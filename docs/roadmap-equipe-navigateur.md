@@ -3436,6 +3436,56 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   (arcs P2/P3 — XPath, Web Animations,
   pont raster).
 
+- [x] **CAP-184. `document.currentScript`
+  par séquence figée (sonde x.com)** — *(numéro
+  officiel attribué à l'intégration)* : le
+  lookup ordinal `by_tag("script").get(ord)`
+  se décalait dès qu'un script s'auto-
+  supprimait — stream `$_TSR` : chaque chunk
+  fait `currentScript.remove()` → ordinaires
+  suivants pointaient le script d'après puis
+  hors-bornes → `TypeError` sur chaque chunk
+  (4 erreurs sonde). Tampon de création figé
+  `Dom::script_seqs` (ord → nœud) posé au
+  parse, lookup insensible aux `remove()` —
+  un script retiré avant éval reste
+  identifiable (spec : `currentScript` =
+  l'élément, attaché ou non). Test
+  `document_current_script_survives_self_
+  remove`. Sonde x.com : 4 erreurs → **0**,
+  bootstrap `$_TSR` hydraté.
+
+- [x] **CAP-185. `load`/`error` des `<link
+  rel=stylesheet>` statiques (sonde x.com)** —
+  *(numéro officiel attribué à l'intégration)* :
+  les feuilles du parse initial fethaient mais
+  ne tiraient jamais l'événement — or
+  `document.addEventListener('load', f, true)`
+  est la gâchette `startEntry` de `x-web`
+  (injection `entry-client-*.js` `type=module`).
+  `Dom::link_seqs` (ordinal parmi **tous** les
+  `<link>`, même convention `collect_scripts`),
+  `el_ord` dans `SheetLink`/`SheetFetch`, la
+  vague enregistre `(ord, ok)` sur toutes les
+  issues (fetch refusé, non-2xx, sécurité
+  sous-ressource, SRI) ; le commit livre
+  `load`/`error` après les scripts, avant
+  `after_script`. Trait
+  `JsEngine::deliver_static_link` + helper
+  moteur `fire_el_load_error` (factorise
+  dyn_img/dyn_link). Bornes : liens filtrés
+  pré-fetch sans événement, autres `rel` non
+  livrés. Tests jscore `cap185_static_link_
+  load_error` + session `static_stylesheet_
+  fires_load_and_error`. Sonde x.com : mutation
+  classée (l'`appendChild` de `startEntry`) —
+  **prochain mur identifié : `type="module"`
+  dynamique évalué en classique →
+  `SyntaxError` silencieuse (CAP-186 à
+  ouvrir : `deliver_dyn_script` ignore le
+  type)**.
+>>>>>>> Stashed changes
+
 - [x] **CAP-182. Arc édition : `Range`
   vivant + `TreeWalker` + `execCommand`
   (sonde)** — `new Range`/`createRange`

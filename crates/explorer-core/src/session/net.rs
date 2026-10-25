@@ -83,6 +83,7 @@ impl Session {
             req,
             title,
             css_slots,
+            link_events,
             scripts,
             script_srcs,
             img_bodies,
@@ -166,6 +167,19 @@ impl Session {
         }
         if let Some(entry) = self.tabs.get_mut(&tab) {
             entry.js = eng;
+            // CAP-185 : `load`/`error` des `<link rel=stylesheet>`
+            // statiques — livrés **après** les scripts du
+            // document (les listeners `addEventListener` sont
+            // enregistrés : le bootstrap `x-web` n'injecte son
+            // entrée `type=module` qu'au `load` de la feuille),
+            // **avant** `after_script` (les insertions
+            // dynamiques qu'ils produisent sont drainées dans
+            // la foulée).
+            if let Some(eng) = entry.js.as_mut() {
+                for (ord, ok) in link_events {
+                    eng.deliver_static_link(explorer_js::JS_CTX_TOP, ord, ok);
+                }
+            }
         }
         // Étape 51 : XHR/fetch émis pendant le chargement →
         // spawned ; une pompe livre les réponses déjà là,
@@ -673,7 +687,36 @@ impl Session {
                     explorer_net::csp::InlineKind::Script,
                     d.nonce.as_deref(),
                 );
-                self.deliver_dyn_script(tab, d.ctx, d.seq, ok.then(|| text.clone()));
+                // CAP-186 : un module inline est ensemencé
+                // `inline:{seq}` puis son graphe de deps est
+                // fetché — jamais l'éval classique.
+                if d.module {
+                    if ok {
+                        self.spawn_dyn_module_graph(
+                            tab,
+                            d.ctx,
+                            d.seq,
+                            format!("inline:{}", d.seq),
+                            text.clone(),
+                            req_base.clone(),
+                            req_page,
+                            doc_policy,
+                            csp,
+                        );
+                    } else {
+                        self.deliver_dyn_module(
+                            tab,
+                            DynModuleDone {
+                                ctx: d.ctx,
+                                seq: d.seq,
+                                name: String::new(),
+                                graph: None,
+                            },
+                        );
+                    }
+                } else {
+                    self.deliver_dyn_script(tab, d.ctx, d.seq, ok.then(|| text.clone()));
+                }
             }
             (Some(src), _) => {
                 let Some(url) = Url::resolve(&req_base, src.trim())
@@ -723,6 +766,7 @@ impl Session {
                 let meta = DynScriptMeta {
                     ctx: d.ctx,
                     seq: d.seq,
+                    module: d.module,
                     integrity: d.integrity.clone(),
                     charset: d.charset.clone(),
                     page: req_page,
@@ -746,6 +790,7 @@ impl Session {
                         frame: None,
                         img: None,
                         link: None,
+                        dyn_module: None,
                     });
                 });
                 self.dyn_tasks.insert((tab, seq), j);
@@ -753,6 +798,129 @@ impl Session {
             // Ni `src` ni texte — balise inerte, rien à livrer.
             (None, None) => {}
         }
+    }
+
+    /// Fetch du graphe d'un `<script type="module">`
+    /// dynamique (CAP-186) — l'entrée est ensemencée
+    /// (`sources[name]`, `alias[name] → base`) puis les
+    /// dépendances sont fetchées hors session
+    /// (`fetch_module_sources`, `max_inflight`/`max_modules`)
+    /// avant envoi `dyn_module` → `eval_module_graph` +
+    /// `load`/`error`. `import_specs` vide : un module
+    /// dynamique à bare specifier hors import map est
+    /// « unresolvable » honnête (issue #6).
+    #[allow(clippy::too_many_arguments)]
+    fn spawn_dyn_module_graph(
+        &mut self,
+        tab: TabId,
+        ctx: u32,
+        seq: u64,
+        name: String,
+        entry_src: String,
+        entry_base: Url,
+        page: Url,
+        page_policy: Option<explorer_net::http::ReferrerPolicy>,
+        csp: Vec<explorer_net::csp::CspPolicy>,
+    ) {
+        let tr = self.transport.clone();
+        let tx = self.net_tx.clone();
+        let max_inflight = self.max_inflight;
+        let max_modules = self.max_modules;
+        let req_url = entry_base.clone();
+        let j = tokio::spawn(async move {
+            let mut graph = crate::session::net_items::ModuleGraph {
+                sources: std::collections::HashMap::from([(
+                    name.clone(),
+                    entry_src.clone(),
+                )]),
+                alias: std::collections::HashMap::from([(
+                    name.clone(),
+                    entry_base.to_string(),
+                )]),
+            };
+            Self::fetch_module_sources(
+                &tr,
+                max_inflight,
+                max_modules,
+                &page,
+                page_policy,
+                &csp,
+                &entry_base,
+                &entry_src,
+                &[],
+                &mut graph,
+            )
+            .await;
+            let _ = tx.send(NetDone {
+                tab,
+                handle: seq,
+                cross: false,
+                mode: explorer_net::http::FetchMode::NoCors,
+                credentials: explorer_net::http::FetchCredentials::SameOrigin,
+                page_origin: String::new(),
+                req_url,
+                partition: None,
+                out: Err(explorer_net::error::NetError::InvalidResponse(
+                    "dyn-module placeholder".into(),
+                )),
+                script: None,
+                frame: None,
+                img: None,
+                link: None,
+                dyn_module: Some(DynModuleDone {
+                    ctx,
+                    seq,
+                    name,
+                    graph: Some(graph),
+                }),
+            });
+        });
+        self.dyn_tasks.insert((tab, seq), j);
+    }
+
+    /// Livraison d'un `<script type="module">` dynamique
+    /// (CAP-186) — même discipline que
+    /// [`Self::deliver_dyn_script`] : tampon
+    /// `js_pending_mod` sous détachement, `eval_module_graph`
+    /// sur le graphe rempli puis `load`/`error` sur
+    /// l'élément, `run_pending` + resynchro +
+    /// `after_script`. `graph = None` → `error` (entrée
+    /// refusée en amont).
+    pub(crate) fn deliver_dyn_module(&mut self, tab: TabId, dm: DynModuleDone) {
+        let DynModuleDone {
+            ctx,
+            seq,
+            name,
+            graph,
+        } = dm;
+        let mut eng = {
+            let Some(entry) = self.tabs.get_mut(&tab) else {
+                return;
+            };
+            if entry.js_detached.is_some() {
+                entry
+                    .js_pending_mod
+                    .push((ctx, seq, graph.map(|graph| ModEval { name, graph })));
+                return;
+            }
+            let Some(eng) = entry.js.take() else { return };
+            eng
+        };
+        let ok = graph.is_some();
+        if let Some(graph) = graph {
+            self.eval_module_graph(tab, eng.as_mut(), ModEval { name, graph });
+        }
+        eng.deliver_dyn_module(ctx, seq, ok);
+        let n = eng.run_pending();
+        tracing::trace!(tab, jobs = n, "jobs js après module dynamique");
+        let mutated = Self::sync_for_apply(eng.as_mut());
+        if let Some(entry) = self.tabs.get_mut(&tab) {
+            entry.js = Some(eng);
+        }
+        if let Some(s) = mutated {
+            self.queue_apply_sync(tab, s);
+        }
+        self.after_script(tab);
     }
 
     /// Livraison d'un `<script>` dynamique (CAP-169) — même
@@ -923,6 +1091,7 @@ impl Session {
                 frame: Some(meta),
                 img: None,
                 link: None,
+                dyn_module: None,
             });
         });
         self.dyn_tasks.insert((tab, seq), j);
@@ -1037,6 +1206,7 @@ impl Session {
                 frame: None,
                 img: Some(meta),
                 link: None,
+                dyn_module: None,
             });
         });
         self.dyn_tasks.insert((tab, seq), j);
@@ -1185,6 +1355,7 @@ impl Session {
                 frame: None,
                 img: None,
                 link: Some(meta),
+                dyn_module: None,
             });
         });
         self.dyn_tasks.insert((tab, seq), j);
@@ -1655,6 +1826,7 @@ impl Session {
                 frame: None,
                 img: None,
                 link: None,
+                dyn_module: None,
             });
         });
         self.net_tasks.insert((tab, handle), j);
@@ -2210,7 +2382,50 @@ impl Session {
                     }
                     _ => None,
                 };
-                self.deliver_dyn_script(d.tab, meta.ctx, meta.seq, body);
+                // CAP-186 : le corps vérifié ensemence le
+                // graphe de modules (deps fetchées hors
+                // session) — `error` si l'entrée est refusée.
+                if meta.module {
+                    match body {
+                        Some(text) => {
+                            let Some((req_page, _rb, doc_policy, csp, _o)) = self
+                                .ctx_net_origin(d.tab, meta.ctx, &meta.page, &meta.page)
+                            else {
+                                continue;
+                            };
+                            self.spawn_dyn_module_graph(
+                                d.tab,
+                                meta.ctx,
+                                meta.seq,
+                                d.req_url.to_string(),
+                                text,
+                                d.req_url.clone(),
+                                req_page,
+                                doc_policy,
+                                csp,
+                            );
+                        }
+                        None => self.deliver_dyn_module(
+                            d.tab,
+                            DynModuleDone {
+                                ctx: meta.ctx,
+                                seq: meta.seq,
+                                name: String::new(),
+                                graph: None,
+                            },
+                        ),
+                    }
+                } else {
+                    self.deliver_dyn_script(d.tab, meta.ctx, meta.seq, body);
+                }
+                continue;
+            }
+            // `<script type="module">` dynamique (CAP-186) —
+            // graphe rempli hors session, `eval_module_graph`
+            // puis `load`/`error` sur l'élément.
+            if let Some(dm) = d.dyn_module {
+                self.dyn_tasks.remove(&(d.tab, dm.seq));
+                self.deliver_dyn_module(d.tab, dm);
                 continue;
             }
             // `<iframe>` dynamique (CAP-171) — `handle` = `seq`
@@ -2355,8 +2570,8 @@ impl Session {
         let sheets: Vec<SheetFetch> = collect_stylesheet_links(dom)
             .into_iter()
             .filter(|(_, m, ..)| media_attr_matches(&env, m.as_deref().unwrap_or_default()))
-            .filter_map(|(h, _, i, c)| Url::resolve(base, &h).ok().map(|u| (u, i, c)))
-            .map(|(u, i, c)| (upg(u), i, c))
+            .filter_map(|(h, _, i, c, lord)| Url::resolve(base, &h).ok().map(|u| (u, i, c, lord)))
+            .map(|(u, i, c, lord)| (upg(u), i, c, lord))
             .filter(|(u, ..)| {
                 !is_mixed_content(page, u)
                     && allow(explorer_net::http::FetchDest::Style, u)

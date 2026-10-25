@@ -12837,3 +12837,77 @@ async fn websocket_refused_fires_error_close() {
     let dump = s.dom_dump(id).unwrap_or_default();
     assert!(dump.contains("err|close:1006/false"), "ws refus : {dump}");
 }
+
+// -- `<link rel=stylesheet>` statique : `load`/`error` (CAP-185) --------
+
+/// Fin de fetch d'une feuille statique → `load` sur
+/// l'élément, refus (404) → `error` — vus en **capture**
+/// sur `document` (pattern bootstrap `x-web` : l'entrée
+/// `type=module` n'est injectée qu'au `load` de la feuille).
+#[tokio::test]
+async fn static_stylesheet_fires_load_and_error() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/",
+        200,
+        "<!doctype html><html><head>\
+        <link rel=stylesheet href=/ok.css>\
+        <link rel=stylesheet href=/ko.css>\
+        <script>var out=[];\
+        document.addEventListener('load',function(e){\
+          if(e.target&&e.target.tagName==='LINK'){\
+            out.push('load:'+e.target.getAttribute('href'));\
+            document.getElementById('p').textContent=out.join('|')}},true);\
+        document.addEventListener('error',function(e){\
+          if(e.target&&e.target.tagName==='LINK'){\
+            out.push('err:'+e.target.getAttribute('href'));\
+            document.getElementById('p').textContent=out.join('|')}},true);\
+        </script></head><body><p id=p>?</p></body></html>",
+    );
+    t.route("/ok.css", 200, "a{color:red}");
+    t.route("/ko.css", 404, "nope");
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    for _ in 0..4 {
+        s.pump_net().await;
+        s.pump_timers(id);
+    }
+    let dump = s.dom_dump(id).unwrap_or_default();
+    assert!(dump.contains("load:/ok.css"), "link load : {dump}");
+    assert!(dump.contains("err:/ko.css"), "link error : {dump}");
+}
+
+// -- `<script type="module">` dynamique (CAP-186) ------------------------
+
+/// `createElement('script'); type='module'; src=…; appendChild` →
+/// fetch de l'entrée + du graphe (`import` réel) + `eval_module`,
+/// puis `load` sur l'élément — jamais l'éval classique
+/// (`import`/`export` y serait `SyntaxError` avalée).
+#[tokio::test]
+async fn dynamic_module_script_evals_graph() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/",
+        200,
+        "<!doctype html><html><body><p id=p>?</p><script>\
+        var s=document.createElement('script');\
+        s.type='module';s.src='/m.js';\
+        s.onload=function(){document.getElementById('p').textContent+='|load'};\
+        document.body.appendChild(s)\
+        </script></body></html>",
+    );
+    t.route("/m.js", 200, "import {v} from '/dep.js';\
+        document.getElementById('p').textContent='mod:'+v");
+    t.route("/dep.js", 200, "export const v=42");
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    for _ in 0..8 {
+        s.pump_net().await;
+        s.pump_timers(id);
+    }
+    let dump = s.dom_dump(id).unwrap_or_default();
+    assert!(dump.contains("mod:42"), "module dynamique : {dump}");
+    assert!(dump.contains("|load"), "load de l'élément : {dump}");
+}

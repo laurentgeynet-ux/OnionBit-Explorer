@@ -11,6 +11,55 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **CAP-185 — `load`/`error` des `<link
+  rel=stylesheet>` statiques** (`explorer-jscore`,
+  `explorer-js`, `explorer-core`) : les feuilles
+  insérées par le parseur tiraient leur fetch mais
+  jamais l'événement — or le bootstrap `x-web`
+  n'injecte son entrée `type=module` qu'au `load` de
+  la feuille (`document.addEventListener('load', f,
+  true)`). Les `<link>` du parse initial sont
+  tamponnés par ordinal figé (`Dom::link_seqs`,
+  même motif que `script_seqs` CAP-184) ;
+  `collect_stylesheet_links` numérote tous les
+  `<link>` (`el_ord`) ; la vague enregistre
+  `(ord, ok)` sur toutes les issues (fetch refusé,
+  non-2xx, sécurité sous-ressource, SRI) et le
+  commit livre `load`/`error` **après** les
+  scripts du document (listeners enregistrés),
+  **avant** `after_script` (les insertions
+  dynamiques produites partent en fetch dans la
+  foulée). Trait `JsEngine::deliver_static_link`.
+  Bornes : liens filtrés en amont du fetch
+  (`media` hors viewport, dedup, `max_sheets`)
+  sans événement ; autres `rel` non livrés.
+  Tests : jscore `cap185_static_link_load_error`
+  (capture `document`, cible/href, ordinal
+  absent tolérant) + session
+  `static_stylesheet_fires_load_and_error`
+  (2xx → `load`, 404 → `error`, patron `x-web`
+  bout-en-bout). Sonde x.com : le bootstrap
+  `startEntry` s'arme désormais (mutation
+  classée, 0 erreur).
+
+- **CAP-184 — `document.currentScript` par
+  séquence figée** (`explorer-jscore`) :
+  `eval_script_el` localisait l'élément par
+  position dans `by_tag("script")` — un script
+  qui s'auto-supprime (`currentScript.remove()`,
+  pattern du stream `$_TSR` de x.com : chaque
+  chunk s'efface) décalait tous les ordinaires
+  suivants → mauvais élément puis `null`
+  hors-bornes. Les `<script>` du parse initial
+  portent désormais un numéro de création figé
+  (`Dom::script_seqs`) : le lookup survit aux
+  `remove()` et identifie même un élément
+  détaché. Test `document_current_script_
+  survives_self_remove` (auto-suppression +
+  re-lookup d'un nœud retiré). Sonde x.com :
+  les 4 `TypeError` du stream `$_TSR`
+  disparus — bootstrap hydraté, 0 erreur.
+
 - **JS-C94 — `WebSocket` réel (RFC 6455)**
   (`explorer-net`, `explorer-jscore`,
   `explorer-js`, `explorer-core`) : le

@@ -3748,6 +3748,76 @@ fn document_current_script() {
     assert_eq!(evf(&mut e, "document.currentScript === null"), "true");
 }
 
+/// CAP-184 — `document.currentScript` sous auto-suppression :
+/// un `<script>` qui se `remove()` ne décale pas le lookup
+/// des suivants (pattern stream `$_TSR` de x.com : chaque
+/// chunk s'auto-supprime — le lookup positionnel renvoyait
+/// le script d'après, puis `null` hors-bornes).
+#[test]
+fn document_current_script_survives_self_remove() {
+    let mut e = engine_with(
+        "<html><body>\
+         <script src=a.js></script>\
+         <script src=b.js></script>\
+         <script src=c.js></script>\
+         </body></html>",
+    );
+    // Le script 0 se supprime du miroir.
+    e.eval_script_el("document.currentScript.remove()", None, 0)
+        .unwrap();
+    // Le script 1 se résout toujours sur lui-même.
+    let v = e
+        .eval_script_el(
+            "var s=document.currentScript; s ? s.getAttribute('src') : 'null'",
+            None,
+            1,
+        )
+        .unwrap();
+    assert_eq!(e.describe(v), "b.js");
+    // L'ordinal 0 identifie encore l'élément — détaché mais
+    // vivant dans l'arène (spec : `currentScript` est
+    // l'élément, attaché ou non).
+    let v = e
+        .eval_script_el(
+            "var s=document.currentScript; s ? s.getAttribute('src') : 'null'",
+            None,
+            0,
+        )
+        .unwrap();
+    assert_eq!(e.describe(v), "a.js");
+}
+
+// ===== CAP-185 — `load`/`error` des `<link>` statiques :
+// ordinal figé au parse (`link_seqs`) ; la capture sur
+// `document` voit la cible (pattern bootstrap `x-web` :
+// `addEventListener('load', f, true)` attend la feuille
+// pour injecter le script d'entrée).
+
+#[test]
+fn cap185_static_link_load_error() {
+    let mut e = engine_with(
+        "<html><head>\
+         <link rel=stylesheet href=/a.css>\
+         <link rel=stylesheet href=/b.css>\
+         <link rel=icon href=/i.png>\
+         </head><body><p id=p>?</p></body></html>",
+    );
+    e.eval(
+        "var out=[];\
+        document.addEventListener('load',function(ev){\
+          out.push('load:'+ev.target.getAttribute('href'))},true);\
+        document.addEventListener('error',function(ev){\
+          out.push('err:'+ev.target.getAttribute('href'))},true)",
+    )
+    .expect("listeners");
+    // ord = ordinal parmi TOUS les `<link>` (icon compte).
+    e.deliver_static_link(0, true);
+    e.deliver_static_link(1, false);
+    // Ordinal absent → no-op tolérant.
+    e.deliver_static_link(42, true);
+    assert_eq!(evf(&mut e, "out.join('|')"), "load:/a.css|err:/b.css");
+}
+
 /// CAP-170 — `document.readyState` : `loading` par défaut
 /// (sans embedder), transitions pilotées par
 /// `Engine::set_ready_state`, valeurs hors enum ignorées.

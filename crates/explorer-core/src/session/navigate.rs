@@ -1139,6 +1139,7 @@ impl Session {
             eng,
             scripting,
             css_slots: Vec::new(),
+            link_events: Vec::new(),
             script_srcs: Vec::new(),
             img_bodies: HashMap::new(),
             frames: Vec::new(),

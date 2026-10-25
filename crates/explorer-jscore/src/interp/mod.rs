@@ -1233,6 +1233,8 @@ impl Engine {
                     }
                 }
                 self.hooks.dyn_script_nodes.insert(seq, n);
+                let module = attr("type")
+                    .is_some_and(|t| t.trim().eq_ignore_ascii_case("module"));
                 out.push(crate::dom_host::DynScriptReq {
                     seq,
                     src,
@@ -1242,6 +1244,7 @@ impl Engine {
                     referrerpolicy: attr("referrerpolicy"),
                     charset: attr("charset"),
                     nonce: attr("nonce"),
+                    module,
                     ctx,
                 });
             }
@@ -1474,23 +1477,7 @@ impl Engine {
         let Some(node) = self.hooks.dyn_img_nodes.remove(&seq) else {
             return;
         };
-        let Some((dom, cache)) = self.dom_ctx.clone() else {
-            return;
-        };
-        let ty = if ok { "load" } else { "error" };
-        let (bubbles, cancelable, composed) = crate::dom_host::platform_event_flags(ty);
-        let ev = crate::dom_host::make_event_state(
-            ty,
-            node,
-            crate::dom_host::EventFlags {
-                bubbles,
-                cancelable,
-                composed,
-                trusted: true,
-            },
-            Vec::new(),
-        );
-        let _ = self.propagate_event(&dom, &cache, &ev);
+        self.fire_el_load_error(node, ok);
     }
 
     /// Draine les `<link rel=stylesheet>` demandés
@@ -1576,6 +1563,46 @@ impl Engine {
         let Some(node) = self.hooks.dyn_link_nodes.remove(&seq) else {
             return;
         };
+        self.fire_el_load_error(node, ok);
+    }
+
+    /// Livraison d'un `<link rel=stylesheet>` **statique**
+    /// (CAP-185) — `ord` = ordinal de l'élément parmi tous
+    /// les `<link>` du document (tampon figé au parse,
+    /// `Dom::link_seqs`) : la session livre `load` à la
+    /// feuille appliquée, `error` au refus (fetch, 4xx/5xx,
+    /// CSP `style-src`, SRI, mixed-content). Élément
+    /// introuvable (miroir divergé) → no-op tolérant.
+    /// Pattern requis par l'amorçage `x-web` : `document.
+    /// addEventListener('load', f, true)` attend le `load`
+    /// de la feuille pour injecter le script d'entrée.
+    pub fn deliver_static_link(&mut self, ord: u32, ok: bool) {
+        let el = self.dom_ctx.as_ref().and_then(|(dom, _)| {
+            let d = dom.borrow();
+            d.link_seqs.get(&ord).copied()
+        });
+        let Some(node) = el else { return };
+        self.fire_el_load_error(node, ok);
+    }
+
+    /// Livraison d'un `<script type="module">` dynamique
+    /// (CAP-186) — le graphe est déjà évalué côté session
+    /// (`eval_module_graph` : fetch deps + `eval_module`) ;
+    /// ici on ne fait que tirer `load` (graphe évalué) ou
+    /// `error` (fetch/refus/éval échouée, spec « error » de
+    /// transport) sur l'élément — jamais d'éval classique :
+    /// `import`/`export` y serait `SyntaxError` avalée.
+    pub fn deliver_dyn_module(&mut self, seq: u64, ok: bool) {
+        let Some(node) = self.hooks.dyn_script_nodes.remove(&seq) else {
+            return;
+        };
+        self.fire_el_load_error(node, ok);
+    }
+
+    /// `load`/`error` non-bullant/non-annulable trusted sur
+    /// l'élément miroir `node` (spec — même fanion que les
+    /// événements de sous-ressource).
+    fn fire_el_load_error(&mut self, node: crate::dom::NodeId, ok: bool) {
         let Some((dom, cache)) = self.dom_ctx.clone() else {
             return;
         };
@@ -2199,12 +2226,21 @@ impl Engine {
     /// `document.write`…) → `currentScript` = `null`, éval
     /// normale — tolérant, jamais de crash.
     ///
+    /// Le lookup passe par le tampon ordinal figé au parse
+    /// (CAP-184, `Dom::script_seqs`) — jamais par position
+    /// dans `by_tag` : un script qui s'auto-supprime
+    /// (`document.currentScript.remove()`, pattern stream
+    /// `$_TSR` de x.com) décalerait tous les ordinaires
+    /// suivants → mauvais élément puis `null`.
+    ///
     /// # Errors
     /// Identique à [`Engine::eval`].
     pub fn eval_script_el(&mut self, src: &str, name: Option<&str>, ord: usize) -> Result<Value> {
         let el = self.dom_ctx.as_ref().and_then(|(dom, _)| {
             let d = dom.borrow();
-            d.by_tag(d.root, "script").get(ord).copied()
+            u32::try_from(ord)
+                .ok()
+                .and_then(|o| d.script_seqs.get(&o).copied())
         });
         let prev = self.hooks.current_script;
         self.hooks.current_script = el;

@@ -500,29 +500,41 @@ pub(crate) fn crossorigin_attr(dom: &Dom, n: NodeId) -> Option<FetchCredentials>
 }
 
 /// Élément stylesheet collecté : `(href, media, integrity,
-/// crossorigin)` — `media` sert au filtre viewport de
+/// crossorigin, el_ord)` — `media` sert au filtre viewport de
 /// `plan_subresources` ; `integrity` (SRI, CAP-163) et
 /// `crossorigin` (mode CORS, CAP-167) voyagent jusqu'au
-/// commit de la réponse.
+/// commit de la réponse. `el_ord` (CAP-185) = ordinal de
+/// l'élément parmi **tous** les `<link>` du document
+/// (y compris les non-collectés — autre `rel`, `href` vide)
+/// : identifie l'élément miroir pour `load`/`error`.
 pub(crate) type SheetLink = (
     String,
     Option<String>,
     Option<String>,
     Option<FetchCredentials>,
+    u32,
 );
 
 /// Feuille résolue prête au fetch : `(url absolue,
-/// integrity, crossorigin)` — `media` a déjà servi au filtre.
-pub(crate) type SheetFetch = (Url, Option<String>, Option<FetchCredentials>);
+/// integrity, crossorigin, el_ord)` — `media` a déjà servi
+/// au filtre ; `el_ord` (CAP-185) identifie l'élément miroir
+/// pour la livraison `load`/`error` de fin de fetch.
+pub(crate) type SheetFetch = (Url, Option<String>, Option<FetchCredentials>, u32);
 
 /// `SheetLink` des `<link rel=stylesheet>` dans l'ordre —
 /// `rel` case-insensitive à tokens (la spec admet
 /// `rel="stylesheet alternate"` et cie) ; `href` vide sauté.
+/// Tous les `<link>` — y compris les non-collectés — sont
+/// numérotés pour `el_ord` (CAP-185, même convention que
+/// `collect_scripts`).
 pub(crate) fn collect_stylesheet_links(dom: &Dom) -> Vec<SheetLink> {
     let mut out = Vec::new();
+    let mut els = 0u32;
     let mut queue = vec![dom.document()];
     while let Some(n) = queue.pop() {
         if dom.tag_name(n).is_ok_and(|t| t == "link") {
+            let el_ord = els;
+            els += 1;
             let rel = dom
                 .attribute(n, "rel")
                 .ok()
@@ -534,7 +546,7 @@ pub(crate) fn collect_stylesheet_links(dom: &Dom) -> Vec<SheetLink> {
                     if !href.is_empty() {
                         let media = dom.attribute(n, "media").ok().flatten();
                         let integrity = dom.attribute(n, "integrity").ok().flatten();
-                        out.push((href, media, integrity, crossorigin_attr(dom, n)));
+                        out.push((href, media, integrity, crossorigin_attr(dom, n), el_ord));
                     }
                 }
             }

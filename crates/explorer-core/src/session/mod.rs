@@ -485,6 +485,11 @@ pub(crate) struct Tab {
     /// le détachement (CAP-169) — `(ctx, seq, corps décodé)`,
     /// `None` = refus → `error` sur l'élément.
     js_pending_dyn: Vec<(u32, u64, Option<String>)>,
+    /// Idem pour les `<script type="module">` dynamiques
+    /// (CAP-186) — `(ctx, seq, ModEval)` : le graphe ne se
+    /// sérialise pas en corps, la livraison diffère de
+    /// `deliver_dyn_script` (éval module puis `load`/`error`).
+    js_pending_mod: Vec<(u32, u64, Option<ModEval>)>,
     /// Pushes d'attributs session→miroir survenus pendant le
     /// détachement JS (53f — `value`/`checked` des champs
     /// édités pendant le burst) : rejoués puis re-sérialisés
@@ -1204,6 +1209,7 @@ impl Session {
                 deferred_inputs: VecDeque::new(),
                 js_pending_net: Vec::new(),
                 js_pending_dyn: Vec::new(),
+                js_pending_mod: Vec::new(),
                 js_pending_crypto: Vec::new(),
                 js_pending_es: Vec::new(),
                 js_pending_ws: Vec::new(),

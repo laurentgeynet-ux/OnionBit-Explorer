@@ -175,6 +175,10 @@ impl Session {
             for (ctx, seq, body) in std::mem::take(&mut entry.js_pending_dyn) {
                 eng.deliver_dyn_script(ctx, seq, body);
             }
+            for (ctx, seq, me) in std::mem::take(&mut entry.js_pending_mod) {
+                let ok = me.is_some_and(|me| Self::eval_mod(eng.as_mut(), &me).is_ok());
+                eng.deliver_dyn_module(ctx, seq, ok);
+            }
             let attrs = std::mem::take(&mut entry.js_pending_attrs);
             // Les pushes sont **toujours** rejoués dans le
             // miroir (la saisie ne se perd pas) ; la
@@ -232,11 +236,23 @@ impl Session {
     /// `eval_module` + `PipelineError` sans faire échouer la
     /// page.
     pub(crate) fn eval_module_graph(&mut self, tab: TabId, eng: &mut dyn JsEngine, me: ModEval) {
-        let ModuleGraph { sources, alias } = me.graph;
+        if let Err(e) = Self::eval_mod(eng, &me) {
+            tracing::debug!(tab, error = %e, "module en échec");
+            let _ = self.events.send(CoreEvent::PipelineError {
+                tab: Some(tab),
+                message: format!("{e} — module «{}»", me.name),
+            });
+        }
+    }
+
+    /// `eval_module` d'un [`ModEval`] sans `&self` (CAP-186) —
+    /// appelable sous emprunt `entry` (replay `js_pending_mod`).
+    /// Résolution identique : bare hors import map =
+    /// « unresolvable » (issue #6), relatif via `alias`.
+    fn eval_mod(eng: &mut dyn JsEngine, me: &ModEval) -> Result<(), explorer_js::JsError> {
+        let ModuleGraph { sources, alias } = &me.graph;
+        let alias = alias.clone();
         let resolve: UrlResolver = Arc::new(move |spec, referrer| {
-            // Un bare arrivant ici est resté hors import map
-            // (le moteur réécrit d'abord) — « unresolvable » par
-            // spec, jamais un chemin relatif déguisé (issue #6).
             if explorer_js::is_bare_specifier(spec) {
                 return None;
             }
@@ -246,13 +262,7 @@ impl Session {
                 .and_then(|u| Url::resolve(&u, spec).ok())
                 .map(|u| u.as_str())
         });
-        if let Err(e) = eng.eval_module(&me.name, sources, resolve) {
-            tracing::debug!(tab, error = %e, "module en échec");
-            let _ = self.events.send(CoreEvent::PipelineError {
-                tab: Some(tab),
-                message: format!("{e} — module «{}»", me.name),
-            });
-        }
+        eng.eval_module(&me.name, sources.clone(), resolve).map(|_| ())
     }
 
     /// Contexte JS de chargement : moteur neuf + miroir posé —

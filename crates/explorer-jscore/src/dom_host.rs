@@ -106,6 +106,11 @@ pub struct DynScriptReq {
     /// Attribut `nonce` — ouvre `script-src` CSP inline pour
     /// les scripts dynamiques sans `src` (CAP-145).
     pub nonce: Option<String>,
+    /// `type="module"` (CAP-186) — la livraison passe par
+    /// `eval_module_graph` + `deliver_dyn_module`, jamais
+    /// l'éval classique (un `import`/`export` top-level y
+    /// serait un `SyntaxError` avalé — mur réel x-web).
+    pub module: bool,
     /// Contexte émetteur (`JsCtxId`) — la livraison et
     /// `currentScript` visent son miroir, jamais le parent.
     pub ctx: crate::context::CtxId,

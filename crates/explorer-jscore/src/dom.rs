@@ -591,6 +591,28 @@ pub struct Dom {
     /// en attente de fetch/éval par la session
     /// (`Engine::drain_dyn_scripts`). Ordre document.
     pub(crate) pending_dyn: Vec<NodeId>,
+    /// `<script>` du parse initial : ordinal document →
+    /// nœud (CAP-184). La session numérote les scripts du
+    /// **vrai** DOM et `eval_script_el` doit retrouver le
+    /// miroir — un lookup positionnel (`by_tag().get(ord)`)
+    /// se décale dès qu'un script se `remove()` lui-même
+    /// (stream `$_TSR` de x.com : chaque chunk s'auto-
+    /// supprime → les ordinaires suivants pointent le script
+    /// d'après puis hors-bornes → `currentScript` = `null`).
+    /// Le tampon est figé au parse : la détache ultérieure
+    /// n'invalide pas l'entrée — un script retiré avant son
+    /// éval reste identifiable (spec : `currentScript` est
+    /// l'élément, attaché ou non). Scripts dynamiques non
+    /// tamponnés : jamais résolus par ordinal.
+    pub(crate) script_seqs: HashMap<u32, NodeId>,
+    /// `<link>` du parse initial : ordinal document → nœud
+    /// (CAP-185) — même motif figé que `script_seqs`, pour
+    /// livrer `load`/`error` de fin de feuille sur le bon
+    /// élément (`deliver_static_link`). Ordinal parmi **tous**
+    /// les `<link>` (même convention que `collect_scripts` —
+    /// les rels non feuille sont tamponnés aussi, ils
+    /// permettront leurs propres événements).
+    pub(crate) link_seqs: HashMap<u32, NodeId>,
     /// `<iframe>` déjà « pris en charge » (CAP-171) — le
     /// parse initial pré-marque les siens (chargés par le
     /// pipeline sous-ressource statique, jamais via la file
@@ -742,6 +764,8 @@ impl Dom {
             doc_open: true,
             dyn_started: HashSet::new(),
             pending_dyn: Vec::new(),
+            script_seqs: HashMap::new(),
+            link_seqs: HashMap::new(),
             dyn_img_seen: HashMap::new(),
             pending_dyn_imgs: Vec::new(),
             dyn_link_seen: HashMap::new(),
@@ -1086,6 +1110,18 @@ impl Dom {
         // chaque `<script>` statique serait évalué en double.
         d.mark_scripts_started(d.root);
         d.pending_dyn.clear();
+        // CAP-184 : tampon ordinal figé des scripts du parse —
+        // `eval_script_el` identifie `currentScript` par cette
+        // séquence, insensible aux `remove()` (champ `script_seqs`).
+        for (seq, n) in (0u32..).zip(d.by_tag(d.root, "script")) {
+            d.script_seqs.insert(seq, n);
+        }
+        // CAP-185 : idem pour les `<link>` — la session livre
+        // `load`/`error` de fin de feuille sur l'élément visé
+        // par ordinal (tous `<link>`, cf. `link_seqs`).
+        for (seq, n) in (0u32..).zip(d.by_tag(d.root, "link")) {
+            d.link_seqs.insert(seq, n);
+        }
         // Les `<iframe>` du parse initial sont chargés par
         // le pipeline sous-ressource — jamais par la file
         // dynamique (CAP-171, même exclusion que les

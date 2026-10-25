@@ -693,6 +693,14 @@ pub(crate) struct SubJob {
     pub(crate) scripting: bool,
     /// Réceptions de la vague — indexées par ordre document.
     pub(crate) css_slots: Vec<Option<String>>,
+    /// `(el_ord, ok)` des `<link rel=stylesheet>` statiques
+    /// (CAP-185) — enregistrés à la réception (fetch, 2xx,
+    /// sécurité sous-ressource, SRI) ; la session livre
+    /// `load`/`error` sur l'élément miroir au commit, une
+    /// fois les scripts du document évalués (les listeners
+    /// `addEventListener(..., true)` doivent exister — le
+    /// bootstrap `x-web` n'injecte son entrée que là-dessus).
+    pub(crate) link_events: Vec<(u32, bool)>,
     pub(crate) script_srcs: Vec<Option<String>>,
     pub(crate) img_bodies: HashMap<String, Vec<u8>>,
     /// Documents `<iframe>` reçus et parsés (étape 128) —
@@ -779,6 +787,7 @@ impl SubJob {
     /// tous les tampons vivent dans le job, le commit les
     /// applique (étape 53d). Les scripts `async` classiques
     /// sont évalués à réception sur le moteur embarqué.
+    #[allow(clippy::too_many_lines)] // dispatch séquentiel — chaque branche est documentée in situ
     pub(crate) async fn run(&mut self) {
         // Slots de réception indexés par ordre document ;
         // `slot_items[slot]` = index de l'item script.
@@ -813,18 +822,32 @@ impl SubJob {
         let mut async_mods = Vec::new();
         let mut frames = Vec::new();
         fetch_wave(&self.transport, self.max_inflight, jobs, |tag, res| {
-            let Ok(resp) = res else { return };
+            // CAP-185 : `load`/`error` de fin de feuille —
+            // enregistré sur toutes les issues (fetch refusé,
+            // non-2xx, sécurité/SRI) ; livré au commit.
+            let Ok(resp) = res else {
+                if let SubTag::Css(i) = tag {
+                    let ord = self.sheet_urls.get(i).map_or(0, |(.., lord)| *lord);
+                    self.link_events.push((ord, false));
+                }
+                return;
+            };
             if !(200..300).contains(&resp.status) {
+                if let SubTag::Css(i) = tag {
+                    let ord = self.sheet_urls.get(i).map_or(0, |(.., lord)| *lord);
+                    self.link_events.push((ord, false));
+                }
                 return;
             }
             match tag {
                 SubTag::Css(i) => {
-                    let (su, sri, _) = &self.sheet_urls[i];
-                    if subresp_security_allows(&self.url, su, FetchDest::Style, &resp)
-                        && sri_allows(sri.as_deref(), &resp.body)
-                    {
+                    let (su, sri, .., lord) = &self.sheet_urls[i];
+                    let ok = subresp_security_allows(&self.url, su, FetchDest::Style, &resp)
+                        && sri_allows(sri.as_deref(), &resp.body);
+                    if ok {
                         self.css_slots[i] = Some(decode_stylesheet(&resp.body, &resp.headers));
                     }
+                    self.link_events.push((*lord, ok));
                 }
                 SubTag::Script(slot) => {
                     let item = &self.scripts[slot_items[slot]];
@@ -1263,6 +1286,30 @@ pub(crate) struct NetDone {
     /// [`Session::commit_dyn_link`]. `handle` porte alors
     /// le `seq` moteur.
     pub(crate) link: Option<DynLinkMeta>,
+    /// `<script type="module">` dynamique (CAP-186) —
+    /// `Some` = le graphe de modules est rempli (entrée +
+    /// dépendances fetchées), à évaluer puis `load`/`error`
+    /// sur l'élément par [`Session::deliver_dyn_module`].
+    pub(crate) dyn_module: Option<DynModuleDone>,
+}
+
+/// Livraison d'un `<script type="module">` dynamique
+/// (CAP-186) — le corps de l'entrée est déjà vérifié par
+/// le canal `script` classique (2xx, sécurité sous-
+/// ressource, SRI) puis le graphe est rempli hors session
+/// par `fetch_module_sources` ; `graph = None` = échec en
+/// amont → `error` sur l'élément.
+pub(crate) struct DynModuleDone {
+    /// Contexte moteur émetteur (`JS_CTX_TOP` ou iframe).
+    pub(crate) ctx: u32,
+    /// `dyn_script_seq` miroir — retrouve l'élément cible.
+    pub(crate) seq: u64,
+    /// Clé de registre moteur (URL de l'entrée ou
+    /// `inline:{seq}`).
+    pub(crate) name: String,
+    /// Graphe rempli (`sources` + `alias`) — `None` si le
+    /// corps de l'entrée a été refusé en amont.
+    pub(crate) graph: Option<ModuleGraph>,
 }
 
 /// Métadonnées de livraison d'un `<script>` dynamique
@@ -1274,6 +1321,10 @@ pub(crate) struct DynScriptMeta {
     /// `dyn_script_seq` miroir — retrouve l'élément cible
     /// de `load`/`error`/`currentScript`.
     pub(crate) seq: u64,
+    /// `type="module"` (CAP-186) — le corps vérifié alimente
+    /// un graphe `fetch_module_sources` (éval `eval_module`),
+    /// pas l'éval classique `deliver_dyn_script`.
+    pub(crate) module: bool,
     /// SRI déclaré sur l'élément (`integrity`).
     pub(crate) integrity: Option<String>,
     /// `charset` déclaré (étape 53b).
@@ -1571,7 +1622,7 @@ pub(crate) fn sub_jobs(
     page_policy: Option<ReferrerPolicy>,
 ) -> VecDeque<(SubTag, Request)> {
     let mut jobs = VecDeque::new();
-    for (i, (u, _, cross)) in sheet_urls.iter().enumerate() {
+    for (i, (u, _, cross, _lord)) in sheet_urls.iter().enumerate() {
         jobs.push_back((
             SubTag::Css(i),
             sub_request(base, u, FetchDest::Style, page_policy, *cross),

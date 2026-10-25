@@ -656,6 +656,12 @@ pub trait JsEngine: Send {
     /// no-op.
     fn deliver_dyn_script(&mut self, _ctx: JsCtxId, _seq: u64, _body: Option<String>) {}
 
+    /// Livre le résultat d'un `<script type="module">`
+    /// dynamique (CAP-186) — le graphe est évalué en amont
+    /// (`eval_module`) ; `true` → `load`, `false` → `error`
+    /// sur l'élément. Défaut : no-op.
+    fn deliver_dyn_module(&mut self, _ctx: JsCtxId, _seq: u64, _ok: bool) {}
+
     /// Draine les `<iframe>` insérés dynamiquement (ou
     /// re-navigués par `src=`/`srcdoc=` — CAP-171) : la
     /// session fetch le `src` (CSP `frame-src`, XFO,
@@ -709,6 +715,13 @@ pub trait JsEngine: Send {
     /// `load` tiré sur l'élément ; `false` : refus
     /// réseau/politique/SRI → `error`. Défaut : no-op.
     fn deliver_dyn_link(&mut self, _ctx: JsCtxId, _seq: u64, _ok: bool) {}
+
+    /// Livre le résultat d'un `<link>` **statique** (parse
+    /// initial, CAP-185) — `ord` = ordinal de l'élément
+    /// parmi tous les `<link>` du document ; `load`/`error`
+    /// sur l'élément miroir comme `deliver_dyn_link`.
+    /// Défaut : no-op.
+    fn deliver_static_link(&mut self, _ctx: JsCtxId, _ord: u32, _ok: bool) {}
 
     /// Éval d'un élément `<script>` classique (CAP-168) :
     /// `script_ord` = ordinal de l'élément parmi les
@@ -1567,6 +1580,16 @@ enum Cmd {
         seq: u64,
         ok: bool,
     },
+    DeliverStaticLink {
+        ctx: JsCtxId,
+        ord: u32,
+        ok: bool,
+    },
+    DeliverDynModule {
+        ctx: JsCtxId,
+        seq: u64,
+        ok: bool,
+    },
     DispatchCtx {
         ctx: JsCtxId,
         ty: String,
@@ -2115,6 +2138,22 @@ impl JscoreEngine {
                     }
                     eng.context_switch(prev);
                 }
+                Cmd::DeliverStaticLink { ctx, ord, ok } => {
+                    let prev = eng.current_context();
+                    eng.context_switch(ctx);
+                    if eng.current_context() == ctx {
+                        eng.deliver_static_link(ord, ok);
+                    }
+                    eng.context_switch(prev);
+                }
+                Cmd::DeliverDynModule { ctx, seq, ok } => {
+                    let prev = eng.current_context();
+                    eng.context_switch(ctx);
+                    if eng.current_context() == ctx {
+                        eng.deliver_dyn_module(seq, ok);
+                    }
+                    eng.context_switch(prev);
+                }
                 Cmd::DispatchCtx { ctx, ty, path, tx } => {
                     let prev = eng.current_context();
                     eng.context_switch(ctx);
@@ -2375,6 +2414,14 @@ impl JsEngine for JscoreEngine {
 
     fn deliver_dyn_link(&mut self, ctx: JsCtxId, seq: u64, ok: bool) {
         let _ = self.tx.send(Cmd::DeliverDynLink { ctx, seq, ok });
+    }
+
+    fn deliver_static_link(&mut self, ctx: JsCtxId, ord: u32, ok: bool) {
+        let _ = self.tx.send(Cmd::DeliverStaticLink { ctx, ord, ok });
+    }
+
+    fn deliver_dyn_module(&mut self, ctx: JsCtxId, seq: u64, ok: bool) {
+        let _ = self.tx.send(Cmd::DeliverDynModule { ctx, seq, ok });
     }
 
     fn dispatch_event_ctx(
