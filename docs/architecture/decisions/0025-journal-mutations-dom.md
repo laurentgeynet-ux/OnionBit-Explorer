@@ -1,6 +1,7 @@
 # ADR-0025 — Synchro miroir JS : du re-parse HTML au journal de mutations
 
-Statut : Proposée — cible 0.3, pilote scopé. Issue de la
+Statut : **Acceptée** — pilote livré (étape 111) ; reliquat
+ouvert 2026-10-25 (§ Ouverture, étape 137). Issue de la
 revue d'architecture externe validée au journal
 `interface-equipes` (08/11).
 
@@ -117,3 +118,38 @@ repli est la mesure de fiabilité du journal).
   nœud à travers la couture (choix de `key`), mapping
   des records JS-C26 → ops, ordre des ops imbriquées —
   à figer dans le pilote (étape NAV à créer).
+
+## Ouverture 2026-10-25 — reliquat (étape 137)
+
+Pilote soldé (étape 111) : voie différentielle tentée
+d'abord à chaque synchro, empreinte + repli re-parse +
+compteurs (`journal_applies`/`journal_fallbacks`/
+`journal_classified`, exposés `explorer-cli`), `NodeId`
+stables → survie native des tables. Le journal est de
+fait le **chemin nominal** — l'ADR est acceptée. Items
+restants, ouverts en étape 137 :
+
+1. **Ciblage relayout par les ops** (conséquence « le
+   diff est le signal dirty » — non livrée) : après
+   rejeu en place, `apply_journal` paie encore
+   `relayout_dom_payload` complet ; les ops portent la
+   cible exacte → `relayout_subtree` direct, sans
+   `take_dirty_path` ni remap. Le chemin
+   `try_incr_payload` reste alimenté par `job.dirty`
+   (R-12), parallèle au journal — à unifier.
+2. **`DomMutation::AttachShadow`** : l'attache
+   programmatique `attachShadow` voyage par re-parse
+   (borne documentée R-96) — nouvelle op de couture
+   `(host, mode, sous-arbre)` ; `Dom::attach_shadow_root`
+   existe côté PIPE, consommation pure (périmètre NAV).
+3. **Seuil de repli calibré** : mesurer
+   `journal_fallbacks` sur corpus réel (vols terrain),
+   fixer le seuil « repli > x → investigation » de la
+   section Conséquences.
+4. **Simplification `img_decoded`/`bg_decoded`
+   (optionnelle)** : le journal nominal rend la survie
+   par clé inutile — les caches restent utiles en dédup
+   de décodage ; nettoyage de confort seulement.
+5. **Limite connue** : index d'insertion décalé d'un
+   cran face aux commentaires résiduels — invisible à
+   l'empreinte ; à traiter si un cas réel le révèle.
