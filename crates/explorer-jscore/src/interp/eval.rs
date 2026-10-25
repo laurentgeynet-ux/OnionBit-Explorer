@@ -426,6 +426,19 @@ impl Engine {
             Expr::New(callee, arg_exprs) => {
                 let f = self.eval_expr(env, this, callee)?;
                 let args = self.eval_args(env, this, arg_exprs)?;
+                // `new` sur non-ctor : le callee est nommé —
+                // les sondes de sites réels identifient l'API
+                // hôte manquante du premier coup.
+                if !self.is_callable(f) {
+                    let who = match callee.as_ref() {
+                        Expr::Ident(n) | Expr::Member(_, n) => n.as_str(),
+                        _ => "?",
+                    };
+                    let d = self.describe(f);
+                    return Err(
+                        self.type_error(format!("new {who}: constructor is not a function: {d}"))
+                    );
+                }
                 self.construct(f, &args)
             }
             Expr::Seq(parts) => {

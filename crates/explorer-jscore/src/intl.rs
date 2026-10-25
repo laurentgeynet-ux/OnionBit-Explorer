@@ -27,6 +27,7 @@ pub(crate) fn install(e: &mut Engine) {
         ("RelativeTimeFormat", intl_rtf_ctor),
         ("Locale", intl_locale_ctor),
         ("DisplayNames", intl_display_ctor),
+        ("Segmenter", intl_segmenter_ctor),
     ] {
         let p = e.new_object();
         let c = crate::builtins::ctor(e, name, f, p);
@@ -1738,4 +1739,263 @@ fn locale_g_opt_ns(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value>
     let id = self_id(e, this, &[], "Locale")?;
     let opts = self_opts(e, id);
     Ok(e.str_val(opt(&opts, "numberingSystem").unwrap_or("latn").to_string()))
+}
+
+// -- `Intl.Segmenter` (CAP-190, ES2022) — borné en-US -----------------
+// Indices en unités UTF-16 (spec). Pas de CLDR : frontières
+// approchées honnêtes — grapheme = paires surrogates +
+// étendues (diacritiques, modifieurs emoji, tags, ZWJ,
+// indicateurs régionaux par paires) ; word = transitions
+// alphanumérique↔autre, `isWordLike` = segment alnum ;
+// sentence = après [.!?]+ suivi de blanc/fin.
+
+/// `new Intl.Segmenter(locales, {granularity})` — `word`/
+/// `sentence`/`grapheme` (défaut) ; autre = `RangeError`.
+fn intl_segmenter_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let opts = read_opts(e, arg(args, 1), &["granularity"])?;
+    match opt(&opts, "granularity") {
+        None | Some("grapheme" | "word" | "sentence") => {}
+        Some(g) => return Err(e.range_error(format!("invalid granularity «{g}»"))),
+    }
+    Ok(intl_obj(
+        e,
+        "Segmenter",
+        &opts,
+        &[("segment", seg_segment), ("resolvedOptions", seg_resolved)],
+    ))
+}
+
+/// `(segment_utf16, index_u16, isWordLike)` — découpe
+/// `input` selon la granularité.
+fn split_segments(input: &str, gran: &str) -> Vec<(String, usize, bool)> {
+    let u: Vec<u16> = input.encode_utf16().collect();
+    let n = u.len();
+    let mut bounds: Vec<usize> = vec![0];
+    match gran {
+        "word" => {
+            // Frontière à chaque transition alnum↔autre.
+            let mut prev_w = false;
+            let mut off = 0usize;
+            for ch in input.chars() {
+                let w = ch.is_alphanumeric() || ch == '_';
+                if off > 0 && w != prev_w {
+                    bounds.push(off);
+                }
+                prev_w = w;
+                off += ch.len_utf16();
+            }
+        }
+        "sentence" => {
+            // Frontière au premier non-blanc après [.!?]+blancs*.
+            let mut off = 0usize;
+            let mut pend = false;
+            for ch in input.chars() {
+                if pend && !ch.is_whitespace() {
+                    bounds.push(off);
+                    pend = false;
+                }
+                if matches!(ch, '.' | '!' | '?') {
+                    pend = true;
+                }
+                off += ch.len_utf16();
+            }
+        }
+        _ => {
+            // grapheme — sous-ensemble UAX #29.
+            let mut i = 1usize;
+            while i < n {
+                if grapheme_break(&u, i) {
+                    bounds.push(i);
+                }
+                i += 1;
+            }
+        }
+    }
+    if n == 0 {
+        return Vec::new();
+    }
+    bounds.dedup();
+    let mut out = Vec::with_capacity(bounds.len());
+    for (k, &b) in bounds.iter().enumerate() {
+        let e2 = bounds.get(k + 1).copied().unwrap_or(n);
+        let s = String::from_utf16_lossy(&u[b..e2]);
+        let wl = s.chars().any(char::is_alphanumeric);
+        out.push((s, b, wl));
+    }
+    out
+}
+
+/// Pas de coupure : entre surrogates, avant étendue/ZWJ+1,
+/// entre indicateurs régionaux appariés.
+fn grapheme_break(u: &[u16], i: usize) -> bool {
+    let prev = u[i - 1];
+    let cur = u[i];
+    if (0xD800..0xDC00).contains(&prev) && (0xDC00..0xE000).contains(&cur) {
+        return false;
+    }
+    if is_extend(cur) || prev == 0x200D {
+        return false;
+    }
+    // Indicateur régional (drapeaux) : paires — pas de
+    // coupure si le RI courant complète une paire.
+    let ri = |j: usize| j + 1 < u.len() && u[j] == 0xD83C && (0xDDE6..=0xDDFF).contains(&u[j + 1]);
+    if ri(i) {
+        let mut k = i;
+        let mut cnt = 0usize;
+        while k >= 2 && ri(k - 2) {
+            cnt += 1;
+            k -= 2;
+        }
+        if cnt % 2 == 1 {
+            return false;
+        }
+    }
+    true
+}
+
+/// Étendues UAX #29 (sous-ensemble) : marques combinaison,
+/// modifieurs emoji, tags, ZWNJ.
+fn is_extend(c: u16) -> bool {
+    matches!(
+        c,
+        0x0300..=0x036F
+            | 0x1AB0..=0x1AFF
+            | 0x1DC0..=0x1DFF
+            | 0x20D0..=0x20FF
+            | 0xFE00..=0xFE0F
+            | 0xFE20..=0xFE2F
+            | 0x3099..=0x309A
+            | 0x200C
+    )
+}
+
+/// `seg.segment(input)` → objet `Segments` itérable :
+/// `[Symbol.iterator]` + `containing(i)` + items
+/// `{segment, index, isWordLike, input}`.
+fn seg_segment(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let id = self_id(e, this, args, "Segmenter")?;
+    let input = e.to_js_string(arg(args, 1))?;
+    let gran = {
+        let o = self_opts(e, id);
+        opt(&o, "granularity").unwrap_or("grapheme").to_string()
+    };
+    let mut list = Vec::new();
+    for (s, idx, wl) in split_segments(&input, &gran) {
+        let o = e.new_object();
+        let sv = e.str_val(s);
+        e.set_own(o, "segment", sv, true);
+        e.set_own(o, "index", Value::Num(idx as f64), true);
+        e.set_own(o, "isWordLike", Value::Bool(wl), true);
+        let iv = e.str_val(input.clone());
+        e.set_own(o, "input", iv, true);
+        list.push(Value::Obj(o));
+    }
+    let arr = e.new_array(list);
+    let seg = e.new_object();
+    e.set_own(seg, "__segs", arr, false);
+    let iv = e.str_val(input);
+    e.set_own(seg, "__input", iv, false);
+    let seg_v = Value::Obj(seg);
+    let it = e.bound_native("[Symbol.iterator]", segs_iter_new, vec![seg_v]);
+    e.set_own(seg, crate::interp::SYM_ITERATOR, it, false);
+    let cont = e.bound_native("containing", segs_containing, vec![seg_v]);
+    e.set_own(seg, "containing", cont, true);
+    Ok(seg_v)
+}
+
+/// `segments[Symbol.iterator]()` → itérateur frais
+/// (`__i` curseur sur `__segs`).
+fn segs_iter_new(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let list = match arg(args, 0) {
+        Value::Obj(id) => e.get_prop(id, "__segs").unwrap_or(Value::Undefined),
+        _ => Value::Undefined,
+    };
+    let it = e.new_object();
+    e.set_own(it, "__i", Value::Num(0.0), false);
+    e.set_own(it, "__segs", list, false);
+    let it_v = Value::Obj(it);
+    let next = e.bound_native("next", segs_iter_next, vec![it_v]);
+    e.set_own(it, "next", next, true);
+    Ok(it_v)
+}
+
+/// `iterator.next()` → `{value, done}` sur `__segs[__i]`.
+fn segs_iter_next(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let r = e.new_object();
+    if let Value::Obj(it) = arg(args, 0) {
+        let i = match e.get_prop(it, "__i") {
+            Some(Value::Num(n)) => n as usize,
+            _ => 0,
+        };
+        let item = match e.get_prop(it, "__segs") {
+            Some(Value::Obj(l)) => e.get_prop(l, &i.to_string()).unwrap_or(Value::Undefined),
+            _ => Value::Undefined,
+        };
+        if matches!(item, Value::Undefined) {
+            e.set_own(r, "value", Value::Undefined, true);
+            e.set_own(r, "done", Value::Bool(true), true);
+        } else {
+            e.set_own(it, "__i", Value::Num((i + 1) as f64), false);
+            e.set_own(r, "value", item, true);
+            e.set_own(r, "done", Value::Bool(false), true);
+        }
+    } else {
+        e.set_own(r, "value", Value::Undefined, true);
+        e.set_own(r, "done", Value::Bool(true), true);
+    }
+    Ok(Value::Obj(r))
+}
+
+/// `segments.containing(i)` → item dont `index ≤ i < fin`.
+fn segs_containing(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let (Value::Obj(segobj), Value::Num(n)) = (arg(args, 0), arg(args, 1)) else {
+        return Ok(Value::Undefined);
+    };
+    let Some(Value::Obj(list)) = e.get_prop(segobj, "__segs") else {
+        return Ok(Value::Undefined);
+    };
+    let len = match e.get_prop(list, "length") {
+        Some(Value::Num(x)) => x as usize,
+        _ => 0,
+    };
+    let n = n as usize;
+    for i in 0..len {
+        let Some(item @ Value::Obj(it)) = e.get_prop(list, &i.to_string()) else {
+            continue;
+        };
+        let idx = match e.get_prop(it, "index") {
+            Some(Value::Num(x)) => x as usize,
+            _ => 0,
+        };
+        if idx > n {
+            break;
+        }
+        let end = if i + 1 < len {
+            match e.get_prop(list, &(i + 1).to_string()) {
+                Some(Value::Obj(nx)) => match e.get_prop(nx, "index") {
+                    Some(Value::Num(x)) => x as usize,
+                    _ => usize::MAX,
+                },
+                _ => usize::MAX,
+            }
+        } else {
+            usize::MAX
+        };
+        if n < end {
+            return Ok(item);
+        }
+    }
+    Ok(Value::Undefined)
+}
+
+/// `seg.resolvedOptions()` → `{locale:'en-US', granularity}`.
+fn seg_resolved(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let id = self_id(e, this, args, "Segmenter")?;
+    let opts = self_opts(e, id);
+    let o = e.new_object();
+    let loc = e.str_val("en-US");
+    e.set_own(o, "locale", loc, true);
+    let g = e.str_val(opt(&opts, "granularity").unwrap_or("grapheme"));
+    e.set_own(o, "granularity", g, true);
+    Ok(Value::Obj(o))
 }

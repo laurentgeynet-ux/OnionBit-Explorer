@@ -3522,6 +3522,25 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   fires_load_and_error`. Sonde x.com : mutation
   classée (l'`appendChild` de `startEntry`).
 
+- [x] **CAP-190. `Intl.Segmenter` borné
+  (sonde x.com)** — `new Intl.Segmenter` =
+  `undefined` → ctor non-appelable dans
+  `entry-client` (diagnostic : le callee est
+  désormais nommé dans `new X`/`construct`
+  non-appelables). Ctor `{granularity}` +
+  `segment()` itérable (`containing`,
+  items `{segment,index,isWordLike,input}`
+  indices UTF-16) + `resolvedOptions` —
+  frontières honnêtes sans CLDR (grapheme :
+  surrogates/étendues/ZWJ/RI ; word :
+  transitions alnum ; sentence : `[.!?]`).
+  Répare `e.truthy`→`to_boolean` (code
+  CAP-187 en vol). Test
+  `intl_segmenter_bounded`. **Verdict :
+  `entry-client` franchit les gaps d'API
+  — mur = `Error: Invariant failed`,
+  invariante applicative X elle-même.**
+
 - [x] **CAP-189. `}`-bloc → regex +
   lvalues `super.*` (sonde x.com)** — deux murs
   de parse/assign de `entry-client` : (a)

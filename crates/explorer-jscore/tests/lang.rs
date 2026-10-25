@@ -7758,3 +7758,39 @@ fn super_prop_assignment() {
         "7"
     );
 }
+
+/// `Intl.Segmenter` (CAP-190, ES2022) — ctor + `segment`
+/// itérable + `containing`, borné en-US (mur réel x-web :
+/// `new Intl.Segmenter` dans `entry-client`).
+#[test]
+fn intl_segmenter_bounded() {
+    // Grapheme : la marque combinante reste attachée
+    // (`b\u{301}` = un seul grapheme, UAX #29).
+    assert_eq!(
+        ev_str(
+            "var segs=new Intl.Segmenter().segment('ab\u{0301}c');\
+            var it=segs[Symbol.iterator]();var out=[];var r;\
+            while(!(r=it.next()).done)out.push(r.value.segment);\
+            out.join('|')"
+        ),
+        "a|b\u{301}|c"
+    );
+    // Word : isWordLike + containing.
+    assert_eq!(
+        ev_str(
+            "var w=new Intl.Segmenter('en',{granularity:'word'});\
+            var sg=w.segment('hi, you');\
+            var c=sg.containing(4);\
+            c.segment+'/'+c.isWordLike+'/'+c.index"
+        ),
+        "you/true/4"
+    );
+    // resolvedOptions + ctor sans new (appel = ctor, spec).
+    assert_eq!(
+        ev_str(
+            "var ro=new Intl.Segmenter([],{granularity:'sentence'}).resolvedOptions();\
+            ro.locale+'/'+ro.granularity"
+        ),
+        "en-US/sentence"
+    );
+}

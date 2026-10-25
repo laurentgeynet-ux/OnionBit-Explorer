@@ -4381,6 +4381,21 @@ impl Host for NodeHost {
                     e.get_prop(e.global, "document").unwrap_or(Value::Null),
                 ));
             }
+            // `shadowRoot.host` (CAP-190 tranche 1) — l'hôte
+            // de la racine ; absent (`undefined` fallthrough)
+            // sur tout autre nœud — la propriété n'existe
+            // que sur `ShadowRoot` (spec).
+            "host" if self.dom.borrow().is_shadow_root(node) => {
+                let h = self.dom.borrow().shadow_host(node);
+                return Ok(Some(match h {
+                    Some(h) => node_value(e, &self.dom, &self.cache, h),
+                    None => Value::Null,
+                }));
+            }
+            // `el.assignedSlot` (CAP-190 tranche 1) — pas de
+            // répartition : un light DOM n'est jamais assigné
+            // (borné honnête, spec : `null` hors distribution).
+            "assignedSlot" => return Ok(Some(Value::Null)),
             // `el.shadowRoot` (stub issue #25) — la racine
             // attachée par `attachShadow`, `null` en mode
             // `closed` ou sans racine.
@@ -5119,11 +5134,25 @@ impl Host for NodeHost {
             // réelles (React, closure, éditeurs) les lisent
             // pour la délégation et la comparaison d'arbres.
             "getRootNode" => {
-                // `{composed:true}` n'ouvre rien — pas de
-                // shadow DOM dans le miroir (borné). Racine
-                // `#document` → le global `document` (identité
-                // `===` exigée, comme `ownerDocument`).
-                let root = self.dom.borrow().root_of(node);
+                // `{composed:true}` (CAP-190) : depuis
+                // l'intérieur d'une racine shadow, remonte à
+                // l'arbre de l'hôte (spec — sinon la racine
+                // shadow elle-même). Racine `#document` →
+                // le global `document` (identité `===`
+                // exigée, comme `ownerDocument`).
+                let mut root = self.dom.borrow().root_of(node);
+                let composed = args.first().is_some_and(|v| {
+                    if let Value::Obj(id) = v {
+                        e.get_prop(*id, "composed").is_some_and(|c| e.to_boolean(c))
+                    } else {
+                        false
+                    }
+                });
+                if composed && self.dom.borrow().is_shadow_root(root) {
+                    if let Some(h) = self.dom.borrow().shadow_host(root) {
+                        root = self.dom.borrow().root_of(h);
+                    }
+                }
                 let doc_root = self.dom.borrow().root;
                 let v = if root == doc_root {
                     e.get_prop(e.global, "document").unwrap_or(Value::Null)
@@ -5204,16 +5233,16 @@ impl Host for NodeHost {
                 self.dom.borrow_mut().set_canvas_ctx(node, v);
                 Ok(Some(v))
             }
-            // `attachShadow(init)` — stub spec-minimal
-            // (issue #25, PAS le vrai Shadow DOM) : attache
-            // un `DocumentFragment` rôle shadowRoot et le
-            // retourne — suffit aux polyfills
+            // `attachShadow(init)` — surface tranche 1
+            // (CAP-190, hors scoping/slots/répartition) :
+            // attache un `DocumentFragment` rôle shadowRoot
+            // et le retourne — suffit aux polyfills
             // d'instrumentation (Invoker Commands : `n.call`
             // sur la méthode absente tuait github-elements).
             // `mode:"closed"` → `el.shadowRoot` null, racine
-            // réelle quand même. Re-appel : la racine
-            // existante est retournée (tolérant — spec jette
-            // `NotSupportedError`).
+            // réelle quand même. Re-appel → `NotSupportedError`
+            // (spec, CAP-190 : renvoyer l'existante trompait
+            // les feature-detects qui vérifient le jeté).
             "attachShadow" => {
                 let open = match args.first() {
                     Some(Value::Obj(id)) => {
@@ -5224,15 +5253,17 @@ impl Host for NodeHost {
                     }
                     _ => true,
                 };
-                let existing = self.dom.borrow().shadow_root(node, true);
-                let root = if let Some(r) = existing {
-                    r
-                } else {
-                    let r = self.dom.borrow_mut().create_fragment();
-                    self.dom.borrow_mut().attach_shadow_root(node, r, open);
-                    r
-                };
-                Ok(Some(node_value(e, &self.dom, &self.cache, root)))
+                if self.dom.borrow().shadow_root(node, true).is_some() {
+                    let v = e.error_value(
+                        e.protos.error,
+                        "NotSupportedError",
+                        "attachShadow: shadow root already attached",
+                    );
+                    return Err(crate::heap::Thrown(v));
+                }
+                let r = self.dom.borrow_mut().create_fragment();
+                self.dom.borrow_mut().attach_shadow_root(node, r, open);
+                Ok(Some(node_value(e, &self.dom, &self.cache, r)))
             }
             // `attachInternals()` — stub (issue #25) : objet
             // minimal exposant `shadowRoot` (même en mode
@@ -5242,6 +5273,11 @@ impl Host for NodeHost {
                 cache: self.cache.clone(),
                 node,
             })))),
+            // `slot.assignedElements()`/`assignedNodes({flatten})`
+            // (CAP-190 tranche 1) — pas de répartition dans le
+            // miroir : tableau vide honnête (borné — l'arc
+            // slots est tranche 3).
+            "assignedElements" | "assignedNodes" => Ok(Some(e.new_array(Vec::new()))),
             // `prepend(...kids)` / `before`/`after`/`replaceWith` —
             // nodes or strings (strings → text nodes).
             "prepend" => {

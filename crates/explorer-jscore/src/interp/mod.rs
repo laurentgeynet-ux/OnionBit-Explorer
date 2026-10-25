@@ -5513,10 +5513,14 @@ impl Engine {
     /// explicite, partagé avec les sous-constructions.
     pub(crate) fn construct_nt(&mut self, f: Value, args: &[Value], nt: Value) -> JsResult<Value> {
         if !self.is_callable(f) {
-            return Err(self.type_error("constructor is not a function"));
+            // Le callee est nommé — les sondes de sites réels
+            // identifient l'API hôte manquante du premier coup.
+            let d = self.describe(f);
+            return Err(self.type_error(format!("constructor is not a function: {d}")));
         }
         let Value::Obj(fid) = f else {
-            return Err(self.type_error("constructor is not a function"));
+            let d = self.describe(f);
+            return Err(self.type_error(format!("constructor is not a function: {d}")));
         };
         // Proxy : trap `construct` ou délégation à la cible.
         if let Some((_, target, handler)) = self.proxy_th(fid)? {

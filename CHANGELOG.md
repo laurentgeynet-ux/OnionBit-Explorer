@@ -11,6 +11,25 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **CAP-190 — `Intl.Segmenter` borné** (`explorer-jscore`,
+  ES2022 — mur réel x-web : `new Intl.Segmenter` dans
+  `entry-client`) : ctor `{granularity}` (grapheme défaut,
+  word/sentence, `RangeError` sinon) ; `segment(input)` →
+  objet itérable (`[Symbol.iterator]`, `containing(i)`,
+  items `{segment, index, isWordLike, input}` — indices
+  UTF-16 spec) ; `resolvedOptions()`. Frontières honnêtes
+  sans CLDR : grapheme = paires surrogates + étendues
+  (diacritiques, modifieurs, ZWJ, RI appariés — sous-
+  ensemble UAX #29) ; word = transitions alnum ;
+  sentence = `[.!?]` + blanc. Diagnostics de sonde :
+  `new X`/ctor non-appelable nomment le callee
+  (`new Segmenter: constructor is not a function:`).
+  Répare au passage `e.truthy` → `to_boolean`
+  (dom_host, code CAP-187 en vol). Test
+  `intl_segmenter_bounded`. Sonde : le bundle dépasse
+  les gaps d'API — mur atteint =
+  `Error: Invariant failed` **côté applicatif X**.
+
 - **CAP-189 — `}`-bloc → regex + lvalues
   `super.*`** (`explorer-jscore`) : deux murs
   de parse/assign du bundle `entry-client`
