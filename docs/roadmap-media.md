@@ -32,10 +32,14 @@ Une sous-étape = un commit dédié (règle §5) ; gate Flutter
 
 - [ ] **136a — Choix plugin + licence** : évaluer
   `webview_windows` (pub.dev) vs accès direct WebView2 via
-  `win32`+COM ; critères : licence compatible MIT/Apache
-  (vigilance ADR-0027 §Conséquences, même règle que `fvp`
-  en ADR-0024), maintenance, embed Flutter Windows,
-  détection du runtime Evergreen
+  `win32`+COM ; candidat multi-plateforme
+  `flutter_inappwebview` (WebView2 sous Windows +
+  WKWebView macOS/iOS + WebView Android dans une API
+  unique — à peser si l'extension OS est envisageable, cf.
+  § Extensions) ; critères : licence compatible
+  MIT/Apache (vigilance ADR-0027 §Conséquences, même
+  règle que `fvp` en ADR-0024), maintenance, embed
+  Flutter Windows, détection du runtime Evergreen
   (`GetAvailableCoreWebView2BrowserVersionString`).
   Livrable : choix justifié dans l'ADR/journal + PoC
   minimal (surface WebView2 affichée dans une page de
@@ -95,3 +99,19 @@ Une sous-étape = un commit dédié (règle §5) ; gate Flutter
   ADR-0022 inapplicables aux domaines délégués —
   l'allowlist reste minimale pour cette raison autant que
   pour le périmètre de confiance.
+
+## Extensions multi-plateforme (note — WebView2 = Windows only)
+
+La délégation est un chemin **Windows** ; le modèle
+d'onglet délégué (136c) est pensé comme seam neutre —
+équivalents si le produit vise d'autres OS :
+
+| OS | Surface | DRM réaliste |
+|---|---|---|
+| Android | `android.webkit.WebView` | Widevine via MediaDrm — L3 généralisé, L1 selon device |
+| iOS/macOS | `WKWebView` | FairPlay — exige un certificat Apple FPS côté app |
+| Linux | CEF (`flutter_cef`) / WebKitGTK | Widevine L3 au mieux ; OpenCDM — niche |
+
+Chaque extension = entrée au journal + réévaluation
+licence/certification propre à la plateforme. Hors
+périmètre de l'étape 136 elle-même (Windows d'abord).
