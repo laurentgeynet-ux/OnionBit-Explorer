@@ -9,6 +9,16 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **R-99 — `content_rect` publique**
+  (`explorer-render`) :
+  `display::content_rect` exposée
+  (content box = border box −
+  bordures − padding) — NAV la
+  répliquait en privé dans
+  `session/composite.rs` pour le
+  composite d'iframes ; adoption +
+  retrait de la copie à son commit.
+
 - **R-98 — `explorer_html::entities`
   exposé** (`explorer-html`) :
   `lookup_named`/`EntityMatch`

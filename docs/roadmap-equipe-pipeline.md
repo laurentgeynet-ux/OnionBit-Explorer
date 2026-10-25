@@ -2594,6 +2594,12 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   attribut, numériques `&#…`/`&#x…` remap `windows-1252`,
   orphelins littéraux). Test `decode_str_entites_nommees_
   et_numeriques`. Adoption miroir = commit NAV.
+- [x] **R-99. `content_rect` promue publique** (audit file
+  2026-10-25 — NAV la réplique en privé dans
+  `session/composite.rs` pour le composite d'iframes, journal
+  étape 129) — **livré** : `display::content_rect` exposée
+  (`pub`, contrat « content box = border box − bordures −
+  padding ») ; NAV adopte et retire sa copie à son commit.
 
 ## Palier R-B — Contenu étranger, animation, canvas
 

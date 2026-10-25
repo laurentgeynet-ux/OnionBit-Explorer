@@ -1365,7 +1365,12 @@ fn border_color_of(st: &explorer_css::ComputedStyle, side: &str) -> Color {
 
 /// Content box de la boîte = border box − bordures − padding
 /// (les `em` sont résolus via `prop_px`/`font_size_of`).
-fn content_rect(bx: &explorer_layout::LayoutBox) -> Rect {
+///
+/// Publique depuis R-99 : consommé hors crate par le composite
+/// de sous-contextes `<iframe>` côté `explorer-core` (le
+/// viewport enfant = content box de la boîte remplacée).
+#[must_use]
+pub fn content_rect(bx: &explorer_layout::LayoutBox) -> Rect {
     let st = &bx.style;
     let l = border_side_w(st, "left") + prop_px(st, "padding-left", 0.0);
     let t = border_side_w(st, "top") + prop_px(st, "padding-top", 0.0);
