@@ -31,6 +31,7 @@ class DelegatedWebView extends StatefulWidget {
   const DelegatedWebView({
     super.key,
     required this.url,
+    this.visible = true,
     this.userDataFolder,
     this.profileName,
     this.onController,
@@ -38,6 +39,13 @@ class DelegatedWebView extends StatefulWidget {
 
   /// URL initiale du domaine délégué.
   final String url;
+
+  /// Visibilité du HWND natif — le widget reste monté pour les
+  /// onglets en arrière-plan (page et session conservées,
+  /// 136d) ; seul le HWND est masqué via `setVisibility` — la
+  /// seule façon de cacher la surface native puisque Flutter
+  /// ne peut ni peindre ni clipper par-dessus.
+  final bool visible;
 
   /// Dossier de données WebView2 dédié — séparé du profil
   /// Explorer (ADR-0027 §5). `null` = défaut du plugin.
@@ -72,6 +80,14 @@ class _DelegatedWebViewState extends State<DelegatedWebView> {
     controller.loadRequest(Uri.parse(widget.url));
     _controller = controller;
     widget.onController?.call(controller);
+    if (!widget.visible) {
+      // `WinWebViewWidget` ré-affiche le HWND à son mount —
+      // on re-masque après la première frame si l'onglet est
+      // né en arrière-plan.
+      WidgetsBinding.instance.addPostFrameCallback(
+        (_) => _controller?.setVisibility(false),
+      );
+    }
   }
 
   @override
@@ -82,6 +98,11 @@ class _DelegatedWebViewState extends State<DelegatedWebView> {
     // contacter le moteur).
     if (old.url != widget.url) {
       _controller?.loadRequest(Uri.parse(widget.url));
+    }
+    // Bascule premier plan / arrière-plan : le widget reste
+    // monté (état conservé), seul le HWND bascule.
+    if (old.visible != widget.visible) {
+      _controller?.setVisibility(widget.visible);
     }
   }
 

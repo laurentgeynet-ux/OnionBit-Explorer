@@ -4798,9 +4798,14 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
     registre contrôleurs, routage
     back/forward/reload WebView2,
     gardes pull/close. 3 tests.
-  - [ ] 136d — surface
-    `DelegatedWebView` +
-    user-data-folder dédié
+  - [x] **136d — surface
+    persistante + user-data-folder** :
+    webviews toutes montées (état
+    conservé entre onglets),
+    bascule `setVisibility` ;
+    `userDataFolder` =
+    `<profileDir>/webview2` —
+    sessions hors profil Explorer.
   - [ ] 136e — resync events
     navigation (URL/titre/
     historique) + routage

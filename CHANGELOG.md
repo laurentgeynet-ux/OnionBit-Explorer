@@ -756,6 +756,25 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   sans pull de frame, `closeTab`
   libère le contrôleur. 3 tests.
 
+- **136d — surface déléguée
+  persistante + user-data-folder**
+  (`app/`, étape 136 NAV, ADR-0027
+  §5) : toutes les webviews
+  déléguées restent **montées**
+  (page, session et lecture
+  conservées au changement
+  d'onglet — l'onglet arrière-plan
+  garde son état WebView2) ; la
+  visibilité bascule via
+  `setVisibility`, seule voie
+  d'occlusion sous HWND natif
+  (Flutter ne compose rien
+  au-dessus). `userDataFolder` =
+  `<profileDir>/webview2` —
+  données de session séparées du
+  profil Explorer ; `profileName`
+  exposé au widget.
+
 - **CAP-198 — Shadow DOM tranche 4 :
   event retargeting** (`explorer-jscore`)
   : le chemin de propagation des

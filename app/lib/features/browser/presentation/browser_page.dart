@@ -11,6 +11,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/design/design_tokens.dart';
+import '../../../core/settings/app_settings.dart';
 import '../../settings/presentation/settings_dialog.dart';
 import '../domain/browser_tab.dart';
 import '../domain/media_offer.dart';
@@ -152,6 +153,14 @@ class _BrowserPageState extends ConsumerState<BrowserPage> {
 
     final active = st.active;
     final muted = t.color('onSurface', 'muted');
+    // User-data-folder WebView2 dédié (136d, ADR-0027 §5) —
+    // `<profil moteur>/webview2`, séparé du profil Explorer ;
+    // vide (profil par défaut) → `null`, défaut du plugin.
+    final profileDir = ref.watch(
+      settingsProvider.select((s) => s.profileDir),
+    );
+    final wvUserDir =
+        profileDir.trim().isEmpty ? null : '${profileDir.trim()}/webview2';
 
     return Scaffold(
       backgroundColor: t.color('surface', 'base'),
@@ -270,14 +279,37 @@ class _BrowserPageState extends ConsumerState<BrowserPage> {
                         message: st.pageErrors[active.id]!,
                         onRetry: () => ctrl.navigate(active.url),
                       )
-                    : active.kind == TabKind.delegated
-                    ? DelegatedWebView(
-                        key: ValueKey('wv-${active.id}'),
-                        url: active.url,
-                        onController: (c) =>
-                            ctrl.registerWebView(active.id, c),
-                      )
-                    : _FrameView(tokens: t, state: st, ctrl: ctrl),
+                    : Stack(
+                        children: [
+                          if (active.kind != TabKind.delegated)
+                            Positioned.fill(
+                              child:
+                                  _FrameView(tokens: t, state: st, ctrl: ctrl),
+                            ),
+                          // 136d — toutes les webviews déléguées
+                          // restent montées (page, session et
+                          // lecture conservées au changement
+                          // d'onglet) ; seul le HWND bascule via
+                          // `setVisibility` — Flutter ne peut
+                          // rien composer au-dessus de la surface
+                          // native.
+                          for (final tab in st.tabs)
+                            if (tab.kind == TabKind.delegated)
+                              Positioned.fill(
+                                child: Offstage(
+                                  offstage: tab.id != active.id,
+                                  child: DelegatedWebView(
+                                    key: ValueKey('wv-${tab.id}'),
+                                    url: tab.url,
+                                    visible: tab.id == active.id,
+                                    userDataFolder: wvUserDir,
+                                    onController: (c) =>
+                                        ctrl.registerWebView(tab.id, c),
+                                  ),
+                                ),
+                              ),
+                        ],
+                      ),
               ),
               _StatusBar(
                 tokens: t,
