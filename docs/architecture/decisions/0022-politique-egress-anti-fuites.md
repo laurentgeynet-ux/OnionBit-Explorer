@@ -82,6 +82,11 @@ fuite inatteignable avant de la tracer.
    c'est-à-dire fuir. Documenté dans la config du profil.
 
 6. **Séquencement (déclencheurs).**
+   - **Arbitrage lead (2026-10-25)** : la branche arti/Tor est
+     la **dernière à ouvrir** — déclenchée quand la version
+     « vanilla » est fonctionnelle (journal
+     `interface-equipes.md`). Tout ce qui suit est ordonné
+     derrière cette condition.
    - Lint + bans cargo-deny : libre dès maintenant — verrouille
      le périmètre avant Arti (étape NAVIGATEUR à ouvrir).
    - `EgressConnector` + compteur de flux : avec l'ADR
