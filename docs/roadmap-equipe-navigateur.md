@@ -4814,7 +4814,7 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
     nominal ; les caches restent en
     dédup de décodage — confort.
 
-- [ ] **Étape 138. Piles élargies +
+- [x] **Étape 138. Piles élargies +
   capture de crash (mort silencieuse
   daemon x.com, prioritaire)** —
   seul trou non nommé de la file :
