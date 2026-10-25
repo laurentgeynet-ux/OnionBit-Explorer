@@ -4848,3 +4848,77 @@ fn cap181_clipboard_hook() {
     e.run_microtasks().expect("microtasks");
     assert_eq!(evf(&mut e, "w+'|'+r"), "resolved/reject|clip!");
 }
+
+// ===== CAP-182 — arc édition : `new Range`/`createRange`,
+// `createTreeWalker`, `execCommand` (sonde `_census_calls`).
+
+#[test]
+fn cap182_editing_arc() {
+    let mut e = engine_with(
+        "<!doctype html><html><body><div id=x><p id=a>hello</p><p id=b>world</p></div></body></html>",
+    );
+    e.eval(
+        "var x=document.getElementById('x'),a=document.getElementById('a'),\
+            b=document.getElementById('b'),d=document,s=d.getSelection();",
+    )
+    .expect("setup");
+    // `new Range()` — frontières document + selectNode +
+    // addRange → `getRangeAt`/`toString`.
+    assert_eq!(
+        evf(&mut e,
+            "var r=new Range();r.selectNode(a);\
+            [r.startContainer===x, r.startOffset, r.endOffset, r.collapsed, r.toString()].join('|')"),
+        "true|0|1|false|hello"
+    );
+    // selectNodeContents + collapse + cloneContents fragment.
+    assert_eq!(
+        evf(&mut e,
+            "r.selectNodeContents(x);\
+            var f=r.cloneContents();\
+            [f.childNodes.length, f.childNodes[0].textContent, r.startOffset, r.endOffset].join('|')"),
+        "2|hello|0|2"
+    );
+    // TreeWalker — DFS filtré (`SHOW_ELEMENT`), `nextNode`
+    // itère ; `firstChild` = premier descendant (avant
+    // `extractContents`, qui détache les `<p>`).
+    assert_eq!(
+        evf(&mut e,
+            "var tw=d.createTreeWalker(document.body, NodeFilter.SHOW_ELEMENT);\
+            var seen='';for(var i=0;i<3;i++){var n=tw.nextNode();seen+=(n?n.id||n.tagName:'' )+'/'};\
+            seen+'|'+typeof d.createTreeWalker"),
+        "x/a/b/|function"
+    );
+    // extractContents = clone + delete ; deleteContents sur
+    // sous-range texte.
+    assert_eq!(
+        evf(
+            &mut e,
+            "var r2=d.createRange();r2.selectNodeContents(x);\
+            var f2=r2.extractContents();\
+            [x.childNodes.length, f2.childNodes.length, x.textContent].join('|')"
+        ),
+        "0|2|"
+    );
+    // execCommand — `selectAll`→true range body ; `copy`→false
+    // sans hook ; commande inconnue→false (honnête).
+    assert_eq!(
+        evf(
+            &mut e,
+            "d.execCommand('selectAll');\
+            [s.rangeCount, d.execCommand('copy'), d.execCommand('bold'),\
+             typeof d.createRange, typeof Range].join('|')"
+        ),
+        "1|false|false|function|function"
+    );
+    // addRange d'un vrai Range → `toString` de la sélection.
+    assert_eq!(
+        evf(
+            &mut e,
+            "s.removeAllRanges();var r3=new Range();r3.selectNodeContents(document.body);\
+            s.addRange(r3);\
+            [s.rangeCount, s.anchorNode===document.body, s.anchorOffset, s.focusOffset,\
+             typeof r3.setStart].join('|')"
+        ),
+        "1|true|0|1|function"
+    );
+}

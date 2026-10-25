@@ -1680,6 +1680,45 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   leur éval — écart spec assumé) ;
   `readystatechange` enfant non propagé. 2 tests
   session.
+- **CAP-182 — arc édition : `Range` vivant,
+  `TreeWalker`, `execCommand` (sonde
+  `_census_calls`)** (`explorer-jscore`) :
+  `new Range()`/`document.createRange()`
+  deviennent constructibles (sortie de
+  `illegal_ctor`, spec) — host `Range`
+  à bornes mutables : `setStart`/`setEnd`/
+  `setStartBefore`·`After`/`setEndBefore`·
+  `After` (rabat same-container borné),
+  `selectNode`/`selectNodeContents`,
+  `collapse`, `cloneContents`/
+  `extractContents`/`deleteContents`
+  (sous-chaîne texte + détachement des
+  enfants couverts top-level), `insertNode`,
+  `cloneRange`, `toString`, `getBounding
+  ClientRect`/`getClientRects` (rect de
+  l'ancêtre commun — borné). `Selection.
+  addRange` consomme le vrai Range par
+  downcast ; `SelData.ranges` passe en
+  `Rc<RefCell<SelRange>>` partagé —
+  `getRangeAt` rend le range **vivant**
+  (mutations répercutées ; identité
+  `===` par appel non portée, documenté).
+  `document.createTreeWalker(root,
+  whatToShow?, filter?)` — successeur
+  document-order borné à la racine avec
+  remontée aux oncles (`tw_step_out`) ;
+  skip → descend, reject → coupe le
+  sous-arbre ; navigation inverse/fratrie
+  → `null` honnête (borné). `NodeFilter`
+  global : constantes `SHOW_*`/`FILTER_*`.
+  `document.execCommand` borné : `copy`/
+  `cut` → hook presse-papiers CAP-181 sur
+  le texte de sélection, `selectAll` →
+  range `body`-entier, autres → `false`
+  (spec : commande inconnue). `getRangeAt`
+  snapshot remplacé par le Range vivant.
+  Test jscore `cap182_editing_arc`.
+
 - **CAP-181 — `navigator.clipboard` par
   hook embedder (sonde `_census_calls`)**
   (`explorer-jscore`) : surface spec
