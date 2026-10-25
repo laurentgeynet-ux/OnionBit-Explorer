@@ -73,12 +73,16 @@ class FakeRepo implements BrowserRepository {
   }
 
   @override
-  Future<BrowserTab?> back(String tabId) async =>
-      BrowserTab(id: tabId, url: 'http://prev/');
+  Future<BrowserTab?> back(String tabId) async {
+    actions.add('back:$tabId');
+    return BrowserTab(id: tabId, url: 'http://prev/');
+  }
 
   @override
-  Future<BrowserTab?> forward(String tabId) async =>
-      BrowserTab(id: tabId, url: 'http://next/');
+  Future<BrowserTab?> forward(String tabId) async {
+    actions.add('forward:$tabId');
+    return BrowserTab(id: tabId, url: 'http://next/');
+  }
 
   @override
   Future<void> closeTab(String tabId) async => actions.add('close:$tabId');

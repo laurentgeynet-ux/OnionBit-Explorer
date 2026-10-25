@@ -3,10 +3,12 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 import 'dart:async';
+import 'dart:io';
 import 'dart:ui' as ui;
 
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:webview_win_floating/webview_win_floating.dart';
 
 import '../../../core/api/api_client.dart';
 import '../../../core/api/events_client.dart';
@@ -20,6 +22,7 @@ import '../data/media_player.dart';
 import '../domain/bookmark.dart';
 import '../domain/browser_tab.dart';
 import '../domain/download_offer.dart';
+import '../domain/drm_allowlist.dart';
 import '../domain/history_entry.dart';
 import '../domain/media_offer.dart';
 
@@ -376,6 +379,22 @@ class BrowserController extends Notifier<BrowserState> {
   /// Config capturée dans `build` (cadence de re-bootstrap).
   late AppConfig _cfg;
 
+  /// Allowlist DRM (136b) — reconstruite avec `_cfg`.
+  late DrmAllowlist _allow;
+
+  /// Contrôleurs WebView2 des onglets délégués, indexés par
+  /// id d'onglet — enregistrés par `DelegatedWebView` au
+  /// mount (`registerWebView`), consommés pour la navigation
+  /// et le routage back/forward/reload (136e). Le HWND natif
+  /// est libéré par le finalizer du plugin à la destruction
+  /// du widget.
+  final Map<String, WinWebViewController> _webviews = {};
+
+  /// Enregistre le contrôleur WebView2 de l'onglet `tabId`
+  /// (appelé par `DelegatedWebView` — ADR-0027).
+  void registerWebView(String tabId, WinWebViewController c) =>
+      _webviews[tabId] = c;
+
   /// Fabrique de lecteurs natifs — injectable en test.
   late MediaPlayerFactory _playerFactory;
 
@@ -439,6 +458,7 @@ class BrowserController extends Notifier<BrowserState> {
   BrowserState build() {
     _repo = ref.watch(browserRepositoryProvider);
     _cfg = ref.read(configProvider);
+    _allow = DrmAllowlist(_cfg.drmDelegateHosts);
     _playerFactory = ref.read(mediaPlayerFactoryProvider);
     ref.onDispose(() => _daemonRetry?.cancel());
     ref.onDispose(_releaseAllPlayers);
@@ -1022,6 +1042,7 @@ class BrowserController extends Notifier<BrowserState> {
   /// Ferme un onglet (côté daemon + localement — l'événement
   /// `tab_closed` confirme).
   Future<void> closeTab(String id) async {
+    _webviews.remove(id);
     try {
       await _repo.closeTab(id);
       _onEvent(ServerEvent('tab_closed', {'tab': int.tryParse(id) ?? id}));
@@ -1036,9 +1057,19 @@ class BrowserController extends Notifier<BrowserState> {
   /// l'onglet entrant sera re-appris au prochain clic).
   void selectTab(String id) {
     state = state.copyWith(activeId: id, fieldFocused: false);
-    if (!_frameImages.containsKey(id)) {
+    // Un onglet délégué n'a pas de frame moteur — pas de pull.
+    if (_tabById(id)?.kind != TabKind.delegated &&
+        !_frameImages.containsKey(id)) {
       unawaited(_pullFrame(id));
     }
+  }
+
+  /// L'onglet `id`, s'il existe.
+  BrowserTab? _tabById(String id) {
+    for (final t in state.tabs) {
+      if (t.id == id) return t;
+    }
+    return null;
   }
 
   /// Ctrl+Tab / Ctrl+Shift+Tab — cyclage circulaire dans la
@@ -1410,7 +1441,28 @@ class BrowserController extends Notifier<BrowserState> {
     if (!url.contains('://') && !url.startsWith('about:')) {
       url = 'http://$url';
     }
-    _patch(id, (t) => t.copyWith(loading: true, url: url));
+    // Délégation DRM (136c, ADR-0027 §1) : l'URL matche
+    // l'allowlist **et** WebView2 est disponible (Windows) →
+    // onglet délégué ; REST et FFI sont court-circuités — le
+    // moteur n'est jamais contacté pour ces domaines.
+    // Hors-Windows : repli honnête (§6) — chemin moteur
+    // normal, l'échec DRM reste porté par le site.
+    if (Platform.isWindows && _allow.delegatesUrl(url)) {
+      _patch(
+        id,
+        (t) =>
+            t.copyWith(kind: TabKind.delegated, url: url, loading: false),
+      );
+      // La WebView de l'onglet charge l'URL ; si le widget
+      // n'est pas encore monté, sa construction part de
+      // `tab.url`.
+      unawaited(_webviews[id]?.loadRequest(Uri.parse(url)));
+      return;
+    }
+    _patch(
+      id,
+      (t) => t.copyWith(loading: true, url: url, kind: TabKind.engine),
+    );
     try {
       final t = await _repo.navigate(id, url);
       if (t != null) _patch(id, (_) => t.copyWith(loading: false));
@@ -1426,9 +1478,27 @@ class BrowserController extends Notifier<BrowserState> {
     }
   }
 
-  /// `back`/`forward`/`reload` sur l'onglet actif.
-  Future<void> goBack() => _doAction((r, id) => r.back(id));
-  Future<void> goForward() => _doAction((r, id) => r.forward(id));
+  /// `back`/`forward`/`reload` sur l'onglet actif. Sur un
+  /// onglet délégué, la commande part à la WebView2 — jamais
+  /// au daemon (l'onglet dormant derrière ne doit pas être
+  /// navigué, ADR-0027 §3).
+  Future<void> goBack() async {
+    final id = state.activeId;
+    if (id == null) return;
+    final wv = _webviews[id];
+    if (wv != null && await wv.canGoBack()) return wv.goBack();
+    if (_tabById(id)?.kind == TabKind.delegated) return;
+    await _doAction((r, tid) => r.back(tid));
+  }
+
+  Future<void> goForward() async {
+    final id = state.activeId;
+    if (id == null) return;
+    final wv = _webviews[id];
+    if (wv != null && await wv.canGoForward()) return wv.goForward();
+    if (_tabById(id)?.kind == TabKind.delegated) return;
+    await _doAction((r, tid) => r.forward(tid));
+  }
 
   /// Recharge l'onglet actif (étape 93) : une page servie
   /// par méthode non sûre répond `resubmit_confirm` — la
@@ -1437,6 +1507,11 @@ class BrowserController extends Notifier<BrowserState> {
   Future<void> reload() async {
     final id = state.activeId;
     if (id == null) return;
+    // Onglet délégué : reload envoyé à la WebView2 — jamais
+    // de resubmit moteur sur l'onglet dormant.
+    final wv = _webviews[id];
+    if (wv != null) return wv.reload();
+    if (_tabById(id)?.kind == TabKind.delegated) return;
     _patch(id, (t) => t.copyWith(loading: true));
     try {
       final r = await _repo.reload(id);

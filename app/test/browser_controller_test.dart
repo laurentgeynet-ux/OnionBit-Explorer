@@ -866,6 +866,56 @@ void main() {
     await waitFor(() => repo.frameFetches > before);
     expect(repo.regionFetches, isEmpty);
   });
+
+  test('136c — URL DRM : onglet délégué, moteur jamais contacté',
+      () async {
+    final repo = FakeRepo();
+    final c = makeContainer(repo, FakeEvents());
+    addTearDown(c.dispose);
+    await settle(c);
+
+    await c.read(browserProvider.notifier).navigate('netflix.com');
+    // `navigate` REST/FFI court-circuité (ADR-0027 §1).
+    expect(repo.navigations, isEmpty);
+    final tab = c.read(browserProvider).active!;
+    expect(tab.kind, TabKind.delegated);
+    expect(tab.url, 'http://netflix.com');
+  });
+
+  test('136c — delegated → engine : re-bascule sur URL normale',
+      () async {
+    final repo = FakeRepo();
+    final c = makeContainer(repo, FakeEvents());
+    addTearDown(c.dispose);
+    await settle(c);
+
+    final ctrl = c.read(browserProvider.notifier);
+    await ctrl.navigate('netflix.com');
+    expect(c.read(browserProvider).active!.kind, TabKind.delegated);
+
+    await ctrl.navigate('example.com');
+    expect(repo.navigations, ['1:http://example.com']);
+    expect(c.read(browserProvider).active!.kind, TabKind.engine);
+  });
+
+  test('136c — back/reload délégués ne touchent pas le daemon',
+      () async {
+    final repo = FakeRepo();
+    final c = makeContainer(repo, FakeEvents());
+    addTearDown(c.dispose);
+    await settle(c);
+
+    final ctrl = c.read(browserProvider.notifier);
+    await ctrl.navigate('netflix.com');
+    await ctrl.goBack();
+    await ctrl.goForward();
+    await ctrl.reload();
+    // Aucune WebView montée en test → no-op ; l'onglet daemon
+    // dormant n'est jamais navigué.
+    expect(repo.actions.where((a) => a.startsWith('back:')), isEmpty);
+    expect(repo.actions.where((a) => a.startsWith('forward:')), isEmpty);
+    expect(repo.navigations, isEmpty);
+  });
 }
 
 /// Contrôleur minimal sans onglet — `activeId` reste null.

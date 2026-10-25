@@ -15,6 +15,7 @@ import '../../settings/presentation/settings_dialog.dart';
 import '../domain/browser_tab.dart';
 import '../domain/media_offer.dart';
 import 'browser_controller.dart';
+import 'delegated_webview.dart';
 import 'library_panels.dart';
 
 /// Coquille navigateur — étape 29 : barre d'onglets, boutons
@@ -268,6 +269,13 @@ class _BrowserPageState extends ConsumerState<BrowserPage> {
                         url: active.url,
                         message: st.pageErrors[active.id]!,
                         onRetry: () => ctrl.navigate(active.url),
+                      )
+                    : active.kind == TabKind.delegated
+                    ? DelegatedWebView(
+                        key: ValueKey('wv-${active.id}'),
+                        url: active.url,
+                        onController: (c) =>
+                            ctrl.registerWebView(active.id, c),
                       )
                     : _FrameView(tokens: t, state: st, ctrl: ctrl),
               ),

@@ -4787,10 +4787,17 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
     host exact + sous-domaines,
     http/https, URL malformée
     refusée. 6 tests.
-  - [ ] 136c — `BrowserTab.kind`
-    = engine|delegated,
-    interception navigate avant
-    REST et FFI
+  - [x] **136c — interception
+    navigate + `TabKind`** :
+    kind décidé par URL —
+    `delegated` court-circuite
+    `_repo.navigate` (REST et
+    FFI), re-bascule engine sur
+    URL normale ; `DelegatedWebView`
+    monté à la place de la frame,
+    registre contrôleurs, routage
+    back/forward/reload WebView2,
+    gardes pull/close. 3 tests.
   - [ ] 136d — surface
     `DelegatedWebView` +
     user-data-folder dédié

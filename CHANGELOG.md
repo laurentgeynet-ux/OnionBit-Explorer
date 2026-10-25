@@ -735,6 +735,27 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   http/https seuls, URL malformée
   refusée. 6 tests.
 
+- **136c — interception navigate :
+  `TabKind` + court-circuit moteur**
+  (`app/`, étape 136 NAV, ADR-0027) :
+  `BrowserTab.kind` =
+  `engine|delegated` décidé **par
+  URL à chaque navigation** —
+  domaine allowlisté sous Windows
+  → `delegated`, `_repo.navigate`
+  jamais appelé (REST **et** FFI
+  court-circuités, l'onglet daemon
+  dormant reprend la main à la
+  re-bascule engine). `DelegatedWebView`
+  monté à la place de `_FrameView`,
+  registre `_webviews` par onglet,
+  `didUpdateWidget` recharge l'URL.
+  Gardes : `back`/`forward`/`reload`
+  routés WebView2 (jamais de nav
+  sur l'onglet dormant), `selectTab`
+  sans pull de frame, `closeTab`
+  libère le contrôleur. 3 tests.
+
 - **CAP-198 — Shadow DOM tranche 4 :
   event retargeting** (`explorer-jscore`)
   : le chemin de propagation des

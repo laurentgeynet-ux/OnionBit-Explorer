@@ -75,6 +75,17 @@ class _DelegatedWebViewState extends State<DelegatedWebView> {
   }
 
   @override
+  void didUpdateWidget(DelegatedWebView old) {
+    super.didUpdateWidget(old);
+    // Navigation déléguée → rechargement (interception 136c :
+    // `BrowserController.navigate` a posé `tab.url` sans
+    // contacter le moteur).
+    if (old.url != widget.url) {
+      _controller?.loadRequest(Uri.parse(widget.url));
+    }
+  }
+
+  @override
   void dispose() {
     _controller = null; // GC → finalizer du plugin libère le HWND.
     super.dispose();
