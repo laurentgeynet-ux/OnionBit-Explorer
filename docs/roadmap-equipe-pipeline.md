@@ -2645,6 +2645,12 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   résolu : un descendant `visible` explicite reste ciblable,
   §11.2). Régression
   `hit_test_visibility_hidden_non_ciblable`.
+- [x] **R-103. `display:contents` livré** (résidu catalogue —
+  repli `Block` historique) : `child_boxes` aplatit l'élément
+  sans boîte, ses enfants (et `::before`/`::after`) promus
+  fils directs — items flex/grid, découpage en-ligne et slot
+  UA héritent tous du mécanisme. Tests : structure + items
+  flex.
 
 ## Palier R-B — Contenu étranger, animation, canvas
 

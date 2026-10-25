@@ -489,6 +489,28 @@ fn child_boxes<S: ::std::hash::BuildHasher>(
     }
     for child in children {
         if dom.element(child).is_ok() {
+            // §2.7 `display:contents` (R-103) : l'élément ne
+            // génère **aucune boîte** — ses enfants sont promus
+            // comme fils directs (le découpage en-ligne/autour-
+            // de-bloc et les items flex/grid se font sur eux).
+            // `child_boxes` émet aussi `::before`/`::after` de
+            // l'élément aplati — les pseudos génèrent toujours.
+            if styles
+                .get(child)
+                .is_some_and(|s| s.get("display") == Some("contents"))
+            {
+                let inner = explorer_common::deep(|| {
+                    child_boxes(
+                        dom,
+                        child,
+                        styles,
+                        styles.get(child).unwrap_or(parent_style),
+                        sizes,
+                    )
+                });
+                out.extend(inner);
+                continue;
+            }
             // Récursion ∝ profondeur DOM — pile garantie
             // (R-24 : `host-nest3000` ne doit plus tuer le
             // worker).

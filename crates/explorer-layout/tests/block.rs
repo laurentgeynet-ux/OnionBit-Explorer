@@ -1562,3 +1562,46 @@ fn hit_test_visibility_hidden_non_ciblable() {
         "descendant visible reste atteint sous un parent caché"
     );
 }
+
+// ── R-103 : display:contents — enfants promus items flex ───
+
+#[test]
+fn display_contents_enfants_items_flex() {
+    // `.f{display:flex} > .w{display:contents} > a+a` : les
+    // enfants de l'aplatit deviennent des items flex (côte à
+    // côte), pas une seule boîte enveloppe.
+    fn find_rects(bx: &LayoutBox, tag: NodeId, out: &mut Vec<explorer_layout::Rect>) {
+        if bx.node == Some(tag) {
+            out.push(bx.rect);
+        }
+        for c in &bx.children {
+            find_rects(c, tag, out);
+        }
+    }
+    let (dom, bx) = laid(
+        "<div class=f><div class=w><i>x</i><i>y</i></div></div>",
+        "body{margin:0}.f{display:flex}.w{display:contents}i{width:40px;height:20px}",
+    );
+    // Les deux items côte à côte : même y, x distincts.
+    let mut rects = Vec::new();
+    for i in {
+        let mut q = vec![dom.document()];
+        let mut f = Vec::new();
+        while let Some(n) = q.pop() {
+            if dom.tag_name(n).is_ok_and(|t| t == "i") {
+                f.push(n);
+            }
+            if let Ok(ch) = dom.children(n) {
+                q.extend(ch.iter().rev());
+            }
+        }
+        f
+    } {
+        find_rects(&bx, i, &mut rects);
+    }
+    assert_eq!(rects.len(), 2, "les deux <i> ont leur boîte");
+    assert!(
+        (rects[0].y - rects[1].y).abs() < 1.0 && (rects[1].x - rects[0].x).abs() > 10.0,
+        "items côte à côte : {rects:?}"
+    );
+}

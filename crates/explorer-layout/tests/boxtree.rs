@@ -458,3 +458,73 @@ fn slot_sans_assigne_peint_son_repli() {
         .expect("repli");
     assert!(find(&bx, fb).is_some(), "repli peint faute d'assigné");
 }
+
+// ── R-103 : display:contents — pas de boîte, enfants promus ─
+
+#[test]
+fn display_contents_aplatit_les_enfants() {
+    fn parent_of(bx: &LayoutBox, node: NodeId) -> Option<&LayoutBox> {
+        for c in &bx.children {
+            if c.node == Some(node) {
+                return Some(bx);
+            }
+            if let Some(p) = parent_of(c, node) {
+                return Some(p);
+            }
+        }
+        None
+    }
+    // §2.7 : l'élément `contents` ne génère aucune boîte —
+    // ses enfants sont promus fils directs du parent (et
+    // `::before`/`::after` de l'aplatit génèrent toujours).
+    let (dom, bx) = tree(
+        "<html><body><div id=p>\
+         <div id=c style=\"display:contents\"><p id=k>x</p></div>\
+         <span id=s>y</span></div></body></html>",
+    );
+    let c = {
+        let mut q = vec![dom.document()];
+        let mut f = None;
+        while let Some(n) = q.pop() {
+            if dom.attribute(n, "id").ok().flatten().as_deref() == Some("c") {
+                f = Some(n);
+            }
+            if let Ok(ch) = dom.children(n) {
+                q.extend(ch.iter().rev());
+            }
+        }
+        f.expect("div#c")
+    };
+    assert!(find(&bx, c).is_none(), "contents → aucune boîte");
+    // Les enfants de #c (p#k) existent comme boîtes, fils
+    // directs de la boîte #p.
+    let k = {
+        let mut q = vec![dom.document()];
+        let mut f = None;
+        while let Some(n) = q.pop() {
+            if dom.attribute(n, "id").ok().flatten().as_deref() == Some("k") {
+                f = Some(n);
+            }
+            if let Ok(ch) = dom.children(n) {
+                q.extend(ch.iter().rev());
+            }
+        }
+        f.expect("p#k")
+    };
+    assert!(find(&bx, k).is_some(), "p#k a sa boîte");
+    // #p est le parent de la boîte de #k (plus de #c entre).
+    let p = {
+        let mut q = vec![dom.document()];
+        let mut f = None;
+        while let Some(n) = q.pop() {
+            if dom.attribute(n, "id").ok().flatten().as_deref() == Some("p") {
+                f = Some(n);
+            }
+            if let Ok(ch) = dom.children(n) {
+                q.extend(ch.iter().rev());
+            }
+        }
+        f.expect("div#p")
+    };
+    assert_eq!(parent_of(&bx, k).and_then(|b| b.node), Some(p));
+}

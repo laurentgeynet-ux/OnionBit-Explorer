@@ -9,6 +9,24 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **R-103 — `display:contents`
+  livré** (`explorer-layout`, §2.7
+  CSS Display — résidu du
+  catalogue) : l'élément ne génère
+  plus de boîte — ses enfants sont
+  promus fils directs du parent
+  dans `child_boxes` (découpage
+  en-ligne/autour-de-bloc,
+  `wrap_anonymous` et items
+  flex/grid se font sur eux ; le
+  slot UA à `display:contents`
+  distribue via son propre chemin
+  R-96/97). `::before`/`::after`
+  de l'aplatit génèrent toujours.
+  Tests : aplatissement structurel
+  + parent réel (`boxtree.rs`),
+  items flex promus (`block.rs`).
+
 - **Étape 137a — ciblage
   `relayout_subtree` par les ops du
   journal** (`explorer-core`) : fin du
