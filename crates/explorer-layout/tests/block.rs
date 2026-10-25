@@ -1605,3 +1605,40 @@ fn display_contents_enfants_items_flex() {
         "items côte à côte : {rects:?}"
     );
 }
+
+#[test]
+fn hit_test_lien_example_com() {
+    // Motif réel d'example.com : div centrée marge auto +
+    // padding, paragraphe contenant <a href>. La sonde du vol
+    // rapportait `lien:absent` — la boîte <a> doit être
+    // hittable (sinon trou PIPE réel).
+    let (dom, bx) = laid(
+        "<div><h1>Example Domain</h1>\
+         <p>This domain is for use in examples.\
+         <a href=\"https://www.iana.org/domains/example\">Learn more</a></p></div>",
+        "body{margin:0} div{width:600px;margin:50px auto;padding:50px}",
+    );
+    let a = by_tag(&dom, "a");
+    // Le rect du lien dans l'arbre posé.
+    fn find_rect(bx: &LayoutBox, node: NodeId) -> Option<explorer_layout::Rect> {
+        if bx.node == Some(node) {
+            return Some(bx.rect);
+        }
+        bx.children.iter().find_map(|c| find_rect(c, node))
+    }
+    let Some(r) = find_rect(&bx, a) else {
+        panic!("la boîte <a> n'existe pas — trou réel")
+    };
+    eprintln!("rect <a> = {r:?}");
+    assert!(r.width > 0.0 && r.height > 0.0, "rect non vide : {r:?}");
+    // Le hit retourne le nœud texte — son parent est `a`.
+    let hit = explorer_layout::hit_test(&bx, r.x + 1.0, r.y + r.height / 2.0);
+    let el = hit.and_then(|n| {
+        if dom.element(n).is_ok() {
+            Some(n)
+        } else {
+            dom.parent(n).ok().flatten()
+        }
+    });
+    assert_eq!(el, Some(a), "hit sur le lien attendu");
+}
