@@ -555,6 +555,13 @@ struct DocumentHost {
     /// `document.domain` (issue #24) — suffixe enregistrable
     /// posé par le setter ; `None` = hostname courant.
     domain_override: RefCell<Option<String>>,
+    /// `document.adoptedStyleSheets` (CAP-195) — tableau
+    /// settable : `[]` paresseux posé à la première lecture
+    /// (identité `===` stable spec), l'assignation remplace.
+    /// Les feuilles adoptées ne sont PAS appliquées à la
+    /// cascade (scoping = tranche 2) — la surface suffit aux
+    /// polyfills qui étalent la liste (`[C, ...e.adopted…]`).
+    adopted_sheets: RefCell<Option<Value>>,
 }
 
 /// Element/text node object (`this` carries the node id).
@@ -1187,10 +1194,17 @@ impl NodeHost {
     }
 }
 
-/// `el.style` — camelCase ↔ kebab-case map over the `style` attr.
+/// `el.style` / `getComputedStyle(el)` — camelCase ↔ kebab-case
+/// map over the `style` attr ; `computed` distingue les deux
+/// surfaces : `el.style` ne rend que l'inline (spec), tandis que
+/// `getComputedStyle` dispose du repli géométrie (CAP-196).
 struct StyleHost {
     dom: DomRef,
     node: NodeId,
+    /// `true` seulement pour l'objet rendu par
+    /// `getComputedStyle` — autorise le repli cascade borné
+    /// (`position` ← `ElementGeom.fixed` publié, i#19).
+    computed: bool,
 }
 
 /// `el.classList` — token ops over the `class` attr.
@@ -1516,6 +1530,7 @@ pub(crate) fn document_value(e: &mut Engine, dom: &DomRef) -> Value {
         cache: Rc::new(RefCell::new(HashMap::new())),
         implementation: RefCell::new(None),
         domain_override: RefCell::new(None),
+        adopted_sheets: RefCell::new(None),
     }))
 }
 
@@ -1531,6 +1546,7 @@ impl Engine {
             cache: cache.clone(),
             implementation: RefCell::new(None),
             domain_override: RefCell::new(None),
+            adopted_sheets: RefCell::new(None),
         }));
         // `#document` == `document` : listeners/`this`/`on*` au
         // sommet de la propagation résolvent sur l'objet document
@@ -2665,6 +2681,19 @@ impl Host for DocumentHost {
                     None => Value::Null,
                 }))
             }
+            // `document.adoptedStyleSheets` (CAP-195 — mesuré :
+            // le polyfill Popover de github `[C, ...e.adopted
+            // StyleSheets]` mourait `value is not iterable`) —
+            // tableau `[]` paresseux par document (identité
+            // `===` stable spec), assignable via `set` ;
+            // feuilles non appliquées (scoping = tranche 2).
+            "adoptedStyleSheets" => {
+                let v = *self
+                    .adopted_sheets
+                    .borrow_mut()
+                    .get_or_insert_with(|| e.new_array(Vec::new()));
+                Ok(Some(v))
+            }
             // `document.defaultView` — la fenêtre du document ≙ le
             // global (single-window model).
             "defaultView" => Ok(Some(Value::Obj(e.global))),
@@ -2853,6 +2882,13 @@ impl Host for DocumentHost {
                     }
                 }
             }
+            return Ok(true);
+        }
+        if key == "adoptedStyleSheets" {
+            // Assignation acceptée (CAP-195) — la liste remplace
+            // le tableau courant ; les feuilles ne sont pas
+            // appliquées à la cascade (tranche 2).
+            *self.adopted_sheets.borrow_mut() = Some(v);
             return Ok(true);
         }
         Ok(false)
@@ -4204,6 +4240,7 @@ impl Host for NodeHost {
                 return Ok(Some(e.new_host_object(Rc::new(StyleHost {
                     dom: self.dom.clone(),
                     node,
+                    computed: false,
                 }))));
             }
             "classList" => {
@@ -6231,10 +6268,23 @@ impl Host for StyleHost {
                 .find(|(k, _)| k == &kebab)
                 .map(|(_, v)| v)
         };
-        Ok(Some(match v {
-            Some(v) => e.str_val(v),
-            None => e.str_val(""),
-        }))
+        // CAP-196 — `getComputedStyle(el).position` : la feuille
+        // de style n'a pas de relais vers JS, mais la session a
+        // vu la cascade au layout — quand la géométrie publiée
+        // marque la boîte `fixed` (i#19), servir `"fixed"`.
+        // Mur mesuré : garde `"fixed"===position` du script
+        // `--marketing-header-fixed-top` de github. Inline
+        // prime toujours ; `el.style` (computed=false) reste
+        // pur inline.
+        let v = match (v, self.computed && kebab == "position") {
+            (Some(v), _) => v,
+            (None, true) => match element_geom(&self.dom, self.node) {
+                Some((_, true, _, _)) => "fixed".to_string(),
+                _ => String::new(),
+            },
+            (None, false) => String::new(),
+        };
+        Ok(Some(e.str_val(v)))
     }
 
     fn set(&self, e: &mut Engine, _t: Value, key: &str, v: Value) -> JsResult<bool> {
@@ -6266,7 +6316,16 @@ impl Host for StyleHost {
                         .into_iter()
                         .find(|(kk, _)| kk == &k)
                         .map(|(_, v)| v)
-                        .unwrap_or_default()
+                };
+                // CAP-196 — même repli `position`←géométrie que
+                // `get` : les deux accesseurs restent cohérents.
+                let v = match (v, self.computed && k == "position") {
+                    (Some(v), _) => v,
+                    (None, true) => match element_geom(&self.dom, self.node) {
+                        Some((_, true, _, _)) => "fixed".to_string(),
+                        _ => String::new(),
+                    },
+                    (None, false) => String::new(),
                 };
                 Ok(Some(e.str_val(v)))
             }
@@ -7072,6 +7131,7 @@ impl Host for DomImplementationHost {
                     cache: Rc::new(RefCell::new(HashMap::new())),
                     implementation: RefCell::new(None),
                     domain_override: RefCell::new(None),
+                    adopted_sheets: RefCell::new(None),
                 }))))
             }
             // `hasFeature()` — spec : retourne toujours `true`
@@ -7602,7 +7662,11 @@ fn win_get_computed_style(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult
     let Some((dom, _)) = e.dom_ctx.clone() else {
         return Err(e.type_error("getComputedStyle: no document"));
     };
-    Ok(e.new_host_object(Rc::new(StyleHost { dom, node })))
+    Ok(e.new_host_object(Rc::new(StyleHost {
+        dom,
+        node,
+        computed: true,
+    })))
 }
 
 /// `window.matchMedia(q)` — pas de moteur de media queries :

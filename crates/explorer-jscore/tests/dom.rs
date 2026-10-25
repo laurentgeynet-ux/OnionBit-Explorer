@@ -5382,3 +5382,78 @@ fn cap194_abort_signal_surface() {
         "true/A/undefined"
     );
 }
+
+// ===== CAP-195 — `document.adoptedStyleSheets` settable `[]`
+// (mur mesuré : le polyfill Popover github fait `[C, ...e.
+// adoptedStyleSheets]` → `value is not iterable` quand le
+// nom manquait).
+
+#[test]
+fn cap195_adopted_style_sheets_surface() {
+    let mut e = engine_with("<p>x</p>");
+    // `[]` réel + identité stable `===` + spread sain.
+    assert_eq!(
+        evf(
+            &mut e,
+            "Array.isArray(document.adoptedStyleSheets)+'/'+\
+            (document.adoptedStyleSheets===document.adoptedStyleSheets)+'/'+\
+            [0,...document.adoptedStyleSheets].length"
+        ),
+        "true/true/1"
+    );
+    // Assignation remplace — motif `adoptedStyleSheets=[…]`.
+    assert_eq!(
+        evf(
+            &mut e,
+            "document.adoptedStyleSheets=[{a:1},{b:2}];\
+            document.adoptedStyleSheets.length+'/'+document.adoptedStyleSheets[1].b"
+        ),
+        "2/2"
+    );
+}
+
+// ===== CAP-196 — `getComputedStyle(el).position` ← `fixed`
+// de la géométrie publiée (mur mesuré : garde `"fixed"===
+// position` du script `--marketing-header-fixed-top` github).
+
+#[test]
+fn cap196_computed_position_from_geometry() {
+    let (mut e, _jar, _navs) = engine_full(PAGE);
+    let geom = explorer_jscore::GeometrySlot::default();
+    {
+        let mut g = geom.lock().unwrap();
+        // #list → html>body>ul[0] — boîte `fixed` publiée.
+        g.rects.insert(
+            vec![
+                ("html".to_string(), 0),
+                ("body".to_string(), 0),
+                ("ul".to_string(), 0),
+            ],
+            explorer_jscore::ElementGeom {
+                rect: explorer_jscore::GeoRect {
+                    x: 0.0,
+                    y: 8.0,
+                    w: 200.0,
+                    h: 40.0,
+                },
+                fixed: true,
+            },
+        );
+    }
+    e.set_geometry_ctx(0, geom);
+    // `position` feuille-only : la cascade l'a vue au layout
+    // (fixed publié) → `"fixed"` ; le non-publié et `el.style`
+    // (inline pur, spec) restent honnêtes `""` ; idem via
+    // `getPropertyValue`.
+    assert_eq!(
+        evf(
+            &mut e,
+            "var s=getComputedStyle(document.getElementById('list'));\
+            s.position+'/'+\
+            getComputedStyle(document.getElementById('main')).position+'/'+\
+            document.getElementById('list').style.position+'/'+\
+            s.getPropertyValue('position')"
+        ),
+        "fixed///fixed"
+    );
+}

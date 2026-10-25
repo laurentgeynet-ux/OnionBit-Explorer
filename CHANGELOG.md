@@ -9,6 +9,34 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **CAP-195 — `document.adoptedStyleSheets`
+  settable `[]`** (`explorer-jscore` — mur
+  mesuré : le polyfill Popover de github fait
+  `[C, ...e.adoptedStyleSheets]` → `TypeError:
+  value is not iterable`, seule erreur
+  `/console` restante du site) : tableau
+  `[]` paresseux posé à la première lecture
+  (identité `===` stable spec), assignation
+  acceptée et relue (`adopted_sheets` par
+  `DocumentHost`). Les feuilles adoptées ne
+  sont pas appliquées à la cascade — borne
+  tranche 2 documentée. Test
+  `cap195_adopted_style_sheets_surface`.
+
+- **CAP-196 — `getComputedStyle(el).position`
+  ← géométrie publiée** (`explorer-jscore` —
+  mur mesuré : la garde `"fixed" ===
+  getComputedStyle(r).position` du script
+  `--marketing-header-fixed-top` de github
+  lisait l'inline seul → `""`) : `StyleHost`
+  gagne `computed` (`el.style` reste pur
+  inline, spec) ; quand l'inline est absent
+  et `position` demandé, la boîte `fixed`
+  de la `GeometryMap` (i#19) rend
+  `"fixed"` — `getPropertyValue` suit le
+  même repli. Test
+  `cap196_computed_position_from_geometry`.
+
 - **CAP-192 — `customElements` lisible et
   patchable** (`explorer-jscore`) : le
   bootstrap `patchDefine` de reddit meurt

@@ -6492,6 +6492,29 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   `custom_elements_methods_readable_
   and_patchable`, `custom_elements_registry`.
 
+- [x] **CAP-195. `document.adoptedStyleSheets`
+  settable `[]`** — mur mesuré github :
+  le polyfill Popover meurt à
+  `[C, ...e.adoptedStyleSheets]`
+  (`value is not iterable`). Tableau
+  `[]` paresseux stable `===`,
+  assignation acceptée ; feuilles non
+  appliquées (scoping = T2). Test
+  `cap195_adopted_style_sheets_surface`.
+
+- [x] **CAP-196. `getComputedStyle
+  (el).position` ← géométrie** — mur
+  mesuré github : garde `"fixed"===
+  position` lisait l'inline → `""` →
+  `--marketing-header-fixed-top` jamais
+  posée. `StyleHost.computed` distingue
+  `el.style` (pur inline, spec) ;
+  `position` absent de l'inline →
+  `"fixed"` quand `ElementGeom.fixed`
+  est publié (i#19). `getPropertyValue`
+  idem. Test `cap196_computed_position_
+  from_geometry`.
+
 ## Tâches continues
 
 - **Spécialiste JS** : divergence miroir ↔ `explorer-dom` quand
