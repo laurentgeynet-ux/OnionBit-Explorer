@@ -1186,31 +1186,15 @@ fn match_selector_part_eval(
             return false;
         }
         slot
-    } else if let Some(pname) = compound.simples.iter().find_map(|s| match s {
-        SimpleSelector::Part(n) => Some(n.as_str()),
-        _ => None,
-    }) {
-        let Some(root) = dom.containing_shadow_root(node) else {
+    } else if compound
+        .simples
+        .iter()
+        .any(|s| matches!(s, SimpleSelector::Part(_)))
+    {
+        let Some(el) = match_part_chain(dom, node, compound, state, cache, anc, scope) else {
             return false;
         };
-        let part_ok = dom
-            .attribute(node, "part")
-            .ok()
-            .flatten()
-            .is_some_and(|v| v.split_ascii_whitespace().any(|t| t == pname));
-        let Some(host) = dom.shadow_host(root) else {
-            return false;
-        };
-        if !part_ok {
-            return false;
-        }
-        if !compound.iter().all(|s| match s {
-            SimpleSelector::Part(_) => true,
-            _ => simple_matches(dom, host, s, state, &mut *cache, anc, scope),
-        }) {
-            return false;
-        }
-        host
+        el
     } else {
         if !compound
             .iter()
@@ -1287,6 +1271,65 @@ impl CompoundSelector {
 
 /// Un simple contre un nœud élément. `scope` = racine shadow
 /// de la règle évaluée (R-96) — conditionne `:host*`.
+/// R-110 — chaîne `::part(a)::part(b)` et `exportparts`
+/// (css-scoping §3.5) : chaque `::part` remonte d'une
+/// frontière de shadow — le **dernier** nom désigne le sujet
+/// (part la plus interne), les précédents ses hôtes.
+/// `exportparts="i:o"` du host expose le nom interne `i`
+/// sous l'alias `o` (`"i"` seul = même nom). Retourne l'hôte
+/// le plus externe (point d'ancrage des combinators suivants).
+#[allow(clippy::too_many_arguments)]
+fn match_part_chain(
+    dom: &Dom,
+    node: NodeId,
+    compound: &CompoundSelector,
+    state: &dyn Fn(&str) -> bool,
+    cache: &mut MatchCache,
+    anc: AncestorFilter,
+    scope: Option<NodeId>,
+) -> Option<NodeId> {
+    let names: Vec<&str> = compound
+        .simples
+        .iter()
+        .filter_map(|s| match s {
+            SimpleSelector::Part(n) => Some(n.as_str()),
+            _ => None,
+        })
+        .collect();
+    let mut el = node;
+    for pname in names.iter().rev() {
+        let root = dom.containing_shadow_root(el)?;
+        let host = dom.shadow_host(root)?;
+        let exported = dom.attribute(host, "exportparts").ok().flatten();
+        let part_ok = dom.attribute(el, "part").ok().flatten().is_some_and(|v| {
+            v.split_ascii_whitespace().any(|t| {
+                if t == *pname {
+                    return true;
+                }
+                exported.as_deref().is_some_and(|e| {
+                    e.split_ascii_whitespace().any(|e| match e.split_once(':') {
+                        Some((i, o)) => i == t && o == *pname,
+                        None => e == t && e == *pname,
+                    })
+                })
+            })
+        });
+        if !part_ok {
+            return None;
+        }
+        el = host;
+    }
+    // Les autres simples du composé qualifient l'hôte le plus
+    // externe ; les combinators marchent depuis lui.
+    if !compound.iter().all(|s| match s {
+        SimpleSelector::Part(_) => true,
+        _ => simple_matches(dom, el, s, state, cache, anc, scope),
+    }) {
+        return None;
+    }
+    Some(el)
+}
+
 fn simple_matches(
     dom: &Dom,
     node: NodeId,

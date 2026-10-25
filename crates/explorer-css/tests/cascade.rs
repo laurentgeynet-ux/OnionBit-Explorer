@@ -5,7 +5,7 @@
 //! Tests de la cascade : origines, spécificité, `!important`,
 //! héritage, mots-clés, media queries, feuille UA.
 
-use explorer_css::{ComputedStyle, Origin, StyleEngine, StyleEnv};
+use explorer_css::{matches, parse_selector_list, ComputedStyle, Origin, StyleEngine, StyleEnv};
 use explorer_dom::{DocumentMode, Dom, NodeId};
 use explorer_html::TreeBuilder;
 
@@ -2258,4 +2258,39 @@ fn light_dark_suit_le_schema_use() {
         ),
         Some("#000".into())
     );
+}
+
+#[test]
+fn part_chaine_et_exportparts() {
+    // R-110 : `::part` chaîné (remontée par frontière) +
+    // `exportparts` (alias via l'hôte).
+    let mut dom = Dom::new();
+    let doc = dom.document();
+    let outer = dom.create_element("x-outer").unwrap();
+    dom.append_child(doc, outer).unwrap();
+    let root_o = dom.create_fragment().unwrap();
+    dom.attach_shadow_root(outer, root_o, true);
+    let inner = dom.create_element("x-inner").unwrap();
+    dom.set_attribute(inner, "part", "mid").unwrap();
+    dom.set_attribute(inner, "exportparts", "deep:alias")
+        .unwrap();
+    dom.append_child(root_o, inner).unwrap();
+    let root_i = dom.create_fragment().unwrap();
+    dom.attach_shadow_root(inner, root_i, true);
+    let deep = dom.create_element("span").unwrap();
+    dom.set_attribute(deep, "part", "deep").unwrap();
+    dom.append_child(root_i, deep).unwrap();
+
+    let sel = |s: &str| parse_selector_list(s).unwrap().into_iter().next().unwrap();
+    // 1. part direct : x-inner::part(deep) atteint deep.
+    assert!(matches(&dom, deep, &sel("x-inner::part(deep)")));
+    // 2. chaîne : x-outer::part(mid)::part(deep) — mid sur
+    //    l'hôte interne, deep sur le sujet.
+    assert!(matches(&dom, deep, &sel("x-outer::part(mid)::part(deep)")));
+    // 3. exportparts : l'alias est visible — x-inner::part(alias).
+    assert!(matches(&dom, deep, &sel("x-inner::part(alias)")));
+    // 4. négatif : l'alias n'existe pas sans exportparts,
+    //    mid n'est pas sur deep.
+    assert!(!matches(&dom, deep, &sel("x-inner::part(mid)")));
+    assert!(!matches(&dom, deep, &sel("x-outer::part(deep)")));
 }

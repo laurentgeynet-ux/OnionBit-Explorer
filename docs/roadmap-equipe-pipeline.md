@@ -2686,6 +2686,11 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   height`→`min-height` (un `height` UA bloquait la
   précondition `height:auto`), stretch planché au
   `min-height` item (§9.8). Test rect 42 + hit-test zone.
+- [x] **R-110. `::part` chaîné + `exportparts` + slots nichés**
+  (bornes Shadow) : `::part(a)::part(b)` marche par frontière,
+  `exportparts` expose `i` sous `o` (§3.5) ; slots nichés
+  couverts par récursion `slot_assigned` (test verrou).
+  `match_part_chain` extrait.
 
 ## Palier R-B — Contenu étranger, animation, canvas
 

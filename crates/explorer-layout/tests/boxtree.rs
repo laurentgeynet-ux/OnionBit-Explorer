@@ -528,3 +528,42 @@ fn display_contents_aplatit_les_enfants() {
     };
     assert_eq!(parent_of(&bx, k).and_then(|b| b.node), Some(p));
 }
+
+#[test]
+fn slot_niche_dans_slot_aplatit() {
+    // Slot niché : `<x-inner>` (avec son propre `<slot>`
+    // shadow) est **assigné** au `<slot>` de `<x-outer>` —
+    // `<b>` doit franchir les deux niveaux de distribution
+    // (récursion `slot_assigned`, DOM `flatten`).
+    let (dom, bx) = tree(
+        "<html><body><x-outer><template shadowrootmode=\"open\">\
+         <slot></slot></template>\
+         <x-inner><template shadowrootmode=\"open\"><slot></slot></template>\
+         <b>txt</b></x-inner></x-outer></body></html>",
+    );
+    let b = by_tag(&dom, "b");
+    let inner = by_tag(&dom, "x-inner");
+    let outer = by_tag(&dom, "x-outer");
+    // b peint : x-outer.slot ← x-inner assigné → son slot ← b.
+    let host_bx = find(&bx, outer).expect("boîte x-outer");
+    let under = |parent: &LayoutBox, n| {
+        parent
+            .children
+            .iter()
+            .any(|c| c.node == Some(n) || find(c, n).is_some())
+    };
+    assert!(under(host_bx, inner), "x-inner distribué");
+    assert!(find(&bx, b).is_some(), "b franchit les 2 slots");
+    // Le slot interne reçoit bien b comme enfant.
+    let inner_root = dom.shadow_root(inner, true).expect("racine interne");
+    let inner_slot = dom
+        .slots_in(inner_root)
+        .into_iter()
+        .next()
+        .expect("slot interne");
+    let slot_bx = find(&bx, inner_slot).expect("boîte slot interne");
+    assert!(
+        slot_bx.children.iter().any(|c| c.node == Some(b)),
+        "b enfant du slot interne"
+    );
+}

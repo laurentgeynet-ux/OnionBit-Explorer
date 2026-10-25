@@ -9,6 +9,25 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **R-110 — `::part` chaîné +
+  `exportparts`** (`explorer-css`,
+  css-scoping §3.5, bornes Shadow
+  restantes) : `x::part(a)::part(b)`
+  remonte d'une frontière par nom
+  (dernier = sujet interne,
+  précédents = hôtes) ;
+  `exportparts="i:o"` expose le nom
+  interne `i` sous l'alias `o` — les
+  deux étaient ignorés (seul le 1er
+  `::part` était lu, `part` brut
+  seul). Extraction
+  `match_part_chain`. **Slots nichés
+  : vérifiés déjà couverts**
+  (récursion `slot_assigned`) — test
+  `slot_niche_dans_slot_aplatit`
+  verrouille. Test
+  `part_chaine_et_exportparts`.
+
 - **R-109 — `align-items:stretch`
   applique l'étirement cross**
   (`explorer-layout` + `explorer-css`
