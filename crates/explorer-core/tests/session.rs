@@ -3656,12 +3656,12 @@ async fn external_scripts_run_in_document_order() {
         "/p",
         200,
         "<!doctype html><html><body><div id=\"x\">avant</div>\
-         <script src=\"/a.js\"></script><script src=\"/b.js\"></script>\
+         <script src=\"/a.js\"></script><script src=\"/l.js\"></script>\
          <script>document.getElementById('x').textContent=o</script>\
          </body></html>",
     );
     t.route("/a.js", 200, "var o='A'");
-    t.route("/b.js", 200, "o=o+'B'");
+    t.route("/l.js", 200, "o=o+'B'");
     t.route(
         "/stat",
         200,
@@ -3760,9 +3760,9 @@ async fn module_script_fetches_graph_and_evaluates() {
         "/p",
         200,
         "<!doctype html><html><body><div id=\"x\">avant</div>\
-         <script type=\"module\" src=\"/m.js\"></script></body></html>",
+         <script type=\"module\" src=\"/l.js\"></script></body></html>",
     );
-    t.route("/m.js", 200, "import './dep.js'");
+    t.route("/l.js", 200, "import './dep.js'");
     t.route(
         "/dep.js",
         200,
@@ -4853,10 +4853,10 @@ async fn module_script_utf8_despite_charset_attr() {
         "/p",
         200,
         "<!doctype html><html><body><div id=\"x\">avant</div>\
-         <script type=\"module\" src=\"/m.js\" charset=\"iso-8859-1\"></script></body></html>",
+         <script type=\"module\" src=\"/l.js\" charset=\"iso-8859-1\"></script></body></html>",
     );
     t.route_bin(
-        "/m.js",
+        "/l.js",
         200,
         b"document.getElementById('x').textContent='caf\xC3\xA9'".to_vec(),
     );
@@ -12892,13 +12892,13 @@ async fn dynamic_module_script_evals_graph() {
         200,
         "<!doctype html><html><body><p id=p>?</p><script>\
         var s=document.createElement('script');\
-        s.type='module';s.src='/m.js';\
+        s.type='module';s.src='/l.js';\
         s.onload=function(){document.getElementById('p').textContent+='|load'};\
         document.body.appendChild(s)\
         </script></body></html>",
     );
     t.route(
-        "/m.js",
+        "/l.js",
         200,
         "import {v} from '/dep.js';\
         document.getElementById('p').textContent='mod:'+v",
@@ -13080,10 +13080,10 @@ async fn external_module_script_defines_custom_element() {
         "/p",
         200,
         "<!doctype html><html><body><div id=\"x\">avant</div>\
-         <script type=\"module\" src=\"/m.js\"></script></body></html>",
+         <script type=\"module\" src=\"/l.js\"></script></body></html>",
     );
     t.route(
-        "/m.js",
+        "/l.js",
         200,
         "class C extends HTMLElement { connectedCallback(){\
          document.getElementById('x').textContent='CE-OK' } }\
@@ -13111,10 +13111,10 @@ async fn external_module_crossorigin_defer_evals() {
         "/p",
         200,
         "<!doctype html><html><body><div id=\"x\">avant</div>\
-         <script type=\"module\" src=\"/m.js\" crossorigin defer></script></body></html>",
+         <script type=\"module\" src=\"/l.js\" crossorigin defer></script></body></html>",
     );
     t.route(
-        "/m.js",
+        "/l.js",
         200,
         "document.getElementById('x').setAttribute('data-ce','defined');",
     );
@@ -13126,4 +13126,26 @@ async fn external_module_crossorigin_defer_evals() {
         dump.contains("data-ce=\"defined\""),
         "module crossorigin+defer non évalué : {dump}"
     );
+}
+
+/// Bissection mur module github (vol 10/11) : un vrai chunk
+/// rspack servi en externe — éval réel, erreur surfacée ou
+/// passée = attribution du mur.
+#[tokio::test]
+async fn real_land_module_eval() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/p",
+        200,
+        "<!doctype html><html><body><div id=\"x\">avant</div>\
+         <script type=\"module\" src=\"/l.js\"></script></body></html>",
+    );
+    let body = std::fs::read_to_string("C:/Users/Lou/AppData/Local/Temp/land.js")
+        .unwrap_or_else(|_| "document.getElementById('x').textContent='SKIP'".into());
+    t.route("/l.js", 200, Box::leak(body.into_boxed_str()));
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let a = s.open_tab();
+    s.navigate(a, "http://h.test/p").await.unwrap();
+    let dump = s.dom_dump(a).unwrap_or_default();
+    eprintln!("console/dump : {dump}");
 }
