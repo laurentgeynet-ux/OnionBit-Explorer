@@ -1291,6 +1291,21 @@ pub(crate) struct NetDone {
     /// dépendances fetchées), à évaluer puis `load`/`error`
     /// sur l'élément par [`Session::deliver_dyn_module`].
     pub(crate) dyn_module: Option<DynModuleDone>,
+    /// `import()` dynamique (JS-C100) — `Some` = le corps est
+    /// livré au moteur via [`Session::commit_dyn_import`]
+    /// (instancier+évaluer+résoudre la promesse pending) ;
+    /// `handle` porte le `seq` moteur.
+    pub(crate) import: Option<DynImportMeta>,
+}
+
+/// Livraison d'un `import()` dynamique fetché (JS-C100) —
+/// `ctx`/`seq` retrouvent la promesse pending moteur ;
+/// `url` sert au log/attribution.
+pub(crate) struct DynImportMeta {
+    /// Contexte moteur émetteur.
+    pub(crate) ctx: u32,
+    /// `dyn_import_seq` moteur — clé `pending_imports`.
+    pub(crate) seq: u64,
 }
 
 /// Livraison d'un `<script type="module">` dynamique

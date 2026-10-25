@@ -333,6 +333,18 @@ pub struct Engine {
     /// Chargeur de sources de modules injecté par l'hôte
     /// (fetch/cache/résolution `file:`/URL).
     pub(crate) module_loader: Option<Rc<std::cell::RefCell<dyn crate::module::ModuleLoader>>>,
+    /// `import()` dont le chargeur a fait miss — la promesse
+    /// reste pending et la session fetch l'URL résolue
+    /// (JS-C100). Clé = `seq` répercutée à `deliver_import`.
+    pub(crate) pending_imports: std::collections::HashMap<u64, crate::module::PendingImport>,
+    /// Requêtes de fetch `import()` drainées par la session.
+    pub(crate) dyn_import_reqs: Vec<crate::module::DynImportReq>,
+    /// `true` quand la session s'est branchée (`set_import_
+    /// drain`) — sans drain, un miss rejette comme avant.
+    pub(crate) import_drain_wired: bool,
+    /// Compteur de séquences `import()` (répercuté à la
+    /// livraison — même motif `dyn_script_seq`).
+    pub(crate) dyn_import_seq: u64,
     /// Specifier du module en cours d'exécution (`import.meta.url`
     /// et referrer de `import()`).
     pub(crate) current_module: String,
@@ -729,6 +741,10 @@ impl Engine {
             module_urls: std::collections::HashMap::new(),
             module_envs: Vec::new(),
             module_loader: None,
+            pending_imports: std::collections::HashMap::new(),
+            dyn_import_reqs: Vec::new(),
+            import_drain_wired: false,
+            dyn_import_seq: 0,
             current_module: String::new(),
             import_map: Vec::new(),
             workers: Vec::new(),

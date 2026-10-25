@@ -246,11 +246,88 @@ impl Engine {
     /// `referrer` = l'URL du module importeur (lue via la liaison
     /// cachée `IMPORT_META` de son env — couvre les appels depuis
     /// fonctions/callbacks, où `current_module` ne dit rien).
+    /// Miss sur le chargeur → fetch à la demande si la session
+    /// est branchée (JS-C100) : la promesse reste pending et
+    /// une `DynImportReq` part dans `drain_dyn_imports`.
     pub(crate) fn dynamic_import(&mut self, spec: &str, referrer: &str) -> JsResult<Value> {
-        let (url, src) = self.load_source(spec, referrer)?;
-        let idx = self.instantiate(spec, &url, &src, 0)?;
-        self.evaluate_module(idx)?;
-        Ok(self.module_ns_object(idx))
+        match self.load_source(spec, referrer) {
+            Ok((url, src)) => {
+                let idx = self.instantiate(spec, &url, &src, 0)?;
+                self.evaluate_module(idx)?;
+                Ok(self.module_ns_object(idx))
+            }
+            Err(_) if self.import_drain_wired => self.defer_import(spec, referrer),
+            Err(err) => Err(err),
+        }
+    }
+
+    /// Miss `load_source` — l'URL résolue part en
+    /// `DynImportReq`, la promesse `import()` reste pending
+    /// jusqu'à `deliver_import` (JS-C100). Repli sur le rejet
+    /// d'origine si le drain n'est pas branché.
+    fn defer_import(&mut self, spec: &str, referrer: &str) -> JsResult<Value> {
+        let resolved = self.resolve_bare(spec).unwrap_or_else(|| spec.to_string());
+        let url = self
+            .module_loader
+            .clone()
+            .and_then(|l| l.borrow_mut().resolve(&resolved, referrer))
+            .unwrap_or_else(|| resolved.clone());
+        let pid = self.new_promise();
+        let seq = self.dyn_import_seq;
+        self.dyn_import_seq += 1;
+        self.pending_imports.insert(
+            seq,
+            PendingImport {
+                spec: resolved,
+                url: url.clone(),
+                promise: pid,
+            },
+        );
+        self.dyn_import_reqs.push(DynImportReq {
+            seq,
+            url,
+            ctx: self.cur_ctx,
+        });
+        Ok(Value::Obj(pid))
+    }
+
+    /// Livraison d'un fetch `import()` drainé (JS-C100) :
+    /// `Ok(src)` → instancier + évaluer + résoudre la promesse
+    /// pending avec le namespace ; `Err(msg)` → rejet.
+    pub fn deliver_import(&mut self, seq: u64, src: std::result::Result<String, String>) {
+        let Some(p) = self.pending_imports.remove(&seq) else {
+            return;
+        };
+        match src {
+            Ok(s) => {
+                match self
+                    .instantiate(&p.spec, &p.url, &s, 0)
+                    .and_then(|i| self.evaluate_module(i).map(|()| i))
+                {
+                    Ok(idx) => {
+                        let ns = self.module_ns_object(idx);
+                        self.resolve_promise(p.promise, ns);
+                    }
+                    Err(Thrown(t)) => self.reject_promise(p.promise, t),
+                }
+            }
+            Err(msg) => {
+                let v = self.str_val(msg);
+                self.reject_promise(p.promise, v);
+            }
+        }
+    }
+
+    /// Drain des requêtes `import()` — la session fetch les
+    /// URL et rappelle `deliver_import` (JS-C100).
+    pub fn drain_dyn_imports(&mut self) -> Vec<DynImportReq> {
+        std::mem::take(&mut self.dyn_import_reqs)
+    }
+
+    /// Branchement session (JS-C100) — active le defer sur
+    /// miss du chargeur.
+    pub fn set_import_drain(&mut self) {
+        self.import_drain_wired = true;
     }
 
     /// `InnerModuleInstantiation` — registers the module in the
@@ -721,4 +798,31 @@ fn pat_names(p: &Pat, out: &mut Vec<String>) {
         }
         Pat::Lvalue(_) => {}
     }
+}
+
+/// `import()` en attente — miss du chargeur différé au fetch
+/// session (JS-C100) : `resolve` a produit l'URL canonique,
+/// la promesse reste pending jusqu'à `deliver_import`.
+pub(crate) struct PendingImport {
+    /// Spécificateur canonique (post import-map) — clé
+    /// `module_specs`.
+    pub spec: String,
+    /// URL absolue résolue — `import.meta.url` et référent
+    /// des imports du module.
+    pub url: String,
+    /// Promesse `import()` à résoudre/rejeter à la livraison.
+    pub promise: crate::ObjId,
+}
+
+/// Requête de fetch `import()` drainée par la session
+/// (JS-C100) — même motif `DynScriptReq` : l'URL est déjà
+/// résolue (host policy `ModuleLoader::resolve`), la session
+/// fetch et rappelle `deliver_import(seq, Ok(src)/Err(msg))`.
+pub struct DynImportReq {
+    /// Identifiant — répercuté à `deliver_import`.
+    pub seq: u64,
+    /// URL absolue à fetcher (module ou fichier JS nu).
+    pub url: String,
+    /// Contexte émetteur — la livraison vise son miroir.
+    pub ctx: crate::context::CtxId,
 }

@@ -716,6 +716,20 @@ pub trait JsEngine: Send {
     /// réseau/politique/SRI → `error`. Défaut : no-op.
     fn deliver_dyn_link(&mut self, _ctx: JsCtxId, _seq: u64, _ok: bool) {}
 
+    /// Drain des requêtes `import()` dynamiques (JS-C100) —
+    /// la session fetch `url` et rappelle
+    /// `deliver_dyn_import`. Défaut : rien (le miss rejette
+    /// comme avant).
+    fn drain_dyn_imports(&mut self) -> Vec<explorer_jscore::DynImportReq> {
+        Vec::new()
+    }
+
+    /// Livre la source d'un `import()` fetchée par la session
+    /// (JS-C100) — `Some` → instancier+évaluer+résoudre la
+    /// promesse ; `None` → rejet `fetch échoué`. Défaut :
+    /// no-op.
+    fn deliver_dyn_import(&mut self, _ctx: JsCtxId, _seq: u64, _src: Option<String>) {}
+
     /// Livre le résultat d'un `<link>` **statique** (parse
     /// initial, CAP-185) — `ord` = ordinal de l'élément
     /// parmi tous les `<link>` du document ; `load`/`error`
@@ -1199,6 +1213,9 @@ pub use explorer_jscore::DynFrameReq;
 /// Réémis : requête de `<img>` dynamique (CAP-172) —
 /// drainée par [`JsEngine::drain_dyn_imgs`].
 pub use explorer_jscore::DynImgReq;
+/// `import()` dynamique à fetcher (JS-C100) — drainé par la
+/// session, livré via `deliver_dyn_import`.
+pub use explorer_jscore::DynImportReq;
 /// Réémis : requête de `<link>` dynamique (CAP-173) —
 /// drainée par [`JsEngine::drain_dyn_links`].
 pub use explorer_jscore::DynLinkReq;
@@ -1580,6 +1597,14 @@ enum Cmd {
         seq: u64,
         ok: bool,
     },
+    DrainDynImports {
+        tx: Sender<Vec<explorer_jscore::DynImportReq>>,
+    },
+    DeliverDynImport {
+        ctx: JsCtxId,
+        seq: u64,
+        src: Option<String>,
+    },
     DeliverStaticLink {
         ctx: JsCtxId,
         ord: u32,
@@ -1656,6 +1681,9 @@ impl JscoreEngine {
     #[allow(clippy::too_many_lines)] // dispatch de commandes — grandir ne gagne rien
     fn worker(rx: &Receiver<Cmd>) {
         let mut eng = explorer_jscore::Engine::new();
+        // JS-C100 — la session draine `import()` manquants
+        // (`drain_dyn_imports` → fetch → `deliver_dyn_import`).
+        eng.set_import_drain();
         // Plafonds logiques relevés pour la pile de 32 Mio du
         // thread moteur (JS-C41) : la pile est aussi protégée par
         // `maybe_grow`, ces bornes ne fixent que le `RangeError`
@@ -2138,6 +2166,19 @@ impl JscoreEngine {
                     }
                     eng.context_switch(prev);
                 }
+                Cmd::DrainDynImports { tx } => {
+                    if tx.send(eng.drain_dyn_imports()).is_err() {
+                        return;
+                    }
+                }
+                Cmd::DeliverDynImport { ctx, seq, src } => {
+                    let prev = eng.current_context();
+                    eng.context_switch(ctx);
+                    if eng.current_context() == ctx {
+                        eng.deliver_import(seq, src.map_or_else(|| Err("fetch échoué".into()), Ok));
+                    }
+                    eng.context_switch(prev);
+                }
                 Cmd::DeliverStaticLink { ctx, ord, ok } => {
                     let prev = eng.current_context();
                     eng.context_switch(ctx);
@@ -2414,6 +2455,18 @@ impl JsEngine for JscoreEngine {
 
     fn deliver_dyn_link(&mut self, ctx: JsCtxId, seq: u64, ok: bool) {
         let _ = self.tx.send(Cmd::DeliverDynLink { ctx, seq, ok });
+    }
+
+    fn drain_dyn_imports(&mut self) -> Vec<explorer_jscore::DynImportReq> {
+        let (tx, rx) = channel();
+        if self.tx.send(Cmd::DrainDynImports { tx }).is_err() {
+            return Vec::new();
+        }
+        rx.recv().unwrap_or_default()
+    }
+
+    fn deliver_dyn_import(&mut self, ctx: JsCtxId, seq: u64, src: Option<String>) {
+        let _ = self.tx.send(Cmd::DeliverDynImport { ctx, seq, src });
     }
 
     fn deliver_static_link(&mut self, ctx: JsCtxId, ord: u32, ok: bool) {

@@ -9,6 +9,16 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **JS-C100 — `import()` dynamique
+  servi à la demande** (jscore+js+
+  core) : miss `MapLoader` →
+  promesse pending + `DynImportReq`
+  drainée + fetch session →
+  `deliver_dyn_import` → namespace
+  résolu (verrou Shoelace —
+  autoloader `import("${tag}.js")`
+  non préfetché).
+
 - **JS-C99 — sous-ensemble sélecteur
   du miroir** (`explorer-jscore`) :
   `:not()`/`:is()`/`:where()` +

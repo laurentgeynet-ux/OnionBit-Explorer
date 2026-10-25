@@ -95,7 +95,9 @@ pub use heap::{HeapStats, Host};
 pub use idb::{CacheEntry, CacheRegistry, IdbDb, IdbIndexDef, IdbRegistry, IdbStore};
 pub use interp::Engine;
 pub use mediaq::MediaEnv;
-pub use module::{is_bare_specifier, module_specifiers, rewrite_bare_specifier, ModuleLoader};
+pub use module::{
+    is_bare_specifier, module_specifiers, rewrite_bare_specifier, DynImportReq, ModuleLoader,
+};
 pub use storage::Storage;
 pub use value::{ObjId, Value};
 pub use websocket::{WsEventKind, WsOut, WsRequest, WsTransport};

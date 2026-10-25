@@ -6738,6 +6738,27 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   `:host*`, `::part`, `:popover-open`,
   `:modal`, `:valid`/`:invalid` —
   parse-fail honnête (`[]`).
+- [x] **JS-C100. `import()` dynamique
+  servi à la demande**
+  (`explorer-jscore` + `explorer-js` +
+  `explorer-core`) — verrou Shoelace
+  mesuré : `MapLoader` ne sert que le
+  graphe **préfetché** — les specs
+  construits à la volée (`${tag}.js`)
+  rejetaient → `customElements.define`
+  jamais atteint. Livré : miss
+  `load_source` → promesse `import()`
+  **pending** + `DynImportReq` enfilée
+  (`drain_dyn_imports`, même motif
+  `DynScriptReq`) ; la session fetch
+  l'URL (CSP `script-src`, mixed-
+  content) → `deliver_dyn_import`
+  → `instantiate`/`evaluate` →
+  `resolve_promise` — adoption
+  thenable gratuite (eval.rs wrap).
+  Sans drain branché : rejet comme
+  avant (pas de defer fantôme).
+  Tests `c100_*` (3).
 
 ## Tâches continues
 

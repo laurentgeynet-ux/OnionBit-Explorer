@@ -617,6 +617,17 @@ impl Session {
         };
         self.dispatch_net_requests(tab, &page, &base, reqs);
         self.spawn_dyn_subresources(tab, &page, &base, dyns, dyn_frames, dyn_imgs, dyn_links);
+        // `import()` dynamiques (JS-C100) — URL déjà résolue
+        // par le chargeur hôte, `deliver_dyn_import` à la
+        // réponse.
+        for r in self
+            .tabs
+            .get_mut(&tab)
+            .and_then(|e| e.js.as_mut())
+            .map_or_else(Vec::new, |eng| eng.drain_dyn_imports())
+        {
+            self.spawn_dyn_import(tab, &page, &base, &r);
+        }
     }
 
     /// Distribution des requêtes dynamiques drainées
@@ -656,6 +667,102 @@ impl Session {
         for d in dyn_links {
             self.spawn_dyn_link(tab, page, base, &d);
         }
+    }
+
+    /// `import()` dynamique (JS-C100) — l'URL est déjà résolue
+    /// par le chargeur hôte ; fetch `script-src` + mixed-content
+    /// puis `deliver_dyn_import` au moteur (instancier+évaluer+
+    /// résoudre la promesse pending).
+    fn spawn_dyn_import(
+        &mut self,
+        tab: TabId,
+        page: &Url,
+        base: &Url,
+        r: &explorer_js::DynImportReq,
+    ) {
+        let Some((req_page, req_base, _doc_policy, csp, _opaque)) =
+            self.ctx_net_origin(tab, r.ctx, page, base)
+        else {
+            self.deliver_dyn_import_req(tab, r.ctx, r.seq, None);
+            return;
+        };
+        let Some(url) = Url::resolve(&req_base, &r.url)
+            .ok()
+            .filter(|u| !is_mixed_content(&req_page, u))
+            .filter(|u| {
+                explorer_net::csp::csp_allows(
+                    &csp,
+                    &req_page,
+                    explorer_net::http::FetchDest::Script,
+                    u,
+                )
+            })
+        else {
+            self.deliver_dyn_import_req(tab, r.ctx, r.seq, None);
+            return;
+        };
+        let req = sub_request(
+            &req_page,
+            &url,
+            explorer_net::http::FetchDest::Script,
+            None,
+            Some(explorer_net::http::FetchCredentials::SameOrigin),
+        );
+        let is_cross = req_page.origin() != url.origin();
+        let fetch_mode = req.fetch_mode;
+        let page_origin = origin_header_value(&req_page);
+        let partition = explorer_net::cookies::request_partition(&req);
+        let req_url = req.url.clone();
+        let meta = crate::session::net_items::DynImportMeta {
+            ctx: r.ctx,
+            seq: r.seq,
+        };
+        let tr = self.transport.clone();
+        let tx = self.net_tx.clone();
+        let seq = r.seq;
+        tokio::spawn(async move {
+            let out = tr.fetch(&req).await;
+            let _ = tx.send(NetDone {
+                tab,
+                handle: seq,
+                cross: is_cross,
+                mode: fetch_mode,
+                credentials: explorer_net::http::FetchCredentials::SameOrigin,
+                page_origin,
+                req_url,
+                partition,
+                out,
+                script: None,
+                frame: None,
+                img: None,
+                link: None,
+                dyn_module: None,
+                import: Some(meta),
+            });
+        });
+    }
+
+    /// `deliver_dyn_import` au moteur du contexte émetteur —
+    /// `Some(body)` → instancier+évaluer ; `None` → rejet.
+    fn deliver_dyn_import_req(&mut self, tab: TabId, ctx: u32, seq: u64, src: Option<String>) {
+        if let Some(eng) = self.tabs.get_mut(&tab).and_then(|e| e.js.as_mut()) {
+            eng.deliver_dyn_import(ctx, seq, src);
+        }
+    }
+
+    /// `NetDone` `import` → corps du module → `deliver_dyn_import`.
+    fn commit_dyn_import(
+        &mut self,
+        tab: TabId,
+        meta: &crate::session::net_items::DynImportMeta,
+        out: &NetResult<explorer_net::http::Response>,
+    ) {
+        let src = out.as_ref().ok().and_then(|r| {
+            (200..300)
+                .contains(&r.status)
+                .then(|| String::from_utf8_lossy(&r.body).into_owned())
+        });
+        self.deliver_dyn_import_req(tab, meta.ctx, meta.seq, src);
     }
 
     /// Un `<script>` inséré dynamiquement (CAP-169) : inline →
@@ -812,6 +919,7 @@ impl Session {
                 img: None,
                 link: None,
                 dyn_module: None,
+                import: None,
             });
         });
         self.dyn_tasks.insert((tab, seq), j);
@@ -884,6 +992,7 @@ impl Session {
                     name,
                     graph: Some(graph),
                 }),
+                import: None,
             });
         });
         self.dyn_tasks.insert((tab, seq), j);
@@ -1103,6 +1212,7 @@ impl Session {
                 img: None,
                 link: None,
                 dyn_module: None,
+                import: None,
             });
         });
         self.dyn_tasks.insert((tab, seq), j);
@@ -1218,6 +1328,7 @@ impl Session {
                 img: Some(meta),
                 link: None,
                 dyn_module: None,
+                import: None,
             });
         });
         self.dyn_tasks.insert((tab, seq), j);
@@ -1367,6 +1478,7 @@ impl Session {
                 img: None,
                 link: Some(meta),
                 dyn_module: None,
+                import: None,
             });
         });
         self.dyn_tasks.insert((tab, seq), j);
@@ -1838,6 +1950,7 @@ impl Session {
                 img: None,
                 link: None,
                 dyn_module: None,
+                import: None,
             });
         });
         self.net_tasks.insert((tab, handle), j);
@@ -2481,6 +2594,13 @@ impl Session {
             if let Some(meta) = d.link {
                 self.dyn_tasks.remove(&(d.tab, meta.seq));
                 self.commit_dyn_link(d.tab, &meta, &d.out);
+                continue;
+            }
+            // `import()` dynamique (JS-C100) — corps livré au
+            // moteur (instancier+évaluer+résoudre la promesse).
+            if let Some(meta) = d.import {
+                self.dyn_tasks.remove(&(d.tab, meta.seq));
+                self.commit_dyn_import(d.tab, &meta, &d.out);
                 continue;
             }
             self.net_tasks.remove(&(d.tab, d.handle));
