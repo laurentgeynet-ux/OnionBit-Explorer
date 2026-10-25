@@ -719,6 +719,22 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   widget `DelegatedWebView` —
   `flutter build windows` vert.
 
+- **136b — allowlist DRM en config**
+  (`app/`, étape 136 NAV) :
+  `AppConfig.drmDelegateHosts` —
+  seed minimal arbitré
+  (`netflix.com`, `disneyplus.com`,
+  `canalplus.com`, `mycanal.fr`,
+  `primevideo.com` ; `amazon.tld`
+  volontairement absent — déléguer
+  le host entier enverrait la
+  boutique hors moteur). Matcher
+  `DrmAllowlist` déclaratif : host
+  exact + sous-domaines, jamais
+  d'heuristique (ADR-0027 §2) —
+  http/https seuls, URL malformée
+  refusée. 6 tests.
+
 - **CAP-198 — Shadow DOM tranche 4 :
   event retargeting** (`explorer-jscore`)
   : le chemin de propagation des

@@ -30,6 +30,19 @@ class AppConfig {
       'audio/webm',
       'application/vnd.apple.mpegurl',
     ],
+    this.drmDelegateHosts = const [
+      // Chaque entrée = un arbitrage (ADR-0027 §2 : périmètre
+      // de confiance + exception d'égress ADR-0022 — le trafic
+      // délégué ne traverse ni explorer-net ni le profil).
+      'netflix.com', // VOD — Widevine L1
+      'disneyplus.com', // VOD — Widevine
+      'canalplus.com', // myCANAL (portail canal+)
+      'mycanal.fr', // domaine historique myCANAL
+      'primevideo.com', // Prime Video standalone
+      // amazon.tld volontairement ABSENT : déléguer le host
+      // entier enverrait la boutique hors moteur — voir
+      // DrmAllowlist (limite host-entier documentée).
+    ],
     this.engineMode = const String.fromEnvironment(
       'EXPLORER_ENGINE',
       defaultValue: 'auto',
@@ -91,4 +104,11 @@ class AppConfig {
   /// containers/codecs que le backend MDK (`fvp`) sait jouer ;
   /// `canPlayType` côté JS se reflète dessus.
   final List<String> mediaCodecs;
+
+  /// Domaines délégués à la WebView2 (étape 136b, ADR-0027) —
+  /// allowlist explicite et minimale ; matching host exact +
+  /// sous-domaines (`DrmAllowlist`). Chaque entrée est aussi
+  /// une exception d'égress : le trafic de ces domaines ne
+  /// traverse pas `explorer-net`.
+  final List<String> drmDelegateHosts;
 }

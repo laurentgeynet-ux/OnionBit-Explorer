@@ -4777,9 +4777,16 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
     Amendement ADR-0027 + PoC
     `lib/poc_delegated.dart`
     (build windows vert).
-  - [ ] 136b — allowlist DRM en
-    config (§4.13), matcher host
-    + sous-domaines
+  - [x] **136b — allowlist DRM en
+    config** :
+    `AppConfig.drmDelegateHosts`
+    (5 domaines seed arbitrés,
+    `amazon.tld` exclu — host
+    entier trop large) ; matcher
+    `DrmAllowlist` domaine :
+    host exact + sous-domaines,
+    http/https, URL malformée
+    refusée. 6 tests.
   - [ ] 136c — `BrowserTab.kind`
     = engine|delegated,
     interception navigate avant
