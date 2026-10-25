@@ -1600,3 +1600,91 @@ fn pseudo_after_fond_peint_meme_sans_canvas() {
         "fond rouge du ::after attendu : {items:?}"
     );
 }
+
+// ── R-104 : radial-/conic-gradient peints ───────────────────
+
+#[test]
+fn radial_gradient_peint_un_degrade_centre_bord() {
+    // `radial-gradient(red, blue)` : centre rouge, bord bleu.
+    let list = bg_div("background-image:radial-gradient(red, blue)");
+    let img = list
+        .items
+        .iter()
+        .find_map(|i| match i {
+            DisplayItem::BackgroundImage { img, .. } => Some(img.clone()),
+            _ => None,
+        })
+        .expect("dégradé radial émis");
+    assert_eq!((img.width, img.height), (40, 20));
+    let px = |x: usize, y: usize| {
+        let o = (y * img.width as usize + x) * 4;
+        &img.rgba[o..o + 4]
+    };
+    assert!(
+        px(20, 10)[0] > 200 && px(20, 10)[2] < 60,
+        "centre rouge : {:?}",
+        px(20, 10)
+    );
+    // Coin = au-delà de l'ellipse farthest-corner → bleu.
+    assert!(
+        px(0, 0)[2] > 200 && px(0, 0)[0] < 60,
+        "bord bleu : {:?}",
+        px(0, 0)
+    );
+}
+
+#[test]
+fn conic_gradient_peint_des_quadrants() {
+    // `conic-gradient(red 0 25%, blue 25% 100%)` : haut rouge,
+    // le reste bleu (le stop en % est une fraction de tour).
+    let list = bg_div("background-image:conic-gradient(red 0 25%, blue 25% 100%)");
+    let img = list
+        .items
+        .iter()
+        .find_map(|i| match i {
+            DisplayItem::BackgroundImage { img, .. } => Some(img.clone()),
+            _ => None,
+        })
+        .expect("dégradé conique émis");
+    let px = |x: usize, y: usize| {
+        let o = (y * img.width as usize + x) * 4;
+        &img.rgba[o..o + 4]
+    };
+    // Au-dessus du centre (0deg → haut) = rouge.
+    assert!(
+        px(20, 1)[0] > 200 && px(20, 1)[2] < 60,
+        "haut rouge : {:?}",
+        px(20, 1)
+    );
+    // En dessous (≈180deg > 25%) = bleu.
+    assert!(
+        px(20, 19)[2] > 200 && px(20, 19)[0] < 60,
+        "bas bleu : {:?}",
+        px(20, 19)
+    );
+}
+
+#[test]
+fn radial_circle_et_at_position() {
+    // `radial-gradient(circle at 25% 50%, white 0%, black 100%)`
+    // : centre décalé → pixel (10,10) blanc, (39,10) sombre.
+    let list = bg_div("background-image:radial-gradient(circle at 25% 50%, white 0%, black 100%)");
+    let img = list
+        .items
+        .iter()
+        .find_map(|i| match i {
+            DisplayItem::BackgroundImage { img, .. } => Some(img.clone()),
+            _ => None,
+        })
+        .expect("radial émis");
+    let px = |x: usize, y: usize| {
+        let o = (y * img.width as usize + x) * 4;
+        &img.rgba[o..o + 4]
+    };
+    assert!(
+        px(10, 10)[0] > 200,
+        "centre décalé blanc : {:?}",
+        px(10, 10)
+    );
+    assert!(px(39, 10)[0] < 60, "loin noir : {:?}", px(39, 10));
+}

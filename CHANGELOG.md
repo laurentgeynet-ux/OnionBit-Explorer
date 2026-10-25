@@ -9,6 +9,28 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **R-104 — `radial-`/`conic-gradient`
+  peints** (`explorer-render`,
+  résidu du catalogue — parsés
+  depuis longtemps, jamais
+  rasterisés) : `decode_gradient`
+  dispatch linear/radial/conic ;
+  radial = ellipse normalisée
+  (`circle`/`ellipse`, keywords
+  `closest|farthest-side|corner`
+  avec le `√2` littéral de
+  css-images-3 §3.2, `at <pos>`,
+  rayons explicites px/%) ;
+  conic = angle horaire depuis le
+  haut (`from <angle>`, `at <pos>`,
+  stops `<%>` **ou `<angle>`** —
+  `stop_position` accepte
+  désormais `deg`/`grad`/`rad`/
+  `turn`). `repeating-*` via
+  `rem_euclid`. 3 tests pixels
+  (centre/bord radial, quadrants
+  coniques, `at` décalé).
+
 - **R-103 — `display:contents`
   livré** (`explorer-layout`, §2.7
   CSS Display — résidu du

@@ -1206,8 +1206,7 @@ fn emit_bg_layers(
         let img = if bg_has_url(layer) {
             node.and_then(|n| images.backgrounds.get(&n)).cloned()
         } else if bg_has_gradient(layer) {
-            crate::gradient::decode_linear_gradient(layer, area.0, area.1, fs)
-                .map(std::sync::Arc::new)
+            crate::gradient::decode_gradient(layer, area.0, area.1, fs).map(std::sync::Arc::new)
         } else {
             None
         };

@@ -276,11 +276,16 @@ fn resolve_stops(args: &[&str], span_px: f32, fs: f64) -> Option<Vec<(f32, Color
 }
 
 /// Position de stop : `<%>` → fraction de la ligne ;
-/// `<length>` absolue → px/étendue ; font-relative → `fs`.
+/// `<angle>` (`deg`/`grad`/`rad`/`turn`, stops coniques) →
+/// fraction de tour ; `<length>` absolue → px/étendue ;
+/// font-relative → `fs`.
 #[allow(clippy::cast_possible_truncation)]
 fn stop_position(t: &str, span_px: f32, fs: f64) -> Option<f32> {
     if let Some(p) = t.strip_suffix('%') {
         return p.parse::<f32>().ok().map(|v| v / 100.0);
+    }
+    if let Some(deg) = angle_deg(t) {
+        return Some(deg / 360.0);
     }
     let l = parse_length(t)?;
     let px = match l.unit.px_factor() {
@@ -324,4 +329,375 @@ fn sample_stops(stops: &[(f32, Color)], t: f32) -> Color {
         }
     }
     stops.last().map_or(Color::BLACK, |(_, c)| *c)
+}
+
+// ── R-104 : radial-gradient / conic-gradient ────────────────
+
+/// Point d'entrée unique des couches dégradé : `linear-`,
+/// `radial-`, `conic-gradient` (+ variantes `repeating-*`) →
+/// bitmap `area_w × area_h`, `None` si non dégradé/malformé.
+#[allow(clippy::cast_precision_loss)]
+pub(crate) fn decode_gradient(
+    layer: &str,
+    area_w: f32,
+    area_h: f32,
+    fs: f64,
+) -> Option<DecodedImage> {
+    let low = layer.to_ascii_lowercase();
+    if low.contains("conic-gradient(") {
+        return decode_conic(layer, &low, area_w, area_h, fs);
+    }
+    if low.contains("radial-gradient(") {
+        return decode_radial(layer, &low, area_w, area_h, fs);
+    }
+    decode_linear_gradient(layer, area_w, area_h, fs)
+}
+
+/// `args[0]` après `gradient(` : la virgule de tête sépare le
+/// prologue (`shape/size/at`/`from`) des stops.
+fn gradient_args<'a>(layer: &'a str, low: &str) -> Option<(&'a str, Vec<&'a str>)> {
+    let open = low.find("gradient(")? + "gradient(".len() - 1;
+    let mut depth = 0i32;
+    let mut close = layer.len();
+    for (i, ch) in layer.char_indices().skip_while(|(i, _)| *i <= open) {
+        match ch {
+            '(' => depth += 1,
+            ')' if depth == 0 => {
+                close = i;
+                break;
+            }
+            ')' => depth -= 1,
+            _ => {}
+        }
+    }
+    let args = split_top_commas(&layer[open + 1..close]);
+    (!args.is_empty()).then(|| (args[0], args))
+}
+
+/// `at <x> [<y>]` → centre `(px, py)` dans l'aire — mots-clés
+/// `left|right|top|bottom|center`, `<%>` et `<length>` (le
+/// premier token = x, le second = y ; un seul `top`/`bottom`
+/// seul compte pour y, l'autre axe centre).
+#[allow(clippy::cast_possible_truncation)]
+fn at_position(arg: &str, w: f32, h: f32, fs: f64) -> (f32, f32) {
+    let toks = split_top_ws(arg.trim());
+    let mut cx = w / 2.0;
+    let mut cy = h / 2.0;
+    let mut seen_x = false;
+    let mut seen_y = false;
+    for t in toks {
+        match t {
+            "left" if !seen_x => {
+                cx = 0.0;
+                seen_x = true;
+            }
+            "right" if !seen_x => {
+                cx = w;
+                seen_x = true;
+            }
+            "top" if !seen_y => {
+                cy = 0.0;
+                seen_y = true;
+            }
+            "bottom" if !seen_y => {
+                cy = h;
+                seen_y = true;
+            }
+            "center" => {}
+            _ => {
+                let px = if let Some(p) = t.strip_suffix('%') {
+                    p.parse::<f32>().ok().map(|v| v / 100.0)
+                } else {
+                    parse_length(t).map(|l| {
+                        (match l.unit.px_factor() {
+                            Some(f) => l.value * f,
+                            None => l.value * fs * 0.5,
+                        }) as f32
+                    })
+                };
+                if let Some(v) = px {
+                    if !seen_x {
+                        cx = if t.ends_with('%') { v * w } else { v };
+                        seen_x = true;
+                    } else if !seen_y {
+                        cy = if t.ends_with('%') { v * h } else { v };
+                        seen_y = true;
+                    }
+                }
+            }
+        }
+    }
+    (cx, cy)
+}
+
+/// Rayons de l'ellipse finale du dégradé radial — keywords
+/// spec (`*-side`/`*-corner`) ou longueurs explicites ; le
+/// `√2` de `*-corner` ellipse est la formule littérale de
+/// css-images-3 §3.2.
+#[allow(clippy::similar_names)] // dx_min/dy_min : axes jumeaux
+fn radial_radii(
+    shape_circle: bool,
+    size_kw: &str,
+    explicit: Option<(f32, f32)>,
+    cx: f32,
+    cy: f32,
+    w: f32,
+    h: f32,
+) -> (f32, f32) {
+    if let Some(r) = explicit {
+        return r;
+    }
+    let dx_min = cx.min(w - cx).max(0.0);
+    let dx_max = cx.max(w - cx).max(0.0);
+    let dy_min = cy.min(h - cy).max(0.0);
+    let dy_max = cy.max(h - cy).max(0.0);
+    let corner_dist = |dx: f32, dy: f32| (dx * dx + dy * dy).sqrt();
+    match size_kw {
+        "closest-side" if shape_circle => (dx_min.min(dy_min), dx_min.min(dy_min)),
+        "farthest-side" if shape_circle => (dx_max.max(dy_max), dx_max.max(dy_max)),
+        "closest-corner" if shape_circle => {
+            let r = [
+                corner_dist(cx, cy),
+                corner_dist(w - cx, cy),
+                corner_dist(cx, h - cy),
+                corner_dist(w - cx, h - cy),
+            ]
+            .into_iter()
+            .fold(f32::MAX, f32::min);
+            (r, r)
+        }
+        "closest-side" => (dx_min, dy_min),
+        "farthest-side" => (dx_max, dy_max),
+        "closest-corner" => (
+            dx_min * std::f32::consts::SQRT_2,
+            dy_min * std::f32::consts::SQRT_2,
+        ),
+        // `farthest-corner` — défaut spec.
+        _ if shape_circle => {
+            let r = [
+                corner_dist(cx, cy),
+                corner_dist(w - cx, cy),
+                corner_dist(cx, h - cy),
+                corner_dist(w - cx, h - cy),
+            ]
+            .into_iter()
+            .fold(0.0f32, f32::max);
+            (r, r)
+        }
+        _ => (
+            dx_max * std::f32::consts::SQRT_2,
+            dy_max * std::f32::consts::SQRT_2,
+        ),
+    }
+}
+
+/// `radial-gradient([shape size at pos,] stops…)` → bitmap.
+/// Prologue MVP : `circle`/`ellipse`, `closest|farthest-*
+/// side|corner`, `at <pos>`, rayons explicites (1 pour
+/// `circle`, 2 pour `ellipse`, `<%>` ellipse seulement,
+/// rapportés aux axes de l'aire).
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    clippy::cast_precision_loss
+)]
+fn decode_radial(
+    layer: &str,
+    low: &str,
+    area_w: f32,
+    area_h: f32,
+    fs: f64,
+) -> Option<DecodedImage> {
+    let repeating = low.contains("repeating-radial-gradient(");
+    let (prologue, args) = gradient_args(layer, low)?;
+    // Le prologue est-il un prologue de forme (vs un stop) ?
+    // Heuristique : le premier token n'est pas une couleur.
+    let toks = split_top_ws(prologue.trim());
+    let prologue_is_shape = parse_color(toks.first().copied().unwrap_or("")).is_none();
+    let stop_args: &[&str] = if prologue_is_shape && args.len() > 1 {
+        &args[1..]
+    } else {
+        &args[..]
+    };
+    if stop_args.is_empty() {
+        return None;
+    }
+    let mut circle = false;
+    let mut size_kw = "farthest-corner";
+    // Rayons explicites (`None` = px, `Some` = fraction %).
+    let mut radii: Vec<Result<f32, f32>> = Vec::new();
+    let mut past_at = false;
+    for t in &toks {
+        if *t == "at" {
+            past_at = true;
+            continue;
+        }
+        if past_at || !prologue_is_shape {
+            break;
+        }
+        match *t {
+            "circle" => circle = true,
+            "ellipse" => circle = false,
+            "closest-side" | "farthest-side" | "closest-corner" | "farthest-corner" => {
+                size_kw = t;
+            }
+            _ => {
+                if let Some(p) = t.strip_suffix('%') {
+                    if let Ok(v) = p.parse::<f32>() {
+                        radii.push(Ok(v / 100.0));
+                        continue;
+                    }
+                }
+                if let Some(l) = parse_length(t) {
+                    radii.push(Err(match l.unit.px_factor() {
+                        Some(f) => (l.value * f) as f32,
+                        None => (l.value * fs * 0.5) as f32,
+                    }));
+                }
+            }
+        }
+    }
+    let (mut cx, mut cy) = (area_w / 2.0, area_h / 2.0);
+    if prologue_is_shape {
+        if let Some(i) = prologue.trim().find(" at ") {
+            let (x, y) = at_position(&prologue.trim()[i + 4..], area_w, area_h, fs);
+            cx = x;
+            cy = y;
+        }
+    }
+    let width = area_w.clamp(1.0, MAX_GRADIENT_DIM);
+    let height = area_h.clamp(1.0, MAX_GRADIENT_DIM);
+    // `Ok(f)` = fraction d'axe, `Err(px)` = absolu.
+    let px_of = |r: Result<f32, f32>, axis: f32| match r {
+        Ok(f) => f * axis,
+        Err(px) => px,
+    };
+    let explicit = if radii.len() >= 2 && !circle {
+        Some((px_of(radii[0], width), px_of(radii[1], height)))
+    } else {
+        radii.first().map(|&r| (px_of(r, width), px_of(r, width)))
+    };
+    let (rx, ry) = radial_radii(circle, size_kw, explicit, cx, cy, width, height);
+    let (rx, ry) = (rx.max(0.01), ry.max(0.01));
+    let stops = resolve_stops(stop_args, 1.0, fs)?;
+    let (iw, ih) = (width as u32, height as u32);
+    let mut rgba = vec![0u8; iw as usize * ih as usize * 4];
+    for row in 0..ih {
+        for col in 0..iw {
+            let dx = (col as f32 + 0.5 - cx) / rx;
+            let dy = (row as f32 + 0.5 - cy) / ry;
+            let t0 = (dx * dx + dy * dy).sqrt();
+            let frac = if repeating {
+                t0.rem_euclid(1.0)
+            } else {
+                t0.clamp(0.0, 1.0)
+            };
+            let color = sample_stops(&stops, frac);
+            let off = (row as usize * iw as usize + col as usize) * 4;
+            rgba[off] = color.r;
+            rgba[off + 1] = color.g;
+            rgba[off + 2] = color.b;
+            rgba[off + 3] = color.a;
+        }
+    }
+    Some(DecodedImage {
+        width: iw,
+        height: ih,
+        rgba,
+    })
+}
+
+/// `conic-gradient([from θ] [at pos,] stops…)` → bitmap :
+/// fraction = angle horaire depuis le haut (+ `from`), les
+/// stops en `<%>` ou `<angle>` (`deg`/`grad`/`rad`/`turn`).
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    clippy::cast_precision_loss
+)]
+fn decode_conic(layer: &str, low: &str, area_w: f32, area_h: f32, fs: f64) -> Option<DecodedImage> {
+    let repeating = low.contains("repeating-conic-gradient(");
+    let (prologue, args) = gradient_args(layer, low)?;
+    let toks = split_top_ws(prologue.trim());
+    let prologue_is_shape = parse_color(toks.first().copied().unwrap_or("")).is_none();
+    let stop_args: &[&str] = if prologue_is_shape && args.len() > 1 {
+        &args[1..]
+    } else {
+        &args[..]
+    };
+    if stop_args.is_empty() {
+        return None;
+    }
+    let mut from_deg = 0.0f32;
+    let mut cx = area_w / 2.0;
+    let mut cy = area_h / 2.0;
+    if prologue_is_shape {
+        let mut i = 0;
+        while i < toks.len() {
+            match toks[i] {
+                "from" => {
+                    if let Some(d) = toks.get(i + 1).and_then(|a| angle_deg(a)) {
+                        from_deg = d;
+                    }
+                    i += 1;
+                }
+                "at" => {
+                    let rest = toks[i + 1..].join(" ");
+                    let (x, y) = at_position(&rest, area_w, area_h, fs);
+                    cx = x;
+                    cy = y;
+                    break;
+                }
+                _ => {}
+            }
+            i += 1;
+        }
+    }
+    let stops = resolve_stops(stop_args, 1.0, fs)?;
+    let width = area_w.clamp(1.0, MAX_GRADIENT_DIM);
+    let height = area_h.clamp(1.0, MAX_GRADIENT_DIM);
+    let (iw, ih) = (width as u32, height as u32);
+    let mut rgba = vec![0u8; iw as usize * ih as usize * 4];
+    for row in 0..ih {
+        for col in 0..iw {
+            let dx = col as f32 + 0.5 - cx;
+            let dy = row as f32 + 0.5 - cy;
+            // 0deg = haut, sens horaire : atan2(dx, -dy).
+            let ang = dx.atan2(-dy).to_degrees();
+            let t0 = (ang + from_deg).rem_euclid(360.0) / 360.0;
+            let frac = if repeating {
+                t0.rem_euclid(1.0)
+            } else {
+                t0.clamp(0.0, 1.0)
+            };
+            let color = sample_stops(&stops, frac);
+            let off = (row as usize * iw as usize + col as usize) * 4;
+            rgba[off] = color.r;
+            rgba[off + 1] = color.g;
+            rgba[off + 2] = color.b;
+            rgba[off + 3] = color.a;
+        }
+    }
+    Some(DecodedImage {
+        width: iw,
+        height: ih,
+        rgba,
+    })
+}
+
+/// `<angle>` → degrés (`deg`/`grad`/`rad`/`turn`).
+fn angle_deg(a: &str) -> Option<f32> {
+    let v = a.trim();
+    if let Some(d) = v.strip_suffix("deg") {
+        d.parse().ok()
+    } else if let Some(d) = v.strip_suffix("grad") {
+        d.parse::<f32>().ok().map(|x| x * 0.9)
+    } else if let Some(d) = v.strip_suffix("turn") {
+        d.parse::<f32>().ok().map(|x| x * 360.0)
+    } else {
+        v.strip_suffix("rad")?
+            .parse::<f32>()
+            .ok()
+            .map(f32::to_degrees)
+    }
 }

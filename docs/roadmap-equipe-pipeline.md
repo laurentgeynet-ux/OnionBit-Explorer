@@ -2651,6 +2651,12 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   fils directs — items flex/grid, découpage en-ligne et slot
   UA héritent tous du mécanisme. Tests : structure + items
   flex.
+- [x] **R-104. `radial-`/`conic-gradient` peints** (résidu
+  catalogue — parsés, non rasterisés) : `decode_gradient`
+  dispatche linear/radial/conic ; ellipse normalisée
+  (shape/size/`at`, `√2` corner de css-images-3 §3.2, rayons
+  px/%) et cône horaire (`from`, `at`, stops `%`/angle).
+  `repeating-*` inclus. 3 tests pixels.
 
 ## Palier R-B — Contenu étranger, animation, canvas
 
