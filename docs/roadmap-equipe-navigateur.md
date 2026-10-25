@@ -3002,7 +3002,7 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   canal nouveau. `flutter
   analyze`/`test` verts.
 
-- [ ] **Étape 133. Discard des
+- [x] **Étape 133. Discard des
   bitmaps des snapshots
   bfcache** — le multiplicateur
   mesuré par l'étape 130 (~144
@@ -4778,6 +4778,41 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   Hors périmètre de l'étape :
   MSE/EME moteur — murs nommés
   ADR-0024/0027.
+
+- [ ] **Étape 137. Reliquat ADR-0025 —
+  journal de mutations au-delà du
+  pilote** (ouverte 2026-10-25,
+  § Ouverture de l'ADR) : le journal
+  est le chemin nominal depuis
+  l'étape 111 ; ce qui reste :
+  - [ ] **137a — ciblage relayout par
+    les ops** : `apply_journal` paie
+    encore `relayout_dom_payload`
+    complet alors que les ops portent
+    la cible exacte → `relayout_
+    subtree` direct, sans
+    `take_dirty_path` ni remap ;
+    unifier avec `job.dirty` (R-12)
+    ou le supplanter.
+  - [ ] **137b — `DomMutation::
+    AttachShadow`** : op de couture
+    `(host, mode, sous-arbre)` —
+    l'attache `attachShadow`
+    programmatique voyage encore par
+    re-parse (borne R-96) ;
+    `Dom::attach_shadow_root` existe,
+    consommation pure périmètre NAV.
+  - [ ] **137c — seuil de repli
+    calibré** : mesurer
+    `journal_fallbacks` sur vols
+    terrain réels, fixer le seuil
+    d'investigation de l'ADR.
+  - [ ] **137d — simplification
+    `img_decoded`/`bg_decoded`
+    (optionnelle)** : survie par clé
+    devenue inutile sous journal
+    nominal ; les caches restent en
+    dédup de décodage — confort.
 
 - [ ] **Écarts terrain — vol humain
   22/10 (release `39ab821`, FFI)** :
