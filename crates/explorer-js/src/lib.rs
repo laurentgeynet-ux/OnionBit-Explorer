@@ -19,7 +19,7 @@
 #![forbid(unsafe_code)]
 
 use std::collections::HashMap;
-use std::sync::mpsc::{channel, Receiver, Sender};
+use std::sync::mpsc::{channel, Receiver, RecvTimeoutError, Sender};
 use std::sync::Arc;
 use std::thread::JoinHandle;
 
@@ -1687,6 +1687,21 @@ impl JscoreEngine {
     }
 
     /// `Eval` sur le canal — `name` étiquette la source pour
+    /// Borne de réponse du thread moteur : un éval qui tourne
+    /// dans le fil (spin) ne doit pas figer la session —
+    ///  → erreur nommée sur les chemins d’éval,
+    /// repli par défaut sur les drains (JS-C105).
+    const EVAL_CMD_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
+    fn recv_eval<T>(rx: &Receiver<T>) -> Result<T, JsError> {
+        rx.recv_timeout(Self::EVAL_CMD_TIMEOUT).map_err(|e| match e {
+            RecvTimeoutError::Timeout => {
+                JsError::Uncaught("moteur figé — éval dépassée".into())
+            }
+            RecvTimeoutError::Disconnected => JsError::Dead,
+        })
+    }
+
     /// les frames `error.stack` (`JsEngine::eval_named`).
     fn eval_cmd(&mut self, source: &str, name: Option<&str>) -> Result<String, JsError> {
         let (tx, rx) = channel();
@@ -1701,7 +1716,7 @@ impl JscoreEngine {
         {
             return Err(JsError::Dead);
         }
-        rx.recv().map_err(|_| JsError::Dead)?
+        Self::recv_eval(&rx)?
     }
 
     /// Boucle du thread : possède le `explorer_jscore::Engine` (`!Send`)
@@ -2317,7 +2332,7 @@ impl JsEngine for JscoreEngine {
         if self.tx.send(Cmd::RunPending { max_timers, tx }).is_err() {
             return 0;
         }
-        rx.recv().unwrap_or(0)
+        rx.recv_timeout(Self::EVAL_CMD_TIMEOUT).unwrap_or(0)
     }
 
     fn next_timer_deadline(&mut self) -> Option<std::time::Duration> {
@@ -2325,7 +2340,7 @@ impl JsEngine for JscoreEngine {
         if self.tx.send(Cmd::TimerDeadline { tx }).is_err() {
             return None;
         }
-        rx.recv().unwrap_or(None)
+        rx.recv_timeout(Self::EVAL_CMD_TIMEOUT).unwrap_or(None)
     }
 
     fn sync_mirror_attr(&mut self, path: &[(String, u32)], attr: &str, value: Option<&str>) {
@@ -2357,7 +2372,7 @@ impl JsEngine for JscoreEngine {
         {
             return None;
         }
-        rx.recv().ok().flatten()
+        rx.recv_timeout(Self::EVAL_CMD_TIMEOUT).ok().flatten()
     }
 
     fn context_new_in(
@@ -2379,7 +2394,7 @@ impl JsEngine for JscoreEngine {
         {
             return None;
         }
-        rx.recv().ok().flatten()
+        rx.recv_timeout(Self::EVAL_CMD_TIMEOUT).ok().flatten()
     }
 
     fn context_destroy(&mut self, ctx: JsCtxId) {
@@ -2422,7 +2437,7 @@ impl JsEngine for JscoreEngine {
         {
             return Err(JsError::Dead);
         }
-        rx.recv().map_err(|_| JsError::Dead)?
+        Self::recv_eval(&rx)?
     }
 
     fn eval_script_el(
@@ -2446,7 +2461,7 @@ impl JsEngine for JscoreEngine {
         {
             return Err(JsError::Dead);
         }
-        rx.recv().map_err(|_| JsError::Dead)?
+        Self::recv_eval(&rx)?
     }
 
     fn drain_dyn_scripts(&mut self) -> Vec<explorer_jscore::DynScriptReq> {
@@ -2454,7 +2469,7 @@ impl JsEngine for JscoreEngine {
         if self.tx.send(Cmd::DrainDynScripts { tx }).is_err() {
             return Vec::new();
         }
-        rx.recv().unwrap_or_default()
+        rx.recv_timeout(Self::EVAL_CMD_TIMEOUT).unwrap_or_default()
     }
 
     fn deliver_dyn_script(&mut self, ctx: JsCtxId, seq: u64, body: Option<String>) {
@@ -2466,7 +2481,7 @@ impl JsEngine for JscoreEngine {
         if self.tx.send(Cmd::DrainDynFrames { tx }).is_err() {
             return Vec::new();
         }
-        rx.recv().unwrap_or_default()
+        rx.recv_timeout(Self::EVAL_CMD_TIMEOUT).unwrap_or_default()
     }
 
     fn deliver_dyn_frame(&mut self, ctx: JsCtxId, seq: u64, ok: bool) {
@@ -2478,7 +2493,7 @@ impl JsEngine for JscoreEngine {
         if self.tx.send(Cmd::DrainDynImgs { tx }).is_err() {
             return Vec::new();
         }
-        rx.recv().unwrap_or_default()
+        rx.recv_timeout(Self::EVAL_CMD_TIMEOUT).unwrap_or_default()
     }
 
     fn deliver_dyn_img(&mut self, ctx: JsCtxId, seq: u64, ok: bool) {
@@ -2490,7 +2505,7 @@ impl JsEngine for JscoreEngine {
         if self.tx.send(Cmd::DrainDynLinks { tx }).is_err() {
             return Vec::new();
         }
-        rx.recv().unwrap_or_default()
+        rx.recv_timeout(Self::EVAL_CMD_TIMEOUT).unwrap_or_default()
     }
 
     fn deliver_dyn_link(&mut self, ctx: JsCtxId, seq: u64, ok: bool) {
@@ -2502,7 +2517,7 @@ impl JsEngine for JscoreEngine {
         if self.tx.send(Cmd::DrainDynImports { tx }).is_err() {
             return Vec::new();
         }
-        rx.recv().unwrap_or_default()
+        rx.recv_timeout(Self::EVAL_CMD_TIMEOUT).unwrap_or_default()
     }
 
     fn deliver_dyn_import(
@@ -2547,7 +2562,7 @@ impl JsEngine for JscoreEngine {
         {
             return Err(JsError::Dead);
         }
-        rx.recv().map_err(|_| JsError::Dead)?
+        Self::recv_eval(&rx)?
     }
 
     fn sync_dom_ctx(&mut self, ctx: JsCtxId) -> Option<String> {
@@ -2555,7 +2570,7 @@ impl JsEngine for JscoreEngine {
         if self.tx.send(Cmd::DomSyncCtx { ctx, tx }).is_err() {
             return None;
         }
-        rx.recv().ok().flatten()
+        rx.recv_timeout(Self::EVAL_CMD_TIMEOUT).ok().flatten()
     }
 
     fn drain_sinks_ctx(
@@ -2566,7 +2581,7 @@ impl JsEngine for JscoreEngine {
         if self.tx.send(Cmd::DrainSinksCtx { ctx, tx }).is_err() {
             return (Vec::new(), std::collections::BTreeMap::new());
         }
-        rx.recv().unwrap_or_default()
+        rx.recv_timeout(Self::EVAL_CMD_TIMEOUT).unwrap_or_default()
     }
 
     fn drain_nav_requests(&mut self) -> Vec<NavRequest> {
@@ -2574,7 +2589,7 @@ impl JsEngine for JscoreEngine {
         if self.tx.send(Cmd::DrainNav { tx }).is_err() {
             return Vec::new();
         }
-        rx.recv().unwrap_or_default()
+        rx.recv_timeout(Self::EVAL_CMD_TIMEOUT).unwrap_or_default()
     }
 
     fn sync_ctx_url(&mut self, ctx: JsCtxId, url: &str, history_len: u32) {
@@ -2651,7 +2666,7 @@ impl JsEngine for JscoreEngine {
         if self.tx.send(Cmd::DomSync { tx }).is_err() {
             return None;
         }
-        rx.recv().ok().flatten()
+        rx.recv_timeout(Self::EVAL_CMD_TIMEOUT).ok().flatten()
     }
 
     fn sync_dom_keyed(&mut self) -> Option<DomSyncKeyed> {
@@ -2663,7 +2678,7 @@ impl JsEngine for JscoreEngine {
         {
             return None;
         }
-        rx.recv().ok().flatten()
+        rx.recv_timeout(Self::EVAL_CMD_TIMEOUT).ok().flatten()
     }
 
     fn resync_dom_keyed(&mut self) -> Option<DomSyncKeyed> {
@@ -2671,7 +2686,7 @@ impl JsEngine for JscoreEngine {
         if self.tx.send(Cmd::DomSyncKeyed { force: true, tx }).is_err() {
             return None;
         }
-        rx.recv().ok().flatten()
+        rx.recv_timeout(Self::EVAL_CMD_TIMEOUT).ok().flatten()
     }
 
     fn drain_dom_mutations(&mut self) -> Option<DomJournal> {
@@ -2679,7 +2694,7 @@ impl JsEngine for JscoreEngine {
         if self.tx.send(Cmd::DomJournal { tx }).is_err() {
             return None;
         }
-        rx.recv().ok().flatten()
+        rx.recv_timeout(Self::EVAL_CMD_TIMEOUT).ok().flatten()
     }
 
     fn dom_sync_stats(&mut self) -> Option<DomSyncStats> {
@@ -2687,7 +2702,7 @@ impl JsEngine for JscoreEngine {
         if self.tx.send(Cmd::DomSyncStats { tx }).is_err() {
             return None;
         }
-        rx.recv().ok().flatten()
+        rx.recv_timeout(Self::EVAL_CMD_TIMEOUT).ok().flatten()
     }
 
     fn heap_stats(&mut self) -> Option<HeapStats> {
@@ -2695,7 +2710,7 @@ impl JsEngine for JscoreEngine {
         if self.tx.send(Cmd::HeapStats { tx }).is_err() {
             return None;
         }
-        rx.recv().ok()
+        rx.recv_timeout(Self::EVAL_CMD_TIMEOUT).ok()
     }
 
     fn canvas_ops(&mut self) -> CanvasOpsTable {
@@ -2703,7 +2718,7 @@ impl JsEngine for JscoreEngine {
         if self.tx.send(Cmd::CanvasOps { tx }).is_err() {
             return Vec::new();
         }
-        rx.recv().unwrap_or_default()
+        rx.recv_timeout(Self::EVAL_CMD_TIMEOUT).unwrap_or_default()
     }
 
     fn eval_module(
@@ -2725,7 +2740,7 @@ impl JsEngine for JscoreEngine {
         {
             return Err(JsError::Dead);
         }
-        rx.recv().map_err(|_| JsError::Dead)?
+        Self::recv_eval(&rx)?
     }
 
     fn dispatch_event(&mut self, ty: &str, path: &[(String, u32)]) -> Result<bool, JsError> {
@@ -2751,7 +2766,7 @@ impl JsEngine for JscoreEngine {
         {
             return Err(JsError::Dead);
         }
-        rx.recv().map_err(|_| JsError::Dead)?
+        Self::recv_eval(&rx)?
     }
 
     fn set_import_map(&mut self, json: &str) {
@@ -2777,7 +2792,7 @@ impl JsEngine for JscoreEngine {
         if self.tx.send(Cmd::DrainNet { tx }).is_err() {
             return Vec::new();
         }
-        rx.recv().unwrap_or_default()
+        rx.recv_timeout(Self::EVAL_CMD_TIMEOUT).unwrap_or_default()
     }
 
     fn deliver_net_response(&mut self, resp: NetResponse) -> Result<(), JsError> {
@@ -2785,7 +2800,7 @@ impl JsEngine for JscoreEngine {
         if self.tx.send(Cmd::DeliverNet { resp, tx }).is_err() {
             return Err(JsError::Dead);
         }
-        rx.recv().map_err(|_| JsError::Dead)?
+        Self::recv_eval(&rx)?
     }
 
     fn deliver_es_event(
@@ -2807,7 +2822,7 @@ impl JsEngine for JscoreEngine {
         {
             return Err(JsError::Dead);
         }
-        rx.recv().map_err(|_| JsError::Dead)?
+        Self::recv_eval(&rx)?
     }
 
     fn deliver_ws_event(
@@ -2829,7 +2844,7 @@ impl JsEngine for JscoreEngine {
         {
             return Err(JsError::Dead);
         }
-        rx.recv().map_err(|_| JsError::Dead)?
+        Self::recv_eval(&rx)?
     }
 
     fn deliver_crypto_response(&mut self, resp: CryptoResponse) -> Result<(), JsError> {
@@ -2837,7 +2852,7 @@ impl JsEngine for JscoreEngine {
         if self.tx.send(Cmd::DeliverCrypto { resp, tx }).is_err() {
             return Err(JsError::Dead);
         }
-        rx.recv().map_err(|_| JsError::Dead)?
+        Self::recv_eval(&rx)?
     }
 
     fn install_storage(&mut self, local: std::collections::BTreeMap<String, String>) {
@@ -2849,7 +2864,7 @@ impl JsEngine for JscoreEngine {
         if self.tx.send(Cmd::DrainStorage { tx }).is_err() {
             return std::collections::BTreeMap::new();
         }
-        rx.recv().unwrap_or_default()
+        rx.recv_timeout(Self::EVAL_CMD_TIMEOUT).unwrap_or_default()
     }
 
     fn set_cookie_snapshot(&mut self, header: &str) {
@@ -2863,7 +2878,7 @@ impl JsEngine for JscoreEngine {
         if self.tx.send(Cmd::DrainCookies { tx }).is_err() {
             return Vec::new();
         }
-        rx.recv().unwrap_or_default()
+        rx.recv_timeout(Self::EVAL_CMD_TIMEOUT).unwrap_or_default()
     }
 
     fn set_media_claim(&mut self, path: &[(String, u32)], media: u64, codecs: Option<Vec<String>>) {
@@ -2886,7 +2901,7 @@ impl JsEngine for JscoreEngine {
         if self.tx.send(Cmd::DrainMediaCommands { tx }).is_err() {
             return Vec::new();
         }
-        rx.recv().unwrap_or_default()
+        rx.recv_timeout(Self::EVAL_CMD_TIMEOUT).unwrap_or_default()
     }
 }
 

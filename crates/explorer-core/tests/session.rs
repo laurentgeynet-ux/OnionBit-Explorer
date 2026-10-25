@@ -13241,6 +13241,140 @@ async fn govuk_app_module_eval_terminates() {
     eprintln!("wedge repro : {}", if r.is_err() { "TIMEOUT (wedge confirmé)" } else { "terminé" });
 }
 
+/// Wedge gov.uk — bissection DOM réel : le vrai HTML de
+/// gov.uk (scripts neutralisés sauf `application.js` →
+/// `/app.js`) + le vrai module. Si l'éval wedged en live
+/// mais pas sur `<div id=x>`, le déclencheur est le DOM.
+#[tokio::test]
+async fn govuk_dom_app_module_eval_terminates() {
+    let (mut s, t) = test_session();
+    let page = std::fs::read_to_string("C:/Users/Lou/AppData/Local/Temp/govuk_dom.html")
+        .unwrap_or_else(|_| "<!doctype html><div id=x>a</div><script type=\"module\" src=\"/app.js\"></script>".into());
+    t.route("/p", 200, Box::leak(page.into_boxed_str()));
+    t.route("/dead.js", 200, "void 0");
+    let body = std::fs::read_to_string("C:/Users/Lou/AppData/Local/Temp/govuk_app.js")
+        .unwrap_or_else(|_| "document.title='SKIP'".into());
+    t.route("/app.js", 200, Box::leak(body.into_boxed_str()));
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let a = s.open_tab();
+    let r = tokio::time::timeout(
+        std::time::Duration::from_secs(20),
+        s.navigate(a, "http://h.test/p"),
+    )
+    .await;
+    eprintln!("wedge DOM réel : {}", if r.is_err() { "TIMEOUT (wedge confirmé)" } else { "terminé" });
+}
+
+/// Wedge gov.uk — repro fidèle live : DOM réel + les 5
+/// vrais scripts dans l'ordre (lux-measurer, rum-custom-data
+/// module, rum-loader, load-analytics module, application
+/// module) — même état moteur qu'au vol wedged.
+#[tokio::test]
+async fn govuk_full_scripts_eval_terminates() {
+    let (mut s, t) = test_session();
+    let tmp = "C:/Users/Lou/AppData/Local/Temp/";
+    let page = std::fs::read_to_string(format!("{tmp}govuk_full.html"))
+        .unwrap_or_else(|_| "<!doctype html><div id=x>a</div><script type=\"module\" src=\"/app.js\"></script>".into());
+    t.route("/p", 200, Box::leak(page.into_boxed_str()));
+    t.route("/dead.js", 200, "void 0");
+    for (route, file) in [
+        ("/lux.js", "govuk_lux-measurer-d.js"),
+        ("/rumdata.js", "govuk_rum-custom-data-b.js"),
+        ("/rumloader.js", "govuk_rum-loader-a.js"),
+        ("/analytics.js", "govuk_load-analytics-d.js"),
+        ("/app.js", "govuk_app.js"),
+    ] {
+        let body = std::fs::read_to_string(format!("{tmp}{file}"))
+            .unwrap_or_else(|_| "void 0".into());
+        t.route(route, 200, Box::leak(body.into_boxed_str()));
+    }
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let a = s.open_tab();
+    let r = tokio::time::timeout(
+        std::time::Duration::from_secs(20),
+        s.navigate(a, "http://h.test/p"),
+    )
+    .await;
+    eprintln!("wedge scripts complets : {}", if r.is_err() { "TIMEOUT (wedge confirmé)" } else { "terminé" });
+}
+
+/// Variante bissection gov.uk : les **3 modules seuls**
+/// (rum-custom-data, load-analytics, application) — les
+/// scripts classiques async neutralisés. Si la wedge tient,
+/// le déclencheur est intra-modules (ex. `load-analytics`
+/// arme un état que `application` rencontre).
+#[tokio::test]
+async fn govuk_modules_only_eval_terminates() {
+    let (mut s, t) = test_session();
+    let tmp = "C:/Users/Lou/AppData/Local/Temp/";
+    let page = std::fs::read_to_string(format!("{tmp}govuk_mods.html"))
+        .unwrap_or_else(|_| "<!doctype html><div id=x>a</div><script type=\"module\" src=\"/rumdata.js\"></script><script type=\"module\" src=\"/analytics.js\"></script><script type=\"module\" src=\"/app.js\"></script>".into());
+    t.route("/p", 200, Box::leak(page.into_boxed_str()));
+    t.route("/dead.js", 200, "void 0");
+    for (route, file) in [
+        ("/rumdata.js", "govuk_rum-custom-data-b.js"),
+        ("/analytics.js", "govuk_load-analytics-d.js"),
+        ("/app.js", "govuk_app.js"),
+    ] {
+        let body = std::fs::read_to_string(format!("{tmp}{file}"))
+            .unwrap_or_else(|_| "void 0".into());
+        t.route(route, 200, Box::leak(body.into_boxed_str()));
+    }
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let a = s.open_tab();
+    let r = tokio::time::timeout(
+        std::time::Duration::from_secs(60),
+        s.navigate(a, "http://h.test/p"),
+    )
+    .await;
+    eprintln!("wedge modules seuls : {}", if r.is_err() { "TIMEOUT (wedge confirmé)" } else { "terminé" });
+}
+
+/// Bissection gov.uk : un helper par variante de jeu de
+/// scripts — `govuk_lux.html` (modules + lux-measurer) et
+/// `govuk_rum.html` (modules + rum-loader). Les modules
+/// seuls terminent ; le complet wedge → un classique async
+/// est l'ingrédient.
+#[tokio::test]
+async fn govuk_lux_variant_eval_terminates() {
+    govuk_variant("govuk_lux.html", "lux").await;
+}
+
+/// Voir `govuk_lux_variant_eval_terminates`.
+#[tokio::test]
+async fn govuk_rum_variant_eval_terminates() {
+    govuk_variant("govuk_rum.html", "rum").await;
+}
+
+async fn govuk_variant(page_file: &str, label: &str) {
+    let (mut s, t) = test_session();
+    let tmp = "C:/Users/Lou/AppData/Local/Temp/";
+    let page = std::fs::read_to_string(format!("{tmp}{page_file}"))
+        .unwrap_or_else(|_| "<!doctype html><div id=x>a</div>".into());
+    t.route("/p", 200, Box::leak(page.into_boxed_str()));
+    t.route("/dead.js", 200, "void 0");
+    for (route, file) in [
+        ("/lux.js", "govuk_lux-measurer-d.js"),
+        ("/rumloader.js", "govuk_rum-loader-a.js"),
+        ("/rumdata.js", "govuk_rum-custom-data-b.js"),
+        ("/analytics.js", "govuk_load-analytics-d.js"),
+        ("/app.js", "govuk_app.js"),
+    ] {
+        let body = std::fs::read_to_string(format!("{tmp}{file}"))
+            .unwrap_or_else(|_| "void 0".into());
+        t.route(route, 200, Box::leak(body.into_boxed_str()));
+    }
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let a = s.open_tab();
+    let r = tokio::time::timeout(
+        std::time::Duration::from_secs(60),
+        s.navigate(a, "http://h.test/p"),
+    )
+    .await;
+    eprintln!("wedge variante {label} : {}", if r.is_err() { "TIMEOUT" } else { "terminé" });
+    assert!(r.is_ok(), "navigate doit rendre (variante {label})");
+}
+
 /// Wedge gov.uk — bissection combinaison : les vrais fichiers
 /// servis en fake transport, même ordre que la page réelle.
 #[tokio::test]
@@ -13324,4 +13458,30 @@ async fn govuk_full_state_eval() {
     )
     .await;
     eprintln!("état-complet : {}", if r.is_err() { "TIMEOUT (wedge reproduit)" } else { "terminé" });
+}
+
+/// JS-C105 — éval wedge bornée : un script `while(true)` ne doit
+/// pas figer la session — `recv_timeout` sur les chemins moteur →
+/// `PipelineError` nommée, `navigate` revient, API vivante.
+#[tokio::test]
+async fn wedging_script_does_not_freeze_session() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/p",
+        200,
+        "<!doctype html><html><body><div id=\"x\">avant</div>\
+         <script>while(true){}</script></body></html>",
+    );
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let a = s.open_tab();
+    let r = tokio::time::timeout(
+        std::time::Duration::from_secs(45),
+        s.navigate(a, "http://h.test/p"),
+    )
+    .await;
+    eprintln!(
+        "wedge bornée : {}",
+        if r.is_err() { "TIMEOUT — échec" } else { "navigate retourné — borné" }
+    );
+    assert!(r.is_ok(), "le script boucle a figé la session");
 }
