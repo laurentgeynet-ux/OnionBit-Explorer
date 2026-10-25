@@ -13183,3 +13183,35 @@ async fn module_import_failure_surfaces() {
         s.dom_dump(a).map(|d| d.len())
     );
 }
+
+/// Bissection continuation webpack (mur lazy-CE github) :
+/// `import()` livré → la namespace résolue doit exposer
+/// `__webpack_modules__` — sinon `e.C(ns)` n'enregistre
+/// rien, `s(id)` ne trouve aucune factory, `define()` mort.
+#[tokio::test]
+async fn imported_namespace_exposes_webpack_modules_table() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/p",
+        200,
+        "<!doctype html><html><body><div id=\"x\">avant</div>\
+         <script type=\"module\">\
+         import('./dep.js').then(ns => {\
+           document.getElementById('x').textContent =\
+             ns.__webpack_modules__ ? 'NS-OK' : 'NS-VIDE';\
+         });\
+         </script></body></html>",
+    );
+    t.route(
+        "/dep.js",
+        200,
+        "export const __webpack_modules__={rpt(){customElements.define('x-a',class{})}};",
+    );
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let a = s.open_tab();
+    s.navigate(a, "http://h.test/p").await.unwrap();
+    s.pump_net().await;
+    s.pump_timers(a);
+    let dump = s.dom_dump(a).unwrap_or_default();
+    eprintln!("ns test : {dump}");
+}
