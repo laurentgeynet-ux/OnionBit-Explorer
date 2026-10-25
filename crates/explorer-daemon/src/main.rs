@@ -314,6 +314,7 @@ fn http_stack(
 }
 
 #[tokio::main]
+#[allow(clippy::too_many_lines)] // setup séquentiel — chaque bloc est documenté in situ
 async fn main() {
     tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::from_default_env())
