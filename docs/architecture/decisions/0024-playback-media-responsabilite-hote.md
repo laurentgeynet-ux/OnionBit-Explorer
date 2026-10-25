@@ -1,6 +1,8 @@
 # ADR-0024 — Lecture média : responsabilité d'hôte, seam `MediaSurface`
 
-Statut : Proposée — arbitrage produit, prolonge ADR-0023.
+Statut : **Acceptée** — livrée (étape 71a–d), amendée
+2026-10-25 (stack hôte nommée, § Amendement). Prolonge
+ADR-0023.
 
 ## Contexte
 
@@ -104,3 +106,19 @@ pas une capacité du moteur.**
 - **PIPE** : R-34 (médias vrais remplacés boxtree) donne
   au seam une géométrie fiable — taille intrinsèque du
   poster, rect exact — prérequis documenté, non bloquant.
+
+## Amendement 2026-10-25 — stack hôte nommée
+
+Lecture ambiguïté levée (décision lead) : « zéro codec »
+vise les **crates `explorer-*`** — le workspace Rust reste
+sans décodeur. Côté `app/`, le backend de lecture est
+concrètement **`video_player` + `fvp`** (moteur MDK, FFmpeg
+en **liaison dynamique** — LGPL compatible MIT/Apache,
+vérifié à l'étape 71d ; non statique). L'option « décodeurs
+internes » (`symphonia`, `rav1d`, point 3 de la décision)
+devient explicitement **non planifiée** : la couverture
+FFmpeg hôte la rend sans besoin — elle ne se rouvrirait que
+si un contexte sans hôte l'exigeait (embedder headless,
+variante producteur interne du même seam). MSE et DRM
+restent nommés hors atteinte — DRM dorénavant couvert par
+la stratégie de délégation ADR-0027.

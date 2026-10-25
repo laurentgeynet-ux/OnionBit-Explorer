@@ -1069,5 +1069,9 @@ roadmap — candidats à un ADR dédié si un besoin réel émerge :
   moteur) ;
 - site isolation multi-processus (modèle de menace : ADR-0011 ;
   trajectoire sandbox figée par ADR-0026 — paliers P1/P2/P3
-  déclenchés par conditions).
+  déclenchés par conditions) ;
+- lecture DRM (Widevine/FairPlay — Netflix, myCANAL, Disney+,
+  Prime…) : verrou contractuel nommé par ADR-0024 ; délégation
+  WebView2 au niveau `app/` actée par ADR-0027 — garée,
+  déclenchée à usage réel (Étape 136 NAV).
 
