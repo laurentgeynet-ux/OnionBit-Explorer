@@ -4146,6 +4146,7 @@ fn geometry_bridge_gbrect_and_dims() {
                     h: 50.0,
                 },
                 fixed: false,
+                positioned: false,
             },
         );
         // #list → html>body>ul[0] — sous un ancêtre fixed :
@@ -4164,6 +4165,7 @@ fn geometry_bridge_gbrect_and_dims() {
                     h: 40.0,
                 },
                 fixed: true,
+                positioned: true,
             },
         );
     }
@@ -4896,6 +4898,7 @@ fn cap180_inverse_geometry() {
                     h: 50.0,
                 },
                 fixed: false,
+                positioned: false,
             },
         );
         // #list ul — fixed, déjà viewport (10,15)-(110,65)
@@ -4914,6 +4917,7 @@ fn cap180_inverse_geometry() {
                     h: 50.0,
                 },
                 fixed: true,
+                positioned: true,
             },
         );
     }
@@ -5631,6 +5635,7 @@ fn cap196_computed_position_from_geometry() {
                     h: 40.0,
                 },
                 fixed: true,
+                positioned: true,
             },
         );
     }
@@ -5649,5 +5654,83 @@ fn cap196_computed_position_from_geometry() {
             s.getPropertyValue('position')"
         ),
         "fixed///fixed"
+    );
+}
+
+/// `offsetParent`/`offsetTop`/`offsetLeft` (JS-C97, palier 2
+/// i#19) : la session publie `positioned` par élément ; le
+/// miroir marche sa chaîne — plus proche ancêtre positionné
+/// ou `body`, `null` pour `position:fixed` ; la distance est
+/// `rect − parent.rect` en coords document (insensible au
+/// scroll) ; `fixed` → `rect.y` viewport.
+#[test]
+fn c97_offset_parent_top_left() {
+    let (mut e, _jar, _navs) = engine_full(PAGE);
+    e.set_viewport(800, 600);
+    let geom = explorer_jscore::GeometrySlot::default();
+    {
+        let mut g = geom.lock().unwrap();
+        g.scroll_y = 100.0;
+        // body → html>body[0] — positionné (relative).
+        g.rects.insert(
+            vec![("html".to_string(), 0), ("body".to_string(), 0)],
+            explorer_jscore::ElementGeom {
+                rect: explorer_jscore::GeoRect {
+                    x: 0.0,
+                    y: 8.0,
+                    w: 800.0,
+                    h: 2000.0,
+                },
+                fixed: false,
+                positioned: true,
+            },
+        );
+        // #main div (statique) → html>body>div[0]
+        g.rects.insert(
+            vec![
+                ("html".to_string(), 0),
+                ("body".to_string(), 0),
+                ("div".to_string(), 0),
+            ],
+            explorer_jscore::ElementGeom {
+                rect: explorer_jscore::GeoRect {
+                    x: 40.0,
+                    y: 120.0,
+                    w: 100.0,
+                    h: 50.0,
+                },
+                fixed: false,
+                positioned: false,
+            },
+        );
+        // #list ul (fixed) → html>body>ul[0]
+        g.rects.insert(
+            vec![
+                ("html".to_string(), 0),
+                ("body".to_string(), 0),
+                ("ul".to_string(), 0),
+            ],
+            explorer_jscore::ElementGeom {
+                rect: explorer_jscore::GeoRect {
+                    x: 0.0,
+                    y: 8.0,
+                    w: 200.0,
+                    h: 40.0,
+                },
+                fixed: true,
+                positioned: true,
+            },
+        );
+    }
+    e.set_geometry_ctx(0, geom);
+    assert_eq!(
+        evf(
+            &mut e,
+            "var out=[],m=document.getElementById('main'),l=document.getElementById('list');\
+             out.push(m.offsetParent===document.body,l.offsetParent===null);\
+             out.push(m.offsetTop,m.offsetLeft,l.offsetTop,l.offsetLeft);\
+             out.join(',')"
+        ),
+        "true,true,112,40,8,0"
     );
 }

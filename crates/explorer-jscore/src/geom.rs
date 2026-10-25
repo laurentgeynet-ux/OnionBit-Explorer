@@ -80,6 +80,12 @@ pub struct ElementGeom {
     /// `position:fixed` — le rect est en coords viewport
     /// (ne pas soustraire le scroll à la lecture).
     pub fixed: bool,
+    /// Une boîte contributrice est **positionnée** (computed
+    /// `position` ≠ `static` — relative/absolute/fixed/sticky,
+    /// JS-C97 palier 2) : sert au calcul d'`offsetParent`
+    /// (plus proche ancêtre positionné — le miroir marche sa
+    /// propre chaîne et consulte ce bit par `element_path`).
+    pub positioned: bool,
 }
 
 /// Table publiée — reconstruite entièrement par l'embedder à

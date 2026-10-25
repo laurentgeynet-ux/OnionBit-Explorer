@@ -4730,6 +4730,48 @@ impl Host for NodeHost {
             // « scroll bottom » — mesuré sur google.com) ;
             // `scroll*` = dimensions du document publiées
             // (repli viewport sans table — harnais).
+            // `offsetParent` (JS-C97) — le plus proche ancêtre
+            // positionné (`ElementGeom.positioned` publié par la
+            // session) ou `td`/`th`/`table`/`body`, `null` pour
+            // `position:fixed`, racine et élément sans boîte.
+            "offsetParent" => {
+                let (fixed, parent) = {
+                    let fixed = element_geom(&self.dom, node).is_some_and(|(_, f, ..)| f);
+                    (fixed, offset_parent_node(&self.dom, node))
+                };
+                return Ok(Some(if fixed {
+                    Value::Null
+                } else {
+                    match parent {
+                        Some(p) => node_value(e, &self.dom, &self.cache, p),
+                        None => Value::Null,
+                    }
+                }));
+            }
+            // `offsetTop`/`offsetLeft` — distance border-edge de
+            // l'élément au padding-edge de l'`offsetParent`
+            // (union des boîtes ≙ border box, borne `crate::geom`)
+            // : `rect − parent.rect` en coords **document**
+            // (insensible au scroll) ; `position:fixed` → rect.y
+            // (déjà viewport, offsetParent `null` spec) ;
+            // pas de géométrie → 0 (repli historique).
+            "offsetTop" | "offsetLeft" => {
+                let vert = key == "offsetTop";
+                let px = match element_geom(&self.dom, node) {
+                    Some((r, fixed, ..)) => {
+                        if fixed {
+                            f64::from(if vert { r.y } else { r.x })
+                        } else {
+                            let base = offset_parent_node(&self.dom, node)
+                                .and_then(|p| element_geom(&self.dom, p))
+                                .map_or(0.0, |(pr, ..)| f64::from(if vert { pr.y } else { pr.x }));
+                            f64::from(if vert { r.y } else { r.x }) - base
+                        }
+                    }
+                    None => 0.0,
+                };
+                return Ok(Some(Value::Num(px)));
+            }
             "clientWidth" | "clientHeight" | "scrollWidth" | "scrollHeight" | "offsetWidth"
             | "offsetHeight" => {
                 let (vw, vh) = e.hooks.viewport;
@@ -5900,6 +5942,48 @@ fn element_geom_rect(dom: &DomRef, node: NodeId) -> Option<(f64, f64, f64, f64)>
 fn element_geom_size(dom: &DomRef, node: NodeId) -> Option<(f64, f64)> {
     let (r, ..) = element_geom(dom, node)?;
     Some((f64::from(r.w), f64::from(r.h)))
+}
+
+/// `positioned` publié pour `node` (JS-C97) — `true` si une
+/// boîte contributrice a `position` ≠ `static`.
+fn geom_positioned(dom: &DomRef, node: NodeId) -> bool {
+    let Some((map, path)) = ({
+        let d = dom.borrow();
+        d.geometry.clone().zip(d.element_path(node))
+    }) else {
+        return false;
+    };
+    map.lock()
+        .ok()
+        .and_then(|g| g.rects.get(&path).copied())
+        .is_some_and(|eg| eg.positioned)
+}
+
+/// `offsetParent` spec (JS-C97) — le plus proche ancêtre
+/// **élément** positionné (`ElementGeom.positioned`), ou
+/// `td`/`th`/`table`/`body` ; `None` quand la marche atteint
+/// `#document` (élément racine, sans boîte, `fixed` — le
+/// `fixed` est tranché par l'appelant via `ElementGeom.fixed`).
+fn offset_parent_node(dom: &DomRef, node: NodeId) -> Option<NodeId> {
+    let mut cur = node;
+    loop {
+        let p = dom_parent(dom, cur)?;
+        let (tag, is_el, is_root) = {
+            let d = dom.borrow();
+            (
+                d.nodes[p as usize].tag.clone(),
+                d.nodes[p as usize].kind == NodeKind::Element,
+                p == d.root,
+            )
+        };
+        if is_root || !is_el {
+            return None;
+        }
+        if matches!(tag.as_str(), "body" | "table" | "td" | "th") || geom_positioned(dom, p) {
+            return Some(p);
+        }
+        cur = p;
+    }
 }
 
 /// Dimension du document publiée pour `scroll*` de l'élément

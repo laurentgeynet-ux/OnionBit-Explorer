@@ -4747,6 +4747,38 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   avec les métadonnées de
   document). 8 tests session.
 
+- [ ] **Étape 136. Onglet délégué
+  WebView2 pour domaines DRM
+  (ADR-0027) — garée, déclencheur
+  usage réel** : bascule de
+  l'onglet Flutter sur une
+  WebView2 native Windows pour
+  une allowlist de domaines DRM
+  (Netflix, myCANAL, Disney+,
+  Prime…) — le chrome (onglets,
+  omnibox, tokens, historique)
+  reste Explorer, le moteur
+  n'est jamais contacté sur ces
+  domaines (`navigate` REST et
+  FFI court-circuités).
+  Chantier `app/` pur, aucune
+  couture PIPE ; la seam
+  `MediaSurface` (étape 71)
+  reste la voie du non-DRM.
+  Contenu à l'ouverture :
+  allowlist en config (§4.13),
+  modèle d'onglet délégué sur
+  `BrowserTab`, resync des
+  events de navigation WebView2
+  (titre/URL/historique),
+  indicateur chrome de
+  délégation, repli honnête
+  hors-Windows (site non lu),
+  licence du plugin vérifiée.
+  Hors périmètre de l'étape :
+  MSE/EME moteur — murs nommés
+  ADR-0024/0027.
+
 - [ ] **Écarts terrain — vol humain
   22/10 (release `39ab821`, FFI)** :
   second run humain — trois constats
@@ -6566,44 +6598,61 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   pas l'arbre aplat (T3 CAP-197).
   Test `cap198_shadow_event_retarget`.
 
-- [ ] **JS-C96. `await` en sous-expression
-  paresseuse (mur n°1 x.com, vol
-  `ebb5168`)** — borne documentée de
-  JS-C34b désormais **mesurée sur site
-  réel** : `entry-client-logged-out--
-  kyjfLnL.js` jette `TypeError "await
-  on a pending promise is unsupported"`
-  (`await_value`, `interp/mod.rs:3327`)
-  — `lower_suspend_body` ne hisse pas
-  `await`/`yield` portés par les
+- [x] **JS-C96. `await` hors lowering
+  — toutes les positions couvertes
+  (mur n°1 x.com, vol `ebb5168`)** —
+  borne documentée de JS-C34b mesurée
+  sur site réel (`TypeError "await on
+  a pending promise is unsupported"`).
+  **Correction du diagnostic** : les
   sous-expressions paresseuses
-  (`&&`/`?:`/`?.`/`??`). Porter le
-  hoist aux positions d'expression
-  (ou repli micro-task poll).
-  **Prioritaire** : landing x.com
-  rendue au vol `ebb5168` (premier
-  rendu x.com du projet), bootstrap
-  arrêté sur ce mur.
+  (`&&`/`?:`/`?.`/`??`) étaient déjà
+  hissées — les vrais trous étaient
+  les **têtes de statements** et les
+  **motifs**. Livré : `for` init
+  (var/let/expr), `case` de `switch`,
+  `with`, `using`/`await using`,
+  `for-in var_init`, défauts de motifs
+  (`{a = …}`/`[… = …]` — déclarations,
+  `catch`, cibles `for-of`),
+  `for await` (nouveau frame
+  `FKind::ForAwait` — `it.next()`
+  awaited par pas, `done`/rejet spec),
+  clés calculées d'objets et de
+  classes, `class extends`, `export
+  default`/decl, et `lower_suspend_fn`
+  — paramètres `a = await e` déplacés
+  dans le corps en `if (a ===
+  undefined) a = e` (paresse spec
+  préservée). Déviations assumées
+  documentées : suspends hissés **une
+  fois, éagerment** pour `case`/`catch`
+  /défauts de motifs et têtes de boucle.
+  Régressions `c96_*` (5 tests, 13+
+  positions — sonde exhaustive
+  pré-fix exécutée).
 
-- [ ] **JS-C97. Palier 2 geom —
-  `offsetTop`/`offset*` sur
-  `ElementGeom` (verrou de valeur
-  github, vol `73820bf`)** — la
-  garde `--marketing-header-fixed-top`
-  lit `a.offsetTop` après
-  `"fixed"===getComputedStyle().position`
-  (CAP-196 servi) : la var reste
-  absente sans `offsetTop`. Chaîne
-  complète mesurée au source :
-  `position` + `children.find(contains)`
-  + `offsetTop` → `setProperty`.
-  Même canal que CAP-196 (i#19 —
-  `StyleHost` ← `ElementGeom`
-  publié). **Preuve source, pas
-  spéculation.** Requis aussi pour
-  `offsetHeight`/`clientHeight`
-  (même palier — les guards
-  géométrie des menus/overlays).
+- [x] **JS-C97. Palier 2 geom —
+  `offsetParent`/`offsetTop`/
+  `offsetLeft` sur `ElementGeom`
+  (verrou github, vol `73820bf`)** —
+  la garde `--marketing-header-fixed-top`
+  lisait `a.offsetTop` (CAP-196
+  servi pour `position`). Livré :
+  `ElementGeom.positioned` (computed
+  `position` ≠ `static`, publié à la
+  collecte `collect_geometry`), la
+  marche `offsetParent` côté miroir —
+  plus proche ancêtre positionné ou
+  `td`/`th`/`table`/`body`, `null`
+  pour `fixed`/racine/sans boîte
+  (spec CSSOM) ; `offsetTop`/
+  `offsetLeft` = `rect − parent.rect`
+  en coords **document** (insensible
+  au scroll, union ≙ border box) ;
+  `fixed` → `rect` viewport.
+  Régression `c97_offset_parent_
+  top_left`.
 
 ## Tâches continues
 

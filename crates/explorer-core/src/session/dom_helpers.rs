@@ -82,6 +82,10 @@ pub(crate) fn collect_geometry(
                 h: bx.rect.height,
             });
             e.fixed |= fixed;
+            // JS-C97 : la position calculée sert d'
+            // `offsetParent` aux descendants — la marche des
+            // ancêtres vit côté miroir (`positioned` ≠ static).
+            e.positioned |= bx.position != explorer_layout::Position::Static;
         }
     }
     for c in &bx.children {

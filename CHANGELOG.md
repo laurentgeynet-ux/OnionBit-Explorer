@@ -9,6 +9,83 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **JS-C96 — `await` hors lowering :
+  toutes les positions couvertes**
+  (`explorer-jscore`) : le mur x.com
+  `TypeError: await on a pending
+  promise is unsupported` visait les
+  positions que `lower_suspend_body`
+  ne hissait pas — les sous-
+  expressions paresseuses étaient
+  déjà couvertes ; les vrais trous
+  étaient les têtes de statements et
+  les motifs. Livré : `for` init,
+  `case` de `switch`, `with`,
+  `using`/`await using`, `for-in`
+  `var_init`, défauts de motifs
+  (`{a = …}`, `[… = …]` —
+  déclarations, `catch`, cibles
+  `for-*`), clés calculées d'objets/
+  classes, `class extends`, `export`,
+  et `lower_suspend_fn` pour les
+  paramètres par défaut (`if (a ===
+  undefined) a = e` — paresse spec
+  préservée). **`for await`** :
+  nouveau frame `FKind::ForAwait` —
+  `it.next()` awaited par pas
+  (`@@asyncIterator` puis repli
+  `@@iterator` spec), `{value,done}`
+  par item, rejet → throw dans le
+  corps, `break`/`continue`/GC
+  couverts. Déviations assumées :
+  suspends hissés une fois éagerment
+  pour `case`/`catch`/défauts de
+  motifs/têtes de boucle. Tests
+  `c96_*` (5).
+
+- **JS-C97 — `offsetParent`/
+  `offsetTop`/`offsetLeft`**
+  (`explorer-jscore` + `explorer-core`
+  — palier 2 géométrie i#19, verrou
+  github `--marketing-header-fixed-top`)
+  : `ElementGeom.positioned` publié à
+  la collecte (`position` ≠ `static`),
+  la marche `offsetParent` vit côté
+  miroir — plus proche ancêtre
+  positionné ou `td`/`th`/`table`/
+  `body`, `null` pour `fixed`/racine/
+  sans boîte (spec CSSOM) ;
+  `offsetTop`/`offsetLeft` = `rect −
+  parent.rect` en coords document
+  (insensible au scroll) ; `fixed` →
+  rect viewport. Test
+  `c97_offset_parent_top_left`.
+
+### Added
+
+- **ADR-0027 — délégation DRM : onglet
+  WebView2 au niveau `app/`** (proposée,
+  garée par déclencheur usage réel) :
+  acte la stratégie du journal
+  2026-10-22 — l'onglet Flutter bascule
+  sur une WebView2 native Windows
+  (Widevine L1 + PlayReady matériels)
+  pour une allowlist explicite et
+  minimale de domaines DRM ; chrome
+  Explorer conservé (onglets, omnibox,
+  historique), `navigate` REST/FFI
+  court-circuité, exception d'égress
+  nommée (ADR-0022, proxy, cookies et
+  profil inapplicables aux domaines
+  délégués), repli honnête hors-Windows.
+  Alternatives documentées : pont FFI
+  Widevine (L3/480p + mois + fragilité)
+  écarté, exclusion assumée conservée
+  en repli. Zéro dépendance au
+  workspace Rust — `forbid(unsafe)`
+  et ADR-0001 intacts ; aucun code
+  modifié. Roadmap : Étape 136 garée.
+
 - **CAP-198 — Shadow DOM tranche 4 :
   event retargeting** (`explorer-jscore`)
   : le chemin de propagation des

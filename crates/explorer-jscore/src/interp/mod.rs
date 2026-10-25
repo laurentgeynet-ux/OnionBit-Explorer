@@ -5385,8 +5385,20 @@ impl Engine {
         let outer_strict = self.strict;
         self.strict = lit.strict;
         let local = Env::local(env);
+        // JS-C96 : générateur/async — les `= défaut` de
+        // paramètres contenant un suspend sont déplacés dans
+        // le corps (la liaison s'exécute hors `GExec`, un
+        // `await` pendante y jetterait). `lit` reste la
+        // référence (`fn.length`, `args_map`).
+        let lowered_fn =
+            (lit.is_gen || lit.is_async).then(|| crate::interp::lazy::lower_suspend_fn(lit));
         // Param binding: patterns + `= default` + `...rest`.
-        for (i, p) in lit.params.iter().enumerate() {
+        for (i, p) in lowered_fn
+            .as_ref()
+            .map_or(&lit.params, |(params, _)| params)
+            .iter()
+            .enumerate()
+        {
             let v = if p.rest {
                 self.new_array(args.get(i..).unwrap_or(&[]).to_vec())
             } else {
@@ -5457,12 +5469,18 @@ impl Engine {
         if !lit.is_arrow {
             Self::env_put(&local, NEW_TARGET, nt, false);
         }
-        self.hoist(&lit.body, &local);
+        let lowered_body = lowered_fn.as_ref().map(|(_, b)| b.clone());
+        self.hoist(
+            lowered_body.as_deref().map_or(&lit.body[..], |b| &b[..]),
+            &local,
+        );
         // Générateur lazy (JS-C34) : le corps ne tourne
         // qu'à `next()` — un `GExec` suspendable porte la
         // pile de contrôle ; `yield` suspend/reprend.
         if lit.is_gen {
-            let body = crate::interp::lazy::lower_suspend_body(&lit.body);
+            let body = lowered_body
+                .clone()
+                .unwrap_or_else(|| crate::interp::lazy::lower_suspend_body(&lit.body));
             let it = crate::interp::lazy::gen_lazy_obj(self, local.clone(), this, body);
             if let (Value::Obj(iid), Value::Obj(fid)) = (it, f) {
                 if let Some(proto) = self.get_prop(fid, "prototype") {
@@ -5481,7 +5499,8 @@ impl Engine {
         // pendante suspend le frame et s'enfile en réaction
         // `then` ; `return`/`throw` settle la promesse rendue.
         if lit.is_async {
-            let body = crate::interp::lazy::lower_suspend_body(&lit.body);
+            let body =
+                lowered_body.unwrap_or_else(|| crate::interp::lazy::lower_suspend_body(&lit.body));
             let prom = self.new_promise();
             let gen = crate::interp::lazy::gen_lazy_obj(self, local.clone(), this, body);
             if let Value::Obj(gid) = gen {
