@@ -5308,16 +5308,17 @@ fn cap191_shadow_surface() {
         evf(&mut e, "var t='';try{h.attachShadow()}catch(v){t=v.name}t"),
         "NotSupportedError"
     );
-    // Pas de répartition : `assignedSlot` null,
-    // `assignedElements()` vide — borné honnête.
+    // Répartition flat (CAP-195 tranche 3) : `light` (enfant
+    // light-DOM sans `slot`) est distribué au slot par défaut
+    // — `assignedSlot` résout, `assigned*` comptent réel.
     assert_eq!(
         evf(
             &mut e,
             "var sl=d.createElement('slot');r.appendChild(sl);\
-            [d.getElementById('light').assignedSlot===null,\
+            [d.getElementById('light').assignedSlot===sl,\
              sl.assignedElements().length, sl.assignedNodes().length].join('|')"
         ),
-        "true|0|0"
+        "true|1|1"
     );
     // innerHTML sur la racine (fragment parsing).
     assert_eq!(

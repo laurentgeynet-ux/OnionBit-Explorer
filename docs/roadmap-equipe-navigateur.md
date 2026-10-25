@@ -3455,6 +3455,19 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   couvertes. Test `tla_module_awaits_
   pending`.
 
+- [x] **CAP-197. Shadow DOM T3+T5
+  (miroir)** — T3 répartition flat :
+  `slots_in`/`slot_assigned`/
+  `assigned_slot` (`<slot>` DFS,
+  enfants hôte dont `slot` égale
+  `name`, textes → défaut, racines
+  exclues) ; `el.slot=` reflété.
+  T5 `<template shadowrootmode>` —
+  fragment `content` = racine.
+  Journal : flat-tree rendu + parse
+  déclaratif réel = entrées PIPE
+  futures. Tests `shadow_t3`.
+
 - [x] **CAP-188. `document.evaluate` :
   sous-ensemble `XPath` borné (sonde)** —
   `evaluate(expr, ctx, resolver, type,

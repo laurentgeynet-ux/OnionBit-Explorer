@@ -1121,6 +1121,31 @@ impl Dom {
         for (seq, n) in (0u32..).zip(d.by_tag(d.root, "script")) {
             d.script_seqs.insert(seq, n);
         }
+        // T5 — `<template shadowrootmode>` déclaratif :
+        // tout `template` portant l'attribut dont le parent
+        // est un élément devient la racine shadow de ce
+        // parent (spec DSD — `<template>` reste l'élément
+        // hôte de l'arbre ; ses enfants = l'arbre shadow).
+        // Borne : pas de `shadowrootserializable`/`delegatesfocus`
+        // matérialisés (surface non mesurée).
+        let tmpls = d.by_tag(d.root, "template");
+        for t in tmpls {
+            let Some(mode) = d.attr(t, "shadowrootmode").map(str::to_string) else {
+                continue;
+            };
+            let open = mode != "closed";
+            if let Some(p) = d.nodes[t as usize].parent {
+                if d.nodes[p as usize].kind == NodeKind::Element {
+                    // La racine est le fragment `content` du
+                    // template (spec DSD — les enfants y
+                    // vivent ; le `<template>` reste enfant
+                    // light-DOM de l'hôte).
+                    if let Some(frag) = d.template_content(t) {
+                        d.attach_shadow_root(p, frag, open);
+                    }
+                }
+            }
+        }
         // CAP-185 : idem pour les `<link>` — la session livre
         // `load`/`error` de fin de feuille sur l'élément visé
         // par ordinal (tous `<link>`, cf. `link_seqs`).
@@ -1376,6 +1401,77 @@ impl Dom {
     #[must_use]
     pub fn is_shadow_root(&self, node: NodeId) -> bool {
         self.shadow_hosts.contains_key(&node)
+    }
+
+    /// Les `<slot>` de l'arbre shadow de `root`, DFS —
+    /// l'analyse flat n'a pas de slots imbriqués à aplatir
+    /// (borne tranche 3).
+    #[must_use]
+    pub fn slots_in(&self, root: NodeId) -> Vec<NodeId> {
+        let mut out = Vec::new();
+        let mut stack = vec![root];
+        while let Some(n) = stack.pop() {
+            let node = &self.nodes[n as usize];
+            if node.kind == NodeKind::Element && node.tag == "slot" {
+                out.push(n);
+            }
+            for &c in node.children.iter().rev() {
+                stack.push(c);
+            }
+        }
+        out
+    }
+
+    /// Nœuds distribués au `<slot>` `slot` — répartition
+    /// flat (tranche 3, miroir) : les enfants light-DOM de
+    /// l'hôte dont l'attribut `slot` égale `slot.name`
+    /// (défaut `""` → enfants sans `slot` ou `slot=""` ;
+    /// les textes vont toujours au slot par défaut).
+    /// `flatten` non porté — les `<slot>` imbriqués ne se
+    /// re-distribuent pas.
+    #[must_use]
+    pub fn slot_assigned(&self, slot: NodeId, elements_only: bool) -> Vec<NodeId> {
+        // Hôte = parent de la racine shadow contenant `slot`.
+        let mut cur = slot;
+        let host = loop {
+            match self.nodes[cur as usize].parent {
+                Some(p) if self.is_shadow_root(p) => match self.shadow_host(p) {
+                    Some(h) => break h,
+                    None => return Vec::new(),
+                },
+                Some(p) => cur = p,
+                None => return Vec::new(),
+            }
+        };
+        let name = self.attr(slot, "name").unwrap_or_default().to_string();
+        self.child_nodes(host)
+            .into_iter()
+            .filter(|&c| {
+                let n = &self.nodes[c as usize];
+                match n.kind {
+                    // Une racine shadow n'est pas distribuable.
+                    NodeKind::Element => {
+                        !self.is_shadow_root(c) && self.attr(c, "slot").unwrap_or_default() == name
+                    }
+                    NodeKind::Text => !elements_only && name.is_empty(),
+                    NodeKind::Fragment => false,
+                }
+            })
+            .collect()
+    }
+
+    /// `el.assignedSlot` — le `<slot>` de la racine shadow du
+    /// parent de `el` dont `name` égale `el.slot` (défaut
+    /// `""`) ; `None` hors distribution (pas de racine ou
+    /// pas de slot correspondant — borne flat).
+    #[must_use]
+    pub fn assigned_slot(&self, el: NodeId) -> Option<NodeId> {
+        let parent = self.nodes[el as usize].parent?;
+        let (root, _) = self.shadow_roots.get(&parent).copied()?;
+        let want = self.attr(el, "slot").unwrap_or_default();
+        self.slots_in(root)
+            .into_iter()
+            .find(|&s| self.attr(s, "name").unwrap_or_default() == want)
     }
 
     /// Racine shadow de `host` — `include_closed` pour
