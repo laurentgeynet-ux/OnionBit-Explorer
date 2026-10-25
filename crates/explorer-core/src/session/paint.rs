@@ -238,6 +238,51 @@ impl Session {
         r
     }
 
+    /// Relayout ciblé sur les éléments animés (étape 139 —
+    /// la mesure profil `commit_lock` 33,5 s sur github
+    /// attribuait le coût à un **reflow complet par tick
+    /// d'animation**) : les ordinals `elem` des transitions/
+    /// animations actives sont résolus en `NodeId` par
+    /// `element_ordinals`, `journal_cover` pose
+    /// `relayout_subtree` sur leur ancêtre commun — repli
+    /// reflow complet si la cible n'est pas trouvable.
+    pub(crate) fn relayout_animated(
+        &mut self,
+        tab: TabId,
+        ords: &[usize],
+    ) -> Result<(), CoreError> {
+        self.reclaim_orphaned_paint(tab);
+        let ctx = self.apply_ctx();
+        let Some(entry) = self.tabs.get_mut(&tab) else {
+            return Err(CoreError::UnknownTab(tab));
+        };
+        let canvas_ops = entry.js.as_deref_mut().map_or_else(
+            explorer_js::CanvasOpsTable::new,
+            explorer_js::JsEngine::canvas_ops,
+        );
+        let mut p = entry.take_paint();
+        let Some(dom) = p.dom.take() else {
+            entry.put_paint(p);
+            return Err(CoreError::EmptyDocument);
+        };
+        let ord_to_node: std::collections::HashMap<usize, explorer_dom::NodeId> =
+            anim_items::element_ordinals(&dom)
+                .into_iter()
+                .map(|(n, o)| (o, n))
+                .collect();
+        let touched: Vec<explorer_dom::NodeId> =
+            ords.iter().filter_map(|o| ord_to_node.get(o).copied()).collect();
+        let r = match apply::journal_cover(&dom, &touched) {
+            Some(t) => apply::relayout_subtree_payload(&mut p, &ctx, &dom, t, &canvas_ops),
+            None => apply::relayout_dom_payload(&mut p, &ctx, &dom, &canvas_ops),
+        };
+        p.dom = Some(dom);
+        if let Some(entry) = self.tabs.get_mut(&tab) {
+            entry.put_paint(p);
+        }
+        r
+    }
+
     /// Passe de styles partagée par le reflow complet et le
     /// relayout incrémental (étape 55f) : cascade `<style>` +
     /// `<link>`, calcul sur tout `dom`, surcharge des

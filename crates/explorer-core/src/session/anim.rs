@@ -45,13 +45,22 @@ impl Session {
     /// étape 55e). `Ok(true)` = frame produite + émise.
     pub(crate) fn advance_animations(&mut self, tab: TabId) -> Result<bool, CoreError> {
         let now = Instant::now();
-        let active = self.tabs.get(&tab).is_some_and(|t| {
-            !t.transitions.is_empty() || t.animations.iter().any(|a| a.playing(now))
+        let (active, ords) = self.tabs.get(&tab).map_or((false, Vec::new()), |t| {
+            let playing = !t.transitions.is_empty()
+                || t.animations.iter().any(|a| a.playing(now));
+            let mut o: Vec<usize> = t.transitions.iter().map(|tr| tr.elem).collect();
+            o.extend(
+                t.animations
+                    .iter()
+                    .filter(|a| a.playing(now))
+                    .map(|a| a.elem),
+            );
+            (playing, o)
         });
         if !active {
             return Ok(false);
         }
-        match self.relayout(tab) {
+        match self.relayout_animated(tab, &ords) {
             Ok(()) => {
                 self.emit_invalidated(tab);
                 Ok(true)

@@ -1079,6 +1079,23 @@ fn apply_journal(
     Ok(out)
 }
 
+/// Relayout incrémental ciblé par `NodeId` (137a — voie
+/// journal et avance animée) : `relayout_subtree` sur la
+/// cible, repli reflow complet si la voie ciblée refuse.
+pub(crate) fn relayout_subtree_payload(
+    p: &mut PaintPayload,
+    ctx: &ApplyCtx,
+    dom: &Dom,
+    target: explorer_dom::NodeId,
+    canvas_ops: &CanvasOpsTable,
+) -> Result<(), CoreError> {
+    if try_incr_payload(p, ctx, Some(dom), dom, target, target, canvas_ops) {
+        Ok(())
+    } else {
+        relayout_dom_payload(p, ctx, dom, canvas_ops)
+    }
+}
+
 /// Relayout post-rejeu journal (137a) : incrémental ciblé
 /// sur l'ancêtre commun des ops — `relayout_subtree` au
 /// lieu du reflow complet, repli `relayout_dom_payload` si
@@ -1106,7 +1123,10 @@ fn journal_relayout(
 /// Ancêtre commun le plus profond des cibles d'ops journal
 /// (137a — la zone à re-poser). `None` = vide (pas de cible
 /// → le repli `relayout_dom_payload` tourne comme avant).
-fn journal_cover(dom: &Dom, touched: &[explorer_dom::NodeId]) -> Option<explorer_dom::NodeId> {
+pub(crate) fn journal_cover(
+    dom: &Dom,
+    touched: &[explorer_dom::NodeId],
+) -> Option<explorer_dom::NodeId> {
     let mut seen = std::collections::HashSet::new();
     let mut it = touched.iter().copied().filter(|n| seen.insert(*n));
     let first = it.next()?;
