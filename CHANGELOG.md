@@ -1711,6 +1711,51 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   leur éval — écart spec assumé) ;
   `readystatechange` enfant non propagé. 2 tests
   session.
+- **CAP-183 — surfaces honnêtes :
+  `createNodeIterator`, `SharedWorker`,
+  `CSSStyleSheet`, ctors spec-fidèles
+  (sonde `_census_calls` — 17 échecs
+  restants après CAP-182, triés en
+  artefacts spec vs trous réels)**
+  (`explorer-jscore`, `explorer-daemon`) :
+  `document.createNodeIterator(root,
+  whatToShow?, filter?)` — itérateur
+  document-order **incluant la racine**
+  au premier `nextNode` (spec : `Node
+  Iterator` ≠ `TreeWalker`), `previous
+  Node` via `tw_prev` (prédécesseur :
+  dernier descendant du frère précédent
+  ou parent), `detach` no-op spec ;
+  `tw_accept`/`tw_next` factorisés en
+  paramètres `(dom, cache, what, filter,
+  root)` partagés TreeWalker/NodeIterator.
+  `new SharedWorker(url)` — ctor défini
+  (feature-detect) : sans loader →
+  `TypeError` honnête comme `Worker` ;
+  avec factory → objet `{port}`
+  déléguant au worker (borné : chaque
+  contexte a le sien, pas de partage —
+  documenté). `new CSSStyleSheet(opts?)`
+  — constructible spec : `{type, href,
+  disabled, cssRules, media}` +
+  `insertRule`/`deleteRule`/`replace`/
+  `replaceSync` (règles stockées
+  `{cssText,type:1}` ; le parseur CSS
+  vit en `explorer-css`, la cascade/
+  `adoptedStyleSheets` = chantier
+  session — borné). `TreeWalker`,
+  `NodeIterator`, `MutationRecord`,
+  `IdleDeadline` → `illegal_ctor` :
+  `TypeError` spec-fidèle au `new`
+  (interfaces définies non
+  constructibles — `ReferenceError`
+  était un faux négatif). Réparation
+  gate amont : `build_session` extrait
+  de `main` (JS-C94 WS avait poussé
+  `main()` à 106/100 lignes — l'équipe
+  causale répare, règle §10). Test
+  jscore `cap183_honest_surfaces`.
+
 - **CAP-182 — arc édition : `Range` vivant,
   `TreeWalker`, `execCommand` (sonde
   `_census_calls`)** (`explorer-jscore`) :

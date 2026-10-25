@@ -3407,6 +3407,35 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   ne se propage pas au parent. 2 tests session
   (`document_ready_state_*`).
 
+- [x] **CAP-183. Surfaces honnêtes :
+  `createNodeIterator`, `SharedWorker`,
+  `CSSStyleSheet`, ctors spec-fidèles
+  (sonde)** — `createNodeIterator` :
+  itérateur doc-order incluant la
+  racine (spec ≠ TreeWalker),
+  `previousNode` via `tw_prev` ;
+  helpers `tw_*` factorisés partagés.
+  `new SharedWorker` : ctor défini →
+  `TypeError` gate sans loader,
+  `{port}` délégué avec (borné : pas
+  de partage inter-contextes).
+  `new CSSStyleSheet` : constructible
+  borné — `{cssRules, insertRule,
+  deleteRule, replace, replaceSync}`
+  (règles stockées, cascade =
+  chantier session). `TreeWalker`/
+  `NodeIterator`/`MutationRecord`/
+  `IdleDeadline` → `illegal_ctor`
+  (`TypeError` spec, pas
+  `ReferenceError`). Réparation :
+  `build_session` extrait (`main`
+  106/100 lignes post-JS-C94 — équipe
+  causale répare). Test jscore
+  `cap183_honest_surfaces`. Reste
+  mesuré : `evaluate`/animate/canvas
+  (arcs P2/P3 — XPath, Web Animations,
+  pont raster).
+
 - [x] **CAP-182. Arc édition : `Range`
   vivant + `TreeWalker` + `execCommand`
   (sonde)** — `new Range`/`createRange`

@@ -60,10 +60,11 @@ pub(crate) struct MiscState {
     /// Wrapper `Selection` déjà rendu — spec : `getSelection`
     /// retourne **le même objet** à chaque appel.
     sel_wrapper: Option<ObjId>,
-    /// `Range.prototype` / `TreeWalker.prototype` paresseux
-    /// (CAP-182).
+    /// `Range.prototype` / `TreeWalker.prototype` /
+    /// `NodeIterator.prototype` paresseux (CAP-182/183).
     range_proto: Option<ObjId>,
     tw_proto: Option<ObjId>,
+    ni_proto: Option<ObjId>,
 }
 
 impl MiscState {
@@ -77,6 +78,7 @@ impl MiscState {
             self.sel_proto,
             self.range_proto,
             self.tw_proto,
+            self.ni_proto,
         ]
         .into_iter()
         .flatten()
@@ -1357,14 +1359,21 @@ fn tw_show_bit(d: &crate::dom::Dom, n: NodeId) -> u32 {
 /// d'abord, callback ensuite (`FILTER_ACCEPT`=1 retourne
 /// `true`-like dans les scripts réels : on accepte tout
 /// verdict truthy≠2/3 — borné, documenté).
-fn tw_accept(e: &mut Engine, tw: &TreeWalkerHost, n: NodeId, what: u32, filter: Value) -> u8 {
-    if tw_show_bit(&tw.dom.borrow(), n) & what == 0 {
+fn tw_accept(
+    e: &mut Engine,
+    dom: &crate::dom_host::DomRef,
+    cache: &crate::dom_host::NodeCache,
+    n: NodeId,
+    what: u32,
+    filter: Value,
+) -> u8 {
+    if tw_show_bit(&dom.borrow(), n) & what == 0 {
         return 1;
     }
     match filter {
         Value::Undefined | Value::Null => 0,
         _ => {
-            let nv = node_value(e, &tw.dom, &tw.cache, n);
+            let nv = node_value(e, dom, cache, n);
             match e
                 .call_value(filter, Value::Undefined, &[nv])
                 .ok()
@@ -1401,32 +1410,34 @@ fn tw_step_out(dom: &crate::dom_host::DomRef, mut n: NodeId, root: NodeId) -> Op
 
 /// Prochain nœud accepté en ordre document borné à `root`
 /// (skip → descend quand même ; reject → saute le sous-arbre).
-fn tw_next(e: &mut Engine, tw: &TreeWalkerHost, from: NodeId) -> Option<NodeId> {
-    let (root, what, filter) = {
-        let d = tw.data.borrow();
-        (d.root, d.what, d.filter)
-    };
-    let mut n = tw
-        .dom
+fn tw_next(
+    e: &mut Engine,
+    dom: &crate::dom_host::DomRef,
+    cache: &crate::dom_host::NodeCache,
+    what: u32,
+    filter: Value,
+    root: NodeId,
+    from: NodeId,
+) -> Option<NodeId> {
+    let mut n = dom
         .borrow()
         .child_nodes(from)
         .into_iter()
         .next()
-        .or_else(|| tw_step_out(&tw.dom, from, root))?;
+        .or_else(|| tw_step_out(dom, from, root))?;
     loop {
-        match tw_accept(e, tw, n, what, filter) {
+        match tw_accept(e, dom, cache, n, what, filter) {
             0 => return Some(n),
             1 => {
-                n = tw
-                    .dom
+                n = dom
                     .borrow()
                     .child_nodes(n)
                     .into_iter()
                     .next()
-                    .or_else(|| tw_step_out(&tw.dom, n, root))?;
+                    .or_else(|| tw_step_out(dom, n, root))?;
             }
             _ => {
-                n = tw_step_out(&tw.dom, n, root)?;
+                n = tw_step_out(dom, n, root)?;
             }
         }
     }
@@ -1525,12 +1536,18 @@ impl Host for TreeWalkerHost {
         let _ = args;
         let found = match name {
             "nextNode" => {
-                let cur = self.data.borrow().cur;
-                tw_next(e, self, cur)
+                let (root, what, filter, cur) = {
+                    let d = self.data.borrow();
+                    (d.root, d.what, d.filter, d.cur)
+                };
+                tw_next(e, &self.dom, &self.cache, what, filter, root, cur)
             }
             "firstChild" => {
-                let root = self.data.borrow().root;
-                tw_next(e, self, root)
+                let (root, what, filter) = {
+                    let d = self.data.borrow();
+                    (d.root, d.what, d.filter)
+                };
+                tw_next(e, &self.dom, &self.cache, what, filter, root, root)
             }
             // Borné CAP-182 : navigation inverse/fratrie non
             // portée — `null` honnête plutôt que parcours faux.
@@ -1593,4 +1610,329 @@ pub(crate) fn exec_command(e: &mut Engine, _t: Value, args: &[Value]) -> JsResul
         }
         _ => Ok(Value::Bool(false)),
     }
+}
+
+// ===== CAP-183 — NodeIterator / CSSStyleSheet / SharedWorker —
+
+/// `NodeIterator` — itérateur document-order plat (spec :
+/// premier `nextNode` **inclut** la racine si acceptée —
+/// contrairement au `TreeWalker` qui part d'un niveau plus
+/// bas). `new NodeIterator` reste non-constructible (spec).
+struct NiHost {
+    data: Rc<RefCell<NiData>>,
+    dom: crate::dom_host::DomRef,
+    cache: crate::dom_host::NodeCache,
+}
+
+struct NiData {
+    root: NodeId,
+    what: u32,
+    filter: Value,
+    /// `cur` courant + `started` (le premier `nextNode`
+    /// part de la racine incluse).
+    cur: NodeId,
+    started: bool,
+}
+
+/// Prédécesseur en ordre document borné à `root` — dernier
+/// descendant du frère précédent, sinon le parent (accept
+/// décidé par l'appelant ; `reject`/`skip` bouclent).
+fn tw_prev(tw_dom: &crate::dom_host::DomRef, n: NodeId, root: NodeId) -> Option<NodeId> {
+    if n == root {
+        return None;
+    }
+    let d = tw_dom.borrow();
+    let p = d.parent(n)?;
+    let kids = d.child_nodes(p);
+    if let Some(i) = kids.iter().position(|&c| c == n) {
+        if i > 0 {
+            let mut m = kids[i - 1];
+            while let Some(c) = d.child_nodes(m).last().copied() {
+                m = c;
+            }
+            return Some(m);
+        }
+    }
+    Some(p)
+}
+
+/// `NodeIterator.prototype` paresseux.
+fn ni_proto(e: &mut Engine) -> ObjId {
+    if let Some(p) = e.misc.ni_proto {
+        return p;
+    }
+    let p = e.new_object();
+    let tag = e.str_val("NodeIterator");
+    e.set_own(p, crate::interp::SYM_TO_STRING_TAG, tag, false);
+    e.misc.ni_proto = Some(p);
+    p
+}
+
+/// `document.createNodeIterator(root, whatToShow?, filter?)`
+/// (CAP-183) — successeur/prédécesseur document-order via
+/// `tw_next`/`tw_prev` ; filter/masque `NodeFilter` comme
+/// `createTreeWalker`.
+pub(crate) fn create_nodeiterator(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let Some((dom, cache)) = e.dom_ctx.clone() else {
+        return Err(e.type_error("createNodeIterator: no document"));
+    };
+    let root = node_for(e, arg(args, 0)).unwrap_or_else(|| dom.borrow().root);
+    let what = e.to_number(arg(args, 1)).unwrap_or(f64::from(u32::MAX)) as u32;
+    let filter = arg(args, 2);
+    let v = e.new_host_object(Rc::new(NiHost {
+        data: Rc::new(RefCell::new(NiData {
+            root,
+            what,
+            filter,
+            cur: root,
+            started: false,
+        })),
+        dom,
+        cache,
+    }));
+    let p = ni_proto(e);
+    if let Value::Obj(id) = v {
+        if let Some(o) = e.heap.obj_mut(id) {
+            o.proto = Value::Obj(p);
+        }
+    }
+    Ok(v)
+}
+
+impl Host for NiHost {
+    fn class_name(&self) -> &'static str {
+        "NodeIterator"
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
+    fn has_method(&self, name: &str) -> bool {
+        matches!(
+            name,
+            "nextNode" | "previousNode" | "detach" | "referenceNode"
+        )
+    }
+
+    fn get(&self, e: &mut Engine, _t: Value, key: &str) -> JsResult<Option<Value>> {
+        let d = self.data.borrow();
+        Ok(Some(match key {
+            "root" => node_value(e, &self.dom, &self.cache, d.root),
+            "whatToShow" => Value::Num(f64::from(d.what)),
+            "filter" => d.filter,
+            "referenceNode" => node_value(e, &self.dom, &self.cache, d.cur),
+            "pointerBeforeReferenceNode" => Value::Bool(false),
+            _ => return Ok(None),
+        }))
+    }
+
+    fn invoke(
+        &self,
+        e: &mut Engine,
+        _t: Value,
+        name: &str,
+        args: &[Value],
+    ) -> JsResult<Option<Value>> {
+        let _ = args;
+        match name {
+            "nextNode" => {
+                let (root, what, filter, cur, started) = {
+                    let d = self.data.borrow();
+                    (d.root, d.what, d.filter, d.cur, d.started)
+                };
+                let found = if started {
+                    tw_next(e, &self.dom, &self.cache, what, filter, root, cur)
+                } else {
+                    self.data.borrow_mut().started = true;
+                    if tw_accept(e, &self.dom, &self.cache, root, what, filter) == 0 {
+                        Some(root)
+                    } else {
+                        tw_next(e, &self.dom, &self.cache, what, filter, root, root)
+                    }
+                };
+                match found {
+                    Some(n) => {
+                        self.data.borrow_mut().cur = n;
+                        Ok(Some(node_value(e, &self.dom, &self.cache, n)))
+                    }
+                    None => Ok(Some(Value::Null)),
+                }
+            }
+            "previousNode" => {
+                let (root, what, filter, mut n) = {
+                    let d = self.data.borrow();
+                    (d.root, d.what, d.filter, d.cur)
+                };
+                loop {
+                    let Some(p) = tw_prev(&self.dom, n, root) else {
+                        return Ok(Some(Value::Null));
+                    };
+                    n = p;
+                    if tw_accept(e, &self.dom, &self.cache, n, what, filter) == 0 {
+                        self.data.borrow_mut().cur = n;
+                        return Ok(Some(node_value(e, &self.dom, &self.cache, n)));
+                    }
+                }
+            }
+            "detach" => Ok(Some(Value::Undefined)),
+            "referenceNode" => Ok(Some(node_value(
+                e,
+                &self.dom,
+                &self.cache,
+                self.data.borrow().cur,
+            ))),
+            _ => Ok(None),
+        }
+    }
+}
+
+// ===== CAP-183 (suite) — `CSSStyleSheet` / `SharedWorker` —
+
+/// `new CSSStyleSheet(options?)` (CAP-183) — feuille
+/// **constructible** spec : objet miroir `{type:"text/css",
+/// href:null, disabled:false, cssRules:[], media:{mediaText:""}}`
+/// + `insertRule`/`deleteRule`/`replace`/`replaceSync`.
+///
+/// Borné : les règles sont stockées telles quelles
+/// (`{cssText, type:1}`) — le parseur CSS vit côté
+/// `explorer-css`, la cascade/`adoptedStyleSheets` est un
+/// chantier session (documenté).
+pub(crate) fn css_sheet_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let o = e.new_object();
+    let t = e.str_val("text/css");
+    e.set_own(o, "type", t, true);
+    e.set_own(o, "href", Value::Null, true);
+    e.set_own(o, "disabled", Value::Bool(false), true);
+    let rules = e.new_array(Vec::new());
+    e.set_own(o, "cssRules", rules, true);
+    let media = e.new_object();
+    let mt = e.str_val("");
+    e.set_own(media, "mediaText", mt, true);
+    e.set_own(o, "media", Value::Obj(media), true);
+    let tag = e.str_val("CSSStyleSheet");
+    e.set_own(o, crate::interp::SYM_TO_STRING_TAG, tag, false);
+    // options `{baseURL, media, disabled}` — `disabled` est
+    // le seul honnêtement stocké ici (borné).
+    if let Value::Obj(opts) = arg(args, 0) {
+        let dis = e.get_prop(opts, "disabled");
+        if matches!(dis, Some(Value::Bool(b)) if b) {
+            e.set_own(o, "disabled", Value::Bool(true), true);
+        }
+    }
+    e.add_method(o, "insertRule", sheet_insert_rule);
+    e.add_method(o, "deleteRule", sheet_delete_rule);
+    e.add_method(o, "replace", sheet_replace);
+    e.add_method(o, "replaceSync", sheet_replace_sync);
+    Ok(Value::Obj(o))
+}
+
+/// `cssRules` de `this` (`ObjId` attendu).
+fn sheet_rules(e: &mut Engine, this: Value) -> Option<ObjId> {
+    let Value::Obj(id) = this else { return None };
+    match e.get_prop(id, "cssRules") {
+        Some(Value::Obj(r)) => Some(r),
+        _ => None,
+    }
+}
+
+/// `insertRule(rule, index?)` → index spec (borné : la règle
+/// est stockée `{cssText,type:1}`, pas cascadée).
+fn sheet_insert_rule(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let text = e.to_js_string(arg(args, 0))?;
+    let idx = e.to_number(arg(args, 1)).unwrap_or(0.0).max(0.0) as usize;
+    let Some(rid) = sheet_rules(e, this) else {
+        return Err(e.type_error("insertRule: no cssRules"));
+    };
+    let rule = e.new_object();
+    let c = e.str_val(&text);
+    e.set_own(rule, "cssText", c, true);
+    e.set_own(rule, "type", Value::Num(1.0), true);
+    let len = {
+        let Some(o) = e.heap.obj_mut(rid) else {
+            return Err(e.type_error("insertRule: detached"));
+        };
+        if let crate::heap::ObjKind::Array(elems) = &mut o.kind {
+            elems.insert(idx.min(elems.len()), Value::Obj(rule));
+        }
+        match &o.kind {
+            crate::heap::ObjKind::Array(elems) => elems.len(),
+            _ => 0,
+        }
+    };
+    let _ = len;
+    Ok(Value::Num(idx as f64))
+}
+
+/// `deleteRule(index)` — borne `idx < len` sinon `IndexSizeError`.
+fn sheet_delete_rule(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let idx = e.to_number(arg(args, 0))? as usize;
+    let Some(rid) = sheet_rules(e, this) else {
+        return Err(e.type_error("deleteRule: no cssRules"));
+    };
+    let Some(o) = e.heap.obj_mut(rid) else {
+        return Err(e.type_error("deleteRule: detached"));
+    };
+    if let crate::heap::ObjKind::Array(elems) = &mut o.kind {
+        if idx < elems.len() {
+            elems.remove(idx);
+        }
+    }
+    Ok(Value::Undefined)
+}
+
+/// `replace(text)` → promesse résolue `this` (spec :
+/// `CSSStyleSheet` — borné : texte stocké `__text`, règles
+/// vidées ; pas de parse).
+fn sheet_replace(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let text = e.to_js_string(arg(args, 0))?;
+    sheet_set_text(e, this, &text)?;
+    let pid = e.new_promise();
+    e.resolve_promise(pid, this);
+    Ok(Value::Obj(pid))
+}
+
+/// `replaceSync(text)` — même, synchrone.
+fn sheet_replace_sync(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let text = e.to_js_string(arg(args, 0))?;
+    sheet_set_text(e, this, &text)?;
+    Ok(Value::Undefined)
+}
+
+/// `__text` posé + `cssRules` vidées (spec `replace*`).
+fn sheet_set_text(e: &mut Engine, this: Value, text: &str) -> JsResult<()> {
+    let Value::Obj(id) = this else {
+        return Err(e.type_error("replace: not a sheet"));
+    };
+    let t = e.str_val(text);
+    e.set_own(id, "__text", t, false);
+    if let Some(rid) = sheet_rules(e, this) {
+        if let Some(o) = e.heap.obj_mut(rid) {
+            if let crate::heap::ObjKind::Array(elems) = &mut o.kind {
+                elems.clear();
+            }
+        }
+    }
+    Ok(())
+}
+
+/// `new SharedWorker(url)` (CAP-183) — gate honnête identique
+/// à `Worker` : sans loader → `TypeError`. Avec → objet
+/// `{port}` qui délègue `postMessage`/`onmessage` au worker
+/// (borné : chaque contexte a le sien — le partage spec est
+/// un chantier inter-contextes).
+pub(crate) fn shared_worker_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    if e.worker_factory.is_none() {
+        let spec = e.to_js_string(arg(args, 0))?;
+        if spec.is_empty() {
+            return Err(e.type_error("SharedWorker: empty script URL"));
+        }
+        return Err(e.type_error("SharedWorker: no loader installed"));
+    }
+    let host = crate::worker::worker_ctor_pub(e, Value::Undefined, args)?;
+    let o = e.new_object();
+    e.set_own(o, "port", host, true);
+    let tag = e.str_val("SharedWorker");
+    e.set_own(o, crate::interp::SYM_TO_STRING_TAG, tag, false);
+    Ok(Value::Obj(o))
 }

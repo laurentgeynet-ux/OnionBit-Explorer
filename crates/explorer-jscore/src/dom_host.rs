@@ -1779,7 +1779,10 @@ impl Engine {
             "CSSStyleDeclaration",
             "CSSRule",
             "StyleSheet",
-            "CSSStyleSheet",
+            "TreeWalker",
+            "NodeIterator",
+            "MutationRecord",
+            "IdleDeadline",
             "XMLSerializer",
             "AbortSignal",
             "DOMException",
@@ -1813,6 +1816,25 @@ impl Engine {
             self.set_own(fid, "prototype", Value::Obj(p), false);
         }
         self.set_own(g, "Range", f, false);
+        // `CSSStyleSheet` — constructible spec (CAP-183) :
+        // feuille stockée côté miroir (`insertRule`/`deleteRule`/
+        // `replace`/`replaceSync` — cascade = chantier session,
+        // documenté).
+        let f = self.native_fn("CSSStyleSheet", crate::misc_apis::css_sheet_ctor);
+        if let Value::Obj(fid) = f {
+            let p = self.new_object();
+            self.set_own(fid, "prototype", Value::Obj(p), false);
+        }
+        self.set_own(g, "CSSStyleSheet", f, false);
+        // `SharedWorker` (CAP-183) — ctor défini pour le
+        // feature-detect ; sans loader → TypeError honnête
+        // (comme `Worker`) ; avec → `{port}` déléguant au
+        // worker (borné : chaque contexte a le sien, pas de
+        // partage — documenté).
+        let f = self.native_fn("SharedWorker", |e, t, a| {
+            crate::misc_apis::shared_worker_ctor(e, t, a)
+        });
+        self.set_own(g, "SharedWorker", f, false);
         // `NodeFilter` — constantes `SHOW_*`/`FILTER_*` lues
         // par `createTreeWalker(root, NodeFilter.SHOW_…)`.
         let nf = self.new_object();
@@ -2989,9 +3011,26 @@ impl Host for DocumentHost {
             // navigation inverse non portée), execCommand
             // `copy`/`cut`→hook clipboard/`selectAll`→range
             // body (le reste → `false` honnête).
-            "createRange" => Ok(Some(crate::misc_apis::range_ctor(e, Value::Undefined, args)?)),
-            "createTreeWalker" => Ok(Some(crate::misc_apis::create_treewalker(e, Value::Undefined, args)?)),
-            "execCommand" => Ok(Some(crate::misc_apis::exec_command(e, Value::Undefined, args)?)),
+            "createRange" => Ok(Some(crate::misc_apis::range_ctor(
+                e,
+                Value::Undefined,
+                args,
+            )?)),
+            "createTreeWalker" => Ok(Some(crate::misc_apis::create_treewalker(
+                e,
+                Value::Undefined,
+                args,
+            )?)),
+            "createNodeIterator" => Ok(Some(crate::misc_apis::create_nodeiterator(
+                e,
+                Value::Undefined,
+                args,
+            )?)),
+            "execCommand" => Ok(Some(crate::misc_apis::exec_command(
+                e,
+                Value::Undefined,
+                args,
+            )?)),
             "adoptNode" => {
                 let Some(src) = node_for(e, arg(args, 0)) else {
                     return Err(e.type_error("adoptNode: nœud requis"));
@@ -3286,6 +3325,7 @@ const DOC_METHODS: &[&str] = &[
     "exitFullscreen",
     "createRange",
     "createTreeWalker",
+    "createNodeIterator",
     "execCommand",
     "elementFromPoint",
     "elementsFromPoint",
