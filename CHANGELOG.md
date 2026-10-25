@@ -9,6 +9,27 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **JS-C104 — virgule finale
+  ES2017 en liste d'arguments**
+  (`explorer-jscore::parser`) :
+  `args()` exigeait une
+  expression après chaque
+  virgule → `f(a,)` rejeté en
+  `SyntaxError` alors qu'arrays
+  (`[1,]`), objets (`{a:1,}`) et
+  `params` l'acceptaient déjà.
+  Mur spectrum.adobe.com mesuré
+  (ak.js:280 — `every(…,)`,
+  code Prettier-formaté) : après
+  fix, 0 erreur console, contenu
+  SSR rendu, 4 `import()`
+  livrés `ok=true` (effet
+  `footer.js` visible). Couvre
+  appel, `new`, `super`,
+  appel optionnel ; `f(,)` et
+  `f(a,,)` restent illégaux.
+  Test `trailing_comma_call_args`.
+
 - **R-111 — `!important` inversé à
   la frontière shadow**
   (`explorer-css`, css-scoping §6 —

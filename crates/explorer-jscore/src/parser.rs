@@ -1930,6 +1930,12 @@ impl Parser {
             return Ok(out);
         }
         loop {
+            // Virgule finale ES2017 : `f(a,)` — la parenthèse
+            // ferme sans arg après la virgule (spectrum
+            // ak.js:280 : `every(…,)`).
+            if self.eat_p(P::RParen) {
+                return Ok(out);
+            }
             // `f(...a)` spread arg — `Expr::Spread` marker.
             if self.eat_p(P::Ellipsis) {
                 out.push(Expr::Spread(Box::new(self.assign(no_in)?)));

@@ -6872,6 +6872,19 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   reliquat repris au drain suivant.
   Test `c103_*`.
 
+- [x] **JS-C104. Virgule finale
+  ES2017 en args d'appel**
+  (`explorer-jscore::parser`) —
+  `f(a,)`/`new X(a,)`/`x?.(a,)`
+  acceptés (arrays/objets/params
+  l'étaient déjà — seul trou) ;
+  `f(,)`/`f(a,,)` restent
+  illégaux. Mur spectrum
+  ak.js:280 levé — terrain :
+  0 erreur console, imports
+  dynamiques livrés.
+  Test `trailing_comma_call_args`.
+
 - [x] **JS-C102. `el.constructor` =
   ctor CE sur élément upgradé**
   (`explorer-jscore`) — verrou

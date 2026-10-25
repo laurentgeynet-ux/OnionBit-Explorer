@@ -318,7 +318,7 @@ impl Engine {
                     }
                     Err(Thrown(t)) => {
                         tracing::debug!(spec = %p.spec, error = ?t, "import() chunk en échec");
-                        self.reject_promise(p.promise, t)
+                        self.reject_promise(p.promise, t);
                     }
                 }
             }

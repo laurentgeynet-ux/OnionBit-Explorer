@@ -7847,3 +7847,20 @@ fn intl_segmenter_bounded() {
         "en-US/sentence"
     );
 }
+
+#[test]
+fn trailing_comma_call_args() {
+    // Virgule finale ES2017 en liste d'arguments — légal
+    // (`f(a,)` == `f(a)`) ; spectrum ak.js:280 l'exigeait.
+    // `f(,)` et `f(a,,)` restent des erreurs de syntaxe.
+    assert_eq!(num(ev("function f(a){return a} f(41,)")), 41.0);
+    assert_eq!(num(ev("function g(a,b){return a+b} g(40,2,)")), 42.0);
+    assert_eq!(
+        num(ev("[1,2,3].every(function(x){return x>0},) ? 7 : 0")),
+        7.0
+    );
+    assert_eq!(num(ev("new Number(5,).valueOf()")), 5.0);
+    let mut e = Engine::new();
+    assert!(e.eval("f(,)").is_err(), "`f(,)` reste illégal");
+    assert!(e.eval("f(a,,)").is_err(), "`f(a,,)` reste illégal");
+}
