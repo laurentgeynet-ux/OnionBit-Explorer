@@ -1799,3 +1799,22 @@ fn markers_textuels_decimal_roman_emis() {
     // reversed+start=9 : 9, puis value=4 ré-ancre, puis 3.
     assert_eq!(texts, ["IX.", "IV.", "III."], "romain + reversed/value");
 }
+
+#[test]
+fn marker_list_style_string_litteral() {
+    // R-112 — `list-style-type:"*"` : la chaîne EST le
+    // marqueur (css-lists §3.3) — datatracker IETF peignait
+    // `decimal` faute de `<string>` sur 41 listes.
+    let (_d, _b, items) = dl(
+        "<ul><li>a</li><li>b</li></ul>",
+        "body{margin:0} ul{list-style-type:\"*\"}",
+    );
+    let texts: Vec<&str> = items
+        .iter()
+        .filter_map(|i| match i {
+            DisplayItem::MarkerText { text, .. } => Some(text.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(texts, ["*", "*"], "chaîne littérale comme marqueur");
+}

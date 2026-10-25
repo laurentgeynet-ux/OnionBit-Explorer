@@ -1438,7 +1438,19 @@ fn emit_text_marker(bx: &LayoutBox, items: &mut Vec<DisplayItem>, off: (f32, f32
     if !fs.is_finite() || fs <= 0.0 {
         return;
     }
-    let text = marker_label(ty, bx.marker_ordinal);
+    // `<string>` (css-lists §3.3 — R-112) : le marqueur est
+    // la chaîne **elle-même** (`list-style-type:"- "` →
+    // `- `), pas un compteur — mesuré terrain :
+    // `ul{list-style-type:"*"}` de l'IETF.
+    let text = if let Some(s) = ty
+        .strip_prefix('"')
+        .and_then(|v| v.strip_suffix('"'))
+        .or_else(|| ty.strip_prefix('\'').and_then(|v| v.strip_suffix('\'')))
+    {
+        s.to_string()
+    } else {
+        marker_label(ty, bx.marker_ordinal)
+    };
     let baseline_y = bx.lines.first().map_or_else(
         || {
             bx.rect.y

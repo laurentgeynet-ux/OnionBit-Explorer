@@ -2287,6 +2287,17 @@ ul, menu, dir { list-style-type: disc }
 ul ul, ol ul, menu ul, dir ul { list-style-type: circle }
 ul ul ul, ol ul ul, menu ul ul, dir ul ul { list-style-type: square }
 ol { list-style-type: decimal }
+/* HTML Rendering §14.3.9 — `type` de liste = règles UA
+   attribut-sélecteur (pas un hint : l'auteur les bat).
+   Mesuré : `ol[type=a]` de l'IETF rendait decimal. */
+ol[type='1' i], li[type='1' i] { list-style-type: decimal }
+ol[type='a' s], li[type='a' s] { list-style-type: lower-alpha }
+ol[type='A' s], li[type='A' s] { list-style-type: upper-alpha }
+ol[type='i' s], li[type='i' s] { list-style-type: lower-roman }
+ol[type='I' s], li[type='I' s] { list-style-type: upper-roman }
+ul[type='disc' i], li[type='disc' i] { list-style-type: disc }
+ul[type='circle' i], li[type='circle' i] { list-style-type: circle }
+ul[type='square' i], li[type='square' i] { list-style-type: square }
 td, th { display: table-cell }
 center { text-align: -webkit-center }
 b, strong { font-weight: bold }

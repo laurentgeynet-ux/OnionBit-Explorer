@@ -9,6 +9,28 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **R-112 — `list-style-type:
+  <string>` peint** (`explorer-render`,
+  css-lists §3.3 — écart datatracker
+  IETF : `ul{list-style-type:"*"}`,
+  41 listes) : la chaîne est le
+  marqueur lui-même (pas de suffixe
+  `.`) — `emit_text_marker` lit le
+  littéral `"…"`/`'…'`. Test
+  `marker_list_style_string_litteral`.
+
+- **R-113 — `ol[type]`/`li[type]`/
+  `ul[type]` mappés** (`explorer-css`
+  UA, HTML Rendering §14.3.9 —
+  écart datatracker IETF :
+  `ol[type=a]` rendait `decimal`) :
+  règles UA attribut-sélecteur —
+  `1`/`a`/`A`/`i`/`I`→ decimal/
+  alpha/roman, `disc`/`circle`/
+  `square` → idem. Pas un hint :
+  l'ordre UA < auteur couvre déjà.
+  Test `ol_type_attribut_mappe_list_style`.
+
 - **JS-C104 — virgule finale
   ES2017 en liste d'arguments**
   (`explorer-jscore::parser`) :

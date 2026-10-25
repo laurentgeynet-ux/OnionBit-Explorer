@@ -2328,3 +2328,34 @@ fn important_frontiere_shadow_inverse() {
         "inner !important > outer normal"
     );
 }
+
+#[test]
+fn ol_type_attribut_mappe_list_style() {
+    // R-113 — `ol[type]` hint → `list-style-type` (HTML
+    // §14.3.9) : `type=a` → lower-alpha, `type=I` →
+    // upper-roman — datatracker IETF rendait decimal.
+    let f = fixture();
+    let mut dom = f.dom;
+    let ol = dom.create_element("ol").unwrap();
+    dom.set_attribute(ol, "type", "a").unwrap();
+    dom.append_child(dom.document(), ol).unwrap();
+    let li = dom.create_element("li").unwrap();
+    dom.append_child(ol, li).unwrap();
+    let e = StyleEngine::new();
+    let s = e.compute(&dom, li, &env());
+    assert_eq!(
+        s.get("list-style-type"),
+        Some("lower-alpha"),
+        "type=a → alpha"
+    );
+    // `type` inconnu → pas de hint (repli calculé).
+    let ol2 = dom.create_element("ol").unwrap();
+    dom.set_attribute(ol2, "type", "z").unwrap();
+    dom.append_child(dom.document(), ol2).unwrap();
+    let li2 = dom.create_element("li").unwrap();
+    dom.append_child(ol2, li2).unwrap();
+    assert_ne!(
+        e.compute(&dom, li2, &env()).get("list-style-type"),
+        Some("decimal-z")
+    );
+}

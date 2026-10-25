@@ -2686,6 +2686,13 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   height`→`min-height` (un `height` UA bloquait la
   précondition `height:auto`), stretch planché au
   `min-height` item (§9.8). Test rect 42 + hit-test zone.
+- [x] **R-112. `list-style-type: <string>`** (écart corpus
+  datatracker) : la chaîne est le marqueur — `MarkerText`
+  porte le littéral, aucun suffixe. 1 test.
+- [x] **R-113. `ol[type]`/`li[type]`/`ul[type]` UA** (écart
+  corpus datatracker, §14.3.9) : règles attribut-sélecteur
+  `1/a/A/i/I`→decimal/alpha/roman — pas un hint (perdrait
+  contre `ol{decimal}`). 1 test.
 - [x] **R-110. `::part` chaîné + `exportparts` + slots nichés**
   (bornes Shadow) : `::part(a)::part(b)` marche par frontière,
   `exportparts` expose `i` sous `o` (§3.5) ; slots nichés
