@@ -31,6 +31,7 @@ mod cascade;
 mod fontface;
 mod parser;
 mod selector;
+mod state;
 mod token;
 mod tokenizer;
 pub mod transition;

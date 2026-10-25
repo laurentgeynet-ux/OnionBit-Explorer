@@ -398,3 +398,165 @@ fn match_liste_complexe_reelle() {
         &list("div#a > span, p.c[lang|=fr], em.x")
     ));
 }
+
+// ── R-100 : pseudos d'état structurels + :valid/:invalid ────
+
+/// DOM formulaire de test : `form > input[required] (vide),
+/// input type=email value=malformé, input type=checkbox
+/// checked, select required (option vide), fieldset[disabled]
+/// > legend > input + input`.
+struct FormFixture {
+    dom: Dom,
+    input_req: NodeId,
+    input_email: NodeId,
+    input_chk: NodeId,
+    select: NodeId,
+    fs_input: NodeId,
+    legend_input: NodeId,
+    form: NodeId,
+}
+
+fn form_fixture() -> FormFixture {
+    let mut dom = Dom::new();
+    let doc = dom.document();
+    let form = dom.create_element("form").unwrap();
+    dom.append_child(doc, form).unwrap();
+
+    let input_req = dom.create_element("input").unwrap();
+    dom.set_attribute(input_req, "type", "text").unwrap();
+    dom.set_attribute(input_req, "required", "").unwrap();
+    dom.append_child(form, input_req).unwrap();
+
+    let input_email = dom.create_element("input").unwrap();
+    dom.set_attribute(input_email, "type", "email").unwrap();
+    dom.set_attribute(input_email, "value", "pas-un-email")
+        .unwrap();
+    dom.append_child(form, input_email).unwrap();
+
+    let input_chk = dom.create_element("input").unwrap();
+    dom.set_attribute(input_chk, "type", "checkbox").unwrap();
+    dom.set_attribute(input_chk, "checked", "").unwrap();
+    dom.append_child(form, input_chk).unwrap();
+
+    let select = dom.create_element("select").unwrap();
+    dom.set_attribute(select, "required", "").unwrap();
+    dom.append_child(form, select).unwrap();
+    let opt = dom.create_element("option").unwrap();
+    dom.set_attribute(opt, "value", "").unwrap();
+    dom.append_child(select, opt).unwrap();
+
+    let fs = dom.create_element("fieldset").unwrap();
+    dom.set_attribute(fs, "disabled", "").unwrap();
+    dom.append_child(form, fs).unwrap();
+    let legend = dom.create_element("legend").unwrap();
+    dom.append_child(fs, legend).unwrap();
+    let legend_input = dom.create_element("input").unwrap();
+    dom.append_child(legend, legend_input).unwrap();
+    let fs_input = dom.create_element("input").unwrap();
+    dom.append_child(fs, fs_input).unwrap();
+
+    FormFixture {
+        dom,
+        input_req,
+        input_email,
+        input_chk,
+        select,
+        fs_input,
+        legend_input,
+        form,
+    }
+}
+
+#[test]
+fn etat_disabled_enabled_fieldset() {
+    let f = form_fixture();
+    // Contrôle direct dans un fieldset[disabled] → désactivé.
+    assert!(matches(&f.dom, f.fs_input, &sel(":disabled")));
+    assert!(!matches(&f.dom, f.fs_input, &sel(":enabled")));
+    // Exception première <legend> : reste activable.
+    assert!(matches(&f.dom, f.legend_input, &sel(":enabled")));
+    assert!(!matches(&f.dom, f.legend_input, &sel(":disabled")));
+    // Contrôle libre → enabled.
+    assert!(matches(&f.dom, f.input_req, &sel(":enabled")));
+}
+
+#[test]
+fn etat_checked() {
+    let f = form_fixture();
+    assert!(matches(&f.dom, f.input_chk, &sel(":checked")));
+    assert!(!matches(&f.dom, f.input_req, &sel(":checked")));
+}
+
+#[test]
+fn etat_required_optional() {
+    let f = form_fixture();
+    assert!(matches(&f.dom, f.input_req, &sel(":required")));
+    assert!(matches(&f.dom, f.select, &sel(":required")));
+    assert!(!matches(&f.dom, f.input_req, &sel(":optional")));
+    assert!(matches(&f.dom, f.input_chk, &sel(":optional")));
+}
+
+#[test]
+fn etat_valid_invalid() {
+    let f = form_fixture();
+    // required vide → :invalid ; checkbox cochée non requise → :valid.
+    assert!(matches(&f.dom, f.input_req, &sel(":invalid")));
+    assert!(!matches(&f.dom, f.input_req, &sel(":valid")));
+    assert!(matches(&f.dom, f.input_chk, &sel(":valid")));
+    // email malformé → :invalid.
+    assert!(matches(&f.dom, f.input_email, &sel(":invalid")));
+    // select required à option vide → :invalid.
+    assert!(matches(&f.dom, f.select, &sel(":invalid")));
+    // form agrège : contient des invalides → :invalid.
+    assert!(matches(&f.dom, f.form, &sel(":invalid")));
+    assert!(!matches(&f.dom, f.form, &sel(":valid")));
+}
+
+#[test]
+fn etat_valid_apres_remplissage() {
+    let mut f = form_fixture();
+    // L'état se lit dans le DOM — poser la valeur suffit.
+    f.dom.set_attribute(f.input_req, "value", "ok").unwrap();
+    f.dom
+        .set_attribute(f.input_email, "value", "a@b.co")
+        .unwrap();
+    assert!(matches(&f.dom, f.input_req, &sel(":valid")));
+    assert!(matches(&f.dom, f.input_email, &sel(":valid")));
+    // Le select reste invalide → le form aussi.
+    assert!(matches(&f.dom, f.select, &sel(":invalid")));
+    assert!(matches(&f.dom, f.form, &sel(":invalid")));
+}
+
+#[test]
+fn etat_readonly_placeholder() {
+    let mut dom = Dom::new();
+    let doc = dom.document();
+    let inp = dom.create_element("input").unwrap();
+    dom.set_attribute(inp, "placeholder", "Nom…").unwrap();
+    dom.append_child(doc, inp).unwrap();
+    let ro = dom.create_element("input").unwrap();
+    dom.set_attribute(ro, "readonly", "").unwrap();
+    dom.append_child(doc, ro).unwrap();
+    let div = dom.create_element("div").unwrap();
+    dom.set_attribute(div, "contenteditable", "").unwrap();
+    dom.append_child(doc, div).unwrap();
+
+    assert!(matches(&dom, inp, &sel(":placeholder-shown")));
+    assert!(matches(&dom, inp, &sel(":read-write")));
+    assert!(matches(&dom, ro, &sel(":read-only")));
+    assert!(matches(&dom, div, &sel(":read-write")));
+}
+
+#[test]
+fn etat_user_invalid_gatee_par_state() {
+    let f = form_fixture();
+    // Invalide réel mais jamais touché → :user-invalid faux
+    // sans flag d'interaction (conservateur spec).
+    assert!(!matches(&f.dom, f.input_req, &sel(":user-invalid")));
+    assert!(explorer_css::matches_with_state(
+        &f.dom,
+        f.input_req,
+        &sel(":user-invalid"),
+        &|n| n == "user-invalid"
+    ));
+}

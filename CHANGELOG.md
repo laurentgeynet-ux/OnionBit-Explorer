@@ -9,6 +9,44 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ### Added
 
+- **R-100 — `:valid`/`:invalid` +
+  pseudos d'état structurels**
+  (`explorer-css`, répond à la
+  demande NAV étape 54) : module
+  `state` — `:disabled`/`:enabled`
+  (attribut + `fieldset[disabled]`
+  ancêtre avec exemption première
+  `legend`), `:checked`,
+  `:required`/`:optional`,
+  `:read-only`/`:read-write`
+  (`readonly`/editable +
+  `contenteditable`),
+  `:placeholder-shown`, et le
+  modèle de validation §4.10.19 :
+  candidats (input hors types
+  bouton/caché, select, textarea ;
+  barrés si disabled/readonly/
+  sous `datalist`), contraintes
+  `required`, `type=email|url`,
+  `min`/`max`/`step` (number/range),
+  `minlength`/`maxlength` (UTF-16) —
+  `form`/`fieldset` agrègent leurs
+  contrôles descendants. `pattern`
+  documenté non évalué (RegExp JS).
+  Nouveau : `:user-valid`/
+  `:user-invalid` parsés, validité
+  réelle **et** flag d'interaction
+  via `state` (conservateur : faux
+  par défaut). Toutes ces pseudos
+  s'évaluent désormais sur le DOM —
+  elles fonctionnent aussi avec
+  `state` = `|_| false` (la session
+  n'avait jamais câblé le callback
+  — `:checked` `:disabled` etc.
+  étaient morts en production).
+  7 tests `etat_*` dans
+  `tests/selector.rs`.
+
 - **R-99 — `content_rect` publique**
   (`explorer-render`) :
   `display::content_rect` exposée

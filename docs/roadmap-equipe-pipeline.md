@@ -2600,6 +2600,29 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   étape 129) — **livré** : `display::content_rect` exposée
   (`pub`, contrat « content box = border box − bordures −
   padding ») ; NAV adopte et retire sa copie à son commit.
+- [x] **R-100. `:valid`/`:invalid` + pseudos d'état
+  structurels** (demande NAV étape 54, seule extension
+  « proposée » encore ouverte) — **livré** : module
+  `state` d'`explorer-css` — les pseudos à valeur lue dans
+  l'arbre s'évaluent désormais sur le DOM (plus sur `state`
+  — qui restait `|_| false` en session : `:checked`,
+  `:disabled`… étaient morts en production) : `:disabled`/
+  `:enabled` (attribut + `fieldset[disabled]` ancêtre,
+  exemption première `legend`), `:checked`,
+  `:required`/`:optional`, `:read-only`/`:read-write`
+  (`readonly` + `contenteditable`), `:placeholder-shown`,
+  et le modèle §4.10.19 : candidats (input hors
+  bouton/caché, select, textarea ; barrés disabled/
+  readonly/`datalist`), contraintes `required`, `email`/
+  `url`, `min`/`max`/`step` (number/range), `min`/`max`
+  `length` (UTF-16) ; `form`/`fieldset` agrègent leurs
+  candidats descendants. `:user-valid`/`:user-invalid`
+  parsés : validité interne **et** `state(name)` (garde
+  d'interaction = couture NAV, conservateur faux).
+  `pattern` non évalué (RegExp JS — borné, documenté).
+  7 tests `etat_*` (`tests/selector.rs`) : fieldset/legend,
+  checked, required/optional, valid/invalid + agrégation
+  form, remplissage, readonly/placeholder, gate user-*.
 
 ## Palier R-B — Contenu étranger, animation, canvas
 

@@ -276,6 +276,14 @@ pub enum DynamicPseudo {
     Valid,
     /// `:invalid`.
     Invalid,
+    /// `:user-valid` / `:user-invalid` — validité **après
+    /// interaction utilisateur** (selectors-4 §14) : la
+    /// validité est évaluée sur le DOM et la garde
+    /// d'interaction est déléguée à `state` (faux par défaut
+    /// — conservateur spec : rien n'a été tapé).
+    UserValid,
+    /// `:user-invalid`.
+    UserInvalid,
 }
 
 impl DynamicPseudo {
@@ -301,6 +309,8 @@ impl DynamicPseudo {
             Self::PlaceholderShown => "placeholder-shown",
             Self::Valid => "valid",
             Self::Invalid => "invalid",
+            Self::UserValid => "user-valid",
+            Self::UserInvalid => "user-invalid",
         }
     }
 
@@ -325,6 +335,8 @@ impl DynamicPseudo {
             "placeholder-shown" => Self::PlaceholderShown,
             "valid" => Self::Valid,
             "invalid" => Self::Invalid,
+            "user-valid" => Self::UserValid,
+            "user-invalid" => Self::UserInvalid,
             _ => return None,
         })
     }
@@ -1470,6 +1482,23 @@ fn dynamic_matches(
                 && matches!(dom.attributes(node), Ok(attrs) if attrs.iter().any(|a| a.name == "href"))
         }
         DynamicPseudo::Visited => false,
+        // États structurels : évalués sur le DOM (R-100) — ils
+        // fonctionnent aussi avec `state` = `|_| false`.
+        DynamicPseudo::Disabled => crate::state::is_disabled(dom, node),
+        DynamicPseudo::Enabled => crate::state::is_enabled(dom, node),
+        DynamicPseudo::Checked => crate::state::is_checked(dom, node),
+        DynamicPseudo::Required => crate::state::is_required(dom, node),
+        DynamicPseudo::Optional => crate::state::is_optional(dom, node),
+        DynamicPseudo::ReadOnly => !crate::state::is_read_write(dom, node),
+        DynamicPseudo::ReadWrite => crate::state::is_read_write(dom, node),
+        DynamicPseudo::PlaceholderShown => crate::state::placeholder_shown(dom, node),
+        DynamicPseudo::Valid => crate::state::is_valid(dom, node),
+        DynamicPseudo::Invalid => crate::state::is_invalid(dom, node),
+        // `:user-*` = validité réelle **et** flag d'interaction
+        // fourni par l'appelant (conservateur : faux par
+        // défaut — spec : rien ne matche avant interaction).
+        DynamicPseudo::UserValid => crate::state::is_valid(dom, node) && state(d.name()),
+        DynamicPseudo::UserInvalid => crate::state::is_invalid(dom, node) && state(d.name()),
         _ => state(d.name()),
     }
 }
