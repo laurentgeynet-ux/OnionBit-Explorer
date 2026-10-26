@@ -558,13 +558,13 @@ pub(crate) fn array_from(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<
 pub(crate) fn array_includes(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let id = this_array(e, this)?;
     let needle = arg(args, 0);
-    let elems = take_elems(e, id);
+    let elems = take_elems(e, id)?;
     // SameValueZero (NaN matches itself here).
     let found = elems.iter().any(|&v| {
         e.strict_eq(v, needle)
             || matches!((v, needle), (Value::Num(a), Value::Num(b)) if a.is_nan() && b.is_nan())
     });
-    put_elems(e, id, elems);
+    put_elems(e, id, elems)?;
     Ok(Value::Bool(found))
 }
 
@@ -579,7 +579,7 @@ pub(crate) fn array_iter_find(
     if !e.is_callable(cb) {
         return Err(e.type_error("callback is not a function"));
     }
-    let elems = take_elems(e, id);
+    let elems = take_elems(e, id)?;
     let mut hits = Vec::with_capacity(elems.len());
     for (i, &v) in elems.iter().enumerate() {
         if v.is_hole() {
@@ -599,7 +599,7 @@ pub(crate) fn array_find(e: &mut Engine, this: Value, args: &[Value]) -> JsResul
         .zip(&hits)
         .find_map(|(&v, &h)| (h == Some(true)).then_some(v))
         .unwrap_or(Value::Undefined);
-    put_elems(e, id, elems);
+    put_elems(e, id, elems)?;
     Ok(out)
 }
 
@@ -609,14 +609,14 @@ pub(crate) fn array_find_index(e: &mut Engine, this: Value, args: &[Value]) -> J
         .iter()
         .position(|&h| h == Some(true))
         .map_or(-1.0, |i| i as f64);
-    put_elems(e, id, elems);
+    put_elems(e, id, elems)?;
     Ok(Value::Num(out))
 }
 
 pub(crate) fn array_some(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let (elems, hits, id) = array_iter_find(e, this, args)?;
     let out = hits.contains(&Some(true));
-    put_elems(e, id, elems);
+    put_elems(e, id, elems)?;
     Ok(Value::Bool(out))
 }
 
@@ -625,7 +625,7 @@ pub(crate) fn array_every(e: &mut Engine, this: Value, args: &[Value]) -> JsResu
     // `every` : les trous sont ignorés — `all` porte sur les
     // éléments présents seulement (spec).
     let out = hits.iter().flatten().all(|&h| h);
-    put_elems(e, id, elems);
+    put_elems(e, id, elems)?;
     Ok(Value::Bool(out))
 }
 

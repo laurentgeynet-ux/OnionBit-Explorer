@@ -60,6 +60,28 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   4M non tickée — même classe,
   fix = take/put faillibles + tick.
 
+- **JS-C108 — reliquat wedge gov.uk
+  fermé : `take_elems`/`put_elems`
+  faillibles + tickés**
+  (`explorer-jscore::builtins`) : les
+  mutateurs O(len) encore
+  matérialisants (`shift`, `splice`,
+  `sort`, `unshift`, `fill`,
+  `copyWithin` — 67 call sites) passaient
+  la boucle `[[Get]]`/`[[Set]]`/`[[Delete]]`
+  indices de `length` (cap 4M) sans
+  tick — spin hors budget de la même
+  classe que `push`/`pop`. Les deux
+  helpers sont désormais `JsResult` +
+  `tick()` par indice : un
+  `{length: 2**32}` meurt au budget ops
+  (erreur nommée) au lieu de geler des
+  minutes ; les tableaux natifs gardent
+  leur backing direct (zéro surcoût).
+  Test `array_mutators_array_like_
+  bounded_by_ops` (6 mutateurs, budget
+  20k → éval en erreur bornée).
+
 - **JS-C104 — virgule finale
   ES2017 en liste d'arguments**
   (`explorer-jscore::parser`) :

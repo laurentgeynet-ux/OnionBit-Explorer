@@ -6948,6 +6948,20 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   les mutateurs O(len) (`shift`,
   `splice`, `sort`).
 
+- [x] **JS-C108. `take_elems`/`put_elems`
+  faillibles + tickés** (reliquat
+  JS-C107 — `explorer-jscore::builtins`) :
+  les mutateurs O(len) encore
+  matérialisants (`shift`, `splice`,
+  `sort`, `unshift`, `fill`, `copyWithin`)
+  bouclaient 4M de `get`/`set`/`delete`
+  indices non tickés — `{length: 2**32}`
+  gelaient hors budget. Helpers devenus
+  `JsResult` + `tick` par indice (67 call
+  sites) : mort au budget, erreur nommée ;
+  tableaux natifs inchangés. Test
+  `array_mutators_array_like_bounded_by_ops`.
+
 - [x] **JS-C106. Borne
   d'imbrication 512→4096**
   (`explorer-jscore::parser`) —

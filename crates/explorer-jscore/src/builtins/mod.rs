@@ -970,8 +970,8 @@ fn this_array(e: &mut Engine, this: Value) -> JsResult<ObjId> {
 fn this_array_like(e: &mut Engine, this: Value) -> JsResult<Vec<Value>> {
     match this {
         Value::Obj(id) if matches!(e.heap.obj(id).map(|o| &o.kind), Some(ObjKind::Array(_))) => {
-            let elems = take_elems(e, id);
-            put_elems(e, id, elems.clone());
+            let elems = take_elems(e, id)?;
+            put_elems(e, id, elems.clone())?;
             Ok(elems)
         }
         Value::Undefined | Value::Null => {
@@ -994,59 +994,66 @@ fn this_array_like(e: &mut Engine, this: Value) -> JsResult<Vec<Value>> {
     }
 }
 
-fn take_elems(e: &mut Engine, id: ObjId) -> Vec<Value> {
+fn take_elems(e: &mut Engine, id: ObjId) -> JsResult<Vec<Value>> {
     if let Some(o) = e.heap.obj(id) {
         if !matches!(&o.kind, ObjKind::Array(_)) {
             // Objet array-like (méthodes génériques spec,
             // JS-C90) : matérialise via `length` + `[[Get]]`
             // indices — `take_elems` vide alors le backing
-            // array pour rien.
+            // array pour rien. Tické : `{length: 2**32}`
+            // (queue webpack — wedge gov.uk, JS-C107) meurt
+            // au budget ops au lieu de spinner 4M de `get`.
             let len = match e.get_prop(id, "length") {
                 Some(v) => (e.to_number(v).unwrap_or(0.0).max(0.0) as usize).min(4_000_000),
                 None => 0,
             };
             let mut v = Vec::with_capacity(len.min(1 << 20));
             for i in 0..len {
+                e.tick()?;
                 v.push(e.get_prop(id, &i.to_string()).unwrap_or(Value::Undefined));
             }
-            return v;
+            return Ok(v);
         }
     }
-    match e.heap.obj_mut(id) {
+    Ok(match e.heap.obj_mut(id) {
         Some(o) => match &mut o.kind {
             ObjKind::Array(v) => std::mem::take(v),
             _ => Vec::new(),
         },
         None => Vec::new(),
-    }
+    })
 }
 
-fn put_elems(e: &mut Engine, id: ObjId, elems: Vec<Value>) {
+fn put_elems(e: &mut Engine, id: ObjId, elems: Vec<Value>) -> JsResult<()> {
     let is_array = e
         .heap
         .obj(id)
         .is_some_and(|o| matches!(&o.kind, ObjKind::Array(_)));
     if !is_array {
         // Array-like : `[[Set]]` indices, `[[Delete]]` de la
-        // queue et `length` final (spec mutants génériques).
+        // queue et `length` final (spec mutants génériques) —
+        // tické comme `take_elems` (même classe, wedge JS-C107).
         let old_len = match e.get_prop(id, "length") {
             Some(v) => (e.to_number(v).unwrap_or(0.0).max(0.0) as usize).min(4_000_000),
             None => 0,
         };
         for (i, v) in elems.iter().enumerate() {
+            e.tick()?;
             let _ = e.set_prop(id, &i.to_string(), *v);
         }
         for i in elems.len()..old_len {
+            e.tick()?;
             e.delete_prop(id, &i.to_string());
         }
         let _ = e.set_prop(id, "length", Value::Num(elems.len() as f64));
-        return;
+        return Ok(());
     }
     if let Some(o) = e.heap.obj_mut(id) {
         if let ObjKind::Array(v) = &mut o.kind {
             *v = elems;
         }
     }
+    Ok(())
 }
 
 /// Variante de [`put_elems`] pour les *mutators* (`pop`, `sort`,
@@ -1061,7 +1068,7 @@ fn put_elems_guarded(e: &mut Engine, id: ObjId, elems: Vec<Value>, orig: &[Value
     if integ & 3 != 0 && orig.len() != elems.len() {
         return Err(e.type_error("cannot change length of a sealed array"));
     }
-    put_elems(e, id, elems);
+    put_elems(e, id, elems)?;
     Ok(())
 }
 

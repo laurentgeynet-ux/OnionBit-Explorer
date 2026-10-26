@@ -18,7 +18,7 @@ pub(crate) fn array_reduce_right(e: &mut Engine, this: Value, args: &[Value]) ->
     if !e.is_callable(cb) {
         return Err(e.type_error("reduceRight needs a function"));
     }
-    let elems = take_elems(e, id);
+    let elems = take_elems(e, id)?;
     let (mut acc, start) = match args.get(1) {
         Some(v) => (*v, elems.len() as i64 - 1),
         // Sans init, acc = dernier élément *présent* (spec).
@@ -26,7 +26,7 @@ pub(crate) fn array_reduce_right(e: &mut Engine, this: Value, args: &[Value]) ->
             if let Some(i) = elems.iter().rposition(|v| !v.is_hole()) {
                 (elems[i], i as i64 - 1)
             } else {
-                put_elems(e, id, elems);
+                put_elems(e, id, elems)?;
                 return Err(e.type_error("reduceRight of empty array"));
             }
         }
@@ -38,7 +38,7 @@ pub(crate) fn array_reduce_right(e: &mut Engine, this: Value, args: &[Value]) ->
         }
         acc = e.call_value(cb, Value::Undefined, &[acc, v, Value::Num(i as f64), this])?;
     }
-    put_elems(e, id, elems);
+    put_elems(e, id, elems)?;
     Ok(acc)
 }
 

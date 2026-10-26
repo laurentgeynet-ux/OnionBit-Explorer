@@ -16,7 +16,7 @@ use super::*;
 /// interne relative (indices négatifs = depuis la fin, spec).
 pub(crate) fn array_copy_within(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let id = this_array(e, this)?;
-    let mut elems = take_elems(e, id);
+    let mut elems = take_elems(e, id)?;
     let len = elems.len() as i64;
     let rel = |v: Value, e: &mut Engine| -> JsResult<i64> { Ok(e.to_number(v)? as i64) };
     let target = match rel(arg(args, 0), e)? {
@@ -43,7 +43,7 @@ pub(crate) fn array_copy_within(e: &mut Engine, this: Value, args: &[Value]) -> 
     // copyWithin` — copie d'abord, puis pose).
     let count = (end - start).max(0).min(len - target);
     if count > 0 && e.heap.obj(id).is_some_and(|o| o.elem_integrity & 2 != 0) {
-        put_elems(e, id, elems);
+        put_elems(e, id, elems)?;
         return Err(e.type_error("cannot copyWithin a frozen array"));
     }
     if count > 0 {
@@ -52,7 +52,7 @@ pub(crate) fn array_copy_within(e: &mut Engine, this: Value, args: &[Value]) -> 
             elems[(target as usize) + k] = v;
         }
     }
-    put_elems(e, id, elems);
+    put_elems(e, id, elems)?;
     Ok(this)
 }
 

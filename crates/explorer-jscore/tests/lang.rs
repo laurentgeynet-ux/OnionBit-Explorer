@@ -295,6 +295,32 @@ fn array_push_generic_array_like_no_materialize() {
 }
 
 #[test]
+fn array_mutators_array_like_bounded_by_ops() {
+    // Reliquat JS-C107 : les mutateurs O(len) (`shift`, `splice`,
+    // `sort`…) matérialisent encore via `take_elems`/`put_elems` —
+    // la boucle 4M est désormais TICKÉE : l'éval meurt au budget
+    // ops (erreur nommée) au lieu de spinner hors comptage.
+    for src in [
+        "Array.prototype.shift.call({length:4294967295})",
+        "Array.prototype.splice.call({length:4294967295}, 0, 1)",
+        "Array.prototype.sort.call({length:4294967295})",
+        "Array.prototype.fill.call({length:4294967295}, 1)",
+        "Array.prototype.unshift.call({length:4294967295}, 1)",
+        "Array.prototype.copyWithin.call({length:4294967295}, 0, 1)",
+    ] {
+        let mut e = Engine::new();
+        e.set_op_limit(20_000);
+        assert!(
+            e.eval(src).is_err(),
+            "l'éval doit mourir au budget ops : {src}"
+        );
+    }
+    // Le chemin tableau natif reste inchangé (backing réel, pas de
+    // matérialisation par indices).
+    assert_eq!(ev_str("var a=[1,2,3]; a.shift(); a.join(',')"), "2,3");
+}
+
+#[test]
 fn for_in() {
     assert_eq!(
         ev_str("var o = {a:1, b:2}; var s=''; for (var k in o) { s += k } s"),

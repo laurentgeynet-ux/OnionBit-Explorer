@@ -94,16 +94,16 @@ pub(crate) fn rel_index(e: &mut Engine, v: Value, len: usize) -> JsResult<Option
 
 pub(crate) fn array_at(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let id = this_array(e, this)?;
-    let elems = take_elems(e, id);
+    let elems = take_elems(e, id)?;
     let i = rel_index(e, arg(args, 0), elems.len())?;
     let v = i.map_or(Value::Undefined, |i| elems[i]).unhole();
-    put_elems(e, id, elems);
+    put_elems(e, id, elems)?;
     Ok(v)
 }
 
 pub(crate) fn array_fill(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let id = this_array(e, this)?;
-    let mut elems = take_elems(e, id);
+    let mut elems = take_elems(e, id)?;
     let len = elems.len();
     let v = arg(args, 0);
     let start = rel_index(e, arg(args, 1), len)?.unwrap_or(0);
@@ -114,13 +114,13 @@ pub(crate) fn array_fill(e: &mut Engine, this: Value, args: &[Value]) -> JsResul
     // `fill` n'écrit que sur une plage non vide — tableau gelé
     // avec plage vide → no-op admis (spec `Set(throw)` par slot).
     if end.min(len) > start && e.heap.obj(id).is_some_and(|o| o.elem_integrity & 2 != 0) {
-        put_elems(e, id, elems);
+        put_elems(e, id, elems)?;
         return Err(e.type_error("cannot fill a frozen array"));
     }
     for slot in &mut elems[start..end.min(len)] {
         *slot = v;
     }
-    put_elems(e, id, elems);
+    put_elems(e, id, elems)?;
     Ok(this)
 }
 
@@ -144,7 +144,7 @@ pub(crate) fn flat_into(
         if depth > 0 {
             if let Value::Obj(id) = v {
                 if matches!(e.heap.obj(id).map(|o| &o.kind), Some(ObjKind::Array(_))) {
-                    let kids = take_elems(e, id);
+                    let kids = take_elems(e, id)?;
                     e.alloc_guard(kids.len().saturating_mul(std::mem::size_of::<Value>()))?;
                     for el in kids.into_iter().rev() {
                         stack.push((el, depth - 1));
@@ -164,12 +164,12 @@ pub(crate) fn array_flat(e: &mut Engine, this: Value, args: &[Value]) -> JsResul
         Value::Undefined => 1,
         v => e.to_number(v)? as u32,
     };
-    let elems = take_elems(e, id);
+    let elems = take_elems(e, id)?;
     let mut out = Vec::new();
     for v in elems.iter().copied() {
         flat_into(e, v, depth, &mut out)?;
     }
-    put_elems(e, id, elems);
+    put_elems(e, id, elems)?;
     Ok(e.new_array(out))
 }
 
@@ -179,7 +179,7 @@ pub(crate) fn array_flat_map(e: &mut Engine, this: Value, args: &[Value]) -> JsR
     if !e.is_callable(cb) {
         return Err(e.type_error("flatMap needs a function"));
     }
-    let elems = take_elems(e, id);
+    let elems = take_elems(e, id)?;
     let mut out = Vec::new();
     for (i, &v) in elems.iter().enumerate() {
         if v.is_hole() {
@@ -188,7 +188,7 @@ pub(crate) fn array_flat_map(e: &mut Engine, this: Value, args: &[Value]) -> JsR
         let r = e.call_value(cb, arg(args, 1), &[v, Value::Num(i as f64), this])?;
         flat_into(e, r, 1, &mut out)?;
     }
-    put_elems(e, id, elems);
+    put_elems(e, id, elems)?;
     Ok(e.new_array(out))
 }
 
@@ -200,7 +200,7 @@ pub(crate) fn array_find_last(e: &mut Engine, this: Value, args: &[Value]) -> Js
         .rev()
         .find_map(|(&v, &h)| (h == Some(true)).then_some(v))
         .unwrap_or(Value::Undefined);
-    put_elems(e, id, elems);
+    put_elems(e, id, elems)?;
     Ok(out)
 }
 
@@ -214,7 +214,7 @@ pub(crate) fn array_find_last_index(
         .iter()
         .rposition(|&h| h == Some(true))
         .map_or(-1.0, |i| i as f64);
-    put_elems(e, id, elems);
+    put_elems(e, id, elems)?;
     Ok(Value::Num(out))
 }
 
@@ -222,8 +222,8 @@ pub(crate) fn array_find_last_index(
 // Map/Set's; live-cursor semantics documented as deviation).
 pub(crate) fn array_values(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
     let id = this_array(e, this)?;
-    let elems = take_elems(e, id);
-    put_elems(e, id, elems.clone());
+    let elems = take_elems(e, id)?;
+    put_elems(e, id, elems.clone())?;
     // L'itérateur produit `undefined` pour les trous (spec `Get`).
     let vals: Vec<Value> = elems.iter().map(|v| v.unhole()).collect();
     Ok(crate::collections::iter_obj(e, vals, e.protos.array_iter))
@@ -231,7 +231,7 @@ pub(crate) fn array_values(e: &mut Engine, this: Value, _a: &[Value]) -> JsResul
 
 pub(crate) fn array_keys(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
     let id = this_array(e, this)?;
-    let n = take_elems(e, id).len();
+    let n = take_elems(e, id)?.len();
     Ok(crate::collections::iter_obj(
         e,
         (0..n).map(|i| Value::Num(i as f64)).collect(),
@@ -241,19 +241,19 @@ pub(crate) fn array_keys(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<
 
 pub(crate) fn array_entries(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
     let id = this_array(e, this)?;
-    let elems = take_elems(e, id);
+    let elems = take_elems(e, id)?;
     let mut items = Vec::with_capacity(elems.len());
     for (i, &v) in elems.iter().enumerate() {
         items.push(e.new_array(vec![Value::Num(i as f64), v.unhole()]));
     }
-    put_elems(e, id, elems);
+    put_elems(e, id, elems)?;
     Ok(crate::collections::iter_obj(e, items, e.protos.array_iter))
 }
 
 // ES2023 non-mutating variants.
 pub(crate) fn array_with(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let id = this_array(e, this)?;
-    let elems = take_elems(e, id);
+    let elems = take_elems(e, id)?;
     let len = elems.len();
     if let Some(i) = rel_index(e, arg(args, 0), len)? {
         // `with` produit un résultat dense (spec `Get` → trou
@@ -261,21 +261,21 @@ pub(crate) fn array_with(e: &mut Engine, this: Value, args: &[Value]) -> JsResul
         let mut out_v: Vec<Value> = elems.iter().map(|v| v.unhole()).collect();
         out_v[i] = arg(args, 1);
         let out = e.new_array(out_v);
-        put_elems(e, id, elems);
+        put_elems(e, id, elems)?;
         Ok(out)
     } else {
-        put_elems(e, id, elems);
+        put_elems(e, id, elems)?;
         Err(e.range_error("with: index out of range"))
     }
 }
 
 pub(crate) fn array_to_reversed(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let id = this_array(e, this)?;
-    let elems = take_elems(e, id);
+    let elems = take_elems(e, id)?;
     let mut out_v: Vec<Value> = elems.iter().map(|v| v.unhole()).collect();
     out_v.reverse();
     let out = e.new_array(out_v);
-    put_elems(e, id, elems);
+    put_elems(e, id, elems)?;
     let _ = args;
     Ok(out)
 }
@@ -286,7 +286,7 @@ pub(crate) fn array_to_reversed(e: &mut Engine, this: Value, args: &[Value]) -> 
 /// conversion des args laisse l'array intact.
 pub(crate) fn array_splice(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let id = this_array(e, this)?;
-    let elems = take_elems(e, id);
+    let elems = take_elems(e, id)?;
     let len = elems.len();
     let start = match arg(args, 0) {
         Value::Undefined => 0,
@@ -320,17 +320,17 @@ pub(crate) fn array_splice(e: &mut Engine, this: Value, args: &[Value]) -> JsRes
     // insertion (ajout interdit) lève `TypeError` — y compris quand
     // la longueur finale ne changerait pas (spec).
     if e.heap.obj(id).is_some_and(|o| o.elem_integrity & 3 != 0) && (del > 0 || !ins.is_empty()) {
-        put_elems(e, id, elems);
+        put_elems(e, id, elems)?;
         return Err(e.type_error("cannot splice a sealed array"));
     }
     let darr = e.new_array(deleted);
-    put_elems(e, id, out_v);
+    put_elems(e, id, out_v)?;
     Ok(darr)
 }
 
 pub(crate) fn array_to_spliced(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let id = this_array(e, this)?;
-    let elems = take_elems(e, id);
+    let elems = take_elems(e, id)?;
     let len = elems.len();
     let start = match arg(args, 0) {
         Value::Undefined => 0,
@@ -347,7 +347,7 @@ pub(crate) fn array_to_spliced(e: &mut Engine, this: Value, args: &[Value]) -> J
     out_v.extend(ins);
     out_v.extend(elems[start + del..].iter().map(|v| v.unhole()));
     let out = e.new_array(out_v);
-    put_elems(e, id, elems);
+    put_elems(e, id, elems)?;
     Ok(out)
 }
 
@@ -355,10 +355,10 @@ pub(crate) fn array_to_sorted(e: &mut Engine, this: Value, args: &[Value]) -> Js
     // Copy → sort via the shared comparator path → new array
     // (`sort` mutates `this`; `toSorted` must not).
     let id = this_array(e, this)?;
-    let elems = take_elems(e, id);
+    let elems = take_elems(e, id)?;
     // Dense — `toSorted` relit les slots par `Get` (spec).
     let copy = e.new_array(elems.iter().map(|v| v.unhole()).collect());
-    put_elems(e, id, elems);
+    put_elems(e, id, elems)?;
     array_sort(e, copy, args)?;
     Ok(copy)
 }
