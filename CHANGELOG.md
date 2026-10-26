@@ -7,6 +7,26 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **JS-C156 — `JsError::Timeout`
+  typé** (`explorer-js`) — le
+  disjoncteur « moteur figé »
+  rendait `Uncaught("moteur figé —
+  éval dépassée")` (signature
+  chaîne fragile) ; nouveau kind
+  `Timeout` distinct de
+  `Uncaught`/`Dead` — la session
+  peut distinguer un stall d'une
+  exception du script.
+
+- **JS-C155 — `URL.canParse`/
+  `URL.parse`** (`explorer-jscore`)
+  — statiques spec 2024 absentes du
+  ctor (`typeof URL.canParse` =
+  `undefined` sur bundles
+  modernes) : `canParse` bool sans
+  jeté, `parse` instance ou `null`.
+  Tests dans `c16_url`.
+
 - **JS-C154 — `unhandledrejection`**
   (`explorer-jscore`,
   `explorer-js`, `explorer-core`) —
