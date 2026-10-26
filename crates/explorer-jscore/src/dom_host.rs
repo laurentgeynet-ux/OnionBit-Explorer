@@ -1683,6 +1683,9 @@ impl Engine {
         // `MutationObserver` (JS-C26) — les records vivent dans
         // la file du `Dom`, livrés au microtask checkpoint.
         self.install_mutation_observer();
+        // Interfaces IDB (feature-detect/`instanceof`) —
+        // indépendantes du registre `indexedDB` (install_idb).
+        crate::idb::install_idb_interfaces(self);
         // `location` + `history` — hooks-driven (see BrowserHooks).
         // `Location` global (JS-C122/news.google) : l'interface
         // existe comme nom global — `location instanceof

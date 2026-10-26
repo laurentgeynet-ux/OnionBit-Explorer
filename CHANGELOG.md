@@ -7,6 +7,16 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **JS-C141 — interfaces IDB déclarées**
+  (`explorer-jscore`) — `IDBIndex is
+  not defined` (Rakuten) tuait le
+  bundle : les interfaces
+  `IDBIndex`/`IDBObjectStore`/`IDBCursor`/
+  `IDBTransaction`/`IDBRequest`/`IDBDatabase`…
+  sont posées par `install_dom` (stubs
+  non-constructibles, `instanceof` OK),
+  indépendantes du registre `indexedDB`.
+
 - **JS-C140 — `Range.createContextualFragment`**
   (`explorer-jscore`) — première
   exception de la cascade `sc_*` de
