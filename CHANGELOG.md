@@ -7,6 +7,24 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **JS-C159 — surface ShadowRoot/
+  sockets visible** (`explorer-jscore`)
+  — `ShadowRoot.getElementById`
+  scopé au sous-arbre (spec
+  `DocumentFragment` ; hydratation
+  CE reddit `faceplate-*`),
+  `sr instanceof ShadowRoot` vrai
+  (proto du ctor posé à
+  `node_value`), méthodes
+  `WebSocket`/`BroadcastChannel`
+  lisibles (`has_method` — les
+  invoke-only rendaient `undefined`
+  aux feature-detects), `EventSource`
+  posé à `install_dom` (refus différé
+  sans transport, jamais un global
+  absent). Test
+  `c159_shadow_ws_bc_es_surface`.
+
 - **JS-C158 — `TextEncoderStream`/
   `TextDecoderStream`** (`explorer-jscore`)
   — Encoding API absente du global

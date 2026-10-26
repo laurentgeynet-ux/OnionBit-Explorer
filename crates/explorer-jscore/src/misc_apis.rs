@@ -255,6 +255,15 @@ impl Host for BcHost {
         self
     }
 
+    // Méthodes visibles en lecture (feature-detects) —
+    // invoke-only les rendait `undefined` (vols 27-28).
+    fn has_method(&self, name: &str) -> bool {
+        matches!(
+            name,
+            "postMessage" | "close" | "addEventListener" | "removeEventListener"
+        )
+    }
+
     fn get(&self, e: &mut Engine, _t: Value, key: &str) -> JsResult<Option<Value>> {
         if key != "name" {
             return Ok(None);
