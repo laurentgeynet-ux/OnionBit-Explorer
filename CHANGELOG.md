@@ -8,6 +8,23 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 ## [Unreleased]
 
 - **Vol 2026-10-26 — correctifs de vol,
+  vague 3 (FIX-3, vols 18/19)**
+  - **Console perdue après navigation**
+    (x.com) : `event_capacity` 64 → 512 —
+    le burst d'événements d'une navigation
+    faisait lagguer le recorder, les
+    `PipelineError` étaient perdus.
+  - **Iframes muettes en échec** (tumblr
+    CMP) : fetch échoué, statut non-2xx et
+    refus X-Frame-Options/frame-ancestors
+    sont désormais `warn`-logués (le cadre
+    blanc spec-correct n'est plus silencieux).
+  - **`/frame` cohérence** : re-vérifiée —
+    défaut viewport dans tous les cas,
+    `?full=1` document ; le 200 à corps
+    vide reste impossible (204 + Retry-After).
+
+- **Vol 2026-10-26 — correctifs de vol,
   vague 2 (FIX-3, vols 13/16/17)**
   — trois constats supplémentaires :
   - **Images lazy-load jamais peintes**
