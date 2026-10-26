@@ -3798,6 +3798,18 @@ impl Host for DocumentHost {
                 Value::Undefined,
                 args,
             )?)),
+            // DOM Level 3 XPath (mur htmx/hyperscript —
+            // `createExpression is not a function`).
+            "createExpression" => Ok(Some(crate::misc_apis::xpath_create_expression(
+                e,
+                Value::Undefined,
+                args,
+            )?)),
+            "createNSResolver" => Ok(Some(crate::misc_apis::create_ns_resolver(
+                e,
+                Value::Undefined,
+                args,
+            )?)),
             // Storage Access API (JS-C98) — premier parti :
             // `hasStorageAccess` → `true`, `requestStorageAccess`
             // → résolu (aucune restriction tiers ici).
@@ -4114,6 +4126,8 @@ const DOC_METHODS: &[&str] = &[
     "getAnimations",
     "startViewTransition",
     "evaluate",
+    "createExpression",
+    "createNSResolver",
     "hasStorageAccess",
     "requestStorageAccess",
     "elementFromPoint",

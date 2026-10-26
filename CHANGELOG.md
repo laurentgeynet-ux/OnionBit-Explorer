@@ -7,7 +7,43 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
-- **JS-C123 — `delete el.dataset.x`
+- **JS-C127 — `new URL(".", location)`
+  résout** (`explorer-jscore`) —
+  mur assets svelte/fastapi/mkdocs
+  (complète JS-C122 `baseURI`,
+  même classe `Invalid base URL`).
+  Deux trous :
+  1. `to_primitive` lisait les
+     méthodes via `get_prop` (chaîne
+     proto seule) — jamais le crochet
+     hôte → `location.toString` =
+     `Object.prototype.toString` →
+     "[object Location]" rejeté en
+     base. Le `[[Get]]` spec
+     (`get_prop_value` : hôtes,
+     accesseurs, pièges proxy)
+     remplace la lecture — bonus
+     spec : getters et traps de
+     `Proxy` s'exécutent désormais
+     pendant `ToPrimitive`.
+  2. `url_norm_path` jetait le
+     segment final `.`/`..` sans
+     slash terminal (`/a/.` → `/a`)
+     — RFC 3986 §5.2.4 impose
+     `/a/` ; le segment pointé en
+     queue rétablit `/`.
+  `Location` : `toString` posé en
+  propriété réelle (fonction native
+  → `href`, lisible par `Get`) +
+  `has_method` pour `assign`/
+  `replace`/`reload` (`typeof` =
+  'function'). Mesuré in-process :
+  `new URL('.', location)` →
+  `http://ex.org:8080/a/`.
+  Test `new_url_against_location_
+  resolves`.
+
+- **JS-C126 — `delete el.dataset.x`
   retire l'attribut `data-*`**
   (`explorer-jscore`) — mur final
   de la révélation spectrum,
@@ -37,7 +73,7 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   Test `dataset_delete_removes_
   data_attr`.
 
-- **JS-C122 — handles DOM
+- **JS-C125 — handles DOM
   cross-document rejetés +
   mutateurs bornés** (`explorer-
   jscore`) — `node_for` validait
@@ -72,7 +108,7 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   DOMParser → `TypeError`, DOM
   page intact).
 
-- **JS-C121 — qSA miroir :
+- **JS-C124 — qSA miroir :
   combinateur `>` + universel
   `*`** (`explorer-jscore`) —
   le sous-ensemble sélecteur du
@@ -12023,3 +12059,14 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   résolu s'il existe, sinon l'URL
   du document. Test
   `url_ctor_with_location_base`.
+
+- **JS-C124 — DOM Level 3 XPath**
+  (`explorer-jscore::dom_host`+`misc_apis`)
+  — `document.createExpression` /
+  `createNSResolver` ajoutés (mur
+  htmx.org : `createExpression is
+  not a function` — hyperscript).
+  `XPathExpression.evaluate` ré-
+  délègue à `xpath_evaluate` ;
+  resolver = nœud ou documentElement.
+  Test `document_xpath_create_expression`.

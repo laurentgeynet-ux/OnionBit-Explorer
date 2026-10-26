@@ -6339,3 +6339,21 @@ fn location_global_exists_and_chains() {
         assert_eq!(evf(&mut e, src), want, "{src}");
     }
 }
+
+#[test]
+fn document_xpath_create_expression() {
+    // DOM L3 XPath (mur htmx/hyperscript — `createExpression is
+    // not a function`) : expression compilée + evaluate + resolver.
+    let (mut e, _jar, _navs) = engine_full(PAGE);
+    e.eval("var _xp=document.createExpression('.//a');var _nr=document.createNSResolver(document)")
+        .unwrap_or_else(|x| panic!("xpath setup: {x}"));
+    for (src, want) in [
+        ("typeof document.createExpression", "function"),
+        ("typeof document.createNSResolver", "function"),
+        ("typeof _xp", "object"),
+        ("typeof _xp.evaluate", "function"),
+        ("typeof _xp.evaluate(document, 9)", "object"),
+    ] {
+        assert_eq!(evf(&mut e, src), want, "{src}");
+    }
+}

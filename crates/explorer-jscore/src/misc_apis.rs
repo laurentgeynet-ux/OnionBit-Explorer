@@ -34,7 +34,7 @@ use std::collections::{HashMap, VecDeque};
 use std::rc::Rc;
 
 use crate::dom::NodeId;
-use crate::dom_host::{node_for, node_value};
+use crate::dom_host::{node_for, node_for_in, node_value};
 use crate::heap::{Host, JsResult};
 use crate::value::{ObjId, Value};
 use crate::Engine;
@@ -654,7 +654,7 @@ impl Host for SelectionHost {
                 Ok(Some(range_shared(e, r.clone())))
             }
             "selectAllChildren" => {
-                let Some(node) = node_for(e, arg(args, 0)) else {
+                let Some(node) = node_for_in(e, arg(args, 0), &self.dom) else {
                     return Err(e.type_error("Selection.selectAllChildren: not a Node"));
                 };
                 let count = self.dom.borrow().child_nodes(node).len() as u32;
@@ -669,7 +669,7 @@ impl Host for SelectionHost {
             "collapse" | "collapseToStart" | "collapseToEnd" | "extend" => {
                 let d = self.data.borrow();
                 let node = if matches!(name, "collapse" | "extend") {
-                    node_for(e, arg(args, 0))
+                    node_for_in(e, arg(args, 0), &self.dom)
                 } else {
                     d.ranges.first().map(|r| {
                         let r = r.borrow();
@@ -732,8 +732,10 @@ impl Host for SelectionHost {
                     } else {
                         let sn = e
                             .get_prop(id, "startContainer")
-                            .and_then(|v| node_for(e, v));
-                        let en = e.get_prop(id, "endContainer").and_then(|v| node_for(e, v));
+                            .and_then(|v| node_for_in(e, v, &self.dom));
+                        let en = e
+                            .get_prop(id, "endContainer")
+                            .and_then(|v| node_for_in(e, v, &self.dom));
                         let so = e
                             .get_prop(id, "startOffset")
                             .and_then(|v| e.to_number(v).ok())
@@ -764,8 +766,8 @@ impl Host for SelectionHost {
                 Ok(Some(Value::Undefined))
             }
             "setBaseAndExtent" => {
-                let sn = node_for(e, arg(args, 0));
-                let en = node_for(e, arg(args, 2));
+                let sn = node_for_in(e, arg(args, 0), &self.dom);
+                let en = node_for_in(e, arg(args, 2), &self.dom);
                 let so = e.to_number(arg(args, 1)).unwrap_or(0.0) as u32;
                 let eo = e.to_number(arg(args, 3)).unwrap_or(0.0) as u32;
                 let (Some(sn), Some(en)) = (sn, en) else {
@@ -782,7 +784,7 @@ impl Host for SelectionHost {
             "containsNode" => {
                 // Approximation honnête : vrai si `node` est le
                 // conteneur ou un descendant du conteneur.
-                let Some(n) = node_for(e, arg(args, 0)) else {
+                let Some(n) = node_for_in(e, arg(args, 0), &self.dom) else {
                     return Ok(Some(Value::Bool(false)));
                 };
                 let d = self.data.borrow();
@@ -1160,7 +1162,7 @@ impl Host for RangeHost {
     ) -> JsResult<Option<Value>> {
         match name {
             "setStart" | "setEnd" => {
-                let Some(n) = node_for(e, arg(args, 0)) else {
+                let Some(n) = node_for_in(e, arg(args, 0), &self.dom) else {
                     return Err(e.type_error("Range.set*: not a Node"));
                 };
                 let off = e.to_number(arg(args, 1)).unwrap_or(0.0).max(0.0) as u32;
@@ -1185,7 +1187,7 @@ impl Host for RangeHost {
                 Ok(Some(Value::Undefined))
             }
             "setStartBefore" | "setStartAfter" | "setEndBefore" | "setEndAfter" => {
-                let Some(n) = node_for(e, arg(args, 0)) else {
+                let Some(n) = node_for_in(e, arg(args, 0), &self.dom) else {
                     return Err(e.type_error("Range.set*: not a Node"));
                 };
                 let Some((p, i)) = node_index(&self.dom, n) else {
@@ -1213,7 +1215,7 @@ impl Host for RangeHost {
                 Ok(Some(Value::Undefined))
             }
             "selectNode" | "selectNodeContents" => {
-                let Some(n) = node_for(e, arg(args, 0)) else {
+                let Some(n) = node_for_in(e, arg(args, 0), &self.dom) else {
                     return Err(e.type_error("Range.select*: not a Node"));
                 };
                 if name == "selectNode" {
@@ -1291,7 +1293,7 @@ impl Host for RangeHost {
                 Ok(Some(Value::Undefined))
             }
             "insertNode" => {
-                let Some(n) = node_for(e, arg(args, 0)) else {
+                let Some(n) = node_for_in(e, arg(args, 0), &self.dom) else {
                     return Err(e.type_error("Range.insertNode: not a Node"));
                 };
                 let r = *self.data.borrow();
@@ -1473,7 +1475,7 @@ pub(crate) fn create_treewalker(e: &mut Engine, _t: Value, args: &[Value]) -> Js
     let Some((dom, cache)) = e.dom_ctx.clone() else {
         return Err(e.type_error("createTreeWalker: no document"));
     };
-    let root = node_for(e, arg(args, 0)).unwrap_or_else(|| dom.borrow().root);
+    let root = node_for_in(e, arg(args, 0), &dom).unwrap_or_else(|| dom.borrow().root);
     let what = e.to_number(arg(args, 1)).unwrap_or(f64::from(u32::MAX)) as u32;
     let filter = arg(args, 2);
     let v = e.new_host_object(Rc::new(TreeWalkerHost {
@@ -1530,7 +1532,7 @@ impl Host for TreeWalkerHost {
 
     fn set(&self, e: &mut Engine, _t: Value, key: &str, v: Value) -> JsResult<bool> {
         if key == "currentNode" {
-            if let Some(n) = node_for(e, v) {
+            if let Some(n) = node_for_in(e, v, &self.dom) {
                 self.data.borrow_mut().cur = n;
             }
             return Ok(true);
@@ -1688,7 +1690,7 @@ pub(crate) fn create_nodeiterator(e: &mut Engine, _t: Value, args: &[Value]) -> 
     let Some((dom, cache)) = e.dom_ctx.clone() else {
         return Err(e.type_error("createNodeIterator: no document"));
     };
-    let root = node_for(e, arg(args, 0)).unwrap_or_else(|| dom.borrow().root);
+    let root = node_for_in(e, arg(args, 0), &dom).unwrap_or_else(|| dom.borrow().root);
     let what = e.to_number(arg(args, 1)).unwrap_or(f64::from(u32::MAX)) as u32;
     let filter = arg(args, 2);
     let v = e.new_host_object(Rc::new(NiHost {
@@ -2408,13 +2410,59 @@ fn xp_apply(d: &crate::dom::Dom, set: &[NodeId], ps: &ParsedStep, desc: bool) ->
 /// `id('x')`, `count(...)` — syntaxe non portée →
 /// `TypeError` honnête (spec `InvalidExpressionError` —
 /// borné). Types 1/2/3 scalaires + 4/5/7/9 listes.
+/// `document.createExpression(expr, resolver)` — retourne un
+/// `XPathExpression` `{evaluate(ctx, type, res)}` qui ré-délègue à
+/// `xpath_evaluate` (mur htmx/hyperscript : `createExpression is
+/// not a function`).
+pub(crate) fn xpath_create_expression(
+    e: &mut Engine,
+    _this: Value,
+    args: &[Value],
+) -> JsResult<Value> {
+    let expr = arg(args, 0);
+    let o = e.new_object();
+    e.set_own(o, "__expr", expr, false);
+    let ev = e.native_fn("evaluate", xpath_expr_evaluate);
+    e.set_own(o, "evaluate", ev, true);
+    let tag = e.str_val("XPathExpression");
+    e.set_own(o, crate::interp::SYM_TO_STRING_TAG, tag, false);
+    Ok(Value::Obj(o))
+}
+
+/// `XPathExpression.prototype.evaluate` — prépose `__expr` aux
+/// args puis ré-délègue à `xpath_evaluate` (ctx, type, result).
+fn xpath_expr_evaluate(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let expr = match this {
+        Value::Obj(id) => e.get_prop(id, "__expr").unwrap_or(Value::Undefined),
+        _ => Value::Undefined,
+    };
+    let mut a = Vec::with_capacity(args.len() + 1);
+    a.push(expr);
+    a.extend_from_slice(args);
+    xpath_evaluate(e, Value::Undefined, &a)
+}
+
+/// `document.createNSResolver(node)` — spec : retourne le nœud
+/// résolveur (le documentElement ici — notre XPath ne résout pas
+/// de préfixes externes).
+pub(crate) fn create_ns_resolver(e: &mut Engine, _this: Value, args: &[Value]) -> JsResult<Value> {
+    if matches!(arg(args, 0), Value::Obj(_)) {
+        return Ok(arg(args, 0));
+    }
+    if let Some((dom, cache)) = e.dom_ctx.clone() {
+        let root = dom.borrow().root;
+        return Ok(node_value(e, &dom, &cache, root));
+    }
+    Ok(Value::Null)
+}
+
 pub(crate) fn xpath_evaluate(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let _ = this;
     let Some((dom, cache)) = e.dom_ctx.clone() else {
         return Err(e.type_error("evaluate: no document"));
     };
     let expr = e.to_js_string(arg(args, 0))?;
-    let ctx = node_for(e, arg(args, 1)).unwrap_or_else(|| dom.borrow().root);
+    let ctx = node_for_in(e, arg(args, 1), &dom).unwrap_or_else(|| dom.borrow().root);
     let ty = e.to_number(arg(args, 3)).unwrap_or(9.0);
     let mut nodes: Vec<NodeId> = Vec::new();
     let path = expr.trim().to_string();
