@@ -237,11 +237,31 @@ pub(crate) fn download_meta(headers: &[(String, String)]) -> Option<DownloadMeta
         .split(';')
         .next()
         .is_some_and(|d| d.trim().eq_ignore_ascii_case("attachment"));
-    let doc_like = mime.is_empty()
-        || mime == "text/html"
-        || mime == "application/xhtml+xml"
-        || mime.starts_with("text/")
-        || mime.ends_with("+xml");
+    // Une ressource **script** servie en top-level n'est
+    // pas un document — `text/javascript` serait sinon
+    // ratatché à `text/*` et peint en brut (vol rakuten :
+    // `window.open` vers un `.js` ouvrait un onglet
+    // affichant la source). Politique navigateurs : ces
+    // types basculent en téléchargement.
+    let script_like = matches!(
+        mime.as_str(),
+        "application/javascript"
+            | "application/x-javascript"
+            | "application/ecmascript"
+            | "application/x-ecmascript"
+            | "text/javascript"
+            | "text/ecmascript"
+            | "text/jscript"
+            | "text/livescript"
+            | "text/x-javascript"
+            | "text/x-ecmascript"
+    );
+    let doc_like = !script_like
+        && (mime.is_empty()
+            || mime == "text/html"
+            || mime == "application/xhtml+xml"
+            || mime.starts_with("text/")
+            || mime.ends_with("+xml"));
     if attached || !doc_like {
         return Some(DownloadMeta {
             filename_hint,

@@ -1320,6 +1320,39 @@ impl Session {
         Ok(())
     }
 
+    /// Ferme un contexte `NewTab` resté **vierge** après sa
+    /// navigation inaugurale (vol rakuten/soundcloud,
+    /// CAP-159) : un `window.open`/`<a target=_blank>` dont
+    /// la réponse est un téléchargement (ex. `.js` servi
+    /// `text/javascript`) laisse sinon un onglet parasite
+    /// vide — les navigateurs ferment la popup mort-née.
+    /// Vierge = `url` et historique jamais peuplés : un
+    /// téléchargement ne commit rien, une erreur peint sa
+    /// page (étape 76 — conservée). Les pendings offerts
+    /// sur le contexte mort sont **re-attribués** à
+    /// `opener` pour rester décidables (`accept_download`
+    /// exige l'onglet vivant) — l'événement
+    /// `DownloadOffered` déjà émis porte l'ancien id,
+    /// borne assumée et documentée.
+    pub(crate) fn close_stillborn_popup(&mut self, opener: TabId, tab: TabId) {
+        if tab == opener {
+            return;
+        }
+        let stillborn = self
+            .tabs
+            .get(&tab)
+            .is_some_and(|e| e.url.is_none() && e.hist.is_empty());
+        if !stillborn {
+            return;
+        }
+        for dl in self.downloads.values_mut() {
+            if dl.tab == tab {
+                dl.tab = opener;
+            }
+        }
+        let _ = self.close_tab(tab);
+    }
+
     /// Onglets ouverts.
     #[must_use]
     pub fn tabs(&self) -> Vec<TabId> {

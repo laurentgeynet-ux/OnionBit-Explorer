@@ -2348,3 +2348,85 @@ fn auto_nav_budget_caps_script_and_refresh() {
     assert!(s.enqueue_nav_act(tab, act(), false));
     assert_eq!(s.tabs.get(&tab).unwrap().pending_nav.len(), 5);
 }
+
+/// Vol rakuten/soundcloud — un `window.open`/`<a
+/// target=_blank>` dont la réponse est un téléchargement
+/// (ex. `.js` servi `text/javascript`) laissait un onglet
+/// parasite vierge : `close_stillborn_popup` le referme et
+/// ré-attribue les pendings à l'opener. Un contexte neuf
+/// réellement navigué (URL + historique) n'est pas touché.
+#[test]
+fn stillborn_popup_closes_and_downloads_reattributed() {
+    let mut s = Session::new(Arc::new(FailTransport), Arc::new(TestFont));
+    let opener = s.open_tab();
+    let url = Url::parse("http://h.test/page").unwrap();
+    s.tabs.get_mut(&opener).unwrap().url = Some(url.clone());
+    let popup = s.named_or_new_tab(opener, "");
+    s.downloads.insert(
+        7,
+        PendingDownload {
+            tail: NavTail {
+                epoch: 0,
+                push: true,
+                prev_title: None,
+                req: Request::get(url.clone()),
+            },
+            id: 7,
+            tab: popup,
+            url,
+            filename_hint: None,
+            mime: "text/javascript".to_string(),
+            size: None,
+            body: b"js".to_vec(),
+        },
+    );
+    s.close_stillborn_popup(opener, popup);
+    assert!(!s.tabs.contains_key(&popup), "popup vierge refermée");
+    assert_eq!(
+        s.pending_downloads(opener).len(),
+        1,
+        "le pending suit l'opener, pas l'onglet mort"
+    );
+
+    // Un contexte neuf qui a vraiment atterri (page ou
+    // page d'erreur — `url`/`hist` peuplés) survit.
+    let landed = s.named_or_new_tab(opener, "");
+    {
+        let e = s.tabs.get_mut(&landed).unwrap();
+        e.url = Some(Url::parse("http://h.test/ok").unwrap());
+        e.hist.push(HistEntry {
+            req: Request::get(Url::parse("http://h.test/ok").unwrap()),
+            failed: true,
+            same_doc: false,
+            state: None,
+        });
+    }
+    s.close_stillborn_popup(opener, landed);
+    assert!(s.tabs.contains_key(&landed), "onglet atterri conservé");
+    // `close_stillborn_popup` sur l'opener lui-même : no-op.
+    s.close_stillborn_popup(opener, opener);
+    assert!(s.tabs.contains_key(&opener));
+}
+
+/// `download_meta` : un type **script** servi en top-level
+/// n'est pas un document — `text/javascript` serait sinon
+/// ratatché à `text/*` et peint en brut (vol rakuten).
+#[test]
+fn download_meta_rejects_script_mimes() {
+    let h = vec![(
+        "content-type".to_string(),
+        "text/javascript; charset=utf-8".to_string(),
+    )];
+    let meta = download_meta(&h).expect("script top-level = téléchargement");
+    assert_eq!(meta.mime, "text/javascript");
+    let h = vec![(
+        "content-type".to_string(),
+        "application/javascript".to_string(),
+    )];
+    assert!(download_meta(&h).is_some());
+    let h = vec![("content-type".to_string(), "text/html".to_string())];
+    assert!(download_meta(&h).is_none(), "html reste un document");
+    let h = vec![("content-type".to_string(), "text/plain".to_string())];
+    assert!(download_meta(&h).is_none(), "text/plain reste un document");
+}
+
