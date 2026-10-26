@@ -7,6 +7,21 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **JS-C147 — `this` sloppy boxé en
+  wrapper** (`explorer-jscore`) —
+  `OrdinaryCallBindThis` rendait le
+  global pour TOUT `this` non-objet :
+  `f.call("x")` donnait `this` =
+  globalThis → `toLowerCase is not
+  a function (on Object)` (jQuery
+  `g.each`/`propFix` — codepen
+  `everypage`, soundcloud `1-*.js`).
+  Spec : primitives → wrappers
+  String/Number/Boolean/BigInt via
+  `__prim` (même chemin que
+  `new String`) ; seuls
+  `null`/`undefined` → global.
+
 - **JS-C146 — `in_gen` restauré après
   fonction imbriquée** (`explorer-jscore`)
   — `fn_body` restaurait `in_gen` à la

@@ -2502,6 +2502,22 @@ impl Engine {
         self.heap.alloc_obj(Object::ordinary(proto))
     }
 
+    /// Boxing `ToObject` d'une primitive — wrapper portant
+    /// `__prim` (même chemin que `new String`/`new Number`,
+    /// `length` non-writable pour les strings). Utilisé par
+    /// `OrdinaryCallBindThis` sloppy.
+    pub(crate) fn box_primitive(&mut self, v: Value) -> Value {
+        let proto = match v {
+            Value::Str(_) => self.protos.string,
+            Value::Num(_) => self.protos.number,
+            Value::Bool(_) => self.protos.boolean,
+            Value::Big(_) => self.protos.bigint,
+            _ => self.protos.object,
+        };
+        let id = self.heap.alloc_obj(Object::ordinary(Value::Obj(proto)));
+        crate::builtins::ctors::wrap_or_prim(self, Value::Obj(id), proto, v)
+    }
+
     /// Fonction native enveloppant une méthode host
     /// (feature-detect) — `args[0]` = nom lié posé par
     /// `bound_native` au site `get_prop_value`, `this` =
@@ -5572,7 +5588,18 @@ impl Engine {
         let this = if lit.strict || matches!(this, Value::Obj(_)) {
             this
         } else {
-            Value::Obj(self.global)
+            match this {
+                // Spec `OrdinaryCallBindThis` sloppy :
+                // `ToObject(thisArg)` — les primitives sont
+                // **boxées** en wrappers String/Number/Boolean/
+                // BigInt (`f.call("x")` ⇒ `this.toLowerCase()`
+                // fonctionne — jQuery `g.each`/`propFix`,
+                // codepen `everypage`, soundcloud `1-*.js`).
+                // Seuls `undefined`/`null` basculent sur
+                // l'objet global.
+                Value::Undefined | Value::Null => Value::Obj(self.global),
+                v => self.box_primitive(v),
+            }
         };
         let outer_strict = self.strict;
         self.strict = lit.strict;
