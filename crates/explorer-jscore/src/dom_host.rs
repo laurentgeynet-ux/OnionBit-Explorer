@@ -3219,6 +3219,43 @@ impl Engine {
 // document
 // ------------------------------------------------------------------
 
+/// Auto-vive la pièce du squelette document (`html`/`head`/
+/// `body`) si absente du miroir — invariant HTML « un document
+/// a toujours ces trois éléments » (le parseur les génère même
+/// vides ; les miroirs de `about:blank` ou de fragments n'en
+/// ont pas). Même insertion que le getter `document.head`
+/// (JS-C89) : `html` enfant de la racine, `head` premier
+/// enfant de `html`, `body` dernier.
+fn ensure_doc_part(dom: &DomRef, tag: &str) {
+    let mut d = dom.borrow_mut();
+    let root = d.root;
+    if !d.by_tag(root, tag).is_empty() {
+        return;
+    }
+    let mut html_el = d.by_tag(root, "html").first().copied();
+    if html_el.is_none() {
+        let h = d.create_element("html");
+        d.append(root, h);
+        html_el = Some(h);
+    }
+    let Some(html_el) = html_el else {
+        return;
+    };
+    match tag {
+        "html" => {}
+        "head" => {
+            let h = d.create_element("head");
+            let first = d.child_nodes(html_el).first().copied();
+            d.insert_before(html_el, h, first);
+        }
+        "body" => {
+            let b = d.create_element("body");
+            d.append(html_el, b);
+        }
+        _ => {}
+    }
+}
+
 impl Host for DocumentHost {
     fn has_method(&self, name: &str) -> bool {
         DOC_METHODS.contains(&name)
@@ -3621,6 +3658,17 @@ impl Host for DocumentHost {
             }
             "getElementsByTagName" => {
                 let tag = e.to_js_string(arg(args, 0))?;
+                // `html`/`head`/`body` existent TOUJOURS dans un
+                // document (le parseur HTML les auto-génère) — les
+                // documents de cadre vides (`about:blank`, miroir
+                // sans squelette) les auto-vivent comme le getter
+                // `head` (JS-C89). Sans ça, `getElementsByTagName(
+                // 'head')[0]` rend `undefined` → `appendChild`
+                // jette (bootstrap Cloudflare `c()` de jsfiddle/
+                // codepen, ×12 en boucle à chaque input).
+                if matches!(tag.as_str(), "html" | "head" | "body") {
+                    ensure_doc_part(&self.dom, &tag);
+                }
                 let ids = {
                     let d = self.dom.borrow();
                     d.by_tag(d.root, &tag)

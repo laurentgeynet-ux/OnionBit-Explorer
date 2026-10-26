@@ -7,6 +7,22 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **JS-C148 — `head`/`body`/`html`
+  auto-vivés dans
+  `getElementsByTagName`** (`explorer-jscore`)
+  — un document a TOUJOURS ces trois
+  éléments (le parseur les génère
+  même vides) ; les miroirs de cadre
+  sans squelette (`about:blank`,
+  iframe CF de jsfiddle) rendaient
+  `getElementsByTagName('head')[0]` =
+  `undefined` → `cannot read
+  'appendChild' of Undefined` (×12
+  en boucle à chaque input).
+  `ensure_doc_part` pose la pièce
+  manquante (même invariant que le
+  getter `document.head`, JS-C89).
+
 - **JS-C147 — `this` sloppy boxé en
   wrapper** (`explorer-jscore`) —
   `OrdinaryCallBindThis` rendait le
