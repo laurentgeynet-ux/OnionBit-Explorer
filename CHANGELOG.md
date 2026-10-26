@@ -998,6 +998,20 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   (cast HLS, dossier externe —
   déclencheurs nommés).
 
+- **139e terrain — flux réel
+  relayé** (`media_proxy_field`,
+  `#[ignore]`) : proxy +
+  `AutoClient` réel → serveur
+  IPTV mock local
+  (`D:\Projet\serveur iptv`,
+  `/movie/user/user/1001.mp4` =
+  `Bear (Demo).mp4`) — octets MP4
+  relayés, signature `ftyp`,
+  `Range` propagé (206). Lancer :
+  `cargo test -p explorer-net
+  --test media_proxy_field --
+  --ignored`.
+
 - **CAP-198 — Shadow DOM tranche 4 :
   event retargeting** (`explorer-jscore`)
   : le chemin de propagation des
