@@ -31,8 +31,7 @@ async fn proxy_relaye_flux_vod_reel() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[ignore = "terrain : exige MEDIA_PROXY_FIELD_URL=<url flux>"]
 async fn proxy_relaye_flux_env() {
-    let url = std::env::var("MEDIA_PROXY_FIELD_URL")
-        .expect("MEDIA_PROXY_FIELD_URL requis");
+    let url = std::env::var("MEDIA_PROXY_FIELD_URL").expect("MEDIA_PROXY_FIELD_URL requis");
     relay_full(&url).await;
 }
 
@@ -51,8 +50,7 @@ async fn relay_full(target: &str) {
         Arc::new(explorer_net::policy::RedirectTransport::wrap(inner, 5));
     // UA injecté : les panels IPTV filtrent souvent (VLC…) —
     // `MEDIA_PROXY_FIELD_UA` permet de le choisir en vol.
-    let ua = std::env::var("MEDIA_PROXY_FIELD_UA")
-        .unwrap_or_else(|_| "ExplorerTest".into());
+    let ua = std::env::var("MEDIA_PROXY_FIELD_UA").unwrap_or_else(|_| "ExplorerTest".into());
     let proxy = MediaProxy::spawn(transport, ua)
         .await
         .expect("bind loopback");
@@ -76,11 +74,7 @@ async fn relay_full(target: &str) {
     let mut buf = Vec::new();
     // Live `.ts` : le serveur peut ignorer `Range` → flux
     // infini ; on borne à 20 s et on garde le partiel.
-    let _ = tokio::time::timeout(
-        std::time::Duration::from_secs(20),
-        s.read_to_end(&mut buf),
-    )
-    .await;
+    let _ = tokio::time::timeout(std::time::Duration::from_secs(20), s.read_to_end(&mut buf)).await;
     let txt = String::from_utf8_lossy(&buf);
     // FileResponse honore Range → 206 + content-range.
     assert!(
@@ -91,6 +85,7 @@ async fn relay_full(target: &str) {
     // cadencée 188 o) selon le flux servi.
     assert!(buf.len() > 100, "corps vide : {} octets", buf.len());
     let mp4 = buf.windows(4).any(|w| w == b"ftyp");
+    #[allow(clippy::naive_bytecount)]
     let ts = buf.iter().filter(|&&b| b == 0x47).count() > 50;
     assert!(mp4 || ts, "ni signature mp4 ni trames ts relais");
 }

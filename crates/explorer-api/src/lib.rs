@@ -123,6 +123,29 @@ fn record_console_event(ring: &ConsoleRing, ev: &CoreEvent) {
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
             let q = g.entry(*t).or_default();
+            // Flood (vol 28 : chess ~60 × `TypeError: n is
+            // not a function` identiques) — un message
+            // **identique au précédent** replie en suffixe
+            // ` ×N` au lieu d'empiler des lignes. La
+            // répétition non consécutive n'est pas touchée
+            // (alternance honnête, pas de dédup globale).
+            let dup_n = q.back().and_then(|last| {
+                if last == message {
+                    Some(2)
+                } else {
+                    last.strip_prefix(message.as_str()).and_then(|suf| {
+                        suf.strip_prefix(" ×")
+                            .and_then(|n| n.parse::<u32>().ok())
+                            .map(|n| n + 1)
+                    })
+                }
+            });
+            if let Some(n) = dup_n {
+                if let Some(last) = q.back_mut() {
+                    *last = format!("{message} ×{n}");
+                }
+                return;
+            }
             if q.len() >= CONSOLE_RING {
                 q.pop_front();
             }
@@ -1192,6 +1215,39 @@ mod tests {
         let g = ring.lock().unwrap();
         assert_eq!(g[&tab].len(), 1, "les erreurs post-nav restent");
         assert_eq!(g[&tab][0], "après nav");
+    }
+
+    #[test]
+    fn console_ring_dedup_consecutif() {
+        // Vol 28 chess : ~60 TypeError identiques → le ring
+        // replie « message ×N » au lieu d'empiler.
+        let ring = ConsoleRing::default();
+        let tab: TabId = 2;
+        let ev = CoreEvent::PipelineError {
+            tab: Some(tab),
+            message: "TypeError: n is not a function".to_string(),
+        };
+        for _ in 0..60 {
+            record_console_event(&ring, &ev.clone());
+        }
+        {
+            let g = ring.lock().unwrap();
+            assert_eq!(g[&tab].len(), 1);
+            assert_eq!(g[&tab][0], "TypeError: n is not a function ×60");
+        }
+        // Un message différent puis la même erreur : nouvelle
+        // ligne (alternance honnête, pas de dédup globale).
+        record_console_event(
+            &ring,
+            &CoreEvent::PipelineError {
+                tab: Some(tab),
+                message: "autre".to_string(),
+            },
+        );
+        record_console_event(&ring, &ev);
+        let g = ring.lock().unwrap();
+        assert_eq!(g[&tab].len(), 3);
+        assert_eq!(g[&tab][2], "TypeError: n is not a function");
     }
 
     #[test]
