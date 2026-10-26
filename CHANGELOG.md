@@ -122,6 +122,57 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   body_sibling`, `implicit_close_
   dt_dd_pairs`.
 
+- **JS-C115 — `FunctionDecl` top-level
+  ne ré-instancie plus le hoisté,
+  `registerId` vaadin tué**
+  (`explorer-jscore::interp::exec`) —
+  vol vaadin : `TypeError: registerId
+  is not a function` (forms/v2.js,
+  styled-components — `e.registerId=`
+  posé en statique, perdu ensuite).
+  Repro minimal : `function f(){ e.x
+  =1; function e(){}; return e.x }`
+  → `null`. Cause : `Stmt::Function
+  Decl` ré-installait un objet neuf
+  à sa ligne alors que `hoist` avait
+  déjà instancié la fonction à
+  l'entrée de scope — les props
+  posées tôt disparaissaient (spec :
+  no-op à la déclaration). Fix :
+  skip de la ré-installation quand
+  le binding contient déjà la
+  fonction de cette déclaration
+  (`Rc::ptr_eq` sur l'AST) — Annex-B
+  bloc (`undefined` → installe) et
+  ré-exec de boucle (closure fraîche)
+  préservés. 279/279 lang verts,
+  `registerId` disparu de la console
+  vaadin au re-vol.
+
+- **JS-C116 — `document.styleSheets`
+  itérable, fixup lumo débloqué**
+  (`explorer-jscore::dom_host`) —
+  vol vaadin : `connectedCallback` CE
+  → `m` lumo → `new Set(e.style
+  Sheets)` sur `[#d, document]` →
+  `object is not iterable`. Ajout
+  d'une StyleSheetList bornée :
+  `<style>` + `<link rel=stylesheet>`
+  (rel token-list, case-insensitive)
+  en ordre document via `by_tag`,
+  objets `CSSStyleSheet` (`css_
+  sheet_ctor`) avec `ownerNode`/
+  `href` posés, tableau frais par
+  get. Mesuré : 52 feuilles vaadin,
+  `new Set` ok, `appendChild` CE
+  survit à l'init lumoInjector.
+  Reliquat : `_set_theme` absent de
+  **tous** les modules servis —
+  ThemableMixin jamais bundlé
+  (défaut amont du site, fidélité).
+  Test `document_style_sheets_
+  iterable`.
+
 - **JS-C107 — `push`/`pop` array-like
   O(1), wedge gov.uk tuée**
   (`explorer-jscore::builtins`) :
@@ -150,6 +201,23 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   `splice`, `sort`…) gardent la cap
   4M non tickée — même classe,
   fix = take/put faillibles + tick.
+
+- **JS-C118 — `customElements.define`
+  jette des `DOMException` typées**
+  (`explorer-jscore::dom_host`) —
+  catalyst github tolère précisément
+  `e instanceof DOMException &&
+  e.name==="NotSupportedError"` sur
+  re-define et rejette le reste →
+  un `TypeError` cassait la chaîne
+  lazy-CE en silence. Spec : nom
+  invalide → `SyntaxError`, nom ou
+  ctor déjà pris → `NotSupportedError`,
+  ctor non-appelable → `TypeError`.
+  Tests `define_duplicate_throws_
+  domexception_not_supported` +
+  `custom_elements_registry`
+  (attendu mis à jour).
 
 - **JS-C113 — kill mémoire sur
   vivant, pas sur estimé** (`explorer-jscore`
@@ -890,6 +958,31 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   `c97_offset_parent_top_left`.
 
 ### Fixed
+
+- **Étape 140 — cycle de vie doc
+  droppé sous pompe JS détachée**
+  (`explorer-core::session`) : race
+  `sub_commit_tail` vs
+  `pump_timers_shared` — `set_ready_
+  state`/`dispatch_doc_event`
+  (`interactive`/`complete`,
+  `readystatechange`, `DOMContent
+  Loaded`, `load`) tombent en
+  silencieux quand `entry.js=None`,
+  jamais rejoués. Vol github :
+  `readyState` figé `"loading"` →
+  gate `ready` du registre lazy
+  pendue → zéro `import()`. File
+  `pending_doc_lifecycle` bornée sur
+  `Tab` (pattern `js_pending_*`),
+  rejouée à `commit_js_pump`, purgée
+  nav/epoch/snapshot. Mesuré :
+  `"complete"` tenu, 24 `import()`
+  lazy (2 avant). Reliquat : define
+  lazy encore absent — mur plus
+  profond (chaîne `x` catalyst).
+  Test `doc_lifecycle_replays_after_
+  detached_pump`.
 
 - **JS-C98 — régression
   `PerformanceObserver` github**

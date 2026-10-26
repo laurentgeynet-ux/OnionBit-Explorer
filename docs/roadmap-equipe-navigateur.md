@@ -4950,6 +4950,35 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
     propre ; ADR-0024 et
     CHANGELOG à jour.
 
+- [x] **Étape 140. Cycle de vie doc
+  rejoué après pompe JS détachée**
+  (`explorer-core::session`) — race
+  mesurée au vol github : le tail de
+  `sub_commit` pose `readyState
+  interactive`/`complete` +
+  `readystatechange`/`DOMContent
+  Loaded`/`load` pendant que la
+  pompe détachée détient le moteur
+  (`entry.js=None`) — appels tombés
+  en silencieux, jamais rejoués →
+  `readyState` figé `"loading"`,
+  gate `ready` du lazy-registry
+  github pendue, zéro `import()`,
+  mort sans erreur. File bornée
+  `pending_doc_lifecycle` sur `Tab`
+  (pattern `js_pending_*`), rejouée
+  à `commit_js_pump`, purgée nav/
+  epoch/snapshot. Mesuré :
+  `readyState "complete"` tenu, gate
+  levée, 24 `import()` lazy (2
+  avant), livraisons ok. Reliquat :
+  `customElements.define` lazy
+  encore absent — entrées `s(id)`
+  propres, mur plus profond (chaîne
+  `x` catalyst). Test
+  `doc_lifecycle_replays_after_
+  detached_pump`.
+
 - [ ] **Écarts terrain — vol humain
   22/10 (release `39ab821`, FFI)** :
   second run humain — trois constats
@@ -6973,6 +7002,61 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   reliquat repris au drain suivant.
   Test `c103_*`.
 
+- [x] **JS-C114. Parseur miroir :
+  `</head>` implicite + `PAIRED_CLOSE`**
+  (`explorer-jscore::dom`) — gBCR
+  0×0 global w3.org attribué à tort
+  au « post-layout » : la sonde
+  `EXPLORER_GEOM_TRACE` a classé la
+  vraie cause — le miroir nichait
+  `body` sous `head` (HTML sans
+  `</head>` littéral) → tous les
+  chemins `element_path` décalés.
+  Règle « in head » (`HEAD_TAGS` +
+  `<body>` implicite) + paires
+  cross-tag (`dd`/`dt`/`li`,
+  `tr`/`td`/`th`, sections de table)
+  dépilant jusqu'à la cible.
+  Mesuré : 0 % → **87,6 %**
+  rects non-nuls ; résidu honnête.
+  Tests `implicit_head_close_keeps_
+  body_sibling` + `implicit_close_
+  dt_dd_pairs`.
+
+- [x] **JS-C115. `FunctionDecl`
+  top-level sans ré-instanciation**
+  (`explorer-jscore::interp::exec`)
+  — `registerId is not a function`
+  vaadin : l'exécution de la
+  déclaration recréait la fonction
+  en objet neuf, jetant l'hoistée
+  qui portait les props posées tôt.
+  Skip quand le binding contient
+  déjà la fonction de cette
+  déclaration (`Rc::ptr_eq` AST) —
+  Annex-B bloc et closures de
+  boucle préservés. `registerId`
+  disparu de la console vaadin.
+  Test `iife_hoisted_fn_shadows_
+  and_receives_props`.
+
+- [x] **JS-C116. `document.
+  styleSheets` itérable**
+  (`explorer-jscore::dom_host`) —
+  fixup lumo vaadin `new Set(
+  e.styleSheets)` tuait l'upgrade
+  CE (`object is not iterable`).
+  StyleSheetList bornée : `<style>`
+  + `<link rel=stylesheet>` (rel
+  token-list case-insensitive) en
+  ordre document, objets
+  `css_sheet_ctor` + `ownerNode`/
+  `href`, tableau frais par get.
+  Mesuré : 52 feuilles, CE
+  `appendChild` survit à l'init
+  lumoInjector. Test `document_
+  style_sheets_iterable`.
+
 - [x] **JS-C107. `push`/`pop`
   array-like O(1) — wedge gov.uk
   tuée** (`explorer-jscore::builtins`)
@@ -7001,6 +7085,19 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   sur déchets. `tick` → `collect()`
   → re-test — kill sur vivant seul.
   `c37_mem_limit_soft_kill` refondu.
+
+- [x] **JS-C118. `define` jette
+  `DOMException` typées**
+  (`explorer-jscore::dom_host`) —
+  catalyst github rejette le
+  `TypeError` sur re-define (tolère
+  `NotSupportedError` par `e.name`).
+  Spec : nom invalide → `SyntaxError`,
+  doublon nom/ctor → `NotSupportedError`,
+  ctor non-appelable → `TypeError`.
+  Tests `define_duplicate_throws_
+  domexception_not_supported` +
+  `custom_elements_registry`.
 
 - [x] **JS-C112. Garde cycle DOM**
   (`explorer-jscore` dom+dom_host) —

@@ -2210,9 +2210,22 @@ impl Engine {
         self.set_own(g, "outerWidth", Value::Num(f64::from(w)), false);
         self.set_own(g, "outerHeight", Value::Num(f64::from(h)), false);
         self.set_own(g, "devicePixelRatio", Value::Num(1.0), false);
-        // Pas de scroll réel — la page tient dans le viewport.
-        for k in ["scrollX", "scrollY", "pageXOffset", "pageYOffset"] {
-            self.set_own(g, k, Value::Num(0.0), false);
+        // Scroll réel — `scroll*`/`page*Offset` lisent la
+        // `GeometryMap` publiée (mise à jour par la session au
+        // scroll input, sans rebuild). Vol github : figés à 0,
+        // les loaders lazy « élément proche du viewport » ne
+        // pouvaient plus se déclencher.
+        {
+            let sx = self.native_fn("scrollX", global_scroll_x);
+            let sy = self.native_fn("scrollY", global_scroll_y);
+            let px = self.native_fn("pageXOffset", global_scroll_x);
+            let py = self.native_fn("pageYOffset", global_scroll_y);
+            if let Some(o) = self.heap.obj_mut(g) {
+                o.set_accessor("scrollX", sx, Value::Undefined, true);
+                o.set_accessor("scrollY", sy, Value::Undefined, true);
+                o.set_accessor("pageXOffset", px, Value::Undefined, true);
+                o.set_accessor("pageYOffset", py, Value::Undefined, true);
+            }
         }
 
         // -- JS-C98 — complétude de surface (census) ----------
@@ -3154,7 +3167,12 @@ impl Host for DocumentHost {
             })),
             "fullscreen" => Ok(Some(Value::Bool(e.hooks.fullscreen_el.is_some()))),
             "fullscreenEnabled" => Ok(Some(Value::Bool(true))),
-            "documentElement" => {
+            // `document.scrollingElement` (spec : root en
+            // standards mode — pas de quirks détecté dans le
+            // miroir) ; les loaders lazy lisent
+            // `scrollingElement.scrollTop` (vol github :
+            // `undefined` cassait le trigger de visibilité).
+            "documentElement" | "scrollingElement" => {
                 let n = self.dom.borrow().document_element();
                 Ok(Some(match n {
                     Some(n) => node_value(e, &self.dom, &self.cache, n),
@@ -3173,6 +3191,49 @@ impl Host for DocumentHost {
                     .borrow_mut()
                     .get_or_insert_with(|| e.new_array(Vec::new()));
                 Ok(Some(v))
+            }
+            // `document.styleSheets` — mesuré terrain vaadin :
+            // le fixup lumo itère `new Set(e.styleSheets)` à
+            // l'upgrade CE → absent = `object is not iterable`
+            // (même classe que `adoptedStyleSheets` CAP-195).
+            // StyleSheetList bornée : une `CSSStyleSheet` shape
+            // par `<style>`/`<link rel=stylesheet>` en ordre
+            // document (`ownerNode`, `href`), tableau frais par
+            // get — la « live list » reste bornée.
+            "styleSheets" => {
+                let elems: Vec<NodeId> = {
+                    let d = self.dom.borrow();
+                    d.by_tag(d.root, "*")
+                        .into_iter()
+                        .filter(|&n| {
+                            let t = &d.nodes[n as usize].tag;
+                            t == "style"
+                                || (t == "link"
+                                    && d.attr(n, "rel").is_some_and(|r| {
+                                        r.split_whitespace()
+                                            .any(|x| x.eq_ignore_ascii_case("stylesheet"))
+                                    }))
+                        })
+                        .collect()
+                };
+                let mut sheets = Vec::with_capacity(elems.len());
+                for n in elems {
+                    let v = crate::misc_apis::css_sheet_ctor(e, Value::Undefined, &[])?;
+                    if let Value::Obj(o) = v {
+                        let own = node_value(e, &self.dom, &self.cache, n);
+                        e.set_own(o, "ownerNode", own, true);
+                        let href = {
+                            let d = self.dom.borrow();
+                            d.attr(n, "href").map(str::to_owned)
+                        };
+                        if let Some(h) = href {
+                            let hv = e.str_val(h);
+                            e.set_own(o, "href", hv, true);
+                        }
+                    }
+                    sheets.push(v);
+                }
+                Ok(Some(e.new_array(sheets)))
             }
             // `document.defaultView` — la fenêtre du document ≙ le
             // global (single-window model).
@@ -5243,6 +5304,25 @@ impl Host for NodeHost {
                 };
                 return Ok(Some(Value::Num(px)));
             }
+            // `scrollTop`/`scrollLeft` — scroll réel du
+            // document sur les nœuds racines (`body`/
+            // `documentElement` — les loaders lazy lisent
+            // `document.documentElement.scrollTop` ; vol
+            // github : `undefined` figeait le trigger). Les
+            // autres éléments : 0 honnête (pas de scroll
+            // d'élément dans le moteur).
+            "scrollTop" | "scrollLeft" => {
+                let is_root = {
+                    let d = self.dom.borrow();
+                    node == d.body() || Some(node) == d.document_element()
+                };
+                let px = if is_root {
+                    geom_scroll_offset(&self.dom, key == "scrollLeft")
+                } else {
+                    0.0
+                };
+                return Ok(Some(Value::Num(px)));
+            }
             // Références de méthode — les shims lisent
             // `o = el.matches || el.msMatchesSelector`
             // (selector-observer github.com : `o.call(e,t)`)
@@ -6401,7 +6481,10 @@ fn element_receiver(e: &mut Engine, v: Value) -> Option<(NodeId, DomRef, NodeCac
 /// table injectée (harnais), nœud détaché, ou chemin absent
 /// (divergence miroir/session bornée → repli sur les 0
 /// historiques à l'appelant).
-fn element_geom(dom: &DomRef, node: NodeId) -> Option<(crate::geom::GeoRect, bool, f32, f32)> {
+pub(crate) fn element_geom(
+    dom: &DomRef,
+    node: NodeId,
+) -> Option<(crate::geom::GeoRect, bool, f32, f32)> {
     let d = dom.borrow();
     let map = d.geometry.as_ref()?.clone();
     let path = d.element_path(node)?;
@@ -6429,11 +6512,7 @@ fn geom_trace_miss(g: &crate::geom::GeometryMap, path: &[(String, u32)]) {
         return;
     }
     let parent = &path[..path.len().saturating_sub(1)];
-    let near = g
-        .rects
-        .keys()
-        .filter(|k| k.starts_with(parent))
-        .count();
+    let near = g.rects.keys().filter(|k| k.starts_with(parent)).count();
     eprintln!(
         "[geom-miss] path={path:?} parent-hits={near} rects={}",
         g.rects.len()
@@ -6444,7 +6523,7 @@ fn geom_trace_miss(g: &crate::geom::GeometryMap, path: &[(String, u32)]) {
 /// `(x, y, w, h)` : coords document moins scroll, ou telles
 /// quelles sous `position:fixed` (le layout pose `fixed`
 /// contre le viewport — i#18).
-fn element_geom_rect(dom: &DomRef, node: NodeId) -> Option<(f64, f64, f64, f64)> {
+pub(crate) fn element_geom_rect(dom: &DomRef, node: NodeId) -> Option<(f64, f64, f64, f64)> {
     let (r, fixed, sx, sy) = element_geom(dom, node)?;
     let (x, y) = if fixed {
         (r.x, r.y)
@@ -6502,6 +6581,54 @@ fn offset_parent_node(dom: &DomRef, node: NodeId) -> Option<NodeId> {
         }
         cur = p;
     }
+}
+
+/// `window.scrollX`/`pageXOffset` — scroll horizontal de la
+/// `GeometryMap` publiée (accessors sur le global).
+fn global_scroll_x(e: &mut Engine, _this: Value, _a: &[Value]) -> JsResult<Value> {
+    let y = e
+        .dom_ctx
+        .as_ref()
+        .and_then(|(d, _)| {
+            d.borrow()
+                .geometry
+                .as_ref()?
+                .lock()
+                .ok()
+                .map(|g| g.scroll_x)
+        })
+        .unwrap_or(0.0);
+    Ok(Value::Num(f64::from(y)))
+}
+
+/// `window.scrollY`/`pageYOffset` — scroll vertical publié.
+fn global_scroll_y(e: &mut Engine, _this: Value, _a: &[Value]) -> JsResult<Value> {
+    let y = e
+        .dom_ctx
+        .as_ref()
+        .and_then(|(d, _)| {
+            d.borrow()
+                .geometry
+                .as_ref()?
+                .lock()
+                .ok()
+                .map(|g| g.scroll_y)
+        })
+        .unwrap_or(0.0);
+    Ok(Value::Num(f64::from(y)))
+}
+
+/// `scrollTop`/`scrollLeft` de `documentElement`/`body` — le
+/// scroll du document (les éléments ne scrollent pas → 0
+/// honnête ailleurs). `x` = horizontal.
+fn geom_scroll_offset(dom: &DomRef, horizontal: bool) -> f64 {
+    let Some(slot) = dom.borrow().geometry.clone() else {
+        return 0.0;
+    };
+    let Some(g) = slot.lock().ok() else {
+        return 0.0;
+    };
+    f64::from(if horizontal { g.scroll_x } else { g.scroll_y })
 }
 
 /// Dimension du document publiée pour `scroll*` de l'élément
@@ -7497,10 +7624,16 @@ impl Host for CustomElementsHost {
                 let n = e.to_js_string(arg(args, 0))?;
                 let ctor = arg(args, 1);
                 tracing::debug!(name = %n, "customElements.define");
-                // Approche spec `SyntaxError`/`NotSupportedError`
-                // via TypeError (pas de DOMException typé ici).
+                // Spec `define` : DOMException typés — les
+                // frameworks (catalyst github) tolèrent
+                // `NotSupportedError` par `e.name` et rejettent
+                // le reste : un TypeError cassait le chemin.
                 if !ce_valid_name(&n) {
-                    return Err(e.type_error(format!("customElements.define: invalid name {n:?}")));
+                    return Err(dom_exception(
+                        e,
+                        "SyntaxError",
+                        &format!("customElements.define: invalid name {n:?}"),
+                    ));
                 }
                 if !e.is_callable(ctor) {
                     return Err(e.type_error("customElements.define: ctor is not a constructor"));
@@ -7514,10 +7647,18 @@ impl Host for CustomElementsHost {
                 {
                     let d = self.dom.borrow();
                     if d.ce.defs.contains_key(&n) {
-                        return Err(e.type_error("custom element already defined"));
+                        return Err(dom_exception(
+                            e,
+                            "NotSupportedError",
+                            "custom element already defined",
+                        ));
                     }
                     if d.ce.defs.values().any(|def| e.strict_eq(def.ctor, ctor)) {
-                        return Err(e.type_error("custom element ctor already registered"));
+                        return Err(dom_exception(
+                            e,
+                            "NotSupportedError",
+                            "custom element ctor already registered",
+                        ));
                     }
                 }
                 // `observedAttributes` figé au define (spec).
@@ -9156,6 +9297,22 @@ fn dom_exception_ctor(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<V
         e.set_own(oid, "name", n, true);
     }
     Ok(Value::Undefined)
+}
+
+/// Mint une `DOMException` nommée (`name`/`message`, proto
+/// `DOMException.prototype`) — les erreurs spec de `define` et
+/// consorts. Repli `TypeError` si le global manque (harnais
+/// sans DOM installé).
+fn dom_exception(e: &mut Engine, name: &str, msg: &str) -> crate::heap::Thrown {
+    let de = e.get_prop_value(Value::Obj(e.global), "DOMException").ok();
+    let proto = de
+        .and_then(|f| e.get_prop_value(f, "prototype").ok())
+        .and_then(|v| match v {
+            Value::Obj(p) => Some(p),
+            _ => None,
+        })
+        .unwrap_or(e.protos.object);
+    crate::heap::Thrown(e.error_value(proto, name, msg))
 }
 
 /// `signal.removeEventListener('abort', cb)` — retire de `__ls`.

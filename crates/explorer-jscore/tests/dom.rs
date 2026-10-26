@@ -591,6 +591,30 @@ fn append_child_ancestor_cycle_rejected() {
 }
 
 #[test]
+fn define_duplicate_throws_domexception_not_supported() {
+    // Spec + catalyst github : re-define doit jeter
+    // `DOMException`/`NotSupportedError` — le catch de catalyst
+    // tolère précisément cette forme (`!(e instanceof
+    // DOMException && e.name==="NotSupportedError") → rethrow`) ;
+    // un TypeError cassait la chaîne lazy-CE.
+    assert_eq!(
+        ev("class CE1 extends HTMLElement{};\
+            customElements.define('x-dup', CE1);\
+            try { customElements.define('x-dup', CE1); 'no' }\
+            catch (e) { [e instanceof DOMException, e.name].join('|') }"),
+        "true|NotSupportedError"
+    );
+    // Nom invalide → DOMException `SyntaxError` (spec).
+    assert_eq!(
+        ev(
+            "try { customElements.define('nohyphen', class extends HTMLElement{}); 'no' }\
+            catch (e) { [e instanceof DOMException, e.name].join('|') }"
+        ),
+        "true|SyntaxError"
+    );
+}
+
+#[test]
 fn template_content_is_fragment() {
     // github.com `z8-*.js` : `tpl.content.appendChild(row)` —
     // `.content` matérialise le fragment de contenu et y
@@ -2204,7 +2228,8 @@ fn custom_elements_registry() {
         ),
         "object|undefined|true"
     );
-    // ctor non-fonction → TypeError ; nom déjà pris → TypeError.
+    // ctor non-fonction → TypeError ; nom déjà pris →
+    // `NotSupportedError` DOMException (spec + catalyst).
     assert_eq!(
         ev2(
             PAGE,
@@ -2213,7 +2238,7 @@ fn custom_elements_registry() {
              r+='|';try{customElements.define('y-el',42)}catch(e){r+=e.name}",
             "r"
         ),
-        "TypeError|TypeError"
+        "NotSupportedError|TypeError"
     );
     // `whenDefined` — promesse tenue `undefined` pour un nom
     // enregistré (spec — l'ancien stub résolvait le ctor).
@@ -2537,6 +2562,110 @@ fn rawtext_close_survives_length_shifting_runes() {
     // Casse mélangée de la balise fermante — tolérée.
     let d3 = Dom::from_html("<div><script>var a=1;</ScRiPt><b>z</b></div>");
     assert!(d3.serialize_document().contains("<b>z</b>"));
+}
+
+/// gBCR w3.org — un document **sans `</head>` littéral**
+/// (HTML5 légal : `<body>` ferme `head` implicitement) doit
+/// donner `head` et `body` en frères sous `html`, jamais
+/// `body` niché dans `head`. Sans la règle, chaque chemin
+/// `element_path` porte un maillon `head` en trop et
+/// **aucun** rect géométrie ne matche — `gBCR` 0×0 global
+/// (mesuré `EXPLORER_GEOM_TRACE`, 300/300 zéro).
+#[test]
+fn implicit_head_close_keeps_body_sibling() {
+    let d = Dom::from_html(
+        "<html><head><title>t</title><meta charset=utf-8><body class=h><p>hi</p></body></html>",
+    );
+    let html = d.document_element().unwrap();
+    let head = d.by_tag(html, "head")[0];
+    let body = d.body();
+    assert_eq!(d.parent(body), Some(html), "body enfant de html");
+    assert_eq!(d.parent(head), Some(html), "head enfant de html");
+    assert_ne!(d.parent(body), Some(head), "body n'est pas dans head");
+    // Le paragraphe vit dans body — pas sous head.
+    let p = d.by_tag(body, "p")[0];
+    assert_eq!(d.parent(p), Some(body));
+
+    // Contenu flux sans `<body>` littéral : la spec « after
+    // head » synthétise un `<body>` — parité de chemins avec
+    // le tree-builder réel.
+    let d2 = Dom::from_html("<html><head><title>t</title><div>x</div></html>");
+    let b2 = d2.body();
+    assert_ne!(b2, d2.root, "un body implicite a été posé");
+    assert_eq!(d2.nodes[b2 as usize].tag, "body");
+    let div = d2.by_tag(d2.root, "div")[0];
+    assert_eq!(d2.parent(div), Some(b2), "le div rejoint le body implicite");
+
+    // `<body>` explicitement fermé dans head (cas normal) :
+    // rien ne change — head et body restent frères.
+    let d3 = Dom::from_html("<html><head><title>t</title></head><body><p>x</p></body></html>");
+    let h3 = d3.by_tag(d3.root, "head")[0];
+    assert_eq!(d3.parent(d3.body()), Some(d3.document_element().unwrap()));
+    assert_eq!(d3.parent(h3), Some(d3.document_element().unwrap()));
+}
+
+/// Paires `dd`/`dt` — la spec « implied end tags » les ferme
+/// mutuellement : `<dt>` puis `<dd>` sont **frères** sous `dl`,
+/// jamais nichés l'un dans l'autre (w3.org : listes de
+/// définitions → chemins divergents → gBCR miss classés).
+#[test]
+fn implicit_close_dt_dd_pairs() {
+    let d = Dom::from_html("<body><dl><dt>t1<dd>d1<dt>t2<dd>d2</dl></body>");
+    let dl = d.by_tag(d.root, "dl")[0];
+    let dts = d.by_tag(dl, "dt");
+    let dds = d.by_tag(dl, "dd");
+    assert_eq!(dts.len(), 2);
+    assert_eq!(dds.len(), 2);
+    for n in dts.iter().chain(&dds) {
+        assert_eq!(d.parent(*n), Some(dl), "dt/dd frères sous dl");
+    }
+    // `td` ferme `td` (same-tag, comportement conservé) et
+    // `tr` ferme `td` ouvert puis `tr` — table correcte.
+    let d2 = Dom::from_html("<body><table><tr><td>a<td>b<tr><td>c</table></body>");
+    let trs = d2.by_tag(d2.root, "tr");
+    assert_eq!(trs.len(), 2);
+    let tds = d2.by_tag(d2.root, "td");
+    assert_eq!(tds.len(), 3);
+    assert_eq!(d2.parent(tds[0]), Some(trs[0]));
+    assert_eq!(d2.parent(tds[1]), Some(trs[0]), "td b frère de td a");
+    assert_eq!(d2.parent(tds[2]), Some(trs[1]), "td c sous la 2e tr");
+    // Sections de table : `tbody` ferme `thead` ouvert (à
+    // travers `tr`/`th`) — jamais niché sous un en-tête
+    // (w3.org : tbody sous th → sous-arbre entier divergent).
+    let dt =
+        Dom::from_html("<body><table><thead><tr><th>h<tbody><tr><td>x<tr><td>y</table></body>");
+    let table = dt.by_tag(dt.root, "table")[0];
+    let thead = dt.by_tag(table, "thead")[0];
+    let tbody = dt.by_tag(table, "tbody")[0];
+    assert_eq!(dt.parent(thead), Some(table));
+    assert_eq!(dt.parent(tbody), Some(table), "tbody frère de thead");
+    let btrs = dt.by_tag(tbody, "tr");
+    assert_eq!(btrs.len(), 2, "deux tr frères dans tbody");
+    assert_eq!(dt.parent(btrs[1]), Some(tbody));
+    // Hors contexte closable : tolérance — un `<dd>` sans
+    // ancêtre closable reste niché plutôt que perdu.
+    let d3 = Dom::from_html("<body><div><dd>x</dd></div></body>");
+    assert_eq!(d3.by_tag(d3.root, "dd").len(), 1);
+}
+
+/// vaadin terrain — `document.styleSheets` doit être
+/// itérable : le fixup lumo fait `new Set(e.styleSheets)`
+/// à l'upgrade CE (`object is not iterable` sinon) —
+/// `<style>` + `<link rel=stylesheet>` en ordre document,
+/// `ownerNode`/`href` posés.
+#[test]
+fn document_style_sheets_iterable() {
+    assert_eq!(
+        ev_in(
+            "<html><head><link rel=stylesheet href=a.css>\
+             <style>.x{}</style><link rel=icon href=i.ico></head>\
+             <body><style>.y{}</style></body></html>",
+            "(function(){var s=document.styleSheets;var o=[];\
+             for(const x of s){o.push(x.ownerNode.tagName+(x.href?'!':''))}\
+             return o.join(',')+'|'+s.length})()"
+        ),
+        "LINK!,STYLE,STYLE|3"
+    );
 }
 
 /// JS-C37/C39 — le coût de resynchronisation `serialize_document`
@@ -3548,6 +3677,99 @@ fn c69_ctor_validation() {
              r+'|'+t+'|'+Object.prototype.toString.call(new ResizeObserver(function(){}))"
         ),
         "TypeError|TypeError|TypeError|TypeError|TypeError|object|[object ResizeObserver]"
+    );
+}
+
+// -- JS-C117 : visibilité viewport réelle (vol github lazy-CE) -------
+
+#[test]
+fn c117_scroll_getters_read_geometry() {
+    // `scrollY`/`pageYOffset`/`scrollTop`/`scrollingElement`
+    // lisent la `GeometryMap` publiée (figés 0/undefined au
+    // vol github → loaders lazy jamais déclenchés).
+    let (mut e, _jar, _navs) = engine_full(PAGE_OBS);
+    e.set_viewport(800, 600);
+    let geom = explorer_jscore::GeometrySlot::default();
+    geom.lock().unwrap().scroll_y = 1234.0;
+    e.set_geometry_ctx(0, geom);
+    assert_eq!(
+        evf(
+            &mut e,
+            "[window.scrollY,window.pageYOffset,window.scrollX,\
+              document.documentElement.scrollTop,\
+              document.scrollingElement===document.documentElement,\
+              document.scrollingElement.scrollTop].join(',')"
+        ),
+        "1234,1234,0,1234,true,1234"
+    );
+    // Méthodes IO visibles à `typeof` — les feature-detects
+    // des loaders voient l'API fonctionnelle.
+    assert_eq!(
+        evf(
+            &mut e,
+            "var io=new IntersectionObserver(function(){});\
+             [typeof io.observe,typeof io.unobserve,\
+              typeof io.disconnect,typeof io.takeRecords].join(',')"
+        ),
+        "function,function,function,function"
+    );
+}
+
+#[test]
+fn c117_io_reevaluates_on_scroll() {
+    // Élément sous le fold → initiale `false` ; scroll publié
+    // → ré-évaluation au checkpoint → livraison `true`
+    // (vol github : IO silencieux après l'init → lazy CE
+    // jamais importée).
+    let (mut e, _jar, _navs) = engine_full(PAGE_OBS);
+    e.set_viewport(800, 600);
+    let geom = explorer_jscore::GeometrySlot::default();
+    {
+        let mut g = geom.lock().unwrap();
+        g.scroll_y = 0.0;
+        g.doc_h = 4000.0;
+        // #a → html>body>div[0] — sous le fold (doc y=3000).
+        g.rects.insert(
+            vec![
+                ("html".to_string(), 0),
+                ("body".to_string(), 0),
+                ("div".to_string(), 0),
+            ],
+            explorer_jscore::ElementGeom {
+                rect: explorer_jscore::GeoRect {
+                    x: 0.0,
+                    y: 3000.0,
+                    w: 100.0,
+                    h: 100.0,
+                },
+                fixed: false,
+                positioned: false,
+            },
+        );
+    }
+    e.set_geometry_ctx(0, geom.clone());
+    evf(
+        &mut e,
+        "window.__log=[];\
+         var io=new IntersectionObserver(function(es){\
+           es.forEach(function(x){window.__log.push(x.isIntersecting)});\
+         });\
+         io.observe(document.getElementById('a'));\
+         'armed'",
+    );
+    e.run_microtasks().expect("pump initiale");
+    assert_eq!(evf(&mut e, "window.__log.join('|')"), "false");
+    // Scroll session publié — l'entrée entre au viewport.
+    geom.lock().unwrap().scroll_y = 2500.0;
+    e.run_microtasks().expect("pump ré-évaluation");
+    assert_eq!(evf(&mut e, "window.__log.join('|')"), "false|true");
+    // `scrollY`/`scrollTop` suivent le scroll publié.
+    assert_eq!(
+        evf(
+            &mut e,
+            "[window.scrollY,document.documentElement.scrollTop].join(',')"
+        ),
+        "2500,2500"
     );
 }
 
