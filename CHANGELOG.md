@@ -1051,6 +1051,15 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   `cargo test -p explorer-net
   --test media_proxy_field --
   --ignored`.
+  Vols complémentaires sur
+  serveur IPTV **privé** (adresse
+  non citée) : VOD MP4 via 302→
+  nœud token + **live MPEG-TS
+  20 s** (`MEDIA_PROXY_FIELD_URL`
+  / `_UA` — le panel filtre
+  l'UA). Verdict : flux réel
+  relayé, local et internet,
+  live et VOD.
 
 - **CAP-198 — Shadow DOM tranche 4 :
   event retargeting** (`explorer-jscore`)
