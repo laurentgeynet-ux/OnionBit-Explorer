@@ -7,6 +7,30 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **Vol 21/22 — `text-overflow:
+  ellipsis` + `white-space:
+  nowrap`** (`explorer-layout`)
+  — le « … » est désormais
+  inséré au point de coupure
+  quand le texte déborde un
+  bloc à `overflow` ≠ `visible`
+  (mesuré dans la fonte du
+  fragment coupé ; les
+  fragments hors coupe sont
+  rognés à la mesure réelle).
+  Le fix a révélé que `nowrap`
+  n'empêchait **pas** les
+  coupures souples — garde
+  ajoutée dans le line-break
+  (seul `hard_after` force).
+  Régressions
+  `text_overflow_ellipsis_`
+  `insere_suspension`,
+  `text_overflow_clip_par_`
+  `defaut`,
+  `text_overflow_ellipsis_`
+  `sans_clip_inerte` (inline).
+
 - **Vol 11/20 — `min()`/`max()`/
   `clamp()` dans les longueurs**
   (`explorer-css`,
