@@ -1856,6 +1856,25 @@ impl Dom {
     }
 
     /// Attach `child` under `parent` (re-parents if attached).
+    /// `anc` est `node` ou un ancêtre de `node` (borne
+    /// `MAX_PROTO_DEPTH` — chaîne hostile non cyclique).
+    #[must_use]
+    pub fn is_ancestor_or_self(&self, node: NodeId, anc: NodeId) -> bool {
+        let mut cur = Some(node);
+        let mut d = 0;
+        while let Some(n) = cur {
+            if n == anc {
+                return true;
+            }
+            cur = self.nodes[n as usize].parent;
+            d += 1;
+            if d > 512 {
+                return false;
+            }
+        }
+        false
+    }
+
     pub fn append(&mut self, parent: NodeId, child: NodeId) {
         if self.nodes[child as usize].kind == NodeKind::Fragment {
             self.splice_fragment(parent, child, None);

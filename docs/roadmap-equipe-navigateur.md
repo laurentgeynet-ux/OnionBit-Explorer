@@ -6993,6 +6993,17 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   les mutateurs O(len) (`shift`,
   `splice`, `sort`).
 
+- [x] **JS-C112. Garde cycle DOM**
+  (`explorer-jscore` dom+dom_host) —
+  `appendChild`/`insertBefore`/
+  `replaceChild` d'un ancêtre/soi
+  créait un cycle → walks DFS
+  bouclaient. `is_ancestor_or_self`
+  → `HierarchyRequestError` (spec) ;
+  arbre acyclique par construction.
+  Test `append_child_ancestor_cycle_
+  rejected`.
+
 - [x] **JS-C111. Regex/commentaires
   dans `${…}` template** (`explorer-jscore
   ::lexer`) — mur apple (`unterminated

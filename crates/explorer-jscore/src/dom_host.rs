@@ -4001,6 +4001,7 @@ const NODE_METHODS: &[&str] = &[
     "getAttribute",
     "hasAttribute",
     "hasAttributes",
+    "getAttributeNames",
     "removeAttribute",
     "toggleAttribute",
     "insertAdjacentElement",
@@ -5597,6 +5598,12 @@ impl Host for NodeHost {
                 let target = node_for(e, arg(args, 0));
                 match target {
                     Some(child) => {
+                        // Spec `HierarchyRequestError` : append un
+                        // ancêtre/soi créerait un cycle → toutes les
+                        // walks DFS postérieures boucleraient.
+                        if self.dom.borrow().is_ancestor_or_self(node, child) {
+                            return Err(e.type_error("HierarchyRequestError: ancestor"));
+                        }
                         self.dom.borrow_mut().append(node, child);
                         Ok(Some(arg(args, 0)))
                     }
@@ -5643,6 +5650,22 @@ impl Host for NodeHost {
                 let n = &self.dom.borrow().nodes[node as usize];
                 let has = n.kind == NodeKind::Element && !n.attrs.is_empty();
                 Ok(Some(Value::Bool(has)))
+            }
+            // `el.getAttributeNames()` — tableau des noms
+            // d'attributs (spec Element). Lit l'emploie pour
+            // énumérer les marqueurs de parties par attribut
+            // (`?attr$` — vaadin terrain).
+            "getAttributeNames" => {
+                let names: Vec<Value> = {
+                    let d = self.dom.borrow();
+                    let n = &d.nodes[node as usize];
+                    if n.kind == NodeKind::Element {
+                        n.attrs.iter().map(|(k, _)| e.str_val(k)).collect()
+                    } else {
+                        Vec::new()
+                    }
+                };
+                Ok(Some(e.new_array(names)))
             }
             "removeAttribute" => {
                 let k = e.to_js_string(arg(args, 0))?;
@@ -5787,6 +5810,9 @@ impl Host for NodeHost {
                 let ref_n = node_for(e, arg(args, 1));
                 match new_n {
                     Some(c) => {
+                        if self.dom.borrow().is_ancestor_or_self(node, c) {
+                            return Err(e.type_error("HierarchyRequestError: ancestor"));
+                        }
                         self.dom.borrow_mut().insert_before(node, c, ref_n);
                         Ok(Some(arg(args, 0)))
                     }
@@ -5798,6 +5824,9 @@ impl Host for NodeHost {
                 let old_n = node_for(e, arg(args, 1));
                 match (new_n, old_n) {
                     (Some(n), Some(o)) => {
+                        if self.dom.borrow().is_ancestor_or_self(node, n) {
+                            return Err(e.type_error("HierarchyRequestError: ancestor"));
+                        }
                         self.dom.borrow_mut().replace_child(node, n, o);
                         Ok(Some(arg(args, 1)))
                     }

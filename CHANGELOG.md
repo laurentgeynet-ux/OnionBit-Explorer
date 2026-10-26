@@ -60,6 +60,23 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   4M non tickée — même classe,
   fix = take/put faillibles + tick.
 
+- **JS-C112 — garde cycle DOM :
+  `appendChild`/`insertBefore`/
+  `replaceChild` rejettent un ancêtre**
+  (`explorer-jscore` dom+dom_host) —
+  `parent.appendChild(a)` où `a` est
+  ancêtre/soi de `parent` créait un
+  cycle → **toutes les walks DFS
+  postérieures bouclaient** (qSA,
+  `innerHTML`, `textContent`…).
+  Spec `HierarchyRequestError` :
+  `is_ancestor_or_self` au dispatch
+  → TypeError, l'arbre reste
+  acyclique **par construction**
+  (rend caduc la dédupe des ~30
+  walks). Test
+  `append_child_ancestor_cycle_rejected`.
+
 - **JS-C111 — regex/commentaires
   dans `${…}` template** (`explorer-jscore
   ::lexer`) — mesuré terrain apple.com :

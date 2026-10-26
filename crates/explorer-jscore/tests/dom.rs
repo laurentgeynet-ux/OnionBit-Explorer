@@ -556,6 +556,41 @@ fn event_target_and_domexception_constructible() {
 }
 
 #[test]
+fn append_child_ancestor_cycle_rejected() {
+    // Spec `HierarchyRequestError` : `parent.appendChild(ancêtre)`
+    // créerait un cycle → toutes les walks DFS postérieures
+    // boucleraient (qSA, innerHTML, textContent…).
+    assert_eq!(
+        ev("var g = document.createElement('div');\
+            var p = document.createElement('section');\
+            g.appendChild(p);\
+            try { p.appendChild(g); 'no' } catch (e) { 'err' }"),
+        "err"
+    );
+    // Soi-même — `p.appendChild(p)` est aussi un cycle.
+    assert_eq!(
+        ev("var p2 = document.createElement('div');\
+            try { p2.appendChild(p2); 'no' } catch (e) { 'err' }"),
+        "err"
+    );
+    // insertBefore même garde.
+    assert_eq!(
+        ev("var g3 = document.createElement('div');\
+            var p3 = document.createElement('section');\
+            g3.appendChild(p3);\
+            try { p3.insertBefore(g3, null); 'no' } catch (e) { 'err' }"),
+        "err"
+    );
+    // Append normal toujours OK.
+    assert_eq!(
+        ev("var a = document.createElement('div');\
+            var b = document.createElement('div');\
+            a.appendChild(b); a.childNodes.length"),
+        "1"
+    );
+}
+
+#[test]
 fn template_content_is_fragment() {
     // github.com `z8-*.js` : `tpl.content.appendChild(row)` —
     // `.content` matérialise le fragment de contenu et y
