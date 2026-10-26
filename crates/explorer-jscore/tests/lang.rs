@@ -5620,6 +5620,15 @@ fn c16_url() {
             "https://ex.com/a?q=1",
         ),
         ("new URL('#f', 'https://ex.com/a').href", "https://ex.com/a#f"),
+        // JS-C155 — statiques spec 2024 : `canParse` bool sans
+        // jeté, `parse` instance ou `null` (feature-detects
+        // bundles modernes — vols 22-25).
+        ("URL.canParse('https://ex.com/a')", "true"),
+        ("URL.canParse('::bad')", "false"),
+        ("URL.canParse('/rel', 'https://ex.com')", "true"),
+        ("URL.canParse('/rel')", "false"),
+        ("URL.parse('https://ex.com/x').pathname", "/x"),
+        ("URL.parse('::bad') === null", "true"),
         (
             "new URL('../d', 'https://ex.com/a/b/c').href",
             "https://ex.com/a/d",

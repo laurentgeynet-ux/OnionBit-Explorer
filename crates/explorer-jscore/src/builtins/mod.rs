@@ -164,6 +164,12 @@ pub(crate) fn install(e: &mut Engine) {
     // `URL`/`URLSearchParams` (WHATWG subset — JS-C16) : parsing
     // absolu + résolution relative basique, pas d'IDNA/punycode.
     let url = ctor(e, "URL", url_ctor, e.protos.url);
+    // JS-C155 — `URL.canParse`/`URL.parse` statiques (spec
+    // 2024 — feature-detects modernes).
+    if let Value::Obj(uid) = url {
+        e.add_method(uid, "canParse", url_can_parse);
+        e.add_method(uid, "parse", url_parse_static);
+    }
     let usp = ctor(e, "URLSearchParams", usp_ctor, e.protos.url_params);
     e.set_own(g, "URL", url, false);
     e.set_own(g, "URLSearchParams", usp, false);
