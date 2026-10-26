@@ -1447,6 +1447,20 @@ pub(crate) fn node_value(e: &mut Engine, dom: &DomRef, cache: &NodeCache, node: 
         node,
     }));
     if let Value::Obj(id) = v {
+        // `sr instanceof ShadowRoot` (JS-C159) — la racine
+        // hérite `ShadowRoot.prototype` (proto lu sur le
+        // ctor global, posé à `install_dom`).
+        if dom.borrow().is_shadow_root(node) {
+            let proto = e.get_prop(e.global, "ShadowRoot").and_then(|c| match c {
+                Value::Obj(cid) => e.get_prop(cid, "prototype"),
+                _ => None,
+            });
+            if let Some(p @ Value::Obj(_)) = proto {
+                if let Some(o) = e.heap.obj_mut(id) {
+                    o.proto = p;
+                }
+            }
+        }
         cache.borrow_mut().insert(node, id);
     }
     v
@@ -1671,6 +1685,17 @@ impl Engine {
         let tag = self.str_val("Clipboard");
         self.set_own(clip, crate::interp::SYM_TO_STRING_TAG, tag, false);
         self.set_own(nav, "clipboard", Value::Obj(clip), true);
+        // Props triviales honnêtes (JS-C157) — lues par les
+        // CMP/feature-detects : `undefined` cassait la lecture
+        // (`navigator.onLine`, `hardwareConcurrency`…).
+        // Valeurs low-fingerprint, pas des stubs promettant.
+        self.set_own(nav, "onLine", Value::Bool(true), true);
+        self.set_own(nav, "cookieEnabled", Value::Bool(true), true);
+        self.set_own(nav, "webdriver", Value::Bool(false), true);
+        self.set_own(nav, "globalPrivacyControl", Value::Bool(false), true);
+        self.set_own(nav, "doNotTrack", Value::Null, true);
+        self.set_own(nav, "maxTouchPoints", Value::Num(0.0), true);
+        self.set_own(nav, "hardwareConcurrency", Value::Num(4.0), true);
         self.set_own(g, "navigator", Value::Obj(nav), false);
 
         // `Worker` borné (JS-C29) — le constructeur est présent
@@ -2294,6 +2319,10 @@ impl Engine {
         // `WebSocket` (JS-C73) — stub honnête (handshake
         // refusé en async) pour les feature-detects.
         crate::websocket::install_websocket(self);
+        // `EventSource` (JS-C92) — même motif : sans transport
+        // le ctor arme un refus différé au checkpoint, jamais
+        // un global absent (feature-detects des loaders).
+        crate::eventsource::install_eventsource(self);
         // `Notification`/`BroadcastChannel`/`reportError`/
         // `getSelection` (JS-C74) — dom_ctx posé → Selection
         // disponible ici.
@@ -5892,6 +5921,27 @@ impl Host for NodeHost {
                 let cls = e.to_js_string(arg(args, 0))?;
                 let ids = self.dom.borrow().by_class(node, &cls);
                 Ok(Some(dom_collection(e, &self.dom, &self.cache, &ids, false)))
+            }
+            // `DocumentFragment.getElementById` (spec — exposé
+            // sur ShadowRoot ; les hydratations CE le lisent,
+            // reddit `faceplate-*`) — scopé au sous-arbre via
+            // le chemin sélecteur `[id]`, jamais le document.
+            // Éléments ordinaires : non exposé (spec).
+            "getElementById" => {
+                let is_frag = matches!(
+                    self.dom.borrow().nodes[node as usize].kind,
+                    NodeKind::Fragment
+                );
+                if !is_frag {
+                    return Ok(None);
+                }
+                let id = e.to_js_string(arg(args, 0))?;
+                let sel = format!("[id=\"{}\"]", id.replace('"', "\\\""));
+                let ids = self.dom.borrow().query(node, &sel);
+                Ok(Some(match ids.first() {
+                    Some(&n) => node_value(e, &self.dom, &self.cache, n),
+                    None => Value::Null,
+                }))
             }
             "querySelector" => {
                 let sel = e.to_js_string(arg(args, 0))?;

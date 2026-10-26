@@ -1144,6 +1144,38 @@ fn c71_transform_and_pipethrough() {
 }
 
 #[test]
+fn c158_text_codec_streams() {
+    // JS-C158 — `TextEncoderStream`/`TextDecoderStream`
+    // (medium.com : `TextEncoderStream is not defined`) —
+    // TransformStream à transformer natif UTF-8.
+    let (mut e, _t) = engine();
+    assert_eq!(
+        describe(
+            &mut e,
+            "typeof TextEncoderStream + '|' + typeof TextDecoderStream + '|' +\
+             (new TextEncoderStream().writable instanceof WritableStream)"
+        ),
+        "function|function|true"
+    );
+    // Round-trip : string → bytes → string.
+    describe(
+        &mut e,
+        "var acc = '';\
+         var te = new TextEncoderStream();\
+         var w = te.writable.getWriter(), r = te.readable.getReader();\
+         var td = new TextDecoderStream();\
+         var wd = td.writable.getWriter(), rd2 = td.readable.getReader();\
+         w.write('héllo').then(function () {\
+             r.read().then(function (v) { acc += v.value.length + ';'; });\
+         });\
+         wd.write(new TextEncoder().encode('monde')).then(function () {\
+             rd2.read().then(function (v) { acc += v.value; });\
+         });",
+    );
+    assert_eq!(describe(&mut e, "acc"), "6;monde");
+}
+
+#[test]
 fn c71_response_body_stream() {
     let (mut e, _t) = engine();
     // `res.body` = ReadableStream — un chunk Uint8Array + done.

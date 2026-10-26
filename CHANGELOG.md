@@ -7,6 +7,69 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **JS-C159 — surface ShadowRoot/
+  sockets visible** (`explorer-jscore`)
+  — `ShadowRoot.getElementById`
+  scopé au sous-arbre (spec
+  `DocumentFragment` ; hydratation
+  CE reddit `faceplate-*`),
+  `sr instanceof ShadowRoot` vrai
+  (proto du ctor posé à
+  `node_value`), méthodes
+  `WebSocket`/`BroadcastChannel`
+  lisibles (`has_method` — les
+  invoke-only rendaient `undefined`
+  aux feature-detects), `EventSource`
+  posé à `install_dom` (refus différé
+  sans transport, jamais un global
+  absent). Test
+  `c159_shadow_ws_bc_es_surface`.
+
+- **JS-C158 — `TextEncoderStream`/
+  `TextDecoderStream`** (`explorer-jscore`)
+  — Encoding API absente du global
+  (`TextEncoderStream is not defined`,
+  medium.com ×2) : `TransformStream`
+  à transformer natif UTF-8 — encode
+  → `Uint8Array`, decode → chaîne
+  (`from_utf8_lossy`), protos dédiés
+  (`instanceof` propre). Test
+  `c158_text_codec_streams`.
+
+- **JS-C157 — props `navigator`
+  triviales** (`explorer-jscore`) —
+  `onLine`/`cookieEnabled`/`webdriver`/
+  `globalPrivacyControl`/`doNotTrack`/
+  `maxTouchPoints`/`hardwareConcurrency`
+  manquaient du navigateur low-
+  fingerprint (CMP/feature-detects
+  lisaient `undefined`). Valeurs
+  honnêtes : `onLine`/`cookieEnabled`
+  true, `webdriver`/`GPC` false,
+  `doNotTrack` null, `maxTouchPoints`
+  0, `hardwareConcurrency` 4. Test
+  `navigator_spec_props`.
+
+- **JS-C156 — `JsError::Timeout`
+  typé** (`explorer-js`) — le
+  disjoncteur « moteur figé »
+  rendait `Uncaught("moteur figé —
+  éval dépassée")` (signature
+  chaîne fragile) ; nouveau kind
+  `Timeout` distinct de
+  `Uncaught`/`Dead` — la session
+  peut distinguer un stall d'une
+  exception du script.
+
+- **JS-C155 — `URL.canParse`/
+  `URL.parse`** (`explorer-jscore`)
+  — statiques spec 2024 absentes du
+  ctor (`typeof URL.canParse` =
+  `undefined` sur bundles
+  modernes) : `canParse` bool sans
+  jeté, `parse` instance ou `null`.
+  Tests dans `c16_url`.
+
 - **JS-C154 — `unhandledrejection`**
   (`explorer-jscore`,
   `explorer-js`, `explorer-core`) —

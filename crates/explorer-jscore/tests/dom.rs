@@ -5553,6 +5553,27 @@ fn cap181_clipboard_hook() {
     assert_eq!(evf(&mut e, "w+'|'+r"), "resolved/reject|clip!");
 }
 
+// ===== JS-C157 — props `navigator` triviales (CMP/feature-detects)
+
+#[test]
+fn navigator_spec_props() {
+    let mut e = engine_with("<p>x</p>");
+    // Valeurs honnêtes low-fingerprint — `undefined` cassait
+    // la lecture (`navigator.onLine`, `hardwareConcurrency`).
+    assert_eq!(
+        evf(
+            &mut e,
+            "[typeof navigator.onLine, navigator.onLine,\
+             typeof navigator.cookieEnabled, navigator.cookieEnabled,\
+             navigator.doNotTrack === null,\
+             navigator.globalPrivacyControl, navigator.webdriver,\
+             navigator.maxTouchPoints, navigator.hardwareConcurrency,\
+             navigator.hardwareConcurrency >= 1].join('|')"
+        ),
+        "boolean|true|boolean|true|true|false|false|0|4|true"
+    );
+}
+
 // ===== CAP-182 — arc édition : `new Range`/`createRange`,
 // `createTreeWalker`, `execCommand` (sonde `_census_calls`).
 
@@ -6411,4 +6432,40 @@ fn document_xpath_create_expression() {
     ] {
         assert_eq!(evf(&mut e, src), want, "{src}");
     }
+}
+
+// ===== JS-C159 — surface observable shadow/Ws/BC/EventSource
+
+#[test]
+fn c159_shadow_ws_bc_es_surface() {
+    let mut e = engine_with("<div id=h></div>");
+    // `sr.getElementById` scopé au sous-arbre + `instanceof`.
+    assert_eq!(
+        evf(
+            &mut e,
+            "var h=document.getElementById('h'),r=h.attachShadow({mode:'open'});\
+            r.innerHTML='<p id=x>hi</p>';\
+            [r instanceof ShadowRoot, r.getElementById('x').textContent,\
+             r.getElementById('absent')===null, document.getElementById('x')===null].join('|')"
+        ),
+        "true|hi|true|true"
+    );
+    // `getElementById` non exposé sur élément ordinaire (spec —
+    // invoke-only → `undefined` à la lecture).
+    assert_eq!(evf(&mut e, "typeof h.getElementById"), "undefined");
+    // Méthodes WebSocket/BroadcastChannel lisibles (invoke-only
+    // les rendait `undefined` — feature-detects cassés).
+    assert_eq!(
+        evf(
+            &mut e,
+            "[typeof new WebSocket('ws://x').send,\
+             typeof new WebSocket('ws://x').close,\
+             typeof new WebSocket('ws://x').addEventListener,\
+             typeof new BroadcastChannel('c').postMessage].join('|')"
+        ),
+        "function|function|function|function"
+    );
+    // `EventSource` global posé à install_dom (refus différé
+    // sans transport, jamais un global absent).
+    assert_eq!(evf(&mut e, "typeof EventSource"), "function");
 }
