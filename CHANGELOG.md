@@ -902,7 +902,15 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   branchée** au lecteur (à câbler
   au premier flux à en-têtes
   exigés) ; `ffprobe` non requis
-  (MDK probe déjà).
+  (MDK probe déjà). Référence
+  prouvée citée : la chaîne
+  complète est déjà câblée/testée
+  dans `C:\IptvMediacenter-Rust`
+  (proxy Axum zéro-copie, cast
+  `HlsTranscoder` ffprobe→HLS,
+  `mdk-bridge`+`MdkPlayerEngine`) —
+  source des patterns pour un
+  portage éventuel.
 
 - **CAP-198 — Shadow DOM tranche 4 :
   event retargeting** (`explorer-jscore`)

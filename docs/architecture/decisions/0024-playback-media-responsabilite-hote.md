@@ -170,3 +170,22 @@ probing ; ne s'introduirait que pour un besoin de
 métadonnées en amont du lecteur (nommé, non planifié).
 
 **Hors périmètre confirmé** : MSE et DRM (ADR-0027).
+
+### Référence prouvée : `C:\IptvMediacenter-Rust`
+
+Le chaînage complet existe **déjà câblé et testé** dans
+le projet voisin (core headless Rust, mêmes briques) —
+source de vérité pour les patterns, pas à réinventer :
+
+| Maillon | Ici (Explorer) | Référence prouvée |
+|---|---|---|
+| proxy flux | `local_proxy_server` (`explorer-net`, non branché) | `iptv-infra::network::local_proxy` — Axum zéro-copie, headers/UA injectés, **tout** flux de lecture y passe |
+| cast | — | `iptv-infra::network::hls_transcoder` (`/hls/v1/`) : **ffprobe → remux\|encode → HLS** (ffmpeg sur PATH) |
+| moteur | `fvp` (plugin Flutter, MDK) | `mdk-bridge` FFI + `MdkPlayerEngine` (`iptv-infra::player::mdk_engine`) — même MDK, surface HWND native |
+| seam hôte | `MediaSurface`/`MediaPlayer` | `PlayerEnginePort` + `PlayerEngineDelegate`/`PlayerStateSink` |
+
+Le portage éventuel de la jambe proxy (et plus tard du
+cast/dossier externe) doit **s'inspirer de cette
+implémentation validée** — mêmes pièges déjà traités
+(streaming borné, profils réseau par host, reprise
+Range).
