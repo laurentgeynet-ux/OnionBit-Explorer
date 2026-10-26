@@ -4917,14 +4917,13 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   UA injectés), `hls_transcoder`
   (cast ffprobe→HLS), `MdkPlayerEngine`.
   Sous-étapes :
-  - [ ] 139a — `LocalMediaProxy`
-    loopback dans `explorer-net`
-    (seul crate à socket) :
-    endpoint streamé zéro-copie,
-    headers/UA custom par requête,
-    borne de flux ; listener à
-    port éphémère partagé par
-    daemon et FFI.
+  - [~] 139a — `LocalMediaProxy`
+    posé (`media_proxy.rs` :
+    `GET /m?u=` streamé zéro-copie
+    `fetch_stream`, Range/headers
+    propagés, port éphémère
+    daemon+FFI) — reste : test flux
+    et borne de flux.
   - [ ] 139b — branchement seam :
     `MediaOffered.url` réécrit en
     URL proxy avant le claim —

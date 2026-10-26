@@ -927,6 +927,23 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   (139c), dossier externe garé
   (139d), tests flux + doc (139e).
 
+- **139a — `LocalMediaProxy`
+  loopback posé** (`explorer-net`,
+  étape 139 NAV, ADR-0024
+  amendée) : `media_proxy::MediaProxy
+  ::spawn(transport, ua)` — listener
+  `127.0.0.1` éphémère (partagé
+  daemon/FFI), `GET /m?u=<cible>`
+  streamé zéro-copie via
+  `fetch_stream` (headers `Range`/
+  `Accept`/`Cookie`/`UA` propagés,
+  `content-*`/`accept-ranges`
+  relayés — seek vidéo OK),
+  `proxy.url(target)` = URL à
+  remettre au lecteur. Même
+  câblage que
+  `iptv-infra::network::local_proxy`.
+
 - **CAP-198 — Shadow DOM tranche 4 :
   event retargeting** (`explorer-jscore`)
   : le chemin de propagation des

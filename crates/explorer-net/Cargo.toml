@@ -27,6 +27,7 @@ h2.workspace = true
 http.workspace = true
 bytes.workspace = true
 futures-util.workspace = true
+axum.workspace = true
 # Provider crypto de `crypto.subtle` (JS-C79) — même `ring`
 # que rustls (exception ADR-0002 déjà consignée), aucune
 # nouvelle dépendance externe n'entre dans le lockfile.

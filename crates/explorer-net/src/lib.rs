@@ -22,6 +22,7 @@ pub mod h1;
 pub mod h2;
 pub mod http;
 pub mod lang;
+pub mod media_proxy;
 pub mod policy;
 pub mod proxy;
 pub mod resolver;
