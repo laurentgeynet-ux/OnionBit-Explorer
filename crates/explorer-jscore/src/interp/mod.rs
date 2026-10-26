@@ -1241,8 +1241,7 @@ impl Engine {
             let sheets = dom.borrow().adopted_sheets.clone();
             for sid in sheets {
                 let mut parts = Vec::new();
-                if let Ok(Value::Obj(rid)) = self.get_prop_value(Value::Obj(sid), "cssRules")
-                {
+                if let Ok(Value::Obj(rid)) = self.get_prop_value(Value::Obj(sid), "cssRules") {
                     let rule_ids: Vec<ObjId> = match self.heap.obj(rid).map(|o| &o.kind) {
                         Some(ObjKind::Array(elems)) => elems
                             .iter()
@@ -1266,6 +1265,26 @@ impl Engine {
                 if !parts.is_empty() {
                     out.push(parts.join("\n"));
                 }
+            }
+        }
+        out
+    }
+
+    /// Noms des custom elements définis (`customElements
+    /// .define`, JS-C68) sur tous les documents vivants —
+    /// top-level + realms garés. La session les pousse dans
+    /// [`explorer_dom::Dom::set_defined_names`] pour que le
+    /// sélecteur `:defined` (selectors-4 §13) matche : c'est
+    /// la moitié « registre » du mécanisme lazy-CE github
+    /// (`sel:not(:defined){animation:…}` → `animationstart`).
+    pub fn defined_ce_names(&mut self) -> Vec<String> {
+        let mut out = Vec::new();
+        if let Some((d, _)) = &self.dom_ctx {
+            out.extend(d.borrow().ce.defs.keys().cloned());
+        }
+        for ctx in self.parked.values() {
+            if let Some((d, _)) = &ctx.dom_ctx {
+                out.extend(d.borrow().ce.defs.keys().cloned());
             }
         }
         out
@@ -3289,6 +3308,22 @@ impl Engine {
         v: Value,
         mode: BindMode,
     ) -> JsResult<()> {
+        // JS-C121 : récursion sur `Pat` imbriqué — segment tas.
+        stacker::maybe_grow(
+            crate::parser::STACK_RED_ZONE,
+            crate::parser::STACK_GROW,
+            || self.bind_pat_inner(env, this, pat, v, mode),
+        )
+    }
+
+    fn bind_pat_inner(
+        &mut self,
+        env: &EnvRef,
+        this: Value,
+        pat: &Pat,
+        v: Value,
+        mode: BindMode,
+    ) -> JsResult<()> {
         match pat {
             Pat::Ident(name) => {
                 if name.is_empty() {
@@ -4721,6 +4756,20 @@ impl Engine {
                 return i >= *len;
             }
         }
+        // Hôte « vue live » (`dataset`, storage…) — le crochet
+        // `del` traduit la suppression vers le support avant le
+        // repli « propriété propre » (spectrum : `delete
+        // section.dataset.status` devait retirer `data-status`,
+        // pas une prop JS fantôme).
+        let host = match self.heap.obj(id).map(|o| &o.kind) {
+            Some(ObjKind::Host(h)) => Some(h.clone()),
+            _ => None,
+        };
+        if let Some(h) = host {
+            if let Ok(Some(ok)) = h.del(self, Value::Obj(id), key) {
+                return ok;
+            }
+        }
         if let Some(o) = self.heap.obj_mut(id) {
             if let ObjKind::Array(elems) = &mut o.kind {
                 if key == "length" {
@@ -5139,12 +5188,17 @@ impl Engine {
             ["valueOf", "toString"]
         };
         for m in order {
-            if let Some(f) = self.get_prop(id, m) {
-                if self.is_callable(f) {
-                    let r = self.call_value(f, v, &[])?;
-                    if !r.is_object() {
-                        return Ok(r);
-                    }
+            // `[[Get]]` complet (spec `OrdinaryToPrimitive`) :
+            // `get_prop` court-circuitait hôtes et pièges —
+            // `location.toString` tombait sur
+            // `Object.prototype.toString` → "[object Location]"
+            // → `new URL(".", location)` « Invalid base URL »
+            // (motif assets svelte/fastapi/mkdocs).
+            let f = self.get_prop_value(v, m)?;
+            if self.is_callable(f) {
+                let r = self.call_value(f, v, &[])?;
+                if !r.is_object() {
+                    return Ok(r);
                 }
             }
         }
@@ -5380,7 +5434,11 @@ impl Engine {
         nt: Value,
     ) -> JsResult<Value> {
         let Value::Obj(id) = f else {
-            return Err(self.type_error("value is not a function"));
+            // Le récepteur dans le message — les murs corpus
+            // « value is not a function » nomment leur cible
+            // (bootstrap/DSFR/figaro : quelle prop manque).
+            let d: String = self.describe(f).chars().take(80).collect();
+            return Err(self.type_error(format!("value is not a function: {d}")));
         };
         // Proxy callable : trap `apply` ou délégation à la cible.
         if let Some((_, target, handler)) = self.proxy_th(id)? {
@@ -5394,7 +5452,10 @@ impl Engine {
         let fun = match self.heap.obj(id) {
             Some(o) => match &o.kind {
                 ObjKind::Fun(fu) => fu.clone(),
-                _ => return Err(self.type_error("object is not a function")),
+                _ => {
+                    let d: String = self.describe(f).chars().take(80).collect();
+                    return Err(self.type_error(format!("object is not a function: {d}")));
+                }
             },
             None => return Err(self.type_error("value is not a function")),
         };
@@ -5814,6 +5875,16 @@ impl Engine {
 
     /// `var` hoisting is function-scoped: walk nested statements too.
     pub(crate) fn hoist_vars_only(&mut self, body: &[Stmt], env: &EnvRef) {
+        // JS-C121 : récursion sur l'arbre Stmt — segment tas
+        // comme `exec_stmt` (nested `if`/`try` profonds).
+        stacker::maybe_grow(
+            crate::parser::STACK_RED_ZONE,
+            crate::parser::STACK_GROW,
+            || self.hoist_vars_only_inner(body, env),
+        );
+    }
+
+    fn hoist_vars_only_inner(&mut self, body: &[Stmt], env: &EnvRef) {
         for s in body {
             match s {
                 Stmt::Var(decls) => {
