@@ -317,3 +317,22 @@ fn background_shorthand_fusionne_les_couches() {
     let v = expand_shorthand("background", "url(a.png), red").expect("couleur finale");
     assert!(v.iter().any(|(n, v)| n == "background-color" && v == "red"));
 }
+
+#[test]
+fn oklch_lab_lch_hsl_parse() {
+    // R-115 — css-color-4 : oklch/oklab/lab/lch/hsl parsés.
+    assert_eq!(parse_color("hsl(240 100% 50%)").unwrap().b, 255);
+    assert_eq!(
+        parse_color("hsl(0, 100%, 50%)"),
+        Some(Color {
+            r: 255,
+            g: 0,
+            b: 0,
+            a: 255
+        })
+    );
+    assert!(parse_color("oklch(0.5 0.1 180)").is_some());
+    assert!(parse_color("oklab(0.5 0.1 -0.1)").is_some());
+    assert!(parse_color("lab(50% 40 -30)").is_some());
+    assert!(parse_color("lch(50% 40 240)").is_some());
+}

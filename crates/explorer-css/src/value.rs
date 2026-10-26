@@ -233,7 +233,153 @@ pub fn parse_color(text: &str) -> Option<Color> {
     {
         return parse_rgb(inner);
     }
+    // R-115 — `oklab`/`oklch`/`lab`/`lch`/`hsl`/`hsla` (css-color-4).
+    for (fn_name, parser) in [
+        ("oklab(", parse_oklab as fn(&str) -> Option<Color>),
+        ("oklch(", parse_oklch),
+        ("lab(", parse_lab),
+        ("lch(", parse_lch),
+        ("hsl(", parse_hsl),
+        ("hsla(", parse_hsl),
+    ] {
+        if let Some(inner) = lower
+            .strip_prefix(fn_name)
+            .and_then(|s| s.strip_suffix(')'))
+        {
+            return parser(inner);
+        }
+    }
     named_color(&lower)
+}
+
+/// « l c h » séparés espaces (+ `/ a`) — les deux styles
+/// css-color-4 (pourcentage ou nombre) acceptés.
+fn color_3args(inner: &str) -> Option<(String, String, String, f32)> {
+    let (body, alpha) = match inner.split_once('/') {
+        Some((b, a)) => (
+            b,
+            a.trim().trim_end_matches('%').parse::<f32>().ok()?
+                / if a.trim().ends_with('%') { 100.0 } else { 1.0 },
+        ),
+        None => (inner, 1.0),
+    };
+    let mut it = body.split_whitespace();
+    Some((
+        it.next()?.into(),
+        it.next()?.into(),
+        it.next()?.into(),
+        alpha,
+    ))
+}
+
+fn num_or_pct(t: &str, max: f32) -> f32 {
+    t.trim_end_matches('%')
+        .parse::<f32>()
+        .map(|v| if t.ends_with('%') { v / 100.0 * max } else { v })
+        .unwrap_or(0.0)
+}
+
+fn srgb_gamma(v: f32) -> f32 {
+    if v <= 0.003_130_8 {
+        12.92 * v
+    } else {
+        1.055 * v.powf(1.0 / 2.4) - 0.055
+    }
+}
+
+fn oklab_xyz(l: f32, a: f32, b: f32) -> (f32, f32, f32) {
+    let l2 = (l + 0.396_337_78 * a + 0.215_803_76 * b).powi(3);
+    let m2 = (l - 0.105_561_346 * a - 0.063_854_17 * b).powi(3);
+    let s2 = (l - 0.089_484_18 * a - 1.291_485_5 * b).powi(3);
+    (
+        1.227_014 * l2 - 0.557_799_8 * m2 + 0.281_256_15 * s2,
+        -0.040_580_18 * l2 + 1.112_256_9 * m2 - 0.071_676_6 * s2,
+        -0.076_381_28 * l2 - 0.421_481_98 * m2 + 1.586_163_3 * s2,
+    )
+}
+
+fn xyz_srgb_color(x: f32, y: f32, z: f32, alpha: f32) -> Color {
+    let (rl, gl, bl) = (
+        x.mul_add(3.240_97, y.mul_add(-1.537_383_2, z * -0.498_610_76)),
+        x.mul_add(-0.969_243_64, y.mul_add(1.875_967_5, z * 0.041_555_06)),
+        x.mul_add(0.055_630_08, y.mul_add(-0.203_976_96, z * 1.056_971_5)),
+    );
+    let c = |v: f32| (srgb_gamma(v).clamp(0.0, 1.0) * 255.0).round() as u8;
+    Color {
+        r: c(rl),
+        g: c(gl),
+        b: c(bl),
+        a: (alpha.clamp(0.0, 1.0) * 255.0).round() as u8,
+    }
+}
+
+fn parse_oklab(inner: &str) -> Option<Color> {
+    let (l, a, b, alpha) = color_3args(inner)?;
+    let (x, y, z) = oklab_xyz(num_or_pct(&l, 1.0), a.parse().ok()?, b.parse().ok()?);
+    Some(xyz_srgb_color(x, y, z, alpha))
+}
+
+fn parse_oklch(inner: &str) -> Option<Color> {
+    let (l, c, h, alpha) = color_3args(inner)?;
+    let (cr, hh) = (num_or_pct(&c, 0.4), h.parse::<f32>().ok()?);
+    let (x, y, z) = oklab_xyz(
+        num_or_pct(&l, 1.0),
+        cr * hh.to_radians().cos(),
+        cr * hh.to_radians().sin(),
+    );
+    Some(xyz_srgb_color(x, y, z, alpha))
+}
+
+fn parse_lab(inner: &str) -> Option<Color> {
+    let (l, a, b, alpha) = color_3args(inner)?;
+    let fy = (num_or_pct(&l, 100.0) + 16.0) / 116.0;
+    let f = |t: f32| {
+        if t > 6.0 / 29.0 {
+            t * t * t
+        } else {
+            (108.0 / 841.0) * (t - 4.0 / 29.0)
+        }
+    };
+    let (aa, bb) = (a.parse::<f32>().ok()?, b.parse::<f32>().ok()?);
+    let (x, y, z) = (
+        f(fy + aa / 500.0) * 0.95047,
+        f(fy),
+        f(fy - bb / 200.0) * 1.08883,
+    );
+    Some(xyz_srgb_color(x, y, z, alpha))
+}
+
+fn parse_lch(inner: &str) -> Option<Color> {
+    let (l, c, h, alpha) = color_3args(inner)?;
+    let (cr, hh) = (num_or_pct(&c, 150.0), h.parse::<f32>().ok()?);
+    parse_lab(&format!(
+        "{} {} {} / {}",
+        l,
+        cr * hh.to_radians().cos(),
+        cr * hh.to_radians().sin(),
+        alpha
+    ))
+}
+
+fn parse_hsl(inner: &str) -> Option<Color> {
+    let cleaned = inner.replace(',', " ");
+    let (h, s, l, alpha) = color_3args(&cleaned)?;
+    let (hh, ss, ll) = (
+        h.parse::<f32>().ok()?.rem_euclid(360.0),
+        num_or_pct(&s, 100.0) / 100.0,
+        num_or_pct(&l, 100.0) / 100.0,
+    );
+    let f = |n: f32| {
+        let k = (n + hh / 30.0).rem_euclid(12.0);
+        ll - ss * ll.min(1.0 - ll) * (k - 3.0).min(9.0 - k).min(1.0).max(-1.0)
+    };
+    let c = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
+    Some(Color {
+        r: c(f(0.0)),
+        g: c(f(8.0)),
+        b: c(f(4.0)),
+        a: (alpha.clamp(0.0, 1.0) * 255.0).round() as u8,
+    })
 }
 
 fn parse_hex(hex: &str) -> Option<Color> {
