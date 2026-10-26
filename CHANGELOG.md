@@ -240,6 +240,198 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   en plage astrale. Assertion stale
   `surrogate_bounds_degrade` réalignée
   (plage surrogate → astrale, f5d3fb7).
+- **Vol 18/19 — `flex-direction:
+  column` fit-content**
+  (`explorer-layout`) — hors
+  `stretch`, un item `column`
+  rétrécit désormais sur son
+  contenu (fit-content §9.5)
+  avant d'être placé par
+  `align-items` : un bloc
+  `width:auto` gardait la
+  largeur du conteneur → bouton
+  « Réessayer » quora pleine
+  largeur au lieu de centré.
+  Régressions
+  `flex_column_align_center_`
+  `retrécit_l_item`,
+  `flex_column_stretch_`
+  `pleine_largeur` (modern).
+
+- **Vol 17/19 — tables anonymes
+  + `table-caption`**
+  (`explorer-layout`, UA
+  `caption`)
+  (`explorer-css`) — §17.2.1 :
+  une suite de `table-cell`/
+  `table-row`/groupes sous un
+  parent non-`table` est
+  emballée dans une table
+  anonyme (cartes IGN posées en
+  `display:table-cell` sous
+  `display:block` s'empilaient
+  en colonne ~380 px). §17.4 :
+  `display:table-caption`
+  `top|bottom` posée hors
+  grille (figcaption Parsoid
+  wikipedia partait en cellule
+  → figure gonflée recouvrant
+  le texte). Régressions
+  `table_cell_nue_enveloppee_`
+  `en_table_anonyme`,
+  `table_row_nu_enveloppe`,
+  `table_caption_sous_la_`
+  `grille`, `table_caption_`
+  `side_top` (modern).
+
+- **Vol 16/19 — hit-test ordre
+  d'empilement**
+  (`explorer-layout`) — les
+  enfants sont testés dans
+  l'ordre de peinture inversé
+  (§9.9.1 : positionnés après
+  le flux, `z-index` ordonnés,
+  dernier du document à rang
+  égal). Un bandeau posé avant
+  le contenu dans le DOM volait
+  les hits des liens peints
+  dessus → `{"result":"ignored"}`
+  gamefaqs/speedtest,
+  « Français » canada.
+  Régressions
+  `hit_test_ordre_empilement_`
+  `dernier_peint_gagne`,
+  `hit_test_ordre_document_`
+  `inverse_a_rang_egal`
+  (block).
+
+- **Vol 2026-10-26 — shorthand
+  `inset`** (`explorer-css`) —
+  éclaté en `top/right/bottom/
+  left` : les liens overlay
+  `position:absolute; inset:0`
+  du Guardian restaient sans
+  offsets → boîtes `0x0`,
+  articles inouvrables au
+  hit-test (`editable:false`,
+  click `ignored`). Régression
+  `inset_expansion` (values).
+
+- **Vol 2026-10-26 — `opacity: 0`
+  n'émet rien** (`explorer-render`)
+  — un élément à opacité nulle et
+  tout son sous-arbre sont
+  court-circuités dans
+  `paint_box` (groupe alpha nul ;
+  les modales `opacity-0` de
+  bookshop/ecma peintaient en
+  plein). Opacités partielles :
+  non appliquées (groupe alpha
+  reporté). Régressions
+  `opacity_zero_nemet_rien`,
+  `opacity_partielle_ne_court_
+  circuite_pas` (display).
+
+- **Vol 2026-10-26 — `[popover]`
+  fermé masqué** (`explorer-css`)
+  — nouveau DynamicPseudo
+  `:popover-open` (toujours faux
+  tant que `showPopover()` n'existe
+  pas) + règle UA spec
+  `[popover]:not(:popover-open)
+  { display: none }` : les
+  tool-tips/mega-menus
+  `popover="manual"` de github
+  étaient peints dépliés en
+  permanence (~1500 px empilés).
+  Régression `ua_popover_ferme_
+  masque` (cascade).
+
+- **Vol 2026-10-26 — `grid-column`
+  à lignes négatives** (`explorer-
+  layout`) — `-1` désigne la
+  bordure après la dernière piste
+  (spec §7.1) : `grid-column:
+  1 / -1` couvre désormais toutes
+  les colonnes — auparavant un
+  parse `usize` échouait et
+  l'item retombait en placement
+  auto sur la première piste
+  (`minmax(0,1fr)` ignorée →
+  commentaires shreddit/reddit
+  collapsés à la piste avatar
+  32 px). Régressions
+  `grid_column_span_toutes_pistes_
+  ligne_negative`,
+  `grid_column_depart_a_ligne_
+  negative` (modern).
+
+- **Vol 2026-10-26 — échecs de
+  sous-ressources en console**
+  (`explorer-core`) — un `<link>`/
+  `<script>`/`<img>`/`<iframe>`
+  dont le fetch échoue (réseau,
+  non-2xx, en-têtes de sécurité
+  ou SRI) produit désormais un
+  `PipelineError` attribué à
+  l'onglet : les pages blanches
+  old.reddit/archive.org et le
+  « error loading the page » de
+  craigslist n'avaient AUCUNE
+  trace dans le ring console.
+  Régression
+  `subresource_failures_reach_
+  console_ring` (session).
+
+- **Vol 2026-10-26 — `<svg>`
+  à `viewBox` seul = 100 % du
+  conteneur** (`explorer-css`) —
+  hint `width:100%` posé quand
+  l'attribut `width` manque et
+  qu'un `viewBox` définit la
+  géométrie (SVG2 : `auto` →
+  `100%`), la hauteur dérivant
+  du ratio §10.6.2 — fini les
+  logos géants à la taille du
+  viewBox (w3.org). Régressions
+  `svg_viewbox_seul_*`,
+  `svg_dimensions_explicites_
+  inchangees` (block).
+
+- **Vol 2026-10-26 —
+  `pointer-events: none` au
+  hit-test** (`explorer-layout`)
+  — une boîte `pointer-events:
+  none` ne peut plus être cible
+  (ses enfants `auto` explicites
+  restent ciblables) : les
+  overlays transparents auteur
+  volaient les hits au-dessus
+  des `<input>` peints →
+  `editable:false`, clic
+  `ignored` (service-public,
+  bookshop). Régressions
+  `hit_test_pointer_events_*`
+  (block).
+
+- **Vol 2026-10-26 — `<noscript>`
+  masqué même sous style auteur**
+  (`explorer-css`) — la règle UA
+  `@media (scripting) { noscript
+  { display: none } }` passait en
+  `!important` comme la spec HTML
+  Rendering : une feuille auteur
+  `noscript { display:flex }`
+  (mesuré mastodon.social) ne
+  révèle plus le fallback rawtext
+  quand le scripting est actif.
+  Régression
+  `noscript_important_coiffe_
+  style_auteur` (cascade 106/…).
+  Au passage : rafraîchissement
+  clippy 1.99 de `value.rs`
+  (renommages, `map_or`, cast
+  borné `unit_to_u8`).
 
 - **JS-C133 — `initCustomEvent`
   (DOM L2, strate polymer/shady)**

@@ -11062,6 +11062,54 @@ async fn noscript_fallback_visible_without_js() {
     );
 }
 
+// ---------- Vol 2026-10-26 — console : échecs de
+// sous-ressources ----------
+
+/// Vol 2026-10-26 — un `<link>`/`<script>`/`<img>`/`<iframe>`
+/// dont le fetch échoue (non-2xx ou réseau) produit un
+/// `PipelineError` attribué à l'onglet : les pages blanches
+/// old.reddit/archive.org n'avaient AUCUNE trace console
+/// des sous-ressources mortes.
+#[tokio::test]
+async fn subresource_failures_reach_console_ring() {
+    let (mut s, t) = test_session();
+    // Seule la page est routée : /dead.css, /dead.js et
+    // /dead.png répondent 404 chez FakeTransport.
+    t.route(
+        "/",
+        200,
+        "<!doctype html><html><head>\
+         <link rel=\"stylesheet\" href=\"/dead.css\">\
+         <script src=\"/dead.js\"></script>\
+         </head><body><img src=\"/dead.png\"></body></html>",
+    );
+    // Un `<script>` externe n'est fetché que sous scripting.
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let mut rx = s.subscribe();
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+
+    let mut msgs = Vec::new();
+    while let Ok(ev) = rx.try_recv() {
+        if let CoreEvent::PipelineError { tab, message } = ev {
+            if tab == Some(id) {
+                msgs.push(message);
+            }
+        }
+    }
+    for (kind, url) in [
+        ("feuille", "/dead.css"),
+        ("script", "/dead.js"),
+        ("image", "/dead.png"),
+    ] {
+        assert!(
+            msgs.iter()
+                .any(|m| m.contains(kind) && m.contains(url) && m.contains("HTTP 404")),
+            "échec {kind} {url} rapporté en console : {msgs:?}"
+        );
+    }
+}
+
 // ---------- CAP-156 — `document.referrer` ----------
 
 /// `document.referrer` reflète le `Referer` effectivement

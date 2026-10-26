@@ -336,3 +336,24 @@ fn oklch_lab_lch_hsl_parse() {
     assert!(parse_color("lab(50% 40 -30)").is_some());
     assert!(parse_color("lch(50% 40 240)").is_some());
 }
+
+/// Vol 2026-10-26 — `inset` s'éclate en `top/right/bottom/
+/// left` (liens overlay `inset:0` du Guardian à boîtes 0x0).
+#[test]
+fn inset_expansion() {
+    let got = expand_shorthand("inset", "0").expect("inset:0");
+    assert_eq!(
+        got,
+        vec![
+            ("top".to_string(), "0".to_string()),
+            ("right".to_string(), "0".to_string()),
+            ("bottom".to_string(), "0".to_string()),
+            ("left".to_string(), "0".to_string()),
+        ]
+    );
+    let got = expand_shorthand("inset", "10px 20px").expect("inset 2v");
+    assert_eq!(got[0].1, "10px");
+    assert_eq!(got[1].1, "20px");
+    assert_eq!(got[2].1, "10px");
+    assert_eq!(got[3].1, "20px");
+}

@@ -474,6 +474,53 @@ fn grid_repeat() {
     assert!(approx(c.rect.width, 100.0), "{}", c.rect.width);
 }
 
+/// Vol 2026-10-26 (reddit shreddit) — `grid-column: 1 / -1`
+/// = toutes les pistes : la ligne négative `-1` désigne la
+/// bordure APRÈS la dernière piste (spec §7.1). Sans ça, un
+/// item demandant `1 / -1` retombait en placement auto sur
+/// la seule première piste (`minmax(0,1fr)` ignorée →
+/// commentaires collapsés à la piste avatar 32 px).
+#[test]
+fn grid_column_span_toutes_pistes_ligne_negative() {
+    let (dom, bx) = laid(
+        "<!doctype html><section style=\"width:400px\">\
+         <div id=\"a\">avatar</div>\
+         <div id=\"c\">commentaire pleine largeur</div></section>",
+        "body { margin: 0 } section { display: grid; \
+         grid-template-columns: 32px minmax(0, 1fr) } \
+         #a { grid-column: 1 } #c { grid-column: 1 / -1; height: 10px }",
+    );
+    let c = find(&bx, by_id(&dom, "c"));
+    assert!(
+        approx(c.rect.width, 400.0),
+        "item 1/-1 : w={} attendu 400 (toutes les pistes)",
+        c.rect.width
+    );
+    assert!(approx(c.rect.x, 0.0), "x={}", c.rect.x);
+}
+
+/// `grid-column` à bornes négatives mixtes : `2 / -1` couvre
+/// de la 2e piste à la fin — la première piste reste libre.
+#[test]
+fn grid_column_depart_a_ligne_negative() {
+    let (dom, bx) = laid(
+        "<!doctype html><section style=\"width:400px\">\
+         <div id=\"a\">x</div>\
+         <div id=\"c\">y</div></section>",
+        "body { margin: 0 } section { display: grid; \
+         grid-template-columns: 32px minmax(0, 1fr) 40px } \
+         #a { grid-column: 1 } #c { grid-column: 2 / -1; height: 10px }",
+    );
+    let c = find(&bx, by_id(&dom, "c"));
+    assert!(approx(c.rect.x, 32.0), "x={}", c.rect.x);
+    assert!(
+        approx(c.rect.width, 400.0 - 32.0),
+        "2/-1 : w={} attendu {}",
+        c.rect.width,
+        400.0 - 32.0
+    );
+}
+
 // ── R-5 : grid MVP+ ──────────────────────────────────────────
 
 #[test]
@@ -929,5 +976,156 @@ fn img_auto_contribue_intrinseque() {
         card.rect.width > 237.0,
         "img `width:auto` : l'intrinsèque mesure toujours : card w={:.1}",
         card.rect.width
+    );
+}
+
+/// Vol 18 quora : en `flex-direction:column`, l'axe cross
+/// est horizontal — hors `stretch`, un item `align-items`
+/// non-étiré est **fit-content** (shrink-to-fit §9.5), puis
+/// placé par `align-items`. Un bloc `width:auto` ne doit PAS
+/// garder la largeur du conteneur.
+#[test]
+fn flex_column_align_center_retrécit_l_item() {
+    let (dom, bx) = laid(
+        "<!doctype html><section><button id=b>OK</button></section>",
+        "body { margin: 0 } section { display: flex; flex-direction: column; \
+         align-items: center; width: 800px } button { padding: 0 16px }",
+    );
+    let b = find(&bx, by_id(&dom, "b"));
+    // Fit-content : bien plus étroit que les 800 px du
+    // conteneur et centré dans la colonne.
+    assert!(
+        b.rect.width < 200.0,
+        "item resté pleine largeur : {}",
+        b.rect.width
+    );
+    assert!(
+        approx(b.rect.x + b.rect.width / 2.0, 400.0),
+        "item non centré : x={} w={}",
+        b.rect.x,
+        b.rect.width
+    );
+}
+
+/// Symétrie : `stretch` (défaut) conserve la pleine largeur
+/// cross en direction `column`.
+#[test]
+fn flex_column_stretch_pleine_largeur() {
+    let (dom, bx) = laid(
+        "<!doctype html><section><div id=d>x</div></section>",
+        "body { margin: 0 } section { display: flex; flex-direction: column; width: 800px }",
+    );
+    let d = find(&bx, by_id(&dom, "d"));
+    assert!(
+        approx(d.rect.width, 800.0),
+        "stretch perdu : {}",
+        d.rect.width
+    );
+}
+
+/// Vol 19 IGN : `display:table-cell` sous un parent `block`
+/// — §17.2.1 impose une table ANONYME autour de la suite :
+/// les cellules forment une rangée (25 % chacune ici), pas
+/// une colonne empilée.
+#[test]
+fn table_cell_nue_enveloppee_en_table_anonyme() {
+    let (dom, bx) = laid(
+        "<!doctype html><section><article id=a>A</article><article id=b>B</article>\
+         <article id=c>C</article><article id=d>D</article></section>",
+        "body { margin: 0 } section { display: block; width: 800px } \
+         article { display: table-cell; width: 25% }",
+    );
+    let a = find(&bx, by_id(&dom, "a"));
+    let b = find(&bx, by_id(&dom, "b"));
+    let c = find(&bx, by_id(&dom, "c"));
+    let d = find(&bx, by_id(&dom, "d"));
+    // Une seule rangée : même y, x croissants, ~200 px chacune.
+    assert!(
+        approx(a.rect.y, b.rect.y),
+        "rangée éclatée : {} {}",
+        a.rect.y,
+        b.rect.y
+    );
+    assert!(
+        b.rect.x > a.rect.x,
+        "b pas à droite de a : {} {}",
+        a.rect.x,
+        b.rect.x
+    );
+    assert!(c.rect.x > b.rect.x, "c pas à droite de b");
+    assert!(d.rect.x > c.rect.x, "d pas à droite de c");
+    assert!(
+        b.rect.width <= a.rect.width + 1.0,
+        "cellules non distribuées"
+    );
+}
+
+/// Un `table-row` nu sous `block` reçoit le même emballage.
+#[test]
+fn table_row_nu_enveloppe() {
+    let (dom, bx) = laid(
+        "<!doctype html><div id=w><div id=r><div id=c1>x</div><div id=c2>y</div></div></div>",
+        "body { margin: 0 } #w { width: 800px } #r { display: table-row } \
+         #r > div { display: table-cell }",
+    );
+    let c1 = find(&bx, by_id(&dom, "c1"));
+    let c2 = find(&bx, by_id(&dom, "c2"));
+    assert!(approx(c1.rect.y, c2.rect.y), "rangée éclatée");
+    assert!(c2.rect.x > c1.rect.x, "c2 pas à droite de c1");
+}
+
+/// Vol 17 wikipedia : `figure{display:table;float:right}`
+/// Parsoid — la légende `display:table-caption` va SOUS la
+/// grille (§17.4), pas en cellule anonyme à droite de
+/// l'image (le figure passait de 250 à 730 px et recouvrait
+/// le texte de l'article).
+#[test]
+fn table_caption_sous_la_grille() {
+    let (dom, bx) = laid(
+        "<!doctype html><section><figure typeof=\"mw:File/Thumb\" class=\"mw-halign-right\">\
+         <a><img width=250 height=160></a><figcaption>légende</figcaption></figure>\
+         <p>texte texte texte texte texte texte texte texte texte</p></section>",
+        "body { margin: 0 } figure[typeof~='mw:File/Thumb']{display:table}\
+         figure[typeof~='mw:File/Thumb'] figcaption{display:table-caption;caption-side:bottom}\
+         figure[typeof~='mw:File/Thumb'].mw-halign-right{float:right}\
+         section{width:800px}",
+    );
+    let fig = find(&bx, by_tag(&dom, "figure"));
+    let cap = find(&bx, by_tag(&dom, "figcaption"));
+    // Flottante à droite, largeur ~image (pas image+caption).
+    assert!(
+        fig.rect.width <= 260.0,
+        "figure élargie : {}",
+        fig.rect.width
+    );
+    assert!(fig.rect.x > 500.0, "figure pas à droite : {}", fig.rect.x);
+    // Légende sous l'image (y > bas de l'img), pleine largeur.
+    let img = find(&bx, by_tag(&dom, "img"));
+    assert!(
+        cap.rect.y >= img.rect.y + img.rect.height - 0.6,
+        "caption pas sous l'image : cap={} img_bas={}",
+        cap.rect.y,
+        img.rect.y + img.rect.height
+    );
+    assert!(approx(cap.rect.x, fig.rect.x), "caption pas alignée table");
+    // Le paragraphe s'enroule autour du flottant.
+    let p = find(&bx, by_tag(&dom, "p"));
+    assert!(p.rect.x < fig.rect.x, "texte sous la figure");
+}
+
+/// `caption-side: top` place la légende au-dessus.
+#[test]
+fn table_caption_side_top() {
+    let (dom, bx) = laid(
+        "<!doctype html><table><caption>titre</caption><tr><td>x</td></tr></table>",
+        "body { margin: 0 } caption { caption-side: top }",
+    );
+    let cap = find(&bx, by_tag(&dom, "caption"));
+    let td = find(&bx, by_tag(&dom, "td"));
+    assert!(
+        cap.rect.y <= td.rect.y + 0.6,
+        "caption top pas au-dessus : {} > {}",
+        cap.rect.y,
+        td.rect.y
     );
 }

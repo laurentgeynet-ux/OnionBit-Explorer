@@ -1817,8 +1817,26 @@ fn apply_presentational_hints(dom: &Dom, node: NodeId, props: &mut HashMap<Strin
     };
     match tag {
         "table" | "td" | "th" | "tr" | "col" | "colgroup" | "img" | "iframe" | "object"
-        | "embed" | "canvas" | "video" | "svg" => {
+        | "embed" | "canvas" | "video" => {
             hint(props, "width", dim(hint_attr(dom, node, "width")));
+            hint(props, "height", dim(hint_attr(dom, node, "height")));
+        }
+        "svg" => {
+            // SVG2 : `width`/`height` absent = `auto` =
+            // `100%` — PAS la taille du viewBox (vol
+            // 2026-10-26 : logo w3.org géant — un `<svg>`
+            // à `viewBox` seul occupait ses ~1000 unités
+            // en px au lieu de 100 % du conteneur, la
+            // hauteur dérivant du ratio comme `height:
+            // auto`). Sans `viewBox` le repli remplacé
+            // 300×150 reste la référence — le hint n'est
+            // posé que si la géométrie est définie.
+            let vb = hint_attr(dom, node, "viewBox").is_some();
+            hint(
+                props,
+                "width",
+                dim(hint_attr(dom, node, "width")).or_else(|| vb.then(|| "100%".to_string())),
+            );
             hint(props, "height", dim(hint_attr(dom, node, "height")));
         }
         "hr" => {
@@ -2264,7 +2282,11 @@ pub fn initial_value(name: &str) -> Option<&'static str> {
 ///
 /// `noscript` est masqué **sous scripting** (R-93 — MQ5
 /// `(scripting)`, HTML Rendering : son contenu ne s'affiche
-/// que sans moteur de script). Sans scripting il reste un
+/// que sans moteur de script). La règle est `!important`
+/// comme la spec : un style auteur `noscript { display:… }`
+/// (mastodon `display:flex`, terrain) ne doit pas révéler
+/// le fallback — l'important UA coiffe l'auteur normal ET
+/// l'auteur important. Sans scripting il reste un
 /// vrai sous-arbre rendu — comportement historique.
 /// `noframes`/`noembed` restent visibles pour la même
 /// raison (pas de frames ni de plugins — leur contenu EST le
@@ -2286,14 +2308,19 @@ tfoot { display: table-footer-group }
 tr { display: table-row }
 col { display: table-column }
 colgroup { display: table-column-group }
-caption { display: block }
+caption { display: table-caption }
 [hidden], head, script, style, link, meta, title, template,
 area, base, basefont, datalist, param, source, track,
 frame { display: none }
 details:not([open]) > :not(summary) { display: none }
 dialog:not([open]) { display: none }
+/* HTML Rendering §15.3.1 : un popover ferme ne s'affiche
+   pas — :popover-open est toujours faux tant que
+   showPopover() n'existe pas (vol 2026-10-26 : mega-menu
+   github/tool-tips popover=manual peints deplies). */
+[popover]:not(:popover-open) { display: none }
 audio:not([controls]) { display: none }
-@media (scripting) { noscript { display: none } }
+@media (scripting) { noscript { display: none !important } }
 li { display: list-item }
 ul, menu, dir { list-style-type: disc }
 ul ul, ol ul, menu ul, dir ul { list-style-type: circle }

@@ -599,6 +599,62 @@ fn noscript_masque_sous_scripting() {
     );
 }
 
+/// Vol 2026-10-26 (mastodon) — la règle UA est
+/// `display: none !important` comme la spec HTML Rendering :
+/// une feuille auteur `noscript { display:flex }` ne doit
+/// PAS révéler le fallback rawtext sous scripting.
+#[test]
+fn noscript_important_coiffe_style_auteur() {
+    let dom = TreeBuilder::parse("<body><noscript>fallback</noscript></body>");
+    let noscript = {
+        let html = dom
+            .children(dom.document())
+            .unwrap_or_default()
+            .into_iter()
+            .find(|&c| dom.tag_name(c).is_ok_and(|t| t == "html"))
+            .expect("html présent");
+        let body = dom
+            .children(html)
+            .unwrap_or_default()
+            .into_iter()
+            .find(|&b| dom.tag_name(b).is_ok_and(|t| t == "body"))
+            .expect("body présent");
+        dom.children(body)
+            .unwrap_or_default()
+            .into_iter()
+            .find(|&n| dom.tag_name(n).is_ok_and(|t| t == "noscript"))
+            .expect("noscript présent")
+    };
+    let mut e = StyleEngine::new();
+    e.add_css("noscript { display: flex }", Origin::Author);
+    let on = StyleEnv {
+        scripting: true,
+        ..env()
+    };
+    assert_eq!(
+        e.compute(&dom, noscript, &on).get("display"),
+        Some("none"),
+        "scripting : l'important UA coiffe le display:flex auteur"
+    );
+    // Même un `!important` auteur cède devant l'important UA
+    // (ordre de cascade : UA important > auteur important).
+    let mut e2 = StyleEngine::new();
+    e2.add_css("noscript { display: flex !important }", Origin::Author);
+    assert_eq!(
+        e2.compute(&dom, noscript, &on).get("display"),
+        Some("none"),
+        "scripting : l'important UA coiffe l'important auteur"
+    );
+    // Sans scripting : la règle auteur s'applique (UA inerte).
+    let mut e3 = StyleEngine::new();
+    e3.add_css("noscript { display: flex }", Origin::Author);
+    assert_eq!(
+        e3.compute(&dom, noscript, &env()).get("display"),
+        Some("flex"),
+        "sans scripting : le style auteur gagne"
+    );
+}
+
 #[test]
 fn color_scheme_dark_defauts_ua() {
     // R-59 — `color-scheme` sur la racine arbitre les défauts
@@ -1029,6 +1085,31 @@ fn ua_details_ferme_ne_montre_que_summary() {
     let open = el(&mut dom, f.body, "details", &[("open", "")]);
     let p2 = el(&mut dom, open, "p", &[]);
     assert_eq!(e.compute(&dom, p2, &env()).get("display"), Some("block"));
+}
+
+/// Vol 2026-10-26 — `[popover]` fermé = `display:none` (UA
+/// HTML Rendering §15.3.1) : les tool-tips/mega-menus
+/// `popover="manual"` de github étaient peints dépliés.
+/// `:popover-open` est toujours faux tant que `showPopover()`
+/// n'existe pas → tout `[popover]` est masqué.
+#[test]
+fn ua_popover_ferme_masque() {
+    let f = fixture();
+    let e = StyleEngine::new();
+    let mut dom = f.dom;
+    let tip = el(&mut dom, f.body, "tool-tip", &[("popover", "manual")]);
+    assert_eq!(
+        e.compute(&dom, tip, &env()).get("display"),
+        Some("none"),
+        "popover fermé : UA masque"
+    );
+    // Sans attribut popover : élément normal, règle inerte.
+    let plain = el(&mut dom, f.body, "div", &[]);
+    assert_ne!(
+        e.compute(&dom, plain, &env()).get("display"),
+        Some("none"),
+        "élément ordinaire non affecté"
+    );
 }
 
 #[test]

@@ -73,17 +73,73 @@ fn hidden(bx: &LayoutBox) -> bool {
     matches!(bx.style.get("visibility"), Some("hidden" | "collapse"))
 }
 
+/// La boîte ne peut pas être **cible** de hit-test : outre
+/// `visibility`, `pointer-events: none` (vol 2026-10-26 —
+/// les overlays auteur `pointer-events:none` volaient tous
+/// les hits au-dessus des champs : `editable:false` et clic
+/// `ignored` sur des `<input>` pourtant peints). Comme pour
+/// `visibility`, on descend quand même : un enfant portant
+/// `pointer-events: auto` explicite reste ciblable (sa
+/// valeur calculée diffère de celle du parent).
+fn unhittable(bx: &LayoutBox) -> bool {
+    hidden(bx) || bx.style.get("pointer-events") == Some("none")
+}
+
+/// Rang de peinture d'une boîte au sein de son parent
+/// (CSS 2.1 §9.9.1 / css-position §3.5 — ordre d'empilement
+/// simplifié) : les éléments positionnés (`relative`,
+/// `absolute`, `fixed`, `sticky`) passent **après** le flux
+/// normal, les `z-index` négatifs avant, les positifs après
+/// encore. Le hit-test doit frapper la couche la plus haute
+/// en premier — un bandeau/overlays `fixed` transparent qui
+/// précède le contenu dans le DOM est peint AU-DESSUS de
+/// lui : tester les enfants en ordre de document lui
+/// volait les clics des liens situés dessous (vol 19 :
+/// `{"result":"ignored"}` sur liens valides de
+/// gamefaqs/speedtest, « Français » de canada.ca).
+fn paint_rank(c: &LayoutBox) -> i64 {
+    let positioned = !matches!(
+        c.kind,
+        crate::BoxKind::Text | crate::BoxKind::AnonymousBlock
+    ) && matches!(
+        c.style.get("position"),
+        Some("relative" | "absolute" | "fixed" | "sticky")
+    );
+    if !positioned {
+        return 0;
+    }
+    #[allow(clippy::cast_possible_truncation)]
+    let z = c
+        .style
+        .number("z-index")
+        .map_or(i64::from(c.z_index), |v| v as i64);
+    // Positionnés : z < 0 sous le flux, z = 0/auto au rang
+    // central, z > 0 au-dessus de tout.
+    1_000_000_000 + z.signum() * 1_000_000_000 + z.clamp(-999_999_999, 999_999_999)
+}
+
+/// Indices des enfants dans l'ordre de **peinture inversé**
+/// (la dernière couche peinte, la plus haute, testée en
+/// premier) — à rang égal, le dernier du document gagne.
+fn hit_order(bx: &LayoutBox) -> Vec<usize> {
+    let mut idx: Vec<usize> = (0..bx.children.len()).collect();
+    idx.sort_by_key(|&i| paint_rank(&bx.children[i]));
+    idx.reverse();
+    idx
+}
+
 #[must_use]
 pub fn hit_test(bx: &LayoutBox, x: f32, y: f32) -> Option<NodeId> {
     if !contains(paint_bounds(bx), x, y) {
         return None;
     }
-    for child in &bx.children {
+    for i in hit_order(bx) {
+        let child = &bx.children[i];
         if let Some(n) = explorer_common::deep(|| hit_test(child, x, y)) {
             return Some(n);
         }
     }
-    if hidden(bx) {
+    if unhittable(bx) {
         return None;
     }
     contains(bx.rect, x, y).then_some(bx.node).flatten()
@@ -111,7 +167,8 @@ fn hit_test_delta(bx: &LayoutBox, x: f32, y_vp: f32, delta: f32) -> Option<NodeI
     if !contains(paint_bounds(bx), x, y) {
         return None;
     }
-    for child in &bx.children {
+    for i in hit_order(bx) {
+        let child = &bx.children[i];
         // `position:fixed` = coords viewport : delta nul pour
         // tout le sous-arbre. Détection par le **style** (comme
         // `resolve_absolutes`) — le champ `position` n'est
@@ -125,7 +182,7 @@ fn hit_test_delta(bx: &LayoutBox, x: f32, y_vp: f32, delta: f32) -> Option<NodeI
             return Some(n);
         }
     }
-    if hidden(bx) {
+    if unhittable(bx) {
         return None;
     }
     contains(bx.rect, x, y).then_some(bx.node).flatten()
