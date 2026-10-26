@@ -7,6 +7,43 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **JS-C129 — journal `Insert` :
+  appariement par tag, fin du zip
+  tronqué** (`explorer-jscore` +
+  `explorer-js` + `explorer-core`) —
+  mur ADR-0025 mesuré « partout »
+  (~16 s de repli re-parse) : les
+  nœuds insérés par JS étaient
+  appariés `créés (pré-ordre)` ↔
+  `ids` **positionnellement** — une
+  synthèse moteur au re-parse
+  (`<tbody>`…) ou un nœud non émis
+  décalait toutes les clés suivantes
+  → `UnmappedKey` en cascade →
+  repli. Le miroir calculait déjà
+  les tags (`serialize_subtree_keyed`
+  les jetait !) : transportés dans
+  `DomMutation::Insert.tags` (couture
+  NAV interne — `explorer-js`↔core),
+  rejeu réutilisant `align_keyed`
+  (extraction de la boucle
+  `build_keymap` : monotone, textes
+  par adjacence stricte + hash,
+  extras moteur sautés, orphelins
+  miroir non mappés → `UnmappedKey`
+  sûr, jamais de faux positif).
+  Bloc `Insert` extrait en
+  `journal_insert` (seuil
+  `too_many_lines`). Repli
+  positionnel conservé si `tags`
+  absent. Tests `align_keyed_skips_
+  engine_only_nodes` (le `span`
+  moteur non miroir ne décale plus
+  `b`) + `align_keyed_text_requires_
+  content_match` ; 7/7 tests journal
+  session verts (rejets table/svg/
+  baseline compris).
+
 - **JS-C127 — `new URL(".", location)`
   résout** (`explorer-jscore`) —
   mur assets svelte/fastapi/mkdocs
@@ -108,7 +145,7 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   DOMParser → `TypeError`, DOM
   page intact).
 
-- **JS-C124 — qSA miroir :
+- **JS-C128 — qSA miroir :
   combinateur `>` + universel
   `*`** (`explorer-jscore`) —
   le sous-ensemble sélecteur du
@@ -12070,3 +12107,17 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   délègue à `xpath_evaluate` ;
   resolver = nœud ou documentElement.
   Test `document_xpath_create_expression`.
+
+- **Étape 144 — budget navigations
+  automatiques** (`explorer-core`) —
+  `max_auto_navs=64` (config) borne
+  les navs émises par le contenu par
+  onglet : `<meta refresh>` ré-armé
+  + intents script (`location.*`,
+  reload, submit). Cdiscount : 3 812
+  navs en 16 min, process tué à la
+  main — la boucle devient une page
+  figée + WARN unique. Les clics ne
+  débitent pas le budget. Test
+  `auto_nav_budget_caps_script_and_
+  refresh` — 417/417 verts.

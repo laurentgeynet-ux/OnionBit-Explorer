@@ -286,6 +286,7 @@ fn test_session() -> (Session, Arc<FakeTransport>) {
         max_modules: 64,
         max_inflight: 6,
         max_script_net: 16,
+        max_auto_navs: 64,
         max_timer_jobs: 64,
         paint_chunk_bytes: 32 * 1024,
         paint_interval_ms: 100,
@@ -4487,6 +4488,7 @@ async fn timer_jobs_bounded_per_pump() {
         t.clone(),
         Arc::new(FixtureFont),
         SessionConfig {
+            max_auto_navs: 64,
             max_timer_jobs: 1,
             ..SessionConfig::default()
         },
@@ -6684,6 +6686,7 @@ async fn redirect_commits_final_url_and_fragment() {
             max_modules: 64,
             max_inflight: 6,
             max_script_net: 16,
+            max_auto_navs: 64,
             max_timer_jobs: 64,
             paint_chunk_bytes: 32 * 1024,
             paint_interval_ms: 100,

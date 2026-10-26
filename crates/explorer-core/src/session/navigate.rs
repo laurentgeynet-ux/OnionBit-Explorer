@@ -1101,6 +1101,8 @@ impl Session {
             entry.bg_decoded.clear();
             entry.img_bodies.clear();
             entry.linked_sheets.clear();
+            entry.adopted_sheets.clear();
+            entry.defined_names.clear();
             entry.frames.clear();
             entry.prev_styles = HashMap::new();
             entry.transitions.clear();
@@ -1178,14 +1180,47 @@ impl Session {
             .and_then(|e| e.pending_nav.pop_front())
     }
 
+    /// Débite le budget de navigations **automatiques** de
+    /// l'onglet (meta refresh + intents script — `false`
+    /// quand `max_auto_navs` est épuisé). WARN une seule
+    /// fois au franchissement : une page en boucle
+    /// auto-refresh/`location.*` se dénonce sans spammer.
+    /// Cdiscount : 3 812 navs en 16 min, process tué à la
+    /// main — la borne transforme la boucle en page figée.
+    pub(crate) fn auto_nav_budget(&mut self, tab: TabId) -> bool {
+        let Some(e) = self.tabs.get_mut(&tab) else {
+            return false;
+        };
+        if e.auto_navs >= self.max_auto_navs {
+            if e.auto_navs == self.max_auto_navs {
+                e.auto_navs += 1;
+                tracing::warn!(
+                    tab = tab,
+                    max = self.max_auto_navs,
+                    "budget nav-auto épuisé — page en boucle, intents jetés"
+                );
+            }
+            return false;
+        }
+        e.auto_navs += 1;
+        true
+    }
+
     /// Enfile une intention — `false` si la file est pleine
     /// (`MAX_PENDING_NAV`) : l'appelant cesse alors de
     /// vider le moteur (un flot hostile ne fait pas gonfler
     /// la mémoire, et aucune intention n'est jetée en
     /// silence — celles encore dans le moteur restent
-    /// drainables au prochain tour).
-    pub(crate) fn enqueue_nav_act(&mut self, tab: TabId, act: DrainAct) -> bool {
+    /// drainables au prochain tour). `auto` = intention
+    /// émise par le contenu (script, meta refresh) — débite
+    /// le budget nav-auto ; `false` = geste utilisateur.
+    pub(crate) fn enqueue_nav_act(&mut self, tab: TabId, act: DrainAct, auto: bool) -> bool {
         const MAX_PENDING_NAV: usize = 8;
+        if auto && !self.auto_nav_budget(tab) {
+            // Intention auto au-delà du budget — jetée (la
+            // boucle s'arrête net, pas de re-file).
+            return true;
+        }
         if let Some(e) = self.tabs.get_mut(&tab) {
             if e.pending_nav.len() < MAX_PENDING_NAV {
                 e.pending_nav.push_back(act);
@@ -1214,7 +1249,7 @@ impl Session {
                 ScriptNav::Reload => DrainAct::Reload,
                 ScriptNav::NewTab(u, n) => DrainAct::NewTab(Box::new(Request::get(u)), n),
             };
-            if !self.enqueue_nav_act(tab, act) {
+            if !self.enqueue_nav_act(tab, act, true) {
                 break;
             }
         }

@@ -24,24 +24,37 @@ impl Session {
     /// timer sont à drainer ensuite via
     /// [`Self::drain_script_nav`] (async).
     ///
+    /// Tick `<meta http-equiv=refresh>` (CAP-143) : l'échéance
+    /// échue devient une intention `DrainAct::Req` — débitée
+    /// du budget nav-auto (boucle cdiscount : refresh ré-armé
+    /// à chaque commit, 3 812 navs mesurées).
+    fn pump_refresh(&mut self, tab: TabId) {
+        let refresh_target = self.tabs.get_mut(&tab).and_then(|entry| {
+            entry
+                .refresh_at
+                .as_ref()
+                .is_some_and(|(t, _)| Instant::now() >= *t)
+                .then(|| entry.refresh_at.take())
+                .flatten()
+                .map(|(_, target)| target)
+        });
+        if let Some(target) = refresh_target {
+            if self.auto_nav_budget(tab) {
+                self.enqueue_nav_act(
+                    tab,
+                    DrainAct::Req(Box::new(Request::get(target)), true),
+                    false,
+                );
+            }
+        }
+    }
+
     /// Fait aussi office de tick `<meta http-equiv=refresh>`
     /// (CAP-143) : l'échéance échue pousse une intention
     /// `DrainAct::Req` — sans moteur JS, au même drain que
     /// les intentions script.
     pub fn pump_timers(&mut self, tab: TabId) -> usize {
-        if let Some(entry) = self.tabs.get_mut(&tab) {
-            if entry
-                .refresh_at
-                .as_ref()
-                .is_some_and(|(t, _)| Instant::now() >= *t)
-            {
-                if let Some((_, target)) = entry.refresh_at.take() {
-                    entry
-                        .pending_nav
-                        .push_back(DrainAct::Req(Box::new(Request::get(target)), true));
-                }
-            }
-        }
+        self.pump_refresh(tab);
         let max = self.max_timer_jobs;
         let t0 = Instant::now();
         let (jobs, mutated) = {

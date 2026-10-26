@@ -205,6 +205,11 @@ pub(crate) struct Tab {
     /// une échéance échue en intention de navigation. Gelée/
     /// restaurée avec le bfcache (délai restant conservé).
     refresh_at: Option<(std::time::Instant, Url)>,
+    /// Navigations automatiques déjà enfilées pour cet
+    /// onglet (meta refresh + intents script) — compteur
+    /// cumulatif borné par `Session::max_auto_navs` ; les
+    /// clics utilisateur ne le débitent pas.
+    auto_navs: u32,
     /// Politiques CSP du document commis (CAP-145) —
     /// évaluées aux fetchs tardifs (`@import`, fonds/
     /// masques, fonts, modules), aux intentions de
@@ -324,6 +329,11 @@ pub(crate) struct Tab {
     /// `drain_script_net`, cascadé en feuilles auteur document
     /// après `linked_sheets` (ordre spec).
     adopted_sheets: Vec<String>,
+    /// Noms des custom elements définis — gel bfcache du
+    /// champ `Tab.defined_names` (registre `customElements`
+    /// du miroir, re-poussé dans `Dom::set_defined_names`
+    /// à la restauration).
+    defined_names: Vec<String>,
     /// Contextes de navigation imbriqués (étape 128) :
     /// `<iframe src>` fetchés sous l'initiateur de la page
     /// et parsés en leur `Dom` propre — ordre d'arrivée
@@ -596,6 +606,11 @@ pub(crate) struct PageSnapshot {
     /// pompe (`drain_script_net`), cascadé en feuilles auteur
     /// document après `linked_sheets` (ordre spec).
     adopted_sheets: Vec<String>,
+    /// Noms des custom elements définis (`customElements.
+    /// define`) — snapshot miroir rafraîchi au même drain ;
+    /// poussé dans `Dom::set_defined_names` pour `:defined`
+    /// (selectors-4 §13) aux points de synchronisation.
+    defined_names: Vec<String>,
     /// Styles calculés (transitions — vidées au gel).
     prev_styles: HashMap<usize, ComputedStyle>,
     /// Régions invalides en vol (+ tête déjà émise).
@@ -789,6 +804,11 @@ pub struct Session {
     /// (`max_timer_jobs` de config, étape 52 — borne
     /// ADR-0019).
     max_timer_jobs: usize,
+    /// Budget de navigations automatiques par onglet
+    /// (`max_auto_navs` de config — meta refresh + intents
+    /// script ; boucle cdiscount mesurée : 3 812 navs,
+    /// process tué à la main).
+    max_auto_navs: u32,
     /// Octets reçus entre peintures progressives
     /// (`paint_chunk_bytes` de config, étape 53).
     paint_chunk_bytes: usize,
@@ -948,6 +968,7 @@ impl Session {
             dyn_tasks: HashMap::new(),
             max_script_net: cfg.max_script_net,
             max_timer_jobs: cfg.max_timer_jobs,
+            max_auto_navs: cfg.max_auto_navs,
             paint_chunk_bytes: cfg.paint_chunk_bytes,
             paint_interval: std::time::Duration::from_millis(cfg.paint_interval_ms),
             resync_gap_max: std::time::Duration::from_millis(cfg.resync_gap_max_ms),
@@ -1208,6 +1229,7 @@ impl Session {
                 base_target: None,
                 win_name: None,
                 refresh_at: None,
+                auto_navs: 0,
                 csp: Vec::new(),
                 hist_idx: 0,
                 hist_pending: false,
@@ -1233,6 +1255,7 @@ impl Session {
                 images: PaintImages::default(),
                 linked_sheets: Vec::new(),
                 adopted_sheets: Vec::new(),
+                defined_names: Vec::new(),
                 frames: Vec::new(),
                 frame_ctxs: Vec::new(),
                 frame_nodes: Vec::new(),

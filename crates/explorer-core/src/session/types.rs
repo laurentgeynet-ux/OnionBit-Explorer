@@ -851,6 +851,13 @@ pub struct SessionConfig {
     /// de timers échus ne monopolise pas la pompe ; le reste
     /// attend le tick suivant).
     pub max_timer_jobs: usize,
+    /// Navigations **automatiques** par onglet (meta refresh +
+    /// intentions script `location.*`/reload/submit) — borne
+    /// session, distincte de `MAX_NAV_HOPS` (chaîne) et de
+    /// `MAX_PENDING_NAV` (file). Cdiscount mesuré : 3 812 navs
+    /// auto en boucle = process à tuer ; le web légitime en
+    /// fait une poignée. `0` = aucune nav auto.
+    pub max_auto_navs: u32,
     /// Octets de corps reçus entre deux peintures progressives
     /// (étape 53 — cadence « N octets » du relayout pendant le
     /// téléchargement ; `0` = peinture à chaque morceau reçu).
@@ -916,6 +923,7 @@ impl Default for SessionConfig {
             max_inflight: 6,
             max_script_net: 16,
             max_timer_jobs: 128,
+            max_auto_navs: 64,
             paint_chunk_bytes: 32 * 1024,
             paint_interval_ms: 100,
             resync_gap_max_ms: 4_000,

@@ -144,6 +144,8 @@ fn paintless_snapshot_repairs_on_restore() {
             js: None,
             images: PaintImages::default(),
             linked_sheets: Vec::new(),
+            adopted_sheets: Vec::new(),
+            defined_names: Vec::new(),
             prev_styles: HashMap::new(),
             dirty: Vec::new(),
             emitted: 0,
@@ -239,6 +241,8 @@ async fn back_during_inflight_nav_restores_previous() {
             js: None,
             images: PaintImages::default(),
             linked_sheets: Vec::new(),
+            adopted_sheets: Vec::new(),
+            defined_names: Vec::new(),
             prev_styles: HashMap::new(),
             dirty: Vec::new(),
             emitted: 0,
@@ -898,6 +902,92 @@ async fn animationstart_fires_for_new_keyframe_animation() {
         .and_then(|eng| eng.eval("window.__as").ok())
         .unwrap_or_default();
     assert_eq!(out.trim(), "ghz@DIV", "animationstart livré : {out}");
+}
+
+/// Étape 143 — pont lazy-CE : feuille **construite**
+/// (`new CSSStyleSheet` + `insertRule` + `adoptedStyleSheets`)
+/// cascadée réellement, et `:defined` lu sur le registre
+/// miroir. Mécanisme github catalyst à l'identique :
+/// `sel:not(:defined){animation:nom}` → naissance →
+/// `animationstart` → découverte ; puis `define` bascule
+/// l'élément en `:defined`.
+#[tokio::test]
+async fn adopted_sheet_defined_selector_drives_lazy_discovery() {
+    let mut s = Session::new(Arc::new(FailTransport), Arc::new(TestFont));
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let tab = s.open_tab();
+    let html = "<!doctype html><html><body><x-lazy></x-lazy></body></html>";
+    let eng = s.spawn_engine(tab, html, true, "");
+    {
+        let e = s.tabs.get_mut(&tab).unwrap();
+        let mut tb = TreeBuilder::new();
+        tb.push(html);
+        tb.finish();
+        e.dom = Some(tb.into_dom());
+        e.url = Some(Url::parse("http://h.test/lazy").unwrap());
+        e.js = eng;
+    }
+    // Feuille construite à la catalyst + listener capture.
+    let _ = s.tabs.get_mut(&tab).and_then(|e| e.js.as_mut()).map(|eng| {
+        eng.eval(
+            "window.__as='none';\
+             document.addEventListener('animationstart',function(e){\
+             window.__as=e.animationName+'@'+e.target.tagName;},true);\
+             var sh=new CSSStyleSheet();\
+             sh.insertRule('@keyframes lazydetect { from {opacity:.9} to {opacity:1} }');\
+             sh.insertRule('x-lazy:not(:defined){animation:lazydetect 5s !important}');\
+             document.adoptedStyleSheets=[sh];",
+        )
+    });
+    // Drain (moteur présent) → feuille adoptée + registre
+    // poussés au Dom → cascade → naissance → événement.
+    s.drain_script_net(tab);
+    s.relayout(tab).unwrap();
+    s.pump_timers(tab);
+    let out = s
+        .tabs
+        .get_mut(&tab)
+        .and_then(|e| e.js.as_mut())
+        .and_then(|eng| eng.eval("window.__as").ok())
+        .unwrap_or_default();
+    assert_eq!(
+        out.trim(),
+        "lazydetect@X-LAZY",
+        "animationstart lazy : {out}"
+    );
+    // `define` → drain pousse le nom → `x-lazy:defined`
+    // matche désormais (le registre vivant du Dom session).
+    let _ = s.tabs.get_mut(&tab).and_then(|e| e.js.as_mut()).map(|eng| {
+        eng.eval(
+            "customElements.define('x-lazy',class extends HTMLElement{});\
+             window.__def=document.querySelector('x-lazy')!==null",
+        )
+    });
+    s.drain_script_net(tab);
+    {
+        let entry = s.tabs.get_mut(&tab).unwrap();
+        let dom = entry.dom.as_ref().unwrap();
+        // BFS — `x-lazy` est le seul élément à tiret.
+        let mut found = None;
+        let mut queue = vec![dom.document()];
+        while let Some(n) = queue.pop() {
+            if dom.tag_name(n).is_ok_and(|t| t == "x-lazy") {
+                found = Some(n);
+                break;
+            }
+            if let Ok(ch) = dom.children(n) {
+                queue.extend(ch.iter().rev());
+            }
+        }
+        let node = found.expect("x-lazy dans le DOM");
+        let sel = explorer_css::parse_selector_list("x-lazy:defined")
+            .expect("sélecteur parse")
+            .remove(0);
+        assert!(
+            explorer_css::matches(dom, node, &sel),
+            "x-lazy défini doit matcher :defined"
+        );
+    }
 }
 
 /// Étape 57bis — find-in-page : occurrences comptées sur
@@ -2223,4 +2313,38 @@ async fn eval_shared_evalue_drain_et_tolere() {
         EvalReply::Done { value, .. } => assert_eq!(value.as_deref(), Ok("10")),
         EvalReply::Unavailable => panic!("moteur réinséré attendu"),
     }
+}
+
+/// Boucle nav-auto bornée (cdiscount : 3 812 navigations
+/// en 16 min, process tué à la main) — `max_auto_navs`
+/// débitée par les intents script et le meta refresh,
+/// jamais par les clics utilisateur.
+#[test]
+fn auto_nav_budget_caps_script_and_refresh() {
+    let mut s = Session::new(Arc::new(FailTransport), Arc::new(TestFont));
+    let tab = s.open_tab();
+    s.max_auto_navs = 4;
+    let act = || {
+        DrainAct::Req(
+            Box::new(Request::get(Url::parse("http://x.test/").unwrap())),
+            true,
+        )
+    };
+    // Intents script : le budget en laisse passer 4, le
+    // reste est jeté (retour `true` — le drain s'arrête,
+    // pas de re-file dans le moteur).
+    for _ in 0..10 {
+        assert!(s.enqueue_nav_act(tab, act(), true));
+    }
+    assert_eq!(s.tabs.get(&tab).unwrap().pending_nav.len(), 4);
+    // Meta refresh : pareil — échéance échue, budget déjà
+    // épuisé → rien n'est enfilé.
+    s.tabs.get_mut(&tab).unwrap().refresh_at =
+        Some((Instant::now(), Url::parse("http://x.test/again").unwrap()));
+    s.pump_timers(tab);
+    assert_eq!(s.tabs.get(&tab).unwrap().pending_nav.len(), 4);
+    // Le clic utilisateur ne débite pas le budget — un
+    // `auto=false` enfile toujours.
+    assert!(s.enqueue_nav_act(tab, act(), false));
+    assert_eq!(s.tabs.get(&tab).unwrap().pending_nav.len(), 5);
 }

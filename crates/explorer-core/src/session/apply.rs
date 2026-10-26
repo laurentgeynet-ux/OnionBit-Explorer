@@ -272,6 +272,13 @@ pub(crate) struct PaintPayload {
     /// Feuilles `<link>` — une entrée par feuille, parsées
     /// isolément à la cascade (étape 104, cf. R-68).
     pub linked_sheets: Vec<String>,
+    /// Noms `customElements` du miroir — clonés de
+    /// `Tab.defined_names` au `take_paint` pour le bake des
+    /// `Dom` reconstruits pendant la passe détachée
+    /// (`:defined`, selectors-4 §13). Jamais ré-écrit par
+    /// `put_paint` : `Tab.defined_names` fait foi (le drain
+    /// a pu livrer plus frais pendant la fenêtre).
+    pub defined_names: Vec<String>,
     /// `document.adoptedStyleSheets` → textes CSS par feuille
     /// (CAP-195 tranche 2) — cascadées en feuilles auteur
     /// document **après** `linked_sheets` (ordre spec).
@@ -441,6 +448,11 @@ impl Tab {
             // ré-écrit par `put_paint` (Tab fait foi).
             csp: self.csp.clone(),
             linked_sheets: std::mem::take(&mut self.linked_sheets),
+            // Le registre voyage avec la passe : les `Dom`
+            // reconstruits par la synchro le re-bakent
+            // (`apply_journal`), `put_paint` re-bake aussi
+            // depuis `Tab.defined_names` (plus frais possible).
+            defined_names: self.defined_names.clone(),
             adopted_sheets: self.adopted_sheets.clone(),
             prev_styles: std::mem::take(&mut self.prev_styles),
             transitions: std::mem::take(&mut self.transitions),
@@ -470,6 +482,13 @@ impl Tab {
     /// la fenêtre (scroll input) et fait foi.
     pub(crate) fn put_paint(&mut self, p: PaintPayload) {
         self.dom = p.dom;
+        // Registre `customElements` (CAP-195 tranche 2 —
+        // `:defined`) : la copie vivant dans `p.dom` date du
+        // `take_paint` ; `drain_script_net` a pu livrer des
+        // noms plus frais pendant la fenêtre détachée.
+        if let Some(d) = self.dom.as_mut() {
+            d.set_defined_names(self.defined_names.iter().cloned());
+        }
         self.tree = p.tree;
         self.tree_epoch = p.tree_epoch;
         self.list = p.list;
@@ -614,7 +633,11 @@ pub(crate) fn apply_payload(
 ) -> ApplyOutcome {
     let t0 = Instant::now();
     let mut out = ApplyOutcome::default();
-    let new_dom = TreeBuilder::parse_scripting(&job.html, ctx.scripting);
+    let mut new_dom = TreeBuilder::parse_scripting(&job.html, ctx.scripting);
+    // Registre `customElements` (`:defined`) — transporté
+    // par la payload, le Dom frais repart nu à chaque
+    // re-parse.
+    new_dom.set_defined_names(p.defined_names.iter().cloned());
     let new_title = extract_title(&new_dom);
     // Relayout incrémental (étape 55f) avant tout
     // remplacement — il a besoin de l'ancien DOM et de
@@ -828,40 +851,61 @@ fn build_keymap(
     keymap.clear();
     let engine = engine_preorder(dom);
     if tags.len() == ids.len() && !ids.is_empty() {
-        let mut j = 0usize;
-        'outer: for (i, &m) in ids.iter().enumerate() {
-            if let Some(hex) = tags[i].strip_prefix("#text\x00") {
-                // Texte : concordance exacte du contenu à
-                // la position courante, sinon non mappé.
-                let Some(e) = engine.get(j) else { break };
-                let Ok(h) = u64::from_str_radix(hex, 16) else {
-                    break;
-                };
-                if let Ok(explorer_dom::NodeData::Text(t)) = dom.data(*e) {
-                    if fnv64(t.as_str()) == h {
-                        keymap.insert(m, *e);
-                        j += 1;
-                    }
-                }
-                continue;
-            }
-            while j < engine.len() {
-                let e = engine[j];
-                j += 1;
-                if dom
-                    .tag_name(e)
-                    .is_ok_and(|t| t.eq_ignore_ascii_case(&tags[i]))
-                {
-                    keymap.insert(m, e);
-                    continue 'outer;
-                }
-            }
-            break; // plus de moteur : le reste reste non mappé
-        }
+        align_keyed(keymap, dom, &engine, ids, tags);
         return;
     }
     for (e, m) in engine.into_iter().zip(ids.iter().copied()) {
         keymap.insert(m, e);
+    }
+}
+
+/// Appariement monotone **par tag** d'une séquence moteur
+/// `engine` (pré-ordre, kinds sérialisables) aux clés miroir
+/// `(ids, tags)` — partagé entre la baseline cléée
+/// ([`build_keymap`]) et le rejeu des `Insert` (JS-C129 : un
+/// nœud moteur synthétisé au re-parse ou non émis par le
+/// miroir ne décale plus les clés suivantes — l'ancien zip
+/// positionnel tronqué laissait les orphelins retomber en
+/// `UnmappedKey` → re-parse). Textes : adjacence stricte +
+/// hash de contenu égal, sinon non mappés. Les clés miroir
+/// sans correspondant restent hors table — `UnmappedKey` au
+/// rejeu (repli sûr, jamais faux positif).
+fn align_keyed(
+    keymap: &mut HashMap<u64, explorer_dom::NodeId>,
+    dom: &Dom,
+    engine: &[explorer_dom::NodeId],
+    ids: &[u64],
+    tags: &[String],
+) {
+    let mut j = 0usize;
+    'outer: for (i, &m) in ids.iter().enumerate() {
+        if let Some(hex) = tags[i].strip_prefix("#text\x00") {
+            // Texte : concordance exacte du contenu à
+            // la position courante, sinon non mappé.
+            let Some(e) = engine.get(j) else { break };
+            let Ok(h) = u64::from_str_radix(hex, 16) else {
+                break;
+            };
+            if let Ok(explorer_dom::NodeData::Text(t)) = dom.data(*e) {
+                if fnv64(t.as_str()) == h {
+                    keymap.insert(m, *e);
+                    j += 1;
+                }
+            }
+            continue;
+        }
+        while j < engine.len() {
+            let e = engine[j];
+            j += 1;
+            if dom
+                .tag_name(e)
+                .is_ok_and(|t| t.eq_ignore_ascii_case(&tags[i]))
+            {
+                keymap.insert(m, e);
+                continue 'outer;
+            }
+        }
+        break; // plus de moteur : le reste reste non mappé
     }
 }
 
@@ -965,6 +1009,62 @@ fn journal_attach_shadow(
     Ok(h)
 }
 
+/// Rejeu `Insert` : fragment sérialisé re-parsé en
+/// mini-document puis greffé sous le parent mappé ; les clés
+/// miroir du sous-arbre entrent en `keymap` par **appariement
+/// de tags** (JS-C129 — un nœud moteur synthétisé au
+/// re-parse ou non émis par le miroir ne décale plus les
+/// clés suivantes ; l'ancien zip tronqué les laissait
+/// dériver → `UnmappedKey` en cascade → repli re-parse).
+/// Retourne le parent (cible du relayout incrémental).
+fn journal_insert(
+    p: &mut PaintPayload,
+    ctx: &ApplyCtx,
+    parent: u64,
+    index: u32,
+    html: &str,
+    ids: &[u64],
+    tags: &[String],
+) -> Result<explorer_dom::NodeId, JournalReject> {
+    let par = key_node(p, parent)?;
+    // Pas de parse de fragment contextuel dans
+    // `explorer-html` : le fragment est parsé en
+    // document minimal et ses enfants de `<body>`
+    // greffés (le classifieur miroir a déjà écarté
+    // les contenus à parsing contextuel).
+    let frag = TreeBuilder::parse_scripting(html, ctx.scripting);
+    let Some(root_el) = frag.document_element() else {
+        return Err(JournalReject::Dom);
+    };
+    // `<body>` (ou `<html>` à défaut) = porte-greffe.
+    let Ok(body) = frag.children(root_el).map(|c| {
+        c.iter()
+            .find(|&&n| frag.tag_name(n).is_ok_and(|t| t == "body"))
+            .copied()
+            .unwrap_or(root_el)
+    }) else {
+        return Err(JournalReject::Dom);
+    };
+    let to_move = frag.children(body).unwrap_or_default();
+    let dom = p.dom.as_mut().ok_or(JournalReject::NoDom)?;
+    let base = index as usize;
+    let mut created_all = Vec::new();
+    for (i, &src_root) in to_move.iter().enumerate() {
+        let new_root = graft_subtree(dom, &frag, src_root, par, base + i)?;
+        engine_preorder_subtree(dom, new_root, &mut created_all);
+    }
+    if tags.len() == ids.len() && !ids.is_empty() {
+        align_keyed(&mut p.keymap, dom, &created_all, ids, tags);
+    } else {
+        // Repli positionnel — moteur plus ancien que la
+        // couture (journal sans tags).
+        for (e, m) in created_all.into_iter().zip(ids.iter().copied()) {
+            p.keymap.insert(m, e);
+        }
+    }
+    Ok(par)
+}
+
 /// Applique un journal de mutations **en place** sur le DOM
 /// commis (ADR-0025 — les `NodeId` survivent : `images`,
 /// `find`, `popup`, `focused` restent valides sans
@@ -1041,43 +1141,9 @@ fn apply_journal(
                 index,
                 html,
                 ids,
+                tags,
             } => {
-                let par = key_node(p, *parent)?;
-                // Pas de parse de fragment contextuel dans
-                // `explorer-html` : le fragment est parsé en
-                // document minimal et ses enfants de `<body>`
-                // greffés (le classifieur miroir a déjà écarté
-                // les contenus à parsing contextuel).
-                let frag = TreeBuilder::parse_scripting(html, ctx.scripting);
-                let Some(root_el) = frag.document_element() else {
-                    return Err(JournalReject::Dom);
-                };
-                let mut to_move = Vec::new();
-                // `<body>` (ou `<html>` à défaut) = porte-greffe.
-                let Ok(body) = frag.children(root_el).map(|c| {
-                    c.iter()
-                        .find(|&&n| frag.tag_name(n).is_ok_and(|t| t == "body"))
-                        .copied()
-                        .unwrap_or(root_el)
-                }) else {
-                    return Err(JournalReject::Dom);
-                };
-                to_move.extend(frag.children(body).unwrap_or_default());
-                let dom = p.dom.as_mut().ok_or(JournalReject::NoDom)?;
-                let base = *index as usize;
-                let mut created_all = Vec::new();
-                for (i, &src_root) in to_move.iter().enumerate() {
-                    let new_root = graft_subtree(dom, &frag, src_root, par, base + i)?;
-                    engine_preorder_subtree(dom, new_root, &mut created_all);
-                }
-                // Appariement `créés (pré-ordre)` ↔ `ids` — zip
-                // tronqué : le compte exact n'est pas garanti
-                // (round-trip), les orphelins retomberont en
-                // `UnmappedKey` → repli.
-                for (e, m) in created_all.into_iter().zip(ids.iter().copied()) {
-                    p.keymap.insert(m, e);
-                }
-                touched.push(par);
+                touched.push(journal_insert(p, ctx, *parent, *index, html, ids, tags)?);
             }
         }
     }
@@ -2243,5 +2309,62 @@ fn insert_fetched_images(p: &mut PaintPayload, styles: &StyleMap, max_px: u32) {
             registered = p.images.masks_url.len(),
             "mask: masques enregistrés"
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    /// JS-C129 — le rejeu `Insert` apparie `créés (moteur)` ↔
+    /// `ids/tags (miroir)` **par tag**, pas positionnellement :
+    /// un nœud que le re-parse moteur synthétise ou garde sans
+    /// reflet miroir (ex. `<tbody>` sous `<table>`) ne décale
+    /// plus les clés suivantes — avant : zip tronqué → clés
+    /// dérivées sur de mauvais nœuds, `UnmappedKey` en cascade
+    /// → repli re-parse (~16 s terrain, classe « partout »).
+    #[test]
+    fn align_keyed_skips_engine_only_nodes() {
+        // Moteur : div > p(x), span(synthèse), b(y).
+        let dom = TreeBuilder::parse_scripting(
+            "<html><body><div><p>x</p><span>s</span><b>y</b></div></body></html>",
+            false,
+        );
+        let engine = engine_preorder(&dom);
+        // miroir : div, p, #text x, b, #text y — le `span`
+        // moteur n'a pas de clé miroir (synthèse parse).
+        let tags = [
+            "div".to_string(),
+            "p".to_string(),
+            format!("#text {:016x}", fnv64("x")),
+            "b".to_string(),
+            format!("#text {:016x}", fnv64("y")),
+        ];
+        let ids = [10u64, 11, 12, 13, 14];
+        let mut map = HashMap::new();
+        align_keyed(&mut map, &dom, &engine, &ids, &tags);
+        // `b` miroir (clé 13) doit tomber sur le VRAI `b`
+        // moteur — le zip positionnel l'aurait posé sur `span`.
+        let b = map[&13];
+        assert_eq!(dom.tag_name(b).unwrap(), "b");
+        assert_eq!(map.len(), 5, "5 clés miroir attendues : {map:?}");
+    }
+
+    /// Le texte miroir sans concordant de contenu à la
+    /// position courante reste non mappé — `UnmappedKey` sûr,
+    /// jamais un `SetText` sur le mauvais nœud.
+    #[test]
+    fn align_keyed_text_requires_content_match() {
+        let dom = TreeBuilder::parse_scripting("<html><body><div>ab</div></body></html>", false);
+        let engine = engine_preorder(&dom);
+        // Miroir : div, #text "a" (le moteur a fusionné
+        // `a`+`b` en "ab" — hash différent → pas de map).
+        let tags = ["div".to_string(), format!("#text {:016x}", fnv64("a"))];
+        let ids = [20u64, 21];
+        let mut map = HashMap::new();
+        align_keyed(&mut map, &dom, &engine, &ids, &tags);
+        assert!(map.contains_key(&20));
+        assert!(!map.contains_key(&21), "texte divergent non mappé");
     }
 }

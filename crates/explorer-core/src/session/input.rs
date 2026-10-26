@@ -376,7 +376,7 @@ impl Session {
                     req.download_hint = download;
                     DrainAct::Req(Box::new(req), true)
                 };
-                self.enqueue_nav_act(tab, act);
+                self.enqueue_nav_act(tab, act, false);
                 Ok(InputOutcome::Navigated)
             }
             _ => Ok(InputOutcome::Ignored),
@@ -739,7 +739,7 @@ impl Session {
         } else {
             DrainAct::Req(Box::new(req), true)
         };
-        self.enqueue_nav_act(tab, act);
+        self.enqueue_nav_act(tab, act, false);
         Ok(())
     }
 

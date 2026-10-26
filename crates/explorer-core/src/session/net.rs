@@ -585,7 +585,7 @@ impl Session {
     }
 
     pub(crate) fn drain_script_net(&mut self, tab: TabId) {
-        let Some((page, base, reqs, dyns, dyn_frames, dyn_imgs, dyn_links, adopted)) =
+        let Some((page, base, reqs, dyns, dyn_frames, dyn_imgs, dyn_links, adopted, ce_names)) =
             self.tabs.get_mut(&tab).and_then(|e| {
                 let page = e.url.clone();
                 let base = e.nav_base().cloned();
@@ -602,6 +602,11 @@ impl Session {
                         // 2) — snapshot cssText par feuille,
                         // cascadé à la passe suivante.
                         eng.adopted_sheets_css(),
+                        // Registre `customElements` — poussé
+                        // dans le `Dom` pour `:defined` (le
+                        // pseudo est structurel, évalué à la
+                        // cascade sur l'arbre session).
+                        eng.defined_ce_names(),
                     )
                 })
             })
@@ -613,6 +618,10 @@ impl Session {
         };
         if let Some(e) = self.tabs.get_mut(&tab) {
             e.adopted_sheets = adopted;
+            e.defined_names = ce_names;
+            if let Some(d) = e.dom.as_mut() {
+                d.set_defined_names(e.defined_names.iter().cloned());
+            }
         }
         self.dispatch_net_requests(tab, &page, &base, reqs);
         self.spawn_dyn_subresources(tab, &page, &base, dyns, dyn_frames, dyn_imgs, dyn_links);
@@ -664,6 +673,7 @@ impl Session {
         // `<link rel=stylesheet>` : fetch `style-src` CSP +
         // mixed-content puis `linked_sheets` + `load`/`error`
         // — `commit_dyn_link` à la réponse.
+        tracing::debug!(tab, n = dyn_links.len(), "drain dyn links");
         for d in dyn_links {
             self.spawn_dyn_link(tab, page, base, &d);
         }
@@ -1451,6 +1461,7 @@ impl Session {
         let Some((req_page, req_base, doc_policy, csp, _opaque)) =
             self.ctx_net_origin(tab, d.ctx, page, base)
         else {
+            tracing::debug!(tab, seq = d.seq, "dyn link : origine ctx introuvable");
             self.deliver_dyn_link_el(tab, d.ctx, d.seq, false);
             return;
         };
@@ -1466,6 +1477,7 @@ impl Session {
                 )
             })
         else {
+            tracing::debug!(tab, seq = d.seq, href = %d.href, "dyn link : URL/CSP refusée");
             self.deliver_dyn_link_el(tab, d.ctx, d.seq, false);
             return;
         };
@@ -1505,6 +1517,7 @@ impl Session {
         let tr = self.transport.clone();
         let tx = self.net_tx.clone();
         let seq = d.seq;
+        tracing::debug!(tab, seq, url = %req_url, "dyn link : fetch émis");
         let j = tokio::spawn(async move {
             let out = tr.fetch(&req).await;
             let _ = tx.send(NetDone {
@@ -1573,6 +1586,7 @@ impl Session {
             }
             _ => false,
         };
+        tracing::debug!(tab, seq = meta.seq, ok, url = %meta.url, "deliver dyn link");
         self.deliver_dyn_link_el(tab, meta.ctx, meta.seq, ok);
     }
 
