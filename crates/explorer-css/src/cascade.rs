@@ -2314,6 +2314,11 @@ area, base, basefont, datalist, param, source, track,
 frame { display: none }
 details:not([open]) > :not(summary) { display: none }
 dialog:not([open]) { display: none }
+/* HTML Rendering §15.3.1 : un popover ferme ne s'affiche
+   pas — :popover-open est toujours faux tant que
+   showPopover() n'existe pas (vol 2026-10-26 : mega-menu
+   github/tool-tips popover=manual peints deplies). */
+[popover]:not(:popover-open) { display: none }
 audio:not([controls]) { display: none }
 @media (scripting) { noscript { display: none !important } }
 li { display: list-item }

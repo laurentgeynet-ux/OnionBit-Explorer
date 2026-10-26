@@ -289,6 +289,13 @@ pub enum DynamicPseudo {
     /// `customElements` du document ([`Dom::is_defined_name`]),
     /// rempli par la session depuis le miroir JS.
     Defined,
+    /// `:popover-open` — popover actuellement affiché. Aucun
+    /// `showPopover()` n'existe encore : toujours faux via
+    /// `state` (la règle UA `[popover]:not(:popover-open)`
+    /// masque alors tout `[popover]` — vol 2026-10-26,
+    /// méga-menu github/tool-tips `popover="manual"` peints
+    /// dépliés en permanence).
+    PopoverOpen,
 }
 
 impl DynamicPseudo {
@@ -317,6 +324,7 @@ impl DynamicPseudo {
             Self::UserValid => "user-valid",
             Self::UserInvalid => "user-invalid",
             Self::Defined => "defined",
+            Self::PopoverOpen => "popover-open",
         }
     }
 
@@ -344,6 +352,7 @@ impl DynamicPseudo {
             "user-valid" => Self::UserValid,
             "user-invalid" => Self::UserInvalid,
             "defined" => Self::Defined,
+            "popover-open" => Self::PopoverOpen,
             _ => return None,
         })
     }

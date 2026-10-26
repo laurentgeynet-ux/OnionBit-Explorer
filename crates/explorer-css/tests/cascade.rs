@@ -1087,6 +1087,31 @@ fn ua_details_ferme_ne_montre_que_summary() {
     assert_eq!(e.compute(&dom, p2, &env()).get("display"), Some("block"));
 }
 
+/// Vol 2026-10-26 — `[popover]` fermé = `display:none` (UA
+/// HTML Rendering §15.3.1) : les tool-tips/mega-menus
+/// `popover="manual"` de github étaient peints dépliés.
+/// `:popover-open` est toujours faux tant que `showPopover()`
+/// n'existe pas → tout `[popover]` est masqué.
+#[test]
+fn ua_popover_ferme_masque() {
+    let f = fixture();
+    let e = StyleEngine::new();
+    let mut dom = f.dom;
+    let tip = el(&mut dom, f.body, "tool-tip", &[("popover", "manual")]);
+    assert_eq!(
+        e.compute(&dom, tip, &env()).get("display"),
+        Some("none"),
+        "popover fermé : UA masque"
+    );
+    // Sans attribut popover : élément normal, règle inerte.
+    let plain = el(&mut dom, f.body, "div", &[]);
+    assert_ne!(
+        e.compute(&dom, plain, &env()).get("display"),
+        Some("none"),
+        "élément ordinaire non affecté"
+    );
+}
+
 #[test]
 fn ua_noscript_reste_visible() {
     // Scripting désactivé (domaine pur) : le contenu de

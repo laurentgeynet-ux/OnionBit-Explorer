@@ -7,6 +7,21 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **Vol 2026-10-26 — `[popover]`
+  fermé masqué** (`explorer-css`)
+  — nouveau DynamicPseudo
+  `:popover-open` (toujours faux
+  tant que `showPopover()` n'existe
+  pas) + règle UA spec
+  `[popover]:not(:popover-open)
+  { display: none }` : les
+  tool-tips/mega-menus
+  `popover="manual"` de github
+  étaient peints dépliés en
+  permanence (~1500 px empilés).
+  Régression `ua_popover_ferme_
+  masque` (cascade).
+
 - **Vol 2026-10-26 — `grid-column`
   à lignes négatives** (`explorer-
   layout`) — `-1` désigne la
