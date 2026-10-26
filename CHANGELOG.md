@@ -884,6 +884,26 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   logiciel est câblé de bout en
   bout.
 
+- **ADR-0024 amendée — périmètre
+  et chaînage nommés** : portée
+  reformulée = lecture des médias
+  **non-DRM** audio+vidéo +
+  médias d'un **dossier externe**
+  (nommé, explicitement **non
+  câblé** — la seam ne transporte
+  que des URLs réseau). Chaînage
+  réel documenté : seam
+  `MediaSurface` →
+  `MediaPlayerFactory`
+  (`networkUrl` direct) → `fvp` →
+  MDK → FFmpeg dynamique →
+  overlay ; jambe `local_proxy_server`
+  présente côté moteur, **non
+  branchée** au lecteur (à câbler
+  au premier flux à en-têtes
+  exigés) ; `ffprobe` non requis
+  (MDK probe déjà).
+
 - **CAP-198 — Shadow DOM tranche 4 :
   event retargeting** (`explorer-jscore`)
   : le chemin de propagation des

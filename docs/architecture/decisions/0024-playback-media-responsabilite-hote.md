@@ -122,3 +122,51 @@ si un contexte sans hôte l'exigeait (embedder headless,
 variante producteur interne du même seam). MSE et DRM
 restent nommés hors atteinte — DRM dorénavant couvert par
 la stratégie de délégation ADR-0027.
+
+## Amendement 2026-10-25 — périmètre et chaînage nommés
+
+Reformulation de la portée (décision lead) : l'ADR couvre
+la mise en route de la lecture des **médias non-DRM —
+audio et vidéo** — et, dans le même mouvement de
+responsabilité d'hôte, la lecture des **médias présents
+dans un dossier externe** à l'app (fichiers locaux de
+l'utilisateur). Cette deuxième source est **nommée, non
+câblée** : la seam ne transporte aujourd'hui que des URLs
+réseau ; un dossier média configurable est une extension
+ultérieure (le lecteur accepterait une source fichier au
+même point d'injection `MediaPlayerFactory` —
+`VideoPlayerController.file` au lieu de `networkUrl`).
+Aucun travail n'est demandé dessus ici.
+
+### Chaînage concret (état réel)
+
+```
+<video>/<audio> lisible
+  → moteur : MediaOffered (SSE) — rect, url, mime
+  → hôte : POST …/claim {codecs} (AppConfig.mediaCodecs)
+  → lecteur : MediaPlayerFactory(url)
+        = VideoPlayerController.networkUrl   ← direct aujourd'hui
+        ├─ [jambe proxy NON branchée : local_proxy_server
+        │    pour en-têtes custom / routage — à câbler si
+        │    un flux l'exige]
+        └─ fvp → moteur MDK → FFmpeg (liaison dynamique,
+             LGPL vérifiée) → surface vidéo / sortie audio
+  → overlay au-dessus du rect peint par le moteur
+  → état hôte → POST …/state → props JS + events DOM
+```
+
+**Câblé** : seam SSE+REST+FFI (71a–e), lecteur réel
+`networkUrl` → fvp/MDK/FFmpeg, rapport d'état borné 4 Hz,
+repli honnête sans claim.
+
+**Présent, pas branché** : `local_proxy_server`
+(`explorer-net`) — point unique prévu pour les flux à
+en-têtes exigés ou routage (ADR §Conséquences) ; la
+source URL part aujourd'hui directe au lecteur. À câbler
+au premier flux qui l'exige.
+
+**Pas requis** : `ffprobe` — MDK/FFmpeg font déjà le
+probing ; ne s'introduirait que pour un besoin de
+métadonnées en amont du lecteur (nommé, non planifié).
+
+**Hors périmètre confirmé** : MSE et DRM (ADR-0027).
