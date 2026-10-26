@@ -7,6 +7,123 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **JS-C133 — `initCustomEvent`
+  (DOM L2, strate polymer/shady)**
+  (`explorer-jscore`) — mur ytd-app
+  : `document.createEvent` +
+  `initEvent` existaient, le
+  4e chemin `initCustomEvent(t, b,
+  c, detail)` manquait. Porté sur
+  `initEvent` + `detail` posé dans
+  les props d'event (`RefCell` —
+  le payload arrive post-`create`).
+  `__shady_*`/`ShadyDOM`/`ShadyCSS`
+  **restés absents volontairement**
+  : ces globals n'existent que
+  sous polyfill actif — des stubs
+  enverraient les sites dans le
+  chemin patché non implémenté ;
+  la voie native (`customElements`
+  présent) est la surface honnête.
+  Régression `init_custom_event_
+  carries_detail` (dom 212/212).
+
+- **JS-C132 — chargeur Worker
+  branché + spawn différé**
+  (`explorer-jscore` + `explorer-js`
+  + `explorer-core`) — mur
+  « Worker: no loader »
+  (openstreetmap/Leaflet) : la
+  fabrique `WorkerLoader` n'était
+  jamais injectée. `request()` non
+  bloquant ajouté au trait
+  (`load` reste synchrone borné pour
+  `importScripts` dans le thread
+  worker) ; `new Worker` = spawn
+  différé — le wrapper part tout de
+  suite (`postMessage` s'enfile dans
+  le canal créé au ctor, spec), la
+  source arrive à `pump_workers`.
+  Couture : `NetRequest::WorkerLoad`
+  sur une file `Send` dédiée (la
+  file `Rc` ne quitte pas le thread
+  moteur) drainée **avant** le drain
+  `Cmd` — sinon impasse : l'éval
+  serait bloquée en attente de la
+  réponse que la session ne peut
+  envoyer qu'après le drain.
+  `drain_worker_requests` (additif
+  `JsEngine`) ; session : résolution
+  contre `referrer`, CSP
+  `script-src` (repli spec de
+  `worker-src`), mixed-content,
+  `data:` décodé sans requête ;
+  réponse par canal one-shot —
+  jamais de livraison par le thread
+  moteur bloqué. Régressions
+  `worker_loads_and_posts_back`
+  (session) + suite `worker` 10/10.
+
+- **JS-C131 — `import()` : `data:`
+  décodé + chunks relatifs contre
+  le module référent**
+  (`explorer-jscore` +
+  `explorer-core`) — deux murs
+  d'une classe : (a) `import(
+  "data:…")` partait en fetch
+  réseau (reddit — chunks
+  embarqués) → court-circuit
+  `data_url_bytes` après le filtre
+  CSP `script-src` (scheme-source
+  `data:`), livraison
+  `deliver_dyn_import_req` ;
+  (b) `import("./x.js")` dont le
+  résolveur de chargeur rend `None`
+  partait brut → la session le
+  résolvait contre la **base
+  document** (mastodon/axios :
+  `import('./chunk.js')` depuis
+  `/packs/a.js` → `/chunk.js` =
+  404) — `defer_import` résout
+  désormais contre le `referrer`
+  (`import.meta.url`) via les
+  primitives `url_parse_*` du
+  moteur : l'URL absolue part à la
+  session **et** `import.meta.url`
+  du module livré est correcte.
+  Régressions `dyn_import_data_url_
+  resolves` + `dyn_import_relative_
+  resolves_against_module_url`
+  (session).
+
+- **JS-C130 — batterie de sondes
+  d'imbrication profonde**
+  (`explorer-jscore`, tests) —
+  audit de la classe « stack
+  overflow jscore » (alpine/x.com)
+  : 28 constructs à 20 k–200 k
+  niveaux (arrows, ternaires,
+  parens, patterns, templates,
+  classes, chaînes membres/
+  `?.`/`??`/`||`/virgule, unaires,
+  `await`, blocs, boucles, labels,
+  try/switch, spreads, regex
+  imbriqués, JSON.parse, innerHTML
+  40 k, cloneNode, textContent)
+  — **tous bornés** (parseur
+  `nest`+`maybe_grow`, eval
+  `expr_depth`, `call_depth`, JSON
+  200, drops itératifs, dispatch
+  événements itératif). Aucun
+  débordement reproduit : le trou
+  résiduel n'est pas dans les
+  transporteurs JS — suspect
+  restant = réentrance session
+  (listener→mutation→dispatch),
+  à nommer par le bundle réel.
+  Régression permanente
+  `tests/depth_probe.rs` (1 s).
+
 - **JS-C129 — journal `Insert` :
   appariement par tag, fin du zip
   tronqué** (`explorer-jscore` +

@@ -128,12 +128,18 @@ impl Engine {
                 return;
             };
             if p.state != PromiseState::Pending {
+                if std::env::var("EXPLORER_PROM_TRACE").is_ok() {
+                    eprintln!("[settle-skip] already settled");
+                }
                 return;
             }
             p.state = state;
             p.result = result;
             std::mem::take(&mut p.reactions)
         };
+        if std::env::var("EXPLORER_PROM_TRACE").is_ok() && !reactions.is_empty() {
+            eprintln!("[settle] reactions={}", reactions.len());
+        }
         for r in reactions {
             let rejected = state == PromiseState::Rejected;
             self.microtasks.push_back((
@@ -210,6 +216,9 @@ impl Engine {
         // Thenable adoption: `obj.then` callable → deferred call.
         if let Value::Obj(oid) = v {
             if let Some(then_fn) = self.get_prop(oid, "then") {
+                if std::env::var("EXPLORER_PROM_TRACE").is_ok() {
+                    eprintln!("[res-thenable] callable={}", self.is_callable(then_fn));
+                }
                 if self.is_callable(then_fn) {
                     let (resolve, reject) = {
                         let Some(o) = self.heap.obj(id) else { return };
@@ -276,6 +285,14 @@ impl Engine {
         let mut ran = 0usize;
         let mut rounds = 0usize;
         let home = self.cur_ctx;
+        // Le drain est une frontière de tâche : budget neuf,
+        // comme `run_due_timers_ctx` le fait déjà par timer.
+        // Sans ré-armement, un eval lourd laissait `ops_left≈0`
+        // et chaque pompe poppait un job pour le perdre au
+        // `tick()` — famine muette (github : `.then` post-
+        // `import()` mangés un par pompe, `define` jamais
+        // atteint).
+        self.ops_left = self.op_limit;
         loop {
             loop {
                 if ran >= MICROTASK_DRAIN_CAP {
@@ -292,9 +309,39 @@ impl Engine {
                 // dans le mauvais realm).
                 self.switch_to(ctx);
                 if self.cur_ctx != ctx {
+                    // `EXPLORER_PROM_TRACE` : un job dont le ctx
+                    // n'est plus joignable (mort ou jamais garé)
+                    // est sauté — nomme la famine (github lazy-CE :
+                    // réactions `.then` post-`import()` taguées
+                    // d'un ctx module disparu).
+                    if std::env::var("EXPLORER_PROM_TRACE").is_ok() {
+                        eprintln!("[prom-job-drop] ctx={ctx} cur={}", self.cur_ctx);
+                    }
                     continue;
                 }
-                self.tick()?;
+                if let Err(e) = self.tick() {
+                    // Budget/heap épuisé : le job n'a **pas**
+                    // couru — re-queue en tête plutôt que le
+                    // perdre (la pompe suivante, budget neuf,
+                    // le reprendra). Sans ça chaque drain
+                    // affamé mangeait un job en silence.
+                    self.microtasks.push_front((ctx, job));
+                    return Err(e);
+                }
+                if std::env::var("EXPLORER_PROM_TRACE").is_ok() {
+                    let kind = match &job {
+                        Job::Reaction { rejected, .. } => {
+                            if *rejected {
+                                "reaction-rej"
+                            } else {
+                                "reaction-ok"
+                            }
+                        }
+                        Job::Thenable { .. } => "thenable",
+                        Job::Plain(_) => "plain",
+                    };
+                    eprintln!("[mt-run] {kind} ctx={ctx}");
+                }
                 ran += 1;
                 match job {
                     Job::Reaction {
@@ -314,10 +361,7 @@ impl Engine {
                                     // le `.then` webpack post-import
                                     // raté, `define` jamais atteint).
                                     if std::env::var("EXPLORER_PROM_TRACE").is_ok() {
-                                        eprintln!(
-                                            "[prom-cb-throw] {}",
-                                            self.describe(t)
-                                        );
+                                        eprintln!("[prom-cb-throw] {}", self.describe(t));
                                     }
                                     self.settle_promise(next, PromiseState::Rejected, t);
                                 }

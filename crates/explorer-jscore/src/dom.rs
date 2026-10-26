@@ -814,6 +814,16 @@ impl Dom {
 
     // -- MutationObserver (JS-C26) ------------------------------------
 
+    /// `id < len` — un id obsolète (arène reconstruite sous un
+    /// handle JS vivant : resync du miroir pendant un storm
+    /// d'appends, spectrum `groupChildren` → `nodes[614]` sur
+    /// arène 507) n'est pas un nœud valide — l'appelant dégrade
+    /// en TypeError/no-op, jamais panic.
+    #[must_use]
+    pub fn node_valid(&self, node: NodeId) -> bool {
+        (node as usize) < self.nodes.len()
+    }
+
     /// `observer.observe(target, options)` — une registration
     /// par `(id, cible)` ; re-`observe` remplace les options.
     pub fn observe_mutations(&mut self, target: NodeId, reg: MutObsReg) {
@@ -976,14 +986,17 @@ impl Dom {
 
     /// Variante sous-arbre de [`Self::serialize_keyed`] —
     /// utilisée par le drain de journal pour les `Insert`
-    /// (`outer_html` + ids de tout le sous-arbre).
+    /// (`outer_html` + ids + tags de tout le sous-arbre — les
+    /// tags permettent au rejeu un appariement **par tag** plutôt
+    /// que positionnel : une synthèse moteur (`<tbody>`…) ou un
+    /// nœud non émis ne décale plus toute la table — JS-C129).
     #[must_use]
-    pub fn serialize_subtree_keyed(&self, node: NodeId) -> (String, Vec<u64>) {
+    pub fn serialize_subtree_keyed(&self, node: NodeId) -> (String, Vec<u64>, Vec<String>) {
         let mut out = String::new();
         let mut ids = Vec::new();
         let mut tags = Vec::new();
         self.serialize_keyed_node(node, &mut out, &mut ids, &mut tags);
-        (out, ids)
+        (out, ids, tags)
     }
 
     /// Traversée unique `serialize` + collecte d'ids — mêmes
@@ -1701,6 +1714,9 @@ impl Dom {
     /// de géométrie publiée par la session (issue #19 —
     /// `getBoundingClientRect`/`offset*` de `dom_host`).
     pub(crate) fn element_path(&self, mut n: NodeId) -> Option<Vec<(String, u32)>> {
+        if !self.node_valid(n) {
+            return None;
+        }
         while self.nodes[n as usize].kind != NodeKind::Element
             || self.nodes[n as usize].tag == "#document"
         {
@@ -1873,7 +1889,7 @@ impl Dom {
             if n == anc {
                 return true;
             }
-            cur = self.nodes[n as usize].parent;
+            cur = self.nodes.get(n as usize).and_then(|nd| nd.parent);
             d += 1;
             if d > 512 {
                 return false;
@@ -1883,6 +1899,12 @@ impl Dom {
     }
 
     pub fn append(&mut self, parent: NodeId, child: NodeId) {
+        // Id obsolète (arène reconstruite — spectrum
+        // `groupChildren`, `nodes[607]` sur 507) → no-op,
+        // jamais panic.
+        if !self.node_valid(parent) || !self.node_valid(child) {
+            return;
+        }
         if self.nodes[child as usize].kind == NodeKind::Fragment {
             self.splice_fragment(parent, child, None);
             return;
@@ -1910,6 +1932,9 @@ impl Dom {
 
     /// Detach `node` from its parent (keeps the node alive).
     pub fn detach(&mut self, node: NodeId) {
+        if !self.node_valid(node) {
+            return;
+        }
         if let Some(p) = self.nodes[node as usize].parent {
             let (prev, next) = {
                 let kids = &self.nodes[p as usize].children;
@@ -1941,6 +1966,9 @@ impl Dom {
     /// « replace all » — les `append` internes n'en émettent pas
     /// (on mute directement, sans passer par [`Dom::append`]).
     pub fn replace_children(&mut self, node: NodeId, kids: &[NodeId]) {
+        if !self.node_valid(node) {
+            return;
+        }
         let old = std::mem::take(&mut self.nodes[node as usize].children);
         for c in &old {
             self.nodes[*c as usize].parent = None;
@@ -1970,13 +1998,16 @@ impl Dom {
     /// is elements-only, see [`Dom::element_children`]).
     #[must_use]
     pub fn child_nodes(&self, node: NodeId) -> Vec<NodeId> {
+        if !self.node_valid(node) {
+            return Vec::new();
+        }
         self.nodes[node as usize].children.clone()
     }
 
     /// `parentNode` — `None` for the root or detached nodes.
     #[must_use]
     pub fn parent(&self, node: NodeId) -> Option<NodeId> {
-        self.nodes[node as usize].parent
+        self.nodes.get(node as usize)?.parent
     }
 
     /// `<template>.content` — le `DocumentFragment` de contenu,
@@ -2025,7 +2056,9 @@ impl Dom {
     /// enfants ordinaires (un template jamais touché sérialise
     /// ses enfants directs — le résultat est le même markup).
     fn serial_children(&self, n: NodeId) -> &[NodeId] {
-        let node = &self.nodes[n as usize];
+        let Some(node) = self.nodes.get(n as usize) else {
+            return &[];
+        };
         if node.tag == "template" {
             if let Some(&f) = self.template_contents.get(&n) {
                 return &self.nodes[f as usize].children;
@@ -2038,7 +2071,7 @@ impl Dom {
     /// `None` when detached or at the edge.
     #[must_use]
     pub fn sibling(&self, node: NodeId, next: bool) -> Option<NodeId> {
-        let p = self.nodes[node as usize].parent?;
+        let p = self.nodes.get(node as usize)?.parent?;
         let kids = &self.nodes[p as usize].children;
         let i = kids.iter().position(|&c| c == node)?;
         let j = if next { i + 1 } else { i.checked_sub(1)? };
@@ -2049,6 +2082,9 @@ impl Dom {
     /// isn't a child of `parent` the insert degrades to append
     /// (tolerant — Dillo never throws on malformed trees either).
     pub fn insert_before(&mut self, parent: NodeId, child: NodeId, ref_node: Option<NodeId>) {
+        if !self.node_valid(parent) || !self.node_valid(child) {
+            return;
+        }
         if self.nodes[child as usize].kind == NodeKind::Fragment {
             self.splice_fragment(parent, child, ref_node);
             return;
@@ -2103,6 +2139,9 @@ impl Dom {
     /// le fragment reste vide — spec `insert` des fragments.
     /// Un seul record `childList` pour le groupe.
     fn splice_fragment(&mut self, parent: NodeId, frag: NodeId, ref_node: Option<NodeId>) {
+        if !self.node_valid(parent) || !self.node_valid(frag) {
+            return;
+        }
         self.detach(frag);
         let kids = std::mem::take(&mut self.nodes[frag as usize].children);
         for &k in &kids {
@@ -2153,6 +2192,9 @@ impl Dom {
     /// `replaceChild(new, old)` — `old` is detached, `new` takes
     /// its slot. Returns `old` (spec) — caller wraps it.
     pub fn replace_child(&mut self, parent: NodeId, new: NodeId, old: NodeId) {
+        if !self.node_valid(parent) || !self.node_valid(new) || !self.node_valid(old) {
+            return;
+        }
         let idx = self.nodes[parent as usize]
             .children
             .iter()
@@ -2390,14 +2432,14 @@ impl Dom {
         let Some(parts) = split_complex_parts(sel) else {
             return false;
         };
-        let Some((&last, prefix)) = parts.split_last() else {
+        let Some((last, prefix)) = parts.split_last() else {
             return false;
         };
-        let Some(simple) = parse_simple_selector(last, 0) else {
+        let Some(simple) = parse_simple_selector(last.text, 0) else {
             return false;
         };
         self.node_matches(node, &simple, scope)
-            && (prefix.is_empty() || self.ancestor_matches(self.root, node, prefix, scope))
+            && (prefix.is_empty() || self.ancestor_matches(node, prefix, scope))
     }
 
     /// `el.closest(sel)` — nearest ancestor-or-self matching `sel`
@@ -2472,7 +2514,8 @@ impl Dom {
     /// `getAttribute` (first occurrence, case-insensitive name).
     #[must_use]
     pub fn attr(&self, node: NodeId, name: &str) -> Option<&str> {
-        self.nodes[node as usize]
+        self.nodes
+            .get(node as usize)?
             .attrs
             .iter()
             .find(|(k, _)| k.eq_ignore_ascii_case(name))
@@ -2481,6 +2524,9 @@ impl Dom {
 
     /// `setAttribute`.
     pub fn set_attr(&mut self, node: NodeId, name: &str, value: &str) {
+        if !self.node_valid(node) {
+            return;
+        }
         let old = self.attr(node, name).map(str::to_string);
         let attrs = &mut self.nodes[node as usize].attrs;
         if let Some((_, v)) = attrs.iter_mut().find(|(k, _)| k.eq_ignore_ascii_case(name)) {
@@ -2539,6 +2585,9 @@ impl Dom {
 
     /// `removeAttribute`. Returns whether it existed.
     pub fn remove_attr(&mut self, node: NodeId, name: &str) -> bool {
+        if !self.node_valid(node) {
+            return false;
+        }
         let old = self.attr(node, name).map(str::to_string);
         let attrs = &mut self.nodes[node as usize].attrs;
         let before = attrs.len();
@@ -2729,7 +2778,8 @@ impl Dom {
     /// `tag`/`#id`/`.class`/`[attr]`/`[attr op v]` (répétables,
     /// valeur nue ou quotée, flag `i`/`s`), `*`, pseudo-classes
     /// vérifiables (`:defined`, `:not()`, `:is()`, structurelles,
-    /// états — JS-C99), combinatoire descendant (`a b`), listes
+    /// états — JS-C99), combinatoires descendant (`a b`) **et
+    /// enfant (`a > b` — JS-C120, spectrum `main > div`)**, listes
     /// `a, b`. `[]` pour le reste.
     #[must_use]
     pub fn query(&self, from: NodeId, sel: &str) -> Vec<NodeId> {
@@ -2751,7 +2801,7 @@ impl Dom {
             let Some(last) = parts.last() else {
                 continue;
             };
-            let Some(simple) = parse_simple_selector(last, 0) else {
+            let Some(simple) = parse_simple_selector(last.text, 0) else {
                 continue;
             };
             let mut out = Vec::new();
@@ -2760,7 +2810,7 @@ impl Dom {
             // gauche→droite (bornée à `from`).
             if parts.len() > 1 {
                 let prefix = &parts[..parts.len() - 1];
-                out.retain(|&n| self.ancestor_matches(from, n, prefix, scope));
+                out.retain(|&n| self.ancestor_matches(n, prefix, scope));
             }
             matched.extend(out);
         }
@@ -2771,29 +2821,45 @@ impl Dom {
     }
 
     /// Does some ancestor chain of `node` (within `from`) match the
-    /// selector `parts` right-to-left? Used by the descendant
-    /// combinator and by `closest` on compound selectors.
-    /// Recursion bounded by `parts.len()` ≤ [`MAX_SELECTOR_PARTS`]
-    /// — a longer compound selector is outside the documented
-    /// subset and simply fails to match (JS-C55).
-    fn ancestor_matches(&self, bound: NodeId, node: NodeId, parts: &[&str], scope: NodeId) -> bool {
+    /// selector `parts` right-to-left? `parts[i].child` = `>` joint
+    /// au compound suivant — parent direct exigé, sinon marche
+    /// d'ancêtres (descendant). Used by the combinators and by
+    /// `closest`/`matches` on compound selectors. Recursion bounded
+    /// by `parts.len()` ≤ [`MAX_SELECTOR_PARTS`] — a longer compound
+    /// selector is outside the documented subset and simply fails
+    /// to match (JS-C55).
+    fn ancestor_matches(&self, node: NodeId, parts: &[SelPart<'_>], scope: NodeId) -> bool {
         if parts.len() > MAX_SELECTOR_PARTS {
             return false;
         }
-        let Some((&last, rest)) = parts.split_last() else {
+        let Some((last, rest)) = parts.split_last() else {
             return true;
         };
-        let Some(simple) = parse_simple_selector(last, 0) else {
+        let Some(simple) = parse_simple_selector(last.text, 0) else {
             return false;
         };
+        if last.child {
+            // `a > b` — le parent seul décide. `bound` N'EST pas
+            // exclu : `el.qSA(':scope > *')` exige que le parent
+            // (l'élément scopé) matche — spec `qSA` évalue en
+            // contexte document. Le nœud document échoue de
+            // lui-même au test `kind` dans `node_matches`.
+            let Some(p) = self.parent(node) else {
+                return false;
+            };
+            return self.node_matches(p, &simple, scope) && self.ancestor_matches(p, rest, scope);
+        }
         let mut cur = self.parent(node);
         let mut seen = std::collections::HashSet::new();
         while let Some(a) = cur {
-            if a == bound || !seen.insert(a) {
+            // La marche monte jusqu'à la racine : `qSA` évalue le
+            // sélecteur en contexte document — un ancêtre au-dessus
+            // de `bound` compte pour le match (seul le RÉSULTAT est
+            // confiné au sous-arbre). `seen` borne les cycles.
+            if !seen.insert(a) {
                 break;
             }
-            if self.node_matches(a, &simple, scope) && self.ancestor_matches(bound, a, rest, scope)
-            {
+            if self.node_matches(a, &simple, scope) && self.ancestor_matches(a, rest, scope) {
                 return true;
             }
             cur = self.parent(a);
@@ -3687,13 +3753,24 @@ fn split_selector_list(sel: &str) -> Option<Vec<&str>> {
     Some(out)
 }
 
-/// Coupe `a b` en compounds — espaces hors `()`/`[]` (JS-C99 :
-/// un `[a="x y"]` ou `:not( .x )` ne casse plus la découpe).
-fn split_complex_parts(sel: &str) -> Option<Vec<&str>> {
+/// Compound d'un sélecteur complexe — `child` vrai quand le
+/// compound est joint à son voisin de droite par `>` (sinon
+/// descendant).
+struct SelPart<'a> {
+    text: &'a str,
+    child: bool,
+}
+
+/// Coupe `a b`/`a > b` en compounds — espaces et `>` hors
+/// `()`/`[]` (JS-C99 : un `[a="x y"]` ou `:not( .x )` ne casse
+/// plus la découpe ; JS-C120 : `>` terrain spectrum
+/// `main > div`).
+fn split_complex_parts(sel: &str) -> Option<Vec<SelPart<'_>>> {
     let b = sel.as_bytes();
     let mut depth = 0i32;
-    let mut out = Vec::new();
+    let mut out: Vec<SelPart<'_>> = Vec::new();
     let mut i = 0;
+    let mut pending_child = false;
     while i < b.len() {
         while i < b.len() && b[i].is_ascii_whitespace() {
             i += 1;
@@ -3701,12 +3778,21 @@ fn split_complex_parts(sel: &str) -> Option<Vec<&str>> {
         if i >= b.len() {
             break;
         }
+        if b[i] == b'>' {
+            // `a > > b` ou `> a` — hors grammaire.
+            if pending_child {
+                return None;
+            }
+            pending_child = true;
+            i += 1;
+            continue;
+        }
         let st = i;
         while i < b.len() {
             match b[i] {
                 b'(' | b'[' => depth += 1,
                 b')' | b']' => depth -= 1,
-                _ if b[i].is_ascii_whitespace() && depth == 0 => break,
+                _ if depth == 0 && (b[i].is_ascii_whitespace() || b[i] == b'>') => break,
                 _ => {}
             }
             if !(0..=16).contains(&depth) {
@@ -3714,12 +3800,21 @@ fn split_complex_parts(sel: &str) -> Option<Vec<&str>> {
             }
             i += 1;
         }
-        out.push(&sel[st..i]);
+        if pending_child {
+            // `>` en tête (`> a`) — hors grammaire.
+            out.last_mut()?.child = true;
+            pending_child = false;
+        }
+        out.push(SelPart {
+            text: &sel[st..i],
+            child: false,
+        });
         if out.len() > MAX_SELECTOR_PARTS {
             return None;
         }
     }
-    if depth != 0 {
+    // `a >` terminal ou parenthèse/crochet non fermé.
+    if depth != 0 || pending_child {
         return None;
     }
     Some(out)
@@ -3827,11 +3922,12 @@ fn parse_simple_selector(sel: &str, depth: usize) -> Option<SimpleSel> {
     while i < b.len() && is_sel_ident(b[i]) {
         i += 1;
     }
-    if i > start {
-        let t = &sel[start..i];
-        if t != "*" {
-            out.tag = Some(t.to_lowercase());
-        }
+    // `*` seul parse en compound vide — valide (tout élément
+    // matche) : le garde « sélecteur vide » plus bas ne doit
+    // pas le rejeter (`qSA('*')` rendait [] — spectrum JS-C120).
+    let universal = i > start && &sel[start..i] == "*";
+    if i > start && !universal {
+        out.tag = Some(sel[start..i].to_lowercase());
     }
     while i < b.len() {
         match b[i] {
@@ -3948,7 +4044,8 @@ fn parse_simple_selector(sel: &str, depth: usize) -> Option<SimpleSel> {
             _ => return None,
         }
     }
-    if out.tag.is_none()
+    if !universal
+        && out.tag.is_none()
         && out.id.is_none()
         && out.classes.is_empty()
         && out.attrs.is_empty()

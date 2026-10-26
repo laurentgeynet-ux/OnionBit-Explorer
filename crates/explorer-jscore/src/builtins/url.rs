@@ -157,8 +157,17 @@ pub(crate) fn url_norm_path(path: &str) -> String {
         }
     }
     let out = segs.join("/");
-    if path.starts_with('/') && !out.starts_with('/') {
-        return format!("/{out}");
+    let mut out = if path.starts_with('/') && !out.starts_with('/') {
+        format!("/{out}")
+    } else {
+        out
+    };
+    // RFC 3986 §5.2.4 : un segment final `.`/`..` laisse un
+    // slash terminal (`/a/.` → `/a/`, `a/b/..` → `a/`). Sans
+    // lui `new URL(".", "…/a/b")` rendait `…/a` — la résolution
+    // d'assets relative svelte/fastapi/mkdocs cassait.
+    if !out.is_empty() && !out.ends_with('/') && (path.ends_with("/.") || path.ends_with("/..")) {
+        out.push('/');
     }
     out
 }

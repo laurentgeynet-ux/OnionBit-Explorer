@@ -17,7 +17,7 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use crate::dom::{MutObsReg, MutationRecord, NodeId};
-use crate::dom_host::{node_for, node_value, DomRef, NodeCache};
+use crate::dom_host::{node_for_in, node_value, DomRef, NodeCache};
 use crate::heap::{Host, JsResult, ObjKind};
 use crate::value::{ObjId, Value};
 use crate::Engine;
@@ -213,7 +213,7 @@ impl Host for MutObsHost {
         match name {
             "observe" => {
                 let target = args.first().copied().unwrap_or(Value::Undefined);
-                let Some(node) = node_for(e, target) else {
+                let Some(node) = node_for_in(e, target, &self.dom) else {
                     return Err(e.type_error("observe: nœud requis"));
                 };
                 let opts = args.get(1).copied().unwrap_or(Value::Undefined);

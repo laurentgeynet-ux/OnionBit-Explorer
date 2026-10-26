@@ -1577,6 +1577,26 @@ pub(crate) struct CryptoDone {
 /// en-têtes, un `Message` par événement parsé, `Error` à la
 /// coupure), consommée par [`Session::poll_net`] →
 /// `deliver_es` — multi-coups contrairement à `NetDone`.
+/// Paramètres d'une charge de source `Worker`/`importScripts`
+/// (JS-C132) — packés pour `Session::spawn_worker_load`
+/// (clippy `too_many_arguments`, même motif [`EsSpawnArgs`]).
+pub(crate) struct WorkerLoadArgs<'a> {
+    /// Onglet émetteur.
+    pub tab: crate::TabId,
+    /// Page du document top-level.
+    pub page: &'a explorer_net::url::Url,
+    /// Base de résolution du document.
+    pub base: &'a explorer_net::url::Url,
+    /// Spécificateur tel qu'écrit (`new Worker(spec)`).
+    pub spec: &'a str,
+    /// URL de la page émettrice (`hooks.page_url`).
+    pub referrer: &'a str,
+    /// Contexte émetteur.
+    pub ctx: explorer_js::JsCtxId,
+    /// Canal one-shot de réponse au thread bloqué en `load()`.
+    pub reply: explorer_js::WorkerReply,
+}
+
 /// Paramètres d'ouverture d'un flux SSE (JS-C92) — packés
 /// pour `Session::spawn_es` (clippy `too_many_arguments`).
 pub(crate) struct EsSpawnArgs<'a> {

@@ -10,20 +10,28 @@
 //! observation » — les navigateurs rapportent toujours l'état
 //! courant à la première passe).
 //!
-//! Géométrie honnête : le miroir n'a pas de moteur de mise en
-//! page — les rectangles reprennent la règle des stubs de
-//! dimensions (`documentElement`/`body` ≙ viewport, 0 sinon,
-//! cf. `clientWidth`). `isIntersecting` ≙ élément rattaché au
-//! document (un élément détaché ne peut intersecter) ;
-//! `intersectionRatio` 1/0 en conséquence. `thresholds`,
-//! `root` et `rootMargin` sont validés/exposés mais non
-//! appliqués (pas de géométrie réelle à filtrer).
+//! Géométrie réelle quand la table est publiée : le miroir
+//! n'a pas de moteur de mise en page mais la session publie
+//! la `GeometryMap` (`element_path → rect`, scroll inclus) —
+//! `isIntersecting`/`intersectionRatio`/`boundingClientRect`
+//!/`rootBounds` calculent la vraie intersection rect ∩
+//! viewport (`fixed` déjà viewport, cf. `element_geom`).
+//! Sans table (harnais), repli honnête : `is_attached` pour
+//! `isIntersecting`, rect nul. Les cibles sont **ré-évaluées
+//! à chaque checkpoint** : un changement d'état (scroll,
+//! relayout, insertion) enfile une livraison — la classe
+//! « lazy-loader jamais déclenché » (vol github : `scrollY`
+//! figé + IO silencieux après l'init) est couverte.
+//!
+//! `thresholds`/`root`/`rootMargin` validés/exposés ; le
+//! seuil gouverne la livraison (`ratio` croise la borne —
+//! approximation bornée vs la courbe spec complète).
 
 use std::collections::HashMap;
 use std::rc::Rc;
 
 use crate::dom::NodeId;
-use crate::dom_host::{node_for, node_value, DomRef, NodeCache};
+use crate::dom_host::{element_geom_rect, node_for_in, node_value, DomRef, NodeCache};
 use crate::heap::{Host, JsResult, ObjKind};
 use crate::value::{ObjId, Value};
 use crate::Engine;
@@ -56,6 +64,14 @@ struct ObsReg {
     targets: Vec<NodeId>,
     /// Cibles en attente de leur notification initiale.
     pending: Vec<NodeId>,
+    /// `options.threshold` figé (`IntersectionObserver`) —
+    /// borne de ratio gouvernant la livraison.
+    thresholds: Vec<f64>,
+    /// Dernier état d'intersection **rapporté** par cible —
+    /// la ré-évaluation au checkpoint n'enfile qu'un
+    /// changement (scroll/relayout) ; les cibles encore en
+    /// `pending` n'ont pas d'état rapporté.
+    last: HashMap<NodeId, bool>,
 }
 
 /// Famille d'observer — sélectionne le format d'entry.
@@ -130,30 +146,101 @@ impl Engine {
         order.sort_unstable();
         let mut delivered = 0usize;
         for id in order {
-            let (kind, cb, wrapper, root, pending) = {
+            let (kind, cb, wrapper, root, thresholds, targets, mut pending) = {
                 let Some(reg) = self.obs.regs.get_mut(&id) else {
                     continue;
                 };
-                if reg.pending.is_empty() {
-                    continue;
-                }
                 (
                     reg.kind,
                     reg.cb,
                     reg.wrapper,
                     reg.root,
+                    reg.thresholds.clone(),
+                    reg.targets.clone(),
                     std::mem::take(&mut reg.pending),
                 )
             };
+            // Ré-évaluation (Intersection) : l'état courant de
+            // chaque cible déjà rapportée est recalculé à ce
+            // checkpoint — scroll/relayout entre deux pompes.
+            // Un changement d'état rejoint `pending` (spec :
+            // « queue an IntersectionObserverEntry »).
+            if kind == ObsKind::Intersection {
+                for &n in &targets {
+                    if pending.contains(&n) {
+                        continue;
+                    }
+                    let now = self.is_intersecting(&dom, root, thresholds.first(), n);
+                    let last = self.obs.regs.get(&id).and_then(|r| r.last.get(&n)).copied();
+                    if last != Some(now) {
+                        pending.push(n);
+                    }
+                }
+            }
+            if pending.is_empty() {
+                continue;
+            }
             let entries: Vec<Value> = pending
                 .iter()
-                .map(|&n| self.observer_entry(kind, &dom, &cache, root, n))
+                .map(|&n| {
+                    if kind == ObsKind::Intersection {
+                        let cur = self.is_intersecting(&dom, root, thresholds.first(), n);
+                        if let Some(reg) = self.obs.regs.get_mut(&id) {
+                            reg.last.insert(n, cur);
+                        }
+                    }
+                    self.observer_entry(kind, &dom, &cache, root, n)
+                })
                 .collect();
             let arr = self.new_array(entries);
             self.call_value(cb, Value::Obj(wrapper), &[arr, Value::Obj(wrapper)])?;
             delivered += 1;
         }
         Ok(delivered)
+    }
+
+    /// État `isIntersecting` courant de `node` — vraie
+    /// intersection rect ∩ root quand la `GeometryMap` est
+    /// publiée ; seuil le plus bas demandé (toucher le
+    /// viewport suffit à `threshold: 0`, la borne spécifique
+    /// s'applique au ratio). Repli `is_attached` sans table.
+    fn is_intersecting(
+        &mut self,
+        dom: &DomRef,
+        root: Option<NodeId>,
+        threshold: Option<&f64>,
+        node: NodeId,
+    ) -> bool {
+        let Some((x, y, w, h)) = element_geom_rect(dom, node) else {
+            return dom.borrow().is_attached(node);
+        };
+        // Borne du root : viewport par défaut, rect réel sinon.
+        let (rx, ry, rw, rh) = root.map_or_else(
+            || {
+                let (vw, vh) = self.hooks.viewport;
+                (0.0, 0.0, f64::from(vw), f64::from(vh))
+            },
+            |rn| element_geom_rect(dom, rn).unwrap_or((0.0, 0.0, 0.0, 0.0)),
+        );
+        let (ix, iy) = (x.max(rx), y.max(ry));
+        let (ir, ib) = ((x + w).min(rx + rw), (y + h).min(ry + rh));
+        let (iw, ih) = (ir - ix, ib - iy);
+        if iw < 0.0 || ih < 0.0 {
+            return false;
+        }
+        // Touche = intersectant (spec : `intersectionRect` non
+        // vide aux bords — `iw/ih == 0` compte true à
+        // `threshold: 0`) ; au-delà, le ratio gouverne.
+        let area_el = w * h;
+        let ratio = if area_el > 0.0 {
+            (iw * ih) / area_el
+        } else {
+            0.0
+        };
+        match threshold {
+            Some(&t) if t > 0.0 => ratio >= t,
+            _ => true,
+        }
     }
 
     /// `Entry` JS d'une notification — format selon `kind`
@@ -173,28 +260,54 @@ impl Engine {
         self.set_own(o, "target", target, true);
         match kind {
             ObsKind::Intersection => {
-                let attached = dom.borrow().is_attached(node);
-                self.set_own(o, "isIntersecting", Value::Bool(attached), true);
-                let ratio = if attached { 1.0 } else { 0.0 };
+                // Rect réel (geometry publiée) — hors table,
+                // règle `clientWidth` : racines ≙ viewport,
+                // 0 sinon. `isIntersecting` repli `is_attached`.
+                let real = element_geom_rect(dom, node);
+                let (x, y, w, h) = real.unwrap_or_else(|| {
+                    let is_root = {
+                        let d = dom.borrow();
+                        node == d.body() || Some(node) == d.document_element()
+                    };
+                    if is_root {
+                        let (vw, vh) = self.hooks.viewport;
+                        (0.0, 0.0, f64::from(vw), f64::from(vh))
+                    } else {
+                        (0.0, 0.0, 0.0, 0.0)
+                    }
+                });
+                let (rx, ry, rw, rh) = root.map_or_else(
+                    || {
+                        let (vw, vh) = self.hooks.viewport;
+                        (0.0, 0.0, f64::from(vw), f64::from(vh))
+                    },
+                    |rn| element_geom_rect(dom, rn).unwrap_or((0.0, 0.0, 0.0, 0.0)),
+                );
+                let (ix, iy) = (x.max(rx), y.max(ry));
+                let (ir, ib) = ((x + w).min(rx + rw), (y + h).min(ry + rh));
+                let (iw, ih) = ((ir - ix).max(0.0), (ib - iy).max(0.0));
+                let (intersecting, ratio) = if real.is_some() {
+                    let touches = ir - ix >= 0.0 && ib - iy >= 0.0;
+                    let ratio = if w * h > 0.0 {
+                        (iw * ih) / (w * h)
+                    } else {
+                        0.0
+                    };
+                    (touches, ratio)
+                } else {
+                    let attached = dom.borrow().is_attached(node);
+                    (attached, if attached { 1.0 } else { 0.0 })
+                };
+                self.set_own(o, "isIntersecting", Value::Bool(intersecting), true);
                 self.set_own(o, "intersectionRatio", Value::Num(ratio), true);
                 let time = self.t0.elapsed().as_secs_f64() * 1000.0;
                 self.set_own(o, "time", Value::Num(time), true);
-                let rect = self.rect_value(dom, node);
+                let rect = self.rect_of(x, y, w, h);
+                let irect = self.rect_of(ix, iy, iw, ih);
+                let rbounds = self.rect_of(rx, ry, rw, rh);
                 self.set_own(o, "boundingClientRect", rect, true);
-                // Pas de root réel mesurable : élément intersectant
-                // ≙ rect complet, sinon rect nul.
-                let zero = self.rect_zero();
-                self.set_own(
-                    o,
-                    "intersectionRect",
-                    if attached { rect } else { zero },
-                    true,
-                );
-                let rb = match root {
-                    Some(rn) => self.rect_value(dom, rn),
-                    None => self.viewport_rect(),
-                };
-                self.set_own(o, "rootBounds", rb, true);
+                self.set_own(o, "intersectionRect", irect, true);
+                self.set_own(o, "rootBounds", rbounds, true);
             }
             ObsKind::Resize => {
                 let rect = self.rect_value(dom, node);
@@ -247,15 +360,29 @@ impl Engine {
         }
     }
 
-    /// Rect nul (format `DOMRectReadOnly` minimal).
-    fn rect_zero(&mut self) -> Value {
+    /// Rect arbitraire `(x, y, w, h)` au format
+    /// `DOMRectReadOnly` minimal — `x`/`left`/`top` etc.
+    /// tous dérivés (spec : `bottom`/`right` = bords).
+    fn rect_of(&mut self, x: f64, y: f64, w: f64, h: f64) -> Value {
         let r = self.new_object();
-        for k in [
-            "x", "y", "top", "left", "bottom", "right", "width", "height",
+        for (k, v) in [
+            ("x", x),
+            ("y", y),
+            ("top", y),
+            ("left", x),
+            ("bottom", y + h),
+            ("right", x + w),
+            ("width", w),
+            ("height", h),
         ] {
-            self.set_own(r, k, Value::Num(0.0), true);
+            self.set_own(r, k, Value::Num(v), true);
         }
         Value::Obj(r)
+    }
+
+    /// Rect nul (format `DOMRectReadOnly` minimal).
+    fn rect_zero(&mut self) -> Value {
+        self.rect_of(0.0, 0.0, 0.0, 0.0)
     }
 
     /// Rect du viewport `(0,0,vw,vh)` — `hooks.viewport`.
@@ -292,10 +419,15 @@ fn intersection_observer_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsRe
     let thresholds = obs_opt_thresholds(e, opts)?;
     let root = match obs_opt(e, opts, "root") {
         Value::Undefined | Value::Null => None,
-        v => match node_for(e, v) {
-            Some(n) => Some(n),
-            None => return Err(e.type_error("IntersectionObserver: root is not an Element")),
-        },
+        v => {
+            let Some((dom, _)) = e.dom_ctx.clone() else {
+                return Err(e.type_error("IntersectionObserver: document non installé"));
+            };
+            match node_for_in(e, v, &dom) {
+                Some(n) => Some(n),
+                None => return Err(e.type_error("IntersectionObserver: root is not an Element")),
+            }
+        }
     };
     let margin = obs_opt(e, opts, "rootMargin");
     if !matches!(margin, Value::Undefined) {
@@ -418,8 +550,23 @@ fn new_obs(
             root,
             targets: Vec::new(),
             pending: Vec::new(),
+            thresholds: thresholds.to_vec(),
+            last: HashMap::new(),
         },
     );
+    // Méthodes en props natives sur l'instance — `typeof
+    // io.observe` doit rendre « function » (vol github : le
+    // rail dispatch-only rendait « undefined » → les
+    // feature-detects sautent l'API qui existe).
+    for (m, f) in [
+        ("observe", obs_observe as crate::heap::NativeFn),
+        ("unobserve", obs_unobserve),
+        ("disconnect", obs_disconnect),
+        ("takeRecords", obs_take_records),
+    ] {
+        let fv = e.native_fn(m, f);
+        e.set_own(oid, m, fv, true);
+    }
     // Options exposées (`observer.thresholds`/`rootMargin` —
     // figées à l'instanciation, spec).
     if kind == ObsKind::Intersection {
@@ -472,7 +619,7 @@ impl Host for ObsHost {
         match name {
             "observe" => {
                 let target = args.first().copied().unwrap_or(Value::Undefined);
-                let Some(node) = node_for(e, target) else {
+                let Some(node) = node_for_in(e, target, &self.dom) else {
                     return Err(e.type_error("observe: Element requis"));
                 };
                 let Some(reg) = e.obs.regs.get_mut(&self.id) else {
@@ -487,7 +634,7 @@ impl Host for ObsHost {
             }
             "unobserve" => {
                 let target = args.first().copied().unwrap_or(Value::Undefined);
-                let Some(node) = node_for(e, target) else {
+                let Some(node) = node_for_in(e, target, &self.dom) else {
                     return Err(e.type_error("unobserve: Element requis"));
                 };
                 if let Some(reg) = e.obs.regs.get_mut(&self.id) {
@@ -518,4 +665,100 @@ impl Host for ObsHost {
             _ => Ok(None),
         }
     }
+}
+
+// ------------------------------------------------------------------
+// Méthodes en props natives (typeof honnête — vol github :
+// `typeof io.observe` rendait « undefined » car le rail
+// `invoke` est invisible en lecture de prop ; les loaders
+// feature-detect sautaient l'API fonctionnelle).
+// ------------------------------------------------------------------
+
+/// `(id, dom, cache)` de l'`ObsHost` receveur — `this` doit
+/// être un observer instancié par `new_obs`.
+fn obs_parts(e: &mut Engine, this: Value) -> Option<(u64, DomRef, NodeCache)> {
+    let Value::Obj(oid) = this else {
+        return None;
+    };
+    match e.heap.obj(oid).map(|o| &o.kind) {
+        Some(ObjKind::Host(h)) => {
+            let oh = h.as_any().downcast_ref::<ObsHost>()?;
+            Some((oh.id, oh.dom.clone(), oh.cache.clone()))
+        }
+        _ => None,
+    }
+}
+
+/// `io.observe(target)` — enfile cible + notification
+/// initiale (re-observe = no-op spec).
+fn obs_observe(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let Some((id, dom, _)) = obs_parts(e, this) else {
+        return Ok(Value::Undefined);
+    };
+    let target = args.first().copied().unwrap_or(Value::Undefined);
+    let Some(node) = node_for_in(e, target, &dom) else {
+        return Err(e.type_error("observe: Element requis"));
+    };
+    if let Some(reg) = e.obs.regs.get_mut(&id) {
+        if !reg.targets.contains(&node) {
+            reg.targets.push(node);
+            reg.pending.push(node);
+        }
+    }
+    Ok(Value::Undefined)
+}
+
+/// `io.unobserve(target)` — retire la cible et sa
+/// notification pendante.
+fn obs_unobserve(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let Some((id, dom, _)) = obs_parts(e, this) else {
+        return Ok(Value::Undefined);
+    };
+    let target = args.first().copied().unwrap_or(Value::Undefined);
+    let Some(node) = node_for_in(e, target, &dom) else {
+        return Err(e.type_error("unobserve: Element requis"));
+    };
+    if let Some(reg) = e.obs.regs.get_mut(&id) {
+        reg.targets.retain(|&n| n != node);
+        reg.pending.retain(|&n| n != node);
+        reg.last.remove(&node);
+    }
+    Ok(Value::Undefined)
+}
+
+/// `io.disconnect()` — purge cibles et notifications.
+fn obs_disconnect(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
+    let Some((id, _, _)) = obs_parts(e, this) else {
+        return Ok(Value::Undefined);
+    };
+    if let Some(reg) = e.obs.regs.get_mut(&id) {
+        reg.targets.clear();
+        reg.pending.clear();
+        reg.last.clear();
+    }
+    Ok(Value::Undefined)
+}
+
+/// `io.takeRecords()` — vide la file et rend les entries.
+fn obs_take_records(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
+    let Some((id, dom, cache)) = obs_parts(e, this) else {
+        return Ok(e.new_array(Vec::new()));
+    };
+    let (kind, root, pending) = match e.obs.regs.get_mut(&id) {
+        Some(reg) => (reg.kind, reg.root, std::mem::take(&mut reg.pending)),
+        None => (ObsKind::Intersection, None, Vec::new()),
+    };
+    let entries: Vec<Value> = pending
+        .iter()
+        .map(|&n| {
+            if kind == ObsKind::Intersection {
+                let cur = e.is_intersecting(&dom, root, None, n);
+                if let Some(reg) = e.obs.regs.get_mut(&id) {
+                    reg.last.insert(n, cur);
+                }
+            }
+            e.observer_entry(kind, &dom, &cache, root, n)
+        })
+        .collect();
+    Ok(e.new_array(entries))
 }

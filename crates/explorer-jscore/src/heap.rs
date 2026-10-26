@@ -1379,6 +1379,21 @@ pub trait Host: std::any::Any {
         Vec::new()
     }
 
+    /// `delete host[key]` — `Some(ok)` = l'hôte a tranché
+    /// (valeur renvoyée par `[[Delete]]`), `None` = repli par
+    /// défaut (propriété propre JS — les hôtes « vue live »
+    /// comme `dataset` doivent traduire la suppression vers
+    /// leur support : sans ce crochet `delete el.dataset.x`
+    /// laissait l'attribut `data-x` intact — spectrum gardait
+    /// `data-status` → `div[data-status]{display:none}`
+    /// éternel).
+    ///
+    /// # Errors
+    /// Propage les exceptions levées par l'hôte.
+    fn del(&self, _e: &mut crate::Engine, _this: Value, _key: &str) -> JsResult<Option<bool>> {
+        Ok(None)
+    }
+
     /// `[object X]` tag for `Object.prototype.toString`.
     fn class_name(&self) -> &'static str {
         "HostObject"

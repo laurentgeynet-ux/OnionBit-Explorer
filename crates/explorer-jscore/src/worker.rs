@@ -40,6 +40,21 @@ pub trait WorkerLoader: Send {
     /// # Errors
     /// `Err` message propagé en erreur JS (`TypeError`).
     fn load(&mut self, spec: &str, referrer: &str) -> std::result::Result<String, String>;
+
+    /// Lance la charge **sans attendre** — retourne un
+    /// receveur one-shot (spawn différé de `new Worker`,
+    /// JS-C132 : le constructeur rend la main avant le
+    /// fetch, la source arrive à la pompe). Défaut : `load`
+    /// inline — correct mais synchrone (le ctor patiente).
+    fn request(
+        &mut self,
+        spec: &str,
+        referrer: &str,
+    ) -> Receiver<std::result::Result<String, String>> {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let _ = tx.send(self.load(spec, referrer));
+        rx
+    }
 }
 
 /// Fabrique de loaders — chaque worker reçoit sa propre instance
@@ -115,8 +130,13 @@ pub(crate) enum WorkerEvent {
 /// le `WorkerHost` — son `finalize` (wrapper GC'd) coupe le
 /// flot entrant et le marque terminé ici.
 pub(crate) struct WorkerSlot {
-    /// Événements remontés par le worker.
+    /// Événements remontés par le worker (canal créé au ctor —
+    /// vide tant que le thread n'est pas spawné).
     pub rx: Receiver<WorkerEvent>,
+    /// Spawn différé (JS-C132) : receveur de la source en
+    /// vol + loader/canaux destinés au thread. `None` une
+    /// fois le thread lancé (ou le fetch tombé).
+    pub pending: Option<WorkerPending>,
     /// Vivant tant que le fil sortant n'est pas coupé.
     pub alive: Arc<AtomicBool>,
     /// Thread du worker — gardé pour l'information ; détaché (le
@@ -126,6 +146,22 @@ pub(crate) struct WorkerSlot {
     pub obj: Value,
     /// `terminate()` appelé ou worker mort.
     pub terminated: bool,
+}
+
+/// Matériel du spawn différé — tout est créé au ctor
+/// (les `postMessage` pré-démarrage s'enfilent dans `in_tx`,
+/// spec : file de messages du port).
+pub(crate) struct WorkerPending {
+    /// Receveur one-shot de la source fetchée par la session.
+    pub src_rx: Receiver<std::result::Result<String, String>>,
+    /// Loader emporté par le thread (`importScripts`).
+    pub loader: Box<dyn WorkerLoader>,
+    /// Spécificateur du script (`page_url` du worker).
+    pub spec: String,
+    /// File main→worker — passée au thread au spawn.
+    pub in_rx: Receiver<WireValue>,
+    /// Émetteur worker→main — cloné dans le thread au spawn.
+    pub out_tx: SyncSender<WorkerEvent>,
 }
 
 /// Objet hôte du wrapper `Worker` — porte le canal sortant et le
@@ -228,6 +264,61 @@ impl Engine {
     pub fn pump_workers(&mut self) -> JsResult<usize> {
         let mut delivered = 0usize;
         for i in 0..self.workers.len() {
+            // Spawn différé (JS-C132) : la source arrive sur le
+            // receveur one-shot — `Ok` lance le thread, `Err`
+            // (fetch tombé) = event `error` spec sur le wrapper.
+            if self.workers[i].pending.is_some() {
+                let res = match self.workers[i]
+                    .pending
+                    .as_ref()
+                    .map(|p| p.src_rx.try_recv())
+                {
+                    Some(Ok(res)) => Some(res),
+                    Some(Err(std::sync::mpsc::TryRecvError::Empty)) => None,
+                    Some(Err(std::sync::mpsc::TryRecvError::Disconnected)) | None => {
+                        self.workers[i].pending = None;
+                        self.workers[i].terminated = true;
+                        None
+                    }
+                };
+                if let Some(p) = self.workers[i].pending.take() {
+                    match res {
+                        Some(Ok(src)) => {
+                            let alive_w = Arc::clone(&self.workers[i].alive);
+                            let op = self.op_limit;
+                            let join = std::thread::spawn(move || {
+                                let WorkerPending {
+                                    spec,
+                                    loader,
+                                    in_rx,
+                                    out_tx,
+                                    ..
+                                } = p;
+                                worker_main(&spec, &src, loader, &out_tx, &in_rx, op, alive_w);
+                            });
+                            self.workers[i].join = Some(join);
+                        }
+                        Some(Err(m)) => {
+                            self.workers[i].terminated = true;
+                            let obj = self.workers[i].obj;
+                            if let Value::Obj(oid) = obj {
+                                let onerr =
+                                    self.get_prop(oid, "onerror").unwrap_or(Value::Undefined);
+                                if self.is_callable(onerr) {
+                                    let s = self.str_val(m);
+                                    let ev = self.message_event(obj, "error", s);
+                                    self.call_value(onerr, obj, &[ev])?;
+                                    delivered += 1;
+                                }
+                            }
+                        }
+                        None => {
+                            // Rien livré → repose `pending`.
+                            self.workers[i].pending = Some(p);
+                        }
+                    }
+                }
+            }
             loop {
                 let ev = match self.workers[i].rx.try_recv() {
                     Ok(ev) => ev,
@@ -489,9 +580,11 @@ impl Engine {
     }
 }
 
-/// `new Worker(spec)` — fetch synchrone de la source via la
-/// fabrique (même approximation que le `ModuleLoader`), spawn
-/// d'un `Engine` dédié sur son thread, pool borné.
+/// `new Worker(spec)` — spec : le constructeur rend le
+/// wrapper **avant** le fetch (JS-C132) ; la requête part
+/// au chargeur (`request` non bloquant), la source arrive
+/// à `pump_workers` qui spawn le thread. `onerror` est tiré
+/// si le fetch tombe — jamais de blocage de l'éval en cours.
 pub(crate) fn worker_ctor_pub(e: &mut Engine, _this: Value, args: &[Value]) -> JsResult<Value> {
     let spec = e.to_js_string(arg(args, 0))?;
     if spec.is_empty() {
@@ -505,19 +598,11 @@ pub(crate) fn worker_ctor_pub(e: &mut Engine, _this: Value, args: &[Value]) -> J
     }
     let mut loader = factory();
     let referrer = e.hooks.page_url.clone();
-    let src = loader
-        .load(&spec, &referrer)
-        .map_err(|m| e.type_error(format!("Worker: cannot load `{spec}`: {m}")))?;
+    let src_rx = loader.request(&spec, &referrer);
     let (in_tx, in_rx) = sync_channel::<WireValue>(e.worker_cfg.queue_len);
     let (out_tx, out_rx) = sync_channel::<WorkerEvent>(e.worker_cfg.queue_len);
     let alive = Arc::new(AtomicBool::new(true));
     let idx = e.workers.len();
-    let op = e.op_limit;
-    let spec_w = spec.clone();
-    let alive_w = Arc::clone(&alive);
-    let join = std::thread::spawn(move || {
-        worker_main(&spec_w, &src, loader, &out_tx, &in_rx, op, alive_w);
-    });
     let host = e.new_host_object(Rc::new(WorkerHost {
         tx: Mutex::new(Some(in_tx)),
         alive: Arc::clone(&alive),
@@ -525,8 +610,15 @@ pub(crate) fn worker_ctor_pub(e: &mut Engine, _this: Value, args: &[Value]) -> J
     }));
     e.workers.push(WorkerSlot {
         rx: out_rx,
+        pending: Some(WorkerPending {
+            src_rx,
+            loader,
+            spec,
+            in_rx,
+            out_tx,
+        }),
         alive,
-        join: Some(join),
+        join: None,
         obj: host,
         terminated: false,
     });

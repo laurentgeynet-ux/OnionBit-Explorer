@@ -580,11 +580,117 @@ impl Session {
                         });
                     });
                 }
+                // `Worker`/`importScripts` (JS-C132) — le
+                // demandeur (thread moteur au premier
+                // `new Worker`, thread worker ensuite) est
+                // bloqué en `load()` : la réponse part par le
+                // canal one-shot `reply` depuis la tâche
+                // fetch, sans transiter par `deliver_*`.
+                NetRequest::WorkerLoad {
+                    url,
+                    referrer,
+                    ctx,
+                    reply,
+                } => {
+                    self.spawn_worker_load(&WorkerLoadArgs {
+                        tab,
+                        page,
+                        base,
+                        spec: &url,
+                        referrer: &referrer,
+                        ctx,
+                        reply,
+                    });
+                }
             }
         }
     }
 
+    /// `NetRequest::WorkerLoad` — source de worker fetchée
+    /// côté session : résolution contre `referrer` (page ou
+    /// module émetteur — un worker reçoit l'URL de la page
+    /// qui l'a créé), CSP `script-src` (repli spec de
+    /// `worker-src`) + mixed-content, corps répondu par
+    /// `reply` one-shot. `data:` est décodé sans requête,
+    /// même pile que les sous-ressources dynamiques.
+    fn spawn_worker_load(&mut self, a: &WorkerLoadArgs<'_>) {
+        let Some((req_page, req_base, _policy, csp, _opaque)) =
+            self.ctx_net_origin(a.tab, a.ctx, a.page, a.base)
+        else {
+            let _ = a.reply.0.send(Err("pas d'origine de contexte".to_string()));
+            return;
+        };
+        if let Some(body) = data_url_bytes(a.spec) {
+            let _ = a
+                .reply
+                .0
+                .send(Ok(String::from_utf8_lossy(&body).into_owned()));
+            return;
+        }
+        let rbase = Url::parse(a.referrer).ok().unwrap_or(req_base);
+        let Some(url) = Url::resolve(&rbase, a.spec)
+            .ok()
+            .filter(|u| !is_mixed_content(&req_page, u))
+            .filter(|u| {
+                explorer_net::csp::csp_allows(
+                    &csp,
+                    &req_page,
+                    explorer_net::http::FetchDest::Script,
+                    u,
+                )
+            })
+        else {
+            let _ = a.reply.0.send(Err("résolution/CSP refusée".to_string()));
+            return;
+        };
+        let req = sub_request(
+            &req_page,
+            &url,
+            explorer_net::http::FetchDest::Script,
+            None,
+            Some(explorer_net::http::FetchCredentials::SameOrigin),
+        );
+        let tr = self.transport.clone();
+        let reply = a.reply.clone();
+        tokio::spawn(async move {
+            let out = tr
+                .fetch(&req)
+                .await
+                .map_err(|e| e.to_string())
+                .and_then(|resp| {
+                    if (200..300).contains(&resp.status) {
+                        Ok(String::from_utf8_lossy(&resp.body).into_owned())
+                    } else {
+                        Err(format!("HTTP {}", resp.status))
+                    }
+                });
+            let _ = reply.0.send(out);
+        });
+    }
+
     pub(crate) fn drain_script_net(&mut self, tab: TabId) {
+        // `WorkerLoad` (JS-C132) **avant** le drain `Cmd` :
+        // le demandeur (thread moteur au premier `new Worker`)
+        // est bloqué en `load()` — dispatcher le fetch async
+        // le débloque ; le drain `Rc` suivant attend alors ≈
+        // la durée du fetch au lieu d'expirer en timeout.
+        let (wpage, wbase, wreqs) = self.tabs.get_mut(&tab).map_or_else(
+            || (None, None, Vec::new()),
+            |e| {
+                (
+                    e.url.clone(),
+                    e.nav_base().cloned(),
+                    e.js.as_mut()
+                        .map_or_else(Vec::new, |eng| eng.drain_worker_requests()),
+                )
+            },
+        );
+        if let (Some(wp), Some(wb)) = (&wpage, &wbase) {
+            if !wreqs.is_empty() {
+                let mut wfailed = Vec::new();
+                self.dispatch_net_reqs_inner(tab, wp, wb, wreqs, &mut wfailed);
+            }
+        }
         let Some((page, base, reqs, dyns, dyn_frames, dyn_imgs, dyn_links, adopted, ce_names)) =
             self.tabs.get_mut(&tab).and_then(|e| {
                 let page = e.url.clone();
@@ -713,6 +819,15 @@ impl Session {
             self.deliver_dyn_import_req(tab, r.ctx, r.seq, None, Vec::new());
             return;
         };
+        // `data:` — corps auto-porteur : décodé sans requête
+        // (spec : `import()` accepte les URL `data:` — chunks
+        // embarqués reddit). Le contrôle CSP `script-src`
+        // (scheme-source `data:`) a déjà couru au filtre.
+        if let Some(body) = data_url_bytes(&url.as_str()) {
+            let src = String::from_utf8_lossy(&body).into_owned();
+            self.deliver_dyn_import_req(tab, r.ctx, r.seq, Some(src), Vec::new());
+            return;
+        }
         tracing::debug!(tab, url = %url, "dyn import : fetch émis");
         let req = sub_request(
             &req_page,

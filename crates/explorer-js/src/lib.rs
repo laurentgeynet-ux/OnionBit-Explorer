@@ -240,6 +240,49 @@ pub enum NetRequest {
         /// Raison ≤ 123 octets.
         reason: String,
     },
+    /// Source `new Worker(url)`/`importScripts` (JS-C132) —
+    /// chargement **synchrone** depuis le thread worker : la
+    /// requête part sur un canal `Send` dédié (la file `Rc`
+    /// des `NetRequest` ne quitte pas le thread moteur), la
+    /// session fetch puis répond **par `reply`** — aucune
+    /// livraison ne transite par le thread moteur bloqué.
+    WorkerLoad {
+        /// URL telle qu'écrite — résolution contre
+        /// `referrer` (URL du module/page émetteur), repli
+        /// base document côté session.
+        url: String,
+        /// URL de la page émettrice (`hooks.page_url`).
+        referrer: String,
+        /// Contexte émetteur (étape 134) — top-level pour
+        /// les workers classiques.
+        ctx: JsCtxId,
+        /// Canal de réponse direct — le fetcher session y
+        /// écrit `Ok(source)`/`Err(message)` sans repasser
+        /// par le thread moteur.
+        reply: WorkerReply,
+    },
+}
+
+/// Canal one-shot d'un [`NetRequest::WorkerLoad`] — enrobage
+/// du `Sender` pour garder les derives de `NetRequest`
+/// (`PartialEq` : deux requêtes ne partagent jamais leur
+/// canal de réponse → toujours distinctes).
+#[derive(Clone)]
+pub struct WorkerReply(
+    /// Réponse livrée par la tâche fetch de la session.
+    pub std::sync::mpsc::Sender<std::result::Result<String, String>>,
+);
+
+impl std::fmt::Debug for WorkerReply {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("WorkerReply(..)")
+    }
+}
+
+impl PartialEq for WorkerReply {
+    fn eq(&self, _other: &Self) -> bool {
+        false
+    }
 }
 
 /// Réponse livrée au moteur pour un `handle` drainé —
@@ -329,6 +372,13 @@ pub enum DomMutation {
         html: String,
         /// `NodeId` miroir des nœuds insérés (pré-ordre).
         ids: Vec<u64>,
+        /// Tags parallèles à `ids` (`#text\x00<hash>` pour les
+        /// textes) — le rejeu apparie **par tag** : un nœud
+        /// moteur synthétisé au re-parse (`<tbody>`…) ou non
+        /// émis ne décale plus les clés suivantes en
+        /// `UnmappedKey` (JS-C129 ; avant : zip positionnel
+        /// tronqué → repli re-parse).
+        tags: Vec<String>,
     },
     /// Retrait du nœud `key` (avec tout son sous-arbre).
     Remove {
@@ -737,6 +787,14 @@ pub trait JsEngine: Send {
         Vec::new()
     }
 
+    /// Noms des custom elements définis (`customElements
+    /// .define`) sur tous les documents — la session les pousse
+    /// dans `Dom::set_defined_names` pour `:defined`
+    /// (selectors-4 §13). Défaut : rien.
+    fn defined_ce_names(&mut self) -> Vec<String> {
+        Vec::new()
+    }
+
     /// Drain des requêtes `import()` dynamiques (JS-C100) —
     /// la session fetch `url` et rappelle
     /// `deliver_dyn_import`. Défaut : rien (le miss rejette
@@ -1099,6 +1157,16 @@ pub trait JsEngine: Send {
         Ok(())
     }
 
+    /// Drain des `NetRequest::WorkerLoad` (JS-C132) — file
+    /// `Send` distincte du drain `Rc` de [`Self::drain_net_requests`] :
+    /// le thread moteur peut y être bloqué en `load()` — ce
+    /// drain ne transite **pas** par une commande (il doit
+    /// rester instantané pour débloquer le demandeur).
+    /// À appeler **avant** `drain_net_requests`. Défaut : vide.
+    fn drain_worker_requests(&mut self) -> Vec<NetRequest> {
+        Vec::new()
+    }
+
     /// Livre un `EsEvent` (`open`/`message`/`error`) au flux
     /// SSE `handle` du contexte `ctx` (JS-C92). Défaut :
     /// `Ok(())` (moteur sans transport SSE).
@@ -1329,10 +1397,12 @@ fn journal_ops_to_seam(
                 }
                 let mut html = String::new();
                 let mut ids = Vec::new();
+                let mut tags = Vec::new();
                 for &a in &added {
-                    let (h, i) = d.serialize_subtree_keyed(a);
+                    let (h, i, t) = d.serialize_subtree_keyed(a);
                     html.push_str(&h);
                     ids.extend(i);
+                    tags.extend(t);
                 }
                 if RISKY_CONTENT.iter().any(|t| html.contains(t)) {
                     return None;
@@ -1342,6 +1412,7 @@ fn journal_ops_to_seam(
                     index,
                     html,
                     ids,
+                    tags,
                 });
             }
             explorer_jscore::JournalOp::Remove { key } => {
@@ -1611,6 +1682,9 @@ enum Cmd {
     AdoptedSheetsCss {
         tx: Sender<Vec<String>>,
     },
+    DefinedCeNames {
+        tx: Sender<Vec<String>>,
+    },
     DrainDynScripts {
         tx: Sender<Vec<explorer_jscore::DynScriptReq>>,
     },
@@ -1674,6 +1748,12 @@ enum Cmd {
 pub struct JscoreEngine {
     tx: Sender<Cmd>,
     join: Option<JoinHandle<()>>,
+    /// File `Send` des `WorkerLoad` (JS-C132) — alimentée
+    /// depuis le thread moteur **et** les threads worker
+    /// (là où `Rc<RefCell>` ne passe pas) ; drainée par
+    /// `drain_net_requests` sans transiter par `Cmd` —
+    /// le thread moteur peut y être bloqué en `load()`.
+    worker_rx: std::sync::mpsc::Receiver<NetRequest>,
 }
 
 impl JscoreEngine {
@@ -1681,6 +1761,7 @@ impl JscoreEngine {
     #[must_use]
     pub fn new() -> Self {
         let (tx, rx) = channel::<Cmd>();
+        let (wtx, wrx) = std::sync::mpsc::channel::<NetRequest>();
         let join = std::thread::Builder::new()
             .name("explorer-jscore".to_string())
             // Pile large : le parseur/évaluateur descendant coûte
@@ -1689,12 +1770,20 @@ impl JscoreEngine {
             // recourir aux segments tas de `maybe_grow` ; les
             // plafonds logiques sont relevés dans `worker`.
             .stack_size(32 * 1024 * 1024)
-            .spawn(move || Self::worker(&rx));
+            .spawn(move || Self::worker(&rx, &wtx));
         match join {
-            Ok(j) => Self { tx, join: Some(j) },
+            Ok(j) => Self {
+                tx,
+                join: Some(j),
+                worker_rx: wrx,
+            },
             // Thread impossible (OS saturé) : moteur inerte —
             // `eval` répondra `Dead`, jamais de panic.
-            Err(_) => Self { tx, join: None },
+            Err(_) => Self {
+                tx,
+                join: None,
+                worker_rx: wrx,
+            },
         }
     }
 
@@ -1736,11 +1825,18 @@ impl JscoreEngine {
     /// et sert les commandes jusqu'à `Shutdown` ou fermeture du
     /// canal (le `Sender` meurt avec le proxy).
     #[allow(clippy::too_many_lines)] // dispatch de commandes — grandir ne gagne rien
-    fn worker(rx: &Receiver<Cmd>) {
+    fn worker(rx: &Receiver<Cmd>, wtx: &std::sync::mpsc::Sender<NetRequest>) {
         let mut eng = explorer_jscore::Engine::new();
         // JS-C100 — la session draine `import()` manquants
         // (`drain_dyn_imports` → fetch → `deliver_dyn_import`).
         eng.set_import_drain();
+        // JS-C132 — `new Worker`/`importScripts` : fabrique de
+        // loaders pontés vers la session (canal `Send` dédié,
+        // réponse directe — jamais d'I/O dans le moteur).
+        let wfac = wtx.clone();
+        eng.set_worker_factory(std::sync::Arc::new(move || {
+            Box::new(ChanWorker { tx: wfac.clone() }) as Box<dyn explorer_jscore::WorkerLoader>
+        }));
         // Plafonds logiques relevés pour la pile de 32 Mio du
         // thread moteur (JS-C41) : la pile est aussi protégée par
         // `maybe_grow`, ces bornes ne fixent que le `RangeError`
@@ -2215,6 +2311,11 @@ impl JscoreEngine {
                         break;
                     }
                 }
+                Cmd::DefinedCeNames { tx } => {
+                    if tx.send(eng.defined_ce_names()).is_err() {
+                        break;
+                    }
+                }
                 Cmd::DrainDynLinks { tx } => {
                     if tx.send(eng.drain_dyn_links()).is_err() {
                         return;
@@ -2526,6 +2627,14 @@ impl JsEngine for JscoreEngine {
         rx.recv_timeout(Self::EVAL_CMD_TIMEOUT).unwrap_or_default()
     }
 
+    fn defined_ce_names(&mut self) -> Vec<String> {
+        let (tx, rx) = channel();
+        if self.tx.send(Cmd::DefinedCeNames { tx }).is_err() {
+            return Vec::new();
+        }
+        rx.recv_timeout(Self::EVAL_CMD_TIMEOUT).unwrap_or_default()
+    }
+
     fn drain_dyn_links(&mut self) -> Vec<explorer_jscore::DynLinkReq> {
         let (tx, rx) = channel();
         if self.tx.send(Cmd::DrainDynLinks { tx }).is_err() {
@@ -2819,6 +2928,10 @@ impl JsEngine for JscoreEngine {
             return Vec::new();
         }
         rx.recv_timeout(Self::EVAL_CMD_TIMEOUT).unwrap_or_default()
+    }
+
+    fn drain_worker_requests(&mut self) -> Vec<NetRequest> {
+        self.worker_rx.try_iter().collect()
     }
 
     fn deliver_net_response(&mut self, resp: NetResponse) -> Result<(), JsError> {
@@ -3445,6 +3558,59 @@ impl explorer_jscore::XhrTransport for ChanXhr {
 
     fn abort(&self, handle: u64) {
         self.q.borrow_mut().push(NetRequest::Abort { handle });
+    }
+}
+
+/// `WorkerLoader` des threads worker (JS-C132) — même modèle
+/// « jamais d'I/O dans le moteur » que [`ChanXhr`], mais
+/// **synchrone-bloquant** : `load` exige la source tout de
+/// suite (`new Worker`/`importScripts` sont synchrones dans
+/// le scope). La requête part sur un canal `Send` drainé par
+/// `drain_net_requests` ; la réponse revient par le canal
+/// one-shot de la requête — écrite par la tâche fetch de la
+/// session, sans passer par le thread moteur (qui peut être
+/// le demandeur bloqué — premier `load` du `worker_ctor`).
+struct ChanWorker {
+    /// File `Send` partagée avec `JscoreEngine::worker_rx`.
+    tx: std::sync::mpsc::Sender<NetRequest>,
+}
+
+/// Borne d'attente d'une source worker : au-delà, `load`
+/// échoue en `TypeError` plutôt que de geler le thread worker
+/// indéfiniment (session morte, fetch orphelin).
+const WORKER_LOAD_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
+
+impl explorer_jscore::WorkerLoader for ChanWorker {
+    /// `new Worker` — chemin non bloquant : la requête part,
+    /// le receveur est emporté par le slot `pending` et la
+    /// source arrive à `pump_workers` (spawn différé, JS-C132).
+    fn request(
+        &mut self,
+        spec: &str,
+        referrer: &str,
+    ) -> std::sync::mpsc::Receiver<std::result::Result<String, String>> {
+        let (rtx, rrx) = std::sync::mpsc::channel();
+        if self
+            .tx
+            .send(NetRequest::WorkerLoad {
+                url: spec.to_string(),
+                referrer: referrer.to_string(),
+                ctx: JS_CTX_TOP,
+                reply: WorkerReply(rtx.clone()),
+            })
+            .is_err()
+        {
+            let _ = rtx.send(Err("file session fermée".to_string()));
+        }
+        rrx
+    }
+
+    /// `importScripts` dans le thread worker — synchrone par
+    /// nature ; le thread est dédié, l'attente est bornée.
+    fn load(&mut self, spec: &str, referrer: &str) -> std::result::Result<String, String> {
+        self.request(spec, referrer)
+            .recv_timeout(WORKER_LOAD_TIMEOUT)
+            .unwrap_or_else(|_| Err("fetch worker : délai dépassé".to_string()))
     }
 }
 

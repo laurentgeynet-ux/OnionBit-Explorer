@@ -13219,6 +13219,104 @@ async fn imported_namespace_exposes_webpack_modules_table() {
     eprintln!("ns test : {dump}");
 }
 
+/// Régression JS-C131 (mur import `data:` — reddit) :
+/// `import('data:text/javascript,…')` doit décoder le corps
+/// embarqué sans requête — jamais de fetch sur le scheme.
+#[tokio::test]
+async fn dyn_import_data_url_resolves() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/p",
+        200,
+        "<!doctype html><html><body><div id=\"x\">avant</div>\
+         <script type=\"module\">\
+         import('data:text/javascript,export%20const%20v=41').then(ns => {\
+           document.getElementById('x').textContent = 'V=' + ns.v;\
+         });\
+         </script></body></html>",
+    );
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let a = s.open_tab();
+    s.navigate(a, "http://h.test/p").await.unwrap();
+    s.pump_net().await;
+    s.pump_timers(a);
+    let dump = s.dom_dump(a).unwrap_or_default();
+    assert!(dump.contains("V=41"), "import data: non livré : {dump}");
+}
+
+/// Régression JS-C131 (chunks relatifs — mastodon/axios) :
+/// `import('./b.js')` depuis un module sous `/packs/` doit se
+/// résoudre contre l'URL du module référent → `/packs/b.js`,
+/// pas la base document (`/b.js` — non routé ici, 404).
+#[tokio::test]
+async fn dyn_import_relative_resolves_against_module_url() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/p",
+        200,
+        "<!doctype html><html><body><div id=\"x\">avant</div>\
+         <script type=\"module\" src=\"/packs/a.js\"></script>\
+         </body></html>",
+    );
+    t.route(
+        "/packs/a.js",
+        200,
+        "import('./b.js').then(ns => {\
+           document.getElementById('x').textContent = 'B=' + ns.b;\
+         });",
+    );
+    t.route("/packs/b.js", 200, "export const b = 7;");
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let a = s.open_tab();
+    s.navigate(a, "http://h.test/p").await.unwrap();
+    s.pump_net().await;
+    s.pump_timers(a);
+    let dump = s.dom_dump(a).unwrap_or_default();
+    assert!(
+        dump.contains("B=7"),
+        "chunk relatif résolu contre la base document : {dump}"
+    );
+}
+
+/// Régression JS-C132 (Worker loader — openstreetmap/Leaflet) :
+/// `new Worker('/w.js')` doit fetcher la source via la session
+/// (canal `Send` → `NetRequest::WorkerLoad` → fetch → réponse
+/// directe au thread bloqué) puis l'aller-retour `postMessage`
+/// doit vivre.
+#[tokio::test]
+async fn worker_loads_and_posts_back() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/p",
+        200,
+        "<!doctype html><html><body><div id=\"x\">avant</div>\
+         <script>\
+         const w = new Worker('/w.js');\
+         w.onmessage = e => {\
+           document.getElementById('x').textContent = 'W=' + e.data;\
+         };\
+         w.postMessage('go');\
+         </script></body></html>",
+    );
+    t.route(
+        "/w.js",
+        200,
+        "onmessage = e => { postMessage('pong:' + e.data); };",
+    );
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let a = s.open_tab();
+    s.navigate(a, "http://h.test/p").await.unwrap();
+    for _ in 0..8 {
+        s.pump_net().await;
+        s.pump_timers(a);
+    }
+    let dump = s.dom_dump(a).unwrap_or_default();
+    assert!(
+        dump.contains("W=pong:go"),
+        "worker non chargé ou postMessage perdu : {dump}"
+    );
+}
+
 /// Wedge gov.uk (vol corpus 11/11) : eval de `application.js`
 /// réel — si le mur se reproduit, la nav ne rend jamais
 /// (boucle jscore sans budget — classe C103).

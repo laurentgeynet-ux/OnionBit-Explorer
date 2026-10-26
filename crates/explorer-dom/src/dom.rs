@@ -73,6 +73,11 @@ pub struct Dom {
     /// `host` JS et le scoping cascade (`:host`, remontée des
     /// ancêtres hors de l'arbre).
     shadow_hosts: HashMap<NodeId, NodeId>,
+    /// Noms de custom elements définis (registre
+    /// `customElements`) — rempli par la session depuis le
+    /// miroir JS ; lu par `:defined` (selectors-4 §13) à la
+    /// cascade. Document-local, comme le registre spec.
+    defined_names: std::collections::HashSet<String>,
 }
 
 impl Dom {
@@ -96,6 +101,7 @@ impl Dom {
             document_mode: DocumentMode::NoQuirks,
             shadow_roots: HashMap::new(),
             shadow_hosts: HashMap::new(),
+            defined_names: std::collections::HashSet::new(),
         };
         // Index 0 sur arène vide : ne peut pas échouer.
         let _ = dom.alloc(NodeData::Document);
@@ -603,6 +609,25 @@ impl Dom {
     #[must_use]
     pub fn is_shadow_root(&self, node: NodeId) -> bool {
         self.shadow_hosts.contains_key(&node)
+    }
+
+    /// Remplace l'ensemble des noms de custom elements définis
+    /// (registre `customElements`) — la session le synchronise
+    /// depuis le miroir JS à chaque drain ; `:defined` le lit.
+    pub fn set_defined_names(&mut self, names: impl IntoIterator<Item = String>) {
+        self.defined_names = names.into_iter().collect();
+    }
+
+    /// `true` si `name` est un nom de custom element défini —
+    /// spec « defined element » : la pseudo-classe `:defined`
+    /// matche les éléments dont le nom (ou l'attribut `is`) y
+    /// figure, **plus tous les éléments natifs** (un élément
+    /// sans tiret dans son nom local est toujours défini).
+    /// Le tri par nom est délégué à l'appelant
+    /// ([`explorer_css::state::is_defined`] côté cascade).
+    #[must_use]
+    pub fn is_defined_name(&self, name: &str) -> bool {
+        self.defined_names.contains(name)
     }
 
     /// Racine shadow englobant `node` — `None` si `node` vit dans

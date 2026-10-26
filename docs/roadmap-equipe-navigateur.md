@@ -4970,6 +4970,25 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   (PIPE). Test `adopted_sheets_css_
   extracts_rule_texts`.
 
+- [x] **Étape 143. Feuilles
+  construites cascadées +
+  `:defined`** (`explorer-dom/css/
+  jscore/js/core`) — le rail
+  `adoptedStyleSheets → cascade`
+  pré-câblé (CAP-195 tranche 2) +
+  `DynamicPseudo::Defined` /
+  `state::is_defined` (natif =
+  vrai, tiret/`is=` → registre) ;
+  `Dom::set_defined_names` rempli
+  par `Engine::defined_ce_names` →
+  `Tab` → `PaintPayload` → bake
+  des `Dom` reconstruits.
+  Découverte lazy-CE post-load
+  débloquée (mécanisme github
+  catalyst). Test `adopted_sheet_
+  defined_selector_drives_lazy_
+  discovery`.
+
 - [x] **Étape 142. `animationstart`
   synthétique** (`explorer-core::
   session`) — naissances `@keyframes`
@@ -7144,6 +7163,128 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   sur déchets. `tick` → `collect()`
   → re-test — kill sur vivant seul.
   `c37_mem_limit_soft_kill` refondu.
+
+- [x] **JS-C133. `initCustomEvent`
+  (DOM L2, strate polymer/shady)**
+  (`explorer-jscore`) — `createEvent`
+  +`initEvent` existaient, le chemin
+  `initCustomEvent(t,b,c,detail)`
+  manquait (mur ytd-app) : porté
+  sur `initEvent` + `detail` en props
+  (`RefCell`). `__shady_*`/`ShadyDOM`/
+  `ShadyCSS` absents volontairement —
+  stubs = chemin polyfill non implémenté.
+  Test `init_custom_event_carries_detail`.
+
+- [x] **JS-C132. Chargeur Worker
+  branché, spawn différé** (`explorer-
+  jscore`+`explorer-js`+`explorer-core`)
+  — mur « Worker: no loader » (osm/
+  Leaflet) : fabrique jamais injectée.
+  `WorkerLoader::request` non bloquant
+  (spawn différé — `new Worker` rend le
+  wrapper avant le fetch, spec) ;
+  `NetRequest::WorkerLoad` sur file
+  `Send` dédiée drainée **avant** le
+  drain `Cmd` (sinon impasse eval↔load),
+  `drain_worker_requests` additif
+  `JsEngine` ; session : referrer, CSP
+  `script-src` (repli `worker-src`),
+  mixed-content, `data:` inline ;
+  réponse one-shot directe au thread.
+  `load` reste synchrone borné pour
+  `importScripts`. Tests session
+  `worker_loads_and_posts_back` +
+  jscore worker 10/10.
+
+- [x] **JS-C131. `import()` : `data:` +
+  chunks relatifs contre le référent**
+  (`explorer-jscore`+`explorer-core`) —
+  (a) `import("data:…")` partait en
+  fetch → `data_url_bytes` après CSP
+  `script-src` (scheme `data:`) —
+  mur reddit ; (b) spécificateur
+  relatif non résolu par le chargeur
+  partait brut → résolu session contre
+  la base document (`import('./x.js')`
+  depuis `/packs/` → `/x.js` 404,
+  mastodon/axios) — `defer_import`
+  résout contre `referrer` =
+  `import.meta.url` (fetch **et**
+  `import.meta.url` corrects).
+  Tests `dyn_import_data_url_resolves`
+  + `dyn_import_relative_resolves_
+  against_module_url`.
+
+- [x] **JS-C129. Journal `Insert` :
+  appariement par tag** (`explorer-
+  jscore`+`explorer-js`+`explorer-
+  core`) — fin du zip positionnel
+  `created↔ids` : `DomMutation::
+  Insert` transporte `tags` (le
+  miroir les calculait déjà) ;
+  `align_keyed` extrait de
+  `build_keymap` réutilisé au rejeu
+  — extras moteur sautés, orphelins
+  miroir → `UnmappedKey` sûr (classe
+  mesurée « repli ~16 s partout »).
+  Tests `align_keyed_*` + 7/7
+  journal session verts.
+
+- [x] **JS-C127. `new URL(".", location)`
+  résout** (`explorer-jscore`) — mur
+  assets svelte/fastapi/mkdocs (même
+  classe que JS-C122 `baseURI`) :
+  `to_primitive` lisait `toString` en
+  chaîne proto seule (jamais l'hôte)
+  → "[object Location]" ; passé au
+  `[[Get]]` spec (hôtes/accesseurs/
+  pièges proxy — bonus `Proxy` en
+  coercition). `Location.toString` =
+  fonction réelle → `href` ;
+  `has_method` assign/replace/reload.
+  Bonus : `url_norm_path` rétablit le
+  `/` terminal des segments `.`/`..`
+  (RFC 3986 §5.2.4).
+  Test `new_url_against_location_resolves`.
+
+- [x] **JS-C126. `delete el.dataset.x`
+  retire `data-*`** (`explorer-jscore`)
+  — mur final de révélation spectrum :
+  `Host` sans hook `delete` →
+  `delete dataset.status` no-op →
+  `div[data-status]{display:none}`
+  éternel. `Host::del` + `delete_prop`
+  consulte l'hôte + `DatasetHost::del`
+  ; `DatasetHost::get` → `None` sur
+  clé absente (`in` exact). Terrain :
+  `status:12`→`status:0`, doc 25→~3563 px.
+  Test `dataset_delete_removes_data_attr`.
+
+- [x] **JS-C125. Handles DOM
+  cross-document rejetés** (`explorer-
+  jscore`) — `node_for` validait l'id
+  sur l'arène de l'argument puis
+  indexait l'arène du receveur : id
+  étranger hors-limites = panic
+  mesuré, in-bounds = mutation du
+  mauvais nœud (perte `<main>`
+  spectrum). `node_for_in` exige
+  `Rc::ptr_eq` ; ~20 sites re-câblés
+  ; mutateurs + `is_ancestor_or_self`
+  bornés (jamais panic sur id
+  hostile/périmé). Test
+  `cross_document_node_args_are_rejected`.
+
+- [x] **JS-C128. qSA miroir : `>` +
+  `*`** (`explorer-jscore`) — le
+  sous-ensemble ne connaissait que le
+  descendant : `main > div`→0, `*`→0
+  → décorateur spectrum aveugle.
+  `SelPart.child` (parent direct),
+  `*` mémorisé hors du garde « tout
+  vide », `:scope > *` matchable sur
+  le bound. Terrain : 0→12 / 0→215.
 
 - [x] **JS-C119. Promesses `import()`
   racinées + microtasks dé-famées**

@@ -279,6 +279,16 @@ impl Engine {
             .clone()
             .and_then(|l| l.borrow_mut().resolve(&resolved, referrer))
             .unwrap_or_else(|| resolved.clone());
+        // Spec `HostResolveImportedModule` : un spécificateur
+        // relatif se résout contre l'URL du **module référent**
+        // (import.meta.url — mastodon : `import('./chunk-x.js')`
+        // depuis /packs/js/), pas la base document qu'applique
+        // la session. Referrer non absolu (script classique)
+        // → l'URL brute part telle quelle, repli inchangé.
+        let url = crate::builtins::url::url_parse_absolute(referrer)
+            .and_then(|b| crate::builtins::url::url_parse(&url, Some(&b)))
+            .map(|p| crate::builtins::url::url_href(&p))
+            .unwrap_or(url);
         let pid = self.new_promise();
         let seq = self.dyn_import_seq;
         self.dyn_import_seq += 1;
@@ -303,6 +313,13 @@ impl Engine {
     /// `Ok(src)` → instancier + évaluer + résoudre la promesse
     /// pending avec le namespace ; `Err(msg)` → rejet.
     pub fn deliver_import(&mut self, seq: u64, src: std::result::Result<String, String>) {
+        if std::env::var("EXPLORER_PROM_TRACE").is_ok() {
+            eprintln!(
+                "[import-deliver] seq={seq} pending={} ctx={}",
+                self.pending_imports.contains_key(&seq),
+                self.cur_ctx
+            );
+        }
         let Some(p) = self.pending_imports.remove(&seq) else {
             return;
         };
@@ -314,6 +331,13 @@ impl Engine {
                 {
                     Ok(idx) => {
                         let ns = self.module_ns_object(idx);
+                        if std::env::var("EXPLORER_PROM_TRACE").is_ok() {
+                            let nr = self.heap.obj(p.promise).map_or(999, |o| match &o.kind {
+                                crate::heap::ObjKind::Promise(pr) => pr.reactions.len(),
+                                _ => 998,
+                            });
+                            eprintln!("[import-resolve] seq={seq} reactions={nr}");
+                        }
                         self.resolve_promise(p.promise, ns);
                     }
                     Err(Thrown(t)) => {

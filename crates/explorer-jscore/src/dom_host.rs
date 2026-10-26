@@ -1286,8 +1286,10 @@ pub(crate) struct EventState {
     /// création de l'event relativement à l'origine temps).
     created: std::time::Instant,
     /// Props plateforme (`key`, `code`, `keyCode`…) — résolues
-    /// par l'`EventHost` après les champs du cœur.
-    props: Vec<(String, Value)>,
+    /// par l'`EventHost` après les champs du cœur. `RefCell` :
+    /// `initCustomEvent` pose `detail` après construction
+    /// (DOM L2 — le payload arrive post-`createEvent`).
+    props: RefCell<Vec<(String, Value)>>,
 }
 
 /// Flags d'initialisation d'un event (spec `EventInit` +
@@ -1329,7 +1331,7 @@ pub(crate) fn make_event_state(
         adjusted_related: Cell::new(None),
         path: RefCell::new(Vec::new()),
         created: std::time::Instant::now(),
-        props,
+        props: RefCell::new(props),
     })
 }
 
@@ -7088,13 +7090,19 @@ impl Host for EventHost {
                 if let Some(n) = self.state.adjusted_related.get() {
                     node_value(e, &self.dom, &self.cache, n)
                 } else {
-                    match self.state.props.iter().find(|(k, _)| k == "relatedTarget") {
+                    match self
+                        .state
+                        .props
+                        .borrow()
+                        .iter()
+                        .find(|(k, _)| k == "relatedTarget")
+                    {
                         Some((_, v)) => *v,
                         None => Value::Null,
                     }
                 }
             }
-            _ => match self.state.props.iter().find(|(k, _)| k == key) {
+            _ => match self.state.props.borrow().iter().find(|(k, _)| k == key) {
                 Some((_, v)) => *v,
                 None => return Ok(None),
             },
@@ -7166,7 +7174,7 @@ impl Host for EventHost {
                     .collect();
                 Ok(Some(e.new_array(vals)))
             }
-            "initEvent" => {
+            "initEvent" | "initCustomEvent" => {
                 let ty = e.to_js_string(arg(args, 0))?;
                 *self.state.ty.borrow_mut() = ty;
                 self.state.bubbles.set(e.to_boolean(arg(args, 1)));
@@ -7176,6 +7184,14 @@ impl Host for EventHost {
                 self.state.stopped.set(false);
                 self.state.immediate.set(false);
                 self.state.prevented.set(false);
+                // DOM L2 `initCustomEvent` (polymer/shady) :
+                // 4e argument = `detail` — posé dans les props
+                // comme le ferait l'init du ctor `CustomEvent`.
+                if name == "initCustomEvent" {
+                    let mut p = self.state.props.borrow_mut();
+                    p.retain(|(k, _)| k != "detail");
+                    p.push(("detail".to_string(), arg(args, 3)));
+                }
                 Ok(Some(Value::Undefined))
             }
             _ => Ok(None),

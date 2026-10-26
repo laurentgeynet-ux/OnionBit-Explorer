@@ -1014,6 +1014,25 @@ fn prevent_default_returned_by_dispatch() {
     );
 }
 
+/// JS-C133 — chemin polymer/shady : `createEvent('CustomEvent')`
+/// suivi de `initCustomEvent(type, bubbles, cancelable, detail)`
+/// doit porter `detail` au listener (strates ytd-app) — le
+/// payload arrive post-`createEvent` (posé en props d'event).
+#[test]
+fn init_custom_event_carries_detail() {
+    assert_eq!(
+        ev("var b = document.getElementById('main');\
+            var got = '';\
+            b.addEventListener('cev', function (ev) {\
+                got = ev.type + ':' + ev.bubbles + ':' + (ev.detail && ev.detail.n);\
+            });\
+            var ev = document.createEvent('CustomEvent');\
+            ev.initCustomEvent('cev', true, false, {n: 7});\
+            b.dispatchEvent(ev); got"),
+        "cev:true:7"
+    );
+}
+
 // -- timers (JS-3) -----------------------------------------------------------
 
 #[test]
