@@ -276,11 +276,7 @@ impl Session {
         // `readystatechange` juste avant `DOMContentLoaded`
         // (ordre spec — les scripts de la page ont déjà couru,
         // les sous-ressources peuvent encore charger).
-        if let Some(entry) = self.tabs.get_mut(&tab) {
-            if let Some(eng) = entry.js.as_mut() {
-                eng.set_ready_state(explorer_js::JS_CTX_TOP, "interactive");
-            }
-        }
+        self.set_doc_ready_state(tab, explorer_js::JS_CTX_TOP, "interactive");
         self.dispatch_doc_event(tab, "readystatechange");
         self.dispatch_doc_event(tab, "DOMContentLoaded");
         // `Navigated` seulement si le document final est bien
@@ -314,11 +310,7 @@ impl Session {
         // `readystatechange` **avant** `load` (spec — dans un
         // listener `load`, `document.readyState ===
         // "complete"`).
-        if let Some(entry) = self.tabs.get_mut(&tab) {
-            if let Some(eng) = entry.js.as_mut() {
-                eng.set_ready_state(explorer_js::JS_CTX_TOP, "complete");
-            }
-        }
+        self.set_doc_ready_state(tab, explorer_js::JS_CTX_TOP, "complete");
         self.dispatch_doc_event(tab, "readystatechange");
         // `load` : tout est commis (sous-ressources, peinture,
         // historique) — dernier événement du cycle de vie.
@@ -593,7 +585,7 @@ impl Session {
     }
 
     pub(crate) fn drain_script_net(&mut self, tab: TabId) {
-        let Some((page, base, reqs, dyns, dyn_frames, dyn_imgs, dyn_links)) =
+        let Some((page, base, reqs, dyns, dyn_frames, dyn_imgs, dyn_links, adopted)) =
             self.tabs.get_mut(&tab).and_then(|e| {
                 let page = e.url.clone();
                 let base = e.nav_base().cloned();
@@ -606,6 +598,10 @@ impl Session {
                         eng.drain_dyn_frames(),
                         eng.drain_dyn_imgs(),
                         eng.drain_dyn_links(),
+                        // `adoptedStyleSheets` (CAP-195 tranche
+                        // 2) — snapshot cssText par feuille,
+                        // cascadé à la passe suivante.
+                        eng.adopted_sheets_css(),
                     )
                 })
             })
@@ -615,6 +611,9 @@ impl Session {
         let (Some(page), Some(base)) = (page, base) else {
             return;
         };
+        if let Some(e) = self.tabs.get_mut(&tab) {
+            e.adopted_sheets = adopted;
+        }
         self.dispatch_net_requests(tab, &page, &base, reqs);
         self.spawn_dyn_subresources(tab, &page, &base, dyns, dyn_frames, dyn_imgs, dyn_links);
         // `import()` dynamiques (JS-C100) — URL déjà résolue
@@ -792,7 +791,13 @@ impl Session {
         src: Option<String>,
         deps: Vec<(String, String)>,
     ) {
-        tracing::debug!(tab, seq, ok = src.is_some(), deps = deps.len(), "deliver dyn import");
+        tracing::debug!(
+            tab,
+            seq,
+            ok = src.is_some(),
+            deps = deps.len(),
+            "deliver dyn import"
+        );
         if let Some(eng) = self.tabs.get_mut(&tab).and_then(|e| e.js.as_mut()) {
             eng.deliver_dyn_import(ctx, seq, src, deps);
         }

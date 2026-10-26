@@ -736,6 +736,170 @@ fn pump_resync_coalesced_under_floor() {
     assert_eq!(dom_text(&s), "n3");
 }
 
+/// 53f — tail de commit pendant le détachement : les
+/// transitions `readyState` + événements document sont
+/// tamponnées puis rejouées à la réinsertion, dans l'ordre.
+/// Sans le tampon elles mouraient muet (`entry.js = None`)
+/// — `readyState` figé à `"loading"` et les portes
+/// `readystatechange` des pages pendantes à jamais
+/// (mesuré sur github : `element-registry` lazy inerte).
+#[test]
+fn doc_lifecycle_replays_after_detached_pump() {
+    let mut s = Session::new(Arc::new(FailTransport), Arc::new(TestFont));
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let tab = s.open_tab();
+    let html = "<!doctype html><html><body><div id=\"x\"></div></body></html>";
+    let eng = s.spawn_engine(tab, html, true, "");
+    {
+        let e = s.tabs.get_mut(&tab).unwrap();
+        let mut tb = TreeBuilder::new();
+        tb.push(html);
+        tb.finish();
+        e.dom = Some(tb.into_dom());
+        e.url = Some(Url::parse("http://h.test/lc").unwrap());
+        e.js = eng;
+    }
+    // Listener page : trace chaque transition vue.
+    let _ = s.tabs.get_mut(&tab).and_then(|e| e.js.as_mut()).map(|eng| {
+        eng.eval(
+            "document.addEventListener('readystatechange',function(){\
+                 document.getElementById('x').textContent+='>'+document.readyState;});",
+        )
+    });
+
+    // La pompe emporte le moteur (fenêtre détachée ouverte).
+    let (eng, _budget, epoch, sync_ok) = s.take_js_engine(tab).unwrap();
+    assert!(s.tabs.get(&tab).unwrap().js.is_none());
+
+    // Le tail de commit court SANS moteur → tout tamponne.
+    s.set_doc_ready_state(tab, explorer_js::JS_CTX_TOP, "interactive");
+    s.dispatch_doc_event(tab, "readystatechange");
+    s.dispatch_doc_event(tab, "DOMContentLoaded");
+    s.set_doc_ready_state(tab, explorer_js::JS_CTX_TOP, "complete");
+    s.dispatch_doc_event(tab, "readystatechange");
+    s.dispatch_doc_event(tab, "load");
+    assert_eq!(
+        s.tabs.get(&tab).unwrap().pending_doc_lifecycle.len(),
+        6,
+        "les six étapes du cycle sont tamponnées"
+    );
+
+    // Réinsertion → rejeu dans l'ordre.
+    s.commit_js_pump(tab, epoch, Some((0, None, eng)), sync_ok);
+    assert!(s.tabs.get(&tab).unwrap().pending_doc_lifecycle.is_empty());
+
+    let out = s
+        .tabs
+        .get_mut(&tab)
+        .and_then(|e| e.js.as_mut())
+        .and_then(|eng| {
+            eng.eval("document.readyState+'::'+document.getElementById('x').textContent")
+                .ok()
+        })
+        .unwrap_or_default();
+    assert_eq!(
+        out.trim(),
+        "complete::>interactive>complete",
+        "transitions rejouées à la réinsertion : {out}"
+    );
+}
+
+/// Trou de liveness dyn-subresources : `<link rel=stylesheet>`
+/// inséré par JS ne devait son fetch qu'à `after_script`
+/// (gate `jobs>0` de la pompe) — une page qui marque le lien
+/// sans ré-armer de job laissait `pending_dyn_links` mourir
+/// de faim : `load`/`error` jamais livrés, la promesse
+/// `c.e` de webpack suspendue (mesuré github : chunks CSS
+/// `n.f.css` → `link.onload`, lazy-CE jamais définis). La
+/// pompe draine désormais `drain_script_net` à chaque
+/// battement — avec **zéro** job en file.
+#[tokio::test]
+async fn dyn_link_drains_without_pending_jobs() {
+    let mut s = Session::new(Arc::new(FailTransport), Arc::new(TestFont));
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let tab = s.open_tab();
+    let html = "<!doctype html><html><head></head><body></body></html>";
+    let eng = s.spawn_engine(tab, html, true, "");
+    {
+        let e = s.tabs.get_mut(&tab).unwrap();
+        let mut tb = TreeBuilder::new();
+        tb.push(html);
+        tb.finish();
+        e.dom = Some(tb.into_dom());
+        e.url = Some(Url::parse("http://h.test/dl").unwrap());
+        e.js = eng;
+    }
+    // `n.f.css` webpack : lien posé par propriétés, attaché
+    // à <head> — aucun timer/promesse armé derrière.
+    let _ = s.tabs.get_mut(&tab).and_then(|e| e.js.as_mut()).map(|eng| {
+        eng.eval(
+            "var l=document.createElement('link');\
+             l.rel='stylesheet';\
+             l.href='http://h.test/x.css';\
+             document.head.appendChild(l);",
+        )
+    });
+    // Pompe silencieuse (jobs=0) — le drain doit émettre le
+    // lien malgré l'absence de jobs.
+    s.pump_timers(tab);
+    let pending = s
+        .tabs
+        .get_mut(&tab)
+        .and_then(|e| e.js.as_mut())
+        .map_or(999, |eng| eng.drain_dyn_links().len());
+    assert_eq!(
+        pending, 0,
+        "le lien dyn doit être drainé : {pending} restant"
+    );
+}
+
+/// 141b — `animationstart` synthétique : la cascade qui
+/// enregistre une animation `@keyframes` nouvelle sur un
+/// élément émet l'événement bullant sur le miroir, props
+/// `animationName`/`elapsedTime`/`pseudoElement` (spec
+/// `AnimationEvent`). Sans lui, la découverte lazy des
+/// registries CE (`x(e)` → `m.get(e.animationName)`,
+/// github catalyst) ne voyait aucune insertion post-load
+/// — `define` jamais atteint.
+#[tokio::test]
+async fn animationstart_fires_for_new_keyframe_animation() {
+    let mut s = Session::new(Arc::new(FailTransport), Arc::new(TestFont));
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let tab = s.open_tab();
+    let html = "<!doctype html><html><head><style>\
+                @keyframes ghz { from { opacity:.9 } to { opacity:1 } }\
+                #x { animation-name: ghz; animation-duration: 5s }\
+                </style></head><body><div id=\"x\"></div></body></html>";
+    let eng = s.spawn_engine(tab, html, true, "");
+    {
+        let e = s.tabs.get_mut(&tab).unwrap();
+        let mut tb = TreeBuilder::new();
+        tb.push(html);
+        tb.finish();
+        e.dom = Some(tb.into_dom());
+        e.url = Some(Url::parse("http://h.test/as").unwrap());
+        e.js = eng;
+    }
+    let _ = s.tabs.get_mut(&tab).and_then(|e| e.js.as_mut()).map(|eng| {
+        eng.eval(
+            "window.__as='none';\
+             document.getElementById('x').addEventListener('animationstart',\
+             function(e){window.__as=e.animationName+'@'+e.target.tagName;});",
+        )
+    });
+    // Cascade → naissance enregistrée → drain pompe →
+    // événement livré au listener miroir.
+    s.relayout(tab).unwrap();
+    s.pump_timers(tab);
+    let out = s
+        .tabs
+        .get_mut(&tab)
+        .and_then(|e| e.js.as_mut())
+        .and_then(|eng| eng.eval("window.__as").ok())
+        .unwrap_or_default();
+    assert_eq!(out.trim(), "ghz@DIV", "animationstart livré : {out}");
+}
+
 /// Étape 57bis — find-in-page : occurrences comptées sur
 /// le boxtree, navigation cyclique, scroll-vers-courante,
 /// surlignage injecté dans la display list.

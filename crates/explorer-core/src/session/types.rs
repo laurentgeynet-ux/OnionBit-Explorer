@@ -634,6 +634,39 @@ pub(crate) struct FrameCtx {
     pub(crate) load_fired: bool,
 }
 
+/// Étape du cycle de vie document tamponnée pendant le
+/// détachement du moteur JS (étape 53f) — rejouée à la
+/// réinsertion, dans l'ordre d'émission. Sans ce tampon,
+/// `set_ready_state`/`readystatechange`/`DOMContentLoaded`/
+/// `load` du tail de commit tombaient dans le vide quand il
+/// courait pendant une pompe détachée (`entry.js = None` →
+/// drop muet) : `readyState` restait `"loading"` à jamais
+/// et les portes `readystatechange` des pages réelles
+/// (ex. `element-registry` de github, dont les
+/// custom-elements lazy attendent `ready`) pendaient
+/// indéfiniment — sans la moindre erreur surfacée.
+#[derive(Debug)]
+pub(crate) enum DocLifecycle {
+    /// `document.readyState` ← l'état, pour le contexte.
+    ReadyState(explorer_js::JsCtxId, String),
+    /// Événement cible document dans le realm
+    /// (`readystatechange`, `DOMContentLoaded`, `load`,
+    /// `scroll`, `wheel`… — vide `path`/`props`).
+    Event(explorer_js::JsCtxId, String),
+}
+
+/// Borne de [`super::Tab::pending_doc_lifecycle`] — le tail
+/// de commit n'émet que 6 étapes ; la garde borne un flot
+/// d'événements document (`scroll`/`wheel`) pendant une
+/// longue pompe détachée.
+pub(crate) const MAX_PENDING_LIFECYCLE: usize = 32;
+
+/// Borne de [`super::Tab::pending_anim_births`] — naissances
+/// d'animations collectées par passe de style en attente de
+/// dispatch `animationstart` (étape 141b). Une page hostile
+/// qui recalcule en boucle ne peut saturer la file.
+pub(crate) const MAX_ANIM_BIRTHS: usize = 256;
+
 /// `Cookie` filaire → forme persistée (expiration → secs
 /// unix ; les expirés ne sont jamais exportés —
 /// [`CookieJar::export`] purge déjà).

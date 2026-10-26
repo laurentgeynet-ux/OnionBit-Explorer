@@ -72,6 +72,17 @@ impl Session {
             self.poll_net();
             sync_phase(tab, "pump.drains", t);
         }
+        // Requêtes émises par la **dernière** rafale de jobs
+        // (`fetch`/`import()`/`<img>`/`<link>` dynamiques…) :
+        // `drain_script_net` ne tournait que via
+        // `after_script` (gate `jobs>0`) — un lien marqué
+        // sans jobs suivants n'était jamais fetché, son
+        // `load`/`error` jamais livré (mesuré github : les
+        // promesses `c.e` des chunks CSS pendent sur
+        // `link.onload`). Le drain est bon marché à vide —
+        // il court à chaque battement.
+        self.drain_script_net(tab);
+        self.drain_anim_births(tab);
         // Les applies enfilés par cette pompe sont exécutés
         // ici (hôte `&mut` synchrone — étape 55h).
         self.drain_applies();
@@ -149,6 +160,7 @@ impl Session {
                 entry.js_pending_ws.clear();
                 entry.js_pending_dyn.clear();
                 entry.js_pending_attrs.clear();
+                entry.pending_doc_lifecycle.clear();
                 return 0;
             };
             if entry.nav_epoch != epoch {
@@ -158,7 +170,24 @@ impl Session {
                 entry.js_pending_ws.clear();
                 entry.js_pending_dyn.clear();
                 entry.js_pending_attrs.clear();
+                entry.pending_doc_lifecycle.clear();
                 return 0;
+            }
+            // Cycle de vie document émis pendant le
+            // détachement (le tail de commit a pu courir sans
+            // moteur) — rejoué **avant** les livraisons
+            // tamponnées : une porte `readystatechange` qui se
+            // lève enfile ses `import()`/`fetch` avant elles,
+            // comme l'aurait fait l'événement à l'heure.
+            for step in std::mem::take(&mut entry.pending_doc_lifecycle) {
+                match step {
+                    types::DocLifecycle::ReadyState(ctx, s) => {
+                        eng.set_ready_state(ctx, &s);
+                    }
+                    types::DocLifecycle::Event(ctx, ty) => {
+                        let _ = eng.dispatch_event_ctx(ctx, &ty, &[]);
+                    }
+                }
             }
             // Sous-phases `commit_lock` (tâche profil github
             // doc 20,6 s — attribution fine des ~800 ms/round :
@@ -226,7 +255,62 @@ impl Session {
             self.poll_net();
             sync_phase(tab, "commit.drains", t);
         }
+        // Même liveness que `pump_timers` : les requêtes
+        // émises par la dernière rafale (liens/images/
+        // scripts/`import()` dynamiques) doivent partir
+        // même si plus aucun job n'est en file.
+        self.drain_script_net(tab);
+        self.drain_anim_births(tab);
         jobs
+    }
+
+    /// Livraison des `animationstart` collectés à la
+    /// cascade (étape 141b) — chaque naissance `(nœud réel,
+    /// nom)` devient un événement bullant sur l'élément
+    /// miroir, props `animationName`/`elapsedTime`/
+    /// `pseudoElement` (spec `AnimationEvent`). Moteur
+    /// absent (détachement) → la naissance est
+    /// **conservée** en queue, jamais perdue : la
+    /// découverte lazy des registries CE (`x(e)` catalyst
+    /// → `m.get(e.animationName)`) dépend de chaque
+    /// dispatch — un drop muet laissait l'entrée lazy
+    /// invisible à jamais. Nœud reparti entre passe et
+    /// drain → sauté (dispatcher vers un mort est sans
+    /// sens, son miroir n'existe plus non plus).
+    fn drain_anim_births(&mut self, tab: TabId) {
+        loop {
+            let Some(entry) = self.tabs.get(&tab) else {
+                return;
+            };
+            if entry.js.is_none() {
+                return;
+            }
+            let Some((node, name)) = entry.pending_anim_births.front().cloned() else {
+                return;
+            };
+            // Le DOM commis fait foi : le nœud d'une
+            // naissance peut être reparti entre la passe et
+            // le drain (re-parse, detach) → sauté.
+            let path = entry.dom.as_ref().and_then(|d| element_path(d, node));
+            self.tabs
+                .get_mut(&tab)
+                .map(|e| e.pending_anim_births.pop_front());
+            let Some(path) = path else {
+                continue;
+            };
+            let props = [
+                (
+                    "animationName".to_string(),
+                    explorer_js::EventProp::Str(name),
+                ),
+                ("elapsedTime".to_string(), explorer_js::EventProp::Num(0.0)),
+                (
+                    "pseudoElement".to_string(),
+                    explorer_js::EventProp::Str(String::new()),
+                ),
+            ];
+            self.dispatch_path_event_props(tab, "animationstart", &path, &props);
+        }
     }
 
     /// Plus proche échéance de timer JS tous onglets — délai
@@ -633,6 +717,33 @@ impl Session {
         self.dispatch_path_event(tab, ty, &[])
     }
 
+    /// `document.readyState` pour le contexte `ctx` — pendant
+    /// le détachement (53f) l'étape est tamponnée puis
+    /// rejouée à la réinsertion, dans l'ordre : le tail de
+    /// commit peut courir pendant une pompe détachée, et le
+    /// drop muet laissait `readyState` à `"loading"` pour
+    /// toujours (les portes `readystatechange` des pages —
+    /// github `element-registry` — pendaient sans erreur).
+    pub(crate) fn set_doc_ready_state(
+        &mut self,
+        tab: TabId,
+        ctx: explorer_js::JsCtxId,
+        state: &'static str,
+    ) {
+        let Some(entry) = self.tabs.get_mut(&tab) else {
+            return;
+        };
+        if let Some(eng) = entry.js.as_mut() {
+            eng.set_ready_state(ctx, state);
+        } else if entry.js_detached.is_some()
+            && entry.pending_doc_lifecycle.len() < MAX_PENDING_LIFECYCLE
+        {
+            entry
+                .pending_doc_lifecycle
+                .push(types::DocLifecycle::ReadyState(ctx, state.to_string()));
+        }
+    }
+
     /// Cœur du dispatch : `path` vers le miroir (vide =
     /// document), resynchronisation + drains des surfaces
     /// script (étapes 50-51) — point de synchro partagé par
@@ -662,6 +773,25 @@ impl Session {
                 return false;
             };
             let Some(eng) = entry.js.as_mut() else {
+                // Moteur détaché (53f) : un événement **cible
+                // document** est tamponné puis rejoué à la
+                // réinsertion — sinon `readystatechange`/
+                // `DOMContentLoaded`/`load` du tail de
+                // commit mouraient sans trace quand une
+                // pompe tenait le moteur (readyState figé à
+                // `"loading"`, portes des pages pendantes).
+                // Les événements à `path`/`props` gardent la
+                // voie existante (entrées → `deferred_inputs`).
+                if entry.js_detached.is_some()
+                    && path.is_empty()
+                    && props.is_empty()
+                    && entry.pending_doc_lifecycle.len() < MAX_PENDING_LIFECYCLE
+                {
+                    entry.pending_doc_lifecycle.push(types::DocLifecycle::Event(
+                        explorer_js::JS_CTX_TOP,
+                        ty.to_string(),
+                    ));
+                }
                 return false;
             };
             let p = match eng.dispatch_event_props(ty, path, props) {

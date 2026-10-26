@@ -1084,6 +1084,14 @@ impl Session {
                 }
             }
             entry.js = None;
+            // Le cycle de vie tamponné appartenait au
+            // document mort — comme les autres tampons 53f,
+            // il ne rejoue pas sur le document neuf.
+            entry.pending_doc_lifecycle.clear();
+            // Naissances d'animation du document mort — les
+            // `animationstart` pendants n'ont plus de cible
+            // ni de listeners sur le document neuf.
+            entry.pending_anim_births.clear();
             entry.frame_ctxs.clear();
             entry.images = PaintImages::default();
             entry.bg_aliases.clear();

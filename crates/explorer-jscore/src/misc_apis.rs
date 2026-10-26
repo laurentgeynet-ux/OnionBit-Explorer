@@ -1852,7 +1852,13 @@ fn sheet_rules(e: &mut Engine, this: Value) -> Option<ObjId> {
 /// est stockée `{cssText,type:1}`, pas cascadée).
 fn sheet_insert_rule(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let text = e.to_js_string(arg(args, 0))?;
-    let idx = e.to_number(arg(args, 1)).unwrap_or(0.0).max(0.0) as usize;
+    // Spec : index absent → insertion en fin (`cssRules.length`),
+    // pas 0 — l'ordre de cascade dépend de l'ordre d'insertion.
+    let idx = if matches!(arg(args, 1), Value::Undefined) {
+        usize::MAX
+    } else {
+        e.to_number(arg(args, 1)).unwrap_or(0.0).max(0.0) as usize
+    };
     let Some(rid) = sheet_rules(e, this) else {
         return Err(e.type_error("insertRule: no cssRules"));
     };

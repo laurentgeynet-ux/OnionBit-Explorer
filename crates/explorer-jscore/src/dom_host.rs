@@ -1366,6 +1366,16 @@ pub(crate) fn platform_event_flags(ty: &str) -> (bool, bool, bool) {
         "DOMContentLoaded",
         "readystatechange",
         "abort",
+        // `AnimationEvent`/`TransitionEvent` — spec : bullants,
+        // non-annulables, non-composés.
+        "animationstart",
+        "animationiteration",
+        "animationend",
+        "animationcancel",
+        "transitionrun",
+        "transitionstart",
+        "transitionend",
+        "transitioncancel",
     ];
     const NON_COMPOSED: &[&str] = &[
         "focus",
@@ -1379,6 +1389,14 @@ pub(crate) fn platform_event_flags(ty: &str) -> (bool, bool, bool) {
         "DOMContentLoaded",
         "readystatechange",
         "abort",
+        "animationstart",
+        "animationiteration",
+        "animationend",
+        "animationcancel",
+        "transitionrun",
+        "transitionstart",
+        "transitionend",
+        "transitioncancel",
     ];
     (
         !NON_BUBBLING.contains(&ty),
@@ -3427,8 +3445,26 @@ impl Host for DocumentHost {
         }
         if key == "adoptedStyleSheets" {
             // Assignation acceptée (CAP-195) — la liste remplace
-            // le tableau courant ; les feuilles ne sont pas
-            // appliquées à la cascade (tranche 2).
+            // le tableau courant ; les `ObjId` des feuilles sont
+            // enregistrés sur le miroir — la session les lit via
+            // `adopted_sheets_css` pour la cascade (tranche 2).
+            if let Value::Obj(aid) = v {
+                let sheets: Vec<ObjId> = {
+                    match e.heap.obj(aid).map(|o| &o.kind) {
+                        Some(ObjKind::Array(elems)) => elems
+                            .iter()
+                            .filter_map(|el| match el {
+                                Value::Obj(id) => Some(*id),
+                                _ => None,
+                            })
+                            .collect(),
+                        _ => Vec::new(),
+                    }
+                };
+                self.dom.borrow_mut().adopted_sheets = sheets;
+            } else {
+                self.dom.borrow_mut().adopted_sheets.clear();
+            }
             *self.adopted_sheets.borrow_mut() = Some(v);
             return Ok(true);
         }

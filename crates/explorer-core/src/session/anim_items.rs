@@ -256,13 +256,22 @@ pub(crate) fn update_transitions(
 /// inchangée conserve son `start` (le tick ne redémarre
 /// pas), changée elle repart de `now`. Les éléments dont la
 /// déclaration disparaît perdent leur animation.
+///
+/// Retourne les **naissances** `(NodeId, nom)` — animations
+/// nouvellement enregistrées (pas de `same_decl`) : la
+/// session les transforme en `animationstart` sur le miroir
+/// JS (spec — l'événement part quand l'animation démarre,
+/// délai négatif inclus). Consommé par le lazy-discovery
+/// `animationstart`/`e.animationName` des registries CE
+/// (github catalyst : `x(e)` → `m.get(name)` → entrée lazy).
 pub(crate) fn sync_animations(
     animations: &mut Vec<ActiveAnimation>,
     styles: &StyleMap,
     ord_of: &HashMap<NodeId, usize>,
     eng: &StyleEngine,
     now: Instant,
-) {
+) -> Vec<(NodeId, String)> {
+    let mut births = Vec::new();
     let mut fresh = Vec::with_capacity(animations.len());
     for (node, cs) in styles.iter() {
         let Some(&ord) = ord_of.get(&node) else {
@@ -275,20 +284,23 @@ pub(crate) fn sync_animations(
             let same = animations
                 .iter()
                 .find(|a| a.elem == ord && a.idx == idx && same_decl(&a.decl, decl));
-            fresh.push(match same {
-                Some(a) => a.clone(),
-                None => ActiveAnimation {
+            fresh.push(if let Some(a) = same {
+                a.clone()
+            } else {
+                births.push((node, decl.name.clone()));
+                ActiveAnimation {
                     elem: ord,
                     idx,
                     decl: decl.clone(),
                     start: now,
                     applied: false,
-                },
+                }
             });
         }
     }
     *animations = fresh;
     animations.truncate(MAX_TRANSITIONS);
+    births
 }
 
 /// Surcharges d'animation sur `styles` (post-cascade —

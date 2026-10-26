@@ -1219,6 +1219,58 @@ impl Engine {
     /// `src`/`text` selon la balise. La session résout,
     /// applique CSP/mixed-content et fetch — le moteur ne
     /// touche jamais le réseau.
+    /// `document.adoptedStyleSheets` → textes CSS par feuille
+    /// (CAP-195 tranche 2) — `cssRules[*].cssText` joint en une
+    /// feuille auteur document par `CSSStyleSheet` adoptée, dans
+    /// l'ordre du tableau (spec : après les feuilles `<link>`).
+    /// Snapshot à la demande — la session l'appelle à chaque
+    /// passe de style ; règles mutées par `insertRule` visibles
+    /// à la passe suivante.
+    pub fn adopted_sheets_css(&mut self) -> Vec<String> {
+        let mut doms: Vec<crate::dom_host::DomRef> = Vec::new();
+        if let Some((d, _)) = &self.dom_ctx {
+            doms.push(d.clone());
+        }
+        for ctx in self.parked.values() {
+            if let Some((d, _)) = &ctx.dom_ctx {
+                doms.push(d.clone());
+            }
+        }
+        let mut out = Vec::new();
+        for dom in doms {
+            let sheets = dom.borrow().adopted_sheets.clone();
+            for sid in sheets {
+                let mut parts = Vec::new();
+                if let Ok(Value::Obj(rid)) = self.get_prop_value(Value::Obj(sid), "cssRules")
+                {
+                    let rule_ids: Vec<ObjId> = match self.heap.obj(rid).map(|o| &o.kind) {
+                        Some(ObjKind::Array(elems)) => elems
+                            .iter()
+                            .filter_map(|el| match el {
+                                Value::Obj(id) => Some(*id),
+                                _ => None,
+                            })
+                            .collect(),
+                        _ => Vec::new(),
+                    };
+                    for oid in rule_ids {
+                        if let Some(t) = self
+                            .get_prop_value(Value::Obj(oid), "cssText")
+                            .ok()
+                            .and_then(|v| self.to_js_string(v).ok())
+                        {
+                            parts.push(t);
+                        }
+                    }
+                }
+                if !parts.is_empty() {
+                    out.push(parts.join("\n"));
+                }
+            }
+        }
+        out
+    }
+
     pub fn drain_dyn_scripts(&mut self) -> Vec<crate::dom_host::DynScriptReq> {
         let mut doms: Vec<(crate::context::CtxId, crate::dom_host::DomRef)> = Vec::new();
         if let Some((d, _)) = &self.dom_ctx {
@@ -2078,6 +2130,16 @@ impl Engine {
         // `BrowsingContext::push_roots`.
         for (_, promise, _) in &self.crypto.pending {
             ids.push(*promise);
+        }
+        // Promesses `import()` différées (JS-C100) — racines
+        // tant qu'elles attendent la livraison session : sans
+        // traçage le GC balayait la promesse entre
+        // `defer_import` et `deliver_import`, la résolution
+        // tombait dans le vide et les `.then` mouraient en
+        // silence (mesuré github : lazy-CE jamais définis —
+        // `heap.obj(promise)` → None, reactions=999).
+        for p in self.pending_imports.values() {
+            ids.push(p.promise);
         }
         for (_, job) in &self.microtasks {
             match job {

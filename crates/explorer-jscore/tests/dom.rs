@@ -591,6 +591,20 @@ fn append_child_ancestor_cycle_rejected() {
 }
 
 #[test]
+fn adopted_sheets_css_extracts_rule_texts() {
+    // CAP-195 tranche 2 : les feuilles adoptées livrent leurs
+    // `cssText` à la session — cascade en feuilles auteur
+    // document (ordre spec : après les `<link>`).
+    let mut e = engine_full(PAGE);
+    e.0.eval(
+        "var s=new CSSStyleSheet();s.insertRule('a{color:red}');\
+         s.insertRule('b{margin:0}');document.adoptedStyleSheets=[s];",
+    )
+    .unwrap();
+    assert_eq!(e.0.adopted_sheets_css(), vec!["a{color:red}\nb{margin:0}"]);
+}
+
+#[test]
 fn define_duplicate_throws_domexception_not_supported() {
     // Spec + catalyst github : re-define doit jeter
     // `DOMException`/`NotSupportedError` — le catch de catalyst

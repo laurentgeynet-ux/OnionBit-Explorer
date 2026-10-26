@@ -4950,6 +4950,65 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
     propre ; ADR-0024 et
     CHANGELOG à jour.
 
+- [x] **Étape 143. Pont
+  `adoptedStyleSheets` → cascade**
+  (`explorer-core::session` +
+  `explorer-jscore` + `explorer-js`)
+  — feuilles construites
+  (`new CSSStyleSheet` + `insertRule`
+  + `adoptedStyleSheets`) cascadées
+  en feuilles auteur document :
+  `ObjId` au `set` → `adopted_sheets
+  _css()` (cssText par feuille) →
+  trait `JsEngine` → `drain_script
+  _net` → `Tab`/`PageSnapshot`/
+  `PaintPayload` → `add_css(Author)`
+  après `linked_sheets` (ordre spec).
+  Fix inclus : `insertRule` sans
+  index → fin (spec, était tête).
+  Reliquat : `:defined` matcher
+  (PIPE). Test `adopted_sheets_css_
+  extracts_rule_texts`.
+
+- [x] **Étape 142. `animationstart`
+  synthétique** (`explorer-core::
+  session`) — naissances `@keyframes`
+  collectées à `sync_animations`,
+  transportées par `PaintPayload`
+  (détaché) vers `pending_anim_
+  births` borné, dispatchées
+  `animationstart {animationName,
+  elapsedTime, pseudoElement}` par
+  `drain_anim_births` aux deux
+  battements ; flags spec
+  animation/transition (bullants,
+  non-annulables, non-composés).
+  Découverte lazy-CE github
+  (`x(e)` → `m.get(animationName)`)
+  couverte pour les insertions
+  post-load. Test `animationstart_
+  fires_for_new_keyframe_animation`.
+  Reliquat : `adoptedStyleSheets`/
+  `insertRule` non pontés vers la
+  cascade (feuilles JS-pures).
+
+- [x] **Étape 141. Drain dyn-subresources
+  dé-famé** (`explorer-core::session`)
+  — `drain_script_net` ne tournait que
+  via `after_script` (gate `jobs>0`) :
+  les `<link>`/`<img>`/`import()`
+  émis par la dernière rafale n'étaient
+  jamais fetchés, `load`/`error` jamais
+  livrés — famine liveness mesurée en
+  vol (`<link>` injecté → `load` jamais
+  ; post-fix → `LOAD`). Le drain court
+  à chaque battement des deux pompes.
+  Terrain github : `n.f.css` suspendait
+  `c.e` sur `link.onload`. Reliquat :
+  define lazy absent — mur côté
+  fabrique d'entrée `s(id)`. Test
+  `dyn_link_drains_without_pending_jobs`.
+
 - [x] **Étape 140. Cycle de vie doc
   rejoué après pompe JS détachée**
   (`explorer-core::session`) — race
@@ -7085,6 +7144,25 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   sur déchets. `tick` → `collect()`
   → re-test — kill sur vivant seul.
   `c37_mem_limit_soft_kill` refondu.
+
+- [x] **JS-C119. Promesses `import()`
+  racinées + microtasks dé-famées**
+  (`explorer-jscore`) — mur final
+  lazy-CE github mesuré en vol :
+  `pending_imports` non tracé au GC
+  (promesse balayée → `resolve` no-op
+  → `.then` morts, `reactions=999`
+  instrument) ; `run_microtasks` sans
+  ré-armement `ops_left` (drains
+  affamés mangeaient un job par
+  pompe). Fix : promise en racine +
+  budget neuf par drain + re-queue
+  sur échec `tick`. Terrain :
+  `react-partial`/`select-panel-
+  experimental`/`global-banner`/
+  `active-global-banners` définis.
+  Test `import_then_fires_after_
+  deliver`.
 
 - [x] **JS-C118. `define` jette
   `DOMException` typées**

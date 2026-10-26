@@ -44,6 +44,7 @@ impl Tab {
             js: self.js.take(),
             images: std::mem::take(&mut self.images),
             linked_sheets: std::mem::take(&mut self.linked_sheets),
+            adopted_sheets: self.adopted_sheets.clone(),
             prev_styles: std::mem::take(&mut self.prev_styles),
             dirty: std::mem::take(&mut self.dirty),
             emitted: self.emitted,
@@ -129,6 +130,7 @@ impl Tab {
         self.js = snap.js;
         self.images = snap.images;
         self.linked_sheets = snap.linked_sheets;
+        self.adopted_sheets = snap.adopted_sheets;
         self.prev_styles = snap.prev_styles;
         self.dirty = snap.dirty;
         self.emitted = snap.emitted;
@@ -142,6 +144,8 @@ impl Tab {
         self.js_pending_dyn.clear();
         self.js_pending_mod.clear();
         self.js_pending_attrs.clear();
+        self.pending_doc_lifecycle.clear();
+        self.pending_anim_births.clear();
         self.sync_floor = None;
         self.last_req = snap.last_req;
         self.frames = snap.frames;

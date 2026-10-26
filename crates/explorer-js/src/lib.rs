@@ -728,6 +728,15 @@ pub trait JsEngine: Send {
     /// réseau/politique/SRI → `error`. Défaut : no-op.
     fn deliver_dyn_link(&mut self, _ctx: JsCtxId, _seq: u64, _ok: bool) {}
 
+    /// `document.adoptedStyleSheets` → textes CSS par feuille
+    /// (CAP-195 tranche 2) — snapshot à la demande, joint par
+    /// feuille, ordre du tableau (spec : après les `<link>`).
+    /// La session les cascade en feuilles auteur document.
+    /// Défaut : rien.
+    fn adopted_sheets_css(&mut self) -> Vec<String> {
+        Vec::new()
+    }
+
     /// Drain des requêtes `import()` dynamiques (JS-C100) —
     /// la session fetch `url` et rappelle
     /// `deliver_dyn_import`. Défaut : rien (le miss rejette
@@ -1599,6 +1608,9 @@ enum Cmd {
     DrainDynLinks {
         tx: Sender<Vec<explorer_jscore::DynLinkReq>>,
     },
+    AdoptedSheetsCss {
+        tx: Sender<Vec<String>>,
+    },
     DrainDynScripts {
         tx: Sender<Vec<explorer_jscore::DynScriptReq>>,
     },
@@ -1694,12 +1706,13 @@ impl JscoreEngine {
     const EVAL_CMD_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
     fn recv_eval<T>(rx: &Receiver<T>) -> Result<T, JsError> {
-        rx.recv_timeout(Self::EVAL_CMD_TIMEOUT).map_err(|e| match e {
-            RecvTimeoutError::Timeout => {
-                JsError::Uncaught("moteur figé — éval dépassée".into())
-            }
-            RecvTimeoutError::Disconnected => JsError::Dead,
-        })
+        rx.recv_timeout(Self::EVAL_CMD_TIMEOUT)
+            .map_err(|e| match e {
+                RecvTimeoutError::Timeout => {
+                    JsError::Uncaught("moteur figé — éval dépassée".into())
+                }
+                RecvTimeoutError::Disconnected => JsError::Dead,
+            })
     }
 
     /// les frames `error.stack` (`JsEngine::eval_named`).
@@ -2197,6 +2210,11 @@ impl JscoreEngine {
                     }
                     eng.context_switch(prev);
                 }
+                Cmd::AdoptedSheetsCss { tx } => {
+                    if tx.send(eng.adopted_sheets_css()).is_err() {
+                        break;
+                    }
+                }
                 Cmd::DrainDynLinks { tx } => {
                     if tx.send(eng.drain_dyn_links()).is_err() {
                         return;
@@ -2498,6 +2516,14 @@ impl JsEngine for JscoreEngine {
 
     fn deliver_dyn_img(&mut self, ctx: JsCtxId, seq: u64, ok: bool) {
         let _ = self.tx.send(Cmd::DeliverDynImg { ctx, seq, ok });
+    }
+
+    fn adopted_sheets_css(&mut self) -> Vec<String> {
+        let (tx, rx) = channel();
+        if self.tx.send(Cmd::AdoptedSheetsCss { tx }).is_err() {
+            return Vec::new();
+        }
+        rx.recv_timeout(Self::EVAL_CMD_TIMEOUT).unwrap_or_default()
     }
 
     fn drain_dyn_links(&mut self) -> Vec<explorer_jscore::DynLinkReq> {

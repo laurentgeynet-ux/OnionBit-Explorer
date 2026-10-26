@@ -319,6 +319,11 @@ pub(crate) struct Tab {
     /// isolation d'erreur par `<link>`, cf. R-68), vidées à
     /// chaque re-parse.
     linked_sheets: Vec<String>,
+    /// `document.adoptedStyleSheets` → textes CSS par feuille
+    /// (CAP-195 tranche 2) — snapshot miroir rafraîchi par
+    /// `drain_script_net`, cascadé en feuilles auteur document
+    /// après `linked_sheets` (ordre spec).
+    adopted_sheets: Vec<String>,
     /// Contextes de navigation imbriqués (étape 128) :
     /// `<iframe src>` fetchés sous l'initiateur de la page
     /// et parsés en leur `Dom` propre — ordre d'arrivée
@@ -473,6 +478,22 @@ pub(crate) struct Tab {
     /// Réponses `crypto.subtle` tamponnées pendant le détachement
     /// — même règle que `js_pending_net` (JS-C79).
     js_pending_crypto: Vec<explorer_js::CryptoResponse>,
+    /// Étapes du cycle de vie document (`readyState`,
+    /// `readystatechange`, `DOMContentLoaded`, `load`…)
+    /// tamponnées pendant le détachement (53f) — le tail de
+    /// commit peut courir pendant une pompe en vol ; sans ce
+    /// tampon elles tombaient dans le vide et
+    /// `document.readyState` restait `"loading"` à jamais
+    /// (github : portes `ready` du registre lazy pendantes).
+    pending_doc_lifecycle: Vec<types::DocLifecycle>,
+    /// Naissances `@keyframes` en attente de dispatch
+    /// `animationstart` (étape 141b) — collectées par
+    /// `sync_animations` dans la payload détachée,
+    /// fusionnées au `put_paint`, drainées par
+    /// [`Session::drain_anim_births`] quand le moteur est
+    /// présent (sinon conservées — la découverte lazy des
+    /// registries CE dépend de chaque événement).
+    pending_anim_births: std::collections::VecDeque<(explorer_dom::NodeId, String)>,
     /// Événements `EventSource` tamponnés pendant le
     /// détachement (JS-C92) — `(ctx, handle, ev)`, même
     /// règle que `js_pending_crypto`.
@@ -570,6 +591,11 @@ pub(crate) struct PageSnapshot {
     images: PaintImages,
     /// Feuilles `<link>` — une entrée par feuille (104).
     linked_sheets: Vec<String>,
+    /// `document.adoptedStyleSheets` → textes CSS par feuille
+    /// (CAP-195 tranche 2) — snapshot miroir rafraîchi à la
+    /// pompe (`drain_script_net`), cascadé en feuilles auteur
+    /// document après `linked_sheets` (ordre spec).
+    adopted_sheets: Vec<String>,
     /// Styles calculés (transitions — vidées au gel).
     prev_styles: HashMap<usize, ComputedStyle>,
     /// Régions invalides en vol (+ tête déjà émise).
@@ -632,8 +658,7 @@ pub struct Session {
     /// tous les onglets ; les URLs `MediaOffered` sont
     /// réécrites via lui (139b — tout flux de lecture passe
     /// par le proxy, même câblage `iptv-infra::local_proxy`).
-    media_proxy:
-        Arc<std::sync::OnceLock<explorer_net::media_proxy::MediaProxy>>,
+    media_proxy: Arc<std::sync::OnceLock<explorer_net::media_proxy::MediaProxy>>,
     /// Registre de fontes : faces `@font-face` fetchées
     /// devant la source locale injectée (ADR-0016). Purge
     /// par navigation (faces par document). Sous `Mutex`
@@ -874,11 +899,8 @@ impl Session {
             let cell = media_proxy.clone();
             h.spawn(async move {
                 let ua = concat!("Explorer/", env!("CARGO_PKG_VERSION"));
-                if let Ok(p) = explorer_net::media_proxy::MediaProxy::spawn(
-                    tp,
-                    ua.to_string(),
-                )
-                .await
+                if let Ok(p) =
+                    explorer_net::media_proxy::MediaProxy::spawn(tp, ua.to_string()).await
                 {
                     let _ = cell.set(p);
                 }
@@ -1210,6 +1232,7 @@ impl Session {
                 js: None,
                 images: PaintImages::default(),
                 linked_sheets: Vec::new(),
+                adopted_sheets: Vec::new(),
                 frames: Vec::new(),
                 frame_ctxs: Vec::new(),
                 frame_nodes: Vec::new(),
@@ -1238,6 +1261,8 @@ impl Session {
                 js_pending_dyn: Vec::new(),
                 js_pending_mod: Vec::new(),
                 js_pending_crypto: Vec::new(),
+                pending_doc_lifecycle: Vec::new(),
+                pending_anim_births: std::collections::VecDeque::new(),
                 js_pending_es: Vec::new(),
                 js_pending_ws: Vec::new(),
                 js_pending_attrs: Vec::new(),

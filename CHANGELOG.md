@@ -202,6 +202,41 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   4M non tickée — même classe,
   fix = take/put faillibles + tick.
 
+- **JS-C119 — promesses `import()`
+  racinées au GC + microtasks
+  dé-famées** (`explorer-jscore`) —
+  **mur final de la chaîne lazy-CE
+  github, mesuré en vol**. Deux trous
+  de famine muette :
+  1. `pending_imports` absent des
+     racines de `Engine::collect` →
+     la promesse différée était
+     balayée entre `defer_import` et
+     `deliver_import` → `resolve_
+     promise` tombait sur un objet
+     mort (`heap.obj` → `None`),
+     zéro rejet, zéro `.then` —
+     instrument : `reactions=999`.
+  2. `run_microtasks` ne ré-armait
+     pas `ops_left` (les timers si,
+     `run_due_timers_ctx`) → un eval
+     lourd laissait le budget à ~0,
+     chaque drain poppait un job et
+     le perdait au `tick()` — Err
+     avalée par `unwrap_or(0)`.
+     Fix : budget neuf par drain
+     (frontière de tâche) + job
+     re-queué en tête sur échec
+     `tick`, jamais perdu.
+  Terrain (release frais, PROM_TRACE) :
+  `reactions=1`, `[mt-run] reaction-
+  ok`, `.then` post-`import()` tiré —
+  `customElements.get("react-partial")
+  `, `"select-panel-experimental"`,
+  `"global-banner"`, `"active-global-
+  banners"` = function. Test
+  `import_then_fires_after_deliver`.
+
 - **JS-C118 — `customElements.define`
   jette des `DOMException` typées**
   (`explorer-jscore::dom_host`) —
@@ -958,6 +993,68 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   `c97_offset_parent_top_left`.
 
 ### Fixed
+
+- **Étape 142 — `animationstart`
+  synthétique depuis les naissances
+  CSS** (`explorer-core::session` +
+  `explorer-jscore::dom_host`) :
+  `sync_animations` retourne les
+  déclarations `@keyframes` nouvelles
+  `(NodeId, nom)` ; le
+  `PaintPayload.anim_births` les
+  transporte hors de la passe
+  détachée vers `Tab.pending_anim_
+  births` (file bornée, purgée
+  nav/snapshot/epoch) ; `drain_anim_
+  births` dispatche `animationstart`
+  bullant sur l'élément miroir avec
+  `animationName`/`elapsedTime`/
+  `pseudoElement` (spec
+  `AnimationEvent`, non-annulable,
+  non-composé — flags élargis aux
+  événements animation/transition) ;
+  naissances conservées si le moteur
+  est détaché. Motif : les registries
+  lazy CE (github catalyst `x(e)` →
+  `m.get(e.animationName)` → gate →
+  loader → `define`) découvrent les
+  insertions post-load **uniquement**
+  par ce hook CSS. Test
+  `animationstart_fires_for_new_
+  keyframe_animation`. Reliquat
+  nommé : les feuilles **construites**
+  (`new CSSStyleSheet` + `document.
+  adoptedStyleSheets` + `insertRule`)
+  restent JS-pures — pont vers la
+  cascade à bâtir pour les éléments
+  insérés post-load.
+
+- **Étape 141 — sous-ressources
+  dynamiques famées sans jobs**
+  (`explorer-core::session`) :
+  `drain_script_net` ne tournait que
+  via `after_script`, gardé par
+  `jobs>0` — un `<link>`/`<img>`/
+  `import()` émis par la dernière
+  rafale n'était jamais fetché,
+  `load`/`error` jamais livré.
+  Mesuré github : `n.f.css` webpack
+  suspend `c.e` sur `link.onload`
+  → promesse `Promise.all` pendue,
+  chaîne lazy-CE morte en silence.
+  Sonde terrain : `<link>` injecté
+  → `__lr` `"pending"` à jamais ;
+  post-fix → `"LOAD"` livré.
+  `drain_script_net` court à chaque
+  battement des deux pompes
+  (attachée + `commit_js_pump`) —
+  bon marché à vide. Reliquat :
+  `customElements.define` lazy
+  toujours absent — `s(id)`/entrées
+  propres (PROM_TRACE muet), le
+  mur est côté fabrique d'entrée.
+  Test `dyn_link_drains_without_
+  pending_jobs`.
 
 - **Étape 140 — cycle de vie doc
   droppé sous pompe JS détachée**
@@ -11788,3 +11885,28 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
     48 enrichies ; référence tiny-skia corrigée (ADR-0001, pas
     ADR-0005) ; section « Hors périmètre assumé » ajoutée.
 
+
+- **Étape 143 + JS-C120 — pont
+  `adoptedStyleSheets` → cascade**
+  (`explorer-core::session` +
+  `explorer-jscore` + `explorer-js`)
+  — les feuilles construites
+  (`new CSSStyleSheet` + `insertRule`
+  + `document.adoptedStyleSheets`)
+  restaient JS-pures, jamais
+  appliquées (CAP-195 tranche 2).
+  `Dom.adopted_sheets` (ObjId au
+  `set`) → `Engine::adopted_sheets
+  _css()` (`cssRules[*].cssText` par
+  feuille) → trait `JsEngine` +
+  Cmd pompe → `drain_script_net`
+  rafraîchit `Tab.adopted_sheets`
+  → `PaintPayload`/`PageSnapshot` →
+  `add_css(Author)` après
+  `linked_sheets` (ordre spec).
+  Fix inclus : `insertRule` sans
+  index insérait en tête (spec :
+  fin). Reliquat : `:defined` dans
+  le matcher (PIPE). Test
+  `adopted_sheets_css_extracts_
+  rule_texts`.

@@ -46,8 +46,7 @@ impl Session {
     pub(crate) fn advance_animations(&mut self, tab: TabId) -> Result<bool, CoreError> {
         let now = Instant::now();
         let (active, ords) = self.tabs.get(&tab).map_or((false, Vec::new()), |t| {
-            let playing = !t.transitions.is_empty()
-                || t.animations.iter().any(|a| a.playing(now));
+            let playing = !t.transitions.is_empty() || t.animations.iter().any(|a| a.playing(now));
             let mut o: Vec<usize> = t.transitions.iter().map(|tr| tr.elem).collect();
             o.extend(
                 t.animations

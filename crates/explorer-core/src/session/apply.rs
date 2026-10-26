@@ -272,12 +272,24 @@ pub(crate) struct PaintPayload {
     /// Feuilles `<link>` — une entrée par feuille, parsées
     /// isolément à la cascade (étape 104, cf. R-68).
     pub linked_sheets: Vec<String>,
+    /// `document.adoptedStyleSheets` → textes CSS par feuille
+    /// (CAP-195 tranche 2) — cascadées en feuilles auteur
+    /// document **après** `linked_sheets` (ordre spec).
+    pub adopted_sheets: Vec<String>,
     /// Styles bruts de la dernière cascade (transitions).
     pub prev_styles: HashMap<usize, ComputedStyle>,
     /// Transitions en vol.
     pub transitions: Vec<ActiveTransition>,
     /// Animations `@keyframes` enregistrées.
     pub animations: Vec<ActiveAnimation>,
+    /// Naissances `animationstart` de la passe (étape 141b)
+    /// — `(NodeId, nom keyframes)` collectées par
+    /// [`sync_animations`], vidées dans
+    /// `Tab::pending_anim_births` au `put_paint` : la
+    /// session les traduit en événements `animationstart`
+    /// sur le miroir JS (découverte lazy des registries CE,
+    /// github `x(e)` → `m.get(animationName)`).
+    pub anim_births: Vec<(explorer_dom::NodeId, String)>,
     /// Hauteur du document posé.
     pub doc_h: f32,
     /// Scroll peint dans `frame` (le `scroll_y` de `Tab`
@@ -429,9 +441,14 @@ impl Tab {
             // ré-écrit par `put_paint` (Tab fait foi).
             csp: self.csp.clone(),
             linked_sheets: std::mem::take(&mut self.linked_sheets),
+            adopted_sheets: self.adopted_sheets.clone(),
             prev_styles: std::mem::take(&mut self.prev_styles),
             transitions: std::mem::take(&mut self.transitions),
             animations: std::mem::take(&mut self.animations),
+            // `pending_anim_births` reste sur `Tab` — ce ne sont
+            // pas des données de la passe, mais une file
+            // d'événements JS en attente de livraison.
+            anim_births: Vec::new(),
             doc_h: self.doc_h,
             scroll_y: self.scroll_y,
             spec_paint: std::mem::take(&mut self.spec_paint),
@@ -467,9 +484,16 @@ impl Tab {
         self.frame_nodes = p.frame_nodes;
         self.frame_bitmaps = p.frame_bitmaps;
         self.linked_sheets = p.linked_sheets;
+        self.adopted_sheets = p.adopted_sheets;
         self.prev_styles = p.prev_styles;
         self.transitions = p.transitions;
         self.animations = p.animations;
+        if self.pending_anim_births.len() < types::MAX_ANIM_BIRTHS {
+            self.pending_anim_births.extend(p.anim_births);
+            while self.pending_anim_births.len() > types::MAX_ANIM_BIRTHS {
+                self.pending_anim_births.pop_back();
+            }
+        }
         self.doc_h = p.doc_h;
         self.spec_paint = p.spec_paint;
         self.dirty = p.dirty;
@@ -1322,6 +1346,11 @@ pub(crate) fn styles_payload(
     for css in &p.linked_sheets {
         eng.add_css(css, Origin::Author);
     }
+    // `adoptedStyleSheets` : spec — feuilles construites,
+    // ordre du tableau, après les `<link>`/`<style>`.
+    for css in &p.adopted_sheets {
+        eng.add_css(css, Origin::Author);
+    }
     // Media queries évaluées contre le viewport RÉEL de la
     // session (demande PIPE→NAV : `max-width:1007` doit être
     // vrai à 800px, pas lue sur le 1024×768 par défaut) et
@@ -1335,7 +1364,11 @@ pub(crate) fn styles_payload(
         .collect();
     let now = Instant::now();
     update_transitions(&p.prev_styles, &mut p.transitions, &styles, &ord_of, now);
-    sync_animations(&mut p.animations, &styles, &ord_of, &eng, now);
+    let births = sync_animations(&mut p.animations, &styles, &ord_of, &eng, now);
+    if p.anim_births.len() < types::MAX_ANIM_BIRTHS {
+        p.anim_births.extend(births);
+        p.anim_births.truncate(types::MAX_ANIM_BIRTHS);
+    }
     apply_anim_overrides(
         &p.transitions,
         &mut p.animations,

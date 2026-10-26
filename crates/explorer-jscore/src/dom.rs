@@ -654,6 +654,12 @@ pub struct Dom {
     /// `<link>` en attente de fetch par la session
     /// (`Engine::drain_dyn_links`) — ordre d'émission.
     pub(crate) pending_dyn_links: Vec<NodeId>,
+    /// `document.adoptedStyleSheets` — `ObjId` des feuilles
+    /// adoptées posées par `set` (CAP-195 tranche 2) : la
+    /// session lit `cssRules[*].cssText` par feuille via
+    /// [`Engine::adopted_sheets_css`] pour les cascader en
+    /// feuilles auteur document (spec : après les `<link>`).
+    pub(crate) adopted_sheets: Vec<ObjId>,
     /// « Document ouvert à l'écriture » (JS-C35) — `true` tant
     /// que la page se charge : `document.write`/`writeln` y
     /// ajoutent à `<body>`. `document.close()` ou la
@@ -792,6 +798,7 @@ impl Dom {
             pending_dyn_imgs: Vec::new(),
             dyn_link_seen: HashMap::new(),
             pending_dyn_links: Vec::new(),
+            adopted_sheets: Vec::new(),
             dyn_frame_seen: HashSet::new(),
             pending_dyn_frames: Vec::new(),
             focused: Cell::new(None),
@@ -3348,11 +3355,55 @@ impl Dom {
             if tag.is_empty() {
                 continue;
             }
-            // Minimal implicit-close tolerance (li/p/tr/td/option).
-            if IMPLICIT_CLOSE.contains(&tag.as_str()) {
-                if let Some(&top) = stack.last() {
-                    if self.nodes[top as usize].tag == tag {
+            // Implicit-close par paires — « implied end tags »
+            // borné : `dd`/`dt` se ferment l'un l'autre, `tr`
+            // ferme `td`/`th` **puis** `tr`, etc. Dépile jusqu'à
+            // ce qu'une cible ait été poppée (traverse les
+            // intermédiaires, spec) — s'arrêter au premier
+            // closable laissait `tr` ouvert sous `tr>td`
+            // (mesuré w3.org, `EXPLORER_GEOM_TRACE`). Ne
+            // s'applique que si un ancêtre cible est présent —
+            // sinon l'élément reste niché (tolérant, aucune
+            // perte de contenu).
+            if let Some((_, targets)) = PAIRED_CLOSE.iter().find(|(t, _)| *t == tag) {
+                if stack
+                    .iter()
+                    .any(|&n| targets.contains(&self.nodes[n as usize].tag.as_str()))
+                {
+                    while let Some(&top) = stack.last() {
+                        let done = targets.contains(&self.nodes[top as usize].tag.as_str());
                         stack.pop();
+                        if done {
+                            break;
+                        }
+                    }
+                }
+            }
+            // HTML5 « in head » : un start-tag hors contenu head
+            // ferme `<head>` implicitement — w3.org sert `<body>`
+            // sans `</head>` littéral ; sans la règle le miroir
+            // niche `body` sous `head` et **tous** les chemins
+            // `element_path` divergent de l'arbre réel (gBCR 0×0
+            // global — mesuré w3.org, `EXPLORER_GEOM_TRACE`).
+            if !HEAD_TAGS.contains(&tag.as_str()) {
+                if let Some(hp) = stack
+                    .iter()
+                    .rposition(|&n| self.nodes[n as usize].tag == "head")
+                {
+                    // Ferme `head` et ses enfants ouverts, puis
+                    // spec « after head » : un entrant non
+                    // body/frameset/html synthétise `<body>`
+                    // implicite (parité de chemins avec le
+                    // tree-builder réel, qui fait de même).
+                    stack.truncate(hp);
+                    if !matches!(tag.as_str(), "body" | "frameset" | "html")
+                        && stack.iter().any(|&n| self.nodes[n as usize].tag == "html")
+                        && !stack.iter().any(|&n| self.nodes[n as usize].tag == "body")
+                    {
+                        let b = self.alloc(NodeKind::Element, "body");
+                        let t = *stack.last().unwrap_or(&parent);
+                        self.append(t, b);
+                        stack.push(b);
                     }
                 }
             }
@@ -3446,8 +3497,35 @@ fn contains_ci(hay: &str, needle: &str) -> bool {
     n.len() <= h.len() && h.windows(n.len()).any(|w| w.eq_ignore_ascii_case(n))
 }
 
-/// Tags that implicitly close a same-tag sibling.
-const IMPLICIT_CLOSE: &[&str] = &["li", "p", "tr", "td", "th", "option", "dt", "dd"];
+/// Implicit-close par paires (borné, spec « implied end
+/// tags ») : start-tag → **cibles** — le dépile traverse
+/// les intermédiaires et s'arrête dès qu'une cible a été
+/// poppée. `dd`/`dt` se ferment mutuellement ; `tr` ferme
+/// `td`/`th` en chemin **puis** `tr` ; `optgroup` traverse
+/// `option`. N'agit que si une cible est ancêtre ouverte.
+const PAIRED_CLOSE: &[(&str, &[&str])] = &[
+    ("li", &["dd", "dt", "li"]),
+    ("dd", &["dd", "dt"]),
+    ("dt", &["dd", "dt"]),
+    ("p", &["p"]),
+    ("tr", &["tr"]),
+    ("td", &["td", "th"]),
+    ("th", &["td", "th"]),
+    ("thead", &["thead", "tbody", "tfoot"]),
+    ("tbody", &["thead", "tbody", "tfoot"]),
+    ("tfoot", &["thead", "tbody", "tfoot"]),
+    ("option", &["option"]),
+    ("optgroup", &["optgroup"]),
+];
+
+/// Contenu admis en `<head>` — mode d'insertion HTML5
+/// « in head » (base/link/meta/script/style/title/template…).
+/// Tout autre start-tag ferme `<head>` implicitement ;
+/// `html`/`head` eux-mêmes n'ouvrent pas de fermeture.
+const HEAD_TAGS: &[&str] = &[
+    "base", "basefont", "bgsound", "font", "head", "html", "link", "meta", "noframes", "noscript",
+    "script", "style", "template", "title",
+];
 
 /// `tag` / `#id` / `.class` / `tag.class` / `tag#id` / `*` → parts.
 /// Sélecteur simple du sous-ensemble `Dom::query` — un

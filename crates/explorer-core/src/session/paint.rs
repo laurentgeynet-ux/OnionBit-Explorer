@@ -270,8 +270,10 @@ impl Session {
                 .into_iter()
                 .map(|(n, o)| (o, n))
                 .collect();
-        let touched: Vec<explorer_dom::NodeId> =
-            ords.iter().filter_map(|o| ord_to_node.get(o).copied()).collect();
+        let touched: Vec<explorer_dom::NodeId> = ords
+            .iter()
+            .filter_map(|o| ord_to_node.get(o).copied())
+            .collect();
         let r = match apply::journal_cover(&dom, &touched) {
             Some(t) => apply::relayout_subtree_payload(&mut p, &ctx, &dom, t, &canvas_ops),
             None => apply::relayout_dom_payload(&mut p, &ctx, &dom, &canvas_ops),
