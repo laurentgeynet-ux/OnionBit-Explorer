@@ -49,7 +49,11 @@ async fn relay_full(target: &str) {
     // suivies (302 → nœud token), bornes par défaut.
     let transport: Arc<dyn HttpTransport> =
         Arc::new(explorer_net::policy::RedirectTransport::wrap(inner, 5));
-    let proxy = MediaProxy::spawn(transport, "ExplorerTest".into())
+    // UA injecté : les panels IPTV filtrent souvent (VLC…) —
+    // `MEDIA_PROXY_FIELD_UA` permet de le choisir en vol.
+    let ua = std::env::var("MEDIA_PROXY_FIELD_UA")
+        .unwrap_or_else(|_| "ExplorerTest".into());
+    let proxy = MediaProxy::spawn(transport, ua)
         .await
         .expect("bind loopback");
 
