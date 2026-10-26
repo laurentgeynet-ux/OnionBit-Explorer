@@ -7,6 +7,26 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **Vol 2026-10-26 — correctifs de vol,
+  vague 2 (FIX-3, vols 13/16/17)**
+  — trois constats supplémentaires :
+  - **Images lazy-load jamais peintes**
+    (lemonde ~195 img, bbc home 0 %) :
+    `collect_images` retombe sur les
+    attributs lazy `data-src`/`data-lazy-src`/
+    `data-original`/`data-url`/`data-srcset`
+    quand `src`/`srcset` manque — le bootstrap
+    JS mort n'est plus requis.
+  - **`GET /frame` = viewport par défaut**
+    (sémantique instable : doc entier quand non
+    clampé, viewport quand clampé — 53 Mo de PNG)
+    — `?full=1` sert le document, `?x&y&w&h`
+    inchangé, `Session::scale()` exposé.
+  - **Scroll différé rapporte la projection** :
+    pendant une apply détachée, `Scroll` rend
+    `Scrolled{scroll_y}` projeté (position +
+    deltas en file), plus `Ignored` abandonné.
+
 - **Vol 2026-10-26 — correctifs de vol
   (FIX-3, `explorer-core` + `explorer-api`)**
   — quatre constats du rapport de vol :
