@@ -424,6 +424,14 @@ pub(crate) fn raw_length_px(
     if raw.len() > 5 && raw[..5].eq_ignore_ascii_case("calc(") && raw.ends_with(')') {
         return eval_calc(&raw[5..raw.len() - 1], pct_basis, em_basis, ctx);
     }
+    // `min()`/`max()`/`clamp()` (CSS Values 4 §9) — fonctions
+    // mathématiques au niveau valeur entière ; les arguments
+    // sont eux-mêmes des longueurs complètes (`calc` imbriqué
+    // compris). Vol 11 stripe : `clamp()`/`min()` dans les
+    // largeurs retombait à `auto` → items flex éclatés.
+    if let Some(v) = eval_math_fn(raw, pct_basis, em_basis, ctx) {
+        return Some(v);
+    }
     let len = parse_length(raw)?;
     #[allow(clippy::cast_possible_truncation)]
     Some(match len.unit {
@@ -438,6 +446,69 @@ pub(crate) fn raw_length_px(
         Unit::Vmax => len.value as f32 * ctx.viewport_w.max(ctx.viewport_h) / 100.0,
         u => (len.value * u.px_factor()?) as f32,
     })
+}
+
+/// `min(a, …)` / `max(a, …)` / `clamp(min, pref, max)`
+/// (CSS Values 4 §9) au niveau d'une valeur entière : chaque
+/// argument séparé par une virgule de **profondeur 0** est
+/// évalué par [`raw_length_px`] (`calc` imbriqué compris).
+/// `None` si ce n'est pas une de ces fonctions ou si la
+/// syntaxe casse — la dégradation usuelle (`auto`) reprend.
+fn eval_math_fn(raw: &str, pct_basis: f32, em_basis: f32, ctx: &BlockCtx) -> Option<f32> {
+    let t = raw.trim();
+    let (name, inner) = ["clamp", "min", "max"].into_iter().find_map(|n| {
+        if t.len() > n.len()
+            && t[..n.len()].eq_ignore_ascii_case(n)
+            && t[n.len()..].starts_with('(')
+            && t.ends_with(')')
+        {
+            Some((n, &t[n.len() + 1..t.len() - 1]))
+        } else {
+            None
+        }
+    })?;
+    // Virgules de niveau 0 seulement — les arguments peuvent
+    // contenir des parenthèses (`calc`, fonctions imbriquées).
+    let mut depth = 0i32;
+    let mut parts: Vec<String> = Vec::new();
+    let mut cur = String::new();
+    for ch in inner.chars() {
+        match ch {
+            '(' => {
+                depth += 1;
+                cur.push(ch);
+            }
+            ')' => {
+                depth -= 1;
+                if depth < 0 {
+                    return None;
+                }
+                cur.push(ch);
+            }
+            ',' if depth == 0 => parts.push(std::mem::take(&mut cur)),
+            _ => cur.push(ch),
+        }
+    }
+    if depth != 0 {
+        return None;
+    }
+    parts.push(cur);
+    let vals: Vec<f32> = parts
+        .iter()
+        .map(|p| raw_length_px(p, pct_basis, em_basis, ctx))
+        .collect::<Option<_>>()?;
+    match name {
+        "min" => vals.iter().copied().reduce(f32::min),
+        "max" => vals.iter().copied().reduce(f32::max),
+        _ => {
+            // `clamp(MIN, VAL, MAX)` = `max(MIN, min(VAL, MAX))`
+            // — un MIN > MAX laisse MIN gagner (spec §9.2).
+            if vals.len() != 3 {
+                return None;
+            }
+            Some(vals[0].max(vals[1].min(vals[2])))
+        }
+    }
 }
 
 /// Évalue l'intérieur d'un `calc(...)` en px : `term ((+|-) term)*`,

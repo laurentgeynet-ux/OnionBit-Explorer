@@ -304,6 +304,53 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   en plage astrale. Assertion stale
   `surrogate_bounds_degrade` réalignée
   (plage surrogate → astrale, f5d3fb7).
+- **Vol 21/22 — `text-overflow:
+  ellipsis` + `white-space:
+  nowrap`** (`explorer-layout`)
+  — le « … » est désormais
+  inséré au point de coupure
+  quand le texte déborde un
+  bloc à `overflow` ≠ `visible`
+  (mesuré dans la fonte du
+  fragment coupé ; les
+  fragments hors coupe sont
+  rognés à la mesure réelle).
+  Le fix a révélé que `nowrap`
+  n'empêchait **pas** les
+  coupures souples — garde
+  ajoutée dans le line-break
+  (seul `hard_after` force).
+  Régressions
+  `text_overflow_ellipsis_`
+  `insere_suspension`,
+  `text_overflow_clip_par_`
+  `defaut`,
+  `text_overflow_ellipsis_`
+  `sans_clip_inerte` (inline).
+
+- **Vol 11/20 — `min()`/`max()`/
+  `clamp()` dans les longueurs**
+  (`explorer-css`,
+  `explorer-layout`) — CSS
+  Values 4 §9 : les fonctions
+  mathématiques sont validées
+  en déclaration (`value_is_`
+  `valid_for` droppait
+  `width:min(50%,300px)` →
+  items flex éclatés stripe) et
+  évaluées par `raw_length_px`
+  (arguments séparés aux
+  virgules de profondeur 0,
+  `calc` imbriqué compris ;
+  `clamp` = `max(MIN,
+  min(VAL, MAX))`). Régressions
+  `min_max_clamp_resolus`,
+  `clamp_borne_min`,
+  `min_avec_calc_imbrique`
+  (modern) +
+  `min_max_clamp_conserves_`
+  `en_declaration` (cascade).
+
 - **Vol 18/19 — `flex-direction:
   column` fit-content**
   (`explorer-layout`) — hors

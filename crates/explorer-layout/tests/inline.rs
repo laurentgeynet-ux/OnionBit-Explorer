@@ -504,3 +504,62 @@ fn text_indent_premiere_ligne_seule() {
     let fx = p2.children[0].lines[0].fragments[0].rect.x;
     assert!(fx <= -9990.0, "indent négatif x={fx}");
 }
+
+/// Vol 21/22 : `text-overflow:ellipsis` — un fragment « … »
+/// est inséré au point de coupure quand le texte déborde un
+/// conteneur à `overflow:hidden` (discourse « Topics »
+/// tronqué net sans suspension).
+#[test]
+fn text_overflow_ellipsis_insere_suspension() {
+    let (dom, bx) = laid_w(
+        "<!doctype html><p>un titre beaucoup trop long pour tenir</p>",
+        "body { margin: 0 } p { width: 80px; white-space: nowrap; \
+         overflow: hidden; text-overflow: ellipsis; font-size: 10px }",
+        800.0,
+    );
+    let p = find(&bx, by_tag(&dom, "p"));
+    let anon = &p.children[0];
+    assert_eq!(anon.lines.len(), 1, "nowrap : une ligne");
+    let last = anon.lines[0].fragments.last().expect("fragment ellipsis");
+    assert_eq!(last.text, "…", "dernier fragment = suspension");
+    // Le « … » finit au bord droit du content box (x=0, w=80).
+    assert!(
+        (last.rect.x + last.rect.width - 80.0).abs() < 1.0,
+        "ellipsis au bord : {:?}",
+        last.rect
+    );
+    // Le fragment tronqué précédent se termine avant l'« … ».
+    let prev = &anon.lines[0].fragments[anon.lines[0].fragments.len() - 2];
+    assert!(
+        prev.rect.x + prev.rect.width <= last.rect.x + 0.6,
+        "troncature : {:?} vs {:?}",
+        prev.rect,
+        last.rect
+    );
+}
+
+/// `text-overflow:clip` (défaut) : aucun fragment « … ».
+#[test]
+fn text_overflow_clip_par_defaut() {
+    let (dom, bx) = laid_w(
+        "<!doctype html><p>un titre beaucoup trop long pour tenir</p>",
+        "body { margin: 0 } p { width: 80px; white-space: nowrap; overflow: hidden; font-size: 10px }",
+        800.0,
+    );
+    let p = find(&bx, by_tag(&dom, "p"));
+    let last = p.children[0].lines[0].fragments.last().expect("frag");
+    assert_ne!(last.text, "…", "clip : pas de suspension");
+}
+
+/// `ellipsis` sans clip (`overflow:visible`) : pas d'effet.
+#[test]
+fn text_overflow_ellipsis_sans_clip_inerte() {
+    let (dom, bx) = laid_w(
+        "<!doctype html><p>un titre beaucoup trop long pour tenir</p>",
+        "body { margin: 0 } p { width: 80px; white-space: nowrap; text-overflow: ellipsis; font-size: 10px }",
+        800.0,
+    );
+    let p = find(&bx, by_tag(&dom, "p"));
+    let last = p.children[0].lines[0].fragments.last().expect("frag");
+    assert_ne!(last.text, "…", "visible : pas de suspension");
+}
