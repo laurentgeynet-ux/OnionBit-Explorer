@@ -669,6 +669,12 @@ impl Session {
     }
 
     pub(crate) fn drain_script_net(&mut self, tab: TabId) {
+        // Disjoncteur (vol 25) : les drains `Cmd` attendent
+        // une réponse du worker — figé, chacun patienterait
+        // 30 s sous verrou.
+        if self.js_stalled(tab) {
+            return;
+        }
         // `WorkerLoad` (JS-C132) **avant** le drain `Cmd` :
         // le demandeur (thread moteur au premier `new Worker`)
         // est bloqué en `load()` — dispatcher le fetch async
@@ -814,7 +820,7 @@ impl Session {
         let Some((req_page, req_base, doc_policy, csp, _opaque)) =
             self.ctx_net_origin(tab, r.ctx, page, base)
         else {
-            tracing::debug!(tab, ctx = r.ctx, "dyn import : pas d'origine — rejet");
+            tracing::warn!(tab, ctx = r.ctx, "dyn import : pas d'origine — rejet");
             self.deliver_dyn_import_req(tab, r.ctx, r.seq, None, Vec::new());
             return;
         };
@@ -830,7 +836,7 @@ impl Session {
                 )
             })
         else {
-            tracing::debug!(tab, url = %r.url, "dyn import : résolution/CSP refusé — rejet");
+            tracing::warn!(tab, url = %r.url, "dyn import : résolution/CSP refusé — rejet");
             self.deliver_dyn_import_req(tab, r.ctx, r.seq, None, Vec::new());
             return;
         };
@@ -2532,6 +2538,9 @@ impl Session {
     /// `localStorage` vers la map d'origine + le profil, et
     /// les nouvelles requêtes réseau vers le scheduler.
     pub(crate) fn after_script(&mut self, tab: TabId) {
+        if self.js_stalled(tab) {
+            return;
+        }
         let Some((page, writes, map)) = self.tabs.get_mut(&tab).and_then(|e| {
             e.js.as_mut().map(|eng| {
                 (

@@ -369,27 +369,81 @@ pub(crate) fn meta_refresh(dom: &Dom) -> Option<(f64, Option<String>)> {
 /// méta refresh honorée : le document n'a rien d'autre à
 /// offrir, c'est le sens du repli. Une page riche avec un
 /// `noscript` annexe garde la spec : `None`.
+/// Re-parse le rawtext d'un `<noscript>` (scripting off)
+/// et applique la grammaire `meta_refresh` habituelle.
+fn noscript_refresh_of(dom: &Dom, n: NodeId) -> Option<(f64, Option<String>)> {
+    let text = dom.text_content(n).ok()?;
+    if text.trim().is_empty() {
+        return None;
+    }
+    let mut tb = explorer_html::TreeBuilder::new();
+    tb.push(&text);
+    tb.finish();
+    meta_refresh(&tb.into_dom())
+}
+
+/// `<meta http-equiv=refresh>` enfermée dans un
+/// `<noscript>` (vol google SERP, CAP-155) : scripting
+/// levé au parse, le contenu de `noscript` est rawtext —
+/// la méta n'existe jamais comme élément et
+/// [`meta_refresh`] la manque. Spec : ignorée tant que le
+/// scripting tourne. Repli produit, deux cas honorés :
+/// - **`noscript` dans le `head`** (vol 23 DDG `/html` :
+///   le méta de repli no-JS du head est un redirect
+///   d'entrée de gamme, indépendant du contenu du body) ;
+/// - **fallback pur** — tous les enfants éléments du
+///   `body` sont `noscript`/`script`, aucun texte non
+///   blanc hors repli : le document n'a rien d'autre à
+///   offrir.
+///
+/// Une page riche avec un `noscript` annexe **dans le
+/// body** garde la spec : `None`.
 pub(crate) fn noscript_meta_refresh(dom: &Dom) -> Option<(f64, Option<String>)> {
-    // Le `<body>` — aucun repli « page » sans lui.
+    // `head` et `body` en un seul balayage.
+    let mut head = None;
     let mut body = None;
     let mut queue = vec![dom.document()];
     while let Some(n) = queue.pop() {
-        if dom.tag_name(n).is_ok_and(|t| t == "body") {
-            body = Some(n);
+        match dom.tag_name(n) {
+            Ok("head") => head = Some(n),
+            Ok("body") => body = Some(n),
+            _ => {}
+        }
+        if head.is_some() && body.is_some() {
             break;
         }
         if let Ok(ch) = dom.children(n) {
             queue.extend(ch.iter().rev());
         }
     }
+    // Cas 1 — `noscript` descendant de `head`, toujours
+    // éligible (pattern no-JS de DDG, indépendant du body).
+    let mut noscripts = Vec::new();
+    if let Some(h) = head {
+        let mut q = vec![h];
+        while let Some(n) = q.pop() {
+            if dom.tag_name(n).is_ok_and(|t| t == "noscript") {
+                noscripts.push(n);
+            }
+            if let Ok(ch) = dom.children(n) {
+                q.extend(ch.iter().rev());
+            }
+        }
+    }
+    for n in &noscripts {
+        if let Some(r) = noscript_refresh_of(dom, *n) {
+            return Some(r);
+        }
+    }
+    // Cas 2 — fallback pur dans le `body`.
     let body = body?;
     let children = dom.children(body).ok()?;
-    let mut noscripts = Vec::new();
+    let mut body_noscripts = Vec::new();
     for c in children {
         match dom.data(c).ok()? {
             explorer_dom::NodeData::Element(_) => match dom.tag_name(c).ok()? {
                 "script" => {}
-                "noscript" => noscripts.push(c),
+                "noscript" => body_noscripts.push(c),
                 _ => return None, // contenu réel — spec.
             },
             // Texte non blanc hors repli → contenu réel.
@@ -397,18 +451,8 @@ pub(crate) fn noscript_meta_refresh(dom: &Dom) -> Option<(f64, Option<String>)> 
             _ => {}
         }
     }
-    // Re-parse du rawtext (scripting off) : la méta du
-    // repli devient un vrai élément — `meta_refresh`
-    // applique sa grammaire habituelle (première valide).
-    for n in noscripts {
-        let text = dom.text_content(n).ok()?;
-        if text.trim().is_empty() {
-            continue;
-        }
-        let mut tb = explorer_html::TreeBuilder::new();
-        tb.push(&text);
-        tb.finish();
-        if let Some(r) = meta_refresh(&tb.into_dom()) {
+    for n in body_noscripts {
+        if let Some(r) = noscript_refresh_of(dom, n) {
             return Some(r);
         }
     }

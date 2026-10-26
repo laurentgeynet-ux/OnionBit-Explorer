@@ -24,16 +24,51 @@
 use explorer_dom::NodeId;
 
 use crate::boxtree::{LayoutBox, Rect};
+use crate::transform::{box_transform, Affine};
 
-/// Union des rects du sous-arbre — la zone que la peinture
-/// peut couvrir (bornes de clip `overflow` ignorées à ce
-/// stade : l'union est une borne *conservative*, jamais
-/// restrictive).
+/// Union des rects du sous-arbre **dans le repère de `bx`**
+/// (avant sa propre transform, les transforms des
+/// descendants déjà appliquées) — la zone que la peinture
+/// peut couvrir (bornes de clip `overflow` ignorées :
+/// l'union est une borne *conservative*, jamais
+/// restrictive). Un enfant transformé peut déborder très
+/// loin de son rect layout : son bound suit la matrice.
 fn paint_bounds(bx: &LayoutBox) -> Rect {
     // Récursion ∝ profondeur de l'arbre → arêtes `deep` (R-24).
     bx.children.iter().fold(bx.rect, |acc, c| {
-        union(acc, explorer_common::deep(|| paint_bounds(c)))
+        let b = explorer_common::deep(|| paint_bounds(c));
+        // Bounds de l'enfant exprimés dans le repère de `bx` :
+        // sa propre `transform` s'applique à tout son
+        // sous-arbre (même portée que `PushTransform`).
+        let b = box_transform(c, &c.rect).map_or(b, |t| map_rect(t, b));
+        union(acc, b)
     })
+}
+
+/// Bounding-box du rect `r` sous la matrice `t` (les quatre
+/// coins transformés — la rotation élargit, comme le
+/// raster).
+fn map_rect(t: Affine, r: Rect) -> Rect {
+    let (x2, y2) = (r.x + r.width, r.y + r.height);
+    let pts = [
+        t.apply(r.x, r.y),
+        t.apply(x2, r.y),
+        t.apply(r.x, y2),
+        t.apply(x2, y2),
+    ];
+    let (mut x0, mut y0, mut x1, mut y1) = (f32::MAX, f32::MAX, f32::MIN, f32::MIN);
+    for (px, py) in pts {
+        x0 = x0.min(px);
+        y0 = y0.min(py);
+        x1 = x1.max(px);
+        y1 = y1.max(py);
+    }
+    Rect {
+        x: x0,
+        y: y0,
+        width: x1 - x0,
+        height: y1 - y0,
+    }
 }
 
 fn union(a: Rect, b: Rect) -> Rect {
@@ -130,19 +165,34 @@ fn hit_order(bx: &LayoutBox) -> Vec<usize> {
 
 #[must_use]
 pub fn hit_test(bx: &LayoutBox, x: f32, y: f32) -> Option<NodeId> {
-    if !contains(paint_bounds(bx), x, y) {
+    hit_test_m(bx, x, y, Affine::IDENTITY)
+}
+
+/// Descente sous une matrice cumulative `m` (produit des
+/// `transform` des ancêtres, origines résolues) : le point
+/// sondé est ramené dans le repère **non transformé** de la
+/// boîte par `m⁻¹` — les rects du layout restent exprimés
+/// avant transform, comme la display list qui les émet sous
+/// `PushTransform`. Une matrice non inversible (`scale(0)`)
+/// aplatit le sous-arbre : rien n'y est cliquable.
+fn hit_test_m(bx: &LayoutBox, x: f32, y: f32, m: Affine) -> Option<NodeId> {
+    // La transform propre de la boîte s'applique à elle-même
+    // ET à ses descendants (même portée que `PushTransform`).
+    let m = box_transform(bx, &bx.rect).map_or(m, |t| t.post_concat(m));
+    let (px, py) = m.invert()?.apply(x, y);
+    if !contains(paint_bounds(bx), px, py) {
         return None;
     }
     for i in hit_order(bx) {
         let child = &bx.children[i];
-        if let Some(n) = explorer_common::deep(|| hit_test(child, x, y)) {
+        if let Some(n) = explorer_common::deep(|| hit_test_m(child, x, y, m)) {
             return Some(n);
         }
     }
     if unhittable(bx) {
         return None;
     }
-    contains(bx.rect, x, y).then_some(bx.node).flatten()
+    contains(bx.rect, px, py).then_some(bx.node).flatten()
 }
 
 /// Hit-test conscient du scroll (issue #18) : `y` est en
@@ -163,8 +213,17 @@ pub fn hit_test_scrolled(bx: &LayoutBox, x: f32, y: f32, scroll_y: f32) -> Optio
 }
 
 fn hit_test_delta(bx: &LayoutBox, x: f32, y_vp: f32, delta: f32) -> Option<NodeId> {
-    let y = y_vp + delta;
-    if !contains(paint_bounds(bx), x, y) {
+    hit_test_delta_m(bx, x, y_vp, delta, Affine::IDENTITY)
+}
+
+/// Variante scrollée de [`hit_test_m`] : `m` cumule les
+/// `transform` d'ancêtres (inverse appliquée au point, même
+/// parité que la display list — vol : hit décalé sur
+/// élément transformé).
+fn hit_test_delta_m(bx: &LayoutBox, x: f32, y_vp: f32, delta: f32, m: Affine) -> Option<NodeId> {
+    let m = box_transform(bx, &bx.rect).map_or(m, |t| t.post_concat(m));
+    let (px, py) = m.invert()?.apply(x, y_vp + delta);
+    if !contains(paint_bounds(bx), px, py) {
         return None;
     }
     for i in hit_order(bx) {
@@ -178,12 +237,12 @@ fn hit_test_delta(bx: &LayoutBox, x: f32, y_vp: f32, delta: f32) -> Option<NodeI
         } else {
             delta
         };
-        if let Some(n) = explorer_common::deep(|| hit_test_delta(child, x, y_vp, d)) {
+        if let Some(n) = explorer_common::deep(|| hit_test_delta_m(child, x, y_vp, d, m)) {
             return Some(n);
         }
     }
     if unhittable(bx) {
         return None;
     }
-    contains(bx.rect, x, y).then_some(bx.node).flatten()
+    contains(bx.rect, px, py).then_some(bx.node).flatten()
 }

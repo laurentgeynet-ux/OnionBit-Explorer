@@ -907,6 +907,14 @@ pub struct SessionConfig {
     /// aligné sur `DEFAULT_MEM_LIMIT` du moteur : la
     /// protection reste le comportement nominal.
     pub js_mem_limit_mib: usize,
+    /// Disjoncteur « moteur figé » (vol 25 : worker jscore
+    /// saturé — chaque `recv_eval` patiente 30 s sous verrou
+    /// → API muette ~90 s). Après un timeout/`Dead`, les
+    /// appels moteur bloquants de l'onglet sont court-circuités
+    /// pendant cette durée — le verrou session est relâché
+    /// vite, l'onglet perd son JS le temps du refroidissement.
+    /// `Duration::ZERO` = disjoncteur désactivé. Défaut 10 s.
+    pub js_stall_cooldown: std::time::Duration,
 }
 
 impl Default for SessionConfig {
@@ -936,6 +944,7 @@ impl Default for SessionConfig {
             color_scheme: explorer_css::ColorScheme::default(),
             dom_journal_max_ops: 512,
             js_mem_limit_mib: 512,
+            js_stall_cooldown: std::time::Duration::from_secs(10),
         }
     }
 }

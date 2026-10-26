@@ -95,6 +95,7 @@ impl Session {
                     scroll_y: self.projected_scroll(tab),
                 });
             }
+            tracing::info!(tab, "input différé — paint en vol, rejeté comme ignored");
             return Ok(InputOutcome::Ignored);
         }
         match ev {
@@ -235,6 +236,7 @@ impl Session {
     /// l'action par défaut), bascule des contrôles puis
     /// `input`/`change`, focus sur les champs, `submit` des
     /// formulaires, navigation des liens.
+    #[allow(clippy::too_many_lines)] // séquence d'activation DOM — grandir ne factorise rien
     pub(crate) fn handle_click(
         &mut self,
         tab: TabId,
@@ -391,7 +393,22 @@ impl Session {
                 self.enqueue_nav_act(tab, act, false);
                 Ok(InputOutcome::Navigated)
             }
-            _ => Ok(InputOutcome::Ignored),
+            _ => {
+                // Vol 25 (airbnb cookie, canada « Français ») :
+                // `ignored` ne disait pas *pourquoi* — le motif
+                // est désormais tracé : pas de hit DOM, hit non
+                // actionnable (ni lien/champ/select/submit), ou
+                // `preventDefault` côté handler.
+                tracing::info!(
+                    tab,
+                    x,
+                    y,
+                    hit = node.is_some(),
+                    prevented,
+                    "click ignored — aucun contrôle/lien actionnable sous le point"
+                );
+                Ok(InputOutcome::Ignored)
+            }
         }
     }
 

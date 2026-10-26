@@ -402,9 +402,13 @@ fn main() {
 
 #[allow(clippy::too_many_lines)] // setup séquentiel — chaque bloc est documenté in situ
 async fn amain() {
-    tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::from_default_env())
-        .init();
+    // Défaut `info` sans `RUST_LOG` (vol 18 : les `warn`
+    // iframe étaient perdus — le filtre vide ne passe que
+    // `error` ; le daemon est un hôte de diagnostic, les
+    // refus d'embarquement/sous-ressources doivent sortir).
+    let filter = EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| EnvFilter::new("info"));
+    tracing_subscriber::fmt().with_env_filter(filter).init();
     let mut cfg = DaemonConfig::from_env();
     let cli = parse_args();
     if let Some(p) = cli.port {
@@ -486,8 +490,15 @@ async fn amain() {
                 // `sync_dom` tournent en `spawn_blocking`
                 // avec le moteur extrait — le verrou n'est
                 // tenu qu'au take/commit (étape 53f).
+                // Yield entre onglets (vol 15 cdiscount :
+                // famine du flux API sous JS continu — les
+                // phases `commit` de chaque pompe tiennent
+                // le Mutex en livrées moteur ; céder le
+                // tour laisse les handlers HTTP passer
+                // entre deux onglets).
                 for tab in &tabs {
                     explorer_core::pump_timers_shared(&s, *tab).await;
+                    tokio::task::yield_now().await;
                 }
                 // Un timer peut émettre `location.href` —
                 // les intentions sont honorées ici, hors

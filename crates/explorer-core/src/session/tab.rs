@@ -152,6 +152,9 @@ impl Tab {
                                  // son drapeau et les tampons qui lui appartenaient
                                  // (53f) ne doivent pas survivre à la restauration.
         self.js_detached = None;
+        // Moteur neuf restauré — le disjoncteur de l'ancien
+        // contexte ne survit pas (vol 25).
+        self.js_stall_until = None;
         self.js_pending_net.clear();
         self.js_pending_crypto.clear();
         self.js_pending_dyn.clear();

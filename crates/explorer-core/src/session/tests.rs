@@ -2527,3 +2527,30 @@ async fn deferred_scroll_reports_projected_position() {
     s.drain_deferred_inputs(tab);
     assert_eq!(s.tabs.get(&tab).unwrap().scroll_y, 1000.0);
 }
+
+/// Vol 23 DDG `/html` — `noscript` **dans le head** avec
+/// body riche : le redirect no-JS est honoré quand même
+/// (pattern d'entrée de gamme, indépendant du contenu).
+#[test]
+fn noscript_head_meta_refresh_honored_on_rich_page() {
+    let mut tb = TreeBuilder::new();
+    tb.set_scripting(true);
+    tb.push("<html><head><noscript><meta http-equiv=refresh content=\"0;url=/?q=x\"></noscript></head><body><form>q</form><p>résultats</p></body></html>");
+    tb.finish();
+    let r = noscript_meta_refresh(&tb.into_dom());
+    assert_eq!(r.and_then(|(_, u)| u).as_deref(), Some("/?q=x"));
+}
+
+/// Vol 25 (kayak) — signature du disjoncteur « moteur
+/// figé » : `Dead` et l'éval dépassée du proxy arment ;
+/// une vraie exception JS n'arme pas.
+#[test]
+fn engine_stall_signature() {
+    assert!(Session::is_engine_stall(&explorer_js::JsError::Dead));
+    assert!(Session::is_engine_stall(&explorer_js::JsError::Uncaught(
+        "moteur figé — éval dépassée".into()
+    )));
+    assert!(!Session::is_engine_stall(&explorer_js::JsError::Uncaught(
+        "TypeError: x is not a function".into()
+    )));
+}

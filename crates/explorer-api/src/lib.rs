@@ -86,23 +86,50 @@ fn spawn_console_recorder(session: &Arc<tokio::sync::Mutex<Session>>, ring: &Con
     tokio::spawn(async move {
         loop {
             match rx.recv().await {
-                Ok(CoreEvent::PipelineError { tab, message }) => {
-                    if let Some(t) = tab {
-                        let mut g = ring
-                            .lock()
-                            .unwrap_or_else(std::sync::PoisonError::into_inner);
-                        let q = g.entry(t).or_default();
-                        if q.len() >= CONSOLE_RING {
-                            q.pop_front();
-                        }
-                        q.push_back(message);
-                    }
-                }
-                Ok(_) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
+                Ok(ev) => record_console_event(&ring, &ev),
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
                 Err(tokio::sync::broadcast::error::RecvError::Closed) => return,
             }
         }
     });
+}
+
+/// Un événement → mutation du ring console (fonction pure
+/// — testable sans tâche). Deux règles :
+/// - `PipelineError{tab}` → poussé sous le cap
+///   [`CONSOLE_RING`] ;
+/// - `Navigated{tab}` → **le ring de l'onglet est vidé**
+///   (vol 24 : erreurs substack encore visibles sur
+///   ghost.org — attribution ambiguë). Le canal broadcast
+///   est ordonné : les erreurs émises avant `Navigated`
+///   partent avec lui, celles de la nouvelle page
+///   survivent — « ring = erreurs de la page courante ».
+fn record_console_event(ring: &ConsoleRing, ev: &CoreEvent) {
+    match ev {
+        CoreEvent::Navigated { tab, .. } => {
+            if let Some(q) = ring
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .get_mut(tab)
+            {
+                q.clear();
+            }
+        }
+        CoreEvent::PipelineError {
+            tab: Some(t),
+            message,
+        } => {
+            let mut g = ring
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let q = g.entry(*t).or_default();
+            if q.len() >= CONSOLE_RING {
+                q.pop_front();
+            }
+            q.push_back(message.clone());
+        }
+        _ => {}
+    }
 }
 
 /// Construit le routeur de l'API. `session` est injectée par
@@ -1129,4 +1156,58 @@ fn media_event_json(ev: &CoreEvent) -> (&'static str, String) {
     // Le motif d'appel ne retient que les variantes média ;
     // un appel direct hors bras dégrade en event muet.
     explorer_core::media_event_json(ev).unwrap_or(("media", String::new()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn console_ring_vide_a_la_navigation() {
+        // Vol 24 : les erreurs du site précédent ne doivent
+        // plus être attribuées à la nouvelle page.
+        let ring = ConsoleRing::default();
+        let tab: TabId = 7;
+        let err = |m: &str| CoreEvent::PipelineError {
+            tab: Some(tab),
+            message: m.to_string(),
+        };
+        record_console_event(&ring, &err("avant nav"));
+        record_console_event(
+            &ring,
+            &CoreEvent::Navigated {
+                tab,
+                url: "https://ghost.org".to_string(),
+                title: None,
+            },
+        );
+        assert!(
+            ring.lock()
+                .unwrap()
+                .get(&tab)
+                .is_none_or(std::collections::VecDeque::is_empty),
+            "le ring doit être vidé à Navigated"
+        );
+        record_console_event(&ring, &err("après nav"));
+        let g = ring.lock().unwrap();
+        assert_eq!(g[&tab].len(), 1, "les erreurs post-nav restent");
+        assert_eq!(g[&tab][0], "après nav");
+    }
+
+    #[test]
+    fn console_ring_cap_tenu() {
+        let ring = ConsoleRing::default();
+        let tab: TabId = 1;
+        for i in 0..(CONSOLE_RING + 5) {
+            record_console_event(
+                &ring,
+                &CoreEvent::PipelineError {
+                    tab: Some(tab),
+                    message: format!("e{i}"),
+                },
+            );
+        }
+        let g = ring.lock().unwrap();
+        assert_eq!(g[&tab].len(), CONSOLE_RING);
+    }
 }
