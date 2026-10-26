@@ -2476,3 +2476,19 @@ fn color_mix_resout_espaces() {
         Some("rgb(0,128,0)")
     );
 }
+
+/// Vol 11 stripe : `min()`/`max()`/`clamp()` dans une
+/// déclaration de longueur ne sont plus droppés par la
+/// validation (`width:min(50%,300px)` retombait à `auto`).
+#[test]
+fn min_max_clamp_conserves_en_declaration() {
+    let f = fixture();
+    let mut e = StyleEngine::new();
+    e.add_css(
+        "div { width: min(50%, 300px); max-width: clamp(100px, 50%, 300px) }",
+        Origin::Author,
+    );
+    let s = e.compute(&f.dom, f.div, &env());
+    assert_eq!(s.get("width"), Some("min(50%, 300px)"));
+    assert_eq!(s.get("max-width"), Some("clamp(100px, 50%, 300px)"));
+}

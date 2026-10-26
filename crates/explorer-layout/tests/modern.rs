@@ -1129,3 +1129,45 @@ fn table_caption_side_top() {
         td.rect.y
     );
 }
+
+/// Vol 11 stripe : `min()`/`max()`/`clamp()` (CSS Values 4
+/// §9) sont résolus comme longueurs complètes — avant,
+/// `width:min(50%,300px)` retombait à `auto` et les items
+/// flex s'éclataient à leur contenu.
+#[test]
+fn min_max_clamp_resolus() {
+    let (dom, bx) = laid(
+        "<!doctype html><div id=a>x</div><div id=b>x</div><div id=c>x</div>",
+        "body { margin: 0 } #a { width: min(50%, 300px); height: 10px } \
+         #b { width: max(50%, 300px); height: 10px } \
+         #c { width: clamp(100px, 50%, 300px); height: 10px }",
+    );
+    let a = find(&bx, by_id(&dom, "a"));
+    let b = find(&bx, by_id(&dom, "b"));
+    let c = find(&bx, by_id(&dom, "c"));
+    assert!(approx(a.rect.width, 300.0), "min : {}", a.rect.width);
+    assert!(approx(b.rect.width, 400.0), "max : {}", b.rect.width);
+    assert!(approx(c.rect.width, 300.0), "clamp haut : {}", c.rect.width);
+}
+
+/// `clamp` borné par MIN quand la valeur préférée est basse.
+#[test]
+fn clamp_borne_min() {
+    let (dom, bx) = laid(
+        "<!doctype html><div id=c>x</div>",
+        "body { margin: 0 } #c { width: clamp(500px, 10%, 600px); height: 10px }",
+    );
+    let c = find(&bx, by_id(&dom, "c"));
+    assert!(approx(c.rect.width, 500.0), "clamp bas : {}", c.rect.width);
+}
+
+/// `calc` imbriqué dans `min` (arguments profondeur>0).
+#[test]
+fn min_avec_calc_imbrique() {
+    let (dom, bx) = laid(
+        "<!doctype html><div id=a>x</div>",
+        "body { margin: 0 } #a { width: min(calc(100% - 100px), 500px); height: 10px }",
+    );
+    let a = find(&bx, by_id(&dom, "a"));
+    assert!(approx(a.rect.width, 500.0), "min(calc) : {}", a.rect.width);
+}

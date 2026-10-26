@@ -533,11 +533,16 @@ fn named_color(name: &str) -> Option<Color> {
 #[must_use]
 pub fn value_is_valid_for(name: &str, value: &str) -> bool {
     let v = value.trim();
-    // `var()`/`calc()`/`attr()` sont résolus plus tard — la
-    // validation syntaxique ici les laisse passer.
+    // `var()`/`calc()`/`attr()`/`min()`/`max()`/`clamp()`
+    // sont résolus plus tard — la validation syntaxique ici
+    // les laisse passer (vol 11 stripe : `width:min(50%,…)`
+    // droppé → items éclatés à la taille de contenu).
     if v.contains("var(")
         || v.contains("calc(")
         || v.contains("attr(")
+        || v.contains("min(")
+        || v.contains("max(")
+        || v.contains("clamp(")
         || matches!(
             v.to_ascii_lowercase().as_str(),
             "inherit" | "initial" | "unset" | "revert" | "revert-layer"
