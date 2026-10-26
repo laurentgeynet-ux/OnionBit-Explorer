@@ -7,6 +7,16 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **Vol 26 — `input`/`textarea`/
+  `select` cadre UA**
+  (`explorer-css`) — la feuille
+  UA ne donnait de bordure
+  qu'à `button` : les champs
+  s'affichaient sans cadre
+  (francetravail). Règle UA
+  `border:1px solid #767676;
+  background-color:#fff`.
+
 - **Vol 28 — `<iframe>` sans
   dimensions = 300×150**
   (`explorer-layout`) — boîte

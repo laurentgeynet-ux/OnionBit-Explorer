@@ -2381,6 +2381,7 @@ input, textarea {
    explicite et neutralisait `align-items:stretch` en
    flex (R-109 — zone morte mesurée sur github). */
 input { min-height: 1.2em }
+input, textarea, select { border: 1px solid #767676; background-color: #fff }
 select { border: 1px solid #767676; padding: 1px 4px }
 button { border: 1px solid #767676; padding: 1px 6px; background-color: #eee }
 input[type=submit], input[type=button], input[type=reset] {
