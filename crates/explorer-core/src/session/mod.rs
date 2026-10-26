@@ -1139,6 +1139,12 @@ impl Session {
         self.viewport
     }
 
+    /// Facteur DPI courant (px physiques par px CSS).
+    #[must_use]
+    pub fn scale(&self) -> f32 {
+        self.scale
+    }
+
     /// Change viewport + DPI ; invalide toutes les frames
     /// (le re-render des onglets chargés est différé à
     /// `rerender` — l'appelant pilote).

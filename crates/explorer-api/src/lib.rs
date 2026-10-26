@@ -313,21 +313,27 @@ async fn close_tab(State(st): State<ApiState>, Path(id): Path<TabId>) -> Respons
 
 /// Paramètres de `GET /frame` (étape 55) — région en
 /// pixels physiques, comme les `rects` de
-/// `frame_invalidated`. Incomplet (une coordonnée manque) =
-/// frame entière, pour rester tolérant côté client.
+/// `frame_invalidated`. `full=1` = document entier (borne
+/// `MAX_FRAME_DIM` : un document plus haut n'a jamais de
+/// frame pleine — la tranche viewport est servie).
 #[derive(serde::Deserialize)]
 struct FrameRegionQuery {
     x: Option<u32>,
     y: Option<u32>,
     w: Option<u32>,
     h: Option<u32>,
+    full: Option<u8>,
 }
 
 /// `GET /api/tabs/{id}/frame` → `image/png` (pull ADR-0004).
 /// Le pull fait avancer les transitions CSS (étape 45) :
 /// l'UI cadence les frames, le moteur échantillonne le
-/// progrès à chaque appel. `?x=&y=&w=&h=` (px physiques,
-/// étape 55) ne sert que la région demandée.
+/// progrès à chaque appel. **Défaut = viewport courant**
+/// (contrat vols 13/17 : la taille servie ne dépend plus
+/// de `doc_h` — un document non clampé ne renvoie plus un
+/// PNG de 50 Mio) ; `?x=&y=&w=&h=` (px physiques, étape
+/// 55) sert la région demandée ; `?full=1` sert toute la
+/// frame stockée (comportement historique, borné).
 async fn frame(
     State(st): State<ApiState>,
     Path(id): Path<TabId>,
@@ -335,9 +341,26 @@ async fn frame(
 ) -> Response {
     let mut session = st.session.lock().await;
     let _ = session.tick_animations(id);
-    let png = match (q.x, q.y, q.w, q.h) {
-        (Some(rx), Some(ry), Some(rw), Some(rh)) => session.frame_png_region(id, rx, ry, rw, rh),
-        _ => session.frame_png(id),
+    let png = match (q.x, q.y, q.w, q.h, q.full) {
+        (Some(rx), Some(ry), Some(rw), Some(rh), _) => session.frame_png_region(id, rx, ry, rw, rh),
+        (.., Some(1)) => session.frame_png(id),
+        // Défaut = la tranche viewport en px physiques ; la
+        // région est clippée par `frame_region` — une frame
+        // plus petite (doc court, fenêtre raster) revient
+        // entière, jamais étirée.
+        _ => {
+            let (vw, vh) = session.viewport();
+            let s = session.scale().max(f32::EPSILON);
+            #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+            // viewport px CSS ≥ 0, ×scale fini — `as` borne à 0.
+            let (pw, ph) = (
+                (vw * s).round().max(0.0) as u32,
+                (vh * s).round().max(0.0) as u32,
+            );
+            session
+                .frame_png_region(id, 0, 0, pw.max(1), ph.max(1))
+                .or_else(|| session.frame_png(id))
+        }
     };
     match png {
         // Un corps vide n'est jamais un PNG valide — servi
