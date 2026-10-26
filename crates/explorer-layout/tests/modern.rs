@@ -474,6 +474,53 @@ fn grid_repeat() {
     assert!(approx(c.rect.width, 100.0), "{}", c.rect.width);
 }
 
+/// Vol 2026-10-26 (reddit shreddit) — `grid-column: 1 / -1`
+/// = toutes les pistes : la ligne négative `-1` désigne la
+/// bordure APRÈS la dernière piste (spec §7.1). Sans ça, un
+/// item demandant `1 / -1` retombait en placement auto sur
+/// la seule première piste (`minmax(0,1fr)` ignorée →
+/// commentaires collapsés à la piste avatar 32 px).
+#[test]
+fn grid_column_span_toutes_pistes_ligne_negative() {
+    let (dom, bx) = laid(
+        "<!doctype html><section style=\"width:400px\">\
+         <div id=\"a\">avatar</div>\
+         <div id=\"c\">commentaire pleine largeur</div></section>",
+        "body { margin: 0 } section { display: grid; \
+         grid-template-columns: 32px minmax(0, 1fr) } \
+         #a { grid-column: 1 } #c { grid-column: 1 / -1; height: 10px }",
+    );
+    let c = find(&bx, by_id(&dom, "c"));
+    assert!(
+        approx(c.rect.width, 400.0),
+        "item 1/-1 : w={} attendu 400 (toutes les pistes)",
+        c.rect.width
+    );
+    assert!(approx(c.rect.x, 0.0), "x={}", c.rect.x);
+}
+
+/// `grid-column` à bornes négatives mixtes : `2 / -1` couvre
+/// de la 2e piste à la fin — la première piste reste libre.
+#[test]
+fn grid_column_depart_a_ligne_negative() {
+    let (dom, bx) = laid(
+        "<!doctype html><section style=\"width:400px\">\
+         <div id=\"a\">x</div>\
+         <div id=\"c\">y</div></section>",
+        "body { margin: 0 } section { display: grid; \
+         grid-template-columns: 32px minmax(0, 1fr) 40px } \
+         #a { grid-column: 1 } #c { grid-column: 2 / -1; height: 10px }",
+    );
+    let c = find(&bx, by_id(&dom, "c"));
+    assert!(approx(c.rect.x, 32.0), "x={}", c.rect.x);
+    assert!(
+        approx(c.rect.width, 400.0 - 32.0),
+        "2/-1 : w={} attendu {}",
+        c.rect.width,
+        400.0 - 32.0
+    );
+}
+
 // ── R-5 : grid MVP+ ──────────────────────────────────────────
 
 #[test]

@@ -7,6 +7,25 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **Vol 2026-10-26 — `grid-column`
+  à lignes négatives** (`explorer-
+  layout`) — `-1` désigne la
+  bordure après la dernière piste
+  (spec §7.1) : `grid-column:
+  1 / -1` couvre désormais toutes
+  les colonnes — auparavant un
+  parse `usize` échouait et
+  l'item retombait en placement
+  auto sur la première piste
+  (`minmax(0,1fr)` ignorée →
+  commentaires shreddit/reddit
+  collapsés à la piste avatar
+  32 px). Régressions
+  `grid_column_span_toutes_pistes_
+  ligne_negative`,
+  `grid_column_depart_a_ligne_
+  negative` (modern).
+
 - **Vol 2026-10-26 — échecs de
   sous-ressources en console**
   (`explorer-core`) — un `<link>`/

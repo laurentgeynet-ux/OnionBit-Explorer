@@ -154,7 +154,11 @@ fn parse_tracks(raw: &str, fs: f32, ctx: &BlockCtx, cb: f32) -> (Vec<Track>, Lin
 /// résout `<ident>-start` côté début / `<ident>-end` côté
 /// fin (`grid-column: content` couvre ainsi la piste
 /// `[content-start]…[content-end]` — squelette MDN).
-fn placement(raw: Option<&str>, names: &[(String, usize)]) -> (Option<usize>, usize) {
+fn placement(
+    raw: Option<&str>,
+    names: &[(String, usize)],
+    ntracks: usize,
+) -> (Option<usize>, usize) {
     let Some(raw) = raw else {
         return (None, 1);
     };
@@ -176,8 +180,18 @@ fn placement(raw: Option<&str>, names: &[(String, usize)]) -> (Option<usize>, us
         if let Some(n) = s.strip_prefix("span ").and_then(|v| v.trim().parse().ok()) {
             return (None, Some(n));
         }
-        if let Ok(v) = s.parse::<usize>() {
-            return (v.checked_sub(1), None);
+        if let Ok(v) = s.parse::<i32>() {
+            // Lignes 1-based : `-1` = bordure après la
+            // dernière piste (`grid-column: 1 / -1` =
+            // toutes les colonnes — vol 2026-10-26, les
+            // commentaires shreddit s'effondraient à la
+            // seule piste avatar 32 px).
+            let line = if v > 0 {
+                v - 1
+            } else {
+                (i32::try_from(ntracks).unwrap_or(i32::MAX) + 1 + v).max(0)
+            };
+            return (usize::try_from(line).ok(), None);
         }
         (named_line(s, suffix), None)
     };
@@ -437,8 +451,12 @@ pub(crate) fn flow_grid_children(
         let area_rect = cst.get("grid-area").and_then(|a| {
             let a = a.trim();
             areas.get(a).copied().or_else(|| {
-                let parts: Vec<(Option<usize>, usize)> =
-                    a.split('/').map(|p| placement(Some(p), &[])).collect();
+                let n_r = row_tracks.len().max(1);
+                let parts: Vec<(Option<usize>, usize)> = a
+                    .split('/')
+                    .enumerate()
+                    .map(|(i, p)| placement(Some(p), &[], if i % 2 == 0 { n_r } else { ncols }))
+                    .collect();
                 if parts.len() == 4 {
                     // r / c / r2 / c2 → (col, span_c, row, span_r)
                     let (r0, _) = parts[0];
@@ -463,8 +481,8 @@ pub(crate) fn flow_grid_children(
                 }
             })
         });
-        let (mut start_c, mut span_c) = placement(cst.get("grid-column"), &col_names);
-        let (mut start_r, mut span_r) = placement(cst.get("grid-row"), &row_names);
+        let (mut start_c, mut span_c) = placement(cst.get("grid-column"), &col_names, ncols);
+        let (mut start_r, mut span_r) = placement(cst.get("grid-row"), &row_names, rows_lim);
         if let Some((c0, r0, sc, sr)) = area_rect {
             start_c = Some(c0);
             span_c = sc;
