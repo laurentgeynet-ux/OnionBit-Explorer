@@ -2308,7 +2308,7 @@ tfoot { display: table-footer-group }
 tr { display: table-row }
 col { display: table-column }
 colgroup { display: table-column-group }
-caption { display: block }
+caption { display: table-caption }
 [hidden], head, script, style, link, meta, title, template,
 area, base, basefont, datalist, param, source, track,
 frame { display: none }

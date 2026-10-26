@@ -1770,7 +1770,13 @@ fn flow_children(
     // flux est alors une ligne nouvelle (le curseur).
     let mut inline_anchor: Option<f32> = None;
     let count = bx.children.len();
+    // Fin (exclue) de la dernière suite emballée en table
+    // anonyme (§17.2.1) — les indices déjà posés sont sautés.
+    let mut skip_until = 0usize;
     for i in 0..count {
+        if i < skip_until {
+            continue;
+        }
         let (kind, cst) = {
             let c = &bx.children[i];
             (c.kind, c.style.clone())
@@ -1917,6 +1923,101 @@ fn flow_children(
                 fl,
                 cb_h,
             );
+            continue;
+        }
+
+        // §17.2.1 : une suite d'enfants « internes de table »
+        // (`table-cell`, `table-row`, groupes de rangs) hors
+        // d'un parent `display:table` est emballée dans une
+        // table ANONYME — sans quoi les cartes posées en
+        // `display:table-cell` sous un conteneur `block`
+        // (IGN `section.hspotlight/upcoming`, vol 19)
+        // s'empilaient en colonne pleine largeur au lieu de
+        // former leurs rangées. Les blancs inter-cellules
+        // rejoignent l'emballage (§17.2.1 : ignorés dans la
+        // table), comme `ignorable_in_table`.
+        let cdisp = cst.get_or("display", "block");
+        if matches!(
+            cdisp,
+            "table-cell"
+                | "table-row"
+                | "table-row-group"
+                | "table-header-group"
+                | "table-footer-group"
+        ) {
+            let internal = |c: &LayoutBox| {
+                matches!(
+                    c.display(),
+                    "table-cell"
+                        | "table-row"
+                        | "table-row-group"
+                        | "table-header-group"
+                        | "table-footer-group"
+                ) && !c.out_of_flow()
+                    && !matches!(c.style.get("float"), Some("left" | "right"))
+            };
+            let mut end = i;
+            while end < count
+                && (internal(&bx.children[end])
+                    || crate::tables::ignorable_in_table(&bx.children[end]))
+            {
+                end += 1;
+            }
+            // Emballage temporaire : les enfants de la suite
+            // sont déplacés sous une boîte anonyme
+            // `display:table`, posés par l'algorithme table
+            // (cellules nues → rang anonyme, cf.
+            // `collect_grid`), puis réinsérés à leur indice —
+            // l'arbre garde sa forme, seule la géométrie change.
+            let mut wstyle = bx.style.clone();
+            wstyle.set("display", "table");
+            let mut wrapper = LayoutBox {
+                kind: BoxKind::AnonymousBlock,
+                node: None,
+                style: wstyle,
+                text: None,
+                children: bx.children.drain(i..end).collect(),
+                lines: Vec::new(),
+                rect: Rect::default(),
+                position: Position::Static,
+                float: Float::None,
+                overflow: Overflow::default(),
+                z_index: 0,
+                intrinsic: None,
+                control_checked: false,
+                slot: crate::boxtree::BoxSlot::default(),
+                height_raised: false,
+                fc_root: false,
+                marker_ordinal: 0,
+            };
+            let gap = if first && adjoining_top {
+                0.0
+            } else {
+                prev_margin.map_or(0.0, MarginRun::value)
+            };
+            let used = crate::tables::layout_table(
+                &mut wrapper,
+                content_x,
+                cursor + gap,
+                content_w,
+                ctx,
+                fs,
+                None,
+            );
+            let cells = std::mem::take(&mut wrapper.children);
+            bx.children.splice(i..i, cells);
+            // La suite est posée : les itérations suivantes la
+            // sautent (les indices sont restaurés à l'identique
+            // par la réinsertion).
+            skip_until = end;
+            cursor += gap + used;
+            flow_bottom = cursor;
+            // La table anonyme établit un BFC : ni ses marges
+            // (nulles) ni celles des cellules ne traversent —
+            // la chaîne repart à zéro.
+            prev_margin = Some(MarginRun::default());
+            first = false;
+            inline_anchor = None;
             continue;
         }
 
