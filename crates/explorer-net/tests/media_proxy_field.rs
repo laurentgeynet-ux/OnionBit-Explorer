@@ -21,15 +21,39 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[ignore = "terrain : exige le serveur IPTV local sur :8000"]
 async fn proxy_relaye_flux_vod_reel() {
-    let transport: Arc<dyn HttpTransport> = Arc::new(AutoClient::new(
+    relay("/movie/user/user/1001.mp4", "http://127.0.0.1:8000").await;
+}
+
+/// Vol réseau réel — cible fournie par `MEDIA_PROXY_FIELD_URL`
+/// (aucune URL ni identifiant dans le dépôt : serveur privé).
+/// Même pile que le daemon (`RedirectTransport` — les panels
+/// IPTV redirigent vers le nœud de flux).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "terrain : exige MEDIA_PROXY_FIELD_URL=<url flux>"]
+async fn proxy_relaye_flux_env() {
+    let url = std::env::var("MEDIA_PROXY_FIELD_URL")
+        .expect("MEDIA_PROXY_FIELD_URL requis");
+    relay_full(&url).await;
+}
+
+async fn relay(path: &str, base: &str) {
+    relay_full(&format!("{base}{path}")).await;
+}
+
+async fn relay_full(target: &str) {
+    let inner: Arc<dyn HttpTransport> = Arc::new(AutoClient::new(
         Arc::new(TlsConnector::web_roots()),
         HttpConfig::default(),
     ));
+    // Même pile que le daemon pour les flux : redirections
+    // suivies (302 → nœud token), bornes par défaut.
+    let transport: Arc<dyn HttpTransport> =
+        Arc::new(explorer_net::policy::RedirectTransport::wrap(inner, 5));
     let proxy = MediaProxy::spawn(transport, "ExplorerTest".into())
         .await
         .expect("bind loopback");
 
-    let full = proxy.url("http://127.0.0.1:8000/movie/user/user/1001.mp4");
+    let full = proxy.url(target);
     let path = full
         .strip_prefix(&format!("http://{}", proxy.addr()))
         .expect("path");
@@ -46,14 +70,23 @@ async fn proxy_relaye_flux_vod_reel() {
     .await
     .expect("écriture");
     let mut buf = Vec::new();
-    s.read_to_end(&mut buf).await.expect("lecture");
+    // Live `.ts` : le serveur peut ignorer `Range` → flux
+    // infini ; on borne à 20 s et on garde le partiel.
+    let _ = tokio::time::timeout(
+        std::time::Duration::from_secs(20),
+        s.read_to_end(&mut buf),
+    )
+    .await;
     let txt = String::from_utf8_lossy(&buf);
     // FileResponse honore Range → 206 + content-range.
     assert!(
         txt.contains("206") || txt.contains("200"),
         "réponse proxy : {txt}"
     );
-    // Corps MP4 présent (signature `ftyp` visible dans le flux).
+    // Corps présent : MP4 (`ftyp`) ou MPEG-TS (sync `0x47`
+    // cadencée 188 o) selon le flux servi.
     assert!(buf.len() > 100, "corps vide : {} octets", buf.len());
-    assert!(buf.windows(4).any(|w| w == b"ftyp"), "pas de signature mp4");
+    let mp4 = buf.windows(4).any(|w| w == b"ftyp");
+    let ts = buf.iter().filter(|&&b| b == 0x47).count() > 50;
+    assert!(mp4 || ts, "ni signature mp4 ni trames ts relais");
 }
