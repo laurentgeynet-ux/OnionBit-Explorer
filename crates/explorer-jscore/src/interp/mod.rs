@@ -2658,7 +2658,15 @@ impl Engine {
             return Err(self.range_error("script execution limit exceeded"));
         }
         if self.heap.over_limit() {
-            return Err(self.range_error("heap memory limit exceeded"));
+            // Le drapeau est *estimé* (posé à l'alloc, recalculé
+            // au sweep) — les déchets entre deux GC peuvent le
+            // faire passer : collecter d'abord, ne tuer que sur
+            // dépassement **vivant** (mesuré hubspot : kill sur
+            // garbage alors que le vrai live est sous la borne).
+            self.collect();
+            if self.heap.over_limit() {
+                return Err(self.range_error("heap memory limit exceeded"));
+            }
         }
         self.ops_left -= 1;
         self.ops_total += 1;

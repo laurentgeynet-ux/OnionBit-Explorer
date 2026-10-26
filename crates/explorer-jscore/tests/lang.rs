@@ -346,19 +346,23 @@ fn mixin_class_extends_call_result() {
     // base` ; la chaîne proto doit porter les méthodes du mixin
     // (mesuré : `_set_theme` undefined sur l'instance).
     assert_eq!(
-        ev_str("var M=function(s){return class extends s{theme(){return 'ok'}}};\
+        ev_str(
+            "var M=function(s){return class extends s{theme(){return 'ok'}}};\
                 class Base{};\
                 class Btn extends M(Base){own(){return 'b'}}\
                 var b=new Btn();\
-                [b.own(),b.theme(),b instanceof Base,b instanceof Btn].join('|')"),
+                [b.own(),b.theme(),b instanceof Base,b instanceof Btn].join('|')"
+        ),
         "b|ok|true|true"
     );
     // Chaîné : M2(M(Base)) — deux niveaux de mixin.
     assert_eq!(
-        ev_str("var M=function(s){return class extends s{a(){return 1}}};\
+        ev_str(
+            "var M=function(s){return class extends s{a(){return 1}}};\
                 var M2=function(s){return class extends s{b(){return 2}}};\
                 class X extends M2(M(class Base{})){}\
-                var x=new X(); [x.a(),x.b()].join('|')"),
+                var x=new X(); [x.a(),x.b()].join('|')"
+        ),
         "1|2"
     );
 }
@@ -3788,21 +3792,25 @@ fn c37_mem_limit_soft_kill() {
     e.collect();
     let base = e.heap_stats().estimated_bytes;
     e.set_mem_limit(base + 128 * 1024);
+    // Garbage transitoire : le tick collecte avant de tuer —
+    // le vivant reste sous la borne → la boucle survit (JS-C113 :
+    // le kill sur estimé tuait des pages réelles — hubspot).
+    let r = e.eval(
+        "var s = 'x'; for (var i = 0; i < 200000; i++) { var t = s + i + 'aaaaaaaaaaaaaaaa'; } 'ok'",
+    );
+    match r {
+        Ok(v) => assert_eq!(e.describe(v), "ok"),
+        Err(err) => panic!("kill sur garbage (estimé ≠ vivant) : {err}"),
+    }
+    // Rétention réelle au-delà de la borne → kill (le vivant
+    // dépasse, collecter ne réclame rien).
     let err = e
-        .eval(
-            "var s = 'x'; for (var i = 0; i < 200000; i++) { var t = s + i + 'aaaaaaaaaaaaaaaa'; }",
-        )
+        .eval("var a=[]; for (var i=0;i<30000;i++) a.push('xxxxxxxxxxxxxxxxxxxxxxxx'+i);")
         .unwrap_err();
     assert!(
         format!("{err}").contains("heap memory limit"),
-        "attendu kill doux mémoire, eu {err}"
+        "attendu kill doux mémoire sur vivant, eu {err}"
     );
-    // Le moteur reste utilisable après le kill (le garbage est
-    // réclamé, l'estimation repasse sous la borne).
-    match e.eval("1 + 1") {
-        Ok(v) => assert_eq!(e.describe(v), "2"),
-        Err(err) => panic!("engine dead after soft kill: {err}"),
-    }
 }
 
 #[test]

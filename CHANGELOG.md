@@ -60,6 +60,26 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   4M non tickée — même classe,
   fix = take/put faillibles + tick.
 
+- **JS-C113 — kill mémoire sur
+  vivant, pas sur estimé** (`explorer-jscore`
+  ::tick) — mesuré terrain hubspot
+  (`template_main.min.js` :
+  `RangeError: heap memory limit
+  exceeded`) : le drapeau
+  `over_limit` est **estimé** (posé
+  à l'alloc, recalculé au sweep) —
+  les déchets entre deux GC le
+  faisaient passer → kill sur
+  garbage alors que le vivant est
+  sous la borne. Le `tick` collecte
+  d'abord, ne tue que sur
+  dépassement **vivant** — page à
+  forte rotation d'objets survive,
+  rétention réelle meurt toujours.
+  `c37_mem_limit_soft_kill` refondu
+  (déchets → survie, rétention →
+  kill).
+
 - **JS-C112 — garde cycle DOM :
   `appendChild`/`insertBefore`/
   `replaceChild` rejettent un ancêtre**

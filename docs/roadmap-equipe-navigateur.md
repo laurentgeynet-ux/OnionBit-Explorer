@@ -6993,6 +6993,15 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   les mutateurs O(len) (`shift`,
   `splice`, `sort`).
 
+- [x] **JS-C113. Kill mémoire sur
+  vivant** (`explorer-jscore`::tick) —
+  mur hubspot (`heap memory limit
+  exceeded` sur page réelle) : le
+  drapeau `over_limit` estimé tuait
+  sur déchets. `tick` → `collect()`
+  → re-test — kill sur vivant seul.
+  `c37_mem_limit_soft_kill` refondu.
+
 - [x] **JS-C112. Garde cycle DOM**
   (`explorer-jscore` dom+dom_host) —
   `appendChild`/`insertBefore`/
