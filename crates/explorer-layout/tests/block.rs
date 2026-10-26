@@ -590,6 +590,74 @@ fn hit_test_point_hors_document() {
     assert_eq!(explorer_layout::hit_test(&bx, 5.0, 5000.0), None);
 }
 
+/// Vol 2026-10-26 — `pointer-events: none` : un overlay
+/// transparent couvrant un champ ne vole plus le hit — le
+/// `<input>` sous-jacent reste `editable` (service-public,
+/// bookshop : `editable:false` sur champs peints).
+#[test]
+fn hit_test_pointer_events_none_transparent() {
+    let (dom, bx) = laid(
+        "<div id=o style=\"position:absolute;inset:0;width:100px;height:100px\"></div>\
+         <input id=i style=\"width:80px;height:20px\">",
+        "body{margin:0} #o{pointer-events:none} input{position:absolute;top:0;left:0}",
+    );
+    let input = by_tag(&dom, "input");
+    assert_eq!(
+        explorer_layout::hit_test(&bx, 10.0, 10.0),
+        Some(input),
+        "overlay pointer-events:none : l'input sous-jacent gagne"
+    );
+}
+
+/// `pointer-events: none` n'interdit que la cible — un
+/// enfant portant `auto` explicite reste ciblable (spec :
+/// la propriété s'hérite mais se réactive par enfant).
+#[test]
+fn hit_test_pointer_events_enfant_reactive() {
+    let (dom, bx) = laid(
+        "<div id=o style=\"position:absolute;inset:0;width:100px;height:100px\">\
+         <a id=a href=# style=\"pointer-events:auto;display:block;width:20px;height:20px\">x</a>\
+         </div><p id=u style=\"width:50px;height:50px\">y</p>",
+        "body{margin:0} #o{pointer-events:none} p{position:absolute;top:0;left:0}",
+    );
+    let a = by_tag(&dom, "a");
+    // (5,5) est dans le <a> ET dans le <p> dessous : le
+    // réactivé gagne — hors de lui, le parent `none` est
+    // sauté et le <p> sous-jacent encaisse.
+    let hit = explorer_layout::hit_test(&bx, 5.0, 5.0);
+    // Le nœud gagnant peut être le texte de `<a>` — l'élément
+    // ancêtre porteur du `auto` est la cible sémantique.
+    let mut cur = hit;
+    let elem = loop {
+        let Some(n) = cur else { break None };
+        if dom.tag_name(n).is_ok() {
+            break Some(n);
+        }
+        cur = dom.parent(n).ok().flatten();
+    };
+    assert_eq!(
+        elem,
+        Some(a),
+        "enfant pointer-events:auto ciblable : {hit:?}"
+    );
+    let p = by_tag(&dom, "p");
+    let hit = explorer_layout::hit_test(&bx, 40.0, 40.0);
+    let node = hit.and_then(|n| {
+        let mut cur = n;
+        loop {
+            match dom.tag_name(cur) {
+                Ok(_) => return Some(cur),
+                Err(_) => cur = dom.parent(cur).ok().flatten()?,
+            }
+        }
+    });
+    assert_eq!(
+        node,
+        Some(p),
+        "zone overlay hors <a> → p sous-jacent : {hit:?}"
+    );
+}
+
 // ── R-20 : jamais-rendus ne produisent aucune boîte ─────────
 
 #[test]

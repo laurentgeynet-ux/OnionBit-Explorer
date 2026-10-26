@@ -73,6 +73,18 @@ fn hidden(bx: &LayoutBox) -> bool {
     matches!(bx.style.get("visibility"), Some("hidden" | "collapse"))
 }
 
+/// La boîte ne peut pas être **cible** de hit-test : outre
+/// `visibility`, `pointer-events: none` (vol 2026-10-26 —
+/// les overlays auteur `pointer-events:none` volaient tous
+/// les hits au-dessus des champs : `editable:false` et clic
+/// `ignored` sur des `<input>` pourtant peints). Comme pour
+/// `visibility`, on descend quand même : un enfant portant
+/// `pointer-events: auto` explicite reste ciblable (sa
+/// valeur calculée diffère de celle du parent).
+fn unhittable(bx: &LayoutBox) -> bool {
+    hidden(bx) || bx.style.get("pointer-events") == Some("none")
+}
+
 #[must_use]
 pub fn hit_test(bx: &LayoutBox, x: f32, y: f32) -> Option<NodeId> {
     if !contains(paint_bounds(bx), x, y) {
@@ -83,7 +95,7 @@ pub fn hit_test(bx: &LayoutBox, x: f32, y: f32) -> Option<NodeId> {
             return Some(n);
         }
     }
-    if hidden(bx) {
+    if unhittable(bx) {
         return None;
     }
     contains(bx.rect, x, y).then_some(bx.node).flatten()
@@ -125,7 +137,7 @@ fn hit_test_delta(bx: &LayoutBox, x: f32, y_vp: f32, delta: f32) -> Option<NodeI
             return Some(n);
         }
     }
-    if hidden(bx) {
+    if unhittable(bx) {
         return None;
     }
     contains(bx.rect, x, y).then_some(bx.node).flatten()
