@@ -1779,3 +1779,54 @@ fn flex_stretch_input_remplit_wrapper() {
     // Un `min-height` parent ne change rien — % indéterminé
     // reste `auto` (spec) : le test v3 du diag le confirmait.
 }
+
+/// Vol 19 (FIX-3) — un bandeau/overlay apparaissant AVANT le
+/// contenu dans le DOM mais couvrant la zone volait les hits
+/// des liens posés après lui (ordre de document ≠ ordre de
+/// peinture : le dernier peint est au-dessus). Le hit-test
+/// suit désormais l'ordre d'empilement inversé.
+#[test]
+fn hit_test_ordre_empilement_dernier_peint_gagne() {
+    let (dom, bx) = laid(
+        "<div id=o style=\"width:100px;height:100px\"></div>\
+         <a id=a href=# style=\"position:absolute;top:0;left:0;display:block;width:60px;height:60px\">x</a>",
+        "body{margin:0}",
+    );
+    let a = by_tag(&dom, "a");
+    // (10,10) est dans les deux : le <a> positionné, peint
+    // après le div en flux, gagne.
+    let hit = explorer_layout::hit_test(&bx, 10.0, 10.0);
+    let elem = hit.and_then(|n| {
+        let mut cur = n;
+        loop {
+            match dom.tag_name(cur) {
+                Ok(_) => return Some(cur),
+                Err(_) => cur = dom.parent(cur).ok().flatten()?,
+            }
+        }
+    });
+    assert_eq!(elem, Some(a), "couche supérieure attendue : {hit:?}");
+}
+
+/// Même rang d'empilement : le dernier du document est peint
+/// au-dessus — il encaisse en premier.
+#[test]
+fn hit_test_ordre_document_inverse_a_rang_egal() {
+    let (dom, bx) = laid(
+        "<div id=o style=\"position:absolute;top:0;left:0;width:100px;height:100px\">\
+         </div><a id=a href=# style=\"position:absolute;top:0;left:0;display:block;width:50px;height:50px\">x</a>",
+        "body{margin:0}",
+    );
+    let a = by_tag(&dom, "a");
+    let hit = explorer_layout::hit_test(&bx, 10.0, 10.0);
+    let elem = hit.and_then(|n| {
+        let mut cur = n;
+        loop {
+            match dom.tag_name(cur) {
+                Ok(_) => return Some(cur),
+                Err(_) => cur = dom.parent(cur).ok().flatten()?,
+            }
+        }
+    });
+    assert_eq!(elem, Some(a), "dernier peint attendu : {hit:?}");
+}
