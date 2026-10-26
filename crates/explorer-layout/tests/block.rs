@@ -1968,6 +1968,7 @@ fn iframe_sans_dimensions_gabarit_300x150() {
     let f = find(&bx, by_tag(&dom, "iframe"));
     assert!(approx(f.rect.width, 300.0), "w={}", f.rect.width);
     assert!(approx(f.rect.height, 150.0), "h={}", f.rect.height);
+}
 
 #[test]
 fn hit_test_transform_sur_ancetre_atteint_les_enfants() {
