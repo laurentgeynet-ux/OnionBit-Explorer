@@ -7,6 +7,17 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **JS-C158 — `TextEncoderStream`/
+  `TextDecoderStream`** (`explorer-jscore`)
+  — Encoding API absente du global
+  (`TextEncoderStream is not defined`,
+  medium.com ×2) : `TransformStream`
+  à transformer natif UTF-8 — encode
+  → `Uint8Array`, decode → chaîne
+  (`from_utf8_lossy`), protos dédiés
+  (`instanceof` propre). Test
+  `c158_text_codec_streams`.
+
 - **JS-C157 — props `navigator`
   triviales** (`explorer-jscore`) —
   `onLine`/`cookieEnabled`/`webdriver`/
