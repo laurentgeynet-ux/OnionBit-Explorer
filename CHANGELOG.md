@@ -7,6 +7,21 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **JS-C146 — `in_gen` restauré après
+  fonction imbriquée** (`explorer-jscore`)
+  — `fn_body` restaurait `in_gen` à la
+  valeur posée par l'appelant immédiat,
+  pas celle du site : un `function(){}`
+  non-générateur imbriqué dans un
+  `function*(){}` (pattern
+  `__awaiter(this,…,function*(){})` de
+  TypeScript) masquait les `yield` du
+  corps englobant → `expected ';'`
+  (spotify `vendor~mobile-web-player`,
+  528 Ko verbatim) et `expected ')'`
+  (netlify `30991.*.js`). Les deux
+  fichiers réels parsent désormais.
+
 - **JS-C145 — `yield` dans `switch`
   en générateur** (`explorer-jscore`)
   — `Stmt::Switch` n'avait pas de
