@@ -250,6 +250,210 @@ fn vol14_comments_not_serialized() {
     assert_eq!(ids.len(), tags.len());
 }
 
+/// `Insert.index` du journal compte les enfants **sérialisables**
+/// (Element|Text) — indexer sur `children` brut décalait d'un
+/// cran par `<!-- -->` antérieur : le graft moteur posait le
+/// nœud un slot trop tard (les `<li>` de craigslist sortaient de
+/// leur `<ul>` — vol2).
+#[test]
+fn vol14_journal_insert_index_skips_comments() {
+    use explorer_jscore::{Dom, JournalOp};
+    let mut d = Dom::from_html("<ul><!--c--><li>a</li></ul>");
+    d.clear_journal();
+    let ul = d.by_tag(d.root, "ul")[0];
+    let li = d.create_element("li");
+    let t = d.create_text("b");
+    d.append(li, t);
+    d.append(ul, li);
+    let ops = d.take_journal().unwrap_or_default();
+    let Some(JournalOp::Insert { index, .. }) =
+        ops.iter().find(|op| matches!(op, JournalOp::Insert { .. }))
+    else {
+        panic!("pas d'Insert dans le journal: {ops:?}");
+    };
+    // Un seul enfant sérialisable avant le nouveau <li> —
+    // le commentaire ne compte pas.
+    assert_eq!(*index, 1);
+}
+
+/// `yield` à l'intérieur d'un `switch` dans un générateur —
+/// le `Stmt::Switch` n'avait pas de frame `GExec` et passait
+/// en éval eager → `SyntaxError: yield outside a generator`
+/// (github `4u-*.js`, hydratation React morte, recherche vide).
+#[test]
+fn vol8_yield_inside_switch() {
+    let mut e = Engine::new();
+    for (src, want) in [
+        (
+            "var g=function*(){switch(1){case 1: yield 14}}; g().next().value",
+            "14",
+        ),
+        // fallthrough : case atteint + corps suivants.
+        (
+            "var g2=function*(){switch(1){case 1: yield 1; case 2: yield 2; default: yield 3}}; [...g2()].join(',')",
+            "1,2,3",
+        ),
+        // `break` nu sort du switch (FKind::Switch est sa cible).
+        (
+            "var g3=function*(){switch(1){case 1: yield 1; break; case 2: yield 2} yield 9}; [...g3()].join(',')",
+            "1,9",
+        ),
+        // `default` seulement si aucun test ne matche.
+        (
+            "var g4=function*(){switch(7){case 1: yield 1; default: yield 2; case 3: yield 3}}; [...g4()].join(',')",
+            "2,3",
+        ),
+    ] {
+        match e.eval(src) {
+            Ok(v) => assert_eq!(e.describe(v), want, "{src}"),
+            Err(err) => panic!("{src} -> {err}"),
+        }
+    }
+}
+
+/// `in_gen` clobberé par une fonction NON-génératrice imbriquée
+/// — `fn_body` restaurait la valeur posée par le corps, pas
+/// celle de l'appelant : `function*(){var f=function(){};
+/// yield x}` rejetait `expected ';'` (spotify vendor +
+/// netlify `expected )`, les deux fichiers verbatim passent).
+#[test]
+fn vol12_nested_fn_restores_in_gen() {
+    let mut e = Engine::new();
+    for (src, want) in [
+        (
+            "var g=function*(){var f=function(){return 1}; yield 2}; [...g()][0]",
+            "2",
+        ),
+        (
+            "var g=function*(){var h={m(){return 1}, get g(){return 2}, set g(v){}}; yield 3}; [...g()][0]",
+            "3",
+        ),
+        (
+            "var g=function(){var g2=function*(){var f=function(){1}; yield 5}; return [...g2()]}; g()[0]",
+            "5",
+        ),
+    ] {
+        match e.eval(src) {
+            Ok(v) => assert_eq!(e.describe(v), want, "{src}"),
+            Err(err) => panic!("{src} -> {err}"),
+        }
+    }
+    // Extrait verbatim `vendor~mobile-web-player.344bcab5.js` :
+    // `__awaiter(this,void 0,void 0,function*(){…yield i(…)})`
+    // — le `yield` à l'offset de l'erreur « expected ';' ».
+    let slice = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/data/vol12_spotify_gen_slice.js"
+    ))
+    .unwrap_or_else(|e| panic!("fixture: {e}"));
+    let src = format!("var g=({slice});typeof g");
+    match e.eval(&src) {
+        Ok(v) => assert_eq!(e.describe(v), "function"),
+        Err(err) => panic!("spotify slice -> {err}"),
+    }
+}
+
+/// `this` sloppy = `ToObject(thisArg)` — primitives boxées en
+/// wrappers (jQuery `g.each`/`propFix`, codepen `everypage`,
+/// soundcloud `1-*.js` : `toLowerCase is not a function (on
+/// Object)`). Seuls `null`/`undefined` → objet global.
+#[test]
+fn vol14_sloppy_this_boxes_primitives() {
+    let mut e = Engine::new();
+    for (src, want) in [
+        ("(function(){return this.toLowerCase()}).call('AB')", "ab"),
+        (
+            "(function(){return Object.prototype.toString.call(this)}).call('AB')",
+            "[object String]",
+        ),
+        ("(function(){return this.length}).call('ABC')", "3"),
+        ("(function(){return this.toFixed(1)}).call(3.14)", "3.1"),
+        (
+            "['x'].map(function(){return this.toLowerCase()},'AB')[0]",
+            "ab",
+        ),
+        ("(function(){return typeof this}).call(null)", "object"),
+        (
+            "(function(){'use strict';return this.toLowerCase()}).call('AB')",
+            "ab",
+        ),
+    ] {
+        match e.eval(src) {
+            Ok(v) => assert_eq!(e.describe(v), want, "{src}"),
+            Err(err) => panic!("{src} -> {err}"),
+        }
+    }
+}
+
+/// `document.getElementsByTagName('head')[0]` — un document a
+/// TOUJOURS `html`/`head`/`body` (auto-générés par le parseur) ;
+/// les miroirs de cadre vide (`about:blank`) les auto-vivent —
+/// le bootstrap Cloudflare `c()` de jsfiddle jetait
+/// `cannot read 'appendChild' of Undefined` ×12.
+#[test]
+fn vol14_head_autovivified_for_tagname() {
+    use explorer_jscore::Dom;
+    let mut e = Engine::new();
+    e.install_dom(&Rc::new(RefCell::new(Dom::from_html(""))));
+    for (src, want) in [
+        (
+            "typeof document.getElementsByTagName('head')[0]",
+            "object",
+        ),
+        (
+            "document.getElementsByTagName('head')[0].appendChild(document.createElement('script')); document.getElementsByTagName('script').length",
+            "1",
+        ),
+        (
+            "typeof document.getElementsByTagName('body')[0]",
+            "object",
+        ),
+        (
+            "typeof document.getElementsByTagName('html')[0]",
+            "object",
+        ),
+    ] {
+        match e.eval(src) {
+            Ok(v) => assert_eq!(e.describe(v), want, "{src}"),
+            Err(err) => panic!("{src} -> {err}"),
+        }
+    }
+}
+
+/// `el.src`/`el.href` résolus contre `document.baseURI` à la
+/// lecture (spec IDL — `getAttribute` reste brut) : `new URL(
+/// el.src)` échouait `Invalid URL`/`Invalid scheme` (lemonde,
+/// franceinfo).
+#[test]
+fn vol13_src_href_resolve_against_base() {
+    use explorer_jscore::Dom;
+    let mut e = Engine::new();
+    e.sync_ctx_url(0, "https://www.lemonde.fr/x/y", 1);
+    e.install_dom(&Rc::new(RefCell::new(Dom::from_html(
+        "<img src='/a/b.png'><a href='/p?q=1'>x</a>",
+    ))));
+    for (src, want) in [
+        (
+            "document.querySelector('img').src",
+            "https://www.lemonde.fr/a/b.png",
+        ),
+        (
+            "document.querySelector('a').href",
+            "https://www.lemonde.fr/p?q=1",
+        ),
+        ("document.querySelector('a').getAttribute('href')", "/p?q=1"),
+        (
+            "new URL(document.querySelector('img').src).href",
+            "https://www.lemonde.fr/a/b.png",
+        ),
+    ] {
+        match e.eval(src) {
+            Ok(v) => assert_eq!(e.describe(v), want, "{src}"),
+            Err(err) => panic!("{src} -> {err}"),
+        }
+    }
+}
+
 /// `IDBIndex` & autres interfaces IDB déclarées — Rakuten :
 /// `IDBIndex is not defined` était une `ReferenceError` fatale.
 #[test]

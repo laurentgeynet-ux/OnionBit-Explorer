@@ -1139,12 +1139,23 @@ impl Dom {
                 if let Some(&first) = rec.added.first() {
                     // Position au moment de la mutation — les
                     // ops rejouent en séquence, l'index reste
-                    // valide côté moteur.
+                    // valide côté moteur. Comptée sur les enfants
+                    // **sérialisables** (Element|Text) : le moteur
+                    // n'a pas de nœuds commentaires, indexer sur
+                    // `children` brut décalerait l'insertion d'un
+                    // cran par `<!-- -->` antérieur (graft_subtree
+                    // filtre par `serializable_kind`).
                     let index = self.nodes[rec.target as usize]
                         .children
                         .iter()
-                        .position(|&c| c == first)
-                        .map_or(0, |i| i as u32);
+                        .take_while(|&&c| c != first)
+                        .filter(|&&c| {
+                            matches!(
+                                self.nodes[c as usize].kind,
+                                NodeKind::Element | NodeKind::Text
+                            )
+                        })
+                        .count() as u32;
                     self.journal.push(JournalOp::Insert {
                         parent: rec.target,
                         index,

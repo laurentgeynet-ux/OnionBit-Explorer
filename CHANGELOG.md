@@ -7,6 +7,19 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **JS-C144 — index d'insertion du
+  journal en espace sérialisable**
+  (`explorer-jscore`) — `Insert.index`
+  était compté sur `children` brut,
+  le moteur le lit filtré Element|Text
+  : chaque `<!-- -->` antérieur
+  décalait le graft d'un cran → les
+  `<li>` posés hors de leur `<ul>`
+  (craigslist vol2 — TreeBuilder
+  natif OK, c'est le miroir/journal).
+  L'index compte désormais les
+  enfants sérialisables précédents.
+
 - **JS-C143 — commentaires exclus de
   la synchro DOM** (`explorer-jscore`)
   — `serialize_keyed_node` émettait
