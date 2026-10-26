@@ -1794,3 +1794,34 @@ fn flex_stretch_input_remplit_wrapper() {
     // Un `min-height` parent ne change rien — % indéterminé
     // reste `auto` (spec) : le test v3 du diag le confirmait.
 }
+
+#[test]
+fn hit_test_transform_sur_ancetre_atteint_les_enfants() {
+    // Non-régression vol 26 : un `transform` sur un ancêtre
+    // commun ne doit pas rendre tout le sous-arbre inerte —
+    // la matrice cumulative ramène le point sondé dans le
+    // repère de chaque boîte.
+    let (dom, bx) = laid(
+        "<div id=w><a id=c href=#>lien</a><input id=i></div>",
+        "body{margin:0} #w{transform:translate(50px,0)}          a{display:block;width:100px;height:20px}          input{display:block;width:100px;height:20px}",
+    );
+    let a = by_tag(&dom, "a");
+    let inp = by_tag(&dom, "input");
+    let el = |n: Option<NodeId>| {
+        n.and_then(|n| {
+            if dom.element(n).is_ok() {
+                Some(n)
+            } else {
+                dom.parent(n).ok().flatten()
+            }
+        })
+    };
+    // (55,5) = position peinte du <a> ; (55,25) = input.
+    assert_eq!(el(explorer_layout::hit_test(&bx, 55.0, 5.0)), Some(a));
+    assert_eq!(el(explorer_layout::hit_test(&bx, 55.0, 25.0)), Some(inp));
+    // Variante scrollée (chemin de la session).
+    assert_eq!(
+        el(explorer_layout::hit_test_scrolled(&bx, 55.0, 5.0, 0.0)),
+        Some(a)
+    );
+}
