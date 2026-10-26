@@ -590,6 +590,116 @@ fn hit_test_point_hors_document() {
     assert_eq!(explorer_layout::hit_test(&bx, 5.0, 5000.0), None);
 }
 
+#[test]
+fn hit_test_transform_translate_suit_la_peinture() {
+    // Vol : `transform` appliqué à la display list mais
+    // ignoré du hit-test → zones cliquables décalées. La
+    // matrice inverse du style (`explorer_layout::transform`)
+    // ramène le point sondé dans le repère de la boîte.
+    let (dom, bx) = laid(
+        "<a id=t href=#>x</a>",
+        "body{margin:0} a{display:block;position:absolute;left:10px;top:10px;\
+         width:40px;height:20px;transform:translate(100px,50px)}",
+    );
+    let a = by_tag(&dom, "a");
+    // Position PEINTE : (110,60) — le rect layout reste
+    // (10,10). Le hit doit suivre la peinture.
+    let hit = explorer_layout::hit_test(&bx, 115.0, 65.0);
+    let el = hit.and_then(|n| {
+        if dom.element(n).is_ok() {
+            Some(n)
+        } else {
+            dom.parent(n).ok().flatten()
+        }
+    });
+    assert_eq!(el, Some(a), "hit {hit:?} au point peint");
+    // Position LAYOUT (rect brut, avant transform) : le
+    // point ne doit plus retomber sur `a`.
+    let el2 = explorer_layout::hit_test(&bx, 15.0, 15.0).and_then(|n| {
+        if dom.element(n).is_ok() {
+            Some(n)
+        } else {
+            dom.parent(n).ok().flatten()
+        }
+    });
+    assert_ne!(el2, Some(a), "le rect non transformé ne doit plus hit `a`");
+}
+
+#[test]
+fn hit_test_transform_rotate_90_inverse_les_axes() {
+    // Rotation 90° : la zone cliquable suit le quart de
+    // tour. Le point sondé est calculé par la **même**
+    // `box_transform` que la peinture (source unique
+    // `explorer_layout::transform`) — parité garantie par
+    // construction, sans supposer la convention d'origine.
+    let (dom, bx) = laid(
+        "<a id=t href=#>x</a>",
+        "body{margin:0} a{display:block;position:absolute;left:0;top:0;\
+         width:100px;height:20px;transform:rotate(90deg)}",
+    );
+    let a = by_tag(&dom, "a");
+    let a_bx = find(&bx, a);
+    let t = explorer_layout::box_transform(a_bx, &a_bx.rect).expect("matrice");
+    // Coins transformés du rect : la sonde vise le centre
+    // de la zone PEINTE.
+    let (cx, cy) = t.apply(a_bx.rect.x + 25.0, a_bx.rect.y + 10.0);
+    let hit = explorer_layout::hit_test(&bx, cx, cy).and_then(|n| {
+        if dom.element(n).is_ok() {
+            Some(n)
+        } else {
+            dom.parent(n).ok().flatten()
+        }
+    });
+    assert_eq!(hit, Some(a), "hit ({cx},{cy}) sur la zone peinte");
+    // Le centre du rect LAYOUT peut sortir de la surface
+    // peinte — là, `a` ne doit pas gagner.
+    let (ux, uy) = (
+        a_bx.rect.x + a_bx.rect.width / 2.0,
+        a_bx.rect.y + a_bx.rect.height / 2.0,
+    );
+    let inv = t.invert().expect("inversible");
+    let (lx, ly) = inv.apply(ux, uy);
+    let inside = lx >= a_bx.rect.x
+        && lx <= a_bx.rect.x + a_bx.rect.width
+        && ly >= a_bx.rect.y
+        && ly <= a_bx.rect.y + a_bx.rect.height;
+    if !inside {
+        let el = explorer_layout::hit_test(&bx, ux, uy).and_then(|n| {
+            if dom.element(n).is_ok() {
+                Some(n)
+            } else {
+                dom.parent(n).ok().flatten()
+            }
+        });
+        assert_ne!(el, Some(a), "centre layout hors surface → pas de hit `a`");
+    }
+}
+
+#[test]
+fn hit_test_transforms_imbriquees_accumulent() {
+    // Parent `translate(50,0)` + enfant `translate(0,30)` :
+    // la zone cliquable cumule les deux matrices — le point
+    // peint (rect + (50,30)) hit, le point layout nu non.
+    let (dom, bx) = laid(
+        "<div id=p><a id=c href=#>x</a></div>",
+        "body{margin:0} #p{position:absolute;left:0;top:0;width:60px;height:60px;\
+         transform:translate(50px,0)} \
+         #c{display:block;position:absolute;left:5px;top:5px;width:30px;\
+         height:20px;transform:translate(0,30px)}",
+    );
+    let c = by_tag(&dom, "a");
+    // Rect layout de `c` : (5,5,30,20) — peint à
+    // (55,35)-(85,55).
+    let hit = explorer_layout::hit_test(&bx, 60.0, 40.0).and_then(|n| {
+        if dom.element(n).is_ok() {
+            Some(n)
+        } else {
+            dom.parent(n).ok().flatten()
+        }
+    });
+    assert_eq!(hit, Some(c), "hit cumulé parent+enfant");
+}
+
 // ── R-20 : jamais-rendus ne produisent aucune boîte ─────────
 
 #[test]

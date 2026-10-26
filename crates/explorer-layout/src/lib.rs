@@ -28,6 +28,7 @@ mod intrinsic;
 mod relayout;
 mod tables;
 pub mod text;
+pub mod transform;
 
 pub use block::{layout_tree, BlockCtx};
 pub use boxtree::{
@@ -39,3 +40,4 @@ pub use hit::{hit_test, hit_test_scrolled};
 pub use inline::{fragment_sub_rect, Fragment, LineBox};
 pub use relayout::{relayout_subtree, Relayout};
 pub use text::{Break, Direction, TextRun};
+pub use transform::{box_transform, Affine};

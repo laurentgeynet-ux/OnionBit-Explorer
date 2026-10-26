@@ -2273,140 +2273,15 @@ fn font_request(st: &explorer_css::ComputedStyle) -> explorer_layout::font::Font
     explorer_layout::font::request_of_family(st, explorer_layout::font::DEFAULT_FAMILY)
 }
 
-/// Longueur d'une fonction `transform` → px : absolues via
-/// `px_factor`, `%` relatif à `basis` (taille propre de la
-/// boîte — spec : reference box = border box).
-fn tf_len_px(s: &str, basis: f32) -> Option<f64> {
-    let t = s.trim();
-    if let Some(p) = t.strip_suffix('%') {
-        return p
-            .trim()
-            .parse::<f64>()
-            .ok()
-            .map(|v| v * f64::from(basis) / 100.0);
-    }
-    parse_length(t).and_then(|l| l.unit.px_factor().map(|f| l.value * f))
-}
-
-/// Angle `deg`/`rad`/`turn`/`grad` → radians.
-fn tf_angle(s: &str) -> Option<f64> {
-    let t = s.trim().to_ascii_lowercase();
-    let (num, k) = ["deg", "grad", "rad", "turn"]
-        .iter()
-        .find_map(|u| t.strip_suffix(u).map(|n| (n, *u)))?;
-    let v: f64 = num.trim().parse().ok()?;
-    Some(match k {
-        "deg" => v.to_radians(),
-        "rad" => v,
-        "turn" => v * std::f64::consts::TAU,
-        _ => v * std::f64::consts::PI / 200.0,
-    })
-}
-
-/// `transform: f1(...) f2(...)…` → matrice brute (sans
-/// origine). Fonctions : `matrix`, `translate[X|Y]`,
-/// `scale[X|Y]`, `rotate`, `skew[X|Y]` ; `%` des `translate`
-/// relatif à la border box. `none`/inconnu → `None`.
-#[allow(clippy::cast_possible_truncation)]
-fn transform_matrix(raw: &str, rect: &Rect) -> Option<tiny_skia::Transform> {
-    use tiny_skia::Transform;
-    let mut m = Transform::identity();
-    let mut any = false;
-    let mut left = raw.trim();
-    if left.eq_ignore_ascii_case("none") || left.is_empty() {
-        return None;
-    }
-    while let Some(open) = left.find('(') {
-        let name = left[..open].trim().to_ascii_lowercase();
-        let close = left.find(')')?;
-        let args: Vec<&str> = left[open + 1..close].split(',').collect();
-        let num = |i: usize| -> Option<f64> { args.get(i)?.trim().parse().ok() };
-        let f = match name.as_str() {
-            "matrix" => Transform::from_row(
-                num(0)? as f32,
-                num(1)? as f32,
-                num(2)? as f32,
-                num(3)? as f32,
-                num(4)? as f32,
-                num(5)? as f32,
-            ),
-            "translate" => Transform::from_translate(
-                tf_len_px(args.first()?, rect.width)? as f32,
-                args.get(1)
-                    .map_or(0.0, |v| tf_len_px(v, rect.height).unwrap_or(0.0) as f32),
-            ),
-            "translatex" => {
-                Transform::from_translate(tf_len_px(args.first()?, rect.width)? as f32, 0.0)
-            }
-            "translatey" => {
-                Transform::from_translate(0.0, tf_len_px(args.first()?, rect.height)? as f32)
-            }
-            "scale" => {
-                let sx = num(0)? as f32;
-                Transform::from_scale(
-                    sx,
-                    args.get(1)
-                        .map_or(sx, |v| v.trim().parse::<f32>().unwrap_or(sx)),
-                )
-            }
-            "scalex" => Transform::from_scale(num(0)? as f32, 1.0),
-            "scaley" => Transform::from_scale(1.0, num(0)? as f32),
-            "rotate" => {
-                // tiny-skia prend des degrés (`tf_angle` rend
-                // des radians pour `tan()` des skews).
-                Transform::from_rotate(tf_angle(args.first()?)?.to_degrees() as f32)
-            }
-            "skewx" => Transform::from_skew(tf_angle(args.first()?)?.tan() as f32, 0.0),
-            "skewy" => Transform::from_skew(0.0, tf_angle(args.first()?)?.tan() as f32),
-            "skew" => Transform::from_skew(
-                tf_angle(args.first()?)?.tan() as f32,
-                args.get(1).and_then(|v| tf_angle(v)).unwrap_or(0.0).tan() as f32,
-            ),
-            _ => return None,
-        };
-        // Composition gauche→droite : chaque fonction s'applique
-        // APRÈS les précédentes (post-concaténation).
-        m = m.post_concat(f);
-        any = true;
-        left = left[close + 1..].trim();
-    }
-    if !any {
-        return None;
-    }
-    Some(m)
-}
-
-/// Résout `transform-origin` en point absolu de `rect` —
-/// deux valeurs px/`%` (défaut 50 % 50 %).
-#[allow(clippy::cast_possible_truncation)]
-fn origin_px(st: &explorer_css::ComputedStyle, rect: &Rect) -> (f32, f32) {
-    let raw = st.get_or("transform-origin", "50% 50%");
-    let mut it = raw.split_whitespace();
-    let x = it
-        .next()
-        .and_then(|v| tf_len_px(v, rect.width))
-        .map_or(rect.width / 2.0, |v| v as f32);
-    let y = it
-        .next()
-        .and_then(|v| tf_len_px(v, rect.height))
-        .map_or(rect.height / 2.0, |v| v as f32);
-    (rect.x + x, rect.y + y)
-}
-
-/// `transform` d'une boîte → matrice complète (origine
-/// incluse) — `None` si identité/invalidée.
+/// `transform` d'une boîte → matrice tiny-skia (origine
+/// incluse) — délègue à
+/// [`explorer_layout::transform::box_transform`], source
+/// unique partagée avec le hit-test (qui applique la
+/// matrice inverse au point sondé — vol : zones cliquables
+/// décalées sur éléments transformés).
 fn box_transform(bx: &LayoutBox, rect: &Rect) -> Option<tiny_skia::Transform> {
-    use tiny_skia::Transform;
-    let raw = bx.style.get("transform")?;
-    let m = transform_matrix(raw, rect)?;
-    let (ox, oy) = origin_px(&bx.style, rect);
-    // F(p) = o + M(p − o) : on post-concatène dans l'ordre
-    // d'application — T(−o) d'abord, M, puis T(+o).
-    Some(
-        Transform::from_translate(-ox, -oy)
-            .post_concat(m)
-            .post_concat(Transform::from_translate(ox, oy)),
-    )
+    explorer_layout::transform::box_transform(bx, rect)
+        .map(|m| tiny_skia::Transform::from_row(m.a, m.b, m.c, m.d, m.e, m.f))
 }
 
 /// Peint une boîte et ses descendants dans l'ordre borné.
