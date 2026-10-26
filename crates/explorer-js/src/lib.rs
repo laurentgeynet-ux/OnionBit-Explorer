@@ -711,6 +711,12 @@ pub trait JsEngine: Send {
         Vec::new()
     }
 
+    /// Descriptions des `unhandledrejection` tirés (JS-C154)
+    /// — la session les verse au ring console. Défaut : rien.
+    fn drain_unhandled_rejections(&mut self) -> Vec<String> {
+        Vec::new()
+    }
+
     /// Livre le résultat d'un `<script>` dynamique au moteur
     /// (CAP-169) — `Some(text)` : évalué dans le contexte
     /// `ctx` émetteur puis `load` tiré sur l'élément ;
@@ -1688,6 +1694,11 @@ enum Cmd {
     DrainDynScripts {
         tx: Sender<Vec<explorer_jscore::DynScriptReq>>,
     },
+    /// `unhandledrejection` tirés (JS-C154) — descriptions
+    /// vers le ring console de la session.
+    DrainUnhandledRejections {
+        tx: Sender<Vec<String>>,
+    },
     DeliverDynScript {
         ctx: JsCtxId,
         seq: u64,
@@ -2272,6 +2283,11 @@ impl JscoreEngine {
                         return;
                     }
                 }
+                Cmd::DrainUnhandledRejections { tx } => {
+                    if tx.send(eng.drain_unhandled_rejections()).is_err() {
+                        return;
+                    }
+                }
                 Cmd::DeliverDynScript { ctx, seq, body } => {
                     let prev = eng.current_context();
                     eng.context_switch(ctx);
@@ -2586,6 +2602,14 @@ impl JsEngine for JscoreEngine {
     fn drain_dyn_scripts(&mut self) -> Vec<explorer_jscore::DynScriptReq> {
         let (tx, rx) = channel();
         if self.tx.send(Cmd::DrainDynScripts { tx }).is_err() {
+            return Vec::new();
+        }
+        rx.recv_timeout(Self::EVAL_CMD_TIMEOUT).unwrap_or_default()
+    }
+
+    fn drain_unhandled_rejections(&mut self) -> Vec<String> {
+        let (tx, rx) = channel();
+        if self.tx.send(Cmd::DrainUnhandledRejections { tx }).is_err() {
             return Vec::new();
         }
         rx.recv_timeout(Self::EVAL_CMD_TIMEOUT).unwrap_or_default()

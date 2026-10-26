@@ -7,6 +7,28 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **JS-C154 — `unhandledrejection`**
+  (`explorer-jscore`,
+  `explorer-js`, `explorer-core`) —
+  les rejets sans `.then` mouraient
+  en silence (pinterest, airbnb).
+  `JsPromise.handled`
+  (`[[PromiseIsHandled]]` spec) posé
+  par tout `then`/adoption ; un
+  settle `Rejected` non-handled est
+  gardé et l'event
+  `{type,promise,reason,preventDefault}`
+  tiré en fin de checkpoint sur
+  `onunhandledrejection` + listeners
+  `__et` ; un `.then` tardif retire
+  la promesse (« rejectionhandled »
+  silencieux). Descriptions drainées
+  via `JsEngine::drain_unhandled_
+  rejections` (nouveau `Cmd` acteur)
+  → `CoreEvent::PipelineError` →
+  ring console. Test
+  `promise_unhandled_rejection`.
+
 - **JS-C153 — `AbortSignal.
   throwIfAborted`** (`explorer-jscore`)
   — la méthode existait mais n'était

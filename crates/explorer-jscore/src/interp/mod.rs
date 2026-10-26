@@ -347,6 +347,13 @@ pub struct Engine {
     /// `true` quand la session s'est branchée (`set_import_
     /// drain`) — sans drain, un miss rejette comme avant.
     pub(crate) import_drain_wired: bool,
+    /// Promesses rejetées sans `then` (JS-C154) — candidates
+    /// `unhandledrejection`, revues en fin de checkpoint
+    /// (un `.then` tardif pose `handled` et les retire).
+    pub(crate) pending_unhandled: Vec<(Value, Value)>,
+    /// Descriptions des rejets non gérés — drainées par la
+    /// session (`report_unhandled_rejection` → ring console).
+    pub(crate) unhandled_reports: Vec<String>,
     /// Compteur de séquences `import()` (répercuté à la
     /// livraison — même motif `dyn_script_seq`).
     pub(crate) dyn_import_seq: u64,
@@ -757,6 +764,8 @@ impl Engine {
             pending_imports: std::collections::HashMap::new(),
             dyn_import_reqs: Vec::new(),
             import_drain_wired: false,
+            pending_unhandled: Vec::new(),
+            unhandled_reports: Vec::new(),
             dyn_import_seq: 0,
             module_sources: std::collections::HashMap::new(),
             current_module: String::new(),
@@ -1288,6 +1297,13 @@ impl Engine {
             }
         }
         out
+    }
+
+    /// Descriptions des `unhandledrejection` tirés (JS-C154) —
+    /// la session les verse au ring console
+    /// (`report_unhandled_rejection`).
+    pub fn drain_unhandled_rejections(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.unhandled_reports)
     }
 
     pub fn drain_dyn_scripts(&mut self) -> Vec<crate::dom_host::DynScriptReq> {
@@ -2160,6 +2176,12 @@ impl Engine {
         // `heap.obj(promise)` → None, reactions=999).
         for p in self.pending_imports.values() {
             ids.push(p.promise);
+        }
+        // `unhandledrejection` en attente (JS-C154) — promesse
+        // + raison racines jusqu'au tir du checkpoint.
+        for (p, r) in &self.pending_unhandled {
+            crate::heap::push_value(&mut ids, *p);
+            crate::heap::push_value(&mut ids, *r);
         }
         for (_, job) in &self.microtasks {
             match job {

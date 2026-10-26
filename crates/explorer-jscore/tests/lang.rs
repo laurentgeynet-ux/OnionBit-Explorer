@@ -1448,6 +1448,44 @@ fn promise_finally() {
 }
 
 #[test]
+fn promise_unhandled_rejection() {
+    // JS-C154 — une promesse rejetée sans `.then` déclenche
+    // `unhandledrejection` en fin de checkpoint : event sur
+    // `onunhandledrejection`/listeners + rapport drainable.
+    let mut e = Engine::new();
+    e.eval(
+        "var got = ''; window.onunhandledrejection = function(ev) {\
+           got = ev.type + '/' + ev.reason + '/' + (ev.promise instanceof Promise);\
+         };\
+         Promise.reject('boom');",
+    )
+    .expect("eval");
+    let got = e.eval("got").expect("got");
+    assert_eq!(e.describe(got), "unhandledrejection/boom/true");
+    // `.catch` présent → handled, pas d'event.
+    let mut e2 = Engine::new();
+    e2.eval(
+        "var n = 0; window.onunhandledrejection = function() { n++ };\
+         Promise.reject('x').catch(function() {});\
+         Promise.reject('y');",
+    )
+    .expect("eval2");
+    let n = e2.eval("n").expect("n");
+    assert_eq!(e2.describe(n), "1", "seul le rejet sans handler doit tirer");
+    // Rapport drainable par la session.
+    assert!(e.drain_unhandled_rejections()[0].contains("boom"));
+    // `.then` tardif (après le settle, avant le tir) → retiré.
+    let mut e3 = Engine::new();
+    e3.eval(
+        "var m = 0; window.onunhandledrejection = function() { m++ };\
+             var p = Promise.reject('z'); p.catch(function() {});",
+    )
+    .expect("eval3");
+    let m = e3.eval("m").expect("m");
+    assert_eq!(e3.describe(m), "0");
+}
+
+#[test]
 fn promise_adoption() {
     // Resolving with a promise adopts its state.
     assert_eq!(
