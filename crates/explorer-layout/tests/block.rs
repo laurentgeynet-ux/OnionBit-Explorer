@@ -928,6 +928,33 @@ fn remplace_max_width_bridant_derive_la_hauteur_par_ratio() {
     assert!(approx(img.rect.height, 100.0), "h={}", img.rect.height);
 }
 
+/// Vol 2026-10-26 — `<svg viewBox>` sans `width` : la taille
+/// N'EST PAS le viewBox (logo w3.org géant) — SVG2 `auto`
+/// = `100%` du conteneur, `height:auto` dérivé du ratio.
+#[test]
+fn svg_viewbox_seul_occupe_la_largeur_conteneur() {
+    let (dom, bx) = laid(
+        "<div style=\"width:400px\"><svg viewBox=\"0 0 200 100\"></svg></div>",
+        "body{margin:0}",
+    );
+    let svg = find(&bx, by_tag(&dom, "svg"));
+    assert!(approx(svg.rect.width, 400.0), "w={}", svg.rect.width);
+    assert!(approx(svg.rect.height, 200.0), "h={}", svg.rect.height);
+}
+
+/// Contrôle : `<svg width/height>` explicites gardent la
+/// priorité sur le hint (attributs = déclarations UA).
+#[test]
+fn svg_dimensions_explicites_inchangees() {
+    let (dom, bx) = laid(
+        "<div style=\"width:400px\"><svg width=\"80\" height=\"40\" viewBox=\"0 0 200 100\"></svg></div>",
+        "body{margin:0}",
+    );
+    let svg = find(&bx, by_tag(&dom, "svg"));
+    assert!(approx(svg.rect.width, 80.0), "w={}", svg.rect.width);
+    assert!(approx(svg.rect.height, 40.0), "h={}", svg.rect.height);
+}
+
 #[test]
 fn remplace_height_specifiee_derive_la_largeur_par_ratio() {
     // §10.6.2 symétrique : `height:100px` + `width:auto` →

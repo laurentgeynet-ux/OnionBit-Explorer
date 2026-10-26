@@ -24,6 +24,21 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   `subresource_failures_reach_
   console_ring` (session).
 
+- **Vol 2026-10-26 — `<svg>`
+  à `viewBox` seul = 100 % du
+  conteneur** (`explorer-css`) —
+  hint `width:100%` posé quand
+  l'attribut `width` manque et
+  qu'un `viewBox` définit la
+  géométrie (SVG2 : `auto` →
+  `100%`), la hauteur dérivant
+  du ratio §10.6.2 — fini les
+  logos géants à la taille du
+  viewBox (w3.org). Régressions
+  `svg_viewbox_seul_*`,
+  `svg_dimensions_explicites_
+  inchangees` (block).
+
 - **Vol 2026-10-26 —
   `pointer-events: none` au
   hit-test** (`explorer-layout`)

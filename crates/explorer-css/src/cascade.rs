@@ -1817,8 +1817,26 @@ fn apply_presentational_hints(dom: &Dom, node: NodeId, props: &mut HashMap<Strin
     };
     match tag {
         "table" | "td" | "th" | "tr" | "col" | "colgroup" | "img" | "iframe" | "object"
-        | "embed" | "canvas" | "video" | "svg" => {
+        | "embed" | "canvas" | "video" => {
             hint(props, "width", dim(hint_attr(dom, node, "width")));
+            hint(props, "height", dim(hint_attr(dom, node, "height")));
+        }
+        "svg" => {
+            // SVG2 : `width`/`height` absent = `auto` =
+            // `100%` — PAS la taille du viewBox (vol
+            // 2026-10-26 : logo w3.org géant — un `<svg>`
+            // à `viewBox` seul occupait ses ~1000 unités
+            // en px au lieu de 100 % du conteneur, la
+            // hauteur dérivant du ratio comme `height:
+            // auto`). Sans `viewBox` le repli remplacé
+            // 300×150 reste la référence — le hint n'est
+            // posé que si la géométrie est définie.
+            let vb = hint_attr(dom, node, "viewBox").is_some();
+            hint(
+                props,
+                "width",
+                dim(hint_attr(dom, node, "width")).or_else(|| vb.then(|| "100%".to_string())),
+            );
             hint(props, "height", dim(hint_attr(dom, node, "height")));
         }
         "hr" => {
