@@ -212,6 +212,38 @@ fn overflow_clip_encadre_les_enfants() {
 }
 
 #[test]
+fn fixed_echappe_au_clip_overflow_ancetre() {
+    // Vol 26 (indeed) : un `position:fixed` ancré viewport ne
+    // doit pas être rogné par le `overflow` d'un ancêtre —
+    // son bloc conteneur est le viewport. La boîte fixe
+    // `bottom:0` (y≈180 dans un viewport de 200) sort du
+    // clip de l'ancêtre (50 px de haut) : son item doit être
+    // émis avec une profondeur de clip nulle.
+    let (_dom, _bx, items) = dl(
+        "<div id=o><div id=f></div></div>",
+        "#o{overflow:hidden;height:50px;position:relative} \
+         #f{position:fixed;bottom:0;left:0;width:100px;height:20px;background-color:#ff0000}",
+    );
+    let mut depth = 0i32;
+    let mut fixed_clip_depth = None;
+    for it in &items {
+        match it {
+            DisplayItem::PushClip(_) => depth += 1,
+            DisplayItem::PopClip => depth -= 1,
+            DisplayItem::FillRect { rect, .. } if rect.y > 150.0 => {
+                fixed_clip_depth = Some(depth);
+            }
+            _ => {}
+        }
+    }
+    assert_eq!(
+        fixed_clip_depth,
+        Some(0),
+        "le fond du `fixed` doit être émis hors de tout clip : {items:?}"
+    );
+}
+
+#[test]
 fn overflow_clip_couvre_les_lignes_propres() {
     // R-55 : motif `.sr-only` de lobste.rs — un élément EN LIGNE
     // positionné (`position:absolute`) est racine de son propre

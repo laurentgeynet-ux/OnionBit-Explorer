@@ -7,6 +7,22 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **Vol 26 — `position:fixed`
+  échappe au clip `overflow`
+  ancêtre** (`explorer-render`) —
+  le clip `overflow` englobait
+  le drain des positionnés :
+  un `fixed` ancré viewport
+  était rogné par un ancêtre
+  `overflow:hidden` (bandeau
+  cookie indeed `bottom:0`).
+  File racine `fixed_defer`
+  fusionnée par z dans
+  `pos_defer`, hors de tout
+  clip. Régression
+  `fixed_echappe_au_clip_`
+  `overflow_ancetre` (display).
+
 - **Vol 26 — `input`/`textarea`/
   `select` cadre UA**
   (`explorer-css`) — la feuille
