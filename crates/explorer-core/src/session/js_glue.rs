@@ -1019,7 +1019,21 @@ impl Session {
                 .tabs
                 .get(&tab)
                 .and_then(|entry| entry.dom.as_ref().and_then(|d| element_path(d, n))),
-            None => Some(Vec::new()),
+            // Rien de focalisé → `document.activeElement`
+            // spec = `<body>` : les écouteurs posés sur
+            // `document.body` (jeux clavier type wordle,
+            // vol 28) doivent recevoir la frappe — le
+            // document nu reste le repli sans body.
+            None => self
+                .tabs
+                .get(&tab)
+                .and_then(|entry| entry.dom.as_ref())
+                .map(|d| {
+                    descendant_elements(d, d.document(), "body")
+                        .first()
+                        .and_then(|b| element_path(d, *b))
+                        .unwrap_or_default()
+                }),
         };
         match path {
             Some(p) => self.dispatch_path_event_props(tab, ty, &p, &props),
