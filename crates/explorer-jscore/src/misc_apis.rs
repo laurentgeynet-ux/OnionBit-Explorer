@@ -2443,7 +2443,7 @@ fn xpath_expr_evaluate(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<
 }
 
 /// `document.createNSResolver(node)` — spec : retourne le nœud
-/// résolveur (le documentElement ici — notre XPath ne résout pas
+/// résolveur (le `documentElement` ici — notre `XPath` ne résout pas
 /// de préfixes externes).
 pub(crate) fn create_ns_resolver(e: &mut Engine, _this: Value, args: &[Value]) -> JsResult<Value> {
     if matches!(arg(args, 0), Value::Obj(_)) {

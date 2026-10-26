@@ -7,6 +7,18 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **JS-C136 — `XPathEvaluator`
+  `{createExpression, createNSResolver}`**
+  (`explorer-jscore`) — mur
+  codeberg.org (htmx) : le ctor ne
+  posait que `evaluate` ;
+  `new XPathEvaluator().createExpression(
+  '…hx-on…')` jetait
+  `createExpression is not a function`
+  au chargement du module webpack.
+  Rails sur les stubs `xpath_*`
+  existants (JS-C124).
+
 - **JS-C135 — `XMLHttpRequest.prototype`
   réel** (`explorer-jscore`) — mur
   Excalidraw (vol 2026-10-26) : Sentry

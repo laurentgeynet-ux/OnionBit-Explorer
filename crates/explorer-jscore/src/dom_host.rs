@@ -11729,11 +11729,20 @@ fn observer_empty(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
     Ok(e.new_array(Vec::new()))
 }
 
-/// `new XPathEvaluator()` — `{evaluate}` (rail
-/// `xpath_evaluate` existant — CAP-188).
+/// `new XPathEvaluator()` — `{evaluate, createExpression,
+/// createNSResolver}` (rail `xpath_*` existant — CAP-188 ;
+/// `createExpression` exigé par htmx sur codeberg/gitea :
+/// `new XPathEvaluator().createExpression('…hx-on…')`).
 fn xpath_evaluator_ctor(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
     let o = e.new_object();
     let ev = e.native_fn("evaluate", crate::misc_apis::xpath_evaluate);
     e.set_own(o, "evaluate", ev, true);
+    let ce = e.native_fn(
+        "createExpression",
+        crate::misc_apis::xpath_create_expression,
+    );
+    e.set_own(o, "createExpression", ce, true);
+    let cr = e.native_fn("createNSResolver", crate::misc_apis::create_ns_resolver);
+    e.set_own(o, "createNSResolver", cr, true);
     Ok(Value::Obj(o))
 }
