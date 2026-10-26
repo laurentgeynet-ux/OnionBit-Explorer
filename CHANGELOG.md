@@ -367,6 +367,71 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   en plage astrale. Assertion stale
   `surrogate_bounds_degrade` réalignée
   (plage surrogate → astrale, f5d3fb7).
+- **Vol 26 — PUA `.notdef` en
+  slot muet** (`explorer-layout`,
+  `explorer-render`) — icon-font
+  échouée (Material Icons…) :
+  les caractères `U+E000`–
+  `U+F8FF` non couverts peinaient
+  un tofu `□`. `Glyph::invisible`
+  conserve l'avance, saute le
+  dessin. Régression
+  `pua_notdef_slot_muet` (font).
+
+- **Vol 26 — `position:fixed`
+  échappe au clip `overflow`
+  ancêtre** (`explorer-render`) —
+  le clip `overflow` englobait
+  le drain des positionnés :
+  un `fixed` ancré viewport
+  était rogné par un ancêtre
+  `overflow:hidden` (bandeau
+  cookie indeed `bottom:0`).
+  File racine `fixed_defer`
+  fusionnée par z dans
+  `pos_defer`, hors de tout
+  clip. Régression
+  `fixed_echappe_au_clip_`
+  `overflow_ancetre` (display).
+
+- **Vol 26 — `input`/`textarea`/
+  `select` cadre UA**
+  (`explorer-css`) — la feuille
+  UA ne donnait de bordure
+  qu'à `button` : les champs
+  s'affichaient sans cadre
+  (francetravail). Règle UA
+  `border:1px solid #767676;
+  background-color:#fff`.
+
+- **Vol 28 — `<iframe>` sans
+  dimensions = 300×150**
+  (`explorer-layout`) — boîte
+  feuille remplacée au gabarit
+  spec : le document embarqué
+  n'était jamais boxifié et la
+  balise retombait à 0×0
+  (wordle NYT). Régression
+  `iframe_sans_dimensions_`
+  `gabarit_300x150` (block).
+
+- **Vol 25 — `<svg>` à
+  `viewBox` seul → 300 px**
+  (`explorer-css`) — la règle
+  `width:100%` (bf2b0d3) était
+  correcte pour les héros mais
+  gonflait les icônes : le
+  hint devient `min(300px,
+  100%)` — défaut d'objet
+  remplacé Chrome (300 px,
+  borné au conteneur),
+  `height:auto` par le ratio
+  du viewBox. Régressions
+  `svg_viewbox_seul_borne_a_`
+  `300px`,
+  `svg_viewbox_seul_conteneur_`
+  `etroit` (block).
+
 - **Vol 21/22 — `text-overflow:
   ellipsis` + `white-space:
   nowrap`** (`explorer-layout`)

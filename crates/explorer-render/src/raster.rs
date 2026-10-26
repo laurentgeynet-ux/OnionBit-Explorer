@@ -244,6 +244,12 @@ fn paint_text(
     let mut pen = ox;
     let mut span_i = 0usize;
     for (gi, g) in run.glyphs.iter().enumerate() {
+        // PUA sans couverture → slot muet (vol 26) : l'avance
+        // reste comptée, rien n'est peint.
+        if g.invisible {
+            pen += g.advance;
+            continue;
+        }
         let gi32 = u32::try_from(gi).unwrap_or(u32::MAX);
         while span_i < spans.len() && gi32 >= spans[span_i].end {
             span_i += 1;

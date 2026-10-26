@@ -1831,11 +1831,19 @@ fn apply_presentational_hints(dom: &Dom, node: NodeId, props: &mut HashMap<Strin
             // auto`). Sans `viewBox` le repli remplacé
             // 300×150 reste la référence — le hint n'est
             // posé que si la géométrie est définie.
+            // `width`/`height` absent = taille d'objet remplacé
+            // par défaut **300 px** (comportement Chrome — vol
+            // 25 kayak : l'icône `⇄` à viewBox seul remplissait
+            // ses 325 px de colonne). La hauteur dérive du
+            // ratio du viewBox (§10.6.2 — un viewBox carré
+            // donne 300×300, pas 300×150). `min(300px,100%)`
+            // pour ne pas déborder un conteneur plus étroit.
             let vb = hint_attr(dom, node, "viewBox").is_some();
             hint(
                 props,
                 "width",
-                dim(hint_attr(dom, node, "width")).or_else(|| vb.then(|| "100%".to_string())),
+                dim(hint_attr(dom, node, "width"))
+                    .or_else(|| vb.then(|| "min(300px, 100%)".to_string())),
             );
             hint(props, "height", dim(hint_attr(dom, node, "height")));
         }
@@ -2373,6 +2381,7 @@ input, textarea {
    explicite et neutralisait `align-items:stretch` en
    flex (R-109 — zone morte mesurée sur github). */
 input { min-height: 1.2em }
+input, textarea, select { border: 1px solid #767676; background-color: #fff }
 select { border: 1px solid #767676; padding: 1px 4px }
 button { border: 1px solid #767676; padding: 1px 6px; background-color: #eee }
 input[type=submit], input[type=button], input[type=reset] {
