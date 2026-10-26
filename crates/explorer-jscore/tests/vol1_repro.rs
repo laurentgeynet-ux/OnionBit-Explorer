@@ -478,7 +478,7 @@ fn vol6_idb_interfaces_declared() {
     assert!(e.eval("new IDBIndex()").is_err());
 }
 
-/// `super.m()` dans un **constructeur** dérivé — le HomeObject du
+/// `super.m()` dans un **constructeur** dérivé — le `[[HomeObject]]` du
 /// ctor était le ctor lui-même (proto = parent ctor) au lieu de
 /// `ctor.prototype` (proto = `Parent.prototype`) : `super.add()`
 /// rendait `undefined` → DSFR `core.module.js` mourait →
@@ -524,7 +524,8 @@ fn vol16_dsfr_core_module_evals() {
         "/tests/data/vol16_dsfr_core.js"
     ))
     .unwrap_or_else(|e| panic!("fixture: {e}"));
-    e.eval(&src).unwrap_or_else(|err| panic!("dsfr eval: {err}"));
+    e.eval(&src)
+        .unwrap_or_else(|err| panic!("dsfr eval: {err}"));
     match e.eval("typeof window.dsfr") {
         Ok(v) => assert_eq!(e.describe(v), "function"),
         Err(err) => panic!("dsfr -> {err}"),
