@@ -490,8 +490,15 @@ async fn amain() {
                 // `sync_dom` tournent en `spawn_blocking`
                 // avec le moteur extrait — le verrou n'est
                 // tenu qu'au take/commit (étape 53f).
+                // Yield entre onglets (vol 15 cdiscount :
+                // famine du flux API sous JS continu — les
+                // phases `commit` de chaque pompe tiennent
+                // le Mutex en livrées moteur ; céder le
+                // tour laisse les handlers HTTP passer
+                // entre deux onglets).
                 for tab in &tabs {
                     explorer_core::pump_timers_shared(&s, *tab).await;
+                    tokio::task::yield_now().await;
                 }
                 // Un timer peut émettre `location.href` —
                 // les intentions sont honorées ici, hors
