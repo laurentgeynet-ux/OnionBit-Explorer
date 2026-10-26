@@ -1425,6 +1425,18 @@ impl StyleEngine {
                 }
             }
         }
+        // 9. `color-mix` (R-114 — css-color-5 §3) : résolu à la
+        //    valeur calculée, après `var()`/`light-dark`.
+        if props
+            .values()
+            .any(|v| v.to_ascii_lowercase().contains("color-mix("))
+        {
+            for v in props.values_mut() {
+                if v.to_ascii_lowercase().contains("color-mix(") {
+                    *v = color_mix::resolve_color_mix(v);
+                }
+            }
+        }
         ComputedStyle { props, vars }
     }
 
@@ -2417,6 +2429,317 @@ fn split_top_commas_css(s: &str) -> Vec<&str> {
     }
     out.push(&s[start..]);
     out
+}
+
+mod color_mix {
+    #![allow(clippy::pedantic)]
+    use super::*;
+
+    /// `color-mix(in s, c1 p1, c2 p2)` → `rgba(…)` (css-color-5
+    /// §3, R-114 — ×1143 dans la feuille Tailwind). Rectangulaires
+    /// prémultipliés : srgb, srgb-linear, xyz, lab, oklab ;
+    /// polaires : lch, oklch, hsl (hue par le plus court chemin).
+    /// Somme < 100 → alpha × somme (§3.3). Inconnu → brut.
+    pub(crate) fn resolve_color_mix(v: &str) -> String {
+        let mut out = String::with_capacity(v.len());
+        let mut rest = v;
+        while let Some(i) = rest.to_ascii_lowercase().find("color-mix(") {
+            out.push_str(&rest[..i]);
+            let open = i + "color-mix".len();
+            let mut depth = 0i32;
+            let mut close = None;
+            for (j, ch) in rest.char_indices().skip_while(|(j, _)| *j <= open) {
+                match ch {
+                    '(' => depth += 1,
+                    ')' if depth == 0 => {
+                        close = Some(j);
+                        break;
+                    }
+                    ')' => depth -= 1,
+                    _ => {}
+                }
+            }
+            let Some(cj) = close else {
+                out.push_str(&rest[i..]);
+                return out;
+            };
+            match mix_eval(&rest[open + 1..cj]) {
+                Some(c) => out.push_str(&c),
+                None => out.push_str(&rest[i..=cj]),
+            }
+            rest = &rest[cj + 1..];
+        }
+        out.push_str(rest);
+        out
+    }
+
+    fn mix_eval(inner: &str) -> Option<String> {
+        let resolved = resolve_color_mix(inner);
+        let parts = split_top_commas_css(&resolved);
+        if parts.len() != 3 {
+            return None;
+        }
+        let space = parts[0]
+            .trim()
+            .strip_prefix("in")?
+            .trim()
+            .to_ascii_lowercase();
+        let (c1, p1) = mix_operand(parts[1])?;
+        let (c2, p2) = mix_operand(parts[2])?;
+        let (p1, p2) = match (p1, p2) {
+            (Some(a), None) => (a, 100.0 - a),
+            (None, Some(b)) => (100.0 - b, b),
+            (None, None) => (50.0, 50.0),
+            (Some(a), Some(b)) => (a, b),
+        };
+        if p1 <= 0.0 || p2 <= 0.0 {
+            let sole = if p1 <= 0.0 { c2 } else { c1 };
+            return Some(fmt_rgba(
+                f32::from(sole.r),
+                f32::from(sole.g),
+                f32::from(sole.b),
+                f32::from(sole.a) / 255.0,
+            ));
+        }
+        let sum = p1 + p2;
+        let alpha_mul = if sum < 100.0 { sum / 100.0 } else { 1.0 };
+        let (w1, w2) = (p1 / sum, p2 / sum);
+        let a = (f32::from(c1.a) / 255.0).mul_add(w1, (f32::from(c2.a) / 255.0) * w2) * alpha_mul;
+        Some(match space.as_str() {
+            "srgb" | "srgb-linear" | "xyz" | "xyz-d65" | "lab" | "oklab" => {
+                let (x1, y1, z1) = mix_to(&space, c1);
+                let (x2, y2, z2) = mix_to(&space, c2);
+                let (a1, a2) = (f32::from(c1.a) / 255.0, f32::from(c2.a) / 255.0);
+                let d = a1.mul_add(w1, a2 * w2).max(f32::EPSILON);
+                mix_from(
+                    &space,
+                    (x1 * a1).mul_add(w1, (x2 * a2) * w2) / d,
+                    (y1 * a1).mul_add(w1, (y2 * a2) * w2) / d,
+                    (z1 * a1).mul_add(w1, (z2 * a2) * w2) / d,
+                    a,
+                )
+            }
+            "hsl" | "lch" | "oklch" => {
+                let (x1, y1, z1) = mix_polar(&space, c1);
+                let (x2, y2, z2) = mix_polar(&space, c2);
+                let dh = (z2 - z1 + 540.0).rem_euclid(360.0) - 180.0;
+                mix_from_polar(
+                    &space,
+                    x1.mul_add(w1, x2 * w2),
+                    y1.mul_add(w1, y2 * w2),
+                    z1 + dh * w2,
+                    a,
+                )
+            }
+            _ => return None,
+        })
+    }
+
+    fn mix_operand(s: &str) -> Option<(crate::value::Color, Option<f32>)> {
+        let s = s.trim();
+        let (c, p) = match s.rsplit_once(' ') {
+            Some((head, tail)) if tail.ends_with('%') => {
+                (head, tail.trim_end_matches('%').parse::<f32>().ok())
+            }
+            _ => (s, None),
+        };
+        Some((crate::value::parse_color(c)?, p))
+    }
+
+    fn mix_to(space: &str, c: crate::value::Color) -> (f32, f32, f32) {
+        let (r, g, b) = (
+            f32::from(c.r) / 255.0,
+            f32::from(c.g) / 255.0,
+            f32::from(c.b) / 255.0,
+        );
+        let (rl, gl, bl) = (srgb_linear(r), srgb_linear(g), srgb_linear(b));
+        match space {
+            "srgb" => (r, g, b),
+            "srgb-linear" => (rl, gl, bl),
+            "xyz" | "xyz-d65" => srgb_xyz(rl, gl, bl),
+            "lab" => xyz_lab(srgb_xyz(rl, gl, bl)),
+            _ => xyz_oklab(srgb_xyz(rl, gl, bl)),
+        }
+    }
+
+    fn mix_from(space: &str, x: f32, y: f32, z: f32, a: f32) -> String {
+        let (r, g, b) = match space {
+            "srgb" => (x, y, z),
+            "srgb-linear" => (srgb_gamma(x), srgb_gamma(y), srgb_gamma(z)),
+            "xyz" | "xyz-d65" => {
+                let (rl, gl, bl) = xyz_srgb(x, y, z);
+                (srgb_gamma(rl), srgb_gamma(gl), srgb_gamma(bl))
+            }
+            "lab" => {
+                let (rl, gl, bl) =
+                    xyz_srgb(lab_xyz(x, y, z).0, lab_xyz(x, y, z).1, lab_xyz(x, y, z).2);
+                (srgb_gamma(rl), srgb_gamma(gl), srgb_gamma(bl))
+            }
+            _ => {
+                let (rl, gl, bl) = oklab_xyz(x, y, z);
+                (srgb_gamma(rl), srgb_gamma(gl), srgb_gamma(bl))
+            }
+        };
+        fmt_rgba(r, g, b, a)
+    }
+
+    fn mix_polar(space: &str, c: crate::value::Color) -> (f32, f32, f32) {
+        let (r, g, b) = (
+            f32::from(c.r) / 255.0,
+            f32::from(c.g) / 255.0,
+            f32::from(c.b) / 255.0,
+        );
+        let (rl, gl, bl) = (srgb_linear(r), srgb_linear(g), srgb_linear(b));
+        match space {
+            "hsl" => rgb_hsl(r, g, b),
+            "lch" => lab_lch(xyz_lab(srgb_xyz(rl, gl, bl))),
+            _ => lab_lch(xyz_oklab(srgb_xyz(rl, gl, bl))),
+        }
+    }
+
+    fn mix_from_polar(space: &str, x: f32, y: f32, z: f32, a: f32) -> String {
+        let (r, g, b) = match space {
+            "hsl" => hsl_rgb(x, y, z),
+            "lch" => {
+                let (rl, gl, bl) = {
+                    let t = lab_xyz(lch_lab(x, y, z).0, lch_lab(x, y, z).1, lch_lab(x, y, z).2);
+                    xyz_srgb(t.0, t.1, t.2)
+                };
+                (srgb_gamma(rl), srgb_gamma(gl), srgb_gamma(bl))
+            }
+            _ => {
+                let (rl, gl, bl) = oklab_xyz(x, y * z.to_radians().cos(), y * z.to_radians().sin());
+                (srgb_gamma(rl), srgb_gamma(gl), srgb_gamma(bl))
+            }
+        };
+        fmt_rgba(r, g, b, a)
+    }
+
+    fn fmt_rgba(r: f32, g: f32, b: f32, a: f32) -> String {
+        let c = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
+        let al = a.clamp(0.0, 1.0);
+        if (al - 1.0).abs() < f32::EPSILON {
+            format!("rgb({},{},{})", c(r), c(g), c(b))
+        } else {
+            format!("rgba({},{},{},{:.3})", c(r), c(g), c(b), al)
+        }
+    }
+
+    fn srgb_linear(v: f32) -> f32 {
+        if v <= 0.04045 {
+            v / 12.92
+        } else {
+            ((v + 0.055) / 1.055).powf(2.4)
+        }
+    }
+
+    fn srgb_gamma(v: f32) -> f32 {
+        if v <= 0.003_130_8 {
+            12.92 * v
+        } else {
+            1.055 * v.powf(1.0 / 2.4) - 0.055
+        }
+    }
+
+    fn srgb_xyz(r: f32, g: f32, b: f32) -> (f32, f32, f32) {
+        (
+            r.mul_add(0.412_390_8, g.mul_add(0.357_584_34, b * 0.180_480_8)),
+            r.mul_add(0.212_639, g.mul_add(0.715_168_7, b * 0.072_192_32)),
+            r.mul_add(0.019_330_82, g.mul_add(0.119_194_78, b * 0.950_532_2)),
+        )
+    }
+
+    fn xyz_srgb(x: f32, y: f32, z: f32) -> (f32, f32, f32) {
+        (
+            x.mul_add(3.240_97, y.mul_add(-1.537_383_2, z * -0.498_610_76)),
+            x.mul_add(-0.969_243_64, y.mul_add(1.875_967_5, z * 0.041_555_06)),
+            x.mul_add(0.055_630_08, y.mul_add(-0.203_976_96, z * 1.056_971_5)),
+        )
+    }
+    fn xyz_lab((x, y, z): (f32, f32, f32)) -> (f32, f32, f32) {
+        let f = |t: f32| {
+            if t > 0.008_856 {
+                t.cbrt()
+            } else {
+                (841.0 / 108.0) * t + 4.0 / 29.0
+            }
+        };
+        let (fx, fy, fz) = (f(x / 0.95047), f(y), f(z / 1.08883));
+        (116.0 * fy - 16.0, 500.0 * (fx - fy), 200.0 * (fy - fz))
+    }
+
+    fn lab_xyz(l: f32, a: f32, b: f32) -> (f32, f32, f32) {
+        let fy = (l + 16.0) / 116.0;
+        let f = |t: f32| {
+            if t > 6.0 / 29.0 {
+                t * t * t
+            } else {
+                (108.0 / 841.0) * (t - 4.0 / 29.0)
+            }
+        };
+        (
+            f(fy + a / 500.0) * 0.95047,
+            f(fy),
+            f(fy - b / 200.0) * 1.08883,
+        )
+    }
+
+    fn lab_lch((l, a, b): (f32, f32, f32)) -> (f32, f32, f32) {
+        (l, a.hypot(b), b.atan2(a).to_degrees().rem_euclid(360.0))
+    }
+
+    fn lch_lab(l: f32, c: f32, h: f32) -> (f32, f32, f32) {
+        (l, c * h.to_radians().cos(), c * h.to_radians().sin())
+    }
+
+    fn xyz_oklab((x, y, z): (f32, f32, f32)) -> (f32, f32, f32) {
+        let l = (0.818_933 * x + 0.361_866_7 * y - 0.128_859_71 * z).cbrt();
+        let m = (0.032_984_54 * x + 0.929_311_9 * y + 0.036_145_64 * z).cbrt();
+        let s = (0.048_200_3 * x + 0.264_366_27 * y + 0.633_851_7 * z).cbrt();
+        (
+            0.210_454_26 * l + 0.793_617_8 * m - 0.004_072_05 * s,
+            1.977_998_5 * l - 2.428_592_2 * m + 0.450_593_7 * s,
+            0.025_904_04 * l + 0.782_771_77 * m - 0.808_675_77 * s,
+        )
+    }
+
+    fn oklab_xyz(l: f32, a: f32, b: f32) -> (f32, f32, f32) {
+        let l2 = (l + 0.396_337_78 * a + 0.215_803_76 * b).powi(3);
+        let m2 = (l - 0.105_561_346 * a - 0.063_854_17 * b).powi(3);
+        let s2 = (l - 0.089_484_18 * a - 1.291_485_5 * b).powi(3);
+        (
+            1.227_014 * l2 - 0.557_799_8 * m2 + 0.281_256_15 * s2,
+            -0.040_580_18 * l2 + 1.112_256_9 * m2 - 0.071_676_6 * s2,
+            -0.076_381_28 * l2 - 0.421_481_98 * m2 + 1.586_163_3 * s2,
+        )
+    }
+
+    fn rgb_hsl(r: f32, g: f32, b: f32) -> (f32, f32, f32) {
+        let (max, min) = (r.max(g).max(b), r.min(g).min(b));
+        let l = f32::midpoint(max, min);
+        if (max - min).abs() < f32::EPSILON {
+            return (l, 0.0, 0.0);
+        }
+        let d = max - min;
+        let s = d / (1.0 - (2.0 * l - 1.0).abs()).max(f32::EPSILON);
+        let h = if (max - r).abs() < f32::EPSILON {
+            60.0 * ((g - b) / d).rem_euclid(6.0)
+        } else if (max - g).abs() < f32::EPSILON {
+            60.0 * ((b - r) / d + 2.0)
+        } else {
+            60.0 * ((r - g) / d + 4.0)
+        };
+        (l, s, h)
+    }
+
+    fn hsl_rgb(l: f32, s: f32, h: f32) -> (f32, f32, f32) {
+        let h = h.rem_euclid(360.0);
+        let f = |n: f32| {
+            let k = (n + h / 30.0).rem_euclid(12.0);
+            l - s * l.min(1.0 - l) * k.min(4.0).min(9.0 - k).clamp(-1.0, 1.0)
+        };
+        (f(0.0), f(8.0), f(4.0))
+    }
 }
 
 #[cfg(test)]

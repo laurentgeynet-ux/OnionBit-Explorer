@@ -509,3 +509,28 @@ fn any_descendant_invalid(dom: &Dom, node: NodeId) -> bool {
             || explorer_common::deep(|| any_descendant_invalid(dom, *k))
     })
 }
+
+/// `:defined` (selectors-4 §13) — l'élément est « défini » :
+/// toujours vrai pour les éléments natifs (nom sans tiret) ;
+/// pour un nom à tiret ou un `is=` custom, vrai ssi le nom
+/// figure dans le registre du document
+/// ([`Dom::is_defined_name`], rempli par la session depuis le
+/// miroir JS — sans moteur, aucun custom n'est défini).
+pub(crate) fn is_defined(dom: &Dom, node: NodeId) -> bool {
+    if !is_element(dom, node) {
+        return false;
+    }
+    // `is="x-foo"` : built-in customisé — défini ssi `x-foo`
+    // est enregistré (spec : l'attribut fait foi quand il
+    // désigne un nom de custom element valide).
+    if let Some(is) = attr(dom, node, "is") {
+        let is = is.trim();
+        if is.contains('-') {
+            return dom.is_defined_name(&is.to_ascii_lowercase());
+        }
+    }
+    match tag(dom, node) {
+        t if t.contains('-') => dom.is_defined_name(t),
+        _ => true,
+    }
+}

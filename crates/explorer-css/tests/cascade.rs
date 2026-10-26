@@ -2359,3 +2359,39 @@ fn ol_type_attribut_mappe_list_style() {
         Some("decimal-z")
     );
 }
+
+#[test]
+fn color_mix_resout_espaces() {
+    // R-114 — `color-mix()` résolu à la valeur calculée
+    // (css-color-5 §3 — ×1143 dans la feuille Tailwind).
+    let f = fixture();
+    let mut dom = f.dom;
+    let div = dom.create_element("div").unwrap();
+    dom.append_child(dom.document(), div).unwrap();
+    let mut e = StyleEngine::new();
+    e.add_css(
+        "div{color:color-mix(in srgb, red 25%, blue)}",
+        Origin::Author,
+    );
+    let s = e.compute(&dom, div, &env());
+    // 25% red + 75% blue en srgb → (63.75,0,191.25) ≈ (64,0,191).
+    assert_eq!(s.get("color"), Some("rgb(64,0,191)"));
+    // oklab + pourcentage manquant → 50/50.
+    let mut e = StyleEngine::new();
+    e.add_css(
+        "div{color:color-mix(in oklab, black, white)}",
+        Origin::Author,
+    );
+    let s = e.compute(&dom, div, &env());
+    assert!(s.get("color").is_some_and(|v| v.starts_with("rgb")));
+    // var() imbriqué résolu avant.
+    let mut e = StyleEngine::new();
+    e.add_css(
+        "div{--c:rgb(0,255,0);color:color-mix(in srgb, var(--c) 50%, black)}",
+        Origin::Author,
+    );
+    assert_eq!(
+        e.compute(&dom, div, &env()).get("color"),
+        Some("rgb(0,128,0)")
+    );
+}

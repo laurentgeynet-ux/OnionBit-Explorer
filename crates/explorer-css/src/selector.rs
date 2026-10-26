@@ -284,6 +284,11 @@ pub enum DynamicPseudo {
     UserValid,
     /// `:user-invalid`.
     UserInvalid,
+    /// `:defined` — élément **défini** (selectors-4 §13) :
+    /// natif toujours vrai ; nom à tiret → registre
+    /// `customElements` du document ([`Dom::is_defined_name`]),
+    /// rempli par la session depuis le miroir JS.
+    Defined,
 }
 
 impl DynamicPseudo {
@@ -311,6 +316,7 @@ impl DynamicPseudo {
             Self::Invalid => "invalid",
             Self::UserValid => "user-valid",
             Self::UserInvalid => "user-invalid",
+            Self::Defined => "defined",
         }
     }
 
@@ -337,6 +343,7 @@ impl DynamicPseudo {
             "invalid" => Self::Invalid,
             "user-valid" => Self::UserValid,
             "user-invalid" => Self::UserInvalid,
+            "defined" => Self::Defined,
             _ => return None,
         })
     }
@@ -1537,6 +1544,7 @@ fn dynamic_matches(
         DynamicPseudo::PlaceholderShown => crate::state::placeholder_shown(dom, node),
         DynamicPseudo::Valid => crate::state::is_valid(dom, node),
         DynamicPseudo::Invalid => crate::state::is_invalid(dom, node),
+        DynamicPseudo::Defined => crate::state::is_defined(dom, node),
         // `:user-*` = validité réelle **et** flag d'interaction
         // fourni par l'appelant (conservateur : faux par
         // défaut — spec : rien ne matche avant interaction).
