@@ -181,3 +181,78 @@ fn vol2_worker_add_event_listener() {
         "function"
     );
 }
+
+/// `Range.createContextualFragment` — première exception de la
+/// cascade `sc_*` de maps.google.com (vol9).
+#[test]
+fn vol9_range_contextual_fragment() {
+    use explorer_jscore::Dom;
+    let mut e = Engine::new();
+    e.install_dom(&Rc::new(RefCell::new(Dom::from_html("<div id=x></div>"))));
+    for (src, want) in [
+        (
+            "var r = document.createRange(); typeof r.createContextualFragment",
+            "function",
+        ),
+        (
+            "var f = r.createContextualFragment('<span>a</span><b>b</b>'); f.childNodes.length",
+            "2",
+        ),
+        ("f.childNodes[0].tagName", "SPAN"),
+        (
+            "document.getElementById('x').appendChild(f); document.getElementById('x').childNodes.length",
+            "2",
+        ),
+    ] {
+        match e.eval(src) {
+            Ok(v) => assert_eq!(e.describe(v), want, "{src}"),
+            Err(err) => panic!("{src} -> {err}"),
+        }
+    }
+}
+
+/// `window` hérite `EventTarget.prototype` (`WebIDL`) — le polyfill
+/// webcomponents (`YouTube`) y lit `__shady_native_addEventListener`
+/// après `Object.defineProperty(EventTarget.prototype, …)`.
+#[test]
+fn vol10_window_inherits_event_target_prototype() {
+    use explorer_jscore::Dom;
+    let mut e = Engine::new();
+    e.install_dom(&Rc::new(RefCell::new(Dom::from_html("<p></p>"))));
+    for (src, want) in [
+        (
+            "Object.defineProperty(EventTarget.prototype, '__shady_native_addEventListener', {value: EventTarget.prototype.addEventListener}); typeof window.__shady_native_addEventListener",
+            "function",
+        ),
+        ("window instanceof EventTarget", "true"),
+    ] {
+        match e.eval(src) {
+            Ok(v) => assert_eq!(e.describe(v), want, "{src}"),
+            Err(err) => panic!("{src} -> {err}"),
+        }
+    }
+}
+
+/// `IDBIndex` & autres interfaces IDB déclarées — Rakuten :
+/// `IDBIndex is not defined` était une `ReferenceError` fatale.
+#[test]
+fn vol6_idb_interfaces_declared() {
+    use explorer_jscore::Dom;
+    let mut e = Engine::new();
+    e.install_dom(&Rc::new(RefCell::new(Dom::from_html("<p></p>"))));
+    for name in [
+        "IDBIndex",
+        "IDBObjectStore",
+        "IDBCursor",
+        "IDBTransaction",
+        "IDBRequest",
+        "IDBDatabase",
+    ] {
+        match e.eval(&format!("typeof {name}")) {
+            Ok(v) => assert_eq!(e.describe(v), "function", "{name}"),
+            Err(err) => panic!("{name} -> {err}"),
+        }
+    }
+    // `new IDBIndex()` → TypeError honnête (pas de ctor WebIDL).
+    assert!(e.eval("new IDBIndex()").is_err());
+}
