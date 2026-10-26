@@ -338,12 +338,19 @@ impl Session {
             });
         }
         for s in offered {
+            // 139b — tout flux de lecture passe par le proxy
+            // local (même câblage `local_proxy` de référence) ;
+            // proxy pas encore prêt → URL directe (repli).
+            let url = self
+                .media_proxy
+                .get()
+                .map_or_else(|| s.url.clone(), |p| p.url(&s.url));
             let _ = self.events.send(CoreEvent::MediaOffered {
                 tab,
                 media: s.id,
                 kind: s.kind,
                 rect: s.rect,
-                url: s.url,
+                url,
                 mime: s.mime,
                 controls: s.controls,
                 autoplay: s.autoplay,

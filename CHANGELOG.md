@@ -944,6 +944,25 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   câblage que
   `iptv-infra::network::local_proxy`.
 
+- **139b — seam branchée :
+  `MediaOffered.url` via proxy**
+  (`explorer-core`, étape 139 NAV)
+  : `Session` spawn le
+  `MediaProxy` en tâche tokio dès
+  `with_config` (daemon, CLI et
+  FFI — `Handle::try_current`) et
+  réécrit chaque `url` d'offre via
+  `proxy.url()` — tout flux de
+  lecture passe par le loopback
+  (headers `Range`/cookies/UA
+  propagés, politique transport
+  intacte). Proxy pas prêt ou
+  bind échoué → URL directe
+  (repli honnête, jamais de
+  blocage). Le claim hôte reçoit
+  une URL `127.0.0.1` — le
+  lecteur `networkUrl` inchangé.
+
 - **CAP-198 — Shadow DOM tranche 4 :
   event retargeting** (`explorer-jscore`)
   : le chemin de propagation des

@@ -627,6 +627,13 @@ pub(crate) struct PageSnapshot {
 /// bus d'événements.
 pub struct Session {
     transport: Arc<dyn HttpTransport>,
+    /// Proxy média loopback (étape 139a) — spawné en tâche
+    /// tokio dès la construction (daemon et FFI), partagé par
+    /// tous les onglets ; les URLs `MediaOffered` sont
+    /// réécrites via lui (139b — tout flux de lecture passe
+    /// par le proxy, même câblage `iptv-infra::local_proxy`).
+    media_proxy:
+        Arc<std::sync::OnceLock<explorer_net::media_proxy::MediaProxy>>,
     /// Registre de fontes : faces `@font-face` fetchées
     /// devant la source locale injectée (ADR-0016). Purge
     /// par navigation (faces par document). Sous `Mutex`
@@ -858,7 +865,27 @@ impl Session {
             ))),
             accept_language.clone(),
         ));
+        // Proxy média (139a/b) : bind en tâche tokio — daemon,
+        // CLI et FFI tournent tous sous runtime ; si l'écoute
+        // échoue les offres gardent l'URL directe (repli).
+        let media_proxy = Arc::new(std::sync::OnceLock::new());
+        if let Ok(h) = tokio::runtime::Handle::try_current() {
+            let tp = transport.clone();
+            let cell = media_proxy.clone();
+            h.spawn(async move {
+                let ua = concat!("Explorer/", env!("CARGO_PKG_VERSION"));
+                if let Ok(p) = explorer_net::media_proxy::MediaProxy::spawn(
+                    tp,
+                    ua.to_string(),
+                )
+                .await
+                {
+                    let _ = cell.set(p);
+                }
+            });
+        }
         Self {
+            media_proxy,
             transport,
             webfonts: Arc::new(std::sync::Mutex::new(WebFontSource::new(
                 fonts,

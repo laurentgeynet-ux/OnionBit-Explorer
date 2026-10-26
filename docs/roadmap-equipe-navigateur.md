@@ -4924,12 +4924,13 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
     propagés, port éphémère
     daemon+FFI) — reste : test flux
     et borne de flux.
-  - [ ] 139b — branchement seam :
-    `MediaOffered.url` réécrit en
-    URL proxy avant le claim —
-    `MediaPlayerFactory` reçoit le
-    flux via proxy (headers,
-    cookies, routage unifiés).
+  - [x] **139b — seam branchée** :
+    `Session` spawn `MediaProxy`
+    en tokio dès `with_config`
+    (daemon/CLI/FFI), `url`
+    d'offre réécrite via
+    `proxy.url()` — repli URL
+    directe si proxy absent.
   - [ ] 139c — cast HLS (garée) :
     port `hls_transcoder` —
     ffprobe → remux|encode → HLS,
