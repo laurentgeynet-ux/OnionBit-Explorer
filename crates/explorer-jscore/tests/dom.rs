@@ -2959,6 +2959,28 @@ fn canvas_op_marks_dirty_path() {
 }
 
 #[test]
+fn canvas_to_data_url_and_blob() {
+    // JS-C151 — `toDataURL`/`toBlob` stubs honnêtes (pas de
+    // raster miroir, JS-C28) : data-URL PNG vide, suffisant
+    // aux feature-detects anti-bot (aliexpress sufei-punish).
+    let dom = Rc::new(RefCell::new(Dom::from_html(PAGE_CANVAS)));
+    let mut e = Engine::new();
+    e.install_dom(&dom);
+    let d = e
+        .eval("document.getElementById('c').toDataURL()")
+        .expect("toDataURL");
+    assert_eq!(e.describe(d), "data:image/png;base64,");
+    // `toBlob` invoque son callback avec la data-URL.
+    e.eval("document.getElementById('c').toBlob(b => { window.__b = b; })")
+        .expect("toBlob");
+    let b = e.eval("window.__b").expect("blob cb");
+    assert_eq!(e.describe(b), "data:image/png;base64,");
+    // Non-canvas : repli générique (pas de méthode) — pas de
+    // data-URL fantôme.
+    assert!(e.eval("document.body.toDataURL()").is_err());
+}
+
+#[test]
 fn canvas_width_reset_clears_ops() {
     // `canvas.width =` efface le bitmap enregistré (spec).
     let dom = Rc::new(RefCell::new(Dom::from_html(PAGE_CANVAS)));
@@ -6105,6 +6127,20 @@ fn cap194_abort_signal_surface() {
             +typeof AbortSignal.timeout(0).then"
         ),
         "true/A/undefined"
+    );
+    // JS-C153 — statique `AbortSignal.throwIfAborted(sig)`
+    // (youtube kevlar vol22 : lue sur le ctor →
+    // `of Undefined`). Jette `reason` si aborted, passe sinon.
+    assert_eq!(
+        evf(
+            &mut e,
+            "typeof AbortSignal.throwIfAborted+'/'+\
+            (function(){try{AbortSignal.throwIfAborted(AbortSignal.abort('X'));return 'n'}\
+             catch(v){return v.name||v}})()+'/'+\
+            (function(){var c=new AbortController();\
+             AbortSignal.throwIfAborted(c.signal);return 'ok'})()"
+        ),
+        "function/X/ok"
     );
 }
 

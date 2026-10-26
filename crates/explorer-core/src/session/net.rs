@@ -743,6 +743,21 @@ impl Session {
             tracing::debug!(tab, url = %r.url, seq = r.seq, "spawn dyn import");
             self.spawn_dyn_import(tab, &page, &base, &r);
         }
+        // `unhandledrejection` (JS-C154) — les rejets JS non
+        // gérés étaient des morts silencieuses (pinterest,
+        // airbnb) : le moteur tire l'event au checkpoint, la
+        // session verse la description au ring console.
+        for msg in self
+            .tabs
+            .get_mut(&tab)
+            .and_then(|e| e.js.as_mut())
+            .map_or_else(Vec::new, |eng| eng.drain_unhandled_rejections())
+        {
+            let _ = self.events.send(CoreEvent::PipelineError {
+                tab: Some(tab),
+                message: msg,
+            });
+        }
     }
 
     /// Distribution des requêtes dynamiques drainées

@@ -7,6 +7,70 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **JS-C154 — `unhandledrejection`**
+  (`explorer-jscore`,
+  `explorer-js`, `explorer-core`) —
+  les rejets sans `.then` mouraient
+  en silence (pinterest, airbnb).
+  `JsPromise.handled`
+  (`[[PromiseIsHandled]]` spec) posé
+  par tout `then`/adoption ; un
+  settle `Rejected` non-handled est
+  gardé et l'event
+  `{type,promise,reason,preventDefault}`
+  tiré en fin de checkpoint sur
+  `onunhandledrejection` + listeners
+  `__et` ; un `.then` tardif retire
+  la promesse (« rejectionhandled »
+  silencieux). Descriptions drainées
+  via `JsEngine::drain_unhandled_
+  rejections` (nouveau `Cmd` acteur)
+  → `CoreEvent::PipelineError` →
+  ring console. Test
+  `promise_unhandled_rejection`.
+
+- **JS-C153 — `AbortSignal.
+  throwIfAborted`** (`explorer-jscore`)
+  — la méthode existait mais n'était
+  exposée ni en statique sur le ctor
+  ni en propriété lisible du signal
+  (invoke-only → `signal.throwIfAborted`
+  rendait `undefined`, youtube kevlar
+  `cannot read 'throwIfAborted' of
+  Undefined`). Statique `AbortSignal.
+  throwIfAborted(sig)` ajoutée sur les
+  deux installs (DOM + bare `fetch`),
+  `has_method` du host complété.
+  Test `cap194_abort_signal_surface`.
+
+- **JS-C152 — `atob` chaîne-octet**
+  (`explorer-jscore`) — le décodage
+  validait sa sortie en UTF-8 et
+  jetait `invalid byte sequence` sur
+  tout octet non-ASCII (bsky bundle
+  Sentry/expo) alors que la spec rend
+  une chaîne Latin-1 (1 code point /
+  octet). Corrigé + whitespace restreint
+  à l'ASCII (NBSP rejeté) + octet non
+  ASCII ne glisse plus via `c as u8`
+  tronqué. Tests dans `globals`.
+
+- **JS-C151 — `canvas.toDataURL`/
+  `toBlob`** (`explorer-jscore`) —
+  les feature-detects anti-bot
+  (aliexpress `sufei-punish`)
+  comparent le format data-URL ;
+  méthodes absentes →
+  `toDataURL is not a function`.
+  Stubs honnêtes sans raster
+  (JS-C28) : `toDataURL` rend
+  `data:image/png;base64,` (PNG
+  vide), `toBlob` passe la même
+  valeur à son callback — gatés
+  `<canvas>`, repli générique
+  ailleurs. Test
+  `canvas_to_data_url_and_blob`.
+
 - **JS-C150 — `super.m()` dans un
   constructeur dérivé** (`explorer-jscore`)
   — le `[[HomeObject]]` du ctor était
