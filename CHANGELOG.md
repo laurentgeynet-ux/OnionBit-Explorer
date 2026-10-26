@@ -7,6 +7,23 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **Vol 25 — `<svg>` à
+  `viewBox` seul → 300 px**
+  (`explorer-css`) — la règle
+  `width:100%` (bf2b0d3) était
+  correcte pour les héros mais
+  gonflait les icônes : le
+  hint devient `min(300px,
+  100%)` — défaut d'objet
+  remplacé Chrome (300 px,
+  borné au conteneur),
+  `height:auto` par le ratio
+  du viewBox. Régressions
+  `svg_viewbox_seul_borne_a_`
+  `300px`,
+  `svg_viewbox_seul_conteneur_`
+  `etroit` (block).
+
 - **Vol 21/22 — `text-overflow:
   ellipsis` + `white-space:
   nowrap`** (`explorer-layout`)

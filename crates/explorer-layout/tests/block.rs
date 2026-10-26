@@ -929,17 +929,32 @@ fn remplace_max_width_bridant_derive_la_hauteur_par_ratio() {
 }
 
 /// Vol 2026-10-26 — `<svg viewBox>` sans `width` : la taille
-/// N'EST PAS le viewBox (logo w3.org géant) — SVG2 `auto`
-/// = `100%` du conteneur, `height:auto` dérivé du ratio.
+/// N'EST PAS le viewBox (logo w3.org géant) — défaut remplacé
+/// `min(300px, 100%)` (comportement Chrome ; vol 25 kayak :
+/// l'icône `⇄` ne doit plus remplir sa colonne de 325 px),
+/// `height:auto` dérivé du ratio.
 #[test]
-fn svg_viewbox_seul_occupe_la_largeur_conteneur() {
+fn svg_viewbox_seul_borne_a_300px() {
     let (dom, bx) = laid(
         "<div style=\"width:400px\"><svg viewBox=\"0 0 200 100\"></svg></div>",
         "body{margin:0}",
     );
     let svg = find(&bx, by_tag(&dom, "svg"));
-    assert!(approx(svg.rect.width, 400.0), "w={}", svg.rect.width);
-    assert!(approx(svg.rect.height, 200.0), "h={}", svg.rect.height);
+    assert!(approx(svg.rect.width, 300.0), "w={}", svg.rect.width);
+    assert!(approx(svg.rect.height, 150.0), "h={}", svg.rect.height);
+}
+
+/// Conteneur plus étroit que 300 px : `min(300px, 100%)`
+/// laisse le SVG tenir dans son bloc.
+#[test]
+fn svg_viewbox_seul_conteneur_etroit() {
+    let (dom, bx) = laid(
+        "<div style=\"width:200px\"><svg viewBox=\"0 0 200 100\"></svg></div>",
+        "body{margin:0}",
+    );
+    let svg = find(&bx, by_tag(&dom, "svg"));
+    assert!(approx(svg.rect.width, 200.0), "w={}", svg.rect.width);
+    assert!(approx(svg.rect.height, 100.0), "h={}", svg.rect.height);
 }
 
 /// Contrôle : `<svg width/height>` explicites gardent la
