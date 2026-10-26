@@ -4905,6 +4905,48 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   strictement. Régression : test de
   récursion profonde qui survit.
 
+- [ ] **Étape 139. Chaîne média —
+  même câblage que la référence
+  `IptvMediacenter-Rust` (ADR-0024
+  amendée)** : porter le pattern
+  éprouvé — tout flux de lecture
+  passe par un proxy local, puis
+  le lecteur hôte. Référence :
+  `iptv-infra::network::local_proxy`
+  (Axum, streaming borné, headers/
+  UA injectés), `hls_transcoder`
+  (cast ffprobe→HLS), `MdkPlayerEngine`.
+  Sous-étapes :
+  - [ ] 139a — `LocalMediaProxy`
+    loopback dans `explorer-net`
+    (seul crate à socket) :
+    endpoint streamé zéro-copie,
+    headers/UA custom par requête,
+    borne de flux ; listener à
+    port éphémère partagé par
+    daemon et FFI.
+  - [ ] 139b — branchement seam :
+    `MediaOffered.url` réécrit en
+    URL proxy avant le claim —
+    `MediaPlayerFactory` reçoit le
+    flux via proxy (headers,
+    cookies, routage unifiés).
+  - [ ] 139c — cast HLS (garée) :
+    port `hls_transcoder` —
+    ffprobe → remux|encode → HLS,
+    endpoint `/hls/v1/` ; ouvrir au
+    premier besoin cast réel.
+  - [ ] 139d — dossier externe
+    (garée, ADR-0024 amendée) :
+    source fichier via
+    `MediaPlayerFactory.file` +
+    dossier configurable — même
+    seam, entrée non-réseau.
+  - [ ] 139e — tests flux
+    streamé/headers/range +
+    doc (CHANGELOG, ADR mise à
+    jour « câblé »).
+
 - [ ] **Écarts terrain — vol humain
   22/10 (release `39ab821`, FFI)** :
   second run humain — trois constats

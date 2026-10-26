@@ -912,6 +912,21 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   source des patterns pour un
   portage éventuel.
 
+- **Étape 139 ouverte — portage du
+  câblage média de référence**
+  (`explorer-net` + `app/`,
+  ADR-0024 amendée) : même
+  implantation que
+  `IptvMediacenter-Rust` — tout
+  flux de lecture via un proxy
+  local. Sous-étapes retranscrites
+  : `LocalMediaProxy` loopback
+  streamé (139a), réécriture
+  `MediaOffered.url` avant claim
+  (139b), cast HLS ffprobe garé
+  (139c), dossier externe garé
+  (139d), tests flux + doc (139e).
+
 - **CAP-198 — Shadow DOM tranche 4 :
   event retargeting** (`explorer-jscore`)
   : le chemin de propagation des
