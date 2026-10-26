@@ -382,8 +382,10 @@ fn iife_hoisted_fn_shadows_and_receives_props() {
     );
     // La valeur retournée EST la fonction hoisted (callable).
     assert_eq!(
-        ev_str("var th = (function(){ e.x = 5; function e(){return 'called'}; return e })();\
-                [th(), th.x].join('|')"),
+        ev_str(
+            "var th = (function(){ e.x = 5; function e(){return 'called'}; return e })();\
+                [th(), th.x].join('|')"
+        ),
         "called|5"
     );
     // Cas minimal : écriture puis lecture sur le binding hoisted.
@@ -396,6 +398,14 @@ fn iife_hoisted_fn_shadows_and_receives_props() {
     assert_eq!(
         ev_str("(function(){ var r = typeof e; e.x = 7; function e(){}; return [r, e.x].join('|') })()"),
         "function|7"
+    );
+    // Sonde d'identité : l'objet écrit === l'objet retourné ?
+    // (sépare « écriture ailleurs » de « ré-instanciation »)
+    assert_eq!(
+        ev_str("(function(){ e.tag = 'W'; function e(){return 'call'};\
+                var w = e.tag, c = e(), t2 = e.tag;\
+                return [w, c, t2].join('|') })()"),
+        "W|call|W"
     );
 }
 
