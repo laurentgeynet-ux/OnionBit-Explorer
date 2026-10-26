@@ -307,12 +307,27 @@ impl Engine {
                             match self.call_value(cb, Value::Undefined, &[arg]) {
                                 Ok(v) => self.resolve_promise(next, v),
                                 Err(Thrown(t)) => {
+                                    // `EXPLORER_PROM_TRACE` : un cb
+                                    // qui jette atterrit en rejet
+                                    // silencieux — la raison nomme
+                                    // l'API manquante (github lazy-CE :
+                                    // le `.then` webpack post-import
+                                    // raté, `define` jamais atteint).
+                                    if std::env::var("EXPLORER_PROM_TRACE").is_ok() {
+                                        eprintln!(
+                                            "[prom-cb-throw] {}",
+                                            self.describe(t)
+                                        );
+                                    }
                                     self.settle_promise(next, PromiseState::Rejected, t);
                                 }
                             }
                         } else {
                             // Pass-through: `then()` without a handler for
                             // this outcome forwards state/result as-is.
+                            if rejected && std::env::var("EXPLORER_PROM_TRACE").is_ok() {
+                                eprintln!("[prom-unhandled] {}", self.describe(arg));
+                            }
                             self.settle_promise(
                                 next,
                                 if rejected {
