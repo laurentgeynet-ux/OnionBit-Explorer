@@ -229,6 +229,12 @@ impl Engine {
             "overrideMimeType",
             "addEventListener",
             "removeEventListener",
+            // `XMLHttpRequest.prototype.fetch` — Chrome le détecte
+            // par `!!f && f.length === 3` (player_ias YouTube) ;
+            // exposée, la détection échoue honnêtement (bound
+            // `hostMethod` → `invoke` renvoie `None` → fallback
+            // XHR classique).
+            "fetch",
         ] {
             let name = self.str_val(m);
             let f = self.bound_native("hostMethod", Self::host_method, vec![name]);

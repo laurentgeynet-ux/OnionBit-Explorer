@@ -1923,6 +1923,16 @@ impl Engine {
             if let Value::Obj(fid) = et_f {
                 self.set_own(fid, "prototype", Value::Obj(p), false);
             }
+            // WebIDL : `window` hérite `EventTarget.prototype` —
+            // le polyfill webcomponents (YouTube) lit
+            // `window.__shady_native_addEventListener` à travers
+            // cette chaîne après y avoir défini la native
+            // sauvegardée (`L(proto,…)` → `defineProperty`).
+            if let Some(o) = self.heap.obj_mut(g) {
+                if matches!(o.proto, Value::Obj(p0) if p0 == self.protos.object) {
+                    o.proto = Value::Obj(p);
+                }
+            }
         }
         self.set_own(g, "EventTarget", et_f, false);
         // `DOMException` — constructible spec : `new

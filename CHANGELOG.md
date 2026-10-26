@@ -7,6 +7,18 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **JS-C142 — `window` hérite
+  `EventTarget.prototype`** (`explorer-jscore`)
+  — mur YouTube : le polyfill
+  webcomponents lit
+  `window.__shady_native_addEventListener`
+  via la chaîne proto (`window` est un
+  `EventTarget` en WebIDL). Notre global
+  héritait `Object.prototype` seul →
+  `__shady_native_*` jamais visible,
+  boot Polymer mort. `window instanceof
+  EventTarget` est désormais vrai.
+
 - **JS-C141 — interfaces IDB déclarées**
   (`explorer-jscore`) — `IDBIndex is
   not defined` (Rakuten) tuait le
