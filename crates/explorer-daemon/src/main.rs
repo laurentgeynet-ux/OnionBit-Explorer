@@ -402,9 +402,13 @@ fn main() {
 
 #[allow(clippy::too_many_lines)] // setup séquentiel — chaque bloc est documenté in situ
 async fn amain() {
-    tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::from_default_env())
-        .init();
+    // Défaut `info` sans `RUST_LOG` (vol 18 : les `warn`
+    // iframe étaient perdus — le filtre vide ne passe que
+    // `error` ; le daemon est un hôte de diagnostic, les
+    // refus d'embarquement/sous-ressources doivent sortir).
+    let filter = EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| EnvFilter::new("info"));
+    tracing_subscriber::fmt().with_env_filter(filter).init();
     let mut cfg = DaemonConfig::from_env();
     let cli = parse_args();
     if let Some(p) = cli.port {
