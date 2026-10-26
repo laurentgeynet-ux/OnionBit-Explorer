@@ -7,6 +7,14 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **JS-C140 — `Range.createContextualFragment`**
+  (`explorer-jscore`) — première
+  exception de la cascade `sc_*` de
+  maps.google.com (19 erreurs). Fragment
+  parsé dans le même Dom que le range
+  (contexte non contextualisé —
+  déviation documentée).
+
 - **JS-C139 — regex : classes multi-items
   de basses surrogates → ensemble
   astral** (`explorer-jscore`) —

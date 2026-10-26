@@ -1127,6 +1127,7 @@ impl Host for RangeHost {
                 | "collapse"
                 | "cloneContents"
                 | "extractContents"
+                | "createContextualFragment"
                 | "deleteContents"
                 | "insertNode"
                 | "cloneRange"
@@ -1291,6 +1292,22 @@ impl Host for RangeHost {
                 let r = *self.data.borrow();
                 delete_range_contents(&self.dom, &r);
                 Ok(Some(Value::Undefined))
+            }
+            "createContextualFragment" => {
+                // `Range.createContextualFragment(html)` — mur
+                // maps.google.com (vol 2026-10-26) : première
+                // exception de la cascade `sc_*`. Le fragment est
+                // parsé dans le même Dom que le range (contexte =
+                // startContainer, notre parseur de fragment n'est
+                // pas contextualisé — déviation documentée).
+                let html = e.to_js_string(arg(args, 0))?;
+                let frag = {
+                    let mut d = self.dom.borrow_mut();
+                    let frag = d.create_fragment();
+                    d.parse_fragment_into(frag, &html);
+                    frag
+                };
+                Ok(Some(node_value(e, &self.dom, &self.cache, frag)))
             }
             "insertNode" => {
                 let Some(n) = node_for_in(e, arg(args, 0), &self.dom) else {
