@@ -656,6 +656,7 @@ fn hit_test_pointer_events_enfant_reactive() {
         Some(p),
         "zone overlay hors <a> → p sous-jacent : {hit:?}"
     );
+}
 
 #[test]
 fn hit_test_transform_translate_suit_la_peinture() {
