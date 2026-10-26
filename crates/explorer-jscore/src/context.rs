@@ -209,6 +209,7 @@ impl BrowsingContext {
             self.xhr.req_proto,
             self.xhr.res_proto,
             self.xhr.fd_proto,
+            self.xhr.xhr_proto,
         ]
         .into_iter()
         .flatten()

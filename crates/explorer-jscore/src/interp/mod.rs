@@ -2138,6 +2138,7 @@ impl Engine {
             self.xhr.req_proto,
             self.xhr.res_proto,
             self.xhr.fd_proto,
+            self.xhr.xhr_proto,
         ]
         .into_iter()
         .flatten()
@@ -2508,7 +2509,7 @@ impl Engine {
     /// (même pile que `el.m()` à l'appel). `Ok(None)` →
     /// `Undefined` (la surface a pu changer entre lecture
     /// et appel).
-    fn host_method(&mut self, this: Value, args: &[Value]) -> JsResult<Value> {
+    pub(crate) fn host_method(&mut self, this: Value, args: &[Value]) -> JsResult<Value> {
         let name = match args.first() {
             Some(Value::Str(s)) => self.heap.string(*s).unwrap_or_default(),
             _ => return Ok(Value::Undefined),
@@ -5450,13 +5451,14 @@ impl Engine {
             return self.call_value(target, this, args);
         }
         let fun = match self.heap.obj(id) {
-            Some(o) => match &o.kind {
-                ObjKind::Fun(fu) => fu.clone(),
-                _ => {
+            Some(o) => {
+                if let ObjKind::Fun(fu) = &o.kind {
+                    fu.clone()
+                } else {
                     let d: String = self.describe(f).chars().take(80).collect();
                     return Err(self.type_error(format!("object is not a function: {d}")));
                 }
-            },
+            }
             None => return Err(self.type_error("value is not a function")),
         };
         match fun {

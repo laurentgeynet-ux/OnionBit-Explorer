@@ -7,6 +7,23 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **JS-C135 — `XMLHttpRequest.prototype`
+  réel** (`explorer-jscore`) — mur
+  Excalidraw (vol 2026-10-26) : Sentry
+  instrumente le proto via
+  `Dr(XMLHttpRequest.prototype, "send",
+  wrap)` ; sans prototype réel, la
+  valeur était `undefined` →
+  `TypeError: 'in' requires an object`
+  au bootstrap (page blanche). Proto
+  objet + méthodes en `hostMethod`
+  re-dispatchant `Host::invoke`
+  (`xhr.send` lisible comme fonction,
+  `instanceof` fonctionne), constantes
+  `UNSENT…DONE` sur ctor + proto,
+  chaîne d'instance câblée, racine GC
+  ajoutée.
+
 - **JS-C134 — regex : `-` littéral en
   classe + paires surrogates hors
   classe** (`explorer-jscore`) — deux
