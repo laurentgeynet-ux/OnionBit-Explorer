@@ -804,12 +804,34 @@ pub(crate) fn collect_images(dom: &Dom, img_w: f32, dpr: f32) -> Vec<(NodeId, St
                     let eff_w = resolve_sizes(dom.attribute(n, "sizes").ok().flatten(), img_w);
                     pick_srcset(&ss, eff_w, dpr)
                 });
-                let src = picked.or_else(|| {
-                    dom.attribute(n, "src")
-                        .ok()
-                        .flatten()
-                        .filter(|s| !s.is_empty())
-                });
+                let src = picked
+                    .or_else(|| {
+                        dom.attribute(n, "src")
+                            .ok()
+                            .flatten()
+                            .filter(|s| !s.is_empty())
+                    })
+                    // Lazy-load (vol 13 lemonde/bbc : ~200
+                    // `<img>` à `data-src`, ~0 % peints) : le
+                    // deferred `loading="lazy"` est déjà
+                    // fetché d'emblée — reste la variante
+                    // « src déplacé en data-* » dont le JS
+                    // bootstrap est souvent mort. Repli
+                    // produit : les attributs lazy usuels
+                    // servent de source, dans cet ordre —
+                    // mieux que jamais peint.
+                    .or_else(|| {
+                        const LAZY_SRCS: &[&str] = &[
+                            "data-src",
+                            "data-lazy-src",
+                            "data-original",
+                            "data-url",
+                            "data-srcset",
+                        ];
+                        LAZY_SRCS.iter().find_map(|a| {
+                            dom.attribute(n, a).ok().flatten().filter(|s| !s.is_empty())
+                        })
+                    });
                 if let Some(src) = src {
                     out.push((n, src));
                 }

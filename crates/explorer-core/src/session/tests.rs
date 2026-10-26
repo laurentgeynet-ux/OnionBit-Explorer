@@ -2465,3 +2465,17 @@ fn noscript_meta_refresh_fallback_pure_only() {
     tb.finish();
     assert!(noscript_meta_refresh(&tb.into_dom()).is_none());
 }
+
+/// Vol 13 lemonde/bbc — les `<img>` à `data-src` (lazy JS
+/// mort) n'étaient jamais fetchées : repli produit sur les
+/// attributs lazy usuels quand ni `srcset` ni `src` n'est
+/// posé. `src`/`srcset` gagnent s'ils existent.
+#[test]
+fn collect_images_falls_back_to_lazy_data_src() {
+    let dom = test_dom("<img data-src=\"/a.png\"><img src=\"/b.png\" data-src=\"/c.png\"><img srcset=\"/d.png 1x\" data-src=\"/e.png\"><img>");
+    let srcs: Vec<String> = collect_images(&dom, 800.0, 1.0)
+        .into_iter()
+        .map(|(_, s)| s)
+        .collect();
+    assert_eq!(srcs, vec!["/a.png", "/b.png", "/d.png"]);
+}
