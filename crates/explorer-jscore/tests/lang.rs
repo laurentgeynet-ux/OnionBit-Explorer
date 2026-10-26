@@ -341,6 +341,29 @@ fn template_substitution_regex_and_comments() {
 }
 
 #[test]
+fn mixin_class_extends_call_result() {
+    // vaadin terrain — ThemableMixin(base) retourne `class extends
+    // base` ; la chaîne proto doit porter les méthodes du mixin
+    // (mesuré : `_set_theme` undefined sur l'instance).
+    assert_eq!(
+        ev_str("var M=function(s){return class extends s{theme(){return 'ok'}}};\
+                class Base{};\
+                class Btn extends M(Base){own(){return 'b'}}\
+                var b=new Btn();\
+                [b.own(),b.theme(),b instanceof Base,b instanceof Btn].join('|')"),
+        "b|ok|true|true"
+    );
+    // Chaîné : M2(M(Base)) — deux niveaux de mixin.
+    assert_eq!(
+        ev_str("var M=function(s){return class extends s{a(){return 1}}};\
+                var M2=function(s){return class extends s{b(){return 2}}};\
+                class X extends M2(M(class Base{})){}\
+                var x=new X(); [x.a(),x.b()].join('|')"),
+        "1|2"
+    );
+}
+
+#[test]
 fn for_in() {
     assert_eq!(
         ev_str("var o = {a:1, b:2}; var s=''; for (var k in o) { s += k } s"),
