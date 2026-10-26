@@ -1474,6 +1474,8 @@ pub(crate) struct DynImportMeta {
     pub(crate) ctx: u32,
     /// `dyn_import_seq` moteur — clé `pending_imports`.
     pub(crate) seq: u64,
+    /// URL demandée — log/attribution de l'échec.
+    pub(crate) url: String,
     /// Corps de l'entrée (2xx) — `None` = fetch refusé/erreur.
     pub(crate) entry: Option<String>,
     /// Dépendances **statiques** du module livré — `(url

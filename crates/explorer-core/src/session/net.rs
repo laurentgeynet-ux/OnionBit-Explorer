@@ -795,6 +795,7 @@ impl Session {
     /// par le chargeur hôte ; fetch `script-src` + mixed-content
     /// puis `deliver_dyn_import` au moteur (instancier+évaluer+
     /// résoudre la promesse pending).
+    #[allow(clippy::too_many_lines)] // spawn + tâche fetch/graphe inline, chaque bras documenté
     fn spawn_dyn_import(
         &mut self,
         tab: TabId,
@@ -888,6 +889,7 @@ impl Session {
             let meta = crate::session::net_items::DynImportMeta {
                 ctx,
                 seq,
+                url: url_g.to_string(),
                 entry,
                 sources,
             };
@@ -935,7 +937,28 @@ impl Session {
     }
 
     /// `NetDone` `import` → corps + graphe → `deliver_dyn_import`.
-    fn commit_dyn_import(&mut self, tab: TabId, meta: &crate::session::net_items::DynImportMeta) {
+    /// Échec de fetch (`entry: None`) → warn + `PipelineError`
+    /// avec status/URL : le rejet côté moteur est un
+    /// « cannot load module » générique — la console doit
+    /// dire *où* la chaîne a cassé (vol letterboxd).
+    fn commit_dyn_import(
+        &mut self,
+        tab: TabId,
+        meta: &crate::session::net_items::DynImportMeta,
+        out: &NetResult<Response>,
+    ) {
+        if meta.entry.is_none() {
+            let why = match out {
+                Ok(r) => format!("statut {}", r.status),
+                Err(e) => e.to_string(),
+            };
+            tracing::warn!(tab, url = %meta.url, seq = meta.seq, error = %why,
+                "dyn import : fetch échoué — rejet livré");
+            let _ = self.events.send(CoreEvent::PipelineError {
+                tab: Some(tab),
+                message: format!("import() — fetch échoué : {} ({why})", meta.url),
+            });
+        }
         let deps = meta.sources.clone();
         self.deliver_dyn_import_req(tab, meta.ctx, meta.seq, meta.entry.clone(), deps);
     }
@@ -2782,7 +2805,7 @@ impl Session {
             // moteur (instancier+évaluer+résoudre la promesse).
             if let Some(meta) = d.import {
                 self.dyn_tasks.remove(&(d.tab, meta.seq));
-                self.commit_dyn_import(d.tab, &meta);
+                self.commit_dyn_import(d.tab, &meta, &d.out);
                 continue;
             }
             self.net_tasks.remove(&(d.tab, d.handle));
