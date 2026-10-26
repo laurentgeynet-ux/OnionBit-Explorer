@@ -1836,6 +1836,18 @@ pub(crate) fn css_sheet_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsRes
     e.add_method(o, "deleteRule", sheet_delete_rule);
     e.add_method(o, "replace", sheet_replace);
     e.add_method(o, "replaceSync", sheet_replace_sync);
+    // `proto = CSSStyleSheet.prototype` (spec + `instanceof`) —
+    // le proto porte les méthodes (feature-detect
+    // `"replaceSync" in CSSStyleSheet.prototype`, catalyst
+    // github) ; les own-methods ci-dessus restent (double
+    // rail, lecture directe `sh.insertRule` comme référence).
+    if let Ok(Value::Obj(cid)) = e.get_prop_value(Value::Obj(e.global), "CSSStyleSheet") {
+        if let Ok(proto @ Value::Obj(_)) = e.get_prop_value(Value::Obj(cid), "prototype") {
+            if let Some(obj) = e.heap.obj_mut(o) {
+                obj.proto = proto;
+            }
+        }
+    }
     Ok(Value::Obj(o))
 }
 
@@ -1850,11 +1862,12 @@ fn sheet_rules(e: &mut Engine, this: Value) -> Option<ObjId> {
 
 /// `insertRule(rule, index?)` → index spec (borné : la règle
 /// est stockée `{cssText,type:1}`, pas cascadée).
-fn sheet_insert_rule(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+pub(crate) fn sheet_insert_rule(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let text = e.to_js_string(arg(args, 0))?;
     // Spec : index absent → insertion en fin (`cssRules.length`),
     // pas 0 — l'ordre de cascade dépend de l'ordre d'insertion.
-    let idx = if matches!(arg(args, 1), Value::Undefined) {
+    // La valeur retournée est l'index d'insertion RÉEL (clampé).
+    let want = if matches!(arg(args, 1), Value::Undefined) {
         usize::MAX
     } else {
         e.to_number(arg(args, 1)).unwrap_or(0.0).max(0.0) as usize
@@ -1866,24 +1879,23 @@ fn sheet_insert_rule(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Va
     let c = e.str_val(&text);
     e.set_own(rule, "cssText", c, true);
     e.set_own(rule, "type", Value::Num(1.0), true);
-    let len = {
-        let Some(o) = e.heap.obj_mut(rid) else {
-            return Err(e.type_error("insertRule: detached"));
-        };
+    let Some(o) = e.heap.obj_mut(rid) else {
+        return Err(e.type_error("insertRule: detached"));
+    };
+    let at = {
         if let crate::heap::ObjKind::Array(elems) = &mut o.kind {
-            elems.insert(idx.min(elems.len()), Value::Obj(rule));
-        }
-        match &o.kind {
-            crate::heap::ObjKind::Array(elems) => elems.len(),
-            _ => 0,
+            let at = want.min(elems.len());
+            elems.insert(at, Value::Obj(rule));
+            at
+        } else {
+            0
         }
     };
-    let _ = len;
-    Ok(Value::Num(idx as f64))
+    Ok(Value::Num(at as f64))
 }
 
 /// `deleteRule(index)` — borne `idx < len` sinon `IndexSizeError`.
-fn sheet_delete_rule(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+pub(crate) fn sheet_delete_rule(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let idx = e.to_number(arg(args, 0))? as usize;
     let Some(rid) = sheet_rules(e, this) else {
         return Err(e.type_error("deleteRule: no cssRules"));
@@ -1902,7 +1914,7 @@ fn sheet_delete_rule(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Va
 /// `replace(text)` → promesse résolue `this` (spec :
 /// `CSSStyleSheet` — borné : texte stocké `__text`, règles
 /// vidées ; pas de parse).
-fn sheet_replace(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+pub(crate) fn sheet_replace(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let text = e.to_js_string(arg(args, 0))?;
     sheet_set_text(e, this, &text)?;
     let pid = e.new_promise();
@@ -1911,7 +1923,7 @@ fn sheet_replace(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value>
 }
 
 /// `replaceSync(text)` — même, synchrone.
-fn sheet_replace_sync(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+pub(crate) fn sheet_replace_sync(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let text = e.to_js_string(arg(args, 0))?;
     sheet_set_text(e, this, &text)?;
     Ok(Value::Undefined)

@@ -1931,6 +1931,27 @@ impl Engine {
         let f = self.native_fn("CSSStyleSheet", crate::misc_apis::css_sheet_ctor);
         if let Value::Obj(fid) = f {
             let p = self.new_object();
+            // Méthodes sur le PROTOTYPE (IDL, spec) — le
+            // feature-detect github catalyst exige
+            // `"replaceSync" in CSSStyleSheet.prototype` pour
+            // prendre la voie native `adoptedStyleSheets`
+            // (sinon fallback `r.Se` = define direct sans
+            // découverte lazy). Les instances chaînent leur
+            // `proto` dans `css_sheet_ctor`.
+            for (k, f2) in [
+                (
+                    "insertRule",
+                    crate::misc_apis::sheet_insert_rule as crate::heap::NativeFn,
+                ),
+                ("deleteRule", crate::misc_apis::sheet_delete_rule),
+                ("replace", crate::misc_apis::sheet_replace),
+                ("replaceSync", crate::misc_apis::sheet_replace_sync),
+            ] {
+                let m = self.native_fn(k, f2);
+                self.set_own(p, k, m, true);
+            }
+            let tag = self.str_val("CSSStyleSheet");
+            self.set_own(p, crate::interp::SYM_TO_STRING_TAG, tag, false);
             self.set_own(fid, "prototype", Value::Obj(p), false);
         }
         self.set_own(g, "CSSStyleSheet", f, false);
@@ -2005,6 +2026,16 @@ impl Engine {
         // `document instanceof Document` vrai, comme la spec.
         if let (Value::Obj(did), Some(Value::Obj(cid))) = (doc, self.get_prop(g, "Document")) {
             if let Some(proto @ Value::Obj(_)) = self.get_prop(cid, "prototype") {
+                // `adoptedStyleSheets` sur le prototype (IDL) —
+                // la feature-detect github l'exige
+                // (`"adoptedStyleSheets" in Document.prototype`)
+                // avant d'injecter ses règles lazy-detect en
+                // feuille construite. Propriété propre `undefined`
+                // : la lecture passe par le getter hôte du
+                // `document` (proprio `in`, jamais résolution).
+                if let Value::Obj(pid) = proto {
+                    self.set_own(pid, "adoptedStyleSheets", Value::Undefined, true);
+                }
                 if let Some(o) = self.heap.obj_mut(did) {
                     o.proto = proto;
                 }
