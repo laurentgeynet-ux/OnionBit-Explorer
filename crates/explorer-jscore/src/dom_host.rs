@@ -6257,6 +6257,30 @@ impl Host for NodeHost {
                 self.dom.borrow_mut().set_canvas_ctx(node, v);
                 Ok(Some(v))
             }
+            // `<canvas>.toDataURL()`/`toBlob()` — stub honnête
+            // (pas de raster côté miroir, JS-C28) : le préfixe
+            // `data:` d'un PNG vide suffit aux feature-detects
+            // anti-bot (aliexpress sufei-punish lit le format).
+            // `toBlob` passe la data-URL vide à son callback.
+            "toDataURL" => {
+                let is_canvas = self.dom.borrow().nodes[node as usize].tag == "canvas";
+                if !is_canvas {
+                    return Ok(None);
+                }
+                Ok(Some(e.str_val("data:image/png;base64,")))
+            }
+            "toBlob" => {
+                let is_canvas = self.dom.borrow().nodes[node as usize].tag == "canvas";
+                if !is_canvas {
+                    return Ok(None);
+                }
+                let cb = arg(args, 0);
+                if e.is_callable(cb) {
+                    let b = e.str_val("data:image/png;base64,");
+                    e.call_value(cb, Value::Undefined, &[b])?;
+                }
+                Ok(Some(Value::Undefined))
+            }
             // `attachShadow(init)` — surface tranche 1
             // (CAP-191, hors scoping/slots/répartition) :
             // attache un `DocumentFragment` rôle shadowRoot

@@ -7,6 +7,22 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **JS-C151 — `canvas.toDataURL`/
+  `toBlob`** (`explorer-jscore`) —
+  les feature-detects anti-bot
+  (aliexpress `sufei-punish`)
+  comparent le format data-URL ;
+  méthodes absentes →
+  `toDataURL is not a function`.
+  Stubs honnêtes sans raster
+  (JS-C28) : `toDataURL` rend
+  `data:image/png;base64,` (PNG
+  vide), `toBlob` passe la même
+  valeur à son callback — gatés
+  `<canvas>`, repli générique
+  ailleurs. Test
+  `canvas_to_data_url_and_blob`.
+
 - **JS-C150 — `super.m()` dans un
   constructeur dérivé** (`explorer-jscore`)
   — le `[[HomeObject]]` du ctor était
