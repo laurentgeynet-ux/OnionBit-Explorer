@@ -10,7 +10,8 @@
 //! condensats `ring` dans `explorer-net`.
 
 use explorer_jscore::{
-    CryptoOp, CryptoRequest, CryptoResponse, CryptoTransport, DigestAlgo, Engine,
+    CryptoOp, CryptoRequest, CryptoResponse, CryptoTransport, DigestAlgo, Engine, ImportFormat,
+    KeyAlgo,
 };
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -49,8 +50,12 @@ impl StubCrypto {
             CryptoOp::Digest(DigestAlgo::Sha256) => self.sizes.0,
             CryptoOp::Digest(DigestAlgo::Sha384) => self.sizes.1,
             CryptoOp::Digest(DigestAlgo::Sha512) => self.sizes.2,
-            // JS-C93 : ce harnais ne couvre que `digest`.
-            CryptoOp::ImportKey { .. } | CryptoOp::Sign { .. } | CryptoOp::Verify { .. } => 0,
+            // JS-C93/C160 : ce harnais ne couvre que `digest`.
+            CryptoOp::ImportKey { .. }
+            | CryptoOp::Sign { .. }
+            | CryptoOp::Verify { .. }
+            | CryptoOp::Encrypt { .. }
+            | CryptoOp::Decrypt { .. } => 0,
         };
         let mut out = req.data;
         out.resize(size, 0xAA);
@@ -291,4 +296,66 @@ fn get_random_values_quota() {
         ),
         "65536"
     );
+}
+
+/// JS-C160 — `importKey` AES-GCM normalise `{name:"AES-GCM",
+/// length}` en `CryptoKey secret`, `encrypt`/`decrypt`
+/// émettent `CryptoOp::Encrypt/Decrypt` (iv/aad copiés).
+#[test]
+fn c160_aes_gcm_op_dispatch() {
+    let (mut e, t) = engine();
+    // `importKey` émet `ImportKey{algo:AesGcm}` — plus de
+    // `unknown algorithm` (marinetraffic).
+    eval(
+        &mut e,
+        "crypto.subtle.importKey('raw', new Uint8Array(16),\
+             {name:'AES-GCM',length:128}, true, ['encrypt','decrypt'])\
+         .then(k=>{globalThis.__k=k});",
+    );
+    assert!(matches!(
+        t.requests.borrow()[0].1.op,
+        CryptoOp::ImportKey {
+            format: ImportFormat::Raw,
+            algo: KeyAlgo::AesGcm,
+        }
+    ));
+    let h = t.requests.borrow()[0].0;
+    e.deliver_crypto_response(CryptoResponse {
+        handle: h,
+        result: Ok(vec![0u8; 16]),
+    })
+    .expect("deliver importKey");
+    assert_eq!(describe(&mut e, "__k.algorithm.name"), "AES-GCM");
+    assert_eq!(describe(&mut e, "__k.type"), "secret");
+    // `encrypt`/`decrypt` émettent les ops avec iv/aad.
+    eval(
+        &mut e,
+        "var iv=new Uint8Array(12),aad=new Uint8Array([1,2]);\
+         crypto.subtle.encrypt({name:'AES-GCM',iv,additionalData:aad},__k,new Uint8Array([9]));\
+         crypto.subtle.decrypt({name:'AES-GCM',iv},__k,new Uint8Array(20));",
+    );
+    {
+        let reqs = t.requests.borrow();
+        assert!(matches!(
+            reqs[1].1.op,
+            CryptoOp::Encrypt {
+                algo: KeyAlgo::AesGcm,
+                ..
+            }
+        ));
+        let CryptoOp::Encrypt { iv, aad, .. } = &reqs[1].1.op else {
+            panic!("encrypt op");
+        };
+        assert_eq!(iv.len(), 12);
+        assert_eq!(aad.as_slice(), &[1, 2]);
+        assert!(matches!(reqs[2].1.op, CryptoOp::Decrypt { .. }));
+    }
+    // Usage manquant → InvalidAccessError async.
+    eval(
+        &mut e,
+        "globalThis.__e='';\
+         crypto.subtle.decrypt({name:'AES-GCM',iv},__k,new Uint8Array(20))\
+             .catch(x=>{__e=x.name});",
+    );
+    e.run_microtasks().expect("pump");
 }
