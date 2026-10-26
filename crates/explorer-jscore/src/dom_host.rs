@@ -1746,7 +1746,6 @@ impl Engine {
         }
         self.set_own(g, "HTMLElement", he, false);
         for name in [
-            "EventTarget",
             "Element",
             "HTMLImageElement",
             // Famille `HTML*Element` au complet (mesuré github.com
@@ -1846,7 +1845,6 @@ impl Engine {
             "MutationRecord",
             "IdleDeadline",
             "XMLSerializer",
-            "DOMException",
             // dev.to : `instanceOf(Window)` (prop-types react-dates)
             // — détection seule, jamais construit.
             "Window",
@@ -1858,6 +1856,37 @@ impl Engine {
             }
             self.set_own(g, name, f, false);
         }
+        // `EventTarget` — constructible spec (corpus css-tricks :
+        // wp-polyfill/core-js meurt au feature-detect sinon).
+        // Listeners = map cachée `__et` type → [cb] (rail `__ls`).
+        let et_f = self.native_fn("EventTarget", event_target_ctor);
+        {
+            let p = self.new_object();
+            let m = self.native_fn("addEventListener", et_add_listener);
+            self.set_own(p, "addEventListener", m, true);
+            let m = self.native_fn("removeEventListener", et_remove_listener);
+            self.set_own(p, "removeEventListener", m, true);
+            let m = self.native_fn("dispatchEvent", et_dispatch_event);
+            self.set_own(p, "dispatchEvent", m, true);
+            let tag = self.str_val("EventTarget");
+            self.set_own(p, crate::interp::SYM_TO_STRING_TAG, tag, false);
+            if let Value::Obj(fid) = et_f {
+                self.set_own(fid, "prototype", Value::Obj(p), false);
+            }
+        }
+        self.set_own(g, "EventTarget", et_f, false);
+        // `DOMException` — constructible spec : `new
+        // DOMException(message?, name?)` → `{name, message}`
+        // (même mur css-tricks — `x instanceof DOMException` et
+        // `new DOMException("…","NotSupportedError")` passent).
+        let de_f = self.native_fn("DOMException", dom_exception_ctor);
+        if let Value::Obj(fid) = de_f {
+            let p = self.new_object();
+            let tag = self.str_val("DOMException");
+            self.set_own(p, crate::interp::SYM_TO_STRING_TAG, tag, false);
+            self.set_own(fid, "prototype", Value::Obj(p), false);
+        }
+        self.set_own(g, "DOMException", de_f, false);
         // `DOMParser` — constructible (JS-C91) : htmx parse
         // les réponses `hx-swap` via `new DOMParser().
         // parseFromString(html,"text/html")` — même voie que
@@ -3971,6 +4000,7 @@ const NODE_METHODS: &[&str] = &[
     "setAttribute",
     "getAttribute",
     "hasAttribute",
+    "hasAttributes",
     "removeAttribute",
     "toggleAttribute",
     "insertAdjacentElement",
@@ -5604,6 +5634,14 @@ impl Host for NodeHost {
             "hasAttribute" => {
                 let k = e.to_js_string(arg(args, 0))?;
                 let has = self.dom.borrow().has_attr(node, &k);
+                Ok(Some(Value::Bool(has)))
+            }
+            // `el.hasAttributes()` — spec Element : attrs
+            // non vides. Le walker de templates Lit l'appelle
+            // pour distinguer élément/marqueur (vaadin terrain).
+            "hasAttributes" => {
+                let n = &self.dom.borrow().nodes[node as usize];
+                let has = n.kind == NodeKind::Element && !n.attrs.is_empty();
                 Ok(Some(Value::Bool(has)))
             }
             "removeAttribute" => {
@@ -8932,6 +8970,132 @@ fn signal_add_listener(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<
         };
         e.set_own(l, &len.to_string(), cb, true);
         e.set_own(l, "length", Value::Num((len + 1) as f64), true);
+    }
+    Ok(Value::Undefined)
+}
+
+/// `new EventTarget()` — objet ordinaire + map cachée `__et`
+/// (`type` → `[cb]`, rail `__ls` d'`AbortSignal`). Spec : le ctor
+/// est légal (mesuré css-tricks : core-js meurt au detect sinon).
+fn event_target_ctor(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
+    // `this` porte déjà `EventTarget.prototype` (construct_nt) —
+    // écrire `__et` dessus rend `et instanceof EventTarget` vrai.
+    if let Value::Obj(oid) = this {
+        let mid = e.new_object();
+        e.set_own(oid, "__et", Value::Obj(mid), true);
+    }
+    Ok(Value::Undefined)
+}
+
+/// `et.addEventListener(type, cb)` — pousse sur `__et[type]`.
+fn et_add_listener(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let Value::Obj(sid) = this else {
+        return Ok(Value::Undefined);
+    };
+    let ty = e.to_js_string(arg(args, 0))?;
+    let cb = arg(args, 1);
+    if !e.is_callable(cb) {
+        return Ok(Value::Undefined); // spec : non-appelable ignoré
+    }
+    if let Some(Value::Obj(map)) = e.get_prop(sid, "__et") {
+        let list = e.get_prop(map, &ty).unwrap_or(Value::Undefined);
+        if let Value::Obj(l) = list {
+            let len = match e.get_prop(l, "length") {
+                Some(Value::Num(n)) => n as usize,
+                _ => 0,
+            };
+            e.set_own(l, &len.to_string(), cb, true);
+            e.set_own(l, "length", Value::Num((len + 1) as f64), true);
+        } else {
+            let l = e.new_array(vec![cb]);
+            e.set_own(map, &ty, l, true);
+        }
+    }
+    Ok(Value::Undefined)
+}
+
+/// `et.removeEventListener(type, cb)` — retire de `__et[type]`.
+fn et_remove_listener(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let Value::Obj(sid) = this else {
+        return Ok(Value::Undefined);
+    };
+    let ty = e.to_js_string(arg(args, 0))?;
+    let cb = arg(args, 1);
+    if let Some(Value::Obj(map)) = e.get_prop(sid, "__et") {
+        if let Some(Value::Obj(l)) = e.get_prop(map, &ty) {
+            let len = match e.get_prop(l, "length") {
+                Some(Value::Num(n)) => n as usize,
+                _ => 0,
+            };
+            // Reconstruit sans la cb — écrire `undefined` aux
+            // indices resterait sur les props, `elems` du
+            // tableau garderait la cb (chemins disjoints).
+            let mut keep = Vec::new();
+            for i in 0..len {
+                if let Some(v) = e.get_prop(l, &i.to_string()) {
+                    if v != cb {
+                        keep.push(v);
+                    }
+                }
+            }
+            let l2 = e.new_array(keep);
+            e.set_own(map, &ty, l2, true);
+        }
+    }
+    Ok(Value::Undefined)
+}
+
+/// `et.dispatchEvent(ev)` — appelle chaque cb de `__et[ev.type]`
+/// (`target`/`currentTarget` = l'objet), `false` si
+/// `preventDefault` fut tiré.
+fn et_dispatch_event(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let Value::Obj(sid) = this else {
+        return Err(e.type_error("dispatchEvent: cible invalide"));
+    };
+    let ev = arg(args, 0);
+    let Value::Obj(evid) = ev else {
+        return Err(e.type_error("dispatchEvent: événement requis"));
+    };
+    let ty = e.get_prop(evid, "type").unwrap_or(Value::Undefined);
+    let ty = e.to_js_string(ty)?;
+    e.set_own(evid, "target", this, true);
+    e.set_own(evid, "currentTarget", this, true);
+    if let Some(Value::Obj(map)) = e.get_prop(sid, "__et") {
+        if let Some(Value::Obj(l)) = e.get_prop(map, &ty) {
+            let len = match e.get_prop(l, "length") {
+                Some(Value::Num(n)) => n as usize,
+                _ => 0,
+            };
+            for i in 0..len {
+                if let Some(cb) = e.get_prop(l, &i.to_string()) {
+                    if cb != Value::Undefined && e.is_callable(cb) {
+                        e.call_value(cb, this, &[ev])?;
+                    }
+                }
+            }
+        }
+    }
+    let dp = e
+        .get_prop(evid, "defaultPrevented")
+        .unwrap_or(Value::Bool(false));
+    Ok(Value::Bool(!e.to_boolean(dp)))
+}
+
+/// `new DOMException(message?, name?)` — `{name, message}`
+/// (spec — core-js/css-tricks feature-detect).
+fn dom_exception_ctor(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let message = e.to_js_string(arg(args, 0))?;
+    let name = if args.len() > 1 && arg(args, 1) != Value::Undefined {
+        e.to_js_string(arg(args, 1))?
+    } else {
+        "Error".to_string()
+    };
+    // `this` porte `DOMException.prototype` (construct_nt).
+    if let Value::Obj(oid) = this {
+        let m = e.str_val(message);
+        e.set_own(oid, "message", m, true);
+        let n = e.str_val(name);
+        e.set_own(oid, "name", n, true);
     }
     Ok(Value::Undefined)
 }

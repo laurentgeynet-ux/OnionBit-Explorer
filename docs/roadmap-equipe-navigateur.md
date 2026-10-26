@@ -6993,6 +6993,21 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   les mutateurs O(len) (`shift`,
   `splice`, `sort`).
 
+- [x] **JS-C110. `EventTarget` /
+  `DOMException` constructibles**
+  (`explorer-jscore::dom_host`) —
+  mur css-tricks (`illegal
+  constructor` tuait wp-polyfill
+  au detect) : `new EventTarget()`
+  → instance proto-liée + listeners
+  `__et` (add/remove/dispatch,
+  `target`/`currentTarget`,
+  `preventDefault`) ; `new
+  DOMException(msg, name)` →
+  `{name, message}`. Test
+  `event_target_and_domexception_
+  constructible`.
+
 - [x] **JS-C109. Nœuds `Comment`
   réels** (`explorer-jscore` dom +
   dom_host) — mur Lit mesuré vaadin

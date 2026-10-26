@@ -518,6 +518,44 @@ fn create_comment_node() {
 }
 
 #[test]
+fn event_target_and_domexception_constructible() {
+    // css-tricks terrain : wp-polyfill/core-js meurt au feature-
+    // detect si `new EventTarget()`/`new DOMException()` jettent
+    // « illegal constructor » — les deux sont constructibles spec.
+    assert_eq!(
+        ev("var et = new EventTarget();\
+            [typeof et.addEventListener, et instanceof EventTarget].join('|')"),
+        "function|true"
+    );
+    // Listener + dispatch : cb appelée avec l'event, `target`
+    // posé, `dispatchEvent` → true (non preventDefault).
+    assert_eq!(
+        ev("var et = new EventTarget(); var log='';\
+            et.addEventListener('ping', function(ev){\
+              log += ev.type + '/' + (ev.target === et); });\
+            var r = et.dispatchEvent({type:'ping'});\
+            [log, r].join('|')"),
+        "ping/true|true"
+    );
+    // removeEventListener retire la cb.
+    assert_eq!(
+        ev("var et = new EventTarget(); var n=0;\
+            var f = function(){ n++ };\
+            et.addEventListener('x', f);\
+            et.removeEventListener('x', f);\
+            et.dispatchEvent({type:'x'}); n"),
+        "0"
+    );
+    // `new DOMException(msg, name)` — `{name, message}` + instanceof.
+    assert_eq!(
+        ev("var d = new DOMException('nope', 'NotSupportedError');\
+            [d.name, d.message, d instanceof DOMException].join('|')"),
+        "NotSupportedError|nope|true"
+    );
+    assert_eq!(ev("new DOMException('x').name"), "Error");
+}
+
+#[test]
 fn template_content_is_fragment() {
     // github.com `z8-*.js` : `tpl.content.appendChild(row)` —
     // `.content` matérialise le fragment de contenu et y

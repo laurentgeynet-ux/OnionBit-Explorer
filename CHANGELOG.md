@@ -60,6 +60,28 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   4M non tickée — même classe,
   fix = take/put faillibles + tick.
 
+- **JS-C110 — `EventTarget` /
+  `DOMException` constructibles**
+  (`explorer-jscore::dom_host`) —
+  mesuré terrain css-tricks.com :
+  `TypeError: illegal constructor`
+  tuait `wp-polyfill`/core-js au
+  feature-detect (spec : les deux
+  le sont). `new EventTarget()` →
+  instance sur `EventTarget.prototype`
+  (`instanceof` vrai) + `addEventListener`
+  /`removeEventListener`/`dispatchEvent`
+  — listeners en map cachée `__et`
+  (`type` → `[cb]`, rail `__ls`
+  d'`AbortSignal`), `target`/
+  `currentTarget` posés au dispatch,
+  `false` si `preventDefault`.
+  `new DOMException(message?, name?)`
+  → `{name, message}` (défaut
+  `"Error"`). Test
+  `event_target_and_domexception_
+  constructible`.
+
 - **JS-C109 — nœuds `Comment`
   réels : `document.createComment`,
   `<!--…-->` parsés** (`explorer-jscore`
