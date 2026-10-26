@@ -466,6 +466,13 @@ pub(crate) struct Tab {
     /// réinsertion, une epoch changée jette le moteur (son
     /// miroir parle de l'ancienne page).
     js_detached: Option<u64>,
+    /// Disjoncteur « moteur figé » (vol 25) : `Some` = le
+    /// worker jscore de l'onglet a rendu un timeout/`Dead`
+    /// et tout appel bloquant est court-circuité jusqu'à
+    /// l'instant marqué — les 30 s de `recv_eval` ne
+    /// reprennent plus le verrou session (API muette ~90 s
+    /// sur kayak). Durée : `SessionConfig::js_stall_cooldown`.
+    js_stall_until: Option<std::time::Instant>,
     /// État de peinture détaché pour un apply hors verrou
     /// (étape 55h) — les champs `dom`/`tree`/`list`/`frame`
     /// sont vides le temps du `spawn_blocking` : la session
@@ -819,6 +826,9 @@ pub struct Session {
     /// pilotés par la pompe (`resync_gap_max_ms` de config,
     /// 55g-suite).
     resync_gap_max: std::time::Duration,
+    /// Refroidissement du disjoncteur « moteur figé »
+    /// (`js_stall_cooldown` de config, vol 25).
+    js_stall_cooldown: std::time::Duration,
     /// Pages gelées par onglet dans le bfcache
     /// (`bfcache_pages` de config, étape 56).
     bfcache_pages: usize,
@@ -972,6 +982,7 @@ impl Session {
             paint_chunk_bytes: cfg.paint_chunk_bytes,
             paint_interval: std::time::Duration::from_millis(cfg.paint_interval_ms),
             resync_gap_max: std::time::Duration::from_millis(cfg.resync_gap_max_ms),
+            js_stall_cooldown: cfg.js_stall_cooldown,
             bfcache_pages: cfg.bfcache_pages,
             incremental_syncs: 0,
             dom_journal_max_ops: cfg.dom_journal_max_ops,
@@ -1284,6 +1295,7 @@ impl Session {
                 bfcache: VecDeque::new(),
                 spec_paint: false,
                 js_detached: None,
+                js_stall_until: None,
                 paint_detached: false,
                 deferred_inputs: VecDeque::new(),
                 js_pending_net: Vec::new(),

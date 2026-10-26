@@ -2540,3 +2540,17 @@ fn noscript_head_meta_refresh_honored_on_rich_page() {
     let r = noscript_meta_refresh(&tb.into_dom());
     assert_eq!(r.and_then(|(_, u)| u).as_deref(), Some("/?q=x"));
 }
+
+/// Vol 25 (kayak) — signature du disjoncteur « moteur
+/// figé » : `Dead` et l'éval dépassée du proxy arment ;
+/// une vraie exception JS n'arme pas.
+#[test]
+fn engine_stall_signature() {
+    assert!(Session::is_engine_stall(&explorer_js::JsError::Dead));
+    assert!(Session::is_engine_stall(&explorer_js::JsError::Uncaught(
+        "moteur figé — éval dépassée".into()
+    )));
+    assert!(!Session::is_engine_stall(&explorer_js::JsError::Uncaught(
+        "TypeError: x is not a function".into()
+    )));
+}

@@ -669,6 +669,12 @@ impl Session {
     }
 
     pub(crate) fn drain_script_net(&mut self, tab: TabId) {
+        // Disjoncteur (vol 25) : les drains `Cmd` attendent
+        // une réponse du worker — figé, chacun patienterait
+        // 30 s sous verrou.
+        if self.js_stalled(tab) {
+            return;
+        }
         // `WorkerLoad` (JS-C132) **avant** le drain `Cmd` :
         // le demandeur (thread moteur au premier `new Worker`)
         // est bloqué en `load()` — dispatcher le fetch async
@@ -2517,6 +2523,9 @@ impl Session {
     /// `localStorage` vers la map d'origine + le profil, et
     /// les nouvelles requêtes réseau vers le scheduler.
     pub(crate) fn after_script(&mut self, tab: TabId) {
+        if self.js_stalled(tab) {
+            return;
+        }
         let Some((page, writes, map)) = self.tabs.get_mut(&tab).and_then(|e| {
             e.js.as_mut().map(|eng| {
                 (
