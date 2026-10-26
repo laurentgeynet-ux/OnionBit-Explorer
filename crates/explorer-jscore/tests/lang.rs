@@ -368,6 +368,38 @@ fn mixin_class_extends_call_result() {
 }
 
 #[test]
+fn iife_hoisted_fn_shadows_and_receives_props() {
+    // hubspot/styled-components (_v2.js) : `th=(function(){
+    // e.registerId=…; function e(){}; return e })()` — la
+    // déclaration `e` hoiste dans la portée IIFE et
+    // `e.registerId` s'assigne sur la **fonction** hoisted,
+    // retournée → `th.registerId` doit être une fonction
+    // (mur vaadin : « registerId is not a function »).
+    assert_eq!(
+        ev_str("var th = (function(){ e.registerId = function(){return 1}; function e(){}; return e })();\
+                [typeof th, typeof th.registerId].join('|')"),
+        "function|function"
+    );
+    // La valeur retournée EST la fonction hoisted (callable).
+    assert_eq!(
+        ev_str("var th = (function(){ e.x = 5; function e(){return 'called'}; return e })();\
+                [th(), th.x].join('|')"),
+        "called|5"
+    );
+    // Cas minimal : écriture puis lecture sur le binding hoisted.
+    assert_eq!(
+        ev_str("(function(){ e.x = 5; function e(){}; return e.x })()"),
+        "5"
+    );
+    // Lecture AVANT déclaration (hoisting total — spec : `e` est
+    // déjà la fonction, pas undefined).
+    assert_eq!(
+        ev_str("(function(){ var r = typeof e; e.x = 7; function e(){}; return [r, e.x].join('|') })()"),
+        "function|7"
+    );
+}
+
+#[test]
 fn for_in() {
     assert_eq!(
         ev_str("var o = {a:1, b:2}; var s=''; for (var k in o) { s += k } s"),
