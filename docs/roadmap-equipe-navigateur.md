@@ -6993,6 +6993,18 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   les mutateurs O(len) (`shift`,
   `splice`, `sort`).
 
+- [x] **JS-C111. Regex/commentaires
+  dans `${…}` template** (`explorer-jscore
+  ::lexer`) — mur apple (`unterminated
+  string in template` globalheader) :
+  `'`/`"` dans un regex littéral ou
+  commentaire ouvrait un scan chaîne
+  jusqu'à EOF. `/` géré : `//`/`/*…*/`
+  sautés, regex vs division par
+  contexte opérande, `skip_regex`
+  (`\\`/`[…]`). Test
+  `template_substitution_regex_and_comments`.
+
 - [x] **JS-C110. `EventTarget` /
   `DOMException` constructibles**
   (`explorer-jscore::dom_host`) —

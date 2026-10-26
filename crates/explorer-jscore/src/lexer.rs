@@ -991,11 +991,80 @@ impl Lexer {
                 }
                 Some('\'' | '"') => self.skip_quoted()?,
                 Some('`') => self.skip_nested_template()?,
+                Some('/') => {
+                    // Regex et commentaires à l'intérieur d'une
+                    // substitution : une `'`/`"` dedans n'ouvre PAS
+                    // de chaîne — sinon le scan lit jusqu'à EOF
+                    // (« unterminated string in template » — mesuré
+                    // apple.com globalheader : `/…/.test(ua)` avec
+                    // quote dans le motif).
+                    if self.peek_at(1) == Some('/') {
+                        while let Some(c) = self.peek() {
+                            self.bump();
+                            if c == '\n' {
+                                break;
+                            }
+                        }
+                    } else if self.peek_at(1) == Some('*') {
+                        self.bump();
+                        self.bump();
+                        while self.peek().is_some() {
+                            if self.peek() == Some('*') && self.peek_at(1) == Some('/') {
+                                self.bump();
+                                self.bump();
+                                break;
+                            }
+                            self.bump();
+                        }
+                    } else if self.prev_is_operand_end() {
+                        // Division — le `/` seul se consomme.
+                        self.bump();
+                    } else {
+                        self.skip_regex()?;
+                    }
+                }
                 Some(_) => {
                     self.bump();
                 }
             }
         }
+    }
+
+    /// `/` en position division ? Le caractère non-blanc
+    /// précédent ferme un opérande (`)`, `]`, `}`, quote,
+    /// identifiant/chiffre) → division ; sinon regex.
+    fn prev_is_operand_end(&self) -> bool {
+        for c in self.chars[..self.pos].iter().rev() {
+            match c {
+                ' ' | '\t' | '\n' | '\r' => {}
+                ')' | ']' | '}' | '\'' | '"' | '`' => return true,
+                _ => return c.is_alphanumeric() || *c == '_' || *c == '$',
+            }
+        }
+        false
+    }
+
+    /// Skip `/…/flags` inside `${…}` — `\\` et classes `[…]`
+    /// honorés (un `/` dans `[/]` ou un `/` échappé ne ferment pas).
+    fn skip_regex(&mut self) -> Result<()> {
+        self.bump(); // /
+        let mut class = false;
+        loop {
+            match self.bump() {
+                None => return Err(self.err("unterminated regex in template")),
+                Some('\\') => {
+                    self.bump();
+                }
+                Some('[') => class = true,
+                Some(']') => class = false,
+                Some('/') if !class => break,
+                Some(_) => {}
+            }
+        }
+        while matches!(self.peek(), Some(c) if c.is_alphabetic()) {
+            self.bump();
+        }
+        Ok(())
     }
 
     /// Skip `'…'`/`"…"` inside a `${…}` scan (escapes honoured).

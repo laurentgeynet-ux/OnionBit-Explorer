@@ -321,6 +321,26 @@ fn array_mutators_array_like_bounded_by_ops() {
 }
 
 #[test]
+fn template_substitution_regex_and_comments() {
+    // apple.com globalheader : `'`/`"` à l'intérieur d'un littéral
+    // regex ou d'un commentaire en `${…}` ouvrait un scan chaîne
+    // jusqu'à EOF — « unterminated string in template ».
+    assert_eq!(
+        ev_str("var t = `u=${/msie|trident/i.test('Trident')} !`; t"),
+        "u=true !"
+    );
+    // Quote dans le motif regex.
+    assert_eq!(ev_str("`x=${/a'b/.test(\"a'b\")}`"), "x=true");
+    // Commentaires avec quotes dans la substitution.
+    assert_eq!(ev_str("`n=${/* it's ok */ 42}`"), "n=42");
+    assert_eq!(ev_str("`m=${// it's ok\n7}`"), "m=7");
+    // Division (opérande à gauche) toujours division.
+    assert_eq!(ev_str("var a=10; var s=`d=${a / 2}`; s"), "d=5");
+    // Templates imbriqués avec regex dedans.
+    assert_eq!(ev_str("`o=${`i${/x/.test(\"x\")}n`}`"), "o=itruen");
+}
+
+#[test]
 fn for_in() {
     assert_eq!(
         ev_str("var o = {a:1, b:2}; var s=''; for (var k in o) { s += k } s"),

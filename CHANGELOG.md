@@ -60,6 +60,24 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   4M non tickée — même classe,
   fix = take/put faillibles + tick.
 
+- **JS-C111 — regex/commentaires
+  dans `${…}` template** (`explorer-jscore
+  ::lexer`) — mesuré terrain apple.com :
+  `unterminated string in template` sur
+  `globalheader.umd.js:91` — le scan de
+  substitution traitait `'`/`"` comme
+  ouverture de chaîne même à
+  l'intérieur d'un littéral regex ou
+  d'un commentaire → lecture jusqu'à
+  EOF. `template_expr_src_inner` gère
+  désormais `/` : `//…`/`/*…*/` sautés,
+  regex vs division par contexte
+  (`prev_is_operand_end` — opérande
+  fermé → division, sinon regex),
+  `skip_regex` avec `\\` et classes
+  `[…]` honorés. Test
+  `template_substitution_regex_and_comments`.
+
 - **JS-C110 — `EventTarget` /
   `DOMException` constructibles**
   (`explorer-jscore::dom_host`) —
