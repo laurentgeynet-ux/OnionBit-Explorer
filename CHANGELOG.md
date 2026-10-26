@@ -988,6 +988,16 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   une URL `127.0.0.1` — le
   lecteur `networkUrl` inchangé.
 
+- **139e — tests flux proxy +
+  clôture étape 139** : 2 tests
+  `media_proxy` — relais de
+  chunks streamé, `Range` propagé
+  amont, UA injectée, refus 400
+  sans `u` ; clippy net+core
+  propre. 139c/d restent garées
+  (cast HLS, dossier externe —
+  déclencheurs nommés).
+
 - **CAP-198 — Shadow DOM tranche 4 :
   event retargeting** (`explorer-jscore`)
   : le chemin de propagation des

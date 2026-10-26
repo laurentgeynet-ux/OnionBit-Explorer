@@ -4905,7 +4905,7 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   strictement. Régression : test de
   récursion profonde qui survit.
 
-- [ ] **Étape 139. Chaîne média —
+- [x] **Étape 139. Chaîne média —
   même câblage que la référence
   `IptvMediacenter-Rust` (ADR-0024
   amendée)** : porter le pattern
@@ -4917,13 +4917,12 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   UA injectés), `hls_transcoder`
   (cast ffprobe→HLS), `MdkPlayerEngine`.
   Sous-étapes :
-  - [~] 139a — `LocalMediaProxy`
-    posé (`media_proxy.rs` :
+  - [x] 139a — `LocalMediaProxy`
+    posé + testé (`media_proxy.rs` :
     `GET /m?u=` streamé zéro-copie
     `fetch_stream`, Range/headers
     propagés, port éphémère
-    daemon+FFI) — reste : test flux
-    et borne de flux.
+    daemon+FFI ; 2 tests flux)
   - [x] **139b — seam branchée** :
     `Session` spawn `MediaProxy`
     en tokio dès `with_config`
@@ -4942,10 +4941,14 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
     `MediaPlayerFactory.file` +
     dossier configurable — même
     seam, entrée non-réseau.
-  - [ ] 139e — tests flux
-    streamé/headers/range +
-    doc (CHANGELOG, ADR mise à
-    jour « câblé »).
+  - [x] 139e — tests flux +
+    doc : `proxy_relaye_stream_
+    headers_range_et_ua` (chunks
+    relayés, Range propagé, UA
+    injectée) + `proxy_refuse_
+    sans_u` ; clippy net+core
+    propre ; ADR-0024 et
+    CHANGELOG à jour.
 
 - [ ] **Écarts terrain — vol humain
   22/10 (release `39ab821`, FFI)** :

@@ -28,8 +28,7 @@ use crate::url::Url;
 
 /// En-têtes propagés du client vers le flux amont (le lecteur
 /// les pose : `Range` pour le seek, `Accept`, `Cookie`).
-const FORWARD_IN: &[&str] =
-    &["range", "accept", "cookie", "if-range", "user-agent"];
+const FORWARD_IN: &[&str] = &["range", "accept", "cookie", "if-range", "user-agent"];
 
 /// En-têtes propagés de la réponse amont vers le client.
 const FORWARD_OUT: &[&str] = &[
@@ -54,16 +53,12 @@ impl MediaProxy {
     ///
     /// # Errors
     /// `std::io::Error` si le bind échoue.
-    pub async fn spawn(
-        transport: Arc<dyn HttpTransport>,
-        ua: String,
-    ) -> std::io::Result<Self> {
-        let listener =
-            tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+    pub async fn spawn(transport: Arc<dyn HttpTransport>, ua: String) -> std::io::Result<Self> {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
         let addr = listener.local_addr()?;
-        let app = Router::new().route("/m", get(handle)).with_state(
-            ProxyState { transport, ua },
-        );
+        let app = Router::new()
+            .route("/m", get(handle))
+            .with_state(ProxyState { transport, ua });
         tokio::spawn(async move {
             let _ = axum::serve(listener, app).await;
         });
@@ -87,14 +82,13 @@ impl MediaProxy {
 fn encode(s: &str) -> String {
     s.chars()
         .map(|c| match c {
-            'A'..='Z' | 'a'..='z' | '0'..='9' | '-' | '_' | '.' | '~' => {
-                c.to_string()
-            }
+            'A'..='Z' | 'a'..='z' | '0'..='9' | '-' | '_' | '.' | '~' => c.to_string(),
             _ => {
                 let mut b = String::new();
                 let mut tmp = [0u8; 4];
                 for byte in c.encode_utf8(&mut tmp).as_bytes() {
-                    b.push_str(&format!("%{byte:02X}"));
+                    use std::fmt::Write as _;
+                    let _ = write!(b, "%{byte:02X}");
                 }
                 b
             }
@@ -149,13 +143,9 @@ async fn handle(
             }
             // Corps streamé chunk-par-chunk (zéro-copie de la
             // référence : jamais de bufferisation pleine).
-            let stream = futures_util::stream::poll_fn(move |cx| {
-                up.body.poll_recv(cx)
-            })
-            .map(|r| {
-                r.map(axum::body::Bytes::from).map_err(|e| {
-                    std::io::Error::new(std::io::ErrorKind::Other, e.to_string())
-                })
+            let stream = futures_util::stream::poll_fn(move |cx| up.body.poll_recv(cx)).map(|r| {
+                r.map(axum::body::Bytes::from)
+                    .map_err(|e| std::io::Error::other(e.to_string()))
             });
             match b.body(Body::from_stream(stream)) {
                 Ok(resp) => resp,
@@ -166,5 +156,111 @@ async fn handle(
             .status(502)
             .body(Body::from(format!("flux amont : {e}")))
             .unwrap_or_else(|_| AxResponse::new(Body::empty())),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::error::NetResult;
+    use crate::http::{Response, StreamedResponse};
+    use async_trait::async_trait;
+    use std::sync::Mutex;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    /// Transport simulé : une route fixe, capture les en-têtes
+    /// amont (prouve la propagation `Range` + injection UA).
+    struct Fake {
+        chunks: Vec<Vec<u8>>,
+        seen: Mutex<Vec<(String, String)>>,
+    }
+
+    #[async_trait]
+    impl HttpTransport for Fake {
+        async fn fetch(&self, _r: &Request) -> NetResult<Response> {
+            Ok(Response {
+                status: 200,
+                reason: "OK".into(),
+                headers: Vec::new(),
+                body: Vec::new(),
+                reused_connection: false,
+                resolved_url: None,
+            })
+        }
+
+        async fn fetch_stream(&self, r: &Request) -> NetResult<StreamedResponse> {
+            *self
+                .seen
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = r.headers.clone();
+            let (tx, rx) = tokio::sync::mpsc::channel(8);
+            for c in self.chunks.clone() {
+                let _ = tx.send(Ok(c)).await;
+            }
+            Ok(StreamedResponse {
+                status: 200,
+                reason: "OK".into(),
+                headers: vec![("content-type".into(), "video/mp4".into())],
+                reused_connection: false,
+                resolved_url: None,
+                body: rx,
+            })
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn proxy_relaye_stream_headers_range_et_ua() {
+        let fake = Arc::new(Fake {
+            chunks: vec![b"HELLO-".to_vec(), b"CHUNKS".to_vec()],
+            seen: Mutex::new(Vec::new()),
+        });
+        let proxy = MediaProxy::spawn(fake.clone(), "UA-TEST".into())
+            .await
+            .expect("bind loopback");
+        // URL proxyfiée → path de la requête locale.
+        let full = proxy.url("https://cdn.ex/v.mp4");
+        let path = full
+            .strip_prefix(&format!("http://{}", proxy.addr()))
+            .expect("path");
+        let mut s = tokio::net::TcpStream::connect(proxy.addr())
+            .await
+            .expect("connexion");
+        s.write_all(
+            format!(
+                "GET {path} HTTP/1.1\r\nHost: x\r\nRange: bytes=0-9\r\nConnection: close\r\n\r\n"
+            )
+            .as_bytes(),
+        )
+        .await
+        .expect("écriture");
+        let mut buf = Vec::new();
+        s.read_to_end(&mut buf).await.expect("lecture");
+        let txt = String::from_utf8_lossy(&buf);
+        assert!(txt.contains("200"), "statut relayé : {txt}");
+        assert!(txt.to_lowercase().contains("content-type: video/mp4"));
+        assert!(txt.contains("HELLO-") && txt.contains("CHUNKS"));
+        let seen = fake.seen.lock().expect("lock").clone();
+        assert!(seen.iter().any(|(n, v)| n == "range" && v == "bytes=0-9"));
+        assert!(seen
+            .iter()
+            .any(|(n, v)| n == "user-agent" && v == "UA-TEST"));
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn proxy_refuse_sans_u() {
+        let fake = Arc::new(Fake {
+            chunks: Vec::new(),
+            seen: Mutex::new(Vec::new()),
+        });
+        let proxy = MediaProxy::spawn(fake, "UA".into()).await.expect("bind");
+        let mut s = tokio::net::TcpStream::connect(proxy.addr())
+            .await
+            .expect("co");
+        s.write_all(b"GET /m HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n")
+            .await
+            .expect("w");
+        let mut buf = Vec::new();
+        s.read_to_end(&mut buf).await.expect("r");
+        assert!(String::from_utf8_lossy(&buf).contains("400"));
     }
 }
