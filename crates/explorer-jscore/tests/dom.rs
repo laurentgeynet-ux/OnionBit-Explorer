@@ -6276,7 +6276,7 @@ fn deeply_nested_expression_parses() {
     assert!(r.is_ok(), "600 parenthèses imbriquées rejetées : {r:?}");
 }
 
-/// JS-C124 — `new URL(".", location)` → « Invalid base URL »
+/// JS-C127 — `new URL(".", location)` → « Invalid base URL »
 /// (svelte/fastapi/mkdocs — motif de résolution d'assets ultra-
 /// commun) : `location` n'avait pas de `toString` surfacé →
 /// `to_primitive` tombait sur `Object.prototype.toString` →
@@ -6322,5 +6322,20 @@ fn url_ctor_with_location_base() {
             Ok(v) => println!("OK   {src} → {}", e.describe(v)),
             Err(x) => println!("FAIL {src} → {x}"),
         }
+    }
+}
+
+#[test]
+fn location_global_exists_and_chains() {
+    // `Location` global (news.google) : interface exposée,
+    // `location instanceof Location`, `new` illégal.
+    let (mut e, _jar, _navs) = engine_full(PAGE);
+    for (src, want) in [
+        ("typeof Location", "function"),
+        ("location instanceof Location", "true"),
+        ("typeof Location.prototype", "object"),
+        ("try{new Location();'no'}catch(x){x.name}", "TypeError"),
+    ] {
+        assert_eq!(evf(&mut e, src), want, "{src}");
     }
 }

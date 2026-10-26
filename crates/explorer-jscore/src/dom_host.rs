@@ -1682,7 +1682,23 @@ impl Engine {
         // la file du `Dom`, livrés au microtask checkpoint.
         self.install_mutation_observer();
         // `location` + `history` — hooks-driven (see BrowserHooks).
+        // `Location` global (JS-C122/news.google) : l'interface
+        // existe comme nom global — `location instanceof
+        // Location` requiert le proto chaîné (pattern `Document`).
         let loc = self.new_host_object(Rc::new(LocationHost));
+        let lf = self.native_fn("Location", illegal_ctor);
+        if let Value::Obj(lfid) = lf {
+            let lp = self.new_object();
+            let tag = self.str_val("Location");
+            self.set_own(lp, crate::interp::SYM_TO_STRING_TAG, tag, false);
+            self.set_own(lfid, "prototype", Value::Obj(lp), false);
+            if let Value::Obj(locid) = loc {
+                if let Some(o) = self.heap.obj_mut(locid) {
+                    o.proto = Value::Obj(lp);
+                }
+            }
+        }
+        self.set_own(g, "Location", lf, false);
         let hist = self.new_host_object(Rc::new(HistoryHost));
         self.set_own(g, "location", loc, false);
         self.set_own(g, "history", hist, false);
