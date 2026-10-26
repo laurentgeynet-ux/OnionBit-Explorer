@@ -7,6 +7,71 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **Vol 18/19 — `flex-direction:
+  column` fit-content**
+  (`explorer-layout`) — hors
+  `stretch`, un item `column`
+  rétrécit désormais sur son
+  contenu (fit-content §9.5)
+  avant d'être placé par
+  `align-items` : un bloc
+  `width:auto` gardait la
+  largeur du conteneur → bouton
+  « Réessayer » quora pleine
+  largeur au lieu de centré.
+  Régressions
+  `flex_column_align_center_`
+  `retrécit_l_item`,
+  `flex_column_stretch_`
+  `pleine_largeur` (modern).
+
+- **Vol 17/19 — tables anonymes
+  + `table-caption`**
+  (`explorer-layout`, UA
+  `caption`)
+  (`explorer-css`) — §17.2.1 :
+  une suite de `table-cell`/
+  `table-row`/groupes sous un
+  parent non-`table` est
+  emballée dans une table
+  anonyme (cartes IGN posées en
+  `display:table-cell` sous
+  `display:block` s'empilaient
+  en colonne ~380 px). §17.4 :
+  `display:table-caption`
+  `top|bottom` posée hors
+  grille (figcaption Parsoid
+  wikipedia partait en cellule
+  → figure gonflée recouvrant
+  le texte). Régressions
+  `table_cell_nue_enveloppee_`
+  `en_table_anonyme`,
+  `table_row_nu_enveloppe`,
+  `table_caption_sous_la_`
+  `grille`, `table_caption_`
+  `side_top` (modern).
+
+- **Vol 16/19 — hit-test ordre
+  d'empilement**
+  (`explorer-layout`) — les
+  enfants sont testés dans
+  l'ordre de peinture inversé
+  (§9.9.1 : positionnés après
+  le flux, `z-index` ordonnés,
+  dernier du document à rang
+  égal). Un bandeau posé avant
+  le contenu dans le DOM volait
+  les hits des liens peints
+  dessus → `{"result":"ignored"}`
+  gamefaqs/speedtest,
+  « Français » canada.
+  Régressions
+  `hit_test_ordre_empilement_`
+  `dernier_peint_gagne`,
+  `hit_test_ordre_document_`
+  `inverse_a_rang_egal`
+  (block).
+
 - **Vol 2026-10-26 — shorthand
   `inset`** (`explorer-css`) —
   éclaté en `top/right/bottom/
