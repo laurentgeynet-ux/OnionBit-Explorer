@@ -1250,6 +1250,15 @@ fn globals() {
     assert_eq!(ev_str("decodeURIComponent('a%20b')"), "a b");
     assert_eq!(ev_str("btoa('abc')"), "YWJj");
     assert_eq!(ev_str("atob('YWJj')"), "abc");
+    // JS-C152 — `atob` rend une chaîne-octet Latin-1 (spec),
+    // pas de l'UTF-8 : les octets non-ASCII passaient en
+    // `invalid byte sequence` (bsky bundle Sentry/expo).
+    assert_eq!(ev_str("atob('/w==').charCodeAt(0)"), "255");
+    assert_eq!(ev_str("atob('gIE=').charCodeAt(1)"), "129");
+    // Whitespace ASCII ignoré (spec) ; base64url `-`/`_`
+    // reste rejeté (non natif — les sites patchent).
+    assert_eq!(ev_str("atob(' YWJj\\n')"), "abc");
+    assert_eq!(ev_str("atob('AA').charCodeAt(0)"), "0");
     assert_eq!(ev_str("typeof Date.now()"), "number");
 }
 
