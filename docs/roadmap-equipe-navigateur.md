@@ -6990,6 +6990,20 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   les mutateurs O(len) (`shift`,
   `splice`, `sort`).
 
+- [x] **JS-C109. Nœuds `Comment`
+  réels** (`explorer-jscore` dom +
+  dom_host) — mur Lit mesuré vaadin
+  (`createComment is not a function`
+  → 0 custom element) : `NodeKind::
+  Comment` complet — `nodeType` 8,
+  `#comment`, `data`/`nodeValue`/
+  `textContent`, `<!--…-->` round-trip
+  `innerHTML` (marqueurs `?lit$N$`
+  vivants), TreeWalker `SHOW_COMMENT`.
+  `nodeName` majuscule = éléments
+  seuls (spec). Test
+  `create_comment_node`.
+
 - [x] **JS-C108. `take_elems`/`put_elems`
   faillibles + tickés** (reliquat
   JS-C107 — `explorer-jscore::builtins`) :

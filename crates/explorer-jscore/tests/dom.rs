@@ -483,6 +483,41 @@ fn create_and_attach() {
 }
 
 #[test]
+fn create_comment_node() {
+    // `document.createComment` — nodeType 8 ; Lit y dépose ses
+    // marqueurs de parties (vaadin terrain — le manque faisait
+    // `createComment is not a function` et aucun CE ne montait).
+    assert_eq!(
+        ev("var c = document.createComment('?lit$0$');\
+            [c.nodeType, c.nodeName, c.data, c.textContent].join('|')"),
+        "8|#comment|?lit$0$|?lit$0$"
+    );
+    // `data`/`nodeValue` écrivables sur le comment.
+    assert_eq!(
+        ev("var c = document.createComment('a');\
+            c.data = 'b'; c.nodeValue"),
+        "b"
+    );
+    // Les `<!--…-->` d'`innerHTML` deviennent des nœuds Comment
+    // (marqueurs Lit injectés via innerHTML) et ressortent à la
+    // sérialisation — round-trip fidèle.
+    assert_eq!(
+        ev("var d = document.createElement('div');\
+            d.innerHTML = 'x<!--?lit$1$-->y';\
+            [d.childNodes.length, d.childNodes[1].nodeType, d.childNodes[1].data, d.innerHTML].join('|')"),
+        "3|8|?lit$1$|x<!--?lit$1$-->y"
+    );
+    // `textContent` du parent saute les comments (spec) ;
+    // `children` (éléments seuls) n'en compte pas.
+    assert_eq!(
+        ev("var d = document.createElement('div');\
+            d.innerHTML = '<b>a</b><!--m--><b>c</b>';\
+            [d.children.length, d.textContent].join('|')"),
+        "2|ac"
+    );
+}
+
+#[test]
 fn template_content_is_fragment() {
     // github.com `z8-*.js` : `tpl.content.appendChild(row)` —
     // `.content` matérialise le fragment de contenu et y
@@ -5288,7 +5323,7 @@ fn cap191_shadow_surface() {
              r.getRootNode()===r, r instanceof DocumentFragment,\
              typeof r.querySelector].join('|')"
         ),
-        "11|#DOCUMENT-FRAGMENT|true|true|true|false|function"
+        "11|#document-fragment|true|true|true|false|function"
     );
     // Enfants de la racine : getRootNode() = racine ;
     // {composed:true} → document (traverse l'hôte).

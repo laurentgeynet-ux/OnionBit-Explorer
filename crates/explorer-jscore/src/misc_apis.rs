@@ -1352,6 +1352,7 @@ struct TreeWalkerHost {
 fn tw_show_bit(d: &crate::dom::Dom, n: NodeId) -> u32 {
     match d.nodes[n as usize].kind {
         crate::dom::NodeKind::Text => 0x4,
+        crate::dom::NodeKind::Comment => 0x80,
         crate::dom::NodeKind::Fragment => 0x400,
         crate::dom::NodeKind::Element => {
             let t = &d.nodes[n as usize].tag;

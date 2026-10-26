@@ -3475,6 +3475,14 @@ impl Host for DocumentHost {
                 let n = self.dom.borrow_mut().create_text(&t);
                 Ok(Some(node_value(e, &self.dom, &self.cache, n)))
             }
+            // `document.createComment(data)` — `nodeType` 8 ;
+            // Lit y dépose ses marqueurs de parties
+            // (`?lit$N$`/`?node=`) — vaadin terrain.
+            "createComment" => {
+                let t = e.to_js_string(arg(args, 0))?;
+                let n = self.dom.borrow_mut().create_comment(&t);
+                Ok(Some(node_value(e, &self.dom, &self.cache, n)))
+            }
             // `document.importNode(node, deep)` (CAP-177) —
             // spec : clone dans le document cible ; le miroir
             // n'a qu'un document → même rail que `cloneNode`.
@@ -3921,6 +3929,7 @@ const DOC_METHODS: &[&str] = &[
     "createElement",
     "createElementNS",
     "createTextNode",
+    "createComment",
     "createDocumentFragment",
     "createEvent",
     "open",
@@ -4938,7 +4947,7 @@ impl Host for NodeHost {
             }
             "nodeValue" | "data" => {
                 let n = &self.dom.borrow().nodes[node as usize];
-                let v = if n.kind == NodeKind::Text {
+                let v = if matches!(n.kind, NodeKind::Text | NodeKind::Comment) {
                     n.text.clone()
                 } else {
                     String::new()
@@ -4986,7 +4995,12 @@ impl Host for NodeHost {
                     None => Value::Null,
                 }));
             }
-            "length" if self.dom.borrow().nodes[node as usize].kind == NodeKind::Text => {
+            "length"
+                if matches!(
+                    self.dom.borrow().nodes[node as usize].kind,
+                    NodeKind::Text | NodeKind::Comment
+                ) =>
+            {
                 let n = self.dom.borrow().nodes[node as usize].text.len();
                 return Ok(Some(Value::Num(n as f64)));
             }
@@ -5007,8 +5021,18 @@ impl Host for NodeHost {
                 }));
             }
             "tagName" | "nodeName" => {
-                let t = self.dom.borrow().nodes[node as usize].tag.clone();
-                return Ok(Some(e.str_val(t.to_uppercase())));
+                let (k, t) = {
+                    let n = &self.dom.borrow().nodes[node as usize];
+                    (n.kind, n.tag.clone())
+                };
+                // Majuscule = éléments HTML (spec) ; les sentinels
+                // non-élément gardent leur forme (`#text`,
+                // `#comment`, `#document-fragment`, `#document`).
+                return Ok(Some(e.str_val(if k == NodeKind::Element {
+                    t.to_uppercase()
+                } else {
+                    t
+                })));
             }
             "innerHTML" => {
                 let s = self.dom.borrow().inner_html(node);
@@ -5035,6 +5059,7 @@ impl Host for NodeHost {
                 return Ok(Some(Value::Num(match k {
                     NodeKind::Element => 1.0,
                     NodeKind::Text => 3.0,
+                    NodeKind::Comment => 8.0,
                     NodeKind::Fragment => 11.0,
                 })));
             }
@@ -5364,7 +5389,10 @@ impl Host for NodeHost {
             // `CharacterData` — écriture directe du payload
             // texte (record `characterData`, JS-C26).
             "nodeValue" | "data" => {
-                let is_text = self.dom.borrow().nodes[node as usize].kind == NodeKind::Text;
+                let is_text = matches!(
+                    self.dom.borrow().nodes[node as usize].kind,
+                    NodeKind::Text | NodeKind::Comment
+                );
                 if is_text {
                     let s = e.to_js_string(v)?;
                     self.dom.borrow_mut().set_text(node, &s);

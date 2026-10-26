@@ -60,6 +60,31 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   4M non tickée — même classe,
   fix = take/put faillibles + tick.
 
+- **JS-C109 — nœuds `Comment`
+  réels : `document.createComment`,
+  `<!--…-->` parsés** (`explorer-jscore`
+  dom + dom_host) — mesuré terrain
+  vaadin.com : `document.createComment
+  is not a function` tuait le boot
+  Lit (0 custom element). `NodeKind
+  ::Comment` : `nodeType` 8, `nodeName`
+  `#comment`, `data`/`nodeValue`/
+  `textContent` lus+écrits (spec
+  CharacterData), sérialisation
+  `<!--…-->` round-trip via `innerHTML`
+  (les marqueurs de parties `?lit$N$`
+  survivent), TreeWalker
+  `SHOW_COMMENT` 0x80, non slottable
+  ni élément (`children`/sélecteurs
+  inchangés) ; le fragment parser
+  émet les commentaires au lieu de
+  les sauter. Correction liée :
+  `nodeName`/`tagName` majuscule
+  réservée aux éléments — `#text`/
+  `#document-fragment` redeviennent
+  minuscules spec. Test
+  `create_comment_node`.
+
 - **JS-C108 — reliquat wedge gov.uk
   fermé : `take_elems`/`put_elems`
   faillibles + tickés**

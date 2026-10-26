@@ -191,6 +191,10 @@ pub enum NodeKind {
     Element,
     /// Text run — payload in `text`, `tag` is `"#text"`.
     Text,
+    /// `<!-- … -->` comment — payload in `text`, `tag` is
+    /// `"#comment"`, `nodeType` 8 (Lit template markers —
+    /// vaadin terrain).
+    Comment,
     /// `DocumentFragment` (`nodeType` 11) — `tag` is
     /// `"#document-fragment"`. Spec insertion : appending a
     /// fragment splices its children into the parent and leaves
@@ -1428,6 +1432,14 @@ impl Dom {
         self.alloc(NodeKind::Element, tag)
     }
 
+    /// Detached comment node (`document.createComment`) —
+    /// `nodeType` 8, marqueurs de template Lit (vaadin terrain).
+    pub fn create_comment(&mut self, text: &str) -> NodeId {
+        let id = self.alloc(NodeKind::Comment, "#comment");
+        self.nodes[id as usize].text = text.to_string();
+        id
+    }
+
     /// Detached text node (`document.createTextNode`).
     pub fn create_text(&mut self, text: &str) -> NodeId {
         let id = self.alloc(NodeKind::Text, "#text");
@@ -1523,7 +1535,7 @@ impl Dom {
                         !self.is_shadow_root(c) && self.attr(c, "slot").unwrap_or_default() == name
                     }
                     NodeKind::Text => !elements_only && name.is_empty(),
-                    NodeKind::Fragment => false,
+                    NodeKind::Comment | NodeKind::Fragment => false,
                 }
             })
             .collect()
@@ -3024,9 +3036,14 @@ impl Dom {
 
     // -- text & serialization ---------------------------------------------
 
-    /// `textContent` — concatenated descendant text.
+    /// `textContent` — concatenated descendant text. Pour un
+    /// nœud `Text`/`Comment`, c'est la data elle-même (spec).
     #[must_use]
     pub fn text_content(&self, node: NodeId) -> String {
+        let n = &self.nodes[node as usize];
+        if matches!(n.kind, NodeKind::Text | NodeKind::Comment) {
+            return n.text.clone();
+        }
         let mut out = String::new();
         self.collect_text(node, &mut out);
         out
@@ -3088,6 +3105,15 @@ impl Dom {
                     let n = &self.nodes[id as usize];
                     if n.kind == NodeKind::Text {
                         out.push_str(&escape_text(&n.text));
+                        continue;
+                    }
+                    // Comment — data verbatim entre marqueurs
+                    // (spec sérialisation ; les marqueurs Lit
+                    // `?lit$N$` ressortent pour le re-parse).
+                    if n.kind == NodeKind::Comment {
+                        out.push_str("<!--");
+                        out.push_str(&n.text);
+                        out.push_str("-->");
                         continue;
                     }
                     // Fragment : pas de balise englobante —
@@ -3174,13 +3200,21 @@ impl Dom {
                 i += 1;
                 continue;
             }
-            // Comments / doctype / PIs.
+            // Comments (`<!--…-->`) — émis en nœuds Comment
+            // (nodeType 8) : Lit y pose ses marqueurs de parties
+            // `?lit$N$` via innerHTML — doctype/PIs restent sautés.
             if cs[i + 1..].starts_with(&['!', '-', '-']) {
                 i += 4;
+                let start = i;
                 while i + 2 < cs.len() && !(cs[i] == '-' && cs[i + 1] == '-' && cs[i + 2] == '>') {
                     i += 1;
                 }
+                let body: String = cs[start..i].iter().collect();
                 i = (i + 3).min(cs.len());
+                flush_text!();
+                let c = self.create_comment(&body);
+                let top = *stack.last().unwrap_or(&parent);
+                self.append(top, c);
                 continue;
             }
             if matches!(cs.get(i + 1), Some('!' | '?')) {
