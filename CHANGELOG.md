@@ -7,6 +7,39 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **Vol 2026-10-26 — échecs de
+  sous-ressources en console**
+  (`explorer-core`) — un `<link>`/
+  `<script>`/`<img>`/`<iframe>`
+  dont le fetch échoue (réseau,
+  non-2xx, en-têtes de sécurité
+  ou SRI) produit désormais un
+  `PipelineError` attribué à
+  l'onglet : les pages blanches
+  old.reddit/archive.org et le
+  « error loading the page » de
+  craigslist n'avaient AUCUNE
+  trace dans le ring console.
+  Régression
+  `subresource_failures_reach_
+  console_ring` (session).
+
+- **Vol 2026-10-26 —
+  `pointer-events: none` au
+  hit-test** (`explorer-layout`)
+  — une boîte `pointer-events:
+  none` ne peut plus être cible
+  (ses enfants `auto` explicites
+  restent ciblables) : les
+  overlays transparents auteur
+  volaient les hits au-dessus
+  des `<input>` peints →
+  `editable:false`, clic
+  `ignored` (service-public,
+  bookshop). Régressions
+  `hit_test_pointer_events_*`
+  (block).
+
 - **Vol 2026-10-26 — `<noscript>`
   masqué même sous style auteur**
   (`explorer-css`) — la règle UA

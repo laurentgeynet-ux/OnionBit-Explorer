@@ -937,7 +937,21 @@ impl SubJob {
             // CAP-185 : `load`/`error` de fin de feuille —
             // enregistré sur toutes les issues (fetch refusé,
             // non-2xx, sécurité/SRI) ; livré au commit.
+            // Vol 2026-10-26 : tout échec est aussi rapporté
+            // en console (`PipelineError`) — les pages
+            // blanches old.reddit/archive.org n'avaient
+            // **aucune** trace des sous-ressources mortes.
             let Ok(resp) = res else {
+                report_sub_failure(
+                    &events,
+                    tab,
+                    &tag,
+                    &self.sheet_urls,
+                    &self.scripts,
+                    &slot_items,
+                    &self.frame_urls,
+                    "échec réseau",
+                );
                 if let SubTag::Css(i) = tag {
                     let ord = self.sheet_urls.get(i).map_or(0, |(.., lord)| *lord);
                     self.link_events.push((ord, false));
@@ -945,24 +959,45 @@ impl SubJob {
                 return;
             };
             if !(200..300).contains(&resp.status) {
+                report_sub_failure(
+                    &events,
+                    tab,
+                    &tag,
+                    &self.sheet_urls,
+                    &self.scripts,
+                    &slot_items,
+                    &self.frame_urls,
+                    &format!("HTTP {}", resp.status),
+                );
                 if let SubTag::Css(i) = tag {
                     let ord = self.sheet_urls.get(i).map_or(0, |(.., lord)| *lord);
                     self.link_events.push((ord, false));
                 }
                 return;
             }
-            match tag {
+            match &tag {
                 SubTag::Css(i) => {
-                    let (su, sri, .., lord) = &self.sheet_urls[i];
+                    let (su, sri, .., lord) = &self.sheet_urls[*i];
                     let ok = subresp_security_allows(&self.url, su, FetchDest::Style, &resp)
                         && sri_allows(sri.as_deref(), &resp.body);
                     if ok {
-                        self.css_slots[i] = Some(decode_stylesheet(&resp.body, &resp.headers));
+                        self.css_slots[*i] = Some(decode_stylesheet(&resp.body, &resp.headers));
+                    } else {
+                        report_sub_failure(
+                            &events,
+                            tab,
+                            &tag,
+                            &self.sheet_urls,
+                            &self.scripts,
+                            &slot_items,
+                            &self.frame_urls,
+                            "en-têtes de sécurité ou SRI",
+                        );
                     }
                     self.link_events.push((*lord, ok));
                 }
                 SubTag::Script(slot) => {
-                    let item = &self.scripts[slot_items[slot]];
+                    let item = &self.scripts[slot_items[*slot]];
                     let sec_ok = item.src.as_ref().is_none_or(|u| {
                         subresp_security_allows(&self.url, u, FetchDest::Script, &resp)
                     });
@@ -988,17 +1023,28 @@ impl SubJob {
                                 eval_arrival(&mut eng, &text, item.el_ord);
                             }
                         } else {
-                            self.script_srcs[slot] = Some(text);
+                            self.script_srcs[*slot] = Some(text);
                         }
+                    } else {
+                        report_sub_failure(
+                            &events,
+                            tab,
+                            &tag,
+                            &self.sheet_urls,
+                            &self.scripts,
+                            &slot_items,
+                            &self.frame_urls,
+                            "en-têtes de sécurité ou SRI",
+                        );
                     }
                 }
                 SubTag::Img(u) => {
-                    if subresp_security_allows(&self.url, &u, FetchDest::Image, &resp) {
+                    if subresp_security_allows(&self.url, u, FetchDest::Image, &resp) {
                         self.img_bodies.insert(u.as_str(), resp.body);
                     }
                 }
                 SubTag::Frame(i) => {
-                    let (u, _, sandbox) = &self.frame_urls[i];
+                    let (u, _, sandbox) = &self.frame_urls[*i];
                     collect_frame(
                         &self.url,
                         &self.cookies,
@@ -2085,6 +2131,42 @@ pub(crate) fn media_attr_matches(env: &StyleEnv, media: &str) -> bool {
         _ => None,
     });
     queries.is_none_or(|q| media_matches(env, q))
+}
+
+/// Échec d'une sous-ressource de la vague → `PipelineError`
+/// en console (vol 2026-10-26 — les échecs étaient
+/// silencieux : pages blanches sans aucune trace,
+/// « error loading the page » injoignable). Décrit la
+/// ressource (`kind url`) et la cause ; jamais fatal.
+#[allow(clippy::too_many_arguments)] // description d'une ressource par tag — toutes les tables indexées sont nécessaires
+fn report_sub_failure(
+    events: &broadcast::Sender<CoreEvent>,
+    tab: TabId,
+    tag: &SubTag,
+    sheet_urls: &[SheetFetch],
+    scripts: &[ScriptItem],
+    slot_items: &[usize],
+    frame_urls: &[(Url, Option<ReferrerPolicy>, Option<SandboxFlags>)],
+    why: &str,
+) {
+    let desc = match tag {
+        SubTag::Css(i) => sheet_urls
+            .get(*i)
+            .map_or_else(|| "feuille ?".to_string(), |(u, ..)| format!("feuille {u}")),
+        SubTag::Script(slot) => slot_items
+            .get(*slot)
+            .and_then(|i| scripts.get(*i))
+            .and_then(|it| it.src.as_ref())
+            .map_or_else(|| "script (inline)".to_string(), |u| format!("script {u}")),
+        SubTag::Img(u) => format!("image {u}"),
+        SubTag::Frame(i) => frame_urls
+            .get(*i)
+            .map_or_else(|| "cadre ?".to_string(), |(u, ..)| format!("cadre {u}")),
+    };
+    let _ = events.send(CoreEvent::PipelineError {
+        tab: Some(tab),
+        message: format!("sous-ressource en échec ({why}) : {desc}"),
+    });
 }
 
 /// Vague de fetches parallèle bornée (étape 50, scheduler
