@@ -188,7 +188,7 @@ impl crate::heap::Host for WorkerHost {
     fn invoke(
         &self,
         e: &mut Engine,
-        _this: Value,
+        this: Value,
         name: &str,
         args: &[Value],
     ) -> JsResult<Option<Value>> {
@@ -212,8 +212,37 @@ impl crate::heap::Host for WorkerHost {
                 e.workers[self.idx].terminated = true;
                 Ok(Some(Value::Undefined))
             }
+            "addEventListener" | "removeEventListener" => {
+                // Rails UJS / Sentry instrumentent le wrapper
+                // (`w.addEventListener('message', f)`) — sans ça
+                // `addEventListener is not a function` (OSM).
+                if let Value::Obj(oid) = this {
+                    let ty = e.to_js_string(arg(args, 0))?;
+                    let f = arg(args, 1);
+                    if name == "addEventListener" {
+                        if e.is_callable(f) {
+                            listener_push(e, oid, &ty, f);
+                        }
+                    } else {
+                        listener_remove(e, oid, &ty, f);
+                    }
+                }
+                Ok(Some(Value::Undefined))
+            }
+            "dispatchEvent" => Ok(Some(Value::Bool(true))),
             _ => Ok(None),
         }
+    }
+
+    fn has_method(&self, name: &str) -> bool {
+        matches!(
+            name,
+            "postMessage"
+                | "terminate"
+                | "addEventListener"
+                | "removeEventListener"
+                | "dispatchEvent"
+        )
     }
 
     fn finalize(&self) {
@@ -228,6 +257,74 @@ impl crate::heap::Host for WorkerHost {
 
 fn arg(args: &[Value], i: usize) -> Value {
     args.get(i).copied().unwrap_or(Value::Undefined)
+}
+
+// -- listeners `addEventListener` (wrapper + scope worker) -------------
+//
+// Les écoutes vivent en props ordinaires `__wl{i}` = `{t, f}` +
+// compteur `__wln` sur l'objet cible (wrapper `Worker` ou global
+// worker) — traçage GC gratuit, pas d'état parallèle.
+
+/// Enregistre `f` comme écoute `type` sur `id`.
+fn listener_push(e: &mut Engine, id: crate::value::ObjId, ty: &str, f: Value) {
+    let n = match e.get_prop(id, "__wln") {
+        Some(Value::Num(n)) => n as usize,
+        _ => 0,
+    };
+    let entry = e.new_object();
+    let t = e.str_val(ty);
+    e.set_own(entry, "t", t, false);
+    e.set_own(entry, "f", f, false);
+    e.set_own(id, &format!("__wl{n}"), Value::Obj(entry), false);
+    e.set_own(id, "__wln", Value::Num((n + 1) as f64), false);
+}
+
+/// Retire les écoutes `ty` égales à `f` (marque `f` à `undefined`,
+/// `listeners_of` les ignore — les indices restent stables).
+fn listener_remove(e: &mut Engine, id: crate::value::ObjId, ty: &str, f: Value) {
+    let n = match e.get_prop(id, "__wln") {
+        Some(Value::Num(n)) => n as usize,
+        _ => 0,
+    };
+    for i in 0..n {
+        let Some(Value::Obj(ent)) = e.get_prop(id, &format!("__wl{i}")) else {
+            continue;
+        };
+        let same_ty = e
+            .get_prop(ent, "t")
+            .and_then(|v| e.to_js_string(v).ok())
+            .is_some_and(|t| t == ty);
+        let same_f = e.get_prop(ent, "f").is_some_and(|ef| e.strict_eq(ef, f));
+        if same_ty && same_f {
+            e.set_own(ent, "f", Value::Undefined, false);
+        }
+    }
+}
+
+/// Les fonctions d'écoute `type` enregistrées sur `id`.
+fn listeners_of(e: &mut Engine, id: crate::value::ObjId, ty: &str) -> Vec<Value> {
+    let n = match e.get_prop(id, "__wln") {
+        Some(Value::Num(n)) => n as usize,
+        _ => 0,
+    };
+    let mut out = Vec::new();
+    for i in 0..n {
+        let Some(Value::Obj(ent)) = e.get_prop(id, &format!("__wl{i}")) else {
+            continue;
+        };
+        let same_ty = e
+            .get_prop(ent, "t")
+            .and_then(|v| e.to_js_string(v).ok())
+            .is_some_and(|t| t == ty);
+        if same_ty {
+            if let Some(f) = e.get_prop(ent, "f") {
+                if e.is_callable(f) {
+                    out.push(f);
+                }
+            }
+        }
+    }
+    out
 }
 
 impl Engine {
@@ -340,14 +437,27 @@ impl Engine {
                             self.call_value(onmsg, obj, &[ev])?;
                             delivered += 1;
                         }
+                        // `addEventListener('message', f)` du
+                        // wrapper — spéc EventTarget.
+                        for f in listeners_of(self, oid, "message") {
+                            let ev = self.message_event(obj, "message", data);
+                            self.call_value(f, obj, &[ev])?;
+                            delivered += 1;
+                        }
                     }
                     WorkerEvent::Fail(msg) => {
                         let Value::Obj(oid) = obj else { continue };
                         let onerr = self.get_prop(oid, "onerror").unwrap_or(Value::Undefined);
                         if self.is_callable(onerr) {
-                            let m = self.str_val(msg);
+                            let m = self.str_val(msg.clone());
                             let ev = self.message_event(obj, "error", m);
                             self.call_value(onerr, obj, &[ev])?;
+                            delivered += 1;
+                        }
+                        for f in listeners_of(self, oid, "error") {
+                            let m = self.str_val(msg.clone());
+                            let ev = self.message_event(obj, "error", m);
+                            self.call_value(f, obj, &[ev])?;
                             delivered += 1;
                         }
                     }
@@ -660,6 +770,12 @@ fn worker_main(
     e.set_own(g, "importScripts", imp, false);
     let close = e.native_fn("close", wscope_close);
     e.set_own(g, "close", close, false);
+    // `self.addEventListener('message', f)` dans le scope worker —
+    // même surface que `onmessage` (spec WorkerGlobalScope).
+    let ael = e.native_fn("addEventListener", wscope_add_listener);
+    e.set_own(g, "addEventListener", ael, false);
+    let rel = e.native_fn("removeEventListener", wscope_remove_listener);
+    e.set_own(g, "removeEventListener", rel, false);
     e.set_own(g, "onmessage", Value::Null, true);
     e.set_own(g, "onerror", Value::Null, true);
 
@@ -704,6 +820,12 @@ fn worker_main(
                             fail(&mut e, t);
                         }
                     }
+                    for f in listeners_of(&mut e, g, "message") {
+                        let ev = e.message_event(gv, "message", data);
+                        if let Err(t) = e.call_value(f, gv, &[ev]) {
+                            fail(&mut e, t);
+                        }
+                    }
                 }
                 Err(t) => fail(&mut e, t),
             }
@@ -715,6 +837,25 @@ fn worker_main(
             fail(&mut e, t);
         }
     }
+}
+
+/// `self.addEventListener(type, f)` dans le scope worker — même
+/// mécanique de props `__wl*` que le wrapper (cible = global).
+fn wscope_add_listener(e: &mut Engine, _this: Value, args: &[Value]) -> JsResult<Value> {
+    let ty = e.to_js_string(arg(args, 0))?;
+    let f = arg(args, 1);
+    if e.is_callable(f) {
+        listener_push(e, e.global, &ty, f);
+    }
+    Ok(Value::Undefined)
+}
+
+/// `self.removeEventListener(type, f)` — marque l'écoute à
+/// `undefined` (indices stables).
+fn wscope_remove_listener(e: &mut Engine, _this: Value, args: &[Value]) -> JsResult<Value> {
+    let ty = e.to_js_string(arg(args, 0))?;
+    listener_remove(e, e.global, &ty, arg(args, 1));
+    Ok(Value::Undefined)
 }
 
 /// `postMessage(v)` dans le scope worker — remonte une valeur fil

@@ -7,6 +7,18 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **JS-C138 — `Worker#addEventListener`
+  des deux côtés** (`explorer-jscore`)
+  — mur openstreetmap.org (Rails UJS) :
+  `w.addEventListener('message', f)`
+  jetait `addEventListener is not a
+  function (on Worker)`. Écoutes en
+  props `__wl{i}`/`__wln` (traçage GC
+  gratuit) sur le wrapper **et** le
+  scope worker ; `dispatchEvent` noop
+  → `true`, `has_method` déclaré
+  (feature-detect `typeof w.m`).
+
 - **JS-C137 — `Intl.supportedValuesOf`**
   (`explorer-jscore`) — mur
   bandcamp.com/discover : absent,
