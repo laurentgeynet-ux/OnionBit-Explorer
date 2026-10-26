@@ -399,7 +399,72 @@ fn query_selector_subset() {
     assert_eq!(ev("document.querySelector('p').tagName"), "P");
     assert_eq!(ev("document.querySelectorAll('li').length"), "2");
     // Complex selectors out of subset → null, not an error.
-    assert_eq!(ev("document.querySelector('div > p')"), "null");
+    assert_eq!(ev("document.querySelector('div ~ p')"), "null");
+}
+
+/// Combinateur enfant `a > b` — motif terrain : spectrum.adobe.com
+/// décore ses sections via `querySelectorAll('main > div')`
+/// (JS-C120 ; `doc:25` quand le sélecteur rendait vide).
+#[test]
+fn query_selector_child_combinator() {
+    assert_eq!(ev("document.querySelectorAll('div > p').length"), "1");
+    assert_eq!(ev("document.querySelectorAll('#main > p').length"), "1");
+    assert_eq!(ev("document.querySelectorAll('body > div').length"), "1");
+    assert_eq!(ev("document.querySelectorAll('ul > li').length"), "2");
+    // Sans espaces autour de `>`.
+    assert_eq!(ev("document.querySelectorAll('#list>li').length"), "2");
+    // `b` est descendant de div mais pas enfant direct.
+    assert_eq!(ev("document.querySelectorAll('div > b').length"), "0");
+    // Chaîne mixte : `>` puis descendant.
+    assert_eq!(ev("document.querySelectorAll('#main > p b').length"), "1");
+    // `querySelector`/`matches`/`closest` partagent le rail.
+    assert_eq!(ev("document.querySelector('div > p').tagName"), "P");
+    assert_eq!(ev("document.querySelector('p').matches('div > p')"), "true");
+    assert_eq!(
+        ev("document.querySelector('b').closest('p > b').tagName"),
+        "B"
+    );
+    assert_eq!(
+        ev("document.querySelector('b').closest('div > b') === null"),
+        "true"
+    );
+}
+
+#[test]
+fn query_selector_universal() {
+    // `*` — tout élément sous le nœud requêté.
+    assert_eq!(
+        ev("document.querySelectorAll('*').length === document.getElementsByTagName('*').length"),
+        "true"
+    );
+    assert_eq!(ev("document.querySelectorAll('ul > *').length"), "2");
+    assert_eq!(ev("document.querySelectorAll('#main > *').length"), "1");
+}
+
+/// `el.qSA(':scope > *')` — le parent-scopé DOIT matcher (spec :
+/// les sélecteurs s'évaluent en contexte document, le `bound`
+/// n'exclut pas l'élément requêté). Motif : ak.js `groupChildren`
+/// — spectrum.adobe.com.
+#[test]
+fn query_selector_scope_child() {
+    assert_eq!(
+        ev("document.getElementById('list').querySelectorAll(':scope > *').length"),
+        "2"
+    );
+    assert_eq!(
+        ev("document.getElementById('main').querySelectorAll(':scope > p').length"),
+        "1"
+    );
+    // `el.qSA('div > p')` — `el` lui-même peut servir de parent.
+    assert_eq!(
+        ev("document.getElementById('main').querySelectorAll('#main > p').length"),
+        "1"
+    );
+    // Descendant ne franchit pas davantage : p reste trouvé.
+    assert_eq!(
+        ev("document.getElementById('main').querySelectorAll('div b').length"),
+        "1"
+    );
 }
 
 /// Sélecteurs d'attribut `[a]`/`[a=v]`/`~=`/`|=`/`^=`/`$=`/`*=` —
@@ -450,7 +515,7 @@ fn query_selector_attr_operators() {
     );
     // Hors sous-ensemble (`>`, pseudo-élément) → null, jamais
     // d'erreur ; `:hover` = état `Never` (JS-C99) → non matché.
-    assert_eq!(ev("document.querySelector('div > p')"), "null");
+    assert_eq!(ev("document.querySelector('div + p')"), "null");
     assert_eq!(ev("document.querySelector('input::x')"), "null");
     assert_eq!(ev("document.querySelector('input:hover')"), "null");
     // `matches`/`closest` partagent le même sous-ensemble.
@@ -5091,6 +5156,100 @@ fn dom_parser_constructs_and_parses() {
     );
 }
 
+/// Cross-document (vol spectrum) : un nœud d'une **autre arène**
+/// (`DOMParser`, `iframe.contentDocument`, `xhr.responseXML`)
+/// passé aux mutateurs du document courant validait l'id contre
+/// SA propre arène puis l'indexait dans celle du receveur —
+/// hors-limites = panic (`is_ancestor_or_self`), in-bounds =
+/// mutation du mauvais nœud (le `<main>` de la page détaché
+/// puis propagé au DOM session par le journal). `node_for_in`
+/// borne à l'arène du receveur → `TypeError` amont, jamais de
+/// corruption. La spec adopterait cross-document ; les arènes
+/// ne fusionnant pas, le dégradé honnête est le rejet.
+#[test]
+fn cross_document_node_args_are_rejected() {
+    // Mutateurs structurels : TypeError sur nœud étranger.
+    assert_eq!(
+        ev(
+            "var d=new DOMParser().parseFromString('<div id=x>y</div>','text/html');\
+            var fx=d.getElementById('x');\
+            var out=[];\
+            try{document.body.appendChild(fx)}catch(e){out.push('a')}\
+            try{document.body.insertBefore(fx,null)}catch(e){out.push('i')}\
+            try{document.body.replaceChild(fx,document.body.firstChild)}catch(e){out.push('r')}\
+            try{document.body.removeChild(fx)}catch(e){out.push('d')}\
+            try{document.body.insertAdjacentElement('beforeend',fx)}catch(e){out.push('j')}\
+            try{document.body.prepend(fx)}catch(e){out.push('p')}\
+            out.join('')"
+        ),
+        "airdjp"
+    );
+    // Prédicats : pas de throw, mais jamais d'égalité/
+    // contenance factice cross-document.
+    assert_eq!(
+        ev(
+            "var d=new DOMParser().parseFromString('<div id=x>y</div>','text/html');\
+            var fx=d.getElementById('x');\
+            document.body.contains(fx)+'/'+document.body.isSameNode(fx)+'/'+\
+            document.body.isEqualNode(fx)"
+        ),
+        "false/false/false"
+    );
+    // Régression directe du symptôme : l'append d'un nœud
+    // étranger ne doit **pas** détacher/rattacher le nœud
+    // local de même indice (le `<main>` spectrum).
+    assert_eq!(
+        ev_in(
+            "<html><body><main><div>s1</div></main><footer>f</footer></body></html>",
+            "var d=new DOMParser().parseFromString('<a/><b/><c/>','text/html');\
+                var f=d.querySelector('b');\
+                try{document.body.appendChild(f)}catch(e){}\
+                document.getElementsByTagName('main').length+'/'+\
+                document.querySelectorAll('main > div').length"
+        ),
+        "1/1"
+    );
+    // Observateurs/Range/Selection : mêmes rejets bornés.
+    assert_eq!(
+        ev("var d=new DOMParser().parseFromString('<div id=x>y</div>','text/html');\
+            var fx=d.getElementById('x');\
+            var out=[];\
+            try{new MutationObserver(function(){}).observe(fx,{childList:true})}catch(e){out.push('m')}\
+            try{new IntersectionObserver(function(){}).observe(fx)}catch(e){out.push('o')}\
+            try{document.createRange().selectNode(fx)}catch(e){out.push('r')}\
+            try{window.getSelection().selectAllChildren(fx)}catch(e){out.push('s')}\
+            out.join('')"),
+        "mors"
+    );
+}
+
+/// `delete el.dataset.x` doit retirer `data-x` (vol spectrum :
+/// `delete section.dataset.status` tombait sur la prop JS
+/// propre — l'attribut restait, `div[data-status]` restait
+/// `display:none` et la page ne se révélait jamais). Sans le
+/// crochet `Host::del`, la suppression visait une prop
+/// fantôme ; `delete` en strict sur un host non-supprimable
+/// jetait même `TypeError`.
+#[test]
+fn dataset_delete_removes_data_attr() {
+    assert_eq!(
+        ev("var el=document.createElement('div');\
+            el.dataset.status='decorated';\
+            var before=el.getAttribute('data-status');\
+            delete el.dataset.status;\
+            before+'/'+el.getAttribute('data-status')+'/'+('status' in el.dataset)+'/'+el.dataset.status"),
+        "decorated/null/false/undefined"
+    );
+    // camelCase ↔ kebab-case sur le chemin delete.
+    assert_eq!(
+        ev("var el=document.createElement('div');\
+            el.setAttribute('data-block-name','x');\
+            delete el.dataset.blockName;\
+            el.getAttribute('data-block-name')"),
+        "null"
+    );
+}
+
 // -- `classList` méthodes lisibles (JS-C91) -----------------------------------
 
 /// `classList.add` doit se lire comme fonction — htmx fait
@@ -6115,4 +6274,53 @@ fn deeply_nested_expression_parses() {
     let mut e = explorer_jscore::Engine::new();
     let r = e.eval(&src);
     assert!(r.is_ok(), "600 parenthèses imbriquées rejetées : {r:?}");
+}
+
+/// JS-C124 — `new URL(".", location)` → « Invalid base URL »
+/// (svelte/fastapi/mkdocs — motif de résolution d'assets ultra-
+/// commun) : `location` n'avait pas de `toString` surfacé →
+/// `to_primitive` tombait sur `Object.prototype.toString` →
+/// "[object Location]" rejeté comme base. Spec : `Location`
+/// stringifie à `href` ; `assign`/`replace`/`reload` lisibles.
+#[test]
+fn new_url_against_location_resolves() {
+    let (mut e, _jar, _n) = engine_full(PAGE);
+    // `page_url` = http://ex.org:8080/a/b?q=1#frag.
+    assert_eq!(
+        evf(&mut e, "new URL('.', location).href"),
+        "http://ex.org:8080/a/"
+    );
+    assert_eq!(
+        evf(&mut e, "String(location)"),
+        "http://ex.org:8080/a/b?q=1#frag"
+    );
+    assert_eq!(
+        evf(&mut e, "location + ''"),
+        "http://ex.org:8080/a/b?q=1#frag"
+    );
+    assert_eq!(
+        evf(&mut e, "location.toString()"),
+        "http://ex.org:8080/a/b?q=1#frag"
+    );
+    assert_eq!(evf(&mut e, "typeof location.assign"), "function");
+    assert_eq!(evf(&mut e, "typeof location.replace"), "function");
+}
+
+#[test]
+fn url_ctor_with_location_base() {
+    // `new URL(".", location)` / `new URL(href, document.baseURI)`
+    // — Location/baseURI doivent être stringifiés en base
+    // (svelte.dev, fastapi, mkdocs : « Invalid base URL »).
+    let (mut e, _jar, _navs) = engine_full(PAGE);
+    for src in [
+        "new URL('.', location).href",
+        "new URL('x', location).href",
+        "new URL('.', location.href).href",
+        "new URL('.', document.baseURI).href",
+    ] {
+        match e.eval(src) {
+            Ok(v) => println!("OK   {src} → {}", e.describe(v)),
+            Err(x) => println!("FAIL {src} → {x}"),
+        }
+    }
 }

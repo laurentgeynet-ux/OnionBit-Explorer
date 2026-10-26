@@ -682,6 +682,9 @@ fn dom_acc_get(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     }) else {
         return Ok(Value::Undefined);
     };
+    if !dom.borrow().node_valid(node) {
+        return Ok(Value::Undefined);
+    }
     dom_raw_get(e, &dom, node, &prop)
 }
 
@@ -706,6 +709,9 @@ fn dom_acc_set(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
         return Ok(Value::Undefined);
     };
     let mut d = dom.borrow_mut();
+    if !d.node_valid(node) {
+        return Ok(Value::Undefined);
+    }
     let tag = d.nodes[node as usize].tag.clone();
     if let Some(attr) = dom_bool_attr(&prop) {
         if e.to_boolean(v) {
@@ -1075,8 +1081,13 @@ impl NodeHost {
     fn norm_children(&self, e: &mut Engine, args: &[Value]) -> JsResult<Vec<NodeId>> {
         let mut out = Vec::with_capacity(args.len());
         for &a in args {
-            if let Some(n) = node_for(e, a) {
+            if let Some(n) = node_for_in(e, a, &self.dom) {
                 out.push(n);
+            } else if node_for(e, a).is_some() {
+                // Nœud d'une autre arène (`DOMParser`, iframe)
+                // — la spec l'adopterait ; non fusionnable →
+                // TypeError plutôt que texte fantaisiste inséré.
+                return Err(e.type_error("node is from a different document"));
             } else {
                 let s = e.to_js_string(a)?;
                 out.push(self.dom.borrow_mut().create_text(&s));
@@ -2983,7 +2994,7 @@ impl Engine {
         // résolu ici, présenté par `fire_listeners` via
         // `adjusted_related` (lu par `EventHost::get`).
         let rt = self.get_prop_value(ev_val, "relatedTarget")?;
-        ev.related_node.set(node_for(self, rt));
+        ev.related_node.set(node_for_in(self, rt, dom));
         ev.adjusted.set(target);
         ev.adjusted_related.set(ev.related_node.get());
         // Capture: root → parent (capture listeners only).
@@ -3312,6 +3323,23 @@ impl Host for DocumentHost {
                 Ok(Some(e.str_val(t)))
             }
             "URL" | "documentURI" => Ok(Some(e.str_val(e.hooks.page_url.clone()))),
+            // `document.baseURI` — la base de résolution des
+            // URLs relatives (spec : `<base href>` résolu s'il
+            // existe, sinon l'URL du document). Mur corpus
+            // svelte/fastapi/mkdocs : `new URL(".", document.
+            // baseURI)` → « Invalid base URL » sans la prop.
+            "baseURI" => {
+                let href = {
+                    let d = self.dom.borrow();
+                    d.by_tag(d.root, "base")
+                        .iter()
+                        .find_map(|&n| d.attr(n, "href").map(str::to_owned))
+                };
+                let base = href
+                    .and_then(|h| crate::xhr::resolve_url(e, &h))
+                    .unwrap_or_else(|| e.hooks.page_url.clone());
+                Ok(Some(e.str_val(base)))
+            }
             // `document.referrer` (CAP-156) — le `Referer` de
             // la navigation du document, `""` hors referrer
             // (spec : reflète le referrer initial, jamais la
@@ -3644,7 +3672,7 @@ impl Host for DocumentHost {
             // spec : clone dans le document cible ; le miroir
             // n'a qu'un document → même rail que `cloneNode`.
             "importNode" => {
-                let Some(src) = node_for(e, arg(args, 0)) else {
+                let Some(src) = node_for_in(e, arg(args, 0), &self.dom) else {
                     return Err(e.type_error("importNode: nœud requis"));
                 };
                 let deep = e.to_boolean(arg(args, 1));
@@ -3768,7 +3796,7 @@ impl Host for DocumentHost {
                 Ok(Some(Value::Obj(id)))
             }
             "adoptNode" => {
-                let Some(src) = node_for(e, arg(args, 0)) else {
+                let Some(src) = node_for_in(e, arg(args, 0), &self.dom) else {
                     return Err(e.type_error("adoptNode: nœud requis"));
                 };
                 self.dom.borrow_mut().detach(src);
@@ -4708,7 +4736,13 @@ fn can_play(arg: &str, declared: &[String]) -> &'static str {
 
 impl Host for NodeHost {
     fn class_name(&self) -> &'static str {
-        match self.dom.borrow().nodes[self.node as usize].tag.as_str() {
+        let d = self.dom.borrow();
+        // Id obsolète (arène resynchronisée sous handle JS vivant)
+        // → repli générique, jamais panic.
+        if !d.node_valid(self.node) {
+            return "HTMLElement";
+        }
+        match d.nodes[self.node as usize].tag.as_str() {
             "video" => "HTMLVideoElement",
             "audio" => "HTMLAudioElement",
             "canvas" => "HTMLCanvasElement",
@@ -4730,6 +4764,9 @@ impl Host for NodeHost {
     }
 
     fn has_method(&self, name: &str) -> bool {
+        if !self.dom.borrow().node_valid(self.node) {
+            return NODE_METHODS.contains(&name);
+        }
         NODE_METHODS.contains(&name)
             || (is_dialog(&self.dom, self.node) && matches!(name, "showModal" | "show" | "close"))
             || (is_field(&self.dom, self.node)
@@ -4754,6 +4791,12 @@ impl Host for NodeHost {
 
     fn get(&self, e: &mut Engine, this: Value, key: &str) -> JsResult<Option<Value>> {
         let node = self.node;
+        // Id obsolète (arène resynchronisée — spectrum
+        // `groupChildren`, `nodes[614]` sur 507) → prop absente,
+        // dégradation `undefined` plutôt que panic.
+        if !self.dom.borrow().node_valid(node) {
+            return Ok(None);
+        }
         // Accesseur propre `defineProperty` (JS-C82) : il shadowe
         // la voie host — `read_prop` l'invoquera (spec : own
         // prop > IDL). Sans ça le tracker React posé par
@@ -5544,6 +5587,11 @@ impl Host for NodeHost {
 
     fn set(&self, e: &mut Engine, this: Value, key: &str, v: Value) -> JsResult<bool> {
         let node = self.node;
+        // Id obsolète → écriture refusée (set expando ailleurs),
+        // jamais panic sur l'arène.
+        if !self.dom.borrow().node_valid(node) {
+            return Ok(false);
+        }
         // Accesseur propre `defineProperty` (JS-C82) : refuser
         // la voie host → `write_prop` invoque le setter.
         if let Value::Obj(id) = this {
@@ -5742,7 +5790,7 @@ impl Host for NodeHost {
                 Ok(Some(dom_collection(e, &self.dom, &self.cache, &ids, false)))
             }
             "appendChild" | "append" => {
-                let target = node_for(e, arg(args, 0));
+                let target = node_for_in(e, arg(args, 0), &self.dom);
                 match target {
                     Some(child) => {
                         // Spec `HierarchyRequestError` : append un
@@ -5758,7 +5806,7 @@ impl Host for NodeHost {
                 }
             }
             "removeChild" => {
-                let target = node_for(e, arg(args, 0));
+                let target = node_for_in(e, arg(args, 0), &self.dom);
                 match target {
                     Some(child) => {
                         self.dom.borrow_mut().detach(child);
@@ -5925,7 +5973,7 @@ impl Host for NodeHost {
             // `submit_via` (avec l'activation des boutons
             // submit, CAP-153).
             "requestSubmit" => {
-                let submitter = node_for(e, arg(args, 0));
+                let submitter = node_for_in(e, arg(args, 0), &self.dom);
                 self.submit_via(e, node, submitter)?;
                 Ok(Some(Value::Undefined))
             }
@@ -5953,8 +6001,8 @@ impl Host for NodeHost {
             }
             // -- JS-7g structural ops ------------------------------------
             "insertBefore" => {
-                let new_n = node_for(e, arg(args, 0));
-                let ref_n = node_for(e, arg(args, 1));
+                let new_n = node_for_in(e, arg(args, 0), &self.dom);
+                let ref_n = node_for_in(e, arg(args, 1), &self.dom);
                 match new_n {
                     Some(c) => {
                         if self.dom.borrow().is_ancestor_or_self(node, c) {
@@ -5967,8 +6015,8 @@ impl Host for NodeHost {
                 }
             }
             "replaceChild" => {
-                let new_n = node_for(e, arg(args, 0));
-                let old_n = node_for(e, arg(args, 1));
+                let new_n = node_for_in(e, arg(args, 0), &self.dom);
+                let old_n = node_for_in(e, arg(args, 1), &self.dom);
                 match (new_n, old_n) {
                     (Some(n), Some(o)) => {
                         if self.dom.borrow().is_ancestor_or_self(node, n) {
@@ -5990,8 +6038,8 @@ impl Host for NodeHost {
                 Ok(Some(node_value(e, &self.dom, &self.cache, c)))
             }
             "contains" => {
-                let r =
-                    node_for(e, arg(args, 0)).is_some_and(|o| self.dom.borrow().contains(node, o));
+                let r = node_for_in(e, arg(args, 0), &self.dom)
+                    .is_some_and(|o| self.dom.borrow().contains(node, o));
                 Ok(Some(Value::Bool(r)))
             }
             // CAP-164 — surface Node de complétude : les libs
@@ -6035,16 +6083,16 @@ impl Host for NodeHost {
                 Ok(Some(Value::Bool(r)))
             }
             "isSameNode" => {
-                let r = node_for(e, arg(args, 0)).is_some_and(|o| o == node);
+                let r = node_for_in(e, arg(args, 0), &self.dom).is_some_and(|o| o == node);
                 Ok(Some(Value::Bool(r)))
             }
             "isEqualNode" => {
-                let r = node_for(e, arg(args, 0))
+                let r = node_for_in(e, arg(args, 0), &self.dom)
                     .is_some_and(|o| self.dom.borrow().is_equal_node(node, o));
                 Ok(Some(Value::Bool(r)))
             }
             "compareDocumentPosition" => {
-                let Some(o) = node_for(e, arg(args, 0)) else {
+                let Some(o) = node_for_in(e, arg(args, 0), &self.dom) else {
                     return Err(e.type_error("compareDocumentPosition: not a node"));
                 };
                 let bits = self.dom.borrow().compare_position(node, o);
@@ -6220,7 +6268,7 @@ impl Host for NodeHost {
             // vide puis insère (React/lit-html l'utilisent).
             "insertAdjacentElement" => {
                 let pos = e.to_js_string(arg(args, 0))?;
-                let Some(child) = node_for(e, arg(args, 1)) else {
+                let Some(child) = node_for_in(e, arg(args, 1), &self.dom) else {
                     return Err(e.type_error("insertAdjacentElement: not a node"));
                 };
                 self.insert_at_position(e, node, &pos, child)?;
@@ -6514,6 +6562,13 @@ pub(crate) fn node_for(e: &mut Engine, v: Value) -> Option<NodeId> {
         _ => return None,
     };
     if let Some(n) = h.as_any().downcast_ref::<NodeHost>() {
+        // Id obsolète (arène resynchronisée pendant que le JS
+        // tenait la référence — spectrum `groupChildren` :
+        // `nodes[614]` sur arène 507) → pas un nœud : TypeError
+        // amont plutôt que panic dans `append`/`detach`.
+        if !n.dom.borrow().node_valid(n.node) {
+            return None;
+        }
         return Some(n.node);
     }
     // `document` est un nœud cible valide (`observe(document)`,
@@ -6521,6 +6576,40 @@ pub(crate) fn node_for(e: &mut Engine, v: Value) -> Option<NodeId> {
     // Mesuré sur github.com : element-registry observe le
     // document (JS-C56).
     if let Some(dh) = h.as_any().downcast_ref::<DocumentHost>() {
+        return Some(dh.dom.borrow().root);
+    }
+    None
+}
+
+/// `node_for` restreint à **l'arène `dom` du receveur** — `None`
+/// si le handle appartient à un autre miroir (cross-document :
+/// `iframe.contentDocument`, `DOMParser`, `xhr.responseXML`,
+/// `createHTMLDocument`). Sans ce garde, l'id étranger était
+/// validé contre SA propre arène puis indexé dans celle du
+/// receveur — hors-limites = panic (`is_ancestor_or_self`),
+/// in-bounds = mutation du **mauvais nœud** (spectrum :
+/// `<main>` détaché par un `remove()` d'id transplanté).
+/// La spec adopterait le nœud cross-document — les arènes ne
+/// fusionnant pas, on dégrade en « pas un nœud » (`TypeError`
+/// amont), jamais en corruption.
+pub(crate) fn node_for_in(e: &mut Engine, v: Value, dom: &DomRef) -> Option<NodeId> {
+    let Value::Obj(id) = v else {
+        return None;
+    };
+    let h = match e.heap.obj(id).map(|o| &o.kind) {
+        Some(ObjKind::Host(h)) => h.clone(),
+        _ => return None,
+    };
+    if let Some(n) = h.as_any().downcast_ref::<NodeHost>() {
+        if !Rc::ptr_eq(&n.dom, dom) || !dom.borrow().node_valid(n.node) {
+            return None;
+        }
+        return Some(n.node);
+    }
+    if let Some(dh) = h.as_any().downcast_ref::<DocumentHost>() {
+        if !Rc::ptr_eq(&dh.dom, dom) {
+            return None;
+        }
         return Some(dh.dom.borrow().root);
     }
     None
@@ -6539,6 +6628,9 @@ fn element_receiver(e: &mut Engine, v: Value) -> Option<(NodeId, DomRef, NodeCac
         _ => return None,
     };
     let n = h.as_any().downcast_ref::<NodeHost>()?;
+    if !n.dom.borrow().node_valid(n.node) {
+        return None;
+    }
     Some((n.node, n.dom.clone(), n.cache.clone()))
 }
 
@@ -7803,7 +7895,7 @@ impl Host for CustomElementsHost {
             }
             "upgrade" => {
                 let root = arg(args, 0);
-                let Some(node) = node_for(e, root) else {
+                let Some(node) = node_for_in(e, root, &self.dom) else {
                     return Err(e.type_error("customElements.upgrade: not a node"));
                 };
                 ce_upgrade_subtree(e, &self.dom, &self.cache, node)?;
@@ -8144,9 +8236,28 @@ impl Host for LocationHost {
                     format!("{proto}//{host}")
                 }
             }
+            // `toString` doit être une fonction réelle (spec
+            // `Location.prototype.toString` → `href`) : sinon
+            // `ToPrimitive` tombe sur `Object.prototype.toString`
+            // → "[object Location]" — et `new URL(".", location)`
+            // échouait « Invalid base URL » (motif assets
+            // svelte/fastapi/mkdocs). `invoke` gère déjà l'appel
+            // méthode ; ici c'est la lecture-propriété.
+            "toString" => {
+                return Ok(Some(e.native_fn("toString", |e, _t, _a| {
+                    Ok(e.str_val(e.hooks.page_url.clone()))
+                })));
+            }
             _ => return Ok(None),
         };
         Ok(Some(e.str_val(s)))
+    }
+
+    fn has_method(&self, name: &str) -> bool {
+        // `typeof location.assign === 'function'` — surface IDL.
+        // `toString` est servi par `get` (fonction réelle), il
+        // n'a pas besoin du repli invoke.
+        matches!(name, "assign" | "replace" | "reload")
     }
 
     fn set(&self, e: &mut Engine, _t: Value, key: &str, v: Value) -> JsResult<bool> {
@@ -8597,11 +8708,11 @@ fn win_dispatch_event(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Val
 /// jamais une exception). `TypeError` si l'argument n'est pas un
 /// élément, comme la spec.
 fn win_get_computed_style(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
-    let Some(node) = node_for(e, arg(args, 0)) else {
-        return Err(e.type_error("getComputedStyle: parameter 1 is not of type 'Element'"));
-    };
     let Some((dom, _)) = e.dom_ctx.clone() else {
         return Err(e.type_error("getComputedStyle: no document"));
+    };
+    let Some(node) = node_for_in(e, arg(args, 0), &dom) else {
+        return Err(e.type_error("getComputedStyle: parameter 1 is not of type 'Element'"));
     };
     Ok(e.new_host_object(Rc::new(StyleHost {
         dom,
@@ -8760,11 +8871,11 @@ fn xmlserializer_ctor(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value
 /// `serializer.serializeToString(node)` — `outer_html` du
 /// nœud (ou du document entier, résolu `#document`).
 fn xmlserialize_to_string(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
-    let Some(n) = node_for(e, arg(args, 0)) else {
-        return Err(e.type_error("serializeToString: nœud requis"));
-    };
     let Some((dom, _cache)) = e.dom_ctx.clone() else {
         return Err(e.type_error("serializeToString: no document"));
+    };
+    let Some(n) = node_for_in(e, arg(args, 0), &dom) else {
+        return Err(e.type_error("serializeToString: nœud requis"));
     };
     let s = dom.borrow().outer_html(n);
     Ok(e.str_val(s))
@@ -9703,15 +9814,15 @@ struct DatasetHost {
 
 impl Host for DatasetHost {
     fn get(&self, e: &mut Engine, _t: Value, key: &str) -> JsResult<Option<Value>> {
-        let v = self
+        // `None` sur attr absent — `el.dataset.x` lit
+        // `undefined` par le repli, et `'x' in dataset` reste
+        // honnête (`has_prop` lit `is_some` — `Some(Undefined)`
+        // rapportait « présent » même après `delete`).
+        Ok(self
             .dom
             .borrow()
             .attr(self.node, &camel_to_data_key(key))
-            .map(str::to_string);
-        Ok(Some(match v {
-            Some(v) => e.str_val(v),
-            None => Value::Undefined,
-        }))
+            .map(|v| e.str_val(v)))
     }
 
     fn set(&self, e: &mut Engine, _t: Value, key: &str, v: Value) -> JsResult<bool> {
@@ -9728,6 +9839,19 @@ impl Host for DatasetHost {
             .iter()
             .filter_map(|(k, _)| data_key_to_camel(k))
             .collect()
+    }
+
+    /// `delete el.dataset.x` → `removeAttribute('data-x')`
+    /// (spec `[[Delete]]` de `DOMStringMap` — sans lui la
+    /// suppression tombait sur la prop JS propre et
+    /// l'attribut restait : spectrum gardait
+    /// `data-status="decorated"` → `div[data-status]` restait
+    /// `display:none`).
+    fn del(&self, _e: &mut Engine, _t: Value, key: &str) -> JsResult<Option<bool>> {
+        self.dom
+            .borrow_mut()
+            .remove_attr(self.node, &camel_to_data_key(key));
+        Ok(Some(true))
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
@@ -10579,10 +10703,10 @@ fn formdata_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
             let Some(dom) = e.dom_ctx.as_ref().map(|(d, _)| d.clone()) else {
                 return Err(e.type_error("FormData: pas de DOM — élément form indisponible"));
             };
-            let Some(n) = node_for(e, v) else {
+            let Some(n) = node_for_in(e, v, &dom) else {
                 return Err(e.type_error("FormData: argument is not a form element"));
             };
-            let submitter = node_for(e, arg(args, 1));
+            let submitter = node_for_in(e, arg(args, 1), &dom);
             let fields = {
                 let d = dom.borrow();
                 if d.nodes[n as usize].tag != "form" {

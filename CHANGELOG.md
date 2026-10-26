@@ -12013,3 +12013,13 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   Tests `regex_astral_class_
   quantifier`, `regex_class_
   quantifier_in_alternative`.
+
+- **JS-C122 — `document.baseURI`**
+  (`explorer-jscore::dom_host`) —
+  `new URL(".", document.baseURI)`
+  mourait « Invalid base URL »
+  (svelte/fastapi/mkdocs — mur
+  corpus n°2). Spec : `<base href>`
+  résolu s'il existe, sinon l'URL
+  du document. Test
+  `url_ctor_with_location_base`.
