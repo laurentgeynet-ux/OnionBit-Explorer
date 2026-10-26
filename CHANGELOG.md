@@ -7,6 +7,44 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **Vol 2026-10-26 — correctifs de vol
+  (FIX-3, `explorer-core` + `explorer-api`)**
+  — quatre constats du rapport de vol :
+  - **Onglet parasite sur ressource `.js`**
+    (rakuten `gw.js`, soundcloud) : les
+    types script servis en top-level
+    (`text/javascript`, `application/
+    javascript`, ecmascript…) ne sont plus
+    « doc_like » dans `download_meta` →
+    offre de téléchargement ; un contexte
+    `window.open`/`target=_blank` resté
+    vierge après navigation inaugurale est
+    refermé (`close_stillborn_popup`, pendings
+    ré-attribués à l'opener).
+  - **`/frame` 200 à corps vide** (transitoire
+    post-navigation) : corps vide → `204` +
+    `Retry-After: 1` ; un encodage vide n'est
+    plus caché dans `entry.png`.
+  - **Mémoire bfcache** (~130 Mio de rasters
+    + ~17 Mio de PNG pour 4 pages gelées) :
+    frame et PNG libérés au gel — DOM + arbre
+    survivent, la restauration repeint via
+    `needs_paint`.
+  - **Meta refresh en `<noscript>`** (google
+    SERP) : honorée quand la page est un
+    fallback pur (body = `noscript`/`script`
+    seulement) — le rawtext est re-parsé
+    scripting off ; une page riche avec un
+    noscript annexe garde la spec.
+  - **Crash daemon silencieux** (vol 4) :
+    audit des chemins DELETE+navigate —
+    gardes epoch/`Option` exhaustifs, aucun
+    `unwrap` en code livré ; la sentinelle
+    `EXPLORER_DEATH_LOG` existe déjà — mort
+    sans crochet = kill externe/OOM (le
+    correctif bfcache ci-dessus réduit le
+    réservoir principal suspecté).
+
 - **JS-C133 — `initCustomEvent`
   (DOM L2, strate polymer/shady)**
   (`explorer-jscore`) — mur ytd-app
