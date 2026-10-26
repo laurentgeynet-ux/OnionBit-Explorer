@@ -687,6 +687,10 @@ enum FKind {
         catch: Option<(Pat, Vec<Stmt>)>,
         finally: Option<Vec<Stmt>>,
     },
+    /// `switch` porteur de suspensions — sa liste est le
+    /// corps **aplatit** du case atteint jusqu'à la fin
+    /// (fallthrough) ; un `break` non labellé s'y arrête.
+    Switch,
 }
 
 /// Une frame : liste + curseur + env + labels + kind.
@@ -967,9 +971,12 @@ impl GExec {
                     | FKind::ForIter { .. }
                     | FKind::ForAwait { .. }
             );
+            // `break` nu : boucle **ou switch** englobant
+            // (`switch` est la seule autre cible de `break`
+            // non labellé — spec `BreakableStatement`).
             let hit = match &label {
                 Some(l) => f.labels.iter().any(|x| x == *l),
-                None => is_loop,
+                None => is_loop || matches!(f.kind, FKind::Switch),
             };
             let f = self.stack.pop().unwrap();
             self.run_finally(e, &f)?;
@@ -1127,7 +1134,7 @@ impl GExec {
         // avancent) ; le tick la compte.
         e.tick()?;
         match &f.kind {
-            FKind::Seq => {
+            FKind::Seq | FKind::Switch => {
                 self.stack.pop();
             }
             FKind::While { cond } => {
@@ -1630,6 +1637,50 @@ impl GExec {
                     labels: vec![name.clone()],
                     kind: FKind::Seq,
                 });
+                Ok(GFlow::Adv)
+            }
+            // `switch` porteur de suspensions : le discriminant
+            // et les tests sont purs post-lowering (les suspends
+            // de `case (await e)` ont été hissés éagerment). Le
+            // case atteint est aplati avec tous les suivants —
+            // fallthrough = liste plate, `break` s'arrête au
+            // frame `Switch` (`do_break`).
+            Stmt::Switch { disc, cases } => {
+                let dv = e.eval_expr(env, self.this, disc)?;
+                let mut start = None;
+                let mut default = None;
+                for (i, c) in cases.iter().enumerate() {
+                    match &c.test {
+                        Some(t) => {
+                            let tv = e.eval_expr(env, self.this, t)?;
+                            if start.is_none() && e.strict_eq(dv, tv) {
+                                start = Some(i);
+                            }
+                        }
+                        None => {
+                            if default.is_none() {
+                                default = Some(i);
+                            }
+                        }
+                    }
+                }
+                // Spec : `default` ne s'exécute que si aucun
+                // test n'a matché (pas « case + default »).
+                if let Some(from) = start.or(default) {
+                    let mut flat = Vec::new();
+                    for c in &cases[from..] {
+                        flat.extend(c.body.iter().cloned());
+                    }
+                    if !flat.is_empty() {
+                        self.stack.push(GFrame {
+                            list: Rc::new(flat),
+                            pc: 0,
+                            env: Env::local(env.clone()),
+                            labels: Vec::new(),
+                            kind: FKind::Switch,
+                        });
+                    }
+                }
                 Ok(GFlow::Adv)
             }
             Stmt::Break(l) => Ok(GFlow::Brk(l.clone())),

@@ -7,6 +7,21 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **JS-C145 — `yield` dans `switch`
+  en générateur** (`explorer-jscore`)
+  — `Stmt::Switch` n'avait pas de
+  frame `GExec` : un `yield` dans
+  un `case` retombait sur l'éval
+  eager → `SyntaxError: yield
+  outside a generator` (github
+  `4u-*.js` ×3 — hydratation React
+  morte, recherche vide). Nouveau
+  `FKind::Switch` : discriminant +
+  tests évalués (purs post-lowering),
+  corps aplati du case atteint à la
+  fin (fallthrough), `break` nu
+  s'arrête au frame.
+
 - **JS-C144 — index d'insertion du
   journal en espace sérialisable**
   (`explorer-jscore`) — `Insert.index`
