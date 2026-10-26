@@ -432,6 +432,80 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   clippy 1.99 de `value.rs`
   (renommages, `map_or`, cast
   borné `unit_to_u8`).
+- **Vol 2026-10-26 — correctifs de vol,
+  vague 3 (FIX-3, vols 18/19)**
+  - **Console perdue après navigation**
+    (x.com) : `event_capacity` 64 → 512 —
+    le burst d'événements d'une navigation
+    faisait lagguer le recorder, les
+    `PipelineError` étaient perdus.
+  - **Iframes muettes en échec** (tumblr
+    CMP) : fetch échoué, statut non-2xx et
+    refus X-Frame-Options/frame-ancestors
+    sont désormais `warn`-logués (le cadre
+    blanc spec-correct n'est plus silencieux).
+  - **`/frame` cohérence** : re-vérifiée —
+    défaut viewport dans tous les cas,
+    `?full=1` document ; le 200 à corps
+    vide reste impossible (204 + Retry-After).
+
+- **Vol 2026-10-26 — correctifs de vol,
+  vague 2 (FIX-3, vols 13/16/17)**
+  — trois constats supplémentaires :
+  - **Images lazy-load jamais peintes**
+    (lemonde ~195 img, bbc home 0 %) :
+    `collect_images` retombe sur les
+    attributs lazy `data-src`/`data-lazy-src`/
+    `data-original`/`data-url`/`data-srcset`
+    quand `src`/`srcset` manque — le bootstrap
+    JS mort n'est plus requis.
+  - **`GET /frame` = viewport par défaut**
+    (sémantique instable : doc entier quand non
+    clampé, viewport quand clampé — 53 Mo de PNG)
+    — `?full=1` sert le document, `?x&y&w&h`
+    inchangé, `Session::scale()` exposé.
+  - **Scroll différé rapporte la projection** :
+    pendant une apply détachée, `Scroll` rend
+    `Scrolled{scroll_y}` projeté (position +
+    deltas en file), plus `Ignored` abandonné.
+
+- **Vol 2026-10-26 — correctifs de vol
+  (FIX-3, `explorer-core` + `explorer-api`)**
+  — quatre constats du rapport de vol :
+  - **Onglet parasite sur ressource `.js`**
+    (rakuten `gw.js`, soundcloud) : les
+    types script servis en top-level
+    (`text/javascript`, `application/
+    javascript`, ecmascript…) ne sont plus
+    « doc_like » dans `download_meta` →
+    offre de téléchargement ; un contexte
+    `window.open`/`target=_blank` resté
+    vierge après navigation inaugurale est
+    refermé (`close_stillborn_popup`, pendings
+    ré-attribués à l'opener).
+  - **`/frame` 200 à corps vide** (transitoire
+    post-navigation) : corps vide → `204` +
+    `Retry-After: 1` ; un encodage vide n'est
+    plus caché dans `entry.png`.
+  - **Mémoire bfcache** (~130 Mio de rasters
+    + ~17 Mio de PNG pour 4 pages gelées) :
+    frame et PNG libérés au gel — DOM + arbre
+    survivent, la restauration repeint via
+    `needs_paint`.
+  - **Meta refresh en `<noscript>`** (google
+    SERP) : honorée quand la page est un
+    fallback pur (body = `noscript`/`script`
+    seulement) — le rawtext est re-parsé
+    scripting off ; une page riche avec un
+    noscript annexe garde la spec.
+  - **Crash daemon silencieux** (vol 4) :
+    audit des chemins DELETE+navigate —
+    gardes epoch/`Option` exhaustifs, aucun
+    `unwrap` en code livré ; la sentinelle
+    `EXPLORER_DEATH_LOG` existe déjà — mort
+    sans crochet = kill externe/OOM (le
+    correctif bfcache ci-dessus réduit le
+    réservoir principal suspecté).
 
 - **JS-C133 — `initCustomEvent`
   (DOM L2, strate polymer/shady)**

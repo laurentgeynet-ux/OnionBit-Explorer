@@ -9338,7 +9338,15 @@ async fn mem_report_attributes_live_and_bfcache() {
     let _ = s.frame_png(id);
     let r2 = s.mem_report(id).expect("rapport après nav /b");
     assert_eq!(r2.bfcache_pages, 1, "/a gelée");
-    assert!(r2.bfcache_dom_nodes > 0 && r2.bfcache_frame_bytes > 0);
+    // Vol github (~130 Mio de rasters gelés) : la frame et
+    // le PNG ne sont plus retenus au gel — la restauration
+    // repeint depuis DOM + arbre (`needs_paint`).
+    assert!(r2.bfcache_dom_nodes > 0);
+    assert_eq!(
+        r2.bfcache_frame_bytes, 0,
+        "la raster des pages gelées n'est plus retenue"
+    );
+    assert_eq!(r2.bfcache_png_bytes, 0);
     assert!(
         r2.bfcache_js_heap_bytes > 0,
         "le moteur JS gelé est un réservoir mesuré"

@@ -19,7 +19,11 @@ impl Session {
         self.ensure_painted(tab);
         let entry = self.tabs.get_mut(&tab)?;
         if entry.png.is_none() {
-            entry.png = entry.frame.as_ref()?.encode_png();
+            // Un encodage vide n'est jamais un PNG serviable
+            // — rejeté plutôt que caché : la prochaine
+            // demande retentera l'encodage (cohérence avec
+            // le `204` + `Retry-After` de l'API).
+            entry.png = entry.frame.as_ref()?.encode_png().filter(|p| !p.is_empty());
         }
         entry.png.clone()
     }

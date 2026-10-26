@@ -82,7 +82,19 @@ impl Session {
             .get(&tab)
             .is_some_and(|e| e.paint_detached || !e.deferred_inputs.is_empty())
         {
+            let is_scroll = matches!(ev, InputEvent::Scroll { .. });
             self.defer_input(tab, ev);
+            // Un scroll différé est **accepté**, pas ignoré
+            // (vol 13 franceinfo : `ignored` ×2 pendant une
+            // longue apply — le client abandonnait alors que
+            // le delta était enfilé) : le `scroll_y` rendu
+            // est la projection de la file, rejouée telle
+            // quelle à la livraison.
+            if is_scroll {
+                return Ok(InputOutcome::Scrolled {
+                    scroll_y: self.projected_scroll(tab),
+                });
+            }
             return Ok(InputOutcome::Ignored);
         }
         match ev {
@@ -826,6 +838,25 @@ impl Session {
             entry.focused = Some(new_path);
         }
         Some(n)
+    }
+
+    /// `scroll_y` projeté des deltas en file — la position
+    /// qu'atteindra le drain des entrées différées (clampée
+    /// sur le `doc_h` courant, comme `scroll_by`).
+    fn projected_scroll(&self, tab: TabId) -> f32 {
+        let Some(e) = self.tabs.get(&tab) else {
+            return 0.0;
+        };
+        let queued: f32 = e
+            .deferred_inputs
+            .iter()
+            .map(|ev| match ev {
+                InputEvent::Scroll { dy } => *dy,
+                _ => 0.0,
+            })
+            .sum();
+        let max = (e.doc_h - self.viewport.1).max(0.0);
+        (e.scroll_y + queued).clamp(0.0, max)
     }
 
     /// Enfile une entrée pendant la peinture détachée — la

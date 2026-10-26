@@ -325,9 +325,14 @@ pub async fn drain_navs_shared(sess: &tokio::sync::Mutex<Session>, tab: TabId) -
                     let mut s = sess.lock().await;
                     s.named_or_new_tab(tab, &name)
                 };
-                Box::pin(navigate_shared(sess, t2, *req, true))
+                let ok = Box::pin(navigate_shared(sess, t2, *req, true))
                     .await
-                    .is_ok()
+                    .is_ok();
+                {
+                    let mut s = sess.lock().await;
+                    s.close_stillborn_popup(tab, t2);
+                }
+                ok
             }
             Some(DrainAct::Go(0)) => {
                 // `history.go(0)` = rechargement de l'entrée

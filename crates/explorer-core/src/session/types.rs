@@ -787,7 +787,11 @@ pub enum CoreError {
 #[derive(Debug, Clone, Copy)]
 pub struct SessionConfig {
     /// Capacité du bus d'événements (au-delà, les abonnés
-    /// lents sautent des événements — le pull PNG corrige).
+    /// lents sautent des événements — le pull PNG corrige
+    /// les frames, mais les `PipelineError` enregistrés
+    /// dans le ring console sont **perdus** pour de bon :
+    /// dimensionné pour les bursts d'une navigation
+    /// complète — vol 18 x.com).
     pub event_capacity: usize,
     /// Viewport CSS initial `(w, h)`.
     pub viewport: (f32, f32),
@@ -908,7 +912,7 @@ pub struct SessionConfig {
 impl Default for SessionConfig {
     fn default() -> Self {
         Self {
-            event_capacity: 64,
+            event_capacity: 512,
             viewport: (1024.0, 768.0),
             scale: 1.0,
             js_ops: 5_000_000,

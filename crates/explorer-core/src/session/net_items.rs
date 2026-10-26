@@ -237,11 +237,31 @@ pub(crate) fn download_meta(headers: &[(String, String)]) -> Option<DownloadMeta
         .split(';')
         .next()
         .is_some_and(|d| d.trim().eq_ignore_ascii_case("attachment"));
-    let doc_like = mime.is_empty()
-        || mime == "text/html"
-        || mime == "application/xhtml+xml"
-        || mime.starts_with("text/")
-        || mime.ends_with("+xml");
+    // Une ressource **script** servie en top-level n'est
+    // pas un document — `text/javascript` serait sinon
+    // ratatché à `text/*` et peint en brut (vol rakuten :
+    // `window.open` vers un `.js` ouvrait un onglet
+    // affichant la source). Politique navigateurs : ces
+    // types basculent en téléchargement.
+    let script_like = matches!(
+        mime.as_str(),
+        "application/javascript"
+            | "application/x-javascript"
+            | "application/ecmascript"
+            | "application/x-ecmascript"
+            | "text/javascript"
+            | "text/ecmascript"
+            | "text/jscript"
+            | "text/livescript"
+            | "text/x-javascript"
+            | "text/x-ecmascript"
+    );
+    let doc_like = !script_like
+        && (mime.is_empty()
+            || mime == "text/html"
+            || mime == "application/xhtml+xml"
+            || mime.starts_with("text/")
+            || mime.ends_with("+xml"));
     if attached || !doc_like {
         return Some(DownloadMeta {
             filename_hint,
@@ -531,6 +551,10 @@ impl NavJob {
         let refresh_base = base_url.clone().unwrap_or_else(|| resolved.clone());
         let refresh = header_refresh
             .or_else(|| meta_refresh(&dom))
+            // Repli `noscript` (vol google) : page de
+            // fallback pure — scripting levé au parse, la
+            // méta du repli est honorée.
+            .or_else(|| noscript_meta_refresh(&dom))
             .and_then(|(secs, raw)| {
                 let target = match raw {
                     Some(r) => Url::resolve(&refresh_base, &r).ok()?,
@@ -956,6 +980,13 @@ impl SubJob {
                     let ord = self.sheet_urls.get(i).map_or(0, |(.., lord)| *lord);
                     self.link_events.push((ord, false));
                 }
+                // Un `<iframe src>` en échec laissait un
+                // cadre blanc sans trace (vol 18).
+                if let SubTag::Frame(i) = tag {
+                    if let Some((u, ..)) = self.frame_urls.get(i) {
+                        tracing::warn!(url = %u, "iframe : fetch en échec — cadre vide");
+                    }
+                }
                 return;
             };
             if !(200..300).contains(&resp.status) {
@@ -972,6 +1003,11 @@ impl SubJob {
                 if let SubTag::Css(i) = tag {
                     let ord = self.sheet_urls.get(i).map_or(0, |(.., lord)| *lord);
                     self.link_events.push((ord, false));
+                }
+                if let SubTag::Frame(i) = tag {
+                    if let Some((u, ..)) = self.frame_urls.get(i) {
+                        tracing::warn!(url = %u, status = resp.status, "iframe : statut non-2xx — cadre vide");
+                    }
                 }
                 return;
             }
@@ -2011,6 +2047,15 @@ pub(crate) fn collect_frame(
             sandbox,
             frame_scripting(parent_scripting, sandbox),
         ));
+    } else {
+        // Embarquement refusé (XFO / CSP frame-ancestors) —
+        // cadre blanc spec-correct mais jamais silencieux
+        // (vol 18 tumblr CMP).
+        tracing::warn!(
+            url = %u,
+            status = resp.status,
+            "iframe : embarquement refusé (X-Frame-Options / frame-ancestors)"
+        );
     }
 }
 

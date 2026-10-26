@@ -1481,7 +1481,12 @@ impl Session {
                     // neuf — la requête le peuple d'une
                     // entrée.
                     let t2 = self.named_or_new_tab(tab, &name);
-                    self.navigate_request(t2, *req, true).await.is_ok()
+                    let ok = self.navigate_request(t2, *req, true).await.is_ok();
+                    // Réponse = téléchargement (ex. `.js`) :
+                    // le contexte neuf n'a rien committé —
+                    // refermé plutôt que laissé parasite.
+                    self.close_stillborn_popup(tab, t2);
+                    ok
                 }
                 DrainAct::Go(0) => {
                     // `history.go(0)` = rechargement de

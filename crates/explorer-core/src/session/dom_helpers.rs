@@ -357,6 +357,64 @@ pub(crate) fn meta_refresh(dom: &Dom) -> Option<(f64, Option<String>)> {
     None
 }
 
+/// `<meta http-equiv=refresh>` enfermée dans un
+/// `<noscript>` (vol google SERP, CAP-155) : scripting
+/// levé au parse, le contenu de `noscript` est rawtext —
+/// la méta n'existe jamais comme élément et
+/// [`meta_refresh`] la manque. Spec : ignorée tant que le
+/// scripting tourne. Repli produit : quand la page est un
+/// **fallback pur** — tous les enfants éléments du `body`
+/// sont `noscript`/`script`, aucun texte non blanc hors
+/// repli — le rawtext est re-parsé (scripting off) et sa
+/// méta refresh honorée : le document n'a rien d'autre à
+/// offrir, c'est le sens du repli. Une page riche avec un
+/// `noscript` annexe garde la spec : `None`.
+pub(crate) fn noscript_meta_refresh(dom: &Dom) -> Option<(f64, Option<String>)> {
+    // Le `<body>` — aucun repli « page » sans lui.
+    let mut body = None;
+    let mut queue = vec![dom.document()];
+    while let Some(n) = queue.pop() {
+        if dom.tag_name(n).is_ok_and(|t| t == "body") {
+            body = Some(n);
+            break;
+        }
+        if let Ok(ch) = dom.children(n) {
+            queue.extend(ch.iter().rev());
+        }
+    }
+    let body = body?;
+    let children = dom.children(body).ok()?;
+    let mut noscripts = Vec::new();
+    for c in children {
+        match dom.data(c).ok()? {
+            explorer_dom::NodeData::Element(_) => match dom.tag_name(c).ok()? {
+                "script" => {}
+                "noscript" => noscripts.push(c),
+                _ => return None, // contenu réel — spec.
+            },
+            // Texte non blanc hors repli → contenu réel.
+            explorer_dom::NodeData::Text(t) if !t.trim().is_empty() => return None,
+            _ => {}
+        }
+    }
+    // Re-parse du rawtext (scripting off) : la méta du
+    // repli devient un vrai élément — `meta_refresh`
+    // applique sa grammaire habituelle (première valide).
+    for n in noscripts {
+        let text = dom.text_content(n).ok()?;
+        if text.trim().is_empty() {
+            continue;
+        }
+        let mut tb = explorer_html::TreeBuilder::new();
+        tb.push(&text);
+        tb.finish();
+        if let Some(r) = meta_refresh(&tb.into_dom()) {
+            return Some(r);
+        }
+    }
+    None
+}
+
 /// Grammaire `content` d'une méta refresh **et de
 /// l'en-tête `Refresh:`** (spec HTML « pragmas »,
 /// tolérante — CAP-143/144) : `N[;][url=]U` — nombre en
@@ -746,12 +804,34 @@ pub(crate) fn collect_images(dom: &Dom, img_w: f32, dpr: f32) -> Vec<(NodeId, St
                     let eff_w = resolve_sizes(dom.attribute(n, "sizes").ok().flatten(), img_w);
                     pick_srcset(&ss, eff_w, dpr)
                 });
-                let src = picked.or_else(|| {
-                    dom.attribute(n, "src")
-                        .ok()
-                        .flatten()
-                        .filter(|s| !s.is_empty())
-                });
+                let src = picked
+                    .or_else(|| {
+                        dom.attribute(n, "src")
+                            .ok()
+                            .flatten()
+                            .filter(|s| !s.is_empty())
+                    })
+                    // Lazy-load (vol 13 lemonde/bbc : ~200
+                    // `<img>` à `data-src`, ~0 % peints) : le
+                    // deferred `loading="lazy"` est déjà
+                    // fetché d'emblée — reste la variante
+                    // « src déplacé en data-* » dont le JS
+                    // bootstrap est souvent mort. Repli
+                    // produit : les attributs lazy usuels
+                    // servent de source, dans cet ordre —
+                    // mieux que jamais peint.
+                    .or_else(|| {
+                        const LAZY_SRCS: &[&str] = &[
+                            "data-src",
+                            "data-lazy-src",
+                            "data-original",
+                            "data-url",
+                            "data-srcset",
+                        ];
+                        LAZY_SRCS.iter().find_map(|a| {
+                            dom.attribute(n, a).ok().flatten().filter(|s| !s.is_empty())
+                        })
+                    });
                 if let Some(src) = src {
                     out.push((n, src));
                 }

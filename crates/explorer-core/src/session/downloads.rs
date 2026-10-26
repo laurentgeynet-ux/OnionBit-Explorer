@@ -23,8 +23,9 @@ use std::path::{Path, PathBuf};
 use explorer_net::url::Url;
 
 use super::{
-    collect_meta_csp, document_base, extract_title, meta_referrer_policy, meta_refresh, CoreError,
-    CoreEvent, DownloadInfo, NavDone, NavTail, Session, StreamDecoder, TabId,
+    collect_meta_csp, document_base, extract_title, meta_referrer_policy, meta_refresh,
+    noscript_meta_refresh, CoreError, CoreEvent, DownloadInfo, NavDone, NavTail, Session,
+    StreamDecoder, TabId,
 };
 
 /// Téléchargement bufferisé en attente de décision —
@@ -189,15 +190,19 @@ impl Session {
         // (CAP-143) : le rejeu « document » programme sa
         // navigation comme une réception réseau.
         let refresh_base = base_url.clone().unwrap_or_else(|| dl.url.clone());
-        let refresh = meta_refresh(&dom).and_then(|(secs, raw)| {
-            let target = match raw {
-                Some(r) => Url::resolve(&refresh_base, &r).ok()?,
-                None => dl.url.clone(),
-            };
-            std::time::Duration::try_from_secs_f64(secs.max(0.0))
-                .ok()
-                .map(|d| (d, target))
-        });
+        let refresh = meta_refresh(&dom)
+            // Même repli `noscript` que `NavJob::run`
+            // (vol google — fallback pur).
+            .or_else(|| noscript_meta_refresh(&dom))
+            .and_then(|(secs, raw)| {
+                let target = match raw {
+                    Some(r) => Url::resolve(&refresh_base, &r).ok()?,
+                    None => dl.url.clone(),
+                };
+                std::time::Duration::try_from_secs_f64(secs.max(0.0))
+                    .ok()
+                    .map(|d| (d, target))
+            });
         let done = NavDone {
             // Rejeu « document » d'un corps bufferisé : les
             // en-têtes de la réponse d'origine ne sont pas
