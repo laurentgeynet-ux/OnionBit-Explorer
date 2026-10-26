@@ -3253,7 +3253,6 @@ fn ensure_doc_part(dom: &DomRef, tag: &str) {
         return;
     };
     match tag {
-        "html" => {}
         "head" => {
             let h = d.create_element("head");
             let first = d.child_nodes(html_el).first().copied();

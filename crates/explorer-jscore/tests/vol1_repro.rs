@@ -236,7 +236,7 @@ fn vol10_window_inherits_event_target_prototype() {
 /// Les nœuds `Comment` n'ont pas de reflet moteur —
 /// `serialize_keyed` les sautait en `<#comment>` littéral
 /// (re-parsé en élément fantôme peint en texte sur des dizaines
-/// de sites : MDN, JSFiddle, reddit, archive) ET décalait le zip
+/// de sites : MDN, `JSFiddle`, reddit, archive) ET décalait le zip
 /// `ids` ↔ `engine_preorder` d'un cran par commentaire.
 #[test]
 fn vol14_comments_not_serialized() {
