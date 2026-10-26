@@ -7,6 +7,25 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **JS-C150 — `super.m()` dans un
+  constructeur dérivé** (`explorer-jscore`)
+  — le `[[HomeObject]]` du ctor était
+  le ctor lui-même (proto = parent
+  **ctor**) : `super.add()` résolvait
+  sur le parent ctor, jamais sur
+  `Parent.prototype` → `undefined` →
+  DSFR `core.module.js` mourait,
+  `window.dsfr` jamais posé, les 13
+  `…internals.register` aval jetaient
+  `cannot read 'internals' of
+  Undefined` (legifrance, vol16).
+  HomeObject du ctor = `ctor.prototype`
+  (spec `ClassDefinitionEvaluation`) ;
+  `super()` reste sur `SUPER_BIND`.
+  Le module verbatim évalue et pose
+  `window.dsfr` (fixture
+  `vol16_dsfr_core.js`).
+
 - **JS-C149 — `el.src`/`el.href`
   résolus contre `document.baseURI`**
   (`explorer-jscore`) — les props IDL

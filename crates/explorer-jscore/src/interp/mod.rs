@@ -3673,7 +3673,14 @@ impl Engine {
         // `new` path uses `ctor.prototype`; re-point it at ours.
         self.set_own(ctor_id, "prototype", Value::Obj(proto), false);
         self.set_own(proto, "constructor", ctor, false);
-        Self::env_put(&cenv, HOME_BIND, ctor, false);
+        // `[[HomeObject]]` du ctor = l'objet **prototype** de la
+        // classe (spec `ClassDefinitionEvaluation`), pas le ctor
+        // : `super.m()` dans un constructeur dérivé résout sur
+        // `Parent.prototype` (`super.add(...)` de DSFR — sinon
+        // `undefined` → module `core.module.js` mort → les 13
+        // `…internals…` en cascade). `super()` reste sur
+        // `SUPER_BIND` (le parent **ctor**, distinct).
+        Self::env_put(&cenv, HOME_BIND, Value::Obj(proto), false);
         // Nom propre de la classe — liaison immuable dans le
         // scope de classe (spec `ClassDefinitionEvaluation`),
         // visible des méthodes/statiques/champs : `class e {

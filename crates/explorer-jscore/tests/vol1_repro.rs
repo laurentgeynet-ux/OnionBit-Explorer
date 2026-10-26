@@ -477,3 +477,56 @@ fn vol6_idb_interfaces_declared() {
     // `new IDBIndex()` → TypeError honnête (pas de ctor WebIDL).
     assert!(e.eval("new IDBIndex()").is_err());
 }
+
+/// `super.m()` dans un **constructeur** dérivé — le HomeObject du
+/// ctor était le ctor lui-même (proto = parent ctor) au lieu de
+/// `ctor.prototype` (proto = `Parent.prototype`) : `super.add()`
+/// rendait `undefined` → DSFR `core.module.js` mourait →
+/// `window.dsfr` jamais posé → `cannot read 'internals' of
+/// Undefined` ×13 dans les modules aval (legifrance, vol16).
+#[test]
+fn vol16_super_member_in_derived_ctor() {
+    let mut e = Engine::new();
+    for (src, want) in [
+        (
+            "class A{add(x){return x+1}}; class B extends A{constructor(){super(); this.r=super.add(1)}}; new B().r",
+            "2",
+        ),
+        (
+            "class A{get g(){return 7}}; class B extends A{constructor(){super(); this.v=super.g}}; new B().v",
+            "7",
+        ),
+        // `super()` reste sur le parent ctor ; `B instanceof A`.
+        (
+            "var b=new (class extends (class A{constructor(){this.b=1}}) {constructor(){super(); this.v=this.b}})(); b instanceof Object && b.v",
+            "1",
+        ),
+    ] {
+        match e.eval(src) {
+            Ok(v) => assert_eq!(e.describe(v), want, "{src}"),
+            Err(err) => panic!("{src} -> {err}"),
+        }
+    }
+}
+
+/// Le module DSFR verbatim (54 Ko) — évaluait en échec sur
+/// `super.add` en ctor ; désormais `window.dsfr` est posé (le
+/// namespace proxy) et les `internals.register` aval passent.
+#[test]
+fn vol16_dsfr_core_module_evals() {
+    use explorer_jscore::Dom;
+    let mut e = Engine::new();
+    e.install_dom(&Rc::new(RefCell::new(Dom::from_html(
+        "<html><head></head><body><div></div></body></html>",
+    ))));
+    let src = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/data/vol16_dsfr_core.js"
+    ))
+    .unwrap_or_else(|e| panic!("fixture: {e}"));
+    e.eval(&src).unwrap_or_else(|err| panic!("dsfr eval: {err}"));
+    match e.eval("typeof window.dsfr") {
+        Ok(v) => assert_eq!(e.describe(v), "function"),
+        Err(err) => panic!("dsfr -> {err}"),
+    }
+}
