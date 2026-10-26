@@ -5553,6 +5553,27 @@ fn cap181_clipboard_hook() {
     assert_eq!(evf(&mut e, "w+'|'+r"), "resolved/reject|clip!");
 }
 
+// ===== JS-C157 — props `navigator` triviales (CMP/feature-detects)
+
+#[test]
+fn navigator_spec_props() {
+    let mut e = engine_with("<p>x</p>");
+    // Valeurs honnêtes low-fingerprint — `undefined` cassait
+    // la lecture (`navigator.onLine`, `hardwareConcurrency`).
+    assert_eq!(
+        evf(
+            &mut e,
+            "[typeof navigator.onLine, navigator.onLine,\
+             typeof navigator.cookieEnabled, navigator.cookieEnabled,\
+             navigator.doNotTrack === null,\
+             navigator.globalPrivacyControl, navigator.webdriver,\
+             navigator.maxTouchPoints, navigator.hardwareConcurrency,\
+             navigator.hardwareConcurrency >= 1].join('|')"
+        ),
+        "boolean|true|boolean|true|true|false|false|0|4|true"
+    );
+}
+
 // ===== CAP-182 — arc édition : `new Range`/`createRange`,
 // `createTreeWalker`, `execCommand` (sonde `_census_calls`).
 

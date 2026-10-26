@@ -1671,6 +1671,17 @@ impl Engine {
         let tag = self.str_val("Clipboard");
         self.set_own(clip, crate::interp::SYM_TO_STRING_TAG, tag, false);
         self.set_own(nav, "clipboard", Value::Obj(clip), true);
+        // Props triviales honnêtes (JS-C157) — lues par les
+        // CMP/feature-detects : `undefined` cassait la lecture
+        // (`navigator.onLine`, `hardwareConcurrency`…).
+        // Valeurs low-fingerprint, pas des stubs promettant.
+        self.set_own(nav, "onLine", Value::Bool(true), true);
+        self.set_own(nav, "cookieEnabled", Value::Bool(true), true);
+        self.set_own(nav, "webdriver", Value::Bool(false), true);
+        self.set_own(nav, "globalPrivacyControl", Value::Bool(false), true);
+        self.set_own(nav, "doNotTrack", Value::Null, true);
+        self.set_own(nav, "maxTouchPoints", Value::Num(0.0), true);
+        self.set_own(nav, "hardwareConcurrency", Value::Num(4.0), true);
         self.set_own(g, "navigator", Value::Obj(nav), false);
 
         // `Worker` borné (JS-C29) — le constructeur est présent

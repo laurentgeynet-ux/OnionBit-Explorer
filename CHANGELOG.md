@@ -7,6 +7,20 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **JS-C157 — props `navigator`
+  triviales** (`explorer-jscore`) —
+  `onLine`/`cookieEnabled`/`webdriver`/
+  `globalPrivacyControl`/`doNotTrack`/
+  `maxTouchPoints`/`hardwareConcurrency`
+  manquaient du navigateur low-
+  fingerprint (CMP/feature-detects
+  lisaient `undefined`). Valeurs
+  honnêtes : `onLine`/`cookieEnabled`
+  true, `webdriver`/`GPC` false,
+  `doNotTrack` null, `maxTouchPoints`
+  0, `hardwareConcurrency` 4. Test
+  `navigator_spec_props`.
+
 - **JS-C156 — `JsError::Timeout`
   typé** (`explorer-js`) — le
   disjoncteur « moteur figé »
