@@ -2244,6 +2244,11 @@ impl Engine {
             self.set_own(fid, "timeout", m, true);
             let m = self.native_fn("any", signal_static_any);
             self.set_own(fid, "any", m, true);
+            // Statique spec `AbortSignal.throwIfAborted(sig)`
+            // (youtube kevlar vol22 : lu sur le ctor →
+            // `cannot read 'throwIfAborted' of Undefined`).
+            let m = self.native_fn("throwIfAborted", signal_static_throw_if_aborted);
+            self.set_own(fid, "throwIfAborted", m, true);
             self.set_own(fid, "prototype", Value::Obj(sig_proto), false);
         }
         self.set_own(g, "AbortSignal", as_f, false);
@@ -9477,6 +9482,19 @@ fn signal_throw_if_aborted(e: &mut Engine, this: Value, _a: &[Value]) -> JsResul
             let r = e.get_prop(sid, "reason").unwrap_or(Value::Undefined);
             return Err(crate::heap::Thrown(r));
         }
+    }
+    Ok(Value::Undefined)
+}
+
+/// `AbortSignal.throwIfAborted(sig)` — statique spec :
+/// même sémantique que la méthode, le signal en argument.
+fn signal_static_throw_if_aborted(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let Value::Obj(sid) = arg(args, 0) else {
+        return Err(e.type_error("AbortSignal.throwIfAborted: not an AbortSignal"));
+    };
+    if matches!(e.get_prop(sid, "aborted"), Some(Value::Bool(true))) {
+        let r = e.get_prop(sid, "reason").unwrap_or(Value::Undefined);
+        return Err(crate::heap::Thrown(r));
     }
     Ok(Value::Undefined)
 }

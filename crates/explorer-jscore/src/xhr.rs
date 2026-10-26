@@ -2104,6 +2104,11 @@ impl Engine {
             // `AbortSignal.abort(reason?)` — signal déjà aborted.
             let f = self.native_fn("abort", abort_signal_static_abort);
             self.set_own(cid, "abort", f, false);
+            // `AbortSignal.throwIfAborted(sig)` — statique
+            // (youtube kevlar : `AbortSignal.throwIfAborted`
+            // lu sur le ctor → `of Undefined`).
+            let f = self.native_fn("throwIfAborted", abort_signal_static_throw_if);
+            self.set_own(cid, "throwIfAborted", f, false);
         }
         self.set_own(g, "AbortSignal", asig, false);
     }
@@ -2178,6 +2183,17 @@ impl Host for AbortSignalHost {
         }
     }
 
+    // Méthodes visibles en lecture — `signal.throwIfAborted`
+    // rendait `undefined` (invoke-only) alors que les sites
+    // s'en servent comme propriété (`AbortSignal.prototype.
+    // throwIfAborted` youtube kevlar vol22).
+    fn has_method(&self, name: &str) -> bool {
+        matches!(
+            name,
+            "addEventListener" | "removeEventListener" | "throwIfAborted"
+        )
+    }
+
     fn trace(&self, out: &mut Vec<crate::value::ObjId>) {
         for (f, _) in &self.data.borrow().listeners {
             if let Value::Obj(id) = f {
@@ -2208,6 +2224,26 @@ fn abort_signal_static_abort(e: &mut Engine, _t: Value, args: &[Value]) -> JsRes
             listeners: Vec::new(),
         })),
     })))
+}
+
+/// `AbortSignal.throwIfAborted(sig)` — statique spec : jette
+/// `sig.reason` si aborted (`AbortError` par défaut), rien sinon.
+fn abort_signal_static_throw_if(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let Some(data) = abort_data(e, arg(args, 0)) else {
+        return Err(e.type_error("AbortSignal.throwIfAborted: not an AbortSignal"));
+    };
+    let r = {
+        let d = data.borrow();
+        d.aborted.then_some(d.reason)
+    };
+    if let Some(r) = r {
+        return Err(crate::heap::Thrown(if matches!(r, Value::Undefined) {
+            e.str_val("AbortError")
+        } else {
+            r
+        }));
+    }
+    Ok(Value::Undefined)
 }
 
 /// `AbortSignal` neuf non-aborté — signal par défaut de

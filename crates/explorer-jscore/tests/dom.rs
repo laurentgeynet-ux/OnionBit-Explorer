@@ -6128,6 +6128,20 @@ fn cap194_abort_signal_surface() {
         ),
         "true/A/undefined"
     );
+    // JS-C153 — statique `AbortSignal.throwIfAborted(sig)`
+    // (youtube kevlar vol22 : lue sur le ctor →
+    // `of Undefined`). Jette `reason` si aborted, passe sinon.
+    assert_eq!(
+        evf(
+            &mut e,
+            "typeof AbortSignal.throwIfAborted+'/'+\
+            (function(){try{AbortSignal.throwIfAborted(AbortSignal.abort('X'));return 'n'}\
+             catch(v){return v.name||v}})()+'/'+\
+            (function(){var c=new AbortController();\
+             AbortSignal.throwIfAborted(c.signal);return 'ok'})()"
+        ),
+        "function/X/ok"
+    );
 }
 
 // ===== CAP-195 — `document.adoptedStyleSheets` settable `[]`

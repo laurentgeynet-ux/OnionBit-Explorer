@@ -7,6 +7,32 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **JS-C153 — `AbortSignal.
+  throwIfAborted`** (`explorer-jscore`)
+  — la méthode existait mais n'était
+  exposée ni en statique sur le ctor
+  ni en propriété lisible du signal
+  (invoke-only → `signal.throwIfAborted`
+  rendait `undefined`, youtube kevlar
+  `cannot read 'throwIfAborted' of
+  Undefined`). Statique `AbortSignal.
+  throwIfAborted(sig)` ajoutée sur les
+  deux installs (DOM + bare `fetch`),
+  `has_method` du host complété.
+  Test `cap194_abort_signal_surface`.
+
+- **JS-C152 — `atob` chaîne-octet**
+  (`explorer-jscore`) — le décodage
+  validait sa sortie en UTF-8 et
+  jetait `invalid byte sequence` sur
+  tout octet non-ASCII (bsky bundle
+  Sentry/expo) alors que la spec rend
+  une chaîne Latin-1 (1 code point /
+  octet). Corrigé + whitespace restreint
+  à l'ASCII (NBSP rejeté) + octet non
+  ASCII ne glisse plus via `c as u8`
+  tronqué. Tests dans `globals`.
+
 - **JS-C151 — `canvas.toDataURL`/
   `toBlob`** (`explorer-jscore`) —
   les feature-detects anti-bot
