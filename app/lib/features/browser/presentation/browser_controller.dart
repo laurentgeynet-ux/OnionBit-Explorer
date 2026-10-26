@@ -17,6 +17,7 @@ import '../../../core/config/app_config.dart';
 import '../../../core/di/providers.dart';
 import '../../../core/platform/env.dart';
 import '../../../core/settings/app_settings.dart';
+import '../../../core/l10n/app_localizations.dart';
 import '../data/browser_repository.dart';
 import '../data/media_player.dart';
 import '../domain/bookmark.dart';
@@ -351,6 +352,16 @@ final findProvider = NotifierProvider<FindController, FindBarState>(
 /// Contrôleur navigateur — pilote les actions REST et applique
 /// les événements SSE au `BrowserState` (ADR-0003/0004).
 class BrowserController extends Notifier<BrowserState> {
+  /// Libellés UI sans BuildContext — lookup statique sur la
+  /// locale réglée (`uiLanguage`, `fr` par défaut).
+  AppLocalizations get _l10n => lookupAppLocalizations(
+    Locale(
+      ref.watch(settingsProvider).uiLanguage.isEmpty
+          ? 'fr'
+          : ref.watch(settingsProvider).uiLanguage,
+    ),
+  );
+
   StreamSubscription<ServerEvent>? _sub;
 
   /// Timer de sondage des animations en mode FFI — remplace
@@ -757,7 +768,7 @@ class BrowserController extends Notifier<BrowserState> {
         );
       case 'download_done':
         state = state.copyWith(
-          lastError: () => 'Téléchargement enregistré : ${ev.data['path']}',
+          lastError: () => _l10n.downloadSaved('${ev.data['path']}'),
         );
       case 'tab_closed':
         final tabs = state.tabs.where((t) => t.id != tabId).toList();
@@ -788,7 +799,7 @@ class BrowserController extends Notifier<BrowserState> {
     try {
       await _repo.acceptDownload(offer.tab, offer.id);
     } on Exception catch (e) {
-      state = state.copyWith(lastError: () => 'Téléchargement : $e');
+      state = state.copyWith(lastError: () => _l10n.downloadError('$e'));
     }
   }
 
@@ -799,7 +810,7 @@ class BrowserController extends Notifier<BrowserState> {
     try {
       await _repo.declineDownload(offer.tab, offer.id);
     } on Exception catch (e) {
-      state = state.copyWith(lastError: () => 'Téléchargement : $e');
+      state = state.copyWith(lastError: () => _l10n.downloadError('$e'));
     }
   }
 

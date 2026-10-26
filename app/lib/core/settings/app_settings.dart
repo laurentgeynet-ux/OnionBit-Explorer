@@ -26,6 +26,7 @@ class AppSettings {
     this.engine = 'auto',
     this.profileDir = '',
     this.language = '',
+    this.uiLanguage = '',
   });
 
   final String theme;
@@ -33,16 +34,24 @@ class AppSettings {
   final String profileDir;
   final String language;
 
+  /// Langue de l'interface (`'fr'` | `'en'`) — choisie **une
+  /// fois** au premier lancement (dialogue one-shot), jamais
+  /// réaffichée ensuite : ce n'est pas un réglage d'usage
+  /// quotidien. `''` = pas encore choisi.
+  final String uiLanguage;
+
   AppSettings copyWith({
     String? theme,
     String? engine,
     String? profileDir,
     String? language,
+    String? uiLanguage,
   }) => AppSettings(
     theme: theme ?? this.theme,
     engine: engine ?? this.engine,
     profileDir: profileDir ?? this.profileDir,
     language: language ?? this.language,
+    uiLanguage: uiLanguage ?? this.uiLanguage,
   );
 
   Map<String, dynamic> toJson() => {
@@ -50,6 +59,7 @@ class AppSettings {
     'engine': engine,
     'profileDir': profileDir,
     'language': language,
+    'uiLanguage': uiLanguage,
   };
 
   /// Tolérant : entrée absente/invalide → valeur par défaut
@@ -68,6 +78,11 @@ class AppSettings {
           ? json['profileDir'] as String
           : '',
       language: json['language'] is String ? json['language'] as String : '',
+      uiLanguage: pick(
+        'uiLanguage',
+        '',
+        const {'', 'fr', 'en', 'es', 'pt', 'zh', 'hi', 'id', 'de', 'ru', 'ja'},
+      ),
     );
   }
 }
@@ -166,6 +181,11 @@ class SettingsController extends Notifier<AppSettings> {
   /// en direct par l'écoute `browserProvider` (étape 118).
   Future<void> setLanguage(String lang) =>
       _save(state.copyWith(language: lang.trim()));
+
+  /// Langue UI (`'fr'` | `'en'`, `''` = défaut `fr`) —
+  /// réglée dans le dialogue Réglages.
+  Future<void> setUiLanguage(String lang) =>
+      _save(state.copyWith(uiLanguage: lang.trim()));
 }
 
 /// Provider des réglages — `main.dart` en dérive `themeMode`,

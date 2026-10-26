@@ -7,6 +7,26 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **i18n — 10 locales, rien en dur**
+  (`app/`) — sources ARB
+  `lib/l10n/app_{fr,en,es,pt,zh,hi,
+  id,de,ru,ja}.arb` (template fr =
+  défaut), gen-l10n vers
+  `lib/core/l10n` — toutes les
+  chaînes UI passent par
+  `AppLocalizations` (browser_page,
+  settings_dialog, library_panels,
+  controller via `lookupApp-
+  Localizations`). Réglage
+  `uiLanguage` persisté ; sélecteur
+  « Interface » dans Réglages ;
+  `MaterialApp.locale` explicite —
+  aucune détection OS (app
+  portable). Les messages internes
+  de la couche data (exceptions
+  API) restent des diagnostics
+  techniques, non localisés.
+
 ### Added
 
 - **R-112 — `list-style-type:
@@ -30,6 +50,41 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   `square` → idem. Pas un hint :
   l'ordre UA < auteur couvre déjà.
   Test `ol_type_attribut_mappe_list_style`.
+
+- **JS-C114 — parseur miroir :
+  `</head>` implicite + `PAIRED_CLOSE`
+  cross-tag, gBCR débloqué**
+  (`explorer-jscore::dom`) — vol
+  w3.org sous `EXPLORER_GEOM_TRACE` :
+  300/300 probes `getBoundingClientRect`
+  à 0×0, chemins `[html,head,body,…]`
+  → le HTML servi n'a **pas de
+  `</head>` littéral** (légal HTML5) ;
+  `parse_fragment_into` nichait `body`
+  sous `head` → tout `element_path`
+  décalé d'un maillon, 3012 rects
+  présents mais inatteignables. Fix
+  borné, mode « in head » : start-tag
+  hors `HEAD_TAGS` ferme `head`, et
+  « after head » synthétise `<body>`
+  pour le contenu flux (parité de
+  chemins avec le tree-builder réel).
+  Puis `PAIRED_CLOSE` remplace la
+  règle same-tag : `dd`/`dt`/`li`
+  mutuels, `tr`→`tr` en traversant
+  `td`/`th`, sections
+  `thead`/`tbody`/`tfoot` mutuelles —
+  dépile **jusqu'à la cible** (un
+  premier-closable cassait `tr>td`→
+  `tr`). Mesures vol : 0 % → 55 % →
+  79 % → **87,6 % non-zéro** ; résidu
+  honnête (`.dfn-panel` `display:none`,
+  `script`, spans inline anonymes) ;
+  `doc_h` corrigé 37752→49373 (la
+  boîte body réelle résout enfin).
+  Tests `implicit_head_close_keeps_
+  body_sibling`, `implicit_close_
+  dt_dd_pairs`.
 
 - **JS-C107 — `push`/`pop` array-like
   O(1), wedge gov.uk tuée**

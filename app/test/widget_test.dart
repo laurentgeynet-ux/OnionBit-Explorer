@@ -9,6 +9,7 @@ import 'package:explorer_app/core/di/providers.dart';
 import 'package:explorer_app/features/browser/presentation/browser_page.dart';
 import 'package:explorer_app/main.dart';
 import 'package:flutter/material.dart';
+import 'package:explorer_app/core/l10n/app_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -91,6 +92,10 @@ void main() {
       UncontrolledProviderScope(
         container: c,
         child: MaterialApp(
+          localizationsDelegates:
+              AppLocalizations.localizationsDelegates,
+          supportedLocales: AppLocalizations.supportedLocales,
+          locale: const Locale('fr'),
           home: BrowserPage(tokens: DesignTokens.fallback),
         ),
       ),
@@ -124,6 +129,10 @@ void main() {
       UncontrolledProviderScope(
         container: c,
         child: MaterialApp(
+          localizationsDelegates:
+              AppLocalizations.localizationsDelegates,
+          supportedLocales: AppLocalizations.supportedLocales,
+          locale: const Locale('fr'),
           home: BrowserPage(tokens: DesignTokens.fallback),
         ),
       ),

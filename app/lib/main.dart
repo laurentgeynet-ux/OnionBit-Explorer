@@ -4,6 +4,8 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import 'core/l10n/app_localizations.dart';
 import 'package:fvp/fvp.dart' as fvp;
 
 import 'core/design/app_theme.dart';
@@ -57,6 +59,16 @@ class ExplorerApp extends ConsumerWidget {
 
     return MaterialApp(
       debugShowCheckedModeBanner: false,
+      // i18n fr/en — locale choisie une fois au premier
+      // lancement (`uiLanguage`, pas un réglage quotidien) ;
+      // `''` → français (défaut produit).
+      localizationsDelegates: AppLocalizations.localizationsDelegates,
+      supportedLocales: AppLocalizations.supportedLocales,
+      locale: Locale(
+        ref.watch(settingsProvider).uiLanguage.isEmpty
+            ? 'fr'
+            : ref.watch(settingsProvider).uiLanguage,
+      ),
       theme: buildTheme(lightTokens),
       darkTheme: buildTheme(darkTokens),
       themeMode: themeMode,

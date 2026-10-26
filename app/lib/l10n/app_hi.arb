@@ -1,0 +1,90 @@
+{
+  "@@locale": "hi",
+  "newTab": "नया टैब",
+  "close": "बंद करें",
+  "home": "मुखपृष्ठ",
+  "history": "इतिहास",
+  "bookmarks": "बुकमार्क",
+  "addBookmark": "बुकमार्क जोड़ें",
+  "removeBookmark": "बुकमार्क हटाएँ",
+  "downloads": "डाउनलोड",
+  "findInPage": "पृष्ठ में खोजें",
+  "findInPageShortcut": "पृष्ठ में खोजें (Ctrl+F)",
+  "omniboxHint": "खोजें या URL दर्ज करें",
+  "daemonOffline": "डेमन उपलब्ध नहीं — explorer-daemon चलाएँ",
+  "retry": "पुनः प्रयास",
+  "settings": "सेटिंग्स",
+  "zoomIn": "ज़ूम इन",
+  "zoomOut": "ज़ूम आउट",
+  "actualSize": "वास्तविक आकार",
+  "moreActions": "और क्रियाएँ",
+  "delegatedTabTooltip": "डेलीगेटेड टैब — मूल WebView2 रेंडरिंग",
+  "noTabs": "कोई टैब नहीं",
+  "pageLoadError": "पृष्ठ लोड नहीं हो सका",
+  "navigateToUrl": "किसी URL पर जाएँ",
+  "language": "भाषा",
+  "profile": "प्रोफ़ाइल",
+  "profileDirLabel": "प्रोफ़ाइल निर्देशिका (डिफ़ॉल्ट: OS)",
+  "save": "सहेजें",
+  "cancel": "रद्द करें",
+  "resend": "पुनः भेजें",
+  "resendFormTitle": "फ़ॉर्म पुनः भेजें?",
+  "emptyBookmarks": "कोई बुकमार्क नहीं — बार का सितारा एक जोड़ता है",
+  "emptyHistory": "कोई पृष्ठ नहीं देखा गया",
+  "activeFieldTooltip": "सक्रिय फ़ील्ड — टाइपिंग इंजन को भेजी जाती है",
+  "acceptLanguageLabel": "Accept-Language (खाली: OS लोकेल)",
+  "engineRest": "REST (डेमन)",
+  "engineFfi": "FFI (इन-प्रोसेस इंजन)",
+  "engineLabel": "इंजन",
+  "openAsText": "टेक्स्ट के रूप में खोलें",
+  "theme": "थीम",
+  "downloadDialogTitle": "डाउनलोड",
+  "downloadNotDisplayable": "यह फ़ाइल ब्राउज़र में प्रदर्शित नहीं हो सकती।",
+  "resendFormBody": "यह पृष्ठ {method} से प्राप्त हुआ था।\n{url}\n\nरीलोड करने से डेटा फिर भेजा जाएगा — कोई दुष्प्रभाव\n(ऑर्डर, भुगतान) दोहराया जा सकता है।",
+  "@resendFormBody": {
+    "placeholders": {
+      "method": {},
+      "url": {}
+    }
+  },
+  "themeSystem": "सिस्टम",
+  "themeDark": "डार्क",
+  "themeLight": "लाइट",
+  "engineAuto": "ऑटो (FFI उपलब्ध हो तो, वरना REST)",
+  "profileNote": "EXPLORER_PROFILE में निर्यात — इंजन (FFI) या डेमन (REST) के अगले स्टार्ट पर प्रभावी। Enter से पुष्टि करें।",
+  "historyUnavailable": "इतिहास अनुपलब्ध — {error}",
+  "@historyUnavailable": {
+    "placeholders": {
+      "error": {}
+    }
+  },
+  "bookmarksUnavailable": "बुकमार्क अनुपलब्ध — {error}",
+  "@bookmarksUnavailable": {
+    "placeholders": {
+      "error": {}
+    }
+  },
+  "closeEsc": "बंद करें (Esc)",
+  "previous": "पिछला",
+  "next": "अगला",
+  "reload": "पुनः लोड करें",
+  "zoomPercent": "ज़ूम {pct} %",
+  "@zoomPercent": {
+    "placeholders": {
+      "pct": {}
+    }
+  },
+  "interfaceLanguage": "इंटरफ़ेस",
+  "downloadSaved": "डाउनलोड सहेजा गया: {path}",
+  "@downloadSaved": {
+    "placeholders": {
+      "path": {}
+    }
+  },
+  "downloadError": "डाउनलोड: {error}",
+  "@downloadError": {
+    "placeholders": {
+      "error": {}
+    }
+  }
+}

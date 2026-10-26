@@ -1,0 +1,90 @@
+{
+  "@@locale": "ru",
+  "newTab": "Новая вкладка",
+  "close": "Закрыть",
+  "home": "Главная",
+  "history": "История",
+  "bookmarks": "Закладки",
+  "addBookmark": "Добавить закладку",
+  "removeBookmark": "Удалить закладку",
+  "downloads": "Загрузки",
+  "findInPage": "Найти на странице",
+  "findInPageShortcut": "Найти на странице (Ctrl+F)",
+  "omniboxHint": "Поиск или ввод URL",
+  "daemonOffline": "Демон недоступен — запустите explorer-daemon",
+  "retry": "Повторить",
+  "settings": "Настройки",
+  "zoomIn": "Увеличить",
+  "zoomOut": "Уменьшить",
+  "actualSize": "Фактический размер",
+  "moreActions": "Ещё действия",
+  "delegatedTabTooltip": "Делегированная вкладка — нативный рендеринг WebView2",
+  "noTabs": "Нет вкладок",
+  "pageLoadError": "Не удалось загрузить страницу",
+  "navigateToUrl": "Перейдите по URL",
+  "language": "Язык",
+  "profile": "Профиль",
+  "profileDirLabel": "Каталог профиля (по умолчанию: ОС)",
+  "save": "Сохранить",
+  "cancel": "Отмена",
+  "resend": "Отправить снова",
+  "resendFormTitle": "Отправить форму повторно?",
+  "emptyBookmarks": "Нет закладок — звезда в панели добавляет их",
+  "emptyHistory": "Нет посещённых страниц",
+  "activeFieldTooltip": "Активное поле — ввод отправляется движку",
+  "acceptLanguageLabel": "Accept-Language (пусто: локаль ОС)",
+  "engineRest": "REST (демон)",
+  "engineFfi": "FFI (движок в процессе)",
+  "engineLabel": "Движок",
+  "openAsText": "Открыть как текст",
+  "theme": "Тема",
+  "downloadDialogTitle": "Загрузка",
+  "downloadNotDisplayable": "Этот файл нельзя отобразить в браузере.",
+  "resendFormBody": "Страница получена методом {method}.\n{url}\n\nПерезагрузка отправит данные снова — побочный эффект\n(заказ, платёж) может повториться.",
+  "@resendFormBody": {
+    "placeholders": {
+      "method": {},
+      "url": {}
+    }
+  },
+  "themeSystem": "Системная",
+  "themeDark": "Тёмная",
+  "themeLight": "Светлая",
+  "engineAuto": "Авто (FFI при наличии, иначе REST)",
+  "profileNote": "Экспортируется в EXPLORER_PROFILE — действует при следующем запуске движка (FFI) или демона (REST). Подтвердите Enter.",
+  "historyUnavailable": "История недоступна — {error}",
+  "@historyUnavailable": {
+    "placeholders": {
+      "error": {}
+    }
+  },
+  "bookmarksUnavailable": "Закладки недоступны — {error}",
+  "@bookmarksUnavailable": {
+    "placeholders": {
+      "error": {}
+    }
+  },
+  "closeEsc": "Закрыть (Esc)",
+  "previous": "Назад",
+  "next": "Вперёд",
+  "reload": "Перезагрузить",
+  "zoomPercent": "Масштаб {pct} %",
+  "@zoomPercent": {
+    "placeholders": {
+      "pct": {}
+    }
+  },
+  "interfaceLanguage": "Интерфейс",
+  "downloadSaved": "Загрузка сохранена: {path}",
+  "@downloadSaved": {
+    "placeholders": {
+      "path": {}
+    }
+  },
+  "downloadError": "Загрузка: {error}",
+  "@downloadError": {
+    "placeholders": {
+      "error": {}
+    }
+  }
+}

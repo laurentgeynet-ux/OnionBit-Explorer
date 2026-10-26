@@ -1,0 +1,90 @@
+{
+  "@@locale": "id",
+  "newTab": "Tab baru",
+  "close": "Tutup",
+  "home": "Beranda",
+  "history": "Riwayat",
+  "bookmarks": "Bookmark",
+  "addBookmark": "Tambah bookmark",
+  "removeBookmark": "Hapus bookmark",
+  "downloads": "Unduhan",
+  "findInPage": "Cari di halaman",
+  "findInPageShortcut": "Cari di halaman (Ctrl+F)",
+  "omniboxHint": "Cari atau masukkan URL",
+  "daemonOffline": "Daemon tidak terjangkau — jalankan explorer-daemon",
+  "retry": "Coba lagi",
+  "settings": "Pengaturan",
+  "zoomIn": "Perbesar",
+  "zoomOut": "Perkecil",
+  "actualSize": "Ukuran sebenarnya",
+  "moreActions": "Tindakan lainnya",
+  "delegatedTabTooltip": "Tab didelegasikan — rendering WebView2 native",
+  "noTabs": "Tidak ada tab",
+  "pageLoadError": "Halaman gagal dimuat",
+  "navigateToUrl": "Navigasi ke URL",
+  "language": "Bahasa",
+  "profile": "Profil",
+  "profileDirLabel": "Direktori profil (default: OS)",
+  "save": "Simpan",
+  "cancel": "Batal",
+  "resend": "Kirim ulang",
+  "resendFormTitle": "Kirim ulang formulir?",
+  "emptyBookmarks": "Belum ada bookmark — bintang di bar menambahkannya",
+  "emptyHistory": "Belum ada halaman dikunjungi",
+  "activeFieldTooltip": "Kolom aktif — ketikan dikirim ke engine",
+  "acceptLanguageLabel": "Accept-Language (kosong: locale OS)",
+  "engineRest": "REST (daemon)",
+  "engineFfi": "FFI (engine in-process)",
+  "engineLabel": "Engine",
+  "openAsText": "Buka sebagai teks",
+  "theme": "Tema",
+  "downloadDialogTitle": "Unduhan",
+  "downloadNotDisplayable": "File ini tidak dapat ditampilkan di browser.",
+  "resendFormBody": "Halaman diperoleh melalui {method}.\n{url}\n\nMemuat ulang akan mengirim ulang data — efek samping\n(pesanan, pembayaran) dapat terulang.",
+  "@resendFormBody": {
+    "placeholders": {
+      "method": {},
+      "url": {}
+    }
+  },
+  "themeSystem": "Sistem",
+  "themeDark": "Gelap",
+  "themeLight": "Terang",
+  "engineAuto": "Otomatis (FFI jika ada, REST jika tidak)",
+  "profileNote": "Diekspor ke EXPLORER_PROFILE — berlaku saat engine (FFI) atau daemon (REST) berikutnya dimulai. Konfirmasi dengan Enter.",
+  "historyUnavailable": "Riwayat tidak tersedia — {error}",
+  "@historyUnavailable": {
+    "placeholders": {
+      "error": {}
+    }
+  },
+  "bookmarksUnavailable": "Bookmark tidak tersedia — {error}",
+  "@bookmarksUnavailable": {
+    "placeholders": {
+      "error": {}
+    }
+  },
+  "closeEsc": "Tutup (Esc)",
+  "previous": "Sebelumnya",
+  "next": "Berikutnya",
+  "reload": "Muat ulang",
+  "zoomPercent": "Zoom {pct} %",
+  "@zoomPercent": {
+    "placeholders": {
+      "pct": {}
+    }
+  },
+  "interfaceLanguage": "Antarmuka",
+  "downloadSaved": "Unduhan disimpan: {path}",
+  "@downloadSaved": {
+    "placeholders": {
+      "path": {}
+    }
+  },
+  "downloadError": "Unduhan: {error}",
+  "@downloadError": {
+    "placeholders": {
+      "error": {}
+    }
+  }
+}

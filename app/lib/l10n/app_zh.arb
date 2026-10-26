@@ -1,0 +1,90 @@
+{
+  "@@locale": "zh",
+  "newTab": "新标签页",
+  "close": "关闭",
+  "home": "主页",
+  "history": "历史记录",
+  "bookmarks": "书签",
+  "addBookmark": "添加书签",
+  "removeBookmark": "移除书签",
+  "downloads": "下载",
+  "findInPage": "在页面中查找",
+  "findInPageShortcut": "在页面中查找 (Ctrl+F)",
+  "omniboxHint": "搜索或输入网址",
+  "daemonOffline": "无法连接守护进程 — 请启动 explorer-daemon",
+  "retry": "重试",
+  "settings": "设置",
+  "zoomIn": "放大",
+  "zoomOut": "缩小",
+  "actualSize": "实际大小",
+  "moreActions": "更多操作",
+  "delegatedTabTooltip": "委托标签页 — 原生 WebView2 渲染",
+  "noTabs": "没有标签页",
+  "pageLoadError": "页面加载失败",
+  "navigateToUrl": "导航到一个网址",
+  "language": "语言",
+  "profile": "配置文件",
+  "profileDirLabel": "配置文件目录（默认：操作系统）",
+  "save": "保存",
+  "cancel": "取消",
+  "resend": "重新发送",
+  "resendFormTitle": "重新发送表单？",
+  "resendFormBody": "该页面是通过 {method} 获取的。\n{url}\n\n重新加载将重新发送数据 — 副作用\n（订单、付款）可能会重复。",
+  "@resendFormBody": {
+    "placeholders": {
+      "method": {},
+      "url": {}
+    }
+  },
+  "themeSystem": "系统",
+  "themeDark": "深色",
+  "themeLight": "浅色",
+  "engineAuto": "自动（有 FFI 则用 FFI，否则用 REST）",
+  "profileNote": "导出到 EXPLORER_PROFILE — 在引擎（FFI）或守护进程（REST）下次启动时生效。按回车确认。",
+  "historyUnavailable": "历史记录不可用 — {error}",
+  "@historyUnavailable": {
+    "placeholders": {
+      "error": {}
+    }
+  },
+  "bookmarksUnavailable": "书签不可用 — {error}",
+  "@bookmarksUnavailable": {
+    "placeholders": {
+      "error": {}
+    }
+  },
+  "closeEsc": "关闭 (Esc)",
+  "emptyBookmarks": "没有书签 — 点击栏上的星标添加",
+  "emptyHistory": "尚未访问任何页面",
+  "activeFieldTooltip": "活动字段 — 输入内容发送给引擎",
+  "acceptLanguageLabel": "Accept-Language（留空：使用系统区域）",
+  "engineRest": "REST（守护进程）",
+  "engineFfi": "FFI（进程内引擎）",
+  "engineLabel": "引擎",
+  "openAsText": "以文本打开",
+  "theme": "主题",
+  "downloadDialogTitle": "下载",
+  "downloadNotDisplayable": "此文件无法在浏览器中显示。",
+  "previous": "后退",
+  "next": "前进",
+  "reload": "重新加载",
+  "zoomPercent": "缩放 {pct} %",
+  "@zoomPercent": {
+    "placeholders": {
+      "pct": {}
+    }
+  },
+  "interfaceLanguage": "界面",
+  "downloadSaved": "下载已保存：{path}",
+  "@downloadSaved": {
+    "placeholders": {
+      "path": {}
+    }
+  },
+  "downloadError": "下载：{error}",
+  "@downloadError": {
+    "placeholders": {
+      "error": {}
+    }
+  }
+}

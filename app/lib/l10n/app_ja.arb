@@ -1,0 +1,90 @@
+{
+  "@@locale": "ja",
+  "newTab": "新しいタブ",
+  "close": "閉じる",
+  "home": "ホーム",
+  "history": "履歴",
+  "bookmarks": "ブックマーク",
+  "addBookmark": "ブックマークに追加",
+  "removeBookmark": "ブックマークを削除",
+  "downloads": "ダウンロード",
+  "findInPage": "ページ内を検索",
+  "findInPageShortcut": "ページ内を検索 (Ctrl+F)",
+  "omniboxHint": "検索またはURLを入力",
+  "daemonOffline": "デーモンに接続できません — explorer-daemon を起動してください",
+  "retry": "再試行",
+  "settings": "設定",
+  "zoomIn": "拡大",
+  "zoomOut": "縮小",
+  "actualSize": "実際のサイズ",
+  "moreActions": "その他の操作",
+  "delegatedTabTooltip": "委譲タブ — ネイティブ WebView2 レンダリング",
+  "noTabs": "タブがありません",
+  "pageLoadError": "ページを読み込めませんでした",
+  "navigateToUrl": "URLに移動",
+  "language": "言語",
+  "profile": "プロファイル",
+  "profileDirLabel": "プロファイルディレクトリ（デフォルト：OS）",
+  "save": "保存",
+  "cancel": "キャンセル",
+  "resend": "再送信",
+  "resendFormTitle": "フォームを再送信しますか？",
+  "resendFormBody": "このページは {method} で取得されました。\n{url}\n\n再読み込みするとデータが再送信されます — 副作用\n（注文、支払い）が繰り返される可能性があります。",
+  "@resendFormBody": {
+    "placeholders": {
+      "method": {},
+      "url": {}
+    }
+  },
+  "themeSystem": "システム",
+  "themeDark": "ダーク",
+  "themeLight": "ライト",
+  "engineAuto": "自動（FFI があれば FFI、なければ REST）",
+  "profileNote": "EXPLORER_PROFILE にエクスポート — エンジン（FFI）またはデーモン（REST）の次回起動時に有効。Enter で確定。",
+  "historyUnavailable": "履歴を利用できません — {error}",
+  "@historyUnavailable": {
+    "placeholders": {
+      "error": {}
+    }
+  },
+  "bookmarksUnavailable": "ブックマークを利用できません — {error}",
+  "@bookmarksUnavailable": {
+    "placeholders": {
+      "error": {}
+    }
+  },
+  "closeEsc": "閉じる (Esc)",
+  "emptyBookmarks": "ブックマークがありません — バーのスターで追加できます",
+  "emptyHistory": "訪問したページがありません",
+  "activeFieldTooltip": "アクティブなフィールド — 入力はエンジンに送信されます",
+  "acceptLanguageLabel": "Accept-Language（空：OS ロケール）",
+  "engineRest": "REST（デーモン）",
+  "engineFfi": "FFI（インプロセスエンジン）",
+  "engineLabel": "エンジン",
+  "openAsText": "テキストとして開く",
+  "theme": "テーマ",
+  "downloadDialogTitle": "ダウンロード",
+  "downloadNotDisplayable": "このファイルはブラウザで表示できません。",
+  "previous": "戻る",
+  "next": "進む",
+  "reload": "再読み込み",
+  "zoomPercent": "ズーム {pct} %",
+  "@zoomPercent": {
+    "placeholders": {
+      "pct": {}
+    }
+  },
+  "interfaceLanguage": "インターフェース",
+  "downloadSaved": "ダウンロードを保存しました：{path}",
+  "@downloadSaved": {
+    "placeholders": {
+      "path": {}
+    }
+  },
+  "downloadError": "ダウンロード：{error}",
+  "@downloadError": {
+    "placeholders": {
+      "error": {}
+    }
+  }
+}

@@ -12,6 +12,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:webview_win_floating/webview_win_floating.dart';
 
 import '../../../core/design/design_tokens.dart';
+import '../../../core/l10n/app_localizations.dart';
 import '../../../core/settings/app_settings.dart';
 import '../../settings/presentation/settings_dialog.dart';
 import '../domain/browser_tab.dart';
@@ -93,10 +94,10 @@ class _BrowserPageState extends ConsumerState<BrowserPage> {
       showDialog<void>(
         context: context,
         builder: (ctx) => AlertDialog(
-          title: const Text('Téléchargement'),
+          title: Text(AppLocalizations.of(ctx).downloadDialogTitle),
           content: Text(
             '${offer.filename}$size\n${offer.url}\n\n'
-            'Ce fichier n’est pas affichable dans le navigateur.',
+            '${AppLocalizations.of(ctx).downloadNotDisplayable}',
           ),
           actions: [
             TextButton(
@@ -104,14 +105,14 @@ class _BrowserPageState extends ConsumerState<BrowserPage> {
                 Navigator.of(ctx).pop();
                 ctrl.declineDownload(offer);
               },
-              child: const Text('Ouvrir comme texte'),
+              child: Text(AppLocalizations.of(ctx).openAsText),
             ),
             FilledButton(
               onPressed: () {
                 Navigator.of(ctx).pop();
                 ctrl.acceptDownload(offer);
               },
-              child: const Text('Enregistrer'),
+              child: Text(AppLocalizations.of(ctx).save),
             ),
           ],
         ),
@@ -125,12 +126,9 @@ class _BrowserPageState extends ConsumerState<BrowserPage> {
       showDialog<void>(
         context: context,
         builder: (ctx) => AlertDialog(
-          title: const Text('Renvoyer le formulaire ?'),
+          title: Text(AppLocalizations.of(ctx).resendFormTitle),
           content: Text(
-            'La page a été obtenue par ${pending.method}.\n'
-            '${pending.url}\n\n'
-            'Recharger renverra les données — un effet de bord\n'
-            '(commande, paiement) peut être répété.',
+            AppLocalizations.of(ctx).resendFormBody(pending.method, pending.url),
           ),
           actions: [
             TextButton(
@@ -138,14 +136,14 @@ class _BrowserPageState extends ConsumerState<BrowserPage> {
                 Navigator.of(ctx).pop();
                 ctrl.dismissResubmit();
               },
-              child: const Text('Annuler'),
+              child: Text(AppLocalizations.of(ctx).cancel),
             ),
             FilledButton(
               onPressed: () {
                 Navigator.of(ctx).pop();
                 ctrl.reloadConfirmed();
               },
-              child: const Text('Renvoyer'),
+              child: Text(AppLocalizations.of(ctx).resend),
             ),
           ],
         ),
@@ -269,7 +267,7 @@ class _BrowserPageState extends ConsumerState<BrowserPage> {
                 child: active == null
                     ? Center(
                         child: Text(
-                          'Aucun onglet',
+                          AppLocalizations.of(context).noTabs,
                           style: TextStyle(color: muted),
                         ),
                       )
@@ -409,7 +407,7 @@ class _ErrorPage extends StatelessWidget {
             ),
             SizedBox(height: tokens.dim('spacing', 'md', fallback: 16)),
             Text(
-              'Impossible de charger la page',
+              AppLocalizations.of(context).pageLoadError,
               style: TextStyle(
                 color: tokens.color('onSurface', 'base'),
                 fontSize: tokens.dim2('typography', 'size', 'lg', fallback: 18),
@@ -435,7 +433,7 @@ class _ErrorPage extends StatelessWidget {
             TextButton.icon(
               onPressed: onRetry,
               icon: const Icon(Icons.refresh),
-              label: const Text('Réessayer'),
+              label: Text(AppLocalizations.of(context).retry),
             ),
           ],
         ),
@@ -468,7 +466,7 @@ class _StatusBar extends StatelessWidget {
   Widget build(BuildContext context) {
     final label =
         state.hoverUrl ??
-        (state.fieldFocused ? 'Champ actif — saisie envoyée au moteur' : '');
+        (state.fieldFocused ? AppLocalizations.of(context).activeFieldTooltip : '');
     final style = TextStyle(
       color: tokens.color('onSurface', 'muted'),
       fontSize: tokens.dim2('typography', 'size', 'sm', fallback: 12),
@@ -525,10 +523,8 @@ class _OfflineBanner extends StatelessWidget {
         ),
         child: Row(
           children: [
-            const Expanded(
-              child: Text('Daemon injoignable — lancez explorer-daemon'),
-            ),
-            TextButton(onPressed: onRetry, child: const Text('Réessayer')),
+            Expanded(child: Text(AppLocalizations.of(context).daemonOffline)),
+            TextButton(onPressed: onRetry, child: Text(AppLocalizations.of(context).retry)),
           ],
         ),
       ),
@@ -568,7 +564,7 @@ class _TabStrip extends StatelessWidget {
           IconButton(
             icon: const Icon(Icons.add),
             onPressed: state.daemonOnline ? ctrl.newTab : null,
-            tooltip: 'Nouvel onglet',
+            tooltip: AppLocalizations.of(context).newTab,
           ),
         ],
       ),
@@ -634,7 +630,7 @@ class _TabChip extends StatelessWidget {
                 // l'onglet vit dans une WebView2 native — la
                 // bascule est signalée dans le chrome.
                 Tooltip(
-                  message: 'Onglet délégué — rendu WebView2 natif',
+                  message: AppLocalizations.of(context).delegatedTabTooltip,
                   child: Icon(
                     Icons.live_tv,
                     size: tokens.dim('metrics', 'iconSm', fallback: 14),
@@ -649,7 +645,7 @@ class _TabChip extends StatelessWidget {
               SizedBox(width: tokens.dim('spacing', 'xs', fallback: 4)),
               Expanded(
                 child: Text(
-                  label.isEmpty ? 'Nouvel onglet' : label,
+                  label.isEmpty ? AppLocalizations.of(context).newTab : label,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -737,7 +733,7 @@ class _FindBarState extends ConsumerState<_FindBar> {
                   fontSize: 13,
                 ),
                 decoration: InputDecoration(
-                  hintText: 'Rechercher dans la page',
+                  hintText: AppLocalizations.of(context).findInPage,
                   hintStyle: TextStyle(color: muted, fontSize: 13),
                   isDense: true,
                   border: InputBorder.none,
@@ -766,14 +762,14 @@ class _FindBarState extends ConsumerState<_FindBar> {
               icon: const Icon(Icons.keyboard_arrow_up, size: 20),
               color: canStep ? t.color('onSurface', 'base') : muted,
               onPressed: canStep ? () => ctrl.step(-1) : null,
-              tooltip: 'Précédent',
+              tooltip: AppLocalizations.of(context).previous,
               visualDensity: VisualDensity.compact,
             ),
             IconButton(
               icon: const Icon(Icons.keyboard_arrow_down, size: 20),
               color: canStep ? t.color('onSurface', 'base') : muted,
               onPressed: canStep ? () => ctrl.step(1) : null,
-              tooltip: 'Suivant',
+              tooltip: AppLocalizations.of(context).next,
               visualDensity: VisualDensity.compact,
             ),
             const Spacer(),
@@ -781,7 +777,7 @@ class _FindBarState extends ConsumerState<_FindBar> {
               icon: const Icon(Icons.close, size: 18),
               color: muted,
               onPressed: () => ctrl.close(),
-              tooltip: 'Fermer (Échap)',
+              tooltip: AppLocalizations.of(context).closeEsc,
               visualDensity: VisualDensity.compact,
             ),
           ],
@@ -847,17 +843,17 @@ class _NavBar extends ConsumerWidget {
       children: [
         IconButton(
           icon: const Icon(Icons.arrow_back),
-          tooltip: 'Précédent',
+          tooltip: AppLocalizations.of(context).previous,
           onPressed: enabled && tab?.canBack == true ? ctrl.goBack : null,
         ),
         IconButton(
           icon: const Icon(Icons.arrow_forward),
-          tooltip: 'Suivant',
+          tooltip: AppLocalizations.of(context).next,
           onPressed: enabled && tab?.canForward == true ? ctrl.goForward : null,
         ),
         IconButton(
           icon: const Icon(Icons.refresh),
-          tooltip: 'Recharger',
+          tooltip: AppLocalizations.of(context).reload,
           onPressed: enabled ? ctrl.reload : null,
         ),
         // « Home » = page vide `about:blank` dans l'onglet
@@ -865,7 +861,7 @@ class _NavBar extends ConsumerWidget {
         // convention est la page blanche du nouvel onglet.
         IconButton(
           icon: const Icon(Icons.home_outlined),
-          tooltip: 'Accueil',
+          tooltip: AppLocalizations.of(context).home,
           onPressed: enabled ? () => ctrl.navigate('about:blank') : null,
         ),
         Expanded(
@@ -873,9 +869,9 @@ class _NavBar extends ConsumerWidget {
             controller: omnibox,
             focusNode: omniboxFocus,
             enabled: enabled,
-            decoration: const InputDecoration(
-              hintText: 'Rechercher ou saisir une URL',
-              prefixIcon: Icon(Icons.search),
+            decoration: InputDecoration(
+              hintText: AppLocalizations.of(context).omniboxHint,
+              prefixIcon: const Icon(Icons.search),
               isDense: true,
             ),
             textInputAction: TextInputAction.go,
@@ -884,7 +880,7 @@ class _NavBar extends ConsumerWidget {
         ),
         IconButton(
           icon: Icon(marked ? Icons.star : Icons.star_border),
-          tooltip: marked ? 'Retirer le signet' : 'Ajouter le signet',
+          tooltip: marked ? AppLocalizations.of(context).removeBookmark : AppLocalizations.of(context).addBookmark,
           onPressed: markable
               ? () => ref
                     .read(bookmarksProvider.notifier)
@@ -893,28 +889,28 @@ class _NavBar extends ConsumerWidget {
         ),
         IconButton(
           icon: const Icon(Icons.history),
-          tooltip: 'Historique',
+          tooltip: AppLocalizations.of(context).history,
           onPressed: enabled
               ? () => LibraryPanel.showHistory(context, tokens)
               : null,
         ),
         IconButton(
           icon: const Icon(Icons.bookmarks_outlined),
-          tooltip: 'Signets',
+          tooltip: AppLocalizations.of(context).bookmarks,
           onPressed: enabled
               ? () => LibraryPanel.showBookmarks(context, tokens)
               : null,
         ),
         IconButton(
           icon: const Icon(Icons.find_in_page_outlined),
-          tooltip: 'Rechercher dans la page (Ctrl+F)',
+          tooltip: AppLocalizations.of(context).findInPageShortcut,
           onPressed: enabled
               ? () => ref.read(findProvider.notifier).open()
               : null,
         ),
         PopupMenuButton<String>(
           icon: const Icon(Icons.zoom_in),
-          tooltip: 'Zoom ${(zoom * 100).round()} %',
+          tooltip: AppLocalizations.of(context).zoomPercent((zoom * 100).round()),
           enabled: enabled,
           onSelected: (v) {
             final z = ref.read(zoomProvider.notifier);
@@ -928,14 +924,14 @@ class _NavBar extends ConsumerWidget {
             }
           },
           itemBuilder: (_) => [
-            const PopupMenuItem(value: 'in', child: Text('Zoom avant (+)')),
-            const PopupMenuItem(value: 'out', child: Text('Zoom arrière (−)')),
-            const PopupMenuItem(value: 'reset', child: Text('Taille réelle')),
+            PopupMenuItem(value: 'in', child: Text('AppLocalizations.of(context).zoomIn (+)')),
+            PopupMenuItem(value: 'out', child: Text('AppLocalizations.of(context).zoomOut (−)')),
+            PopupMenuItem(value: 'reset', child: Text(AppLocalizations.of(context).actualSize)),
           ],
         ),
         IconButton(
           icon: const Icon(Icons.settings_outlined),
-          tooltip: 'Réglages',
+          tooltip: AppLocalizations.of(context).settings,
           onPressed: () => SettingsDialog.show(context, tokens),
         ),
       ],
@@ -972,17 +968,17 @@ class _NavBar extends ConsumerWidget {
       children: [
         IconButton(
           icon: const Icon(Icons.arrow_back),
-          tooltip: 'Précédent',
+          tooltip: AppLocalizations.of(context).previous,
           onPressed: enabled && tab?.canBack == true ? ctrl.goBack : null,
         ),
         IconButton(
           icon: const Icon(Icons.arrow_forward),
-          tooltip: 'Suivant',
+          tooltip: AppLocalizations.of(context).next,
           onPressed: enabled && tab?.canForward == true ? ctrl.goForward : null,
         ),
         IconButton(
           icon: const Icon(Icons.refresh),
-          tooltip: 'Recharger',
+          tooltip: AppLocalizations.of(context).reload,
           onPressed: enabled ? ctrl.reload : null,
         ),
         Expanded(
@@ -990,9 +986,9 @@ class _NavBar extends ConsumerWidget {
             controller: omnibox,
             focusNode: omniboxFocus,
             enabled: enabled,
-            decoration: const InputDecoration(
-              hintText: 'Rechercher ou saisir une URL',
-              prefixIcon: Icon(Icons.search),
+            decoration: InputDecoration(
+              hintText: AppLocalizations.of(context).omniboxHint,
+              prefixIcon: const Icon(Icons.search),
               isDense: true,
             ),
             textInputAction: TextInputAction.go,
@@ -1001,7 +997,7 @@ class _NavBar extends ConsumerWidget {
         ),
         PopupMenuButton<String>(
           icon: const Icon(Icons.more_vert),
-          tooltip: 'Plus d’actions',
+          tooltip: AppLocalizations.of(context).moreActions,
           onSelected: (v) {
             switch (v) {
               case 'mark':
@@ -1029,37 +1025,37 @@ class _NavBar extends ConsumerWidget {
             }
           },
           itemBuilder: (_) => [
-            item('home', Icons.home_outlined, 'Accueil', enabled: enabled),
+            item('home', Icons.home_outlined, AppLocalizations.of(context).home, enabled: enabled),
             item(
               'mark',
               marked ? Icons.star : Icons.star_border,
-              marked ? 'Retirer le signet' : 'Ajouter le signet',
+              marked ? AppLocalizations.of(context).removeBookmark : AppLocalizations.of(context).addBookmark,
               enabled: markable,
             ),
-            item('history', Icons.history, 'Historique', enabled: enabled),
+            item('history', Icons.history, AppLocalizations.of(context).history, enabled: enabled),
             item(
               'marks',
               Icons.bookmarks_outlined,
-              'Signets',
+              AppLocalizations.of(context).bookmarks,
               enabled: enabled,
             ),
             item(
               'find',
               Icons.find_in_page_outlined,
-              'Rechercher dans la page',
+              AppLocalizations.of(context).findInPage,
               enabled: enabled,
             ),
             const PopupMenuDivider(),
-            item('zoom-in', Icons.zoom_in, 'Zoom avant', enabled: enabled),
-            item('zoom-out', Icons.zoom_out, 'Zoom arrière', enabled: enabled),
+            item('zoom-in', Icons.zoom_in, AppLocalizations.of(context).zoomIn, enabled: enabled),
+            item('zoom-out', Icons.zoom_out, AppLocalizations.of(context).zoomOut, enabled: enabled),
             item(
               'zoom-reset',
               Icons.zoom_out_map,
-              'Taille réelle',
+              AppLocalizations.of(context).actualSize,
               enabled: enabled,
             ),
             const PopupMenuDivider(),
-            item('settings', Icons.settings_outlined, 'Réglages'),
+            item('settings', Icons.settings_outlined, AppLocalizations.of(context).settings),
           ],
         ),
       ],
@@ -1507,7 +1503,7 @@ class _FrameViewState extends ConsumerState<_FrameView> {
         Text(
           active?.url.isNotEmpty == true
               ? active!.url
-              : 'Naviguez vers une URL',
+              : AppLocalizations.of(context).navigateToUrl,
           style: TextStyle(color: muted),
         ),
       ],

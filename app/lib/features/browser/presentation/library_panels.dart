@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/design/design_tokens.dart';
+import '../../../core/l10n/app_localizations.dart';
 import '../domain/bookmark.dart';
 import '../domain/history_entry.dart';
 import 'browser_controller.dart';
@@ -51,7 +52,7 @@ class LibraryPanel extends ConsumerWidget {
 
     return AlertDialog(
       backgroundColor: t.color('surface', 'raised'),
-      title: Text(history ? 'Historique' : 'Signets'),
+      title: Text(history ? AppLocalizations.of(context).history : AppLocalizations.of(context).bookmarks),
       content: SizedBox(
         width: 460,
         height: 380,
@@ -63,7 +64,7 @@ class LibraryPanel extends ConsumerWidget {
                         const Center(child: CircularProgressIndicator()),
                     error: (e, _) => _Message(
                       tokens: t,
-                      text: 'Historique indisponible — $e',
+                      text: AppLocalizations.of(context).historyUnavailable('$e'),
                     ),
                     data: (entries) =>
                         _HistoryList(tokens: t, entries: entries, onOpen: open),
@@ -74,7 +75,7 @@ class LibraryPanel extends ConsumerWidget {
                     loading: () =>
                         const Center(child: CircularProgressIndicator()),
                     error: (e, _) =>
-                        _Message(tokens: t, text: 'Signets indisponibles — $e'),
+                        _Message(tokens: t, text: AppLocalizations.of(context).bookmarksUnavailable('$e')),
                     data: (marks) => _BookmarkList(
                       tokens: t,
                       marks: marks,
@@ -87,7 +88,7 @@ class LibraryPanel extends ConsumerWidget {
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Fermer'),
+          child: Text(AppLocalizations.of(context).close),
         ),
       ],
     );
@@ -123,7 +124,7 @@ class _HistoryList extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (entries.isEmpty) {
-      return _Message(tokens: tokens, text: 'Aucune page visitée');
+      return _Message(tokens: tokens, text: AppLocalizations.of(context).emptyHistory);
     }
     return ListView.builder(
       itemCount: entries.length,
@@ -158,7 +159,7 @@ class _BookmarkList extends StatelessWidget {
     if (marks.isEmpty) {
       return _Message(
         tokens: tokens,
-        text: 'Aucun signet — l’étoile de la barre en ajoute',
+        text: AppLocalizations.of(context).emptyBookmarks,
       );
     }
     return ListView.builder(
@@ -172,7 +173,7 @@ class _BookmarkList extends StatelessWidget {
           onTap: () => onOpen(b.url),
           trailing: IconButton(
             icon: const Icon(Icons.delete_outline),
-            tooltip: 'Retirer le signet',
+            tooltip: AppLocalizations.of(context).removeBookmark,
             onPressed: () => onRemove(b.url),
           ),
         );

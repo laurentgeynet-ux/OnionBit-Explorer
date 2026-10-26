@@ -1,0 +1,90 @@
+{
+  "@@locale": "en",
+  "newTab": "New tab",
+  "close": "Close",
+  "home": "Home",
+  "history": "History",
+  "bookmarks": "Bookmarks",
+  "addBookmark": "Add bookmark",
+  "removeBookmark": "Remove bookmark",
+  "downloads": "Downloads",
+  "findInPage": "Find in page",
+  "findInPageShortcut": "Find in page (Ctrl+F)",
+  "omniboxHint": "Search or enter a URL",
+  "daemonOffline": "Daemon unreachable — start explorer-daemon",
+  "retry": "Retry",
+  "settings": "Settings",
+  "zoomIn": "Zoom in",
+  "zoomOut": "Zoom out",
+  "actualSize": "Actual size",
+  "moreActions": "More actions",
+  "delegatedTabTooltip": "Delegated tab — native WebView2 rendering",
+  "noTabs": "No tabs",
+  "pageLoadError": "Failed to load the page",
+  "navigateToUrl": "Navigate to a URL",
+  "language": "Language",
+  "profile": "Profile",
+  "profileDirLabel": "Profile directory (default: OS)",
+  "save": "Save",
+  "cancel": "Cancel",
+  "resend": "Resend",
+  "resendFormTitle": "Resend the form?",
+  "emptyBookmarks": "No bookmarks — the star in the bar adds one",
+  "emptyHistory": "No pages visited",
+  "activeFieldTooltip": "Active field — typing sent to the engine",
+  "acceptLanguageLabel": "Accept-Language (empty: OS locale)",
+  "engineRest": "REST (daemon)",
+  "engineFfi": "FFI (in-process engine)",
+  "engineLabel": "Engine",
+  "openAsText": "Open as text",
+  "theme": "Theme",
+  "downloadDialogTitle": "Download",
+  "downloadNotDisplayable": "This file cannot be displayed in the browser.",
+  "resendFormBody": "This page was obtained by {method}.\n{url}\n\nReloading will resend the data — a side effect\n(order, payment) may be repeated.",
+  "@resendFormBody": {
+    "placeholders": {
+      "method": {},
+      "url": {}
+    }
+  },
+  "themeSystem": "System",
+  "themeDark": "Dark",
+  "themeLight": "Light",
+  "engineAuto": "Auto (FFI if present, REST otherwise)",
+  "profileNote": "Exported to EXPLORER_PROFILE — applies at next engine (FFI) or daemon (REST) start. Confirm with Enter.",
+  "historyUnavailable": "History unavailable — {error}",
+  "@historyUnavailable": {
+    "placeholders": {
+      "error": {}
+    }
+  },
+  "bookmarksUnavailable": "Bookmarks unavailable — {error}",
+  "@bookmarksUnavailable": {
+    "placeholders": {
+      "error": {}
+    }
+  },
+  "closeEsc": "Close (Esc)",
+  "previous": "Previous",
+  "next": "Next",
+  "reload": "Reload",
+  "zoomPercent": "Zoom {pct} %",
+  "@zoomPercent": {
+    "placeholders": {
+      "pct": {}
+    }
+  },
+  "interfaceLanguage": "Interface",
+  "downloadSaved": "Download saved: {path}",
+  "@downloadSaved": {
+    "placeholders": {
+      "path": {}
+    }
+  },
+  "downloadError": "Download: {error}",
+  "@downloadError": {
+    "placeholders": {
+      "error": {}
+    }
+  }
+}

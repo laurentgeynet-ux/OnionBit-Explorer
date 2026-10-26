@@ -1,0 +1,90 @@
+{
+  "@@locale": "de",
+  "newTab": "Neuer Tab",
+  "close": "Schließen",
+  "home": "Startseite",
+  "history": "Verlauf",
+  "bookmarks": "Lesezeichen",
+  "addBookmark": "Lesezeichen hinzufügen",
+  "removeBookmark": "Lesezeichen entfernen",
+  "downloads": "Downloads",
+  "findInPage": "Auf der Seite suchen",
+  "findInPageShortcut": "Auf der Seite suchen (Strg+F)",
+  "omniboxHint": "Suchen oder URL eingeben",
+  "daemonOffline": "Daemon nicht erreichbar — explorer-daemon starten",
+  "retry": "Erneut versuchen",
+  "settings": "Einstellungen",
+  "zoomIn": "Vergrößern",
+  "zoomOut": "Verkleinern",
+  "actualSize": "Tatsächliche Größe",
+  "moreActions": "Weitere Aktionen",
+  "delegatedTabTooltip": "Delegierter Tab — natives WebView2-Rendering",
+  "noTabs": "Keine Tabs",
+  "pageLoadError": "Seite konnte nicht geladen werden",
+  "navigateToUrl": "Zu einer URL navigieren",
+  "language": "Sprache",
+  "profile": "Profil",
+  "profileDirLabel": "Profilverzeichnis (Standard: OS)",
+  "save": "Speichern",
+  "cancel": "Abbrechen",
+  "resend": "Erneut senden",
+  "resendFormTitle": "Formular erneut senden?",
+  "emptyBookmarks": "Keine Lesezeichen — der Stern in der Leiste fügt eines hinzu",
+  "emptyHistory": "Keine Seiten besucht",
+  "activeFieldTooltip": "Aktives Feld — Eingabe wird an die Engine gesendet",
+  "acceptLanguageLabel": "Accept-Language (leer: OS-Locale)",
+  "engineRest": "REST (Daemon)",
+  "engineFfi": "FFI (In-Process-Engine)",
+  "engineLabel": "Engine",
+  "openAsText": "Als Text öffnen",
+  "theme": "Design",
+  "downloadDialogTitle": "Download",
+  "downloadNotDisplayable": "Diese Datei kann im Browser nicht angezeigt werden.",
+  "resendFormBody": "Die Seite wurde per {method} geladen.\n{url}\n\nBeim Neuladen werden die Daten erneut gesendet —\neine Nebenwirkung (Bestellung, Zahlung) kann sich wiederholen.",
+  "@resendFormBody": {
+    "placeholders": {
+      "method": {},
+      "url": {}
+    }
+  },
+  "themeSystem": "System",
+  "themeDark": "Dunkel",
+  "themeLight": "Hell",
+  "engineAuto": "Auto (FFI falls vorhanden, sonst REST)",
+  "profileNote": "Nach EXPLORER_PROFILE exportiert — wirkt beim nächsten Start des Motors (FFI) oder Daemons (REST). Mit Eingabetaste bestätigen.",
+  "historyUnavailable": "Verlauf nicht verfügbar — {error}",
+  "@historyUnavailable": {
+    "placeholders": {
+      "error": {}
+    }
+  },
+  "bookmarksUnavailable": "Lesezeichen nicht verfügbar — {error}",
+  "@bookmarksUnavailable": {
+    "placeholders": {
+      "error": {}
+    }
+  },
+  "closeEsc": "Schließen (Esc)",
+  "previous": "Zurück",
+  "next": "Weiter",
+  "reload": "Neu laden",
+  "zoomPercent": "Zoom {pct} %",
+  "@zoomPercent": {
+    "placeholders": {
+      "pct": {}
+    }
+  },
+  "interfaceLanguage": "Oberfläche",
+  "downloadSaved": "Download gespeichert: {path}",
+  "@downloadSaved": {
+    "placeholders": {
+      "path": {}
+    }
+  },
+  "downloadError": "Download: {error}",
+  "@downloadError": {
+    "placeholders": {
+      "error": {}
+    }
+  }
+}

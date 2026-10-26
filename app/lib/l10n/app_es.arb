@@ -1,0 +1,90 @@
+{
+  "@@locale": "es",
+  "newTab": "Nueva pestaña",
+  "close": "Cerrar",
+  "home": "Inicio",
+  "history": "Historial",
+  "bookmarks": "Marcadores",
+  "addBookmark": "Añadir marcador",
+  "removeBookmark": "Quitar marcador",
+  "downloads": "Descargas",
+  "findInPage": "Buscar en la página",
+  "findInPageShortcut": "Buscar en la página (Ctrl+F)",
+  "omniboxHint": "Buscar o introducir una URL",
+  "daemonOffline": "Daemon inaccesible — inicia explorer-daemon",
+  "retry": "Reintentar",
+  "settings": "Configuración",
+  "zoomIn": "Acercar",
+  "zoomOut": "Alejar",
+  "actualSize": "Tamaño real",
+  "moreActions": "Más acciones",
+  "delegatedTabTooltip": "Pestaña delegada — renderizado WebView2 nativo",
+  "noTabs": "Sin pestañas",
+  "pageLoadError": "No se pudo cargar la página",
+  "navigateToUrl": "Navega a una URL",
+  "language": "Idioma",
+  "profile": "Perfil",
+  "profileDirLabel": "Directorio de perfil (predeterminado: SO)",
+  "save": "Guardar",
+  "cancel": "Cancelar",
+  "resend": "Reenviar",
+  "resendFormTitle": "¿Reenviar el formulario?",
+  "emptyBookmarks": "Sin marcadores — la estrella de la barra añade uno",
+  "emptyHistory": "Ninguna página visitada",
+  "activeFieldTooltip": "Campo activo — la escritura se envía al motor",
+  "acceptLanguageLabel": "Accept-Language (vacío: locale del SO)",
+  "engineRest": "REST (daemon)",
+  "engineFfi": "FFI (motor en proceso)",
+  "engineLabel": "Motor",
+  "openAsText": "Abrir como texto",
+  "theme": "Tema",
+  "downloadDialogTitle": "Descarga",
+  "downloadNotDisplayable": "Este archivo no se puede mostrar en el navegador.",
+  "resendFormBody": "La página se obtuvo mediante {method}.\n{url}\n\nRecargar reenviará los datos — puede repetirse un efecto secundario\n(pedido, pago).",
+  "@resendFormBody": {
+    "placeholders": {
+      "method": {},
+      "url": {}
+    }
+  },
+  "themeSystem": "Sistema",
+  "themeDark": "Oscuro",
+  "themeLight": "Claro",
+  "engineAuto": "Auto (FFI si está presente, REST si no)",
+  "profileNote": "Exportado a EXPLORER_PROFILE — efecto en el próximo inicio del motor (FFI) o daemon (REST). Confirmar con Entrar.",
+  "historyUnavailable": "Historial no disponible — {error}",
+  "@historyUnavailable": {
+    "placeholders": {
+      "error": {}
+    }
+  },
+  "bookmarksUnavailable": "Marcadores no disponibles — {error}",
+  "@bookmarksUnavailable": {
+    "placeholders": {
+      "error": {}
+    }
+  },
+  "closeEsc": "Cerrar (Esc)",
+  "previous": "Anterior",
+  "next": "Siguiente",
+  "reload": "Recargar",
+  "zoomPercent": "Zoom {pct} %",
+  "@zoomPercent": {
+    "placeholders": {
+      "pct": {}
+    }
+  },
+  "interfaceLanguage": "Interfaz",
+  "downloadSaved": "Descarga guardada: {path}",
+  "@downloadSaved": {
+    "placeholders": {
+      "path": {}
+    }
+  },
+  "downloadError": "Descarga: {error}",
+  "@downloadError": {
+    "placeholders": {
+      "error": {}
+    }
+  }
+}

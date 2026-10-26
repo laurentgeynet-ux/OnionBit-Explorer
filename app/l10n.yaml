@@ -1,0 +1,11 @@
+# i18n Explorer — ARB flutter gen-l10n (même patron que
+# IptvMediacenter : sources lib/l10n, généré lib/core/l10n).
+# Template = français (locale par défaut du produit).
+arb-dir: lib/l10n
+template-arb-file: app_fr.arb
+output-localization-file: app_localizations.dart
+output-dir: lib/core/l10n
+synthetic-package: false
+untranslated-messages-file: untranslated.txt
+nullable-getter: false
+preferred-supported-locales: [fr]
