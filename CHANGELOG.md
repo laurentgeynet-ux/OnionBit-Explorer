@@ -7,6 +7,18 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **Vol 2026-10-26 — shorthand
+  `inset`** (`explorer-css`) —
+  éclaté en `top/right/bottom/
+  left` : les liens overlay
+  `position:absolute; inset:0`
+  du Guardian restaient sans
+  offsets → boîtes `0x0`,
+  articles inouvrables au
+  hit-test (`editable:false`,
+  click `ignored`). Régression
+  `inset_expansion` (values).
+
 - **Vol 2026-10-26 — `opacity: 0`
   n'émet rien** (`explorer-render`)
   — un élément à opacité nulle et

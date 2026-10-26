@@ -605,6 +605,22 @@ pub fn value_is_valid_for(name: &str, value: &str) -> bool {
 pub fn expand_shorthand(name: &str, value: &str) -> Option<Vec<(String, String)>> {
     match name {
         "margin" | "padding" => expand_box(name, value),
+        "inset" => {
+            // `inset` = `top right bottom left` (CSS Logical
+            // §? — boîte 1..4 valeurs, même répétition que
+            // margin). Vol 2026-10-26 : les liens overlay
+            // `position:absolute; inset:0` du Guardian
+            // restaient sans offsets → boîtes `0x0`,
+            // articles inouvrables au hit-test.
+            let parts: Vec<&str> = value.split_whitespace().collect();
+            let [top, right, bottom, left] = four_sides(&parts)?;
+            Some(vec![
+                ("top".to_string(), top),
+                ("right".to_string(), right),
+                ("bottom".to_string(), bottom),
+                ("left".to_string(), left),
+            ])
+        }
         "border" => Some(expand_border_parts("border", value)),
         "border-width" | "border-style" | "border-color" => {
             expand_border_uniform(name.strip_prefix("border-")?, value)
