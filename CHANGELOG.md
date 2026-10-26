@@ -7,6 +7,25 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **JS-C134 — regex : `-` littéral en
+  classe + paires surrogates hors
+  classe** (`explorer-jscore`) — deux
+  murs du vol 2026-10-26 :
+  `/^[-]?[0-9]+…$/` (ecma-international,
+  contact-form-7) dégénérait en `(?!)`
+  — le `-` de tête n'était pas compté
+  dans `class_emitted` (émis `\x{2d}`
+  désormais). La regex emoji de
+  gitlab.com (`\uD83D\uDCA5`,
+  `\uD83C[\uDFFB-\uDFFF]`) était
+  rejetée « Invalid codepoint » — les
+  paires surrogates hors classe sont
+  fusionnées en point astral (comme
+  déjà en `u`) et `\uD8hi[\uDClo-\uDChi]`
+  en plage astrale. Assertion stale
+  `surrogate_bounds_degrade` réalignée
+  (plage surrogate → astrale, f5d3fb7).
+
 - **JS-C133 — `initCustomEvent`
   (DOM L2, strate polymer/shady)**
   (`explorer-jscore`) — mur ytd-app
