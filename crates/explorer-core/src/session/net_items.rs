@@ -966,12 +966,24 @@ impl SubJob {
                     let ord = self.sheet_urls.get(i).map_or(0, |(.., lord)| *lord);
                     self.link_events.push((ord, false));
                 }
+                // Un `<iframe src>` en échec laissait un
+                // cadre blanc sans trace (vol 18).
+                if let SubTag::Frame(i) = tag {
+                    if let Some((u, ..)) = self.frame_urls.get(i) {
+                        tracing::warn!(url = %u, "iframe : fetch en échec — cadre vide");
+                    }
+                }
                 return;
             };
             if !(200..300).contains(&resp.status) {
                 if let SubTag::Css(i) = tag {
                     let ord = self.sheet_urls.get(i).map_or(0, |(.., lord)| *lord);
                     self.link_events.push((ord, false));
+                }
+                if let SubTag::Frame(i) = tag {
+                    if let Some((u, ..)) = self.frame_urls.get(i) {
+                        tracing::warn!(url = %u, status = resp.status, "iframe : statut non-2xx — cadre vide");
+                    }
                 }
                 return;
             }
@@ -1989,6 +2001,15 @@ pub(crate) fn collect_frame(
             sandbox,
             frame_scripting(parent_scripting, sandbox),
         ));
+    } else {
+        // Embarquement refusé (XFO / CSP frame-ancestors) —
+        // cadre blanc spec-correct mais jamais silencieux
+        // (vol 18 tumblr CMP).
+        tracing::warn!(
+            url = %u,
+            status = resp.status,
+            "iframe : embarquement refusé (X-Frame-Options / frame-ancestors)"
+        );
     }
 }
 
