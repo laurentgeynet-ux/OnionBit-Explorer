@@ -651,6 +651,19 @@ impl Session {
     /// [`Self::eval_or_report`] (`PipelineError`, jamais de
     /// page cassée), adapté au realm `ctx`.
     fn eval_ctx_or_report(&mut self, tab: TabId, eng: &mut dyn JsEngine, ctx: u32, src: &str) {
+        // Disjoncteur (vol 29 doctolib) : une éval déjà
+        // tombée en timeout fige le worker 30 s — relancer
+        // les scripts suivants dans le même commit = N×30 s
+        // de verrou → daemon entier mort. On saute l'appel.
+        if self.js_stalled(tab) {
+            tracing::debug!(
+                tab,
+                ctx,
+                bytes = src.len(),
+                "script iframe sauté — disjoncteur moteur ouvert"
+            );
+            return;
+        }
         if let Err(e) = eng.eval_ctx(ctx, src, None) {
             tracing::debug!(tab, ctx, error = %e, "script iframe en échec");
             if Self::is_engine_stall(&e) {
@@ -838,6 +851,27 @@ impl Session {
         url: Option<&str>,
         el_ord: Option<usize>,
     ) {
+        // Disjoncteur (vol 29 doctolib) : après un timeout,
+        // chaque éval suivante attendrait encore 30 s sous
+        // verrou — 8 bundles = ~4 min d'API morte. On saute
+        // l'appel et on rapporte en PipelineError (visible
+        // console, comme un échec d'éval normal).
+        if self.js_stalled(tab) {
+            tracing::warn!(
+                tab,
+                bytes = src.len(),
+                "script sauté — disjoncteur moteur ouvert"
+            );
+            let origin = url.map(|u| format!("{u} — ")).unwrap_or_default();
+            let _ = self.events.send(CoreEvent::PipelineError {
+                tab: Some(tab),
+                message: format!(
+                    "moteur figé — éval sautée — {origin}src «{}»",
+                    src_head(src)
+                ),
+            });
+            return;
+        }
         let t_eval = std::time::Instant::now();
         tracing::info!(tab, bytes = src.len(), "script: eval…");
         let r = match el_ord {
