@@ -799,7 +799,7 @@ impl Session {
         let Some((req_page, req_base, doc_policy, csp, _opaque)) =
             self.ctx_net_origin(tab, r.ctx, page, base)
         else {
-            tracing::debug!(tab, ctx = r.ctx, "dyn import : pas d'origine — rejet");
+            tracing::warn!(tab, ctx = r.ctx, "dyn import : pas d'origine — rejet");
             self.deliver_dyn_import_req(tab, r.ctx, r.seq, None, Vec::new());
             return;
         };
@@ -815,7 +815,7 @@ impl Session {
                 )
             })
         else {
-            tracing::debug!(tab, url = %r.url, "dyn import : résolution/CSP refusé — rejet");
+            tracing::warn!(tab, url = %r.url, "dyn import : résolution/CSP refusé — rejet");
             self.deliver_dyn_import_req(tab, r.ctx, r.seq, None, Vec::new());
             return;
         };

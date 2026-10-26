@@ -575,6 +575,29 @@ impl Session {
         }
     }
 
+    /// Rejet de promesse non rattrapé → `PipelineError`
+    /// (vol : mort silencieuse type pinterest —
+    /// `__PWS_ROOT__` vide sans aucune trace).
+    ///
+    /// **Couture en attente** : le trait `JsEngine`
+    /// n'expose pas encore de drain pour les rejets (les
+    /// `onunhandledrejection` émis côté jscore restent
+    /// internes au moteur — chantier FIX-1). Ce routeur est
+    /// prêt : le jour où `drain_unhandled_rejections`
+    /// (ou équivalent) arrive, il suffit de l'appeler aux
+    /// points de synchro et de repasser chaque message ici —
+    /// le `PipelineError` part déjà vers le ring `/console`.
+    // Aucun drain ne l'appelle encore (couture jscore
+    // attendue) — l'avertissement est donc intentionnel.
+    #[allow(dead_code)]
+    pub(crate) fn report_unhandled_rejection(&mut self, tab: TabId, message: &str) {
+        tracing::warn!(tab, error = %message, "promesse rejetée non rattrapée");
+        let _ = self.events.send(CoreEvent::PipelineError {
+            tab: Some(tab),
+            message: format!("unhandledrejection — {message}"),
+        });
+    }
+
     /// `load` du document enfant dans son contexte, puis
     /// `load` sur l'élément `<iframe>` côté parent
     /// (`onload=` — étape 134). Appelé au `sub_commit_tail`
