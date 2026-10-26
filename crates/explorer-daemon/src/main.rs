@@ -64,7 +64,10 @@ struct DaemonConfig {
     /// pas une promesse produit.
     js_mem_mib: Option<usize>,
     /// Budget d'ops JS par évaluation (`EXPLORER_JS_OPS`,
-    /// étape 124) — `None` = défaut `SessionConfig` (5 M) ;
+    /// étape 124) — `None` = [`DEFAULT_DAEMON_JS_OPS`] (20 M,
+    /// relève le défaut `SessionConfig` 5 M : wordpress et
+    /// bootstraps légitimes dépassaient 5 M — `RangeError:
+    /// script execution limit` au boot, vol 25) ;
     /// `0` = illimité explicite (mappé `u64::MAX` — un `while(1)`
     /// gèle alors le contexte : réglage diagnostic uniquement).
     js_ops: Option<u64>,
@@ -140,6 +143,15 @@ impl DaemonConfig {
 /// de vol, pas une promesse produit ; la valeur active est
 /// tracée pour que le rapport de terrain cite la borne en
 /// vigueur, jamais supposée).
+/// Budget d'ops JS par évaluation côté **daemon** (vol 25) :
+/// 20 M — le défaut `SessionConfig` (5 M, pensé pour le CLI
+/// one-shot) tuait des bootstraps légitimes (`RangeError:
+/// script execution limit exceeded` sur wordpress) ; la
+/// borne reste finie — un script hostile est toujours
+/// interrompu, juste plus tard (le disjoncteur « moteur
+/// figé » couvre le worker saturé, vague 8).
+const DEFAULT_DAEMON_JS_OPS: u64 = 20_000_000;
+
 fn session_config(cfg: &DaemonConfig) -> explorer_core::SessionConfig {
     let mut sc = explorer_core::SessionConfig {
         color_scheme: cfg.color_scheme,
@@ -149,12 +161,12 @@ fn session_config(cfg: &DaemonConfig) -> explorer_core::SessionConfig {
         tracing::info!("EXPLORER_JS_MEM_MIB={mib} — borne heap JS par contexte");
         sc.js_mem_limit_mib = mib;
     }
-    if let Some(ops) = cfg.js_ops {
-        // `0` = illimité explicite (étape 124) — `op_limit=0`
-        // tuerait le premier `tick` ; `u64::MAX` en tient lieu.
-        let v = if ops == 0 { u64::MAX } else { ops };
+    // `0` = illimité explicite (étape 124) — `op_limit=0`
+    // tuerait le premier `tick` ; `u64::MAX` en tient lieu.
+    let ops = cfg.js_ops.unwrap_or(DEFAULT_DAEMON_JS_OPS);
+    sc.js_ops = if ops == 0 { u64::MAX } else { ops };
+    if cfg.js_ops.is_some() {
         tracing::info!("EXPLORER_JS_OPS={ops} — budget d'ops JS par évaluation");
-        sc.js_ops = v;
     }
     if let Some((w, h)) = cfg.viewport {
         tracing::info!("EXPLORER_VIEWPORT={w}x{h} — viewport initial des onglets");
@@ -365,17 +377,17 @@ fn main() {
     // crochet Rust) ; une entrée `panic:` = crochet exécuté
     // → le panic est nommé. `EXPLORER_DEATH_LOG` surchage le
     // chemin (défaut `$TEMP/explorer_daemon_death.log`).
-    let death_log = std::env::var("EXPLORER_DEATH_LOG")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| std::env::temp_dir().join("explorer_daemon_death.log"));
+    let death_log = std::env::var("EXPLORER_DEATH_LOG").map_or_else(
+        |_| std::env::temp_dir().join("explorer_daemon_death.log"),
+        PathBuf::from,
+    );
     let _ = std::fs::write(&death_log, "alive\n");
     {
         let p = death_log.clone();
         std::panic::set_hook(Box::new(move |info| {
             let loc = info
                 .location()
-                .map(|l| format!("{l}"))
-                .unwrap_or_else(|| "?".to_string());
+                .map_or_else(|| "?".to_string(), |l| format!("{l}"));
             let _ = std::fs::write(&p, format!("panic: {info} @ {loc}\n"));
             eprintln!("explorer-daemon : panic {info} @ {loc}");
         }));
@@ -406,8 +418,7 @@ async fn amain() {
     // iframe étaient perdus — le filtre vide ne passe que
     // `error` ; le daemon est un hôte de diagnostic, les
     // refus d'embarquement/sous-ressources doivent sortir).
-    let filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new("info"));
+    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
     tracing_subscriber::fmt().with_env_filter(filter).init();
     let mut cfg = DaemonConfig::from_env();
     let cli = parse_args();
