@@ -599,6 +599,62 @@ fn noscript_masque_sous_scripting() {
     );
 }
 
+/// Vol 2026-10-26 (mastodon) — la règle UA est
+/// `display: none !important` comme la spec HTML Rendering :
+/// une feuille auteur `noscript { display:flex }` ne doit
+/// PAS révéler le fallback rawtext sous scripting.
+#[test]
+fn noscript_important_coiffe_style_auteur() {
+    let dom = TreeBuilder::parse("<body><noscript>fallback</noscript></body>");
+    let noscript = {
+        let html = dom
+            .children(dom.document())
+            .unwrap_or_default()
+            .into_iter()
+            .find(|&c| dom.tag_name(c).is_ok_and(|t| t == "html"))
+            .expect("html présent");
+        let body = dom
+            .children(html)
+            .unwrap_or_default()
+            .into_iter()
+            .find(|&b| dom.tag_name(b).is_ok_and(|t| t == "body"))
+            .expect("body présent");
+        dom.children(body)
+            .unwrap_or_default()
+            .into_iter()
+            .find(|&n| dom.tag_name(n).is_ok_and(|t| t == "noscript"))
+            .expect("noscript présent")
+    };
+    let mut e = StyleEngine::new();
+    e.add_css("noscript { display: flex }", Origin::Author);
+    let on = StyleEnv {
+        scripting: true,
+        ..env()
+    };
+    assert_eq!(
+        e.compute(&dom, noscript, &on).get("display"),
+        Some("none"),
+        "scripting : l'important UA coiffe le display:flex auteur"
+    );
+    // Même un `!important` auteur cède devant l'important UA
+    // (ordre de cascade : UA important > auteur important).
+    let mut e2 = StyleEngine::new();
+    e2.add_css("noscript { display: flex !important }", Origin::Author);
+    assert_eq!(
+        e2.compute(&dom, noscript, &on).get("display"),
+        Some("none"),
+        "scripting : l'important UA coiffe l'important auteur"
+    );
+    // Sans scripting : la règle auteur s'applique (UA inerte).
+    let mut e3 = StyleEngine::new();
+    e3.add_css("noscript { display: flex }", Origin::Author);
+    assert_eq!(
+        e3.compute(&dom, noscript, &env()).get("display"),
+        Some("flex"),
+        "sans scripting : le style auteur gagne"
+    );
+}
+
 #[test]
 fn color_scheme_dark_defauts_ua() {
     // R-59 — `color-scheme` sur la racine arbitre les défauts

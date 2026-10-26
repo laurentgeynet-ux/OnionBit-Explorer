@@ -2264,7 +2264,11 @@ pub fn initial_value(name: &str) -> Option<&'static str> {
 ///
 /// `noscript` est masqué **sous scripting** (R-93 — MQ5
 /// `(scripting)`, HTML Rendering : son contenu ne s'affiche
-/// que sans moteur de script). Sans scripting il reste un
+/// que sans moteur de script). La règle est `!important`
+/// comme la spec : un style auteur `noscript { display:… }`
+/// (mastodon `display:flex`, terrain) ne doit pas révéler
+/// le fallback — l'important UA coiffe l'auteur normal ET
+/// l'auteur important. Sans scripting il reste un
 /// vrai sous-arbre rendu — comportement historique.
 /// `noframes`/`noembed` restent visibles pour la même
 /// raison (pas de frames ni de plugins — leur contenu EST le
@@ -2293,7 +2297,7 @@ frame { display: none }
 details:not([open]) > :not(summary) { display: none }
 dialog:not([open]) { display: none }
 audio:not([controls]) { display: none }
-@media (scripting) { noscript { display: none } }
+@media (scripting) { noscript { display: none !important } }
 li { display: list-item }
 ul, menu, dir { list-style-type: disc }
 ul ul, ol ul, menu ul, dir ul { list-style-type: circle }

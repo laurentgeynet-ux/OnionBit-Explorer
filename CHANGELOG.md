@@ -7,6 +7,25 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **Vol 2026-10-26 — `<noscript>`
+  masqué même sous style auteur**
+  (`explorer-css`) — la règle UA
+  `@media (scripting) { noscript
+  { display: none } }` passait en
+  `!important` comme la spec HTML
+  Rendering : une feuille auteur
+  `noscript { display:flex }`
+  (mesuré mastodon.social) ne
+  révèle plus le fallback rawtext
+  quand le scripting est actif.
+  Régression
+  `noscript_important_coiffe_
+  style_auteur` (cascade 106/…).
+  Au passage : rafraîchissement
+  clippy 1.99 de `value.rs`
+  (renommages, `map_or`, cast
+  borné `unit_to_u8`).
+
 - **JS-C133 — `initCustomEvent`
   (DOM L2, strate polymer/shady)**
   (`explorer-jscore`) — mur ytd-app
