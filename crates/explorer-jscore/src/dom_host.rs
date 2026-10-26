@@ -6407,8 +6407,37 @@ fn element_geom(dom: &DomRef, node: NodeId) -> Option<(crate::geom::GeoRect, boo
     let path = d.element_path(node)?;
     drop(d);
     let g = map.lock().ok()?;
-    let eg = g.rects.get(&path).copied()?;
-    Some((eg.rect, eg.fixed, g.scroll_x, g.scroll_y))
+    let eg = g.rects.get(&path).copied();
+    if eg.is_none() {
+        geom_trace_miss(&g, &path);
+    }
+    Some((eg?.rect, eg?.fixed, g.scroll_x, g.scroll_y))
+}
+
+/// Sonde `EXPLORER_GEOM_TRACE` — classe les miss `gBCR` :
+/// un chemin présent partageant le préfixe parent → dérive
+/// d'index (mutation miroir qui décale les frères — la boîte
+/// existe mais sous l'ancien chemin) ; aucun voisin → nœud
+/// jamais posé (post-layout/anonyme — rien à re-collecter).
+fn geom_trace_miss(g: &crate::geom::GeometryMap, path: &[(String, u32)]) {
+    static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    if std::env::var("EXPLORER_GEOM_TRACE").is_err() {
+        return;
+    }
+    let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    if n >= 40 {
+        return;
+    }
+    let parent = &path[..path.len().saturating_sub(1)];
+    let near = g
+        .rects
+        .keys()
+        .filter(|k| k.starts_with(parent))
+        .count();
+    eprintln!(
+        "[geom-miss] path={path:?} parent-hits={near} rects={}",
+        g.rects.len()
+    );
 }
 
 /// Rect **viewport** de `node` pour `getBoundingClientRect` —
