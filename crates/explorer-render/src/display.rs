@@ -3275,6 +3275,25 @@ fn paint_box<'a>(
         off
     };
 
+    // `opacity: 0` (§3.2, groupe alpha nul) : tout le
+    // sous-arbre est invisible — court-circuit AVANT la
+    // descente (transform/clip/enfants n'émettent rien de
+    // visible de toute façon). Contrairement à
+    // `visibility:hidden` qui permet la réactivation par un
+    // descendant, `opacity` est héritée multiplicativement
+    // : 0 ne se relève jamais. Vol 2026-10-26 : les modales
+    // `opacity-0` (bookshop « Our mission », overlay ecma)
+    // peintaient en plein. Les opacités partielles
+    // (0 < o < 1) restent non appliquées — MVP : le groupe
+    // alpha complet est reporté.
+    if bx
+        .style
+        .get("opacity")
+        .is_some_and(|v| v.trim().parse::<f32>().is_ok_and(|o| o <= 0.0))
+    {
+        return;
+    }
+
     // `transform` : matrice poussée avant tout item du
     // sous-arbre, retiré après (imbrication additive).
     let tf = box_transform(bx, &shifted(bx.rect, off));

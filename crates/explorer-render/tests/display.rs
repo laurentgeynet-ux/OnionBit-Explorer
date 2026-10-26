@@ -1818,3 +1818,39 @@ fn marker_list_style_string_litteral() {
         .collect();
     assert_eq!(texts, ["*", "*"], "chaîne littérale comme marqueur");
 }
+
+/// Vol 2026-10-26 — `opacity: 0` : tout le sous-arbre est
+/// invisible (modales `opacity-0` bookshop/ecma peintes en
+/// plein). Un élément `opacity:0` n'émet RIEN, enfants
+/// compris (l'opacité se compose multiplicativement — 0 ne
+/// se relève jamais, contrairement à `visibility`).
+#[test]
+fn opacity_zero_nemet_rien() {
+    let (_d, _b, items) = dl(
+        "<div id=v>visible</div><div id=o>cache</div>",
+        "body{margin:0} #o{opacity:0;background-color:#ff0000}",
+    );
+    let n_text = items
+        .iter()
+        .filter(|i| matches!(i, DisplayItem::Text { .. } | DisplayItem::MarkerText { .. }))
+        .count();
+    let n_fill = items
+        .iter()
+        .filter(|i| matches!(i, DisplayItem::FillRect { .. }))
+        .count();
+    assert_eq!(n_text, 1, "seul 'visible' peint : {items:?}");
+    assert_eq!(n_fill, 0, "fond de la modale invisible : {items:?}");
+}
+
+/// `opacity` positive (0<o<1, MVP non appliquée) : la boîte
+/// reste peinte — seul `0` court-circuite.
+#[test]
+fn opacity_partielle_ne_court_circuite_pas() {
+    let (_d, _b, items) = dl("<div id=o>semi</div>", "body{margin:0} #o{opacity:0.4}");
+    assert!(
+        items
+            .iter()
+            .any(|i| matches!(i, DisplayItem::Text { .. } | DisplayItem::MarkerText { .. })),
+        "opacité partielle : contenu peint : {items:?}"
+    );
+}

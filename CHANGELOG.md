@@ -7,6 +7,21 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **Vol 2026-10-26 — `opacity: 0`
+  n'émet rien** (`explorer-render`)
+  — un élément à opacité nulle et
+  tout son sous-arbre sont
+  court-circuités dans
+  `paint_box` (groupe alpha nul ;
+  les modales `opacity-0` de
+  bookshop/ecma peintaient en
+  plein). Opacités partielles :
+  non appliquées (groupe alpha
+  reporté). Régressions
+  `opacity_zero_nemet_rien`,
+  `opacity_partielle_ne_court_
+  circuite_pas` (display).
+
 - **Vol 2026-10-26 — `[popover]`
   fermé masqué** (`explorer-css`)
   — nouveau DynamicPseudo
