@@ -7,6 +7,17 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **Vol 26 — PUA `.notdef` en
+  slot muet** (`explorer-layout`,
+  `explorer-render`) — icon-font
+  échouée (Material Icons…) :
+  les caractères `U+E000`–
+  `U+F8FF` non couverts peinaient
+  un tofu `□`. `Glyph::invisible`
+  conserve l'avance, saute le
+  dessin. Régression
+  `pua_notdef_slot_muet` (font).
+
 - **Vol 26 — `position:fixed`
   échappe au clip `overflow`
   ancêtre** (`explorer-render`) —
