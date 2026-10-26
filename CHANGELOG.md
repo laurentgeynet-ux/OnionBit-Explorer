@@ -1061,6 +1061,19 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   relayé, local et internet,
   live et VOD.
 
+- **Vol pixels — première lecture
+  vidéo réelle dans l'app**
+  (étape 139) : daemon :9377 +
+  app live, page `<video autoplay>`
+  locale → `MediaOffered`
+  proxyfié (port éphémère daemon,
+  `TIME_WAIT` app→proxy prouvé)
+  → claim → fvp → MP4 via
+  `AutoClient` → `playing`,
+  position 1365→9466 ms. Chaîne
+  seam → proxy → lecteur → pixels
+  éprouvée de bout en bout.
+
 - **CAP-198 — Shadow DOM tranche 4 :
   event retargeting** (`explorer-jscore`)
   : le chemin de propagation des
