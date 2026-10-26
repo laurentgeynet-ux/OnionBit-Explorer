@@ -56,6 +56,24 @@ void main() {
     expect(a.delegatesUrl('https://www.google.com'), isFalse);
   });
 
+  test('seed produit : catalogue streaming étendu', () {
+    final a = DrmAllowlist(const AppConfig().drmDelegateHosts);
+    for (final url in [
+      'https://www.hulu.com/watch/x',
+      'https://play.max.com',
+      'https://tv.apple.com/fr/show/x',
+      'https://www.tf1plus.fr/direct',
+      'https://www.dazn.com/fr-FR/home',
+      'https://www.twitch.tv/chaine',
+      'https://tv.sfr.fr/direct',
+      'https://www.bbc.co.uk/iplayer',
+    ]) {
+      expect(a.delegatesUrl(url), isTrue, reason: url);
+    }
+    // La boutique Amazon reste sur le moteur.
+    expect(a.delegatesUrl('https://www.amazon.fr/dp/x'), isFalse);
+  });
+
   test('host avec port et credentials matche sur le host seul', () {
     expect(allow.delegatesUrl('https://netflix.com:443/browse'), isTrue);
     expect(allow.delegatesUrl('https://u:p@netflix.com/'), isTrue);

@@ -43,6 +43,70 @@ class AppConfig {
       // (ADR-0024) + DRM films/Premium : onglet délégué
       // entier (page + lecteur natifs WebView2).
       'youtu.be', // liens courts — la 301 part déjà en WebView2
+      // ── Majors US ──
+      'hulu.com', // Disney US
+      'max.com', // HBO/Max
+      'hbomax.com', // domaine historique HBO Max
+      'paramountplus.com', // Paramount+
+      'peacocktv.com', // NBCUniversal
+      'appletv.com', // Apple TV+ (FairPlay)
+      'tv.apple.com', // lecteur web Apple TV+
+      'crunchyroll.com', // anime
+      'discoveryplus.com', // standalone selon régions
+      'amcplus.com', // AMC Networks
+      'shudder.com', // AMC Networks (horreur)
+      'starplus.com', // Disney LatAm
+      'mubi.com', // VOD art & essai
+      'pluto.tv', // FAST Paramount
+      'tubitv.com', // FAST Fox
+      'plex.tv', // FAST + media server
+      'sling.com', // vMVPD Dish
+      'fubo.tv', // vMVPD sport
+      'philo.com', // vMVPD
+      // ── France / francophonie ──
+      'tf1plus.fr', // TF1+
+      'france.tv', // France Télévisions
+      '6play.fr', // M6+ (domaine historique)
+      'm6.fr', // M6+ (nouveau portail)
+      'arte.tv', // ARTE (contenus DRM partiels)
+      'rmcbfmplay.com', // RMC BFM Play
+      'molotov.tv', // TV de rattrapage
+      'rakuten.tv', // VOD Rakuten
+      'orangecine.fr', // OCS/Orange Ciné
+      'tv.sfr.fr', // SFR TV
+      // ── Sport ──
+      'dazn.com', // DAZN — Widevine strict
+      'espn.com', // ESPN+/Watch
+      'beinsports.com', // beIN Connect (connect.*)
+      // ── Europe ──
+      'skyshowtime.com', // Sky/Paramount JV
+      'sky.com', // Sky UK
+      'nowtv.com', // NOW UK
+      'nowtv.it', // NOW Italie
+      'itv.com', // ITVX (portal inclus /watch)
+      'itvx.com', // ITVX dédié
+      'channel4.com', // Channel 4 UK
+      'bbc.co.uk', // BBC iPlayer (/iplayer)
+      'joyn.de', // Joyn DE
+      'rtlplus.de', // RTL+ DE
+      'zdf.de', // ZDFmediathek
+      'ardmediathek.de', // ARD Mediathek
+      'rtve.es', // RTVE Play ES
+      'atresplayer.com', // Atresplayer ES
+      'raiplay.it', // RaiPlay IT
+      'viaplay.com', // Viaplay Nordiques
+      // ── Asie / autres ──
+      'hotstar.com', // Disney+ Hotstar IN
+      'iq.com', // iQIYI
+      'wetv.vip', // WeTV Tencent
+      'viu.com', // Viu
+      'viki.com', // Rakuten Viki
+      'twitch.tv', // pas de DRM mais MSE massif —
+      // même raison que YouTube : le lecteur JS
+      // dépasse le moteur, onglet délégué
+      // amazon.tld volontairement ABSENT : déléguer le host
+      // entier enverrait la boutique hors moteur — voir
+      // DrmAllowlist (limite host-entier documentée).
       // amazon.tld volontairement ABSENT : déléguer le host
       // entier enverrait la boutique hors moteur — voir
       // DrmAllowlist (limite host-entier documentée).

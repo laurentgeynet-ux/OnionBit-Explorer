@@ -42,6 +42,27 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   produit : YouTube … délégué`
   (google.com reste moteur).
 
+- **ADR-0027 — allowlist étendue :
+  catalogue streaming complet**
+  (`app/`, `AppConfig.
+  drmDelegateHosts`) — ~55
+  domaines délégués : majors US
+  (hulu, max, paramountplus,
+  peacocktv, tv.apple.com,
+  crunchyroll…), francophones
+  (tf1plus, france.tv, m6, arte,
+  molotov, tv.sfr…), sport (dazn,
+  espn, beinsports), Europe (sky,
+  itvx, bbc iplayer, joyn, rtl+,
+  raiplay, viaplay…), Asie
+  (hotstar, iq.com, wetv, viu,
+  viki) + twitch (MSE massif, même
+  raison que YouTube). `amazon.*`
+  reste exclu par design (host
+  entier = boutique). Test `seed
+  produit : catalogue streaming
+  étendu`.
+
 ### Added
 
 - **R-112 — `list-style-type:
