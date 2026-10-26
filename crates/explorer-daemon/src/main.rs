@@ -357,6 +357,29 @@ fn build_session(
 }
 
 fn main() {
+    // Sentinelle de mort (vol PIPE : code 1 + stderr vide à
+    // ~6e-7e site, deux vols de suite). Principe : `alive`
+    // écrit au départ, effacé à l'arrêt propre — un vol qui
+    // laisse `alive` = mort externe (kill, stack overflow,
+    // alloc-abort : aucun de ces chemins ne passe par un
+    // crochet Rust) ; une entrée `panic:` = crochet exécuté
+    // → le panic est nommé. `EXPLORER_DEATH_LOG` surchage le
+    // chemin (défaut `$TEMP/explorer_daemon_death.log`).
+    let death_log = std::env::var("EXPLORER_DEATH_LOG")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| std::env::temp_dir().join("explorer_daemon_death.log"));
+    let _ = std::fs::write(&death_log, "alive\n");
+    {
+        let p = death_log.clone();
+        std::panic::set_hook(Box::new(move |info| {
+            let loc = info
+                .location()
+                .map(|l| format!("{l}"))
+                .unwrap_or_else(|| "?".to_string());
+            let _ = std::fs::write(&p, format!("panic: {info} @ {loc}\n"));
+            eprintln!("explorer-daemon : panic {info} @ {loc}");
+        }));
+    }
     // Pile large pour **tous** les threads du runtime (workers
     // + pool `spawn_blocking`) : le thread moteur jscore porte
     // déjà 32 Mio (JS-C41) ; un overflow sur un worker —
@@ -371,6 +394,10 @@ fn main() {
         .build()
         .expect("runtime tokio")
         .block_on(amain());
+    // Arrêt propre (CTRL-C / shutdown) : la sentinelle est
+    // effacée — un `alive` résiduel après une mort signifie
+    // « aucun crochet n'a couru » (mort externe).
+    let _ = std::fs::remove_file(&death_log);
 }
 
 #[allow(clippy::too_many_lines)] // setup séquentiel — chaque bloc est documenté in situ
