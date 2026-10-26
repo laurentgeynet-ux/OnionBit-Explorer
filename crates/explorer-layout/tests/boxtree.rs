@@ -567,3 +567,26 @@ fn slot_niche_dans_slot_aplatit() {
         "b enfant du slot interne"
     );
 }
+
+/// R-116 — les commentaires `<!-- -->` ne produisent JAMAIS de
+/// boîte : `child_boxes` n'émet que `NodeData::Text` (les
+/// commentaires sont `NodeData::Comment`). Régression mesurée
+/// terrain (amazon ×N, guardian ×119 : `<#comment>` peint
+/// comme texte — le nœud filtrait dans le rail miroir).
+#[test]
+fn commentaire_ne_peint_pas() {
+    let (_dom, root) = tree("<html><body><!-- secret --><p>visible</p></body></html>");
+    let mut texts = Vec::new();
+    let mut queue = vec![&root];
+    while let Some(b) = queue.pop() {
+        if let Some(t) = &b.text {
+            texts.push(t.clone());
+        }
+        queue.extend(&b.children);
+    }
+    assert!(
+        !texts.iter().any(|t| t.contains("secret")),
+        "commentaire peint : {texts:?}"
+    );
+    assert!(texts.iter().any(|t| t.contains("visible")), "texte perdu : {texts:?}");
+}
