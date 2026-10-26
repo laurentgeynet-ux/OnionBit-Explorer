@@ -1845,3 +1845,17 @@ fn hit_test_ordre_document_inverse_a_rang_egal() {
     });
     assert_eq!(elem, Some(a), "dernier peint attendu : {hit:?}");
 }
+
+/// Vol 28 wordle NYT : `<iframe>` sans dimensions = objet
+/// remplacé 300×150 (HTML Rendering) — la boîte ne doit
+/// pas retomber à 0×0.
+#[test]
+fn iframe_sans_dimensions_gabarit_300x150() {
+    let (dom, bx) = laid(
+        "<div><iframe src=\"https://example.com\"></iframe></div>",
+        "body{margin:0} div{width:800px}",
+    );
+    let f = find(&bx, by_tag(&dom, "iframe"));
+    assert!(approx(f.rect.width, 300.0), "w={}", f.rect.width);
+    assert!(approx(f.rect.height, 150.0), "h={}", f.rect.height);
+}

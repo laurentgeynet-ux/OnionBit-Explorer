@@ -7,6 +7,17 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **Vol 28 — `<iframe>` sans
+  dimensions = 300×150**
+  (`explorer-layout`) — boîte
+  feuille remplacée au gabarit
+  spec : le document embarqué
+  n'était jamais boxifié et la
+  balise retombait à 0×0
+  (wordle NYT). Régression
+  `iframe_sans_dimensions_`
+  `gabarit_300x150` (block).
+
 - **Vol 25 — `<svg>` à
   `viewBox` seul → 300 px**
   (`explorer-css`) — la règle
