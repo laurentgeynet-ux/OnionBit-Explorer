@@ -353,6 +353,23 @@ fn translate_pattern(src: &str, unicode: bool, fold: bool) -> Result<String, Str
                         i = next;
                         continue;
                     }
+                    // Paire surrogates fusionnée par `class_atom_of`
+                    // (`\ud83d\ude00` → astral) : `frag` porte le
+                    // premier échappe brut (`\x{d83d}` — codepoint
+                    // invalide pour le backend, hors `u` la fusion
+                    // n'est pas faite côté `escape`) → émettre le
+                    // point astral, sauter les 12 chars de la paire.
+                    if cp > 0xFFFF {
+                        if let Some((_cp, pnext)) = surrogate_pair(&cs, i) {
+                            out.push_str(&format!("\\x{{{cp:x}}}"));
+                            class_emitted = true;
+                            class_prev = Some(atom);
+                            class_prev_bound = class_dash;
+                            class_dash = false;
+                            i = pnext;
+                            continue;
+                        }
+                    }
                 }
                 out.push_str(&frag);
                 class_emitted = true;
@@ -449,13 +466,43 @@ fn translate_pattern(src: &str, unicode: bool, fold: bool) -> Result<String, Str
                         // nos strings UTF-8 — la plage est clampée
                         // (`lo`→`\x{e000}`, `hi`→`\x{d7ff}`) ; une
                         // plage entièrement surrogate n'émet rien.
+                        // Plage entièrement surrogate
+                        // `[\ud800-\udfff]` = tout atome astral
+                        // en sémantique UTF-16 (les minifieurs
+                        // l'écrivent pour « char > BMP ») → la
+                        // plage astrale UTF-8 équivalente.
+                        if is_surrogate(lo) && is_surrogate(hi) {
+                            out.push_str("\\x{10000}-\\x{10ffff}");
+                            class_emitted = true;
+                            i = if cs[i + 1] == '\\' {
+                                t.escape(&cs, i + 1, src)?.1
+                            } else {
+                                i + 2
+                            };
+                            class_prev = Some(ClassAtom::Char(hi));
+                            class_prev_bound = true;
+                            class_dash = false;
+                            continue;
+                        }
                         let lo_c = if is_surrogate(lo) { 0xe000 } else { lo };
                         let hi_c = if is_surrogate(hi) { 0xd7ff } else { hi };
                         // La borne haute est toujours consommée ici
                         // (fold ou non) — l'émission décalée au tour
                         // suivant empêcherait le clamp.
                         let (hfrag, hnext) = if cs[i + 1] == '\\' {
-                            t.escape(&cs, i + 1, src)?
+                            // Borne haute = paire surrogates
+                            // fusionnée (`-\ud83d\ude4f`) : même
+                            // fuite que l'atome seul — émettre le
+                            // point astral, pas le `\x{d83d}` brut.
+                            if hi > 0xFFFF {
+                                if let Some((_cp, pnext)) = surrogate_pair(&cs, i + 1) {
+                                    (format!("\\x{{{hi:x}}}"), pnext)
+                                } else {
+                                    t.escape(&cs, i + 1, src)?
+                                }
+                            } else {
+                                t.escape(&cs, i + 1, src)?
+                            }
                         } else {
                             (cs[i + 1].to_string(), i + 2)
                         };

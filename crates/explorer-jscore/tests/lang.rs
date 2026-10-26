@@ -402,9 +402,11 @@ fn iife_hoisted_fn_shadows_and_receives_props() {
     // Sonde d'identité : l'objet écrit === l'objet retourné ?
     // (sépare « écriture ailleurs » de « ré-instanciation »)
     assert_eq!(
-        ev_str("(function(){ e.tag = 'W'; function e(){return 'call'};\
+        ev_str(
+            "(function(){ e.tag = 'W'; function e(){return 'call'};\
                 var w = e.tag, c = e(), t2 = e.tag;\
-                return [w, c, t2].join('|') })()"),
+                return [w, c, t2].join('|') })()"
+        ),
         "W|call|W"
     );
 }
@@ -8031,4 +8033,84 @@ fn trailing_comma_call_args() {
     let mut e = Engine::new();
     assert!(e.eval("f(,)").is_err(), "`f(,)` reste illégal");
     assert!(e.eval("f(a,,)").is_err(), "`f(a,,)` reste illégal");
+}
+
+#[test]
+fn comma_indirect_call_pattern() {
+    // Minifié webpack/terser : `(0, obj.f)()` — appel indirect
+    // via séquence (perte de `this` intentionnelle) — mesuré
+    // devto_base_4 @1:543 (bundle réel).
+    let mut e = Engine::new();
+    let r = e.eval("var o={f:function(){return 'ok'}}; var g=(0,o.f); [g(), (0,o.f)()].join('|')");
+    match r {
+        Ok(v) => assert_eq!(e.describe(v), "ok|ok"),
+        Err(x) => panic!("(0,f)() rejeté : {x}"),
+    }
+    // Séquence en position statement : `a=!b, f(c)` (devto_base_2).
+    let r = e.eval("var out='';var a=false;function f(v){out+='hit'+v}; a=!a, f(a); out");
+    match r {
+        Ok(v) => assert_eq!(e.describe(v), "hittrue"),
+        Err(x) => panic!("séquence statement rejetée : {x}"),
+    }
+}
+
+#[test]
+fn obj_literal_function_keyword_method() {
+    // devto_base_5 @1:186 : `{…,function(e,n){…}}` — méthode dont
+    // le nom est le mot-clé `function` (légal ES6 : mots-clés
+    // réservés OK en nom de propriété/méthode). Mesuré bundle réel.
+    let mut e = Engine::new();
+    for src in [
+        "var o={a:function(){return 1},function(e){return 2}}; o.a()+'|'+o.function(0)",
+        "var o={a(){return 1},function(e){return 2}}; o.a()+'|'+o.function(0)",
+        "var a=[function(){return 1},function(){return 2}]; a[0]()+'|'+a[1]()",
+        "(function(){var x=function(){}; return 1})(0, function(){}, function(){})",
+        "var x=(function(){},function(){return 9}); x()",
+    ] {
+        match e.eval(src) {
+            Ok(v) => println!("OK   {src}  → {}", e.describe(v)),
+            Err(x) => println!("FAIL {src}  → {x}"),
+        }
+    }
+}
+
+#[test]
+fn regex_class_quantifier_in_alternative() {
+    // Motif corpus (guardian/youtube) : `[abc]?` en alternative
+    // `/x|[ab]?/` — split UTF-16 classique des minifieurs.
+    let mut e = Engine::new();
+    for src in [
+        r"/[ab]?c/.test('abc')",
+        r"/x|[ab]?/.test('ab')",
+        r"/(foo|[0-9]+?)bar/.test('42bar')",
+        r"/a|[bc]?d?/.test('d')",
+        r"/https?:\/\//.test('https://')",
+    ] {
+        match e.eval(src) {
+            Ok(v) => println!("OK   {src} → {}", e.describe(v)),
+            Err(x) => println!("FAIL {src} → {x}"),
+        }
+    }
+}
+
+#[test]
+fn regex_astral_class_quantifier() {
+    // « split UTF-16 » : un char astral (surrogate pair) dans
+    // une classe quantifiée — `/[\u{1F300}-\u{1F5FF}]?/u` ou
+    // classes du genre `[\u00a0-\ud83d\udcff]?`.
+    let mut e = Engine::new();
+    for src in [
+        r"/[\u00a0-\uffff]?/.test('\u00c0')",
+        r"/[\u00a0-\uffff]?/.test('x')",
+        r"/[\ud83d\ude00-\ud83d\ude4f]?/.test('x')",
+        // Plage entière surrogate = « tout astral » (minifieurs).
+        r"/[\ud800-\udfff]/u.test('\u{1f600}')",
+        r"/[\w.-]+@/.test('a@')",
+        r"/[^-\w]/u.test('-')",
+    ] {
+        match e.eval(src) {
+            Ok(v) => println!("OK   {src} → {}", e.describe(v)),
+            Err(x) => println!("FAIL {src} → {x}"),
+        }
+    }
 }

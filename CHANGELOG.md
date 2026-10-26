@@ -7,6 +7,93 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **JS-C123 — `delete el.dataset.x`
+  retire l'attribut `data-*`**
+  (`explorer-jscore`) — mur final
+  de la révélation spectrum,
+  mesuré en vol : la page pose
+  `section.dataset.status = "…"`
+  puis le supprime après
+  `Promise.all(loadBlock)` — le
+  `delete` tombait dans le vide :
+  le trait `Host` n'avait aucun
+  hook de suppression →
+  `div[data-status]{display:none}`
+  éternel. Trois coups :
+  `Host::del` (défaut `false`),
+  `delete_prop` consulte l'hôte
+  avant `remove_own`, `DatasetHost
+  ::del` retire `data-<clé>`. Fix
+  sémantique lié : `DatasetHost::
+  get` rend `None` sur clé absente
+  (avant `Some(Undefined)` →
+  `has_prop` lisait « présent » →
+  `'x' in dataset` restait vrai
+  après suppression). Terrain
+  (release, :9460) : `status:12`
+  figé → **`status:0`, sections
+  révélées, doc 25 px → ~3563 px**,
+  319 boîtes / 271 items.
+  Test `dataset_delete_removes_
+  data_attr`.
+
+- **JS-C122 — handles DOM
+  cross-document rejetés +
+  mutateurs bornés** (`explorer-
+  jscore`) — `node_for` validait
+  l'id contre l'arène **de
+  l'argument** puis l'indexait
+  dans l'arène du **receveur** :
+  un handle d'arène étrangère
+  (DOMParser, responseXML,
+  iframe) était soit hors-limites
+  (panic `index 614 > len 507`
+  mesuré en vol) soit in-bounds
+  → `detach` sur le **mauvais
+  nœud** — voie mesurée de la
+  perte de `<main>` spectrum.
+  `node_for_in(e, v, dom)` exige
+  `Rc::ptr_eq` entre les arènes ;
+  les ~20 sites (`dom_host`,
+  `misc_apis`, `mutation`,
+  `observers`, Range/Selection/
+  TreeWalker/NodeIterator/IO/RO/
+  FormData/serialisation XML)
+  re-câblés. Passe « jamais
+  panic » : `is_ancestor_or_self`
+  bornée, `append`/`detach`/
+  `insert_before`/`replace_child`/
+  `splice_fragment`/attr & text
+  writers/`element_path` no-op
+  sur id invalide — la page
+  hostile est la norme.
+  Test `cross_document_node_
+  args_are_rejected` (nœud
+  DOMParser → `TypeError`, DOM
+  page intact).
+
+- **JS-C121 — qSA miroir :
+  combinateur `>` + universel
+  `*`** (`explorer-jscore`) —
+  le sous-ensemble sélecteur du
+  miroir ne connaissait que le
+  descendant : `main > div` → 0,
+  `*` → 0. Le décorateur spectrum
+  (`main > div`, `:scope > *`)
+  trouvait zéro section → page
+  masquée à jamais. `SelPart`
+  gagne `child` (jointure `>`),
+  `ancestor_matches` exige le
+  parent direct ; le garde
+  « tout vide → None » ne jette
+  plus `*` (mémorisé) ; `:scope`
+  reste matchable par `>` sur le
+  bound (per spec) — le `seen`
+  borne déjà. `~`/`+` restent
+  échecs propres. Terrain :
+  `main > div` 0→12, `*` 0→215.
+  205 tests dom verts.
+
 - **i18n — 10 locales, rien en dur**
   (`app/`) — sources ARB
   `lib/l10n/app_{fr,en,es,pt,zh,hi,
@@ -11910,3 +11997,19 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   le matcher (PIPE). Test
   `adopted_sheets_css_extracts_
   rule_texts`.
+
+- **JS-C121 — échappes surrogate
+  regex** (`explorer-jscore::regexp`)
+  — `[\ud83d\ude00-\ud83d\ude4f]`
+  (classe corpus guardian/youtube)
+  compilait `invalid codepoint` :
+  l'atome astral fusionné portait
+  l'échappe brut `\x{d83d}`.
+  Paire → `\x{astral}` (atome et
+  borne haute de range) ; plage
+  surrogate `[\ud800-\udfff]` →
+  `[\x{10000}-\x{10ffff}]` (« tout
+  astral » UTF-16). 285/285 lang.
+  Tests `regex_astral_class_
+  quantifier`, `regex_class_
+  quantifier_in_alternative`.
