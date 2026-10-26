@@ -7,6 +7,23 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **JS-C143 — commentaires exclus de
+  la synchro DOM** (`explorer-jscore`)
+  — `serialize_keyed_node` émettait
+  `<#comment>` littéral pour tout nœud
+  `Comment` : re-parsé en élément
+  fantôme **peint en texte** (MDN,
+  JSFiddle, reddit, archive, w3c,
+  ecma, vercel, dailymotion) **et**
+  poussait un `id`/`tag` sans
+  correspondant `serializable_kind`
+  côté moteur → le zip
+  `engine_preorder` ↔ `ids` dérivait
+  d'un cran par `<!-- -->`. Les
+  commentaires sont sautés sans
+  émission ni clé, aligné sur
+  `serializable_kind` (Element|Text).
+
 - **JS-C142 — `window` hérite
   `EventTarget.prototype`** (`explorer-jscore`)
   — mur YouTube : le polyfill

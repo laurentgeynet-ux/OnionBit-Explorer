@@ -233,6 +233,23 @@ fn vol10_window_inherits_event_target_prototype() {
     }
 }
 
+/// Les nœuds `Comment` n'ont pas de reflet moteur —
+/// `serialize_keyed` les sautait en `<#comment>` littéral
+/// (re-parsé en élément fantôme peint en texte sur des dizaines
+/// de sites : MDN, JSFiddle, reddit, archive) ET décalait le zip
+/// `ids` ↔ `engine_preorder` d'un cran par commentaire.
+#[test]
+fn vol14_comments_not_serialized() {
+    use explorer_jscore::Dom;
+    let d = Dom::from_html("<html><body><!-- x --><p>a<!--y--></p></body></html>");
+    let (html, ids, tags) = d.serialize_keyed();
+    assert!(!html.contains("#comment"), "{html}");
+    assert!(!html.contains("<!--"), "{html}");
+    // Sérialisables : html, body, p, et le texte "a".
+    assert_eq!(ids.len(), 4, "{tags:?}");
+    assert_eq!(ids.len(), tags.len());
+}
+
 /// `IDBIndex` & autres interfaces IDB déclarées — Rakuten :
 /// `IDBIndex is not defined` était une `ReferenceError` fatale.
 #[test]

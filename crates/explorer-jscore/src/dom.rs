@@ -1049,6 +1049,16 @@ impl Dom {
                         out.push_str(&escape_text(&n.text));
                         continue;
                     }
+                    // Commentaire : pas de reflet moteur
+                    // (`serializable_kind` côté apply ne garde que
+                    // Element|Text) — ni markup `<#comment>`
+                    // (re-parsé en élément fantôme peint en
+                    // texte), ni entrée `ids`/`tags` (le zip
+                    // `engine_preorder` ↔ `ids` dériverait d'un
+                    // cran par commentaire).
+                    if n.kind == NodeKind::Comment {
+                        continue;
+                    }
                     if n.kind == NodeKind::Fragment {
                         // Aucun nœud moteur émis — id non listé
                         // (les enfants le sont).
