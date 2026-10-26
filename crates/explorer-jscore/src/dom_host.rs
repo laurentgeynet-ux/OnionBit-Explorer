@@ -659,6 +659,17 @@ fn dom_raw_get(e: &mut Engine, dom: &DomRef, node: NodeId, prop: &str) -> JsResu
         return Ok(e.str_val(v));
     }
     let attr = prop_to_attr(prop).unwrap_or(prop);
+    // IDL URL-typé (`src`/`href` sur `<img>`/`<script>`/`<a>`…) :
+    // la lecture résout contre `document.baseURI` (spec
+    // `[[Get]]` URL — `getAttribute` reste brut). `new URL(
+    // el.src)` échouait `Invalid URL` sur les src relatives
+    // (lemonde `inline:5`, franceinfo `Invalid scheme`).
+    if matches!(attr, "src" | "href") {
+        if let Some(raw) = d.attr(node, attr) {
+            let resolved = crate::xhr::resolve_url(e, raw).unwrap_or_else(|| raw.to_string());
+            return Ok(e.str_val(resolved));
+        }
+    }
     let v = d.attr(node, attr).unwrap_or("").to_string();
     Ok(e.str_val(v))
 }
@@ -5643,11 +5654,20 @@ impl Host for NodeHost {
         }
         // Attribute-mapped props.
         if let Some(attr) = prop_to_attr(key) {
-            let v = self.dom.borrow().attr(node, attr).map(str::to_string);
-            return Ok(Some(match v {
-                Some(v) => e.str_val(v),
-                None => e.str_val(""),
-            }));
+            // IDL URL-typé : `src`/`href` se résolvent contre
+            // `document.baseURI` à la lecture (spec) —
+            // `getAttribute` reste brut. `new URL(el.src)`
+            // échouait `Invalid URL` sur les chemins relatifs
+            // (lemonde `inline:5`, franceinfo `Invalid scheme`).
+            let raw = self.dom.borrow().attr(node, attr).map(str::to_string);
+            let v = match (&raw, attr) {
+                (Some(r), "src" | "href") => {
+                    crate::xhr::resolve_url(e, r).unwrap_or_else(|| r.clone())
+                }
+                (Some(r), _) => r.clone(),
+                (None, _) => String::new(),
+            };
+            return Ok(Some(e.str_val(v)));
         }
         if BOOL_ATTRS.contains(&key) {
             let has = self.dom.borrow().has_attr(node, key);

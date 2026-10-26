@@ -7,6 +7,20 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **JS-C149 — `el.src`/`el.href`
+  résolus contre `document.baseURI`**
+  (`explorer-jscore`) — les props IDL
+  URL-typées rendaient l'attribut
+  brut : `new URL(el.src)` échouait
+  `Invalid URL`/`Invalid scheme` sur
+  les chemins relatifs (lemonde
+  `inline:5`, franceinfo
+  `polyfills-*.js`). La lecture
+  résout (spec `[[Get]]` URL) dans
+  `dom_raw_get` et le chemin
+  attribute-mapped ; `getAttribute`
+  reste brut.
+
 - **JS-C148 — `head`/`body`/`html`
   auto-vivés dans
   `getElementsByTagName`** (`explorer-jscore`)
