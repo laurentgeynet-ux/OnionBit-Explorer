@@ -1054,27 +1054,43 @@ fn astral_class(cs: &[char], i: usize, hi: u32) -> Option<(String, usize)> {
         }
     };
     let mut j = i + 1;
-    let lo = low(j)?;
+    let mut lo = low(j)?;
     j += 6;
     let base = 0x1_0000 + ((hi - 0xd800) << 10);
     if cs.get(j) == Some(&']') {
         // `[\uDClo]` — un seul point astral.
         return Some((format!("\\x{{{:x}}}", base + (lo - 0xdc00)), j + 1));
     }
-    if cs.get(j) == Some(&'-') {
-        let hi2 = low(j + 1)?;
-        if cs.get(j + 7) == Some(&']') {
-            return Some((
-                format!(
-                    "[\\x{{{:x}}}-\\x{{{:x}}}]",
-                    base + (lo - 0xdc00),
-                    base + (hi2 - 0xdc00)
-                ),
-                j + 8,
+    // Classe multi-items de basses surrogates — atomes `\uDCxx`
+    // et plages `\uDCxx-\uDCyy` fusionnés en ensemble astral
+    // (`\uD800[\uDD00-\uDD02\uDF9F\uDFD0]`, bundle kevlar
+    // YouTube). Tout autre atome → `None` (retombée `(?!)` +
+    // classe normale).
+    let mut frag = String::from("[");
+    loop {
+        if cs.get(j) == Some(&'-') {
+            let hi2 = low(j + 1)?;
+            frag.push_str(&format!(
+                "\\x{{{:x}}}-\\x{{{:x}}}",
+                base + (lo - 0xdc00),
+                base + (hi2 - 0xdc00)
             ));
+            j += 7;
+        } else {
+            frag.push_str(&format!("\\x{{{:x}}}", base + (lo - 0xdc00)));
+        }
+        match cs.get(j) {
+            Some(&']') => {
+                frag.push(']');
+                return Some((frag, j + 1));
+            }
+            Some(&'\\') => {
+                lo = low(j)?;
+                j += 6;
+            }
+            _ => return None,
         }
     }
-    None
 }
 
 /// `{n}` / `{n,}` / `{n,m}` à `cs[i]` → `(lo, hi, next)`.
@@ -1656,5 +1672,29 @@ mod tests {
             r"(?:[^\uD800-\uDBFF]|^)[\uDC00-\uDFFF]|[\uD800-\uDBFF](?![\uDC00-\uDFFF])",
             "abc"
         ));
+    }
+}
+
+#[cfg(test)]
+mod dbg_vol10 {
+    #[test]
+    fn yt_regex() {
+        let pat = std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/data/vol10_yt_regex.txt"
+        ))
+        .unwrap();
+        let t = super::translate_pattern(&pat, false, false).unwrap();
+        eprintln!("TAIL>>{}", &t[1850.min(t.len())..]);
+        assert!(!t.contains("(?!)"), "dead branch left: {t}");
+        assert!(fancy_regex::Regex::new(&t).is_ok());
+        // Plage astrale `\uD800\uDD00-\uDD02` = U+10300–U+10302 :
+        // la classe multi-items doit la couvrir.
+        // `\uD800\uDD00` = U+10100, `\uD800\uDF9F` = U+1039F.
+        let mini = super::translate_pattern("\\uD800[\\uDD00-\\uDD02]", false, false).unwrap();
+        assert_eq!(mini, "[\\x{10100}-\\x{10102}]");
+        let re = super::JsRegExp::compile(&pat, "").unwrap();
+        assert!(re.exec("\u{10101}", 0).is_some());
+        assert!(re.exec("\u{1039f}", 0).is_some());
     }
 }

@@ -7,6 +7,15 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **JS-C139 — regex : classes multi-items
+  de basses surrogates → ensemble
+  astral** (`explorer-jscore`) —
+  `\uD800[\uDD00-\uDD02\uDF9F\uDFD0]`
+  (bundle kevlar YouTube) : JS-C134 ne
+  fusionnait que l'atome/plage unique —
+  branche morte `(?!)`. La boucle
+  couvre atomes et plages mixtes.
+
 - **JS-C138 — `Worker#addEventListener`
   des deux côtés** (`explorer-jscore`)
   — mur openstreetmap.org (Rails UJS) :
