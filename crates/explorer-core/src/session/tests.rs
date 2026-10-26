@@ -2430,3 +2430,38 @@ fn download_meta_rejects_script_mimes() {
     assert!(download_meta(&h).is_none(), "text/plain reste un document");
 }
 
+/// Vol google SERP — la méta refresh enfermée dans un
+/// `<noscript>` est rawtext quand le scripting est levé
+/// (CAP-155) : invisible pour `meta_refresh`. Sur une page
+/// de **fallback pur** (body = `noscript`/`script`
+/// seulement) elle est honorée ; une page riche avec un
+/// `noscript` annexe garde la spec (`None`).
+#[test]
+fn noscript_meta_refresh_fallback_pure_only() {
+    let mut tb = TreeBuilder::new();
+    tb.set_scripting(true);
+    tb.push("<html><body><script>x()</script><noscript><meta http-equiv=refresh content=\"0;url=/retry\"></noscript></body></html>");
+    tb.finish();
+    let dom = tb.into_dom();
+    assert!(meta_refresh(&dom).is_none(), "rawtext : pas d'élément meta");
+    let (secs, raw) = noscript_meta_refresh(&dom).expect("fallback pur : méta honorée");
+    assert_eq!(secs, 0.0);
+    assert_eq!(raw.as_deref(), Some("/retry"));
+
+    // Page riche + noscript annexe → spec : rien.
+    let mut tb = TreeBuilder::new();
+    tb.set_scripting(true);
+    tb.push("<html><body><p>contenu</p><noscript><meta http-equiv=refresh content=\"0;url=/r\"></noscript></body></html>");
+    tb.finish();
+    assert!(
+        noscript_meta_refresh(&tb.into_dom()).is_none(),
+        "page riche : la méta noscript reste ignorée"
+    );
+
+    // Texte non blanc hors repli → pas un fallback pur.
+    let mut tb = TreeBuilder::new();
+    tb.set_scripting(true);
+    tb.push("<html><body>bonjour<noscript><meta http-equiv=refresh content=\"0;url=/r\"></noscript></body></html>");
+    tb.finish();
+    assert!(noscript_meta_refresh(&tb.into_dom()).is_none());
+}

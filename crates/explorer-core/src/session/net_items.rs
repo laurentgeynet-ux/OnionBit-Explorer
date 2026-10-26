@@ -551,6 +551,10 @@ impl NavJob {
         let refresh_base = base_url.clone().unwrap_or_else(|| resolved.clone());
         let refresh = header_refresh
             .or_else(|| meta_refresh(&dom))
+            // Repli `noscript` (vol google) : page de
+            // fallback pure — scripting levé au parse, la
+            // méta du repli est honorée.
+            .or_else(|| noscript_meta_refresh(&dom))
             .and_then(|(secs, raw)| {
                 let target = match raw {
                     Some(r) => Url::resolve(&refresh_base, &r).ok()?,

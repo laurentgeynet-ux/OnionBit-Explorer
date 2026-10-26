@@ -357,6 +357,64 @@ pub(crate) fn meta_refresh(dom: &Dom) -> Option<(f64, Option<String>)> {
     None
 }
 
+/// `<meta http-equiv=refresh>` enfermée dans un
+/// `<noscript>` (vol google SERP, CAP-155) : scripting
+/// levé au parse, le contenu de `noscript` est rawtext —
+/// la méta n'existe jamais comme élément et
+/// [`meta_refresh`] la manque. Spec : ignorée tant que le
+/// scripting tourne. Repli produit : quand la page est un
+/// **fallback pur** — tous les enfants éléments du `body`
+/// sont `noscript`/`script`, aucun texte non blanc hors
+/// repli — le rawtext est re-parsé (scripting off) et sa
+/// méta refresh honorée : le document n'a rien d'autre à
+/// offrir, c'est le sens du repli. Une page riche avec un
+/// `noscript` annexe garde la spec : `None`.
+pub(crate) fn noscript_meta_refresh(dom: &Dom) -> Option<(f64, Option<String>)> {
+    // Le `<body>` — aucun repli « page » sans lui.
+    let mut body = None;
+    let mut queue = vec![dom.document()];
+    while let Some(n) = queue.pop() {
+        if dom.tag_name(n).is_ok_and(|t| t == "body") {
+            body = Some(n);
+            break;
+        }
+        if let Ok(ch) = dom.children(n) {
+            queue.extend(ch.iter().rev());
+        }
+    }
+    let body = body?;
+    let children = dom.children(body).ok()?;
+    let mut noscripts = Vec::new();
+    for c in children {
+        match dom.data(c).ok()? {
+            explorer_dom::NodeData::Element(_) => match dom.tag_name(c).ok()? {
+                "script" => {}
+                "noscript" => noscripts.push(c),
+                _ => return None, // contenu réel — spec.
+            },
+            // Texte non blanc hors repli → contenu réel.
+            explorer_dom::NodeData::Text(t) if !t.trim().is_empty() => return None,
+            _ => {}
+        }
+    }
+    // Re-parse du rawtext (scripting off) : la méta du
+    // repli devient un vrai élément — `meta_refresh`
+    // applique sa grammaire habituelle (première valide).
+    for n in noscripts {
+        let text = dom.text_content(n).ok()?;
+        if text.trim().is_empty() {
+            continue;
+        }
+        let mut tb = explorer_html::TreeBuilder::new();
+        tb.push(&text);
+        tb.finish();
+        if let Some(r) = meta_refresh(&tb.into_dom()) {
+            return Some(r);
+        }
+    }
+    None
+}
+
 /// Grammaire `content` d'une méta refresh **et de
 /// l'en-tête `Refresh:`** (spec HTML « pragmas »,
 /// tolérante — CAP-143/144) : `N[;][url=]U` — nombre en
