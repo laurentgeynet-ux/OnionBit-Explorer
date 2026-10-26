@@ -7,6 +7,17 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **JS-C137 — `Intl.supportedValuesOf`**
+  (`explorer-jscore`) — mur
+  bandcamp.com/discover : absent,
+  `supportedValuesOf is not a function`
+  tuait le bootstrap Vue (résultats
+  figés). Sous-ensemble honnête sans
+  CLDR : `gregory`, `default`,
+  `latn`/`arab`, `UTC`, devises
+  courantes, `unit` vide ; clé
+  inconnue → `RangeError` (spec).
+
 - **JS-C136 — `XPathEvaluator`
   `{createExpression, createNSResolver}`**
   (`explorer-jscore`) — mur

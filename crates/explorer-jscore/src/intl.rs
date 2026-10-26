@@ -18,6 +18,7 @@ pub(crate) fn install(e: &mut Engine) {
     let intl_v = Value::Obj(intl);
     e.add_method(intl, "getCanonicalLocales", canonical);
     e.add_method(intl, "supportedLocalesOf", canonical);
+    e.add_method(intl, "supportedValuesOf", supported_values_of);
     for (name, f) in [
         ("DateTimeFormat", intl_dtf_ctor as crate::heap::NativeFn),
         ("NumberFormat", intl_nf_ctor),
@@ -201,6 +202,29 @@ fn canonical(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
             None => return Err(e.range_error("Incorrect locale information provided")),
         }
     }
+    Ok(e.new_array(vals))
+}
+
+/// `Intl.supportedValuesOf(key)` — sous-ensemble honnête : sans
+/// données CLDR, on rapporte les valeurs que le moteur traite
+/// réellement (`gregory`, `latn`, `UTC`, devises courantes du
+/// `NumberFormat`). Clé inconnue → `RangeError` (spec). Mur mesuré :
+/// `supportedValuesOf is not a function` tuait le bootstrap Vue de
+/// bandcamp.com/discover.
+fn supported_values_of(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let key = e.to_js_string(arg(args, 0))?;
+    let list: &[&str] = match key.as_str() {
+        "calendar" => &["gregory"],
+        "collation" => &["default"],
+        "currency" => &["USD", "EUR", "GBP", "JPY", "CAD", "AUD", "CHF", "CNY"],
+        "numberingSystem" => &["latn", "arab"],
+        "timeZone" => &["UTC"],
+        "unit" => &[],
+        _ => {
+            return Err(e.range_error(format!("invalid key: {key}")));
+        }
+    };
+    let vals: Vec<Value> = list.iter().map(|s| e.str_val(*s)).collect();
     Ok(e.new_array(vals))
 }
 
