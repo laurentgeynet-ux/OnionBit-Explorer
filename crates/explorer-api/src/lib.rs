@@ -340,12 +340,21 @@ async fn frame(
         _ => session.frame_png(id),
     };
     match png {
-        Some(bytes) => (
+        // Un corps vide n'est jamais un PNG valide — servi
+        // `204` comme l'absence de frame, jamais `200` vide
+        // (vol : `/frame` 200 à 0 octet en transitoire de
+        // rasterisation). `Retry-After` signale aux clients
+        // que la frame arrive — retenter, pas abandonner.
+        Some(bytes) if !bytes.is_empty() => (
             [(header::CONTENT_TYPE, HeaderValue::from_static("image/png"))],
             bytes,
         )
             .into_response(),
-        None => StatusCode::NO_CONTENT.into_response(),
+        _ => (
+            StatusCode::NO_CONTENT,
+            [(header::RETRY_AFTER, HeaderValue::from_static("1"))],
+        )
+            .into_response(),
     }
 }
 
