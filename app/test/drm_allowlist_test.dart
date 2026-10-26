@@ -2,6 +2,7 @@
 // Copyright (C) 2026 Laurent Geynet
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
+import 'package:explorer_app/core/config/app_config.dart';
 import 'package:explorer_app/features/browser/domain/drm_allowlist.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -43,6 +44,16 @@ void main() {
     expect(a.delegatesUrl('https://www.netflix.com'), isTrue);
     expect(a.delegatesUrl('https://canap.fr'), isTrue);
     expect(a.hosts, isNot(contains('')));
+  });
+
+  test('seed produit : YouTube (MSE hors moteur + DRM) délégué', () {
+    final a = DrmAllowlist(const AppConfig().drmDelegateHosts);
+    expect(a.delegatesUrl('https://www.youtube.com/watch?v=x'), isTrue);
+    expect(a.delegatesUrl('https://m.youtube.com'), isTrue);
+    expect(a.delegatesUrl('https://music.youtube.com'), isTrue);
+    expect(a.delegatesUrl('https://youtu.be/abc'), isTrue);
+    // Google lui-même reste sur le moteur.
+    expect(a.delegatesUrl('https://www.google.com'), isFalse);
   });
 
   test('host avec port et credentials matche sur le host seul', () {

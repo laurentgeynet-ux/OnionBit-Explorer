@@ -27,6 +27,21 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   API) restent des diagnostics
   techniques, non localisés.
 
+- **ADR-0027 — YouTube rejoint
+  l'allowlist de délégation**
+  (`app/`, `AppConfig`) —
+  `youtube.com` + `youtu.be`
+  ajoutés au seed : la page
+  entière passe en onglet WebView2
+  (MSE natif + DRM films/Premium,
+  sous-domaines `www`/`m`/`music`
+  couverts par le matcher).
+  `youtu.be` délègue avant fetch —
+  la 301 part directement dans la
+  surface native. Test `seed
+  produit : YouTube … délégué`
+  (google.com reste moteur).
+
 ### Added
 
 - **R-112 — `list-style-type:
