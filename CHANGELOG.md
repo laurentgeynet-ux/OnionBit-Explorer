@@ -7,25 +7,6 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
-- **`QtavMediaPlayer` — backend
-  QtavRust/FFmpegRust derrière la seam**
-  (`app/` — `dart:ffi` → `qtav_ffi.dll`,
-  ADR-0012 côté QtavRust) : lecteur pur
-  Rust/MIT-Apache alternatif à
-  `VideoMediaPlayer` (fvp/MDK) — frames
-  RGBA tirées par polling
-  (`qtav_frame_seq`/`pull`, patron
-  `dirty_rects`) → `ui.Image`, audio
-  jouée en natif dans la DLL (cpal),
-  transports play/pause/seek/volume/
-  mute/rate relayés. Factory : qtav
-  tenté d'abord, échec → repli fvp.
-  DLL : `QTAV_FFI_LIB` ou `qtav_ffi.dll`
-  à côté de l'exe/PATH. Couverture
-  limitée par ffrs (H.264 + audio
-  complet aujourd'hui) — fvp reste le
-  filet codecs.
-
 - **i18n — 10 locales, rien en dur**
   (`app/`) — sources ARB
   `lib/l10n/app_{fr,en,es,pt,zh,hi,
@@ -1012,61 +993,6 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   `c97_offset_parent_top_left`.
 
 ### Fixed
-
-- **Étape 143 — feuilles construites
-  cascadées + `:defined` sur le
-  registre vivant** (`explorer-dom`,
-  `explorer-css`, `explorer-jscore`,
-  `explorer-js`, `explorer-core`) :
-  le reliquat nommé de l'étape 142
-  est fermé — le rail
-  `adoptedStyleSheets → cascade`
-  existait déjà bout-en-bout
-  (`insertRule` → `cssRules.cssText`
-  → `Engine::adopted_sheets_css` →
-  `drain_script_net` → `PaintPayload`
-  → feuilles auteur après `linked_
-  sheets`) ; il manquait **`:defined`**
-  — pseudo structurel perdu au parse
-  (`sel:not(:defined)` droppé →
-  règle catalyst morte). Chemin :
-  `DynamicPseudo::Defined` +
-  `state::is_defined` (natif = vrai,
-  nom à tiret/`is=` → registre) ;
-  `Dom::set_defined_names`/`is_
-  defined_name` (champ additif
-  document-local) ; `Engine::
-  defined_ce_names` (miroir
-  `ce.defs`, top + garés) →
-  `Tab.defined_names` → transport
-  `PaintPayload` → bake des `Dom`
-  reconstruits (`apply_payload` /
-  `put_paint`). Test `adopted_
-  sheet_defined_selector_drives_
-  lazy_discovery` — mécanisme
-  catalyst à l'identique : feuille
-  `x-lazy:not(:defined){animation:…}`
-  adoptée → `animationstart` livré,
-  `define` → `:defined` matche.
-  **Présence IDL** :
-  `adoptedStyleSheets` posé sur
-  `Document.prototype` + méthodes
-  `insertRule`/`deleteRule`/
-  `replace`/`replaceSync` sur
-  `CSSStyleSheet.prototype`
-  (chaînage `proto` des feuilles) —
-  la feature-detect catalyst exige
-  les deux `in` avant la voie
-  native (mesuré live :
-  `docProto:true`, `rs:true`).
-  Terrain github : la voie native
-  reste gardée par le flag
-  **serveur** `catalyst_lazy_define_
-  native` — `sheets:0` en vol,
-  `r.Se` (define direct) pris ; le
-  pont est exercé par les sites à
-  feuilles construites
-  inconditionnelles (Lit/vaadin).
 
 - **Étape 142 — `animationstart`
   synthétique depuis les naissances

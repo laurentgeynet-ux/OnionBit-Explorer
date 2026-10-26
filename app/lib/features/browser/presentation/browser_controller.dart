@@ -20,7 +20,6 @@ import '../../../core/settings/app_settings.dart';
 import '../../../core/l10n/app_localizations.dart';
 import '../data/browser_repository.dart';
 import '../data/media_player.dart';
-import '../data/qtav_media_player.dart';
 import '../domain/bookmark.dart';
 import '../domain/browser_tab.dart';
 import '../domain/download_offer.dart';
@@ -144,17 +143,9 @@ class BrowserState {
 }
 
 /// Fabrique de lecteurs natifs pour la seam `MediaSurface` —
-/// `QtavMediaPlayer` (QtavRust/FFmpegRust, pur Rust) tenté
-/// d'abord — la DLL absente ou une ouverture en échec retombe
-/// sur `VideoMediaPlayer` (MDK/`fvp`) ; fake en test.
+/// `VideoMediaPlayer` (MDK/`fvp`) en prod, fake en test.
 final mediaPlayerFactoryProvider = Provider<MediaPlayerFactory>(
-  (ref) => (url) async {
-    try {
-      return await QtavMediaPlayer.create(url);
-    } on Object {
-      return VideoMediaPlayer.create(url);
-    }
-  },
+  (ref) => VideoMediaPlayer.create,
 );
 
 /// Dépôt injectable (tests : `Provider.overrideWith`).
