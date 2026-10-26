@@ -1566,8 +1566,15 @@ fn deferred_inputs_fifo_and_coalesce() {
             mods: KeyMods::NONE,
         },
     ] {
+        let is_scroll = matches!(ev, InputEvent::Scroll { .. });
         let r = s.handle_input_now(tab, ev).unwrap();
-        assert_eq!(r, InputOutcome::Ignored, "détaché ⇒ différé");
+        // Détaché ⇒ différé ; le scroll rapporte sa position
+        // **projetée** plutôt qu'un `Ignored` (vol 13).
+        if is_scroll {
+            assert!(matches!(r, InputOutcome::Scrolled { .. }));
+        } else {
+            assert_eq!(r, InputOutcome::Ignored, "détaché ⇒ différé");
+        }
     }
     {
         let e = s.tabs.get(&tab).unwrap();
@@ -2478,4 +2485,45 @@ fn collect_images_falls_back_to_lazy_data_src() {
         .map(|(_, s)| s)
         .collect();
     assert_eq!(srcs, vec!["/a.png", "/b.png", "/d.png"]);
+}
+
+/// Vol 13 franceinfo — un `Scroll` pendant la peinture
+/// détachée (apply hors verrou) est **accepté** : le
+/// `scroll_y` rapporté projette les deltas en file, le
+/// drain rejoue ensuite le scroll réel au lieu d'un
+/// `Ignored` abandonné par le client.
+#[tokio::test]
+async fn deferred_scroll_reports_projected_position() {
+    let mut s = Session::new(Arc::new(FailTransport), Arc::new(TestFont));
+    let tab = s.open_tab();
+    {
+        let e = s.tabs.get_mut(&tab).unwrap();
+        e.doc_h = 10_000.0;
+        e.scroll_y = 100.0;
+        e.paint_detached = true;
+    }
+    let out = s
+        .handle_input(tab, InputEvent::Scroll { dy: 900.0 })
+        .await
+        .unwrap();
+    let InputOutcome::Scrolled { scroll_y } = out else {
+        panic!("scroll différé refusé : {out:?}");
+    };
+    assert_eq!(scroll_y, 1000.0, "projection = position + file");
+    // Le replay effectif applique le delta enfilé — DOM +
+    // frame factices posés pour court-circuiter le
+    // lazy-heal (un relayout écraserait `doc_h`).
+    {
+        let e = s.tabs.get_mut(&tab).unwrap();
+        e.paint_detached = false;
+        e.dom = Some(test_dom("<p>x</p>"));
+        e.frame = Some(Frame {
+            width: 8,
+            height: 8,
+            pixels: vec![0; 8 * 8 * 4],
+            scale: 1.0,
+        });
+    }
+    s.drain_deferred_inputs(tab);
+    assert_eq!(s.tabs.get(&tab).unwrap().scroll_y, 1000.0);
 }
