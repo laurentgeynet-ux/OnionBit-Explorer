@@ -1820,6 +1820,12 @@ impl JscoreEngine {
     ///  → erreur nommée sur les chemins d’éval,
     /// repli par défaut sur les drains (JS-C105).
     const EVAL_CMD_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+    /// Évaluations de programmes (B-23 — lemonde) : le
+    /// budget boot moteur est 60 s (B-22) — un canal à 30 s
+    /// tuait les compiles légitimes avant leur deadline
+    /// interne (stall → disjoncteur muet). Pompes/drains
+    /// restent à 30 s.
+    const EVAL_CMD_TIMEOUT_EVAL: std::time::Duration = std::time::Duration::from_secs(65);
 
     fn recv_eval<T>(rx: &Receiver<T>) -> Result<T, JsError> {
         rx.recv_timeout(Self::EVAL_CMD_TIMEOUT)
@@ -1830,6 +1836,14 @@ impl JscoreEngine {
     }
 
     /// les frames `error.stack` (`JsEngine::eval_named`).
+    fn recv_eval_long<T>(rx: &Receiver<T>) -> Result<T, JsError> {
+        rx.recv_timeout(Self::EVAL_CMD_TIMEOUT_EVAL)
+            .map_err(|e| match e {
+                RecvTimeoutError::Timeout => JsError::Timeout,
+                RecvTimeoutError::Disconnected => JsError::Dead,
+            })
+    }
+
     fn eval_cmd(&mut self, source: &str, name: Option<&str>) -> Result<String, JsError> {
         let (tx, rx) = channel();
         if self
@@ -1843,7 +1857,7 @@ impl JscoreEngine {
         {
             return Err(JsError::Dead);
         }
-        Self::recv_eval(&rx)?
+        Self::recv_eval_long(&rx)?
     }
 
     /// Boucle du thread : possède le `explorer_jscore::Engine` (`!Send`)
@@ -2594,7 +2608,7 @@ impl JsEngine for JscoreEngine {
         {
             return Err(JsError::Dead);
         }
-        Self::recv_eval(&rx)?
+        Self::recv_eval_long(&rx)?
     }
 
     fn eval_script_el(
@@ -2618,7 +2632,7 @@ impl JsEngine for JscoreEngine {
         {
             return Err(JsError::Dead);
         }
-        Self::recv_eval(&rx)?
+        Self::recv_eval_long(&rx)?
     }
 
     fn drain_dyn_scripts(&mut self) -> Vec<explorer_jscore::DynScriptReq> {
@@ -2921,7 +2935,7 @@ impl JsEngine for JscoreEngine {
         {
             return Err(JsError::Dead);
         }
-        Self::recv_eval(&rx)?
+        Self::recv_eval_long(&rx)?
     }
 
     fn dispatch_event(&mut self, ty: &str, path: &[(String, u32)]) -> Result<bool, JsError> {
