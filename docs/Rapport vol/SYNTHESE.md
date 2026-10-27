@@ -131,7 +131,7 @@ plateforme net** (ops jscore Encrypt/Decrypt restent à livrer) ·
 
 | 25 | **Navigation `location` spontanée non sollicitée** — `location.href` posé sans input (détection env ?) | `explorer-jscore`/UA | qwant `[V4-main]` vol 44 : redirigé vers `/mobile-apps?utm_campaign=w2m` — nav unique (§B-2 tient) mais suspect `navigator.*`/UA feature-detect | **OUVERT — terrain V4** |
 
-| 26 | **Wedge DOM détaché terminal post-apply** — `journal_fallbacks` non livré OU apply mort entre `layout` et `repaint` → `/dom` 404, `/frame` 204, **fuite mémoire sans borne** (caf 2,93 Go vol 47 ; **bfmtv 6,88 Go en 5 min vol 49 — escalade §B-26→§B-1, API entière morte** ; figaro variante sans UnmappedKey) | `explorer-core` | caf/figaro/bfmtv/radiofrance/meteofrance `[V4-main]` vols 47/49/54/59 (meteofrance : apply arrêté à `layout ms=253`, dent de scie) ; **musee-orsay vol 62** : apply stoppé post-`layout ms=968`, `pump.js_run_sync` ~8 ms/5 s persistant, fuite 976→2,35 Go **poursuivie post-DELETE** (recoupe §B-30) (radiofrance : apply en escalade 0,4→9,2→>49,5 s, +90 Mo/s, API vivante) — signature commune : apply journalisé jusqu'à `layout`, jamais `repaint`/`fin` | **CRITIQUE — suspect n°1 du crash poste ; métriques proposées : `apply_started_without_fin`, `paint_in_flight_age_ms`** |
+| 26 | **Wedge DOM détaché terminal post-apply** — `journal_fallbacks` non livré OU apply mort entre `layout` et `repaint` → `/dom` 404, `/frame` 204, **fuite mémoire sans borne** (caf 2,93 Go vol 47 ; **bfmtv 6,88 Go en 5 min vol 49 — escalade §B-26→§B-1, API entière morte** ; figaro variante sans UnmappedKey) | `explorer-core` | caf/figaro/bfmtv/radiofrance/meteofrance `[V4-main]` vols 47/49/54/59 (meteofrance : apply arrêté à `layout ms=253`, dent de scie) ; **musee-orsay vol 62** : apply stoppé post-`layout ms=968`, `pump.js_run_sync` ~8 ms/5 s persistant, fuite 976→2,35 Go **poursuivie post-DELETE** (recoupe §B-30) (radiofrance : apply en escalade 0,4→9,2→>49,5 s, +90 Mo/s, API vivante) — signature commune : apply journalisé jusqu'à `layout`, jamais `repaint`/`fin` | **CRITIQUE — reproduit `[V5-main]` vol 65 2/2** : figaro (apply wedged à `layout ms=565`, fuite 8 Mo/s, libérée au DELETE) ; meteofrance (**mort du process** : 825 Mo→2,9 Go en 75 s, exit 1, API morte — le daemon a été tué par la fuite, pas par l'agent). Suspect n°1 crash poste ; métriques proposées : `apply_started_without_fin`, `paint_in_flight_age_ms` |
 
 | 27 | **Image en mosaïque géante plein viewport au scroll** | `explorer-render`/`layout` | ouest-france `[V4-main]` vol 48 scroll_y=1800 — tuile répétée couvrant tout l'écran (background-repeat ? border-image ?) | **OUVERT — terrain V4** |
 
@@ -148,7 +148,7 @@ plateforme net** (ops jscore Encrypt/Decrypt restent à livrer) ·
 
 | 34 | **`max-height` (%) ignorée sur élément remplacé** — `<img>` taille intrinsèque 703×994 dans `div.h-48` au lieu de ≤192 px, clip `overflow` | `explorer-css`/`layout` | cjoint `[V4-main]` vol 56 (`img [-159 -222 703x994]` dans div 366×192) — bras opposé de §B-28 | **OUVERT — terrain V4** |
 
-| 35 | **Colonne `block` effondrée à largeur 0** — texte mot-par-ligne (h2/p dans `0x876`) | `explorer-layout`/`css` | welcometothejungle `[V4-main]` vol 57 — famille §B-24/§B-28 mais en largeur | **OUVERT — terrain V4** |
+| 35 | **Colonne `block` effondrée à largeur 0** — texte mot-par-ligne | `explorer-layout`/`css` | wttj `[V4-main]` vol 57 | **RÉSOLU `[V5-main]` vol 64** — h2 1261 px, p 252-1286 px (subgrid col-span-N) |
 | 36 | **SVG peint/placé hors de sa boîte** — `block<svg>` positionné hors du bouton parent (x décalé) ou à échelle géante (wordmark 700 px dans boîte 300×81) | `explorer-layout`/`render` | wttj smear + indeed wordmark `[V4-main]` vol 57 — recoupe §B-32 pixelisé | **OUVERT — terrain V4** |
 
 | 37 | **Panic `index out of bounds` `dom.rs:2691` en `event.dispatch`** — NodeId obsolète post re-parse ADR-0025 (24 rejets `Fingerprint` en rafale) → garde-fou a rattrapé (disjoncteur, onglet JS mort) — **violation ADR-0008**, 2ᵉ panic jscore, 1ᵉ rattrapé | `explorer-jscore` | caniuse `[V4-main]` vol 58 | **CRITIQUE — handle JS invalide après re-parse** |
@@ -184,7 +184,7 @@ plateforme net** (ops jscore Encrypt/Decrypt restent à livrer) ·
 
 ### ⚪ Externe — hors moteur (catalogue à jour)
 
-Anti-bot : 403 sec (ebay, etsy, stackoverflow, tripadvisor, sncf-connect, affinity.serif, hardware.fr, liberation.fr,
+Anti-bot : 403 sec (ebay, etsy, stackoverflow, tripadvisor, sncf-connect, affinity.serif, hardware.fr, liberation.fr, · vhost TLS mort www.figaro.fr (UnrecognisedName, curl idem — externe) ·
 seloger, medium, khanacademy, apec, nytimes) · Datadome (leboncoin) ·
 Akamai Bot Manager (cdiscount, zalando→`supported-browsers`) ·
 x5sec Alibaba (aliexpress→punish) · **AWS WAF insolvable** (imdb,
