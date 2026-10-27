@@ -1046,6 +1046,13 @@ pub trait JsEngine: Send {
         None
     }
 
+    /// Passe GC forcée (T3 — trim bfcache) : le gel d'une
+    /// page emporte le moteur (~50 Mio/page) — la session
+    /// demande une passe avant parc pour ne retenir que le
+    /// vivant. Fire-and-forget (la file de commandes
+    /// ordonne). Défaut : no-op (moteur sans GC).
+    fn gc(&mut self) {}
+
     /// Snapshot « chemin élément → op-list » des `<canvas>`
     /// ayant dessiné (JS-C28, couture R-11) — liste
     /// **cumulée** relue à chaque appel (bitmap persistante,
@@ -1570,6 +1577,8 @@ enum Cmd {
     HeapStats {
         tx: Sender<HeapStats>,
     },
+    /// Passe GC forcée (T3) — sans réponse, la file ordonne.
+    Gc,
     CanvasOps {
         tx: Sender<CanvasOpsTable>,
     },
@@ -2128,6 +2137,9 @@ impl JscoreEngine {
                     if tx.send(eng.heap_stats()).is_err() {
                         return;
                     }
+                }
+                Cmd::Gc => {
+                    eng.collect();
                 }
                 Cmd::EvalModule {
                     entry,
@@ -2906,6 +2918,10 @@ impl JsEngine for JscoreEngine {
             return None;
         }
         rx.recv_timeout(Self::EVAL_CMD_TIMEOUT).ok()
+    }
+
+    fn gc(&mut self) {
+        let _ = self.tx.send(Cmd::Gc);
     }
 
     fn canvas_ops(&mut self) -> CanvasOpsTable {

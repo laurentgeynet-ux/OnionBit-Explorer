@@ -41,7 +41,16 @@ impl Tab {
             hovered: self.hovered.take(),
             popup: self.popup.take(),
             find: self.find.take(),
-            js: self.js.take(),
+            js: {
+                // T3 : trim heap avant parc — la page gelée
+                // n'emporte que le vivant (~50 Mio/page sinon,
+                // note FIX-1). Passe GC fire-and-forget avant
+                // le `take` (la file de commandes ordonne).
+                if let Some(e) = self.js.as_mut() {
+                    e.gc();
+                }
+                self.js.take()
+            },
             images: std::mem::take(&mut self.images),
             linked_sheets: std::mem::take(&mut self.linked_sheets),
             adopted_sheets: self.adopted_sheets.clone(),
