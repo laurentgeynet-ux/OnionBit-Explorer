@@ -178,7 +178,7 @@ plateforme net** (ops jscore Encrypt/Decrypt restent à livrer) ·
 
 | 52 | **Rafale `UnmappedKey` continue** — mutations DOM périodiques → re-parse ~1×/5 s (56×/2,5 min) sans wedge | `explorer-core` | bouygues-immobilier `[V7-main]` vol 84 : contenu, API vivante — famille §B-41 atténuée | **OUVERT — V7** |
 
-| 53 | **`translateX(-50%)` popin déplacée +320 px** — `#popin_tc_privacy` edf `left:683px` layoutée x=1046 (≈50%+viewport) → boutons consentement hors écran, page verrouillée (`body{position:fixed}`) | `explorer-layout`/`css` | edf `[V7-main]` vol 85 — suspect translate appliqué en sens inverse | **OUVERT — V7** |
+| 53 | **`translateX(-50%)` popin déplacée +320 px** — `#popin_tc_privacy` edf `left:683px` layoutée x=1046 (≈50%+viewport) → boutons consentement hors écran, page verrouillée (`body{position:fixed}`) | `explorer-layout`/`css` | edf `[V7-main]` vol 85 — suspect translate appliqué en sens inverse | **CORRECTIF `20191b8` a re-voler** — motif nomme : `translate3d`/`scale3d`/`matrix3d`/`rotate3d` non reconnues -> transform entier ignore -> tiroir centre `left/top:50%` colle a x=683+. Fix : projection 2D des variantes 3D (translate3d->x/y, z = identite, rotate3d axe z). Verrous verts |
 
 ### 🟡 Moyen — perf, métriques, observabilité résiduelle
 
