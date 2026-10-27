@@ -310,6 +310,10 @@ impl Engine {
         // `import()` mangés un par pompe, `define` jamais
         // atteint).
         self.ops_left = self.op_limit;
+        // Frontière de batch aussi pour la deadline (J1) —
+        // une file auto-régénérante meurt au wall-clock, pas
+        // au timeout canal.
+        self.arm_eval_deadline();
         loop {
             loop {
                 if ran >= MICROTASK_DRAIN_CAP {

@@ -7,6 +7,33 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **JS-C164 — traps Proxy : clés-symboles
+  livrées en `Symbol`** (`explorer-jscore`) —
+  `[[Get]]`/`[[Set]]`/`[[Has]]`/
+  `[[Delete]]`/`[[GetOwnPropertyDescriptor]]`
+  passaient la clé **stringifiée** à la trap —
+  tout `prop === Symbol.x` dedans était
+  toujours faux. Mesuré mastodon : immer lit
+  `draft[DRAFT_STATE]` via `get` → `isDraft`
+  faux → `freeze(draft)` gèle la cible du
+  proxy → `ownKeys` `TypeError` (`must list
+  all keys of non-extensible target`, clés
+  nommées : `type_`/`draft_`/`revoke_`…).
+  `prop_trap_key` démange la clé interne via
+  `sym_index` → la trap reçoit le `Symbol`
+  spec. Test `proxy_traps_receive_symbol_keys`
+  (5 traps + protocole draft immer réduit :
+  isDraft, copy-on-write, freeze unwrap,
+  ownKeys post-mutation). Vol mastodon :
+  le `TypeError` ownKeys disparaît —
+  l'app descend jusqu'à `createStore`
+  (mur suivant nommé : Redux #7,
+  action non-plain au dispatch).
+  Nettoyage au passage : bras AES-GCM
+  dupliqués morts (`crypto.rs`),
+  warnings `deadline`/`struct_excessive_bools`
+  pour un gate `-D warnings` propre.
+
 - **Vol 32 — héros effondrés en colonne
   étroite** (`explorer-layout`) — deux
   causes réelles reproduites depuis les
@@ -13102,3 +13129,19 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   débitent pas le budget. Test
   `auto_nav_budget_caps_script_and_
   refresh` — 417/417 verts.
+
+- **JS-C164 — deadline wall-clock d'éval**
+  (`explorer-jscore`+`explorer-js`+`core`)
+  — `EXPLORER_JS_EVAL_TIMEOUT_MS`
+  (défaut 10 s) borne un **batch**
+  (éval/drain timers/microtasks) en
+  temps réel : `tick` échoue →
+  `Error::Deadline` → `JsError::
+  Timeout` → disjoncteur `js_stall`
+  existant. allrecipes : une rafale
+  de timers saturant un cœur post-
+  apply laissait l'API muette 3-6 min
+  (N pompes × timeout canal 30 s) —
+  elle meurt en ms désormais.
+  `run_pending_bounded` typé Result.
+  Tests deadline eval+rafale verts.

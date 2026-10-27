@@ -422,7 +422,7 @@ fn run_pending_bounded_caps_timer_jobs() {
          setTimeout(function(){n=n+1},0)",
     )
     .unwrap();
-    assert_eq!(eng.run_pending_bounded(1), 1);
+    assert_eq!(eng.run_pending_bounded(1).unwrap_or_default(), 1);
     assert_eq!(eng.eval("n").unwrap(), "1");
     assert!(eng.run_pending() >= 1);
     assert_eq!(eng.eval("n").unwrap(), "2");

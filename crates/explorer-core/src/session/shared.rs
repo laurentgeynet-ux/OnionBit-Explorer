@@ -445,7 +445,7 @@ pub async fn pump_timers_shared(sess: &tokio::sync::Mutex<Session>, tab: TabId) 
     // (55g-suite).
     let tb = Instant::now();
     let out = tokio::task::spawn_blocking(move || {
-        let jobs = eng.run_pending_bounded(max);
+        let jobs = eng.run_pending_bounded(max).unwrap_or(0);
         let mutated = if sync_ok {
             Session::sync_for_apply(&mut *eng)
         } else {
@@ -513,7 +513,7 @@ pub async fn eval_shared(sess: &tokio::sync::Mutex<Session>, tab: TabId, src: St
         // L'éval a pu armer timers/microtasks (attribution
         // d'hydratation, setTimeout(0)…) — on les draine pour
         // que la valeur rendue reflète l'état stabilisé.
-        let jobs = eng.run_pending_bounded(max);
+        let jobs = eng.run_pending_bounded(max).unwrap_or(0);
         let mutated = if sync_ok {
             Session::sync_for_apply(&mut *eng)
         } else {

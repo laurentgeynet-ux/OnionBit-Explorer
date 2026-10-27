@@ -23,6 +23,13 @@ pub enum Error {
     /// The script threw a value that nothing caught.
     #[error("uncaught script exception: {0}")]
     Uncaught(String),
+    /// The wall-clock eval deadline fired inside the engine
+    /// (`EXPLORER_JS_EVAL_TIMEOUT_MS` — a burst of timers/
+    /// microtasks saturating a core is killed in milliseconds,
+    /// not at the 30 s channel timeout). Hosts map this to
+    /// `JsError::Timeout` for the frozen-engine breaker.
+    #[error("eval deadline exceeded")]
+    Deadline,
 }
 
 /// Convenience alias used across the crate.

@@ -56,6 +56,7 @@ impl From<explorer_jscore::Error> for JsError {
                 Self::Syntax { line, col, message }
             }
             explorer_jscore::Error::Uncaught(m) => Self::Uncaught(m),
+            explorer_jscore::Error::Deadline => Self::Timeout,
         }
     }
 }
@@ -595,9 +596,16 @@ pub trait JsEngine: Send {
     /// par tick ; le surplus reste en file pour la pompe
     /// suivante). Défaut : [`Self::run_pending`] (moteur sans
     /// notion de borne — le quota est alors non exigé).
-    fn run_pending_bounded(&mut self, max_timers: usize) -> usize {
+    /// `Err(JsError::Timeout)` = deadline wall-clock interne
+    /// (J1) — l'appelant arme le disjoncteur moteur figé.
+    ///
+    /// # Errors
+    /// `JsError::Timeout` si la deadline interne tue la rafale,
+    /// `JsError::Uncaught` sur un callback qui jette,
+    /// `JsError::Dead` si le moteur ne répond plus.
+    fn run_pending_bounded(&mut self, max_timers: usize) -> Result<usize, JsError> {
         let _ = max_timers;
-        self.run_pending()
+        Ok(self.run_pending())
     }
 
     /// Délai jusqu'à la prochaine échéance de timer JS —
@@ -1471,7 +1479,10 @@ enum Cmd {
     RunPending {
         /// Borne de timers par pompe (ADR-0019).
         max_timers: usize,
-        tx: Sender<usize>,
+        /// Typé : une mort deadline de la rafale remonte
+        /// `JsError::Timeout` → disjoncteur moteur figé
+        /// (allrecipes — auparavant `unwrap_or(0)` avalé).
+        tx: Sender<Result<usize, JsError>>,
     },
     TimerDeadline {
         tx: Sender<Option<std::time::Duration>>,
@@ -1913,9 +1924,17 @@ impl JscoreEngine {
                     }
                 }
                 Cmd::RunPending { max_timers, tx } => {
-                    let n = eng.run_due_timers_bounded(max_timers).unwrap_or(0)
-                        + eng.run_microtasks().unwrap_or(0);
-                    if tx.send(n).is_err() {
+                    let r = eng
+                        .run_due_timers_bounded(max_timers)
+                        .and_then(|n| eng.run_microtasks().map(|m| n + m))
+                        .map_err(|e| {
+                            if eng.take_deadline_hit() {
+                                JsError::Timeout
+                            } else {
+                                JsError::Uncaught(eng.describe(e.0))
+                            }
+                        });
+                    if tx.send(r).is_err() {
                         return;
                     }
                 }
@@ -2462,15 +2481,15 @@ impl JsEngine for JscoreEngine {
     }
 
     fn run_pending(&mut self) -> usize {
-        self.run_pending_bounded(usize::MAX)
+        self.run_pending_bounded(usize::MAX).unwrap_or(0)
     }
 
-    fn run_pending_bounded(&mut self, max_timers: usize) -> usize {
+    fn run_pending_bounded(&mut self, max_timers: usize) -> Result<usize, JsError> {
         let (tx, rx) = channel();
         if self.tx.send(Cmd::RunPending { max_timers, tx }).is_err() {
-            return 0;
+            return Err(JsError::Dead);
         }
-        rx.recv_timeout(Self::EVAL_CMD_TIMEOUT).unwrap_or(0)
+        Self::recv_eval(&rx)?
     }
 
     fn next_timer_deadline(&mut self) -> Option<std::time::Duration> {

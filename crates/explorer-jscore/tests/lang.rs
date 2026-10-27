@@ -2988,6 +2988,58 @@ fn proxy_traps() {
     );
 }
 
+/// JS-C164 : les traps Proxy reçoivent un *`PropertyKey`* — un symbole
+/// doit arriver en `Symbol`, pas en chaîne mangée (motif immer
+/// `x[DRAFT_STATE]` : `isDraft` lit `draft[DRAFT_STATE]` via la trap
+/// `get` — une chaîne à la place casse `prop === SYM` → immer gèle
+/// le draft → `ownKeys` `TypeError`, mesuré mastodon).
+#[test]
+fn proxy_traps_receive_symbol_keys() {
+    assert_eq!(
+        ev_str("var S = Symbol.for('st'); var p = new Proxy({}, {get: function(t, k) { return k === S ? 'hit' : 'miss'; }}); p[S]"),
+        "hit"
+    );
+    assert_eq!(
+        ev_str("var S = Symbol('u'); var got; var p = new Proxy({}, {set: function(t, k, v) { got = k === S; return true; }}); p[S] = 1; got"),
+        "true"
+    );
+    assert_eq!(
+        ev_str("var S = Symbol('h'); var p = new Proxy({}, {has: function(t, k) { return k === S; }}); S in p"),
+        "true"
+    );
+    assert_eq!(
+        ev_str("var S = Symbol('d'); var p = new Proxy({}, {deleteProperty: function(t, k) { return k === S; }}); delete p[S]"),
+        "true"
+    );
+    assert_eq!(
+        ev_str("var S = Symbol('g'); var p = new Proxy({}, {getOwnPropertyDescriptor: function(t, k) { return k === S ? {value: 7, enumerable: true, configurable: true} : undefined; }}); Object.getOwnPropertyDescriptor(p, S).value"),
+        "7"
+    );
+    // Protocole draft immer réduit : state interne + `latest(s)` —
+    // `isDraft` par clé-symbole, `freeze` unwrap (le draft ne doit
+    // jamais être gelé), copy-on-write, ownKeys post-mutation.
+    assert_eq!(
+        ev_str(
+            "var DS = Symbol('immer'); \
+             var isDraft = function(v) { return !!v && !!v[DS]; }; \
+             var base = {x: 1, y: 2}; \
+             var state = {type_: 1, modified_: false, base_: base, copy_: null}; \
+             var latest = function(s) { return s.copy_ || s.base_; }; \
+             var draft = new Proxy(state, { \
+               get: function(t, k) { if (k === DS) return state; return latest(state)[k]; }, \
+               set: function(t, k, v) { var s = latest(state); if (!state.copy_) state.copy_ = Object.assign({}, state.base_); state.copy_[k] = v; state.modified_ = true; return true; }, \
+               has: function(t, k) { return k in latest(state); }, \
+               ownKeys: function(t) { return Reflect.ownKeys(latest(state)); }, \
+               getOwnPropertyDescriptor: function(t, k) { return Object.getOwnPropertyDescriptor(latest(state), k); } \
+             }); \
+             var checks = [isDraft(draft), draft.x, 'x' in draft, Object.keys(draft).join(','), typeof Object.freeze(isDraft(draft) ? latest(draft[DS]) : draft)]; \
+             draft.y = 9; \
+             checks.push(draft[DS].modified_, state.copy_.y, Object.keys(draft).join(',')); \
+             checks.join('|')"),
+        "true|1|true|x,y|object|true|9|x,y"
+    );
+}
+
 /// `[[Set]]` dont le receiver est une primitive : la chaîne
 /// proto intercepte (setter hérité, proxy `set` amarré sous le
 /// proto via `setPrototypeOf`) — fixture test262
@@ -8256,4 +8308,30 @@ fn module_and_classic_share_window() {
             Err(x) => panic!("{src} → {x}"),
         }
     }
+}
+
+#[test]
+fn eval_deadline_kills_infinite_loop() {
+    // J1 : deadline wall-clock — `while(1)` meurt en ms avec
+    // `Error::Deadline` (→ JsError::Timeout → disjoncteur),
+    // pas au timeout canal 30 s ni au budget 10M ops.
+    let mut e = Engine::new();
+    e.set_eval_timeout_ms(50);
+    match e.eval("while(1){}") {
+        Err(explorer_jscore::Error::Deadline) => {}
+        other => panic!("deadline attendue, vu {other:?}"),
+    }
+}
+
+#[test]
+fn eval_deadline_kills_timer_burst() {
+    // Rafale timers post-apply (allrecipes) : un callback en
+    // boucle meurt au wall-clock et `deadline_hit` remonte.
+    let mut e = Engine::new();
+    e.set_eval_timeout_ms(50);
+    e.install_timers();
+    e.eval("var n=0; setInterval(function(){ while(true){n++} },0)")
+        .unwrap_or_else(|x| panic!("eval: {x}"));
+    assert!(e.run_due_timers().is_err());
+    assert!(e.take_deadline_hit());
 }

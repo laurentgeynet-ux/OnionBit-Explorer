@@ -70,7 +70,17 @@ impl Session {
             let Some(eng) = entry.js.as_mut() else {
                 return 0;
             };
-            let jobs = eng.run_pending_bounded(max);
+            // Deadline interne (J1) : une rafale saturante
+            // remonte `Timeout` → disjoncteur, même règle
+            // qu'une éval figée (allrecipes).
+            let jobs = match eng.run_pending_bounded(max) {
+                Ok(n) => n,
+                Err(explorer_js::JsError::Timeout) => {
+                    entry.js_stall_until = Some(Instant::now() + self.js_stall_cooldown);
+                    0
+                }
+                Err(_) => 0,
+            };
             let m = if sync_ok {
                 Self::sync_for_apply(eng.as_mut())
             } else {

@@ -156,6 +156,11 @@ impl Engine {
     /// pompe partagé par [`Self::run_due_timers_bounded`] pour
     /// chaque contexte visité (JS-C78).
     fn run_due_timers_ctx(&mut self, max: usize) -> JsResult<usize> {
+        // Deadline **par batch** (J1) — armée une fois : un
+        // `setInterval` auto-régénérant (allrecipes) sature
+        // jusqu'au wall-clock puis tout le reste de la rafale
+        // meurt ensemble, au lieu de N callbacks × budget.
+        self.arm_eval_deadline();
         // Snapshot the due timers first: an interval rescheduled to
         // `now` would otherwise be picked up again in this same pump
         // and loop forever. One pump = each due timer fires at most

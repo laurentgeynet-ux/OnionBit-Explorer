@@ -35,6 +35,11 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 const DEFAULT_CALL_DEPTH: u32 = 256;
 const MAX_PROTO_DEPTH: u32 = 512;
 const DEFAULT_OP_LIMIT: u64 = 10_000_000;
+/// Budget wall-clock par défaut d'un batch d'éval, en ms —
+/// surchargeable par `EXPLORER_JS_EVAL_TIMEOUT_MS`. Choisi sous
+/// le timeout canal (30 s) : une rafale rend la main aux pompes
+/// ~10× plus tôt (allrecipes : 6 pompes × 30 s ≈ 3-6 min muets).
+const DEFAULT_EVAL_MS: u64 = 10_000;
 /// Seuil GC par défaut (JS-C37) — ~130 K cellules vivantes
 /// déclenchent une passe à la frontière de job suivante.
 const DEFAULT_GC_THRESHOLD: usize = 131_072;
@@ -185,6 +190,10 @@ pub type EvalHook = Rc<dyn Fn(&str)>;
 
 /// The script engine. One `Engine` per browsing context (page):
 /// the heap, global object and scope chain all die together.
+// Les bools sont des drapeaux indépendants de garde (deadline,
+// GC, mode strict…) — les regrouper en struct masquerait leur
+// usage dispersé sans gain de clarté.
+#[allow(clippy::struct_excessive_bools)]
 pub struct Engine {
     pub(crate) heap: Heap,
     pub(crate) global: ObjId,
@@ -255,6 +264,19 @@ pub struct Engine {
     /// Total cumulé des `tick` — compteur d'ops exposé par
     /// [`Engine::heap_stats`]/[`Engine::ops_used`] (métriques).
     ops_total: u64,
+    /// Deadline wall-clock du batch courant (éval / drain timers
+    /// / microtasks) — armée par `arm_eval_deadline` aux bornes
+    /// publiques, vérifiée dans `tick` (J1 : une rafale post-apply
+    /// saturant un cœur meurt en ms, pas au timeout canal 30 s —
+    /// allrecipes : API muette 3-6 min, 6 pompes × 30 s).
+    eval_deadline: Option<Instant>,
+    /// Budget wall-clock d'un batch, ms — `EXPLORER_JS_EVAL_
+    /// TIMEOUT_MS` lu une fois (défaut : voir `DEFAULT_EVAL_MS`).
+    eval_timeout_ms: u64,
+    /// Posé par `tick` quand la deadline échoue — les bords
+    /// publics convertissent en `Error::Deadline` (→ `JsError::
+    /// Timeout` côté adaptateur → disjoncteur moteur figé).
+    pub(crate) deadline_hit: bool,
     /// Host-side timer queue (JS-3) — pumped by the embedder's event
     /// loop via [`Engine::run_due_timers`].
     pub(crate) timers: crate::timers::TimerQueue,
@@ -749,6 +771,12 @@ impl Engine {
             nest_limit: crate::parser::DEFAULT_NEST_LIMIT,
             ops_left: DEFAULT_OP_LIMIT,
             op_limit: DEFAULT_OP_LIMIT,
+            eval_deadline: None,
+            eval_timeout_ms: std::env::var("EXPLORER_JS_EVAL_TIMEOUT_MS")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(DEFAULT_EVAL_MS),
+            deadline_hit: false,
             gc_threshold: DEFAULT_GC_THRESHOLD,
             ops_total: 0,
             timers: crate::timers::TimerQueue::default(),
@@ -2448,11 +2476,16 @@ impl Engine {
     /// retour (une frontière de job).
     fn run_program(&mut self, prog: &crate::ast::Program) -> Result<Value> {
         self.ops_left = self.op_limit;
+        self.arm_eval_deadline();
         let r = match self.exec_program(prog) {
             Ok(v) => Ok(v),
+            Err(Thrown(_v)) if self.deadline_hit => Err(Error::Deadline),
             Err(Thrown(v)) => Err(Error::Uncaught(self.describe(v))),
         };
         if let Err(Thrown(v)) = self.run_microtasks() {
+            if self.deadline_hit {
+                return Err(Error::Deadline);
+            }
             return Err(Error::Uncaught(self.describe(v)));
         }
         r
@@ -2816,11 +2849,37 @@ impl Engine {
         }
     }
 
+    /// Arme la deadline wall-clock pour le batch qui entre
+    /// (éval / drain timers / microtasks). `0` ms = illimité.
+    pub(crate) fn arm_eval_deadline(&mut self) {
+        self.eval_deadline = (self.eval_timeout_ms > 0)
+            .then(|| Instant::now() + std::time::Duration::from_millis(self.eval_timeout_ms));
+    }
+
+    /// Consomme le drapeau `deadline_hit` — l'adaptateur
+    /// distingue une mort deadline (→ `JsError::Timeout`) d'une
+    /// exception ordinaire (`Uncaught`).
+    pub fn take_deadline_hit(&mut self) -> bool {
+        std::mem::take(&mut self.deadline_hit)
+    }
+
+    /// Budget wall-clock d'un batch d'éval, en ms (hôte/tests —
+    /// `0` = deadline désactivée).
+    pub fn set_eval_timeout_ms(&mut self, ms: u64) {
+        self.eval_timeout_ms = ms;
+    }
+
     /// Operation budget tick — also counts microtasks so a
     /// self-feeding reaction loop dies like an infinite `while`.
     /// La borne mémoire heap (JS-C37, ADR-0019) est relue ici :
     /// l'alloc lève le drapeau, le `tick` transforme en kill doux.
     pub(crate) fn tick(&mut self) -> JsResult<()> {
+        if let Some(d) = self.eval_deadline {
+            if Instant::now() >= d {
+                self.deadline_hit = true;
+                return Err(self.range_error("eval deadline exceeded"));
+            }
+        }
         if self.ops_left == 0 {
             return Err(self.range_error("script execution limit exceeded"));
         }
@@ -3799,7 +3858,7 @@ impl Engine {
                 }
                 ClassMemberKind::Field => {
                     let key = self.eval_prop_key(env, this, &m.key)?;
-                    let kv = self.str_val(key);
+                    let kv = self.prop_trap_key(&key);
                     let pair = self.new_array(vec![kv, fv]);
                     fields.push(pair);
                 }
@@ -4198,7 +4257,7 @@ impl Engine {
         if let Some((tid, target, handler)) = self.proxy_th(id)? {
             let trap = self.proxy_trap(handler, "get")?;
             if matches!(trap, Value::Obj(_)) {
-                let kv = self.str_val(key);
+                let kv = self.prop_trap_key(key);
                 let v = self.call_value(trap, handler, &[target, kv, recv])?;
                 // Invariants spec `[[Get]]` : data non-config
                 // non-writable → valeur imposée ; accesseur
@@ -4335,7 +4394,7 @@ impl Engine {
         if !matches!(trap, Value::Obj(_)) {
             return Ok(None);
         }
-        let kv = self.str_val(key);
+        let kv = self.prop_trap_key(key);
         let ok = self.call_value(trap, handler, &[target, kv, v, recv])?;
         if !self.to_boolean(ok) {
             return self.write_refused(key).map(Some);
@@ -4813,7 +4872,7 @@ impl Engine {
         if let Some((tid, target, handler)) = self.proxy_th(id)? {
             let trap = self.proxy_trap(handler, "has")?;
             if matches!(trap, Value::Obj(_)) {
-                let kv = self.str_val(key);
+                let kv = self.prop_trap_key(key);
                 let r = self.call_value(trap, handler, &[target, kv])?;
                 if !self.to_boolean(r) {
                     // Invariants spec `[[HasProperty]]` : prop
@@ -4902,7 +4961,7 @@ impl Engine {
         if let Some((tid, target, handler)) = self.proxy_th(id)? {
             let trap = self.proxy_trap(handler, "deleteProperty")?;
             let ok = if matches!(trap, Value::Obj(_)) {
-                let kv = self.str_val(key);
+                let kv = self.prop_trap_key(key);
                 let r = self.call_value(trap, handler, &[target, kv])?;
                 self.to_boolean(r)
             } else {
@@ -4998,6 +5057,23 @@ impl Engine {
         out
     }
 
+    /// Clé de propriété telle qu'une trap Proxy doit la recevoir —
+    /// `Value` **Symbol** si la clé interne est mangée (`\u{f130}…`,
+    /// indexée dans `sym_index` — well-knowns `Symbol.*` et anonymes
+    /// `sym{N}` y figurent), `Str` sinon. Spec : `[[Get]]`/`[[Set]]`/…
+    /// passent un *`PropertyKey`* (String | Symbol) ; stringify un
+    /// symbole casse tout `prop === Symbol.x` dans les traps —
+    /// mesuré mastodon : immer `x[DRAFT_STATE]` → `isDraft` faux →
+    /// `freeze(draft)` → cible non-extensible → `ownKeys` `TypeError`.
+    fn prop_trap_key(&mut self, key: &str) -> Value {
+        if key.starts_with('\u{f130}') {
+            if let Some(id) = self.sym_index.get(key) {
+                return Value::Obj(*id);
+            }
+        }
+        self.str_val(key)
+    }
+
     /// `[[OwnPropertyKeys]]` trap-aware (`Reflect.ownKeys`,
     /// `getOwnPropertyNames`) — la trap `ownKeys` doit rendre un
     /// tableau de strings dédupliquées (spec : `TypeError` sinon).
@@ -5062,7 +5138,7 @@ impl Engine {
         if let Some((tid, target, handler)) = self.proxy_th(id)? {
             let trap = self.proxy_trap(handler, "getOwnPropertyDescriptor")?;
             if matches!(trap, Value::Obj(_)) {
-                let kv = self.str_val(key);
+                let kv = self.prop_trap_key(key);
                 let r = self.call_value(trap, handler, &[target, kv])?;
                 return match r {
                     // Invariant : prop non-config ne peut pas être
