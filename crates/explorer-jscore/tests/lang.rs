@@ -2988,7 +2988,7 @@ fn proxy_traps() {
     );
 }
 
-/// JS-C164 : les traps Proxy reçoivent un *`PropertyKey`* — un symbole
+/// JS-C165 : les traps Proxy reçoivent un *`PropertyKey`* — un symbole
 /// doit arriver en `Symbol`, pas en chaîne mangée (motif immer
 /// `x[DRAFT_STATE]` : `isDraft` lit `draft[DRAFT_STATE]` via la trap
 /// `get` — une chaîne à la place casse `prop === SYM` → immer gèle

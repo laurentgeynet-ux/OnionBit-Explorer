@@ -7,7 +7,7 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
-- **JS-C164 — traps Proxy : clés-symboles
+- **JS-C165 — traps Proxy : clés-symboles
   livrées en `Symbol`** (`explorer-jscore`) —
   `[[Get]]`/`[[Set]]`/`[[Has]]`/
   `[[Delete]]`/`[[GetOwnPropertyDescriptor]]`

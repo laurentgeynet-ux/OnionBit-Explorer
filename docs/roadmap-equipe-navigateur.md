@@ -7164,6 +7164,30 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   → re-test — kill sur vivant seul.
   `c37_mem_limit_soft_kill` refondu.
 
+- [x] **JS-C165. Traps Proxy : clés-
+  symboles livrées en `Symbol`**
+  (`explorer-jscore`) — `[[Get]]`/
+  `[[Set]]`/`[[Has]]`/`[[Delete]]`/
+  `[[GetOwnPropertyDescriptor]]`
+  passaient la clé stringifiée à la
+  trap — `prop === Symbol.x` dedans
+  toujours faux. Mur mesuré mastodon :
+  immer `draft[DRAFT_STATE]` →
+  `isDraft` faux → `freeze(draft)`
+  gèle la cible → `ownKeys` TypeError.
+  `prop_trap_key` démange via
+  `sym_index`. Test
+  `proxy_traps_receive_symbol_keys`
+  + protocole draft immer réduit.
+  Vol live : ownKeys TypeError parti,
+  app descend à `createStore` (mur
+  suivant : Redux #7, action
+  non-plain au dispatch — middleware
+  chain). Cap `max_modules` 64→256 +
+  warn `tronqué` (commit `2b61012` —
+  graphe mastodon 121 > 64, axios
+  n°65+ jamais préfetché).
+
 - [x] **JS-C134. Récursions non
   bornées : drops AST + walks
   runtime** (`explorer-jscore`) —

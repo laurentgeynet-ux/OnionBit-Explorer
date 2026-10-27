@@ -99,7 +99,7 @@ plateforme net** (ops jscore Encrypt/Decrypt restent à livrer) ·
 | 2 | **Boucle infinie de navigations auto** (meta refresh / `location.*` cumulés) | `explorer-core` | cdiscount : 3 812 navs, 20 001 streams, 16 min, kill manuel (éq. 6) | Budget `max_auto_navs` (étape 144) référencé post-fix — **à re-voler** |
 | 3 | **Stack overflow** `explorer-jscore` — récursion parser/AST non bornée | `explorer-jscore` | alpinejs.dev : thread mort (éq. 2) | **OUVERT** — pas de `depth_limit` livré dans les FIX |
 | 4 | **Morts silencieuses résiduelles** : boot JS échoue sans aucune entrée console | `core`/`jscore` | pinterest (vol 22 post-fix, toujours muet), twitch, archive.org, radiogarden (33 scripts, 0 erreur), play2048, cartes.gouv, windy/flightradar (modules+importmap inertes) | **EN NETTE DÉCROISSANCE** — `unhandledrejection` + warns fetch stylesheet/script/iframe + dyn import livrés ; restent bras MapLoader et drains de modules |
-| 5 | **`import()` : dep absente du MapLoader** — « module non chargé : {url absolue} » | `explorer-js`/`core` | mastodon, chess, letterboxd, marmiton | **OUVERT** — bras identifié (`fetch_module_sources` ne collecte pas tout : borne `max_modules`, refus, spec non extrait) ; tracing ajouté, racine à fermer |
+| 5 | **`import()` : dep absente du MapLoader** — « module non chargé : {url absolue} » | `explorer-js`/`core` | mastodon, chess, letterboxd, marmiton | **FIX LIVRÉ** — racine mastodon fermée : `max_modules` 64→256 + warn `tronqué` (`2b61012`) ; re-vol post-fix : graphe `application-*.js` = 121 sources, axios (n°65+) chargé et instancié, erreur disparue. Restes §B : refus fetch / spec non extrait d'import map (J3) ; chess/letterboxd/marmiton à re-voler |
 | 6 | **`import()` sur `data:` URL refusé** (résolution/CSP) | `explorer-core` | reddit ×2 — polyfills-loader et boot Shreddit tués | **OUVERT** — `data:` décodé côté dyn import mais refusé en module ? |
 | 7 | **`visibility:hidden` jamais levé** — page blanche totale malgré DOM/layout complets | `jscore`/glue | geeksforgeeks (vol 30) | **OUVERT** |
 | 8 | **Frame blanche au scroll** — layout complet à y=5520, frame blanche à scroll_y=1600 | `explorer-render` (suspect `build_display_list_incremental`) | glassdoor (vol 26) | **OUVERT** — audit sans trou démontré, repro attendu |
@@ -121,6 +121,7 @@ plateforme net** (ops jscore Encrypt/Decrypt restent à livrer) ·
 | 19 | **`document.write`/`async` ordonnancement** — scripts dyn drainés post-commit, pas en ordre de parse | `explorer-core` | tumblr main-*.js jamais exécuté | **OUVERT** — chantier profond documenté |
 | 20 | **Images `data-src`** : repli livré (840a33c) mais marmiton encore gris en V3 | `explorer-core` | vol 34 | **À RE-VALIDER** sur binaire post-fix |
 | 21 | **Console `×N` ne borne pas la source** : `r is not defined` ×512 (genius reactAds) = retry/intervalle non borné | `jscore` budget | vol 33 | dédup visuel OK ; boucle applicative reste |
+| 22 | **Redux `dispatch` : action non-plain** — `Minified Redux error #7` (« Actions must be plain objects ») : une action non-plain traverse la chaîne middleware/thunk jusqu'au dispatch de base | `explorer-jscore` | mastodon `/about` (vol opérateur, binaire post-C165) — l'app exécute 121 modules jusqu'à `createStore` | **OUVERT** — suspect : composition `applyMiddleware`/`typeof` action thunk non interceptée ; immer résolu (J10) |
 
 ### 🟡 Moyen — perf, métriques, observabilité résiduelle
 
@@ -203,16 +204,16 @@ vols/observabilité (transverse).
 
 | # | Tâche | Source | État |
 |---|---|---|---|
-| J1 | **Deadline wall-clock éval** (`EXPLORER_JS_EVAL_TIMEOUT_MS`) — rafale timers post-apply saturant un cœur (allrecipes : API muette 3-6 min, RAM 2,9 Go) → `JsError::Timeout` → disjoncteur existant | §B-1, §D-1 | spec prête (reprise 16 FIX-1) — **numéro C164** (C163 pris par le fix champs dérivés) |
+| J1 | **Deadline wall-clock éval** (`EXPLORER_JS_EVAL_TIMEOUT_MS`) — rafale timers post-apply saturant un cœur (allrecipes : API muette 3-6 min, RAM 2,9 Go) → `JsError::Timeout` → disjoncteur existant | §B-1, §D-1 | **livré** (JS-C164, `1ec32d5` — par batch, disjoncteur armé) — à re-voler allrecipes |
 | J2 | `depth_limit` parser/AST — le seul crash process (alpinejs) ; C134 a borné drop AST + walk JSON, pas la descente syntaxique | §B-3 | ouvert |
-| J3 | Bras MapLoader `import()` : `fetch_module_sources` ne collecte pas tout (`max_modules`, refus, spec non extrait) + `data:` refusé en module | §B-5/6 | ouvert, tracing posé |
+| J3 | Bras MapLoader `import()` : `fetch_module_sources` ne collecte pas tout (`max_modules`, refus, spec non extrait) + `data:` refusé en module | §B-5/6 | partiel — `data:` livré (JS-C131), cap 64→256 + warn `tronqué` (`2b61012`) ; reste refus/spec non extrait |
 | J4 | Heap budget : capper `heap memory limit exceeded` à 1 occurrence + mesurer le seuil réel (marmiton, bookshop beacon) | §B-12 | ouvert |
 | J5 | Matrice APIs résiduelles : `instanceof Element` trop strict, `Function.name` classes minifiées, `document` of Null (dw), token `debugger` tuant un module, `Illegal component name ""` | §B-14 | partiel (C162 Bootstrap, attachShadow sorti du stub) |
 | J6 | Spread/rest `...` « outside a call or array literal » — position non couverte par C146 | §B-9 | ouvert |
 | J7 | `document.write`/async : ordonnancement post-commit vs ordre de parse (tumblr) | §B-19 | chantier profond documenté |
 | J8 | Boucle applicative non bornée (`r is not defined` ×512 — intervalle retry en rafale) | §B-21 | dédup visuel OK ; borne runtime à poser |
 | J9 | `visibility:hidden` jamais levé (geeksforgeeks — hydrate JS) | §B-7 | ouvert |
-| J10 | Proxy : traps reçoivent `PropertyKey` symbol (immer/mastodon `isDraft`) | §B-9/19 | **en vol** (session opérateur) |
+| J10 | Proxy : traps reçoivent `PropertyKey` symbol (immer/mastodon `isDraft`) | §B-9/19 | **RÉSOLU** — JS-C165 : `prop_trap_key` démange `sym_index`, re-vol mastodon : `ownKeys` TypeError disparu, app atteint `createStore` |
 
 ### NAV — `explorer-core` / `net` / `daemon` / `api`
 
