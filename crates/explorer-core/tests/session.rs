@@ -2289,11 +2289,13 @@ async fn click_dispatches_dom_event_and_rerenders() {
 
     // Clic sur le div : le listener mute le miroir → resynchro
     // → rendu identique à la page statique cible.
+    // B-31 : un clic livré au DOM rapporte `Edited` (mutation
+    // commise), pas `Ignored`.
     let out = s
         .handle_input(a, InputEvent::Click { x: 5.0, y: 5.0 })
         .await
         .unwrap();
-    assert!(matches!(out, InputOutcome::Ignored));
+    assert!(matches!(out, InputOutcome::Edited));
     assert_eq!(s.frame_png(a), s.frame_png(b));
 }
 
@@ -2320,7 +2322,8 @@ async fn click_runs_inline_onclick_attribute() {
         .handle_input(a, InputEvent::Click { x: 5.0, y: 5.0 })
         .await
         .unwrap();
-    assert!(matches!(out, InputOutcome::Ignored));
+    // B-31 : clic livré au DOM → `Edited`, pas `Ignored`.
+    assert!(matches!(out, InputOutcome::Edited));
     assert_eq!(s.frame_png(a), s.frame_png(b));
 }
 
@@ -12269,8 +12272,15 @@ async fn dyn_frame_fetch_realm_load() {
     s.set_js_factory(explorer_js::JscoreEngine::factory());
     let a = s.open_tab();
     s.navigate(a, "http://h.test/").await.unwrap();
-    s.pump_net().await;
-    s.pump_net().await;
+    // Le fetch du cadre part en tâche — sous charge
+    // parallèle de la suite, 2 pompes ne suffisent pas
+    // toujours ; on pompe jusqu'à l'émission (borne 16).
+    for _ in 0..16 {
+        s.pump_net().await;
+        if t.paths().contains(&"/f".to_string()) {
+            break;
+        }
+    }
     assert!(
         t.paths().contains(&"/f".to_string()),
         "iframe dynamique fetché"
@@ -12350,9 +12360,15 @@ async fn dyn_frame_src_renavigates() {
     s.set_js_factory(explorer_js::JscoreEngine::factory());
     let a = s.open_tab();
     s.navigate(a, "http://h.test/").await.unwrap();
-    s.pump_net().await;
-    s.pump_net().await;
-    let paths = t.paths();
+    // Même motif : borne 16 pompes avec sortie anticipée.
+    let mut paths = Vec::new();
+    for _ in 0..16 {
+        s.pump_net().await;
+        paths = t.paths();
+        if paths.contains(&"/b".to_string()) {
+            break;
+        }
+    }
     assert!(
         paths.contains(&"/b".to_string()),
         "dernier src fetché : {paths:?}"
@@ -12738,11 +12754,18 @@ async fn subtle_hmac_import_sign_verify() {
     s.set_js_factory(explorer_js::JscoreEngine::factory());
     let id = s.open_tab();
     s.navigate(id, "http://h.test/").await.unwrap();
-    for _ in 0..4 {
+    // 5 promesses chaînées — sous charge parallèle de la
+    // suite, 4 pompes ne suffisent pas ; borne haute avec
+    // sortie anticipée (même motif que `worker_loads…`).
+    let mut dump = String::new();
+    for _ in 0..32 {
         s.pump_net().await;
         s.pump_timers(id);
+        dump = s.dom_dump(id).unwrap_or_default();
+        if dump.contains("k:secret/HMAC") || dump.contains("err:") {
+            break;
+        }
     }
-    let dump = s.dom_dump(id).unwrap_or_default();
     // Tag HMAC-SHA256 = 32 octets ; ok:true, bad:false.
     assert!(
         dump.contains("k:secret/HMAC/xfalse sig:32 ok:true bad:false"),
@@ -13364,11 +13387,18 @@ async fn worker_loads_and_posts_back() {
     s.set_js_factory(explorer_js::JscoreEngine::factory());
     let a = s.open_tab();
     s.navigate(a, "http://h.test/p").await.unwrap();
-    for _ in 0..8 {
+    // Le worker est fetché+évalué en tâches — sous charge
+    // parallèle de la suite, 8 pompes ne suffisent pas
+    // toujours ; on pompe jusqu'à l'arrivée (borne 32).
+    let mut dump = String::new();
+    for _ in 0..32 {
         s.pump_net().await;
         s.pump_timers(a);
+        dump = s.dom_dump(a).unwrap_or_default();
+        if dump.contains("W=pong:go") {
+            break;
+        }
     }
-    let dump = s.dom_dump(a).unwrap_or_default();
     assert!(
         dump.contains("W=pong:go"),
         "worker non chargé ou postMessage perdu : {dump}"

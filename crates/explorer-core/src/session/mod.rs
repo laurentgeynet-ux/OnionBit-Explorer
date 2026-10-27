@@ -889,7 +889,7 @@ pub struct Session {
     /// (commit, rejet, parc orphelin, panic réarmé).
     pub(crate) paint_in_flight: std::collections::HashMap<TabId, std::time::Instant>,
     /// Série de pompes JS productives consécutives par onglet
-    /// (B-41 — flixbus : pump.js_run_sync persistant, rafale
+    /// (B-41 — flixbus : `pump.js_run_sync` persistant, rafale
     /// `UnmappedKey` re-parse→éval sans fin) — lue par
     /// `commit_js_pump`.
     pump_streaks: std::collections::HashMap<TabId, u32>,
@@ -1082,7 +1082,7 @@ impl Session {
     pub fn paint_in_flight_age_ms(&self, tab: TabId) -> Option<u64> {
         self.paint_in_flight
             .get(&tab)
-            .map(|t| t.elapsed().as_millis() as u64)
+            .map(|t| u64::try_from(t.elapsed().as_millis()).unwrap_or(u64::MAX))
     }
 
     /// Ops de journal classées « re-parse » au drain par les
@@ -1471,7 +1471,7 @@ impl Session {
                 title: t
                     .dom
                     .as_ref()
-                    .and_then(|d| extract_title(d))
+                    .and_then(extract_title)
                     .or_else(|| t.title.clone()),
                 can_back: pos > 0,
                 can_forward: pos + 1 < t.hist.len(),

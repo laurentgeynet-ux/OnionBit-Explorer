@@ -33,12 +33,6 @@ use explorer_net::http::Request;
 /// [`Session::navigate`] + [`Session::drain_script_nav`].
 ///
 /// # Errors
-/// Mêmes erreurs que [`Session::navigate`]
-/// (`Url`, `Fetch`, `HttpStatus`, `EmptyDocument`,
-/// `NothingToPaint`, `FrameTooBig`, `UnknownTab`) —
-/// `PipelineError` est émis sur le bus pour les erreurs de
-/// pipeline, comme le chemin `&mut self`.
-
 /// B-30 : future qui s'achève quand l'onglet meurt — les
 /// phases détachées (`job.run`/`sub.run`) s'interrompent au
 /// lieu d'allouer une page pour un onglet fermé.
@@ -62,6 +56,15 @@ async fn tab_alive(
         .map(|e| e.nav_alive.clone())
 }
 
+/// Mêmes erreurs que [`Session::navigate`]
+/// (`Url`, `Fetch`, `HttpStatus`, `EmptyDocument`,
+/// `NothingToPaint`, `FrameTooBig`, `UnknownTab`) —
+/// `PipelineError` est émis sur le bus pour les erreurs de
+/// pipeline, comme le chemin `&mut self`.
+///
+/// # Errors
+/// Voir ci-dessus — propagées via `emit_error` après peinture
+/// de la page d'erreur.
 pub async fn navigate_shared(
     sess: &tokio::sync::Mutex<Session>,
     tab: TabId,
@@ -100,7 +103,7 @@ pub async fn navigate_shared(
     });
     let (done, tail) = match tokio::select! {
         r = job_run => Some(r),
-        _ = wait_tab_dead(&alive) => None,
+        () = wait_tab_dead(&alive) => None,
     } {
         Some(r) => match r {
             // Téléchargement (étape 70) : enregistré en attente
@@ -153,8 +156,8 @@ pub async fn navigate_shared(
     // l'onglet meurt en vol (B-30 : l'orphelin allouait
     // une page entière pour un onglet fermé, +28 Mo/s).
     tokio::select! {
-        _ = sub.run() => {},
-        _ = wait_tab_dead(&alive) => {
+        () = sub.run() => {},
+        () = wait_tab_dead(&alive) => {
             tracing::warn!(tab, "nav orpheline stoppée — onglet fermé en fetch (B-30)");
         }
     }
@@ -169,6 +172,7 @@ pub async fn navigate_shared(
 /// `spawn_blocking` sur la payload (même mécanique que
 /// l'apply 55h), queue sous verrou (historique, `Navigated`,
 /// fragment, `mark_hist_ok`).
+#[allow(clippy::too_many_lines)] // trois temps séquencés — découper fragmenterait le contrat epoch
 async fn nav_commit_shared(
     sess: &tokio::sync::Mutex<Session>,
     tab: TabId,
@@ -312,9 +316,7 @@ async fn nav_commit_shared(
             // rend l'état utilisable et la page d'erreur
             // est peinte (timeout nommé, jamais muet).
             s.rearm_nav_paint(tab);
-            let err = CoreError::Timeout(
-                "worker relayout/images > 90 s (B-46)".to_string(),
-            );
+            let err = CoreError::Timeout("worker relayout/images > 90 s (B-46)".to_string());
             s.paint_error_page(tab, err_req, push, &err);
             Err(s.emit_error(tab, err))
         }
