@@ -2704,6 +2704,12 @@ fn box_sig(bx: &LayoutBox) -> u64 {
         Overflow::Scroll => 2,
         Overflow::Auto => 3,
     });
+    h.mix(match bx.overflow_x {
+        Overflow::Visible => 0,
+        Overflow::Hidden => 1,
+        Overflow::Scroll => 2,
+        Overflow::Auto => 3,
+    });
     h.mix(u64::from(u32::from_ne_bytes(bx.z_index.to_ne_bytes())));
     h.mix(u64::from(bx.control_checked));
     let (iw, ih) = bx.intrinsic.unwrap_or((0.0, 0.0));
@@ -3242,7 +3248,10 @@ fn paint_box<'a>(
         // bordures — on garde le rect entier, documenté).
         // `bx.lines` compte pour l'ouverture : les lignes
         // propres sont du contenu autant que les enfants (R-55).
-        let clipped = bx.overflow != Overflow::Visible;
+        // R-120 : clip si un des DEUX axes est non-visible
+        // (`overflow-x:hidden` seul clippe la padding box —
+        // l'axe y est devenu `auto`, scrollable).
+        let clipped = bx.overflow != Overflow::Visible || bx.overflow_x != Overflow::Visible;
         if clipped {
             items.push(DisplayItem::PushClip(shifted(bx.rect, off)));
         }

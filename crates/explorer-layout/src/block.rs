@@ -1399,17 +1399,23 @@ fn apply_layout_metadata(bx: &mut LayoutBox, st: &ComputedStyle) {
         _ => Float::None,
     };
     let ov = |axis: &str| match st.get(axis) {
-        Some("hidden") => 3,
-        Some("auto") => 2,
-        Some("scroll") => 1,
-        _ => 0,
-    };
-    bx.overflow = match ov("overflow-x").max(ov("overflow-y")) {
-        3 => Overflow::Hidden,
-        2 => Overflow::Auto,
-        1 => Overflow::Scroll,
+        Some("hidden") => Overflow::Hidden,
+        Some("auto") => Overflow::Auto,
+        Some("scroll") => Overflow::Scroll,
         _ => Overflow::Visible,
     };
+    let (mut ox, mut oy) = (ov("overflow-x"), ov("overflow-y"));
+    // css-overflow-3 §3 (R-120) : un axe `visible` calcule
+    // `auto` quand l'autre n'est pas visible — `overflow-x:
+    // hidden` seul clippait les DEUX axes (guardian : étendue
+    // verticale tronquée) ; ici y devient `auto`, scrollable.
+    if ox != Overflow::Visible && oy == Overflow::Visible {
+        oy = Overflow::Auto;
+    } else if oy != Overflow::Visible && ox == Overflow::Visible {
+        ox = Overflow::Auto;
+    }
+    bx.overflow = oy;
+    bx.overflow_x = ox;
     bx.z_index = st
         .get("z-index")
         .and_then(|z| z.trim().parse::<i32>().ok())
@@ -2089,6 +2095,7 @@ fn flow_children(
                 position: Position::Static,
                 float: Float::None,
                 overflow: Overflow::default(),
+                overflow_x: Overflow::Visible,
                 z_index: 0,
                 intrinsic: None,
                 control_checked: false,

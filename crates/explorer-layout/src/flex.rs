@@ -467,7 +467,12 @@ pub(crate) fn flow_flex_children(
                                 crate::intrinsic::min_content_size_px(c, cfs, ctx)
                             }
                             _ => crate::intrinsic::intrinsic_size_px(
-                                &c.style, "min-width", c, main_cb, cfs, ctx,
+                                &c.style,
+                                "min-width",
+                                c,
+                                main_cb,
+                                cfs,
+                                ctx,
                             )
                             .or_else(|| css_px(&c.style, "min-width", main_cb, cfs, ctx))
                             .unwrap_or(0.0),

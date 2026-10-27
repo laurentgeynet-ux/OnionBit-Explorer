@@ -130,8 +130,13 @@ pub struct LayoutBox {
     pub position: Position,
     /// `float` usé (étape 21).
     pub float: Float,
-    /// `overflow` usé — clipping appliqué par le rendu.
+    /// `overflow-y` usé — clipping vertical + étendue
+    /// scrollable (R-120 : par axe — `x` dans `overflow_x`).
     pub overflow: Overflow,
+    /// `overflow-x` usé (R-120) — clipping horizontal.
+    /// Spec css-overflow-3 §3 : un axe `visible` calcule
+    /// `auto` quand l'autre n'est pas visible.
+    pub overflow_x: Overflow,
     /// `z-index` résolu (0 = auto) — contextes d'empilement
     /// pour l'ordre de peinture.
     pub z_index: i32,
@@ -428,6 +433,7 @@ pub fn build_box_tree_sized<S: ::std::hash::BuildHasher>(
         position: Position::Static,
         float: Float::None,
         overflow: Overflow::Visible,
+        overflow_x: Overflow::Visible,
         z_index: 0,
         intrinsic: None,
         control_checked: false,
@@ -568,6 +574,7 @@ fn child_boxes<S: ::std::hash::BuildHasher>(
                     position: Position::Static,
                     float: Float::None,
                     overflow: Overflow::Visible,
+                    overflow_x: Overflow::Visible,
                     z_index: 0,
                     intrinsic: None,
                     control_checked: false,
@@ -728,6 +735,7 @@ fn leaf_box_anon(kind: BoxKind, style: ComputedStyle) -> LayoutBox {
         position: Position::Static,
         float: Float::None,
         overflow: Overflow::Visible,
+        overflow_x: Overflow::Visible,
         z_index: 0,
         intrinsic: None,
         control_checked: false,
@@ -951,6 +959,7 @@ fn flush_run(out: &mut Vec<LayoutBox>, run: &mut Vec<LayoutBox>, style: &Compute
             position: Position::Static,
             float: Float::None,
             overflow: Overflow::Visible,
+            overflow_x: Overflow::Visible,
             z_index: 0,
             intrinsic: None,
             control_checked: false,
@@ -1051,6 +1060,7 @@ fn object_box(
         position: Position::Static,
         float: Float::None,
         overflow: Overflow::Visible,
+        overflow_x: Overflow::Visible,
         z_index: 0,
         intrinsic: sizes.get(&root).copied(),
         control_checked: false,
@@ -1144,6 +1154,7 @@ fn leaf_box(
         position: Position::Static,
         float: Float::None,
         overflow: Overflow::Visible,
+        overflow_x: Overflow::Visible,
         z_index: 0,
         intrinsic,
         control_checked: false,
@@ -1192,6 +1203,7 @@ fn control_box(
                     position: Position::Static,
                     float: Float::None,
                     overflow: Overflow::Visible,
+                    overflow_x: Overflow::Visible,
                     z_index: 0,
                     intrinsic: None,
                     control_checked: false,

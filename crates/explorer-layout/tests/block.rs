@@ -2000,3 +2000,30 @@ fn hit_test_transform_sur_ancetre_atteint_les_enfants() {
         Some(a)
     );
 }
+
+#[test]
+fn overflow_x_seul_ne_clippe_pas_y() {
+    // R-120 : `overflow-x:hidden` seul → y calcule `auto`
+    // (css-overflow-3 §3), l'étendue verticale reste
+    // scrollable (guardian : doc coupé).
+    let dom = TreeBuilder::parse("<div><p>bas</p></div>");
+    let mut e = StyleEngine::new();
+    e.add_css("div{overflow-x:hidden}", Origin::Author);
+    let styles = e.compute_tree(&dom, dom.document(), &StyleEnv::default());
+    let root_el = dom
+        .children(dom.document())
+        .into_iter()
+        .flatten()
+        .find(|&c| dom.element(c).is_ok())
+        .unwrap();
+    let mut bx = build_box_tree(&dom, root_el, &styles).unwrap();
+    layout_tree(&mut bx, VIEW, &BlockCtx::default());
+    fn find(bx: &explorer_layout::LayoutBox) -> Option<&explorer_layout::LayoutBox> {
+        if bx.overflow_x == explorer_layout::Overflow::Hidden {
+            return Some(bx);
+        }
+        bx.children.iter().find_map(find)
+    }
+    let d = find(&bx).expect("div overflow-x");
+    assert_eq!(d.overflow, explorer_layout::Overflow::Auto);
+}

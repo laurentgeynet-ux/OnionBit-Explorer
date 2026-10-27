@@ -34,7 +34,10 @@ fn laid(html: &str, css: &str) -> (Dom, LayoutBox) {
 fn by_id(dom: &Dom, id: &str) -> NodeId {
     let mut queue = vec![dom.document()];
     while let Some(n) = queue.pop() {
-        if dom.attribute(n, "id").is_ok_and(|v| v.as_deref() == Some(id)) {
+        if dom
+            .attribute(n, "id")
+            .is_ok_and(|v| v.as_deref() == Some(id))
+        {
             return n;
         }
         if let Ok(ch) = dom.children(n) {
@@ -48,7 +51,10 @@ fn find(b: &LayoutBox, id: NodeId) -> &LayoutBox {
     if b.node == Some(id) {
         return b;
     }
-    b.children.iter().find_map(|c| find_opt(c, id)).expect("boite")
+    b.children
+        .iter()
+        .find_map(|c| find_opt(c, id))
+        .expect("boite")
 }
 
 fn find_opt(b: &LayoutBox, id: NodeId) -> Option<&LayoutBox> {
@@ -117,7 +123,11 @@ fn flex_shrink_plancher_min_content() {
     );
     let d = find(&bx, by_id(&dom, "d"));
     let i = find(&bx, by_id(&dom, "i"));
-    assert!(d.rect.width > 20.0, "d.w={} (>0 = plancher min-content)", d.rect.width);
+    assert!(
+        d.rect.width > 20.0,
+        "d.w={} (>0 = plancher min-content)",
+        d.rect.width
+    );
     assert!(approx(i.rect.width, 900.0), "i.w={}", i.rect.width);
     let (dom2, bx2) = laid(
         html,
@@ -125,5 +135,9 @@ fn flex_shrink_plancher_min_content() {
          #i { flex-shrink: 0 } #d { min-width: 0 }",
     );
     let d0 = find(&bx2, by_id(&dom2, "d"));
-    assert!(approx(d0.rect.width, 0.0), "min-width:0 -> d.w={}", d0.rect.width);
+    assert!(
+        approx(d0.rect.width, 0.0),
+        "min-width:0 -> d.w={}",
+        d0.rect.width
+    );
 }
