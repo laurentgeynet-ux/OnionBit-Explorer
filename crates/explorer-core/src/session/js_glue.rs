@@ -378,7 +378,7 @@ impl Session {
         if drain_expired {
             tracing::warn!(
                 tab,
-                elapsed_ms = t0.elapsed().as_millis() as u64,
+                elapsed_ms = u64::try_from(t0.elapsed().as_millis()).unwrap_or(u64::MAX),
                 "commit borné — drains finaux sautés (B-41)"
             );
         }
@@ -509,7 +509,15 @@ impl Session {
             } else {
                 message
             };
-            self.emit_pipeline_error(tab, msg);
+            // B-51 : émettre l'événement, jamais s'appeler
+            // soi-même — la 1ʳᵉ occurrence ré-entrait et
+            // mourait à n=2 : toute erreur pipeline était
+            // avalée (évals `ok=false` invisibles à
+            // `/console`).
+            let _ = self.events.send(CoreEvent::PipelineError {
+                tab: Some(tab),
+                message: msg,
+            });
         }
     }
 
