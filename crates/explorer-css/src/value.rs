@@ -615,6 +615,25 @@ pub fn expand_shorthand(name: &str, value: &str) -> Option<Vec<(String, String)>
     if let Some(expanded) = expand_logical(name, value) {
         return Some(expanded);
     }
+    // Shorthands `place-*` (css-align-3 — R-125) : 1 valeur
+    // répétée ou 2 (`<align> <justify>`).
+    if let Some((a, b)) = match name {
+        "place-items" => Some(("align-items", "justify-items")),
+        "place-content" => Some(("align-content", "justify-content")),
+        "place-self" => Some(("align-self", "justify-self")),
+        _ => None,
+    } {
+        let parts: Vec<&str> = value.split_whitespace().collect();
+        let (v1, v2) = match parts.as_slice() {
+            [v] => (*v, *v),
+            [v1, v2] => (*v1, *v2),
+            _ => return None,
+        };
+        return Some(vec![
+            (a.to_string(), v1.to_string()),
+            (b.to_string(), v2.to_string()),
+        ]);
+    }
     match name {
         "margin" | "padding" => expand_box(name, value),
         "inset" => {
