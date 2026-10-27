@@ -282,6 +282,7 @@ impl Engine {
                     match &d.init {
                         Some(init) => {
                             let v = self.eval_expr(env, this, init)?;
+                            self.infer_name(&d.pat, v);
                             self.bind_pat(env, this, &d.pat, v, BindMode::Var)?;
                         }
                         // `var a;` — declare without clobbering.
@@ -295,6 +296,7 @@ impl Engine {
                     Self::declare_pat_lex(env, &d.pat, !constant);
                     if let Some(init) = &d.init {
                         let v = self.eval_expr(env, this, init)?;
+                        self.infer_name(&d.pat, v);
                         self.bind_pat(env, this, &d.pat, v, BindMode::Lex { mutable: !constant })?;
                     }
                 }
@@ -733,5 +735,33 @@ impl Engine {
             }
         }
         Ok(())
+    }
+}
+
+impl Engine {
+    /// `NamedEvaluation` spec — une fonction/classe anonyme liée à
+    /// un identifiant reçoit son `name` (dw : `var C = class{}`
+    /// → `C.name === "C"` ; sinon `customElements.define(C.name,…)`
+    /// recevait `""` → `Illegal component name ""`).
+    fn infer_name(&mut self, pat: &Pat, v: Value) {
+        let Pat::Ident(name) = pat else {
+            return;
+        };
+        let Value::Obj(id) = v else {
+            return;
+        };
+        if !self.is_callable(v) {
+            return;
+        }
+        // Déjà nommée (`function f(){}`, `class K{}`) — ne pas
+        // écraser ; l'inférence ne vaut que pour `""`/absent.
+        let cur = self
+            .get_prop(id, "name")
+            .and_then(|n| self.heap_string_of(n))
+            .unwrap_or_default();
+        if cur.is_empty() && !name.is_empty() {
+            let n = self.str_val(name.clone());
+            self.set_own(id, "name", n, false);
+        }
     }
 }

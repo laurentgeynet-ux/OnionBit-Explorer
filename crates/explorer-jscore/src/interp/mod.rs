@@ -2772,6 +2772,20 @@ impl Engine {
         Thrown(self.error_value(proto, "SyntaxError", &msg.into()))
     }
 
+    /// Borne partagée des chaînes de délégation proxy —
+    /// `new Proxy(p,…)` ×N : chaque maillon sans trap re-saute
+    /// vers sa cible *hors* `call_depth` (J2 : la chaîne
+    /// `Proxy(proxy)×20k` overflowait la pile native, classe du
+    /// crash alpine). Au-delà de `MAX_PROTO_DEPTH` → `RangeError`,
+    /// cohérent avec les moteurs natifs (stack overflow).
+    pub(crate) fn proxy_hop(&mut self, depth: &mut u32) -> JsResult<()> {
+        *depth += 1;
+        if *depth > MAX_PROTO_DEPTH {
+            return Err(self.range_error("maximum proxy delegation depth exceeded"));
+        }
+        Ok(())
+    }
+
     /// `URIError` — no dedicated proto, hangs off `Error`'s (deviation
     /// documented in ADR-0007; `e.name` still says `URIError`).
     pub(crate) fn uri_error(&mut self, msg: impl Into<String>) -> Thrown {
@@ -2873,7 +2887,47 @@ impl Engine {
     /// self-feeding reaction loop dies like an infinite `while`.
     /// La borne mémoire heap (JS-C37, ADR-0019) est relue ici :
     /// l'alloc lève le drapeau, le `tick` transforme en kill doux.
+    /// Sonde J2 : watermark pile native — quand la récursion
+    /// fond sans que `call_depth` compte (mur alpine), la
+    /// backtrace nomme le chemin AVANT le garde-fou noyau.
+    /// `EXPLORER_LOWSTACK=1` arme ; absent/0 = muet. Appelée
+    /// aux entonnoirs (`tick`, `call_value_impl`, `get_prop`).
+    pub(crate) fn lowstack_tick(&self) {
+        thread_local! {
+            static LOWSTACK_ARMED: std::cell::Cell<Option<bool>> = const { std::cell::Cell::new(None) };
+            static LOW_BAND: std::cell::Cell<u64> = const { std::cell::Cell::new(u64::MAX) };
+        }
+        let armed = LOWSTACK_ARMED.with(|c| {
+            c.get().unwrap_or_else(|| {
+                let v = std::env::var("EXPLORER_LOWSTACK").is_ok();
+                c.set(Some(v));
+                v
+            })
+        });
+        if !armed {
+            return;
+        }
+        if let Some(rem) = stacker::remaining_stack() {
+            let band = (rem as u64) / 131_072;
+            let prev = LOW_BAND.with(std::cell::Cell::get);
+            if band < prev {
+                LOW_BAND.with(|c| c.set(band));
+                eprintln!(
+                    "[lowstack] rem={}KiB call_depth={} calls={}",
+                    rem / 1024,
+                    self.call_depth,
+                    self.call_stack.len(),
+                );
+                if rem < 262_144 {
+                    eprintln!("{}", std::backtrace::Backtrace::force_capture());
+                    LOW_BAND.with(|c| c.set(0));
+                }
+            }
+        }
+    }
+
     pub(crate) fn tick(&mut self) -> JsResult<()> {
+        self.lowstack_tick();
         if let Some(d) = self.eval_deadline {
             if Instant::now() >= d {
                 self.deadline_hit = true;
@@ -4261,10 +4315,15 @@ impl Engine {
     /// getter calls it with `this = recv` (differs from `base` only
     /// for `super.x` reads).
     pub(crate) fn read_prop(&mut self, base: Value, recv: Value, key: &str) -> JsResult<Value> {
-        let Value::Obj(id) = base else {
+        self.lowstack_tick();
+        let Value::Obj(mut id) = base else {
             return self.get_prop_value(base, key);
         };
-        if let Some((tid, target, handler)) = self.proxy_th(id)? {
+        // Un proxy sans trap `get` délègue `[[Get]]` à sa cible —
+        // boucle bornée : `new Proxy(proxy,…)` ×N récurait ici en
+        // Rust hors `call_depth` (J2 : overflow natif, classe alpine).
+        let mut depth = 0;
+        while let Some((tid, target, handler)) = self.proxy_th(id)? {
             let trap = self.proxy_trap(handler, "get")?;
             if matches!(trap, Value::Obj(_)) {
                 let kv = self.prop_trap_key(key);
@@ -4293,7 +4352,8 @@ impl Engine {
                 }
                 return Ok(v);
             }
-            return self.read_prop(target, recv, key);
+            id = tid;
+            self.proxy_hop(&mut depth)?;
         }
         match self.find_prop(id, key) {
             Some(Prop::Data { value, .. }) => Ok(value),
@@ -4318,18 +4378,15 @@ impl Engine {
         key: &str,
         v: Value,
     ) -> JsResult<()> {
-        if let Some((tid, target, handler)) = self.proxy_th(id)? {
-            if self
-                .proxy_set_step(tid, target, handler, recv, key, v)?
-                .is_some()
-            {
-                return Ok(());
-            }
-            return self.write_prop(tid, recv, key, v);
-        }
-        // Accessors on the chain intercept the write.
+        // Accessors on the chain intercept the write. Le maillon
+        // de tête comme les suivants passent par la même boucle
+        // bornée — `own` suit le dernier non-proxy (cible réelle
+        // du `set_prop` final : écrire sur le wrapper proxy serait
+        // une fuite, J2 : délégation `Proxy(proxy)×N` sans borne).
+        let mut own = id;
         let mut cur = Some(id);
         let mut depth = 0;
+        let mut phops = 0;
         while let Some(cid) = cur {
             // Un proxy *au milieu* de la chaîne intercepte aussi
             // — même logique qu'en tête (`Object.setPrototypeOf(
@@ -4344,7 +4401,12 @@ impl Engine {
                     return Ok(());
                 }
                 cur = Some(tid);
+                own = tid;
                 depth += 1;
+                // Chaîne de délégation proxy hostile → erreur
+                // (spec : RangeError) ; la marche proto ordinaire
+                // garde sa borne silencieuse `break` historique.
+                self.proxy_hop(&mut phops)?;
                 if depth > MAX_PROTO_DEPTH {
                     break;
                 }
@@ -4361,7 +4423,7 @@ impl Engine {
                 }
                 // Data prop non-writable *héritée* → l'écriture est
                 // refusée (pas de shadowing possible, spec [[Set]]).
-                Some(Prop::Data { attrs, .. }) if cid != id && !attrs.writable => {
+                Some(Prop::Data { attrs, .. }) if cid != own && !attrs.writable => {
                     return self.write_refused(key);
                 }
                 Some(_) => break, // data writable → shadow with own write
@@ -4376,7 +4438,7 @@ impl Engine {
                 break;
             }
         }
-        if self.set_prop(id, key, v)? {
+        if self.set_prop(own, key, v)? {
             Ok(())
         } else {
             self.write_refused(key)
@@ -4878,8 +4940,10 @@ impl Engine {
         }
     }
 
-    pub(crate) fn has_prop(&mut self, id: ObjId, key: &str) -> JsResult<bool> {
-        if let Some((tid, target, handler)) = self.proxy_th(id)? {
+    pub(crate) fn has_prop(&mut self, mut id: ObjId, key: &str) -> JsResult<bool> {
+        // Délégation bornée, même motif que `read_prop` (J2).
+        let mut depth = 0;
+        while let Some((tid, target, handler)) = self.proxy_th(id)? {
             let trap = self.proxy_trap(handler, "has")?;
             if matches!(trap, Value::Obj(_)) {
                 let kv = self.prop_trap_key(key);
@@ -4904,7 +4968,8 @@ impl Engine {
                 }
                 return Ok(self.to_boolean(r));
             }
-            return self.has_prop(tid, key);
+            id = tid;
+            self.proxy_hop(&mut depth)?;
         }
         if let Some(h) = self.host_of(id) {
             if h.get(self, Value::Obj(id), key)?.is_some() {
@@ -4967,15 +5032,19 @@ impl Engine {
 
     /// `delete o.k` → `false` si refusé ; en strict un refus est un
     /// `TypeError` (spec `[[Delete]]` + strict Delete).
-    pub(crate) fn delete_result(&mut self, id: ObjId, key: &str) -> JsResult<Value> {
-        if let Some((tid, target, handler)) = self.proxy_th(id)? {
+    pub(crate) fn delete_result(&mut self, mut id: ObjId, key: &str) -> JsResult<Value> {
+        // Délégation bornée, même motif que `read_prop` (J2).
+        let mut depth = 0;
+        while let Some((tid, target, handler)) = self.proxy_th(id)? {
             let trap = self.proxy_trap(handler, "deleteProperty")?;
             let ok = if matches!(trap, Value::Obj(_)) {
                 let kv = self.prop_trap_key(key);
                 let r = self.call_value(trap, handler, &[target, kv])?;
                 self.to_boolean(r)
             } else {
-                return self.delete_result(tid, key);
+                id = tid;
+                self.proxy_hop(&mut depth)?;
+                continue;
             };
             if ok {
                 // Invariant spec `[[Delete]]` : une prop non-config
@@ -5087,8 +5156,10 @@ impl Engine {
     /// `[[OwnPropertyKeys]]` trap-aware (`Reflect.ownKeys`,
     /// `getOwnPropertyNames`) — la trap `ownKeys` doit rendre un
     /// tableau de strings dédupliquées (spec : `TypeError` sinon).
-    pub(crate) fn own_keys_trapped(&mut self, id: ObjId) -> JsResult<Vec<String>> {
-        if let Some((tid, target, handler)) = self.proxy_th(id)? {
+    pub(crate) fn own_keys_trapped(&mut self, mut id: ObjId) -> JsResult<Vec<String>> {
+        // Délégation bornée, même motif que `read_prop` (J2).
+        let mut depth = 0;
+        while let Some((tid, target, handler)) = self.proxy_th(id)? {
             let trap = self.proxy_trap(handler, "ownKeys")?;
             if matches!(trap, Value::Obj(_)) {
                 let r = self.call_value(trap, handler, &[target])?;
@@ -5137,15 +5208,18 @@ impl Engine {
                 }
                 return Ok(out);
             }
-            return self.own_keys_trapped(tid);
+            id = tid;
+            self.proxy_hop(&mut depth)?;
         }
         Ok(self.own_keys(id))
     }
 
     /// `[[GetOwnProperty]]` trap-aware — la trap rend un objet
     /// descripteur ou `undefined` (spec : `TypeError` sinon).
-    pub(crate) fn get_own_prop(&mut self, id: ObjId, key: &str) -> JsResult<Option<Prop>> {
-        if let Some((tid, target, handler)) = self.proxy_th(id)? {
+    pub(crate) fn get_own_prop(&mut self, mut id: ObjId, key: &str) -> JsResult<Option<Prop>> {
+        // Délégation bornée, même motif que `read_prop` (J2).
+        let mut depth = 0;
+        while let Some((tid, target, handler)) = self.proxy_th(id)? {
             let trap = self.proxy_trap(handler, "getOwnPropertyDescriptor")?;
             if matches!(trap, Value::Obj(_)) {
                 let kv = self.prop_trap_key(key);
@@ -5195,7 +5269,8 @@ impl Engine {
                     )),
                 };
             }
-            return self.get_own_prop(tid, key);
+            id = tid;
+            self.proxy_hop(&mut depth)?;
         }
         Ok(self.find_own(id, key))
     }
@@ -5622,6 +5697,7 @@ impl Engine {
         args: &[Value],
         nt: Value,
     ) -> JsResult<Value> {
+        self.lowstack_tick();
         let Value::Obj(id) = f else {
             // Le récepteur dans le message — les murs corpus
             // « value is not a function » nomment leur cible

@@ -6492,3 +6492,25 @@ fn instanceof_dom_hierarchy() {
         assert_eq!(evf(&mut e, src), want, "{src}");
     }
 }
+
+#[test]
+fn component_name_and_function_name_probe() {
+    // J5 suite (dw) : `Illegal component name ""` —
+    // customElements.define(name vide ou cls sans nom) et
+    // Function.name sur classes minifiées.
+    let (mut e, _jar, _navs) = engine_full(PAGE);
+    for src in [
+        "class extends Object {}",
+        "var C=class{}; C.name",
+        "var C=class extends Object{}; C.name",
+        "function f(){} f.name",
+        "class {}; (class{}).name",
+        "customElements.define('', class extends HTMLElement{});'d'",
+        "customElements.define('x-1', class extends HTMLElement{});'d2'",
+    ] {
+        match e.eval(src) {
+            Ok(v) => println!("OK   {src} → {}", e.describe(v)),
+            Err(x) => println!("FAIL {src} → {x}"),
+        }
+    }
+}
