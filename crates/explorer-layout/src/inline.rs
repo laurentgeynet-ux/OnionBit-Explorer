@@ -1006,46 +1006,67 @@ fn break_into_lines(
             if acc.is_empty() {
                 descend_band!(pw);
             }
-            let shaped = ctx.fonts.and_then(|src| {
-                ctx.font_cache.borrow_mut().shape(
-                    src,
-                    &font_req,
-                    text,
-                    fs,
-                    piece.dir == Direction::Rtl,
-                    crate::block::letter_spacing_px(&item.style, fs, ctx),
-                )
-            });
-            let baseline = shaped.as_ref().map_or(fs * 0.8, |s| s.metrics.ascent);
-            let trail_w = if text.ends_with(text::is_css_ws) {
-                pw - measure(text.trim_end_matches(text::is_css_ws))
+            // `overflow-wrap`/`word-break` (R-126 — css-text-3
+            // §5.5) : la pièce dépasse la bande même seule sur
+            // sa ligne → la couper au plus long préfixe tenant,
+            // le reste continue sur les lignes suivantes. Sans
+            // cette borne un mot long (URL, `break-words`
+            // Tailwind) débordait sa boîte au lieu de couper.
+            let break_any = matches!(
+                item.style.get("overflow-wrap"),
+                Some("break-word" | "anywhere")
+            ) || matches!(item.style.get("word-break"), Some("break-all"));
+            let segs = if break_any && !no_wrap && pw > line_w + 0.01 {
+                split_to_fit(text, line_w - (cursor_x - line_x), line_w, &measure)
             } else {
-                0.0
+                vec![text]
             };
-            acc.frags.push(Fragment {
-                node: item.node,
-                owner: item.owner,
-                text: text.to_string(),
-                atomic: false,
-                aid: None,
-                style: item.style.clone(),
-                rect: Rect {
-                    x: cursor_x,
-                    y: cursor_y,
-                    width: pw,
-                    height: lh,
-                },
-                baseline,
-                shaped,
-                trail_w,
-                marg_l: 0.0,
-                marg_r: 0.0,
-                marg_t: 0.0,
-                marg_b: 0.0,
-            });
-            acc.max_lh = acc.max_lh.max(lh);
-            acc.max_base = acc.max_base.max(baseline);
-            cursor_x += pw;
+            for (si, seg) in segs.iter().enumerate() {
+                if si > 0 {
+                    new_line!();
+                }
+                let pw = measure(seg);
+                let shaped = ctx.fonts.and_then(|src| {
+                    ctx.font_cache.borrow_mut().shape(
+                        src,
+                        &font_req,
+                        seg,
+                        fs,
+                        piece.dir == Direction::Rtl,
+                        crate::block::letter_spacing_px(&item.style, fs, ctx),
+                    )
+                });
+                let baseline = shaped.as_ref().map_or(fs * 0.8, |s| s.metrics.ascent);
+                let trail_w = if si + 1 == segs.len() && seg.ends_with(text::is_css_ws) {
+                    pw - measure(seg.trim_end_matches(text::is_css_ws))
+                } else {
+                    0.0
+                };
+                acc.frags.push(Fragment {
+                    node: item.node,
+                    owner: item.owner,
+                    text: (*seg).to_string(),
+                    atomic: false,
+                    aid: None,
+                    style: item.style.clone(),
+                    rect: Rect {
+                        x: cursor_x,
+                        y: cursor_y,
+                        width: pw,
+                        height: lh,
+                    },
+                    baseline,
+                    shaped,
+                    trail_w,
+                    marg_l: 0.0,
+                    marg_r: 0.0,
+                    marg_t: 0.0,
+                    marg_b: 0.0,
+                });
+                acc.max_lh = acc.max_lh.max(lh);
+                acc.max_base = acc.max_base.max(baseline);
+                cursor_x += pw;
+            }
             if piece.hard_after {
                 new_line!();
             }
@@ -1347,4 +1368,42 @@ fn line_height_of(style: &ComputedStyle, fs: f32, ctx: &BlockCtx) -> f32 {
         return (n * fs).max(1.0);
     }
     css_px(style, "line-height", fs, fs, ctx).unwrap_or(normal)
+}
+
+/// Découpe `text` en segments tenant chacun dans la bande
+/// (`avail` sur la première ligne, `line_w` ensuite) —
+/// `overflow-wrap: break-word`/`anywhere` et
+/// `word-break: break-all` (R-126). Coupure aux frontières
+/// UTF-8 ; au moins un caractère par segment (progression
+/// garantie même si la bande est plus étroite qu'un glyphe).
+fn split_to_fit<'a>(
+    text: &'a str,
+    avail: f32,
+    line_w: f32,
+    measure: &dyn Fn(&str) -> f32,
+) -> Vec<&'a str> {
+    let mut segs = Vec::new();
+    let mut rest = text;
+    let mut budget = avail;
+    while measure(rest) > line_w.max(budget) + 0.01 && !rest.is_empty() {
+        let mut cut = 0;
+        for (i, ch) in rest.char_indices() {
+            let end = i + ch.len_utf8();
+            if measure(&rest[..end]) <= budget + 0.01 {
+                cut = end;
+            } else {
+                break;
+            }
+        }
+        if cut == 0 {
+            cut = rest.char_indices().nth(1).map_or(rest.len(), |(i, _)| i);
+        }
+        segs.push(&rest[..cut]);
+        rest = &rest[cut..];
+        budget = line_w;
+    }
+    if !rest.is_empty() {
+        segs.push(rest);
+    }
+    segs
 }

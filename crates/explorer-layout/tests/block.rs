@@ -2134,3 +2134,29 @@ fn aspect_ratio_auto_height() {
         v.rect.height
     );
 }
+
+#[test]
+fn overflow_wrap_break_word_coupe() {
+    // R-126 : `overflow-wrap:break-word` (Tailwind
+    // `break-words`) — un mot plus large que la ligne se
+    // coupe au lieu de déborder.
+    let dom = TreeBuilder::parse("<div id=d>treslongmotquidebordepartout</div>");
+    let mut e = StyleEngine::new();
+    e.add_css(
+        "body{margin:0} #d{width:60px;overflow-wrap:break-word;font-size:10px}",
+        Origin::Author,
+    );
+    let styles = e.compute_tree(&dom, dom.document(), &StyleEnv::default());
+    let root_el = dom
+        .children(dom.document())
+        .into_iter()
+        .flatten()
+        .find(|&c| dom.element(c).is_ok())
+        .unwrap();
+    let mut bx = build_box_tree(&dom, root_el, &styles).unwrap();
+    layout_tree(&mut bx, VIEW, &BlockCtx::default());
+    let d = find(&bx, by_id(&dom, "d"));
+    // Le mot de ~30 chars doit produire ≥2 lignes (coupé).
+    let total: usize = d.lines.len() + d.children.iter().map(|c| c.lines.len()).sum::<usize>();
+    assert!(total >= 2, "mot long non coupé — {total} ligne(s)");
+}
