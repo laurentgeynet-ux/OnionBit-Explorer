@@ -399,6 +399,23 @@ impl Session {
                 // est désormais tracé : pas de hit DOM, hit non
                 // actionnable (ni lien/champ/select/submit), ou
                 // `preventDefault` côté handler.
+                if node.is_some() && !prevented {
+                    // B-31 (photopea) : un élément a reçu le
+                    // `click` — handlers `on*`/`addEventListener`
+                    // possibles (attribut compilé paresseux au
+                    // tir, effets de bord libres) ; l'absence
+                    // d'action par défaut n'est pas un refus —
+                    // `ignored` reste aux clics hors contenu.
+                    tracing::info!(
+                        tab,
+                        x,
+                        y,
+                        "click livré au DOM — aucune action par défaut"
+                    );
+                    self.relayout(tab)?;
+                    self.emit_invalidated(tab);
+                    return Ok(InputOutcome::Edited);
+                }
                 tracing::info!(
                     tab,
                     x,
