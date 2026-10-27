@@ -38,6 +38,30 @@ use explorer_net::http::Request;
 /// `NothingToPaint`, `FrameTooBig`, `UnknownTab`) —
 /// `PipelineError` est émis sur le bus pour les erreurs de
 /// pipeline, comme le chemin `&mut self`.
+
+/// B-30 : future qui s'achève quand l'onglet meurt — les
+/// phases détachées (`job.run`/`sub.run`) s'interrompent au
+/// lieu d'allouer une page pour un onglet fermé.
+async fn wait_tab_dead(flag: &std::sync::atomic::AtomicBool) {
+    use std::sync::atomic::Ordering;
+    while flag.load(Ordering::Relaxed) {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+}
+
+/// Clone le drapeau `nav_alive` de l'onglet (B-30) — `None`
+/// si l'onglet est déjà mort : la phase ne démarre même pas.
+async fn tab_alive(
+    sess: &tokio::sync::Mutex<Session>,
+    tab: TabId,
+) -> Option<std::sync::Arc<std::sync::atomic::AtomicBool>> {
+    sess.lock()
+        .await
+        .tabs
+        .get(&tab)
+        .map(|e| e.nav_alive.clone())
+}
+
 pub async fn navigate_shared(
     sess: &tokio::sync::Mutex<Session>,
     tab: TabId,
@@ -59,7 +83,11 @@ pub async fn navigate_shared(
         s.nav_begin(tab, req, push)?
     };
     let epoch = job.epoch;
-    let (done, tail) = match job
+    let alive = tab_alive(sess, tab).await;
+    let Some(alive) = alive else {
+        return Ok(()); // onglet mort entre nav_begin et run
+    };
+    let job_run = job
         .run(|dom: &Dom| -> PaintFut<'_> {
             // `try_lock` : la peinture progressive ne bloque
             // jamais le téléchargement — un tick manqué (lock
@@ -70,9 +98,12 @@ pub async fn navigate_shared(
                 s.nav_paint(tab, epoch, dom);
             }
             Box::pin(async {})
-        })
-        .await
-    {
+        });
+    let (done, tail) = match tokio::select! {
+        r = job_run => Some(r),
+        _ = wait_tab_dead(&alive) => None,
+    } {
+        Some(r) => match r {
         // Téléchargement (étape 70) : enregistré en attente
         // — rien de committé, la page courante reste.
         Ok(NavOutcome::Download(dl)) => {
@@ -89,6 +120,10 @@ pub async fn navigate_shared(
             s.paint_error_page(tab, &job.req, job.push, &e);
             return Err(s.emit_error(tab, e));
         }
+        },
+        // Onglet mort en vol (B-30) : abandon propre — la
+        // page en cours n'a plus de réceptacle.
+        None => return Ok(()),
     };
     // Requête/page d'erreur éventuelle : l'URL effectivement
     // naviguée (post-redirections) — les erreurs post-fetch
@@ -115,7 +150,15 @@ pub async fn navigate_shared(
     let Some(mut sub) = sub else {
         return Ok(());
     };
-    sub.run().await;
+    // Phase d'allocation sous-ressources — stoppée si
+    // l'onglet meurt en vol (B-30 : l'orphelin allouait
+    // une page entière pour un onglet fermé, +28 Mo/s).
+    tokio::select! {
+        _ = sub.run() => {},
+        _ = wait_tab_dead(&alive) => {
+            tracing::warn!(tab, "nav orpheline stoppée — onglet fermé en fetch (B-30)");
+        }
+    }
     nav_commit_shared(sess, tab, epoch, sub, &err_req, push).await
 }
 

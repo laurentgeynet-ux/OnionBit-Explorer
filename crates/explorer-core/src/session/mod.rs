@@ -158,6 +158,11 @@ pub(crate) struct HistEntry {
 /// État d'un onglet : pipeline complet gardé — le re-render
 /// (`resize`) repart du `dom` sans re-fetch.
 pub(crate) struct Tab {
+    /// Drapeau vie partagé avec les phases détachées
+    /// (`navigate_shared` fetch/sub — B-30) : `false` au
+    /// `close_tab` → les tâches orphelines s'arrêtent
+    /// au lieu d'allouer une page morte (+28 Mo/s).
+    pub(crate) nav_alive: std::sync::Arc<std::sync::atomic::AtomicBool>,
     /// URL courante.
     url: Option<Url>,
     /// Titre de la page (`<title>`).
@@ -1268,6 +1273,7 @@ impl Session {
         self.tabs.insert(
             id,
             Tab {
+                nav_alive: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true)),
                 url: None,
                 title: None,
                 hist: Vec::new(),
@@ -1354,6 +1360,10 @@ impl Session {
         // Surfaces média : `MediaGone` avant `TabClosed`
         // pour que l'hôte relâche ses pipelines (étape 71b).
         self.close_media(tab);
+        if let Some(e) = self.tabs.get_mut(&tab) {
+            e.nav_alive
+                .store(false, std::sync::atomic::Ordering::Relaxed);
+        }
         self.tabs.remove(&tab).ok_or(CoreError::UnknownTab(tab))?;
         // Requêtes script-initiées en vol : annulées — leurs
         // réponses éventuelles arriveraient à un onglet mort.
