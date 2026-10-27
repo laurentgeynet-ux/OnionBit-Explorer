@@ -1,0 +1,1612 @@
+| <!DOCTYPE html>
+| <html>
+|   lang="en"
+|   <head>
+|     "
+    "
+|     <meta>
+|       charset="utf-8"
+|     "
+    "
+|     <meta>
+|       content="width=device-width, initial-scale=1"
+|       name="viewport"
+|     "
+    "
+|     <link>
+|       href="https://s4.bcbits.com/vite/bc-discover-page/client/v1/en/assets/DiscoverApp-ByRbSzI5.css"
+|       rel="stylesheet"
+|     "
+
+"
+|     <script>
+|       crossorigin="anonymous"
+|       nonce="rGb5sP25FjXnGVZT+gEzEQ=="
+|       src="https://s4.bcbits.com/vite/bc-discover-page/client/v1/en/entrypoints/DiscoverApp.vue_en-46QVaVXQ.js"
+|       type="module"
+|     "
+
+    "
+|     <title>
+|       "Discover music and merch on Bandcamp"
+|     "
+"
+|     <link>
+|       href="https://bandcamp.com/discover"
+|       rel="canonical"
+|     "
+"
+|     <meta>
+|       content="Discover music and merch on Bandcamp"
+|       property="og:title"
+|     "
+"
+|     <meta>
+|       content="Shop vinyl, cassettes, CDs, t-shirts, digital music and more on Bandcamp."
+|       name="description"
+|     "
+"
+|     <meta>
+|       content="Shop vinyl, cassettes, CDs, t-shirts, digital music and more on Bandcamp."
+|       property="og:description"
+|     "
+"
+|     <link>
+|       href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAALQAAAC0CAMAAAAKE/YAAAAABGdBTUEAALGPC/xhBQAAAYxQTFRF////qdvpM6nJOKvKSbLO7fj72O/1I6LEHaDDHqHESbPPVrfSH6LEJaTF0uzzyunxJqTGIKLEX7zURbHOJKTF3vH3uuLtJ6TGIqLFcMPZ/v//JaPF6fb6qtzpKKTGg8vf+f3+LqfHJqXG8vr8mdTlJ6XGlNLj8/r8LKbH+P3+h83gJqPFp9vo6/f6NqrK/f7/dMXaJKPEt+Hs4PL3Qa/NY77VIqHEJ6TFx+jw1e70H6HEUbbRNarJptroKKXGq9zpu+PtRrHOXrzUIKHETbTQwubvJqTFIaLEZ7/WPq7MJaPE5PT4st/rJKPFecfc/P7/M6rJJaPGotnni87g9/z9K6bGKaXH9fv9j9Dindbm8Pn7JaTGMKjI+/7+fsndr97q5/X5OqzLbMHZIqLEv+Tu2/D2HqDEWrnTzuvya8HYJKLFfcjdntbmjtDi9vv9K6XGjM/hodjn7vj7MqnI5fT4aMDX2e/1V7jSH6HDJqPG0ezzy+ryI6PEb8PZHqHD6Pb5iM3fY77WYLzV1O30q9McfwAAAhxJREFUeAHtwWVbkwEYBeCjCD5DXpg6fIXhCBkpBkrrJGcxMLAIUZGwu1v/uD/Cc51P575hZmZmZmZmZmZmZmZmZmZmZmZmZkawa3cVyZ5qiNTsDZJMLVT21QVJUg+RhmyQ7D8AlYPBkmuEyKE0SA43QaS5KljyLRA5UgiSpBUibe3B0nEUIp3FIEm7INJdCJaeXoj09QdJegwiA0mwHD8BkZOngiQdhMjpXLCcgcrQcJCMjEJkLB8k4xNQmRgPkvwYREZHgmR4CCpngiV3GiKDaZCcOgmRE2eDJRmAyLlSkPT3QaS3J1gK3RDpSoOk2AmRox3B0t4GkdYkSErnIdKSD5aqZog0HQ6SdBIijblgmYLK9EyQZBsgUp8ESd0+qMxmgiSpgchcOUguXITKpWC5fAUi86UgqSxAZPFqsFyrhsj1QpCUb0Bk6Waw3LoNkTtpkKR3IbK8EiyraxC5VwmSdB0i9/PB8gAqDzeCJH0Ekc1KkGzVQmV7JkiSHYjslINkfBsqtVtBUtmEyKNikGw8hsqDYHlyHyLraZDknkJkbTVYVpYh8qwYJNnnEHlxK1heLkHk1UqQlF5D5E05WN4uQmShEiSleYi8uxwsl6Dy/kKQlOcg8iEJkswsVD5+CpLPXyDyNRskM9NQmcoESaURIpNpkHz7DpHmoPnxEyK3f/0m+fMXZmZmZmZmZmZmZmZmZmZmZmZmZmb/7R/6Gu2we5s5dAAAAABJRU5ErkJggg=="
+|       rel="apple-touch-icon"
+|       sizes="180x180"
+|     "
+"
+|     <link>
+|       href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAMAAABEpIrGAAAABGdBTUEAALGPC/xhBQAAACBjSFJNAAB6JgAAgIQAAPoAAACA6AAAdTAAAOpgAAA6mAAAF3CculE8AAAAzFBMVEUAAAAdoMMeoMMeocQeoMQdn8Ibn8Ieo8UfocQcn8IcoMIeosQdocMeocUcoMMfosUgo8QeosUeocMdoMMdoMMdoMMdoMMdoMMdoMMdoMMdoMMdoMMdoMMdoMMdoMMfosUdoMMdoMMdoMMdoMMdoMMdoMMdoMMdoMMdoMMdoMMdoMMdoMMeocQdoMMdoMMdoMMdoMMdoMMdoMMdn8IdoMMdoMMdoMMdoMMdoMMdoMMdoMMdoMMdoMMcoMMdoMMdoMMdoMMdoMMdoMP///8al1lIAAAAQnRSTlMAAAAAAAAAAAAAAAAAAAAAAAAAAwQBVWRgYWNbTP2SAcn5+/raD1/8ZwrY0QZzVhbm/sABh0MCI/KumzKaARVy0sgKk2+GAAAAAWJLR0RDZ9ANYgAAAAd0SU1FB+MEEQ8KGdT5UsEAAAEXSURBVDjLzVLZUgIxENw2iuCtyQICCxJuRGSRU1R0/v+jnCXLy2ZqHy37IVWp6fSkZzoI/g8AaCNAp/UTIGROnoAy5Ur1MYta3dVPzzQaFFEWETWPAoXWE7VtBh3q9lz9XKNPA09gQEP3LYRqNPY7RPQ8KboGBi9kBYEpEptFdvg6o9ivz0tvSQtcGCwEgZiW0Ey4xArrjSSw5QoToDTeBQtkd0xQgeJz5+vziw9olQhcrbD1BWLarPnpNRM0lsKQLS1gbg4ePgtzSWD2xe4VEzSmwg8t7Xl6hznfTr6lIY9HKkz3MBS31Ie+c4RelzrZNbfpp1U65qspWIipweZSQr3m5axaKZv7/IAmCX5Ib3LYcxP+5/gFzD1sP8rfy6wAAAAldEVYdGRhdGU6Y3JlYXRlADIwMTktMDQtMTdUMTU6MTA6MjUrMDI6MDC8n04vAAAAJXRFWHRkYXRlOm1vZGlmeQAyMDE5LTA0LTE3VDE1OjEwOjI1KzAyOjAwzcL2kwAAAFd6VFh0UmF3IHByb2ZpbGUgdHlwZSBpcHRjAAB4nOPyDAhxVigoyk/LzEnlUgADIwsuYwsTIxNLkxQDEyBEgDTDZAMjs1Qgy9jUyMTMxBzEB8uASKBKLgDqFxF08kI1lQAAAABJRU5ErkJggg=="
+|       rel="icon"
+|       sizes="32x32"
+|       type="image/png"
+|     "
+"
+|     <link>
+|       href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAMAAAAoLQ9TAAAABGdBTUEAALGPC/xhBQAAACBjSFJNAAB6JgAAgIQAAPoAAACA6AAAdTAAAOpgAAA6mAAAF3CculE8AAAAdVBMVEUAAAAdoMMcoMMeocQbn8Icn8IeocMdoMIdocMdoMMdoMMdoMMdoMMdoMMdoMMdoMMdoMMdoMMdoMMdoMMdoMMdoMMdoMMdoMMdoMMdoMMdoMMdoMMdoMMdoMMdoMMdoMMdoMMdoMMdoMMdoMMdoMMdoMP///9+mAVhAAAAJXRSTlMAAAAAAAAAAAABAwIaq7CvrrSVBIv8/Wom9P77+b6eRTayNYqWe6+z5QAAAAFiS0dEJloImLUAAAAHdElNRQfjBBEPChnU+VLBAAAAkElEQVQY01WP7RaCMAxDExV1DBBExjeI2vd/RcsQON5fbZZ2DQD+gVkw4Yb1BkMegOUNR22jOLl50uwOnnI+pBCPkxK0rOqmLWY66Q9gyGE3jITl0y2tyhOtCtNqEPdSgaO41TDoPIJeOr+xbepKf0C5G97MA+KTpctRSRzpjWcYnwe4+ARa2z2Y+WXduM7CFwePDzkv9+PCAAAAJXRFWHRkYXRlOmNyZWF0ZQAyMDE5LTA0LTE3VDE1OjEwOjI1KzAyOjAwvJ9OLwAAACV0RVh0ZGF0ZTptb2RpZnkAMjAxOS0wNC0xN1QxNToxMDoyNSswMjowMM3C9pMAAABXelRYdFJhdyBwcm9maWxlIHR5cGUgaXB0YwAAeJzj8gwIcVYoKMpPy8xJ5VIAAyMLLmMLEyMTS5MUAxMgRIA0w2QDI7NUIMvY1MjEzMQcxAfLgEigSi4A6hcRdPJCNZUAAAAASUVORK5CYII="
+|       rel="icon"
+|       sizes="16x16"
+|       type="image/png"
+|     "
+"
+|     <link>
+|       color="#0CACD7"
+|       href="data:image/svg+xml,%3csvg%20version='1.0'%20xmlns='http://www.w3.org/2000/svg'%20width='688.000000pt'%20height='688.000000pt'%20viewBox='0%200%20688.000000%20688.000000'%20preserveAspectRatio='xMidYMid%20meet'%3e%3cg%20transform='translate(0.000000,688.000000)%20scale(0.100000,-0.100000)'%20fill='%230CACD7'%20stroke='none'%3e%3cpath%20d='M2024%205146%20c-92%20-171%20-176%20-325%20-186%20-343%20-9%20-18%20-34%20-63%20-54%20-100%20-20%20-37%20-45%20-81%20-54%20-98%20-10%20-16%20-40%20-73%20-67%20-125%20-42%20-78%20-194%20-360%20-391%20-720%20-19%20-36%20-47%20-87%20-62%20-115%20-28%20-54%20-34%20-64%20-268%20-495%20-85%20-157%20-171%20-316%20-192%20-355%20-20%20-38%20-95%20-176%20-165%20-305%20-70%20-129%20-144%20-264%20-163%20-300%20-19%20-36%20-47%20-87%20-62%20-115%20-15%20-27%20-47%20-86%20-70%20-130%20-24%20-44%20-52%20-96%20-63%20-115%20-11%20-19%20-42%20-78%20-70%20-130%20-28%20-52%20-70%20-131%20-94%20-175%20-25%20-44%20-45%20-84%20-46%20-90%20-1%20-7%20782%20-10%202331%20-11%20l2333%200%2018%2025%20c10%2014%2054%2094%2098%20176%2045%2083%2092%20170%20105%20195%2014%2025%2042%2077%2062%20115%2021%2039%2051%2093%2066%20120%2015%2028%2047%2086%2070%20130%2024%2044%2055%20103%2070%20130%2054%2099%20283%20522%20323%20595%2022%2041%2050%2093%2062%20115%2012%2022%2038%2069%2057%20105%2030%2055%20364%20672%20463%20855%2018%2033%2090%20166%20160%20295%20125%20230%20165%20305%20230%20425%2018%2033%20106%20195%20195%20360%2090%20165%20173%20319%20186%20343%2013%2023%2024%2044%2024%2046%200%201%20-1053%202%20-2339%202%20l-2339%200%20-168%20-310z'/%3e%3c/g%3e%3c/svg%3e"
+|       rel="mask-icon"
+|     "
+  "
+|   "
+  "
+|   <body>
+|     "
+    
+    "
+|     <div>
+|       data-blob="{"appData":{"originalPageUrl":"https://bandcamp.com/discover","initialState":{"categories":[{"id":0,"label":"all categories","slug":"all"},{"id":1,"label":"digital","slug":"digital"},{"id":2,"label":"vinyl","slug":"vinyl"},{"id":3,"label":"compact discs","slug":"cd"},{"id":4,"label":"cassettes","slug":"cassette"},{"id":5,"label":"t-shirts","slug":"tshirt"}],"genres":[{"id":10,"label":"electronic","slug":"electronic"},{"id":23,"label":"rock","slug":"rock"},{"id":18,"label":"metal","slug":"metal"},{"id":2,"label":"alternative","slug":"alternative"},{"id":14,"label":"hip-hop/rap","slug":"hip-hop-rap"},{"id":11,"label":"experimental","slug":"experimental"},{"id":20,"label":"punk","slug":"punk"},{"id":12,"label":"folk","slug":"folk"},{"id":19,"label":"pop","slug":"pop"},{"id":3,"label":"ambient","slug":"ambient"},{"id":24,"label":"soundtrack","slug":"soundtrack"},{"id":26,"label":"world","slug":"world"},{"id":15,"label":"jazz","slug":"jazz"},{"id":1,"label":"acoustic","slug":"acoustic"},{"id":13,"label":"funk","slug":"funk"},{"id":21,"label":"r&b/soul","slug":"r-b-soul"},{"id":9,"label":"devotional","slug":"devotional"},{"id":5,"label":"classical","slug":"classical"},{"id":22,"label":"reggae","slug":"reggae"},{"id":27,"label":"podcasts","slug":"podcasts"},{"id":7,"label":"country","slug":"country"},{"id":25,"label":"spoken word","slug":"spoken-word"},{"id":6,"label":"comedy","slug":"comedy"},{"id":4,"label":"blues","slug":"blues"},{"id":16,"label":"kids","slug":"kids"},{"id":28,"label":"audiobooks","slug":"audiobooks"},{"id":17,"label":"latin","slug":"latin"}],"subgenres":[{"id":1001,"label":"folk","slug":"folk","parentSlug":"acoustic"},{"id":1002,"label":"singer-songwriter","slug":"singer-songwriter","parentSlug":"acoustic"},{"id":1003,"label":"rock","slug":"rock","parentSlug":"acoustic"},{"id":1004,"label":"pop","slug":"pop","parentSlug":"acoustic"},{"id":1005,"label":"guitar","slug":"guitar","parentSlug":"acoustic"},{"id":1006,"label":"americana","slug":"americana","parentSlug":"acoustic"},{"id":1007,"label":"electro-acoustic","slug":"electro-acoustic","parentSlug":"acoustic"},{"id":1008,"label":"instrumental","slug":"instrumental","parentSlug":"acoustic"},{"id":1009,"label":"piano","slug":"piano","parentSlug":"acoustic"},{"id":1010,"label":"bluegrass","slug":"bluegrass","parentSlug":"acoustic"},{"id":1011,"label":"roots","slug":"roots","parentSlug":"acoustic"},{"id":1012,"label":"indie rock","slug":"indie-rock","parentSlug":"alternative"},{"id":1013,"label":"industrial","slug":"industrial","parentSlug":"alternative"},{"id":1014,"label":"shoegaze","slug":"shoegaze","parentSlug":"alternative"},{"id":1015,"label":"grunge","slug":"grunge","parentSlug":"alternative"},{"id":1016,"label":"goth","slug":"goth","parentSlug":"alternative"},{"id":1017,"label":"dream pop","slug":"dream-pop","parentSlug":"alternative"},{"id":1018,"label":"emo","slug":"emo","parentSlug":"alternative"},{"id":1019,"label":"math rock","slug":"math-rock","parentSlug":"alternative"},{"id":1020,"label":"britpop","slug":"britpop","parentSlug":"alternative"},{"id":1021,"label":"jangle pop","slug":"jangle-pop","parentSlug":"alternative"},{"id":1022,"label":"chill-out","slug":"chill-out","parentSlug":"ambient"},{"id":1023,"label":"drone","slug":"drone","parentSlug":"ambient"},{"id":1024,"label":"dark ambient","slug":"dark-ambient","parentSlug":"ambient"},{"id":1025,"label":"electronic","slug":"electronic","parentSlug":"ambient"},{"id":1026,"label":"soundscapes","slug":"soundscapes","parentSlug":"ambient"},{"id":1027,"label":"field recordings","slug":"field-recordings","parentSlug":"ambient"},{"id":1028,"label":"atmospheric","slug":"atmospheric","parentSlug":"ambient"},{"id":1029,"label":"meditation","slug":"meditation","parentSlug":"ambient"},{"id":1030,"label":"noise","slug":"noise","parentSlug":"ambient"},{"id":1031,"label":"new age","slug":"new-age","parentSlug":"ambient"},{"id":1032,"label":"idm","slug":"idm","parentSlug":"ambient"},{"id":1033,"label":"industrial","slug":"industrial","parentSlug":"ambient"},{"id":1034,"label":"rhythm & blues","slug":"rhythm-blues","parentSlug":"blues"},{"id":1035,"label":"blues rock","slug":"blues-rock","parentSlug":"blues"},{"id":1036,"label":"country blues","slug":"country-blues","parentSlug":"blues"},{"id":1037,"label":"boogie-woogie","slug":"boogie-woogie","parentSlug":"blues"},{"id":1038,"label":"delta blues","slug":"delta-blues","parentSlug":"blues"},{"id":1039,"label":"americana","slug":"americana","parentSlug":"blues"},{"id":1040,"label":"electric blues","slug":"electric-blues","parentSlug":"blues"},{"id":1041,"label":"gospel","slug":"gospel","parentSlug":"blues"},{"id":1042,"label":"bluegrass","slug":"bluegrass","parentSlug":"blues"},{"id":1043,"label":"orchestral","slug":"orchestral","parentSlug":"classical"},{"id":1044,"label":"neo-classical","slug":"neo-classical","parentSlug":"classical"},{"id":1045,"label":"chamber music","slug":"chamber-music","parentSlug":"classical"},{"id":1046,"label":"classical piano","slug":"classical-piano","parentSlug":"classical"},{"id":1047,"label":"contemporary classical","slug":"contemporary-classical","parentSlug":"classical"},{"id":1048,"label":"baroque","slug":"baroque","parentSlug":"classical"},{"id":1049,"label":"opera","slug":"opera","parentSlug":"classical"},{"id":1050,"label":"choral","slug":"choral","parentSlug":"classical"},{"id":1051,"label":"modern classical","slug":"modern-classical","parentSlug":"classical"},{"id":1052,"label":"avant garde","slug":"avant-garde","parentSlug":"classical"},{"id":1053,"label":"improv","slug":"improv","parentSlug":"comedy"},{"id":1054,"label":"stand-up","slug":"stand-up","parentSlug":"comedy"},{"id":1055,"label":"bluegrass","slug":"bluegrass","parentSlug":"country"},{"id":1056,"label":"country rock","slug":"country-rock","parentSlug":"country"},{"id":1057,"label":"americana","slug":"americana","parentSlug":"country"},{"id":1058,"label":"country folk","slug":"country-folk","parentSlug":"country"},{"id":1059,"label":"alt-country","slug":"alt-country","parentSlug":"country"},{"id":1060,"label":"country blues","slug":"country-blues","parentSlug":"country"},{"id":1061,"label":"western","slug":"western","parentSlug":"country"},{"id":1062,"label":"singer-songwriter","slug":"singer-songwriter","parentSlug":"country"},{"id":1063,"label":"outlaw","slug":"outlaw","parentSlug":"country"},{"id":1064,"label":"honky-tonk","slug":"honky-tonk","parentSlug":"country"},{"id":1065,"label":"roots","slug":"roots","parentSlug":"country"},{"id":1066,"label":"hillbilly","slug":"hillbilly","parentSlug":"country"},{"id":1067,"label":"christian","slug":"christian","parentSlug":"devotional"},{"id":1068,"label":"gospel","slug":"gospel","parentSlug":"devotional"},{"id":1069,"label":"meditation","slug":"meditation","parentSlug":"devotional"},{"id":1070,"label":"spiritual","slug":"spiritual","parentSlug":"devotional"},{"id":1071,"label":"worship","slug":"worship","parentSlug":"devotional"},{"id":1072,"label":"inspirational","slug":"inspirational","parentSlug":"devotional"},{"id":1073,"label":"house","slug":"house","parentSlug":"electronic"},{"id":1074,"label":"electronica","slug":"electronica","parentSlug":"electronic"},{"id":1075,"label":"downtempo","slug":"downtempo","parentSlug":"electronic"},{"id":1076,"label":"techno","slug":"techno","parentSlug":"electronic"},{"id":1077,"label":"electro","slug":"electro","parentSlug":"electronic"},{"id":1078,"label":"dubstep","slug":"dubstep","parentSlug":"electronic"},{"id":1079,"label":"beats","slug":"beats","parentSlug":"electronic"},{"id":1080,"label":"dance","slug":"dance","parentSlug":"electronic"},{"id":1081,"label":"idm","slug":"idm","parentSlug":"electronic"},{"id":1082,"label":"drum & bass","slug":"drum-bass","parentSlug":"electronic"},{"id":1083,"label":"breaks","slug":"breaks","parentSlug":"electronic"},{"id":1084,"label":"trance","slug":"trance","parentSlug":"electronic"},{"id":1085,"label":"glitch","slug":"glitch","parentSlug":"electronic"},{"id":1086,"label":"chiptune","slug":"chiptune","parentSlug":"electronic"},{"id":1087,"label":"chillwave","slug":"chillwave","parentSlug":"electronic"},{"id":1088,"label":"dub","slug":"dub","parentSlug":"electronic"},{"id":1089,"label":"edm","slug":"edm","parentSlug":"electronic"},{"id":1090,"label":"instrumental","slug":"instrumental","parentSlug":"electronic"},{"id":1091,"label":"witch house","slug":"witch-house","parentSlug":"electronic"},{"id":1092,"label":"garage","slug":"garage","parentSlug":"electronic"},{"id":1093,"label":"juke","slug":"juke","parentSlug":"electronic"},{"id":1094,"label":"footwork","slug":"footwork","parentSlug":"electronic"},{"id":1095,"label":"vaporwave","slug":"vaporwave","parentSlug":"electronic"},{"id":1096,"label":"synthwave","slug":"synthwave","parentSlug":"electronic"},{"id":1097,"label":"noise","slug":"noise","parentSlug":"experimental"},{"id":1098,"label":"drone","slug":"drone","parentSlug":"experimental"},{"id":1099,"label":"avant garde","slug":"avant-garde","parentSlug":"experimental"},{"id":1100,"label":"experimental rock","slug":"experimental-rock","parentSlug":"experimental"},{"id":1101,"label":"improvisation","slug":"improvisation","parentSlug":"experimental"},{"id":1102,"label":"sound art","slug":"sound-art","parentSlug":"experimental"},{"id":1103,"label":"musique concrete","slug":"musique-concrete","parentSlug":"experimental"},{"id":1104,"label":"singer-songwriter","slug":"singer-songwriter","parentSlug":"folk"},{"id":1105,"label":"folk rock","slug":"folk-rock","parentSlug":"folk"},{"id":1106,"label":"indie folk","slug":"indie-folk","parentSlug":"folk"},{"id":1107,"label":"pop folk","slug":"pop-folk","parentSlug":"folk"},{"id":1108,"label":"traditional","slug":"traditional","parentSlug":"folk"},{"id":1109,"label":"experimental folk","slug":"experimental-folk","parentSlug":"folk"},{"id":1110,"label":"roots","slug":"roots","parentSlug":"folk"},{"id":1111,"label":"funk jam","slug":"funk-jam","parentSlug":"funk"},{"id":1112,"label":"deep funk","slug":"deep-funk","parentSlug":"funk"},{"id":1113,"label":"funk rock","slug":"funk-rock","parentSlug":"funk"},{"id":1114,"label":"jazz funk","slug":"jazz-funk","parentSlug":"funk"},{"id":1115,"label":"boogie","slug":"boogie","parentSlug":"funk"},{"id":1116,"label":"g-funk","slug":"g-funk","parentSlug":"funk"},{"id":1117,"label":"rare groove","slug":"rare-groove","parentSlug":"funk"},{"id":1118,"label":"electro","slug":"electro","parentSlug":"funk"},{"id":1119,"label":"go-go","slug":"go-go","parentSlug":"funk"},{"id":1120,"label":"rap","slug":"rap","parentSlug":"hip-hop-rap"},{"id":1121,"label":"underground hip-hop","slug":"underground-hip-hop","parentSlug":"hip-hop-rap"},{"id":1122,"label":"instrumental hip-hop","slug":"instrumental-hip-hop","parentSlug":"hip-hop-rap"},{"id":1123,"label":"trap","slug":"trap","parentSlug":"hip-hop-rap"},{"id":1124,"label":"conscious hip-hop","slug":"conscious-hip-hop","parentSlug":"hip-hop-rap"},{"id":1125,"label":"boom-bap","slug":"boom-bap","parentSlug":"hip-hop-rap"},{"id":1126,"label":"beat-tape","slug":"beat-tape","parentSlug":"hip-hop-rap"},{"id":1127,"label":"hardcore","slug":"hardcore","parentSlug":"hip-hop-rap"},{"id":1128,"label":"grime","slug":"grime","parentSlug":"hip-hop-rap"},{"id":1129,"label":"fusion","slug":"fusion","parentSlug":"jazz"},{"id":1130,"label":"big band","slug":"big-band","parentSlug":"jazz"},{"id":1131,"label":"nu jazz","slug":"nu-jazz","parentSlug":"jazz"},{"id":1132,"label":"modern jazz","slug":"modern-jazz","parentSlug":"jazz"},{"id":1133,"label":"swing","slug":"swing","parentSlug":"jazz"},{"id":1134,"label":"free jazz","slug":"free-jazz","parentSlug":"jazz"},{"id":1135,"label":"soul jazz","slug":"soul-jazz","parentSlug":"jazz"},{"id":1136,"label":"latin jazz","slug":"latin-jazz","parentSlug":"jazz"},{"id":1137,"label":"vocal jazz","slug":"vocal-jazz","parentSlug":"jazz"},{"id":1138,"label":"bebop","slug":"bebop","parentSlug":"jazz"},{"id":1139,"label":"spiritual jazz","slug":"spiritual-jazz","parentSlug":"jazz"},{"id":1140,"label":"family music","slug":"family-music","parentSlug":"kids"},{"id":1141,"label":"educational","slug":"educational","parentSlug":"kids"},{"id":1142,"label":"music therapy","slug":"music-therapy","parentSlug":"kids"},{"id":1143,"label":"lullaby","slug":"lullaby","parentSlug":"kids"},{"id":1144,"label":"baby","slug":"baby","parentSlug":"kids"},{"id":1145,"label":"brazilian","slug":"brazilian","parentSlug":"latin"},{"id":1146,"label":"cumbia","slug":"cumbia","parentSlug":"latin"},{"id":1147,"label":"tango","slug":"tango","parentSlug":"latin"},{"id":1148,"label":"latin rock","slug":"latin-rock","parentSlug":"latin"},{"id":1149,"label":"flamenco","slug":"flamenco","parentSlug":"latin"},{"id":1150,"label":"salsa","slug":"salsa","parentSlug":"latin"},{"id":1151,"label":"reggaeton","slug":"reggaeton","parentSlug":"latin"},{"id":1152,"label":"merengue","slug":"merengue","parentSlug":"latin"},{"id":1153,"label":"bolero","slug":"bolero","parentSlug":"latin"},{"id":1154,"label":"méxico d.f.","slug":"méxico-d.f.","parentSlug":"latin"},{"id":1155,"label":"bachata","slug":"bachata","parentSlug":"latin"},{"id":1156,"label":"hardcore","slug":"hardcore","parentSlug":"metal"},{"id":1157,"label":"black metal","slug":"black-metal","parentSlug":"metal"},{"id":1158,"label":"death metal","slug":"death-metal","parentSlug":"metal"},{"id":1159,"label":"thrash metal","slug":"thrash-metal","parentSlug":"metal"},{"id":1160,"label":"grindcore","slug":"grindcore","parentSlug":"metal"},{"id":1161,"label":"doom","slug":"doom","parentSlug":"metal"},{"id":1162,"label":"post hardcore","slug":"post-hardcore","parentSlug":"metal"},{"id":1163,"label":"progressive metal","slug":"progressive-metal","parentSlug":"metal"},{"id":1164,"label":"metalcore","slug":"metalcore","parentSlug":"metal"},{"id":1165,"label":"sludge metal","slug":"sludge-metal","parentSlug":"metal"},{"id":1166,"label":"heavy metal","slug":"heavy-metal","parentSlug":"metal"},{"id":1167,"label":"deathcore","slug":"deathcore","parentSlug":"metal"},{"id":1168,"label":"noise","slug":"noise","parentSlug":"metal"},{"id":1169,"label":"indie pop","slug":"indie-pop","parentSlug":"pop"},{"id":1170,"label":"synth pop","slug":"synth-pop","parentSlug":"pop"},{"id":1171,"label":"power pop","slug":"power-pop","parentSlug":"pop"},{"id":1172,"label":"new wave","slug":"new-wave","parentSlug":"pop"},{"id":1173,"label":"dream pop","slug":"dream-pop","parentSlug":"pop"},{"id":1174,"label":"noise pop","slug":"noise-pop","parentSlug":"pop"},{"id":1175,"label":"experimental pop","slug":"experimental-pop","parentSlug":"pop"},{"id":1176,"label":"electro pop","slug":"electro-pop","parentSlug":"pop"},{"id":1177,"label":"adult contemporary","slug":"adult-contemporary","parentSlug":"pop"},{"id":1178,"label":"jangle pop","slug":"jangle-pop","parentSlug":"pop"},{"id":1179,"label":"j-pop","slug":"j-pop","parentSlug":"pop"},{"id":1180,"label":"hardcore punk","slug":"hardcore-punk","parentSlug":"punk"},{"id":1181,"label":"garage","slug":"garage","parentSlug":"punk"},{"id":1182,"label":"pop punk","slug":"pop-punk","parentSlug":"punk"},{"id":1183,"label":"punk rock","slug":"punk-rock","parentSlug":"punk"},{"id":1184,"label":"post-punk","slug":"post-punk","parentSlug":"punk"},{"id":1185,"label":"post-hardcore","slug":"post-hardcore","parentSlug":"punk"},{"id":1186,"label":"thrash","slug":"thrash","parentSlug":"punk"},{"id":1187,"label":"crust punk","slug":"crust-punk","parentSlug":"punk"},{"id":1188,"label":"folk punk","slug":"folk-punk","parentSlug":"punk"},{"id":1189,"label":"emo","slug":"emo","parentSlug":"punk"},{"id":1190,"label":"ska","slug":"ska","parentSlug":"punk"},{"id":1191,"label":"no wave","slug":"no-wave","parentSlug":"punk"},{"id":1192,"label":"soul","slug":"soul","parentSlug":"r-b-soul"},{"id":1193,"label":"r&b","slug":"r-b","parentSlug":"r-b-soul"},{"id":1194,"label":"neo-soul","slug":"neo-soul","parentSlug":"r-b-soul"},{"id":1195,"label":"gospel","slug":"gospel","parentSlug":"r-b-soul"},{"id":1196,"label":"contemporary r&b","slug":"contemporary-r-b","parentSlug":"r-b-soul"},{"id":1197,"label":"motown","slug":"motown","parentSlug":"r-b-soul"},{"id":1198,"label":"urban","slug":"urban","parentSlug":"r-b-soul"},{"id":1199,"label":"dub","slug":"dub","parentSlug":"reggae"},{"id":1200,"label":"ska","slug":"ska","parentSlug":"reggae"},{"id":1201,"label":"roots","slug":"roots","parentSlug":"reggae"},{"id":1202,"label":"dancehall","slug":"dancehall","parentSlug":"reggae"},{"id":1203,"label":"rocksteady","slug":"rocksteady","parentSlug":"reggae"},{"id":1204,"label":"ragga","slug":"ragga","parentSlug":"reggae"},{"id":1205,"label":"lovers rock","slug":"lovers-rock","parentSlug":"reggae"},{"id":1206,"label":"indie","slug":"indie","parentSlug":"rock"},{"id":1207,"label":"prog rock","slug":"prog-rock","parentSlug":"rock"},{"id":1208,"label":"post-rock","slug":"post-rock","parentSlug":"rock"},{"id":1209,"label":"rock & roll","slug":"rock-roll","parentSlug":"rock"},{"id":1210,"label":"psychedelic rock","slug":"psychedelic-rock","parentSlug":"rock"},{"id":1211,"label":"hard rock","slug":"hard-rock","parentSlug":"rock"},{"id":1212,"label":"garage rock","slug":"garage-rock","parentSlug":"rock"},{"id":1213,"label":"surf rock","slug":"surf-rock","parentSlug":"rock"},{"id":1214,"label":"instrumental","slug":"instrumental","parentSlug":"rock"},{"id":1215,"label":"math rock","slug":"math-rock","parentSlug":"rock"},{"id":1216,"label":"rockabilly","slug":"rockabilly","parentSlug":"rock"},{"id":1217,"label":"film music","slug":"film-music","parentSlug":"soundtrack"},{"id":1218,"label":"video game music","slug":"video-game-music","parentSlug":"soundtrack"},{"id":1219,"label":"video game","slug":"video-game","parentSlug":"soundtrack"},{"id":1220,"label":"ost","slug":"ost","parentSlug":"soundtrack"},{"id":1221,"label":"poetry","slug":"poetry","parentSlug":"spoken-word"},{"id":1222,"label":"inspirational","slug":"inspirational","parentSlug":"spoken-word"},{"id":1223,"label":"storytelling","slug":"storytelling","parentSlug":"spoken-word"},{"id":1224,"label":"self-help","slug":"self-help","parentSlug":"spoken-word"},{"id":1225,"label":"latin","slug":"latin","parentSlug":"world"},{"id":1226,"label":"roots","slug":"roots","parentSlug":"world"},{"id":1227,"label":"african","slug":"african","parentSlug":"world"},{"id":1228,"label":"tropical","slug":"tropical","parentSlug":"world"},{"id":1229,"label":"tribal","slug":"tribal","parentSlug":"world"},{"id":1230,"label":"brazilian","slug":"brazilian","parentSlug":"world"},{"id":1231,"label":"celtic","slug":"celtic","parentSlug":"world"},{"id":1232,"label":"world fusion","slug":"world-fusion","parentSlug":"world"},{"id":1233,"label":"cumbia","slug":"cumbia","parentSlug":"world"},{"id":1234,"label":"gypsy","slug":"gypsy","parentSlug":"world"},{"id":1235,"label":"new age","slug":"new-age","parentSlug":"world"},{"id":1236,"label":"balkan","slug":"balkan","parentSlug":"world"},{"id":1237,"label":"reggaeton","slug":"reggaeton","parentSlug":"world"}],"customTags":[],"slices":[{"id":1,"label":"best-selling","slug":"top"},{"id":2,"label":"new arrivals","slug":"new"},{"id":3,"label":"surprise me","slug":"rand"}],"locations":[{"id":0,"label":"from anywhere","slug":"0"},{"id":2759794,"label":"amsterdam","slug":"2759794"},{"id":4180439,"label":"atlanta","slug":"4180439"},{"id":4671654,"label":"austin","slug":"4671654"},{"id":4347778,"label":"baltimore","slug":"4347778"},{"id":2950159,"label":"berlin","slug":"2950159"},{"id":4930956,"label":"boston","slug":"4930956"},{"id":5110302,"label":"brooklyn","slug":"5110302"},{"id":3435907,"label":"buenos aires","slug":"3435907"},{"id":4887398,"label":"chicago","slug":"4887398"},{"id":5419384,"label":"denver","slug":"5419384"},{"id":4990729,"label":"detroit","slug":"4990729"},{"id":2964574,"label":"dublin","slug":"2964574"},{"id":3333231,"label":"glasgow","slug":"3333231"},{"id":2643743,"label":"london","slug":"2643743"},{"id":5368361,"label":"los angeles","slug":"5368361"},{"id":3117735,"label":"madrid","slug":"3117735"},{"id":2643123,"label":"manchester","slug":"2643123"},{"id":2158177,"label":"melbourne","slug":"2158177"},{"id":3530597,"label":"mexico city","slug":"3530597"},{"id":4164138,"label":"miami","slug":"4164138"},{"id":5037649,"label":"minneapolis","slug":"5037649"},{"id":6077243,"label":"montreal","slug":"6077243"},{"id":4644585,"label":"nashville","slug":"4644585"},{"id":4335045,"label":"new orleans","slug":"4335045"},{"id":5128581,"label":"new york city","slug":"5128581"},{"id":5378538,"label":"oakland","slug":"5378538"},{"id":2988507,"label":"paris","slug":"2988507"},{"id":4560349,"label":"philadelphia","slug":"4560349"},{"id":5746545,"label":"portland","slug":"5746545"},{"id":5391959,"label":"san francisco","slug":"5391959"},{"id":5809844,"label":"seattle","slug":"5809844"},{"id":2147714,"label":"sydney","slug":"2147714"},{"id":6167865,"label":"toronto","slug":"6167865"},{"id":6173331,"label":"vancouver","slug":"6173331"},{"id":4140963,"label":"washington, dc","slug":"4140963"}],"times":[{"id":-1,"label":"fresh","slug":"fresh"},{"id":0,"label":"today","slug":"today"},{"id":1,"label":"this week","slug":"this-week"},{"id":2,"label":"last week","slug":"1w"},{"id":3,"label":"2 weeks ago","slug":"2w"},{"id":4,"label":"3 weeks ago","slug":"3w"},{"id":5,"label":"4 weeks ago","slug":"4w"},{"id":6,"label":"5 weeks ago","slug":"5w"},{"id":7,"label":"6 weeks ago","slug":"6w"}]},"curatedGenres":["acoustic","alternative","ambient","audiobooks","blues","classical","comedy","country","devotional","electronic","experimental","folk","funk","hip-hop-rap","jazz","kids","latin","metal","podcasts","pop","punk","r-b-soul","reggae","rock","soundtrack","spoken-word","world","folk","singer-songwriter","rock","pop","guitar","americana","electro-acoustic","instrumental","piano","bluegrass","roots","indie-rock","industrial","shoegaze","grunge","goth","dream-pop","emo","math-rock","britpop","jangle-pop","chill-out","drone","dark-ambient","electronic","soundscapes","field-recordings","atmospheric","meditation","noise","new-age","idm","industrial","rhythm-blues","blues-rock","country-blues","boogie-woogie","delta-blues","americana","electric-blues","gospel","bluegrass","orchestral","neo-classical","chamber-music","classical-piano","contemporary-classical","baroque","opera","choral","modern-classical","avant-garde","improv","stand-up","bluegrass","country-rock","americana","country-folk","alt-country","country-blues","western","singer-songwriter","outlaw","honky-tonk","roots","hillbilly","christian","gospel","meditation","spiritual","worship","inspirational","house","electronica","downtempo","techno","electro","dubstep","beats","dance","idm","drum-bass","breaks","trance","glitch","chiptune","chillwave","dub","edm","instrumental","witch-house","garage","juke","footwork","vaporwave","synthwave","noise","drone","avant-garde","experimental-rock","improvisation","sound-art","musique-concrete","singer-songwriter","folk-rock","indie-folk","pop-folk","traditional","experimental-folk","roots","funk-jam","deep-funk","funk-rock","jazz-funk","boogie","g-funk","rare-groove","electro","go-go","rap","underground-hip-hop","instrumental-hip-hop","trap","conscious-hip-hop","boom-bap","beat-tape","hardcore","grime","fusion","big-band","nu-jazz","modern-jazz","swing","free-jazz","soul-jazz","latin-jazz","vocal-jazz","bebop","spiritual-jazz","family-music","educational","music-therapy","lullaby","baby","brazilian","cumbia","tango","latin-rock","flamenco","salsa","reggaeton","merengue","bolero","méxico-d.f.","bachata","hardcore","black-metal","death-metal","thrash-metal","grindcore","doom","post-hardcore","progressive-metal","metalcore","sludge-metal","heavy-metal","deathcore","noise","indie-pop","synth-pop","power-pop","new-wave","dream-pop","noise-pop","experimental-pop","electro-pop","adult-contemporary","jangle-pop","j-pop","hardcore-punk","garage","pop-punk","punk-rock","post-punk","post-hardcore","thrash","crust-punk","folk-punk","emo","ska","no-wave","soul","r-b","neo-soul","gospel","contemporary-r-b","motown","urban","dub","ska","roots","dancehall","rocksteady","ragga","lovers-rock","indie","prog-rock","post-rock","rock-roll","psychedelic-rock","hard-rock","garage-rock","surf-rock","instrumental","math-rock","rockabilly","film-music","video-game-music","video-game","ost","poetry","inspirational","storytelling","self-help","latin","roots","african","tropical","tribal","brazilian","celtic","world-fusion","cumbia","gypsy","new-age","balkan","reggaeton"],"includeResultTypes":["a","s"],"fanUsername":null,"shouldRenderFollowedBandsFilter":true},"pageContext":{"identity":{"adminLevel":0,"fanId":null,"fanImageId":null,"fanUsername":null,"isAdmin":false,"isFanPrivate":false,"isFanVerified":false,"isImpersonating":false,"isLoggedIn":false,"userId":null},"isMobile":false,"pageBand":{"bandId":null,"currentUserRole":null,"googleAnalyticsId":null},"pageFan":{"pageFanId":null,"pageFanUsername":null,"isCurrentUserPageFan":null},"isPageMobilized":false,"languages":{"en":"English","de":"Deutsch","es":"Español","fr":"Français","pt":"Português","ja":"日本語"},"cart":{"id":null,"clientID":null,"state":null,"numItems":null},"colorScheme":null,"crumbs":null,"banners":[],"recaptchaPublicKey":"6Ld7hz4UAAAAANlndw60vAheGUwN0Mb-qeWD_LHr","sentryConfig":{"dsn":"https://e330f58aaa17ecab80991a3308166eb3@o363271.ingest.us.sentry.io/4508598003105792","environment":"production","release":"bc-discover-page@cad8c863342e35bf5e33f09009fc929a6d9ed101"}}}"
+|       data-ssr-rendered=""
+|       id="DiscoverApp"
+|       <div>
+|         class="full-page-app-wrapper discover_page full-height discover-app"
+|         data-v-02464800=""
+|         data-v-5693a515=""
+|         style="--v47893866: ;"
+|         <!-- [ -->
+|         <!-- [ -->
+|         <!--  -->
+|         <!-- [ -->
+|         <!-- [ -->
+|         <a>
+|           class="skip-link bc-visible-focus-only g-button sm"
+|           data-v-02464800=""
+|           href="#content"
+|           <!-- [ -->
+|           <!--  -->
+|           <!--  -->
+|           <!-- ] -->
+|           <!-- [ -->
+|           "Skip to content"
+|           <!-- ] -->
+|         <div>
+|           class="menu-bar-container"
+|           data-v-02464800=""
+|           <header>
+|             class="menu-bar"
+|             data-v-02464800=""
+|             data-v-fed70f16=""
+|             <nav>
+|               aria-label="Bandcamp"
+|               data-v-fed70f16=""
+|               <ul>
+|                 aria-label="Main menu"
+|                 class="page-wrapper menu-items"
+|                 data-v-7835f577=""
+|                 data-v-fed70f16=""
+|                 role="menubar"
+|                 style=""
+|                 <!-- [ -->
+|                 <li>
+|                   class="logo"
+|                   data-v-fed70f16=""
+|                   role="none"
+|                   style=""
+|                   <a>
+|                     class="bandcamp-logo-link"
+|                     data-v-5cfc24b1=""
+|                     data-v-fed70f16=""
+|                     href="https://bandcamp.com/?from=menubar&ui_context=logo"
+|                     role="menuitem"
+|                     <svg>
+|                       aria-hidden="true"
+|                       class=""
+|                       data-v-5cfc24b1=""
+|                       fill="currentColor"
+|                       viewBox="0 0 795 125"
+|                       width="120"
+|                       xmlns="http://www.w3.org/2000/svg"
+|                       <path>
+|                         class="tent"
+|                         d="M113.88 98.17H0L53.18 0h113.88z"
+|                       <path>
+|                         d="M166.76 0h15.21v36.44h.27c4.14-6.9 12.81-11.18 20.55-11.18 21.75 0 32.3 17.13 32.3 37.97 0 19.19-9.34 37.27-29.76 37.27-9.34 0-19.35-2.34-23.9-11.73h-.26v9.8h-14.41zm34.03 37.69c-12.8 0-19.35 10.08-19.35 25.26 0 14.36 7.07 25.13 19.35 25.13 13.88 0 19.09-12.7 19.09-25.13-.01-12.97-6.55-25.26-19.1-25.26zm152.15-12.24c-9.07 0-16.95 4.83-21.49 12.7l-.26-.27v-10.5h-14.42v60.8c-8.67.1-9.48.1-10.14.1-2.8 0-3.6-1.53-3.6-5.4V46.17c0-15.04-14.15-20.71-27.63-20.71-15.22 0-30.3 5.38-31.36 23.75h15.2c.68-7.73 6.68-11.32 15.22-11.32 6.14 0 14.28 1.52 14.28 9.66 0 9.25-9.74 8-20.68 10.08-12.82 1.52-26.56 4.42-26.56 22.22 0 13.95 11.2 20.85 23.62 20.85 8.14 0 17.88-2.62 23.9-8.69 1.19 6.49 5.6 8.7 11.73 8.7 2.54 0 7.34-.97 31.14-1.8v-.14h.1v-42.1c0-10.5 6.54-18.78 16.68-18.78 8.94 0 13.21 4.83 13.48 16.01v44.87h15.22v-49c.03-16.02-9.45-24.3-24.4-24.3l-.03-.01Zm-65.1 49.3c0 9.93-10.41 13.52-17.08 13.52-5.34 0-14.02-2.07-14.02-9.11 0-8.29 5.87-10.77 12.41-11.88 6.68-1.24 14.02-1.1 18.69-4.27v11.73Zm167.87 23.82H441.3v-9.66h-.27c-4 8.14-12.68 11.6-21.35 11.6-21.75 0-32.3-16.72-32.3-38.11 0-25.82 14.81-37.14 29.9-37.14 8.67 0 18.28 3.32 22.95 11.18h.27V0h15.21zm-34.03-10.49c13.61 0 19.35-12.84 19.35-25.27 0-15.73-7.34-25.13-19.08-25.13-14.29 0-19.36 13.12-19.36 25.96 0 12.29 5.87 24.44 19.1 24.44zm94.49-36.81c-1.2-8.7-7.34-13.4-15.75-13.4-7.88 0-18.95 4.29-18.95 25.96 0 11.88 5.07 24.44 18.28 24.44 8.81 0 14.95-6.08 16.42-16.3h15.21c-2.8 18.5-13.88 28.72-31.63 28.72-21.62 0-33.5-15.87-33.5-36.86 0-21.53 11.35-38.38 34.04-38.38 16.01 0 29.63 8.29 31.1 25.82h-15.23Zm173.51-25.82c-10 0-16.55 4.56-21.62 11.87-3.07-8.14-10.94-11.87-19.35-11.87-10.95 0-16.69 4.83-21.22 11.87h-.4V27.4h-14.42v60.78c-8.68.1-9.49.1-10.15.1-2.8 0-3.6-1.52-3.6-5.38V46.16c0-15.04-14.15-20.71-27.63-20.71-15.21 0-30.3 5.38-31.37 23.75h15.22c.67-7.73 6.68-11.33 15.22-11.33 6.13 0 14.28 1.53 14.28 9.67 0 9.25-9.75 8-20.7 10.08-12.8 1.52-26.55 4.42-26.55 22.22 0 13.95 11.21 20.85 23.62 20.85 8.14 0 17.89-2.62 23.9-8.69 1.2 6.49 5.6 8.7 11.74 8.7 2.53 0 7.34-.97 30.92-1.8v-.14h.31V56.38c0-11.87 7.21-18.5 15.09-18.5 9.2 0 12.14 5.24 12.14 15.05v45.83h15.21V56.93c0-12.01 4.4-19.05 14.68-19.05 11.88 0 12.55 7.87 12.55 19.2v41.68h15.21V49.48c.01-17.4-8.53-24.03-23.07-24.03zm-105.97 49.3c0 9.93-10.4 13.52-17.08 13.52-5.34 0-14.01-2.08-14.01-9.11 0-8.29 5.87-10.77 12.4-11.88 6.68-1.24 14.02-1.1 18.7-4.27v11.73Zm142.81-47.36h14.41v9.66h.27c4.27-8.14 12.54-11.6 21.35-11.6 21.76 0 32.3 17.12 32.3 37.97 0 19.19-9.35 37.27-29.76 37.27-8.8 0-18.29-3.31-23.09-11.17h-.27v35.6h-15.21V27.4Zm34.03 10.48c-12.81 0-19.35 10.09-19.35 25.27 0 14.35 7.07 25.13 19.35 25.13 13.88 0 19.09-12.7 19.09-25.13 0-12.97-6.55-25.27-19.1-25.27z"
+|                     <span>
+|                       class="bc-screen-reader-only"
+|                       data-v-5cfc24b1=""
+|                       "Bandcamp home"
+|                 <!--  -->
+|                 <li>
+|                   class="search"
+|                   data-v-fed70f16=""
+|                   role="none"
+|                   <div>
+|                     class="search-instant-inline"
+|                     data-v-82b8ce16=""
+|                     data-v-fed70f16=""
+|                     role="menuitem"
+|                     <form>
+|                       aria-describedby="v-1-0-0"
+|                       class="site-search-form"
+|                       data-v-82b8ce16=""
+|                       data-v-9e9d2c84=""
+|                       role="search"
+|                       <div>
+|                         class="g-form-input-wrapper g-text-body-responsive g-input"
+|                         data-v-36f45f89=""
+|                         data-v-6a77968d=""
+|                         data-v-9e9d2c84=""
+|                         is-disabled="false"
+|                         <label>
+|                           class="bc-screen-reader-only"
+|                           data-v-6a77968d=""
+|                           for="v-1-0-1"
+|                           "Search for artist, album or track "
+|                           <span>
+|                             class="optional-indicator"
+|                             data-v-6a77968d=""
+|                             "(optional)"
+|                         <!--  -->
+|                         <!-- [ -->
+|                         <div>
+|                           class="input-container"
+|                           data-v-36f45f89=""
+|                           style=""
+|                           <input>
+|                             aria-invalid="false"
+|                             autocomplete="off"
+|                             autocorrect="off"
+|                             class=""
+|                             data-v-36f45f89=""
+|                             id="v-1-0-1"
+|                             placeholder="Search and discover music"
+|                             spellcheck="false"
+|                             type="search"
+|                             value=""
+|                           <!--  -->
+|                         <!-- ] -->
+|                         <!--  -->
+|                         <!--  -->
+|                       <button>
+|                         class="bc-visible-focus-only g-button sm"
+|                         data-v-9e9d2c84=""
+|                         type="submit"
+|                         <!-- [ -->
+|                         <!--  -->
+|                         <!--  -->
+|                         <!-- ] -->
+|                         <!-- [ -->
+|                         "Search"
+|                         <!-- ] -->
+|                     <section>
+|                       class="results"
+|                       data-v-82b8ce16=""
+|                       id="v-1-0-0"
+|                       <!--  -->
+|                     <!--  -->
+|                 <!--  -->
+|                 <!--  -->
+|                 <!--  -->
+|                 <!--  -->
+|                 <!-- [ -->
+|                 <li>
+|                   class="signup"
+|                   data-v-fed70f16=""
+|                   part="signup-button"
+|                   role="none"
+|                   <button>
+|                     class="g-button no-outline"
+|                     data-v-fed70f16=""
+|                     role="menuitem"
+|                     <!-- [ -->
+|                     <!--  -->
+|                     <!--  -->
+|                     <!-- ] -->
+|                     <!-- [ -->
+|                     "Sign up"
+|                     <!-- ] -->
+|                 <li>
+|                   class="login"
+|                   data-v-fed70f16=""
+|                   role="none"
+|                   <a>
+|                     class="g-button no-outline"
+|                     data-v-fed70f16=""
+|                     href="https://bandcamp.com/login?from=menubar"
+|                     role="menuitem"
+|                     <!-- [ -->
+|                     <!--  -->
+|                     <!--  -->
+|                     <!-- ] -->
+|                     <!-- [ -->
+|                     "Log in"
+|                     <!-- ] -->
+|                 <!-- ] -->
+|                 <!-- ] -->
+|             <!--  -->
+|         <div>
+|           data-v-02464800=""
+|           id="content"
+|         <!--  -->
+|         <!-- ] -->
+|         <!-- ] -->
+|         <!-- [ -->
+|         <section>
+|           aria-label="Selected filters"
+|           class="breadcrumbs-bar hidden"
+|           data-v-5693a515=""
+|           data-v-ed67300c=""
+|           <div>
+|             class="page-wrapper breadcrumbs-page-wrapper"
+|             data-v-7835f577=""
+|             data-v-ed67300c=""
+|             style=""
+|             <!-- [ -->
+|             <ul>
+|               class="crumbs"
+|               data-v-ed67300c=""
+|               id="v-0"
+|               <!-- [ -->
+|               <li>
+|                 class="crumb default-option primaryTags"
+|                 data-v-ed67300c=""
+|                 "all genres "
+|                 <span>
+|                   aria-hidden="true"
+|                   data-v-ed67300c=""
+|                   "/"
+|               <li>
+|                 class="crumb default-option categories"
+|                 data-v-ed67300c=""
+|                 "all categories "
+|                 <span>
+|                   aria-hidden="true"
+|                   data-v-ed67300c=""
+|                   "/"
+|               <li>
+|                 class="crumb default-option slices"
+|                 data-v-ed67300c=""
+|                 "best-selling "
+|                 <!--  -->
+|               <!-- ] -->
+|             <!--  -->
+|             <!--  -->
+|             <!--  -->
+|             <div>
+|               class="spacer"
+|               data-v-ed67300c=""
+|             <div>
+|               class="result-count-display"
+|               data-v-ed67300c=""
+|               "0 results"
+|             <!-- ] -->
+|         <!-- ] -->
+|         <main>
+|           class="app"
+|           data-v-02464800=""
+|           <!-- [ -->
+|           <div>
+|             class="filters-banner"
+|             data-v-5693a515=""
+|             data-v-fcb1d231=""
+|             id="filters"
+|             style="--af8b6674:var(--gray200);"
+|             <div>
+|               class="page-wrapper tag-search-wrapper"
+|               data-v-3de73ee3=""
+|               data-v-7835f577=""
+|               data-v-fcb1d231=""
+|               style="--v7f255c70:var(--secondary-transparency-dark);"
+|               <!-- [ -->
+|               <div>
+|                 class="tag-search-desktop-container"
+|                 data-v-3de73ee3=""
+|                 <div>
+|                   class="tag-search-desktop"
+|                   data-v-3de73ee3=""
+|                   <div>
+|                     autocomplete="off"
+|                     autocorrect="off"
+|                     class="combo-box tag-search-combo-box"
+|                     data-v-2ced399a=""
+|                     data-v-3de73ee3=""
+|                     spellcheck="off"
+|                     type="search"
+|                     <div>
+|                       class="inner"
+|                       data-v-2ced399a=""
+|                       <!-- [ -->
+|                       <!-- ] -->
+|                       <div>
+|                         class="g-form-input-wrapper g-text-body-responsive g-input input-component tag-search-combo-box"
+|                         data-v-2ced399a=""
+|                         data-v-36f45f89=""
+|                         data-v-6a77968d=""
+|                         is-disabled="false"
+|                         <label>
+|                           class="bc-screen-reader-only"
+|                           data-v-6a77968d=""
+|                           for="v-1"
+|                           "Tag search "
+|                           <span>
+|                             class="optional-indicator"
+|                             data-v-6a77968d=""
+|                             "(optional)"
+|                         <!--  -->
+|                         <!-- [ -->
+|                         <div>
+|                           class="input-container"
+|                           data-v-36f45f89=""
+|                           style=""
+|                           <input>
+|                             aria-expanded="false"
+|                             aria-invalid="false"
+|                             autocomplete="off"
+|                             autocorrect="off"
+|                             class="input-component tag-search-combo-box"
+|                             data-v-36f45f89=""
+|                             id="v-1"
+|                             placeholder="Add a genre, location, or tag"
+|                             role="combobox"
+|                             spellcheck="off"
+|                             type="search"
+|                             value=""
+|                           <!--  -->
+|                         <!-- ] -->
+|                         <!--  -->
+|                         <!--  -->
+|                       <!-- [ -->
+|                       <!-- ] -->
+|                     <!--  -->
+|                     <!--  -->
+|                 <!--  -->
+|               <!-- ] -->
+|             <div>
+|               class="genre-filter"
+|               data-v-2dee2467=""
+|               data-v-fcb1d231=""
+|               <div>
+|                 class="page-wrapper horizontal-scroll-row"
+|                 data-v-2dee2467=""
+|                 data-v-3d1d73ea=""
+|                 data-v-7835f577=""
+|                 id="genre-scroll-row"
+|                 style=""
+|                 <!-- [ -->
+|                 <!--  -->
+|                 <div>
+|                   class="inner"
+|                   data-v-3d1d73ea=""
+|                   <div>
+|                     class="observer-target"
+|                     data-v-3d1d73ea=""
+|                   <!-- [ -->
+|                   <div>
+|                     class="selected-tags"
+|                     data-v-2dee2467=""
+|                     <button>
+|                       class="chip-button selected-tag selected-tag g-button sm"
+|                       data-v-2dee2467=""
+|                       data-v-483713c3=""
+|                       <!-- [ -->
+|                       <!--  -->
+|                       <!--  -->
+|                       <!-- ] -->
+|                       <!-- [ -->
+|                       <!-- [ -->
+|                       "all genres"
+|                       <!-- ] -->
+|                       <!-- ] -->
+|                   <div>
+|                     class="list-box chip-group chip-group-multiselect filled genres"
+|                     data-v-2dee2467=""
+|                     data-v-5644c0d8=""
+|                     data-v-6151692c=""
+|                     id="multiselect-genres"
+|                     variant="filled"
+|                     <p>
+|                       class="list-box-label g-text-200-md bc-screen-reader-only"
+|                       data-v-6151692c=""
+|                       id="v-3"
+|                       "Genres"
+|                     <ul>
+|                       aria-activedescendant="v-4-electronic"
+|                       aria-labelledby="v-3"
+|                       aria-multiselectable="true"
+|                       data-v-6151692c=""
+|                       id="v-2"
+|                       role="listbox"
+|                       tabindex="0"
+|                       <!-- [ -->
+|                       <li>
+|                         aria-selected="false"
+|                         class="list-box-option active sm electronic"
+|                         data-v-6151692c=""
+|                         data-v-7543d2e4=""
+|                         id="v-4-electronic"
+|                         name="electronic"
+|                         role="option"
+|                         <!--  -->
+|                         <span>
+|                           data-v-7543d2e4=""
+|                           "electronic"
+|                       <li>
+|                         aria-selected="false"
+|                         class="list-box-option sm rock"
+|                         data-v-6151692c=""
+|                         data-v-7543d2e4=""
+|                         id="v-4-rock"
+|                         name="rock"
+|                         role="option"
+|                         <!--  -->
+|                         <span>
+|                           data-v-7543d2e4=""
+|                           "rock"
+|                       <li>
+|                         aria-selected="false"
+|                         class="list-box-option sm metal"
+|                         data-v-6151692c=""
+|                         data-v-7543d2e4=""
+|                         id="v-4-metal"
+|                         name="metal"
+|                         role="option"
+|                         <!--  -->
+|                         <span>
+|                           data-v-7543d2e4=""
+|                           "metal"
+|                       <li>
+|                         aria-selected="false"
+|                         class="list-box-option sm alternative"
+|                         data-v-6151692c=""
+|                         data-v-7543d2e4=""
+|                         id="v-4-alternative"
+|                         name="alternative"
+|                         role="option"
+|                         <!--  -->
+|                         <span>
+|                           data-v-7543d2e4=""
+|                           "alternative"
+|                       <li>
+|                         aria-selected="false"
+|                         class="list-box-option sm hip-hop-rap"
+|                         data-v-6151692c=""
+|                         data-v-7543d2e4=""
+|                         id="v-4-hip-hop-rap"
+|                         name="hip-hop-rap"
+|                         role="option"
+|                         <!--  -->
+|                         <span>
+|                           data-v-7543d2e4=""
+|                           "hip-hop/rap"
+|                       <li>
+|                         aria-selected="false"
+|                         class="list-box-option sm experimental"
+|                         data-v-6151692c=""
+|                         data-v-7543d2e4=""
+|                         id="v-4-experimental"
+|                         name="experimental"
+|                         role="option"
+|                         <!--  -->
+|                         <span>
+|                           data-v-7543d2e4=""
+|                           "experimental"
+|                       <li>
+|                         aria-selected="false"
+|                         class="list-box-option sm punk"
+|                         data-v-6151692c=""
+|                         data-v-7543d2e4=""
+|                         id="v-4-punk"
+|                         name="punk"
+|                         role="option"
+|                         <!--  -->
+|                         <span>
+|                           data-v-7543d2e4=""
+|                           "punk"
+|                       <li>
+|                         aria-selected="false"
+|                         class="list-box-option sm folk"
+|                         data-v-6151692c=""
+|                         data-v-7543d2e4=""
+|                         id="v-4-folk"
+|                         name="folk"
+|                         role="option"
+|                         <!--  -->
+|                         <span>
+|                           data-v-7543d2e4=""
+|                           "folk"
+|                       <li>
+|                         aria-selected="false"
+|                         class="list-box-option sm pop"
+|                         data-v-6151692c=""
+|                         data-v-7543d2e4=""
+|                         id="v-4-pop"
+|                         name="pop"
+|                         role="option"
+|                         <!--  -->
+|                         <span>
+|                           data-v-7543d2e4=""
+|                           "pop"
+|                       <li>
+|                         aria-selected="false"
+|                         class="list-box-option sm ambient"
+|                         data-v-6151692c=""
+|                         data-v-7543d2e4=""
+|                         id="v-4-ambient"
+|                         name="ambient"
+|                         role="option"
+|                         <!--  -->
+|                         <span>
+|                           data-v-7543d2e4=""
+|                           "ambient"
+|                       <li>
+|                         aria-selected="false"
+|                         class="list-box-option sm soundtrack"
+|                         data-v-6151692c=""
+|                         data-v-7543d2e4=""
+|                         id="v-4-soundtrack"
+|                         name="soundtrack"
+|                         role="option"
+|                         <!--  -->
+|                         <span>
+|                           data-v-7543d2e4=""
+|                           "soundtrack"
+|                       <li>
+|                         aria-selected="false"
+|                         class="list-box-option sm world"
+|                         data-v-6151692c=""
+|                         data-v-7543d2e4=""
+|                         id="v-4-world"
+|                         name="world"
+|                         role="option"
+|                         <!--  -->
+|                         <span>
+|                           data-v-7543d2e4=""
+|                           "world"
+|                       <li>
+|                         aria-selected="false"
+|                         class="list-box-option sm jazz"
+|                         data-v-6151692c=""
+|                         data-v-7543d2e4=""
+|                         id="v-4-jazz"
+|                         name="jazz"
+|                         role="option"
+|                         <!--  -->
+|                         <span>
+|                           data-v-7543d2e4=""
+|                           "jazz"
+|                       <li>
+|                         aria-selected="false"
+|                         class="list-box-option sm acoustic"
+|                         data-v-6151692c=""
+|                         data-v-7543d2e4=""
+|                         id="v-4-acoustic"
+|                         name="acoustic"
+|                         role="option"
+|                         <!--  -->
+|                         <span>
+|                           data-v-7543d2e4=""
+|                           "acoustic"
+|                       <li>
+|                         aria-selected="false"
+|                         class="list-box-option sm funk"
+|                         data-v-6151692c=""
+|                         data-v-7543d2e4=""
+|                         id="v-4-funk"
+|                         name="funk"
+|                         role="option"
+|                         <!--  -->
+|                         <span>
+|                           data-v-7543d2e4=""
+|                           "funk"
+|                       <li>
+|                         aria-selected="false"
+|                         class="list-box-option sm r-b-soul"
+|                         data-v-6151692c=""
+|                         data-v-7543d2e4=""
+|                         id="v-4-r-b-soul"
+|                         name="r-b-soul"
+|                         role="option"
+|                         <!--  -->
+|                         <span>
+|                           data-v-7543d2e4=""
+|                           "r&b/soul"
+|                       <li>
+|                         aria-selected="false"
+|                         class="list-box-option sm devotional"
+|                         data-v-6151692c=""
+|                         data-v-7543d2e4=""
+|                         id="v-4-devotional"
+|                         name="devotional"
+|                         role="option"
+|                         <!--  -->
+|                         <span>
+|                           data-v-7543d2e4=""
+|                           "devotional"
+|                       <li>
+|                         aria-selected="false"
+|                         class="list-box-option sm classical"
+|                         data-v-6151692c=""
+|                         data-v-7543d2e4=""
+|                         id="v-4-classical"
+|                         name="classical"
+|                         role="option"
+|                         <!--  -->
+|                         <span>
+|                           data-v-7543d2e4=""
+|                           "classical"
+|                       <li>
+|                         aria-selected="false"
+|                         class="list-box-option sm reggae"
+|                         data-v-6151692c=""
+|                         data-v-7543d2e4=""
+|                         id="v-4-reggae"
+|                         name="reggae"
+|                         role="option"
+|                         <!--  -->
+|                         <span>
+|                           data-v-7543d2e4=""
+|                           "reggae"
+|                       <li>
+|                         aria-selected="false"
+|                         class="list-box-option sm podcasts"
+|                         data-v-6151692c=""
+|                         data-v-7543d2e4=""
+|                         id="v-4-podcasts"
+|                         name="podcasts"
+|                         role="option"
+|                         <!--  -->
+|                         <span>
+|                           data-v-7543d2e4=""
+|                           "podcasts"
+|                       <li>
+|                         aria-selected="false"
+|                         class="list-box-option sm country"
+|                         data-v-6151692c=""
+|                         data-v-7543d2e4=""
+|                         id="v-4-country"
+|                         name="country"
+|                         role="option"
+|                         <!--  -->
+|                         <span>
+|                           data-v-7543d2e4=""
+|                           "country"
+|                       <li>
+|                         aria-selected="false"
+|                         class="list-box-option sm spoken-word"
+|                         data-v-6151692c=""
+|                         data-v-7543d2e4=""
+|                         id="v-4-spoken-word"
+|                         name="spoken-word"
+|                         role="option"
+|                         <!--  -->
+|                         <span>
+|                           data-v-7543d2e4=""
+|                           "spoken word"
+|                       <li>
+|                         aria-selected="false"
+|                         class="list-box-option sm comedy"
+|                         data-v-6151692c=""
+|                         data-v-7543d2e4=""
+|                         id="v-4-comedy"
+|                         name="comedy"
+|                         role="option"
+|                         <!--  -->
+|                         <span>
+|                           data-v-7543d2e4=""
+|                           "comedy"
+|                       <li>
+|                         aria-selected="false"
+|                         class="list-box-option sm blues"
+|                         data-v-6151692c=""
+|                         data-v-7543d2e4=""
+|                         id="v-4-blues"
+|                         name="blues"
+|                         role="option"
+|                         <!--  -->
+|                         <span>
+|                           data-v-7543d2e4=""
+|                           "blues"
+|                       <li>
+|                         aria-selected="false"
+|                         class="list-box-option sm kids"
+|                         data-v-6151692c=""
+|                         data-v-7543d2e4=""
+|                         id="v-4-kids"
+|                         name="kids"
+|                         role="option"
+|                         <!--  -->
+|                         <span>
+|                           data-v-7543d2e4=""
+|                           "kids"
+|                       <li>
+|                         aria-selected="false"
+|                         class="list-box-option sm audiobooks"
+|                         data-v-6151692c=""
+|                         data-v-7543d2e4=""
+|                         id="v-4-audiobooks"
+|                         name="audiobooks"
+|                         role="option"
+|                         <!--  -->
+|                         <span>
+|                           data-v-7543d2e4=""
+|                           "audiobooks"
+|                       <li>
+|                         aria-selected="false"
+|                         class="list-box-option sm latin"
+|                         data-v-6151692c=""
+|                         data-v-7543d2e4=""
+|                         id="v-4-latin"
+|                         name="latin"
+|                         role="option"
+|                         <!--  -->
+|                         <span>
+|                           data-v-7543d2e4=""
+|                           "latin"
+|                       <!-- ] -->
+|                   <!-- ] -->
+|                   <div>
+|                     class="observer-target"
+|                     data-v-3d1d73ea=""
+|                 <!--  -->
+|                 <!-- ] -->
+|               <div>
+|                 class="subgenre-filter"
+|                 data-v-2dee2467=""
+|                 <!--  -->
+|             <div>
+|               class="page-wrapper horizontal-scroll-row category-filter"
+|               data-v-3d1d73ea=""
+|               data-v-7835f577=""
+|               data-v-fcb1d231=""
+|               style=""
+|               <!-- [ -->
+|               <!--  -->
+|               <div>
+|                 class="inner"
+|                 data-v-3d1d73ea=""
+|                 <div>
+|                   class="observer-target"
+|                   data-v-3d1d73ea=""
+|                 <!-- [ -->
+|                 <div>
+|                   class="chip-group filled categories"
+|                   data-v-c7ab182c=""
+|                   <label>
+|                     class="g-text-medium bc-screen-reader-only"
+|                     data-v-c7ab182c=""
+|                     for="v-5"
+|                     "Categories"
+|                   <ul>
+|                     class="radio-group"
+|                     data-v-c4cc7969=""
+|                     data-v-c7ab182c=""
+|                     id="v-5"
+|                     islabelhidden="true"
+|                     label="Categories"
+|                     role="radiogroup"
+|                     <!-- [ -->
+|                     <li>
+|                       aria-checked="true"
+|                       class="radio-item active selected sm"
+|                       data-v-6996f9ba=""
+|                       data-v-c4cc7969=""
+|                       id="v-6-0"
+|                       name="0"
+|                       role="radio"
+|                       tabindex="0"
+|                       <svg>
+|                         aria-hidden="true"
+|                         class="icon dieter-circle-icon"
+|                         data-v-6996f9ba=""
+|                         fill="currentColor"
+|                         height="20"
+|                         role="img"
+|                         viewBox="0 0 20 20"
+|                         width="20"
+|                         xmlns="http://www.w3.org/2000/svg"
+|                         <path>
+|                           d="M10.945 10.089a.95.95 0 0 1-.945.957.95.95 0 0 1-.945-.957c0-.53.423-.958.945-.958s.945.429.945.957"
+|                           stroke="none"
+|                         <path>
+|                           d="M10.945 6.418a.95.95 0 0 1-.945.958.95.95 0 0 1-.945-.958c0-.529.423-.957.945-.957s.945.428.945.957"
+|                           stroke="none"
+|                         <path>
+|                           d="M7.895 8.35a.95.95 0 0 1-.946.958.95.95 0 0 1-.945-.958c0-.529.423-.958.945-.958s.946.429.946.958"
+|                           stroke="none"
+|                         <path>
+|                           d="M7.895 11.827a.95.95 0 0 1-.946.958.95.95 0 0 1-.945-.958c0-.53.423-.958.945-.958s.946.429.946.958"
+|                           stroke="none"
+|                         <path>
+|                           d="M10.945 13.565a.95.95 0 0 1-.945.958.95.95 0 0 1-.945-.958c0-.529.423-.957.945-.957s.945.428.945.957"
+|                           stroke="none"
+|                         <path>
+|                           d="M10.945 17.042A.95.95 0 0 1 10 18a.95.95 0 0 1-.945-.958c0-.529.423-.958.945-.958s.945.43.945.958"
+|                           stroke="none"
+|                         <path>
+|                           d="M3.89 10.089a.95.95 0 0 1-.945.957A.95.95 0 0 1 2 10.09c0-.53.423-.958.945-.958.523 0 .946.429.946.957"
+|                           stroke="none"
+|                         <path>
+|                           d="M4.844 13.565a.95.95 0 0 1-.945.958.95.95 0 0 1-.946-.958c0-.529.424-.957.946-.957s.945.428.945.957"
+|                           stroke="none"
+|                         <path>
+|                           d="M7.513 16.076a.95.95 0 0 1-.945.958.95.95 0 0 1-.945-.958c0-.529.423-.957.945-.957s.945.428.945.957"
+|                           stroke="none"
+|                         <path>
+|                           d="M14.568 16.076a.95.95 0 0 1-.945.958.95.95 0 0 1-.946-.958c0-.529.424-.957.946-.957s.945.428.945.957"
+|                           stroke="none"
+|                         <path>
+|                           d="M17.047 13.565a.95.95 0 0 1-.946.958.95.95 0 0 1-.945-.958c0-.529.423-.957.945-.957s.946.428.946.957"
+|                           stroke="none"
+|                         <path>
+|                           d="M18 10.089a.95.95 0 0 1-.945.957.95.95 0 0 1-.946-.957c0-.53.423-.958.946-.958s.945.429.945.957"
+|                           stroke="none"
+|                         <path>
+|                           d="M8.88 2.958c0-.53.423-.958.945-.958s.946.429.946.958a.95.95 0 0 1-.946.958.95.95 0 0 1-.945-.958"
+|                           stroke="none"
+|                         <path>
+|                           d="M14.981 6.434c0-.529.423-.957.946-.957s.945.428.945.957a.95.95 0 0 1-.945.958.95.95 0 0 1-.946-.958"
+|                           stroke="none"
+|                         <path>
+|                           d="M12.312 3.924c0-.53.423-.958.945-.958s.946.429.946.958a.95.95 0 0 1-.946.957.95.95 0 0 1-.945-.957"
+|                           stroke="none"
+|                         <path>
+|                           d="M5.257 3.924c0-.53.423-.958.946-.958s.945.429.945.958a.95.95 0 0 1-.945.957.95.95 0 0 1-.946-.957"
+|                           stroke="none"
+|                         <path>
+|                           d="M2.779 6.434c0-.529.423-.957.945-.957s.945.428.945.957a.95.95 0 0 1-.945.958.95.95 0 0 1-.945-.958"
+|                           stroke="none"
+|                         <path>
+|                           d="M13.996 11.827a.95.95 0 0 1-.945.958.95.95 0 0 1-.946-.958c0-.53.424-.958.946-.958s.945.429.945.958"
+|                           stroke="none"
+|                         <path>
+|                           d="M13.996 8.157a.95.95 0 0 1-.945.958.95.95 0 0 1-.946-.958c0-.529.424-.958.946-.958s.945.429.945.958"
+|                           stroke="none"
+|                       <span>
+|                         data-v-6996f9ba=""
+|                         "all categories"
+|                     <li>
+|                       aria-checked="false"
+|                       class="radio-item sm"
+|                       data-v-6996f9ba=""
+|                       data-v-c4cc7969=""
+|                       id="v-6-1"
+|                       name="1"
+|                       role="radio"
+|                       tabindex="0"
+|                       <svg>
+|                         aria-hidden="true"
+|                         class="icon digital-album-icon"
+|                         data-v-6996f9ba=""
+|                         fill="currentColor"
+|                         height="20"
+|                         role="img"
+|                         stroke="none"
+|                         viewBox="0 0 20 20"
+|                         width="20"
+|                         xmlns="http://www.w3.org/2000/svg"
+|                         <path>
+|                           clip-rule="evenodd"
+|                           d="M7.011 2.675a3.1 3.1 0 0 0-.574-.784C6.202 1.67 5.9 1.5 5.538 1.5c-.68 0-1.163.55-1.486 1.104-.345.591-.627 1.388-.852 2.256-.405 1.566-.648 3.464-.692 5.057h-.841v1H7.99l.014.094c.174 1.268.495 3.063.967 4.552.235.741.516 1.437.852 1.958.318.494.784.979 1.426.979.339 0 .63-.15.863-.344a3.1 3.1 0 0 0 .63-.765l.08.13c.32.494.785.979 1.427.979.339 0 .63-.15.863-.344s.436-.454.616-.742c.359-.576.671-1.345.928-2.16.452-1.436.761-3.111.829-4.337h.847v-1h-6.481c-.225-1.454-.534-3.23-.936-4.75-.247-.934-.537-1.801-.88-2.446-.17-.321-.367-.613-.6-.83-.234-.22-.536-.391-.898-.391-.68 0-1.163.55-1.486 1.104zM4.168 5.11c-.383 1.48-.615 3.29-.66 4.806h2c.044-1.593.287-3.49.692-5.057q.126-.49.278-.94a7 7 0 0 0-.325-.73c-.144-.271-.28-.457-.4-.57-.117-.11-.186-.12-.215-.12-.098 0-.323.094-.622.607-.278.477-.533 1.173-.748 2.004m2.856.603a24 24 0 0 0-.516 4.203H7.84c-.205-1.314-.475-2.85-.816-4.203m.516-1.796c.12-.313.245-.586.376-.81.299-.514.524-.608.622-.608.029 0 .098.01.215.12.12.113.256.299.4.57.288.542.555 1.322.796 2.232.376 1.42.67 3.086.89 4.495H8.853c-.225-1.454-.534-3.23-.936-4.75-.116-.437-.24-.858-.376-1.25m3.451 6.999h-1.99c.172 1.239.482 2.948.924 4.344.225.71.474 1.307.74 1.718.282.438.487.521.585.521.031 0 .104-.013.223-.113.121-.1.26-.265.407-.502q.17-.273.332-.628a13 13 0 0 1-.24-.694c-.471-1.49-.793-3.285-.967-4.552zm2.304 5.352q.179.413.37.71c.282.438.487.521.585.521.031 0 .104-.013.223-.113.121-.1.26-.265.407-.502.295-.473.578-1.153.823-1.932.427-1.355.713-2.919.781-4.036h-1.998c-.068 1.226-.377 2.901-.829 4.336-.11.351-.231.694-.362 1.016m-.525-1.531c-.36-1.283-.618-2.733-.769-3.821h1.483c-.064 1.058-.325 2.518-.714 3.82"
+|                           fill-rule="evenodd"
+|                           stroke="none"
+|                       <span>
+|                         data-v-6996f9ba=""
+|                         "digital"
+|                     <li>
+|                       aria-checked="false"
+|                       class="radio-item sm"
+|                       data-v-6996f9ba=""
+|                       data-v-c4cc7969=""
+|                       id="v-6-2"
+|                       name="2"
+|                       role="radio"
+|                       tabindex="0"
+|                       <svg>
+|                         aria-hidden="true"
+|                         class="icon vinyl-record-outline-icon"
+|                         data-v-6996f9ba=""
+|                         fill="currentColor"
+|                         height="20"
+|                         role="img"
+|                         stroke="none"
+|                         viewBox="0 0 20 20"
+|                         width="20"
+|                         xmlns="http://www.w3.org/2000/svg"
+|                         <path>
+|                           d="M10 11a1 1 0 1 0 0-2 1 1 0 0 0 0 2"
+|                           stroke="none"
+|                         <path>
+|                           clip-rule="evenodd"
+|                           d="M13 10a3 3 0 1 1-6 0 3 3 0 0 1 6 0m-3 2.19a2.19 2.19 0 1 0 0-4.38 2.19 2.19 0 0 0 0 4.38"
+|                           fill-rule="evenodd"
+|                           stroke="none"
+|                         <path>
+|                           d="m12.36 13.443-.28-.457-2.271 1.526 1.114 1.706 2.27-1.526-.15-.348 1.695-1.233c.452-.322 2.305-1.886 2.557-3.486l.205-1.233-.844-2.037-.073 1.251a5 5 0 0 1-.05.505c-.145.978-.644 2.49-2.194 3.75l-.46.373-.894.725a18 18 0 0 1-.605.474.1.1 0 0 1-.02.01"
+|                           stroke="none"
+|                         <path>
+|                           clip-rule="evenodd"
+|                           d="M10 17.2a7.2 7.2 0 1 0 0-14.4 7.2 7.2 0 0 0 0 14.4m0 .8a8 8 0 1 0 0-16 8 8 0 0 0 0 16"
+|                           fill-rule="evenodd"
+|                           stroke="none"
+|                       <span>
+|                         data-v-6996f9ba=""
+|                         "vinyl"
+|                     <li>
+|                       aria-checked="false"
+|                       class="radio-item sm"
+|                       data-v-6996f9ba=""
+|                       data-v-c4cc7969=""
+|                       id="v-6-3"
+|                       name="3"
+|                       role="radio"
+|                       tabindex="0"
+|                       <svg>
+|                         aria-hidden="true"
+|                         class="icon compact-disc-outline-icon"
+|                         data-v-6996f9ba=""
+|                         fill="currentColor"
+|                         height="20"
+|                         role="img"
+|                         stroke="none"
+|                         viewBox="0 0 20 20"
+|                         width="20"
+|                         xmlns="http://www.w3.org/2000/svg"
+|                         <path>
+|                           clip-rule="evenodd"
+|                           d="M3.873 15.023A7.923 7.923 0 1 1 16.127 4.976 7.923 7.923 0 0 1 3.873 15.023M16.923 10a6.923 6.923 0 0 1-9.34 6.489l1.494-4.014a2.641 2.641 0 0 0 3.325-3.574l3.896-1.78c.402.877.625 1.852.625 2.879m-6-2.476 1.495-4.013a6.923 6.923 0 0 0-8.716 9.369l3.895-1.782a2.641 2.641 0 0 1 3.325-3.574M5.678 15.41a7 7 0 0 1-1.494-1.651L8.028 12a3 3 0 0 0 .118.11l-1.475 3.96a7 7 0 0 1-.992-.662m10.136-9.167a6.9 6.9 0 0 0-2.486-2.312L11.864 7.86a3 3 0 0 1 .135.126zM11.64 10a1.641 1.641 0 1 1-3.282 0 1.641 1.641 0 0 1 3.282 0"
+|                           fill-rule="evenodd"
+|                           stroke="none"
+|                         <path>
+|                           d="M10 10.88a.88.88 0 1 0 0-1.76.88.88 0 0 0 0 1.76"
+|                           stroke="none"
+|                       <span>
+|                         data-v-6996f9ba=""
+|                         "compact discs"
+|                     <li>
+|                       aria-checked="false"
+|                       class="radio-item sm"
+|                       data-v-6996f9ba=""
+|                       data-v-c4cc7969=""
+|                       id="v-6-4"
+|                       name="4"
+|                       role="radio"
+|                       tabindex="0"
+|                       <svg>
+|                         aria-hidden="true"
+|                         class="icon cassette-tape-outline-icon"
+|                         data-v-6996f9ba=""
+|                         fill="currentColor"
+|                         height="20"
+|                         role="img"
+|                         stroke="none"
+|                         viewBox="0 0 20 20"
+|                         width="20"
+|                         xmlns="http://www.w3.org/2000/svg"
+|                         <path>
+|                           clip-rule="evenodd"
+|                           d="M17.7 4.3H2.3v11.4h15.4zM2.3 3.5a.8.8 0 0 0-.8.8v11.4a.8.8 0 0 0 .8.8h15.4a.8.8 0 0 0 .8-.8V4.3a.8.8 0 0 0-.8-.8z"
+|                           fill-rule="evenodd"
+|                           stroke="none"
+|                         <path>
+|                           clip-rule="evenodd"
+|                           d="M8.5 9a2.3 2.3 0 1 1-4.6 0 2.3 2.3 0 0 1 4.6 0m-2.3 1.5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3"
+|                           fill-rule="evenodd"
+|                           stroke="none"
+|                         <path>
+|                           clip-rule="evenodd"
+|                           d="M16.2 9a2.3 2.3 0 1 1-4.6 0 2.3 2.3 0 0 1 4.6 0m-2.3 1.5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3"
+|                           fill-rule="evenodd"
+|                           stroke="none"
+|                         <path>
+|                           clip-rule="evenodd"
+|                           d="M6.366 14a.4.4 0 0 0-.337.185l-1.292 2.03-.674-.43 1.291-2.03a1.2 1.2 0 0 1 1.012-.555h7.268c.41 0 .792.21 1.012.556l1.291 2.03-.675.429-1.291-2.03a.4.4 0 0 0-.337-.185z"
+|                           fill-rule="evenodd"
+|                           stroke="none"
+|                       <span>
+|                         data-v-6996f9ba=""
+|                         "cassettes"
+|                     <li>
+|                       aria-checked="false"
+|                       class="radio-item sm"
+|                       data-v-6996f9ba=""
+|                       data-v-c4cc7969=""
+|                       id="v-6-5"
+|                       name="5"
+|                       role="radio"
+|                       tabindex="0"
+|                       <svg>
+|                         aria-hidden="true"
+|                         class="icon tshirt-outline-icon"
+|                         data-v-6996f9ba=""
+|                         fill="currentColor"
+|                         height="20"
+|                         role="img"
+|                         stroke="none"
+|                         viewBox="0 0 20 20"
+|                         width="20"
+|                         xmlns="http://www.w3.org/2000/svg"
+|                         <path>
+|                           clip-rule="evenodd"
+|                           d="M15.039 16.5a1 1 0 0 1-1 1H5.577a1 1 0 0 1-1-1v-6.422a1 1 0 0 1-1.37-.286L1.67 7.498a1 1 0 0 1 .126-1.266l3.077-3.059a1 1 0 0 1 .39-.24l1.154-.382a1 1 0 0 1 1.094.322c.26.322.578.714.988 1.032.402.312.832.507 1.31.507.495 0 .997-.21 1.429-.524.211-.155.387-.322.518-.473a2 2 0 0 0 .189-.262l.01-.02.003-.006a1 1 0 0 1 1.242-.576l1.154.382a1 1 0 0 1 .39.24l3.462 3.441a1 1 0 0 1 .061 1.352l-1.923 2.294a1 1 0 0 1-1.304.2zm.538-6.882-1.538-1.53V16.5H5.577V8.088L4.038 9.235 2.5 6.941l3.077-3.059L6.73 3.5c.513.637 1.538 1.912 3.077 1.912s2.82-1.275 3.077-1.912l1.154.382L17.5 7.324z"
+|                           fill-rule="evenodd"
+|                           stroke="none"
+|                       <span>
+|                         data-v-6996f9ba=""
+|                         "t-shirts"
+|                     <!-- ] -->
+|                 <!-- ] -->
+|                 <div>
+|                   class="observer-target"
+|                   data-v-3d1d73ea=""
+|               <!--  -->
+|               <!-- ] -->
+|             <div>
+|               class="page-wrapper more-filters-row"
+|               data-v-7835f577=""
+|               data-v-bd3ef641=""
+|               data-v-fcb1d231=""
+|               style="--v3aca094b: ;--v14184748:var(--bc-font-weight-bold);"
+|               <!-- [ -->
+|               <div>
+|                 class="right"
+|                 data-v-bd3ef641=""
+|                 <div>
+|                   class="sort-filter-dropdown"
+|                   data-v-0305b871=""
+|                   data-v-bd3ef641=""
+|                   style="--v1f0c6a01:var(--gray200);--v1f0c6640:var(--gray100);--v1f0c7544:var(--gray500);--v1f0c7905:var(--gray600);"
+|                   <button>
+|                     class="filter-button g-button sm outline icon-left"
+|                     data-v-0305b871=""
+|                     data-v-33e6d67e=""
+|                     <!-- [ -->
+|                     <svg>
+|                       aria-hidden="true"
+|                       class="icon sort-outline-icon"
+|                       data-v-fc423256=""
+|                       fill="currentColor"
+|                       height="20"
+|                       role="img"
+|                       viewBox="0 0 24 24"
+|                       width="20"
+|                       xmlns="http://www.w3.org/2000/svg"
+|                       <path>
+|                         d="M12.53 6.472 8 1.942l-4.53 4.53 1.06 1.06 2.72-2.72v11.192h1.5V4.813l2.72 2.72zm-1.06 11.056 4.53 4.53 4.53-4.53-1.06-1.06-2.72 2.72V7.995h-1.5v11.191l-2.72-2.72z"
+|                         stroke="none"
+|                     <!--  -->
+|                     <!-- ] -->
+|                     <!-- [ -->
+|                     "best-selling "
+|                     <svg>
+|                       aria-hidden="true"
+|                       class="icon caret-down-icon icon caret"
+|                       data-v-33e6d67e=""
+|                       fill="currentColor"
+|                       height="20"
+|                       role="img"
+|                       viewBox="0 0 20 20"
+|                       width="20"
+|                       xmlns="http://www.w3.org/2000/svg"
+|                       <path>
+|                         clip-rule="evenodd"
+|                         d="m10 13.293 5.646-5.647.707.708L10 14.707 3.646 8.354l.708-.708z"
+|                         fill-rule="evenodd"
+|                         stroke="none"
+|                     <!-- ] -->
+|                   <!--  -->
+|                 <div>
+|                   class="location-filter-dropdown"
+|                   data-v-4ba3691f=""
+|                   data-v-bd3ef641=""
+|                   style="--v100ad37b:var(--white);--v0a3d197e:var(--gray200);"
+|                   <button>
+|                     class="filter-button g-button sm outline icon-left"
+|                     data-v-33e6d67e=""
+|                     data-v-4ba3691f=""
+|                     <!-- [ -->
+|                     <svg>
+|                       aria-hidden="true"
+|                       class="icon location-outline-icon"
+|                       data-v-fc423256=""
+|                       fill="currentColor"
+|                       height="20"
+|                       role="img"
+|                       viewBox="0 0 20 20"
+|                       width="20"
+|                       xmlns="http://www.w3.org/2000/svg"
+|                       <path>
+|                         clip-rule="evenodd"
+|                         d="M14.09 9.222c.265-.55.343-1.506.226-2.242a4.57 4.57 0 0 0-9.029.01c-.104.659-.07 1.271.262 2.293l4.248 7.526zm.885.467c.398-.796.467-1.998.328-2.867A5.57 5.57 0 0 0 4.3 6.834c-.134.85-.07 1.629.306 2.782a1 1 0 0 0 .062.14l4.437 7.859a.796.796 0 0 0 1.386 0z"
+|                         fill-rule="evenodd"
+|                         stroke="none"
+|                       <path>
+|                         clip-rule="evenodd"
+|                         d="M9.802 8.587a1.387 1.387 0 1 0 0-2.775 1.387 1.387 0 0 0 0 2.775m0 1a2.387 2.387 0 1 0 0-4.775 2.387 2.387 0 0 0 0 4.775"
+|                         fill-rule="evenodd"
+|                         stroke="none"
+|                     <!--  -->
+|                     <!-- ] -->
+|                     <!-- [ -->
+|                     "artists from anywhere "
+|                     <svg>
+|                       aria-hidden="true"
+|                       class="icon caret-down-icon icon caret"
+|                       data-v-33e6d67e=""
+|                       fill="currentColor"
+|                       height="20"
+|                       role="img"
+|                       viewBox="0 0 20 20"
+|                       width="20"
+|                       xmlns="http://www.w3.org/2000/svg"
+|                       <path>
+|                         clip-rule="evenodd"
+|                         d="m10 13.293 5.646-5.647.707.708L10 14.707 3.646 8.354l.708-.708z"
+|                         fill-rule="evenodd"
+|                         stroke="none"
+|                     <!-- ] -->
+|                   <!--  -->
+|                 <div>
+|                   class="time-filter-dropdown"
+|                   data-v-7f38961f=""
+|                   data-v-bd3ef641=""
+|                   style="--v86aca5da:var(--gray200);--v86acad5c:var(--gray100);--v86ac8f54:var(--gray500);--v86ac87d2:var(--gray600);"
+|                   <button>
+|                     class="filter-button g-button sm outline icon-left"
+|                     data-v-33e6d67e=""
+|                     data-v-7f38961f=""
+|                     <!-- [ -->
+|                     <svg>
+|                       aria-hidden="true"
+|                       class="icon clock-outline-icon"
+|                       data-v-fc423256=""
+|                       fill="currentColor"
+|                       height="20"
+|                       role="img"
+|                       viewBox="0 0 20 20"
+|                       width="20"
+|                       xmlns="http://www.w3.org/2000/svg"
+|                       <path>
+|                         clip-rule="evenodd"
+|                         d="M10 17a7 7 0 1 0 0-14 7 7 0 0 0 0 14m0 1a8 8 0 1 0 0-16 8 8 0 0 0 0 16"
+|                         fill-rule="evenodd"
+|                         stroke="none"
+|                       <path>
+|                         clip-rule="evenodd"
+|                         d="M9.5 5h1v5.5H14v1H9.5z"
+|                         fill-rule="evenodd"
+|                         stroke="none"
+|                     <!--  -->
+|                     <!-- ] -->
+|                     <!-- [ -->
+|                     "fresh "
+|                     <svg>
+|                       aria-hidden="true"
+|                       class="icon caret-down-icon icon caret"
+|                       data-v-33e6d67e=""
+|                       fill="currentColor"
+|                       height="20"
+|                       role="img"
+|                       viewBox="0 0 20 20"
+|                       width="20"
+|                       xmlns="http://www.w3.org/2000/svg"
+|                       <path>
+|                         clip-rule="evenodd"
+|                         d="m10 13.293 5.646-5.647.707.708L10 14.707 3.646 8.354l.708-.708z"
+|                         fill-rule="evenodd"
+|                         stroke="none"
+|                     <!-- ] -->
+|                   <!--  -->
+|                 <button>
+|                   aria-pressed="false"
+|                   class="filter-button g-button sm outline icon-left"
+|                   data-v-33e6d67e=""
+|                   data-v-bd3ef641=""
+|                   <!-- [ -->
+|                   <svg>
+|                     aria-hidden="true"
+|                     class="icon headphones-heart-outline-icon"
+|                     data-v-fc423256=""
+|                     fill="currentColor"
+|                     height="20"
+|                     role="img"
+|                     stroke="currentColor"
+|                     viewBox="0 0 20 20"
+|                     width="20"
+|                     xmlns="http://www.w3.org/2000/svg"
+|                     <path>
+|                       clip-rule="evenodd"
+|                       d="M4.37 4.52C5.868 3.082 7.893 2.28 10 2.28s4.133.803 5.63 2.24c1.496 1.436 2.34 3.39 2.34 5.43v7.77h-3.058c-.78 0-1.412-.631-1.412-1.411v-4.382c0-.78.632-1.412 1.412-1.412h2.117V9.95c0-1.778-.735-3.488-2.052-4.752A7.2 7.2 0 0 0 10 3.221c-1.87 0-3.66.713-4.977 1.977S2.97 8.172 2.97 9.95v.565h2.117c.78 0 1.412.632 1.412 1.412v4.382c0 .78-.632 1.412-1.412 1.412H2.03V9.95c0-2.04.845-3.994 2.342-5.43m-1.4 6.936v5.323h2.118c.26 0 .47-.21.47-.47v-4.382a.47.47 0 0 0-.47-.471zm14.06 0h-2.118a.47.47 0 0 0-.47.47v4.383c0 .26.21.47.47.47h2.117z"
+|                       fill-rule="evenodd"
+|                       stroke="none"
+|                     <path>
+|                       clip-rule="evenodd"
+|                       d="M7.818 7.37c.252-.157.585-.287.972-.287.528 0 .947.18 1.226.465.267-.282.663-.465 1.194-.465.387 0 .72.13.972.287.248.156.434.348.522.499.334.565.28 1.206-.198 1.755l-.008.009-2.316 2.382a.23.23 0 0 1-.164.068.23.23 0 0 1-.164-.067l-2.35-2.382-.01-.01c-.478-.549-.532-1.19-.198-1.755.088-.15.274-.343.522-.499Z"
+|                       fill-rule="evenodd"
+|                       fill="none"
+|                       stroke-linejoin="round"
+|                   <!--  -->
+|                   <!-- ] -->
+|                   <!-- [ -->
+|                   "artists and labels I follow "
+|                   <!--  -->
+|                   <!-- ] -->
+|               <button>
+|                 class="reset-filters g-button sm no-outline"
+|                 data-v-bd3ef641=""
+|                 <!-- [ -->
+|                 <!--  -->
+|                 <!--  -->
+|                 <!-- ] -->
+|                 <!-- [ -->
+|                 "clear all filters"
+|                 <!-- ] -->
+|               <!--  -->
+|               <!-- ] -->
+|           <div>
+|             class="page-wrapper results-container"
+|             data-v-5693a515=""
+|             data-v-7835f577=""
+|             style=""
+|             <!-- [ -->
+|             <div>
+|               class="results-grid"
+|               data-v-5693a515=""
+|               data-v-713e0804=""
+|               <!--  -->
+|               <div>
+|                 class="pull-up"
+|                 data-v-713e0804=""
+|                 <p>
+|                   aria-atomic="true"
+|                   aria-live="polite"
+|                   class="bc-screen-reader-only"
+|                   data-v-713e0804=""
+|                   role="status"
+|                 <!--  -->
+|             <!--  -->
+|             <!--  -->
+|             <!-- ] -->
+|           <!-- ] -->
+|         <!--  -->
+|         <!-- [ -->
+|         <a>
+|           class="artist-index-link bc-screen-reader-only"
+|           data-v-5693a515=""
+|           href="https://bandcamp.com/artist_index"
+|           "Artist index"
+|         <a>
+|           class="new-releases-link bc-screen-reader-only"
+|           data-v-5693a515=""
+|           href="https://bandcamp.com/discover?s=new"
+|           "New releases"
+|         <!-- ] -->
+|         <div>
+|           data-v-02464800=""
+|           id="dialog-teleport"
+|         <div>
+|           data-v-02464800=""
+|           id="toast-teleport"
+|         <div>
+|           aria-live="polite"
+|           aria-relevant="additions"
+|           class="toast-banner-manager"
+|           data-v-02464800=""
+|           data-v-52d8313f=""
+|         <footer>
+|           data-v-02464800=""
+|           data-v-d8c23637=""
+|           id="page-footer"
+|           <div>
+|             class="editorial-recommendations-banner"
+|             data-v-bde5e88d=""
+|             data-v-d8c23637=""
+|             role="presentation"
+|             <svg>
+|               class="loading-spinner-icon"
+|               data-v-bde5e88d=""
+|               fill="currentColor"
+|               height="40"
+|               viewBox="0 0 24 24"
+|               width="40"
+|               xmlns="http://www.w3.org/2000/svg"
+|               <path>
+|                 d="M4 10a2 2 0 1 1 0 4 2 2 0 0 1 0-4"
+|                 stroke="none"
+|               <path>
+|                 d="M7.757 4.929A2 2 0 1 1 4.93 7.757 2 2 0 0 1 7.757 4.93"
+|                 opacity=".874"
+|                 stroke="none"
+|               <path>
+|                 d="M12 2a2 2 0 1 1 0 4 2 2 0 0 1 0-4"
+|                 opacity=".749"
+|                 stroke="none"
+|               <path>
+|                 d="M19.071 4.929a2 2 0 1 1-2.829 2.828 2 2 0 0 1 2.83-2.828"
+|                 opacity=".624"
+|                 stroke="none"
+|               <path>
+|                 d="M20 10a2 2 0 1 1 0 4 2 2 0 0 1 0-4"
+|                 opacity=".499"
+|                 stroke="none"
+|               <path>
+|                 d="M19.071 16.243a2 2 0 1 1-2.829 2.828 2 2 0 0 1 2.83-2.828"
+|                 opacity=".375"
+|                 stroke="none"
+|               <path>
+|                 d="M12 18a2 2 0 1 1 0 4 2 2 0 0 1 0-4"
+|                 opacity=".25"
+|                 stroke="none"
+|               <path>
+|                 d="M7.757 16.243A2 2 0 1 1 4.93 19.07a2 2 0 0 1 2.828-2.828"
+|                 opacity=".125"
+|                 stroke="none"
+|           <div>
+|             class="page-wrapper"
+|             data-v-212bca89=""
+|             data-v-7835f577=""
+|             data-v-d8c23637=""
+|             id="maximal-page-footer"
+|             style=""
+|             <!-- [ -->
+|             <nav>
+|               data-v-212bca89=""
+|               <div>
+|                 class="nav-left"
+|                 data-v-212bca89=""
+|                 <ul>
+|                   data-v-212bca89=""
+|                   <!-- [ -->
+|                   <li>
+|                     data-v-212bca89=""
+|                     <a>
+|                       data-v-212bca89=""
+|                       href="https://bandcamp.com/about?from=footer"
+|                       "About"
+|                   <li>
+|                     data-v-212bca89=""
+|                     <a>
+|                       data-v-212bca89=""
+|                       href="https://bandcamp.com/buttons?from=footer"
+|                       "Buttons/Logos"
+|                   <li>
+|                     data-v-212bca89=""
+|                     <a>
+|                       data-v-212bca89=""
+|                       href="https://daily.bandcamp.com/?from=footer"
+|                       "Bandcamp Daily"
+|                   <li>
+|                     data-v-212bca89=""
+|                     <a>
+|                       data-v-212bca89=""
+|                       href="https://bandcamp.com/gift_cards?from=footer"
+|                       "Gift Cards"
+|                   <li>
+|                     data-v-212bca89=""
+|                     <a>
+|                       data-v-212bca89=""
+|                       href="https://store.bandcamp.com/?from=footer"
+|                       "Bandcamp Merch"
+|                   <li>
+|                     data-v-212bca89=""
+|                     <a>
+|                       data-v-212bca89=""
+|                       href="https://get.bandcamp.help/?from=footer"
+|                       "Help"
+|                   <li>
+|                     data-v-212bca89=""
+|                     <a>
+|                       data-v-212bca89=""
+|                       href="https://bandcamp.com/jobs?from=footer"
+|                       "Jobs"
+|                   <li>
+|                     data-v-212bca89=""
+|                     <a>
+|                       data-v-212bca89=""
+|                       href="https://bandcamp.com/about?from=footer#press"
+|                       "Press"
+|                   <!-- ] -->
+|                 <div>
+|                   data-v-212bca89=""
+|                   <ul>
+|                     class="social"
+|                     data-v-212bca89=""
+|                     <!-- [ -->
+|                     <li>
+|                       data-v-212bca89=""
+|                       <a>
+|                         data-v-212bca89=""
+|                         href="https://bsky.app/profile/bandcamp.com"
+|                         "Bluesky"
+|                     <li>
+|                       data-v-212bca89=""
+|                       <a>
+|                         data-v-212bca89=""
+|                         href="https://www.facebook.com/Bandcamp"
+|                         "Facebook"
+|                     <li>
+|                       data-v-212bca89=""
+|                       <a>
+|                         data-v-212bca89=""
+|                         href="https://www.instagram.com/bandcamp"
+|                         "Instagram"
+|                     <li>
+|                       data-v-212bca89=""
+|                       <a>
+|                         data-v-212bca89=""
+|                         href="https://www.tiktok.com/@bandcamp"
+|                         "TikTok"
+|                     <!-- ] -->
+|                   <ul>
+|                     class="policy"
+|                     data-v-212bca89=""
+|                     <!-- [ -->
+|                     <li>
+|                       data-v-212bca89=""
+|                       <a>
+|                         data-v-212bca89=""
+|                         href="https://get.bandcamp.help/articles/15263124-bandcamp-s-acceptable-use-and-moderation-policy?from=footer"
+|                         "Acceptable Use & Moderation Policy"
+|                     <li>
+|                       data-v-212bca89=""
+|                       <a>
+|                         data-v-212bca89=""
+|                         href="https://bandcamp.com/fair_trade_music_policy?from=footer"
+|                         "Fair Trade Music Policy"
+|                     <li>
+|                       data-v-212bca89=""
+|                       <a>
+|                         data-v-212bca89=""
+|                         href="https://bandcamp.com/copyright?from=footer"
+|                         "Copyright"
+|                     <li>
+|                       data-v-212bca89=""
+|                       <a>
+|                         data-v-212bca89=""
+|                         href="https://bandcamp.com/privacy?from=footer"
+|                         "Privacy"
+|                     <li>
+|                       data-v-212bca89=""
+|                       <a>
+|                         data-v-212bca89=""
+|                         href="https://bandcamp.com/terms_of_use?from=footer"
+|                         "Terms of Use"
+|                     <!-- ] -->
+|                     <li>
+|                       data-v-212bca89=""
+|                       <!--  -->
+|                       <!-- [ -->
+|                       <button>
+|                         class="cookie-control-button"
+|                         type="button"
+|                         "Cookie Settings"
+|                       <!--  -->
+|                       <!-- ] -->
+|               <div>
+|                 class="nav-right"
+|                 data-v-212bca89=""
+|                 <ul>
+|                   data-v-212bca89=""
+|                   <!-- [ -->
+|                   <li>
+|                     data-v-212bca89=""
+|                     <a>
+|                       data-v-212bca89=""
+|                       href="https://bandcamp.com/artists?from=footer"
+|                       "Bandcamp for Artists"
+|                   <li>
+|                     data-v-212bca89=""
+|                     <a>
+|                       data-v-212bca89=""
+|                       href="https://bandcamp.com/fans?from=footer"
+|                       "Bandcamp for Fans"
+|                   <li>
+|                     data-v-212bca89=""
+|                     <a>
+|                       data-v-212bca89=""
+|                       href="https://bandcamp.com/labels?from=footer"
+|                       "Bandcamp for Labels"
+|                   <!-- ] -->
+|                 <div>
+|                   class="apps"
+|                   data-v-212bca89=""
+|                   <p>
+|                     data-v-212bca89=""
+|                     "Apps:"
+|                   <ul>
+|                     data-v-212bca89=""
+|                     <!-- [ -->
+|                     <li>
+|                       data-v-212bca89=""
+|                       <a>
+|                         data-v-212bca89=""
+|                         href="https://play.google.com/store/apps/details?id=com.bandcamp.android"
+|                         "Android"
+|                     <li>
+|                       data-v-212bca89=""
+|                       <a>
+|                         data-v-212bca89=""
+|                         href="https://itunes.apple.com/us/app/bandcamp/id706408639?mt=8"
+|                         "iOS"
+|                     <!-- ] -->
+|                 <div>
+|                   class="buttons"
+|                   data-v-212bca89=""
+|                   <!--  -->
+|                   <!-- [ -->
+|                   <button>
+|                     class="language-picker"
+|                     data-v-d87d3905=""
+|                     type="button"
+|                     "Language: English"
+|                   <!--  -->
+|                   <!-- ] -->
+|             <a>
+|               class="bandcamp-logo-link"
+|               data-v-212bca89=""
+|               data-v-5cfc24b1=""
+|               href="https://bandcamp.com/?from=footer&ui_context=logo"
+|               <svg>
+|                 aria-hidden="true"
+|                 class="monochrome"
+|                 data-v-5cfc24b1=""
+|                 fill="currentColor"
+|                 viewBox="0 0 795 125"
+|                 width="120"
+|                 xmlns="http://www.w3.org/2000/svg"
+|                 <path>
+|                   class="tent"
+|                   d="M113.88 98.17H0L53.18 0h113.88z"
+|                 <path>
+|                   d="M166.76 0h15.21v36.44h.27c4.14-6.9 12.81-11.18 20.55-11.18 21.75 0 32.3 17.13 32.3 37.97 0 19.19-9.34 37.27-29.76 37.27-9.34 0-19.35-2.34-23.9-11.73h-.26v9.8h-14.41zm34.03 37.69c-12.8 0-19.35 10.08-19.35 25.26 0 14.36 7.07 25.13 19.35 25.13 13.88 0 19.09-12.7 19.09-25.13-.01-12.97-6.55-25.26-19.1-25.26zm152.15-12.24c-9.07 0-16.95 4.83-21.49 12.7l-.26-.27v-10.5h-14.42v60.8c-8.67.1-9.48.1-10.14.1-2.8 0-3.6-1.53-3.6-5.4V46.17c0-15.04-14.15-20.71-27.63-20.71-15.22 0-30.3 5.38-31.36 23.75h15.2c.68-7.73 6.68-11.32 15.22-11.32 6.14 0 14.28 1.52 14.28 9.66 0 9.25-9.74 8-20.68 10.08-12.82 1.52-26.56 4.42-26.56 22.22 0 13.95 11.2 20.85 23.62 20.85 8.14 0 17.88-2.62 23.9-8.69 1.19 6.49 5.6 8.7 11.73 8.7 2.54 0 7.34-.97 31.14-1.8v-.14h.1v-42.1c0-10.5 6.54-18.78 16.68-18.78 8.94 0 13.21 4.83 13.48 16.01v44.87h15.22v-49c.03-16.02-9.45-24.3-24.4-24.3l-.03-.01Zm-65.1 49.3c0 9.93-10.41 13.52-17.08 13.52-5.34 0-14.02-2.07-14.02-9.11 0-8.29 5.87-10.77 12.41-11.88 6.68-1.24 14.02-1.1 18.69-4.27v11.73Zm167.87 23.82H441.3v-9.66h-.27c-4 8.14-12.68 11.6-21.35 11.6-21.75 0-32.3-16.72-32.3-38.11 0-25.82 14.81-37.14 29.9-37.14 8.67 0 18.28 3.32 22.95 11.18h.27V0h15.21zm-34.03-10.49c13.61 0 19.35-12.84 19.35-25.27 0-15.73-7.34-25.13-19.08-25.13-14.29 0-19.36 13.12-19.36 25.96 0 12.29 5.87 24.44 19.1 24.44zm94.49-36.81c-1.2-8.7-7.34-13.4-15.75-13.4-7.88 0-18.95 4.29-18.95 25.96 0 11.88 5.07 24.44 18.28 24.44 8.81 0 14.95-6.08 16.42-16.3h15.21c-2.8 18.5-13.88 28.72-31.63 28.72-21.62 0-33.5-15.87-33.5-36.86 0-21.53 11.35-38.38 34.04-38.38 16.01 0 29.63 8.29 31.1 25.82h-15.23Zm173.51-25.82c-10 0-16.55 4.56-21.62 11.87-3.07-8.14-10.94-11.87-19.35-11.87-10.95 0-16.69 4.83-21.22 11.87h-.4V27.4h-14.42v60.78c-8.68.1-9.49.1-10.15.1-2.8 0-3.6-1.52-3.6-5.38V46.16c0-15.04-14.15-20.71-27.63-20.71-15.21 0-30.3 5.38-31.37 23.75h15.22c.67-7.73 6.68-11.33 15.22-11.33 6.13 0 14.28 1.53 14.28 9.67 0 9.25-9.75 8-20.7 10.08-12.8 1.52-26.55 4.42-26.55 22.22 0 13.95 11.21 20.85 23.62 20.85 8.14 0 17.89-2.62 23.9-8.69 1.2 6.49 5.6 8.7 11.74 8.7 2.53 0 7.34-.97 30.92-1.8v-.14h.31V56.38c0-11.87 7.21-18.5 15.09-18.5 9.2 0 12.14 5.24 12.14 15.05v45.83h15.21V56.93c0-12.01 4.4-19.05 14.68-19.05 11.88 0 12.55 7.87 12.55 19.2v41.68h15.21V49.48c.01-17.4-8.53-24.03-23.07-24.03zm-105.97 49.3c0 9.93-10.4 13.52-17.08 13.52-5.34 0-14.01-2.08-14.01-9.11 0-8.29 5.87-10.77 12.4-11.88 6.68-1.24 14.02-1.1 18.7-4.27v11.73Zm142.81-47.36h14.41v9.66h.27c4.27-8.14 12.54-11.6 21.35-11.6 21.76 0 32.3 17.12 32.3 37.97 0 19.19-9.35 37.27-29.76 37.27-8.8 0-18.29-3.31-23.09-11.17h-.27v35.6h-15.21V27.4Zm34.03 10.48c-12.81 0-19.35 10.09-19.35 25.27 0 14.35 7.07 25.13 19.35 25.13 13.88 0 19.09-12.7 19.09-25.13 0-12.97-6.55-25.27-19.1-25.27z"
+|               <span>
+|                 class="bc-screen-reader-only"
+|                 data-v-5cfc24b1=""
+|                 "Bandcamp home"
+|             <!-- ] -->
+|         <!-- ] -->
+|         <!--  -->
+|         <!-- ] -->
+|     "
+    
+  
+
+"

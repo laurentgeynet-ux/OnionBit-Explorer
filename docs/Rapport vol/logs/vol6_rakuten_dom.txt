@@ -1,0 +1,3257 @@
+| <html>
+|   class=" js flexbox flexboxlegacy no-canvas no-canvastext postmessage no-websqldatabase indexeddb hashchange history draganddrop websockets no-rgba no-hsla no-multiplebgs backgroundsize borderimage borderradius boxshadow textshadow no-opacity cssanimations csscolumns cssgradients cssreflections csstransforms no-csstransforms3d csstransitions no-fontface no-generatedcontent no-video no-audio localstorage sessionstorage webworkers no-applicationcache"
+|   lang="ja"
+|   prefix="og: http://ogp.me/ns# fb: http://www.facebook.com/2008/fbml"
+|   <head>
+|   <body>
+|     "<#comment>"
+|     <!-- #comment -->
+|     "
+<#comment>"
+|     <!-- #comment -->
+|     "
+<#comment>"
+|     <!-- #comment -->
+|     "  <#comment>"
+|     <!-- #comment -->
+|     "
+"
+|     <style>
+|       "article,aside,dialog,figcaption,figure,footer,header,hgroup,main,nav,section{display:block}mark{background:#FF0;color:#000}template{display:none}"
+|     "
+    "
+|     <meta>
+|       charset="utf-8"
+|     "
+    "
+|     <meta>
+|       content="IE=edge,chrome=1"
+|       http-equiv="X-UA-Compatible"
+|     "
+    "
+|     <title>
+|       "【楽天市場】Shopping is Entertainment! ： インターネット最大級の通信販売、通販オンラインショッピングコミュニティ"
+|     "
+"
+|     <meta>
+|       content="楽天市場はインターネット通販が楽しめる総合ショッピングモール。楽天ポイントがどんどん貯まる！使える！毎日お得なクーポンも。食品から家電、ファッション、ベビー用品、コスメまで、充実の品揃え。"
+|       name="description"
+|     "
+"
+|     <meta>
+|       content="通販,インターネット通販,オンラインショッピング,楽天,楽天市場,rakuten,ラクテン,らくてん"
+|       name="keywords"
+|     "
+"
+|     <link>
+|       href="https://www.rakuten.co.jp/"
+|       rel="canonical"
+|     "
+"
+|     <link>
+|       href="android-app://jp.co.rakuten.android/rakuten-ichiba-app/www.rakuten.co.jp/home/?scid=gi_top"
+|       rel="alternate"
+|     "
+"
+|     <meta>
+|       content="NOYDIR"
+|       name="robots"
+|     "
+"
+|     <meta>
+|       content="NOODP"
+|       name="robots"
+|     "
+"
+|     <meta>
+|       content="nositelinkssearchbox"
+|       name="google"
+|     "
+"
+|     <link>
+|       href="https://r.r10s.jp/com/img/home/logo/touch_google.png"
+|       rel="shortcut icon"
+|     "
+"
+|     <link>
+|       href="https://r.r10s.jp/com/img/home/logo/touch_google.png"
+|       rel="icon"
+|     "
+"
+|     <link>
+|       href="https://r.r10s.jp/com/img/home/logo/touch_google.png"
+|       rel="apple-touch-icon"
+|     "
+<#comment>"
+|     <!-- #comment -->
+|     "
+"
+|     <meta>
+|       content="【楽天市場】Shopping is Entertainment! ： インターネット最大級の通信販売、通販オンラインショッピングコミュニティ"
+|       property="og:title"
+|     "
+"
+|     <meta>
+|       content="楽天市場はインターネット通販が楽しめる総合ショッピングモール。楽天ポイントがどんどん貯まる！使える！毎日お得なクーポンも。食品から家電、ファッション、ベビー用品、コスメまで、充実の品揃え。"
+|       property="og:description"
+|     "
+"
+|     <meta>
+|       content="https://www.rakuten.co.jp/"
+|       property="og:url"
+|     "
+"
+|     <meta>
+|       content="https://r.r10s.jp/com/inc/home/20080930/spt/common/img/20180702_ogp.png"
+|       property="og:image"
+|     "
+"
+|     <meta>
+|       content="website"
+|       property="og:type"
+|     "
+"
+|     <meta>
+|       content="楽天市場"
+|       property="og:site_name"
+|     "
+<#comment>"
+|     <!-- #comment -->
+|     "
+"
+|     <meta>
+|       content="194149240717705"
+|       property="fb:app_id"
+|     "
+<#comment>"
+|     <!-- #comment -->
+|     "
+<#comment>"
+|     <!-- #comment -->
+|     "
+"
+|     <meta>
+|       content="summary"
+|       name="twitter:card"
+|     "
+"
+|     <meta>
+|       content="@RakutenJP"
+|       name="twitter:site"
+|     "
+"
+|     <meta>
+|       content="【楽天市場】Shopping is Entertainment! ： インターネット最大級の通信販売、通販オンラインショッピングコミュニティ"
+|       name="twitter:title"
+|     "
+"
+|     <meta>
+|       content="楽天市場はインターネット通販が楽しめる総合ショッピングモール。楽天ポイントがどんどん貯まる！使える！毎日お得なクーポンも。食品から家電、ファッション、ベビー用品、コスメまで、充実の品揃え。"
+|       name="twitter:description"
+|     "
+"
+|     <meta>
+|       content="https://r.r10s.jp/com/inc/home/20080930/spt/common/img/20180702_ogp.png"
+|       name="twitter:image:src"
+|     "
+<#comment>"
+|     <!-- #comment -->
+|     "
+<#comment>"
+|     <!-- #comment -->
+|     "
+ <#comment>"
+|     <!-- #comment -->
+|     "
+    "
+|     <link>
+|       href="https://r.r10s.jp/com/inc/home/20080930/spt/common/css/ichiba_top-1.6.3.min.css?v=20260730"
+|       rel="stylesheet"
+|     "
+"
+|     <link>
+|       href="https://r.r10s.jp/com/inc/home/20080930/spt/common/css/develop_js_1.1.2.min.css?v=20241003"
+|       rel="stylesheet"
+|     "
+"
+|     <style>
+|       type="text/css"
+|       "
+	img[src*="fitin=200:200"], img[src*="_ex=200:200"],
+	img[src*="fitin=100:100"], img[src*="_ex=100:100"] {
+		max-width: 100px;
+		max-height: 100px;
+	}
+	img[src*="fitin=130:130"], img[src*="_ex=130:130"] {
+		max-width: 130px;
+		max-height: 130px;
+	}
+	img[src*="fitin=117:117"], img[src*="_ex=117:117"] {
+		max-width: 117px;
+		max-height: 117px;
+	}
+	img[src*="?_ex=200x200"], img[src*="_ex=200x200"],
+	img[src*="?_ex=100x100"], img[src*="_ex=100x100"] {
+		max-width: 100px;
+		max-height: 100px;
+	}
+	img[src*="?_ex=130x130"], img[src*="_ex=130x130"] {
+		max-width: 130px;
+		max-height: 130px;
+	}
+	img[src*="?_ex=117x117"], img[src*="_ex=117x117"] {
+		max-width: 117px;
+		max-height: 117px;
+	}
+"
+|     "
+
+"
+|     <script>
+|       src="https://error.rakuten.co.jp/r-cookiecleaner/r-cc-config-rat.js"
+|       type="text/javascript"
+|     <script>
+|       src="https://error.rakuten.co.jp/r-cookiecleaner/r-cc-config-rat.js"
+|       type="text/javascript"
+|     <script>
+|       id="ratPluginJSCookieCleaner"
+|       src="https://error.rakuten.co.jp/r-cookiecleaner/r-cc-rat.js"
+|       type="text/javascript"
+|     <script>
+|       src="https://r.r10s.jp/com/rat/js/ral-1.10.2.js"
+|       type="text/javascript"
+|     <script>
+|       src="//www.rakuten.co.jp/com/advance/ichiba/ichiba_top_page_right_banner/pc/condition.js"
+|     "
+"
+|     <script>
+|       src="//www.rakuten.co.jp/com/advance/ichiba/ichiba_top_recommend/pc/condition.js"
+|     "
+"
+|     <script>
+|       async=""
+|       src="//r.r10s.jp/com/ap/target/phoenix-2.7.2.min.js"
+|     "
+"
+|     <script>
+|       src="https://r.r10s.jp/com/inc/home/20080930/beta/tz/js/init.min.js"
+|       type="text/javascript"
+|     "
+"
+|     <script>
+|       src="https://r.r10s.jp/com/inc/home/20080930/spt/common/js/pc_ichiba_top_init.js?v=1611141500"
+|       type="text/javascript"
+|     "
+"
+|     <script>
+|       data-export-class="true"
+|       data-group="ichiba-top"
+|       id="script-shisa"
+|       src="https://r.r10s.jp/com/js/d/shisa/1.1.6/shisa.min.js"
+|       type="text/javascript"
+|     "
+"
+|     <script>
+|       src="https://r.r10s.jp/com/js/d/Rmodules/1.29/Rmodules-1.29.6.min.js"
+|       type="text/javascript"
+|     "
+
+"
+|     <style>
+|       ".wrapper {
+  position: relative;
+}
+.runa-carousel {
+  display: flex;
+  overflow-x: scroll;
+  overflow-y: hidden;
+  flex: none;
+  flex-flow: row nowrap;
+  scroll-snap-type: x mandatory;
+  scroll-behavior: smooth;
+  overscroll-behavior-x: contain;
+  position: relative;
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.runa-carousel::-webkit-scrollbar {
+  display: none;
+}
+
+.runa-carousel__slide {
+  text-align: center;
+  scroll-snap-align: center;
+  flex: none;
+  position: relative;
+}
+
+.runa-carousel__navigation-prev,
+.runa-carousel__navigation-next {
+  position: absolute;
+  top: 50%;
+  cursor: pointer;
+  left: 0;
+  z-index: 9999;
+  font-size: 72px;
+  transform: translateY(-50%);
+  color: #007aff;
+  padding: 4px;
+  user-select: none;
+  -moz-user-select: none;
+  -webkit-text-select: none;
+  -webkit-user-select: none;
+}
+
+.runa-carousel__navigation-next {
+  left: auto;
+  right: 0;
+}
+
+.runa-carousel__navigation-hidden {
+  display: none;
+}
+
+.runa-carousel__pagination {
+  text-align: center;
+  width: 100%;
+  z-index: 9999;
+}
+
+.runa-carousel__pagination-inside {
+  position: absolute;
+  left: 0;
+  top: auto;
+  bottom: 8px;
+}
+
+.runa-carousel__pagination-outside {
+  margin-top: 4px;
+}
+
+.runa-carousel__pagination-bullet {
+  margin: 4px;
+  width: 8px;
+  height: 8px;
+  display: inline-block;
+  border-radius: 50%;
+  background: #000000;
+  opacity: 0.3;
+}
+
+.runa-carousel__pagination-bullet_active {
+  background: #007aff;
+  opacity: 1;
+}
+"
+|     <script>
+|       src="https://r.r10s.jp/com/js/d/Rmodules/modules/rmod-jquery-1.12.2.min.js"
+|       type="text/javascript"
+|     <script>
+|       src="https://r.r10s.jp/com/js/d/R/1.8/R-1.8.0.min.js"
+|       type="text/javascript"
+|     <script>
+|       src="https://r.r10s.jp/com/js/d/RApi/1.19/R.api-1.19.0.min.js"
+|       type="text/javascript"
+|     <script>
+|       src="https://r.r10s.jp/com/js/d/RApiTop/1.8/R.api.top-1.8.1.min.js"
+|       type="text/javascript"
+|     <script>
+|       src="https://r.r10s.jp/com/js/d/RUi/1.4/R.ui-1.4.1.min.js"
+|       type="text/javascript"
+|     <input>
+|       class="SiteCatalyst"
+|       id="scUAPattern"
+|       type="hidden"
+|       value="pc"
+|     "
+
+"
+|     <script>
+|       type="application/ld+json"
+|       "
+{
+ "@context" : "http://schema.org",
+ "@type" : "Corporation",
+ "url" : "https://www.rakuten.co.jp/",
+ "logo" : "https://r.r10s.jp/com/inc/home/20080930/spt/common/img/20180701_logo_knowledgegraph_w200_h200.gif"
+}
+"
+|     "
+
+"
+|     <script>
+|       type="application/ld+json"
+|       "
+{
+ "@context" : "https://schema.org",
+ "@type" : "WebSite",
+ "name" : "楽天",
+ "url" : "https://www.rakuten.co.jp/"
+}
+"
+|     " <#comment>"
+|     <!-- #comment -->
+|     "
+"
+|     <script>
+|       "bazadebezolkohpepadr="1896452482""
+|     <script>
+|       defer=""
+|       src="https://www.rakuten.co.jp/akam/13/71099326"
+|       type="text/javascript"
+|     "
+
+    <#comment>"
+|     <!-- #comment -->
+|     "
+	"
+|     <script>
+|       charset="utf-8"
+|       src="https://www.rakuten.co.jp/com/tls/tls.js"
+|     "
+<#comment>"
+|     <!-- #comment -->
+|     "
+    <#comment>"
+|     <!-- #comment -->
+|     "
+    "
+|     <script>
+|       type="text/javascript"
+|       "
+    <!--
+    var sc_abPatern = "top_normal";
+    -->
+    "
+|     "
+    "
+|     <div>
+|       id="wrapper"
+|       "
+        "
+|       <style>
+|         type="text/css"
+|         "
+  .globalBannerWrapper{
+    width: 100%;
+    background: #ffffff;
+  }
+  .globalBannerInner{
+    width: 100%;
+    max-width: 1340px;
+    margin: 0 auto;
+    text-align: center;
+  }
+"
+|       "
+"
+|       <div>
+|         class="globalBannerWrapper"
+|         <div>
+|           class="globalBannerInner"
+|           data-global-banner="banner1"
+|       " <#comment>"
+|       <!-- #comment -->
+|       "
+        "
+|       <div>
+|         irc="LanguageDisclaimer"
+|       " <#comment>"
+|       <!-- #comment -->
+|       "
+        "
+|       <div>
+|         data-appear-component-id="pc_top_header-service"
+|         data-global-dropdown="{
+    "items": [
+      { "type": "link", "key": "taiwan", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fwww.rakuten.com.tw%2F%3Fscid%3Dwi_jpn_topflag&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22global-tw_rd%22%5D&pgs=pc_top_header_modal-service", "clickComponentId": "pc_top_header_modal-taiwan_click" },
+      { "type": "link", "key": "unitedStates", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fwww.rakuten.com%2F%3Fscid%3Dwi_jpn_topflag&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22global-usa_rd%22%5D&pgs=pc_top_header_modal-service", "clickComponentId": "pc_top_header_modal-usa_click" },
+       { "type": "link", "key": "germany", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fwww.rakuten.de%2F%3Fscid%3Dwi_jpn_topflag&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22global-de_rd%22%5D&pgs=pc_top_header_modal-service", "clickComponentId": "pc_top_header_modal-germany_click" }
+    ],
+    "link": {
+      "key": "globalServiceListSeeMore",
+      "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fglobal.rakuten.com%2Fgroup%2F%3Fscid%3Dwi_jpn_topflag&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22global_rd%22%5D&pgs=pc_top_header_modal-service",
+      "clickComponentId": "pc_top_header_modal-globalsitemap_click"
+    }
+  }"
+|         data-language-selector="{
+    "show": true,
+    "reloadOnChange": true,
+    "appearComponentId": "pc_top_header-service_modal-lang_selector"
+  }"
+|         data-primary-menu="[
+    {
+      "type": "link",
+      "key": "primaryMobileTitle",
+      "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fac.ebis.ne.jp%2Ftr_set.php%3Fargument%3DZMhPE4GP%26ai%3Drgp_mno_73&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22mobile_rd%22%5D&pgs=pc_top_header_service",
+      "clickComponentId": "pc_top_header_mobile_click"
+    },
+    {
+      "type": "link",
+      "key": "primaryRanking",
+      "url": "https://ranking.rakuten.co.jp/?l-id=top_normal_header_ranking",
+      "clickComponentId": "pc_top_header_ranking_click"
+    },
+    {
+      "type": "link",
+      "key": "primarySuperDeal",
+      "url": "https://event.rakuten.co.jp/superdeal/?l-id=top_normal_header_superdeal",
+      "clickComponentId": "pc_top_header_superdeal_click"
+    },
+    {
+      "type": "link",
+      "key": "primaryRakutenFashion",
+      "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fbrandavenue.rakuten.co.jp%2F&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22brandavenue_rd%22%5D&pgs=pc_top_header_service",
+      "clickComponentId": "pc_top_header_fashion_click"
+    },
+    {
+      "type": "link",
+      "key": "primaryTravelTitle",
+      "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Ftravel.rakuten.co.jp%2F%3Fscid%3Dwi_grp_gmx_trv_ich_top_grptab1&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22travel_rd%22%5D&pgs=pc_top_header_service",
+      "clickComponentId": "pc_top_header_travel_click"
+    },
+    {
+      "type": "link",
+      "key": "primaryCardTitle",
+      "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fad2.trafficgate.net%2Ft%2Fr%2F1927%2F1441%2F99636_99636%2F&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22card_rd%22%5D&pgs=pc_top_header_service",
+      "clickComponentId": "pc_top_header_card_click"
+    },
+    {
+      "type": "link",
+      "key": "primaryFinanceTitle",
+      "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fr10.to%2FhrSGTl&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22security_rd%22%5D&pgs=pc_top_header_service",
+      "clickComponentId": "pc_top_header_security_click"
+    },
+    {
+      "type": "link",
+      "key": "primaryBankTitle",
+      "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fwww.rakuten-bank.co.jp%2F%3Fscid%3Dwi_ich_top_grptab1&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22bank_rd%22%5D&pgs=pc_top_header_service",
+      "clickComponentId": "pc_top_header_bank_click"
+    },
+    {
+      "type": "link",
+      "key": "primaryRakutenBooks",
+      "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fbooks.rakuten.co.jp%2F%3Fscid%3Dwi_grp_gmx_boo_ich_top_grptab1&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22books_rd%22%5D&pgs=pc_top_header_service",
+      "clickComponentId": "pc_top_header_books_click"
+    },
+    {
+      "type": "link",
+      "key": "primaryRakutenKobo",
+      "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fbooks.rakuten.co.jp%2Fe-book%2F%3Fscid%3Dwi_grp_gmx_kob_ich_top_grptab1&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22e-book_rd%22%5D&pgs=pc_top_header_service",
+      "clickComponentId": "pc_top_header_kobo_click"
+    },
+    {
+      "type": "link",
+      "key": "primaryRakutenRakuma",
+      "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Ffril.jp%2F%3Fscid%3Dwi_ich_pc_top_grptab&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22rakuma_rd%22%5D&pgs=pc_top_header_service",
+      "clickComponentId": "pc_top_header_rakuma_click"
+    },
+    {
+      "type": "link",
+      "key": "primaryRakutenRebates",
+      "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fr10.to%2FhOpdWw&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22rebates_rd%22%5D&pgs=pc_top_header_service",
+      "clickComponentId": "pc_top_header_rebates_click"
+    },
+    {
+      "type": "link",
+      "key": "primaryRakuten24",
+      "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2F24.rakuten.co.jp%2F&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%2224_rd%22%5D&pgs=pc_top_header_service",
+      "clickComponentId": "pc_top_header_24_click"
+    },
+    {
+      "type": "link",
+      "key": "primaryRakuten24Express",
+      "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Ffast-delivery-mart.rakuten.co.jp%2F&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22sokuhai_rd%22%5D&pgs=pc_top_header_service",
+      "clickComponentId": "pc_top_header_sokuhai_click"
+    },
+    {
+      "type": "link",
+      "key": "primaryRakutenBic",
+      "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fbiccamera.rakuten.co.jp%2F%3Fscid%3Dwi_ich_top_header&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22biccamera_rd%22%5D&pgs=pc_top_header_service",
+      "clickComponentId": "pc_top_header_biccamera_click"
+    },
+    {
+      "type": "link",
+      "key": "primaryNetSuper",
+      "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fnetsuper.rakuten.co.jp%2F%3Fscid%3Dwi_ich_header_zsu_top&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22netsuper_rd%22%5D&pgs=pc_top_header_service",
+      "clickComponentId": "pc_top_header_netsuper_click"
+    },
+    {
+      "type": "link",
+      "key": "primaryRakutenRoom",
+      "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Froom.rakuten.co.jp%2F%3Fscid%3Dwi_ich_room_pcweb_top_grptab1&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22room_rd%22%5D&pgs=pc_top_header_service",
+      "clickComponentId": "pc_top_header_room_click"
+    }
+  ]"
+|         data-service-list-dropdown="{
+    "items": [
+      {
+        "id": "shopping",
+        "key": "shoppingTitle",
+        "iconSrc": "https://r.r10s.jp/com/img/thumb/200309/message/flash/dui/ecosystem/icon/shoppingcart.svg",
+        "items": [
+          [
+            { "type": "link", "key": "furusatoNozei", "url": "https://event.rakuten.co.jp/furusato/?l-id=top_normal_header_modal-furusato", "clickComponentId": "pc_top_header_modal-furusato_click" },
+            { "type": "link", "key": "superDeal", "url": "https://event.rakuten.co.jp/superdeal/?l-id=top_normal_header_modal-superdeal", "clickComponentId": "pc_top_header_modal-superdeal_click" },
+            { "type": "link", "key": "ranking", "url": "https://ranking.rakuten.co.jp/?l-id=top_normal_header_modal-ranking", "clickComponentId": "pc_top_header_modal-ranking_click" },
+            { "type": "link", "key": "okurimonoNavi", "url": "https://event.rakuten.co.jp/gift/?l-id=top_normal_header_modal-gift", "clickComponentId": "pc_top_header_modal-gift_click" },
+            { "type": "link", "key": "socialGift", "url": "https://event.rakuten.co.jp/gift/socialgift/?l-id=top_normal_header_modal-socialgift", "clickComponentId": "pc_top_header_modal-socialgift_click" },
+            { "type": "link", "key": "subscription", "url": "https://event.rakuten.co.jp/regular/?l-id=top_normal_header_modal-regular", "clickComponentId": "pc_top_header_modal-regular_click" },
+            { "type": "link", "key": "shoppingChannel", "url": "https://event.rakuten.co.jp/campaign/live-shopping/shop/?l-id=top_normal_header_modal-liveshopping", "clickComponentId": "pc_top_header_modal-liveshopping_click" },
+            { "type": "link", "key": "rakutenBooks", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fbooks.rakuten.co.jp%2F%3Fscid%3Dwi_grp_gmx_boo_ich_top_grptab2&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22books_rd%22%5D&pgs=pc_top_header_modal-service", "clickComponentId": "pc_top_header_modal-books_click" },
+            { "type": "link", "key": "rakutenKobo", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fbooks.rakuten.co.jp%2Fe-book%2F%3Fscid%3Dwi_grp_gmx_kob_ich_top_grptab2&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22e-book_rd%22%5D&pgs=pc_top_header_modal-service", "clickComponentId": "pc_top_header_modal-kobo_click" },
+            { "type": "link", "key": "rakuten24", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2F24.rakuten.co.jp%2F&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%2224_rd%22%5D&pgs=pc_top_header_modal-service", "clickComponentId": "pc_top_header_modal-24_click" },
+            { "type": "link", "key": "rakuten24Express", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Ffast-delivery-mart.rakuten.co.jp%2F&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22sokuhai_rd%22%5D&pgs=pc_top_header_modal-service", "clickComponentId": "pc_top_header_modal-sokuhai_click" }
+          ],
+          [
+            { "type": "link", "key": "rakutenBic", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fbiccamera.rakuten.co.jp%2F%3Fscid%3Dwi_ich_top_header_bic&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22biccamera_rd%22%5D&pgs=pc_top_header_modal-service", "clickComponentId": "pc_top_header_modal-biccamera_click" },
+            { "type": "link", "key": "rakutenFashion", "url": "https://brandavenue.rakuten.co.jp/?l-id=top_normal_header_modal-fashion", "clickComponentId": "pc_top_header_modal-fashion_click" },
+            { "type": "link", "key": "rakutenRakken", "url": "https://event.rakuten.co.jp/rakken/?l-id=top_normal_header_modal-rakken", "clickComponentId": "pc_top_header_modal-rakken_click" },
+            { "type":"link","title":{"ja":"ラクマ","en":"Rakuten Rakuma","ko":"Rakuten Rakuma","zh-CN":"Rakuten Rakuma","zh-TW":"Rakuten Rakuma"},"url":"https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Ffril.jp%2F%3Fscid%3Dwi_ich_pc_top_grptab_group&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22rakuma_rd%22%5D&pgs=pc_top_header_modal-service","clickComponentId":"pc_top_header_modal-rakuma_click" },
+            { "type": "link", "key": "rakutenSuper", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fnetsuper.rakuten.co.jp%2F%3Fscid%3Dwi_ich_header_zsu_top&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22netsuper_rd%22%5D&pgs=pc_top_header_modal-service", "clickComponentId": "pc_top_header_modal-netsuper_click" },
+            { "type": "link", "key": "rakutenRebates", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fr10.to%2FhsKJWN&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22rebates_rd%22%5D&pgs=pc_top_header_modal-service", "clickComponentId": "pc_top_header_modal-rebates_click" },
+            { "type": "link", "key": "rakutenRoom", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Froom.rakuten.co.jp%2F%3Fscid%3Dwi_ich_room_pcweb_top_grptab2&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22room_rd%22%5D&pgs=pc_top_header_modal-service", "clickComponentId": "pc_top_header_modal-room_click" },
+            { "type": "link", "key": "jLeague", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fstore.jleague.jp%2F%3Fscid%3Dwi_ich_jos_rtop_pc_headertxt_01&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22jleague_rd%22%5D&pgs=pc_top_header_modal-service", "clickComponentId": "pc_top_header_modal-jleague_click" }
+          ]
+        ]
+      },
+      {
+        "id": "card-payment",
+        "key": "cardTitle",
+        "iconSrc": "https://r.r10s.jp/com/img/thumb/200309/message/flash/dui/ecosystem/icon/creditcard.svg",
+        "items": [
+          [
+            { "type": "link", "key": "rakutenCard", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fad2.trafficgate.net%2Ft%2Fr%2F8563%2F1441%2F99636_99636%2F&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22card_rd%22%5D&pgs=pc_top_header_modal-service", "clickComponentId": "pc_top_header_modal-card_click" },
+            { "type": "link", "key": "rakutenPayOnline", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fr10.to%2FhksjNg&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22checkout_rd%22%5D&pgs=pc_top_header_modal-service", "clickComponentId": "pc_top_header_modal-payonline_click" },
+            { "type": "link", "key": "rakutenPaySp", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fr10.to%2FhUzFIB&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22pay_rd%22%5D&pgs=pc_top_header_modal-service", "clickComponentId": "pc_top_header_modal-payapp_click" },
+            { "type": "link", "key": "rakutenEdy", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fr10.to%2FhNJOxL&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22edy_rd%22%5D&pgs=pc_top_header_modal-service", "clickComponentId": "pc_top_header_modal-edy_click" }
+          ]
+        ]
+      },
+      {
+        "id": "finance",
+        "key": "financeTitle",
+        "iconSrc": "https://r.r10s.jp/com/img/thumb/200309/message/flash/dui/ecosystem/icon/yen.svg",
+        "items": [
+          [
+            { "type": "link", "key": "rakutenBank", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fwww.rakuten-bank.co.jp%2F%3Fscid%3Dwi_ich_top_grptab2&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22bank_rd%22%5D&pgs=pc_top_header_modal-service", "clickComponentId": "pc_top_header_modal-bank_click" },
+            { "type": "link", "key": "rakutenSecurities", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fr10.to%2Fhv3LoL&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22security_rd%22%5D&pgs=pc_top_header_modal-service", "clickComponentId": "pc_top_header_modal-security_click" },
+            { "type": "link", "key": "rakutenWallet", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fwww.rakuten-wallet.co.jp%2F%3Fscid%3Dwi_ich_header_2024_top&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22wallet_rd%22%5D&pgs=pc_top_header_modal-service", "clickComponentId": "pc_top_header_modal-wallet_click" },
+            { "type": "link", "key": "insuranceDesk", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fwww.rakuten-insurance.co.jp%2F&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22rakuten-insurance_rd%22%5D&pgs=pc_top_header_modal-service", "clickComponentId": "pc_top_header_modal-hokenmadoguchi_click" },
+            { "type": "link", "key": "rakutenSonpo", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fwww.rakuten-sonpo.co.jp%2F&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22sonpo_rd%22%5D&pgs=pc_top_header_modal-service", "clickComponentId": "pc_top_header_modal-sonpo_click" },
+            { "type": "link", "key": "rakutenSeimei", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fwww.rakuten-life.co.jp%2F%3Fscid%3Dwi_grp_gmx_sei_ich_top_grptab2&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22rakuten-life_rd%22%5D&pgs=pc_top_header_modal-service", "clickComponentId": "pc_top_header_modal-lifeinsurance_click" },
+            { "type": "link", "key": "carInsuranceEstimates", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Finsurance.rakuten.co.jp%2Fcar%2F%3Fscid%3Dwi_ich_tgt_c001&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22insurance_rd%22%5D&pgs=pc_top_header_modal-service", "clickComponentId": "pc_top_header_modal-carinsurance_click" },
+            { "type": "link", "key": "easyInsurance", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fwww.rakuten.co.jp%2Fr-hoken%2F&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22r-hoken_rd%22%5D&pgs=pc_top_header_modal-service", "clickComponentId": "pc_top_header_modal-kantanhoken_click" },
+            { "type": "link", "key": "insuranceCompare", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fhoken.rakuten.co.jp%2F%3Fscid%3Dwi_grp_gmx_hkn_ich_top_grptab2&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22hoken_rd%22%5D&pgs=pc_top_header_modal-service", "clickComponentId": "pc_top_header_modal-hokenhikaku_click" },
+            { "type": "link", "key": "petInsurance", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fwww.rakuten-ssi.co.jp%2Fapplication%2Fad%2Flp%2F90162203%2F2.html&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22ssi_rd%22%5D&pgs=pc_top_header_modal-service", "clickComponentId": "pc_top_header_modal-petinsurance_click" }
+          ]
+        ]
+      },
+      {
+        "id": "travel-leisure",
+        "key": "travelTitle",
+        "iconSrc": "https://r.r10s.jp/com/img/thumb/200309/message/flash/dui/ecosystem/icon/plane.svg",
+        "items": [
+          [
+            { "type": "link", "key": "rakutenTravel", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Ftravel.rakuten.co.jp%2F%3Fscid%3Dwi_grp_gmx_trv_ich_top_grptab2&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22travel_rd%22%5D&pgs=pc_top_header_modal-service", "clickComponentId": "pc_top_header_modal-travel_click" },
+            { "type": "link", "key": "rakutenTravelExperiences", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fexperiences.travel.rakuten.co.jp%2F%3Fscid%3Dwi_ich_txp_pc-top-header&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22experiences-travel_rd%22%5D&pgs=pc_top_header_modal-service", "clickComponentId": "pc_top_header_modal-travelexperience_click" },
+            { "type": "link", "key": "rakutenStay", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fstay.rakuten.co.jp%2F%3Fscid%3Dwi_ich_top_header_rs_01&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22stay_rd%22%5D&pgs=pc_top_header_modal-service", "clickComponentId": "pc_top_header_modal-stay_click" },
+            { "type": "link", "key": "rakutenCarShare", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fcarshare.rakuten.co.jp%2F%3Fscid%3Dwi_grp_gmx_carshare_ich_top_grptab&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22carshare_rd%22%5D&pgs=pc_top_header_modal-service", "clickComponentId": "pc_top_header_modal-carshare_click" },
+            { "type": "link", "key": "rakutenGora", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fgora.golf.rakuten.co.jp%2F%3Fscid%3Dwi_ich_gra_top_header&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22gora_rd%22%5D&pgs=pc_top_header_modal-service", "clickComponentId": "pc_top_header_modal-gora_click" },
+            { "type": "link", "key": "rakutenToto", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Ftoto.rakuten.co.jp%2F%3Fscid%3Dwi_grp_gmx_tot_ich_top_grptab2&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22toto_rd%22%5D&pgs=pc_top_header_modal-service", "clickComponentId": "pc_top_header_modal-toto_click" },
+            { "type": "link", "key": "rakutenTakarakuji", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Ftakarakuji.rakuten.co.jp%2F%3Fscid%3Dwi_grp_gmx_tkk_ich_top_grptab2&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22takarakuji_rd%22%5D&pgs=pc_top_header_modal-service", "clickComponentId": "pc_top_header_modal-takarakuji_click" },
+            { "type": "link", "key": "rakutenKeiba", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fkeiba.rakuten.co.jp%2F%3Fscid%3Dwi_grp_gmx_kba_ich_top_grptab2&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22keiba_rd%22%5D&pgs=pc_top_header_modal-service", "clickComponentId": "pc_top_header_modal-keiba_click" }
+          ]
+        ]
+      },
+      {
+        "id": "mobile-info",
+        "key": "mobileTitle",
+        "iconSrc": "https://r.r10s.jp/com/img/thumb/200309/message/flash/dui/ecosystem/icon/smartphone.svg",
+        "items": [
+          [
+            { "type": "link", "key": "rakutenMobile", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fac.ebis.ne.jp%2Ftr_set.php%3Fargument%3DZMhPE4GP%26ai%3Drgp_mno_78&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22mobile_rd%22%5D&pgs=pc_top_header_modal-service", "clickComponentId": "pc_top_header_modal-mobile_click" },
+            { "type": "link", "key": "rakutenDenwa", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fdenwa.rakuten.co.jp%2F%3Fscid%3Dwi_grp_gmx_dnw_ich_top_grptab2&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22denwa_rd%22%5D&pgs=pc_top_header_modal-service", "clickComponentId": "pc_top_header_modal-denwa_click" },
+            { "type": "link", "key": "rakutenInfoseek", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fwww.infoseek.co.jp%2F%3Fscid%3Dwi_grp_gmx_ifs_ich_top_grptab2&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22infoseek_rd%22%5D&pgs=pc_top_header_modal-service", "clickComponentId": "pc_top_header_modal-infoseek_click" },
+            { "type": "link", "key": "rakutenWebSearch", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fwebsearch.rakuten.co.jp%2F%3Fscid%3Dwi_grp_gmx_too_ich_top_grptab2&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22websearch_rd%22%5D&pgs=pc_top_header_modal-service", "clickComponentId": "pc_top_header_modal-websearch_click" },
+            { "type": "link", "key": "rakutenAffiliate", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Faffiliate.rakuten.co.jp%2F&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22affiliate_rd%22%5D&pgs=pc_top_header_modal-service", "clickComponentId": "pc_top_header_modal-affiliate_click" },
+            { "type": "link", "key": "rakutenViber", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fviber.co.jp%2F%3Fscid%3Dwi_grp_gmx_vib_ich_top_grptab2&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22viber_rd%22%5D&pgs=pc_top_header_modal-service", "clickComponentId": "pc_top_header_modal-viber_click" }
+          ]
+        ]
+      },
+      {
+        "id": "entertainment",
+        "key": "entertainmentTitle",
+        "iconSrc": "https://r.r10s.jp/com/img/thumb/200309/message/flash/dui/ecosystem/icon/playmovie.svg",
+        "items": [
+          [
+            { "type": "link", "key": "rakutenMagazine", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fmagazine.rakuten.co.jp%2F%3Fscid%3Dwi_grp_gmx_mgz_ich_top_grptab2&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22magazine_rd%22%5D&pgs=pc_top_header_modal-service", "clickComponentId": "pc_top_header_modal-magazine_click" },
+            { "type": "link", "key": "rakutenTicket", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fticket.rakuten.co.jp%2F%3Fscid%3Dwi_grp_gmx_tic_ich_top_grptab2&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22ticket_rd%22%5D&pgs=pc_top_header_modal-service", "clickComponentId": "pc_top_header_modal-ticket_click" },
+            { "type": "link", "key": "rakutenMusic", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fmusic.rakuten.co.jp%2F%3Fscid%3Dwi_grp_gmx_msc_ich_top_grptab1&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22music_rd%22%5D&pgs=pc_top_header_modal-service", "clickComponentId": "pc_top_header_modal-music_click" }
+          ]
+        ]
+      },
+      {
+        "id": "lifestyle",
+        "key": "lifestyleTitle",
+        "iconSrc": "https://r.r10s.jp/com/img/thumb/200309/message/flash/dui/ecosystem/icon/home.svg",
+        "items": [
+          [
+            { "type": "link", "key": "rakutenDenki", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fenergy.rakuten.co.jp%2Felectricity%2F%3Fscid%3Dwi_ich_ene_bmd_bmd_pchead&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22energy_rd%22%5D&pgs=pc_top_header_modal-service", "clickComponentId": "pc_top_header_modal-denki_click" },
+            { "type": "link", "key": "rakutenGas", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fenergy.rakuten.co.jp%2Fgas%2F%3Fscid%3Dwi_ich_ene_bmd_htr_normal&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22gas_rd%22%5D&pgs=pc_top_header_modal-service", "clickComponentId": "pc_top_header_modal-gas_click" },
+            { "type": "link", "key": "rakutenBeauty", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fbeauty.rakuten.co.jp%2F%3Fscid%3Dwi_grp_gmx_bea_ich_top_grptab2&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22beauty_rd%22%5D&pgs=pc_top_header_modal-service", "clickComponentId": "pc_top_header_modal-beauty_click" },
+            { "type": "link", "key": "rakutenCar", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fcar.rakuten.co.jp%2F&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22car_rd%22%5D&pgs=pc_top_header_modal-service", "clickComponentId": "pc_top_header_modal-car_click" },
+            { "type": "link", "key": "rakutenCarInspection", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fshaken.rakuten.co.jp%2F%3Fscid%3Dwi_grp_gmx_sha_ich_top_grptab2&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22shaken_rd%22%5D&pgs=pc_top_header_modal-service", "clickComponentId": "pc_top_header_modal-shaken_click" }
+          ]
+        ]
+      },
+      {
+        "id": "point",
+        "key": "pointTitle",
+        "iconSrc": "https://r.r10s.jp/com/img/thumb/200309/message/flash/dui/ecosystem/icon/point.svg",
+        "items": [
+          [
+            { "type": "link", "key": "rakutenPointCard", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fr10.to%2Fh5FQ8c&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22pointcard_rd%22%5D&pgs=pc_top_header_modal-service", "clickComponentId": "pc_top_header_modal-pointcard_click" }
+          ]
+        ]
+      }
+    ],
+    "link": {
+      "key": "serviceListSeeMore",
+      "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fwww.rakuten.co.jp%2Fsitemap%2F&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22sitemap_rd%22%5D&pgs=pc_top_header_modal-service",
+      "clickComponentId": "pc_top_header_modal-sitemap_click"
+    }
+  }"
+|         data-utility-menu="[
+    {
+      "type": "dropdown",
+      "key": "serviceList",
+      "ref": "serviceListDropdown",
+      "iconSrc": "https://r.r10s.jp/com/img/thumb/200309/message/flash/dui/ecosystem/icon/shoppingcart.svg",
+      "appearComponentId": "pc_top_header-service_modal-servicelist"
+    },
+    {
+      "type": "dropdown",
+      "title": "Global",
+      "ref": "globalDropdown",
+      "iconSrc": "https://r.r10s.jp/com/img/thumb/200309/message/flash/dui/ecosystem/icon/world.svg",
+      "appearComponentId": "pc_top_header-service_modal-global"
+    },
+    {
+      "type": "link",
+      "key": "storeOpen",
+      "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fwww.rakuten.co.jp%2Fec%2F%3Fcamp%3D701100000004kPu%26scid%3Dwi_ich_top_01&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22ec_rd%22%5D&pgs=pc_top_header_service",
+      "clickComponentId": "pc_top_header_storeopen_click"
+    },
+    {
+      "type": "link",
+      "key": "help",
+      "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fichiba.faq.rakuten.net&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22faq_rd%22%5D&pgs=pc_top_header_service",
+      "clickComponentId": "pc_top_header_help_click"
+    }
+  ]"
+|         irc="GroupHeader"
+|       " <#comment>"
+|       <!-- #comment -->
+|       "
+
+        "
+|       <div>
+|         id="no-js-caution"
+|         style="display:none;"
+|         "
+"
+|         <p>
+|           class="caution-read"
+|           "ご使用のブラウザでJavaScriptが無効なため、一部の機能をご利用できません。"
+|         "
+"
+|         <p>
+|           class="caution-sub-read"
+|           "JavaScriptの設定方法は、"
+|           <a>
+|             href="https://ichiba.faq.rakuten.net/detail/000006432"
+|             onclick="this.href='https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fichiba.faq.rakuten.net%2Fdetail%2F000006432&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22faq-jsoff_rd%22%5D&pgs=pc_top_header_service'"
+|             "楽天市場ヘルプページ"
+|           "をご覧ください。"
+|         "
+"
+|       "
+ <#comment>"
+|       <!-- #comment -->
+|       "
+        "
+|       <div>
+|         data-shisa-coverage="100"
+|         data-shisa-nonce="false"
+|         data-shisa-url="https://rat.rakuten.co.jp"
+|         id="common-header-mall-standalone"
+|       "
+"
+|       <div>
+|         data-settings="[
+      {
+  "tracker": {
+    "params": {
+      "accountId": 1,
+      "serviceId": 1,
+      "pageLayout": "pc",
+      "pageType": "top",
+      "pageName": "ichiba_top"
+    }
+  },
+
+  "hideMnoBanner": true,
+  "showSearchBar": true,
+  "showMemberInfoSummary": false,
+  "showSpu": false,
+  "showCartModal": true,
+  "customLogoImageUrl": false,
+  "withBorder": false,
+  "suggestionUrl" : "https://rdc-api-catalog-gateway-api.rakuten.co.jp/SUI/autocomplete/",
+  "useTBasketDomain": true,
+  "omniConfig":{
+    "clientId":"rakuten_ichiba_top_web",
+    "redirectUri":"https://www.rakuten.co.jp/"
+  },
+  "api": {
+      "cartApiSid": 1010,
+      "notificationLocId": 25,
+      "shouldUseRestBff": true,
+      "url":"https://ichiba-common-web-gateway.rakuten.co.jp/ichiba-common/headerinfo/get/v1",
+      "apikey": "hin9ruj3haAPxBP0nBQBlaga6haUCobPR",
+      "clientId": "top",
+      "spuViewType": "top",
+      "spuSource": "pc",
+      "spuEncoding": "UTF-8",
+      "spuAcc": 1,
+      "spuAid": 1
+    }
+}
+
+    ]"
+|         data-url="https://www.rakuten.co.jp"
+|         irc="CommonHeaderMall"
+|       "
+"
+|       <div>
+|         data-info-messages="[
+      {}
+,
+      {}
+    ]"
+|         irc="InfoMessages"
+|       "
+<#comment>"
+|       <!-- #comment -->
+|       "
+"
+|       <div>
+|         data-omni-config="{
+     "clientId":"rakuten_ichiba_top_web",
+     "redirectUri":"https://www.rakuten.co.jp/"
+    }"
+|         data-show-new="true"
+|         data-tracker="{
+  "params": {
+      "accountId": 1,
+      "serviceId": 1,
+      "pageLayout": "pc",
+      "pageType": "top",
+      "pageName": "ichiba_top"
+    }
+}
+"
+|         irc="MembershipHeader"
+|       "
+<#comment>"
+|       <!-- #comment -->
+|       "
+"
+|       <div>
+|         data-appear-component-id="pc_top_header_headerbottombanner"
+|         data-click-component-id="pc_top_header_headerbottombanner_click"
+|         data-client-id="d40535ac09aac0ef32f8a23b8bb8e04bc2e8f9d6b0981fa98a16d0382f558d83"
+|         data-default-banner-image-link="https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fac.ebis.ne.jp%2Ftr_set.php%3Fargument%3DZMhPE4GP%26ai%3Drgp_mno_008154&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22mobile_rd%22%5D&pgs=pc_top_header_headerbottombanner"
+|         data-default-banner-image-src="https://r.r10s.jp/com/inc/home/20080930/ris/img/pitari_mno/emg_mnotop_pc_1890x50.png"
+|         data-jssdk-key="d40535ac09aac0ef32f8a16d0382f558d83"
+|         data-jssdk-url="https://cdn.rmc.contents.rakuten.co.jp/sdk/webcx-web-blocks/2.74.0/webcx-web-blocks.production.min.js"
+|         data-phoenix-attribute="data-phoenix-mnoprj_ichiba_top_pc"
+|         data-rat-account-id="1804"
+|         data-rat-api-account-src="https://rat.rakuten.co.jp"
+|         irc="MnoBanner"
+|       "
+<#comment>"
+|       <!-- #comment -->
+|       "
+
+ <#comment>"
+|       <!-- #comment -->
+|       "
+
+        "
+|       <div>
+|         id="ritSanbKeyCol"
+|       "
+        "
+|       <div>
+|         id="ritScFooterKeyCol"
+|       "
+        "
+|       <div>
+|         data-hide-for-android-below-version="14.3.0"
+|         data-url="https://ichiba-web-assistant.ai.rakuten.co.jp"
+|         irc="UC"
+|       " <#comment>"
+|       <!-- #comment -->
+|       "
+        "
+|       <link>
+|         href="https://r.r10s.jp/com/js/service/app/pages/top/css/pc-038cc7061200ffaabfb2.bundle.css"
+|         rel="stylesheet"
+|       "
+"
+|       <div>
+|         data-api-url="https://ichiba-common-web-gateway.rakuten.co.jp/ichiba-common/headerinfo/get/v1"
+|         data-apikey="hin9ruj3haAPxBP0nBQBlaga6haUCobPR"
+|         data-personalization-disabled="true"
+|         data-rat-account-id="1"
+|         data-rat-adobe-site-section="rakuten_top"
+|         data-rat-custom-parameters=""
+|         data-rat-cv-event=""
+|         data-rat-page-layout="pc"
+|         data-rat-page-name="ichiba_top"
+|         data-rat-page-type="top"
+|         data-rat-service-id="1"
+|         data-rat-site-section="top"
+|         data-should-query-point-invest-info="true"
+|         data-should-use-rest-bff="true"
+|         data-supported-locales="["ja","en","zh-CN","zh-TW","ko"]"
+|         data-view-type="TOP_START_POINT"
+|         id="page-app"
+|       "
+"
+|       <style>
+|         "
+    html, body {
+		min-width: 1024px;
+		overflow-x: auto;
+	}
+	
+	body {
+      background: #fff;
+    }
+
+
+    #container {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: flex-start;
+      width: 100%;
+      min-width: 1024px;
+      max-width: 1280px;
+      margin: 0 auto;
+      padding: 0px;
+      box-sizing: border-box;
+    }
+    .gradation-background {
+      background: linear-gradient(to bottom, #F0F0EE 0%, #ffffff 1600px);
+    }
+    #header-ichiba-top {
+      border-bottom: 1px solid #ebebeb;
+    }
+    [irc='SpuSlider'] {
+      order: 1;
+      flex: 0 0 100%;
+      width: 100%;
+    }
+    [irc='SpuSlider'] > div {
+      width: 100%;
+      box-sizing: border-box;
+      padding: 0px 32px;
+      background: #fff;
+    }
+    #main-container {
+      order: 3;
+      flex: 1 1 auto;
+      min-width: 768px;
+      width: calc(100% - 256px);
+      box-sizing: border-box;
+    }
+    #main-section {
+      margin-left: 0px;
+      width: 100%;
+      box-sizing: border-box;
+      padding: 32px 0px;
+      background: #fff;
+    }
+    #side-navi {
+      order: 2;
+      flex: 0 0 256px;
+      background: transparent;
+      padding: 0px;
+      width: 256px;
+      margin-left: 0px;
+      float: none;
+      box-sizing: border-box;
+    }
+    #footer-section {
+      border-top: 1px solid rgba(0, 0, 0, 0.08);
+    }
+"
+|       " <#comment>"
+|       <!-- #comment -->
+|       "
+
+        "
+|       <div>
+|         class="gradation-background"
+|         "
+            <#comment>"
+|         <!-- #comment -->
+|         "
+
+
+
+"
+|         <style>
+|           type="text/css"
+|           "
+#bigBannerWidget {
+  overflow: hidden;
+  width: 100%;
+  min-width: 1020px;
+  max-width: 1890px;
+  height: 300px;
+  margin: 0 auto;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+}
+#bigBannerWidget .r-slideshow-pc {
+  height: 300px;
+  margin: 0;
+}
+#bigBannerWidget .r-slideshow-pc .r-slideshow-body {
+  position: relative;
+  width: 1890px;
+  left: 50%;
+  transform: translate(-50%, 0);
+}
+#bigBannerWidget .r-slideshow-pc .r-slideshow-body .r-slideshow-items {
+  margin: 0;
+  position: relative;
+  width: 1890px;
+  left: 50%;
+  transform: translate(-50%, 0);
+}
+#bigBannerWidget .r-slideshow-pc .r-slideshow-body .r-slideshow-items .r-slideshow-item a {
+  width: 1890px;
+}
+#bigBannerWidget .r-slideshow-pc .r-slideshow-body .r-slideshow-items .r-slideshow-item a .r-slideshow-item-image {
+  height: 300px;
+  width: 1890px;
+}
+#bigBannerWidget .r-slideshow-pc .r-slideshow-body .r-slideshow-items .r-slideshow-item a .r-slideshow-item-image > img {
+  display: block;
+  height: 300px;
+  max-height: 100%;
+  max-width: 100%;
+  width: 1890px;
+}
+#bigBannerWidget .r-slideshow-pc .r-slideshow-scroll-button {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  width: 96%;
+  max-width: 1340px;
+  margin: 0 auto;
+}
+#bigBannerWidget .r-slideshow-pc .r-slideshow-scroll-button .r-slideshow-scroll-button-prev,
+#bigBannerWidget .r-slideshow-pc .r-slideshow-scroll-button .r-slideshow-scroll-button-next {
+  cursor: pointer;
+  z-index: 1;
+  position: absolute;
+  top: 124px;
+  right: 0;
+  width: 55px;
+  height: 55px;
+  background: rgba(255, 255, 255, 0.5);
+  border-radius: 50%;
+  text-align: center;
+}
+#bigBannerWidget .r-slideshow-pc .r-slideshow-scroll-button .r-slideshow-scroll-button-prev:hover,
+#bigBannerWidget .r-slideshow-pc .r-slideshow-scroll-button .r-slideshow-scroll-button-next:hover {
+  opacity: 0.65;
+}
+#bigBannerWidget .r-slideshow-pc .r-slideshow-scroll-button .r-slideshow-scroll-button-prev:before {
+  content: "";
+  display: inline-block;
+  width: 15px;
+  height: 15px;
+  margin: 17px 0 0 8px;
+  border-top: 5px solid #999999;
+  border-left: 5px solid #999999;
+  transform: rotate(-45deg);
+}
+#bigBannerWidget .r-slideshow-pc .r-slideshow-scroll-button .r-slideshow-scroll-button-next:before {
+  content: "";
+  display: inline-block;
+  width: 15px;
+  height: 15px;
+  margin: 17px 0 0 -8px;
+  border-top: 5px solid #999999;
+  border-right: 5px solid #999999;
+  transform: rotate(45deg);
+}
+.ppf-slideshow-tb {
+  height: 435px;
+}
+.ppf-slideshow-tb .r-slideshow-scroll-button-prev,
+.ppf-slideshow-tb .r-slideshow-scroll-button-next {
+  border: 1px solid #cecece;
+  height: 40px;
+  top: 395px;
+  width: 76px;
+}
+.ppf-slideshow-tb .r-slideshow-scroll-button-prev span,
+.ppf-slideshow-tb .r-slideshow-scroll-button-next span {
+  top: 17px;
+}
+.ppf-slideshow-tb .r-slideshow-scroll-button-prev span {
+  left: 30px;
+}
+.ppf-slideshow-tb .r-slideshow-scroll-button-next span {
+  right: 30px;
+}
+.ppf-slideshow-tb .r-slideshow-index-container {
+  top: 400px;
+}
+
+
+"
+|         "
+
+
+"
+|         <div>
+|           id="bigBannerWidget"
+|         "
+
+
+
+"
+|         <script>
+|           class="ppfConfig"
+|           type="text/template"
+|           "
+  <div>
+    <!-- Settings -->
+
+    <div class="settings" data-target="#bigBannerWidget" data-mode="BIGBANNER" data-target-id="5"
+    data-rat-page-name="ichiba_top"
+    data-auto-play="true" data-auto-play-delay="5000" data-rat-component="bigbanner" data-rat-account-id="1">
+    </div>
+
+    <!-- Template -->
+
+    <div class="ppfSlideshowTemplate">
+      <div class="r-slideshow-pc">
+        <div class="r-slideshow-body">
+          <div class="r-slideshow-items"></div>
+        </div>
+        <div class="r-slideshow-scroll-button">
+          <div class="r-slideshow-scroll-button-prev" title="Previous Items">
+          </div>
+          <div class="r-slideshow-scroll-button-next" title="Next Items">
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="ppfSlideshowItemTemplate" >
+      <a href="#LANDING_URL#">
+        <div class="r-slideshow-item-image">
+          <img data-r-src="#BANNER_URL#" alt="#ALT_STRING#" />
+        </div>
+      </a>
+    </div>
+  </div>
+
+"
+|         "
+ <#comment>"
+|         <!-- #comment -->
+|         "
+            "
+|         <div>
+|           id="container"
+|           "
+                "
+|           <div>
+|             data-detail-link="https://event.rakuten.co.jp/campaign/point-up/everyday/point/?l-id=top_normal_SPUgadget_guide"
+|             irc="SpuSlider"
+|             "
+"
+|           " <#comment>"
+|           <!-- #comment -->
+|           "
+                "
+|           <div>
+|             id="main-container"
+|             "
+                    "
+|             <div>
+|               id="main-section"
+|               "
+                        "
+|               <style>
+|                 "
+ #raceWidget.r-slideshow {
+    height: 202px;
+    margin: 0 0 34px;
+    padding: 0 26px;
+    box-sizing: border-box;
+  }
+
+  #raceWidget.r-slideshow .r-slideshow-page {
+    width: 102%;
+    margin: 0 0 0 -1.6%;
+  }
+
+  #raceWidget.r-slideshow .r-slideshow-items {
+    margin: 0 20px 0 30px;
+  }
+
+  #raceWidget .r-slideshow-pc {
+    height: 235px;
+    margin: 10px 0 0 0;
+    margin-top: 0;
+  }
+
+  #raceWidget .r-slideshow-pc .r-slideshow-item a {
+    width: 172px;
+  }
+
+  #raceWidget .r-slideshow-pc .r-slideshow-item-image {
+    height: 172px;
+    width: 172px;
+  }
+
+  #raceWidget .r-slideshow-pc .r-slideshow-item-image > img {
+    max-height: 172px;
+    max-width: 172px;
+  }
+
+  #raceWidget .r-slideshow-pc .r-slideshow-scroll-button-prev,
+  #raceWidget .r-slideshow-pc .r-slideshow-scroll-button-next {
+    top: 72px;
+    z-index: 1;
+  }
+
+  #raceWidget .r-slideshow-pc .r-slideshow-index-container {
+    top: 190px;
+  }
+#festivalBanner a, #subfestivalBanner a { overflow: hidden; display: block; margin-bottom: 20px; }
+#festivalBanner img, #subfestivalBanner img { display: block; width: 925px; margin-left: 50%; -webkit-transform: translate(-463px, 0); transform: translate(-463px, 0); }
+@media (min-width:1412px) {
+  #festivalBanner img, #subfestivalBanner img { margin-left: 0; -webkit-transform: none; transform: none; }
+}
+.prev-button-jsbanner, .next-button-jsbanner { position: absolute;}
+"
+|               "
+"
+|               <div>
+|                 id="raceWidget"
+|               "
+"
+|               <div>
+|                 id="subfestivalBanner"
+|               "
+"
+|               <script>
+|                 class="ppfConfig"
+|                 type="text/template"
+|                 "
+  <div>
+    <!-- Settings -->
+<div class="settings" data-target="#raceWidget" data-target-id="2" data-shisa-group="ichiba-top" data-rat-account-id="1" data-rat-component="race" data-rat-page-name="ichiba_top"
+data-default-content='[
+{
+"a":"0",
+"b":"https://r.r10s.jp/com/img/thumb/200309/message/flash/20230825/beginner_new.jpg",
+"l":"https://event.rakuten.co.jp/beginner/?l-id=top_normal_emergency_pc01"
+},
+{
+"a":"0",
+"b":"https://r.r10s.jp/com/img/thumb/200309/message/flash/20240808/spu_js_314x314_20240604.gif",
+"l":"https://event.rakuten.co.jp/campaign/point-up/everyday/point/?l-id=top_normal_emergency_pc02"
+},
+{
+"a":"0",
+"b":"https://r.r10s.jp/com/img/thumb/200309/message/flash/20240808/season_recommend_314x314_03.jpg",
+"l":"https://event.rakuten.co.jp/?l-id=top_normal_emergency_pc03"
+},
+{
+"a":"0",
+"b":"https://r.r10s.jp/com/img/thumb/200309/message/flash/20240808/rakutenfont_regular_event_deal_314x314.jpg",
+"l":"https://event.rakuten.co.jp/superdeal/?l-id=top_normal_emergency_pc04"
+},
+{
+"a":"0",
+"b":"https://r.r10s.jp/com/img/thumb/200309/message/flash/20240808/timesale.gif",
+"l":"https://event.rakuten.co.jp/bargain/timesale/?l-id=top_normal_emergency_pc05"
+},
+{
+"a":"0",
+"b":"https://r.r10s.jp/com/img/thumb/200309/message/flash/20240808/20240716_furusato_top_314x314_04_rice.jpg",
+"l":"https://event.rakuten.co.jp/furusato/?l-id=top_normal_emergency_pc06"
+}
+]'></div>
+    <!-- Template -->
+    <div class="ppfSlideshowTemplate">
+      <div class="r-slideshow-pc">
+        <div class="r-slideshow-body">
+          <div class="r-slideshow-items"></div>
+        </div>
+        <div class="r-slideshow-scroll-button-prev prev-button-jsbanner" title="Previous Items">
+          <span class="prev-button"></span>
+        </div>
+        <div class="r-slideshow-scroll-button-next next-button-jsbanner" title="Next Items">
+          <span class="next-button"></span>
+        </div>
+        <div class="r-slideshow-index-container"></div>
+      </div>
+    </div>
+    <div class="ppfSlideshowItemTemplate">
+      <a href="#LANDING_URL#">
+        <div class="r-slideshow-item-image">
+          <img data-r-src="#BANNER_URL#" alt="#ALT_STRING#" />
+        </div>
+      </a>
+    </div>
+  </div>
+"
+|               "
+"
+|               <script>
+|                 src="https://r.r10s.jp/com/js/d/ppf/3.2/ppf-3.2.1.min.js"
+|                 type="text/javascript"
+|               "
+ <#comment>"
+|               <!-- #comment -->
+|               "
+                          "
+|               <div>
+|                 id="subfestival-banner"
+|                 "
+    "
+|                 <a>
+|                   href="https://event.rakuten.co.jp/campaign/point-up/everyday/point/?l-id=top_normal_subfesbanner_20261013_SPU"
+|                   rel="noopener noreferrer"
+|                   "
+      "
+|                   <img>
+|                     alt="subfestival banner"
+|                     src="https://r.r10s.jp/com/img/thumb/200309/message/flash/campaign/2026/20261013_SPU_1440x96.gif"
+|                   "
+    "
+|                 "
+  "
+|               "
+
+"
+|               <style>
+|                 "
+    #subfestival-banner {
+          display: flex;
+          justify-content: center;
+          padding: 0px 32px 32px;
+          box-sizing: border-box;
+        }
+        #subfestival-banner a {
+          display: block;
+          width: 100%;
+        }
+        #subfestival-banner img {
+          display: block;
+          width: 100%;
+          height: auto;
+        }
+"
+|               " <#comment>"
+|               <!-- #comment -->
+|               "
+                        "
+|               <section>
+|                 data-categories="[
+  {
+    "name": {"ja": "おすすめ", "en": "Recommended", "ko": "추천", "zh-CN": "推荐", "zh-TW": "推薦"},
+    "value": "recommend",
+    "prefixIcon": "common-campaign",
+    "tabTrackerProps": {"name": "pc_top_bigsale_recommend", "event": "click"},
+    "items": [
+      {
+        "href": "https://event.rakuten.co.jp/campaign/point-up/marathon/20261024kawpf/bigsale/?l-id=top_normal_bigsale_recommend_bigsale",
+        "imageUrl": "https://r.r10s.jp/com/img/thumb/200309/message/flash/campaign/bigsaleparts/list/Bigsale_bigsale_20260704.jpg",
+        "title": "大特価SALE",
+        "description": "掲載アイテム全品20%以上OFF！"
+      },
+      {
+        "href": "https://event.rakuten.co.jp/campaign/point-up/marathon/20261024kawpf/pokkiri-food/?l-id=top_normal_bigsale_recommend_pokkiri-food",
+        "imageUrl": "https://r.r10s.jp/com/img/thumb/200309/message/flash/campaign/bigsaleparts/list/Bigsale_pokkiri-food_20260704.jpg",
+        "title": "1,000円ポッキリ多数グルメ",
+        "description": "買いまわりに迷ったらココ！"
+      },
+      {
+        "href": "https://event.rakuten.co.jp/campaign/point-up/marathon/20261024kawpf/pointup20/?l-id=top_normal_bigsale_recommend_pointup20",
+        "imageUrl": "https://r.r10s.jp/com/img/thumb/200309/message/flash/campaign/bigsaleparts/list/Bigsale_pointup20_20260704.jpg",
+        "title": "送料無料！ポイント20倍アイテム",
+        "description": "全会員様対象！ポイント大量GET"
+      },
+      {
+        "href": "https://event.rakuten.co.jp/campaign/point-up/marathon/20261024kawpf/timelimited/?l-id=top_normal_bigsale_recommend_timelimited",
+        "imageUrl": "https://r.r10s.jp/com/img/thumb/200309/message/flash/campaign/bigsaleparts/list/Bigsale_timelimited_20260704.jpg",
+        "title": "この時間の注目ピックアップ",
+        "description": "必見！注目アイテムをチェック"
+      }
+    ]
+  },
+  {
+    "name": {"ja": "クーポン", "en": "Coupons", "ko": "쿠폰", "zh-CN": "优惠券", "zh-TW": "優惠券"},
+    "value": "coupon",
+    "prefixIcon": "common-coupons-outline",
+    "tabTrackerProps": {"name": "pc_top_bigsale_coupon", "event": "click"},
+    "items": [
+      {
+        "href": "https://event.rakuten.co.jp/campaign/point-up/marathon/20261024kawpf/itemcoupon/?l-id=top_normal_bigsale_coupon_itemcoupon",
+        "imageUrl": "https://r.r10s.jp/com/img/thumb/200309/message/flash/campaign/bigsaleparts/list/Bigsale_itemcoupon_20260704.jpg",
+        "title": "最大半額クーポン",
+        "description": "掲載アイテムがお得！まずはチェック！"
+      },
+      {
+        "href": "https://event.rakuten.co.jp/campaign/point-up/marathon/20261024kawpf/multicoupon/?l-id=top_normal_bigsale_coupon_multicoupon",
+        "imageUrl": "https://r.r10s.jp/com/img/thumb/200309/message/flash/campaign/bigsaleparts/list/Bigsale_multicoupon_20260704.jpg",
+        "title": "100円～2,000円OFFクーポン",
+        "description": "選んで使える、何度でも使える！"
+      },
+      {
+        "href": "https://event.rakuten.co.jp/campaign/point-up/marathon/20261024kawpf/rankcoupon/?l-id=top_normal_bigsale_coupon_rankcoupon",
+        "imageUrl": "https://r.r10s.jp/com/img/thumb/200309/message/flash/campaign/bigsaleparts/list/Bigsale_rankcoupon_20260704.jpg",
+        "title": "777円OFFクーポン",
+        "description": "ダイヤモンド・プラチナ会員様限定"
+      },
+      {
+        "href": "https://event.rakuten.co.jp/campaign/point-up/marathon/20261024kawpf/shopcoupon/?l-id=top_normal_bigsale_coupon_shopcoupon",
+        "imageUrl": "https://r.r10s.jp/com/img/thumb/200309/message/flash/campaign/bigsaleparts/list/Bigsale_shopcoupon_20260704.jpg",
+        "title": "対象ショップ割引クーポン",
+        "description": "店内全品対象！お得がいっぱい"
+      }
+    ]
+  },
+  {
+    "name": {"ja": "ポイント", "en": "Points", "ko": "포인트", "zh-CN": "积分", "zh-TW": "點數"},
+    "value": "point",
+    "prefixIcon": "common-point",
+    "tabTrackerProps": {"name": "pc_top_bigsale_point", "event": "click"},
+    "items": [
+      {
+        "href": "https://event.rakuten.co.jp/campaign/point-up/marathon/20261024kawpf/pointup20/?l-id=top_normal_bigsale_point_pointup20",
+        "imageUrl": "https://r.r10s.jp/com/img/thumb/200309/message/flash/campaign/bigsaleparts/list/Bigsale_pointup20_20260704.jpg",
+        "title": "送料無料！ポイント20倍アイテム",
+        "description": "全会員様対象！ポイント大量GET"
+      },
+      {
+        "href": "https://event.rakuten.co.jp/campaign/point-up/marathon/20261024kawpf/pointrank/?l-id=top_normal_bigsale_point_pointrank",
+        "imageUrl": "https://r.r10s.jp/com/img/thumb/200309/message/flash/campaign/bigsaleparts/list/Bigsale_pointrank_20260704.jpg",
+        "title": "ポイント最大10倍アイテム",
+        "description": "会員ランク別ご優待キャンペーン"
+      }
+    ]
+  },
+  {
+    "name": {"ja": "グルメ", "en": "Gourmet", "ko": "식품", "zh-CN": "美食", "zh-TW": "美食"},
+    "value": "gourmet",
+    "prefixIcon": "genre-food",
+    "tabTrackerProps": {"name": "pc_top_bigsale_gourmet", "event": "click"},
+    "items": [
+      {
+        "href": "https://event.rakuten.co.jp/campaign/point-up/marathon/20261024kawpf/otegoro-food/?l-id=top_normal_bigsale_gourmet_otegoro-food",
+        "imageUrl": "https://r.r10s.jp/com/img/thumb/200309/message/flash/campaign/bigsaleparts/list/Bigsale_otegoro-food_20260704.jpg",
+        "title": "送料無料おてごろグルメ",
+        "description": "2,000円以下！おうちでプチ贅沢！"
+      },
+      {
+        "href": "https://event.rakuten.co.jp/campaign/point-up/marathon/20261024kawpf/wakeari-food/?l-id=top_normal_bigsale_gourmet_wakeari-food",
+        "imageUrl": "https://r.r10s.jp/com/img/thumb/200309/message/flash/campaign/bigsaleparts/list/Bigsale_wakeari-food_20260704.jpg",
+        "title": "訳あり・お試し・送料無料グルメ",
+        "description": "一度は食べてみてほしい！"
+      },
+      {
+        "href": "https://event.rakuten.co.jp/campaign/point-up/marathon/20261024kawpf/review/?l-id=top_normal_bigsale_gourmet_review",
+        "imageUrl": "https://r.r10s.jp/com/img/thumb/200309/message/flash/campaign/bigsaleparts/list/Bigsale_review_20260704.jpg",
+        "title": "レビュー高評価グルメ",
+        "description": "買ってよかった！みんなのおすすめ！"
+      },
+      {
+        "href": "https://event.rakuten.co.jp/campaign/point-up/marathon/20261024kawpf/pokkiri-food/?l-id=top_normal_bigsale_gourmet_pokkiri-food",
+        "imageUrl": "https://r.r10s.jp/com/img/thumb/200309/message/flash/campaign/bigsaleparts/list/Bigsale_pokkiri-food_20260704.jpg",
+        "title": "1,000円ポッキリ多数グルメ",
+        "description": "買いまわりに迷ったらココ！"
+      }
+    ]
+  },
+  {
+    "name": {"ja": "ファッション", "en": "Fashion", "ko": "패션", "zh-CN": "流行服饰", "zh-TW": "流行服飾"},
+    "value": "fashion",
+    "prefixIcon": "genre-ladies-fashion",
+    "tabTrackerProps": {"name": "pc_top_bigsale_fashion", "event": "click"},
+    "items": [
+      {
+        "href": "https://event.rakuten.co.jp/campaign/point-up/marathon/20261024kawpf/ladiesfashion/?l-id=top_normal_bigsale_fashion_ladiesfashion",
+        "imageUrl": "https://r.r10s.jp/com/img/thumb/200309/message/flash/campaign/bigsaleparts/list/Bigsale_ladiesfashion_20260704.jpg",
+        "title": "ファッションやコスメ",
+        "description": "旬なコーデとトレンドコスメが勢揃い！"
+      }
+    ]
+  },
+  {
+    "name": {"ja": "ゲーム", "en": "Game", "ko": "게임", "zh-CN": "游戏", "zh-TW": "遊戲"},
+    "value": "game",
+    "prefixIcon": "slot-outline",
+    "tabTrackerProps": {"name": "pc_top_bigsale_game", "event": "click"},
+    "items": [
+      {
+        "href": "https://event.rakuten.co.jp/campaign/point-up/marathon/20261024kawpf/quizcoupon/?l-id=top_normal_bigsale_game_quizcoupon",
+        "imageUrl": "https://r.r10s.jp/com/img/thumb/200309/message/flash/campaign/bigsaleparts/list/Bigsale_quizcoupon_20260704.jpg",
+        "title": "30秒チャレンジ！クイズクーポン",
+        "description": "クイズに正解でクーポンをGET！"
+      }
+    ]
+  },
+  {
+    "name": {"ja": "ガイド", "en": "Guide", "ko": "가이드", "zh-CN": "指南", "zh-TW": "指南"},
+    "value": "guide",
+    "prefixIcon": "common-new-user",
+    "tabTrackerProps": {"name": "pc_top_bigsale_guide", "event": "click"},
+    "items": [
+      {
+        "href": "https://event.rakuten.co.jp/campaign/point-up/marathon/guide/?l-id=top_normal_bigsale_guide_guide",
+        "imageUrl": "https://r.r10s.jp/com/img/thumb/200309/message/flash/campaign/bigsaleparts/list/Bigsale_guide_20260704.jpg",
+        "title": "ショップ買いまわりとは？",
+        "description": "【ポイント最大10倍】買いまわりでお得"
+      },
+      {
+        "href": "https://event.rakuten.co.jp/campaign/point-up/marathon/guide/quiz/?l-id=top_normal_bigsale_guide_guide-quiz",
+        "imageUrl": "https://r.r10s.jp/com/img/thumb/200309/message/flash/campaign/bigsaleparts/list/Bigsale_guide-quiz_20260704.jpg",
+        "title": "クイズ！ショップ買いまわり",
+        "description": "いくつ知ってる？お得な買い方"
+      },
+      {
+        "href": "https://event.rakuten.co.jp/campaign/point-up/marathon/guide/case/?l-id=top_normal_bigsale_guide_case",
+        "imageUrl": "https://r.r10s.jp/com/img/thumb/200309/message/flash/campaign/bigsaleparts/list/Bigsale_case_20260704.jpg",
+        "title": "マンガで見る！ポイントアップ術",
+        "description": "ショップ買いまわりの達人が教えます"
+      }
+    ]
+  }
+]"
+|                 data-header="{
+    "imageUrl": "https://r.r10s.jp/com/img/thumb/200309/message/flash/campaign/bigsaleparts/panda_marathon.svg",
+    "logo": "marathon",
+    "text": {
+      "ja": "特設会場",
+      "en": "Special Venue",
+      "ko": "기획전",
+      "zh-CN": "特设会场",
+      "zh-TW": "特設會場"
+    }
+  }"
+|                 data-rat-account-id="1"
+|                 data-rat-page-layout="pc"
+|                 data-rat-page-name="ichiba_top"
+|                 data-rat-page-type="top"
+|                 data-rat-service-id="1"
+|                 data-rat-site-section="top"
+|                 irc="BigSaleTabContent"
+|               "
+ <#comment>"
+|               <!-- #comment -->
+|               "
+                        <#comment>"
+|               <!-- #comment -->
+|               "
+"
+|               <div>
+|                 data-rat-pgn="ichiba_top"
+|                 data-rat-ssc="top"
+|                 data-ratevent="appear"
+|                 data-ratid="pc_top_ad-billboard"
+|                 id="runa_Billboard_Wrapper"
+|                 "
+"
+|                 <div>
+|                   id="rdn-adspot-Ichiba_PC_IchibaTOP_Billboard-79700994"
+|                 "
+"
+|               "
+<#comment>"
+|               <!-- #comment -->
+|               "
+"
+|               <script>
+|                 "
+var rdntag = rdntag || {};
+rdntag.cmd = rdntag.cmd || [];
+rdntag.cmd.push(function() {
+  // Fetches ads within 2 viewports.
+  rdntag.enableLazyLoad(200);
+  rdntag
+    .defineAdCode("Ichiba_PC_IchibaTOP_Billboard", "rdn-adspot-Ichiba_PC_IchibaTOP_Billboard-79700994")
+    .enableSingleRequest();
+  rdntag
+    .defineAdCode("Ichiba_PC_IchibaTOP_LeftNaviBottom", "rdn-adspot-Ichiba_PC_IchibaTOP_LeftNaviBottom-40692244")
+    .enableSingleRequest();
+  rdntag.displayWithSingleRequest();
+});
+"
+|               "
+"
+|               <script>
+|                 async=""
+|                 src="https://s-cdn.rmp.rakuten.co.jp/js/aa.js"
+|               " <#comment>"
+|               <!-- #comment -->
+|               "
+            
+                        "
+|               <div>
+|                 irc="ItemBrowsingHistoryWidgetPc"
+|               " <#comment>"
+|               <!-- #comment -->
+|               "
+                        "
+|               <div>
+|                 data-click-count-flag="1"
+|                 data-rat-component-id="pc_top_bh-item_related-item_modal"
+|                 irc="RelatedItemsModal"
+|               " <#comment>"
+|               <!-- #comment -->
+|               "
+                        "
+|               <div>
+|                 data-rat-component-id="pc_top_bookmark-item"
+|                 irc="BookmarksPc"
+|               " <#comment>"
+|               <!-- #comment -->
+|               "
+                        "
+|               <div>
+|                 irc="BuyAgainWidgetPc"
+|               " <#comment>"
+|               <!-- #comment -->
+|               "
+                        "
+|               <div>
+|                 irc="SuperDealRecommendationPc"
+|               " <#comment>"
+|               <!-- #comment -->
+|               "
+                        "
+|               <div>
+|                 data-genre-filter="["551169"]"
+|                 data-genre-layer="2"
+|                 data-ranking-shuffle="true"
+|                 data-rat-component-id="pc_top_rec-bh-item"
+|                 data-rat-enabled="true"
+|                 data-reco-threshold="5"
+|                 irc="RelatedItemsWidget"
+|               " <#comment>"
+|               <!-- #comment -->
+|               "
+                        "
+|               <div>
+|                 data-rat-component="pc_top_ad-coupon"
+|                 irc="RecommendedCouponWidgetPc"
+|               " <#comment>"
+|               <!-- #comment -->
+|               "
+                        "
+|               <div>
+|                 data-genre-mapping="{
+  "accessories": {"gid":"216129","du":"1","ge":"9","offset":"100"},
+  "total": {"gid":"0","du":"1","ge":"9","offset":"100"},
+  "appliance": {"gid":"562637","du":"1","ge":"9","offset":"100"},
+  "autogoods": {"gid":"503190","du":"1","ge":"9","offset":"100"},
+  "baby": {"gid":"100533","du":"1","ge":"9","offset":"100"},
+  "beauty": {"gid":"100939","du":"1","ge":"9","offset":"100"},
+  "book": {"gid":"200162","du":"1","ge":"9","offset":"100"},
+  "media": {"gid":"101240","du":"1","ge":"9","offset":"100"},
+  "computer": {"gid":"100026","du":"1","ge":"9","offset":"100"},
+  "daily": {"gid":"215783","du":"1","ge":"9","offset":"100"},
+  "drink": {"gid":"100316","du":"1","ge":"9","offset":"100"},
+  "ebooks": {"gid":"0","du":"7","qt":"1","offset":"100","eventid":"KoboRanking","genreurl":"https://books.rakuten.co.jp/ranking/daily/101/#!/1/"},
+  "electronics": {"gid":"211742","du":"1","ge":"9","offset":"100"},
+  "fashiongoods": {"gid":"216131","du":"1","ge":"9","offset":"100"},
+  "flower": {"gid":"100005","du":"1","ge":"9","offset":"100"},
+  "food": {"gid":"100227","du":"1","ge":"9","offset":"100"},
+  "furusato": {"gid":"0","eid":"11","du":"7","ge":"9","offset":"100","eventid":"furusatoNormal","genreurl":"https://event.rakuten.co.jp/furusato/ranking/"},
+  "game": {"gid":"101205","du":"1","ge":"9","offset":"100"},
+  "health": {"gid":"100938","du":"1","ge":"9","offset":"100"},
+  "inner": {"gid":"100433","du":"1","ge":"9","offset":"100"},
+  "instrument": {"gid":"112493","du":"1","ge":"9","offset":"100"},
+  "interior": {"gid":"100804","du":"1","ge":"9","offset":"100"},
+  "kitchen": {"gid":"558944","du":"1","ge":"9","offset":"100"},
+  "ladiesfashion": {"gid":"100371","du":"1","ge":"9","offset":"100"},
+  "liquor": {"gid":"510915","du":"1","ge":"9","offset":"100"},
+  "medicine": {"gid":"551169","du":"1","ge":"9","offset":"100"},
+  "mensfashion": {"gid":"551177","du":"1","ge":"9","offset":"100"},
+  "pet": {"gid":"101213","du":"1","ge":"9","offset":"100"},
+  "realtime": {"gid":"0","du":"6","ge":"9","offset":"100"},
+  "sake": {"gid":"510901","du":"1","ge":"9","offset":"100"},
+  "service": {"gid":"101438","du":"1","ge":"9","offset":"100"},
+  "shoes": {"gid":"558885","du":"1","ge":"9","offset":"100"},
+  "smartdevice": {"gid":"564500","du":"1","ge":"9","offset":"100"},
+  "sports": {"gid":"101070","du":"1","ge":"9","offset":"100"},
+  "sweets": {"gid":"551167","du":"1","ge":"9","offset":"100"},
+  "toy": {"gid":"566382","du":"1","ge":"9","offset":"100"},
+  "watch": {"gid":"558929","du":"1","ge":"9","offset":"100"},
+  "hobby": {"gid":"101164","du":"1","ge":"9","offset":"100"}
+}"
+|                 data-genre-number="38"
+|                 data-genres="{"1":"ladiesfashion","2":"mensfashion","3":"inner","4":"fashiongoods","5":"shoes","6":"watch","7":"accessories","8":"baby","9":"toy","10":"sports","11":"appliance","12":"electronics","13":"computer","14":"smartdevice","16":"food","17":"sweets","18":"drink","19":"liquor","20":"sake","21":"interior","22":"daily","23":"kitchen","24":"book","25":"media","26":"game","27":"hobby","28":"instrument","30":"autogoods","31":"beauty","32":"health","33":"medicine","34":"pet","35":"flower","36":"service"}"
+|                 irc="RankingSlider"
+|                 "
+"
+|               " <#comment>"
+|               <!-- #comment -->
+|               "
+                        "
+|               <div>
+|                 data-rad-total="30"
+|                 data-rat-account-id="1"
+|                 data-rat-service-id="1"
+|                 data-sid="top_normal_ad_ichioshi"
+|                 irc="TodayRecommendationPc"
+|                 "
+"
+|               " <#comment>"
+|               <!-- #comment -->
+|               "
+                        "
+|               <div>
+|                 data-brand-gadget-list="
+[{"url":"https://www.rakuten.co.jp/gakken-seed-toy/?s-id=top_normal_brandshop_gakken-seed-toy","imageUrl":"https://tshop.r10s.jp/gakken-seed-toy/logo/logo1.jpg?fitin=200:200","new":true},{"url":"https://www.rakuten.co.jp/niigatakashimaya/?s-id=top_normal_brandshop_niigatakashimaya","imageUrl":"https://tshop.r10s.jp/niigatakashimaya/logo/logo1.jpg?fitin=200:200","new":true},{"url":"https://www.rakuten.co.jp/bee-online/?s-id=top_normal_brandshop_bee-online","imageUrl":"https://tshop.r10s.jp/bee-online/logo/logo1.jpg?fitin=200:200","new":true},{"url":"https://www.rakuten.co.jp/taylormadegolf/?s-id=top_normal_brandshop_taylormadegolf","imageUrl":"https://tshop.r10s.jp/taylormadegolf/logo/logo1.jpg?fitin=200:200","new":false},{"url":"https://www.rakuten.co.jp/morinagamilk/?s-id=top_normal_brandshop_morinagamilk","imageUrl":"https://tshop.r10s.jp/morinagamilk/logo/logo1.jpg?fitin=200:200","new":false},{"url":"https://www.rakuten.co.jp/dakotahouse/?s-id=top_normal_brandshop_dakotahouse","imageUrl":"https://tshop.r10s.jp/dakotahouse/logo/logo1.jpg?fitin=200:200","new":false},{"url":"https://www.rakuten.co.jp/asics-trading/?s-id=top_normal_brandshop_asics-trading","imageUrl":"https://tshop.r10s.jp/asics-trading/logo/logo1.jpg?fitin=200:200","new":false},{"url":"https://www.rakuten.co.jp/proportionbodydressing/?s-id=top_normal_brandshop_proportionbodydressing","imageUrl":"https://tshop.r10s.jp/proportionbodydressing/logo/logo1.jpg?fitin=200:200","new":false},{"url":"https://www.rakuten.co.jp/jomalone/?s-id=top_normal_brandshop_jomalone","imageUrl":"https://tshop.r10s.jp/jomalone/logo/logo1.jpg?fitin=200:200","new":false},{"url":"https://www.rakuten.co.jp/tsumorichisato-sleep/?s-id=top_normal_brandshop_tsumorichisato-sleep","imageUrl":"https://tshop.r10s.jp/tsumorichisato-sleep/logo/logo1.jpg?fitin=200:200","new":false},{"url":"https://www.rakuten.co.jp/logicool/?s-id=top_normal_brandshop_logicool","imageUrl":"https://tshop.r10s.jp/logicool/logo/logo1.jpg?fitin=200:200","new":false},{"url":"https://www.rakuten.co.jp/pdc-shop/?s-id=top_normal_brandshop_pdc-shop","imageUrl":"https://tshop.r10s.jp/pdc-shop/logo/logo1.jpg?fitin=200:200","new":false},{"url":"https://www.rakuten.co.jp/irisplaza-r/?s-id=top_normal_brandshop_irisplaza-r","imageUrl":"https://tshop.r10s.jp/irisplaza-r/logo/logo1.jpg?fitin=200:200","new":false},{"url":"https://www.rakuten.co.jp/lancome/?s-id=top_normal_brandshop_lancome","imageUrl":"https://tshop.r10s.jp/lancome/logo/logo1.jpg?fitin=200:200","new":false}]
+    "
+|                 data-enabled="true"
+|                 irc="BrandGadget"
+|                 "
+"
+|               " <#comment>"
+|               <!-- #comment -->
+|               "
+                        "
+|               <div>
+|                 data-rat-account-id="1"
+|                 data-rat-page-layout="pc"
+|                 data-rat-page-type="top"
+|                 data-rat-service-id="1"
+|                 irc="ShopBrowsingHistoryPc"
+|                 "
+"
+|               " <#comment>"
+|               <!-- #comment -->
+|               "
+                        <#comment>"
+|               <!-- #comment -->
+|               "
+                        "
+|               <div>
+|                 irc="RecommendedItemsPc"
+|               " <#comment>"
+|               <!-- #comment -->
+|               "
+                        <#comment>"
+|               <!-- #comment -->
+|               "
+                        "
+|               <div>
+|                 irc="BrandPortal"
+|                 "
+"
+|               " <#comment>"
+|               <!-- #comment -->
+|               "
+                        "
+|               <div>
+|                 data-default-content="[
+
+    {
+
+      "url": "https://event.rakuten.co.jp/disney/character/villains/?l-id=rmagazine_1026_Disney_villains",
+
+      "imageUrl": "https://r.r10s.jp/evt/event/rmagazine/_cmn/inc/img/main/2026/top_1026_Disney_villains.jpg",
+
+      "description": "ヴィランズの力強い言葉が彩るアイテムをチェック！",
+
+      "new": true
+
+    },
+
+    {
+
+      "url": "https://event.rakuten.co.jp/beauty/brand/luxe/luxurybeauty/topics/095/?l-id=rmagazine_1026_RLB095",
+
+      "imageUrl": "https://r.r10s.jp/evt/event/rmagazine/_cmn/inc/img/main/2026/top_1026_RLB095.jpg",
+
+      "description": "秋コスメ2026×George｜ ミュート＆血色感メイク",
+
+      "new": true
+
+    },
+
+    {
+
+      "url": "https://event.rakuten.co.jp/starwars/pickup/?l-id=rmagazine_1023_starwars_pickup",
+
+      "imageUrl": "https://r.r10s.jp/evt/event/rmagazine/_cmn/inc/img/main/2026/top_1023_starwars_pickup.jpg",
+
+      "description": "遊び心あふれるハロウィン特別仕様のアクションフィギュア",
+
+      "new": false
+
+    },
+
+    {
+
+      "url": "https://event.rakuten.co.jp/rankinghalfterm/interior/?l-id=rmagazine_1019_rankinghalfterm_interior",
+
+      "imageUrl": "https://r.r10s.jp/evt/event/rmagazine/_cmn/inc/img/main/2026/top_1019_rankinghalfterm_interior.jpg",
+
+      "description": "上半期に楽天で最も売れたインテリア",
+
+      "new": false
+
+    },
+
+    {
+
+      "url": "https://event.rakuten.co.jp/marvel/osha_kore/?l-id=rmagazine_1016_marvel_pickup",
+
+      "imageUrl": "https://r.r10s.jp/evt/event/rmagazine/_cmn/inc/img/main/2026/top_1016_marvel_pickup.jpg",
+
+      "description": "マーベルファン必見！フィギュア型のワイヤレススピーカー",
+
+      "new": false
+
+    },
+
+    {
+
+      "url": "https://brandavenue.rakuten.co.jp/contents/rfmag/202610/?l-id=rmagazine_1016_rfmag_202610",
+
+      "imageUrl": "https://r.r10s.jp/evt/event/rmagazine/_cmn/inc/img/main/2026/top_1016_rfmag_202610.jpg",
+
+      "description": "今年らしく着こなすための、旬のレイヤード術も必見",
+
+      "new": false
+
+    },
+
+    {
+
+      "url": "https://event.rakuten.co.jp/disney/pickup/?l-id=rmagazine_1023_disney_pickup",
+
+      "imageUrl": "https://r.r10s.jp/evt/event/rmagazine/_cmn/inc/img/main/2026/top_1023_disney_pickup.jpg",
+
+      "description": "映画公開85周年！『ダンボ』グッズで日常に癒しをプラス",
+
+      "new": false
+
+    },
+
+    {
+
+      "url": "https://event.rakuten.co.jp/beauty/brand/luxe/luxurybeauty/topics/094/?l-id=rmagazine_1023_RLB094",
+
+      "imageUrl": "https://r.r10s.jp/evt/event/rmagazine/_cmn/inc/img/main/2026/top_1023_RLB094.jpg",
+
+      "description": "頭皮の乾燥を防ぐ。理想の髪を育む、大人のスカルプケア習慣",
+
+      "new": false
+
+    },
+
+    {
+
+      "url": "https://room.rakuten.co.jp/feature/room_people_book71/?l-id=rmagazine_0928_room",
+
+      "imageUrl": "https://r.r10s.jp/evt/event/rmagazine/_cmn/inc/img/main/2026/top_0928_room.jpg",
+
+      "description": "自分をご機嫌にする大人のカジュアルコーデ150",
+
+      "new": false
+
+    },
+
+    {
+
+      "url": "https://network.mobile.rakuten.co.jp/sumakatsu/contents/articles/2023/00075/?argument=ZMhPE4GP&dmai=sumakatsu_r_000075&l-id=rmagazine_0707_mobile_00075",
+
+      "imageUrl": "https://r.r10s.jp/evt/event/rmagazine/_cmn/inc/img/main/2025/top_0707_mobile_00075.jpg",
+
+      "description": "中学生がスマホを持つメリット・デメリットは？",
+
+      "new": false
+
+    }
+
+  ]
+
+
+
+"
+|                 data-max-items="10"
+|                 data-rat-account-id="1"
+|                 data-rat-component-id="pc_top_rmagazine"
+|                 data-rat-page-layout="pc"
+|                 data-rat-page-type="top"
+|                 data-rat-service-id="1"
+|                 irc="Rmagazine"
+|                 "
+"
+|               " <#comment>"
+|               <!-- #comment -->
+|               "
+                        "
+|               <div>
+|                 data-enabled="true"
+|                 data-group-recommendations="[
+  {
+    "serviceLogo": "https://r.r10s.jp/com/img/thumb/200309/event/servicelogo/servicelogo_websearch.svg",
+    "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Ftoolbar.rakuten.co.jp%2Fintro%2Finformation%2Fmembers%2Fnewcampaign1%2F%3Fscid%3Dwi_grp_gmx_too_ich_top_grpcpn_new1000&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22toolbar_250pt_20251104_rd%22%5D&pgs=pc_top_group-content",
+    "banner": "https://r.r10s.jp/com/img/thumb/200309/event/202610_recommend/ich_grpcpn_too_250.png",
+    "detail": "検索するだけでポイント獲得"
+  },
+  {
+    "serviceLogo": "https://r.r10s.jp/com/img/thumb/200309/event/servicelogo/servicelogo_bank.svg",
+    "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fwww.rakuten-bank.co.jp%2Fcampaign%2Freorganization%2Faccount-open%2F%3Fscid%3Dwi_grp_gmx_bnk_ich_top_grpcpn_a_saihen&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22bank_35000pt_20261002_rd%22%5D&pgs=pc_top_group-content",
+    "banner": "https://r.r10s.jp/com/img/thumb/200309/event/202610_recommend/ich_grpcpn_bnk_35k.jpg",
+    "detail": "口座開設＆条件達成で"
+  },
+  {
+    "serviceLogo": "https://r.r10s.jp/com/img/thumb/200309/event/servicelogo/servicelogo_card.svg",
+    "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fwww.rakuten-card.co.jp%2Fcampaign%2Frakuten_card%2Frakuten%2F%3Fscid%3Dwi_grp_gmx_rtc_ich_top_grpcpn&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22card_5000pt_20260115_rd%22%5D&pgs=pc_top_group-content",
+    "banner": "https://r.r10s.jp/com/img/thumb/200309/event/202608_recommend/ich_grpcpn_rtc_5000.gif",
+    "detail": "年会費永年無料"
+  },
+  {
+    "serviceLogo": "https://r.r10s.jp/com/img/thumb/200309/event/servicelogo/servicelogo_security.svg",
+    "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fr10.to%2FhNe1Sb&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22securities_2000pt_20251104_rd%22%5D&pgs=pc_top_group-content",
+    "banner": "https://r.r10s.jp/com/img/thumb/200309/event/202412_recommend/ich_grpcpn_sec.jpg",
+    "detail": "楽天ポイントでおトクに投資！"
+  },
+  {
+    "serviceLogo": "https://r.r10s.jp/com/img/thumb/200309/event/servicelogo/servicelogo_travel.svg",
+    "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fimg.travel.rakuten.co.jp%2Fimage%2Ftr%2Fuserm%2Fxu%2FLBbnt%2F&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22travel_6000pt_20251104_rd%22%5D&pgs=pc_top_group-content",
+    "banner": "https://r.r10s.jp/com/img/thumb/200309/event/202501_recommend/ich_grpcpn_trv.png",
+    "detail": "初めて利用キャンペーン"
+  },
+  {
+    "serviceLogo": "https://r.r10s.jp/com/img/thumb/200309/event/servicelogo/servicelogo_energy.svg",
+    "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fenergy.rakuten.co.jp%2Fcampaign%2Flp%2Fpoint%2Fenergy%2F%3Fscid%3Dwi_grp_gmx_ene_ich_top_grpcpn%26argument%3DOqP7rSBI%26dmai%3Dg_0024&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22denki_10000pt_20261002_rd%22%5D&pgs=pc_top_group-content",
+    "banner": "https://r.r10s.jp/com/img/thumb/200309/event/202610_recommend/ich_grpcpn_ene_10k.jpg",
+    "detail": "楽天でんきでポイント貯まる！"
+  },
+  {
+    "serviceLogo": "https://r.r10s.jp/com/img/thumb/200309/event/servicelogo/servicelogo_pointclub.svg",
+    "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fpoint.rakuten.co.jp%2Fdoc%2Fapp%2Fpoitoku%2F%3Fscid%3Dwi_grp_gmx_burn_ich_top_grpcpn&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22pointburn_central-3bai__20260430%22%5D&pgs=pc_top_group-content",
+    "banner": "https://r.r10s.jp/com/img/thumb/200309/event/202604_recommend/ich_grpcpn_burnx3.png",
+    "detail": "ポイ得で還元率アップ"
+  },
+  {
+    "serviceLogo": "https://r.r10s.jp/com/img/thumb/200309/event/servicelogo/servicelogo_pointclub.svg",
+    "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fevent.rakuten.co.jp%2Fgroup%2Fsbc%2F%3Fl-id%3Dwi_grp_gmx_sbcex_ich_top_grpcpn&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22start1000_1000pt-plus1000pt_20260904_rd%22%5D&pgs=pc_top_group-content",
+    "banner": "https://r.r10s.jp/com/img/thumb/200309/event/202609_recommend/ich_grpcpn_start1000_202609.jpg",
+    "detail": "10周年限定ボーナス大放出！"
+  },
+  {
+    "serviceLogo": "https://r.r10s.jp/com/img/thumb/200309/event/servicelogo/servicelogo_mobile.svg",
+    "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fac.ebis.ne.jp%2Ftr_set.php%3Fargument%3DZMhPE4GP%26ai%3Drgp_mno_007648&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22mno_13000pt-spu4_20251226_rd%22%5D&pgs=pc_top_group-content",
+    "banner": "https://r.r10s.jp/com/img/thumb/200309/event/202605_recommend/ich_grpcpn_rmb.png",
+    "detail": "楽天市場でのお買い物がおトク"
+  },
+  {
+    "serviceLogo": "https://r.r10s.jp/com/img/thumb/200309/event/servicelogo/servicelogo_bank.svg",
+    "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fwww.rakuten-bank.co.jp%2Fcampaign%2Fcardloan%2F2608-RG%2Fichiba%2Fgr%2Fsc4qo%3Fscid%3Dwi_grp_gmx_cdl_ich_top_grpcpn&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22bank-cardloan_31000pt-halfprice_20260831_rd%22%5D&pgs=pc_top_group-content",
+    "banner": "https://r.r10s.jp/com/img/thumb/200309/event/202608_recommend/cdl_ich_grpcpn_2608.jpg",
+    "detail": "面倒な申込書記入は一切不要！"
+  },
+  {
+    "serviceLogo": "https://r.r10s.jp/com/img/thumb/200309/event/servicelogo/servicelogo_books.svg",
+    "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fbooks.rakuten.co.jp%2Finfo%2Fspecial-price-sale%2Fall%2F%3Fscid%3Dwi_grp_gmx_boo_ich_top_grpcpn_sale&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22books_80peroff-sale_20260731_rd%22%5D&pgs=pc_top_group-content",
+    "banner": "https://r.r10s.jp/com/img/thumb/200309/event/202412_recommend/ich_grpcpn_boo.jpg",
+    "detail": "全品送料無料！"
+  }
+]"
+|                 data-has-border-bottom="true"
+|                 irc="GroupRecommendationWidget"
+|                 "
+"
+|               " <#comment>"
+|               <!-- #comment -->
+|               "
+                        "
+|               <div>
+|                 data-settings="{
+    "adUrl": "https://event.rakuten.co.jp/guide/shipping/sustainable/?l-id=top_normal_government_redelivery",
+    "imageUrl": "https://r.r10s.jp/com/img/thumb/200309/message/flash/campaign/government/0229_ShippingSustainable.jpg",
+    "appearCompId": "pc_top_governmentbanner",
+    "clickCompId": "pc_top_governmentbanner_click"
+  }"
+|                 irc="StaticAdBanner"
+|               " <#comment>"
+|               <!-- #comment -->
+|               "
+                         <#comment>"
+|               <!-- #comment -->
+|               "
+                    "
+|             " <#comment>"
+|             <!-- #comment -->
+|             "
+                "
+|           " <#comment>"
+|           <!-- #comment -->
+|           "
+                "
+|           <div>
+|             id="side-navi"
+|             "
+                    "
+|             <div>
+|               data-has-border-bottom="true"
+|               data-icon="common-search"
+|               data-items="[
+    {
+      "key": "ranking",
+      "type": "default",
+      "items": [
+        { "key": "rankingGeneral", "link": "https://ranking.rakuten.co.jp/", "lid": "top_normal_sidenavi_find-item_modal-ranking_ranking", "clickComponentId": "pc_top_sidenavi_find-item_modal-ranking_ranking_click" },
+        { "key": "rankingRealtime", "link": "https://ranking.rakuten.co.jp/realtime/", "lid": "top_normal_sidenavi_find-item_modal-ranking_realtime", "clickComponentId": "pc_top_sidenavi_find-item_modal-ranking_realtime_click" },
+        { "key": "rankingGenre", "link": "https://ranking.rakuten.co.jp/genre/", "lid": "top_normal_sidenavi_find-item_modal-ranking_genre", "clickComponentId": "pc_top_sidenavi_find-item_modal-ranking_genre_click" },
+        { "key": "rankingMale", "link": "https://ranking.rakuten.co.jp/daily/gender=male/", "lid": "top_normal_sidenavi_find-item_modal-ranking_male", "clickComponentId": "pc_top_sidenavi_find-item_modal-ranking_male_click" },
+        { "key": "rankingFemale", "link": "https://ranking.rakuten.co.jp/daily/gender=female/", "lid": "top_normal_sidenavi_find-item_modal-ranking_female", "clickComponentId": "pc_top_sidenavi_find-item_modal-ranking_female_click" }
+      ]
+    },
+    {
+      "key": "furusato",
+      "type": "default",
+      "items": [
+        { "key": "furusatoOverall", "link": "https://event.rakuten.co.jp/furusato/", "lid": "top_normal_sidenavi_find-item_modal-furusato_furusato", "clickComponentId": "pc_top_sidenavi_find-item_modal-furusato_furusato_click" },
+        { "key": "furusatoSearch", "link": "https://search.rakuten.co.jp/search/event/?ev=40", "lid": "top_normal_sidenavi_find-item_modal-furusato_search", "clickComponentId": "pc_top_sidenavi_find-item_modal-furusato_search_click" },
+        { "key": "furusatoRanking", "link": "https://event.rakuten.co.jp/furusato/ranking/", "lid": "top_normal_sidenavi_find-item_modal-furusato_ranking", "clickComponentId": "pc_top_sidenavi_find-item_modal-furusato_ranking_click" },
+        { "key": "furusatoMypage", "link": "https://event.rakuten.co.jp/furusato/mypage/", "lid": "top_normal_sidenavi_find-item_modal-furusato_mypage", "clickComponentId": "pc_top_sidenavi_find-item_modal-furusato_mypage_click" },
+        { "key": "furusatoSimulator", "link": "https://event.rakuten.co.jp/furusato/mypage/deductions/", "lid": "top_normal_sidenavi_find-item_modal-furusato_deductions", "clickComponentId": "pc_top_sidenavi_find-item_modal-furusato_deductions_click" }
+      ]
+    },
+    {
+      "key": "seasonal",
+      "type": "event",
+      "currentEventsTitleKey": "seasonalCurrentTitle",
+      "seasonalEventsTitleKey": "seasonalEventsTitle",
+      "items": [
+        { "key": "seasonalLuckyBags", "link": "https://event.rakuten.co.jp/newyear/", "lid": "top_normal_sidenavi_find-item_modal-seasonal_newyear", "clickComponentId": "pc_top_sidenavi_find-item_modal-seasonal_newyear_click", "image": "https://r.r10s.jp/com/inc/home/20080930/ris/img/sidenavi/seasonal/icon/newyear.png" },
+        { "key": "seasonalValentine", "link": "https://event.rakuten.co.jp/valentine/", "lid": "top_normal_sidenavi_find-item_modal-seasonal_valentine", "clickComponentId": "pc_top_sidenavi_find-item_modal-seasonal_valentine_click", "image": "https://r.r10s.jp/com/inc/home/20080930/ris/img/sidenavi/seasonal/icon/valentine.png" },
+        { "key": "seasonalNewLife", "link": "https://event.rakuten.co.jp/season/newlife/", "lid": "top_normal_sidenavi_find-item_modal-seasonal_newlife", "clickComponentId": "pc_top_sidenavi_find-item_modal-seasonal_newlife_click", "image": "https://r.r10s.jp/com/inc/home/20080930/ris/img/sidenavi/seasonal/icon/newlife.png" },
+        { "key": "seasonalWhiteDay", "link": "https://event.rakuten.co.jp/whiteday/", "lid": "top_normal_sidenavi_find-item_modal-seasonal_whiteday", "clickComponentId": "pc_top_sidenavi_find-item_modal-seasonal_whiteday_click", "image": "https://r.r10s.jp/com/inc/home/20080930/ris/img/sidenavi/seasonal/icon/whiteday.png" },
+        { "key": "seasonalMothersDay", "link": "https://event.rakuten.co.jp/mother/", "lid": "top_normal_sidenavi_find-item_modal-seasonal_mother", "clickComponentId": "pc_top_sidenavi_find-item_modal-seasonal_mother_click", "image": "https://r.r10s.jp/com/inc/home/20080930/ris/img/sidenavi/seasonal/icon/mother.png" },
+        { "key": "seasonalFathersDay", "link": "https://event.rakuten.co.jp/father/", "lid": "top_normal_sidenavi_find-item_modal-seasonal_father", "clickComponentId": "pc_top_sidenavi_find-item_modal-seasonal_father_click", "image": "https://r.r10s.jp/com/inc/home/20080930/ris/img/sidenavi/seasonal/icon/father.png" },
+        { "key": "seasonalOchugen", "link": "https://event.rakuten.co.jp/ochugen/", "lid": "top_normal_sidenavi_find-item_modal-seasonal_ochugen", "clickComponentId": "pc_top_sidenavi_find-item_modal-seasonal_ochugen_click", "image": "https://r.r10s.jp/com/inc/home/20080930/ris/img/sidenavi/seasonal/icon/ochugen.png" },
+        { "key": "seasonalKeiro", "link": "https://event.rakuten.co.jp/keirou/", "lid": "top_normal_sidenavi_find-item_modal-seasonal_keirou", "clickComponentId": "pc_top_sidenavi_find-item_modal-seasonal_keirou_click", "image": "https://r.r10s.jp/com/inc/home/20080930/ris/img/sidenavi/seasonal/icon/keirou.png" },
+        { "key": "seasonalAwLife", "link": "https://event.rakuten.co.jp/season/awlife/", "lid": "top_normal_sidenavi_find-item_modal-seasonal_awlife", "clickComponentId": "pc_top_sidenavi_find-item_modal-seasonal_awlife_click", "image": "https://r.r10s.jp/com/inc/home/20080930/ris/img/sidenavi/seasonal/icon/awlife.png" },
+        { "key": "seasonalSeibo", "link": "https://event.rakuten.co.jp/oseibo/", "lid": "top_normal_sidenavi_find-item_modal-seasonal_oseibo", "clickComponentId": "pc_top_sidenavi_find-item_modal-seasonal_oseibo_click", "image": "https://r.r10s.jp/com/inc/home/20080930/ris/img/sidenavi/seasonal/icon/oseibo.png" },
+        { "key": "seasonalOsechi", "link": "https://event.rakuten.co.jp/toshikoshi/", "lid": "top_normal_sidenavi_find-item_modal-seasonal_toshikoshi", "clickComponentId": "pc_top_sidenavi_find-item_modal-seasonal_toshikoshi_click", "image": "https://r.r10s.jp/com/inc/home/20080930/ris/img/sidenavi/seasonal/icon/toshikoshi.png" },
+        { "key": "seasonalChristmas", "link": "https://event.rakuten.co.jp/xmas/", "lid": "top_normal_sidenavi_find-item_modal-seasonal_xmas", "clickComponentId": "pc_top_sidenavi_find-item_modal-seasonal_xmas_click", "image": "https://r.r10s.jp/com/inc/home/20080930/ris/img/sidenavi/seasonal/icon/xmas.png" }
+      ]
+    },
+    {
+      "key": "gift",
+      "type": "default",
+      "items": [
+        { "key": "giftOverall", "link": "https://event.rakuten.co.jp/gift/", "lid": "top_normal_sidenavi_find-item_modal-gift_gift", "clickComponentId": "pc_top_sidenavi_find-item_modal-gift_gift_click" },
+        { "key": "socialGift", "link": "https://event.rakuten.co.jp/gift/socialgift/", "lid": "top_normal_sidenavi_find-item_modal-gift_socialgift", "clickComponentId": "pc_top_sidenavi_find-item_modal-gift_socialgift_click" },
+        { "key": "giftBirthday", "link": "https://event.rakuten.co.jp/gift/scene/birthday/", "lid": "top_normal_sidenavi_find-item_modal-gift_birthday", "clickComponentId": "pc_top_sidenavi_find-item_modal-gift_birthday_click" },
+        { "key": "giftUchiiwai", "link": "https://event.rakuten.co.jp/gift/scene/uchiiwai/", "lid": "top_normal_sidenavi_find-item_modal-gift_uchiiwai", "clickComponentId": "pc_top_sidenavi_find-item_modal-gift_uchiiwai_click" },
+        { "key": "giftWedding", "link": "https://event.rakuten.co.jp/gift/scene/wedding/", "lid": "top_normal_sidenavi_find-item_modal-gift_wedding", "clickComponentId": "pc_top_sidenavi_find-item_modal-gift_wedding_click" },
+        { "key": "giftGuide", "link": "https://event.rakuten.co.jp/gift/guide/", "lid": "top_normal_sidenavi_find-item_modal-gift_guide", "clickComponentId": "pc_top_sidenavi_find-item_modal-gift_guide_click" }
+      ]
+    },
+    {
+      "key": "brand",
+      "type": "default",
+      "items": [
+        { "key": "brandShops", "link": "https://event.rakuten.co.jp/brand/", "lid": "top_normal_sidenavi_find-item_modal-brand_brand", "clickComponentId": "pc_top_sidenavi_find-item_modal-brand_brand_click" },
+        { "key": "brandOfficial", "link": "https://event.rakuten.co.jp/brand/officialshop/", "lid": "top_normal_sidenavi_find-item_modal-brand_officialshop", "clickComponentId": "pc_top_sidenavi_find-item_modal-brand_officialshop_click" },
+        { "key": "brandLuxuryBeauty", "link": "https://event.rakuten.co.jp/beauty/brand/luxe/luxurybeauty/", "lid": "top_normal_sidenavi_find-item_modal-brand_luxurybeauty", "clickComponentId": "pc_top_sidenavi_find-item_modal-brand_luxurybeauty_click" }
+      ]
+    }
+  ]"
+|               irc="SearchWidget"
+|             "
+ <#comment>"
+|             <!-- #comment -->
+|             "
+                    "
+|             <div>
+|               data-appear-component-id="pc_top_sidenavi_genre"
+|               data-has-border-bottom="true"
+|               data-icon="common-group"
+|               data-items="[
+    {
+      "key": "fashion",
+      "appearComponentId": "pc_top_sidenavi_genre-fashion",
+      "items": [
+        { "key": "ladiesfashion", "link": "https://www.rakuten.co.jp/category/100371/?l-id=top_normal_sidenavi_genre-fashion_ladiesfashion", "image": "https://r.r10s.jp/com/ctg/top/category/resource/img/genrelist/100371.png", "clickComponentId": "pc_top_sidenavi_genre-fashion_ladiesfashion_click" },
+        { "key": "mensfashion", "link": "https://www.rakuten.co.jp/category/551177/?l-id=top_normal_sidenavi_genre-fashion_mensfashion", "image": "https://r.r10s.jp/com/ctg/top/category/resource/img/genrelist/551177.png", "clickComponentId": "pc_top_sidenavi_genre-fashion_mensfashion_click" },
+        { "key": "kidsfashion", "link": "https://www.rakuten.co.jp/category/111078/?l-id=top_normal_sidenavi_genre-fashion_kidsfashion", "image": "https://r.r10s.jp/com/ctg/top/category/resource/img/genrelist/111078.png", "clickComponentId": "pc_top_sidenavi_genre-fashion_kidsfashion_click" },
+        { "key": "babyfashion", "link": "https://www.rakuten.co.jp/category/111102/?l-id=top_normal_sidenavi_genre-fashion_babyfashion", "image": "https://r.r10s.jp/com/ctg/top/category/resource/img/genrelist/111102.png", "clickComponentId": "pc_top_sidenavi_genre-fashion_babyfashion_click" },
+        { "key": "inner", "link": "https://www.rakuten.co.jp/category/100433/?l-id=top_normal_sidenavi_genre-fashion_inner", "image": "https://r.r10s.jp/com/ctg/top/category/resource/img/genrelist/100433.png", "clickComponentId": "pc_top_sidenavi_genre-fashion_inner_click" },
+        { "key": "fashiongoods", "link": "https://www.rakuten.co.jp/category/216131/?l-id=top_normal_sidenavi_genre-fashion_fashiongoods", "image": "https://r.r10s.jp/com/ctg/top/category/resource/img/genrelist/216131.png", "clickComponentId": "pc_top_sidenavi_genre-fashion_fashiongoods_click" },
+        { "key": "shoes", "link": "https://www.rakuten.co.jp/category/558885/?l-id=top_normal_sidenavi_genre-fashion_shoes", "image": "https://r.r10s.jp/com/ctg/top/category/resource/img/genrelist/558885.png", "clickComponentId": "pc_top_sidenavi_genre-fashion_shoes_click" },
+        { "key": "watch", "link": "https://www.rakuten.co.jp/category/558929/?l-id=top_normal_sidenavi_genre-fashion_watch", "image": "https://r.r10s.jp/com/ctg/top/category/resource/img/genrelist/558929.png", "clickComponentId": "pc_top_sidenavi_genre-fashion_watch_click" },
+        { "key": "accessories", "link": "https://www.rakuten.co.jp/category/216129/?l-id=top_normal_sidenavi_genre-fashion_accessories", "image": "https://r.r10s.jp/com/ctg/top/category/resource/img/genrelist/216129.png", "clickComponentId": "pc_top_sidenavi_genre-fashion_accessories_click" }
+      ]
+    },
+    {
+      "key": "food",
+      "appearComponentId": "pc_top_sidenavi_genre-food",
+      "items": [
+        { "key": "food", "link": "https://www.rakuten.co.jp/category/100227/?l-id=top_normal_sidenavi_genre-food_food", "image": "https://r.r10s.jp/com/ctg/top/category/resource/img/genrelist/100227.png", "clickComponentId": "pc_top_sidenavi_genre-food_food_click" },
+        { "key": "sweets", "link": "https://www.rakuten.co.jp/category/551167/?l-id=top_normal_sidenavi_genre-food_sweets", "image": "https://r.r10s.jp/com/ctg/top/category/resource/img/genrelist/551167.png", "clickComponentId": "pc_top_sidenavi_genre-food_sweets_click" },
+        { "key": "drink", "link": "https://www.rakuten.co.jp/category/100316/?l-id=top_normal_sidenavi_genre-food_drink", "image": "https://r.r10s.jp/com/ctg/top/category/resource/img/genrelist/100316.png", "clickComponentId": "pc_top_sidenavi_genre-food_drink_click" },
+        { "key": "liquor", "link": "https://www.rakuten.co.jp/category/510915/?l-id=top_normal_sidenavi_genre-food_liquor", "image": "https://r.r10s.jp/com/ctg/top/category/resource/img/genrelist/510915.png", "clickComponentId": "pc_top_sidenavi_genre-food_liquor_click" },
+        { "key": "wine", "link": "https://www.rakuten.co.jp/category/100317/?l-id=top_normal_sidenavi_genre-food_wine", "image": "https://r.r10s.jp/com/ctg/top/category/resource/img/genrelist/100317.png", "clickComponentId": "pc_top_sidenavi_genre-food_wine_click" },
+        { "key": "sake", "link": "https://www.rakuten.co.jp/category/510901/?l-id=top_normal_sidenavi_genre-food_sake", "image": "https://r.r10s.jp/com/ctg/top/category/resource/img/genrelist/510901.png", "clickComponentId": "pc_top_sidenavi_genre-food_sake_click" }
+      ]
+    },
+    {
+      "key": "daily",
+      "appearComponentId": "pc_top_sidenavi_genre-daily",
+      "items": [
+        { "key": "daily", "link": "https://www.rakuten.co.jp/category/215783/?l-id=top_normal_sidenavi_genre-daily_daily", "image": "https://r.r10s.jp/com/ctg/top/category/resource/img/genrelist/215783.png", "clickComponentId": "pc_top_sidenavi_genre-daily_daily_click" },
+        { "key": "health", "link": "https://www.rakuten.co.jp/category/100938/?l-id=top_normal_sidenavi_genre-daily_health", "image": "https://r.r10s.jp/com/ctg/top/category/resource/img/genrelist/100938.png", "clickComponentId": "pc_top_sidenavi_genre-daily_health_click" },
+        { "key": "medicine", "link": "https://www.rakuten.co.jp/category/551169/?l-id=top_normal_sidenavi_genre-daily_medicine", "image": "https://r.r10s.jp/com/ctg/top/category/resource/img/genrelist/551169.png", "clickComponentId": "pc_top_sidenavi_genre-daily_medicine_click" }
+      ]
+    },
+    {
+      "key": "cosme",
+      "appearComponentId": "pc_top_sidenavi_genre-cosme",
+      "items": [
+        { "key": "beauty", "link": "https://www.rakuten.co.jp/category/100939/?l-id=top_normal_sidenavi_genre-cosme_beauty", "image": "https://r.r10s.jp/com/ctg/top/category/resource/img/genrelist/100939.png", "clickComponentId": "pc_top_sidenavi_genre-cosme_beauty_click" }
+      ]
+    },
+    {
+      "key": "baby",
+      "appearComponentId": "pc_top_sidenavi_genre-baby",
+      "items": [
+        { "key": "baby", "link": "https://www.rakuten.co.jp/category/100533/?l-id=top_normal_sidenavi_genre-baby_baby", "image": "https://r.r10s.jp/com/ctg/top/category/resource/img/genrelist/100533.png", "clickComponentId": "pc_top_sidenavi_genre-baby_baby_click" },
+        { "key": "toy", "link": "https://www.rakuten.co.jp/category/566382/?l-id=top_normal_sidenavi_genre-baby_toy", "image": "https://r.r10s.jp/com/ctg/top/category/resource/img/genrelist/566382.png", "clickComponentId": "pc_top_sidenavi_genre-baby_toy_click" }
+      ]
+    },
+    {
+      "key": "appliance",
+      "appearComponentId": "pc_top_sidenavi_genre-appliance",
+      "items": [
+        { "key": "appliance", "link": "https://www.rakuten.co.jp/category/562637/?l-id=top_normal_sidenavi_genre-appliance_appliance", "image": "https://r.r10s.jp/com/ctg/top/category/resource/img/genrelist/562637.png", "clickComponentId": "pc_top_sidenavi_genre-appliance_appliance_click" },
+        { "key": "electronics", "link": "https://www.rakuten.co.jp/category/211742/?l-id=top_normal_sidenavi_genre-appliance_electronics", "image": "https://r.r10s.jp/com/ctg/top/category/resource/img/genrelist/211742.png", "clickComponentId": "pc_top_sidenavi_genre-appliance_electronics_click" },
+        { "key": "smartdevice", "link": "https://www.rakuten.co.jp/category/564500/?l-id=top_normal_sidenavi_genre-appliance_smartdevice", "image": "https://r.r10s.jp/com/ctg/top/category/resource/img/genrelist/564500.png", "clickComponentId": "pc_top_sidenavi_genre-appliance_smartdevice_click" },
+        { "key": "computer", "link": "https://www.rakuten.co.jp/category/100026/?l-id=top_normal_sidenavi_genre-appliance_computer", "image": "https://r.r10s.jp/com/ctg/top/category/resource/img/genrelist/100026.png", "clickComponentId": "pc_top_sidenavi_genre-appliance_computer_click" }
+      ]
+    },
+    {
+      "key": "sports",
+      "appearComponentId": "pc_top_sidenavi_genre-sports",
+      "items": [
+        { "key": "sports", "link": "https://www.rakuten.co.jp/category/101070/?l-id=top_normal_sidenavi_genre-sports_sports", "image": "https://r.r10s.jp/com/ctg/top/category/resource/img/genrelist/101070.png", "clickComponentId": "pc_top_sidenavi_genre-sports_sports_click" },
+        { "key": "golf", "link": "https://www.rakuten.co.jp/category/101077/?l-id=top_normal_sidenavi_genre-sports_golf", "image": "https://r.r10s.jp/com/ctg/top/category/resource/img/genrelist/101077.png", "clickComponentId": "pc_top_sidenavi_genre-sports_golf_click" }
+      ]
+    },
+    {
+      "key": "auto",
+      "appearComponentId": "pc_top_sidenavi_genre-auto",
+      "items": [
+        { "key": "autogoods", "link": "https://www.rakuten.co.jp/category/503190/?l-id=top_normal_sidenavi_genre-auto_autogoods", "image": "https://r.r10s.jp/com/ctg/top/category/resource/img/genrelist/503190.png", "clickComponentId": "pc_top_sidenavi_genre-auto_autogoods_click" },
+        { "key": "auto", "link": "https://www.rakuten.co.jp/category/101114/?l-id=top_normal_sidenavi_genre-auto_auto", "image": "https://r.r10s.jp/com/ctg/top/category/resource/img/genrelist/101114.png", "clickComponentId": "pc_top_sidenavi_genre-auto_auto_click" }
+      ]
+    },
+    {
+      "key": "interior",
+      "appearComponentId": "pc_top_sidenavi_genre-interior",
+      "items": [
+        { "key": "interior", "link": "https://www.rakuten.co.jp/category/100804/?l-id=top_normal_sidenavi_genre-interior_interior", "image": "https://r.r10s.jp/com/ctg/top/category/resource/img/genrelist/100804.png", "clickComponentId": "pc_top_sidenavi_genre-interior_interior_click" },
+        { "key": "kitchen", "link": "https://www.rakuten.co.jp/category/558944/?l-id=top_normal_sidenavi_genre-interior_kitchen", "image": "https://r.r10s.jp/com/ctg/top/category/resource/img/genrelist/558944.png", "clickComponentId": "pc_top_sidenavi_genre-interior_kitchen_click" },
+        { "key": "pet", "link": "https://www.rakuten.co.jp/category/101213/?l-id=top_normal_sidenavi_genre-interior_pet", "image": "https://r.r10s.jp/com/ctg/top/category/resource/img/genrelist/101213.png", "clickComponentId": "pc_top_sidenavi_genre-interior_pet_click" },
+        { "key": "flower", "link": "https://www.rakuten.co.jp/category/100005/?l-id=top_normal_sidenavi_genre-interior_flower", "image": "https://r.r10s.jp/com/ctg/top/category/resource/img/genrelist/100005.png", "clickComponentId": "pc_top_sidenavi_genre-interior_flower_click" },
+        { "key": "service", "link": "https://www.rakuten.co.jp/category/101438/?l-id=top_normal_sidenavi_genre-interior_service", "image": "https://r.r10s.jp/com/ctg/top/category/resource/img/genrelist/101438.png", "clickComponentId": "pc_top_sidenavi_genre-interior_service_click" }
+      ]
+    },
+    {
+      "key": "hobby",
+      "appearComponentId": "pc_top_sidenavi_genre-hobby",
+      "items": [
+        { "key": "game", "link": "https://www.rakuten.co.jp/category/101205/?l-id=top_normal_sidenavi_genre-hobby_game", "image": "https://r.r10s.jp/com/ctg/top/category/resource/img/genrelist/101205.png", "clickComponentId": "pc_top_sidenavi_genre-hobby_game_click" },
+        { "key": "media", "link": "https://www.rakuten.co.jp/category/101240/?l-id=top_normal_sidenavi_genre-hobby_media", "image": "https://r.r10s.jp/com/ctg/top/category/resource/img/genrelist/101240.png", "clickComponentId": "pc_top_sidenavi_genre-hobby_media_click" },
+        { "key": "hobby", "link": "https://www.rakuten.co.jp/category/101164/?l-id=top_normal_sidenavi_genre-hobby_hobby", "image": "https://r.r10s.jp/com/ctg/top/category/resource/img/genrelist/101164.png", "clickComponentId": "pc_top_sidenavi_genre-hobby_hobby_click" },
+        { "key": "instrument", "link": "https://www.rakuten.co.jp/category/112493/?l-id=top_normal_sidenavi_genre-hobby_instrument", "image": "https://r.r10s.jp/com/ctg/top/category/resource/img/genrelist/112493.png", "clickComponentId": "pc_top_sidenavi_genre-hobby_instrument_click" },
+        { "key": "book", "link": "https://www.rakuten.co.jp/category/200162/?l-id=top_normal_sidenavi_genre-hobby_book", "image": "https://r.r10s.jp/com/ctg/top/category/common/img/index/2021/book.png", "clickComponentId": "pc_top_sidenavi_genre-hobby_book_click" },
+{
+          "link": "https://www.rakuten.co.jp/category/101381/?l-id=top_normal_sidenavi_genre-hobby_catalog",
+          "clickComponentId": "pc_top_sidenavi_genre-hobby_catalog_click",
+          "image": "https://r.r10s.jp/com/ctg/top/category/resource/img/genrelist/101381.png",
+          "title": { "ja": "カタログギフト・チケット", "en": "Catalog Gifts & Tickets", "ko": "카탈로그 선물&티켓", "zh-CN": "礼品目录＆票券", "zh-TW": "目錄禮品＆票券" }
+        }
+      ]
+    }
+  ]"
+|               data-rat-account-id="1"
+|               data-rat-page-layout="pc"
+|               data-rat-page-type="top"
+|               data-rat-service-id="1"
+|               irc="GenreWidget"
+|             " <#comment>"
+|             <!-- #comment -->
+|             "
+                    "
+|             <div>
+|               data-appear-component-id="pc_top_sidenavi_service"
+|               data-has-border-bottom="true"
+|               data-icon="common-group-menu"
+|               data-items="[
+    {
+      "key": "shopping",
+      "items": [
+        { "key": "superDeal", "link": "https://event.rakuten.co.jp/superdeal/?l-id=top_normal_sidenavi_service_modal_shopping_superdeal", "image": "https://r.r10s.jp/com/inc/home/20080930/ris/img/sidenavi/service/superdeal.svg", "clickComponentId": "pc_top_sidenavi_service_modal_shopping_superdeal_click" },
+        { "key": "regularPurchase", "link": "https://event.rakuten.co.jp/regular/?l-id=top_normal_sidenavi_service_modal_shopping_regular", "image": "https://r.r10s.jp/com/inc/home/20080930/ris/img/sidenavi/service/regular.svg", "clickComponentId": "pc_top_sidenavi_service_modal_shopping_regular_click" },
+        { "key": "rakutenBooks", "link": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fbooks.rakuten.co.jp%2F&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22books_rd%22%5D&pgs=pc_top_sidenavi_genre", "image": "https://r.r10s.jp/com/inc/home/20080930/ris/img/sidenavi/service/books.svg", "clickComponentId": "pc_top_sidenavi_service_modal_shopping_books_click" },
+        { "key": "rakuten24", "link": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2F24.rakuten.co.jp%2F&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%2224_daily_rd%22%5D&pgs=pc_top_sidenavi_genre", "image": "https://r.r10s.jp/com/inc/home/20080930/ris/img/sidenavi/service/24.svg", "clickComponentId": "pc_top_sidenavi_service_modal_shopping_24_click" },
+        { "key": "rakutenBic", "link": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fbiccamera.rakuten.co.jp%2F&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22biccamera_rd%22%5D&pgs=pc_top_sidenavi_service", "image": "https://r.r10s.jp/com/inc/home/20080930/ris/img/sidenavi/service/biccamera.svg", "clickComponentId": "pc_top_sidenavi_service_modal_shopping_biccamera_click" },
+        { "key": "rakken", "link": "https://event.rakuten.co.jp/rakken/?l-id=top_normal_sidenavi_service_modal_shopping_rakken", "image": "https://r.r10s.jp/com/inc/home/20080930/ris/img/sidenavi/service/rakken.svg", "clickComponentId": "pc_top_sidenavi_service_modal_shopping_rakken_click" },
+        { "key": "rakutenMart", "link": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fsm.rakuten.co.jp%2F%3Fscid%3Dwi_ich_top_left&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22sm_rd%22%5D&pgs=pc_top_sidenavi_genre", "image": "https://r.r10s.jp/com/inc/home/20080930/ris/img/sidenavi/service/sm.svg", "clickComponentId": "pc_top_sidenavi_service_modal_shopping_sm_click" },
+        { "key": "rebates", "link": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fwww.rebates.jp%2F%3Futm_medium%3Dpartner%26utm_campaign%3Dich_top_leftnavi%26utm_source%3Dweb%26utm_content%3Dichiba%26utm_term%3D%26utm_size%3D%26utm_pub%3D%26utm_ebs%3DHP%26scid%3Dich_top_leftnavi&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22rebates_rd%22%5D&pgs=pc_top_sidenavi_service", "image": "https://r.r10s.jp/com/inc/home/20080930/ris/img/sidenavi/service/rebates.svg", "clickComponentId": "pc_top_sidenavi_service_modal_shopping_rebates_click" },
+        { "key": "raCoupon", "link": "https://event.rakuten.co.jp/coupon/?l-id=top_normal_sidenavi_service_modal_shopping_coupon", "image": "https://r.r10s.jp/com/inc/home/20080930/ris/img/sidenavi/service/coupon.svg", "clickComponentId": "pc_top_sidenavi_service_modal_shopping_coupon_click" },
+        { "key": "globalShopping", "link": "https://event.rakuten.co.jp/overseas/?l-id=top_normal_sidenavi_service_modal_shopping_overseas", "image": "https://r.r10s.jp/com/inc/home/20080930/ris/img/sidenavi/service/overseas.svg", "clickComponentId": "pc_top_sidenavi_service_modal_shopping_overseas_click" },
+        { "key": "timeSale", "link": "https://event.rakuten.co.jp/bargain/timesale/?l-id=top_normal_sidenavi_service_modal_shopping_timesale", "image": "https://r.r10s.jp/com/inc/home/20080930/ris/img/sidenavi/service/timesale.svg", "clickComponentId": "pc_top_sidenavi_service_modal_shopping_timesale_click" },
+        { "key": "shoppingChannel", "link": "https://event.rakuten.co.jp/campaign/live-shopping/shop/?l-id=top_normal_sidenavi_service_modal_shopping_liveshopping", "image": "https://r.r10s.jp/com/inc/home/20080930/ris/img/sidenavi/service/liveshopping.svg", "clickComponentId": "pc_top_sidenavi_service_modal_shopping_liveshopping_click" },
+        { "key": "kobo", "link": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fbooks.rakuten.co.jp%2Fe-book%2F&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22e-book_rd%22%5D&pgs=pc_top_sidenavi_genre", "image": "https://r.r10s.jp/com/inc/home/20080930/ris/img/sidenavi/service/kobo.svg", "clickComponentId": "pc_top_sidenavi_service_modal_shopping_kobo_click" },
+        { "key": "rakuten24Express", "link": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Ffast-delivery-mart.rakuten.co.jp%2F&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22sokuhai_rd%22%5D&pgs=pc_top_sidenavi_service", "image": "https://r.r10s.jp/com/inc/home/20080930/ris/img/sidenavi/service/sokuhai.svg", "clickComponentId": "pc_top_sidenavi_service_modal_shopping_sokuhai_click" },
+        { "key": "rakutenFashion", "link": "https://brandavenue.rakuten.co.jp/?l-id=top_normal_sidenavi_service_modal_shopping_fashion", "image": "https://r.r10s.jp/com/inc/home/20080930/ris/img/sidenavi/service/fashion.svg", "clickComponentId": "pc_top_sidenavi_service_modal_shopping_fashion_click" },
+        { "key": "rakuma", "link": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Ffril.jp%2F%3Fscid%3Dwi_ich_pc_top_leftmenu&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22rakuma_rd%22%5D&pgs=pc_top_sidenavi_service", "image": "https://r.r10s.jp/com/inc/home/20080930/ris/img/sidenavi/service/rakuma.svg", "clickComponentId": "pc_top_sidenavi_service_modal_shopping_rakuma_click",
+        "description": {"ja": "楽天のフリマアプリ", "en": "Rakuten’s flea market app", "ko": "라쿠텐 플리마 앱", "zh-CN": "Rakuten二手交易应用", "zh-TW": "Rakuten二手交易應用程式"} 
+        },
+        { "key": "nationalSuper", "link": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fnetsuper.rakuten.co.jp%2F&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22netsuper_rd%22%5D&pgs=pc_top_sidenavi_service", "image": "https://r.r10s.jp/com/inc/home/20080930/ris/img/sidenavi/service/netsuper.svg", "clickComponentId": "pc_top_sidenavi_service_modal_shopping_netsuper_click" },
+        { "key": "room", "link": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Froom.rakuten.co.jp%2F%3Fscid%3Dwi_ich_pc_top_trend&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22room_rd%22%5D&pgs=pc_top_sidenavi_service", "image": "https://r.r10s.jp/com/inc/home/20080930/ris/img/sidenavi/service/room.svg", "clickComponentId": "pc_top_sidenavi_service_modal_shopping_room_click" },
+        { "key": "jLeagueStore", "link": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fstore.jleague.jp%2F&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22jleague_rd%22%5D&pgs=pc_top_sidenavi_genre", "image": "https://r.r10s.jp/com/inc/home/20080930/ris/img/sidenavi/service/jleague.svg", "clickComponentId": "pc_top_sidenavi_service_modal_character_jleague_click" }
+      ]
+    },
+    {
+      "key": "cardPayment",
+      "items": [
+        { "key": "rakutenCard", "link": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fad2.trafficgate.net%2Ft%2Fr%2F10371%2F1441%2F99636_99636%2F&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22card_rd%22%5D&pgs=pc_top_sidenavi_service", "image": "https://r.r10s.jp/com/inc/home/20080930/ris/img/sidenavi/service/card.svg", "clickComponentId": "pc_top_sidenavi_service_modal_payment_card_click" },
+        { "key": "rakutenPayOnline", "link": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fr10.to%2FhNiBtF&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22checkout_rd%22%5D&pgs=pc_top_sidenavi_service", "image": "https://r.r10s.jp/com/inc/home/20080930/ris/img/sidenavi/service/online.svg", "clickComponentId": "pc_top_sidenavi_service_modal_payment_online_click",
+          "description": {"ja": "カード払いをアプリ一つで", "en": "Pay by card with a single app", "ko": "카드 결제를 앱 하나로", "zh-CN": "一款应用搞定刷卡支付", "zh-TW": "一個應用程式搞定信用卡支付"}
+        },
+        { "key": "rakutenPayMobile", "link": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fr10.to%2FhPcrK5&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22pay_rd%22%5D&pgs=pc_top_sidenavi_service", "image": "https://r.r10s.jp/com/inc/home/20080930/ris/img/sidenavi/service/app.svg", "clickComponentId": "pc_top_sidenavi_service_modal_payment_app_click" },
+        { "key": "rakutenEdy", "link": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fr10.to%2FhFNEfc&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22edy_rd%22%5D&pgs=pc_top_sidenavi_service", "image": "https://r.r10s.jp/com/inc/home/20080930/ris/img/sidenavi/service/edy.svg", "clickComponentId": "pc_top_sidenavi_service_modal_payment_edy_click" }
+      ]
+    },
+    {
+      "key": "bankSecuritiesInsurance",
+      "items": [
+        { "key": "rakutenBank", "link": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fwww.rakuten-bank.co.jp%2F&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22bank_rd%22%5D&pgs=pc_top_sidenavi_service", "image": "https://r.r10s.jp/com/inc/home/20080930/ris/img/sidenavi/service/bank.svg", "clickComponentId": "pc_top_sidenavi_service_modal_finance_bank_click" },
+        { "key": "rakutenWallet", "link": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fwww.rakuten-wallet.co.jp%2F&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22wallet_rd%22%5D&pgs=pc_top_sidenavi_service", "image": "https://r.r10s.jp/com/inc/home/20080930/ris/img/sidenavi/service/wallet.svg", "clickComponentId": "pc_top_sidenavi_service_modal_finance_wallet_click" },
+        { "key": "rakutenSonpo", "link": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fwww.rakuten-sonpo.co.jp%2F&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22sonpo_rd%22%5D&pgs=pc_top_sidenavi_service", "image": "https://r.r10s.jp/com/inc/home/20080930/ris/img/sidenavi/service/sonpo.svg", "clickComponentId": "pc_top_sidenavi_service_modal_finance_sonpo_click" },
+        { "key": "carInsuranceQuote", "link": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Finsurance.rakuten.co.jp%2F&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22insurance_rd%22%5D&pgs=pc_top_sidenavi_service", "image": "https://r.r10s.jp/com/inc/home/20080930/ris/img/sidenavi/service/carinsurance.svg", "clickComponentId": "pc_top_sidenavi_service_modal_finance_carinsurance_click" },
+        { "key": "insuranceComparison", "link": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fhoken.rakuten.co.jp%2F&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22hoken_rd%22%5D&pgs=pc_top_sidenavi_service", "image": "https://r.r10s.jp/com/inc/home/20080930/ris/img/sidenavi/service/hokenhikaku.svg", "clickComponentId": "pc_top_sidenavi_service_modal_finance_hokenhikaku_click" },
+        { "key": "rakutenSecurities", "link": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fr10.to%2FhbRI5U&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22security_rd%22%5D&pgs=pc_top_sidenavi_service", "image": "https://r.r10s.jp/com/inc/home/20080930/ris/img/sidenavi/service/security.svg", "clickComponentId": "pc_top_sidenavi_service_modal_finance_security_click" },
+        { "key": "insuranceConsultations", "link": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fwww.rakuten-insurance.co.jp%2F&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22rakuten-insurance_rd%22%5D&pgs=pc_top_sidenavi_service", "image": "https://r.r10s.jp/com/inc/home/20080930/ris/img/sidenavi/service/hokenmadoguchi.svg", "clickComponentId": "pc_top_sidenavi_service_modal_finance_hokenmadoguchi_click" },
+        { "key": "rakutenLife", "link": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fwww.rakuten-life.co.jp%2F%3Fscid%3Dwi_grp_gmx_sei_ich_top_genre&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22rakuten-life_rd%22%5D&pgs=pc_top_sidenavi_service", "image": "https://r.r10s.jp/com/inc/home/20080930/ris/img/sidenavi/service/lifeinsurance.svg", "clickComponentId": "pc_top_sidenavi_service_modal_finance_lifeinsurance_click" },
+        { "key": "easyInsurance", "link": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fwww.rakuten.co.jp%2Fr-hoken%2F&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22r-hoken_rd%22%5D&pgs=pc_top_sidenavi_service", "image": "https://r.r10s.jp/com/inc/home/20080930/ris/img/sidenavi/service/kantanhoken.svg", "clickComponentId": "pc_top_sidenavi_service_modal_finance_kantanhoken_click" },
+        { "key": "rakutenPetInsurance", "link": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fwww.rakuten-ssi.co.jp%2Fapplication%2Fad%2Flp%2F90162203%2F2.html&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22ssi_rd%22%5D&pgs=pc_top_sidenavi_genre", "image": "https://r.r10s.jp/com/inc/home/20080930/ris/img/sidenavi/service/petinsurance.svg", "clickComponentId": "pc_top_sidenavi_service_modal_finance_petinsurance_click" }
+      ]
+    },
+    {
+      "key": "travelLeisure",
+      "items": [
+        { "key": "rakutenTravel", "link": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Ftravel.rakuten.co.jp%2F&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22travel_rd%22%5D&pgs=pc_top_sidenavi_service", "image": "https://r.r10s.jp/com/inc/home/20080930/ris/img/sidenavi/service/travel.svg", "clickComponentId": "pc_top_sidenavi_service_modal_travel_travel_click" },
+        { "key": "rakutenStay", "link": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fstay.rakuten.co.jp%2F&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22stay_rd%22%5D&pgs=pc_top_sidenavi_service", "image": "https://r.r10s.jp/com/inc/home/20080930/ris/img/sidenavi/service/stay.svg", "clickComponentId": "pc_top_sidenavi_service_modal_travel_stay_click" },
+        { "key": "rakutenGora", "link": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fgora.golf.rakuten.co.jp%2F%3Fscid%3Dwi_ich_gra_top_leftnv&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22gora_rd%22%5D&pgs=pc_top_sidenavi_service", "image": "https://r.r10s.jp/com/inc/home/20080930/ris/img/sidenavi/service/gora.svg", "clickComponentId": "pc_top_sidenavi_service_modal_travel_gora_click" },
+        { "key": "rakutenLottery", "link": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Ftakarakuji.rakuten.co.jp%2F&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22takarakuji_rd%22%5D&pgs=pc_top_sidenavi_service", "image": "https://r.r10s.jp/com/inc/home/20080930/ris/img/sidenavi/service/kuji.svg", "clickComponentId": "pc_top_sidenavi_service_modal_travel_kuji_click" },
+        { "key": "rakutenTravelExperiences", "link": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fexperiences.travel.rakuten.co.jp%2F&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22experiences-travel_rd%22%5D&pgs=pc_top_sidenavi_service", "image": "https://r.r10s.jp/com/inc/home/20080930/ris/img/sidenavi/service/travelexperience.svg", "clickComponentId": "pc_top_sidenavi_service_modal_travel_travelexperience_click" },
+        { "key": "rakutenCarShare", "link": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fcarshare.rakuten.co.jp%2F%3Fscid%3Dwi_ich_carshare_genretab_top&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22carshare_rd%22%5D&pgs=pc_top_sidenavi_genre", "image": "https://r.r10s.jp/com/inc/home/20080930/ris/img/sidenavi/service/carshare.svg", "clickComponentId": "pc_top_sidenavi_service_modal_travel_carshare_click" },
+        { "key": "rakutenToto", "link": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Ftoto.rakuten.co.jp%2F&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22toto_rd%22%5D&pgs=pc_top_sidenavi_service", "image": "https://r.r10s.jp/com/inc/home/20080930/ris/img/sidenavi/service/toto.svg", "clickComponentId": "pc_top_sidenavi_service_modal_travel_toto_click" },
+        { "key": "rakutenKeiba", "link": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fkeiba.rakuten.co.jp%2F&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22keiba_rd%22%5D&pgs=pc_top_sidenavi_service", "image": "https://r.r10s.jp/com/inc/home/20080930/ris/img/sidenavi/service/keiba.svg", "clickComponentId": "pc_top_sidenavi_service_modal_travel_keiba_click" }
+      ]
+    },
+    {
+      "key": "mobileCommunication",
+      "items": [
+        { 
+          "key": "rakutenMobile", 
+          "link": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fac.ebis.ne.jp%2Ftr_set.php%3Fargument%3DZMhPE4GP%26ai%3Drgp_mno_75&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22mobile_rd%22%5D&pgs=pc_top_sidenavi_genre", 
+          "image": "https://r.r10s.jp/com/inc/home/20080930/ris/img/sidenavi/service/mobile.svg", 
+          "clickComponentId": "pc_top_sidenavi_service_modal_network_mobile_click",
+          "description": {"ja": "アプリで国内通話無料", "en": "Free domestic calls in-app", "ko": "앱으로 국내 통화 무료", "zh-CN": "使用该应用可免费拨打国内电话", "zh-TW": "使用應用程式即可享國內免費通話"} 
+        },
+        { "key": "rakutenHikari", "link": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fnetwork.mobile.rakuten.co.jp%2Fhikari%2F%3Fscid%3Dwi_ich_rmb_mkdiv_genretab_top%3D1&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22hikari_rd%22%5D&pgs=pc_top_sidenavi_genre", "image": "https://r.r10s.jp/com/inc/home/20080930/ris/img/sidenavi/service/hikari.svg", "clickComponentId": "pc_top_sidenavi_service_modal_network_hikari_click" },
+        { "key": "rakutenDenwa", "link": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fdenwa.rakuten.co.jp%2F&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22denwa_rd%22%5D&pgs=pc_top_sidenavi_service", "image": "https://r.r10s.jp/com/inc/home/20080930/ris/img/sidenavi/service/denwa.svg", "clickComponentId": "pc_top_sidenavi_service_modal_network_denwa_click",
+          "description": {"ja": "通話料無料の電話アプリ", "en": "Phone app with no calling fees", "ko": "통화료 무료 전화 앱", "zh-CN": "可免费通话的电话应用", "zh-TW": "免費通話應用程式"}
+        },
+        { "key": "rakutenInfoseek", "link": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fwww.infoseek.co.jp%2F&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22infoseek_rd%22%5D&pgs=pc_top_sidenavi_service", "image": "https://r.r10s.jp/com/inc/home/20080930/ris/img/sidenavi/service/infoseek.svg", "clickComponentId": "pc_top_sidenavi_service_modal_network_infoseek_click" },
+        { "key": "rakutenWebSearch", "link": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Ftoolbar.rakuten.co.jp%2Fintro%2Finstall%2Fchrome%2F&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22toolbar_rd%22%5D&pgs=pc_top_sidenavi_service", "image": "https://r.r10s.jp/com/inc/home/20080930/ris/img/sidenavi/service/websearch.svg", "clickComponentId": "pc_top_sidenavi_service_modal_network_websearch_click" },
+        { "key": "rakutenAffiliate", "link": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Faffiliate.rakuten.co.jp%2F&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22affiliate_rd%22%5D&pgs=pc_top_sidenavi_service", "image": "https://r.r10s.jp/com/inc/home/20080930/ris/img/sidenavi/service/affiliate.svg", "clickComponentId": "pc_top_sidenavi_service_modal_network_affiliate_click" },
+        { "key": "viber", "link": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fviber.co.jp%2F&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22viber_rd%22%5D&pgs=pc_top_sidenavi_service", "image": "https://r.r10s.jp/com/inc/home/20080930/ris/img/sidenavi/service/viber.svg", "clickComponentId": "pc_top_sidenavi_service_modal_network_viber_click" }
+      ]
+    },
+    {
+      "key": "videoEntertainment",
+      "items": [
+        { "key": "viki", "link": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fwww.viki.com%2F%3Flocale%3Dja&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22viki_rd%22%5D&pgs=pc_top_sidenavi_genre", "image": "https://r.r10s.jp/com/inc/home/20080930/ris/img/sidenavi/service/viki.svg", "clickComponentId": "pc_top_sidenavi_service_modal_entertainment_viki_click" },
+        { "key": "rakutenMagazine", "link": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fmagazine.rakuten.co.jp%2F&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22magazine_rd%22%5D&pgs=pc_top_sidenavi_genre", "image": "https://r.r10s.jp/com/inc/home/20080930/ris/img/sidenavi/service/magazine.svg", "clickComponentId": "pc_top_sidenavi_service_modal_entertainment_magazine_click" },
+        { "key": "rakutenTicket", "link": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fticket.rakuten.co.jp%2F&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22ticket_rd%22%5D&pgs=pc_top_sidenavi_service", "image": "https://r.r10s.jp/com/inc/home/20080930/ris/img/sidenavi/service/ticket.svg", "clickComponentId": "pc_top_sidenavi_service_modal_entertainment_ticket_click" },
+        { "key": "rakutenMusic", "link": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fmusic.rakuten.co.jp%2F&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22music_rd%22%5D&pgs=pc_top_sidenavi_genre", "image": "https://r.r10s.jp/com/inc/home/20080930/ris/img/sidenavi/service/music.svg", "clickComponentId": "pc_top_sidenavi_service_modal_entertainment_music_click",
+          "description": {"ja": "定額制の聴き放題アプリ", "en": "Unlimited listening subscription app", "ko": "정액제 무제한 음악 앱", "zh-CN": "包月畅听应用", "zh-TW": "定額暢聽音樂應用程式"}
+        }
+      ]
+    },
+    {
+      "key": "life",
+      "items": [
+        { "key": "rakutenDenki", "link": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fenergy.rakuten.co.jp%2Felectricity%2F%3Fscid%3Dwi_ich_ene_bmd_bmd_pcleftgenre&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22energy_rd%22%5D&pgs=pc_top_sidenavi_service", "image": "https://r.r10s.jp/com/inc/home/20080930/ris/img/sidenavi/service/denki.svg", "clickComponentId": "pc_top_sidenavi_service_modal_life_denki_click" },
+        { "key": "rakutenBeauty", "link": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fbeauty.rakuten.co.jp%2F&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22beauty_rd%22%5D&pgs=pc_top_sidenavi_genre", "image": "https://r.r10s.jp/com/inc/home/20080930/ris/img/sidenavi/service/beauty.svg", "clickComponentId": "pc_top_sidenavi_service_modal_life_beauty_click" },
+        { "key": "rakutenGurunabi", "link": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fdining.rakuten.co.jp%2Fcnt%2F%3Fscid%3Dwi_ich_top_genretab_cnt&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22dining_rd%22%5D&pgs=pc_top_sidenavi_service", "image": "https://r.r10s.jp/com/inc/home/20080930/ris/img/sidenavi/service/gnavi.svg", "clickComponentId": "pc_top_sidenavi_service_modal_life_gnavi_click" },
+        { "key": "petWari", "link": "https://event.rakuten.co.jp/pet/petwari/?l-id=top_normal_sidenavi_service_modal_life_petwari", "image": "https://r.r10s.jp/com/inc/home/20080930/ris/img/sidenavi/service/petwari.svg", "clickComponentId": "pc_top_sidenavi_service_modal_life_petwari_click" },
+        { "key": "myCarWari", "link": "https://event.rakuten.co.jp/auto/mycar/program/?l-id=top_normal_sidenavi_service_modal_life_mycarwari", "image": "https://r.r10s.jp/com/inc/home/20080930/ris/img/sidenavi/service/mycarwari.svg", "clickComponentId": "pc_top_sidenavi_service_modal_life_mycarwari_click" },
+        { "key": "rakutenCarShaken", "link": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fshaken.rakuten.co.jp%2F&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22shaken_rd%22%5D&pgs=pc_top_sidenavi_service", "image": "https://r.r10s.jp/com/inc/home/20080930/ris/img/sidenavi/service/shaken.svg", "clickComponentId": "pc_top_sidenavi_service_modal_life_shaken_click" },
+        { "key": "rakutenGas", "link": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fenergy.rakuten.co.jp%2Fgas%2F%3Fscid%3Dwi_ich_ene_bmd_sidecate_normal&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22gas_rd%22%5D&pgs=pc_top_sidenavi_service", "image": "https://r.r10s.jp/com/inc/home/20080930/ris/img/sidenavi/service/gas.svg", "clickComponentId": "pc_top_sidenavi_service_modal_life_gas_click" },
+        { "key": "rakutenRecipe", "link": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Frecipe.rakuten.co.jp%2F&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22recipe_rd%22%5D&pgs=pc_top_sidenavi_service", "image": "https://r.r10s.jp/com/inc/home/20080930/ris/img/sidenavi/service/recipe.svg", "clickComponentId": "pc_top_sidenavi_service_modal_life_recipe_click" },
+        { "key": "mamaWari", "link": "https://event.rakuten.co.jp/family/?l-id=top_normal_sidenavi_service_modal_life_mamawari", "image": "https://r.r10s.jp/com/inc/home/20080930/ris/img/sidenavi/service/mamawari.svg", "clickComponentId": "pc_top_sidenavi_service_modal_life_mamawari_click" },
+        { "key": "gakuWari", "link": "https://event.rakuten.co.jp/young/?l-id=top_normal_sidenavi_service_modal_life_gakuwari", "image": "https://r.r10s.jp/com/inc/home/20080930/ris/img/sidenavi/service/gakuwari.svg", "clickComponentId": "pc_top_sidenavi_service_modal_life_gakuwari_click" },
+        { "key": "rakutenCar", "link": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fcar.rakuten.co.jp%2F&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22car_rd%22%5D&pgs=pc_top_sidenavi_genre", "image": "https://r.r10s.jp/com/inc/home/20080930/ris/img/sidenavi/service/car.svg", "clickComponentId": "pc_top_sidenavi_service_modal_life_car_click" },
+        { "key": "rakutenRealEstate", "link": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Frealestate.rakuten.co.jp%2F&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22realestate_rd%22%5D&pgs=pc_top_sidenavi_service", "image": "https://r.r10s.jp/com/inc/home/20080930/ris/img/sidenavi/service/realstate.svg", "clickComponentId": "pc_top_sidenavi_service_modal_life_realstate_click" }
+      ]
+    },
+    {
+      "key": "point",
+      "items": [
+        { "key": "rakutenPointCard", "link": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fpointcard.rakuten.co.jp%2F&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22pointcard_rd%22%5D&pgs=pc_top_sidenavi_service", "image": "https://r.r10s.jp/com/inc/home/20080930/ris/img/sidenavi/service/pointcard.svg", "clickComponentId": "pc_top_sidenavi_service_modal_point_pointcard_click" }
+      ]
+    }
+  ]"
+|               data-link="{
+    "key": "widgetLink",
+    "url": "https://www.rakuten.co.jp/sitemap/?l-id=top_normal_sidenavi_service_sitemap",
+    "clickComponentId": "pc_top_sidenavi_service_sitemap_click"
+  }"
+|               data-rat-account-id="1"
+|               data-rat-page-layout="pc"
+|               data-rat-page-type="top"
+|               data-rat-service-id="1"
+|               irc="ServiceWidget"
+|             " <#comment>"
+|             <!-- #comment -->
+|             "
+                    "
+|             <div>
+|               data-has-border-bottom="true"
+|               data-icon="common-campaign"
+|               data-items="[
+    {
+      "key": "readingCollaboration",
+      "items": [
+        {
+          "key": "rfMag",
+          "link": "https://brandavenue.rakuten.co.jp/contents/rfmag/?l-id=top_normal_sidenavi_service_modal_curation_rfmag",
+          "image": "https://r.r10s.jp/com/inc/home/20080930/ris/img/sidenavi/curation/rfmag.png",
+          "clickComponentId": "pc_top_sidenavi_service_modal_curation_rfmag_click"
+        },
+        {
+          "key": "rMagazine",
+          "link": "https://event.rakuten.co.jp/rmagazine/?l-id=top_normal_sidenavi_service_modal_curation_rmagazine",
+          "image": "https://r.r10s.jp/com/inc/home/20080930/ris/img/sidenavi/curation/rmagazine.png",
+          "clickComponentId": "pc_top_sidenavi_service_modal_curation_rmagazine_click"
+        },
+        {
+          "key": "earthMall",
+          "link": "https://event.rakuten.co.jp/earthmall/?l-id=top_normal_sidenavi_service_modal_curation_earthmall",
+          "image": "https://r.r10s.jp/com/inc/home/20080930/ris/img/sidenavi/curation/earthmall.png",
+          "clickComponentId": "pc_top_sidenavi_service_modal_curation_earthmall_click"
+        },
+        {
+          "key": "machiraku",
+          "link": "https://event.rakuten.co.jp/area/?l-id=top_normal_sidenavi_service_modal_curation_machiraku",
+          "image": "https://r.r10s.jp/com/inc/home/20080930/ris/img/sidenavi/curation/machiraku.png",
+          "clickComponentId": "pc_top_sidenavi_service_modal_curation_machiraku_click"
+        },
+        {
+          "key": "diggly",
+          "link": "https://event.rakuten.co.jp/diggly/?l-id=top_normal_sidenavi_service_modal_curation_diggly",
+          "image": "https://r.r10s.jp/com/inc/home/20080930/ris/img/sidenavi/curation/diggly.png",
+          "clickComponentId": "pc_top_sidenavi_service_modal_curation_diggly_click"
+        }
+      ]
+    },
+    {
+      "key": "character",
+      "items": [
+        {
+          "key": "disneyZone",
+          "link": "https://event.rakuten.co.jp/disney/?l-id=top_normal_sidenavi_service_modal_character_disney",
+          "image": "https://r.r10s.jp/com/inc/home/20080930/ris/img/sidenavi/curation/disney.png",
+          "clickComponentId": "pc_top_sidenavi_service_modal_character_disney_click"
+        },
+        {
+          "key": "marvelCorner",
+          "link": "https://event.rakuten.co.jp/marvel/?l-id=top_normal_sidenavi_service_modal_character_marvel",
+          "image": "https://r.r10s.jp/com/inc/home/20080930/ris/img/sidenavi/curation/marvel.png",
+          "clickComponentId": "pc_top_sidenavi_service_modal_character_marvel_click"
+        },
+        {
+          "key": "starWarsCorner",
+          "link": "https://event.rakuten.co.jp/starwars/?l-id=top_normal_sidenavi_service_modal_character_starwars",
+          "image": "https://r.r10s.jp/com/inc/home/20080930/ris/img/sidenavi/curation/starwars.png",
+          "clickComponentId": "pc_top_sidenavi_service_modal_character_starwars_click"
+        },
+        {
+          "key": "pokemonFeature",
+          "link": "https://event.rakuten.co.jp/pokemon/?l-id=top_normal_sidenavi_service_modal_character_pokemon",
+          "image": "https://r.r10s.jp/com/inc/home/20080930/ris/img/sidenavi/curation/pokemon.png",
+          "clickComponentId": "pc_top_sidenavi_service_modal_character_pokemon_click"
+        },
+        {
+          "key": "moominFeature",
+          "link": "https://event.rakuten.co.jp/moomin/?l-id=top_normal_sidenavi_service_modal_character_moomin",
+          "image": "https://r.r10s.jp/com/inc/home/20080930/ris/img/sidenavi/curation/moomin.png",
+          "clickComponentId": "pc_top_sidenavi_service_modal_character_moomin_click"
+        }
+      ]
+    }
+  ]"
+|               irc="CurationContent"
+|             " <#comment>"
+|             <!-- #comment -->
+|             "
+                    "
+|             <div>
+|               data-appear-component-id="pc_top_sidenavi_help-guide"
+|               data-has-border-bottom="true"
+|               data-items="[
+    {
+      "key": "delivery",
+      "subItems": [
+        {
+          "key": "deliveryGeneral",
+          "link": "https://event.rakuten.co.jp/guide/shipping/?l-id=top_normal_sidenavi_help-guide_modal-delivery_shipping",
+          "clickComponentId": "pc_top_sidenavi_help-guide_modal-delivery_shipping_click"
+        },
+        {
+          "key": "deliveryConvenience",
+          "link": "https://event.rakuten.co.jp/guide/shipping/cvs/?l-id=top_normal_sidenavi_help-guide_modal-delivery_shipping-cvs",
+          "clickComponentId": "pc_top_sidenavi_help-guide_modal-delivery_shipping-cvs_click"
+        },
+        {
+          "key": "deliveryPostOffice",
+          "link": "https://event.rakuten.co.jp/guide/shipping/jp/?l-id=top_normal_sidenavi_help-guide_modal-delivery_shipping-jp",
+          "clickComponentId": "pc_top_sidenavi_help-guide_modal-delivery_shipping-jp_click"
+        },
+        {
+          "key": "deliveryHakoposu",
+          "link": "https://event.rakuten.co.jp/guide/shipping/haco-pos/?l-id=top_normal_sidenavi_help-guide_modal-delivery_shipping-haco-pos",
+          "clickComponentId": "pc_top_sidenavi_help-guide_modal-delivery_shipping-haco-pos_click"
+        },
+        {
+          "key": "deliveryInStore",
+          "link": "https://event.rakuten.co.jp/instore_pickup/?l-id=top_normal_sidenavi_help-guide_modal-delivery_instore-pickup",
+          "clickComponentId": "pc_top_sidenavi_help-guide_modal-delivery_instore-pickup_click"
+        }
+      ]
+    },
+    {
+      "key": "shoppingGuide",
+      "link": "https://event.rakuten.co.jp/beginner/?l-id=top_normal_sidenavi_help-guide_beginner",
+      "clickComponentId": "pc_top_sidenavi_help-guide_beginner_click"
+    },
+    {
+      "key": "openShop",
+      "link": "https://www.rakuten.co.jp/ec/",
+      "clickComponentId": "pc_top_sidenavi_help-guide_ec_click"
+    },
+    {
+      "key": "freeCompensation",
+      "link": "https://event.rakuten.co.jp/anshin/anshinshopping/?l-id=top_normal_sidenavi_help-guide_anshin",
+      "clickComponentId": "pc_top_sidenavi_help-guide_anshin_click"
+    },
+    {
+      "key": "helpContact",
+      "link": "https://ichiba.faq.rakuten.net/",
+      "clickComponentId": "pc_top_sidenavi_help-guide_faq_click"
+    }
+  ]"
+|               data-rat-account-id="1"
+|               data-rat-page-layout="pc"
+|               data-rat-page-type="top"
+|               data-rat-service-id="1"
+|               irc="HelpWidget"
+|               " <#comment>"
+|               <!-- #comment -->
+|               "
+                "
+|             " <#comment>"
+|             <!-- #comment -->
+|             "
+            "
+|           " <#comment>"
+|           <!-- #comment -->
+|           "
+        "
+|         " <#comment>"
+|         <!-- #comment -->
+|         "
+
+        "
+|         <div>
+|           id="footer-section"
+|           "
+            "
+|           <div>
+|             data-has-border-top="true"
+|             data-meta-field-ids="{
+    "userAgent": "290469"
+  }"
+|             data-rat-account-id="1"
+|             data-rat-component-id="pc_top_footer-rts"
+|             data-rat-page-name="ichiba_top"
+|             data-rat-page-type="top"
+|             data-rat-service-id="1"
+|             data-survey-id="43174"
+|             data-survey-props="{"prefixQuestionNumber": "質問",
+    "questions": [
+      {
+        "fieldId": "294265",
+        "question": {
+          "ja": "このページで改善して欲しい項目を下記（選択肢１から7）よりお選びください。"
+        },
+        "type": "checkbox",
+        "options": [
+          {
+            "optionId": "822450",
+            "option": {
+              "ja": "1. 画像の見やすさ"
+            }
+          },
+          {
+            "optionId": "822451",
+            "option": {
+              "ja": "2. 文字の読みやすさ"
+            }
+          },
+          {
+            "optionId": "822452",
+            "option": {
+              "ja": "3. ページの表示速度"
+            }
+          },
+          {
+            "optionId": "822453",
+            "option": {
+              "ja": "4. 知りたい情報の見つけやすさ"
+            }
+          },
+          {
+            "optionId": "822454",
+            "option": {
+              "ja": "5. 使用したい機能の見つけやすさ"
+            }
+          },
+          {
+            "optionId": "822455",
+            "option": {
+              "ja": "6. 自分に関係のある情報の提供"
+            }
+          },
+          {
+            "optionId": "822456",
+            "option": {
+              "ja": "7. その他"
+            }
+          }
+        ]
+      },
+      {
+        "fieldId": "294266",
+        "question": {
+          "ja": "このページに関してご意見・ご要望ございましたら、ご自由にお書きください。【1000文字】"
+        },
+        "type": "text"
+      }
+    ],
+  "disclaimer": {
+      "prefixText": {
+        "ja": "お客様より提供いただく情報はサービス向上のために利用します。個人情報の取り扱いに関しては"
+      },
+      "suffixText": {
+        "ja": "をご確認ください。"
+      },
+      "linkText": {
+        "ja": "こちら"
+      },
+      "linkUrl": "https://privacy.rakuten.co.jp/"
+    },
+  "submitButtonText": "送信する",
+  "thankyouMessage": "ご協力ありがとうございました"
+  }"
+|             data-trigger-props="{
+    "fieldId": "294264",
+    "mainQuestion": {
+      "ja": "このページの使いやすさはいかがですか？"
+    },
+    "optionIds": {
+      "1": "822445",
+      "2": "822446",
+      "3": "822447",
+      "4": "822448",
+      "5": "822449"
+    },
+    "lowestScoreText": {
+      "ja": "とても使いにくい"
+    },
+    "highestScoreText": {
+      "ja": "とても使いやすい"
+    }
+  }"
+|             irc="RealtimeSurvey"
+|           " <#comment>"
+|           <!-- #comment -->
+|           "
+            "
+|           <div>
+|             data-configuration="{
+      "prefixText": {
+      "ja": "楽天市場アプリで\nもっと快適にお買い物",
+      "en": "Shop smarter with \n the Rakuten Ichiba app",
+      "ko": "Rakuten Ichiba 앱으로\n 더 편리하게 쇼핑",
+      "zh-CN": "使用Rakuten Ichiba应用，\n购物更轻松",
+      "zh-TW": "使用Rakuten Ichiba應用程式，\n購物更方便"
+    },
+ 
+    "appStore": {
+      "clickComponentId": "pc_top_footer-app_rakuten_apple_click",
+      "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fitunes.apple.com%2Fjp%2Fapp%2Fid419267350%2F&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22rakuten_apple_rd%22%5D&pgs=pc_top_footer-app"
+    },
+    "playStore": {
+      "clickComponentId": "pc_top_footer-app_rakuten_google_click",
+      "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fapp.adjust.com%2Fscqmzg%3Fcampaign%3DEXP_ichiba%26adgroup%3DPC_top%26creative%3DfooterButton_20150326&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22rakuten_google_rd%22%5D&pgs=pc_top_footer-app"
+    }
+  }"
+|             data-rat-component-id="pc_top_footer-app"
+|             irc="AppPromotionWidget"
+|           " <#comment>"
+|           <!-- #comment -->
+|           "
+            "
+|           <div>
+|             data-has-border-bottom="true"
+|             data-merchant-resources="{
+    "key": "merchantTitle",
+    "links": [
+      { "key": "merchantOpenShop", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fwww.rakuten.co.jp%2Fec%2F%3Fcamp%3D70110000000UyVP%26scid%3Dwi_ich_footer_guide_top&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22ec_rd%22%5D&pgs=pc_top_footer-business", "clickComponentId": "pc_top_footer-business_ec_click" },
+      { "title": {
+      "ja": "市場出店のお申込",
+      "en": "Store application",
+      "ko": "Rakuten Ichiba 입점 신청",
+      "zh-CN": "申请入驻",
+      "zh-TW": "申請出店"},
+      "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fecappfrm.rakuten.co.jp%2Fichiba%2Fentry%2Finput%3Fcamp%3D70110000000tpcw%26scid%3Dwi_ich__footer_guide_top_direct&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22ecappfrm_entry_rd%22%5D&pgs=pc_top_footer-business",
+      "clickComponentId": "pc_top_footer-business_ecappfrm_entry_click" },
+      { "title": {
+      "ja": "市場出店資料の請求",
+      "en": "Request store opening guide",
+      "ko": "입점 자료 요청",
+      "zh-CN": "申请开店资料",
+      "zh-TW": "索取ichiba開店資料"},
+      "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fecappfrm.rakuten.co.jp%2Flead%2F%3Fcamp%3D70110000000UyVP%26scid%3Dwi_ich_footer_guide_top_rfi%26fcont%3Df&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22ecappfrm_form_rd%22%5D&pgs=pc_top_footer-business",
+      "clickComponentId": "pc_top_footer-business_ecappfrm_form_click" },
+      { "key": "merchantPlans", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fwww.rakuten.co.jp%2Fec%2Fplan%2F%3Fcamp%3D70110000000UyVP%26scid%3Dwi_ich_footer_guide_plan&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22ec_plan_rd%22%5D&pgs=pc_top_footer-business", "clickComponentId": "pc_top_footer-business_ec_plan_click" },
+      { "key": "merchantProcess", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fwww.rakuten.co.jp%2Fec%2Fopen%2F%3Fcamp%3D70110000000UyVP%26scid%3Dwi_ich_footer_guide_open&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22ec_open_rd%22%5D&pgs=pc_top_footer-business", "clickComponentId": "pc_top_footer-business_ec_open_click" },
+      { "key": "merchantKnowhow", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fwww.rakuten.co.jp%2Fec%2Fstart%2Fknowhow%2F%3Fcamp%3D70110000000UyVP%26scid%3Dwi_ich_footer_guide_start_knowhow&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22ec_start_rd%22%5D&pgs=pc_top_footer-business", "clickComponentId": "pc_top_footer-business_ec_start_click" },
+      { "key": "merchantMakerNavi", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fmaker-showroom.rakuten.co.jp%2Fsolution%2F&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22maker-showroom_rd%22%5D&pgs=pc_top_footer-service", "clickComponentId": "pc_top_footer-business_maker-showroom_click" },
+      { "key": "merchantPointOnline", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fpointonline.rakuten.co.jp%2Fservice%2F&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22pointonline_rd%22%5D&pgs=pc_top_footer-service", "clickComponentId": "pc_top_footer-business_pointonline_click" },
+      { "key": "merchantPayStore", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fpay.rakuten.co.jp%2Fbusiness%2F%3Fscid%3Dsmp_redirect_top_202012&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22pay_business_rd%22%5D&pgs=pc_top_footer-service", "clickComponentId": "pc_top_footer-business_pay_business_click" }
+    ]
+  }"
+|             data-omni-config="{
+    "clientId": "rakuten_ichiba_top_web",
+    "redirectUri": "https://www.rakuten.co.jp/?l-id=top_092"
+  }"
+|             data-service-list="{
+    "key": "sectionTitle",
+    "sections": [
+      {
+        "key": "shoppingTitle",
+        "icon": { "visualElement": { "category": "pointDisplay", "name": "point-display-shopping-cart" } },
+        "items": [
+          { "key": "rakutenBooks", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fbooks.rakuten.co.jp%2F%3Fl-id%3Dtop_normal_special40&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22books_rd%22%5D&pgs=pc_top_footer-service", "clickComponentId": "pc_top_footer_service_books_click" },
+          { "key": "rakutenKobo", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fbooks.rakuten.co.jp%2Fe-book%2F&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22e-book_rd%22%5D&pgs=pc_top_footer-service", "clickComponentId": "pc_top_footer_service_kobo_click" },
+          { "key": "rakuten24", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2F24.rakuten.co.jp%2F&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%2224_rd%22%5D&pgs=pc_top_footer-service", "clickComponentId": "pc_top_footer_service_24_click" },
+          { "key": "rakuten24Express", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Ffast-delivery-mart.rakuten.co.jp%2F&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22sokuhai_rd%22%5D&pgs=pc_top_footer-service", "clickComponentId": "pc_top_footer_service_sokuhai_click" },
+          { "key": "rakutenBic", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fbiccamera.rakuten.co.jp%2F%3Fscid%3Dwi_ich_top_footer_bic&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22biccamera_rd%22%5D&pgs=pc_top_footer-service", "clickComponentId": "pc_top_footer_service_biccamera_click" },
+          { "key": "rakutenFashion", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fbrandavenue.rakuten.co.jp%2F&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22brandavenue_rd%22%5D&pgs=pc_top_footer-service", "clickComponentId": "pc_top_footer_service_fashion_click" },
+          { "key": "rakutenRakken", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fevent.rakuten.co.jp%2Frakken%2F&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22rakken_rd%22%5D&pgs=pc_top_footer-service", "clickComponentId": "pc_top_footer_service_rakken_click" },
+          { "key": "rakutenRakuma", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Ffril.jp%2F%3Fscid%3Dwi_ich_pc_top_groupservice&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22rakuma_rd%22%5D&pgs=pc_top_footer-service", "clickComponentId": "pc_top_footer_service_rakuma_click" },
+          { "key": "rakutenMart", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fsm.rakuten.co.jp%2F%3Fscid%3Dwi_ich_top_footer&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22sm_rd%22%5D&pgs=pc_top_footer-service", "clickComponentId": "pc_top_footer_service_mart_click" },
+          { "key": "rakutenSuper", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fnetsuper.rakuten.co.jp%2F%3Fscid%3Dwi_ich_footer_zsu_top&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22netsuper_rd%22%5D&pgs=pc_top_footer-service", "clickComponentId": "pc_top_footer_service_netsuper_click" },
+          { "key": "rakutenRebates", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fwww.rebates.jp%2F%3Futm_medium%3Dpartner%26utm_campaign%3Dich_top_ftr%26utm_source%3Dweb%26utm_content%3Dichiba%26utm_term%3D%26utm_size%3D%26utm_pub%3D%26utm_ebs%3DHP%26scid%3Dich_top_ftr&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22rebates_rd%22%5D&pgs=pc_top_footer-service", "clickComponentId": "pc_top_footer_service_rebates_click" },
+          { "key": "rakutenRoom", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Froom.rakuten.co.jp%2F&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22room_rd%22%5D&pgs=pc_top_footer-service", "clickComponentId": "pc_top_footer_service_room_click" },
+          { "key": "rakutenRaCoupon", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fcoupon.rakuten.co.jp%2F&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22coupon_rd%22%5D&pgs=pc_top_footer-service", "clickComponentId": "pc_top_footer_service_racoupon_click" },
+          { "key": "jLeague", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fstore.jleague.jp%2F%3Fscid%3Dwi_ich_jos_rtop_pc_footertxt_01&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22jleague_rd%22%5D&pgs=pc_top_footer-service", "clickComponentId": "pc_top_footer_service_jleague_click" },
+          { "key": "rakutenGlobalExpress", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fglobalexpress.rakuten.co.jp%2Fbeginner%2Fichiba%2F&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22globalexpress_rd%22%5D&pgs=pc_top_footer-service", "clickComponentId": "pc_top_footer_service_globalexpress_click" }
+        ]
+      },
+      {
+        "key": "cardTitle",
+        "icon": { "visualElement": { "category": "pointDisplay", "name": "point-display-credit-card" } },
+        "items": [
+          { "key": "rakutenCard", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fad2.trafficgate.net%2Ft%2Fr%2F5126%2F1441%2F99636_99636%2F&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22card_rd%22%5D&pgs=pc_top_footer-service", "clickComponentId": "pc_top_footer_service_card_click" },
+          { "key": "rakutenPayOnline", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fcheckout.rakuten.co.jp%2Fshopping%2F%3Fscid%3Dwi_ich_top_footer_pc_text_rpayid&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22checkout_rd%22%5D&pgs=pc_top_footer-service", "clickComponentId": "pc_top_footer_service_payonline_click" },
+          { "key": "rakutenPaySp", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fpay.rakuten.co.jp%2Fdetail%2F&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22pay_rd%22%5D&pgs=pc_top_footer-service", "clickComponentId": "pc_top_footer_service_payapp_click" },
+          { "key": "rakutenEdy", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fedy.rakuten.co.jp%2F&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22edy_rd%22%5D&pgs=pc_top_footer-service", "clickComponentId": "pc_top_footer_service_edy_click" }
+        ]
+      },
+      {
+        "key": "financeTitle",
+        "icon": { "visualElement": { "category": "picturedIcon", "name": "pictured-price-yen" } },
+        "items": [
+          { "key": "rakutenBank", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fwww.rakuten-bank.co.jp%3Fscid%3Dwi_ich_account&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22bank_rd%22%5D&pgs=pc_top_footer-service", "clickComponentId": "pc_top_footer_service_bank_click" },
+          { "key": "rakutenSecurities", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fr10.to%2FhztIzr&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22security_rd%22%5D&pgs=pc_top_footer-service", "clickComponentId": "pc_top_footer_service_security_click" },
+          { "key": "rakutenWallet", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fwww.rakuten-wallet.co.jp%2F&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22wallet_rd%22%5D&pgs=pc_top_footer-service", "clickComponentId": "pc_top_footer_service_wallet_click" },
+          { "key": "rakutenToushin", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fwww.rakuten-toushin.co.jp%2F&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22toushin_rd%22%5D&pgs=pc_top_footer-service", "clickComponentId": "pc_top_footer_service_toushin_click" },
+          { "key": "rakutenSonpo", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fwww.rakuten-sonpo.co.jp%2F&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22sonpo_rd%22%5D&pgs=pc_top_footer-service", "clickComponentId": "pc_top_footer_service_sonpo_click" },
+          { "key": "rakutenSeimei", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fwww.rakuten-life.co.jp%2F&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22rakuten-life_rd%22%5D&pgs=pc_top_footer-service", "clickComponentId": "pc_top_footer_service_lifeinsurance_click" },
+          { "key": "carInsuranceEstimates", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Finsurance.rakuten.co.jp%2Fcar%2F%3Fscid%3Dwi_ich_est_spc_c001&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22insurance_rd%22%5D&pgs=pc_top_footer-service", "clickComponentId": "pc_top_footer_service_carinsurance_click" },
+          { "key": "easyInsurance", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fwww.rakuten.co.jp%2Fr-hoken%2F&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22r-hoken_rd%22%5D&pgs=pc_top_footer-service", "clickComponentId": "pc_top_footer_service_kantanhoken_click" },
+          { "key": "insuranceCompare", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fhoken.rakuten.co.jp%2F%3Fscid%3Dwi_ich_top_footer&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22hoken_rd%22%5D&pgs=pc_top_footer-service", "clickComponentId": "pc_top_footer_service_hokenhikaku_click" },
+          { "key": "petInsurance", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fwww.rakuten-ssi.co.jp%2Fproduct%2F&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22ssi_rd%22%5D&pgs=pc_top_footer-service", "clickComponentId": "pc_top_footer_service_petinsurance_click" }
+        ]
+      },
+      {
+        "key": "travelTitle",
+        "icon": { "visualElement": { "category": "picturedIcon", "name": "pictured-plane" } },
+        "items": [
+          { "key": "rakutenTravel", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Ftravel.rakuten.co.jp%2F%3Fl-id%3Dtop_normal_special41&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22travel_rd%22%5D&pgs=pc_top_footer-service", "clickComponentId": "pc_top_footer_service_travel_click" },
+          { "key": "rakutenTravelExperiences", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fexperiences.travel.rakuten.co.jp%2F%3Fscid%3Dwi_ich_txp_pc-top-footer&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22experiences-travel_rd%22%5D&pgs=pc_top_footer-service", "clickComponentId": "pc_top_footer_service_travelexperience_click" },
+          { "key": "rakutenTravelCamp", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fcamp.travel.rakuten.co.jp%2F%3Fscid%3Dwi_ich_tcp_top_footer&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22camp-travel_rd%22%5D&pgs=pc_top_footer-service", "clickComponentId": "pc_top_footer_service_travelcamp_click" },
+          { "key": "rakutenStay", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fstay.rakuten.co.jp%2F%3Fscid%3Dwi_ich_top_footer_rs_01&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22stay_rd%22%5D&pgs=pc_top_footer-service", "clickComponentId": "pc_top_footer_service_stay_click" },
+          { "key": "rakutenOyado", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fvacation-stay.jp%2F%3Fscid%3Dwi_ich_top_footer_vs_01&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22vacation-stay_rd%22%5D&pgs=pc_top_footer-service", "clickComponentId": "pc_top_footer_service_oyado_click" },
+          { "key": "rakutenCarShare", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fcarshare.rakuten.co.jp%2F%3Fscid%3Dwi_grp_gmx_carshare_ich_top_footer&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22carshare_rd%22%5D&pgs=pc_top_footer-service", "clickComponentId": "pc_top_footer_service_carshare_click" },
+          { "key": "rakutenGora", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fgora.golf.rakuten.co.jp%2F%3Fscid%3Dwi_ich_gra_top_footer&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22gora_rd%22%5D&pgs=pc_top_footer-service", "clickComponentId": "pc_top_footer_service_gora_click" },
+          { "key": "rakutenToto", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Ftoto.rakuten.co.jp%2F%3Ftsi%3D10000%26scid%3Dwi_tto_ichibatop_02&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22toto_rd%22%5D&pgs=pc_top_footer-service", "clickComponentId": "pc_top_footer_service_toto_click" },
+          { "key": "rakutenTakarakuji", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Ftakarakuji.rakuten.co.jp%2F%3Fscid%3Dwi_tkk_ichibatop_01&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22takarakuji_rd%22%5D&pgs=pc_top_footer-service", "clickComponentId": "pc_top_footer_service_takarakuji_click" },
+          { "key": "rakutenKeiba", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fkeiba.rakuten.co.jp%2F%3Fl-id%3Dtop_normal_special07&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22keiba_rd%22%5D&pgs=pc_top_footer-service", "clickComponentId": "pc_top_footer_service_keiba_click" },
+          { "key": "kDreams", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fkeirin.kdreams.jp%2F&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22keirin_rd%22%5D&pgs=pc_top_footer-service", "clickComponentId": "pc_top_footer_service_kdreams_click" }
+        ]
+      },
+      {
+        "key": "mobileTitle",
+        "icon": { "visualElement": { "category": "picturedIcon", "name": "pictured-smartphone" } },
+        "items": [
+          { "key": "rakutenMobile", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fac.ebis.ne.jp%2Ftr_set.php%3Fargument%3DZMhPE4GP%26ai%3Drgp_ichi_180913&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22mobile_rd%22%5D&pgs=pc_top_footer-service", "clickComponentId": "pc_top_footer_service_mobile_click" },
+          { "key": "rakutenHikari", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fnetwork.mobile.rakuten.co.jp%2Fhikari%2F%3Fscid%3Dwi_rmb_ich_top_footer&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22hikari_rd%22%5D&pgs=pc_top_footer-service", "clickComponentId": "pc_top_footer_service_hikari_click" },
+          { "key": "rakutenDenwa", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fdenwa.rakuten.co.jp%2F&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22denwa_rd%22%5D&pgs=pc_top_footer-service", "clickComponentId": "pc_top_footer_service_denwa_click" },
+          { "key": "rakutenInfoseek", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fwww.infoseek.co.jp%2F&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22infoseek_rd%22%5D&pgs=pc_top_footer-service", "clickComponentId": "pc_top_footer_service_infoseek_click" },
+          { "key": "rakutenWebSearch", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fwebsearch.rakuten.co.jp%2F&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22websearch_rd%22%5D&pgs=pc_top_footer-service", "clickComponentId": "pc_top_footer_service_websearch_click" },
+          { "key": "rakutenAffiliate", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Faffiliate.rakuten.co.jp%2F&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22affiliate_rd%22%5D&pgs=pc_top_footer-service", "clickComponentId": "pc_top_footer_service_affiliate_click" },
+          { "key": "rakutenLinkShare", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fwww.linkshare.ne.jp%2F&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22linkshare_rd%22%5D&pgs=pc_top_footer-service", "clickComponentId": "pc_top_footer_service_linkshare_click" },
+          { "key": "rakutenBlog", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fplaza.rakuten.co.jp%2F&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22plaza_rd%22%5D&pgs=pc_top_footer-service", "clickComponentId": "pc_top_footer_service_blog_click" },
+          { "key": "rakutenViber", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fviber.co.jp%2F%3Fscid%3Dwi_ich_00004_pc_toppage20140908_06&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22viber_rd%22%5D&pgs=pc_top_footer-service", "clickComponentId": "pc_top_footer_service_viber_click" }
+        ]
+      },
+      {
+        "key": "entertainmentTitle",
+        "icon": { "visualElement": { "category": "picturedIcon", "name": "pictured-play-movie" } },
+        "items": [
+          { "key": "rChannel", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fchannel.rakuten.co.jp%2F&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22channel_rd%22%5D&pgs=pc_top_footer-service", "clickComponentId": "pc_top_footer_service_rchannel_click" },
+          { "key": "rakutenViki", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fwww.viki.com%2F&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22viki_rd%22%5D&pgs=pc_top_footer-service", "clickComponentId": "pc_top_footer_service_viki_click" },
+          { "key": "rakutenMagazine", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fmagazine.rakuten.co.jp%2F%3Fscid%3Dwi_ich_top_footer_160811&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22magazine_rd%22%5D&pgs=pc_top_footer-service", "clickComponentId": "pc_top_footer_service_magazine_click" },
+          { "key": "rakutenTicket", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fticket.rakuten.co.jp%2F%3Fich_top&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22ticket_rd%22%5D&pgs=pc_top_footer-service", "clickComponentId": "pc_top_footer_service_ticket_click" },
+          { "key": "rakutenMusic", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fmusic.rakuten.co.jp%2F%3Fscid%3Dwi_ich_special_msc_non_top_ftr&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22music_rd%22%5D&pgs=pc_top_footer-service", "clickComponentId": "pc_top_footer_service_music_click" },
+          { "key": "minnaTicket", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fnft.rakuten.co.jp%2F%3Fscid%3Dwi_ich_footer_text&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22nft_rd%22%5D&pgs=pc_top_footer-service", "clickComponentId": "pc_top_footer_service_nft_click" },
+          { "key": "rakutenEagles", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fwww.rakuteneagles.jp%2F&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22rakuteneagles_rd%22%5D&pgs=pc_top_footer-service", "clickComponentId": "pc_top_footer_service_eagles_click" },
+          { "key": "visselKobe", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fwww.vissel-kobe.co.jp%2F&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22vissel-kobe_rd%22%5D&pgs=pc_top_footer-service", "clickComponentId": "pc_top_footer_service_vissel_click" }
+        ]
+      },
+      {
+        "key": "lifestyleTitle",
+        "icon": { "visualElement": { "category": "picturedIcon", "name": "pictured-home" } },
+        "items": [
+          { "key": "rakutenDenki", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fenergy.rakuten.co.jp%2Felectricity%2F%3Fscid%3Dwi_ich_ene_bmd_bmd_fter&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22energy_rd%22%5D&pgs=pc_top_footer-service", "clickComponentId": "pc_top_footer_service_denki_click" },
+          { "key": "rakutenGas", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fenergy.rakuten.co.jp%2Fgas%2F&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22gas_rd%22%5D&pgs=pc_top_footer-service", "clickComponentId": "pc_top_footer_service_gas_click" },
+          { "key": "yoyakusuri", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fwww.yoyakusuri.com%2F&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22pharmacy_rd%22%5D&pgs=pc_top_footer-service", "clickComponentId": "pc_top_footer_service_yoyakusuri_click" },
+          { "key": "rakutenHealthCare", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fhealthcare.rakuten.co.jp%2F&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22healthcare_rd%22%5D&pgs=pc_top_footer-service", "clickComponentId": "pc_top_footer_service_healthcare_click" },
+          { "key": "rakutenSenior", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fsenior.rakuten.co.jp%2F&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22senior_rd%22%5D&pgs=pc_top_footer-service", "clickComponentId": "pc_top_footer_service_senior_click" },
+          { "key": "rakutenBeauty", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fbeauty.rakuten.co.jp%2F%3Fscid%3Dwi_ich_top03&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22beauty_rd%22%5D&pgs=pc_top_footer-service", "clickComponentId": "pc_top_footer_service_beauty_click" },
+          { "key": "rakutenRecipe", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Frecipe.rakuten.co.jp%2F%3Fl-id%3Dtop_normal_special37&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22recipe_rd%22%5D&pgs=pc_top_footer-service", "clickComponentId": "pc_top_footer_service_recipe_click" },
+          { "key": "rakutenGurunavi", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fwww.gnavi.co.jp%2F&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22gnavi_rd%22%5D&pgs=pc_top_footer-service", "clickComponentId": "pc_top_footer_service_gnavi_click" },
+          { "key": "rakutenCar", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fcar.rakuten.co.jp%2F&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22car_rd%22%5D&pgs=pc_top_footer-service", "clickComponentId": "pc_top_footer_service_car_click" },
+          { "key": "rakutenCarInspection", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fshaken.rakuten.co.jp%2F%3Fscid%3Dwi_ich_top_ftr&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22shaken_rd%22%5D&pgs=pc_top_footer-service", "clickComponentId": "pc_top_footer_service_shaken_click" },
+          { "key": "rakutenPhoto", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fshashinkan.rakuten.co.jp%2F%3Fscid%3D135%26l-id%3Dtop_normal_special20&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22shashinkan_rd%22%5D&pgs=pc_top_footer-service", "clickComponentId": "pc_top_footer_service_shasinkan_click" },
+          { "key": "rakutenRealEstate", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Frealestate.rakuten.co.jp%2F%3Fscid%3Drg_ichibatop2_top&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22realestate_rd%22%5D&pgs=pc_top_footer-service", "clickComponentId": "pc_top_footer_service_realstate_click" },
+          { "key": "rakutenKakeibo", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fpersonal-finance.rakuten.co.jp%2F%3Fscid%3Dwi_ich_kakeibotop_footer&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22personal-finance_rd%22%5D&pgs=pc_top_footer-service", "clickComponentId": "pc_top_footer_service_kakeibo_click" }
+        ]
+      },
+      {
+        "key": "pointTitle",
+        "icon": { "visualElement": { "category": "point", "name": "point-a1" } },
+        "items": [
+          { "key": "rakutenPointCard", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fpointcard.rakuten.co.jp%2F&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22pointcard_rd%22%5D&pgs=pc_top_footer-service", "clickComponentId": "pc_top_footer_service_pointcard_click" },
+          { "key": "rakutenPointMall", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fpointmall.rakuten.co.jp%2Fspecial%2Fguide%2F%3Fs%3acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22maildepoint_rd%22%5D&pgs=pc_top_footer-service", "clickComponentId": "pc_top_footer_service_maildepoint_click" },
+          { "key": "rakutenSuperPointScreen", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fscreen.rakuten.co.jp%2F&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22screen_rd%22%5D&pgs=pc_top_footer-service", "clickComponentId": "pc_top_footer_service_pointscreen_click" },
+          { "key": "rakutenPasha", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fpasha.rakuten.co.jp%2F&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22pasha_rd%22%5D&pgs=pc_top_footer-service", "clickComponentId": "pc_top_footer_service_pasha_click" },
+          { "key": "rakutenCheck", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fcheck.rakuten.co.jp%2F&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22check_rd%22%5D&pgs=pc_top_footer-service", "clickComponentId": "pc_top_footer_service_check_click" },
+          { "key": "rakutenInsight", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fmember.insight.rakuten.co.jp%2F%3Fscid%3Dwi_grp_ichi_footer&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22insight_rd%22%5D&pgs=pc_top_footer-service", "clickComponentId": "pc_top_footer_service_insight_click" },
+          { "key": "rakutenMiniBite", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fminijob.rakuten.co.jp%2F&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22minijob_rd%22%5D&pgs=pc_top_footer-service", "clickComponentId": "pc_top_footer_service_minijob_click" }
+        ]
+      },
+      {
+        "key": "globalTitle",
+        "icon": { "visualElement": { "category": "picturedIcon", "name": "pictured-world" } },
+        "items": [
+          { "key": "taiwan", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fwww.rakuten.com.tw%2F&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22global-tw_rd%22%5D&pgs=pc_top_footer-service", "clickComponentId": "pc_top_footer_service_taiwan_click" },
+          { "key": "unitedStates", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fwww.rakuten.com%2F&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22global-usa_rd%22%5D&pgs=pc_top_footer-service", "clickComponentId": "pc_top_footer_service_usa_click" },
+                    { "key": "germany", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fwww.rakuten.de%2F&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22global-de_rd%22%5D&pgs=pc_top_footer-service", "clickComponentId": "pc_top_footer_service_germany_click" }
+        ]
+      }
+    ]
+  }"
+|             data-shopper-resources="{
+    "key": "shopperTitle",
+    "links": [
+      { "key": "shopperFirstTime", "url": "https://event.rakuten.co.jp/beginner/?l-id=top_normal_footer-guide_beginner", "clickComponentId": "pc_top_footer-guide_beginner_click" },
+      { "key": "shopperEnglishGuide", "url": "https://event.rakuten.co.jp/beginner/en/?l-id=top_normal_footer-guide_beginner-en", "clickComponentId": "pc_top_footer-guide_beginner-en_click" },
+      { "key": "shopperSafety", "url": "https://event.rakuten.co.jp/anshin/?l-id=top_normal_footer-guide_anshin", "clickComponentId": "pc_top_footer-guide_anshin_click" },
+      { "key": "shopperNewsletter", "url": "https://emagazine.rakuten.co.jp/ns?act=apply", "clickComponentId": "pc_top_footer-guide_emagazine-apply_click" },
+      { "key": "shopperDeliveryGuide", "url": "https://event.rakuten.co.jp/guide/shipping/?l-id=top_normal_footer-guide_shipping", "clickComponentId": "pc_top_footer-guide_shipping_click" },
+      { "key": "shopperTerms", "url": "https://www.rakuten.co.jp/doc/info/rule/ichiba_shopping.html?l-id=top_normal_footer-guide_ichiba-shopping", "clickComponentId": "pc_top_footer-guide_ichiba-shopping_click" },
+      { "key": "shopperHelp", "url": "https://rd.rakuten.co.jp/rat?R2=https%3A%2F%2Fichiba.faq.rakuten.net&acc=1&aid=1&etype=redirect&ssc=top&pgn=ichiba_top&compid=%5B%22faq_rd%22%5D&pgs=pc_top_footer-guide", "clickComponentId": "pc_top_footer-guide_faq_click" },
+      { "key": "shopperOrderHistory", "url": "https://order.my.rakuten.co.jp/?page=search", "clickComponentId": "pc_top_footer-guide_order_click" },
+      { "key": "shopperUnsubscribe", "url": "https://emagazine.rakuten.co.jp/ns?act=chg_news&f=member", "clickComponentId": "pc_top_footer-guide_emagazine-chg-news_click" }
+    ]
+  }"
+|             irc="FooterLinkArea"
+|           " <#comment>"
+|           <!-- #comment -->
+|           "
+            "
+|           <div>
+|             data-settings="{
+  "footerInfos": [
+    {
+      "icon": "https://r.r10s.jp/com/img/thumb/footer/icon_security_red.svg",
+      "url":"https://corp.rakuten.co.jp/security/",
+      "title": {
+        "ja": "情報セキュリティの取り組み",
+        "en": "Information Security Initiatives",
+        "ko": "정보 보안 관련 노력",
+        "zh-CN": "信息安全措施",
+        "zh-TW": "資訊安全措施"
+      },
+      "subTitle": {
+        "ja": "SSLに対応している楽天市場では、クレジットカード番号は暗号化して送信されます。",
+        "en": "Rakuten uses SSL to ensure that credit card numbers are transmitted securely in encrypted form.",
+        "ko": "SSL을 지원하는 Rakuten Ichiba에서는 신용카드 번호가 암호화되어 전송됩니다.",
+        "zh-CN": "在支持SSL的Rakuten Ichiba，信用卡号将加密发送。",
+        "zh-TW": "於支援SSL的Rakuten Ichiba中，信用卡號將加密傳送。"
+      },
+      "tracker": { "name": "pc_footer_initiative_security" }
+    },
+    {
+      "icon": "https://r.r10s.jp/com/img/thumb/footer/icon_safety_red.svg",
+      "url":"https://event.rakuten.co.jp/anshin/?l-id=pc_footer_safety",
+      "title": {
+        "ja": "安心してお買い物いただくために",
+        "en": "Safety and Security Efforts",
+        "ko": "안심하고 쇼핑하실 수 있도록",
+        "zh-CN": "为确保您安心购物",
+        "zh-TW": "為確保您安心購物"
+      },
+      "subTitle": {
+        "ja": "楽天独自のガイドラインを設け、違反がないかを日々パトロールしています。",
+        "en": "Rakuten has established its own guidelines and actively monitors them daily to prevent violations.",
+        "ko": "Rakuten 자체 가이드라인을 마련하여 위반 여부를 매일 확인하고 있습니다.",
+        "zh-CN": "Rakuten制定了独有的使用规范，并每日巡查以确保没有违规行为。",
+        "zh-TW": "Rakuten制定了獨有的使用規範，並每日巡查以確保沒有違規行為。"
+      },
+      "tracker": { "name": "pc_footer_initiative_safety" }
+    },
+    {
+      "icon": "https://r.r10s.jp/com/img/thumb/footer/icon_sustainability_red.svg",
+      "url":"https://corp.rakuten.co.jp/sustainability/",
+      "title": {
+        "ja": "楽天のサステナビリティ",
+        "en": "Sustainability",
+        "ko": "Rakuten의 지속가능성",
+        "zh-CN": "Rakuten可持续发展",
+        "zh-TW": "Rakuten的永續發展"
+      },
+      "subTitle": {
+        "ja": "楽天は、すべての人々にとって持続的な未来を目指します。",
+        "en": "Rakuten aims for a sustainable future for all people.",
+        "ko": "Rakuten은 모든 사람들을 위한 지속가능한 미래를 지향합니다.",
+        "zh-CN": "Rakuten致力于为所有人创造可持续的未来。",
+        "zh-TW": "Rakuten致力於為所有人創造永續的未來。"
+      },
+      "tracker": { "name": "pc_footer_initiative_sustainability" }
+    }
+  ],
+  "menuColumns": [
+    [
+      { "children": { "ja": "会員情報", "en": "Account information", "ko": "회원 정보", "zh-CN": "会员信息", "zh-TW": "會員資訊" }, "href": "https://my.rakuten.co.jp/?l-id=pc_footer_account" },
+      { "children": { "ja": "買い物かご", "en": "Cart", "ko": "장바구니", "zh-CN": "购物车", "zh-TW": "購物車" }, "href": "https://basket.step.rakuten.co.jp/rms/mall/bs/cartall/?l-id=pc_footer_cart" },
+      { "children": { "ja": "閲覧履歴", "en": "Browsed", "ko": "열람 기록", "zh-CN": "浏览记录", "zh-TW": "瀏覽紀錄" }, "href": "https://ashiato.rakuten.co.jp/rms/ashiato/page?l-id=pc_footer_bh" },
+      { "children": { "ja": "購入履歴", "en": "Orders", "ko": "구매 내역", "zh-CN": "购买记录", "zh-TW": "購買紀錄" }, "href": "https://order.my.rakuten.co.jp/?l-id=pc_footer_ph" }
+    ],
+    [
+      { "children": { "ja": "お気に入り", "en": "Bookmarks", "ko": "즐겨찾기", "zh-CN": "收藏夹", "zh-TW": "追蹤清單" }, "href": "https://my.bookmark.rakuten.co.jp/item?l-id=pc_footer_bookmark" },
+      { "children": { "ja": "myクーポン", "en": "my Coupon", "ko": "my쿠폰", "zh-CN": "my优惠券", "zh-TW": "my優惠券" }, "href": "https://coupon.rakuten.co.jp/myCoupon/%E6%A5%BD%E5%A4%A9%E5%B8%82%E5%A0%B4?l-id=pc_footer_coupon" },
+      { "children": { "ja": "ランキング", "en": "Ranking", "ko": "랭킹", "zh-CN": "排行榜", "zh-TW": "排行榜" }, "href": "https://ranking.rakuten.co.jp/?l-id=pc_footer_ranking" },
+      { "children": { "ja": "スーパーDEAL", "en": "Super DEAL", "ko": "Super DEAL", "zh-CN": "Super DEAL", "zh-TW": "Super DEAL" }, "href": "https://event.rakuten.co.jp/superdeal/?l-id=pc_footer_deal" }
+    ],
+    [
+      { "children": { "ja": "楽天市場トップ", "en": "Rakuten Ichiba Top", "ko": "Rakuten Ichiba 홈", "zh-CN": "Rakuten Ichiba首页", "zh-TW": "Rakuten Ichiba首頁" }, "href": "https://www.rakuten.co.jp/?l-id=pc_footer_top" },
+      { "children": { "ja": "特集一覧", "en": "Featured Articles", "ko": "기획전 목록", "zh-CN": "特辑一览", "zh-TW": "特輯一覽" }, "href": "https://event.rakuten.co.jp/?l-id=pc_footer_event" },
+      { "children": { "ja": "楽天市場アプリ", "en": "Rakuten Ichiba App", "ko": "Rakuten Ichiba 앱", "zh-CN": "Rakuten Ichiba应用", "zh-TW": "Rakuten Ichiba應用程式" }, "href": "https://event.rakuten.co.jp/app/?l-id=pc_footer_app" },
+      { "children": { "ja": "楽天のサービス一覧", "en": "Rakuten Group services", "ko": "Rakuten 서비스 전체보기", "zh-CN": "Rakuten的服务一览", "zh-TW": "Rakuten服務一覽" }, "href": "https://www.rakuten.co.jp/sitemap/" }
+    ],
+    [
+      { "children": { "ja": "出店のご案内", "en": "Application for Merchant", "ko": "입점 안내", "zh-CN": "开店指南", "zh-TW": "開店指南" }, "href": "https://www.rakuten.co.jp/ec/?camp=70110000000UMcX&scid=wi_ich_genre_footer" },
+      { "children": { "ja": "ご利用ガイド", "en": "Usage guide", "ko": "이용안내", "zh-CN": "使用指南", "zh-TW": "使用指南" }, "href": "https://event.rakuten.co.jp/beginner/?l-id=pc_footer_guide" },
+      { "children": { "ja": "ヘルプ・問い合わせ", "en": "Help & Contact", "ko": "고객센터/문의하기", "zh-CN": "帮助中心・联系客服", "zh-TW": "幫助中心・聯絡客服" }, "href": "https://ichiba.faq.rakuten.net/?l-id=pc_footer_help" }
+    ]
+  ],
+  "companyInfos": [
+    { "children": { "ja": "企業情報", "en": "About us", "ko": "회사 소개", "zh-CN": "企业信息", "zh-TW": "公司資訊" }, "href": "https://corp.rakuten.co.jp/", "tracker": { "name": "pc_footer_companyinfo" } },
+    { "children": { "ja": "個人情報保護方針", "en": "Privacy Policy", "ko": "개인정보 보호정책", "zh-CN": "隐私政策", "zh-TW": "個人資訊保護方針" }, "href": "https://privacy.rakuten.co.jp/", "tracker": { "name": "pc_footer_privacy" } },
+    { "children": { "ja": "投資家情報", "en": "Investor", "ko": "투자자 정보", "zh-CN": "投资者信息", "zh-TW": "投資者資訊" }, "href": "https://corp.rakuten.co.jp/investors/?l-id=pc_footer_ir", "tracker": { "name": "pc_footer_investors" } },
+    { "children": { "ja": "サステナビリティ", "en": "Sustainability", "ko": "지속가능성", "zh-CN": "可持续发展", "zh-TW": "永續發展" }, "href": "https://corp.rakuten.co.jp/sustainability/", "tracker": { "name": "pc_footer_sustainability" } },
+    { "children": { "ja": "プレスリリース", "en": "Press Release", "ko": "보도 자료", "zh-CN": "新闻稿", "zh-TW": "新聞稿" }, "href": "https://corp.rakuten.co.jp/news/press/", "tracker": { "name": "pc_footer_press" } },
+    { "children": { "ja": "採用情報", "en": "Careers", "ko": "채용 정보", "zh-CN": "招聘信息", "zh-TW": "徵才資訊" }, "href": "https://corp.rakuten.co.jp/careers/", "tracker": { "name": "pc_footer_careers" } }
+  ],
+  "infoMessages": [
+    {}
+,
+        { "alertType": 2, "mainText": "プラットフォームの透明性及び公正性の向上に関する取り組みについて", "mainUrl": "https://ichiba.faq.rakuten.net/detail/000017555?l-id=top_normal_footer_info_20210401" },
+    { "alertType": 2, "mainText": "楽天を装った不審なメール・WEBサイトにご注意ください", "mainUrl": "https://ichiba.faq.rakuten.net/detail/000013315?l-id=top_normal_footer_info_20200423" },
+    { "alertType": 2, "mainText": "楽天グループの新たなセキュリティ対策と会員規約一部改定のお知らせ", "mainUrl": "https://corp.faq.rakuten.net/rakutenid/s/detail/000008662" }
+  ],
+  "languageSelector": { "show": true, "reloadOnChange": true },
+  "logoImageUrl": "https://r.r10s.jp/com/assets/resources/r-logo168bc44f5e8c64e9f566a4e10668c7a6.svg",
+  "logoWidth": 104,
+  "secondaryLogoImageUrl": "https://r.r10s.jp/com/img/thumb/logo/pc_logo_footer_gogreen.svg",
+  "secondaryLogoLinkUrl": "https://corp.rakuten.co.jp/event/green-emp/?scid=wi_ich_gogreen_footer",
+  "copyright": "© Rakuten Group, Inc."
+}"
+|             irc="CommonFooterMall"
+|           "
+
+ <#comment>"
+|           <!-- #comment -->
+|           "
+        "
+|         "
+    "
+|       " <#comment>"
+|       <!-- #comment -->
+|       "
+    "
+|       <script>
+|         charset="UTF-8"
+|         src="https://r.r10s.jp/com/js/service/app/pages/top/javascript/vendors-038cc7061200ffaabfb2.bundle.js"
+|       "
+"
+|       <script>
+|         charset="UTF-8"
+|         src="https://r.r10s.jp/com/js/service/app/pages/top/javascript/pc-038cc7061200ffaabfb2.bundle.js"
+|       "
+"
+|       <script>
+|         charset="UTF-8"
+|         src="https://r.r10s.jp/com/js/service/app/pages/top/javascript/main-038cc7061200ffaabfb2.bundle.js"
+|       "
+"
+|       <script>
+|         async=""
+|         charset="euc-jp"
+|         src="https://www.rakuten.co.jp/com/inc/home/20080930/spt/common/js/pc_ichiba_top_async-1.4.9.js"
+|         type="text/javascript"
+|       "
+"
+|       <script>
+|         async=""
+|         src="https://r.r10s.jp/com/entf/asset/js/loader/entf-loader-ichiba-1.0.0.min.js"
+|         type="text/javascript"
+|       "
+"
+|       <script>
+|         language="JavaScript"
+|         src="https://r.r10s.jp/com/js/d/suggest/top/suggest-ichiba-top-pc-v1.0.0.min.js"
+|       " <#comment>"
+|       <!-- #comment -->
+|       "
+    <#comment>"
+|       <!-- #comment -->
+|       "
+    "
+|       <script>
+|         language="JavaScript"
+|         "
+    <!--
+    var prop10value="Rakuten Top";
+    //-->
+    "
+|       "
+    <#comment>"
+|       <!-- #comment -->
+|       "
+    <#comment>"
+|       <!-- #comment -->
+|       "
+"
+|       <input>
+|         class="SiteCatalyst"
+|         id="sc_betaInfo"
+|         type="hidden"
+|         value="Normal"
+|       "<#comment>"
+|       <!-- #comment -->
+|       "
+    <#comment>"
+|       <!-- #comment -->
+|       "
+"
+|       <script>
+|         charset="utf-8"
+|         src="//image.rakuten.co.jp/com/js/omniture/s_code.js"
+|         type="text/javascript"
+|       "
+"
+|       <script>
+|         src="//www.rakuten.co.jp/com/js/omniture/plugin/sc_genesis.js?v=20160201"
+|         type="text/javascript"
+|       "
+"
+|       <script>
+|         src="//www.rakuten.co.jp/com/js/omniture/plugin/sc_trackingexternal.min.js?v=20150629"
+|         type="text/javascript"
+|       "
+"
+|       <script>
+|         src="//www.rakuten.co.jp/com/js/omniture/codetopaste/www/sc_top.js"
+|         type="text/javascript"
+|       "
+<#comment>"
+|       <!-- #comment -->
+|       <noscript>
+|         "<img src="https://rakuten.112.2O7.net/b/ss/rakutencojpmain/1/H.7--NS/0" height="1" width="1" border="0" alt="">"
+|       "
+<#comment>"
+|       <!-- #comment -->
+|       "
+"
+|       <script>
+|         src="https://r.r10s.jp/com/js/omniture/plugin/sc_trackingid.js"
+|         type="text/javascript"
+|       "
+
+
+    <#comment>"
+|       <!-- #comment -->
+|       "
+    <#comment>"
+|       <!-- #comment -->
+|       "
+<#comment>"
+|       <!-- #comment -->
+|       "
+"
+|       <input>
+|         id="ratAccountId"
+|         name="rat"
+|         type="hidden"
+|         value="1"
+|       "
+"
+|       <input>
+|         id="ratServiceId"
+|         name="rat"
+|         type="hidden"
+|         value="1"
+|       "
+"
+|       <input>
+|         id="ratPageLayout"
+|         name="rat"
+|         type="hidden"
+|         value="pc"
+|       "
+"
+|       <input>
+|         id="ratSiteSection"
+|         name="rat"
+|         type="hidden"
+|         value="top"
+|       "
+"
+|       <input>
+|         id="ratAdobeSiteSection"
+|         name="rat"
+|         type="hidden"
+|         value="rakuten_top"
+|       "
+"
+|       <input>
+|         id="ratPageType"
+|         name="rat"
+|         type="hidden"
+|         value="top"
+|       "
+"
+|       <input>
+|         id="ratPageName"
+|         name="rat"
+|         type="hidden"
+|         value="ichiba_top"
+|       "
+<#comment>"
+|       <!-- #comment -->
+|       "
+"
+|       <input>
+|         id="ratCustomParameters"
+|         name="rat"
+|         type="hidden"
+|         value=""
+|       "
+<#comment>"
+|       <!-- #comment -->
+|       "
+"
+|       <input>
+|         id="ratCvEvent"
+|         name="rat"
+|         type="hidden"
+|         value=""
+|       "
+"
+|       <script>
+|         src="//r.r10s.jp/com/rat/js/rat-main.js"
+|         type="text/javascript"
+|       "
+<#comment>"
+|       <!-- #comment -->
+|       "
+<#comment>"
+|       <!-- #comment -->
+|       "
+    <#comment>"
+|       <!-- #comment -->
+|       "
+"
+|       <script>
+|         "
+  var grp15_ias_prm = {
+    page_cd: "ichiba_top_pc",
+    service: "ichiba",
+    page: "top",
+    d: "pc"
+  };
+"
+|       "
+
+"
+|       <script>
+|         async=""
+|         src="//ias.r10s.jp/grp15/rtm.js?container_code=ichiba"
+|         type="text/javascript"
+|       "
+<#comment>"
+|       <!-- #comment -->
+|       "<#comment>"
+|       <!-- #comment -->
+|       "
+    "
+|       <script>
+|         charset="EUC-JP"
+|         src="https://r.r10s.jp/com/js/d/pa/pa3.min.js"
+|         type="text/javascript"
+|       "
+    <#comment>"
+|       <!-- #comment -->
+|       "
+"
+|       <script>
+|         "
+var mPulse = mPulse || {};
+(function(window, document){
+	'use strict';
+	mPulse.ichibalogin = '0';
+	mPulse.ichibatop = "Normal";
+	if(isLogged()){
+		mPulse.ichibalogin = '1';
+	}
+
+	var $Beta = document.getElementById("sc_betaInfo");	
+	if($Beta != null){
+		mPulse.ichibatop = $Beta.value;
+	}
+
+	function isLogged() {
+		var cookiesList, i, j, c, key;
+		if(!document.cookie) {
+			return false;
+		}
+		cookiesList = document.cookie.split(';');
+		for (i = cookiesList.length - 1; i >= 0; i--) {
+			c = cookiesList[i];
+			j = c.indexOf('=');
+			if(j === -1) {
+				continue;
+			}
+			key = window.decodeURIComponent(c.substr(0, j)).replace(/^\s+/g, '');
+			if(key === 'Rz') {
+				return true;
+			}
+		}
+		return false;
+	}
+})(this, this.document);
+"
+|       "
+<#comment>"
+|       <!-- #comment -->
+|       "
+
+"
+|       <noscript>
+|         "<img src="https://www.rakuten.co.jp/akam/13/pixel_71099326?a=dD0zMDQyOGIwM2ZlYTQ1NzZhOTU3ZmNlNWM2ODYyYWEyYjY3OGQ5MTRjJmpzPW9mZg==" style="visibility: hidden; position: absolute; left: -999px; top: -999px;">"
+|     "
+"
+|     <img>
+|       height="1"
+|       name="s_i_rakutendev"
+|       src="https://image.rakuten.co.jp/com/img/home/t.gif"
+|       style="position:absolute"
+|       width="1"
+|     <iframe>
+|       id="grp15if_0"
+|       name="grp15if_0"
+|       style="display: none"
+|     "
+"

@@ -1,0 +1,37 @@
+2026-10-26T12:59:49.503871Z  INFO explorer_core::session::navigate: nav: fetch+parse… tab=1
+2026-10-26T12:59:49.567729Z DEBUG h2::client: binding client connection
+2026-10-26T12:59:49.567854Z DEBUG h2::client: client connection bound
+2026-10-26T12:59:49.567945Z DEBUG h2::codec::framed_write: send frame=Settings { flags: (0x0) }
+2026-10-26T12:59:49.568536Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=Headers { stream_id: StreamId(1), flags: (0x5: END_HEADERS | END_STREAM) }
+2026-10-26T12:59:49.597853Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Settings { flags: (0x0), header_table_size: 8192, max_concurrent_streams: 100 }
+2026-10-26T12:59:49.598764Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=Settings { flags: (0x1: ACK) }
+2026-10-26T12:59:49.598825Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=WindowUpdate { stream_id: StreamId(0), size_increment: 16711681 }
+2026-10-26T12:59:49.598868Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Settings { flags: (0x1: ACK) }
+2026-10-26T12:59:49.598897Z DEBUG Connection{peer=Client}: h2::proto::settings: received settings ACK; applying Settings { flags: (0x0) }
+2026-10-26T12:59:49.600211Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Headers { stream_id: StreamId(1), flags: (0x4: END_HEADERS) }
+2026-10-26T12:59:49.604005Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Headers { stream_id: StreamId(1), flags: (0x4: END_HEADERS) }
+2026-10-26T12:59:49.610078Z  INFO explorer_core::session::apply: apply: cascade ms=3
+2026-10-26T12:59:49.610489Z  INFO explorer_core::session::apply: apply: boxtree ms=3
+2026-10-26T12:59:49.704842Z  INFO explorer_core::session::apply: apply: layout ms=98
+2026-10-26T12:59:49.788075Z  INFO explorer_core::session::apply: apply: repaint ms=181
+2026-10-26T12:59:49.789071Z DEBUG explorer_core::session::paint: pipeline en échec tab=1 error=HTTP 403
+erreur : HTTP 403
+2026-10-26T12:59:50.058729Z  INFO explorer_core::session::navigate: nav: fetch+parse… tab=1
+2026-10-26T12:59:50.104201Z DEBUG h2::client: binding client connection
+2026-10-26T12:59:50.104319Z DEBUG h2::client: client connection bound
+2026-10-26T12:59:50.104390Z DEBUG h2::codec::framed_write: send frame=Settings { flags: (0x0) }
+2026-10-26T12:59:50.105022Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=Headers { stream_id: StreamId(1), flags: (0x5: END_HEADERS | END_STREAM) }
+2026-10-26T12:59:50.134335Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Settings { flags: (0x0), header_table_size: 8192, max_concurrent_streams: 100 }
+2026-10-26T12:59:50.134430Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=Settings { flags: (0x1: ACK) }
+2026-10-26T12:59:50.134475Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=WindowUpdate { stream_id: StreamId(0), size_increment: 16711681 }
+2026-10-26T12:59:50.134518Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Settings { flags: (0x1: ACK) }
+2026-10-26T12:59:50.134546Z DEBUG Connection{peer=Client}: h2::proto::settings: received settings ACK; applying Settings { flags: (0x0) }
+2026-10-26T12:59:50.134956Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Headers { stream_id: StreamId(1), flags: (0x4: END_HEADERS) }
+2026-10-26T12:59:50.142656Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Headers { stream_id: StreamId(1), flags: (0x4: END_HEADERS) }
+2026-10-26T12:59:50.142784Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(1), flags: (0x1: END_STREAM) }
+2026-10-26T12:59:50.146708Z  INFO explorer_core::session::apply: apply: cascade ms=3
+2026-10-26T12:59:50.147068Z  INFO explorer_core::session::apply: apply: boxtree ms=3
+2026-10-26T12:59:50.186698Z  INFO explorer_core::session::apply: apply: layout ms=43
+2026-10-26T12:59:50.211270Z  INFO explorer_core::session::apply: apply: repaint ms=67
+2026-10-26T12:59:50.211508Z DEBUG explorer_core::session::paint: pipeline en échec tab=1 error=HTTP 403
+erreur : HTTP 403

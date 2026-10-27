@@ -1,0 +1,3221 @@
+| <html>
+|   lang="en-gb"
+|   <head>
+|     <meta>
+|       charset="utf-8"
+|     <meta>
+|       content="IE=edge"
+|       http-equiv="x-ua-compatible"
+|     <meta>
+|       content="width=device-width,initial-scale=1"
+|       name="viewport"
+|     <title>
+|       "Ghost: The best open source blog & newsletter platform"
+|     <meta>
+|       content="Beautiful, modern publishing with email newsletters and paid subscriptions built-in. Used by Platformer, 404Media, Lever News, Tangle, The Browser, and thousands more."
+|       name="description"
+|     <link>
+|       href="https://ghost.org/"
+|       rel="canonical"
+|     <meta>
+|       content="#15171A"
+|       name="theme-color"
+|     <meta>
+|       content="Ghost - The Professional Publishing Platform"
+|       property="og:site_name"
+|     <meta>
+|       content="website"
+|       property="og:type"
+|     <meta>
+|       content="Ghost: The best open source blog & newsletter platform"
+|       property="og:title"
+|     <meta>
+|       content="Beautiful, modern publishing with email newsletters and paid subscriptions built-in. Used by Platformer, 404Media, Lever News, Tangle, The Browser, and thousands more."
+|       property="og:description"
+|     <meta>
+|       content="https://ghost.org/"
+|       property="og:url"
+|     <meta>
+|       content="https://ghost.org/images/meta/ghost-6.png"
+|       property="og:image"
+|     <meta>
+|       content="1280"
+|       property="og:image:width"
+|     <meta>
+|       content="640"
+|       property="og:image:height"
+|     <meta>
+|       content="Ghost: The best open source blog & newsletter platform"
+|       name="twitter:title"
+|     <meta>
+|       content="Beautiful, modern publishing with email newsletters and paid subscriptions built-in. Used by Platformer, 404Media, Lever News, Tangle, The Browser, and thousands more."
+|       name="twitter:description"
+|     <meta>
+|       content="https://ghost.org/"
+|       name="twitter:url"
+|     <meta>
+|       content="@ghost"
+|       name="twitter:site"
+|     <meta>
+|       content="@ghost"
+|       name="twitter:creator"
+|     <meta>
+|       content="summary_large_image"
+|       name="twitter:card"
+|     <meta>
+|       content="https://ghost.org/images/meta/ghost-6.png"
+|       name="twitter:image"
+|     <script>
+|       type="application/ld+json"
+|       "{"@context":"https://schema.org/","@type":"WebSite","url":"https://ghost.org/","mainEntityOfPage":{"@type":"WebPage","@id":"https:\/\/ghost.org/"},"image":{"@type":"ImageObject","url":"https://ghost.org/images/meta/ghost-6.png","width":1280,"height":640},"description":"Beautiful, modern publishing with email newsletters and paid subscriptions built-in. Used by Platformer, 404Media, Lever News, Tangle, The Browser, and thousands more."}"
+|     <meta>
+|       content="Hugo 0.119.0"
+|       name="generator"
+|     <link>
+|       href="https://ghost.org/sitemap.xml"
+|       rel="sitemap"
+|       title="Sitemap"
+|       type="application/xml"
+|     <link>
+|       href="/fonts/"
+|       rel="preconnect"
+|     <link>
+|       as="font"
+|       crossorigin="anonymous"
+|       href="/fonts/InterVariable.woff2"
+|       rel="preload"
+|       type="font/woff2"
+|     <link>
+|       as="font"
+|       crossorigin="anonymous"
+|       href="/fonts/InterVariable-Italic.woff2"
+|       rel="preload"
+|       type="font/woff2"
+|     <style>
+|       "@font-face{font-family:InterVariable;font-style:normal;font-weight:100 900;font-display:optional;src:url(/fonts/InterVariable.woff2)format("woff2")}@font-face{font-family:InterVariable;font-style:italic;font-weight:100 900;font-display:optional;src:url(/fonts/InterVariable-Italic.woff2)format("woff2")}@font-face{font-family:inter;font-style:normal;font-weight:100;font-display:optional;src:url(/fonts/Inter-Thin.woff2)format("woff2")}@font-face{font-family:inter;font-style:italic;font-weight:100;font-display:optional;src:url(/fonts/Inter-ThinItalic.woff2)format("woff2")}@font-face{font-family:inter;font-style:normal;font-weight:200;font-display:optional;src:url(/fonts/Inter-ExtraLight.woff2)format("woff2")}@font-face{font-family:inter;font-style:italic;font-weight:200;font-display:optional;src:url(/fonts/Inter-ExtraLightItalic.woff2)format("woff2")}@font-face{font-family:inter;font-style:normal;font-weight:300;font-display:optional;src:url(/fonts/Inter-Light.woff2)format("woff2")}@font-face{font-family:inter;font-style:italic;font-weight:300;font-display:optional;src:url(/fonts/Inter-LightItalic.woff2)format("woff2")}@font-face{font-family:inter;font-style:normal;font-weight:400;font-display:optional;src:url(/fonts/Inter-Regular.woff2)format("woff2")}@font-face{font-family:inter;font-style:italic;font-weight:400;font-display:optional;src:url(/fonts/Inter-Italic.woff2)format("woff2")}@font-face{font-family:inter;font-style:normal;font-weight:500;font-display:optional;src:url(/fonts/Inter-Medium.woff2)format("woff2")}@font-face{font-family:inter;font-style:italic;font-weight:500;font-display:optional;src:url(/fonts/Inter-MediumItalic.woff2)format("woff2")}@font-face{font-family:inter;font-style:normal;font-weight:600;font-display:optional;src:url(/fonts/Inter-SemiBold.woff2)format("woff2")}@font-face{font-family:inter;font-style:italic;font-weight:600;font-display:optional;src:url(/fonts/Inter-SemiBoldItalic.woff2)format("woff2")}@font-face{font-family:inter;font-style:normal;font-weight:700;font-display:optional;src:url(/fonts/Inter-Bold.woff2)format("woff2")}@font-face{font-family:inter;font-style:italic;font-weight:700;font-display:optional;src:url(/fonts/Inter-BoldItalic.woff2)format("woff2")}@font-face{font-family:inter;font-style:normal;font-weight:800;font-display:optional;src:url(/fonts/Inter-ExtraBold.woff2)format("woff2")}@font-face{font-family:inter;font-style:italic;font-weight:800;font-display:optional;src:url(/fonts/Inter-ExtraBoldItalic.woff2)format("woff2")}@font-face{font-family:inter;font-style:normal;font-weight:900;font-display:optional;src:url(/fonts/Inter-Black.woff2)format("woff2")}@font-face{font-family:inter;font-style:italic;font-weight:900;font-display:optional;src:url(/fonts/Inter-BlackItalic.woff2)format("woff2")}@font-face{font-family:interdisplay;font-style:normal;font-weight:100;font-display:optional;src:url(/fonts/InterDisplay-Thin.woff2)format("woff2")}@font-face{font-family:interdisplay;font-style:italic;font-weight:100;font-display:optional;src:url(/fonts/InterDisplay-ThinItalic.woff2)format("woff2")}@font-face{font-family:interdisplay;font-style:normal;font-weight:200;font-display:optional;src:url(/fonts/InterDisplay-ExtraLight.woff2)format("woff2")}@font-face{font-family:interdisplay;font-style:italic;font-weight:200;font-display:optional;src:url(/fonts/InterDisplay-ExtraLightItalic.woff2)format("woff2")}@font-face{font-family:interdisplay;font-style:normal;font-weight:300;font-display:optional;src:url(/fonts/InterDisplay-Light.woff2)format("woff2")}@font-face{font-family:interdisplay;font-style:italic;font-weight:300;font-display:optional;src:url(/fonts/InterDisplay-LightItalic.woff2)format("woff2")}@font-face{font-family:interdisplay;font-style:normal;font-weight:400;font-display:optional;src:url(/fonts/InterDisplay-Regular.woff2)format("woff2")}@font-face{font-family:interdisplay;font-style:italic;font-weight:400;font-display:optional;src:url(/fonts/InterDisplay-Italic.woff2)format("woff2")}@font-face{font-family:interdisplay;font-style:normal;font-weight:500;font-display:optional;src:url(/fonts/InterDisplay-Medium.woff2)format("woff2")}@font-face{font-family:interdisplay;font-style:italic;font-weight:500;font-display:optional;src:url(/fonts/InterDisplay-MediumItalic.woff2)format("woff2")}@font-face{font-family:interdisplay;font-style:normal;font-weight:600;font-display:optional;src:url(/fonts/InterDisplay-SemiBold.woff2)format("woff2")}@font-face{font-family:interdisplay;font-style:italic;font-weight:600;font-display:optional;src:url(/fonts/InterDisplay-SemiBoldItalic.woff2)format("woff2")}@font-face{font-family:interdisplay;font-style:normal;font-weight:700;font-display:optional;src:url(/fonts/InterDisplay-Bold.woff2)format("woff2")}@font-face{font-family:interdisplay;font-style:italic;font-weight:700;font-display:optional;src:url(/fonts/InterDisplay-BoldItalic.woff2)format("woff2")}@font-face{font-family:interdisplay;font-style:normal;font-weight:800;font-display:optional;src:url(/fonts/InterDisplay-ExtraBold.woff2)format("woff2")}@font-face{font-family:interdisplay;font-style:italic;font-weight:800;font-display:optional;src:url(/fonts/InterDisplay-ExtraBoldItalic.woff2)format("woff2")}@font-face{font-family:interdisplay;font-style:normal;font-weight:900;font-display:optional;src:url(/fonts/InterDisplay-Black.woff2)format("woff2")}@font-face{font-family:interdisplay;font-style:italic;font-weight:900;font-display:optional;src:url(/fonts/InterDisplay-BlackItalic.woff2)format("woff2")}"
+|     <link>
+|       href="https://ghost.org/css/main.min.73259286e26c54949685b296a3e07ac7ad04bacaf0b3fd5850873353fbc33bad.css"
+|       rel="stylesheet"
+|     <script>
+|       async=""
+|       data-domain="ghost.org"
+|       defer=""
+|       src="/js/script.js"
+|     "
+"
+|     <script>
+|       "(function(e){e.fpr=e.fpr||function(){e.fpr.q=e.fpr.q||[],e.fpr.q[arguments[0]=="set"?"unshift":"push"](arguments)}})(window),fpr("init",{cid:"pq6gukie"}),fpr("click")"
+|     <script>
+|       async=""
+|       src="https://cdn.firstpromoter.com/fpr.js"
+|     "
+"
+|     <script>
+|       data-cookie-options="{"expiresInDays": 60}"
+|       data-domains="{"refer":"ghost.deal"}"
+|       defer=""
+|       src="https://www.dubcdn.com/analytics/script.js"
+|     "
+"
+|     <script>
+|       async=""
+|       data-key="PYkL0nCRh6I6GhEwnSWOKQ"
+|       src="https://analytics.ahrefs.com/analytics.js"
+|   <body>
+|     class="antialiased text-md"
+|     <div>
+|       class="max-w-full overflow-x-clip relative min-h-screen my-0 mx-auto bg-white"
+|       <header>
+|         class="relative bg-[var(--header-bg)]"
+|         data-header-transparent="false"
+|         x-data="{open: false}"
+|         x-on:keydown.escape="open = false"
+|         <div>
+|           class="px-4 sm:px-6"
+|           <div>
+|             class="flex justify-between items-center max-w-8xl mx-auto py-[3vmin] lg:justify-start lg:space-x-10"
+|             <div>
+|               class="flex justify-start"
+|               <a>
+|                 href="/"
+|                 <svg>
+|                   class="ghost-orb-logo"
+|                   height="40px"
+|                   preserveAspectRatio="xMidYMid meet"
+|                   viewBox="0 0 800 294"
+|                   xmlns="http://www.w3.org/2000/svg"
+|                   "
+"
+|                   <style>
+|                     "
+svg.ghost-orb-logo {
+    background-size: 100% 100%;
+    background-repeat: no-repeat;
+    background-image: url(/images/logos/logo-black-1.webp);
+}
+"
+|                   "
+"
+|             <div>
+|               class="-mr-2 -my-2 lg:hidden"
+|               <button>
+|                 aria-expanded="false"
+|                 class="rounded-md p-2 inline-flex items-center justify-center text-[var(--header-text-muted)] hover:text-[var(--header-text-hover)] hover:bg-[var(--header-button-hover-bg)] focus:outline-none"
+|                 type="button"
+|                 x-on:click="open = !open"
+|                 "
+"
+|                 <span>
+|                   class="sr-only"
+|                   "Open menu"
+|                 <svg>
+|                   aria-hidden="true"
+|                   class="h-5 w-5 max-w-none"
+|                   fill="none"
+|                   stroke="currentColor"
+|                   viewBox="0 0 24 24"
+|                   xmlns="http://www.w3.org/2000/svg"
+|                   "
+                        "
+|                   <path>
+|                     d="M4 6h16M4 12h16M4 18h16"
+|                     stroke-linecap="round"
+|                     stroke-linejoin="round"
+|                     stroke-width="2"
+|                   "
+                    "
+|             <nav>
+|               class="hidden lg:flex space-x-10"
+|               <div>
+|                 class="relative"
+|                 x-data="{open: false}"
+|                 x-on:keydown.escape="open = false"
+|                 <button>
+|                   :class="{ 'text-[var(--header-text)]': open, 'text-[var(--header-text-muted)]': !(open) }"
+|                   aria-expanded="false"
+|                   class="text-[var(--header-text-muted)] font-medium group rounded-md inline-flex items-center text-md hover:text-[var(--header-text-hover)] focus:outline-none"
+|                   type="button"
+|                   x-on:click="open = !open"
+|                   "
+"
+|                   <span>
+|                     "Product"
+|                   <svg>
+|                     aria-hidden="true"
+|                     class="text-[var(--header-text-muted)] ml-1 h-5 w-5 group-hover:text-[var(--header-text-hover)]"
+|                     fill="currentColor"
+|                     viewBox="0 0 20 20"
+|                     xmlns="http://www.w3.org/2000/svg"
+|                     "
+                            "
+|                     <path>
+|                       clip-rule="evenodd"
+|                       d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z"
+|                       fill-rule="evenodd"
+|                     "
+                        "
+|                 <div>
+|                   class="absolute z-50 -ml-4 mt-8 transform px-2 w-screen max-w-xs sm:px-0 lg:ml-0 lg:left-1/2 lg:-translate-x-1/2"
+|                   x-on:click.outside="open = false"
+|                   x-show="open"
+|                   x-transition:enter-end="opacity-100 translate-y-0"
+|                   x-transition:enter-start="opacity-0 -translate-y-1"
+|                   x-transition:enter="transition ease-out duration-200"
+|                   x-transition:leave-end="opacity-0 -translate-y-1"
+|                   x-transition:leave-start="opacity-100 translate-y-0"
+|                   x-transition:leave="transition ease-in duration-150"
+|                   <div>
+|                     class="rounded-lg shadow-[var(--header-dropdown-shadow)] ring-1 ring-black ring-opacity-5 overflow-hidden"
+|                     <div>
+|                       class="relative grid grid-cols-1 gap-6 bg-[var(--header-dropdown-bg)] px-5 py-6 sm:gap-8 sm:p-8"
+|                       <a>
+|                         class="-m-4 p-4 flex flex-col justify-between rounded-lg hover:bg-[var(--header-button-hover-bg)]"
+|                         href="/creators/"
+|                         <div>
+|                           class="lg:flex-1 lg:flex lg:flex-col lg:justify-between"
+|                           <div>
+|                             class="flex items-start gap-x-2.5"
+|                             <span>
+|                               class="h-5 w-5 text-slate-500 shrink-0 mt-1"
+|                               <svg>
+|                                 viewBox="0 0 48 48"
+|                                 xmlns="http://www.w3.org/2000/svg"
+|                                 <g>
+|                                   transform="matrix(2,0,0,2,0,0)"
+|                                   <path>
+|                                     d="M14.885,3A16.977,16.977,0,0,0,7.385.75c-3,0-3.75,1.5-3.75,3,0,1.657.675,3,2.25,3h9c1.3,0,2.25-.127,2.25-1.5A1.989,1.989,0,0,0,14.885,3Z"
+|                                     fill="none"
+|                                     stroke-linecap="round"
+|                                     stroke-linejoin="round"
+|                                     stroke-width="1.5"
+|                                     stroke="currentColor"
+|                                   <path>
+|                                     d="M14.885,3A2.25,2.25,0,0,1,17.135.75"
+|                                     fill="none"
+|                                     stroke-linecap="round"
+|                                     stroke-linejoin="round"
+|                                     stroke-width="1.5"
+|                                     stroke="currentColor"
+|                                   <path>
+|                                     d="M6.635,15.748a9.762,9.762,0,0,0-5.886,7.5"
+|                                     fill="none"
+|                                     stroke-linecap="round"
+|                                     stroke-linejoin="round"
+|                                     stroke-width="1.5"
+|                                     stroke="currentColor"
+|                                   <path>
+|                                     d="M22.823,13.382A2.25,2.25,0,1,1,19.006,11c.794-1.272,2.7-.08,3.895-1.989C22.9,9.009,23.481,12.328,22.823,13.382Z"
+|                                     fill="none"
+|                                     stroke-linecap="round"
+|                                     stroke-linejoin="round"
+|                                     stroke-width="1.5"
+|                                     stroke="currentColor"
+|                                   <path>
+|                                     d="M19.722,14.1a2.035,2.035,0,0,0-2.9.825l-3.262,5.935a1.658,1.658,0,0,0,2.8,1.747l3.9-5.535A2.036,2.036,0,0,0,19.722,14.1Z"
+|                                     fill="none"
+|                                     stroke-linecap="round"
+|                                     stroke-linejoin="round"
+|                                     stroke-width="1.5"
+|                                     stroke="currentColor"
+|                                   <path>
+|                                     d="M5.2,6.653a5.25,5.25,0,1,0,10.375.076"
+|                                     fill="none"
+|                                     stroke-linecap="round"
+|                                     stroke-linejoin="round"
+|                                     stroke-width="1.5"
+|                                     stroke="currentColor"
+|                             <div>
+|                               <p>
+|                                 class="text-lg font-bold font-hdg text-[var(--header-text)]"
+|                                 "For Creators"
+|                               <p>
+|                                 class="mt-1 text-sm text-[var(--header-text-muted)]"
+|                                 "YouTubers, bloggers, podcasters, musicians & artists"
+|                       <a>
+|                         class="-m-4 p-4 flex flex-col justify-between rounded-lg hover:bg-[var(--header-button-hover-bg)]"
+|                         href="/publishers/"
+|                         <div>
+|                           class="lg:flex-1 lg:flex lg:flex-col lg:justify-between"
+|                           <div>
+|                             class="flex items-start gap-x-2.5"
+|                             <span>
+|                               class="h-5 w-5 text-slate-500 shrink-0 mt-1"
+|                               <svg>
+|                                 fill="none"
+|                                 viewBox="0 0 48 48"
+|                                 xmlns="http://www.w3.org/2000/svg"
+|                                 "
+"
+|                                 <g>
+|                                   transform="matrix(2,0,0,2,0,0)"
+|                                   <path>
+|                                     d="M21.746 15.75H2.246L1.2 21.479C1.16033 21.695 1.16856 21.917 1.2241 22.1294C1.27964 22.3419 1.38114 22.5395 1.52144 22.7084C1.66173 22.8773 1.8374 23.0134 2.03604 23.107C2.23467 23.2005 2.45143 23.2494 2.671 23.25H21.322C21.5422 23.2504 21.7597 23.2023 21.9592 23.1092C22.1587 23.0161 22.3353 22.8801 22.4763 22.7111C22.6174 22.5421 22.7195 22.3441 22.7755 22.1311C22.8314 21.9182 22.8398 21.6955 22.8 21.479L21.746 15.75Z"
+|                                     stroke-linecap="round"
+|                                     stroke-linejoin="round"
+|                                     stroke-width="1.5"
+|                                     stroke="currentColor"
+|                                   <path>
+|                                     d="M5.246 1.5C5.246 1.40117 5.26553 1.30331 5.30347 1.21206C5.34141 1.1208 5.39702 1.03794 5.46708 0.968246C5.53715 0.89855 5.62031 0.843389 5.71176 0.805934C5.80322 0.768479 5.90117 0.749468 6 0.749995H15L18.75 4.5V11.25H5.246V1.5Z"
+|                                     stroke-linecap="round"
+|                                     stroke-linejoin="round"
+|                                     stroke-width="1.5"
+|                                     stroke="currentColor"
+|                                   <path>
+|                                     d="M21.746 12.75H23.246"
+|                                     stroke-linecap="round"
+|                                     stroke-linejoin="round"
+|                                     stroke-width="1.5"
+|                                     stroke="currentColor"
+|                                   <path>
+|                                     d="M0.75 12.75H2.25"
+|                                     stroke-linecap="round"
+|                                     stroke-linejoin="round"
+|                                     stroke-width="1.5"
+|                                     stroke="currentColor"
+|                                   <path>
+|                                     d="M7.125 19.875C6.91789 19.875 6.75 19.7071 6.75 19.5C6.75 19.2929 6.91789 19.125 7.125 19.125"
+|                                     stroke-width="1.5"
+|                                     stroke="currentColor"
+|                                   <path>
+|                                     d="M7.125 19.875C7.33211 19.875 7.5 19.7071 7.5 19.5C7.5 19.2929 7.33211 19.125 7.125 19.125"
+|                                     stroke-width="1.5"
+|                                     stroke="currentColor"
+|                                   <path>
+|                                     d="M12 19.875C11.7929 19.875 11.625 19.7071 11.625 19.5C11.625 19.2929 11.7929 19.125 12 19.125"
+|                                     stroke-width="1.5"
+|                                     stroke="currentColor"
+|                                   <path>
+|                                     d="M12 19.875C12.2071 19.875 12.375 19.7071 12.375 19.5C12.375 19.2929 12.2071 19.125 12 19.125"
+|                                     stroke-width="1.5"
+|                                     stroke="currentColor"
+|                                   <path>
+|                                     d="M16.875 19.875C16.6679 19.875 16.5 19.7071 16.5 19.5C16.5 19.2929 16.6679 19.125 16.875 19.125"
+|                                     stroke-width="1.5"
+|                                     stroke="currentColor"
+|                                   <path>
+|                                     d="M16.875 19.875C17.0821 19.875 17.25 19.7071 17.25 19.5C17.25 19.2929 17.0821 19.125 16.875 19.125"
+|                                     stroke-width="1.5"
+|                                     stroke="currentColor"
+|                                   <path>
+|                                     d="M2.246 15.75V12.75C2.246 12.3522 2.40404 11.9706 2.68534 11.6893C2.96665 11.408 3.34818 11.25 3.746 11.25H20.246C20.6438 11.25 21.0254 11.408 21.3067 11.6893C21.588 11.9706 21.746 12.3522 21.746 12.75V15.75"
+|                                     stroke-linecap="round"
+|                                     stroke-linejoin="round"
+|                                     stroke-width="1.5"
+|                                     stroke="currentColor"
+|                                   <path>
+|                                     d="M8.246 8.25H14.996"
+|                                     stroke-linecap="round"
+|                                     stroke-linejoin="round"
+|                                     stroke-width="1.5"
+|                                     stroke="currentColor"
+|                                   <path>
+|                                     d="M8.246 4.5H11.996"
+|                                     stroke-linecap="round"
+|                                     stroke-linejoin="round"
+|                                     stroke-width="1.5"
+|                                     stroke="currentColor"
+|                             <div>
+|                               <p>
+|                                 class="text-lg font-bold font-hdg text-[var(--header-text)]"
+|                                 "For Publishers"
+|                               <p>
+|                                 class="mt-1 text-sm text-[var(--header-text-muted)]"
+|                                 "Writers, journalists, local news and new media outlets"
+|                       <a>
+|                         class="-m-4 p-4 flex flex-col justify-between rounded-lg hover:bg-[var(--header-button-hover-bg)]"
+|                         href="/business/"
+|                         <div>
+|                           class="lg:flex-1 lg:flex lg:flex-col lg:justify-between"
+|                           <div>
+|                             class="flex items-start gap-x-2.5"
+|                             <span>
+|                               class="h-5 w-5 text-slate-500 shrink-0 mt-1"
+|                               <svg>
+|                                 viewBox="0 0 48 48"
+|                                 xmlns="http://www.w3.org/2000/svg"
+|                                 "
+
+"
+|                                 <g>
+|                                   transform="matrix(2,0,0,2,0,0)"
+|                                   <g>
+|                                     "
+    "
+|                                     <path>
+|                                       d="M6.25,23.25l7.61-12.08a1.12,1.12,0,0,1,1.78,0l7.61,12.08Z"
+|                                       style="fill: none;stroke: currentColor;stroke-linecap: round;stroke-linejoin: round;stroke-width: 1.5px"
+|                                     "
+    "
+|                                     <polyline>
+|                                       points="6.25 23.25 0.75 23.26 6.75 14.26 9.6 17.94"
+|                                       style="fill: none;stroke: currentColor;stroke-linecap: round;stroke-linejoin: round;stroke-width: 1.5px"
+|                                     "
+    "
+|                                     <polyline>
+|                                       points="11.31 15.22 14.72 17.51 18.16 15.16"
+|                                       style="fill: none;stroke: currentColor;stroke-linecap: round;stroke-linejoin: round;stroke-width: 1.5px"
+|                                     "
+    "
+|                                     <line>
+|                                       style="fill: none;stroke: currentColor;stroke-linecap: round;stroke-linejoin: round;stroke-width: 1.5px"
+|                                       x1="14.75"
+|                                       x2="14.75"
+|                                       y1="10.73"
+|                                       y2="0.74"
+|                                     "
+    "
+|                                     <path>
+|                                       d="M14.75.74h7.19a.53.53,0,0,1,.47.3.55.55,0,0,1-.06.55L21.21,3a.53.53,0,0,0,0,.65l1.14,1.45a.54.54,0,0,1,.06.55.53.53,0,0,1-.47.3H14.75"
+|                                       style="fill: none;stroke: currentColor;stroke-linecap: round;stroke-linejoin: round;stroke-width: 1.5px"
+|                                     "
+  "
+|                             <div>
+|                               <p>
+|                                 class="text-lg font-bold font-hdg text-[var(--header-text)]"
+|                                 "For Business"
+|                               <p>
+|                                 class="mt-1 text-sm text-[var(--header-text-muted)]"
+|                                 "Modern brands & companies with ambitious content marketing"
+|                       <a>
+|                         class="-m-4 p-4 flex flex-col justify-between rounded-lg hover:bg-[var(--header-button-hover-bg)]"
+|                         href="https://docs.ghost.org/"
+|                         <div>
+|                           class="lg:flex-1 lg:flex lg:flex-col lg:justify-between"
+|                           <div>
+|                             class="flex items-start gap-x-2.5"
+|                             <span>
+|                               class="h-5 w-5 text-slate-500 shrink-0 mt-1"
+|                               <svg>
+|                                 viewBox="0 0 48 48"
+|                                 xmlns="http://www.w3.org/2000/svg"
+|                                 <g>
+|                                   transform="matrix(2,0,0,2,0,0)"
+|                                   <path>
+|                                     d="M7.629,4.5l-6.44,6.439a1.5,1.5,0,0,0,0,2.121l6.44,6.44"
+|                                     fill="none"
+|                                     stroke-linecap="round"
+|                                     stroke-linejoin="round"
+|                                     stroke-width="1.5"
+|                                     stroke="currentColor"
+|                                   <path>
+|                                     d="M16.371,4.5l6.44,6.439a1.5,1.5,0,0,1,0,2.121l-6.44,6.44"
+|                                     fill="none"
+|                                     stroke-linecap="round"
+|                                     stroke-linejoin="round"
+|                                     stroke-width="1.5"
+|                                     stroke="currentColor"
+|                             <div>
+|                               <p>
+|                                 class="text-lg font-bold font-hdg text-[var(--header-text)]"
+|                                 "For Developers"
+|                               <p>
+|                                 class="mt-1 text-sm text-[var(--header-text-muted)]"
+|                                 "Source code, documentation, guides and tutorials"
+|               <a>
+|                 class="text-md text-[var(--header-text-muted)] font-medium hover:text-[var(--header-text-hover)]"
+|                 href="https://explore.ghost.org"
+|                 "Explore"
+|               <div>
+|                 class="relative"
+|                 x-data="{open: false}"
+|                 x-on:keydown.escape="open = false"
+|                 <button>
+|                   :class="{ 'text-[var(--header-text)]': open, 'text-[var(--header-text-muted)]': !(open) }"
+|                   aria-expanded="false"
+|                   class="text-[var(--header-text-muted)] font-medium group rounded-md inline-flex items-center text-md hover:text-[var(--header-text-hover)] focus:outline-none"
+|                   type="button"
+|                   x-on:click="open = !open"
+|                   "
+"
+|                   <span>
+|                     "Resources"
+|                   <svg>
+|                     aria-hidden="true"
+|                     class="text-[var(--header-text-muted)] ml-1 h-5 w-5 group-hover:text-[var(--header-text-hover)]"
+|                     fill="currentColor"
+|                     viewBox="0 0 20 20"
+|                     xmlns="http://www.w3.org/2000/svg"
+|                     "
+                            "
+|                     <path>
+|                       clip-rule="evenodd"
+|                       d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z"
+|                       fill-rule="evenodd"
+|                     "
+                        "
+|                 <div>
+|                   class="absolute ml-0 left-1/2 -translate-x-1/2 z-50 -ml-4 mt-8 transform px-2 w-screen max-w-2xl sm:px-0"
+|                   x-on:click.outside="open = false"
+|                   x-show="open"
+|                   x-transition:enter-end="opacity-100 translate-y-0"
+|                   x-transition:enter-start="opacity-0 -translate-y-1"
+|                   x-transition:enter="transition ease-out duration-200"
+|                   x-transition:leave-end="opacity-0 -translate-y-1"
+|                   x-transition:leave-start="opacity-100 translate-y-0"
+|                   x-transition:leave="transition ease-in duration-150"
+|                   <div>
+|                     class="rounded-lg shadow-[var(--header-dropdown-shadow)] ring-1 ring-black ring-opacity-5 overflow-hidden"
+|                     <div>
+|                       class="relative grid grid-cols-2 gap-6 bg-[var(--header-dropdown-bg)] px-5 py-6 sm:gap-7 sm:p-8"
+|                       <a>
+|                         class="-m-4 p-4 flex flex-col justify-between rounded-lg hover:bg-[var(--header-button-hover-bg)]"
+|                         href="/marketplace/"
+|                         <div>
+|                           class="ml-4 lg:flex-1 lg:flex lg:flex-col lg:justify-between gap-y-1 lg:ml-0"
+|                           <div>
+|                             class="flex items-start gap-x-2.5"
+|                             <span>
+|                               class="h-5 w-5 text-slate-500 shrink-0 mt-1"
+|                               <svg>
+|                                 fill="currentColor"
+|                                 id="Layer_1"
+|                                 style="enable-background:new 0 0 24 24;"
+|                                 version="1.1"
+|                                 viewBox="0 0 24 24"
+|                                 x="0px"
+|                                 xml:space="preserve"
+|                                 xmlns:xlink="http://www.w3.org/1999/xlink"
+|                                 xmlns="http://www.w3.org/2000/svg"
+|                                 y="0px"
+|                                 "
+"
+|                                 <g>
+|                                   "
+	"
+|                                   <path>
+|                                     d="M11.993,14.251c-0.365,0-0.729-0.088-1.052-0.255L0.732,8.714C0.478,8.584,0.275,8.38,0.144,8.125
+		c-0.344-0.67-0.079-1.494,0.59-1.838l10.206-5.28c0.324-0.167,0.688-0.255,1.052-0.255s0.729,0.088,1.052,0.255l10.21,5.281
+		c0.252,0.131,0.454,0.333,0.585,0.585c0.346,0.67,0.083,1.495-0.585,1.842l-10.209,5.281
+		C12.723,14.162,12.359,14.251,11.993,14.251z M11.63,12.663c0.112,0.058,0.237,0.088,0.364,0.088c0.126,0,0.252-0.031,0.363-0.088
+		l9.979-5.162l-9.979-5.162c-0.111-0.058-0.237-0.088-0.363-0.088s-0.252,0.03-0.364,0.088L1.652,7.501L11.63,12.663z"
+|                                   "
+	"
+|                                   <path>
+|                                     d="M11.996,18.751c-0.366,0-0.73-0.088-1.055-0.256L0.433,13.426c-0.18-0.087-0.316-0.239-0.382-0.428
+		c-0.066-0.189-0.054-0.393,0.033-0.573c0.124-0.258,0.389-0.424,0.675-0.424c0.114,0,0.224,0.025,0.326,0.075l10.527,5.078
+		c0.126,0.064,0.256,0.096,0.385,0.096c0.125,0,0.25-0.03,0.361-0.088l10.576-5.087c0.103-0.049,0.212-0.074,0.325-0.074
+		c0.287,0,0.552,0.167,0.676,0.425c0.179,0.372,0.022,0.821-0.351,1l-10.557,5.078C12.718,18.664,12.359,18.751,11.996,18.751z"
+|                                   "
+	"
+|                                   <path>
+|                                     d="M11.996,23.251c-0.366,0-0.73-0.088-1.055-0.256L0.433,17.926c-0.18-0.087-0.316-0.239-0.382-0.428
+		c-0.066-0.189-0.054-0.393,0.033-0.573c0.124-0.258,0.389-0.424,0.676-0.424c0.114,0,0.223,0.025,0.326,0.075l10.527,5.078
+		c0.126,0.065,0.256,0.096,0.385,0.096c0.125,0,0.25-0.03,0.361-0.087l10.576-5.087c0.103-0.049,0.212-0.074,0.325-0.074
+		c0.287,0,0.552,0.167,0.676,0.425c0.179,0.372,0.022,0.821-0.351,1l-10.557,5.078C12.718,23.164,12.359,23.251,11.996,23.251z"
+|                                   "
+"
+|                                 "
+"
+|                             <div>
+|                               <p>
+|                                 class="text-lg font-bold font-hdg text-[var(--header-text)]"
+|                                 "Marketplace"
+|                               <p>
+|                                 class="mt-1 text-sm text-[var(--header-text-muted)]"
+|                                 "Professional themes, custom integrations and qualified experts"
+|                       <a>
+|                         class="-m-4 p-4 flex flex-col justify-between rounded-lg hover:bg-[var(--header-button-hover-bg)]"
+|                         href="/resources/"
+|                         <div>
+|                           class="ml-4 lg:flex-1 lg:flex lg:flex-col lg:justify-between gap-y-1 lg:ml-0"
+|                           <div>
+|                             class="flex items-start gap-x-2.5"
+|                             <span>
+|                               class="h-5 w-5 text-slate-500 shrink-0 mt-1"
+|                               <svg>
+|                                 viewBox="0 0 48 48"
+|                                 xmlns="http://www.w3.org/2000/svg"
+|                                 <g>
+|                                   transform="matrix(2,0,0,2,0,0)"
+|                                   <path>
+|                                     d="M21,23.25H5.25A2.25,2.25,0,0,1,3,21"
+|                                     fill="none"
+|                                     stroke-linecap="round"
+|                                     stroke-linejoin="round"
+|                                     stroke-width="1.5"
+|                                     stroke="currentColor"
+|                                   <path>
+|                                     d="M12,2.25H6a3,3,0,0,0-3,3V21a2.25,2.25,0,0,1,2.25-2.25h15A.75.75,0,0,0,21,18V3a.75.75,0,0,0-.75-.75H18"
+|                                     fill="none"
+|                                     stroke-linecap="round"
+|                                     stroke-linejoin="round"
+|                                     stroke-width="1.5"
+|                                     stroke="currentColor"
+|                                   <path>
+|                                     d="M19.5 23.25L19.5 18.75"
+|                                     fill="none"
+|                                     stroke-linecap="round"
+|                                     stroke-linejoin="round"
+|                                     stroke-width="1.5"
+|                                     stroke="currentColor"
+|                                   <path>
+|                                     d="M18,12.75l-3-3-3,3V2.25A1.5,1.5,0,0,1,13.5.75h3A1.5,1.5,0,0,1,18,2.25Z"
+|                                     fill="none"
+|                                     stroke-linecap="round"
+|                                     stroke-linejoin="round"
+|                                     stroke-width="1.5"
+|                                     stroke="currentColor"
+|                             <div>
+|                               <p>
+|                                 class="text-lg font-bold font-hdg text-[var(--header-text)] flex items-center gap-2"
+|                                 "Start here "
+|                                 <span>
+|                                   class="inline-block bg-pink-900 text-white py-0.5 px-1 text-[1rem] font-semibold uppercase tracking-wide rounded-[4px]"
+|                                   "New"
+|                               <p>
+|                                 class="mt-1 text-sm text-[var(--header-text-muted)]"
+|                                 "A huge library of guides, stories, interviews and tips for success"
+|                       <a>
+|                         class="-m-4 p-4 flex flex-col justify-between rounded-lg hover:bg-[var(--header-button-hover-bg)]"
+|                         href="/themes/"
+|                         <div>
+|                           class="ml-4 lg:flex-1 lg:flex lg:flex-col lg:justify-between gap-y-1 lg:ml-0"
+|                           <div>
+|                             class="flex items-start gap-x-2.5"
+|                             <span>
+|                               class="h-5 w-5 text-slate-500 shrink-0 mt-1"
+|                               <svg>
+|                                 viewBox="0 0 48 48"
+|                                 xmlns="http://www.w3.org/2000/svg"
+|                                 "
+
+"
+|                                 <g>
+|                                   transform="matrix(2,0,0,2,0,0)"
+|                                   <g>
+|                                     "
+    "
+|                                     <rect>
+|                                       height="7.25"
+|                                       rx="0.75"
+|                                       style="fill: none;stroke: currentColor;stroke-linecap: round;stroke-linejoin: round;stroke-width: 1.5px"
+|                                       width="5.75"
+|                                       x="4.75"
+|                                       y="4.75"
+|                                     "
+    "
+|                                     <rect>
+|                                       height="4.25"
+|                                       rx="0.75"
+|                                       style="fill: none;stroke: currentColor;stroke-linecap: round;stroke-linejoin: round;stroke-width: 1.5px"
+|                                       width="5.75"
+|                                       x="4.75"
+|                                       y="15"
+|                                     "
+    "
+|                                     <rect>
+|                                       height="7.25"
+|                                       rx="0.75"
+|                                       style="fill: none;stroke: currentColor;stroke-linecap: round;stroke-linejoin: round;stroke-width: 1.5px"
+|                                       width="5.75"
+|                                       x="13.5"
+|                                       y="12"
+|                                     "
+    "
+|                                     <rect>
+|                                       height="4.25"
+|                                       rx="0.75"
+|                                       style="fill: none;stroke: currentColor;stroke-linecap: round;stroke-linejoin: round;stroke-width: 1.5px"
+|                                       width="5.75"
+|                                       x="13.5"
+|                                       y="4.75"
+|                                     "
+    "
+|                                     <rect>
+|                                       height="22.5"
+|                                       rx="1.5"
+|                                       style="fill: none;stroke: currentColor;stroke-linecap: round;stroke-linejoin: round;stroke-width: 1.5px"
+|                                       width="22.5"
+|                                       x="0.75"
+|                                       y="0.75"
+|                                     "
+  "
+|                             <div>
+|                               <p>
+|                                 class="text-lg font-bold font-hdg text-[var(--header-text)]"
+|                                 "Themes"
+|                               <p>
+|                                 class="mt-1 text-sm text-[var(--header-text-muted)]"
+|                                 "Hundreds of beautifully designed publication templates"
+|                       <a>
+|                         class="-m-4 p-4 flex flex-col justify-between rounded-lg hover:bg-[var(--header-button-hover-bg)]"
+|                         href="/help/"
+|                         <div>
+|                           class="ml-4 lg:flex-1 lg:flex lg:flex-col lg:justify-between gap-y-1 lg:ml-0"
+|                           <div>
+|                             class="flex items-start gap-x-2.5"
+|                             <span>
+|                               class="h-5 w-5 text-slate-500 shrink-0 mt-1"
+|                               <svg>
+|                                 fill="none"
+|                                 viewBox="0 0 48 48"
+|                                 xmlns="http://www.w3.org/2000/svg"
+|                                 "
+"
+|                                 <g>
+|                                   transform="matrix(2,0,0,2,0,0)"
+|                                   <path>
+|                                     d="M9 9.00004C9.00011 8.45007 9.15139 7.91071 9.43732 7.44091C9.72325 6.97111 10.1328 6.58895 10.6213 6.33619C11.1097 6.08344 11.6583 5.96982 12.2069 6.00776C12.7556 6.04569 13.2833 6.23372 13.7323 6.55129C14.1813 6.86886 14.5344 7.30375 14.7529 7.80843C14.9715 8.31311 15.0471 8.86816 14.9715 9.41291C14.8959 9.95766 14.6721 10.4712 14.3244 10.8973C13.9767 11.3234 13.5185 11.6457 13 11.829C12.7074 11.9325 12.4541 12.1241 12.275 12.3775C12.0959 12.631 11.9998 12.9337 12 13.244V14.25"
+|                                     stroke-linecap="round"
+|                                     stroke-linejoin="round"
+|                                     stroke-width="1.5"
+|                                     stroke="currentColor"
+|                                   <path>
+|                                     d="M12 18C11.7929 18 11.625 17.8321 11.625 17.625C11.625 17.4179 11.7929 17.25 12 17.25"
+|                                     stroke-width="1.5"
+|                                     stroke="currentColor"
+|                                   <path>
+|                                     d="M12 18C12.2071 18 12.375 17.8321 12.375 17.625C12.375 17.4179 12.2071 17.25 12 17.25"
+|                                     stroke-width="1.5"
+|                                     stroke="currentColor"
+|                                   <path>
+|                                     d="M12 23.25C18.2132 23.25 23.25 18.2132 23.25 12C23.25 5.7868 18.2132 0.75 12 0.75C5.7868 0.75 0.75 5.7868 0.75 12C0.75 18.2132 5.7868 23.25 12 23.25Z"
+|                                     stroke-miterlimit="10"
+|                                     stroke-width="1.5"
+|                                     stroke="currentColor"
+|                             <div>
+|                               <p>
+|                                 class="text-lg font-bold font-hdg text-[var(--header-text)]"
+|                                 "Help center"
+|                               <p>
+|                                 class="mt-1 text-sm text-[var(--header-text-muted)]"
+|                                 "Get help with product features and answers to common questions."
+|                       <a>
+|                         class="-m-4 p-4 flex flex-col justify-between rounded-lg hover:bg-[var(--header-button-hover-bg)]"
+|                         href="/integrations/"
+|                         <div>
+|                           class="ml-4 lg:flex-1 lg:flex lg:flex-col lg:justify-between gap-y-1 lg:ml-0"
+|                           <div>
+|                             class="flex items-start gap-x-2.5"
+|                             <span>
+|                               class="h-5 w-5 text-slate-500 shrink-0 mt-1"
+|                               <svg>
+|                                 viewBox="0 0 48 48"
+|                                 xmlns="http://www.w3.org/2000/svg"
+|                                 <g>
+|                                   transform="matrix(2,0,0,2,0,0)"
+|                                   <defs>
+|                                     <style>
+|                                       ".a{fill:none;stroke:currentColor;stroke-linecap:round;stroke-linejoin:round;stroke-width:1.5px;}"
+|                                   <title>
+|                                     "module-four"
+|                                   <polygon>
+|                                     class="a"
+|                                     points="22.5 7.5 22.5 18 12 22.5 1.5 18 1.5 7.5 12 12 22.5 7.5"
+|                                   <line>
+|                                     class="a"
+|                                     x1="12"
+|                                     x2="12"
+|                                     y1="22.5"
+|                                     y2="12"
+|                                   <line>
+|                                     class="a"
+|                                     x1="7.5"
+|                                     x2="1.5"
+|                                     y1="4.929"
+|                                     y2="7.5"
+|                                   <line>
+|                                     class="a"
+|                                     x1="16.5"
+|                                     x2="22.5"
+|                                     y1="4.929"
+|                                     y2="7.5"
+|                                   <ellipse>
+|                                     class="a"
+|                                     cx="12"
+|                                     cy="3"
+|                                     rx="4.5"
+|                                     ry="1.5"
+|                                   <path>
+|                                     class="a"
+|                                     d="M7.5,3V6c0,.828,2.015,1.5,4.5,1.5s4.5-.672,4.5-1.5V3"
+|                             <div>
+|                               <p>
+|                                 class="text-lg font-bold font-hdg text-[var(--header-text)]"
+|                                 "Integrations"
+|                               <p>
+|                                 class="mt-1 text-sm text-[var(--header-text-muted)]"
+|                                 "Connect thousands of apps and services with your website"
+|                       <a>
+|                         class="-m-4 p-4 flex flex-col justify-between rounded-lg hover:bg-[var(--header-button-hover-bg)]"
+|                         href="/changelog/"
+|                         <div>
+|                           class="ml-4 lg:flex-1 lg:flex lg:flex-col lg:justify-between gap-y-1 lg:ml-0"
+|                           <div>
+|                             class="flex items-start gap-x-2.5"
+|                             <span>
+|                               class="h-5 w-5 text-slate-500 shrink-0 mt-1"
+|                               <svg>
+|                                 viewBox="0 0 48 48"
+|                                 xmlns="http://www.w3.org/2000/svg"
+|                                 <g>
+|                                   transform="matrix(2,0,0,2,0,0)"
+|                                   <path>
+|                                     d="M7.5 23.248L12 11.248 12 8.248 12 11.248 16.5 23.248"
+|                                     fill="none"
+|                                     stroke-linecap="round"
+|                                     stroke-linejoin="round"
+|                                     stroke-width="1.5"
+|                                     stroke="currentColor"
+|                                   <path>
+|                                     d="M17.726.747a9,9,0,0,1,0,15"
+|                                     fill="none"
+|                                     stroke-linecap="round"
+|                                     stroke-linejoin="round"
+|                                     stroke-width="1.5"
+|                                     stroke="currentColor"
+|                                   <path>
+|                                     d="M16.5,4.575a5.249,5.249,0,0,1,0,7.347"
+|                                     fill="none"
+|                                     stroke-linecap="round"
+|                                     stroke-linejoin="round"
+|                                     stroke-width="1.5"
+|                                     stroke="currentColor"
+|                                   <path>
+|                                     d="M6.275.747a9,9,0,0,0,0,15"
+|                                     fill="none"
+|                                     stroke-linecap="round"
+|                                     stroke-linejoin="round"
+|                                     stroke-width="1.5"
+|                                     stroke="currentColor"
+|                                   <path>
+|                                     d="M7.5,4.575a5.251,5.251,0,0,0,0,7.347"
+|                                     fill="none"
+|                                     stroke-linecap="round"
+|                                     stroke-linejoin="round"
+|                                     stroke-width="1.5"
+|                                     stroke="currentColor"
+|                                   <path>
+|                                     d="M8.625 20.248L15.375 20.248"
+|                                     fill="none"
+|                                     stroke-linecap="round"
+|                                     stroke-linejoin="round"
+|                                     stroke-width="1.5"
+|                                     stroke="currentColor"
+|                             <div>
+|                               <p>
+|                                 class="text-lg font-bold font-hdg text-[var(--header-text)]"
+|                                 "Product updates"
+|                               <p>
+|                                 class="mt-1 text-sm text-[var(--header-text-muted)]"
+|                                 "All the latest changes and improvements to Ghost"
+|                       <a>
+|                         class="-m-4 p-4 flex flex-col justify-between rounded-lg hover:bg-[var(--header-button-hover-bg)]"
+|                         href="/experts/"
+|                         <div>
+|                           class="ml-4 lg:flex-1 lg:flex lg:flex-col lg:justify-between gap-y-1 lg:ml-0"
+|                           <div>
+|                             class="flex items-start gap-x-2.5"
+|                             <span>
+|                               class="h-5 w-5 text-slate-500 shrink-0 mt-1"
+|                               <svg>
+|                                 viewBox="0 0 48 48"
+|                                 xmlns="http://www.w3.org/2000/svg"
+|                                 <g>
+|                                   transform="matrix(2,0,0,2,0,0)"
+|                                   <path>
+|                                     d="M7.629,4.5l-6.44,6.439a1.5,1.5,0,0,0,0,2.121l6.44,6.44"
+|                                     fill="none"
+|                                     stroke-linecap="round"
+|                                     stroke-linejoin="round"
+|                                     stroke-width="1.5"
+|                                     stroke="currentColor"
+|                                   <path>
+|                                     d="M16.371,4.5l6.44,6.439a1.5,1.5,0,0,1,0,2.121l-6.44,6.44"
+|                                     fill="none"
+|                                     stroke-linecap="round"
+|                                     stroke-linejoin="round"
+|                                     stroke-width="1.5"
+|                                     stroke="currentColor"
+|                             <div>
+|                               <p>
+|                                 class="text-lg font-bold font-hdg text-[var(--header-text)]"
+|                                 "Experts"
+|                               <p>
+|                                 class="mt-1 text-sm text-[var(--header-text-muted)]"
+|                                 "Get help building your site from certified Ghost developers"
+|                       <a>
+|                         class="-m-4 p-4 flex flex-col justify-between rounded-lg hover:bg-[var(--header-button-hover-bg)]"
+|                         href="/about/"
+|                         <div>
+|                           class="ml-4 lg:flex-1 lg:flex lg:flex-col lg:justify-between gap-y-1 lg:ml-0"
+|                           <div>
+|                             class="flex items-start gap-x-2.5"
+|                             <span>
+|                               class="h-5 w-5 text-slate-500 shrink-0 mt-1"
+|                               <svg>
+|                                 viewBox="0 0 48 48"
+|                                 xmlns="http://www.w3.org/2000/svg"
+|                                 <g>
+|                                   transform="matrix(2,0,0,2,0,0)"
+|                                   <path>
+|                                     d="M3.75,14v7.5A1.5,1.5,0,0,0,5.25,23h13.5a1.5,1.5,0,0,0,1.5-1.5V14"
+|                                     fill="none"
+|                                     stroke-linecap="round"
+|                                     stroke-linejoin="round"
+|                                     stroke-width="1.5"
+|                                     stroke="currentColor"
+|                                   <path>
+|                                     d="M.75,12.629,10.939,2.439a1.5,1.5,0,0,1,2.122,0L23.25,12.629"
+|                                     fill="none"
+|                                     stroke-linecap="round"
+|                                     stroke-linejoin="round"
+|                                     stroke-width="1.5"
+|                                     stroke="currentColor"
+|                                   <path>
+|                                     d="M16.5 5.879L16.5 3.5 20.25 3.5 20.25 9.629"
+|                                     fill="none"
+|                                     stroke-linecap="round"
+|                                     stroke-linejoin="round"
+|                                     stroke-width="1.5"
+|                                     stroke="currentColor"
+|                                   <path>
+|                                     d="M15.93,11.845a1.9,1.9,0,0,0-2.751,0L12,13.064l-1.179-1.219a1.9,1.9,0,0,0-2.751,0,2.06,2.06,0,0,0,0,2.845l3.511,3.631a.579.579,0,0,0,.838,0L15.93,14.69A2.06,2.06,0,0,0,15.93,11.845Z"
+|                                     fill="none"
+|                                     stroke-linecap="round"
+|                                     stroke-linejoin="round"
+|                                     stroke-width="1.5"
+|                                     stroke="currentColor"
+|                             <div>
+|                               <p>
+|                                 class="text-lg font-bold font-hdg text-[var(--header-text)]"
+|                                 "About us"
+|                               <p>
+|                                 class="mt-1 text-sm text-[var(--header-text-muted)]"
+|                                 "Learn more about the people behind the platform (We're hiring!)"
+|               <a>
+|                 class="text-md text-[var(--header-text-muted)] font-medium hover:text-[var(--header-text-hover)]"
+|                 href="/pricing/"
+|                 "Pricing"
+|             <div>
+|               class="hidden lg:flex items-center gap-7 justify-end lg:flex-1 lg:w-0"
+|               <a>
+|                 class="whitespace-nowrap text-md text-[var(--header-text-muted)] font-medium hover:text-[var(--header-text-hover)]"
+|                 href="https://account.ghost.org/signin/"
+|                 "Sign in"
+|               "
+"
+|               <a>
+|                 class="plausible-event-name=Signup-CTA-clicked whitespace-nowrap px-4 py-2 border border-transparent rounded-md shadow-sm text-sm text-[var(--header-cta-text)] bg-[var(--header-cta-bg)]"
+|                 href="https://account.ghost.org/signup/"
+|                 <strong>
+|                   class="font-semibold"
+|                   "Get Started"
+|                 " — free"
+|         <div>
+|           class="absolute top-0 inset-x-0 z-50 transition transform origin-top-right lg:hidden"
+|           x-on:click.outside="open = false"
+|           x-show="open"
+|           <div>
+|             class="shadow-lg ring-1 ring-black ring-opacity-5 bg-[var(--header-dropdown-bg)] divide-y-2 divide-[var(--header-divide)]"
+|             <div>
+|               class="pt-[3vmin] pb-6 px-4 sm:px-6"
+|               <div>
+|                 class="flex items-center justify-between"
+|                 <a>
+|                   href="/"
+|                   <svg>
+|                     class="ghost-orb-logo"
+|                     height="40px"
+|                     preserveAspectRatio="xMidYMid meet"
+|                     viewBox="0 0 800 294"
+|                     xmlns="http://www.w3.org/2000/svg"
+|                     "
+"
+|                     <style>
+|                       "
+svg.ghost-orb-logo {
+    background-size: 100% 100%;
+    background-repeat: no-repeat;
+    background-image: url(/images/logos/logo-black-1.webp);
+}
+"
+|                     "
+"
+|                 <div>
+|                   class="-mr-2"
+|                   <button>
+|                     class="bg-[var(--header-dropdown-bg)] rounded-md p-2 inline-flex items-center justify-center text-[var(--header-text-muted)] hover:text-[var(--header-text-hover)] hover:bg-[var(--header-button-hover-bg)] focus:outline-none"
+|                     type="button"
+|                     x-on:click="open = !open"
+|                     "
+"
+|                     <span>
+|                       class="sr-only"
+|                       "Close menu"
+|                     <svg>
+|                       aria-hidden="true"
+|                       class="h-4 w-4 max-w-none"
+|                       fill="none"
+|                       stroke-width="2"
+|                       stroke="currentColor"
+|                       viewBox="0 0 24 24"
+|                       xmlns="http://www.w3.org/2000/svg"
+|                       "
+                                "
+|                       <path>
+|                         d="M6 18L18 6M6 6l12 12"
+|                         stroke-linecap="round"
+|                         stroke-linejoin="round"
+|                       "
+                            "
+|               <div>
+|                 class="mt-10"
+|                 <nav>
+|                   class="grid grid-cols-1 gap-y-7"
+|                   <a>
+|                     class="flex flex-col justify-between"
+|                     href="/creators/"
+|                     <div>
+|                       class="lg:flex-1 lg:flex lg:flex-col lg:justify-between lg:ml-0"
+|                       <div>
+|                         class="flex items-center gap-x-2.5"
+|                         <span>
+|                           class="h-5 w-5 text-[var(--header-icon)]"
+|                           <svg>
+|                             viewBox="0 0 48 48"
+|                             xmlns="http://www.w3.org/2000/svg"
+|                             <g>
+|                               transform="matrix(2,0,0,2,0,0)"
+|                               <path>
+|                                 d="M14.885,3A16.977,16.977,0,0,0,7.385.75c-3,0-3.75,1.5-3.75,3,0,1.657.675,3,2.25,3h9c1.3,0,2.25-.127,2.25-1.5A1.989,1.989,0,0,0,14.885,3Z"
+|                                 fill="none"
+|                                 stroke-linecap="round"
+|                                 stroke-linejoin="round"
+|                                 stroke-width="1.5"
+|                                 stroke="currentColor"
+|                               <path>
+|                                 d="M14.885,3A2.25,2.25,0,0,1,17.135.75"
+|                                 fill="none"
+|                                 stroke-linecap="round"
+|                                 stroke-linejoin="round"
+|                                 stroke-width="1.5"
+|                                 stroke="currentColor"
+|                               <path>
+|                                 d="M6.635,15.748a9.762,9.762,0,0,0-5.886,7.5"
+|                                 fill="none"
+|                                 stroke-linecap="round"
+|                                 stroke-linejoin="round"
+|                                 stroke-width="1.5"
+|                                 stroke="currentColor"
+|                               <path>
+|                                 d="M22.823,13.382A2.25,2.25,0,1,1,19.006,11c.794-1.272,2.7-.08,3.895-1.989C22.9,9.009,23.481,12.328,22.823,13.382Z"
+|                                 fill="none"
+|                                 stroke-linecap="round"
+|                                 stroke-linejoin="round"
+|                                 stroke-width="1.5"
+|                                 stroke="currentColor"
+|                               <path>
+|                                 d="M19.722,14.1a2.035,2.035,0,0,0-2.9.825l-3.262,5.935a1.658,1.658,0,0,0,2.8,1.747l3.9-5.535A2.036,2.036,0,0,0,19.722,14.1Z"
+|                                 fill="none"
+|                                 stroke-linecap="round"
+|                                 stroke-linejoin="round"
+|                                 stroke-width="1.5"
+|                                 stroke="currentColor"
+|                               <path>
+|                                 d="M5.2,6.653a5.25,5.25,0,1,0,10.375.076"
+|                                 fill="none"
+|                                 stroke-linecap="round"
+|                                 stroke-linejoin="round"
+|                                 stroke-width="1.5"
+|                                 stroke="currentColor"
+|                         <p>
+|                           class="text-lg font-bold font-hdg text-[var(--header-text)]"
+|                           "For Creators"
+|                       <p>
+|                         class="mt-1 text-sm text-[var(--header-text-muted)]"
+|                         "Join thousands of creators using Ghost to share their work"
+|                   <a>
+|                     class="flex flex-col justify-between"
+|                     href="/publishers/"
+|                     <div>
+|                       class="lg:flex-1 lg:flex lg:flex-col lg:justify-between lg:ml-0"
+|                       <div>
+|                         class="flex items-center gap-x-2.5"
+|                         <span>
+|                           class="h-5 w-5 text-[var(--header-icon)]"
+|                           <svg>
+|                             fill="none"
+|                             viewBox="0 0 48 48"
+|                             xmlns="http://www.w3.org/2000/svg"
+|                             "
+"
+|                             <g>
+|                               transform="matrix(2,0,0,2,0,0)"
+|                               <path>
+|                                 d="M21.746 15.75H2.246L1.2 21.479C1.16033 21.695 1.16856 21.917 1.2241 22.1294C1.27964 22.3419 1.38114 22.5395 1.52144 22.7084C1.66173 22.8773 1.8374 23.0134 2.03604 23.107C2.23467 23.2005 2.45143 23.2494 2.671 23.25H21.322C21.5422 23.2504 21.7597 23.2023 21.9592 23.1092C22.1587 23.0161 22.3353 22.8801 22.4763 22.7111C22.6174 22.5421 22.7195 22.3441 22.7755 22.1311C22.8314 21.9182 22.8398 21.6955 22.8 21.479L21.746 15.75Z"
+|                                 stroke-linecap="round"
+|                                 stroke-linejoin="round"
+|                                 stroke-width="1.5"
+|                                 stroke="currentColor"
+|                               <path>
+|                                 d="M5.246 1.5C5.246 1.40117 5.26553 1.30331 5.30347 1.21206C5.34141 1.1208 5.39702 1.03794 5.46708 0.968246C5.53715 0.89855 5.62031 0.843389 5.71176 0.805934C5.80322 0.768479 5.90117 0.749468 6 0.749995H15L18.75 4.5V11.25H5.246V1.5Z"
+|                                 stroke-linecap="round"
+|                                 stroke-linejoin="round"
+|                                 stroke-width="1.5"
+|                                 stroke="currentColor"
+|                               <path>
+|                                 d="M21.746 12.75H23.246"
+|                                 stroke-linecap="round"
+|                                 stroke-linejoin="round"
+|                                 stroke-width="1.5"
+|                                 stroke="currentColor"
+|                               <path>
+|                                 d="M0.75 12.75H2.25"
+|                                 stroke-linecap="round"
+|                                 stroke-linejoin="round"
+|                                 stroke-width="1.5"
+|                                 stroke="currentColor"
+|                               <path>
+|                                 d="M7.125 19.875C6.91789 19.875 6.75 19.7071 6.75 19.5C6.75 19.2929 6.91789 19.125 7.125 19.125"
+|                                 stroke-width="1.5"
+|                                 stroke="currentColor"
+|                               <path>
+|                                 d="M7.125 19.875C7.33211 19.875 7.5 19.7071 7.5 19.5C7.5 19.2929 7.33211 19.125 7.125 19.125"
+|                                 stroke-width="1.5"
+|                                 stroke="currentColor"
+|                               <path>
+|                                 d="M12 19.875C11.7929 19.875 11.625 19.7071 11.625 19.5C11.625 19.2929 11.7929 19.125 12 19.125"
+|                                 stroke-width="1.5"
+|                                 stroke="currentColor"
+|                               <path>
+|                                 d="M12 19.875C12.2071 19.875 12.375 19.7071 12.375 19.5C12.375 19.2929 12.2071 19.125 12 19.125"
+|                                 stroke-width="1.5"
+|                                 stroke="currentColor"
+|                               <path>
+|                                 d="M16.875 19.875C16.6679 19.875 16.5 19.7071 16.5 19.5C16.5 19.2929 16.6679 19.125 16.875 19.125"
+|                                 stroke-width="1.5"
+|                                 stroke="currentColor"
+|                               <path>
+|                                 d="M16.875 19.875C17.0821 19.875 17.25 19.7071 17.25 19.5C17.25 19.2929 17.0821 19.125 16.875 19.125"
+|                                 stroke-width="1.5"
+|                                 stroke="currentColor"
+|                               <path>
+|                                 d="M2.246 15.75V12.75C2.246 12.3522 2.40404 11.9706 2.68534 11.6893C2.96665 11.408 3.34818 11.25 3.746 11.25H20.246C20.6438 11.25 21.0254 11.408 21.3067 11.6893C21.588 11.9706 21.746 12.3522 21.746 12.75V15.75"
+|                                 stroke-linecap="round"
+|                                 stroke-linejoin="round"
+|                                 stroke-width="1.5"
+|                                 stroke="currentColor"
+|                               <path>
+|                                 d="M8.246 8.25H14.996"
+|                                 stroke-linecap="round"
+|                                 stroke-linejoin="round"
+|                                 stroke-width="1.5"
+|                                 stroke="currentColor"
+|                               <path>
+|                                 d="M8.246 4.5H11.996"
+|                                 stroke-linecap="round"
+|                                 stroke-linejoin="round"
+|                                 stroke-width="1.5"
+|                                 stroke="currentColor"
+|                         <p>
+|                           class="text-lg font-bold font-hdg text-[var(--header-text)]"
+|                           "For Publishers"
+|                       <p>
+|                         class="mt-1 text-sm text-[var(--header-text-muted)]"
+|                         "The platform for independent publishers"
+|                   <a>
+|                     class="flex flex-col justify-between"
+|                     href="/business/"
+|                     <div>
+|                       class="lg:flex-1 lg:flex lg:flex-col lg:justify-between lg:ml-0"
+|                       <div>
+|                         class="flex items-center gap-x-2.5"
+|                         <span>
+|                           class="h-5 w-5 text-[var(--header-icon)]"
+|                           <svg>
+|                             viewBox="0 0 48 48"
+|                             xmlns="http://www.w3.org/2000/svg"
+|                             "
+
+"
+|                             <g>
+|                               transform="matrix(2,0,0,2,0,0)"
+|                               <g>
+|                                 "
+    "
+|                                 <path>
+|                                   d="M6.25,23.25l7.61-12.08a1.12,1.12,0,0,1,1.78,0l7.61,12.08Z"
+|                                   style="fill: none;stroke: currentColor;stroke-linecap: round;stroke-linejoin: round;stroke-width: 1.5px"
+|                                 "
+    "
+|                                 <polyline>
+|                                   points="6.25 23.25 0.75 23.26 6.75 14.26 9.6 17.94"
+|                                   style="fill: none;stroke: currentColor;stroke-linecap: round;stroke-linejoin: round;stroke-width: 1.5px"
+|                                 "
+    "
+|                                 <polyline>
+|                                   points="11.31 15.22 14.72 17.51 18.16 15.16"
+|                                   style="fill: none;stroke: currentColor;stroke-linecap: round;stroke-linejoin: round;stroke-width: 1.5px"
+|                                 "
+    "
+|                                 <line>
+|                                   style="fill: none;stroke: currentColor;stroke-linecap: round;stroke-linejoin: round;stroke-width: 1.5px"
+|                                   x1="14.75"
+|                                   x2="14.75"
+|                                   y1="10.73"
+|                                   y2="0.74"
+|                                 "
+    "
+|                                 <path>
+|                                   d="M14.75.74h7.19a.53.53,0,0,1,.47.3.55.55,0,0,1-.06.55L21.21,3a.53.53,0,0,0,0,.65l1.14,1.45a.54.54,0,0,1,.06.55.53.53,0,0,1-.47.3H14.75"
+|                                   style="fill: none;stroke: currentColor;stroke-linecap: round;stroke-linejoin: round;stroke-width: 1.5px"
+|                                 "
+  "
+|                         <p>
+|                           class="text-lg font-bold font-hdg text-[var(--header-text)]"
+|                           "For Business"
+|                       <p>
+|                         class="mt-1 text-sm text-[var(--header-text-muted)]"
+|                         "Content marketing for modern business"
+|                   <a>
+|                     class="flex flex-col justify-between"
+|                     href="https://docs.ghost.org/"
+|                     <div>
+|                       class="lg:flex-1 lg:flex lg:flex-col lg:justify-between lg:ml-0"
+|                       <div>
+|                         class="flex items-center gap-x-2.5"
+|                         <span>
+|                           class="h-5 w-5 text-[var(--header-icon)]"
+|                           <svg>
+|                             viewBox="0 0 48 48"
+|                             xmlns="http://www.w3.org/2000/svg"
+|                             <g>
+|                               transform="matrix(2,0,0,2,0,0)"
+|                               <path>
+|                                 d="M7.629,4.5l-6.44,6.439a1.5,1.5,0,0,0,0,2.121l6.44,6.44"
+|                                 fill="none"
+|                                 stroke-linecap="round"
+|                                 stroke-linejoin="round"
+|                                 stroke-width="1.5"
+|                                 stroke="currentColor"
+|                               <path>
+|                                 d="M16.371,4.5l6.44,6.439a1.5,1.5,0,0,1,0,2.121l-6.44,6.44"
+|                                 fill="none"
+|                                 stroke-linecap="round"
+|                                 stroke-linejoin="round"
+|                                 stroke-width="1.5"
+|                                 stroke="currentColor"
+|                         <p>
+|                           class="text-lg font-bold font-hdg text-[var(--header-text)]"
+|                           "For Developers"
+|                       <p>
+|                         class="mt-1 text-sm text-[var(--header-text-muted)]"
+|                         "Source code, documentation, guides and tutorials"
+|             <div>
+|               class="py-6 px-4 sm:px-6 space-y-10"
+|               <div>
+|                 class="grid grid-cols-2 gap-y-4 gap-x-8"
+|                 <a>
+|                   class="font-medium text-[var(--header-text)] hover:text-[var(--header-text-hover)]"
+|                   href="https://explore.ghost.org"
+|                   "Explore"
+|                 "
+"
+|                 <a>
+|                   class="font-medium text-[var(--header-text)] hover:text-[var(--header-text-hover)]"
+|                   href="/pricing/"
+|                   "Pricing"
+|                 "
+"
+|                 <a>
+|                   class="font-medium text-[var(--header-text)] hover:text-[var(--header-text-hover)]"
+|                   href="/marketplace/"
+|                   "Marketplace"
+|                 "
+"
+|                 <a>
+|                   class="font-medium text-[var(--header-text)] hover:text-[var(--header-text-hover)]"
+|                   href="/themes/"
+|                   "Themes"
+|                 "
+"
+|                 <a>
+|                   class="font-medium text-[var(--header-text)] hover:text-[var(--header-text-hover)]"
+|                   href="/integrations/"
+|                   "Integrations"
+|                 "
+"
+|                 <a>
+|                   class="font-medium text-[var(--header-text)] hover:text-[var(--header-text-hover)]"
+|                   href="/resources/"
+|                   "Resources"
+|                 "
+"
+|                 <a>
+|                   class="font-medium text-[var(--header-text)] hover:text-[var(--header-text-hover)]"
+|                   href="/help/"
+|                   "Help center"
+|                 "
+"
+|                 <a>
+|                   class="font-medium text-[var(--header-text)] hover:text-[var(--header-text-hover)]"
+|                   href="/changelog/"
+|                   "Product updates"
+|                 "
+"
+|                 <a>
+|                   class="font-medium text-[var(--header-text)] hover:text-[var(--header-text-hover)]"
+|                   href="https://docs.ghost.org/"
+|                   "Developers"
+|                 "
+"
+|                 <a>
+|                   class="font-medium text-[var(--header-text)] hover:text-[var(--header-text-hover)]"
+|                   href="/about/"
+|                   "About us"
+|             <div>
+|               class="py-6 px-6 sticky bottom-0 bg-[var(--header-dropdown-bg)]"
+|               <a>
+|                 class="plausible-event-name=Signup-CTA-clicked w-full block px-4 py-2 border border-transparent rounded-md shadow-sm text-sm text-[var(--header-cta-text)] bg-[var(--header-cta-bg)] text-center"
+|                 href="https://account.ghost.org/signup/"
+|                 <strong>
+|                   class="font-semibold"
+|                   "Get Started"
+|                 " — free"
+|               <p>
+|                 class="mt-4 text-center font-medium text-[var(--header-text-muted)]"
+|                 "Existing customer?
+"
+|                 <a>
+|                   href="https://account.ghost.org/signin/"
+|                   "Sign in"
+|       <main>
+|         role="main"
+|         <div>
+|           class="mt-[16vmin] mx-auto max-w-8xl px-4 flex flex-col items-center gap-3 text-center"
+|           <a>
+|             class="group inline-block py-[8px] px-[3px] rounded-full bg-yellow-900 transition-all duration-300 ease-in-out"
+|             href="/6/"
+|             <span>
+|               class="bg-transparent py-2 px-5 text-sm font-semibold rounded-full group-hover:bg-transparent transition-all duration-300 ease-in-out"
+|               "Just launched: Ghost 6.0 →"
+|           <h1>
+|             class="text-[6.5vmin] lg:text-8xl leading-[1] text-six-900 tracking-tight"
+|             <span>
+|               class="block"
+|               "Turn your audience"
+|             "
+"
+|             <span>
+|               class="block"
+|               <span>
+|                 class="text-six-900"
+|                 "into a business"
+|               "."
+|         <div>
+|           class="relative mt-[8vmin] px-4 sm:px-6"
+|           <div>
+|             class="max-w-8xl mx-auto rounded-t-lg md:rounded-t-xl lg:rounded-t-2xl overflow-hidden relative z-10 bg-base"
+|             <picture>
+|               class="block sm:hidden"
+|               <source>
+|                 media="(min-width: 640px)"
+|                 srcset="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"
+|               <source>
+|                 sizes="100vw"
+|                 srcset="/renders/posters/dashboard-1170.1151a0449058526164e7af08619d59c158971fd1566bf62bc0539c75472ca57f.avif 1170w, /renders/posters/dashboard-780.707383c0b787ae1507db98edd1f685dc5f16bdb310bb081e1026c229faee7f61.avif 780w"
+|                 type="image/avif"
+|               <img>
+|                 alt=""
+|                 class="block w-full"
+|                 sizes="100vw"
+|                 src="/renders/posters/dashboard-780.44856cbd385019c796a2806140775dc55b1281418e263409365a6c539e750552.webp"
+|                 srcset="/renders/posters/dashboard-1170.2a834c7d0bab2afeac8cc059efa36f9c2d62fef454fa98c2665e0bdf830e3876.webp 1170w, /renders/posters/dashboard-780.44856cbd385019c796a2806140775dc55b1281418e263409365a6c539e750552.webp 780w"
+|                 style="aspect-ratio:1688/1031"
+|             "
+"
+|             <iframe>
+|               aria-hidden="true"
+|               class="hidden sm:block w-full"
+|               loading="lazy"
+|               src="/renders/dashboard.eb80ec17e1c8b6217fa6f3bbed22b02c9c17dc823fee9e3637031b5f7b9e72a8.html"
+|               style="aspect-ratio:1688/1031;border:0;flex-shrink:0;pointer-events:none"
+|               tabindex="-1"
+|               title="Ghost dashboard"
+|             "
+"
+|             <script>
+|               "(function(e){function t(){window.innerWidth>=640&&e.dataset.render&&(e.src=e.dataset.render,delete e.dataset.render)}t(),window.addEventListener("resize",t)})(document.currentScript.previousElementSibling)"
+|           <div>
+|             class="absolute left-0 right-0 bottom-0 z-0 h-1/2 bg-slate-200"
+|         <div>
+|           class="relative bg-white pb-[12vmin] pt-[11vmin] px-4 sm:px-6"
+|           <div>
+|             class="max-w-8xl mx-auto"
+|             <p>
+|               class="max-w-6xl text-2xl md:text-5xl font-bold text-black font-hdg tracking-tight"
+|               style="line-height:1.35"
+|               "Ghost is a powerful app for professional publishers to create, share, and grow a business around their content. It comes with modern tools to build a website, publish content, send newsletters & offer paid subscriptions to members."
+|             <a>
+|               class="plausible-event-name=Signup-CTA-clicked text-slate-500 font-semibold text-xl lg:text-4xl inline-block mt-[4vmin] tracking-tight font-hdg"
+|               href="https://account.ghost.org/signup/"
+|               "Try Ghost completely free for 14 days →"
+|         <div>
+|           class="relative bg-slate-900 px-4 sm:px-6 overflow-hidden"
+|           <div>
+|             class="max-w-8xl mx-auto"
+|             <div>
+|               class="grid gap-[8vmin] grid-cols-12 items-center"
+|               <div>
+|                 class="col-span-12 lg:col-span-5 mt-12"
+|                 <h2>
+|                   class="text-xs text-lime-900 uppercase tracking-widest flex justify-between items-center"
+|                   <span>
+|                     class="flex-shrink-0"
+|                     "Easy site design"
+|                 <p>
+|                   class="mt-6 text-2xl lg:text-5xl font-bold text-white font-hdg"
+|                   "Complete control over "
+|                   <em>
+|                     "your"
+|                   " website and branding."
+|                 <p>
+|                   class="mt-6 text-xl lg:text-2xl text-slate-300 font-hdg"
+|                   "Launch a custom website and tweak the design settings to perfectly match your brand and style."
+|                 <p>
+|                   class="mt-6 text-xl lg:text-2xl text-slate-300 font-hdg"
+|                   "Go even further with hundreds of custom themes in our marketplace, or build your own completely custom design from scratch."
+|                 <p>
+|                   class="mt-6 text-xl lg:text-2xl text-slate-300 font-hdg"
+|                   "Your unique brand sits front and center, while Ghost runs things in the background."
+|                 <a>
+|                   class="inline-block mt-6 text-xl lg:text-2xl text-lime-900 font-semibold font-hdg hover:underline"
+|                   href="/themes/"
+|                   "Explore Ghost themes →"
+|               <div>
+|                 class="col-span-7"
+|                 <div>
+|                   class="w-screen h-auto mt-12"
+|                   <div>
+|                     class="max-w-7xl rounded-lg md:rounded-xl lg:rounded-2xl overflow-hidden bg-white"
+|                     <picture>
+|                       class="block sm:hidden"
+|                       <source>
+|                         media="(min-width: 640px)"
+|                         srcset="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"
+|                       <source>
+|                         sizes="100vw"
+|                         srcset="/renders/posters/themes-1170.96ff4ff820bfae2602951ef4ec61626d8cbef60691970c0d04edcdd5db64ff9c.avif 1170w, /renders/posters/themes-780.14deea84659620c18eecad6a66ea9a8a5051aac70c6d8f413f6b0e1b5bb797ee.avif 780w"
+|                         type="image/avif"
+|                       <img>
+|                         alt=""
+|                         class="block w-full"
+|                         sizes="100vw"
+|                         src="/renders/posters/themes-780.132fe11aeaff9a90d3da6459e79b726bd4b80f2429817ffd14d3c02a7a44533d.webp"
+|                         srcset="/renders/posters/themes-1170.85dfef8da81863e9067a9b8b8453e40b43a8682bbc97092d290541c2f3bd89c5.webp 1170w, /renders/posters/themes-780.132fe11aeaff9a90d3da6459e79b726bd4b80f2429817ffd14d3c02a7a44533d.webp 780w"
+|                         style="aspect-ratio:1320/880"
+|                     "
+"
+|                     <iframe>
+|                       aria-hidden="true"
+|                       class="hidden sm:block w-full"
+|                       loading="lazy"
+|                       src="/renders/themes.b398a329846fa32a5f97d097512293162a637cf4498a239056593fd80face678.html"
+|                       style="aspect-ratio:1320/880;border:0;flex-shrink:0;pointer-events:none"
+|                       tabindex="-1"
+|                       title="Ghost themes"
+|                     "
+"
+|                     <script>
+|                       "(function(e){function t(){window.innerWidth>=640&&e.dataset.render&&(e.src=e.dataset.render,delete e.dataset.render)}t(),window.addEventListener("resize",t)})(document.currentScript.previousElementSibling)"
+|           <div>
+|             class="grid gap-3 lg:gap-4 grid-cols-4 lg:grid-cols-5 items-end mt-20"
+|             <div>
+|               class="col-span-1 grid-cols-1 gap-3 lg:gap-4 hidden lg:grid"
+|               <img>
+|                 alt=""
+|                 height="750"
+|                 loading="lazy"
+|                 sizes="(max-width: 800px) calc((100vw - 12vmin - 3rem) / 4), calc((100vw - 12vmin - 6rem) / 5)"
+|                 src="/images/marketplace/themes/gallery/1.png"
+|                 srcset="/images/marketplace/themes/gallery/1_hue3493b35e18683fc18b4e18de641178d_265724_100x0_resize_q100_h2_box_3.webp 100w, /images/marketplace/themes/gallery/1_hue3493b35e18683fc18b4e18de641178d_265724_200x0_resize_q100_h2_box_3.webp 200w, /images/marketplace/themes/gallery/1_hue3493b35e18683fc18b4e18de641178d_265724_300x0_resize_q100_h2_box_3.webp 300w, /images/marketplace/themes/gallery/1_hue3493b35e18683fc18b4e18de641178d_265724_450x0_resize_q100_h2_box_3.webp 450w, /images/marketplace/themes/gallery/1_hue3493b35e18683fc18b4e18de641178d_265724_600x0_resize_q100_h2_box_3.webp 600w, /images/marketplace/themes/gallery/1_hue3493b35e18683fc18b4e18de641178d_265724_800x0_resize_q100_h2_box_3.webp 800w, /images/marketplace/themes/gallery/1_hue3493b35e18683fc18b4e18de641178d_265724_1000x0_resize_q100_h2_box_3.webp 1000w"
+|                 width="1200"
+|               "
+"
+|               <img>
+|                 alt=""
+|                 height="601"
+|                 loading="lazy"
+|                 sizes="(max-width: 800px) calc((100vw - 12vmin - 3rem) / 4), calc((100vw - 12vmin - 6rem) / 5)"
+|                 src="/images/marketplace/themes/gallery/10.png"
+|                 srcset="/images/marketplace/themes/gallery/10_hu70a322e78cd25fadb797f09d7028b7c6_158995_100x0_resize_q100_h2_box_3.webp 100w, /images/marketplace/themes/gallery/10_hu70a322e78cd25fadb797f09d7028b7c6_158995_200x0_resize_q100_h2_box_3.webp 200w, /images/marketplace/themes/gallery/10_hu70a322e78cd25fadb797f09d7028b7c6_158995_300x0_resize_q100_h2_box_3.webp 300w, /images/marketplace/themes/gallery/10_hu70a322e78cd25fadb797f09d7028b7c6_158995_450x0_resize_q100_h2_box_3.webp 450w, /images/marketplace/themes/gallery/10_hu70a322e78cd25fadb797f09d7028b7c6_158995_600x0_resize_q100_h2_box_3.webp 600w, /images/marketplace/themes/gallery/10_hu70a322e78cd25fadb797f09d7028b7c6_158995_800x0_resize_q100_h2_box_3.webp 800w, /images/marketplace/themes/gallery/10_hu70a322e78cd25fadb797f09d7028b7c6_158995_1000x0_resize_q100_h2_box_3.webp 1000w"
+|                 width="1134"
+|               "
+"
+|               <img>
+|                 alt=""
+|                 height="583"
+|                 loading="lazy"
+|                 sizes="(max-width: 800px) calc((100vw - 12vmin - 3rem) / 4), calc((100vw - 12vmin - 6rem) / 5)"
+|                 src="/images/marketplace/themes/gallery/9.png"
+|                 srcset="/images/marketplace/themes/gallery/9_hu7f65267634ae5611e15c6c9193a30606_103301_100x0_resize_q100_h2_box_3.webp 100w, /images/marketplace/themes/gallery/9_hu7f65267634ae5611e15c6c9193a30606_103301_200x0_resize_q100_h2_box_3.webp 200w, /images/marketplace/themes/gallery/9_hu7f65267634ae5611e15c6c9193a30606_103301_300x0_resize_q100_h2_box_3.webp 300w, /images/marketplace/themes/gallery/9_hu7f65267634ae5611e15c6c9193a30606_103301_450x0_resize_q100_h2_box_3.webp 450w, /images/marketplace/themes/gallery/9_hu7f65267634ae5611e15c6c9193a30606_103301_600x0_resize_q100_h2_box_3.webp 600w, /images/marketplace/themes/gallery/9_hu7f65267634ae5611e15c6c9193a30606_103301_800x0_resize_q100_h2_box_3.webp 800w, /images/marketplace/themes/gallery/9_hu7f65267634ae5611e15c6c9193a30606_103301_1000x0_resize_q100_h2_box_3.webp 1000w"
+|                 width="1042"
+|               "
+"
+|               <img>
+|                 alt=""
+|                 height="767"
+|                 loading="lazy"
+|                 sizes="(max-width: 800px) calc((100vw - 12vmin - 3rem) / 4), calc((100vw - 12vmin - 6rem) / 5)"
+|                 src="/images/marketplace/themes/gallery/2.png"
+|                 srcset="/images/marketplace/themes/gallery/2_huc60bd78e9687369ad14d5f988e95f0f4_204379_100x0_resize_q100_h2_box_3.webp 100w, /images/marketplace/themes/gallery/2_huc60bd78e9687369ad14d5f988e95f0f4_204379_200x0_resize_q100_h2_box_3.webp 200w, /images/marketplace/themes/gallery/2_huc60bd78e9687369ad14d5f988e95f0f4_204379_300x0_resize_q100_h2_box_3.webp 300w, /images/marketplace/themes/gallery/2_huc60bd78e9687369ad14d5f988e95f0f4_204379_450x0_resize_q100_h2_box_3.webp 450w, /images/marketplace/themes/gallery/2_huc60bd78e9687369ad14d5f988e95f0f4_204379_600x0_resize_q100_h2_box_3.webp 600w, /images/marketplace/themes/gallery/2_huc60bd78e9687369ad14d5f988e95f0f4_204379_800x0_resize_q100_h2_box_3.webp 800w, /images/marketplace/themes/gallery/2_huc60bd78e9687369ad14d5f988e95f0f4_204379_1000x0_resize_q100_h2_box_3.webp 1000w"
+|                 width="1010"
+|             <div>
+|               class="col-span-1 grid grid-cols-1 gap-3 lg:gap-4"
+|               <img>
+|                 alt=""
+|                 height="389"
+|                 loading="lazy"
+|                 sizes="(max-width: 800px) calc((100vw - 12vmin - 3rem) / 4), calc((100vw - 12vmin - 6rem) / 5)"
+|                 src="/images/marketplace/themes/gallery/31.png"
+|                 srcset="/images/marketplace/themes/gallery/31_hu23677a6dc7ceb9d950273b47389ee9f2_102543_100x0_resize_q100_h2_box_3.webp 100w, /images/marketplace/themes/gallery/31_hu23677a6dc7ceb9d950273b47389ee9f2_102543_200x0_resize_q100_h2_box_3.webp 200w, /images/marketplace/themes/gallery/31_hu23677a6dc7ceb9d950273b47389ee9f2_102543_300x0_resize_q100_h2_box_3.webp 300w, /images/marketplace/themes/gallery/31_hu23677a6dc7ceb9d950273b47389ee9f2_102543_450x0_resize_q100_h2_box_3.webp 450w, /images/marketplace/themes/gallery/31_hu23677a6dc7ceb9d950273b47389ee9f2_102543_600x0_resize_q100_h2_box_3.webp 600w"
+|                 width="700"
+|               "
+"
+|               <img>
+|                 alt=""
+|                 height="687"
+|                 loading="lazy"
+|                 sizes="(max-width: 800px) calc((100vw - 12vmin - 3rem) / 4), calc((100vw - 12vmin - 6rem) / 5)"
+|                 src="/images/marketplace/themes/gallery/16.png"
+|                 srcset="/images/marketplace/themes/gallery/16_hu15106a464093f7531d0ae40d764c2870_115750_100x0_resize_q100_h2_box_3.webp 100w, /images/marketplace/themes/gallery/16_hu15106a464093f7531d0ae40d764c2870_115750_200x0_resize_q100_h2_box_3.webp 200w, /images/marketplace/themes/gallery/16_hu15106a464093f7531d0ae40d764c2870_115750_300x0_resize_q100_h2_box_3.webp 300w, /images/marketplace/themes/gallery/16_hu15106a464093f7531d0ae40d764c2870_115750_450x0_resize_q100_h2_box_3.webp 450w, /images/marketplace/themes/gallery/16_hu15106a464093f7531d0ae40d764c2870_115750_600x0_resize_q100_h2_box_3.webp 600w, /images/marketplace/themes/gallery/16_hu15106a464093f7531d0ae40d764c2870_115750_800x0_resize_q100_h2_box_3.webp 800w, /images/marketplace/themes/gallery/16_hu15106a464093f7531d0ae40d764c2870_115750_1000x0_resize_q100_h2_box_3.webp 1000w"
+|                 width="1116"
+|               "
+"
+|               <img>
+|                 alt=""
+|                 height="679"
+|                 loading="lazy"
+|                 sizes="(max-width: 800px) calc((100vw - 12vmin - 3rem) / 4), calc((100vw - 12vmin - 6rem) / 5)"
+|                 src="/images/marketplace/themes/gallery/7.png"
+|                 srcset="/images/marketplace/themes/gallery/7_hub7d4ed8d68e4b8522178aea5cbee02bb_151385_100x0_resize_q100_h2_box_3.webp 100w, /images/marketplace/themes/gallery/7_hub7d4ed8d68e4b8522178aea5cbee02bb_151385_200x0_resize_q100_h2_box_3.webp 200w, /images/marketplace/themes/gallery/7_hub7d4ed8d68e4b8522178aea5cbee02bb_151385_300x0_resize_q100_h2_box_3.webp 300w, /images/marketplace/themes/gallery/7_hub7d4ed8d68e4b8522178aea5cbee02bb_151385_450x0_resize_q100_h2_box_3.webp 450w, /images/marketplace/themes/gallery/7_hub7d4ed8d68e4b8522178aea5cbee02bb_151385_600x0_resize_q100_h2_box_3.webp 600w, /images/marketplace/themes/gallery/7_hub7d4ed8d68e4b8522178aea5cbee02bb_151385_800x0_resize_q100_h2_box_3.webp 800w, /images/marketplace/themes/gallery/7_hub7d4ed8d68e4b8522178aea5cbee02bb_151385_1000x0_resize_q100_h2_box_3.webp 1000w"
+|                 width="1136"
+|               "
+"
+|               <img>
+|                 alt=""
+|                 height="595"
+|                 loading="lazy"
+|                 sizes="(max-width: 800px) calc((100vw - 12vmin - 3rem) / 4), calc((100vw - 12vmin - 6rem) / 5)"
+|                 src="/images/marketplace/themes/gallery/29.png"
+|                 srcset="/images/marketplace/themes/gallery/29_hu7d8007571fef1208eae8c9987d766944_90794_100x0_resize_q100_h2_box_3.webp 100w, /images/marketplace/themes/gallery/29_hu7d8007571fef1208eae8c9987d766944_90794_200x0_resize_q100_h2_box_3.webp 200w, /images/marketplace/themes/gallery/29_hu7d8007571fef1208eae8c9987d766944_90794_300x0_resize_q100_h2_box_3.webp 300w, /images/marketplace/themes/gallery/29_hu7d8007571fef1208eae8c9987d766944_90794_450x0_resize_q100_h2_box_3.webp 450w, /images/marketplace/themes/gallery/29_hu7d8007571fef1208eae8c9987d766944_90794_600x0_resize_q100_h2_box_3.webp 600w"
+|                 width="700"
+|             <div>
+|               class="col-span-1 grid grid-cols-1 gap-3 lg:gap-4"
+|               <img>
+|                 alt=""
+|                 height="477"
+|                 loading="lazy"
+|                 sizes="(max-width: 800px) calc((100vw - 12vmin - 3rem) / 4), calc((100vw - 12vmin - 6rem) / 5)"
+|                 src="/images/marketplace/themes/gallery/32.png"
+|                 srcset="/images/marketplace/themes/gallery/32_huab68c0400e99d7ba654d78c9bbfb06f6_24785_100x0_resize_q100_h2_box_3.webp 100w, /images/marketplace/themes/gallery/32_huab68c0400e99d7ba654d78c9bbfb06f6_24785_200x0_resize_q100_h2_box_3.webp 200w, /images/marketplace/themes/gallery/32_huab68c0400e99d7ba654d78c9bbfb06f6_24785_300x0_resize_q100_h2_box_3.webp 300w, /images/marketplace/themes/gallery/32_huab68c0400e99d7ba654d78c9bbfb06f6_24785_450x0_resize_q100_h2_box_3.webp 450w, /images/marketplace/themes/gallery/32_huab68c0400e99d7ba654d78c9bbfb06f6_24785_600x0_resize_q100_h2_box_3.webp 600w"
+|                 width="700"
+|               "
+"
+|               <img>
+|                 alt=""
+|                 height="604"
+|                 loading="lazy"
+|                 sizes="(max-width: 800px) calc((100vw - 12vmin - 3rem) / 4), calc((100vw - 12vmin - 6rem) / 5)"
+|                 src="/images/marketplace/themes/gallery/33.png"
+|                 srcset="/images/marketplace/themes/gallery/33_hu052ed601aea7d9b9dcfdefe81929a862_99991_100x0_resize_q100_h2_box_3.webp 100w, /images/marketplace/themes/gallery/33_hu052ed601aea7d9b9dcfdefe81929a862_99991_200x0_resize_q100_h2_box_3.webp 200w, /images/marketplace/themes/gallery/33_hu052ed601aea7d9b9dcfdefe81929a862_99991_300x0_resize_q100_h2_box_3.webp 300w, /images/marketplace/themes/gallery/33_hu052ed601aea7d9b9dcfdefe81929a862_99991_450x0_resize_q100_h2_box_3.webp 450w, /images/marketplace/themes/gallery/33_hu052ed601aea7d9b9dcfdefe81929a862_99991_600x0_resize_q100_h2_box_3.webp 600w"
+|                 width="700"
+|               "
+"
+|               <img>
+|                 alt=""
+|                 height="726"
+|                 loading="lazy"
+|                 sizes="(max-width: 800px) calc((100vw - 12vmin - 3rem) / 4), calc((100vw - 12vmin - 6rem) / 5)"
+|                 src="/images/marketplace/themes/gallery/15.png"
+|                 srcset="/images/marketplace/themes/gallery/15_hu11e331409657f9ea278e420d0f59bce6_111652_100x0_resize_q100_h2_box_3.webp 100w, /images/marketplace/themes/gallery/15_hu11e331409657f9ea278e420d0f59bce6_111652_200x0_resize_q100_h2_box_3.webp 200w, /images/marketplace/themes/gallery/15_hu11e331409657f9ea278e420d0f59bce6_111652_300x0_resize_q100_h2_box_3.webp 300w, /images/marketplace/themes/gallery/15_hu11e331409657f9ea278e420d0f59bce6_111652_450x0_resize_q100_h2_box_3.webp 450w, /images/marketplace/themes/gallery/15_hu11e331409657f9ea278e420d0f59bce6_111652_600x0_resize_q100_h2_box_3.webp 600w, /images/marketplace/themes/gallery/15_hu11e331409657f9ea278e420d0f59bce6_111652_800x0_resize_q100_h2_box_3.webp 800w, /images/marketplace/themes/gallery/15_hu11e331409657f9ea278e420d0f59bce6_111652_1000x0_resize_q100_h2_box_3.webp 1000w"
+|                 width="1134"
+|             <div>
+|               class="col-span-1 grid grid-cols-1 gap-3 lg:gap-4"
+|               <img>
+|                 alt=""
+|                 height="428"
+|                 loading="lazy"
+|                 sizes="(max-width: 800px) calc((100vw - 12vmin - 3rem) / 4), calc((100vw - 12vmin - 6rem) / 5)"
+|                 src="/images/marketplace/themes/gallery/27.png"
+|                 srcset="/images/marketplace/themes/gallery/27_hu084232fd0add9091fbcdf313dd0581d6_41497_100x0_resize_q100_h2_box_3.webp 100w, /images/marketplace/themes/gallery/27_hu084232fd0add9091fbcdf313dd0581d6_41497_200x0_resize_q100_h2_box_3.webp 200w, /images/marketplace/themes/gallery/27_hu084232fd0add9091fbcdf313dd0581d6_41497_300x0_resize_q100_h2_box_3.webp 300w, /images/marketplace/themes/gallery/27_hu084232fd0add9091fbcdf313dd0581d6_41497_450x0_resize_q100_h2_box_3.webp 450w, /images/marketplace/themes/gallery/27_hu084232fd0add9091fbcdf313dd0581d6_41497_600x0_resize_q100_h2_box_3.webp 600w"
+|                 width="700"
+|               "
+"
+|               <img>
+|                 alt=""
+|                 height="1028"
+|                 loading="lazy"
+|                 sizes="(max-width: 800px) calc((100vw - 12vmin - 3rem) / 4), calc((100vw - 12vmin - 6rem) / 5)"
+|                 src="/images/marketplace/themes/gallery/4.png"
+|                 srcset="/images/marketplace/themes/gallery/4_hu835c013f2ea94981ae437d729e102449_251558_100x0_resize_q100_h2_box_3.webp 100w, /images/marketplace/themes/gallery/4_hu835c013f2ea94981ae437d729e102449_251558_200x0_resize_q100_h2_box_3.webp 200w, /images/marketplace/themes/gallery/4_hu835c013f2ea94981ae437d729e102449_251558_300x0_resize_q100_h2_box_3.webp 300w, /images/marketplace/themes/gallery/4_hu835c013f2ea94981ae437d729e102449_251558_450x0_resize_q100_h2_box_3.webp 450w, /images/marketplace/themes/gallery/4_hu835c013f2ea94981ae437d729e102449_251558_600x0_resize_q100_h2_box_3.webp 600w, /images/marketplace/themes/gallery/4_hu835c013f2ea94981ae437d729e102449_251558_800x0_resize_q100_h2_box_3.webp 800w, /images/marketplace/themes/gallery/4_hu835c013f2ea94981ae437d729e102449_251558_1000x0_resize_q100_h2_box_3.webp 1000w"
+|                 width="1000"
+|               "
+"
+|               <img>
+|                 alt=""
+|                 height="824"
+|                 loading="lazy"
+|                 sizes="(max-width: 800px) calc((100vw - 12vmin - 3rem) / 4), calc((100vw - 12vmin - 6rem) / 5)"
+|                 src="/images/marketplace/themes/gallery/20.png"
+|                 srcset="/images/marketplace/themes/gallery/20_huafed1ac3adb86ba9ee2c714f2ffb2638_177149_100x0_resize_q100_h2_box_3.webp 100w, /images/marketplace/themes/gallery/20_huafed1ac3adb86ba9ee2c714f2ffb2638_177149_200x0_resize_q100_h2_box_3.webp 200w, /images/marketplace/themes/gallery/20_huafed1ac3adb86ba9ee2c714f2ffb2638_177149_300x0_resize_q100_h2_box_3.webp 300w, /images/marketplace/themes/gallery/20_huafed1ac3adb86ba9ee2c714f2ffb2638_177149_450x0_resize_q100_h2_box_3.webp 450w, /images/marketplace/themes/gallery/20_huafed1ac3adb86ba9ee2c714f2ffb2638_177149_600x0_resize_q100_h2_box_3.webp 600w, /images/marketplace/themes/gallery/20_huafed1ac3adb86ba9ee2c714f2ffb2638_177149_800x0_resize_q100_h2_box_3.webp 800w, /images/marketplace/themes/gallery/20_huafed1ac3adb86ba9ee2c714f2ffb2638_177149_1000x0_resize_q100_h2_box_3.webp 1000w"
+|                 width="1152"
+|             <div>
+|               class="col-span-1 grid grid-cols-1 gap-3 lg:gap-4"
+|               <img>
+|                 alt=""
+|                 height="869"
+|                 loading="lazy"
+|                 sizes="(max-width: 800px) calc((100vw - 12vmin - 3rem) / 4), calc((100vw - 12vmin - 6rem) / 5)"
+|                 src="/images/marketplace/themes/gallery/19.png"
+|                 srcset="/images/marketplace/themes/gallery/19_hu33a0ac050ddeefda399b8f9a2e3cbe6e_126115_100x0_resize_q100_h2_box_3.webp 100w, /images/marketplace/themes/gallery/19_hu33a0ac050ddeefda399b8f9a2e3cbe6e_126115_200x0_resize_q100_h2_box_3.webp 200w, /images/marketplace/themes/gallery/19_hu33a0ac050ddeefda399b8f9a2e3cbe6e_126115_300x0_resize_q100_h2_box_3.webp 300w, /images/marketplace/themes/gallery/19_hu33a0ac050ddeefda399b8f9a2e3cbe6e_126115_450x0_resize_q100_h2_box_3.webp 450w, /images/marketplace/themes/gallery/19_hu33a0ac050ddeefda399b8f9a2e3cbe6e_126115_600x0_resize_q100_h2_box_3.webp 600w, /images/marketplace/themes/gallery/19_hu33a0ac050ddeefda399b8f9a2e3cbe6e_126115_800x0_resize_q100_h2_box_3.webp 800w, /images/marketplace/themes/gallery/19_hu33a0ac050ddeefda399b8f9a2e3cbe6e_126115_1000x0_resize_q100_h2_box_3.webp 1000w"
+|                 width="1064"
+|               "
+"
+|               <img>
+|                 alt=""
+|                 height="649"
+|                 loading="lazy"
+|                 sizes="(max-width: 800px) calc((100vw - 12vmin - 3rem) / 4), calc((100vw - 12vmin - 6rem) / 5)"
+|                 src="/images/marketplace/themes/gallery/25.png"
+|                 srcset="/images/marketplace/themes/gallery/25_huf058e85a6804c0f90790051235815319_142266_100x0_resize_q100_h2_box_3.webp 100w, /images/marketplace/themes/gallery/25_huf058e85a6804c0f90790051235815319_142266_200x0_resize_q100_h2_box_3.webp 200w, /images/marketplace/themes/gallery/25_huf058e85a6804c0f90790051235815319_142266_300x0_resize_q100_h2_box_3.webp 300w, /images/marketplace/themes/gallery/25_huf058e85a6804c0f90790051235815319_142266_450x0_resize_q100_h2_box_3.webp 450w, /images/marketplace/themes/gallery/25_huf058e85a6804c0f90790051235815319_142266_600x0_resize_q100_h2_box_3.webp 600w, /images/marketplace/themes/gallery/25_huf058e85a6804c0f90790051235815319_142266_800x0_resize_q100_h2_box_3.webp 800w, /images/marketplace/themes/gallery/25_huf058e85a6804c0f90790051235815319_142266_1000x0_resize_q100_h2_box_3.webp 1000w"
+|                 width="1044"
+|               "
+"
+|               <img>
+|                 alt=""
+|                 height="925"
+|                 loading="lazy"
+|                 sizes="(max-width: 800px) calc((100vw - 12vmin - 3rem) / 4), calc((100vw - 12vmin - 6rem) / 5)"
+|                 src="/images/marketplace/themes/gallery/14.png"
+|                 srcset="/images/marketplace/themes/gallery/14_hu7470a22c374a118c6f730f1a5ba4ae12_171273_100x0_resize_q100_h2_box_3.webp 100w, /images/marketplace/themes/gallery/14_hu7470a22c374a118c6f730f1a5ba4ae12_171273_200x0_resize_q100_h2_box_3.webp 200w, /images/marketplace/themes/gallery/14_hu7470a22c374a118c6f730f1a5ba4ae12_171273_300x0_resize_q100_h2_box_3.webp 300w, /images/marketplace/themes/gallery/14_hu7470a22c374a118c6f730f1a5ba4ae12_171273_450x0_resize_q100_h2_box_3.webp 450w, /images/marketplace/themes/gallery/14_hu7470a22c374a118c6f730f1a5ba4ae12_171273_600x0_resize_q100_h2_box_3.webp 600w, /images/marketplace/themes/gallery/14_hu7470a22c374a118c6f730f1a5ba4ae12_171273_800x0_resize_q100_h2_box_3.webp 800w, /images/marketplace/themes/gallery/14_hu7470a22c374a118c6f730f1a5ba4ae12_171273_1000x0_resize_q100_h2_box_3.webp 1000w"
+|                 width="1218"
+|         <div>
+|           class="relative bg-slate-200 py-[8vmin] px-4 sm:px-6 overflow-hidden"
+|           <div>
+|             class="max-w-8xl mx-auto"
+|             <h2>
+|               class="text-xs text-slate-500 uppercase tracking-widest flex justify-between items-center"
+|               <span>
+|                 class="flex-shrink-0"
+|                 "Advanced creator tools"
+|             <div>
+|               class="grid gap-[4vmin] grid-cols-12 items-center"
+|               <div>
+|                 class="col-span-12"
+|                 <p>
+|                   class="mt-4 text-2xl lg:text-5xl font-bold text-black font-hdg leading-none tracking-tight"
+|                   "Publish by web & email newsletter."
+|                 <p>
+|                   class="max-w-3xl mt-6 text-xl lg:text-2xl md:text-4xl leading-normal font-normal text-slate-700 font-hdg"
+|                   "An editor built from the ground-up for professionals. Calm by design, with advanced workflows by default. No more suffering through clumsy toolbars or drag & oops. Immerse yourself in the story with an interface that's invisible until you need it, and powerful when you do."
+|           <div>
+|             class="col-span-12 w-full max-w-8xl mx-auto bg-white mt-10 lg:mt-20 rounded-lg md:rounded-xl lg:rounded-2xl overflow-hidden shadow-sm"
+|             <picture>
+|               class="block sm:hidden"
+|               <source>
+|                 media="(min-width: 640px)"
+|                 srcset="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"
+|               <source>
+|                 sizes="100vw"
+|                 srcset="/renders/posters/editor-1170.7679751f5e4c8945040530237ceefe360aa8148d1f9015aa547db7cfb8f2bf2a.avif 1170w, /renders/posters/editor-780.033be4854327d6e049daab67b6b883c374fe43fd8cceca1f8b3ce88d17d62a91.avif 780w"
+|                 type="image/avif"
+|               <img>
+|                 alt=""
+|                 class="block w-full"
+|                 sizes="100vw"
+|                 src="/renders/posters/editor-780.01e951196fb83a690e4c46cd98dfe63bee9011242bc2a4ac87fb7f29ff15042a.webp"
+|                 srcset="/renders/posters/editor-1170.bed78e32a54e309507fc850d3ff73b8bbf6c45896666584864c2376184cb646d.webp 1170w, /renders/posters/editor-780.01e951196fb83a690e4c46cd98dfe63bee9011242bc2a4ac87fb7f29ff15042a.webp 780w"
+|                 style="aspect-ratio:1560/911"
+|             "
+"
+|             <iframe>
+|               aria-hidden="true"
+|               class="hidden sm:block w-full"
+|               loading="lazy"
+|               src="/renders/editor.05c8dc425244d38a70d5c92f34212a34dd858c44e26ee9c82a8043654c6ba97f.html"
+|               style="aspect-ratio:1560/911;border:0;flex-shrink:0;pointer-events:none"
+|               tabindex="-1"
+|               title="Ghost editor"
+|             "
+"
+|             <script>
+|               "(function(e){function t(){window.innerWidth>=640&&e.dataset.render&&(e.src=e.dataset.render,delete e.dataset.render)}t(),window.addEventListener("resize",t)})(document.currentScript.previousElementSibling)"
+|           <div>
+|             class="max-w-8xl mx-auto"
+|             <div>
+|               class="mt-10 lg:mt-20 grid gap-0 md:gap-[6vmin] grid-cols-1 md:grid-cols-12 justify-items-center items-center"
+|               <div>
+|                 class="col-span-5 order-first"
+|                 <img>
+|                   alt="Rich media & dynamic cards"
+|                   height="816"
+|                   loading="lazy"
+|                   src="/images/home/rich-media_huddde3de0210564f5a2a17ac289541a12_96216_816x0_resize_q100_h2_box_3.webp"
+|                   width="816"
+|               <div>
+|                 class="col-span-7"
+|                 <h3>
+|                   class="mt-0 md:mt-10 text-2xl lg:text-4xl font-bold text-black leading-none tracking-tight"
+|                   "Rich media & dynamic cards."
+|                 <p>
+|                   class="max-w-xl mt-6 text-xl lg:text-2xl leading-normal font-normal text-slate-700 font-hdg"
+|                   "Modern publishing requires more than just words. Expand your story with image galleries, gifs, video, audio, products, info boxes, accordion toggles, downloadable files, bookmarks, and so much more."
+|             <div>
+|               class="mt-0 md:mt-10 mb-10 lg:mb-20 grid gap-0 md:gap-[6vmin] grid-cols-1 md:grid-cols-12 justify-items-center items-center"
+|               <div>
+|                 class="col-span-7 order-last md:order-first"
+|                 <h3>
+|                   class="mt-0 md:mt-10 text-2xl lg:text-4xl font-bold text-black leading-none tracking-tight"
+|                   "Newsletters built-in."
+|                 <p>
+|                   class="max-w-xl mt-6 text-xl lg:text-2xl leading-normal font-normal text-slate-700 font-hdg"
+|                   "Deliver posts by email newsletter to your audience, so they'll be in the loop whenever something new goes live. Segment your audience and send multiple different newsletters based on preference."
+|               <div>
+|                 class="col-span-5 order-first md:order-last"
+|                 <img>
+|                   alt="Newsletters"
+|                   height="816"
+|                   loading="lazy"
+|                   src="/images/home/newsletters_hu16db4287012918642023c05f2cd52e4a_41443_816x0_resize_q100_h2_box_3.webp"
+|                   width="816"
+|         <div>
+|           class="relative bg-slate-900 py-[8vmin] px-4 sm:px-6 overflow-hidden"
+|           <div>
+|             class="max-w-8xl mx-auto"
+|             <div>
+|               class="grid gap-[4vmin] grid-cols-12 items-center"
+|               <div>
+|                 class="flex justify-center col-span-12 md:col-span-7 h-auto md:h-[800px] relative"
+|                 <div>
+|                   class="relative h-full w-full overflow-hidden bg-[#F8B1E2] rounded-lg md:rounded-xl lg:rounded-2xl flex flex-col justify-center"
+|                   <picture>
+|                     class="block sm:hidden"
+|                     <source>
+|                       media="(min-width: 640px)"
+|                       srcset="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"
+|                     <source>
+|                       sizes="100vw"
+|                       srcset="/renders/posters/portal-1078.5da6bee6d381e0ced4f4c6281cecf6a49f9707a4dd254da9b76d6a9362bf1896.avif 1078w, /renders/posters/portal-780.bd284fc99fe5ca681807858af9afa38b9128fef46a73352ff2db19abc3ec90df.avif 780w"
+|                       type="image/avif"
+|                     <img>
+|                       alt=""
+|                       class="block w-full"
+|                       sizes="100vw"
+|                       src="/renders/posters/portal-780.9f61da6bbf58f464db8c1e51e5bbca0581e2602c9117de044fd428a4a77004e2.webp"
+|                       srcset="/renders/posters/portal-1078.906af19c35200b8b73c14a13fa6fcd7287f4e298ecbfea5d567a993bf36f67e0.webp 1078w, /renders/posters/portal-780.9f61da6bbf58f464db8c1e51e5bbca0581e2602c9117de044fd428a4a77004e2.webp 780w"
+|                       style="aspect-ratio:656/796"
+|                   "
+"
+|                   <iframe>
+|                     aria-hidden="true"
+|                     class="hidden sm:block w-full"
+|                     loading="lazy"
+|                     src="/renders/portal.c93372cf63698de7c5b22f79633106e676376e0df6ab1c035d8e05c12cefc416.html"
+|                     style="aspect-ratio:656/796;border:0;flex-shrink:0;pointer-events:none"
+|                     tabindex="-1"
+|                     title="Ghost portal"
+|                   "
+"
+|                   <script>
+|                     "(function(e){function t(){window.innerWidth>=640&&e.dataset.render&&(e.src=e.dataset.render,delete e.dataset.render)}t(),window.addEventListener("resize",t)})(document.currentScript.previousElementSibling)"
+|               <div>
+|                 class="col-span-12 md:col-span-5 mt-12"
+|                 <h2>
+|                   class="text-xs text-lime-900 uppercase tracking-widest flex justify-between items-center"
+|                   <span>
+|                     class="flex-shrink-0"
+|                     "Grow your audiences"
+|                 <p>
+|                   class="mt-6 text-2xl lg:text-5xl font-bold text-white font-hdg leading-tight tracking-tight"
+|                   "Transform those clicks into contacts."
+|                 <p>
+|                   class="mt-6 text-xl lg:text-2xl text-slate-300 font-hdg"
+|                   "Until now, building an indie publication with memberships and subscriptions has been difficult and complicated."
+|                 <p>
+|                   class="mt-6 text-xl lg:text-2xl text-slate-300 font-hdg"
+|                   "Ghost makes it easy, with native signup forms that turn anonymous views into logged-in members."
+|                 <p>
+|                   class="mt-6 text-xl lg:text-2xl text-slate-300 font-hdg"
+|                   "Allow people to sign up for free, or purchase a paid subscription to support your work across monthly and yearly premium tiers."
+|                 <p>
+|                   class="mt-6 text-xl lg:text-2xl text-white font-hdg font-medium"
+|                   "Hello, new friends."
+|         <div>
+|           class="relative bg-white py-[8vmin] px-4 sm:px-6 overflow-hidden"
+|           <div>
+|             class="max-w-8xl mx-auto"
+|             <h2>
+|               class="text-xs text-slate-500 uppercase tracking-widest flex justify-between items-center"
+|               <span>
+|                 class="flex-shrink-0"
+|                 "Run your business"
+|             <div>
+|               class="grid gap-[4vmin] grid-cols-12 items-center"
+|               <div>
+|                 class="col-span-12"
+|                 <p>
+|                   class="mt-4 text-2xl lg:text-5xl font-bold text-black font-hdg leading-none tracking-tight"
+|                   "Manage your memberships."
+|                 <p>
+|                   class="max-w-3xl mt-6 text-xl lg:text-2xl md:text-4xl leading-normal font-normal text-slate-700 font-hdg"
+|                   "See who's signing up, who's paying, and what they're reading, so you can get a better understanding of your core audience."
+|           <div>
+|             class="col-span-12 w-full max-w-8xl mx-auto mt-10"
+|             <style>
+|               "#members-video{width:100%}@media(min-width:1280px){#members-video{width:calc(100% + 100px)}}"
+|             <picture>
+|               class="block sm:hidden"
+|               <source>
+|                 media="(min-width: 640px)"
+|                 srcset="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"
+|               <source>
+|                 sizes="100vw"
+|                 srcset="/renders/posters/members-1170.46257035ab2af1a67ef79d85724f39045245e4cdb9d05d0cc8decb19ef17a15f.avif 1170w, /renders/posters/members-780.2b77f2205850c7ebad42c96316be0b19322594f3ac66c8c6072ce3bb496f6de5.avif 780w"
+|                 type="image/avif"
+|               <img>
+|                 alt=""
+|                 class="block w-full"
+|                 sizes="100vw"
+|                 src="/renders/posters/members-780.e171f3fe6c548c8b5df0e05f3b4921c55a9530e52aef3e370f9777804fe9d58b.webp"
+|                 srcset="/renders/posters/members-1170.f9b9a749331eef76c0e0fd7801179e44e0bdfe3a1f3b26b07b3543487750fd17.webp 1170w, /renders/posters/members-780.e171f3fe6c548c8b5df0e05f3b4921c55a9530e52aef3e370f9777804fe9d58b.webp 780w"
+|                 style="aspect-ratio:1680/1015"
+|             "
+"
+|             <iframe>
+|               aria-hidden="true"
+|               class="hidden sm:block w-full xl:-mx-[50px] max-w-none"
+|               id="members-video"
+|               loading="lazy"
+|               src="/renders/members.fbcd9581418b3f8d057a508726acab18a7e1e4e1ecb0e6b1917b8ca8ef4ace7f.html"
+|               style="aspect-ratio:1680/1015;border:0;flex-shrink:0;pointer-events:none"
+|               tabindex="-1"
+|               title="Ghost members"
+|             "
+"
+|             <script>
+|               "(function(e){function t(){window.innerWidth>=640&&e.dataset.render&&(e.src=e.dataset.render,delete e.dataset.render)}t(),window.addEventListener("resize",t)})(document.currentScript.previousElementSibling)"
+|           <div>
+|             class="max-w-8xl mx-auto"
+|             <div>
+|               class="mt-0 md:mt-10 lg:mt-20 grid gap-0 md:gap-[6vmin] grid-cols-1 md:grid-cols-12 justify-items-center items-center"
+|               <div>
+|                 class="col-span-5 order-first"
+|                 <img>
+|                   alt="Native analytics"
+|                   height="816"
+|                   loading="lazy"
+|                   src="/images/home/native-analytics_hube9f4ce53cd3dc80d0a977ea75029ad7_16450_816x0_resize_q100_h2_box_3.webp"
+|                   width="816"
+|               <div>
+|                 class="col-span-7"
+|                 <h3>
+|                   class="mt-0 md:mt-10 text-2xl lg:text-4xl font-bold text-black leading-none tracking-tight"
+|                   "Native analytics."
+|                 <p>
+|                   class="max-w-xl mt-6 text-xl lg:text-2xl leading-normal font-normal text-slate-700 font-hdg"
+|                   "Understand what's working. Detailed engagement analytics for your audience so you can understand what content is getting the most attention, and who your biggest fans are."
+|             <div>
+|               class="mt-0 md:mt-10 mb-10 lg:mb-20 grid gap-0 md:gap-[6vmin] grid-cols-1 md:grid-cols-12 justify-items-center items-center"
+|               <div>
+|                 class="col-span-7 order-last md:order-first"
+|                 <h3>
+|                   class="mt-0 md:mt-10 text-2xl lg:text-4xl font-bold text-black leading-none tracking-tight"
+|                   "Offers & promotions."
+|                 <p>
+|                   class="max-w-xl mt-6 text-xl lg:text-2xl leading-normal font-normal text-slate-700 font-hdg"
+|                   "Entice new subscribers with offers and promotions to grow your business. Run a 30% discount for your first 100 subscribers, an 80%-off Black Friday sale, or a special promotion for a live event."
+|               <div>
+|                 class="col-span-5 order-first md:order-last"
+|                 <img>
+|                   alt="Offers & promotions"
+|                   height="816"
+|                   loading="lazy"
+|                   src="/images/home/offers-promotions_hu0f9c92914823a14a9f790b98506d5d7c_19779_816x0_resize_q100_h2_box_3.webp"
+|                   width="816"
+|         <div>
+|           class="relative flex flex-col items-center bg-white pb-[10vmin] px-4 sm:px-6 overflow-hidden"
+|           <ul>
+|             class="scale-75 lg:scale-100 py-10 flex-shrink-0 flex justify-center gap-12 -mb-80"
+|             <li>
+|               class="flex-shrink-0 flex flex-col gap-12 mt-10"
+|               <div>
+|                 class="group relative flex flex-col items-center justify-center"
+|                 <a>
+|                   class="w-24 h-24 flex flex-col items-center justify-center rounded-3xl hover:shadow-3xl border border-neutral-200 overflow-hidden shadow-sm"
+|                   href="/integrations/geckoboard/"
+|                   <img>
+|                     alt="GeckoBoard"
+|                     height="160"
+|                     loading="lazy"
+|                     src="/images/logos/integrations/geckoboard_hu9dcbb26ba4b2bd93be47ded1c4023006_2732_160x0_resize_q100_h2_box.webp"
+|                     width="160"
+|                 <p>
+|                   class="absolute text-xs leading-none text-white px-3 py-2 bg-zinc-900 rounded-lg shadow-sm pointer-events-none whitespace-nowrap bottom-full opacity-0 transition-all group-hover:opacity-100 group-hover:bottom-[110%]"
+|                   "GeckoBoard"
+|               <div>
+|                 class="group relative flex flex-col items-center justify-center"
+|                 <a>
+|                   class="w-24 h-24 flex flex-col items-center justify-center rounded-3xl hover:shadow-3xl border border-neutral-200 overflow-hidden shadow-sm p-4"
+|                   href="/integrations/discourse/"
+|                   <img>
+|                     alt="Discourse"
+|                     height="164"
+|                     loading="lazy"
+|                     src="/images/logos/integrations/discourse_hu446d4df4327211d4f32029c85ce50706_6431_160x0_resize_q100_h2_box_3.webp"
+|                     width="160"
+|                 <p>
+|                   class="absolute text-xs leading-none text-white px-3 py-2 bg-zinc-900 rounded-lg shadow-sm pointer-events-none whitespace-nowrap bottom-full opacity-0 transition-all group-hover:opacity-100 group-hover:bottom-[110%]"
+|                   "Discourse"
+|               <div>
+|                 class="group relative flex flex-col items-center justify-center"
+|                 <a>
+|                   class="w-24 h-24 flex flex-col items-center justify-center rounded-3xl hover:shadow-3xl border border-neutral-200 overflow-hidden shadow-sm"
+|                   href="/integrations/imgur/"
+|                   <img>
+|                     alt="Imgur"
+|                     height="159"
+|                     loading="lazy"
+|                     src="/images/logos/integrations/imgur_huf9be42a5da9d192330acb6d6dee2dbd2_5740_160x0_resize_q100_h2_box_3.webp"
+|                     width="160"
+|                 <p>
+|                   class="absolute text-xs leading-none text-white px-3 py-2 bg-zinc-900 rounded-lg shadow-sm pointer-events-none whitespace-nowrap bottom-full opacity-0 transition-all group-hover:opacity-100 group-hover:bottom-[110%]"
+|                   "Imgur"
+|             <li>
+|               class="flex-shrink-0 flex flex-col gap-12 -mt-10"
+|               <div>
+|                 class="group relative flex flex-col items-center justify-center"
+|                 <a>
+|                   class="w-24 h-24 flex flex-col items-center justify-center rounded-3xl hover:shadow-3xl border border-neutral-200 overflow-hidden shadow-sm p-4"
+|                   href="/integrations/mailchimp/"
+|                   <img>
+|                     alt="MailChimp"
+|                     height="160"
+|                     loading="lazy"
+|                     src="/images/logos/integrations/mailchimp_hucb75d06be88e6331905252c3cff4ebbc_32058_160x0_resize_q100_h2_box_3.webp"
+|                     width="160"
+|                 <p>
+|                   class="absolute text-xs leading-none text-white px-3 py-2 bg-zinc-900 rounded-lg shadow-sm pointer-events-none whitespace-nowrap bottom-full opacity-0 transition-all group-hover:opacity-100 group-hover:bottom-[110%]"
+|                   "MailChimp"
+|               <div>
+|                 class="group relative flex flex-col items-center justify-center"
+|                 <a>
+|                   class="w-24 h-24 flex flex-col items-center justify-center rounded-3xl hover:shadow-3xl border border-neutral-200 overflow-hidden shadow-sm"
+|                   href="/integrations/pinterest/"
+|                   <img>
+|                     alt="Pinterest"
+|                     height="160"
+|                     loading="lazy"
+|                     src="/images/logos/integrations/pinterest-icon_hu17bc386ac34f3ca7457c7518d42ff016_10430_160x0_resize_q100_h2_box_3.webp"
+|                     width="160"
+|                 <p>
+|                   class="absolute text-xs leading-none text-white px-3 py-2 bg-zinc-900 rounded-lg shadow-sm pointer-events-none whitespace-nowrap bottom-full opacity-0 transition-all group-hover:opacity-100 group-hover:bottom-[110%]"
+|                   "Pinterest"
+|               <div>
+|                 class="group relative flex flex-col items-center justify-center"
+|                 <a>
+|                   class="w-24 h-24 flex flex-col items-center justify-center rounded-3xl hover:shadow-3xl border border-neutral-200 overflow-hidden shadow-sm p-4"
+|                   href="/integrations/helpscout/"
+|                   <img>
+|                     alt="HelpScout"
+|                     height="155"
+|                     loading="lazy"
+|                     src="/images/logos/integrations/helpscout_hu0f647104f480247c4ed00e72431615cd_7914_160x0_resize_q100_h2_box_3.webp"
+|                     width="160"
+|                 <p>
+|                   class="absolute text-xs leading-none text-white px-3 py-2 bg-zinc-900 rounded-lg shadow-sm pointer-events-none whitespace-nowrap bottom-full opacity-0 transition-all group-hover:opacity-100 group-hover:bottom-[110%]"
+|                   "HelpScout"
+|               <div>
+|                 class="group relative flex flex-col items-center justify-center"
+|                 <a>
+|                   class="w-24 h-24 flex flex-col items-center justify-center rounded-3xl hover:shadow-3xl border border-neutral-200 overflow-hidden shadow-sm p-5"
+|                   href="/integrations/buffer/"
+|                   <img>
+|                     alt="Buffer"
+|                     height="164"
+|                     loading="lazy"
+|                     src="/images/logos/integrations/buffer_hu2190af463302b978f69c864b508a1040_12312_160x0_resize_q100_h2_box_3.webp"
+|                     width="160"
+|                 <p>
+|                   class="absolute text-xs leading-none text-white px-3 py-2 bg-zinc-900 rounded-lg shadow-sm pointer-events-none whitespace-nowrap bottom-full opacity-0 transition-all group-hover:opacity-100 group-hover:bottom-[110%]"
+|                   "Buffer"
+|             <li>
+|               class="flex-shrink-0 flex flex-col gap-12 mt-10"
+|               <div>
+|                 class="group relative flex flex-col items-center justify-center"
+|                 <a>
+|                   class="w-24 h-24 flex flex-col items-center justify-center rounded-3xl hover:shadow-3xl border border-neutral-200 overflow-hidden shadow-md p-6"
+|                   href="/integrations/unsplash/"
+|                   <img>
+|                     alt="Unsplash"
+|                     loading="lazy"
+|                     src="/images/logos/integrations/unsplash.svg"
+|                 <p>
+|                   class="absolute text-xs leading-none text-white px-3 py-2 bg-zinc-900 rounded-lg shadow-sm pointer-events-none whitespace-nowrap bottom-full opacity-0 transition-all group-hover:opacity-100 group-hover:bottom-[110%]"
+|                   "Unsplash"
+|               <div>
+|                 class="group relative flex flex-col items-center justify-center"
+|                 <a>
+|                   class="w-24 h-24 flex flex-col items-center justify-center rounded-3xl hover:shadow-3xl border border-neutral-200 overflow-hidden shadow-md p-3"
+|                   href="/integrations/airtable/"
+|                   <img>
+|                     alt="AirTable"
+|                     loading="lazy"
+|                     src="/images/logos/integrations/airtable.svg"
+|                 <p>
+|                   class="absolute text-xs leading-none text-white px-3 py-2 bg-zinc-900 rounded-lg shadow-sm pointer-events-none whitespace-nowrap bottom-full opacity-0 transition-all group-hover:opacity-100 group-hover:bottom-[110%]"
+|                   "AirTable"
+|               <div>
+|                 class="group relative flex flex-col items-center justify-center"
+|                 <a>
+|                   class="w-24 h-24 flex flex-col items-center justify-center rounded-3xl hover:shadow-3xl border border-neutral-200 overflow-hidden shadow-md p-3 bg-[#1bb6eb]"
+|                   href="/integrations/vimeo/"
+|                   <img>
+|                     alt="Vimeo"
+|                     height="120"
+|                     loading="lazy"
+|                     src="/images/logos/integrations/vimeo_hu90a9314b768628cab26bebd193de9896_2175_120x0_resize_q100_h2_box_3.webp"
+|                     width="120"
+|                 <p>
+|                   class="absolute text-xs leading-none text-white px-3 py-2 bg-zinc-900 rounded-lg shadow-sm pointer-events-none whitespace-nowrap bottom-full opacity-0 transition-all group-hover:opacity-100 group-hover:bottom-[110%]"
+|                   "Vimeo"
+|             <li>
+|               class="flex-shrink-0 flex flex-col gap-12 mt-20"
+|               <div>
+|                 class="group relative flex flex-col items-center justify-center"
+|                 <a>
+|                   class="w-24 h-24 flex flex-col items-center justify-center rounded-3xl hover:shadow-3xl border border-neutral-200 overflow-hidden shadow-lg"
+|                   href="/integrations/discord/"
+|                   <img>
+|                     alt="Discord"
+|                     height="160"
+|                     loading="lazy"
+|                     src="/images/logos/integrations/discord_hu65eeccc91402e292ff2f38d86dc2e280_137720_160x0_resize_q100_h2_box_3.webp"
+|                     width="160"
+|                 <p>
+|                   class="absolute text-xs leading-none text-white px-3 py-2 bg-zinc-900 rounded-lg shadow-sm pointer-events-none whitespace-nowrap bottom-full opacity-0 transition-all group-hover:opacity-100 group-hover:bottom-[110%]"
+|                   "Discord"
+|               <div>
+|                 class="group relative flex flex-col items-center justify-center"
+|                 <a>
+|                   class="w-24 h-24 flex flex-col items-center justify-center rounded-3xl hover:shadow-3xl border border-neutral-200 overflow-hidden shadow-md p-3"
+|                   href="/integrations/spotify/"
+|                   <img>
+|                     alt="Spotify"
+|                     height="160"
+|                     loading="lazy"
+|                     src="/images/logos/integrations/spotify_hu02ece3331244a1a05a22e08ab8c82352_11439_160x0_resize_q100_h2_box_3.webp"
+|                     width="160"
+|                 <p>
+|                   class="absolute text-xs leading-none text-white px-3 py-2 bg-zinc-900 rounded-lg shadow-sm pointer-events-none whitespace-nowrap bottom-full opacity-0 transition-all group-hover:opacity-100 group-hover:bottom-[110%]"
+|                   "Spotify"
+|             <li>
+|               class="flex-shrink-0 flex flex-col gap-12 mt-10"
+|               <div>
+|                 class="group relative flex flex-col items-center justify-center"
+|                 <a>
+|                   class="w-24 h-24 flex flex-col items-center justify-center rounded-3xl hover:shadow-3xl border border-neutral-200 overflow-hidden shadow-lg p-4"
+|                   href="/integrations/ulysses/"
+|                   <img>
+|                     alt="Ulysses"
+|                     height="145"
+|                     loading="lazy"
+|                     src="/images/logos/integrations/ulysses_hu89ac0130727389662312f692acb35eb9_44367_160x0_resize_q100_h2_box_3.webp"
+|                     width="160"
+|                 <p>
+|                   class="absolute text-xs leading-none text-white px-3 py-2 bg-zinc-900 rounded-lg shadow-sm pointer-events-none whitespace-nowrap bottom-full opacity-0 transition-all group-hover:opacity-100 group-hover:bottom-[110%]"
+|                   "Ulysses"
+|               <div>
+|                 class="group relative flex flex-col items-center justify-center"
+|                 <a>
+|                   class="w-24 h-24 flex flex-col items-center justify-center rounded-3xl hover:shadow-3xl border border-neutral-200 overflow-hidden shadow-lg p-2 bg-[#2862ae]"
+|                   href="/integrations/activecampaign/"
+|                   <img>
+|                     alt="ActiveCampaign"
+|                     height="160"
+|                     loading="lazy"
+|                     src="/images/logos/integrations/activecampaign_hu55adbd9ee46b84914187939c5d9e857b_5263_160x0_resize_q100_h2_box_3.webp"
+|                     width="160"
+|                 <p>
+|                   class="absolute text-xs leading-none text-white px-3 py-2 bg-zinc-900 rounded-lg shadow-sm pointer-events-none whitespace-nowrap bottom-full opacity-0 transition-all group-hover:opacity-100 group-hover:bottom-[110%]"
+|                   "ActiveCampaign"
+|             <li>
+|               class="flex-shrink-0 flex flex-col gap-12 mt-20"
+|               <div>
+|                 class="group relative flex flex-col items-center justify-center"
+|                 <a>
+|                   class="w-24 h-24 flex flex-col items-center justify-center rounded-3xl hover:shadow-3xl border border-neutral-200 overflow-hidden shadow-xl"
+|                   href="/integrations/twitter/"
+|                   <img>
+|                     alt="Twitter"
+|                     height="160"
+|                     loading="lazy"
+|                     src="/images/logos/integrations/twitter-icon_hu5c637f1aa200bec11147894012cea6b0_32657_160x0_resize_q100_h2_box.webp"
+|                     width="160"
+|                 <p>
+|                   class="absolute text-xs leading-none text-white px-3 py-2 bg-zinc-900 rounded-lg shadow-sm pointer-events-none whitespace-nowrap bottom-full opacity-0 transition-all group-hover:opacity-100 group-hover:bottom-[110%]"
+|                   "Twitter"
+|             <li>
+|               class="flex-shrink-0 mt-10"
+|               <div>
+|                 class="group relative flex flex-col items-center justify-center"
+|                 <a>
+|                   class="w-24 h-24 flex flex-col items-center justify-center rounded-3xl hover:shadow-3xl border border-neutral-200 overflow-hidden shadow-xl"
+|                   href="/integrations/zapier/"
+|                   <img>
+|                     alt="Zapier"
+|                     height="160"
+|                     loading="lazy"
+|                     src="/images/logos/integrations/zapier-icon_hu6ffed9e0138f6f6dd95ab5453cbc529e_3021_160x0_resize_q100_h2_box_3.webp"
+|                     width="160"
+|                 <p>
+|                   class="absolute text-xs leading-none text-white px-3 py-2 bg-zinc-900 rounded-lg shadow-sm pointer-events-none whitespace-nowrap bottom-full opacity-0 transition-all group-hover:opacity-100 group-hover:bottom-[110%]"
+|                   "Zapier"
+|             <li>
+|               class="flex-shrink-0"
+|               <div>
+|                 class="group relative flex flex-col items-center justify-center"
+|                 <a>
+|                   class="w-24 h-24 flex flex-col items-center justify-center rounded-3xl hover:shadow-3xl border border-neutral-200 overflow-hidden shadow-2xl"
+|                   href="/integrations/stripe/"
+|                   <img>
+|                     alt="Stripe"
+|                     loading="lazy"
+|                     src="/images/logos/integrations/stripe.svg"
+|                 <p>
+|                   class="absolute text-xs leading-none text-white px-3 py-2 bg-zinc-900 rounded-lg shadow-sm pointer-events-none whitespace-nowrap bottom-full opacity-0 transition-all group-hover:opacity-100 group-hover:bottom-[110%]"
+|                   "Stripe"
+|             <li>
+|               class="flex-shrink-0"
+|               <div>
+|                 class="group relative flex flex-col items-center justify-center"
+|                 <a>
+|                   class="w-24 h-24 flex flex-col items-center justify-center rounded-3xl hover:shadow-3xl border border-neutral-200 overflow-hidden shadow-2xl p-4"
+|                   href="/integrations/slack/"
+|                   <img>
+|                     alt="Slack"
+|                     height="160"
+|                     loading="lazy"
+|                     src="/images/logos/integrations/slack_hub000cc74b3e4e528278503b6f90bdd3c_4017_160x0_resize_q100_h2_box_3.webp"
+|                     width="160"
+|                 <p>
+|                   class="absolute text-xs leading-none text-white px-3 py-2 bg-zinc-900 rounded-lg shadow-sm pointer-events-none whitespace-nowrap bottom-full opacity-0 transition-all group-hover:opacity-100 group-hover:bottom-[110%]"
+|                   "Slack"
+|             <li>
+|               class="flex-shrink-0 mt-10"
+|               <div>
+|                 class="group relative flex flex-col items-center justify-center"
+|                 <a>
+|                   class="w-24 h-24 flex flex-col items-center justify-center rounded-3xl hover:shadow-3xl border border-neutral-200 overflow-hidden shadow-xl"
+|                   href="/integrations/instagram/"
+|                   <img>
+|                     alt="Instagram"
+|                     height="160"
+|                     loading="lazy"
+|                     src="/images/logos/integrations/instagram-icon_hu62599df7ba6659655fb34ee4a133f9df_56190_160x0_resize_q100_h2_box_3.webp"
+|                     width="160"
+|                 <p>
+|                   class="absolute text-xs leading-none text-white px-3 py-2 bg-zinc-900 rounded-lg shadow-sm pointer-events-none whitespace-nowrap bottom-full opacity-0 transition-all group-hover:opacity-100 group-hover:bottom-[110%]"
+|                   "Instagram"
+|             <li>
+|               class="flex-shrink-0 flex flex-col gap-12 mt-20"
+|               <div>
+|                 class="group relative flex flex-col items-center justify-center"
+|                 <a>
+|                   class="w-24 h-24 flex flex-col items-center justify-center rounded-3xl hover:shadow-3xl border border-neutral-200 overflow-hidden shadow-xl"
+|                   href="/integrations/facebook/"
+|                   <img>
+|                     alt="Facebook"
+|                     height="160"
+|                     loading="lazy"
+|                     src="/images/logos/integrations/facebook_hu98a9dad8211a1589972f3c29ef2f6ec8_256431_160x0_resize_q100_h2_box_3.webp"
+|                     width="160"
+|                 <p>
+|                   class="absolute text-xs leading-none text-white px-3 py-2 bg-zinc-900 rounded-lg shadow-sm pointer-events-none whitespace-nowrap bottom-full opacity-0 transition-all group-hover:opacity-100 group-hover:bottom-[110%]"
+|                   "Facebook"
+|             <li>
+|               class="flex-shrink-0 flex flex-col gap-12 mt-10"
+|               <div>
+|                 class="group relative flex flex-col items-center justify-center"
+|                 <a>
+|                   class="w-24 h-24 flex flex-col items-center justify-center rounded-3xl hover:shadow-3xl border border-neutral-200 overflow-hidden shadow-lg p-4"
+|                   href="/integrations/ia-writer/"
+|                   <img>
+|                     alt="iA Writer"
+|                     height="160"
+|                     loading="lazy"
+|                     src="/images/logos/integrations/iawriter_hu5342b37a24a825d9c0811df1cdac773a_3726_160x0_resize_q100_h2_box.webp"
+|                     width="160"
+|                 <p>
+|                   class="absolute text-xs leading-none text-white px-3 py-2 bg-zinc-900 rounded-lg shadow-sm pointer-events-none whitespace-nowrap bottom-full opacity-0 transition-all group-hover:opacity-100 group-hover:bottom-[110%]"
+|                   "iA Writer"
+|               <div>
+|                 class="group relative flex flex-col items-center justify-center"
+|                 <a>
+|                   class="w-24 h-24 flex flex-col items-center justify-center rounded-3xl hover:shadow-3xl border border-neutral-200 overflow-hidden shadow-lg p-2 bg-[#ff0000]"
+|                   href="/integrations/youtube/"
+|                   <img>
+|                     alt="YouTube"
+|                     loading="lazy"
+|                     src="/images/logos/integrations/youtube-icon.svg"
+|                 <p>
+|                   class="absolute text-xs leading-none text-white px-3 py-2 bg-zinc-900 rounded-lg shadow-sm pointer-events-none whitespace-nowrap bottom-full opacity-0 transition-all group-hover:opacity-100 group-hover:bottom-[110%]"
+|                   "YouTube"
+|             <li>
+|               class="flex-shrink-0 flex flex-col gap-12 mt-20"
+|               <div>
+|                 class="group relative flex flex-col items-center justify-center"
+|                 <a>
+|                   class="w-24 h-24 flex flex-col items-center justify-center rounded-3xl hover:shadow-3xl border border-neutral-200 overflow-hidden shadow-md"
+|                   href="/integrations/feedly/"
+|                   <img>
+|                     alt="Feedly"
+|                     height="160"
+|                     loading="lazy"
+|                     src="/images/logos/integrations/feedly-icon_hua173f7b0c14df14b5c7ab33d6a728112_20001_160x0_resize_q100_h2_box_3.webp"
+|                     width="160"
+|                 <p>
+|                   class="absolute text-xs leading-none text-white px-3 py-2 bg-zinc-900 rounded-lg shadow-sm pointer-events-none whitespace-nowrap bottom-full opacity-0 transition-all group-hover:opacity-100 group-hover:bottom-[110%]"
+|                   "Feedly"
+|               <div>
+|                 class="group relative flex flex-col items-center justify-center"
+|                 <a>
+|                   class="w-24 h-24 flex flex-col items-center justify-center rounded-3xl hover:shadow-3xl border border-neutral-200 overflow-hidden shadow-md p-5"
+|                   href="/integrations/analytics/"
+|                   <img>
+|                     alt="Google Analytics"
+|                     height="100"
+|                     loading="lazy"
+|                     src="/images/logos/integrations/google-analytics_hu4d123172e6791cf5e37b9720bc0d3de1_1524_100x0_resize_q100_h2_box_3.webp"
+|                     width="100"
+|                 <p>
+|                   class="absolute text-xs leading-none text-white px-3 py-2 bg-zinc-900 rounded-lg shadow-sm pointer-events-none whitespace-nowrap bottom-full opacity-0 transition-all group-hover:opacity-100 group-hover:bottom-[110%]"
+|                   "Google Analytics"
+|             <li>
+|               class="flex-shrink-0 flex flex-col gap-12 mt-10"
+|               <div>
+|                 class="group relative flex flex-col items-center justify-center"
+|                 <a>
+|                   class="w-24 h-24 flex flex-col items-center justify-center rounded-3xl hover:shadow-3xl border border-neutral-200 overflow-hidden shadow-md"
+|                   href="/integrations/github/"
+|                   <img>
+|                     alt="GitHub"
+|                     height="160"
+|                     loading="lazy"
+|                     src="/images/logos/integrations/github-icon_hu68b6c32ca8127d3aaa32b1c798a38361_58807_160x0_resize_q100_h2_box_3.webp"
+|                     width="160"
+|                 <p>
+|                   class="absolute text-xs leading-none text-white px-3 py-2 bg-zinc-900 rounded-lg shadow-sm pointer-events-none whitespace-nowrap bottom-full opacity-0 transition-all group-hover:opacity-100 group-hover:bottom-[110%]"
+|                   "GitHub"
+|               <div>
+|                 class="group relative flex flex-col items-center justify-center"
+|                 <a>
+|                   class="w-24 h-24 flex flex-col items-center justify-center rounded-3xl hover:shadow-3xl border border-neutral-200 overflow-hidden shadow-md"
+|                   href="/integrations/netlify/"
+|                   <img>
+|                     alt="Netlify"
+|                     height="160"
+|                     loading="lazy"
+|                     src="/images/logos/integrations/netlify-icon_hudbc134aca404a547bb91f5e6e243e22b_225651_160x0_resize_q100_h2_box_3.webp"
+|                     width="160"
+|                 <p>
+|                   class="absolute text-xs leading-none text-white px-3 py-2 bg-zinc-900 rounded-lg shadow-sm pointer-events-none whitespace-nowrap bottom-full opacity-0 transition-all group-hover:opacity-100 group-hover:bottom-[110%]"
+|                   "Netlify"
+|               <div>
+|                 class="group relative flex flex-col items-center justify-center"
+|                 <a>
+|                   class="w-24 h-24 flex flex-col items-center justify-center rounded-3xl hover:shadow-3xl border border-neutral-200 overflow-hidden shadow-md p-4"
+|                   href="/integrations/lets-encrypt/"
+|                   <img>
+|                     alt="Let's Encrypt"
+|                     loading="lazy"
+|                     src="/images/logos/integrations/letsencrypt.svg"
+|                 <p>
+|                   class="absolute text-xs leading-none text-white px-3 py-2 bg-zinc-900 rounded-lg shadow-sm pointer-events-none whitespace-nowrap bottom-full opacity-0 transition-all group-hover:opacity-100 group-hover:bottom-[110%]"
+|                   "Let's Encrypt"
+|             <li>
+|               class="flex-shrink-0 flex flex-col gap-12 -mt-10"
+|               <div>
+|                 class="group relative flex flex-col items-center justify-center"
+|                 <a>
+|                   class="w-24 h-24 flex flex-col items-center justify-center rounded-3xl hover:shadow-3xl border border-neutral-200 overflow-hidden shadow-sm p-4"
+|                   href="/integrations/plausible/"
+|                   <img>
+|                     alt="Plausible"
+|                     height="160"
+|                     loading="lazy"
+|                     src="/images/logos/integrations/plausible_hubdd59c639a2e80e3d62ecbddcb793d1c_52957_160x0_resize_q100_h2_box_3.webp"
+|                     width="160"
+|                 <p>
+|                   class="absolute text-xs leading-none text-white px-3 py-2 bg-zinc-900 rounded-lg shadow-sm pointer-events-none whitespace-nowrap bottom-full opacity-0 transition-all group-hover:opacity-100 group-hover:bottom-[110%]"
+|                   "Plausible"
+|               <div>
+|                 class="group relative flex flex-col items-center justify-center"
+|                 <a>
+|                   class="w-24 h-24 flex flex-col items-center justify-center rounded-3xl hover:shadow-3xl border border-neutral-200 overflow-hidden shadow-sm p-5"
+|                   href="/integrations/chartmogul/"
+|                   <img>
+|                     alt="ChartMogul"
+|                     height="87"
+|                     loading="lazy"
+|                     src="/images/logos/integrations/chartmogul_hu01c73d47915043033a3a07dcbb830fa7_3078_131x0_resize_q100_h2_box_3.webp"
+|                     width="131"
+|                 <p>
+|                   class="absolute text-xs leading-none text-white px-3 py-2 bg-zinc-900 rounded-lg shadow-sm pointer-events-none whitespace-nowrap bottom-full opacity-0 transition-all group-hover:opacity-100 group-hover:bottom-[110%]"
+|                   "ChartMogul"
+|               <div>
+|                 class="group relative flex flex-col items-center justify-center"
+|                 <a>
+|                   class="w-24 h-24 flex flex-col items-center justify-center rounded-3xl hover:shadow-3xl border border-neutral-200 overflow-hidden shadow-sm p-4"
+|                   href="/integrations/cove-comments/"
+|                   <img>
+|                     alt="Cove"
+|                     height="160"
+|                     loading="lazy"
+|                     src="/images/logos/integrations/cove_hucf72b5cab77934e0dbdd62c9151ae31a_24300_160x0_resize_q100_h2_box_3.webp"
+|                     width="160"
+|                 <p>
+|                   class="absolute text-xs leading-none text-white px-3 py-2 bg-zinc-900 rounded-lg shadow-sm pointer-events-none whitespace-nowrap bottom-full opacity-0 transition-all group-hover:opacity-100 group-hover:bottom-[110%]"
+|                   "Cove"
+|               <div>
+|                 class="group relative flex flex-col items-center justify-center"
+|                 <a>
+|                   class="w-24 h-24 flex flex-col items-center justify-center rounded-3xl hover:shadow-3xl border border-neutral-200 overflow-hidden shadow-sm"
+|                   href="/integrations/udesly/"
+|                   <img>
+|                     alt="Udesly"
+|                     height="160"
+|                     loading="lazy"
+|                     src="/images/logos/integrations/udesly_hub04795b06dbcc5e5f6c0b7d7230597a0_16467_160x0_resize_q100_h2_box.webp"
+|                     width="160"
+|                 <p>
+|                   class="absolute text-xs leading-none text-white px-3 py-2 bg-zinc-900 rounded-lg shadow-sm pointer-events-none whitespace-nowrap bottom-full opacity-0 transition-all group-hover:opacity-100 group-hover:bottom-[110%]"
+|                   "Udesly"
+|             <li>
+|               class="flex-shrink-0 flex flex-col gap-12 mt-10"
+|               <div>
+|                 class="group relative flex flex-col items-center justify-center"
+|                 <a>
+|                   class="w-24 h-24 flex flex-col items-center justify-center rounded-3xl hover:shadow-3xl border border-neutral-200 overflow-hidden shadow-sm p-6"
+|                   href="/integrations/giphy/"
+|                   <img>
+|                     alt="Giphy"
+|                     height="205"
+|                     loading="lazy"
+|                     src="/images/logos/integrations/giphy_hu839955978ddec91be9d0f6e09acb5597_2430_160x0_resize_q100_h2_box_3.webp"
+|                     width="160"
+|                 <p>
+|                   class="absolute text-xs leading-none text-white px-3 py-2 bg-zinc-900 rounded-lg shadow-sm pointer-events-none whitespace-nowrap bottom-full opacity-0 transition-all group-hover:opacity-100 group-hover:bottom-[110%]"
+|                   "Giphy"
+|               <div>
+|                 class="group relative flex flex-col items-center justify-center"
+|                 <a>
+|                   class="w-24 h-24 flex flex-col items-center justify-center rounded-3xl hover:shadow-3xl border border-neutral-200 overflow-hidden shadow-sm"
+|                   href="/integrations/intercom/"
+|                   <img>
+|                     alt="Intercom"
+|                     height="160"
+|                     loading="lazy"
+|                     src="/images/logos/integrations/intercom_hude66a5f241690a97e54a5fc3e70727ae_4530_160x0_resize_q100_h2_box_3.webp"
+|                     width="160"
+|                 <p>
+|                   class="absolute text-xs leading-none text-white px-3 py-2 bg-zinc-900 rounded-lg shadow-sm pointer-events-none whitespace-nowrap bottom-full opacity-0 transition-all group-hover:opacity-100 group-hover:bottom-[110%]"
+|                   "Intercom"
+|               <div>
+|                 class="group relative flex flex-col items-center justify-center"
+|                 <a>
+|                   class="w-24 h-24 flex flex-col items-center justify-center rounded-3xl hover:shadow-3xl border border-neutral-200 overflow-hidden shadow-sm p-4"
+|                   href="/integrations/tally/"
+|                   <img>
+|                     alt="Tally"
+|                     height="160"
+|                     loading="lazy"
+|                     src="/images/logos/integrations/tally_hua6f2d93b3473e03cb0bdd8940252547d_39015_160x0_resize_q100_h2_box_3.webp"
+|                     width="160"
+|                 <p>
+|                   class="absolute text-xs leading-none text-white px-3 py-2 bg-zinc-900 rounded-lg shadow-sm pointer-events-none whitespace-nowrap bottom-full opacity-0 transition-all group-hover:opacity-100 group-hover:bottom-[110%]"
+|                   "Tally"
+|           <div>
+|             class="max-w-8xl mx-auto z-50"
+|             <div>
+|               class="grid gap-[4vmin] grid-cols-12 items-center"
+|               <div>
+|                 class="col-span-12 text-center"
+|                 <h2>
+|                   class="text-xs text-slate-500 uppercase tracking-widest"
+|                   "Integrations"
+|                 <p>
+|                   class="mt-6 text-4xl font-bold text-black font-hdg tracking-tight leading-[0.9]"
+|                   "Works with everything."
+|                 <p>
+|                   class="max-w-2xl mx-auto mt-6 text-xl lg:text-2xl leading-tight font-normal text-slate-700 font-hdg"
+|                   "Social, referral programs, push notifications, social sharing, payment gateways, A/B testing, desktop editors, mobile apps, comments, recommendations. "
+|                   <strong>
+|                     "Yes."
+|                 <a>
+|                   class="inline-block mt-6 text-xl text-slate-500 font-semibold font-hdg hover:underline"
+|                   href="/integrations/"
+|                   "Explore the integrations library →"
+|         <div>
+|           class="relative bg-base text-white py-[5vmin] 2xl:pb-0 px-4 sm:px-6 overflow-hidden"
+|           <div>
+|             class="relative w-full max-w-8xl mx-auto pt-12"
+|             <div>
+|               class="col-span-12 text-center pb-12 sm:pb-20 border-b border-gray-800"
+|               <img>
+|                 alt="Graph"
+|                 class="mx-auto"
+|                 loading="lazy"
+|                 src="/images/home/graph.svg"
+|               <h3>
+|                 class="-mt-2 text-5xl lg:text-7xl font-hdg leading-none"
+|                 "$100,000,000+"
+|               <p>
+|                 class="mt-4 text-xl lg:text-2xl max-w-lg text-balance text-slate-300 mx-auto leading-tight font-normal font-hdg"
+|                 "Revenue earned each year by publications running on Ghost, with "
+|                 <span>
+|                   class="text-white font-medium"
+|                   "0%"
+|                 " payment fees."
+|             <div>
+|               class="mt-10 sm:mt-20 publications"
+|               <div>
+|                 class="grid sm:grid-cols-4 gap-4 lg:gap-8 items-baseline"
+|                 <div>
+|                   class="col-span-1"
+|                   <h2>
+|                     class="lg:text-4xl text-2xl font-hdg font-bold"
+|                     "Publishers"
+|                 <div>
+|                   class="col-span-2"
+|                   <p>
+|                     class="text-lg sm:text-xl lg:text-2xl text-white leading-tight font-hdg font-medium"
+|                     "A newsletter is just the start"
+|                   <p>
+|                     class="text-lg sm:text-xl lg:text-2xl text-slate-400 leading-tight font-hdg text-balance"
+|                     "Build your own independent media business"
+|                 <div>
+|                   class="col-span-1 justify-self-start sm:justify-self-end"
+|                   <a>
+|                     class="inline-block px-4 py-2 bg-lime-950 text-lime-300 font-semibold text-md rounded-lg hover:bg-lime-400 hover:text-black"
+|                     href="/publishers"
+|                     title="Learn more about Ghost for Publishers"
+|                     "Learn more →"
+|               <div>
+|                 class="mt-10 border-b border-gray-800 pb-16"
+|                 <div>
+|                   class="flex sm:grid sm:grid-cols-2 lg:flex overflow-x-auto gap-8 snap-x snap-mandatory pb-6 -mb-6 align-top"
+|                   <div>
+|                     class="relative group flex-none w-[85%] sm:w-auto sm:flex-auto"
+|                     <img>
+|                       alt="404 Media"
+|                       class="rounded-lg w-full snap-start"
+|                       height="384"
+|                       loading="lazy"
+|                       src="/images/home/404media_hu3135a5aa5f6af37ca666586270259058_523067_618x0_resize_q100_h2_box_3.webp"
+|                       width="618"
+|                     <div>
+|                       class="mt-3 flex justify-between items-baseline"
+|                       <h3>
+|                         class="text-lg font-semibold leading-none"
+|                         "404 Media"
+|                       <span>
+|                         class="text-gray-400 group-hover:hidden"
+|                         "Technology"
+|                       "
+"
+|                       <span>
+|                         class="text-white group-hover:block hidden"
+|                         "123K members"
+|                   <div>
+|                     class="relative group flex-none w-[85%] sm:w-auto sm:flex-auto"
+|                     <img>
+|                       alt="Tangle"
+|                       class="rounded-lg w-full snap-start"
+|                       height="384"
+|                       loading="lazy"
+|                       src="/images/home/tangle_huffae4ea95679079820ec67a34e32d644_436746_618x0_resize_q100_h2_box_3.webp"
+|                       width="618"
+|                     <div>
+|                       class="mt-3 flex justify-between items-baseline"
+|                       <h3>
+|                         class="text-lg font-semibold leading-none"
+|                         "Tangle"
+|                       <span>
+|                         class="text-gray-400 group-hover:hidden"
+|                         "Politics"
+|                       "
+"
+|                       <span>
+|                         class="text-white group-hover:block hidden"
+|                         "$281K MRR"
+|                   <div>
+|                     class="relative group flex-none w-[85%] sm:w-auto sm:flex-auto"
+|                     <img>
+|                       alt="Platformer"
+|                       class="rounded-lg w-full snap-start"
+|                       height="384"
+|                       loading="lazy"
+|                       src="/images/home/platformer_hu7a81c0db4481d4671cb942fea647af69_170625_618x0_resize_q100_h2_box_3.webp"
+|                       width="618"
+|                     <div>
+|                       class="mt-3 flex justify-between items-baseline"
+|                       <h3>
+|                         class="text-lg font-semibold leading-none"
+|                         "Platformer"
+|                       <span>
+|                         class="text-gray-400 group-hover:hidden"
+|                         "Technology"
+|                       "
+"
+|                       <span>
+|                         class="text-white group-hover:block hidden"
+|                         "197K members"
+|                   <div>
+|                     class="relative group flex-none w-[85%] sm:w-auto sm:flex-auto"
+|                     <img>
+|                       alt="The Lever"
+|                       class="rounded-lg w-full snap-start"
+|                       height="384"
+|                       loading="lazy"
+|                       src="/images/home/thelever_huebf636a0fd2912b404bd7a7fd02197b1_427364_618x0_resize_q100_h2_box_3.webp"
+|                       width="618"
+|                     <div>
+|                       class="mt-3 flex justify-between items-baseline"
+|                       <h3>
+|                         class="text-lg font-semibold leading-none"
+|                         "The Lever"
+|                       <span>
+|                         class="text-gray-400 group-hover:hidden"
+|                         "Politics"
+|                       "
+"
+|                       <span>
+|                         class="text-white group-hover:block hidden"
+|                         "149K members"
+|             <div>
+|               class="mt-10 sm:mt-20 publications"
+|               <div>
+|                 class="grid sm:grid-cols-4 gap-4 lg:gap-8 items-baseline"
+|                 <div>
+|                   class="col-span-1"
+|                   <h2>
+|                     class="lg:text-4xl text-2xl font-hdg font-bold"
+|                     "Creators"
+|                 <div>
+|                   class="col-span-2"
+|                   <p>
+|                     class="text-lg sm:text-xl lg:text-2xl text-white leading-tight font-hdg font-medium"
+|                     "Escape the algorithm"
+|                   <p>
+|                     class="text-lg sm:text-xl lg:text-2xl text-slate-400 leading-tight font-hdg text-balance"
+|                     "Your audience, brand, and revenue – owned entirely by you"
+|                 <div>
+|                   class="col-span-1 justify-self-start sm:justify-self-end"
+|                   <a>
+|                     class="inline-block px-4 py-2 bg-lime-950 text-lime-300 font-semibold rounded-lg hover:bg-lime-400 hover:text-black text-md"
+|                     href="/creators"
+|                     title="Learn more about Ghost for Creators"
+|                     "Learn more →"
+|               <div>
+|                 class="mt-10 border-b border-gray-800 pb-16"
+|                 <div>
+|                   class="flex sm:grid sm:grid-cols-2 lg:flex overflow-x-auto gap-8 snap-x snap-mandatory pb-6 -mb-6 align-top"
+|                   <div>
+|                     class="relative group flex-none w-[85%] sm:w-auto sm:flex-auto"
+|                     <img>
+|                       alt="Gone With The Wynns"
+|                       class="rounded-lg w-full snap-start"
+|                       height="384"
+|                       loading="lazy"
+|                       src="/images/home/gonewiththewynns_hu86ec4b771ed10d8565d793c5f4150c2a_517364_618x0_resize_q100_h2_box_3.webp"
+|                       width="618"
+|                     <div>
+|                       class="mt-3 flex justify-between items-baseline"
+|                       <h3>
+|                         class="text-lg font-semibold leading-none"
+|                         "Gone With The Wynns"
+|                       <span>
+|                         class="text-gray-400 group-hover:hidden"
+|                         "Travel"
+|                       "
+"
+|                       <span>
+|                         class="text-white group-hover:block hidden"
+|                         "27K members"
+|                   <div>
+|                     class="relative group flex-none w-[85%] sm:w-auto sm:flex-auto"
+|                     <img>
+|                       alt="Creator Science"
+|                       class="rounded-lg w-full snap-start"
+|                       height="384"
+|                       loading="lazy"
+|                       src="/images/home/creator-science_hu54a3e73b477f9b9813b425c254f4f84e_449118_618x0_resize_q100_h2_box_3.webp"
+|                       width="618"
+|                     <div>
+|                       class="mt-3 flex justify-between items-baseline"
+|                       <h3>
+|                         class="text-lg font-semibold leading-none"
+|                         "Creator Science"
+|                       <span>
+|                         class="text-gray-400 group-hover:hidden"
+|                         "Business"
+|                       "
+"
+|                       <span>
+|                         class="text-white group-hover:block hidden"
+|                         "$39K MRR"
+|                   <div>
+|                     class="relative group flex-none w-[85%] sm:w-auto sm:flex-auto"
+|                     <img>
+|                       alt="DESK Magazine"
+|                       class="rounded-lg w-full snap-start"
+|                       height="384"
+|                       loading="lazy"
+|                       src="/images/home/desk-magazine_hu902d99c9c0f7064514de5b699c2522de_254821_618x0_resize_q100_h2_box_3.webp"
+|                       width="618"
+|                     <div>
+|                       class="mt-3 flex justify-between items-baseline"
+|                       <h3>
+|                         class="text-lg font-semibold leading-none"
+|                         "DESK Magazine"
+|                       <span>
+|                         class="text-gray-400 group-hover:hidden"
+|                         "Design"
+|                       "
+"
+|                       <span>
+|                         class="text-white group-hover:block hidden"
+|                         "29K members"
+|                   <div>
+|                     class="relative group flex-none w-[85%] sm:w-auto sm:flex-auto"
+|                     <img>
+|                       alt="Jeff Su"
+|                       class="rounded-lg w-full snap-start"
+|                       height="384"
+|                       loading="lazy"
+|                       src="/images/home/jeff-su_hu9920d683b2b8c50389dbe9e33bf95d95_280790_618x0_resize_q100_h2_box_3.webp"
+|                       width="618"
+|                     <div>
+|                       class="mt-3 flex justify-between items-baseline"
+|                       <h3>
+|                         class="text-lg font-semibold leading-none"
+|                         "Jeff Su"
+|                       <span>
+|                         class="text-gray-400 group-hover:hidden"
+|                         "Productivity"
+|                       "
+"
+|                       <span>
+|                         class="text-white group-hover:block hidden"
+|                         "15K members"
+|             <div>
+|               class="mt-10 sm:mt-20 publications"
+|               <div>
+|                 class="grid sm:grid-cols-4 gap-4 lg:gap-8 items-baseline"
+|                 <div>
+|                   class="col-span-1"
+|                   <h2>
+|                     class="lg:text-4xl text-2xl font-hdg font-bold"
+|                     "Businesses"
+|                 <div>
+|                   class="col-span-2"
+|                   <p>
+|                     class="text-lg sm:text-xl lg:text-2xl text-white leading-tight font-hdg font-medium"
+|                     "Content marketing you can measure"
+|                   <p>
+|                     class="text-lg sm:text-xl lg:text-2xl text-slate-400 leading-tight font-hdg text-balance"
+|                     "Turn clicks into contacts with native lead gen & analytics"
+|                 <div>
+|                   class="col-span-1 justify-self-start sm:justify-self-end"
+|                   <a>
+|                     class="inline-block px-4 py-2 bg-lime-950 text-lime-300 font-semibold rounded-lg hover:bg-lime-400 hover:text-black text-md"
+|                     href="/business"
+|                     title="Learn more about Ghost for Businesses"
+|                     "Learn more →"
+|               <div>
+|                 class="mt-10 lg:pb-48 pb-24"
+|                 <div>
+|                   class="flex sm:grid sm:grid-cols-2 lg:flex overflow-x-auto gap-8 snap-x snap-mandatory pb-6 -mb-6 align-top"
+|                   <div>
+|                     class="relative group flex-none w-[85%] sm:w-auto sm:flex-auto"
+|                     <img>
+|                       alt="YCombinator"
+|                       class="rounded-lg w-full snap-start"
+|                       height="384"
+|                       loading="lazy"
+|                       src="/images/home/ycombinator_hu5213b0641ac9abab88e51c4b548a34e3_238397_618x0_resize_q100_h2_box_3.webp"
+|                       width="618"
+|                     <div>
+|                       class="mt-3 flex justify-between items-baseline"
+|                       <h3>
+|                         class="text-lg font-semibold leading-none"
+|                         "YCombinator"
+|                       <span>
+|                         class="text-gray-400"
+|                         "Business"
+|                   <div>
+|                     class="relative group flex-none w-[85%] sm:w-auto sm:flex-auto"
+|                     <img>
+|                       alt="Kickstarter"
+|                       class="rounded-lg w-full snap-start"
+|                       height="384"
+|                       loading="lazy"
+|                       src="/images/home/kickstarter_hu1d830a53bab04bb93bc2732e8d73f60b_46672_618x0_resize_q100_h2_box_3.webp"
+|                       width="618"
+|                     <div>
+|                       class="mt-3 flex justify-between items-baseline"
+|                       <h3>
+|                         class="text-lg font-semibold leading-none"
+|                         "Kickstarter"
+|                       <span>
+|                         class="text-gray-400"
+|                         "Business"
+|                   <div>
+|                     class="relative group flex-none w-[85%] sm:w-auto sm:flex-auto"
+|                     <img>
+|                       alt="Buffer"
+|                       class="rounded-lg w-full snap-start"
+|                       height="384"
+|                       loading="lazy"
+|                       src="/images/home/buffer_hub7e63261f296d2824fa075b83d4f98f4_39181_618x0_resize_q100_h2_box_3.webp"
+|                       width="618"
+|                     <div>
+|                       class="mt-3 flex justify-between items-baseline"
+|                       <h3>
+|                         class="text-lg font-semibold leading-none"
+|                         "Buffer"
+|                       <span>
+|                         class="text-gray-400"
+|                         "Business"
+|                   <div>
+|                     class="relative group flex-none w-[85%] sm:w-auto sm:flex-auto"
+|                     <img>
+|                       alt="Unsplash"
+|                       class="rounded-lg w-full snap-start"
+|                       height="384"
+|                       loading="lazy"
+|                       src="/images/home/unsplash_huc1020fb8ece5ef25dbf500aab5175f06_419995_618x0_resize_q100_h2_box_3.webp"
+|                       width="618"
+|                     <div>
+|                       class="mt-3 flex justify-between items-baseline"
+|                       <h3>
+|                         class="text-lg font-semibold leading-none"
+|                         "Unsplash"
+|                       <span>
+|                         class="text-gray-400"
+|                         "Culture"
+|         <div>
+|           class="py-[8vmin] bg-white relative px-4 sm:px-6 overflow-hidden"
+|           <div>
+|             class="absolute bottom-0 left-0 right-0 h-[12vh] bg-[#151719]"
+|           <div>
+|             class="relative z-10 max-w-8xl mx-auto"
+|             <h2>
+|               class="text-xs font-semibold text-slate-500 uppercase tracking-widest"
+|               "Built to last"
+|             <div>
+|               class="font-semibold"
+|               <div>
+|                 class="max-w-[400px] md:max-w-[600px]"
+|                 <p>
+|                   class="mt-6 text-2xl md:text-4xl font-hdg leading-tight text-gray-500"
+|                   <span>
+|                     class="text-black font-bold"
+|                     "A product you can depend on."
+|                   <br>
+|                   "Ghost is open source, independent, and funded 100% by its users."
+|                 <p>
+|                   class="mt-6 text-2xl md:text-4xl font-hdg leading-tight"
+|                   <span>
+|                     class="text-black font-bold"
+|                     "No investors. No bullshit."
+|           <div>
+|             class="relative z-10 col-span-12 w-full max-w-8xl mx-auto mt-10 -mb-[8vmin]"
+|             <img>
+|               alt="Ghost screenshot"
+|               class="rounded-md md:rounded-xl lg:rounded-2xl border-[1px] border-transparent bg-gradient-to-b from-white/0 via-[rgba(255,255,255,0.05)] to-[rgba(255,255,255,0.1)] p-[1px]"
+|               height="1992"
+|               loading="lazy"
+|               sizes="(max-width: 1400px) 1400px, 100vw"
+|               src="/images/home/posts.png"
+|               srcset="/images/home/posts_hu3b21debb17401a2115316debd8fe8fa5_467056_300x0_resize_q100_h2_box_3.webp 300w, /images/home/posts_hu3b21debb17401a2115316debd8fe8fa5_467056_600x0_resize_q100_h2_box_3.webp 600w, /images/home/posts_hu3b21debb17401a2115316debd8fe8fa5_467056_800x0_resize_q100_h2_box_3.webp 800w, /images/home/posts_hu3b21debb17401a2115316debd8fe8fa5_467056_1000x0_resize_q100_h2_box_3.webp 1000w, /images/home/posts_hu3b21debb17401a2115316debd8fe8fa5_467056_1400x0_resize_q100_h2_box_3.webp 1400w, /images/home/posts_hu3b21debb17401a2115316debd8fe8fa5_467056_1600x0_resize_q100_h2_box_3.webp 1600w, /images/home/posts_hu3b21debb17401a2115316debd8fe8fa5_467056_2000x0_resize_q100_h2_box_3.webp 2000w, /images/home/posts_hu3b21debb17401a2115316debd8fe8fa5_467056_2800x0_resize_q100_h2_box_3.webp 2800w, /images/home/posts_hu3b21debb17401a2115316debd8fe8fa5_467056_3200x0_resize_q100_h2_box_3.webp 3200w, /images/home/posts_hu3b21debb17401a2115316debd8fe8fa5_467056_3600x0_resize_q100_h2_box_3.webp 3600w"
+|               width="3600"
+|         <div>
+|           :aria-expanded="showCouponModal ? 'true' : 'false'"
+|           :class="showCouponModal ? 'flex' : 'hidden'"
+|           class="fixed top-0 right-0 bottom-0 left-0 z-50 flex-col items-center bg-[rgba(34,52,59,.15)] backdrop-blur-sm"
+|           id="coupon-modal"
+|           x-data="couponModal()"
+|           x-show="showCouponModal"
+|           <section>
+|             class="absolute overflow-hidden mt-0 mx-auto mb-10 md:my-[25vh] max-w-[40rem] p-0 max-h-[50rem] outline-none bg-white rounded-xl shadow-2xl"
+|             x-on:click.outside="closeCouponModal"
+|             <div>
+|               class="relative h-auto w-auto border-none text-midgrey bg-white text-center"
+|               <header>
+|                 class="flex justify-center items-center bg-gradient-to-r from-white to-[#f8bfd5] py-10"
+|                 <div>
+|                   class="uppercase text-[#FF237D] text-[2.6rem] font-bold leading-[3.2rem] rounded-md tracking-wider py-2 px-6 border-2 border-[#FF237D]"
+|                   x-text="coupon"
+|               <div>
+|                 class="p-9 flex items-center justify-center flex-col"
+|                 <h2>
+|                   class="text-base text-2xl font-semibold leading-11 mb-3"
+|                   "You've been referred!"
+|                 <p>
+|                   class="text-[1.9rem] leading-[2.5rem] max-w-[300px] mb-8 font-[500]"
+|                   "A special offer has automatically been applied to this visit."
+|                 <p>
+|                   class="text-xl font-semibold mb-9 max-w-[300px] text-base leading-[2.6rem]"
+|                   x-html="description"
+|                 <button>
+|                   aria-label="Close modal"
+|                   class="gh-btn gh-btn-black w-full text-[1.8rem]"
+|                   role="button"
+|                   x-on:click="closeCouponModal"
+|                   "
+Continue →"
+|         <div>
+|           :aria-expanded="showDubCouponModal ? 'true' : 'false'"
+|           :class="showDubCouponModal ? 'flex' : 'hidden'"
+|           class="fixed p-4 top-0 right-0 bottom-0 left-0 z-50 flex-col justify-center items-center bg-[rgba(34,52,59,.15)] backdrop-blur-sm"
+|           id="dub-coupon-modal"
+|           x-data="dubCouponModal()"
+|           x-show="showDubCouponModal"
+|           <section>
+|             class="overflow-hidden m-4 sm:mt-0 mx-auto sm:mb-10 max-w-[40rem] max-h-[50rem] outline-none bg-white rounded-2xl shadow-3xl"
+|             x-on:click.outside="closeDubCouponModal"
+|             <div>
+|               class="p-8 sm:p-12 text-center"
+|               <img>
+|                 :alt="partnerName"
+|                 :src="image"
+|                 class="w-20 h-20 rounded-full mx-auto mb-6"
+|               <h2>
+|                 class="text-xl sm:text-2xl font-bold mb-4 leading-tight text-balance"
+|                 <span>
+|                   x-text="partnerName"
+|                 " has gifted you "
+|                 <span>
+|                   x-html="description"
+|               <p>
+|                 class="text-gray-600 mb-8"
+|                 "Your discount will be automatically applied when you purchase a paid plan."
+|               <button>
+|                 aria-label="Close modal"
+|                 class="gh-btn gh-btn-black w-full text-[1.8rem]"
+|                 role="button"
+|                 x-on:click="closeDubCouponModal"
+|                 "
+Continue →"
+|       <div>
+|         class="py-[14vmin] text-center bg-base text-gray-400 font-semibold relative z-10"
+|         <div>
+|           class="max-w-8xl mx-auto flex flex-col items-center gap-6"
+|           <h2>
+|             class="text-xs md:text-md font-semibold text-lime-900 uppercase tracking-widest"
+|             "Launch your big idea"
+|           <p>
+|             class="text-2xl md:text-5xl font-hdg leading-tight"
+|             "Last week, "
+|             <span>
+|               class="text-white font-bold"
+|               "10,603"
+|             " brand new"
+|             <br>
+|             "publications got started with Ghost."
+|           <p>
+|             class="text-2xl md:text-5xl font-hdg leading-tight"
+|             <span>
+|               class="text-white font-bold"
+|               "Today, it's your turn."
+|           <a>
+|             class="plausible-event-name=Signup-CTA-clicked mt-10 text-xl text-black font-semibold font-hdg py-4 px-6 rounded-lg bg-lime-900"
+|             href="https://account.ghost.org/signup/"
+|             "Start publishing now →"
+|       <div>
+|         class="bg-base px-4 sm:px-6"
+|         <div>
+|           class="max-w-8xl mx-auto text-slate-400 text-md"
+|           <div>
+|             class="flex justify-center sm:justify-between items-center py-[4vmin]"
+|             <nav>
+|               class="flex justify-start items-center font-medium text-white text-sm sm:text-md"
+|               <a>
+|                 class="pr-4 hover:text-lime-900 hidden sm:block"
+|                 href="/"
+|                 <svg>
+|                   class="ghost-orb-logo-light"
+|                   height="40px"
+|                   preserveAspectRatio="xMidYMid meet"
+|                   viewBox="0 0 800 294"
+|                   xmlns="http://www.w3.org/2000/svg"
+|                   "
+"
+|                   <style>
+|                     "
+svg.ghost-orb-logo-light {
+    background-size: 100% 100%;
+    background-repeat: no-repeat;
+    background-image: url(/images/logos/ghost-logo-light.webp);
+}
+"
+|                   "
+"
+|               <a>
+|                 class="px-4 hover:text-lime-900"
+|                 href="/about/"
+|                 "About"
+|               "
+"
+|               <a>
+|                 class="px-4 hover:text-lime-900"
+|                 href="/explore/"
+|                 "Explore"
+|               "
+"
+|               <a>
+|                 class="px-4 hover:text-lime-900"
+|                 href="https://careers.ghost.org/"
+|                 rel="noopener noreferrer"
+|                 target="_blank"
+|                 "Careers"
+|               "
+"
+|               <a>
+|                 class="px-4 hover:text-lime-900"
+|                 href="https://ghost.org/resources/"
+|                 "Resources"
+|             <iframe>
+|               class="hidden sm:block"
+|               frameborder="0"
+|               height="20"
+|               loading="lazy"
+|               scrolling="0"
+|               src="https://ghbtns.com/github-btn.html?user=tryghost&repo=ghost&type=star&count=true"
+|               title="Star Ghost on GitHub"
+|               width="110"
+|           <div>
+|             class="hidden sm:grid gap-[4vmin] grid-cols-3 md:grid-cols-4 lg:grid-cols-5 mt-[4vmin] justify-start pb-[5vmin]"
+|             <section>
+|               <span>
+|                 class="text-white font-medium mb-1"
+|                 "Product"
+|               <ul>
+|                 class="text-md"
+|                 <li>
+|                   <a>
+|                     class="block py-2 leading-tight hover:text-white"
+|                     href="/"
+|                     "Creator platform"
+|                 <li>
+|                   <a>
+|                     class="block py-2 leading-tight hover:text-white"
+|                     href="/marketplace/"
+|                     "Theme marketplace"
+|                 <li>
+|                   <a>
+|                     class="block py-2 leading-tight hover:text-white"
+|                     href="/integrations/"
+|                     "Integrations"
+|                 <li>
+|                   <a>
+|                     class="block py-2 leading-tight hover:text-white"
+|                     href="/experts/"
+|                     "Experts"
+|                 <li>
+|                   <a>
+|                     class="block py-2 leading-tight hover:text-white"
+|                     href="/news/"
+|                     "Ghost for news"
+|             <section>
+|               <span>
+|                 class="text-white font-medium mb-1"
+|                 "Developers"
+|               <ul>
+|                 class="text-md"
+|                 <li>
+|                   <a>
+|                     class="block py-2 leading-tight hover:text-white"
+|                     href="https://docs.ghost.org/install/"
+|                     "How to install Ghost"
+|                 <li>
+|                   <a>
+|                     class="block py-2 leading-tight hover:text-white"
+|                     href="https://docs.ghost.org/"
+|                     "Core concepts"
+|                 <li>
+|                   <a>
+|                     class="block py-2 leading-tight hover:text-white"
+|                     href="/pricing/"
+|                     "Ghost hosting"
+|                 <li>
+|                   <a>
+|                     class="block py-2 leading-tight hover:text-white"
+|                     href="https://docs.ghost.org/content-api/"
+|                     "API documentation"
+|                 <li>
+|                   <a>
+|                     class="block py-2 leading-tight hover:text-white"
+|                     href="https://docs.ghost.org/security/"
+|                     "Security overview"
+|                 <li>
+|                   <a>
+|                     class="block py-2 leading-tight hover:text-white"
+|                     href="https://github.com/TryGhost/Ghost"
+|                     rel="noopener noreferrer"
+|                     target="_blank"
+|                     "Source code"
+|             <section>
+|               class="hidden md:block"
+|               <span>
+|                 class="text-white font-medium mb-1"
+|                 "Resources"
+|               <ul>
+|                 class="text-md"
+|                 <li>
+|                   <a>
+|                     class="block py-2 leading-tight hover:text-white"
+|                     href="/tutorials/"
+|                     "Ghost tutorials"
+|                 <li>
+|                   <a>
+|                     class="block py-2 leading-tight hover:text-white"
+|                     href="/resources/"
+|                     "Resources"
+|                 <li>
+|                   <a>
+|                     class="block py-2 leading-tight hover:text-white"
+|                     href="/love/"
+|                     "Ghost reviews"
+|                 <li>
+|                   <a>
+|                     class="block py-2 leading-tight hover:text-white"
+|                     href="https://opensubscriptionplatforms.com"
+|                     "Open Subscription Platforms"
+|             <section>
+|               class="hidden lg:block"
+|               <span>
+|                 class="text-white font-medium mb-1"
+|                 "Comparisons"
+|               <ul>
+|                 class="text-md"
+|                 <li>
+|                   <a>
+|                     class="block py-2 leading-tight hover:text-white"
+|                     href="/vs/substack/"
+|                     "Ghost vs Substack"
+|                 <li>
+|                   <a>
+|                     class="block py-2 leading-tight hover:text-white"
+|                     href="/vs/beehiiv/"
+|                     "Ghost vs BeeHiiv"
+|                 <li>
+|                   <a>
+|                     class="block py-2 leading-tight hover:text-white"
+|                     href="/vs/wordpress/"
+|                     "Ghost vs WordPress"
+|                 <li>
+|                   <a>
+|                     class="block py-2 leading-tight hover:text-white"
+|                     href="/vs/medium/"
+|                     "Ghost vs Medium"
+|                 <li>
+|                   <a>
+|                     class="block py-2 leading-tight hover:text-white"
+|                     href="/vs/patreon/"
+|                     "Ghost vs Patreon"
+|                 <li>
+|                   <a>
+|                     class="block py-2 leading-tight text-lime-900"
+|                     href="/alternatives/"
+|                     "Ghost alternatives →"
+|             <section>
+|               <span>
+|                 class="text-white font-medium mb-1"
+|                 "Support"
+|               <ul>
+|                 class="text-md"
+|                 <li>
+|                   <a>
+|                     class="block py-2 leading-tight hover:text-white"
+|                     href="/help/"
+|                     "Help center"
+|                 <li>
+|                   <a>
+|                     class="block py-2 leading-tight hover:text-white"
+|                     href="https://forum.ghost.org/"
+|                     "Community forum"
+|                 <li>
+|                   <a>
+|                     class="inline-flex items-center py-2 hover:text-white group"
+|                     href="https://status.ghost.org/"
+|                     rel="noopener noreferrer"
+|                     target="_blank"
+|                     "Status  "
+|                     <span>
+|                       class="flex-grow-0 inline-flex items-center bg-slate-700 text-slate-300 group-hover:text-slate-300 rounded px-1 text-xs font-semibold"
+|                       <svg>
+|                         height="4"
+|                         viewBox="0 0 7 4"
+|                         width="7"
+|                         xmlns="http://www.w3.org/2000/svg"
+|                         "
+  "
+|                         <title>
+|                           "
+    Triangle
+  "
+|                         "
+  "
+|                         <path>
+|                           d="M3.5 0L7 4H0z"
+|                           fill-rule="evenodd"
+|                           fill="#BFD0DC"
+|                         "
+"
+|                       "
+ 99.9%"
+|           <div>
+|             class="flex flex-col sm:flex-row items-center justify-center sm:justify-between py-[8vmin]"
+|             <div>
+|               class="flex items-center"
+|               <a>
+|                 class="mr-12"
+|                 href="/about/"
+|                 <img>
+|                   alt="Non-Profit Foundation"
+|                   height="34"
+|                   loading="lazy"
+|                   src="/images/logos/indie.svg"
+|                   width="89"
+|               "
+"
+|               <a>
+|                 class="mr-12"
+|                 href="https://github.com/tryghost"
+|                 rel="noopener noreferrer"
+|                 target="_blank"
+|                 <img>
+|                   alt="Open Source"
+|                   height="34"
+|                   loading="lazy"
+|                   src="/images/logos/opensource.svg"
+|                   width="89"
+|               "
+"
+|               <a>
+|                 href="https://climate.stripe.com/6MNofu"
+|                 rel="noopener noreferrer"
+|                 target="_blank"
+|                 <img>
+|                   alt="Carbon Neutral"
+|                   height="34"
+|                   loading="lazy"
+|                   src="/images/logos/carbonneutral.svg"
+|                   width="102"
+|             <nav>
+|               class="hidden md:flex items-center text-sm"
+|               <a>
+|                 class="inline-block px-2 hover:text-white"
+|                 href="/terms/"
+|                 "Terms"
+|               "
+"
+|               <a>
+|                 class="inline-block px-2 hover:text-white"
+|                 href="/privacy/"
+|                 "Privacy"
+|               "
+"
+|               <a>
+|                 class="inline-block px-2 hover:text-white"
+|                 href="/contact/"
+|                 "Contact"
+|               "
+"
+|               <a>
+|                 class="inline-block pl-2 hover:text-white"
+|                 href="/"
+|                 "Ghost Foundation © 2026"
+|     <div>
+|       class="fixed bottom-0 left-0 right-0 -z-10 bg-base h-80"
+|     <link>
+|       as="script"
+|       href="https://ghost.org/js/app.min.js"
+|       rel="preload"
+|     <script>
+|       src="https://ghost.org/js/app.min.js"
+|       type="text/javascript"
+|     <script>
+|       async=""
+|       data-netlify-cwv-token="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzaXRlX2lkIjoiYjU0MDgyZGEtNzE4ZS00ZjA2LWJjYTktNmE4NjJmYTA5ZTIwIiwiYWNjb3VudF9pZCI6IjViOWE1YTVkZGQyOGVmNzJjZGI1ZDkyMyIsImRlcGxveV9pZCI6IjZhZGVjMTUwYzA0ZDA5MGExZDY4ZjkzZiIsImlzcyI6Im5ldGxpZnkifQ.uV7Ie1tEc74xfWKeI9K8mWVZiLXzAZTTPvAPMH-_4BE"
+|       data-netlify-deploy-branch="main"
+|       data-netlify-deploy-context="production"
+|       data-netlify-rum-site-id="b54082da-718e-4f06-bca9-6a862fa09e20"
+|       id="netlify-rum-container"
+|       src="/.netlify/scripts/rum"
+|     "
+"

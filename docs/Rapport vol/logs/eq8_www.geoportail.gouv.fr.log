@@ -1,0 +1,1301 @@
+2026-10-26T12:45:18.420109Z  INFO explorer_core::session::navigate: nav: fetch+parse… tab=1
+2026-10-26T12:45:18.496692Z DEBUG h2::client: binding client connection
+2026-10-26T12:45:18.496815Z DEBUG h2::client: client connection bound
+2026-10-26T12:45:18.496878Z DEBUG h2::codec::framed_write: send frame=Settings { flags: (0x0) }
+2026-10-26T12:45:18.497180Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=Headers { stream_id: StreamId(1), flags: (0x5: END_HEADERS | END_STREAM) }
+2026-10-26T12:45:18.579673Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Settings { flags: (0x0), header_table_size: 4096, max_concurrent_streams: 100, initial_window_size: 1048576, enable_connect_protocol: 0 }
+2026-10-26T12:45:18.580010Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=Settings { flags: (0x1: ACK) }
+2026-10-26T12:45:18.580110Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Settings { flags: (0x1: ACK) }
+2026-10-26T12:45:18.580147Z DEBUG Connection{peer=Client}: h2::proto::settings: received settings ACK; applying Settings { flags: (0x0) }
+2026-10-26T12:45:18.580185Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=WindowUpdate { stream_id: StreamId(0), size_increment: 983041 }
+2026-10-26T12:45:18.597501Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Headers { stream_id: StreamId(1), flags: (0x4: END_HEADERS) }
+2026-10-26T12:45:18.597608Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(1) }
+2026-10-26T12:45:18.597651Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(1), flags: (0x1: END_STREAM) }
+2026-10-26T12:45:18.666181Z DEBUG h2::client: binding client connection
+2026-10-26T12:45:18.666239Z DEBUG h2::client: client connection bound
+2026-10-26T12:45:18.666268Z DEBUG h2::codec::framed_write: send frame=Settings { flags: (0x0) }
+2026-10-26T12:45:18.666462Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=Headers { stream_id: StreamId(1), flags: (0x5: END_HEADERS | END_STREAM) }
+2026-10-26T12:45:18.749454Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Settings { flags: (0x0), header_table_size: 4096, max_concurrent_streams: 100, initial_window_size: 1048576, enable_connect_protocol: 0 }
+2026-10-26T12:45:18.749542Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=Settings { flags: (0x1: ACK) }
+2026-10-26T12:45:18.749583Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Settings { flags: (0x1: ACK) }
+2026-10-26T12:45:18.749610Z DEBUG Connection{peer=Client}: h2::proto::settings: received settings ACK; applying Settings { flags: (0x0) }
+2026-10-26T12:45:18.749640Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=WindowUpdate { stream_id: StreamId(0), size_increment: 983041 }
+2026-10-26T12:45:18.765176Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Headers { stream_id: StreamId(1), flags: (0x4: END_HEADERS) }
+2026-10-26T12:45:18.765283Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(1) }
+2026-10-26T12:45:18.765327Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(1), flags: (0x1: END_STREAM) }
+2026-10-26T12:45:18.766318Z  INFO explorer_core::session::navigate: nav: fetch+parse ok → peinture tab=1 ms=346
+2026-10-26T12:45:18.766735Z  INFO explorer_core::session::navigate: nav: peinture ok → sous-ressources tab=1 ms=346
+2026-10-26T12:45:18.766810Z DEBUG explorer_core::session::net_items: script émis src=https://cartes.gouv.fr/explorer-les-cartes/env/env.js?v=1792597712604 module=false
+2026-10-26T12:45:18.766843Z DEBUG explorer_core::session::net_items: script émis src=https://cartes.gouv.fr/explorer-les-cartes/assets/index-t8Cr_OTk.js module=true
+2026-10-26T12:45:18.767318Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=Headers { stream_id: StreamId(3), flags: (0x5: END_HEADERS | END_STREAM) }
+2026-10-26T12:45:18.767466Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=Headers { stream_id: StreamId(5), flags: (0x5: END_HEADERS | END_STREAM) }
+2026-10-26T12:45:18.767539Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=Headers { stream_id: StreamId(7), flags: (0x5: END_HEADERS | END_STREAM) }
+2026-10-26T12:45:18.849377Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Headers { stream_id: StreamId(3), flags: (0x4: END_HEADERS) }
+2026-10-26T12:45:18.849510Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(3) }
+2026-10-26T12:45:18.851719Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Headers { stream_id: StreamId(5), flags: (0x4: END_HEADERS) }
+2026-10-26T12:45:18.851776Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(5) }
+2026-10-26T12:45:18.851817Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(5), flags: (0x1: END_STREAM) }
+2026-10-26T12:45:18.852290Z DEBUG explorer_core::session::net_items: sous-ressource script tab=1 src=Some("https://cartes.gouv.fr/explorer-les-cartes/env/env.js?v=1792597712604") module=false sec_ok=true sri_ok=true
+2026-10-26T12:45:18.868899Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Headers { stream_id: StreamId(7), flags: (0x4: END_HEADERS) }
+2026-10-26T12:45:18.869008Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:18.869064Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:18.869153Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:18.869197Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:18.869237Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:18.869306Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:18.869349Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:18.869406Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:18.869613Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 36862 }
+2026-10-26T12:45:18.869650Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(7), size_increment: 25974 }
+2026-10-26T12:45:18.872185Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:18.872365Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:18.888439Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:18.888589Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:18.888654Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:18.888696Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:18.888905Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 28673 }
+2026-10-26T12:45:18.888942Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(7), size_increment: 28673 }
+2026-10-26T12:45:18.892023Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(3) }
+2026-10-26T12:45:18.892146Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(3) }
+2026-10-26T12:45:18.892285Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(3) }
+2026-10-26T12:45:18.892459Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 36862 }
+2026-10-26T12:45:18.892494Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(3), size_increment: 46648 }
+2026-10-26T12:45:18.910934Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(3) }
+2026-10-26T12:45:18.911007Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(3) }
+2026-10-26T12:45:18.911055Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:18.911265Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 28673 }
+2026-10-26T12:45:18.931852Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(3) }
+2026-10-26T12:45:18.932062Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(3) }
+2026-10-26T12:45:18.932152Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(3) }
+2026-10-26T12:45:18.932453Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 36862 }
+2026-10-26T12:45:18.932502Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(3), size_increment: 55749 }
+2026-10-26T12:45:18.951990Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(3) }
+2026-10-26T12:45:18.952105Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:18.952172Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:18.952410Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 28673 }
+2026-10-26T12:45:18.952447Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(7), size_increment: 28673 }
+2026-10-26T12:45:18.972155Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(3) }
+2026-10-26T12:45:18.972303Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(3) }
+2026-10-26T12:45:18.972368Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(3) }
+2026-10-26T12:45:18.972552Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 36862 }
+2026-10-26T12:45:18.972590Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(3), size_increment: 46648 }
+2026-10-26T12:45:18.992270Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(3) }
+2026-10-26T12:45:18.992377Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(3) }
+2026-10-26T12:45:18.992425Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:18.992610Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 28673 }
+2026-10-26T12:45:19.012525Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(3), flags: (0x1: END_STREAM) }
+2026-10-26T12:45:19.012640Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:19.012735Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:19.029868Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 36862 }
+2026-10-26T12:45:19.029944Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(7), size_increment: 40643 }
+2026-10-26T12:45:19.032957Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:19.033021Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:19.033162Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 24892 }
+2026-10-26T12:45:19.033197Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(7), size_increment: 24892 }
+2026-10-26T12:45:19.052790Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:19.052922Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:19.052985Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:19.053174Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 40643 }
+2026-10-26T12:45:19.053211Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(7), size_increment: 40643 }
+2026-10-26T12:45:19.073280Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:19.073406Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:19.073585Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 24892 }
+2026-10-26T12:45:19.073633Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(7), size_increment: 24892 }
+2026-10-26T12:45:19.094398Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:19.094529Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:19.094592Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:19.094773Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 40643 }
+2026-10-26T12:45:19.094809Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(7), size_increment: 40643 }
+2026-10-26T12:45:19.114134Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:19.114255Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:19.114423Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 24892 }
+2026-10-26T12:45:19.114459Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(7), size_increment: 24892 }
+2026-10-26T12:45:19.134610Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:19.134742Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:19.134803Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:19.135043Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 40643 }
+2026-10-26T12:45:19.135079Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(7), size_increment: 40643 }
+2026-10-26T12:45:19.155307Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:19.155444Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:19.155627Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 24892 }
+2026-10-26T12:45:19.155665Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(7), size_increment: 24892 }
+2026-10-26T12:45:19.175695Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:19.175811Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:19.175872Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:19.176050Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 40643 }
+2026-10-26T12:45:19.176087Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(7), size_increment: 40643 }
+2026-10-26T12:45:19.195682Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:19.195780Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:19.195946Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 24892 }
+2026-10-26T12:45:19.195982Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(7), size_increment: 24892 }
+2026-10-26T12:45:19.215890Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:19.215988Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:19.216046Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:19.216206Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 40643 }
+2026-10-26T12:45:19.216242Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(7), size_increment: 40643 }
+2026-10-26T12:45:19.235921Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:19.236005Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:19.236151Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 24892 }
+2026-10-26T12:45:19.236187Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(7), size_increment: 24892 }
+2026-10-26T12:45:19.256632Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:19.257583Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:19.257671Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:19.257904Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 40643 }
+2026-10-26T12:45:19.257941Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(7), size_increment: 40643 }
+2026-10-26T12:45:19.277129Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:19.277327Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:19.277505Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 24892 }
+2026-10-26T12:45:19.277542Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(7), size_increment: 24892 }
+2026-10-26T12:45:19.297764Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:19.297897Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:19.297959Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:19.298137Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 40643 }
+2026-10-26T12:45:19.298174Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(7), size_increment: 40643 }
+2026-10-26T12:45:19.318879Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:19.319007Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:19.319184Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 24892 }
+2026-10-26T12:45:19.319222Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(7), size_increment: 24892 }
+2026-10-26T12:45:19.339481Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:19.339619Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:19.339682Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:19.340014Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 40643 }
+2026-10-26T12:45:19.340765Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(7), size_increment: 40643 }
+2026-10-26T12:45:19.359605Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:19.359726Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:19.359890Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 24892 }
+2026-10-26T12:45:19.359927Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(7), size_increment: 24892 }
+2026-10-26T12:45:19.380393Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:19.380514Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:19.380576Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:19.380754Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 40643 }
+2026-10-26T12:45:19.380790Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(7), size_increment: 40643 }
+2026-10-26T12:45:19.400801Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:19.400889Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:19.401045Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 24892 }
+2026-10-26T12:45:19.401088Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(7), size_increment: 24892 }
+2026-10-26T12:45:19.421265Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:19.421472Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:19.421549Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:19.421796Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 40643 }
+2026-10-26T12:45:19.421840Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(7), size_increment: 40643 }
+2026-10-26T12:45:19.441173Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:19.441294Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:19.441470Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 24892 }
+2026-10-26T12:45:19.441509Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(7), size_increment: 24892 }
+2026-10-26T12:45:19.462065Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:19.462167Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:19.462227Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:19.462393Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 40643 }
+2026-10-26T12:45:19.462432Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(7), size_increment: 40643 }
+2026-10-26T12:45:19.482302Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:19.482393Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:19.482549Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 24892 }
+2026-10-26T12:45:19.482585Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(7), size_increment: 24892 }
+2026-10-26T12:45:19.502678Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:19.502776Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:19.502834Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7), flags: (0x1: END_STREAM) }
+2026-10-26T12:45:19.589322Z DEBUG explorer_core::session::net_items: sous-ressource script tab=1 src=Some("https://cartes.gouv.fr/explorer-les-cartes/assets/index-t8Cr_OTk.js") module=true sec_ok=true sri_ok=true
+2026-10-26T12:45:19.935327Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 33212 }
+2026-10-26T12:45:19.935395Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=Headers { stream_id: StreamId(9), flags: (0x5: END_HEADERS | END_STREAM) }
+2026-10-26T12:45:19.969946Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Headers { stream_id: StreamId(9), flags: (0x4: END_HEADERS) }
+2026-10-26T12:45:19.970070Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(9) }
+2026-10-26T12:45:19.970116Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(9), flags: (0x1: END_STREAM) }
+2026-10-26T12:45:19.972086Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=Headers { stream_id: StreamId(11), flags: (0x5: END_HEADERS | END_STREAM) }
+2026-10-26T12:45:20.007962Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Headers { stream_id: StreamId(11), flags: (0x4: END_HEADERS) }
+2026-10-26T12:45:20.008071Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(11) }
+2026-10-26T12:45:20.008117Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(11), flags: (0x1: END_STREAM) }
+2026-10-26T12:45:20.192885Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=Headers { stream_id: StreamId(13), flags: (0x5: END_HEADERS | END_STREAM) }
+2026-10-26T12:45:20.228439Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Headers { stream_id: StreamId(13), flags: (0x4: END_HEADERS) }
+2026-10-26T12:45:20.228560Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(13) }
+2026-10-26T12:45:20.238634Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(13) }
+2026-10-26T12:45:20.239016Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 22517 }
+2026-10-26T12:45:20.247871Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(13) }
+2026-10-26T12:45:20.247976Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(13) }
+2026-10-26T12:45:20.248089Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(13) }
+2026-10-26T12:45:20.248271Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 22172 }
+2026-10-26T12:45:20.248307Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(13), size_increment: 36054 }
+2026-10-26T12:45:20.249086Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(13) }
+2026-10-26T12:45:20.249133Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(13), flags: (0x1: END_STREAM) }
+2026-10-26T12:45:20.259552Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=Headers { stream_id: StreamId(15), flags: (0x5: END_HEADERS | END_STREAM) }
+2026-10-26T12:45:20.304643Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Headers { stream_id: StreamId(15), flags: (0x4: END_HEADERS) }
+2026-10-26T12:45:20.304861Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(15) }
+2026-10-26T12:45:20.304919Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(15) }
+2026-10-26T12:45:20.304992Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(15) }
+2026-10-26T12:45:20.305094Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(15) }
+2026-10-26T12:45:20.305149Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(15) }
+2026-10-26T12:45:20.305209Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(15) }
+2026-10-26T12:45:20.305248Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(15), flags: (0x1: END_STREAM) }
+2026-10-26T12:45:20.316223Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 49230 }
+2026-10-26T12:45:20.316309Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=Headers { stream_id: StreamId(17), flags: (0x5: END_HEADERS | END_STREAM) }
+2026-10-26T12:45:20.351236Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Headers { stream_id: StreamId(17), flags: (0x4: END_HEADERS) }
+2026-10-26T12:45:20.351357Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(17) }
+2026-10-26T12:45:20.351428Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(17) }
+2026-10-26T12:45:20.351934Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(17) }
+2026-10-26T12:45:20.351998Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(17) }
+2026-10-26T12:45:20.352038Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(17), flags: (0x1: END_STREAM) }
+2026-10-26T12:45:20.363198Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 41328 }
+2026-10-26T12:45:20.363287Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=Headers { stream_id: StreamId(19), flags: (0x5: END_HEADERS | END_STREAM) }
+2026-10-26T12:45:20.400601Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Headers { stream_id: StreamId(19), flags: (0x4: END_HEADERS) }
+2026-10-26T12:45:20.400747Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(19) }
+2026-10-26T12:45:20.401502Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(19) }
+2026-10-26T12:45:20.401586Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(19) }
+2026-10-26T12:45:20.401669Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(19) }
+2026-10-26T12:45:20.401711Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(19), flags: (0x1: END_STREAM) }
+2026-10-26T12:45:20.412769Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 44284 }
+2026-10-26T12:45:20.412851Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=Headers { stream_id: StreamId(21), flags: (0x5: END_HEADERS | END_STREAM) }
+2026-10-26T12:45:20.448877Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Headers { stream_id: StreamId(21), flags: (0x4: END_HEADERS) }
+2026-10-26T12:45:20.449065Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(21) }
+2026-10-26T12:45:20.449121Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(21) }
+2026-10-26T12:45:20.449226Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(21) }
+2026-10-26T12:45:20.449273Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(21) }
+2026-10-26T12:45:20.449328Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(21) }
+2026-10-26T12:45:20.449366Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(21), flags: (0x1: END_STREAM) }
+2026-10-26T12:45:20.459907Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 41940 }
+2026-10-26T12:45:20.459967Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=Headers { stream_id: StreamId(23), flags: (0x5: END_HEADERS | END_STREAM) }
+2026-10-26T12:45:20.495176Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Headers { stream_id: StreamId(23), flags: (0x4: END_HEADERS) }
+2026-10-26T12:45:20.495336Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(23) }
+2026-10-26T12:45:20.495501Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(23) }
+2026-10-26T12:45:20.495608Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(23) }
+2026-10-26T12:45:20.495714Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(23) }
+2026-10-26T12:45:20.495780Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(23), flags: (0x1: END_STREAM) }
+2026-10-26T12:45:20.515927Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 44572 }
+2026-10-26T12:45:20.516061Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=Headers { stream_id: StreamId(25), flags: (0x5: END_HEADERS | END_STREAM) }
+2026-10-26T12:45:20.551738Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Headers { stream_id: StreamId(25), flags: (0x4: END_HEADERS) }
+2026-10-26T12:45:20.551900Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(25) }
+2026-10-26T12:45:20.552081Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(25) }
+2026-10-26T12:45:20.552170Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(25) }
+2026-10-26T12:45:20.552227Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(25), flags: (0x1: END_STREAM) }
+2026-10-26T12:45:20.572435Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 42092 }
+2026-10-26T12:45:20.572585Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=Headers { stream_id: StreamId(27), flags: (0x5: END_HEADERS | END_STREAM) }
+2026-10-26T12:45:20.608538Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Headers { stream_id: StreamId(27), flags: (0x4: END_HEADERS) }
+2026-10-26T12:45:20.608763Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(27) }
+2026-10-26T12:45:20.608841Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(27) }
+2026-10-26T12:45:20.608949Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(27) }
+2026-10-26T12:45:20.609036Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(27) }
+2026-10-26T12:45:20.609090Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(27), flags: (0x1: END_STREAM) }
+2026-10-26T12:45:20.627624Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 45300 }
+2026-10-26T12:45:20.627765Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=Headers { stream_id: StreamId(29), flags: (0x5: END_HEADERS | END_STREAM) }
+2026-10-26T12:45:20.664194Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Headers { stream_id: StreamId(29), flags: (0x4: END_HEADERS) }
+2026-10-26T12:45:20.664702Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(29) }
+2026-10-26T12:45:20.664773Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(29) }
+2026-10-26T12:45:20.664857Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(29) }
+2026-10-26T12:45:20.664937Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(29) }
+2026-10-26T12:45:20.664987Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(29) }
+2026-10-26T12:45:20.665084Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(29) }
+2026-10-26T12:45:20.665381Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 61538 }
+2026-10-26T12:45:20.665424Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(29), size_increment: 61538 }
+2026-10-26T12:45:20.683514Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(29) }
+2026-10-26T12:45:20.687940Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(29), flags: (0x1: END_STREAM) }
+2026-10-26T12:45:20.688961Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=Headers { stream_id: StreamId(31), flags: (0x5: END_HEADERS | END_STREAM) }
+2026-10-26T12:45:20.725533Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Headers { stream_id: StreamId(31), flags: (0x4: END_HEADERS) }
+2026-10-26T12:45:20.725696Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(31) }
+2026-10-26T12:45:20.725751Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(31) }
+2026-10-26T12:45:20.725827Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(31) }
+2026-10-26T12:45:20.725869Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(31) }
+2026-10-26T12:45:20.725909Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(31) }
+2026-10-26T12:45:20.725990Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(31) }
+2026-10-26T12:45:20.726038Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 17934 }
+2026-10-26T12:45:20.726296Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 47601 }
+2026-10-26T12:45:20.726332Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(31), size_increment: 47601 }
+2026-10-26T12:45:20.746614Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(31) }
+2026-10-26T12:45:20.746705Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(31) }
+2026-10-26T12:45:20.767157Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(31) }
+2026-10-26T12:45:20.770920Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(31) }
+2026-10-26T12:45:20.771013Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(31) }
+2026-10-26T12:45:20.771061Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 17934 }
+2026-10-26T12:45:20.771365Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 47601 }
+2026-10-26T12:45:20.771404Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(31), size_increment: 65535 }
+2026-10-26T12:45:20.857834Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(31), flags: (0x1: END_STREAM) }
+2026-10-26T12:45:20.874904Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=Headers { stream_id: StreamId(33), flags: (0x5: END_HEADERS | END_STREAM) }
+2026-10-26T12:45:20.910746Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Headers { stream_id: StreamId(33), flags: (0x4: END_HEADERS) }
+2026-10-26T12:45:20.910962Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(33) }
+2026-10-26T12:45:20.911018Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(33) }
+2026-10-26T12:45:20.911073Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(33) }
+2026-10-26T12:45:20.911262Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 24548 }
+2026-10-26T12:45:20.911306Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(33), size_increment: 23668 }
+2026-10-26T12:45:20.912050Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(33) }
+2026-10-26T12:45:20.912104Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(33) }
+2026-10-26T12:45:20.912384Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(33) }
+2026-10-26T12:45:20.912538Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 32768 }
+2026-10-26T12:45:20.912572Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(33), size_increment: 32768 }
+2026-10-26T12:45:20.930886Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(33) }
+2026-10-26T12:45:20.930953Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(33) }
+2026-10-26T12:45:20.931790Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(33), flags: (0x1: END_STREAM) }
+2026-10-26T12:45:20.932125Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 23932 }
+2026-10-26T12:45:20.932169Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=Headers { stream_id: StreamId(35), flags: (0x5: END_HEADERS | END_STREAM) }
+2026-10-26T12:45:21.028500Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Headers { stream_id: StreamId(35), flags: (0x4: END_HEADERS) }
+2026-10-26T12:45:21.028649Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(35) }
+2026-10-26T12:45:21.028704Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(35) }
+2026-10-26T12:45:21.028814Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(35) }
+2026-10-26T12:45:21.028864Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(35) }
+2026-10-26T12:45:21.028930Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(35) }
+2026-10-26T12:45:21.028977Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(35) }
+2026-10-26T12:45:21.029216Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 61538 }
+2026-10-26T12:45:21.029252Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(35), size_increment: 61538 }
+2026-10-26T12:45:21.048463Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(35) }
+2026-10-26T12:45:21.049503Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(35) }
+2026-10-26T12:45:21.049593Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(35) }
+2026-10-26T12:45:21.049653Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(35), flags: (0x1: END_STREAM) }
+2026-10-26T12:45:21.071474Z DEBUG explorer_core::session::net_items: prefetch modules tab=1 async_mods=0 post_modules=1
+2026-10-26T12:45:23.915481Z DEBUG explorer_core::session::net_items: module prefetché tab=1 name=https://cartes.gouv.fr/explorer-les-cartes/assets/index-t8Cr_OTk.js sources=1
+2026-10-26T12:45:23.915761Z  INFO explorer_core::session::navigate: nav: sous-ressources ok → commit tab=1 ms=5495
+2026-10-26T12:45:23.916377Z  INFO explorer_core::session::js_glue: script: eval… tab=1 bytes=1370
+2026-10-26T12:45:23.917158Z  INFO explorer_core::session::js_glue: script: eval fin tab=1 ms=0 ok=true
+2026-10-26T12:45:23.917186Z DEBUG explorer_core::session::js_glue: module eval… tab=1 name=https://cartes.gouv.fr/explorer-les-cartes/assets/index-t8Cr_OTk.js
+2026-10-26T12:45:28.309635Z DEBUG explorer_jscore::dom_host: customElements.define name=pnx-mini-map
+2026-10-26T12:45:28.310370Z DEBUG explorer_jscore::dom_host: customElements.define name=gpf-picture-legend-widget
+2026-10-26T12:45:28.845066Z DEBUG explorer_jscore::module: import() dynamique spec="./Load-DJ3Ap9jA.js" referrer="https://cartes.gouv.fr/explorer-les-cartes/assets/index-t8Cr_OTk.js"
+2026-10-26T12:45:28.846296Z DEBUG explorer_core::session::js_glue: module eval fin tab=1 ms=4929
+2026-10-26T12:45:28.848108Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:45:28.848888Z DEBUG explorer_core::session::net: spawn dyn import tab=1 url=https://cartes.gouv.fr/explorer-les-cartes/assets/Load-DJ3Ap9jA.js seq=0
+2026-10-26T12:45:28.848967Z DEBUG explorer_core::session::net: dyn import : fetch émis tab=1 url=https://cartes.gouv.fr/explorer-les-cartes/assets/Load-DJ3Ap9jA.js
+2026-10-26T12:45:28.849760Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 52970 }
+2026-10-26T12:45:28.850484Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=Headers { stream_id: StreamId(37), flags: (0x5: END_HEADERS | END_STREAM) }
+2026-10-26T12:45:28.850575Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=Headers { stream_id: StreamId(39), flags: (0x5: END_HEADERS | END_STREAM) }
+2026-10-26T12:45:28.850641Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=Headers { stream_id: StreamId(41), flags: (0x5: END_HEADERS | END_STREAM) }
+2026-10-26T12:45:28.850705Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=Headers { stream_id: StreamId(43), flags: (0x5: END_HEADERS | END_STREAM) }
+2026-10-26T12:45:29.101883Z  INFO explorer_core::session::apply: apply: cascade ms=250
+2026-10-26T12:45:29.111383Z  INFO explorer_core::session::apply: apply: boxtree ms=260
+2026-10-26T12:45:29.115065Z  INFO explorer_core::session::apply: apply: layout ms=263
+2026-10-26T12:45:29.133888Z  INFO explorer_core::session::apply: apply: repaint ms=282
+2026-10-26T12:45:29.134261Z  INFO sync_profile: phase sync tab=1 phase="event.dispatch" us=115
+2026-10-26T12:45:29.134364Z  INFO sync_profile: phase sync tab=1 phase="event.mirror_sync" us=105
+2026-10-26T12:45:29.135235Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:45:29.135302Z  INFO sync_profile: phase sync tab=1 phase="event.after_script" us=937
+2026-10-26T12:45:29.135329Z  INFO sync_profile: phase sync tab=1 phase="event.poll_net" us=28
+2026-10-26T12:45:29.135407Z  INFO sync_profile: phase sync tab=1 phase="event.dispatch" us=62
+2026-10-26T12:45:29.135485Z  INFO sync_profile: phase sync tab=1 phase="event.mirror_sync" us=77
+2026-10-26T12:45:29.135592Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:45:29.135653Z  INFO sync_profile: phase sync tab=1 phase="event.after_script" us=167
+2026-10-26T12:45:29.135677Z  INFO sync_profile: phase sync tab=1 phase="event.poll_net" us=24
+2026-10-26T12:45:29.135816Z  INFO sync_profile: phase sync tab=1 phase="event.dispatch" us=56
+2026-10-26T12:45:29.135901Z  INFO sync_profile: phase sync tab=1 phase="event.mirror_sync" us=84
+2026-10-26T12:45:29.136005Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:45:29.136065Z  INFO sync_profile: phase sync tab=1 phase="event.after_script" us=164
+2026-10-26T12:45:29.136089Z  INFO sync_profile: phase sync tab=1 phase="event.poll_net" us=25
+2026-10-26T12:45:29.136166Z  INFO sync_profile: phase sync tab=1 phase="event.dispatch" us=61
+2026-10-26T12:45:29.136245Z  INFO sync_profile: phase sync tab=1 phase="event.mirror_sync" us=78
+2026-10-26T12:45:29.136349Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:45:29.136397Z  INFO sync_profile: phase sync tab=1 phase="event.after_script" us=152
+2026-10-26T12:45:29.136418Z  INFO sync_profile: phase sync tab=1 phase="event.poll_net" us=22
+2026-10-26T12:45:29.136718Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=GoAway { error_code: NO_ERROR, last_stream_id: StreamId(2147483647) }
+2026-10-26T12:45:29.136772Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=GoAway { error_code: NO_ERROR, last_stream_id: StreamId(1) }
+2026-10-26T12:45:29.137138Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=GoAway { error_code: NO_ERROR, last_stream_id: StreamId(2147483647) }
+2026-10-26T12:45:29.137244Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Headers { stream_id: StreamId(37), flags: (0x4: END_HEADERS) }
+2026-10-26T12:45:29.137365Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(37) }
+2026-10-26T12:45:29.137418Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(37) }
+2026-10-26T12:45:29.137456Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(37) }
+2026-10-26T12:45:29.137526Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(37) }
+2026-10-26T12:45:29.137570Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(37) }
+2026-10-26T12:45:29.137636Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(37) }
+2026-10-26T12:45:29.137685Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(37) }
+2026-10-26T12:45:29.137788Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(37) }
+2026-10-26T12:45:29.137832Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(37) }
+2026-10-26T12:45:29.137906Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Headers { stream_id: StreamId(41), flags: (0x4: END_HEADERS) }
+2026-10-26T12:45:29.137958Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(41) }
+2026-10-26T12:45:29.138002Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(41), flags: (0x1: END_STREAM) }
+2026-10-26T12:45:29.138088Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(37) }
+2026-10-26T12:45:29.138139Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(37) }
+2026-10-26T12:45:29.138222Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(37) }
+2026-10-26T12:45:29.138268Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=GoAway { error_code: NO_ERROR, last_stream_id: StreamId(43) }
+2026-10-26T12:45:29.138702Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 65535 }
+2026-10-26T12:45:29.138748Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(37), size_increment: 65306 }
+2026-10-26T12:45:29.139493Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:45:29.139652Z  INFO sync_profile: phase sync tab=1 phase="pump.js_run_sync" us=58
+2026-10-26T12:45:29.139727Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:45:29.159885Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(37) }
+2026-10-26T12:45:29.159989Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(37) }
+2026-10-26T12:45:29.160152Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 32768 }
+2026-10-26T12:45:29.160188Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(37), size_increment: 32768 }
+2026-10-26T12:45:29.160540Z  INFO sync_profile: phase sync tab=1 phase="pump.js_run_sync" us=168
+2026-10-26T12:45:29.160784Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:45:29.179383Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(37) }
+2026-10-26T12:45:29.179500Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(37) }
+2026-10-26T12:45:29.179633Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 32767 }
+2026-10-26T12:45:29.179669Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(37), size_increment: 32767 }
+2026-10-26T12:45:29.181177Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(37) }
+2026-10-26T12:45:29.181264Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(37), flags: (0x1: END_STREAM) }
+2026-10-26T12:45:29.196293Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:45:29.196501Z  INFO sync_profile: phase sync tab=1 phase="pump.js_run_sync" us=82
+2026-10-26T12:45:29.196677Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:45:29.224045Z  INFO sync_profile: phase sync tab=1 phase="pump.js_run_sync" us=145
+2026-10-26T12:45:29.224289Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:45:29.254796Z  INFO sync_profile: phase sync tab=1 phase="pump.js_run_sync" us=180
+2026-10-26T12:45:29.255179Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:45:29.285311Z  INFO sync_profile: phase sync tab=1 phase="pump.js_run_sync" us=140
+2026-10-26T12:45:29.285589Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:45:29.316965Z  INFO sync_profile: phase sync tab=1 phase="pump.js_run_sync" us=131
+2026-10-26T12:45:29.317159Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:45:29.347568Z  INFO sync_profile: phase sync tab=1 phase="pump.js_run_sync" us=164
+2026-10-26T12:45:29.347851Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:45:29.378786Z  INFO sync_profile: phase sync tab=1 phase="pump.js_run_sync" us=179
+2026-10-26T12:45:29.379045Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:45:29.409580Z  INFO sync_profile: phase sync tab=1 phase="pump.js_run_sync" us=172
+2026-10-26T12:45:29.409857Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:45:29.410896Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Headers { stream_id: StreamId(39), flags: (0x4: END_HEADERS) }
+2026-10-26T12:45:29.411115Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(39) }
+2026-10-26T12:45:29.411165Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(39) }
+2026-10-26T12:45:29.411204Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(39) }
+2026-10-26T12:45:29.411250Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(39) }
+2026-10-26T12:45:29.411353Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(39) }
+2026-10-26T12:45:29.411397Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(39) }
+2026-10-26T12:45:29.411435Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(39) }
+2026-10-26T12:45:29.411492Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(39) }
+2026-10-26T12:45:29.411540Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 16846 }
+2026-10-26T12:45:29.411767Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 48689 }
+2026-10-26T12:45:29.411803Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(39), size_increment: 48689 }
+2026-10-26T12:45:29.416120Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Headers { stream_id: StreamId(43), flags: (0x4: END_HEADERS) }
+2026-10-26T12:45:29.432229Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(39) }
+2026-10-26T12:45:29.432338Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(39) }
+2026-10-26T12:45:29.432689Z  INFO sync_profile: phase sync tab=1 phase="pump.js_run_sync" us=180
+2026-10-26T12:45:29.432936Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:45:29.436140Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(39) }
+2026-10-26T12:45:29.436265Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 16846 }
+2026-10-26T12:45:29.436451Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(39), size_increment: 33230 }
+2026-10-26T12:45:29.451694Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(39) }
+2026-10-26T12:45:29.451803Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(39) }
+2026-10-26T12:45:29.451851Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 16384 }
+2026-10-26T12:45:29.451999Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 32305 }
+2026-10-26T12:45:29.452034Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(39), size_increment: 32305 }
+2026-10-26T12:45:29.457715Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(43) }
+2026-10-26T12:45:29.457989Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(43) }
+2026-10-26T12:45:29.458350Z  INFO sync_profile: phase sync tab=1 phase="pump.js_run_sync" us=158
+2026-10-26T12:45:29.458684Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:45:29.476839Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(39) }
+2026-10-26T12:45:29.476974Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(39) }
+2026-10-26T12:45:29.477041Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(39) }
+2026-10-26T12:45:29.477089Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 16846 }
+2026-10-26T12:45:29.477279Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 48689 }
+2026-10-26T12:45:29.477315Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(39), size_increment: 48689 }
+2026-10-26T12:45:29.487497Z  INFO sync_profile: phase sync tab=1 phase="pump.js_run_sync" us=219
+2026-10-26T12:45:29.487823Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:45:29.498123Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(39) }
+2026-10-26T12:45:29.498237Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(39) }
+2026-10-26T12:45:29.518617Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(39) }
+2026-10-26T12:45:29.518732Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(39) }
+2026-10-26T12:45:29.518797Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(39) }
+2026-10-26T12:45:29.518918Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 16846 }
+2026-10-26T12:45:29.519090Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 48689 }
+2026-10-26T12:45:29.519126Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(39), size_increment: 65535 }
+2026-10-26T12:45:29.519374Z  INFO sync_profile: phase sync tab=1 phase="pump.js_run_sync" us=130
+2026-10-26T12:45:29.519592Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:45:29.539909Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(43) }
+2026-10-26T12:45:29.540044Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(43) }
+2026-10-26T12:45:29.540179Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(43), size_increment: 33692 }
+2026-10-26T12:45:29.540554Z  INFO sync_profile: phase sync tab=1 phase="pump.js_run_sync" us=166
+2026-10-26T12:45:29.540810Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:45:29.560736Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(39) }
+2026-10-26T12:45:29.560838Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(39) }
+2026-10-26T12:45:29.560917Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(39) }
+2026-10-26T12:45:29.560963Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 16846 }
+2026-10-26T12:45:29.561085Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 48689 }
+2026-10-26T12:45:29.561119Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(39), size_increment: 48689 }
+2026-10-26T12:45:29.565722Z  INFO sync_profile: phase sync tab=1 phase="pump.js_run_sync" us=109
+2026-10-26T12:45:29.565947Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:45:29.597213Z  INFO sync_profile: phase sync tab=1 phase="pump.js_run_sync" us=160
+2026-10-26T12:45:29.597428Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:45:29.628359Z  INFO sync_profile: phase sync tab=1 phase="pump.js_run_sync" us=168
+2026-10-26T12:45:29.628598Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:45:29.645450Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(39) }
+2026-10-26T12:45:29.645598Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(39) }
+2026-10-26T12:45:29.645760Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 32768 }
+2026-10-26T12:45:29.645797Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(39), size_increment: 32768 }
+2026-10-26T12:45:29.659646Z  INFO sync_profile: phase sync tab=1 phase="pump.js_run_sync" us=181
+2026-10-26T12:45:29.659927Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:45:29.665520Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(39) }
+2026-10-26T12:45:29.665632Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(39) }
+2026-10-26T12:45:29.665801Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 32767 }
+2026-10-26T12:45:29.665837Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(39), size_increment: 32767 }
+2026-10-26T12:45:29.666471Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(39) }
+2026-10-26T12:45:29.666539Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(39) }
+2026-10-26T12:45:29.666646Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 32768 }
+2026-10-26T12:45:29.666679Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(39), size_increment: 32768 }
+2026-10-26T12:45:29.687570Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(39) }
+2026-10-26T12:45:29.687688Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(39) }
+2026-10-26T12:45:29.687844Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 32767 }
+2026-10-26T12:45:29.687882Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(39), size_increment: 32767 }
+2026-10-26T12:45:29.688273Z  INFO sync_profile: phase sync tab=1 phase="pump.js_run_sync" us=209
+2026-10-26T12:45:29.688615Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:45:29.707788Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(39) }
+2026-10-26T12:45:29.707898Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(39) }
+2026-10-26T12:45:29.708030Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 32768 }
+2026-10-26T12:45:29.708066Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(39), size_increment: 32768 }
+2026-10-26T12:45:29.722284Z  INFO sync_profile: phase sync tab=1 phase="pump.js_run_sync" us=195
+2026-10-26T12:45:29.722646Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:45:29.728446Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(39) }
+2026-10-26T12:45:29.728553Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(39) }
+2026-10-26T12:45:29.728683Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 32767 }
+2026-10-26T12:45:29.728719Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(39), size_increment: 32767 }
+2026-10-26T12:45:29.750977Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(39) }
+2026-10-26T12:45:29.751048Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(39) }
+2026-10-26T12:45:29.751159Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 32768 }
+2026-10-26T12:45:29.751195Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(39), size_increment: 32768 }
+2026-10-26T12:45:29.751395Z  INFO sync_profile: phase sync tab=1 phase="pump.js_run_sync" us=79
+2026-10-26T12:45:29.751672Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:45:29.771030Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(39) }
+2026-10-26T12:45:29.771176Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(39) }
+2026-10-26T12:45:29.771344Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 32767 }
+2026-10-26T12:45:29.771384Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(39), size_increment: 32767 }
+2026-10-26T12:45:29.785577Z  INFO sync_profile: phase sync tab=1 phase="pump.js_run_sync" us=137
+2026-10-26T12:45:29.785905Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:45:29.792624Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(39) }
+2026-10-26T12:45:29.792790Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(39), flags: (0x1: END_STREAM) }
+2026-10-26T12:45:29.792856Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(43) }
+2026-10-26T12:45:29.838594Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 32768 }
+2026-10-26T12:45:29.839152Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(43) }
+2026-10-26T12:45:29.839238Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(43) }
+2026-10-26T12:45:29.839396Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 32767 }
+2026-10-26T12:45:29.839451Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(43), size_increment: 45215 }
+2026-10-26T12:45:29.842307Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:45:29.842639Z  INFO sync_profile: phase sync tab=1 phase="pump.js_run_sync" us=76
+2026-10-26T12:45:29.842834Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+[journal : 0 appliqués / 0 replis / 0 classées]
+docs/Rapport vol/captures/2026-10-26_13-45-18_Equipe_8_Instit_www.geoportail.gouv.fr.png — 1844526 octets
+2026-10-26T12:45:30.608285Z  INFO explorer_core::session::navigate: nav: fetch+parse… tab=1
+2026-10-26T12:45:30.704641Z DEBUG h2::client: binding client connection
+2026-10-26T12:45:30.704766Z DEBUG h2::client: client connection bound
+2026-10-26T12:45:30.704837Z DEBUG h2::codec::framed_write: send frame=Settings { flags: (0x0) }
+2026-10-26T12:45:30.705281Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=Headers { stream_id: StreamId(1), flags: (0x5: END_HEADERS | END_STREAM) }
+2026-10-26T12:45:30.795408Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Settings { flags: (0x0), header_table_size: 4096, max_concurrent_streams: 100, initial_window_size: 1048576, enable_connect_protocol: 0 }
+2026-10-26T12:45:30.795506Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=Settings { flags: (0x1: ACK) }
+2026-10-26T12:45:30.795552Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Settings { flags: (0x1: ACK) }
+2026-10-26T12:45:30.795580Z DEBUG Connection{peer=Client}: h2::proto::settings: received settings ACK; applying Settings { flags: (0x0) }
+2026-10-26T12:45:30.795611Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=WindowUpdate { stream_id: StreamId(0), size_increment: 983041 }
+2026-10-26T12:45:30.798530Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Headers { stream_id: StreamId(1), flags: (0x4: END_HEADERS) }
+2026-10-26T12:45:30.798622Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(1) }
+2026-10-26T12:45:30.798671Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(1), flags: (0x1: END_STREAM) }
+2026-10-26T12:45:30.895674Z DEBUG h2::client: binding client connection
+2026-10-26T12:45:30.895766Z DEBUG h2::client: client connection bound
+2026-10-26T12:45:30.895799Z DEBUG h2::codec::framed_write: send frame=Settings { flags: (0x0) }
+2026-10-26T12:45:30.896043Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=Headers { stream_id: StreamId(1), flags: (0x5: END_HEADERS | END_STREAM) }
+2026-10-26T12:45:30.991046Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Settings { flags: (0x0), header_table_size: 4096, max_concurrent_streams: 100, initial_window_size: 1048576, enable_connect_protocol: 0 }
+2026-10-26T12:45:30.991131Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=Settings { flags: (0x1: ACK) }
+2026-10-26T12:45:30.991254Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Settings { flags: (0x1: ACK) }
+2026-10-26T12:45:30.991288Z DEBUG Connection{peer=Client}: h2::proto::settings: received settings ACK; applying Settings { flags: (0x0) }
+2026-10-26T12:45:30.991319Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=WindowUpdate { stream_id: StreamId(0), size_increment: 983041 }
+2026-10-26T12:45:31.001891Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Headers { stream_id: StreamId(1), flags: (0x4: END_HEADERS) }
+2026-10-26T12:45:31.001959Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(1) }
+2026-10-26T12:45:31.002013Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(1), flags: (0x1: END_STREAM) }
+2026-10-26T12:45:31.003037Z  INFO explorer_core::session::navigate: nav: fetch+parse ok → peinture tab=1 ms=394
+2026-10-26T12:45:31.003469Z  INFO explorer_core::session::navigate: nav: peinture ok → sous-ressources tab=1 ms=395
+2026-10-26T12:45:31.003541Z DEBUG explorer_core::session::net_items: script émis src=https://cartes.gouv.fr/explorer-les-cartes/env/env.js?v=1792597712604 module=false
+2026-10-26T12:45:31.003578Z DEBUG explorer_core::session::net_items: script émis src=https://cartes.gouv.fr/explorer-les-cartes/assets/index-t8Cr_OTk.js module=true
+2026-10-26T12:45:31.004001Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=Headers { stream_id: StreamId(3), flags: (0x5: END_HEADERS | END_STREAM) }
+2026-10-26T12:45:31.004135Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=Headers { stream_id: StreamId(5), flags: (0x5: END_HEADERS | END_STREAM) }
+2026-10-26T12:45:31.004259Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=Headers { stream_id: StreamId(7), flags: (0x5: END_HEADERS | END_STREAM) }
+2026-10-26T12:45:31.091818Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Headers { stream_id: StreamId(3), flags: (0x4: END_HEADERS) }
+2026-10-26T12:45:31.091989Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(3) }
+2026-10-26T12:45:31.092038Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(3) }
+2026-10-26T12:45:31.112106Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(3) }
+2026-10-26T12:45:31.112219Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(3) }
+2026-10-26T12:45:31.112284Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(3) }
+2026-10-26T12:45:31.112331Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 12909 }
+2026-10-26T12:45:31.112570Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 37746 }
+2026-10-26T12:45:31.112606Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(3), size_increment: 50132 }
+2026-10-26T12:45:31.132546Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(3) }
+2026-10-26T12:45:31.132761Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Headers { stream_id: StreamId(5), flags: (0x4: END_HEADERS) }
+2026-10-26T12:45:31.132854Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Headers { stream_id: StreamId(7), flags: (0x4: END_HEADERS) }
+2026-10-26T12:45:31.143005Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(3) }
+2026-10-26T12:45:31.143113Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(5), flags: (0x1: END_STREAM) }
+2026-10-26T12:45:31.143179Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:31.143654Z DEBUG explorer_core::session::net_items: sous-ressource script tab=1 src=Some("https://cartes.gouv.fr/explorer-les-cartes/env/env.js?v=1792597712604") module=false sec_ok=true sri_ok=true
+2026-10-26T12:45:31.143750Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 27789 }
+2026-10-26T12:45:31.163239Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(3) }
+2026-10-26T12:45:31.163373Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(3) }
+2026-10-26T12:45:31.163440Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(3) }
+2026-10-26T12:45:31.163652Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 37746 }
+2026-10-26T12:45:31.163689Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(3), size_increment: 53149 }
+2026-10-26T12:45:31.194307Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(3) }
+2026-10-26T12:45:31.194469Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:31.194659Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 27789 }
+2026-10-26T12:45:31.194695Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(7), size_increment: 27210 }
+2026-10-26T12:45:31.224748Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(3) }
+2026-10-26T12:45:31.224889Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(3) }
+2026-10-26T12:45:31.224954Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(3) }
+2026-10-26T12:45:31.225179Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 37746 }
+2026-10-26T12:45:31.225215Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(3), size_increment: 50132 }
+2026-10-26T12:45:31.255425Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(3) }
+2026-10-26T12:45:31.255597Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:31.255787Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 27789 }
+2026-10-26T12:45:31.286197Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(3), flags: (0x1: END_STREAM) }
+2026-10-26T12:45:31.286335Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:31.286431Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:31.302721Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 37746 }
+2026-10-26T12:45:31.302775Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(7), size_increment: 45011 }
+2026-10-26T12:45:31.317194Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:31.317291Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:31.348337Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:31.348446Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:31.348590Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:31.348639Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 20524 }
+2026-10-26T12:45:31.348854Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 45011 }
+2026-10-26T12:45:31.348889Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(7), size_increment: 65535 }
+2026-10-26T12:45:31.443211Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:31.443351Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:31.443435Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:31.443486Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:31.443674Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 65535 }
+2026-10-26T12:45:31.443712Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(7), size_increment: 65535 }
+2026-10-26T12:45:31.474888Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:31.475026Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:31.475113Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:31.475163Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:31.475351Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 65535 }
+2026-10-26T12:45:31.475388Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(7), size_increment: 65535 }
+2026-10-26T12:45:31.506784Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:31.506935Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:31.507200Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 32768 }
+2026-10-26T12:45:31.507247Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(7), size_increment: 32768 }
+2026-10-26T12:45:31.507469Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:31.507531Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:31.507687Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 32767 }
+2026-10-26T12:45:31.507721Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(7), size_increment: 32767 }
+2026-10-26T12:45:31.538294Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:31.538445Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:31.538662Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 32768 }
+2026-10-26T12:45:31.538701Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(7), size_increment: 32768 }
+2026-10-26T12:45:31.568918Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:31.569037Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:31.569217Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 32767 }
+2026-10-26T12:45:31.569253Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(7), size_increment: 32767 }
+2026-10-26T12:45:31.599490Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:31.599571Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:31.599728Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 32768 }
+2026-10-26T12:45:31.599763Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(7), size_increment: 32768 }
+2026-10-26T12:45:31.630641Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:31.630716Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:31.630959Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 32767 }
+2026-10-26T12:45:31.630995Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(7), size_increment: 32767 }
+2026-10-26T12:45:31.660826Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:31.660930Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:31.661122Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 32768 }
+2026-10-26T12:45:31.661159Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(7), size_increment: 32768 }
+2026-10-26T12:45:31.690999Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:31.691114Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:31.691312Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 32767 }
+2026-10-26T12:45:31.691349Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(7), size_increment: 32767 }
+2026-10-26T12:45:31.722054Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:31.722193Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:31.722475Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 32768 }
+2026-10-26T12:45:31.722515Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(7), size_increment: 32768 }
+2026-10-26T12:45:31.752875Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:31.752969Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:31.753170Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 32767 }
+2026-10-26T12:45:31.753209Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(7), size_increment: 32767 }
+2026-10-26T12:45:31.783288Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:31.783392Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:31.783625Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 32768 }
+2026-10-26T12:45:31.783676Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(7), size_increment: 32768 }
+2026-10-26T12:45:31.813358Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:31.813443Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:31.813621Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 32767 }
+2026-10-26T12:45:31.813657Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(7), size_increment: 32767 }
+2026-10-26T12:45:31.844099Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:31.844207Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:31.844398Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 32768 }
+2026-10-26T12:45:31.844435Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(7), size_increment: 32768 }
+2026-10-26T12:45:31.874484Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:31.874594Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:31.874774Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 32767 }
+2026-10-26T12:45:31.874811Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(7), size_increment: 32767 }
+2026-10-26T12:45:31.905612Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:31.905742Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:31.905997Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 32768 }
+2026-10-26T12:45:31.906046Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(7), size_increment: 32768 }
+2026-10-26T12:45:31.936255Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:31.936360Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:31.936538Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 32767 }
+2026-10-26T12:45:31.936575Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(7), size_increment: 32767 }
+2026-10-26T12:45:31.966524Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:31.966632Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:31.966828Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 32768 }
+2026-10-26T12:45:31.966865Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(7), size_increment: 32768 }
+2026-10-26T12:45:31.996730Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:31.996819Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:31.997006Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 32767 }
+2026-10-26T12:45:31.997047Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(7), size_increment: 32767 }
+2026-10-26T12:45:32.027503Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:32.027586Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7) }
+2026-10-26T12:45:32.027978Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 32768 }
+2026-10-26T12:45:32.028016Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(7), size_increment: 32768 }
+2026-10-26T12:45:32.058372Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7), flags: (0x1: END_STREAM) }
+2026-10-26T12:45:32.138492Z DEBUG explorer_core::session::net_items: sous-ressource script tab=1 src=Some("https://cartes.gouv.fr/explorer-les-cartes/assets/index-t8Cr_OTk.js") module=true sec_ok=true sri_ok=true
+2026-10-26T12:45:32.463081Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=Headers { stream_id: StreamId(9), flags: (0x5: END_HEADERS | END_STREAM) }
+2026-10-26T12:45:32.501066Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Headers { stream_id: StreamId(9), flags: (0x4: END_HEADERS) }
+2026-10-26T12:45:32.501214Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(9) }
+2026-10-26T12:45:32.501297Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(9) }
+2026-10-26T12:45:32.501348Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(9), flags: (0x1: END_STREAM) }
+2026-10-26T12:45:32.503309Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=Headers { stream_id: StreamId(11), flags: (0x5: END_HEADERS | END_STREAM) }
+2026-10-26T12:45:32.537960Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Headers { stream_id: StreamId(11), flags: (0x4: END_HEADERS) }
+2026-10-26T12:45:32.538127Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(11) }
+2026-10-26T12:45:32.538196Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(11), flags: (0x1: END_STREAM) }
+2026-10-26T12:45:32.749786Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=Headers { stream_id: StreamId(13), flags: (0x5: END_HEADERS | END_STREAM) }
+2026-10-26T12:45:32.787971Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Headers { stream_id: StreamId(13), flags: (0x4: END_HEADERS) }
+2026-10-26T12:45:32.788165Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(13) }
+2026-10-26T12:45:32.788250Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(13) }
+2026-10-26T12:45:32.788300Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 20178 }
+2026-10-26T12:45:32.798036Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(13) }
+2026-10-26T12:45:32.798116Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(13) }
+2026-10-26T12:45:32.798187Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(13) }
+2026-10-26T12:45:32.798247Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(13) }
+2026-10-26T12:45:32.798414Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 31468 }
+2026-10-26T12:45:32.798462Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(13), size_increment: 31468 }
+2026-10-26T12:45:32.807524Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(13) }
+2026-10-26T12:45:32.807606Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(13) }
+2026-10-26T12:45:32.807804Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(13) }
+2026-10-26T12:45:32.807849Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(13), flags: (0x1: END_STREAM) }
+2026-10-26T12:45:32.816829Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=Headers { stream_id: StreamId(15), flags: (0x5: END_HEADERS | END_STREAM) }
+2026-10-26T12:45:32.863925Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Headers { stream_id: StreamId(15), flags: (0x4: END_HEADERS) }
+2026-10-26T12:45:32.864079Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(15) }
+2026-10-26T12:45:32.864159Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(15) }
+2026-10-26T12:45:32.864201Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(15) }
+2026-10-26T12:45:32.864270Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(15) }
+2026-10-26T12:45:32.864332Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(15) }
+2026-10-26T12:45:32.864371Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(15), flags: (0x1: END_STREAM) }
+2026-10-26T12:45:32.864417Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 9900 }
+2026-10-26T12:45:32.874558Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 43916 }
+2026-10-26T12:45:32.874646Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=Headers { stream_id: StreamId(17), flags: (0x5: END_HEADERS | END_STREAM) }
+2026-10-26T12:45:32.962176Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Headers { stream_id: StreamId(17), flags: (0x4: END_HEADERS) }
+2026-10-26T12:45:32.962331Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(17) }
+2026-10-26T12:45:32.962381Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(17) }
+2026-10-26T12:45:32.962452Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(17) }
+2026-10-26T12:45:32.962514Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(17) }
+2026-10-26T12:45:32.962553Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(17), flags: (0x1: END_STREAM) }
+2026-10-26T12:45:32.972003Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 41328 }
+2026-10-26T12:45:32.972110Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=Headers { stream_id: StreamId(19), flags: (0x5: END_HEADERS | END_STREAM) }
+2026-10-26T12:45:33.007371Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Headers { stream_id: StreamId(19), flags: (0x4: END_HEADERS) }
+2026-10-26T12:45:33.007546Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(19) }
+2026-10-26T12:45:33.007598Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(19) }
+2026-10-26T12:45:33.007642Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(19) }
+2026-10-26T12:45:33.007731Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(19) }
+2026-10-26T12:45:33.007780Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(19), flags: (0x1: END_STREAM) }
+2026-10-26T12:45:33.018551Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 44284 }
+2026-10-26T12:45:33.018670Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=Headers { stream_id: StreamId(21), flags: (0x5: END_HEADERS | END_STREAM) }
+2026-10-26T12:45:33.054134Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Headers { stream_id: StreamId(21), flags: (0x4: END_HEADERS) }
+2026-10-26T12:45:33.054318Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(21) }
+2026-10-26T12:45:33.054399Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(21) }
+2026-10-26T12:45:33.054895Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(21) }
+2026-10-26T12:45:33.054997Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(21) }
+2026-10-26T12:45:33.055060Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(21) }
+2026-10-26T12:45:33.055099Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(21), flags: (0x1: END_STREAM) }
+2026-10-26T12:45:33.065481Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 41940 }
+2026-10-26T12:45:33.065569Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=Headers { stream_id: StreamId(23), flags: (0x5: END_HEADERS | END_STREAM) }
+2026-10-26T12:45:33.099659Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Headers { stream_id: StreamId(23), flags: (0x4: END_HEADERS) }
+2026-10-26T12:45:33.099731Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(23) }
+2026-10-26T12:45:33.099823Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(23) }
+2026-10-26T12:45:33.099871Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(23) }
+2026-10-26T12:45:33.099913Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(23) }
+2026-10-26T12:45:33.100004Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(23) }
+2026-10-26T12:45:33.100046Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(23) }
+2026-10-26T12:45:33.100083Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(23), flags: (0x1: END_STREAM) }
+2026-10-26T12:45:33.110134Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 44572 }
+2026-10-26T12:45:33.110220Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=Headers { stream_id: StreamId(25), flags: (0x5: END_HEADERS | END_STREAM) }
+2026-10-26T12:45:33.145009Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Headers { stream_id: StreamId(25), flags: (0x4: END_HEADERS) }
+2026-10-26T12:45:33.145162Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(25) }
+2026-10-26T12:45:33.145215Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(25) }
+2026-10-26T12:45:33.145259Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(25) }
+2026-10-26T12:45:33.145348Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(25) }
+2026-10-26T12:45:33.145390Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(25) }
+2026-10-26T12:45:33.145433Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(25) }
+2026-10-26T12:45:33.145471Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(25), flags: (0x1: END_STREAM) }
+2026-10-26T12:45:33.155256Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 42092 }
+2026-10-26T12:45:33.155360Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=Headers { stream_id: StreamId(27), flags: (0x5: END_HEADERS | END_STREAM) }
+2026-10-26T12:45:33.196345Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Headers { stream_id: StreamId(27), flags: (0x4: END_HEADERS) }
+2026-10-26T12:45:33.196476Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(27) }
+2026-10-26T12:45:33.196522Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(27) }
+2026-10-26T12:45:33.198518Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(27) }
+2026-10-26T12:45:33.198766Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(27) }
+2026-10-26T12:45:33.199300Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(27) }
+2026-10-26T12:45:33.199370Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(27) }
+2026-10-26T12:45:33.199420Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 19474 }
+2026-10-26T12:45:33.199599Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(27), size_increment: 36152 }
+2026-10-26T12:45:33.200851Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(27) }
+2026-10-26T12:45:33.201079Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(27) }
+2026-10-26T12:45:33.201127Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(27), flags: (0x1: END_STREAM) }
+2026-10-26T12:45:33.201177Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 20774 }
+2026-10-26T12:45:33.211341Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=Headers { stream_id: StreamId(29), flags: (0x5: END_HEADERS | END_STREAM) }
+2026-10-26T12:45:33.257426Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Headers { stream_id: StreamId(29), flags: (0x4: END_HEADERS) }
+2026-10-26T12:45:33.257575Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(29) }
+2026-10-26T12:45:33.257643Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(29) }
+2026-10-26T12:45:33.257825Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 25826 }
+2026-10-26T12:45:33.258820Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(29) }
+2026-10-26T12:45:33.258906Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(29) }
+2026-10-26T12:45:33.258966Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(29) }
+2026-10-26T12:45:33.259105Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 28672 }
+2026-10-26T12:45:33.259141Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(29), size_increment: 49446 }
+2026-10-26T12:45:33.261043Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(29) }
+2026-10-26T12:45:33.261186Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(29) }
+2026-10-26T12:45:33.288413Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(29) }
+2026-10-26T12:45:33.292027Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(29), flags: (0x1: END_STREAM) }
+2026-10-26T12:45:33.292410Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 30026 }
+2026-10-26T12:45:33.292455Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=Headers { stream_id: StreamId(31), flags: (0x5: END_HEADERS | END_STREAM) }
+2026-10-26T12:45:33.327761Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Headers { stream_id: StreamId(31), flags: (0x4: END_HEADERS) }
+2026-10-26T12:45:33.327878Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(31) }
+2026-10-26T12:45:33.328003Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(31) }
+2026-10-26T12:45:33.328080Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(31) }
+2026-10-26T12:45:33.328127Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(31) }
+2026-10-26T12:45:33.328196Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(31) }
+2026-10-26T12:45:33.328243Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(31) }
+2026-10-26T12:45:33.328462Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 51530 }
+2026-10-26T12:45:33.328498Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(31), size_increment: 51530 }
+2026-10-26T12:45:33.328684Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(31) }
+2026-10-26T12:45:33.329143Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(31) }
+2026-10-26T12:45:33.359591Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(31) }
+2026-10-26T12:45:33.359727Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(31) }
+2026-10-26T12:45:33.359791Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(31), flags: (0x1: END_STREAM) }
+2026-10-26T12:45:33.359846Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 14005 }
+2026-10-26T12:45:33.378681Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 48481 }
+2026-10-26T12:45:33.378770Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=Headers { stream_id: StreamId(33), flags: (0x5: END_HEADERS | END_STREAM) }
+2026-10-26T12:45:33.458307Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Headers { stream_id: StreamId(33), flags: (0x4: END_HEADERS) }
+2026-10-26T12:45:33.458591Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(33) }
+2026-10-26T12:45:33.458645Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(33) }
+2026-10-26T12:45:33.458680Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(33) }
+2026-10-26T12:45:33.458774Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(33) }
+2026-10-26T12:45:33.458846Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(33) }
+2026-10-26T12:45:33.458914Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(33) }
+2026-10-26T12:45:33.459254Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(33) }
+2026-10-26T12:45:33.459330Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(33) }
+2026-10-26T12:45:33.459402Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(33) }
+2026-10-26T12:45:33.459469Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(33) }
+2026-10-26T12:45:33.459574Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(33) }
+2026-10-26T12:45:33.459622Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(33) }
+2026-10-26T12:45:33.459702Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(33) }
+2026-10-26T12:45:33.459750Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(33) }
+2026-10-26T12:45:33.459804Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(33) }
+2026-10-26T12:45:33.460027Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 65535 }
+2026-10-26T12:45:33.460063Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(33), size_increment: 65535 }
+2026-10-26T12:45:33.491199Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(33), flags: (0x1: END_STREAM) }
+2026-10-26T12:45:33.491644Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=Headers { stream_id: StreamId(35), flags: (0x5: END_HEADERS | END_STREAM) }
+2026-10-26T12:45:33.525568Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Headers { stream_id: StreamId(35), flags: (0x4: END_HEADERS) }
+2026-10-26T12:45:33.525846Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(35) }
+2026-10-26T12:45:33.526319Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(35) }
+2026-10-26T12:45:33.526368Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(35) }
+2026-10-26T12:45:33.526413Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(35) }
+2026-10-26T12:45:33.526457Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(35) }
+2026-10-26T12:45:33.526578Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(35) }
+2026-10-26T12:45:33.526648Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(35) }
+2026-10-26T12:45:33.526723Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(35) }
+2026-10-26T12:45:33.526770Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(35) }
+2026-10-26T12:45:33.526822Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(35) }
+2026-10-26T12:45:33.526866Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 17629 }
+2026-10-26T12:45:33.527075Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 47906 }
+2026-10-26T12:45:33.527117Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(35), size_increment: 50702 }
+2026-10-26T12:45:33.557676Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(35) }
+2026-10-26T12:45:33.588417Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(35) }
+2026-10-26T12:45:33.588615Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(35) }
+2026-10-26T12:45:33.588785Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(35), flags: (0x1: END_STREAM) }
+2026-10-26T12:45:33.588853Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 14833 }
+2026-10-26T12:45:33.611491Z DEBUG explorer_core::session::net_items: prefetch modules tab=1 async_mods=0 post_modules=1
+2026-10-26T12:45:36.415250Z DEBUG explorer_core::session::net_items: module prefetché tab=1 name=https://cartes.gouv.fr/explorer-les-cartes/assets/index-t8Cr_OTk.js sources=1
+2026-10-26T12:45:36.416038Z  INFO explorer_core::session::navigate: nav: sous-ressources ok → commit tab=1 ms=5807
+2026-10-26T12:45:36.416669Z  INFO explorer_core::session::js_glue: script: eval… tab=1 bytes=1370
+2026-10-26T12:45:36.417482Z  INFO explorer_core::session::js_glue: script: eval fin tab=1 ms=0 ok=true
+2026-10-26T12:45:36.417510Z DEBUG explorer_core::session::js_glue: module eval… tab=1 name=https://cartes.gouv.fr/explorer-les-cartes/assets/index-t8Cr_OTk.js
+2026-10-26T12:45:40.806607Z DEBUG explorer_jscore::dom_host: customElements.define name=pnx-mini-map
+2026-10-26T12:45:40.807298Z DEBUG explorer_jscore::dom_host: customElements.define name=gpf-picture-legend-widget
+2026-10-26T12:45:41.310195Z DEBUG explorer_jscore::module: import() dynamique spec="./Load-DJ3Ap9jA.js" referrer="https://cartes.gouv.fr/explorer-les-cartes/assets/index-t8Cr_OTk.js"
+2026-10-26T12:45:41.311414Z DEBUG explorer_core::session::js_glue: module eval fin tab=1 ms=4893
+2026-10-26T12:45:41.313176Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:45:41.313236Z DEBUG explorer_core::session::net: spawn dyn import tab=1 url=https://cartes.gouv.fr/explorer-les-cartes/assets/Load-DJ3Ap9jA.js seq=0
+2026-10-26T12:45:41.313300Z DEBUG explorer_core::session::net: dyn import : fetch émis tab=1 url=https://cartes.gouv.fr/explorer-les-cartes/assets/Load-DJ3Ap9jA.js
+2026-10-26T12:45:41.313441Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 48973 }
+2026-10-26T12:45:41.314047Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=Headers { stream_id: StreamId(37), flags: (0x5: END_HEADERS | END_STREAM) }
+2026-10-26T12:45:41.314123Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=Headers { stream_id: StreamId(39), flags: (0x5: END_HEADERS | END_STREAM) }
+2026-10-26T12:45:41.314183Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=Headers { stream_id: StreamId(41), flags: (0x5: END_HEADERS | END_STREAM) }
+2026-10-26T12:45:41.314242Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=Headers { stream_id: StreamId(43), flags: (0x5: END_HEADERS | END_STREAM) }
+2026-10-26T12:45:41.522026Z  INFO explorer_core::session::apply: apply: cascade ms=207
+2026-10-26T12:45:41.531110Z  INFO explorer_core::session::apply: apply: boxtree ms=216
+2026-10-26T12:45:41.534870Z  INFO explorer_core::session::apply: apply: layout ms=220
+2026-10-26T12:45:41.547172Z  INFO explorer_core::session::apply: apply: repaint ms=232
+2026-10-26T12:45:41.547569Z  INFO sync_profile: phase sync tab=1 phase="event.dispatch" us=169
+2026-10-26T12:45:41.547750Z  INFO sync_profile: phase sync tab=1 phase="event.mirror_sync" us=194
+2026-10-26T12:45:41.548041Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:45:41.548111Z  INFO sync_profile: phase sync tab=1 phase="event.after_script" us=361
+2026-10-26T12:45:41.548139Z  INFO sync_profile: phase sync tab=1 phase="event.poll_net" us=29
+2026-10-26T12:45:41.548223Z  INFO sync_profile: phase sync tab=1 phase="event.dispatch" us=66
+2026-10-26T12:45:41.548307Z  INFO sync_profile: phase sync tab=1 phase="event.mirror_sync" us=84
+2026-10-26T12:45:41.548416Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:45:41.548481Z  INFO sync_profile: phase sync tab=1 phase="event.after_script" us=174
+2026-10-26T12:45:41.548575Z  INFO sync_profile: phase sync tab=1 phase="event.poll_net" us=94
+2026-10-26T12:45:41.548729Z  INFO sync_profile: phase sync tab=1 phase="event.dispatch" us=53
+2026-10-26T12:45:41.548818Z  INFO sync_profile: phase sync tab=1 phase="event.mirror_sync" us=89
+2026-10-26T12:45:41.548929Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:45:41.548995Z  INFO sync_profile: phase sync tab=1 phase="event.after_script" us=176
+2026-10-26T12:45:41.549020Z  INFO sync_profile: phase sync tab=1 phase="event.poll_net" us=26
+2026-10-26T12:45:41.549096Z  INFO sync_profile: phase sync tab=1 phase="event.dispatch" us=60
+2026-10-26T12:45:41.549178Z  INFO sync_profile: phase sync tab=1 phase="event.mirror_sync" us=82
+2026-10-26T12:45:41.549287Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:45:41.549351Z  INFO sync_profile: phase sync tab=1 phase="event.after_script" us=172
+2026-10-26T12:45:41.549376Z  INFO sync_profile: phase sync tab=1 phase="event.poll_net" us=26
+2026-10-26T12:45:41.549679Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=GoAway { error_code: NO_ERROR, last_stream_id: StreamId(2147483647) }
+2026-10-26T12:45:41.549734Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=GoAway { error_code: NO_ERROR, last_stream_id: StreamId(1) }
+2026-10-26T12:45:41.550057Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=GoAway { error_code: NO_ERROR, last_stream_id: StreamId(2147483647) }
+2026-10-26T12:45:41.550163Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Headers { stream_id: StreamId(37), flags: (0x4: END_HEADERS) }
+2026-10-26T12:45:41.550303Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(37) }
+2026-10-26T12:45:41.550351Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(37) }
+2026-10-26T12:45:41.550388Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(37) }
+2026-10-26T12:45:41.550426Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(37) }
+2026-10-26T12:45:41.550498Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(37) }
+2026-10-26T12:45:41.550566Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(37) }
+2026-10-26T12:45:41.550639Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(37) }
+2026-10-26T12:45:41.550712Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(37) }
+2026-10-26T12:45:41.550787Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(37) }
+2026-10-26T12:45:41.550856Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(37) }
+2026-10-26T12:45:41.550926Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(37) }
+2026-10-26T12:45:41.550995Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(37) }
+2026-10-26T12:45:41.551068Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(37) }
+2026-10-26T12:45:41.551140Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(37) }
+2026-10-26T12:45:41.551213Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(37) }
+2026-10-26T12:45:41.551306Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(37) }
+2026-10-26T12:45:41.551352Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(37) }
+2026-10-26T12:45:41.551423Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Headers { stream_id: StreamId(39), flags: (0x4: END_HEADERS) }
+2026-10-26T12:45:41.551567Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Headers { stream_id: StreamId(41), flags: (0x4: END_HEADERS) }
+2026-10-26T12:45:41.551652Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Headers { stream_id: StreamId(43), flags: (0x4: END_HEADERS) }
+2026-10-26T12:45:41.551909Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 65535 }
+2026-10-26T12:45:41.551945Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(37), size_increment: 65535 }
+2026-10-26T12:45:41.552216Z  INFO sync_profile: phase sync tab=1 phase="pump.js_run_sync" us=108
+2026-10-26T12:45:41.552416Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:45:41.580783Z  INFO sync_profile: phase sync tab=1 phase="pump.js_run_sync" us=190
+2026-10-26T12:45:41.581028Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:45:41.584599Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(37) }
+2026-10-26T12:45:41.584715Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(37) }
+2026-10-26T12:45:41.584801Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(37) }
+2026-10-26T12:45:41.584853Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(37) }
+2026-10-26T12:45:41.585004Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 65535 }
+2026-10-26T12:45:41.585039Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(37), size_increment: 65535 }
+2026-10-26T12:45:41.593693Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=GoAway { error_code: NO_ERROR, last_stream_id: StreamId(43) }
+2026-10-26T12:45:41.611618Z  INFO sync_profile: phase sync tab=1 phase="pump.js_run_sync" us=152
+2026-10-26T12:45:41.611935Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:45:41.616359Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(37) }
+2026-10-26T12:45:41.616472Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(37), flags: (0x1: END_STREAM) }
+2026-10-26T12:45:41.616582Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(39) }
+2026-10-26T12:45:41.616688Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(39) }
+2026-10-26T12:45:41.616764Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(39) }
+2026-10-26T12:45:41.629750Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 65535 }
+2026-10-26T12:45:41.629826Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(39), size_increment: 48918 }
+2026-10-26T12:45:41.642808Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:45:41.642993Z  INFO sync_profile: phase sync tab=1 phase="pump.js_run_sync" us=61
+2026-10-26T12:45:41.643072Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:45:41.660814Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(39) }
+2026-10-26T12:45:41.660984Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(39) }
+2026-10-26T12:45:41.661081Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(39) }
+2026-10-26T12:45:41.661135Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(39) }
+2026-10-26T12:45:41.661291Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 65535 }
+2026-10-26T12:45:41.661402Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(39), size_increment: 65535 }
+2026-10-26T12:45:41.673935Z  INFO sync_profile: phase sync tab=1 phase="pump.js_run_sync" us=143
+2026-10-26T12:45:41.674172Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:45:41.692012Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(39) }
+2026-10-26T12:45:41.692272Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(39) }
+2026-10-26T12:45:41.692362Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(39) }
+2026-10-26T12:45:41.692414Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(39) }
+2026-10-26T12:45:41.692465Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 16384 }
+2026-10-26T12:45:41.692622Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 49151 }
+2026-10-26T12:45:41.692657Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(39), size_increment: 65535 }
+2026-10-26T12:45:41.704860Z  INFO sync_profile: phase sync tab=1 phase="pump.js_run_sync" us=195
+2026-10-26T12:45:41.705122Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:45:41.723628Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(41), flags: (0x1: END_STREAM) }
+2026-10-26T12:45:41.723793Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(43) }
+2026-10-26T12:45:41.735652Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:45:41.735844Z  INFO sync_profile: phase sync tab=1 phase="pump.js_run_sync" us=64
+2026-10-26T12:45:41.736038Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:45:41.754598Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(39) }
+2026-10-26T12:45:41.754799Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(39) }
+2026-10-26T12:45:41.754858Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(39) }
+2026-10-26T12:45:41.754918Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 16384 }
+2026-10-26T12:45:41.755150Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 49151 }
+2026-10-26T12:45:41.755189Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(39), size_increment: 49151 }
+2026-10-26T12:45:41.766195Z  INFO sync_profile: phase sync tab=1 phase="pump.js_run_sync" us=229
+2026-10-26T12:45:41.766637Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:45:41.786447Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(39) }
+2026-10-26T12:45:41.796928Z  INFO sync_profile: phase sync tab=1 phase="pump.js_run_sync" us=163
+2026-10-26T12:45:41.797252Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:45:41.817710Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(39) }
+2026-10-26T12:45:41.817852Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(39) }
+2026-10-26T12:45:41.817906Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(39) }
+2026-10-26T12:45:41.817962Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 16384 }
+2026-10-26T12:45:41.818265Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 49151 }
+2026-10-26T12:45:41.818306Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(39), size_increment: 65535 }
+2026-10-26T12:45:41.818640Z  INFO sync_profile: phase sync tab=1 phase="pump.js_run_sync" us=170
+2026-10-26T12:45:41.818862Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:45:41.844229Z  INFO sync_profile: phase sync tab=1 phase="pump.js_run_sync" us=130
+2026-10-26T12:45:41.844460Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:45:41.848958Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(43) }
+2026-10-26T12:45:41.849146Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(43), size_increment: 32539 }
+2026-10-26T12:45:41.875436Z  INFO sync_profile: phase sync tab=1 phase="pump.js_run_sync" us=154
+2026-10-26T12:45:41.875713Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:45:41.879896Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(39) }
+2026-10-26T12:45:41.880042Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(39) }
+2026-10-26T12:45:41.880165Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(39) }
+2026-10-26T12:45:41.880226Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 16384 }
+2026-10-26T12:45:41.880390Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 49151 }
+2026-10-26T12:45:41.880427Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(39), size_increment: 49151 }
+2026-10-26T12:45:41.907056Z  INFO sync_profile: phase sync tab=1 phase="pump.js_run_sync" us=159
+2026-10-26T12:45:41.907305Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:45:41.937831Z  INFO sync_profile: phase sync tab=1 phase="pump.js_run_sync" us=214
+2026-10-26T12:45:41.938270Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:45:41.969294Z  INFO sync_profile: phase sync tab=1 phase="pump.js_run_sync" us=183
+2026-10-26T12:45:41.969550Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:45:41.971214Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(39) }
+2026-10-26T12:45:41.971407Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(39) }
+2026-10-26T12:45:41.971506Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(39) }
+2026-10-26T12:45:41.971560Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(39) }
+2026-10-26T12:45:41.971735Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 65535 }
+2026-10-26T12:45:41.971772Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(39), size_increment: 65535 }
+2026-10-26T12:45:42.001020Z  INFO sync_profile: phase sync tab=1 phase="pump.js_run_sync" us=180
+2026-10-26T12:45:42.001303Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:45:42.002771Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(39) }
+2026-10-26T12:45:42.002911Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(39) }
+2026-10-26T12:45:42.002999Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(39) }
+2026-10-26T12:45:42.003051Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(39) }
+2026-10-26T12:45:42.003259Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 65535 }
+2026-10-26T12:45:42.003299Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(39), size_increment: 65535 }
+2026-10-26T12:45:42.031824Z  INFO sync_profile: phase sync tab=1 phase="pump.js_run_sync" us=175
+2026-10-26T12:45:42.032241Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:45:42.034348Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(39) }
+2026-10-26T12:45:42.034519Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(39) }
+2026-10-26T12:45:42.034789Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(39) }
+2026-10-26T12:45:42.034843Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(39) }
+2026-10-26T12:45:42.035232Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 65535 }
+2026-10-26T12:45:42.035271Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(39), size_increment: 65535 }
+2026-10-26T12:45:42.063427Z  INFO sync_profile: phase sync tab=1 phase="pump.js_run_sync" us=156
+2026-10-26T12:45:42.063659Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:45:42.066875Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(39) }
+2026-10-26T12:45:42.066981Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(39), flags: (0x1: END_STREAM) }
+2026-10-26T12:45:42.067072Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(43) }
+2026-10-26T12:45:42.067164Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(43) }
+2026-10-26T12:45:42.067227Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(43) }
+2026-10-26T12:45:42.115721Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 65535 }
+2026-10-26T12:45:42.115793Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(43), size_increment: 46368 }
+2026-10-26T12:45:42.118663Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:45:42.118946Z  INFO sync_profile: phase sync tab=1 phase="pump.js_run_sync" us=69
+2026-10-26T12:45:42.119162Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:45:42.146415Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(43) }
+2026-10-26T12:45:42.146539Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(43) }
+2026-10-26T12:45:42.146683Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 32768 }
+2026-10-26T12:45:42.146720Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(43), size_increment: 32768 }
+2026-10-26T12:45:42.146986Z  INFO sync_profile: phase sync tab=1 phase="pump.js_run_sync" us=118
+2026-10-26T12:45:42.147188Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:45:42.147299Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(43) }
+2026-10-26T12:45:42.147354Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(43) }
+2026-10-26T12:45:42.147473Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 32767 }
+2026-10-26T12:45:42.147507Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(43), size_increment: 32767 }
+2026-10-26T12:45:42.170179Z  INFO sync_profile: phase sync tab=1 phase="pump.js_run_sync" us=126
+2026-10-26T12:45:42.170474Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:45:42.177392Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(43), flags: (0x1: END_STREAM) }
+2026-10-26T12:45:42.177535Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=GoAway { error_code: NO_ERROR, last_stream_id: StreamId(0) }
+2026-10-26T12:45:42.177576Z DEBUG Connection{peer=Client}: h2::proto::connection: Connection::poll; connection error error=GoAway(b"", NO_ERROR, Library)
+2026-10-26T12:45:42.717419Z DEBUG explorer_net::h2: échec h2 — connexion abandonnée e=HTTP/2 : ready connection error received: not a result of an error
+2026-10-26T12:45:42.717988Z  INFO sync_profile: phase sync tab=1 phase="pump.js_run_sync" us=138
+2026-10-26T12:45:42.718313Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:45:42.746710Z  INFO sync_profile: phase sync tab=1 phase="pump.js_run_sync" us=184
+2026-10-26T12:45:42.746907Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:45:42.777651Z  INFO sync_profile: phase sync tab=1 phase="pump.js_run_sync" us=157
+2026-10-26T12:45:42.777900Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:45:42.802514Z DEBUG h2::client: binding client connection
+2026-10-26T12:45:42.802580Z DEBUG h2::client: client connection bound
+2026-10-26T12:45:42.802609Z DEBUG h2::codec::framed_write: send frame=Settings { flags: (0x0) }
+2026-10-26T12:45:42.802842Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=Headers { stream_id: StreamId(1), flags: (0x5: END_HEADERS | END_STREAM) }
+2026-10-26T12:45:42.803222Z  INFO sync_profile: phase sync tab=1 phase="pump.js_run_sync" us=165
+2026-10-26T12:45:42.803472Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:45:42.806820Z DEBUG h2::client: binding client connection
+2026-10-26T12:45:42.806931Z DEBUG h2::client: client connection bound
+2026-10-26T12:45:42.806967Z DEBUG h2::codec::framed_write: send frame=Settings { flags: (0x0) }
+2026-10-26T12:45:42.809785Z DEBUG h2::client: binding client connection
+2026-10-26T12:45:42.809860Z DEBUG h2::client: client connection bound
+2026-10-26T12:45:42.809890Z DEBUG h2::codec::framed_write: send frame=Settings { flags: (0x0) }
+2026-10-26T12:45:42.810143Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=Headers { stream_id: StreamId(1), flags: (0x5: END_HEADERS | END_STREAM) }
+2026-10-26T12:45:42.810308Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=Headers { stream_id: StreamId(1), flags: (0x5: END_HEADERS | END_STREAM) }
+2026-10-26T12:45:42.839918Z  INFO sync_profile: phase sync tab=1 phase="pump.js_run_sync" us=365
+2026-10-26T12:45:42.840256Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:45:42.869914Z  INFO sync_profile: phase sync tab=1 phase="pump.js_run_sync" us=142
+2026-10-26T12:45:42.870180Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:45:42.898080Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Settings { flags: (0x0), header_table_size: 4096, max_concurrent_streams: 100, initial_window_size: 1048576, enable_connect_protocol: 0 }
+2026-10-26T12:45:42.898163Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=Settings { flags: (0x1: ACK) }
+2026-10-26T12:45:42.898207Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Settings { flags: (0x1: ACK) }
+2026-10-26T12:45:42.898232Z DEBUG Connection{peer=Client}: h2::proto::settings: received settings ACK; applying Settings { flags: (0x0) }
+2026-10-26T12:45:42.898262Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=WindowUpdate { stream_id: StreamId(0), size_increment: 983041 }
+2026-10-26T12:45:42.898599Z  INFO sync_profile: phase sync tab=1 phase="pump.js_run_sync" us=148
+2026-10-26T12:45:42.898805Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:45:42.899003Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Settings { flags: (0x0), header_table_size: 4096, max_concurrent_streams: 100, initial_window_size: 1048576, enable_connect_protocol: 0 }
+2026-10-26T12:45:42.899043Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=Settings { flags: (0x1: ACK) }
+2026-10-26T12:45:42.899078Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Settings { flags: (0x1: ACK) }
+2026-10-26T12:45:42.899117Z DEBUG Connection{peer=Client}: h2::proto::settings: received settings ACK; applying Settings { flags: (0x0) }
+2026-10-26T12:45:42.899148Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=WindowUpdate { stream_id: StreamId(0), size_increment: 983041 }
+2026-10-26T12:45:42.900769Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Settings { flags: (0x0), header_table_size: 4096, max_concurrent_streams: 100, initial_window_size: 1048576, enable_connect_protocol: 0 }
+2026-10-26T12:45:42.900866Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=Settings { flags: (0x1: ACK) }
+2026-10-26T12:45:42.900927Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Settings { flags: (0x1: ACK) }
+2026-10-26T12:45:42.900966Z DEBUG Connection{peer=Client}: h2::proto::settings: received settings ACK; applying Settings { flags: (0x0) }
+2026-10-26T12:45:42.901014Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=WindowUpdate { stream_id: StreamId(0), size_increment: 983041 }
+2026-10-26T12:45:42.902965Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Headers { stream_id: StreamId(1), flags: (0x4: END_HEADERS) }
+2026-10-26T12:45:42.903068Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(1) }
+2026-10-26T12:45:42.903120Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(1) }
+2026-10-26T12:45:42.903434Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Headers { stream_id: StreamId(1), flags: (0x4: END_HEADERS) }
+2026-10-26T12:45:42.903493Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(1) }
+2026-10-26T12:45:42.903532Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(1), flags: (0x1: END_STREAM) }
+2026-10-26T12:45:42.903840Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=GoAway { error_code: NO_ERROR, last_stream_id: StreamId(0) }
+2026-10-26T12:45:42.903877Z DEBUG Connection{peer=Client}: h2::proto::connection: Connection::poll; connection error error=GoAway(b"", NO_ERROR, Library)
+2026-10-26T12:45:42.906173Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Headers { stream_id: StreamId(1), flags: (0x4: END_HEADERS) }
+2026-10-26T12:45:42.906309Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(1) }
+2026-10-26T12:45:42.912688Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(1) }
+2026-10-26T12:45:42.922403Z  INFO sync_profile: phase sync tab=1 phase="pump.js_run_sync" us=189
+2026-10-26T12:45:42.922692Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:45:42.923528Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(1) }
+2026-10-26T12:45:42.923635Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(1) }
+2026-10-26T12:45:42.923720Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(1) }
+2026-10-26T12:45:42.923763Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(1) }
+2026-10-26T12:45:42.923832Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(1) }
+2026-10-26T12:45:42.923894Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(1) }
+2026-10-26T12:45:42.923965Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 15182 }
+2026-10-26T12:45:42.924233Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 26562 }
+2026-10-26T12:45:42.924273Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(1), size_increment: 41744 }
+2026-10-26T12:45:42.926281Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(1) }
+2026-10-26T12:45:42.926429Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(1) }
+2026-10-26T12:45:42.926574Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 32495 }
+2026-10-26T12:45:42.926611Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(1), size_increment: 32495 }
+2026-10-26T12:45:42.927655Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(1) }
+2026-10-26T12:45:42.927732Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(1) }
+2026-10-26T12:45:42.939176Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(1) }
+2026-10-26T12:45:42.942201Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(1) }
+2026-10-26T12:45:42.943493Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(1) }
+2026-10-26T12:45:42.943637Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(1) }
+2026-10-26T12:45:42.943799Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 23791 }
+2026-10-26T12:45:42.943839Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(1), size_increment: 23791 }
+2026-10-26T12:45:42.944222Z  INFO sync_profile: phase sync tab=1 phase="pump.js_run_sync" us=166
+2026-10-26T12:45:42.944471Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:45:42.947022Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(1) }
+2026-10-26T12:45:42.947140Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(1) }
+2026-10-26T12:45:42.947199Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 20480 }
+2026-10-26T12:45:42.947440Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(1), size_increment: 33040 }
+2026-10-26T12:45:42.957546Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(1) }
+2026-10-26T12:45:42.957715Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(1) }
+2026-10-26T12:45:42.957798Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 12560 }
+2026-10-26T12:45:42.958081Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 32495 }
+2026-10-26T12:45:42.958130Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(1), size_increment: 32495 }
+2026-10-26T12:45:42.963589Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(1) }
+2026-10-26T12:45:42.963737Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(1) }
+2026-10-26T12:45:42.963811Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(1) }
+2026-10-26T12:45:42.963976Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 41744 }
+2026-10-26T12:45:42.964014Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(1), size_increment: 41744 }
+2026-10-26T12:45:42.978904Z  INFO sync_profile: phase sync tab=1 phase="pump.js_run_sync" us=193
+2026-10-26T12:45:42.979232Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:45:42.984336Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(1) }
+2026-10-26T12:45:42.984457Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(1) }
+2026-10-26T12:45:42.984586Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 23791 }
+2026-10-26T12:45:42.984622Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(1), size_increment: 23791 }
+2026-10-26T12:45:42.988495Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(1) }
+2026-10-26T12:45:42.988709Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(1) }
+2026-10-26T12:45:43.010345Z  INFO sync_profile: phase sync tab=1 phase="pump.js_run_sync" us=148
+2026-10-26T12:45:43.010585Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:45:43.014565Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(1) }
+2026-10-26T12:45:43.014715Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(1) }
+2026-10-26T12:45:43.014783Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(1) }
+2026-10-26T12:45:43.014936Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 41744 }
+2026-10-26T12:45:43.014974Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(1), size_increment: 41744 }
+2026-10-26T12:45:43.018823Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(1) }
+2026-10-26T12:45:43.018988Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(1) }
+2026-10-26T12:45:43.019056Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(1) }
+2026-10-26T12:45:43.019103Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 20480 }
+2026-10-26T12:45:43.019374Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 45055 }
+2026-10-26T12:45:43.019573Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(1), size_increment: 65535 }
+2026-10-26T12:45:43.042873Z  INFO sync_profile: phase sync tab=1 phase="pump.js_run_sync" us=138
+2026-10-26T12:45:43.043130Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:45:43.045032Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(1) }
+2026-10-26T12:45:43.045125Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(1) }
+2026-10-26T12:45:43.045286Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 23791 }
+2026-10-26T12:45:43.045323Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(1), size_increment: 23791 }
+[url : https://cartes.gouv.fr/explorer-les-cartes/]
+| <html>
+|   data-fr-theme="light"
+|   lang="fr"
+|   <head>
+|     "
+    "
+|     <script>
+|       src="/explorer-les-cartes/env/env.js?v=1792597712604"
+|     "
+
+    "
+|     <meta>
+|       charset="UTF-8"
+|     "
+    "
+|     <meta>
+|       content="Explorer les cartes : Découvrez des cartes thématiques et de référence dont les fonds IGN sur l’ensemble du territoire français."
+|       name="description"
+|     "
+
+    "
+|     <link>
+|       href="/explorer-les-cartes/favicon.ico"
+|       rel="icon"
+|     "
+    "
+|     <meta>
+|       content="width=device-width, initial-scale=1.0"
+|       name="viewport"
+|     "
+    "
+|     <title>
+|       "cartes.gouv.fr | Explorer les cartes"
+|     "
+    "
+|     <meta>
+|       content="Cartes.gouv.fr : notre territoire commun"
+|       property="og:title"
+|     "
+    "
+|     <meta>
+|       content="website"
+|       property="og:type"
+|     "
+    "
+|     <meta>
+|       content="https://cartes.gouv.fr/explorer-les-cartes/"
+|       property="og:url"
+|     "
+    "
+|     <meta>
+|       content=""
+|       property="og:image"
+|     "
+    "
+|     <meta>
+|       content="Explorer les cartes : Découvrez des cartes thématiques et de référence dont les fonds IGN sur l’ensemble du territoire français."
+|       property="og:description"
+|     "
+    "
+|     <script>
+|       crossorigin=""
+|       src="/explorer-les-cartes/assets/index-t8Cr_OTk.js"
+|       type="module"
+|     "
+    "
+|     <link>
+|       crossorigin=""
+|       href="/explorer-les-cartes/assets/style-0GMaana2.css"
+|       rel="stylesheet"
+|     "
+  "
+|     <link>
+|       crossorigin=""
+|       href="/explorer-les-cartes/assets/Load-DJ3Ap9jA.js"
+|       rel="modulepreload"
+|     <link>
+|       crossorigin=""
+|       href="/explorer-les-cartes/assets/StoreData-CHrNpdKn.js"
+|       rel="modulepreload"
+|     <link>
+|       crossorigin=""
+|       href="/explorer-les-cartes/assets/Patience-DlrtN-gP.js"
+|       rel="modulepreload"
+|   "
+  "
+|   <body>
+|     "
+    "
+|     <div>
+|       id="app"
+|     "
+  
+
+"

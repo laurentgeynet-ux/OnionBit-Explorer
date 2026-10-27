@@ -1,0 +1,5044 @@
+| <html>
+|   lang="en"
+|   <head>
+|     "
+  "
+|     <meta>
+|       content="text/html; charset=utf-8"
+|       http-equiv="content-type"
+|     "
+  "
+|     <link>
+|       href="/touch-icon-144.png"
+|       rel="icon"
+|       sizes="144x144"
+|       type="image/png"
+|     "
+  "
+|     <link>
+|       href="/touch-icon.png"
+|       rel="apple-touch-icon"
+|       sizes="57x57"
+|     "
+  "
+|     <link>
+|       href="/touch-icon.png"
+|       rel="apple-touch-icon"
+|       sizes="114x114"
+|     "
+  "
+|     <link>
+|       href="/touch-icon-144.png"
+|       rel="apple-touch-icon"
+|       sizes="72x72"
+|     "
+  "
+|     <link>
+|       href="/touch-icon-144.png"
+|       rel="apple-touch-icon"
+|       sizes="144x144"
+|     "
+  "
+|     <link>
+|       href="/manifest.json"
+|       rel="manifest"
+|     "
+  "
+|     <link>
+|       href="/opensearch.xml"
+|       rel="search"
+|       title="Lobsters"
+|       type="application/opensearchdescription+xml"
+|     "
+  "
+|     <meta>
+|       content="width=device-width, initial-scale=1"
+|       name="viewport"
+|     "
+  "
+|     <meta>
+|       content="always"
+|       name="referrer"
+|     "
+  "
+|     <meta>
+|       content="#AC130D"
+|       name="theme-color"
+|     "
+  "
+|     <meta>
+|       content="{"O":"Off-topic","A":"Already Posted","B":"Broken Link","S":"Spam","":"Cancel"}"
+|       name="story-flags"
+|     "
+  "
+|     <meta>
+|       content="{"O":"Off-topic","M":"Me-too","T":"Troll","U":"Unkind","S":"Spam","":"Cancel"}"
+|       name="comment-flags"
+|     "
+
+    "
+|     <meta>
+|       content="website"
+|       property="og:type"
+|     "
+    "
+|     <meta>
+|       content="Lobsters"
+|       property="og:title"
+|     "
+    "
+|     <meta>
+|       content="https://lobste.rs/touch-icon-144.png"
+|       property="og:image"
+|     "
+    "
+|     <meta>
+|       content="A computing-focused community centered around link aggregation and discussion."
+|       property="og:description"
+|     "
+  "
+|     <link>
+|       href="/favicon.ico"
+|       rel="shortcut icon"
+|     "
+  "
+|     <title>
+|       "Lobsters"
+|     "
+
+    "
+|     <link>
+|       href="/application.css"
+|       rel="stylesheet"
+|     "
+    "
+|     <link>
+|       href="/system-system.css"
+|       rel="stylesheet"
+|     "
+    "
+|     <script>
+|       src="/application.js"
+|       type="module"
+|     "
+
+  "
+|     <meta>
+|       content="authenticity_token"
+|       name="csrf-param"
+|     "
+"
+|     <meta>
+|       content="2WoPosPm65CB-MP1zVO7OKt2X6OYMT1_-qcnw-kGuBAnhw44iSC9nv7ynvwXNB3I3C3zyIs3JXqGoQap6z5uBQ"
+|       name="csrf-token"
+|     "
+    "
+|     <link>
+|       href="https://lobste.rs/rss"
+|       rel="alternate"
+|       title="RSS 2.0"
+|       type="application/rss+xml"
+|     "
+    "
+|     <link>
+|       href="https://lobste.rs/comments.rss"
+|       rel="alternate"
+|       title="Comments - RSS 2.0"
+|       type="application/rss+xml"
+|     "
+  "
+|     <meta>
+|       content="noai, noimageai"
+|       name="robots"
+|     "
+    "
+|     <script>
+|       nonce="WM41JCnmRgpfWj5kk1kRcw=="
+|       type="speculationrules"
+|       "
+      {
+        "prefetch": [
+          {
+            "where": {
+              "href_matches": "/*"
+            },
+            "eagerness": "moderate"
+          }
+        ]
+      }
+    "
+|     "
+"
+|   "
+"
+|   <body>
+|     data-username=""
+|     "
+  "
+|     <header>
+|       id="header"
+|       "
+    "
+|       <div>
+|         id="header-top"
+|         "
+      "
+|         <h1>
+|           id="logo"
+|           style="background-color: #ac130d;"
+|           "
+        "
+|           <a>
+|             href="/"
+|             title="Lobsters (Current traffic: 0%)"
+|             "
+          "
+|             <b>
+|               aria-hidden="true"
+|               class="sr-only"
+|               "Lobsters"
+|             "
+        "
+|           "
+        
+      "
+|         "
+
+      "
+|         <nav>
+|           aria-label="Menu"
+|           "
+        "
+|           <ul>
+|             "
+          "
+|             <li>
+|               <a>
+|                 href="/active"
+|                 "Active"
+|             "
+          "
+|             <li>
+|               <a>
+|                 href="/recent"
+|                 "Recent"
+|             "
+          "
+|             <li>
+|               <a>
+|                 href="/comments"
+|                 "Comments"
+|             "
+
+
+          "
+|             <li>
+|               <a>
+|                 href="/search"
+|                 "Search"
+|             "
+
+
+            "
+|             <li>
+|               class="push-right"
+|               <a>
+|                 href="/login"
+|                 "Login"
+|             "
+        "
+|           "
+      "
+|         "
+    "
+|       "
+
+
+  "
+|     "
+
+  "
+|     <main>
+|       id="inside"
+|       "
+
+
+    
+
+"
+|       <ol>
+|         class="stories list "
+|         "
+
+
+"
+|         <li>
+|           class="story 
+
+
+
+
+"
+|           data-shortid="olnqh2"
+|           id="story_olnqh2"
+|           "
+"
+|           <div>
+|             class="story_liner h-entry"
+|             "
+  "
+|             <div>
+|               class="voters"
+|               "
+    "
+|               <a>
+|                 class="upvoter"
+|                 href="/login"
+|                 "29"
+|               "
+  "
+|             "
+  "
+|             <div>
+|               class="details"
+|               "
+    "
+|               <span>
+|                 aria-level="1"
+|                 class="link h-cite u-repost-of"
+|                 role="heading"
+|                 "
+        "
+|                 <a>
+|                   class="u-url"
+|                   href="https://brennenputh.me/blog/printable-websites/"
+|                   rel="ugc noreferrer"
+|                   "Websites Should Be Printable"
+|                 "
+    "
+|               "
+      "
+|               <ul>
+|                 aria-label="Tags"
+|                 class="tags"
+|                 "
+          "
+|         <li>
+|           <a>
+|             aria-label="Tag css"
+|             class="tag tag_css"
+|             href="/t/css"
+|             title="Cascading Style Sheets"
+|             "css"
+|         "
+          "
+|         <li>
+|           <a>
+|             aria-label="Tag web"
+|             class="tag tag_web"
+|             href="/t/web"
+|             title="Web development and news"
+|             "web"
+|         "
+      
+        "
+|         <a>
+|           class="domain"
+|           href="/domains/brennenputh.me"
+|           "brennenputh.me"
+|         "
+
+
+    "
+|         <div>
+|           class="byline"
+|           "
+      "
+|           <a>
+|             aria-hidden="true"
+|             href="/~zk"
+|             tabindex="-1"
+|             <img>
+|               alt=""
+|               class="avatar"
+|               decoding="async"
+|               height="16"
+|               loading="lazy"
+|               src="/avatars/zk-16.png"
+|               srcset="/avatars/zk-16.png 1x, /avatars/zk-32.png 2x"
+|               width="16"
+|           "
+          "
+|           <span>
+|             " via "
+|           "
+        "
+|           <a>
+|             class="u-author h-card"
+|             href="/~zk"
+|             "zk"
+|           " 
+
+        "
+|           <time>
+|             data-at-unix="1793016178"
+|             datetime="2026-10-26 07:02:58"
+|             title="2026-10-26 07:02:58"
+|             "4 hours ago"
+|           "
+
+          "
+|           <span>
+|             aria-hidden="true"
+|             " | "
+|           "
+          "
+|           <details>
+|             class="caches"
+|             name="caches"
+|             "
+            "
+|             <summary>
+|               "caches"
+|             "
+            "
+|             <ul>
+|               "
+              "
+|               <li>
+|                 <a>
+|                   href="https://web.archive.org/web/3/https%3A%2F%2Fbrennenputh.me%2Fblog%2Fprintable-websites%2F"
+|                   "Archive.org"
+|               "
+              "
+|               <li>
+|                 <a>
+|                   href="https://ghostarchive.org/search?term=https%3A%2F%2Fbrennenputh.me%2Fblog%2Fprintable-websites%2F"
+|                   "Ghostarchive"
+|               "
+            "
+|             "
+          "
+|           "
+          "
+|           <span>
+|             class="comments_label"
+|             "
+            "
+|             <span>
+|               aria-hidden="true"
+|               " | "
+|             "
+            "
+|             <a>
+|               aria-level="2"
+|               href="/s/olnqh2/websites_should_be_printable"
+|               role="heading"
+|               "
+              7 comments
+            "
+|             "
+          "
+|           "
+    "
+|         "
+  
+
+"
+|         <a>
+|           class="mobile_comments "
+|           href="/s/olnqh2/websites_should_be_printable"
+|           style="display: none;"
+|           "
+  "
+|           <span>
+|             "7"
+|           "
+"
+|         "
+
+
+
+
+"
+|         <li>
+|           class="story 
+
+
+
+
+"
+|           data-shortid="ryjnyi"
+|           id="story_ryjnyi"
+|           "
+"
+|           <div>
+|             class="story_liner h-entry"
+|             "
+  "
+|             <div>
+|               class="voters"
+|               "
+    "
+|               <a>
+|                 class="upvoter"
+|                 href="/login"
+|                 "18"
+|               "
+  "
+|             "
+  "
+|             <div>
+|               class="details"
+|               "
+    "
+|               <span>
+|                 aria-level="1"
+|                 class="link h-cite u-repost-of"
+|                 role="heading"
+|                 "
+        "
+|                 <a>
+|                   class="u-url"
+|                   href="https://evancz.dev/why-is-it-so-expensive-to-send-an-email"
+|                   rel="ugc noreferrer"
+|                   "Why is it so expensive to send an email?"
+|                 "
+    "
+|               "
+      "
+|               <ul>
+|                 aria-label="Tags"
+|                 class="tags"
+|                 "
+          "
+|         <li>
+|           <a>
+|             aria-label="Tag email"
+|             class="tag tag_email"
+|             href="/t/email"
+|             title="e-mail"
+|             "email"
+|         "
+      
+        "
+|         <a>
+|           class="domain"
+|           href="/domains/evancz.dev"
+|           "evancz.dev"
+|         "
+
+
+    "
+|         <div>
+|           class="byline"
+|           "
+      "
+|           <a>
+|             aria-hidden="true"
+|             href="/~wolfadex"
+|             tabindex="-1"
+|             <img>
+|               alt=""
+|               class="avatar"
+|               decoding="async"
+|               height="16"
+|               loading="lazy"
+|               src="/avatars/wolfadex-16.png"
+|               srcset="/avatars/wolfadex-16.png 1x, /avatars/wolfadex-32.png 2x"
+|               width="16"
+|           "
+          "
+|           <span>
+|             " via "
+|           "
+        "
+|           <a>
+|             class="u-author h-card"
+|             href="/~wolfadex"
+|             "wolfadex"
+|           " 
+
+        "
+|           <time>
+|             data-at-unix="1793021141"
+|             datetime="2026-10-26 08:25:41"
+|             title="2026-10-26 08:25:41"
+|             "2 hours ago"
+|           "
+
+          "
+|           <span>
+|             aria-hidden="true"
+|             " | "
+|           "
+          "
+|           <details>
+|             class="caches"
+|             name="caches"
+|             "
+            "
+|             <summary>
+|               "caches"
+|             "
+            "
+|             <ul>
+|               "
+              "
+|               <li>
+|                 <a>
+|                   href="https://web.archive.org/web/3/https%3A%2F%2Fevancz.dev%2Fwhy-is-it-so-expensive-to-send-an-email"
+|                   "Archive.org"
+|               "
+              "
+|               <li>
+|                 <a>
+|                   href="https://ghostarchive.org/search?term=https%3A%2F%2Fevancz.dev%2Fwhy-is-it-so-expensive-to-send-an-email"
+|                   "Ghostarchive"
+|               "
+            "
+|             "
+          "
+|           "
+          "
+|           <span>
+|             class="comments_label"
+|             "
+            "
+|             <span>
+|               aria-hidden="true"
+|               " | "
+|             "
+            "
+|             <a>
+|               aria-level="2"
+|               href="/s/ryjnyi/why_is_it_so_expensive_send_email"
+|               role="heading"
+|               "
+              8 comments
+            "
+|             "
+          "
+|           "
+    "
+|         "
+  
+
+"
+|         <a>
+|           class="mobile_comments "
+|           href="/s/ryjnyi/why_is_it_so_expensive_send_email"
+|           style="display: none;"
+|           "
+  "
+|           <span>
+|             "8"
+|           "
+"
+|         "
+
+
+
+
+"
+|         <li>
+|           class="story 
+
+
+
+
+"
+|           data-shortid="tbbiqb"
+|           id="story_tbbiqb"
+|           "
+"
+|           <div>
+|             class="story_liner h-entry"
+|             "
+  "
+|             <div>
+|               class="voters"
+|               "
+    "
+|               <a>
+|                 class="upvoter"
+|                 href="/login"
+|                 "80"
+|               "
+  "
+|             "
+  "
+|             <div>
+|               class="details"
+|               "
+    "
+|               <span>
+|                 aria-level="1"
+|                 class="link h-cite u-repost-of"
+|                 role="heading"
+|                 "
+        "
+|                 <a>
+|                   class="u-url"
+|                   href="https://yossarian.net/til/post/posix-wordexp-3-is-dangerous/"
+|                   rel="ugc noreferrer"
+|                   "POSIX wordexp(3) is dangerous"
+|                 "
+    "
+|               "
+      "
+|               <ul>
+|                 aria-label="Tags"
+|                 class="tags"
+|                 "
+          "
+|         <li>
+|           <a>
+|             aria-label="Tag c"
+|             class="tag tag_c"
+|             href="/t/c"
+|             title="C programming"
+|             "c"
+|         "
+          "
+|         <li>
+|           <a>
+|             aria-label="Tag security"
+|             class="tag tag_security"
+|             href="/t/security"
+|             title="Netsec, appsec, and infosec"
+|             "security"
+|         "
+      
+        "
+|         <a>
+|           class="domain"
+|           href="/domains/yossarian.net"
+|           "yossarian.net"
+|         "
+
+
+    "
+|         <div>
+|           class="byline"
+|           "
+      "
+|           <a>
+|             aria-hidden="true"
+|             href="/~yossarian"
+|             tabindex="-1"
+|             <img>
+|               alt=""
+|               class="avatar"
+|               decoding="async"
+|               height="16"
+|               loading="lazy"
+|               src="/avatars/yossarian-16.png"
+|               srcset="/avatars/yossarian-16.png 1x, /avatars/yossarian-32.png 2x"
+|               width="16"
+|           "
+          "
+|           <span>
+|             " authored by "
+|           "
+        "
+|           <a>
+|             class="u-author h-card user_is_author"
+|             href="/~yossarian"
+|             "yossarian"
+|           " 
+
+        "
+|           <time>
+|             data-at-unix="1792940969"
+|             datetime="2026-10-25 10:09:29"
+|             title="2026-10-25 10:09:29"
+|             "25 hours ago"
+|           "
+
+          "
+|           <span>
+|             aria-hidden="true"
+|             " | "
+|           "
+          "
+|           <details>
+|             class="caches"
+|             name="caches"
+|             "
+            "
+|             <summary>
+|               "caches"
+|             "
+            "
+|             <ul>
+|               "
+              "
+|               <li>
+|                 <a>
+|                   href="https://web.archive.org/web/3/https%3A%2F%2Fyossarian.net%2Ftil%2Fpost%2Fposix-wordexp-3-is-dangerous%2F"
+|                   "Archive.org"
+|               "
+              "
+|               <li>
+|                 <a>
+|                   href="https://ghostarchive.org/search?term=https%3A%2F%2Fyossarian.net%2Ftil%2Fpost%2Fposix-wordexp-3-is-dangerous%2F"
+|                   "Ghostarchive"
+|               "
+            "
+|             "
+          "
+|           "
+          "
+|           <span>
+|             class="comments_label"
+|             "
+            "
+|             <span>
+|               aria-hidden="true"
+|               " | "
+|             "
+            "
+|             <a>
+|               aria-level="2"
+|               href="/s/tbbiqb/posix_wordexp_3_is_dangerous"
+|               role="heading"
+|               "
+              20 comments
+            "
+|             "
+          "
+|           "
+    "
+|         "
+  
+
+"
+|         <a>
+|           class="mobile_comments "
+|           href="/s/tbbiqb/posix_wordexp_3_is_dangerous"
+|           style="display: none;"
+|           "
+  "
+|           <span>
+|             "20"
+|           "
+"
+|         "
+
+
+
+
+"
+|         <li>
+|           class="story 
+
+
+
+
+"
+|           data-shortid="hzrmwz"
+|           id="story_hzrmwz"
+|           "
+"
+|           <div>
+|             class="story_liner h-entry"
+|             "
+  "
+|             <div>
+|               class="voters"
+|               "
+    "
+|               <a>
+|                 class="upvoter"
+|                 href="/login"
+|                 "44"
+|               "
+  "
+|             "
+  "
+|             <div>
+|               class="details"
+|               "
+    "
+|               <span>
+|                 aria-level="1"
+|                 class="link h-cite u-repost-of"
+|                 role="heading"
+|                 "
+        "
+|                 <a>
+|                   class="u-url"
+|                   href="https://bsandro.tech/posts/simple-netbsd-webserver/"
+|                   rel="ugc noreferrer"
+|                   "Simple NetBSD webserver"
+|                 "
+    "
+|               "
+      "
+|               <ul>
+|                 aria-label="Tags"
+|                 class="tags"
+|                 "
+          "
+|         <li>
+|           <a>
+|             aria-label="Tag netbsd"
+|             class="tag tag_netbsd"
+|             href="/t/netbsd"
+|             title="NetBSD"
+|             "netbsd"
+|         "
+      
+        "
+|         <a>
+|           class="domain"
+|           href="/domains/bsandro.tech"
+|           "bsandro.tech"
+|         "
+
+
+    "
+|         <div>
+|           class="byline"
+|           "
+      "
+|           <a>
+|             aria-hidden="true"
+|             href="/~bsandro"
+|             tabindex="-1"
+|             <img>
+|               alt=""
+|               class="avatar"
+|               decoding="async"
+|               height="16"
+|               loading="lazy"
+|               src="/avatars/bsandro-16.png"
+|               srcset="/avatars/bsandro-16.png 1x, /avatars/bsandro-32.png 2x"
+|               width="16"
+|           "
+          "
+|           <span>
+|             " authored by "
+|           "
+        "
+|           <a>
+|             class="u-author h-card user_is_author"
+|             href="/~bsandro"
+|             "bsandro"
+|           " 
+
+        "
+|           <time>
+|             data-at-unix="1792970020"
+|             datetime="2026-10-25 18:13:40"
+|             title="2026-10-25 18:13:40"
+|             "16 hours ago"
+|           "
+
+          "
+|           <span>
+|             aria-hidden="true"
+|             " | "
+|           "
+          "
+|           <details>
+|             class="caches"
+|             name="caches"
+|             "
+            "
+|             <summary>
+|               "caches"
+|             "
+            "
+|             <ul>
+|               "
+              "
+|               <li>
+|                 <a>
+|                   href="https://web.archive.org/web/3/https%3A%2F%2Fbsandro.tech%2Fposts%2Fsimple-netbsd-webserver%2F"
+|                   "Archive.org"
+|               "
+              "
+|               <li>
+|                 <a>
+|                   href="https://ghostarchive.org/search?term=https%3A%2F%2Fbsandro.tech%2Fposts%2Fsimple-netbsd-webserver%2F"
+|                   "Ghostarchive"
+|               "
+            "
+|             "
+          "
+|           "
+          "
+|           <span>
+|             class="comments_label"
+|             "
+            "
+|             <span>
+|               aria-hidden="true"
+|               " | "
+|             "
+            "
+|             <a>
+|               aria-level="2"
+|               href="/s/hzrmwz/simple_netbsd_webserver"
+|               role="heading"
+|               "
+              8 comments
+            "
+|             "
+          "
+|           "
+    "
+|         "
+  
+
+"
+|         <a>
+|           class="mobile_comments "
+|           href="/s/hzrmwz/simple_netbsd_webserver"
+|           style="display: none;"
+|           "
+  "
+|           <span>
+|             "8"
+|           "
+"
+|         "
+
+
+
+
+"
+|         <li>
+|           class="story 
+
+
+
+
+"
+|           data-shortid="xzp4m0"
+|           id="story_xzp4m0"
+|           "
+"
+|           <div>
+|             class="story_liner h-entry"
+|             "
+  "
+|             <div>
+|               class="voters"
+|               "
+    "
+|               <a>
+|                 class="upvoter"
+|                 href="/login"
+|                 "16"
+|               "
+  "
+|             "
+  "
+|             <div>
+|               class="details"
+|               "
+    "
+|               <span>
+|                 aria-level="1"
+|                 class="link h-cite u-repost-of"
+|                 role="heading"
+|                 "
+        "
+|                 <a>
+|                   class="u-url"
+|                   href="https://support.apple.com/en-us/149555"
+|                   rel="ugc noreferrer"
+|                   "About the compromised eMudhra intermediate CAs"
+|                 "
+    "
+|               "
+      "
+|               <ul>
+|                 aria-label="Tags"
+|                 class="tags"
+|                 "
+          "
+|         <li>
+|           <a>
+|             aria-label="Tag mac"
+|             class="tag tag_mac"
+|             href="/t/mac"
+|             title="Apple macOS"
+|             "mac"
+|         "
+          "
+|         <li>
+|           <a>
+|             aria-label="Tag security"
+|             class="tag tag_security"
+|             href="/t/security"
+|             title="Netsec, appsec, and infosec"
+|             "security"
+|         "
+      
+        "
+|         <a>
+|           class="domain"
+|           href="/domains/support.apple.com"
+|           "support.apple.com"
+|         "
+
+
+    "
+|         <div>
+|           class="byline"
+|           "
+      "
+|           <a>
+|             aria-hidden="true"
+|             href="/~freddyb"
+|             tabindex="-1"
+|             <img>
+|               alt=""
+|               class="avatar"
+|               decoding="async"
+|               height="16"
+|               loading="lazy"
+|               src="/avatars/freddyb-16.png"
+|               srcset="/avatars/freddyb-16.png 1x, /avatars/freddyb-32.png 2x"
+|               width="16"
+|           "
+          "
+|           <span>
+|             " via "
+|           "
+        "
+|           <a>
+|             class="u-author h-card"
+|             href="/~freddyb"
+|             "freddyb"
+|           " 
+
+        "
+|           <time>
+|             data-at-unix="1793008735"
+|             datetime="2026-10-26 04:58:55"
+|             title="2026-10-26 04:58:55"
+|             "6 hours ago"
+|           "
+
+          "
+|           <span>
+|             aria-hidden="true"
+|             " | "
+|           "
+          "
+|           <details>
+|             class="caches"
+|             name="caches"
+|             "
+            "
+|             <summary>
+|               "caches"
+|             "
+            "
+|             <ul>
+|               "
+              "
+|               <li>
+|                 <a>
+|                   href="https://web.archive.org/web/3/https%3A%2F%2Fsupport.apple.com%2Fen-us%2F149555"
+|                   "Archive.org"
+|               "
+              "
+|               <li>
+|                 <a>
+|                   href="https://ghostarchive.org/search?term=https%3A%2F%2Fsupport.apple.com%2Fen-us%2F149555"
+|                   "Ghostarchive"
+|               "
+            "
+|             "
+          "
+|           "
+          "
+|           <span>
+|             class="comments_label"
+|             "
+            "
+|             <span>
+|               aria-hidden="true"
+|               " | "
+|             "
+            "
+|             <a>
+|               aria-level="2"
+|               href="/s/xzp4m0/about_compromised_emudhra_intermediate"
+|               role="heading"
+|               "
+              17 comments
+            "
+|             "
+          "
+|           "
+    "
+|         "
+  
+
+"
+|         <a>
+|           class="mobile_comments "
+|           href="/s/xzp4m0/about_compromised_emudhra_intermediate"
+|           style="display: none;"
+|           "
+  "
+|           <span>
+|             "17"
+|           "
+"
+|         "
+
+
+
+
+"
+|         <li>
+|           class="story 
+
+
+
+
+"
+|           data-shortid="x1s5oq"
+|           id="story_x1s5oq"
+|           "
+"
+|           <div>
+|             class="story_liner h-entry"
+|             "
+  "
+|             <div>
+|               class="voters"
+|               "
+    "
+|               <a>
+|                 class="upvoter"
+|                 href="/login"
+|                 "31"
+|               "
+  "
+|             "
+  "
+|             <div>
+|               class="details"
+|               "
+    "
+|               <span>
+|                 aria-level="1"
+|                 class="link h-cite u-repost-of"
+|                 role="heading"
+|                 "
+        "
+|                 <a>
+|                   class="u-url"
+|                   href="https://fishbowl.pastiche.org/2026/10/26/ai-skills"
+|                   rel="ugc noreferrer"
+|                   "“AI Skills” are worthless in 2026"
+|                 "
+    "
+|               "
+      "
+|               <ul>
+|                 aria-label="Tags"
+|                 class="tags"
+|                 "
+          "
+|         <li>
+|           <a>
+|             aria-label="Tag ai-tooling"
+|             class="tag tag_ai-tooling"
+|             href="/t/ai-tooling"
+|             title="The design, ux, development of AI/LLM-powered tools."
+|             "ai-tooling"
+|         "
+          "
+|         <li>
+|           <a>
+|             aria-label="Tag practices"
+|             class="tag tag_practices"
+|             href="/t/practices"
+|             title="Development and team practices"
+|             "practices"
+|         "
+      
+        "
+|         <a>
+|           class="domain"
+|           href="/domains/fishbowl.pastiche.org"
+|           "fishbowl.pastiche.org"
+|         "
+
+
+    "
+|         <div>
+|           class="byline"
+|           "
+      "
+|           <a>
+|             aria-hidden="true"
+|             href="/~ubernostrum"
+|             tabindex="-1"
+|             <img>
+|               alt=""
+|               class="avatar"
+|               decoding="async"
+|               height="16"
+|               loading="lazy"
+|               src="/avatars/ubernostrum-16.png"
+|               srcset="/avatars/ubernostrum-16.png 1x, /avatars/ubernostrum-32.png 2x"
+|               width="16"
+|           "
+          "
+|           <span>
+|             " via "
+|           "
+        "
+|           <a>
+|             class="u-author h-card"
+|             href="/~ubernostrum"
+|             "ubernostrum"
+|           " 
+
+        "
+|           <time>
+|             data-at-unix="1792974222"
+|             datetime="2026-10-25 19:23:42"
+|             title="2026-10-25 19:23:42"
+|             "15 hours ago"
+|           "
+
+          "
+|           <span>
+|             aria-hidden="true"
+|             " | "
+|           "
+          "
+|           <details>
+|             class="caches"
+|             name="caches"
+|             "
+            "
+|             <summary>
+|               "caches"
+|             "
+            "
+|             <ul>
+|               "
+              "
+|               <li>
+|                 <a>
+|                   href="https://web.archive.org/web/3/https%3A%2F%2Ffishbowl.pastiche.org%2F2026%2F10%2F26%2Fai-skills"
+|                   "Archive.org"
+|               "
+              "
+|               <li>
+|                 <a>
+|                   href="https://ghostarchive.org/search?term=https%3A%2F%2Ffishbowl.pastiche.org%2F2026%2F10%2F26%2Fai-skills"
+|                   "Ghostarchive"
+|               "
+            "
+|             "
+          "
+|           "
+          "
+|           <span>
+|             class="comments_label"
+|             "
+            "
+|             <span>
+|               aria-hidden="true"
+|               " | "
+|             "
+            "
+|             <a>
+|               aria-level="2"
+|               href="/s/x1s5oq/ai_skills_are_worthless_2026"
+|               role="heading"
+|               "
+              22 comments
+            "
+|             "
+          "
+|           "
+    "
+|         "
+  
+
+"
+|         <a>
+|           class="mobile_comments "
+|           href="/s/x1s5oq/ai_skills_are_worthless_2026"
+|           style="display: none;"
+|           "
+  "
+|           <span>
+|             "22"
+|           "
+"
+|         "
+
+
+
+
+"
+|         <li>
+|           class="story 
+
+
+
+
+"
+|           data-shortid="xxdda9"
+|           id="story_xxdda9"
+|           "
+"
+|           <div>
+|             class="story_liner h-entry"
+|             "
+  "
+|             <div>
+|               class="voters"
+|               "
+    "
+|               <a>
+|                 class="upvoter"
+|                 href="/login"
+|                 "9"
+|               "
+  "
+|             "
+  "
+|             <div>
+|               class="details"
+|               "
+    "
+|               <span>
+|                 aria-level="1"
+|                 class="link h-cite u-repost-of"
+|                 role="heading"
+|                 "
+        "
+|                 <a>
+|                   class="u-url"
+|                   href="/s/xxdda9/what_are_you_doing_this_week"
+|                   rel="ugc noreferrer"
+|                   "What are you doing this week?"
+|                 "
+    "
+|               "
+      "
+|               <a>
+|                 aria-label="Description text for: What are you doing this week?"
+|                 class="description_present"
+|                 href="/s/xxdda9/what_are_you_doing_this_week"
+|                 title="What are you doing this week? Feel free to share!
+
+
+
+Keep in mind it’s OK to do nothing at all, too."
+|                 "☶"
+|               "
+      "
+|               <ul>
+|                 aria-label="Tags"
+|                 class="tags"
+|                 "
+          "
+|         <li>
+|           <a>
+|             aria-label="Tag ask"
+|             class="tag tag_ask tag_is_media"
+|             href="/t/ask"
+|             title="Ask Lobsters"
+|             "ask"
+|         "
+          "
+|         <li>
+|           <a>
+|             aria-label="Tag programming"
+|             class="tag tag_programming"
+|             href="/t/programming"
+|             title="Use when every tag or no specific tag applies"
+|             "programming"
+|         "
+      
+
+
+    "
+|         <div>
+|           class="byline"
+|           "
+      "
+|           <a>
+|             aria-hidden="true"
+|             href="/~caius"
+|             tabindex="-1"
+|             <img>
+|               alt=""
+|               class="avatar"
+|               decoding="async"
+|               height="16"
+|               loading="lazy"
+|               src="/avatars/caius-16.png"
+|               srcset="/avatars/caius-16.png 1x, /avatars/caius-32.png 2x"
+|               width="16"
+|           "
+          "
+|           <span>
+|             " authored by "
+|           "
+        "
+|           <a>
+|             class="u-author h-card user_is_author"
+|             href="/~caius"
+|             "caius"
+|           " 
+
+        "
+|           <time>
+|             data-at-unix="1793014518"
+|             datetime="2026-10-26 06:35:18"
+|             title="2026-10-26 06:35:18"
+|             "4 hours ago"
+|           "
+
+          "
+|           <span>
+|             class="comments_label"
+|             "
+            "
+|             <span>
+|               aria-hidden="true"
+|               " | "
+|             "
+            "
+|             <a>
+|               aria-level="2"
+|               href="/s/xxdda9/what_are_you_doing_this_week"
+|               role="heading"
+|               "
+              12 comments
+            "
+|             "
+          "
+|           "
+    "
+|         "
+  
+
+"
+|         <a>
+|           class="mobile_comments "
+|           href="/s/xxdda9/what_are_you_doing_this_week"
+|           style="display: none;"
+|           "
+  "
+|           <span>
+|             "12"
+|           "
+"
+|         "
+
+
+
+
+"
+|         <li>
+|           class="story 
+
+
+
+
+"
+|           data-shortid="zfoiw1"
+|           id="story_zfoiw1"
+|           "
+"
+|           <div>
+|             class="story_liner h-entry"
+|             "
+  "
+|             <div>
+|               class="voters"
+|               "
+    "
+|               <a>
+|                 class="upvoter"
+|                 href="/login"
+|                 "120"
+|               "
+  "
+|             "
+  "
+|             <div>
+|               class="details"
+|               "
+    "
+|               <span>
+|                 aria-level="1"
+|                 class="link h-cite u-repost-of"
+|                 role="heading"
+|                 "
+        "
+|                 <a>
+|                   class="u-url"
+|                   href="https://slurpburgers.com/slurpbuilds/the-slurptop/"
+|                   rel="ugc noreferrer"
+|                   "The Slurptop: A home-built luggable that runs on power tool batteries"
+|                 "
+    "
+|               "
+      "
+|               <ul>
+|                 aria-label="Tags"
+|                 class="tags"
+|                 "
+          "
+|         <li>
+|           <a>
+|             aria-label="Tag art"
+|             class="tag tag_art"
+|             href="/t/art"
+|             title="Art"
+|             "art"
+|         "
+          "
+|         <li>
+|           <a>
+|             aria-label="Tag hardware"
+|             class="tag tag_hardware"
+|             href="/t/hardware"
+|             title="Hardware"
+|             "hardware"
+|         "
+      
+        "
+|         <a>
+|           class="domain"
+|           href="/domains/slurpburgers.com"
+|           "slurpburgers.com"
+|         "
+
+
+    "
+|         <div>
+|           class="byline"
+|           "
+      "
+|           <a>
+|             aria-hidden="true"
+|             href="/~hoistbypetard"
+|             tabindex="-1"
+|             <img>
+|               alt=""
+|               class="avatar"
+|               decoding="async"
+|               height="16"
+|               loading="lazy"
+|               src="/avatars/hoistbypetard-16.png"
+|               srcset="/avatars/hoistbypetard-16.png 1x, /avatars/hoistbypetard-32.png 2x"
+|               width="16"
+|           "
+          "
+|           <span>
+|             " via "
+|           "
+        "
+|           <a>
+|             class="u-author h-card"
+|             href="/~hoistbypetard"
+|             "hoistbypetard"
+|           " 
+
+        "
+|           <time>
+|             data-at-unix="1792935791"
+|             datetime="2026-10-25 08:43:11"
+|             title="2026-10-25 08:43:11"
+|             "26 hours ago"
+|           "
+
+          "
+|           <span>
+|             aria-hidden="true"
+|             " | "
+|           "
+          "
+|           <details>
+|             class="caches"
+|             name="caches"
+|             "
+            "
+|             <summary>
+|               "caches"
+|             "
+            "
+|             <ul>
+|               "
+              "
+|               <li>
+|                 <a>
+|                   href="https://web.archive.org/web/3/https%3A%2F%2Fslurpburgers.com%2Fslurpbuilds%2Fthe-slurptop%2F"
+|                   "Archive.org"
+|               "
+              "
+|               <li>
+|                 <a>
+|                   href="https://ghostarchive.org/search?term=https%3A%2F%2Fslurpburgers.com%2Fslurpbuilds%2Fthe-slurptop%2F"
+|                   "Ghostarchive"
+|               "
+            "
+|             "
+          "
+|           "
+          "
+|           <span>
+|             class="comments_label"
+|             "
+            "
+|             <span>
+|               aria-hidden="true"
+|               " | "
+|             "
+            "
+|             <a>
+|               aria-level="2"
+|               href="/s/zfoiw1/slurptop_home_built_luggable_runs_on"
+|               role="heading"
+|               "
+              33 comments
+            "
+|             "
+          "
+|           "
+    "
+|         "
+  
+
+"
+|         <a>
+|           class="mobile_comments "
+|           href="/s/zfoiw1/slurptop_home_built_luggable_runs_on"
+|           style="display: none;"
+|           "
+  "
+|           <span>
+|             "33"
+|           "
+"
+|         "
+
+
+
+
+"
+|         <li>
+|           class="story 
+
+
+
+
+"
+|           data-shortid="cxwpil"
+|           id="story_cxwpil"
+|           "
+"
+|           <div>
+|             class="story_liner h-entry"
+|             "
+  "
+|             <div>
+|               class="voters"
+|               "
+    "
+|               <a>
+|                 class="upvoter"
+|                 href="/login"
+|                 "69"
+|               "
+  "
+|             "
+  "
+|             <div>
+|               class="details"
+|               "
+    "
+|               <span>
+|                 aria-level="1"
+|                 class="link h-cite u-repost-of"
+|                 role="heading"
+|                 "
+        "
+|                 <a>
+|                   class="u-url"
+|                   href="https://vim-classic.org/"
+|                   rel="ugc noreferrer"
+|                   "Vim Classic"
+|                 "
+    "
+|               "
+      "
+|               <ul>
+|                 aria-label="Tags"
+|                 class="tags"
+|                 "
+          "
+|         <li>
+|           <a>
+|             aria-label="Tag editors"
+|             class="tag tag_editors"
+|             href="/t/editors"
+|             title="Code editors and IDEs without a specific tag"
+|             "editors"
+|         "
+          "
+|         <li>
+|           <a>
+|             aria-label="Tag vim"
+|             class="tag tag_vim"
+|             href="/t/vim"
+|             title="Vim editor"
+|             "vim"
+|         "
+      
+        "
+|         <a>
+|           class="domain"
+|           href="/domains/vim-classic.org"
+|           "vim-classic.org"
+|         "
+
+
+    "
+|         <div>
+|           class="byline"
+|           "
+      "
+|           <a>
+|             aria-hidden="true"
+|             href="/~datboi"
+|             tabindex="-1"
+|             <img>
+|               alt=""
+|               class="avatar"
+|               decoding="async"
+|               height="16"
+|               loading="lazy"
+|               src="/avatars/datboi-16.png"
+|               srcset="/avatars/datboi-16.png 1x, /avatars/datboi-32.png 2x"
+|               width="16"
+|           "
+          "
+|           <span>
+|             " via "
+|           "
+        "
+|           <a>
+|             class="u-author h-card"
+|             href="/~datboi"
+|             "datboi"
+|           " 
+
+        "
+|           <time>
+|             data-at-unix="1792940745"
+|             datetime="2026-10-25 10:05:45"
+|             title="2026-10-25 10:05:45"
+|             "25 hours ago"
+|           "
+
+          "
+|           <span>
+|             aria-hidden="true"
+|             " | "
+|           "
+          "
+|           <details>
+|             class="caches"
+|             name="caches"
+|             "
+            "
+|             <summary>
+|               "caches"
+|             "
+            "
+|             <ul>
+|               "
+              "
+|               <li>
+|                 <a>
+|                   href="https://web.archive.org/web/3/https%3A%2F%2Fvim-classic.org%2F"
+|                   "Archive.org"
+|               "
+              "
+|               <li>
+|                 <a>
+|                   href="https://ghostarchive.org/search?term=https%3A%2F%2Fvim-classic.org%2F"
+|                   "Ghostarchive"
+|               "
+            "
+|             "
+          "
+|           "
+          "
+|           <span>
+|             class="comments_label"
+|             "
+            "
+|             <span>
+|               aria-hidden="true"
+|               " | "
+|             "
+            "
+|             <a>
+|               aria-level="2"
+|               href="/s/cxwpil/vim_classic"
+|               role="heading"
+|               "
+              43 comments
+            "
+|             "
+          "
+|           "
+    "
+|         "
+  
+
+"
+|         <a>
+|           class="mobile_comments "
+|           href="/s/cxwpil/vim_classic"
+|           style="display: none;"
+|           "
+  "
+|           <span>
+|             "43"
+|           "
+"
+|         "
+
+
+
+
+"
+|         <li>
+|           class="story 
+
+
+
+
+"
+|           data-shortid="mu3xcd"
+|           id="story_mu3xcd"
+|           "
+"
+|           <div>
+|             class="story_liner h-entry"
+|             "
+  "
+|             <div>
+|               class="voters"
+|               "
+    "
+|               <a>
+|                 class="upvoter"
+|                 href="/login"
+|                 "25"
+|               "
+  "
+|             "
+  "
+|             <div>
+|               class="details"
+|               "
+    "
+|               <span>
+|                 aria-level="1"
+|                 class="link h-cite u-repost-of"
+|                 role="heading"
+|                 "
+        "
+|                 <a>
+|                   class="u-url"
+|                   href="https://www.unix.dog/~yosh/blog/2026-10-25_pratt-parsing.html"
+|                   rel="ugc noreferrer"
+|                   "writing about pratt parsing so I remember it"
+|                 "
+    "
+|               "
+      "
+|               <ul>
+|                 aria-label="Tags"
+|                 class="tags"
+|                 "
+          "
+|         <li>
+|           <a>
+|             aria-label="Tag c"
+|             class="tag tag_c"
+|             href="/t/c"
+|             title="C programming"
+|             "c"
+|         "
+          "
+|         <li>
+|           <a>
+|             aria-label="Tag plt"
+|             class="tag tag_plt"
+|             href="/t/plt"
+|             title="Programming language theory, types, design"
+|             "plt"
+|         "
+      
+        "
+|         <a>
+|           class="domain"
+|           href="/domains/unix.dog"
+|           "unix.dog"
+|         "
+
+
+    "
+|         <div>
+|           class="byline"
+|           "
+      "
+|           <a>
+|             aria-hidden="true"
+|             href="/~FedericoSchonborn"
+|             tabindex="-1"
+|             <img>
+|               alt=""
+|               class="avatar"
+|               decoding="async"
+|               height="16"
+|               loading="lazy"
+|               src="/avatars/FedericoSchonborn-16.png"
+|               srcset="/avatars/FedericoSchonborn-16.png 1x, /avatars/FedericoSchonborn-32.png 2x"
+|               width="16"
+|           "
+          "
+|           <span>
+|             " via "
+|           "
+        "
+|           <a>
+|             class="u-author h-card"
+|             href="/~FedericoSchonborn"
+|             "FedericoSchonborn"
+|           " 
+
+        "
+|           <time>
+|             data-at-unix="1792983996"
+|             datetime="2026-10-25 22:06:36"
+|             title="2026-10-25 22:06:36"
+|             "13 hours ago"
+|           "
+
+          "
+|           <span>
+|             aria-hidden="true"
+|             " | "
+|           "
+          "
+|           <details>
+|             class="caches"
+|             name="caches"
+|             "
+            "
+|             <summary>
+|               "caches"
+|             "
+            "
+|             <ul>
+|               "
+              "
+|               <li>
+|                 <a>
+|                   href="https://web.archive.org/web/3/https%3A%2F%2Fwww.unix.dog%2F~yosh%2Fblog%2F2026-10-25_pratt-parsing.html"
+|                   "Archive.org"
+|               "
+              "
+|               <li>
+|                 <a>
+|                   href="https://ghostarchive.org/search?term=https%3A%2F%2Fwww.unix.dog%2F~yosh%2Fblog%2F2026-10-25_pratt-parsing.html"
+|                   "Ghostarchive"
+|               "
+            "
+|             "
+          "
+|           "
+          "
+|           <span>
+|             class="comments_label"
+|             "
+            "
+|             <span>
+|               aria-hidden="true"
+|               " | "
+|             "
+            "
+|             <a>
+|               aria-level="2"
+|               href="/s/mu3xcd/writing_about_pratt_parsing_so_i_remember"
+|               role="heading"
+|               "
+              7 comments
+            "
+|             "
+          "
+|           "
+    "
+|         "
+  
+
+"
+|         <a>
+|           class="mobile_comments "
+|           href="/s/mu3xcd/writing_about_pratt_parsing_so_i_remember"
+|           style="display: none;"
+|           "
+  "
+|           <span>
+|             "7"
+|           "
+"
+|         "
+
+
+
+
+"
+|         <li>
+|           class="story 
+
+
+
+
+"
+|           data-shortid="p9obkt"
+|           id="story_p9obkt"
+|           "
+"
+|           <div>
+|             class="story_liner h-entry"
+|             "
+  "
+|             <div>
+|               class="voters"
+|               "
+    "
+|               <a>
+|                 class="upvoter"
+|                 href="/login"
+|                 "14"
+|               "
+  "
+|             "
+  "
+|             <div>
+|               class="details"
+|               "
+    "
+|               <span>
+|                 aria-level="1"
+|                 class="link h-cite u-repost-of"
+|                 role="heading"
+|                 "
+        "
+|                 <a>
+|                   class="u-url"
+|                   href="https://gram-editor.com/posts/release-3.4.0/"
+|                   rel="ugc noreferrer"
+|                   "Gram 3.4.0 released"
+|                 "
+    "
+|               "
+      "
+|               <ul>
+|                 aria-label="Tags"
+|                 class="tags"
+|                 "
+          "
+|         <li>
+|           <a>
+|             aria-label="Tag editors"
+|             class="tag tag_editors"
+|             href="/t/editors"
+|             title="Code editors and IDEs without a specific tag"
+|             "editors"
+|         "
+          "
+|         <li>
+|           <a>
+|             aria-label="Tag release"
+|             class="tag tag_release"
+|             href="/t/release"
+|             title="Software releases and announcements"
+|             "release"
+|         "
+      
+        "
+|         <a>
+|           class="domain"
+|           href="/domains/gram-editor.com"
+|           "gram-editor.com"
+|         "
+
+
+    "
+|         <div>
+|           class="byline"
+|           "
+      "
+|           <a>
+|             aria-hidden="true"
+|             href="/~FedericoSchonborn"
+|             tabindex="-1"
+|             <img>
+|               alt=""
+|               class="avatar"
+|               decoding="async"
+|               height="16"
+|               loading="lazy"
+|               src="/avatars/FedericoSchonborn-16.png"
+|               srcset="/avatars/FedericoSchonborn-16.png 1x, /avatars/FedericoSchonborn-32.png 2x"
+|               width="16"
+|           "
+          "
+|           <span>
+|             " via "
+|           "
+        "
+|           <a>
+|             class="u-author h-card"
+|             href="/~FedericoSchonborn"
+|             "FedericoSchonborn"
+|           " 
+
+        "
+|           <time>
+|             data-at-unix="1793015245"
+|             datetime="2026-10-26 06:47:25"
+|             title="2026-10-26 06:47:25"
+|             "4 hours ago"
+|           "
+
+          "
+|           <span>
+|             aria-hidden="true"
+|             " | "
+|           "
+          "
+|           <details>
+|             class="caches"
+|             name="caches"
+|             "
+            "
+|             <summary>
+|               "caches"
+|             "
+            "
+|             <ul>
+|               "
+              "
+|               <li>
+|                 <a>
+|                   href="https://web.archive.org/web/3/https%3A%2F%2Fgram-editor.com%2Fposts%2Frelease-3.4.0%2F"
+|                   "Archive.org"
+|               "
+              "
+|               <li>
+|                 <a>
+|                   href="https://ghostarchive.org/search?term=https%3A%2F%2Fgram-editor.com%2Fposts%2Frelease-3.4.0%2F"
+|                   "Ghostarchive"
+|               "
+            "
+|             "
+          "
+|           "
+          "
+|           <span>
+|             class="comments_label"
+|             "
+            "
+|             <span>
+|               aria-hidden="true"
+|               " | "
+|             "
+            "
+|             <a>
+|               aria-level="2"
+|               href="/s/p9obkt/gram_3_4_0_released"
+|               role="heading"
+|               "
+              no comments
+            "
+|             "
+          "
+|           "
+    "
+|         "
+  
+
+"
+|         <a>
+|           class="mobile_comments zero"
+|           href="/s/p9obkt/gram_3_4_0_released"
+|           style="display: none;"
+|           "
+  "
+|           <span>
+|             "0"
+|           "
+"
+|         "
+
+
+
+
+"
+|         <li>
+|           class="story 
+
+
+
+
+"
+|           data-shortid="kiivg2"
+|           id="story_kiivg2"
+|           "
+"
+|           <div>
+|             class="story_liner h-entry"
+|             "
+  "
+|             <div>
+|               class="voters"
+|               "
+    "
+|               <a>
+|                 class="upvoter"
+|                 href="/login"
+|                 "61"
+|               "
+  "
+|             "
+  "
+|             <div>
+|               class="details"
+|               "
+    "
+|               <span>
+|                 aria-level="1"
+|                 class="link h-cite u-repost-of"
+|                 role="heading"
+|                 "
+        "
+|                 <a>
+|                   class="u-url"
+|                   href="https://ziglang.org/devlog/2026/#2026-10-24"
+|                   rel="ugc noreferrer"
+|                   "Partial Operator Precedence"
+|                 "
+    "
+|               "
+      "
+|               <ul>
+|                 aria-label="Tags"
+|                 class="tags"
+|                 "
+          "
+|         <li>
+|           <a>
+|             aria-label="Tag zig"
+|             class="tag tag_zig"
+|             href="/t/zig"
+|             title="Zig programming"
+|             "zig"
+|         "
+      
+        "
+|         <a>
+|           class="domain"
+|           href="/domains/ziglang.org"
+|           "ziglang.org"
+|         "
+
+
+    "
+|         <div>
+|           class="byline"
+|           "
+      "
+|           <a>
+|             aria-hidden="true"
+|             href="/~liberty"
+|             tabindex="-1"
+|             <img>
+|               alt=""
+|               class="avatar"
+|               decoding="async"
+|               height="16"
+|               loading="lazy"
+|               src="/avatars/liberty-16.png"
+|               srcset="/avatars/liberty-16.png 1x, /avatars/liberty-32.png 2x"
+|               width="16"
+|           "
+          "
+|           <span>
+|             " via "
+|           "
+        "
+|           <a>
+|             class="u-author h-card"
+|             href="/~liberty"
+|             "liberty"
+|           " 
+
+        "
+|           <time>
+|             data-at-unix="1792937901"
+|             datetime="2026-10-25 09:18:21"
+|             title="2026-10-25 09:18:21"
+|             "25 hours ago"
+|           "
+
+          "
+|           <span>
+|             aria-hidden="true"
+|             " | "
+|           "
+          "
+|           <details>
+|             class="caches"
+|             name="caches"
+|             "
+            "
+|             <summary>
+|               "caches"
+|             "
+            "
+|             <ul>
+|               "
+              "
+|               <li>
+|                 <a>
+|                   href="https://web.archive.org/web/3/https%3A%2F%2Fziglang.org%2Fdevlog%2F2026%2F%232026-10-24"
+|                   "Archive.org"
+|               "
+              "
+|               <li>
+|                 <a>
+|                   href="https://ghostarchive.org/search?term=https%3A%2F%2Fziglang.org%2Fdevlog%2F2026%2F%232026-10-24"
+|                   "Ghostarchive"
+|               "
+            "
+|             "
+          "
+|           "
+          "
+|           <span>
+|             class="comments_label"
+|             "
+            "
+|             <span>
+|               aria-hidden="true"
+|               " | "
+|             "
+            "
+|             <a>
+|               aria-level="2"
+|               href="/s/kiivg2/partial_operator_precedence"
+|               role="heading"
+|               "
+              16 comments
+            "
+|             "
+          "
+|           "
+    "
+|         "
+  
+
+"
+|         <a>
+|           class="mobile_comments "
+|           href="/s/kiivg2/partial_operator_precedence"
+|           style="display: none;"
+|           "
+  "
+|           <span>
+|             "16"
+|           "
+"
+|         "
+
+
+
+
+"
+|         <li>
+|           class="story 
+
+
+
+
+"
+|           data-shortid="5u7gjd"
+|           id="story_5u7gjd"
+|           "
+"
+|           <div>
+|             class="story_liner h-entry"
+|             "
+  "
+|             <div>
+|               class="voters"
+|               "
+    "
+|               <a>
+|                 class="upvoter"
+|                 href="/login"
+|                 "5"
+|               "
+  "
+|             "
+  "
+|             <div>
+|               class="details"
+|               "
+    "
+|               <span>
+|                 aria-level="1"
+|                 class="link h-cite u-repost-of"
+|                 role="heading"
+|                 "
+        "
+|                 <a>
+|                   class="u-url"
+|                   href="https://arstechnica.com/gadgets/2026/10/from-impulse-purchase-to-pocket-studio-the-m-vave-fm-1/"
+|                   rel="ugc noreferrer"
+|                   "From impulse purchase to pocket studio: The M-Vave FM-1"
+|                 "
+    "
+|               "
+      "
+|               <ul>
+|                 aria-label="Tags"
+|                 class="tags"
+|                 "
+          "
+|         <li>
+|           <a>
+|             aria-label="Tag hardware"
+|             class="tag tag_hardware"
+|             href="/t/hardware"
+|             title="Hardware"
+|             "hardware"
+|         "
+      
+        "
+|         <a>
+|           class="domain"
+|           href="/domains/arstechnica.com"
+|           "arstechnica.com"
+|         "
+
+
+    "
+|         <div>
+|           class="byline"
+|           "
+      "
+|           <a>
+|             aria-hidden="true"
+|             href="/~gnafuthegreat"
+|             tabindex="-1"
+|             <img>
+|               alt=""
+|               class="avatar"
+|               decoding="async"
+|               height="16"
+|               loading="lazy"
+|               src="/avatars/gnafuthegreat-16.png"
+|               srcset="/avatars/gnafuthegreat-16.png 1x, /avatars/gnafuthegreat-32.png 2x"
+|               width="16"
+|           "
+          "
+|           <span>
+|             " via "
+|           "
+        "
+|           <a>
+|             class="u-author h-card"
+|             href="/~gnafuthegreat"
+|             "gnafuthegreat"
+|           " 
+
+        "
+|           <time>
+|             data-at-unix="1793019344"
+|             datetime="2026-10-26 07:55:44"
+|             title="2026-10-26 07:55:44"
+|             "3 hours ago"
+|           "
+
+          "
+|           <span>
+|             aria-hidden="true"
+|             " | "
+|           "
+          "
+|           <details>
+|             class="caches"
+|             name="caches"
+|             "
+            "
+|             <summary>
+|               "caches"
+|             "
+            "
+|             <ul>
+|               "
+              "
+|               <li>
+|                 <a>
+|                   href="https://web.archive.org/web/3/https%3A%2F%2Farstechnica.com%2Fgadgets%2F2026%2F10%2Ffrom-impulse-purchase-to-pocket-studio-the-m-vave-fm-1%2F"
+|                   "Archive.org"
+|               "
+              "
+|               <li>
+|                 <a>
+|                   href="https://ghostarchive.org/search?term=https%3A%2F%2Farstechnica.com%2Fgadgets%2F2026%2F10%2Ffrom-impulse-purchase-to-pocket-studio-the-m-vave-fm-1%2F"
+|                   "Ghostarchive"
+|               "
+            "
+|             "
+          "
+|           "
+          "
+|           <span>
+|             class="comments_label"
+|             "
+            "
+|             <span>
+|               aria-hidden="true"
+|               " | "
+|             "
+            "
+|             <a>
+|               aria-level="2"
+|               href="/s/5u7gjd/from_impulse_purchase_pocket_studio_m"
+|               role="heading"
+|               "
+              3 comments
+            "
+|             "
+          "
+|           "
+    "
+|         "
+  
+
+"
+|         <a>
+|           class="mobile_comments "
+|           href="/s/5u7gjd/from_impulse_purchase_pocket_studio_m"
+|           style="display: none;"
+|           "
+  "
+|           <span>
+|             "3"
+|           "
+"
+|         "
+
+
+
+
+"
+|         <li>
+|           class="story 
+
+
+
+
+"
+|           data-shortid="cf8mdy"
+|           id="story_cf8mdy"
+|           "
+"
+|           <div>
+|             class="story_liner h-entry"
+|             "
+  "
+|             <div>
+|               class="voters"
+|               "
+    "
+|               <a>
+|                 class="upvoter"
+|                 href="/login"
+|                 "14"
+|               "
+  "
+|             "
+  "
+|             <div>
+|               class="details"
+|               "
+    "
+|               <span>
+|                 aria-level="1"
+|                 class="link h-cite u-repost-of"
+|                 role="heading"
+|                 "
+        "
+|                 <a>
+|                   class="u-url"
+|                   href="https://atgreen.github.io/repl-yell/posts/openldk-java-in-common-lisp/"
+|                   rel="ugc noreferrer"
+|                   "OpenLDK: Bringing the Java World into Common Lisp"
+|                 "
+    "
+|               "
+      "
+|               <ul>
+|                 aria-label="Tags"
+|                 class="tags"
+|                 "
+          "
+|         <li>
+|           <a>
+|             aria-label="Tag java"
+|             class="tag tag_java"
+|             href="/t/java"
+|             title="Java programming"
+|             "java"
+|         "
+          "
+|         <li>
+|           <a>
+|             aria-label="Tag lisp"
+|             class="tag tag_lisp"
+|             href="/t/lisp"
+|             title="Lisp and Scheme programming"
+|             "lisp"
+|         "
+      
+        "
+|         <a>
+|           class="domain"
+|           href="/domains/atgreen.github.io"
+|           "atgreen.github.io"
+|         "
+
+
+    "
+|         <div>
+|           class="byline"
+|           "
+      "
+|           <a>
+|             aria-hidden="true"
+|             href="/~veqq"
+|             tabindex="-1"
+|             <img>
+|               alt=""
+|               class="avatar"
+|               decoding="async"
+|               height="16"
+|               loading="lazy"
+|               src="/avatars/veqq-16.png"
+|               srcset="/avatars/veqq-16.png 1x, /avatars/veqq-32.png 2x"
+|               width="16"
+|           "
+          "
+|           <span>
+|             " via "
+|           "
+        "
+|           <a>
+|             class="u-author h-card"
+|             href="/~veqq"
+|             "veqq"
+|           " 
+
+        "
+|           <time>
+|             data-at-unix="1792995319"
+|             datetime="2026-10-26 01:15:19"
+|             title="2026-10-26 01:15:19"
+|             "9 hours ago"
+|           "
+
+          "
+|           <span>
+|             aria-hidden="true"
+|             " | "
+|           "
+          "
+|           <details>
+|             class="caches"
+|             name="caches"
+|             "
+            "
+|             <summary>
+|               "caches"
+|             "
+            "
+|             <ul>
+|               "
+              "
+|               <li>
+|                 <a>
+|                   href="https://web.archive.org/web/3/https%3A%2F%2Fatgreen.github.io%2Frepl-yell%2Fposts%2Fopenldk-java-in-common-lisp%2F"
+|                   "Archive.org"
+|               "
+              "
+|               <li>
+|                 <a>
+|                   href="https://ghostarchive.org/search?term=https%3A%2F%2Fatgreen.github.io%2Frepl-yell%2Fposts%2Fopenldk-java-in-common-lisp%2F"
+|                   "Ghostarchive"
+|               "
+            "
+|             "
+          "
+|           "
+          "
+|           <span>
+|             class="comments_label"
+|             "
+            "
+|             <span>
+|               aria-hidden="true"
+|               " | "
+|             "
+            "
+|             <a>
+|               aria-level="2"
+|               href="/s/cf8mdy/openldk_bringing_java_world_into_common"
+|               role="heading"
+|               "
+              no comments
+            "
+|             "
+          "
+|           "
+    "
+|         "
+  
+
+"
+|         <a>
+|           class="mobile_comments zero"
+|           href="/s/cf8mdy/openldk_bringing_java_world_into_common"
+|           style="display: none;"
+|           "
+  "
+|           <span>
+|             "0"
+|           "
+"
+|         "
+
+
+
+
+"
+|         <li>
+|           class="story 
+
+
+
+
+"
+|           data-shortid="xmnhbt"
+|           id="story_xmnhbt"
+|           "
+"
+|           <div>
+|             class="story_liner h-entry"
+|             "
+  "
+|             <div>
+|               class="voters"
+|               "
+    "
+|               <a>
+|                 class="upvoter"
+|                 href="/login"
+|                 "6"
+|               "
+  "
+|             "
+  "
+|             <div>
+|               class="details"
+|               "
+    "
+|               <span>
+|                 aria-level="1"
+|                 class="link h-cite u-repost-of"
+|                 role="heading"
+|                 "
+        "
+|                 <a>
+|                   class="u-url"
+|                   href="https://blog.veitheller.de/Simple_Sudoku_Solvers_SIII%2C_EII%3A_Assembly.html"
+|                   rel="ugc noreferrer"
+|                   "Simple Sudoku Solver in Assembly"
+|                 "
+    "
+|               "
+      "
+|               <ul>
+|                 aria-label="Tags"
+|                 class="tags"
+|                 "
+          "
+|         <li>
+|           <a>
+|             aria-label="Tag assembly"
+|             class="tag tag_assembly"
+|             href="/t/assembly"
+|             title="Assembly programming"
+|             "assembly"
+|         "
+      
+        "
+|         <a>
+|           class="domain"
+|           href="/domains/blog.veitheller.de"
+|           "blog.veitheller.de"
+|         "
+
+
+    "
+|         <div>
+|           class="byline"
+|           "
+      "
+|           <a>
+|             aria-hidden="true"
+|             href="/~abhin4v"
+|             tabindex="-1"
+|             <img>
+|               alt=""
+|               class="avatar"
+|               decoding="async"
+|               height="16"
+|               loading="lazy"
+|               src="/avatars/abhin4v-16.png"
+|               srcset="/avatars/abhin4v-16.png 1x, /avatars/abhin4v-32.png 2x"
+|               width="16"
+|           "
+          "
+|           <span>
+|             " via "
+|           "
+        "
+|           <a>
+|             class="u-author h-card"
+|             href="/~abhin4v"
+|             "abhin4v"
+|           " 
+
+        "
+|           <time>
+|             data-at-unix="1793021325"
+|             datetime="2026-10-26 08:28:45"
+|             title="2026-10-26 08:28:45"
+|             "2 hours ago"
+|           "
+
+          "
+|           <span>
+|             aria-hidden="true"
+|             " | "
+|           "
+          "
+|           <details>
+|             class="caches"
+|             name="caches"
+|             "
+            "
+|             <summary>
+|               "caches"
+|             "
+            "
+|             <ul>
+|               "
+              "
+|               <li>
+|                 <a>
+|                   href="https://web.archive.org/web/3/https%3A%2F%2Fblog.veitheller.de%2FSimple_Sudoku_Solvers_SIII%252C_EII%253A_Assembly.html"
+|                   "Archive.org"
+|               "
+              "
+|               <li>
+|                 <a>
+|                   href="https://ghostarchive.org/search?term=https%3A%2F%2Fblog.veitheller.de%2FSimple_Sudoku_Solvers_SIII%252C_EII%253A_Assembly.html"
+|                   "Ghostarchive"
+|               "
+            "
+|             "
+          "
+|           "
+          "
+|           <span>
+|             class="comments_label"
+|             "
+            "
+|             <span>
+|               aria-hidden="true"
+|               " | "
+|             "
+            "
+|             <a>
+|               aria-level="2"
+|               href="/s/xmnhbt/simple_sudoku_solver_assembly"
+|               role="heading"
+|               "
+              no comments
+            "
+|             "
+          "
+|           "
+    "
+|         "
+  
+
+"
+|         <a>
+|           class="mobile_comments zero"
+|           href="/s/xmnhbt/simple_sudoku_solver_assembly"
+|           style="display: none;"
+|           "
+  "
+|           <span>
+|             "0"
+|           "
+"
+|         "
+
+
+
+
+"
+|         <li>
+|           class="story 
+
+
+
+
+"
+|           data-shortid="ysyqnt"
+|           id="story_ysyqnt"
+|           "
+"
+|           <div>
+|             class="story_liner h-entry"
+|             "
+  "
+|             <div>
+|               class="voters"
+|               "
+    "
+|               <a>
+|                 class="upvoter"
+|                 href="/login"
+|                 "14"
+|               "
+  "
+|             "
+  "
+|             <div>
+|               class="details"
+|               "
+    "
+|               <span>
+|                 aria-level="1"
+|                 class="link h-cite u-repost-of"
+|                 role="heading"
+|                 "
+        "
+|                 <a>
+|                   class="u-url"
+|                   href="https://archive.org/download/small_web/11787-48384.mp4"
+|                   rel="ugc noreferrer"
+|                   "The Small Web Is Huge"
+|                 "
+    "
+|               "
+      "
+|               <a>
+|                 aria-label="Description text for: The Small Web Is Huge"
+|                 class="description_present"
+|                 href="/s/ysyqnt/small_web_is_huge"
+|                 title="Speaker Page: https://pretalx.seagl.org/2026/talk/GQZEUY/
+
+
+
+Additional Notes: https://punkto.org/blog/small_web"
+|                 "☶"
+|               "
+      "
+|               <ul>
+|                 aria-label="Tags"
+|                 class="tags"
+|                 "
+          "
+|         <li>
+|           <a>
+|             aria-label="Tag video"
+|             class="tag tag_video tag_is_media"
+|             href="/t/video"
+|             title="Link to a video"
+|             "video"
+|         "
+          "
+|         <li>
+|           <a>
+|             aria-label="Tag culture"
+|             class="tag tag_culture"
+|             href="/t/culture"
+|             title="Technical communities and culture"
+|             "culture"
+|         "
+      
+        "
+|         <a>
+|           class="domain"
+|           href="/domains/archive.org"
+|           "archive.org"
+|         "
+
+
+    "
+|         <div>
+|           class="byline"
+|           "
+      "
+|           <a>
+|             aria-hidden="true"
+|             href="/~mhm"
+|             tabindex="-1"
+|             <img>
+|               alt=""
+|               class="avatar"
+|               decoding="async"
+|               height="16"
+|               loading="lazy"
+|               src="/avatars/mhm-16.png"
+|               srcset="/avatars/mhm-16.png 1x, /avatars/mhm-32.png 2x"
+|               width="16"
+|           "
+          "
+|           <span>
+|             " via "
+|           "
+        "
+|           <a>
+|             class="u-author h-card"
+|             href="/~mhm"
+|             "mhm"
+|           " 
+
+        "
+|           <time>
+|             data-at-unix="1793014483"
+|             datetime="2026-10-26 06:34:43"
+|             title="2026-10-26 06:34:43"
+|             "4 hours ago"
+|           "
+
+          "
+|           <span>
+|             aria-hidden="true"
+|             " | "
+|           "
+          "
+|           <details>
+|             class="caches"
+|             name="caches"
+|             "
+            "
+|             <summary>
+|               "caches"
+|             "
+            "
+|             <ul>
+|               "
+              "
+|               <li>
+|                 <a>
+|                   href="https://web.archive.org/web/3/https%3A%2F%2Farchive.org%2Fdownload%2Fsmall_web%2F11787-48384.mp4"
+|                   "Archive.org"
+|               "
+              "
+|               <li>
+|                 <a>
+|                   href="https://ghostarchive.org/search?term=https%3A%2F%2Farchive.org%2Fdownload%2Fsmall_web%2F11787-48384.mp4"
+|                   "Ghostarchive"
+|               "
+            "
+|             "
+          "
+|           "
+          "
+|           <span>
+|             class="comments_label"
+|             "
+            "
+|             <span>
+|               aria-hidden="true"
+|               " | "
+|             "
+            "
+|             <a>
+|               aria-level="2"
+|               href="/s/ysyqnt/small_web_is_huge"
+|               role="heading"
+|               "
+              2 comments
+            "
+|             "
+          "
+|           "
+    "
+|         "
+  
+
+"
+|         <a>
+|           class="mobile_comments "
+|           href="/s/ysyqnt/small_web_is_huge"
+|           style="display: none;"
+|           "
+  "
+|           <span>
+|             "2"
+|           "
+"
+|         "
+
+
+
+
+"
+|         <li>
+|           class="story 
+
+
+
+
+"
+|           data-shortid="0ta2mv"
+|           id="story_0ta2mv"
+|           "
+"
+|           <div>
+|             class="story_liner h-entry"
+|             "
+  "
+|             <div>
+|               class="voters"
+|               "
+    "
+|               <a>
+|                 class="upvoter"
+|                 href="/login"
+|                 "2"
+|               "
+  "
+|             "
+  "
+|             <div>
+|               class="details"
+|               "
+    "
+|               <span>
+|                 aria-level="1"
+|                 class="link h-cite u-repost-of"
+|                 role="heading"
+|                 "
+        "
+|                 <a>
+|                   class="u-url"
+|                   href="https://turtleware.eu/posts/Heavenly-delights-of-hashing-numbers-under-EQUALP.html"
+|                   rel="ugc noreferrer"
+|                   "Heavenly delights of hashing numbers under EQUALP"
+|                 "
+    "
+|               "
+      "
+|               <ul>
+|                 aria-label="Tags"
+|                 class="tags"
+|                 "
+          "
+|         <li>
+|           <a>
+|             aria-label="Tag lisp"
+|             class="tag tag_lisp"
+|             href="/t/lisp"
+|             title="Lisp and Scheme programming"
+|             "lisp"
+|         "
+          "
+|         <li>
+|           <a>
+|             aria-label="Tag math"
+|             class="tag tag_math"
+|             href="/t/math"
+|             title="Mathematics"
+|             "math"
+|         "
+          "
+|         <li>
+|           <a>
+|             aria-label="Tag performance"
+|             class="tag tag_performance"
+|             href="/t/performance"
+|             title="Performance and optimization"
+|             "performance"
+|         "
+          "
+|         <li>
+|           <a>
+|             aria-label="Tag programming"
+|             class="tag tag_programming"
+|             href="/t/programming"
+|             title="Use when every tag or no specific tag applies"
+|             "programming"
+|         "
+      
+        "
+|         <a>
+|           class="domain"
+|           href="/domains/turtleware.eu"
+|           "turtleware.eu"
+|         "
+
+
+    "
+|         <div>
+|           class="byline"
+|           "
+      "
+|           <a>
+|             aria-hidden="true"
+|             href="/~jackdaniel"
+|             tabindex="-1"
+|             <img>
+|               alt=""
+|               class="avatar"
+|               decoding="async"
+|               height="16"
+|               loading="lazy"
+|               src="/avatars/jackdaniel-16.png"
+|               srcset="/avatars/jackdaniel-16.png 1x, /avatars/jackdaniel-32.png 2x"
+|               width="16"
+|           "
+          "
+|           <span>
+|             " authored by "
+|           "
+        "
+|           <a>
+|             class="u-author h-card user_is_author"
+|             href="/~jackdaniel"
+|             "jackdaniel"
+|           " 
+
+        "
+|           <time>
+|             data-at-unix="1793029259"
+|             datetime="2026-10-26 10:40:59"
+|             title="2026-10-26 10:40:59"
+|             "30 minutes ago"
+|           "
+
+          "
+|           <span>
+|             aria-hidden="true"
+|             " | "
+|           "
+          "
+|           <details>
+|             class="caches"
+|             name="caches"
+|             "
+            "
+|             <summary>
+|               "caches"
+|             "
+            "
+|             <ul>
+|               "
+              "
+|               <li>
+|                 <a>
+|                   href="https://web.archive.org/web/3/https%3A%2F%2Fturtleware.eu%2Fposts%2FHeavenly-delights-of-hashing-numbers-under-EQUALP.html"
+|                   "Archive.org"
+|               "
+              "
+|               <li>
+|                 <a>
+|                   href="https://ghostarchive.org/search?term=https%3A%2F%2Fturtleware.eu%2Fposts%2FHeavenly-delights-of-hashing-numbers-under-EQUALP.html"
+|                   "Ghostarchive"
+|               "
+            "
+|             "
+          "
+|           "
+          "
+|           <span>
+|             class="comments_label"
+|             "
+            "
+|             <span>
+|               aria-hidden="true"
+|               " | "
+|             "
+            "
+|             <a>
+|               aria-level="2"
+|               href="/s/0ta2mv/heavenly_delights_hashing_numbers_under"
+|               role="heading"
+|               "
+              no comments
+            "
+|             "
+          "
+|           "
+    "
+|         "
+  
+
+"
+|         <a>
+|           class="mobile_comments zero"
+|           href="/s/0ta2mv/heavenly_delights_hashing_numbers_under"
+|           style="display: none;"
+|           "
+  "
+|           <span>
+|             "0"
+|           "
+"
+|         "
+
+
+
+
+"
+|         <li>
+|           class="story 
+
+
+
+
+"
+|           data-shortid="vgq0mf"
+|           id="story_vgq0mf"
+|           "
+"
+|           <div>
+|             class="story_liner h-entry"
+|             "
+  "
+|             <div>
+|               class="voters"
+|               "
+    "
+|               <a>
+|                 class="upvoter"
+|                 href="/login"
+|                 "7"
+|               "
+  "
+|             "
+  "
+|             <div>
+|               class="details"
+|               "
+    "
+|               <span>
+|                 aria-level="1"
+|                 class="link h-cite u-repost-of"
+|                 role="heading"
+|                 "
+        "
+|                 <a>
+|                   class="u-url"
+|                   href="https://v3.wails.io/blog/wails-v3-released/"
+|                   rel="ugc noreferrer"
+|                   "Wails v3.0.0 Released"
+|                 "
+    "
+|               "
+      "
+|               <ul>
+|                 aria-label="Tags"
+|                 class="tags"
+|                 "
+          "
+|         <li>
+|           <a>
+|             aria-label="Tag go"
+|             class="tag tag_go"
+|             href="/t/go"
+|             title="Golang programming"
+|             "go"
+|         "
+          "
+|         <li>
+|           <a>
+|             aria-label="Tag release"
+|             class="tag tag_release"
+|             href="/t/release"
+|             title="Software releases and announcements"
+|             "release"
+|         "
+      
+        "
+|         <a>
+|           class="domain"
+|           href="/domains/v3.wails.io"
+|           "v3.wails.io"
+|         "
+
+
+    "
+|         <div>
+|           class="byline"
+|           "
+      "
+|           <a>
+|             aria-hidden="true"
+|             href="/~rcalixte"
+|             tabindex="-1"
+|             <img>
+|               alt=""
+|               class="avatar"
+|               decoding="async"
+|               height="16"
+|               loading="lazy"
+|               src="/avatars/rcalixte-16.png"
+|               srcset="/avatars/rcalixte-16.png 1x, /avatars/rcalixte-32.png 2x"
+|               width="16"
+|           "
+          "
+|           <span>
+|             " via "
+|           "
+        "
+|           <a>
+|             class="u-author h-card"
+|             href="/~rcalixte"
+|             "rcalixte"
+|           " 
+
+        "
+|           <time>
+|             data-at-unix="1793014237"
+|             datetime="2026-10-26 06:30:37"
+|             title="2026-10-26 06:30:37"
+|             "4 hours ago"
+|           "
+
+          "
+|           <span>
+|             aria-hidden="true"
+|             " | "
+|           "
+          "
+|           <details>
+|             class="caches"
+|             name="caches"
+|             "
+            "
+|             <summary>
+|               "caches"
+|             "
+            "
+|             <ul>
+|               "
+              "
+|               <li>
+|                 <a>
+|                   href="https://web.archive.org/web/3/https%3A%2F%2Fv3.wails.io%2Fblog%2Fwails-v3-released%2F"
+|                   "Archive.org"
+|               "
+              "
+|               <li>
+|                 <a>
+|                   href="https://ghostarchive.org/search?term=https%3A%2F%2Fv3.wails.io%2Fblog%2Fwails-v3-released%2F"
+|                   "Ghostarchive"
+|               "
+            "
+|             "
+          "
+|           "
+          "
+|           <span>
+|             class="comments_label"
+|             "
+            "
+|             <span>
+|               aria-hidden="true"
+|               " | "
+|             "
+            "
+|             <a>
+|               aria-level="2"
+|               href="/s/vgq0mf/wails_v3_0_0_released"
+|               role="heading"
+|               "
+              no comments
+            "
+|             "
+          "
+|           "
+    "
+|         "
+  
+
+"
+|         <a>
+|           class="mobile_comments zero"
+|           href="/s/vgq0mf/wails_v3_0_0_released"
+|           style="display: none;"
+|           "
+  "
+|           <span>
+|             "0"
+|           "
+"
+|         "
+
+
+
+
+"
+|         <li>
+|           class="story 
+
+
+
+
+"
+|           data-shortid="twdnpy"
+|           id="story_twdnpy"
+|           "
+"
+|           <div>
+|             class="story_liner h-entry"
+|             "
+  "
+|             <div>
+|               class="voters"
+|               "
+    "
+|               <a>
+|                 class="upvoter"
+|                 href="/login"
+|                 "7"
+|               "
+  "
+|             "
+  "
+|             <div>
+|               class="details"
+|               "
+    "
+|               <span>
+|                 aria-level="1"
+|                 class="link h-cite u-repost-of"
+|                 role="heading"
+|                 "
+        "
+|                 <a>
+|                   class="u-url"
+|                   href="https://weinholt.se/articles/akku-scm-1-2-0/"
+|                   rel="ugc noreferrer"
+|                   "Akku.scm 1.2.0 released"
+|                 "
+    "
+|               "
+      "
+|               <ul>
+|                 aria-label="Tags"
+|                 class="tags"
+|                 "
+          "
+|         <li>
+|           <a>
+|             aria-label="Tag lisp"
+|             class="tag tag_lisp"
+|             href="/t/lisp"
+|             title="Lisp and Scheme programming"
+|             "lisp"
+|         "
+          "
+|         <li>
+|           <a>
+|             aria-label="Tag release"
+|             class="tag tag_release"
+|             href="/t/release"
+|             title="Software releases and announcements"
+|             "release"
+|         "
+      
+        "
+|         <a>
+|           class="domain"
+|           href="/domains/weinholt.se"
+|           "weinholt.se"
+|         "
+
+
+    "
+|         <div>
+|           class="byline"
+|           "
+      "
+|           <a>
+|             aria-hidden="true"
+|             href="/~FedericoSchonborn"
+|             tabindex="-1"
+|             <img>
+|               alt=""
+|               class="avatar"
+|               decoding="async"
+|               height="16"
+|               loading="lazy"
+|               src="/avatars/FedericoSchonborn-16.png"
+|               srcset="/avatars/FedericoSchonborn-16.png 1x, /avatars/FedericoSchonborn-32.png 2x"
+|               width="16"
+|           "
+          "
+|           <span>
+|             " via "
+|           "
+        "
+|           <a>
+|             class="u-author h-card"
+|             href="/~FedericoSchonborn"
+|             "FedericoSchonborn"
+|           " 
+
+        "
+|           <time>
+|             data-at-unix="1793012956"
+|             datetime="2026-10-26 06:09:16"
+|             title="2026-10-26 06:09:16"
+|             "5 hours ago"
+|           "
+
+          "
+|           <span>
+|             aria-hidden="true"
+|             " | "
+|           "
+          "
+|           <details>
+|             class="caches"
+|             name="caches"
+|             "
+            "
+|             <summary>
+|               "caches"
+|             "
+            "
+|             <ul>
+|               "
+              "
+|               <li>
+|                 <a>
+|                   href="https://web.archive.org/web/3/https%3A%2F%2Fweinholt.se%2Farticles%2Fakku-scm-1-2-0%2F"
+|                   "Archive.org"
+|               "
+              "
+|               <li>
+|                 <a>
+|                   href="https://ghostarchive.org/search?term=https%3A%2F%2Fweinholt.se%2Farticles%2Fakku-scm-1-2-0%2F"
+|                   "Ghostarchive"
+|               "
+            "
+|             "
+          "
+|           "
+          "
+|           <span>
+|             class="comments_label"
+|             "
+            "
+|             <span>
+|               aria-hidden="true"
+|               " | "
+|             "
+            "
+|             <a>
+|               aria-level="2"
+|               href="/s/twdnpy/akku_scm_1_2_0_released"
+|               role="heading"
+|               "
+              no comments
+            "
+|             "
+          "
+|           "
+    "
+|         "
+  
+
+"
+|         <a>
+|           class="mobile_comments zero"
+|           href="/s/twdnpy/akku_scm_1_2_0_released"
+|           style="display: none;"
+|           "
+  "
+|           <span>
+|             "0"
+|           "
+"
+|         "
+
+
+
+
+"
+|         <li>
+|           class="story 
+
+
+
+
+"
+|           data-shortid="ekwolo"
+|           id="story_ekwolo"
+|           "
+"
+|           <div>
+|             class="story_liner h-entry"
+|             "
+  "
+|             <div>
+|               class="voters"
+|               "
+    "
+|               <a>
+|                 class="upvoter"
+|                 href="/login"
+|                 "16"
+|               "
+  "
+|             "
+  "
+|             <div>
+|               class="details"
+|               "
+    "
+|               <span>
+|                 aria-level="1"
+|                 class="link h-cite u-repost-of"
+|                 role="heading"
+|                 "
+        "
+|                 <a>
+|                   class="u-url"
+|                   href="https://voxelmanip.se/2026/10/24/building-java-me-apps-with-modern-tooling/"
+|                   rel="ugc noreferrer"
+|                   "Building Java ME Apps with Modern Tooling"
+|                 "
+    "
+|               "
+      "
+|               <ul>
+|                 aria-label="Tags"
+|                 class="tags"
+|                 "
+          "
+|         <li>
+|           <a>
+|             aria-label="Tag java"
+|             class="tag tag_java"
+|             href="/t/java"
+|             title="Java programming"
+|             "java"
+|         "
+          "
+|         <li>
+|           <a>
+|             aria-label="Tag retrocomputing"
+|             class="tag tag_retrocomputing"
+|             href="/t/retrocomputing"
+|             title="Reproductions, emulators, and other revivals of historic technologies"
+|             "retrocomputing"
+|         "
+      
+        "
+|         <a>
+|           class="domain"
+|           href="/domains/voxelmanip.se"
+|           "voxelmanip.se"
+|         "
+
+
+    "
+|         <div>
+|           class="byline"
+|           "
+      "
+|           <a>
+|             aria-hidden="true"
+|             href="/~mhd"
+|             tabindex="-1"
+|             <img>
+|               alt=""
+|               class="avatar"
+|               decoding="async"
+|               height="16"
+|               loading="lazy"
+|               src="/avatars/mhd-16.png"
+|               srcset="/avatars/mhd-16.png 1x, /avatars/mhd-32.png 2x"
+|               width="16"
+|           "
+          "
+|           <span>
+|             " via "
+|           "
+        "
+|           <a>
+|             class="u-author h-card"
+|             href="/~mhd"
+|             "mhd"
+|           " 
+
+        "
+|           <time>
+|             data-at-unix="1792963999"
+|             datetime="2026-10-25 16:33:19"
+|             title="2026-10-25 16:33:19"
+|             "18 hours ago"
+|           "
+
+          "
+|           <span>
+|             aria-hidden="true"
+|             " | "
+|           "
+          "
+|           <details>
+|             class="caches"
+|             name="caches"
+|             "
+            "
+|             <summary>
+|               "caches"
+|             "
+            "
+|             <ul>
+|               "
+              "
+|               <li>
+|                 <a>
+|                   href="https://web.archive.org/web/3/https%3A%2F%2Fvoxelmanip.se%2F2026%2F10%2F24%2Fbuilding-java-me-apps-with-modern-tooling%2F"
+|                   "Archive.org"
+|               "
+              "
+|               <li>
+|                 <a>
+|                   href="https://ghostarchive.org/search?term=https%3A%2F%2Fvoxelmanip.se%2F2026%2F10%2F24%2Fbuilding-java-me-apps-with-modern-tooling%2F"
+|                   "Ghostarchive"
+|               "
+            "
+|             "
+          "
+|           "
+          "
+|           <span>
+|             class="comments_label"
+|             "
+            "
+|             <span>
+|               aria-hidden="true"
+|               " | "
+|             "
+            "
+|             <a>
+|               aria-level="2"
+|               href="/s/ekwolo/building_java_me_apps_with_modern_tooling"
+|               role="heading"
+|               "
+              3 comments
+            "
+|             "
+          "
+|           "
+    "
+|         "
+  
+
+"
+|         <a>
+|           class="mobile_comments "
+|           href="/s/ekwolo/building_java_me_apps_with_modern_tooling"
+|           style="display: none;"
+|           "
+  "
+|           <span>
+|             "3"
+|           "
+"
+|         "
+
+
+
+
+"
+|         <li>
+|           class="story 
+
+
+
+
+"
+|           data-shortid="di1j7o"
+|           id="story_di1j7o"
+|           "
+"
+|           <div>
+|             class="story_liner h-entry"
+|             "
+  "
+|             <div>
+|               class="voters"
+|               "
+    "
+|               <a>
+|                 class="upvoter"
+|                 href="/login"
+|                 "3"
+|               "
+  "
+|             "
+  "
+|             <div>
+|               class="details"
+|               "
+    "
+|               <span>
+|                 aria-level="1"
+|                 class="link h-cite u-repost-of"
+|                 role="heading"
+|                 "
+        "
+|                 <a>
+|                   class="u-url"
+|                   href="https://chirp.tene7.com/?action=view&url=shadow-dummy-folders-an-obvious-overflow-and-a-rop-chain"
+|                   rel="ugc noreferrer"
+|                   "Shadow: Dummy folders, an obvious overflow, and a ROP chain"
+|                 "
+    "
+|               "
+      "
+|               <ul>
+|                 aria-label="Tags"
+|                 class="tags"
+|                 "
+          "
+|         <li>
+|           <a>
+|             aria-label="Tag hardware"
+|             class="tag tag_hardware"
+|             href="/t/hardware"
+|             title="Hardware"
+|             "hardware"
+|         "
+          "
+|         <li>
+|           <a>
+|             aria-label="Tag reversing"
+|             class="tag tag_reversing"
+|             href="/t/reversing"
+|             title="Reverse engineering"
+|             "reversing"
+|         "
+      
+        "
+|         <a>
+|           class="domain"
+|           href="/domains/chirp.tene7.com"
+|           "chirp.tene7.com"
+|         "
+
+
+    "
+|         <div>
+|           class="byline"
+|           "
+      "
+|           <a>
+|             aria-hidden="true"
+|             href="/~unlobito"
+|             tabindex="-1"
+|             <img>
+|               alt=""
+|               class="avatar"
+|               decoding="async"
+|               height="16"
+|               loading="lazy"
+|               src="/avatars/unlobito-16.png"
+|               srcset="/avatars/unlobito-16.png 1x, /avatars/unlobito-32.png 2x"
+|               width="16"
+|           "
+          "
+|           <span>
+|             " via "
+|           "
+        "
+|           <a>
+|             class="u-author h-card"
+|             href="/~unlobito"
+|             "unlobito"
+|           " 
+
+        "
+|           <time>
+|             data-at-unix="1793020943"
+|             datetime="2026-10-26 08:22:23"
+|             title="2026-10-26 08:22:23"
+|             "2 hours ago"
+|           "
+
+          "
+|           <span>
+|             aria-hidden="true"
+|             " | "
+|           "
+          "
+|           <details>
+|             class="caches"
+|             name="caches"
+|             "
+            "
+|             <summary>
+|               "caches"
+|             "
+            "
+|             <ul>
+|               "
+              "
+|               <li>
+|                 <a>
+|                   href="https://web.archive.org/web/3/https%3A%2F%2Fchirp.tene7.com%2F%3Faction%3Dview%26url%3Dshadow-dummy-folders-an-obvious-overflow-and-a-rop-chain"
+|                   "Archive.org"
+|               "
+              "
+|               <li>
+|                 <a>
+|                   href="https://ghostarchive.org/search?term=https%3A%2F%2Fchirp.tene7.com%2F%3Faction%3Dview%26url%3Dshadow-dummy-folders-an-obvious-overflow-and-a-rop-chain"
+|                   "Ghostarchive"
+|               "
+            "
+|             "
+          "
+|           "
+          "
+|           <span>
+|             class="comments_label"
+|             "
+            "
+|             <span>
+|               aria-hidden="true"
+|               " | "
+|             "
+            "
+|             <a>
+|               aria-level="2"
+|               href="/s/di1j7o/shadow_dummy_folders_obvious_overflow"
+|               role="heading"
+|               "
+              no comments
+            "
+|             "
+          "
+|           "
+    "
+|         "
+  
+
+"
+|         <a>
+|           class="mobile_comments zero"
+|           href="/s/di1j7o/shadow_dummy_folders_obvious_overflow"
+|           style="display: none;"
+|           "
+  "
+|           <span>
+|             "0"
+|           "
+"
+|         "
+
+
+
+
+"
+|         <li>
+|           class="story 
+
+
+
+
+"
+|           data-shortid="lh8nvx"
+|           id="story_lh8nvx"
+|           "
+"
+|           <div>
+|             class="story_liner h-entry"
+|             "
+  "
+|             <div>
+|               class="voters"
+|               "
+    "
+|               <a>
+|                 class="upvoter"
+|                 href="/login"
+|                 "3"
+|               "
+  "
+|             "
+  "
+|             <div>
+|               class="details"
+|               "
+    "
+|               <span>
+|                 aria-level="1"
+|                 class="link h-cite u-repost-of"
+|                 role="heading"
+|                 "
+        "
+|                 <a>
+|                   class="u-url"
+|                   href="https://radimentary.wordpress.com/2022/11/07/aggro-is-the-foundation/"
+|                   rel="ugc noreferrer"
+|                   "Aggro is the Foundation (2022)"
+|                 "
+    "
+|               "
+      "
+|               <ul>
+|                 aria-label="Tags"
+|                 class="tags"
+|                 "
+          "
+|         <li>
+|           <a>
+|             aria-label="Tag math"
+|             class="tag tag_math"
+|             href="/t/math"
+|             title="Mathematics"
+|             "math"
+|         "
+          "
+|         <li>
+|           <a>
+|             aria-label="Tag practices"
+|             class="tag tag_practices"
+|             href="/t/practices"
+|             title="Development and team practices"
+|             "practices"
+|         "
+      
+        "
+|         <a>
+|           class="domain"
+|           href="/domains/radimentary.wordpress.com"
+|           "radimentary.wordpress.com"
+|         "
+
+
+    "
+|         <div>
+|           class="byline"
+|           "
+      "
+|           <a>
+|             aria-hidden="true"
+|             href="/~ohrv"
+|             tabindex="-1"
+|             <img>
+|               alt=""
+|               class="avatar"
+|               decoding="async"
+|               height="16"
+|               loading="lazy"
+|               src="/avatars/ohrv-16.png"
+|               srcset="/avatars/ohrv-16.png 1x, /avatars/ohrv-32.png 2x"
+|               width="16"
+|           "
+          "
+|           <span>
+|             " via "
+|           "
+        "
+|           <a>
+|             class="u-author h-card"
+|             href="/~ohrv"
+|             "ohrv"
+|           " 
+
+        "
+|           <time>
+|             data-at-unix="1793020897"
+|             datetime="2026-10-26 08:21:37"
+|             title="2026-10-26 08:21:37"
+|             "2 hours ago"
+|           "
+
+          "
+|           <span>
+|             aria-hidden="true"
+|             " | "
+|           "
+          "
+|           <details>
+|             class="caches"
+|             name="caches"
+|             "
+            "
+|             <summary>
+|               "caches"
+|             "
+            "
+|             <ul>
+|               "
+              "
+|               <li>
+|                 <a>
+|                   href="https://web.archive.org/web/3/https%3A%2F%2Fradimentary.wordpress.com%2F2022%2F11%2F07%2Faggro-is-the-foundation%2F"
+|                   "Archive.org"
+|               "
+              "
+|               <li>
+|                 <a>
+|                   href="https://ghostarchive.org/search?term=https%3A%2F%2Fradimentary.wordpress.com%2F2022%2F11%2F07%2Faggro-is-the-foundation%2F"
+|                   "Ghostarchive"
+|               "
+            "
+|             "
+          "
+|           "
+          "
+|           <span>
+|             class="comments_label"
+|             "
+            "
+|             <span>
+|               aria-hidden="true"
+|               " | "
+|             "
+            "
+|             <a>
+|               aria-level="2"
+|               href="/s/lh8nvx/aggro_is_foundation_2022"
+|               role="heading"
+|               "
+              no comments
+            "
+|             "
+          "
+|           "
+    "
+|         "
+  
+
+"
+|         <a>
+|           class="mobile_comments zero"
+|           href="/s/lh8nvx/aggro_is_foundation_2022"
+|           style="display: none;"
+|           "
+  "
+|           <span>
+|             "0"
+|           "
+"
+|         "
+
+
+
+
+"
+|         <li>
+|           class="story 
+
+
+
+
+"
+|           data-shortid="5ullyu"
+|           id="story_5ullyu"
+|           "
+"
+|           <div>
+|             class="story_liner h-entry"
+|             "
+  "
+|             <div>
+|               class="voters"
+|               "
+    "
+|               <a>
+|                 class="upvoter"
+|                 href="/login"
+|                 "22"
+|               "
+  "
+|             "
+  "
+|             <div>
+|               class="details"
+|               "
+    "
+|               <span>
+|                 aria-level="1"
+|                 class="link h-cite u-repost-of"
+|                 role="heading"
+|                 "
+        "
+|                 <a>
+|                   class="u-url"
+|                   href="https://refi64.dev/posts/chromium-audio-break.html"
+|                   rel="ugc noreferrer"
+|                   "When a glibc update accidentally breaks Chromium's audio (2021)"
+|                 "
+    "
+|               "
+      "
+|               <ul>
+|                 aria-label="Tags"
+|                 class="tags"
+|                 "
+          "
+|         <li>
+|           <a>
+|             aria-label="Tag c"
+|             class="tag tag_c"
+|             href="/t/c"
+|             title="C programming"
+|             "c"
+|         "
+          "
+|         <li>
+|           <a>
+|             aria-label="Tag debugging"
+|             class="tag tag_debugging"
+|             href="/t/debugging"
+|             title="Debugging techniques"
+|             "debugging"
+|         "
+          "
+|         <li>
+|           <a>
+|             aria-label="Tag programming"
+|             class="tag tag_programming"
+|             href="/t/programming"
+|             title="Use when every tag or no specific tag applies"
+|             "programming"
+|         "
+      
+        "
+|         <a>
+|           class="domain"
+|           href="/domains/refi64.dev"
+|           "refi64.dev"
+|         "
+
+
+    "
+|         <div>
+|           class="byline"
+|           "
+      "
+|           <a>
+|             aria-hidden="true"
+|             href="/~seb"
+|             tabindex="-1"
+|             <img>
+|               alt=""
+|               class="avatar"
+|               decoding="async"
+|               height="16"
+|               loading="lazy"
+|               src="/avatars/seb-16.png"
+|               srcset="/avatars/seb-16.png 1x, /avatars/seb-32.png 2x"
+|               width="16"
+|           "
+          "
+|           <span>
+|             " via "
+|           "
+        "
+|           <a>
+|             class="u-author h-card"
+|             href="/~seb"
+|             "seb"
+|           " 
+
+        "
+|           <time>
+|             data-at-unix="1792942461"
+|             datetime="2026-10-25 10:34:21"
+|             title="2026-10-25 10:34:21"
+|             "24 hours ago"
+|           "
+
+          "
+|           <span>
+|             aria-hidden="true"
+|             " | "
+|           "
+          "
+|           <details>
+|             class="caches"
+|             name="caches"
+|             "
+            "
+|             <summary>
+|               "caches"
+|             "
+            "
+|             <ul>
+|               "
+              "
+|               <li>
+|                 <a>
+|                   href="https://web.archive.org/web/3/https%3A%2F%2Frefi64.dev%2Fposts%2Fchromium-audio-break.html"
+|                   "Archive.org"
+|               "
+              "
+|               <li>
+|                 <a>
+|                   href="https://ghostarchive.org/search?term=https%3A%2F%2Frefi64.dev%2Fposts%2Fchromium-audio-break.html"
+|                   "Ghostarchive"
+|               "
+            "
+|             "
+          "
+|           "
+          "
+|           <span>
+|             class="comments_label"
+|             "
+            "
+|             <span>
+|               aria-hidden="true"
+|               " | "
+|             "
+            "
+|             <a>
+|               aria-level="2"
+|               href="/s/5ullyu/when_glibc_update_accidentally_breaks"
+|               role="heading"
+|               "
+              2 comments
+            "
+|             "
+          "
+|           "
+    "
+|         "
+  
+
+"
+|         <a>
+|           class="mobile_comments "
+|           href="/s/5ullyu/when_glibc_update_accidentally_breaks"
+|           style="display: none;"
+|           "
+  "
+|           <span>
+|             "2"
+|           "
+"
+|         "
+
+
+
+
+"
+|         <li>
+|           class="story 
+
+
+
+
+"
+|           data-shortid="jdczl6"
+|           id="story_jdczl6"
+|           "
+"
+|           <div>
+|             class="story_liner h-entry"
+|             "
+  "
+|             <div>
+|               class="voters"
+|               "
+    "
+|               <a>
+|                 class="upvoter"
+|                 href="/login"
+|                 "14"
+|               "
+  "
+|             "
+  "
+|             <div>
+|               class="details"
+|               "
+    "
+|               <span>
+|                 aria-level="1"
+|                 class="link h-cite u-repost-of"
+|                 role="heading"
+|                 "
+        "
+|                 <a>
+|                   class="u-url"
+|                   href="https://media.ccc.de/v/matrix-conference-2026-99070-a-vision-for-a-next-generation-timeline"
+|                   rel="ugc noreferrer"
+|                   "A vision for a next-generation timeline"
+|                 "
+    "
+|               "
+      "
+|               <a>
+|                 aria-label="Description text for: A vision for a next-generation timeline"
+|                 class="description_present"
+|                 href="/s/jdczl6/vision_for_next_generation_timeline"
+|                 title="
+
+
+
+Slides: https://cfp.2026.matrix.org/media/matrix-conference-2026/submissions/WRGTRX/resources/sli_ZZVyXQu.pdf"
+|                 "☶"
+|               "
+      "
+|               <ul>
+|                 aria-label="Tags"
+|                 class="tags"
+|                 "
+          "
+|         <li>
+|           <a>
+|             aria-label="Tag video"
+|             class="tag tag_video tag_is_media"
+|             href="/t/video"
+|             title="Link to a video"
+|             "video"
+|         "
+          "
+|         <li>
+|           <a>
+|             aria-label="Tag distributed"
+|             class="tag tag_distributed"
+|             href="/t/distributed"
+|             title="Distributed systems"
+|             "distributed"
+|         "
+      
+        "
+|         <a>
+|           class="domain"
+|           href="/domains/media.ccc.de"
+|           "media.ccc.de"
+|         "
+
+
+    "
+|         <div>
+|           class="byline"
+|           "
+      "
+|           <a>
+|             aria-hidden="true"
+|             href="/~JadedBlueEyes"
+|             tabindex="-1"
+|             <img>
+|               alt=""
+|               class="avatar"
+|               decoding="async"
+|               height="16"
+|               loading="lazy"
+|               src="/avatars/JadedBlueEyes-16.png"
+|               srcset="/avatars/JadedBlueEyes-16.png 1x, /avatars/JadedBlueEyes-32.png 2x"
+|               width="16"
+|           "
+          "
+|           <span>
+|             " authored by "
+|           "
+        "
+|           <a>
+|             class="u-author h-card user_is_author"
+|             href="/~JadedBlueEyes"
+|             "JadedBlueEyes"
+|           " 
+
+        "
+|           <time>
+|             data-at-unix="1792940590"
+|             datetime="2026-10-25 10:03:10"
+|             title="2026-10-25 10:03:10"
+|             "25 hours ago"
+|           "
+
+          "
+|           <span>
+|             aria-hidden="true"
+|             " | "
+|           "
+          "
+|           <details>
+|             class="caches"
+|             name="caches"
+|             "
+            "
+|             <summary>
+|               "caches"
+|             "
+            "
+|             <ul>
+|               "
+              "
+|               <li>
+|                 <a>
+|                   href="https://web.archive.org/web/3/https%3A%2F%2Fmedia.ccc.de%2Fv%2Fmatrix-conference-2026-99070-a-vision-for-a-next-generation-timeline"
+|                   "Archive.org"
+|               "
+              "
+|               <li>
+|                 <a>
+|                   href="https://ghostarchive.org/search?term=https%3A%2F%2Fmedia.ccc.de%2Fv%2Fmatrix-conference-2026-99070-a-vision-for-a-next-generation-timeline"
+|                   "Ghostarchive"
+|               "
+            "
+|             "
+          "
+|           "
+          "
+|           <span>
+|             class="comments_label"
+|             "
+            "
+|             <span>
+|               aria-hidden="true"
+|               " | "
+|             "
+            "
+|             <a>
+|               aria-level="2"
+|               href="/s/jdczl6/vision_for_next_generation_timeline"
+|               role="heading"
+|               "
+              1 comment
+            "
+|             "
+          "
+|           "
+    "
+|         "
+  
+
+"
+|         <a>
+|           class="mobile_comments "
+|           href="/s/jdczl6/vision_for_next_generation_timeline"
+|           style="display: none;"
+|           "
+  "
+|           <span>
+|             "1"
+|           "
+"
+|         "
+
+
+
+
+"
+|         <li>
+|           class="story 
+
+
+
+
+"
+|           data-shortid="xgih2x"
+|           id="story_xgih2x"
+|           "
+"
+|           <div>
+|             class="story_liner h-entry"
+|             "
+  "
+|             <div>
+|               class="voters"
+|               "
+    "
+|               <a>
+|                 class="upvoter"
+|                 href="/login"
+|                 "123"
+|               "
+  "
+|             "
+  "
+|             <div>
+|               class="details"
+|               "
+    "
+|               <span>
+|                 aria-level="1"
+|                 class="link h-cite u-repost-of"
+|                 role="heading"
+|                 "
+        "
+|                 <a>
+|                   class="u-url"
+|                   href="https://blog.luitjes.it/posts/i-want-my-wednesday-back/"
+|                   rel="ugc noreferrer"
+|                   "I want my Wednesday back"
+|                 "
+    "
+|               "
+      "
+|               <ul>
+|                 aria-label="Tags"
+|                 class="tags"
+|                 "
+          "
+|         <li>
+|           <a>
+|             aria-label="Tag php"
+|             class="tag tag_php"
+|             href="/t/php"
+|             title="PHP programming"
+|             "php"
+|         "
+          "
+|         <li>
+|           <a>
+|             aria-label="Tag security"
+|             class="tag tag_security"
+|             href="/t/security"
+|             title="Netsec, appsec, and infosec"
+|             "security"
+|         "
+      
+        "
+|         <a>
+|           class="domain"
+|           href="/domains/blog.luitjes.it"
+|           "blog.luitjes.it"
+|         "
+
+
+    "
+|         <div>
+|           class="byline"
+|           "
+      "
+|           <a>
+|             aria-hidden="true"
+|             href="/~lucasluitjes"
+|             tabindex="-1"
+|             <img>
+|               alt=""
+|               class="avatar"
+|               decoding="async"
+|               height="16"
+|               loading="lazy"
+|               src="/avatars/lucasluitjes-16.png"
+|               srcset="/avatars/lucasluitjes-16.png 1x, /avatars/lucasluitjes-32.png 2x"
+|               width="16"
+|           "
+          "
+|           <span>
+|             " authored by "
+|           "
+        "
+|           <a>
+|             class="u-author h-card user_is_author"
+|             href="/~lucasluitjes"
+|             "lucasluitjes"
+|           " 
+
+        "
+|           <time>
+|             data-at-unix="1792836568"
+|             datetime="2026-10-24 05:09:28"
+|             title="2026-10-24 05:09:28"
+|             "2 days ago"
+|           "
+
+          "
+|           <span>
+|             aria-hidden="true"
+|             " | "
+|           "
+          "
+|           <details>
+|             class="caches"
+|             name="caches"
+|             "
+            "
+|             <summary>
+|               "caches"
+|             "
+            "
+|             <ul>
+|               "
+              "
+|               <li>
+|                 <a>
+|                   href="https://web.archive.org/web/3/https%3A%2F%2Fblog.luitjes.it%2Fposts%2Fi-want-my-wednesday-back%2F"
+|                   "Archive.org"
+|               "
+              "
+|               <li>
+|                 <a>
+|                   href="https://ghostarchive.org/search?term=https%3A%2F%2Fblog.luitjes.it%2Fposts%2Fi-want-my-wednesday-back%2F"
+|                   "Ghostarchive"
+|               "
+            "
+|             "
+          "
+|           "
+          "
+|           <span>
+|             class="comments_label"
+|             "
+            "
+|             <span>
+|               aria-hidden="true"
+|               " | "
+|             "
+            "
+|             <a>
+|               aria-level="2"
+|               href="/s/xgih2x/i_want_my_wednesday_back"
+|               role="heading"
+|               "
+              32 comments
+            "
+|             "
+          "
+|           "
+    "
+|         "
+  
+
+"
+|         <a>
+|           class="mobile_comments "
+|           href="/s/xgih2x/i_want_my_wednesday_back"
+|           style="display: none;"
+|           "
+  "
+|           <span>
+|             "32"
+|           "
+"
+|         "
+
+
+"
+|       "
+
+
+
+"
+|       <nav>
+|         class="morelink"
+|         "
+
+    "
+|         <a>
+|           href="/page/2"
+|           rel="next"
+|           "Page 2"
+|         "
+"
+|       "
+
+  "
+|     "
+
+  "
+|     <footer>
+|       "
+    "
+|       <span>
+|         id="office-hours-live"
+|         "
+    "
+|       "
+
+    "
+|       <nav>
+|         "
+      "
+|         <a>
+|           href="/about"
+|           "About"
+|         "
+      "
+|         <a>
+|           href="/tags"
+|           "Tags"
+|         "
+      "
+|         <a>
+|           href="/filters"
+|           "Filter"
+|         "
+      "
+|         <a>
+|           href="/moderations"
+|           "Moderation Log"
+|         "
+    "
+|       "
+  "
+|     "
+
+  "
+|     <span>
+|       id="iab-pcm-sdk"
+|     <span>
+|       id="iab-autofill-sdk"
+|     "
+
+
+"

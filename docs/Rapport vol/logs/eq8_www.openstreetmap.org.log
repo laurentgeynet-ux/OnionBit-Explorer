@@ -1,0 +1,3025 @@
+2026-10-26T12:29:19.767969Z  INFO explorer_core::session::navigate: nav: fetch+parse… tab=1
+2026-10-26T12:29:19.840208Z DEBUG h2::client: binding client connection
+2026-10-26T12:29:19.840416Z DEBUG h2::client: client connection bound
+2026-10-26T12:29:19.840498Z DEBUG h2::codec::framed_write: send frame=Settings { flags: (0x0) }
+2026-10-26T12:29:19.840925Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=Headers { stream_id: StreamId(1), flags: (0x5: END_HEADERS | END_STREAM) }
+2026-10-26T12:29:19.871999Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Settings { flags: (0x0), header_table_size: 8192, max_concurrent_streams: 100 }
+2026-10-26T12:29:19.872471Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=Settings { flags: (0x1: ACK) }
+2026-10-26T12:29:19.872549Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=WindowUpdate { stream_id: StreamId(0), size_increment: 16711681 }
+2026-10-26T12:29:19.872616Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Settings { flags: (0x1: ACK) }
+2026-10-26T12:29:19.872662Z DEBUG Connection{peer=Client}: h2::proto::settings: received settings ACK; applying Settings { flags: (0x0) }
+2026-10-26T12:29:19.917357Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Headers { stream_id: StreamId(1), flags: (0x4: END_HEADERS) }
+2026-10-26T12:29:19.917487Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(1) }
+2026-10-26T12:29:19.917964Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(1), flags: (0x1: END_STREAM) }
+2026-10-26T12:29:19.935356Z  INFO explorer_core::session::navigate: nav: fetch+parse ok → peinture tab=1 ms=167
+2026-10-26T12:29:19.939339Z  INFO explorer_core::session::navigate: nav: peinture ok → sous-ressources tab=1 ms=171
+2026-10-26T12:29:19.939535Z DEBUG explorer_core::session::net_items: script émis src=https://www.openstreetmap.org/assets/turbo-c17cce38062be94687ab3e688cf14213be635ee2b55e63d9d5778659fab0c27b.js module=true
+2026-10-26T12:29:19.939578Z DEBUG explorer_core::session::net_items: script émis src=https://www.openstreetmap.org/assets/application-3901b15b6f7d3d1a2230f955618d0bf378642e9ba2d6e87a67ac7c26875231cf.js module=false
+2026-10-26T12:29:19.939669Z DEBUG explorer_core::session::net_items: script émis src=https://www.openstreetmap.org/assets/i18n/en-e74144985e09be405fab7070256bc2d294633a989f292206d1eb4755ef7aeda7.js module=false
+2026-10-26T12:29:19.939766Z DEBUG explorer_core::session::net_items: script émis src=https://www.openstreetmap.org/assets/index-23675379e2a622eb8c83071fa7056075bba0a77b506ae832c002dd66cecf95a2.js module=false
+2026-10-26T12:29:19.941048Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=Headers { stream_id: StreamId(3), flags: (0x5: END_HEADERS | END_STREAM) }
+2026-10-26T12:29:19.941205Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=Headers { stream_id: StreamId(5), flags: (0x5: END_HEADERS | END_STREAM) }
+2026-10-26T12:29:19.941296Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=Headers { stream_id: StreamId(7), flags: (0x5: END_HEADERS | END_STREAM) }
+2026-10-26T12:29:19.941386Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=Headers { stream_id: StreamId(9), flags: (0x5: END_HEADERS | END_STREAM) }
+2026-10-26T12:29:19.941489Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=Headers { stream_id: StreamId(11), flags: (0x5: END_HEADERS | END_STREAM) }
+2026-10-26T12:29:19.941578Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=Headers { stream_id: StreamId(13), flags: (0x5: END_HEADERS | END_STREAM) }
+2026-10-26T12:29:19.960048Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Headers { stream_id: StreamId(11), flags: (0x4: END_HEADERS) }
+2026-10-26T12:29:19.960477Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Headers { stream_id: StreamId(9), flags: (0x4: END_HEADERS) }
+2026-10-26T12:29:19.962517Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(9) }
+2026-10-26T12:29:19.962794Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 22891 }
+2026-10-26T12:29:19.965033Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(9), flags: (0x1: END_STREAM) }
+2026-10-26T12:29:19.970934Z DEBUG explorer_core::session::net_items: sous-ressource script tab=1 src=Some("https://www.openstreetmap.org/assets/turbo-c17cce38062be94687ab3e688cf14213be635ee2b55e63d9d5778659fab0c27b.js") module=true sec_ok=true sri_ok=true
+2026-10-26T12:29:19.971293Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=Headers { stream_id: StreamId(15), flags: (0x5: END_HEADERS | END_STREAM) }
+2026-10-26T12:29:19.971885Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Headers { stream_id: StreamId(7), flags: (0x4: END_HEADERS) }
+2026-10-26T12:29:19.972018Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7), flags: (0x1: END_STREAM) }
+2026-10-26T12:29:19.974725Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=Headers { stream_id: StreamId(17), flags: (0x5: END_HEADERS | END_STREAM) }
+2026-10-26T12:29:19.977296Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Headers { stream_id: StreamId(5), flags: (0x4: END_HEADERS) }
+2026-10-26T12:29:19.977413Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(5), flags: (0x1: END_STREAM) }
+2026-10-26T12:29:19.977583Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Headers { stream_id: StreamId(13), flags: (0x4: END_HEADERS) }
+2026-10-26T12:29:19.978782Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(13), flags: (0x1: END_STREAM) }
+2026-10-26T12:29:19.978861Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 23654 }
+2026-10-26T12:29:19.978901Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=Headers { stream_id: StreamId(19), flags: (0x5: END_HEADERS | END_STREAM) }
+2026-10-26T12:29:19.981166Z DEBUG explorer_core::session::net_items: sous-ressource script tab=1 src=Some("https://www.openstreetmap.org/assets/i18n/en-e74144985e09be405fab7070256bc2d294633a989f292206d1eb4755ef7aeda7.js") module=false sec_ok=true sri_ok=true
+2026-10-26T12:29:19.981398Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(11) }
+2026-10-26T12:29:19.981547Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Headers { stream_id: StreamId(3), flags: (0x4: END_HEADERS) }
+2026-10-26T12:29:19.982715Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(11) }
+2026-10-26T12:29:19.982778Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(3) }
+2026-10-26T12:29:19.982822Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 18990 }
+2026-10-26T12:29:19.983002Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 22891 }
+2026-10-26T12:29:19.983038Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(11), size_increment: 25686 }
+2026-10-26T12:29:19.996089Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Headers { stream_id: StreamId(15), flags: (0x4: END_HEADERS) }
+2026-10-26T12:29:19.996800Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Headers { stream_id: StreamId(17), flags: (0x4: END_HEADERS) }
+2026-10-26T12:29:19.998538Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(11) }
+2026-10-26T12:29:19.998599Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(3) }
+2026-10-26T12:29:19.998985Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Headers { stream_id: StreamId(19), flags: (0x4: END_HEADERS) }
+2026-10-26T12:29:19.999055Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 23654 }
+2026-10-26T12:29:20.010952Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(15) }
+2026-10-26T12:29:20.012002Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(11) }
+2026-10-26T12:29:20.012169Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 32200 }
+2026-10-26T12:29:20.012205Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(11), size_increment: 32768 }
+2026-10-26T12:29:20.012891Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(3) }
+2026-10-26T12:29:20.013040Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(3), size_increment: 23458 }
+2026-10-26T12:29:20.027523Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(11) }
+2026-10-26T12:29:20.027678Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(3) }
+2026-10-26T12:29:20.027744Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(15), flags: (0x1: END_STREAM) }
+2026-10-26T12:29:20.027797Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(3) }
+2026-10-26T12:29:20.031073Z DEBUG explorer_core::session::net_items: sous-ressource script tab=1 src=Some("https://www.openstreetmap.org/assets/index-23675379e2a622eb8c83071fa7056075bba0a77b506ae832c002dd66cecf95a2.js") module=false sec_ok=true sri_ok=true
+2026-10-26T12:29:20.031168Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 33335 }
+2026-10-26T12:29:20.031448Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(3), flags: (0x1: END_STREAM) }
+2026-10-26T12:29:20.031546Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(11) }
+2026-10-26T12:29:20.031616Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(11) }
+2026-10-26T12:29:20.041322Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 32200 }
+2026-10-26T12:29:20.041404Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(11), size_increment: 32966 }
+2026-10-26T12:29:20.050378Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(11) }
+2026-10-26T12:29:20.050492Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(11) }
+2026-10-26T12:29:20.050549Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(17) }
+2026-10-26T12:29:20.050732Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 33335 }
+2026-10-26T12:29:20.050768Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(11), size_increment: 32569 }
+2026-10-26T12:29:20.061431Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(11) }
+2026-10-26T12:29:20.061628Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(19) }
+2026-10-26T12:29:20.061699Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(17), flags: (0x1: END_STREAM) }
+2026-10-26T12:29:20.064181Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 29588 }
+2026-10-26T12:29:20.064601Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(11) }
+2026-10-26T12:29:20.078069Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(11) }
+2026-10-26T12:29:20.078201Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(11) }
+2026-10-26T12:29:20.078268Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(11) }
+2026-10-26T12:29:20.078448Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 35947 }
+2026-10-26T12:29:20.078484Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(11), size_increment: 40578 }
+2026-10-26T12:29:20.094921Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(11) }
+2026-10-26T12:29:20.095044Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(11) }
+2026-10-26T12:29:20.095088Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(19) }
+2026-10-26T12:29:20.095261Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 29588 }
+2026-10-26T12:29:20.095298Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(11), size_increment: 24957 }
+2026-10-26T12:29:20.110769Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(11) }
+2026-10-26T12:29:20.110878Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(19), flags: (0x1: END_STREAM) }
+2026-10-26T12:29:20.111813Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(11) }
+2026-10-26T12:29:20.111871Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(11) }
+2026-10-26T12:29:20.112037Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 35947 }
+2026-10-26T12:29:20.112073Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(11), size_increment: 31492 }
+2026-10-26T12:29:20.128191Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(11) }
+2026-10-26T12:29:20.128308Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(11) }
+2026-10-26T12:29:20.128460Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 29588 }
+2026-10-26T12:29:20.128496Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(11), size_increment: 29588 }
+2026-10-26T12:29:20.144220Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(11) }
+2026-10-26T12:29:20.145048Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(11) }
+2026-10-26T12:29:20.145107Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(11) }
+2026-10-26T12:29:20.145252Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 35947 }
+2026-10-26T12:29:20.145288Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(11), size_increment: 35947 }
+2026-10-26T12:29:20.161189Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(11) }
+2026-10-26T12:29:20.161312Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(11) }
+2026-10-26T12:29:20.161552Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 29588 }
+2026-10-26T12:29:20.161593Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(11), size_increment: 29588 }
+2026-10-26T12:29:20.176934Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(11) }
+2026-10-26T12:29:20.178124Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(11) }
+2026-10-26T12:29:20.178188Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(11) }
+2026-10-26T12:29:20.178331Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 35947 }
+2026-10-26T12:29:20.178366Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(11), size_increment: 35947 }
+2026-10-26T12:29:20.194146Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(11) }
+2026-10-26T12:29:20.194285Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(11), flags: (0x1: END_STREAM) }
+2026-10-26T12:29:20.260092Z DEBUG explorer_core::session::net_items: sous-ressource script tab=1 src=Some("https://www.openstreetmap.org/assets/application-3901b15b6f7d3d1a2230f955618d0bf378642e9ba2d6e87a67ac7c26875231cf.js") module=false sec_ok=true sri_ok=true
+2026-10-26T12:29:20.518880Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 27152 }
+2026-10-26T12:29:20.518959Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=Headers { stream_id: StreamId(21), flags: (0x5: END_HEADERS | END_STREAM) }
+2026-10-26T12:29:20.537795Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Headers { stream_id: StreamId(21), flags: (0x4: END_HEADERS) }
+2026-10-26T12:29:20.538198Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(21), flags: (0x1: END_STREAM) }
+2026-10-26T12:29:20.539794Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=Headers { stream_id: StreamId(23), flags: (0x5: END_HEADERS | END_STREAM) }
+2026-10-26T12:29:20.558981Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Headers { stream_id: StreamId(23), flags: (0x4: END_HEADERS) }
+2026-10-26T12:29:20.559069Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(23), flags: (0x1: END_STREAM) }
+2026-10-26T12:29:20.560344Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=Headers { stream_id: StreamId(25), flags: (0x5: END_HEADERS | END_STREAM) }
+2026-10-26T12:29:20.578825Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Headers { stream_id: StreamId(25), flags: (0x4: END_HEADERS) }
+2026-10-26T12:29:20.579092Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(25), flags: (0x1: END_STREAM) }
+2026-10-26T12:29:20.580573Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=Headers { stream_id: StreamId(27), flags: (0x5: END_HEADERS | END_STREAM) }
+2026-10-26T12:29:20.599278Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Headers { stream_id: StreamId(27), flags: (0x4: END_HEADERS) }
+2026-10-26T12:29:20.600142Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(27) }
+2026-10-26T12:29:20.600317Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 23872 }
+2026-10-26T12:29:20.601062Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(27) }
+2026-10-26T12:29:20.601237Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(27), size_increment: 32768 }
+2026-10-26T12:29:20.601898Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(27) }
+2026-10-26T12:29:20.601952Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 16384 }
+2026-10-26T12:29:20.602251Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(27) }
+2026-10-26T12:29:20.602481Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 25279 }
+2026-10-26T12:29:20.602518Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(27), size_increment: 25279 }
+2026-10-26T12:29:20.617303Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(27) }
+2026-10-26T12:29:20.620517Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(27) }
+2026-10-26T12:29:20.620582Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(27) }
+2026-10-26T12:29:20.620762Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 40256 }
+2026-10-26T12:29:20.620796Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(27), size_increment: 40256 }
+2026-10-26T12:29:20.635031Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(27) }
+2026-10-26T12:29:20.635118Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(27) }
+2026-10-26T12:29:20.635369Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(27) }
+2026-10-26T12:29:20.635506Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 25279 }
+2026-10-26T12:29:20.635540Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(27), size_increment: 25279 }
+2026-10-26T12:29:20.652009Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(27) }
+2026-10-26T12:29:20.652819Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(27) }
+2026-10-26T12:29:20.652885Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(27) }
+2026-10-26T12:29:20.652929Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 16384 }
+2026-10-26T12:29:20.653087Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 23872 }
+2026-10-26T12:29:20.653121Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(27), size_increment: 40256 }
+2026-10-26T12:29:20.667833Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(27), flags: (0x1: END_STREAM) }
+2026-10-26T12:29:20.668384Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=Headers { stream_id: StreamId(29), flags: (0x5: END_HEADERS | END_STREAM) }
+2026-10-26T12:29:20.726065Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Headers { stream_id: StreamId(29), flags: (0x4: END_HEADERS) }
+2026-10-26T12:29:20.726170Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(29), flags: (0x1: END_STREAM) }
+2026-10-26T12:29:20.726866Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=Headers { stream_id: StreamId(31), flags: (0x5: END_HEADERS | END_STREAM) }
+2026-10-26T12:29:20.792457Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Headers { stream_id: StreamId(31), flags: (0x4: END_HEADERS) }
+2026-10-26T12:29:20.792786Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(31), flags: (0x1: END_STREAM) }
+2026-10-26T12:29:20.793261Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=Headers { stream_id: StreamId(33), flags: (0x5: END_HEADERS | END_STREAM) }
+2026-10-26T12:29:20.872100Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Headers { stream_id: StreamId(33), flags: (0x4: END_HEADERS) }
+2026-10-26T12:29:20.872194Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(33), flags: (0x1: END_STREAM) }
+2026-10-26T12:29:20.872695Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=Headers { stream_id: StreamId(35), flags: (0x5: END_HEADERS | END_STREAM) }
+2026-10-26T12:29:20.891554Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Headers { stream_id: StreamId(35), flags: (0x4: END_HEADERS) }
+2026-10-26T12:29:20.891679Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(35), flags: (0x1: END_STREAM) }
+2026-10-26T12:29:20.892206Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=Headers { stream_id: StreamId(37), flags: (0x5: END_HEADERS | END_STREAM) }
+2026-10-26T12:29:20.910441Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Headers { stream_id: StreamId(37), flags: (0x4: END_HEADERS) }
+2026-10-26T12:29:20.910554Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(37), flags: (0x1: END_STREAM) }
+2026-10-26T12:29:20.910998Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=Headers { stream_id: StreamId(39), flags: (0x5: END_HEADERS | END_STREAM) }
+2026-10-26T12:29:20.929192Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Headers { stream_id: StreamId(39), flags: (0x4: END_HEADERS) }
+2026-10-26T12:29:20.929311Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(39), flags: (0x1: END_STREAM) }
+2026-10-26T12:29:21.150206Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=Headers { stream_id: StreamId(41), flags: (0x5: END_HEADERS | END_STREAM) }
+2026-10-26T12:29:21.168165Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Headers { stream_id: StreamId(41), flags: (0x4: END_HEADERS) }
+2026-10-26T12:29:21.169714Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(41) }
+2026-10-26T12:29:21.169918Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 27331 }
+2026-10-26T12:29:21.170830Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(41) }
+2026-10-26T12:29:21.170914Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(41) }
+2026-10-26T12:29:21.170973Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(41) }
+2026-10-26T12:29:21.171114Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 38204 }
+2026-10-26T12:29:21.171150Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(41), size_increment: 54588 }
+2026-10-26T12:29:21.186507Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(41) }
+2026-10-26T12:29:21.186858Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(41) }
+2026-10-26T12:29:21.204616Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(41) }
+2026-10-26T12:29:21.204882Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 27331 }
+2026-10-26T12:29:21.204932Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(41), size_increment: 27331 }
+2026-10-26T12:29:21.205470Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(41) }
+2026-10-26T12:29:21.205614Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(41) }
+2026-10-26T12:29:21.205690Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(41) }
+2026-10-26T12:29:21.205911Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 38204 }
+2026-10-26T12:29:21.205957Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(41), size_increment: 38204 }
+2026-10-26T12:29:21.222679Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(41) }
+2026-10-26T12:29:21.223097Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(41), flags: (0x1: END_STREAM) }
+2026-10-26T12:29:21.223693Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=Headers { stream_id: StreamId(43), flags: (0x5: END_HEADERS | END_STREAM) }
+2026-10-26T12:29:21.257541Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Headers { stream_id: StreamId(43), flags: (0x4: END_HEADERS) }
+2026-10-26T12:29:21.258259Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(43) }
+2026-10-26T12:29:21.258522Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 30273 }
+2026-10-26T12:29:21.260010Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(43) }
+2026-10-26T12:29:21.260068Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(43) }
+2026-10-26T12:29:21.260141Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(43) }
+2026-10-26T12:29:21.260281Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 35262 }
+2026-10-26T12:29:21.260316Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(43), size_increment: 51646 }
+2026-10-26T12:29:21.275371Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(43) }
+2026-10-26T12:29:21.275751Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(43) }
+2026-10-26T12:29:21.293284Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(43) }
+2026-10-26T12:29:21.293531Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 30273 }
+2026-10-26T12:29:21.293570Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(43), size_increment: 30273 }
+2026-10-26T12:29:21.294350Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(43) }
+2026-10-26T12:29:21.294427Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(43) }
+2026-10-26T12:29:21.294484Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(43) }
+2026-10-26T12:29:21.294613Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 35262 }
+2026-10-26T12:29:21.294647Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(43), size_increment: 35262 }
+2026-10-26T12:29:21.310766Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(43) }
+2026-10-26T12:29:21.311974Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(43) }
+2026-10-26T12:29:21.312037Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(43) }
+2026-10-26T12:29:21.312246Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 30273 }
+2026-10-26T12:29:21.312285Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(43), size_increment: 30273 }
+2026-10-26T12:29:21.328624Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(43) }
+2026-10-26T12:29:21.328726Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(43) }
+2026-10-26T12:29:21.328779Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(43), flags: (0x1: END_STREAM) }
+2026-10-26T12:29:21.369749Z DEBUG explorer_core::session::net_items: prefetch modules tab=1 async_mods=0 post_modules=1
+2026-10-26T12:29:21.451847Z DEBUG explorer_core::session::net_items: module prefetché tab=1 name=https://www.openstreetmap.org/assets/turbo-c17cce38062be94687ab3e688cf14213be635ee2b55e63d9d5778659fab0c27b.js sources=1
+2026-10-26T12:29:21.451930Z  INFO explorer_core::session::navigate: nav: sous-ressources ok → commit tab=1 ms=1683
+2026-10-26T12:29:21.452510Z  INFO explorer_core::session::js_glue: script: eval… tab=1 bytes=1529756
+2026-10-26T12:29:27.860255Z  INFO explorer_core::session::js_glue: script: eval fin tab=1 ms=6407 ok=false
+2026-10-26T12:29:27.860356Z DEBUG explorer_core::session::js_glue: script en échec tab=1 error=exception js : TypeError: Worker: no loader installed
+    at <anonymous> (https://www.openstreetmap.org/assets/application-3901b15b6f7d3d1a2230f955618d0bf378642e9ba2d6e87a67ac7c26875231cf.js:222:20668)
+    at <anonymous> (https://www.openstreetmap.org/assets/application-3901b15b6f7d3d1a2230f955618d0bf378642e9ba2d6e87a67ac7c26875231cf.js:222:21178)
+    at u (https://www.openstreetmap.org/assets/application-3901b15b6f7d3d1a2230f955618d0bf378642e9ba2d6e87a67ac7c26875231cf.js:220:18495)
+    at <anonymous> (https://www.openstreetmap.org/assets/application-3901b15b6f7d3d1a2230f955618d0bf378642e9ba2d6e87a67ac7c26875231cf.js:223:18988)
+    at w (https://www.openstreetmap.org/assets/application-3901b15b6f7d3d1a2230f955618d0bf378642e9ba2d6e87a67ac7c26875231cf.js:220:21878)
+    at <anonymous> (https://www.openstreetmap.org/assets/application-3901b15b6f7d3d1a2230f955618d0bf378642e9ba2d6e87a67ac7c26875231cf.js:237:31785)
+2026-10-26T12:29:27.958899Z  INFO explorer_core::session::js_glue: script: eval… tab=1 bytes=27578
+2026-10-26T12:29:27.968789Z  INFO explorer_core::session::js_glue: script: eval fin tab=1 ms=9 ok=false
+2026-10-26T12:29:27.968858Z DEBUG explorer_core::session::js_glue: script en échec tab=1 error=exception js : TypeError: cannot read `store` of Undefined
+2026-10-26T12:29:27.970573Z  INFO explorer_core::session::js_glue: script: eval… tab=1 bytes=57017
+2026-10-26T12:29:28.068634Z  INFO explorer_core::session::js_glue: script: eval fin tab=1 ms=98 ok=true
+2026-10-26T12:29:28.068795Z DEBUG explorer_core::session::js_glue: module eval… tab=1 name=https://www.openstreetmap.org/assets/turbo-c17cce38062be94687ab3e688cf14213be635ee2b55e63d9d5778659fab0c27b.js
+2026-10-26T12:29:28.166337Z DEBUG explorer_jscore::dom_host: customElements.define name=turbo-frame
+2026-10-26T12:29:28.172993Z DEBUG explorer_jscore::dom_host: customElements.define name=turbo-stream
+2026-10-26T12:29:28.173234Z DEBUG explorer_jscore::dom_host: customElements.define name=turbo-stream-source
+2026-10-26T12:29:28.176781Z DEBUG explorer_jscore::dom_host: customElements.define name=turbo-cable-stream-source
+2026-10-26T12:29:28.178048Z DEBUG explorer_core::session::js_glue: module eval fin tab=1 ms=108
+2026-10-26T12:29:28.195254Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:29:28.195430Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 32834 }
+2026-10-26T12:29:30.046550Z  INFO explorer_core::session::apply: apply: cascade ms=466
+2026-10-26T12:29:31.789386Z  INFO explorer_core::session::apply: apply: boxtree ms=2209
+2026-10-26T12:29:31.845616Z  INFO explorer_core::session::apply: apply: layout ms=2266
+2026-10-26T12:29:31.930755Z  INFO explorer_core::session::apply: apply: repaint ms=2351
+2026-10-26T12:29:31.933965Z  INFO sync_profile: phase sync tab=1 phase="event.dispatch" us=738
+2026-10-26T12:29:31.944680Z  INFO sync_profile: phase sync tab=1 phase="event.mirror_sync" us=10716
+2026-10-26T12:29:31.944972Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:29:31.945042Z  INFO sync_profile: phase sync tab=1 phase="event.after_script" us=369
+2026-10-26T12:29:31.945071Z  INFO sync_profile: phase sync tab=1 phase="event.poll_net" us=29
+2026-10-26T12:29:31.949413Z  INFO sync_profile: phase sync tab=1 phase="event.dispatch" us=4324
+2026-10-26T12:29:31.950759Z  INFO sync_profile: phase sync tab=1 phase="event.mirror_sync" us=1346
+2026-10-26T12:29:31.950970Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:29:31.951037Z  INFO sync_profile: phase sync tab=1 phase="event.after_script" us=278
+2026-10-26T12:29:31.951063Z  INFO sync_profile: phase sync tab=1 phase="event.poll_net" us=27
+2026-10-26T12:29:31.951981Z  INFO sync_profile: phase sync tab=1 phase="event.dispatch" us=291
+2026-10-26T12:29:31.952083Z  INFO sync_profile: phase sync tab=1 phase="event.mirror_sync" us=101
+2026-10-26T12:29:31.952183Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:29:31.952237Z  INFO sync_profile: phase sync tab=1 phase="event.after_script" us=154
+2026-10-26T12:29:31.952260Z  INFO sync_profile: phase sync tab=1 phase="event.poll_net" us=24
+2026-10-26T12:29:31.952618Z DEBUG explorer_core::session::js_glue: listener dom en échec tab=1 ty="load" error=exception js : TypeError: cannot read `call` of Undefined
+    at <anonymous> (https://www.openstreetmap.org/assets/application-3901b15b6f7d3d1a2230f955618d0bf378642e9ba2d6e87a67ac7c26875231cf.js:62:606)
+    at <anonymous> (https://www.openstreetmap.org/assets/application-3901b15b6f7d3d1a2230f955618d0bf378642e9ba2d6e87a67ac7c26875231cf.js:122:4217)
+    at i (https://www.openstreetmap.org/assets/application-3901b15b6f7d3d1a2230f955618d0bf378642e9ba2d6e87a67ac7c26875231cf.js:32:436)
+2026-10-26T12:29:31.952645Z  INFO sync_profile: phase sync tab=1 phase="event.dispatch" us=370
+2026-10-26T12:29:31.952723Z  INFO sync_profile: phase sync tab=1 phase="event.mirror_sync" us=76
+2026-10-26T12:29:31.952823Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:29:31.952884Z  INFO sync_profile: phase sync tab=1 phase="event.after_script" us=161
+2026-10-26T12:29:31.952909Z  INFO sync_profile: phase sync tab=1 phase="event.poll_net" us=25
+2026-10-26T12:29:31.953693Z  INFO sync_profile: phase sync tab=1 phase="pump.js_run_sync" us=61
+2026-10-26T12:29:31.953772Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:29:31.953923Z  INFO sync_profile: phase sync tab=1 phase="event.dispatch" us=86
+2026-10-26T12:29:31.954015Z  INFO sync_profile: phase sync tab=1 phase="event.mirror_sync" us=90
+2026-10-26T12:29:31.954150Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:29:31.954210Z  INFO sync_profile: phase sync tab=1 phase="event.after_script" us=195
+2026-10-26T12:29:31.954235Z  INFO sync_profile: phase sync tab=1 phase="event.poll_net" us=26
+2026-10-26T12:29:31.954395Z  INFO sync_profile: phase sync tab=1 phase="event.dispatch" us=118
+2026-10-26T12:29:31.954481Z  INFO sync_profile: phase sync tab=1 phase="event.mirror_sync" us=86
+2026-10-26T12:29:31.954583Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:29:31.954644Z  INFO sync_profile: phase sync tab=1 phase="event.after_script" us=163
+2026-10-26T12:29:31.954667Z  INFO sync_profile: phase sync tab=1 phase="event.poll_net" us=23
+[journal : 0 appliqués / 0 replis / 0 classées]
+docs/Rapport vol/captures/2026-10-26_13-29-19_Equipe_8_Instit_www.openstreetmap.org.png — 3147679 octets
+2026-10-26T12:29:32.712324Z  INFO explorer_core::session::navigate: nav: fetch+parse… tab=1
+2026-10-26T12:29:32.760937Z DEBUG h2::client: binding client connection
+2026-10-26T12:29:32.761041Z DEBUG h2::client: client connection bound
+2026-10-26T12:29:32.761084Z DEBUG h2::codec::framed_write: send frame=Settings { flags: (0x0) }
+2026-10-26T12:29:32.761461Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=Headers { stream_id: StreamId(1), flags: (0x5: END_HEADERS | END_STREAM) }
+2026-10-26T12:29:32.792995Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Settings { flags: (0x0), header_table_size: 8192, max_concurrent_streams: 100 }
+2026-10-26T12:29:32.793083Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=Settings { flags: (0x1: ACK) }
+2026-10-26T12:29:32.793135Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=WindowUpdate { stream_id: StreamId(0), size_increment: 16711681 }
+2026-10-26T12:29:32.793177Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Settings { flags: (0x1: ACK) }
+2026-10-26T12:29:32.793207Z DEBUG Connection{peer=Client}: h2::proto::settings: received settings ACK; applying Settings { flags: (0x0) }
+2026-10-26T12:29:32.842946Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Headers { stream_id: StreamId(1), flags: (0x4: END_HEADERS) }
+2026-10-26T12:29:32.843520Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(1), flags: (0x1: END_STREAM) }
+2026-10-26T12:29:32.859308Z  INFO explorer_core::session::navigate: nav: fetch+parse ok → peinture tab=1 ms=146
+2026-10-26T12:29:32.863405Z  INFO explorer_core::session::navigate: nav: peinture ok → sous-ressources tab=1 ms=151
+2026-10-26T12:29:32.863511Z DEBUG explorer_core::session::net_items: script émis src=https://www.openstreetmap.org/assets/turbo-c17cce38062be94687ab3e688cf14213be635ee2b55e63d9d5778659fab0c27b.js module=true
+2026-10-26T12:29:32.863564Z DEBUG explorer_core::session::net_items: script émis src=https://www.openstreetmap.org/assets/application-3901b15b6f7d3d1a2230f955618d0bf378642e9ba2d6e87a67ac7c26875231cf.js module=false
+2026-10-26T12:29:32.863600Z DEBUG explorer_core::session::net_items: script émis src=https://www.openstreetmap.org/assets/i18n/en-e74144985e09be405fab7070256bc2d294633a989f292206d1eb4755ef7aeda7.js module=false
+2026-10-26T12:29:32.863626Z DEBUG explorer_core::session::net_items: script émis src=https://www.openstreetmap.org/assets/index-23675379e2a622eb8c83071fa7056075bba0a77b506ae832c002dd66cecf95a2.js module=false
+2026-10-26T12:29:32.864544Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=Headers { stream_id: StreamId(3), flags: (0x5: END_HEADERS | END_STREAM) }
+2026-10-26T12:29:32.864686Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=Headers { stream_id: StreamId(5), flags: (0x5: END_HEADERS | END_STREAM) }
+2026-10-26T12:29:32.864754Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=Headers { stream_id: StreamId(7), flags: (0x5: END_HEADERS | END_STREAM) }
+2026-10-26T12:29:32.864816Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=Headers { stream_id: StreamId(9), flags: (0x5: END_HEADERS | END_STREAM) }
+2026-10-26T12:29:32.864885Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=Headers { stream_id: StreamId(11), flags: (0x5: END_HEADERS | END_STREAM) }
+2026-10-26T12:29:32.864947Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=Headers { stream_id: StreamId(13), flags: (0x5: END_HEADERS | END_STREAM) }
+2026-10-26T12:29:32.884829Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Headers { stream_id: StreamId(3), flags: (0x4: END_HEADERS) }
+2026-10-26T12:29:32.885085Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Headers { stream_id: StreamId(7), flags: (0x4: END_HEADERS) }
+2026-10-26T12:29:32.885304Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Headers { stream_id: StreamId(9), flags: (0x4: END_HEADERS) }
+2026-10-26T12:29:32.886724Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(3) }
+2026-10-26T12:29:32.887001Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 22263 }
+2026-10-26T12:29:32.889157Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(7), flags: (0x1: END_STREAM) }
+2026-10-26T12:29:32.893235Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=Headers { stream_id: StreamId(15), flags: (0x5: END_HEADERS | END_STREAM) }
+2026-10-26T12:29:32.893720Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(9) }
+2026-10-26T12:29:32.893918Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 25001 }
+2026-10-26T12:29:32.900880Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Headers { stream_id: StreamId(11), flags: (0x4: END_HEADERS) }
+2026-10-26T12:29:32.903486Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(3) }
+2026-10-26T12:29:32.903631Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(9) }
+2026-10-26T12:29:32.903936Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Headers { stream_id: StreamId(5), flags: (0x4: END_HEADERS) }
+2026-10-26T12:29:32.904149Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Headers { stream_id: StreamId(13), flags: (0x4: END_HEADERS) }
+2026-10-26T12:29:32.904579Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(3), size_increment: 32131 }
+2026-10-26T12:29:32.905642Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(3), flags: (0x1: END_STREAM) }
+2026-10-26T12:29:32.905785Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 18271 }
+2026-10-26T12:29:32.921604Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=Headers { stream_id: StreamId(17), flags: (0x5: END_HEADERS | END_STREAM) }
+2026-10-26T12:29:32.922060Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(9) }
+2026-10-26T12:29:32.922180Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(5), flags: (0x1: END_STREAM) }
+2026-10-26T12:29:32.922297Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(11) }
+2026-10-26T12:29:32.922380Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(13) }
+2026-10-26T12:29:32.922567Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Headers { stream_id: StreamId(15), flags: (0x4: END_HEADERS) }
+2026-10-26T12:29:32.922651Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 12741 }
+2026-10-26T12:29:32.924297Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 34523 }
+2026-10-26T12:29:32.924405Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(9), size_increment: 27149 }
+2026-10-26T12:29:32.924457Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=Headers { stream_id: StreamId(19), flags: (0x5: END_HEADERS | END_STREAM) }
+2026-10-26T12:29:32.924955Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(9), flags: (0x1: END_STREAM) }
+2026-10-26T12:29:32.925044Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(11) }
+2026-10-26T12:29:32.925108Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(13) }
+2026-10-26T12:29:32.931304Z DEBUG explorer_core::session::net_items: sous-ressource script tab=1 src=Some("https://www.openstreetmap.org/assets/turbo-c17cce38062be94687ab3e688cf14213be635ee2b55e63d9d5778659fab0c27b.js") module=true sec_ok=true sri_ok=true
+2026-10-26T12:29:32.931558Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(11), size_increment: 32768 }
+2026-10-26T12:29:32.940266Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(15) }
+2026-10-26T12:29:32.940399Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 18271 }
+2026-10-26T12:29:32.940919Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Headers { stream_id: StreamId(17), flags: (0x4: END_HEADERS) }
+2026-10-26T12:29:32.958189Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(11) }
+2026-10-26T12:29:32.958299Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(13), flags: (0x1: END_STREAM) }
+2026-10-26T12:29:32.958352Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(15), flags: (0x1: END_STREAM) }
+2026-10-26T12:29:32.958404Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(11) }
+2026-10-26T12:29:32.958617Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Headers { stream_id: StreamId(19), flags: (0x4: END_HEADERS) }
+2026-10-26T12:29:32.958683Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 12741 }
+2026-10-26T12:29:32.960707Z DEBUG explorer_core::session::net_items: sous-ressource script tab=1 src=Some("https://www.openstreetmap.org/assets/i18n/en-e74144985e09be405fab7070256bc2d294633a989f292206d1eb4755ef7aeda7.js") module=false sec_ok=true sri_ok=true
+2026-10-26T12:29:32.963527Z DEBUG explorer_core::session::net_items: sous-ressource script tab=1 src=Some("https://www.openstreetmap.org/assets/index-23675379e2a622eb8c83071fa7056075bba0a77b506ae832c002dd66cecf95a2.js") module=false sec_ok=true sri_ok=true
+2026-10-26T12:29:32.963690Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 34523 }
+2026-10-26T12:29:32.963732Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(11), size_increment: 27162 }
+2026-10-26T12:29:32.973684Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(11) }
+2026-10-26T12:29:32.973796Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(17), flags: (0x1: END_STREAM) }
+2026-10-26T12:29:32.973889Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(19) }
+2026-10-26T12:29:32.991378Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(11) }
+2026-10-26T12:29:32.991504Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 18271 }
+2026-10-26T12:29:32.992308Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(11) }
+2026-10-26T12:29:32.992383Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(11) }
+2026-10-26T12:29:32.992430Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 16384 }
+2026-10-26T12:29:32.992590Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 30880 }
+2026-10-26T12:29:32.992625Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(11), size_increment: 51322 }
+2026-10-26T12:29:33.009230Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(11) }
+2026-10-26T12:29:33.009381Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(19) }
+2026-10-26T12:29:33.025693Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(11) }
+2026-10-26T12:29:33.025825Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(19) }
+2026-10-26T12:29:33.025888Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(19), flags: (0x1: END_STREAM) }
+2026-10-26T12:29:33.025944Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 18271 }
+2026-10-26T12:29:33.027146Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(11) }
+2026-10-26T12:29:33.027241Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(11) }
+2026-10-26T12:29:33.027287Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 20597 }
+2026-10-26T12:29:33.027470Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 26667 }
+2026-10-26T12:29:33.027506Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(11), size_increment: 44939 }
+2026-10-26T12:29:33.043578Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(11) }
+2026-10-26T12:29:33.043691Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(11) }
+2026-10-26T12:29:33.060007Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(11) }
+2026-10-26T12:29:33.060108Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(11) }
+2026-10-26T12:29:33.060151Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 18271 }
+2026-10-26T12:29:33.060356Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(11), size_increment: 38869 }
+2026-10-26T12:29:33.061413Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(11) }
+2026-10-26T12:29:33.061501Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(11) }
+2026-10-26T12:29:33.061555Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 20598 }
+2026-10-26T12:29:33.061779Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 26666 }
+2026-10-26T12:29:33.061826Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(11), size_increment: 26666 }
+2026-10-26T12:29:33.077852Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(11) }
+2026-10-26T12:29:33.077954Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(11) }
+2026-10-26T12:29:33.094352Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(11) }
+2026-10-26T12:29:33.094490Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(11) }
+2026-10-26T12:29:33.094546Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 18271 }
+2026-10-26T12:29:33.094934Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(11), size_increment: 38870 }
+2026-10-26T12:29:33.095857Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(11) }
+2026-10-26T12:29:33.095938Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(11) }
+2026-10-26T12:29:33.096082Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 20599 }
+2026-10-26T12:29:33.096290Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 26665 }
+2026-10-26T12:29:33.096334Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(11), size_increment: 26665 }
+2026-10-26T12:29:33.113440Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(11) }
+2026-10-26T12:29:33.113541Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(11) }
+2026-10-26T12:29:33.128561Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(11) }
+2026-10-26T12:29:33.128656Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(11) }
+2026-10-26T12:29:33.128699Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 18271 }
+2026-10-26T12:29:33.129167Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(11), size_increment: 38871 }
+2026-10-26T12:29:33.129943Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(11) }
+2026-10-26T12:29:33.129992Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(11) }
+2026-10-26T12:29:33.130033Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 20600 }
+2026-10-26T12:29:33.130182Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 26664 }
+2026-10-26T12:29:33.130228Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(11), size_increment: 26664 }
+2026-10-26T12:29:33.147509Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(11) }
+2026-10-26T12:29:33.147610Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(11) }
+2026-10-26T12:29:33.162114Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(11), flags: (0x1: END_STREAM) }
+2026-10-26T12:29:33.222404Z DEBUG explorer_core::session::net_items: sous-ressource script tab=1 src=Some("https://www.openstreetmap.org/assets/application-3901b15b6f7d3d1a2230f955618d0bf378642e9ba2d6e87a67ac7c26875231cf.js") module=false sec_ok=true sri_ok=true
+2026-10-26T12:29:33.464628Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 26442 }
+2026-10-26T12:29:33.464716Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=Headers { stream_id: StreamId(21), flags: (0x5: END_HEADERS | END_STREAM) }
+2026-10-26T12:29:33.482638Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Headers { stream_id: StreamId(21), flags: (0x4: END_HEADERS) }
+2026-10-26T12:29:33.482766Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(21), flags: (0x1: END_STREAM) }
+2026-10-26T12:29:33.484361Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=Headers { stream_id: StreamId(23), flags: (0x5: END_HEADERS | END_STREAM) }
+2026-10-26T12:29:33.502720Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Headers { stream_id: StreamId(23), flags: (0x4: END_HEADERS) }
+2026-10-26T12:29:33.502823Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(23), flags: (0x1: END_STREAM) }
+2026-10-26T12:29:33.503914Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=Headers { stream_id: StreamId(25), flags: (0x5: END_HEADERS | END_STREAM) }
+2026-10-26T12:29:33.522724Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Headers { stream_id: StreamId(25), flags: (0x4: END_HEADERS) }
+2026-10-26T12:29:33.522878Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(25), flags: (0x1: END_STREAM) }
+2026-10-26T12:29:33.524168Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=Headers { stream_id: StreamId(27), flags: (0x5: END_HEADERS | END_STREAM) }
+2026-10-26T12:29:33.545888Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Headers { stream_id: StreamId(27), flags: (0x4: END_HEADERS) }
+2026-10-26T12:29:33.546043Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(27) }
+2026-10-26T12:29:33.546487Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 23333 }
+2026-10-26T12:29:33.547325Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(27) }
+2026-10-26T12:29:33.547419Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(27) }
+2026-10-26T12:29:33.547480Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(27) }
+2026-10-26T12:29:33.547643Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 42202 }
+2026-10-26T12:29:33.547678Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(27), size_increment: 58047 }
+2026-10-26T12:29:33.563638Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(27) }
+2026-10-26T12:29:33.581323Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(27) }
+2026-10-26T12:29:33.581604Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 23334 }
+2026-10-26T12:29:33.581654Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(27), size_increment: 23334 }
+2026-10-26T12:29:33.583088Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(27) }
+2026-10-26T12:29:33.583201Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(27) }
+2026-10-26T12:29:33.583283Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(27) }
+2026-10-26T12:29:33.583477Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 42201 }
+2026-10-26T12:29:33.583522Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(27), size_increment: 42201 }
+2026-10-26T12:29:33.599893Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(27) }
+2026-10-26T12:29:33.600005Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(27) }
+2026-10-26T12:29:33.600167Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 23334 }
+2026-10-26T12:29:33.600204Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(27), size_increment: 23334 }
+2026-10-26T12:29:33.615872Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(27) }
+2026-10-26T12:29:33.616490Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(27) }
+2026-10-26T12:29:33.616556Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(27), flags: (0x1: END_STREAM) }
+2026-10-26T12:29:33.616953Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 26774 }
+2026-10-26T12:29:33.617004Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=Headers { stream_id: StreamId(29), flags: (0x5: END_HEADERS | END_STREAM) }
+2026-10-26T12:29:33.696282Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Headers { stream_id: StreamId(29), flags: (0x5: END_HEADERS | END_STREAM) }
+2026-10-26T12:29:33.696738Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=Headers { stream_id: StreamId(31), flags: (0x5: END_HEADERS | END_STREAM) }
+2026-10-26T12:29:33.767707Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Headers { stream_id: StreamId(31), flags: (0x4: END_HEADERS) }
+2026-10-26T12:29:33.767813Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(31), flags: (0x1: END_STREAM) }
+2026-10-26T12:29:33.768210Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=Headers { stream_id: StreamId(33), flags: (0x5: END_HEADERS | END_STREAM) }
+2026-10-26T12:29:33.840567Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Headers { stream_id: StreamId(33), flags: (0x4: END_HEADERS) }
+2026-10-26T12:29:33.840680Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(33), flags: (0x1: END_STREAM) }
+2026-10-26T12:29:33.841101Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=Headers { stream_id: StreamId(35), flags: (0x5: END_HEADERS | END_STREAM) }
+2026-10-26T12:29:33.860064Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Headers { stream_id: StreamId(35), flags: (0x4: END_HEADERS) }
+2026-10-26T12:29:33.860197Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(35), flags: (0x1: END_STREAM) }
+2026-10-26T12:29:33.860730Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=Headers { stream_id: StreamId(37), flags: (0x5: END_HEADERS | END_STREAM) }
+2026-10-26T12:29:33.879713Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Headers { stream_id: StreamId(37), flags: (0x4: END_HEADERS) }
+2026-10-26T12:29:33.879819Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(37), flags: (0x1: END_STREAM) }
+2026-10-26T12:29:33.880239Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=Headers { stream_id: StreamId(39), flags: (0x5: END_HEADERS | END_STREAM) }
+2026-10-26T12:29:33.899969Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Headers { stream_id: StreamId(39), flags: (0x4: END_HEADERS) }
+2026-10-26T12:29:33.900079Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(39), flags: (0x1: END_STREAM) }
+2026-10-26T12:29:34.082757Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=Headers { stream_id: StreamId(41), flags: (0x5: END_HEADERS | END_STREAM) }
+2026-10-26T12:29:34.101156Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Headers { stream_id: StreamId(41), flags: (0x4: END_HEADERS) }
+2026-10-26T12:29:34.102784Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(41) }
+2026-10-26T12:29:34.103703Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(41) }
+2026-10-26T12:29:34.103783Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 17479 }
+2026-10-26T12:29:34.103958Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(41), size_increment: 32768 }
+2026-10-26T12:29:34.104936Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(41) }
+2026-10-26T12:29:34.105029Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(41) }
+2026-10-26T12:29:34.105079Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(41) }
+2026-10-26T12:29:34.105130Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 16384 }
+2026-10-26T12:29:34.105300Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 31672 }
+2026-10-26T12:29:34.105334Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(41), size_increment: 31672 }
+2026-10-26T12:29:34.120354Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(41) }
+2026-10-26T12:29:34.122400Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(41) }
+2026-10-26T12:29:34.138524Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(41) }
+2026-10-26T12:29:34.138649Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 17479 }
+2026-10-26T12:29:34.138845Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(41), size_increment: 33863 }
+2026-10-26T12:29:34.139428Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(41) }
+2026-10-26T12:29:34.139494Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(41) }
+2026-10-26T12:29:34.139534Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(41) }
+2026-10-26T12:29:34.139574Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 16384 }
+2026-10-26T12:29:34.139734Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 31672 }
+2026-10-26T12:29:34.139768Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(41), size_increment: 31672 }
+2026-10-26T12:29:34.155772Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(41), flags: (0x1: END_STREAM) }
+2026-10-26T12:29:34.156426Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=Headers { stream_id: StreamId(43), flags: (0x5: END_HEADERS | END_STREAM) }
+2026-10-26T12:29:34.191860Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Headers { stream_id: StreamId(43), flags: (0x4: END_HEADERS) }
+2026-10-26T12:29:34.193279Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(43) }
+2026-10-26T12:29:34.194366Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(43) }
+2026-10-26T12:29:34.194499Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 20421 }
+2026-10-26T12:29:34.194730Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(43), size_increment: 32768 }
+2026-10-26T12:29:34.195143Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(43) }
+2026-10-26T12:29:34.195208Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(43) }
+2026-10-26T12:29:34.195251Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 16384 }
+2026-10-26T12:29:34.195400Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 28730 }
+2026-10-26T12:29:34.195434Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(43), size_increment: 28730 }
+2026-10-26T12:29:34.211235Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(43) }
+2026-10-26T12:29:34.211747Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(43) }
+2026-10-26T12:29:34.212277Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(43) }
+2026-10-26T12:29:34.229364Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(43) }
+2026-10-26T12:29:34.229469Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(43) }
+2026-10-26T12:29:34.229530Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(43) }
+2026-10-26T12:29:34.229574Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 20421 }
+2026-10-26T12:29:34.229779Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 45114 }
+2026-10-26T12:29:34.229813Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(43), size_increment: 65535 }
+2026-10-26T12:29:34.263031Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(43) }
+2026-10-26T12:29:34.264717Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(43) }
+2026-10-26T12:29:34.265523Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(43) }
+2026-10-26T12:29:34.265579Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(43) }
+2026-10-26T12:29:34.265641Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(43), flags: (0x1: END_STREAM) }
+2026-10-26T12:29:34.265694Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 20423 }
+2026-10-26T12:29:34.302796Z DEBUG explorer_core::session::net_items: prefetch modules tab=1 async_mods=0 post_modules=1
+2026-10-26T12:29:34.383168Z DEBUG explorer_core::session::net_items: module prefetché tab=1 name=https://www.openstreetmap.org/assets/turbo-c17cce38062be94687ab3e688cf14213be635ee2b55e63d9d5778659fab0c27b.js sources=1
+2026-10-26T12:29:34.383249Z  INFO explorer_core::session::navigate: nav: sous-ressources ok → commit tab=1 ms=1670
+2026-10-26T12:29:34.383906Z  INFO explorer_core::session::js_glue: script: eval… tab=1 bytes=1529756
+2026-10-26T12:29:40.735560Z  INFO explorer_core::session::js_glue: script: eval fin tab=1 ms=6351 ok=false
+2026-10-26T12:29:40.735653Z DEBUG explorer_core::session::js_glue: script en échec tab=1 error=exception js : TypeError: Worker: no loader installed
+    at <anonymous> (https://www.openstreetmap.org/assets/application-3901b15b6f7d3d1a2230f955618d0bf378642e9ba2d6e87a67ac7c26875231cf.js:222:20668)
+    at <anonymous> (https://www.openstreetmap.org/assets/application-3901b15b6f7d3d1a2230f955618d0bf378642e9ba2d6e87a67ac7c26875231cf.js:222:21178)
+    at u (https://www.openstreetmap.org/assets/application-3901b15b6f7d3d1a2230f955618d0bf378642e9ba2d6e87a67ac7c26875231cf.js:220:18495)
+    at <anonymous> (https://www.openstreetmap.org/assets/application-3901b15b6f7d3d1a2230f955618d0bf378642e9ba2d6e87a67ac7c26875231cf.js:223:18988)
+    at w (https://www.openstreetmap.org/assets/application-3901b15b6f7d3d1a2230f955618d0bf378642e9ba2d6e87a67ac7c26875231cf.js:220:21878)
+    at <anonymous> (https://www.openstreetmap.org/assets/application-3901b15b6f7d3d1a2230f955618d0bf378642e9ba2d6e87a67ac7c26875231cf.js:237:31785)
+2026-10-26T12:29:40.837080Z  INFO explorer_core::session::js_glue: script: eval… tab=1 bytes=27578
+2026-10-26T12:29:40.847382Z  INFO explorer_core::session::js_glue: script: eval fin tab=1 ms=10 ok=false
+2026-10-26T12:29:40.847451Z DEBUG explorer_core::session::js_glue: script en échec tab=1 error=exception js : TypeError: cannot read `store` of Undefined
+2026-10-26T12:29:40.849148Z  INFO explorer_core::session::js_glue: script: eval… tab=1 bytes=57017
+2026-10-26T12:29:40.953222Z  INFO explorer_core::session::js_glue: script: eval fin tab=1 ms=104 ok=true
+2026-10-26T12:29:40.953343Z DEBUG explorer_core::session::js_glue: module eval… tab=1 name=https://www.openstreetmap.org/assets/turbo-c17cce38062be94687ab3e688cf14213be635ee2b55e63d9d5778659fab0c27b.js
+2026-10-26T12:29:41.069177Z DEBUG explorer_jscore::dom_host: customElements.define name=turbo-frame
+2026-10-26T12:29:41.077467Z DEBUG explorer_jscore::dom_host: customElements.define name=turbo-stream
+2026-10-26T12:29:41.077807Z DEBUG explorer_jscore::dom_host: customElements.define name=turbo-stream-source
+2026-10-26T12:29:41.081693Z DEBUG explorer_jscore::dom_host: customElements.define name=turbo-cable-stream-source
+2026-10-26T12:29:41.083410Z DEBUG explorer_core::session::js_glue: module eval fin tab=1 ms=130
+2026-10-26T12:29:41.109741Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:29:41.109938Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=WindowUpdate { stream_id: StreamId(0), size_increment: 32832 }
+2026-10-26T12:29:43.037371Z  INFO explorer_core::session::apply: apply: cascade ms=439
+2026-10-26T12:29:45.058087Z  INFO explorer_core::session::apply: apply: boxtree ms=2459
+2026-10-26T12:29:45.121491Z  INFO explorer_core::session::apply: apply: layout ms=2523
+2026-10-26T12:29:45.200599Z  INFO explorer_core::session::apply: apply: repaint ms=2602
+2026-10-26T12:29:45.203745Z  INFO sync_profile: phase sync tab=1 phase="event.dispatch" us=708
+2026-10-26T12:29:45.215115Z  INFO sync_profile: phase sync tab=1 phase="event.mirror_sync" us=11367
+2026-10-26T12:29:45.215502Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:29:45.215615Z  INFO sync_profile: phase sync tab=1 phase="event.after_script" us=507
+2026-10-26T12:29:45.215650Z  INFO sync_profile: phase sync tab=1 phase="event.poll_net" us=36
+2026-10-26T12:29:45.220104Z  INFO sync_profile: phase sync tab=1 phase="event.dispatch" us=4430
+2026-10-26T12:29:45.221746Z  INFO sync_profile: phase sync tab=1 phase="event.mirror_sync" us=1641
+2026-10-26T12:29:45.222142Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:29:45.222249Z  INFO sync_profile: phase sync tab=1 phase="event.after_script" us=506
+2026-10-26T12:29:45.222283Z  INFO sync_profile: phase sync tab=1 phase="event.poll_net" us=36
+2026-10-26T12:29:45.225058Z  INFO sync_profile: phase sync tab=1 phase="event.dispatch" us=1340
+2026-10-26T12:29:45.225391Z  INFO sync_profile: phase sync tab=1 phase="event.mirror_sync" us=335
+2026-10-26T12:29:45.225751Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:29:45.225838Z  INFO sync_profile: phase sync tab=1 phase="event.after_script" us=454
+2026-10-26T12:29:45.225868Z  INFO sync_profile: phase sync tab=1 phase="event.poll_net" us=30
+2026-10-26T12:29:45.226402Z DEBUG explorer_core::session::js_glue: listener dom en échec tab=1 ty="load" error=exception js : TypeError: cannot read `call` of Undefined
+    at <anonymous> (https://www.openstreetmap.org/assets/application-3901b15b6f7d3d1a2230f955618d0bf378642e9ba2d6e87a67ac7c26875231cf.js:62:606)
+    at <anonymous> (https://www.openstreetmap.org/assets/application-3901b15b6f7d3d1a2230f955618d0bf378642e9ba2d6e87a67ac7c26875231cf.js:122:4217)
+    at i (https://www.openstreetmap.org/assets/application-3901b15b6f7d3d1a2230f955618d0bf378642e9ba2d6e87a67ac7c26875231cf.js:32:436)
+2026-10-26T12:29:45.226444Z  INFO sync_profile: phase sync tab=1 phase="event.dispatch" us=560
+2026-10-26T12:29:45.226561Z  INFO sync_profile: phase sync tab=1 phase="event.mirror_sync" us=117
+2026-10-26T12:29:45.226852Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:29:45.226932Z  INFO sync_profile: phase sync tab=1 phase="event.after_script" us=370
+2026-10-26T12:29:45.226960Z  INFO sync_profile: phase sync tab=1 phase="event.poll_net" us=28
+2026-10-26T12:29:45.227841Z  INFO sync_profile: phase sync tab=1 phase="pump.js_run_sync" us=85
+2026-10-26T12:29:45.228033Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:29:45.228247Z  INFO sync_profile: phase sync tab=1 phase="event.dispatch" us=137
+2026-10-26T12:29:45.228427Z  INFO sync_profile: phase sync tab=1 phase="event.mirror_sync" us=180
+2026-10-26T12:29:45.228675Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:29:45.228746Z  INFO sync_profile: phase sync tab=1 phase="event.after_script" us=318
+2026-10-26T12:29:45.228770Z  INFO sync_profile: phase sync tab=1 phase="event.poll_net" us=25
+2026-10-26T12:29:45.228924Z  INFO sync_profile: phase sync tab=1 phase="event.dispatch" us=111
+2026-10-26T12:29:45.229028Z  INFO sync_profile: phase sync tab=1 phase="event.mirror_sync" us=104
+2026-10-26T12:29:45.229266Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:29:45.229336Z  INFO sync_profile: phase sync tab=1 phase="event.after_script" us=308
+2026-10-26T12:29:45.229360Z  INFO sync_profile: phase sync tab=1 phase="event.poll_net" us=25
+2026-10-26T12:29:45.255979Z  INFO sync_profile: phase sync tab=1 phase="pump.js_run_sync" us=222
+2026-10-26T12:29:45.256375Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:29:45.287188Z  INFO sync_profile: phase sync tab=1 phase="pump.js_run_sync" us=137
+2026-10-26T12:29:45.287402Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:29:45.318412Z  INFO sync_profile: phase sync tab=1 phase="pump.js_run_sync" us=154
+2026-10-26T12:29:45.318639Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:29:45.348891Z  INFO sync_profile: phase sync tab=1 phase="pump.js_run_sync" us=211
+2026-10-26T12:29:45.349254Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:29:45.380683Z  INFO sync_profile: phase sync tab=1 phase="pump.js_run_sync" us=171
+2026-10-26T12:29:45.380938Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:29:45.412357Z  INFO sync_profile: phase sync tab=1 phase="pump.js_run_sync" us=602
+2026-10-26T12:29:45.412607Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:29:45.443188Z  INFO sync_profile: phase sync tab=1 phase="pump.js_run_sync" us=165
+2026-10-26T12:29:45.443772Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:29:45.473747Z  INFO sync_profile: phase sync tab=1 phase="pump.js_run_sync" us=249
+2026-10-26T12:29:45.474083Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:29:45.504094Z  INFO sync_profile: phase sync tab=1 phase="pump.js_run_sync" us=189
+2026-10-26T12:29:45.504433Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:29:45.534621Z  INFO sync_profile: phase sync tab=1 phase="pump.js_run_sync" us=170
+2026-10-26T12:29:45.534921Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:29:45.565652Z  INFO sync_profile: phase sync tab=1 phase="pump.js_run_sync" us=211
+2026-10-26T12:29:45.565931Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:29:45.596794Z  INFO sync_profile: phase sync tab=1 phase="pump.js_run_sync" us=188
+2026-10-26T12:29:45.597108Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:29:45.627671Z  INFO sync_profile: phase sync tab=1 phase="pump.js_run_sync" us=183
+2026-10-26T12:29:45.627964Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:29:45.658849Z  INFO sync_profile: phase sync tab=1 phase="pump.js_run_sync" us=175
+2026-10-26T12:29:45.659141Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:29:45.689711Z  INFO sync_profile: phase sync tab=1 phase="pump.js_run_sync" us=176
+2026-10-26T12:29:45.689997Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:29:45.720525Z  INFO sync_profile: phase sync tab=1 phase="pump.js_run_sync" us=163
+2026-10-26T12:29:45.720765Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:29:45.752450Z  INFO sync_profile: phase sync tab=1 phase="pump.js_run_sync" us=209
+2026-10-26T12:29:45.752811Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:29:45.783543Z  INFO sync_profile: phase sync tab=1 phase="pump.js_run_sync" us=146
+2026-10-26T12:29:45.783792Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:29:45.814490Z  INFO sync_profile: phase sync tab=1 phase="pump.js_run_sync" us=197
+2026-10-26T12:29:45.814764Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:29:45.845234Z  INFO sync_profile: phase sync tab=1 phase="pump.js_run_sync" us=176
+2026-10-26T12:29:45.845555Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:29:45.876940Z  INFO sync_profile: phase sync tab=1 phase="pump.js_run_sync" us=328
+2026-10-26T12:29:45.877262Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:29:45.907694Z  INFO sync_profile: phase sync tab=1 phase="pump.js_run_sync" us=192
+2026-10-26T12:29:45.908027Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:29:45.939665Z  INFO sync_profile: phase sync tab=1 phase="pump.js_run_sync" us=195
+2026-10-26T12:29:45.940004Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:29:45.971061Z  INFO sync_profile: phase sync tab=1 phase="pump.js_run_sync" us=183
+2026-10-26T12:29:45.971662Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:29:46.002290Z  INFO sync_profile: phase sync tab=1 phase="pump.js_run_sync" us=180
+2026-10-26T12:29:46.002565Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:29:46.033574Z  INFO sync_profile: phase sync tab=1 phase="pump.js_run_sync" us=188
+2026-10-26T12:29:46.033898Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:29:46.064563Z  INFO sync_profile: phase sync tab=1 phase="pump.js_run_sync" us=197
+2026-10-26T12:29:46.064889Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:29:46.095706Z  INFO sync_profile: phase sync tab=1 phase="pump.js_run_sync" us=172
+2026-10-26T12:29:46.095984Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:29:46.126880Z  INFO sync_profile: phase sync tab=1 phase="pump.js_run_sync" us=172
+2026-10-26T12:29:46.127165Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:29:46.157206Z  INFO sync_profile: phase sync tab=1 phase="pump.js_run_sync" us=201
+2026-10-26T12:29:46.157566Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:29:46.188516Z  INFO sync_profile: phase sync tab=1 phase="pump.js_run_sync" us=164
+2026-10-26T12:29:46.188803Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:29:46.219332Z  INFO sync_profile: phase sync tab=1 phase="pump.js_run_sync" us=206
+2026-10-26T12:29:46.219605Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:29:46.251487Z  INFO sync_profile: phase sync tab=1 phase="pump.js_run_sync" us=221
+2026-10-26T12:29:46.251786Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:29:46.283629Z  INFO sync_profile: phase sync tab=1 phase="pump.js_run_sync" us=177
+2026-10-26T12:29:46.283963Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:29:46.314943Z  INFO sync_profile: phase sync tab=1 phase="pump.js_run_sync" us=187
+2026-10-26T12:29:46.315239Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:29:46.346545Z  INFO sync_profile: phase sync tab=1 phase="pump.js_run_sync" us=174
+2026-10-26T12:29:46.346799Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:29:46.377916Z  INFO sync_profile: phase sync tab=1 phase="pump.js_run_sync" us=165
+2026-10-26T12:29:46.378197Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:29:46.409546Z  INFO sync_profile: phase sync tab=1 phase="pump.js_run_sync" us=182
+2026-10-26T12:29:46.409783Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:29:46.440896Z  INFO sync_profile: phase sync tab=1 phase="pump.js_run_sync" us=157
+2026-10-26T12:29:46.441259Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:29:46.471273Z  INFO sync_profile: phase sync tab=1 phase="pump.js_run_sync" us=164
+2026-10-26T12:29:46.471576Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:29:46.502627Z  INFO sync_profile: phase sync tab=1 phase="pump.js_run_sync" us=180
+2026-10-26T12:29:46.502942Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:29:46.534240Z  INFO sync_profile: phase sync tab=1 phase="pump.js_run_sync" us=199
+2026-10-26T12:29:46.534500Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:29:46.565166Z  INFO sync_profile: phase sync tab=1 phase="pump.js_run_sync" us=201
+2026-10-26T12:29:46.565486Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:29:46.596004Z  INFO sync_profile: phase sync tab=1 phase="pump.js_run_sync" us=177
+2026-10-26T12:29:46.596288Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:29:46.627704Z  INFO sync_profile: phase sync tab=1 phase="pump.js_run_sync" us=173
+2026-10-26T12:29:46.627984Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:29:46.659470Z  INFO sync_profile: phase sync tab=1 phase="pump.js_run_sync" us=179
+2026-10-26T12:29:46.659783Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:29:46.691252Z  INFO sync_profile: phase sync tab=1 phase="pump.js_run_sync" us=186
+2026-10-26T12:29:46.691571Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+2026-10-26T12:29:46.722699Z  INFO sync_profile: phase sync tab=1 phase="pump.js_run_sync" us=218
+2026-10-26T12:29:46.723047Z DEBUG explorer_core::session::net: drain dyn links tab=1 n=0
+[url : https://www.openstreetmap.org/]
+| <html>
+|   dir="ltr"
+|   lang="en"
+|   <head>
+|     data-locale="en"
+|     data-location="{"minlon":-5.142222,"minlat":41.371582,"maxlon":9.561556,"maxlat":51.092804}"
+|     data-preferred-editor="id"
+|     data-preferred-languages="[]"
+|     <style>
+|       type="text/css"
+|       ".turbo-progress-bar {
+  position: fixed;
+  display: block;
+  top: 0;
+  left: 0;
+  height: 3px;
+  background: #0076ff;
+  z-index: 2147483647;
+  transition:
+    width 300ms ease-out,
+    opacity 150ms 150ms ease-in;
+  transform: translate3d(0, 0, 0);
+}
+"
+|     "
+  
+"
+|     <meta>
+|       content="IE=edge"
+|       http-equiv="X-UA-Compatible"
+|     "
+"
+|     <meta>
+|       content="width=device-width, initial-scale=1"
+|       name="viewport"
+|     "
+"
+|     <link>
+|       href="/assets/apple-touch-icon-57x57-0af2b52ac2b1a8cb0aba42f17aa901bfdedb9174bd978f838e3b3e1dd8602f52.png"
+|       rel="apple-touch-icon"
+|       sizes="57x57"
+|       type="image/png"
+|     "
+"
+|     <link>
+|       href="/assets/apple-touch-icon-60x60-cff74c9066d8e7fd08b29407712edbae5613cc9a4c03ee0398a89502a6a41d1f.png"
+|       rel="apple-touch-icon"
+|       sizes="60x60"
+|       type="image/png"
+|     "
+"
+|     <link>
+|       href="/assets/apple-touch-icon-72x72-63c6fdf3ddf65feebac1c0441bf6a378d1e4bde7107f598ae86733c402895eae.png"
+|       rel="apple-touch-icon"
+|       sizes="72x72"
+|       type="image/png"
+|     "
+"
+|     <link>
+|       href="/assets/apple-touch-icon-76x76-1740d6e7a59521693c496dd8fbe1caf3d5ad302017cb0f5073b6914b4f5b7544.png"
+|       rel="apple-touch-icon"
+|       sizes="76x76"
+|       type="image/png"
+|     "
+"
+|     <link>
+|       href="/assets/apple-touch-icon-114x114-20ba9df1a8f9b341040d661b7942b7b10288b9b4c4ce0663e10018958dc7f4a8.png"
+|       rel="apple-touch-icon"
+|       sizes="114x114"
+|       type="image/png"
+|     "
+"
+|     <link>
+|       href="/assets/apple-touch-icon-120x120-c304991e604d1be82639709b96fb87f7b6b6688cc0d04d5f6141604259299648.png"
+|       rel="apple-touch-icon"
+|       sizes="120x120"
+|       type="image/png"
+|     "
+"
+|     <link>
+|       href="/assets/apple-touch-icon-144x144-fbf20bdf9d2f7c1fe8eb85d7869a9bda285be88c93a39438150f5eb5955758ce.png"
+|       rel="apple-touch-icon"
+|       sizes="144x144"
+|       type="image/png"
+|     "
+"
+|     <link>
+|       href="/assets/apple-touch-icon-152x152-af45dc979e972cab863517b2cb33a3dcf3e04e02a2eb2734c6f93edc21fa395d.png"
+|       rel="apple-touch-icon"
+|       sizes="152x152"
+|       type="image/png"
+|     "
+"
+|     <link>
+|       href="/assets/apple-touch-icon-180x180-ea6361d7ae5b3f08c6290652ad703fa239364cc09c84873044f3299845f24652.png"
+|       rel="apple-touch-icon"
+|       sizes="180x180"
+|       type="image/png"
+|     "
+"
+|     <link>
+|       href="/assets/favicon-32x32-99b88fcadeef736889823c8a886b89d8cada9d4423a49a27de29bacc0a6bebd1.png"
+|       rel="icon"
+|       sizes="32x32"
+|       type="image/png"
+|     "
+"
+|     <link>
+|       href="/assets/favicon-194x194-79d3fb0152c735866e64b1d7535d504483cd13c2fad0131a6142bd9629d30de2.png"
+|       rel="icon"
+|       sizes="194x194"
+|       type="image/png"
+|     "
+"
+|     <link>
+|       href="/assets/favicon-96x96-6ffbc38962fddb870f9577b76430a0ee4db5fb4eca485f850cd45436d7f3eb87.png"
+|       rel="icon"
+|       sizes="96x96"
+|       type="image/png"
+|     "
+"
+|     <link>
+|       href="/assets/android-chrome-192x192-f970b9be3965dfda6ea9481b305c39b2ec794e296f802235e30d4671f0f896e1.png"
+|       rel="icon"
+|       sizes="192x192"
+|       type="image/png"
+|     "
+"
+|     <link>
+|       href="/assets/favicon-16x16-474476c1b2381628a81361a9e2bf04b936d21f77c59e84b48c6c69ea376fb6cf.png"
+|       rel="icon"
+|       sizes="16x16"
+|       type="image/png"
+|     "
+"
+|     <link>
+|       color="#7ebc6f"
+|       href="/assets/tab-icon-07d8c4247610d2f043ac298b3905536230b9615b08e23e69026c8d55790da13b.svg"
+|       rel="mask-icon"
+|     "
+"
+|     <link>
+|       href="/assets/manifest-97cb57bafa7f7f002cc5fe5532b856c4246eef5cbbd21c78b4c6bc2ffa46747a.json"
+|       rel="manifest"
+|     "
+"
+|     <meta>
+|       content="/assets/browserconfig-c59184dc0264731151cbf50ae58f7fa8ae5153138013f125203e1193800f862f.xml"
+|       name="msapplication-config"
+|     "
+"
+|     <meta>
+|       content="#00a300"
+|       name="msapplication-TileColor"
+|     "
+"
+|     <meta>
+|       content="/assets/mstile-144x144-02723f6f7cb2c18e6f8041c93f80982decb52b24a7e447477bc2ce3136d75806.png"
+|       name="msapplication-TileImage"
+|     "
+"
+|     <meta>
+|       content="#ffffff"
+|       name="theme-color"
+|     "
+"
+|     <meta>
+|       content="morph"
+|       name="turbo-refresh-method"
+|     "
+"
+|     <meta>
+|       content="preserve"
+|       name="turbo-refresh-scroll"
+|     "
+"
+|     <link>
+|       href="https://www.openstreetmap.org/"
+|       rel="canonical"
+|     "
+"
+|     <link>
+|       href="/assets/osm-42b7b3fbcee2193e455a773db6cd3d34a2f48ca94547fed54901dd9d8307b02b.xml"
+|       rel="search"
+|       title="OpenStreetMap Search"
+|       type="application/opensearchdescription+xml"
+|     "
+"
+|     <meta>
+|       content="OpenStreetMap is a map of the world, created by people like you and free to use under an open license."
+|       name="description"
+|     "
+"
+|     <meta>
+|       content="OpenStreetMap"
+|       property="og:site_name"
+|     "
+"
+|     <meta>
+|       content="OpenStreetMap"
+|       property="og:title"
+|     "
+"
+|     <meta>
+|       content="website"
+|       property="og:type"
+|     "
+"
+|     <meta>
+|       content="https://www.openstreetmap.org/"
+|       property="og:url"
+|     "
+"
+|     <meta>
+|       content="OpenStreetMap is a map of the world, created by people like you and free to use under an open license."
+|       property="og:description"
+|     "
+"
+|     <meta>
+|       content="https://www.openstreetmap.org/assets/osm_logo_256-ed028f90468224a272961c380ecee0cfb73b8048b34f4b4b204b7f0d1097875d.png"
+|       property="og:image"
+|     "
+"
+|     <meta>
+|       content="OpenStreetMap logo"
+|       property="og:image:alt"
+|     "
+
+  "
+|     <script>
+|       src="/assets/turbo-c17cce38062be94687ab3e688cf14213be635ee2b55e63d9d5778659fab0c27b.js"
+|       type="module"
+|     "
+  "
+|     <script>
+|       src="/assets/application-3901b15b6f7d3d1a2230f955618d0bf378642e9ba2d6e87a67ac7c26875231cf.js"
+|     "
+  "
+|     <script>
+|       src="/assets/i18n/en-e74144985e09be405fab7070256bc2d294633a989f292206d1eb4755ef7aeda7.js"
+|     "
+    "
+|     <link>
+|       href="/assets/screen-auto-ltr-d1fba5979d2f387276d738920086742b0f4116326208bcd5cb034f984def84cb.css"
+|       media="screen"
+|       rel="stylesheet"
+|     "
+  "
+|     <link>
+|       href="/assets/print-ltr-97dee1ca487394c852f28c2906a930316ab6d2cacf7f73e47c1c31fad8919051.css"
+|       media="print"
+|       rel="stylesheet"
+|     "
+  "
+|     <link>
+|       href="/assets/leaflet-all-d3e8505f47e0f0615d3daf2619f2267c086cbe9e17e276f393ee686dca54e0d3.css"
+|       media="screen, print"
+|       rel="stylesheet"
+|     "
+  "
+|     <link>
+|       href="/assets/maplibre-gl-all-20d18df1d89490f1022cce8a156e2ff3958396ddad7f015c94b31f4da45543e6.css"
+|       media="screen, print"
+|       rel="stylesheet"
+|     "
+    "
+|     <script>
+|       src="/assets/index-23675379e2a622eb8c83071fa7056075bba0a77b506ae832c002dd66cecf95a2.js"
+|     "
+
+  
+  "
+|     <meta>
+|       content="authenticity_token"
+|       name="csrf-param"
+|     "
+"
+|     <meta>
+|       content="kwkcleHoPDTbaaEuNLgVUXuGuGzD14ZKbPNq5bnYHknfaDzBcnzR-aXYLGHnpNhf10aNk-7jHtucWRwnwQjTFQ"
+|       name="csrf-token"
+|     "
+  "
+|     <meta>
+|       content="YU/3HtokiVPJCyD7QRCzU8XJmNKbHGc0"
+|       name="csp-nonce"
+|     "
+  "
+|     <title>
+|       "OpenStreetMap"
+|     "
+"
+|   "
+  "
+|   <body>
+|     class="map-layout"
+|     "
+    
+"
+|     <header>
+|       class="navbar navbar-expand-md bg-body flex-column flex-md-row align-items-stretch p-0 position-relative flex-nowrap z-3"
+|       "
+  "
+|       <h1>
+|         class="d-flex m-0 align-items-center fw-semibold"
+|         "
+    "
+|         <a>
+|           class="icon-link gap-1 me-auto text-body-emphasis text-decoration-none geolink"
+|           href="/"
+|           "
+      "
+|           <img>
+|             alt="OpenStreetMap logo"
+|             height="30"
+|             src="/assets/osm_logo-cc7d94392992162133be3baa21a37eb84f19f9b91178f704005378fbeecabb4e.svg"
+|             width="30"
+|           "
+      OpenStreetMap
+    "
+|         "
+    
+"
+|         <button>
+|           class="btn btn-outline-secondary align-self-stretch px-2 border-secondary border-opacity-10 d-md-none"
+|           data-bs-target="#select_language_dialog"
+|           data-bs-toggle="modal"
+|           title="Select Language"
+|           type="button"
+|           <i>
+|             class="bi bi-translate fs-5 lh-1"
+|         "
+
+    "
+|         <button>
+|           aria-controls="header-nav"
+|           aria-expanded="false"
+|           aria-label="Main"
+|           class="navbar-toggler p-0 border-0 collapsed"
+|           data-bs-target="#header-nav"
+|           data-bs-toggle="collapse"
+|           type="button"
+|           "
+      "
+|           <span>
+|             class="navbar-toggler-icon"
+|           "
+    "
+|         "
+  "
+|       "
+  "
+|       <section>
+|         class="flex-grow-1 collapse d-md-block"
+|         id="header-nav"
+|         "
+      
+
+"
+|         <div>
+|           class="search_forms d-md-none"
+|           "
+  "
+|           <form>
+|             action="/search"
+|             class="search_form bg-body-secondary p-2"
+|             method="GET"
+|             "
+    "
+|             <div>
+|               class="d-flex gap-2"
+|               "
+      "
+|               <div>
+|                 class="input-group flex-nowrap"
+|                 "
+        "
+|                 <input>
+|                   autocomplete="on"
+|                   class="form-control z-0 py-1 px-2"
+|                   dir="auto"
+|                   id="query"
+|                   name="query"
+|                   placeholder="Search"
+|                   type="text"
+|                 "
+        "
+|                 <div>
+|                   class="input-group-text border-start-0 p-0 position-relative"
+|                   "
+          "
+|                   <button>
+|                     class="describe_location position-absolute end-0 m-1 btn btn-outline-primary border-0 p-1 text-primary link-body-emphasis link-opacity-100-hover"
+|                     name="button"
+|                     title="Describe the current location using the search engine"
+|                     type="button"
+|                     "Where is this?"
+|                   "
+        "
+|                 "
+        "
+|                 <button>
+|                   class="btn btn-primary p-1"
+|                   name="button"
+|                   title="Go"
+|                   type="submit"
+|                   "
+          "
+|                   <svg>
+|                     height="20"
+|                     width="24"
+|                     xmlns="http://www.w3.org/2000/svg"
+|                     <circle>
+|                       cx="13"
+|                       cy="7"
+|                       fill-opacity=".5"
+|                       fill="currentColor"
+|                       r="6.5"
+|                       stroke="currentColor"
+|                     <path>
+|                       d="M9.75 12.629a6.5 6.5 0 0 1-2.379-2.379"
+|                       fill="none"
+|                       stroke-width="1.5"
+|                       stroke="currentColor"
+|                     <path>
+|                       d="m1 19 .5-.5"
+|                       stroke-opacity=".5"
+|                       stroke-width="2"
+|                       stroke="currentColor"
+|                     <path>
+|                       d="M1.5 18.5 6 14"
+|                       stroke-width="2.5"
+|                       stroke="currentColor"
+|                     <path>
+|                       d="m6 14 .5-.5"
+|                       stroke-opacity=".5"
+|                       stroke-width="2"
+|                       stroke="currentColor"
+|                     <path>
+|                       d="m6.5 13.5 2-2"
+|                       stroke-width="1.5"
+|                       stroke="currentColor"
+|                   "
+"
+|                 "      "
+|               "
+      "
+|               <a>
+|                 class="btn btn-primary p-1 switch_link"
+|                 href="/directions"
+|                 title="Find directions between two points"
+|                 "
+        "
+|                 <svg>
+|                   class="align-bottom"
+|                   height="24"
+|                   width="28"
+|                   xmlns="http://www.w3.org/2000/svg"
+|                   <path>
+|                     d="M11.5 11.5v-3h3v-1l-5-5-5 5v1h3v6"
+|                     fill="none"
+|                     stroke-opacity=".5"
+|                     stroke="currentColor"
+|                   <path>
+|                     d="M7.5 21.5h4v-5a1 1 0 0 1 1-1h5v3h1l5-5-5-5h-1v3h-6a4 4 0 0 0-4 4z"
+|                     fill-opacity=".5"
+|                     fill="currentColor"
+|                     stroke="currentColor"
+|                 "
+"
+|               "    "
+|             "
+  "
+|           "
+
+  "
+|           <form>
+|             action="/directions"
+|             class="directions_form bg-body-secondary p-2"
+|             method="GET"
+|             "
+    "
+|             <div>
+|               class="d-flex flex-column gap-2"
+|               "
+      "
+|               <div>
+|                 class="d-flex gap-2 align-items-center"
+|                 "
+        "
+|                 <div>
+|                   class="btn-group routing_modes"
+|                   role="group"
+|                   "
+            "
+|                   <input>
+|                     autocomplete="off"
+|                     class="btn-check"
+|                     disabled="disabled"
+|                     id="modes_car"
+|                     name="modes"
+|                     type="radio"
+|                     value="car"
+|                   "
+            "
+|                   <label>
+|                     class="btn btn-outline-secondary px-2 py-1"
+|                     for="modes_car"
+|                     title="Car"
+|                     <i>
+|                       aria-hidden="true"
+|                       class="bi bi-car-front-fill fs-6"
+|                   "
+            "
+|                   <input>
+|                     autocomplete="off"
+|                     class="btn-check"
+|                     disabled="disabled"
+|                     id="modes_bicycle"
+|                     name="modes"
+|                     type="radio"
+|                     value="bicycle"
+|                   "
+            "
+|                   <label>
+|                     class="btn btn-outline-secondary px-2 py-1"
+|                     for="modes_bicycle"
+|                     title="Bicycle"
+|                     <i>
+|                       aria-hidden="true"
+|                       class="bi bi-bicycle fs-6"
+|                   "
+            "
+|                   <input>
+|                     autocomplete="off"
+|                     class="btn-check"
+|                     disabled="disabled"
+|                     id="modes_foot"
+|                     name="modes"
+|                     type="radio"
+|                     value="foot"
+|                   "
+            "
+|                   <label>
+|                     class="btn btn-outline-secondary px-2 py-1"
+|                     for="modes_foot"
+|                     title="Foot"
+|                     <i>
+|                       aria-hidden="true"
+|                       class="bi bi-person-walking fs-6"
+|                   "
+        "
+|                 "
+        "
+|                 <select>
+|                   class="form-select py-1 px-2"
+|                   id="routing_engines"
+|                   name="routing_engines"
+|                   title="Directions services"
+|                   <optgroup>
+|                     label="Directions services"
+|                     <option>
+|                       disabled="disabled"
+|                       value="graphhopper"
+|                       "GraphHopper"
+|                     "
+"
+|                     <option>
+|                       disabled="disabled"
+|                       value="fossgis_osrm"
+|                       "OSRM"
+|                     "
+"
+|                     <option>
+|                       disabled="disabled"
+|                       value="fossgis_valhalla"
+|                       "Valhalla"
+|                 "
+        "
+|                 <button>
+|                   aria-label="Close"
+|                   class="btn-close flex-shrink-0 p-2 rounded-5"
+|                   type="button"
+|                 "
+      "
+|               "
+      "
+|               <div>
+|                 class="d-flex gap-2 align-items-center"
+|                 "
+        "
+|                 <div>
+|                   class="d-flex flex-column gap-1 flex-grow-1"
+|                   "
+          "
+|                   <div>
+|                     class="d-grid align-items-center"
+|                     "
+            "
+|                     <div>
+|                       class="routing_marker_column z-0"
+|                       "
+              "
+|                       <span>
+|                         data-type="from"
+|                         draggable="true"
+|                         "
+                "
+|                         <svg>
+|                           viewBox="0 0 25 40"
+|                           "
+                  "
+|                           <title>
+|                             "Route start marker"
+|                           "
+                  "
+|                           <use>
+|                             color="var(--marker-green)"
+|                             href="#pin-start"
+|                           "
+                "
+|                         "
+              "
+|                       "
+            "
+|                     "
+            "
+|                     <input>
+|                       autocomplete="on"
+|                       class="form-control py-1 px-2 ps-4"
+|                       dir="auto"
+|                       id="route_from"
+|                       name="route_from"
+|                       placeholder="From"
+|                       type="text"
+|                     "
+          "
+|                   "
+          "
+|                   <div>
+|                     class="d-grid align-items-center"
+|                     "
+            "
+|                     <div>
+|                       class="routing_marker_column z-0"
+|                       "
+              "
+|                       <span>
+|                         data-type="to"
+|                         draggable="true"
+|                         "
+                "
+|                         <svg>
+|                           viewBox="0 0 25 40"
+|                           "
+                  "
+|                           <title>
+|                             "Route end marker"
+|                           "
+                  "
+|                           <use>
+|                             color="var(--marker-red)"
+|                             href="#pin-destination"
+|                           "
+                "
+|                         "
+              "
+|                       "
+            "
+|                     "
+            "
+|                     <input>
+|                       autocomplete="on"
+|                       class="form-control py-1 px-2 ps-4"
+|                       dir="auto"
+|                       id="route_to"
+|                       name="route_to"
+|                       placeholder="To"
+|                       type="text"
+|                     "
+          "
+|                   "
+        "
+|                 "
+        "
+|                 <button>
+|                   class="reverse_directions btn btn-outline-secondary p-1"
+|                   name="button"
+|                   title="Reverse Directions"
+|                   type="button"
+|                   <i>
+|                     aria-hidden="true"
+|                     class="bi bi-arrow-down-up d-flex fs-5"
+|                 "
+      "
+|               "
+    "
+|             "
+  "
+|           "
+"
+|         "
+
+    "
+|         <nav>
+|           aria-label="Main navigation"
+|           class="navbar-nav gap-2 flex-grow-1"
+|           "
+      "
+|           <div>
+|             class="btn-group"
+|             id="edit_tab"
+|             "
+        "
+|             <a>
+|               class="btn btn-outline-primary geolink editlink"
+|               data-editor="id"
+|               href="/edit"
+|               id="editanchor"
+|               "Edit"
+|             "
+        "
+|             <button>
+|               class="btn btn-outline-primary dropdown-toggle dropdown-toggle-split flex-grow-0"
+|               data-bs-toggle="dropdown"
+|               type="button"
+|             "
+        "
+|             <ul>
+|               class="dropdown-menu position-absolute"
+|               "
+            "
+|               <li>
+|                 "
+              "
+|                 <a>
+|                   class="geolink editlink dropdown-item"
+|                   data-editor="id"
+|                   href="/edit?editor=id"
+|                   "Edit with iD (in-browser editor)"
+|                 "
+            "
+|               "
+            "
+|               <li>
+|                 "
+              "
+|                 <a>
+|                   class="geolink editlink dropdown-item"
+|                   data-editor="remote"
+|                   href="/edit?editor=remote"
+|                   "Edit with Remote Control (JOSM, Potlatch, Merkaartor)"
+|                 "
+            "
+|               "
+        "
+|             "
+      "
+|           "
+      "
+|           <ul>
+|             class="nav flex-grow-1 ms-md-2 align-items-center justify-content-center justify-content-md-start"
+|             data-turbo-permanent=""
+|             id="secondary-nav-menu"
+|             "
+          "
+|             <li>
+|               class="nav-item"
+|               "
+            "
+|               <a>
+|                 class="nav-link px-1 py-2 py-md-1 text-secondary geolink"
+|                 href="/history"
+|                 "History"
+|               "
+          "
+|             "
+          "
+|             <li>
+|               class="nav-item"
+|               "
+            "
+|               <a>
+|                 class="nav-link px-1 py-2 py-md-1 text-secondary geolink"
+|                 href="/export"
+|                 "Export"
+|               "
+          "
+|             "
+          "
+|             <li>
+|               class="nav-item"
+|               "
+            "
+|               <a>
+|                 class="nav-link px-1 py-2 py-md-1 text-secondary"
+|                 href="/traces"
+|                 "GPS Traces"
+|               "
+          "
+|             "
+          "
+|             <li>
+|               class="nav-item"
+|               "
+            "
+|               <a>
+|                 class="nav-link px-1 py-2 py-md-1 text-secondary"
+|                 href="/diary"
+|                 "User Diaries"
+|               "
+          "
+|             "
+          "
+|             <li>
+|               class="nav-item"
+|               "
+            "
+|               <a>
+|                 class="nav-link px-1 py-2 py-md-1 text-secondary"
+|                 href="/communities"
+|                 "Communities"
+|               "
+          "
+|             "
+          "
+|             <li>
+|               class="nav-item"
+|               "
+            "
+|               <a>
+|                 class="nav-link px-1 py-2 py-md-1 text-secondary"
+|                 href="/copyright"
+|                 "Copyright"
+|               "
+          "
+|             "
+          "
+|             <li>
+|               class="nav-item"
+|               "
+            "
+|               <a>
+|                 class="nav-link px-1 py-2 py-md-1 text-secondary"
+|                 href="/help"
+|                 "Help"
+|               "
+          "
+|             "
+          "
+|             <li>
+|               class="nav-item"
+|               "
+            "
+|               <a>
+|                 class="nav-link px-1 py-2 py-md-1 text-secondary"
+|                 href="https://supporting.openstreetmap.org/donate/"
+|                 target="new"
+|                 "Donate"
+|               "
+          "
+|             "
+          "
+|             <li>
+|               class="nav-item"
+|               "
+            "
+|               <a>
+|                 class="nav-link px-1 py-2 py-md-1 text-secondary"
+|                 href="/about"
+|                 "About"
+|               "
+          "
+|             "
+        "
+|             <li>
+|               class="dropdown nav-item ms-auto collapse"
+|               id="compact-secondary-nav"
+|               "
+          "
+|               <button>
+|                 class="dropdown-toggle nav-link btn btn-outline-secondary px-1 py-2 py-md-1 border-0 bg-body text-secondary"
+|                 data-bs-toggle="dropdown"
+|                 type="button"
+|                 "More"
+|               "
+          "
+|               <ul>
+|                 class="dropdown-menu"
+|                 "
+          "
+|               "
+        "
+|             "
+      "
+|           "
+
+      
+"
+|           <button>
+|             class="btn btn-outline-secondary align-self-stretch px-2 d-none d-md-block py-0"
+|             data-bs-target="#select_language_dialog"
+|             data-bs-toggle="modal"
+|             title="Select Language"
+|             type="button"
+|             <i>
+|               class="bi bi-translate fs-5 lh-1"
+|           "
+
+          "
+|           <div>
+|             class="d-flex btn-group login-menu"
+|             "
+            "
+|             <a>
+|               class="geolink btn btn-outline-secondary"
+|               href="/login?referer=%2F"
+|               "Log In"
+|             "
+            "
+|             <a>
+|               class="btn btn-outline-secondary"
+|               href="/user/new"
+|               "Sign Up"
+|             "
+          "
+|           "
+    "
+|         "
+  "
+|       "
+"
+|     "
+
+"
+|     <div>
+|       aria-hidden="true"
+|       aria-labelledby="select_language_dialog_label"
+|       class="modal fade"
+|       id="select_language_dialog"
+|       role="dialog"
+|       tabindex="-1"
+|       "
+  "
+|       <div>
+|         class="modal-dialog modal-lg modal-dialog-scrollable"
+|         "
+    "
+|         <div>
+|           class="modal-content"
+|           "
+      "
+|           <div>
+|             class="modal-header"
+|             "
+        "
+|             <h1>
+|               class="modal-title fs-5"
+|               id="select_language_dialog_label"
+|               "Select Language"
+|             "
+        "
+|             <button>
+|               aria-label="Close"
+|               class="btn-close"
+|               data-bs-dismiss="modal"
+|               type="button"
+|             "
+      "
+|           "
+      "
+|           <div>
+|             class="modal-body px-1"
+|             "
+        "
+|             <turbo-frame>
+|               data-src="/panes/languages"
+|               id="select_language_list"
+|               "
+          "
+|               <div>
+|                 class="text-center py-3"
+|                 "
+"
+|                 <div>
+|                   class="spinner-border"
+|                   role="status"
+|                   "
+  "
+|                   <span>
+|                     class="visually-hidden"
+|                     "Loading..."
+|                   "
+"
+|                 "
+"
+|               "
+        "
+|             "
+      "
+|           "
+    "
+|         "
+  "
+|       "
+"
+|     "
+
+"
+|     <div>
+|       aria-hidden="true"
+|       aria-labelledby="osm_alert_title"
+|       class="modal fade"
+|       id="osm_alert_modal"
+|       role="alertdialog"
+|       tabindex="-1"
+|       "
+  "
+|       <div>
+|         class="modal-dialog modal-dialog-centered"
+|         "
+    "
+|         <div>
+|           class="modal-content"
+|           "
+      "
+|           <div>
+|             class="modal-header"
+|             "
+        "
+|             <h1>
+|               class="modal-title fs-5"
+|               id="osm_alert_title"
+|             "
+        "
+|             <button>
+|               aria-label="Close"
+|               class="btn-close"
+|               data-bs-dismiss="modal"
+|               type="button"
+|             "
+      "
+|           "
+      "
+|           <div>
+|             class="modal-body"
+|             id="osm_alert_message"
+|             "
+      "
+|           "
+      "
+|           <div>
+|             class="modal-footer"
+|             "
+        "
+|             <button>
+|               class="btn btn-primary"
+|               data-bs-dismiss="modal"
+|               type="button"
+|               "Close"
+|             "
+      "
+|           "
+    "
+|         "
+  "
+|       "
+"
+|     "
+
+    
+"
+|     <div>
+|       class="overlay-sidebar"
+|       id="content"
+|       "
+      "
+|       <div>
+|         class="bg-body flex-shrink-0 z-1"
+|         id="sidebar"
+|         "
+    
+
+"
+|         <div>
+|           class="search_forms d-none d-md-block"
+|           "
+  "
+|           <form>
+|             action="/search"
+|             class="search_form bg-body-secondary p-2"
+|             method="GET"
+|             "
+    "
+|             <div>
+|               class="d-flex gap-2"
+|               "
+      "
+|               <div>
+|                 class="input-group flex-nowrap"
+|                 "
+        "
+|                 <input>
+|                   autocomplete="on"
+|                   autofocus="autofocus"
+|                   class="form-control z-0 py-1 px-2"
+|                   dir="auto"
+|                   id="query"
+|                   name="query"
+|                   placeholder="Search"
+|                   type="text"
+|                 "
+        "
+|                 <div>
+|                   class="input-group-text border-start-0 p-0 position-relative"
+|                   "
+          "
+|                   <button>
+|                     class="describe_location position-absolute end-0 m-1 btn btn-outline-primary border-0 p-1 text-primary link-body-emphasis link-opacity-100-hover"
+|                     name="button"
+|                     title="Describe the current location using the search engine"
+|                     type="button"
+|                     "Where is this?"
+|                   "
+        "
+|                 "
+        "
+|                 <button>
+|                   class="btn btn-primary p-1"
+|                   name="button"
+|                   title="Go"
+|                   type="submit"
+|                   "
+          "
+|                   <svg>
+|                     height="20"
+|                     width="24"
+|                     xmlns="http://www.w3.org/2000/svg"
+|                     <circle>
+|                       cx="13"
+|                       cy="7"
+|                       fill-opacity=".5"
+|                       fill="currentColor"
+|                       r="6.5"
+|                       stroke="currentColor"
+|                     <path>
+|                       d="M9.75 12.629a6.5 6.5 0 0 1-2.379-2.379"
+|                       fill="none"
+|                       stroke-width="1.5"
+|                       stroke="currentColor"
+|                     <path>
+|                       d="m1 19 .5-.5"
+|                       stroke-opacity=".5"
+|                       stroke-width="2"
+|                       stroke="currentColor"
+|                     <path>
+|                       d="M1.5 18.5 6 14"
+|                       stroke-width="2.5"
+|                       stroke="currentColor"
+|                     <path>
+|                       d="m6 14 .5-.5"
+|                       stroke-opacity=".5"
+|                       stroke-width="2"
+|                       stroke="currentColor"
+|                     <path>
+|                       d="m6.5 13.5 2-2"
+|                       stroke-width="1.5"
+|                       stroke="currentColor"
+|                   "
+"
+|                 "      "
+|               "
+      "
+|               <a>
+|                 class="btn btn-primary p-1 switch_link"
+|                 href="/directions"
+|                 title="Find directions between two points"
+|                 "
+        "
+|                 <svg>
+|                   class="align-bottom"
+|                   height="24"
+|                   width="28"
+|                   xmlns="http://www.w3.org/2000/svg"
+|                   <path>
+|                     d="M11.5 11.5v-3h3v-1l-5-5-5 5v1h3v6"
+|                     fill="none"
+|                     stroke-opacity=".5"
+|                     stroke="currentColor"
+|                   <path>
+|                     d="M7.5 21.5h4v-5a1 1 0 0 1 1-1h5v3h1l5-5-5-5h-1v3h-6a4 4 0 0 0-4 4z"
+|                     fill-opacity=".5"
+|                     fill="currentColor"
+|                     stroke="currentColor"
+|                 "
+"
+|               "    "
+|             "
+  "
+|           "
+
+  "
+|           <form>
+|             action="/directions"
+|             class="directions_form bg-body-secondary p-2"
+|             method="GET"
+|             "
+    "
+|             <div>
+|               class="d-flex flex-column gap-2"
+|               "
+      "
+|               <div>
+|                 class="d-flex gap-2 align-items-center"
+|                 "
+        "
+|                 <div>
+|                   class="btn-group routing_modes"
+|                   role="group"
+|                   "
+            "
+|                   <input>
+|                     autocomplete="off"
+|                     class="btn-check"
+|                     disabled="disabled"
+|                     id="modes_car"
+|                     name="modes"
+|                     type="radio"
+|                     value="car"
+|                   "
+            "
+|                   <label>
+|                     class="btn btn-outline-secondary px-2 py-1"
+|                     for="modes_car"
+|                     title="Car"
+|                     <i>
+|                       aria-hidden="true"
+|                       class="bi bi-car-front-fill fs-6"
+|                   "
+            "
+|                   <input>
+|                     autocomplete="off"
+|                     class="btn-check"
+|                     disabled="disabled"
+|                     id="modes_bicycle"
+|                     name="modes"
+|                     type="radio"
+|                     value="bicycle"
+|                   "
+            "
+|                   <label>
+|                     class="btn btn-outline-secondary px-2 py-1"
+|                     for="modes_bicycle"
+|                     title="Bicycle"
+|                     <i>
+|                       aria-hidden="true"
+|                       class="bi bi-bicycle fs-6"
+|                   "
+            "
+|                   <input>
+|                     autocomplete="off"
+|                     class="btn-check"
+|                     disabled="disabled"
+|                     id="modes_foot"
+|                     name="modes"
+|                     type="radio"
+|                     value="foot"
+|                   "
+            "
+|                   <label>
+|                     class="btn btn-outline-secondary px-2 py-1"
+|                     for="modes_foot"
+|                     title="Foot"
+|                     <i>
+|                       aria-hidden="true"
+|                       class="bi bi-person-walking fs-6"
+|                   "
+        "
+|                 "
+        "
+|                 <select>
+|                   class="form-select py-1 px-2"
+|                   id="routing_engines"
+|                   name="routing_engines"
+|                   title="Directions services"
+|                   <optgroup>
+|                     label="Directions services"
+|                     <option>
+|                       disabled="disabled"
+|                       value="graphhopper"
+|                       "GraphHopper"
+|                     "
+"
+|                     <option>
+|                       disabled="disabled"
+|                       value="fossgis_osrm"
+|                       "OSRM"
+|                     "
+"
+|                     <option>
+|                       disabled="disabled"
+|                       value="fossgis_valhalla"
+|                       "Valhalla"
+|                 "
+        "
+|                 <button>
+|                   aria-label="Close"
+|                   class="btn-close flex-shrink-0 p-2 rounded-5"
+|                   type="button"
+|                 "
+      "
+|               "
+      "
+|               <div>
+|                 class="d-flex gap-2 align-items-center"
+|                 "
+        "
+|                 <div>
+|                   class="d-flex flex-column gap-1 flex-grow-1"
+|                   "
+          "
+|                   <div>
+|                     class="d-grid align-items-center"
+|                     "
+            "
+|                     <div>
+|                       class="routing_marker_column z-0"
+|                       "
+              "
+|                       <span>
+|                         data-type="from"
+|                         draggable="true"
+|                         "
+                "
+|                         <svg>
+|                           viewBox="0 0 25 40"
+|                           "
+                  "
+|                           <title>
+|                             "Route start marker"
+|                           "
+                  "
+|                           <use>
+|                             color="var(--marker-green)"
+|                             href="#pin-start"
+|                           "
+                "
+|                         "
+              "
+|                       "
+            "
+|                     "
+            "
+|                     <input>
+|                       autocomplete="on"
+|                       class="form-control py-1 px-2 ps-4"
+|                       dir="auto"
+|                       id="route_from"
+|                       name="route_from"
+|                       placeholder="From"
+|                       type="text"
+|                     "
+          "
+|                   "
+          "
+|                   <div>
+|                     class="d-grid align-items-center"
+|                     "
+            "
+|                     <div>
+|                       class="routing_marker_column z-0"
+|                       "
+              "
+|                       <span>
+|                         data-type="to"
+|                         draggable="true"
+|                         "
+                "
+|                         <svg>
+|                           viewBox="0 0 25 40"
+|                           "
+                  "
+|                           <title>
+|                             "Route end marker"
+|                           "
+                  "
+|                           <use>
+|                             color="var(--marker-red)"
+|                             href="#pin-destination"
+|                           "
+                "
+|                         "
+              "
+|                       "
+            "
+|                     "
+            "
+|                     <input>
+|                       autocomplete="on"
+|                       class="form-control py-1 px-2 ps-4"
+|                       dir="auto"
+|                       id="route_to"
+|                       name="route_to"
+|                       placeholder="To"
+|                       type="text"
+|                     "
+          "
+|                   "
+        "
+|                 "
+        "
+|                 <button>
+|                   class="reverse_directions btn btn-outline-secondary p-1"
+|                   name="button"
+|                   title="Reverse Directions"
+|                   type="button"
+|                   <i>
+|                     aria-hidden="true"
+|                     class="bi bi-arrow-down-up d-flex fs-5"
+|                 "
+      "
+|               "
+    "
+|             "
+  "
+|           "
+"
+|         "
+
+    "
+|         <div>
+|           id="flash"
+|           "
+      
+
+    "
+|         "
+
+    "
+|         <div>
+|           id="browse_status"
+|         "
+
+    
+"
+|         <div>
+|           class="sidebar-close-controls sticky-top z-0"
+|           "
+  "
+|           <div>
+|             class="position-absolute end-0 m-2 rounded-5 bg-body-tertiary shadow-sm"
+|             "
+    "
+|             <button>
+|               class="btn-close d-block p-2 invisible"
+|               disabled=""
+|               type="button"
+|             "
+  "
+|           "
+"
+|         "
+"
+|         <div>
+|           class="sidebar-close-controls sticky-top"
+|           "
+  "
+|           <div>
+|             class="position-absolute end-0 m-2 rounded-5"
+|             "
+    "
+|             <button>
+|               aria-label="Close"
+|               class="btn-close d-block p-2 rounded-5"
+|               type="button"
+|             "
+  "
+|           "
+"
+|         "
+"
+|         <div>
+|           class="sidebar-close-controls position-relative"
+|           "
+  "
+|           <div>
+|             class="position-absolute end-0 bg-body p-4 ps-3"
+|             "
+  "
+|           "
+"
+|         "
+
+
+    "
+|         <div>
+|           class="my-3 text-center loader"
+|           id="sidebar_loader"
+|           "
+"
+|           <div>
+|             class="spinner-border"
+|             role="status"
+|             "
+  "
+|             <span>
+|               class="visually-hidden"
+|               "Loading..."
+|             "
+"
+|           "
+"
+|         "
+
+    "
+|         <div>
+|           class="p-3 position-relative z-n1"
+|           id="sidebar_content"
+|           "
+      "
+|           <turbo-frame>
+|             data-turbo="false"
+|             id="sidebar_content_frame"
+|             target="_top"
+|             "
+        
+      "
+|           "
+    "
+|         "
+
+      "
+|         <div>
+|           class="welcome d-none position-relative p-3"
+|           "
+        "
+|           <button>
+|             aria-label="Close"
+|             class="btn-close position-absolute end-0 top-0 m-2 rounded-5 p-2"
+|             type="button"
+|           "
+        "
+|           <h2>
+|             class="me-4 text-break"
+|             "Welcome to OpenStreetMap!"
+|           "
+        "
+|           <p>
+|             class="fs-6 fw-light"
+|             "OpenStreetMap is a map of the world, created by people like you and free to use under an open license."
+|           "
+        "
+|           <p>
+|             class="fs-7 fw-light"
+|             "Hosting is supported by "
+|             <a>
+|               href="https://www.fastly.com/"
+|               "Fastly"
+|             ", "
+|             <a>
+|               href="https://osmfoundation.org/wiki/Corporate_Members"
+|               "OSMF corporate members"
+|             ", and other "
+|             <a>
+|               href="https://hardware.openstreetmap.org/thanks/"
+|               "partners"
+|             ".
+        "
+|           "
+        "
+|           <p>
+|             class="fs-7 fw-light"
+|             "
+          By using this website or other infrastructure provided by the OpenStreetMap Foundation, you agree to the "
+|             <a>
+|               href="https://osmfoundation.org/wiki/Terms_of_Use"
+|               "Terms of Use"
+|             ".
+        "
+|           "
+        "
+|           <div>
+|             class="d-flex gap-2"
+|             "
+          "
+|             <a>
+|               class="btn btn-primary w-100 d-flex align-items-center justify-content-center"
+|               href="/about"
+|               "Learn More"
+|             "
+          "
+|             <a>
+|               class="btn btn-primary w-100 d-flex align-items-center justify-content-center"
+|               href="/user/new"
+|               "Start Mapping"
+|             "
+        "
+|           "
+      "
+|         "
+
+    
+  "
+|         <div>
+|           class="d-md-block d-none position-relative"
+|           data-bs-theme="light"
+|           id="banner"
+|           "
+    "
+|           <a>
+|             href="https://wiki.openstreetmap.org/wiki/31_Day_OSM_Challenge"
+|             <img>
+|               alt="31 Day OSM Challenge 2026"
+|               src="/assets/banners/31day_2026-6686f3302802621c6c60358a4ddb742b42cbc72ddcd20cbfce089f82fb03f706.png"
+|               srcset="/assets/banners/31day_2026-6686f3302802621c6c60358a4ddb742b42cbc72ddcd20cbfce089f82fb03f706.png 1x, /assets/banners/31day_2026@2x-afd92d6416d70824214ab26bf97c881e5bc4fe43b4bc8fd3705b6d4e4949b542.png 2x"
+|               title="31 Day OSM Challenge 2026"
+|           "
+    "
+|           <button>
+|             aria-label="Close"
+|             class="btn-close position-absolute top-0 end-0 m-4 opacity-100 bg-white bg-opacity-50"
+|             id="_osm_banner_31day_2026"
+|             name="button"
+|             type="button"
+|           "
+"
+|         "
+  "
+|       "
+
+  
+"
+|       <svg>
+|         aria-hidden="true"
+|         class="end-100 position-absolute"
+|         height="0"
+|         width="0"
+|         "
+  "
+|         <defs>
+|           "
+    "
+|           <linearGradient>
+|             gradientUnits="userSpaceOnUse"
+|             id="fill"
+|             x1="0"
+|             x2="0"
+|             y1="0"
+|             y2="40"
+|             "
+      "
+|             <stop>
+|               offset="0"
+|               stop-color="#aaa6"
+|             "
+      "
+|             <stop>
+|               offset="1"
+|               stop-color="#2224"
+|             "
+    "
+|           "
+    "
+|           <linearGradient>
+|             gradientUnits="userSpaceOnUse"
+|             id="stroke"
+|             x1="0"
+|             x2="0"
+|             y1="0"
+|             y2="20"
+|             "
+      "
+|             <stop>
+|               offset="0"
+|               stop-color="#6666"
+|             "
+      "
+|             <stop>
+|               offset="1"
+|               stop-color="#4448"
+|             "
+    "
+|           "
+    "
+|           <clipPath>
+|             id="pin-clip"
+|             "
+      "
+|             <path>
+|               d="M12.5 40 2.94 21.6448C1.47 18.8224 0 16 0 12.5a12.5 12.5 0 0 1 25 0c0 3.5-1.47 6.3224-2.94 9.1448z"
+|               id="pin-path"
+|             "
+    "
+|           "
+    "
+|           <filter>
+|             height="200%"
+|             id="pin-shadow-blur"
+|             width="200%"
+|             x="-50%"
+|             y="-50%"
+|             <feGaussianBlur>
+|               stdDeviation="4 2"
+|           "
+    "
+|           <ellipse>
+|             cx="12.5"
+|             cy="40"
+|             fill-opacity="0.3"
+|             filter="url(#pin-shadow-blur)"
+|             id="pin-shadow"
+|             rx="12.5"
+|             ry="3"
+|           "
+
+
+      "
+|           <path>
+|             d="M11.5 10a1 1 0 0 0 2 5 1 1 0 0 0-2-5"
+|             fill="#fff"
+|             id="dot-path"
+|             stroke-linecap="round"
+|           "
+      "
+|           <g>
+|             clip-path="url(#pin-clip)"
+|             id="pin-dot"
+|             "
+        "
+|             <use>
+|               fill="currentColor"
+|               href="#pin-path"
+|             "
+        "
+|             <use>
+|               fill="url(#fill)"
+|               href="#pin-path"
+|             "
+        "
+|             <g>
+|               opacity="0.122"
+|               stroke="#fff"
+|               "
+          "
+|               <use>
+|                 fill="none"
+|                 href="#pin-path"
+|                 stroke-width="4.4"
+|               "
+          "
+|               <use>
+|                 href="#dot-path"
+|                 stroke-width="7.2"
+|               "
+        "
+|             "
+        "
+|             <g>
+|               stroke="currentColor"
+|               "
+          "
+|               <use>
+|                 fill="none"
+|                 href="#pin-path"
+|                 stroke-width="2.2"
+|               "
+          "
+|               <use>
+|                 href="#dot-path"
+|                 stroke-width="5"
+|               "
+        "
+|             "
+        "
+|             <g>
+|               stroke="url(#stroke)"
+|               "
+          "
+|               <use>
+|                 fill="none"
+|                 href="#pin-path"
+|                 stroke-width="2.2"
+|               "
+          "
+|               <use>
+|                 href="#dot-path"
+|                 stroke-width="5"
+|               "
+        "
+|             "
+        "
+|             <use>
+|               href="#dot-path"
+|               stroke-width="2.8"
+|               stroke="#fff"
+|             "
+      "
+|           "
+      "
+|           <path>
+|             d="M12.5 6.25V14.15m0 5.6v0"
+|             fill="none"
+|             id="exclam-path"
+|             stroke-linecap="round"
+|           "
+      "
+|           <g>
+|             clip-path="url(#pin-clip)"
+|             id="pin-exclam"
+|             "
+        "
+|             <use>
+|               fill="currentColor"
+|               href="#pin-path"
+|             "
+        "
+|             <use>
+|               fill="url(#fill)"
+|               href="#pin-path"
+|             "
+        "
+|             <g>
+|               opacity="0.122"
+|               stroke="#fff"
+|               "
+          "
+|               <use>
+|                 fill="none"
+|                 href="#pin-path"
+|                 stroke-width="4.4"
+|               "
+          "
+|               <use>
+|                 href="#exclam-path"
+|                 stroke-width="7.2"
+|               "
+        "
+|             "
+        "
+|             <g>
+|               stroke="currentColor"
+|               "
+          "
+|               <use>
+|                 fill="none"
+|                 href="#pin-path"
+|                 stroke-width="2.2"
+|               "
+          "
+|               <use>
+|                 href="#exclam-path"
+|                 stroke-width="5"
+|               "
+        "
+|             "
+        "
+|             <g>
+|               stroke="url(#stroke)"
+|               "
+          "
+|               <use>
+|                 fill="none"
+|                 href="#pin-path"
+|                 stroke-width="2.2"
+|               "
+          "
+|               <use>
+|                 href="#exclam-path"
+|                 stroke-width="5"
+|               "
+        "
+|             "
+        "
+|             <use>
+|               href="#exclam-path"
+|               stroke-width="2.8"
+|               stroke="#fff"
+|             "
+      "
+|           "
+      "
+|           <path>
+|             d="M7.157 14.649Q8.9 16 11.22 18.761 14.7 11.7 17.843 8.239"
+|             fill="none"
+|             id="tick-path"
+|             stroke-linecap="round"
+|             stroke-linejoin="round"
+|           "
+      "
+|           <g>
+|             clip-path="url(#pin-clip)"
+|             id="pin-tick"
+|             "
+        "
+|             <use>
+|               fill="currentColor"
+|               href="#pin-path"
+|             "
+        "
+|             <use>
+|               fill="url(#fill)"
+|               href="#pin-path"
+|             "
+        "
+|             <g>
+|               opacity="0.122"
+|               stroke="#fff"
+|               "
+          "
+|               <use>
+|                 fill="none"
+|                 href="#pin-path"
+|                 stroke-width="4.4"
+|               "
+          "
+|               <use>
+|                 href="#tick-path"
+|                 stroke-width="7.2"
+|               "
+        "
+|             "
+        "
+|             <g>
+|               stroke="currentColor"
+|               "
+          "
+|               <use>
+|                 fill="none"
+|                 href="#pin-path"
+|                 stroke-width="2.2"
+|               "
+          "
+|               <use>
+|                 href="#tick-path"
+|                 stroke-width="5"
+|               "
+        "
+|             "
+        "
+|             <g>
+|               stroke="url(#stroke)"
+|               "
+          "
+|               <use>
+|                 fill="none"
+|                 href="#pin-path"
+|                 stroke-width="2.2"
+|               "
+          "
+|               <use>
+|                 href="#tick-path"
+|                 stroke-width="5"
+|               "
+        "
+|             "
+        "
+|             <use>
+|               href="#tick-path"
+|               stroke-width="2.8"
+|               stroke="#fff"
+|             "
+      "
+|           "
+      "
+|           <path>
+|             d="M5.75 13h13.5m-6.75-6.75v13.5"
+|             id="plus-path"
+|             stroke-linecap="round"
+|           "
+      "
+|           <g>
+|             clip-path="url(#pin-clip)"
+|             id="pin-plus"
+|             "
+        "
+|             <use>
+|               fill="currentColor"
+|               href="#pin-path"
+|             "
+        "
+|             <use>
+|               fill="url(#fill)"
+|               href="#pin-path"
+|             "
+        "
+|             <g>
+|               opacity="0.122"
+|               stroke="#fff"
+|               "
+          "
+|               <use>
+|                 fill="none"
+|                 href="#pin-path"
+|                 stroke-width="4.4"
+|               "
+          "
+|               <use>
+|                 href="#plus-path"
+|                 stroke-width="7.2"
+|               "
+        "
+|             "
+        "
+|             <g>
+|               stroke="currentColor"
+|               "
+          "
+|               <use>
+|                 fill="none"
+|                 href="#pin-path"
+|                 stroke-width="2.2"
+|               "
+          "
+|               <use>
+|                 href="#plus-path"
+|                 stroke-width="5"
+|               "
+        "
+|             "
+        "
+|             <g>
+|               stroke="url(#stroke)"
+|               "
+          "
+|               <use>
+|                 fill="none"
+|                 href="#pin-path"
+|                 stroke-width="2.2"
+|               "
+          "
+|               <use>
+|                 href="#plus-path"
+|                 stroke-width="5"
+|               "
+        "
+|             "
+        "
+|             <use>
+|               href="#plus-path"
+|               stroke-width="2.8"
+|               stroke="#fff"
+|             "
+      "
+|           "
+      "
+|           <path>
+|             d="M5.5 13h7v7l5-12z"
+|             fill="#fff"
+|             id="start-path"
+|             stroke-linejoin="round"
+|           "
+      "
+|           <g>
+|             clip-path="url(#pin-clip)"
+|             id="pin-start"
+|             "
+        "
+|             <use>
+|               fill="currentColor"
+|               href="#pin-path"
+|             "
+        "
+|             <use>
+|               fill="url(#fill)"
+|               href="#pin-path"
+|             "
+        "
+|             <g>
+|               opacity="0.122"
+|               stroke="#fff"
+|               "
+          "
+|               <use>
+|                 fill="none"
+|                 href="#pin-path"
+|                 stroke-width="4.4"
+|               "
+          "
+|               <use>
+|                 href="#start-path"
+|                 stroke-width="7.2"
+|               "
+        "
+|             "
+        "
+|             <g>
+|               stroke="currentColor"
+|               "
+          "
+|               <use>
+|                 fill="none"
+|                 href="#pin-path"
+|                 stroke-width="2.2"
+|               "
+          "
+|               <use>
+|                 href="#start-path"
+|                 stroke-width="5"
+|               "
+        "
+|             "
+        "
+|             <g>
+|               stroke="url(#stroke)"
+|               "
+          "
+|               <use>
+|                 fill="none"
+|                 href="#pin-path"
+|                 stroke-width="2.2"
+|               "
+          "
+|               <use>
+|                 href="#start-path"
+|                 stroke-width="5"
+|               "
+        "
+|             "
+        "
+|             <use>
+|               href="#start-path"
+|               stroke-width="2.8"
+|               stroke="#fff"
+|             "
+      "
+|           "
+      "
+|           <path>
+|             d="M10 21 7 9c5-3 6 2 11 0l1 4c-5 2-6-3-11 0"
+|             fill="#fff"
+|             id="destination-path"
+|             stroke-linecap="round"
+|             stroke-linejoin="round"
+|           "
+      "
+|           <g>
+|             clip-path="url(#pin-clip)"
+|             id="pin-destination"
+|             "
+        "
+|             <use>
+|               fill="currentColor"
+|               href="#pin-path"
+|             "
+        "
+|             <use>
+|               fill="url(#fill)"
+|               href="#pin-path"
+|             "
+        "
+|             <g>
+|               opacity="0.122"
+|               stroke="#fff"
+|               "
+          "
+|               <use>
+|                 fill="none"
+|                 href="#pin-path"
+|                 stroke-width="4.4"
+|               "
+          "
+|               <use>
+|                 href="#destination-path"
+|                 stroke-width="7.2"
+|               "
+        "
+|             "
+        "
+|             <g>
+|               stroke="currentColor"
+|               "
+          "
+|               <use>
+|                 fill="none"
+|                 href="#pin-path"
+|                 stroke-width="2.2"
+|               "
+          "
+|               <use>
+|                 href="#destination-path"
+|                 stroke-width="5"
+|               "
+        "
+|             "
+        "
+|             <g>
+|               stroke="url(#stroke)"
+|               "
+          "
+|               <use>
+|                 fill="none"
+|                 href="#pin-path"
+|                 stroke-width="2.2"
+|               "
+          "
+|               <use>
+|                 href="#destination-path"
+|                 stroke-width="5"
+|               "
+        "
+|             "
+        "
+|             <use>
+|               href="#destination-path"
+|               stroke-width="2.8"
+|               stroke="#fff"
+|             "
+      "
+|           "
+  "
+|         "
+"
+|       "
+
+
+  "
+|       <noscript>
+|         "
+    <div class="mt-5 p-3">
+      <p>You are either using a browser that does not support JavaScript, or you have disabled JavaScript.</p>
+      <p>OpenStreetMap uses JavaScript for its slippy map.</p>
+    </div>
+  "
+|       "
+
+  "
+|       <div>
+|         class="bg-body flex-shrink-0 order-md-1 z-2"
+|         id="map-ui"
+|         "
+    
+"
+|         <div>
+|           class="sidebar-close-controls sticky-top z-0"
+|           "
+  "
+|           <div>
+|             class="position-absolute end-0 m-2 rounded-5 bg-body-tertiary shadow-sm"
+|             "
+    "
+|             <button>
+|               class="btn-close d-block p-2 invisible"
+|               disabled=""
+|               type="button"
+|             "
+  "
+|           "
+"
+|         "
+"
+|         <div>
+|           class="sidebar-close-controls sticky-top"
+|           "
+  "
+|           <div>
+|             class="position-absolute end-0 m-2 rounded-5"
+|             "
+    "
+|             <button>
+|               aria-label="Close"
+|               class="btn-close d-block p-2 rounded-5"
+|               type="button"
+|             "
+  "
+|           "
+"
+|         "
+"
+|         <div>
+|           class="sidebar-close-controls position-relative"
+|           "
+  "
+|           <div>
+|             class="position-absolute end-0 bg-body p-4 ps-3"
+|             "
+  "
+|           "
+"
+|         "
+
+  "
+|       "
+
+  "
+|       <div>
+|         class="bg-body-secondary flex-grow-1 z-0"
+|         id="map"
+|         "
+  "
+|       "
+
+  "
+|       <div>
+|         class="d-none"
+|         id="attribution"
+|         "
+    "
+|         <table>
+|           "
+      "
+|           <tbody>
+|             <tr>
+|               "
+        "
+|               <td>
+|                 "https://openstreetmap.org/copyright"
+|               "
+        "
+|               <td>
+|                 "https://openstreetmap.org"
+|               "
+      "
+|             "
+      "
+|             <tr>
+|               "
+        "
+|               <td>
+|                 class="attribution_notice"
+|                 colspan="2"
+|                 "Copyright OpenStreetMap and contributors, under an open license"
+|               "
+      "
+|             "
+    "
+|         "
+  "
+|       "
+
+  "
+|       <div>
+|         class="dropdown d-none shadow cm_dropdown"
+|         id="map-context-menu"
+|       "
+
+"
+|     "
+
+    "
+|     <noscript>
+|       "<p><img class="matomo" alt="" src="https://matomo.openstreetmap.org/matomo.php?idsite=1"></p>"
+|     "
+
+"

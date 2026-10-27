@@ -1,0 +1,3180 @@
+| <html>
+|   class="windows js fx-unsupported is-modern-browser loaded"
+|   data-country-code="FR"
+|   data-esr-versions="153.5.1"
+|   data-gtm-container-id="GTM-MW3R8V"
+|   data-latest-firefox="158.0.1"
+|   data-needs-consent="True"
+|   data-sentry-dsn="https://c3ab8514873549d5b3785ebc7fb83c80@o1069899.ingest.sentry.io/6260331"
+|   data-stub-attribution-rate="1.0"
+|   dir="ltr"
+|   lang="en"
+|   <head>
+|     "
+    "
+|     <meta>
+|       charset="utf-8"
+|     "
+
+    "
+|   <body>
+|     class="html-ltr mzp-t-mozilla"
+|     "<#comment>"
+|     <!-- #comment -->
+|     "
+    "
+|     <script>
+|       src="https://www.mozilla.org/media/js/site.c6d6f1fa36a4.js"
+|     "
+
+    
+    <#comment>"
+|     <!-- #comment -->
+|     "
+
+    <#comment>"
+|     <!-- #comment -->
+|     "
+
+<#comment>"
+|     <!-- #comment -->
+|     "
+
+    "
+|     <meta>
+|       content="width=device-width, initial-scale=1"
+|       name="viewport"
+|     "
+    
+
+    
+    "
+|     <title>
+|       "Internet for people, not profit — Mozilla Global"
+|     "
+    "
+|     <meta>
+|       content="Mozilla is the not-for-profit behind the lightning fast Firefox browser. We put people over profit to give everyone more power online."
+|       name="description"
+|     "
+    "
+|     <meta>
+|       content="website"
+|       property="og:type"
+|     "
+    "
+|     <meta>
+|       content="Mozilla"
+|       property="og:site_name"
+|     "
+    "
+|     <meta>
+|       content="en_US"
+|       property="og:locale"
+|     "
+    "
+|     <meta>
+|       content="https://www.mozilla.org/en-US/"
+|       property="og:url"
+|     "
+    "
+|     <meta>
+|       content="https://www.mozilla.org/media/img/m24/og.3a69dffad83e.png"
+|       property="og:image"
+|     "
+    "
+|     <meta>
+|       content="Internet for people, not profit"
+|       property="og:title"
+|     "
+    "
+|     <meta>
+|       content="Mozilla is the not-for-profit behind the lightning fast Firefox browser. We put people over profit to give everyone more power online."
+|       property="og:description"
+|     "
+    "
+|     <meta>
+|       content="262134952380"
+|       property="fb:page_id"
+|     "
+    "
+|     <meta>
+|       content="summary"
+|       name="twitter:card"
+|     "
+    "
+|     <meta>
+|       content="@mozilla"
+|       name="twitter:site"
+|     "
+    "
+|     <meta>
+|       content="mozilla.org"
+|       name="twitter:domain"
+|     "
+    "
+|     <meta>
+|       content="Firefox"
+|       name="twitter:app:name:googleplay"
+|     "
+    "
+|     <meta>
+|       content="org.mozilla.firefox"
+|       name="twitter:app:id:googleplay"
+|     "
+    "
+|     <meta>
+|       content="Firefox"
+|       name="twitter:app:name:iphone"
+|     "
+    "
+|     <meta>
+|       content="989804926"
+|       name="twitter:app:id:iphone"
+|     "
+    "
+|     <meta>
+|       content="Firefox"
+|       name="twitter:app:name:ipad"
+|     "
+    "
+|     <meta>
+|       content="989804926"
+|       name="twitter:app:id:ipad"
+|     "
+    "
+|     <link>
+|       href="https://www.mozilla.org/media/img/favicons/mozilla/apple-touch-icon.05aa000f6748.png"
+|       rel="apple-touch-icon"
+|       sizes="180x180"
+|       type="image/png"
+|     "
+    "
+|     <link>
+|       href="https://www.mozilla.org/media/img/favicons/mozilla/favicon-196x196.e143075360ea.png"
+|       rel="icon"
+|       sizes="196x196"
+|       type="image/png"
+|     "
+    "
+|     <link>
+|       href="https://www.mozilla.org/media/img/favicons/mozilla/favicon.d0be64e474b1.ico"
+|       rel="shortcut icon"
+|     "
+    
+  
+    "
+|     <link>
+|       href="https://www.mozilla.org/"
+|       hreflang="x-default"
+|       rel="alternate"
+|     "
+    
+      "
+|     <link>
+|       href="https://www.mozilla.org/ach/"
+|       hreflang="ach"
+|       rel="alternate"
+|       title="Acholi"
+|     "
+    
+      "
+|     <link>
+|       href="https://www.mozilla.org/ar/"
+|       hreflang="ar"
+|       rel="alternate"
+|       title="عربي"
+|     "
+    
+      "
+|     <link>
+|       href="https://www.mozilla.org/ast/"
+|       hreflang="ast"
+|       rel="alternate"
+|       title="Asturianu"
+|     "
+    
+      "
+|     <link>
+|       href="https://www.mozilla.org/be/"
+|       hreflang="be"
+|       rel="alternate"
+|       title="Беларуская"
+|     "
+    
+      "
+|     <link>
+|       href="https://www.mozilla.org/bg/"
+|       hreflang="bg"
+|       rel="alternate"
+|       title="Български"
+|     "
+    
+      "
+|     <link>
+|       href="https://www.mozilla.org/br/"
+|       hreflang="br"
+|       rel="alternate"
+|       title="Brezhoneg"
+|     "
+    
+      "
+|     <link>
+|       href="https://www.mozilla.org/bs/"
+|       hreflang="bs"
+|       rel="alternate"
+|       title="Bosanski"
+|     "
+    
+      "
+|     <link>
+|       href="https://www.mozilla.org/ca/"
+|       hreflang="ca"
+|       rel="alternate"
+|       title="Català"
+|     "
+    
+      "
+|     <link>
+|       href="https://www.mozilla.org/cak/"
+|       hreflang="cak"
+|       rel="alternate"
+|       title="Maya Kaqchikel"
+|     "
+    
+      "
+|     <link>
+|       href="https://www.mozilla.org/cs/"
+|       hreflang="cs"
+|       rel="alternate"
+|       title="Čeština"
+|     "
+    
+      "
+|     <link>
+|       href="https://www.mozilla.org/cy/"
+|       hreflang="cy"
+|       rel="alternate"
+|       title="Cymraeg"
+|     "
+    
+      "
+|     <link>
+|       href="https://www.mozilla.org/da/"
+|       hreflang="da"
+|       rel="alternate"
+|       title="Dansk"
+|     "
+    
+      "
+|     <link>
+|       href="https://www.mozilla.org/de/"
+|       hreflang="de"
+|       rel="alternate"
+|       title="Deutsch"
+|     "
+    
+      "
+|     <link>
+|       href="https://www.mozilla.org/dsb/"
+|       hreflang="dsb"
+|       rel="alternate"
+|       title="Dolnoserbšćina"
+|     "
+    
+      "
+|     <link>
+|       href="https://www.mozilla.org/el/"
+|       hreflang="el"
+|       rel="alternate"
+|       title="Ελληνικά"
+|     "
+    
+      "
+|     <link>
+|       href="https://www.mozilla.org/en-CA/"
+|       hreflang="en-CA"
+|       rel="alternate"
+|       title="English (Canadian)"
+|     "
+    
+      "
+|     <link>
+|       href="https://www.mozilla.org/en-GB/"
+|       hreflang="en-GB"
+|       rel="alternate"
+|       title="English (British)"
+|     "
+    
+      "
+|     <link>
+|       href="https://www.mozilla.org/en-US/"
+|       hreflang="en-US"
+|       rel="alternate"
+|       title="English (US)"
+|     "
+    
+      "
+|     <link>
+|       href="https://www.mozilla.org/eo/"
+|       hreflang="eo"
+|       rel="alternate"
+|       title="Esperanto"
+|     "
+    
+      "
+|     <link>
+|       href="https://www.mozilla.org/es-AR/"
+|       hreflang="es-AR"
+|       rel="alternate"
+|       title="Español (de Argentina)"
+|     "
+    
+      "
+|     <link>
+|       href="https://www.mozilla.org/es-CL/"
+|       hreflang="es-CL"
+|       rel="alternate"
+|       title="Español (de Chile)"
+|     "
+    
+      "
+|     <link>
+|       href="https://www.mozilla.org/es-ES/"
+|       hreflang="es-ES"
+|       rel="alternate"
+|       title="Español (de España)"
+|     "
+    
+      "
+|     <link>
+|       href="https://www.mozilla.org/es-MX/"
+|       hreflang="es-MX"
+|       rel="alternate"
+|       title="Español (de México)"
+|     "
+    
+      "
+|     <link>
+|       href="https://www.mozilla.org/eu/"
+|       hreflang="eu"
+|       rel="alternate"
+|       title="Euskara"
+|     "
+    
+      "
+|     <link>
+|       href="https://www.mozilla.org/fa/"
+|       hreflang="fa"
+|       rel="alternate"
+|       title="فارسی"
+|     "
+    
+      "
+|     <link>
+|       href="https://www.mozilla.org/fi/"
+|       hreflang="fi"
+|       rel="alternate"
+|       title="suomi"
+|     "
+    
+      "
+|     <link>
+|       href="https://www.mozilla.org/fr/"
+|       hreflang="fr"
+|       rel="alternate"
+|       title="Français"
+|     "
+    
+      "
+|     <link>
+|       href="https://www.mozilla.org/fy-NL/"
+|       hreflang="fy-NL"
+|       rel="alternate"
+|       title="Frysk"
+|     "
+    
+      "
+|     <link>
+|       href="https://www.mozilla.org/gd/"
+|       hreflang="gd"
+|       rel="alternate"
+|       title="Gàidhlig"
+|     "
+    
+      "
+|     <link>
+|       href="https://www.mozilla.org/gl/"
+|       hreflang="gl"
+|       rel="alternate"
+|       title="Galego"
+|     "
+    
+      "
+|     <link>
+|       href="https://www.mozilla.org/gn/"
+|       hreflang="gn"
+|       rel="alternate"
+|       title="Avañe'ẽ"
+|     "
+    
+      "
+|     <link>
+|       href="https://www.mozilla.org/he/"
+|       hreflang="he"
+|       rel="alternate"
+|       title="עברית"
+|     "
+    
+      "
+|     <link>
+|       href="https://www.mozilla.org/hi-IN/"
+|       hreflang="hi-IN"
+|       rel="alternate"
+|       title="हिन्दी (भारत)"
+|     "
+    
+      "
+|     <link>
+|       href="https://www.mozilla.org/hr/"
+|       hreflang="hr"
+|       rel="alternate"
+|       title="Hrvatski"
+|     "
+    
+      "
+|     <link>
+|       href="https://www.mozilla.org/hsb/"
+|       hreflang="hsb"
+|       rel="alternate"
+|       title="Hornjoserbsce"
+|     "
+    
+      "
+|     <link>
+|       href="https://www.mozilla.org/hu/"
+|       hreflang="hu"
+|       rel="alternate"
+|       title="magyar"
+|     "
+    
+      "
+|     <link>
+|       href="https://www.mozilla.org/ia/"
+|       hreflang="ia"
+|       rel="alternate"
+|       title="Interlingua"
+|     "
+    
+      "
+|     <link>
+|       href="https://www.mozilla.org/id/"
+|       hreflang="id"
+|       rel="alternate"
+|       title="Bahasa Indonesia"
+|     "
+    
+      "
+|     <link>
+|       href="https://www.mozilla.org/is/"
+|       hreflang="is"
+|       rel="alternate"
+|       title="íslenska"
+|     "
+    
+      "
+|     <link>
+|       href="https://www.mozilla.org/it/"
+|       hreflang="it"
+|       rel="alternate"
+|       title="Italiano"
+|     "
+    
+      "
+|     <link>
+|       href="https://www.mozilla.org/ja/"
+|       hreflang="ja"
+|       rel="alternate"
+|       title="日本語"
+|     "
+    
+      "
+|     <link>
+|       href="https://www.mozilla.org/ka/"
+|       hreflang="ka"
+|       rel="alternate"
+|       title="ქართული"
+|     "
+    
+      "
+|     <link>
+|       href="https://www.mozilla.org/kab/"
+|       hreflang="kab"
+|       rel="alternate"
+|       title="Taqbaylit"
+|     "
+    
+      "
+|     <link>
+|       href="https://www.mozilla.org/kk/"
+|       hreflang="kk"
+|       rel="alternate"
+|       title="Қазақ"
+|     "
+    
+      "
+|     <link>
+|       href="https://www.mozilla.org/km/"
+|       hreflang="km"
+|       rel="alternate"
+|       title="ខ្មែរ"
+|     "
+    
+      "
+|     <link>
+|       href="https://www.mozilla.org/ko/"
+|       hreflang="ko"
+|       rel="alternate"
+|       title="한국어"
+|     "
+    
+      "
+|     <link>
+|       href="https://www.mozilla.org/lo/"
+|       hreflang="lo"
+|       rel="alternate"
+|       title="ພາສາລາວ"
+|     "
+    
+      "
+|     <link>
+|       href="https://www.mozilla.org/lv/"
+|       hreflang="lv"
+|       rel="alternate"
+|       title="Latviešu"
+|     "
+    
+      "
+|     <link>
+|       href="https://www.mozilla.org/mk/"
+|       hreflang="mk"
+|       rel="alternate"
+|       title="Македонски"
+|     "
+    
+      "
+|     <link>
+|       href="https://www.mozilla.org/ml/"
+|       hreflang="ml"
+|       rel="alternate"
+|       title="മലയാളം"
+|     "
+    
+      "
+|     <link>
+|       href="https://www.mozilla.org/ms/"
+|       hreflang="ms"
+|       rel="alternate"
+|       title="Melayu"
+|     "
+    
+      "
+|     <link>
+|       href="https://www.mozilla.org/my/"
+|       hreflang="my"
+|       rel="alternate"
+|       title="မြန်မာဘာသာ"
+|     "
+    
+      "
+|     <link>
+|       href="https://www.mozilla.org/nb-NO/"
+|       hreflang="nb-NO"
+|       rel="alternate"
+|       title="Norsk bokmål"
+|     "
+    
+      "
+|     <link>
+|       href="https://www.mozilla.org/nl/"
+|       hreflang="nl"
+|       rel="alternate"
+|       title="Nederlands"
+|     "
+    
+      "
+|     <link>
+|       href="https://www.mozilla.org/nn-NO/"
+|       hreflang="nn-NO"
+|       rel="alternate"
+|       title="Norsk nynorsk"
+|     "
+    
+      "
+|     <link>
+|       href="https://www.mozilla.org/pa-IN/"
+|       hreflang="pa-IN"
+|       rel="alternate"
+|       title="ਪੰਜਾਬੀ (ਭਾਰਤ)"
+|     "
+    
+      "
+|     <link>
+|       href="https://www.mozilla.org/pl/"
+|       hreflang="pl"
+|       rel="alternate"
+|       title="Polski"
+|     "
+    
+      "
+|     <link>
+|       href="https://www.mozilla.org/pt-BR/"
+|       hreflang="pt-BR"
+|       rel="alternate"
+|       title="Português (do Brasil)"
+|     "
+    
+      "
+|     <link>
+|       href="https://www.mozilla.org/pt-PT/"
+|       hreflang="pt-PT"
+|       rel="alternate"
+|       title="Português (Europeu)"
+|     "
+    
+      "
+|     <link>
+|       href="https://www.mozilla.org/rm/"
+|       hreflang="rm"
+|       rel="alternate"
+|       title="rumantsch"
+|     "
+    
+      "
+|     <link>
+|       href="https://www.mozilla.org/ro/"
+|       hreflang="ro"
+|       rel="alternate"
+|       title="Română"
+|     "
+    
+      "
+|     <link>
+|       href="https://www.mozilla.org/ru/"
+|       hreflang="ru"
+|       rel="alternate"
+|       title="Русский"
+|     "
+    
+      "
+|     <link>
+|       href="https://www.mozilla.org/scn/"
+|       hreflang="scn"
+|       rel="alternate"
+|       title="Sicilianu"
+|     "
+    
+      "
+|     <link>
+|       href="https://www.mozilla.org/sco/"
+|       hreflang="sco"
+|       rel="alternate"
+|       title="Scots"
+|     "
+    
+      "
+|     <link>
+|       href="https://www.mozilla.org/si/"
+|       hreflang="si"
+|       rel="alternate"
+|       title="සිංහල"
+|     "
+    
+      "
+|     <link>
+|       href="https://www.mozilla.org/sk/"
+|       hreflang="sk"
+|       rel="alternate"
+|       title="slovenčina"
+|     "
+    
+      "
+|     <link>
+|       href="https://www.mozilla.org/skr/"
+|       hreflang="skr"
+|       rel="alternate"
+|       title="سرائیکی"
+|     "
+    
+      "
+|     <link>
+|       href="https://www.mozilla.org/sl/"
+|       hreflang="sl"
+|       rel="alternate"
+|       title="Slovenščina"
+|     "
+    
+      "
+|     <link>
+|       href="https://www.mozilla.org/sq/"
+|       hreflang="sq"
+|       rel="alternate"
+|       title="Shqip"
+|     "
+    
+      "
+|     <link>
+|       href="https://www.mozilla.org/sr/"
+|       hreflang="sr"
+|       rel="alternate"
+|       title="Српски"
+|     "
+    
+      "
+|     <link>
+|       href="https://www.mozilla.org/sv-SE/"
+|       hreflang="sv-SE"
+|       rel="alternate"
+|       title="Svenska"
+|     "
+    
+      "
+|     <link>
+|       href="https://www.mozilla.org/tg/"
+|       hreflang="tg"
+|       rel="alternate"
+|       title="Тоҷикӣ"
+|     "
+    
+      "
+|     <link>
+|       href="https://www.mozilla.org/th/"
+|       hreflang="th"
+|       rel="alternate"
+|       title="ไทย"
+|     "
+    
+      "
+|     <link>
+|       href="https://www.mozilla.org/tl/"
+|       hreflang="tl"
+|       rel="alternate"
+|       title="Tagalog"
+|     "
+    
+      "
+|     <link>
+|       href="https://www.mozilla.org/tr/"
+|       hreflang="tr"
+|       rel="alternate"
+|       title="Türkçe"
+|     "
+    
+      "
+|     <link>
+|       href="https://www.mozilla.org/trs/"
+|       hreflang="trs"
+|       rel="alternate"
+|       title="Triqui"
+|     "
+    
+      "
+|     <link>
+|       href="https://www.mozilla.org/uk/"
+|       hreflang="uk"
+|       rel="alternate"
+|       title="Українська"
+|     "
+    
+      "
+|     <link>
+|       href="https://www.mozilla.org/vi/"
+|       hreflang="vi"
+|       rel="alternate"
+|       title="Tiếng Việt"
+|     "
+    
+      "
+|     <link>
+|       href="https://www.mozilla.org/zh-CN/"
+|       hreflang="zh-CN"
+|       rel="alternate"
+|       title="中文 (简体)"
+|     "
+    
+      "
+|     <link>
+|       href="https://www.mozilla.org/zh-TW/"
+|       hreflang="zh-TW"
+|       rel="alternate"
+|       title="正體中文 (繁體)"
+|     "
+    
+  
+
+    
+    
+    "
+|     <link>
+|       href="https://mastodon.social/@mozilla"
+|       rel="me"
+|     "
+
+    <#comment>"
+|     <!-- #comment -->
+|     "
+
+    <#comment>"
+|     <!-- #comment -->
+|     "
+
+    <#comment>"
+|     <!-- #comment -->
+|     "
+    
+    
+      "
+|     <link>
+|       href="https://www.mozilla.org/media/css/protocol-mozilla.eafbcba9bb2a.css"
+|       rel="stylesheet"
+|       type="text/css"
+|     "
+      
+        "
+|     <link>
+|       href="https://www.mozilla.org/media/css/m24-navigation-and-footer.038277dadfff.css"
+|       rel="stylesheet"
+|       type="text/css"
+|     "
+      
+      
+    
+
+    
+    
+  "
+|     <link>
+|       href="https://www.mozilla.org/media/css/locales.67d2e1de4170.css"
+|       rel="stylesheet"
+|       type="text/css"
+|     "
+
+    <#comment>"
+|     <!-- #comment -->
+|     "
+
+    
+      
+    
+
+    
+    
+      <#comment>"
+|     <!-- #comment -->
+|     "
+        
+
+<#comment>"
+|     <!-- #comment -->
+|     "
+
+<#comment>"
+|     <!-- #comment -->
+|     "
+<#comment>"
+|     <!-- #comment -->
+|     "
+<#comment>"
+|     <!-- #comment -->
+|     "
+<#comment>"
+|     <!-- #comment -->
+|     "
+<#comment>"
+|     <!-- #comment -->
+|     "
+
+
+    "
+|     <script>
+|       src="https://www.mozilla.org/media/js/gtm-snippet.cc9550e6b401.js"
+|     "
+
+<#comment>"
+|     <!-- #comment -->
+|     "
+      <#comment>"
+|     <!-- #comment -->
+|     "
+    
+  
+
+  
+    "
+|     <div>
+|       data-global-close="Close"
+|       data-global-next="Next"
+|       data-global-previous="Previous"
+|       id="strings"
+|     "
+
+    
+      
+
+"
+|     <aside>
+|       aria-label="Cookie Banner"
+|       class="moz-consent-banner"
+|       data-nosnippet="true"
+|       data-testid="consent-banner"
+|       id="moz-consent-banner"
+|       role="region"
+|       "
+  "
+|       <div>
+|         class="moz-consent-banner-content"
+|         "
+    "
+|         <h2>
+|           class="moz-consent-banner-heading"
+|           "Help us improve your Mozilla experience"
+|         "
+    "
+|         <div>
+|           class="moz-consent-banner-copy"
+|           "
+      "
+|           <p>
+|             "In addition to Cookies necessary for this site to function, we’d like your permission to set some additional Cookies to better understand your browsing needs and improve your experience. Rest assured — we value your privacy."
+|           "
+      "
+|           <div>
+|             class="moz-consent-banner-controls"
+|             "
+        "
+|             <button>
+|               class="moz-consent-banner-button moz-consent-banner-button-accept"
+|               data-testid="consent-banner-accept-button"
+|               id="moz-consent-banner-button-accept"
+|               type="button"
+|               "
+          Accept All Additional Cookies
+        "
+|             "
+        "
+|             <button>
+|               class="moz-consent-banner-button moz-consent-banner-button-reject"
+|               data-testid="consent-banner-reject-button"
+|               id="moz-consent-banner-button-reject"
+|               type="button"
+|               "
+          Reject All Additional Cookies
+        "
+|             "
+        "
+|             <a>
+|               href="/en-US/privacy/websites/cookie-settings/"
+|               "
+          Cookie settings
+        "
+|             "
+      "
+|           "
+    "
+|         "
+  "
+|       "
+"
+|     "
+    
+
+    
+      
+
+
+  
+
+ 
+
+
+  
+
+
+
+
+
+  
+
+
+
+ "
+|     <nav>
+|       aria-label="Primary"
+|       class="m24-navigation-refresh enable-main-nav-sticky m24-mzp-is-sticky"
+|       "
+  "
+|       <div>
+|         class="m24-c-navigation-l-content"
+|         "
+    "
+|         <div>
+|           class="m24-c-navigation-container"
+|           "
+      "
+|           <button>
+|             aria-controls="m24-c-navigation-items"
+|             aria-expanded="false"
+|             class="m24-c-navigation-menu-button"
+|             data-testid="m24-navigation-menu-button"
+|             type="button"
+|             "Menu"
+|           "
+      "
+|           <a>
+|             class="m24-c-navigation-logo-link"
+|             data-link-position="nav"
+|             data-link-text="mozilla home icon"
+|             href="/en-US/"
+|             "
+        "
+|             <img>
+|               alt="Mozilla"
+|               class="m24-c-navigation-logo-image"
+|               height="24"
+|               src="https://www.mozilla.org/media/img/logos/m24/lockup-black.f2ddba3f0724.svg"
+|               width="101"
+|             "
+      "
+|           "
+      "
+|           <div>
+|             class="m24-c-navigation-items"
+|             data-testid="m24-navigation-menu-items"
+|             id="m24-c-navigation-items"
+|             "
+        "
+|             <div>
+|               class="m24-c-navigation-menu"
+|               "
+          "
+|               <div>
+|                 class="m24-c-menu m24-mzp-is-enhanced"
+|                 "
+            "
+|                 <ul>
+|                   class="m24-c-menu-category-list"
+|                   "
+              
+
+
+
+"
+|                   <li>
+|                     class="m24-c-menu-category mzp-has-drop-down mzp-js-expandable"
+|                     "
+  "
+|                     <a>
+|                       aria-controls="m24-c-menu-panel-products"
+|                       aria-expanded="false"
+|                       aria-haspopup="true"
+|                       class="m24-c-menu-title"
+|                       data-testid="m24-navigation-link-products"
+|                       href="/en-US/products/"
+|                       "Products"
+|                     "
+  "
+|                     <div>
+|                       class="m24-c-menu-panel"
+|                       data-testid="m24-navigation-panel-products"
+|                       id="m24-c-menu-panel-products"
+|                       "
+    "
+|                       <div>
+|                         class="m24-c-menu-panel-container"
+|                         data-testid="m24-navigation-menu-products"
+|                         "
+      "
+|                         <button>
+|                           aria-controls="m24-c-menu-panel-products"
+|                           class="m24-c-menu-button-close"
+|                           type="button"
+|                           "Close Products menu"
+|                         "
+      "
+|                         <div>
+|                           class="m24-c-menu-panel-content"
+|                           "
+        "
+|                           <ul>
+|                             class="m24-mzp-l-content"
+|                             "
+          "
+|                   <li>
+|                     "
+            "
+|                     <section>
+|                       class="m24-c-menu-item mzp-has-icon"
+|                       "
+              "
+|                       <a>
+|                         class="m24-c-menu-item-link"
+|                         data-link-position="topnav - products"
+|                         data-link-text="Firefox browsers"
+|                         data-testid="m24-navigation-menu-link-firefox"
+|                         href="https://www.firefox.com?utm_source=www.mozilla.org&utm_medium=referral&utm_campaign=nav&utm_content=products"
+|                         "
+                "
+|                         <img>
+|                           alt=""
+|                           class="m24-c-menu-item-icon"
+|                           height="32"
+|                           loading="lazy"
+|                           src="https://www.mozilla.org/media/protocol/img/logos/firefox/browser/logo.eb1324e44442.svg"
+|                           width="32"
+|                         "
+                "
+|                         <h2>
+|                           class="m24-c-menu-item-title"
+|                           "Firefox browsers"
+|                         "
+              "
+|                       "
+            "
+|                     "
+          "
+|                   "
+          "
+|                   <li>
+|                     "
+            "
+|                     <section>
+|                       class="m24-c-menu-item mzp-has-icon"
+|                       "
+              "
+|                       <a>
+|                         class="m24-c-menu-item-link"
+|                         data-link-position="topnav - products"
+|                         data-link-text="Mozilla VPN"
+|                         data-testid="m24-navigation-menu-link-products-vpn"
+|                         href="/en-US/products/vpn/"
+|                         "
+                "
+|                         <img>
+|                           alt=""
+|                           class="m24-c-menu-item-icon"
+|                           height="32"
+|                           loading="lazy"
+|                           src="https://www.mozilla.org/media/protocol/img/logos/mozilla/vpn/logo.c648f487bfb8.svg"
+|                           width="32"
+|                         "
+                "
+|                         <h2>
+|                           class="m24-c-menu-item-title"
+|                           "Mozilla VPN"
+|                         "
+              "
+|                       "
+            "
+|                     "
+          "
+|                   "
+          "
+|                   <li>
+|                     "
+            "
+|                     <section>
+|                       class="m24-c-menu-item mzp-has-icon"
+|                       "
+              
+                
+              
+              "
+|                       <a>
+|                         class="m24-c-menu-item-link"
+|                         data-link-position="topnav - products"
+|                         data-link-text="Mozilla Monitor"
+|                         href="/en-US/products/monitor/"
+|                         "
+                "
+|                         <img>
+|                           alt=""
+|                           class="m24-c-menu-item-icon"
+|                           height="32"
+|                           loading="lazy"
+|                           src="https://www.mozilla.org/media/protocol/img/logos/firefox/monitor/logo.d97e5516f9e6.svg"
+|                           width="32"
+|                         "
+                "
+|                         <h2>
+|                           class="m24-c-menu-item-title"
+|                           "Mozilla Monitor"
+|                         "
+              "
+|                       "
+            "
+|                     "
+          "
+|                   "
+          "
+|                   <li>
+|                     "
+            "
+|                     <section>
+|                       class="m24-c-menu-item mzp-has-icon"
+|                       "
+              "
+|                       <a>
+|                         class="m24-c-menu-item-link"
+|                         data-link-position="topnav - products"
+|                         data-link-text="Firefox Relay"
+|                         href="https://relay.firefox.com/?utm_source=www.mozilla.org&utm_medium=referral&utm_campaign=nav&utm_content=products"
+|                         "
+                "
+|                         <img>
+|                           alt=""
+|                           class="m24-c-menu-item-icon"
+|                           height="32"
+|                           loading="lazy"
+|                           src="https://www.mozilla.org/media/protocol/img/logos/firefox/relay/logo.d42a8b52e44c.svg"
+|                           width="32"
+|                         "
+                "
+|                         <h2>
+|                           class="m24-c-menu-item-title"
+|                           "Firefox Relay"
+|                         "
+              "
+|                       "
+            "
+|                     "
+          "
+|                   "
+          "
+|                   <li>
+|                     "
+            "
+|                     <section>
+|                       class="m24-c-menu-item mzp-has-icon"
+|                       "
+              "
+|                       <a>
+|                         class="m24-c-menu-item-link"
+|                         data-link-position="topnav - products"
+|                         data-link-text="MDN Plus"
+|                         href="https://developer.mozilla.org/plus?utm_source=www.mozilla.org&utm_medium=referral&utm_campaign=nav&utm_content=products"
+|                         "
+                "
+|                         <img>
+|                           alt=""
+|                           class="m24-c-menu-item-icon"
+|                           height="32"
+|                           loading="lazy"
+|                           src="https://www.mozilla.org/media/img/logos/mdn/mdn-plus-logo.c615b46ca4ce.svg"
+|                           width="32"
+|                         "
+                "
+|                         <h2>
+|                           class="m24-c-menu-item-title"
+|                           "MDN Plus"
+|                         "
+              "
+|                       "
+            "
+|                     "
+          "
+|                   "
+          "
+|                   <li>
+|                     "
+            "
+|                     <section>
+|                       class="m24-c-menu-item mzp-has-icon"
+|                       "
+              "
+|                       <a>
+|                         class="m24-c-menu-item-link"
+|                         data-link-position="topnav - products"
+|                         data-link-text="Thunderbird"
+|                         href="https://www.thunderbird.net/?utm_source=www.mozilla.org&utm_medium=referral&utm_campaign=nav&utm_content=products"
+|                         "
+                "
+|                         <img>
+|                           alt=""
+|                           class="m24-c-menu-item-icon"
+|                           height="32"
+|                           loading="lazy"
+|                           src="https://www.mozilla.org/media/img/logos/thunderbird/logo-thunderbird.121e9c0fed45.svg"
+|                           width="32"
+|                         "
+                "
+|                         <h2>
+|                           class="m24-c-menu-item-title"
+|                           "Thunderbird"
+|                         "
+              "
+|                       "
+            "
+|                     "
+          "
+|                   "
+          "
+|                   <li>
+|                     "
+            "
+|                     <section>
+|                       class="m24-c-menu-item mzp-has-icon"
+|                       "
+              "
+|                       <a>
+|                         class="m24-c-menu-item-link"
+|                         data-link-position="topnav - products"
+|                         data-link-text="0DIN"
+|                         href="https://0din.ai/?utm_source=www.mozilla.org&utm_medium=referral&utm_campaign=nav&utm_content=products"
+|                         "
+                "
+|                         <img>
+|                           alt=""
+|                           class="m24-c-menu-item-icon"
+|                           height="32"
+|                           loading="lazy"
+|                           src="https://www.mozilla.org/media/img/logos/0din/logo-0din.50589c5926d2.svg"
+|                           width="32"
+|                         "
+                "
+|                         <h2>
+|                           class="m24-c-menu-item-title"
+|                           "0DIN"
+|                         "
+              "
+|                       "
+            "
+|                     "
+          "
+|                   "
+          "
+|                   <li>
+|                     "
+            "
+|                     <section>
+|                       class="m24-c-menu-item mzp-has-icon"
+|                       "
+              "
+|                       <a>
+|                         class="m24-c-menu-item-link"
+|                         data-link-position="topnav - products"
+|                         data-link-text="Tabstack"
+|                         href="https://tabstack.ai/?utm_source=www.mozilla.org&utm_medium=referral&utm_campaign=nav&utm_content=products"
+|                         "
+                "
+|                         <img>
+|                           alt=""
+|                           class="m24-c-menu-item-icon"
+|                           height="32"
+|                           loading="lazy"
+|                           src="https://www.mozilla.org/media/img/logos/tabstack/logo-tabstack.4551b75d8e6b.svg"
+|                           width="32"
+|                         "
+                "
+|                         <h2>
+|                           class="m24-c-menu-item-title"
+|                           "Tabstack"
+|                         "
+              "
+|                       "
+            "
+|                     "
+          "
+|                   "
+          "
+|                   <li>
+|                     "
+            "
+|                     <section>
+|                       class="m24-c-menu-item mzp-has-icon"
+|                       "
+              "
+|                       <a>
+|                         class="m24-c-menu-item-link"
+|                         data-link-position="topnav - products"
+|                         data-link-text="Otari"
+|                         href="https://otari.ai/?utm_source=www.mozilla.org&utm_medium=referral&utm_campaign=nav&utm_content=products"
+|                         "
+                "
+|                         <img>
+|                           alt=""
+|                           class="m24-c-menu-item-icon"
+|                           height="32"
+|                           loading="lazy"
+|                           src="https://www.mozilla.org/media/img/logos/otari/otari-logo.24578ec1007a.svg"
+|                           width="32"
+|                         "
+                "
+|                         <h2>
+|                           class="m24-c-menu-item-title"
+|                           "Otari"
+|                         "
+              "
+|                       "
+            "
+|                     "
+          "
+|                   "
+        "
+|                 "
+        "
+|                 <p>
+|                   class="m24-c-menu-category-link"
+|                   "
+          "
+|                   <a>
+|                     data-link-position="topnav - products"
+|                     data-link-text="Go to all browsers and products"
+|                     href="/en-US/products/"
+|                     "
+            All products
+            "
+|                     <svg>
+|                       height="16"
+|                       viewBox="0 0 16 16"
+|                       width="16"
+|                       xmlns="http://www.w3.org/2000/svg"
+|                       <path>
+|                         d="m7.24 1.36 5.89 5.89H0v1.5h13.13l-5.89 5.89L8.3 15.7 16 8 8.3.3z"
+|                         fill="currentColor"
+|                     "
+          "
+|                   "
+        "
+|                 "
+      "
+|               "
+    "
+|             "<#comment>"
+|             <!-- #comment -->
+|             "
+  "
+|           "<#comment>"
+|           <!-- #comment -->
+|           "
+<#comment>"
+|           <!-- #comment -->
+|           "
+              
+
+ 
+
+ "
+|           <li>
+|             class="m24-c-menu-category mzp-has-drop-down mzp-js-expandable"
+|             "
+   "
+|             <a>
+|               aria-controls="m24-c-menu-panel-about"
+|               aria-expanded="false"
+|               aria-haspopup="true"
+|               class="m24-c-menu-title"
+|               data-testid="m24-navigation-link-about-us"
+|               href="/en-US/about/"
+|               "About us"
+|             "
+   "
+|             <div>
+|               class="m24-c-menu-panel"
+|               data-testid="m24-navigation-menu-about-us"
+|               id="m24-c-menu-panel-about"
+|               "
+     "
+|               <div>
+|                 class="m24-c-menu-panel-container"
+|                 "
+       "
+|                 <button>
+|                   aria-controls="m24-c-menu-panel-about"
+|                   class="m24-c-menu-button-close"
+|                   type="button"
+|                   "Close About us menu"
+|                 "
+       "
+|                 <div>
+|                   class="m24-c-menu-panel-content multi-column"
+|                   "
+        "
+|                   <div>
+|                     class="m24-mzp-l-content-container"
+|                     "
+          "
+|                     <p>
+|                       "Our Mission"
+|                     "
+          "
+|                     <ul>
+|                       class="m24-mzp-l-content"
+|                       "
+            "
+|           <li>
+|             "
+              "
+|             <section>
+|               class="m24-c-menu-item"
+|               "
+                "
+|               <a>
+|                 class="m24-c-menu-item-link"
+|                 data-link-position="topnav - about"
+|                 data-link-text="About Mozilla"
+|                 href="/en-US/about/"
+|                 "
+                  "
+|                 <h2>
+|                   class="m24-c-menu-item-title"
+|                   "About Mozilla"
+|                 "
+                "
+|               "
+              "
+|             "
+            "
+|           "
+            "
+|           <li>
+|             "
+              "
+|             <section>
+|               class="m24-c-menu-item"
+|               "
+                "
+|               <a>
+|                 class="m24-c-menu-item-link"
+|                 data-link-position="topnav - about"
+|                 data-link-text="The Mozilla manifesto"
+|                 href="/en-US/about/manifesto/"
+|                 "
+                  "
+|                 <h2>
+|                   class="m24-c-menu-item-title"
+|                   "The Mozilla Manifesto"
+|                 "
+                "
+|               "
+              "
+|             "
+            "
+|           "
+            "
+|           <li>
+|             "
+              "
+|             <section>
+|               class="m24-c-menu-item"
+|               "
+                "
+|               <a>
+|                 class="m24-c-menu-item-link"
+|                 data-link-position="topnav - about"
+|                 data-link-text="Get Involved"
+|                 href="/en-US/contribute/"
+|                 "
+                  "
+|                 <h2>
+|                   class="m24-c-menu-item-title"
+|                   "Get Involved"
+|                 "
+                "
+|               "
+              "
+|             "
+            "
+|           "
+            "
+|           <li>
+|             "
+              "
+|             <section>
+|               class="m24-c-menu-item"
+|               "
+                "
+|               <a>
+|                 class="m24-c-menu-item-link"
+|                 data-link-position="topnav - about"
+|                 data-link-text="Blog"
+|                 href="https://blog.mozilla.org/?utm_source=www.mozilla.org&utm_medium=referral&utm_campaign=nav&utm_content=about-us"
+|                 "
+                  "
+|                 <h2>
+|                   class="m24-c-menu-item-title"
+|                   "Blog"
+|                 "
+                "
+|               "
+              "
+|             "
+            "
+|           "
+           
+        "
+|         "
+        "
+|         <div>
+|           class="m24-mzp-l-content-container"
+|           "
+          "
+|           <p>
+|             "Our Work"
+|           "
+          "
+|           <ul>
+|             class="m24-mzp-l-content"
+|             "
+            "
+|             <li>
+|               "
+              "
+|               <section>
+|                 class="m24-c-menu-item"
+|                 "
+                "
+|                 <a>
+|                   class="m24-c-menu-item-link"
+|                   data-link-position="topnav - about"
+|                   data-link-text="Mozilla Foundation"
+|                   href="https://www.mozillafoundation.org/?utm_source=www.mozilla.org&utm_medium=referral&utm_campaign=nav&utm_content=about-us"
+|                   "
+                  "
+|                   <h2>
+|                     class="m24-c-menu-item-title"
+|                     "Mozilla Foundation"
+|                   "
+                "
+|                 "
+              "
+|               "
+            "
+|             "
+            "
+|             <li>
+|               "
+              "
+|               <section>
+|                 class="m24-c-menu-item"
+|                 "
+                "
+|                 <a>
+|                   class="m24-c-menu-item-link"
+|                   data-link-position="topnav - about"
+|                   data-link-text="Mozilla.ai"
+|                   href="https://www.mozilla.ai/?utm_source=www.mozilla.org&utm_medium=referral&utm_campaign=nav&utm_content=about-us"
+|                   "
+                  "
+|                   <h2>
+|                     class="m24-c-menu-item-title"
+|                     "Mozilla.ai"
+|                   "
+                "
+|                 "
+              "
+|               "
+            "
+|             "
+            "
+|             <li>
+|               "
+              "
+|               <section>
+|                 class="m24-c-menu-item"
+|                 "
+                "
+|                 <a>
+|                   class="m24-c-menu-item-link"
+|                   data-link-position="topnav - about"
+|                   data-link-text="Mozilla Ventures"
+|                   href="https://mozilla.vc/?utm_source=www.mozilla.org&utm_medium=referral&utm_campaign=nav&utm_content=about-us"
+|                   "
+                  "
+|                   <h2>
+|                     class="m24-c-menu-item-title"
+|                     "Mozilla Ventures"
+|                   "
+                "
+|                 "
+              "
+|               "
+            "
+|             "
+            "
+|             <li>
+|               "
+              "
+|               <section>
+|                 class="m24-c-menu-item"
+|                 "
+                "
+|                 <a>
+|                   class="m24-c-menu-item-link"
+|                   data-link-position="topnav - about"
+|                   data-link-text="Mozilla Ads"
+|                   href="/en-US/advertising/"
+|                   "
+                  "
+|                   <h2>
+|                     class="m24-c-menu-item-title"
+|                     "Mozilla Advertising"
+|                   "
+                "
+|                 "
+              "
+|               "
+            "
+|             "
+            "
+|             <li>
+|               "
+              "
+|               <section>
+|                 class="m24-c-menu-item"
+|                 "
+                "
+|                 <a>
+|                   class="m24-c-menu-item-link"
+|                   data-link-position="topnav - about"
+|                   data-link-text="Mozilla Builders"
+|                   href="https://builders.mozilla.org/?utm_source=www.mozilla.org&utm_medium=referral&utm_campaign=nav&utm_content=about-us"
+|                   "
+                  "
+|                   <h2>
+|                     class="m24-c-menu-item-title"
+|                     "Mozilla Builders"
+|                   "
+                "
+|                 "
+              "
+|               "
+            "
+|             "
+            "
+|             <li>
+|               "
+              "
+|               <section>
+|                 class="m24-c-menu-item"
+|                 "
+                "
+|                 <a>
+|                   class="m24-c-menu-item-link"
+|                   data-link-position="topnav - about"
+|                   data-link-text="Mozilla New Products"
+|                   href="https://newproducts.mozilla.org/?utm_source=www.mozilla.org&utm_medium=referral&utm_campaign=nav&utm_content=about-us"
+|                   "
+                  "
+|                   <h2>
+|                     class="m24-c-menu-item-title"
+|                     "Mozilla New Products"
+|                   "
+                "
+|                 "
+              "
+|               "
+            "
+|             "
+           "
+|           "
+        "
+|         "
+       "
+|       "
+     <#comment>"
+|       <!-- #comment -->
+|       "
+   <#comment>"
+|       <!-- #comment -->
+|       "
+ <#comment>"
+|       <!-- #comment -->
+|       "
+            
+          
+        <#comment>"
+|       <!-- #comment -->
+|       "
+      <#comment>"
+|       <!-- #comment -->
+|       "
+      "
+|       <blink>
+|         class="spacer-gif"
+|       "
+    <#comment>"
+|       <!-- #comment -->
+|       "
+  <#comment>"
+|       <!-- #comment -->
+|       "
+"
+|     "
+
+    
+
+    
+
+    "
+|     <div>
+|       id="outer-wrapper"
+|       "
+      
+"
+|       <main>
+|         class="mzp-l-content"
+|         "
+  "
+|         <header>
+|           class="c-simple-header"
+|           "
+    "
+|           <h1>
+|             class="c-simple-header-title"
+|             "Choose your language or locale to browse Mozilla.org"
+|           "
+    
+    "
+|           <p>
+|             "It is available in the following languages:"
+|           "
+  "
+|         "
+  "
+|         <section>
+|           class="c-block-list"
+|           "
+    "
+|           <ul>
+|             "
+      
+        "
+|             <li>
+|               lang="ach"
+|               <a>
+|                 href="/ach/"
+|                 title="Browse / in the Acholi language"
+|                 "Acholi"
+|             "
+      
+        "
+|             <li>
+|               lang="ar"
+|               <a>
+|                 href="/ar/"
+|                 title="Browse / in the عربي language"
+|                 "عربي"
+|             "
+      
+        "
+|             <li>
+|               lang="ast"
+|               <a>
+|                 href="/ast/"
+|                 title="Browse / in the Asturianu language"
+|                 "Asturianu"
+|             "
+      
+        "
+|             <li>
+|               lang="be"
+|               <a>
+|                 href="/be/"
+|                 title="Browse / in the Беларуская language"
+|                 "Беларуская"
+|             "
+      
+        "
+|             <li>
+|               lang="bg"
+|               <a>
+|                 href="/bg/"
+|                 title="Browse / in the Български language"
+|                 "Български"
+|             "
+      
+        "
+|             <li>
+|               lang="br"
+|               <a>
+|                 href="/br/"
+|                 title="Browse / in the Brezhoneg language"
+|                 "Brezhoneg"
+|             "
+      
+        "
+|             <li>
+|               lang="bs"
+|               <a>
+|                 href="/bs/"
+|                 title="Browse / in the Bosanski language"
+|                 "Bosanski"
+|             "
+      
+        "
+|             <li>
+|               lang="ca"
+|               <a>
+|                 href="/ca/"
+|                 title="Browse / in the Català language"
+|                 "Català"
+|             "
+      
+        "
+|             <li>
+|               lang="cak"
+|               <a>
+|                 href="/cak/"
+|                 title="Browse / in the Maya Kaqchikel language"
+|                 "Maya Kaqchikel"
+|             "
+      
+        "
+|             <li>
+|               lang="cs"
+|               <a>
+|                 href="/cs/"
+|                 title="Browse / in the Čeština language"
+|                 "Čeština"
+|             "
+      
+        "
+|             <li>
+|               lang="cy"
+|               <a>
+|                 href="/cy/"
+|                 title="Browse / in the Cymraeg language"
+|                 "Cymraeg"
+|             "
+      
+        "
+|             <li>
+|               lang="da"
+|               <a>
+|                 href="/da/"
+|                 title="Browse / in the Dansk language"
+|                 "Dansk"
+|             "
+      
+        "
+|             <li>
+|               lang="de"
+|               <a>
+|                 href="/de/"
+|                 title="Browse / in the Deutsch language"
+|                 "Deutsch"
+|             "
+      
+        "
+|             <li>
+|               lang="dsb"
+|               <a>
+|                 href="/dsb/"
+|                 title="Browse / in the Dolnoserbšćina language"
+|                 "Dolnoserbšćina"
+|             "
+      
+        "
+|             <li>
+|               lang="el"
+|               <a>
+|                 href="/el/"
+|                 title="Browse / in the Ελληνικά language"
+|                 "Ελληνικά"
+|             "
+      
+        "
+|             <li>
+|               lang="en-CA"
+|               <a>
+|                 href="/en-CA/"
+|                 title="Browse / in the English (Canadian) language"
+|                 "English (Canadian)"
+|             "
+      
+        "
+|             <li>
+|               lang="en-GB"
+|               <a>
+|                 href="/en-GB/"
+|                 title="Browse / in the English (British) language"
+|                 "English (British)"
+|             "
+      
+        "
+|             <li>
+|               lang="en-US"
+|               <a>
+|                 href="/en-US/"
+|                 title="Browse / in the English (US) language"
+|                 "English (US)"
+|             "
+      
+        "
+|             <li>
+|               lang="eo"
+|               <a>
+|                 href="/eo/"
+|                 title="Browse / in the Esperanto language"
+|                 "Esperanto"
+|             "
+      
+        "
+|             <li>
+|               lang="es-AR"
+|               <a>
+|                 href="/es-AR/"
+|                 title="Browse / in the Español (de Argentina) language"
+|                 "Español (de Argentina)"
+|             "
+      
+        "
+|             <li>
+|               lang="es-CL"
+|               <a>
+|                 href="/es-CL/"
+|                 title="Browse / in the Español (de Chile) language"
+|                 "Español (de Chile)"
+|             "
+      
+        "
+|             <li>
+|               lang="es-ES"
+|               <a>
+|                 href="/es-ES/"
+|                 title="Browse / in the Español (de España) language"
+|                 "Español (de España)"
+|             "
+      
+        "
+|             <li>
+|               lang="es-MX"
+|               <a>
+|                 href="/es-MX/"
+|                 title="Browse / in the Español (de México) language"
+|                 "Español (de México)"
+|             "
+      
+        "
+|             <li>
+|               lang="eu"
+|               <a>
+|                 href="/eu/"
+|                 title="Browse / in the Euskara language"
+|                 "Euskara"
+|             "
+      
+        "
+|             <li>
+|               lang="fa"
+|               <a>
+|                 href="/fa/"
+|                 title="Browse / in the فارسی language"
+|                 "فارسی"
+|             "
+      
+        "
+|             <li>
+|               lang="fi"
+|               <a>
+|                 href="/fi/"
+|                 title="Browse / in the suomi language"
+|                 "suomi"
+|             "
+      
+        "
+|             <li>
+|               lang="fr"
+|               <a>
+|                 href="/fr/"
+|                 title="Browse / in the Français language"
+|                 "Français"
+|             "
+      
+        "
+|             <li>
+|               lang="fy-NL"
+|               <a>
+|                 href="/fy-NL/"
+|                 title="Browse / in the Frysk language"
+|                 "Frysk"
+|             "
+      
+        "
+|             <li>
+|               lang="gd"
+|               <a>
+|                 href="/gd/"
+|                 title="Browse / in the Gàidhlig language"
+|                 "Gàidhlig"
+|             "
+      
+        "
+|             <li>
+|               lang="gl"
+|               <a>
+|                 href="/gl/"
+|                 title="Browse / in the Galego language"
+|                 "Galego"
+|             "
+      
+        "
+|             <li>
+|               lang="gn"
+|               <a>
+|                 href="/gn/"
+|                 title="Browse / in the Avañe'ẽ language"
+|                 "Avañe'ẽ"
+|             "
+      
+        "
+|             <li>
+|               lang="he"
+|               <a>
+|                 href="/he/"
+|                 title="Browse / in the עברית language"
+|                 "עברית"
+|             "
+      
+        "
+|             <li>
+|               lang="hi-IN"
+|               <a>
+|                 href="/hi-IN/"
+|                 title="Browse / in the हिन्दी (भारत) language"
+|                 "हिन्दी (भारत)"
+|             "
+      
+        "
+|             <li>
+|               lang="hr"
+|               <a>
+|                 href="/hr/"
+|                 title="Browse / in the Hrvatski language"
+|                 "Hrvatski"
+|             "
+      
+        "
+|             <li>
+|               lang="hsb"
+|               <a>
+|                 href="/hsb/"
+|                 title="Browse / in the Hornjoserbsce language"
+|                 "Hornjoserbsce"
+|             "
+      
+        "
+|             <li>
+|               lang="hu"
+|               <a>
+|                 href="/hu/"
+|                 title="Browse / in the magyar language"
+|                 "magyar"
+|             "
+      
+        "
+|             <li>
+|               lang="ia"
+|               <a>
+|                 href="/ia/"
+|                 title="Browse / in the Interlingua language"
+|                 "Interlingua"
+|             "
+      
+        "
+|             <li>
+|               lang="id"
+|               <a>
+|                 href="/id/"
+|                 title="Browse / in the Bahasa Indonesia language"
+|                 "Bahasa Indonesia"
+|             "
+      
+        "
+|             <li>
+|               lang="is"
+|               <a>
+|                 href="/is/"
+|                 title="Browse / in the íslenska language"
+|                 "íslenska"
+|             "
+      
+        "
+|             <li>
+|               lang="it"
+|               <a>
+|                 href="/it/"
+|                 title="Browse / in the Italiano language"
+|                 "Italiano"
+|             "
+      
+        "
+|             <li>
+|               lang="ja"
+|               <a>
+|                 href="/ja/"
+|                 title="Browse / in the 日本語 language"
+|                 "日本語"
+|             "
+      
+        "
+|             <li>
+|               lang="ka"
+|               <a>
+|                 href="/ka/"
+|                 title="Browse / in the ქართული language"
+|                 "ქართული"
+|             "
+      
+        "
+|             <li>
+|               lang="kab"
+|               <a>
+|                 href="/kab/"
+|                 title="Browse / in the Taqbaylit language"
+|                 "Taqbaylit"
+|             "
+      
+        "
+|             <li>
+|               lang="kk"
+|               <a>
+|                 href="/kk/"
+|                 title="Browse / in the Қазақ language"
+|                 "Қазақ"
+|             "
+      
+        "
+|             <li>
+|               lang="km"
+|               <a>
+|                 href="/km/"
+|                 title="Browse / in the ខ្មែរ language"
+|                 "ខ្មែរ"
+|             "
+      
+        "
+|             <li>
+|               lang="ko"
+|               <a>
+|                 href="/ko/"
+|                 title="Browse / in the 한국어 language"
+|                 "한국어"
+|             "
+      
+        "
+|             <li>
+|               lang="lo"
+|               <a>
+|                 href="/lo/"
+|                 title="Browse / in the ພາສາລາວ language"
+|                 "ພາສາລາວ"
+|             "
+      
+        "
+|             <li>
+|               lang="lv"
+|               <a>
+|                 href="/lv/"
+|                 title="Browse / in the Latviešu language"
+|                 "Latviešu"
+|             "
+      
+        "
+|             <li>
+|               lang="mk"
+|               <a>
+|                 href="/mk/"
+|                 title="Browse / in the Македонски language"
+|                 "Македонски"
+|             "
+      
+        "
+|             <li>
+|               lang="ml"
+|               <a>
+|                 href="/ml/"
+|                 title="Browse / in the മലയാളം language"
+|                 "മലയാളം"
+|             "
+      
+        "
+|             <li>
+|               lang="ms"
+|               <a>
+|                 href="/ms/"
+|                 title="Browse / in the Melayu language"
+|                 "Melayu"
+|             "
+      
+        "
+|             <li>
+|               lang="my"
+|               <a>
+|                 href="/my/"
+|                 title="Browse / in the မြန်မာဘာသာ language"
+|                 "မြန်မာဘာသာ"
+|             "
+      
+        "
+|             <li>
+|               lang="nb-NO"
+|               <a>
+|                 href="/nb-NO/"
+|                 title="Browse / in the Norsk bokmål language"
+|                 "Norsk bokmål"
+|             "
+      
+        "
+|             <li>
+|               lang="nl"
+|               <a>
+|                 href="/nl/"
+|                 title="Browse / in the Nederlands language"
+|                 "Nederlands"
+|             "
+      
+        "
+|             <li>
+|               lang="nn-NO"
+|               <a>
+|                 href="/nn-NO/"
+|                 title="Browse / in the Norsk nynorsk language"
+|                 "Norsk nynorsk"
+|             "
+      
+        "
+|             <li>
+|               lang="pa-IN"
+|               <a>
+|                 href="/pa-IN/"
+|                 title="Browse / in the ਪੰਜਾਬੀ (ਭਾਰਤ) language"
+|                 "ਪੰਜਾਬੀ (ਭਾਰਤ)"
+|             "
+      
+        "
+|             <li>
+|               lang="pl"
+|               <a>
+|                 href="/pl/"
+|                 title="Browse / in the Polski language"
+|                 "Polski"
+|             "
+      
+        "
+|             <li>
+|               lang="pt-BR"
+|               <a>
+|                 href="/pt-BR/"
+|                 title="Browse / in the Português (do Brasil) language"
+|                 "Português (do Brasil)"
+|             "
+      
+        "
+|             <li>
+|               lang="pt-PT"
+|               <a>
+|                 href="/pt-PT/"
+|                 title="Browse / in the Português (Europeu) language"
+|                 "Português (Europeu)"
+|             "
+      
+        "
+|             <li>
+|               lang="rm"
+|               <a>
+|                 href="/rm/"
+|                 title="Browse / in the rumantsch language"
+|                 "rumantsch"
+|             "
+      
+        "
+|             <li>
+|               lang="ro"
+|               <a>
+|                 href="/ro/"
+|                 title="Browse / in the Română language"
+|                 "Română"
+|             "
+      
+        "
+|             <li>
+|               lang="ru"
+|               <a>
+|                 href="/ru/"
+|                 title="Browse / in the Русский language"
+|                 "Русский"
+|             "
+      
+        "
+|             <li>
+|               lang="scn"
+|               <a>
+|                 href="/scn/"
+|                 title="Browse / in the Sicilianu language"
+|                 "Sicilianu"
+|             "
+      
+        "
+|             <li>
+|               lang="sco"
+|               <a>
+|                 href="/sco/"
+|                 title="Browse / in the Scots language"
+|                 "Scots"
+|             "
+      
+        "
+|             <li>
+|               lang="si"
+|               <a>
+|                 href="/si/"
+|                 title="Browse / in the සිංහල language"
+|                 "සිංහල"
+|             "
+      
+        "
+|             <li>
+|               lang="sk"
+|               <a>
+|                 href="/sk/"
+|                 title="Browse / in the slovenčina language"
+|                 "slovenčina"
+|             "
+      
+        "
+|             <li>
+|               lang="skr"
+|               <a>
+|                 href="/skr/"
+|                 title="Browse / in the سرائیکی language"
+|                 "سرائیکی"
+|             "
+      
+        "
+|             <li>
+|               lang="sl"
+|               <a>
+|                 href="/sl/"
+|                 title="Browse / in the Slovenščina language"
+|                 "Slovenščina"
+|             "
+      
+        "
+|             <li>
+|               lang="sq"
+|               <a>
+|                 href="/sq/"
+|                 title="Browse / in the Shqip language"
+|                 "Shqip"
+|             "
+      
+        "
+|             <li>
+|               lang="sr"
+|               <a>
+|                 href="/sr/"
+|                 title="Browse / in the Српски language"
+|                 "Српски"
+|             "
+      
+        "
+|             <li>
+|               lang="sv-SE"
+|               <a>
+|                 href="/sv-SE/"
+|                 title="Browse / in the Svenska language"
+|                 "Svenska"
+|             "
+      
+        "
+|             <li>
+|               lang="tg"
+|               <a>
+|                 href="/tg/"
+|                 title="Browse / in the Тоҷикӣ language"
+|                 "Тоҷикӣ"
+|             "
+      
+        "
+|             <li>
+|               lang="th"
+|               <a>
+|                 href="/th/"
+|                 title="Browse / in the ไทย language"
+|                 "ไทย"
+|             "
+      
+        "
+|             <li>
+|               lang="tl"
+|               <a>
+|                 href="/tl/"
+|                 title="Browse / in the Tagalog language"
+|                 "Tagalog"
+|             "
+      
+        "
+|             <li>
+|               lang="tr"
+|               <a>
+|                 href="/tr/"
+|                 title="Browse / in the Türkçe language"
+|                 "Türkçe"
+|             "
+      
+        "
+|             <li>
+|               lang="trs"
+|               <a>
+|                 href="/trs/"
+|                 title="Browse / in the Triqui language"
+|                 "Triqui"
+|             "
+      
+        "
+|             <li>
+|               lang="uk"
+|               <a>
+|                 href="/uk/"
+|                 title="Browse / in the Українська language"
+|                 "Українська"
+|             "
+      
+        "
+|             <li>
+|               lang="vi"
+|               <a>
+|                 href="/vi/"
+|                 title="Browse / in the Tiếng Việt language"
+|                 "Tiếng Việt"
+|             "
+      
+        "
+|             <li>
+|               lang="zh-CN"
+|               <a>
+|                 href="/zh-CN/"
+|                 title="Browse / in the 中文 (简体) language"
+|                 "中文 (简体)"
+|             "
+      
+        "
+|             <li>
+|               lang="zh-TW"
+|               <a>
+|                 href="/zh-TW/"
+|                 title="Browse / in the 正體中文 (繁體) language"
+|                 "正體中文 (繁體)"
+|             "
+      
+    "
+|           "
+  "
+|         "
+"
+|       "
+
+
+      
+        
+
+
+
+
+  
+
+ "
+|       <footer>
+|         class="moz24-footer"
+|         id="colophon"
+|         role="contentinfo"
+|         "
+  
+  "
+|         <div>
+|           class="moz24-footer-content"
+|           "
+    
+    "
+|           <div>
+|             class="moz24-footer-primary"
+|             "
+      "
+|             <div>
+|               class="moz24-footer-sections-container"
+|               "
+        "
+|               <div>
+|                 class="moz24-footer-links"
+|                 "
+          "
+|                 <section>
+|                   "
+            "
+|                   <h2>
+|                     class="moz24-footer-label"
+|                     data-testid="footer-heading-company"
+|                     "
+              Company
+            "
+|                   "
+            "
+|                   <ul>
+|                     class="moz24-footer-primary-list"
+|                     data-testid="footer-list-company"
+|                     "
+              "
+|                     <li>
+|                       <a>
+|                         data-link-position="footer"
+|                         data-link-text="Leadership"
+|                         href="/en-US/about/leadership/"
+|                         "Leadership"
+|                     "
+              "
+|                     <li>
+|                       <a>
+|                         data-link-position="footer"
+|                         data-link-text="Press Center"
+|                         href="https://blog.mozilla.org/category/mozilla/news/?utm_source=www.mozilla.org&utm_medium=referral&utm_campaign=footer&utm_content=company"
+|                         "Press Center"
+|                     "
+              "
+|                     <li>
+|                       <a>
+|                         data-link-position="footer"
+|                         data-link-text="Careers"
+|                         href="/en-US/careers/"
+|                         "Careers"
+|                     "
+              "
+|                     <li>
+|                       <a>
+|                         data-link-position="footer"
+|                         data-link-text="Merch Store"
+|                         href="https://shop.mozilla.com/?utm_source=www.mozilla.org&utm_medium=referral&utm_campaign=footer&utm_content=company"
+|                         "Merch Store"
+|                     "
+              "
+|                     <li>
+|                       <a>
+|                         data-link-position="footer"
+|                         data-link-text="Contact"
+|                         href="/en-US/contact/"
+|                         "Contact"
+|                     "
+            
+            "
+|                   "
+          "
+|                 "
+
+          "
+|                 <section>
+|                   "
+            "
+|                   <h2>
+|                     class="moz24-footer-label"
+|                     data-testid="footer-heading-support"
+|                     "
+              Support
+            "
+|                   "
+            "
+|                   <ul>
+|                     class="moz24-footer-primary-list"
+|                     data-testid="footer-list-support"
+|                     "
+              "
+|                     <li>
+|                       <a>
+|                         data-link-position="footer"
+|                         data-link-text="Product Help"
+|                         href="https://support.mozilla.org/?utm_source=www.mozilla.org&utm_medium=referral&utm_campaign=footer&utm_content=support"
+|                         "Product Help"
+|                     "
+              "
+|                     <li>
+|                       <a>
+|                         data-link-position="footer"
+|                         data-link-text="File a Bug"
+|                         href="https://bugzilla.mozilla.org/?utm_source=www.mozilla.org&utm_medium=referral&utm_campaign=footer&utm_content=support"
+|                         "File a Bug"
+|                     "
+              "
+|                     <li>
+|                       <a>
+|                         data-link-position="footer"
+|                         data-link-text="Localise Mozilla"
+|                         href="https://pontoon.mozilla.org/?utm_source=www.mozilla.org&utm_medium=referral&utm_campaign=footer&utm_content=support"
+|                         "Localize Mozilla"
+|                     "
+              "
+|                     <li>
+|                       <a>
+|                         data-link-position="footer"
+|                         data-link-text="Security"
+|                         href="/en-US/security/"
+|                         "Security"
+|                     "
+            "
+|                   "
+          "
+|                 "
+
+          "
+|                 <section>
+|                   "
+            "
+|                   <h2>
+|                     class="moz24-footer-label"
+|                     data-testid="footer-heading-developers"
+|                     "
+              Developers
+            "
+|                   "
+            "
+|                   <ul>
+|                     class="moz24-footer-primary-list"
+|                     data-testid="footer-list-developers"
+|                     "
+              "
+|                     <li>
+|                       <a>
+|                         data-link-position="footer"
+|                         data-link-text="Firefox Developer Edition"
+|                         href="https://www.firefox.com/channel/desktop/developer/?utm_source=www.mozilla.org&utm_medium=referral&utm_campaign=footer"
+|                         "Developer Edition"
+|                     "
+              "
+|                     <li>
+|                       <a>
+|                         data-link-position="footer"
+|                         data-link-text="Firefox for Enterprise"
+|                         href="https://www.firefox.com/browsers/enterprise/?utm_source=www.mozilla.org&utm_medium=referral&utm_campaign=footer"
+|                         "Enterprise"
+|                     "
+              "
+|                     <li>
+|                       <a>
+|                         data-link-position="footer"
+|                         data-link-text="Tools"
+|                         href="https://firefox-source-docs.mozilla.org/devtools-user/?utm_source=www.mozilla.org&utm_medium=referral&utm_campaign=footer&utm_content=developers"
+|                         rel="external"
+|                         "Tools"
+|                     "
+              "
+|                     <li>
+|                       <a>
+|                         data-link-position="footer"
+|                         data-link-text="MDN"
+|                         href="https://developer.mozilla.org/?utm_source=www.mozilla.org&utm_medium=referral&utm_campaign=footer"
+|                         "MDN"
+|                     "
+              "
+|                     <li>
+|                       <a>
+|                         data-link-position="footer"
+|                         data-link-text="Firefox Release Notes"
+|                         href="https://www.firefox.com/firefox/158.0.1/releasenotes/?utm_source=www.mozilla.org&utm_medium=referral&utm_campaign=footer"
+|                         "Firefox Release Notes"
+|                     "
+            "
+|                   "
+          "
+|                 "
+          "
+|                 <section>
+|                   role="presentation"
+|                   "<#comment>"
+|                   <!-- #comment -->
+|                 "
+        "
+|               "
+        "
+|               <div>
+|                 class="moz24-footer-socials"
+|                 "
+          "
+|                 <div>
+|                   class="moz24-footer-refresh-social-wrapper"
+|                   "
+            "
+|                   <h2>
+|                     class="moz24-footer-heading-social"
+|                     "Follow @Mozilla"
+|                   "
+            "
+|                   <ul>
+|                     class="moz24-footer-social-links"
+|                     "
+              "
+|                     <li>
+|                       <a>
+|                         class="bluesky"
+|                         data-link-position="footer"
+|                         data-link-text="Bluesky (@mozilla.org)"
+|                         href="https://bsky.app/profile/mozilla.org"
+|                         translate="no"
+|                         "Bluesky"
+|                         <span>
+|                           " (@mozilla.org)"
+|                     "
+              "
+|                     <li>
+|                       <a>
+|                         class="instagram"
+|                         data-link-position="footer"
+|                         data-link-text="Instagram (@mozilla)"
+|                         href="https://www.instagram.com/mozilla/"
+|                         "Instagram"
+|                         <span>
+|                           " (@mozilla)"
+|                     "
+              "
+|                     <li>
+|                       <a>
+|                         class="linkedin"
+|                         data-link-position="footer"
+|                         data-link-text="LinkedIn (@mozilla)"
+|                         href="https://www.linkedin.com/company/mozilla-corporation/"
+|                         "LinkedIn"
+|                         <span>
+|                           " (@mozilla)"
+|                     "
+              "
+|                     <li>
+|                       <a>
+|                         class="tiktok"
+|                         data-link-position="footer"
+|                         data-link-text="TikTok (@mozilla)"
+|                         href="https://www.tiktok.com/@mozilla"
+|                         "TikTok"
+|                         <span>
+|                           " (@mozilla)"
+|                     "
+              "
+|                     <li>
+|                       <a>
+|                         class="spotify"
+|                         data-link-position="footer"
+|                         data-link-text="Spotify (@mozilla)"
+|                         href="https://open.spotify.com/show/0vT7LJMeVDxyQ2ZamHKu08?si=_uDRD6bRR_6M5YZyISGXgA"
+|                         "Spotify"
+|                         <span>
+|                           " (@mozilla)"
+|                     "
+            "
+|                   "
+          "
+|                 "
+          "
+|                 <div>
+|                   class="moz24-footer-refresh-social-wrapper"
+|                   "
+            "
+|                   <h2>
+|                     class="moz24-footer-heading-social"
+|                     "Follow @Firefox"
+|                   "
+            "
+|                   <ul>
+|                     class="moz24-footer-social-links"
+|                     "
+              "
+|                     <li>
+|                       <a>
+|                         class="bluesky"
+|                         data-link-position="footer"
+|                         data-link-text="Bluesky (@firefox.com)"
+|                         href="https://bsky.app/profile/firefox.com"
+|                         translate="no"
+|                         "Bluesky"
+|                         <span>
+|                           " (@firefox.com)"
+|                     "
+              "
+|                     <li>
+|                       <a>
+|                         class="instagram"
+|                         data-link-position="footer"
+|                         data-link-text="Instagram (@firefox)"
+|                         href="https://www.instagram.com/firefox/"
+|                         "Instagram"
+|                         <span>
+|                           " (@firefox)"
+|                     "
+              "
+|                     <li>
+|                       <a>
+|                         class="youtube"
+|                         data-link-position="footer"
+|                         data-link-text="YouTube (@firefoxchannel)"
+|                         href="https://www.youtube.com/user/firefoxchannel"
+|                         "YouTube"
+|                         <span>
+|                           " (@firefoxchannel)"
+|                     "
+              "
+|                     <li>
+|                       <a>
+|                         class="tiktok"
+|                         data-link-position="footer"
+|                         data-link-text="TikTok (@firefox)"
+|                         href="https://www.tiktok.com/@firefox"
+|                         "TikTok"
+|                         <span>
+|                           " (@firefox)"
+|                     "
+            "
+|                   "
+          "
+|                 "
+        "
+|               "
+      "
+|             "
+    "
+|           "
+    "
+|           <div>
+|             class="moz24-footer-actions"
+|             "
+      "
+|             <a>
+|               class="moz24-footer-donate"
+|               data-link-text="Donate"
+|               href="https://www.mozillafoundation.org/?form=moco-donate-footer"
+|               "
+        "
+|               <span>
+|                 class="mzp-c-button-icon-start"
+|                 "
+          "
+|                 <svg>
+|                   height="16"
+|                   viewBox="0 0 16 16"
+|                   width="16"
+|                   xmlns="http://www.w3.org/2000/svg"
+|                   <g>
+|                     clip-path="url(#a)"
+|                     <path>
+|                       d="M14.8 8.25c.77-.77 1.2-1.8 1.2-2.9a4.094 4.094 0 0 0-4.1-4.1c-1.1 0-2.12.43-2.9 1.2L7.99 3.46 6.98 2.45c-.77-.77-1.8-1.2-2.9-1.2a4.094 4.094 0 0 0-4.1 4.1c0 1.1.43 2.12 1.2 2.9l6.8 6.8 6.8-6.8zM1.5 5.35c0-.7.27-1.35.76-1.83.49-.49 1.14-.76 1.84-.76s1.34.27 1.84.76l2.07 2.07 2.07-2.07c.98-.98 2.69-.98 3.67 0a2.595 2.595 0 0 1 0 3.67l-5.74 5.74-5.75-5.74c-.49-.49-.76-1.14-.76-1.84"
+|                       fill="currentColor"
+|                   <defs>
+|                     <clipPath>
+|                       id="a"
+|                       <path>
+|                         d="M0 0h16v16H0z"
+|                 "
+        "
+|               "
+        "
+|               <span>
+|                 class="mzp-c-button-icon-text"
+|                 "Donate"
+|               "
+      "
+|             "
+      "
+|             <div>
+|               class="moz24-footer-language"
+|               "
+        
+       "
+|             "
+    "
+|           "
+    
+    "
+|           <div>
+|             class="moz24-footer-secondary"
+|             "
+      "
+|             <div>
+|               class="moz24-footer-legal"
+|               "
+        "
+|               <p>
+|                 class="moz24-footer-license"
+|                 rel="license"
+|                 "
+          
+          Donate to the not-for-profit "
+|                 <a>
+|                   data-link-position="footer"
+|                   data-link-text="Mozilla Foundation"
+|                   href="https://www.mozillafoundation.org/?utm_source=www.mozilla.org&utm_medium=referral&utm_campaign=footer"
+|                   rel="external noopener"
+|                   "Mozilla Foundation"
+|                 "."
+|                 <br>
+|                 "
+          Portions of this content are ©1998–2026 by individual mozilla.org contributors. Content available under a "
+|                 <a>
+|                   href="/en-US/foundation/licensing/website-content/"
+|                   rel="license"
+|                   "Creative Commons license"
+|                 ".
+        "
+|               "
+        "
+|               <ul>
+|                 class="moz24-footer-terms"
+|                 "
+          "
+|                 <li>
+|                   <a>
+|                     data-link-position="footer"
+|                     data-link-text="Privacy"
+|                     href="/en-US/privacy/websites/"
+|                     "Website Privacy Notice"
+|                 "
+          "
+|                 <li>
+|                   "
+            
+            "
+|                   <a>
+|                     data-link-position="footer"
+|                     data-link-text="Cookies"
+|                     href="/en-US/privacy/websites/cookie-settings/"
+|                     "Cookies"
+|                   "
+          "
+|                 "
+          "
+|                 <li>
+|                   <a>
+|                     data-link-position="footer"
+|                     data-link-text="Legal"
+|                     href="/en-US/about/legal/"
+|                     "Legal"
+|                 "
+          "
+|                 <li>
+|                   <a>
+|                     data-link-position="footer"
+|                     data-link-text="Community Participation Guidelines"
+|                     href="/en-US/about/governance/policies/participation/"
+|                     "Community Participation Guidelines"
+|                 "
+          
+            "
+|                 <li>
+|                   <a>
+|                     data-link-position="footer"
+|                     data-link-text="About this site"
+|                     href="/en-US/about/this-site/"
+|                     "About this site"
+|                 "
+          
+        "
+|               "
+      "
+|             "
+    "
+|           "
+    "
+|           <img>
+|             alt=""
+|             class="moz24-footer-logo-image-bottom"
+|             height="285"
+|             loading="lazy"
+|             src="https://www.mozilla.org/media/img/logos/m24/wordmark-white.2d673bb5b33a.svg"
+|             width="1376"
+|           "
+  "
+|         "
+"
+|       "
+
+
+  
+
+
+      
+
+      
+      
+    "
+|     "
+
+    
+    
+      
+        <#comment>"
+|     <!-- #comment -->
+|     "
+          
+          "
+|     <script>
+|       src="https://www.mozilla.org/media/js/sentry.d1770d77b071.js"
+|     "
+        <#comment>"
+|     <!-- #comment -->
+|     "
+      
+    
+
+    
+      <#comment>"
+|     <!-- #comment -->
+|     "
+        
+        "
+|     <script>
+|       src="https://www.mozilla.org/media/js/lib.57070d33021c.js"
+|     "
+        "
+|     <script>
+|       src="https://www.mozilla.org/media/js/fxa.bf74c411a79c.js"
+|     "
+        "
+|     <script>
+|       src="https://www.mozilla.org/media/js/data.a3c1e6e4dfae.js"
+|     "
+        
+          "
+|     <script>
+|       src="https://www.mozilla.org/media/js/m24-ui.54a2e7c5dc9d.js"
+|     "
+        
+      <#comment>"
+|     <!-- #comment -->
+|     "
+
+      <#comment>"
+|     <!-- #comment -->
+|     "
+    
+
+    
+    
+
+    <#comment>"
+|     <!-- #comment -->
+|     "
+    
+
+    
+    <#comment>"
+|     <!-- #comment -->
+|     "
+
+    
+    <#comment>"
+|     <!-- #comment -->
+|     "
+      
+      "
+|     <script>
+|       src="https://www.mozilla.org/media/js/consent-banner.20ae7deac179.js"
+|     "
+    <#comment>"
+|     <!-- #comment -->
+|     "
+    
+  
+"

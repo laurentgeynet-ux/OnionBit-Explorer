@@ -1,0 +1,616 @@
+| <!DOCTYPE html>
+| <html>
+|   lang="en"
+|   <head>
+|     "
+    "
+|     <meta>
+|       charset="utf-8"
+|     "
+    "
+|     <meta>
+|       content="width=device-width, initial-scale=1"
+|       name="viewport"
+|     "
+    
+"
+|     <title>
+|       "sourcehut hub"
+|     "
+
+    
+    "
+|     <link>
+|       href="/static/logo.svg"
+|       rel="icon"
+|       type="image/svg+xml"
+|     "
+    "
+|     <link>
+|       href="/static/logo.png"
+|       rel="icon"
+|       sizes="any"
+|       type="image/png"
+|     "
+    
+    "
+|     <link>
+|       href="/static/hub.sr.ht/main.min.069ba334.css"
+|       rel="stylesheet"
+|     "
+    
+    
+    
+    
+  "
+|   "
+  "
+|   <body>
+|     "
+    
+    
+    
+    
+    "
+|     <nav>
+|       class="container navbar navbar-light navbar-expand-sm"
+|       "
+      
+"
+|       <span>
+|         class="navbar-brand"
+|         "
+  "
+|         <span>
+|           aria-hidden="true"
+|           class="icon icon-circle "
+|           <svg>
+|             height="22"
+|             viewBox="0 0 512 512"
+|             width="22"
+|             xmlns="http://www.w3.org/2000/svg"
+|             <path>
+|               d="M256 8C119 8 8 119 8 256s111 248 248 248 248-111 248-248S393 8 256 8zm0 448c-110.5 0-200-89.5-200-200S145.5 56 256 56s200 89.5 200 200-89.5 200-200 200z"
+|           "
+"
+|         "
+  "
+|         <a>
+|           href="https://sr.ht"
+|           "
+    sourcehut
+  "
+|         "
+"
+|       "
+
+"
+|       <ul>
+|         class="navbar-nav"
+|         "
+  
+"
+|       "
+"
+|       <div>
+|         class="login"
+|         "
+  
+  "
+|         <span>
+|           class="navbar-text"
+|           "
+    
+    "
+|           <a>
+|             href="https://meta.sr.ht/login?return_to=https%3A%2F%2Fsr.ht%2F%3F"
+|             rel="nofollow"
+|             "Log in"
+|           "
+    —
+    "
+|           <a>
+|             href="https://meta.sr.ht"
+|             "Register"
+|           "
+    
+  "
+|         "
+  
+"
+|       "
+    "
+|     "
+    
+    
+    "
+|     <div>
+|       class="container"
+|       "
+      
+"
+|       <div>
+|         class="row"
+|         "
+  "
+|         <div>
+|           class="col-md-8"
+|           "
+    "
+|           <p>
+|             "
+      Welcome to
+      "
+|             <a>
+|               href="https://sourcehut.org"
+|               "
+        sourcehut"
+|             ",
+      the hacker's forge!
+    "
+|           "
+    "
+|           <p>
+|             "
+      "
+|             <a>
+|               class="btn btn-primary"
+|               href="https://meta.sr.ht/register"
+|               "Register here "
+|               <span>
+|                 aria-hidden="true"
+|                 class="icon icon-caret-right "
+|                 <svg>
+|                   viewBox="0 0 192 512"
+|                   xmlns="http://www.w3.org/2000/svg"
+|                   <path>
+|                     d="M0 384.662V127.338c0-17.818 21.543-26.741 34.142-14.142l128.662 128.662c7.81 7.81 7.81 20.474 0 28.284L34.142 398.804C21.543 411.404 0 402.48 0 384.662z"
+|                 "
+"
+|             "
+      or
+      "
+|             <a>
+|               href="https://meta.sr.ht/login?return_to=https%3A%2F%2Fsr.ht%2F%3F"
+|               "
+        Log in "
+|               <span>
+|                 aria-hidden="true"
+|                 class="icon icon-caret-right "
+|                 <svg>
+|                   viewBox="0 0 192 512"
+|                   xmlns="http://www.w3.org/2000/svg"
+|                   <path>
+|                     d="M0 384.662V127.338c0-17.818 21.543-26.741 34.142-14.142l128.662 128.662c7.81 7.81 7.81 20.474 0 28.284L34.142 398.804C21.543 411.404 0 402.48 0 384.662z"
+|                 "
+"
+|               "
+      "
+|             "
+      to get started, or check out some of our featured projects:
+    "
+|           "
+  "
+|         "
+"
+|       "
+"
+|       <div>
+|         class="row"
+|         style="margin-top: 1rem"
+|         "
+  "
+|         <div>
+|           class="col-md-12"
+|           "
+    "
+|           <h3>
+|             "Featured projects"
+|           "
+    "
+|           <div>
+|             class="event-list feature-list"
+|             "
+      
+      "
+|             <div>
+|               class="event"
+|               "
+        "
+|               <h5>
+|                 "
+          "
+|                 <span>
+|                   class="text-muted"
+|                   "~transkb/"
+|                 <a>
+|                   href="/~transkb/transkb/"
+|                   "transkb"
+|                 "
+        "
+|               "
+        "
+|               <blockquote>
+|                 "
+          "
+|                 <style>
+|                   ".highlight { background: inherit; }"
+|                 <div>
+|                   class="markdown"
+|                   <p>
+|                     "Collection of important resources for transgender people"
+|                   "
+"
+|                 "
+        "
+|               "
+        
+      "
+|             "
+      
+      "
+|             <div>
+|               class="event"
+|               "
+        "
+|               <h5>
+|                 "
+          "
+|                 <span>
+|                   class="text-muted"
+|                   "~vicho/"
+|                 <a>
+|                   href="/~vicho/el_poblador/"
+|                   "el_poblador"
+|                 "
+        "
+|               "
+        "
+|               <blockquote>
+|                 "
+          "
+|                 <style>
+|                   ".highlight { background: inherit; }"
+|                 <div>
+|                   class="markdown"
+|                   <p>
+|                     "A terminal-based implementation of Settlers of Catan"
+|                   "
+"
+|                 "
+        "
+|               "
+        
+        "
+|               <div>
+|                 class="tags"
+|                 "
+        
+          "
+|                 <a>
+|                   class="tag"
+|                   href="/projects?search=%23board-games"
+|                   rel="nofollow"
+|                   "#board-games"
+|                 "
+        
+          "
+|                 <a>
+|                   class="tag"
+|                   href="/projects?search=%23tui"
+|                   rel="nofollow"
+|                   "#tui"
+|                 "
+        
+          "
+|                 <a>
+|                   class="tag"
+|                   href="/projects?search=%23catan"
+|                   rel="nofollow"
+|                   "#catan"
+|                 "
+        
+        "
+|               "
+        
+      "
+|             "
+      
+      "
+|             <div>
+|               class="event"
+|               "
+        "
+|               <h5>
+|                 "
+          "
+|                 <span>
+|                   class="text-muted"
+|                   "~sheepy/"
+|                 <a>
+|                   href="/~sheepy/3ds-homebrew/"
+|                   "3ds-homebrew"
+|                 "
+        "
+|               "
+        "
+|               <blockquote>
+|                 "
+          "
+|                 <style>
+|                   ".highlight { background: inherit; }"
+|                 <div>
+|                   class="markdown"
+|                   <p>
+|                     "A collection of "silly" 3DS homebrew projects."
+|                   "
+"
+|                 "
+        "
+|               "
+        
+        "
+|               <div>
+|                 class="tags"
+|                 "
+        
+          "
+|                 <a>
+|                   class="tag"
+|                   href="/projects?search=%233ds"
+|                   rel="nofollow"
+|                   "#3ds"
+|                 "
+        
+          "
+|                 <a>
+|                   class="tag"
+|                   href="/projects?search=%23homebrew"
+|                   rel="nofollow"
+|                   "#homebrew"
+|                 "
+        
+          "
+|                 <a>
+|                   class="tag"
+|                   href="/projects?search=%23rust"
+|                   rel="nofollow"
+|                   "#rust"
+|                 "
+        
+        "
+|               "
+        
+      "
+|             "
+      
+      "
+|             <div>
+|               class="event"
+|               "
+        "
+|               <h5>
+|                 "
+          "
+|                 <span>
+|                   class="text-muted"
+|                   "~reykjalin/"
+|                 <a>
+|                   href="/~reykjalin/Fonn/"
+|                   "Fonn"
+|                 "
+        "
+|               "
+        "
+|               <blockquote>
+|                 "
+          "
+|                 <style>
+|                   ".highlight { background: inherit; }"
+|                 <div>
+|                   class="markdown"
+|                   <p>
+|                     "Fönn is a code editor powered by libfn, a text editor engine as a library."
+|                   "
+"
+|                 "
+        "
+|               "
+        
+        "
+|               <div>
+|                 class="tags"
+|                 "
+        
+          "
+|                 <a>
+|                   class="tag"
+|                   href="/projects?search=%23editor"
+|                   rel="nofollow"
+|                   "#editor"
+|                 "
+        
+          "
+|                 <a>
+|                   class="tag"
+|                   href="/projects?search=%23tui"
+|                   rel="nofollow"
+|                   "#tui"
+|                 "
+        
+          "
+|                 <a>
+|                   class="tag"
+|                   href="/projects?search=%23zig"
+|                   rel="nofollow"
+|                   "#zig"
+|                 "
+        
+        "
+|               "
+        
+      "
+|             "
+      
+      "
+|             <div>
+|               class="event"
+|               "
+        "
+|               <h5>
+|                 "
+          "
+|                 <span>
+|                   class="text-muted"
+|                   "~mlb/"
+|                 <a>
+|                   href="/~mlb/linkhut/"
+|                   "linkhut"
+|                 "
+        "
+|               "
+        "
+|               <blockquote>
+|                 "
+          "
+|                 <style>
+|                   ".highlight { background: inherit; }"
+|                 <div>
+|                   class="markdown"
+|                   <p>
+|                     "A social bookmarking website"
+|                   "
+"
+|                 "
+        "
+|               "
+        
+        "
+|               <div>
+|                 class="tags"
+|                 "
+        
+          "
+|                 <a>
+|                   class="tag"
+|                   href="/projects?search=%23social"
+|                   rel="nofollow"
+|                   "#social"
+|                 "
+        
+          "
+|                 <a>
+|                   class="tag"
+|                   href="/projects?search=%23bookmarks"
+|                   rel="nofollow"
+|                   "#bookmarks"
+|                 "
+        
+        "
+|               "
+        
+      "
+|             "
+      
+      "
+|             <div>
+|               class="event"
+|               "
+        "
+|               <h5>
+|                 "
+          "
+|                 <span>
+|                   class="text-muted"
+|                   "~bptato/"
+|                 <a>
+|                   href="/~bptato/chawan/"
+|                   "chawan"
+|                 "
+        "
+|               "
+        "
+|               <blockquote>
+|                 "
+          "
+|                 <style>
+|                   ".highlight { background: inherit; }"
+|                 <div>
+|                   class="markdown"
+|                   <p>
+|                     "A web browser for your terminal emulator"
+|                   "
+"
+|                 "
+        "
+|               "
+        
+        "
+|               <div>
+|                 class="tags"
+|                 "
+        
+          "
+|                 <a>
+|                   class="tag"
+|                   href="/projects?search=%23browser"
+|                   rel="nofollow"
+|                   "#browser"
+|                 "
+        
+          "
+|                 <a>
+|                   class="tag"
+|                   href="/projects?search=%23pager"
+|                   rel="nofollow"
+|                   "#pager"
+|                 "
+        
+        "
+|               "
+        
+      "
+|             "
+      
+    "
+|           "
+  "
+|         "
+"
+|       "
+"
+|       <div>
+|         class="row"
+|         "
+  "
+|         <div>
+|           class="col-md-4 offset-md-8"
+|           "
+    "
+|           <a>
+|             class="btn btn-default btn-block"
+|             href="/projects"
+|             "More projects "
+|             <span>
+|               aria-hidden="true"
+|               class="icon icon-caret-right "
+|               <svg>
+|                 viewBox="0 0 192 512"
+|                 xmlns="http://www.w3.org/2000/svg"
+|                 <path>
+|                   d="M0 384.662V127.338c0-17.818 21.543-26.741 34.142-14.142l128.662 128.662c7.81 7.81 7.81 20.474 0 28.284L34.142 398.804C21.543 411.404 0 402.48 0 384.662z"
+|               "
+"
+|           "
+  "
+|         "
+"
+|       "
+
+    "
+|     "
+    
+    
+    
+  
+"

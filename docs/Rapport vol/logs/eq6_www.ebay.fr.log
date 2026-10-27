@@ -1,0 +1,34 @@
+2026-10-26T12:30:22.397780Z  INFO explorer_core::session::navigate: nav: fetch+parse… tab=1
+2026-10-26T12:30:22.474856Z DEBUG h2::client: binding client connection
+2026-10-26T12:30:22.475033Z DEBUG h2::client: client connection bound
+2026-10-26T12:30:22.475114Z DEBUG h2::codec::framed_write: send frame=Settings { flags: (0x0) }
+2026-10-26T12:30:22.475489Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=Headers { stream_id: StreamId(1), flags: (0x5: END_HEADERS | END_STREAM) }
+2026-10-26T12:30:22.553077Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Settings { flags: (0x0), header_table_size: 4096, max_concurrent_streams: 100, initial_window_size: 65535, max_frame_size: 16384, max_header_list_size: 32768 }
+2026-10-26T12:30:22.554116Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=Settings { flags: (0x1: ACK) }
+2026-10-26T12:30:22.554206Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Settings { flags: (0x1: ACK) }
+2026-10-26T12:30:22.554236Z DEBUG Connection{peer=Client}: h2::proto::settings: received settings ACK; applying Settings { flags: (0x0) }
+2026-10-26T12:30:22.674128Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Headers { stream_id: StreamId(1), flags: (0x4: END_HEADERS) }
+2026-10-26T12:30:22.674231Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(1) }
+2026-10-26T12:30:22.677691Z  INFO explorer_core::session::apply: apply: cascade ms=2
+2026-10-26T12:30:22.677977Z  INFO explorer_core::session::apply: apply: boxtree ms=3
+2026-10-26T12:30:22.716695Z  INFO explorer_core::session::apply: apply: layout ms=41
+2026-10-26T12:30:22.745590Z  INFO explorer_core::session::apply: apply: repaint ms=70
+2026-10-26T12:30:22.745802Z DEBUG explorer_core::session::paint: pipeline en échec tab=1 error=HTTP 403
+erreur : HTTP 403
+2026-10-26T12:30:22.969399Z  INFO explorer_core::session::navigate: nav: fetch+parse… tab=1
+2026-10-26T12:30:23.041421Z DEBUG h2::client: binding client connection
+2026-10-26T12:30:23.041508Z DEBUG h2::client: client connection bound
+2026-10-26T12:30:23.041551Z DEBUG h2::codec::framed_write: send frame=Settings { flags: (0x0) }
+2026-10-26T12:30:23.041836Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=Headers { stream_id: StreamId(1), flags: (0x5: END_HEADERS | END_STREAM) }
+2026-10-26T12:30:23.066408Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Settings { flags: (0x0), header_table_size: 4096, max_concurrent_streams: 100, initial_window_size: 65535, max_frame_size: 16384, max_header_list_size: 32768 }
+2026-10-26T12:30:23.066499Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=Settings { flags: (0x1: ACK) }
+2026-10-26T12:30:23.081825Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Settings { flags: (0x1: ACK) }
+2026-10-26T12:30:23.081912Z DEBUG Connection{peer=Client}: h2::proto::settings: received settings ACK; applying Settings { flags: (0x0) }
+2026-10-26T12:30:23.226361Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Headers { stream_id: StreamId(1), flags: (0x4: END_HEADERS) }
+2026-10-26T12:30:23.226470Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(1) }
+2026-10-26T12:30:23.230250Z  INFO explorer_core::session::apply: apply: cascade ms=3
+2026-10-26T12:30:23.230519Z  INFO explorer_core::session::apply: apply: boxtree ms=3
+2026-10-26T12:30:23.271953Z  INFO explorer_core::session::apply: apply: layout ms=45
+2026-10-26T12:30:23.297953Z  INFO explorer_core::session::apply: apply: repaint ms=71
+2026-10-26T12:30:23.298107Z DEBUG explorer_core::session::paint: pipeline en échec tab=1 error=HTTP 403
+erreur : HTTP 403

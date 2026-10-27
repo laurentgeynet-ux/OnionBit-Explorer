@@ -1,0 +1,779 @@
+| <html>
+|   class="gl-system ui-indigo with-top-bar with-header page-with-panels with-gl-container-queries  user-logged-out"
+|   lang="en"
+|   style="--scrollbar-width: 0px"
+|   <head>
+|     prefix="og: http://ogp.me/ns#"
+|     "
+"
+|     <meta>
+|       charset="utf-8"
+|     "
+"
+|     <meta>
+|       content="IE=edge"
+|       http-equiv="X-UA-Compatible"
+|     "
+"
+|     <meta>
+|       content="width=device-width, initial-scale=1"
+|       name="viewport"
+|     "
+"
+|     <title>
+|       "Explore projects · GitLab"
+|     "
+"
+|     <link>
+|       as="font"
+|       crossorigin=""
+|       href="/assets/gitlab-sans/GitLabSans-9892dc17af892e03de41625c0ee325117a3b8ee4ba6005f3a3eac68510030aed.woff2"
+|       rel="preload"
+|     "
+"
+|     <link>
+|       as="font"
+|       crossorigin=""
+|       href="/assets/gitlab-sans/GitLabSans-Italic-f96f17332d67b21ada2dfba5f0c0e1d5801eab99330472057bf18edd93d4ccf7.woff2"
+|       rel="preload"
+|     "
+"
+|     <link>
+|       as="font"
+|       crossorigin=""
+|       href="/assets/gitlab-mono/GitLabMono-29c2152dac8739499dd0fe5cd37a486ebcc7d4798c9b6d3aeab65b3172375b05.woff2"
+|       rel="preload"
+|     "
+"
+|     <link>
+|       as="font"
+|       crossorigin=""
+|       href="/assets/gitlab-mono/GitLabMono-Italic-af36701a2188df32a9dcea12e0424c380019698d4f76da9ad8ea2fd59432cf83.woff2"
+|       rel="preload"
+|     "
+
+"
+|     <script>
+|       src="//stats.framasoft.org/matomo.js"
+|       type="text/javascript"
+|     <script>
+|       "
+//<![CDATA[
+window.gon={};gon.api_version="v4";gon.default_avatar_url="https://framagit.org/assets/no_avatar-849f9c04a3a0d0cea2424ae97b27447dc64a7dbfae83c036c45b403392f0e8ba.png";gon.max_file_size=12;gon.asset_host=null;gon.webpack_public_path="/assets/webpack/";gon.relative_url_root="";gon.user_color_mode="gl-system";gon.user_color_scheme="white";gon.markdown_surround_selection=null;gon.markdown_automatic_lists=null;gon.markdown_maintain_indentation=null;gon.math_rendering_limits_enabled=true;gon.recaptcha_api_server_url="https://www.recaptcha.net/recaptcha/api.js";gon.recaptcha_sitekey="";gon.gitlab_url="https://framagit.org";gon.promo_url="https://about.gitlab.com";gon.forum_url="https://forum.gitlab.com";gon.docs_url="https://docs.gitlab.com";gon.revision="449ed2875c2";gon.feature_category="groups_and_projects";gon.gitlab_logo="/assets/gitlab_logo-2957169c8ef64c58616a1ac3f4fc626e8a35ce4eb3ed31bb0d873712f2a041a0.png";gon.secure=true;gon.sprite_icons="/assets/icons-557611e974a59dbbc29ee0980dc4bc97610b136af3a30b5c715d47d566317bc5.svg";gon.sprite_file_icons="/assets/file_icons/file_icons-90de312d3dbe794a19dee8aee171f184ff69ca9c9cf9fe37e8b254e84c3a1543.svg";gon.illustrations_path="/assets/illustrations-04a01984e0e87c0ff5382b3165c0edde89b46604b3dd8f8528bfb111ab1a435d.svg";gon.emoji_sprites_css_path="/assets/emoji_sprites-9f4e433199c18178b03727c749cbd0c22e569f69ffb05ec235a49dc29b318bb3.css";gon.emoji_backend_version=4;gon.test_env=false;gon.disable_animations=false;gon.suggested_label_colors={"#cc338b":"Magenta-pink","#dc143c":"Crimson","#c21e56":"Rose red","#cd5b45":"Dark coral","#ed9121":"Carrot orange","#eee600":"Titanium yellow","#009966":"Green-cyan","#8fbc8f":"Dark sea green","#6699cc":"Blue-gray","#e6e6fa":"Lavender","#9400d3":"Dark violet","#330066":"Deep violet","#36454f":"Charcoal grey","#808080":"Gray"};gon.first_day_of_week=1;gon.time_display_relative=true;gon.time_display_format=0;gon.ee=false;gon.jh=false;gon.dot_com=false;gon.uf_error_prefix="UF";gon.pat_prefix="glpat-";gon.fluid_layout=false;gon.keyboard_shortcuts_enabled=true;gon.emoji_autocomplete_enabled=true;gon.broadcast_message_dismissal_path=null;gon.diagramsnet_url="https://embed.diagrams.net";gon.features={"uiForOrganizations":false,"pageBreadcrumbsInTopBar":false,"orgSwitcher":false,"findAndReplace":false,"removeMonitorMetrics":true,"workItemsClientSideBoards":false,"hideUnpinnedSidebarItems":false,"workItemFeaturesField":true,"etagCachingPostRequests":false};
+//]]>
+"
+|     "
+
+"
+|     <script>
+|       "
+//<![CDATA[
+const root = document.documentElement;
+if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
+  root.classList.add('gl-dark');
+}
+
+window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', (e) => {
+  if (e.matches) {
+    root.classList.add('gl-dark');
+  } else {
+    root.classList.remove('gl-dark');
+  }
+});
+
+//]]>
+"
+|     "
+
+
+"
+|     <link>
+|       href="https://framagit.org/explore/projects"
+|       rel="canonical"
+|     "
+
+
+"
+|     <meta>
+|       content="light dark"
+|       name="color-scheme"
+|     "
+"
+|     <link>
+|       href="/assets/application-79f356d98146549c21e5657de00ff91a957f995329d1725db0bb2a7251d2b59a.css"
+|       media="(prefers-color-scheme: light)"
+|       rel="stylesheet"
+|     "
+"
+|     <link>
+|       href="/assets/application_dark-a3de088d254f447173abe48a05ec6b7ac075668b58b5be1aa26c5012bb0f8395.css"
+|       media="(prefers-color-scheme: dark)"
+|       rel="stylesheet"
+|     "
+"
+|     <link>
+|       href="/assets/page_bundles/commit_description-9e7efe20f0cef17d0606edabfad0418e9eb224aaeaa2dae32c817060fa60abcc.css"
+|       rel="stylesheet"
+|     <link>
+|       href="/assets/page_bundles/design_management-4765252040ab8edacfb27d7015bf41527629b0dc4fdacd1f1bc9d3f65cecae1b.css"
+|       rel="stylesheet"
+|     <link>
+|       href="/assets/page_bundles/issuable_list-7a33f8b5a79c609e4bac7e1fa1c5553962adf726cd700fbead1f9e974c41e7c9.css"
+|       rel="stylesheet"
+|     <link>
+|       href="/assets/page_bundles/issues_list-1d9cdbbaf9469f9073c410dc7a7f2543b02071773aa332daf63803eaaec87e62.css"
+|       rel="stylesheet"
+|     <link>
+|       href="/assets/page_bundles/issues_show-ec954ae4932e0bfe7383adee3c75f53c5985c6edea62c7ae4370cb1f6e85a91a.css"
+|       rel="stylesheet"
+|     <link>
+|       href="/assets/page_bundles/notes_shared-bd75305a90734f71761e8d13c4286994caf487acb52219ee52dcc65c0c3f6a05.css"
+|       rel="stylesheet"
+|     <link>
+|       href="/assets/page_bundles/work_items-b2f575a41145c7ff2490084c75138aab201b2593b93846f5812aec8cfb2a6ca2.css"
+|       rel="stylesheet"
+|     "
+"
+|     <link>
+|       href="/assets/tailwind-1643fe418f6d3ad9eacf47d603d9c8150de2e6a435bbd333f32fd5f776cd7c7c.css"
+|       rel="stylesheet"
+|     "
+
+
+"
+|     <link>
+|       href="/assets/fonts-deb7ad1d55ca77c0172d8538d53442af63604ff490c74acc2859db295c125bdb.css"
+|       rel="stylesheet"
+|     "
+"
+|     <link>
+|       href="/assets/highlight/themes/white-2a02e7cdb193dcec5b8068ad0a57aee70b1cd0888c8d1dbe8ab5996651334922.css"
+|       media="(prefers-color-scheme: light)"
+|       rel="stylesheet"
+|     "
+"
+|     <link>
+|       href="/assets/highlight/themes/dark-7fbedc840cde3d684b77966ee3740cd6cf4ba7c26a807b7c8701223af70f772f.css"
+|       media="(prefers-color-scheme: dark)"
+|       rel="stylesheet"
+|     "
+
+"
+|     <script>
+|       defer="defer"
+|       src="/assets/webpack/runtime.ea79027a.bundle.js"
+|     "
+"
+|     <script>
+|       defer="defer"
+|       src="/assets/webpack/main.02b8bf31.chunk.js"
+|     "
+"
+|     <script>
+|       defer="defer"
+|       src="/assets/webpack/tracker.1eb446cb.chunk.js"
+|     "
+"
+|     <script>
+|       "
+//<![CDATA[
+window.snowplowOptions = {"namespace":"gl","hostname":"framagit.org:443","postPath":"/-/collect_events","forceSecureTracker":true,"appId":"gitlab_sm"};
+gl = window.gl || {};
+gl.snowplowStandardContext = {"schema":"iglu:com.gitlab/gitlab_standard/jsonschema/1-1-8","data":{"environment":"self-managed","source":"gitlab-rails","client_type":"api","correlation_id":"01M5WJ5PAC9CQJXDRR95QVTHJK","extra":{},"user_id":null,"global_user_id":null,"user_type":null,"is_gitlab_team_member":null,"namespace_id":null,"ultimate_parent_namespace_id":null,"project_id":null,"feature_enabled_by_namespace_ids":null,"realm":"self-managed","deployment_type":"self-managed","context_generated_at":"2026-10-26T16:54:49.455Z","organization_id":1}};
+gl.snowplowPseudonymizedPageUrl = "https://framagit.org/explore";
+gl.maskedDefaultReferrerUrl = null;
+gl.ga4MeasurementId = 'G-ENFH3X7M5Y';
+gl.duoEvents = [];
+gl.onlySendDuoEvents = true;
+
+
+//]]>
+"
+|     "
+
+
+
+"
+|     <script>
+|       defer="defer"
+|       src="/assets/webpack/commons-graphql_explorer-pages.admin.application_settings.service_accounts-pages.admin.applications--b635524d.b3338b4b.chunk.js"
+|     "
+"
+|     <script>
+|       defer="defer"
+|       src="/assets/webpack/commons-pages.admin.abuse_reports.show-pages.dashboard.issues-pages.dashboard.issues.vue3-pages.dash-5ffc317d.0bcd8c23.chunk.js"
+|     "
+"
+|     <script>
+|       defer="defer"
+|       src="/assets/webpack/commons-pages.admin.abuse_reports.show-pages.dashboard.issues-pages.dashboard.issues.vue3-pages.dash-f8003152.f196957a.chunk.js"
+|     "
+"
+|     <script>
+|       defer="defer"
+|       src="/assets/webpack/commons-pages.admin.application_settings.service_accounts-pages.explore.analytics_dashboards-pages.e-306889d5.8b0f4475.chunk.js"
+|     "
+"
+|     <script>
+|       defer="defer"
+|       src="/assets/webpack/commons-pages.admin.abuse_reports.show-pages.dashboard.issues-pages.dashboard.work_items-pages.group-b344e337.050faeee.chunk.js"
+|     "
+"
+|     <script>
+|       defer="defer"
+|       src="/assets/webpack/commons-pages.admin.deploy_keys.index-pages.admin.deploy_keys.index.vue3-pages.admin.groups.index-pa-95f4ca76.204c76b4.chunk.js"
+|     "
+"
+|     <script>
+|       defer="defer"
+|       src="/assets/webpack/commons-pages.dashboard.home-pages.registrations.new-pages.root-pages.root.vue3-pages.sessions.new-p-a41aff06.d68c093a.chunk.js"
+|     "
+"
+|     <script>
+|       defer="defer"
+|       src="/assets/webpack/commons-pages.dashboard.home-pages.projects.snippets.show-pages.projects.snippets.show.vue3-pages.ro-3e3d840b.db458a62.chunk.js"
+|     "
+"
+|     <script>
+|       defer="defer"
+|       src="/assets/webpack/0dcf7166.fee24f6c.chunk.js"
+|     "
+"
+|     <script>
+|       defer="defer"
+|       src="/assets/webpack/commons-pages.search.show-pages.search.show.vue3-super_sidebar-super_sidebar.vue3.e1ab1d65.chunk.js"
+|     "
+"
+|     <script>
+|       defer="defer"
+|       src="/assets/webpack/commons-super_sidebar-super_sidebar.vue3.e38d27a4.chunk.js"
+|     "
+"
+|     <script>
+|       defer="defer"
+|       src="/assets/webpack/commons-pages.search.show-super_sidebar.e41625fd.chunk.js"
+|     "
+"
+|     <script>
+|       defer="defer"
+|       src="/assets/webpack/super_sidebar.ff1bc863.chunk.js"
+|     "
+"
+|     <script>
+|       defer="defer"
+|       src="/assets/webpack/8632254b.bbb48efe.chunk.js"
+|     "
+"
+|     <script>
+|       defer="defer"
+|       src="/assets/webpack/commons-pages.admin.abuse_reports-pages.admin.abuse_reports.show-pages.admin.groups.index-pages.admi-315b2517.e590656f.chunk.js"
+|     "
+"
+|     <script>
+|       defer="defer"
+|       src="/assets/webpack/commons-pages.admin.groups.index-pages.admin.groups.index.vue3-pages.admin.projects.index-pages.admi-81046c2c.cbf32916.chunk.js"
+|     "
+"
+|     <script>
+|       defer="defer"
+|       src="/assets/webpack/commons-pages.admin.groups.index-pages.admin.groups.index.vue3-pages.admin.projects.index-pages.admi-82fa539d.e50edb64.chunk.js"
+|     "
+"
+|     <script>
+|       defer="defer"
+|       src="/assets/webpack/97619091.5a8da893.chunk.js"
+|     "
+"
+|     <script>
+|       defer="defer"
+|       src="/assets/webpack/20245211.4c977f35.chunk.js"
+|     "
+"
+|     <script>
+|       defer="defer"
+|       src="/assets/webpack/commons-pages.admin.groups.index-pages.admin.projects.index-pages.dashboard.groups.index-pages.dashb-bd75d285.8c68cd54.chunk.js"
+|     "
+"
+|     <script>
+|       defer="defer"
+|       src="/assets/webpack/commons-pages.admin.groups.index-pages.admin.projects.index-pages.dashboard.groups.index-pages.dashb-d6945604.df6b8e2e.chunk.js"
+|     "
+"
+|     <script>
+|       defer="defer"
+|       src="/assets/webpack/commons-pages.admin.groups.index-pages.admin.projects.index-pages.dashboard.projects-pages.explore.p-25876521.02273cb0.chunk.js"
+|     "
+"
+|     <script>
+|       defer="defer"
+|       src="/assets/webpack/commons-pages.admin.projects.index-pages.dashboard.projects-pages.explore.projects-pages.groups.show-c0a4d52d.b0c77b3a.chunk.js"
+|     "
+"
+|     <script>
+|       defer="defer"
+|       src="/assets/webpack/commons-pages.admin.projects.index-pages.dashboard.projects-pages.explore.projects-pages.groups.show-6601f759.294772c9.chunk.js"
+|     "
+"
+|     <script>
+|       defer="defer"
+|       src="/assets/webpack/pages.explore.projects.b9bb6a22.chunk.js"
+|     "
+
+"
+|     <meta>
+|       content="object"
+|       property="og:type"
+|     "
+"
+|     <meta>
+|       content="GitLab"
+|       property="og:site_name"
+|     "
+"
+|     <meta>
+|       content="Explore projects · GitLab"
+|       property="og:title"
+|     "
+"
+|     <meta>
+|       content="Framagit"
+|       property="og:description"
+|     "
+"
+|     <meta>
+|       content="https://framagit.org/assets/twitter_card-570ddb06edf56a2312253c5872489847a0f385112ddbcd71ccfa1570febab5d2.jpg"
+|       property="og:image"
+|     "
+"
+|     <meta>
+|       content="64"
+|       property="og:image:width"
+|     "
+"
+|     <meta>
+|       content="64"
+|       property="og:image:height"
+|     "
+"
+|     <meta>
+|       content="https://framagit.org/explore"
+|       property="og:url"
+|     "
+"
+|     <meta>
+|       content="summary"
+|       property="twitter:card"
+|     "
+"
+|     <meta>
+|       content="Explore projects · GitLab"
+|       property="twitter:title"
+|     "
+"
+|     <meta>
+|       content="Framagit"
+|       property="twitter:description"
+|     "
+"
+|     <meta>
+|       content="https://framagit.org/assets/twitter_card-570ddb06edf56a2312253c5872489847a0f385112ddbcd71ccfa1570febab5d2.jpg"
+|       property="twitter:image"
+|     "
+
+"
+|     <meta>
+|       content="authenticity_token"
+|       name="csrf-param"
+|     "
+"
+|     <meta>
+|       content="aGP8ibGWF87GV91N68JLCipk64IDmCOk-uZHxfmPsoxWopN5chVPG4g1Tc3EQXEAT88iIlOYuGhizCsIdw9ikw"
+|       name="csrf-token"
+|     "
+"
+|     <meta>
+|       name="csp-nonce"
+|     "
+"
+|     <meta>
+|       content="/-/cable"
+|       name="action-cable-url"
+|     "
+"
+|     <link>
+|       crossorigin="use-credentials"
+|       href="/-/manifest.json"
+|       rel="manifest"
+|     "
+"
+|     <link>
+|       data-original-href="/uploads/-/system/appearance/favicon/1/git.png"
+|       href="/uploads/-/system/appearance/favicon/1/git.png"
+|       id="favicon"
+|       rel="icon"
+|       type="image/png"
+|     "
+"
+|     <link>
+|       href="/assets/apple-touch-icon-b049d4bc0dd9626f31db825d61880737befc7835982586d015bded10b4435460.png"
+|       rel="apple-touch-icon"
+|       type="image/x-icon"
+|     "
+"
+|     <link>
+|       crossorigin="use-credentials"
+|       href="/search/opensearch.xml"
+|       rel="search"
+|       title="Search GitLab"
+|       type="application/opensearchdescription+xml"
+|     "
+
+
+"
+|   <body>
+|     class="tab-width-8 gl-browser-generic gl-platform-other"
+|     data-page="explore:projects:index"
+|     "<#comment>"
+|     <!-- #comment -->
+|     "
+"
+|     <script>
+|       "
+//<![CDATA[
+var _paq = window._paq = window._paq || [];
+_paq.push(['trackPageView']);
+_paq.push(['enableLinkTracking']);
+;
+(function() {
+  var u="//stats.framasoft.org/";
+  _paq.push(['setTrackerUrl', u+'matomo.php']);
+  _paq.push(['setSiteId', "29"]);
+  var d=document, g=d.createElement('script'), s=d.getElementsByTagName('script')[0];
+  g.type='text/javascript'; g.async=true; g.src=u+'matomo.js'; s.parentNode.insertBefore(g,s);
+})();
+
+
+//]]>
+"
+|     <noscript>
+|     <p>
+|       <img>
+|         alt=""
+|         src="//stats.framasoft.org/matomo.php?idsite=29"
+|         style="border:0;"
+|     "
+<#comment>"
+|     <!-- #comment -->
+|     "
+
+
+"
+|     <meta>
+|       content="Framagit"
+|       name="description"
+|     "
+"
+|     <meta>
+|       content="#F4F0FF"
+|       media="(prefers-color-scheme: light)"
+|       name="theme-color"
+|     "
+"
+|     <meta>
+|       content="#25202F"
+|       media="(prefers-color-scheme: dark)"
+|       name="theme-color"
+|     "
+
+
+
+"
+|     <div>
+|       id="js-tooltips-container"
+|     "
+
+"
+|     <script>
+|       "
+//<![CDATA[
+gl = window.gl || {};
+gl.client = {"isGeneric":true,"isOther":true};
+
+
+//]]>
+"
+|     "
+
+
+"
+|     <header>
+|       class="super-topbar js-super-topbar"
+|     "
+"
+|     <div>
+|       class="layout-page js-page-layout page-with-super-sidebar"
+|       "
+"
+|       <script>
+|         "
+//<![CDATA[
+const outer = document.createElement('div');
+outer.style.visibility = 'hidden';
+outer.style.overflow = 'scroll';
+document.body.appendChild(outer);
+const inner = document.createElement('div');
+outer.appendChild(inner);
+const scrollbarWidth = outer.offsetWidth - inner.offsetWidth;
+outer.parentNode.removeChild(outer);
+document.documentElement.style.setProperty('--scrollbar-width', `${scrollbarWidth}px`);
+
+//]]>
+"
+|       <aside>
+|         class="js-super-sidebar super-sidebar super-sidebar-loading"
+|         data-command-palette="{}"
+|         data-is-saas="false"
+|         data-sidebar="{"is_logged_in":false,"compare_plans_url":"https://about.gitlab.com/pricing","current_menu_items":[{"id":"projects_menu","title":"Projects","icon":"project","avatar_shape":"rect","link":"/explore/projects","is_active":true,"items":[],"separated":false},{"id":"groups_menu","title":"Groups","icon":"group","avatar_shape":"rect","link":"/explore/groups","is_active":false,"items":[],"separated":false},{"id":"catalog_menu","title":"CI/CD Catalog","icon":"catalog-checkmark","avatar_shape":"rect","link":"/explore/catalog","is_active":false,"items":[],"separated":false},{"id":"topics_menu","title":"Topics","icon":"labels","avatar_shape":"rect","link":"/explore/projects/topics","is_active":false,"items":[],"separated":false},{"id":"snippets_menu","title":"Snippets","icon":"snippet","avatar_shape":"rect","link":"/explore/snippets","is_active":false,"items":[],"separated":false}],"current_context_header":"Explore","support_path":"https://contact.framasoft.org","display_whats_new":false,"show_version_check":null,"search":{"search_context":{"for_snippets":null}},"panel_type":"explore","shortcut_links":[{"title":"Snippets","href":"/explore/snippets","css_class":"dashboard-shortcuts-snippets"},{"title":"Groups","href":"/explore/groups","css_class":"dashboard-shortcuts-groups"},{"title":"Projects","href":"/explore/projects","css_class":"dashboard-shortcuts-projects"}],"has_terms":true,"allow_signup":"true","pinned_items":[]}"
+|       "
+
+"
+|       <div>
+|         class="broadcast-wrapper gl-rounded-lg gl-overflow-hidden"
+|         "
+
+
+
+"
+|       "
+"
+|       <div>
+|         class="panels-container gl-flex gl-gap-3"
+|         "
+"
+|         <div>
+|           class="content-panels gl-flex-1 gl-w-full gl-flex gl-gap-0 gl-relative js-content-panels gl-@container/content-panels"
+|           "
+"
+|           <div>
+|             class="paneled-view static-panel js-static-panel js-paneled-view content-wrapper"
+|             "
+"
+|             <div>
+|               class="panel-header"
+|               "
+"
+|               <div>
+|                 class="panel-header-inner js-panel-header-inner"
+|                 "
+"
+|                 <script>
+|                   type="application/ld+json"
+|                   "
+{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Explore","item":"https://framagit.org/explore"},{"@type":"ListItem","position":2,"name":"Projects","item":"https://framagit.org/explore"}]}
+
+
+"
+|                 "
+"
+|                 <div>
+|                   data-testid="breadcrumb-links"
+|                   id="js-vue-page-breadcrumbs-wrapper"
+|                   "
+"
+|                   <div>
+|                     data-breadcrumbs-json="[{"text":"Explore","href":"/explore","avatarPath":null},{"text":"Projects","href":"/explore","avatarPath":null}]"
+|                     id="js-vue-page-breadcrumbs"
+|                   "
+"
+|                   <div>
+|                     id="js-injected-page-breadcrumbs"
+|                   "
+"
+|                 "
+"
+|                 <div>
+|                   id="js-page-breadcrumbs-extra"
+|                 "
+
+
+
+"
+|                 <div>
+|                   class="panel-header-inner-actions"
+|                   "
+
+
+"
+|                   <div>
+|                     class="panel-header-inner-actions-portal-target js-panel-actions-portal-target"
+|                   "
+"
+|                 "
+"
+|               "
+"
+|             "
+"
+|             <div>
+|               class="panel-content"
+|               "
+"
+|               <div>
+|                 class="panel-content-inner js-static-panel-inner"
+|                 "
+"
+|                 <div>
+|                   class="alert-wrapper alert-wrapper-top-space gl-flex gl-flex-col gl-gap-3 container-fluid container-limited"
+|                   "
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+"
+|                 "
+
+
+"
+|                 <div>
+|                   class="container-fluid container-limited "
+|                   "
+"
+|                   <main>
+|                     class="content gl-@container/panel"
+|                     id="content-body"
+|                     "
+"
+|                     <div>
+|                       id="js-drawer-container"
+|                     "
+"
+|                     <div>
+|                       class="flash-container flash-container-page sticky"
+|                       data-testid="flash-container"
+|                       "
+"
+|                       <div>
+|                         id="js-global-alerts"
+|                       "
+"
+|                     "
+
+
+
+
+"
+|                     <div>
+|                       class="page-title-holder gl-flex gl-items-center"
+|                       data-testid="explore-projects-title"
+|                       "
+"
+|                       <h1>
+|                         class="page-title gl-text-size-h-display"
+|                         "Explore projects"
+|                       "
+"
+|                       <div>
+|                         class="page-title-controls"
+|                         "
+"
+|                       "
+"
+|                     "
+
+"
+|                     <div>
+|                       data-base-path="/explore/projects"
+|                       data-initial-sort="latest_activity_desc"
+|                       data-programming-languages="[{"id":33,"name":"Batchfile","color":"#C1F12E","created_at":"2018-09-24T10:00:29.992Z","language_id":29},{"id":16,"name":"C","color":"#555555","created_at":"2018-09-24T07:24:40.897Z","language_id":41},{"id":47,"name":"C#","color":"#178600","created_at":"2018-09-24T13:08:14.064Z","language_id":42},{"id":2,"name":"C++","color":"#f34b7d","created_at":"2018-09-24T06:53:15.218Z","language_id":43},{"id":19,"name":"CMake","color":"#DA3434","created_at":"2018-09-24T07:45:10.213Z","language_id":47},{"id":4,"name":"CSS","color":"#663399","created_at":"2018-09-24T06:53:15.570Z","language_id":50},{"id":168,"name":"Dockerfile","color":"#384d54","created_at":"2019-04-23T08:41:06.265Z","language_id":89},{"id":167,"name":"Hack","color":"#878787","created_at":"2019-04-23T07:12:54.203Z","language_id":153},{"id":5,"name":"HTML","color":"#e34c26","created_at":"2018-09-24T06:53:15.663Z","language_id":146},{"id":20,"name":"Java","color":"#b07219","created_at":"2018-09-24T07:47:44.482Z","language_id":181},{"id":3,"name":"JavaScript","color":"#f1e05a","created_at":"2018-09-24T06:53:15.471Z","language_id":183},{"id":23,"name":"Jupyter Notebook","color":"#DA5B0B","created_at":"2018-09-24T07:55:55.037Z","language_id":185},{"id":6,"name":"Makefile","color":"#427819","created_at":"2018-09-24T06:53:15.905Z","language_id":220},{"id":13,"name":"Perl","color":"#0298c3","created_at":"2018-09-24T07:12:34.671Z","language_id":282},{"id":14,"name":"PHP","color":"#4F5D95","created_at":"2018-09-24T07:21:43.818Z","language_id":272},{"id":8,"name":"Python","color":"#3572A5","created_at":"2018-09-24T06:55:32.757Z","language_id":303},{"id":24,"name":"Ruby","color":"#701516","created_at":"2018-09-24T07:58:56.846Z","language_id":326},{"id":81,"name":"Rust","color":"#dea584","created_at":"2018-09-28T18:54:53.504Z","language_id":327},{"id":225,"name":"SCSS","color":"#c6538c","created_at":"2020-10-23T08:50:08.321Z","language_id":329},{"id":1,"name":"Shell","color":"#89e051","created_at":"2018-09-24T06:44:03.743Z","language_id":346},{"id":31,"name":"Smarty","color":"#f0c040","created_at":"2018-09-24T08:41:51.000Z","language_id":353},{"id":7,"name":"TeX","color":"#3D6117","created_at":"2018-09-24T06:55:32.633Z","language_id":369},{"id":224,"name":"Twig","color":"#c1d026","created_at":"2020-10-23T08:50:07.963Z","language_id":377},{"id":36,"name":"TypeScript","color":"#3178c6","created_at":"2018-09-24T11:38:56.907Z","language_id":378},{"id":25,"name":"Vue","color":"#41b883","created_at":"2018-09-24T08:04:38.511Z","language_id":391}]"
+|                       id="js-explore-projects"
+|                     "
+
+
+"
+|                   "
+"
+|                 "
+
+
+"
+|               "
+
+
+"
+|             "
+"
+|           "
+"
+|           <div>
+|             class="paneled-view-portal"
+|             id="contextual-panel-portal"
+|           "
+"
+|         "
+"
+|       "
+
+"
+|     "
+
+
+"
+|     <script>
+|       "
+//<![CDATA[
+if ('loading' in HTMLImageElement.prototype) {
+  document.querySelectorAll('img.lazy').forEach(img => {
+    img.loading = 'lazy';
+    let imgUrl = img.dataset.src;
+    // Only adding width + height for avatars for now
+    // Keep this logic in sync with appendWidthToAvatarUrl in
+    // app/assets/javascripts/vue_shared/components/user_avatar/utils.js
+    if (imgUrl.indexOf('/avatar/') > -1 && !imgUrl.includes('width=')) {
+      const targetWidth = img.getAttribute('width') || img.width;
+      imgUrl += imgUrl.includes('?') ? `&width=${targetWidth}` : `?width=${targetWidth}`;
+    }
+    img.src = imgUrl;
+    img.removeAttribute('data-src');
+    img.classList.remove('lazy');
+    img.classList.add('js-lazy-loaded');
+    img.dataset.testid = 'js-lazy-loaded-content';
+  });
+}
+
+//]]>
+"
+|     "
+"
+|     <script>
+|       "
+//<![CDATA[
+gl = window.gl || {};
+gl.experiments = {};
+
+
+//]]>
+"
+|     "
+
+
+
+
+"

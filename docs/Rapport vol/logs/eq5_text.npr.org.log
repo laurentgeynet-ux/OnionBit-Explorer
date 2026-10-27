@@ -1,0 +1,477 @@
+2026-10-26T12:31:54.371727Z  INFO explorer_core::session::navigate: nav: fetch+parse… tab=1
+2026-10-26T12:31:54.455993Z DEBUG h2::client: binding client connection
+2026-10-26T12:31:54.456132Z DEBUG h2::client: client connection bound
+2026-10-26T12:31:54.456200Z DEBUG h2::codec::framed_write: send frame=Settings { flags: (0x0) }
+2026-10-26T12:31:54.456529Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=Headers { stream_id: StreamId(1), flags: (0x5: END_HEADERS | END_STREAM) }
+2026-10-26T12:31:54.485430Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Settings { flags: (0x0), header_table_size: 4096, max_concurrent_streams: 100, initial_window_size: 65535, max_frame_size: 16384, max_header_list_size: 32768 }
+2026-10-26T12:31:54.485710Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=Settings { flags: (0x1: ACK) }
+2026-10-26T12:31:54.485756Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Settings { flags: (0x1: ACK) }
+2026-10-26T12:31:54.485784Z DEBUG Connection{peer=Client}: h2::proto::settings: received settings ACK; applying Settings { flags: (0x0) }
+2026-10-26T12:31:55.870989Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Headers { stream_id: StreamId(1), flags: (0x4: END_HEADERS) }
+2026-10-26T12:31:55.871443Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(1), flags: (0x1: END_STREAM) }
+2026-10-26T12:31:55.874807Z  INFO explorer_core::session::navigate: nav: fetch+parse ok → peinture tab=1 ms=1503
+2026-10-26T12:31:55.875711Z  INFO explorer_core::session::navigate: nav: peinture ok → sous-ressources tab=1 ms=1504
+2026-10-26T12:31:55.878907Z DEBUG explorer_core::session::net_items: prefetch modules tab=1 async_mods=0 post_modules=0
+2026-10-26T12:31:55.878938Z  INFO explorer_core::session::navigate: nav: sous-ressources ok → commit tab=1 ms=1507
+2026-10-26T12:31:55.890554Z  INFO explorer_core::session::apply: apply: cascade ms=11
+2026-10-26T12:31:55.893218Z  INFO explorer_core::session::apply: apply: boxtree ms=14
+2026-10-26T12:31:56.165259Z  INFO explorer_core::session::apply: apply: layout ms=286
+2026-10-26T12:31:56.231209Z  INFO explorer_core::session::apply: apply: repaint ms=352
+[journal : 0 appliqués / 0 replis / 0 classées]
+docs/Rapport vol/captures/2026-10-26_13-31-54_Equipe_5_Medias_text.npr.org.png — 3120440 octets
+2026-10-26T12:31:56.944151Z  INFO explorer_core::session::navigate: nav: fetch+parse… tab=1
+2026-10-26T12:31:56.995967Z DEBUG h2::client: binding client connection
+2026-10-26T12:31:56.996052Z DEBUG h2::client: client connection bound
+2026-10-26T12:31:56.996104Z DEBUG h2::codec::framed_write: send frame=Settings { flags: (0x0) }
+2026-10-26T12:31:56.996402Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=Headers { stream_id: StreamId(1), flags: (0x5: END_HEADERS | END_STREAM) }
+2026-10-26T12:31:57.014327Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Settings { flags: (0x0), header_table_size: 4096, max_concurrent_streams: 100, initial_window_size: 65535, max_frame_size: 16384, max_header_list_size: 32768 }
+2026-10-26T12:31:57.014407Z DEBUG Connection{peer=Client}: h2::codec::framed_write: send frame=Settings { flags: (0x1: ACK) }
+2026-10-26T12:31:57.025956Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Settings { flags: (0x1: ACK) }
+2026-10-26T12:31:57.026040Z DEBUG Connection{peer=Client}: h2::proto::settings: received settings ACK; applying Settings { flags: (0x0) }
+2026-10-26T12:31:57.026961Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Headers { stream_id: StreamId(1), flags: (0x4: END_HEADERS) }
+2026-10-26T12:31:57.027033Z DEBUG Connection{peer=Client}: h2::codec::framed_read: received frame=Data { stream_id: StreamId(1), flags: (0x1: END_STREAM) }
+2026-10-26T12:31:57.030295Z  INFO explorer_core::session::navigate: nav: fetch+parse ok → peinture tab=1 ms=86
+2026-10-26T12:31:57.031252Z  INFO explorer_core::session::navigate: nav: peinture ok → sous-ressources tab=1 ms=87
+2026-10-26T12:31:57.034479Z DEBUG explorer_core::session::net_items: prefetch modules tab=1 async_mods=0 post_modules=0
+2026-10-26T12:31:57.034513Z  INFO explorer_core::session::navigate: nav: sous-ressources ok → commit tab=1 ms=90
+2026-10-26T12:31:57.047119Z  INFO explorer_core::session::apply: apply: cascade ms=12
+2026-10-26T12:31:57.049818Z  INFO explorer_core::session::apply: apply: boxtree ms=15
+2026-10-26T12:31:57.334832Z  INFO explorer_core::session::apply: apply: layout ms=300
+2026-10-26T12:31:57.399752Z  INFO explorer_core::session::apply: apply: repaint ms=365
+[url : https://text.npr.org/]
+| <!DOCTYPE html>
+| <html>
+|   lang="en"
+|   <head>
+|     "
+    "
+|     <title>
+|       "NPR : National Public Radio"
+|     "
+    "
+|     <meta>
+|       content="text/html;charset=utf-8"
+|       http-equiv="Content-Type"
+|     "
+    "
+|     <meta>
+|       content="width=device-width"
+|       name="viewport"
+|     "
+    "
+|     <link>
+|       href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAAXNSR0IArs4c6QAAAHlJREFUOBFjYBgFFIcA48cYpf/opvAv+YouxODXshZDbFONDSMLSJRv8V245KdYZTD7//8XcDFGRgkwe2O1NVzMv/UomA02AMQCaUQ2CCQG0ohsEEgMphHEBgEmCIWdRNeMTRXYBTBnw2iYQpjTYXx022Hio/RAhwAAjXEfJrIXnj4AAAAASUVORK5CYII="
+|       id="favicon"
+|       rel="shortcut icon"
+|       type="image/png"
+|     "
+    "
+|     <style>
+|       "
+        body {
+    display: block;
+    padding: 0px 20px;
+    max-width: 550px;
+    margin: 0 auto;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol";
+}
+
+.full-version-link {
+    margin-left: 15px;
+}
+
+.slug-line {
+    font-size: 1.1rem;
+    margin-bottom: 15px;
+}
+
+.hr-line {
+    position: relative;
+    height: 4px;
+}
+
+.hr-line:after {
+    background: linear-gradient(to right, #e60000 0%, #e60000 33.33%, #000000 33.33%, #000000 66.66%, #3366CC 66.66%);
+    position: absolute;
+    content: '';
+    height: 4px;
+    right: 0;
+    left: 0;
+    top: 0;
+}
+
+hr.gray {
+    border: .5px solid gray;
+}
+
+.story-title {
+    line-height: 2rem;
+    font-size: 1.5rem;
+    margin: 0;
+}
+
+.topic-heading {
+    line-height: 2rem;
+    font-size: 1.5rem;
+}
+
+.topic-container>ul {
+    padding: 0;
+    line-height: 1.4rem;
+}
+
+.topic-container li {
+    display: block;
+    padding-bottom: 15px;
+}
+
+.topic-container {
+    margin-top: 20px;
+}
+
+.topic-date {
+    margin: 20px 0;
+    font-style: italic;
+}
+
+.paragraphs-container {
+    line-height: 1.5rem;
+}
+
+.button:link,
+.button:visited {
+    background-color: white;
+    color: black;
+    border: 2px solid black;
+    padding: 4px 8px;
+    text-align: center;
+    text-decoration: none;
+    display: inline-block;
+}
+
+.button:hover,
+.button:active {
+    background-color: black;
+    color: white;
+}
+
+.lower-nav-container {
+    margin-top: 40px;
+}
+
+.lower-nav-container li {
+    margin-left: 0;
+    display: inline;
+    padding-right: 20px;
+}
+
+h6 {
+  text-transform: uppercase;
+}
+
+    "
+|     "
+"
+|   "
+
+
+"
+|   <body>
+|     "
+"
+|     <header>
+|       "
+  "
+|       <p>
+|         "Text-Only Version "
+|         <a>
+|           class="full-version-link button"
+|           href="https://www.npr.org/"
+|           "Go To Full Site"
+|       "
+"
+|     "
+
+
+"
+|     <main>
+|       "
+  "
+|       <p>
+|         "
+    
+  "
+|       "
+
+  "
+|       <div>
+|         class="topic-container"
+|         "
+    "
+|         <h1>
+|           class="topic-heading"
+|           "NPR : National Public Radio"
+|         "
+    "
+|         <div>
+|           class="hr-line"
+|         "
+    "
+|         <p>
+|           class="topic-date"
+|           "Monday, October 26, 2026"
+|         "
+    "
+|         <ul>
+|           "
+      
+        "
+|           <li>
+|             <a>
+|               class="topic-title"
+|               href="/nx-s1-6008167"
+|               "Republicans are spending millions and still may not win districts drawn to favor them"
+|           "
+      
+        "
+|           <li>
+|             <a>
+|               class="topic-title"
+|               href="/nx-s1-6016816"
+|               "Trump escalates anti-Muslim attacks against El-Sayed in Michigan"
+|           "
+      
+        "
+|           <li>
+|             <a>
+|               class="topic-title"
+|               href="/nx-s1-6016299"
+|               "Brazil's left-wing President Lula elected for fourth term"
+|           "
+      
+        "
+|           <li>
+|             <a>
+|               class="topic-title"
+|               href="/nx-s1-6000653"
+|               "Special ed diaries: Teachers tell NPR about their most joyous, most difficult moments"
+|           "
+      
+        "
+|           <li>
+|             <a>
+|               class="topic-title"
+|               href="/nx-s1-6016222"
+|               " Venezuela's opposition leader María Corina Machado returns after months in exile"
+|           "
+      
+        "
+|           <li>
+|             <a>
+|               class="topic-title"
+|               href="/g-s1-104412"
+|               "Who is María Corina Machado, Venezuela's Nobel Peace Prize winning opposition leader?"
+|           "
+      
+        "
+|           <li>
+|             <a>
+|               class="topic-title"
+|               href="/nx-s1-5991896"
+|               "Court ruling fails to end wait for thousands of immigrants stuck abroad without visas"
+|           "
+      
+        "
+|           <li>
+|             <a>
+|               class="topic-title"
+|               href="/nx-s1-6016212"
+|               "Blanche defends DOJ lawsuit blocking Alaska Senate results if Republican loses"
+|           "
+      
+        "
+|           <li>
+|             <a>
+|               class="topic-title"
+|               href="/nx-s1-6016205"
+|               "U.S. measles cases more than double what they were last year as outbreak spreads"
+|           "
+      
+        "
+|           <li>
+|             <a>
+|               class="topic-title"
+|               href="/nx-s1-6012820"
+|               "How AI is transforming hurricane forecasts"
+|           "
+      
+        "
+|           <li>
+|             <a>
+|               class="topic-title"
+|               href="/nx-s1-6015482"
+|               "Musk says SpaceX did restrict Starlink, as Ukraine says the tech has been restored"
+|           "
+      
+        "
+|           <li>
+|             <a>
+|               class="topic-title"
+|               href="/nx-s1-6009247"
+|               "Loggers say Roadless Rule repeal won't solve their biggest challenges "
+|           "
+      
+        "
+|           <li>
+|             <a>
+|               class="topic-title"
+|               href="/nx-s1-5995411"
+|               "Two beaches, just miles apart, show how different daily life is in Israel and Gaza"
+|           "
+      
+        "
+|           <li>
+|             <a>
+|               class="topic-title"
+|               href="/nx-s1-6011089"
+|               "Why going on a 'say no' retreat is a gift to your future self"
+|           "
+      
+        "
+|           <li>
+|             <a>
+|               class="topic-title"
+|               href="/g-s1-149563"
+|               "Israelis have changed. Will they change their leadership?"
+|           "
+      
+        "
+|           <li>
+|             <a>
+|               class="topic-title"
+|               href="/nx-s1-6013613"
+|               "Israeli PM pledges massive military operation after West Bank checkpoint attack"
+|           "
+      
+        "
+|           <li>
+|             <a>
+|               class="topic-title"
+|               href="/nx-s1-6015522"
+|               "Archdiocese of New York agrees to $800 million settlement over sexual abuse claims"
+|           "
+      
+        "
+|           <li>
+|             <a>
+|               class="topic-title"
+|               href="/nx-s1-6011190"
+|               "When a teen posts a selfie, how much filter is 'too much' filter?"
+|           "
+      
+        "
+|           <li>
+|             <a>
+|               class="topic-title"
+|               href="/nx-s1-6016126"
+|               "Soldiers guard center of Milan as thousands of protesters march in cities across Europe"
+|           "
+      
+        "
+|           <li>
+|             <a>
+|               class="topic-title"
+|               href="/nx-s1-5977810"
+|               "More dads taking paid family leave for a new baby, sometimes as much as moms are"
+|           "
+      
+    "
+|         "
+  "
+|       "
+"
+|     "
+
+
+"
+|     <div>
+|       class="hr-line"
+|     "
+"
+|     <nav>
+|       "
+"
+|       <p>
+|         "Topics"
+|       "
+"
+|       <ul>
+|         "
+    "
+|         <li>
+|           <a>
+|             href="/1001"
+|             "News"
+|         "
+    "
+|         <li>
+|           <a>
+|             href="/1008"
+|             "Culture"
+|         "
+    "
+|         <li>
+|           <a>
+|             href="/1039"
+|             "Music"
+|         "
+"
+|       "
+"
+|     "
+
+
+"
+|     <footer>
+|       "
+  "
+|       <nav>
+|         class="lower-nav-container"
+|         "
+    "
+|         <li>
+|           <a>
+|             href="/614470770"
+|             "Contact Us"
+|         "
+    "
+|         <li>
+|           <a>
+|             href="/179876898"
+|             "Terms of Use"
+|         "
+    "
+|         <li>
+|           <a>
+|             href="/179881519"
+|             "Permissions"
+|         "
+    "
+|         <li>
+|           <a>
+|             href="/179878450"
+|             "Privacy Policy"
+|         "
+  "
+|       "
+
+  "
+|       <p>
+|         "© NPR"
+|       "
+"
+|     "
+
+
+
+"

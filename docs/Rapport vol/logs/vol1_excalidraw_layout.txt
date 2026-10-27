@@ -1,0 +1,7 @@
+block<html> [0 0 1366x900]
+  block<body> [0 0 1366x900]
+    block<header> [0 0 1366x0]
+      block<h1> [0 21.44 1x1]
+        anon [0 21.44 1x36.796875]
+          text "Excalidraw" [0 21.44 156.4375x36.796875]
+    block<div> [0 0 1366x900]

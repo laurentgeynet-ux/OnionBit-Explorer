@@ -1,0 +1,7 @@
+block<html> [0 0 1366x51]
+  block<body> [0 0 1366x51]
+    block [0 0 1366x50]
+    block<div> [0 50 1366x0]
+    block<a> [0 0 6.4410005x1]
+      anon [0 0 6.4410005x1]
+        text "Privacy Policy" [0 0 6.441x1]

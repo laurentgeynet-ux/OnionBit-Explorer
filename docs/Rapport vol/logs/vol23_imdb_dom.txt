@@ -1,0 +1,78 @@
+| <!DOCTYPE html>
+| <html>
+|   lang="en"
+|   <head>
+|     "
+    "
+|     <meta>
+|       charset="utf-8"
+|     "
+    "
+|     <meta>
+|       content="width=device-width, initial-scale=1"
+|       name="viewport"
+|     "
+    "
+|     <title>
+|     "
+    "
+|     <style>
+|       "
+        body {
+            font-family: "Arial";
+        }
+    "
+|     "
+    "
+|     <script>
+|       type="text/javascript"
+|       "
+    window.awsWafCookieDomainList = ['imdb.com'];
+    window.gokuProps = {
+"key":"AQIDAHjcYu/GjX+QlghicBgQ/7bFaQZ+m5FKCMDnO+vTbNg96AGN/udEjRANbwhOJRik8bTdAAAAfjB8BgkqhkiG9w0BBwagbzBtAgEAMGgGCSqGSIb3DQEHATAeBglghkgBZQMEAS4wEQQMkCEM21yBAjS347O6AgEQgDte4EkybWnhScNAZ8Gd9dEGR0KpujR6vm5hnU6wXtU8uLZs546yHRbMI9iJWmzQYwbIUANIjwqtVwPscw==",
+          "iv":"CgAFtTKT1QAAD6Ep",
+          "context":"yhqqbfLZo2CcoO7IGkSqi9gYn9HWGyq5Tgnv2E1iQ+WQzCA3CVhOIjJsgh3JZz+mg2bz0Zirz4miw6G4jwGzNcIAvrnkn5qOZmcFl+Vz+4g72IVp1MlzNudJP/HM/my/z568s1/Xb00JFBxq6nd9XDsu40YTZOgnXzWYoHzP9CGP2r5p/JX6rlhmZERoRGRpy+3MHIQP0YnS7XeyFlBCdqoiqERak4/AVfE10hrNLnkW1n6oSthShYH7tgKz0oGC/DOPowccaAAICKYPuCFgyByEPXmmB385TVPWOygI14vW8Cp/TTrjcSjCSGUJ3vktrJVsTe6C1Io+hyfqE0cRurgC+poHAgoSgMwDTHe8ceMcAXoz8Q=="
+};
+    "
+|     "
+    "
+|     <script>
+|       src="https://fb423e1ef94f.6277d64d.us-east-1.token.awswaf.com/fb423e1ef94f/c3382d439950/916d943f6a58/challenge.js"
+|     "
+"
+|   "
+"
+|   <body>
+|     "
+    "
+|     <div>
+|       id="challenge-container"
+|     "
+    "
+|     <script>
+|       type="text/javascript"
+|       "
+        AwsWafIntegration.saveReferrer();
+        AwsWafIntegration.checkForceRefresh().then((forceRefresh) => {
+            if (forceRefresh) {
+                AwsWafIntegration.forceRefreshToken().then(() => {
+                    window.location.reload(true);
+                });
+            } else {
+                AwsWafIntegration.getToken().then(() => {
+                    window.location.reload(true);
+                });
+            }
+        });
+    "
+|     "
+    "
+|     <noscript>
+|       "
+        <h1>JavaScript is disabled</h1>
+        In order to continue, we need to verify that you're not a robot.
+        This requires JavaScript. Enable JavaScript and then reload the page.
+    "
+|     "
+
+"

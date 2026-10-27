@@ -1,0 +1,2188 @@
+| <html>
+|   data-fr-js="true"
+|   data-fr-scheme="light"
+|   dir="ltr"
+|   lang="fr"
+|   xmlns:esi="http://www.edge-delivery.org/esi/1.0"
+|   xmlns:ff4j="http://www.w3.org/1999/xhtml"
+|   <head>
+|     "
+	"
+|     <title>
+|       "Accueil | Service Public"
+|     <script>
+|       async=""
+|       data-name="ab-tasty"
+|       data-type="text/javascript"
+|       id="abtasty"
+|       src="https://try.abtasty.com/f2a27ecc441fb1662a47bee9ea97d2ea.js"
+|     <script>
+|       crossorigin="anonymous"
+|       id="readspeaker_script"
+|       integrity="sha384-lzKF3q93rwr6Dkx85dTWD73+IApvfO/ZfAeThrWcxQW6VdVUlHXEEv3kVyK04oYp"
+|       src="https://www.service-public.gouv.fr/resources/v-6215e1551d/assets/js/readspeaker/webReader.js?pids=wr&notools=1"
+|       type="text/javascript"
+|     <link>
+|       href="https://www.service-public.gouv.fr"
+|       rel="canonical"
+|     <link>
+|       href="https://www.service-public.gouv.fr"
+|       hreflang="fr"
+|       rel="alternate"
+|     <link>
+|       href="https://www.service-public.gouv.fr/?lang=en"
+|       hreflang="en"
+|       rel="alternate"
+|     <link>
+|       href="https://www.service-public.gouv.fr"
+|       hreflang="x-default"
+|       rel="alternate"
+|     "
+	"
+|     <meta>
+|       charset="utf-8"
+|     <meta>
+|       content="IE=edge"
+|       http-equiv="X-UA-Compatible"
+|     <meta>
+|       content="width=device-width, initial-scale=1, shrink-to-fit=no"
+|       name="viewport"
+|     <meta>
+|       content="0M4w4pmuOVWvOnlav2F9cPC4K-_-kiJ2mXl2S34sS1E"
+|       name="google-site-verification"
+|     <meta>
+|       content="nqpx3VsE_Ao-G_jygRYG--ZRBL_JlZFgL2jIuoMrYpU"
+|       name="google-site-verification"
+|     <meta>
+|       content="Service Public - Vos droits et démarches plus simplement"
+|       name="description"
+|     <meta>
+|       content="particuliers"
+|       name="audience"
+|     <meta>
+|       content="index,follow,max-snippet:-1,max-image-preview:large,max-video-preview:-1"
+|       name="robots"
+|     <meta>
+|       content="service-public.gouv.fr"
+|       name="sp_cookie_domain"
+|     <meta>
+|       content="https://lannuaire.service-public.gouv.fr"
+|       name="annuaire_root"
+|     <meta>
+|       content="https://www.service-public.gouv.fr"
+|       name="sp_root"
+|     <meta>
+|       content="/resources/v-6215e1551d/assets/js"
+|       name="ressources_url"
+|     <link>
+|       href="https://www.service-public.gouv.fr/resources/v-6215e1551d/assets/dsfr-1.14/dist/favicon/apple-touch-icon.png"
+|       rel="apple-touch-icon"
+|   <body>
+|     data-rsevent-id="rs_804117"
+|     lang="fr"
+|     "<#comment>"
+|     <!-- #comment -->
+|     <link>
+|       href="https://www.service-public.gouv.fr/resources/v-6215e1551d/assets/dsfr-1.14/dist/favicon/favicon.svg"
+|       rel="icon"
+|       type="image/svg+xml"
+|     <link>
+|       href="https://www.service-public.gouv.fr/resources/v-6215e1551d/assets/dsfr-1.14/dist/favicon/favicon.ico/"
+|       rel="shortcut icon"
+|       type="image/x-icon"
+|     "<#comment>"
+|     <!-- #comment -->
+|     <link>
+|       crossorigin="use-credentials"
+|       href="https://www.service-public.gouv.fr/resources/v-6215e1551d/assets/dsfr-1.14/dist/favicon/manifest.webmanifest"
+|       rel="manifest"
+|     <link>
+|       href="https://www.service-public.gouv.fr/resources/v-6215e1551d/assets/dsfr-1.14/dist/dsfr.min.css"
+|       rel="stylesheet"
+|     <link>
+|       href="https://www.service-public.gouv.fr/resources/v-6215e1551d/assets/dsfr-1.14/dist/utility/utility.min.css"
+|       rel="stylesheet"
+|     <link>
+|       href="https://www.service-public.gouv.fr/resources/v-6215e1551d/assets/dsfr-1.14/css/sp-dsfr.css"
+|       rel="stylesheet"
+|     <meta>
+|       content="article"
+|       property="og:type"
+|     <meta>
+|       content="Service Public - Vos droits et démarches plus simplement"
+|       property="og:title"
+|     <meta>
+|       content="https://www.service-public.gouv.fr/resources/v-6215e1551d/assets/img/sp-share.png"
+|       property="og:image"
+|     <meta>
+|       content="https://www.service-public.gouv.fr"
+|       property="og:url"
+|     <meta>
+|       content="Service Public - Vos droits et démarches plus simplement"
+|       property="og:description"
+|     <meta>
+|       content="summary"
+|       name="twitter:card"
+|     <meta>
+|       content="@servicepublicfr"
+|       name="twitter:site"
+|     <meta>
+|       content="Service Public - Vos droits et démarches plus simplement"
+|       name="twitter:title"
+|     <meta>
+|       content="Service Public - Vos droits et démarches plus simplement"
+|       name="twitter:description"
+|     <meta>
+|       content="https://www.service-public.gouv.fr/resources/v-6215e1551d/assets/img/sp-share.png"
+|       name="twitter:image"
+|     <link>
+|       href="https://try.abtasty.com/shared/me.9807ef1c2511db1e4e46.js"
+|       rel="preload"
+|     <link>
+|       href="https://www.service-public.gouv.fr/resources/v-6215e1551d/assets/js/readspeaker/r/r2557/ReadSpeaker.Styles-Button.css?v=3.8.3.2557"
+|       id="rsmod_Styles"
+|       rel="stylesheet"
+|       type="text/css"
+|     <script>
+|       data-requirecontext="_"
+|       data-requiremodule="orejime/orejime"
+|       src="https://www.service-public.gouv.fr/resources/v-6215e1551d/assets/js/orejime/orejime.js"
+|       type="text/javascript"
+|     <script>
+|       data-requirecontext="_"
+|       data-requiremodule="domReady"
+|       src="https://www.service-public.gouv.fr/resources/v-6215e1551d/assets/js/domReady.js"
+|       type="text/javascript"
+|     <script>
+|       data-requirecontext="_"
+|       data-requiremodule="entreprendre/vdd"
+|       src="https://www.service-public.gouv.fr/resources/v-6215e1551d/assets/js/entreprendre/vdd.js"
+|       type="text/javascript"
+|     <script>
+|       data-requirecontext="_"
+|       data-requiremodule="video"
+|       src="https://www.service-public.gouv.fr/resources/v-6215e1551d/assets/js/video.js"
+|       type="text/javascript"
+|     <script>
+|       data-requirecontext="_"
+|       data-requiremodule="chapters"
+|       src="https://www.service-public.gouv.fr/resources/v-6215e1551d/assets/js/chapters.js"
+|       type="text/javascript"
+|     <script>
+|       data-requirecontext="_"
+|       data-requiremodule="tagFilter"
+|       src="https://www.service-public.gouv.fr/resources/v-6215e1551d/assets/js/tagFilter.js"
+|       type="text/javascript"
+|     <script>
+|       data-requirecontext="_"
+|       data-requiremodule="navigation"
+|       src="https://www.service-public.gouv.fr/resources/v-6215e1551d/assets/js/navigation.js"
+|       type="text/javascript"
+|     <script>
+|       data-requirecontext="_"
+|       data-requiremodule="init"
+|       src="https://www.service-public.gouv.fr/resources/v-6215e1551d/assets/js/init.js"
+|       type="text/javascript"
+|     <script>
+|       data-requirecontext="_"
+|       data-requiremodule="choice-tree/choiceTree"
+|       src="https://www.service-public.gouv.fr/resources/v-6215e1551d/assets/js/choice-tree/choiceTree.js"
+|       type="text/javascript"
+|     <script>
+|       data-requirecontext="_"
+|       data-requiremodule="toolbar"
+|       src="https://www.service-public.gouv.fr/resources/v-6215e1551d/assets/js/toolbar.js"
+|       type="text/javascript"
+|     <script>
+|       data-requirecontext="_"
+|       data-requiremodule="selectLang"
+|       src="https://www.service-public.gouv.fr/resources/v-6215e1551d/assets/js/selectLang.js"
+|       type="text/javascript"
+|     <script>
+|       data-requirecontext="_"
+|       data-requiremodule="infographie"
+|       src="https://www.service-public.gouv.fr/resources/v-6215e1551d/assets/js/infographie.js"
+|       type="text/javascript"
+|     <script>
+|       data-requirecontext="_"
+|       data-requiremodule="fixDsfr"
+|       src="https://www.service-public.gouv.fr/resources/v-6215e1551d/assets/js/fixDsfr.js"
+|       type="text/javascript"
+|     <script>
+|       data-requirecontext="_"
+|       data-requiremodule="franceservices/franceServiceAutocomplete"
+|       src="https://www.service-public.gouv.fr/resources/v-6215e1551d/assets/js/franceservices/franceServiceAutocomplete.js"
+|       type="text/javascript"
+|     <script>
+|       data-requirecontext="_"
+|       data-requiremodule="franceservices/franceServices"
+|       src="https://www.service-public.gouv.fr/resources/v-6215e1551d/assets/js/franceservices/franceServices.js"
+|       type="text/javascript"
+|     <script>
+|       data-requirecontext="_"
+|       data-requiremodule="click-hide"
+|       src="https://www.service-public.gouv.fr/resources/v-6215e1551d/assets/js/click-hide.js"
+|       type="text/javascript"
+|     <script>
+|       data-requirecontext="_"
+|       data-requiremodule="captcha/captcha-aife"
+|       src="https://www.service-public.gouv.fr/resources/v-6215e1551d/assets/js/captcha/captcha-aife.js"
+|       type="text/javascript"
+|     <script>
+|       data-requirecontext="_"
+|       data-requiremodule="vddTooltip"
+|       src="https://www.service-public.gouv.fr/resources/v-6215e1551d/assets/js/vddTooltip.js"
+|       type="text/javascript"
+|     <script>
+|       data-requirecontext="_"
+|       data-requiremodule="entreprendre/marquage"
+|       src="https://www.service-public.gouv.fr/resources/v-6215e1551d/assets/js/entreprendre/marquage.js"
+|       type="text/javascript"
+|     <script>
+|       data-requirecontext="_"
+|       data-requiremodule="persoGeo"
+|       src="https://www.service-public.gouv.fr/resources/v-6215e1551d/assets/js/entreprendre/persogeo/persoGeo.js"
+|       type="text/javascript"
+|     <script>
+|       data-requirecontext="_"
+|       data-requiremodule="mustache"
+|       src="https://www.service-public.gouv.fr/resources/v-6215e1551d/assets/js/mustache/mustache.min.js"
+|       type="text/javascript"
+|     <script>
+|       data-requirecontext="_"
+|       data-requiremodule="require-plugins/text"
+|       src="https://www.service-public.gouv.fr/resources/v-6215e1551d/assets/js/require-plugins/text.js"
+|       type="text/javascript"
+|     <script>
+|       data-requirecontext="_"
+|       data-requiremodule="entreprendre/persogeo/components/apiService"
+|       src="https://www.service-public.gouv.fr/resources/v-6215e1551d/assets/js/entreprendre/persogeo/components/apiService.js"
+|       type="text/javascript"
+|     <script>
+|       data-requirecontext="_"
+|       data-requiremodule="entreprendre/persogeo/components/searchComponent"
+|       src="https://www.service-public.gouv.fr/resources/v-6215e1551d/assets/js/entreprendre/persogeo/components/searchComponent.js"
+|       type="text/javascript"
+|     <script>
+|       data-requirecontext="_"
+|       data-requiremodule="entreprendre/persogeo/components/markup"
+|       src="https://www.service-public.gouv.fr/resources/v-6215e1551d/assets/js/entreprendre/persogeo/components/markup.js"
+|       type="text/javascript"
+|     <script>
+|       data-requirecontext="_"
+|       data-requiremodule="entreprendre/persogeo/components/htmlGenerator"
+|       src="https://www.service-public.gouv.fr/resources/v-6215e1551d/assets/js/entreprendre/persogeo/components/htmlGenerator.js"
+|       type="text/javascript"
+|     <script>
+|       data-requirecontext="_"
+|       data-requiremodule="entreprendre/persogeo/components/serviceEnLigneButton"
+|       src="https://www.service-public.gouv.fr/resources/v-6215e1551d/assets/js/entreprendre/persogeo/components/serviceEnLigneButton.js"
+|       type="text/javascript"
+|     <script>
+|       data-requirecontext="_"
+|       data-requiremodule="entreprendre/persogeo/components/resetSearch"
+|       src="https://www.service-public.gouv.fr/resources/v-6215e1551d/assets/js/entreprendre/persogeo/components/resetSearch.js"
+|       type="text/javascript"
+|     <script>
+|       data-requirecontext="_"
+|       data-requiremodule="entreprendre/persogeo/components/constants"
+|       src="https://www.service-public.gouv.fr/resources/v-6215e1551d/assets/js/entreprendre/persogeo/components/constants.js"
+|       type="text/javascript"
+|     <script>
+|       data-requirecontext="_"
+|       data-requiremodule="entreprendre/persogeo/components/container"
+|       src="https://www.service-public.gouv.fr/resources/v-6215e1551d/assets/js/entreprendre/persogeo/components/container.js"
+|       type="text/javascript"
+|     <script>
+|       data-requirecontext="_"
+|       data-requiremodule="entreprendre/persogeo/components/serverErrors"
+|       src="https://www.service-public.gouv.fr/resources/v-6215e1551d/assets/js/entreprendre/persogeo/components/serverErrors.js"
+|       type="text/javascript"
+|     <script>
+|       data-requirecontext="_"
+|       data-requiremodule="entreprendre/persogeo/components/pivot"
+|       src="https://www.service-public.gouv.fr/resources/v-6215e1551d/assets/js/entreprendre/persogeo/components/pivot.js"
+|       type="text/javascript"
+|     <script>
+|       data-requirecontext="_"
+|       data-requiremodule="entreprendre/securityUtils"
+|       src="https://www.service-public.gouv.fr/resources/v-6215e1551d/assets/js/entreprendre/securityUtils.js"
+|       type="text/javascript"
+|     <div>
+|       id="orejime"
+|       <div>
+|         class="orejime-AppContainer"
+|     <noscript>
+|       "<div class="fr-container fr-mb-10v" id="top"><p class="sp-text--center">Javascript est desactivé dans votre navigateur.</p></div>"
+|     <div>
+|       class="fr-skiplinks"
+|       <nav>
+|         aria-label="Accès rapide"
+|         class="fr-container"
+|         lang="fr"
+|         role="navigation"
+|         <ul>
+|           class="fr-skiplinks__list"
+|           <li>
+|             <a>
+|               class="fr-link"
+|               href="#main"
+|               "Contenu"
+|           <li>
+|             class="sp-display-lg"
+|             <a>
+|               class="fr-link"
+|               href="#header-navigation"
+|               "Menu"
+|           <li>
+|             class="sp-display-lg"
+|             <a>
+|               class="fr-link"
+|               href="#header-search-main"
+|               "Recherche"
+|           <li>
+|             <a>
+|               class="fr-link"
+|               href="#footer"
+|               "Pied de page"
+|     <header>
+|       id="banner"
+|       role="banner"
+|       <script>
+|         data-test="marquage_authentication"
+|         "
+      var marquage_authentication = {
+        connected: false,
+        id: null,
+        category: null
+      };
+    "
+|       <div>
+|         class="fr-header"
+|         <div>
+|           class="fr-header__body"
+|           <div>
+|             class="fr-container"
+|             <div>
+|               class="fr-header__body-row"
+|               <div>
+|                 class="fr-header__brand fr-enlarge-link"
+|                 <div>
+|                   class="fr-header__brand-top"
+|                   <div>
+|                     class="fr-header__logo"
+|                     <p>
+|                       class="sp-print-only"
+|                       <img>
+|                         alt=""
+|                         src="https://www.service-public.gouv.fr/resources/v-6215e1551d/assets/img/logo-rf-top.svg"
+|                         width="50"
+|                     <p>
+|                       class="fr-logo"
+|                       "
+                    République "
+|                       <br>
+|                       "Française
+                  "
+|                     <p>
+|                       class="sp-print-only"
+|                       <img>
+|                         alt=""
+|                         src="https://www.service-public.gouv.fr/resources/v-6215e1551d/assets/img/logo-rf-bottom.svg"
+|                         width="80"
+|                   <div>
+|                     class="fr-header__navbar"
+|                     id="header-search-mobile"
+|                     <button>
+|                       aria-controls="header-search"
+|                       class="fr-btn--search fr-btn"
+|                       data-fr-opened="false"
+|                       id="fr-btn-header-search-mobile"
+|                       title="Ouvrir la recherche"
+|                       type="button"
+|                       "
+                      Ouvrir la recherche
+                    "
+|                     <button>
+|                       aria-controls="header-navigation"
+|                       class="fr-btn--menu fr-btn sp-btn--menu"
+|                       data-fr-opened="false"
+|                       id="fr-btn-menu-mobile-3"
+|                       type="button"
+|                       "
+                    Menu
+                  "
+|                 <div>
+|                   class="fr-header__service"
+|                   <a>
+|                     data-fr-inject-svg=""
+|                     href="https://www.service-public.gouv.fr"
+|                     title="Accueil Service Public - Vos droits et démarches plus simplement"
+|                     <img>
+|                       alt="Accueil Service Public - Vos droits et démarches plus simplement"
+|                       class="fr-responsive-img sp-header-logo"
+|                       src="/resources/v-6215e1551d/assets/img/logo/service-public.svg"
+|               <div>
+|                 class="fr-header__tools"
+|                 <div>
+|                   class="fr-header__tools-links"
+|                   <ul>
+|                     class="fr-btns-group"
+|                     <li>
+|                       data-test="profil"
+|                       <a>
+|                         class="fr-btn fr-fi-user-fill fr-btn--icon-left"
+|                         href="https://www.service-public.gouv.fr/compte/se-connecter"
+|                         <span>
+|                           "Se connecter"
+|                     <li>
+|                       <a>
+|                         class="fr-btn fr-displayed-lg sp-link-switch-site sp-text-color--red fr-fi-arrow-right-line fr-btn--icon-right"
+|                         data-test="lien-entreprendre"
+|                         href="https://entreprendre.service-public.gouv.fr"
+|                         rel="noopener noreferrer"
+|                         target="_blank"
+|                         title="Accéder au site pour les entreprises - nouvelle fenêtre"
+|                         <span>
+|                           "Accéder au site pour les entreprises"
+|                 <div>
+|                   class="fr-header__search fr-modal"
+|                   id="header-search"
+|                   <div>
+|                     class="fr-container fr-container-lg--fluid"
+|                     <button>
+|                       aria-controls="header-search"
+|                       class="fr-link--close fr-link"
+|                       data-fr-js-modal-button="true"
+|                       title="Fermer la recherche"
+|                       "Fermer"
+|                     <div>
+|                       class="sp-bloc-autocomplete"
+|                       id="search"
+|                       <form>
+|                         action="https://www.service-public.gouv.fr/particuliers/recherche-generale"
+|                         aria-label="Tout le site"
+|                         class="fr-search-bar sp-autocomplete select-a11y"
+|                         id="header-search-main"
+|                         method="get"
+|                         role="search"
+|                         <label>
+|                           class="fr-label"
+|                           for="header-search-input"
+|                           "
+                Recherche
+              "
+|                         <div>
+|                           aria-live="polite"
+|                           class="fr-sr-only sp-autocomplete-results"
+|                           <p>
+|                         <p>
+|                           class="fr-hidden Message"
+|                           id="messageheader-search-input"
+|                           "Des suggestions vous seront proposées lors de votre saisie situées après le champ"
+|                         <input>
+|                           aria-describedby="messageheader-search-input"
+|                           autocapitalize="off"
+|                           autocomplete="off"
+|                           class="fr-input"
+|                           data-enableautocompletev2="true"
+|                           data-test="search-input"
+|                           id="header-search-input"
+|                           maxlength="300"
+|                           name="keyword"
+|                           placeholder="Rechercher sur le site"
+|                           spellcheck="false"
+|                           title="Rechercher sur le site"
+|                           type="search"
+|                           value=""
+|                         <div>
+|                           class="sp-item-suggestions fr-hidden"
+|                           data-test="sp-item-suggestions-container"
+|                           <ul>
+|                             role="listbox"
+|                         <button>
+|                           class="fr-btn"
+|                           title="Rechercher sur le site"
+|                           type="submit"
+|                           <span>
+|                             "
+              Rechercher sur le site
+              "
+|         <div>
+|           class="fr-header__menu fr-modal"
+|           data-_csrf="f0bbaad4-0f0a-4809-be50-3e0766d200db"
+|           data-_csrf_header="X-CSRF-TOKEN"
+|           id="header-navigation"
+|           <div>
+|             class="fr-container"
+|             <button>
+|               aria-controls="header-navigation"
+|               class="fr-link--close fr-link"
+|               title="Fermer le menu"
+|               type="button"
+|               "
+            Fermer
+          "
+|             <div>
+|               class="fr-header__menu-links"
+|             <nav>
+|               aria-label="Menu principal"
+|               class="fr-nav sp-nav"
+|               id="header-navigation-bar"
+|               role="navigation"
+|               <ul>
+|                 class="fr-nav__list"
+|                 <li>
+|                   class="fr-nav__item"
+|                   <a>
+|                     aria-current="true"
+|                     class="fr-nav__link"
+|                     href="https://www.service-public.gouv.fr/particuliers"
+|                     title="Accueil"
+|                     <svg>
+|                       aria-hidden="true"
+|                       class=" fr-displayed-lg  sp-icon  sp-icon-ri-home-line "
+|                       focusable="false"
+|                       height="24"
+|                       viewBox="0 0 24 24"
+|                       width="24"
+|                       <path>
+|                         d="M21 20a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9.49a1 1 0 0 1 .386-.79l8-6.222a1 1 0 0 1 1.228 0l8 6.222a1 1 0 0 1 .386.79V20zm-2-1V9.978l-7-5.444-7 5.444V19h14z"
+|                     <span>
+|                       class="fr-sr-only-lg fr-displayed-xs"
+|                       "Accueil"
+|                 <li>
+|                   class="fr-nav__item"
+|                   <a>
+|                     class="fr-nav__link"
+|                     href="https://www.service-public.gouv.fr/particuliers/actualites"
+|                     "
+        Actualité"
+|                     <br>
+|                       class="fr-displayed-lg"
+|                     " de vos droits et démarches
+      "
+|                 <li>
+|                   class="fr-nav__item"
+|                   <button>
+|                     aria-controls="menu-sp-1"
+|                     aria-expanded="false"
+|                     class="fr-nav__btn"
+|                     type="button"
+|                     "
+        Fiches pratiques "
+|                     <br>
+|                       class="fr-displayed-lg"
+|                     "par événement de vie
+      "
+|                   <div>
+|                     class="fr-collapse fr-menu"
+|                     id="menu-sp-1"
+|                     <ul>
+|                       class="fr-menu__list"
+|                 <li>
+|                   <a>
+|                     class="fr-nav__link"
+|                     href="https://www.service-public.gouv.fr/particuliers/vosdroits/F14128"
+|                     "Je déménage"
+|                 <li>
+|                   <a>
+|                     class="fr-nav__link"
+|                     href="https://www.service-public.gouv.fr/particuliers/vosdroits/F17556"
+|                     "Je cherche un emploi"
+|                 <li>
+|                   <a>
+|                     class="fr-nav__link"
+|                     href="https://www.service-public.gouv.fr/particuliers/vosdroits/F16225"
+|                     "Je deviens parent"
+|                 <li>
+|                   <a>
+|                     class="fr-nav__link"
+|                     href="https://www.service-public.gouv.fr/particuliers/vosdroits/F16123"
+|                     "Je veux obtenir un crédit immobilier"
+|                 <li>
+|                   <a>
+|                     class="fr-nav__link"
+|                     href="https://www.service-public.gouv.fr/particuliers/vosdroits/F15913"
+|                     "J'achète un logement"
+|                 <li>
+|                   <a>
+|                     class="fr-nav__link"
+|                     href="https://www.service-public.gouv.fr/particuliers/vosdroits/F17904"
+|                     "Je prépare ma retraite"
+|                 <li>
+|                   <a>
+|                     class="fr-nav__link"
+|                     href="https://www.service-public.gouv.fr/particuliers/vosdroits/F16507"
+|                     "Un proche est décédé"
+|                 <li>
+|                   <a>
+|                     class="fr-nav__link fr-text--bold sp-item-see-more"
+|                     href="https://www.service-public.gouv.fr/particuliers/vosdroits/comment-faire-si"
+|                     <span>
+|                       aria-hidden="true"
+|                       class="fr-icon-add-line fr-icon--sm"
+|                     "Voir tous les événements de vie"
+|           <li>
+|             class="fr-nav__item"
+|             <button>
+|               aria-controls="menu-sp-2"
+|               aria-expanded="false"
+|               class="fr-nav__btn"
+|               type="button"
+|               "
+        Fiches pratiques "
+|               <br>
+|                 class="fr-displayed-lg"
+|               "par thème
+      "
+|             <div>
+|               class="fr-collapse fr-menu"
+|               id="menu-sp-2"
+|               <ul>
+|                 class="fr-menu__list"
+|           <li>
+|             <a>
+|               class="fr-nav__link"
+|               href="https://www.service-public.gouv.fr/particuliers/vosdroits/N19810"
+|               "Papiers - Citoyenneté - Élections"
+|           <li>
+|             <a>
+|               class="fr-nav__link"
+|               href="https://www.service-public.gouv.fr/particuliers/vosdroits/N19805"
+|               "Famille - Scolarité"
+|           <li>
+|             <a>
+|               class="fr-nav__link"
+|               href="https://www.service-public.gouv.fr/particuliers/vosdroits/N19811"
+|               "Social - Santé"
+|           <li>
+|             <a>
+|               class="fr-nav__link"
+|               href="https://www.service-public.gouv.fr/particuliers/vosdroits/N19806"
+|               "Travail - Formation"
+|           <li>
+|             <a>
+|               class="fr-nav__link"
+|               href="https://www.service-public.gouv.fr/particuliers/vosdroits/N19808"
+|               "Logement"
+|           <li>
+|             <a>
+|               class="fr-nav__link"
+|               href="https://www.service-public.gouv.fr/particuliers/vosdroits/N19812"
+|               "Transports - Mobilité"
+|           <li>
+|             <a>
+|               class="fr-nav__link"
+|               href="https://www.service-public.gouv.fr/particuliers/vosdroits/N19803"
+|               "Argent - Impôts - Consommation"
+|           <li>
+|             <a>
+|               class="fr-nav__link fr-text--bold sp-item-see-more"
+|               href="https://www.service-public.gouv.fr/particuliers/vosdroits/theme"
+|               <span>
+|                 aria-hidden="true"
+|                 class="fr-icon-add-line fr-icon--sm"
+|               "Voir tous les thèmes"
+|         <li>
+|           class="fr-nav__item"
+|           <button>
+|             aria-controls="menu-sp-3"
+|             aria-expanded="false"
+|             class="fr-nav__btn"
+|             type="button"
+|             "
+        Démarches, "
+|             <br>
+|               class="fr-displayed-lg"
+|             " aides et outils
+      "
+|           <div>
+|             class="fr-collapse fr-menu"
+|             id="menu-sp-3"
+|             <ul>
+|               class="fr-menu__list"
+|         <li>
+|           <a>
+|             class="fr-nav__link"
+|             data-test="aides-financieres"
+|             href="https://www.service-public.gouv.fr/particuliers/vosdroits/N32475"
+|             "
+              Aides financières"
+|         <li>
+|           <a>
+|             class="fr-nav__link"
+|             href="https://www.service-public.gouv.fr/particuliers/recherche?rubricFilter=serviceEnLigne&rubricTypeFilter="
+|             "Démarches, cerfas, modèles de lettres et simulateurs"
+|       <li>
+|         class="fr-nav__item"
+|         <a>
+|           class="fr-nav__link"
+|           data-test="annuaire_menu"
+|           href="https://lannuaire.service-public.gouv.fr"
+|           "
+        Annuaire "
+|           <br>
+|             class="fr-displayed-lg"
+|           "de l’administration
+      "
+|       <li>
+|         class="fr-nav__item"
+|         <a>
+|           class="fr-nav__link"
+|           href="https://www.service-public.gouv.fr/contact/accueil"
+|           "
+            Contacter"
+|           <br>
+|             class="fr-displayed-lg"
+|           " Service Public
+          "
+|       <div>
+|         class="fr-header__menu-links sp-header__menu-links-bottom fr-hidden-lg"
+|         <div>
+|           class="fr-btns-group"
+|           <a>
+|             class="fr-btn sp-link-switch-site sp-text-color--red fr-icon-arrow-right-line fr-btn--icon-right"
+|             data-test="lien-entreprendre"
+|             href="https://entreprendre.service-public.gouv.fr"
+|             rel="noopener noreferrer"
+|             target="_blank"
+|             title="Accéder au site pour les entreprises - nouvelle fenêtre"
+|             <span>
+|               class=""
+|               "Accéder au site pour les entreprises  "
+|     <main>
+|       class="main"
+|       id="main"
+|       lang="fr"
+|       role="main"
+|       <div>
+|         class="fr-container fr-pb-2w"
+|         <div>
+|           class="sp-container"
+|           <h1>
+|             class="fr-pt-4w fr-mb-4w fr-h2"
+|             id="titlePage"
+|             "
+    Bienvenue sur le site officiel d’information et de démarches administratives
+  "
+|           <div>
+|             class="sp-banner fr-mb-2w"
+|             <p>
+|               class="fr-mb-4w"
+|               <img>
+|                 alt="Une question sur vos droits ? Une démarche à faire ? Nous vous guidons"
+|                 class="fr-responsive-img"
+|                 loading="lazy"
+|                 src="https://www.service-public.gouv.fr/accueil/image"
+|           <div>
+|             class="sp-situation"
+|             <h2>
+|               class="fr-h3"
+|               "Fiches pratiques par événement de vie"
+|             <ul>
+|               class="fr-grid-row fr-grid-row--gutters sp-grid-row--gutters-16 fr-raw-list fr-mb-1w"
+|               <li>
+|                 class="fr-col-12 fr-col-sm-6 fr-col-md-3"
+|                 <div>
+|                   class="fr-tile fr-enlarge-link fr-tile--no-icon fr-tile--sm sp-situation-tile"
+|                   data-test="dsfr-tile"
+|                   <div>
+|                     class="fr-tile__body"
+|                     <div>
+|                       class="fr-tile__content"
+|                       <h3>
+|                         class="fr-tile__title"
+|                         <a>
+|                           class="fr-tile__link"
+|                           data-test="dsfr-tile-link"
+|                           href="https://www.service-public.gouv.fr/particuliers/vosdroits/F14128"
+|                           "Je déménage"
+|                   <div>
+|                     class="fr-tile__header"
+|                     <div>
+|                       class="fr-tile__pictogram"
+|                       data-fr-inject-svg=""
+|                       <img>
+|                         alt=""
+|                         class="fr-responsive-img"
+|                         data-test="dsfr-tile-img"
+|                         loading="lazy"
+|                         src="https://www.service-public.gouv.fr/resources/v-6215e1551d/assets/img/situation/icone-demenagement.svg"
+|               <li>
+|                 class="fr-col-12 fr-col-sm-6 fr-col-md-3"
+|                 <div>
+|                   class="fr-tile fr-enlarge-link fr-tile--no-icon fr-tile--sm sp-situation-tile"
+|                   data-test="dsfr-tile"
+|                   <div>
+|                     class="fr-tile__body"
+|                     <div>
+|                       class="fr-tile__content"
+|                       <h3>
+|                         class="fr-tile__title"
+|                         <a>
+|                           class="fr-tile__link"
+|                           data-test="dsfr-tile-link"
+|                           href="https://www.service-public.gouv.fr/particuliers/vosdroits/F16225"
+|                           "Je deviens parent"
+|                   <div>
+|                     class="fr-tile__header"
+|                     <div>
+|                       class="fr-tile__pictogram"
+|                       data-fr-inject-svg=""
+|                       <img>
+|                         alt=""
+|                         class="fr-responsive-img"
+|                         data-test="dsfr-tile-img"
+|                         loading="lazy"
+|                         src="https://www.service-public.gouv.fr/resources/v-6215e1551d/assets/img/situation/icone-attente-enfant.svg"
+|               <li>
+|                 class="fr-col-12 fr-col-sm-6 fr-col-md-3"
+|                 <div>
+|                   class="fr-tile fr-enlarge-link fr-tile--no-icon fr-tile--sm sp-situation-tile"
+|                   data-test="dsfr-tile"
+|                   <div>
+|                     class="fr-tile__body"
+|                     <div>
+|                       class="fr-tile__content"
+|                       <h3>
+|                         class="fr-tile__title"
+|                         <a>
+|                           class="fr-tile__link"
+|                           data-test="dsfr-tile-link"
+|                           href="https://www.service-public.gouv.fr/particuliers/vosdroits/F17556"
+|                           "Je recherche un emploi"
+|                   <div>
+|                     class="fr-tile__header"
+|                     <div>
+|                       class="fr-tile__pictogram"
+|                       data-fr-inject-svg=""
+|                       <img>
+|                         alt=""
+|                         class="fr-responsive-img"
+|                         data-test="dsfr-tile-img"
+|                         loading="lazy"
+|                         src="https://www.service-public.gouv.fr/resources/v-6215e1551d/assets/img/situation/icone-recherche-emploi.svg"
+|               <li>
+|                 class="fr-col-12 fr-col-sm-6 fr-col-md-3"
+|                 <div>
+|                   class="fr-tile fr-enlarge-link fr-tile--no-icon fr-tile--sm sp-situation-tile"
+|                   data-test="dsfr-tile"
+|                   <div>
+|                     class="fr-tile__body"
+|                     <div>
+|                       class="fr-tile__content"
+|                       <h3>
+|                         class="fr-tile__title"
+|                         <a>
+|                           class="fr-tile__link"
+|                           data-test="dsfr-tile-link"
+|                           href="https://www.service-public.gouv.fr/particuliers/vosdroits/F17904"
+|                           "Je prépare ma retraite"
+|                   <div>
+|                     class="fr-tile__header"
+|                     <div>
+|                       class="fr-tile__pictogram"
+|                       data-fr-inject-svg=""
+|                       <img>
+|                         alt=""
+|                         class="fr-responsive-img"
+|                         data-test="dsfr-tile-img"
+|                         loading="lazy"
+|                         src="https://www.service-public.gouv.fr/resources/v-6215e1551d/assets/img/situation/icone-preparation-retraite.svg"
+|             <div>
+|               class="sp-link fr-mb-3w"
+|               <div>
+|                 class="sp-link--label fr-grid-row--right"
+|                 <p>
+|                   class="fr-mb-0"
+|                   <a>
+|                     class="fr-link"
+|                     href="https://www.service-public.gouv.fr/particuliers/vosdroits/comment-faire-si"
+|                     <span>
+|                       class=""
+|                       "Voir toutes les fiches par événement de vie"
+|                 <span>
+|                   aria-hidden="true"
+|                   class="sp-icon fr-icon-arrow-right-line fr-icon--sm sp-blue"
+|           <div>
+|             class="sp-geo fr-mb-6w sp-bloc-france-services rs_skip"
+|             id="sp-france-service-home"
+|             <div>
+|               class="sp-geo-logo fr-col-md-4"
+|               data-fr-inject-svg=""
+|               data-test="geo-logo"
+|               <h2>
+|                 <span>
+|                   class="fr-sr-only"
+|                   "France Services"
+|                 <img>
+|                   alt=""
+|                   loading="lazy"
+|                   src="https://www.service-public.gouv.fr/resources/v-6215e1551d/web/img/logo-france-services.svg"
+|             <div>
+|               class="fr-col-md-8"
+|               <h3>
+|                 class="geo-title fr-h6"
+|                 <span>
+|                   "
+                Besoin d’aide près de chez vous ?
+            "
+|               <p>
+|                 class="fr-mb-3w"
+|                 "Un "
+|                 <strong>
+|                   "point d’accueil "
+|                 " pour vos "
+|                 <strong>
+|                   "démarches administratives"
+|               <div>
+|                 <button>
+|                   aria-controls="geo-help-FS"
+|                   aria-expanded="false"
+|                   class="fr-btn sp-btn--geo"
+|                   data-click-hide=""
+|                   id="sp-help-btn"
+|                   title="Trouver une France services"
+|                   type="button"
+|                   <span>
+|                     " Trouver une France services"
+|               <form>
+|                 action="/annuaire/recherche-france-service"
+|                 aria-label="Recherche France services"
+|                 id="search-form-fs"
+|                 method="get"
+|                 <div>
+|                   class="fr-collapse"
+|                   id="geo-help-FS"
+|                   <div>
+|                     class="fr-input-group sp-bloc-autocomplete sp-geo-fs"
+|                     id="search-fs"
+|                     <label>
+|                       class="fr-label fr-text--bold"
+|                       for="search-input-fs"
+|                       "
+                Quelle est votre adresse ?
+                "
+|                       <span>
+|                         class="fr-hint-text"
+|                         id="hint-localisation-01"
+|                         "
+                        Exemple : 32 rue Olympe de Gouges 89100 Sens, 33700, Toulouse
+                    "
+|                     <div>
+|                       class="sp-autocomplete fr-mt-1w"
+|                       id="input-search-localisation"
+|                       <div>
+|                         class="sp-input-wrap fr-input-wrap fr-fi-search-line select-a11y"
+|                         <div>
+|                           aria-live="polite"
+|                           class="fr-sr-only sp-autocomplete-results"
+|                           <p>
+|                         <p>
+|                           class="fr-hidden Message"
+|                           id="messagesearch-input-fs"
+|                           "Des suggestions vous seront proposées lors de votre saisie situées après le champ"
+|                         <input>
+|                           aria-describedby="localisation-01-message messagesearch-input-fs"
+|                           autocapitalize="off"
+|                           autocomplete="off"
+|                           class="fr-input"
+|                           data-enableautocompletev2="true"
+|                           data-enableautoselect="false"
+|                           data-id="search-input-fs-geo"
+|                           data-test="France_service_Geolocalisee"
+|                           id="search-input-fs"
+|                           maxlength="300"
+|                           name="search"
+|                           required="required"
+|                           spellcheck="false"
+|                           type="search"
+|                           value=""
+|                         <div>
+|                           class="sp-item-suggestions fr-hidden"
+|                           data-test="sp-item-suggestions-container"
+|                           <ul>
+|                             role="listbox"
+|                         <button>
+|                           class="btn btn-with-reset"
+|                           id="btn-with-reset-fs"
+|                           title="Supprimer cette adresse"
+|                           type="reset"
+|                           <svg>
+|                             aria-hidden="true"
+|                             class="sp-icon sp-icon-ri-close-line"
+|                             focusable="false"
+|                             height="24"
+|                             viewBox="0 0 24 24"
+|                             width="24"
+|                             <path>
+|                               d="M12 10.586l4.95-4.95 1.414 1.414-4.95 4.95 4.95 4.95-1.414 1.414-4.95-4.95-4.95 4.95-1.414-1.414 4.95-4.95-4.95-4.95L7.05 5.636z"
+|                     <div>
+|                       class="fr-messages-group"
+|                       id="localisation-01-message"
+|                       <p>
+|                         aria-hidden="true"
+|                         class="fr-error-text"
+|                         hidden="hidden"
+|                         id="search-fs-alert"
+|                         role="alert"
+|                         "
+                  Sélectionnez une suggestion dans la liste
+                "
+|                       <p>
+|                         aria-hidden="true"
+|                         class="fr-error-text"
+|                         hidden="hidden"
+|                         id="search-fs-error"
+|                         role="alert"
+|                         "
+                  Une erreur est survenue pendant la recherche, merci de réessayer
+                "
+|                   <p>
+|                     <button>
+|                       class="fr-btn fr-btn--secondary sp-btn-framboise fr-my-2w fr-icon-map-pin-2-line fr-btn--sm "
+|                       data-test="btn-utiliser-position"
+|                       type="button"
+|                       <span>
+|                         "
+                   Utiliser votre position
+                "
+|                   <p>
+|                     aria-live="polite"
+|                     class="fr-sr-only"
+|                     data-test="geoloc-fc"
+|                   <button>
+|                     class="fr-btn sp-btn-framboise"
+|                     id="btnFc"
+|                     title="Rechercher une France services"
+|                     type="submit"
+|                     <span>
+|                       "
+                  Rechercher
+              "
+|                   <div>
+|                     class="sp-geo-search-result"
+|                     style="display: none;"
+|                 <input>
+|                   id="hidden-real-address"
+|                   name="realAddress"
+|                   type="hidden"
+|                   value=""
+|                 <input>
+|                   id="useGeolocationHidden"
+|                   name="useGeolocation"
+|                   type="hidden"
+|                   value=""
+|           <div>
+|             class="sp-home-fiche-pratiques fr-mb-6w"
+|             <h2>
+|               class="fr-h3"
+|               "Fiches pratiques les plus lues"
+|             <ul>
+|               class="fr-grid-row fr-grid-row--gutters fr-raw-list fr-mb-1w"
+|               <li>
+|                 class="fr-col-12 fr-col-sm-6 fr-col-lg-4"
+|                 <div>
+|                   class="fr-card fr-card--sm fr-enlarge-link "
+|                   data-test="carte"
+|                   <div>
+|                     class="fr-card__body"
+|                     <div>
+|                       class="fr-card__content"
+|                       <h3>
+|                         class="fr-card__title"
+|                         data-test="carte-titre"
+|                         <a>
+|                           data-test="cards-private"
+|                           href="https://www.service-public.gouv.fr/particuliers/vosdroits/F31952"
+|                           "Calendrier des vacances scolaires 2026-2027 et 2027-2028"
+|                       <div>
+|                         class="fr-card__start fr-mb-2w"
+|                         <p>
+|                           class="fr-card__detail fr-mb-0"
+|                           data-test="carte-badge"
+|                           "École primaire (maternelle et élémentaire)"
+|               <li>
+|                 class="fr-col-12 fr-col-sm-6 fr-col-lg-4"
+|                 <div>
+|                   class="fr-card fr-card--sm fr-enlarge-link "
+|                   data-test="carte"
+|                   <div>
+|                     class="fr-card__body"
+|                     <div>
+|                       class="fr-card__content"
+|                       <h3>
+|                         class="fr-card__title"
+|                         data-test="carte-titre"
+|                         <a>
+|                           data-test="cards-private"
+|                           href="https://www.service-public.gouv.fr/particuliers/vosdroits/F21091"
+|                           "Renouvellement du passeport d'un majeur"
+|                       <div>
+|                         class="fr-card__start fr-mb-2w"
+|                         <p>
+|                           class="fr-card__detail fr-mb-0"
+|                           data-test="carte-badge"
+|                           "Passeport"
+|               <li>
+|                 class="fr-col-12 fr-col-sm-6 fr-col-lg-4"
+|                 <div>
+|                   class="fr-card fr-card--sm fr-enlarge-link "
+|                   data-test="carte"
+|                   <div>
+|                     class="fr-card__body"
+|                     <div>
+|                       class="fr-card__content"
+|                       <h3>
+|                         class="fr-card__title"
+|                         data-test="carte-titre"
+|                         <a>
+|                           data-test="cards-private"
+|                           href="https://www.service-public.gouv.fr/particuliers/vosdroits/F19134"
+|                           "Durée de conservation des papiers"
+|                       <div>
+|                         class="fr-card__start fr-mb-2w"
+|                         <p>
+|                           class="fr-card__detail fr-mb-0"
+|                           data-test="carte-badge"
+|                           "Certificat, copie, légalisation et conservation de documents"
+|               <li>
+|                 class="fr-col-12 fr-col-sm-6 fr-col-lg-4"
+|                 <div>
+|                   class="fr-card fr-card--sm fr-enlarge-link "
+|                   data-test="carte"
+|                   <div>
+|                     class="fr-card__body"
+|                     <div>
+|                       class="fr-card__content"
+|                       <h3>
+|                         class="fr-card__title"
+|                         data-test="carte-titre"
+|                         <a>
+|                           data-test="cards-private"
+|                           href="https://www.service-public.gouv.fr/particuliers/vosdroits/F13609"
+|                           "Aides pour financer le permis de conduire"
+|                       <div>
+|                         class="fr-card__start fr-mb-2w"
+|                         <p>
+|                           class="fr-card__detail fr-mb-0"
+|                           data-test="carte-badge"
+|                           "Permis de conduire"
+|               <li>
+|                 class="fr-col-12 fr-col-sm-6 fr-col-lg-4"
+|                 <div>
+|                   class="fr-card fr-card--sm fr-enlarge-link "
+|                   data-test="carte"
+|                   <div>
+|                     class="fr-card__body"
+|                     <div>
+|                       class="fr-card__content"
+|                       <h3>
+|                         class="fr-card__title"
+|                         data-test="carte-titre"
+|                         <a>
+|                           data-test="cards-private"
+|                           href="https://www.service-public.gouv.fr/particuliers/vosdroits/F612"
+|                           "Bruits de voisinage"
+|                       <div>
+|                         class="fr-card__start fr-mb-2w"
+|                         <p>
+|                           class="fr-card__detail fr-mb-0"
+|                           data-test="carte-badge"
+|                           "Troubles de voisinage"
+|               <li>
+|                 class="fr-col-12 fr-col-sm-6 fr-col-lg-4"
+|                 <div>
+|                   class="fr-card fr-card--sm fr-enlarge-link "
+|                   data-test="carte"
+|                   <div>
+|                     class="fr-card__body"
+|                     <div>
+|                       class="fr-card__content"
+|                       <h3>
+|                         class="fr-card__title"
+|                         data-test="carte-titre"
+|                         <a>
+|                           data-test="cards-private"
+|                           href="https://www.service-public.gouv.fr/particuliers/vosdroits/F33307"
+|                           "Inscription au registre des Français établis hors de France"
+|                       <div>
+|                         class="fr-card__start fr-mb-2w"
+|                         <p>
+|                           class="fr-card__detail fr-mb-0"
+|                           data-test="carte-badge"
+|                           "Vivre à l'étranger"
+|             <div>
+|               class="sp-link fr-mb-3w"
+|               <div>
+|                 class="sp-link--label fr-grid-row--right"
+|                 <p>
+|                   class="fr-mb-0"
+|                   <a>
+|                     class="fr-link"
+|                     data-test="a_lien_vers_fiche_pratique_par_theme"
+|                     href="https://www.service-public.gouv.fr/particuliers/vosdroits/theme"
+|                     <span>
+|                       class=""
+|                       "Voir toutes les fiches par thème"
+|                 <span>
+|                   aria-hidden="true"
+|                   class="sp-icon fr-icon-arrow-right-line fr-icon--sm sp-blue"
+|           <div>
+|             class="sp-home-demarches-outils fr-mb-6w"
+|             <h2>
+|               class="fr-h3"
+|               "Démarches et outils"
+|             <ul>
+|               class="fr-grid-row fr-grid-row--gutters fr-raw-list fr-mb-1v"
+|               <li>
+|                 class="fr-col-12 fr-col-sm-6 fr-col-lg-4"
+|                 <div>
+|                   class="fr-card fr-card--sm fr-enlarge-link "
+|                   data-test="carte"
+|                   <div>
+|                     class="fr-card__body"
+|                     <div>
+|                       class="fr-card__content"
+|                       <h3>
+|                         class="fr-card__title"
+|                         data-test="carte-titre"
+|                         <a>
+|                           data-test="cards-private"
+|                           href="https://www.service-public.gouv.fr/particuliers/vosdroits/R11193"
+|                           "Signaler son changement d'adresse en ligne"
+|                       <div>
+|                         class="fr-card__start fr-mb-2w"
+|                         <p>
+|                           class="fr-card__detail fr-mb-0"
+|                           data-test="carte-badge"
+|                           "Démarche en ligne"
+|               <li>
+|                 class="fr-col-12 fr-col-sm-6 fr-col-lg-4"
+|                 <div>
+|                   class="fr-card fr-card--sm fr-enlarge-link "
+|                   data-test="carte"
+|                   <div>
+|                     class="fr-card__body"
+|                     <div>
+|                       class="fr-card__content"
+|                       <h3>
+|                         class="fr-card__title"
+|                         data-test="carte-titre"
+|                         <a>
+|                           data-test="cards-private"
+|                           href="https://www.service-public.gouv.fr/particuliers/vosdroits/R39696"
+|                           "Calculer le coût d’une carte grise"
+|                       <div>
+|                         class="fr-card__start fr-mb-2w"
+|                         <p>
+|                           class="fr-card__detail fr-mb-0"
+|                           data-test="carte-badge"
+|                           "Simulateur"
+|               <li>
+|                 class="fr-col-12 fr-col-sm-6 fr-col-lg-4"
+|                 <div>
+|                   class="fr-card fr-card--sm fr-enlarge-link "
+|                   data-test="carte"
+|                   <div>
+|                     class="fr-card__body"
+|                     <div>
+|                       class="fr-card__content"
+|                       <h3>
+|                         class="fr-card__title"
+|                         data-test="carte-titre"
+|                         <a>
+|                           data-test="cards-private"
+|                           href="https://www.service-public.gouv.fr/particuliers/vosdroits/R60880"
+|                           "Vérifier combien de temps conserver un document"
+|                       <div>
+|                         class="fr-card__start fr-mb-2w"
+|                         <p>
+|                           class="fr-card__detail fr-mb-0"
+|                           data-test="carte-badge"
+|                           "Simulateur"
+|               <li>
+|                 class="fr-col-12 fr-col-sm-6 fr-col-lg-4"
+|                 <div>
+|                   class="fr-card fr-card--sm fr-enlarge-link "
+|                   data-test="carte"
+|                   <div>
+|                     class="fr-card__body"
+|                     <div>
+|                       class="fr-card__content"
+|                       <h3>
+|                         class="fr-card__title"
+|                         data-test="carte-titre"
+|                         <a>
+|                           data-test="cards-private"
+|                           href="https://www.service-public.gouv.fr/particuliers/vosdroits/R1757"
+|                           "Création d'une association (e-création)"
+|                       <div>
+|                         class="fr-card__start fr-mb-2w"
+|                         <p>
+|                           class="fr-card__detail fr-mb-0"
+|                           data-test="carte-badge"
+|                           "Démarche en ligne"
+|               <li>
+|                 class="fr-col-12 fr-col-sm-6 fr-col-lg-4"
+|                 <div>
+|                   class="fr-card fr-card--sm fr-enlarge-link "
+|                   data-test="carte"
+|                   <div>
+|                     class="fr-card__body"
+|                     <div>
+|                       class="fr-card__content"
+|                       <h3>
+|                         class="fr-card__title"
+|                         data-test="carte-titre"
+|                         <a>
+|                           data-test="cards-private"
+|                           href="https://www.service-public.gouv.fr/particuliers/vosdroits/R47789"
+|                           "Estimer le montant des droits de succession"
+|                       <div>
+|                         class="fr-card__start fr-mb-2w"
+|                         <p>
+|                           class="fr-card__detail fr-mb-0"
+|                           data-test="carte-badge"
+|                           "Simulateur"
+|               <li>
+|                 class="fr-col-12 fr-col-sm-6 fr-col-lg-4"
+|                 <div>
+|                   class="fr-card fr-card--sm fr-enlarge-link "
+|                   data-test="carte"
+|                   <div>
+|                     class="fr-card__body"
+|                     <div>
+|                       class="fr-card__content"
+|                       <h3>
+|                         class="fr-card__title"
+|                         data-test="carte-titre"
+|                         <a>
+|                           data-test="cards-private"
+|                           href="https://www.service-public.gouv.fr/particuliers/vosdroits/R58932"
+|                           "Trouver une mission de bénévolat"
+|                       <div>
+|                         class="fr-card__start fr-mb-2w"
+|                         <p>
+|                           class="fr-card__detail fr-mb-0"
+|                           data-test="carte-badge"
+|                           "Outil de recherche"
+|               <li>
+|                 class="fr-col-12 fr-col-sm-6 fr-col-lg-4"
+|                 <div>
+|                   class="fr-card fr-card--sm fr-enlarge-link "
+|                   data-test="carte"
+|                   <div>
+|                     class="fr-card__body"
+|                     <div>
+|                       class="fr-card__content"
+|                       <h3>
+|                         class="fr-card__title"
+|                         data-test="carte-titre"
+|                         <a>
+|                           data-test="cards-private"
+|                           href="https://www.service-public.gouv.fr/particuliers/vosdroits/R54184"
+|                           "Calculer les indemnités d'entretien de l'assistante maternelle"
+|                       <div>
+|                         class="fr-card__start fr-mb-2w"
+|                         <p>
+|                           class="fr-card__detail fr-mb-0"
+|                           data-test="carte-badge"
+|                           "Simulateur"
+|               <li>
+|                 class="fr-col-12 fr-col-sm-6 fr-col-lg-4"
+|                 <div>
+|                   class="fr-card fr-card--sm fr-enlarge-link "
+|                   data-test="carte"
+|                   <div>
+|                     class="fr-card__body"
+|                     <div>
+|                       class="fr-card__content"
+|                       <h3>
+|                         class="fr-card__title"
+|                         data-test="carte-titre"
+|                         <a>
+|                           data-test="cards-private"
+|                           href="https://www.service-public.gouv.fr/particuliers/vosdroits/R49129"
+|                           "Estimer la part du locataire pour le paiement des frais d’agence"
+|                       <div>
+|                         class="fr-card__start fr-mb-2w"
+|                         <p>
+|                           class="fr-card__detail fr-mb-0"
+|                           data-test="carte-badge"
+|                           "Simulateur"
+|               <li>
+|                 class="fr-col-12 fr-col-sm-6 fr-col-lg-4"
+|                 <div>
+|                   class="fr-card fr-card--sm fr-enlarge-link "
+|                   data-test="carte"
+|                   <div>
+|                     class="fr-card__body"
+|                     <div>
+|                       class="fr-card__content"
+|                       <h3>
+|                         class="fr-card__title"
+|                         data-test="carte-titre"
+|                         <a>
+|                           data-test="cards-private"
+|                           href="https://www.service-public.gouv.fr/particuliers/vosdroits/R77233"
+|                           "Informer son employeur de la prise du congé supplémentaire de naissance"
+|                       <div>
+|                         class="fr-card__start fr-mb-2w"
+|                         <p>
+|                           class="fr-card__detail fr-mb-0"
+|                           data-test="carte-badge"
+|                           "Modèle de document"
+|             <div>
+|               class="sp-link"
+|               <div>
+|                 class="sp-link--label fr-grid-row--right"
+|                 <p>
+|                   class="fr-mb-0"
+|                   <a>
+|                     class="fr-link"
+|                     data-test="voir-toutes-les-demarches-et-outils"
+|                     href="https://www.service-public.gouv.fr/particuliers/recherche?rubricFilter=serviceEnLigne&rubricTypeFilter="
+|                     "
+            Voir toutes les démarches et outils
+          "
+|                 <span>
+|                   aria-hidden="true"
+|                   class="sp-icon fr-icon-arrow-right-line fr-icon--sm sp-blue"
+|           <div>
+|             class="sp-home-actu fr-mb-6w"
+|             data-test="bloc-actu-home-sp"
+|             <h2>
+|               class="fr-h3"
+|               "Actualité de vos droits et démarches"
+|             <ul>
+|               class="fr-grid-row fr-grid-row--gutters fr-raw-list fr-mb-1v"
+|               <li>
+|                 class="fr-col-12 fr-col-sm-6 fr-col-lg-4"
+|                 data-test="actu-alaune-home-sp"
+|                 <div>
+|                   class="fr-card fr-card--sm fr-enlarge-link "
+|                   data-test="carte"
+|                   <div>
+|                     class="fr-card__body"
+|                     <div>
+|                       class="fr-card__content"
+|                       <h3>
+|                         class="fr-card__title"
+|                         data-test="carte-titre"
+|                         <a>
+|                           data-test="cards-private"
+|                           href="https://www.service-public.gouv.fr/particuliers/actualites/A19107"
+|                           "Engagement de service public : une allocation mensuelle de 1 200 € pour les étudiants en médecine"
+|                       <div>
+|                         class="fr-card__start fr-mb-2w"
+|                         <p>
+|                           class="fr-card__detail fr-mb-0"
+|                           data-test="carte-badge"
+|                           "Déserts médicaux"
+|                   <div>
+|                     class="fr-card__header"
+|                     <div>
+|                       class="fr-card__img"
+|                       data-test="carte-illustration"
+|                       <img>
+|                         alt=""
+|                         class="fr-responsive-img"
+|                         data-fr-js-ratio="true"
+|                         data-test="imageacceuil-dam"
+|                         loading="lazy"
+|                         src="https://www.service-public.gouv.fr/webapp/images/dam/large?id=/photos/E10449.jpg&version=1"
+|               <li>
+|                 class="fr-col-12 fr-col-sm-6 fr-col-lg-4"
+|                 data-test="actu-alaune-home-sp"
+|                 <div>
+|                   class="fr-card fr-card--sm fr-enlarge-link "
+|                   data-test="carte"
+|                   <div>
+|                     class="fr-card__body"
+|                     <div>
+|                       class="fr-card__content"
+|                       <h3>
+|                         class="fr-card__title"
+|                         data-test="carte-titre"
+|                         <a>
+|                           data-test="cards-private"
+|                           href="https://www.service-public.gouv.fr/particuliers/actualites/A18926"
+|                           "Prime de transport versée au salarié : le plafond d’exonération est revalorisé temporairement"
+|                       <div>
+|                         class="fr-card__start fr-mb-2w"
+|                         <p>
+|                           class="fr-card__detail fr-mb-0"
+|                           data-test="carte-badge"
+|                           "Déplacements professionnels"
+|                   <div>
+|                     class="fr-card__header"
+|                     <div>
+|                       class="fr-card__img"
+|                       data-test="carte-illustration"
+|                       <img>
+|                         alt=""
+|                         class="fr-responsive-img"
+|                         data-fr-js-ratio="true"
+|                         data-test="imageacceuil-dam"
+|                         loading="lazy"
+|                         src="https://www.service-public.gouv.fr/webapp/images/dam/large?id=/photos/E10181.jpeg&version=1"
+|               <li>
+|                 class="fr-col-12 fr-col-sm-6 fr-col-lg-4"
+|                 data-test="actu-alaune-home-sp"
+|                 <div>
+|                   class="fr-card fr-card--sm fr-enlarge-link "
+|                   data-test="carte"
+|                   <div>
+|                     class="fr-card__body"
+|                     <div>
+|                       class="fr-card__content"
+|                       <h3>
+|                         class="fr-card__title"
+|                         data-test="carte-titre"
+|                         <a>
+|                           data-test="cards-private"
+|                           href="https://www.service-public.gouv.fr/particuliers/actualites/A19103"
+|                           "Retraite de réversion : la procédure pour bénéficier du dispositif a été simplifiée"
+|                       <div>
+|                         class="fr-card__start fr-mb-2w"
+|                         <p>
+|                           class="fr-card__detail fr-mb-0"
+|                           data-test="carte-badge"
+|                           "Pension de retraite"
+|                   <div>
+|                     class="fr-card__header"
+|                     <div>
+|                       class="fr-card__img"
+|                       data-test="carte-illustration"
+|                       <img>
+|                         alt=""
+|                         class="fr-responsive-img"
+|                         data-fr-js-ratio="true"
+|                         data-test="imageacceuil-dam"
+|                         loading="lazy"
+|                         src="https://www.service-public.gouv.fr/webapp/images/dam/large?id=/photos/E10448.jpg&version=1"
+|             <div>
+|               class="sp-link fr-mb-3w"
+|               <div>
+|                 class="sp-link--label fr-grid-row--right"
+|                 <p>
+|                   class="fr-mb-0"
+|                   <a>
+|                     class="fr-link"
+|                     data-test="actu-link-in-home-page"
+|                     href="https://www.service-public.gouv.fr/particuliers/actualites"
+|                     "
+            Voir toutes les actualités
+          "
+|                 <span>
+|                   aria-hidden="true"
+|                   class="sp-icon fr-icon-arrow-right-line fr-icon--sm sp-blue"
+|     <footer>
+|       id="footer"
+|       role="contentinfo"
+|       <div>
+|         class="fr-follow"
+|         <div>
+|           class="fr-container"
+|           <div>
+|             class="fr-grid-row"
+|             <div>
+|               class="fr-col-12 fr-col-md-8"
+|               <div>
+|                 class="fr-follow__newsletter"
+|                 <div>
+|                   <h2>
+|                     class="fr-h5 fr-follow__title"
+|                     "Recevoir la lettre de Service Public"
+|                   <p>
+|                     class="fr-text--sm fr-follow__desc"
+|                     "Abonnement hebdomadaire gratuit"
+|                 <div>
+|                   <a>
+|                     class="fr-btn"
+|                     href="https://www.service-public.gouv.fr/actualites/lettresp/abonnement"
+|                     title="S’abonner à notre lettre d’information"
+|                     "
+                S’abonner
+              "
+|                 <ul>
+|                   class="fr-hint-text sp-list-link-newsletter"
+|                   id="fr-newsletter-hint-text"
+|                   <li>
+|                     class="sp-item-link-newsletter"
+|                     <a>
+|                       class="sp-link-newsletter"
+|                       href="https://www.service-public.gouv.fr/actualites/lettresp/archives/L1262"
+|                       "Lire la dernière lettre"
+|                   <li>
+|                     class="sp-item-link-newsletter"
+|                     <a>
+|                       class="sp-link-newsletter"
+|                       href="https://www.service-public.gouv.fr/actualites/lettresp/archives"
+|                       "Voir toutes les lettres"
+|             <div>
+|               class="fr-col-12 fr-col-md-4"
+|               <div>
+|                 class="fr-follow__social"
+|                 <h2>
+|                   class="fr-h5 fr-mb-3v fr-mb-3v"
+|                   "Suivez-nous
+              "
+|                   <br>
+|                   " sur les réseaux sociaux"
+|                 <ul>
+|                   class="fr-btns-group"
+|                   data-test="reseaux-links"
+|                   <li>
+|                     <a>
+|                       class="fr-btn--facebook fr-btn"
+|                       href="https://www.facebook.com/ServicePublicFr"
+|                       target="_blank"
+|                       title="Facebook - nouvelle fenêtre"
+|                       "
+                  Facebook
+                "
+|                   <li>
+|                     <a>
+|                       class="fr-btn--tiktok fr-btn"
+|                       href="https://www.tiktok.com/@service.public_gouv"
+|                       target="_blank"
+|                       title="TikTok - nouvelle fenêtre"
+|                       "
+                  TikTok
+                "
+|                   <li>
+|                     <a>
+|                       class="fr-btn--linkedin fr-btn"
+|                       href="https://www.linkedin.com/company/service-public-fr"
+|                       target="_blank"
+|                       title="LinkedIn - nouvelle fenêtre"
+|                       "
+                  LinkedIn
+                "
+|                   <li>
+|                     <a>
+|                       class="fr-btn--instagram fr-btn"
+|                       href="https://www.instagram.com/servicepublic/"
+|                       target="_blank"
+|                       title="Instagram - nouvelle fenêtre"
+|                       "
+                  Instagram
+                "
+|                   <li>
+|                     <a>
+|                       class="fr-btn--youtube fr-btn"
+|                       href="https://www.youtube.com/ServicePublicFrance"
+|                       target="_blank"
+|                       title="YouTube - nouvelle fenêtre"
+|                       "
+                  YouTube
+                "
+|       <div>
+|         class="fr-footer"
+|         <div>
+|           class="fr-footer__top"
+|           <div>
+|             class="fr-container"
+|             <div>
+|               class="fr-grid-row fr-grid-row--start fr-grid-row--gutters"
+|               data-test="particulier-sur-footer"
+|               role="list"
+|               <div>
+|                 class="fr-col-12 fr-col-sm-12 fr-col-md-6"
+|                 role="listitem"
+|                 <div>
+|                   class="fr-footer__top-cat"
+|                   "Fiches pratiques par thèmes"
+|                 <ul>
+|                   class="fr-footer__top-list sp-theme-list"
+|                   <li>
+|                     <a>
+|                       class="fr-footer__top-link"
+|                       href="https://www.service-public.gouv.fr/particuliers/vosdroits/N19810"
+|                       "Papiers - Citoyenneté - Élections"
+|                   <li>
+|                     <a>
+|                       class="fr-footer__top-link"
+|                       href="https://www.service-public.gouv.fr/particuliers/vosdroits/N19805"
+|                       "Famille - Scolarité"
+|                   <li>
+|                     <a>
+|                       class="fr-footer__top-link"
+|                       href="https://www.service-public.gouv.fr/particuliers/vosdroits/N19811"
+|                       "Social - Santé"
+|                   <li>
+|                     <a>
+|                       class="fr-footer__top-link"
+|                       href="https://www.service-public.gouv.fr/particuliers/vosdroits/N19806"
+|                       "Travail - Formation"
+|                   <li>
+|                     <a>
+|                       class="fr-footer__top-link"
+|                       href="https://www.service-public.gouv.fr/particuliers/vosdroits/N19808"
+|                       "Logement"
+|                   <li>
+|                     <a>
+|                       class="fr-footer__top-link"
+|                       href="https://www.service-public.gouv.fr/particuliers/vosdroits/N19812"
+|                       "Transports - Mobilité"
+|                   <li>
+|                     <a>
+|                       class="fr-footer__top-link"
+|                       href="https://www.service-public.gouv.fr/particuliers/vosdroits/N19803"
+|                       "Argent - Impôts - Consommation"
+|                   <li>
+|                     <a>
+|                       class="fr-footer__top-link"
+|                       href="https://www.service-public.gouv.fr/particuliers/vosdroits/N19807"
+|                       "Justice"
+|                   <li>
+|                     <a>
+|                       class="fr-footer__top-link"
+|                       href="https://www.service-public.gouv.fr/particuliers/vosdroits/N19804"
+|                       "Étranger - Europe"
+|                   <li>
+|                     <a>
+|                       class="fr-footer__top-link"
+|                       href="https://www.service-public.gouv.fr/particuliers/vosdroits/N19809"
+|                       "Loisirs - Sports - Culture"
+|                   <li>
+|                     <a>
+|                       class="fr-footer__top-link"
+|                       href="https://www.service-public.gouv.fr/particuliers/vosdroits/N31931"
+|                       "Associations, fondations et fonds de dotation"
+|               <div>
+|                 class="fr-col-12 fr-col-sm-6 fr-col-md-3"
+|                 role="listitem"
+|                 <div>
+|                   class="fr-footer__top-cat"
+|                   "Démarches et outils"
+|                 <ul>
+|                   class="fr-footer__top-list"
+|                   <li>
+|                     <a>
+|                       class="fr-footer__top-link"
+|                       href="https://www.service-public.gouv.fr/particuliers/recherche?rubricFilter=serviceEnLigne&rubricTypeFilter=teleservice"
+|                       rel="noopener noreferrer"
+|                       "Démarches en ligne"
+|                   <li>
+|                     <a>
+|                       class="fr-footer__top-link"
+|                       href="https://www.service-public.gouv.fr/particuliers/recherche?rubricFilter=serviceEnLigne&rubricTypeFilter=formulaire"
+|                       rel="noopener noreferrer"
+|                       "Formulaires administratifs (cerfas)"
+|                   <li>
+|                     <a>
+|                       class="fr-footer__top-link"
+|                       href="https://www.service-public.gouv.fr/particuliers/recherche?rubricFilter=serviceEnLigne&rubricTypeFilter=simulateur"
+|                       rel="noopener noreferrer"
+|                       "Simulateurs"
+|                   <li>
+|                     <a>
+|                       class="fr-footer__top-link"
+|                       href="https://www.service-public.gouv.fr/particuliers/recherche?rubricFilter=serviceEnLigne&rubricTypeFilter=modeleLettre"
+|                       rel="noopener noreferrer"
+|                       "Modèles de lettres"
+|                   <li>
+|                     <a>
+|                       class="fr-footer__top-link"
+|                       href="https://www.service-public.gouv.fr/particuliers/recherche?rubricFilter=serviceEnLigne&rubricTypeFilter=outilrecherche"
+|                       rel="noopener noreferrer"
+|                       "Outils de recherche"
+|                   <li>
+|                     <a>
+|                       class="fr-footer__top-link"
+|                       href="https://www.service-public.gouv.fr/particuliers/vosdroits/F33683"
+|                       rel="noopener noreferrer"
+|                       "Allo Service Public"
+|                   <li>
+|                     <a>
+|                       class="fr-footer__top-link"
+|                       href="https://lannuaire.service-public.gouv.fr/"
+|                       rel="noopener noreferrer"
+|                       "Annuaire de l'administration"
+|               <div>
+|                 class="fr-col-12 fr-col-sm-6 fr-col-md-3"
+|                 role="listitem"
+|                 <div>
+|                   class="fr-footer__top-cat"
+|                   "Nous connaître"
+|                 <ul>
+|                   class="fr-footer__top-list"
+|                   <li>
+|                     <a>
+|                       class="fr-footer__top-link"
+|                       href="https://www.service-public.gouv.fr/D10002"
+|                       "Chiffres"
+|                   <li>
+|                     <a>
+|                       class="fr-footer__top-link"
+|                       href="https://www.service-public.gouv.fr/P10004"
+|                       "Mise à disposition des données"
+|                   <li>
+|                     <a>
+|                       class="fr-footer__top-link"
+|                       href="https://www.service-public.gouv.fr/P10002"
+|                       "Missions et valeurs"
+|                   <li>
+|                     <a>
+|                       class="fr-footer__top-link"
+|                       href="https://www.service-public.gouv.fr/D10003"
+|                       "Aide"
+|                   <li>
+|                     <a>
+|                       class="fr-footer__top-link"
+|                       href="https://www.service-public.gouv.fr/D10000"
+|                       "Vous êtes une administration ?"
+|                   <li>
+|                     <a>
+|                       class="fr-footer__top-link"
+|                       href="https://www.service-public.gouv.fr/P10026"
+|                       "Vous êtes journaliste ?"
+|                   <li>
+|                     <a>
+|                       class="fr-footer__top-link"
+|                       href="https://www.service-public.gouv.fr/P10017"
+|                       "Contacter Service Public"
+|         <div>
+|           class="fr-container"
+|           <div>
+|             class="fr-footer__body"
+|             <div>
+|               class="fr-footer__brand fr-enlarge-link"
+|               <p>
+|                 class="fr-logo fr-logo--lg"
+|                 "République "
+|                 <br>
+|                 "Française"
+|             <div>
+|               class="fr-footer__content"
+|               <p>
+|                 class="fr-footer__content-desc"
+|                 "Service Public vous informe et vous oriente vers les services qui
+            permettent de connaître vos obligations, d’exercer vos droits et de faire vos démarches du quotidien."
+|               <p>
+|                 class="fr-footer__content-desc"
+|                 "
+            Il est édité par la
+            "
+|                 <a>
+|                   href="https://www.dila.premier-ministre.gouv.fr/"
+|                   rel="noopener noreferrer"
+|                   target="_blank"
+|                   title="Direction de l'information légale et administrative - Nouvelle fenêtre"
+|                   "
+              Direction de l’information légale et administrative "
+|                   <span>
+|                     aria-hidden="true"
+|                     class="fr-icon-external-link-fill fr-icon--sm fr-ml-1v"
+|                 " et réalisé en partenariat avec les administrations nationales et locales.
+          "
+|               <ul>
+|                 class="fr-footer__content-list"
+|                 <li>
+|                   <a>
+|                     class="fr-footer__content-link"
+|                     href="https://www.legifrance.gouv.fr/"
+|                     rel="noopener noreferrer"
+|                     target="_blank"
+|                     title="legifrance.gouv.fr - Nouvelle fenêtre"
+|                     "legifrance.gouv.fr"
+|                     <span>
+|                       aria-hidden="true"
+|                       class="fr-icon-external-link-fill fr-icon--sm fr-ml-1v"
+|                 <li>
+|                   <a>
+|                     class="fr-footer__content-link"
+|                     href="https://www.info.gouv.fr/"
+|                     rel="noopener noreferrer"
+|                     target="_blank"
+|                     title="info.gouv.fr - Nouvelle fenêtre"
+|                     "info.gouv.fr"
+|                     <span>
+|                       aria-hidden="true"
+|                       class="fr-icon-external-link-fill fr-icon--sm fr-ml-1v"
+|                 <li>
+|                   <a>
+|                     class="fr-footer__content-link"
+|                     href="https://www.data.gouv.fr/"
+|                     rel="noopener noreferrer"
+|                     target="_blank"
+|                     title="data.gouv.fr - Nouvelle fenêtre"
+|                     "data.gouv.fr"
+|                     <span>
+|                       aria-hidden="true"
+|                       class="fr-icon-external-link-fill fr-icon--sm fr-ml-1v"
+|           <div>
+|             class="fr-footer__partners"
+|             <div>
+|               aria-level="2"
+|               class="fr-footer__partners-title fr-text--bold"
+|               role="heading"
+|               "Nos partenaires"
+|             <div>
+|               class="fr-footer__partners-logos"
+|               <div>
+|                 class="fr-footer__partners-main"
+|                 <a>
+|                   class="footer__partners-link"
+|                   href="https://europa.eu/youreurope/index.htm#en"
+|                   target="_blank"
+|                   title="Your Europe - europa.eu - Nouvelle fenêtre"
+|                   <img>
+|                     alt="Your Europe"
+|                     class="fr-footer__logo fr-responsive-img"
+|                     loading="lazy"
+|                     src="https://www.service-public.gouv.fr/resources/v-6215e1551d/assets/img/partenaires/logo-your-europe.svg"
+|                     width="160"
+|               <div>
+|                 class="fr-footer__partners-sub"
+|                 <ul>
+|                   <li>
+|                     class="sp-footer-link"
+|                     <a>
+|                       class="fr-footer__partners-link"
+|                       href="https://www.vie-publique.fr/"
+|                       target="_blank"
+|                       title="Vie publique, au cœur du débat public - vie-publique.fr - Nouvelle fenêtre"
+|                       <img>
+|                         alt="Vie publique, au cœur du débat public"
+|                         class="fr-footer__logo fr-responsive-img"
+|                         loading="lazy"
+|                         src="https://www.service-public.gouv.fr/resources/v-6215e1551d/assets/img/partenaires/logo-VP.svg"
+|                         width="120"
+|                   <li>
+|                     class="sp-footer-link"
+|                     <a>
+|                       class="fr-footer__partners-link"
+|                       data-test="logo-entreprendre"
+|                       href="https://entreprendre.service-public.gouv.fr/"
+|                       rel="noopener noreferrer"
+|                       target="_blank"
+|                       title="Service Public Entreprendre - entreprendre.service-public.gouv.fr - Nouvelle fenêtre"
+|                       <img>
+|                         alt="Entreprendre.Service-Public.gouv.fr"
+|                         class="fr-footer__logo fr-responsive-img"
+|                         loading="lazy"
+|                         src="https://www.service-public.gouv.fr/resources/v-6215e1551d/assets/img/partenaires/logo-entreprendre-service-public.svg"
+|                         width="160"
+|                   <li>
+|                     class="sp-footer-link"
+|                     <a>
+|                       class="fr-footer__partners-link"
+|                       href="https://www.plus.transformation.gouv.fr/"
+|                       target="_blank"
+|                       title="Services Publics + - plus.transformation.gouv.fr - Nouvelle fenêtre"
+|                       <img>
+|                         alt="Service Publics +"
+|                         class="fr-footer__logo fr-responsive-img"
+|                         loading="lazy"
+|                         src="https://www.service-public.gouv.fr/resources/v-6215e1551d/assets/img/partenaires/logo-spplus-footer.svg"
+|                         width="120"
+|           <div>
+|             class="fr-footer__bottom"
+|             <ul>
+|               class="fr-footer__bottom-list"
+|               <li>
+|                 class="fr-footer__bottom-item"
+|                 <a>
+|                   class="fr-footer__bottom-link"
+|                   href="https://www.service-public.gouv.fr/P10003"
+|                   "Plan du site"
+|               <li>
+|                 class="fr-footer__bottom-item"
+|                 <a>
+|                   class="fr-footer__bottom-link"
+|                   href="https://www.service-public.gouv.fr/P10000"
+|                   "Accessibilité : totalement conforme"
+|               <li>
+|                 class="fr-footer__bottom-item"
+|                 <a>
+|                   class="fr-footer__bottom-link"
+|                   href="https://www.service-public.gouv.fr/P10125"
+|                   "Accessibilité des services en ligne"
+|               <li>
+|                 class="fr-footer__bottom-item"
+|                 <a>
+|                   class="fr-footer__bottom-link"
+|                   href="https://www.service-public.gouv.fr/P10025"
+|                   "Mentions légales"
+|               <li>
+|                 class="fr-footer__bottom-item"
+|                 <a>
+|                   class="fr-footer__bottom-link"
+|                   href="https://www.service-public.gouv.fr/P10001"
+|                   "Données personnelles et sécurité"
+|               <li>
+|                 class="fr-footer__bottom-item"
+|                 <a>
+|                   class="fr-footer__bottom-link"
+|                   href="https://www.service-public.gouv.fr/P10050"
+|                   "Conditions générales d'utilisation"
+|               <li>
+|                 class="fr-footer__bottom-item"
+|                 <a>
+|                   class="fr-footer__bottom-link"
+|                   href="https://www.service-public.gouv.fr/P10001"
+|                   rel="noopener noreferrer"
+|                   target="_blank"
+|                   title="Gestion des cookies"
+|                   "Gestion des cookies"
+|             <div>
+|               class="fr-footer__bottom-copy"
+|               <p>
+|                 <span>
+|                   "Sauf mention contraire, tous les contenus de ce site sont sous "
+|                 <a>
+|                   href="https://github.com/etalab/licence-ouverte/blob/master/LO.md"
+|                   rel="noopener noreferrer"
+|                   target="_blank"
+|                   title="licence etalab-2.0 - nouvelle fenêtre"
+|                   "licence etalab-2.0 "
+|                   <span>
+|                     aria-hidden="true"
+|                     class="fr-icon-external-link-fill fr-icon--sm fr-ml-1v"
+|     <script>
+|       "
+  (function () {
+    var divDataCsrf = document.querySelector('div[data-_csrf]');
+    if (!divDataCsrf) return;
+
+    var token = divDataCsrf.getAttribute('data-_csrf');
+    if (!token) return;
+
+    document.querySelectorAll('input[name="_csrf"]').forEach(function (input) {
+      input.value = token;
+    });
+  })();
+"
+|     <script>
+|       data-test="eulerian"
+|       data-type="application/javascript"
+|       "
+        window.dsfr = {
+            analytics: {
+              domain: "jcmm.service-public.fr",
+              page: {
+                id: "",
+                title: "Accueil",
+                labels: ["part", "accueil_", "Accueil", "", ""],
+                categories: ["Accueil", "", ""],
+                template: "accueil_",
+                group: "accueil",
+                theme: "part",
+                current: "0",
+                path: getPagePath()
+              },
+              user: {
+                uid: "",
+                status: "anonym",
+                language: "FR",
+                type: "part"
+              },
+              site: {
+                entity: "SPM || DILA",
+                language: "FR",
+                target: "information",
+                type: "standard",
+                environnement: "production"
+              },
+              isActionEnabled: true
+          }
+        };
+
+        function getPagePath() {
+          const homepagePaths = ["/", "/annuaire", "/entreprendre"];
+          const currentPath = document.location.pathname;
+          const eulerianPathHomePage = "particuliers/accueil";
+
+          return homepagePaths.includes(currentPath) && eulerianPathHomePage
+            ? eulerianPathHomePage
+            : currentPath;
+        }
+      "
+|     <script>
+|       data-test="eulerian-prod-mode"
+|       "
+      window.dsfr.production = true;
+    "
+|     <script>
+|       " document.urlResourcesRoot = "https:\/\/www.service-public.gouv.fr\/resources\/v-6215e1551d";"
+|     <script>
+|       src="https://www.service-public.gouv.fr/resources/v-6215e1551d/assets/dsfr-1.14/dist/dsfr.module.min.js"
+|       type="module"
+|     <script>
+|       nomodule=""
+|       src="https://www.service-public.gouv.fr/resources/v-6215e1551d/assets/dsfr-1.14/dist/dsfr.nomodule.min.js"
+|       type="text/javascript"
+|     <script>
+|       src="https://www.service-public.gouv.fr/resources/v-6215e1551d/assets/dsfr-1.14/dist/analytics/analytics.module.min.js"
+|       type="module"
+|     <script>
+|       nomodule=""
+|       src="https://www.service-public.gouv.fr/resources/v-6215e1551d/assets/dsfr-1.14/dist/analytics/analytics.nomodule.min.js"
+|       type="text/javascript"
+|     <script>
+|       src="https://www.service-public.gouv.fr/resources/v-6215e1551d/assets/js/require.js"
+|       type="text/javascript"
+|     <script>
+|       src="https://www.service-public.gouv.fr/resources/v-6215e1551d/assets/js/common.js"
+|       type="text/javascript"
+|     <script>
+|       src="https://www.service-public.gouv.fr/resources/v-6215e1551d/assets/dsfr-1.14/js/configRgpdPart.js"
+|       type="text/javascript"
+|     <script>
+|       src="https://www.service-public.gouv.fr/resources/v-6215e1551d/assets/js/coperia.js"
+|       type="text/javascript"
+|     <script>
+|       "
+    require(['entreprendre/vdd', 'domReady'], function (vdd, domReady) {
+      domReady(function () {
+        vdd.loadInfoBulleDefinitionTooltip();
+        vdd.loadInfoBulleAbreviation();
+        vdd.loadTooltip();
+        vdd.initFocusInterlocuteur();
+      });
+    });
+  "
+|     <script>
+|       data-test="script_dropdown_list"
+|       "
+    require(['jquery', 'domReady'], function ($, domReady) {
+      domReady(function () {
+        var currentURL = window.location.href;
+        var langParam = new URL(currentURL).searchParams.get('lang');
+        var currentLanguage = (langParam === 'en') ? 'en' : 'fr';
+        $('.fr-translate__language').removeAttr('aria-current');
+        if (currentLanguage === 'en') {
+          $('#language-en').attr('aria-current', 'true');
+        } else {
+          $('#language-fr').attr('aria-current', 'true');
+        }
+      });
+    });
+  "
+|     <script>
+|       data-test="France_service_Geolocalisee"
+|       "
+      var urlSuggest = "https:\/\/www.service-public.gouv.fr\/geo\/suggest\/ban";
+      requirejs(['franceservices/franceServiceAutocomplete']);
+      requirejs(['franceservices/franceServices']);
+    "
+|     <script>
+|       "
+      require(['click-hide', 'domReady'], function (clickHide, domReady) {
+        domReady(function () {
+          clickHide.clickAndHide();
+        });
+      });
+    "
+|     <script>
+|       type="text/javascript"
+|       "
+  window.rsConf = {general: {usePost: true}};
+"
+|     "
+"
