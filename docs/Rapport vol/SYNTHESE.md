@@ -137,6 +137,8 @@ plateforme net** (ops jscore Encrypt/Decrypt restent à livrer) ·
 
 | 28 | **`height:100%` plein-viewport effondrée à 0** — chaîne `html`/`body`/`#map` = `1366x0` → Leaflet lit `clientHeight≈0`, ne demande qu'1 tuile | `explorer-layout`/`css` | uMap éditeur `[V4-main]` vol 50 — tuiles OSM peintes mais page à hauteur 0 (paradoxe : tuiles visibles) | **OUVERT — terrain V4** |
 
+| 29 | **Boucle iframes `sodar` non bornée** — AdSense crée des iframes télémétrie en continu : 419 dans le DOM (+~90/min), `js_heap` 53→160 Mo (~40 Mo/min), cycles apply ~1,3 s | `explorer-core`/budget | linuxmint `[V4-main]` vol 51 — ad-tech fonctionnel (slot peint) mais DOM+heap gonflent ; API responsive, RAM libérée au DELETE | **OUVERT — famille §B-1/§B-21, signature DOM+heap** |
+
 ### 🟡 Moyen — perf, métriques, observabilité résiduelle
 
 - **Framebuffer pleine page** : PNG 48-54 Mo (guardian, youtube) —
@@ -161,7 +163,7 @@ plateforme net** (ops jscore Encrypt/Decrypt restent à livrer) ·
 
 ### ⚪ Externe — hors moteur (catalogue à jour)
 
-Anti-bot : 403 sec (ebay, etsy, stackoverflow, tripadvisor, sncf-connect,
+Anti-bot : 403 sec (ebay, etsy, stackoverflow, tripadvisor, sncf-connect, affinity.serif, hardware.fr,
 seloger, medium, khanacademy, apec, nytimes) · Datadome (leboncoin) ·
 Akamai Bot Manager (cdiscount, zalando→`supported-browsers`) ·
 x5sec Alibaba (aliexpress→punish) · **AWS WAF insolvable** (imdb,
