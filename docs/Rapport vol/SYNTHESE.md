@@ -164,6 +164,9 @@ plateforme net** (ops jscore Encrypt/Decrypt restent à livrer) ·
 
 | 44 | **Escalade quadratique du coût par apply** — `repaint ms=363→9 558→199 721`, cascade 46 s/boxtree 55 s/layout 72 s sur la même page ; borne §B-26 non déclenchée, mécanisme distinct (invalidation qui grandit) | `explorer-core`/`layout` | radiofrance `[V6-main]` vol 68 — API vivante, purge complète post-apply ; stabilité OK, perf seule | **OUVERT — perf, à profiler** |
 
+| 45 | **`doc_h` verrouillé au viewport** — `html,body{height:100%}` + `overflow-x:hidden` → `doc_h`=900, scroll bloqué à 0 alors que le contenu déborde (~13 450 px) | `explorer-layout`/`core` | clubic `[V6-main]` vol 70 — main 11 750 px layouté, frame identique après scroll | **OUVERT — terrain V6** |
+| 46 | **Wedge post-apply silencieux CPU 200%** — apply `fin` journalisé (borne §B-26 tirée) puis silence total, navigate jamais retourné, API morte, RAM 2,7 Go | `explorer-core` | frandroid `[V6-main]` vol 70 — distinct §B-33 (fin journalisée) et §B-41 (pas de phases) | **CRITIQUE — repro 1/1 ; prudence vol : frandroid** |
+
 ### 🟡 Moyen — perf, métriques, observabilité résiduelle
 
 - **Framebuffer pleine page** : PNG 48-54 Mo (guardian, youtube) —
