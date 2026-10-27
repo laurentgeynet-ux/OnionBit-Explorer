@@ -163,10 +163,13 @@ fn content_px_unclamped(bx: &LayoutBox, fs: f32, ctx: &BlockCtx, max: bool, igno
     // grille 236px). Un non-remplacé retombe sur son contenu
     // (`bx.intrinsic` absent → `None` → mesure des enfants).
     let pct = st.get("width").is_some_and(|v| v.contains('%'));
-    // `ignore_w` (racine seulement — mesure §4.5 du plancher
-    // de shrink flex) : le `width` spécifié de l'item n'est
-    // pas un minimum de contenu ; l'intrinsèque remplacé reste.
-    let base = if ignore_w {
+    let base = if matches!(bx.kind, BoxKind::Text | BoxKind::AnonymousBlock) {
+        // Texte et bloc anonyme clonent le style du parent —
+        // leur `width` « hérité » n'est pas une taille de
+        // contenu (les pseudo-éléments gardent `Block`/`Inline`
+        // et leur `width` propre).
+        None
+    } else if ignore_w {
         bx.intrinsic.map(|i| i.0)
     } else if pct && bx.intrinsic.is_some() {
         Some(0.0)

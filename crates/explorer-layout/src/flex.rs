@@ -452,24 +452,17 @@ pub(crate) fn flow_flex_children(
                 for &k in line {
                     let b = items[k].base.unwrap_or(0.0);
                     sizes_l.push(if denom > 0.0 && free < 0.0 {
-                        // §4.5/§9.9.4 : le shrink est planché par
-                        // la taille min automatique de l'item —
-                        // `min-width` défini (longueur, %, ou
-                        // mot-clé intrinsèque) sinon min-content.
-                        // Sans plancher, le seul item shrinkable
-                        // absorbait TOUT le dépassement et
-                        // s'effondrait à 0 px (vol 32 todoist :
-                        // `.details` seul shrinkable face à
-                        // `.illustration{flex-shrink:0}` de
-                        // 1590 px → colonne héro à 0, texte en
-                        // rivière min-content). Gel-itération
-                        // complète documentée hors MVP : un clamp
-                        // simple suffit au cas courant.
+                        // §4.5 : le shrink est planché par la
+                        // taille min automatique — `min-width`
+                        // spécifié (longueur/mot-clé) sinon
+                        // min-content du contenu. Sans plancher,
+                        // le seul item shrinkable absorbait tout
+                        // le dépassement → 0 px (vol 32 todoist :
+                        // `.details` face à `.illustration
+                        // {flex-shrink:0}` 1590 px → héro à 0).
                         let c = &bx.children[order_idx[k]];
                         let cfs = font_size_px(&c.style, fs, ctx);
                         let floor = match c.style.get("min-width").map(|v| v.trim()) {
-                            // `auto`/absent : minimum = min-content
-                            // du contenu, le `width` propre ignoré.
                             None | Some("") | Some("auto") => {
                                 crate::intrinsic::min_content_size_px(c, cfs, ctx)
                             }

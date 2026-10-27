@@ -576,18 +576,14 @@ fn eval_calc(expr: &str, pct_basis: f32, em_basis: f32, ctx: &BlockCtx) -> Optio
             {
                 let start = *i;
                 *i += flen;
-                let mut depth = 0usize;
-                while *i < b.len() {
+                // *i pointe sur '(' — on le consomme puis on
+                // marche jusqu'à la ')' équilibrée incluse.
+                let mut depth = 1usize;
+                *i += 1;
+                while *i < b.len() && depth > 0 {
                     match b[*i] {
                         b'(' => depth += 1,
-                        b')' => {
-                            depth = depth.saturating_sub(1);
-                            *i += 1;
-                            if depth == 0 {
-                                break;
-                            }
-                            continue;
-                        }
+                        b')' => depth = depth.saturating_sub(1),
                         _ => {}
                     }
                     *i += 1;
