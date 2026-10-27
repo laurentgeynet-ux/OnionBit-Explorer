@@ -192,6 +192,58 @@ politique déléguée à l'app hôte (AGENTS §9).
 8. **Re-vols ciblés** : hit-test V2→V3, `data-src` marmiton,
    franceinfo/vercel résiduels layout, glassdoor scroll.
 
+## E-bis. File de tâches par piste
+
+Découpage de §B/§D par propriétaire (AGENTS §10). `NAV-JS` =
+piste spécialiste JS (jscore/js) ; `NAV` = session/core/net/
+daemon/app ; `PIPE` = html/css/layout/render ; `Terrain` =
+vols/observabilité (transverse).
+
+### NAV-JS — `explorer-jscore` / `explorer-js`
+
+| # | Tâche | Source | État |
+|---|---|---|---|
+| J1 | **Deadline wall-clock éval** (`EXPLORER_JS_EVAL_TIMEOUT_MS`) — rafale timers post-apply saturant un cœur (allrecipes : API muette 3-6 min, RAM 2,9 Go) → `JsError::Timeout` → disjoncteur existant | §B-1, §D-1 | spec prête (reprise 16 FIX-1) — **numéro C164** (C163 pris par le fix champs dérivés) |
+| J2 | `depth_limit` parser/AST — le seul crash process (alpinejs) ; C134 a borné drop AST + walk JSON, pas la descente syntaxique | §B-3 | ouvert |
+| J3 | Bras MapLoader `import()` : `fetch_module_sources` ne collecte pas tout (`max_modules`, refus, spec non extrait) + `data:` refusé en module | §B-5/6 | ouvert, tracing posé |
+| J4 | Heap budget : capper `heap memory limit exceeded` à 1 occurrence + mesurer le seuil réel (marmiton, bookshop beacon) | §B-12 | ouvert |
+| J5 | Matrice APIs résiduelles : `instanceof Element` trop strict, `Function.name` classes minifiées, `document` of Null (dw), token `debugger` tuant un module, `Illegal component name ""` | §B-14 | partiel (C162 Bootstrap, attachShadow sorti du stub) |
+| J6 | Spread/rest `...` « outside a call or array literal » — position non couverte par C146 | §B-9 | ouvert |
+| J7 | `document.write`/async : ordonnancement post-commit vs ordre de parse (tumblr) | §B-19 | chantier profond documenté |
+| J8 | Boucle applicative non bornée (`r is not defined` ×512 — intervalle retry en rafale) | §B-21 | dédup visuel OK ; borne runtime à poser |
+| J9 | `visibility:hidden` jamais levé (geeksforgeeks — hydrate JS) | §B-7 | ouvert |
+| J10 | Proxy : traps reçoivent `PropertyKey` symbol (immer/mastodon `isDraft`) | §B-9/19 | **en vol** (session opérateur) |
+
+### NAV — `explorer-core` / `net` / `daemon` / `api`
+
+| # | Tâche | Source | État |
+|---|---|---|---|
+| N1 | **Re-vol cdiscount** — valider `max_auto_navs` (É144) + sentinel death daemon | §B-2 | armé, attend le vol |
+| N2 | Timeouts « jprobe » 25 s non qualifiés (curl.se, apple.dev, phoronix, markojs, pixijs, konvajs) — qualifier fetch/script/eval | §D-4 | ouvert |
+| N3 | Watchdog/budget **post-apply** transversal (RAM 2,9 Go + saturation cœur) — couvre ce que le disjoncteur évals ne voit pas | §B-1 | dépend de J1 |
+| N4 | Morts silencieuses résiduelles : MapLoader bras + drains modules (pinterest, twitch, windy/flightradar importmap) | §B-4 | en décroissance — tracé à compléter |
+| N5 | `document.write` ordonnancé post-commit (avec J7) | §B-19 | chantier profond |
+| N6 | `data-src` marmiton gris en V3 — re-valider sur binaire post-fix | §B-20 | à re-voler |
+
+### PIPE — `html` / `css` / `layout` / `render`
+
+| # | Tâche | Source | État |
+|---|---|---|---|
+| P1 | Frame blanche au scroll (glassdoor, `build_display_list_incremental` suspect) | §B-8 | ouvert — repro attendu |
+| P2 | Résiduels layout : chevauchements runs inline (excalidraw/gitlab/DW), `overflow-x` clip guardian, marquee vercel, sticky accuweather, double émission synchro franceinfo/gitlab, bandeau CNN 250 px | §B-18 | partiel (hero colonne + min-content livrés) |
+| P3 | SVG `<use>` cross-îlots non résolu (reddit logo aplati) | §B-cosm. | ouvert |
+| P4 | Framebuffer tuilé + plafond hauteur (PNG 48-54 Mo guardian/youtube, repaint 16 s) | §B-perf | à planifier |
+| P5 | Off-canvas/backdrop JS-closables restants une fois boots réparés — revérifier après J5 | §B-17 | en décroissance |
+
+### Terrain / observabilité — transverse
+
+| # | Tâche | Source | État |
+|---|---|---|---|
+| T1 | Re-vols ciblés : cdiscount (N1), hit-test V2→V3, data-src marmiton, franceinfo/vercel, glassdoor | §D-8 | attend binaire |
+| T2 | `evals_sans_mutation` compteur + promotion WARN — morts silencieuses auto-détectées | §B-4/obs | instrument proposé |
+| T3 | Heap JS gelé ~50 Mio/page — politique de trim (bfcache) | §B-perf | décision à prendre |
+| T4 | `doc_h` trompeur / clamp documenté — metrique `doc_h_clamped` | §B-perf | documenté |
+
 ## E. Organisation du dossier
 
 ```
