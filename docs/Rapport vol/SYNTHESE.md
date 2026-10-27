@@ -169,6 +169,8 @@ plateforme net** (ops jscore Encrypt/Decrypt restent à livrer) ·
 
 | 47 | **Mojibake UTF-8→Latin-1 des champs JSON API** — `title` de `/api/tabs` garbled (`idÃ©es`, `actualitÃ©`), suffixe dédup `/console` `Ã—3` — DOM/rendu corrects, titre clapote correct↔mojibake selon cycle re-parse | `explorer-core`/`api` | santemagazine/doctissimo/femmeactuelle `[V6-main]` vol 71 | **OUVERT — encodage réponse JSON, fix trivial suspecté** |
 
+| 48 | **Micro-script en boucle ≥60 s** — script 285 o bouclant jusqu'au kill disjoncteur (`eval ms=60002 ok=false`), scripts suivants sautés ; kill absent de `/console` (« pas de journal » mensonger) | `explorer-jscore` | kayak `[V6-main]` vol 72 — porteur historique wedge vol 24 : nav retourné 65 s, modale erreur propre | **OUVERT — contenu par disjoncteur ; J1 validé terrain** |
+
 ### 🟡 Moyen — perf, métriques, observabilité résiduelle
 
 - **Framebuffer pleine page** : PNG 48-54 Mo (guardian, youtube) —

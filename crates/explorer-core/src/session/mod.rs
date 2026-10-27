@@ -1464,7 +1464,15 @@ impl Session {
             TabInfo {
                 id: tab,
                 url: t.url.as_ref().map(std::string::ToString::to_string),
-                title: t.title.clone(),
+                // B-47 (vol71) : le titre stocké peut diverger
+                // du `<title>` commis (cycle re-parse/miroir) —
+                // l'API relit le DOM vivant, source de vérité
+                // identique au rendu et au dump.
+                title: t
+                    .dom
+                    .as_ref()
+                    .and_then(|d| extract_title(d))
+                    .or_else(|| t.title.clone()),
                 can_back: pos > 0,
                 can_forward: pos + 1 < t.hist.len(),
                 scroll_y: t.scroll_y,
