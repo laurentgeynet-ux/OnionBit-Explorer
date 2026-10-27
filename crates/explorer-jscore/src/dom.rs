@@ -1810,8 +1810,12 @@ impl Dom {
         for (tag, k) in path {
             let mut seen = 0u32;
             let mut next = None;
-            for &c in &self.nodes[cur as usize].children {
-                if self.nodes[c as usize].tag == *tag {
+            // B-37 (caniuse vol58) : le chemin peut porter un
+            // NodeId obsolète après un re-parse ADR-0025 —
+            // `nodes[c]` hors borne = panic ADR-0008. `.get`
+            // → `None` typé, jamais d'accès invalide.
+            for &c in &self.nodes.get(cur as usize)?.children {
+                if self.nodes.get(c as usize).map(|n| n.tag.as_str()) == Some(tag.as_str()) {
                     if seen == *k {
                         next = Some(c);
                         break;
