@@ -14034,3 +14034,50 @@ async fn module_graph_data_url_decoded_inline() {
     assert_eq!(t.calls(), 2);
     assert_eq!(s.frame_png(a), s.frame_png(b));
 }
+
+/// §B-10 — scope global inter-scripts : `var`/assignations
+/// top-level doivent atteindre `window` partagé pour le script
+/// suivant, y compris quand le script définisseur meurt à
+/// mi-éval (le `var` est hissé à l'instantiation — lemonde
+/// `lmd`, ouest-france `firstparty`, OSM `OSM.i18n`).
+#[tokio::test]
+async fn global_var_shared_between_script_els() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/p",
+        200,
+        "<!doctype html><html><body><div id=\"r\">?</div>\
+         <script>var lmd={n:1}; window.firstparty=[]; undecl=42;</script>\
+         <script src=\"/ext.js\"></script>\
+         <script>var dead=7; throw new Error('mid'); var later=9;</script>\
+         <script>\
+           var r = [];\
+           r.push(typeof lmd);\
+           r.push(lmd && lmd.n);\
+           r.push(firstparty===window.firstparty);\
+           r.push(undecl===window.undecl);\
+           r.push(typeof dead);\
+           r.push(typeof later);\
+           r.push(dead);\
+           document.getElementById('r').textContent = r.join('|');\
+         </script></body></html>",
+    );
+    t.route(
+        "/ext.js",
+        200,
+        "window.from_ext = lmd.n + firstparty.length;",
+    );
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/p").await.unwrap();
+    let dom = s.dom_dump(id).unwrap_or_default();
+    // `dead`=7 (assigné avant le throw), `later` lié mais
+    // undefined (hissé) — le script mort ne prive pas les
+    // suivants de ses liaisons.
+    assert!(
+        dom.contains("object|1|true|true|number|undefined|7"),
+        "global scope inter-scripts — dump: {}",
+        dom.chars().take(300).collect::<String>()
+    );
+}
