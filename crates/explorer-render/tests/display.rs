@@ -688,6 +688,8 @@ fn dirty_listes_identiques_rien_a_peindre() {
             height: 200.0,
             spans: explorer_render::SpanMap::default(),
             tree_epoch: 0,
+            dropped_emits: 0,
+            first_cycle_path: None,
         },
         explorer_render::DisplayList {
             items: i2,
@@ -695,6 +697,8 @@ fn dirty_listes_identiques_rien_a_peindre() {
             height: 200.0,
             spans: explorer_render::SpanMap::default(),
             tree_epoch: 0,
+            dropped_emits: 0,
+            first_cycle_path: None,
         },
     );
     assert!(
@@ -721,6 +725,8 @@ fn dirty_couleur_changee_zone_de_litem() {
         height: 200.0,
         spans: explorer_render::SpanMap::default(),
         tree_epoch: 0,
+        dropped_emits: 0,
+        first_cycle_path: None,
     };
     let (l1, l2) = (mk(i1), mk(i2));
     let dirty = l2.changed_rects(&l1);
@@ -750,6 +756,8 @@ fn dirty_element_deplace_vieille_et_nouvelle_zones() {
         height: 200.0,
         spans: explorer_render::SpanMap::default(),
         tree_epoch: 0,
+        dropped_emits: 0,
+        first_cycle_path: None,
     };
     let (l1, l2) = (mk(i1), mk(i2));
     let dirty = l2.changed_rects(&l1);
@@ -778,6 +786,8 @@ fn dirty_item_ajoute_sa_zone() {
         height: 200.0,
         spans: explorer_render::SpanMap::default(),
         tree_epoch: 0,
+        dropped_emits: 0,
+        first_cycle_path: None,
     };
     let (l1, l2) = (mk(i1), mk(i2));
     let dirty = l2.changed_rects(&l1);
@@ -1066,6 +1076,8 @@ fn controle_input_peint_sa_valeur() {
             height: 200.0,
             spans: explorer_render::SpanMap::default(),
             tree_epoch: 0,
+            dropped_emits: 0,
+            first_cycle_path: None,
         }
         .dump()
     );

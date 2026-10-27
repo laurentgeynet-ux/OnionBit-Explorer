@@ -332,6 +332,7 @@ fn render_subframe(
     restitute_font_cache(&mut cp, &block);
     let list =
         explorer_render::build_display_list_incremental(&bx, w, h, (0.0, 0.0), &cp.images, None, 0);
+    tracing::info!(items = list.items.len(), "subframe: raster");
     let frame = explorer_render::rasterize_window_cached(
         &list,
         &child_ctx.fonts,

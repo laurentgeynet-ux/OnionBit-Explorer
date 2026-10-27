@@ -214,6 +214,15 @@ pub struct DisplayList {
     /// in-place du chemin `relayout_subtree` conserve
     /// l'epoch). Égalité ⇒ fast-path pointeur autorisé.
     pub tree_epoch: u64,
+    /// Émissions reportées sauté par la borne §B-26 (cycle
+    /// de report cassé ou plafond total) — `0` = peinture
+    /// saine. L'appelant le journalise (`explorer-render`
+    /// ne trace pas — crate PIPELINE pur).
+    pub dropped_emits: u32,
+    /// Premier chemin ayant déclenché la borne §B-26 —
+    /// diagnostic du cycle de report (chemins d'index
+    /// enfants depuis la racine).
+    pub first_cycle_path: Option<Vec<u16>>,
 }
 
 /// Plage d'items émise par une boîte — indexe le re-usage
@@ -886,6 +895,7 @@ fn emit_canvas_bg(
 }
 
 /// Corps partagé des builders — `prev = None` : build plein.
+#[allow(clippy::too_many_lines)]
 fn build_list(
     root: &LayoutBox,
     viewport_w: f32,
@@ -912,6 +922,10 @@ fn build_list(
         inc,
         same_tree,
         canvas_bg_src: None,
+        emit_per_path: std::collections::HashMap::new(),
+        emits_total: 0,
+        dropped: 0,
+        first_cycle_path: None,
     };
     // §14.2 : le fond du canvas vient de la racine ; si elle
     // n'en a pas (couleur transparente et pas d'image), c'est
@@ -1009,12 +1023,15 @@ fn build_list(
             push_z(&mut pos_defer, p, c);
         }
     }
+    let (dropped_emits, first_cycle_path) = (cx.dropped, cx.first_cycle_path.take());
     DisplayList {
         items,
         width: viewport_w,
         height: doc_h,
         spans,
         tree_epoch,
+        dropped_emits,
+        first_cycle_path,
     }
 }
 
@@ -1043,6 +1060,22 @@ struct PaintCx<'a> {
     /// racine, ou `body` quand la racine n'a pas de fond) :
     /// sa propre boîte ne repeint pas son fond.
     canvas_bg_src: Option<explorer_dom::NodeId>,
+    /// Compteur d'émissions par chemin (§B-26) — un porteur
+    /// reporté (inline/positionné/fixe) doit être peint une
+    /// fois par entrée de file ; au-delà de
+    /// [`MAX_EMIT_PER_PATH`], la file s'auto-alimente (cycle
+    /// de report) et on casse la boucle plutôt que de figer
+    /// le processus.
+    emit_per_path: std::collections::HashMap<Box<[u16]>, u32>,
+    /// Total d'émissions reportées de la passe (§B-26) —
+    /// plafond dur [`MAX_EMITS_TOTAL`] couvrant les cycles à
+    /// chemins divergents que le cap par chemin ne voit pas.
+    emits_total: u32,
+    /// Émissions sauté par la borne §B-26 + premier chemin
+    /// fautif — remontés dans [`DisplayList::dropped_emits`].
+    dropped: u32,
+    /// Premier chemin cyclé (§B-26), pour diagnostic.
+    first_cycle_path: Option<Vec<u16>>,
 }
 
 /// Source de ré-usage incrémental.
@@ -2418,6 +2451,20 @@ fn emit_scoped<'a>(
 /// leur span s'enregistrerait sous le chemin de l'ancêtre
 /// drainant et pourrait entrer en collision avec un vrai
 /// enfant de celui-ci.
+/// Borne §B-26 : nombre maximal d'émissions d'un même chemin
+/// par passe. Un porteur reporté doit être peint une fois ;
+/// un cycle de report (une file qui se re-remplit de la même
+/// cible) figeait le processus en croissance mémoire
+/// monotone (meteofrance `[V5-main]` vol 65 — wedge entre
+/// `apply: layout` et `apply: repaint`, +29 Mo/s).
+const MAX_EMIT_PER_PATH: u32 = 4;
+
+/// Plafond dur d'émissions reportées par passe (§B-26) —
+/// très au-dessus de tout site réel (un porteur est émis
+/// une fois ; quelques milliers suffisent aux plus grosses
+/// pages) : le dépasser = une file qui se régénère.
+const MAX_EMITS_TOTAL: u32 = 100_000;
+
 fn emit_scoped_at<'a>(
     path: Vec<u16>,
     bx: &'a LayoutBox,
@@ -2427,6 +2474,30 @@ fn emit_scoped_at<'a>(
     pos_defer: &mut Vec<(Vec<u16>, &'a LayoutBox)>,
     fixed_defer: &mut Vec<(Vec<u16>, &'a LayoutBox)>,
 ) {
+    cx.emits_total += 1;
+    if cx.emits_total > MAX_EMITS_TOTAL {
+        cx.dropped += 1;
+        if cx.first_cycle_path.is_none() {
+            cx.first_cycle_path = Some(path);
+        }
+        return;
+    }
+    // §B-26 : un chemin déjà émis `MAX_EMIT_PER_PATH` fois =
+    // cycle de report — on saute plutôt que de nourrir la
+    // file à l'infini (le contenu est dégradé, le processus
+    // survit).
+    let n = cx
+        .emit_per_path
+        .entry(path.clone().into_boxed_slice())
+        .or_insert(0);
+    *n += 1;
+    if *n > MAX_EMIT_PER_PATH {
+        cx.dropped += 1;
+        if cx.first_cycle_path.is_none() {
+            cx.first_cycle_path = Some(path);
+        }
+        return;
+    }
     let saved = std::mem::replace(&mut cx.path, path);
     if let Some((d, s, sig)) = reuse_delta(bx, off, cx) {
         copy_span(bx, s, d, sig, items, off, cx);

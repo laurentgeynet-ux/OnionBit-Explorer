@@ -345,6 +345,8 @@ fn cull_keeps_only_in_frame_items() {
         height: 100.0,
         spans: explorer_render::SpanMap::default(),
         tree_epoch: 0,
+        dropped_emits: 0,
+        first_cycle_path: None,
     };
     cull_display_list(&mut list);
     let fills = list

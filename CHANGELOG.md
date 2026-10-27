@@ -7,6 +7,37 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **B-26 — borne de cycle de report
+  au paint : wedge `apply` tué**
+  (`explorer-render` + `explorer-core`)
+  — le bug critique des vols : une
+  file de porteurs reportés
+  (inlines/positionnés/`fixed`) se
+  re-remplissait de la même cible →
+  `build_display_list` ne revenait
+  jamais, RAM monotone ~+29 Mo/s
+  jusqu'à la mort (meteofrance
+  `[V5-main]` vol 65 reproduit 2/2,
+  caf/figaro/bfmtv/radiofrance
+  vols 47/49/54/59). Localisé par
+  jalons `apply:` : entre
+  `repaint_payload` et
+  `display_list`. Borne : un chemin
+  émis > 4× est sauté + plafond
+  total 100 000 émissions reportées
+  — `DisplayList::dropped_emits` /
+  `first_cycle_path` remontés et
+  journalisés par `explorer-core`
+  (`explorer-render` ne trace pas).
+  Mesuré : meteofrance complète —
+  `dropped=1`, `path=[0,0,0,0]`,
+  `apply: fin ms=2308`. Jalons
+  `apply: composite_frames` /
+  `repaint_payload` / `display_list`
+  / `raster` conservés (diagnostic
+  permanent de la fenêtre
+  layout→repaint).
+
 - **JS-C171 — spread `...x` dans les
   appels de chaîne optionnelle**
   (`explorer-jscore`) — résidu J6 :

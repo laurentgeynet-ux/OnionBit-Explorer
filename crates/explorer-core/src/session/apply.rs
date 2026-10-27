@@ -38,7 +38,6 @@
 //! fenêtre d'indisponibilité de l'onglet reste le temps de
 //! l'apply (dégradation documentée : `/frame` → 204 heal,
 //! inputs sans arbre inertes).
-
 use super::*;
 use std::collections::VecDeque;
 use std::sync::Arc;
@@ -1522,7 +1521,9 @@ pub(crate) fn relayout_dom_payload(
     // (viewport = content box de sa boîte) et blittée en
     // `images.replaced` — `paint_replaced` émet l'`Image`
     // à la peinture qui suit.
+    tracing::info!("apply: composite_frames");
     composite::composite_frames(p, ctx, dom);
+    tracing::info!("apply: repaint_payload");
     repaint_payload(p, ctx, Some(dom))?;
     tracing::info!(
         ms = u64::try_from(t0.elapsed().as_millis()).unwrap_or(u64::MAX),
@@ -1538,6 +1539,7 @@ pub(crate) fn relayout_dom_payload(
 /// `dom_hint` : le `dom` du job quand `p.dom` est sorti pour
 /// la durée du pipeline (`relayout` le prend pour disjoindre
 /// les emprunts) — le caret résout le focus dessus.
+#[allow(clippy::too_many_lines)]
 pub(crate) fn repaint_payload(
     p: &mut PaintPayload,
     ctx: &ApplyCtx,
@@ -1560,6 +1562,14 @@ pub(crate) fn repaint_payload(
         p.list.as_ref(),
         p.tree_epoch,
     );
+    tracing::info!(items = list.items.len(), "apply: display_list");
+    if list.dropped_emits > 0 {
+        tracing::warn!(
+            dropped = list.dropped_emits,
+            path = ?list.first_cycle_path,
+            "apply: cycle de report cassé (§B-26)"
+        );
+    }
     if let Some(f) = &p.find {
         append_find_highlights(&mut list, f);
     }
@@ -1614,6 +1624,7 @@ pub(crate) fn repaint_payload(
     let full_cover = regions.iter().any(|r| {
         r.x <= 0.0 && r.y <= 0.0 && r.x + r.width >= list.width && r.y + r.height >= list.height
     });
+    tracing::info!(regions = regions.len(), "apply: raster");
     let frame = p
         .frame
         .take()
@@ -1982,7 +1993,7 @@ impl Session {
     ) {
         self.applies_fin += 1;
         self.paint_in_flight.remove(&tab);
-        self.commit_apply_detached_inner(tab, epoch, payload, o)
+        self.commit_apply_detached_inner(tab, epoch, payload, o);
     }
 
     fn commit_apply_detached_inner(
