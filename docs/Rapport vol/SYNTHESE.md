@@ -124,6 +124,7 @@ plateforme net** (ops jscore Encrypt/Decrypt restent à livrer) ·
 | 22 | **Redux `dispatch` : action non-plain** — `Minified Redux error #7` (« Actions must be plain objects ») : une action non-plain traverse la chaîne middleware/thunk jusqu'au dispatch de base | `explorer-jscore` | mastodon `/about` (vol opérateur, binaire post-C165) — l'app exécute 121 modules jusqu'à `createStore` | **OUVERT** — suspect : composition `applyMiddleware`/`typeof` action thunk non interceptée ; immer résolu (J10) |
 
 | 22 | **`eval deadline` trop agressif au boot** — compile légitime tuée | `explorer-jscore`/`js` | cryptpad `[V4-main]` vol 37 : `RangeError: eval deadline exceeded` sur less.min.js → boot RequireJS mort (J1 livré mais seuil bas — à étalonner/exempter phase boot, lien J1/N3) | **OUVERT — terrain V4** |
+| 23 | **Stretched-link incliquable** : `<a>` `position:absolute`+`inset:0` → boîte 235×0 px, hit-test `ignored` sur toutes les cards | `explorer-layout`/`css` | vinted `[V4-main]` vol 39 : rendu ~95 % fidèle mais entièrement incliquable ; `logs/vol39_vinted_layout.txt` 15 ancres ×0 hauteur — le fix `inset` ne couvre pas le stretch vertical (hauteur parent auto ?) | **OUVERT — terrain V4** |
 
 ### 🟡 Moyen — perf, métriques, observabilité résiduelle
 
@@ -149,7 +150,7 @@ plateforme net** (ops jscore Encrypt/Decrypt restent à livrer) ·
 
 ### ⚪ Externe — hors moteur (catalogue à jour)
 
-Anti-bot : 403 sec (ebay, etsy, stackoverflow, tripadvisor,
+Anti-bot : 403 sec (ebay, etsy, stackoverflow, tripadvisor, sncf-connect,
 seloger, medium, khanacademy, apec, nytimes) · Datadome (leboncoin) ·
 Akamai Bot Manager (cdiscount, zalando→`supported-browsers`) ·
 x5sec Alibaba (aliexpress→punish) · **AWS WAF insolvable** (imdb,
