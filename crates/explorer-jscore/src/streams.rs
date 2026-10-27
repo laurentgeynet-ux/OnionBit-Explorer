@@ -1360,7 +1360,7 @@ pub(crate) fn body_stream(e: &mut Engine, bytes: &[u8]) -> Value {
     rs_obj(e, &d, p)
 }
 
-/// `new TextEncoderStream()` — Encoding API : TransformStream
+/// `new TextEncoderStream()` — Encoding API : `TransformStream`
 /// dont le transformer encode chaque chunk en UTF-8
 /// (`Uint8Array` enqueued — spec).
 fn text_encoder_stream_ctor(e: &mut Engine, t: Value, _a: &[Value]) -> JsResult<Value> {

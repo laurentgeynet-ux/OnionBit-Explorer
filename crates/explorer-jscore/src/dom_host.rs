@@ -9371,7 +9371,7 @@ fn element_closest(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Valu
 /// `el.querySelector(sel)`/`querySelectorAll` en natives
 /// `Element.prototype` (JS-C162) — Bootstrap fait
 /// `Element.prototype.querySelectorAll.call(el, s)`
-/// (SelectorEngine `find`, mesuré OSM/ameli). Receveur
+/// (`SelectorEngine` `find`, mesuré OSM/ameli). Receveur
 /// non-Element → `TypeError` (spec).
 fn element_query_selector(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let sel = e.to_js_string(arg(args, 0))?;

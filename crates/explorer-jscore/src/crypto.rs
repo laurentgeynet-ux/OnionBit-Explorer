@@ -783,7 +783,7 @@ fn aead_params(e: &mut Engine, algo_v: Value) -> JsResult<Option<(Vec<u8>, Vec<u
         return Ok(None);
     };
     if let Some(Value::Num(tl)) = e.get_prop(id, "tagLength") {
-        if tl != 128.0 {
+        if tl as u64 != 128 {
             let err = dom_exc(
                 e,
                 "NotSupportedError",
