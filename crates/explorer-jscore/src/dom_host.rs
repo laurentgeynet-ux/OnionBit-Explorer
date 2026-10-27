@@ -1734,7 +1734,6 @@ impl Engine {
         let tag = self.str_val("Geolocation");
         self.set_own(geop, crate::interp::SYM_TO_STRING_TAG, tag, false);
         for m in ["getCurrentPosition", "watchPosition"] {
-            let name = self.str_val(m);
             let f = self.native_fn(m, |e: &mut Engine, _t: Value, args: &[Value]| {
                 // `success` jamais appelée — pas de GPS ;
                 // `error(err)` reçoit `GeolocationPositionError`
