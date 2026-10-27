@@ -222,12 +222,6 @@ pub fn import_key(algo: KeyAlgo, format: KeyFormat, bytes: &[u8]) -> Result<Vec<
                 Err("importKey: invalid raw key (Ed25519)".to_string())
             }
         }
-        // AES-GCM : `raw` uniquement, 128/256 bits (spec).
-        (KeyAlgo::AesGcm, KeyFormat::Raw) => match bytes.len() {
-            16 | 32 => Ok(bytes.to_vec()),
-            _ => Err("importKey: AES-GCM wants a 128/256-bit key".to_string()),
-        },
-        (KeyAlgo::AesGcm, _) => Err("importKey: AES-GCM n'accepte que le format raw".to_string()),
     }
 }
 
