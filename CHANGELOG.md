@@ -26,6 +26,21 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
     nu en position hôte matche désormais
     tout hôte, le schéma et le port
     restent contraignants.
+  - **Feuilles de style — fin des morts
+    muettes** (`explorer-core`) : échec de
+    fetch, statut non-2xx et refus
+    nosniff/CORP/SRI d'un `<link
+    rel=stylesheet>` sont désormais
+    `warn`-logués **et** rapportés en
+    `PipelineError` (`/console`) ; les
+    refus en plan (mixed-content,
+    `style-src`) sont warn-logués.
+  - **`rel="preload" as="style"` collecté**
+    (repli produit, vol 32) : le swap JS
+    `onload→rel=stylesheet` meurt avec le
+    JS — la feuille préchargée est
+    traitée comme un stylesheet
+    (`media=` toujours honoré).
 
 - **Vol 2026-10-26 — correctifs de vol,
   vague 3 (FIX-3, vols 18/19)**

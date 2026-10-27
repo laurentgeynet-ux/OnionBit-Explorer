@@ -2927,9 +2927,18 @@ impl Session {
             .filter_map(|(h, _, i, c, lord)| Url::resolve(base, &h).ok().map(|u| (u, i, c, lord)))
             .map(|(u, i, c, lord)| (upg(u), i, c, lord))
             .filter(|(u, ..)| {
-                !is_mixed_content(page, u)
-                    && allow(explorer_net::http::FetchDest::Style, u)
-                    && seen_sheets.insert(u.to_string())
+                // Refus muets nommés (vol 32 — 0 feuille sans
+                // aucune trace) : mixed-content et `style-src`
+                // refusent en plan, le warn les rend visibles.
+                if is_mixed_content(page, u) {
+                    tracing::warn!(url = %u, "feuille de style refusée — mixed-content");
+                    return false;
+                }
+                if !allow(explorer_net::http::FetchDest::Style, u) {
+                    tracing::warn!(url = %u, "feuille de style refusée par CSP (style-src)");
+                    return false;
+                }
+                seen_sheets.insert(u.to_string())
             })
             .take(self.max_sheets)
             .collect();

@@ -961,24 +961,46 @@ impl SubJob {
             // CAP-185 : `load`/`error` de fin de feuille —
             // enregistré sur toutes les issues (fetch refusé,
             // non-2xx, sécurité/SRI) ; livré au commit.
-            let Ok(resp) = res else {
-                if let SubTag::Css(i) = tag {
-                    let ord = self.sheet_urls.get(i).map_or(0, |(.., lord)| *lord);
-                    self.link_events.push((ord, false));
-                }
-                // Un `<iframe src>` en échec laissait un
-                // cadre blanc sans trace (vol 18).
-                if let SubTag::Frame(i) = tag {
-                    if let Some((u, ..)) = self.frame_urls.get(i) {
-                        tracing::warn!(url = %u, "iframe : fetch en échec — cadre vide");
+            let resp = match res {
+                Ok(resp) => resp,
+                Err(e) => {
+                    if let SubTag::Css(i) = tag {
+                        let ord = self.sheet_urls.get(i).map_or(0, |(.., lord)| *lord);
+                        self.link_events.push((ord, false));
+                        // Une feuille jamais livrée laissait la
+                        // page sans cascade, sans trace (vol 32
+                        // dropbox — 0 CSS, console vide).
+                        if let Some((u, ..)) = self.sheet_urls.get(i) {
+                            tracing::warn!(url = %u, error = %e,
+                                "stylesheet : fetch en échec — feuille non appliquée");
+                            let _ = self.events.send(CoreEvent::PipelineError {
+                                tab: Some(tab),
+                                message: format!("stylesheet — fetch échoué : {u} ({e})"),
+                            });
+                        }
                     }
+                    // Un `<iframe src>` en échec laissait un
+                    // cadre blanc sans trace (vol 18).
+                    if let SubTag::Frame(i) = tag {
+                        if let Some((u, ..)) = self.frame_urls.get(i) {
+                            tracing::warn!(url = %u, "iframe : fetch en échec — cadre vide");
+                        }
+                    }
+                    return;
                 }
-                return;
             };
             if !(200..300).contains(&resp.status) {
                 if let SubTag::Css(i) = tag {
                     let ord = self.sheet_urls.get(i).map_or(0, |(.., lord)| *lord);
                     self.link_events.push((ord, false));
+                    if let Some((u, ..)) = self.sheet_urls.get(i) {
+                        tracing::warn!(url = %u, status = resp.status,
+                            "stylesheet : statut non-2xx — feuille non appliquée");
+                        let _ = self.events.send(CoreEvent::PipelineError {
+                            tab: Some(tab),
+                            message: format!("stylesheet — statut {} : {u}", resp.status),
+                        });
+                    }
                 }
                 if let SubTag::Frame(i) = tag {
                     if let Some((u, ..)) = self.frame_urls.get(i) {
@@ -994,6 +1016,15 @@ impl SubJob {
                         && sri_allows(sri.as_deref(), &resp.body);
                     if ok {
                         self.css_slots[i] = Some(decode_stylesheet(&resp.body, &resp.headers));
+                    } else {
+                        tracing::warn!(url = %su,
+                            "stylesheet : réponse refusée (nosniff/CORP ou SRI)");
+                        let _ = self.events.send(CoreEvent::PipelineError {
+                            tab: Some(tab),
+                            message: format!(
+                                "stylesheet — réponse refusée (nosniff/CORP/SRI) : {su}"
+                            ),
+                        });
                     }
                     self.link_events.push((*lord, ok));
                 }

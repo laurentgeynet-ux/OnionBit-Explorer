@@ -661,7 +661,21 @@ pub(crate) fn collect_stylesheet_links(dom: &Dom) -> Vec<SheetLink> {
                 .flatten()
                 .unwrap_or_default()
                 .to_ascii_lowercase();
-            if rel.split_whitespace().any(|w| w == "stylesheet") {
+            // Repli produit (vol 32) : `rel="preload"
+            // as="style"` — le pattern `onload="this.rel =
+            // 'stylesheet'"` meurt avec le JS ; la feuille
+            // préchargée est traitée comme un stylesheet
+            // (spec : un preload ne s'applique qu'au swap —
+            // dégradé assumé, un `as=style` existe pour être
+            // appliqué). `media=` continue de filtrer en plan.
+            let is_sheet = rel.split_whitespace().any(|w| w == "stylesheet")
+                || (rel.split_whitespace().any(|w| w == "preload")
+                    && dom
+                        .attribute(n, "as")
+                        .ok()
+                        .flatten()
+                        .is_some_and(|a| a.trim().eq_ignore_ascii_case("style")));
+            if is_sheet {
                 if let Ok(Some(href)) = dom.attribute(n, "href") {
                     if !href.is_empty() {
                         let media = dom.attribute(n, "media").ok().flatten();
