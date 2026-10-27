@@ -1013,10 +1013,10 @@ impl Engine {
                     {
                         return Ok(Value::Undefined);
                     }
-                    let mut args = Vec::with_capacity(arg_exprs.len());
-                    for a in arg_exprs {
-                        args.push(self.eval_expr(env, this, a)?);
-                    }
+                    // `eval_args` étend les `...spread` — sinon
+                    // `a?.b(...xs)` tombait sur
+                    // « `...` outside a call or array literal » (J6).
+                    let args = self.eval_args(env, this, arg_exprs)?;
                     // Même ordre que `Callee::Member` : `invoke` du
                     // host d'abord, la valeur lue ensuite (un host
                     // peut exposer les deux pour des noms distincts).

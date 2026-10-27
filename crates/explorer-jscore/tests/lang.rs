@@ -8503,3 +8503,26 @@ fn native_construct_probe() {
         e.eval(src).unwrap_or_else(|x| panic!("{src} → {x}"));
     }
 }
+
+#[test]
+fn j6_spread_in_optional_chain_call() {
+    // J6 : `a?.b(...xs)` / `a.b?.(...xs)` — la branche
+    // `ChainStep::Call|OptCall` évaluait les args un à un sans
+    // `eval_args` → « `...` outside a call or array literal ».
+    let mut e = Engine::new();
+    e.eval(
+        "var o={m:function(){var s=0;for(var i=0;i<arguments.length;i++)s+=arguments[i];return s}};"
+    )
+    .unwrap_or_else(|err| panic!("{err}"));
+    for (src, want) in [
+        ("o?.m(...[1,2,3])", "6"),
+        ("o.m?.(...[4,5])", "9"),
+        ("(null)?.m(...[1])", "undefined"),
+        ("o.m(...[7,8],9)", "24"), // spread non-optionnel : mixte
+    ] {
+        match e.eval(src) {
+            Ok(v) => assert_eq!(e.describe(v), want, "{src}"),
+            Err(err) => panic!("{src}: {err}"),
+        }
+    }
+}

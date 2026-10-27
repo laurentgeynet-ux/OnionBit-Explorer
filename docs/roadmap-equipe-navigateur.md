@@ -7223,6 +7223,19 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   pour les récursions callbacks.
   Sondes `depth_probe` ×20k : 47/47.
 
+- [x] **JS-C171. Spread `...x` dans les
+  appels de chaîne optionnelle**
+  (`explorer-jscore`) — résidu J6 : la
+  branche `ChainStep::Call|OptCall`
+  évaluait les args un à un sans
+  `eval_args` → `a?.b(...xs)` et
+  `a.b?.(...xs)` tombaient sur
+  « `...` outside a call or array
+  literal ». Test
+  `j6_spread_in_optional_chain_call`
+  (call, opt-call, null-short-circuit,
+  mixte spread+positional).
+
 - [x] **JS-C170. Verrou `heap_dead` —
   `heap memory limit` en une seule
   signature** (`explorer-jscore`::tick)

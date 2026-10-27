@@ -7,6 +7,16 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **JS-C171 — spread `...x` dans les
+  appels de chaîne optionnelle**
+  (`explorer-jscore`) — résidu J6 :
+  `a?.b(...xs)` / `a.b?.(...xs)`
+  évaluaient les args sans `eval_args`
+  → `TypeError: \`...\` outside a call
+  or array literal`. La branche
+  `ChainStep::Call|OptCall` passe
+  désormais par `eval_args`.
+
 - **JS-C170 — verrou `heap_dead` :
   `heap memory limit exceeded` en une
   seule signature** (`explorer-jscore`) —
