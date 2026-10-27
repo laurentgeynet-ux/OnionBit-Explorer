@@ -2075,3 +2075,36 @@ fn by_id(dom: &Dom, id: &str) -> NodeId {
     }
     panic!("#{id} absent")
 }
+
+#[test]
+fn hit_positionne_gagne_sur_statique() {
+    // B-24/qwant (variante §B-13) : un `<input>` positionné
+    // doit gagner le hit-test au même point qu'une <img>
+    // statique frère — la couche la plus haute frappe d'abord.
+    let dom = TreeBuilder::parse(
+        "<div id=p><img id=i><input id=s></div>",
+    );
+    let mut e = StyleEngine::new();
+    e.add_css(
+        "body{margin:0} #p{position:relative;height:300px}\
+         #i{width:400px;height:300px}\
+         #s{position:absolute;top:10px;left:10px;width:200px;height:40px}",
+        Origin::Author,
+    );
+    let styles = e.compute_tree(&dom, dom.document(), &StyleEnv::default());
+    let root_el = dom
+        .children(dom.document())
+        .into_iter()
+        .flatten()
+        .find(|&c| dom.element(c).is_ok())
+        .unwrap();
+    let mut bx = build_box_tree(&dom, root_el, &styles).unwrap();
+    layout_tree(&mut bx, VIEW, &BlockCtx::default());
+    // Point dans l'input (20,20) — img le couvre aussi.
+    let hit = explorer_layout::hit_test(&bx, 20.0, 20.0);
+    assert_eq!(
+        hit.and_then(|n| dom.attribute(n, "id").ok().flatten().map(|s| s.to_string())),
+        Some("s".to_string()),
+        "l'input positionné doit gagner sur l'img statique"
+    );
+}
