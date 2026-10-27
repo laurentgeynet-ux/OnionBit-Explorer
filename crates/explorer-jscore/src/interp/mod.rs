@@ -354,6 +354,14 @@ pub struct Engine {
     /// Descriptions des rejets non gérés — drainées par la
     /// session (`report_unhandled_rejection` → ring console).
     pub(crate) unhandled_reports: Vec<String>,
+    /// Compteurs de vie par ligne `unhandledrejection` (JS-C161) —
+    /// dédoublonnage : le ring console est borné, un flood de
+    /// rejets identiques (genius vol33 : 512× `ReferenceError`)
+    /// y reléguait tout le reste. Même ligne = une entrée par
+    /// drain + compteur cumulé `×N`. Bornée à
+    /// `UNHANDLED_SEEN_CAP` clés — au-delà, la ligne est émise
+    /// brute (jamais de croissance libre).
+    pub(crate) unhandled_seen: std::collections::HashMap<String, u64>,
     /// Compteur de séquences `import()` (répercuté à la
     /// livraison — même motif `dyn_script_seq`).
     pub(crate) dyn_import_seq: u64,
@@ -766,6 +774,7 @@ impl Engine {
             import_drain_wired: false,
             pending_unhandled: Vec::new(),
             unhandled_reports: Vec::new(),
+            unhandled_seen: std::collections::HashMap::new(),
             dyn_import_seq: 0,
             module_sources: std::collections::HashMap::new(),
             current_module: String::new(),
@@ -1303,7 +1312,39 @@ impl Engine {
     /// la session les verse au ring console
     /// (`report_unhandled_rejection`).
     pub fn drain_unhandled_rejections(&mut self) -> Vec<String> {
-        std::mem::take(&mut self.unhandled_reports)
+        /// Descriptions distinctes trackées à vie — borne hostile.
+        const UNHANDLED_SEEN_CAP: usize = 128;
+        let pending = std::mem::take(&mut self.unhandled_reports);
+        // Ordre de première occurrence dans le drain.
+        let mut order: Vec<String> = Vec::new();
+        let mut batch: std::collections::HashMap<String, u64> =
+            std::collections::HashMap::new();
+        for line in pending {
+            let c = batch.entry(line.clone()).or_insert(0);
+            *c += 1;
+            if *c == 1 {
+                order.push(line);
+            }
+        }
+        let mut out = Vec::with_capacity(order.len());
+        for line in order {
+            let n = batch[&line];
+            let total = if self.unhandled_seen.len() >= UNHANDLED_SEEN_CAP
+                && !self.unhandled_seen.contains_key(&line)
+            {
+                n // hors plafond : compteur de batch seul, pas de map growth
+            } else {
+                let c = self.unhandled_seen.entry(line.clone()).or_insert(0);
+                *c += n;
+                *c
+            };
+            out.push(if total > 1 {
+                format!("{line} (×{total})")
+            } else {
+                line
+            });
+        }
+        out
     }
 
     pub fn drain_dyn_scripts(&mut self) -> Vec<crate::dom_host::DynScriptReq> {

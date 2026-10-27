@@ -150,7 +150,7 @@ pub enum KeyAlgo {
     EcdsaP256,
     /// `Ed25519` — privée `pkcs8`, publique `raw`/`spki`.
     Ed25519,
-    /// `AES-GCM` (§68 couture FIX-1) — clé `raw` de 128 ou
+    /// `AES-GCM` (JS-C160) — clé `raw` de 128 ou
     /// 256 bits ; ops `encrypt`/`decrypt` via `ring::aead`
     /// (tag GCM 128 bits collé au chiffré, convention
     /// `WebCrypto` `tagLength` par défaut).
@@ -222,7 +222,72 @@ pub fn import_key(algo: KeyAlgo, format: KeyFormat, bytes: &[u8]) -> Result<Vec<
                 Err("importKey: invalid raw key (Ed25519)".to_string())
             }
         }
+        // AES-GCM : `raw` uniquement, 128/256 bits (spec).
+        (KeyAlgo::AesGcm, KeyFormat::Raw) => match bytes.len() {
+            16 | 32 => Ok(bytes.to_vec()),
+            _ => Err("importKey: AES-GCM wants a 128/256-bit key".to_string()),
+        },
+        (KeyAlgo::AesGcm, _) => Err("importKey: AES-GCM n'accepte que le format raw".to_string()),
     }
+}
+
+/// `subtle.encrypt` AES-GCM — `nonce` 96 bits, `aad` libre ;
+/// retourne `chiffré ‖ tag` (128 bits — ring).
+///
+/// # Errors
+/// `Err` (`OperationError`) si clé ≠ 128/256, nonce ≠ 12
+/// octets, ou sceau échoué.
+pub fn aead_seal(
+    algo: KeyAlgo,
+    key: &[u8],
+    nonce: &[u8],
+    aad: &[u8],
+    plaintext: &[u8],
+) -> Result<Vec<u8>, String> {
+    let unbound = aead_unbound(algo, key)?;
+    let nonce = ring::aead::Nonce::try_assume_unique_for_key(nonce)
+        .map_err(|_| "encrypt: AES-GCM veut un nonce de 96 bits".to_string())?;
+    let key = ring::aead::LessSafeKey::new(unbound);
+    let mut buf = plaintext.to_vec();
+    key.seal_in_place_append_tag(nonce, ring::aead::Aad::from(aad), &mut buf)
+        .map_err(|_| "encrypt: AES-GCM seal failed".to_string())?;
+    Ok(buf)
+}
+
+/// `subtle.decrypt` AES-GCM — `data` = `chiffré ‖ tag` ;
+/// retourne le clair ou `OperationError` (tag invalide =
+/// échec d'authentification).
+///
+/// # Errors
+/// `Err` (`OperationError`) si clé/nonce invalide ou tag faux.
+pub fn aead_open(
+    algo: KeyAlgo,
+    key: &[u8],
+    nonce: &[u8],
+    aad: &[u8],
+    ciphertext: &[u8],
+) -> Result<Vec<u8>, String> {
+    let unbound = aead_unbound(algo, key)?;
+    let nonce = ring::aead::Nonce::try_assume_unique_for_key(nonce)
+        .map_err(|_| "decrypt: AES-GCM veut un nonce de 96 bits".to_string())?;
+    let key = ring::aead::LessSafeKey::new(unbound);
+    let mut buf = ciphertext.to_vec();
+    let pt = key
+        .open_in_place(nonce, ring::aead::Aad::from(aad), &mut buf)
+        .map_err(|_| "decrypt: AES-GCM open failed (tag invalide)".to_string())?;
+    Ok(pt.to_vec())
+}
+
+/// `ring::aead::UnboundKey` depuis les octets canoniques —
+/// 128/256 sélectionnés par taille de clé.
+fn aead_unbound(algo: KeyAlgo, key: &[u8]) -> Result<ring::aead::UnboundKey, String> {
+    let a = match (algo, key.len()) {
+        (KeyAlgo::AesGcm, 16) => &ring::aead::AES_128_GCM,
+        (KeyAlgo::AesGcm, 32) => &ring::aead::AES_256_GCM,
+        (KeyAlgo::AesGcm, _) => return Err("AES-GCM veut une clé de 128/256 bits".to_string()),
+        _ => return Err("AEAD : algorithme non supporté".to_string()),
+    };
+    ring::aead::UnboundKey::new(a, key).map_err(|_| "AES-GCM : clé invalide".to_string())
 }
 
 /// `subtle.sign` — `key` = octets canoniques retournés par
