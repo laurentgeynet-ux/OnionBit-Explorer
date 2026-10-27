@@ -2309,3 +2309,63 @@ fn flex_grow_1_recupere_espace_libre() {
         txt.rect.width
     );
 }
+
+#[test]
+fn flex_column_item_stretch_largeur() {
+    // B-35 (wttj) : en `flex-direction:column`, la largeur
+    // d'un item = cross axis → `align-items:stretch` doit
+    // lui donner la largeur du conteneur.
+    let dom = TreeBuilder::parse(
+        "<div id=f><div id=txt><h2>titre dans une colonne flex</h2></div></div>",
+    );
+    let mut e = StyleEngine::new();
+    e.add_css(
+        "#f{display:flex;flex-direction:column;width:800px}",
+        Origin::Author,
+    );
+    let styles = e.compute_tree(&dom, dom.document(), &StyleEnv::default());
+    let root_el = dom
+        .children(dom.document())
+        .into_iter()
+        .flatten()
+        .find(|&c| dom.element(c).is_ok())
+        .unwrap();
+    let mut bx = build_box_tree(&dom, root_el, &styles).unwrap();
+    layout_tree(&mut bx, VIEW, &BlockCtx::default());
+    let txt = find(&bx, by_id(&dom, "txt"));
+    assert!(
+        txt.rect.width >= 700.0,
+        "item colonne stretché → ~800, obtenu {}",
+        txt.rect.width
+    );
+}
+
+#[test]
+fn grid_span_4_sur_pistes_auto_nourrit() {
+    // B-35 (wttj) : `grid-column:span 4` sur des pistes auto
+    // (template `subgrid`/auto) — l'item doit donner sa base
+    // à ses pistes, pas recevoir 0.
+    let dom = TreeBuilder::parse(
+        "<div id=g><div id=c><h2>titre qui doit avoir de la place dans le grid</h2></div></div>",
+    );
+    let mut e = StyleEngine::new();
+    e.add_css(
+        "#g{display:grid;grid-template-columns:subgrid;width:800px} #c{grid-column:span 4}",
+        Origin::Author,
+    );
+    let styles = e.compute_tree(&dom, dom.document(), &StyleEnv::default());
+    let root_el = dom
+        .children(dom.document())
+        .into_iter()
+        .flatten()
+        .find(|&c| dom.element(c).is_ok())
+        .unwrap();
+    let mut bx = build_box_tree(&dom, root_el, &styles).unwrap();
+    layout_tree(&mut bx, VIEW, &BlockCtx::default());
+    let c = find(&bx, by_id(&dom, "c"));
+    assert!(
+        c.rect.width > 50.0,
+        "col-span-4 sur pistes auto → contenu, obtenu {}",
+        c.rect.width
+    );
+}

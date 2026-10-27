@@ -286,19 +286,33 @@ fn col_widths(
     // la même colonne — compter par item divisait le libre
     // par le nombre d'enfants → cartes BBC à 60px).
     let mut autos: Vec<(usize, f32)> = Vec::new();
+    let mut feed = |col: usize, limit: f32| {
+        let sized = match &tracks[col] {
+            Track::Auto => true,
+            Track::MinMax(_, mx) => matches!(&**mx, Track::Auto),
+            _ => false,
+        };
+        if sized {
+            if let Some(e) = autos.iter_mut().find(|(c, _)| *c == col) {
+                e.1 = e.1.max(limit);
+            } else {
+                autos.push((col, limit));
+            }
+        }
+    };
     for &(col, span, base) in items_base {
         if span == 1 && col < w.len() {
-            let sized = match &tracks[col] {
-                Track::Auto => true,
-                Track::MinMax(_, mx) => matches!(**mx, Track::Auto),
-                _ => false,
-            };
-            if sized {
-                if let Some(e) = autos.iter_mut().find(|(c, _)| *c == col) {
-                    e.1 = e.1.max(base);
-                } else {
-                    autos.push((col, base));
-                }
+            feed(col, base);
+        } else if span > 1 {
+            // §12.5.1 (B-35) : un item multi-pistes **nourrit
+            // chacune des pistes auto qu'il chevauche** —
+            // sa base répartie (`base/span` par piste) ;
+            // sans elle `col-span-4`/`subgrid` rendait 4
+            // pistes auto × 0 = colonne effondrée (wttj
+            // texte mot-par-ligne).
+            let share = base / span as f32;
+            for col in col..(col + span).min(w.len()) {
+                feed(col, share);
             }
         }
     }
