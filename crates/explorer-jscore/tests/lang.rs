@@ -8189,3 +8189,71 @@ fn tolowercase_receivers() {
         }
     }
 }
+
+#[test]
+fn var_top_level_shared_across_scripts() {
+    // Mur lemonde/ouest-france : `var lmd` dans un <script>,
+    // lu dans le suivant — le scope global doit persister
+    // entre évaluations (pompes de scripts séparées).
+    let mut e = Engine::new();
+    e.eval("var lmd={n:1}; window.firstparty=[];")
+        .unwrap_or_else(|x| panic!("s1: {x}"));
+    for (src, want) in [
+        ("lmd.n", "1"),
+        ("typeof firstparty", "object"),
+        ("typeof window.firstparty", "object"),
+        ("firstparty === window.firstparty", "true"),
+    ] {
+        match e.eval(src) {
+            Ok(v) => assert_eq!(e.describe(v), want, "{src}"),
+            Err(x) => panic!("{src} → {x}"),
+        }
+    }
+}
+
+#[test]
+fn global_lexical_env_shared_across_scripts() {
+    // Suite du mur lemonde : `let`/`const`/`class`/`function`
+    // top-level vivent dans l'env lexical global (pas window)
+    // — mais doivent être visibles du script suivant.
+    let mut e = Engine::new();
+    e.eval("let lx=7; const cx=8; class Klass{} function fd(){return 9}")
+        .unwrap_or_else(|x| panic!("s1: {x}"));
+    for (src, want) in [
+        ("lx", "7"),
+        ("cx", "8"),
+        ("typeof Klass", "function"),
+        ("fd()", "9"),
+        ("typeof window.lx", "undefined"),
+    ] {
+        match e.eval(src) {
+            Ok(v) => assert_eq!(e.describe(v), want, "{src}"),
+            Err(x) => panic!("{src} → {x}"),
+        }
+    }
+}
+
+#[test]
+fn module_and_classic_share_window() {
+    // Mur DSFR : dsfr.module.js pose `window.dsfr`, les
+    // modules suivants et scripts classiques lisent —
+    // modules et classiques partagent le même global.
+    let mut e = Engine::new();
+    e.eval_module(
+        "window.dsfr={ns:{},register(n,m){this.ns[n]=m}};globalThis.gmod=1;",
+        "m1.js",
+    )
+    .unwrap_or_else(|x| panic!("mod: {x}"));
+    e.eval_module("window.dsfr.register('core',{v:2});", "m2.js")
+        .unwrap_or_else(|x| panic!("mod2: {x}"));
+    for (src, want) in [
+        ("typeof window.dsfr", "object"),
+        ("window.dsfr.ns.core.v", "2"),
+        ("gmod", "1"),
+    ] {
+        match e.eval(src) {
+            Ok(v) => assert_eq!(e.describe(v), want, "{src}"),
+            Err(x) => panic!("{src} → {x}"),
+        }
+    }
+}
