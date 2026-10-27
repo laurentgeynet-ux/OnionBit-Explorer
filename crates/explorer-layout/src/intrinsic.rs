@@ -237,6 +237,14 @@ fn content_px_unclamped(bx: &LayoutBox, fs: f32, ctx: &BlockCtx, max: bool, igno
     let mut best = 0.0f32;
     let mut run = 0.0f32;
     for c in &bx.children {
+        // Hors flux (`absolute`/`fixed`) : aucune contribution
+        // intrinsèque — la taille du conteneur ne doit pas
+        // dépendre d'une boîte qui n'y coule pas (§4.1 /
+        // B-49 : `.skip-links` absolu `width:100%` gonflait
+        // la mesure du parent flex).
+        if c.out_of_flow() {
+            continue;
+        }
         let cfs = font_size_px(&c.style, fs, ctx);
         if inline_level(c) {
             let w = explorer_common::deep(|| content_px(c, cfs, ctx, max));

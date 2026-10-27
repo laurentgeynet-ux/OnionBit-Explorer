@@ -7,6 +7,39 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **B-43 — non reproduit : le tiroir
+  `mini-cart` fermé est bien exclu
+  du hit-test** — re-vol instrumenté
+  auchan (même layout, `doc_h` 2261) :
+  `visibility:hidden` hérité rend tout
+  le sous-arbre `unhittable`, le clic
+  traverse vers l'`<a>` réel
+  (`navigated`). Le `edited` du vol 69
+  frappait un vrai élément (barre
+  haute, 12 px au-dessus du lien).
+  Diagnostic aidé : le log debug
+  `clic hit-test` porte désormais
+  `hit_path` — chemin d'élément du
+  nœud touché — en plus du tag
+  (`explorer-core/session/input.rs`).
+
+- **B-49 — enfant `position:absolute`
+  exclu des items flex/grid**
+  (`explorer-layout`) — un enfant
+  hors flux (`absolute`/`fixed`)
+  d'un conteneur `display:flex` ou
+  `display:grid` était encore mesuré
+  comme item : sa base (`width:100%`
+  → 1 366 px) consommait tout
+  l'espace libre et l'item `flex:1`
+  voisin retombait à 0 — tout le
+  contenu de paris.fr expulsé à
+  x=1 366, frame blanche (vol 73).
+  Flexbox §4.1 / css-grid §6.1 :
+  hors flux ≠ item — placeholder
+  statique pour `resolve_absolutes`,
+  contribution intrinsèque filtrée.
+
 - **B-45 — `doc_h` déverrouillé sur
   `body{overflow-x:hidden}`**
   (`explorer-layout`) — l'overflow de

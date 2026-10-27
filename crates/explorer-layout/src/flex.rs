@@ -317,8 +317,28 @@ pub(crate) fn flow_flex_children(
     // base des % `row-gap`).
     let h_def = h_css;
 
-    // Indices d'items triés par `order` (stable).
-    let mut order_idx: Vec<usize> = (0..bx.children.len()).collect();
+    // Indices d'items triés par `order` (stable). Un enfant
+    // `position:absolute|fixed` n'est PAS un item flex
+    // (Flexbox §4.1) : il ne consomme ni base ni espace libre
+    // — `.skip-links{position:absolute;width:100%}` de paris.fr
+    // mesurait 100% de la ligne → l'item `flex:1` voisin
+    // retombait à 0, tout le contenu expulsé hors viewport
+    // (B-49, vol 73). Placeholder statique pour
+    // `resolve_absolutes` : l'origine du contenu — « comme
+    // s'il était le seul item » (§4.1), start/start.
+    let mut order_idx: Vec<usize> = Vec::with_capacity(bx.children.len());
+    for (i, c) in bx.children.iter_mut().enumerate() {
+        if c.out_of_flow() {
+            c.rect = Rect {
+                x: content_x,
+                y: start_cursor,
+                width: content_w,
+                height: 0.0,
+            };
+        } else {
+            order_idx.push(i);
+        }
+    }
     let orders: Vec<i32> = bx
         .children
         .iter()

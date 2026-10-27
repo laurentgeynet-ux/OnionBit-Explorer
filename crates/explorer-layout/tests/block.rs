@@ -2339,8 +2339,10 @@ fn hit_test_layer_ferme_invisible_passe_au_travers() {
         "body{margin:0}\
          .layer{display:flex;pointer-events:none;overflow:hidden;position:fixed;\
                 top:0;left:0;bottom:0;right:0;z-index:111;opacity:0;\
-                visibility:hidden;transform:scale(.9)}\
-         .layer.rtl{transform:translate3d(100%,0,0)}\
+                visibility:hidden;transform:scale(.9);\
+                transition:transform .3s cubic-bezier(.215,.61,.355,1),opacity .3s cubic-bezier(.215,.61,.355,1),visibility 0ms .3s}\
+         .layer.rtl{visibility:hidden;transform:translate3d(100%,0,0);\
+                transition:transform .3s ease-in,visibility 0ms .3s}\
          .layer__wrapper{pointer-events:auto;width:600px;height:900px}\
          #target{display:block;height:50px}",
         Origin::Author,
@@ -2364,6 +2366,59 @@ fn hit_test_layer_ferme_invisible_passe_au_travers() {
     // le layer — le contenu réel en dessous doit gagner.
     assert_eq!(hit_of(295.0, 40.0), "target");
     assert_eq!(hit_of(760.0, 40.0), "target");
+}
+
+#[test]
+fn flex_enfant_absolu_ne_consomme_pas_lespace() {
+    // B-49 (paris.fr vol 73) : `body{display:flex}` avec un
+    // enfant `position:absolute;width:100%` (`.skip-links`)
+    // — hors flux, il ne doit consommer NI base NI espace
+    // libre. Sans le fix : sa base 100% avalait toute la
+    // ligne → l'item `flex:1` voisin retombait à 0 et tout
+    // le contenu partait à x=1366 → frame blanche.
+    let dom = TreeBuilder::parse(
+        "<body><ul id=sk><li><a href=\"#\">Aller au contenu</a></li></ul>\
+         <div id=main><p>contenu</p></div></body>",
+    );
+    let mut e = StyleEngine::new();
+    e.add_css(
+        "body{margin:0;display:flex}\
+         #sk{position:absolute;top:0;left:0;width:100%;list-style:none;margin:0;padding:0}\
+         #main{flex:1;width:100%}",
+        Origin::Author,
+    );
+    let styles = e.compute_tree(&dom, dom.document(), &StyleEnv::default());
+    let root_el = dom
+        .children(dom.document())
+        .into_iter()
+        .flatten()
+        .find(|&c| dom.element(c).is_ok())
+        .unwrap();
+    let mut bx = build_box_tree(&dom, root_el, &styles).unwrap();
+    layout_tree(&mut bx, VIEW, &BlockCtx::default());
+    let body = &bx.children[0];
+    let ul = body
+        .children
+        .iter()
+        .find(|c| c.node == Some(by_id(&dom, "sk")))
+        .unwrap();
+    let main = body
+        .children
+        .iter()
+        .find(|c| c.node == Some(by_id(&dom, "main")))
+        .unwrap();
+    assert_eq!(
+        main.rect.x, 0.0,
+        "l'item flex:1 doit partir à x=0, mesuré {}",
+        main.rect.x
+    );
+    assert!(
+        main.rect.width > VIEW * 0.9,
+        "l'item flex:1 doit recevoir ~{VIEW}px, mesuré {}",
+        main.rect.width
+    );
+    // L'absolu garde sa boîte (résolue par `resolve_absolutes`).
+    assert!(ul.rect.width > 0.0, "ul absolu doit garder sa boîte");
 }
 
 #[test]

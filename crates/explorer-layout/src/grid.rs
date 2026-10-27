@@ -411,8 +411,24 @@ pub(crate) fn flow_grid_children(
     let flow_col = flow_raw.contains("column");
     let dense = flow_raw.contains("dense");
 
-    // Ordre : `order` puis arbre (comme flex).
-    let mut order_idx: Vec<usize> = (0..bx.children.len()).collect();
+    // Ordre : `order` puis arbre (comme flex). Un enfant
+    // `position:absolute|fixed` n'est PAS un item de grille
+    // (css-grid §6.1, même règle que Flexbox §4.1) : il ne
+    // consomme ni piste ni base — placeholder statique à
+    // l'origine du contenu pour `resolve_absolutes`.
+    let mut order_idx: Vec<usize> = Vec::with_capacity(bx.children.len());
+    for (i, c) in bx.children.iter_mut().enumerate() {
+        if c.out_of_flow() {
+            c.rect = crate::Rect {
+                x: content_x,
+                y: start_cursor,
+                width: content_w,
+                height: 0.0,
+            };
+        } else {
+            order_idx.push(i);
+        }
+    }
     let orders: Vec<i32> = bx
         .children
         .iter()
