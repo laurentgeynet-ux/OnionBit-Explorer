@@ -53,6 +53,13 @@ pub(crate) const SUPER_BIND: &str = "\u{f120}super";
 /// fonction invoquée par `new`/`Reflect.construct`.
 pub(crate) const NEW_TARGET: &str = "\u{f120}new.target";
 
+/// Liaison cachée du **ctor propre** dans le scope de classe —
+/// lue par le chemin `super()` pour trouver `FLD_FIELDS_D`
+/// (depuis JS-C150, `HOME_BIND` = le proto [[HomeObject]],
+/// pas le ctor — réutiliser `HOME_BIND` perdait les champs
+/// dérivés : `y = this.x + 1` non installé).
+pub(crate) const OWN_CTOR: &str = "\u{f120}own.ctor";
+
 /// Liaison cachée du spec résolu du module dans son env —
 /// `import.meta.url` et le référent de `import()` se lisent
 /// lexicalement (fonctions/callbacks imbriqués), pas dans
@@ -1317,8 +1324,7 @@ impl Engine {
         let pending = std::mem::take(&mut self.unhandled_reports);
         // Ordre de première occurrence dans le drain.
         let mut order: Vec<String> = Vec::new();
-        let mut batch: std::collections::HashMap<String, u64> =
-            std::collections::HashMap::new();
+        let mut batch: std::collections::HashMap<String, u64> = std::collections::HashMap::new();
         for line in pending {
             let c = batch.entry(line.clone()).or_insert(0);
             *c += 1;
@@ -3744,6 +3750,10 @@ impl Engine {
         // `…internals…` en cascade). `super()` reste sur
         // `SUPER_BIND` (le parent **ctor**, distinct).
         Self::env_put(&cenv, HOME_BIND, Value::Obj(proto), false);
+        // Le ctor propre pour l'install des champs dérivés
+        // après `super()` — `HOME_BIND` est le proto, pas le
+        // ctor (JS-C150) → liaison dédiée.
+        Self::env_put(&cenv, OWN_CTOR, Value::Obj(ctor_id), false);
         // Nom propre de la classe — liaison immuable dans le
         // scope de classe (spec `ClassDefinitionEvaluation`),
         // visible des méthodes/statiques/champs : `class e {

@@ -284,8 +284,9 @@ impl Engine {
                 self.set_own(tid, FLD_DONE, Value::Bool(true), false);
                 // Nos champs de classe dérivée : installés juste
                 // après `super()` — le constructeur de *cette*
-                // classe est la fermeture courante (`HOME_BIND`).
-                let own_ctor = self.env_get(env, HOME_BIND);
+                // classe vit sur la liaison dédiée (`OWN_CTOR` —
+                // `HOME_BIND` = le proto depuis JS-C150).
+                let own_ctor = self.env_get(env, OWN_CTOR);
                 if let Some(Value::Obj(cid)) = own_ctor {
                     self.install_class_fields(cid, FLD_FIELDS_D, this, nt)?;
                 }
