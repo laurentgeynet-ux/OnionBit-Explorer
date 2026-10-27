@@ -8436,3 +8436,57 @@ fn module_toplevel_throw_surfaces() {
         Ok(v) => panic!("throw module avalé → {}", e.describe(v)),
     }
 }
+
+#[test]
+fn class_call_check_passes() {
+    // B-9 (tiktok) : babel `classCallCheck(this, C)` =
+    // `instanceof` — la chaîne protos J5 doit le satisfaire
+    // (avant : `Cannot call a class as a function`).
+    let mut e = Engine::new();
+    match e.eval(
+        "function _ccc(i,c){if(!(i instanceof c))throw new TypeError(\
+         'Cannot call a class as a function')}\
+         var C=function(){_ccc(this,C);this.x=1};\
+         var o=new C();o.x",
+    ) {
+        Ok(v) => assert_eq!(e.describe(v), "1"),
+        Err(x) => panic!("_classCallCheck → {x}"),
+    }
+}
+
+#[test]
+fn native_construct_probe() {
+    // B-9 (gitlab rspack) : `new` sur une native —
+    // `constructor is not a function: function(){[code]}`.
+    let mut e = Engine::new();
+    for src in [
+        "new Promise(function(r,j){})",
+        "new Map()",
+        "new Set()",
+        "new WeakMap()",
+        "new Array()",
+        "new Date()",
+        "new Error('x')",
+        "new RegExp('a')",
+        "new URLSearchParams('a=1')",
+        "new MutationObserver(function(){})",
+        "new IntersectionObserver(function(){})",
+        "new ResizeObserver(function(){})",
+        "new AbortController()",
+        "new XMLHttpRequest()",
+        "new URL('http://h/')",
+        "new Worker('x.js')",
+        "new Event('e')",
+        "new CustomEvent('c')",
+        "new FormData()",
+        "new TextEncoder()",
+        "new DOMParser()",
+        "new Image()",
+        "new Audio()",
+    ] {
+        match e.eval(src) {
+            Ok(v) => println!("OK   {src}"),
+            Err(x) => println!("FAIL {src} → {x}"),
+        }
+    }
+}

@@ -6567,3 +6567,32 @@ fn frame_document_probe() {
         }
     }
 }
+
+#[test]
+fn native_construct_dom_probe() {
+    // B-9 (gitlab rspack) : `new` sur natives DOM —
+    // `constructor is not a function: function(){[code]}`.
+    let (mut e, _jar, _navs) = engine_full(PAGE);
+    for src in [
+        "new MutationObserver(function(){})",
+        "new IntersectionObserver(function(){})",
+        "new ResizeObserver(function(){})",
+        "new AbortController()",
+        "new XMLHttpRequest()",
+        "new Worker('x.js')",
+        "new Event('e')",
+        "new CustomEvent('c')",
+        "new FormData()",
+        "new DOMParser()",
+        "new Image()",
+        "new Audio()",
+        "new Option()",
+        "new XPathEvaluator()",
+        "new EventTarget()",
+    ] {
+        match e.eval(src) {
+            Ok(v) => println!("OK   {src} → {}", e.describe(v)),
+            Err(x) => println!("FAIL {src} → {x}"),
+        }
+    }
+}
