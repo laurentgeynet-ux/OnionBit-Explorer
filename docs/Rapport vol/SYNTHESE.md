@@ -139,6 +139,8 @@ plateforme net** (ops jscore Encrypt/Decrypt restent à livrer) ·
 
 | 29 | **Boucle iframes `sodar` non bornée** — AdSense crée des iframes télémétrie en continu : 419 dans le DOM (+~90/min), `js_heap` 53→160 Mo (~40 Mo/min), cycles apply ~1,3 s | `explorer-core`/budget | linuxmint `[V4-main]` vol 51 — ad-tech fonctionnel (slot peint) mais DOM+heap gonflent ; API responsive, RAM libérée au DELETE | **OUVERT — famille §B-1/§B-21, signature DOM+heap** |
 
+| 30 | **Fuite mémoire post-DELETE sans borne** — croissance +~28 Mo/s après fermeture de tous les onglets (`{"tabs":[]}`), API responsive, 0 log | `explorer-core` | manomano `[V4-main]` vol 53 : 1,7→2,98→4,27 Go avec zéro onglet — suspect : tâche `POST navigate` orpheline (jamais retournée) allouant après destruction | **CRITIQUE — repro : navigate + DELETE pendant in-flight ; distinct de §B-26** |
+
 ### 🟡 Moyen — perf, métriques, observabilité résiduelle
 
 - **Framebuffer pleine page** : PNG 48-54 Mo (guardian, youtube) —
