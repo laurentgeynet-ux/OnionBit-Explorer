@@ -133,25 +133,30 @@ impl Session {
             for json in &import_maps {
                 eng.set_import_map(json);
             }
+            let mut evals = 0usize;
             for item in scripts.iter().filter(|i| i.exec == ScriptExec::Parse) {
                 let Some(src) = item_source(item, &script_srcs) else {
                     continue;
                 };
                 let url = item.src.as_ref().map(Url::as_str);
                 self.eval_or_report(tab, eng.as_mut(), src, url.as_deref(), Some(item.el_ord));
+                evals += 1;
             }
             for me in arrival_evals {
                 self.eval_module_graph(tab, eng.as_mut(), &me);
+                evals += 1;
             }
             let mut post_evals = post_evals.into_iter();
             for item in scripts.iter().filter(|i| i.exec == ScriptExec::Post) {
                 if item.module {
                     if let Some(me) = post_evals.next() {
                         self.eval_module_graph(tab, eng.as_mut(), &me);
+                        evals += 1;
                     }
                 } else if let Some(src) = item_source(item, &script_srcs) {
                     let url = item.src.as_ref().map(Url::as_str);
                     self.eval_or_report(tab, eng.as_mut(), src, url.as_deref(), Some(item.el_ord));
+                    evals += 1;
                 }
             }
             let n = eng.run_pending();
@@ -159,10 +164,27 @@ impl Session {
             // Miroir muté ? → re-parse : le relayout qui suit
             // rend les modifications (dirty bit consommé côté
             // moteur).
-            if let Some(k) = eng.sync_dom_keyed() {
+            let mutated = if let Some(k) = eng.sync_dom_keyed() {
                 self.apply_dom_sync(tab, &k.html, None, false, Some(k.ids), Some(k.tags));
+                true
             } else if let Some((mutated, _)) = eng.sync_dom_path() {
                 self.apply_dom_sync(tab, &mutated, None, false, None, None);
+                true
+            } else {
+                false
+            };
+            // T2 `evals_sans_mutation` (B-4) : ≥8 évals exécutées
+            // sans aucune mutation DOM = signature « boot muet »
+            // (twitch : 88 ok=true, 0 mutation, shell vide — un
+            // lecteur INFO/WARN concluait « tout vert »). Une
+            // page à scripts purement passifs reste rare au-
+            // delà du seuil.
+            if !mutated && evals >= 8 {
+                tracing::warn!(
+                    tab,
+                    evals,
+                    "evals_sans_mutation — boot possiblement muet (aucune mutation DOM)"
+                );
             }
         }
         if let Some(entry) = self.tabs.get_mut(&tab) {
