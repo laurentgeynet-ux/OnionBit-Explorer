@@ -357,3 +357,41 @@ fn inset_expansion() {
     assert_eq!(got[2].1, "10px");
     assert_eq!(got[3].1, "20px");
 }
+
+#[test]
+fn expand_proprietes_logiques_ltr() {
+    // R-124 — css-logical-1 : mapping LTR/horizontal-tb.
+    // Longhands `-start`/`-end`/`-size` (Tailwind ps-*/pe-*/ms-*).
+    let g = |n, v| expand_shorthand(n, v).unwrap();
+    assert_eq!(
+        g("padding-inline-start", "8px"),
+        vec![("padding-left".into(), "8px".into())]
+    );
+    assert_eq!(
+        g("margin-inline-end", "4px"),
+        vec![("margin-right".into(), "4px".into())]
+    );
+    assert_eq!(
+        g("inset-inline-start", "0"),
+        vec![("left".into(), "0".into())]
+    );
+    assert_eq!(
+        g("block-size", "100px"),
+        vec![("height".into(), "100px".into())]
+    );
+    // Shorthands `-inline`/`-block` : 1 valeur répétée ou 2.
+    assert_eq!(
+        g("margin-inline", "10px 20px"),
+        vec![
+            ("margin-left".into(), "10px".into()),
+            ("margin-right".into(), "20px".into())
+        ]
+    );
+    assert_eq!(
+        g("padding-block", "6px"),
+        vec![
+            ("padding-top".into(), "6px".into()),
+            ("padding-bottom".into(), "6px".into())
+        ]
+    );
+}

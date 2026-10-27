@@ -2549,3 +2549,21 @@ fn container_collecte_et_evalue() {
         150.0
     ));
 }
+
+#[test]
+fn container_type_traverse_la_cascade() {
+    // R-122 suite : `container-type`/`container-name` doivent
+    // arriver en computed pour la 2ᵉ passe NAV.
+    let f = fixture();
+    let mut dom = f.dom;
+    let div = dom.create_element("div").unwrap();
+    dom.append_child(dom.document(), div).unwrap();
+    let mut e = StyleEngine::new();
+    e.add_css(
+        "div{container-type:inline-size;container-name:card}",
+        Origin::Author,
+    );
+    let st = e.compute(&dom, div, &env());
+    assert_eq!(st.get("container-type"), Some("inline-size"));
+    assert_eq!(st.get("container-name"), Some("card"));
+}

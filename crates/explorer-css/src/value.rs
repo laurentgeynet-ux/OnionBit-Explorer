@@ -608,6 +608,13 @@ pub fn value_is_valid_for(name: &str, value: &str) -> bool {
 /// par propriété fera le tri).
 #[must_use]
 pub fn expand_shorthand(name: &str, value: &str) -> Option<Vec<(String, String)>> {
+    // Propriétés logiques (css-logical-1 — R-124) : mapping
+    // LTR / `horizontal-tb` — seul writing-mode porté. Les
+    // `*-inline`/`*-block` prennent 1-2 valeurs ; les
+    // `*-start`/`*-end`/`-size` sont des renommages.
+    if let Some(expanded) = expand_logical(name, value) {
+        return Some(expanded);
+    }
     match name {
         "margin" | "padding" => expand_box(name, value),
         "inset" => {
@@ -1215,6 +1222,100 @@ const FONT_SIZE_KEYWORDS: &[&str] = &[
 ];
 
 /// `1..4` valeurs → `[top, right, bottom, left]` (spec).
+/// Propriétés logiques (css-logical-1 — R-124) : mapping
+/// **LTR / `horizontal-tb`** — le seul writing-mode porté.
+/// Retour : `Some(vec![(physique, valeur)…])` ou `None` si
+/// `name` n'est pas une propriété logique connue.
+///
+/// Couvert : `*-inline[-start|-end]` / `*-block[-start|-end]`
+/// de `margin`, `padding`, `inset`, `border-*` ; `inline-size`,
+/// `block-size` + `min-`/`max-` ; rayons `border-*-radius`.
+fn expand_logical(name: &str, value: &str) -> Option<Vec<(String, String)>> {
+    // Longhands `-start`/`-end`/`-size` = renommage direct.
+    let rename: &str = match name {
+        "margin-inline-start" => "margin-left",
+        "margin-inline-end" => "margin-right",
+        "margin-block-start" => "margin-top",
+        "margin-block-end" => "margin-bottom",
+        "padding-inline-start" => "padding-left",
+        "padding-inline-end" => "padding-right",
+        "padding-block-start" => "padding-top",
+        "padding-block-end" => "padding-bottom",
+        "inset-inline-start" => "left",
+        "inset-inline-end" => "right",
+        "inset-block-start" => "top",
+        "inset-block-end" => "bottom",
+        "inline-size" => "width",
+        "block-size" => "height",
+        "min-inline-size" => "min-width",
+        "max-inline-size" => "max-width",
+        "min-block-size" => "min-height",
+        "max-block-size" => "max-height",
+        "border-inline-start-width" => "border-left-width",
+        "border-inline-end-width" => "border-right-width",
+        "border-block-start-width" => "border-top-width",
+        "border-block-end-width" => "border-bottom-width",
+        "border-inline-start-style" => "border-left-style",
+        "border-inline-end-style" => "border-right-style",
+        "border-block-start-style" => "border-top-style",
+        "border-block-end-style" => "border-bottom-style",
+        "border-inline-start-color" => "border-left-color",
+        "border-inline-end-color" => "border-right-color",
+        "border-block-start-color" => "border-top-color",
+        "border-block-end-color" => "border-bottom-color",
+        "border-start-start-radius" => "border-top-left-radius",
+        "border-start-end-radius" => "border-top-right-radius",
+        "border-end-start-radius" => "border-bottom-left-radius",
+        "border-end-end-radius" => "border-bottom-right-radius",
+        _ => "",
+    };
+    if !rename.is_empty() {
+        return Some(vec![(rename.to_string(), value.to_string())]);
+    }
+    // Shorthands `*-inline`/`*-block` : 1-2 valeurs répétées.
+    let (a, b): (&str, &str) = match name {
+        "margin-inline" => ("margin-left", "margin-right"),
+        "margin-block" => ("margin-top", "margin-bottom"),
+        "padding-inline" => ("padding-left", "padding-right"),
+        "padding-block" => ("padding-top", "padding-bottom"),
+        "inset-inline" => ("left", "right"),
+        "inset-block" => ("top", "bottom"),
+        "border-inline-width" => ("border-left-width", "border-right-width"),
+        "border-inline-style" => ("border-left-style", "border-right-style"),
+        "border-inline-color" => ("border-left-color", "border-right-color"),
+        "border-block-width" => ("border-top-width", "border-bottom-width"),
+        "border-block-style" => ("border-top-style", "border-bottom-style"),
+        "border-block-color" => ("border-top-color", "border-bottom-color"),
+        _ => {
+            // `border-inline`/`border-block` shorthand complet —
+            // délègue à `expand_border_parts` par côté physique.
+            return match name {
+                "border-inline" | "border-block" => {
+                    let (p1, p2) = if name == "border-inline" {
+                        ("border-left", "border-right")
+                    } else {
+                        ("border-top", "border-bottom")
+                    };
+                    let mut out = expand_border_parts(p1, value);
+                    out.extend(expand_border_parts(p2, value));
+                    Some(out)
+                }
+                _ => None,
+            };
+        }
+    };
+    let parts: Vec<&str> = value.split_whitespace().collect();
+    let (v1, v2) = match parts.as_slice() {
+        [v] => (*v, *v),
+        [v1, v2] => (*v1, *v2),
+        _ => return None,
+    };
+    Some(vec![
+        (a.to_string(), v1.to_string()),
+        (b.to_string(), v2.to_string()),
+    ])
+}
+
 fn four_sides(parts: &[&str]) -> Option<[String; 4]> {
     Some(match parts {
         [a] => [
