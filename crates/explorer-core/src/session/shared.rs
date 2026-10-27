@@ -592,6 +592,8 @@ pub async fn drain_applies_shared(sess: &tokio::sync::Mutex<Session>, _tab: TabI
                 // « jamais peint » (lazy-heal au prochain
                 // `/frame`, étape 56b) plutôt que détaché
                 // à vie.
+                s.applies_fin += 1;
+                s.paint_in_flight.remove(&tab);
                 if let Some(e) = s.tabs.get_mut(&tab) {
                     e.paint_detached = false;
                 }

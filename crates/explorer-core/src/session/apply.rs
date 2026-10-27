@@ -1962,6 +1962,8 @@ impl Session {
                 job.epoch,
                 p,
             );
+            self.applies_started += 1;
+            self.paint_in_flight.insert(job.tab, std::time::Instant::now());
             return Some((job, g, ctx, entry.title.clone()));
         }
     }
@@ -1971,6 +1973,18 @@ impl Session {
     /// la payload est jetée (le drapeau est réarmé pour la
     /// peinture de la nouvelle page).
     pub(crate) fn commit_apply_detached(
+        &mut self,
+        tab: TabId,
+        epoch: u64,
+        payload: PaintPayload,
+        o: &ApplyOutcome,
+    ) {
+        self.applies_fin += 1;
+        self.paint_in_flight.remove(&tab);
+        self.commit_apply_detached_inner(tab, epoch, payload, o)
+    }
+
+    fn commit_apply_detached_inner(
         &mut self,
         tab: TabId,
         epoch: u64,
@@ -2097,6 +2111,8 @@ impl Session {
         mut job: PendingApply,
         why: &JournalReject,
     ) {
+        self.applies_fin += 1;
+        self.paint_in_flight.remove(&tab);
         self.journal_fallbacks += 1;
         tracing::warn!(tab, ?why, "journal DOM rejeté → repli re-parse (ADR-0025)");
         if let Some(entry) = self.tabs.get_mut(&tab) {
@@ -2130,6 +2146,8 @@ impl Session {
     /// [`Self::reclaim_orphaned_paint`] à la prochaine
     /// opportunité sous verrou.
     pub(crate) fn park_orphaned_paint(&mut self, tab: TabId, epoch: u64, p: PaintPayload) {
+        self.applies_fin += 1;
+        self.paint_in_flight.remove(&tab);
         let _ = self
             .orphaned_paints
             .lock()

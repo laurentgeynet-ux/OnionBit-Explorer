@@ -867,6 +867,16 @@ pub struct Session {
     /// `set_accept_language` la fait évoluer à chaud, sans
     /// reconstruire la pile.
     accept_language: explorer_net::lang::AcceptLanguage,
+    /// Témoins B-26 : applies engagés sans fin —
+    /// `started − fin` > 0 + âge > 30 s = apply mort en
+    /// vol (bfmtv/radiofrance : meurt entre `layout` et
+    /// `repaint`, peinture jamais servie, RAM sans borne).
+    pub(crate) applies_started: u32,
+    pub(crate) applies_fin: u32,
+    /// Instant d'engagement par onglet — armé au
+    /// `take_next_apply`, relâché aux quatre sorties
+    /// (commit, rejet, parc orphelin, panic réarmé).
+    pub(crate) paint_in_flight: std::collections::HashMap<TabId, std::time::Instant>,
 }
 
 impl Session {
@@ -989,6 +999,9 @@ impl Session {
             journal_fallbacks: 0,
             journal_applies: 0,
             pending_applies: std::collections::VecDeque::new(),
+            applies_started: 0,
+            applies_fin: 0,
+            paint_in_flight: std::collections::HashMap::new(),
             orphaned_paints: std::sync::Arc::new(std::sync::Mutex::new(
                 std::collections::HashMap::new(),
             )),
@@ -1030,6 +1043,24 @@ impl Session {
     #[must_use]
     pub fn journal_applies(&self) -> u32 {
         self.journal_applies
+    }
+
+    /// Applies engagés jamais finis (B-26) — `>0` durable =
+    /// un apply meurt en vol (layout→repaint) : sonder
+    /// `paint_in_flight_age_ms` pour l'âge du coinçage.
+    #[must_use]
+    pub fn apply_started_without_fin(&self) -> u32 {
+        self.applies_started.saturating_sub(self.applies_fin)
+    }
+
+    /// Âge ms de la peinture en vol de l'onglet (B-26) —
+    /// `None` si aucun apply détaché en cours. >30 s =
+    /// escalade (mesuré radiofrance : 0,4 s → 49,5 s).
+    #[must_use]
+    pub fn paint_in_flight_age_ms(&self, tab: TabId) -> Option<u64> {
+        self.paint_in_flight
+            .get(&tab)
+            .map(|t| t.elapsed().as_millis() as u64)
     }
 
     /// Ops de journal classées « re-parse » au drain par les
