@@ -1886,3 +1886,28 @@ fn opacity_partielle_ne_court_circuite_pas() {
         "opacité partielle : contenu peint : {items:?}"
     );
 }
+
+/// `<use href="#id">` cross-îlot : le `<symbol>` vit dans un
+/// `<svg>` séparé (pattern icônes/defs de début de document —
+/// logo reddit aplati). L'usage doit rasteriser la cible.
+#[test]
+fn svg_use_cross_ilot_resolu() {
+    let dom = TreeBuilder::parse(
+        "<svg width=\"40\" height=\"40\"><use href=\"#sym\"/></svg>\
+         <svg style=\"display:none\"><symbol id=\"sym\">\
+         <rect width=\"40\" height=\"40\" fill=\"#00ff00\"/></symbol></svg>",
+    );
+    let mut eng = StyleEngine::new();
+    eng.add_css("body{margin:0}", Origin::Author);
+    let styles = eng.compute_tree(&dom, dom.document(), &StyleEnv::default());
+    let root_el = dom
+        .children(dom.document())
+        .into_iter()
+        .flatten()
+        .find(|&c| dom.element(c).is_ok())
+        .expect("racine");
+    let svgs = explorer_render::collect_svg(&dom, root_el, 1_000_000);
+    // L'îlot `<use>` produit une image (le symbol définit
+    // viewBox par défaut — usvg résout le contenu injecté).
+    assert!(!svgs.is_empty(), "aucun svg rasterisé");
+}

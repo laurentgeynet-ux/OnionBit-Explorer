@@ -49,6 +49,13 @@ pub fn collect_svg(dom: &Dom, root: NodeId, max_px: u32) -> ImageTable {
             if is_svg_root(dom, n) {
                 let mut src = String::new();
                 serialize_into(dom, n, &mut src);
+                // `<use href="#x">`/`url(#x)` cross-îlots (issue
+                // cosmétique synthèse — logo reddit aplati) :
+                // la cible vit souvent dans un autre îlot
+                // (`<symbol>` en début de document) — sans elle
+                // usvg rend l'usage vide. On l'injecte dans
+                // `<defs>` avant `</svg>` pour la résolution.
+                inject_external_refs(dom, root, n, &mut src);
                 if src.len() <= SVG_MAX_SOURCE {
                     if let Some(img) = crate::image::decode_svg_raster(src.as_bytes(), max_px) {
                         out.insert(n, Arc::new(img));
@@ -192,4 +199,69 @@ fn escape_xml(s: &str, out: &mut String, attr: bool) {
             _ => out.push(c),
         }
     }
+}
+
+/// Références `#id`/`url(#id)` d'un îlot résolues depuis le
+/// document entier (cross-îlot — les `<symbol>` partagés
+/// vivent souvent dans un `<svg>` caché ailleurs). Chaque
+/// cible trouvée hors de l'îlot est sérialisée dans un
+/// `<defs>` injecté avant `</svg>` ; les refs introuvables
+/// ou auto-référencées sont ignorées (rendu dégradé usvg).
+fn inject_external_refs(dom: &Dom, doc_root: NodeId, svg: NodeId, src: &mut String) {
+    let mut needed = Vec::<String>::new();
+    let mut defined = Vec::<String>::new();
+    let mut stack = vec![svg];
+    while let Some(n) = stack.pop() {
+        let Ok(e) = dom.element(n) else { continue };
+        for a in &e.attributes {
+            if a.name == "id" {
+                defined.push(a.value.clone());
+            } else if let Some(id) = a.value.strip_prefix('#') {
+                if matches!(a.name.as_str(), "href" | "xlink:href") {
+                    needed.push(id.to_string());
+                }
+            } else if let Some(i) = a.value.find("url(#") {
+                let rest = &a.value[i + 5..];
+                if let Some(end) = rest.find(')') {
+                    needed.push(rest[..end].to_string());
+                }
+            }
+        }
+        if let Ok(ch) = dom.children(n) {
+            stack.extend(ch.iter().rev());
+        }
+    }
+    let mut defs = String::new();
+    for id in &needed {
+        if defined.contains(id) {
+            continue;
+        }
+        if let Some(target) = find_by_id(dom, doc_root, id) {
+            serialize_into(dom, target, &mut defs);
+        }
+    }
+    if defs.is_empty() {
+        return;
+    }
+    let close = format!("</svg>");
+    if let Some(i) = src.rfind(&close) {
+        let defs_tag = format!("<defs>{defs}</defs>");
+        src.insert_str(i, &defs_tag);
+    }
+}
+
+/// Premier élément portant `id` sous `root` (BFS).
+fn find_by_id(dom: &Dom, root: NodeId, id: &str) -> Option<NodeId> {
+    let mut queue = vec![root];
+    while let Some(n) = queue.pop() {
+        if let Ok(e) = dom.element(n) {
+            if e.attributes.iter().any(|a| a.name == "id" && a.value == id) {
+                return Some(n);
+            }
+            if let Ok(ch) = dom.children(n) {
+                queue.extend(ch.iter().rev());
+            }
+        }
+    }
+    None
 }
