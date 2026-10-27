@@ -171,6 +171,9 @@ plateforme net** (ops jscore Encrypt/Decrypt restent à livrer) ·
 
 | 48 | **Micro-script en boucle ≥60 s** — script 285 o bouclant jusqu'au kill disjoncteur (`eval ms=60002 ok=false`), scripts suivants sautés ; kill absent de `/console` (« pas de journal » mensonger) | `explorer-jscore` | kayak `[V6-main]` vol 72 — porteur historique wedge vol 24 : nav retourné 65 s, modale erreur propre | **OUVERT — contenu par disjoncteur ; J1 validé terrain** |
 
+| 49 | **Wrapper racine expulsé hors viewport** — `.paris-main-wrapper` layouté `[1366 0 0×9927]` : largeur 0 au bord droit, tout descendant x≥1366 → frame blanche malgré DOM/layout/images complets (doc_h=9 927) | `explorer-layout`/`css` | paris.fr `[V6-main]` vol 73 — motif suspect : item flex row compressé à 0 ; famille §B-35, symptôme §B-7 | **OUVERT — terrain V6** |
+| 50 | **Re-parse post-apply : DOM jamais réattaché** — apply complet (`repaint` journalisé, borne §B-26 tirée) puis rejet `UnmappedKey` → re-parse → `dom` 404 / `frame` 204 / `dom_nodes=0` >7 min, flag « paint en vol » bloqué | `explorer-core` | bordeaux.fr `[V6-main]` vol 73 — variante §B-26 non couverte par le fix emit (le cycle est borné, le repli non) | **OUVERT — terrain V6** |
+
 ### 🟡 Moyen — perf, métriques, observabilité résiduelle
 
 - **Framebuffer pleine page** : PNG 48-54 Mo (guardian, youtube) —
