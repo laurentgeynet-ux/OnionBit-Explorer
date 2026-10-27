@@ -7,6 +7,51 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **JS-C167 — B-3 tué : le crash alpine
+  était `loose_eq`↔`to_primitive` en
+  ping-pong sur `Symbol`** (`explorer-
+  jscore`, J2) — `STATUS_STACK_OVERFLOW`
+  à l'éxécution d'alpinejs dès
+  `x-data` sur un élément. Chaîne :
+  `evaluate` → `AsyncFunction` +
+  `with(mergeProxies)` → trap `has`
+  `k == Symbol.unscopables` → bras
+  `(Str, Obj)` de `loose_eq` →
+  `to_primitive` rend le symbole
+  (primitive spec, restée `Obj`
+  en interne) → reboucle sur le même
+  bras à l'infini — jambe native
+  pure, invisible à toute borne
+  (zéro prop/env/call/tick). Fix :
+  `Obj` survivant `to_primitive` =
+  symbole → `false` direct.
+  Connexes livrés : `env_get` chemin
+  `with` lisait via `get_prop` brut
+  (aveugle aux traps proxy et à la
+  réflexion hôte → `ReferenceError`
+  sur `with(proxy)` ; passe par
+  `read_prop` + `h.get`) ;
+  `is_callable` itératif
+  (`Proxy(proxy(f))`×N) ; délégation
+  `[[Call]]` unifiée itérative
+  proxy+`Bound` sous `deleg_hop`
+  (`Proxy(proxy(f))`×5000 puis `p()`
+  → `RangeError`, avant overflow) ;
+  `super()` vers parent **natif**
+  transfère l'état du retour dans le
+  `this` pré-alloué (`swap_obj` heap,
+  proto `newTarget` conservé) —
+  `new MiddlewareArray(thunk)` ne
+  perd plus ses args (`len=0` →
+  thunk avalé par le middleware,
+  §B-22 en-process). Instrumentation
+  de bissection (`DG_*`, lowstack,
+  `stack_guard` rem-based — faux
+  positifs sur frontière de segment
+  `stacker`) retirée. Suites :
+  `alpine_bisect` 28/28, `depth_probe`
+  47/47, `dom` 222/222.
+
 - **JS-C166 — délégations proxy/bound
   bornées, plus de récursion Rust hors
   `call_depth`** (`explorer-jscore`, J2) —

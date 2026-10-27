@@ -6,8 +6,10 @@
 //! profond dans un test séparé : le dernier nommé avant
 //! `abort` est le transporteur non borné.
 
-use explorer_jscore::Engine;
+use explorer_jscore::{Dom, Engine};
+use std::cell::RefCell;
 use std::fmt::Write as _;
+use std::rc::Rc;
 
 fn eval_deep(src: &str) -> String {
     let mut e = Engine::new();
@@ -98,6 +100,36 @@ probe!(deep_try, {
     let n = 15000;
     format!("eval('{}')", "try{".repeat(n) + &"}finally{}".repeat(n))
 });
+
+/// Repro du crash vol : le bundle sur un DOM installé —
+/// `MutationObserver` présent → l'éval va jusqu'à `initTree`
+/// (la strate sous laquelle le daemon meurt — vol :9499).
+#[test]
+fn alpine_bundle_dom() {
+    eprintln!("[probe] alpine_bundle_dom");
+    let Ok(src) = std::fs::read_to_string("../../docs/Rapport vol/logs/scratch/alpine.js")
+        .or_else(|_| std::fs::read_to_string("docs/Rapport vol/logs/scratch/alpine.js"))
+        .or_else(|_| std::fs::read_to_string("/tmp/alpine.min.js"))
+    else {
+        eprintln!("[probe] bundle absent — skip");
+        return;
+    };
+    // Page imbriquée type docs (x-data sur des éléments profonds).
+    let html = r##"<html><body><div x-data="{open:false}">
+        <nav><ul><li><a href="#">a</a></li><li><a href="#">b</a></li></ul></nav>
+        <div x-data="{items:[1,2,3]}"><template x-for="i in items"><span x-text="i"></span></template></div>
+        <div x-data="{t:{n:0}}"><button @click="t.n++">+</button><span x-text="t.n"></span></div>
+    </div></body></html>"##;
+    let mut e = Engine::new();
+    e.install_dom(&Rc::new(RefCell::new(Dom::from_html(html))));
+    match e.eval(&src) {
+        Ok(_) => eprintln!("[probe] alpine-dom -> ok (init évalué)"),
+        Err(err) => eprintln!(
+            "[probe] alpine-dom -> err {}",
+            format!("{err}").chars().take(120).collect::<String>()
+        ),
+    }
+}
 
 /// Le vrai bundle alpine.js — crash mesuré en vol (EQ2 #05) :
 /// `has overflowed its stack` pendant l'éval du bundle.

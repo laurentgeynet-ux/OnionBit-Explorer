@@ -6552,9 +6552,8 @@ fn frame_document_probe() {
     // dw : `cannot read 'document' of Null` — un hôte rend
     // null où le site lit `.document` (iframe legacy
     // `frames[i].document` / `contentDocument` absent).
-    let (mut e, _jar, _navs) = engine_full(
-        "<html><body><iframe id=f src='http://h/f'></iframe></body></html>",
-    );
+    let (mut e, _jar, _navs) =
+        engine_full("<html><body><iframe id=f src='http://h/f'></iframe></body></html>");
     for src in [
         "document.getElementById('f').contentDocument",
         "document.getElementById('f').document",

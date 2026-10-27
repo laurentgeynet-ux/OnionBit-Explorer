@@ -280,7 +280,26 @@ impl Engine {
                     self.install_class_fields(pid, FLD_FIELDS, this, nt)?;
                 }
                 let args = self.eval_args(env, this, arg_exprs)?;
-                self.call_value_ctor(parent, this, &args, nt)?;
+                let res = self.call_value_ctor(parent, this, &args, nt)?;
+                // `this` pré-alloué (le modèle ne peut pas le
+                // rebind) — un parent *natif* (`Array`, `Map`,
+                // `Error`…) alloue son propre objet au lieu de
+                // l'initialiser (spec `Reflect.construct`). On
+                // échange les corps heap : `this` absorbe l'état
+                // frais — sauf le proto, restauré à
+                // `newTarget.prototype` (ex. `class MA extends
+                // Array` : `new MA(x)` naissait vide →
+                // `MiddlewareArray` sans middleware → Redux #7,
+                // §B-22).
+                if let Value::Obj(rid) = res {
+                    if rid != tid {
+                        let keep_proto = self.heap.obj(tid).map_or(Value::Undefined, |o| o.proto);
+                        self.heap.swap_obj(tid, rid);
+                        if let Some(to) = self.heap.obj_mut(tid) {
+                            to.proto = keep_proto;
+                        }
+                    }
+                }
                 self.set_own(tid, FLD_DONE, Value::Bool(true), false);
                 // Nos champs de classe dérivée : installés juste
                 // après `super()` — le constructeur de *cette*
@@ -1064,10 +1083,21 @@ impl Engine {
             }
             (Value::Obj(_), Value::Num(_) | Value::Str(_) | Value::Big(_)) => {
                 let p = self.to_primitive(l, PrimHint::Default)?;
+                // `to_primitive` ne rend qu'une primitive, ou un
+                // **symbole** (primitive spec restée `Obj` en interne).
+                // Reboucler dessus retombait sur ce même bras à
+                // l'infini : `"x" == Symbol.unscopables` → overflow
+                // natif (B-3, trap `has` d'alpine `mergeProxies`).
+                if p.is_object() {
+                    return Ok(false);
+                }
                 self.loose_eq(p, r)
             }
             (Value::Num(_) | Value::Str(_) | Value::Big(_), Value::Obj(_)) => {
                 let p = self.to_primitive(r, PrimHint::Default)?;
+                if p.is_object() {
+                    return Ok(false);
+                }
                 self.loose_eq(l, p)
             }
             _ => Ok(false),

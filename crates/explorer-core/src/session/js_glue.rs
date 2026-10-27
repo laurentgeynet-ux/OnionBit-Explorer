@@ -376,8 +376,11 @@ impl Session {
         // non essentiels sautent — warn nommé.
         let drain_expired = t0.elapsed() > Duration::from_secs(45);
         if drain_expired {
-            tracing::warn!(tab, elapsed_ms = t0.elapsed().as_millis() as u64,
-                "commit borné — drains finaux sautés (B-41)");
+            tracing::warn!(
+                tab,
+                elapsed_ms = t0.elapsed().as_millis() as u64,
+                "commit borné — drains finaux sautés (B-41)"
+            );
         }
         if jobs > 0 && !drain_expired {
             self.after_script(tab);
@@ -406,8 +409,11 @@ impl Session {
                 if let Some(e) = self.tabs.get_mut(&tab) {
                     e.js_stall_until = Some(Instant::now() + self.js_stall_cooldown);
                 }
-                tracing::warn!(tab, streak = *streak,
-                    "tempête de pompes — disjoncteur armé (B-41)");
+                tracing::warn!(
+                    tab,
+                    streak = *streak,
+                    "tempête de pompes — disjoncteur armé (B-41)"
+                );
             }
         } else {
             self.pump_streaks.insert(tab, 0);

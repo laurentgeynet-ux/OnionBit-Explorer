@@ -1365,7 +1365,11 @@ impl Dom {
                     .iter()
                     .find_map(|a| {
                         let v = get(a);
-                        if v.is_empty() { None } else { Some(v) }
+                        if v.is_empty() {
+                            None
+                        } else {
+                            Some(v)
+                        }
                     })
                     .unwrap_or("")
             } else {

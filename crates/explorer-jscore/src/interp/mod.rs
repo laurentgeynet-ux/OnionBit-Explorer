@@ -22,7 +22,7 @@ use crate::parser;
 use crate::value::{num_to_js_string, to_uint32, ObjId, Value};
 use std::collections::HashSet;
 use std::rc::Rc;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::AtomicBool;
 use std::sync::mpsc::SyncSender;
 use std::sync::Arc;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
@@ -59,22 +59,6 @@ const STACK_TRACE_LIMIT: usize = 10;
 /// (`super.x` / `super()` resolve through these).
 pub(crate) const HOME_BIND: &str = "\u{f120}home";
 
-/// DIAG B-3 — compteurs de famille lus par un thread moniteur de
-/// test pendant la jambe fatale : le compteur qui grimpe sans
-/// plafond nomme le transporteur. Relaxed, ~gratuits.
-pub static DG_TICKS: AtomicU64 = AtomicU64::new(0);
-pub static DG_EXPR: AtomicU64 = AtomicU64::new(0);
-pub static DG_CALLS: AtomicU64 = AtomicU64::new(0);
-pub static DG_CDEPTH: AtomicU64 = AtomicU64::new(0);
-pub static DG_HGET: AtomicU64 = AtomicU64::new(0);
-pub static DG_HINVOKE: AtomicU64 = AtomicU64::new(0);
-pub static DG_HSET: AtomicU64 = AtomicU64::new(0);
-pub static DG_HKEYS: AtomicU64 = AtomicU64::new(0);
-pub static DG_RPROP: AtomicU64 = AtomicU64::new(0);
-pub static DG_NODEVAL: AtomicU64 = AtomicU64::new(0);
-pub static DG_ENVGET: AtomicU64 = AtomicU64::new(0);
-pub static DG_MT: AtomicU64 = AtomicU64::new(0);
-pub static DG_ITER: AtomicU64 = AtomicU64::new(0);
 /// Parent constructor value for `super(...)`.
 pub(crate) const SUPER_BIND: &str = "\u{f120}super";
 /// Liaison cachée `new.target` dans l'env local d'une
@@ -1357,7 +1341,7 @@ impl Engine {
     /// Noms des custom elements définis (`customElements
     /// .define`, JS-C68) sur tous les documents vivants —
     /// top-level + realms garés. La session les pousse dans
-    /// [`explorer_dom::Dom::set_defined_names`] pour que le
+    /// `explorer_dom::Dom::set_defined_names` pour que le
     /// sélecteur `:defined` (selectors-4 §13) matche : c'est
     /// la moitié « registre » du mécanisme lazy-CE github
     /// (`sel:not(:defined){animation:…}` → `animationstart`).
@@ -1695,7 +1679,10 @@ impl Engine {
                 };
                 out.push(crate::dom_host::DynImgReq {
                     seq,
-                    src: lazy("src", &["data-src", "data-lazy-src", "data-original", "data-url"]),
+                    src: lazy(
+                        "src",
+                        &["data-src", "data-lazy-src", "data-original", "data-url"],
+                    ),
                     srcset: lazy("srcset", &["data-srcset"]),
                     sizes: attr("sizes"),
                     crossorigin,
@@ -2676,7 +2663,6 @@ impl Engine {
         let Some(h) = self.host_of(id) else {
             return Ok(Value::Undefined);
         };
-        DG_HINVOKE.fetch_add(1, Ordering::Relaxed);
         Ok(h.invoke(self, this, &name, &args[1..])?
             .unwrap_or(Value::Undefined))
     }
@@ -2943,48 +2929,7 @@ impl Engine {
     /// self-feeding reaction loop dies like an infinite `while`.
     /// La borne mémoire heap (JS-C37, ADR-0019) est relue ici :
     /// l'alloc lève le drapeau, le `tick` transforme en kill doux.
-    /// Sonde J2 : watermark pile native — quand la récursion
-    /// fond sans que `call_depth` compte (mur alpine), la
-    /// backtrace nomme le chemin AVANT le garde-fou noyau.
-    /// `EXPLORER_LOWSTACK=1` arme ; absent/0 = muet. Appelée
-    /// aux entonnoirs (`tick`, `call_value_impl`, `get_prop`).
-    pub(crate) fn lowstack_tick(&self) {
-        thread_local! {
-            static LOWSTACK_ARMED: std::cell::Cell<Option<bool>> = const { std::cell::Cell::new(None) };
-            static LOW_BAND: std::cell::Cell<u64> = const { std::cell::Cell::new(u64::MAX) };
-        }
-        let armed = LOWSTACK_ARMED.with(|c| {
-            c.get().unwrap_or_else(|| {
-                let v = std::env::var("EXPLORER_LOWSTACK").is_ok();
-                c.set(Some(v));
-                v
-            })
-        });
-        if !armed {
-            return;
-        }
-        if let Some(rem) = stacker::remaining_stack() {
-            let band = (rem as u64) / 131_072;
-            let prev = LOW_BAND.with(std::cell::Cell::get);
-            if band < prev {
-                LOW_BAND.with(|c| c.set(band));
-                eprintln!(
-                    "[lowstack] rem={}KiB call_depth={} calls={}",
-                    rem / 1024,
-                    self.call_depth,
-                    self.call_stack.len(),
-                );
-                if rem < 262_144 {
-                    eprintln!("{}", std::backtrace::Backtrace::force_capture());
-                    LOW_BAND.with(|c| c.set(0));
-                }
-            }
-        }
-    }
-
     pub(crate) fn tick(&mut self) -> JsResult<()> {
-        DG_TICKS.fetch_add(1, Ordering::Relaxed);
-        self.lowstack_tick();
         if let Some(d) = self.eval_deadline {
             if Instant::now() >= d {
                 self.deadline_hit = true;
@@ -3067,7 +3012,6 @@ impl Engine {
     /// binding) ; `visited` borne les chaînes cycliques
     /// (`export {a} from 'b'` ↔ `export {b} from 'a'`).
     pub(crate) fn env_get(&mut self, env: &EnvRef, name: &str) -> Option<Value> {
-        DG_ENVGET.fetch_add(1, Ordering::Relaxed);
         self.env_get_seen(env, name, &mut HashSet::new())
     }
 
@@ -3095,11 +3039,7 @@ impl Engine {
             };
             if let Some(oid) = with_oid {
                 // Traps proxy en échec → nom non lié (tolérance).
-                let wh = self.with_has(oid, &name);
-                if std::env::var("DBG_WITH").is_ok() {
-                    eprintln!("[with_has] {name} -> {:?}", wh.as_ref().map(|b| *b));
-                }
-                let bound = wh.unwrap_or(false);
+                let bound = self.with_has(oid, &name).unwrap_or(false);
                 cur = {
                     let b = e.borrow();
                     b.parent.clone()
@@ -3114,7 +3054,6 @@ impl Engine {
                     // `ReferenceError` en chaîne). Erreur de
                     // trap → non lié, même tolérance que `has`.
                     if let Some(h) = self.host_of(oid) {
-                        DG_HGET.fetch_add(1, Ordering::Relaxed);
                         if let Ok(Some(v)) = h.get(self, Value::Obj(oid), &name) {
                             return Some(v);
                         }
@@ -4072,7 +4011,6 @@ impl Engine {
     /// Own-property lookup with array/`length` semantics — returns
     /// the raw `Prop` so accessor pairs are visible to the caller.
     pub(crate) fn find_own(&mut self, id: ObjId, key: &str) -> Option<Prop> {
-        self.lowstack_tick();
         // `arguments` mappé : l'indice renvoie au slot env du
         // paramètre formel (spec `MappedArgumentsObject` [[Get]]).
         if let Some(i) = array_index(key) {
@@ -4386,27 +4324,6 @@ impl Engine {
     /// getter calls it with `this = recv` (differs from `base` only
     /// for `super.x` reads).
     pub(crate) fn read_prop(&mut self, base: Value, recv: Value, key: &str) -> JsResult<Value> {
-        DG_RPROP.fetch_add(1, Ordering::Relaxed);
-        if std::env::var("EXPLORER_LOWSTACK").is_ok() {
-            if let Some(rem) = stacker::remaining_stack() {
-                if rem < 1_450_000 {
-                    thread_local! {
-                        static DONE3: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
-                    }
-                    let n = DONE3.get();
-                    if n < 3 {
-                        DONE3.set(n + 1);
-                        eprintln!(
-                            "[lowbt-rp{n}] rem={}KiB cd={} key={key}",
-                            rem / 1024,
-                            self.call_depth
-                        );
-                        eprintln!("{}", std::backtrace::Backtrace::force_capture());
-                    }
-                }
-            }
-        }
-        self.lowstack_tick();
         let Value::Obj(mut id) = base else {
             return self.get_prop_value(base, key);
         };
@@ -4722,7 +4639,6 @@ impl Engine {
             Value::Obj(id) => {
                 let h = self.host_of(id);
                 if let Some(h) = &h {
-                    DG_HGET.fetch_add(1, Ordering::Relaxed);
                     if let Some(v) = h.get(self, base, key)? {
                         return Ok(v);
                     }
@@ -4800,7 +4716,6 @@ impl Engine {
             }
             Value::Obj(id) => {
                 if let Some(h) = self.host_of(id) {
-                    DG_HSET.fetch_add(1, Ordering::Relaxed);
                     if h.set(self, base, key, v)? {
                         // Réactions CE synchrones (JS-C68) — un
                         // setter host a pu muter le miroir
@@ -5065,7 +4980,6 @@ impl Engine {
             self.deleg_hop(&mut depth)?;
         }
         if let Some(h) = self.host_of(id) {
-            DG_HGET.fetch_add(1, Ordering::Relaxed);
             if h.get(self, Value::Obj(id), key)?.is_some() {
                 return Ok(true);
             }
@@ -5430,7 +5344,6 @@ impl Engine {
         let mut out = Vec::new();
         let mut seen = HashSet::new();
         if let Some(h) = self.host_of(id) {
-            DG_HKEYS.fetch_add(1, Ordering::Relaxed);
             for k in h.keys(self, Value::Obj(id)) {
                 if seen.insert(k.clone()) {
                     out.push(k);
@@ -5651,16 +5564,29 @@ impl Engine {
     }
 
     pub(crate) fn is_callable(&self, v: Value) -> bool {
-        match v {
-            Value::Obj(id) => match self.heap.obj(id).map(|o| &o.kind) {
-                Some(ObjKind::Fun(_)) => true,
-                // Proxy : callable ssi sa cible l'est (révoqué → non).
-                Some(ObjKind::Proxy { target, handler }) => {
-                    handler.is_some() && self.is_callable(*target)
-                }
-                _ => false,
-            },
-            _ => false,
+        // Itératif — `is_callable` récurait sur la cible d'un proxy
+        // chaîné (`Proxy(proxy(f))` ×N) hors toute borne (J2).
+        let mut cur = v;
+        let mut depth = 0u32;
+        loop {
+            cur = match cur {
+                Value::Obj(id) => match self.heap.obj(id).map(|o| &o.kind) {
+                    Some(ObjKind::Fun(_)) => return true,
+                    // Proxy : callable ssi sa cible l'est (révoqué → non).
+                    Some(ObjKind::Proxy { target, handler }) => {
+                        if handler.is_none() {
+                            return false;
+                        }
+                        *target
+                    }
+                    _ => return false,
+                },
+                _ => return false,
+            };
+            depth += 1;
+            if depth > MAX_PROTO_DEPTH {
+                return false;
+            }
         }
     }
 
@@ -5760,25 +5686,6 @@ impl Engine {
     /// classes refusent l'appel sans `new`). `new`/`super()` passent
     /// par [`call_value_ctor`].
     pub(crate) fn call_value(&mut self, f: Value, this: Value, args: &[Value]) -> JsResult<Value> {
-        if std::env::var("EXPLORER_LOWSTACK").is_ok() {
-            if let Some(rem) = stacker::remaining_stack() {
-                if rem < 1_450_000 {
-                    thread_local! {
-                        static DONE2: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
-                    }
-                    let n = DONE2.get();
-                    if n < 3 {
-                        DONE2.set(n + 1);
-                        eprintln!(
-                            "[lowbt-cv{n}] rem={}KiB cd={}",
-                            rem / 1024,
-                            self.call_depth
-                        );
-                        eprintln!("{}", std::backtrace::Backtrace::force_capture());
-                    }
-                }
-            }
-        }
         if let Value::Obj(fid) = f {
             if self.find_own(fid, CLASS_CTOR).is_some() {
                 return Err(self.type_error("class constructor cannot be invoked without `new`"));
@@ -5810,29 +5717,6 @@ impl Engine {
         args: &[Value],
     ) -> JsResult<Value> {
         self.call_depth += 1;
-        DG_CALLS.fetch_add(1, Ordering::Relaxed);
-        DG_CDEPTH.fetch_max(self.call_depth as u64, Ordering::Relaxed);
-        // DIAG B-3 — la jambe fatale part d'un Call : backtrace
-        // Rust dès que le segment courant est entamé (>0,6 Mio
-        // consommés), une seule fois.
-        if std::env::var("EXPLORER_LOWSTACK").is_ok() {
-            if let Some(rem) = stacker::remaining_stack() {
-                if rem < 1_400_000 {
-                    thread_local! {
-                        static DONE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
-                    }
-                    if !DONE.replace(true) {
-                        eprintln!(
-                            "[lowbt] rem={}KiB cd={} frames={}",
-                            rem / 1024,
-                            self.call_depth,
-                            self.call_stack.len()
-                        );
-                        eprintln!("{}", std::backtrace::Backtrace::force_capture());
-                    }
-                }
-            }
-        }
         if self.call_depth > self.call_depth_limit {
             self.call_depth -= 1;
             return Err(self.range_error("maximum call stack exceeded"));
@@ -5853,29 +5737,67 @@ impl Engine {
         args: &[Value],
         nt: Value,
     ) -> JsResult<Value> {
-        self.lowstack_tick();
-        let Value::Obj(id) = f else {
+        let Value::Obj(_) = f else {
             // Le récepteur dans le message — les murs corpus
             // « value is not a function » nomment leur cible
             // (bootstrap/DSFR/figaro : quelle prop manque).
             let d: String = self.describe(f).chars().take(80).collect();
             return Err(self.type_error(format!("value is not a function: {d}")));
         };
-        // Proxy callable : trap `apply` ou délégation à la cible.
-        if let Some((_, target, handler)) = self.proxy_th(id)? {
-            let trap = self.proxy_trap(handler, "apply")?;
-            if matches!(trap, Value::Obj(_)) {
-                let argv = self.new_array(args.to_vec());
-                return self.call_value(trap, handler, &[target, this, argv]);
+        // Délégations `[[Call]]` itératives — proxy sans trap
+        // `apply` délègue à sa cible, `Bound` à sa cible avec
+        // `args = bound ++ args` et `this` du maillon interne
+        // (spec `BoundFunctionExoticObject.[[Call]]`). Avant :
+        // `Proxy(proxy(f))`/`f.bind…` ×N récurait ici hors
+        // `call_depth` → overflow natif (J2/B-3).
+        let mut cur = f;
+        let mut args_owned: Option<Vec<Value>> = None;
+        let mut this = this;
+        let mut depth = 0u32;
+        while let Value::Obj(cid) = cur {
+            if let Some((_, target, handler)) = self.proxy_th(cid)? {
+                let trap = self.proxy_trap(handler, "apply")?;
+                if matches!(trap, Value::Obj(_)) {
+                    let argv = self.new_array(args_owned.clone().unwrap_or_else(|| args.to_vec()));
+                    return self.call_value(trap, handler, &[target, this, argv]);
+                }
+                cur = target;
+                self.deleg_hop(&mut depth)?;
+                continue;
             }
-            return self.call_value(target, this, args);
+            let bound_parts = match self.heap.obj(cid).map(|o| &o.kind) {
+                Some(ObjKind::Fun(Fun::Bound {
+                    target,
+                    this: bound_this,
+                    bound,
+                })) => Some((*target, *bound_this, bound.clone())),
+                _ => None,
+            };
+            let Some((target, bound_this, bound)) = bound_parts else {
+                break;
+            };
+            let mut a =
+                Vec::with_capacity(bound.len() + args_owned.as_ref().map_or(args.len(), Vec::len));
+            a.extend_from_slice(&bound);
+            match &mut args_owned {
+                Some(v) => a.append(v),
+                None => a.extend_from_slice(args),
+            }
+            args_owned = Some(a);
+            this = bound_this;
+            cur = target;
+            self.deleg_hop(&mut depth)?;
         }
-        let fun = match self.heap.obj(id) {
+        let args_ref: &[Value] = args_owned.as_deref().unwrap_or(args);
+        let fun = match self.heap.obj(match cur {
+            Value::Obj(i) => i,
+            _ => return Err(self.type_error("value is not a function")),
+        }) {
             Some(o) => {
                 if let ObjKind::Fun(fu) = &o.kind {
                     fu.clone()
                 } else {
-                    let d: String = self.describe(f).chars().take(80).collect();
+                    let d: String = self.describe(cur).chars().take(80).collect();
                     return Err(self.type_error(format!("object is not a function: {d}")));
                 }
             }
@@ -5884,24 +5806,19 @@ impl Engine {
         match fun {
             Fun::Native { name, f } => {
                 self.nat_trace_tick(name);
-                self.call_native_ctx(f, this, args)
+                self.call_native_ctx(f, this, args_ref)
             }
             Fun::BoundNative { name, f, bound } => {
                 self.nat_trace_tick(name);
-                let mut a = Vec::with_capacity(bound.len() + args.len());
+                let mut a = Vec::with_capacity(bound.len() + args_ref.len());
                 a.extend_from_slice(&bound);
-                a.extend_from_slice(args);
+                a.extend_from_slice(args_ref);
                 self.call_native_ctx(f, this, &a)
             }
-            Fun::Bound {
-                target,
-                this: bound_this,
-                bound,
-            } => {
-                let mut a = Vec::with_capacity(bound.len() + args.len());
-                a.extend_from_slice(&bound);
-                a.extend_from_slice(args);
-                self.call_value(target, bound_this, &a)
+            Fun::Bound { .. } => {
+                // Déroulé par la boucle ci-dessus — repli
+                // défensif, jamais atteint.
+                Err(self.type_error("bound function dispatch failed"))
             }
             Fun::Script { lit, env, lex_this } => {
                 // JS-C78 : l'appel s'exécute dans le realm de la
@@ -5915,7 +5832,7 @@ impl Engine {
                 if let Some(t) = self.ctx_of_env(&env) {
                     self.switch_to(t);
                 }
-                let r = self.call_script_body(f, &lit, env, lex_this, this, args, nt);
+                let r = self.call_script_body(cur, &lit, env, lex_this, this, args_ref, nt);
                 if self.cur_ctx != prev {
                     self.switch_to(prev);
                 }
@@ -5974,8 +5891,6 @@ impl Engine {
         nt: Value,
     ) -> JsResult<Value> {
         self.call_depth += 1;
-        DG_CALLS.fetch_add(1, Ordering::Relaxed);
-        DG_CDEPTH.fetch_max(self.call_depth as u64, Ordering::Relaxed);
         // JS-C41 : borne logique d'appels — la pile elle-
         // même est protégée par `maybe_grow` au corps.
         if self.call_depth > self.call_depth_limit {

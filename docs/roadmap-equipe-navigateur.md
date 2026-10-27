@@ -7223,6 +7223,43 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   pour les récursions callbacks.
   Sondes `depth_probe` ×20k : 47/47.
 
+- [x] **JS-C167. B-3 tué — tueur
+  réel nommé : `loose_eq`↔
+  `to_primitive` ping-pong `Symbol`**
+  (`explorer-jscore`, J2) — crash
+  `STATUS_STACK_OVERFLOW` à l'exec
+  alpinejs dès `x-data` (b10/b11) :
+  `evaluate` → `AsyncFunction` +
+  `with(mergeProxies)` → trap `has`
+  `k == Symbol.unscopables` → bras
+  `(Str, Obj)` de `loose_eq` →
+  `to_primitive` rend le symbole
+  (primitive spec restée `Obj`
+  interne) → reboucle identique à
+  l'infini, jambe native pure hors
+  toute borne (zéro prop/env/call/
+  tick — invisible aux compteurs).
+  `Obj` survivant `to_primitive` →
+  `false` (symbole ≠ primitive
+  loose). Connexes : `env_get`
+  `with` via `read_prop`+`h.get`
+  (était `get_prop` brut —
+  `ReferenceError` sur `with(proxy)`
+  fonctionnel) ; `is_callable`
+  itératif ; `[[Call]]` unifié
+  itératif proxy+`Bound` sous
+  `deleg_hop` (chaîne callable ×5000
+  → `RangeError`) ; `super()` vers
+  natif absorbe le retour dans
+  `this` (`swap_obj` — fix
+  `MiddlewareArray` `len=0`, §B-22
+  thunk atteint dispatch intercepté
+  en-process). `stack_guard`
+  rem-based retiré (faux positifs
+  frontière segment `stacker` —
+  tirait sur RTK `call_depth=10`).
+  Sondes `alpine_bisect` 28/28.
+
 - [x] **JS-C133. `initCustomEvent`
   (DOM L2, strate polymer/shady)**
   (`explorer-jscore`) — `createEvent`

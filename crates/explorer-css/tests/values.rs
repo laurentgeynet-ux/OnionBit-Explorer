@@ -402,14 +402,23 @@ fn expand_place_shorthands() {
     let g = |n, v| expand_shorthand(n, v).unwrap();
     assert_eq!(
         g("place-items", "center"),
-        vec![("align-items".into(), "center".into()), ("justify-items".into(), "center".into())]
+        vec![
+            ("align-items".into(), "center".into()),
+            ("justify-items".into(), "center".into())
+        ]
     );
     assert_eq!(
         g("place-self", "end start"),
-        vec![("align-self".into(), "end".into()), ("justify-self".into(), "start".into())]
+        vec![
+            ("align-self".into(), "end".into()),
+            ("justify-self".into(), "start".into())
+        ]
     );
     assert_eq!(
         g("place-content", "space-between"),
-        vec![("align-content".into(), "space-between".into()), ("justify-content".into(), "space-between".into())]
+        vec![
+            ("align-content".into(), "space-between".into()),
+            ("justify-content".into(), "space-between".into())
+        ]
     );
 }

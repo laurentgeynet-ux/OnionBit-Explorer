@@ -188,6 +188,25 @@ impl Heap {
         self.cells.get(id as usize).is_some_and(Option::is_some)
     }
 
+    /// Échange le contenu de deux cellules-objet — `super()` sur
+    /// un parent *natif* alloue son propre objet (spec
+    /// `Reflect.construct`) : le `this` pré-alloué du modèle
+    /// absorbe l'état frais par swap, l'identité `ObjId` reste.
+    pub(crate) fn swap_obj(&mut self, a: ObjId, b: ObjId) {
+        if a == b {
+            return;
+        }
+        let (Some(Some(a_cell)), Some(Some(b_cell))) =
+            (self.cells.get(a as usize), self.cells.get(b as usize))
+        else {
+            return;
+        };
+        if !matches!(a_cell.data, CellData::Obj(_)) || !matches!(b_cell.data, CellData::Obj(_)) {
+            return;
+        }
+        self.cells.swap(a as usize, b as usize);
+    }
+
     /// Nombre de cellules vivantes (objets + chaînes).
     pub fn live_count(&self) -> usize {
         self.cells.len() - self.free.len()
