@@ -757,3 +757,215 @@ fn b29_async_function_ctor() {
         Err(x) => panic!("gen ctor err {x}"),
     }
 }
+
+/// b30 — résidu vol : scopes `x-for`/imbriqués. Charge le bundle
+/// réel sur un DOM avec `x-data` + `x-for` + prop imbriquée, puis
+/// vérifie que les expressions résolvent (pas de `ReferenceError`).
+#[test]
+fn b30_xfor_scope_render() {
+    let Ok(src) = std::fs::read_to_string("../../docs/Rapport vol/logs/scratch/alpine.js")
+        .or_else(|_| std::fs::read_to_string("docs/Rapport vol/logs/scratch/alpine.js"))
+    else {
+        eprintln!("[b30] bundle absent — skip");
+        return;
+    };
+    let mut e = Engine::new();
+    e.install_dom(&Rc::new(RefCell::new(Dom::from_html(
+        r##"<html><body>
+          <div x-data="{items:[10,20]}"><template x-for="i in items"><span x-text="i"></span></template></div>
+          <div x-data="{step:1}"><p x-text="step"></p><div x-data="{own:2}"><b x-text="step"></b></div></div>
+        </body></html>"##,
+    ))));
+    if let Err(x) = e.eval(&src) {
+        eprintln!("[b30] bundle err {x}");
+    }
+    // Draine microtasks + timers (initTree est async-schedulé).
+    let _ = e.eval("void 0");
+    match e.eval(
+        "(function(){var s=[]; var spans=document.querySelectorAll('span');
+          for(var i=0;i<spans.length;i++)s.push(spans[i].textContent);
+          var b=document.querySelector('b'); s.push(b?b.textContent:'no-b');
+          return s.join(',')})()",
+    ) {
+        Ok(v) => eprintln!("[b30] rendu spans+b = {}", e.describe(v)),
+        Err(x) => eprintln!("[b30] query err {x}"),
+    }
+    match e.eval(
+        "(function(){var errs=[]; var els=document.querySelectorAll('[x-data]');
+          for(var i=0;i<els.length;i++){ try { Alpine.evaluate(els[i],'1+1'); } catch(x){ errs.push(''+x); } }
+          return errs.join(';')||'ok'})()",
+    ) {
+        Ok(v) => eprintln!("[b30] evaluate direct = {}", e.describe(v)),
+        Err(x) => eprintln!("[b30] evaluate err {x}"),
+    }
+}
+
+/// b31 — dump DOM post-init : où en est `x-for` (clones produits ?
+/// `template.content` ? directive ignorée ?).
+#[test]
+fn b31_xfor_dom_dump() {
+    let Ok(src) = std::fs::read_to_string("../../docs/Rapport vol/logs/scratch/alpine.js")
+        .or_else(|_| std::fs::read_to_string("docs/Rapport vol/logs/scratch/alpine.js"))
+    else {
+        eprintln!("[b31] bundle absent — skip");
+        return;
+    };
+    let mut e = Engine::new();
+    e.install_dom(&Rc::new(RefCell::new(Dom::from_html(
+        r##"<html><body>
+          <div id=a x-data="{items:[10,20]}"><template x-for="i in items"><span x-text="i"></span></template></div>
+          <div id=b x-data="{step:1}"><p x-text="step"></p></div>
+        </body></html>"##,
+    ))));
+    let _ = e.eval(&src);
+    let _ = e.eval("void 0");
+    for probe in [
+        "document.getElementById('a').innerHTML",
+        "document.getElementById('b').innerHTML",
+        "typeof document.querySelector('template').content",
+        "document.querySelectorAll('span').length",
+    ] {
+        match e.eval(probe) {
+            Ok(v) => eprintln!("[b31] {probe} => {}", e.describe(v)),
+            Err(x) => eprintln!("[b31] {probe} => err {x}"),
+        }
+    }
+}
+
+/// b32 — `i` du clone x-for vaut 1 : itération scope ratée ou
+/// `i` lu dans un global fuité ?
+#[test]
+fn b32_xfor_scope_probe() {
+    let Ok(src) = std::fs::read_to_string("../../docs/Rapport vol/logs/scratch/alpine.js")
+        .or_else(|_| std::fs::read_to_string("docs/Rapport vol/logs/scratch/alpine.js"))
+    else {
+        eprintln!("[b32] bundle absent — skip");
+        return;
+    };
+    let mut e = Engine::new();
+    e.install_dom(&Rc::new(RefCell::new(Dom::from_html(
+        r##"<html><body>
+          <div id=a x-data="{items:[10,20]}"><template x-for="i in items"><span x-text="i"></span></template></div>
+        </body></html>"##,
+    ))));
+    let _ = e.eval(&src);
+    let _ = e.eval("void 0");
+    for probe in [
+        "Alpine.evaluate(document.getElementById('a'),'items')",
+        "Alpine.evaluate(document.getElementById('a'),'typeof items')",
+        "Alpine.evaluate(document.getElementById('a'),'i')",
+        "typeof window.i",
+        "Alpine.evaluate(document.querySelector('span'),'i')",
+        "Alpine.evaluate(document.querySelector('span'),'typeof i')",
+        "document.querySelector('template').content===document.querySelector('template').content",
+        "typeof document.querySelector('template').content.querySelectorAll",
+    ] {
+        match e.eval(probe) {
+            Ok(v) => eprintln!("[b32] {probe} => {}", e.describe(v)),
+            Err(x) => eprintln!("[b32] {probe} => err {x}"),
+        }
+    }
+}
+
+/// b33 — `items` évalué = objet (array [10,20]?) mais une seule
+/// itération i=1 : `items.length`/index lecture dans la pile x-data.
+#[test]
+fn b33_xfor_items_probe() {
+    let Ok(src) = std::fs::read_to_string("../../docs/Rapport vol/logs/scratch/alpine.js")
+        .or_else(|_| std::fs::read_to_string("docs/Rapport vol/logs/scratch/alpine.js"))
+    else {
+        eprintln!("[b33] bundle absent — skip");
+        return;
+    };
+    let mut e = Engine::new();
+    e.install_dom(&Rc::new(RefCell::new(Dom::from_html(
+        r##"<html><body>
+          <div id=a x-data="{items:[10,20,30]}"><template x-for="i in items"><span x-text="i"></span></template></div>
+        </body></html>"##,
+    ))));
+    let _ = e.eval(&src);
+    let _ = e.eval("void 0");
+    for probe in [
+        "Alpine.evaluate(document.getElementById('a'),'items.length')",
+        "Alpine.evaluate(document.getElementById('a'),'items[0]')",
+        "Alpine.evaluate(document.getElementById('a'),'items[1]')",
+        "Alpine.evaluate(document.getElementById('a'),'Array.isArray(items)')",
+        "Alpine.evaluate(document.getElementById('a'),'items.constructor.name')",
+        "document.querySelectorAll('#a > span').length",
+        "(function(){var s='';var sp=document.querySelectorAll('span');for(var j=0;j<sp.length;j++)s+='['+sp[j].textContent+']';return s})()",
+        "document.getElementById('a')._x_dataStack?document.getElementById('a')._x_dataStack.length:'nostack'",
+    ] {
+        match e.eval(probe) {
+            Ok(v) => eprintln!("[b33] {probe} => {}", e.describe(v)),
+            Err(x) => eprintln!("[b33] {probe} => err {x}"),
+        }
+    }
+}
+
+/// b34 — motif réel alpinejs.dev : `x-for="([number,name],key) in
+/// steps"` sur **objet** + clones lisant `currentStep` du scope
+/// parent (`:class`, `@click`, `x-init` `$watch`).
+#[test]
+fn b34_xfor_object_key_parent_scope() {
+    let Ok(src) = std::fs::read_to_string("../../docs/Rapport vol/logs/scratch/alpine.js")
+        .or_else(|_| std::fs::read_to_string("docs/Rapport vol/logs/scratch/alpine.js"))
+    else {
+        eprintln!("[b34] bundle absent — skip");
+        return;
+    };
+    let mut e = Engine::new();
+    e.install_dom(&Rc::new(RefCell::new(Dom::from_html(
+        r##"<html><body><div id=r x-data="{currentStep:'a', steps:{a:[15,'A'],b:[6,'B']}}">
+          <template x-for="([number,name],key) in steps">
+            <button :class="currentStep===key && 'on'" @click="currentStep=key"><b x-text="number"></b><i x-text="name"></i></button>
+          </template>
+        </div></body></html>"##,
+    ))));
+    if let Err(x) = e.eval(&src) {
+        eprintln!("[b34] bundle err {x}");
+    }
+    let _ = e.eval("void 0");
+    for probe in [
+        "document.querySelectorAll('button').length",
+        "(function(){var b=document.querySelectorAll('button'),s='';for(var i=0;i<b.length;i++)s+='['+b[i].className+'|'+b[i].textContent+']';return s})()",
+    ] {
+        match e.eval(probe) {
+            Ok(v) => eprintln!("[b34] {probe} => {}", e.describe(v)),
+            Err(x) => eprintln!("[b34] {probe} => err {x}"),
+        }
+    }
+}
+
+/// b35 — clic sur clone : `currentStep=key` en scope item →
+/// délégation parent + `$watch` qui lit `steps`/`direction`.
+#[test]
+fn b35_xfor_click_watch() {
+    let Ok(src) = std::fs::read_to_string("../../docs/Rapport vol/logs/scratch/alpine.js")
+        .or_else(|_| std::fs::read_to_string("docs/Rapport vol/logs/scratch/alpine.js"))
+    else {
+        eprintln!("[b35] bundle absent — skip");
+        return;
+    };
+    let mut e = Engine::new();
+    e.install_dom(&Rc::new(RefCell::new(Dom::from_html(
+        r##"<html><body><div id=r x-data="{currentStep:'a', direction:'right',
+             steps:{a:[15,'A'],b:[6,'B']}}"
+             x-init="$watch('currentStep',(v,o)=>{var k=Object.keys(steps);direction=k.indexOf(v)>k.indexOf(o)?'right':'left'})">
+          <template x-for="([number,name],key) in steps">
+            <button :class="currentStep===key && 'on'" @click="currentStep=key"><b x-text="number"></b></button>
+          </template>
+        </div></body></html>"##,
+    ))));
+    let _ = e.eval(&src);
+    let _ = e.eval("void 0");
+    for probe in [
+        "document.querySelectorAll('button')[1].click(); 'clicked'",
+        "Alpine.evaluate(document.getElementById('r'),'currentStep')",
+        "Alpine.evaluate(document.getElementById('r'),'direction')",
+    ] {
+        match e.eval(probe) {
+            Ok(v) => eprintln!("[b35] {probe} => {}", e.describe(v)),
+            Err(x) => eprintln!("[b35] {probe} => err {x}"),
+        }
+    }
+}

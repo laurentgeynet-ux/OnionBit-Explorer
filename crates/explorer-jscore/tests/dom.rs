@@ -264,9 +264,11 @@ fn html_element_interfaces_detectable() {
 #[test]
 fn navigator_is_fixed_and_poor() {
     assert_eq!(ev("navigator.userAgent"), "Explorer/0.1 (explorer-jscore)");
-    // Deliberately absent: plugins, geolocation, hardware APIs…
+    // Deliberately absent: plugins et APIs matérielles ;
+    // `geolocation` existe depuis B-14 (stub honnête
+    // `POSITION_UNAVAILABLE`, jamais de succès fabriqué).
     assert_eq!(ev("navigator.plugins === undefined"), "true");
-    assert_eq!(ev("navigator.geolocation === undefined"), "true");
+    assert_eq!(ev("typeof navigator.geolocation"), "object");
 }
 
 #[test]

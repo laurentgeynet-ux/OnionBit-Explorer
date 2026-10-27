@@ -7223,6 +7223,21 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   pour les récursions callbacks.
   Sondes `depth_probe` ×20k : 47/47.
 
+- [x] **JS-C169. `Array.isArray`
+  déballe les proxies — `x-for`
+  alpine fonctionne**
+  (`explorer-jscore`) — `x-data`
+  `reactive()` = `Proxy(array)` :
+  `isArray` false → `x-for` un seul
+  clone `i`=index. Spec `IsArray` :
+  proxy → `IsArray(target)`,
+  révoqué → `TypeError`, chaîne
+  `deleg_hop`. Mesuré : `x-for` 3
+  clones, motif objet `([n,name],key)
+  in steps` + `:class`/`@click`
+  déléguant au scope parent verts.
+  Sondes b30–b35.
+
 - [x] **JS-C168. `%AsyncFunction%`
   caché — `new AsyncFunction` rend
   une promesse** (`explorer-jscore`)

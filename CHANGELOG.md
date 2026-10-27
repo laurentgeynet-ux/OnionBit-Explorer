@@ -7,6 +7,28 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **JS-C169 — `Array.isArray` déballe
+  les proxies — `x-for` alpine
+  fonctionne** (`explorer-jscore`) —
+  résidu vol alpinejs.dev : `x-data`
+  wrappé `reactive()` → `items` =
+  `Proxy(array)` → `isArray` false →
+  `x-for` itérait un seul clone avec
+  `i`=index. Spec `IsArray` : proxy →
+  `IsArray(target)` (révoqué →
+  `TypeError`), chaîne bornée
+  `deleg_hop`. Mesuré in-process :
+  `x-for="i in items"` rend les 3
+  clones `[10][20][30]` ; motif
+  réel `([n,name],key) in steps`
+  (objet + destructuring + key) rend
+  ses boutons avec `:class` liant le
+  scope parent et `@click` déléguant
+  `currentStep` au `x-data` parent.
+  Sondes b30–b35. Résidu honnête :
+  `number`/`currentStep` ×1 en vol
+  (passe avant attachement du scope).
+
 - **JS-C168 — `%AsyncFunction%` caché :
   `new AsyncFunction` rend une
   promesse** (`explorer-jscore`) —

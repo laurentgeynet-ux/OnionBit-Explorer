@@ -504,10 +504,29 @@ pub(crate) fn decode_uri(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<
 
 // -- Array extras ------------------------------------------------------
 
-/// `Array.isArray(v)`.
+/// `Array.isArray(v)` — spec `IsArray` : un **proxy** se déballe
+/// (`IsArray(target)`), révoqué → `TypeError`. Alpine `reactive()`
+/// wrappe les tableaux `x-data` : sans le déballage `x-for` ne
+/// voit pas de tableau (un seul clone, item = index, vol).
 pub(crate) fn array_is_array(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
-    Ok(Value::Bool(matches!(arg(args, 0), Value::Obj(id)
-        if matches!(e.heap.obj(id).map(|o| &o.kind), Some(ObjKind::Array(_))))))
+    let mut cur = arg(args, 0);
+    let mut depth = 0u32;
+    loop {
+        let Value::Obj(id) = cur else {
+            return Ok(Value::Bool(false));
+        };
+        match e.heap.obj(id).map(|o| &o.kind) {
+            Some(ObjKind::Array(_)) => return Ok(Value::Bool(true)),
+            Some(ObjKind::Proxy { target, handler }) => {
+                if handler.is_none() {
+                    return Err(e.type_error("cannot perform operation on a revoked proxy"));
+                }
+                cur = *target;
+                e.deleg_hop(&mut depth)?;
+            }
+            _ => return Ok(Value::Bool(false)),
+        }
+    }
 }
 
 /// `Array.from(iterable|arrayLike)` — iterator protocol, then a
