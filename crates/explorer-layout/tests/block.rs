@@ -2160,3 +2160,60 @@ fn overflow_wrap_break_word_coupe() {
     let total: usize = d.lines.len() + d.children.iter().map(|c| c.lines.len()).sum::<usize>();
     assert!(total >= 2, "mot long non coupé — {total} ligne(s)");
 }
+
+#[test]
+fn height_pct_chain_html_body_map() {
+    // B-28 (uMap/Leaflet vol50) : `html`/`body`/`#map` à
+    // `height:100%` — la chaîne doit donner la hauteur
+    // du viewport à chaque étape, pas 0.
+    let dom = TreeBuilder::parse("<body><div id=map></div></body>");
+    let mut e = StyleEngine::new();
+    e.add_css(
+        "html,body{height:100%;margin:0} #map{height:100%}",
+        Origin::Author,
+    );
+    let styles = e.compute_tree(&dom, dom.document(), &StyleEnv::default());
+    let root_el = dom
+        .children(dom.document())
+        .into_iter()
+        .flatten()
+        .find(|&c| dom.element(c).is_ok())
+        .unwrap();
+    let mut bx = build_box_tree(&dom, root_el, &styles).unwrap();
+    layout_tree(&mut bx, VIEW, &BlockCtx::default());
+    let map = find(&bx, by_id(&dom, "map"));
+    assert!(
+        (map.rect.height - 600.0).abs() < 1.0,
+        "#map height:100% → ~600px viewport, obtenu {}",
+        map.rect.height
+    );
+}
+
+#[test]
+fn height_pct_chain_absolute_map() {
+    // B-28 variant : mount Leaflet `#map{position:absolute;
+    // top:0;bottom:0}` dans `body{position:relative}` —
+    // la chaîne % doit donner le viewport au stretch abspos.
+    let dom = TreeBuilder::parse("<body><div id=map></div></body>");
+    let mut e = StyleEngine::new();
+    e.add_css(
+        "html,body{height:100%;margin:0} body{position:relative}\
+         #map{position:absolute;top:0;left:0;right:0;bottom:0}",
+        Origin::Author,
+    );
+    let styles = e.compute_tree(&dom, dom.document(), &StyleEnv::default());
+    let root_el = dom
+        .children(dom.document())
+        .into_iter()
+        .flatten()
+        .find(|&c| dom.element(c).is_ok())
+        .unwrap();
+    let mut bx = build_box_tree(&dom, root_el, &styles).unwrap();
+    layout_tree(&mut bx, VIEW, &BlockCtx::default());
+    let map = find(&bx, by_id(&dom, "map"));
+    assert!(
+        (map.rect.height - 600.0).abs() < 1.0,
+        "#map abspos stretch → ~600px, obtenu {}",
+        map.rect.height
+    );
+}
