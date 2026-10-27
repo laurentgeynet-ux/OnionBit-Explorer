@@ -2091,6 +2091,17 @@ impl Engine {
                     // `.call(el)` (utils/polyfills de
                     // géométrie — même motif).
                     ("getBoundingClientRect", element_gbrect),
+                    // Sélecteurs en natives `Element.prototype`
+                    // (JS-C162) — Bootstrap SelectorEngine fait
+                    // `Element.prototype.querySelectorAll.call(
+                    // el, sel)` ; la référence absente rendait
+                    // `cannot read 'call' of Undefined` à
+                    // chaque handler `load` (mesuré OSM +
+                    // ameli, vols 27/29).
+                    ("querySelector", element_query_selector),
+                    ("querySelectorAll", element_query_selector_all),
+                    ("getElementsByTagName", element_get_by_tag),
+                    ("getElementsByClassName", element_get_by_class),
                 ] {
                     let m = self.native_fn(k, f2);
                     self.set_own(pid, k, m, true);
@@ -9355,6 +9366,57 @@ fn element_closest(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Valu
         Some(n) => node_value(e, &dom, &cache, n),
         None => Value::Null,
     })
+}
+
+/// `el.querySelector(sel)`/`querySelectorAll` en natives
+/// `Element.prototype` (JS-C162) — Bootstrap fait
+/// `Element.prototype.querySelectorAll.call(el, s)`
+/// (SelectorEngine `find`, mesuré OSM/ameli). Receveur
+/// non-Element → `TypeError` (spec).
+fn element_query_selector(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let sel = e.to_js_string(arg(args, 0))?;
+    let Some((node, dom, cache)) = element_receiver(e, this) else {
+        return Err(e.type_error("querySelector: receiver is not an Element"));
+    };
+    let ids = dom.borrow().query(node, &sel);
+    Ok(match ids.first() {
+        Some(&n) => node_value(e, &dom, &cache, n),
+        None => Value::Null,
+    })
+}
+
+/// `el.querySelectorAll(sel)` — même motif que
+/// [`element_query_selector`] ; collection snapshot.
+fn element_query_selector_all(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let sel = e.to_js_string(arg(args, 0))?;
+    let Some((node, dom, cache)) = element_receiver(e, this) else {
+        return Err(e.type_error("querySelectorAll: receiver is not an Element"));
+    };
+    let ids = dom.borrow().query(node, &sel);
+    Ok(dom_collection(e, &dom, &cache, &ids, false))
+}
+
+/// `el.getElementsByTagName(tag)` en native
+/// `Element.prototype` (JS-C162) — collection snapshot
+/// (vivacité non implémentée, dégradation honnête).
+fn element_get_by_tag(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let tag = e.to_js_string(arg(args, 0))?;
+    let Some((node, dom, cache)) = element_receiver(e, this) else {
+        return Err(e.type_error("getElementsByTagName: receiver is not an Element"));
+    };
+    let ids = dom.borrow().by_tag(node, &tag);
+    Ok(dom_collection(e, &dom, &cache, &ids, false))
+}
+
+/// `el.getElementsByClassName(cls)` en native
+/// `Element.prototype` (JS-C162) — même motif.
+fn element_get_by_class(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let cls = e.to_js_string(arg(args, 0))?;
+    let Some((node, dom, cache)) = element_receiver(e, this) else {
+        return Err(e.type_error("getElementsByClassName: receiver is not an Element"));
+    };
+    let ids = dom.borrow().by_class(node, &cls);
+    Ok(dom_collection(e, &dom, &cache, &ids, false))
 }
 
 /// `el.scrollIntoView(arg?)` — no-op honnête (JS-C74) : le

@@ -7,6 +7,28 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **JS-C160 — AES-GCM bout-en-bout**
+  (`explorer-jscore`,
+  `explorer-net`, `explorer-core`) —
+  `subtle.importKey` rejetait
+  `unknown algorithm` et
+  `subtle.decrypt` manquait
+  (marinetraffic : `Failed to
+  decrypt` ×N). `KeyAlgo::AesGcm`
+  + normalisation `{name:"AES-GCM",
+  length}` (raw 128/256, `secret`),
+  `CryptoOp::Encrypt`/`Decrypt`
+  portant `iv`/`aad` copiés
+  (`tagLength` ≠128 →
+  `NotSupportedError` honnête),
+  `subtle.encrypt`/`decrypt` avec
+  garde `InvalidAccessError` spec,
+  dispatch session →
+  `ring::aead::{AES_128_GCM,
+  AES_256_GCM}` (`seal`/`open`,
+  nonce 96 bits). Test
+  `c160_aes_gcm_op_dispatch`.
+
 - **JS-C159 — surface ShadowRoot/
   sockets visible** (`explorer-jscore`)
   — `ShadowRoot.getElementById`

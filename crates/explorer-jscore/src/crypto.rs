@@ -80,6 +80,27 @@ pub enum CryptoOp {
         /// Signature à vérifier (copiée hors heap).
         sig: Vec<u8>,
     },
+    /// `crypto.subtle.encrypt({name:"AES-GCM",iv,additionalData?,
+    /// tagLength?}, key, data)` — clair dans `data`, résultat
+    /// `chiffré ‖ tag` (128 bits à cette tranche — ring).
+    Encrypt {
+        /// Algorithme normalisé (AES-GCM uniquement ici).
+        algo: KeyAlgo,
+        /// Nonce 96 bits copié hors heap.
+        iv: Vec<u8>,
+        /// AAD optionnelle (`additionalData`).
+        aad: Vec<u8>,
+    },
+    /// `crypto.subtle.decrypt(…)` — mêmes paramètres ; `data`
+    /// = `chiffré ‖ tag`, le résultat est le clair.
+    Decrypt {
+        /// Algorithme normalisé.
+        algo: KeyAlgo,
+        /// Nonce copié.
+        iv: Vec<u8>,
+        /// AAD copiée.
+        aad: Vec<u8>,
+    },
 }
 
 /// Algorithme à clé normalisé (JS-C93) — couvert par `ring`
@@ -96,6 +117,9 @@ pub enum KeyAlgo {
     EcdsaP256,
     /// `Ed25519`.
     Ed25519,
+    /// `AES-GCM` — `{name:"AES-GCM", length}` ; seal/open
+    /// `ring::aead` côté plateforme (JS-C160, marinetraffic).
+    AesGcm,
 }
 
 /// Format d'`importKey` (JS-C93) — `jwk` n'entre pas dans
@@ -356,6 +380,19 @@ fn key_algo(e: &mut Engine, v: Value) -> JsResult<Option<(KeyAlgo, &'static str)
             curve_ok.then_some((KeyAlgo::EcdsaP256, "ECDSA"))
         }
         "ED25519" | "NODEED25519" => Some((KeyAlgo::Ed25519, "Ed25519")),
+        // `AES-GCM` — `length` accepté 128/256 (la plateforme
+        // sélectionne par taille de clé, `ring::aead`).
+        "AESGCM" => {
+            let len_ok = if let Value::Obj(id) = v {
+                match e.get_prop(id, "length") {
+                    Some(Value::Num(n)) => (128.0..=256.0).contains(&n) && n % 8.0 == 0.0,
+                    _ => true, // absent = toute taille acceptée par la plateforme
+                }
+            } else {
+                true
+            };
+            len_ok.then_some((KeyAlgo::AesGcm, "AES-GCM"))
+        }
         _ => None,
     })
 }
@@ -483,7 +520,7 @@ fn subtle_import_key(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Valu
         Some((algo, algo_name)) => {
             let key_type: &'static str = match format {
                 ImportFormat::Raw => {
-                    if matches!(algo, KeyAlgo::Hmac { .. }) {
+                    if matches!(algo, KeyAlgo::Hmac { .. } | KeyAlgo::AesGcm) {
                         "secret"
                     } else {
                         "public"
@@ -733,6 +770,115 @@ impl Engine {
     }
 }
 
+/// Params AEAD `{name,iv,additionalData?}` — `iv`/`aad`
+/// copiés hors heap ; `tagLength` accepté 128 ou absent
+/// (ring scelle toujours 16 octets — autre taille = rejet
+/// `NotSupportedError` honnête, jamais tronqué).
+fn aead_params(e: &mut Engine, algo_v: Value) -> JsResult<Option<(Vec<u8>, Vec<u8>)>> {
+    let Value::Obj(id) = algo_v else {
+        return Ok(None);
+    };
+    let iv_v = e.get_prop(id, "iv").unwrap_or(Value::Undefined);
+    let Some(iv) = crate::typed_array::bytes_of_value(e, iv_v) else {
+        return Ok(None);
+    };
+    if let Some(Value::Num(tl)) = e.get_prop(id, "tagLength") {
+        if tl != 128.0 {
+            let err = dom_exc(
+                e,
+                "NotSupportedError",
+                "subtle: AES-GCM tagLength != 128 unsupported",
+            );
+            return Err(crate::heap::Thrown(err));
+        }
+    }
+    let aad_v = e.get_prop(id, "additionalData").unwrap_or(Value::Undefined);
+    let aad = crate::typed_array::bytes_of_value(e, aad_v).unwrap_or_default();
+    Ok(Some((iv, aad)))
+}
+
+/// `crypto.subtle.encrypt`/`decrypt` AES-GCM (JS-C160) —
+/// clé `secret` `AES-GCM` portant l'usage demandé ; sinon
+/// `InvalidAccessError` async (spec). `data` → `chiffré‖tag`
+/// ou l'inverse ; algo autre → `NotSupportedError`.
+fn subtle_aead(
+    e: &mut Engine,
+    args: &[Value],
+    usage: &str,
+    op_kind: fn(KeyAlgo, Vec<u8>, Vec<u8>) -> CryptoOp,
+) -> JsResult<Value> {
+    let algo_v = arg(args, 0);
+    let key_v = arg(args, 1);
+    let Some(data) = crate::typed_array::bytes_of_value(e, arg(args, 2)) else {
+        return Err(e.type_error("subtle: data must be a BufferSource"));
+    };
+    let pid = e.new_promise();
+    // `algorithm` doit être un objet `AES-GCM` — la clé
+    // confirme `name` et porte l'usage.
+    let name_ok = algo_name_of(e, algo_v)?
+        .is_some_and(|n| n.to_ascii_uppercase().replace('-', "") == "AESGCM");
+    let Some((key_bytes, key_type, _an, key_algo, usages, _)) = crypto_key_of(e, key_v) else {
+        let err = dom_exc(e, "InvalidAccessError", "subtle: not a CryptoKey");
+        e.reject_promise(pid, err);
+        return Ok(Value::Obj(pid));
+    };
+    if !(name_ok
+        && matches!(key_algo, KeyAlgo::AesGcm)
+        && key_type == "secret"
+        && usages.iter().any(|u| u == usage))
+    {
+        let err = dom_exc(
+            e,
+            "InvalidAccessError",
+            "subtle: key algorithm/usages mismatch",
+        );
+        e.reject_promise(pid, err);
+        return Ok(Value::Obj(pid));
+    }
+    let Some((iv, aad)) = aead_params(e, algo_v)? else {
+        let err = dom_exc(e, "OperationError", "subtle: AES-GCM requires an iv");
+        e.reject_promise(pid, err);
+        return Ok(Value::Obj(pid));
+    };
+    match e.crypto_transport.clone() {
+        None => {
+            let err = dom_exc(
+                e,
+                "NotSupportedError",
+                "subtle: no crypto backend installed",
+            );
+            e.reject_promise(pid, err);
+        }
+        Some(tr) => {
+            let h = tr.submit(CryptoRequest {
+                op: op_kind(KeyAlgo::AesGcm, iv, aad),
+                data,
+                key: key_bytes,
+            });
+            e.crypto.pending.push((h, pid, PendingKind::Bytes));
+        }
+    }
+    Ok(Value::Obj(pid))
+}
+
+/// `subtle.encrypt` — `CryptoOp::Encrypt`.
+fn subtle_encrypt(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    subtle_aead(e, args, "encrypt", |algo, iv, aad| CryptoOp::Encrypt {
+        algo,
+        iv,
+        aad,
+    })
+}
+
+/// `subtle.decrypt` — `CryptoOp::Decrypt`.
+fn subtle_decrypt(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    subtle_aead(e, args, "decrypt", |algo, iv, aad| CryptoOp::Decrypt {
+        algo,
+        iv,
+        aad,
+    })
+}
+
 /// Pose `crypto.subtle` (objet `SubtleCrypto`) sur l'objet
 /// `crypto` — appelé par `builtins::install` à chaque realm
 /// (JS-C78 : chaque contexte a son instance, l'opération
@@ -745,6 +891,10 @@ pub(crate) fn install_subtle(e: &mut Engine, crypto: ObjId) {
     e.add_method(subtle, "importKey", subtle_import_key);
     e.add_method(subtle, "sign", subtle_sign);
     e.add_method(subtle, "verify", subtle_verify);
+    // JS-C160 — AES-GCM `encrypt`/`decrypt` (marinetraffic :
+    // `importKey unknown algorithm` + `Failed to decrypt`).
+    e.add_method(subtle, "encrypt", subtle_encrypt);
+    e.add_method(subtle, "decrypt", subtle_decrypt);
     let tag = e.str_val("SubtleCrypto");
     e.set_own(subtle, crate::interp::SYM_TO_STRING_TAG, tag, false);
     e.set_own(crypto, "subtle", Value::Obj(subtle), false);

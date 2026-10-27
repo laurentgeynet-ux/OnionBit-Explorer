@@ -552,6 +552,7 @@ impl Session {
                                 }
                                 explorer_js::KeyAlgo::EcdsaP256 => nc::KeyAlgo::EcdsaP256,
                                 explorer_js::KeyAlgo::Ed25519 => nc::KeyAlgo::Ed25519,
+                                explorer_js::KeyAlgo::AesGcm => nc::KeyAlgo::AesGcm,
                             }
                         }
                         let result = match op {
@@ -571,6 +572,14 @@ impl Session {
                             }
                             explorer_js::CryptoOp::Verify { algo, sig } => {
                                 nc::verify(key_of(algo), &key, &sig, &data)
+                            }
+                            // AES-GCM (JS-C160) — nonce/aad dans
+                            // l'op, `chiffré‖tag` dans `data`.
+                            explorer_js::CryptoOp::Encrypt { algo, iv, aad } => {
+                                nc::aead_seal(key_of(algo), &key, &iv, &aad, &data)
+                            }
+                            explorer_js::CryptoOp::Decrypt { algo, iv, aad } => {
+                                nc::aead_open(key_of(algo), &key, &iv, &aad, &data)
                             }
                         };
                         let _ = tx.send(CryptoDone {
