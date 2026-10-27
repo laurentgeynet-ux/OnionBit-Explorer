@@ -176,8 +176,11 @@ fn tf_angle(s: &str) -> Option<f64> {
 
 /// `transform: f1(...) f2(...)…` → matrice brute (sans
 /// origine). Fonctions : `matrix`, `translate[X|Y]`,
-/// `scale[X|Y]`, `rotate`, `skew[X|Y]` ; `%` des `translate`
-/// relatif à la border box. `none`/inconnu → `None`.
+/// `scale[X|Y]`, `rotate`, `skew[X|Y]` + projections 2D des
+/// variantes 3D (`translate3d`, `scale3d`, `matrix3d`,
+/// `rotate3d` axe z — composante z ignorée, `translatez`/
+/// `scalez` = identité). `%` des `translate` relatif à la
+/// border box. `none`/inconnu → `None`.
 #[allow(clippy::cast_possible_truncation)]
 fn transform_matrix(raw: &str, rect: &Rect) -> Option<Affine> {
     let mut m = Affine::IDENTITY;
@@ -207,6 +210,47 @@ fn transform_matrix(raw: &str, rect: &Rect) -> Option<Affine> {
             ),
             "translatex" => Affine::translate(tf_len_px(args.first()?, rect.width)? as f32, 0.0),
             "translatey" => Affine::translate(0.0, tf_len_px(args.first()?, rect.height)? as f32),
+            // Projection 2D des fonctions 3D (moteur planaire —
+            // B-53 : popin TarteAuCitron `translate3d(-50%,-50%,0)`
+            // non reconnue → transform ignoré → tiroir expulsé
+            // hors viewport à `left:50%`). La composante z est
+            // ignorée : `translate3d`/`scale3d`/`matrix3d`/
+            // `rotate3d` retombent sur leur projection x/y —
+            // le décalage principal reste appliqué.
+            "translate3d" => Affine::translate(
+                tf_len_px(args.first()?, rect.width)? as f32,
+                args.get(1)
+                    .map_or(0.0, |v| tf_len_px(v, rect.height).unwrap_or(0.0) as f32),
+            ),
+            "translatez" => Affine::IDENTITY,
+            "matrix3d" => {
+                // `matrix3d(m11..m44)` : la sous-matrice 2D est
+                // (m11 m12 m14, m21 m22 m24, m41 m42) — indices
+                // colonne-major CSS : a=m11, b=m12, c=m21,
+                // d=m22, e=m41, f=m42 → args[0,1,4,5,12,13].
+                Affine {
+                    a: num(0)? as f32,
+                    b: num(1)? as f32,
+                    c: num(4)? as f32,
+                    d: num(5)? as f32,
+                    e: num(12)? as f32,
+                    f: num(13)? as f32,
+                }
+            }
+            "scale3d" => Affine::scale(num(0)? as f32, num(1)? as f32),
+            "scalez" => Affine::IDENTITY,
+            "rotate3d" => {
+                // Rotation d'axe `(x,y,z)` : seule la
+                // composante z projette en 2D — axe autre
+                // qu'(0,0,±1) → bascule hors-plan, ignorée
+                // (mieux vaut aucun transform qu'un faux).
+                let (ax, ay, az) = (num(0)?, num(1)?, num(2)?);
+                if ax.abs() > f64::EPSILON || ay.abs() > f64::EPSILON {
+                    return None;
+                }
+                let sign = if az < 0.0 { -1.0 } else { 1.0 };
+                Affine::rotate((sign * tf_angle(args.get(3).copied()?)?.to_degrees()) as f32)
+            }
             "scale" => {
                 let sx = num(0)? as f32;
                 Affine::scale(

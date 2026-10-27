@@ -2509,3 +2509,84 @@ fn grid_span_4_sur_pistes_auto_nourrit() {
         c.rect.width
     );
 }
+
+#[test]
+fn transform_translatex_pourcent_negatif_direction() {
+    // B-53 (edf vol 85) : popin `left:683px;
+    // transform:translateX(-50%)` layoutée x=1046 au lieu de
+    // ~320 — translate appliqué dans le mauvais sens.
+    let dom = TreeBuilder::parse("<div id=p></div>");
+    let mut e = StyleEngine::new();
+    e.add_css(
+        "#p{position:fixed;left:683px;top:0;width:726px;height:100px;\
+         transform:translateX(-50%)}",
+        Origin::Author,
+    );
+    let styles = e.compute_tree(&dom, dom.document(), &StyleEnv::default());
+    let root_el = dom
+        .children(dom.document())
+        .into_iter()
+        .flatten()
+        .find(|&c| dom.element(c).is_ok())
+        .unwrap();
+    let mut bx = build_box_tree(&dom, root_el, &styles).unwrap();
+    layout_tree(&mut bx, VIEW, &BlockCtx::default());
+    let target = by_id(&dom, "p");
+    let mut stack = vec![&bx];
+    let mut p = None;
+    while let Some(b) = stack.pop() {
+        if b.node == Some(target) {
+            p = Some(b);
+            break;
+        }
+        stack.extend(b.children.iter().rev());
+    }
+    let p = p.expect("#p");
+    let t = explorer_layout::transform::box_transform(p, &p.rect).expect("matrice");
+    let (px, _) = t.apply(p.rect.x, p.rect.y);
+    assert!(
+        (px - (683.0 - 363.0)).abs() < 1.0,
+        "x peint attendu ~320, obtenu {px} (rect={:?})",
+        p.rect
+    );
+}
+
+#[test]
+fn transform_translate3d_projection_2d() {
+    // B-53 (edf vol 85) : `translate3d(-50%,-50%,0)` (motif
+    // TarteAuCitron) n'était pas reconnu → transform ignoré →
+    // tiroir collé à `left:50%`, hors viewport.
+    let dom = TreeBuilder::parse("<div id=p></div>");
+    let mut e = StyleEngine::new();
+    e.add_css(
+        "#p{position:fixed;left:683px;top:0;width:726px;height:100px;\
+         transform:translate3d(-50%,0,0)}",
+        Origin::Author,
+    );
+    let styles = e.compute_tree(&dom, dom.document(), &StyleEnv::default());
+    let root_el = dom
+        .children(dom.document())
+        .into_iter()
+        .flatten()
+        .find(|&c| dom.element(c).is_ok())
+        .unwrap();
+    let mut bx = build_box_tree(&dom, root_el, &styles).unwrap();
+    layout_tree(&mut bx, VIEW, &BlockCtx::default());
+    let target = by_id(&dom, "p");
+    let mut stack = vec![&bx];
+    let mut p = None;
+    while let Some(b) = stack.pop() {
+        if b.node == Some(target) {
+            p = Some(b);
+            break;
+        }
+        stack.extend(b.children.iter().rev());
+    }
+    let p = p.expect("#p");
+    let t = explorer_layout::transform::box_transform(p, &p.rect).expect("matrice");
+    let (px, _) = t.apply(p.rect.x, p.rect.y);
+    assert!(
+        (px - (683.0 - 363.0)).abs() < 1.0,
+        "x peint attendu ~320, obtenu {px}"
+    );
+}
