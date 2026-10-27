@@ -7,6 +7,18 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **B-47 — `charset=utf-8` annoncé
+  sur les réponses JSON de l'API**
+  (`explorer-api`) — `application/json`
+  nu laissait les clients sans hint
+  replier sur Latin-1 : titre d'onglet
+  « idées » → « idÃ©es », suffixe
+  dédup console `×3` → `Ã—3` (vol 71,
+  3 cibles). Les chaînes serveur sont
+  saines — middleware `map_response`
+  qui qualifie le `Content-Type`
+  (PNG/texte inchangés).
+
 - **B-26 — borne de cycle de report
   au paint : wedge `apply` tué**
   (`explorer-render` + `explorer-core`)

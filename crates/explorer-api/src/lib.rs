@@ -222,13 +222,31 @@ pub fn router_with_egress(
             session,
             egress,
             console,
-        });
+        })
+        // §B-47 — `Json` axum émet `application/json` nu :
+        // un client qui replie sur Latin-1 en l'absence de
+        // charset (observé vol 71 : `title` « idées » →
+        // « idÃ©es », suffixe dédup `×3` → `Ã—3`) relit les
+        // octets UTF-8 en mojibake. L'annonce explicite ne
+        // coûte rien et clôt l'ambiguïté côté serveur.
+        .layer(axum::middleware::map_response(json_charset));
     match key {
         Some(k) if !k.is_empty() => r.layer(axum::middleware::from_fn(move |req, next| {
             auth(k.clone(), req, next)
         })),
         _ => r,
     }
+}
+
+/// `application/json` → `application/json; charset=utf-8`
+/// (§B-47) — toute autre valeur inchangée.
+async fn json_charset(mut resp: Response) -> Response {
+    if let Some(v) = resp.headers_mut().get_mut(header::CONTENT_TYPE) {
+        if v.as_bytes() == b"application/json" {
+            *v = HeaderValue::from_static("application/json; charset=utf-8");
+        }
+    }
+    resp
 }
 
 /// Middleware de clé : `x-api-key` prioritaire, `?key=` en
@@ -1184,6 +1202,27 @@ fn media_event_json(ev: &CoreEvent) -> (&'static str, String) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn json_charset_utf8_annonce() {
+        // §B-47 (vol 71) : `application/json` nu laissait un
+        // client sans charset replier sur Latin-1 — les
+        // octets UTF-8 du titre/`×N` ressortaient en
+        // mojibake (`Ã—3`, `idÃ©es`).
+        let resp = json_charset(Json(serde_json::json!({"t": "idées ×3"})).into_response()).await;
+        assert_eq!(
+            resp.headers().get(header::CONTENT_TYPE).unwrap(),
+            "application/json; charset=utf-8"
+        );
+        // Non-JSON inchangé (frame PNG, texte…).
+        let resp =
+            json_charset(([(header::CONTENT_TYPE, "image/png")], Vec::<u8>::new()).into_response())
+                .await;
+        assert_eq!(
+            resp.headers().get(header::CONTENT_TYPE).unwrap(),
+            "image/png"
+        );
+    }
 
     #[test]
     fn console_ring_vide_a_la_navigation() {
