@@ -2542,11 +2542,13 @@ fn noscript_head_meta_refresh_honored_on_rich_page() {
 }
 
 /// Vol 25 (kayak) — signature du disjoncteur « moteur
-/// figé » : `Dead` et l'éval dépassée du proxy arment ;
-/// une vraie exception JS n'arme pas.
+/// figé » : `Dead` et `Timeout` (kind typé — JS-C156)
+/// arment ; la chaîne héritée du proxy reste acceptée en
+/// repli ; une vraie exception JS n'arme pas.
 #[test]
 fn engine_stall_signature() {
     assert!(Session::is_engine_stall(&explorer_js::JsError::Dead));
+    assert!(Session::is_engine_stall(&explorer_js::JsError::Timeout));
     assert!(Session::is_engine_stall(&explorer_js::JsError::Uncaught(
         "moteur figé — éval dépassée".into()
     )));

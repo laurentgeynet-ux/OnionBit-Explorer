@@ -8,6 +8,16 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 ## [Unreleased]
 
 - **Vol 2026-10-26 — correctifs de vol,
+  vague 14 (FIX-3, vols 32/33)**
+  - **`JsError::Timeout` branché sur le
+    disjoncteur** : kind typé livré par
+    FIX-1 (JS-C156, cherry-pick `429ec26`)
+    — `is_engine_stall` reconnaît
+    `JsError::Timeout` ; la signature
+    chaîne « moteur figé » reste acceptée
+    en repli.
+
+- **Vol 2026-10-26 — correctifs de vol,
   vague 3 (FIX-3, vols 18/19)**
   - **Console perdue après navigation**
     (x.com) : `event_capacity` 64 → 512 —

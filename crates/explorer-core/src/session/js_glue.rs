@@ -700,14 +700,15 @@ impl Session {
     }
 
     /// `true` si l'erreur trahit un worker moteur saturé ou
-    /// mort : `Dead`, ou éval dépassée — le proxy jscore la
-    /// rend en `Uncaught("moteur figé — …")` faute de
-    /// variante dédiée (couture `explorer-js`, chantier
-    /// FIX-1 : une variante `Timeout` typée remplacerait ce
-    /// test de chaîne).
+    /// mort : `Dead`, ou éval/drain dépassé — `Timeout` est
+    /// le kind typé depuis JS-C156 (FIX-1) ; le test de
+    /// chaîne `Uncaught("moteur figé — …")` reste en repli
+    /// pour les moteurs sans variante dédiée.
     pub(crate) fn is_engine_stall(e: &explorer_js::JsError) -> bool {
-        matches!(e, explorer_js::JsError::Dead)
-            || matches!(e, explorer_js::JsError::Uncaught(m) if m.starts_with("moteur fig\u{e9}"))
+        matches!(
+            e,
+            explorer_js::JsError::Dead | explorer_js::JsError::Timeout
+        ) || matches!(e, explorer_js::JsError::Uncaught(m) if m.starts_with("moteur fig\u{e9}"))
     }
 
     /// Disjoncteur « moteur figé » actif sur l'onglet ?
