@@ -296,6 +296,7 @@ fn test_session() -> (Session, Arc<FakeTransport>) {
         dom_journal_max_ops: 512,
         js_mem_limit_mib: 512,
         color_scheme: explorer_css::ColorScheme::default(),
+        js_stall_cooldown: std::time::Duration::ZERO,
     })
 }
 
@@ -6696,6 +6697,7 @@ async fn redirect_commits_final_url_and_fragment() {
             dom_journal_max_ops: 512,
             js_mem_limit_mib: 512,
             color_scheme: explorer_css::ColorScheme::default(),
+            js_stall_cooldown: std::time::Duration::ZERO,
         },
     );
 
@@ -9338,7 +9340,15 @@ async fn mem_report_attributes_live_and_bfcache() {
     let _ = s.frame_png(id);
     let r2 = s.mem_report(id).expect("rapport après nav /b");
     assert_eq!(r2.bfcache_pages, 1, "/a gelée");
-    assert!(r2.bfcache_dom_nodes > 0 && r2.bfcache_frame_bytes > 0);
+    // Vol github (~130 Mio de rasters gelés) : la frame et
+    // le PNG ne sont plus retenus au gel — la restauration
+    // repeint depuis DOM + arbre (`needs_paint`).
+    assert!(r2.bfcache_dom_nodes > 0);
+    assert_eq!(
+        r2.bfcache_frame_bytes, 0,
+        "la raster des pages gelées n'est plus retenue"
+    );
+    assert_eq!(r2.bfcache_png_bytes, 0);
     assert!(
         r2.bfcache_js_heap_bytes > 0,
         "le moteur JS gelé est un réservoir mesuré"
@@ -11060,6 +11070,54 @@ async fn noscript_fallback_visible_without_js() {
         dump.contains("FALLBACK_TXT"),
         "scripting OFF : le fallback noscript peint : {dump}"
     );
+}
+
+// ---------- Vol 2026-10-26 — console : échecs de
+// sous-ressources ----------
+
+/// Vol 2026-10-26 — un `<link>`/`<script>`/`<img>`/`<iframe>`
+/// dont le fetch échoue (non-2xx ou réseau) produit un
+/// `PipelineError` attribué à l'onglet : les pages blanches
+/// old.reddit/archive.org n'avaient AUCUNE trace console
+/// des sous-ressources mortes.
+#[tokio::test]
+async fn subresource_failures_reach_console_ring() {
+    let (mut s, t) = test_session();
+    // Seule la page est routée : /dead.css, /dead.js et
+    // /dead.png répondent 404 chez FakeTransport.
+    t.route(
+        "/",
+        200,
+        "<!doctype html><html><head>\
+         <link rel=\"stylesheet\" href=\"/dead.css\">\
+         <script src=\"/dead.js\"></script>\
+         </head><body><img src=\"/dead.png\"></body></html>",
+    );
+    // Un `<script>` externe n'est fetché que sous scripting.
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let mut rx = s.subscribe();
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+
+    let mut msgs = Vec::new();
+    while let Ok(ev) = rx.try_recv() {
+        if let CoreEvent::PipelineError { tab, message } = ev {
+            if tab == Some(id) {
+                msgs.push(message);
+            }
+        }
+    }
+    for (kind, url) in [
+        ("feuille", "/dead.css"),
+        ("script", "/dead.js"),
+        ("image", "/dead.png"),
+    ] {
+        assert!(
+            msgs.iter()
+                .any(|m| m.contains(kind) && m.contains(url) && m.contains("HTTP 404")),
+            "échec {kind} {url} rapporté en console : {msgs:?}"
+        );
+    }
 }
 
 // ---------- CAP-156 — `document.referrer` ----------

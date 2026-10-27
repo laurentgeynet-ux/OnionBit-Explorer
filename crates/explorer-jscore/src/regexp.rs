@@ -394,10 +394,40 @@ fn translate_pattern(src: &str, unicode: bool, fold: bool) -> Result<String, Str
                 // pour le backend.
                 if let ClassAtom::Char(cp) = class_atom_of(&cs, i) {
                     if is_surrogate(cp) {
+                        // `\uD8hi[\uDClo-\uDChi]` — idiom emoji des
+                        // bundles (`\uD83C[\uDFFB-\uDFFF]` = skin
+                        // tone) : surrogate haute + classe de
+                        // basses = plage astrale — sinon le couple
+                        // ne peut jamais matcher (nos strings
+                        // UTF-8 n'ont pas de surrogate isolé).
+                        if (0xd800..0xdc00).contains(&cp) {
+                            if let Some((frag, anext)) = astral_class(&cs, next, cp) {
+                                out.push_str(&frag);
+                                last_atom = true;
+                                i = anext;
+                                continue;
+                            }
+                        }
                         out.push_str("(?!)");
                         last_atom = true;
                         i = next;
                         continue;
+                    }
+                    // Paire de surrogates fusionnée par
+                    // `class_atom_of` (`\ud83d\udca5`, pattern emoji
+                    // des bundles minifiés — GitLab) : `frag` ne
+                    // porte que le premier échappe brut
+                    // (`\x{d83d}`, invalide pour le backend hors
+                    // mode `u` où `escape` ne fusionne pas) →
+                    // émettre le point astral et sauter les 12
+                    // chars de la paire.
+                    if cp > 0xFFFF {
+                        if let Some((_cp, pnext)) = surrogate_pair(&cs, i) {
+                            out.push_str(&format!("\\x{{{cp:x}}}"));
+                            last_atom = true;
+                            i = pnext;
+                            continue;
+                        }
                     }
                 }
                 emit_escape(&mut out, &frag, t.fold);
@@ -452,8 +482,10 @@ fn translate_pattern(src: &str, unicode: bool, fold: bool) -> Result<String, Str
                     if unicode {
                         return Err(format!("invalid class range in `u` regex /{src}/"));
                     }
-                    // Sloppy : `-` littéral devant une class-escape.
-                    out.push_str("\\-");
+                    // Sloppy : `-` littéral devant une class-escape
+                    // (`\-` n'est pas un littéral en classe pour le
+                    // backend — `\x{2d}` uniformément).
+                    class_char(&mut out, u32::from('-'));
                     class_emitted = true;
                     class_prev = Some(ClassAtom::Char(u32::from('-')));
                     class_prev_bound = false;
@@ -558,7 +590,15 @@ fn translate_pattern(src: &str, unicode: bool, fold: bool) -> Result<String, Str
                     out.push('-');
                     class_dash = true;
                 } else {
-                    out.push_str("\\-");
+                    // `-` littéral (tête/queue de classe, ou après
+                    // une borne de range) — `\x{2d}` : `\-` en
+                    // classe n'est pas un littéral pour le backend
+                    // (`/[-]/` compilait sans jamais matcher —
+                    // classe vidée → `(?!)`, et `[-]?` rejeté —
+                    // ecma-international). `class_emitted` requis :
+                    // sans lui la classe dégénère en `(?!)`.
+                    class_char(&mut out, u32::from('-'));
+                    class_emitted = true;
                     class_prev = Some(ClassAtom::Char(u32::from('-')));
                     class_prev_bound = false;
                 }
@@ -995,6 +1035,62 @@ fn class_atom_of(cs: &[char], i: usize) -> ClassAtom {
 /// UTF-8 : un tel atome ne peut matcher aucun caractère.
 fn is_surrogate(cp: u32) -> bool {
     (0xd800..=0xdfff).contains(&cp)
+}
+
+/// `[\uDClo]` ou `[\uDClo-\uDChi]` à `cs[i]` après une surrogate
+/// haute `hi` → fragment de classe astrale fusionnée.
+/// Forme purement surrogate uniquement (un autre atome dans la
+/// classe, `^` ou un `\x` ferait retomber sur `(?!)` + classe
+/// normale — approximation documentée).
+fn astral_class(cs: &[char], i: usize, hi: u32) -> Option<(String, usize)> {
+    if cs.get(i) != Some(&'[') || cs.get(i + 1) == Some(&'^') {
+        return None;
+    }
+    let low = |at: usize| -> Option<u32> {
+        if cs.get(at) == Some(&'\\') && cs.get(at + 1) == Some(&'u') {
+            hex4(cs, at + 2).filter(|v| (0xdc00..0xe000).contains(v))
+        } else {
+            None
+        }
+    };
+    let mut j = i + 1;
+    let mut lo = low(j)?;
+    j += 6;
+    let base = 0x1_0000 + ((hi - 0xd800) << 10);
+    if cs.get(j) == Some(&']') {
+        // `[\uDClo]` — un seul point astral.
+        return Some((format!("\\x{{{:x}}}", base + (lo - 0xdc00)), j + 1));
+    }
+    // Classe multi-items de basses surrogates — atomes `\uDCxx`
+    // et plages `\uDCxx-\uDCyy` fusionnés en ensemble astral
+    // (`\uD800[\uDD00-\uDD02\uDF9F\uDFD0]`, bundle kevlar
+    // YouTube). Tout autre atome → `None` (retombée `(?!)` +
+    // classe normale).
+    let mut frag = String::from("[");
+    loop {
+        if cs.get(j) == Some(&'-') {
+            let hi2 = low(j + 1)?;
+            frag.push_str(&format!(
+                "\\x{{{:x}}}-\\x{{{:x}}}",
+                base + (lo - 0xdc00),
+                base + (hi2 - 0xdc00)
+            ));
+            j += 7;
+        } else {
+            frag.push_str(&format!("\\x{{{:x}}}", base + (lo - 0xdc00)));
+        }
+        match cs.get(j) {
+            Some(&']') => {
+                frag.push(']');
+                return Some((frag, j + 1));
+            }
+            Some(&'\\') => {
+                lo = low(j)?;
+                j += 6;
+            }
+            _ => return None,
+        }
+    }
 }
 
 /// `{n}` / `{n,}` / `{n,m}` à `cs[i]` → `(lo, hi, next)`.
@@ -1484,6 +1580,37 @@ mod tests {
         translate_pattern(src, false, false).unwrap()
     }
 
+    /// `-` littéral en classe (tête/queue) : émis `\x{2d}` et
+    /// compté dans `class_emitted` — sinon la classe dégénérait
+    /// en `(?!)` (`/[-]/` ne matchait rien, `^[-]?` rejeté par le
+    /// backend — ecma-international contact-form-7).
+    #[test]
+    fn literal_dash_in_class() {
+        assert_eq!(tr(r"[-]"), "[\\x{2d}]");
+        assert_eq!(tr(r"[-a]"), "[\\x{2d}a]");
+        assert_eq!(tr(r"[a-]"), "[a\\x{2d}]");
+        assert_eq!(tr(r"[a-b-c]"), "[a-b\\x{2d}c]");
+        let probe = |src: &str, hay: &str| super::JsRegExp::compile(src, "").unwrap().exec(hay, 0);
+        assert!(probe(r"[-]", "-").is_some());
+        assert!(probe(r"^[-]?[0-9]+(?:[eE][+-]?[0-9]+)?$", "-3").is_some());
+        assert!(probe(r"^[-]?[0-9]+(?:[eE][+-]?[0-9]+)?$", "12e+4").is_some());
+    }
+
+    /// Atome hors classe = paire de surrogates `\uD8xx\uDCxx` :
+    /// fusionnée en point astral (le `frag` brut `\x{d8xx}` était
+    /// rejeté « Invalid codepoint » — regex emoji de gitlab.com).
+    /// En `u` `escape()` fusionnait déjà ; sloppy est aligné.
+    #[test]
+    fn surrogate_pair_atom_outside_class() {
+        assert_eq!(tr(r"\uD83D\uDCA5"), "\\x{1f4a5}");
+        assert_eq!(tr(r"\uD83C\uDFFB-\uD83C\uDFFF"), "\\x{1f3fb}-\\x{1f3ff}");
+        // Isolé (pas de paire) → `(?!)` inchangé.
+        assert_eq!(tr(r"\uD83Dx"), "(?!)x");
+        let probe = |src: &str, hay: &str| super::JsRegExp::compile(src, "").unwrap().exec(hay, 0);
+        assert!(probe(r"\uD83D\uDCA5", "\u{1f4a5}").is_some());
+        assert!(probe(r"\uD83C[\uDFFB-\uDFFF]", "\u{1f3fd}").is_some());
+    }
+
     /// Bornes de plage : les échappements sont décodés — bug
     /// mesuré : `\x00` lu comme 'x' (0x78) → "empty class range"
     /// sur `/[\x00- ]/` (pattern réel d'un bundle Google).
@@ -1506,8 +1633,10 @@ mod tests {
     /// omis/(?!), plages clampées, classe vidée → `(?!)`/`[\s\S]`.
     #[test]
     fn surrogate_bounds_degrade() {
-        assert_eq!(tr(r"[\uD800-\uDFFF]"), "(?!)");
-        assert_eq!(tr(r"[^\uD800-\uDBFF]"), "[\\s\\S]");
+        // Plage entièrement surrogate = « tout atome astral » en
+        // sémantique UTF-16 (minifieurs) → plage astrale UTF-8.
+        assert_eq!(tr(r"[\uD800-\uDFFF]"), "[\\x{10000}-\\x{10ffff}]");
+        assert_eq!(tr(r"[^\uD800-\uDBFF]"), "[^\\x{10000}-\\x{10ffff}]");
         assert_eq!(tr(r"[\uD800-\uE000]"), "[\\x{e000}-\\x{e000}]");
         assert_eq!(tr(r"[a-\uDFFF]"), "[a-\\x{d7ff}]");
         assert_eq!(tr(r"\uD800"), "(?!)");
@@ -1543,5 +1672,29 @@ mod tests {
             r"(?:[^\uD800-\uDBFF]|^)[\uDC00-\uDFFF]|[\uD800-\uDBFF](?![\uDC00-\uDFFF])",
             "abc"
         ));
+    }
+}
+
+#[cfg(test)]
+mod dbg_vol10 {
+    #[test]
+    fn yt_regex() {
+        let pat = std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/data/vol10_yt_regex.txt"
+        ))
+        .unwrap();
+        let t = super::translate_pattern(&pat, false, false).unwrap();
+        eprintln!("TAIL>>{}", &t[1850.min(t.len())..]);
+        assert!(!t.contains("(?!)"), "dead branch left: {t}");
+        assert!(fancy_regex::Regex::new(&t).is_ok());
+        // Plage astrale `\uD800\uDD00-\uDD02` = U+10300–U+10302 :
+        // la classe multi-items doit la couvrir.
+        // `\uD800\uDD00` = U+10100, `\uD800\uDF9F` = U+1039F.
+        let mini = super::translate_pattern("\\uD800[\\uDD00-\\uDD02]", false, false).unwrap();
+        assert_eq!(mini, "[\\x{10100}-\\x{10102}]");
+        let re = super::JsRegExp::compile(&pat, "").unwrap();
+        assert!(re.exec("\u{10101}", 0).is_some());
+        assert!(re.exec("\u{1039f}", 0).is_some());
     }
 }

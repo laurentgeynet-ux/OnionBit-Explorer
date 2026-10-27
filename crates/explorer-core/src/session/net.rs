@@ -669,6 +669,12 @@ impl Session {
     }
 
     pub(crate) fn drain_script_net(&mut self, tab: TabId) {
+        // Disjoncteur (vol 25) : les drains `Cmd` attendent
+        // une réponse du worker — figé, chacun patienterait
+        // 30 s sous verrou.
+        if self.js_stalled(tab) {
+            return;
+        }
         // `WorkerLoad` (JS-C132) **avant** le drain `Cmd` :
         // le demandeur (thread moteur au premier `new Worker`)
         // est bloqué en `load()` — dispatcher le fetch async
@@ -743,6 +749,21 @@ impl Session {
             tracing::debug!(tab, url = %r.url, seq = r.seq, "spawn dyn import");
             self.spawn_dyn_import(tab, &page, &base, &r);
         }
+        // `unhandledrejection` (JS-C154) — les rejets JS non
+        // gérés étaient des morts silencieuses (pinterest,
+        // airbnb) : le moteur tire l'event au checkpoint, la
+        // session verse la description au ring console.
+        for msg in self
+            .tabs
+            .get_mut(&tab)
+            .and_then(|e| e.js.as_mut())
+            .map_or_else(Vec::new, |eng| eng.drain_unhandled_rejections())
+        {
+            let _ = self.events.send(CoreEvent::PipelineError {
+                tab: Some(tab),
+                message: msg,
+            });
+        }
     }
 
     /// Distribution des requêtes dynamiques drainées
@@ -789,6 +810,7 @@ impl Session {
     /// par le chargeur hôte ; fetch `script-src` + mixed-content
     /// puis `deliver_dyn_import` au moteur (instancier+évaluer+
     /// résoudre la promesse pending).
+    #[allow(clippy::too_many_lines)] // spawn + tâche fetch/graphe inline, chaque bras documenté
     fn spawn_dyn_import(
         &mut self,
         tab: TabId,
@@ -799,7 +821,7 @@ impl Session {
         let Some((req_page, req_base, doc_policy, csp, _opaque)) =
             self.ctx_net_origin(tab, r.ctx, page, base)
         else {
-            tracing::debug!(tab, ctx = r.ctx, "dyn import : pas d'origine — rejet");
+            tracing::warn!(tab, ctx = r.ctx, "dyn import : pas d'origine — rejet");
             self.deliver_dyn_import_req(tab, r.ctx, r.seq, None, Vec::new());
             return;
         };
@@ -815,7 +837,7 @@ impl Session {
                 )
             })
         else {
-            tracing::debug!(tab, url = %r.url, "dyn import : résolution/CSP refusé — rejet");
+            tracing::warn!(tab, url = %r.url, "dyn import : résolution/CSP refusé — rejet");
             self.deliver_dyn_import_req(tab, r.ctx, r.seq, None, Vec::new());
             return;
         };
@@ -882,6 +904,7 @@ impl Session {
             let meta = crate::session::net_items::DynImportMeta {
                 ctx,
                 seq,
+                url: url_g.to_string(),
                 entry,
                 sources,
             };
@@ -929,7 +952,28 @@ impl Session {
     }
 
     /// `NetDone` `import` → corps + graphe → `deliver_dyn_import`.
-    fn commit_dyn_import(&mut self, tab: TabId, meta: &crate::session::net_items::DynImportMeta) {
+    /// Échec de fetch (`entry: None`) → warn + `PipelineError`
+    /// avec status/URL : le rejet côté moteur est un
+    /// « cannot load module » générique — la console doit
+    /// dire *où* la chaîne a cassé (vol letterboxd).
+    fn commit_dyn_import(
+        &mut self,
+        tab: TabId,
+        meta: &crate::session::net_items::DynImportMeta,
+        out: &NetResult<Response>,
+    ) {
+        if meta.entry.is_none() {
+            let why = match out {
+                Ok(r) => format!("statut {}", r.status),
+                Err(e) => e.to_string(),
+            };
+            tracing::warn!(tab, url = %meta.url, seq = meta.seq, error = %why,
+                "dyn import : fetch échoué — rejet livré");
+            let _ = self.events.send(CoreEvent::PipelineError {
+                tab: Some(tab),
+                message: format!("import() — fetch échoué : {} ({why})", meta.url),
+            });
+        }
         let deps = meta.sources.clone();
         self.deliver_dyn_import_req(tab, meta.ctx, meta.seq, meta.entry.clone(), deps);
     }
@@ -2517,6 +2561,9 @@ impl Session {
     /// `localStorage` vers la map d'origine + le profil, et
     /// les nouvelles requêtes réseau vers le scheduler.
     pub(crate) fn after_script(&mut self, tab: TabId) {
+        if self.js_stalled(tab) {
+            return;
+        }
         let Some((page, writes, map)) = self.tabs.get_mut(&tab).and_then(|e| {
             e.js.as_mut().map(|eng| {
                 (
@@ -2773,7 +2820,7 @@ impl Session {
             // moteur (instancier+évaluer+résoudre la promesse).
             if let Some(meta) = d.import {
                 self.dyn_tasks.remove(&(d.tab, meta.seq));
-                self.commit_dyn_import(d.tab, &meta);
+                self.commit_dyn_import(d.tab, &meta, &d.out);
                 continue;
             }
             self.net_tasks.remove(&(d.tab, d.handle));

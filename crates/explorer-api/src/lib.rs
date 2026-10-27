@@ -86,23 +86,73 @@ fn spawn_console_recorder(session: &Arc<tokio::sync::Mutex<Session>>, ring: &Con
     tokio::spawn(async move {
         loop {
             match rx.recv().await {
-                Ok(CoreEvent::PipelineError { tab, message }) => {
-                    if let Some(t) = tab {
-                        let mut g = ring
-                            .lock()
-                            .unwrap_or_else(std::sync::PoisonError::into_inner);
-                        let q = g.entry(t).or_default();
-                        if q.len() >= CONSOLE_RING {
-                            q.pop_front();
-                        }
-                        q.push_back(message);
-                    }
-                }
-                Ok(_) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
+                Ok(ev) => record_console_event(&ring, &ev),
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
                 Err(tokio::sync::broadcast::error::RecvError::Closed) => return,
             }
         }
     });
+}
+
+/// Un événement → mutation du ring console (fonction pure
+/// — testable sans tâche). Deux règles :
+/// - `PipelineError{tab}` → poussé sous le cap
+///   [`CONSOLE_RING`] ;
+/// - `Navigated{tab}` → **le ring de l'onglet est vidé**
+///   (vol 24 : erreurs substack encore visibles sur
+///   ghost.org — attribution ambiguë). Le canal broadcast
+///   est ordonné : les erreurs émises avant `Navigated`
+///   partent avec lui, celles de la nouvelle page
+///   survivent — « ring = erreurs de la page courante ».
+fn record_console_event(ring: &ConsoleRing, ev: &CoreEvent) {
+    match ev {
+        CoreEvent::Navigated { tab, .. } => {
+            if let Some(q) = ring
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .get_mut(tab)
+            {
+                q.clear();
+            }
+        }
+        CoreEvent::PipelineError {
+            tab: Some(t),
+            message,
+        } => {
+            let mut g = ring
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let q = g.entry(*t).or_default();
+            // Flood (vol 28 : chess ~60 × `TypeError: n is
+            // not a function` identiques) — un message
+            // **identique au précédent** replie en suffixe
+            // ` ×N` au lieu d'empiler des lignes. La
+            // répétition non consécutive n'est pas touchée
+            // (alternance honnête, pas de dédup globale).
+            let dup_n = q.back().and_then(|last| {
+                if last == message {
+                    Some(2)
+                } else {
+                    last.strip_prefix(message.as_str()).and_then(|suf| {
+                        suf.strip_prefix(" ×")
+                            .and_then(|n| n.parse::<u32>().ok())
+                            .map(|n| n + 1)
+                    })
+                }
+            });
+            if let Some(n) = dup_n {
+                if let Some(last) = q.back_mut() {
+                    *last = format!("{message} ×{n}");
+                }
+                return;
+            }
+            if q.len() >= CONSOLE_RING {
+                q.pop_front();
+            }
+            q.push_back(message.clone());
+        }
+        _ => {}
+    }
 }
 
 /// Construit le routeur de l'API. `session` est injectée par
@@ -313,21 +363,27 @@ async fn close_tab(State(st): State<ApiState>, Path(id): Path<TabId>) -> Respons
 
 /// Paramètres de `GET /frame` (étape 55) — région en
 /// pixels physiques, comme les `rects` de
-/// `frame_invalidated`. Incomplet (une coordonnée manque) =
-/// frame entière, pour rester tolérant côté client.
+/// `frame_invalidated`. `full=1` = document entier (borne
+/// `MAX_FRAME_DIM` : un document plus haut n'a jamais de
+/// frame pleine — la tranche viewport est servie).
 #[derive(serde::Deserialize)]
 struct FrameRegionQuery {
     x: Option<u32>,
     y: Option<u32>,
     w: Option<u32>,
     h: Option<u32>,
+    full: Option<u8>,
 }
 
 /// `GET /api/tabs/{id}/frame` → `image/png` (pull ADR-0004).
 /// Le pull fait avancer les transitions CSS (étape 45) :
 /// l'UI cadence les frames, le moteur échantillonne le
-/// progrès à chaque appel. `?x=&y=&w=&h=` (px physiques,
-/// étape 55) ne sert que la région demandée.
+/// progrès à chaque appel. **Défaut = viewport courant**
+/// (contrat vols 13/17 : la taille servie ne dépend plus
+/// de `doc_h` — un document non clampé ne renvoie plus un
+/// PNG de 50 Mio) ; `?x=&y=&w=&h=` (px physiques, étape
+/// 55) sert la région demandée ; `?full=1` sert toute la
+/// frame stockée (comportement historique, borné).
 async fn frame(
     State(st): State<ApiState>,
     Path(id): Path<TabId>,
@@ -335,17 +391,43 @@ async fn frame(
 ) -> Response {
     let mut session = st.session.lock().await;
     let _ = session.tick_animations(id);
-    let png = match (q.x, q.y, q.w, q.h) {
-        (Some(rx), Some(ry), Some(rw), Some(rh)) => session.frame_png_region(id, rx, ry, rw, rh),
-        _ => session.frame_png(id),
+    let png = match (q.x, q.y, q.w, q.h, q.full) {
+        (Some(rx), Some(ry), Some(rw), Some(rh), _) => session.frame_png_region(id, rx, ry, rw, rh),
+        (.., Some(1)) => session.frame_png(id),
+        // Défaut = la tranche viewport en px physiques ; la
+        // région est clippée par `frame_region` — une frame
+        // plus petite (doc court, fenêtre raster) revient
+        // entière, jamais étirée.
+        _ => {
+            let (vw, vh) = session.viewport();
+            let s = session.scale().max(f32::EPSILON);
+            #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+            // viewport px CSS ≥ 0, ×scale fini — `as` borne à 0.
+            let (pw, ph) = (
+                (vw * s).round().max(0.0) as u32,
+                (vh * s).round().max(0.0) as u32,
+            );
+            session
+                .frame_png_region(id, 0, 0, pw.max(1), ph.max(1))
+                .or_else(|| session.frame_png(id))
+        }
     };
     match png {
-        Some(bytes) => (
+        // Un corps vide n'est jamais un PNG valide — servi
+        // `204` comme l'absence de frame, jamais `200` vide
+        // (vol : `/frame` 200 à 0 octet en transitoire de
+        // rasterisation). `Retry-After` signale aux clients
+        // que la frame arrive — retenter, pas abandonner.
+        Some(bytes) if !bytes.is_empty() => (
             [(header::CONTENT_TYPE, HeaderValue::from_static("image/png"))],
             bytes,
         )
             .into_response(),
-        None => StatusCode::NO_CONTENT.into_response(),
+        _ => (
+            StatusCode::NO_CONTENT,
+            [(header::RETRY_AFTER, HeaderValue::from_static("1"))],
+        )
+            .into_response(),
     }
 }
 
@@ -1097,4 +1179,91 @@ fn media_event_json(ev: &CoreEvent) -> (&'static str, String) {
     // Le motif d'appel ne retient que les variantes média ;
     // un appel direct hors bras dégrade en event muet.
     explorer_core::media_event_json(ev).unwrap_or(("media", String::new()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn console_ring_vide_a_la_navigation() {
+        // Vol 24 : les erreurs du site précédent ne doivent
+        // plus être attribuées à la nouvelle page.
+        let ring = ConsoleRing::default();
+        let tab: TabId = 7;
+        let err = |m: &str| CoreEvent::PipelineError {
+            tab: Some(tab),
+            message: m.to_string(),
+        };
+        record_console_event(&ring, &err("avant nav"));
+        record_console_event(
+            &ring,
+            &CoreEvent::Navigated {
+                tab,
+                url: "https://ghost.org".to_string(),
+                title: None,
+            },
+        );
+        assert!(
+            ring.lock()
+                .unwrap()
+                .get(&tab)
+                .is_none_or(std::collections::VecDeque::is_empty),
+            "le ring doit être vidé à Navigated"
+        );
+        record_console_event(&ring, &err("après nav"));
+        let g = ring.lock().unwrap();
+        assert_eq!(g[&tab].len(), 1, "les erreurs post-nav restent");
+        assert_eq!(g[&tab][0], "après nav");
+    }
+
+    #[test]
+    fn console_ring_dedup_consecutif() {
+        // Vol 28 chess : ~60 TypeError identiques → le ring
+        // replie « message ×N » au lieu d'empiler.
+        let ring = ConsoleRing::default();
+        let tab: TabId = 2;
+        let ev = CoreEvent::PipelineError {
+            tab: Some(tab),
+            message: "TypeError: n is not a function".to_string(),
+        };
+        for _ in 0..60 {
+            record_console_event(&ring, &ev.clone());
+        }
+        {
+            let g = ring.lock().unwrap();
+            assert_eq!(g[&tab].len(), 1);
+            assert_eq!(g[&tab][0], "TypeError: n is not a function ×60");
+        }
+        // Un message différent puis la même erreur : nouvelle
+        // ligne (alternance honnête, pas de dédup globale).
+        record_console_event(
+            &ring,
+            &CoreEvent::PipelineError {
+                tab: Some(tab),
+                message: "autre".to_string(),
+            },
+        );
+        record_console_event(&ring, &ev);
+        let g = ring.lock().unwrap();
+        assert_eq!(g[&tab].len(), 3);
+        assert_eq!(g[&tab][2], "TypeError: n is not a function");
+    }
+
+    #[test]
+    fn console_ring_cap_tenu() {
+        let ring = ConsoleRing::default();
+        let tab: TabId = 1;
+        for i in 0..(CONSOLE_RING + 5) {
+            record_console_event(
+                &ring,
+                &CoreEvent::PipelineError {
+                    tab: Some(tab),
+                    message: format!("e{i}"),
+                },
+            );
+        }
+        let g = ring.lock().unwrap();
+        assert_eq!(g[&tab].len(), CONSOLE_RING);
+    }
 }

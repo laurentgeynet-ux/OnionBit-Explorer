@@ -49,7 +49,7 @@ fn real_bundles_first_error() {
         for ent in rd.flatten() {
             let p = ent.path();
             let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
-            let js = p
+            let js = std::path::Path::new(name)
                 .extension()
                 .is_some_and(|ext| ext.eq_ignore_ascii_case("js"))
                 && (p.parent() == Some(d)

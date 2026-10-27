@@ -255,6 +255,15 @@ impl Host for BcHost {
         self
     }
 
+    // Méthodes visibles en lecture (feature-detects) —
+    // invoke-only les rendait `undefined` (vols 27-28).
+    fn has_method(&self, name: &str) -> bool {
+        matches!(
+            name,
+            "postMessage" | "close" | "addEventListener" | "removeEventListener"
+        )
+    }
+
     fn get(&self, e: &mut Engine, _t: Value, key: &str) -> JsResult<Option<Value>> {
         if key != "name" {
             return Ok(None);
@@ -1127,6 +1136,7 @@ impl Host for RangeHost {
                 | "collapse"
                 | "cloneContents"
                 | "extractContents"
+                | "createContextualFragment"
                 | "deleteContents"
                 | "insertNode"
                 | "cloneRange"
@@ -1291,6 +1301,22 @@ impl Host for RangeHost {
                 let r = *self.data.borrow();
                 delete_range_contents(&self.dom, &r);
                 Ok(Some(Value::Undefined))
+            }
+            "createContextualFragment" => {
+                // `Range.createContextualFragment(html)` — mur
+                // maps.google.com (vol 2026-10-26) : première
+                // exception de la cascade `sc_*`. Le fragment est
+                // parsé dans le même Dom que le range (contexte =
+                // startContainer, notre parseur de fragment n'est
+                // pas contextualisé — déviation documentée).
+                let html = e.to_js_string(arg(args, 0))?;
+                let frag = {
+                    let mut d = self.dom.borrow_mut();
+                    let frag = d.create_fragment();
+                    d.parse_fragment_into(frag, &html);
+                    frag
+                };
+                Ok(Some(node_value(e, &self.dom, &self.cache, frag)))
             }
             "insertNode" => {
                 let Some(n) = node_for_in(e, arg(args, 0), &self.dom) else {
@@ -2443,7 +2469,7 @@ fn xpath_expr_evaluate(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<
 }
 
 /// `document.createNSResolver(node)` — spec : retourne le nœud
-/// résolveur (le documentElement ici — notre `XPath` ne résout pas
+/// résolveur (le `documentElement` ici — notre `XPath` ne résout pas
 /// de préfixes externes).
 pub(crate) fn create_ns_resolver(e: &mut Engine, _this: Value, args: &[Value]) -> JsResult<Value> {
     if matches!(arg(args, 0), Value::Obj(_)) {

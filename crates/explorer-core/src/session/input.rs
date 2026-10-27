@@ -82,7 +82,20 @@ impl Session {
             .get(&tab)
             .is_some_and(|e| e.paint_detached || !e.deferred_inputs.is_empty())
         {
+            let is_scroll = matches!(ev, InputEvent::Scroll { .. });
             self.defer_input(tab, ev);
+            // Un scroll différé est **accepté**, pas ignoré
+            // (vol 13 franceinfo : `ignored` ×2 pendant une
+            // longue apply — le client abandonnait alors que
+            // le delta était enfilé) : le `scroll_y` rendu
+            // est la projection de la file, rejouée telle
+            // quelle à la livraison.
+            if is_scroll {
+                return Ok(InputOutcome::Scrolled {
+                    scroll_y: self.projected_scroll(tab),
+                });
+            }
+            tracing::info!(tab, "input différé — paint en vol, rejeté comme ignored");
             return Ok(InputOutcome::Ignored);
         }
         match ev {
@@ -223,6 +236,7 @@ impl Session {
     /// l'action par défaut), bascule des contrôles puis
     /// `input`/`change`, focus sur les champs, `submit` des
     /// formulaires, navigation des liens.
+    #[allow(clippy::too_many_lines)] // séquence d'activation DOM — grandir ne factorise rien
     pub(crate) fn handle_click(
         &mut self,
         tab: TabId,
@@ -379,7 +393,22 @@ impl Session {
                 self.enqueue_nav_act(tab, act, false);
                 Ok(InputOutcome::Navigated)
             }
-            _ => Ok(InputOutcome::Ignored),
+            _ => {
+                // Vol 25 (airbnb cookie, canada « Français ») :
+                // `ignored` ne disait pas *pourquoi* — le motif
+                // est désormais tracé : pas de hit DOM, hit non
+                // actionnable (ni lien/champ/select/submit), ou
+                // `preventDefault` côté handler.
+                tracing::info!(
+                    tab,
+                    x,
+                    y,
+                    hit = node.is_some(),
+                    prevented,
+                    "click ignored — aucun contrôle/lien actionnable sous le point"
+                );
+                Ok(InputOutcome::Ignored)
+            }
         }
     }
 
@@ -826,6 +855,25 @@ impl Session {
             entry.focused = Some(new_path);
         }
         Some(n)
+    }
+
+    /// `scroll_y` projeté des deltas en file — la position
+    /// qu'atteindra le drain des entrées différées (clampée
+    /// sur le `doc_h` courant, comme `scroll_by`).
+    fn projected_scroll(&self, tab: TabId) -> f32 {
+        let Some(e) = self.tabs.get(&tab) else {
+            return 0.0;
+        };
+        let queued: f32 = e
+            .deferred_inputs
+            .iter()
+            .map(|ev| match ev {
+                InputEvent::Scroll { dy } => *dy,
+                _ => 0.0,
+            })
+            .sum();
+        let max = (e.doc_h - self.viewport.1).max(0.0);
+        (e.scroll_y + queued).clamp(0.0, max)
     }
 
     /// Enfile une entrée pendant la peinture détachée — la

@@ -357,6 +357,108 @@ pub(crate) fn meta_refresh(dom: &Dom) -> Option<(f64, Option<String>)> {
     None
 }
 
+/// `<meta http-equiv=refresh>` enfermée dans un
+/// `<noscript>` (vol google SERP, CAP-155) : scripting
+/// levé au parse, le contenu de `noscript` est rawtext —
+/// la méta n'existe jamais comme élément et
+/// [`meta_refresh`] la manque. Spec : ignorée tant que le
+/// scripting tourne. Repli produit : quand la page est un
+/// **fallback pur** — tous les enfants éléments du `body`
+/// sont `noscript`/`script`, aucun texte non blanc hors
+/// repli — le rawtext est re-parsé (scripting off) et sa
+/// méta refresh honorée : le document n'a rien d'autre à
+/// offrir, c'est le sens du repli. Une page riche avec un
+/// `noscript` annexe garde la spec : `None`.
+/// Re-parse le rawtext d'un `<noscript>` (scripting off)
+/// et applique la grammaire `meta_refresh` habituelle.
+fn noscript_refresh_of(dom: &Dom, n: NodeId) -> Option<(f64, Option<String>)> {
+    let text = dom.text_content(n).ok()?;
+    if text.trim().is_empty() {
+        return None;
+    }
+    let mut tb = explorer_html::TreeBuilder::new();
+    tb.push(&text);
+    tb.finish();
+    meta_refresh(&tb.into_dom())
+}
+
+/// `<meta http-equiv=refresh>` enfermée dans un
+/// `<noscript>` (vol google SERP, CAP-155) : scripting
+/// levé au parse, le contenu de `noscript` est rawtext —
+/// la méta n'existe jamais comme élément et
+/// [`meta_refresh`] la manque. Spec : ignorée tant que le
+/// scripting tourne. Repli produit, deux cas honorés :
+/// - **`noscript` dans le `head`** (vol 23 DDG `/html` :
+///   le méta de repli no-JS du head est un redirect
+///   d'entrée de gamme, indépendant du contenu du body) ;
+/// - **fallback pur** — tous les enfants éléments du
+///   `body` sont `noscript`/`script`, aucun texte non
+///   blanc hors repli : le document n'a rien d'autre à
+///   offrir.
+///
+/// Une page riche avec un `noscript` annexe **dans le
+/// body** garde la spec : `None`.
+pub(crate) fn noscript_meta_refresh(dom: &Dom) -> Option<(f64, Option<String>)> {
+    // `head` et `body` en un seul balayage.
+    let mut head = None;
+    let mut body = None;
+    let mut queue = vec![dom.document()];
+    while let Some(n) = queue.pop() {
+        match dom.tag_name(n) {
+            Ok("head") => head = Some(n),
+            Ok("body") => body = Some(n),
+            _ => {}
+        }
+        if head.is_some() && body.is_some() {
+            break;
+        }
+        if let Ok(ch) = dom.children(n) {
+            queue.extend(ch.iter().rev());
+        }
+    }
+    // Cas 1 — `noscript` descendant de `head`, toujours
+    // éligible (pattern no-JS de DDG, indépendant du body).
+    let mut noscripts = Vec::new();
+    if let Some(h) = head {
+        let mut q = vec![h];
+        while let Some(n) = q.pop() {
+            if dom.tag_name(n).is_ok_and(|t| t == "noscript") {
+                noscripts.push(n);
+            }
+            if let Ok(ch) = dom.children(n) {
+                q.extend(ch.iter().rev());
+            }
+        }
+    }
+    for n in &noscripts {
+        if let Some(r) = noscript_refresh_of(dom, *n) {
+            return Some(r);
+        }
+    }
+    // Cas 2 — fallback pur dans le `body`.
+    let body = body?;
+    let children = dom.children(body).ok()?;
+    let mut body_noscripts = Vec::new();
+    for c in children {
+        match dom.data(c).ok()? {
+            explorer_dom::NodeData::Element(_) => match dom.tag_name(c).ok()? {
+                "script" => {}
+                "noscript" => body_noscripts.push(c),
+                _ => return None, // contenu réel — spec.
+            },
+            // Texte non blanc hors repli → contenu réel.
+            explorer_dom::NodeData::Text(t) if !t.trim().is_empty() => return None,
+            _ => {}
+        }
+    }
+    for n in body_noscripts {
+        if let Some(r) = noscript_refresh_of(dom, n) {
+            return Some(r);
+        }
+    }
+    None
+}
+
 /// Grammaire `content` d'une méta refresh **et de
 /// l'en-tête `Refresh:`** (spec HTML « pragmas »,
 /// tolérante — CAP-143/144) : `N[;][url=]U` — nombre en
@@ -746,12 +848,34 @@ pub(crate) fn collect_images(dom: &Dom, img_w: f32, dpr: f32) -> Vec<(NodeId, St
                     let eff_w = resolve_sizes(dom.attribute(n, "sizes").ok().flatten(), img_w);
                     pick_srcset(&ss, eff_w, dpr)
                 });
-                let src = picked.or_else(|| {
-                    dom.attribute(n, "src")
-                        .ok()
-                        .flatten()
-                        .filter(|s| !s.is_empty())
-                });
+                let src = picked
+                    .or_else(|| {
+                        dom.attribute(n, "src")
+                            .ok()
+                            .flatten()
+                            .filter(|s| !s.is_empty())
+                    })
+                    // Lazy-load (vol 13 lemonde/bbc : ~200
+                    // `<img>` à `data-src`, ~0 % peints) : le
+                    // deferred `loading="lazy"` est déjà
+                    // fetché d'emblée — reste la variante
+                    // « src déplacé en data-* » dont le JS
+                    // bootstrap est souvent mort. Repli
+                    // produit : les attributs lazy usuels
+                    // servent de source, dans cet ordre —
+                    // mieux que jamais peint.
+                    .or_else(|| {
+                        const LAZY_SRCS: &[&str] = &[
+                            "data-src",
+                            "data-lazy-src",
+                            "data-original",
+                            "data-url",
+                            "data-srcset",
+                        ];
+                        LAZY_SRCS.iter().find_map(|a| {
+                            dom.attribute(n, a).ok().flatten().filter(|s| !s.is_empty())
+                        })
+                    });
                 if let Some(src) = src {
                     out.push((n, src));
                 }

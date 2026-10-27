@@ -347,6 +347,13 @@ pub struct Engine {
     /// `true` quand la session s'est branchée (`set_import_
     /// drain`) — sans drain, un miss rejette comme avant.
     pub(crate) import_drain_wired: bool,
+    /// Promesses rejetées sans `then` (JS-C154) — candidates
+    /// `unhandledrejection`, revues en fin de checkpoint
+    /// (un `.then` tardif pose `handled` et les retire).
+    pub(crate) pending_unhandled: Vec<(Value, Value)>,
+    /// Descriptions des rejets non gérés — drainées par la
+    /// session (`report_unhandled_rejection` → ring console).
+    pub(crate) unhandled_reports: Vec<String>,
     /// Compteur de séquences `import()` (répercuté à la
     /// livraison — même motif `dyn_script_seq`).
     pub(crate) dyn_import_seq: u64,
@@ -757,6 +764,8 @@ impl Engine {
             pending_imports: std::collections::HashMap::new(),
             dyn_import_reqs: Vec::new(),
             import_drain_wired: false,
+            pending_unhandled: Vec::new(),
+            unhandled_reports: Vec::new(),
             dyn_import_seq: 0,
             module_sources: std::collections::HashMap::new(),
             current_module: String::new(),
@@ -1288,6 +1297,13 @@ impl Engine {
             }
         }
         out
+    }
+
+    /// Descriptions des `unhandledrejection` tirés (JS-C154) —
+    /// la session les verse au ring console
+    /// (`report_unhandled_rejection`).
+    pub fn drain_unhandled_rejections(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.unhandled_reports)
     }
 
     pub fn drain_dyn_scripts(&mut self) -> Vec<crate::dom_host::DynScriptReq> {
@@ -2138,6 +2154,7 @@ impl Engine {
             self.xhr.req_proto,
             self.xhr.res_proto,
             self.xhr.fd_proto,
+            self.xhr.xhr_proto,
         ]
         .into_iter()
         .flatten()
@@ -2159,6 +2176,12 @@ impl Engine {
         // `heap.obj(promise)` → None, reactions=999).
         for p in self.pending_imports.values() {
             ids.push(p.promise);
+        }
+        // `unhandledrejection` en attente (JS-C154) — promesse
+        // + raison racines jusqu'au tir du checkpoint.
+        for (p, r) in &self.pending_unhandled {
+            crate::heap::push_value(&mut ids, *p);
+            crate::heap::push_value(&mut ids, *r);
         }
         for (_, job) in &self.microtasks {
             match job {
@@ -2501,6 +2524,22 @@ impl Engine {
         self.heap.alloc_obj(Object::ordinary(proto))
     }
 
+    /// Boxing `ToObject` d'une primitive — wrapper portant
+    /// `__prim` (même chemin que `new String`/`new Number`,
+    /// `length` non-writable pour les strings). Utilisé par
+    /// `OrdinaryCallBindThis` sloppy.
+    pub(crate) fn box_primitive(&mut self, v: Value) -> Value {
+        let proto = match v {
+            Value::Str(_) => self.protos.string,
+            Value::Num(_) => self.protos.number,
+            Value::Bool(_) => self.protos.boolean,
+            Value::Big(_) => self.protos.bigint,
+            _ => self.protos.object,
+        };
+        let id = self.heap.alloc_obj(Object::ordinary(Value::Obj(proto)));
+        crate::builtins::ctors::wrap_or_prim(self, Value::Obj(id), proto, v)
+    }
+
     /// Fonction native enveloppant une méthode host
     /// (feature-detect) — `args[0]` = nom lié posé par
     /// `bound_native` au site `get_prop_value`, `this` =
@@ -2508,7 +2547,7 @@ impl Engine {
     /// (même pile que `el.m()` à l'appel). `Ok(None)` →
     /// `Undefined` (la surface a pu changer entre lecture
     /// et appel).
-    fn host_method(&mut self, this: Value, args: &[Value]) -> JsResult<Value> {
+    pub(crate) fn host_method(&mut self, this: Value, args: &[Value]) -> JsResult<Value> {
         let name = match args.first() {
             Some(Value::Str(s)) => self.heap.string(*s).unwrap_or_default(),
             _ => return Ok(Value::Undefined),
@@ -3656,7 +3695,14 @@ impl Engine {
         // `new` path uses `ctor.prototype`; re-point it at ours.
         self.set_own(ctor_id, "prototype", Value::Obj(proto), false);
         self.set_own(proto, "constructor", ctor, false);
-        Self::env_put(&cenv, HOME_BIND, ctor, false);
+        // `[[HomeObject]]` du ctor = l'objet **prototype** de la
+        // classe (spec `ClassDefinitionEvaluation`), pas le ctor
+        // : `super.m()` dans un constructeur dérivé résout sur
+        // `Parent.prototype` (`super.add(...)` de DSFR — sinon
+        // `undefined` → module `core.module.js` mort → les 13
+        // `…internals…` en cascade). `super()` reste sur
+        // `SUPER_BIND` (le parent **ctor**, distinct).
+        Self::env_put(&cenv, HOME_BIND, Value::Obj(proto), false);
         // Nom propre de la classe — liaison immuable dans le
         // scope de classe (spec `ClassDefinitionEvaluation`),
         // visible des méthodes/statiques/champs : `class e {
@@ -5571,7 +5617,18 @@ impl Engine {
         let this = if lit.strict || matches!(this, Value::Obj(_)) {
             this
         } else {
-            Value::Obj(self.global)
+            match this {
+                // Spec `OrdinaryCallBindThis` sloppy :
+                // `ToObject(thisArg)` — les primitives sont
+                // **boxées** en wrappers String/Number/Boolean/
+                // BigInt (`f.call("x")` ⇒ `this.toLowerCase()`
+                // fonctionne — jQuery `g.each`/`propFix`,
+                // codepen `everypage`, soundcloud `1-*.js`).
+                // Seuls `undefined`/`null` basculent sur
+                // l'objet global.
+                Value::Undefined | Value::Null => Value::Obj(self.global),
+                v => self.box_primitive(v),
+            }
         };
         let outer_strict = self.strict;
         self.strict = lit.strict;

@@ -212,6 +212,38 @@ fn overflow_clip_encadre_les_enfants() {
 }
 
 #[test]
+fn fixed_echappe_au_clip_overflow_ancetre() {
+    // Vol 26 (indeed) : un `position:fixed` ancré viewport ne
+    // doit pas être rogné par le `overflow` d'un ancêtre —
+    // son bloc conteneur est le viewport. La boîte fixe
+    // `bottom:0` (y≈180 dans un viewport de 200) sort du
+    // clip de l'ancêtre (50 px de haut) : son item doit être
+    // émis avec une profondeur de clip nulle.
+    let (_dom, _bx, items) = dl(
+        "<div id=o><div id=f></div></div>",
+        "#o{overflow:hidden;height:50px;position:relative} \
+         #f{position:fixed;bottom:0;left:0;width:100px;height:20px;background-color:#ff0000}",
+    );
+    let mut depth = 0i32;
+    let mut fixed_clip_depth = None;
+    for it in &items {
+        match it {
+            DisplayItem::PushClip(_) => depth += 1,
+            DisplayItem::PopClip => depth -= 1,
+            DisplayItem::FillRect { rect, .. } if rect.y > 150.0 => {
+                fixed_clip_depth = Some(depth);
+            }
+            _ => {}
+        }
+    }
+    assert_eq!(
+        fixed_clip_depth,
+        Some(0),
+        "le fond du `fixed` doit être émis hors de tout clip : {items:?}"
+    );
+}
+
+#[test]
 fn overflow_clip_couvre_les_lignes_propres() {
     // R-55 : motif `.sr-only` de lobste.rs — un élément EN LIGNE
     // positionné (`position:absolute`) est racine de son propre
@@ -1817,4 +1849,40 @@ fn marker_list_style_string_litteral() {
         })
         .collect();
     assert_eq!(texts, ["*", "*"], "chaîne littérale comme marqueur");
+}
+
+/// Vol 2026-10-26 — `opacity: 0` : tout le sous-arbre est
+/// invisible (modales `opacity-0` bookshop/ecma peintes en
+/// plein). Un élément `opacity:0` n'émet RIEN, enfants
+/// compris (l'opacité se compose multiplicativement — 0 ne
+/// se relève jamais, contrairement à `visibility`).
+#[test]
+fn opacity_zero_nemet_rien() {
+    let (_d, _b, items) = dl(
+        "<div id=v>visible</div><div id=o>cache</div>",
+        "body{margin:0} #o{opacity:0;background-color:#ff0000}",
+    );
+    let n_text = items
+        .iter()
+        .filter(|i| matches!(i, DisplayItem::Text { .. } | DisplayItem::MarkerText { .. }))
+        .count();
+    let n_fill = items
+        .iter()
+        .filter(|i| matches!(i, DisplayItem::FillRect { .. }))
+        .count();
+    assert_eq!(n_text, 1, "seul 'visible' peint : {items:?}");
+    assert_eq!(n_fill, 0, "fond de la modale invisible : {items:?}");
+}
+
+/// `opacity` positive (0<o<1, MVP non appliquée) : la boîte
+/// reste peinte — seul `0` court-circuite.
+#[test]
+fn opacity_partielle_ne_court_circuite_pas() {
+    let (_d, _b, items) = dl("<div id=o>semi</div>", "body{margin:0} #o{opacity:0.4}");
+    assert!(
+        items
+            .iter()
+            .any(|i| matches!(i, DisplayItem::Text { .. } | DisplayItem::MarkerText { .. })),
+        "opacité partielle : contenu peint : {items:?}"
+    );
 }

@@ -132,6 +132,11 @@ pub(crate) struct XhrEngineState {
     /// `FormData.prototype` (JS-C67) — paresseux (naît de
     /// `res.formData()`/`new FormData` même sans DOM).
     pub fd_proto: Option<crate::value::ObjId>,
+    /// `XMLHttpRequest.prototype` — posé par `install_xhr` : sans
+    /// vrai prototype, `XMLHttpRequest.prototype` vaut `undefined`
+    /// et l'instrumentation des bundles (`"send" in xhrProto` —
+    /// Sentry/Excalidraw) jette `TypeError: in requires an object`.
+    pub xhr_proto: Option<crate::value::ObjId>,
 }
 
 /// Per-XHR-instance state, shared between the JS wrapper and the
@@ -192,6 +197,49 @@ impl Engine {
         let v = self.native_fn("XMLHttpRequest", xhr_ctor);
         let g = self.global;
         self.set_own(g, "XMLHttpRequest", v, false);
+        // `XMLHttpRequest.prototype` réel (constant + méthodes en
+        // bound `hostMethod` re-dispatchant `Host::invoke` sur le
+        // receveur) : les bundles instrumentent le proto —
+        // `Dr(XMLHttpRequest.prototype, "send", wrap)` de Sentry
+        // (bootstrap Excalidraw) — et `xhr.send` doit être lisible
+        // comme fonction, pas seulement dispatchable à l'appel.
+        let proto = self.new_object();
+        self.xhr.xhr_proto = Some(proto);
+        if let Value::Obj(cid) = v {
+            self.set_own(cid, "prototype", Value::Obj(proto), false);
+            for (k, n) in [
+                ("UNSENT", 0.0),
+                ("OPENED", 1.0),
+                ("HEADERS_RECEIVED", 2.0),
+                ("LOADING", 3.0),
+                ("DONE", 4.0),
+            ] {
+                self.set_own(cid, k, Value::Num(n), false);
+                self.set_own(proto, k, Value::Num(n), false);
+            }
+        }
+        self.set_own(proto, "constructor", v, false);
+        for m in [
+            "open",
+            "send",
+            "abort",
+            "setRequestHeader",
+            "getResponseHeader",
+            "getAllResponseHeaders",
+            "overrideMimeType",
+            "addEventListener",
+            "removeEventListener",
+            // `XMLHttpRequest.prototype.fetch` — Chrome le détecte
+            // par `!!f && f.length === 3` (player_ias YouTube) ;
+            // exposée, la détection échoue honnêtement (bound
+            // `hostMethod` → `invoke` renvoie `None` → fallback
+            // XHR classique).
+            "fetch",
+        ] {
+            let name = self.str_val(m);
+            let f = self.bound_native("hostMethod", Self::host_method, vec![name]);
+            self.set_own(proto, m, f, false);
+        }
         self.install_fetch();
         self.install_abort();
     }
@@ -334,9 +382,18 @@ impl Engine {
 /// `new XMLHttpRequest()` (also callable without `new` — returns a
 /// fresh XHR either way, matching browser leniency).
 fn xhr_ctor(e: &mut Engine, _this: Value, _args: &[Value]) -> JsResult<Value> {
-    Ok(e.new_host_object(Rc::new(XhrHost {
+    let v = e.new_host_object(Rc::new(XhrHost {
         data: Rc::new(RefCell::new(XhrData::default())),
-    })))
+    }));
+    // Chaîne `xhr → XMLHttpRequest.prototype` : `instanceof`,
+    // `typeof xhr.send === 'function'` et l'override de méthode
+    // par les instrumentation hooks (spec WebIDL).
+    if let (Value::Obj(id), Some(p)) = (v, e.xhr.xhr_proto) {
+        if let Some(o) = e.heap.obj_mut(id) {
+            o.proto = Value::Obj(p);
+        }
+    }
+    Ok(v)
 }
 
 fn arg(args: &[Value], i: usize) -> Value {
@@ -2047,6 +2104,11 @@ impl Engine {
             // `AbortSignal.abort(reason?)` — signal déjà aborted.
             let f = self.native_fn("abort", abort_signal_static_abort);
             self.set_own(cid, "abort", f, false);
+            // `AbortSignal.throwIfAborted(sig)` — statique
+            // (youtube kevlar : `AbortSignal.throwIfAborted`
+            // lu sur le ctor → `of Undefined`).
+            let f = self.native_fn("throwIfAborted", abort_signal_static_throw_if);
+            self.set_own(cid, "throwIfAborted", f, false);
         }
         self.set_own(g, "AbortSignal", asig, false);
     }
@@ -2121,6 +2183,17 @@ impl Host for AbortSignalHost {
         }
     }
 
+    // Méthodes visibles en lecture — `signal.throwIfAborted`
+    // rendait `undefined` (invoke-only) alors que les sites
+    // s'en servent comme propriété (`AbortSignal.prototype.
+    // throwIfAborted` youtube kevlar vol22).
+    fn has_method(&self, name: &str) -> bool {
+        matches!(
+            name,
+            "addEventListener" | "removeEventListener" | "throwIfAborted"
+        )
+    }
+
     fn trace(&self, out: &mut Vec<crate::value::ObjId>) {
         for (f, _) in &self.data.borrow().listeners {
             if let Value::Obj(id) = f {
@@ -2151,6 +2224,26 @@ fn abort_signal_static_abort(e: &mut Engine, _t: Value, args: &[Value]) -> JsRes
             listeners: Vec::new(),
         })),
     })))
+}
+
+/// `AbortSignal.throwIfAborted(sig)` — statique spec : jette
+/// `sig.reason` si aborted (`AbortError` par défaut), rien sinon.
+fn abort_signal_static_throw_if(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let Some(data) = abort_data(e, arg(args, 0)) else {
+        return Err(e.type_error("AbortSignal.throwIfAborted: not an AbortSignal"));
+    };
+    let r = {
+        let d = data.borrow();
+        d.aborted.then_some(d.reason)
+    };
+    if let Some(r) = r {
+        return Err(crate::heap::Thrown(if matches!(r, Value::Undefined) {
+            e.str_val("AbortError")
+        } else {
+            r
+        }));
+    }
+    Ok(Value::Undefined)
 }
 
 /// `AbortSignal` neuf non-aborté — signal par défaut de

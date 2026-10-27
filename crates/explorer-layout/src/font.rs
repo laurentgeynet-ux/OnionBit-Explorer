@@ -109,6 +109,13 @@ pub struct Glyph {
     /// Cluster source (offset octet dans le run) — sert au
     /// hit-testing et à la sélection.
     pub cluster: u32,
+    /// Glyphe non peint (vol 26) : caractère PUA (`U+E000`–
+    /// `U+F8FF`, private use — icon-fonts type Material
+    /// Icons) non couvert par AUCUNE fonte (requête ni
+    /// repli). L'avance est conservée (le slot reste) mais
+    /// le raster saute le dessin — une icône-font manquante
+    /// ne doit pas peindre un tofu `□`.
+    pub invisible: bool,
 }
 
 /// Plage de glyphes shapés dans une fonte de **repli**
@@ -446,11 +453,24 @@ impl FontCache {
                 run.map(|r| (d, i, r))
             })
             .map(|(d, i, r)| {
-                let r = if r.glyphs.iter().any(|g| g.id == 0) {
+                let mut r = if r.glyphs.iter().any(|g| g.id == 0) {
                     self.shape_with_fallback(src, req, &d, i, text, size_px, rtl, ls, r)
                 } else {
                     r
                 };
+                // Vol 26 : les PUA restés `.notdef` (icon-font
+                // non chargée, aucune couverture) ne peignent
+                // pas de tofu — slot muet (avance conservée).
+                for g in &mut r.glyphs {
+                    if g.id == 0
+                        && text
+                            .get(g.cluster as usize..)
+                            .and_then(|s| s.chars().next())
+                            .is_some_and(|c| ('\u{E000}'..='\u{F8FF}').contains(&c))
+                    {
+                        g.invisible = true;
+                    }
+                }
                 std::sync::Arc::new(r)
             });
         if self.shape.len() < SHAPE_CACHE_CAP {
@@ -818,6 +838,7 @@ fn shape_parsed(
             offset_x: pos.x_offset as f32 * scale,
             offset_y: pos.y_offset as f32 * scale,
             cluster: info.cluster,
+            invisible: false,
         })
         .collect();
     let mut glyphs = glyphs;
@@ -1041,6 +1062,22 @@ mod tests {
             .expect("run");
         assert_eq!(run.glyphs.len(), 2);
         assert_eq!(run.glyphs[1].id, 0);
+        assert_eq!(run.fallback_spans.len(), 0);
+    }
+
+    /// Vol 26 : un PUA `.notdef` (icon-font manquante) passe
+    /// en slot muet — `invisible` posé, avance conservée,
+    /// aucun span. Un `.notdef` non-PUA (日) reste visible.
+    #[test]
+    fn pua_notdef_slot_muet() {
+        let src = Src::new(false);
+        let mut cache = FontCache::new();
+        let run = cache
+            .shape(&src, &Src::req(), "A\u{E001}日", 10.0, false, 0.0)
+            .expect("run");
+        assert_eq!(run.glyphs.len(), 3);
+        assert!(run.glyphs[1].invisible, "PUA `.notdef` → muet");
+        assert!(!run.glyphs[2].invisible, "日 `.notdef` → tofu");
         assert_eq!(run.fallback_spans.len(), 0);
     }
 

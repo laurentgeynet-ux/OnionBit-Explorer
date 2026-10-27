@@ -61,6 +61,11 @@ impl Session {
             let Some(entry) = self.tabs.get_mut(&tab) else {
                 return 0;
             };
+            // Disjoncteur (vol 25) : un `run_pending` sur
+            // worker figé patienterait 30 s sous verrou.
+            if entry.js_stall_until.is_some_and(|u| Instant::now() < u) {
+                return 0;
+            }
             let sync_ok = entry.sync_floor.is_none_or(|f| Instant::now() >= f);
             let Some(eng) = entry.js.as_mut() else {
                 return 0;
@@ -137,6 +142,12 @@ impl Session {
         if entry.js_detached.is_some() {
             return None;
         }
+        // Disjoncteur (vol 25) : détacher lancerait un run
+        // de 30 s hors verrou puis des livrées à timeout
+        // **sous** verrou au commit — autant sauter le tour.
+        if entry.js_stall_until.is_some_and(|u| Instant::now() < u) {
+            return None;
+        }
         let sync_ok = entry.sync_floor.is_none_or(|f| Instant::now() >= f);
         let eng = entry.js.take()?;
         entry.js_detached = Some(entry.nav_epoch);
@@ -153,6 +164,7 @@ impl Session {
     /// drains de fin de script — même ordre que
     /// [`Self::pump_timers`]. `out: None` = le bloc a paniqué
     /// (moteur perdu : l'onglet continue sans JS).
+    #[allow(clippy::too_many_lines)] // phase commit : file de livrées ordonnée, pas de sous-fonction nette
     pub(crate) fn commit_js_pump(
         &mut self,
         tab: TabId,
@@ -186,70 +198,143 @@ impl Session {
                 entry.pending_doc_lifecycle.clear();
                 return 0;
             }
-            // Cycle de vie document émis pendant le
-            // détachement (le tail de commit a pu courir sans
-            // moteur) — rejoué **avant** les livraisons
-            // tamponnées : une porte `readystatechange` qui se
-            // lève enfile ses `import()`/`fetch` avant elles,
-            // comme l'aurait fait l'événement à l'heure.
-            for step in std::mem::take(&mut entry.pending_doc_lifecycle) {
-                match step {
-                    types::DocLifecycle::ReadyState(ctx, s) => {
-                        eng.set_ready_state(ctx, &s);
-                    }
-                    types::DocLifecycle::Event(ctx, ty) => {
-                        let _ = eng.dispatch_event_ctx(ctx, &ty, &[]);
-                    }
+            // Disjoncteur « moteur figé » (vol 25) : chaque
+            // livrée/dispatch/eval ci-dessous attend une
+            // réponse du worker (`recv_eval`, 30 s) **sous
+            // verrou** — sur worker saturé la rafale figeait
+            // l'API ~90 s (kayak). Disjoncteur ouvert → on
+            // jette les tampons et on réinsère le moteur sans
+            // l'appeler : le verrou repasse aux handlers HTTP.
+            let mut stall: Option<explorer_js::JsError> = None;
+            if entry.js_stall_until.is_some_and(|u| Instant::now() < u) {
+                let dropped = entry.js_pending_net.len()
+                    + entry.js_pending_crypto.len()
+                    + entry.js_pending_es.len()
+                    + entry.js_pending_ws.len()
+                    + entry.js_pending_dyn.len()
+                    + entry.js_pending_mod.len()
+                    + entry.pending_doc_lifecycle.len();
+                entry.js_pending_net.clear();
+                entry.js_pending_crypto.clear();
+                entry.js_pending_es.clear();
+                entry.js_pending_ws.clear();
+                entry.js_pending_dyn.clear();
+                entry.js_pending_mod.clear();
+                entry.js_pending_attrs.clear();
+                entry.pending_doc_lifecycle.clear();
+                if dropped > 0 {
+                    tracing::warn!(tab, dropped, "moteur figé — livrées tamponnées jetées");
                 }
             }
-            // Sous-phases `commit_lock` (tâche profil github
-            // doc 20,6 s — attribution fine des ~800 ms/round :
-            // chaque livraison exécute du moteur sous verrou).
-            let mut t = Instant::now();
-            for resp in std::mem::take(&mut entry.js_pending_net) {
-                let _ = eng.deliver_net_response(resp);
-            }
-            t = sync_phase(tab, "commit.dl_net", t);
-            for resp in std::mem::take(&mut entry.js_pending_crypto) {
-                let _ = eng.deliver_crypto_response(resp);
-            }
-            t = sync_phase(tab, "commit.dl_crypto", t);
-            for (ctx, handle, ev) in std::mem::take(&mut entry.js_pending_es) {
-                let _ = eng.deliver_es_event(ctx, handle, ev);
-            }
-            t = sync_phase(tab, "commit.dl_es", t);
-            for (ctx, handle, ev) in std::mem::take(&mut entry.js_pending_ws) {
-                let _ = eng.deliver_ws_event(ctx, handle, ev);
-            }
-            t = sync_phase(tab, "commit.dl_ws", t);
-            for (ctx, seq, body) in std::mem::take(&mut entry.js_pending_dyn) {
-                eng.deliver_dyn_script(ctx, seq, body);
-            }
-            t = sync_phase(tab, "commit.dl_dyn", t);
-            for (ctx, seq, me) in std::mem::take(&mut entry.js_pending_mod) {
-                let ok = me.is_some_and(|me| Self::eval_mod(eng.as_mut(), &me).is_ok());
-                eng.deliver_dyn_module(ctx, seq, ok);
-            }
-            t = sync_phase(tab, "commit.eval_mod", t);
-            let attrs = std::mem::take(&mut entry.js_pending_attrs);
-            // Les pushes sont **toujours** rejoués dans le
-            // miroir (la saisie ne se perd pas) ; la
-            // re-sérialisation attend la fin de la fenêtre de
-            // coalescence — le bit sale persiste jusqu'au
-            // prochain apply autorisé (55g-suite).
-            let mutated = if attrs.is_empty() {
+            let mutated = if entry.js_stall_until.is_some_and(|u| Instant::now() < u) {
                 mutated
             } else {
-                for (path, attr, value) in attrs {
-                    eng.sync_mirror_attr(&path, &attr, value.as_deref());
+                // Cycle de vie document émis pendant le
+                // détachement (le tail de commit a pu courir sans
+                // moteur) — rejoué **avant** les livraisons
+                // tamponnées : une porte `readystatechange` qui se
+                // lève enfile ses `import()`/`fetch` avant elles,
+                // comme l'aurait fait l'événement à l'heure.
+                for step in std::mem::take(&mut entry.pending_doc_lifecycle) {
+                    match step {
+                        types::DocLifecycle::ReadyState(ctx, s) => {
+                            eng.set_ready_state(ctx, &s);
+                        }
+                        types::DocLifecycle::Event(ctx, ty) => {
+                            if let Err(e) = eng.dispatch_event_ctx(ctx, &ty, &[]) {
+                                if Self::is_engine_stall(&e) {
+                                    stall = Some(e);
+                                    break;
+                                }
+                            }
+                        }
+                    }
                 }
-                if sync_ok {
-                    Self::sync_for_apply(eng.as_mut())
+                // Sous-phases `commit_lock` (tâche profil github
+                // doc 20,6 s — attribution fine des ~800 ms/round :
+                // chaque livraison exécute du moteur sous verrou).
+                let mut t = Instant::now();
+                if stall.is_none() {
+                    for resp in std::mem::take(&mut entry.js_pending_net) {
+                        if let Err(e) = eng.deliver_net_response(resp) {
+                            if Self::is_engine_stall(&e) {
+                                stall = Some(e);
+                                break;
+                            }
+                        }
+                    }
+                }
+                t = sync_phase(tab, "commit.dl_net", t);
+                if stall.is_none() {
+                    for resp in std::mem::take(&mut entry.js_pending_crypto) {
+                        if let Err(e) = eng.deliver_crypto_response(resp) {
+                            if Self::is_engine_stall(&e) {
+                                stall = Some(e);
+                                break;
+                            }
+                        }
+                    }
+                }
+                t = sync_phase(tab, "commit.dl_crypto", t);
+                if stall.is_none() {
+                    for (ctx, handle, ev) in std::mem::take(&mut entry.js_pending_es) {
+                        if let Err(e) = eng.deliver_es_event(ctx, handle, ev) {
+                            if Self::is_engine_stall(&e) {
+                                stall = Some(e);
+                                break;
+                            }
+                        }
+                    }
+                }
+                t = sync_phase(tab, "commit.dl_es", t);
+                if stall.is_none() {
+                    for (ctx, handle, ev) in std::mem::take(&mut entry.js_pending_ws) {
+                        if let Err(e) = eng.deliver_ws_event(ctx, handle, ev) {
+                            if Self::is_engine_stall(&e) {
+                                stall = Some(e);
+                                break;
+                            }
+                        }
+                    }
+                }
+                t = sync_phase(tab, "commit.dl_ws", t);
+                for (ctx, seq, body) in std::mem::take(&mut entry.js_pending_dyn) {
+                    eng.deliver_dyn_script(ctx, seq, body);
+                }
+                t = sync_phase(tab, "commit.dl_dyn", t);
+                if stall.is_none() {
+                    for (ctx, seq, me) in std::mem::take(&mut entry.js_pending_mod) {
+                        let ok = me.is_some_and(|me| Self::eval_mod(eng.as_mut(), &me).is_ok());
+                        eng.deliver_dyn_module(ctx, seq, ok);
+                    }
+                }
+                t = sync_phase(tab, "commit.eval_mod", t);
+                let attrs = std::mem::take(&mut entry.js_pending_attrs);
+                // Les pushes sont **toujours** rejoués dans le
+                // miroir (la saisie ne se perd pas) ; la
+                // re-sérialisation attend la fin de la fenêtre de
+                // coalescence — le bit sale persiste jusqu'au
+                // prochain apply autorisé (55g-suite).
+                let mutated = if attrs.is_empty() {
+                    mutated
                 } else {
-                    None
-                }
+                    for (path, attr, value) in attrs {
+                        eng.sync_mirror_attr(&path, &attr, value.as_deref());
+                    }
+                    if sync_ok {
+                        Self::sync_for_apply(eng.as_mut())
+                    } else {
+                        None
+                    }
+                };
+                sync_phase(tab, "commit.attrs_sync", t);
+                mutated
             };
-            sync_phase(tab, "commit.attrs_sync", t);
+            if let Some(e) = stall {
+                tracing::warn!(tab, error = %e,
+                    "livrée moteur en timeout — disjoncteur armé");
+                entry.js_stall_until = Some(Instant::now() + self.js_stall_cooldown);
+            }
             entry.js = Some(eng);
             (jobs, mutated)
         };
@@ -568,10 +653,77 @@ impl Session {
     fn eval_ctx_or_report(&mut self, tab: TabId, eng: &mut dyn JsEngine, ctx: u32, src: &str) {
         if let Err(e) = eng.eval_ctx(ctx, src, None) {
             tracing::debug!(tab, ctx, error = %e, "script iframe en échec");
+            if Self::is_engine_stall(&e) {
+                self.mark_js_stall(tab, &e);
+            }
             let _ = self.events.send(CoreEvent::PipelineError {
                 tab: Some(tab),
                 message: format!("{e} — iframe — src «{}»", src_head(src)),
             });
+        }
+    }
+
+    /// Rejet de promesse non rattrapé → `PipelineError`
+    /// (vol : mort silencieuse type pinterest —
+    /// `__PWS_ROOT__` vide sans aucune trace).
+    ///
+    /// **Couture en attente** : le trait `JsEngine`
+    /// n'expose pas encore de drain pour les rejets (les
+    /// `onunhandledrejection` émis côté jscore restent
+    /// internes au moteur — chantier FIX-1). Ce routeur est
+    /// prêt : le jour où `drain_unhandled_rejections`
+    /// (ou équivalent) arrive, il suffit de l'appeler aux
+    /// points de synchro et de repasser chaque message ici —
+    /// le `PipelineError` part déjà vers le ring `/console`.
+    // Aucun drain ne l'appelle encore (couture jscore
+    // attendue) — l'avertissement est donc intentionnel.
+    #[allow(dead_code)]
+    pub(crate) fn report_unhandled_rejection(&mut self, tab: TabId, message: &str) {
+        tracing::warn!(tab, error = %message, "promesse rejetée non rattrapée");
+        let _ = self.events.send(CoreEvent::PipelineError {
+            tab: Some(tab),
+            message: format!("unhandledrejection — {message}"),
+        });
+    }
+
+    /// `true` si l'erreur trahit un worker moteur saturé ou
+    /// mort : `Dead`, ou éval dépassée — le proxy jscore la
+    /// rend en `Uncaught("moteur figé — …")` faute de
+    /// variante dédiée (couture `explorer-js`, chantier
+    /// FIX-1 : une variante `Timeout` typée remplacerait ce
+    /// test de chaîne).
+    pub(crate) fn is_engine_stall(e: &explorer_js::JsError) -> bool {
+        matches!(e, explorer_js::JsError::Dead)
+            || matches!(e, explorer_js::JsError::Uncaught(m) if m.starts_with("moteur fig\u{e9}"))
+    }
+
+    /// Disjoncteur « moteur figé » actif sur l'onglet ?
+    /// (vol 25 : chaque appel bloquant au worker saturé
+    /// patiente `EVAL_CMD_TIMEOUT` = 30 s — sous verrou, une
+    /// rafale de livrées figeait l'API ~90 s sur kayak).
+    /// L'échéance passée rouvre d'elle-même — lecture
+    /// paresseuse, aucune tâche de réarmement.
+    pub(crate) fn js_stalled(&self, tab: TabId) -> bool {
+        self.tabs
+            .get(&tab)
+            .is_some_and(|e| e.js_stall_until.is_some_and(|u| Instant::now() < u))
+    }
+
+    /// Ouvre le disjoncteur pour `js_stall_cooldown` : les
+    /// appels moteur **bloquants** de l'onglet sont
+    /// court-circuités — le verrou session repasse aux
+    /// handlers HTTP entre deux pompes plutôt que d'attendre
+    /// un worker inerte. `cooldown = 0` désactive.
+    fn mark_js_stall(&mut self, tab: TabId, e: &explorer_js::JsError) {
+        if self.js_stall_cooldown.is_zero() {
+            return;
+        }
+        if let Some(entry) = self.tabs.get_mut(&tab) {
+            if entry.js_stall_until.is_none_or(|u| Instant::now() >= u) {
+                tracing::warn!(tab, error = %e,
+                    "moteur figé — disjoncteur ouvert, appels JS court-circuités");
+            }
+            entry.js_stall_until = Some(Instant::now() + self.js_stall_cooldown);
         }
     }
 
@@ -703,6 +855,9 @@ impl Session {
         );
         if let Err(e) = r {
             tracing::debug!(tab, error = %e, "script en échec");
+            if Self::is_engine_stall(&e) {
+                self.mark_js_stall(tab, &e);
+            }
             let origin = url.map(|u| format!("{u} — ")).unwrap_or_default();
             let _ = self.events.send(CoreEvent::PipelineError {
                 tab: Some(tab),
@@ -781,10 +936,16 @@ impl Session {
         props: &[(String, EventProp)],
     ) -> bool {
         let t0 = Instant::now();
+        let cooldown = self.js_stall_cooldown;
         let (prevented, mut t, mutated) = {
             let Some(entry) = self.tabs.get_mut(&tab) else {
                 return false;
             };
+            // Disjoncteur (vol 25) : dispatch vers un worker
+            // figé = 30 s de verrou pour rien.
+            if entry.js_stall_until.is_some_and(|u| Instant::now() < u) {
+                return false;
+            }
             let Some(eng) = entry.js.as_mut() else {
                 // Moteur détaché (53f) : un événement **cible
                 // document** est tamponné puis rejoué à la
@@ -810,6 +971,9 @@ impl Session {
             let p = match eng.dispatch_event_props(ty, path, props) {
                 Ok(p) => p,
                 Err(e) => {
+                    if Self::is_engine_stall(&e) && !cooldown.is_zero() {
+                        entry.js_stall_until = Some(Instant::now() + cooldown);
+                    }
                     tracing::debug!(tab, ty, error = %e, "listener dom en échec");
                     let _ = self.events.send(CoreEvent::PipelineError {
                         tab: Some(tab),
@@ -855,7 +1019,21 @@ impl Session {
                 .tabs
                 .get(&tab)
                 .and_then(|entry| entry.dom.as_ref().and_then(|d| element_path(d, n))),
-            None => Some(Vec::new()),
+            // Rien de focalisé → `document.activeElement`
+            // spec = `<body>` : les écouteurs posés sur
+            // `document.body` (jeux clavier type wordle,
+            // vol 28) doivent recevoir la frappe — le
+            // document nu reste le repli sans body.
+            None => self
+                .tabs
+                .get(&tab)
+                .and_then(|entry| entry.dom.as_ref())
+                .map(|d| {
+                    descendant_elements(d, d.document(), "body")
+                        .first()
+                        .and_then(|b| element_path(d, *b))
+                        .unwrap_or_default()
+                }),
         };
         match path {
             Some(p) => self.dispatch_path_event_props(tab, ty, &p, &props),

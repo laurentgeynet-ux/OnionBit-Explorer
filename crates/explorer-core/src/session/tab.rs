@@ -85,6 +85,17 @@ impl Tab {
         snap.images.masks.clear();
         snap.images.masks_url.clear();
         snap.list = None;
+        // Budget mémoire bfcache (vol github — ~130 Mio de
+        // rasters pour 4 pages gelées) : la frame et son
+        // cache PNG ne sont **pas** conservés au gel. Le
+        // DOM et l'arbre de boîtes survivent : la
+        // restauration repeint via `needs_paint`
+        // (`try_bfcache`) — quelques millisecondes de
+        // repaint contre des dizaines de Mio par page,
+        // même politique que les navigateurs qui ne gardent
+        // pas la surface raster en bfcache.
+        snap.frame = None;
+        snap.png = None;
         self.set_scroll(0.0);
         self.doc_h = 0.0;
         // Issue #19 : la page gelée emporte son moteur — la
@@ -141,6 +152,9 @@ impl Tab {
                                  // son drapeau et les tampons qui lui appartenaient
                                  // (53f) ne doivent pas survivre à la restauration.
         self.js_detached = None;
+        // Moteur neuf restauré — le disjoncteur de l'ancien
+        // contexte ne survit pas (vol 25).
+        self.js_stall_until = None;
         self.js_pending_net.clear();
         self.js_pending_crypto.clear();
         self.js_pending_dyn.clear();

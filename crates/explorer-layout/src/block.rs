@@ -424,6 +424,14 @@ pub(crate) fn raw_length_px(
     if raw.len() > 5 && raw[..5].eq_ignore_ascii_case("calc(") && raw.ends_with(')') {
         return eval_calc(&raw[5..raw.len() - 1], pct_basis, em_basis, ctx);
     }
+    // `min()`/`max()`/`clamp()` (CSS Values 4 §9) — fonctions
+    // mathématiques au niveau valeur entière ; les arguments
+    // sont eux-mêmes des longueurs complètes (`calc` imbriqué
+    // compris). Vol 11 stripe : `clamp()`/`min()` dans les
+    // largeurs retombait à `auto` → items flex éclatés.
+    if let Some(v) = eval_math_fn(raw, pct_basis, em_basis, ctx) {
+        return Some(v);
+    }
     let len = parse_length(raw)?;
     #[allow(clippy::cast_possible_truncation)]
     Some(match len.unit {
@@ -438,6 +446,69 @@ pub(crate) fn raw_length_px(
         Unit::Vmax => len.value as f32 * ctx.viewport_w.max(ctx.viewport_h) / 100.0,
         u => (len.value * u.px_factor()?) as f32,
     })
+}
+
+/// `min(a, …)` / `max(a, …)` / `clamp(min, pref, max)`
+/// (CSS Values 4 §9) au niveau d'une valeur entière : chaque
+/// argument séparé par une virgule de **profondeur 0** est
+/// évalué par [`raw_length_px`] (`calc` imbriqué compris).
+/// `None` si ce n'est pas une de ces fonctions ou si la
+/// syntaxe casse — la dégradation usuelle (`auto`) reprend.
+fn eval_math_fn(raw: &str, pct_basis: f32, em_basis: f32, ctx: &BlockCtx) -> Option<f32> {
+    let t = raw.trim();
+    let (name, inner) = ["clamp", "min", "max"].into_iter().find_map(|n| {
+        if t.len() > n.len()
+            && t[..n.len()].eq_ignore_ascii_case(n)
+            && t[n.len()..].starts_with('(')
+            && t.ends_with(')')
+        {
+            Some((n, &t[n.len() + 1..t.len() - 1]))
+        } else {
+            None
+        }
+    })?;
+    // Virgules de niveau 0 seulement — les arguments peuvent
+    // contenir des parenthèses (`calc`, fonctions imbriquées).
+    let mut depth = 0i32;
+    let mut parts: Vec<String> = Vec::new();
+    let mut cur = String::new();
+    for ch in inner.chars() {
+        match ch {
+            '(' => {
+                depth += 1;
+                cur.push(ch);
+            }
+            ')' => {
+                depth -= 1;
+                if depth < 0 {
+                    return None;
+                }
+                cur.push(ch);
+            }
+            ',' if depth == 0 => parts.push(std::mem::take(&mut cur)),
+            _ => cur.push(ch),
+        }
+    }
+    if depth != 0 {
+        return None;
+    }
+    parts.push(cur);
+    let vals: Vec<f32> = parts
+        .iter()
+        .map(|p| raw_length_px(p, pct_basis, em_basis, ctx))
+        .collect::<Option<_>>()?;
+    match name {
+        "min" => vals.iter().copied().reduce(f32::min),
+        "max" => vals.iter().copied().reduce(f32::max),
+        _ => {
+            // `clamp(MIN, VAL, MAX)` = `max(MIN, min(VAL, MAX))`
+            // — un MIN > MAX laisse MIN gagner (spec §9.2).
+            if vals.len() != 3 {
+                return None;
+            }
+            Some(vals[0].max(vals[1].min(vals[2])))
+        }
+    }
 }
 
 /// Évalue l'intérieur d'un `calc(...)` en px : `term ((+|-) term)*`,
@@ -1770,7 +1841,13 @@ fn flow_children(
     // flux est alors une ligne nouvelle (le curseur).
     let mut inline_anchor: Option<f32> = None;
     let count = bx.children.len();
+    // Fin (exclue) de la dernière suite emballée en table
+    // anonyme (§17.2.1) — les indices déjà posés sont sautés.
+    let mut skip_until = 0usize;
     for i in 0..count {
+        if i < skip_until {
+            continue;
+        }
         let (kind, cst) = {
             let c = &bx.children[i];
             (c.kind, c.style.clone())
@@ -1917,6 +1994,101 @@ fn flow_children(
                 fl,
                 cb_h,
             );
+            continue;
+        }
+
+        // §17.2.1 : une suite d'enfants « internes de table »
+        // (`table-cell`, `table-row`, groupes de rangs) hors
+        // d'un parent `display:table` est emballée dans une
+        // table ANONYME — sans quoi les cartes posées en
+        // `display:table-cell` sous un conteneur `block`
+        // (IGN `section.hspotlight/upcoming`, vol 19)
+        // s'empilaient en colonne pleine largeur au lieu de
+        // former leurs rangées. Les blancs inter-cellules
+        // rejoignent l'emballage (§17.2.1 : ignorés dans la
+        // table), comme `ignorable_in_table`.
+        let cdisp = cst.get_or("display", "block");
+        if matches!(
+            cdisp,
+            "table-cell"
+                | "table-row"
+                | "table-row-group"
+                | "table-header-group"
+                | "table-footer-group"
+        ) {
+            let internal = |c: &LayoutBox| {
+                matches!(
+                    c.display(),
+                    "table-cell"
+                        | "table-row"
+                        | "table-row-group"
+                        | "table-header-group"
+                        | "table-footer-group"
+                ) && !c.out_of_flow()
+                    && !matches!(c.style.get("float"), Some("left" | "right"))
+            };
+            let mut end = i;
+            while end < count
+                && (internal(&bx.children[end])
+                    || crate::tables::ignorable_in_table(&bx.children[end]))
+            {
+                end += 1;
+            }
+            // Emballage temporaire : les enfants de la suite
+            // sont déplacés sous une boîte anonyme
+            // `display:table`, posés par l'algorithme table
+            // (cellules nues → rang anonyme, cf.
+            // `collect_grid`), puis réinsérés à leur indice —
+            // l'arbre garde sa forme, seule la géométrie change.
+            let mut wstyle = bx.style.clone();
+            wstyle.set("display", "table");
+            let mut wrapper = LayoutBox {
+                kind: BoxKind::AnonymousBlock,
+                node: None,
+                style: wstyle,
+                text: None,
+                children: bx.children.drain(i..end).collect(),
+                lines: Vec::new(),
+                rect: Rect::default(),
+                position: Position::Static,
+                float: Float::None,
+                overflow: Overflow::default(),
+                z_index: 0,
+                intrinsic: None,
+                control_checked: false,
+                slot: crate::boxtree::BoxSlot::default(),
+                height_raised: false,
+                fc_root: false,
+                marker_ordinal: 0,
+            };
+            let gap = if first && adjoining_top {
+                0.0
+            } else {
+                prev_margin.map_or(0.0, MarginRun::value)
+            };
+            let used = crate::tables::layout_table(
+                &mut wrapper,
+                content_x,
+                cursor + gap,
+                content_w,
+                ctx,
+                fs,
+                None,
+            );
+            let cells = std::mem::take(&mut wrapper.children);
+            bx.children.splice(i..i, cells);
+            // La suite est posée : les itérations suivantes la
+            // sautent (les indices sont restaurés à l'identique
+            // par la réinsertion).
+            skip_until = end;
+            cursor += gap + used;
+            flow_bottom = cursor;
+            // La table anonyme établit un BFC : ni ses marges
+            // (nulles) ni celles des cellules ne traversent —
+            // la chaîne repart à zéro.
+            prev_margin = Some(MarginRun::default());
+            first = false;
+            inline_anchor = None;
             continue;
         }
 

@@ -787,7 +787,11 @@ pub enum CoreError {
 #[derive(Debug, Clone, Copy)]
 pub struct SessionConfig {
     /// Capacité du bus d'événements (au-delà, les abonnés
-    /// lents sautent des événements — le pull PNG corrige).
+    /// lents sautent des événements — le pull PNG corrige
+    /// les frames, mais les `PipelineError` enregistrés
+    /// dans le ring console sont **perdus** pour de bon :
+    /// dimensionné pour les bursts d'une navigation
+    /// complète — vol 18 x.com).
     pub event_capacity: usize,
     /// Viewport CSS initial `(w, h)`.
     pub viewport: (f32, f32),
@@ -903,12 +907,20 @@ pub struct SessionConfig {
     /// aligné sur `DEFAULT_MEM_LIMIT` du moteur : la
     /// protection reste le comportement nominal.
     pub js_mem_limit_mib: usize,
+    /// Disjoncteur « moteur figé » (vol 25 : worker jscore
+    /// saturé — chaque `recv_eval` patiente 30 s sous verrou
+    /// → API muette ~90 s). Après un timeout/`Dead`, les
+    /// appels moteur bloquants de l'onglet sont court-circuités
+    /// pendant cette durée — le verrou session est relâché
+    /// vite, l'onglet perd son JS le temps du refroidissement.
+    /// `Duration::ZERO` = disjoncteur désactivé. Défaut 10 s.
+    pub js_stall_cooldown: std::time::Duration,
 }
 
 impl Default for SessionConfig {
     fn default() -> Self {
         Self {
-            event_capacity: 64,
+            event_capacity: 512,
             viewport: (1024.0, 768.0),
             scale: 1.0,
             js_ops: 5_000_000,
@@ -932,6 +944,7 @@ impl Default for SessionConfig {
             color_scheme: explorer_css::ColorScheme::default(),
             dom_journal_max_ops: 512,
             js_mem_limit_mib: 512,
+            js_stall_cooldown: std::time::Duration::from_secs(10),
         }
     }
 }

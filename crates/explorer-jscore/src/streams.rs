@@ -1360,6 +1360,50 @@ pub(crate) fn body_stream(e: &mut Engine, bytes: &[u8]) -> Value {
     rs_obj(e, &d, p)
 }
 
+/// `new TextEncoderStream()` — Encoding API : TransformStream
+/// dont le transformer encode chaque chunk en UTF-8
+/// (`Uint8Array` enqueued — spec).
+fn text_encoder_stream_ctor(e: &mut Engine, t: Value, _a: &[Value]) -> JsResult<Value> {
+    let tr = e.new_object();
+    e.add_method(tr, "transform", tes_encode_transform);
+    transform_stream_ctor(e, t, &[Value::Obj(tr)])
+}
+
+/// Transformer `TextEncoderStream` : chunk → UTF-8 bytes,
+/// `ctrl.enqueue(Uint8Array)`.
+fn tes_encode_transform(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let s = e.to_js_string(arg(args, 0))?;
+    let arr = crate::typed_array::new_u8_array(e, s.into_bytes());
+    stream_enqueue(e, arg(args, 1), arr)
+}
+
+/// `new TextDecoderStream(label?, options?)` — chunk bytes →
+/// chaîne UTF-8 (`from_utf8_lossy`, comme `TextDecoder`).
+fn text_decoder_stream_ctor(e: &mut Engine, t: Value, _a: &[Value]) -> JsResult<Value> {
+    let tr = e.new_object();
+    e.add_method(tr, "transform", tes_decode_transform);
+    transform_stream_ctor(e, t, &[Value::Obj(tr)])
+}
+
+/// Transformer `TextDecoderStream` : octets → `enqueue(string)`.
+fn tes_decode_transform(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let bytes = crate::typed_array::bytes_of_value(e, arg(args, 0)).unwrap_or_default();
+    let s = e.str_val(String::from_utf8_lossy(&bytes).into_owned());
+    stream_enqueue(e, arg(args, 1), s)
+}
+
+/// `ctrl.enqueue(v)` — partagé encode/decode.
+fn stream_enqueue(e: &mut Engine, ctrl: Value, v: Value) -> JsResult<Value> {
+    if let Value::Obj(cid) = ctrl {
+        if let Some(enq) = e.get_prop(cid, "enqueue") {
+            if e.is_callable(enq) {
+                e.call_value(enq, ctrl, &[v])?;
+            }
+        }
+    }
+    Ok(Value::Undefined)
+}
+
 /// Installe `ReadableStream`/`WritableStream`/`TransformStream`
 /// sur le global — idempotent.
 pub(crate) fn install_streams(e: &mut Engine) {
@@ -1375,6 +1419,18 @@ pub(crate) fn install_streams(e: &mut Engine) {
         ),
         ("WritableStream", writable_stream_ctor, ws_proto(e)),
         ("TransformStream", transform_stream_ctor, ts_proto(e)),
+        // `TextEncoderStream`/`TextDecoderStream` (Encoding API,
+        // JS-C158) — medium.com charge ses loaders par ces ctors.
+        (
+            "TextEncoderStream",
+            text_encoder_stream_ctor,
+            new_tagged_proto(e, "TextEncoderStream"),
+        ),
+        (
+            "TextDecoderStream",
+            text_decoder_stream_ctor,
+            new_tagged_proto(e, "TextDecoderStream"),
+        ),
     ] {
         let fv = e.native_fn(name, f);
         if let Value::Obj(fid) = fv {

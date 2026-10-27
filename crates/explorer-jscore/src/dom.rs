@@ -1049,6 +1049,16 @@ impl Dom {
                         out.push_str(&escape_text(&n.text));
                         continue;
                     }
+                    // Commentaire : pas de reflet moteur
+                    // (`serializable_kind` côté apply ne garde que
+                    // Element|Text) — ni markup `<#comment>`
+                    // (re-parsé en élément fantôme peint en
+                    // texte), ni entrée `ids`/`tags` (le zip
+                    // `engine_preorder` ↔ `ids` dériverait d'un
+                    // cran par commentaire).
+                    if n.kind == NodeKind::Comment {
+                        continue;
+                    }
                     if n.kind == NodeKind::Fragment {
                         // Aucun nœud moteur émis — id non listé
                         // (les enfants le sont).
@@ -1129,12 +1139,23 @@ impl Dom {
                 if let Some(&first) = rec.added.first() {
                     // Position au moment de la mutation — les
                     // ops rejouent en séquence, l'index reste
-                    // valide côté moteur.
+                    // valide côté moteur. Comptée sur les enfants
+                    // **sérialisables** (Element|Text) : le moteur
+                    // n'a pas de nœuds commentaires, indexer sur
+                    // `children` brut décalerait l'insertion d'un
+                    // cran par `<!-- -->` antérieur (graft_subtree
+                    // filtre par `serializable_kind`).
                     let index = self.nodes[rec.target as usize]
                         .children
                         .iter()
-                        .position(|&c| c == first)
-                        .map_or(0, |i| i as u32);
+                        .take_while(|&&c| c != first)
+                        .filter(|&&c| {
+                            matches!(
+                                self.nodes[c as usize].kind,
+                                NodeKind::Element | NodeKind::Text
+                            )
+                        })
+                        .count() as u32;
                     self.journal.push(JournalOp::Insert {
                         parent: rec.target,
                         index,

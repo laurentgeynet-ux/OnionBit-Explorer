@@ -42,6 +42,11 @@ pub enum JsError {
     /// Le thread moteur est mort (panic interne, poison).
     #[error("moteur js inerte")]
     Dead,
+    /// Éval/drain dépassé `EVAL_CMD_TIMEOUT` — disjoncteur
+    /// « moteur figé » (boucle hostile). Kind typé : la session
+    /// distingue un stall d'une exception du script.
+    #[error("moteur figé — éval dépassée")]
+    Timeout,
 }
 
 impl From<explorer_jscore::Error> for JsError {
@@ -708,6 +713,12 @@ pub trait JsEngine: Send {
     /// [`Self::deliver_dyn_script`]. Défaut : rien (moteur
     /// sans DOM miroir dynamique).
     fn drain_dyn_scripts(&mut self) -> Vec<explorer_jscore::DynScriptReq> {
+        Vec::new()
+    }
+
+    /// Descriptions des `unhandledrejection` tirés (JS-C154)
+    /// — la session les verse au ring console. Défaut : rien.
+    fn drain_unhandled_rejections(&mut self) -> Vec<String> {
         Vec::new()
     }
 
@@ -1688,6 +1699,11 @@ enum Cmd {
     DrainDynScripts {
         tx: Sender<Vec<explorer_jscore::DynScriptReq>>,
     },
+    /// `unhandledrejection` tirés (JS-C154) — descriptions
+    /// vers le ring console de la session.
+    DrainUnhandledRejections {
+        tx: Sender<Vec<String>>,
+    },
     DeliverDynScript {
         ctx: JsCtxId,
         seq: u64,
@@ -1797,9 +1813,7 @@ impl JscoreEngine {
     fn recv_eval<T>(rx: &Receiver<T>) -> Result<T, JsError> {
         rx.recv_timeout(Self::EVAL_CMD_TIMEOUT)
             .map_err(|e| match e {
-                RecvTimeoutError::Timeout => {
-                    JsError::Uncaught("moteur figé — éval dépassée".into())
-                }
+                RecvTimeoutError::Timeout => JsError::Timeout,
                 RecvTimeoutError::Disconnected => JsError::Dead,
             })
     }
@@ -2272,6 +2286,11 @@ impl JscoreEngine {
                         return;
                     }
                 }
+                Cmd::DrainUnhandledRejections { tx } => {
+                    if tx.send(eng.drain_unhandled_rejections()).is_err() {
+                        return;
+                    }
+                }
                 Cmd::DeliverDynScript { ctx, seq, body } => {
                     let prev = eng.current_context();
                     eng.context_switch(ctx);
@@ -2586,6 +2605,14 @@ impl JsEngine for JscoreEngine {
     fn drain_dyn_scripts(&mut self) -> Vec<explorer_jscore::DynScriptReq> {
         let (tx, rx) = channel();
         if self.tx.send(Cmd::DrainDynScripts { tx }).is_err() {
+            return Vec::new();
+        }
+        rx.recv_timeout(Self::EVAL_CMD_TIMEOUT).unwrap_or_default()
+    }
+
+    fn drain_unhandled_rejections(&mut self) -> Vec<String> {
+        let (tx, rx) = channel();
+        if self.tx.send(Cmd::DrainUnhandledRejections { tx }).is_err() {
             return Vec::new();
         }
         rx.recv_timeout(Self::EVAL_CMD_TIMEOUT).unwrap_or_default()

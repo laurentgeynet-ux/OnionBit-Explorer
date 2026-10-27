@@ -659,6 +659,17 @@ fn dom_raw_get(e: &mut Engine, dom: &DomRef, node: NodeId, prop: &str) -> JsResu
         return Ok(e.str_val(v));
     }
     let attr = prop_to_attr(prop).unwrap_or(prop);
+    // IDL URL-typé (`src`/`href` sur `<img>`/`<script>`/`<a>`…) :
+    // la lecture résout contre `document.baseURI` (spec
+    // `[[Get]]` URL — `getAttribute` reste brut). `new URL(
+    // el.src)` échouait `Invalid URL` sur les src relatives
+    // (lemonde `inline:5`, franceinfo `Invalid scheme`).
+    if matches!(attr, "src" | "href") {
+        if let Some(raw) = d.attr(node, attr) {
+            let resolved = crate::xhr::resolve_url(e, raw).unwrap_or_else(|| raw.to_string());
+            return Ok(e.str_val(resolved));
+        }
+    }
     let v = d.attr(node, attr).unwrap_or("").to_string();
     Ok(e.str_val(v))
 }
@@ -1436,6 +1447,20 @@ pub(crate) fn node_value(e: &mut Engine, dom: &DomRef, cache: &NodeCache, node: 
         node,
     }));
     if let Value::Obj(id) = v {
+        // `sr instanceof ShadowRoot` (JS-C159) — la racine
+        // hérite `ShadowRoot.prototype` (proto lu sur le
+        // ctor global, posé à `install_dom`).
+        if dom.borrow().is_shadow_root(node) {
+            let proto = e.get_prop(e.global, "ShadowRoot").and_then(|c| match c {
+                Value::Obj(cid) => e.get_prop(cid, "prototype"),
+                _ => None,
+            });
+            if let Some(p @ Value::Obj(_)) = proto {
+                if let Some(o) = e.heap.obj_mut(id) {
+                    o.proto = p;
+                }
+            }
+        }
         cache.borrow_mut().insert(node, id);
     }
     v
@@ -1660,6 +1685,17 @@ impl Engine {
         let tag = self.str_val("Clipboard");
         self.set_own(clip, crate::interp::SYM_TO_STRING_TAG, tag, false);
         self.set_own(nav, "clipboard", Value::Obj(clip), true);
+        // Props triviales honnêtes (JS-C157) — lues par les
+        // CMP/feature-detects : `undefined` cassait la lecture
+        // (`navigator.onLine`, `hardwareConcurrency`…).
+        // Valeurs low-fingerprint, pas des stubs promettant.
+        self.set_own(nav, "onLine", Value::Bool(true), true);
+        self.set_own(nav, "cookieEnabled", Value::Bool(true), true);
+        self.set_own(nav, "webdriver", Value::Bool(false), true);
+        self.set_own(nav, "globalPrivacyControl", Value::Bool(false), true);
+        self.set_own(nav, "doNotTrack", Value::Null, true);
+        self.set_own(nav, "maxTouchPoints", Value::Num(0.0), true);
+        self.set_own(nav, "hardwareConcurrency", Value::Num(4.0), true);
         self.set_own(g, "navigator", Value::Obj(nav), false);
 
         // `Worker` borné (JS-C29) — le constructeur est présent
@@ -1683,6 +1719,9 @@ impl Engine {
         // `MutationObserver` (JS-C26) — les records vivent dans
         // la file du `Dom`, livrés au microtask checkpoint.
         self.install_mutation_observer();
+        // Interfaces IDB (feature-detect/`instanceof`) —
+        // indépendantes du registre `indexedDB` (install_idb).
+        crate::idb::install_idb_interfaces(self);
         // `location` + `history` — hooks-driven (see BrowserHooks).
         // `Location` global (JS-C122/news.google) : l'interface
         // existe comme nom global — `location instanceof
@@ -1919,6 +1958,16 @@ impl Engine {
             self.set_own(p, crate::interp::SYM_TO_STRING_TAG, tag, false);
             if let Value::Obj(fid) = et_f {
                 self.set_own(fid, "prototype", Value::Obj(p), false);
+            }
+            // WebIDL : `window` hérite `EventTarget.prototype` —
+            // le polyfill webcomponents (YouTube) lit
+            // `window.__shady_native_addEventListener` à travers
+            // cette chaîne après y avoir défini la native
+            // sauvegardée (`L(proto,…)` → `defineProperty`).
+            if let Some(o) = self.heap.obj_mut(g) {
+                if matches!(o.proto, Value::Obj(p0) if p0 == self.protos.object) {
+                    o.proto = Value::Obj(p);
+                }
             }
         }
         self.set_own(g, "EventTarget", et_f, false);
@@ -2220,6 +2269,11 @@ impl Engine {
             self.set_own(fid, "timeout", m, true);
             let m = self.native_fn("any", signal_static_any);
             self.set_own(fid, "any", m, true);
+            // Statique spec `AbortSignal.throwIfAborted(sig)`
+            // (youtube kevlar vol22 : lu sur le ctor →
+            // `cannot read 'throwIfAborted' of Undefined`).
+            let m = self.native_fn("throwIfAborted", signal_static_throw_if_aborted);
+            self.set_own(fid, "throwIfAborted", m, true);
             self.set_own(fid, "prototype", Value::Obj(sig_proto), false);
         }
         self.set_own(g, "AbortSignal", as_f, false);
@@ -2265,6 +2319,10 @@ impl Engine {
         // `WebSocket` (JS-C73) — stub honnête (handshake
         // refusé en async) pour les feature-detects.
         crate::websocket::install_websocket(self);
+        // `EventSource` (JS-C92) — même motif : sans transport
+        // le ctor arme un refus différé au checkpoint, jamais
+        // un global absent (feature-detects des loaders).
+        crate::eventsource::install_eventsource(self);
         // `Notification`/`BroadcastChannel`/`reportError`/
         // `getSelection` (JS-C74) — dom_ctx posé → Selection
         // disponible ici.
@@ -3206,6 +3264,42 @@ impl Engine {
 // document
 // ------------------------------------------------------------------
 
+/// Auto-vive la pièce du squelette document (`html`/`head`/
+/// `body`) si absente du miroir — invariant HTML « un document
+/// a toujours ces trois éléments » (le parseur les génère même
+/// vides ; les miroirs de `about:blank` ou de fragments n'en
+/// ont pas). Même insertion que le getter `document.head`
+/// (JS-C89) : `html` enfant de la racine, `head` premier
+/// enfant de `html`, `body` dernier.
+fn ensure_doc_part(dom: &DomRef, tag: &str) {
+    let mut d = dom.borrow_mut();
+    let root = d.root;
+    if !d.by_tag(root, tag).is_empty() {
+        return;
+    }
+    let mut html_el = d.by_tag(root, "html").first().copied();
+    if html_el.is_none() {
+        let h = d.create_element("html");
+        d.append(root, h);
+        html_el = Some(h);
+    }
+    let Some(html_el) = html_el else {
+        return;
+    };
+    match tag {
+        "head" => {
+            let h = d.create_element("head");
+            let first = d.child_nodes(html_el).first().copied();
+            d.insert_before(html_el, h, first);
+        }
+        "body" => {
+            let b = d.create_element("body");
+            d.append(html_el, b);
+        }
+        _ => {}
+    }
+}
+
 impl Host for DocumentHost {
     fn has_method(&self, name: &str) -> bool {
         DOC_METHODS.contains(&name)
@@ -3608,6 +3702,17 @@ impl Host for DocumentHost {
             }
             "getElementsByTagName" => {
                 let tag = e.to_js_string(arg(args, 0))?;
+                // `html`/`head`/`body` existent TOUJOURS dans un
+                // document (le parseur HTML les auto-génère) — les
+                // documents de cadre vides (`about:blank`, miroir
+                // sans squelette) les auto-vivent comme le getter
+                // `head` (JS-C89). Sans ça, `getElementsByTagName(
+                // 'head')[0]` rend `undefined` → `appendChild`
+                // jette (bootstrap Cloudflare `c()` de jsfiddle/
+                // codepen, ×12 en boucle à chaque input).
+                if matches!(tag.as_str(), "html" | "head" | "body") {
+                    ensure_doc_part(&self.dom, &tag);
+                }
                 let ids = {
                     let d = self.dom.borrow();
                     d.by_tag(d.root, &tag)
@@ -5582,11 +5687,20 @@ impl Host for NodeHost {
         }
         // Attribute-mapped props.
         if let Some(attr) = prop_to_attr(key) {
-            let v = self.dom.borrow().attr(node, attr).map(str::to_string);
-            return Ok(Some(match v {
-                Some(v) => e.str_val(v),
-                None => e.str_val(""),
-            }));
+            // IDL URL-typé : `src`/`href` se résolvent contre
+            // `document.baseURI` à la lecture (spec) —
+            // `getAttribute` reste brut. `new URL(el.src)`
+            // échouait `Invalid URL` sur les chemins relatifs
+            // (lemonde `inline:5`, franceinfo `Invalid scheme`).
+            let raw = self.dom.borrow().attr(node, attr).map(str::to_string);
+            let v = match (&raw, attr) {
+                (Some(r), "src" | "href") => {
+                    crate::xhr::resolve_url(e, r).unwrap_or_else(|| r.clone())
+                }
+                (Some(r), _) => r.clone(),
+                (None, _) => String::new(),
+            };
+            return Ok(Some(e.str_val(v)));
         }
         if BOOL_ATTRS.contains(&key) {
             let has = self.dom.borrow().has_attr(node, key);
@@ -5807,6 +5921,27 @@ impl Host for NodeHost {
                 let cls = e.to_js_string(arg(args, 0))?;
                 let ids = self.dom.borrow().by_class(node, &cls);
                 Ok(Some(dom_collection(e, &self.dom, &self.cache, &ids, false)))
+            }
+            // `DocumentFragment.getElementById` (spec — exposé
+            // sur ShadowRoot ; les hydratations CE le lisent,
+            // reddit `faceplate-*`) — scopé au sous-arbre via
+            // le chemin sélecteur `[id]`, jamais le document.
+            // Éléments ordinaires : non exposé (spec).
+            "getElementById" => {
+                let is_frag = matches!(
+                    self.dom.borrow().nodes[node as usize].kind,
+                    NodeKind::Fragment
+                );
+                if !is_frag {
+                    return Ok(None);
+                }
+                let id = e.to_js_string(arg(args, 0))?;
+                let sel = format!("[id=\"{}\"]", id.replace('"', "\\\""));
+                let ids = self.dom.borrow().query(node, &sel);
+                Ok(Some(match ids.first() {
+                    Some(&n) => node_value(e, &self.dom, &self.cache, n),
+                    None => Value::Null,
+                }))
             }
             "querySelector" => {
                 let sel = e.to_js_string(arg(args, 0))?;
@@ -6176,6 +6311,30 @@ impl Host for NodeHost {
                 }));
                 self.dom.borrow_mut().set_canvas_ctx(node, v);
                 Ok(Some(v))
+            }
+            // `<canvas>.toDataURL()`/`toBlob()` — stub honnête
+            // (pas de raster côté miroir, JS-C28) : le préfixe
+            // `data:` d'un PNG vide suffit aux feature-detects
+            // anti-bot (aliexpress sufei-punish lit le format).
+            // `toBlob` passe la data-URL vide à son callback.
+            "toDataURL" => {
+                let is_canvas = self.dom.borrow().nodes[node as usize].tag == "canvas";
+                if !is_canvas {
+                    return Ok(None);
+                }
+                Ok(Some(e.str_val("data:image/png;base64,")))
+            }
+            "toBlob" => {
+                let is_canvas = self.dom.borrow().nodes[node as usize].tag == "canvas";
+                if !is_canvas {
+                    return Ok(None);
+                }
+                let cb = arg(args, 0);
+                if e.is_callable(cb) {
+                    let b = e.str_val("data:image/png;base64,");
+                    e.call_value(cb, Value::Undefined, &[b])?;
+                }
+                Ok(Some(Value::Undefined))
             }
             // `attachShadow(init)` — surface tranche 1
             // (CAP-191, hors scoping/slots/répartition) :
@@ -9377,6 +9536,19 @@ fn signal_throw_if_aborted(e: &mut Engine, this: Value, _a: &[Value]) -> JsResul
     Ok(Value::Undefined)
 }
 
+/// `AbortSignal.throwIfAborted(sig)` — statique spec :
+/// même sémantique que la méthode, le signal en argument.
+fn signal_static_throw_if_aborted(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let Value::Obj(sid) = arg(args, 0) else {
+        return Err(e.type_error("AbortSignal.throwIfAborted: not an AbortSignal"));
+    };
+    if matches!(e.get_prop(sid, "aborted"), Some(Value::Bool(true))) {
+        let r = e.get_prop(sid, "reason").unwrap_or(Value::Undefined);
+        return Err(crate::heap::Thrown(r));
+    }
+    Ok(Value::Undefined)
+}
+
 /// `signal.addEventListener('abort', cb)` — file `__ls`.
 fn signal_add_listener(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let Value::Obj(sid) = this else {
@@ -11729,11 +11901,20 @@ fn observer_empty(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
     Ok(e.new_array(Vec::new()))
 }
 
-/// `new XPathEvaluator()` — `{evaluate}` (rail
-/// `xpath_evaluate` existant — CAP-188).
+/// `new XPathEvaluator()` — `{evaluate, createExpression,
+/// createNSResolver}` (rail `xpath_*` existant — CAP-188 ;
+/// `createExpression` exigé par htmx sur codeberg/gitea :
+/// `new XPathEvaluator().createExpression('…hx-on…')`).
 fn xpath_evaluator_ctor(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
     let o = e.new_object();
     let ev = e.native_fn("evaluate", crate::misc_apis::xpath_evaluate);
     e.set_own(o, "evaluate", ev, true);
+    let ce = e.native_fn(
+        "createExpression",
+        crate::misc_apis::xpath_create_expression,
+    );
+    e.set_own(o, "createExpression", ce, true);
+    let cr = e.native_fn("createNSResolver", crate::misc_apis::create_ns_resolver);
+    e.set_own(o, "createNSResolver", cr, true);
     Ok(Value::Obj(o))
 }

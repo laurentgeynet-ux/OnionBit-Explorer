@@ -174,6 +174,7 @@ pub(crate) fn layout_inline(
     let indent = side_px(&st, "text-indent", w, fs, ctx, 0.0);
     let mut lines = break_into_lines(&items, &atomics, x, y, w, ctx, fs, fl, strut_lh, indent);
     align_lines(&st, &mut lines, x, w, fl, indent);
+    apply_text_overflow(&st, &mut lines, x + w, ctx, fs);
     // Atomes d'abord : leur sous-arbre a été posé en (0,0)
     // par `size_atomics` — translation au rect du fragment
     // (R-23 : sans elle, les enfants d'un atome — valeur d'un
@@ -189,6 +190,97 @@ pub(crate) fn layout_inline(
     bx.lines = lines;
     bx.rect.height = h;
     h
+}
+
+/// §text-overflow (`clip` par défaut) : quand le contenu
+/// en-ligne déborde le bord droit du bloc conteneur ET que
+/// celui-ci clippe (`overflow[-x]` ≠ `visible`), la valeur
+/// `ellipsis` tronque les fragments au point de coupure et
+/// insère un fragment « … » mesuré dans la fonte du texte
+/// coupé. MVP LTR : seul le débordement à droite est traité
+/// (`ellipsis` RTL / `'<string>'` hors périmètre). Vol 21/22
+/// : « Topics » discourse tronqué net, sans suspension.
+fn apply_text_overflow(
+    st: &ComputedStyle,
+    lines: &mut [LineBox],
+    right: f32,
+    ctx: &BlockCtx,
+    fs: f32,
+) {
+    if st.get("text-overflow") != Some("ellipsis") {
+        return;
+    }
+    let clipped = matches!(
+        st.get("overflow-x").or_else(|| st.get("overflow")),
+        Some("hidden" | "clip" | "scroll" | "auto")
+    ) || matches!(
+        st.get("overflow").or_else(|| st.get("overflow-x")),
+        Some("hidden" | "clip" | "scroll" | "auto")
+    );
+    if !clipped {
+        return;
+    }
+    for line in lines.iter_mut() {
+        if line.rect.x + line.rect.width <= right + 0.01 {
+            continue;
+        }
+        // L'ellipsis prend la fonte du dernier fragment texte
+        // (spec : mise en forme de l'élément qui déborde).
+        let Some((est, enode, eowner, ebase)) = line
+            .fragments
+            .iter()
+            .rev()
+            .find(|f| !f.atomic)
+            .map(|f| (f.style.clone(), f.node, f.owner, f.baseline))
+        else {
+            continue;
+        };
+        let efs = font_size_px(&est, fs, ctx);
+        let ell_w = crate::block::measure_fn(&est, efs, ctx)("…");
+        // Point de coupure : le « … » doit tenir dans le bloc.
+        let cut = right - ell_w;
+        // Fragments entièrement au-delà : supprimés (ils
+        // seraient clippés de toute façon ; les enlever garde
+        // le hit-test et les unions de rect propres).
+        line.fragments.retain(|f| f.rect.x < cut);
+        // Le fragment chevauchant la coupe est rogné à la
+        // mesure réelle de sa fonte (retrait caractère par
+        // caractère — `pop` est sûr Unicode).
+        if let Some(f) = line.fragments.last_mut() {
+            if f.rect.x + f.rect.width > cut {
+                let avail = (cut - f.rect.x).max(0.0);
+                let ffs = font_size_px(&f.style, fs, ctx);
+                let fm = crate::block::measure_fn(&f.style, ffs, ctx);
+                while !f.text.is_empty() && fm(&f.text) > avail {
+                    f.text.pop();
+                }
+                f.rect.width = fm(&f.text).min(avail).max(0.0);
+                f.trail_w = 0.0;
+            }
+        }
+        line.fragments.push(Fragment {
+            node: enode,
+            owner: eowner,
+            text: "…".to_string(),
+            atomic: false,
+            aid: None,
+            rect: Rect {
+                x: cut,
+                y: line.rect.y + (line.baseline - ebase),
+                width: ell_w,
+                height: line.rect.height,
+            },
+            baseline: ebase,
+            shaped: None,
+            trail_w: 0.0,
+            marg_l: 0.0,
+            marg_r: 0.0,
+            marg_t: 0.0,
+            marg_b: 0.0,
+            style: est,
+        });
+        line.rect.width = (cut + ell_w - line.rect.x).max(0.0);
+    }
 }
 
 /// `true` si la boîte coule en ligne comme un atome :
@@ -892,10 +984,23 @@ fn break_into_lines(
                 continue;
             }
             let pw = measure(text);
+            // `nowrap`/`pre` : les coupures SOUPLES sont
+            // interdites (§16.6) — seul `hard_after` (<br>,
+            // \n en pre) force une ligne. Sans ce garde le
+            // texte `nowrap` se coupait comme `normal` —
+            // bloquait tout débordement `text-overflow`.
+            let no_wrap = matches!(
+                item.style.get("white-space"),
+                Some(v) if matches!(v.trim(), "nowrap" | "pre")
+            );
             // Même tolérance `+ 0.01` que `descend_band!` :
             // dépassement sub-ulp agrégé → la pièce tient,
             // sinon `new_line!`.
-            if cursor_x > line_x && cursor_x - line_x + pw > line_w + 0.01 && !acc.is_empty() {
+            if !no_wrap
+                && cursor_x > line_x
+                && cursor_x - line_x + pw > line_w + 0.01
+                && !acc.is_empty()
+            {
                 new_line!();
             }
             if acc.is_empty() {

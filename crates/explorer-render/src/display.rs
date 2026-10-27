@@ -938,6 +938,11 @@ fn build_list(
     // toujours le dernier contexte d'empilement).
     let mut defer = Vec::new();
     let mut pos_defer = Vec::new();
+    // `fixed` : file racine dédiée — drainée APRÈS toute la
+    // descente, hors de tout clip `overflow` ancêtre (leur
+    // bloc conteneur est le viewport). Fusionnée par z dans
+    // `pos_defer` avant le drain pour garder l'ordre global.
+    let mut fixed_defer = Vec::new();
     paint_box(
         root,
         &mut items,
@@ -945,12 +950,14 @@ fn build_list(
         &mut cx,
         &mut defer,
         &mut pos_defer,
+        &mut fixed_defer,
     );
     {
         // Span racine — `escaped` = les porteurs poussés aux
         // files racine (chemins absolus = relatifs à la racine).
         let mut esc = escaped_paths(&defer, 0, &cx.path).into_vec();
         esc.extend(escaped_paths(&pos_defer, 0, &cx.path).into_vec());
+        esc.extend(escaped_paths(&fixed_defer, 0, &cx.path).into_vec());
         let end = u32::try_from(items.len()).unwrap_or(u32::MAX);
         let sig = box_sig(root);
         cx.record_span(
@@ -973,7 +980,16 @@ fn build_list(
             (-scroll.0, -scroll.1),
             &mut cx,
             &mut pos_defer,
+            &mut fixed_defer,
         );
+    }
+    // `fixed` remontés de tout le sous-arbre → fusion triée
+    // par z dans `pos_defer` (ordre de peinture racine). La
+    // fusion se refait à chaque itération : l'émission d'un
+    // positionné peut à son tour remonter des `fixed`
+    // (descendants fixés d'un absolu…).
+    for (p, c) in std::mem::take(&mut fixed_defer) {
+        push_z(&mut pos_defer, p, c);
     }
     // Positionnés reportés — déjà triés stable par z (`push_z`).
     let mut i = 0;
@@ -987,7 +1003,11 @@ fn build_list(
             (-scroll.0, -scroll.1),
             &mut cx,
             &mut pos_defer,
+            &mut fixed_defer,
         );
+        for (p, c) in std::mem::take(&mut fixed_defer) {
+            push_z(&mut pos_defer, p, c);
+        }
     }
     DisplayList {
         items,
@@ -2273,140 +2293,15 @@ fn font_request(st: &explorer_css::ComputedStyle) -> explorer_layout::font::Font
     explorer_layout::font::request_of_family(st, explorer_layout::font::DEFAULT_FAMILY)
 }
 
-/// Longueur d'une fonction `transform` → px : absolues via
-/// `px_factor`, `%` relatif à `basis` (taille propre de la
-/// boîte — spec : reference box = border box).
-fn tf_len_px(s: &str, basis: f32) -> Option<f64> {
-    let t = s.trim();
-    if let Some(p) = t.strip_suffix('%') {
-        return p
-            .trim()
-            .parse::<f64>()
-            .ok()
-            .map(|v| v * f64::from(basis) / 100.0);
-    }
-    parse_length(t).and_then(|l| l.unit.px_factor().map(|f| l.value * f))
-}
-
-/// Angle `deg`/`rad`/`turn`/`grad` → radians.
-fn tf_angle(s: &str) -> Option<f64> {
-    let t = s.trim().to_ascii_lowercase();
-    let (num, k) = ["deg", "grad", "rad", "turn"]
-        .iter()
-        .find_map(|u| t.strip_suffix(u).map(|n| (n, *u)))?;
-    let v: f64 = num.trim().parse().ok()?;
-    Some(match k {
-        "deg" => v.to_radians(),
-        "rad" => v,
-        "turn" => v * std::f64::consts::TAU,
-        _ => v * std::f64::consts::PI / 200.0,
-    })
-}
-
-/// `transform: f1(...) f2(...)…` → matrice brute (sans
-/// origine). Fonctions : `matrix`, `translate[X|Y]`,
-/// `scale[X|Y]`, `rotate`, `skew[X|Y]` ; `%` des `translate`
-/// relatif à la border box. `none`/inconnu → `None`.
-#[allow(clippy::cast_possible_truncation)]
-fn transform_matrix(raw: &str, rect: &Rect) -> Option<tiny_skia::Transform> {
-    use tiny_skia::Transform;
-    let mut m = Transform::identity();
-    let mut any = false;
-    let mut left = raw.trim();
-    if left.eq_ignore_ascii_case("none") || left.is_empty() {
-        return None;
-    }
-    while let Some(open) = left.find('(') {
-        let name = left[..open].trim().to_ascii_lowercase();
-        let close = left.find(')')?;
-        let args: Vec<&str> = left[open + 1..close].split(',').collect();
-        let num = |i: usize| -> Option<f64> { args.get(i)?.trim().parse().ok() };
-        let f = match name.as_str() {
-            "matrix" => Transform::from_row(
-                num(0)? as f32,
-                num(1)? as f32,
-                num(2)? as f32,
-                num(3)? as f32,
-                num(4)? as f32,
-                num(5)? as f32,
-            ),
-            "translate" => Transform::from_translate(
-                tf_len_px(args.first()?, rect.width)? as f32,
-                args.get(1)
-                    .map_or(0.0, |v| tf_len_px(v, rect.height).unwrap_or(0.0) as f32),
-            ),
-            "translatex" => {
-                Transform::from_translate(tf_len_px(args.first()?, rect.width)? as f32, 0.0)
-            }
-            "translatey" => {
-                Transform::from_translate(0.0, tf_len_px(args.first()?, rect.height)? as f32)
-            }
-            "scale" => {
-                let sx = num(0)? as f32;
-                Transform::from_scale(
-                    sx,
-                    args.get(1)
-                        .map_or(sx, |v| v.trim().parse::<f32>().unwrap_or(sx)),
-                )
-            }
-            "scalex" => Transform::from_scale(num(0)? as f32, 1.0),
-            "scaley" => Transform::from_scale(1.0, num(0)? as f32),
-            "rotate" => {
-                // tiny-skia prend des degrés (`tf_angle` rend
-                // des radians pour `tan()` des skews).
-                Transform::from_rotate(tf_angle(args.first()?)?.to_degrees() as f32)
-            }
-            "skewx" => Transform::from_skew(tf_angle(args.first()?)?.tan() as f32, 0.0),
-            "skewy" => Transform::from_skew(0.0, tf_angle(args.first()?)?.tan() as f32),
-            "skew" => Transform::from_skew(
-                tf_angle(args.first()?)?.tan() as f32,
-                args.get(1).and_then(|v| tf_angle(v)).unwrap_or(0.0).tan() as f32,
-            ),
-            _ => return None,
-        };
-        // Composition gauche→droite : chaque fonction s'applique
-        // APRÈS les précédentes (post-concaténation).
-        m = m.post_concat(f);
-        any = true;
-        left = left[close + 1..].trim();
-    }
-    if !any {
-        return None;
-    }
-    Some(m)
-}
-
-/// Résout `transform-origin` en point absolu de `rect` —
-/// deux valeurs px/`%` (défaut 50 % 50 %).
-#[allow(clippy::cast_possible_truncation)]
-fn origin_px(st: &explorer_css::ComputedStyle, rect: &Rect) -> (f32, f32) {
-    let raw = st.get_or("transform-origin", "50% 50%");
-    let mut it = raw.split_whitespace();
-    let x = it
-        .next()
-        .and_then(|v| tf_len_px(v, rect.width))
-        .map_or(rect.width / 2.0, |v| v as f32);
-    let y = it
-        .next()
-        .and_then(|v| tf_len_px(v, rect.height))
-        .map_or(rect.height / 2.0, |v| v as f32);
-    (rect.x + x, rect.y + y)
-}
-
-/// `transform` d'une boîte → matrice complète (origine
-/// incluse) — `None` si identité/invalidée.
+/// `transform` d'une boîte → matrice tiny-skia (origine
+/// incluse) — délègue à
+/// [`explorer_layout::transform::box_transform`], source
+/// unique partagée avec le hit-test (qui applique la
+/// matrice inverse au point sondé — vol : zones cliquables
+/// décalées sur éléments transformés).
 fn box_transform(bx: &LayoutBox, rect: &Rect) -> Option<tiny_skia::Transform> {
-    use tiny_skia::Transform;
-    let raw = bx.style.get("transform")?;
-    let m = transform_matrix(raw, rect)?;
-    let (ox, oy) = origin_px(&bx.style, rect);
-    // F(p) = o + M(p − o) : on post-concatène dans l'ordre
-    // d'application — T(−o) d'abord, M, puis T(+o).
-    Some(
-        Transform::from_translate(-ox, -oy)
-            .post_concat(m)
-            .post_concat(Transform::from_translate(ox, oy)),
-    )
+    explorer_layout::transform::box_transform(bx, rect)
+        .map(|m| tiny_skia::Transform::from_row(m.a, m.b, m.c, m.d, m.e, m.f))
 }
 
 /// Peint une boîte et ses descendants dans l'ordre borné.
@@ -2451,14 +2346,15 @@ fn paint_scoped<'a>(
     off: (f32, f32),
     cx: &mut PaintCx<'a>,
     pos_defer: &mut Vec<(Vec<u16>, &'a LayoutBox)>,
+    fixed_defer: &mut Vec<(Vec<u16>, &'a LayoutBox)>,
 ) {
     let mut defer = Vec::new();
-    paint_box(bx, items, off, cx, &mut defer, pos_defer);
+    paint_box(bx, items, off, cx, &mut defer, pos_defer, fixed_defer);
     let mut i = 0;
     while i < defer.len() {
         let (p, c) = defer[i].clone();
         i += 1;
-        emit_scoped_at(p, c, items, off, cx, pos_defer);
+        emit_scoped_at(p, c, items, off, cx, pos_defer, fixed_defer);
     }
 }
 
@@ -2474,6 +2370,7 @@ fn emit_child<'a>(
     cx: &mut PaintCx<'a>,
     defer: &mut Vec<(Vec<u16>, &'a LayoutBox)>,
     pos_defer: &mut Vec<(Vec<u16>, &'a LayoutBox)>,
+    fixed_defer: &mut Vec<(Vec<u16>, &'a LayoutBox)>,
 ) {
     cx.path.push(u16::try_from(idx).unwrap_or(u16::MAX));
     if let Some((d, s, sig)) = reuse_delta(bx, off, cx) {
@@ -2482,12 +2379,14 @@ fn emit_child<'a>(
         // relatifs → absolus ; le drain englobant les
         // ré-émettra via leurs propres spans. La file cible
         // se re-déduit (inlines → `defer`, positionnés →
-        // `pos_defer`) — les deux y échappent ensemble.
+        // `pos_defer`, `fixed` → `fixed_defer`).
         for rel in &s.escaped {
             if let Some(target) = resolve_rel(bx, rel) {
                 let mut p = cx.path.clone();
                 p.extend(rel.iter().copied());
-                if !matches!(target.position, Position::Static | Position::Sticky)
+                if target.position == Position::Fixed {
+                    push_z(fixed_defer, p, target);
+                } else if !matches!(target.position, Position::Static | Position::Sticky)
                     && target.z_index >= 0
                 {
                     push_z(pos_defer, p, target);
@@ -2500,11 +2399,15 @@ fn emit_child<'a>(
         let start = u32::try_from(items.len()).unwrap_or(u32::MAX);
         let base = defer.len();
         let pbase = pos_defer.len();
-        explorer_common::deep(|| paint_box(bx, items, off, cx, defer, pos_defer));
+        let fbase = fixed_defer.len();
+        explorer_common::deep(|| {
+            paint_box(bx, items, off, cx, defer, pos_defer, fixed_defer);
+        });
         let end = u32::try_from(items.len()).unwrap_or(u32::MAX);
         let sig = box_sig(bx);
         let mut esc = escaped_paths(defer, base, &cx.path).into_vec();
         esc.extend(escaped_paths(pos_defer, pbase, &cx.path).into_vec());
+        esc.extend(escaped_paths(fixed_defer, fbase, &cx.path).into_vec());
         cx.record_span(
             bx,
             start,
@@ -2527,13 +2430,16 @@ fn emit_scoped<'a>(
     off: (f32, f32),
     cx: &mut PaintCx<'a>,
     pos_defer: &mut Vec<(Vec<u16>, &'a LayoutBox)>,
+    fixed_defer: &mut Vec<(Vec<u16>, &'a LayoutBox)>,
 ) {
     cx.path.push(u16::try_from(idx).unwrap_or(u16::MAX));
     if let Some((d, s, sig)) = reuse_delta(bx, off, cx) {
         copy_span(bx, s, d, sig, items, off, cx);
     } else {
         let start = u32::try_from(items.len()).unwrap_or(u32::MAX);
-        explorer_common::deep(|| paint_scoped(bx, items, off, cx, pos_defer));
+        explorer_common::deep(|| {
+            paint_scoped(bx, items, off, cx, pos_defer, fixed_defer);
+        });
         let end = u32::try_from(items.len()).unwrap_or(u32::MAX);
         let sig = box_sig(bx);
         cx.record_span(bx, start, end, effective_off(bx, off), sig, Box::default());
@@ -2554,13 +2460,16 @@ fn emit_scoped_at<'a>(
     off: (f32, f32),
     cx: &mut PaintCx<'a>,
     pos_defer: &mut Vec<(Vec<u16>, &'a LayoutBox)>,
+    fixed_defer: &mut Vec<(Vec<u16>, &'a LayoutBox)>,
 ) {
     let saved = std::mem::replace(&mut cx.path, path);
     if let Some((d, s, sig)) = reuse_delta(bx, off, cx) {
         copy_span(bx, s, d, sig, items, off, cx);
     } else {
         let start = u32::try_from(items.len()).unwrap_or(u32::MAX);
-        explorer_common::deep(|| paint_scoped(bx, items, off, cx, pos_defer));
+        explorer_common::deep(|| {
+            paint_scoped(bx, items, off, cx, pos_defer, fixed_defer);
+        });
         let end = u32::try_from(items.len()).unwrap_or(u32::MAX);
         let sig = box_sig(bx);
         cx.record_span(bx, start, end, effective_off(bx, off), sig, Box::default());
@@ -3259,6 +3168,7 @@ fn legacy_clip_rect(v: &str, r: Rect, px: &dyn Fn(&str, f32) -> Option<f32>) -> 
 }
 
 #[allow(clippy::too_many_lines)]
+#[allow(clippy::too_many_arguments)]
 fn paint_box<'a>(
     bx: &'a LayoutBox,
     items: &mut Vec<DisplayItem>,
@@ -3266,6 +3176,7 @@ fn paint_box<'a>(
     cx: &mut PaintCx<'a>,
     defer: &mut Vec<(Vec<u16>, &'a LayoutBox)>,
     pos_defer: &mut Vec<(Vec<u16>, &'a LayoutBox)>,
+    fixed_defer: &mut Vec<(Vec<u16>, &'a LayoutBox)>,
 ) {
     // `position: fixed` est ancrée au viewport : son sous-arbre
     // ignore le scroll.
@@ -3274,6 +3185,25 @@ fn paint_box<'a>(
     } else {
         off
     };
+
+    // `opacity: 0` (§3.2, groupe alpha nul) : tout le
+    // sous-arbre est invisible — court-circuit AVANT la
+    // descente (transform/clip/enfants n'émettent rien de
+    // visible de toute façon). Contrairement à
+    // `visibility:hidden` qui permet la réactivation par un
+    // descendant, `opacity` est héritée multiplicativement
+    // : 0 ne se relève jamais. Vol 2026-10-26 : les modales
+    // `opacity-0` (bookshop « Our mission », overlay ecma)
+    // peintaient en plein. Les opacités partielles
+    // (0 < o < 1) restent non appliquées — MVP : le groupe
+    // alpha complet est reporté.
+    if bx
+        .style
+        .get("opacity")
+        .is_some_and(|v| v.trim().parse::<f32>().is_ok_and(|o| o <= 0.0))
+    {
+        return;
+    }
 
     // `transform` : matrice poussée avant tout item du
     // sous-arbre, retiré après (imbrication additive).
@@ -3316,6 +3246,13 @@ fn paint_box<'a>(
         if clipped {
             items.push(DisplayItem::PushClip(shifted(bx.rect, off)));
         }
+        // Les `fixed` descendants remontent à la file RACINE
+        // (`fixed_defer`, drainée hors de tout clip) : leur bloc
+        // conteneur est le viewport, un `overflow` ancêtre ne
+        // doit jamais les rogner (vol 26 : bandeau cookie
+        // indeed rogné par le clip d'un ancêtre). Limite : un
+        // ancêtre `transform` devrait en faire le bloc
+        // conteneur — non modélisé côté layout.
         // Fragments de lignes propres (racine d'un contexte
         // inline — élément inline positionné, anon…) : du
         // contenu → DANS le clip, pas avec les décorations de
@@ -3360,7 +3297,15 @@ fn paint_box<'a>(
             .collect();
         neg_z.sort_by_key(|(_, c)| c.z_index);
         for (ci, child) in neg_z {
-            emit_scoped(ci, child, items, off, cx, pd);
+            if child.position == Position::Fixed {
+                // `fixed` → file racine : échappe au clip
+                // `overflow` ancêtre (voir `fixed_defer`).
+                let mut p = cx.path.clone();
+                p.push(u16::try_from(ci).unwrap_or(u16::MAX));
+                push_z(fixed_defer, p, child);
+            } else {
+                emit_scoped(ci, child, items, off, cx, pd, fixed_defer);
+            }
         }
         // (a) blocs en flux — `sticky` garde sa translation de
         // peinture ; récursion `deep` ∝ profondeur (R-24).
@@ -3374,7 +3319,7 @@ fn paint_box<'a>(
                     tiny_skia::Transform::from_translate(stick.0, stick.1),
                 ));
             }
-            emit_child(ci, child, items, off, cx, d, pd);
+            emit_child(ci, child, items, off, cx, d, pd, fixed_defer);
             if stick != (0.0, 0.0) {
                 items.push(DisplayItem::PopTransform);
             }
@@ -3382,7 +3327,7 @@ fn paint_box<'a>(
         // (b) flottants non positionnés — portée propre.
         for (ci, child) in bx.children.iter().enumerate() {
             if in_flow(&child) && child.float != Float::None {
-                emit_scoped(ci, child, items, off, cx, pd);
+                emit_scoped(ci, child, items, off, cx, pd, fixed_defer);
             }
         }
         // (c) porteurs inline — reportés au contexte englobant.
@@ -3401,7 +3346,7 @@ fn paint_box<'a>(
         while i < scoped_defer.len() {
             let (p, c) = scoped_defer[i].clone();
             i += 1;
-            emit_scoped_at(p, c, items, off, cx, pd);
+            emit_scoped_at(p, c, items, off, cx, pd, fixed_defer);
         }
         // Enfants positionnés `z-index` ≥ 0 : enfilés triés dans
         // la file du contexte — drainés à sa fermeture (ici si
@@ -3412,13 +3357,17 @@ fn paint_box<'a>(
             }
             let mut p = cx.path.clone();
             p.push(u16::try_from(ci).unwrap_or(u16::MAX));
-            push_z(pd, p, child);
+            if child.position == Position::Fixed {
+                push_z(fixed_defer, p, child);
+            } else {
+                push_z(pd, p, child);
+            }
         }
         let mut i = 0;
         while i < my_pos.len() {
             let (p, c) = my_pos[i].clone();
             i += 1;
-            emit_scoped_at(p, c, items, off, cx, &mut my_pos);
+            emit_scoped_at(p, c, items, off, cx, &mut my_pos, fixed_defer);
         }
         if clipped {
             items.push(DisplayItem::PopClip);

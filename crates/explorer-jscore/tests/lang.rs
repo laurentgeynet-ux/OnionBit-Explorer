@@ -1250,6 +1250,15 @@ fn globals() {
     assert_eq!(ev_str("decodeURIComponent('a%20b')"), "a b");
     assert_eq!(ev_str("btoa('abc')"), "YWJj");
     assert_eq!(ev_str("atob('YWJj')"), "abc");
+    // JS-C152 — `atob` rend une chaîne-octet Latin-1 (spec),
+    // pas de l'UTF-8 : les octets non-ASCII passaient en
+    // `invalid byte sequence` (bsky bundle Sentry/expo).
+    assert_eq!(ev_str("atob('/w==').charCodeAt(0)"), "255");
+    assert_eq!(ev_str("atob('gIE=').charCodeAt(1)"), "129");
+    // Whitespace ASCII ignoré (spec) ; base64url `-`/`_`
+    // reste rejeté (non natif — les sites patchent).
+    assert_eq!(ev_str("atob(' YWJj\\n')"), "abc");
+    assert_eq!(ev_str("atob('AA').charCodeAt(0)"), "0");
     assert_eq!(ev_str("typeof Date.now()"), "number");
 }
 
@@ -1436,6 +1445,44 @@ fn promise_finally() {
         ),
         "F:r"
     );
+}
+
+#[test]
+fn promise_unhandled_rejection() {
+    // JS-C154 — une promesse rejetée sans `.then` déclenche
+    // `unhandledrejection` en fin de checkpoint : event sur
+    // `onunhandledrejection`/listeners + rapport drainable.
+    let mut e = Engine::new();
+    e.eval(
+        "var got = ''; window.onunhandledrejection = function(ev) {\
+           got = ev.type + '/' + ev.reason + '/' + (ev.promise instanceof Promise);\
+         };\
+         Promise.reject('boom');",
+    )
+    .expect("eval");
+    let got = e.eval("got").expect("got");
+    assert_eq!(e.describe(got), "unhandledrejection/boom/true");
+    // `.catch` présent → handled, pas d'event.
+    let mut e2 = Engine::new();
+    e2.eval(
+        "var n = 0; window.onunhandledrejection = function() { n++ };\
+         Promise.reject('x').catch(function() {});\
+         Promise.reject('y');",
+    )
+    .expect("eval2");
+    let n = e2.eval("n").expect("n");
+    assert_eq!(e2.describe(n), "1", "seul le rejet sans handler doit tirer");
+    // Rapport drainable par la session.
+    assert!(e.drain_unhandled_rejections()[0].contains("boom"));
+    // `.then` tardif (après le settle, avant le tir) → retiré.
+    let mut e3 = Engine::new();
+    e3.eval(
+        "var m = 0; window.onunhandledrejection = function() { m++ };\
+             var p = Promise.reject('z'); p.catch(function() {});",
+    )
+    .expect("eval3");
+    let m = e3.eval("m").expect("m");
+    assert_eq!(e3.describe(m), "0");
 }
 
 #[test]
@@ -5573,6 +5620,15 @@ fn c16_url() {
             "https://ex.com/a?q=1",
         ),
         ("new URL('#f', 'https://ex.com/a').href", "https://ex.com/a#f"),
+        // JS-C155 — statiques spec 2024 : `canParse` bool sans
+        // jeté, `parse` instance ou `null` (feature-detects
+        // bundles modernes — vols 22-25).
+        ("URL.canParse('https://ex.com/a')", "true"),
+        ("URL.canParse('::bad')", "false"),
+        ("URL.canParse('/rel', 'https://ex.com')", "true"),
+        ("URL.canParse('/rel')", "false"),
+        ("URL.parse('https://ex.com/x').pathname", "/x"),
+        ("URL.parse('::bad') === null", "true"),
         (
             "new URL('../d', 'https://ex.com/a/b/c').href",
             "https://ex.com/a/d",

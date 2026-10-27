@@ -282,6 +282,14 @@ fn num_or_pct(t: &str, max: f32) -> f32 {
     })
 }
 
+/// Canal `[0,1]` → octet — arrondi après clamp : la valeur
+/// est bornée `0.0..=1.0`, le cast `as u8` ne peut ni
+/// tronquer ni perdre de signe.
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+fn unit_to_u8(v: f32) -> u8 {
+    (v.clamp(0.0, 1.0) * 255.0).round() as u8
+}
+
 fn srgb_gamma(v: f32) -> f32 {
     if v <= 0.003_130_8 {
         12.92 * v
@@ -301,67 +309,55 @@ fn oklab_xyz(l: f32, a: f32, b: f32) -> (f32, f32, f32) {
     )
 }
 
-/// Composante flottante → octet sRGB — l'entrée est bornée
-/// à `[0, 1]` par le `clamp` avant mise à l'échelle, la
-/// conversion est donc non-perte.
-#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-fn to_byte(v: f32) -> u8 {
-    (v.clamp(0.0, 1.0) * 255.0).round() as u8
-}
-
 fn xyz_srgb_color(x: f32, y: f32, z: f32, alpha: f32) -> Color {
     let (rl, gl, bl) = (
         x.mul_add(3.240_97, y.mul_add(-1.537_383_2, z * -0.498_610_76)),
         x.mul_add(-0.969_243_64, y.mul_add(1.875_967_5, z * 0.041_555_06)),
         x.mul_add(0.055_630_08, y.mul_add(-0.203_976_96, z * 1.056_971_5)),
     );
-    let c = |v: f32| to_byte(srgb_gamma(v));
+    let c = |v: f32| unit_to_u8(srgb_gamma(v));
     Color {
         r: c(rl),
         g: c(gl),
         b: c(bl),
-        a: to_byte(alpha),
+        a: unit_to_u8(alpha),
     }
 }
 
 fn parse_oklab(inner: &str) -> Option<Color> {
-    let (light, comp_a, comp_b, alpha) = color_3args(inner)?;
-    let xyz = oklab_xyz(
-        num_or_pct(&light, 1.0),
-        comp_a.parse().ok()?,
-        comp_b.parse().ok()?,
-    );
-    Some(xyz_srgb_color(xyz.0, xyz.1, xyz.2, alpha))
+    let (light, aa, bb, alpha) = color_3args(inner)?;
+    let (x_v, y_v, z_v) = oklab_xyz(num_or_pct(&light, 1.0), aa.parse().ok()?, bb.parse().ok()?);
+    Some(xyz_srgb_color(x_v, y_v, z_v, alpha))
 }
 
 fn parse_oklch(inner: &str) -> Option<Color> {
     let (light, chroma, hue, alpha) = color_3args(inner)?;
     let (cr, hh) = (num_or_pct(&chroma, 0.4), hue.parse::<f32>().ok()?);
-    let xyz = oklab_xyz(
+    let (x_v, y_v, z_v) = oklab_xyz(
         num_or_pct(&light, 1.0),
         cr * hh.to_radians().cos(),
         cr * hh.to_radians().sin(),
     );
-    Some(xyz_srgb_color(xyz.0, xyz.1, xyz.2, alpha))
+    Some(xyz_srgb_color(x_v, y_v, z_v, alpha))
 }
 
 fn parse_lab(inner: &str) -> Option<Color> {
-    let (light, comp_a, comp_b, alpha) = color_3args(inner)?;
+    let (light, aa, bb, alpha) = color_3args(inner)?;
     let fy = (num_or_pct(&light, 100.0) + 16.0) / 116.0;
-    let finv = |t: f32| {
+    let cube = |t: f32| {
         if t > 6.0 / 29.0 {
             t * t * t
         } else {
             (108.0 / 841.0) * (t - 4.0 / 29.0)
         }
     };
-    let (aa, bb) = (comp_a.parse::<f32>().ok()?, comp_b.parse::<f32>().ok()?);
-    let xyz = (
-        finv(fy + aa / 500.0) * 0.95047,
-        finv(fy),
-        finv(fy - bb / 200.0) * 1.08883,
+    let (aa, bb) = (aa.parse::<f32>().ok()?, bb.parse::<f32>().ok()?);
+    let (x_v, y_v, z_v) = (
+        cube(fy + aa / 500.0) * 0.95047,
+        cube(fy),
+        cube(fy - bb / 200.0) * 1.08883,
     );
-    Some(xyz_srgb_color(xyz.0, xyz.1, xyz.2, alpha))
+    Some(xyz_srgb_color(x_v, y_v, z_v, alpha))
 }
 
 fn parse_lch(inner: &str) -> Option<Color> {
@@ -384,15 +380,20 @@ fn parse_hsl(inner: &str) -> Option<Color> {
         num_or_pct(&sat, 100.0) / 100.0,
         num_or_pct(&light, 100.0) / 100.0,
     );
+    // `.min().max()` et non `.clamp()` : une entrée NaN
+    // (`hsl(NaN …)`) doit retomber sur les bornes numériques
+    // (`f32::min`/`max` ignorent NaN) — `clamp` propagerait
+    // NaN et changerait la couleur résultante.
+    #[allow(clippy::manual_clamp)]
     let chan = |n: f32| {
         let k = (n + hh / 30.0).rem_euclid(12.0);
         ll - ss * ll.min(1.0 - ll) * (k - 3.0).min(9.0 - k).clamp(-1.0, 1.0)
     };
     Some(Color {
-        r: to_byte(chan(0.0)),
-        g: to_byte(chan(8.0)),
-        b: to_byte(chan(4.0)),
-        a: to_byte(alpha),
+        r: unit_to_u8(chan(0.0)),
+        g: unit_to_u8(chan(8.0)),
+        b: unit_to_u8(chan(4.0)),
+        a: unit_to_u8(alpha),
     })
 }
 
@@ -532,11 +533,16 @@ fn named_color(name: &str) -> Option<Color> {
 #[must_use]
 pub fn value_is_valid_for(name: &str, value: &str) -> bool {
     let v = value.trim();
-    // `var()`/`calc()`/`attr()` sont résolus plus tard — la
-    // validation syntaxique ici les laisse passer.
+    // `var()`/`calc()`/`attr()`/`min()`/`max()`/`clamp()`
+    // sont résolus plus tard — la validation syntaxique ici
+    // les laisse passer (vol 11 stripe : `width:min(50%,…)`
+    // droppé → items éclatés à la taille de contenu).
     if v.contains("var(")
         || v.contains("calc(")
         || v.contains("attr(")
+        || v.contains("min(")
+        || v.contains("max(")
+        || v.contains("clamp(")
         || matches!(
             v.to_ascii_lowercase().as_str(),
             "inherit" | "initial" | "unset" | "revert" | "revert-layer"
@@ -604,6 +610,22 @@ pub fn value_is_valid_for(name: &str, value: &str) -> bool {
 pub fn expand_shorthand(name: &str, value: &str) -> Option<Vec<(String, String)>> {
     match name {
         "margin" | "padding" => expand_box(name, value),
+        "inset" => {
+            // `inset` = `top right bottom left` (CSS Logical
+            // §? — boîte 1..4 valeurs, même répétition que
+            // margin). Vol 2026-10-26 : les liens overlay
+            // `position:absolute; inset:0` du Guardian
+            // restaient sans offsets → boîtes `0x0`,
+            // articles inouvrables au hit-test.
+            let parts: Vec<&str> = value.split_whitespace().collect();
+            let [top, right, bottom, left] = four_sides(&parts)?;
+            Some(vec![
+                ("top".to_string(), top),
+                ("right".to_string(), right),
+                ("bottom".to_string(), bottom),
+                ("left".to_string(), left),
+            ])
+        }
         "border" => Some(expand_border_parts("border", value)),
         "border-width" | "border-style" | "border-color" => {
             expand_border_uniform(name.strip_prefix("border-")?, value)

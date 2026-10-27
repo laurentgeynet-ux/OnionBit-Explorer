@@ -1566,8 +1566,15 @@ fn deferred_inputs_fifo_and_coalesce() {
             mods: KeyMods::NONE,
         },
     ] {
+        let is_scroll = matches!(ev, InputEvent::Scroll { .. });
         let r = s.handle_input_now(tab, ev).unwrap();
-        assert_eq!(r, InputOutcome::Ignored, "détaché ⇒ différé");
+        // Détaché ⇒ différé ; le scroll rapporte sa position
+        // **projetée** plutôt qu'un `Ignored` (vol 13).
+        if is_scroll {
+            assert!(matches!(r, InputOutcome::Scrolled { .. }));
+        } else {
+            assert_eq!(r, InputOutcome::Ignored, "détaché ⇒ différé");
+        }
     }
     {
         let e = s.tabs.get(&tab).unwrap();
@@ -2347,4 +2354,203 @@ fn auto_nav_budget_caps_script_and_refresh() {
     // `auto=false` enfile toujours.
     assert!(s.enqueue_nav_act(tab, act(), false));
     assert_eq!(s.tabs.get(&tab).unwrap().pending_nav.len(), 5);
+}
+
+/// Vol rakuten/soundcloud — un `window.open`/`<a
+/// target=_blank>` dont la réponse est un téléchargement
+/// (ex. `.js` servi `text/javascript`) laissait un onglet
+/// parasite vierge : `close_stillborn_popup` le referme et
+/// ré-attribue les pendings à l'opener. Un contexte neuf
+/// réellement navigué (URL + historique) n'est pas touché.
+#[test]
+fn stillborn_popup_closes_and_downloads_reattributed() {
+    let mut s = Session::new(Arc::new(FailTransport), Arc::new(TestFont));
+    let opener = s.open_tab();
+    let url = Url::parse("http://h.test/page").unwrap();
+    s.tabs.get_mut(&opener).unwrap().url = Some(url.clone());
+    let popup = s.named_or_new_tab(opener, "");
+    s.downloads.insert(
+        7,
+        PendingDownload {
+            tail: NavTail {
+                epoch: 0,
+                push: true,
+                prev_title: None,
+                req: Request::get(url.clone()),
+            },
+            id: 7,
+            tab: popup,
+            url,
+            filename_hint: None,
+            mime: "text/javascript".to_string(),
+            size: None,
+            body: b"js".to_vec(),
+        },
+    );
+    s.close_stillborn_popup(opener, popup);
+    assert!(!s.tabs.contains_key(&popup), "popup vierge refermée");
+    assert_eq!(
+        s.pending_downloads(opener).len(),
+        1,
+        "le pending suit l'opener, pas l'onglet mort"
+    );
+
+    // Un contexte neuf qui a vraiment atterri (page ou
+    // page d'erreur — `url`/`hist` peuplés) survit.
+    let landed = s.named_or_new_tab(opener, "");
+    {
+        let e = s.tabs.get_mut(&landed).unwrap();
+        e.url = Some(Url::parse("http://h.test/ok").unwrap());
+        e.hist.push(HistEntry {
+            req: Request::get(Url::parse("http://h.test/ok").unwrap()),
+            failed: true,
+            same_doc: false,
+            state: None,
+        });
+    }
+    s.close_stillborn_popup(opener, landed);
+    assert!(s.tabs.contains_key(&landed), "onglet atterri conservé");
+    // `close_stillborn_popup` sur l'opener lui-même : no-op.
+    s.close_stillborn_popup(opener, opener);
+    assert!(s.tabs.contains_key(&opener));
+}
+
+/// `download_meta` : un type **script** servi en top-level
+/// n'est pas un document — `text/javascript` serait sinon
+/// ratatché à `text/*` et peint en brut (vol rakuten).
+#[test]
+fn download_meta_rejects_script_mimes() {
+    let h = vec![(
+        "content-type".to_string(),
+        "text/javascript; charset=utf-8".to_string(),
+    )];
+    let meta = download_meta(&h).expect("script top-level = téléchargement");
+    assert_eq!(meta.mime, "text/javascript");
+    let h = vec![(
+        "content-type".to_string(),
+        "application/javascript".to_string(),
+    )];
+    assert!(download_meta(&h).is_some());
+    let h = vec![("content-type".to_string(), "text/html".to_string())];
+    assert!(download_meta(&h).is_none(), "html reste un document");
+    let h = vec![("content-type".to_string(), "text/plain".to_string())];
+    assert!(download_meta(&h).is_none(), "text/plain reste un document");
+}
+
+/// Vol google SERP — la méta refresh enfermée dans un
+/// `<noscript>` est rawtext quand le scripting est levé
+/// (CAP-155) : invisible pour `meta_refresh`. Sur une page
+/// de **fallback pur** (body = `noscript`/`script`
+/// seulement) elle est honorée ; une page riche avec un
+/// `noscript` annexe garde la spec (`None`).
+#[test]
+fn noscript_meta_refresh_fallback_pure_only() {
+    let mut tb = TreeBuilder::new();
+    tb.set_scripting(true);
+    tb.push("<html><body><script>x()</script><noscript><meta http-equiv=refresh content=\"0;url=/retry\"></noscript></body></html>");
+    tb.finish();
+    let dom = tb.into_dom();
+    assert!(meta_refresh(&dom).is_none(), "rawtext : pas d'élément meta");
+    let (secs, raw) = noscript_meta_refresh(&dom).expect("fallback pur : méta honorée");
+    assert_eq!(secs, 0.0);
+    assert_eq!(raw.as_deref(), Some("/retry"));
+
+    // Page riche + noscript annexe → spec : rien.
+    let mut tb = TreeBuilder::new();
+    tb.set_scripting(true);
+    tb.push("<html><body><p>contenu</p><noscript><meta http-equiv=refresh content=\"0;url=/r\"></noscript></body></html>");
+    tb.finish();
+    assert!(
+        noscript_meta_refresh(&tb.into_dom()).is_none(),
+        "page riche : la méta noscript reste ignorée"
+    );
+
+    // Texte non blanc hors repli → pas un fallback pur.
+    let mut tb = TreeBuilder::new();
+    tb.set_scripting(true);
+    tb.push("<html><body>bonjour<noscript><meta http-equiv=refresh content=\"0;url=/r\"></noscript></body></html>");
+    tb.finish();
+    assert!(noscript_meta_refresh(&tb.into_dom()).is_none());
+}
+
+/// Vol 13 lemonde/bbc — les `<img>` à `data-src` (lazy JS
+/// mort) n'étaient jamais fetchées : repli produit sur les
+/// attributs lazy usuels quand ni `srcset` ni `src` n'est
+/// posé. `src`/`srcset` gagnent s'ils existent.
+#[test]
+fn collect_images_falls_back_to_lazy_data_src() {
+    let dom = test_dom("<img data-src=\"/a.png\"><img src=\"/b.png\" data-src=\"/c.png\"><img srcset=\"/d.png 1x\" data-src=\"/e.png\"><img>");
+    let srcs: Vec<String> = collect_images(&dom, 800.0, 1.0)
+        .into_iter()
+        .map(|(_, s)| s)
+        .collect();
+    assert_eq!(srcs, vec!["/a.png", "/b.png", "/d.png"]);
+}
+
+/// Vol 13 franceinfo — un `Scroll` pendant la peinture
+/// détachée (apply hors verrou) est **accepté** : le
+/// `scroll_y` rapporté projette les deltas en file, le
+/// drain rejoue ensuite le scroll réel au lieu d'un
+/// `Ignored` abandonné par le client.
+#[tokio::test]
+async fn deferred_scroll_reports_projected_position() {
+    let mut s = Session::new(Arc::new(FailTransport), Arc::new(TestFont));
+    let tab = s.open_tab();
+    {
+        let e = s.tabs.get_mut(&tab).unwrap();
+        e.doc_h = 10_000.0;
+        e.scroll_y = 100.0;
+        e.paint_detached = true;
+    }
+    let out = s
+        .handle_input(tab, InputEvent::Scroll { dy: 900.0 })
+        .await
+        .unwrap();
+    let InputOutcome::Scrolled { scroll_y } = out else {
+        panic!("scroll différé refusé : {out:?}");
+    };
+    assert_eq!(scroll_y, 1000.0, "projection = position + file");
+    // Le replay effectif applique le delta enfilé — DOM +
+    // frame factices posés pour court-circuiter le
+    // lazy-heal (un relayout écraserait `doc_h`).
+    {
+        let e = s.tabs.get_mut(&tab).unwrap();
+        e.paint_detached = false;
+        e.dom = Some(test_dom("<p>x</p>"));
+        e.frame = Some(Frame {
+            width: 8,
+            height: 8,
+            pixels: vec![0; 8 * 8 * 4],
+            scale: 1.0,
+        });
+    }
+    s.drain_deferred_inputs(tab);
+    assert_eq!(s.tabs.get(&tab).unwrap().scroll_y, 1000.0);
+}
+
+/// Vol 23 DDG `/html` — `noscript` **dans le head** avec
+/// body riche : le redirect no-JS est honoré quand même
+/// (pattern d'entrée de gamme, indépendant du contenu).
+#[test]
+fn noscript_head_meta_refresh_honored_on_rich_page() {
+    let mut tb = TreeBuilder::new();
+    tb.set_scripting(true);
+    tb.push("<html><head><noscript><meta http-equiv=refresh content=\"0;url=/?q=x\"></noscript></head><body><form>q</form><p>résultats</p></body></html>");
+    tb.finish();
+    let r = noscript_meta_refresh(&tb.into_dom());
+    assert_eq!(r.and_then(|(_, u)| u).as_deref(), Some("/?q=x"));
+}
+
+/// Vol 25 (kayak) — signature du disjoncteur « moteur
+/// figé » : `Dead` et l'éval dépassée du proxy arment ;
+/// une vraie exception JS n'arme pas.
+#[test]
+fn engine_stall_signature() {
+    assert!(Session::is_engine_stall(&explorer_js::JsError::Dead));
+    assert!(Session::is_engine_stall(&explorer_js::JsError::Uncaught(
+        "moteur figé — éval dépassée".into()
+    )));
+    assert!(!Session::is_engine_stall(&explorer_js::JsError::Uncaught(
+        "TypeError: x is not a function".into()
+    )));
 }

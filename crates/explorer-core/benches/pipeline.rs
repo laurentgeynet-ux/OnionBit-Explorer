@@ -122,6 +122,7 @@ fn bench_session() -> (Session, Arc<FakeTransport>) {
             dom_journal_max_ops: 512,
             js_mem_limit_mib: 512,
             color_scheme: explorer_css::ColorScheme::default(),
+            js_stall_cooldown: std::time::Duration::ZERO,
         },
     );
     (s, t)

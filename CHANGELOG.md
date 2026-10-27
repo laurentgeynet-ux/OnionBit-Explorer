@@ -35,6 +35,744 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   (récursion d'appel JS non
   comptée par `call_depth` —
   natives/callbacks/walk DOM).
+- **JS-C159 — surface ShadowRoot/
+  sockets visible** (`explorer-jscore`)
+  — `ShadowRoot.getElementById`
+  scopé au sous-arbre (spec
+  `DocumentFragment` ; hydratation
+  CE reddit `faceplate-*`),
+  `sr instanceof ShadowRoot` vrai
+  (proto du ctor posé à
+  `node_value`), méthodes
+  `WebSocket`/`BroadcastChannel`
+  lisibles (`has_method` — les
+  invoke-only rendaient `undefined`
+  aux feature-detects), `EventSource`
+  posé à `install_dom` (refus différé
+  sans transport, jamais un global
+  absent). Test
+  `c159_shadow_ws_bc_es_surface`.
+
+- **JS-C158 — `TextEncoderStream`/
+  `TextDecoderStream`** (`explorer-jscore`)
+  — Encoding API absente du global
+  (`TextEncoderStream is not defined`,
+  medium.com ×2) : `TransformStream`
+  à transformer natif UTF-8 — encode
+  → `Uint8Array`, decode → chaîne
+  (`from_utf8_lossy`), protos dédiés
+  (`instanceof` propre). Test
+  `c158_text_codec_streams`.
+
+- **JS-C157 — props `navigator`
+  triviales** (`explorer-jscore`) —
+  `onLine`/`cookieEnabled`/`webdriver`/
+  `globalPrivacyControl`/`doNotTrack`/
+  `maxTouchPoints`/`hardwareConcurrency`
+  manquaient du navigateur low-
+  fingerprint (CMP/feature-detects
+  lisaient `undefined`). Valeurs
+  honnêtes : `onLine`/`cookieEnabled`
+  true, `webdriver`/`GPC` false,
+  `doNotTrack` null, `maxTouchPoints`
+  0, `hardwareConcurrency` 4. Test
+  `navigator_spec_props`.
+
+- **JS-C156 — `JsError::Timeout`
+  typé** (`explorer-js`) — le
+  disjoncteur « moteur figé »
+  rendait `Uncaught("moteur figé —
+  éval dépassée")` (signature
+  chaîne fragile) ; nouveau kind
+  `Timeout` distinct de
+  `Uncaught`/`Dead` — la session
+  peut distinguer un stall d'une
+  exception du script.
+
+- **JS-C155 — `URL.canParse`/
+  `URL.parse`** (`explorer-jscore`)
+  — statiques spec 2024 absentes du
+  ctor (`typeof URL.canParse` =
+  `undefined` sur bundles
+  modernes) : `canParse` bool sans
+  jeté, `parse` instance ou `null`.
+  Tests dans `c16_url`.
+
+- **JS-C154 — `unhandledrejection`**
+  (`explorer-jscore`,
+  `explorer-js`, `explorer-core`) —
+  les rejets sans `.then` mouraient
+  en silence (pinterest, airbnb).
+  `JsPromise.handled`
+  (`[[PromiseIsHandled]]` spec) posé
+  par tout `then`/adoption ; un
+  settle `Rejected` non-handled est
+  gardé et l'event
+  `{type,promise,reason,preventDefault}`
+  tiré en fin de checkpoint sur
+  `onunhandledrejection` + listeners
+  `__et` ; un `.then` tardif retire
+  la promesse (« rejectionhandled »
+  silencieux). Descriptions drainées
+  via `JsEngine::drain_unhandled_
+  rejections` (nouveau `Cmd` acteur)
+  → `CoreEvent::PipelineError` →
+  ring console. Test
+  `promise_unhandled_rejection`.
+
+- **JS-C153 — `AbortSignal.
+  throwIfAborted`** (`explorer-jscore`)
+  — la méthode existait mais n'était
+  exposée ni en statique sur le ctor
+  ni en propriété lisible du signal
+  (invoke-only → `signal.throwIfAborted`
+  rendait `undefined`, youtube kevlar
+  `cannot read 'throwIfAborted' of
+  Undefined`). Statique `AbortSignal.
+  throwIfAborted(sig)` ajoutée sur les
+  deux installs (DOM + bare `fetch`),
+  `has_method` du host complété.
+  Test `cap194_abort_signal_surface`.
+
+- **JS-C152 — `atob` chaîne-octet**
+  (`explorer-jscore`) — le décodage
+  validait sa sortie en UTF-8 et
+  jetait `invalid byte sequence` sur
+  tout octet non-ASCII (bsky bundle
+  Sentry/expo) alors que la spec rend
+  une chaîne Latin-1 (1 code point /
+  octet). Corrigé + whitespace restreint
+  à l'ASCII (NBSP rejeté) + octet non
+  ASCII ne glisse plus via `c as u8`
+  tronqué. Tests dans `globals`.
+
+- **JS-C151 — `canvas.toDataURL`/
+  `toBlob`** (`explorer-jscore`) —
+  les feature-detects anti-bot
+  (aliexpress `sufei-punish`)
+  comparent le format data-URL ;
+  méthodes absentes →
+  `toDataURL is not a function`.
+  Stubs honnêtes sans raster
+  (JS-C28) : `toDataURL` rend
+  `data:image/png;base64,` (PNG
+  vide), `toBlob` passe la même
+  valeur à son callback — gatés
+  `<canvas>`, repli générique
+  ailleurs. Test
+  `canvas_to_data_url_and_blob`.
+
+- **JS-C150 — `super.m()` dans un
+  constructeur dérivé** (`explorer-jscore`)
+  — le `[[HomeObject]]` du ctor était
+  le ctor lui-même (proto = parent
+  **ctor**) : `super.add()` résolvait
+  sur le parent ctor, jamais sur
+  `Parent.prototype` → `undefined` →
+  DSFR `core.module.js` mourait,
+  `window.dsfr` jamais posé, les 13
+  `…internals.register` aval jetaient
+  `cannot read 'internals' of
+  Undefined` (legifrance, vol16).
+  HomeObject du ctor = `ctor.prototype`
+  (spec `ClassDefinitionEvaluation`) ;
+  `super()` reste sur `SUPER_BIND`.
+  Le module verbatim évalue et pose
+  `window.dsfr` (fixture
+  `vol16_dsfr_core.js`).
+
+- **JS-C149 — `el.src`/`el.href`
+  résolus contre `document.baseURI`**
+  (`explorer-jscore`) — les props IDL
+  URL-typées rendaient l'attribut
+  brut : `new URL(el.src)` échouait
+  `Invalid URL`/`Invalid scheme` sur
+  les chemins relatifs (lemonde
+  `inline:5`, franceinfo
+  `polyfills-*.js`). La lecture
+  résout (spec `[[Get]]` URL) dans
+  `dom_raw_get` et le chemin
+  attribute-mapped ; `getAttribute`
+  reste brut.
+
+- **JS-C148 — `head`/`body`/`html`
+  auto-vivés dans
+  `getElementsByTagName`** (`explorer-jscore`)
+  — un document a TOUJOURS ces trois
+  éléments (le parseur les génère
+  même vides) ; les miroirs de cadre
+  sans squelette (`about:blank`,
+  iframe CF de jsfiddle) rendaient
+  `getElementsByTagName('head')[0]` =
+  `undefined` → `cannot read
+  'appendChild' of Undefined` (×12
+  en boucle à chaque input).
+  `ensure_doc_part` pose la pièce
+  manquante (même invariant que le
+  getter `document.head`, JS-C89).
+
+- **JS-C147 — `this` sloppy boxé en
+  wrapper** (`explorer-jscore`) —
+  `OrdinaryCallBindThis` rendait le
+  global pour TOUT `this` non-objet :
+  `f.call("x")` donnait `this` =
+  globalThis → `toLowerCase is not
+  a function (on Object)` (jQuery
+  `g.each`/`propFix` — codepen
+  `everypage`, soundcloud `1-*.js`).
+  Spec : primitives → wrappers
+  String/Number/Boolean/BigInt via
+  `__prim` (même chemin que
+  `new String`) ; seuls
+  `null`/`undefined` → global.
+
+- **JS-C146 — `in_gen` restauré après
+  fonction imbriquée** (`explorer-jscore`)
+  — `fn_body` restaurait `in_gen` à la
+  valeur posée par l'appelant immédiat,
+  pas celle du site : un `function(){}`
+  non-générateur imbriqué dans un
+  `function*(){}` (pattern
+  `__awaiter(this,…,function*(){})` de
+  TypeScript) masquait les `yield` du
+  corps englobant → `expected ';'`
+  (spotify `vendor~mobile-web-player`,
+  528 Ko verbatim) et `expected ')'`
+  (netlify `30991.*.js`). Les deux
+  fichiers réels parsent désormais.
+
+- **JS-C145 — `yield` dans `switch`
+  en générateur** (`explorer-jscore`)
+  — `Stmt::Switch` n'avait pas de
+  frame `GExec` : un `yield` dans
+  un `case` retombait sur l'éval
+  eager → `SyntaxError: yield
+  outside a generator` (github
+  `4u-*.js` ×3 — hydratation React
+  morte, recherche vide). Nouveau
+  `FKind::Switch` : discriminant +
+  tests évalués (purs post-lowering),
+  corps aplati du case atteint à la
+  fin (fallthrough), `break` nu
+  s'arrête au frame.
+
+- **JS-C144 — index d'insertion du
+  journal en espace sérialisable**
+  (`explorer-jscore`) — `Insert.index`
+  était compté sur `children` brut,
+  le moteur le lit filtré Element|Text
+  : chaque `<!-- -->` antérieur
+  décalait le graft d'un cran → les
+  `<li>` posés hors de leur `<ul>`
+  (craigslist vol2 — TreeBuilder
+  natif OK, c'est le miroir/journal).
+  L'index compte désormais les
+  enfants sérialisables précédents.
+
+- **JS-C143 — commentaires exclus de
+  la synchro DOM** (`explorer-jscore`)
+  — `serialize_keyed_node` émettait
+  `<#comment>` littéral pour tout nœud
+  `Comment` : re-parsé en élément
+  fantôme **peint en texte** (MDN,
+  JSFiddle, reddit, archive, w3c,
+  ecma, vercel, dailymotion) **et**
+  poussait un `id`/`tag` sans
+  correspondant `serializable_kind`
+  côté moteur → le zip
+  `engine_preorder` ↔ `ids` dérivait
+  d'un cran par `<!-- -->`. Les
+  commentaires sont sautés sans
+  émission ni clé, aligné sur
+  `serializable_kind` (Element|Text).
+
+- **JS-C142 — `window` hérite
+  `EventTarget.prototype`** (`explorer-jscore`)
+  — mur YouTube : le polyfill
+  webcomponents lit
+  `window.__shady_native_addEventListener`
+  via la chaîne proto (`window` est un
+  `EventTarget` en WebIDL). Notre global
+  héritait `Object.prototype` seul →
+  `__shady_native_*` jamais visible,
+  boot Polymer mort. `window instanceof
+  EventTarget` est désormais vrai.
+
+- **JS-C141 — interfaces IDB déclarées**
+  (`explorer-jscore`) — `IDBIndex is
+  not defined` (Rakuten) tuait le
+  bundle : les interfaces
+  `IDBIndex`/`IDBObjectStore`/`IDBCursor`/
+  `IDBTransaction`/`IDBRequest`/`IDBDatabase`…
+  sont posées par `install_dom` (stubs
+  non-constructibles, `instanceof` OK),
+  indépendantes du registre `indexedDB`.
+
+- **JS-C140 — `Range.createContextualFragment`**
+  (`explorer-jscore`) — première
+  exception de la cascade `sc_*` de
+  maps.google.com (19 erreurs). Fragment
+  parsé dans le même Dom que le range
+  (contexte non contextualisé —
+  déviation documentée).
+
+- **JS-C139 — regex : classes multi-items
+  de basses surrogates → ensemble
+  astral** (`explorer-jscore`) —
+  `\uD800[\uDD00-\uDD02\uDF9F\uDFD0]`
+  (bundle kevlar YouTube) : JS-C134 ne
+  fusionnait que l'atome/plage unique —
+  branche morte `(?!)`. La boucle
+  couvre atomes et plages mixtes.
+
+- **JS-C138 — `Worker#addEventListener`
+  des deux côtés** (`explorer-jscore`)
+  — mur openstreetmap.org (Rails UJS) :
+  `w.addEventListener('message', f)`
+  jetait `addEventListener is not a
+  function (on Worker)`. Écoutes en
+  props `__wl{i}`/`__wln` (traçage GC
+  gratuit) sur le wrapper **et** le
+  scope worker ; `dispatchEvent` noop
+  → `true`, `has_method` déclaré
+  (feature-detect `typeof w.m`).
+
+- **JS-C137 — `Intl.supportedValuesOf`**
+  (`explorer-jscore`) — mur
+  bandcamp.com/discover : absent,
+  `supportedValuesOf is not a function`
+  tuait le bootstrap Vue (résultats
+  figés). Sous-ensemble honnête sans
+  CLDR : `gregory`, `default`,
+  `latn`/`arab`, `UTC`, devises
+  courantes, `unit` vide ; clé
+  inconnue → `RangeError` (spec).
+
+- **JS-C136 — `XPathEvaluator`
+  `{createExpression, createNSResolver}`**
+  (`explorer-jscore`) — mur
+  codeberg.org (htmx) : le ctor ne
+  posait que `evaluate` ;
+  `new XPathEvaluator().createExpression(
+  '…hx-on…')` jetait
+  `createExpression is not a function`
+  au chargement du module webpack.
+  Rails sur les stubs `xpath_*`
+  existants (JS-C124).
+
+- **JS-C135 — `XMLHttpRequest.prototype`
+  réel** (`explorer-jscore`) — mur
+  Excalidraw (vol 2026-10-26) : Sentry
+  instrumente le proto via
+  `Dr(XMLHttpRequest.prototype, "send",
+  wrap)` ; sans prototype réel, la
+  valeur était `undefined` →
+  `TypeError: 'in' requires an object`
+  au bootstrap (page blanche). Proto
+  objet + méthodes en `hostMethod`
+  re-dispatchant `Host::invoke`
+  (`xhr.send` lisible comme fonction,
+  `instanceof` fonctionne), constantes
+  `UNSENT…DONE` sur ctor + proto,
+  chaîne d'instance câblée, racine GC
+  ajoutée.
+
+- **JS-C134 — regex : `-` littéral en
+  classe + paires surrogates hors
+  classe** (`explorer-jscore`) — deux
+  murs du vol 2026-10-26 :
+  `/^[-]?[0-9]+…$/` (ecma-international,
+  contact-form-7) dégénérait en `(?!)`
+  — le `-` de tête n'était pas compté
+  dans `class_emitted` (émis `\x{2d}`
+  désormais). La regex emoji de
+  gitlab.com (`\uD83D\uDCA5`,
+  `\uD83C[\uDFFB-\uDFFF]`) était
+  rejetée « Invalid codepoint » — les
+  paires surrogates hors classe sont
+  fusionnées en point astral (comme
+  déjà en `u`) et `\uD8hi[\uDClo-\uDChi]`
+  en plage astrale. Assertion stale
+  `surrogate_bounds_degrade` réalignée
+  (plage surrogate → astrale, f5d3fb7).
+- **Vol 26 — PUA `.notdef` en
+  slot muet** (`explorer-layout`,
+  `explorer-render`) — icon-font
+  échouée (Material Icons…) :
+  les caractères `U+E000`–
+  `U+F8FF` non couverts peinaient
+  un tofu `□`. `Glyph::invisible`
+  conserve l'avance, saute le
+  dessin. Régression
+  `pua_notdef_slot_muet` (font).
+
+- **Vol 26 — `position:fixed`
+  échappe au clip `overflow`
+  ancêtre** (`explorer-render`) —
+  le clip `overflow` englobait
+  le drain des positionnés :
+  un `fixed` ancré viewport
+  était rogné par un ancêtre
+  `overflow:hidden` (bandeau
+  cookie indeed `bottom:0`).
+  File racine `fixed_defer`
+  fusionnée par z dans
+  `pos_defer`, hors de tout
+  clip. Régression
+  `fixed_echappe_au_clip_`
+  `overflow_ancetre` (display).
+
+- **Vol 26 — `input`/`textarea`/
+  `select` cadre UA**
+  (`explorer-css`) — la feuille
+  UA ne donnait de bordure
+  qu'à `button` : les champs
+  s'affichaient sans cadre
+  (francetravail). Règle UA
+  `border:1px solid #767676;
+  background-color:#fff`.
+
+- **Vol 28 — `<iframe>` sans
+  dimensions = 300×150**
+  (`explorer-layout`) — boîte
+  feuille remplacée au gabarit
+  spec : le document embarqué
+  n'était jamais boxifié et la
+  balise retombait à 0×0
+  (wordle NYT). Régression
+  `iframe_sans_dimensions_`
+  `gabarit_300x150` (block).
+
+- **Vol 25 — `<svg>` à
+  `viewBox` seul → 300 px**
+  (`explorer-css`) — la règle
+  `width:100%` (bf2b0d3) était
+  correcte pour les héros mais
+  gonflait les icônes : le
+  hint devient `min(300px,
+  100%)` — défaut d'objet
+  remplacé Chrome (300 px,
+  borné au conteneur),
+  `height:auto` par le ratio
+  du viewBox. Régressions
+  `svg_viewbox_seul_borne_a_`
+  `300px`,
+  `svg_viewbox_seul_conteneur_`
+  `etroit` (block).
+
+- **Vol 21/22 — `text-overflow:
+  ellipsis` + `white-space:
+  nowrap`** (`explorer-layout`)
+  — le « … » est désormais
+  inséré au point de coupure
+  quand le texte déborde un
+  bloc à `overflow` ≠ `visible`
+  (mesuré dans la fonte du
+  fragment coupé ; les
+  fragments hors coupe sont
+  rognés à la mesure réelle).
+  Le fix a révélé que `nowrap`
+  n'empêchait **pas** les
+  coupures souples — garde
+  ajoutée dans le line-break
+  (seul `hard_after` force).
+  Régressions
+  `text_overflow_ellipsis_`
+  `insere_suspension`,
+  `text_overflow_clip_par_`
+  `defaut`,
+  `text_overflow_ellipsis_`
+  `sans_clip_inerte` (inline).
+
+- **Vol 11/20 — `min()`/`max()`/
+  `clamp()` dans les longueurs**
+  (`explorer-css`,
+  `explorer-layout`) — CSS
+  Values 4 §9 : les fonctions
+  mathématiques sont validées
+  en déclaration (`value_is_`
+  `valid_for` droppait
+  `width:min(50%,300px)` →
+  items flex éclatés stripe) et
+  évaluées par `raw_length_px`
+  (arguments séparés aux
+  virgules de profondeur 0,
+  `calc` imbriqué compris ;
+  `clamp` = `max(MIN,
+  min(VAL, MAX))`). Régressions
+  `min_max_clamp_resolus`,
+  `clamp_borne_min`,
+  `min_avec_calc_imbrique`
+  (modern) +
+  `min_max_clamp_conserves_`
+  `en_declaration` (cascade).
+
+- **Vol 18/19 — `flex-direction:
+  column` fit-content**
+  (`explorer-layout`) — hors
+  `stretch`, un item `column`
+  rétrécit désormais sur son
+  contenu (fit-content §9.5)
+  avant d'être placé par
+  `align-items` : un bloc
+  `width:auto` gardait la
+  largeur du conteneur → bouton
+  « Réessayer » quora pleine
+  largeur au lieu de centré.
+  Régressions
+  `flex_column_align_center_`
+  `retrécit_l_item`,
+  `flex_column_stretch_`
+  `pleine_largeur` (modern).
+
+- **Vol 17/19 — tables anonymes
+  + `table-caption`**
+  (`explorer-layout`, UA
+  `caption`)
+  (`explorer-css`) — §17.2.1 :
+  une suite de `table-cell`/
+  `table-row`/groupes sous un
+  parent non-`table` est
+  emballée dans une table
+  anonyme (cartes IGN posées en
+  `display:table-cell` sous
+  `display:block` s'empilaient
+  en colonne ~380 px). §17.4 :
+  `display:table-caption`
+  `top|bottom` posée hors
+  grille (figcaption Parsoid
+  wikipedia partait en cellule
+  → figure gonflée recouvrant
+  le texte). Régressions
+  `table_cell_nue_enveloppee_`
+  `en_table_anonyme`,
+  `table_row_nu_enveloppe`,
+  `table_caption_sous_la_`
+  `grille`, `table_caption_`
+  `side_top` (modern).
+
+- **Vol 16/19 — hit-test ordre
+  d'empilement**
+  (`explorer-layout`) — les
+  enfants sont testés dans
+  l'ordre de peinture inversé
+  (§9.9.1 : positionnés après
+  le flux, `z-index` ordonnés,
+  dernier du document à rang
+  égal). Un bandeau posé avant
+  le contenu dans le DOM volait
+  les hits des liens peints
+  dessus → `{"result":"ignored"}`
+  gamefaqs/speedtest,
+  « Français » canada.
+  Régressions
+  `hit_test_ordre_empilement_`
+  `dernier_peint_gagne`,
+  `hit_test_ordre_document_`
+  `inverse_a_rang_egal`
+  (block).
+
+- **Vol 2026-10-26 — shorthand
+  `inset`** (`explorer-css`) —
+  éclaté en `top/right/bottom/
+  left` : les liens overlay
+  `position:absolute; inset:0`
+  du Guardian restaient sans
+  offsets → boîtes `0x0`,
+  articles inouvrables au
+  hit-test (`editable:false`,
+  click `ignored`). Régression
+  `inset_expansion` (values).
+
+- **Vol 2026-10-26 — `opacity: 0`
+  n'émet rien** (`explorer-render`)
+  — un élément à opacité nulle et
+  tout son sous-arbre sont
+  court-circuités dans
+  `paint_box` (groupe alpha nul ;
+  les modales `opacity-0` de
+  bookshop/ecma peintaient en
+  plein). Opacités partielles :
+  non appliquées (groupe alpha
+  reporté). Régressions
+  `opacity_zero_nemet_rien`,
+  `opacity_partielle_ne_court_
+  circuite_pas` (display).
+
+- **Vol 2026-10-26 — `[popover]`
+  fermé masqué** (`explorer-css`)
+  — nouveau DynamicPseudo
+  `:popover-open` (toujours faux
+  tant que `showPopover()` n'existe
+  pas) + règle UA spec
+  `[popover]:not(:popover-open)
+  { display: none }` : les
+  tool-tips/mega-menus
+  `popover="manual"` de github
+  étaient peints dépliés en
+  permanence (~1500 px empilés).
+  Régression `ua_popover_ferme_
+  masque` (cascade).
+
+- **Vol 2026-10-26 — `grid-column`
+  à lignes négatives** (`explorer-
+  layout`) — `-1` désigne la
+  bordure après la dernière piste
+  (spec §7.1) : `grid-column:
+  1 / -1` couvre désormais toutes
+  les colonnes — auparavant un
+  parse `usize` échouait et
+  l'item retombait en placement
+  auto sur la première piste
+  (`minmax(0,1fr)` ignorée →
+  commentaires shreddit/reddit
+  collapsés à la piste avatar
+  32 px). Régressions
+  `grid_column_span_toutes_pistes_
+  ligne_negative`,
+  `grid_column_depart_a_ligne_
+  negative` (modern).
+
+- **Vol 2026-10-26 — échecs de
+  sous-ressources en console**
+  (`explorer-core`) — un `<link>`/
+  `<script>`/`<img>`/`<iframe>`
+  dont le fetch échoue (réseau,
+  non-2xx, en-têtes de sécurité
+  ou SRI) produit désormais un
+  `PipelineError` attribué à
+  l'onglet : les pages blanches
+  old.reddit/archive.org et le
+  « error loading the page » de
+  craigslist n'avaient AUCUNE
+  trace dans le ring console.
+  Régression
+  `subresource_failures_reach_
+  console_ring` (session).
+
+- **Vol 2026-10-26 — `<svg>`
+  à `viewBox` seul = 100 % du
+  conteneur** (`explorer-css`) —
+  hint `width:100%` posé quand
+  l'attribut `width` manque et
+  qu'un `viewBox` définit la
+  géométrie (SVG2 : `auto` →
+  `100%`), la hauteur dérivant
+  du ratio §10.6.2 — fini les
+  logos géants à la taille du
+  viewBox (w3.org). Régressions
+  `svg_viewbox_seul_*`,
+  `svg_dimensions_explicites_
+  inchangees` (block).
+
+- **Vol 2026-10-26 —
+  `pointer-events: none` au
+  hit-test** (`explorer-layout`)
+  — une boîte `pointer-events:
+  none` ne peut plus être cible
+  (ses enfants `auto` explicites
+  restent ciblables) : les
+  overlays transparents auteur
+  volaient les hits au-dessus
+  des `<input>` peints →
+  `editable:false`, clic
+  `ignored` (service-public,
+  bookshop). Régressions
+  `hit_test_pointer_events_*`
+  (block).
+
+- **Vol 2026-10-26 — `<noscript>`
+  masqué même sous style auteur**
+  (`explorer-css`) — la règle UA
+  `@media (scripting) { noscript
+  { display: none } }` passait en
+  `!important` comme la spec HTML
+  Rendering : une feuille auteur
+  `noscript { display:flex }`
+  (mesuré mastodon.social) ne
+  révèle plus le fallback rawtext
+  quand le scripting est actif.
+  Régression
+  `noscript_important_coiffe_
+  style_auteur` (cascade 106/…).
+  Au passage : rafraîchissement
+  clippy 1.99 de `value.rs`
+  (renommages, `map_or`, cast
+  borné `unit_to_u8`).
+- **Vol 2026-10-26 — correctifs de vol,
+  vague 3 (FIX-3, vols 18/19)**
+  - **Console perdue après navigation**
+    (x.com) : `event_capacity` 64 → 512 —
+    le burst d'événements d'une navigation
+    faisait lagguer le recorder, les
+    `PipelineError` étaient perdus.
+  - **Iframes muettes en échec** (tumblr
+    CMP) : fetch échoué, statut non-2xx et
+    refus X-Frame-Options/frame-ancestors
+    sont désormais `warn`-logués (le cadre
+    blanc spec-correct n'est plus silencieux).
+  - **`/frame` cohérence** : re-vérifiée —
+    défaut viewport dans tous les cas,
+    `?full=1` document ; le 200 à corps
+    vide reste impossible (204 + Retry-After).
+
+- **Vol 2026-10-26 — correctifs de vol,
+  vague 2 (FIX-3, vols 13/16/17)**
+  — trois constats supplémentaires :
+  - **Images lazy-load jamais peintes**
+    (lemonde ~195 img, bbc home 0 %) :
+    `collect_images` retombe sur les
+    attributs lazy `data-src`/`data-lazy-src`/
+    `data-original`/`data-url`/`data-srcset`
+    quand `src`/`srcset` manque — le bootstrap
+    JS mort n'est plus requis.
+  - **`GET /frame` = viewport par défaut**
+    (sémantique instable : doc entier quand non
+    clampé, viewport quand clampé — 53 Mo de PNG)
+    — `?full=1` sert le document, `?x&y&w&h`
+    inchangé, `Session::scale()` exposé.
+  - **Scroll différé rapporte la projection** :
+    pendant une apply détachée, `Scroll` rend
+    `Scrolled{scroll_y}` projeté (position +
+    deltas en file), plus `Ignored` abandonné.
+
+- **Vol 2026-10-26 — correctifs de vol
+  (FIX-3, `explorer-core` + `explorer-api`)**
+  — quatre constats du rapport de vol :
+  - **Onglet parasite sur ressource `.js`**
+    (rakuten `gw.js`, soundcloud) : les
+    types script servis en top-level
+    (`text/javascript`, `application/
+    javascript`, ecmascript…) ne sont plus
+    « doc_like » dans `download_meta` →
+    offre de téléchargement ; un contexte
+    `window.open`/`target=_blank` resté
+    vierge après navigation inaugurale est
+    refermé (`close_stillborn_popup`, pendings
+    ré-attribués à l'opener).
+  - **`/frame` 200 à corps vide** (transitoire
+    post-navigation) : corps vide → `204` +
+    `Retry-After: 1` ; un encodage vide n'est
+    plus caché dans `entry.png`.
+  - **Mémoire bfcache** (~130 Mio de rasters
+    + ~17 Mio de PNG pour 4 pages gelées) :
+    frame et PNG libérés au gel — DOM + arbre
+    survivent, la restauration repeint via
+    `needs_paint`.
+  - **Meta refresh en `<noscript>`** (google
+    SERP) : honorée quand la page est un
+    fallback pur (body = `noscript`/`script`
+    seulement) — le rawtext est re-parsé
+    scripting off ; une page riche avec un
+    noscript annexe garde la spec.
+  - **Crash daemon silencieux** (vol 4) :
+    audit des chemins DELETE+navigate —
+    gardes epoch/`Option` exhaustifs, aucun
+    `unwrap` en code livré ; la sentinelle
+    `EXPLORER_DEATH_LOG` existe déjà — mort
+    sans crochet = kill externe/OOM (le
+    correctif bfcache ci-dessus réduit le
+    réservoir principal suspecté).
 
 - **JS-C133 — `initCustomEvent`
   (DOM L2, strate polymer/shady)**

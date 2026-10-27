@@ -237,11 +237,31 @@ pub(crate) fn download_meta(headers: &[(String, String)]) -> Option<DownloadMeta
         .split(';')
         .next()
         .is_some_and(|d| d.trim().eq_ignore_ascii_case("attachment"));
-    let doc_like = mime.is_empty()
-        || mime == "text/html"
-        || mime == "application/xhtml+xml"
-        || mime.starts_with("text/")
-        || mime.ends_with("+xml");
+    // Une ressource **script** servie en top-level n'est
+    // pas un document — `text/javascript` serait sinon
+    // ratatché à `text/*` et peint en brut (vol rakuten :
+    // `window.open` vers un `.js` ouvrait un onglet
+    // affichant la source). Politique navigateurs : ces
+    // types basculent en téléchargement.
+    let script_like = matches!(
+        mime.as_str(),
+        "application/javascript"
+            | "application/x-javascript"
+            | "application/ecmascript"
+            | "application/x-ecmascript"
+            | "text/javascript"
+            | "text/ecmascript"
+            | "text/jscript"
+            | "text/livescript"
+            | "text/x-javascript"
+            | "text/x-ecmascript"
+    );
+    let doc_like = !script_like
+        && (mime.is_empty()
+            || mime == "text/html"
+            || mime == "application/xhtml+xml"
+            || mime.starts_with("text/")
+            || mime.ends_with("+xml"));
     if attached || !doc_like {
         return Some(DownloadMeta {
             filename_hint,
@@ -531,6 +551,10 @@ impl NavJob {
         let refresh_base = base_url.clone().unwrap_or_else(|| resolved.clone());
         let refresh = header_refresh
             .or_else(|| meta_refresh(&dom))
+            // Repli `noscript` (vol google) : page de
+            // fallback pure — scripting levé au parse, la
+            // méta du repli est honorée.
+            .or_else(|| noscript_meta_refresh(&dom))
             .and_then(|(secs, raw)| {
                 let target = match raw {
                     Some(r) => Url::resolve(&refresh_base, &r).ok()?,
@@ -937,32 +961,79 @@ impl SubJob {
             // CAP-185 : `load`/`error` de fin de feuille —
             // enregistré sur toutes les issues (fetch refusé,
             // non-2xx, sécurité/SRI) ; livré au commit.
+            // Vol 2026-10-26 : tout échec est aussi rapporté
+            // en console (`PipelineError`) — les pages
+            // blanches old.reddit/archive.org n'avaient
+            // **aucune** trace des sous-ressources mortes.
             let Ok(resp) = res else {
+                report_sub_failure(
+                    &events,
+                    tab,
+                    &tag,
+                    &self.sheet_urls,
+                    &self.scripts,
+                    &slot_items,
+                    &self.frame_urls,
+                    "échec réseau",
+                );
                 if let SubTag::Css(i) = tag {
                     let ord = self.sheet_urls.get(i).map_or(0, |(.., lord)| *lord);
                     self.link_events.push((ord, false));
+                }
+                // Un `<iframe src>` en échec laissait un
+                // cadre blanc sans trace (vol 18).
+                if let SubTag::Frame(i) = tag {
+                    if let Some((u, ..)) = self.frame_urls.get(i) {
+                        tracing::warn!(url = %u, "iframe : fetch en échec — cadre vide");
+                    }
                 }
                 return;
             };
             if !(200..300).contains(&resp.status) {
+                report_sub_failure(
+                    &events,
+                    tab,
+                    &tag,
+                    &self.sheet_urls,
+                    &self.scripts,
+                    &slot_items,
+                    &self.frame_urls,
+                    &format!("HTTP {}", resp.status),
+                );
                 if let SubTag::Css(i) = tag {
                     let ord = self.sheet_urls.get(i).map_or(0, |(.., lord)| *lord);
                     self.link_events.push((ord, false));
                 }
+                if let SubTag::Frame(i) = tag {
+                    if let Some((u, ..)) = self.frame_urls.get(i) {
+                        tracing::warn!(url = %u, status = resp.status, "iframe : statut non-2xx — cadre vide");
+                    }
+                }
                 return;
             }
-            match tag {
+            match &tag {
                 SubTag::Css(i) => {
-                    let (su, sri, .., lord) = &self.sheet_urls[i];
+                    let (su, sri, .., lord) = &self.sheet_urls[*i];
                     let ok = subresp_security_allows(&self.url, su, FetchDest::Style, &resp)
                         && sri_allows(sri.as_deref(), &resp.body);
                     if ok {
-                        self.css_slots[i] = Some(decode_stylesheet(&resp.body, &resp.headers));
+                        self.css_slots[*i] = Some(decode_stylesheet(&resp.body, &resp.headers));
+                    } else {
+                        report_sub_failure(
+                            &events,
+                            tab,
+                            &tag,
+                            &self.sheet_urls,
+                            &self.scripts,
+                            &slot_items,
+                            &self.frame_urls,
+                            "en-têtes de sécurité ou SRI",
+                        );
                     }
                     self.link_events.push((*lord, ok));
                 }
                 SubTag::Script(slot) => {
-                    let item = &self.scripts[slot_items[slot]];
+                    let item = &self.scripts[slot_items[*slot]];
                     let sec_ok = item.src.as_ref().is_none_or(|u| {
                         subresp_security_allows(&self.url, u, FetchDest::Script, &resp)
                     });
@@ -988,17 +1059,28 @@ impl SubJob {
                                 eval_arrival(&mut eng, &text, item.el_ord);
                             }
                         } else {
-                            self.script_srcs[slot] = Some(text);
+                            self.script_srcs[*slot] = Some(text);
                         }
+                    } else {
+                        report_sub_failure(
+                            &events,
+                            tab,
+                            &tag,
+                            &self.sheet_urls,
+                            &self.scripts,
+                            &slot_items,
+                            &self.frame_urls,
+                            "en-têtes de sécurité ou SRI",
+                        );
                     }
                 }
                 SubTag::Img(u) => {
-                    if subresp_security_allows(&self.url, &u, FetchDest::Image, &resp) {
+                    if subresp_security_allows(&self.url, u, FetchDest::Image, &resp) {
                         self.img_bodies.insert(u.as_str(), resp.body);
                     }
                 }
                 SubTag::Frame(i) => {
-                    let (u, _, sandbox) = &self.frame_urls[i];
+                    let (u, _, sandbox) = &self.frame_urls[*i];
                     collect_frame(
                         &self.url,
                         &self.cookies,
@@ -1438,6 +1520,8 @@ pub(crate) struct DynImportMeta {
     pub(crate) ctx: u32,
     /// `dyn_import_seq` moteur — clé `pending_imports`.
     pub(crate) seq: u64,
+    /// URL demandée — log/attribution de l'échec.
+    pub(crate) url: String,
     /// Corps de l'entrée (2xx) — `None` = fetch refusé/erreur.
     pub(crate) entry: Option<String>,
     /// Dépendances **statiques** du module livré — `(url
@@ -1965,6 +2049,15 @@ pub(crate) fn collect_frame(
             sandbox,
             frame_scripting(parent_scripting, sandbox),
         ));
+    } else {
+        // Embarquement refusé (XFO / CSP frame-ancestors) —
+        // cadre blanc spec-correct mais jamais silencieux
+        // (vol 18 tumblr CMP).
+        tracing::warn!(
+            url = %u,
+            status = resp.status,
+            "iframe : embarquement refusé (X-Frame-Options / frame-ancestors)"
+        );
     }
 }
 
@@ -2085,6 +2178,42 @@ pub(crate) fn media_attr_matches(env: &StyleEnv, media: &str) -> bool {
         _ => None,
     });
     queries.is_none_or(|q| media_matches(env, q))
+}
+
+/// Échec d'une sous-ressource de la vague → `PipelineError`
+/// en console (vol 2026-10-26 — les échecs étaient
+/// silencieux : pages blanches sans aucune trace,
+/// « error loading the page » injoignable). Décrit la
+/// ressource (`kind url`) et la cause ; jamais fatal.
+#[allow(clippy::too_many_arguments)] // description d'une ressource par tag — toutes les tables indexées sont nécessaires
+fn report_sub_failure(
+    events: &broadcast::Sender<CoreEvent>,
+    tab: TabId,
+    tag: &SubTag,
+    sheet_urls: &[SheetFetch],
+    scripts: &[ScriptItem],
+    slot_items: &[usize],
+    frame_urls: &[(Url, Option<ReferrerPolicy>, Option<SandboxFlags>)],
+    why: &str,
+) {
+    let desc = match tag {
+        SubTag::Css(i) => sheet_urls
+            .get(*i)
+            .map_or_else(|| "feuille ?".to_string(), |(u, ..)| format!("feuille {u}")),
+        SubTag::Script(slot) => slot_items
+            .get(*slot)
+            .and_then(|i| scripts.get(*i))
+            .and_then(|it| it.src.as_ref())
+            .map_or_else(|| "script (inline)".to_string(), |u| format!("script {u}")),
+        SubTag::Img(u) => format!("image {u}"),
+        SubTag::Frame(i) => frame_urls
+            .get(*i)
+            .map_or_else(|| "cadre ?".to_string(), |(u, ..)| format!("cadre {u}")),
+    };
+    let _ = events.send(CoreEvent::PipelineError {
+        tab: Some(tab),
+        message: format!("sous-ressource en échec ({why}) : {desc}"),
+    });
 }
 
 /// Vague de fetches parallèle bornée (étape 50, scheduler

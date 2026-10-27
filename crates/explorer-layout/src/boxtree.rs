@@ -294,6 +294,7 @@ pub fn build_box_tree(dom: &Dom, root: NodeId, styles: &StyleMap) -> Option<Layo
 /// résolus) ; un `img` absent de la map produit une boîte
 /// texte de son `alt` (dégradation image cassée).
 #[must_use]
+#[allow(clippy::too_many_lines)]
 pub fn build_box_tree_sized<S: ::std::hash::BuildHasher>(
     dom: &Dom,
     root: NodeId,
@@ -343,6 +344,18 @@ pub fn build_box_tree_sized<S: ::std::hash::BuildHasher>(
             root,
             style.clone(),
             intrinsic,
+        ));
+    }
+    // `<iframe>` : élément remplacé — le document embarqué
+    // n'est jamais boxifié ; sans dimensions la spec donne le
+    // gabarit remplacé standard 300×150 (vol 28 wordle NYT :
+    // l'iframe de jeu retombait à 0×0).
+    if dom.tag_name(root).is_ok_and(|t| t == "iframe") {
+        return Some(leaf_box(
+            box_kind_of(&style),
+            root,
+            style.clone(),
+            Some(sizes.get(&root).copied().unwrap_or((300.0, 150.0))),
         ));
     }
     // `<canvas>` (R-11) : élément remplacé — le contenu bitmap

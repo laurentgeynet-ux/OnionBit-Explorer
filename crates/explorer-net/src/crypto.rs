@@ -150,6 +150,11 @@ pub enum KeyAlgo {
     EcdsaP256,
     /// `Ed25519` — privée `pkcs8`, publique `raw`/`spki`.
     Ed25519,
+    /// `AES-GCM` (§68 couture FIX-1) — clé `raw` de 128 ou
+    /// 256 bits ; ops `encrypt`/`decrypt` via `ring::aead`
+    /// (tag GCM 128 bits collé au chiffré, convention
+    /// `WebCrypto` `tagLength` par défaut).
+    AesGcm,
 }
 
 /// Format d'`importKey` — `jwk` non supporté à cette
@@ -183,6 +188,11 @@ pub fn import_key(algo: KeyAlgo, format: KeyFormat, bytes: &[u8]) -> Result<Vec<
         // `spki` ECDSA/Ed25519 : passthrough — la matière est
         // validée à l'usage (`verify`), pas de parse ASN.1 ici.
         (KeyAlgo::Hmac(_), KeyFormat::Raw) | (_, KeyFormat::Spki) => Ok(bytes.to_vec()),
+        (KeyAlgo::AesGcm, KeyFormat::Raw) => match bytes.len() {
+            16 | 32 => Ok(bytes.to_vec()),
+            _ => Err("importKey: invalid raw key (AES-GCM veut 128/256 bits)".to_string()),
+        },
+        (KeyAlgo::AesGcm, _) => Err("importKey: AES-GCM n'accepte que le format raw".to_string()),
         // Privées : `pkcs8` validé par construction ring.
         (KeyAlgo::EcdsaP256, KeyFormat::Pkcs8) => ring::signature::EcdsaKeyPair::from_pkcs8(
             &ring::signature::ECDSA_P256_SHA256_ASN1_SIGNING,
@@ -248,7 +258,74 @@ pub fn sign(algo: KeyAlgo, key: &[u8], data: &[u8]) -> Result<Vec<u8>, String> {
         KeyAlgo::Ed25519 => ring::signature::Ed25519KeyPair::from_pkcs8(key)
             .map(|kp| kp.sign(data).as_ref().to_vec())
             .map_err(|_| "sign: Ed25519 failed".to_string()),
+        KeyAlgo::AesGcm => Err("sign: AES-GCM ne signe pas (encrypt/decrypt)".to_string()),
     }
+}
+
+/// `subtle.encrypt({name:"AES-GCM", iv, additionalData?,
+/// tagLength?}, key, data)` — retourne `chiffré ‖ tag` (tag
+/// 128 bits, convention GCM/WebCrypto par défaut ; le
+/// moteur tronque si `tagLength` < 128). Nonce **96 bits**
+/// exigé par `ring` (spec `WebCrypto` accepte 1–64 octets —
+/// les longueurs non-96 exigeraient une dérivation ; rejet
+/// honnête `OperationError` plutôt que nonce tronqué).
+///
+/// # Errors
+/// `Err` (`OperationError`) si la clé n'est pas 128/256
+/// bits, le nonce ≠ 12 octets, ou le sceau échoue.
+pub fn aead_seal(
+    algo: KeyAlgo,
+    key: &[u8],
+    nonce: &[u8],
+    aad: &[u8],
+    plaintext: &[u8],
+) -> Result<Vec<u8>, String> {
+    let unbound = aead_unbound(algo, key)?;
+    let nonce = ring::aead::Nonce::try_assume_unique_for_key(nonce)
+        .map_err(|_| "encrypt: AES-GCM veut un nonce de 96 bits".to_string())?;
+    let key = ring::aead::LessSafeKey::new(unbound);
+    let mut buf = plaintext.to_vec();
+    key.seal_in_place_append_tag(nonce, ring::aead::Aad::from(aad), &mut buf)
+        .map_err(|_| "encrypt: AES-GCM seal failed".to_string())?;
+    Ok(buf)
+}
+
+/// `subtle.decrypt({name:"AES-GCM", iv, additionalData?,
+/// tagLength?}, key, data)` — `data` = `chiffré ‖ tag` ;
+/// retourne le clair ou `OperationError` (tag invalide =
+/// échec d'authentification, pas `false`).
+///
+/// # Errors
+/// `Err` (`OperationError`) si la clé/nonce sont invalides
+/// ou le tag ne vérifie pas.
+pub fn aead_open(
+    algo: KeyAlgo,
+    key: &[u8],
+    nonce: &[u8],
+    aad: &[u8],
+    ciphertext: &[u8],
+) -> Result<Vec<u8>, String> {
+    let unbound = aead_unbound(algo, key)?;
+    let nonce = ring::aead::Nonce::try_assume_unique_for_key(nonce)
+        .map_err(|_| "decrypt: AES-GCM veut un nonce de 96 bits".to_string())?;
+    let key = ring::aead::LessSafeKey::new(unbound);
+    let mut buf = ciphertext.to_vec();
+    let pt = key
+        .open_in_place(nonce, ring::aead::Aad::from(aad), &mut buf)
+        .map_err(|_| "decrypt: AES-GCM open failed (tag invalide)".to_string())?;
+    Ok(pt.to_vec())
+}
+
+/// `ring::aead::UnboundKey` depuis les octets canoniques —
+/// l'algo sélectionne 128/256 par taille de clé.
+fn aead_unbound(algo: KeyAlgo, key: &[u8]) -> Result<ring::aead::UnboundKey, String> {
+    let a = match (algo, key.len()) {
+        (KeyAlgo::AesGcm, 16) => &ring::aead::AES_128_GCM,
+        (KeyAlgo::AesGcm, 32) => &ring::aead::AES_256_GCM,
+        (KeyAlgo::AesGcm, _) => return Err("AES-GCM veut une clé de 128/256 bits".to_string()),
+        _ => return Err("AEAD : algorithme non supporté".to_string()),
+    };
+    ring::aead::UnboundKey::new(a, key).map_err(|_| "AES-GCM : clé invalide".to_string())
 }
 
 /// `subtle.verify` — `key` = octets canoniques (publique
@@ -279,6 +356,7 @@ pub fn verify(algo: KeyAlgo, key: &[u8], sig: &[u8], data: &[u8]) -> Result<Vec<
         KeyAlgo::Ed25519 => ring::signature::UnparsedPublicKey::new(&ring::signature::ED25519, key)
             .verify(data, sig)
             .is_ok(),
+        KeyAlgo::AesGcm => return Err("verify: AES-GCM ne signe pas".to_string()),
     };
     // Booléen encodé sur un octet — le moteur le décode en
     // `true`/`false` à la livraison (la promesse `verify`
@@ -357,5 +435,46 @@ mod tests {
         // reconnu ne reste, refusé sinon.
         assert!(integrity_allows("sha256-!!!", b"abc"));
         assert!(!integrity_allows("sha256-AAAA", b"abc"));
+    }
+
+    /// AES-GCM — round-trip + vecteur NIST GCM 128
+    /// (clé/IV zéros, clair zéro → tag connu).
+    #[test]
+    fn aes_gcm_roundtrip_et_vecteur() {
+        // NIST GCM spec ex. : key=0^128, iv=0^96, pt=0^128
+        // → ct = 0388dace60b6a392f328c2b971b2fe78,
+        //   tag = ab6e47d42cec13bdf53a67b21257bddf.
+        let key = [0u8; 16];
+        let iv = [0u8; 12];
+        let pt = [0u8; 16];
+        let ct = aead_seal(KeyAlgo::AesGcm, &key, &iv, &[], &pt).expect("seal");
+        let to_hex = |b: &[u8]| {
+            b.iter().fold(String::new(), |mut s, x| {
+                use std::fmt::Write;
+                let _ = write!(s, "{x:02x}");
+                s
+            })
+        };
+        // NIST GCM : ct ‖ tag attendu (vérifié contre la
+        // sortie réelle — le vecteur canonique est respecté).
+        let want = "0388dace60b6a392f328c2b971b2fe78ab6e47d42cec13bdf53a67b21257bddf";
+        let got = to_hex(&ct);
+        assert_eq!(got.len(), want.len(), "longueur ct‖tag");
+        assert!(got == want, "vecteur GCM : {got}");
+        let back = aead_open(KeyAlgo::AesGcm, &key, &iv, &[], &ct).expect("open");
+        assert_eq!(back, pt);
+        // Tag corrompu → OperationError, jamais de clair.
+        let mut bad = ct.clone();
+        let n = bad.len() - 1;
+        bad[n] ^= 1;
+        assert!(aead_open(KeyAlgo::AesGcm, &key, &iv, &[], &bad).is_err());
+        // AAD doit vérifier identique.
+        let c2 = aead_seal(KeyAlgo::AesGcm, &key, &iv, b"hdr", b"x").expect("seal aad");
+        assert!(aead_open(KeyAlgo::AesGcm, &key, &iv, b"autre", &c2).is_err());
+        // Clé 256 bits admise, tailles invalides rejetées.
+        assert!(aead_seal(KeyAlgo::AesGcm, &[0u8; 32], &iv, &[], b"x").is_ok());
+        assert!(import_key(KeyAlgo::AesGcm, KeyFormat::Raw, &[0u8; 16]).is_ok());
+        assert!(import_key(KeyAlgo::AesGcm, KeyFormat::Raw, &[0u8; 24]).is_err());
+        assert!(import_key(KeyAlgo::AesGcm, KeyFormat::Pkcs8, &[0u8; 16]).is_err());
     }
 }

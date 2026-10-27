@@ -241,9 +241,16 @@ pub(crate) fn atob(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value>
         if c == '=' {
             break;
         }
-        let v = match B64.iter().position(|&b| b == c as u8) {
+        // Hors ASCII → invalide (le `c as u8` tronquait
+        // `Ā`/`` en alphabet — un octet de plus passait).
+        let v = match u8::try_from(c)
+            .ok()
+            .and_then(|b| B64.iter().position(|&x| x == b))
+        {
             Some(v) => v as u32,
-            None if c.is_whitespace() => continue,
+            // Spec : ASCII whitespace ignoré avant décodage
+            // (espace, \t, \n, \f, \r — pas NBSP).
+            None if matches!(c, ' ' | '\t' | '\n' | '\x0c' | '\r') => continue,
             None => return Err(e.type_error("atob: invalid character")),
         };
         bits = (bits << 6) | v;
@@ -253,8 +260,10 @@ pub(crate) fn atob(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value>
             out.push((bits >> nbits) as u8);
         }
     }
-    match String::from_utf8(out) {
-        Ok(s) => Ok(e.str_val(s)),
-        Err(_) => Err(e.type_error("atob: invalid byte sequence")),
-    }
+    // `atob` rend une **chaîne-octet** (Latin-1, un code point
+    // par octet — spec), pas de l'UTF-8 : la validation
+    // `from_utf8` jetait `invalid byte sequence` sur toute
+    // donnée non-ASCII (bsky bundle Sentry/expo vol22).
+    let s: String = out.iter().map(|&b| char::from(b)).collect();
+    Ok(e.str_val(s))
 }

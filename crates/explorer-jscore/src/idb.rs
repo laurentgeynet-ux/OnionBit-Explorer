@@ -2909,6 +2909,44 @@ pub(crate) fn install_idb(e: &mut Engine, inject: Option<IdbRegistry>) {
     let kp = keyrange_proto(e);
     e.link_ctor(kc, Some(kp));
     e.set_own(g, "IDBKeyRange", kc, false);
+
+    install_idb_interfaces(e);
+}
+
+/// Interfaces IDB non-constructibles (feature-detect +
+/// `instanceof`) — Rakuten/jQuery probent `IDBIndex`
+/// (vol 2026-10-26 : `IDBIndex is not defined` = `ReferenceError`
+/// fatale). Stubs honnêtes : présents comme noms, `new` jette
+/// `TypeError` (objets de première classe jamais créés à la
+/// main côté script). Posées par `install_dom` — indépendantes
+/// du registre `indexedDB`.
+pub(crate) fn install_idb_interfaces(e: &mut Engine) {
+    for name in [
+        "IDBIndex",
+        "IDBObjectStore",
+        "IDBCursor",
+        "IDBCursorWithValue",
+        "IDBTransaction",
+        "IDBRequest",
+        "IDBOpenDBRequest",
+        "IDBDatabase",
+        "IDBVersionChangeEvent",
+    ] {
+        let c = e.native_fn(name, idb_illegal_ctor);
+        if let Value::Obj(cid) = c {
+            let p = e.new_object();
+            let tag = e.str_val(name);
+            e.set_own(p, crate::interp::SYM_TO_STRING_TAG, tag, false);
+            e.set_own(cid, "prototype", Value::Obj(p), false);
+            e.set_own(p, "constructor", c, false);
+        }
+        e.set_own(e.global, name, c, false);
+    }
+}
+
+/// `TypeError` sur `new` — interfaces sans constructeur `WebIDL`.
+fn idb_illegal_ctor(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
+    Err(e.type_error("Illegal constructor"))
 }
 
 /// `install_caches(reg)` — pose `caches` (`CacheStorage`) sur le

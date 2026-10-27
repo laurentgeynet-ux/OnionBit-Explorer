@@ -72,6 +72,18 @@ enum RowClass {
     Footer,
 }
 
+/// Légendes `table-caption` repérées dans l'arbre (§17.4 :
+/// posées au-dessus ou au-dessous de la grille selon
+/// `caption-side`, pleine largeur de table). Hors périmètre
+/// documenté : `caption-side: left|right`.
+#[derive(Default)]
+struct Captions {
+    /// `caption-side: top` (défaut).
+    top: Vec<Vec<usize>>,
+    /// `caption-side: bottom`.
+    bottom: Vec<Vec<usize>>,
+}
+
 /// Un rang `table-row` repéré : chemin d'indices depuis la
 /// boîte table (les éléments intermédiaires sont les groupes
 /// de rangs) + ses cellules. `path` **vide** = rang anonyme
@@ -89,7 +101,7 @@ struct Row {
 /// `true` pour les boîtes qui ne peuvent pas tenir de cellule
 /// dans une rangée : texte blanc inter-éléments (l'espace
 /// source entre `<li>` n'est PAS du contenu de cellule).
-fn ignorable_in_table(b: &LayoutBox) -> bool {
+pub(crate) fn ignorable_in_table(b: &LayoutBox) -> bool {
     // Colonnes (`col`/`colgroup`) : des repères de grille,
     // pas du contenu — jamais de cellule anonyme.
     if matches!(b.display(), "table-column" | "table-column-group") {
@@ -142,7 +154,8 @@ fn span_of(st: &ComputedStyle, prop: &str) -> usize {
 /// emballés dans des cellules/rangs anonymes ; une table
 /// **imbriquée** est du contenu (on ne descend pas dedans).
 /// Les `col` sont assignés par [`place_cells`] après le tri.
-fn collect_grid(bx: &LayoutBox) -> Vec<Row> {
+/// Renvoie aussi les légendes (`table-caption`, §17.4).
+fn collect_grid(bx: &LayoutBox) -> (Vec<Row>, Captions) {
     /// Cellules d'un rang explicite (enfants `table-cell`
     /// directs — le reste est ignoré, rangs réels seuls).
     fn row_cells(b: &LayoutBox, path: &[usize]) -> Vec<Cell> {
@@ -165,7 +178,13 @@ fn collect_grid(bx: &LayoutBox) -> Vec<Row> {
     /// Marche une suite d'enfants (table, ou groupe de rangs) :
     /// rangs explicites + accumulation des cellules nues en
     /// rangs anonymes (`path` = préfixe jusqu'au conteneur).
-    fn walk_children(b: &LayoutBox, class: RowClass, prefix: &mut Vec<usize>, rows: &mut Vec<Row>) {
+    fn walk_children(
+        b: &LayoutBox,
+        class: RowClass,
+        prefix: &mut Vec<usize>,
+        rows: &mut Vec<Row>,
+        caps: &mut Captions,
+    ) {
         let mut pending: Vec<Cell> = Vec::new();
         let flush = |pending: &mut Vec<Cell>, rows: &mut Vec<Row>| {
             if !pending.is_empty() {
@@ -178,6 +197,17 @@ fn collect_grid(bx: &LayoutBox) -> Vec<Row> {
         };
         for (i, c) in b.children.iter().enumerate() {
             match c.display() {
+                // §17.4 : la légende sort de la grille —
+                // posée au-dessus/dessous par `layout_table`.
+                "table-caption" => {
+                    let mut p = prefix.clone();
+                    p.push(i);
+                    if c.style.get("caption-side") == Some("bottom") {
+                        caps.bottom.push(p);
+                    } else {
+                        caps.top.push(p);
+                    }
+                }
                 "table-row" => {
                     flush(&mut pending, rows);
                     prefix.push(i);
@@ -202,7 +232,7 @@ fn collect_grid(bx: &LayoutBox) -> Vec<Row> {
                     };
                     prefix.push(i);
                     // Arête ∝ profondeur de l'arbre (R-24).
-                    explorer_common::deep(|| walk_children(c, g, prefix, rows));
+                    explorer_common::deep(|| walk_children(c, g, prefix, rows, caps));
                     prefix.pop();
                 }
                 _ => {
@@ -225,7 +255,8 @@ fn collect_grid(bx: &LayoutBox) -> Vec<Row> {
         flush(&mut pending, rows);
     }
     let mut rows: Vec<Row> = Vec::new();
-    walk_children(bx, RowClass::Body, &mut Vec::new(), &mut rows);
+    let mut caps = Captions::default();
+    walk_children(bx, RowClass::Body, &mut Vec::new(), &mut rows, &mut caps);
     let rank = |c: RowClass| match c {
         RowClass::Header => 0,
         RowClass::Body => 1,
@@ -233,7 +264,7 @@ fn collect_grid(bx: &LayoutBox) -> Vec<Row> {
     };
     rows.sort_by_key(|r| rank(r.class));
     place_cells(&mut rows);
-    rows
+    (rows, caps)
 }
 
 /// Assigne `col` à chaque cellule en **ordre visuel**
@@ -344,7 +375,7 @@ pub(crate) fn layout_table(
 ) -> f32 {
     let st = bx.style.clone();
     let fs = font_size_px(&st, parent_fs, ctx);
-    let rows = collect_grid(bx);
+    let (rows, caps) = collect_grid(bx);
     let ncols = rows
         .iter()
         .flat_map(|r| r.cells.iter())
@@ -599,6 +630,29 @@ pub(crate) fn layout_table(
     // `row_fixed` : une cellule à `height` spécifiée (non-%)
     // rend le rang fixe pour la distribution §17.5.3.
     let mut cursor_y = y + it + gap[0];
+    // §17.4 : légendes `caption-side: top` avant la grille.
+    for p in &caps.top {
+        let cap_cb = Rect {
+            x: x + il,
+            y: cursor_y,
+            width: grid_w,
+            height: 0.0,
+        };
+        let Some(cap) = at_path(bx, p) else {
+            continue;
+        };
+        cursor_y += layout_block(
+            cap,
+            x + il,
+            cursor_y,
+            grid_w,
+            None,
+            ctx,
+            fs,
+            cap_cb,
+            &mut FloatCtx::default(),
+        );
+    }
     let mut row_tops = Vec::new();
     let mut row_fixed = vec![false; nrows];
     for (k, row) in rows.iter().enumerate() {
@@ -737,6 +791,31 @@ pub(crate) fn layout_table(
             }
             cur = c;
         }
+    }
+    // §17.4 : légendes `caption-side: bottom` après la
+    // grille (elles n'entrent pas dans la distribution
+    // §17.5.3 de `height`).
+    for p in &caps.bottom {
+        let cap_cb = Rect {
+            x: x + il,
+            y: cursor_y,
+            width: grid_w,
+            height: 0.0,
+        };
+        let Some(cap) = at_path(bx, p) else {
+            continue;
+        };
+        cursor_y += layout_block(
+            cap,
+            x + il,
+            cursor_y,
+            grid_w,
+            None,
+            ctx,
+            fs,
+            cap_cb,
+            &mut FloatCtx::default(),
+        );
     }
     let h = cursor_y - y + ib;
     bx.rect = Rect {

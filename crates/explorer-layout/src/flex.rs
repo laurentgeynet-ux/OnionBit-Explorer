@@ -737,6 +737,35 @@ pub(crate) fn flow_flex_children(
             if cross_auto[k].1 {
                 c.style.set("margin-right", "0px");
             }
+            // Axe cross horizontal (§9.5 taille hypothétique) :
+            // hors `stretch`, un item `column` est « fit-content »
+            // — sa boîte rétrécit sur le contenu puis
+            // `align-items` la place. Sans ça tout item gardait
+            // `content_w` de large (un bloc `width:auto` remplit
+            // son CB) et le centrage n'avait aucun effet —
+            // vol 18 quora : bouton « Réessayer » pleine largeur
+            // au lieu d'être centré sous `align-items:center`.
+            let mode = items[k].align.as_deref().unwrap_or(&align);
+            if mode != "stretch" && c.style.get("width").is_none_or(|v| v == "auto") {
+                let ch_h = side_px(&c.style, "padding-left", content_w, cfs, ctx, 0.0)
+                    + side_px(&c.style, "padding-right", content_w, cfs, ctx, 0.0)
+                    + border_px(&c.style, "border-left-width", content_w, cfs, ctx)
+                    + border_px(&c.style, "border-right-width", content_w, cfs, ctx);
+                let ml = side_px(&c.style, "margin-left", content_w, cfs, ctx, 0.0);
+                let mr = side_px(&c.style, "margin-right", content_w, cfs, ctx, 0.0);
+                let avail = (content_w - ml - mr - ch_h).max(0.0);
+                let (mc, nc) = (
+                    crate::intrinsic::max_content_px(c, cfs, ctx),
+                    crate::intrinsic::min_content_px(c, cfs, ctx),
+                );
+                let fit = avail.min(mc).max(nc);
+                let w = if c.style.get("box-sizing") == Some("border-box") {
+                    fit + ch_h
+                } else {
+                    fit
+                };
+                c.style.set("width", &format!("{w}px"));
+            }
         }
 
         // Passe 0 : pose mesurée — les hauteurs obtenues

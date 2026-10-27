@@ -590,6 +590,184 @@ fn hit_test_point_hors_document() {
     assert_eq!(explorer_layout::hit_test(&bx, 5.0, 5000.0), None);
 }
 
+/// Vol 2026-10-26 — `pointer-events: none` : un overlay
+/// transparent couvrant un champ ne vole plus le hit — le
+/// `<input>` sous-jacent reste `editable` (service-public,
+/// bookshop : `editable:false` sur champs peints).
+#[test]
+fn hit_test_pointer_events_none_transparent() {
+    let (dom, bx) = laid(
+        "<div id=o style=\"position:absolute;inset:0;width:100px;height:100px\"></div>\
+         <input id=i style=\"width:80px;height:20px\">",
+        "body{margin:0} #o{pointer-events:none} input{position:absolute;top:0;left:0}",
+    );
+    let input = by_tag(&dom, "input");
+    assert_eq!(
+        explorer_layout::hit_test(&bx, 10.0, 10.0),
+        Some(input),
+        "overlay pointer-events:none : l'input sous-jacent gagne"
+    );
+}
+
+/// `pointer-events: none` n'interdit que la cible — un
+/// enfant portant `auto` explicite reste ciblable (spec :
+/// la propriété s'hérite mais se réactive par enfant).
+#[test]
+fn hit_test_pointer_events_enfant_reactive() {
+    let (dom, bx) = laid(
+        "<div id=o style=\"position:absolute;inset:0;width:100px;height:100px\">\
+         <a id=a href=# style=\"pointer-events:auto;display:block;width:20px;height:20px\">x</a>\
+         </div><p id=u style=\"width:50px;height:50px\">y</p>",
+        "body{margin:0} #o{pointer-events:none} p{position:absolute;top:0;left:0}",
+    );
+    let a = by_tag(&dom, "a");
+    // (5,5) est dans le <a> ET dans le <p> dessous : le
+    // réactivé gagne — hors de lui, le parent `none` est
+    // sauté et le <p> sous-jacent encaisse.
+    let hit = explorer_layout::hit_test(&bx, 5.0, 5.0);
+    // Le nœud gagnant peut être le texte de `<a>` — l'élément
+    // ancêtre porteur du `auto` est la cible sémantique.
+    let mut cur = hit;
+    let elem = loop {
+        let Some(n) = cur else { break None };
+        if dom.tag_name(n).is_ok() {
+            break Some(n);
+        }
+        cur = dom.parent(n).ok().flatten();
+    };
+    assert_eq!(
+        elem,
+        Some(a),
+        "enfant pointer-events:auto ciblable : {hit:?}"
+    );
+    let p = by_tag(&dom, "p");
+    let hit = explorer_layout::hit_test(&bx, 40.0, 40.0);
+    let node = hit.and_then(|n| {
+        let mut cur = n;
+        loop {
+            match dom.tag_name(cur) {
+                Ok(_) => return Some(cur),
+                Err(_) => cur = dom.parent(cur).ok().flatten()?,
+            }
+        }
+    });
+    assert_eq!(
+        node,
+        Some(p),
+        "zone overlay hors <a> → p sous-jacent : {hit:?}"
+    );
+}
+
+#[test]
+fn hit_test_transform_translate_suit_la_peinture() {
+    // Vol : `transform` appliqué à la display list mais
+    // ignoré du hit-test → zones cliquables décalées. La
+    // matrice inverse du style (`explorer_layout::transform`)
+    // ramène le point sondé dans le repère de la boîte.
+    let (dom, bx) = laid(
+        "<a id=t href=#>x</a>",
+        "body{margin:0} a{display:block;position:absolute;left:10px;top:10px;\
+         width:40px;height:20px;transform:translate(100px,50px)}",
+    );
+    let a = by_tag(&dom, "a");
+    // Position PEINTE : (110,60) — le rect layout reste
+    // (10,10). Le hit doit suivre la peinture.
+    let hit = explorer_layout::hit_test(&bx, 115.0, 65.0);
+    let el = hit.and_then(|n| {
+        if dom.element(n).is_ok() {
+            Some(n)
+        } else {
+            dom.parent(n).ok().flatten()
+        }
+    });
+    assert_eq!(el, Some(a), "hit {hit:?} au point peint");
+    // Position LAYOUT (rect brut, avant transform) : le
+    // point ne doit plus retomber sur `a`.
+    let el2 = explorer_layout::hit_test(&bx, 15.0, 15.0).and_then(|n| {
+        if dom.element(n).is_ok() {
+            Some(n)
+        } else {
+            dom.parent(n).ok().flatten()
+        }
+    });
+    assert_ne!(el2, Some(a), "le rect non transformé ne doit plus hit `a`");
+}
+
+#[test]
+fn hit_test_transform_rotate_90_inverse_les_axes() {
+    // Rotation 90° : la zone cliquable suit le quart de
+    // tour. Le point sondé est calculé par la **même**
+    // `box_transform` que la peinture (source unique
+    // `explorer_layout::transform`) — parité garantie par
+    // construction, sans supposer la convention d'origine.
+    let (dom, bx) = laid(
+        "<a id=t href=#>x</a>",
+        "body{margin:0} a{display:block;position:absolute;left:0;top:0;\
+         width:100px;height:20px;transform:rotate(90deg)}",
+    );
+    let a = by_tag(&dom, "a");
+    let a_bx = find(&bx, a);
+    let t = explorer_layout::box_transform(a_bx, &a_bx.rect).expect("matrice");
+    // Coins transformés du rect : la sonde vise le centre
+    // de la zone PEINTE.
+    let (cx, cy) = t.apply(a_bx.rect.x + 25.0, a_bx.rect.y + 10.0);
+    let hit = explorer_layout::hit_test(&bx, cx, cy).and_then(|n| {
+        if dom.element(n).is_ok() {
+            Some(n)
+        } else {
+            dom.parent(n).ok().flatten()
+        }
+    });
+    assert_eq!(hit, Some(a), "hit ({cx},{cy}) sur la zone peinte");
+    // Le centre du rect LAYOUT peut sortir de la surface
+    // peinte — là, `a` ne doit pas gagner.
+    let (ux, uy) = (
+        a_bx.rect.x + a_bx.rect.width / 2.0,
+        a_bx.rect.y + a_bx.rect.height / 2.0,
+    );
+    let inv = t.invert().expect("inversible");
+    let (lx, ly) = inv.apply(ux, uy);
+    let inside = lx >= a_bx.rect.x
+        && lx <= a_bx.rect.x + a_bx.rect.width
+        && ly >= a_bx.rect.y
+        && ly <= a_bx.rect.y + a_bx.rect.height;
+    if !inside {
+        let el = explorer_layout::hit_test(&bx, ux, uy).and_then(|n| {
+            if dom.element(n).is_ok() {
+                Some(n)
+            } else {
+                dom.parent(n).ok().flatten()
+            }
+        });
+        assert_ne!(el, Some(a), "centre layout hors surface → pas de hit `a`");
+    }
+}
+
+#[test]
+fn hit_test_transforms_imbriquees_accumulent() {
+    // Parent `translate(50,0)` + enfant `translate(0,30)` :
+    // la zone cliquable cumule les deux matrices — le point
+    // peint (rect + (50,30)) hit, le point layout nu non.
+    let (dom, bx) = laid(
+        "<div id=p><a id=c href=#>x</a></div>",
+        "body{margin:0} #p{position:absolute;left:0;top:0;width:60px;height:60px;\
+         transform:translate(50px,0)} \
+         #c{display:block;position:absolute;left:5px;top:5px;width:30px;\
+         height:20px;transform:translate(0,30px)}",
+    );
+    let c = by_tag(&dom, "a");
+    // Rect layout de `c` : (5,5,30,20) — peint à
+    // (55,35)-(85,55).
+    let hit = explorer_layout::hit_test(&bx, 60.0, 40.0).and_then(|n| {
+        if dom.element(n).is_ok() {
+            Some(n)
+        } else {
+            dom.parent(n).ok().flatten()
+        }
+    });
+    assert_eq!(hit, Some(c), "hit cumulé parent+enfant");
+}
+
 // ── R-20 : jamais-rendus ne produisent aucune boîte ─────────
 
 #[test]
@@ -858,6 +1036,48 @@ fn remplace_max_width_bridant_derive_la_hauteur_par_ratio() {
     let img = find(&bx, by_tag(&dom, "img"));
     assert!(approx(img.rect.width, 100.0), "w={}", img.rect.width);
     assert!(approx(img.rect.height, 100.0), "h={}", img.rect.height);
+}
+
+/// Vol 2026-10-26 — `<svg viewBox>` sans `width` : la taille
+/// N'EST PAS le viewBox (logo w3.org géant) — défaut remplacé
+/// `min(300px, 100%)` (comportement Chrome ; vol 25 kayak :
+/// l'icône `⇄` ne doit plus remplir sa colonne de 325 px),
+/// `height:auto` dérivé du ratio.
+#[test]
+fn svg_viewbox_seul_borne_a_300px() {
+    let (dom, bx) = laid(
+        "<div style=\"width:400px\"><svg viewBox=\"0 0 200 100\"></svg></div>",
+        "body{margin:0}",
+    );
+    let svg = find(&bx, by_tag(&dom, "svg"));
+    assert!(approx(svg.rect.width, 300.0), "w={}", svg.rect.width);
+    assert!(approx(svg.rect.height, 150.0), "h={}", svg.rect.height);
+}
+
+/// Conteneur plus étroit que 300 px : `min(300px, 100%)`
+/// laisse le SVG tenir dans son bloc.
+#[test]
+fn svg_viewbox_seul_conteneur_etroit() {
+    let (dom, bx) = laid(
+        "<div style=\"width:200px\"><svg viewBox=\"0 0 200 100\"></svg></div>",
+        "body{margin:0}",
+    );
+    let svg = find(&bx, by_tag(&dom, "svg"));
+    assert!(approx(svg.rect.width, 200.0), "w={}", svg.rect.width);
+    assert!(approx(svg.rect.height, 100.0), "h={}", svg.rect.height);
+}
+
+/// Contrôle : `<svg width/height>` explicites gardent la
+/// priorité sur le hint (attributs = déclarations UA).
+#[test]
+fn svg_dimensions_explicites_inchangees() {
+    let (dom, bx) = laid(
+        "<div style=\"width:400px\"><svg width=\"80\" height=\"40\" viewBox=\"0 0 200 100\"></svg></div>",
+        "body{margin:0}",
+    );
+    let svg = find(&bx, by_tag(&dom, "svg"));
+    assert!(approx(svg.rect.width, 80.0), "w={}", svg.rect.width);
+    assert!(approx(svg.rect.height, 40.0), "h={}", svg.rect.height);
 }
 
 #[test]
@@ -1683,4 +1903,100 @@ fn flex_stretch_input_remplit_wrapper() {
     );
     // Un `min-height` parent ne change rien — % indéterminé
     // reste `auto` (spec) : le test v3 du diag le confirmait.
+}
+
+/// Vol 19 (FIX-3) — un bandeau/overlay apparaissant AVANT le
+/// contenu dans le DOM mais couvrant la zone volait les hits
+/// des liens posés après lui (ordre de document ≠ ordre de
+/// peinture : le dernier peint est au-dessus). Le hit-test
+/// suit désormais l'ordre d'empilement inversé.
+#[test]
+fn hit_test_ordre_empilement_dernier_peint_gagne() {
+    let (dom, bx) = laid(
+        "<div id=o style=\"width:100px;height:100px\"></div>\
+         <a id=a href=# style=\"position:absolute;top:0;left:0;display:block;width:60px;height:60px\">x</a>",
+        "body{margin:0}",
+    );
+    let a = by_tag(&dom, "a");
+    // (10,10) est dans les deux : le <a> positionné, peint
+    // après le div en flux, gagne.
+    let hit = explorer_layout::hit_test(&bx, 10.0, 10.0);
+    let elem = hit.and_then(|n| {
+        let mut cur = n;
+        loop {
+            match dom.tag_name(cur) {
+                Ok(_) => return Some(cur),
+                Err(_) => cur = dom.parent(cur).ok().flatten()?,
+            }
+        }
+    });
+    assert_eq!(elem, Some(a), "couche supérieure attendue : {hit:?}");
+}
+
+/// Même rang d'empilement : le dernier du document est peint
+/// au-dessus — il encaisse en premier.
+#[test]
+fn hit_test_ordre_document_inverse_a_rang_egal() {
+    let (dom, bx) = laid(
+        "<div id=o style=\"position:absolute;top:0;left:0;width:100px;height:100px\">\
+         </div><a id=a href=# style=\"position:absolute;top:0;left:0;display:block;width:50px;height:50px\">x</a>",
+        "body{margin:0}",
+    );
+    let a = by_tag(&dom, "a");
+    let hit = explorer_layout::hit_test(&bx, 10.0, 10.0);
+    let elem = hit.and_then(|n| {
+        let mut cur = n;
+        loop {
+            match dom.tag_name(cur) {
+                Ok(_) => return Some(cur),
+                Err(_) => cur = dom.parent(cur).ok().flatten()?,
+            }
+        }
+    });
+    assert_eq!(elem, Some(a), "dernier peint attendu : {hit:?}");
+}
+
+/// Vol 28 wordle NYT : `<iframe>` sans dimensions = objet
+/// remplacé 300×150 (HTML Rendering) — la boîte ne doit
+/// pas retomber à 0×0.
+#[test]
+fn iframe_sans_dimensions_gabarit_300x150() {
+    let (dom, bx) = laid(
+        "<div><iframe src=\"https://example.com\"></iframe></div>",
+        "body{margin:0} div{width:800px}",
+    );
+    let f = find(&bx, by_tag(&dom, "iframe"));
+    assert!(approx(f.rect.width, 300.0), "w={}", f.rect.width);
+    assert!(approx(f.rect.height, 150.0), "h={}", f.rect.height);
+}
+
+#[test]
+fn hit_test_transform_sur_ancetre_atteint_les_enfants() {
+    // Non-régression vol 26 : un `transform` sur un ancêtre
+    // commun ne doit pas rendre tout le sous-arbre inerte —
+    // la matrice cumulative ramène le point sondé dans le
+    // repère de chaque boîte.
+    let (dom, bx) = laid(
+        "<div id=w><a id=c href=#>lien</a><input id=i></div>",
+        "body{margin:0} #w{transform:translate(50px,0)}          a{display:block;width:100px;height:20px}          input{display:block;width:100px;height:20px}",
+    );
+    let a = by_tag(&dom, "a");
+    let inp = by_tag(&dom, "input");
+    let el = |n: Option<NodeId>| {
+        n.and_then(|n| {
+            if dom.element(n).is_ok() {
+                Some(n)
+            } else {
+                dom.parent(n).ok().flatten()
+            }
+        })
+    };
+    // (55,5) = position peinte du <a> ; (55,25) = input.
+    assert_eq!(el(explorer_layout::hit_test(&bx, 55.0, 5.0)), Some(a));
+    assert_eq!(el(explorer_layout::hit_test(&bx, 55.0, 25.0)), Some(inp));
+    // Variante scrollée (chemin de la session).
+    assert_eq!(
+        el(explorer_layout::hit_test_scrolled(&bx, 55.0, 5.0, 0.0)),
+        Some(a)
+    );
 }

@@ -328,6 +328,21 @@ pub(crate) fn url_href(p: &UrlParts) -> String {
     out
 }
 
+/// `URL.canParse(url, base?)` — spec : bool, jamais de jeté
+/// (les feature-detects modernes l'utilisent avant `new`).
+pub(crate) fn url_can_parse(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    Ok(Value::Bool(url_ctor(e, Value::Undefined, args).is_ok()))
+}
+
+/// `URL.parse(url, base?)` — spec : instance ou `null`
+/// (rejet silencieux du constructeur).
+pub(crate) fn url_parse_static(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    match url_ctor(e, Value::Undefined, args) {
+        Ok(v) => Ok(v),
+        Err(_) => Ok(Value::Null),
+    }
+}
+
 pub(crate) fn url_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     let href = e.to_js_string(arg(args, 0))?;
     // `base` peut être une `URL` (lit son `href`) ou une string.

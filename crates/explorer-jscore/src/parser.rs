@@ -2157,8 +2157,10 @@ impl Parser {
                         self.expect_p(P::LParen, "`(`")?;
                         let params = self.params()?;
                         self.expect_p(P::LBrace, "`{`")?;
+                        let outer_gen = self.in_gen;
                         self.in_gen = false; // get/set : jamais générateurs
                         let body = self.fn_body()?;
+                        self.in_gen = outer_gen;
                         let fun = Rc::new(FnLit {
                             name: None,
                             params,
@@ -2181,8 +2183,10 @@ impl Parser {
                         self.expect_p(P::LParen, "`(`")?;
                         let params = self.params()?;
                         self.expect_p(P::LBrace, "`{`")?;
+                        let outer_gen = self.in_gen;
                         self.in_gen = gen;
                         let body = self.fn_body()?;
+                        self.in_gen = outer_gen;
                         props.push(ObjProp::Prop(
                             key,
                             Expr::Function(Rc::new(FnLit {
@@ -2333,8 +2337,15 @@ impl Parser {
         // paramètres ont été parsés dans le mode du parent (la spec
         // exige des params « simples » quand le corps est strict ;
         // tolérance : on n'a pas de paramètres non-simples).
+        let outer_gen = self.in_gen;
         self.in_gen = gen;
         let (body, strict) = self.fn_body()?;
+        // `fn_body` restaure la valeur **posée juste avant** —
+        // sans ce second restore, un `function(){}` non-générateur
+        // imbriqué dans un `function*(){}` masque les `yield`
+        // du corps englobant (parse `expected ';'` — spotify
+        // `vendor~mobile-web-player`, `__awaiter(this,…,function*(){…})`).
+        self.in_gen = outer_gen;
         Ok(Rc::new(FnLit {
             name,
             params,

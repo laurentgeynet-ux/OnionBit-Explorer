@@ -52,6 +52,10 @@ pub struct JsPromise {
     /// promise — shared by executor call and thenable adoption.
     pub resolve_fn: Value,
     pub reject_fn: Value,
+    /// `[[PromiseIsHandled]]` spec — posé par tout `then`
+    /// (même sans `onRejected`) ; une promesse rejetée jamais
+    /// `.then`ée déclenche `unhandledrejection` au checkpoint.
+    pub handled: bool,
 }
 
 /// A queued microtask.
@@ -96,6 +100,7 @@ impl Engine {
                 reactions: Vec::new(),
                 resolve_fn: Value::Undefined,
                 reject_fn: Value::Undefined,
+                handled: false,
             }),
             extensible: true,
             elem_integrity: 0,
@@ -120,7 +125,7 @@ impl Engine {
     /// Settle `id` — enqueues its reactions as microtasks. No-op on
     /// a non-promise or an already-settled promise.
     pub(crate) fn settle_promise(&mut self, id: ObjId, state: PromiseState, result: Value) {
-        let reactions = {
+        let (reactions, unhandled) = {
             let Some(o) = self.heap.obj_mut(id) else {
                 return;
             };
@@ -135,8 +140,17 @@ impl Engine {
             }
             p.state = state;
             p.result = result;
-            std::mem::take(&mut p.reactions)
+            let u = state == PromiseState::Rejected && !p.handled;
+            (std::mem::take(&mut p.reactions), u)
         };
+        // `unhandledrejection` (JS-C154) — promesse rejetée sans
+        // aucun `then` : gardée pour le tir en fin de checkpoint
+        // (un `.then` tardif la revoit — `rejectionhandled`
+        // silencieux). Le host session draine
+        // `unhandled_reports` pour le ring console.
+        if unhandled {
+            self.pending_unhandled.push((Value::Obj(id), result));
+        }
         if std::env::var("EXPLORER_PROM_TRACE").is_ok() && !reactions.is_empty() {
             eprintln!("[settle] reactions={}", reactions.len());
         }
@@ -194,6 +208,9 @@ impl Engine {
                     };
                     if let Some(o) = self.heap.obj_mut(vid) {
                         if let ObjKind::Promise(p) = &mut o.kind {
+                            // Adoption = souscription — `vid` est
+                            // « handled » (son rejet propage à `id`).
+                            p.handled = true;
                             p.reactions.push(Reaction {
                                 on_fulfilled: my_resolve,
                                 on_rejected: my_reject,
@@ -461,6 +478,10 @@ impl Engine {
             let settled =
                 !delivered && msgs == 0 && workers == 0 && ports == 0 && self.microtasks.is_empty();
             if settled || ran >= MICROTASK_DRAIN_CAP || rounds >= DELIVERY_ROUNDS_CAP {
+                // JS-C154 — `unhandledrejection` en fin de
+                // checkpoint : les rejets non gérés du tour sont
+                // revus (un `.then` tardif les a retirés).
+                self.fire_unhandled_rejections();
                 self.switch_to(home);
                 self.maybe_collect();
                 return Ok(ran);
@@ -468,6 +489,82 @@ impl Engine {
             self.maybe_collect();
         }
     }
+}
+
+impl Engine {
+    /// Tire `unhandledrejection` pour les promesses encore non
+    /// gérées : event `{type, promise, reason, preventDefault}`
+    /// sur `onunhandledrejection` + listeners `__et` du global,
+    /// puis description poussée dans `unhandled_reports` pour
+    /// le drain session (`report_unhandled_rejection` côté core,
+    /// FIX-3). Les handlers qui jettent sont avalés (un mur
+    /// d'event ne doit pas casser le drain).
+    fn fire_unhandled_rejections(&mut self) {
+        let pending = std::mem::take(&mut self.pending_unhandled);
+        for (pv, reason) in pending {
+            // `.then` tardif → « rejectionhandled » silencieux :
+            // la promesse ne remonte plus.
+            let still = match self.heap.obj(if let Value::Obj(id) = pv {
+                id
+            } else {
+                continue;
+            }) {
+                Some(o) => match &o.kind {
+                    ObjKind::Promise(p) => !p.handled,
+                    _ => false,
+                },
+                None => false,
+            };
+            if !still {
+                continue;
+            }
+            let desc = self.describe(reason);
+            self.unhandled_reports
+                .push(format!("unhandledrejection: {desc}"));
+            // Event minimal spec (PromiseRejectionEvent).
+            let ev = self.new_object();
+            let ty = self.str_val("unhandledrejection");
+            self.set_own(ev, "type", ty, true);
+            self.set_own(ev, "promise", pv, true);
+            self.set_own(ev, "reason", reason, true);
+            self.set_own(ev, "defaultPrevented", Value::Bool(false), true);
+            let pd = self.native_fn("preventDefault", rejection_prevent_default);
+            self.set_own(ev, "preventDefault", pd, true);
+            let ev = Value::Obj(ev);
+            let g = Value::Obj(self.global);
+            // `onunhandledrejection` (propriété) puis listeners
+            // `addEventListener('unhandledrejection', …)` (`__et`).
+            let onh = self.get_prop(self.global, "onunhandledrejection");
+            if let Some(f) = onh {
+                if self.is_callable(f) {
+                    let _ = self.call_value(f, g, &[ev]);
+                }
+            }
+            if let Some(Value::Obj(map)) = self.get_prop(self.global, "__et") {
+                if let Some(Value::Obj(l)) = self.get_prop(map, "unhandledrejection") {
+                    let len = match self.get_prop(l, "length") {
+                        Some(Value::Num(n)) => n as usize,
+                        _ => 0,
+                    };
+                    for i in 0..len {
+                        if let Some(cb) = self.get_prop(l, &i.to_string()) {
+                            if self.is_callable(cb) {
+                                let _ = self.call_value(cb, g, &[ev]);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// `ev.preventDefault()` — pose `defaultPrevented`.
+fn rejection_prevent_default(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
+    if let Value::Obj(id) = this {
+        e.set_prop_value(Value::Obj(id), "defaultPrevented", Value::Bool(true))?;
+    }
+    Ok(Value::Undefined)
 }
 
 /// `resolve` bound native: `bound = [promise_id]`.
@@ -523,12 +620,16 @@ fn promise_then(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> 
     let on_r = args.get(1).copied().unwrap_or(Value::Undefined);
     let next = e.new_promise();
     let (state, result) = {
-        let Some(o) = e.heap.obj(id) else {
+        let Some(o) = e.heap.obj_mut(id) else {
             return Err(e.type_error("then called on non-promise"));
         };
-        let ObjKind::Promise(p) = &o.kind else {
+        let ObjKind::Promise(p) = &mut o.kind else {
             return Err(e.type_error("then called on non-promise"));
         };
+        // Spec `[[PromiseIsHandled]]` : tout `then` marque la
+        // promesse (même sans handler — le rejet propage à la
+        // chaîne) ; coupe `unhandledrejection` sur `.then` tardif.
+        p.handled = true;
         (p.state, p.result)
     };
     match state {

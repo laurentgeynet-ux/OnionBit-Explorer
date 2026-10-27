@@ -556,6 +556,16 @@ impl Host for WebSocketHost {
         }))
     }
 
+    // Méthodes visibles en lecture — `typeof ws.send` rendait
+    // 'undefined' (invoke-only) alors que les feature-detects
+    // lisent la surface avant d'appeler (vols 27-28).
+    fn has_method(&self, name: &str) -> bool {
+        matches!(
+            name,
+            "send" | "close" | "addEventListener" | "removeEventListener" | "dispatchEvent"
+        )
+    }
+
     fn set(&self, e: &mut Engine, this: Value, key: &str, val: Value) -> JsResult<bool> {
         if key == "binaryType" {
             let s = e.to_js_string(val)?;
