@@ -268,11 +268,17 @@ async fn nav_commit_shared(
         let r = apply::relayout_dom_payload(p, &ctx, &dom, &canvas_ops);
         p.dom = Some(dom);
         (g, r)
-    })
-    .await;
+    });
+    // B-46 (frandroid vol70) : le worker relayout/insert_images
+    // n'avait aucune borne — un coût quadratique (B-44) ou une
+    // image pathologique laissait le navigate muet à vie après
+    // `apply fin` (CPU 200 %, API morte). Borné : au-delà, le
+    // futur est abandonné — le payload se perd avec le bloc
+    // (rearm + page d'erreur honnête, jamais muet).
+    let work = tokio::time::timeout(Duration::from_secs(90), work).await;
     let mut s = sess.lock().await;
     match work {
-        Ok((g, r)) => {
+        Ok(Ok((g, r))) => {
             let live = s.commit_nav_paint(tab, epoch, (*g).into_payload());
             match (r, live) {
                 (Ok(()), true) => {
@@ -294,9 +300,21 @@ async fn nav_commit_shared(
                 _ => Ok(()),
             }
         }
-        Err(e) => {
+        Ok(Err(e)) => {
             s.rearm_nav_paint(tab);
             let err = CoreError::Fetch(format!("worker rendu de navigation paniqué : {e}"));
+            s.paint_error_page(tab, err_req, push, &err);
+            Err(s.emit_error(tab, err))
+        }
+        Err(_) => {
+            // B-46 : le bloc relayout/images a dépassé sa
+            // borne — la payload part avec lui, `rearm`
+            // rend l'état utilisable et la page d'erreur
+            // est peinte (timeout nommé, jamais muet).
+            s.rearm_nav_paint(tab);
+            let err = CoreError::Timeout(
+                "worker relayout/images > 90 s (B-46)".to_string(),
+            );
             s.paint_error_page(tab, err_req, push, &err);
             Err(s.emit_error(tab, err))
         }
