@@ -16,7 +16,7 @@ télémétrie `logs/`.
 
 ## A. État des correctifs — ce que les vagues FIX ont résolu
 
-Trois branches : `nav/vol-fix-2026-10-26` (jscore, JS-C134→156),
+Trois branches : `nav/vol-fix-2026-10-26` (jscore, JS-C134→162),
 `nav/vol-fix2` (html/css/layout/render), `nav/vol-fix3`
 (core/net/api/daemon).
 
@@ -98,7 +98,7 @@ plateforme net** (ops jscore Encrypt/Decrypt restent à livrer) ·
 | 1 | **Starvation de l'exécuteur post-apply** : la page rend, puis une rafale JS (timers/microtasks, hors éval) sature un cœur → API muette >3-6 min, RAM 2,9 Go, zéro log après `apply: layout` | `explorer-core`/daemon | **allrecipes.com ×2** (vol 34, binaire V3 — survit aux fixes), jscore 32 k lignes | **OUVERT** — le disjoncteur couvre les évals, pas les tâches rafale ; watchdog/budget global absent |
 | 2 | **Boucle infinie de navigations auto** (meta refresh / `location.*` cumulés) | `explorer-core` | cdiscount : 3 812 navs, 20 001 streams, 16 min, kill manuel (éq. 6) | Budget `max_auto_navs` (étape 144) référencé post-fix — **à re-voler** |
 | 3 | **Stack overflow** `explorer-jscore` — récursion parser/AST non bornée | `explorer-jscore` | alpinejs.dev : thread mort (éq. 2) | **OUVERT** — pas de `depth_limit` livré dans les FIX |
-| 4 | **Morts silencieuses résiduelles** : boot JS échoue sans aucune entrée console | `core`/`jscore` | pinterest (vol 22 post-fix, toujours muet), twitch, archive.org, radiogarden (33 scripts, 0 erreur), play2048, cartes.gouv, windy/flightradar (modules+importmap inertes) | **PARTIEL** — `unhandledrejection`/PipelineError livrés, mais scripts jamais exécutés et bras MapLoader restent muets |
+| 4 | **Morts silencieuses résiduelles** : boot JS échoue sans aucune entrée console | `core`/`jscore` | pinterest (vol 22 post-fix, toujours muet), twitch, archive.org, radiogarden (33 scripts, 0 erreur), play2048, cartes.gouv, windy/flightradar (modules+importmap inertes) | **EN NETTE DÉCROISSANCE** — `unhandledrejection` + warns fetch stylesheet/script/iframe + dyn import livrés ; restent bras MapLoader et drains de modules |
 | 5 | **`import()` : dep absente du MapLoader** — « module non chargé : {url absolue} » | `explorer-js`/`core` | mastodon, chess, letterboxd, marmiton | **OUVERT** — bras identifié (`fetch_module_sources` ne collecte pas tout : borne `max_modules`, refus, spec non extrait) ; tracing ajouté, racine à fermer |
 | 6 | **`import()` sur `data:` URL refusé** (résolution/CSP) | `explorer-core` | reddit ×2 — polyfills-loader et boot Shreddit tués | **OUVERT** — `data:` décodé côté dyn import mais refusé en module ? |
 | 7 | **`visibility:hidden` jamais levé** — page blanche totale malgré DOM/layout complets | `jscore`/glue | geeksforgeeks (vol 30) | **OUVERT** |
@@ -112,12 +112,12 @@ plateforme net** (ops jscore Encrypt/Decrypt restent à livrer) ·
 | 10 | **Scope global inter-scripts** : `var`/assignations top-level non propagées à `window` partagé | `explorer-jscore` | lemonde `lmd` ×10, ouest-france `firstparty.push` ×3, OSM `OSM.i18n` | **OUVERT** (JS-C150 a corrigé le bras DSFR `super()` ; le binding `var`→window global reste à vérifier) |
 | 11 | **`new URL(".", location)`** — base `Location` non stringifiée | `explorer-jscore` | fastapi, svelte, lemonde, figaro | **PARTIEL** (JS-C149 couvre les props `src`/`href` ; le constructeur 2-args reste suspect) |
 | 12 | **`heap memory limit exceeded` en rafale** | `explorer-jscore` (budget ou fuite) | marmiton ×3 au boot (vol 34), bookshop ×14 beacon.min.js | **OUVERT** — capper à 1 occurrence + mesurer le seuil |
-| 13 | **Hit-test `ignored` en série** — liens/inputs réels non trouvés | `explorer-layout`/`core` | vols 26/29/30 (V2 integ) : 4/4 clics refusés | **INTERMITTENT** — transform innocenté (FIX-3 v11), suspects boxtree V2 ; **clics fonctionnels en V3** (vol 34) — à confirmer clos |
-| 14 | **APIs DOM restantes** : `attachShadow` stub (issue #25), `document.write` ordonnancé post-commit (tumblr), `instanceof Element` trop strict (impots, ameli), `document` of Null (dw), `Illegal component name ""`/`Function.name` (dw), `debugger` token tue un module (w3schools), `get`/`bind`/`call` of Undefined (marinetraffic, OSM, tiktok — cascades à nommer) | `explorer-jscore` | vols 7/8/16/18/23/24/25/27-30 | **OUVERT** — matrice à tenir ; chaque entrée = un site |
-| 15 | **Shadow DOM / custom elements** : `attachShadow` stub, `faceplate-*`/`shreddit-*` 0×0, slotted content absent | `explorer-jscore` | reddit login (28 partials vides), wordle Fides | **STRUCTUREL** — chantier dédié (issue #25) |
+| 13 | **Hit-test `ignored` en série** — liens/inputs réels non trouvés | `explorer-layout`/`core` | vols 26/29/30 (V2 integ) : 4/4 clics refusés | **PROBABLEMENT RÉSOLU** — cause identifiée : wrappers `visibility:hidden` en attente d'hydratation (GFG), pas un bug hit-test ; **clics = vraies navigations en V3** (vol 34 ×3) ; à fermer après re-vol |
+| 14 | **APIs DOM restantes** : `document.write` ordonnancé post-commit (tumblr), `instanceof Element` trop strict (impots, ameli), `document` of Null (dw), `Illegal component name ""`/`Function.name` (dw), `debugger` token tue un module (w3schools), `get`/`bind` of Undefined (marinetraffic, tiktok — cascades à nommer) | `explorer-jscore` | vols 7/8/16/18/23/24/25/27-30 | **PARTIEL** — `call of Undefined` Bootstrap **résolu** (JS-C162 sélecteurs Element.prototype, post-rédaction) ; `attachShadow` sorti du stub minimal (ShadowRoot.getElementById + instanceof livrés) ; reste la matrice ci-contre |
+| 15 | **Shadow DOM / custom elements** : `attachShadow` stub, `faceplate-*`/`shreddit-*` 0×0, slotted content absent | `explorer-jscore` | reddit login (28 partials vides), wordle Fides | **STRUCTUREL, amorce livrée** — surface JS posée (attachShadow→fragment, getElementById, instanceof, proto chaîné WebSocket/BC/EventSource lisibles) ; slotted/custom-elements upgrade reste le chantier (issue #25) |
 | 16 | **WebGL/canvas lourd** | `jscore`+`render` | threejs, ciechanowski, pixi, radio.garden, flightradar | Hors scope court terme (ADR stubs) — stub Ctx2d/toDataURL livrés |
 | 17 | **Menus/overlays résiduels** : ceux fermés **par JS** restent ouverts (le CSS est corrigé : `hidden`, `[popover]`, `opacity`, `inset`, `details`) ; off-canvas GOG/IGN, backdrop francetravail, megamenus 750g/doctolib | `jscore` (JS mort) + résiduels css | nombreux vols | **EN DÉCROISSANCE** — reste dû aux boots morts, pas au pipeline |
-| 18 | **Layout résiduel** : chevauchements de runs inline (excalidraw/gitlab — non reproduit), hero min-content (notion/todoist — partiellement couvert par `min/max/clamp`+fit-content), `overflow-x` clip (guardian), marquee dupliqué (vercel), sticky repaint (accuweather), dark theme classe JS (vercel), double émission suspectée synchro DOM (franceinfo/gitlab header) | `explorer-layout`/`render` | vols 11/13/20/22/32 | **PARTIEL** — gros fixes livrés, restes à re-voler |
+| 18 | **Layout résiduel** : chevauchements de runs inline (excalidraw/gitlab/DW/deezer — non reproduit), `overflow-x` clip (guardian), marquee dupliqué (vercel), sticky repaint (accuweather), dark theme classe JS (vercel), double émission suspectée synchro DOM (franceinfo/gitlab header), bandeau noir 250px CNN | `explorer-layout`/`render` | vols 11/13/20/22/31/32/33 | **PARTIEL** — **hero colonne RÉSOLU** (calc `min/max/clamp` factor + plancher min-content du shrink flex, repro notion verbatim vert) ; restes à re-voler |
 | 19 | **`document.write`/`async` ordonnancement** — scripts dyn drainés post-commit, pas en ordre de parse | `explorer-core` | tumblr main-*.js jamais exécuté | **OUVERT** — chantier profond documenté |
 | 20 | **Images `data-src`** : repli livré (840a33c) mais marmiton encore gris en V3 | `explorer-core` | vol 34 | **À RE-VALIDER** sur binaire post-fix |
 | 21 | **Console `×N` ne borne pas la source** : `r is not defined` ×512 (genius reactAds) = retry/intervalle non borné | `jscore` budget | vol 33 | dédup visuel OK ; boucle applicative reste |
@@ -185,8 +185,10 @@ politique déléguée à l'app hôte (AGENTS §9).
 5. **Scope global `var`→`window`** + `new URL` 2-args + spread `...`
    résiduel — trois fixes courts à fort dénominateur.
 6. **Heap budget** : seuil + 1 occurrence max du RangeError.
-7. **Matrice APIs DOM** (attachShadow, write ordering, instanceof,
-   Function.name) — chaque entrée débloque un site.
+7. **Matrice APIs DOM** (write ordering, `instanceof Element`,
+   Function.name, document Null) — chaque entrée débloque un site ;
+   **JS-C163** (deadline wall-clock éval, spec prête §reprise 16
+   FIX-1) débloque le point 1.
 8. **Re-vols ciblés** : hit-test V2→V3, `data-src` marmiton,
    franceinfo/vercel résiduels layout, glassdoor scroll.
 
