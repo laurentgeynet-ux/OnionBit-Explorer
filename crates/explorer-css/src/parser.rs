@@ -443,10 +443,12 @@ impl<'t> Parser<'t> {
                             rules,
                         }
                     }
-                    "font-face" | "page" | "viewport" | "counter-style" => AtKind::Declarations {
-                        prelude,
-                        declarations: self.declaration_block(),
-                    },
+                    "font-face" | "page" | "viewport" | "counter-style" | "property" => {
+                        AtKind::Declarations {
+                            prelude,
+                            declarations: self.declaration_block(),
+                        }
+                    }
                     "keyframes" | "-webkit-keyframes" | "-moz-keyframes" => {
                         let frames = self.keyframes_block();
                         AtKind::Keyframes {

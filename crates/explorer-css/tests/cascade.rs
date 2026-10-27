@@ -2492,3 +2492,30 @@ fn min_max_clamp_conserves_en_declaration() {
     assert_eq!(s.get("width"), Some("min(50%, 300px)"));
     assert_eq!(s.get("max-width"), Some("clamp(100px, 50%, 300px)"));
 }
+
+#[test]
+fn property_registre_inherits_et_initial() {
+    // R-118 — @property (css-properties-values-api-1) :
+    // inherits:false masque l'héritage, initial-value sert
+    // de valeur calculée sur les éléments non déclarés.
+    let f = fixture();
+    let mut dom = f.dom;
+    let parent = dom.create_element("div").unwrap();
+    let child = dom.create_element("span").unwrap();
+    dom.append_child(dom.document(), parent).unwrap();
+    dom.append_child(parent, child).unwrap();
+    let mut e = StyleEngine::new();
+    e.add_css(
+        "@property --brand { syntax: '<color>'; inherits: false; initial-value: rgb(255,0,0) }\
+         div{--brand: blue; color: var(--brand)}\
+         span{color: var(--brand)}",
+        Origin::Author,
+    );
+    let ps = e.compute(&dom, parent, &env());
+    let cs = e.compute(&dom, child, &env());
+    // Parent : sa propre valeur (blue).
+    assert_eq!(ps.get("color"), Some("blue"));
+    // Enfant : inherits:false → pas de blue hérité ; initial
+    // du registre sert (red).
+    assert_eq!(cs.get("color"), Some("rgb(255,0,0)"));
+}

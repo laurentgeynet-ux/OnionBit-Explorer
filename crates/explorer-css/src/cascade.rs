@@ -432,6 +432,21 @@ fn rightmost_key(sel: &ComplexSelector) -> BucketKey {
 }
 
 /// Moteur de cascade : accumulateur de feuilles + calcul.
+/// Enregistrement `@property` (css-properties-values-api-1 —
+/// R-118) : `syntax` conservée (non typée v1), `inherits`
+/// et `initial-value` appliqués à la valeur calculée.
+#[derive(Debug, Clone)]
+pub(crate) struct RegisteredProp {
+    /// `syntax` de la registration (`"*"` = tout) — stockée
+    /// pour le typage futur, jamais lue en v1.
+    #[allow(dead_code)]
+    pub syntax: String,
+    /// `inherits` (`true` par défaut spec).
+    pub inherits: bool,
+    /// `initial-value` (`None` → guaranteed-invalid à l'usage).
+    pub initial: Option<String>,
+}
+
 #[derive(Default)]
 pub struct StyleEngine {
     rules: Vec<CollectedRule>,
@@ -463,6 +478,12 @@ pub struct StyleEngine {
     /// `@keyframes` par nom — offsets triés, multi-sélecteurs
     /// éclatés (R-10, module `animation`).
     pub(crate) keyframes: crate::animation::Keyframes,
+    /// Registre `@property` (css-properties-values-api-1 —
+    /// R-118) : `--name` → `{syntax, inherits, initial-value}`.
+    /// La `syntax` est conservée mais non typée à la
+    /// vérification (v1) — `inherits`/`initial-value` agissent
+    /// à la valeur calculée.
+    pub(crate) property_registry: HashMap<String, RegisteredProp>,
 }
 
 /// « Guaranteed-invalid value » (css-variables-1 §3.2) :
@@ -815,12 +836,41 @@ impl StyleEngine {
                                 path.truncate(layer.len());
                             }
                         }
-                    } else if let AtKind::Declarations { declarations, .. } = &at.kind {
+                    } else if let AtKind::Declarations {
+                        prelude,
+                        declarations,
+                    } = &at.kind
+                    {
                         if at.name.eq_ignore_ascii_case("font-face") {
                             self.font_faces.push(CollectedFontFace {
                                 media: media.to_vec(),
                                 declarations: declarations.clone(),
                             });
+                        } else if at.name.eq_ignore_ascii_case("property") {
+                            let name = prelude.trim();
+                            if name.starts_with("--") {
+                                let (mut syntax, mut inherits, mut initial) =
+                                    ("*".to_string(), true, None);
+                                for d in declarations {
+                                    let v = d.value.trim().to_string();
+                                    match d.name.trim() {
+                                        "syntax" => {
+                                            syntax = v.trim_matches('"').trim_matches('\'').into();
+                                        }
+                                        "inherits" => inherits = v == "true",
+                                        "initial-value" => initial = Some(v),
+                                        _ => {}
+                                    }
+                                }
+                                self.property_registry.insert(
+                                    name.to_string(),
+                                    RegisteredProp {
+                                        syntax,
+                                        inherits,
+                                        initial,
+                                    },
+                                );
+                            }
                         }
                     } else if let AtKind::Keyframes { name, frames } = &at.kind {
                         // `@media` englobant appliqué ? La table
@@ -1290,6 +1340,29 @@ impl StyleEngine {
         // les traitent comme avant).
         let mut vars: Arc<HashMap<String, String>> =
             parent.map_or_else(|| Arc::new(HashMap::new()), |p| Arc::clone(&p.vars));
+        // `@property` (R-118 — css-properties-values-api-1 §3)
+        //    — appliqué AVANT `var()` : `props` porte les
+        //    déclarations propres du nœud ; `vars` les héritées.
+        //    `inherits:false` masque l'héritage ; valeur absente
+        //    → `initial-value` (ou guaranteed-invalid — la
+        //    registration est invalide sans initial quand
+        //    `syntax` ≠ `*`).
+        if !self.property_registry.is_empty() {
+            for (name, reg) in &self.property_registry {
+                if props.keys().any(|k| k == name) {
+                    continue;
+                }
+                let v = reg
+                    .initial
+                    .clone()
+                    .unwrap_or_else(|| GUARANTEED_INVALID.to_string());
+                if !reg.inherits || !vars.contains_key(name) {
+                    if vars.get(name).map(String::as_str) != Some(v.as_str()) {
+                        Arc::make_mut(&mut vars).insert(name.clone(), v);
+                    }
+                }
+            }
+        }
         // 4. Mots-clés CSS-wide sur les valeurs déclarées.
         for (k, v) in &mut props {
             // Fast-path : la valeur ordinaire (quasi toutes)
