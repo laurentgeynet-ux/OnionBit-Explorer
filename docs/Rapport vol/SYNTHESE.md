@@ -204,7 +204,7 @@ Akamai Bot Manager (cdiscount, zalando→`supported-browsers`) ·
 x5sec Alibaba (aliexpress→punish) · **AWS WAF insolvable** (imdb,
 booking — challenge obfusqué) · challenge JS reddit **résolu côté
 serveur** · login-walls (old.reddit, quora partiel) · Cloudflare
-urssaf.fr RST 10054 reproduit curl schannel `[V4-main]` vol 45 · Turnstile (quora). Signature cumulée : `UA: Explorer/0.1`, pas de
+urssaf.fr RST 10054 reproduit curl schannel `[V4-main]` vol 45 · calameo (connexion fermée avant fin d'en-têtes, curl H1.1 OK — fingerprint TLS/H2, `[V6-main]` vol 75) · Turnstile (quora). Signature cumulée : `UA: Explorer/0.1`, pas de
 `sec-ch-ua`/`sec-fetch-*`, fingerprint rustls, H2 par défaut —
 politique déléguée à l'app hôte (AGENTS §9).
 
