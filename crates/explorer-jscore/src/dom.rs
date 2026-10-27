@@ -770,6 +770,10 @@ pub struct SerializeStats {
     pub micros: u64,
 }
 
+/// Plafond de nœuds du miroir (B-44) — insertions au-delà
+/// refusées, déplacements attachés légaux (télémétrie sans fin).
+const MAX_DOM_NODES: usize = 100_000;
+
 impl Dom {
     /// Empty document (`#document` root only).
     #[must_use]
@@ -1978,6 +1982,11 @@ impl Dom {
             self.splice_fragment(parent, child, None);
             return;
         }
+        // B-44 : plafond DOM — insertions refusées au-delà,
+        // déplacements d'attachés restants légaux.
+        if !self.nodes[child as usize].attached && self.nodes.len() >= MAX_DOM_NODES {
+            return;
+        }
         self.detach(child);
         self.nodes[child as usize].parent = Some(parent);
         let a = self.nodes[parent as usize].attached;
@@ -2167,6 +2176,10 @@ impl Dom {
         } else {
             ref_node
         };
+        // B-44 : même plafond DOM que `append`.
+        if !self.nodes[child as usize].attached && self.nodes.len() >= MAX_DOM_NODES {
+            return;
+        }
         self.detach(child);
         let idx = ref_node.and_then(|r| {
             self.nodes[parent as usize]
