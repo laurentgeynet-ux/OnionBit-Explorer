@@ -2388,6 +2388,7 @@ struct AbsGeo {
     b: Option<f32>,
     ml: f32,
     mr: f32,
+    mt: f32,
     mb: f32,
     /// `width` est non-`auto` : `layout_block` le re-résoudra
     /// — `cb_w` doit alors rester le vrai bloc conteneur (le %
@@ -2471,6 +2472,7 @@ fn abs_geometry(
         b,
         ml,
         mr,
+        mt,
         mb,
         explicit_w: w_css.is_some(),
     }
@@ -2601,6 +2603,19 @@ pub(crate) fn resolve_absolutes(bx: &mut LayoutBox, cb: Rect, ctx: &BlockCtx, fs
             if let Some(bv) = geo.b {
                 let target_y = target.y + target.height - bv - geo.mb - child.rect.height;
                 crate::flex::translate_subtree(child, 0.0, target_y - child.rect.y);
+            }
+        } else if let (Some(tv), Some(bv)) = (geo.t, geo.b) {
+            // `top`+`bottom`+`height:auto` (§10.6.4 — R-121)
+            // : la boîte **s'étire** entre les deux ancrages —
+            // `inset:0` comblait la largeur (§10.3.7) mais
+            // restait à hauteur 0 (stretched-link vinted :
+            // `<a>` absolu incliquable). `height` non-auto →
+            // sur-contraint : `bottom` ignoré, rien à faire.
+            if cst
+                .get("height")
+                .is_none_or(|h| h.is_empty() || h == "auto")
+            {
+                child.rect.height = (target.height - tv - bv - geo.mt - geo.mb).max(0.0);
             }
         }
     }

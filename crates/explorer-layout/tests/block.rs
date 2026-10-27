@@ -2023,11 +2023,55 @@ fn overflow_x_seul_ne_clippe_pas_y() {
 }
 
 /// Cherche la boîte `overflow-x:hidden` dans l'arbre (R-120).
-fn find_overflow_x(
-    bx: &explorer_layout::LayoutBox,
-) -> Option<&explorer_layout::LayoutBox> {
+fn find_overflow_x(bx: &explorer_layout::LayoutBox) -> Option<&explorer_layout::LayoutBox> {
     if bx.overflow_x == explorer_layout::Overflow::Hidden {
         return Some(bx);
     }
     bx.children.iter().find_map(find_overflow_x)
+}
+
+#[test]
+fn abs_top_bottom_height_auto_setire() {
+    // R-121 / B-23 — stretched-link vinted : `<a>`
+    // `position:absolute; inset:0` dans un parent `relative`
+    // doit couvrir TOUT le CB (§10.6.4), pas hauteur 0.
+    let dom = TreeBuilder::parse("<div id=p><p>carte</p><a id=l>lien</a></div>");
+    let mut e = StyleEngine::new();
+    e.add_css(
+        "body{margin:0} #p{position:relative;height:120px} #l{position:absolute;inset:0}",
+        Origin::Author,
+    );
+    let styles = e.compute_tree(&dom, dom.document(), &StyleEnv::default());
+    let root_el = dom
+        .children(dom.document())
+        .into_iter()
+        .flatten()
+        .find(|&c| dom.element(c).is_ok())
+        .unwrap();
+    let mut bx = build_box_tree(&dom, root_el, &styles).unwrap();
+    layout_tree(&mut bx, VIEW, &BlockCtx::default());
+    let link = find(&bx, by_id(&dom, "l"));
+    assert!(
+        link.rect.height >= 119.0,
+        "stretched-link devrait couvrir ~120px, obtenu {}",
+        link.rect.height
+    );
+}
+
+/// Cherche l'élément `id` dans le DOM (miroir du helper de
+/// modern.rs — `dom.attribute(n, "id")`).
+fn by_id(dom: &Dom, id: &str) -> NodeId {
+    let mut queue = vec![dom.document()];
+    while let Some(n) = queue.pop() {
+        if dom
+            .attribute(n, "id")
+            .is_ok_and(|v| v.as_deref() == Some(id))
+        {
+            return n;
+        }
+        if let Ok(ch) = dom.children(n) {
+            queue.extend(ch.iter().rev());
+        }
+    }
+    panic!("#{id} absent")
 }
