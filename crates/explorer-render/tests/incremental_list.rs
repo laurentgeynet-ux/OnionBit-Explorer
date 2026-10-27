@@ -384,3 +384,32 @@ fn incr_frame_session_identique() {
     at(&mut bx, &[0, 1]).style.set("color", "#ff0000");
     assert_inc_eq_full(&bx, 30.0, &prev, false);
 }
+
+#[test]
+fn incr_scroll_grand_doc_non_blanc() {
+    // Repro glassdoor (anomalie #8 — frame blanche à
+    // scroll_y=1600 sur doc 5520) : doc haute, `prev` peint
+    // à scroll 0, incrémental à 1600 — identique au plein
+    // build ET pixels non blancs.
+    let html = (0..30)
+        .map(|i| format!("<div>bloc{i}</div>"))
+        .collect::<String>();
+    let css = "body{margin:0} div{height:200px;background:#fed;color:#000;font-size:40px}";
+    let (bx, prev) = tree_of(&html, css);
+    assert!(
+        bx.rect.height > 5000.0,
+        "doc trop court : {}",
+        bx.rect.height
+    );
+    assert_inc_eq_full(&bx, 1600.0, &prev, true);
+    // Garde anti-blanc : la frame à 1600 doit contenir des
+    // pixels non blancs (la #fed remplit le viewport).
+    let inc = inc_of(&bx, 1600.0, &prev, true);
+    let f = rasterize(&inc, ctx().fonts.expect("fonte"), 1.0).expect("frame");
+    let non_white = f
+        .pixels
+        .chunks_exact(4)
+        .filter(|p| p[0] != 255 || p[1] != 255 || p[2] != 255)
+        .count();
+    assert!(non_white > 0, "frame blanche à scroll 1600");
+}
