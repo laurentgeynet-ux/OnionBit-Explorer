@@ -138,3 +138,18 @@ frame-moteur vs fenêtre-app est un constat en soi (bug UI).
   moteur + `diff` contre une référence (Chrome/Playwright).
 - **En file** : sonde `/net` (verdicts sous-ressources
   CSP/SRI/CORS par URL) — entaille session, file NAV.
+
+## 8. Traçabilité — synchro avec `Rapport vol/SYNTHESE.md`
+
+Protocole complet : `docs/Rapport vol/SYNTHESE.md` §G.
+
+- Chaque constat du rapport porte `crate` + l'**ID §B** s'il
+  correspond à une anomalie catalogue (`→ §B-5`) ; un trou
+  nouveau = proposition d'entrée §B au numéro suivant.
+- Le rapport indique le **tag de binaire** (`[V1]`/`[V2]`/`[V3]`)
+  — un constat sur binaire périmé n'est pas une régression.
+- Statuts canoniques : `OUVERT` → `FIX LIVRÉ` → `RÉSOLU`
+  (fermé uniquement par re-vol sur binaire post-fix).
+- L'agent FIX référence les IDs tâche §E-bis (`J`/`N`/`P`/`T`)
+  dans ses commits et met à jour ses lignes §E-bis + statuts §B
+  à la clôture.

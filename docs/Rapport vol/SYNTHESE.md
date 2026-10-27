@@ -285,3 +285,27 @@ Rapport vol/
 - **Non appliqué** : JS-C163 (deadline wall-clock éval +
   `EXPLORER_JS_EVAL_TIMEOUT_MS`) — spec complète §reprise 16 du
   rapport FIX-1, chantier suivant.
+
+---
+
+## G. Protocole de synchro (rapports ↔ ce fichier)
+
+- **`SYNTHESE.md` = source de vérité des statuts** ; les rapports
+  de vol sont des preuves **immuables** (instantané d'un binaire).
+- **Rapport de vol** : chaque constat porte `crate` + l'ID §B s'il
+  correspond (`→ §B-5`) ; un trou nouveau = nouvelle entrée §B au
+  numéro suivant, pas de texte libre.
+- **Commit FIX** : référence l'ID tâche
+  (`fix(jscore): J6 — …`) → l'état §E-bis se met à jour au merge.
+- **Clôture FIX** : l'agent met à jour la colonne État de **ses
+  lignes** §E-bis + le statut §B — dans le même commit.
+- **Statuts canoniques** : `OUVERT` → `FIX LIVRÉ` → `RÉSOLU`
+  (fermé **uniquement par un re-vol** T1 sur binaire post-fix) ;
+  `PARTIEL`, `EN DÉCROISSANCE`, `STRUCTUREL`, `INTERMITTENT` pour
+  les cas intermédiaires.
+- **Tag de binaire** : toute anomalie porte sa version
+  (`[V1]`/`[V2]`/`[V3]`) — un constat pré-V3 n'est jamais présumé
+  régression.
+- **Cohérence** : §D = priorités (ordre), §E-bis = propriétaires
+  (pistes NAV-JS / NAV / PIPE / Terrain), §B = catalogue — les
+  IDs §B font le lien, pas de duplication.
