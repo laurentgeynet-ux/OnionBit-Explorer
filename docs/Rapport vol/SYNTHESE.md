@@ -195,7 +195,7 @@ plateforme net** (ops jscore Encrypt/Decrypt restent à livrer) ·
 
 ### ⚪ Externe — hors moteur (catalogue à jour)
 
-Anti-bot : 403 sec (ebay, etsy, stackoverflow, tripadvisor, sncf-connect, affinity.serif, hardware.fr, liberation.fr, · vhost TLS mort www.figaro.fr (UnrecognisedName, curl idem — externe) ·
+Anti-bot : 403 sec (ebay, etsy, stackoverflow, tripadvisor, sncf-connect, affinity.serif, hardware.fr, liberation.fr, logic-immo, lacentrale, · vhost TLS mort www.figaro.fr (UnrecognisedName, curl idem — externe) ·
 seloger, medium, khanacademy, apec, nytimes) · Datadome (leboncoin) ·
 Akamai Bot Manager (cdiscount, zalando→`supported-browsers`) ·
 x5sec Alibaba (aliexpress→punish) · **AWS WAF insolvable** (imdb,
