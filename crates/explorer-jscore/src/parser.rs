@@ -619,6 +619,13 @@ impl Parser {
             }
             Tok::Kw(Kw::Export) if self.module => self.export_stmt(),
             Tok::Kw(Kw::Export) => Err(self.err("`export` outside a module")),
+            // `debugger` — no-op spec (J5 : un module en
+            // contenant mourrait au parse — w3schools).
+            Tok::Kw(Kw::Unsupported("debugger")) => {
+                self.pos += 1;
+                self.expect_semi()?;
+                Ok(Stmt::Empty)
+            }
             Tok::Kw(Kw::Unsupported(k)) => Err(self.err(format!("`{k}` is not supported"))),
             // `ident :` — statement étiqueté (`lbl: for …`).
             Tok::Ident(_)

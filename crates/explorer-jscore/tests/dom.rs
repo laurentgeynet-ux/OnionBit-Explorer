@@ -5853,7 +5853,7 @@ fn cap191_shadow_surface() {
              r.getRootNode()===r, r instanceof DocumentFragment,\
              typeof r.querySelector].join('|')"
         ),
-        "11|#document-fragment|true|true|true|false|function"
+        "11|#document-fragment|true|true|true|true|function"
     );
     // Enfants de la racine : getRootNode() = racine ;
     // {composed:true} → document (traverse l'hôte).
@@ -6468,4 +6468,27 @@ fn c159_shadow_ws_bc_es_surface() {
     // `EventSource` global posé à install_dom (refus différé
     // sans transport, jamais un global absent).
     assert_eq!(evf(&mut e, "typeof EventSource"), "function");
+}
+
+#[test]
+fn instanceof_dom_hierarchy() {
+    // J5 (impots/ameli) : `x instanceof Element`/`Node` —
+    // protos chaînés par kind + héritage d'interfaces.
+    let (mut e, _jar, _navs) = engine_full("<html><body><div id=d>hi</div><!--c--></body></html>");
+    e.eval("var el=document.getElementById('d');var tx=el.firstChild")
+        .unwrap_or_else(|x| panic!("setup: {x}"));
+    for (src, want) in [
+        ("el instanceof Element", "true"),
+        ("el instanceof Node", "true"),
+        ("el instanceof EventTarget", "true"),
+        ("el instanceof HTMLElement", "true"),
+        ("document instanceof Node", "true"),
+        ("document instanceof Element", "false"),
+        ("tx instanceof Text", "true"),
+        ("tx instanceof Node", "true"),
+        ("tx instanceof Element", "false"),
+        ("typeof el.matches", "function"),
+    ] {
+        assert_eq!(evf(&mut e, src), want, "{src}");
+    }
 }

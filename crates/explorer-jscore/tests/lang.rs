@@ -8335,3 +8335,14 @@ fn eval_deadline_kills_timer_burst() {
     assert!(e.run_due_timers().is_err());
     assert!(e.take_deadline_hit());
 }
+
+#[test]
+fn debugger_statement_is_noop() {
+    // `debugger;` = instruction no-op spec — un module qui en
+    // contient ne doit pas mourir au parse (w3schools).
+    let mut e = Engine::new();
+    match e.eval("var x=1; debugger; x") {
+        Ok(v) => assert_eq!(e.describe(v), "1"),
+        Err(x) => panic!("debugger → {x}"),
+    }
+}

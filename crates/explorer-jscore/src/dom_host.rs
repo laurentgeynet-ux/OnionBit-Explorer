@@ -1450,15 +1450,29 @@ pub(crate) fn node_value(e: &mut Engine, dom: &DomRef, cache: &NodeCache, node: 
         // `sr instanceof ShadowRoot` (JS-C159) — la racine
         // hérite `ShadowRoot.prototype` (proto lu sur le
         // ctor global, posé à `install_dom`).
-        if dom.borrow().is_shadow_root(node) {
-            let proto = e.get_prop(e.global, "ShadowRoot").and_then(|c| match c {
-                Value::Obj(cid) => e.get_prop(cid, "prototype"),
-                _ => None,
-            });
-            if let Some(p @ Value::Obj(_)) = proto {
-                if let Some(o) = e.heap.obj_mut(id) {
-                    o.proto = p;
-                }
+        let kind = dom.borrow().nodes.get(node as usize).map(|n| n.kind);
+        let is_sr = dom.borrow().is_shadow_root(node);
+        let ctor = if is_sr {
+            "ShadowRoot"
+        } else {
+            // `instanceof Element`/`Text`/`Comment`/`Node` —
+            // chaîne plate par kind (J5 : impots/ameli — sans
+            // proto, tout `x instanceof Element` était faux).
+            match kind {
+                Some(crate::dom::NodeKind::Element) => "HTMLElement",
+                Some(crate::dom::NodeKind::Text) => "Text",
+                Some(crate::dom::NodeKind::Comment) => "Comment",
+                Some(crate::dom::NodeKind::Fragment) => "DocumentFragment",
+                _ => "Node",
+            }
+        };
+        let proto = e.get_prop(e.global, ctor).and_then(|c| match c {
+            Value::Obj(cid) => e.get_prop(cid, "prototype"),
+            _ => None,
+        });
+        if let Some(p @ Value::Obj(_)) = proto {
+            if let Some(o) = e.heap.obj_mut(id) {
+                o.proto = p;
             }
         }
         cache.borrow_mut().insert(node, id);
@@ -1938,6 +1952,31 @@ impl Engine {
             let f = self.native_fn(name, illegal_ctor);
             if let Value::Obj(fid) = f {
                 let p = self.new_object();
+                // Chaîne d'héritage des protos DOM (J5) —
+                // `instanceof` transitif : `el instanceof
+                // Element` et `instanceof Node` à la fois
+                // (impots/ameli). Les parents sont posés
+                // plus tôt (`Node`/`Element`/`EventTarget`).
+                let parent = match name {
+                    "Text" | "Comment" | "ProcessingInstruction" => Some("CharacterData"),
+                    "CDATASection" => Some("Text"),
+                    "ShadowRoot" => Some("DocumentFragment"),
+                    "Document" | "DocumentFragment" | "CharacterData" | "Attr" | "DocumentType" => {
+                        Some("Node")
+                    }
+                    "SVGElement" => Some("Element"),
+                    _ if name.starts_with("HTML") && name.ends_with("Element") => Some("Element"),
+                    _ => None,
+                };
+                if let Some(pn) = parent {
+                    if let Some(Value::Obj(cid)) = self.get_prop(g, pn) {
+                        if let Some(pp @ Value::Obj(_)) = self.get_prop(cid, "prototype") {
+                            if let Some(o) = self.heap.obj_mut(p) {
+                                o.proto = pp;
+                            }
+                        }
+                    }
+                }
                 self.set_own(fid, "prototype", Value::Obj(p), false);
             }
             self.set_own(g, name, f, false);
@@ -1971,6 +2010,27 @@ impl Engine {
             }
         }
         self.set_own(g, "EventTarget", et_f, false);
+        // Liens hors-liste de la chaîne protos DOM (J5) :
+        // `Node` < `EventTarget` (spec WebIDL), `Element` <
+        // `Node`, `HTMLElement` < `Element` — `instanceof`
+        // transitif complet (`el instanceof EventTarget`).
+        for (child, parent) in [
+            ("Node", "EventTarget"),
+            ("Element", "Node"),
+            ("HTMLElement", "Element"),
+        ] {
+            if let Some(Value::Obj(cid)) = self.get_prop(g, child) {
+                if let Some(Value::Obj(cp)) = self.get_prop(cid, "prototype") {
+                    if let Some(Value::Obj(pcid)) = self.get_prop(g, parent) {
+                        if let Some(pp @ Value::Obj(_)) = self.get_prop(pcid, "prototype") {
+                            if let Some(o) = self.heap.obj_mut(cp) {
+                                o.proto = pp;
+                            }
+                        }
+                    }
+                }
+            }
+        }
         // `DOMException` — constructible spec : `new
         // DOMException(message?, name?)` → `{name, message}`
         // (même mur css-tricks — `x instanceof DOMException` et
