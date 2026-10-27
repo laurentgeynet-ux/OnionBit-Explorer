@@ -3351,6 +3351,28 @@ impl Dom {
     /// tags simply stay open, `</x>` pops to the nearest open `x`.
     pub fn parse_fragment_into(&mut self, parent: NodeId, html: &str) {
         let mut stack = vec![parent];
+        // Compte des tags ouverts dans `stack` — les recherches
+        // d'ancêtre (`head` ouvert, `html`/`body` implicites,
+        // close-tag sans correspondant) scannaient la pile
+        // entière par balise : 200 k divs nichés → O(n²),
+        // ~8 min par expression hostile (`hostile_dom_depth`).
+        // Incrémentée au push, décrémentée à chaque sortie de
+        // pile — O(1) amorti (chaque nœud n'est compté qu'à
+        // son retrait). Le parent du fragment compte aussi :
+        // les scans d'origine le couvraient (index 0).
+        let mut open_tags: HashMap<String, u32> = HashMap::new();
+        if let Some(n) = self.nodes.get(parent as usize) {
+            *open_tags.entry(n.tag.clone()).or_default() += 1;
+        }
+        macro_rules! unpush {
+            ($slice:expr) => {
+                for &n in $slice {
+                    if let Some(c) = open_tags.get_mut(&self.nodes[n as usize].tag) {
+                        *c = c.saturating_sub(1);
+                    }
+                }
+            };
+        }
         let cs: Vec<char> = html.chars().collect();
         let mut i = 0;
         let mut text = String::new();
@@ -3414,13 +3436,19 @@ impl Dom {
                 if name.is_empty() {
                     continue;
                 }
-                if let Some(pos) = stack
-                    .iter()
-                    .rposition(|&id| self.nodes[id as usize].tag == name)
-                {
-                    // Pop through the match, but never the fragment parent.
-                    if pos > 0 {
-                        stack.truncate(pos);
+                // Pas de correspondant ouvert → le rposition
+                // balayait toute la pile pour rien (O(profondeur)
+                // par close-tag orphelin — O(n²) hostile).
+                if open_tags.get(&name).copied().unwrap_or(0) > 0 {
+                    if let Some(pos) = stack
+                        .iter()
+                        .rposition(|&id| self.nodes[id as usize].tag == name)
+                    {
+                        // Pop through the match, but never the fragment parent.
+                        if pos > 0 {
+                            unpush!(&stack[pos..]);
+                            stack.truncate(pos);
+                        }
                     }
                 }
                 continue;
@@ -3514,12 +3542,13 @@ impl Dom {
             // sinon l'élément reste niché (tolérant, aucune
             // perte de contenu).
             if let Some((_, targets)) = PAIRED_CLOSE.iter().find(|(t, _)| *t == tag) {
-                if stack
+                if targets
                     .iter()
-                    .any(|&n| targets.contains(&self.nodes[n as usize].tag.as_str()))
+                    .any(|t| open_tags.get(*t).copied().unwrap_or(0) > 0)
                 {
                     while let Some(&top) = stack.last() {
                         let done = targets.contains(&self.nodes[top as usize].tag.as_str());
+                        unpush!(std::slice::from_ref(&top));
                         stack.pop();
                         if done {
                             break;
@@ -3533,7 +3562,11 @@ impl Dom {
             // niche `body` sous `head` et **tous** les chemins
             // `element_path` divergent de l'arbre réel (gBCR 0×0
             // global — mesuré w3.org, `EXPLORER_GEOM_TRACE`).
-            if !HEAD_TAGS.contains(&tag.as_str()) {
+            // `head` ouvert ? — compteur O(1), pas de scan :
+            // sinon chaque `<div>` payait O(profondeur) sur la
+            // pile (cause racine du O(n²) de `hostile_dom_depth`).
+            if !HEAD_TAGS.contains(&tag.as_str()) && open_tags.get("head").copied().unwrap_or(0) > 0
+            {
                 if let Some(hp) = stack
                     .iter()
                     .rposition(|&n| self.nodes[n as usize].tag == "head")
@@ -3543,14 +3576,16 @@ impl Dom {
                     // body/frameset/html synthétise `<body>`
                     // implicite (parité de chemins avec le
                     // tree-builder réel, qui fait de même).
+                    unpush!(&stack[hp..]);
                     stack.truncate(hp);
                     if !matches!(tag.as_str(), "body" | "frameset" | "html")
-                        && stack.iter().any(|&n| self.nodes[n as usize].tag == "html")
-                        && !stack.iter().any(|&n| self.nodes[n as usize].tag == "body")
+                        && open_tags.get("html").copied().unwrap_or(0) > 0
+                        && open_tags.get("body").copied().unwrap_or(0) == 0
                     {
                         let b = self.alloc(NodeKind::Element, "body");
                         let t = *stack.last().unwrap_or(&parent);
                         self.append(t, b);
+                        *open_tags.entry("body".to_string()).or_default() += 1;
                         stack.push(b);
                     }
                 }
@@ -3609,6 +3644,7 @@ impl Dom {
                     i = (i + 1).min(cs.len());
                     continue; // don't push — already closed
                 }
+                *open_tags.entry(tag.clone()).or_default() += 1;
                 stack.push(id);
             }
         }

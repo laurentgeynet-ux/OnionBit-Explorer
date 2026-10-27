@@ -7223,6 +7223,35 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   pour les récursions callbacks.
   Sondes `depth_probe` ×20k : 47/47.
 
+- [x] **JS-C172. `hostile_dom_depth`
+  résolu — parse fragment O(n)→O(n²)
+  tué** (`explorer-jscore`,
+  `parse_fragment_into`) — la passe
+  JS-C55 avait soldé `is_attached`/
+  `common_ancestor`, mais les scans
+  d'ancêtres « in head » ajoutés
+  depuis scannaient la pile entière
+  **par start-tag** : `rposition`
+  `tag=="head"` (chaque `<div>` non
+  head), `any` `html`/`body`, et le
+  `rposition` des close-tags sans
+  correspondant ouvert → O(n²) exact
+  mesuré (~315 ms→1,3 s→4,8 s→19,7 s
+  à 5k/10k/20k/40k, extrapolé ~8 min
+  par expression à 200 k ≈ les
+  ~80 min du test exclu). Fix :
+  `HashMap<tag,count>` des tags
+  ouverts dans la pile — gardes
+  O(1), scans conservés seulement
+  quand un ancêtre existe vraiment ;
+  décrément `unpush!` à chaque
+  truncate/pop (amorti O(1)). Mesure
+  post-fix : ~17 ms→136 ms à
+  5k→40k (**linéaire**, ~145× à 40k)
+  ; `hostile_dom_depth` complet :
+  **4,7 s** (était >60 min, exclu
+  du gate). ~1 000×.
+
 - [x] **JS-C171. Spread `...x` dans les
   appels de chaîne optionnelle**
   (`explorer-jscore`) — résidu J6 : la

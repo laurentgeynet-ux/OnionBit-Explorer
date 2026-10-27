@@ -7,6 +7,27 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **JS-C172 — `hostile_dom_depth`
+  résolu : parse de fragment
+  O(n²)→O(n)** (`explorer-jscore`) —
+  les gardes « in head » de
+  `parse_fragment_into` scannaient la
+  pile d'éléments ouverts entière
+  **par start-tag** (`rposition` sur
+  `head`, `any` sur `html`/`body`,
+  `rposition` des close-tags sans
+  correspondant) → 200 k divs nichés
+  = O(n²) mesuré (~19,7 s à 40k,
+  ~8 min/expression à 200k — le test
+  exclu du gate). Un
+  `HashMap<tag,compte>` des tags
+  ouverts borne les recherches en
+  O(1) amorti ; `unpush!` décrémente
+  à chaque truncate/pop. Résultat :
+  ~136 ms à 40k (**~145×**),
+  `hostile_dom_depth` complet en
+  **4,7 s** — réintégrable au gate.
+
 - **B-53 — `margin:auto` d'une boîte
   positionnée ne re-centre plus dans
   le flux** (`explorer-layout`) —
