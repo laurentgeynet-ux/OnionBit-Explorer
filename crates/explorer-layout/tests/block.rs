@@ -2101,7 +2101,7 @@ fn hit_positionne_gagne_sur_statique() {
     // Point dans l'input (20,20) — img le couvre aussi.
     let hit = explorer_layout::hit_test(&bx, 20.0, 20.0);
     assert_eq!(
-        hit.and_then(|n| dom.attribute(n, "id").ok().flatten().map(|s| s.to_string())),
+        hit.and_then(|n| dom.attribute(n, "id").ok().flatten()),
         Some("s".to_string()),
         "l'input positionné doit gagner sur l'img statique"
     );
