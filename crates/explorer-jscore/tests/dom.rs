@@ -6546,3 +6546,24 @@ fn user_agent_data_desktop() {
     assert_eq!(evf(&mut e, "navigator.userAgentData.mobile"), "false");
     assert_eq!(evf(&mut e, "navigator.userAgentData.platform"), "Windows");
 }
+
+#[test]
+fn frame_document_probe() {
+    // dw : `cannot read 'document' of Null` — un hôte rend
+    // null où le site lit `.document` (iframe legacy
+    // `frames[i].document` / `contentDocument` absent).
+    let (mut e, _jar, _navs) = engine_full(
+        "<html><body><iframe id=f src='http://h/f'></iframe></body></html>",
+    );
+    for src in [
+        "document.getElementById('f').contentDocument",
+        "document.getElementById('f').document",
+        "document.getElementById('f').contentWindow",
+        "typeof frames",
+    ] {
+        match e.eval(src) {
+            Ok(v) => println!("OK   {src} → {}", e.describe(v)),
+            Err(x) => println!("FAIL {src} → {x}"),
+        }
+    }
+}

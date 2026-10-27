@@ -5116,6 +5116,31 @@ impl Host for NodeHost {
         // `WindowProxy` opaque) ; `contentDocument` rend le
         // `document` de son miroir, `null` si cross ou sans
         // contexte attaché.
+        // `.document` legacy = alias de `contentDocument`
+        // (dw : `frames[i].document`/`f.document` — les
+        // scripts pré-standards posent `.document` sur
+        // l'élément, pas `contentDocument`).
+        if key == "document" && self.dom.borrow().nodes[node as usize].tag == "iframe" {
+            let dom_ptr = std::rc::Rc::as_ptr(&self.dom) as usize;
+            let Some(child) = e.ctx_of_frame(dom_ptr, node) else {
+                return Ok(Some(Value::Null));
+            };
+            if !e.ctx_same_origin(e.cur_ctx, child) {
+                return Ok(Some(Value::Null));
+            }
+            let doc = if child == e.cur_ctx {
+                e.dom_ctx
+                    .as_ref()
+                    .and_then(|(d, cache)| cache.borrow().get(&d.borrow().root).copied())
+            } else {
+                e.parked.get(&child).and_then(|p| {
+                    p.dom_ctx
+                        .as_ref()
+                        .and_then(|(d, cache)| cache.borrow().get(&d.borrow().root).copied())
+                })
+            };
+            return Ok(Some(doc.map_or(Value::Null, Value::Obj)));
+        }
         if matches!(key, "contentWindow" | "contentDocument")
             && self.dom.borrow().nodes[node as usize].tag == "iframe"
         {
