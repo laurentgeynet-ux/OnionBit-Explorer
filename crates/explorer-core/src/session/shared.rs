@@ -154,6 +154,7 @@ async fn nav_commit_shared(
     // détenteur la restitue toujours à son commit, l'epoch
     // est revérifiée à chaque tour (une nav plus récente
     // coupe court). Le verrou n'est jamais tenu ici.
+    let wait_start = std::time::Instant::now();
     let (mut g, ctx, canvas_ops) = loop {
         let take = {
             let mut s = sess.lock().await;
@@ -162,7 +163,30 @@ async fn nav_commit_shared(
         match take {
             NavPaint::Ready(p, c, o) => break (p, c, o),
             NavPaint::Superseded => return Ok(()),
-            NavPaint::Busy => tokio::time::sleep(Duration::from_millis(50)).await,
+            NavPaint::Busy => {
+                // B-33 (ici/20minutes) : le détenteur peut
+                // mourir en vol sans restituer (B-26 — apply
+                // mort entre layout et repaint) : sans borne
+                // la nav attend à vie, page jamais servie.
+                // Timeout → réarmement + erreur nommée.
+                if wait_start.elapsed() > Duration::from_secs(30) {
+                    let mut s = sess.lock().await;
+                    s.rearm_nav_paint(tab);
+                    let age = s.paint_in_flight_age_ms(tab);
+                    tracing::warn!(
+                        tab,
+                        age_ms = ?age,
+                        "nav_paint wedge — détenteur mort, réarmé (B-33)"
+                    );
+                    return Err(s.emit_error(
+                        tab,
+                        CoreError::Timeout(format!(
+                            "nav_paint en attente >30 s (in-flight {age:?} ms)"
+                        )),
+                    ));
+                }
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
         }
     };
     // `p.base_url` porte la base effective (`<base href>`

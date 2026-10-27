@@ -780,6 +780,10 @@ pub enum CoreError {
     /// refusé, écriture en échec (étape 70).
     #[error("téléchargement : {0}")]
     Download(String),
+    /// Attente bornée expirée (B-33 — `nav_paint` en
+    /// attente d'un détenteur mort en vol).
+    #[error("attente expirée : {0}")]
+    Timeout(String),
 }
 
 /// Configuration de session — seuils et viewport initiaux
