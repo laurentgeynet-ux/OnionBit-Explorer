@@ -368,7 +368,18 @@ impl Session {
             self.queue_apply_sync(tab, s);
             t = sync_phase(tab, "commit.apply_queued", ta);
         }
-        if jobs > 0 {
+        // B-41 (credit-agricole vol63) : les drains finaux
+        // sont aussi des attentes worker sous verrou —
+        // `commit.drains` 185 s a affamé l'API alors que le
+        // plafond des livraisons était déjà posé. Même
+        // budget : au-delà de 45 s de commit, les drains
+        // non essentiels sautent — warn nommé.
+        let drain_expired = t0.elapsed() > Duration::from_secs(45);
+        if drain_expired {
+            tracing::warn!(tab, elapsed_ms = t0.elapsed().as_millis() as u64,
+                "commit borné — drains finaux sautés (B-41)");
+        }
+        if jobs > 0 && !drain_expired {
             self.after_script(tab);
             self.poll_net();
             sync_phase(tab, "commit.drains", t);
@@ -377,8 +388,10 @@ impl Session {
         // émises par la dernière rafale (liens/images/
         // scripts/`import()` dynamiques) doivent partir
         // même si plus aucun job n'est en file.
-        self.drain_script_net(tab);
-        self.drain_anim_births(tab);
+        if !drain_expired {
+            self.drain_script_net(tab);
+            self.drain_anim_births(tab);
+        }
         // B-41 (flixbus) : une rafale `UnmappedKey` →
         // re-parse → éval produisait des jobs à chaque
         // pompe — la pompe repartait sans fin (pump_
