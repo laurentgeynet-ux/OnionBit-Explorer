@@ -16,6 +16,16 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
     `JsError::Timeout` ; la signature
     chaîne « moteur figé » reste acceptée
     en repli.
+  - **CSP — host-source `*` nu**
+    (`explorer-net`) : `style-src https://*`
+    refusait chaque feuille (le `*` hôte
+    était comparé littéralement) — vol 32
+    dropbox rendu 1995, et tout site à
+    CSP `https://*` perdait styles, images
+    et `fetch()` (`connect-src`). Le `*`
+    nu en position hôte matche désormais
+    tout hôte, le schéma et le port
+    restent contraignants.
 
 - **Vol 2026-10-26 — correctifs de vol,
   vague 3 (FIX-3, vols 18/19)**

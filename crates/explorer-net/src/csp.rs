@@ -221,9 +221,10 @@ pub fn csp_upgrade(policies: &[CspPolicy], target: &Url) -> Option<Url> {
 /// `src` (source-expression) matche-t-elle `target` sous
 /// `page` (CSP §matching) : `'self'` = origine de la page ;
 /// `*` = http(s)/ws(s) ; scheme-source `xxx:` ; host-source
-/// `[scheme://][*.]host[:port][/chemin]` (chemin en suffixe
-/// honoré, §matching « path-part ») ; keywords/`nonce`/
-/// `hash`/`'none'`/vide → jamais en fetch.
+/// `[scheme://][*.]host[:port][/chemin]` — `*` nu en position
+/// hôte = tout hôte (chemin en suffixe honoré, §matching
+/// « path-part ») ; keywords/`nonce`/`hash`/`'none'`/vide →
+/// jamais en fetch.
 fn source_matches(src: &str, page: &Url, target: &Url) -> bool {
     let s = src.trim();
     if s == "*" {
@@ -263,7 +264,13 @@ fn source_matches(src: &str, page: &Url, target: &Url) -> bool {
         None => (host_port, None),
     };
     let th = target.host();
-    let host_ok = if let Some(suffix) = host_pat.strip_prefix("*.") {
+    // `*` nu en position hôte = tout hôte (spec §matching :
+    // `https://*` admet n'importe quel domaine https — vol 32
+    // dropbox `style-src https://*` refusait chaque feuille) ;
+    // distinct de `*.suffixe` (sous-domaines + apex).
+    let host_ok = if host_pat == "*" {
+        true
+    } else if let Some(suffix) = host_pat.strip_prefix("*.") {
         th == suffix || th.ends_with(&format!(".{suffix}"))
     } else {
         th == host_pat
