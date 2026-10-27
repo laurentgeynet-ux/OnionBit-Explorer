@@ -2430,6 +2430,41 @@ struct AbsGeo {
     explicit_w: bool,
 }
 
+/// §10.3.7 : les marges `auto` d'une boîte positionnée sont
+/// résolues ici et écrites dans le style — `layout_block`
+/// leur appliquerait sinon le centrage §10.3.3 du flux
+/// APRÈS l'ancrage `left`/`top` (popin edf §B-53 :
+/// `left:683px` + `margin:auto` + `width:640px` → x=1046
+/// au lieu de 683, consentement hors viewport). `auto` → 0
+/// sauf `left`+`width`+`right` tous spécifiés : le slack
+/// restant est alors partagé entre les marges `auto`
+/// (peut être négatif — la boîte déborde centrée).
+fn resolve_abs_margins(child: &mut LayoutBox, cst: &ComputedStyle, geo: &AbsGeo, cb_w: f32) {
+    let autos = (
+        cst.get("margin-left") == Some("auto"),
+        cst.get("margin-right") == Some("auto"),
+    );
+    if !(autos.0 || autos.1) {
+        return;
+    }
+    let free = if geo.explicit_w {
+        geo.l.and_then(|lv| geo.r.map(|rv| cb_w - lv - rv - geo.cw))
+    } else {
+        None
+    };
+    let (ml, mr) = match (autos.0, autos.1, free) {
+        (true, true, Some(f)) => (f / 2.0, f / 2.0),
+        (true, false, Some(f)) => (f - geo.mr, geo.mr),
+        (false, true, Some(f)) => (geo.ml, f - geo.ml),
+        (l_auto, r_auto, _) => (
+            if l_auto { 0.0 } else { geo.ml },
+            if r_auto { 0.0 } else { geo.mr },
+        ),
+    };
+    child.style.set("margin-left", &format!("{ml}px"));
+    child.style.set("margin-right", &format!("{mr}px"));
+}
+
 /// §10.3.7 : `width` non-`auto` → contrainte `l`+`r` ;
 /// `width:auto` avec un seul ancrage (ou aucun) →
 /// **shrink-to-fit** (`clamp(dispo, min-content,
@@ -2591,6 +2626,7 @@ pub(crate) fn resolve_absolutes(bx: &mut LayoutBox, cb: Rect, ctx: &BlockCtx, fs
         };
         let geo = abs_geometry(&bx.children[i], &cst, target, cfs, ctx);
         let child = &mut bx.children[i];
+        resolve_abs_margins(child, &cst, &geo, target.width);
         // Boîte absolue = BFC propre : registre vierge. Le CB
         // absolu est défini (padding box de l'ancêtre posé) —
         // ses hauteurs % résolvent (§10.5). `geo.cw` est la

@@ -178,7 +178,7 @@ plateforme net** (ops jscore Encrypt/Decrypt restent à livrer) ·
 
 | 52 | **Rafale `UnmappedKey` continue** — mutations DOM périodiques → re-parse ~1×/5 s (56×/2,5 min) sans wedge | `explorer-core` | bouygues-immobilier `[V7-main]` vol 84 : contenu, API vivante — famille §B-41 atténuée | **OUVERT — V7** |
 
-| 53 | **`translateX(-50%)` popin déplacée +320 px** — `#popin_tc_privacy` edf `left:683px` layoutée x=1046 (≈50%+viewport) → boutons consentement hors écran, page verrouillée (`body{position:fixed}`) | `explorer-layout`/`css` | edf `[V7-main]` vol 85 — suspect translate appliqué en sens inverse | **CORRECTIF `20191b8` a re-voler** — motif nomme : `translate3d`/`scale3d`/`matrix3d`/`rotate3d` non reconnues -> transform entier ignore -> tiroir centre `left/top:50%` colle a x=683+. Fix : projection 2D des variantes 3D (translate3d->x/y, z = identite, rotate3d axe z). Verrous verts |
+| 53 | **Popin consentement déplacée** — `#popin_tc_privacy` edf `left:683px` layoutée x=1046 → boutons consentement hors écran, page verrouillée (`body{position:fixed}`) | `explorer-layout` | edf `[V7-main]` vol 85 — **deux bugs empilés** : (a) `margin:auto` de la boîte `fixed` re-centrée par le §10.3.3 du flux **après** ancrage `left` → `683+(1366-640)/2=1046` exact (le « translate inversé » aurait donné 1003 sur 640 px — écarté) ; (b) `translate3d` non reconnu → `transform` entier ignoré | **CORRECTIFS `20191b8` + marge §10.3.7 à re-voler** — (a) résolu : marges `auto` d'une boîte positionnée résolues dans `resolve_absolutes` (→0 sauf `l`+`w`+`r` tous donnés → partage égal) ; (b) résolu : projection 2D des variantes 3D. Fixture edf fidèle : ancrage x=683, `translate(-50%)` au paint → visuel 363 centré |
 
 ### 🟡 Moyen — perf, métriques, observabilité résiduelle
 

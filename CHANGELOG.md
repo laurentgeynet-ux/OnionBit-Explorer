@@ -7,6 +7,31 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **B-53 — `margin:auto` d'une boîte
+  positionnée ne re-centre plus dans
+  le flux** (`explorer-layout`) —
+  `#popin_tc_privacy` edf (`fixed` +
+  `left:683px` + `width:640px` +
+  `margin:auto`) : `layout_block`
+  appliquait le centrage §10.3.3 du
+  flux **après** l'ancrage `left` →
+  `683 + (1366-640)/2 = 1046`, la
+  popin sortait du viewport
+  (consentement et page verrouillés).
+  §10.3.7 : les marges `auto` d'une
+  boîte absolue/fixe sont désormais
+  résolues dans `resolve_absolutes`
+  → `0` sauf `left`+`width`+`right`
+  tous spécifiés (slack partagé en
+  parts égales). Complète `20191b8`
+  (projection 2D des `transform` 3D)
+  — les deux fixes réunis : ancrage
+  683 puis `translate(-50%)` →
+  visuel 363, centré. Verrous
+  `fixed_left_width_margin_auto_…`
+  + `absolute_left_right_margin_…`,
+  fixture edf fidèle : x=683.
+
 - **139c — lecteur `OnionMediaPlayer` (FFI
   `onionmedia_ffi`) derrière la seam
   `MediaPlayer`** (`app/`) — nouveau

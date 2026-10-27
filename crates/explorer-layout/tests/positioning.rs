@@ -366,6 +366,44 @@ fn fixed_ancre_viewport() {
 }
 
 #[test]
+fn fixed_left_width_margin_auto_ne_re_centre_pas() {
+    // §B-53 — motif `#popin_tc_privacy` edf : `position:fixed`
+    // + `left` + `width` explicites + `margin:auto`
+    // (`right:auto`). §10.3.7 : les marges `auto` → 0, le
+    // centrage §10.3.3 du flux ne s'applique pas — avant le
+    // correctif `layout_block` ajoutait `(cb_w - w)/2` après
+    // l'ancrage `left` → x=1046 au lieu de 683 sur edf.
+    let (dom, bx) = laid(
+        "<div id=q></div>",
+        "#q{position:fixed;left:100px;top:0;width:200px;height:20px;margin:auto}",
+    );
+    let q = find(&bx, by_id(&dom, "q"));
+    assert!(
+        (q.rect.x - 100.0).abs() < 1.0,
+        "q {:?} attendu x≈100",
+        q.rect
+    );
+}
+
+#[test]
+fn absolute_left_right_margin_auto_centre() {
+    // Contrepartie §10.3.7 : `left`+`right`+`width` tous
+    // spécifiés + marges `auto` → le slack est partagé en
+    // parts égales → centrage dans le bloc conteneur.
+    let (dom, bx) = laid(
+        "<div id=q></div>",
+        "#q{position:absolute;left:0;right:0;top:0;width:200px;height:20px;margin:auto}",
+    );
+    let q = find(&bx, by_id(&dom, "q"));
+    let expected = (VIEW - 200.0) / 2.0;
+    assert!(
+        (q.rect.x - expected).abs() < 1.0,
+        "q {:?} attendu x≈{expected}",
+        q.rect
+    );
+}
+
+#[test]
 fn absolute_bottom_dans_parent_positionne() {
     let (dom, bx) = laid(
         "<div id=p><div id=q></div></div>",
