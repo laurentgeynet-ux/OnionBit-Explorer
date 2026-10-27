@@ -562,6 +562,42 @@ fn eval_calc(expr: &str, pct_basis: f32, em_basis: f32, ctx: &BlockCtx) -> Optio
         if calc_open {
             *i += 4;
         }
+        // `min(`/`max(`/`clamp(` sont des <calc-value> valides
+        // (css-values-4 §10.6) — évaluées via `eval_math_fn`
+        // jusqu'à la parenthèse équilibrée. Vol 32 notion :
+        // `calc((min(page-max, 100%-2*inset) - min(center+2*gutter,
+        // page))/2)` dans les pistes de grille retombait à
+        // `auto` → piste 0 → héro effondré en colonne centrée.
+        for fname in ["min", "max", "clamp"] {
+            let flen = fname.len();
+            if s[*i..].len() > flen
+                && s[*i..*i + flen].eq_ignore_ascii_case(fname)
+                && b[*i + flen] == b'('
+            {
+                let start = *i;
+                *i += flen;
+                // *i pointe sur '(' — on le consomme puis on
+                // marche jusqu'à la ')' équilibrée incluse.
+                let mut depth = 1usize;
+                *i += 1;
+                while *i < b.len() && depth > 0 {
+                    match b[*i] {
+                        b'(' => depth += 1,
+                        b')' => depth = depth.saturating_sub(1),
+                        _ => {}
+                    }
+                    *i += 1;
+                }
+                if depth != 0 {
+                    return None;
+                }
+                let v = eval_math_fn(&s[start..*i], pct, em, ctx)?;
+                return Some(Term {
+                    px: f64::from(v),
+                    dim: true,
+                });
+            }
+        }
         if b[*i] == b'(' {
             *i += 1;
             let t = expr_in(s, i, pct, em, ctx)?;

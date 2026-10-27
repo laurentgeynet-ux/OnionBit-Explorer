@@ -1,3 +1,21 @@
+
+- **Vol 32 — héros effondrés en colonne
+  étroite** (`explorer-layout`) — deux
+  causes réelles reproduites depuis les
+  dumps notion/todoist : (a) `calc()`
+  n'évaluait pas les facteurs
+  `min()`/`max()`/`clamp()` (css-values-4
+  §10.6) — les pistes de grille issues
+  de `var()`→`calc()` profonds
+  retombaient en `auto` à 0 px
+  (`grid_pistes_var_calc_imbrique`) ;
+  (b) le shrink flex n'avait pas de
+  plancher : le seul item shrinkable
+  absorbait tout le dépassement et
+  s'effondrait à 0 — désormais borné par
+  le minimum automatique (min-content,
+  §4.5 ; `min-width` spécifié fait foi)
+  — `flex_shrink_plancher_min_content`.
 # Changelog
 
 Toutes les modifications notables de ce projet sont consignées ici.
