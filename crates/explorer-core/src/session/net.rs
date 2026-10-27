@@ -3132,6 +3132,17 @@ impl Session {
             }
             frontier = next;
         }
+        if !frontier.is_empty() {
+            // Plafond `max_modules` atteint avec des deps en
+            // attente — troncation nommée (sinon l'échec
+            // d'instanciation « module non chargé » arrive sans
+            // cause visible — mesuré mastodon, axios en n°65).
+            tracing::warn!(
+                max = max_modules,
+                restants = frontier.len(),
+                "graphe de modules tronqué (max_modules)"
+            );
+        }
     }
 
     /// Décode + insère les corps `<img>` dans la table de

@@ -931,7 +931,10 @@ impl Default for SessionConfig {
             max_fonts: 16,
             max_scripts: 32,
             max_frames: 8,
-            max_modules: 64,
+            // Graphe statique réel : mastodon `application-*.js`
+            // en compte >64 (axios = n°65+ → « module non chargé »,
+            // mesuré en vol). 256 borne encore les chaînes hostiles.
+            max_modules: 256,
             max_inflight: 6,
             max_script_net: 16,
             max_timer_jobs: 128,

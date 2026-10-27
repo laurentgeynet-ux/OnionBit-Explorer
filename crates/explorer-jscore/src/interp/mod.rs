@@ -5037,11 +5037,17 @@ impl Engine {
                         _ => required.push(k),
                     }
                 }
-                if !self.target_extensible(tid)
-                    && (out.len() != required.len() || out.iter().any(|k| !required.contains(k)))
-                {
-                    return Err(self
-                        .type_error("proxy ownKeys: must list all keys of non-extensible target"));
+                if !self.target_extensible(tid) {
+                    let missing: Vec<&String> =
+                        required.iter().filter(|k| !out.contains(k)).collect();
+                    let extra: Vec<&String> =
+                        out.iter().filter(|k| !required.contains(k)).collect();
+                    if !missing.is_empty() || !extra.is_empty() {
+                        return Err(self.type_error(format!(
+                            "proxy ownKeys: must list all keys of non-extensible target \
+                             (missing {missing:?}, extra {extra:?})"
+                        )));
+                    }
                 }
                 return Ok(out);
             }
