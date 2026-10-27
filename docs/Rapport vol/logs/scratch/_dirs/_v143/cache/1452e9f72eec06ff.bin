@@ -1,3 +1,0 @@
-performance.mark("js-parse-end:aria-live-e0f60f15396869e3.js");
-export const __rspack_esm_id="qu";export const __rspack_esm_ids=["qu"];export const __webpack_modules__={LV(e,t,i){var r=i("eV");function n(e,t){o((e.getAttribute("aria-label")||e.innerText||"").trim(),{...t,element:t?.element??e})}function o(e,t){let{assertive:i,element:n}=t??{};try{let t=n?.isConnected?n:r.XC;t&&t.ariaNotify(e,{priority:i?"high":"normal"})}catch{}}i("fd"),i.d(t,{C:()=>n,i:()=>o})}};
-//# sourceMappingURL=aria-live-e0f60f15396869e3-f3cb4bffd9566b2f.js.map
