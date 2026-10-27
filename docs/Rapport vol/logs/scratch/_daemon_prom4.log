@@ -1,0 +1,216 @@
+2026-10-26T04:54:08.394126Z  INFO explorer_core::session::apply: apply: cascade ms=10
+2026-10-26T04:54:08.436565Z  INFO explorer_core::session::apply: apply: boxtree ms=53
+2026-10-26T04:54:08.458882Z  INFO explorer_core::session::apply: apply: layout ms=75
+2026-10-26T04:54:08.517305Z  INFO explorer_core::session::apply: apply: repaint ms=133
+2026-10-26T04:54:08.540164Z DEBUG explorer_core::session::net_items: script émis src=https://github.githubassets.com/assets/high-contrast-cookie-141c17800ca6ba23.js module=true
+2026-10-26T04:54:08.540347Z DEBUG explorer_core::session::net_items: script émis src=https://github.githubassets.com/assets/environment-89a7dceaf537fb4c.js module=true
+2026-10-26T04:54:08.540678Z DEBUG explorer_core::session::net_items: script émis src=https://github.githubassets.com/assets/github-elements-ed5f48b72ec252e4.js module=true
+2026-10-26T04:54:08.540716Z DEBUG explorer_core::session::net_items: script émis src=https://github.githubassets.com/assets/element-registry-06cd2d84777cb424.js module=true
+2026-10-26T04:54:08.540735Z DEBUG explorer_core::session::net_items: script émis src=https://github.githubassets.com/assets/behaviors-cd496cf4e17e083f.js module=true
+2026-10-26T04:54:08.540750Z DEBUG explorer_core::session::net_items: script émis src=https://github.githubassets.com/assets/marketing-essentials-9b5e122b91cab708.js module=true
+2026-10-26T04:54:08.540765Z DEBUG explorer_core::session::net_items: script émis src=https://github.githubassets.com/assets/landing-pages-f2bb6789a6f3945d.js module=true
+2026-10-26T04:54:08.540781Z DEBUG explorer_core::session::net_items: script émis src=https://github.githubassets.com/assets/global-banner-disable-750ad87f36b8e45f.js module=true
+2026-10-26T04:54:08.569968Z DEBUG explorer_core::session::net_items: sous-ressource script tab=1 src=Some("https://github.githubassets.com/assets/high-contrast-cookie-141c17800ca6ba23.js") module=true sec_ok=true sri_ok=true
+2026-10-26T04:54:08.570776Z DEBUG explorer_core::session::net_items: sous-ressource script tab=1 src=Some("https://github.githubassets.com/assets/environment-89a7dceaf537fb4c.js") module=true sec_ok=true sri_ok=true
+2026-10-26T04:54:08.571450Z DEBUG explorer_core::session::net_items: sous-ressource script tab=1 src=Some("https://github.githubassets.com/assets/github-elements-ed5f48b72ec252e4.js") module=true sec_ok=true sri_ok=true
+2026-10-26T04:54:08.572450Z DEBUG explorer_core::session::net_items: sous-ressource script tab=1 src=Some("https://github.githubassets.com/assets/element-registry-06cd2d84777cb424.js") module=true sec_ok=true sri_ok=true
+2026-10-26T04:54:08.574503Z DEBUG explorer_core::session::net_items: sous-ressource script tab=1 src=Some("https://github.githubassets.com/assets/behaviors-cd496cf4e17e083f.js") module=true sec_ok=true sri_ok=true
+2026-10-26T04:54:08.575715Z DEBUG explorer_core::session::net_items: sous-ressource script tab=1 src=Some("https://github.githubassets.com/assets/marketing-essentials-9b5e122b91cab708.js") module=true sec_ok=true sri_ok=true
+2026-10-26T04:54:08.584637Z DEBUG explorer_core::session::net_items: sous-ressource script tab=1 src=Some("https://github.githubassets.com/assets/landing-pages-f2bb6789a6f3945d.js") module=true sec_ok=true sri_ok=true
+2026-10-26T04:54:08.586532Z DEBUG explorer_core::session::net_items: sous-ressource script tab=1 src=Some("https://github.githubassets.com/assets/global-banner-disable-750ad87f36b8e45f.js") module=true sec_ok=true sri_ok=true
+2026-10-26T04:54:09.619309Z DEBUG explorer_core::session::net_items: prefetch modules tab=1 async_mods=0 post_modules=8
+2026-10-26T04:54:09.620323Z DEBUG explorer_core::session::net_items: module prefetché tab=1 name=https://github.githubassets.com/assets/high-contrast-cookie-141c17800ca6ba23.js sources=1
+2026-10-26T04:54:09.664411Z DEBUG explorer_core::session::net_items: module prefetché tab=1 name=https://github.githubassets.com/assets/environment-89a7dceaf537fb4c.js sources=6
+2026-10-26T04:54:09.772372Z DEBUG explorer_core::session::net_items: module prefetché tab=1 name=https://github.githubassets.com/assets/github-elements-ed5f48b72ec252e4.js sources=15
+2026-10-26T04:54:09.835204Z DEBUG explorer_core::session::net_items: module prefetché tab=1 name=https://github.githubassets.com/assets/element-registry-06cd2d84777cb424.js sources=5
+2026-10-26T04:54:10.094766Z DEBUG explorer_core::session::net_items: module prefetché tab=1 name=https://github.githubassets.com/assets/behaviors-cd496cf4e17e083f.js sources=32
+2026-10-26T04:54:10.151894Z DEBUG explorer_core::session::net_items: module prefetché tab=1 name=https://github.githubassets.com/assets/marketing-essentials-9b5e122b91cab708.js sources=8
+2026-10-26T04:54:11.143894Z DEBUG explorer_core::session::net_items: module prefetché tab=1 name=https://github.githubassets.com/assets/landing-pages-f2bb6789a6f3945d.js sources=50
+2026-10-26T04:54:11.144438Z DEBUG explorer_core::session::net_items: module prefetché tab=1 name=https://github.githubassets.com/assets/global-banner-disable-750ad87f36b8e45f.js sources=1
+2026-10-26T04:54:11.144737Z DEBUG explorer_core::session::js_glue: module eval… tab=1 name=https://github.githubassets.com/assets/high-contrast-cookie-141c17800ca6ba23.js
+2026-10-26T04:54:11.146793Z DEBUG explorer_core::session::js_glue: module eval fin tab=1 ms=2
+2026-10-26T04:54:11.146846Z DEBUG explorer_core::session::js_glue: module eval… tab=1 name=https://github.githubassets.com/assets/environment-89a7dceaf537fb4c.js
+2026-10-26T04:54:11.194246Z DEBUG explorer_jscore::dom_host: customElements.define name=live-region-16749d63-13fc-4f9e-ad06-63ec3a241c7f
+2026-10-26T04:54:11.197386Z DEBUG explorer_core::session::js_glue: module eval fin tab=1 ms=50
+2026-10-26T04:54:11.197431Z DEBUG explorer_core::session::js_glue: module eval… tab=1 name=https://github.githubassets.com/assets/github-elements-ed5f48b72ec252e4.js
+2026-10-26T04:54:11.249930Z DEBUG explorer_jscore::dom_host: customElements.define name=include-fragment
+2026-10-26T04:54:11.250114Z DEBUG explorer_jscore::dom_host: customElements.define name=remote-input
+2026-10-26T04:54:11.250637Z DEBUG explorer_jscore::dom_host: customElements.define name=action-list
+2026-10-26T04:54:11.251877Z DEBUG explorer_jscore::dom_host: customElements.define name=action-bar
+2026-10-26T04:54:11.252102Z DEBUG explorer_jscore::dom_host: customElements.define name=details-menu
+2026-10-26T04:54:11.252201Z DEBUG explorer_jscore::dom_host: customElements.define name=anchored-position
+2026-10-26T04:54:11.252273Z DEBUG explorer_jscore::dom_host: customElements.define name=dialog-helper
+2026-10-26T04:54:11.253021Z DEBUG explorer_jscore::dom_host: customElements.define name=focus-group
+2026-10-26T04:54:11.253273Z DEBUG explorer_jscore::dom_host: customElements.define name=scrollable-region
+2026-10-26T04:54:11.253984Z DEBUG explorer_jscore::dom_host: customElements.define name=modal-dialog
+2026-10-26T04:54:11.254333Z DEBUG explorer_jscore::dom_host: customElements.define name=nav-list
+2026-10-26T04:54:11.254657Z DEBUG explorer_jscore::dom_host: customElements.define name=nav-list-group
+2026-10-26T04:54:11.255296Z DEBUG explorer_jscore::dom_host: customElements.define name=segmented-control
+2026-10-26T04:54:11.255731Z DEBUG explorer_jscore::dom_host: customElements.define name=toggle-switch
+2026-10-26T04:54:11.256125Z DEBUG explorer_jscore::dom_host: customElements.define name=tool-tip
+2026-10-26T04:54:11.257838Z DEBUG explorer_jscore::dom_host: customElements.define name=x-banner
+2026-10-26T04:54:11.258318Z DEBUG explorer_jscore::dom_host: customElements.define name=auto-complete
+2026-10-26T04:54:11.258493Z DEBUG explorer_jscore::dom_host: customElements.define name=clipboard-copy
+2026-10-26T04:54:11.260238Z DEBUG explorer_jscore::dom_host: customElements.define name=relative-time
+2026-10-26T04:54:11.260639Z DEBUG explorer_jscore::dom_host: customElements.define name=tab-container
+2026-10-26T04:54:11.261023Z DEBUG explorer_jscore::dom_host: customElements.define name=primer-multi-input
+2026-10-26T04:54:11.261265Z DEBUG explorer_jscore::dom_host: customElements.define name=auto-check
+2026-10-26T04:54:11.261858Z DEBUG explorer_jscore::dom_host: customElements.define name=primer-text-field
+2026-10-26T04:54:11.262239Z DEBUG explorer_jscore::dom_host: customElements.define name=primer-text-area
+2026-10-26T04:54:11.262490Z DEBUG explorer_jscore::dom_host: customElements.define name=toggle-switch-input
+2026-10-26T04:54:11.262815Z DEBUG explorer_jscore::dom_host: customElements.define name=action-menu
+2026-10-26T04:54:11.263090Z DEBUG explorer_jscore::dom_host: customElements.define name=live-region
+2026-10-26T04:54:11.263937Z DEBUG explorer_jscore::dom_host: customElements.define name=select-panel
+2026-10-26T04:54:11.264194Z DEBUG explorer_jscore::dom_host: customElements.define name=details-toggle
+2026-10-26T04:54:11.264487Z DEBUG explorer_jscore::dom_host: customElements.define name=tree-view
+2026-10-26T04:54:11.264736Z DEBUG explorer_jscore::dom_host: customElements.define name=tree-view-icon-pair
+2026-10-26T04:54:11.265405Z DEBUG explorer_jscore::dom_host: customElements.define name=tree-view-sub-tree-node
+2026-10-26T04:54:11.265555Z DEBUG explorer_jscore::dom_host: customElements.define name=tree-view-include-fragment
+2026-10-26T04:54:11.265699Z DEBUG explorer_jscore::dom_host: customElements.define name=details-dialog
+2026-10-26T04:54:11.266082Z DEBUG explorer_jscore::dom_host: customElements.define name=file-attachment
+2026-10-26T04:54:11.266189Z DEBUG explorer_jscore::dom_host: customElements.define name=filter-input
+2026-10-26T04:54:11.269959Z DEBUG explorer_jscore::dom_host: customElements.define name=g-emoji
+2026-10-26T04:54:11.270147Z DEBUG explorer_jscore::dom_host: customElements.define name=md-header
+2026-10-26T04:54:11.270197Z DEBUG explorer_jscore::dom_host: customElements.define name=md-bold
+2026-10-26T04:54:11.270249Z DEBUG explorer_jscore::dom_host: customElements.define name=md-italic
+2026-10-26T04:54:11.270288Z DEBUG explorer_jscore::dom_host: customElements.define name=md-quote
+2026-10-26T04:54:11.270329Z DEBUG explorer_jscore::dom_host: customElements.define name=md-code
+2026-10-26T04:54:11.270368Z DEBUG explorer_jscore::dom_host: customElements.define name=md-link
+2026-10-26T04:54:11.270405Z DEBUG explorer_jscore::dom_host: customElements.define name=md-image
+2026-10-26T04:54:11.270443Z DEBUG explorer_jscore::dom_host: customElements.define name=md-unordered-list
+2026-10-26T04:54:11.270481Z DEBUG explorer_jscore::dom_host: customElements.define name=md-ordered-list
+2026-10-26T04:54:11.270537Z DEBUG explorer_jscore::dom_host: customElements.define name=md-task-list
+2026-10-26T04:54:11.270577Z DEBUG explorer_jscore::dom_host: customElements.define name=md-mention
+2026-10-26T04:54:11.270615Z DEBUG explorer_jscore::dom_host: customElements.define name=md-ref
+2026-10-26T04:54:11.270659Z DEBUG explorer_jscore::dom_host: customElements.define name=md-strikethrough
+2026-10-26T04:54:11.270705Z DEBUG explorer_jscore::dom_host: customElements.define name=markdown-toolbar
+2026-10-26T04:54:11.270888Z DEBUG explorer_jscore::dom_host: customElements.define name=task-lists
+2026-10-26T04:54:11.271535Z DEBUG explorer_jscore::dom_host: customElements.define name=text-expander
+2026-10-26T04:54:11.271629Z DEBUG explorer_jscore::dom_host: customElements.define name=typing-effect
+2026-10-26T04:54:11.271714Z DEBUG explorer_jscore::dom_host: customElements.define name=image-crop
+2026-10-26T04:54:11.278695Z DEBUG explorer_core::session::js_glue: module eval fin tab=1 ms=81
+2026-10-26T04:54:11.278771Z DEBUG explorer_core::session::js_glue: module eval… tab=1 name=https://github.githubassets.com/assets/element-registry-06cd2d84777cb424.js
+2026-10-26T04:54:11.349865Z DEBUG explorer_core::session::js_glue: module eval fin tab=1 ms=71
+2026-10-26T04:54:11.349926Z DEBUG explorer_core::session::js_glue: module eval… tab=1 name=https://github.githubassets.com/assets/behaviors-cd496cf4e17e083f.js
+2026-10-26T04:54:11.506162Z DEBUG explorer_jscore::dom_host: customElements.define name=batch-deferred-content
+2026-10-26T04:54:11.604261Z DEBUG explorer_jscore::dom_host: customElements.define name=turbo-frame
+2026-10-26T04:54:11.604345Z DEBUG explorer_jscore::dom_host: customElements.define name=turbo-stream
+2026-10-26T04:54:11.604388Z DEBUG explorer_jscore::dom_host: customElements.define name=turbo-stream-source
+2026-10-26T04:54:11.616617Z DEBUG explorer_jscore::dom_host: customElements.define name=webauthn-get
+2026-10-26T04:54:11.620621Z DEBUG explorer_jscore::dom_host: customElements.define name=sudo-credential-options
+2026-10-26T04:54:11.662337Z DEBUG explorer_jscore::dom_host: customElements.define name=collapsible-sidebar-widget
+2026-10-26T04:54:11.663038Z DEBUG explorer_jscore::dom_host: customElements.define name=sidebar-memex-input
+2026-10-26T04:54:11.669417Z DEBUG explorer_jscore::module: import() dynamique spec="./4f-128d9b1a702b1593.js" referrer="https://github.githubassets.com/assets/wp-runtime-85b402a4998c6482.js"
+2026-10-26T04:54:11.677944Z DEBUG explorer_jscore::module: import() dynamique spec="./chunk-l1-18d79a71714bc7ea.js" referrer="https://github.githubassets.com/assets/wp-runtime-85b402a4998c6482.js"
+2026-10-26T04:54:11.680959Z DEBUG explorer_core::session::js_glue: module eval fin tab=1 ms=331
+2026-10-26T04:54:11.681052Z DEBUG explorer_core::session::js_glue: module eval… tab=1 name=https://github.githubassets.com/assets/marketing-essentials-9b5e122b91cab708.js
+2026-10-26T04:54:11.692545Z DEBUG explorer_core::session::js_glue: module eval fin tab=1 ms=11
+2026-10-26T04:54:11.692642Z DEBUG explorer_core::session::js_glue: module eval… tab=1 name=https://github.githubassets.com/assets/landing-pages-f2bb6789a6f3945d.js
+2026-10-26T04:54:12.798929Z DEBUG explorer_jscore::dom_host: customElements.define name=react-app
+2026-10-26T04:54:14.666609Z DEBUG explorer_core::session::js_glue: module eval fin tab=1 ms=2973
+2026-10-26T04:54:14.666920Z DEBUG explorer_core::session::js_glue: module eval… tab=1 name=https://github.githubassets.com/assets/global-banner-disable-750ad87f36b8e45f.js
+2026-10-26T04:54:14.710288Z DEBUG explorer_core::session::js_glue: module eval fin tab=1 ms=43
+2026-10-26T04:54:14.974517Z DEBUG explorer_core::session::net: spawn dyn import tab=1 url=https://github.githubassets.com/assets/4f-128d9b1a702b1593.js seq=0
+2026-10-26T04:54:14.974608Z DEBUG explorer_core::session::net: dyn import : fetch émis tab=1 url=https://github.githubassets.com/assets/4f-128d9b1a702b1593.js
+2026-10-26T04:54:14.974659Z DEBUG explorer_core::session::net: spawn dyn import tab=1 url=https://github.githubassets.com/assets/chunk-l1-18d79a71714bc7ea.js seq=1
+2026-10-26T04:54:14.974690Z DEBUG explorer_core::session::net: dyn import : fetch émis tab=1 url=https://github.githubassets.com/assets/chunk-l1-18d79a71714bc7ea.js
+2026-10-26T04:54:14.986775Z DEBUG explorer_core::session::net: deliver dyn import tab=1 seq=0 ok=true deps=0
+2026-10-26T04:54:14.986845Z DEBUG explorer_core::session::net: deliver dyn import tab=1 seq=1 ok=true deps=0
+2026-10-26T04:54:17.056391Z  INFO explorer_core::session::apply: apply: cascade ms=1222
+2026-10-26T04:54:17.107754Z  INFO explorer_core::session::apply: apply: boxtree ms=1274
+2026-10-26T04:54:17.172603Z  INFO explorer_core::session::apply: apply: layout ms=1339
+2026-10-26T04:54:17.701042Z  INFO explorer_core::session::apply: apply: repaint ms=1867
+2026-10-26T04:54:17.762054Z DEBUG explorer_jscore::module: import() dynamique spec="./chunk-lazy-element-select-panel-1db988c3b2debb9f.js" referrer="https://github.githubassets.com/assets/wp-runtime-85b402a4998c6482.js"
+2026-10-26T04:54:17.768755Z DEBUG explorer_jscore::module: import() dynamique spec="./chunk-lazy-element-toggle-switch-d84c21582809dda9.js" referrer="https://github.githubassets.com/assets/wp-runtime-85b402a4998c6482.js"
+2026-10-26T04:54:17.776751Z DEBUG explorer_jscore::module: import() dynamique spec="./chunk-lazy-element-cookie-consent-link-f9fd1ccb00a8c36f.js" referrer="https://github.githubassets.com/assets/wp-runtime-85b402a4998c6482.js"
+2026-10-26T04:54:17.786807Z DEBUG explorer_jscore::module: import() dynamique spec="./chunk-dg-9bfcf8075100cf89.js" referrer="https://github.githubassets.com/assets/wp-runtime-85b402a4998c6482.js"
+2026-10-26T04:54:17.793579Z DEBUG explorer_jscore::module: import() dynamique spec="./chunk-lazy-element-fullstory-capture-15d50c217bc93073.js" referrer="https://github.githubassets.com/assets/wp-runtime-85b402a4998c6482.js"
+2026-10-26T04:54:17.800253Z DEBUG explorer_jscore::module: import() dynamique spec="./chunk-lazy-element-ghcc-consent-47aaf7da7816fc53.js" referrer="https://github.githubassets.com/assets/wp-runtime-85b402a4998c6482.js"
+2026-10-26T04:54:17.806738Z DEBUG explorer_jscore::module: import() dynamique spec="./chunk-lazy-element-webauthn-get-594ac3b363fd9c1e.js" referrer="https://github.githubassets.com/assets/wp-runtime-85b402a4998c6482.js"
+2026-10-26T04:54:17.819841Z DEBUG explorer_jscore::module: import() dynamique spec="./g6m-c6c2e85d4cbe6e0f.js" referrer="https://github.githubassets.com/assets/wp-runtime-85b402a4998c6482.js"
+2026-10-26T04:54:17.829150Z DEBUG explorer_jscore::module: import() dynamique spec="./chunk-lazy-react-partial-app-install-banner-partial-ed58f1b49a2d8d01.js" referrer="https://github.githubassets.com/assets/wp-runtime-85b402a4998c6482.js"
+2026-10-26T04:54:17.836648Z DEBUG explorer_jscore::module: import() dynamique spec="./gw-4bf343b417f9ec19.js" referrer="https://github.githubassets.com/assets/wp-runtime-85b402a4998c6482.js"
+2026-10-26T04:54:17.845829Z DEBUG explorer_jscore::module: import() dynamique spec="./chunk-lazy-react-partial-keyboard-shortcuts-dialog-6d857a36d55539c5.js" referrer="https://github.githubassets.com/assets/wp-runtime-85b402a4998c6482.js"
+2026-10-26T04:54:17.853071Z DEBUG explorer_jscore::module: import() dynamique spec="./hiz-0c55010ddab90e83.js" referrer="https://github.githubassets.com/assets/wp-runtime-85b402a4998c6482.js"
+2026-10-26T04:54:17.855942Z DEBUG explorer_jscore::module: import() dynamique spec="./e2-0b5115974c072a51.js" referrer="https://github.githubassets.com/assets/wp-runtime-85b402a4998c6482.js"
+2026-10-26T04:54:17.866069Z DEBUG explorer_jscore::module: import() dynamique spec="./chunk-lazy-react-partial-marketing-footer-7d6fb2ccc544828f.js" referrer="https://github.githubassets.com/assets/wp-runtime-85b402a4998c6482.js"
+2026-10-26T04:54:17.868864Z DEBUG explorer_jscore::module: import() dynamique spec="./ff-d6dad91563c22a66.js" referrer="https://github.githubassets.com/assets/wp-runtime-85b402a4998c6482.js"
+2026-10-26T04:54:17.878401Z DEBUG explorer_jscore::module: import() dynamique spec="./chunk-lazy-react-partial-marketing-global-banner-65aef68527012d32.js" referrer="https://github.githubassets.com/assets/wp-runtime-85b402a4998c6482.js"
+2026-10-26T04:54:17.882322Z DEBUG explorer_jscore::module: import() dynamique spec="./skl-90fea02d318d647f.js" referrer="https://github.githubassets.com/assets/wp-runtime-85b402a4998c6482.js"
+2026-10-26T04:54:17.884536Z DEBUG explorer_jscore::module: import() dynamique spec="./z7-54a4e2eade1aa26b.js" referrer="https://github.githubassets.com/assets/wp-runtime-85b402a4998c6482.js"
+2026-10-26T04:54:17.888841Z DEBUG explorer_jscore::module: import() dynamique spec="./a6j-32ec4660665b36c1.js" referrer="https://github.githubassets.com/assets/wp-runtime-85b402a4998c6482.js"
+2026-10-26T04:54:17.895511Z DEBUG explorer_jscore::module: import() dynamique spec="./chunk-lazy-react-partial-marketing-header-b4346dea7b2f491a.js" referrer="https://github.githubassets.com/assets/wp-runtime-85b402a4998c6482.js"
+2026-10-26T04:54:17.902035Z DEBUG explorer_jscore::module: import() dynamique spec="./chunk-xvz-afdb8ae9dfb2e6cb.js" referrer="https://github.githubassets.com/assets/wp-runtime-85b402a4998c6482.js"
+2026-10-26T04:54:17.908655Z DEBUG explorer_jscore::module: import() dynamique spec="./chunk-bl-16891fdfed025b0e.js" referrer="https://github.githubassets.com/assets/wp-runtime-85b402a4998c6482.js"
+2026-10-26T04:54:18.131649Z DEBUG explorer_core::session::net: spawn dyn import tab=1 url=https://github.githubassets.com/assets/chunk-lazy-element-select-panel-1db988c3b2debb9f.js seq=2
+2026-10-26T04:54:18.131732Z DEBUG explorer_core::session::net: dyn import : fetch émis tab=1 url=https://github.githubassets.com/assets/chunk-lazy-element-select-panel-1db988c3b2debb9f.js
+2026-10-26T04:54:18.131781Z DEBUG explorer_core::session::net: spawn dyn import tab=1 url=https://github.githubassets.com/assets/chunk-lazy-element-toggle-switch-d84c21582809dda9.js seq=3
+2026-10-26T04:54:18.131810Z DEBUG explorer_core::session::net: dyn import : fetch émis tab=1 url=https://github.githubassets.com/assets/chunk-lazy-element-toggle-switch-d84c21582809dda9.js
+2026-10-26T04:54:18.131839Z DEBUG explorer_core::session::net: spawn dyn import tab=1 url=https://github.githubassets.com/assets/chunk-lazy-element-cookie-consent-link-f9fd1ccb00a8c36f.js seq=4
+2026-10-26T04:54:18.131876Z DEBUG explorer_core::session::net: dyn import : fetch émis tab=1 url=https://github.githubassets.com/assets/chunk-lazy-element-cookie-consent-link-f9fd1ccb00a8c36f.js
+2026-10-26T04:54:18.131919Z DEBUG explorer_core::session::net: spawn dyn import tab=1 url=https://github.githubassets.com/assets/chunk-dg-9bfcf8075100cf89.js seq=5
+2026-10-26T04:54:18.131979Z DEBUG explorer_core::session::net: dyn import : fetch émis tab=1 url=https://github.githubassets.com/assets/chunk-dg-9bfcf8075100cf89.js
+2026-10-26T04:54:18.132015Z DEBUG explorer_core::session::net: spawn dyn import tab=1 url=https://github.githubassets.com/assets/chunk-lazy-element-fullstory-capture-15d50c217bc93073.js seq=6
+2026-10-26T04:54:18.132058Z DEBUG explorer_core::session::net: dyn import : fetch émis tab=1 url=https://github.githubassets.com/assets/chunk-lazy-element-fullstory-capture-15d50c217bc93073.js
+2026-10-26T04:54:18.132098Z DEBUG explorer_core::session::net: spawn dyn import tab=1 url=https://github.githubassets.com/assets/chunk-lazy-element-ghcc-consent-47aaf7da7816fc53.js seq=7
+2026-10-26T04:54:18.132147Z DEBUG explorer_core::session::net: dyn import : fetch émis tab=1 url=https://github.githubassets.com/assets/chunk-lazy-element-ghcc-consent-47aaf7da7816fc53.js
+2026-10-26T04:54:18.132187Z DEBUG explorer_core::session::net: spawn dyn import tab=1 url=https://github.githubassets.com/assets/chunk-lazy-element-webauthn-get-594ac3b363fd9c1e.js seq=8
+2026-10-26T04:54:18.132227Z DEBUG explorer_core::session::net: dyn import : fetch émis tab=1 url=https://github.githubassets.com/assets/chunk-lazy-element-webauthn-get-594ac3b363fd9c1e.js
+2026-10-26T04:54:18.132253Z DEBUG explorer_core::session::net: spawn dyn import tab=1 url=https://github.githubassets.com/assets/g6m-c6c2e85d4cbe6e0f.js seq=9
+2026-10-26T04:54:18.132286Z DEBUG explorer_core::session::net: dyn import : fetch émis tab=1 url=https://github.githubassets.com/assets/g6m-c6c2e85d4cbe6e0f.js
+2026-10-26T04:54:18.132310Z DEBUG explorer_core::session::net: spawn dyn import tab=1 url=https://github.githubassets.com/assets/chunk-lazy-react-partial-app-install-banner-partial-ed58f1b49a2d8d01.js seq=10
+2026-10-26T04:54:18.132338Z DEBUG explorer_core::session::net: dyn import : fetch émis tab=1 url=https://github.githubassets.com/assets/chunk-lazy-react-partial-app-install-banner-partial-ed58f1b49a2d8d01.js
+2026-10-26T04:54:18.132358Z DEBUG explorer_core::session::net: spawn dyn import tab=1 url=https://github.githubassets.com/assets/gw-4bf343b417f9ec19.js seq=11
+2026-10-26T04:54:18.132390Z DEBUG explorer_core::session::net: dyn import : fetch émis tab=1 url=https://github.githubassets.com/assets/gw-4bf343b417f9ec19.js
+2026-10-26T04:54:18.132415Z DEBUG explorer_core::session::net: spawn dyn import tab=1 url=https://github.githubassets.com/assets/chunk-lazy-react-partial-keyboard-shortcuts-dialog-6d857a36d55539c5.js seq=12
+2026-10-26T04:54:18.132459Z DEBUG explorer_core::session::net: dyn import : fetch émis tab=1 url=https://github.githubassets.com/assets/chunk-lazy-react-partial-keyboard-shortcuts-dialog-6d857a36d55539c5.js
+2026-10-26T04:54:18.132498Z DEBUG explorer_core::session::net: spawn dyn import tab=1 url=https://github.githubassets.com/assets/hiz-0c55010ddab90e83.js seq=13
+2026-10-26T04:54:18.132537Z DEBUG explorer_core::session::net: dyn import : fetch émis tab=1 url=https://github.githubassets.com/assets/hiz-0c55010ddab90e83.js
+2026-10-26T04:54:18.132573Z DEBUG explorer_core::session::net: spawn dyn import tab=1 url=https://github.githubassets.com/assets/e2-0b5115974c072a51.js seq=14
+2026-10-26T04:54:18.132619Z DEBUG explorer_core::session::net: dyn import : fetch émis tab=1 url=https://github.githubassets.com/assets/e2-0b5115974c072a51.js
+2026-10-26T04:54:18.132656Z DEBUG explorer_core::session::net: spawn dyn import tab=1 url=https://github.githubassets.com/assets/chunk-lazy-react-partial-marketing-footer-7d6fb2ccc544828f.js seq=15
+2026-10-26T04:54:18.132700Z DEBUG explorer_core::session::net: dyn import : fetch émis tab=1 url=https://github.githubassets.com/assets/chunk-lazy-react-partial-marketing-footer-7d6fb2ccc544828f.js
+2026-10-26T04:54:18.132737Z DEBUG explorer_core::session::net: spawn dyn import tab=1 url=https://github.githubassets.com/assets/ff-d6dad91563c22a66.js seq=16
+2026-10-26T04:54:18.132778Z DEBUG explorer_core::session::net: dyn import : fetch émis tab=1 url=https://github.githubassets.com/assets/ff-d6dad91563c22a66.js
+2026-10-26T04:54:18.132802Z DEBUG explorer_core::session::net: spawn dyn import tab=1 url=https://github.githubassets.com/assets/chunk-lazy-react-partial-marketing-global-banner-65aef68527012d32.js seq=17
+2026-10-26T04:54:18.132832Z DEBUG explorer_core::session::net: dyn import : fetch émis tab=1 url=https://github.githubassets.com/assets/chunk-lazy-react-partial-marketing-global-banner-65aef68527012d32.js
+2026-10-26T04:54:18.132851Z DEBUG explorer_core::session::net: spawn dyn import tab=1 url=https://github.githubassets.com/assets/skl-90fea02d318d647f.js seq=18
+2026-10-26T04:54:18.132884Z DEBUG explorer_core::session::net: dyn import : fetch émis tab=1 url=https://github.githubassets.com/assets/skl-90fea02d318d647f.js
+2026-10-26T04:54:18.132904Z DEBUG explorer_core::session::net: spawn dyn import tab=1 url=https://github.githubassets.com/assets/z7-54a4e2eade1aa26b.js seq=19
+2026-10-26T04:54:18.132927Z DEBUG explorer_core::session::net: dyn import : fetch émis tab=1 url=https://github.githubassets.com/assets/z7-54a4e2eade1aa26b.js
+2026-10-26T04:54:18.132944Z DEBUG explorer_core::session::net: spawn dyn import tab=1 url=https://github.githubassets.com/assets/a6j-32ec4660665b36c1.js seq=20
+2026-10-26T04:54:18.132969Z DEBUG explorer_core::session::net: dyn import : fetch émis tab=1 url=https://github.githubassets.com/assets/a6j-32ec4660665b36c1.js
+2026-10-26T04:54:18.132988Z DEBUG explorer_core::session::net: spawn dyn import tab=1 url=https://github.githubassets.com/assets/chunk-lazy-react-partial-marketing-header-b4346dea7b2f491a.js seq=21
+2026-10-26T04:54:18.133013Z DEBUG explorer_core::session::net: dyn import : fetch émis tab=1 url=https://github.githubassets.com/assets/chunk-lazy-react-partial-marketing-header-b4346dea7b2f491a.js
+2026-10-26T04:54:18.133031Z DEBUG explorer_core::session::net: spawn dyn import tab=1 url=https://github.githubassets.com/assets/chunk-xvz-afdb8ae9dfb2e6cb.js seq=22
+2026-10-26T04:54:18.133056Z DEBUG explorer_core::session::net: dyn import : fetch émis tab=1 url=https://github.githubassets.com/assets/chunk-xvz-afdb8ae9dfb2e6cb.js
+2026-10-26T04:54:18.133074Z DEBUG explorer_core::session::net: spawn dyn import tab=1 url=https://github.githubassets.com/assets/chunk-bl-16891fdfed025b0e.js seq=23
+2026-10-26T04:54:18.133099Z DEBUG explorer_core::session::net: dyn import : fetch émis tab=1 url=https://github.githubassets.com/assets/chunk-bl-16891fdfed025b0e.js
+2026-10-26T04:54:20.377436Z  WARN explorer_core::session::apply: journal DOM rejeté → repli re-parse (ADR-0025) tab=1 why=UnmappedKey
+2026-10-26T04:54:21.772450Z  INFO explorer_core::session::apply: apply: cascade ms=1339
+2026-10-26T04:54:21.838301Z  INFO explorer_core::session::apply: apply: boxtree ms=1405
+2026-10-26T04:54:21.885408Z  INFO explorer_core::session::apply: apply: layout ms=1452
+2026-10-26T04:54:22.805516Z  INFO explorer_core::session::apply: apply: repaint ms=2372
+2026-10-26T04:54:22.823496Z DEBUG explorer_core::session::net: deliver dyn import tab=1 seq=4 ok=true deps=0
+2026-10-26T04:54:22.823575Z DEBUG explorer_core::session::net: deliver dyn import tab=1 seq=3 ok=true deps=0
+2026-10-26T04:54:22.823611Z DEBUG explorer_core::session::net: deliver dyn import tab=1 seq=7 ok=true deps=0
+2026-10-26T04:54:22.823833Z DEBUG explorer_core::session::net: deliver dyn import tab=1 seq=5 ok=true deps=0
+2026-10-26T04:54:22.823884Z DEBUG explorer_core::session::net: deliver dyn import tab=1 seq=6 ok=true deps=0
+2026-10-26T04:54:22.824117Z DEBUG explorer_core::session::net: deliver dyn import tab=1 seq=2 ok=true deps=0
+2026-10-26T04:54:22.824147Z DEBUG explorer_core::session::net: deliver dyn import tab=1 seq=8 ok=true deps=0
+2026-10-26T04:54:22.824210Z DEBUG explorer_core::session::net: deliver dyn import tab=1 seq=9 ok=true deps=0
+2026-10-26T04:54:22.824451Z DEBUG explorer_core::session::net: deliver dyn import tab=1 seq=13 ok=true deps=0
+2026-10-26T04:54:22.824491Z DEBUG explorer_core::session::net: deliver dyn import tab=1 seq=22 ok=true deps=0
+2026-10-26T04:54:22.824538Z DEBUG explorer_core::session::net: deliver dyn import tab=1 seq=18 ok=true deps=0
+2026-10-26T04:54:22.824591Z DEBUG explorer_core::session::net: deliver dyn import tab=1 seq=16 ok=true deps=0
+2026-10-26T04:54:22.824624Z DEBUG explorer_core::session::net: deliver dyn import tab=1 seq=14 ok=true deps=0
+2026-10-26T04:54:22.824665Z DEBUG explorer_core::session::net: deliver dyn import tab=1 seq=19 ok=true deps=0
+2026-10-26T04:54:22.824701Z DEBUG explorer_core::session::net: deliver dyn import tab=1 seq=11 ok=true deps=0
+2026-10-26T04:54:22.824788Z DEBUG explorer_core::session::net: deliver dyn import tab=1 seq=20 ok=true deps=0
+2026-10-26T04:54:22.824867Z DEBUG explorer_core::session::net: deliver dyn import tab=1 seq=10 ok=true deps=7
+2026-10-26T04:54:22.824958Z DEBUG explorer_core::session::net: deliver dyn import tab=1 seq=15 ok=true deps=6
+2026-10-26T04:54:22.825117Z DEBUG explorer_core::session::net: deliver dyn import tab=1 seq=12 ok=true deps=7
+2026-10-26T04:54:22.825330Z DEBUG explorer_core::session::net: deliver dyn import tab=1 seq=21 ok=true deps=7
+2026-10-26T04:54:22.825424Z DEBUG explorer_core::session::net: deliver dyn import tab=1 seq=17 ok=true deps=6
+2026-10-26T04:54:22.825459Z DEBUG explorer_core::session::net: deliver dyn import tab=1 seq=23 ok=true deps=0
+2026-10-26T04:56:00.426990Z DEBUG explorer_jscore::module: import() dynamique spec="https://github.githubassets.com/assets/chunk-lazy-react-partial-marketing-header-b4346dea7b2f491a.js" referrer=""

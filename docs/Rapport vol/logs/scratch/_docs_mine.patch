@@ -1,0 +1,112 @@
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index 5f2eb62..d9d0075 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -359,6 +359,42 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
+   Vérifié terrain : Wikipedia
+   `doc_h=4085` → `scroll_y=
+   3185.29` exact, retour 0.
++- **Étape 130 — empreinte
++  mémoire par réservoir**
++  (`explorer-core/-api/-cli` —
++  constat « station ~1,4 Gio »
++  sous sites réels) :
++  `Session::mem_report(tab) →
++  Option<MemReport>` attribue la
++  page vivante (`dom_nodes`
++  `live_count`, `layout_boxes`,
++  `display_items`, octets exacts
++  `frame`/`png`, bitmaps
++  `DecodedImage` dé-dupliquées
++  par `Arc::as_ptr`, corps
++  `bg_bodies`, `heap_stats` du
++  moteur JS) **et les pages
++  gelées bfcache** — chaque
++  snapshot gèle un moteur JS
++  entier (jusqu'à
++  `js_mem_limit_mib`), premier
++  réservoir suspecté :
++  `bfcache_pages` = 4 → 5 états
++  de page par onglet. Surface :
++  `GET /api/tabs/{id}/mem` (JSON)
++  + `explorer-cli mem <url>`
++  (tableau post-nav). Honnêteté :
++  `_bytes` = octets mesurés,
++  `_nodes`/`_boxes` = comptes ;
++  non mesurés documentés (caches
++  fontes, `prev_styles`, miroir
++  DOM jscore, registres
++  `idb`/`caches` C72 hors heap).
++  Régression
++  `mem_report_attributes_live_and
++  _bfcache` (rapport peuplé,
++  snapshot compté, inconnu →
++  `None`).
+ - **JS-C70 —
+   `Blob`/`File`/`FileReader` +
+   `URL.createObjectURL`**
+diff --git a/docs/interface-equipes.md b/docs/interface-equipes.md
+index d1b650c..f61595f 100644
+--- a/docs/interface-equipes.md
++++ b/docs/interface-equipes.md
+@@ -308,6 +308,7 @@ ni l'un ni l'autre. Variante arrêtée (pull, cohérente avec
+ | 2026-10-23 | `explorer-daemon`/`explorer-cli` — **`EXPLORER_JS_OPS`** (étape 124, suite mesurée du vol `ef087e1`) | **Le réglage 123 a déplacé le mur, pas franchi l'espace** : à `EXPLORER_JS_MEM_MIB=2048`, le PoW `SG_SS` meurt désormais `RangeError: script execution limit exceeded` (budget ops 5 M) au lieu de `heap memory limit` — 1 erreur au lieu de 2, le heap n'est plus le premier coupable. Exposition symétrique : `EXPLORER_JS_OPS` (ops absolues) dans `DaemonConfig`/`session_config` + `session_from_env`, tracée ; `0` = illimité explicite → `u64::MAX` (`op_limit=0` = mort immédiate — divergence de sémantique absorbée localement à l'env). Aucune retouche à la couture `js_ops`/`set_budget`/`set_op_limit` existante ; même cave diagnostic — `0` rend un `while(1)` permanent possible, réglage de vol uniquement. **Mesure terrain complète** : heap 2 Gio + ops 5 M → `emsg=SG_REL` (même issue, cause déplacée) ; l'espace `Error: b` exige désormais `EXPLORER_JS_MEM_MIB=2048 EXPLORER_JS_OPS=<grand>` au prochain vol. | NAV (interne) | livré |
+ | 2026-10-23 | `explorer-daemon`/`explorer-cli`/`scripts` — **radar corpus ≥1200 px** (étape 129, verdict ordonné post-clôture `Error: b`) | **Infrastructure de vérité, pas un réglage** : chaque livraison future sera mesurée sous conditions réelles, pas seulement en unitaire. `EXPLORER_VIEWPORT=WxH` (ex. `1366x900` — même format que l'argument `LxH` de `shot`) lu par daemon (`DaemonConfig.viewport` → `session_config`, `info!`) et CLI (`session_from_env`, `eprintln`) ; défaut `SessionConfig.viewport` 1024×768 inchangé, parse invalide → repli silencieux. `site_smoke.ps1` phase 2 : viewport 1366×900 par onglet (`POST /viewport`) + env côté shots, `doc_h`/`doc_h_clamped` lus de la réponse `navigate` (`!` au verdict), grille de sondes x≤1300/y≤864, **scroll réel prouvé** — `dy=doc_h` doit atteindre `doc_h−900` sinon `scroll:<y>/<max>:FIGÉ` au verdict. La suspicion `scroll_y=0.0` du re-census github devient une mesure automatique site par site. **Vérifié terrain** : Wikipedia → `doc_h=4085`, `scroll_y=3185.29` (= doc_h−900 exact), retour 0 — mécanique saine, le constat github serait page-spécifique (attend le nightly). | NAV (interne) | livré |
+ | 2026-10-23 | `explorer-css`/`explorer-layout` — **R-91 : `@layer` + `%` des positionnés** (hero github : colonne droite hors viewport, CTA coupé) | **Correctif comportemental, API additive seule** : nouveau variant `AtKind::Layer` (`parser`) — attention consommateurs `net_items.rs` : un `match` exhaustif sur `AtKind` doit ignorer ce variant, les `if let` existants sont sains. (a) `@layer` : GitHub enveloppe tout son reset Primer dans `@layer primer-css-base{…}` — bloc avalé entier → `*{box-sizing:border-box}`, `body{margin:0}`, resets forms perdus. Table chemin→rang à l'ordre de première déclaration (`@layer a, b;`, `a.b`, anonymes, imbriqués, sous `@media`) ; clé `(rank, layer, spec, order)` insérée entre origine et spécificité — hors-layer bat tous les layers en normal, `!important` renverse (premier layer gagnant). (b) `resolve_absolutes` passait la border box calculée (`width:%`+châssis) comme `cb_w` à `layout_block` → le % se re-résolvait dessus (1216→1264→1312) ; `cb_w = target.width` quand `width` non-auto. **Observable NAV** : tout site à reset/design-system en `@layer` (Primer/github, Bootstrap 5.3+, Tailwind v4…) récupère ses règles de base — `box-sizing`, marges `body`, tailles de formulaires changent ; rects absolus `width:%`+padding/bordure corrigés (~double-châssis en moins). **Mesuré** : `.lp-IntroHero` 1312→1216, CTA dans la frame, `body{margin:0}` actif. Reliquat : `revert-layer` garde son repli documenté (≈`unset` — ne remonte pas à la couche précédente) ; `@import … layer()` non géré (absent du terrain). | PIPE (R-91) | livré |
++| 2026-10-23 | `explorer-core`/`explorer-api`/`explorer-cli` — **étape 130 : empreinte mémoire par réservoir** (constat « station ~1,4 Gio » sous sites réels) | **Outil de mesure, aucun contrat PIPE touché** : `Session::mem_report(tab) → Option<MemReport>` attribue page vivante + pages gelées bfcache — `dom_nodes` (`Dom::live_count`), `layout_boxes`, `display_items`, octets exacts `frame`/`png`, bitmaps `DecodedImage` **dé-dupliquées par `Arc::as_ptr`** (même `Arc` dans `images.*` + display list + caches = une fois), corps `bg_bodies`, `heap_stats` du moteur vivant **et des gelés** (`bfcache_js_heap_bytes` — le réservoir suspecté : `bfcache_pages` = 4 → jusqu'à 5 heaps JS par onglet). Surface : `GET /api/tabs/{id}/mem` + `explorer-cli mem <url>`. **Honnêteté de mesure** : `_bytes` = octets mesurés, `_nodes`/`_boxes` = comptes (PIPE n'expose pas de capacité — non inventée) ; documentés non mesurés : caches de fontes, `prev_styles`, miroir DOM jscore, registres `idb`/`caches` (JS-C72 — `Rc` injectables vivant hors `heap_stats`, réservoir de seconde mesure). Régression `mem_report_attributes_live_and_bfcache`. | NAV (interne) | livré |
+ 
+ ## Phase terrain humain 2026-10-23 — anomalies dispatchées
+ 
+diff --git a/docs/roadmap-equipe-navigateur.md b/docs/roadmap-equipe-navigateur.md
+index 3efeaad..5b6d397 100644
+--- a/docs/roadmap-equipe-navigateur.md
++++ b/docs/roadmap-equipe-navigateur.md
+@@ -2812,6 +2812,48 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
+   mécanique est saine, le constat
+   github serait page-spécifique.
+ 
++- [x] **Étape 130. Empreinte
++  mémoire par réservoir** (file
++  NAV — constat « station
++  ~1,4 Gio » sous sites réels).
++  `Session::mem_report(tab) →
++  Option<MemReport>` mesure la
++  page vivante **et les pages
++  gelées bfcache** : `dom_nodes`
++  (`live_count`), `layout_boxes`,
++  `display_items`, `frame`/`png`
++  octets exacts, bitmaps
++  `DecodedImage` **dé-dupliquées
++  par `Arc::as_ptr`** (même image
++  dans `images.*` + display list
++  + caches = une fois), corps
++  `bg_bodies`, et `heap_stats`
++  du moteur vivant **comme des
++  gelés** — le premier réservoir
++  suspecté : `bfcache_pages` = 4
++  → 5 états de page par onglet,
++  chaque snapshot gardant un
++  heap jusqu'à `js_mem_limit_mib`.
++  Surface : `GET /api/tabs/{id}/
++  mem` (JSON sérialisé) +
++  `explorer-cli mem <url>`
++  (tableau post-nav + grâce).
++  **Honnêteté** : `_bytes` =
++  mesuré, `_nodes`/`_boxes` =
++  comptes (pas d'accesseur de
++  capacité PIPE — aucune touche
++  domaine) ; non mesurés
++  documentés : caches de fontes,
++  `prev_styles`, miroir DOM
++  jscore, registres
++  `idb`/`caches` (C72 — `Rc`
++  injectables hors heap).
++  Régression
++  `mem_report_attributes_live_and
++  _bfcache` (rapport peuplé,
++  snapshot compté, onglet
++  inconnu → `None`).
++
+ - [ ] **Écarts terrain — vol humain
+   22/10 (release `39ab821`, FFI)** :
+   second run humain — trois constats

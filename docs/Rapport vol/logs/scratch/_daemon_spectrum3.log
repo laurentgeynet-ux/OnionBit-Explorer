@@ -1,0 +1,2 @@
+explorer-daemon : panic panicked at crates\explorer-jscore\src\dom.rs:1896:22:
+index out of bounds: the len is 507 but the index is 607 @ crates\explorer-jscore\src\dom.rs:1896:22

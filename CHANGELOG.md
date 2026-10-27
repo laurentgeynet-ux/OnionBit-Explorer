@@ -1,3 +1,11 @@
+# Changelog
+
+Toutes les modifications notables de ce projet sont consignées ici.
+
+Le format suit [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/)
+et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
+
+## [Unreleased]
 
 - **Vol 32 — héros effondrés en colonne
   étroite** (`explorer-layout`) — deux
@@ -16,14 +24,6 @@
   le minimum automatique (min-content,
   §4.5 ; `min-width` spécifié fait foi)
   — `flex_shrink_plancher_min_content`.
-# Changelog
-
-Toutes les modifications notables de ce projet sont consignées ici.
-
-Le format suit [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/)
-et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
-
-## [Unreleased]
 
 - **JS-C134 — récursions non
   bornées : drops AST + walk JSON**

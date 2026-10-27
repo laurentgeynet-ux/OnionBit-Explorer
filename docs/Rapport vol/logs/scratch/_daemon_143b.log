@@ -1,0 +1,953 @@
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[settle] reactions=3
+[settle-skip] already settled
+[settle-skip] already settled
+[settle-skip] already settled
+[settle-skip] already settled
+[settle-skip] already settled
+[settle-skip] already settled
+[settle-skip] already settled
+[settle-skip] already settled
+[settle-skip] already settled
+[settle-skip] already settled
+[settle-skip] already settled
+[settle-skip] already settled
+[settle-skip] already settled
+[settle-skip] already settled
+[settle-skip] already settled
+[settle-skip] already settled
+[settle-skip] already settled
+[settle-skip] already settled
+[settle-skip] already settled
+[settle-skip] already settled
+[settle-skip] already settled
+[settle-skip] already settled
+[settle-skip] already settled
+[settle-skip] already settled
+[settle-skip] already settled
+[settle-skip] already settled
+[settle-skip] already settled
+[settle-skip] already settled
+[settle-skip] already settled
+[settle-skip] already settled
+[settle-skip] already settled
+[settle-skip] already settled
+[settle-skip] already settled
+[settle-skip] already settled
+[settle-skip] already settled
+[settle-skip] already settled
+[settle-skip] already settled
+[settle-skip] already settled
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[import-deliver] seq=0 pending=true ctx=0
+[import-resolve] seq=0 reactions=1
+[settle] reactions=1
+[import-deliver] seq=1 pending=true ctx=0
+[import-resolve] seq=1 reactions=1
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[settle-skip] already settled
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[settle-skip] already settled
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=2
+[mt-run] reaction-ok ctx=0
+[settle-skip] already settled
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle-skip] already settled
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=13
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[settle] reactions=9
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[settle-skip] already settled
+[settle-skip] already settled
+[settle-skip] already settled
+[settle] reactions=1
+[settle-skip] already settled
+[settle-skip] already settled
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[settle-skip] already settled
+[settle-skip] already settled
+[mt-run] reaction-ok ctx=0
+[import-deliver] seq=3 pending=true ctx=0
+[import-resolve] seq=3 reactions=1
+[settle] reactions=1
+[import-deliver] seq=18 pending=true ctx=0
+[import-resolve] seq=18 reactions=1
+[settle] reactions=1
+[import-deliver] seq=4 pending=true ctx=0
+[import-resolve] seq=4 reactions=1
+[settle] reactions=1
+[import-deliver] seq=7 pending=true ctx=0
+[import-resolve] seq=7 reactions=1
+[settle] reactions=1
+[import-deliver] seq=13 pending=true ctx=0
+[import-resolve] seq=13 reactions=1
+[settle] reactions=1
+[import-deliver] seq=9 pending=true ctx=0
+[import-resolve] seq=9 reactions=1
+[settle] reactions=1
+[settle] reactions=1
+[settle-skip] already settled
+[settle-skip] already settled
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[settle-skip] already settled
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[settle-skip] already settled
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[settle-skip] already settled
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[settle-skip] already settled
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[settle-skip] already settled
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[settle-skip] already settled
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle-skip] already settled
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle-skip] already settled
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle-skip] already settled
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle-skip] already settled
+[mt-run] reaction-ok ctx=0
+[settle] reactions=2
+[mt-run] reaction-ok ctx=0
+[settle-skip] already settled
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle-skip] already settled
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle-skip] already settled
+[mt-run] reaction-ok ctx=0
+[settle-skip] already settled
+[mt-run] reaction-ok ctx=0
+[settle-skip] already settled
+[import-deliver] seq=5 pending=true ctx=0
+[import-resolve] seq=5 reactions=1
+[settle] reactions=1
+[settle] reactions=1
+[settle-skip] already settled
+[settle-skip] already settled
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[settle-skip] already settled
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle-skip] already settled
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[import-deliver] seq=8 pending=true ctx=0
+[import-resolve] seq=8 reactions=1
+[settle] reactions=1
+[import-deliver] seq=22 pending=true ctx=0
+[import-resolve] seq=22 reactions=1
+[settle] reactions=1
+[import-deliver] seq=6 pending=true ctx=0
+[import-resolve] seq=6 reactions=1
+[settle] reactions=1
+[import-deliver] seq=2 pending=true ctx=0
+[import-resolve] seq=2 reactions=1
+[settle] reactions=1
+[import-deliver] seq=14 pending=true ctx=0
+[import-resolve] seq=14 reactions=1
+[settle] reactions=1
+[import-deliver] seq=11 pending=true ctx=0
+[import-resolve] seq=11 reactions=1
+[settle] reactions=1
+[import-deliver] seq=19 pending=true ctx=0
+[import-resolve] seq=19 reactions=1
+[settle] reactions=1
+[import-deliver] seq=16 pending=true ctx=0
+[import-resolve] seq=16 reactions=1
+[settle] reactions=1
+[import-deliver] seq=20 pending=true ctx=0
+[import-resolve] seq=20 reactions=1
+[settle] reactions=1
+[import-deliver] seq=15 pending=true ctx=0
+[import-resolve] seq=15 reactions=1
+[settle] reactions=1
+[import-deliver] seq=12 pending=true ctx=0
+[import-resolve] seq=12 reactions=1
+[settle] reactions=1
+[import-deliver] seq=17 pending=true ctx=0
+[import-resolve] seq=17 reactions=1
+[settle] reactions=1
+[import-deliver] seq=10 pending=true ctx=0
+[import-resolve] seq=10 reactions=1
+[settle] reactions=1
+[import-deliver] seq=21 pending=true ctx=0
+[import-resolve] seq=21 reactions=1
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[settle-skip] already settled
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[settle-skip] already settled
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[settle-skip] already settled
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[settle-skip] already settled
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[settle-skip] already settled
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[settle-skip] already settled
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[settle-skip] already settled
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[settle-skip] already settled
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[settle-skip] already settled
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[settle-skip] already settled
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[settle-skip] already settled
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[settle-skip] already settled
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[settle-skip] already settled
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[settle-skip] already settled
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle-skip] already settled
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle-skip] already settled
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle-skip] already settled
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle-skip] already settled
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle-skip] already settled
+[mt-run] reaction-ok ctx=0
+[settle] reactions=2
+[mt-run] reaction-ok ctx=0
+[settle-skip] already settled
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle-skip] already settled
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle-skip] already settled
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle-skip] already settled
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle-skip] already settled
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle-skip] already settled
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle-skip] already settled
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle-skip] already settled
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle-skip] already settled
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle-skip] already settled
+[mt-run] reaction-ok ctx=0
+[settle-skip] already settled
+[mt-run] reaction-ok ctx=0
+[settle-skip] already settled
+[mt-run] reaction-ok ctx=0
+[settle-skip] already settled
+[mt-run] reaction-ok ctx=0
+[settle-skip] already settled
+[mt-run] reaction-ok ctx=0
+[settle-skip] already settled
+[mt-run] reaction-ok ctx=0
+[settle-skip] already settled
+[mt-run] reaction-ok ctx=0
+[settle-skip] already settled
+[mt-run] reaction-ok ctx=0
+[settle-skip] already settled
+[import-deliver] seq=23 pending=true ctx=0
+[import-resolve] seq=23 reactions=1
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[settle-skip] already settled
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle-skip] already settled
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle-skip] already settled
+[import-deliver] seq=0 pending=true ctx=0
+[import-resolve] seq=0 reactions=1
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle-skip] already settled
+[import-deliver] seq=1 pending=true ctx=0
+[import-resolve] seq=1 reactions=1
+[settle] reactions=1
+[import-deliver] seq=4 pending=true ctx=0
+[import-resolve] seq=4 reactions=1
+[settle] reactions=1
+[import-deliver] seq=3 pending=true ctx=0
+[import-resolve] seq=3 reactions=1
+[settle] reactions=1
+[import-deliver] seq=2 pending=true ctx=0
+[import-resolve] seq=2 reactions=1
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle-skip] already settled
+[mt-run] reaction-ok ctx=0
+[settle-skip] already settled
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[settle-skip] already settled
+[mt-run] reaction-ok ctx=0
+[settle-skip] already settled
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[settle-skip] already settled
+[mt-run] reaction-ok ctx=0
+[import-deliver] seq=5 pending=true ctx=0
+[import-resolve] seq=5 reactions=1
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[settle-skip] already settled
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-rej ctx=0
+[settle] reactions=1
+[mt-run] reaction-rej ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[import-deliver] seq=6 pending=true ctx=0
+[import-resolve] seq=6 reactions=1
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[settle-skip] already settled
+[mt-run] reaction-ok ctx=0

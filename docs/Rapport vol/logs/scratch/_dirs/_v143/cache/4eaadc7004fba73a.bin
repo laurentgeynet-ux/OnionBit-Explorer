@@ -1,0 +1,3 @@
+performance.mark("js-parse-end:chunk-lazy-react-partial-app-install-banner-partial-ed58f1b49a2d8d01.js");
+import*as r from"react";import*as o from"react-dom";import*as t from"react-dom/client";import*as e from"react-is";import*as s from"react/compiler-runtime";import*as m from"react/jsx-runtime";export const __rspack_esm_id="kq9";export const __rspack_esm_ids=["kq9"];export const __webpack_modules__={xO(r){r.exports={l:"Banner__QxCngJ"}},UJ(o){o.exports=r},JO(r){r.exports=o},Ob(r){r.exports=t},Mc(r){r.exports=e},An(r){r.exports=s},Cf(r){r.exports=m}};
+//# sourceMappingURL=chunk-lazy-react-partial-app-install-banner-partial-ed58f1b49a2d8d01-e3bf7663b67f1ac3.js.map

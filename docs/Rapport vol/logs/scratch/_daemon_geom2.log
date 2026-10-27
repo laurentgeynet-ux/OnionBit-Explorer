@@ -1,0 +1,40 @@
+[geom-miss] path=[("html", 0), ("body", 0), ("p", 0), ("a", 0), ("span", 1)] parent-hits=2 rects=3717
+[geom-miss] path=[("html", 0), ("body", 0), ("p", 0), ("a", 1), ("span", 1)] parent-hits=2 rects=3717
+[geom-miss] path=[("html", 0), ("body", 0), ("main", 0), ("table", 0), ("tbody", 0), ("tr", 0), ("tr", 0)] parent-hits=4 rects=3717
+[geom-miss] path=[("html", 0), ("body", 0), ("main", 0), ("table", 0), ("tbody", 0), ("tr", 0), ("tr", 0), ("th", 0)] parent-hits=0 rects=3717
+[geom-miss] path=[("html", 0), ("body", 0), ("main", 0), ("table", 0), ("tbody", 0), ("tr", 0), ("tr", 0), ("th", 0), ("a", 0)] parent-hits=0 rects=3717
+[geom-miss] path=[("html", 0), ("body", 0), ("main", 0), ("table", 0), ("tbody", 0), ("tr", 0), ("tr", 0), ("td", 0)] parent-hits=0 rects=3717
+[geom-miss] path=[("html", 0), ("body", 0), ("main", 0), ("table", 0), ("tbody", 0), ("tr", 0), ("tr", 0), ("td", 0), ("a", 0)] parent-hits=0 rects=3717
+[geom-miss] path=[("html", 0), ("body", 0), ("main", 0), ("table", 0), ("tbody", 0), ("tr", 0), ("tr", 0), ("td", 0), ("a", 1)] parent-hits=0 rects=3717
+[geom-miss] path=[("html", 0), ("body", 0), ("main", 0), ("table", 0), ("tbody", 0), ("tr", 0), ("tr", 0), ("tr", 0)] parent-hits=0 rects=3717
+[geom-miss] path=[("html", 0), ("body", 0), ("main", 0), ("table", 0), ("tbody", 0), ("tr", 0), ("tr", 0), ("tr", 0), ("th", 0)] parent-hits=0 rects=3717
+[geom-miss] path=[("html", 0), ("body", 0), ("main", 0), ("table", 0), ("tbody", 0), ("tr", 0), ("tr", 0), ("tr", 0), ("th", 0), ("a", 0)] parent-hits=0 rects=3717
+[geom-miss] path=[("html", 0), ("body", 0), ("main", 0), ("table", 0), ("tbody", 0), ("tr", 0), ("tr", 0), ("tr", 0), ("td", 0)] parent-hits=0 rects=3717
+[geom-miss] path=[("html", 0), ("body", 0), ("main", 0), ("table", 0), ("tbody", 0), ("tr", 0), ("tr", 0), ("tr", 0), ("tr", 0)] parent-hits=0 rects=3717
+[geom-miss] path=[("html", 0), ("body", 0), ("main", 0), ("table", 0), ("tbody", 0), ("tr", 0), ("tr", 0), ("tr", 0), ("tr", 0), ("th", 0)] parent-hits=0 rects=3717
+[geom-miss] path=[("html", 0), ("body", 0), ("main", 0), ("table", 0), ("tbody", 0), ("tr", 0), ("tr", 0), ("tr", 0), ("tr", 0), ("td", 0)] parent-hits=0 rects=3717
+[geom-miss] path=[("html", 0), ("body", 0), ("main", 0), ("table", 0), ("tbody", 0), ("tr", 0), ("tr", 0), ("tr", 0), ("tr", 0), ("td", 0), ("a", 0)] parent-hits=0 rects=3717
+[geom-miss] path=[("html", 0), ("body", 0), ("main", 0), ("table", 0), ("tbody", 0), ("tr", 0), ("tr", 0), ("tr", 0), ("tr", 0), ("tr", 0)] parent-hits=0 rects=3717
+[geom-miss] path=[("html", 0), ("body", 0), ("main", 0), ("table", 0), ("tbody", 0), ("tr", 0), ("tr", 0), ("tr", 0), ("tr", 0), ("tr", 0), ("th", 0)] parent-hits=0 rects=3717
+[geom-miss] path=[("html", 0), ("body", 0), ("main", 0), ("table", 0), ("tbody", 0), ("tr", 0), ("tr", 0), ("tr", 0), ("tr", 0), ("tr", 0), ("th", 0), ("a", 0)] parent-hits=0 rects=3717
+[geom-miss] path=[("html", 0), ("body", 0), ("main", 0), ("table", 0), ("tbody", 0), ("tr", 0), ("tr", 0), ("tr", 0), ("tr", 0), ("tr", 0), ("td", 0)] parent-hits=0 rects=3717
+[geom-miss] path=[("html", 0), ("body", 0), ("main", 0), ("table", 0), ("tbody", 0), ("tr", 0), ("tr", 0), ("tr", 0), ("tr", 0), ("tr", 0), ("tr", 0)] parent-hits=0 rects=3717
+[geom-miss] path=[("html", 0), ("body", 0), ("main", 0), ("table", 0), ("tbody", 0), ("tr", 0), ("tr", 0), ("tr", 0), ("tr", 0), ("tr", 0), ("tr", 0), ("th", 0)] parent-hits=0 rects=3717
+[geom-miss] path=[("html", 0), ("body", 0), ("main", 0), ("table", 0), ("tbody", 0), ("tr", 0), ("tr", 0), ("tr", 0), ("tr", 0), ("tr", 0), ("tr", 0), ("th", 0), ("a", 0)] parent-hits=0 rects=3717
+[geom-miss] path=[("html", 0), ("body", 0), ("main", 0), ("table", 0), ("tbody", 0), ("tr", 0), ("tr", 0), ("tr", 0), ("tr", 0), ("tr", 0), ("tr", 0), ("td", 0)] parent-hits=0 rects=3717
+[geom-miss] path=[("html", 0), ("body", 0), ("main", 0), ("table", 0), ("tbody", 0), ("tr", 0), ("tr", 0), ("tr", 0), ("tr", 0), ("tr", 0), ("tr", 0), ("tr", 0)] parent-hits=0 rects=3717
+[geom-miss] path=[("html", 0), ("body", 0), ("main", 0), ("table", 0), ("tbody", 0), ("tr", 0), ("tr", 0), ("tr", 0), ("tr", 0), ("tr", 0), ("tr", 0), ("tr", 0), ("th", 0)] parent-hits=0 rects=3717
+[geom-miss] path=[("html", 0), ("body", 0), ("main", 0), ("table", 0), ("tbody", 0), ("tr", 0), ("tr", 0), ("tr", 0), ("tr", 0), ("tr", 0), ("tr", 0), ("tr", 0), ("th", 0), ("a", 0)] parent-hits=0 rects=3717
+[geom-miss] path=[("html", 0), ("body", 0), ("main", 0), ("table", 0), ("tbody", 0), ("tr", 0), ("tr", 0), ("tr", 0), ("tr", 0), ("tr", 0), ("tr", 0), ("tr", 0), ("td", 0)] parent-hits=0 rects=3717
+[geom-miss] path=[("html", 0), ("body", 0), ("main", 0), ("table", 0), ("tbody", 0), ("tr", 0), ("tr", 0), ("tr", 0), ("tr", 0), ("tr", 0), ("tr", 0), ("tr", 0), ("td", 0), ("a", 0)] parent-hits=0 rects=3717
+[geom-miss] path=[("html", 0), ("body", 0), ("main", 0), ("table", 0), ("tbody", 0), ("tr", 0), ("tr", 0), ("tr", 0), ("tr", 0), ("tr", 0), ("tr", 0), ("tr", 0), ("td", 0), ("a", 1)] parent-hits=0 rects=3717
+[geom-miss] path=[("html", 0), ("body", 0), ("main", 0), ("table", 0), ("tbody", 0), ("tr", 0), ("tr", 0), ("tr", 0), ("tr", 0), ("tr", 0), ("tr", 0), ("tr", 0), ("tr", 0)] parent-hits=0 rects=3717
+[geom-miss] path=[("html", 0), ("body", 0), ("main", 0), ("table", 0), ("tbody", 0), ("tr", 0), ("tr", 0), ("tr", 0), ("tr", 0), ("tr", 0), ("tr", 0), ("tr", 0), ("tr", 0), ("th", 0)] parent-hits=0 rects=3717
+[geom-miss] path=[("html", 0), ("body", 0), ("main", 0), ("table", 0), ("tbody", 0), ("tr", 0), ("tr", 0), ("tr", 0), ("tr", 0), ("tr", 0), ("tr", 0), ("tr", 0), ("tr", 0), ("td", 0)] parent-hits=0 rects=3717
+[geom-miss] path=[("html", 0), ("body", 0), ("main", 0), ("table", 0), ("tbody", 0), ("tr", 0), ("tr", 0), ("tr", 0), ("tr", 0), ("tr", 0), ("tr", 0), ("tr", 0), ("tr", 0), ("tr", 0)] parent-hits=0 rects=3717
+[geom-miss] path=[("html", 0), ("body", 0), ("main", 0), ("table", 0), ("tbody", 0), ("tr", 0), ("tr", 0), ("tr", 0), ("tr", 0), ("tr", 0), ("tr", 0), ("tr", 0), ("tr", 0), ("tr", 0), ("th", 0)] parent-hits=0 rects=3717
+[geom-miss] path=[("html", 0), ("body", 0), ("main", 0), ("table", 0), ("tbody", 0), ("tr", 0), ("tr", 0), ("tr", 0), ("tr", 0), ("tr", 0), ("tr", 0), ("tr", 0), ("tr", 0), ("tr", 0), ("th", 0), ("a", 0)] parent-hits=0 rects=3717
+[geom-miss] path=[("html", 0), ("body", 0), ("main", 0), ("table", 0), ("tbody", 0), ("tr", 0), ("tr", 0), ("tr", 0), ("tr", 0), ("tr", 0), ("tr", 0), ("tr", 0), ("tr", 0), ("tr", 0), ("td", 0)] parent-hits=0 rects=3717
+[geom-miss] path=[("html", 0), ("body", 0), ("main", 0), ("table", 1), ("tbody", 0), ("tr", 0), ("tr", 0)] parent-hits=4 rects=3717
+[geom-miss] path=[("html", 0), ("body", 0), ("main", 0), ("table", 1), ("tbody", 0), ("tr", 0), ("tr", 0), ("th", 0)] parent-hits=0 rects=3717
+[geom-miss] path=[("html", 0), ("body", 0), ("main", 0), ("table", 1), ("tbody", 0), ("tr", 0), ("tr", 0), ("th", 0), ("a", 0)] parent-hits=0 rects=3717

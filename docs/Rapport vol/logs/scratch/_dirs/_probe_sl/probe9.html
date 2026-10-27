@@ -1,0 +1,17 @@
+<!doctype html><html><body>
+<sl-button style="display:none">x</sl-button>
+<div id="v1">P</div>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@shoelace-style/shoelace@2.20.1/cdn/shoelace-autoloader.js"></script>
+<script>
+setTimeout(() => {
+  const b0 = document.querySelector('sl-button');
+  const b = document.createElement('sl-button');
+  const pname = o => { try { return Object.getPrototypeOf(o).constructor.name; } catch(e){ return 'err'; } };
+  document.getElementById('v1').textContent =
+    'b0.proto=' + pname(b0) +
+    ' b.proto=' + pname(b) +
+    ' b.cc=' + (typeof b.connectedCallback) +
+    ' b.crr=' + (typeof b.createRenderRoot);
+}, 8000);
+</script>
+</body></html>

@@ -1,0 +1,2 @@
+performance.mark("js-parse-end:chunk-lazy-react-partial-marketing-header-b4346dea7b2f491a.js");
+import*as r from"react";import*as o from"react-dom";import*as t from"react-dom/client";import*as e from"react-is";import*as s from"react/compiler-runtime";import*as p from"react/jsx-runtime";export const __rspack_esm_id="jdp";export const __rspack_esm_ids=["jdp"];export const __webpack_modules__={UJ(o){o.exports=r},JO(r){r.exports=o},Ob(r){r.exports=t},Mc(r){r.exports=e},An(r){r.exports=s},Cf(r){r.exports=p}};

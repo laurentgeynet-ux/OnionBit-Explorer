@@ -1,0 +1,52 @@
+2026-10-26T20:18:21.498614Z  INFO explorer_daemon: fontes système scannées dir=C:\Windows\Fonts
+2026-10-26T20:18:21.501829Z  INFO explorer_daemon: profil chargé dir=C:\Users\Lou\AppData\Roaming\explorer
+2026-10-26T20:18:22.281318Z  INFO explorer_daemon: EXPLORER_VIEWPORT=1366x900 — viewport initial des onglets
+2026-10-26T20:18:22.283448Z  INFO explorer_daemon: explorer-daemon prêt addr=127.0.0.1:9413
+2026-10-26T20:18:53.591762Z  INFO explorer_core::session::apply: apply: cascade ms=4
+2026-10-26T20:18:53.592764Z  INFO explorer_core::session::apply: apply: boxtree ms=5
+2026-10-26T20:18:53.593530Z  INFO explorer_core::session::apply: apply: layout ms=6
+2026-10-26T20:18:53.596666Z  INFO explorer_core::session::apply: apply: repaint ms=9
+2026-10-26T20:18:53.700922Z  INFO explorer_core::session::apply: apply: cascade ms=3
+2026-10-26T20:18:53.701516Z  INFO explorer_core::session::apply: apply: boxtree ms=3
+2026-10-26T20:18:53.701549Z  INFO explorer_core::session::apply: apply: layout ms=3
+2026-10-26T20:18:53.701575Z  INFO explorer_core::session::apply: apply: repaint ms=3
+2026-10-26T20:18:53.912075Z  INFO explorer_core::session::js_glue: script: eval… tab=2 bytes=159
+2026-10-26T20:18:53.912245Z  INFO explorer_core::session::js_glue: script: eval fin tab=2 ms=0 ok=true
+2026-10-26T20:18:53.912258Z  INFO explorer_core::session::js_glue: script: eval… tab=2 bytes=383
+2026-10-26T20:18:53.912334Z  INFO explorer_core::session::js_glue: script: eval fin tab=2 ms=0 ok=true
+2026-10-26T20:18:53.912354Z  INFO explorer_core::session::js_glue: script: eval… tab=2 bytes=5274
+2026-10-26T20:18:53.913738Z  INFO explorer_core::session::js_glue: script: eval fin tab=2 ms=1 ok=true
+2026-10-26T20:18:53.913755Z  INFO explorer_core::session::js_glue: script: eval… tab=2 bytes=82396
+2026-10-26T20:18:53.918315Z  INFO explorer_core::session::js_glue: script: eval fin tab=2 ms=4 ok=true
+2026-10-26T20:18:53.918368Z  INFO explorer_core::session::js_glue: script: eval… tab=2 bytes=153156
+2026-10-26T20:18:53.948715Z  INFO explorer_core::session::js_glue: script: eval fin tab=2 ms=30 ok=true
+2026-10-26T20:18:53.948756Z  INFO explorer_core::session::js_glue: script: eval… tab=2 bytes=143913
+2026-10-26T20:18:55.121054Z  INFO explorer_core::session::js_glue: script: eval fin tab=2 ms=1172 ok=true
+2026-10-26T20:18:55.121108Z  INFO explorer_core::session::js_glue: script: eval… tab=2 bytes=86868
+2026-10-26T20:18:55.169136Z  INFO explorer_core::session::js_glue: script: eval fin tab=2 ms=48 ok=true
+2026-10-26T20:18:55.169184Z  INFO explorer_core::session::js_glue: script: eval… tab=2 bytes=219
+2026-10-26T20:18:55.169236Z  INFO explorer_core::session::js_glue: script: eval fin tab=2 ms=0 ok=true
+2026-10-26T20:18:55.169247Z  INFO explorer_core::session::js_glue: script: eval… tab=2 bytes=1543906
+2026-10-26T20:19:25.184904Z  INFO explorer_core::session::js_glue: script: eval fin tab=2 ms=30015 ok=false
+2026-10-26T20:19:25.184988Z  WARN explorer_core::session::js_glue: moteur figé — disjoncteur ouvert, appels JS court-circuités tab=2 error=exception js : moteur figé — éval dépassée
+2026-10-26T20:19:25.192284Z  INFO explorer_core::session::js_glue: script: eval… tab=2 bytes=41
+2026-10-26T20:19:55.199821Z  INFO explorer_core::session::js_glue: script: eval fin tab=2 ms=30007 ok=false
+2026-10-26T20:19:55.199897Z  WARN explorer_core::session::js_glue: moteur figé — disjoncteur ouvert, appels JS court-circuités tab=2 error=exception js : moteur figé — éval dépassée
+2026-10-26T20:19:55.199922Z  INFO explorer_core::session::js_glue: script: eval… tab=2 bytes=3605005
+2026-10-26T20:20:25.205519Z  INFO explorer_core::session::js_glue: script: eval fin tab=2 ms=30005 ok=false
+2026-10-26T20:20:25.231702Z  WARN explorer_core::session::js_glue: moteur figé — disjoncteur ouvert, appels JS court-circuités tab=2 error=exception js : moteur figé — éval dépassée
+2026-10-26T20:20:25.239567Z  INFO explorer_core::session::js_glue: script: eval… tab=2 bytes=50514
+2026-10-26T20:20:55.240735Z  INFO explorer_core::session::js_glue: script: eval fin tab=2 ms=30001 ok=false
+2026-10-26T20:20:55.240851Z  WARN explorer_core::session::js_glue: moteur figé — disjoncteur ouvert, appels JS court-circuités tab=2 error=exception js : moteur figé — éval dépassée
+2026-10-26T20:20:55.241076Z  INFO explorer_core::session::js_glue: script: eval… tab=2 bytes=34571
+2026-10-26T20:21:25.241576Z  INFO explorer_core::session::js_glue: script: eval fin tab=2 ms=30000 ok=false
+2026-10-26T20:21:25.241635Z  WARN explorer_core::session::js_glue: moteur figé — disjoncteur ouvert, appels JS court-circuités tab=2 error=exception js : moteur figé — éval dépassée
+2026-10-26T20:21:25.241760Z  INFO explorer_core::session::js_glue: script: eval… tab=2 bytes=53190
+2026-10-26T20:21:55.255341Z  INFO explorer_core::session::js_glue: script: eval fin tab=2 ms=30013 ok=false
+2026-10-26T20:21:55.255398Z  WARN explorer_core::session::js_glue: moteur figé — disjoncteur ouvert, appels JS court-circuités tab=2 error=exception js : moteur figé — éval dépassée
+2026-10-26T20:21:55.255627Z  INFO explorer_core::session::js_glue: script: eval… tab=2 bytes=15666
+2026-10-26T20:22:25.270668Z  INFO explorer_core::session::js_glue: script: eval fin tab=2 ms=30015 ok=false
+2026-10-26T20:22:25.270726Z  WARN explorer_core::session::js_glue: moteur figé — disjoncteur ouvert, appels JS court-circuités tab=2 error=exception js : moteur figé — éval dépassée
+2026-10-26T20:22:25.270802Z  INFO explorer_core::session::js_glue: script: eval… tab=2 bytes=41158
+2026-10-26T20:22:55.270873Z  INFO explorer_core::session::js_glue: script: eval fin tab=2 ms=30000 ok=false
+2026-10-26T20:22:55.270946Z  WARN explorer_core::session::js_glue: moteur figé — disjoncteur ouvert, appels JS court-circuités tab=2 error=exception js : moteur figé — éval dépassée

@@ -1,0 +1,22 @@
+<!doctype html><html><body>
+<x-ctor></x-ctor>
+<x-cc></x-cc>
+<sl-button>probe</sl-button>
+<div id="v1">P1</div><div id="v2">P2</div><div id="v3">P3</div>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@shoelace-style/shoelace@2.20.1/cdn/shoelace-autoloader.js"></script>
+<script>
+customElements.define('x-ctor', class extends HTMLElement {
+  constructor() { super(); this.attachShadow({mode:'open'}); }
+});
+customElements.define('x-cc', class extends HTMLElement {
+  connectedCallback() { this.attachShadow({mode:'open'}); }
+});
+setTimeout(() => {
+  const q = s => document.querySelector(s);
+  const has = el => el && el.shadowRoot ? 'SR' : 'null';
+  document.getElementById('v1').textContent = 'ctor=' + has(q('x-ctor'));
+  document.getElementById('v2').textContent = 'cc=' + has(q('x-cc'));
+  document.getElementById('v3').textContent = 'sl=' + has(q('sl-button'));
+}, 6000);
+</script>
+</body></html>

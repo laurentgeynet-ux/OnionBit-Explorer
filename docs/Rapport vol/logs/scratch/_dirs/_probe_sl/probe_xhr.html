@@ -1,0 +1,14 @@
+<!doctype html><html><body>
+<div id="v2">P</div>
+<script>
+const x = new XMLHttpRequest();
+x.onload = () => { document.getElementById('v2').textContent = 'onload:' + x.status; };
+x.onerror = () => { document.getElementById('v2').textContent = 'onerror'; };
+x.open('GET', '/probe4.html');
+x.send();
+setTimeout(() => {
+  const el = document.getElementById('v2');
+  if (el.textContent === 'P') el.textContent = 'NO-CALLBACK rs=' + x.readyState;
+}, 6000);
+</script>
+</body></html>

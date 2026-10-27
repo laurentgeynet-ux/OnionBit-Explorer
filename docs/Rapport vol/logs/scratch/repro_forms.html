@@ -1,0 +1,14 @@
+<!doctype html><html><head><style>
+.baseButton{display:inline-flex;align-items:center;justify-content:center;border-radius:20px;cursor:pointer;font-family:Roboto,Arial,sans-serif;font-size:14px;font-weight:500;height:40px;margin:4px;padding:0 24px;box-sizing:border-box}
+.filledButton{background-color:#0b57d0;color:#fff;border:1px solid transparent}
+.searchButton{min-width:182px}
+.saveButtonContainer{display:inline-block;width:100%;margin-top:12px}
+</style></head><body><div style="text-align:center">
+<div class=saveButtonContainer>
+<form style="display:inline" action=/a method=POST>
+<input type=hidden name=a value=1><input type=hidden name=set_eom value=true>
+<input class="baseButton filledButton searchButton" type=submit value="Tout refuser" aria-label="Tout refuser"></form>
+<form style="display:inline" action=/b method=POST>
+<input type=hidden name=a value=1><input type=hidden name=set_aps value=true>
+<input class="baseButton filledButton searchButton" type=submit value="Tout accepter" aria-label="Tout accepter"></form>
+</div></div></body></html>

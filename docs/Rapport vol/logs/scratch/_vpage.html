@@ -1,0 +1,1975 @@
+<!doctype html>
+<html lang="en" theme="dark" class="dark"> 
+ <head> 
+  <meta name="viewport" content="width=device-width, initial-scale=1"> 
+  <meta property="og:description" content="Build modern apps faster with Vaadin, the open-source Java web framework. Features a unified stack, built-in security, and enterprise-grade UI components."> 
+  <meta property="og:title" content="Vaadin: Java Framework for Building Enterprise Web Applications"> 
+  <meta name="twitter:description" content="Build modern apps faster with Vaadin, the open-source Java web framework. Features a unified stack, built-in security, and enterprise-grade UI components."> 
+  <meta name="twitter:title" content="Vaadin: Java Framework for Building Enterprise Web Applications">  
+  <meta charset="utf-8"> 
+  <title>Vaadin: Java Framework for Building Enterprise Web Applications</title> 
+  <link rel="shortcut icon" href="https://website.vaadin.com/hubfs/vaadin-favicon-32x32.png"> 
+  <meta name="description" content="Build modern apps faster with Vaadin, the open-source Java web framework. Features a unified stack, built-in security, and enterprise-grade UI components."> 
+  <link rel="canonical" href="https://vaadin.com"> 
+  <link rel="stylesheet" href="https://cdn.vaadin.com/website/antlers/v2/assets/fonts/nbinternationalpro/stylesheet.css"> 
+  <link rel="stylesheet" href="https://cdn.vaadin.com/website/antlers/v2/assets/icons/css/line-awesome.min.css" media="none" onload="if(media!=='all')media='all'"> 
+  <script cms-keep src="https://vaadin.com/vaadincom/haas-service/v2/haas-loader.js?theme=login" defer></script> 
+  <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "Organization",
+      "@id": "https://vaadin.com/#organization",
+      "name": "Vaadin",
+      "legalName": "Vaadin Ltd",
+      "url": "https://vaadin.com",
+      "logo": {
+        "@type": "ImageObject",
+        "url": "https://brand.vaadin.com/images/vaadin-logo-light.svg",
+        "width": "200",
+        "height": "40"
+      },
+      "description": "Vaadin is the open-source Java framework for building modern web applications. From backend to modern UIs, Vaadin helps you deliver production-ready apps faster with a unified Java stack, built-in security, and enterprise-grade UI components.",
+      "foundingDate": "2000",
+      "founders": [
+        { "@type": "Person", "name": "Joonas Lehtinen" },
+        { "@type": "Person", "name": "Jurka Rahikkala" }
+      ],
+      "address": {
+        "@type": "PostalAddress",
+        "streetAddress": "Lemminkäisenkatu 3",
+        "addressLocality": "Turku",
+        "addressRegion": "Southwest Finland",
+        "postalCode": "20520",
+        "addressCountry": "FI"
+      },
+      "sameAs": [
+        "https://www.linkedin.com/company/vaadin",
+        "https://x.com/vaadin",
+        "https://www.facebook.com/vaadin",
+        "https://github.com/vaadin",
+        "https://www.youtube.com/@vaadin",
+        "https://www.instagram.com/vaadin",
+        "https://en.wikipedia.org/wiki/Vaadin"
+      ],
+      "numberOfEmployees": {
+        "@type": "QuantitativeValue",
+        "minValue": 51,
+        "maxValue": 200
+      },
+      "areaServed": "Worldwide",
+      "knowsAbout": [
+        "Java framework",
+        "Java framework for web applications",
+        "Java framework for web development",
+        "Web Components",
+        "Enterprise web applications",
+        "UI components",
+        "Java Swing",
+        "Application modernization",
+        "Full-stack framework",
+        "Full-stack Java framework",
+        "Full-stack Java development",
+        "Full-stack web framework",
+        "Web framework",
+        "Java front-end",
+        "Legacy modernization",
+        "Software modernization"
+      ]
+    }
+  </script> 
+  <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "WebSite",
+      "@id": "https://vaadin.com/#website",
+      "name": "Vaadin",
+      "url": "https://vaadin.com",
+      "description": "Vaadin is the open-source Java framework for building modern enterprise web applications entirely in Java.",
+      "publisher": {
+        "@id": "https://vaadin.com/#organization"
+      },
+      "inLanguage": "en"
+    }
+  </script> 
+  <style>
+a.cta_button{-moz-box-sizing:content-box !important;-webkit-box-sizing:content-box !important;box-sizing:content-box !important;vertical-align:middle}.hs-breadcrumb-menu{list-style-type:none;margin:0px 0px 0px 0px;padding:0px 0px 0px 0px}.hs-breadcrumb-menu-item{float:left;padding:10px 0px 10px 10px}.hs-breadcrumb-menu-divider:before{content:'›';padding-left:10px}.hs-featured-image-link{border:0}.hs-featured-image{float:right;margin:0 0 20px 20px;max-width:50%}@media (max-width: 568px){.hs-featured-image{float:none;margin:0;width:100%;max-width:100%}}.hs-screen-reader-text{clip:rect(1px, 1px, 1px, 1px);height:1px;overflow:hidden;position:absolute !important;width:1px}
+</style> 
+  <style>
+      .header-banner {
+        display: block;
+        height: auto;
+        background-color: #0BB59A;
+      }
+      .header-banner:hover {
+        background-color: #059F8C !important;
+      }
+    </style> 
+  <link rel="stylesheet" href="https://website.vaadin.com/hubfs/hub_generated/template_assets/1/48784597791/1791975345583/template_main.min.css"> 
+  <style>
+    #hs_cos_wrapper_home_customer_logos .logo-carousel__heading { color:#9F9F9F; }
+
+#hs_cos_wrapper_home_customer_logos .logo-carousel__bodytext { color:#6f6f6f; }
+
+  </style> 
+  <link class="hs-async-css" rel="preload" href="https://website.vaadin.com/hubfs/hub_generated/template_assets/1/224361142056/1791980800500/template_logo-carousel.min.css" as="style" onload="this.onload=null;this.rel='stylesheet'"> 
+  <noscript> 
+   <link rel="stylesheet" href="https://website.vaadin.com/hubfs/hub_generated/template_assets/1/224361142056/1791980800500/template_logo-carousel.min.css"> 
+  </noscript> 
+  <style>
+      .tabs-module__tab-btn--active {
+        @apply border-[#0968F6] text-[#0968F6];
+      }
+
+      /* Column switcher: only below md (768px). From md up both columns show side by side. */
+      @media (max-width: 767.98px) {
+        .tabs-module__col--inactive {
+          display: none !important;
+        }
+      }
+      .tabs-module__col-btn {
+        -webkit-tap-highlight-color: transparent;
+      }
+      .tabs-module__col-btn:focus-visible,
+      .tabs-module__tab-btn:focus-visible {
+        outline: 2px solid #0968F6;
+        outline-offset: 2px;
+      }
+    #hs_cos_wrapper_comparison-table .tabs-module__heading { color:rgba(255,255,255,1); }
+
+#hs_cos_wrapper_comparison-table .tabs-module__bodytext { color:rgba(135,135,135,1); }
+
+#hs_cos_wrapper_comparison-table .tabs-module__column-headline { color:rgba(255,255,255,1); }
+
+#hs_cos_wrapper_comparison-table .tabs-module__column-tag {
+  color:rgba(255,255,255,1);
+  border-color:rgba(111,111,111,1);
+}
+
+#hs_cos_wrapper_comparison-table .tabs-module__column-list-item { border-color:rgba(255,255,255,0.2); }
+
+#hs_cos_wrapper_comparison-table .tabs-module__column-list-item-sec-card { border-color:rgba(255,255,255,0.1); }
+
+#hs_cos_wrapper_comparison-table .tabs-module__item-title { color:rgba(255,255,255,1); }
+
+#hs_cos_wrapper_comparison-table .tabs-module__item-text { color:rgba(255,255,255,1); }
+
+#hs_cos_wrapper_comparison-table .tabs-module__item-title-sec-card { color:rgba(255,255,255,1); }
+
+#hs_cos_wrapper_comparison-table .tabs-module__item-text-sec-card { color:rgba(135,135,135,1); }
+
+#hs_cos_wrapper_comparison-table .tabs-module__column { background-color:rgba(20,20,20,1); }
+
+#hs_cos_wrapper_comparison-table .tabs-module__column-highlighted { background-color:rgba(9,104,246,1); }
+
+#hs_cos_wrapper_comparison-table .tabs-module__col-switch { border-color:rgba(255,255,255,0.2); }
+
+#hs_cos_wrapper_comparison-table .tabs-module__col-btn { color:rgba(255,255,255,1); }
+
+#hs_cos_wrapper_comparison-table .tabs-module__col-btn[aria-selected="true"] {
+  color:rgba(255,255,255,1);
+  background-color:rgba(38,38,38,0.6);
+  box-shadow:inset 0 0 0 1px rgba(255,255,255,0.2);
+}
+
+    </style> 
+  <link class="hs-async-css" rel="preload" href="https://website.vaadin.com/hubfs/hub_generated/module_assets/1/207501862421/1791982223560/module_home-ai-section.min.css" as="style" onload="this.onload=null;this.rel='stylesheet'"> 
+  <noscript> 
+   <link rel="stylesheet" href="https://website.vaadin.com/hubfs/hub_generated/module_assets/1/207501862421/1791982223560/module_home-ai-section.min.css"> 
+  </noscript> 
+  <link class="hs-async-css" rel="preload" href="https://website.vaadin.com/hubfs/hub_generated/module_assets/1/209425905235/1791980787909/module_logos-and-text.min.css" as="style" onload="this.onload=null;this.rel='stylesheet'"> 
+  <noscript> 
+   <link rel="stylesheet" href="https://website.vaadin.com/hubfs/hub_generated/module_assets/1/209425905235/1791980787909/module_logos-and-text.min.css"> 
+  </noscript> 
+  <style>
+    #hs_cos_wrapper_stack_module .logos-and-text__bg { background-color:rgba(38,38,38,60%); }
+
+#hs_cos_wrapper_stack_module .logos-and-text__heading { color:#ffffff; }
+
+#hs_cos_wrapper_stack_module .logos-and-text__subtext { color:#9F9F9F; }
+
+#hs_cos_wrapper_stack_module .logos-and-text__logo-item { background-color:#262626; }
+
+    </style> 
+  <style>
+    #hs_cos_wrapper_benefits_module .feature_list__heading { color:#ffffff; }
+
+#hs_cos_wrapper_benefits_module .feature_list__text { color:#9F9F9F; }
+
+#hs_cos_wrapper_benefits_module .feature_list__icon { color:#878787; }
+
+#hs_cos_wrapper_benefits_module .feature_list__icon-background { background-color:#262626; }
+
+  </style> 
+  <style>
+  #hs_cos_wrapper_home_footer .page-footer-background { background-color:#0968F6; }
+
+#hs_cos_wrapper_home_footer .page-footer__heading { color:#ffffff; }
+
+#hs_cos_wrapper_home_footer .page-footer__body { color:#ffffff; }
+
+#hs_cos_wrapper_home_footer .page-footer__logos-text { color:#ffffff; }
+
+  </style> 
+  <link rel="stylesheet" crossorigin href="https://website.vaadin.com/hubfs/Home/vaadin-components-demo/vaadin-components-lumo-theme.css"> 
+  <link rel="modulepreload" crossorigin href="https://website.vaadin.com/hubfs/Home/vaadin-components-demo/vaadin-markdown.js"> 
+  <link rel="modulepreload" crossorigin href="https://website.vaadin.com/hubfs/Home/vaadin-components-demo/markdown-helpers.js"> 
+  <link rel="modulepreload" crossorigin href="https://website.vaadin.com/hubfs/Home/vaadin-components-demo/vaadin-button.js"> 
+  <link rel="modulepreload" crossorigin href="https://website.vaadin.com/hubfs/Home/vaadin-components-demo/hero.js"> 
+  <script type="module" crossorigin src="https://website.vaadin.com/hubfs/Home/vaadin-components-demo/vaadin-markdown.js"></script> 
+  <script type="module" crossorigin src="https://website.vaadin.com/hubfs/Home/vaadin-components-demo/markdown-helpers.js"></script> 
+  <script type="module" crossorigin src="https://website.vaadin.com/hubfs/Home/vaadin-components-demo/vaadin-button.js"></script> 
+  <script type="module" crossorigin src="https://website.vaadin.com/hubfs/Home/vaadin-components-demo/hero.js"></script> 
+  <script>
+    window.Prism = window.Prism || {};
+    window.Prism.manual = true;
+  </script> 
+  <script>!function(){var e="body {opacity: 0 !important;}",t=document.createElement("style");t.type="text/css",t.id="page-hide-style",t.styleSheet?t.styleSheet.cssText=e:t.appendChild(document.createTextNode(e)),document.head.appendChild(t),window.rmo=function(){var e=document.getElementById("page-hide-style");e&&(e.parentNode.removeChild(e),document.body.style.opacity="")},setTimeout(window.rmo,2e3)}();</script> 
+  <meta property="og:image" content="https://website.vaadin.com/hubfs/Vaadin-OG%20image.png"> 
+  <meta property="og:image:width" content="1200"> 
+  <meta property="og:image:height" content="630"> 
+  <meta property="og:image:alt" content="Vaadin: Java Framework for Enterprise Web Applications"> 
+  <meta name="twitter:image" content="https://website.vaadin.com/hubfs/Vaadin-OG%20image.png"> 
+  <meta name="twitter:image:alt" content="Vaadin: Java Framework for Enterprise Web Applications"> 
+  <meta property="og:url" content="https://vaadin.com"> 
+  <meta name="twitter:card" content="summary_large_image"> 
+  <meta http-equiv="content-language" content="en"> 
+  <meta name="google-site-verification" content="d_UvhHXVcB3bY6bVopC9hSfmv8hVEQvlMKHQa9VoWlY"> 
+  <script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "Organization",
+  "@id": "https://vaadin.com/#organization",
+  "name": "Vaadin",
+  "legalName": "Vaadin Ltd",
+  "url": "https://vaadin.com",
+  "logo": {
+    "@type": "ImageObject",
+    "url": "https://brand.vaadin.com/images/vaadin-logo-light.svg",
+    "width": "200",
+    "height": "40"
+  },
+  "description": "Vaadin is the open-source Java framework for building modern web applications. From backend to modern UIs, Vaadin helps you deliver production-ready apps faster with a unified Java stack, built-in security, and enterprise-grade UI components.",
+  "foundingDate": "2000",
+  "founders": [
+    { "@type": "Person", "name": "Joonas Lehtinen" },
+    { "@type": "Person", "name": "Jurka Rahikkala" }
+  ],
+  "address": {
+    "@type": "PostalAddress",
+    "streetAddress": "Lemminkäisenkatu 3",
+    "addressLocality": "Turku",
+    "addressRegion": "Southwest Finland",
+    "postalCode": "20520",
+    "addressCountry": "FI"
+  },
+  "sameAs": [
+    "https://www.linkedin.com/company/vaadin",
+    "https://twi.com/vaadin",
+    "https://www.facebook.com/vaadin",
+    "https://github.com/vaadin",
+    "https://www.youtube.com/@vaadin",
+    "https://www.instagram.com/vaadin",
+    "https://en.wikipedia.org/wiki/Vaadin"
+  ],
+  "numberOfEmployees": {
+    "@type": "QuantitativeValue",
+    "minValue": 51,
+    "maxValue": 200
+  },
+  "areaServed": "Worldwide",
+  "knowsAbout": [
+    "Java framework",
+    "Java framework for web applications",
+    "Java framework for web development",
+    "Web Components",
+    "Enterprise web applications",
+    "Full-stack Java development",
+    "UI components",
+    "Java Swing",
+    "Application modernization"
+  ]
+}
+</script> 
+  <script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "WebSite",
+  "@id": "https://vaadin.com/#website",
+  "name": "Vaadin",
+  "url": "https://vaadin.com",
+  "description": "Vaadin is the open-source Java framework for building modern enterprise web applications entirely in Java.",
+  "publisher": {
+    "@id": "https://vaadin.com/#organization"
+  },
+  "potentialAction": {
+    "@type": "SearchAction",
+    "target": {
+      "@type": "EntryPoint",
+      "urlTemplate": "https://vaadin.com/search?q={search_term_string}"
+    },
+    "query-input": "required name=search_term_string"
+  },
+  "inLanguage": "en"
+}
+</script> 
+  <script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "WebPage",
+  "@id": "https://vaadin.com/#webpage",
+  "url": "https://vaadin.com",
+  "name": "Vaadin: Java Framework for Enterprise Web Applications",
+  "description": "Build modern web apps 100% in Java. Vaadin is the open-source Java framework for web development with built-in security, enterprise-grade UI components, and a unified full-stack Java platform.",
+  "isPartOf": { "@id": "https://vaadin.com/#website" },
+  "about": { "@id": "https://vaadin.com/#organization" },
+  "primaryImageOfPage": {
+    "@type": "ImageObject",
+    "url": "https://website.vaadin.com/hubfs/Vaadin-OG%20image.png"
+  },
+  "inLanguage": "en",
+  "keywords": "Java framework, Java framework for web applications, Java framework for web development, Java web framework, enterprise Java, full-stack Java, Java Swing, Swing to Web, Angular alternative, web components Java"
+}
+</script> 
+  <script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "@id": "https://vaadin.com/#software",
+  "name": "Vaadin",
+  "alternateName": ["Vaadin Framework", "Vaadin Flow", "Vaadin Platform"],
+  "description": "Vaadin is an open-source Java framework for building modern web applications. It provides a complete Java stack for enterprise web development with built-in UI components, real-time communication, and security features.",
+  "url": "https://vaadin.com",
+  "applicationCategory": "DeveloperApplication",
+  "applicationSubCategory": "Java Framework for Web Applications",
+  "operatingSystem": "Cross-platform",
+  "softwareVersion": "25.0.5",
+  "releaseNotes": "https://github.com/vaadin/platform/releases/tag/25.0.5",
+  "downloadUrl": "https://start.vaadin.com/app",
+  "installUrl": "https://vaadin.com/docs/latest",
+  "license": "https://www.apache.org/licenses/LICENSE-2.0",
+  "programmingLanguage": ["Java", "Kotlin", "TypeScript"],
+  "offers": [
+    {
+      "@type": "Offer",
+      "name": "Free / Open Source",
+      "price": "0",
+      "priceCurrency": "USD",
+      "description": "Core framework under Apache 2.0 license with open-source UI components and tools.",
+      "url": "https://vaadin.com/pricing"
+    },
+    {
+      "@type": "Offer",
+      "name": "Pro",
+      "description": "Commercial components, tools, and support for professional teams.",
+      "url": "https://vaadin.com/pricing"
+    },
+    {
+      "@type": "Offer",
+      "name": "Enterprise",
+      "description": "Full platform with premium support, extended maintenance, and expert services.",
+      "url": "https://vaadin.com/pricing"
+    }
+  ],
+  "featureList": [
+    "100% Java UI development",
+    "Enterprise-grade UI components",
+    "Built-in security and session management",
+    "Real-time server push communication",
+    "Spring Boot, Jakarta EE, and Quarkus integration",
+    "WCAG 2.1 AA accessible components",
+    "AI-powered Copilot visual editor",
+    "Up to 15-year version maintenance",
+    "Figma design library",
+    "Automated UI testing with TestBench"
+  ],
+  "creator": { "@id": "https://vaadin.com/#organization" }
+}
+</script> 
+  <script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  "@id": "https://vaadin.com/#faq",
+  "mainEntity": [
+    {
+      "@type": "Question",
+      "name": "What is Vaadin?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Vaadin is an open-source Java framework for building modern enterprise web applications. It allows developers to create full-stack web apps entirely in Java, with built-in security, enterprise-grade UI components, and support for Spring Boot, Jakarta EE, and Quarkus backends."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Is Vaadin a free Java framework?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Yes, the core Vaadin framework is open source and free under the Apache 2.0 license. Vaadin also offers commercial Pro and Enterprise plans that include additional components, tools, support, and extended maintenance for teams building business-critical Java web applications."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Which Java backends does Vaadin support?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Vaadin integrates with Spring Boot, Jakarta EE, and Quarkus. You can build applications in Java or Kotlin using the backend framework of your choice."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Do I need to write JavaScript or HTML to use Vaadin?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "No. With Vaadin Flow, you can build the entire UI in 100% Java — no HTML, CSS, or JavaScript required. Vaadin handles the client-server communication and rendering automatically. For teams that prefer a frontend approach, Vaadin also supports TypeScript and React via Hilla."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Is Vaadin suitable for enterprise web applications?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Yes. Vaadin is trusted by 40% of Fortune 500 companies and over 200,000 developers worldwide. It is built for data-heavy enterprise applications with features like lazy-loading grids, built-in security, WCAG 2.1 AA accessibility, and up to 15 years of version maintenance."
+      }
+    }
+  ]
+}
+</script> 
+  <script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BreadcrumbList",
+  "@id": "https://vaadin.com/#breadcrumb",
+  "itemListElement": [
+    {
+      "@type": "ListItem",
+      "position": 1,
+      "name": "Home",
+      "item": "https://vaadin.com"
+    }
+  ]
+}
+</script> 
+  <style>#benefits { display: none; }  </style> 
+  <meta name="generator" content="HubSpot"> 
+ </head> 
+ <body class="text-base antialiased bg-white dark:bg-[#0F0F0F] dark:text-white font-body   hs-content-id-190318537220 hs-site-page page "> 
+  <div id="hs_cos_wrapper_header-banner" class="hs_cos_wrapper hs_cos_wrapper_widget hs_cos_wrapper_type_module" style="" data-hs-cos-general-type="widget" data-hs-cos-type="module"> <a id="header-banner" class="header-banner relative z-1 w-full no-underline transition-all hover:cursor-pointer hover:no-underline" href="https://vaadin.com/vaadin-create-2026" target="_blank" rel="noopener noreferrer"> <p class="banner-container w-full h-full mx-auto flex flex-col md:flex-row items-center justify-center text-center text-white py-4 px-4 lg:px-8 mb-0 mt-0"> Vaadin Create 2026: Where full-stack Java goes next <span class="px-1 hidden md:block">-</span> <span class="underline"> Claim your 30% off ticket → </span> </p> </a> 
+  </div> 
+  <div id="hs_cos_wrapper_site_head" class="hs_cos_wrapper hs_cos_wrapper_widget hs_cos_wrapper_type_module" style="" data-hs-cos-general-type="widget" data-hs-cos-type="module"> 
+  </div> 
+  <div id="hs_cos_wrapper_no-index" class="hs_cos_wrapper hs_cos_wrapper_widget hs_cos_wrapper_type_module" style="" data-hs-cos-general-type="widget" data-hs-cos-type="module"></div> 
+  <div data-global-resource-path="vaadin-theme/templates/partials/body_includes.html"> <cms-page cms-remove enable-haas-injection="false" enable-footer-injection="false"></cms-page> 
+  </div> 
+  <div> 
+   <div class="container"> 
+    <div data-global-resource-path="vaadin-theme/templates/partials/generated/haas.html"> 
+     <header> 
+      <style>
+    .haas-wrapper {
+      opacity: 0;
+    }
+  </style> 
+      <div class="haas-wrapper"> 
+       <div class="haas-content-left"> <button id="haas-mobile-nav-button" class="haas-button haas-mobile-nav-toggle" onclick="window.haas.toggleMenu()" aria-label="menu"> <span></span> </button> <a relative-menu-link aria-label="Go to Vaadin homepage" class="haas-logo" href="/"> 
+         <svg role="img" aria-labelledby="logoTitle" width="111" height="26" viewbox="0 0 871 200" fill="none" xmlns="http://www.w3.org/2000/svg"> 
+          <title id="logoTitle">Vaadin Logo</title> <path class="haas-logo-textmark" d="M589.86 48.5319C594.425 42.7664 608.358 37.2412 618.448 37.2412C656.163 37.2412 669.136 64.1467 669.136 94.4154V159.998C669.136 160.718 668.655 161.199 667.934 161.199H641.509C640.789 161.199 640.308 160.718 640.308 159.998V94.4154C640.308 80.0017 632.621 63.6662 613.643 63.6662C594.905 63.6662 587.218 77.5994 587.218 92.0131V159.998C587.218 160.718 586.737 161.199 586.017 161.199H559.592C558.871 161.199 558.391 160.718 558.391 159.998V40.8446C558.391 40.1239 558.871 39.6435 559.592 39.6435H582.413C583.855 39.6435 584.335 39.8837 584.575 40.8446L587.218 48.2917C587.458 49.2526 588.9 49.7331 589.86 48.5319Z" fill="currentColor" /> <path class="haas-logo-textmark" d="M536.466 161.201H510.041C509.32 161.201 508.84 160.72 508.84 159.999V40.8465C508.84 40.1258 509.32 39.6454 510.041 39.6454H536.466C537.187 39.6454 537.667 40.1258 537.667 40.8465V159.999C537.667 160.72 537.187 161.201 536.466 161.201Z" fill="currentColor" /> <path class="haas-logo-textmark" d="M536.468 28.8317H510.043C509.322 28.8317 508.842 28.7177 508.842 28.5468V0.284898C508.842 0.113961 509.322 0 510.043 0H536.468C537.189 0 537.669 0.113961 537.669 0.284898V28.5468C537.669 28.7177 537.189 28.8317 536.468 28.8317Z" fill="currentColor" /> <path class="haas-logo-textmark" d="M456.671 152.311C450.906 158.077 438.174 163.602 425.922 163.602C392.05 163.602 370.91 137.897 370.91 100.422C370.91 62.9464 394.212 37.242 425.922 37.242C441.297 37.242 452.347 43.9684 457.152 48.7729C458.113 49.7338 459.314 49.2534 459.314 48.0523V1.20114C459.314 0.480467 459.794 0 460.515 0H486.94C487.661 0 488.141 0.480467 488.141 1.20114V159.998C488.141 160.719 487.661 161.199 486.94 161.199H464.118C462.677 161.199 461.956 160.959 461.716 159.998L459.314 152.311C459.074 151.35 457.632 151.35 456.671 152.311ZM399.737 100.422C399.737 122.042 410.307 137.177 430.727 137.177C449.945 137.177 459.314 122.042 459.314 100.422C459.314 76.3991 449.945 63.667 430.727 63.667C410.307 63.667 399.737 78.8014 399.737 100.422Z" fill="currentColor" /> <path class="haas-logo-textmark" d="M199.738 152.474C193.492 158.72 186.951 163.601 167.973 163.601C137.464 163.601 121.609 146.785 121.609 124.924C121.609 104.265 140.107 86.0074 173.018 86.0074H194.398C199.203 86.0074 201.605 83.1247 201.605 80.7224C201.605 75.6776 201.125 63.6662 177.582 63.6662C159.325 63.6662 155.241 71.3535 154.521 79.5213C154.521 80.2419 154.04 80.7224 153.319 80.7224H127.135C126.414 80.7224 125.933 80.2419 125.933 79.5213C125.933 51.1744 149.236 37.2412 177.582 37.2412C210.734 37.2412 230.432 52.856 230.432 82.8844V129.489V134.034V135.382V138.953L230.613 153.464V161.199H214.771C202.28 161.199 205.861 162.375 201.9 152.474C201.42 151.754 200.459 151.754 199.738 152.474ZM167.973 137.176C192.717 137.176 201.605 123.243 201.605 111.231C201.605 110.511 201.125 110.03 200.404 110.03H174.219C154.04 110.03 150.437 118.678 150.437 124.924C150.437 129.969 154.761 137.176 167.973 137.176Z" fill="currentColor" /> <path class="haas-logo-textmark" d="M324.492 152.474C318.246 158.72 311.705 163.601 292.727 163.601C262.218 163.601 246.363 146.785 246.363 124.924C246.363 104.265 264.861 86.0074 297.772 86.0074H319.152C323.957 86.0074 326.359 83.1247 326.359 80.7224C326.359 75.6776 325.879 63.6662 302.336 63.6662C284.079 63.6662 279.995 71.3535 279.274 79.5213C279.274 80.2419 278.794 80.7224 278.073 80.7224H251.889C251.168 80.7224 250.687 80.2419 250.687 79.5213C250.687 51.1744 273.989 37.2412 302.336 37.2412C335.488 37.2412 355.186 52.856 355.186 82.8844V129.489V134.034V135.382V138.953L355.367 153.464V161.199H339.525C327.034 161.199 330.615 162.375 326.654 152.474C326.174 151.754 325.213 151.754 324.492 152.474ZM292.727 137.176C317.471 137.176 326.359 123.243 326.359 111.231C326.359 110.511 325.879 110.03 325.158 110.03H298.973C278.794 110.03 275.191 118.678 275.191 124.924C275.191 129.969 279.515 137.176 292.727 137.176Z" fill="currentColor" /> <path class="haas-logo-textmark" d="M62.0399 133.815L91.1075 41.327C91.3477 40.3661 92.3086 39.6454 93.0293 39.6454H120.175C121.136 39.6454 121.616 40.3661 121.376 41.327L81.7386 159.999C81.4984 160.72 81.0179 161.201 80.2972 161.201H41.3804C40.6597 161.201 40.1792 160.72 39.939 159.999L0.0612182 41.327C-0.179009 40.3661 0.301446 39.6454 1.26236 39.6454H28.8885C29.6092 39.6454 30.3299 40.3661 30.5701 41.327L59.6377 133.815C60.1181 135.016 61.5595 135.016 62.0399 133.815Z" fill="currentColor" /> <path d="M702.115 198.837V176.431C702.115 175.733 702.584 175.5 703.288 175.5H713.845C720.648 175.5 726.512 169.683 726.512 162.935V127.959C726.512 109.112 734.723 103.111 740.353 101.25C742.212 100.635 742.26 98.988 740.353 98.3333C734.254 96.2392 726.512 91.353 726.512 71.8079V37.0648C726.512 30.3171 720.648 24.5001 713.845 24.5001H703.288C702.584 24.5001 702.115 24.2675 702.115 23.5694V1.16339C702.115 0.465365 702.584 0 703.288 0H716.19C738.476 0 753.479 10.9359 753.479 33.0404V78.3229C753.479 85.3033 756.942 90.8876 769.873 90.8876H773.895C774.599 90.8876 775.068 91.3529 775.068 92.051V108.182C775.068 108.88 774.599 109.345 773.895 109.345H769.873C759.912 109.345 753.479 114.929 753.479 121.677V167.192C753.479 189.297 738.476 200 716.19 200H703.288C702.584 200 702.115 199.535 702.115 198.837Z" fill="#007BFF" /> <path d="M833.605 98.5612L777.005 74.8648C776.228 74.4099 776.073 73.5 776.073 72.8177L776.073 44.7533C776.073 44.071 776.383 43.3886 777.16 43.8435L870.099 90.3853C870.565 90.6128 870.876 91.0677 870.876 91.75L870.876 107.886C870.876 108.569 870.565 109.024 870.099 109.251L777.006 156.123C776.229 156.578 775.918 156.123 775.918 155.213L776.072 126.128C776.072 125.445 776.383 124.536 777.005 124.308L833.605 100.225C833.889 100.225 833.889 98.5612 833.605 98.5612Z" fill="#007BFF" /> 
+         </svg> </a> 
+        <nav class="haas-nav" id="haas-nav" aria-label="Main navigation"> 
+         <ul class="haas-nav-items"> <!-- Products --> 
+          <li class="haas-dropdown"> <button class="haas-button haas-nav-button haas-dropdown-button" aria-haspopup="true" aria-expanded="false"> <span>Products</span> <i class="haas-caret las la-angle-down"></i> </button> 
+           <ul class="haas-menu haas-menu-platform"> 
+            <li class="haas-menu-primary"> 
+             <ul> 
+              <li> <a class="haas-menu-primary-link-platform" href="/components" relative-menu-link> 
+                <div class="haas-menu-primary-link-platform-icon"> 
+                 <svg width="32" height="32" viewbox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg"> <path d="M21.0314 29.125C26.5376 29.125 31 24.7484 31 19.3507C31 13.9531 26.5376 9.5765 21.0314 9.5765C15.5264 9.5765 11.0628 13.9519 11.0628 19.3507C11.0628 24.7484 15.5252 29.125 21.0314 29.125Z" fill="#FF707A" /> <path d="M8.83154 4.00545L1.30913 16.786C1.15796 17.0422 1.0597 17.3253 1.01998 17.6189C0.980267 17.9126 0.999878 18.2111 1.07769 18.4973C1.15551 18.7835 1.28999 19.0517 1.47343 19.2866C1.65687 19.5215 1.88564 19.7185 2.14662 19.8662C2.49662 20.063 2.89161 20.1688 3.29411 20.17H18.3477C18.7511 20.1702 19.1475 20.0662 19.4974 19.8685C19.8472 19.6708 20.1382 19.3862 20.3414 19.0432C20.5432 18.7005 20.6495 18.3114 20.6495 17.9152C20.6495 17.5191 20.5432 17.13 20.3414 16.7873L12.819 4.00545C12.6171 3.66108 12.3264 3.37523 11.9764 3.17674C11.6263 2.97826 11.2293 2.87418 10.8253 2.875C10.4215 2.8753 10.0249 2.97985 9.675 3.17823C9.32514 3.3766 9.0343 3.66184 8.83154 4.00545Z" fill="#00B4F0" /> <path d="M20.3414 16.7873L16.6839 10.5692C15.0027 11.3674 13.5833 12.6145 12.5877 14.1684C11.5941 15.7203 11.0655 17.5165 11.0628 19.3507C11.0628 19.6287 11.0628 19.8994 11.109 20.17H18.3477C18.7511 20.1702 19.1475 20.0662 19.4974 19.8685C19.8472 19.6708 20.1382 19.3862 20.3414 19.0432C20.5432 18.7005 20.6495 18.3114 20.6495 17.9152C20.6495 17.5191 20.5432 17.13 20.3414 16.7873Z" fill="#5748FF" /> 
+                 </svg> 
+                </div> 
+                <div> 
+                 <div class="haas-menu-primary-link-platform-title">
+                   UI Components 
+                 </div> 
+                 <div class="haas-menu-primary-link-platform-desc">
+                   Accessible, Beautiful, Consistent 
+                 </div> 
+                </div> </a> </li> 
+              <li> <a class="haas-menu-primary-link-platform" href="/framework" relative-menu-link> 
+                <div class="haas-menu-primary-link-platform-icon"> 
+                 <svg width="32" height="32" viewbox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg"> <path d="M29.2001 16.5926C23.9293 20.6091 15.0548 17.6089 11.896 13.4654C7.12556 7.21823 -1.93095 14.6559 3.88687 20.9269C11.4117 28.7768 24.8103 26.1018 29.2001 16.5926Z" fill="#00B4F0" /> <path d="M3.88117 20.9347C11.4137 28.7768 24.8201 26.1018 29.2016 16.6004C33.5277 6.988 18.994 1.98738 16.1919 11.7828C15.806 13.1957 15.1718 14.5286 14.319 15.7194C12.0012 18.9498 8.19112 20.9347 3.88117 20.9347Z" fill="#FF707A" /> <path d="M29.2016 16.5926C24.9632 19.8313 18.3749 18.5137 14.319 15.7116C12.0012 18.9503 8.19112 20.9347 3.88117 20.9264C6.93682 24.1096 10.9694 25.562 14.9698 25.5226C20.812 25.4749 26.5981 22.2445 29.2016 16.5926Z" fill="#5748FF" /> 
+                 </svg> 
+                </div> 
+                <div> 
+                 <div class="haas-menu-primary-link-platform-title">
+                   Vaadin Framework 
+                 </div> 
+                 <div class="haas-menu-primary-link-platform-desc">
+                   UI in 100% Java 
+                 </div> 
+                </div> </a> </li> 
+              <li> <a class="haas-menu-primary-link-platform" href="/copilot" relative-menu-link> 
+                <div class="haas-menu-primary-link-platform-icon"> 
+                 <svg width="34" height="32" viewbox="0 0 34 32" fill="none" xmlns="http://www.w3.org/2000/svg"> <g clip-path="url(#clip0_119_234)"> 
+                   <path d="M9.34764 6.65138L2.4664 13.5326C1.10424 14.8948 1.10424 17.1033 2.4664 18.4654L9.34766 25.3467C10.7098 26.7088 12.9183 26.7088 14.2805 25.3467L21.1617 18.4654C22.5239 17.1033 22.5239 14.8948 21.1617 13.5326L14.2804 6.65138C12.9183 5.28923 10.7098 5.28923 9.34764 6.65138Z" fill="#00B4F0" /> 
+                   <path d="M19.7195 6.65307L12.8382 13.5343C11.4761 14.8965 11.4761 17.105 12.8382 18.4671L19.7195 25.3484C21.0816 26.7105 23.2901 26.7105 24.6523 25.3484L31.5335 18.4671C32.8957 17.105 32.8957 14.8965 31.5335 13.5343L24.6523 6.65307C23.2901 5.29092 21.0816 5.29092 19.7195 6.65307Z" fill="#FF707A" /> 
+                   <path d="M21.1677 13.5343L16.9821 9.34863L12.7965 13.5343C12.1426 14.1884 11.7753 15.0754 11.7753 16.0003C11.7753 16.9252 12.1426 17.8122 12.7965 18.4663L16.9821 22.6519L21.1677 18.4663C21.8216 17.8122 22.189 16.9252 22.189 16.0003C22.189 15.0754 21.8216 14.1884 21.1677 13.5343Z" fill="#5748FF" /> 
+                  </g> <defs> 
+                   <clippath id="clip0_119_234"> 
+                    <rect width="34" height="23.6298" fill="white" transform="translate(0 4.18506)" /> 
+                   </clippath> 
+                  </defs> 
+                 </svg> 
+                </div> 
+                <div> 
+                 <div class="haas-menu-primary-link-platform-title">
+                   Copilot 
+                 </div> 
+                 <div class="haas-menu-primary-link-platform-desc">
+                   AI-powered UI Editor 
+                 </div> 
+                </div> </a> </li> 
+              <li> <a class="haas-menu-primary-link-platform" href="/acceleration" relative-menu-link> 
+                <div class="haas-menu-primary-link-platform-icon"> 
+                 <svg width="32" height="32" viewbox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg"> <mask id="mask0_119_327" style="mask-type:luminance" maskunits="userSpaceOnUse" x="3" y="5" width="26" height="22"> 
+                   <path d="M29 5.03125H3V26.7368H29V5.03125Z" fill="white" /> 
+                  </mask> <g mask="url(#mask0_119_327)"> 
+                   <path d="M28.0155 14.3116L16.5946 5.24073C16.0406 4.9616 15.3778 4.99185 14.8498 5.31223C14.319 5.63123 13.9987 6.20048 13.9987 6.81099V24.9583C13.9987 25.5674 14.319 26.1353 14.8498 26.4557C15.1358 26.629 15.4603 26.717 15.7889 26.717C16.0653 26.717 16.3403 26.6537 16.5946 26.5272L28.0155 17.4535C28.5655 16.9365 29 16.5488 29 15.8819C29 15.215 28.6315 14.8561 28.0155 14.3116Z" fill="#FF707A" /> 
+                   <path d="M17.0155 14.3124L5.59464 5.24146C5.04051 4.96234 4.37913 4.99258 3.85113 5.31296C3.32038 5.63196 3 6.20122 3 6.81172V24.9591C3 25.5682 3.32038 26.1361 3.85113 26.4564C4.13713 26.6297 4.46163 26.7177 4.79026 26.7177C5.06663 26.7177 5.34164 26.6544 5.59601 26.528L17.0168 17.4543C17.5668 16.9373 18.0013 16.5495 18.0013 15.8827C18.0013 15.2158 17.6315 14.8569 17.0155 14.3124Z" fill="#00B4F0" /> 
+                   <path d="M17.0154 14.3121L13.9987 11.9348C13.9987 12.4479 13.9987 15.4576 13.9987 16.0681V18.1301C13.9987 18.7392 13.9987 19.5302 13.9987 19.9047L17.0168 17.454C17.5668 16.9369 18.0013 16.5492 18.0013 15.8823C18.0013 15.2154 17.6314 14.8566 17.0154 14.3121Z" fill="#5748FF" /> 
+                  </g> 
+                 </svg> 
+                </div> 
+                <div> 
+                 <div class="haas-menu-primary-link-platform-title">
+                   Acceleration Kits 
+                 </div> 
+                 <div class="haas-menu-primary-link-platform-desc">
+                   Enterprise Building Blocks 
+                 </div> 
+                </div> </a> </li> 
+              <li> <a class="haas-menu-primary-link-platform" href="/migration-toolkit" relative-menu-link> 
+                <div class="haas-menu-primary-link-platform-icon"> 
+                 <svg width="32" height="32" viewbox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg"> <g clip-path="url(#clip0_119_381)"> 
+                   <path d="M14.0814 28.8542C14.5903 29.3476 15.2804 29.6248 16 29.6248C16.7196 29.6248 17.4097 29.3476 17.9186 28.8542C18.4274 28.3608 18.7133 27.6916 18.7133 26.9938C18.7133 26.2959 18.4274 25.6267 17.9186 25.1333L8.32567 15.8311L17.9186 6.52886C18.4274 6.03544 18.7133 5.36622 18.7133 4.66842C18.7133 3.97061 18.4274 3.3014 17.9186 2.80797C17.4097 2.31455 16.7196 2.03735 16 2.03735C15.2804 2.03735 14.5903 2.31455 14.0814 2.80797L2.95365 13.5986C2.34304 14.1906 2 14.9937 2 15.8311C2 16.6685 2.34304 17.4715 2.95365 18.0636L14.0814 28.8542Z" fill="#FF707A" /> 
+                   <path d="M17.9186 2.80797C17.4097 2.31455 16.7196 2.03735 16 2.03735C15.2804 2.03735 14.5903 2.31455 14.0814 2.80797C13.5726 3.3014 13.2867 3.97061 13.2867 4.66842C13.2867 5.36622 13.5726 6.03544 14.0814 6.52886L23.6744 15.8311L14.0814 25.1333C13.5726 25.6267 13.2867 26.2959 13.2867 26.9938C13.2867 27.6916 13.5726 28.3608 14.0814 28.8542C14.5903 29.3476 15.2804 29.6248 16 29.6248C16.7196 29.6248 17.4097 29.3476 17.9186 28.8542L29.0464 18.0636C29.657 17.4715 30 16.6685 30 15.8311C30 14.9937 29.657 14.1906 29.0464 13.5986L17.9186 2.80797Z" fill="#00B4F0" /> 
+                   <path d="M14.0474 6.48476C12.989 5.45982 12.9878 3.7969 14.0447 2.77054C15.1017 1.74417 16.8166 1.74301 17.875 2.76795L19.8358 4.66668L16.0082 8.38349L14.0474 6.48476Z" fill="#5748FF" /> 
+                   <path d="M18.7363 15.8316C18.7363 17.2967 17.5115 18.4845 16.0005 18.4845C14.4896 18.4845 13.2648 17.2967 13.2648 15.8316C13.2648 14.3664 14.4896 13.1787 16.0005 13.1787C17.5115 13.1787 18.7363 14.3664 18.7363 15.8316Z" fill="#5748FF" /> 
+                   <path d="M17.8841 28.8848C16.8288 29.9123 15.1145 29.9157 14.0549 28.8926C12.9954 27.8693 12.9919 26.2069 14.047 25.1794L16.003 23.2749L19.84 26.9803L17.8841 28.8848Z" fill="#5748FF" /> 
+                  </g> <defs> 
+                   <clippath id="clip0_119_381"> 
+                    <rect width="28" height="28" fill="white" transform="translate(2 2)" /> 
+                   </clippath> 
+                  </defs> 
+                 </svg> 
+                </div> 
+                <div> 
+                 <div class="haas-menu-primary-link-platform-title">
+                   Migration Toolkit 
+                 </div> 
+                 <div class="haas-menu-primary-link-platform-desc">
+                   Migrate Legacy Apps 
+                 </div> 
+                </div> </a> </li> 
+              <li> <a class="haas-menu-primary-link-platform" href="/swing" relative-menu-link> 
+                <div class="haas-menu-primary-link-platform-icon swing-icon"> 
+                 <svg width="323" height="321" viewbox="0 0 323 321" fill="none" xmlns="http://www.w3.org/2000/svg"> <path d="M161.5 208C135.267 208 114 186.734 114 160.499C114 134.266 135.267 113 161.5 113C187.734 113 209 134.266 209 160.499C209 186.734 187.734 208 161.5 208Z" fill="#5748FF" /> <rect x="104" y="1" width="219" height="102" fill="#FF707A" /> <path d="M103.5 0C160.495 0 206.728 46.0686 206.997 103H104V206.996C103.833 206.997 103.667 207 103.5 207C46.3385 207 0 160.661 0 103.5C0 46.3385 46.3385 0 103.5 0Z" fill="#FF707A" /> <rect x="218" y="320" width="218" height="102" transform="rotate(180 218 320)" fill="#00B4F0" /> <path d="M219.5 321C162.505 321 116.272 274.931 116.003 218H219V114.004C219.167 114.003 219.333 114 219.5 114C276.661 114 323 160.339 323 217.5C323 274.661 276.661 321 219.5 321Z" fill="#00B4F0" /> 
+                 </svg> 
+                </div> 
+                <div> 
+                 <div class="haas-menu-primary-link-platform-title">
+                   SwingBridge 
+                 </div> 
+                 <div class="haas-menu-primary-link-platform-desc">
+                   Modernize your Swing apps 
+                 </div> 
+                </div> </a> </li> 
+             </ul> </li> 
+            <li class="haas-menu-secondary"> 
+             <div> 
+              <ul> 
+               <li> <a class="haas-menu-primary-link" href="/ai" relative-menu-link> <i class="haas-menu-primary-link-icon las la-laptop-code"></i> <span>AI</span> </a> </li> 
+               <li> <a class="haas-menu-primary-link" href="/directory/" relative-menu-link> <i class="haas-menu-primary-link-icon las la-cube"></i> <span>Add-ons</span> </a> </li> 
+               <li> <a class="haas-menu-primary-link" href="/roadmap" relative-menu-link> <i class="haas-menu-primary-link-icon las la-road"></i> <span>Roadmap</span> </a> </li> 
+               <li> <a class="haas-menu-primary-link" href="/showcase" relative-menu-link> <i class="haas-menu-primary-link-icon las la-layer-group"></i> <span>Showcase</span> </a> </li> 
+               <li> <a class="haas-menu-primary-link" href="/examples-and-demos" relative-menu-link> <i class="haas-menu-primary-link-icon las la-icons"></i> <span>Examples &amp; Demos</span> </a> </li> 
+              </ul> 
+             </div> </li> 
+           </ul> </li> 
+          <li> <a id="haas-link-docs" class="haas-button haas-nav-button" href="/docs/latest/" relative-menu-link>Docs</a> </li> <!-- Developers --> 
+          <li class="haas-dropdown"> <button class="haas-button haas-nav-button haas-dropdown-button" aria-haspopup="true" aria-expanded="false"> <span>Resources</span> <i class="haas-caret las la-angle-down"></i> </button> 
+           <ul class="haas-menu haas-menu-developers haas-menu-resources"> 
+            <li class="haas-menu-primary"> 
+             <ul class="haas-menu-resources-right-column"> 
+              <li> <a id="haas-link-forum" class="haas-menu-primary-link-platform" href="/forum" relative-menu-link> 
+                <div class="haas-menu-primary-link-platform-icon"> <i class="text-[#0968F6] las la-comment-dots  text-3xl"></i> 
+                </div> 
+                <div> 
+                 <div class="haas-menu-primary-link-platform-title">
+                   Forum 
+                 </div> 
+                 <div class="haas-menu-primary-link-platform-desc">
+                   Ask questions, find answers 
+                 </div> 
+                </div> </a> </li> 
+              <li> <a id="haas-link-blog" class="haas-menu-primary-link-platform" href="/blog" relative-menu-link> 
+                <div class="haas-menu-primary-link-platform-icon"> <i class="text-[#0968F6] las la-book-open text-3xl"></i> 
+                </div> 
+                <div> 
+                 <div class="haas-menu-primary-link-platform-title">
+                   Blog 
+                 </div> 
+                 <div class="haas-menu-primary-link-platform-desc">
+                   Latest Vaadin news and tips 
+                 </div> 
+                </div> </a> </li> 
+              <li> <a id="haas-link-events" class="haas-menu-primary-link-platform" href="/events" relative-menu-link> 
+                <div class="haas-menu-primary-link-platform-icon"> <i class="text-[#0968F6] las la-calendar-check text-3xl"></i> 
+                </div> 
+                <div> 
+                 <div class="haas-menu-primary-link-platform-title">
+                   Events &amp; Webinars 
+                 </div> 
+                 <div class="haas-menu-primary-link-platform-desc">
+                   Upcoming events and webinars 
+                 </div> 
+                </div> </a> </li> 
+              <li> <a id="haas-link-vaadin-create" class="haas-menu-primary-link-platform" href="/vaadin-create-2026" relative-menu-link> 
+                <div class="haas-menu-primary-link-platform-icon"> <i class="text-[#0968F6] las la-users text-3xl"></i> 
+                </div> 
+                <div> 
+                 <div class="haas-menu-primary-link-platform-title">
+                   Vaadin Create 2026 
+                 </div> 
+                 <div class="haas-menu-primary-link-platform-desc">
+                   The full-stack Java conference 
+                 </div> 
+                </div> </a> </li> 
+             </ul> </li> 
+            <li class="haas-menu-primary"> 
+             <ul> 
+              <li> <a id="haas-link-training" class="haas-menu-primary-link-platform" href="/learn/training" relative-menu-link> 
+                <div class="haas-menu-primary-link-platform-icon"> <i class="text-[#0968F6] las la-graduation-cap text-3xl"></i> 
+                </div> 
+                <div> 
+                 <div class="haas-menu-primary-link-platform-title">
+                   UI Training &amp; Certification 
+                 </div> 
+                 <div class="haas-menu-primary-link-platform-desc">
+                   Free training for your team 
+                 </div> 
+                </div> </a> </li> 
+              <li> <a id="haas-link-white-papers" class="haas-menu-primary-link-platform" href="/white-papers" relative-menu-link> <i class="haas-menu-primary-link-platform-icon las la-file-alt text-3xl text-[#0968F6]"></i> 
+                <div> 
+                 <div class="haas-menu-primary-link-platform-title">
+                   Guides &amp; E-books 
+                 </div> 
+                 <div class="haas-menu-primary-link-platform-desc">
+                   Free downloadable materials 
+                 </div> 
+                </div> </a> </li> 
+              <li> <a id="haas-link-webinars" class="haas-menu-primary-link-platform" href="/events#past-events" relative-menu-link> 
+                <div class="haas-menu-primary-link-platform-icon"> <i class="text-[#0968F6] las la-video text-3xl"></i> 
+                </div> 
+                <div> 
+                 <div class="haas-menu-primary-link-platform-title">
+                   Videos 
+                 </div> 
+                 <div class="haas-menu-primary-link-platform-desc">
+                   Event and webinar recordings 
+                 </div> 
+                </div> </a> </li> 
+              <li> <a id="haas-link-customer-stories" class="haas-menu-primary-link-platform" href="/success-stories" relative-menu-link> <i class="haas-menu-primary-link-platform-icon las la-smile-beam text-3xl text-[#0968F6]"></i> 
+                <div> 
+                 <div class="haas-menu-primary-link-platform-title">
+                   Customer stories 
+                 </div> 
+                 <div class="haas-menu-primary-link-platform-desc">
+                   Vaadin customer success stories 
+                 </div> 
+                </div> </a> </li> 
+             </ul> </li> 
+           </ul> </li> 
+          <li class="haas-dropdown"> <button class="haas-button haas-nav-button haas-dropdown-button" aria-haspopup="true" aria-expanded="false"> <span>Support</span> <i class="haas-caret las la-angle-down"></i> </button> 
+           <ul class="haas-menu haas-menu-developers"> 
+            <li class="haas-menu-primary"> 
+             <ul> 
+              <li> <a class="haas-menu-primary-link-platform" href="/beyond-framework" relative-menu-link> 
+                <div class="haas-menu-primary-link-platform-icon"> <i class="text-[#0968F6] las la-compass  text-3xl"></i> 
+                </div> 
+                <div> 
+                 <div class="haas-menu-primary-link-platform-title">
+                   Beyond framework 
+                 </div> 
+                 <div class="haas-menu-primary-link-platform-desc">
+                   Three ways to go further 
+                 </div> 
+                </div> </a> </li> 
+              <li> <a class="haas-menu-primary-link-platform" href="/solutions/support" relative-menu-link> 
+                <div class="haas-menu-primary-link-platform-icon"> <i class="text-[#0968F6] las la-life-ring  text-3xl"></i> 
+                </div> 
+                <div> 
+                 <div class="haas-menu-primary-link-platform-title">
+                   Support 
+                 </div> 
+                 <div class="haas-menu-primary-link-platform-desc">
+                   Direct line to Vaadin experts 
+                 </div> 
+                </div> </a> </li> 
+              <li> <a class="haas-menu-primary-link-platform" href="/maintenance" relative-menu-link> 
+                <div class="haas-menu-primary-link-platform-icon"> <i class="text-[#0968F6] las la-toolbox  text-3xl"></i> 
+                </div> 
+                <div> 
+                 <div class="haas-menu-primary-link-platform-title">
+                   Maintenance 
+                 </div> 
+                 <div class="haas-menu-primary-link-platform-desc">
+                   Up to 15 years per version 
+                 </div> 
+                </div> </a> </li> 
+              <li> <a class="haas-menu-primary-link-platform" href="/upgrade" relative-menu-link> 
+                <div class="haas-menu-primary-link-platform-icon"> <i class="text-[#0968F6] las la-sync-alt text-3xl"></i> 
+                </div> 
+                <div> 
+                 <div class="haas-menu-primary-link-platform-title">
+                   Upgrading Vaadin Apps 
+                 </div> 
+                 <div class="haas-menu-primary-link-platform-desc">
+                   Get more from your applications 
+                 </div> 
+                </div> </a> </li> 
+             </ul> </li> 
+            <li class="haas-menu-secondary haas-support"> 
+             <div> 
+              <ul> 
+               <li> <a class="haas-menu-primary-link" href="/solutions/expert-services"> <i class="haas-menu-primary-link-icon las la-hammer"></i> <span>Expert services</span> </a> </li> 
+               <li> <a class="haas-menu-primary-link" href="/solutions/design-services"> <i class="haas-menu-primary-link-icon las la-pencil-ruler"></i> <span>Design services</span> </a> </li> 
+               <li> <a class="haas-menu-primary-link" href="/solutions/modernize-existing-app"> <i class="haas-menu-primary-link-icon las la-magic"></i> <span>App modernization</span> </a> </li> 
+               <li> <a class="haas-menu-primary-link" href="/company" relative-menu-link> <i class="haas-menu-primary-link-icon lab la-vaadin"></i> <span>Vaadin company</span> </a> </li> 
+               <li class="haas-focus-link"> <a class="haas-download haas-menu-primary-link text-[#0968F6]" target="_blank" href="https://website.vaadin.com/hubfs/Whitepapers/Vaadin%20Service%20Catalog.pdf"> <i class="haas-menu-primary-link-icon las la-download"></i> <span>Services catalog</span> </a> </li> 
+              </ul> 
+             </div> </li> 
+           </ul> </li> 
+          <li> <a id="haas-link-benefits" class="haas-button haas-nav-button" href="/enterprise" relative-menu-link>Enterprise</a> </li> <!-- Pricing --> 
+          <li> <a id="haas-link-pricing" class="haas-button haas-nav-button" href="/pricing" relative-menu-link>Pricing</a> </li> 
+         </ul> <!-- Mobile nav footer --> 
+         <div class="haas-nav-footer"> <a id="haas-contact-us-cta-mobile" href="https://pages.vaadin.com/contact" class="haas-button haas-nav-button contact-us-button">Contact us</a> <a id="haas-primary-cta-mobile" href="https://start.vaadin.com/app" class="haas-start-button haas-button haas-button-large primary haas-primary-cta-button">Start building</a> 
+         </div> 
+        </nav> 
+       </div> 
+       <div class="haas-content-right"> <a id="haas-contact-us-cta" href="https://pages.vaadin.com/contact" class="haas-desktop haas-button haas-nav-button contact-us-button">Contact us</a> 
+        <div id="haas-container"></div> <a id="haas-primary-cta" href="https://start.vaadin.com/app" class="haas-start-button haas-desktop haas-button primary haas-button-cta haas-primary-cta-button">Start building</a> 
+       </div> 
+      </div> 
+     </header> 
+    </div> 
+   </div> 
+   <style>
+    .container {
+      max-width: 1440px;
+    }
+    .button {
+      border-radius: 4px;
+    }
+    .button.secondary.light {
+      border-color: #575757;
+    }
+    .button.secondary.light:hover {
+      background-color: var(--base-blue);
+      border-color: var(--base-blue);
+      color: white;
+    }
+    #home-footer .button.primary.light {
+      background-color: white;
+      color: #0968F6;
+    }
+    #home-footer .button.secondary.water {
+      border-color: white;
+      color: white;
+    }
+    #home-footer .button.primary.light:hover {
+      background-color: #DBDBDB;
+    }
+    #home-footer .button.secondary.water:hover {
+      background-color: white;
+      color: #0968F6;
+    }
+    .dot {
+      background-color: #DEDEDE;
+      border-radius: 50%;
+      display: inline-block;
+      width: 10px;
+      height: 10px;
+    }
+    .dark .dot {
+      background-color: #505050;
+    }
+    #card-demo-code {
+      text-shadow: none;
+    }
+    /* Code colors */
+    .token.punctuation {
+      color: #eaf0f8;
+    }
+    .token.attr-name,
+    .token.builtin,
+    .token.char,
+    .token.inserted,
+    .token.selector,
+    .token.string {
+      color: #8ce4c5;
+    }
+    .token.keyword,
+    .token.property,
+    .token.tag {
+      color: #cbb4ff;
+    }
+    .token.class-name {
+      color: #c8e1ff;
+    }
+    .token.function {
+      color: #95c6ff;
+    }
+    .line-number {
+      height: 14px;
+    }
+    .caret {
+      animation: blink 1.1s steps(1,end) infinite;
+      background: #0968F6;
+      display: inline-block;
+      height: 0.85rem;
+      width: 0.12rem;
+      vertical-align: -0.26em;
+    }
+    @keyframes blink {
+      50% {
+        opacity: .15;
+      }
+    }
+    .benefits .feature_list__text {
+      line-height: 1.4;
+      font-size: 16px;
+    }
+    .open-source-section-image img {
+      border-radius: 8px;
+      height: 100%!important;
+      object-fit: cover;
+      object-position: center;
+      position: absolute;
+      width: 100%!important;
+    }
+    /* Newsletter subscription */
+    .newsletter-module .hs-form {
+      margin-bottom: 1rem;
+    }
+    .newsletter-module .hs-form .field {
+      margin: 0;
+    }
+    .newsletter-module .hs-form .field > label,
+    .newsletter-module .hs-form .legal-consent-container,
+    .newsletter-module .hs-form .hs_error_rollup {
+      display: none;
+    }
+    .newsletter-module .hs-form .hs-error-msgs {
+      margin-left: 8px;
+    }
+    .newsletter-module .hs-form {
+      align-items: center;
+      display: flex;
+      justify-content: center;
+    }
+    .newsletter-module .hs-form .hs-form-field input[type="email"]:not(.invalid) {
+      border: 1px solid #575757;
+      color: white;
+    }
+    .newsletter-module .hs-form .hs-form-field input[type="email"] {
+      background: transparent;
+      background-color: transparent;
+      height: var(--button-size);
+    }
+    .newsletter-module .hs-form input[type="submit"] {
+      border-radius: 4px;
+      text-transform: uppercase;
+    }
+    .newsletter-module .hs-form-field input::placeholder {
+      color: rgba(180,180,180,0.7);
+    }
+    .newsletter-module .submitted-message {
+      text-align: center;
+    }
+    @media (min-width: 768px) {
+      .button {
+        min-width: 180px;
+      }
+      .newsletter-module .hs-form .input {
+        margin-right: 1rem;
+      }
+      .newsletter-module .hs-form input[type="submit"] {
+        margin-top: 0 !important;
+      }
+    }
+    @media (min-width: 1179px) {
+      .benefits .feature_list__heading {
+        font-size: 22px;
+      }
+      .benefits .feature_list__text {
+        line-height: 1.6;
+        font-size: 18px;
+      }
+    }
+    @media (max-width: 768px) {
+      .newsletter-module form {
+        flex-direction: column;
+        gap: 1rem;
+      }
+      .newsletter-module .hs-form .hs-form-field,
+      .newsletter-module .hs-form .hs-form-field input[type="email"],
+      .newsletter-module .hs-form .hs-submit,
+      .newsletter-module .hs-form .actions,
+      .newsletter-module .hs-form input[type="submit"] {
+        width: 100%;
+      }
+      .newsletter-module .hs-form .hs-submit .hs-button {
+        min-width: unset;
+      }
+      .newsletter-module .hs-form .hs-error-msgs {
+        text-align: center;
+      }
+    }
+    /* Vaadin component CSS */
+    .dark vaadin-card h2 {
+      color: white!important;
+    }
+    .components-ctas div {
+      margin: 0;
+    }
+    .card {
+      border-radius: 4px;
+      border: 1px solid var(--lumo-contrast-10pct);
+    }
+    .card_title {
+      color: var(--lumo-body-text-color);
+    }
+    .card_footer {
+      border-top: 1px solid var(--lumo-contrast-10pct);
+    }
+    .card_sub {
+      color: var(--lumo-secondary-text-color);
+      font-size: var(--lumo-font-size-s);
+    }
+    .vaadin-component {
+      opacity: 0;
+      transition-duration: 300ms;
+      transition-property: all;
+      transition-timing-function: ease-in;
+    }
+    .vaadin-component:defined {
+      opacity: 1;
+    }
+    
+    vaadin-card > img {
+      height: unset;
+      max-width: unset;
+    }
+    #vaadin-customer-logos .logos div {
+      color: #B7B7B7;
+      font-size: 19px;
+      font-weight: 400;
+      line-height: 1.4;
+    }
+    #vaadin-customer-logos h2 {
+      margin-bottom: 0;
+      text-wrap: balance;
+    }
+    #home-before-footer-cta h2 {
+      font-size: 44px;
+    }
+    @media (min-width: 640px) {
+      #home-before-footer-cta h2 {
+        font-size: 56px;
+      }
+    }
+    [theme~='dark'] {
+      --lumo-base-color: #0f0f0f;
+
+      --lumo-header-text-color: white;
+      --lumo-body-text-color: white;
+      --lumo-secondary-text-color: #9F9F9F;
+      --lumo-contrast-60pct: #9F9F9F;
+
+      --lumo-primary-color: #04869A;
+      --lumo-primary-color-10pct: rgba(26, 129, 250, 0.1);
+      --lumo-primary-text-color: white;
+
+      --lumo-success-color: rgb(11, 181, 154);
+      --lumo-success-color-10pct: rgba(11, 181, 154, 0.1);;
+      --lumo-success-text-color: rgb(11, 181, 154);
+
+      --lumo-error-color: rgb(210, 101, 148);
+      --lumo-error-color-10pct: rgba(210, 101, 148, 0.1);
+
+      --lumo-warning-color: rgb(231, 173, 0);
+      --lumo-warning-color-10pct: rgba(231, 173, 0, 0.1);
+    }
+    vaadin-custom-field::part(input-fields) {
+      display: flex;
+    }
+    vaadin-grid {
+      --vaadin-grid-cell-padding: var(--lumo-space-s) var(--lumo-space-m);
+    }
+    vaadin-grid-cell-content:has(vaadin-checkbox, vaadin-menu-bar) {
+      --vaadin-grid-cell-padding: var(--lumo-space-s);
+      padding: var(--vaadin-grid-cell-padding);
+    }
+    vaadin-login-form::part(form) {
+      background: none;
+    }
+    vaadin-message-input-button {
+      --vaadin-button-background: var(--lumo-primary-color);
+      --vaadin-button-text-color: var(--lumo-primary-contrast-color);
+      min-width: var(--lumo-button-size);
+      padding-inline: calc(var(--lumo-button-size) / 4);
+    }
+    vaadin-message-input-button::part(label) {
+      width: 0;
+    }
+    vaadin-message-input-button::part(label)::after {
+      align-items: center;
+      content: var(--lumo-icons-arrow-up);
+      display: flex;
+      font-family: "lumo-icons";
+      font-size: var(--lumo-icon-size-m);
+      inset: 0;
+      justify-content: center;
+      position: absolute;
+    }
+    vaadin-text-area-container {
+      color: var(--vaadin-input-field-placeholder-color, var(--lumo-secondary-text-color));
+    }
+    .text-success {
+      color: var(--lumo-success-text-color);
+    }
+    .bg-lumo-base {
+      background-color: var(--lumo-base-color);
+    }
+    .bg-primary-10 {
+      background-color: var(--lumo-primary-color-10pct);
+    }
+    .bg-success-10 {
+      background-color: var(--lumo-success-color-10pct);
+    }
+    .bg-error-10 {
+      background-color: var(--lumo-error-color-10pct);
+    }
+    /* Vaadin components gallery overlay and fade in */
+    .gallery-placeholder-overlay::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(
+        180deg,
+        #0f0f0f 0,
+        #141414 70%,
+        #0f0f0f 100%
+      );
+    }
+    .gallery-placeholder-overlay::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      transform: translateX(-100%);
+      background: linear-gradient(
+        90deg,
+        rgba(74, 95, 122, 0) 0%,
+        rgba(74, 95, 122, 0.15) 45%,
+        rgba(74, 95, 122, 0) 90%
+      );
+      animation: gallery-shimmer-move 2.2s ease-in-out infinite;
+    }
+    @keyframes gallery-shimmer-move {
+      0% {
+        transform: translateX(-100%);
+      }
+      100% {
+        transform: translateX(100%);
+      }
+    }
+    #gallery-placeholder.fade-out {
+      opacity: 0;
+      transition: opacity 200ms ease-out;
+    }
+    .components-grid {
+      opacity: 1;
+      transition: opacity 200ms ease-out;
+    }
+    .components-grid .faded-in {
+      opacity: 1;
+    }
+  </style> <cms-extension cms-remove hidden bean-name="gitHubReleaseProvider" property="platform" asynchronous="true"> 
+   </cms-extension> 
+   <main> 
+    <section id="home-hero" class="container mb-20 pt-20 md:pt-36"> 
+     <div class="grid grid-cols-12 place-content-center text-center gap-[0_20px] xl:gap-[0_40px] mb-8"> 
+      <h1 class="heading col-span-12 leading-[1.1] mb-4 text-[48px] sm:text-[74px] dark:text-white"> 
+       <div id="hs_cos_wrapper_hero_h1_heading" class="hs_cos_wrapper hs_cos_wrapper_widget hs_cos_wrapper_type_module widget-type-text" style="" data-hs-cos-general-type="widget" data-hs-cos-type="module"> <span id="hs_cos_wrapper_hero_h1_heading_" class="hs_cos_wrapper hs_cos_wrapper_widget hs_cos_wrapper_type_text" style="" data-hs-cos-general-type="widget" data-hs-cos-type="text">The UI Framework for Java &amp; Spring</span> 
+       </div> </h1> 
+      <div class="col-span-12 md:col-span-8 md:col-start-3 text-[17px] leading-[1.4] text-[#6F6F6F] dark:text-[#9F9F9F] mb-4"> 
+       <div id="hs_cos_wrapper_hero_description" class="hs_cos_wrapper hs_cos_wrapper_widget hs_cos_wrapper_type_module widget-type-text" style="" data-hs-cos-general-type="widget" data-hs-cos-type="module"> <span id="hs_cos_wrapper_hero_description_" class="hs_cos_wrapper hs_cos_wrapper_widget hs_cos_wrapper_type_text" style="" data-hs-cos-general-type="widget" data-hs-cos-type="text">Most web frameworks are built for the public internet: for reach and experiences for strangers. Vaadin is built for the other side of the login. For the data-defined, functionally beautiful and long-lived apps your organization actually runs on.</span> 
+       </div> 
+      </div> 
+      <div class="col-span-12 lg:col-span-8 lg:col-start-3 flex flex-col gap-2 items-center"> 
+       <div class="w-full sm:w-auto"> 
+        <div id="hs_cos_wrapper_hero_ctas" class="hs_cos_wrapper hs_cos_wrapper_widget hs_cos_wrapper_type_module" style="" data-hs-cos-general-type="widget" data-hs-cos-type="module"> 
+         <div class="my-4 sm:flex items-center space-y-5 sm:space-y-0 sm:space-x-5 justify-center"> 
+          <div class="w-full sm:min-w-[180px] sm:w-auto"> <a class="button large primary water icon-right  w-full" href="https://start.vaadin.com/app" id="home-primary-cta-b" rel=""> START BUILDING </a> 
+          </div> 
+          <div class="w-full sm:min-w-[180px] sm:w-auto"> <a class="button large secondary light   w-full" href="https://vaadin.com/docs/latest" id="home-secondary-cta-b" rel=""> BROWSE DOCS </a> 
+          </div> 
+         </div> 
+        </div> 
+       </div> <a class="inline-flex items-center gap-1 ml-1 text-[#1b2b41b0] dark:text-[#B7B7B7] dark:hover:text-white hover:no-underline" href="https://github.com/vaadin/platform/releases/tag/25.3.3" rel="noopener" target="_blank"> v25.3.3<i class="lab la-github"></i> </a> 
+      </div> 
+     </div> 
+    </section> 
+    <div id="home-hero-component-demo" class="container mb-xl lg:mb-28"> 
+     <div class="border-t border-r border-l border-[#DBDBDB] dark:border-[#505050] rounded-tl-xl rounded-tr-xl"> 
+      <div class="toolbar h-[30px] flex items-center gap-2 p-4 border-b border-[#DBDBDB] dark:border-[#505050]"> <span class="dot"></span><span class="dot"></span><span class="dot"></span> 
+      </div> 
+      <div class="grid md:grid-cols-[60%_40%] bg-[#F0F4F7] dark:bg-transparent"> 
+       <div class="editor md:border-r border-[#DBDBDB] dark:border-[#505050] relative"> 
+        <div class="grid grid-cols-[25px_1fr] md:grid-cols-[40px_1fr]"> 
+         <div class="flex flex-col py-6 pl-2 items-end gap-[8.4px]"> <span class="line-number text-[#DBDBDB] dark:text-[#505050] text-[14px] leading-[1.6] h-min">1</span> <span class="line-number text-[#DBDBDB] dark:text-[#505050] text-[14px] leading-[1.6] h-min">2</span> <span class="line-number text-[#DBDBDB] dark:text-[#505050] text-[14px] leading-[1.6] h-min">3</span> <span class="line-number text-[#DBDBDB] dark:text-[#505050] text-[14px] leading-[1.6] h-min">4</span> <span class="line-number text-[#DBDBDB] dark:text-[#505050] text-[14px] leading-[1.6] h-min">5</span> <span class="line-number text-[#DBDBDB] dark:text-[#505050] text-[14px] leading-[1.6] h-min">6</span> <span class="line-number text-[#DBDBDB] dark:text-[#505050] text-[14px] leading-[1.6] h-min">7</span> <span class="line-number text-[#DBDBDB] dark:text-[#505050] text-[14px] leading-[1.6] h-min">8</span> <span class="line-number text-[#DBDBDB] dark:text-[#505050] text-[14px] leading-[1.6] h-min">9</span> <span class="line-number text-[#DBDBDB] dark:text-[#505050] text-[14px] leading-[1.6] h-min">10</span> <span class="line-number text-[#DBDBDB] dark:text-[#505050] text-[14px] leading-[1.6] h-min">11</span> <span class="line-number text-[#DBDBDB] dark:text-[#505050] text-[14px] leading-[1.6] h-min">12</span> <span class="line-number text-[#DBDBDB] dark:text-[#505050] text-[14px] leading-[1.6] h-min">13</span> <span class="line-number text-[#DBDBDB] dark:text-[#505050] text-[14px] leading-[1.6] h-min">14</span> <span class="line-number text-[#DBDBDB] dark:text-[#505050] text-[14px] leading-[1.6] h-min">15</span> <span class="line-number text-[#DBDBDB] dark:text-[#505050] text-[14px] leading-[1.6] h-min">16</span> <span class="line-number text-[#DBDBDB] dark:text-[#505050] text-[14px] leading-[1.6] h-min">17</span> <span class="line-number text-[#DBDBDB] dark:text-[#505050] text-[14px] leading-[1.6] h-min">18</span> <span class="line-number text-[#DBDBDB] dark:text-[#505050] text-[14px] leading-[1.6] h-min">19</span> <span class="line-number text-[#DBDBDB] dark:text-[#505050] text-[14px] leading-[1.6] h-min">20</span> <span class="line-number text-[#DBDBDB] dark:text-[#505050] text-[14px] leading-[1.6] h-min">21</span> 
+         </div> 
+         <pre class="!bg-transparent !rounded-none p-6 mb-0 flex !pl-4 md:!overflow-hidden" aria-live="polite">                <code id="card-demo-code" class="text-[#0F0F0F] dark:text-[#C0CAF5] language-java w-full code !leading-[1.6] md:overflow-scroll lg:overflow-hidden">
+                  class ShipmentCard extends Card {
+                      public ShipmentCard(ShipmentDto dto) {
+                        setTitle("Shipment #" + dto.shipmentId());
+                        setSubtitle(dto.shipmentRoute());
+                        setHeaderSuffix(createStatusBadge(dto.status()));
+                        setHeaderPrefix(new DriverAvatar(dto.driver()));
+                    
+                        setMedia(new Image(dto.shipmentImageUrl(), IMAGE_ALT));
+                        addThemeVariants(CardVariant.LUMO_COVER_MEDIA);
+                    
+                        add(new Markdown(dto.shipmentDescription()));
+                    
+                        addToFooter(
+                          new PrimaryButton("Update Status", e -&gt; openShipmentForm(dto)),
+                          new Button("Track Shipment", e -&gt; viewShipmentOnMap(dto))
+                        );
+                      }
+                    }
+                    
+                    void openShipmentForm(ShipmentDto dto) {/*TODO*/}
+                    void viewShipmentOnMap(ShipmentDto dto) {/*TODO*/}
+                </code>
+              </pre> 
+        </div> <button id="restart-animation" class="flex justify-center items-center gap-2 py-1 px-3 absolute top-5 right-5 transition-all duration-300 rounded-sm disabled:hover:cursor-auto hover:cursor-pointer text-lg text-[#272727] dark:text-[#C0CAF5] disabled:text-[#DBDBDB] dark:disabled:text-[#272727] border border-[#DBDBDB] dark:border-[#272727] dark:hover:bg-[#272727] dark:bg-[#0F0F0F] dark:disabled:hover:bg-[#0F0F0F]"> <span id="restart-tooltip" class="text-sm pt-[3px]">Reload code</span> 
+         <svg class="w-5 h-5" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewbox="0 0 20 20" fill="currentColor"> <path d="M5.27922 7.67995C5.99922 5.99995 7.67922 4.79995 9.59922 4.79995C11.9992 4.79995 13.9192 6.55995 14.3192 8.79995H15.9192C15.5192 5.67995 12.8792 3.19995 9.59922 3.19995C7.19922 3.19995 5.11922 4.47995 4.07922 6.47995L3.19922 5.59995V8.79995H6.39922L5.27922 7.67995Z" fill="currentColor" /> <path d="M15.9992 10.4H12.7192L13.9192 11.52C13.1992 13.2 11.5192 14.4 9.51922 14.4C7.19922 14.4 5.19922 12.64 4.79922 10.4H3.19922C3.59922 13.52 6.31922 16 9.51922 16C11.9192 16 13.9992 14.64 15.1192 12.72L15.9992 13.6V10.4Z" fill="currentColor" /> 
+         </svg> </button> 
+       </div> 
+       <div class="preview border-t md:border-t-0 border-[#DBDBDB] dark:border-[#505050]"> 
+        <div id="hero-demo-container" class="stage h-full grid p-5 pt-8 items-start justify-center sm:justify-start lg:justify-center overflow-hidden"> <vaadin-card theme="cover-media" class="vaadin-component demo max-w-[400px] w-[min(100%,400px)]" id="vaadin-card-demo"> 
+          <img id="card-image" class="vaadin-component" slot="media" src="https://website.vaadin.com/hubfs/1.%20Website%20images/Home/component-demos/vaadin-home-card-demo-header-image.svg" width="200" alt="Freight truck on highway"> 
+          <vaadin-avatar id="card-avatar" class="vaadin-component" name="Goodie Transport" has-color-index="" aria-label="Goodie Transport (GT)" role="img" style="--vaadin-avatar-user-color: var(--vaadin-user-color-1);" abbr="GT" slot="header-prefix"></vaadin-avatar> 
+          <div id="card-title" slot="title">
+            Shipment #VDN-45892 
+          </div> 
+          <div id="card-subtitle" class="" slot="subtitle">
+            Berlin, DE → Turku, FI 
+          </div> 
+          <span id="card-suffix" class="" slot="header-suffix" theme="badge success">In Transit</span> 
+          <p>Carrier: Goodie Transport GmbH<br>Berlin → Travemünde (ferry) → Naantali → Turku. 12 pallets of temperature-controlled goods.</p> 
+          <vaadin-button id="card-primary-btn" class="vaadin-component" slot="footer" tabindex="0" role="button" theme="primary">
+            Update Status 
+          </vaadin-button> 
+          <vaadin-button id="card-secondary-btn" class="vaadin-component" slot="footer" tabindex="0" role="button">
+            Track Shipment 
+          </vaadin-button> 
+         </vaadin-card> 
+        </div> 
+       </div> 
+      </div> 
+     </div> 
+     <div class="rounded-bl rounded-br border border-[#DBDBDB] dark:border-[#505050] px-6 py-4"> 
+      <div id="hs_cos_wrapper_command_copy" class="hs_cos_wrapper hs_cos_wrapper_widget hs_cos_wrapper_type_module" style="" data-hs-cos-general-type="widget" data-hs-cos-type="module"> 
+       <div class="copy-command-module flex gap-3 md:gap-2 flex-col " data-copy-code> 
+        <div class="flex  flex-col md:flex-row justify-between gap-6 md:gap-4 "> <span>Run the demo project locally</span> 
+         <div class="os-buttons flex gap-4"> <button class="code-snippet__tab transition-colors duration-200 text-[12px] hover:text-[#0f0f0f] dark:hover:text-white border-[#272727] dark:border-white hover:border-b
+                   dark:text-white text-[#0f0f0f] border-b " data-tab data-command="git clone https://github.com/vaadin/vaadin-demo.git &amp;&amp; cd vaadin-demo &amp;&amp; ./mvnw spring-boot:run" data-active>MacOS/Linux</button> <button class="code-snippet__tab transition-colors duration-200 text-[12px] hover:text-[#0f0f0f] dark:hover:text-white border-[#272727] dark:border-white hover:border-b
+                   text-[#6F6F6F] dark:text-[#878787] " data-tab data-command="git clone https://github.com/vaadin/vaadin-demo.git &amp;&amp; cd vaadin-demo &amp;&amp; mvnw.cmd spring-boot:run">Windows</button> 
+         </div> 
+        </div> 
+        <div class="flex gap-4 md:items-center justify-between w-full min-w-0"> <a id="copy-code-command-btn" class="code-snippet__command-btn group relative flex min-w-0 bg-transparent border-none p-0 cursor-pointer text-left hover:no-underline" data-copy> 
+          <div class="flex gap-1 min-w-0"> <span class="text-[#272727] dark:text-[#C0CAF5] flex-shrink-0">$</span> <code class="code-snippet__command code text-[#0F0F0F] dark:text-[#0BB59A] dark:hover:text-[#C0CAF5] text-sm leading-[1.6] h-min bg-transparent p-0 min-w-0 break-words md:break-normal">git clone https://github.com/vaadin/vaadin-demo.git &amp;&amp; cd vaadin-demo &amp;&amp; ./mvnw spring-boot:run</code> 
+          </div> 
+          <div class="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2 py-1 text-[11px] text-[#272727] dark:text-white bg-[#DBDBDB] dark:bg-[#272727] rounded whitespace-nowrap pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+            Copy to clipboard 
+           <div class="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-[#DBDBDB] dark:border-t-[#272727]"></div> 
+          </div> </a> <a id="copy-code-command-icon-btn" class="code-snippet__copy group relative flex items-center justify-center flex-shrink-0 cursor-pointer hover:no-underline" data-copy> 
+          <div class="flex items-center justify-center w-8 h-8 text-lg flex-shrink-0 transition-all dark:text-[#6F6F6F] dark:hover:text-[#C0CAF5] border border-[#DBDBDB] dark:border-[#272727] dark:hover:bg-[#272727]"> <i class="las la-copy code-snippet__copy-icon absolute transition-opacity duration-300 opacity-100"></i> <i class="las la-check code-snippet__check-icon absolute transition-opacity duration-300 opacity-0 text-[#00ADE7]"></i> 
+          </div> 
+          <div class="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2 py-1 text-[11px] text-[#272727] dark:text-white bg-[#DBDBDB] dark:bg-[#272727] rounded whitespace-nowrap pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+            Copy to clipboard 
+           <div class="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-[#DBDBDB] dark:border-t-[#272727]"></div> 
+          </div> </a> 
+        </div> 
+       </div> 
+      </div> 
+     </div> 
+    </div> 
+    <div id="home-logo-wall" class="container"> 
+     <div id="hs_cos_wrapper_home_customer_logos" class="hs_cos_wrapper hs_cos_wrapper_widget hs_cos_wrapper_type_module" style="" data-hs-cos-general-type="widget" data-hs-cos-type="module"> 
+      <div class="logo-carousel-module "> 
+       <div class="grid grid-cols-12 text-center  mb-8 "> <span class="logo-carousel__heading md:text-lg col-span-full lg:col-span-10 lg:col-start-2 xl:col-span-8 xl:col-start-3 leading-[1.1] md:leading-[1.2] xl:leading-[1.1] mb-0"> Trusted by leading global institutions </span> 
+       </div> 
+       <div class="logo-carousel relative overflow-hidden"> 
+        <div class="logo-carousel-track flex data-logo-carousel-animation gap-y-6 gap-x-9 sm:hidden"> 
+         <div class="logo-carousel-group  flex flex-shrink-0 gap-y-6 gap-x-9"> 
+          <div class="logo-carousel__item flex justify-center items-center max-h-60  will-change-transform"> 
+           <div class="logo-carousel__logo-wrapper"> 
+            <img class="h-auto max-w-none max-h-12 logo-carousel__logo-default" src="https://website.vaadin.com/hubfs/Bank_of_America_logo%201%20(1).svg" alt="" style="max-width: 100%; max-height: px" onerror="this.style.display='none';"> 
+           </div> 
+          </div> 
+          <div class="logo-carousel__item flex justify-center items-center max-h-60  will-change-transform"> 
+           <div class="logo-carousel__logo-wrapper"> 
+            <img class="h-auto max-w-none max-h-12 logo-carousel__logo-default" src="https://website.vaadin.com/hubfs/Citi_logo_March_2023%201.svg" alt="" style="max-width: 100%; max-height: px" onerror="this.style.display='none';"> 
+           </div> 
+          </div> 
+          <div class="logo-carousel__item flex justify-center items-center max-h-60  will-change-transform"> 
+           <div class="logo-carousel__logo-wrapper"> 
+            <img class="h-auto max-w-none max-h-12 logo-carousel__logo-default" src="https://website.vaadin.com/hubfs/1.%20Website%20images/Home/logos/lufthansa-white.svg" alt="" style="max-width: 100%; max-height: px" onerror="this.style.display='none';"> 
+           </div> 
+          </div> 
+          <div class="logo-carousel__item flex justify-center items-center max-h-60  will-change-transform"> 
+           <div class="logo-carousel__logo-wrapper"> 
+            <img class="h-auto max-w-none max-h-12 logo-carousel__logo-default" src="https://website.vaadin.com/hubfs/1.%20Website%20images/Home/logos/johnson-johnson-white.svg" alt="" style="max-width: 100%; max-height: px" onerror="this.style.display='none';"> 
+           </div> 
+          </div> 
+          <div class="logo-carousel__item flex justify-center items-center max-h-60  will-change-transform"> 
+           <div class="logo-carousel__logo-wrapper"> 
+            <img class="h-auto max-w-none max-h-12 logo-carousel__logo-default" src="https://website.vaadin.com/hubfs/Rockwell_Automation_logo_(2019)%201.svg" alt="" style="max-width: 100%; max-height: px" onerror="this.style.display='none';"> 
+           </div> 
+          </div> 
+         </div> 
+         <div class="logo-carousel-group  flex flex-shrink-0 gap-y-6 gap-x-9"> 
+          <div class="logo-carousel__item flex justify-center items-center max-h-60  will-change-transform"> 
+           <div class="logo-carousel__logo-wrapper"> 
+            <img class="h-auto max-w-none max-h-12 logo-carousel__logo-default" src="https://website.vaadin.com/hubfs/Bank_of_America_logo%201%20(1).svg" alt="" style="max-width: 100%; max-height: px" onerror="this.style.display='none';"> 
+           </div> 
+          </div> 
+          <div class="logo-carousel__item flex justify-center items-center max-h-60  will-change-transform"> 
+           <div class="logo-carousel__logo-wrapper"> 
+            <img class="h-auto max-w-none max-h-12 logo-carousel__logo-default" src="https://website.vaadin.com/hubfs/Citi_logo_March_2023%201.svg" alt="" style="max-width: 100%; max-height: px" onerror="this.style.display='none';"> 
+           </div> 
+          </div> 
+          <div class="logo-carousel__item flex justify-center items-center max-h-60  will-change-transform"> 
+           <div class="logo-carousel__logo-wrapper"> 
+            <img class="h-auto max-w-none max-h-12 logo-carousel__logo-default" src="https://website.vaadin.com/hubfs/1.%20Website%20images/Home/logos/lufthansa-white.svg" alt="" style="max-width: 100%; max-height: px" onerror="this.style.display='none';"> 
+           </div> 
+          </div> 
+          <div class="logo-carousel__item flex justify-center items-center max-h-60  will-change-transform"> 
+           <div class="logo-carousel__logo-wrapper"> 
+            <img class="h-auto max-w-none max-h-12 logo-carousel__logo-default" src="https://website.vaadin.com/hubfs/1.%20Website%20images/Home/logos/johnson-johnson-white.svg" alt="" style="max-width: 100%; max-height: px" onerror="this.style.display='none';"> 
+           </div> 
+          </div> 
+          <div class="logo-carousel__item flex justify-center items-center max-h-60  will-change-transform"> 
+           <div class="logo-carousel__logo-wrapper"> 
+            <img class="h-auto max-w-none max-h-12 logo-carousel__logo-default" src="https://website.vaadin.com/hubfs/Rockwell_Automation_logo_(2019)%201.svg" alt="" style="max-width: 100%; max-height: px" onerror="this.style.display='none';"> 
+           </div> 
+          </div> 
+         </div> 
+        </div> 
+        <div class="logo-carousel-group  flex flex-wrap items-center w-full justify-center gap-y-6 gap-x-9 hidden sm:flex"> 
+         <div class="logo-carousel__item flex justify-center items-center max-h-60  "> 
+          <div class="logo-carousel__logo-wrapper"> 
+           <img class="h-auto max-w-none max-h-12 logo-carousel__logo-default" src="https://website.vaadin.com/hubfs/Bank_of_America_logo%201%20(1).svg" alt="" style="max-width: 100%; max-height: px" onerror="this.style.display='none';"> 
+          </div> 
+         </div> 
+         <div class="logo-carousel__item flex justify-center items-center max-h-60  "> 
+          <div class="logo-carousel__logo-wrapper"> 
+           <img class="h-auto max-w-none max-h-12 logo-carousel__logo-default" src="https://website.vaadin.com/hubfs/Citi_logo_March_2023%201.svg" alt="" style="max-width: 100%; max-height: px" onerror="this.style.display='none';"> 
+          </div> 
+         </div> 
+         <div class="logo-carousel__item flex justify-center items-center max-h-60  "> 
+          <div class="logo-carousel__logo-wrapper"> 
+           <img class="h-auto max-w-none max-h-12 logo-carousel__logo-default" src="https://website.vaadin.com/hubfs/1.%20Website%20images/Home/logos/lufthansa-white.svg" alt="" style="max-width: 100%; max-height: px" onerror="this.style.display='none';"> 
+          </div> 
+         </div> 
+         <div class="logo-carousel__item flex justify-center items-center max-h-60  "> 
+          <div class="logo-carousel__logo-wrapper"> 
+           <img class="h-auto max-w-none max-h-12 logo-carousel__logo-default" src="https://website.vaadin.com/hubfs/1.%20Website%20images/Home/logos/johnson-johnson-white.svg" alt="" style="max-width: 100%; max-height: px" onerror="this.style.display='none';"> 
+          </div> 
+         </div> 
+         <div class="logo-carousel__item flex justify-center items-center max-h-60  "> 
+          <div class="logo-carousel__logo-wrapper"> 
+           <img class="h-auto max-w-none max-h-12 logo-carousel__logo-default" src="https://website.vaadin.com/hubfs/Rockwell_Automation_logo_(2019)%201.svg" alt="" style="max-width: 100%; max-height: px" onerror="this.style.display='none';"> 
+          </div> 
+         </div> 
+        </div> 
+       </div> 
+      </div> 
+     </div> 
+    </div> 
+    <section id="comparison-table-section"> 
+     <div id="hs_cos_wrapper_comparison-table" class="hs_cos_wrapper hs_cos_wrapper_widget hs_cos_wrapper_type_module" style="" data-hs-cos-general-type="widget" data-hs-cos-type="module"> 
+      <div class="tabs-module container my-xl md:my-2xl"> 
+       <div class="grid grid-cols-12 gap-y-6 mb-8 lg:mb-16"> 
+        <h2 class="tabs-module__heading text-center col-span-full md:col-span-10 md:col-start-2 text-[2.5rem] lg:text-[3.5rem] leading-[1] m-0"> Vaadin or a JavaScript framework? </h2> 
+        <div class="tabs-module__bodytext text-center col-span-full md:col-span-10 md:col-start-2 xl:col-span-6 xl:col-start-4 text-[1rem] lg:text-[1.125rem] leading-[1.4]">
+          Vaadin is a full-stack UI framework. React, Angular and Vue leave more to you. 
+        </div> 
+       </div> 
+       <div> 
+        <div class="tabs-module__tab-content grid md:grid-cols-12 gap-8 lg:gap-10 " id="comparison-table-panel-0" data-tab-content="0"> 
+         <div class="tabs-module__col-switch md:hidden col-span-full flex gap-1 p-1 border rounded-lg" role="tablist" aria-label="Tab"> <button type="button" role="tab" id="comparison-table-t0-colbtn-0" aria-controls="comparison-table-t0-col-0" aria-selected="true" class="tabs-module__col-btn flex-1 min-w-0 rounded-md px-3 py-2.5 text-[0.875rem] font-medium leading-[1.25] text-center transition-colors duration-200"> Vaadin </button> <button type="button" role="tab" id="comparison-table-t0-colbtn-1" aria-controls="comparison-table-t0-col-1" aria-selected="false" tabindex="-1" class="tabs-module__col-btn flex-1 min-w-0 rounded-md px-3 py-2.5 text-[0.875rem] font-medium leading-[1.25] text-center transition-colors duration-200"> React / Angular / Vue </button> 
+         </div> 
+         <div id="comparison-table-t0-col-0" aria-labelledby="comparison-table-t0-colbtn-0" class="tabs-module__col flex flex-col gap-10 col-span-full md:col-span-6 px-6 md:px-[3.125rem] py-8 rounded-lg tabs-module__column-highlighted"> 
+          <div class="flex items-center justify-between gap-4"> 
+           <h3 class="tabs-module__column-headline text-[1.375rem] leading-[1.4] m-0"> Vaadin </h3> 
+          </div> 
+          <ul class="flex flex-col gap-4 list-none p-0 m-0"> 
+           <li class="tabs-module__column-list-item border-t first:border-t-0 pt-4 first:pt-0"> <span class="tabs-module__item-title text-[1rem] lg:text-[1.125rem] font-medium"> Made for business apps </span> <p class="tabs-module__item-text text-[0.875rem] lg:text-[1rem] leading-[1.4] m-0"> Tools and portals for known users. </p> </li> 
+           <li class="tabs-module__column-list-item border-t first:border-t-0 pt-4 first:pt-0"> <span class="tabs-module__item-title text-[1rem] lg:text-[1.125rem] font-medium"> Focus on business logic </span> <p class="tabs-module__item-text text-[0.875rem] lg:text-[1rem] leading-[1.4] m-0"> Java APIs with browser-server plumbing built in. </p> </li> 
+           <li class="tabs-module__column-list-item border-t first:border-t-0 pt-4 first:pt-0"> <span class="tabs-module__item-title text-[1rem] lg:text-[1.125rem] font-medium"> Secure by design </span> <p class="tabs-module__item-text text-[0.875rem] lg:text-[1rem] leading-[1.4] m-0"> Server-side UI means no API for you to harden. </p> </li> 
+           <li class="tabs-module__column-list-item border-t first:border-t-0 pt-4 first:pt-0"> <span class="tabs-module__item-title text-[1rem] lg:text-[1.125rem] font-medium"> Java end to end </span> <p class="tabs-module__item-text text-[0.875rem] lg:text-[1rem] leading-[1.4] m-0"> Your Java developers own every layer, UI included. </p> </li> 
+           <li class="tabs-module__column-list-item border-t first:border-t-0 pt-4 first:pt-0"> <span class="tabs-module__item-title text-[1rem] lg:text-[1.125rem] font-medium"> Built for data-rich workflows </span> <p class="tabs-module__item-text text-[0.875rem] lg:text-[1rem] leading-[1.4] m-0"> Accessible grids and forms, styled to your brand. </p> </li> 
+           <li class="tabs-module__column-list-item border-t first:border-t-0 pt-4 first:pt-0"> <span class="tabs-module__item-title text-[1rem] lg:text-[1.125rem] font-medium"> SEO pages live elsewhere </span> <p class="tabs-module__item-text text-[0.875rem] lg:text-[1rem] leading-[1.4] m-0"> Keep them on a CMS or static site. </p> </li> 
+          </ul> 
+         </div> 
+         <div id="comparison-table-t0-col-1" aria-labelledby="comparison-table-t0-colbtn-1" class="tabs-module__col flex flex-col gap-10 col-span-full md:col-span-6 px-6 md:px-[3.125rem] py-8 rounded-lg tabs-module__column tabs-module__col--inactive"> 
+          <div class="flex items-center justify-between gap-4"> 
+           <h3 class="tabs-module__column-headline text-[1.375rem] leading-[1.4] m-0"> React / Angular / Vue </h3> 
+          </div> 
+          <ul class="flex flex-col gap-4 list-none p-0 m-0"> 
+           <li class="tabs-module__column-list-item-sec-card border-t first:border-t-0 pt-4 first:pt-0"> <span class="tabs-module__item-title-sec-card text-[1rem] lg:text-[1.125rem] font-medium"> At home on the open web </span> <p class="tabs-module__item-text-sec-card text-[0.875rem] lg:text-[1rem] leading-[1.4] m-0"> Anonymous consumer traffic with sudden spikes. </p> </li> 
+           <li class="tabs-module__column-list-item-sec-card border-t first:border-t-0 pt-4 first:pt-0"> <span class="tabs-module__item-title-sec-card text-[1rem] lg:text-[1.125rem] font-medium"> Pieces you combine and maintain </span> <p class="tabs-module__item-text-sec-card text-[0.875rem] lg:text-[1rem] leading-[1.4] m-0"> Angular includes most of it. React and Vue, less. </p> </li> 
+           <li class="tabs-module__column-list-item-sec-card border-t first:border-t-0 pt-4 first:pt-0"> <span class="tabs-module__item-title-sec-card text-[1rem] lg:text-[1.125rem] font-medium"> An API in between </span> <p class="tabs-module__item-text-sec-card text-[0.875rem] lg:text-[1rem] leading-[1.4] m-0"> Usually one you design, version and secure. </p> </li> 
+           <li class="tabs-module__column-list-item-sec-card border-t first:border-t-0 pt-4 first:pt-0"> <span class="tabs-module__item-title-sec-card text-[1rem] lg:text-[1.125rem] font-medium"> TypeScript up front </span> <p class="tabs-module__item-text-sec-card text-[0.875rem] lg:text-[1rem] leading-[1.4] m-0"> Any backend behind it: Java, Python, Node or .NET. </p> </li> 
+           <li class="tabs-module__column-list-item-sec-card border-t first:border-t-0 pt-4 first:pt-0"> <span class="tabs-module__item-title-sec-card text-[1rem] lg:text-[1.125rem] font-medium"> When the UI is the product </span> <p class="tabs-module__item-text-sec-card text-[0.875rem] lg:text-[1rem] leading-[1.4] m-0"> Full control of interactions and visual style. </p> </li> 
+           <li class="tabs-module__column-list-item-sec-card border-t first:border-t-0 pt-4 first:pt-0"> <span class="tabs-module__item-title-sec-card text-[1rem] lg:text-[1.125rem] font-medium"> Search pages in the same stack </span> <p class="tabs-module__item-text-sec-card text-[0.875rem] lg:text-[1rem] leading-[1.4] m-0"> Server rendering with Next.js, Nuxt or Angular SSR. </p> </li> 
+          </ul> 
+         </div> 
+        </div> 
+       </div> 
+      </div> 
+     </div> 
+    </section> 
+    <section id="components-gallery" class="gallery--hidden my-xl md:mb-2xl md:mt-48 relative"> 
+     <div class="components-hero container mb-16 md:mb-12 lg:mb-md xl:mb-20 md:grid md:grid-cols-12 gap-[20px_40px] grid-rows-[min-content]"> 
+      <h2 class="dark:text-white text-[44px] lg:text-[56px] md:col-span-10 lg:col-span-6 mb-3 lg:mb-0"> 
+       <div id="hs_cos_wrapper_components_heading" class="hs_cos_wrapper hs_cos_wrapper_widget hs_cos_wrapper_type_module widget-type-text" style="" data-hs-cos-general-type="widget" data-hs-cos-type="module"> <span id="hs_cos_wrapper_components_heading_" class="hs_cos_wrapper hs_cos_wrapper_widget hs_cos_wrapper_type_text" style="" data-hs-cos-general-type="widget" data-hs-cos-type="text">UI components for real business applications</span> 
+       </div> </h2> 
+      <div class="lg:grid lg:grid-cols-6 flex flex-col gap-[32px_40px] lg:gap-10 col-span-7 lg:col-span-6 items-start grid-rows-[min-content]"> 
+       <div class="text-[17px] leading-[1.4] text-[#6F6F6F] dark:text-[#9F9F9F] lg:col-span-4 lg:col-start-2"> 
+        <div id="hs_cos_wrapper_components_description" class="hs_cos_wrapper hs_cos_wrapper_widget hs_cos_wrapper_type_module widget-type-text" style="" data-hs-cos-general-type="widget" data-hs-cos-type="module"> <span id="hs_cos_wrapper_components_description_" class="hs_cos_wrapper hs_cos_wrapper_widget hs_cos_wrapper_type_text" style="" data-hs-cos-general-type="widget" data-hs-cos-type="text">Go from backend data to interactive UI in a few lines of Java. Components are accessible, responsive, testable, and support internationalization out of the box.</span> 
+        </div> 
+       </div> 
+       <div class="w-full sm:w-auto lg:col-span-5 lg:col-start-2 components-ctas"> 
+        <div id="hs_cos_wrapper_components_ctas" class="hs_cos_wrapper hs_cos_wrapper_widget hs_cos_wrapper_type_module" style="" data-hs-cos-general-type="widget" data-hs-cos-type="module"> 
+         <div class="my-4 sm:flex items-center space-y-5 sm:space-y-0 sm:space-x-5 justify-start"> 
+          <div class="w-full sm:min-w-[180px] sm:w-auto"> <a class="button large primary water   w-full" href="https://app.demo.vaadin.com" id="get-started-button" rel=""> SEE LIVE DEMO </a> 
+          </div> 
+          <div class="w-full sm:min-w-[180px] sm:w-auto"> <a class="button large secondary light   w-full" href="https://vaadin.com/docs/latest/components" id="browse-components-button" rel=""> BROWSE COMPONENTS </a> 
+          </div> 
+         </div> 
+        </div> 
+       </div> 
+      </div> 
+     </div> 
+     <div id="components-gallery-inner"> 
+      <div class="components-grid container pb-4 md:pb-0 flex flex-col md:grid md:grid-cols-12 gap-10 relative"> <!-- Shimmer overlay div --> 
+       <div id="gallery-placeholder" class="gallery-placeholder-overlay absolute inset-0 p-4 z-2 overflow-hidden rounded bg-[rgba(173,200,235,0.14)]"></div> <!-- Login form --> <vaadin-login-form class="border border-[#DBDBDB] dark:border-[#505050] col-span-3 hidden lg:flex items-center justify-center overflow-hidden rounded" no-autofocus></vaadin-login-form> <!-- Chart --> <vaadin-chart id="currency-chart" class="border border-[#DBDBDB] dark:border-[#505050] box-border col-span-7 lg:col-span-6 overflow-hidden p-6 rounded" no-legend stacking="normal" tooltip type="area"> 
+        <vaadin-chart-series id="usd-series" title="United States dollar"></vaadin-chart-series> 
+        <vaadin-chart-series id="eur-series" title="Euro"></vaadin-chart-series> 
+        <vaadin-chart-series id="jpy-series" title="Japanese yen"></vaadin-chart-series> 
+        <vaadin-chart-series id="gbp-series" title="Poud sterling"></vaadin-chart-series> 
+       </vaadin-chart> <!-- Side navigation --> 
+       <div class="border border-[#DBDBDB] dark:border-[#505050] col-span-5 lg:col-span-3 content-start hidden md:flex flex-col gap-4 overflow-hidden p-6 rounded"> <vaadin-side-nav id="side-nav"> 
+         <vaadin-side-nav-item path="/dashboard"> 
+          <vaadin-icon class="p-1" src="https://website.vaadin.com/hubfs/Home/vaadin-components-demo/dashboard.svg" slot="prefix"></vaadin-icon> Dashboard 
+         </vaadin-side-nav-item> 
+         <vaadin-side-nav-item path="/calendar"> 
+          <vaadin-icon class="p-1" src="https://website.vaadin.com/hubfs/Home/vaadin-components-demo/calendar.svg" slot="prefix"></vaadin-icon> Calendar 
+          <vaadin-icon aria-label="42 new invitations" icon="lumo:bell" slot="suffix" theme="badge error pill primary"></vaadin-icon> 
+         </vaadin-side-nav-item> 
+        </vaadin-side-nav> <vaadin-side-nav collapsible> 
+         <span slot="label">Messages</span> 
+         <vaadin-side-nav-item path="/inbox"> 
+          <vaadin-icon class="p-1" src="https://website.vaadin.com/hubfs/Home/vaadin-components-demo/inbox.svg" slot="prefix"></vaadin-icon> Inbox 
+          <span slot="suffix" theme="badge contrast pill">4</span> 
+         </vaadin-side-nav-item> 
+         <vaadin-side-nav-item path="/sent"> 
+          <vaadin-icon class="p-1" src="https://website.vaadin.com/hubfs/Home/vaadin-components-demo/paperplane.svg" slot="prefix"></vaadin-icon> Sent 
+         </vaadin-side-nav-item> 
+         <vaadin-side-nav-item path="/trash"> 
+          <vaadin-icon class="p-1" src="https://website.vaadin.com/hubfs/Home/vaadin-components-demo/trash.svg" slot="prefix"></vaadin-icon> Trash 
+         </vaadin-side-nav-item> 
+        </vaadin-side-nav> <vaadin-side-nav collapsible> 
+         <span slot="label">Admin</span> 
+         <vaadin-side-nav-item path="/users"> 
+          <vaadin-icon class="p-1" src="https://website.vaadin.com/hubfs/Home/vaadin-components-demo/users.svg" slot="prefix"></vaadin-icon> Users 
+         </vaadin-side-nav-item> 
+         <vaadin-side-nav-item path="/permissions"> 
+          <vaadin-icon class="p-1" src="https://website.vaadin.com/hubfs/Home/vaadin-components-demo/key.svg" slot="prefix"></vaadin-icon> Permissions 
+         </vaadin-side-nav-item> 
+        </vaadin-side-nav> 
+       </div> <!-- Contacts grid --> 
+       <div class="border border-[#DBDBDB] dark:border-[#505050] col-span-12 lg:col-span-8 hidden md:flex flex-col gap-4 overflow-hidden p-6 rounded"> 
+        <div class="flex gap-2 items-center"> <vaadin-text-field class="text-[rgb(159,159,159)]" placeholder="Search..."> 
+          <vaadin-icon icon="lumo:search" slot="prefix"></vaadin-icon> 
+         </vaadin-text-field> <vaadin-button class="bg-lumo-base border border-[#DBDBDB] dark:border-[#505050]" id="role-filter">
+           Role 
+          <vaadin-icon icon="lumo:angle-down" slot="suffix"></vaadin-icon> 
+         </vaadin-button> <vaadin-popover aria-label="Role filter" for="role-filter" modal position="bottom" theme="arrow"> 
+          <vaadin-checkbox-group theme="vertical"> 
+           <vaadin-checkbox label="Admin" value="admin"></vaadin-checkbox> 
+           <vaadin-checkbox label="Manager" value="manager"></vaadin-checkbox> 
+           <vaadin-checkbox label="User" value="user"></vaadin-checkbox> 
+          </vaadin-checkbox-group> 
+         </vaadin-popover> <vaadin-button class="bg-lumo-base border border-[#DBDBDB] dark:border-[#505050]" id="status-filter">
+           Status 
+          <vaadin-icon icon="lumo:angle-down" slot="suffix"></vaadin-icon> 
+         </vaadin-button> <vaadin-popover aria-label="Status filter" for="status-filter" modal position="bottom" theme="arrow"> 
+          <vaadin-checkbox-group theme="vertical"> 
+           <vaadin-checkbox label="Customer" value="customer"></vaadin-checkbox> 
+           <vaadin-checkbox label="Lead" value="lead"></vaadin-checkbox> 
+           <vaadin-checkbox label="Opportunity" value="opportunity"></vaadin-checkbox> 
+           <vaadin-checkbox label="Subscriber" value="subscriber"></vaadin-checkbox> 
+          </vaadin-checkbox-group> 
+         </vaadin-popover> <vaadin-button aria-label="Settings" class="border border-[#DBDBDB] dark:border-[#505050]" style="margin-inline-start:auto" theme="icon tertiary"> 
+          <vaadin-icon icon="lumo:cog"></vaadin-icon> 
+          <vaadin-tooltip slot="tooltip" text="Settings"></vaadin-tooltip> 
+         </vaadin-button> <vaadin-button theme="primary"> 
+          <vaadin-icon icon="lumo:plus" slot="prefix"></vaadin-icon> New Contact 
+         </vaadin-button> 
+        </div> <vaadin-grid id="contacts-grid" all-rows-visible class="leading-m" theme="no-border"> 
+         <vaadin-grid-selection-column></vaadin-grid-selection-column> 
+         <vaadin-grid-column id="name-col" header="Name" auto-width></vaadin-grid-column> 
+         <vaadin-grid-column id="location-col" header="Location" path="location" auto-width></vaadin-grid-column> 
+         <vaadin-grid-column id="status-col" header="Status" auto-width></vaadin-grid-column> 
+         <vaadin-grid-column id="actions-col" header="" width="4rem" flex-grow="0"></vaadin-grid-column> 
+        </vaadin-grid> 
+       </div> <!-- Company details form --> 
+       <div class="border border-[#DBDBDB] dark:border-[#505050] col-span-4 content-start gap-x-4 hidden lg:grid grid-cols-2 overflow-hidden p-6 rounded"> <span class="col-span-full mb-1 text-2xl text-white">Company Details</span> <vaadin-text-field class="col-span-full" label="Name" value="Apex Solutions Group"></vaadin-text-field> <vaadin-text-field label="Website" value="apexsg.com"></vaadin-text-field> <vaadin-combo-box label="Industry" value="Tech"></vaadin-combo-box> <vaadin-radio-group class="col-span-full" label="Requested Service" value="consulting"> 
+         <vaadin-radio-button label="Consulting" value="consulting"></vaadin-radio-button> 
+         <vaadin-radio-button label="Partnership" value="partnership"></vaadin-radio-button> 
+        </vaadin-radio-group> <vaadin-date-picker label="Preferred Start Date" value="2026-01-07"></vaadin-date-picker> <vaadin-integer-field label="Urgency Level" max="9" min="0" step-buttons-visible value="7"></vaadin-integer-field> 
+       </div> <!-- Upload report --> 
+       <div class="border border-[#DBDBDB] dark:border-[#505050] col-span-6 lg:col-span-4 content-start gap-x-4 grid grid-cols-2 overflow-hidden p-6 rounded"> <span class="col-span-full mb-1 text-2xl text-white">Upload Report</span> <vaadin-upload id="vaadin-upload-component" class="col-span-full mb-1 mt-4 px-4 pt-4 pb-2 dark:border-[rgba(180,205,238,0.23)] border-[0.75px] border-dashed"></vaadin-upload> <vaadin-custom-field class="col-span-full" label="Report Period"> 
+         <vaadin-date-picker accessible-name="Start date" class="flex-1 min-w-0" value="2025-04-01"></vaadin-date-picker> 
+         <span class="mx-2 text-[#9F9F9F]">-</span> 
+         <vaadin-date-picker accessible-name="End date" class="flex-1 min-w-0" value="2025-06-30"></vaadin-date-picker> 
+        </vaadin-custom-field> <vaadin-text-area class="col-span-full" label="Notes" value="Includes updated metrics and revised projections for the upcoming quarter."></vaadin-text-area> 
+       </div> <!-- Messaging --> 
+       <div class="border border-[#DBDBDB] dark:border-[#505050] col-span-6 lg:col-span-4 content-start flex flex-col overflow-hidden px-2 py-4 rounded"> <vaadin-message-list id="message-list"></vaadin-message-list> <vaadin-message-input></vaadin-message-input> 
+       </div> <!-- Statistics --> 
+       <div class="border border-[#DBDBDB] dark:border-[#505050] col-span-4 content-start flex sm:hidden lg:flex flex-col overflow-hidden rounded"> <vaadin-tabs> 
+         <vaadin-tab>
+           Weekly 
+         </vaadin-tab> 
+         <vaadin-tab>
+           Monthly 
+         </vaadin-tab> 
+         <vaadin-tab>
+           Yearly 
+         </vaadin-tab> 
+        </vaadin-tabs> 
+        <div class="flex flex-col py-2"> 
+         <div class="flex gap-4 items-center px-4 py-2"> 
+          <div class="bg-primary-10 flex h-14 w-14 items-center justify-center rounded-full text-primary"> <vaadin-icon src="https://website.vaadin.com/hubfs/Home/vaadin-components-demo/cube.svg"></vaadin-icon> 
+          </div> 
+          <div class="flex flex-col flex-grow py-1"> <span class="text-sm text-[#9F9F9F]">Orders</span> <span class="font-medium text-xl">42,719</span> <span class="flex items-center text-sm text-success"> 
+            <vaadin-icon icon="lumo:arrow-up"></vaadin-icon> 16.38% </span> 
+          </div> <a aria-label="Orders" class="flex h-9 w-9 items-center justify-center" title="Orders"> 
+           <vaadin-icon icon="lumo:arrow-right"></vaadin-icon> </a> 
+         </div> 
+         <div class="flex gap-4 items-center px-4 py-2"> 
+          <div class="bg-success-10 flex h-14 w-14 items-center justify-center rounded-full text-success"> <vaadin-icon src="https://website.vaadin.com/hubfs/Home/vaadin-components-demo/bar-chart.svg"></vaadin-icon> 
+          </div> 
+          <div class="flex flex-col flex-grow py-1"> <span class="text-sm text-[#9F9F9F]">Sales</span> <span class="font-medium text-xl">€546,110.70</span> <span class="flex items-center text-sm text-success"> 
+            <vaadin-icon icon="lumo:arrow-up"></vaadin-icon> 40.82% </span> 
+          </div> <a aria-label="Sales" class="flex h-9 w-9 items-center justify-center" title="Sales"> 
+           <vaadin-icon icon="lumo:arrow-right"></vaadin-icon> </a> 
+         </div> 
+         <div class="flex gap-4 items-center px-4 py-2"> 
+          <div class="bg-error-10 flex h-14 w-14 items-center justify-center rounded-full text-error"> <vaadin-icon src="https://website.vaadin.com/hubfs/Home/vaadin-components-demo/users.svg"></vaadin-icon> 
+          </div> 
+          <div class="flex flex-col flex-grow py-1"> <span class="font-normal text-sm text-[#9F9F9F]">Visitors</span> <span class="font-medium text-xl">62,806</span> <span class="flex items-center text-sm text-success"> 
+            <vaadin-icon icon="lumo:arrow-up"></vaadin-icon> 13.35% </span> 
+          </div> <a aria-label="Visitors" class="flex h-9 w-9 items-center justify-center text-[#9F9F9F]" title="Visitors"> 
+           <vaadin-icon icon="lumo:arrow-right"></vaadin-icon> </a> 
+         </div> 
+        </div> 
+       </div> 
+      </div> 
+     </div> 
+    </section> 
+    <section id="open-source" class="container mt-xl md:mt-2xl mb-10 grid grid-cols-12 gap-5 md:gap-10"> 
+     <div class="aspect-square md:aspect-auto lg:aspect-square col-span-12 md:col-span-6 relative rounded-lg open-source-section-image"> 
+      <div id="hs_cos_wrapper_open_source_image" class="hs_cos_wrapper hs_cos_wrapper_widget hs_cos_wrapper_type_module widget-type-linked_image" style="" data-hs-cos-general-type="widget" data-hs-cos-type="module"> <span id="hs_cos_wrapper_open_source_image_" class="hs_cos_wrapper hs_cos_wrapper_widget hs_cos_wrapper_type_linked_image" style="" data-hs-cos-general-type="widget" data-hs-cos-type="linked_image"><img src="https://website.vaadin.com/hs-fs/hubfs/1.%20Website%20images/Home/vaadin-home-open-source-section-image.webp?width=750&amp;name=vaadin-home-open-source-section-image.webp" class="hs-image-widget " style="width:750px;border-width:0px;border:0px;" width="750" alt="Vaadiners sitting at a table" title="Vaadiners sitting at a table" loading="lazy" srcset="https://website.vaadin.com/hs-fs/hubfs/1.%20Website%20images/Home/vaadin-home-open-source-section-image.webp?width=375&amp;name=vaadin-home-open-source-section-image.webp 375w, https://website.vaadin.com/hs-fs/hubfs/1.%20Website%20images/Home/vaadin-home-open-source-section-image.webp?width=750&amp;name=vaadin-home-open-source-section-image.webp 750w, https://website.vaadin.com/hs-fs/hubfs/1.%20Website%20images/Home/vaadin-home-open-source-section-image.webp?width=1125&amp;name=vaadin-home-open-source-section-image.webp 1125w, https://website.vaadin.com/hs-fs/hubfs/1.%20Website%20images/Home/vaadin-home-open-source-section-image.webp?width=1500&amp;name=vaadin-home-open-source-section-image.webp 1500w, https://website.vaadin.com/hs-fs/hubfs/1.%20Website%20images/Home/vaadin-home-open-source-section-image.webp?width=1875&amp;name=vaadin-home-open-source-section-image.webp 1875w, https://website.vaadin.com/hs-fs/hubfs/1.%20Website%20images/Home/vaadin-home-open-source-section-image.webp?width=2250&amp;name=vaadin-home-open-source-section-image.webp 2250w" sizes="(max-width: 750px) 100vw, 750px"></span> 
+      </div> 
+     </div> 
+     <div class="lg:aspect-square flex flex-col justify-between col-span-12 md:col-span-6 rounded-lg bg-[#0968F6] text-white lg:text-lg leading-[1.4] p-6 lg:p-10"> 
+      <div class="mb-20"> 
+       <h2 class="leading-[1.2] text-white text-[18px] md:text-[22px] mb-3"> 
+        <div id="hs_cos_wrapper_open_source_heading" class="hs_cos_wrapper hs_cos_wrapper_widget hs_cos_wrapper_type_module widget-type-text" style="" data-hs-cos-general-type="widget" data-hs-cos-type="module"> <span id="hs_cos_wrapper_open_source_heading_" class="hs_cos_wrapper hs_cos_wrapper_widget hs_cos_wrapper_type_text" style="" data-hs-cos-general-type="widget" data-hs-cos-type="text">Free &amp; open source, Apache 2.0 licensed.</span> 
+        </div> </h2> 
+       <div class="text-white opacity-[0.8] mb-6 xl:text-lg leading-[1.4]"> 
+        <div id="hs_cos_wrapper_open_source_text" class="hs_cos_wrapper hs_cos_wrapper_widget hs_cos_wrapper_type_module widget-type-text" style="" data-hs-cos-general-type="widget" data-hs-cos-type="module"> <span id="hs_cos_wrapper_open_source_text_" class="hs_cos_wrapper hs_cos_wrapper_widget hs_cos_wrapper_type_text" style="" data-hs-cos-general-type="widget" data-hs-cos-type="text">Use and extend Vaadin Core freely, even in commercial projects. Development happens in the open on GitHub, backed by a global community and the Vaadin team.</span> 
+        </div> 
+       </div> <a rel="noopener" target="_blank" href="https://github.com/vaadin" class="flex items-center gap-2 text-white hover:text-[#bbc9dc] hover:no-underline duration-200 transition xl:text-lg"> <i class="lab la-github text-[22px] xl:text-[24px] mb-[2px]"></i> <span class="underline decoration-from-font underline-offset-[3px]">Explore on GitHub</span> </a> 
+      </div> 
+      <div class="flex flex-col gap-6"> <a href="https://vaadin.com/docs/latest/components" class="font-bold text-white hover:text-[#bbc9dc] hover:no-underline transition duration-300 border-t border-[rgba(255,255,255,0.20)] pt-6 flex justify-between"> All Vaadin components<i class="las la-arrow-right"></i> </a> <a href="/forum" class="font-bold text-white hover:text-[#bbc9dc] hover:no-underline transition duration-300 border-t border-[rgba(255,255,255,0.20)] pt-6 flex justify-between"> Vaadin Forum<i class="las la-arrow-right"></i> </a> <a href="/learn/training" class="font-bold text-white hover:text-[#bbc9dc] hover:no-underline transition duration-300 border-t border-[rgba(255,255,255,0.20)] pt-6 flex justify-between"> UI Training &amp; Certification<i class="las la-arrow-right"></i> </a> 
+      </div> 
+     </div> 
+    </section> 
+    <div id="newsletter-subscription" class="container newsletter-module"> 
+     <div class="grid grid-cols-12 gap-x-5 md:gap-x-10 rounded-lg dark:bg-[rgba(38,38,38,0.60)] py-10 px-4"> 
+      <div class="col-span-full md:col-span-8 md:col-start-3 lg:col-span-6 lg:col-start-4 text-center"> 
+       <div class="dark:text-white leading-[1.4] font-bold text-lg md:text-[22px] mb-3"> 
+        <div id="hs_cos_wrapper_newsletter_heading" class="hs_cos_wrapper hs_cos_wrapper_widget hs_cos_wrapper_type_module widget-type-text" style="" data-hs-cos-general-type="widget" data-hs-cos-type="module"> <span id="hs_cos_wrapper_newsletter_heading_" class="hs_cos_wrapper hs_cos_wrapper_widget hs_cos_wrapper_type_text" style="" data-hs-cos-general-type="widget" data-hs-cos-type="text">The Monthly Byte for Java Devs</span> 
+        </div> 
+       </div> 
+       <div class="text-[#9F9F9F] md:text-lg leading-[1.4]"> 
+        <div id="hs_cos_wrapper_newsletter_description" class="hs_cos_wrapper hs_cos_wrapper_widget hs_cos_wrapper_type_module widget-type-text" style="" data-hs-cos-general-type="widget" data-hs-cos-type="module"> <span id="hs_cos_wrapper_newsletter_description_" class="hs_cos_wrapper hs_cos_wrapper_widget hs_cos_wrapper_type_text" style="" data-hs-cos-general-type="widget" data-hs-cos-type="text">Stay ahead in modern web development. Get a monthly roundup of Vaadin updates, practical tips, and deep-dive tutorials delivered straight to your inbox. Loved by 100,000+ developers worldwide. Delivered once a month.</span> 
+        </div> 
+       </div> 
+      </div> 
+      <div x-data="hubspotForm" class="form-container col-span-full md:col-span-8 lg:col-span-6 md:col-start-3 lg:col-start-4 mt-6 md:mx-8 lg:mx-12"> 
+       <div id="hs_cos_wrapper_form" class="hs_cos_wrapper hs_cos_wrapper_widget hs_cos_wrapper_type_module widget-type-form" style="" data-hs-cos-general-type="widget" data-hs-cos-type="module"> <span id="hs_cos_wrapper_form_" class="hs_cos_wrapper hs_cos_wrapper_widget hs_cos_wrapper_type_form" style="" data-hs-cos-general-type="widget" data-hs-cos-type="form"> 
+         <div id="hs_form_target_form"></div> </span> 
+       </div> 
+      </div> 
+     </div> 
+    </div> 
+    <div id="hs_cos_wrapper_ai_section" class="hs_cos_wrapper hs_cos_wrapper_widget hs_cos_wrapper_type_module" style="" data-hs-cos-general-type="widget" data-hs-cos-type="module"> 
+     <section class="container my-xl sm:my-lg md:my-xl grid grid-cols-4 md:grid-cols-12 gap-x-5 xl:gap-x-[40px] gap-y-[60px] md:gap-y-20"> 
+      <div class="flex flex-col gap-6 col-span-full lg:col-span-9"> 
+       <h2 class="text-white text-[44px] md:text-6xl mb-0">AI-ready, from code to production</h2> 
+       <div class="flex flex-col sm:flex-row gap-4"> <a class="button large primary water  w-full sm:min-w-[180px] sm:w-auto" href="https://vaadin.com/ai" id="hs-button_ai_section" rel=""> LEARN MORE </a> 
+       </div> 
+      </div> 
+      <div class="flex flex-col gap-[60px] lg:gap-20 col-span-full"> 
+       <div class="grid md:grid-cols-2 lg:grid-cols-12 gap-5 md:gap-5 pt-4 md:pt-6 border-t border-[#DBDBDB] dark:border-[#272727]"> 
+        <div class="grid col-span-full md:col-span-1 lg:col-span-8 lg:grid-cols-8 gap-3 md:gap-6 lg:gap-[19px]"> 
+         <p class="m-0 text-white font-bold text-lg leading-[1.4] lg:col-span-3">Build apps faster with AI-assisted development.</p> 
+         <p class="m-0 text-white leading-[1.4] opacity-70 lg:col-span-4">The Vaadin MCP server gives your AI coding assistant full context on Vaadin APIs, components, and your project structure — so generated code works without manual fixing. Use it with GitHub Copilot, Claude Code, Cursor, or Windsurf. Vaadin Copilot complements these tools by letting you shape layouts and refine the UI visually on the running app. Verify changes instantly with Browserless testing — UI unit tests that run on the JVM with no browser overhead. Vaadin Copilot and Browserless testing are free, included in every Vaadin project.</p> 
+        </div> 
+        <div class="grid auto-rows-min md:col-span-1 lg:col-span-4 grid-cols-4 gap-4 md:gap-5"> 
+         <div class="home-ai__item rounded-md col-span-2 bg-[#262626] flex items-center justify-center aspect-video"> 
+          <div class="home-ai__logo-wrapper flex justify-center items-center relative"> 
+           <img class=" fill-white max-h-8 h-auto max-w-none home-ai__logo-default " src="https://website.vaadin.com/hubfs/1.%20Website%20images/Home/logos/claude-logo.svg" alt="Claude Logo" loading="" width="138" height="32" onerror="this.style.display='none';"> 
+          </div> 
+         </div> 
+         <div class="home-ai__item rounded-md col-span-2 bg-[#262626] flex items-center justify-center aspect-video"> 
+          <div class="home-ai__logo-wrapper flex justify-center items-center relative"> 
+           <img class=" fill-white max-h-8 h-auto max-w-none home-ai__logo-default " src="https://website.vaadin.com/hubfs/1.%20Website%20images/Home/logos/cursor-logo.svg" alt="Cursor logo" loading="" width="122" height="27" onerror="this.style.display='none';"> 
+          </div> 
+         </div> 
+         <div class="home-ai__item rounded-md col-span-2 bg-[#262626] flex items-center justify-center aspect-video"> 
+          <div class="home-ai__logo-wrapper flex justify-center items-center relative"> 
+           <img class=" fill-white max-h-8 h-auto max-w-none home-ai__logo-default " src="https://website.vaadin.com/hubfs/1.%20Website%20images/Home/logos/github-copilot-logo.svg" alt="GitHub Copilot Logo" loading="" width="137" height="24" onerror="this.style.display='none';"> 
+          </div> 
+         </div> 
+         <div class="home-ai__item rounded-md col-span-2 bg-[#262626] flex items-center justify-center aspect-video"> 
+          <div class="home-ai__logo-wrapper flex justify-center items-center relative"> 
+           <img class=" fill-white max-h-8 h-auto max-w-none home-ai__logo-default " src="https://website.vaadin.com/hubfs/1.%20Website%20images/Home/logos/windsurf-logo.svg" alt="Windsurf Logo" loading="" width="126" height="27" onerror="this.style.display='none';"> 
+          </div> 
+         </div> 
+        </div> 
+       </div> 
+       <div class="grid md:grid-cols-2 lg:grid-cols-12 gap-5 md:gap-5 pt-4 md:pt-6 border-t border-[#DBDBDB] dark:border-[#272727]"> 
+        <div class="grid col-span-full md:col-span-1 lg:col-span-8 lg:grid-cols-8 gap-3 md:gap-6 lg:gap-[19px]"> 
+         <p class="m-0 text-white font-bold text-lg leading-[1.4] lg:col-span-3">Add AI features into your applications.</p> 
+         <p class="m-0 text-white leading-[1.4] opacity-70 lg:col-span-4">Use Spring AI in Vaadin apps to connect models to your data, business logic, and workflows using a Spring-native approach. Build grounded assistants, structured outputs, and tool-driven flows while keeping humans in control.</p> 
+        </div> 
+        <div class="grid auto-rows-min md:col-span-1 lg:col-span-4 grid-cols-4 gap-4 md:gap-5"> 
+         <div class="home-ai__item rounded-md col-span-2 bg-[#262626] flex items-center justify-center aspect-video"> 
+          <div class="home-ai__logo-wrapper flex justify-center items-center relative"> 
+           <img class=" fill-white max-h-8 h-auto max-w-none home-ai__logo-default " src="https://website.vaadin.com/hubfs/1.%20Website%20images/Home/logos/spring-ai-logo.svg" alt="SpringAI Logo" loading="" width="140" height="33" onerror="this.style.display='none';"> 
+          </div> 
+         </div> 
+        </div> 
+       </div> 
+      </div> 
+     </section> 
+    </div> 
+    <section id="works-with-your-platform" class="my-xl md:my-2xl container"> 
+     <div id="hs_cos_wrapper_stack_module" class="hs_cos_wrapper hs_cos_wrapper_widget hs_cos_wrapper_type_module" style="" data-hs-cos-general-type="widget" data-hs-cos-type="module"> 
+      <section class="logos-and-text__bg rounded-lg py-14 md:py-20 lg:py-24 px-4 text-left md:text-center lg:text-left grid grid-cols-12 gap-[0_1.25rem] md:gap-[0_2.5rem] "> 
+       <div class="col-span-full md:col-span-8 md:col-start-3 lg:col-span-5 lg:col-start-7 order-1"> 
+        <h2 class="logos-and-text__heading mb-4 px-4 md:px-0 text-[44px] sm:text-[56px]"> Works with your Java stack </h2> 
+       </div> 
+       <div class="col-span-full md:col-span-8 md:col-start-3 lg:col-span-5 lg:col-start-7 order-2 mb-8 lg:mb-6"> 
+        <p class="logos-and-text__subtext xl:text-lg leading-[1.4] px-4 md:px-0 m-0"> Use the backend you love the most — Spring Boot, Jakarta EE, or Quarkus — and build in Java or Kotlin. </p> 
+       </div> 
+       <div class="col-span-full md:col-span-10 md:col-start-2 lg:col-span-4 lg:col-start-2 lg:row-start-1 lg:row-span-3
+        order-3 lg:order-none grid grid-cols-2 md:grid-cols-4 lg:grid-cols-2 gap-4 md:gap-6 lg:gap-5 place-content-center"> 
+        <div class="logos-and-text__item logos-and-text__logo-item aspect-video md:aspect-auto lg:aspect-video rounded-md col-span-1 py-6 px-8 lg:px-10 flex w-full items-center justify-center"> 
+         <div class="logos-and-text__logo-wrapper relative flex items-center justify-center"> 
+          <img class="logos-and-text__logo-default w-full  logos-and-text__logo-default--has-hover " src="https://website.vaadin.com/hubfs/Logos/Light/spring-framework-logo-white.svg" alt="Spring framework white logo" onerror="this.style.display='none';"> 
+          <img class="logos-and-text__logo-hover w-full" src="https://website.vaadin.com/hubfs/1.%20Website%20images/Home/spring-framework-logo.svg" alt="Spring framework logo" onerror="this.style.display='none';"> 
+         </div> 
+        </div> 
+        <div class="logos-and-text__item logos-and-text__logo-item aspect-video md:aspect-auto lg:aspect-video rounded-md col-span-1 py-6 px-8 lg:px-10 flex w-full items-center justify-center"> 
+         <div class="logos-and-text__logo-wrapper relative flex items-center justify-center"> 
+          <img class="logos-and-text__logo-default w-full  logos-and-text__logo-default--has-hover " src="https://website.vaadin.com/hubfs/Logos/Light/jakarta-ee-logo-white.svg" alt="Jakarta EE logo white" onerror="this.style.display='none';"> 
+          <img class="logos-and-text__logo-hover w-full" src="https://website.vaadin.com/hubfs/1.%20Website%20images/Home/jakarta-ee-logo.svg" alt="Jakarta EE logo" onerror="this.style.display='none';"> 
+         </div> 
+        </div> 
+        <div class="logos-and-text__item logos-and-text__logo-item aspect-video md:aspect-auto lg:aspect-video rounded-md col-span-1 py-6 px-8 lg:px-10 flex w-full items-center justify-center"> 
+         <div class="logos-and-text__logo-wrapper relative flex items-center justify-center"> 
+          <img class="logos-and-text__logo-default w-full  logos-and-text__logo-default--has-hover " src="https://website.vaadin.com/hubfs/Logos/Light/quarkus-logo-white.svg" alt="Quarkus Logo white" onerror="this.style.display='none';"> 
+          <img class="logos-and-text__logo-hover w-full" src="https://website.vaadin.com/hubfs/1.%20Website%20images/Home/quarkus-logo.svg" alt="Quarkus Logo" onerror="this.style.display='none';"> 
+         </div> 
+        </div> 
+        <div class="logos-and-text__item logos-and-text__logo-item aspect-video md:aspect-auto lg:aspect-video rounded-md col-span-1 py-6 px-8 lg:px-10 flex w-full items-center justify-center"> 
+         <div class="logos-and-text__logo-wrapper relative flex items-center justify-center"> 
+          <img class="logos-and-text__logo-default w-full  logos-and-text__logo-default--has-hover " src="https://website.vaadin.com/hubfs/Logos/Light/kotlin-logo-white.svg" alt="Kotlin logo white" onerror="this.style.display='none';"> 
+          <img class="logos-and-text__logo-hover w-full" src="https://website.vaadin.com/hubfs/1.%20Website%20images/Home/kotlin-logo.svg" alt="Kotlin logo" onerror="this.style.display='none';"> 
+         </div> 
+        </div> 
+       </div> 
+       <div class="col-span-full md:col-span-8 md:col-start-3 lg:col-span-5 lg:col-start-7 xl:col-span-4 xl:col-start-7 order-4 lg:order-3
+                  flex flex-col md:flex-row items-center justify-center lg:justify-start gap-4 mt-8 lg:mt-0"> 
+        <div class="w-full md:min-w-[180px] md:w-fit"> <a class="button large primary water   w-full" href="https://start.vaadin.com/app" id="hs-button_stack_module" rel=""> START BUILDING </a> 
+        </div> 
+        <div class="w-full md:min-w-[180px] md:w-fit"> <a class="button large secondary light   w-full" href="https://vaadin.com/docs/latest" id="hs-button_stack_module" rel=""> BROWSE DOCS </a> 
+        </div> 
+       </div> 
+      </section> 
+     </div> 
+    </section> 
+    <section id="more-than-a-framework" class="container my-xl md:my-2xl flex flex-col lg:items-center"> 
+     <div class="mb-16 md:mb-20 flex flex-col sm:grid grid-cols-12 gap-[20px_40px] grid-rows-[min-content]"> 
+      <h2 class="text-left sm:text-center col-span-12 md:col-start-2 md:col-span-10 lg:col-start-3 lg:col-span-8 mb-0 dark:text-white text-[44px] sm:text-[56px]"> 
+       <div id="hs_cos_wrapper_framework_heading" class="hs_cos_wrapper hs_cos_wrapper_widget hs_cos_wrapper_type_module widget-type-text" style="" data-hs-cos-general-type="widget" data-hs-cos-type="module"> <span id="hs_cos_wrapper_framework_heading_" class="hs_cos_wrapper hs_cos_wrapper_widget hs_cos_wrapper_type_text" style="" data-hs-cos-general-type="widget" data-hs-cos-type="text">More than a framework</span> 
+       </div> </h2> 
+      <div class="text-left sm:text-center text-lg leading-[1.4] text-[#6F6F6F] dark:text-[#CDCDCD] col-start-2 col-span-10 md:col-start-3 md:col-span-8"> 
+       <div id="hs_cos_wrapper_framework_bodytext" class="hs_cos_wrapper hs_cos_wrapper_widget hs_cos_wrapper_type_module widget-type-text" style="" data-hs-cos-general-type="widget" data-hs-cos-type="module"> <span id="hs_cos_wrapper_framework_bodytext_" class="hs_cos_wrapper hs_cos_wrapper_widget hs_cos_wrapper_type_text" style="" data-hs-cos-general-type="widget" data-hs-cos-type="text">Serious apps need more than pretty UI widgets. Vaadin lets you build data-heavy UIs quickly, edit visually in app, fast-track integrations, automate UI testing, modernize on your timeline, and stay supported for up to 15 years.</span> 
+       </div> 
+      </div> 
+     </div> 
+     <div id="hs_cos_wrapper_benefits_module" class="hs_cos_wrapper hs_cos_wrapper_widget hs_cos_wrapper_type_module" style="" data-hs-cos-general-type="widget" data-hs-cos-type="module"> 
+      <div class="flex flex-col gap-12 md:gap-16 "> 
+       <div class="mx-auto gap-y-10 gap-x-8 md:gap-x-10  grid sm:grid-cols-2 lg:grid-cols-3"> 
+        <div class="flex flex-col md:flex-row gap-4 "> 
+         <div class="flex items-center justify-center flex-shrink-0  w-10 h-10 "> <span class="feature_list__icon-background rounded-lg w-full h-full flex items-center justify-center"> <i class="text-[22px]  feature_list__icon  las la-magic"></i> </span> 
+         </div> 
+         <div> <span class="feature_list__heading text-lg font-bold leading-[1.4]">Visual editing in dev mode</span> 
+          <div class="feature_list__text xl:text-lg leading-[1.4]  mt-2 ">
+            Open your running app and shape the UI visually. Create layouts, add components, and tweak views in context. Changes are written instantly to your codebase following Vaadin best practices. Iterate faster with a tight feedback loop while staying in control. 
+          </div> 
+         </div> 
+        </div> 
+        <div class="flex flex-col md:flex-row gap-4 "> 
+         <div class="flex items-center justify-center flex-shrink-0  w-10 h-10 "> <span class="feature_list__icon-background rounded-lg w-full h-full flex items-center justify-center"> <i class="text-[22px]  feature_list__icon  las la-rocket"></i> </span> 
+         </div> 
+         <div> <span class="feature_list__heading text-lg font-bold leading-[1.4]">Production-ready integrations</span> 
+          <div class="feature_list__text xl:text-lg leading-[1.4]  mt-2 ">
+            Ship integrations faster without detours. Acceleration Kits provide production-ready setups for SSO, observability, and Kubernetes. Focus on features, not glue work. Secure defaults, proven patterns, and comprehensive documentation included. 
+          </div> 
+         </div> 
+        </div> 
+        <div class="flex flex-col md:flex-row gap-4 "> 
+         <div class="flex items-center justify-center flex-shrink-0  w-10 h-10 "> <span class="feature_list__icon-background rounded-lg w-full h-full flex items-center justify-center"> <i class="text-[22px]  feature_list__icon  las la-check-double"></i> </span> 
+         </div> 
+         <div> <span class="feature_list__heading text-lg font-bold leading-[1.4]">UI testing, built for Vaadin</span> 
+          <div class="feature_list__text xl:text-lg leading-[1.4]  mt-2 ">
+            Automate UI testing with Vaadin TestBench. Get fast UI unit testing and thorough end-to-end testing in one tool, with component-aware selectors, built-in waiting, and screenshots on failure. Run tests locally on your machine, in CI, or on a grid. 
+          </div> 
+         </div> 
+        </div> 
+        <div class="flex flex-col md:flex-row gap-4 "> 
+         <div class="flex items-center justify-center flex-shrink-0  w-10 h-10 "> <span class="feature_list__icon-background rounded-lg w-full h-full flex items-center justify-center"> <i class="text-[22px]  feature_list__icon  las la-sync-alt"></i> </span> 
+         </div> 
+         <div> <span class="feature_list__heading text-lg font-bold leading-[1.4]">Modernization with confidence</span> 
+          <div class="feature_list__text xl:text-lg leading-[1.4]  mt-2 ">
+            Modernize from Swing, SWT, and JavaFX on your schedule. Upgrade when it fits your release cadence, and migrate view by view or all at once. Embed legacy alongside new as needed and keep business logic intact. Let Vaadin's Modernization Toolkit handle the heavy lifting. 
+          </div> 
+         </div> 
+        </div> 
+        <div class="flex flex-col md:flex-row gap-4 "> 
+         <div class="flex items-center justify-center flex-shrink-0  w-10 h-10 "> <span class="feature_list__icon-background rounded-lg w-full h-full flex items-center justify-center"> <i class="text-[22px]  feature_list__icon  las la-briefcase"></i> </span> 
+         </div> 
+         <div> <span class="feature_list__heading text-lg font-bold leading-[1.4]">Longest maintenance in the industry</span> 
+          <div class="feature_list__text xl:text-lg leading-[1.4]  mt-2 ">
+            Maintenance for up to 15 years with ongoing security and compatibility updates. Meet regulatory requirements, reduce upgrade risk, and choose your upgrade windows to match your roadmap. 
+          </div> 
+         </div> 
+        </div> 
+        <div class="flex flex-col md:flex-row gap-4 "> 
+         <div class="flex items-center justify-center flex-shrink-0  w-10 h-10 "> <span class="feature_list__icon-background rounded-lg w-full h-full flex items-center justify-center"> <i class="text-[22px]  feature_list__icon  las la-life-ring"></i> </span> 
+         </div> 
+         <div> <span class="feature_list__heading text-lg font-bold leading-[1.4]">Vendor support</span> 
+          <div class="feature_list__text xl:text-lg leading-[1.4]  mt-2 ">
+            Get fast answers from the engineers behind Vaadin and hands-on help for complex challenges. From design and Figma alignment to development and production, improve time to market with guidance that knows your stack end to end. 
+          </div> 
+         </div> 
+        </div> 
+       </div> 
+      </div> 
+     </div> 
+    </section> 
+    <div id="home-footer" class="mb-xl md:mb-2xl"> 
+     <div id="hs_cos_wrapper_home_footer" class="hs_cos_wrapper hs_cos_wrapper_widget hs_cos_wrapper_type_module" style="" data-hs-cos-general-type="widget" data-hs-cos-type="module"> 
+      <section class="page-footer mt-4  container "> 
+       <div class=" page-footer-background rounded-lg px-4 
+              items-center justify-center text-center py-md md:pt-28 md:pb-24 grid grid-cols-4 md:grid-cols-12 gap-x-5 xl:gap-x-10"> 
+        <h2 class="page-footer__heading text-[2.75rem] lg:text-[3.5rem] leading-none col-span-full md:col-start-3 md:col-span-8">Build your next web app<br class="hidden sm:block">100% in Java</h2> 
+        <p class="page-footer__body text-lg m-auto col-span-full md:col-start-3 md:col-span-8 lg:col-span-6 lg:col-start-4">Unified Java stack with built-in security and proven UI components. Thorough documentation, tutorials and copy-paste examples included.</p> 
+        <div class="mt-10 flex flex-col sm:flex-row gap-4 justify-center col-span-full md:col-start-3 md:col-span-8 lg:col-span-6 lg:col-start-4"> <a class="button large primary light  " href="https://start.vaadin.com/app" id="hs-button_home_footer" rel=""> START BUILDING </a> <a class="button large secondary water  " href="https://vaadin.com/docs/latest" id="hs-button_home_footer" rel=""> BROWSE DOCS </a> 
+        </div> 
+       </div> 
+      </section> 
+     </div> 
+    </div> 
+   </main> <!-- Vaadin Card component demo -->  <!-- Vaadin components demo gallery -->  
+   <div data-global-resource-path="vaadin-theme/templates/partials/generated/footer.html"> 
+    <footer class="v-site-footer"> 
+     <div class="v-container"> 
+      <div class="v-footer-top"> <a class="v-logo" aria-label="Go to Vaadin frontpage" href="/"> 
+        <svg role="img" aria-labelledby="logoTitle" width="111" height="26" viewbox="0 0 871 200" fill="none" xmlns="http://www.w3.org/2000/svg"> 
+         <title id="logoTitle">Vaadin Logo</title> <path class="v-logo-textmark" d="M589.86 48.5319C594.425 42.7664 608.358 37.2412 618.448 37.2412C656.163 37.2412 669.136 64.1467 669.136 94.4154V159.998C669.136 160.718 668.655 161.199 667.934 161.199H641.509C640.789 161.199 640.308 160.718 640.308 159.998V94.4154C640.308 80.0017 632.621 63.6662 613.643 63.6662C594.905 63.6662 587.218 77.5994 587.218 92.0131V159.998C587.218 160.718 586.737 161.199 586.017 161.199H559.592C558.871 161.199 558.391 160.718 558.391 159.998V40.8446C558.391 40.1239 558.871 39.6435 559.592 39.6435H582.413C583.855 39.6435 584.335 39.8837 584.575 40.8446L587.218 48.2917C587.458 49.2526 588.9 49.7331 589.86 48.5319Z" fill="currentColor" /> <path class="v-logo-textmark" d="M536.466 161.201H510.041C509.32 161.201 508.84 160.72 508.84 159.999V40.8465C508.84 40.1258 509.32 39.6454 510.041 39.6454H536.466C537.187 39.6454 537.667 40.1258 537.667 40.8465V159.999C537.667 160.72 537.187 161.201 536.466 161.201Z" fill="currentColor" /> <path class="v-logo-textmark" d="M536.468 28.8317H510.043C509.322 28.8317 508.842 28.7177 508.842 28.5468V0.284898C508.842 0.113961 509.322 0 510.043 0H536.468C537.189 0 537.669 0.113961 537.669 0.284898V28.5468C537.669 28.7177 537.189 28.8317 536.468 28.8317Z" fill="currentColor" /> <path class="v-logo-textmark" d="M456.671 152.311C450.906 158.077 438.174 163.602 425.922 163.602C392.05 163.602 370.91 137.897 370.91 100.422C370.91 62.9464 394.212 37.242 425.922 37.242C441.297 37.242 452.347 43.9684 457.152 48.7729C458.113 49.7338 459.314 49.2534 459.314 48.0523V1.20114C459.314 0.480467 459.794 0 460.515 0H486.94C487.661 0 488.141 0.480467 488.141 1.20114V159.998C488.141 160.719 487.661 161.199 486.94 161.199H464.118C462.677 161.199 461.956 160.959 461.716 159.998L459.314 152.311C459.074 151.35 457.632 151.35 456.671 152.311ZM399.737 100.422C399.737 122.042 410.307 137.177 430.727 137.177C449.945 137.177 459.314 122.042 459.314 100.422C459.314 76.3991 449.945 63.667 430.727 63.667C410.307 63.667 399.737 78.8014 399.737 100.422Z" fill="currentColor" /> <path class="v-logo-textmark" d="M199.738 152.474C193.492 158.72 186.951 163.601 167.973 163.601C137.464 163.601 121.609 146.785 121.609 124.924C121.609 104.265 140.107 86.0074 173.018 86.0074H194.398C199.203 86.0074 201.605 83.1247 201.605 80.7224C201.605 75.6776 201.125 63.6662 177.582 63.6662C159.325 63.6662 155.241 71.3535 154.521 79.5213C154.521 80.2419 154.04 80.7224 153.319 80.7224H127.135C126.414 80.7224 125.933 80.2419 125.933 79.5213C125.933 51.1744 149.236 37.2412 177.582 37.2412C210.734 37.2412 230.432 52.856 230.432 82.8844V129.489V134.034V135.382V138.953L230.613 153.464V161.199H214.771C202.28 161.199 205.861 162.375 201.9 152.474C201.42 151.754 200.459 151.754 199.738 152.474ZM167.973 137.176C192.717 137.176 201.605 123.243 201.605 111.231C201.605 110.511 201.125 110.03 200.404 110.03H174.219C154.04 110.03 150.437 118.678 150.437 124.924C150.437 129.969 154.761 137.176 167.973 137.176Z" fill="currentColor" /> <path class="v-logo-textmark" d="M324.492 152.474C318.246 158.72 311.705 163.601 292.727 163.601C262.218 163.601 246.363 146.785 246.363 124.924C246.363 104.265 264.861 86.0074 297.772 86.0074H319.152C323.957 86.0074 326.359 83.1247 326.359 80.7224C326.359 75.6776 325.879 63.6662 302.336 63.6662C284.079 63.6662 279.995 71.3535 279.274 79.5213C279.274 80.2419 278.794 80.7224 278.073 80.7224H251.889C251.168 80.7224 250.687 80.2419 250.687 79.5213C250.687 51.1744 273.989 37.2412 302.336 37.2412C335.488 37.2412 355.186 52.856 355.186 82.8844V129.489V134.034V135.382V138.953L355.367 153.464V161.199H339.525C327.034 161.199 330.615 162.375 326.654 152.474C326.174 151.754 325.213 151.754 324.492 152.474ZM292.727 137.176C317.471 137.176 326.359 123.243 326.359 111.231C326.359 110.511 325.879 110.03 325.158 110.03H298.973C278.794 110.03 275.191 118.678 275.191 124.924C275.191 129.969 279.515 137.176 292.727 137.176Z" fill="currentColor" /> <path class="v-logo-textmark" d="M62.0399 133.815L91.1075 41.327C91.3477 40.3661 92.3086 39.6454 93.0293 39.6454H120.175C121.136 39.6454 121.616 40.3661 121.376 41.327L81.7386 159.999C81.4984 160.72 81.0179 161.201 80.2972 161.201H41.3804C40.6597 161.201 40.1792 160.72 39.939 159.999L0.0612182 41.327C-0.179009 40.3661 0.301446 39.6454 1.26236 39.6454H28.8885C29.6092 39.6454 30.3299 40.3661 30.5701 41.327L59.6377 133.815C60.1181 135.016 61.5595 135.016 62.0399 133.815Z" fill="currentColor" /> <path d="M702.115 198.837V176.431C702.115 175.733 702.584 175.5 703.288 175.5H713.845C720.648 175.5 726.512 169.683 726.512 162.935V127.959C726.512 109.112 734.723 103.111 740.353 101.25C742.212 100.635 742.26 98.988 740.353 98.3333C734.254 96.2392 726.512 91.353 726.512 71.8079V37.0648C726.512 30.3171 720.648 24.5001 713.845 24.5001H703.288C702.584 24.5001 702.115 24.2675 702.115 23.5694V1.16339C702.115 0.465365 702.584 0 703.288 0H716.19C738.476 0 753.479 10.9359 753.479 33.0404V78.3229C753.479 85.3033 756.942 90.8876 769.873 90.8876H773.895C774.599 90.8876 775.068 91.3529 775.068 92.051V108.182C775.068 108.88 774.599 109.345 773.895 109.345H769.873C759.912 109.345 753.479 114.929 753.479 121.677V167.192C753.479 189.297 738.476 200 716.19 200H703.288C702.584 200 702.115 199.535 702.115 198.837Z" fill="#007BFF" /> <path d="M833.605 98.5612L777.005 74.8648C776.228 74.4099 776.073 73.5 776.073 72.8177L776.073 44.7533C776.073 44.071 776.383 43.3886 777.16 43.8435L870.099 90.3853C870.565 90.6128 870.876 91.0677 870.876 91.75L870.876 107.886C870.876 108.569 870.565 109.024 870.099 109.251L777.006 156.123C776.229 156.578 775.918 156.123 775.918 155.213L776.072 126.128C776.072 125.445 776.383 124.536 777.005 124.308L833.605 100.225C833.889 100.225 833.889 98.5612 833.605 98.5612Z" fill="#007BFF" /> 
+        </svg> </a> 
+       <ul class="v-footer-some"> 
+        <li> <a class="v-footer-some-link" aria-label="twitter" href="https://twitter.com/vaadin"><i class="lab la-twitter"></i></a> </li> 
+        <li> <a class="v-footer-some-link" aria-label="facebook" href="https://facebook.com/vaadin"><i class="lab la-facebook-f"></i></a> </li> 
+        <li> <a class="v-footer-some-link" aria-label="linkedin" href="https://www.linkedin.com/company/vaadin/"><i class="lab la-linkedin-in"></i></a> </li> 
+        <li> <a class="v-footer-some-link" aria-label="github" href="https://github.com/vaadin/"><i class="lab la-github"></i></a> </li> 
+        <li> <a class="v-footer-some-link" aria-label="youtube" href="https://www.youtube.com/user/vaadinofficial"><i class="lab la-youtube"></i></a> </li> 
+        <li> <a class="v-footer-some-link" aria-label="instagram" href="https://www.instagram.com/vaadin/"><i class="lab la-instagram"></i></a> </li> 
+        <li> <a class="v-footer-some-link" aria-label="forum" href="https://vaadin.com/forum"><i class="las la-comment-dots"></i></a> </li> 
+        <li> <a class="v-footer-some-link" aria-label="stackoverflow" href="https://stackoverflow.com/questions/tagged/vaadin"><i class="lab la-stack-overflow"></i></a> </li> 
+       </ul> 
+      </div> 
+      <nav class="v-footer-nav gtm-footer-nav"> 
+       <ul> 
+        <li class="v-footer-nav-title">Company</li> 
+        <li class="v-footer-nav-link"> <a href="/company" router-link>About</a> </li> 
+        <li class="v-footer-nav-link"> <a href="https://brand.vaadin.com" router-link>Brand</a> </li> 
+        <li class="v-footer-nav-link"> <a href="/company/careers" router-link>Careers</a> </li> 
+        <li class="v-footer-nav-link"> <a href="/company/leadership" router-link>Leadership</a> </li> 
+        <li class="v-footer-nav-link"> <a href="https://app.easywhistle.com/report/vaadin/about" router-link>Whistleblowing</a> </li> 
+       </ul> 
+       <ul> 
+        <li class="v-footer-nav-title">Products</li> 
+        <li class="v-footer-nav-link"> <a href="/framework" router-link>Vaadin framework</a> </li> 
+        <li class="v-footer-nav-link"> <a href="/docs/latest/components" router-link>UI Components</a> </li> 
+        <li class="v-footer-nav-link"> <a href="/acceleration" router-link>Acceleration kits</a> </li> 
+        <li class="v-footer-nav-link"> <a href="/copilot" router-link>Copilot</a> </li> 
+        <li class="v-footer-nav-link"> <a href="/swing" router-link>SwingBridge</a> </li> 
+        <li class="v-footer-nav-link"> <a href="/testbench" router-link>TestBench</a> </li> 
+       </ul> 
+       <ul> 
+        <li class="v-footer-nav-title">Services</li> 
+        <li class="v-footer-nav-link"> <a href="/solutions/create-new-app" router-link>App creation</a> </li> 
+        <li class="v-footer-nav-link"> <a href="/solutions/modernize-existing-app" router-link>App modernization</a> </li> 
+        <li class="v-footer-nav-link"> <a href="/migration-toolkit" router-link>Migration assistance</a> </li> 
+        <li class="v-footer-nav-link"> <a href="/solutions/design-services" router-link>Design services</a> </li> 
+        <li class="v-footer-nav-link"> <a href="/solutions/expert-services" router-link>Expert services</a> </li> 
+        <li class="v-footer-nav-link"> <a href="/solutions/support" router-link>Support</a> </li> 
+       </ul> 
+       <ul> 
+        <li class="v-footer-nav-title">Developers</li> 
+        <li class="v-footer-nav-link"> <a href="/docs/latest" router-link>Documentation</a> </li> 
+        <li class="v-footer-nav-link"> <a href="https://start.vaadin.com/app">Generate Starter Project</a> </li> 
+        <li class="v-footer-nav-link"> <a href="/certification" router-link>Become Vaadin certified</a> </li> 
+        <li class="v-footer-nav-link"> <a href="/examples-and-demos" router-link>Examples and Demos</a> </li> 
+        <li class="v-footer-nav-link"> <a href="/learn/training" router-link>Training videos</a> </li> 
+        <li class="v-footer-nav-link"> <a href="/directory/" router-link>Add-ons</a> </li> 
+       </ul> 
+       <ul> 
+        <li class="v-footer-nav-title">Resources</li> 
+        <li class="v-footer-nav-link"> <a href="/blog" router-link>Blog</a> </li> 
+        <li class="v-footer-nav-link"> <a href="/events" router-link>Upcoming events</a> </li> 
+        <li class="v-footer-nav-link"> <a href="/events#past-events" router-link>Event recordings</a> </li> 
+        <li class="v-footer-nav-link"> <a href="/success-stories" router-link>Customer stories</a> </li> 
+        <li class="v-footer-nav-link"> <a href="/student-program/" router-link>For students</a> </li> 
+       </ul> 
+      </nav> 
+      <div class="v-footer-bottom"> <span class="v-made-in-eu v-footer-copy" hidden> 
+        <svg width="16" height="11" viewbox="0 0 16 11" aria-hidden="true" focusable="false" style="margin-bottom: 1px;"> <rect width="16" height="11" rx="1.5" fill="#039" /> <g fill="#fc0"> 
+          <circle cx="8" cy="2.2" r=".55" /> 
+          <circle cx="9.65" cy="2.64" r=".55" /> 
+          <circle cx="10.86" cy="3.85" r=".55" /> 
+          <circle cx="11.3" cy="5.5" r=".55" /> 
+          <circle cx="10.86" cy="7.15" r=".55" /> 
+          <circle cx="9.65" cy="8.36" r=".55" /> 
+          <circle cx="8" cy="8.8" r=".55" /> 
+          <circle cx="6.35" cy="8.36" r=".55" /> 
+          <circle cx="5.14" cy="7.15" r=".55" /> 
+          <circle cx="4.7" cy="5.5" r=".55" /> 
+          <circle cx="5.14" cy="3.85" r=".55" /> 
+          <circle cx="6.35" cy="2.64" r=".55" /> 
+         </g> 
+        </svg> Proudly made in the EU </span> 
+       <div class="v-footer-copy">
+         ©<span id="vCurrentYear"></span> Vaadin Ltd. All rights reserved 
+       </div> 
+       <ul class="v-footer-bottom-links"> 
+        <li class="v-footer-bottom-link"> <a href="/community-terms">Community Terms</a> </li> 
+        <li class="v-footer-bottom-link"> <a href="/privacy-policy">Privacy Policy</a> </li> 
+       </ul> 
+      </div> 
+     </div> 
+    </footer>  
+   </div> 
+  </div> <!-- HubSpot performance collection script -->       <!--[if lte IE 8]>
+    <script charset="utf-8" src="https://js.hsforms.net/forms/v2-legacy.js"></script>
+    <![endif]-->   <!-- Start of HubSpot Analytics Code -->   <!-- End of HubSpot Analytics Code -->    
+  <script defer src="https://website.vaadin.com/hubfs/hub_generated/template_assets/1/199629328405/1791975346347/template_demo-components-hero.min.js"></script>
+  <script type="module" defer src="https://website.vaadin.com/hubfs/hub_generated/template_assets/1/199629328404/1791975345659/template_demo-components-gallery.min.js"></script>
+  <script>
+  const host = window.location.hostname;
+  if ((host !== "preview.vaadin.com") && (host !== "vaadin.com")) {
+    const links = document.querySelectorAll("li.v-footer-nav-link a");
+    links.forEach((link) => {
+      if (link.hostname === host) {
+        const linkURL = new URL(link.href);
+        link.href = "https://vaadin.com" + linkURL.pathname;
+      }
+    });
+  }
+  {
+    const badges = document.querySelectorAll(".v-made-in-eu");
+    const EU = ["AT","BE","BG","HR","CY","CZ","DK","EE","FI","FR","DE","GR","HU","IE","IT","LV","LT","LU","MT","NL","PL","PT","RO","SK","SI","ES","SE"];
+    if (badges.length) {
+      fetch("/cdn-cgi/trace", { credentials: "omit" })
+        .then((r) => (r.ok ? r.text() : ""))
+        .then((t) => {
+          const m = /^loc=([A-Z]{2})$/m.exec(t);
+          if (m && EU.includes(m[1])) badges.forEach((b) => { b.hidden = false; });
+        })
+        .catch(() => {});
+    }
+  }
+
+  const year = document.getElementById("vCurrentYear");
+  if (year) year.innerText = new Date().getFullYear();
+</script>
+  <script defer src="https://website.vaadin.com/hs/hsstatic/content-cwv-embed/static-1.1293/embed.js"></script>
+  <script>
+var hsVars = hsVars || {}; hsVars['language'] = 'en';
+</script>
+  <script src="https://website.vaadin.com/hs/hsstatic/cos-i18n/static-1.53/bundles/project.js"></script>
+  <script src="https://website.vaadin.com/hubfs/hub_generated/template_assets/1/48783625035/1791975346208/template_main.min.js"></script>
+  <script src="https://website.vaadin.com/hubfs/hub_generated/module_assets/1/211372240747/1781095816662/module_copy-code-command.min.js"></script>
+  <script defer src="https://website.vaadin.com/hubfs/hub_generated/module_assets/1/222590648995/1791980786245/module_content-table-with-tabs.min.js"></script>
+  <script data-hs-allowed="true" src="/_hcms/forms/v2.js"></script>
+  <script data-hs-allowed="true">
+        var options = {
+            portalId: '1840687',
+            formId: '5644c040-ee88-4572-beb0-7e481371bbdb',
+            formInstanceId: '4914',
+            
+            pageId: '190318537220',
+            
+            region: 'na1',
+            
+            
+            
+            
+            pageName: "Vaadin: Java Framework for Building Enterprise Web Applications",
+            
+            
+            
+            inlineMessage: "You are now subscribed!",
+            
+            
+            rawInlineMessage: "You are now subscribed!",
+            
+            
+            hsFormKey: "4fe96e11686f65a412aa9720b511fba4",
+            
+            
+            css: '',
+            target: '#hs_form_target_form',
+            
+            
+            
+            
+            
+            
+            abTestId: 190318537216,
+            
+            
+            contentType: "standard-page",
+            
+            
+            
+            formsBaseUrl: '/_hcms/forms/',
+            
+            
+            
+            formData: {
+                cssClass: 'hs-form stacked hs-custom-form'
+            }
+        };
+
+        options.getExtraMetaDataBeforeSubmit = function() {
+            var metadata = {};
+            
+
+            if (hbspt.targetedContentMetadata) {
+                var count = hbspt.targetedContentMetadata.length;
+                var targetedContentData = [];
+                for (var i = 0; i < count; i++) {
+                    var tc = hbspt.targetedContentMetadata[i];
+                     if ( tc.length !== 3) {
+                        continue;
+                     }
+                     targetedContentData.push({
+                        definitionId: tc[0],
+                        criterionId: tc[1],
+                        smartTypeId: tc[2]
+                     });
+                }
+                metadata["targetedContentMetadata"] = JSON.stringify(targetedContentData);
+            }
+
+            return metadata;
+        };
+
+        hbspt.forms.create(options);
+    </script>
+  <script type="text/javascript">
+var _hsq = _hsq || [];
+_hsq.push(["setContentType", "standard-page"]);
+_hsq.push(["setCanonicalUrl", "https:\/\/website.vaadin.com\/index"]);
+_hsq.push(["setPageId", "190318537220"]);
+_hsq.push(["setContentMetadata", {
+    "contentPageId": 190318537220,
+    "legacyPageId": "190318537220",
+    "contentFolderId": null,
+    "contentGroupId": null,
+    "abTestId": 190318537216,
+    "languageVariantId": 190318537220,
+    "languageCode": "en",
+    
+    
+}]);
+</script>
+  <script type="text/javascript" id="hs-script-loader" async defer src="https://website.vaadin.com/hs/scriptloader/1840687.js"></script>
+  <script type="text/javascript">
+var hsVars = {
+    render_id: "7bdeb55e-984d-40fe-9111-21737e1e6b09",
+    ticks: 1791982374975,
+    page_id: 190318537220,
+    
+    content_group_id: 0,
+    portal_id: 1840687,
+    app_hs_base_url: "https://app.hubspot.com",
+    cp_hs_base_url: "https://cp.hubspot.com",
+    language: "en",
+    analytics_page_type: "standard-page",
+    scp_content_type: "",
+    
+    analytics_page_id: "190318537220",
+    category_id: 1,
+    folder_id: 0,
+    is_hubspot_user: false
+}
+</script>
+  <script defer src="https://website.vaadin.com/hs/hsstatic/HubspotToolsMenu/static-1.640/js/index.js"></script>
+ </body>
+</html>

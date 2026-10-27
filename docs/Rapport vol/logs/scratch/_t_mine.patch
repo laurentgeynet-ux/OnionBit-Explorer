@@ -1,0 +1,54 @@
+diff --git a/crates/explorer-core/tests/session.rs b/crates/explorer-core/tests/session.rs
+index 2ade457..9bc25ab 100644
+--- a/crates/explorer-core/tests/session.rs
++++ b/crates/explorer-core/tests/session.rs
+@@ -2052,6 +2052,49 @@ async fn js_heap_limit_zero_disarms() {
+     assert_eq!(title.as_deref(), Some("ok"));
+ }
+ 
++/// Étape 130 — `mem_report` attribue la page vivante et,
++/// après une seconde navigation, la page gelée bfcache
++/// (heap JS gelé compté — premier réservoir suspecté du
++/// constat « station ~1,4 Gio »).
++#[tokio::test]
++async fn mem_report_attributes_live_and_bfcache() {
++    let (mut s, t) = test_session();
++    // Page scriptée AVEC contenu peint : un moteur JS vivant
++    // + des items de display list à attribuer (puis à geler).
++    t.route(
++        "/a",
++        200,
++        "<!doctype html><html><body><div>contenu /a</div>\
++         <script>document.title='a'</script></body></html>",
++    );
++    t.route("/b", 200, PAGE);
++    s.set_js_factory(explorer_js::JscoreEngine::factory());
++    let id = s.open_tab();
++    s.navigate(id, "http://h.test/a").await.unwrap();
++    // Peinture paresseuse : `frame_png` déclenche
++    // layout/display/raster si la frame n'existe pas.
++    let _ = s.frame_png(id);
++    let r1 = s.mem_report(id).expect("rapport après nav /a");
++    assert!(r1.dom_nodes > 0, "dom peuplé");
++    assert!(r1.layout_boxes > 0 && r1.display_items > 0);
++    assert!(r1.frame_bytes > 0, "frame produite");
++    assert!(r1.js_heap_bytes > 0, "contexte JS vivant mesuré");
++    assert_eq!(r1.bfcache_pages, 0);
++    // Seconde navigation → /a gelée : son heap JS doit
++    // apparaître dans `bfcache_js_heap_bytes`.
++    s.navigate(id, "http://h.test/b").await.unwrap();
++    let _ = s.frame_png(id);
++    let r2 = s.mem_report(id).expect("rapport après nav /b");
++    assert_eq!(r2.bfcache_pages, 1, "/a gelée");
++    assert!(r2.bfcache_dom_nodes > 0 && r2.bfcache_frame_bytes > 0);
++    assert!(
++        r2.bfcache_js_heap_bytes > 0,
++        "le moteur JS gelé est un réservoir mesuré"
++    );
++    // Onglet inconnu → None (dégradation, pas de panique).
++    assert!(s.mem_report(999).is_none());
++}
++
+ /// Page dont un script mute le DOM miroir (`textContent`).
+ const PAGE_MUT: &str = "<!doctype html><html><body>\
+      <div id=\"x\">avant</div>\

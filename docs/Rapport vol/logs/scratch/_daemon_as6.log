@@ -1,0 +1,1861 @@
+2026-10-26T06:36:30.078863Z  INFO explorer_daemon: fontes système scannées dir=C:\Windows\Fonts
+2026-10-26T06:36:30.081284Z  INFO explorer_daemon: profil chargé dir=C:\Users\Lou\AppData\Roaming\explorer
+2026-10-26T06:36:30.248405Z  INFO explorer_daemon: explorer-daemon prêt addr=127.0.0.1:9445
+2026-10-26T06:36:35.251130Z  INFO explorer_core::session::apply: apply: cascade ms=6
+2026-10-26T06:36:35.267865Z  INFO explorer_core::session::apply: apply: boxtree ms=23
+2026-10-26T06:36:35.277659Z  INFO explorer_core::session::apply: apply: layout ms=33
+2026-10-26T06:36:35.298936Z  INFO explorer_core::session::apply: apply: repaint ms=54
+2026-10-26T06:36:35.322790Z DEBUG explorer_core::session::net_items: script émis src=https://github.githubassets.com/assets/high-contrast-cookie-141c17800ca6ba23.js module=true
+2026-10-26T06:36:35.322834Z DEBUG explorer_core::session::net_items: script émis src=https://github.githubassets.com/assets/environment-89a7dceaf537fb4c.js module=true
+2026-10-26T06:36:35.322846Z DEBUG explorer_core::session::net_items: script émis src=https://github.githubassets.com/assets/github-elements-ed5f48b72ec252e4.js module=true
+2026-10-26T06:36:35.322857Z DEBUG explorer_core::session::net_items: script émis src=https://github.githubassets.com/assets/element-registry-06cd2d84777cb424.js module=true
+2026-10-26T06:36:35.322868Z DEBUG explorer_core::session::net_items: script émis src=https://github.githubassets.com/assets/behaviors-cd496cf4e17e083f.js module=true
+2026-10-26T06:36:35.322880Z DEBUG explorer_core::session::net_items: script émis src=https://github.githubassets.com/assets/marketing-essentials-9b5e122b91cab708.js module=true
+2026-10-26T06:36:35.322890Z DEBUG explorer_core::session::net_items: script émis src=https://github.githubassets.com/assets/landing-pages-f2bb6789a6f3945d.js module=true
+2026-10-26T06:36:35.322900Z DEBUG explorer_core::session::net_items: script émis src=https://github.githubassets.com/assets/global-banner-disable-750ad87f36b8e45f.js module=true
+2026-10-26T06:36:35.347389Z DEBUG explorer_core::session::net_items: sous-ressource script tab=1 src=Some("https://github.githubassets.com/assets/high-contrast-cookie-141c17800ca6ba23.js") module=true sec_ok=true sri_ok=true
+2026-10-26T06:36:35.347690Z DEBUG explorer_core::session::net_items: sous-ressource script tab=1 src=Some("https://github.githubassets.com/assets/environment-89a7dceaf537fb4c.js") module=true sec_ok=true sri_ok=true
+2026-10-26T06:36:35.347932Z DEBUG explorer_core::session::net_items: sous-ressource script tab=1 src=Some("https://github.githubassets.com/assets/github-elements-ed5f48b72ec252e4.js") module=true sec_ok=true sri_ok=true
+2026-10-26T06:36:35.348212Z DEBUG explorer_core::session::net_items: sous-ressource script tab=1 src=Some("https://github.githubassets.com/assets/element-registry-06cd2d84777cb424.js") module=true sec_ok=true sri_ok=true
+2026-10-26T06:36:35.348598Z DEBUG explorer_core::session::net_items: sous-ressource script tab=1 src=Some("https://github.githubassets.com/assets/behaviors-cd496cf4e17e083f.js") module=true sec_ok=true sri_ok=true
+2026-10-26T06:36:35.348997Z DEBUG explorer_core::session::net_items: sous-ressource script tab=1 src=Some("https://github.githubassets.com/assets/marketing-essentials-9b5e122b91cab708.js") module=true sec_ok=true sri_ok=true
+2026-10-26T06:36:35.351208Z DEBUG explorer_core::session::net_items: sous-ressource script tab=1 src=Some("https://github.githubassets.com/assets/landing-pages-f2bb6789a6f3945d.js") module=true sec_ok=true sri_ok=true
+2026-10-26T06:36:35.352920Z DEBUG explorer_core::session::net_items: sous-ressource script tab=1 src=Some("https://github.githubassets.com/assets/global-banner-disable-750ad87f36b8e45f.js") module=true sec_ok=true sri_ok=true
+2026-10-26T06:36:36.660536Z DEBUG explorer_core::session::net_items: prefetch modules tab=1 async_mods=0 post_modules=8
+2026-10-26T06:36:36.661507Z DEBUG explorer_core::session::net_items: module prefetché tab=1 name=https://github.githubassets.com/assets/high-contrast-cookie-141c17800ca6ba23.js sources=1
+2026-10-26T06:36:36.698191Z DEBUG explorer_core::session::net_items: module prefetché tab=1 name=https://github.githubassets.com/assets/environment-89a7dceaf537fb4c.js sources=6
+2026-10-26T06:36:36.764621Z DEBUG explorer_core::session::net_items: module prefetché tab=1 name=https://github.githubassets.com/assets/github-elements-ed5f48b72ec252e4.js sources=15
+2026-10-26T06:36:36.806879Z DEBUG explorer_core::session::net_items: module prefetché tab=1 name=https://github.githubassets.com/assets/element-registry-06cd2d84777cb424.js sources=5
+2026-10-26T06:36:36.995963Z DEBUG explorer_core::session::net_items: module prefetché tab=1 name=https://github.githubassets.com/assets/behaviors-cd496cf4e17e083f.js sources=32
+2026-10-26T06:36:37.032267Z DEBUG explorer_core::session::net_items: module prefetché tab=1 name=https://github.githubassets.com/assets/marketing-essentials-9b5e122b91cab708.js sources=8
+2026-10-26T06:36:37.829487Z DEBUG explorer_core::session::net_items: module prefetché tab=1 name=https://github.githubassets.com/assets/landing-pages-f2bb6789a6f3945d.js sources=50
+2026-10-26T06:36:37.829848Z DEBUG explorer_core::session::net_items: module prefetché tab=1 name=https://github.githubassets.com/assets/global-banner-disable-750ad87f36b8e45f.js sources=1
+2026-10-26T06:36:37.830077Z DEBUG explorer_core::session::js_glue: module eval… tab=1 name=https://github.githubassets.com/assets/high-contrast-cookie-141c17800ca6ba23.js
+2026-10-26T06:36:37.832099Z DEBUG explorer_core::session::js_glue: module eval fin tab=1 ms=2
+2026-10-26T06:36:37.832139Z DEBUG explorer_core::session::js_glue: module eval… tab=1 name=https://github.githubassets.com/assets/environment-89a7dceaf537fb4c.js
+2026-10-26T06:36:37.872912Z DEBUG explorer_jscore::dom_host: customElements.define name=live-region-bbe91b07-6f64-4afc-aeec-f3ae995a0c2c
+2026-10-26T06:36:37.875552Z DEBUG explorer_core::session::js_glue: module eval fin tab=1 ms=43
+2026-10-26T06:36:37.875603Z DEBUG explorer_core::session::js_glue: module eval… tab=1 name=https://github.githubassets.com/assets/github-elements-ed5f48b72ec252e4.js
+2026-10-26T06:36:37.910301Z DEBUG explorer_jscore::dom_host: customElements.define name=include-fragment
+2026-10-26T06:36:37.910449Z DEBUG explorer_jscore::dom_host: customElements.define name=remote-input
+2026-10-26T06:36:37.910865Z DEBUG explorer_jscore::dom_host: customElements.define name=action-list
+2026-10-26T06:36:37.911874Z DEBUG explorer_jscore::dom_host: customElements.define name=action-bar
+2026-10-26T06:36:37.912049Z DEBUG explorer_jscore::dom_host: customElements.define name=details-menu
+2026-10-26T06:36:37.912129Z DEBUG explorer_jscore::dom_host: customElements.define name=anchored-position
+2026-10-26T06:36:37.912191Z DEBUG explorer_jscore::dom_host: customElements.define name=dialog-helper
+2026-10-26T06:36:37.912817Z DEBUG explorer_jscore::dom_host: customElements.define name=focus-group
+2026-10-26T06:36:37.913026Z DEBUG explorer_jscore::dom_host: customElements.define name=scrollable-region
+2026-10-26T06:36:37.913666Z DEBUG explorer_jscore::dom_host: customElements.define name=modal-dialog
+2026-10-26T06:36:37.913962Z DEBUG explorer_jscore::dom_host: customElements.define name=nav-list
+2026-10-26T06:36:37.914243Z DEBUG explorer_jscore::dom_host: customElements.define name=nav-list-group
+2026-10-26T06:36:37.914864Z DEBUG explorer_jscore::dom_host: customElements.define name=segmented-control
+2026-10-26T06:36:37.915328Z DEBUG explorer_jscore::dom_host: customElements.define name=toggle-switch
+2026-10-26T06:36:37.915830Z DEBUG explorer_jscore::dom_host: customElements.define name=tool-tip
+2026-10-26T06:36:37.916926Z DEBUG explorer_jscore::dom_host: customElements.define name=x-banner
+2026-10-26T06:36:37.917182Z DEBUG explorer_jscore::dom_host: customElements.define name=auto-complete
+2026-10-26T06:36:37.917360Z DEBUG explorer_jscore::dom_host: customElements.define name=clipboard-copy
+2026-10-26T06:36:37.918687Z DEBUG explorer_jscore::dom_host: customElements.define name=relative-time
+2026-10-26T06:36:37.918814Z DEBUG explorer_jscore::dom_host: customElements.define name=tab-container
+2026-10-26T06:36:37.919122Z DEBUG explorer_jscore::dom_host: customElements.define name=primer-multi-input
+2026-10-26T06:36:37.919300Z DEBUG explorer_jscore::dom_host: customElements.define name=auto-check
+2026-10-26T06:36:37.919867Z DEBUG explorer_jscore::dom_host: customElements.define name=primer-text-field
+2026-10-26T06:36:37.920161Z DEBUG explorer_jscore::dom_host: customElements.define name=primer-text-area
+2026-10-26T06:36:37.920402Z DEBUG explorer_jscore::dom_host: customElements.define name=toggle-switch-input
+2026-10-26T06:36:37.920721Z DEBUG explorer_jscore::dom_host: customElements.define name=action-menu
+2026-10-26T06:36:37.920961Z DEBUG explorer_jscore::dom_host: customElements.define name=live-region
+2026-10-26T06:36:37.921687Z DEBUG explorer_jscore::dom_host: customElements.define name=select-panel
+2026-10-26T06:36:37.921966Z DEBUG explorer_jscore::dom_host: customElements.define name=details-toggle
+2026-10-26T06:36:37.922252Z DEBUG explorer_jscore::dom_host: customElements.define name=tree-view
+2026-10-26T06:36:37.922502Z DEBUG explorer_jscore::dom_host: customElements.define name=tree-view-icon-pair
+2026-10-26T06:36:37.923153Z DEBUG explorer_jscore::dom_host: customElements.define name=tree-view-sub-tree-node
+2026-10-26T06:36:37.923303Z DEBUG explorer_jscore::dom_host: customElements.define name=tree-view-include-fragment
+2026-10-26T06:36:37.923451Z DEBUG explorer_jscore::dom_host: customElements.define name=details-dialog
+2026-10-26T06:36:37.923830Z DEBUG explorer_jscore::dom_host: customElements.define name=file-attachment
+2026-10-26T06:36:37.923974Z DEBUG explorer_jscore::dom_host: customElements.define name=filter-input
+2026-10-26T06:36:37.927666Z DEBUG explorer_jscore::dom_host: customElements.define name=g-emoji
+2026-10-26T06:36:37.927857Z DEBUG explorer_jscore::dom_host: customElements.define name=md-header
+2026-10-26T06:36:37.927902Z DEBUG explorer_jscore::dom_host: customElements.define name=md-bold
+2026-10-26T06:36:37.927946Z DEBUG explorer_jscore::dom_host: customElements.define name=md-italic
+2026-10-26T06:36:37.927985Z DEBUG explorer_jscore::dom_host: customElements.define name=md-quote
+2026-10-26T06:36:37.928042Z DEBUG explorer_jscore::dom_host: customElements.define name=md-code
+2026-10-26T06:36:37.928082Z DEBUG explorer_jscore::dom_host: customElements.define name=md-link
+2026-10-26T06:36:37.928120Z DEBUG explorer_jscore::dom_host: customElements.define name=md-image
+2026-10-26T06:36:37.928159Z DEBUG explorer_jscore::dom_host: customElements.define name=md-unordered-list
+2026-10-26T06:36:37.928198Z DEBUG explorer_jscore::dom_host: customElements.define name=md-ordered-list
+2026-10-26T06:36:37.928237Z DEBUG explorer_jscore::dom_host: customElements.define name=md-task-list
+2026-10-26T06:36:37.928277Z DEBUG explorer_jscore::dom_host: customElements.define name=md-mention
+2026-10-26T06:36:37.928338Z DEBUG explorer_jscore::dom_host: customElements.define name=md-ref
+2026-10-26T06:36:37.928383Z DEBUG explorer_jscore::dom_host: customElements.define name=md-strikethrough
+2026-10-26T06:36:37.928430Z DEBUG explorer_jscore::dom_host: customElements.define name=markdown-toolbar
+2026-10-26T06:36:37.928608Z DEBUG explorer_jscore::dom_host: customElements.define name=task-lists
+2026-10-26T06:36:37.929130Z DEBUG explorer_jscore::dom_host: customElements.define name=text-expander
+2026-10-26T06:36:37.929218Z DEBUG explorer_jscore::dom_host: customElements.define name=typing-effect
+2026-10-26T06:36:37.929305Z DEBUG explorer_jscore::dom_host: customElements.define name=image-crop
+2026-10-26T06:36:37.935259Z DEBUG explorer_core::session::js_glue: module eval fin tab=1 ms=59
+2026-10-26T06:36:37.935329Z DEBUG explorer_core::session::js_glue: module eval… tab=1 name=https://github.githubassets.com/assets/element-registry-06cd2d84777cb424.js
+2026-10-26T06:36:37.982022Z DEBUG explorer_core::session::js_glue: module eval fin tab=1 ms=46
+2026-10-26T06:36:37.982093Z DEBUG explorer_core::session::js_glue: module eval… tab=1 name=https://github.githubassets.com/assets/behaviors-cd496cf4e17e083f.js
+2026-10-26T06:36:38.120789Z DEBUG explorer_jscore::dom_host: customElements.define name=batch-deferred-content
+2026-10-26T06:36:38.188379Z DEBUG explorer_jscore::dom_host: customElements.define name=turbo-frame
+2026-10-26T06:36:38.188478Z DEBUG explorer_jscore::dom_host: customElements.define name=turbo-stream
+2026-10-26T06:36:38.188516Z DEBUG explorer_jscore::dom_host: customElements.define name=turbo-stream-source
+2026-10-26T06:36:38.197311Z DEBUG explorer_jscore::dom_host: customElements.define name=webauthn-get
+2026-10-26T06:36:38.200153Z DEBUG explorer_jscore::dom_host: customElements.define name=sudo-credential-options
+2026-10-26T06:36:38.232066Z DEBUG explorer_jscore::dom_host: customElements.define name=collapsible-sidebar-widget
+2026-10-26T06:36:38.232752Z DEBUG explorer_jscore::dom_host: customElements.define name=sidebar-memex-input
+2026-10-26T06:36:38.238266Z DEBUG explorer_jscore::module: import() dynamique spec="./4f-128d9b1a702b1593.js" referrer="https://github.githubassets.com/assets/wp-runtime-85b402a4998c6482.js"
+2026-10-26T06:36:38.244747Z DEBUG explorer_jscore::module: import() dynamique spec="./chunk-l1-18d79a71714bc7ea.js" referrer="https://github.githubassets.com/assets/wp-runtime-85b402a4998c6482.js"
+2026-10-26T06:36:38.246920Z DEBUG explorer_core::session::js_glue: module eval fin tab=1 ms=264
+2026-10-26T06:36:38.247005Z DEBUG explorer_core::session::js_glue: module eval… tab=1 name=https://github.githubassets.com/assets/marketing-essentials-9b5e122b91cab708.js
+2026-10-26T06:36:38.255432Z DEBUG explorer_core::session::js_glue: module eval fin tab=1 ms=8
+2026-10-26T06:36:38.255498Z DEBUG explorer_core::session::js_glue: module eval… tab=1 name=https://github.githubassets.com/assets/landing-pages-f2bb6789a6f3945d.js
+2026-10-26T06:36:38.974285Z DEBUG explorer_jscore::dom_host: customElements.define name=react-app
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+2026-10-26T06:36:40.486674Z DEBUG explorer_core::session::js_glue: module eval fin tab=1 ms=2231
+2026-10-26T06:36:40.486932Z DEBUG explorer_core::session::js_glue: module eval… tab=1 name=https://github.githubassets.com/assets/global-banner-disable-750ad87f36b8e45f.js
+2026-10-26T06:36:40.525255Z DEBUG explorer_core::session::js_glue: module eval fin tab=1 ms=38
+[settle] reactions=3
+[settle-skip] already settled
+[settle-skip] already settled
+[settle-skip] already settled
+[settle-skip] already settled
+[settle-skip] already settled
+[settle-skip] already settled
+[settle-skip] already settled
+[settle-skip] already settled
+[settle-skip] already settled
+[settle-skip] already settled
+[settle-skip] already settled
+[settle-skip] already settled
+[settle-skip] already settled
+[settle-skip] already settled
+[settle-skip] already settled
+[settle-skip] already settled
+[settle-skip] already settled
+[settle-skip] already settled
+[settle-skip] already settled
+[settle-skip] already settled
+[settle-skip] already settled
+[settle-skip] already settled
+[settle-skip] already settled
+[settle-skip] already settled
+[settle-skip] already settled
+[settle-skip] already settled
+[settle-skip] already settled
+[settle-skip] already settled
+[settle-skip] already settled
+[settle-skip] already settled
+[settle-skip] already settled
+[settle-skip] already settled
+[settle-skip] already settled
+[settle-skip] already settled
+[settle-skip] already settled
+[settle-skip] already settled
+[settle-skip] already settled
+[settle-skip] already settled
+2026-10-26T06:36:40.756746Z DEBUG explorer_core::session::net: spawn dyn import tab=1 url=https://github.githubassets.com/assets/4f-128d9b1a702b1593.js seq=0
+2026-10-26T06:36:40.756818Z DEBUG explorer_core::session::net: dyn import : fetch émis tab=1 url=https://github.githubassets.com/assets/4f-128d9b1a702b1593.js
+2026-10-26T06:36:40.756904Z DEBUG explorer_core::session::net: spawn dyn import tab=1 url=https://github.githubassets.com/assets/chunk-l1-18d79a71714bc7ea.js seq=1
+2026-10-26T06:36:40.756935Z DEBUG explorer_core::session::net: dyn import : fetch émis tab=1 url=https://github.githubassets.com/assets/chunk-l1-18d79a71714bc7ea.js
+2026-10-26T06:36:40.769436Z DEBUG explorer_core::session::net: deliver dyn import tab=1 seq=0 ok=true deps=0
+[import-deliver] seq=2026-10-26T06:36:40.769511Z DEBUG explorer_core::session::net: deliver dyn import tab=1 seq=1 ok=true deps=0
+0 pending=true ctx=0
+[import-resolve] seq=0
+[import-deliver] seq=1 pending=true ctx=0
+[import-resolve] seq=1
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+2026-10-26T06:36:40.884174Z  INFO sync_profile: phase sync tab=1 phase="pump.offlock" us=101955
+2026-10-26T06:36:40.884218Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_net" us=0
+2026-10-26T06:36:40.884230Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_crypto" us=12
+2026-10-26T06:36:40.884238Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_es" us=7
+2026-10-26T06:36:40.884245Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_ws" us=6
+2026-10-26T06:36:40.884252Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_dyn" us=6
+2026-10-26T06:36:40.884258Z  INFO sync_profile: phase sync tab=1 phase="commit.eval_mod" us=6
+2026-10-26T06:36:40.884265Z  INFO sync_profile: phase sync tab=1 phase="commit.attrs_sync" us=6
+2026-10-26T06:36:40.884279Z  INFO sync_profile: phase sync tab=1 phase="commit.deliver" us=62
+2026-10-26T06:36:40.884465Z  INFO sync_profile: phase sync tab=1 phase="commit.drains" us=185
+2026-10-26T06:36:40.884508Z  INFO sync_profile: phase sync tab=1 phase="pump.commit_lock" us=295
+2026-10-26T06:36:40.975245Z  INFO sync_profile: phase sync tab=1 phase="pump.offlock" us=78695
+2026-10-26T06:36:40.975304Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_net" us=0
+2026-10-26T06:36:40.975313Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_crypto" us=8
+2026-10-26T06:36:40.975320Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_es" us=7
+2026-10-26T06:36:40.975327Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_ws" us=6
+2026-10-26T06:36:40.975333Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_dyn" us=6
+2026-10-26T06:36:40.975340Z  INFO sync_profile: phase sync tab=1 phase="commit.eval_mod" us=6
+2026-10-26T06:36:40.975346Z  INFO sync_profile: phase sync tab=1 phase="commit.attrs_sync" us=6
+2026-10-26T06:36:40.975353Z  INFO sync_profile: phase sync tab=1 phase="commit.deliver" us=49
+2026-10-26T06:36:40.975551Z  INFO sync_profile: phase sync tab=1 phase="commit.drains" us=197
+2026-10-26T06:36:40.975626Z  INFO sync_profile: phase sync tab=1 phase="pump.commit_lock" us=322
+2026-10-26T06:36:41.062397Z  INFO sync_profile: phase sync tab=1 phase="pump.offlock" us=81585
+2026-10-26T06:36:41.062448Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_net" us=0
+2026-10-26T06:36:41.062463Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_crypto" us=15
+2026-10-26T06:36:41.062472Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_es" us=8
+2026-10-26T06:36:41.062479Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_ws" us=7
+2026-10-26T06:36:41.062487Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_dyn" us=7
+2026-10-26T06:36:41.062495Z  INFO sync_profile: phase sync tab=1 phase="commit.eval_mod" us=7
+2026-10-26T06:36:41.062502Z  INFO sync_profile: phase sync tab=1 phase="commit.attrs_sync" us=7
+2026-10-26T06:36:41.062510Z  INFO sync_profile: phase sync tab=1 phase="commit.deliver" us=63
+2026-10-26T06:36:41.062622Z  INFO sync_profile: phase sync tab=1 phase="commit.drains" us=111
+2026-10-26T06:36:41.062661Z  INFO sync_profile: phase sync tab=1 phase="pump.commit_lock" us=215
+2026-10-26T06:36:41.192402Z  INFO sync_profile: phase sync tab=1 phase="pump.offlock" us=128567
+2026-10-26T06:36:41.192464Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_net" us=0
+2026-10-26T06:36:41.192472Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_crypto" us=8
+2026-10-26T06:36:41.192493Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_es" us=20
+2026-10-26T06:36:41.192506Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_ws" us=12
+2026-10-26T06:36:41.192513Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_dyn" us=7
+2026-10-26T06:36:41.192519Z  INFO sync_profile: phase sync tab=1 phase="commit.eval_mod" us=6
+2026-10-26T06:36:41.192526Z  INFO sync_profile: phase sync tab=1 phase="commit.attrs_sync" us=6
+2026-10-26T06:36:41.192533Z  INFO sync_profile: phase sync tab=1 phase="commit.deliver" us=70
+2026-10-26T06:36:41.192593Z  INFO sync_profile: phase sync tab=1 phase="commit.apply_queued" us=52
+2026-10-26T06:36:41.192812Z  INFO sync_profile: phase sync tab=1 phase="commit.drains" us=219
+2026-10-26T06:36:41.192926Z  INFO sync_profile: phase sync tab=1 phase="pump.commit_lock" us=464
+2026-10-26T06:36:41.276031Z  INFO sync_profile: phase sync tab=1 phase="pump.offlock" us=78011
+2026-10-26T06:36:41.276069Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_net" us=0
+2026-10-26T06:36:41.276077Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_crypto" us=8
+2026-10-26T06:36:41.276085Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_es" us=7
+2026-10-26T06:36:41.276091Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_ws" us=6
+2026-10-26T06:36:41.276098Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_dyn" us=6
+2026-10-26T06:36:41.276105Z  INFO sync_profile: phase sync tab=1 phase="commit.eval_mod" us=6
+2026-10-26T06:36:41.276111Z  INFO sync_profile: phase sync tab=1 phase="commit.attrs_sync" us=6
+2026-10-26T06:36:41.276117Z  INFO sync_profile: phase sync tab=1 phase="commit.deliver" us=49
+2026-10-26T06:36:41.276297Z  INFO sync_profile: phase sync tab=1 phase="commit.drains" us=179
+2026-10-26T06:36:41.276402Z  INFO sync_profile: phase sync tab=1 phase="pump.commit_lock" us=333
+2026-10-26T06:36:41.355123Z  INFO sync_profile: phase sync tab=1 phase="pump.offlock" us=72318
+2026-10-26T06:36:41.355155Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_net" us=0
+2026-10-26T06:36:41.355163Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_crypto" us=7
+2026-10-26T06:36:41.355170Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_es" us=7
+2026-10-26T06:36:41.355177Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_ws" us=6
+2026-10-26T06:36:41.355184Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_dyn" us=6
+2026-10-26T06:36:41.355190Z  INFO sync_profile: phase sync tab=1 phase="commit.eval_mod" us=6
+2026-10-26T06:36:41.355197Z  INFO sync_profile: phase sync tab=1 phase="commit.attrs_sync" us=6
+2026-10-26T06:36:41.355203Z  INFO sync_profile: phase sync tab=1 phase="commit.deliver" us=48
+2026-10-26T06:36:41.355396Z  INFO sync_profile: phase sync tab=1 phase="commit.drains" us=191
+2026-10-26T06:36:41.355517Z  INFO sync_profile: phase sync tab=1 phase="pump.commit_lock" us=362
+2026-10-26T06:36:41.428842Z  INFO sync_profile: phase sync tab=1 phase="pump.offlock" us=71832
+2026-10-26T06:36:41.428902Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_net" us=0
+2026-10-26T06:36:41.428910Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_crypto" us=8
+2026-10-26T06:36:41.428918Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_es" us=7
+2026-10-26T06:36:41.428925Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_ws" us=6
+2026-10-26T06:36:41.428932Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_dyn" us=6
+2026-10-26T06:36:41.428939Z  INFO sync_profile: phase sync tab=1 phase="commit.eval_mod" us=7
+2026-10-26T06:36:41.428946Z  INFO sync_profile: phase sync tab=1 phase="commit.attrs_sync" us=6
+2026-10-26T06:36:41.428953Z  INFO sync_profile: phase sync tab=1 phase="commit.deliver" us=52
+2026-10-26T06:36:41.429076Z  INFO sync_profile: phase sync tab=1 phase="commit.drains" us=123
+2026-10-26T06:36:41.429133Z  INFO sync_profile: phase sync tab=1 phase="pump.commit_lock" us=232
+2026-10-26T06:36:41.507051Z  INFO sync_profile: phase sync tab=1 phase="pump.offlock" us=76458
+2026-10-26T06:36:41.507091Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_net" us=0
+2026-10-26T06:36:41.507108Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_crypto" us=16
+2026-10-26T06:36:41.507119Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_es" us=11
+2026-10-26T06:36:41.507126Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_ws" us=6
+2026-10-26T06:36:41.507132Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_dyn" us=6
+2026-10-26T06:36:41.507139Z  INFO sync_profile: phase sync tab=1 phase="commit.eval_mod" us=6
+2026-10-26T06:36:41.507145Z  INFO sync_profile: phase sync tab=1 phase="commit.attrs_sync" us=6
+2026-10-26T06:36:41.507152Z  INFO sync_profile: phase sync tab=1 phase="commit.deliver" us=61
+2026-10-26T06:36:41.507332Z  INFO sync_profile: phase sync tab=1 phase="commit.drains" us=179
+2026-10-26T06:36:41.507443Z  INFO sync_profile: phase sync tab=1 phase="pump.commit_lock" us=353
+2026-10-26T06:36:41.589927Z  INFO sync_profile: phase sync tab=1 phase="pump.offlock" us=76745
+2026-10-26T06:36:41.589968Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_net" us=0
+2026-10-26T06:36:41.589977Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_crypto" us=9
+2026-10-26T06:36:41.589985Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_es" us=7
+2026-10-26T06:36:41.589993Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_ws" us=7
+2026-10-26T06:36:41.590000Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_dyn" us=7
+2026-10-26T06:36:41.590008Z  INFO sync_profile: phase sync tab=1 phase="commit.eval_mod" us=7
+2026-10-26T06:36:41.590016Z  INFO sync_profile: phase sync tab=1 phase="commit.attrs_sync" us=7
+2026-10-26T06:36:41.590024Z  INFO sync_profile: phase sync tab=1 phase="commit.deliver" us=57
+2026-10-26T06:36:41.590217Z  INFO sync_profile: phase sync tab=1 phase="commit.drains" us=193
+2026-10-26T06:36:41.590331Z  INFO sync_profile: phase sync tab=1 phase="pump.commit_lock" us=364
+2026-10-26T06:36:41.675348Z  INFO sync_profile: phase sync tab=1 phase="pump.offlock" us=78176
+2026-10-26T06:36:41.675398Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_net" us=0
+2026-10-26T06:36:41.675407Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_crypto" us=9
+2026-10-26T06:36:41.675418Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_es" us=10
+2026-10-26T06:36:41.675425Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_ws" us=7
+2026-10-26T06:36:41.675433Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_dyn" us=7
+2026-10-26T06:36:41.675441Z  INFO sync_profile: phase sync tab=1 phase="commit.eval_mod" us=7
+2026-10-26T06:36:41.675448Z  INFO sync_profile: phase sync tab=1 phase="commit.attrs_sync" us=7
+2026-10-26T06:36:41.675456Z  INFO sync_profile: phase sync tab=1 phase="commit.deliver" us=59
+2026-10-26T06:36:41.675664Z  INFO sync_profile: phase sync tab=1 phase="commit.drains" us=207
+2026-10-26T06:36:41.675786Z  INFO sync_profile: phase sync tab=1 phase="pump.commit_lock" us=389
+2026-10-26T06:36:41.782783Z  INFO sync_profile: phase sync tab=1 phase="pump.offlock" us=105788
+2026-10-26T06:36:41.782846Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_net" us=0
+2026-10-26T06:36:41.782857Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_crypto" us=10
+2026-10-26T06:36:41.782865Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_es" us=8
+2026-10-26T06:36:41.782872Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_ws" us=7
+2026-10-26T06:36:41.782879Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_dyn" us=7
+2026-10-26T06:36:41.782886Z  INFO sync_profile: phase sync tab=1 phase="commit.eval_mod" us=6
+2026-10-26T06:36:41.782894Z  INFO sync_profile: phase sync tab=1 phase="commit.attrs_sync" us=7
+2026-10-26T06:36:41.782902Z  INFO sync_profile: phase sync tab=1 phase="commit.deliver" us=58
+2026-10-26T06:36:41.783221Z  INFO sync_profile: phase sync tab=1 phase="commit.drains" us=316
+2026-10-26T06:36:41.783400Z  INFO sync_profile: phase sync tab=1 phase="pump.commit_lock" us=556
+2026-10-26T06:36:41.926297Z  INFO sync_profile: phase sync tab=1 phase="pump.offlock" us=128540
+2026-10-26T06:36:41.926357Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_net" us=0
+2026-10-26T06:36:41.926370Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_crypto" us=13
+2026-10-26T06:36:41.926378Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_es" us=8
+2026-10-26T06:36:41.926386Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_ws" us=7
+2026-10-26T06:36:41.926394Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_dyn" us=7
+2026-10-26T06:36:41.926401Z  INFO sync_profile: phase sync tab=1 phase="commit.eval_mod" us=7
+2026-10-26T06:36:41.926408Z  INFO sync_profile: phase sync tab=1 phase="commit.attrs_sync" us=7
+2026-10-26T06:36:41.926416Z  INFO sync_profile: phase sync tab=1 phase="commit.deliver" us=60
+2026-10-26T06:36:41.926492Z  INFO sync_profile: phase sync tab=1 phase="commit.drains" us=75
+2026-10-26T06:36:41.926525Z  INFO sync_profile: phase sync tab=1 phase="pump.commit_lock" us=169
+2026-10-26T06:36:42.070165Z  INFO sync_profile: phase sync tab=1 phase="pump.offlock" us=128009
+2026-10-26T06:36:42.070239Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_net" us=0
+2026-10-26T06:36:42.070250Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_crypto" us=11
+2026-10-26T06:36:42.070260Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_es" us=9
+2026-10-26T06:36:42.070269Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_ws" us=9
+2026-10-26T06:36:42.070284Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_dyn" us=15
+2026-10-26T06:36:42.070294Z  INFO sync_profile: phase sync tab=1 phase="commit.eval_mod" us=10
+2026-10-26T06:36:42.070304Z  INFO sync_profile: phase sync tab=1 phase="commit.attrs_sync" us=9
+2026-10-26T06:36:42.070313Z  INFO sync_profile: phase sync tab=1 phase="commit.deliver" us=75
+2026-10-26T06:36:42.070532Z  INFO sync_profile: phase sync tab=1 phase="commit.drains" us=218
+2026-10-26T06:36:42.070685Z  INFO sync_profile: phase sync tab=1 phase="pump.commit_lock" us=447
+2026-10-26T06:36:42.182609Z  INFO sync_profile: phase sync tab=1 phase="pump.offlock" us=103424
+2026-10-26T06:36:42.182708Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_net" us=0
+2026-10-26T06:36:42.182725Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_crypto" us=16
+2026-10-26T06:36:42.182738Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_es" us=12
+2026-10-26T06:36:42.182747Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_ws" us=9
+2026-10-26T06:36:42.182756Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_dyn" us=8
+2026-10-26T06:36:42.182766Z  INFO sync_profile: phase sync tab=1 phase="commit.eval_mod" us=9
+2026-10-26T06:36:42.182775Z  INFO sync_profile: phase sync tab=1 phase="commit.attrs_sync" us=9
+2026-10-26T06:36:42.182786Z  INFO sync_profile: phase sync tab=1 phase="commit.deliver" us=80
+2026-10-26T06:36:42.183044Z  INFO sync_profile: phase sync tab=1 phase="commit.drains" us=257
+2026-10-26T06:36:42.183227Z  INFO sync_profile: phase sync tab=1 phase="pump.commit_lock" us=520
+2026-10-26T06:36:42.289390Z  INFO sync_profile: phase sync tab=1 phase="pump.offlock" us=91656
+2026-10-26T06:36:42.289434Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_net" us=0
+2026-10-26T06:36:42.289443Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_crypto" us=9
+2026-10-26T06:36:42.289451Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_es" us=8
+2026-10-26T06:36:42.289459Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_ws" us=7
+2026-10-26T06:36:42.289467Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_dyn" us=7
+2026-10-26T06:36:42.289475Z  INFO sync_profile: phase sync tab=1 phase="commit.eval_mod" us=8
+2026-10-26T06:36:42.289482Z  INFO sync_profile: phase sync tab=1 phase="commit.attrs_sync" us=7
+2026-10-26T06:36:42.289490Z  INFO sync_profile: phase sync tab=1 phase="commit.deliver" us=57
+2026-10-26T06:36:42.289603Z  INFO sync_profile: phase sync tab=1 phase="commit.drains" us=110
+2026-10-26T06:36:42.289697Z  INFO sync_profile: phase sync tab=1 phase="pump.commit_lock" us=264
+2026-10-26T06:36:42.383787Z  INFO sync_profile: phase sync tab=1 phase="pump.offlock" us=91160
+2026-10-26T06:36:42.383921Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_net" us=0
+2026-10-26T06:36:42.383938Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_crypto" us=16
+2026-10-26T06:36:42.383946Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_es" us=8
+2026-10-26T06:36:42.383953Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_ws" us=7
+2026-10-26T06:36:42.383959Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_dyn" us=6
+2026-10-26T06:36:42.383966Z  INFO sync_profile: phase sync tab=1 phase="commit.eval_mod" us=6
+2026-10-26T06:36:42.383972Z  INFO sync_profile: phase sync tab=1 phase="commit.attrs_sync" us=6
+2026-10-26T06:36:42.383979Z  INFO sync_profile: phase sync tab=1 phase="commit.deliver" us=59
+2026-10-26T06:36:42.384093Z  INFO sync_profile: phase sync tab=1 phase="commit.drains" us=111
+2026-10-26T06:36:42.384180Z  INFO sync_profile: phase sync tab=1 phase="pump.commit_lock" us=259
+2026-10-26T06:36:42.470158Z  INFO sync_profile: phase sync tab=1 phase="pump.offlock" us=82853
+2026-10-26T06:36:42.470213Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_net" us=0
+2026-10-26T06:36:42.470223Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_crypto" us=9
+2026-10-26T06:36:42.470231Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_es" us=8
+2026-10-26T06:36:42.470239Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_ws" us=7
+2026-10-26T06:36:42.470247Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_dyn" us=7
+2026-10-26T06:36:42.470254Z  INFO sync_profile: phase sync tab=1 phase="commit.eval_mod" us=7
+2026-10-26T06:36:42.470262Z  INFO sync_profile: phase sync tab=1 phase="commit.attrs_sync" us=7
+2026-10-26T06:36:42.470269Z  INFO sync_profile: phase sync tab=1 phase="commit.deliver" us=56
+2026-10-26T06:36:42.470344Z  INFO sync_profile: phase sync tab=1 phase="commit.drains" us=74
+2026-10-26T06:36:42.470373Z  INFO sync_profile: phase sync tab=1 phase="pump.commit_lock" us=160
+2026-10-26T06:36:42.559599Z  INFO sync_profile: phase sync tab=1 phase="pump.offlock" us=84228
+2026-10-26T06:36:42.559715Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_net" us=0
+2026-10-26T06:36:42.559733Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_crypto" us=17
+2026-10-26T06:36:42.559747Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_es" us=14
+2026-10-26T06:36:42.559760Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_ws" us=12
+2026-10-26T06:36:42.559773Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_dyn" us=13
+2026-10-26T06:36:42.559789Z  INFO sync_profile: phase sync tab=1 phase="commit.eval_mod" us=16
+2026-10-26T06:36:42.559806Z  INFO sync_profile: phase sync tab=1 phase="commit.attrs_sync" us=16
+2026-10-26T06:36:42.559820Z  INFO sync_profile: phase sync tab=1 phase="commit.deliver" us=107
+2026-10-26T06:36:42.560137Z  INFO sync_profile: phase sync tab=1 phase="commit.drains" us=316
+2026-10-26T06:36:42.560335Z  INFO sync_profile: phase sync tab=1 phase="pump.commit_lock" us=622
+2026-10-26T06:36:42.649902Z  INFO sync_profile: phase sync tab=1 phase="pump.offlock" us=88160
+2026-10-26T06:36:42.649946Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_net" us=0
+2026-10-26T06:36:42.649955Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_crypto" us=9
+2026-10-26T06:36:42.649963Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_es" us=7
+2026-10-26T06:36:42.649971Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_ws" us=7
+2026-10-26T06:36:42.649978Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_dyn" us=7
+2026-10-26T06:36:42.649985Z  INFO sync_profile: phase sync tab=1 phase="commit.eval_mod" us=7
+2026-10-26T06:36:42.649992Z  INFO sync_profile: phase sync tab=1 phase="commit.attrs_sync" us=7
+2026-10-26T06:36:42.650768Z  INFO sync_profile: phase sync tab=1 phase="commit.deliver" us=822
+2026-10-26T06:36:42.651063Z  INFO sync_profile: phase sync tab=1 phase="commit.drains" us=293
+2026-10-26T06:36:42.651215Z  INFO sync_profile: phase sync tab=1 phase="pump.commit_lock" us=1270
+2026-10-26T06:36:42.746549Z  INFO sync_profile: phase sync tab=1 phase="pump.offlock" us=81796
+2026-10-26T06:36:42.746596Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_net" us=0
+2026-10-26T06:36:42.746605Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_crypto" us=8
+2026-10-26T06:36:42.746613Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_es" us=7
+2026-10-26T06:36:42.746620Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_ws" us=7
+2026-10-26T06:36:42.746628Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_dyn" us=7
+2026-10-26T06:36:42.746635Z  INFO sync_profile: phase sync tab=1 phase="commit.eval_mod" us=7
+2026-10-26T06:36:42.746643Z  INFO sync_profile: phase sync tab=1 phase="commit.attrs_sync" us=7
+2026-10-26T06:36:42.746650Z  INFO sync_profile: phase sync tab=1 phase="commit.deliver" us=54
+2026-10-26T06:36:42.746853Z  INFO sync_profile: phase sync tab=1 phase="commit.drains" us=202
+2026-10-26T06:36:42.746971Z  INFO sync_profile: phase sync tab=1 phase="pump.commit_lock" us=375
+2026-10-26T06:36:42.844235Z  INFO sync_profile: phase sync tab=1 phase="pump.offlock" us=80030
+2026-10-26T06:36:42.844282Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_net" us=0
+2026-10-26T06:36:42.844291Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_crypto" us=8
+2026-10-26T06:36:42.844298Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_es" us=7
+2026-10-26T06:36:42.844306Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_ws" us=7
+2026-10-26T06:36:42.844313Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_dyn" us=7
+2026-10-26T06:36:42.844320Z  INFO sync_profile: phase sync tab=1 phase="commit.eval_mod" us=7
+2026-10-26T06:36:42.844328Z  INFO sync_profile: phase sync tab=1 phase="commit.attrs_sync" us=7
+2026-10-26T06:36:42.844335Z  INFO sync_profile: phase sync tab=1 phase="commit.deliver" us=53
+2026-10-26T06:36:42.844505Z  INFO sync_profile: phase sync tab=1 phase="commit.drains" us=169
+2026-10-26T06:36:42.844614Z  INFO sync_profile: phase sync tab=1 phase="pump.commit_lock" us=333
+2026-10-26T06:36:42.895325Z  INFO explorer_core::session::apply: apply: cascade ms=1358
+2026-10-26T06:36:42.936428Z  INFO sync_profile: phase sync tab=1 phase="pump.offlock" us=83833
+2026-10-26T06:36:42.936465Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_net" us=0
+2026-10-26T06:36:42.936473Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_crypto" us=8
+2026-10-26T06:36:42.936481Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_es" us=8
+2026-10-26T06:36:42.936488Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_ws" us=6
+2026-10-26T06:36:42.936495Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_dyn" us=7
+2026-10-26T06:36:42.936502Z  INFO sync_profile: phase sync tab=1 phase="commit.eval_mod" us=6
+2026-10-26T06:36:42.936509Z  INFO sync_profile: phase sync tab=1 phase="commit.attrs_sync" us=6
+2026-10-26T06:36:42.936516Z  INFO sync_profile: phase sync tab=1 phase="commit.deliver" us=52
+2026-10-26T06:36:42.936690Z  INFO sync_profile: phase sync tab=1 phase="commit.drains" us=173
+2026-10-26T06:36:42.936741Z  INFO sync_profile: phase sync tab=1 phase="pump.commit_lock" us=277
+2026-10-26T06:36:42.944135Z  INFO explorer_core::session::apply: apply: boxtree ms=1407
+2026-10-26T06:36:43.003078Z  INFO explorer_core::session::apply: apply: layout ms=1466
+2026-10-26T06:36:43.028979Z  INFO sync_profile: phase sync tab=1 phase="pump.offlock" us=80838
+2026-10-26T06:36:43.029028Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_net" us=0
+2026-10-26T06:36:43.029037Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_crypto" us=9
+2026-10-26T06:36:43.029046Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_es" us=8
+2026-10-26T06:36:43.029053Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_ws" us=7
+2026-10-26T06:36:43.029061Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_dyn" us=7
+2026-10-26T06:36:43.029069Z  INFO sync_profile: phase sync tab=1 phase="commit.eval_mod" us=7
+2026-10-26T06:36:43.029076Z  INFO sync_profile: phase sync tab=1 phase="commit.attrs_sync" us=7
+2026-10-26T06:36:43.029093Z  INFO sync_profile: phase sync tab=1 phase="commit.deliver" us=65
+2026-10-26T06:36:43.029293Z  INFO sync_profile: phase sync tab=1 phase="commit.drains" us=200
+2026-10-26T06:36:43.029421Z  INFO sync_profile: phase sync tab=1 phase="pump.commit_lock" us=393
+2026-10-26T06:36:43.108733Z  INFO sync_profile: phase sync tab=1 phase="pump.offlock" us=75734
+2026-10-26T06:36:43.108782Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_net" us=0
+2026-10-26T06:36:43.108791Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_crypto" us=9
+2026-10-26T06:36:43.108799Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_es" us=8
+2026-10-26T06:36:43.108807Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_ws" us=7
+2026-10-26T06:36:43.108814Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_dyn" us=7
+2026-10-26T06:36:43.108822Z  INFO sync_profile: phase sync tab=1 phase="commit.eval_mod" us=7
+2026-10-26T06:36:43.108829Z  INFO sync_profile: phase sync tab=1 phase="commit.attrs_sync" us=7
+2026-10-26T06:36:43.108837Z  INFO sync_profile: phase sync tab=1 phase="commit.deliver" us=56
+2026-10-26T06:36:43.108974Z  INFO sync_profile: phase sync tab=1 phase="commit.drains" us=136
+2026-10-26T06:36:43.109028Z  INFO sync_profile: phase sync tab=1 phase="pump.commit_lock" us=248
+2026-10-26T06:36:43.187242Z  INFO sync_profile: phase sync tab=1 phase="pump.offlock" us=72672
+2026-10-26T06:36:43.187293Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_net" us=0
+2026-10-26T06:36:43.187302Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_crypto" us=8
+2026-10-26T06:36:43.187310Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_es" us=7
+2026-10-26T06:36:43.187316Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_ws" us=6
+2026-10-26T06:36:43.187323Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_dyn" us=6
+2026-10-26T06:36:43.187330Z  INFO sync_profile: phase sync tab=1 phase="commit.eval_mod" us=6
+2026-10-26T06:36:43.187336Z  INFO sync_profile: phase sync tab=1 phase="commit.attrs_sync" us=6
+2026-10-26T06:36:43.187343Z  INFO sync_profile: phase sync tab=1 phase="commit.deliver" us=50
+2026-10-26T06:36:43.187571Z  INFO sync_profile: phase sync tab=1 phase="commit.drains" us=226
+2026-10-26T06:36:43.187728Z  INFO sync_profile: phase sync tab=1 phase="pump.commit_lock" us=435
+2026-10-26T06:36:43.261402Z  INFO sync_profile: phase sync tab=1 phase="pump.offlock" us=71233
+2026-10-26T06:36:43.261449Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_net" us=0
+2026-10-26T06:36:43.261458Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_crypto" us=9
+2026-10-26T06:36:43.261466Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_es" us=8
+2026-10-26T06:36:43.261474Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_ws" us=7
+2026-10-26T06:36:43.261482Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_dyn" us=7
+2026-10-26T06:36:43.261489Z  INFO sync_profile: phase sync tab=1 phase="commit.eval_mod" us=7
+2026-10-26T06:36:43.261497Z  INFO sync_profile: phase sync tab=1 phase="commit.attrs_sync" us=7
+2026-10-26T06:36:43.261505Z  INFO sync_profile: phase sync tab=1 phase="commit.deliver" us=56
+2026-10-26T06:36:43.261687Z  INFO sync_profile: phase sync tab=1 phase="commit.drains" us=182
+2026-10-26T06:36:43.261790Z  INFO sync_profile: phase sync tab=1 phase="pump.commit_lock" us=341
+2026-10-26T06:36:43.336250Z  INFO sync_profile: phase sync tab=1 phase="pump.offlock" us=72097
+2026-10-26T06:36:43.336305Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_net" us=0
+2026-10-26T06:36:43.336313Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_crypto" us=8
+2026-10-26T06:36:43.336321Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_es" us=7
+2026-10-26T06:36:43.336327Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_ws" us=6
+2026-10-26T06:36:43.336334Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_dyn" us=6
+2026-10-26T06:36:43.336340Z  INFO sync_profile: phase sync tab=1 phase="commit.eval_mod" us=6
+2026-10-26T06:36:43.336347Z  INFO sync_profile: phase sync tab=1 phase="commit.attrs_sync" us=6
+2026-10-26T06:36:43.336363Z  INFO sync_profile: phase sync tab=1 phase="commit.deliver" us=59
+2026-10-26T06:36:43.336546Z  INFO sync_profile: phase sync tab=1 phase="commit.drains" us=182
+2026-10-26T06:36:43.336658Z  INFO sync_profile: phase sync tab=1 phase="pump.commit_lock" us=353
+2026-10-26T06:36:43.421595Z  INFO sync_profile: phase sync tab=1 phase="pump.offlock" us=73003
+2026-10-26T06:36:43.421643Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_net" us=0
+2026-10-26T06:36:43.421653Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_crypto" us=9
+2026-10-26T06:36:43.421661Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_es" us=8
+2026-10-26T06:36:43.421668Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_ws" us=7
+2026-10-26T06:36:43.421676Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_dyn" us=7
+2026-10-26T06:36:43.421684Z  INFO sync_profile: phase sync tab=1 phase="commit.eval_mod" us=7
+2026-10-26T06:36:43.421691Z  INFO sync_profile: phase sync tab=1 phase="commit.attrs_sync" us=7
+2026-10-26T06:36:43.421699Z  INFO sync_profile: phase sync tab=1 phase="commit.deliver" us=56
+2026-10-26T06:36:43.421828Z  INFO sync_profile: phase sync tab=1 phase="commit.drains" us=128
+2026-10-26T06:36:43.421917Z  INFO sync_profile: phase sync tab=1 phase="pump.commit_lock" us=274
+2026-10-26T06:36:43.490588Z  INFO explorer_core::session::apply: apply: repaint ms=1953
+2026-10-26T06:36:43.526250Z  INFO sync_profile: phase sync tab=1 phase="pump.offlock" us=78730
+[settle] reactions=13
+[mt-run] reaction-ok ctx=0
+2026-10-26T06:36:43.539053Z DEBUG explorer_jscore::module: import() dynamique spec="./chunk-lazy-element-select-panel-1db988c3b2debb9f.js" referrer="https://github.githubassets.com/assets/wp-runtime-85b402a4998c6482.js"
+[mt-run] reaction-ok ctx=0
+2026-10-26T06:36:43.545716Z DEBUG explorer_jscore::module: import() dynamique spec="./chunk-lazy-element-toggle-switch-d84c21582809dda9.js" referrer="https://github.githubassets.com/assets/wp-runtime-85b402a4998c6482.js"
+[mt-run] reaction-ok ctx=0
+2026-10-26T06:36:43.553699Z DEBUG explorer_jscore::module: import() dynamique spec="./chunk-lazy-element-cookie-consent-link-f9fd1ccb00a8c36f.js" referrer="https://github.githubassets.com/assets/wp-runtime-85b402a4998c6482.js"
+[mt-run] reaction-ok ctx=0
+2026-10-26T06:36:43.563436Z DEBUG explorer_jscore::module: import() dynamique spec="./chunk-dg-9bfcf8075100cf89.js" referrer="https://github.githubassets.com/assets/wp-runtime-85b402a4998c6482.js"
+2026-10-26T06:36:43.570552Z DEBUG explorer_jscore::module: import() dynamique spec="./chunk-lazy-element-fullstory-capture-15d50c217bc93073.js" referrer="https://github.githubassets.com/assets/wp-runtime-85b402a4998c6482.js"
+[mt-run] reaction-ok ctx=0
+2026-10-26T06:36:43.577557Z DEBUG explorer_jscore::module: import() dynamique spec="./chunk-lazy-element-ghcc-consent-47aaf7da7816fc53.js" referrer="https://github.githubassets.com/assets/wp-runtime-85b402a4998c6482.js"
+[mt-run] reaction-ok ctx=0
+2026-10-26T06:36:43.584434Z DEBUG explorer_jscore::module: import() dynamique spec="./chunk-lazy-element-webauthn-get-594ac3b363fd9c1e.js" referrer="https://github.githubassets.com/assets/wp-runtime-85b402a4998c6482.js"
+[mt-run] reaction-ok ctx=0
+2026-10-26T06:36:43.598030Z DEBUG explorer_jscore::module: import() dynamique spec="./g6m-c6c2e85d4cbe6e0f.js" referrer="https://github.githubassets.com/assets/wp-runtime-85b402a4998c6482.js"
+2026-10-26T06:36:43.607595Z DEBUG explorer_jscore::module: import() dynamique spec="./chunk-lazy-react-partial-app-install-banner-partial-ed58f1b49a2d8d01.js" referrer="https://github.githubassets.com/assets/wp-runtime-85b402a4998c6482.js"
+[mt-run] reaction-ok ctx=0
+2026-10-26T06:36:43.615357Z DEBUG explorer_jscore::module: import() dynamique spec="./gw-4bf343b417f9ec19.js" referrer="https://github.githubassets.com/assets/wp-runtime-85b402a4998c6482.js"
+2026-10-26T06:36:43.624714Z DEBUG explorer_jscore::module: import() dynamique spec="./chunk-lazy-react-partial-keyboard-shortcuts-dialog-6d857a36d55539c5.js" referrer="https://github.githubassets.com/assets/wp-runtime-85b402a4998c6482.js"
+[mt-run] reaction-ok ctx=0
+2026-10-26T06:36:43.632514Z DEBUG explorer_jscore::module: import() dynamique spec="./hiz-0c55010ddab90e83.js" referrer="https://github.githubassets.com/assets/wp-runtime-85b402a4998c6482.js"
+2026-10-26T06:36:43.635482Z DEBUG explorer_jscore::module: import() dynamique spec="./e2-0b5115974c072a51.js" referrer="https://github.githubassets.com/assets/wp-runtime-85b402a4998c6482.js"
+2026-10-26T06:36:43.644500Z DEBUG explorer_jscore::module: import() dynamique spec="./chunk-lazy-react-partial-marketing-footer-7d6fb2ccc544828f.js" referrer="https://github.githubassets.com/assets/wp-runtime-85b402a4998c6482.js"
+[mt-run] reaction-ok ctx=0
+2026-10-26T06:36:43.647156Z DEBUG explorer_jscore::module: import() dynamique spec="./ff-d6dad91563c22a66.js" referrer="https://github.githubassets.com/assets/wp-runtime-85b402a4998c6482.js"
+2026-10-26T06:36:43.656629Z DEBUG explorer_jscore::module: import() dynamique spec="./chunk-lazy-react-partial-marketing-global-banner-65aef68527012d32.js" referrer="https://github.githubassets.com/assets/wp-runtime-85b402a4998c6482.js"
+[mt-run] reaction-ok ctx=0
+2026-10-26T06:36:43.660371Z DEBUG explorer_jscore::module: import() dynamique spec="./skl-90fea02d318d647f.js" referrer="https://github.githubassets.com/assets/wp-runtime-85b402a4998c6482.js"
+2026-10-26T06:36:43.662199Z DEBUG explorer_jscore::module: import() dynamique spec="./z7-54a4e2eade1aa26b.js" referrer="https://github.githubassets.com/assets/wp-runtime-85b402a4998c6482.js"
+2026-10-26T06:36:43.666376Z DEBUG explorer_jscore::module: import() dynamique spec="./a6j-32ec4660665b36c1.js" referrer="https://github.githubassets.com/assets/wp-runtime-85b402a4998c6482.js"
+2026-10-26T06:36:43.672985Z DEBUG explorer_jscore::module: import() dynamique spec="./chunk-lazy-react-partial-marketing-header-b4346dea7b2f491a.js" referrer="https://github.githubassets.com/assets/wp-runtime-85b402a4998c6482.js"
+[mt-run] reaction-ok ctx=0
+2026-10-26T06:36:43.679659Z DEBUG explorer_jscore::module: import() dynamique spec="./chunk-xvz-afdb8ae9dfb2e6cb.js" referrer="https://github.githubassets.com/assets/wp-runtime-85b402a4998c6482.js"
+[mt-run] reaction-ok ctx=0
+2026-10-26T06:36:43.687432Z DEBUG explorer_jscore::module: import() dynamique spec="./chunk-bl-16891fdfed025b0e.js" referrer="https://github.githubassets.com/assets/wp-runtime-85b402a4998c6482.js"
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[settle] reactions=9
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[mt-run] reaction-ok ctx=0
+[settle-skip] already settled
+[settle-skip] already settled
+[settle-skip] already settled
+2026-10-26T06:36:43.888552Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_net" us=0
+2026-10-26T06:36:43.888589Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_crypto" us=38
+2026-10-26T06:36:43.888597Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_es" us=7
+2026-10-26T06:36:43.888604Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_ws" us=6
+2026-10-26T06:36:43.888610Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_dyn" us=6
+2026-10-26T06:36:43.888617Z  INFO sync_profile: phase sync tab=1 phase="commit.eval_mod" us=6
+2026-10-26T06:36:43.888623Z  INFO sync_profile: phase sync tab=1 phase="commit.attrs_sync" us=6
+2026-10-26T06:36:43.888630Z  INFO sync_profile: phase sync tab=1 phase="commit.deliver" us=362332
+2026-10-26T06:36:43.890307Z DEBUG explorer_core::session::net: spawn dyn import tab=1 url=https://github.githubassets.com/assets/chunk-lazy-element-select-panel-1db988c3b2debb9f.js seq=2
+2026-10-26T06:36:43.890361Z DEBUG explorer_core::session::net: dyn import : fetch émis tab=1 url=https://github.githubassets.com/assets/chunk-lazy-element-select-panel-1db988c3b2debb9f.js
+2026-10-26T06:36:43.890388Z DEBUG explorer_core::session::net: spawn dyn import tab=1 url=https://github.githubassets.com/assets/chunk-lazy-element-toggle-switch-d84c21582809dda9.js seq=3
+2026-10-26T06:36:43.890418Z DEBUG explorer_core::session::net: dyn import : fetch émis tab=1 url=https://github.githubassets.com/assets/chunk-lazy-element-toggle-switch-d84c21582809dda9.js
+2026-10-26T06:36:43.890442Z DEBUG explorer_core::session::net: spawn dyn import tab=1 url=https://github.githubassets.com/assets/chunk-lazy-element-cookie-consent-link-f9fd1ccb00a8c36f.js seq=4
+2026-10-26T06:36:43.890469Z DEBUG explorer_core::session::net: dyn import : fetch émis tab=1 url=https://github.githubassets.com/assets/chunk-lazy-element-cookie-consent-link-f9fd1ccb00a8c36f.js
+2026-10-26T06:36:43.890490Z DEBUG explorer_core::session::net: spawn dyn import tab=1 url=https://github.githubassets.com/assets/chunk-dg-9bfcf8075100cf89.js seq=5
+2026-10-26T06:36:43.890517Z DEBUG explorer_core::session::net: dyn import : fetch émis tab=1 url=https://github.githubassets.com/assets/chunk-dg-9bfcf8075100cf89.js
+2026-10-26T06:36:43.890543Z DEBUG explorer_core::session::net: spawn dyn import tab=1 url=https://github.githubassets.com/assets/chunk-lazy-element-fullstory-capture-15d50c217bc93073.js seq=6
+2026-10-26T06:36:43.890597Z DEBUG explorer_core::session::net: dyn import : fetch émis tab=1 url=https://github.githubassets.com/assets/chunk-lazy-element-fullstory-capture-15d50c217bc93073.js
+2026-10-26T06:36:43.890635Z DEBUG explorer_core::session::net: spawn dyn import tab=1 url=https://github.githubassets.com/assets/chunk-lazy-element-ghcc-consent-47aaf7da7816fc53.js seq=7
+2026-10-26T06:36:43.890683Z DEBUG explorer_core::session::net: dyn import : fetch émis tab=1 url=https://github.githubassets.com/assets/chunk-lazy-element-ghcc-consent-47aaf7da7816fc53.js
+2026-10-26T06:36:43.890726Z DEBUG explorer_core::session::net: spawn dyn import tab=1 url=https://github.githubassets.com/assets/chunk-lazy-element-webauthn-get-594ac3b363fd9c1e.js seq=8
+2026-10-26T06:36:43.890764Z DEBUG explorer_core::session::net: dyn import : fetch émis tab=1 url=https://github.githubassets.com/assets/chunk-lazy-element-webauthn-get-594ac3b363fd9c1e.js
+2026-10-26T06:36:43.890796Z DEBUG explorer_core::session::net: spawn dyn import tab=1 url=https://github.githubassets.com/assets/g6m-c6c2e85d4cbe6e0f.js seq=9
+2026-10-26T06:36:43.890839Z DEBUG explorer_core::session::net: dyn import : fetch émis tab=1 url=https://github.githubassets.com/assets/g6m-c6c2e85d4cbe6e0f.js
+2026-10-26T06:36:43.890875Z DEBUG explorer_core::session::net: spawn dyn import tab=1 url=https://github.githubassets.com/assets/chunk-lazy-react-partial-app-install-banner-partial-ed58f1b49a2d8d01.js seq=10
+2026-10-26T06:36:43.890911Z DEBUG explorer_core::session::net: dyn import : fetch émis tab=1 url=https://github.githubassets.com/assets/chunk-lazy-react-partial-app-install-banner-partial-ed58f1b49a2d8d01.js
+2026-10-26T06:36:43.890940Z DEBUG explorer_core::session::net: spawn dyn import tab=1 url=https://github.githubassets.com/assets/gw-4bf343b417f9ec19.js seq=11
+2026-10-26T06:36:43.890968Z DEBUG explorer_core::session::net: dyn import : fetch émis tab=1 url=https://github.githubassets.com/assets/gw-4bf343b417f9ec19.js
+2026-10-26T06:36:43.890989Z DEBUG explorer_core::session::net: spawn dyn import tab=1 url=https://github.githubassets.com/assets/chunk-lazy-react-partial-keyboard-shortcuts-dialog-6d857a36d55539c5.js seq=12
+2026-10-26T06:36:43.891019Z DEBUG explorer_core::session::net: dyn import : fetch émis tab=1 url=https://github.githubassets.com/assets/chunk-lazy-react-partial-keyboard-shortcuts-dialog-6d857a36d55539c5.js
+2026-10-26T06:36:43.891041Z DEBUG explorer_core::session::net: spawn dyn import tab=1 url=https://github.githubassets.com/assets/hiz-0c55010ddab90e83.js seq=13
+2026-10-26T06:36:43.891066Z DEBUG explorer_core::session::net: dyn import : fetch émis tab=1 url=https://github.githubassets.com/assets/hiz-0c55010ddab90e83.js
+2026-10-26T06:36:43.891089Z DEBUG explorer_core::session::net: spawn dyn import tab=1 url=https://github.githubassets.com/assets/e2-0b5115974c072a51.js seq=14
+2026-10-26T06:36:43.891131Z DEBUG explorer_core::session::net: dyn import : fetch émis tab=1 url=https://github.githubassets.com/assets/e2-0b5115974c072a51.js
+2026-10-26T06:36:43.891167Z DEBUG explorer_core::session::net: spawn dyn import tab=1 url=https://github.githubassets.com/assets/chunk-lazy-react-partial-marketing-footer-7d6fb2ccc544828f.js seq=15
+2026-10-26T06:36:43.891206Z DEBUG explorer_core::session::net: dyn import : fetch émis tab=1 url=https://github.githubassets.com/assets/chunk-lazy-react-partial-marketing-footer-7d6fb2ccc544828f.js
+2026-10-26T06:36:43.891238Z DEBUG explorer_core::session::net: spawn dyn import tab=1 url=https://github.githubassets.com/assets/ff-d6dad91563c22a66.js seq=16
+2026-10-26T06:36:43.891282Z DEBUG explorer_core::session::net: dyn import : fetch émis tab=1 url=https://github.githubassets.com/assets/ff-d6dad91563c22a66.js
+2026-10-26T06:36:43.891312Z DEBUG explorer_core::session::net: spawn dyn import tab=1 url=https://github.githubassets.com/assets/chunk-lazy-react-partial-marketing-global-banner-65aef68527012d32.js seq=17
+2026-10-26T06:36:43.891349Z DEBUG explorer_core::session::net: dyn import : fetch émis tab=1 url=https://github.githubassets.com/assets/chunk-lazy-react-partial-marketing-global-banner-65aef68527012d32.js
+2026-10-26T06:36:43.891378Z DEBUG explorer_core::session::net: spawn dyn import tab=1 url=https://github.githubassets.com/assets/skl-90fea02d318d647f.js seq=18
+2026-10-26T06:36:43.891507Z DEBUG explorer_core::session::net: dyn import : fetch émis tab=1 url=https://github.githubassets.com/assets/skl-90fea02d318d647f.js
+2026-10-26T06:36:43.891541Z DEBUG explorer_core::session::net: spawn dyn import tab=1 url=https://github.githubassets.com/assets/z7-54a4e2eade1aa26b.js seq=19
+2026-10-26T06:36:43.891585Z DEBUG explorer_core::session::net: dyn import : fetch émis tab=1 url=https://github.githubassets.com/assets/z7-54a4e2eade1aa26b.js
+2026-10-26T06:36:43.891613Z DEBUG explorer_core::session::net: spawn dyn import tab=1 url=https://github.githubassets.com/assets/a6j-32ec4660665b36c1.js seq=20
+2026-10-26T06:36:43.891647Z DEBUG explorer_core::session::net: dyn import : fetch émis tab=1 url=https://github.githubassets.com/assets/a6j-32ec4660665b36c1.js
+2026-10-26T06:36:43.891676Z DEBUG explorer_core::session::net: spawn dyn import tab=1 url=https://github.githubassets.com/assets/chunk-lazy-react-partial-marketing-header-b4346dea7b2f491a.js seq=21
+2026-10-26T06:36:43.891722Z DEBUG explorer_core::session::net: dyn import : fetch émis tab=1 url=https://github.githubassets.com/assets/chunk-lazy-react-partial-marketing-header-b4346dea7b2f491a.js
+2026-10-26T06:36:43.891752Z DEBUG explorer_core::session::net: spawn dyn import tab=1 url=https://github.githubassets.com/assets/chunk-xvz-afdb8ae9dfb2e6cb.js seq=22
+2026-10-26T06:36:43.891798Z DEBUG explorer_core::session::net: dyn import : fetch émis tab=1 url=https://github.githubassets.com/assets/chunk-xvz-afdb8ae9dfb2e6cb.js
+2026-10-26T06:36:43.891828Z DEBUG explorer_core::session::net: spawn dyn import tab=1 url=https://github.githubassets.com/assets/chunk-bl-16891fdfed025b0e.js seq=23
+2026-10-26T06:36:43.891870Z DEBUG explorer_core::session::net: dyn import : fetch émis tab=1 url=https://github.githubassets.com/assets/chunk-bl-16891fdfed025b0e.js
+[settle] reactions=1
+[settle-skip] already settled
+[settle-skip] already settled
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[settle-skip] already settled
+[settle-skip] already settled
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[settle-skip] already settled
+[settle-skip] already settled
+[mt-run] reaction-ok ctx=0
+[settle] reactions=1
+[settle-skip] already settled
+[settle-skip] already settled
+[mt-run] reaction-ok ctx=0
+2026-10-26T06:36:44.352431Z DEBUG explorer_core::session::net: deliver dyn import tab=1 seq=3 ok=true deps=0
+[import-deliver] seq=3 pending=true ctx=0
+[import-resolve] seq=3
+2026-10-26T06:36:44.353871Z  INFO sync_profile: phase sync tab=1 phase="commit.drains" us=465241
+2026-10-26T06:36:44.388199Z  INFO sync_profile: phase sync tab=1 phase="event.dispatch" us=34267
+2026-10-26T06:36:44.456971Z  INFO sync_profile: phase sync tab=1 phase="event.mirror_sync" us=68771
+2026-10-26T06:36:44.457110Z  INFO sync_profile: phase sync tab=1 phase="event.after_script" us=141
+2026-10-26T06:36:44.457152Z DEBUG explorer_core::session::net: deliver dyn import tab=1 seq=4 ok=true deps=0
+2026-10-26T06:36:44.457174Z DEBUG explorer_core::session::net: deliver dyn import tab=1 seq=7 ok=true deps=0
+[import-deliver] seq=2026-10-26T06:36:44.457193Z DEBUG explorer_core::session::net: deliver dyn import tab=1 seq=5 ok=true deps=0
+4 pending=true2026-10-26T06:36:44.457228Z DEBUG explorer_core::session::net: deliver dyn import tab=1 seq=6 ok=true deps=0
+ ctx=02026-10-26T06:36:44.457263Z DEBUG explorer_core::session::net: deliver dyn import tab=1 seq=8 ok=true deps=0
+
+2026-10-26T06:36:44.457295Z DEBUG explorer_core::session::net: deliver dyn import tab=1 seq=2 ok=true deps=0
+2026-10-26T06:36:44.457317Z DEBUG explorer_core::session::net: deliver dyn import tab=1 seq=9 ok=true deps=0
+2026-10-26T06:36:44.457335Z DEBUG explorer_core::session::net: deliver dyn import tab=1 seq=13 ok=true deps=0
+2026-10-26T06:36:44.457353Z DEBUG explorer_core::session::net: deliver dyn import tab=1 seq=18 ok=true deps=0
+2026-10-26T06:36:44.457370Z DEBUG explorer_core::session::net: deliver dyn import tab=1 seq=22 ok=true deps=0
+2026-10-26T06:36:44.457389Z DEBUG explorer_core::session::net: deliver dyn import tab=1 seq=16 ok=true deps=0
+2026-10-26T06:36:44.457419Z DEBUG explorer_core::session::net: deliver dyn import tab=1 seq=14 ok=true deps=0
+2026-10-26T06:36:44.457444Z DEBUG explorer_core::session::net: deliver dyn import tab=1 seq=19 ok=true deps=0
+2026-10-26T06:36:44.457463Z DEBUG explorer_core::session::net: deliver dyn import tab=1 seq=11 ok=true deps=0
+2026-10-26T06:36:44.457483Z DEBUG explorer_core::session::net: deliver dyn import tab=1 seq=20 ok=true deps=0
+2026-10-26T06:36:44.457524Z DEBUG explorer_core::session::net: deliver dyn import tab=1 seq=10 ok=true deps=7
+2026-10-26T06:36:44.457567Z DEBUG explorer_core::session::net: deliver dyn import tab=1 seq=15 ok=true deps=6
+[import-resolve] seq=4
+2026-10-26T06:36:44.457603Z DEBUG explorer_core::session::net: deliver dyn import tab=1 seq=21 ok=true deps=7
+[import-deliver] seq=7 pending=true ctx=02026-10-26T06:36:44.457673Z DEBUG explorer_core::session::net: deliver dyn import tab=1 seq=12 ok=true deps=7
+
+2026-10-26T06:36:44.457716Z DEBUG explorer_core::session::net: deliver dyn import tab=1 seq=17 ok=true deps=6
+[import-resolve] seq=7
+[import-deliver] seq=5 pending=true ctx=0
+[import-resolve] seq=5
+[import-deliver] seq=6 pending=true ctx=0
+2026-10-26T06:36:44.459103Z  INFO sync_profile: phase sync tab=1 phase="event.poll_net" us=1992
+[import-resolve] seq=6
+[import-deliver] seq=8 pending=true ctx=0
+[import-resolve] seq=8
+[import-deliver] seq=2 pending=true ctx=0
+[import-resolve] seq=2
+[import-deliver] seq=9 pending=true ctx=0
+[import-resolve] seq=9
+[import-deliver] seq=13 pending=true ctx=0
+[import-resolve] seq=13
+[import-deliver] seq=18 pending=true ctx=0
+[import-resolve] seq=18
+[import-deliver] seq=22 pending=true ctx=0
+[import-resolve] seq=22
+[import-deliver] seq=16 pending=true ctx=0
+[import-resolve] seq=16
+[import-deliver] seq=14 pending=true ctx=0
+[import-resolve] seq=14
+[import-deliver] seq=19 pending=true ctx=0
+[import-resolve] seq=19
+[import-deliver] seq=11 pending=true ctx=0
+[import-resolve] seq=11
+[import-deliver] seq=20 pending=true ctx=0
+[import-resolve] seq=20
+[import-deliver] seq=10 pending=true ctx=0
+[import-resolve] seq=10
+[import-deliver] seq=15 pending=true ctx=0
+[import-resolve] seq=15
+[import-deliver] seq=21 pending=true ctx=0
+[import-resolve] seq=21
+[import-deliver] seq=12 pending=true ctx=0
+[import-resolve] seq=12
+[import-deliver] seq=17 pending=true ctx=0
+[import-resolve] seq=17
+2026-10-26T06:36:44.518009Z  INFO sync_profile: phase sync tab=1 phase="event.dispatch" us=58867
+2026-10-26T06:36:44.585072Z  INFO sync_profile: phase sync tab=1 phase="event.mirror_sync" us=67063
+2026-10-26T06:36:44.585210Z  INFO sync_profile: phase sync tab=1 phase="event.after_script" us=139
+2026-10-26T06:36:44.585226Z  INFO sync_profile: phase sync tab=1 phase="event.poll_net" us=15
+2026-10-26T06:36:45.930986Z  INFO sync_profile: phase sync tab=1 phase="pump.commit_lock" us=2404686
+2026-10-26T06:36:45.931219Z  WARN explorer_core::session::apply: journal DOM rejeté → repli re-parse (ADR-0025) tab=1 why=UnmappedKey
+2026-10-26T06:36:47.082355Z  INFO explorer_core::session::apply: apply: cascade ms=1101
+2026-10-26T06:36:47.128156Z  INFO explorer_core::session::apply: apply: boxtree ms=1147
+2026-10-26T06:36:47.169033Z  INFO explorer_core::session::apply: apply: layout ms=1188
+2026-10-26T06:36:47.893819Z  INFO explorer_core::session::apply: apply: repaint ms=1912
+2026-10-26T06:36:47.907630Z DEBUG explorer_core::session::net: deliver dyn import tab=1 seq=23 ok=true deps=0
+[import-deliver] seq=23 pending=true ctx=0
+[import-resolve] seq=23
+2026-10-26T06:36:47.977507Z  INFO sync_profile: phase sync tab=1 phase="pump.offlock" us=68126
+2026-10-26T06:36:47.977561Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_net" us=0
+2026-10-26T06:36:47.977570Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_crypto" us=8
+2026-10-26T06:36:47.977577Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_es" us=7
+2026-10-26T06:36:47.977585Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_ws" us=7
+2026-10-26T06:36:47.977592Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_dyn" us=7
+2026-10-26T06:36:47.977609Z  INFO sync_profile: phase sync tab=1 phase="commit.eval_mod" us=16
+2026-10-26T06:36:47.977621Z  INFO sync_profile: phase sync tab=1 phase="commit.attrs_sync" us=12
+2026-10-26T06:36:47.977629Z  INFO sync_profile: phase sync tab=1 phase="commit.deliver" us=68
+2026-10-26T06:36:48.014506Z  INFO sync_profile: phase sync tab=1 phase="event.dispatch" us=36748
+2026-10-26T06:36:48.084593Z  INFO sync_profile: phase sync tab=1 phase="event.mirror_sync" us=70087
+2026-10-26T06:36:48.084755Z  INFO sync_profile: phase sync tab=1 phase="event.after_script" us=163
+2026-10-26T06:36:48.084779Z  INFO sync_profile: phase sync tab=1 phase="event.poll_net" us=24
+2026-10-26T06:36:48.119833Z  INFO sync_profile: phase sync tab=1 phase="event.dispatch" us=35018
+2026-10-26T06:36:48.190018Z  INFO sync_profile: phase sync tab=1 phase="event.mirror_sync" us=70185
+2026-10-26T06:36:48.190233Z  INFO sync_profile: phase sync tab=1 phase="event.after_script" us=217
+2026-10-26T06:36:48.190261Z  INFO sync_profile: phase sync tab=1 phase="event.poll_net" us=28
+2026-10-26T06:36:50.478074Z  INFO explorer_core::session::apply: apply: cascade ms=1119
+2026-10-26T06:36:50.525210Z  INFO explorer_core::session::apply: apply: boxtree ms=1166
+2026-10-26T06:36:50.565697Z  INFO explorer_core::session::apply: apply: layout ms=1207
+2026-10-26T06:36:51.596973Z  INFO explorer_core::session::apply: apply: repaint ms=2238
+2026-10-26T06:36:51.607990Z  INFO sync_profile: phase sync tab=1 phase="pump.commit_lock" us=3630429
+2026-10-26T06:36:51.733342Z  INFO sync_profile: phase sync tab=1 phase="pump.offlock" us=69229
+2026-10-26T06:36:51.733407Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_net" us=0
+2026-10-26T06:36:51.733416Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_crypto" us=8
+2026-10-26T06:36:51.733424Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_es" us=8
+2026-10-26T06:36:51.733433Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_ws" us=8
+2026-10-26T06:36:51.733439Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_dyn" us=6
+2026-10-26T06:36:51.733446Z  INFO sync_profile: phase sync tab=1 phase="commit.eval_mod" us=6
+2026-10-26T06:36:51.733452Z  INFO sync_profile: phase sync tab=1 phase="commit.attrs_sync" us=6
+2026-10-26T06:36:51.733459Z  INFO sync_profile: phase sync tab=1 phase="commit.deliver" us=53
+2026-10-26T06:36:53.237625Z  INFO sync_profile: phase sync tab=1 phase="pump.commit_lock" us=1504216
+2026-10-26T06:36:53.364967Z  INFO sync_profile: phase sync tab=1 phase="pump.offlock" us=67844
+2026-10-26T06:36:53.365015Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_net" us=0
+2026-10-26T06:36:53.365023Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_crypto" us=8
+2026-10-26T06:36:53.365030Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_es" us=7
+2026-10-26T06:36:53.365037Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_ws" us=6
+2026-10-26T06:36:53.365043Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_dyn" us=6
+2026-10-26T06:36:53.365049Z  INFO sync_profile: phase sync tab=1 phase="commit.eval_mod" us=6
+2026-10-26T06:36:53.365056Z  INFO sync_profile: phase sync tab=1 phase="commit.attrs_sync" us=6
+2026-10-26T06:36:53.365062Z  INFO sync_profile: phase sync tab=1 phase="commit.deliver" us=47
+2026-10-26T06:36:54.767544Z  INFO sync_profile: phase sync tab=1 phase="pump.commit_lock" us=1402527
+2026-10-26T06:36:54.892329Z  INFO sync_profile: phase sync tab=1 phase="pump.offlock" us=69020
+2026-10-26T06:36:54.892383Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_net" us=0
+2026-10-26T06:36:54.892391Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_crypto" us=7
+2026-10-26T06:36:54.892398Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_es" us=6
+2026-10-26T06:36:54.892404Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_ws" us=6
+2026-10-26T06:36:54.892410Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_dyn" us=6
+2026-10-26T06:36:54.892417Z  INFO sync_profile: phase sync tab=1 phase="commit.eval_mod" us=6
+2026-10-26T06:36:54.892423Z  INFO sync_profile: phase sync tab=1 phase="commit.attrs_sync" us=6
+2026-10-26T06:36:54.892441Z  INFO sync_profile: phase sync tab=1 phase="commit.deliver" us=58
+2026-10-26T06:36:56.488408Z  INFO sync_profile: phase sync tab=1 phase="pump.commit_lock" us=1596023
+2026-10-26T06:36:56.610474Z  INFO sync_profile: phase sync tab=1 phase="pump.offlock" us=70482
+2026-10-26T06:36:56.610514Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_net" us=0
+2026-10-26T06:36:56.610522Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_crypto" us=7
+2026-10-26T06:36:56.610528Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_es" us=6
+2026-10-26T06:36:56.610535Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_ws" us=6
+2026-10-26T06:36:56.610541Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_dyn" us=6
+2026-10-26T06:36:56.610547Z  INFO sync_profile: phase sync tab=1 phase="commit.eval_mod" us=6
+2026-10-26T06:36:56.610554Z  INFO sync_profile: phase sync tab=1 phase="commit.attrs_sync" us=6
+2026-10-26T06:36:56.610560Z  INFO sync_profile: phase sync tab=1 phase="commit.deliver" us=47
+2026-10-26T06:36:57.977575Z  INFO sync_profile: phase sync tab=1 phase="pump.commit_lock" us=1367061
+2026-10-26T06:36:58.104220Z  INFO sync_profile: phase sync tab=1 phase="pump.offlock" us=70363
+2026-10-26T06:36:58.104267Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_net" us=0
+2026-10-26T06:36:58.104277Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_crypto" us=9
+2026-10-26T06:36:58.104284Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_es" us=7
+2026-10-26T06:36:58.104292Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_ws" us=7
+2026-10-26T06:36:58.104300Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_dyn" us=7
+2026-10-26T06:36:58.104307Z  INFO sync_profile: phase sync tab=1 phase="commit.eval_mod" us=7
+2026-10-26T06:36:58.104316Z  INFO sync_profile: phase sync tab=1 phase="commit.attrs_sync" us=8
+2026-10-26T06:36:58.104324Z  INFO sync_profile: phase sync tab=1 phase="commit.deliver" us=57
+2026-10-26T06:36:59.693459Z  INFO sync_profile: phase sync tab=1 phase="pump.commit_lock" us=1589191
+2026-10-26T06:36:59.816031Z  INFO sync_profile: phase sync tab=1 phase="pump.offlock" us=68506
+2026-10-26T06:36:59.816083Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_net" us=0
+2026-10-26T06:36:59.816091Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_crypto" us=7
+2026-10-26T06:36:59.816098Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_es" us=6
+2026-10-26T06:36:59.816104Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_ws" us=6
+2026-10-26T06:36:59.816111Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_dyn" us=6
+2026-10-26T06:36:59.816117Z  INFO sync_profile: phase sync tab=1 phase="commit.eval_mod" us=6
+2026-10-26T06:36:59.816123Z  INFO sync_profile: phase sync tab=1 phase="commit.attrs_sync" us=6
+2026-10-26T06:36:59.816130Z  INFO sync_profile: phase sync tab=1 phase="commit.deliver" us=47
+2026-10-26T06:37:01.494456Z  INFO sync_profile: phase sync tab=1 phase="pump.commit_lock" us=1678370
+2026-10-26T06:37:01.631064Z  INFO sync_profile: phase sync tab=1 phase="pump.offlock" us=71091
+2026-10-26T06:37:01.631117Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_net" us=0
+2026-10-26T06:37:01.631124Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_crypto" us=7
+2026-10-26T06:37:01.631131Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_es" us=7
+2026-10-26T06:37:01.631138Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_ws" us=6
+2026-10-26T06:37:01.631145Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_dyn" us=6
+2026-10-26T06:37:01.631152Z  INFO sync_profile: phase sync tab=1 phase="commit.eval_mod" us=6
+2026-10-26T06:37:01.631158Z  INFO sync_profile: phase sync tab=1 phase="commit.attrs_sync" us=6
+2026-10-26T06:37:01.631165Z  INFO sync_profile: phase sync tab=1 phase="commit.deliver" us=50
+2026-10-26T06:37:03.193923Z  INFO sync_profile: phase sync tab=1 phase="pump.commit_lock" us=1562807
+2026-10-26T06:37:03.318365Z  INFO sync_profile: phase sync tab=1 phase="pump.offlock" us=70951
+2026-10-26T06:37:03.318424Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_net" us=0
+2026-10-26T06:37:03.318439Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_crypto" us=15
+2026-10-26T06:37:03.318448Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_es" us=8
+2026-10-26T06:37:03.318456Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_ws" us=7
+2026-10-26T06:37:03.318463Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_dyn" us=7
+2026-10-26T06:37:03.318471Z  INFO sync_profile: phase sync tab=1 phase="commit.eval_mod" us=7
+2026-10-26T06:37:03.318479Z  INFO sync_profile: phase sync tab=1 phase="commit.attrs_sync" us=7
+2026-10-26T06:37:03.318486Z  INFO sync_profile: phase sync tab=1 phase="commit.deliver" us=63
+2026-10-26T06:37:04.669203Z  INFO sync_profile: phase sync tab=1 phase="pump.commit_lock" us=1350778
+2026-10-26T06:37:04.800946Z  INFO sync_profile: phase sync tab=1 phase="pump.offlock" us=70139
+2026-10-26T06:37:04.800990Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_net" us=0
+2026-10-26T06:37:04.800998Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_crypto" us=8
+2026-10-26T06:37:04.801005Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_es" us=7
+2026-10-26T06:37:04.801011Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_ws" us=6
+2026-10-26T06:37:04.801018Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_dyn" us=7
+2026-10-26T06:37:04.801025Z  INFO sync_profile: phase sync tab=1 phase="commit.eval_mod" us=6
+2026-10-26T06:37:04.801031Z  INFO sync_profile: phase sync tab=1 phase="commit.attrs_sync" us=6
+2026-10-26T06:37:04.801038Z  INFO sync_profile: phase sync tab=1 phase="commit.deliver" us=49
+2026-10-26T06:37:06.366622Z  INFO sync_profile: phase sync tab=1 phase="pump.commit_lock" us=1565631
+2026-10-26T06:37:06.500069Z  INFO sync_profile: phase sync tab=1 phase="pump.offlock" us=69324
+2026-10-26T06:37:06.500113Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_net" us=0
+2026-10-26T06:37:06.500122Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_crypto" us=9
+2026-10-26T06:37:06.500130Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_es" us=8
+2026-10-26T06:37:06.500141Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_ws" us=10
+2026-10-26T06:37:06.500148Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_dyn" us=7
+2026-10-26T06:37:06.500156Z  INFO sync_profile: phase sync tab=1 phase="commit.eval_mod" us=7
+2026-10-26T06:37:06.500164Z  INFO sync_profile: phase sync tab=1 phase="commit.attrs_sync" us=7
+2026-10-26T06:37:06.500172Z  INFO sync_profile: phase sync tab=1 phase="commit.deliver" us=60
+2026-10-26T06:37:07.881060Z  INFO sync_profile: phase sync tab=1 phase="pump.commit_lock" us=1380945
+2026-10-26T06:37:08.016975Z  INFO sync_profile: phase sync tab=1 phase="pump.offlock" us=69578
+2026-10-26T06:37:08.017016Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_net" us=0
+2026-10-26T06:37:08.017026Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_crypto" us=9
+2026-10-26T06:37:08.017033Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_es" us=7
+2026-10-26T06:37:08.017041Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_ws" us=7
+2026-10-26T06:37:08.017048Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_dyn" us=7
+2026-10-26T06:37:08.017055Z  INFO sync_profile: phase sync tab=1 phase="commit.eval_mod" us=7
+2026-10-26T06:37:08.017063Z  INFO sync_profile: phase sync tab=1 phase="commit.attrs_sync" us=7
+2026-10-26T06:37:08.017070Z  INFO sync_profile: phase sync tab=1 phase="commit.deliver" us=54
+2026-10-26T06:37:09.625031Z  INFO sync_profile: phase sync tab=1 phase="pump.commit_lock" us=1608013
+2026-10-26T06:37:09.753256Z  INFO sync_profile: phase sync tab=1 phase="pump.offlock" us=76160
+2026-10-26T06:37:09.753314Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_net" us=0
+2026-10-26T06:37:09.753323Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_crypto" us=9
+2026-10-26T06:37:09.753340Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_es" us=16
+2026-10-26T06:37:09.753348Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_ws" us=7
+2026-10-26T06:37:09.753366Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_dyn" us=18
+2026-10-26T06:37:09.753380Z  INFO sync_profile: phase sync tab=1 phase="commit.eval_mod" us=14
+2026-10-26T06:37:09.753388Z  INFO sync_profile: phase sync tab=1 phase="commit.attrs_sync" us=8
+2026-10-26T06:37:09.753396Z  INFO sync_profile: phase sync tab=1 phase="commit.deliver" us=83
+2026-10-26T06:37:11.120533Z  INFO sync_profile: phase sync tab=1 phase="pump.commit_lock" us=1367219
+2026-10-26T06:37:11.250331Z  INFO sync_profile: phase sync tab=1 phase="pump.offlock" us=69020
+2026-10-26T06:37:11.250381Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_net" us=0
+2026-10-26T06:37:11.250389Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_crypto" us=7
+2026-10-26T06:37:11.250397Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_es" us=7
+2026-10-26T06:37:11.250403Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_ws" us=6
+2026-10-26T06:37:11.250410Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_dyn" us=6
+2026-10-26T06:37:11.250416Z  INFO sync_profile: phase sync tab=1 phase="commit.eval_mod" us=6
+2026-10-26T06:37:11.250423Z  INFO sync_profile: phase sync tab=1 phase="commit.attrs_sync" us=6
+2026-10-26T06:37:11.250430Z  INFO sync_profile: phase sync tab=1 phase="commit.deliver" us=49
+2026-10-26T06:37:13.031934Z  INFO sync_profile: phase sync tab=1 phase="pump.commit_lock" us=1781550
+2026-10-26T06:37:13.167318Z  INFO sync_profile: phase sync tab=1 phase="pump.offlock" us=68047
+2026-10-26T06:37:13.167377Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_net" us=0
+2026-10-26T06:37:13.167386Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_crypto" us=9
+2026-10-26T06:37:13.167394Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_es" us=8
+2026-10-26T06:37:13.167402Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_ws" us=7
+2026-10-26T06:37:13.167409Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_dyn" us=7
+2026-10-26T06:37:13.167417Z  INFO sync_profile: phase sync tab=1 phase="commit.eval_mod" us=7
+2026-10-26T06:37:13.167424Z  INFO sync_profile: phase sync tab=1 phase="commit.attrs_sync" us=7
+2026-10-26T06:37:13.167432Z  INFO sync_profile: phase sync tab=1 phase="commit.deliver" us=56
+2026-10-26T06:37:14.527576Z  INFO sync_profile: phase sync tab=1 phase="pump.commit_lock" us=1360199
+2026-10-26T06:37:14.649347Z  INFO sync_profile: phase sync tab=1 phase="pump.offlock" us=68120
+2026-10-26T06:37:14.649393Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_net" us=0
+2026-10-26T06:37:14.649401Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_crypto" us=8
+2026-10-26T06:37:14.649408Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_es" us=7
+2026-10-26T06:37:14.649415Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_ws" us=6
+2026-10-26T06:37:14.649421Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_dyn" us=6
+2026-10-26T06:37:14.649428Z  INFO sync_profile: phase sync tab=1 phase="commit.eval_mod" us=6
+2026-10-26T06:37:14.649434Z  INFO sync_profile: phase sync tab=1 phase="commit.attrs_sync" us=6
+2026-10-26T06:37:14.649440Z  INFO sync_profile: phase sync tab=1 phase="commit.deliver" us=49
+2026-10-26T06:37:16.215403Z  INFO sync_profile: phase sync tab=1 phase="pump.commit_lock" us=1566009
+2026-10-26T06:37:16.348992Z  INFO sync_profile: phase sync tab=1 phase="pump.offlock" us=68546
+2026-10-26T06:37:16.349036Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_net" us=0
+2026-10-26T06:37:16.349044Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_crypto" us=7
+2026-10-26T06:37:16.349051Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_es" us=6
+2026-10-26T06:37:16.349058Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_ws" us=6
+2026-10-26T06:37:16.349064Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_dyn" us=6
+2026-10-26T06:37:16.349071Z  INFO sync_profile: phase sync tab=1 phase="commit.eval_mod" us=6
+2026-10-26T06:37:16.349077Z  INFO sync_profile: phase sync tab=1 phase="commit.attrs_sync" us=6
+2026-10-26T06:37:16.349095Z  INFO sync_profile: phase sync tab=1 phase="commit.deliver" us=60
+2026-10-26T06:37:17.830677Z  INFO sync_profile: phase sync tab=1 phase="pump.commit_lock" us=1481639
+2026-10-26T06:37:17.967898Z  INFO sync_profile: phase sync tab=1 phase="pump.offlock" us=70190
+2026-10-26T06:37:17.967944Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_net" us=0
+2026-10-26T06:37:17.967952Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_crypto" us=8
+2026-10-26T06:37:17.967959Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_es" us=7
+2026-10-26T06:37:17.967966Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_ws" us=6
+2026-10-26T06:37:17.967973Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_dyn" us=6
+2026-10-26T06:37:17.967980Z  INFO sync_profile: phase sync tab=1 phase="commit.eval_mod" us=6
+2026-10-26T06:37:17.967986Z  INFO sync_profile: phase sync tab=1 phase="commit.attrs_sync" us=6
+2026-10-26T06:37:17.967993Z  INFO sync_profile: phase sync tab=1 phase="commit.deliver" us=51
+2026-10-26T06:37:19.598765Z  INFO sync_profile: phase sync tab=1 phase="pump.commit_lock" us=1630820
+2026-10-26T06:37:19.722461Z  INFO sync_profile: phase sync tab=1 phase="pump.offlock" us=72934
+2026-10-26T06:37:19.722498Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_net" us=0
+2026-10-26T06:37:19.722506Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_crypto" us=7
+2026-10-26T06:37:19.722513Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_es" us=6
+2026-10-26T06:37:19.722519Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_ws" us=6
+2026-10-26T06:37:19.722526Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_dyn" us=6
+2026-10-26T06:37:19.722532Z  INFO sync_profile: phase sync tab=1 phase="commit.eval_mod" us=6
+2026-10-26T06:37:19.722538Z  INFO sync_profile: phase sync tab=1 phase="commit.attrs_sync" us=6
+2026-10-26T06:37:19.722545Z  INFO sync_profile: phase sync tab=1 phase="commit.deliver" us=48
+2026-10-26T06:37:21.164193Z  INFO sync_profile: phase sync tab=1 phase="pump.commit_lock" us=1441693
+2026-10-26T06:37:21.296539Z  INFO sync_profile: phase sync tab=1 phase="pump.offlock" us=73244
+2026-10-26T06:37:21.296592Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_net" us=0
+2026-10-26T06:37:21.296601Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_crypto" us=8
+2026-10-26T06:37:21.296609Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_es" us=7
+2026-10-26T06:37:21.296616Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_ws" us=7
+2026-10-26T06:37:21.296623Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_dyn" us=7
+2026-10-26T06:37:21.296630Z  INFO sync_profile: phase sync tab=1 phase="commit.eval_mod" us=7
+2026-10-26T06:37:21.296638Z  INFO sync_profile: phase sync tab=1 phase="commit.attrs_sync" us=7
+2026-10-26T06:37:21.296645Z  INFO sync_profile: phase sync tab=1 phase="commit.deliver" us=54
+2026-10-26T06:37:22.990900Z  INFO sync_profile: phase sync tab=1 phase="pump.commit_lock" us=1694306
+2026-10-26T06:37:23.121424Z  INFO sync_profile: phase sync tab=1 phase="pump.offlock" us=70387
+2026-10-26T06:37:23.121483Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_net" us=0
+2026-10-26T06:37:23.121492Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_crypto" us=9
+2026-10-26T06:37:23.121500Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_es" us=7
+2026-10-26T06:37:23.121508Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_ws" us=7
+2026-10-26T06:37:23.121515Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_dyn" us=7
+2026-10-26T06:37:23.121522Z  INFO sync_profile: phase sync tab=1 phase="commit.eval_mod" us=7
+2026-10-26T06:37:23.121529Z  INFO sync_profile: phase sync tab=1 phase="commit.attrs_sync" us=7
+2026-10-26T06:37:23.121536Z  INFO sync_profile: phase sync tab=1 phase="commit.deliver" us=54
+2026-10-26T06:37:24.674258Z  INFO sync_profile: phase sync tab=1 phase="pump.commit_lock" us=1552773
+2026-10-26T06:37:24.674493Z DEBUG explorer_jscore::module: import() dynamique spec="https://github.githubassets.com/assets/chunk-xvz-afdb8ae9dfb2e6cb.js" referrer=""
+2026-10-26T06:37:26.379875Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_net" us=0
+2026-10-26T06:37:26.379924Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_crypto" us=50
+2026-10-26T06:37:26.379932Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_es" us=8
+2026-10-26T06:37:26.379940Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_ws" us=7
+2026-10-26T06:37:26.379947Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_dyn" us=6
+2026-10-26T06:37:26.379954Z  INFO sync_profile: phase sync tab=1 phase="commit.eval_mod" us=7
+2026-10-26T06:37:26.379961Z  INFO sync_profile: phase sync tab=1 phase="commit.attrs_sync" us=6
+2026-10-26T06:37:26.379968Z  INFO sync_profile: phase sync tab=1 phase="commit.deliver" us=95
+2026-10-26T06:37:26.380053Z DEBUG explorer_core::session::net: spawn dyn import tab=1 url=https://github.githubassets.com/assets/chunk-xvz-afdb8ae9dfb2e6cb.js seq=24
+2026-10-26T06:37:26.380100Z DEBUG explorer_core::session::net: dyn import : fetch émis tab=1 url=https://github.githubassets.com/assets/chunk-xvz-afdb8ae9dfb2e6cb.js
+2026-10-26T06:37:26.435026Z DEBUG explorer_core::session::net: deliver dyn import tab=1 seq=24 ok=true deps=0
+[import-deliver] seq=24 pending=true ctx=0
+[import-resolve] seq=24
+2026-10-26T06:37:26.509099Z  INFO sync_profile: phase sync tab=1 phase="pump.offlock" us=72446
+2026-10-26T06:37:26.509141Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_net" us=0
+2026-10-26T06:37:26.509150Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_crypto" us=9
+2026-10-26T06:37:26.509158Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_es" us=8
+2026-10-26T06:37:26.509166Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_ws" us=7
+2026-10-26T06:37:26.509173Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_dyn" us=7
+2026-10-26T06:37:26.509181Z  INFO sync_profile: phase sync tab=1 phase="commit.eval_mod" us=7
+2026-10-26T06:37:26.509188Z  INFO sync_profile: phase sync tab=1 phase="commit.attrs_sync" us=7
+2026-10-26T06:37:26.509196Z  INFO sync_profile: phase sync tab=1 phase="commit.deliver" us=56
+2026-10-26T06:37:28.033187Z  INFO sync_profile: phase sync tab=1 phase="pump.commit_lock" us=1524045
+2026-10-26T06:37:28.166653Z  INFO sync_profile: phase sync tab=1 phase="pump.offlock" us=69531
+2026-10-26T06:37:28.166696Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_net" us=0
+2026-10-26T06:37:28.166704Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_crypto" us=8
+2026-10-26T06:37:28.166711Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_es" us=7
+2026-10-26T06:37:28.166718Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_ws" us=6
+2026-10-26T06:37:28.166725Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_dyn" us=6
+2026-10-26T06:37:28.166731Z  INFO sync_profile: phase sync tab=1 phase="commit.eval_mod" us=6
+2026-10-26T06:37:28.166737Z  INFO sync_profile: phase sync tab=1 phase="commit.attrs_sync" us=6
+2026-10-26T06:37:28.166744Z  INFO sync_profile: phase sync tab=1 phase="commit.deliver" us=49
+2026-10-26T06:37:29.785235Z  INFO sync_profile: phase sync tab=1 phase="pump.commit_lock" us=1618538
+2026-10-26T06:37:29.917719Z  INFO sync_profile: phase sync tab=1 phase="pump.offlock" us=71367
+2026-10-26T06:37:29.917758Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_net" us=0
+2026-10-26T06:37:29.917766Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_crypto" us=8
+2026-10-26T06:37:29.917773Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_es" us=7
+2026-10-26T06:37:29.917780Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_ws" us=6
+2026-10-26T06:37:29.917786Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_dyn" us=6
+2026-10-26T06:37:29.917793Z  INFO sync_profile: phase sync tab=1 phase="commit.eval_mod" us=6
+2026-10-26T06:37:29.917800Z  INFO sync_profile: phase sync tab=1 phase="commit.attrs_sync" us=6
+2026-10-26T06:37:29.917806Z  INFO sync_profile: phase sync tab=1 phase="commit.deliver" us=49
+2026-10-26T06:37:31.326649Z  INFO sync_profile: phase sync tab=1 phase="pump.commit_lock" us=1408890
+2026-10-26T06:37:31.450503Z  INFO sync_profile: phase sync tab=1 phase="pump.offlock" us=69287
+2026-10-26T06:37:31.450549Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_net" us=0
+2026-10-26T06:37:31.450558Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_crypto" us=9
+2026-10-26T06:37:31.450566Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_es" us=7
+2026-10-26T06:37:31.450574Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_ws" us=7
+2026-10-26T06:37:31.450582Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_dyn" us=8
+2026-10-26T06:37:31.450590Z  INFO sync_profile: phase sync tab=1 phase="commit.eval_mod" us=7
+2026-10-26T06:37:31.450597Z  INFO sync_profile: phase sync tab=1 phase="commit.attrs_sync" us=7
+2026-10-26T06:37:31.450605Z  INFO sync_profile: phase sync tab=1 phase="commit.deliver" us=57
+2026-10-26T06:37:33.007042Z  INFO sync_profile: phase sync tab=1 phase="pump.commit_lock" us=1556491
+2026-10-26T06:37:33.142789Z  INFO sync_profile: phase sync tab=1 phase="pump.offlock" us=79707
+2026-10-26T06:37:33.142836Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_net" us=0
+2026-10-26T06:37:33.142845Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_crypto" us=8
+2026-10-26T06:37:33.142852Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_es" us=8
+2026-10-26T06:37:33.142860Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_ws" us=7
+2026-10-26T06:37:33.142868Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_dyn" us=7
+2026-10-26T06:37:33.142875Z  INFO sync_profile: phase sync tab=1 phase="commit.eval_mod" us=7
+2026-10-26T06:37:33.142883Z  INFO sync_profile: phase sync tab=1 phase="commit.attrs_sync" us=7
+2026-10-26T06:37:33.142891Z  INFO sync_profile: phase sync tab=1 phase="commit.deliver" us=56
+2026-10-26T06:37:34.582226Z  INFO sync_profile: phase sync tab=1 phase="pump.commit_lock" us=1439389
+2026-10-26T06:37:36.206988Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_net" us=0
+2026-10-26T06:37:36.207033Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_crypto" us=46
+2026-10-26T06:37:36.207041Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_es" us=7
+2026-10-26T06:37:36.207048Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_ws" us=6
+2026-10-26T06:37:36.207054Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_dyn" us=6
+2026-10-26T06:37:36.207060Z  INFO sync_profile: phase sync tab=1 phase="commit.eval_mod" us=6
+2026-10-26T06:37:36.207067Z  INFO sync_profile: phase sync tab=1 phase="commit.attrs_sync" us=6
+2026-10-26T06:37:36.207073Z  INFO sync_profile: phase sync tab=1 phase="commit.deliver" us=86
+2026-10-26T06:37:36.337902Z  INFO sync_profile: phase sync tab=1 phase="pump.offlock" us=71901
+2026-10-26T06:37:36.337971Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_net" us=0
+2026-10-26T06:37:36.337987Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_crypto" us=16
+2026-10-26T06:37:36.337998Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_es" us=11
+2026-10-26T06:37:36.338015Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_ws" us=16
+2026-10-26T06:37:36.338029Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_dyn" us=13
+2026-10-26T06:37:36.338040Z  INFO sync_profile: phase sync tab=1 phase="commit.eval_mod" us=12
+2026-10-26T06:37:36.338053Z  INFO sync_profile: phase sync tab=1 phase="commit.attrs_sync" us=12
+2026-10-26T06:37:36.338064Z  INFO sync_profile: phase sync tab=1 phase="commit.deliver" us=95
+2026-10-26T06:37:37.785309Z  INFO sync_profile: phase sync tab=1 phase="pump.commit_lock" us=1447338
+2026-10-26T06:37:37.925326Z  INFO sync_profile: phase sync tab=1 phase="pump.offlock" us=77963
+2026-10-26T06:37:37.925367Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_net" us=0
+2026-10-26T06:37:37.925376Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_crypto" us=8
+2026-10-26T06:37:37.925384Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_es" us=7
+2026-10-26T06:37:37.925391Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_ws" us=7
+2026-10-26T06:37:37.925398Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_dyn" us=7
+2026-10-26T06:37:37.925414Z  INFO sync_profile: phase sync tab=1 phase="commit.eval_mod" us=16
+2026-10-26T06:37:37.925426Z  INFO sync_profile: phase sync tab=1 phase="commit.attrs_sync" us=11
+2026-10-26T06:37:37.925433Z  INFO sync_profile: phase sync tab=1 phase="commit.deliver" us=67
+2026-10-26T06:37:39.523554Z  INFO sync_profile: phase sync tab=1 phase="pump.commit_lock" us=1598185
+2026-10-26T06:37:39.652155Z  INFO sync_profile: phase sync tab=1 phase="pump.offlock" us=70920
+2026-10-26T06:37:39.652204Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_net" us=0
+2026-10-26T06:37:39.652213Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_crypto" us=8
+2026-10-26T06:37:39.652219Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_es" us=6
+2026-10-26T06:37:39.652226Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_ws" us=6
+2026-10-26T06:37:39.652232Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_dyn" us=6
+2026-10-26T06:37:39.652239Z  INFO sync_profile: phase sync tab=1 phase="commit.eval_mod" us=6
+2026-10-26T06:37:39.652245Z  INFO sync_profile: phase sync tab=1 phase="commit.attrs_sync" us=6
+2026-10-26T06:37:39.652251Z  INFO sync_profile: phase sync tab=1 phase="commit.deliver" us=48
+2026-10-26T06:37:41.029205Z  INFO sync_profile: phase sync tab=1 phase="pump.commit_lock" us=1376999
+2026-10-26T06:37:41.148879Z  INFO sync_profile: phase sync tab=1 phase="pump.offlock" us=68464
+2026-10-26T06:37:41.148935Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_net" us=0
+2026-10-26T06:37:41.148944Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_crypto" us=8
+2026-10-26T06:37:41.148952Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_es" us=8
+2026-10-26T06:37:41.148959Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_ws" us=7
+2026-10-26T06:37:41.148966Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_dyn" us=7
+2026-10-26T06:37:41.148974Z  INFO sync_profile: phase sync tab=1 phase="commit.eval_mod" us=7
+2026-10-26T06:37:41.148981Z  INFO sync_profile: phase sync tab=1 phase="commit.attrs_sync" us=7
+2026-10-26T06:37:41.148989Z  INFO sync_profile: phase sync tab=1 phase="commit.deliver" us=54
+2026-10-26T06:37:42.765059Z  INFO sync_profile: phase sync tab=1 phase="pump.commit_lock" us=1616121
+2026-10-26T06:37:42.904755Z  INFO sync_profile: phase sync tab=1 phase="pump.offlock" us=73625
+2026-10-26T06:37:42.904806Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_net" us=0
+2026-10-26T06:37:42.904815Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_crypto" us=8
+2026-10-26T06:37:42.904823Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_es" us=8
+2026-10-26T06:37:42.904830Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_ws" us=7
+2026-10-26T06:37:42.904838Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_dyn" us=7
+2026-10-26T06:37:42.904846Z  INFO sync_profile: phase sync tab=1 phase="commit.eval_mod" us=7
+2026-10-26T06:37:42.904853Z  INFO sync_profile: phase sync tab=1 phase="commit.attrs_sync" us=7
+2026-10-26T06:37:42.904861Z  INFO sync_profile: phase sync tab=1 phase="commit.deliver" us=55
+2026-10-26T06:37:44.498843Z  INFO sync_profile: phase sync tab=1 phase="pump.commit_lock" us=1594036
+2026-10-26T06:37:44.620576Z  INFO sync_profile: phase sync tab=1 phase="pump.offlock" us=70955
+2026-10-26T06:37:44.620623Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_net" us=0
+2026-10-26T06:37:44.620632Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_crypto" us=9
+2026-10-26T06:37:44.620641Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_es" us=8
+2026-10-26T06:37:44.620648Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_ws" us=7
+2026-10-26T06:37:44.620655Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_dyn" us=7
+2026-10-26T06:37:44.620663Z  INFO sync_profile: phase sync tab=1 phase="commit.eval_mod" us=7
+2026-10-26T06:37:44.620670Z  INFO sync_profile: phase sync tab=1 phase="commit.attrs_sync" us=7
+2026-10-26T06:37:44.620678Z  INFO sync_profile: phase sync tab=1 phase="commit.deliver" us=55
+2026-10-26T06:37:46.278345Z  INFO sync_profile: phase sync tab=1 phase="pump.commit_lock" us=1657720
+2026-10-26T06:37:46.402761Z  INFO sync_profile: phase sync tab=1 phase="pump.offlock" us=70291
+2026-10-26T06:37:46.402815Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_net" us=0
+2026-10-26T06:37:46.402823Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_crypto" us=8
+2026-10-26T06:37:46.402830Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_es" us=7
+2026-10-26T06:37:46.402837Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_ws" us=6
+2026-10-26T06:37:46.402843Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_dyn" us=6
+2026-10-26T06:37:46.402850Z  INFO sync_profile: phase sync tab=1 phase="commit.eval_mod" us=6
+2026-10-26T06:37:46.402856Z  INFO sync_profile: phase sync tab=1 phase="commit.attrs_sync" us=6
+2026-10-26T06:37:46.402863Z  INFO sync_profile: phase sync tab=1 phase="commit.deliver" us=48
+2026-10-26T06:37:47.879381Z  INFO sync_profile: phase sync tab=1 phase="pump.commit_lock" us=1476565
+2026-10-26T06:37:48.006458Z  INFO sync_profile: phase sync tab=1 phase="pump.offlock" us=73448
+2026-10-26T06:37:48.006494Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_net" us=0
+2026-10-26T06:37:48.006503Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_crypto" us=9
+2026-10-26T06:37:48.006511Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_es" us=8
+2026-10-26T06:37:48.006518Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_ws" us=7
+2026-10-26T06:37:48.006526Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_dyn" us=7
+2026-10-26T06:37:48.006534Z  INFO sync_profile: phase sync tab=1 phase="commit.eval_mod" us=7
+2026-10-26T06:37:48.006541Z  INFO sync_profile: phase sync tab=1 phase="commit.attrs_sync" us=7
+2026-10-26T06:37:48.006549Z  INFO sync_profile: phase sync tab=1 phase="commit.deliver" us=56
+2026-10-26T06:37:49.639636Z  INFO sync_profile: phase sync tab=1 phase="pump.commit_lock" us=1633141
+2026-10-26T06:37:49.768728Z  INFO sync_profile: phase sync tab=1 phase="pump.offlock" us=71460
+2026-10-26T06:37:49.768787Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_net" us=0
+2026-10-26T06:37:49.768797Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_crypto" us=10
+2026-10-26T06:37:49.768806Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_es" us=8
+2026-10-26T06:37:49.768814Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_ws" us=8
+2026-10-26T06:37:49.768822Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_dyn" us=8
+2026-10-26T06:37:49.768830Z  INFO sync_profile: phase sync tab=1 phase="commit.eval_mod" us=7
+2026-10-26T06:37:49.768838Z  INFO sync_profile: phase sync tab=1 phase="commit.attrs_sync" us=7
+2026-10-26T06:37:49.768845Z  INFO sync_profile: phase sync tab=1 phase="commit.deliver" us=59
+2026-10-26T06:37:51.241833Z  INFO sync_profile: phase sync tab=1 phase="pump.commit_lock" us=1473045
+2026-10-26T06:37:51.372079Z  INFO sync_profile: phase sync tab=1 phase="pump.offlock" us=72822
+2026-10-26T06:37:51.372127Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_net" us=0
+2026-10-26T06:37:51.372136Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_crypto" us=9
+2026-10-26T06:37:51.372144Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_es" us=7
+2026-10-26T06:37:51.372152Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_ws" us=7
+2026-10-26T06:37:51.372159Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_dyn" us=7
+2026-10-26T06:37:51.372166Z  INFO sync_profile: phase sync tab=1 phase="commit.eval_mod" us=7
+2026-10-26T06:37:51.372174Z  INFO sync_profile: phase sync tab=1 phase="commit.attrs_sync" us=7
+2026-10-26T06:37:51.372182Z  INFO sync_profile: phase sync tab=1 phase="commit.deliver" us=55
+2026-10-26T06:37:52.970649Z  INFO sync_profile: phase sync tab=1 phase="pump.commit_lock" us=1598521
+2026-10-26T06:37:53.099453Z  INFO sync_profile: phase sync tab=1 phase="pump.offlock" us=71887
+2026-10-26T06:37:53.099520Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_net" us=0
+2026-10-26T06:37:53.099529Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_crypto" us=8
+2026-10-26T06:37:53.099549Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_es" us=20
+2026-10-26T06:37:53.099562Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_ws" us=12
+2026-10-26T06:37:53.099569Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_dyn" us=7
+2026-10-26T06:37:53.099576Z  INFO sync_profile: phase sync tab=1 phase="commit.eval_mod" us=7
+2026-10-26T06:37:53.099583Z  INFO sync_profile: phase sync tab=1 phase="commit.attrs_sync" us=6
+2026-10-26T06:37:53.099590Z  INFO sync_profile: phase sync tab=1 phase="commit.deliver" us=72
+2026-10-26T06:37:54.647376Z  INFO sync_profile: phase sync tab=1 phase="pump.commit_lock" us=1547855
+2026-10-26T06:37:54.770522Z  INFO sync_profile: phase sync tab=1 phase="pump.offlock" us=70593
+2026-10-26T06:37:54.770578Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_net" us=0
+2026-10-26T06:37:54.770586Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_crypto" us=8
+2026-10-26T06:37:54.770594Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_es" us=7
+2026-10-26T06:37:54.770601Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_ws" us=7
+2026-10-26T06:37:54.770607Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_dyn" us=6
+2026-10-26T06:37:54.770614Z  INFO sync_profile: phase sync tab=1 phase="commit.eval_mod" us=7
+2026-10-26T06:37:54.770621Z  INFO sync_profile: phase sync tab=1 phase="commit.attrs_sync" us=6
+2026-10-26T06:37:54.770628Z  INFO sync_profile: phase sync tab=1 phase="commit.deliver" us=50
+2026-10-26T06:37:56.284906Z  INFO sync_profile: phase sync tab=1 phase="pump.commit_lock" us=1514326
+2026-10-26T06:37:56.417471Z  INFO sync_profile: phase sync tab=1 phase="pump.offlock" us=70127
+2026-10-26T06:37:56.417518Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_net" us=0
+2026-10-26T06:37:56.417526Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_crypto" us=7
+2026-10-26T06:37:56.417533Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_es" us=6
+2026-10-26T06:37:56.417539Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_ws" us=6
+2026-10-26T06:37:56.417546Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_dyn" us=6
+2026-10-26T06:37:56.417552Z  INFO sync_profile: phase sync tab=1 phase="commit.eval_mod" us=6
+2026-10-26T06:37:56.417558Z  INFO sync_profile: phase sync tab=1 phase="commit.attrs_sync" us=6
+2026-10-26T06:37:56.417565Z  INFO sync_profile: phase sync tab=1 phase="commit.deliver" us=47
+2026-10-26T06:37:57.792624Z  INFO sync_profile: phase sync tab=1 phase="pump.commit_lock" us=1375104
+2026-10-26T06:37:57.917773Z  INFO sync_profile: phase sync tab=1 phase="pump.offlock" us=69458
+2026-10-26T06:37:57.917820Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_net" us=0
+2026-10-26T06:37:57.917828Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_crypto" us=8
+2026-10-26T06:37:57.917835Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_es" us=6
+2026-10-26T06:37:57.917842Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_ws" us=6
+2026-10-26T06:37:57.917848Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_dyn" us=6
+2026-10-26T06:37:57.917855Z  INFO sync_profile: phase sync tab=1 phase="commit.eval_mod" us=6
+2026-10-26T06:37:57.917861Z  INFO sync_profile: phase sync tab=1 phase="commit.attrs_sync" us=6
+2026-10-26T06:37:57.917867Z  INFO sync_profile: phase sync tab=1 phase="commit.deliver" us=48
+2026-10-26T06:37:59.514360Z  INFO sync_profile: phase sync tab=1 phase="pump.commit_lock" us=1596538
+2026-10-26T06:37:59.649678Z  INFO sync_profile: phase sync tab=1 phase="pump.offlock" us=69146
+2026-10-26T06:37:59.649733Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_net" us=0
+2026-10-26T06:37:59.649741Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_crypto" us=7
+2026-10-26T06:37:59.649748Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_es" us=7
+2026-10-26T06:37:59.649754Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_ws" us=6
+2026-10-26T06:37:59.649761Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_dyn" us=6
+2026-10-26T06:37:59.649775Z  INFO sync_profile: phase sync tab=1 phase="commit.eval_mod" us=14
+2026-10-26T06:37:59.649787Z  INFO sync_profile: phase sync tab=1 phase="commit.attrs_sync" us=11
+2026-10-26T06:37:59.649794Z  INFO sync_profile: phase sync tab=1 phase="commit.deliver" us=62
+2026-10-26T06:38:01.143617Z  INFO sync_profile: phase sync tab=1 phase="pump.commit_lock" us=1493884
+2026-10-26T06:38:01.277408Z  INFO sync_profile: phase sync tab=1 phase="pump.offlock" us=79821
+2026-10-26T06:38:01.277442Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_net" us=0
+2026-10-26T06:38:01.277450Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_crypto" us=8
+2026-10-26T06:38:01.277457Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_es" us=7
+2026-10-26T06:38:01.277464Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_ws" us=6
+2026-10-26T06:38:01.277470Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_dyn" us=6
+2026-10-26T06:38:01.277477Z  INFO sync_profile: phase sync tab=1 phase="commit.eval_mod" us=6
+2026-10-26T06:38:01.277483Z  INFO sync_profile: phase sync tab=1 phase="commit.attrs_sync" us=6
+2026-10-26T06:38:01.277490Z  INFO sync_profile: phase sync tab=1 phase="commit.deliver" us=48
+2026-10-26T06:38:03.193324Z  INFO sync_profile: phase sync tab=1 phase="pump.commit_lock" us=1915880
+2026-10-26T06:38:03.322052Z  INFO sync_profile: phase sync tab=1 phase="pump.offlock" us=74805
+2026-10-26T06:38:03.322091Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_net" us=0
+2026-10-26T06:38:03.322099Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_crypto" us=8
+2026-10-26T06:38:03.322106Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_es" us=7
+2026-10-26T06:38:03.322113Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_ws" us=6
+2026-10-26T06:38:03.322120Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_dyn" us=7
+2026-10-26T06:38:03.322126Z  INFO sync_profile: phase sync tab=1 phase="commit.eval_mod" us=6
+2026-10-26T06:38:03.322133Z  INFO sync_profile: phase sync tab=1 phase="commit.attrs_sync" us=6
+2026-10-26T06:38:03.322139Z  INFO sync_profile: phase sync tab=1 phase="commit.deliver" us=49
+2026-10-26T06:38:04.825708Z  INFO sync_profile: phase sync tab=1 phase="pump.commit_lock" us=1503616
+2026-10-26T06:38:04.958386Z  INFO sync_profile: phase sync tab=1 phase="pump.offlock" us=75745
+2026-10-26T06:38:04.958425Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_net" us=0
+2026-10-26T06:38:04.958433Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_crypto" us=8
+2026-10-26T06:38:04.958441Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_es" us=7
+2026-10-26T06:38:04.958449Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_ws" us=7
+2026-10-26T06:38:04.958456Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_dyn" us=7
+2026-10-26T06:38:04.958463Z  INFO sync_profile: phase sync tab=1 phase="commit.eval_mod" us=7
+2026-10-26T06:38:04.958471Z  INFO sync_profile: phase sync tab=1 phase="commit.attrs_sync" us=7
+2026-10-26T06:38:04.958478Z  INFO sync_profile: phase sync tab=1 phase="commit.deliver" us=54
+2026-10-26T06:38:06.619828Z  INFO sync_profile: phase sync tab=1 phase="pump.commit_lock" us=1661402
+2026-10-26T06:38:06.755651Z  INFO sync_profile: phase sync tab=1 phase="pump.offlock" us=73040
+2026-10-26T06:38:06.755691Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_net" us=0
+2026-10-26T06:38:06.755699Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_crypto" us=8
+2026-10-26T06:38:06.755707Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_es" us=7
+2026-10-26T06:38:06.755713Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_ws" us=6
+2026-10-26T06:38:06.755720Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_dyn" us=6
+2026-10-26T06:38:06.755726Z  INFO sync_profile: phase sync tab=1 phase="commit.eval_mod" us=6
+2026-10-26T06:38:06.755733Z  INFO sync_profile: phase sync tab=1 phase="commit.attrs_sync" us=6
+2026-10-26T06:38:06.755739Z  INFO sync_profile: phase sync tab=1 phase="commit.deliver" us=49
+2026-10-26T06:38:08.314647Z  INFO sync_profile: phase sync tab=1 phase="pump.commit_lock" us=1558953
+2026-10-26T06:38:08.443799Z  INFO sync_profile: phase sync tab=1 phase="pump.offlock" us=76715
+2026-10-26T06:38:08.443843Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_net" us=0
+2026-10-26T06:38:08.443851Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_crypto" us=8
+2026-10-26T06:38:08.443858Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_es" us=7
+2026-10-26T06:38:08.443865Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_ws" us=7
+2026-10-26T06:38:08.443872Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_dyn" us=6
+2026-10-26T06:38:08.443878Z  INFO sync_profile: phase sync tab=1 phase="commit.eval_mod" us=6
+2026-10-26T06:38:08.443885Z  INFO sync_profile: phase sync tab=1 phase="commit.attrs_sync" us=6
+2026-10-26T06:38:08.443892Z  INFO sync_profile: phase sync tab=1 phase="commit.deliver" us=50
+2026-10-26T06:38:10.084996Z  INFO sync_profile: phase sync tab=1 phase="pump.commit_lock" us=1641152
+2026-10-26T06:38:10.223304Z  INFO sync_profile: phase sync tab=1 phase="pump.offlock" us=74900
+2026-10-26T06:38:10.223356Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_net" us=0
+2026-10-26T06:38:10.223364Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_crypto" us=8
+2026-10-26T06:38:10.223371Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_es" us=7
+2026-10-26T06:38:10.223378Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_ws" us=6
+2026-10-26T06:38:10.223384Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_dyn" us=6
+2026-10-26T06:38:10.223391Z  INFO sync_profile: phase sync tab=1 phase="commit.eval_mod" us=6
+2026-10-26T06:38:10.223397Z  INFO sync_profile: phase sync tab=1 phase="commit.attrs_sync" us=6
+2026-10-26T06:38:10.223404Z  INFO sync_profile: phase sync tab=1 phase="commit.deliver" us=49
+2026-10-26T06:38:11.719723Z  INFO sync_profile: phase sync tab=1 phase="pump.commit_lock" us=1496365
+2026-10-26T06:38:11.856281Z  INFO sync_profile: phase sync tab=1 phase="pump.offlock" us=73566
+2026-10-26T06:38:11.856318Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_net" us=0
+2026-10-26T06:38:11.856327Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_crypto" us=8
+2026-10-26T06:38:11.856334Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_es" us=7
+2026-10-26T06:38:11.856341Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_ws" us=6
+2026-10-26T06:38:11.856347Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_dyn" us=6
+2026-10-26T06:38:11.856354Z  INFO sync_profile: phase sync tab=1 phase="commit.eval_mod" us=6
+2026-10-26T06:38:11.856360Z  INFO sync_profile: phase sync tab=1 phase="commit.attrs_sync" us=6
+2026-10-26T06:38:11.856366Z  INFO sync_profile: phase sync tab=1 phase="commit.deliver" us=49
+2026-10-26T06:38:13.552337Z  INFO sync_profile: phase sync tab=1 phase="pump.commit_lock" us=1696017
+2026-10-26T06:38:13.691866Z  INFO sync_profile: phase sync tab=1 phase="pump.offlock" us=81944
+2026-10-26T06:38:13.691907Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_net" us=0
+2026-10-26T06:38:13.691916Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_crypto" us=9
+2026-10-26T06:38:13.691925Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_es" us=8
+2026-10-26T06:38:13.691932Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_ws" us=7
+2026-10-26T06:38:13.691940Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_dyn" us=7
+2026-10-26T06:38:13.691947Z  INFO sync_profile: phase sync tab=1 phase="commit.eval_mod" us=7
+2026-10-26T06:38:13.691955Z  INFO sync_profile: phase sync tab=1 phase="commit.attrs_sync" us=7
+2026-10-26T06:38:13.691962Z  INFO sync_profile: phase sync tab=1 phase="commit.deliver" us=56
+2026-10-26T06:38:15.284204Z  INFO sync_profile: phase sync tab=1 phase="pump.commit_lock" us=1592295
+2026-10-26T06:38:15.421042Z  INFO sync_profile: phase sync tab=1 phase="pump.offlock" us=72605
+2026-10-26T06:38:15.421081Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_net" us=0
+2026-10-26T06:38:15.421089Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_crypto" us=8
+2026-10-26T06:38:15.421106Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_es" us=17
+2026-10-26T06:38:15.421117Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_ws" us=11
+2026-10-26T06:38:15.421124Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_dyn" us=6
+2026-10-26T06:38:15.421131Z  INFO sync_profile: phase sync tab=1 phase="commit.eval_mod" us=6
+2026-10-26T06:38:15.421138Z  INFO sync_profile: phase sync tab=1 phase="commit.attrs_sync" us=6
+2026-10-26T06:38:15.421145Z  INFO sync_profile: phase sync tab=1 phase="commit.deliver" us=65
+2026-10-26T06:38:17.056612Z  INFO sync_profile: phase sync tab=1 phase="pump.commit_lock" us=1635530
+2026-10-26T06:38:17.187287Z  INFO sync_profile: phase sync tab=1 phase="pump.offlock" us=73310
+2026-10-26T06:38:17.187338Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_net" us=0
+2026-10-26T06:38:17.187346Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_crypto" us=8
+2026-10-26T06:38:17.187354Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_es" us=7
+2026-10-26T06:38:17.187361Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_ws" us=7
+2026-10-26T06:38:17.187367Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_dyn" us=6
+2026-10-26T06:38:17.187374Z  INFO sync_profile: phase sync tab=1 phase="commit.eval_mod" us=6
+2026-10-26T06:38:17.187381Z  INFO sync_profile: phase sync tab=1 phase="commit.attrs_sync" us=6
+2026-10-26T06:38:17.187387Z  INFO sync_profile: phase sync tab=1 phase="commit.deliver" us=50
+2026-10-26T06:38:19.249367Z  INFO sync_profile: phase sync tab=1 phase="pump.commit_lock" us=2062027
+2026-10-26T06:38:19.389936Z  INFO sync_profile: phase sync tab=1 phase="pump.offlock" us=74736
+2026-10-26T06:38:19.389991Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_net" us=0
+2026-10-26T06:38:19.390000Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_crypto" us=8
+2026-10-26T06:38:19.390007Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_es" us=7
+2026-10-26T06:38:19.390015Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_ws" us=7
+2026-10-26T06:38:19.390021Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_dyn" us=6
+2026-10-26T06:38:19.390027Z  INFO sync_profile: phase sync tab=1 phase="commit.eval_mod" us=6
+2026-10-26T06:38:19.390034Z  INFO sync_profile: phase sync tab=1 phase="commit.attrs_sync" us=6
+2026-10-26T06:38:19.390040Z  INFO sync_profile: phase sync tab=1 phase="commit.deliver" us=50
+2026-10-26T06:38:21.054836Z  INFO sync_profile: phase sync tab=1 phase="pump.commit_lock" us=1664843
+2026-10-26T06:38:21.189372Z  INFO sync_profile: phase sync tab=1 phase="pump.offlock" us=73435
+2026-10-26T06:38:21.189423Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_net" us=0
+2026-10-26T06:38:21.189431Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_crypto" us=8
+2026-10-26T06:38:21.189438Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_es" us=7
+2026-10-26T06:38:21.189444Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_ws" us=6
+2026-10-26T06:38:21.189451Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_dyn" us=6
+2026-10-26T06:38:21.189457Z  INFO sync_profile: phase sync tab=1 phase="commit.eval_mod" us=6
+2026-10-26T06:38:21.189463Z  INFO sync_profile: phase sync tab=1 phase="commit.attrs_sync" us=6
+2026-10-26T06:38:21.189470Z  INFO sync_profile: phase sync tab=1 phase="commit.deliver" us=48
+2026-10-26T06:38:22.687528Z  INFO sync_profile: phase sync tab=1 phase="pump.commit_lock" us=1498104
+2026-10-26T06:38:22.821990Z  INFO sync_profile: phase sync tab=1 phase="pump.offlock" us=74707
+2026-10-26T06:38:22.822041Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_net" us=0
+2026-10-26T06:38:22.822049Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_crypto" us=8
+2026-10-26T06:38:22.822056Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_es" us=7
+2026-10-26T06:38:22.822063Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_ws" us=6
+2026-10-26T06:38:22.822069Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_dyn" us=6
+2026-10-26T06:38:22.822076Z  INFO sync_profile: phase sync tab=1 phase="commit.eval_mod" us=6
+2026-10-26T06:38:22.822093Z  INFO sync_profile: phase sync tab=1 phase="commit.attrs_sync" us=16
+2026-10-26T06:38:22.822104Z  INFO sync_profile: phase sync tab=1 phase="commit.deliver" us=64
+2026-10-26T06:38:24.623058Z  INFO sync_profile: phase sync tab=1 phase="pump.commit_lock" us=1801016
+2026-10-26T06:38:24.754989Z  INFO sync_profile: phase sync tab=1 phase="pump.offlock" us=72353
+2026-10-26T06:38:24.755032Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_net" us=0
+2026-10-26T06:38:24.755041Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_crypto" us=9
+2026-10-26T06:38:24.755049Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_es" us=7
+2026-10-26T06:38:24.755057Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_ws" us=7
+2026-10-26T06:38:24.755064Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_dyn" us=7
+2026-10-26T06:38:24.755072Z  INFO sync_profile: phase sync tab=1 phase="commit.eval_mod" us=7
+2026-10-26T06:38:24.755079Z  INFO sync_profile: phase sync tab=1 phase="commit.attrs_sync" us=7
+2026-10-26T06:38:24.755087Z  INFO sync_profile: phase sync tab=1 phase="commit.deliver" us=55
+2026-10-26T06:38:26.340526Z  INFO sync_profile: phase sync tab=1 phase="pump.commit_lock" us=1585492
+2026-10-26T06:38:26.476554Z  INFO sync_profile: phase sync tab=1 phase="pump.offlock" us=81537
+2026-10-26T06:38:26.476605Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_net" us=0
+2026-10-26T06:38:26.476614Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_crypto" us=9
+2026-10-26T06:38:26.476623Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_es" us=8
+2026-10-26T06:38:26.476631Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_ws" us=7
+2026-10-26T06:38:26.476638Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_dyn" us=7
+2026-10-26T06:38:26.476646Z  INFO sync_profile: phase sync tab=1 phase="commit.eval_mod" us=7
+2026-10-26T06:38:26.476655Z  INFO sync_profile: phase sync tab=1 phase="commit.attrs_sync" us=8
+2026-10-26T06:38:26.476663Z  INFO sync_profile: phase sync tab=1 phase="commit.deliver" us=59
+2026-10-26T06:38:28.130006Z  INFO sync_profile: phase sync tab=1 phase="pump.commit_lock" us=1653399
+2026-10-26T06:38:28.256635Z  INFO sync_profile: phase sync tab=1 phase="pump.offlock" us=74023
+2026-10-26T06:38:28.256690Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_net" us=0
+2026-10-26T06:38:28.256700Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_crypto" us=10
+2026-10-26T06:38:28.256709Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_es" us=8
+2026-10-26T06:38:28.256717Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_ws" us=8
+2026-10-26T06:38:28.256725Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_dyn" us=7
+2026-10-26T06:38:28.256733Z  INFO sync_profile: phase sync tab=1 phase="commit.eval_mod" us=7
+2026-10-26T06:38:28.256740Z  INFO sync_profile: phase sync tab=1 phase="commit.attrs_sync" us=7
+2026-10-26T06:38:28.256748Z  INFO sync_profile: phase sync tab=1 phase="commit.deliver" us=59
+2026-10-26T06:38:29.753909Z  INFO sync_profile: phase sync tab=1 phase="pump.commit_lock" us=1497218
+2026-10-26T06:38:29.899831Z  INFO sync_profile: phase sync tab=1 phase="pump.offlock" us=82616
+2026-10-26T06:38:29.899875Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_net" us=0
+2026-10-26T06:38:29.899883Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_crypto" us=8
+2026-10-26T06:38:29.899892Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_es" us=8
+2026-10-26T06:38:29.899899Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_ws" us=6
+2026-10-26T06:38:29.899905Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_dyn" us=6
+2026-10-26T06:38:29.899911Z  INFO sync_profile: phase sync tab=1 phase="commit.eval_mod" us=6
+2026-10-26T06:38:29.899918Z  INFO sync_profile: phase sync tab=1 phase="commit.attrs_sync" us=6
+2026-10-26T06:38:29.899924Z  INFO sync_profile: phase sync tab=1 phase="commit.deliver" us=50
+2026-10-26T06:38:31.651297Z  INFO sync_profile: phase sync tab=1 phase="pump.commit_lock" us=1751420
+2026-10-26T06:38:31.791317Z  INFO sync_profile: phase sync tab=1 phase="pump.offlock" us=75099
+2026-10-26T06:38:31.791362Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_net" us=0
+2026-10-26T06:38:31.791369Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_crypto" us=7
+2026-10-26T06:38:31.791376Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_es" us=6
+2026-10-26T06:38:31.791383Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_ws" us=6
+2026-10-26T06:38:31.791389Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_dyn" us=6
+2026-10-26T06:38:31.791395Z  INFO sync_profile: phase sync tab=1 phase="commit.eval_mod" us=6
+2026-10-26T06:38:31.791402Z  INFO sync_profile: phase sync tab=1 phase="commit.attrs_sync" us=6
+2026-10-26T06:38:31.791408Z  INFO sync_profile: phase sync tab=1 phase="commit.deliver" us=47
+2026-10-26T06:38:33.288102Z  INFO sync_profile: phase sync tab=1 phase="pump.commit_lock" us=1496739
+2026-10-26T06:38:33.423448Z  INFO sync_profile: phase sync tab=1 phase="pump.offlock" us=73603
+2026-10-26T06:38:33.423486Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_net" us=0
+2026-10-26T06:38:33.423495Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_crypto" us=8
+2026-10-26T06:38:33.423503Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_es" us=7
+2026-10-26T06:38:33.423510Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_ws" us=7
+2026-10-26T06:38:33.423517Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_dyn" us=7
+2026-10-26T06:38:33.423525Z  INFO sync_profile: phase sync tab=1 phase="commit.eval_mod" us=7
+2026-10-26T06:38:33.423532Z  INFO sync_profile: phase sync tab=1 phase="commit.attrs_sync" us=7
+2026-10-26T06:38:33.423539Z  INFO sync_profile: phase sync tab=1 phase="commit.deliver" us=53
+2026-10-26T06:38:35.114270Z  INFO sync_profile: phase sync tab=1 phase="pump.commit_lock" us=1690780
+2026-10-26T06:38:35.258374Z  INFO sync_profile: phase sync tab=1 phase="pump.offlock" us=77697
+2026-10-26T06:38:35.258410Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_net" us=0
+2026-10-26T06:38:35.258418Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_crypto" us=8
+2026-10-26T06:38:35.258426Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_es" us=7
+2026-10-26T06:38:35.258433Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_ws" us=6
+2026-10-26T06:38:35.258439Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_dyn" us=6
+2026-10-26T06:38:35.258446Z  INFO sync_profile: phase sync tab=1 phase="commit.eval_mod" us=6
+2026-10-26T06:38:35.258452Z  INFO sync_profile: phase sync tab=1 phase="commit.attrs_sync" us=6
+2026-10-26T06:38:35.258458Z  INFO sync_profile: phase sync tab=1 phase="commit.deliver" us=49
+2026-10-26T06:38:36.785951Z  INFO sync_profile: phase sync tab=1 phase="pump.commit_lock" us=1527538
+2026-10-26T06:38:36.940125Z  INFO sync_profile: phase sync tab=1 phase="pump.offlock" us=90695
+2026-10-26T06:38:36.940168Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_net" us=0
+2026-10-26T06:38:36.940178Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_crypto" us=9
+2026-10-26T06:38:36.940186Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_es" us=8
+2026-10-26T06:38:36.940193Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_ws" us=7
+2026-10-26T06:38:36.940201Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_dyn" us=7
+2026-10-26T06:38:36.940208Z  INFO sync_profile: phase sync tab=1 phase="commit.eval_mod" us=7
+2026-10-26T06:38:36.940216Z  INFO sync_profile: phase sync tab=1 phase="commit.attrs_sync" us=7
+2026-10-26T06:38:36.940224Z  INFO sync_profile: phase sync tab=1 phase="commit.deliver" us=56
+2026-10-26T06:38:38.575707Z  INFO sync_profile: phase sync tab=1 phase="pump.commit_lock" us=1635537
+2026-10-26T06:38:38.708319Z  INFO sync_profile: phase sync tab=1 phase="pump.offlock" us=75615
+2026-10-26T06:38:38.708362Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_net" us=0
+2026-10-26T06:38:38.708371Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_crypto" us=9
+2026-10-26T06:38:38.708379Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_es" us=7
+2026-10-26T06:38:38.708397Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_ws" us=17
+2026-10-26T06:38:38.708409Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_dyn" us=12
+2026-10-26T06:38:38.708417Z  INFO sync_profile: phase sync tab=1 phase="commit.eval_mod" us=8
+2026-10-26T06:38:38.708425Z  INFO sync_profile: phase sync tab=1 phase="commit.attrs_sync" us=7
+2026-10-26T06:38:38.708432Z  INFO sync_profile: phase sync tab=1 phase="commit.deliver" us=71
+2026-10-26T06:38:40.229249Z  INFO sync_profile: phase sync tab=1 phase="pump.commit_lock" us=1520886
+2026-10-26T06:38:40.358339Z  INFO sync_profile: phase sync tab=1 phase="pump.offlock" us=74013
+2026-10-26T06:38:40.358384Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_net" us=0
+2026-10-26T06:38:40.358394Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_crypto" us=9
+2026-10-26T06:38:40.358402Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_es" us=8
+2026-10-26T06:38:40.358410Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_ws" us=8
+2026-10-26T06:38:40.358418Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_dyn" us=7
+2026-10-26T06:38:40.358426Z  INFO sync_profile: phase sync tab=1 phase="commit.eval_mod" us=7
+2026-10-26T06:38:40.358434Z  INFO sync_profile: phase sync tab=1 phase="commit.attrs_sync" us=7
+2026-10-26T06:38:40.358443Z  INFO sync_profile: phase sync tab=1 phase="commit.deliver" us=59
+2026-10-26T06:38:42.030407Z  INFO sync_profile: phase sync tab=1 phase="pump.commit_lock" us=1672021
+2026-10-26T06:38:42.167235Z  INFO sync_profile: phase sync tab=1 phase="pump.offlock" us=81773
+2026-10-26T06:38:42.167276Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_net" us=0
+2026-10-26T06:38:42.167284Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_crypto" us=8
+2026-10-26T06:38:42.167292Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_es" us=7
+2026-10-26T06:38:42.167300Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_ws" us=8
+2026-10-26T06:38:42.167308Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_dyn" us=7
+2026-10-26T06:38:42.167314Z  INFO sync_profile: phase sync tab=1 phase="commit.eval_mod" us=6
+2026-10-26T06:38:42.167321Z  INFO sync_profile: phase sync tab=1 phase="commit.attrs_sync" us=6
+2026-10-26T06:38:42.167327Z  INFO sync_profile: phase sync tab=1 phase="commit.deliver" us=52
+2026-10-26T06:38:43.942950Z  INFO sync_profile: phase sync tab=1 phase="pump.commit_lock" us=1775672
+2026-10-26T06:38:44.077364Z  INFO sync_profile: phase sync tab=1 phase="pump.offlock" us=81956
+2026-10-26T06:38:44.077399Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_net" us=0
+2026-10-26T06:38:44.077406Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_crypto" us=7
+2026-10-26T06:38:44.077413Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_es" us=6
+2026-10-26T06:38:44.077420Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_ws" us=6
+2026-10-26T06:38:44.077426Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_dyn" us=6
+2026-10-26T06:38:44.077433Z  INFO sync_profile: phase sync tab=1 phase="commit.eval_mod" us=6
+2026-10-26T06:38:44.077439Z  INFO sync_profile: phase sync tab=1 phase="commit.attrs_sync" us=6
+2026-10-26T06:38:44.077446Z  INFO sync_profile: phase sync tab=1 phase="commit.deliver" us=47
+2026-10-26T06:38:45.796640Z  INFO sync_profile: phase sync tab=1 phase="pump.commit_lock" us=1719239
+2026-10-26T06:38:45.925911Z  INFO sync_profile: phase sync tab=1 phase="pump.offlock" us=75667
+2026-10-26T06:38:45.925952Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_net" us=0
+2026-10-26T06:38:45.925960Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_crypto" us=8
+2026-10-26T06:38:45.925967Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_es" us=7
+2026-10-26T06:38:45.925973Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_ws" us=6
+2026-10-26T06:38:45.925980Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_dyn" us=6
+2026-10-26T06:38:45.925987Z  INFO sync_profile: phase sync tab=1 phase="commit.eval_mod" us=6
+2026-10-26T06:38:45.926004Z  INFO sync_profile: phase sync tab=1 phase="commit.attrs_sync" us=17
+2026-10-26T06:38:45.926015Z  INFO sync_profile: phase sync tab=1 phase="commit.deliver" us=64
+2026-10-26T06:38:47.434147Z  INFO sync_profile: phase sync tab=1 phase="pump.commit_lock" us=1508194
+2026-10-26T06:38:47.569292Z  INFO sync_profile: phase sync tab=1 phase="pump.offlock" us=71699
+2026-10-26T06:38:47.569336Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_net" us=0
+2026-10-26T06:38:47.569345Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_crypto" us=9
+2026-10-26T06:38:47.569354Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_es" us=8
+2026-10-26T06:38:47.569362Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_ws" us=7
+2026-10-26T06:38:47.569369Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_dyn" us=7
+2026-10-26T06:38:47.569377Z  INFO sync_profile: phase sync tab=1 phase="commit.eval_mod" us=7
+2026-10-26T06:38:47.569384Z  INFO sync_profile: phase sync tab=1 phase="commit.attrs_sync" us=7
+2026-10-26T06:38:47.569391Z  INFO sync_profile: phase sync tab=1 phase="commit.deliver" us=56
+2026-10-26T06:38:49.249864Z  INFO sync_profile: phase sync tab=1 phase="pump.commit_lock" us=1680526
+2026-10-26T06:38:49.393651Z  INFO sync_profile: phase sync tab=1 phase="pump.offlock" us=80720
+2026-10-26T06:38:49.393691Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_net" us=0
+2026-10-26T06:38:49.393700Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_crypto" us=9
+2026-10-26T06:38:49.393708Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_es" us=8
+2026-10-26T06:38:49.393716Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_ws" us=7
+2026-10-26T06:38:49.393723Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_dyn" us=7
+2026-10-26T06:38:49.393734Z  INFO sync_profile: phase sync tab=1 phase="commit.eval_mod" us=10
+2026-10-26T06:38:49.393741Z  INFO sync_profile: phase sync tab=1 phase="commit.attrs_sync" us=7
+2026-10-26T06:38:49.393749Z  INFO sync_profile: phase sync tab=1 phase="commit.deliver" us=58
+2026-10-26T06:38:50.841493Z  INFO sync_profile: phase sync tab=1 phase="pump.commit_lock" us=1447800
+2026-10-26T06:38:50.976619Z  INFO sync_profile: phase sync tab=1 phase="pump.offlock" us=79597
+2026-10-26T06:38:50.976671Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_net" us=0
+2026-10-26T06:38:50.976679Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_crypto" us=8
+2026-10-26T06:38:50.976686Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_es" us=7
+2026-10-26T06:38:50.976693Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_ws" us=7
+2026-10-26T06:38:50.976700Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_dyn" us=6
+2026-10-26T06:38:50.976706Z  INFO sync_profile: phase sync tab=1 phase="commit.eval_mod" us=6
+2026-10-26T06:38:50.976713Z  INFO sync_profile: phase sync tab=1 phase="commit.attrs_sync" us=6
+2026-10-26T06:38:50.976720Z  INFO sync_profile: phase sync tab=1 phase="commit.deliver" us=50
+2026-10-26T06:38:52.691812Z  INFO sync_profile: phase sync tab=1 phase="pump.commit_lock" us=1715140
+2026-10-26T06:38:52.833622Z  INFO sync_profile: phase sync tab=1 phase="pump.offlock" us=78403
+2026-10-26T06:38:52.833670Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_net" us=0
+2026-10-26T06:38:52.833678Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_crypto" us=8
+2026-10-26T06:38:52.833687Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_es" us=8
+2026-10-26T06:38:52.833695Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_ws" us=7
+2026-10-26T06:38:52.833702Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_dyn" us=7
+2026-10-26T06:38:52.833709Z  INFO sync_profile: phase sync tab=1 phase="commit.eval_mod" us=7
+2026-10-26T06:38:52.833717Z  INFO sync_profile: phase sync tab=1 phase="commit.attrs_sync" us=7
+2026-10-26T06:38:52.833724Z  INFO sync_profile: phase sync tab=1 phase="commit.deliver" us=56
+2026-10-26T06:38:54.385441Z  INFO sync_profile: phase sync tab=1 phase="pump.commit_lock" us=1551770
+2026-10-26T06:38:54.517388Z  INFO sync_profile: phase sync tab=1 phase="pump.offlock" us=70061
+2026-10-26T06:38:54.517437Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_net" us=0
+2026-10-26T06:38:54.517449Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_crypto" us=12
+2026-10-26T06:38:54.517456Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_es" us=7
+2026-10-26T06:38:54.517462Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_ws" us=6
+2026-10-26T06:38:54.517469Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_dyn" us=6
+2026-10-26T06:38:54.517475Z  INFO sync_profile: phase sync tab=1 phase="commit.eval_mod" us=6
+2026-10-26T06:38:54.517482Z  INFO sync_profile: phase sync tab=1 phase="commit.attrs_sync" us=6
+2026-10-26T06:38:54.517488Z  INFO sync_profile: phase sync tab=1 phase="commit.deliver" us=52
+2026-10-26T06:38:56.272145Z  INFO sync_profile: phase sync tab=1 phase="pump.commit_lock" us=1754706
+2026-10-26T06:38:56.399529Z  INFO sync_profile: phase sync tab=1 phase="pump.offlock" us=72539
+2026-10-26T06:38:56.399568Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_net" us=0
+2026-10-26T06:38:56.399577Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_crypto" us=8
+2026-10-26T06:38:56.399584Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_es" us=7
+2026-10-26T06:38:56.399591Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_ws" us=7
+2026-10-26T06:38:56.399598Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_dyn" us=6
+2026-10-26T06:38:56.399604Z  INFO sync_profile: phase sync tab=1 phase="commit.eval_mod" us=6
+2026-10-26T06:38:56.399611Z  INFO sync_profile: phase sync tab=1 phase="commit.attrs_sync" us=6
+2026-10-26T06:38:56.399618Z  INFO sync_profile: phase sync tab=1 phase="commit.deliver" us=51
+2026-10-26T06:38:57.897271Z  INFO sync_profile: phase sync tab=1 phase="pump.commit_lock" us=1497700
+2026-10-26T06:38:58.039247Z  INFO sync_profile: phase sync tab=1 phase="pump.offlock" us=84630
+2026-10-26T06:38:58.039303Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_net" us=0
+2026-10-26T06:38:58.039312Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_crypto" us=9
+2026-10-26T06:38:58.039320Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_es" us=7
+2026-10-26T06:38:58.039327Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_ws" us=7
+2026-10-26T06:38:58.039335Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_dyn" us=7
+2026-10-26T06:38:58.039342Z  INFO sync_profile: phase sync tab=1 phase="commit.eval_mod" us=7
+2026-10-26T06:38:58.039350Z  INFO sync_profile: phase sync tab=1 phase="commit.attrs_sync" us=7
+2026-10-26T06:38:58.039358Z  INFO sync_profile: phase sync tab=1 phase="commit.deliver" us=55
+2026-10-26T06:38:59.741360Z  INFO sync_profile: phase sync tab=1 phase="pump.commit_lock" us=1702055
+2026-10-26T06:38:59.873193Z  INFO sync_profile: phase sync tab=1 phase="pump.offlock" us=75374
+2026-10-26T06:38:59.873236Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_net" us=0
+2026-10-26T06:38:59.873244Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_crypto" us=7
+2026-10-26T06:38:59.873252Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_es" us=7
+2026-10-26T06:38:59.873259Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_ws" us=7
+2026-10-26T06:38:59.873266Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_dyn" us=7
+2026-10-26T06:38:59.873273Z  INFO sync_profile: phase sync tab=1 phase="commit.eval_mod" us=6
+2026-10-26T06:38:59.873279Z  INFO sync_profile: phase sync tab=1 phase="commit.attrs_sync" us=6
+2026-10-26T06:38:59.873286Z  INFO sync_profile: phase sync tab=1 phase="commit.deliver" us=51
+2026-10-26T06:39:01.430912Z  INFO sync_profile: phase sync tab=1 phase="pump.commit_lock" us=1557674
+2026-10-26T06:39:01.577803Z  INFO sync_profile: phase sync tab=1 phase="pump.offlock" us=79595
+2026-10-26T06:39:01.577846Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_net" us=0
+2026-10-26T06:39:01.577855Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_crypto" us=9
+2026-10-26T06:39:01.577864Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_es" us=8
+2026-10-26T06:39:01.577883Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_ws" us=19
+2026-10-26T06:39:01.577896Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_dyn" us=13
+2026-10-26T06:39:01.577905Z  INFO sync_profile: phase sync tab=1 phase="commit.eval_mod" us=8
+2026-10-26T06:39:01.577913Z  INFO sync_profile: phase sync tab=1 phase="commit.attrs_sync" us=7
+2026-10-26T06:39:01.577920Z  INFO sync_profile: phase sync tab=1 phase="commit.deliver" us=75
+2026-10-26T06:39:03.570967Z  INFO sync_profile: phase sync tab=1 phase="pump.commit_lock" us=1993119
+2026-10-26T06:39:03.709328Z  INFO sync_profile: phase sync tab=1 phase="pump.offlock" us=72485
+2026-10-26T06:39:03.709368Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_net" us=0
+2026-10-26T06:39:03.709376Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_crypto" us=7
+2026-10-26T06:39:03.709383Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_es" us=6
+2026-10-26T06:39:03.709389Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_ws" us=6
+2026-10-26T06:39:03.709396Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_dyn" us=6
+2026-10-26T06:39:03.709402Z  INFO sync_profile: phase sync tab=1 phase="commit.eval_mod" us=6
+2026-10-26T06:39:03.709409Z  INFO sync_profile: phase sync tab=1 phase="commit.attrs_sync" us=6
+2026-10-26T06:39:03.709415Z  INFO sync_profile: phase sync tab=1 phase="commit.deliver" us=47
+2026-10-26T06:39:05.377361Z  INFO sync_profile: phase sync tab=1 phase="pump.commit_lock" us=1667990
+2026-10-26T06:39:05.512496Z  INFO sync_profile: phase sync tab=1 phase="pump.offlock" us=73922
+2026-10-26T06:39:05.512536Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_net" us=0
+2026-10-26T06:39:05.512544Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_crypto" us=8
+2026-10-26T06:39:05.512552Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_es" us=7
+2026-10-26T06:39:05.512559Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_ws" us=7
+2026-10-26T06:39:05.512566Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_dyn" us=7
+2026-10-26T06:39:05.512573Z  INFO sync_profile: phase sync tab=1 phase="commit.eval_mod" us=6
+2026-10-26T06:39:05.512580Z  INFO sync_profile: phase sync tab=1 phase="commit.attrs_sync" us=6
+2026-10-26T06:39:05.512587Z  INFO sync_profile: phase sync tab=1 phase="commit.deliver" us=51
+2026-10-26T06:39:07.409377Z  INFO sync_profile: phase sync tab=1 phase="pump.commit_lock" us=1896839
+2026-10-26T06:39:07.555204Z  INFO sync_profile: phase sync tab=1 phase="pump.offlock" us=91278
+2026-10-26T06:39:07.555282Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_net" us=0
+2026-10-26T06:39:07.555295Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_crypto" us=13
+2026-10-26T06:39:07.555308Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_es" us=12
+2026-10-26T06:39:07.555318Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_ws" us=10
+2026-10-26T06:39:07.555327Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_dyn" us=9
+2026-10-26T06:39:07.555337Z  INFO sync_profile: phase sync tab=1 phase="commit.eval_mod" us=9
+2026-10-26T06:39:07.555346Z  INFO sync_profile: phase sync tab=1 phase="commit.attrs_sync" us=8
+2026-10-26T06:39:07.555355Z  INFO sync_profile: phase sync tab=1 phase="commit.deliver" us=75
+2026-10-26T06:39:09.239890Z  INFO sync_profile: phase sync tab=1 phase="pump.commit_lock" us=1684608
+2026-10-26T06:39:09.370535Z  INFO sync_profile: phase sync tab=1 phase="pump.offlock" us=77190
+2026-10-26T06:39:09.370585Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_net" us=0
+2026-10-26T06:39:09.370594Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_crypto" us=9
+2026-10-26T06:39:09.370602Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_es" us=8
+2026-10-26T06:39:09.370610Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_ws" us=7
+2026-10-26T06:39:09.370618Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_dyn" us=7
+2026-10-26T06:39:09.370626Z  INFO sync_profile: phase sync tab=1 phase="commit.eval_mod" us=8
+2026-10-26T06:39:09.370634Z  INFO sync_profile: phase sync tab=1 phase="commit.attrs_sync" us=8
+2026-10-26T06:39:09.370655Z  INFO sync_profile: phase sync tab=1 phase="commit.deliver" us=72
+2026-10-26T06:39:11.157628Z  INFO sync_profile: phase sync tab=1 phase="pump.commit_lock" us=1787040
+2026-10-26T06:39:11.298615Z  INFO sync_profile: phase sync tab=1 phase="pump.offlock" us=80453
+2026-10-26T06:39:11.298653Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_net" us=0
+2026-10-26T06:39:11.298661Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_crypto" us=8
+2026-10-26T06:39:11.298668Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_es" us=7
+2026-10-26T06:39:11.298675Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_ws" us=6
+2026-10-26T06:39:11.298682Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_dyn" us=6
+2026-10-26T06:39:11.298688Z  INFO sync_profile: phase sync tab=1 phase="commit.eval_mod" us=6
+2026-10-26T06:39:11.298695Z  INFO sync_profile: phase sync tab=1 phase="commit.attrs_sync" us=6
+2026-10-26T06:39:11.298702Z  INFO sync_profile: phase sync tab=1 phase="commit.deliver" us=49
+2026-10-26T06:39:12.936666Z  INFO sync_profile: phase sync tab=1 phase="pump.commit_lock" us=1638011
+2026-10-26T06:39:13.072866Z  INFO sync_profile: phase sync tab=1 phase="pump.offlock" us=75893
+2026-10-26T06:39:13.072908Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_net" us=0
+2026-10-26T06:39:13.072916Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_crypto" us=8
+2026-10-26T06:39:13.072924Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_es" us=7
+2026-10-26T06:39:13.072930Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_ws" us=6
+2026-10-26T06:39:13.072937Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_dyn" us=6
+2026-10-26T06:39:13.072944Z  INFO sync_profile: phase sync tab=1 phase="commit.eval_mod" us=6
+2026-10-26T06:39:13.072950Z  INFO sync_profile: phase sync tab=1 phase="commit.attrs_sync" us=6
+2026-10-26T06:39:13.072957Z  INFO sync_profile: phase sync tab=1 phase="commit.deliver" us=49
+2026-10-26T06:39:15.065203Z  INFO sync_profile: phase sync tab=1 phase="pump.commit_lock" us=1992293
+2026-10-26T06:39:15.223813Z  INFO sync_profile: phase sync tab=1 phase="pump.offlock" us=94526
+2026-10-26T06:39:15.223852Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_net" us=0
+2026-10-26T06:39:15.223860Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_crypto" us=8
+2026-10-26T06:39:15.223867Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_es" us=7
+2026-10-26T06:39:15.223874Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_ws" us=7
+2026-10-26T06:39:15.223881Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_dyn" us=6
+2026-10-26T06:39:15.223887Z  INFO sync_profile: phase sync tab=1 phase="commit.eval_mod" us=6
+2026-10-26T06:39:15.223894Z  INFO sync_profile: phase sync tab=1 phase="commit.attrs_sync" us=6
+2026-10-26T06:39:15.223900Z  INFO sync_profile: phase sync tab=1 phase="commit.deliver" us=49
+2026-10-26T06:39:16.845830Z  INFO sync_profile: phase sync tab=1 phase="pump.commit_lock" us=1621976
+2026-10-26T06:39:16.975094Z  INFO sync_profile: phase sync tab=1 phase="pump.offlock" us=76710
+2026-10-26T06:39:16.975135Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_net" us=0
+2026-10-26T06:39:16.975143Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_crypto" us=7
+2026-10-26T06:39:16.975150Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_es" us=7
+2026-10-26T06:39:16.975157Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_ws" us=7
+2026-10-26T06:39:16.975164Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_dyn" us=6
+2026-10-26T06:39:16.975171Z  INFO sync_profile: phase sync tab=1 phase="commit.eval_mod" us=6
+2026-10-26T06:39:16.975177Z  INFO sync_profile: phase sync tab=1 phase="commit.attrs_sync" us=6
+2026-10-26T06:39:16.975184Z  INFO sync_profile: phase sync tab=1 phase="commit.deliver" us=50
+2026-10-26T06:39:18.804109Z  INFO sync_profile: phase sync tab=1 phase="pump.commit_lock" us=1828972
+2026-10-26T06:39:18.943332Z  INFO sync_profile: phase sync tab=1 phase="pump.offlock" us=78682
+2026-10-26T06:39:18.943393Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_net" us=0
+2026-10-26T06:39:18.943405Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_crypto" us=12
+2026-10-26T06:39:18.943412Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_es" us=7
+2026-10-26T06:39:18.943419Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_ws" us=6
+2026-10-26T06:39:18.943426Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_dyn" us=6
+2026-10-26T06:39:18.943432Z  INFO sync_profile: phase sync tab=1 phase="commit.eval_mod" us=6
+2026-10-26T06:39:18.943439Z  INFO sync_profile: phase sync tab=1 phase="commit.attrs_sync" us=6
+2026-10-26T06:39:18.943445Z  INFO sync_profile: phase sync tab=1 phase="commit.deliver" us=53
+2026-10-26T06:39:20.841927Z  INFO sync_profile: phase sync tab=1 phase="pump.commit_lock" us=1898533
+2026-10-26T06:39:20.985681Z  INFO sync_profile: phase sync tab=1 phase="pump.offlock" us=87320
+2026-10-26T06:39:20.985729Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_net" us=0
+2026-10-26T06:39:20.985737Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_crypto" us=8
+2026-10-26T06:39:20.985746Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_es" us=8
+2026-10-26T06:39:20.985752Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_ws" us=6
+2026-10-26T06:39:20.985759Z  INFO sync_profile: phase sync tab=1 phase="commit.dl_dyn" us=6
+2026-10-26T06:39:20.985765Z  INFO sync_profile: phase sync tab=1 phase="commit.eval_mod" us=6
+2026-10-26T06:39:20.985772Z  INFO sync_profile: phase sync tab=1 phase="commit.attrs_sync" us=6
+2026-10-26T06:39:20.985778Z  INFO sync_profile: phase sync tab=1 phase="commit.deliver" us=51

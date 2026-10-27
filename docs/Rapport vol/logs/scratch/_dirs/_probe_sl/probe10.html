@@ -1,0 +1,21 @@
+<!doctype html><html><body>
+<sl-button style="display:none">x</sl-button>
+<div id="v1">P</div>
+<script type="module" src="https://cdn.jsdelivr.net/npm/@shoelace-style/shoelace@2.20.1/cdn/shoelace-autoloader.js"></script>
+<script>
+setTimeout(() => {
+  let hits = '';
+  const b = document.createElement('sl-button');
+  const o_cc = b.connectedCallback;
+  b.connectedCallback = function(){ hits += 'cc '; try { return o_cc.call(this); } catch(e){ hits += 'ccErr:' + String(e.stack||e.message||e).slice(0,250); } };
+  if (b.createRenderRoot) {
+    const o_crr = b.createRenderRoot;
+    b.createRenderRoot = function(){ hits += 'crr '; try { return o_crr.call(this); } catch(e){ hits += 'crrErr:' + String(e.stack||e.message||e).slice(0,250); } };
+  }
+  try { document.body.appendChild(b); hits += 'app-ok '; }
+  catch(e) { hits += 'appErr:' + String(e).slice(0,200); }
+  hits += 'sr=' + (b.shadowRoot ? 'SR' : 'null');
+  document.getElementById('v1').textContent = hits;
+}, 8000);
+</script>
+</body></html>
