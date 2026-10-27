@@ -144,6 +144,8 @@ plateforme net** (ops jscore Encrypt/Decrypt restent à livrer) ·
 | 31 | **Clic `<button onclick>` → `ignored`** — boîte bien layoutée (1311×59), clic centré, refusé ; bloque les apps à bouton primaire (éditeur photopea injoignable) — `<a target=_blank>` fonctionne | `explorer-core`/hit-test | photopea `[V4-main]` vol 55 — suspect : handler `onclick` attribut non branché côté hit-test | **OUVERT — terrain V4** |
 | 32 | **Rasters pixelisés basse résolution** — icônes/logo/éditeur en blocs (downscale ou upscale brut ?) | `explorer-render` | regex101 `[V4-main]` vol 55 (certitude moyenne — verifier si srcset/lowres) | **OUVERT — terrain V4** |
 
+| 33 | **Wedge `nav_paint` sans timeout** — `take_nav_paint → Busy → sleep(50ms)` en boucle à vie (`shared.rs:157-166`) : `POST navigate` jamais retourné (>25 min), DOM 404/frame 204 permanent, 0 WARN, `journal_fallbacks=0`, ~1,5 cœur saturé | `explorer-core` | francebleu→ici.fr + 20minutes `[V4-main]` vol 52 — wedge en amont (`insert_images`/`styles_payload`) ou `composite_frames` ; distinct de §B-26 (fallbacks=0, navigate en vol) | **CRITIQUE — racine localisée : ajouter timeout + abandon payload** |
+
 ### 🟡 Moyen — perf, métriques, observabilité résiduelle
 
 - **Framebuffer pleine page** : PNG 48-54 Mo (guardian, youtube) —
@@ -168,7 +170,7 @@ plateforme net** (ops jscore Encrypt/Decrypt restent à livrer) ·
 
 ### ⚪ Externe — hors moteur (catalogue à jour)
 
-Anti-bot : 403 sec (ebay, etsy, stackoverflow, tripadvisor, sncf-connect, affinity.serif, hardware.fr,
+Anti-bot : 403 sec (ebay, etsy, stackoverflow, tripadvisor, sncf-connect, affinity.serif, hardware.fr, liberation.fr,
 seloger, medium, khanacademy, apec, nytimes) · Datadome (leboncoin) ·
 Akamai Bot Manager (cdiscount, zalando→`supported-browsers`) ·
 x5sec Alibaba (aliexpress→punish) · **AWS WAF insolvable** (imdb,
