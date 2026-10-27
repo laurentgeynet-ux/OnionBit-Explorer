@@ -2519,3 +2519,33 @@ fn property_registre_inherits_et_initial() {
     // du registre sert (red).
     assert_eq!(cs.get("color"), Some("rgb(255,0,0)"));
 }
+
+#[test]
+fn container_collecte_et_evalue() {
+    // R-122 — `@container` : parse + collecte + évaluation
+    // contre une taille (2ᵉ passe NAV après layout).
+    let mut e = StyleEngine::new();
+    e.add_css(
+        "@container (min-width: 400px) { .card { width: 100px } }",
+        Origin::Author,
+    );
+    assert_eq!(e.container_queries.len(), 1);
+    assert_eq!(e.container_queries[0].name, None);
+    // Évaluation : 500≥400 vrai, 300≥400 faux.
+    assert!(StyleEngine::matches_container_query(
+        "(min-width: 400px)",
+        500.0,
+        200.0
+    ));
+    assert!(!StyleEngine::matches_container_query(
+        "(min-width: 400px)",
+        300.0,
+        200.0
+    ));
+    // `or` disjoint.
+    assert!(StyleEngine::matches_container_query(
+        "(min-width: 400px) or (min-height: 100px)",
+        300.0,
+        150.0
+    ));
+}

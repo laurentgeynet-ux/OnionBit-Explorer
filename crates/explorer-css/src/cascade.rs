@@ -243,6 +243,23 @@ pub(crate) struct CollectedFontFace {
     pub(crate) declarations: Vec<Declaration>,
 }
 
+/// Règle `@container` collectée (R-122 — css-contain-3) :
+/// query + règles à évaluer contre la taille d'un conteneur
+/// (mesurée après layout — la cascade ne la connaît pas).
+#[derive(Debug, Clone)]
+pub struct CollectedContainer {
+    /// Nom de conteneur ciblé (`container-name`), si donné.
+    pub name: Option<String>,
+    /// Condition brute — `(min-width: 400px) and (…)` (parens).
+    pub query: String,
+    /// Pile `@media` englobante.
+    pub media: Vec<Vec<MediaQuery>>,
+    /// Chemin `@layer` englobant.
+    pub layer: Vec<String>,
+    /// Règles imbriquées du bloc.
+    pub rules: Vec<Rule>,
+}
+
 /// Position d'un sélecteur dans la table des règles + son
 /// pseudo-élément cible pré-extrait (le filtre `::before` de
 /// la cascade devient un test de champ, R-83).
@@ -484,6 +501,10 @@ pub struct StyleEngine {
     /// vérification (v1) — `inherits`/`initial-value` agissent
     /// à la valeur calculée.
     pub(crate) property_registry: HashMap<String, RegisteredProp>,
+    /// Queries `@container` collectées (R-122 — css-contain-3) :
+    /// évaluées en seconde passe par l'appelant (la taille du
+    /// conteneur n'existe qu'après layout).
+    pub container_queries: Vec<CollectedContainer>,
 }
 
 /// « Guaranteed-invalid value » (css-variables-1 §3.2) :
@@ -879,6 +900,19 @@ impl StyleEngine {
                         } else if at.name.eq_ignore_ascii_case("property") {
                             self.register_property(prelude, declarations);
                         }
+                    } else if let AtKind::Container { name, query, rules } = &at.kind {
+                        // `@container` (R-122) : règles stockées
+                        // pour la 2ᵉ passe (taille du conteneur
+                        // inconnue à la cascade — l'appelant
+                        // ré-évalue via `container_rules_matching`
+                        // après layout). Collecte additive.
+                        self.container_queries.push(CollectedContainer {
+                            name: name.clone(),
+                            query: query.clone(),
+                            media: media.to_vec(),
+                            layer: layer.to_vec(),
+                            rules: rules.clone(),
+                        });
                     } else if let AtKind::Keyframes { name, frames } = &at.kind {
                         // `@media` englobant appliqué ? La table
                         // des keyframes ne porte pas de media
@@ -975,6 +1009,59 @@ impl StyleEngine {
         .and_then(|v| v.trim().trim_end_matches("px").trim().parse::<f32>().ok())
         .filter(|fs| *fs > 0.0)
         .unwrap_or(env.font_size_base)
+    }
+
+    /// Évalue une condition `@container` contre la taille
+    /// `(w, h)` d'un conteneur (R-122 — css-contain-3 §4) :
+    /// `(min-?width|max-?width|min-?height|max-?height: Npx)`,
+    /// clauses `and` jointes, `or` disjointes. Les unités
+    /// relatives (`em`, `%`…) ne résolvent pas → clause
+    /// ignorée (vraie — dégradation ouverte).
+    /// Consommé en seconde passe par l'appelant (la taille
+    /// du conteneur n'existe qu'après layout).
+    #[must_use]
+    pub fn matches_container_query(query: &str, w: f32, h: f32) -> bool {
+        let eval_one = |q: &str| -> bool {
+            let mut all = true;
+            for clause in q.split('(').skip(1) {
+                let body = clause.split(')').next().unwrap_or("").trim();
+                if body.is_empty() {
+                    continue;
+                }
+                // `and` peut chaîner plusieurs features par
+                // parenthèse dans la forme longue — split sur
+                // `and` à l'intérieur de la clause.
+                for feat in body.split(" and ") {
+                    let feat = feat.trim();
+                    let Some((name, val)) = feat.split_once(':') else {
+                        // Feature seule (`(orientation: …)` non
+                        // porté) → ignorée (clause ouverte).
+                        continue;
+                    };
+                    let (name, val) = (name.trim(), val.trim());
+                    let v = val
+                        .trim_end_matches("px")
+                        .parse::<f32>()
+                        .unwrap_or(f32::NAN);
+                    if v.is_nan() {
+                        continue;
+                    }
+                    let hit = match name {
+                        "min-width" => w >= v,
+                        "max-width" => w <= v,
+                        "width" => (w - v).abs() < f32::EPSILON,
+                        "min-height" => h >= v,
+                        "max-height" => h <= v,
+                        "height" => (h - v).abs() < f32::EPSILON,
+                        _ => true, // feature non portée → ouverte
+                    };
+                    all &= hit;
+                }
+            }
+            all
+        };
+        // `or` disjoint — chaque branche doit matcher seule.
+        query.split(" or ").map(str::trim).any(eval_one)
     }
 
     /// Styles calculés de tout le sous-arbre de `root`

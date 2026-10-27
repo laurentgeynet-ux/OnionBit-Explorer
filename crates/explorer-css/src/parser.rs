@@ -60,6 +60,18 @@ pub struct AtRule {
 /// Corps d'une at-rule selon son nom.
 #[derive(Debug, Clone, PartialEq)]
 pub enum AtKind {
+    /// `@container <name>? <condition> { rules }` — css-contain-3
+    /// (R-122 — ×27 Tailwind) : query brute stockée, règles
+    /// collectées ; évaluées en seconde passe par la couche
+    /// appelante (taille du conteneur inconnue à la cascade).
+    Container {
+        /// Nom du conteneur ciblé (`container-name`), si donné.
+        name: Option<String>,
+        /// Condition brute (`(min-width: 400px)`, `(… and …)`).
+        query: String,
+        /// Règles imbriquées.
+        rules: Vec<Rule>,
+    },
     /// `@media <queries> { rules }` — queries structurées.
     Media {
         /// Liste de media queries (`,` = OU).
@@ -374,6 +386,7 @@ impl<'t> Parser<'t> {
     }
 
     /// At-rule : prélude jusqu'à `;` ou `{`, puis bloc selon nom.
+    #[allow(clippy::too_many_lines)] // match des at-rules — borné par le grammar dispatch
     fn at_rule(&mut self, name: &str) -> Rule {
         let prelude = self.consume_prelude(true);
         match self.peek() {
@@ -419,6 +432,33 @@ impl<'t> Parser<'t> {
                             },
                             rules,
                         }
+                    }
+                    "container" => {
+                        // `@container [name] (condition) { … }` —
+                        // même grammaire de bloc que `@media`.
+                        let rules = if self.nest_depth >= MAX_NESTING {
+                            self.skip_block();
+                            Vec::new()
+                        } else {
+                            self.nest_depth += 1;
+                            let r = self.nested_rules();
+                            self.nest_depth -= 1;
+                            r
+                        };
+                        // Prélude : `<name>? (<query…>)` — le
+                        // nom est le token libre avant la parenthèse.
+                        let prelude_t = prelude.trim();
+                        let (name, query) = match prelude_t.find('(') {
+                            Some(i) => {
+                                let n = prelude_t[..i].trim().to_string();
+                                (
+                                    (!n.is_empty()).then_some(n),
+                                    prelude_t[i..].trim().to_string(),
+                                )
+                            }
+                            None => (None, prelude_t.to_string()),
+                        };
+                        AtKind::Container { name, query, rules }
                     }
                     "layer" => {
                         // Bloc de règles, même grammaire que
