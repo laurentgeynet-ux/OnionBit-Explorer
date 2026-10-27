@@ -8424,3 +8424,15 @@ fn timer_callback_error_isolated_and_capped() {
     assert!(bad.parse::<u32>().unwrap_or(0) >= 8, "bad={bad}");
     assert!(bad.parse::<u32>().unwrap_or(u32::MAX) < 20, "bad={bad}");
 }
+
+#[test]
+fn module_toplevel_throw_surfaces() {
+    // B-4 : une exception en top-level de module doit sortir
+    // en Err (→ PipelineError), pas s'avaler — mastodon/
+    // play2048 « hors unhandledrejection ».
+    let mut e = Engine::new();
+    match e.eval_module("throw new Error('boom')", "m.js") {
+        Err(x) => assert!(format!("{x}").contains("boom"), "{x}"),
+        Ok(v) => panic!("throw module avalé → {}", e.describe(v)),
+    }
+}
