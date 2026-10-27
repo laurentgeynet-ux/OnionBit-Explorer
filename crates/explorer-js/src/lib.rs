@@ -42,6 +42,11 @@ pub enum JsError {
     /// Le thread moteur est mort (panic interne, poison).
     #[error("moteur js inerte")]
     Dead,
+    /// Éval/drain dépassé `EVAL_CMD_TIMEOUT` — disjoncteur
+    /// « moteur figé » (boucle hostile). Kind typé : la session
+    /// distingue un stall d'une exception du script.
+    #[error("moteur figé — éval dépassée")]
+    Timeout,
 }
 
 impl From<explorer_jscore::Error> for JsError {
@@ -1797,9 +1802,7 @@ impl JscoreEngine {
     fn recv_eval<T>(rx: &Receiver<T>) -> Result<T, JsError> {
         rx.recv_timeout(Self::EVAL_CMD_TIMEOUT)
             .map_err(|e| match e {
-                RecvTimeoutError::Timeout => {
-                    JsError::Uncaught("moteur figé — éval dépassée".into())
-                }
+                RecvTimeoutError::Timeout => JsError::Timeout,
                 RecvTimeoutError::Disconnected => JsError::Dead,
             })
     }

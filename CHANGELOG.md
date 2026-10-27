@@ -23,6 +23,16 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
     défaut viewport dans tous les cas,
     `?full=1` document ; le 200 à corps
     vide reste impossible (204 + Retry-After).
+- **JS-C156 — `JsError::Timeout`
+  typé** (`explorer-js`) — le
+  disjoncteur « moteur figé »
+  rendait `Uncaught("moteur figé —
+  éval dépassée")` (signature
+  chaîne fragile) ; nouveau kind
+  `Timeout` distinct de
+  `Uncaught`/`Dead` — la session
+  peut distinguer un stall d'une
+  exception du script.
 
 - **Vol 2026-10-26 — correctifs de vol,
   vague 2 (FIX-3, vols 13/16/17)**
