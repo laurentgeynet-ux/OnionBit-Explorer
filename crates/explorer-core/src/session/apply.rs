@@ -348,6 +348,12 @@ pub(crate) struct PaintPayload {
     /// tout journal tombe en `NoBaseline` → re-parse. Vit et
     /// meurt avec `dom` (même granule de remplacement).
     pub keymap: HashMap<u64, explorer_dom::NodeId>,
+    /// Chemins de cycle §B-26 déjà journalisés pour cet
+    /// onglet — la borne saute des sur-émissions à *chaque*
+    /// apply (vol 67 : 994 WARN identiques `[0,0,0,0]` sur
+    /// meteofrance noyaient le journal) : un WARN par chemin
+    /// suffit, les suivants passent en `debug`.
+    pub cycle_warned: std::collections::HashSet<Box<[u16]>>,
 }
 
 /// Titre courant de l'onglet — lu au début d'apply pour
@@ -472,6 +478,7 @@ impl Tab {
             bg_decoded: std::mem::take(&mut self.bg_decoded),
             img_bodies: std::mem::take(&mut self.img_bodies),
             keymap: std::mem::take(&mut self.dom_keymap),
+            cycle_warned: std::mem::take(&mut self.cycle_warned),
         }
     }
 
@@ -525,6 +532,7 @@ impl Tab {
         self.bg_decoded = p.bg_decoded;
         self.img_bodies = p.img_bodies;
         self.dom_keymap = p.keymap;
+        self.cycle_warned = p.cycle_warned;
         // Issue #19 — la table de géométrie publiée au JS se
         // re-remplit à chaque état commis (nav, apply,
         // relayout, reclaim) : `getBoundingClientRect` &
@@ -1564,11 +1572,27 @@ pub(crate) fn repaint_payload(
     );
     tracing::info!(items = list.items.len(), "apply: display_list");
     if list.dropped_emits > 0 {
-        tracing::warn!(
-            dropped = list.dropped_emits,
-            path = ?list.first_cycle_path,
-            "apply: cycle de report cassé (§B-26)"
-        );
+        // WARN une fois par chemin fautif (la borne absorbe à
+        // chaque apply — vol 67 : 994 WARN identiques), `debug`
+        // ensuite ; `dropped_emits` cumulé reste compté dans
+        // la liste pour la télémétrie.
+        let fresh = list
+            .first_cycle_path
+            .as_ref()
+            .is_none_or(|path| p.cycle_warned.insert(path.clone().into_boxed_slice()));
+        if fresh {
+            tracing::warn!(
+                dropped = list.dropped_emits,
+                path = ?list.first_cycle_path,
+                "apply: cycle de report cassé (§B-26)"
+            );
+        } else {
+            tracing::debug!(
+                dropped = list.dropped_emits,
+                path = ?list.first_cycle_path,
+                "apply: cycle de report cassé (§B-26)"
+            );
+        }
     }
     if let Some(f) = &p.find {
         append_find_highlights(&mut list, f);

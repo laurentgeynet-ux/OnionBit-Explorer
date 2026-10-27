@@ -36,7 +36,22 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   `repaint_payload` / `display_list`
   / `raster` conservés (diagnostic
   permanent de la fenêtre
-  layout→repaint).
+  layout→repaint). **Vol 67
+  `[V6-main]` : RÉSOLU ×3** —
+  meteofrance (`dropped=1`
+  `path=[0,0,0,0]`, `apply: fin`,
+  RAM stable 746 Mo/9 min), orsay
+  (`[0,6,0]`, purge DELETE
+  1 015→780 Mo), figaro (`[0,1]`,
+  ~0,1 Mo/s ; frame blanche JS =
+  résidu séparé). **Dédup du WARN** :
+  `Tab::cycle_warned` (voyage dans
+  `PaintPayload`, vidé à la nav) —
+  un WARN par chemin fautif, les
+  répétitions à chaque apply
+  passent en `debug` (vol 67 :
+  994 WARN identiques noyaient le
+  journal).
 
 - **JS-C171 — spread `...x` dans les
   appels de chaîne optionnelle**

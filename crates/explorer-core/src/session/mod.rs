@@ -404,6 +404,12 @@ pub(crate) struct Tab {
     /// voyage avec la payload (`take_paint`/`put_paint`).
     /// Vide = journal non rejouable → repli re-parse.
     dom_keymap: HashMap<u64, explorer_dom::NodeId>,
+    /// Chemins de cycle de report §B-26 déjà journalisés
+    /// (`WARN` une fois par chemin, `debug` ensuite — la
+    /// borne absorbe à chaque apply ; vol 67 : 994 WARN
+    /// identiques sur meteofrance). Vidé à la navigation,
+    /// voyage avec la payload.
+    cycle_warned: std::collections::HashSet<Box<[u16]>>,
     /// Styles calculés de la dernière mise en page, indexés
     /// par **ordinal d'élément** (ordre document) — la clé
     /// survit au re-parse des synchronisations DOM, là où un
@@ -1332,6 +1338,7 @@ impl Session {
                 bg_decoded: HashMap::new(),
                 img_bodies: HashMap::new(),
                 dom_keymap: HashMap::new(),
+                cycle_warned: std::collections::HashSet::new(),
                 prev_styles: HashMap::new(),
                 transitions: Vec::new(),
                 animations: Vec::new(),
