@@ -36,7 +36,7 @@ pub use boxtree::{
     LayoutBox, Overflow, Position, Rect,
 };
 pub use font::{FontCache, FontMetrics, FontRequest, FontSource, Glyph, ShapedRun};
-pub use hit::{hit_test, hit_test_scrolled};
+pub use hit::{hit_test, hit_test_scrolled, hit_test_scrolled_vp, sticky_offset};
 pub use inline::{fragment_sub_rect, Fragment, LineBox};
 pub use relayout::{relayout_subtree, Relayout};
 pub use text::{Break, Direction, TextRun};

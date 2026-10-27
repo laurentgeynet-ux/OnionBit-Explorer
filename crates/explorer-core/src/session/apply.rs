@@ -1963,7 +1963,8 @@ impl Session {
                 p,
             );
             self.applies_started += 1;
-            self.paint_in_flight.insert(job.tab, std::time::Instant::now());
+            self.paint_in_flight
+                .insert(job.tab, std::time::Instant::now());
             return Some((job, g, ctx, entry.title.clone()));
         }
     }

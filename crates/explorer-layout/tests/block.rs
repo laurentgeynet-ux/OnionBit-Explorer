@@ -2239,3 +2239,44 @@ fn remplace_max_height_pct_bridant_la_hauteur() {
         img.rect.height
     );
 }
+
+#[test]
+fn hit_sticky_epingle_gagne_au_scroll() {
+    // B-40 (trainline/culture.gouv vols 60/62) : un header
+    // `position:sticky;top:0` épinglé au viewport est peint
+    // décalé par `sticky_offset` — le hit-test doit frapper
+    // sa position **visuelle**, pas son doc-y naturel.
+    // Sans le fix : le clic sur le header épinglé retombait
+    // sur la couche dessous (ancre pleine-largeur → nav
+    // erronée) ou `ignored`.
+    let dom = TreeBuilder::parse(
+        "<body><div id=h><a id=l>nav</a></div>\
+         <div id=below style=\"height:2000px\">x</div></body>",
+    );
+    let mut e = StyleEngine::new();
+    e.add_css(
+        "body{margin:0} #h{position:sticky;top:0;height:50px}\
+         #l{display:block;height:50px}",
+        Origin::Author,
+    );
+    let styles = e.compute_tree(&dom, dom.document(), &StyleEnv::default());
+    let root_el = dom
+        .children(dom.document())
+        .into_iter()
+        .flatten()
+        .find(|&c| dom.element(c).is_ok())
+        .unwrap();
+    let mut bx = build_box_tree(&dom, root_el, &styles).unwrap();
+    layout_tree(&mut bx, VIEW, &BlockCtx::default());
+    // Clic à viewport-y 25 avec scroll=1000 : le header est
+    // épinglé en haut — le hit doit tomber sur lui/son lien,
+    // PAS sur `below` (doc-y 1025).
+    let hit = explorer_layout::hit_test_scrolled_vp(&bx, 10.0, 25.0, 1000.0, (VIEW, 600.0));
+    let id = hit
+        .and_then(|n| dom.attribute(n, "id").ok().flatten())
+        .unwrap_or_default();
+    assert!(
+        id == "h" || id == "l",
+        "clic sur header sticky épinglé → h/l attendu, obtenu {id}"
+    );
+}

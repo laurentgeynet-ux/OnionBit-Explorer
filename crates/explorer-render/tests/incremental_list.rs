@@ -391,9 +391,11 @@ fn incr_scroll_grand_doc_non_blanc() {
     // scroll_y=1600 sur doc 5520) : doc haute, `prev` peint
     // à scroll 0, incrémental à 1600 — identique au plein
     // build ET pixels non blancs.
-    let html = (0..30)
-        .map(|i| format!("<div>bloc{i}</div>"))
-        .collect::<String>();
+    let html = (0..30).fold(String::new(), |mut s, i| {
+        use std::fmt::Write as _;
+        let _ = write!(s, "<div>bloc{i}</div>");
+        s
+    });
     let css = "body{margin:0} div{height:200px;background:#fed;color:#000;font-size:40px}";
     let (bx, prev) = tree_of(&html, css);
     assert!(

@@ -20,12 +20,19 @@ use super::{CoreError, SandboxFlags};
 /// peint le plus proche via les ancêtres DOM côté appelant).
 /// `scroll_y` est filé pour que les boîtes `position:fixed`
 /// (coords viewport) restent atteignables après scroll (i#18).
-pub(crate) fn hit_test(bx: &LayoutBox, x: f32, y: f32, scroll_y: f32) -> Option<NodeId> {
+pub(crate) fn hit_test(
+    bx: &LayoutBox,
+    x: f32,
+    y: f32,
+    scroll_y: f32,
+    vp: (f32, f32),
+) -> Option<NodeId> {
     // R-19 : l'élagage sur le border-box tuait les zones dont
     // un enfant déborde le parent (lite.ddg). Le test vit en
     // amont : `explorer_layout::hit_test_scrolled` élague sur
     // l'union du sous-arbre (paint bounds) — même contrat.
-    explorer_layout::hit_test_scrolled(bx, x, y, scroll_y)
+    // `vp` = scrollport — seuils sticky `bottom`/`right` (B-40).
+    explorer_layout::hit_test_scrolled_vp(bx, x, y, scroll_y, vp)
 }
 
 /// Chemin `(tag, index parmi les frères éléments de même tag)`

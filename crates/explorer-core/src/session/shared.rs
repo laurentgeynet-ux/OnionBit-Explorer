@@ -87,39 +87,38 @@ pub async fn navigate_shared(
     let Some(alive) = alive else {
         return Ok(()); // onglet mort entre nav_begin et run
     };
-    let job_run = job
-        .run(|dom: &Dom| -> PaintFut<'_> {
-            // `try_lock` : la peinture progressive ne bloque
-            // jamais le téléchargement — un tick manqué (lock
-            // occupé par un `/frame` ou une autre phase) est
-            // repeint au suivant, le commit final repeint de
-            // toute façon.
-            if let Ok(mut s) = sess.try_lock() {
-                s.nav_paint(tab, epoch, dom);
-            }
-            Box::pin(async {})
-        });
+    let job_run = job.run(|dom: &Dom| -> PaintFut<'_> {
+        // `try_lock` : la peinture progressive ne bloque
+        // jamais le téléchargement — un tick manqué (lock
+        // occupé par un `/frame` ou une autre phase) est
+        // repeint au suivant, le commit final repeint de
+        // toute façon.
+        if let Ok(mut s) = sess.try_lock() {
+            s.nav_paint(tab, epoch, dom);
+        }
+        Box::pin(async {})
+    });
     let (done, tail) = match tokio::select! {
         r = job_run => Some(r),
         _ = wait_tab_dead(&alive) => None,
     } {
         Some(r) => match r {
-        // Téléchargement (étape 70) : enregistré en attente
-        // — rien de committé, la page courante reste.
-        Ok(NavOutcome::Download(dl)) => {
-            let mut s = sess.lock().await;
-            s.offer_download(tab, *dl);
-            return Ok(());
-        }
-        Ok(NavOutcome::Document(d, t)) => (d, t),
-        Err(e) => {
-            let mut s = sess.lock().await;
-            s.unspec(tab); // peinture spéculative → réverte (56c)
-                           // Page d'erreur commise (étape 69) — l'URL tentée
-                           // s'affiche ; étape 76 : entrée `failed` poussée.
-            s.paint_error_page(tab, &job.req, job.push, &e);
-            return Err(s.emit_error(tab, e));
-        }
+            // Téléchargement (étape 70) : enregistré en attente
+            // — rien de committé, la page courante reste.
+            Ok(NavOutcome::Download(dl)) => {
+                let mut s = sess.lock().await;
+                s.offer_download(tab, *dl);
+                return Ok(());
+            }
+            Ok(NavOutcome::Document(d, t)) => (d, t),
+            Err(e) => {
+                let mut s = sess.lock().await;
+                s.unspec(tab); // peinture spéculative → réverte (56c)
+                               // Page d'erreur commise (étape 69) — l'URL tentée
+                               // s'affiche ; étape 76 : entrée `failed` poussée.
+                s.paint_error_page(tab, &job.req, job.push, &e);
+                return Err(s.emit_error(tab, e));
+            }
         },
         // Onglet mort en vol (B-30) : abandon propre — la
         // page en cours n'a plus de réceptacle.

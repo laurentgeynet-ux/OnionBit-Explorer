@@ -209,18 +209,42 @@ fn hit_test_m(bx: &LayoutBox, x: f32, y: f32, m: Affine) -> Option<NodeId> {
 /// `hit_test` reste la variante coords document (delta nul).
 #[must_use]
 pub fn hit_test_scrolled(bx: &LayoutBox, x: f32, y: f32, scroll_y: f32) -> Option<NodeId> {
-    hit_test_delta(bx, x, y, scroll_y)
+    // Sans scrollport connu, les seuils `bottom`/`right` ne
+    // peuvent évaluer `vp` — dégradé = offset nul sur cet
+    // axe (comportement antérieur, pas de régression) ;
+    // `top`/`left` restent exacts. Préférer
+    // [`hit_test_scrolled_vp`] dès que le viewport est connu.
+    hit_test_delta_m_vp(bx, x, y, scroll_y, (0.0, 0.0), Affine::IDENTITY)
 }
 
-fn hit_test_delta(bx: &LayoutBox, x: f32, y_vp: f32, delta: f32) -> Option<NodeId> {
-    hit_test_delta_m(bx, x, y_vp, delta, Affine::IDENTITY)
+/// [`hit_test_scrolled`] avec le scrollport `(w, h)` —
+/// requis pour les sticky à seuil `bottom`/`right` (B-40) ;
+/// identique sinon.
+#[must_use]
+pub fn hit_test_scrolled_vp(
+    bx: &LayoutBox,
+    x: f32,
+    y: f32,
+    scroll_y: f32,
+    vp: (f32, f32),
+) -> Option<NodeId> {
+    hit_test_delta_m_vp(bx, x, y, scroll_y, vp, Affine::IDENTITY)
 }
 
 /// Variante scrollée de [`hit_test_m`] : `m` cumule les
 /// `transform` d'ancêtres (inverse appliquée au point, même
 /// parité que la display list — vol : hit décalé sur
-/// élément transformé).
-fn hit_test_delta_m(bx: &LayoutBox, x: f32, y_vp: f32, delta: f32, m: Affine) -> Option<NodeId> {
+/// élément transformé). `vp` = scrollport `(w, h)` pour les
+/// seuils sticky `bottom`/`right`.
+#[allow(clippy::too_many_arguments)]
+fn hit_test_delta_m_vp(
+    bx: &LayoutBox,
+    x: f32,
+    y_vp: f32,
+    delta: f32,
+    vp: (f32, f32),
+    m: Affine,
+) -> Option<NodeId> {
     let m = box_transform(bx, &bx.rect).map_or(m, |t| t.post_concat(m));
     let (px, py) = m.invert()?.apply(x, y_vp + delta);
     if !contains(paint_bounds(bx), px, py) {
@@ -237,7 +261,21 @@ fn hit_test_delta_m(bx: &LayoutBox, x: f32, y_vp: f32, delta: f32, m: Affine) ->
         } else {
             delta
         };
-        if let Some(n) = explorer_common::deep(|| hit_test_delta_m(child, x, y_vp, d, m)) {
+        // `position:sticky` (B-40) : la display list translate
+        // la boîte vers son seuil (`sticky_offset`) mais le
+        // rect layout reste au doc-y naturel — un clic sur
+        // l'élément épinglé le manquait (`ignored`) ou frappait
+        // la couche dessous (`navigated` vers l'ancre
+        // pleine-largeur — culture.gouv). Le point est
+        // ramené dans le repère pré-décalage, comme `fixed`.
+        let (sx, sy) = if child.position == crate::Position::Sticky {
+            sticky_offset(child, (0.0, -delta), bx.rect, vp)
+        } else {
+            (0.0, 0.0)
+        };
+        if let Some(n) =
+            explorer_common::deep(|| hit_test_delta_m_vp(child, x - sx, y_vp - sy, d, vp, m))
+        {
             return Some(n);
         }
     }
@@ -245,4 +283,82 @@ fn hit_test_delta_m(bx: &LayoutBox, x: f32, y_vp: f32, delta: f32, m: Affine) ->
         return None;
     }
     contains(bx.rect, px, py).then_some(bx.node).flatten()
+}
+
+/// Décalage `position: sticky` — **source unique** partagée
+/// par la display list (`explorer-render`) et le hit-test
+/// (B-40 : un header sticky épinglé au viewport restait
+/// cliquable à son doc-y naturel alors qu'il est peint
+/// décalé — clic `ignored`/`navigated` vers la cible
+/// dessous, trainline/culture.gouv).
+///
+/// `off` = translation de scroll déjà appliquée `(x, y)`
+/// (négative — un rect document + `off` = position
+/// viewport), `bound` = border box du bloc conteneur en
+/// coords document, `vp` = `(w, h)` du scrollport. Les
+/// quatre côtés `top`/`bottom`/`left`/`right` ; sur-
+/// contrainte spec : `top` gagne `bottom`, `left` gagne
+/// `right` (LTR).
+#[must_use]
+pub fn sticky_offset(bx: &LayoutBox, off: (f32, f32), bound: Rect, vp: (f32, f32)) -> (f32, f32) {
+    if bx.position != crate::Position::Sticky {
+        return (0.0, 0.0);
+    }
+    let painted = shifted(bx.rect, off);
+    let bound_p = shifted(bound, off);
+    let dy = if let Some(thr) = thr_px(&bx.style, "top") {
+        let room = (bound_p.y + bound_p.height - painted.y - painted.height).max(0.0);
+        (thr - painted.y).clamp(0.0, room)
+    } else if let Some(thr) = thr_px(&bx.style, "bottom") {
+        let room = (painted.y - bound_p.y).max(0.0);
+        -(painted.y + painted.height - (vp.1 - thr)).clamp(0.0, room)
+    } else {
+        0.0
+    };
+    let dx = if let Some(thr) = thr_px(&bx.style, "left") {
+        let room = (bound_p.x + bound_p.width - painted.x - painted.width).max(0.0);
+        (thr - painted.x).clamp(0.0, room)
+    } else if let Some(thr) = thr_px(&bx.style, "right") {
+        let room = (painted.x - bound_p.x).max(0.0);
+        -(painted.x + painted.width - (vp.0 - thr)).clamp(0.0, room)
+    } else {
+        0.0
+    };
+    (dx, dy)
+}
+
+/// Seuil sticky `top`/`bottom`/`left`/`right` → px ;
+/// `auto`/absent/`%`/`calc` → `None` (pas de seuil sur cet
+/// axe). `em`/`rem` résolvent sur la `font-size` calculée
+/// (px absolu en cascade — même convention que `prop_px`
+/// côté render).
+#[allow(clippy::cast_possible_truncation)]
+fn thr_px(st: &explorer_css::ComputedStyle, prop: &str) -> Option<f32> {
+    let raw = st.get(prop)?.trim();
+    if raw.is_empty() || raw == "auto" {
+        return None;
+    }
+    let l = explorer_css::value::parse_length(raw)?;
+    Some(
+        (match l.unit.px_factor() {
+            Some(f) => l.value * f,
+            None if raw.ends_with("em") => {
+                let fs = st
+                    .get("font-size")
+                    .and_then(explorer_css::value::parse_length)
+                    .and_then(|fl| fl.unit.px_factor().map(|f| fl.value * f))
+                    .unwrap_or(16.0);
+                l.value * fs
+            }
+            None => return None,
+        }) as f32,
+    )
+}
+
+fn shifted(r: Rect, off: (f32, f32)) -> Rect {
+    Rect {
+        x: r.x + off.0,
+        y: r.y + off.1,
+        ..r
+    }
 }

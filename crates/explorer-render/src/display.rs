@@ -2238,46 +2238,11 @@ fn paint_inline_deco(
     }
 }
 
-/// Décalage `position: sticky` — les **quatre côtés**
-/// (R-6) : `off` = translation de scroll déjà appliquée
-/// `(x, y)` (négative), `bound` = border box du bloc
-/// conteneur en coordonnées document, `vp` = `(largeur,
-/// hauteur)` du scrollport (le viewport — référence du
-/// sticky racine ; les conteneurs `overflow` internes ne
-/// scrollent pas encore). La boîte collée est bornée pour
-/// ne jamais sortir de son parent. Sur-contrainte spec :
-/// `top` gagne sur `bottom`, `left` sur `right` (LTR).
-fn sticky_offset(bx: &LayoutBox, off: (f32, f32), bound: Rect, vp: (f32, f32)) -> (f32, f32) {
-    if bx.position != Position::Sticky {
-        return (0.0, 0.0);
-    }
-    let painted = shifted(bx.rect, off);
-    let bound_p = shifted(bound, off);
-    let dy = if bx.style.get("top").is_some_and(|v| v != "auto") {
-        let thr = prop_px(&bx.style, "top", 0.0);
-        let room = (bound_p.y + bound_p.height - painted.y - painted.height).max(0.0);
-        (thr - painted.y).clamp(0.0, room)
-    } else if bx.style.get("bottom").is_some_and(|v| v != "auto") {
-        let thr = prop_px(&bx.style, "bottom", 0.0);
-        // Colle quand le bas peint dépasserait `vp_h - bottom`.
-        let room = (painted.y - bound_p.y).max(0.0);
-        -(painted.y + painted.height - (vp.1 - thr)).clamp(0.0, room)
-    } else {
-        0.0
-    };
-    let dx = if bx.style.get("left").is_some_and(|v| v != "auto") {
-        let thr = prop_px(&bx.style, "left", 0.0);
-        let room = (bound_p.x + bound_p.width - painted.x - painted.width).max(0.0);
-        (thr - painted.x).clamp(0.0, room)
-    } else if bx.style.get("right").is_some_and(|v| v != "auto") {
-        let thr = prop_px(&bx.style, "right", 0.0);
-        let room = (painted.x - bound_p.x).max(0.0);
-        -(painted.x + painted.width - (vp.0 - thr)).clamp(0.0, room)
-    } else {
-        0.0
-    };
-    (dx, dy)
-}
+// `sticky_offset` vit dans `explorer_layout::hit` — source
+// unique partagée par la display list et le hit-test (B-40 :
+// un sticky épinglé est PEINT décalé par `PushTransform` ;
+// le hit-test applique le même décalage à la cible).
+use explorer_layout::sticky_offset;
 
 /// `FontRequest` dérivé du style — **délègue à
 /// `request_of_family`** (R-81) : une seule implémentation

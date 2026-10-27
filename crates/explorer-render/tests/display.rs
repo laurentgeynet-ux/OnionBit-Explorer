@@ -1899,7 +1899,6 @@ fn svg_use_cross_ilot_resolu() {
     );
     let mut eng = StyleEngine::new();
     eng.add_css("body{margin:0}", Origin::Author);
-    let styles = eng.compute_tree(&dom, dom.document(), &StyleEnv::default());
     let root_el = dom
         .children(dom.document())
         .into_iter()
