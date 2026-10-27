@@ -632,7 +632,12 @@ impl<'t> Parser<'t> {
         let mut parens = 0i32;
         loop {
             match self.peek() {
-                None | Some(Token::Semicolon | Token::CloseBrace) if parens == 0 => break,
+                // EOF clos la déclaration même parenthèses
+                // ouvertes (§B-50 — `translateX(0px;` jamais
+                // fermé par un `style=` muté JS bouclait sans
+                // consommer : `next()` → None, progrès nul).
+                None => break,
+                Some(Token::Semicolon | Token::CloseBrace) if parens == 0 => break,
                 // `Function` porte son `(` : il ouvre aussi un niveau.
                 Some(Token::Function(_) | Token::OpenParen | Token::OpenBracket) => parens += 1,
                 Some(Token::CloseParen | Token::CloseBracket) => {

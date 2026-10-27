@@ -43,8 +43,8 @@ pub use cascade::{
 };
 pub use fontface::{FontFace, FontSrc};
 pub use parser::{
-    parse_stylesheet, AtKind, AtRule, Declaration, ImportRule, MediaQuery, QualifiedRule, Rule,
-    Stylesheet,
+    parse_declarations, parse_stylesheet, AtKind, AtRule, Declaration, ImportRule, MediaQuery,
+    QualifiedRule, Rule, Stylesheet,
 };
 pub use selector::{
     matches, matches_any, matches_any_with_state, matches_with_state, parse_selector_list, AttrOp,

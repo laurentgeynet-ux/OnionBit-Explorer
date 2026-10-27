@@ -307,3 +307,25 @@ fn accolade_echappee_ne_ferme_pas_le_bloc() {
         Some("yellow")
     );
 }
+
+#[test]
+fn parenthese_non_fermee_eof_termine() {
+    // §B-50 : `style="transform: translateX(0px;…"` — parenthèse
+    // jamais refermée (attribut muté par JS). EOF doit clore la
+    // déclaration ; avant le fix, la boucle de valeur attendait
+    // la `)` et ne consommait plus rien → boucle infinie dans
+    // la cascade après re-parse du DOM miroir (bordeaux).
+    let d = explorer_css::parse_declarations(
+        "transform: translateX(0px; padding-right: 0%; transition: transform .5s",
+    );
+    assert!(
+        d.iter().any(|x| x.name == "transform"),
+        "la déclaration à `(` non fermée doit être récupérée : {d:?}"
+    );
+    // Idem dans une feuille : `(` jamais fermé — tout le reste
+    // entre dans la valeur (spec : `}` n'interrompt pas un bloc
+    // `(` ouvert), le parse se termine à EOF.
+    let s = parse_stylesheet("a{transform:translateX(0px; b{color:red}");
+    assert_eq!(s.rules.len(), 1, "{:?}", s.rules);
+    assert!(decls(&s.rules[0]).iter().any(|x| x.name == "transform"));
+}

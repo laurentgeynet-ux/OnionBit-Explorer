@@ -7,6 +7,22 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **B-50 — parenthèse non fermée dans
+  un `style=` : boucle infinie de la
+  cascade tuée** (`explorer-css`) —
+  un JS mutait `style.transform` en
+  `translateX(0px;` sans refermer la
+  parenthèse ; la boucle de valeur du
+  parser attendait la `)` à EOF sans
+  jamais consommer → cascade infinie
+  après le re-parse ADR-0025, DOM
+  jamais réattaché (bordeaux vol 73).
+  EOF clos désormais la déclaration
+  même parenthèses ouvertes (spec).
+  Re-vol validé : rejet `UnmappedKey`
+  → re-parse → cascade → layout →
+  commit, `/dom` et `/frame` servis.
+
 - **B-43 — non reproduit : le tiroir
   `mini-cart` fermé est bien exclu
   du hit-test** — re-vol instrumenté

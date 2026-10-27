@@ -641,6 +641,13 @@ pub(crate) fn apply_payload(
     let t0 = Instant::now();
     let mut out = ApplyOutcome::default();
     let mut new_dom = TreeBuilder::parse_scripting(&job.html, ctx.scripting);
+    // B-50 (bordeaux) : un apply mort avant « apply: cascade »
+    // n'avait aucun jalon — le parse de la sérialisation miroir
+    // est maintenant borné temporellement dans le journal.
+    tracing::info!(
+        ms = u64::try_from(t0.elapsed().as_millis()).unwrap_or(u64::MAX),
+        "apply: parse"
+    );
     // Registre `customElements` (`:defined`) — transporté
     // par la payload, le Dom frais repart nu à chaque
     // re-parse.
@@ -660,6 +667,11 @@ pub(crate) fn apply_payload(
             try_incr_payload(p, ctx, None, &new_dom, t_old, t_new, &job.canvas_ops)
         });
     out.incremental = incremental;
+    tracing::debug!(
+        ms = u64::try_from(t0.elapsed().as_millis()).unwrap_or(u64::MAX),
+        incremental,
+        "apply: incr"
+    );
     // Les op-lists `<canvas>` survivent au re-parse : le
     // miroir les conserve (bitmap cumulative) — la table est
     // construite sur `new_dom` depuis les ops capturées à
@@ -670,6 +682,10 @@ pub(crate) fn apply_payload(
     // suivant tombera en `NoBaseline` → re-parse, jamais à
     // faux).
     build_keymap(&mut p.keymap, &new_dom, &job.ids, &job.tags);
+    tracing::debug!(
+        ms = u64::try_from(t0.elapsed().as_millis()).unwrap_or(u64::MAX),
+        "apply: keymap"
+    );
     p.dom = Some(new_dom);
     p.images = PaintImages::default();
     p.images.canvases = canvases;
@@ -692,6 +708,10 @@ pub(crate) fn apply_payload(
     // les `NodeId` du find meurent de même → effacé (57bis).
     p.popup = None;
     p.find = None;
+    tracing::debug!(
+        ms = u64::try_from(t0.elapsed().as_millis()).unwrap_or(u64::MAX),
+        "apply: imgs"
+    );
     if old_title != new_title.as_deref() {
         out.title = Some(new_title);
     }
