@@ -882,6 +882,11 @@ pub struct Session {
     /// `take_next_apply`, relâché aux quatre sorties
     /// (commit, rejet, parc orphelin, panic réarmé).
     pub(crate) paint_in_flight: std::collections::HashMap<TabId, std::time::Instant>,
+    /// Série de pompes JS productives consécutives par onglet
+    /// (B-41 — flixbus : pump.js_run_sync persistant, rafale
+    /// `UnmappedKey` re-parse→éval sans fin) — lue par
+    /// `commit_js_pump`.
+    pump_streaks: std::collections::HashMap<TabId, u32>,
     /// Déduplieur des erreurs pipeline en rafale (B-12) —
     /// `(onglet, message, occurrences)` : répétitions
     /// consécutives identiques tues, re-émises ×16.
@@ -1012,6 +1017,7 @@ impl Session {
             applies_fin: 0,
             paint_in_flight: std::collections::HashMap::new(),
             last_pipeline_error: None,
+            pump_streaks: std::collections::HashMap::new(),
             orphaned_paints: std::sync::Arc::new(std::sync::Mutex::new(
                 std::collections::HashMap::new(),
             )),

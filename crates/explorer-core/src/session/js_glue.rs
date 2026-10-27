@@ -379,6 +379,26 @@ impl Session {
         // même si plus aucun job n'est en file.
         self.drain_script_net(tab);
         self.drain_anim_births(tab);
+        // B-41 (flixbus) : une rafale `UnmappedKey` →
+        // re-parse → éval produisait des jobs à chaque
+        // pompe — la pompe repartait sans fin (pump_
+        // js_run_sync persistant, API affamée). Série de
+        // pompes productives bornée : au-delà de 64,
+        // disjoncteur armé + warn — la page tombe en
+        // « moteur figé » nommé plutôt que starvation.
+        if jobs > 0 {
+            let streak = self.pump_streaks.entry(tab).or_insert(0);
+            *streak += 1;
+            if *streak == 64 {
+                if let Some(e) = self.tabs.get_mut(&tab) {
+                    e.js_stall_until = Some(Instant::now() + self.js_stall_cooldown);
+                }
+                tracing::warn!(tab, streak = *streak,
+                    "tempête de pompes — disjoncteur armé (B-41)");
+            }
+        } else {
+            self.pump_streaks.insert(tab, 0);
+        }
         jobs
     }
 
