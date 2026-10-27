@@ -55,7 +55,7 @@ pub(crate) const NEW_TARGET: &str = "\u{f120}new.target";
 
 /// Liaison cachée du **ctor propre** dans le scope de classe —
 /// lue par le chemin `super()` pour trouver `FLD_FIELDS_D`
-/// (depuis JS-C150, `HOME_BIND` = le proto [[HomeObject]],
+/// (depuis JS-C150, `HOME_BIND` = le proto [[`HomeObject`]],
 /// pas le ctor — réutiliser `HOME_BIND` perdait les champs
 /// dérivés : `y = this.x + 1` non installé).
 pub(crate) const OWN_CTOR: &str = "\u{f120}own.ctor";
