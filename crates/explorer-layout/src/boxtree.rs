@@ -1229,25 +1229,48 @@ fn control_box(
 /// visible et défilable ; la zone scrollable du document suit
 /// le bord inférieur de toute boîte dont le débord n'est pas
 /// clippé. Une boîte `overflow` ≠ visible clippe : ses
-/// enfants ne contribuent pas au-delà de sa propre bordure.
-/// `fixed` est ancré au viewport — exclu du total (un bandeau
-/// fixe en bas de fenêtre ne doit pas allonger la page).
-/// Récursion bornée par `deep` (R-24 — arbres hostiles).
+/// enfants ne contribuent pas au-delà de sa propre bordure —
+/// **sauf sur la chaîne racine** (`html`, puis `body` quand
+/// `html` est `visible`) dont l'overflow se propage au
+/// *viewport* (css-overflow-3 §3.3) : `auto`/`scroll` y
+/// rendent le document défilable sans borner l'étendue —
+/// §B-45 (clubic vol 70) : `body{overflow-x:hidden}` calcule
+/// `overflow-y:auto` (R-120), la page doit rester scrollable
+/// sur ses ~13 450 px au lieu d'être figée à `doc_h`=900.
+/// `hidden` propagé au viewport clippe toujours (pas de
+/// scroll). `fixed` est ancré au viewport — exclu du total
+/// (un bandeau fixe en bas de fenêtre ne doit pas allonger
+/// la page). Récursion bornée par `deep` (R-24 — arbres
+/// hostiles).
 #[must_use]
 pub fn scrollable_overflow_bottom(root: &LayoutBox) -> f32 {
-    fn visit(bx: &LayoutBox, clip_bottom: f32) -> f32 {
+    // `to_viewport` = l'overflow de cette boîte se propage au
+    // viewport au lieu de borner l'étendue du document :
+    // vrai pour `html` (profondeur 0) toujours, pour `body`
+    // (profondeur 1) seulement quand `html` est `visible`
+    // (css-overflow-3 §3.3). `auto`/`scroll` propagé =
+    // document défilable (le débord compte) ; `hidden`
+    // propagé = viewport non scrollable (clip). Hors chaîne
+    // racine (`depth >= 2`), un scroll conteneur clippe
+    // normalement : son débord défile en interne.
+    fn visit(bx: &LayoutBox, clip_bottom: f32, depth: u32, parent_visible: bool) -> f32 {
         let own_bottom = (bx.rect.y + bx.rect.height).min(clip_bottom);
         if bx.position == Position::Fixed {
             return own_bottom;
         }
-        let child_clip = if bx.overflow == Overflow::Visible {
+        let to_viewport = depth == 0 || (depth == 1 && parent_visible);
+        let child_clip = if bx.overflow == Overflow::Visible
+            || (to_viewport && bx.overflow != Overflow::Hidden)
+        {
             clip_bottom
         } else {
             own_bottom
         };
         bx.children.iter().fold(own_bottom, |acc, c| {
-            acc.max(explorer_common::deep(|| visit(c, child_clip)))
+            acc.max(explorer_common::deep(|| {
+                visit(c, child_clip, depth + 1, bx.overflow == Overflow::Visible)
+            }))
         })
     }
-    visit(root, f32::INFINITY)
+    visit(root, f32::INFINITY, 0, false)
 }

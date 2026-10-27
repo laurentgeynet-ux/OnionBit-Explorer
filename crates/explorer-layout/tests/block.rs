@@ -2031,6 +2031,42 @@ fn find_overflow_x(bx: &explorer_layout::LayoutBox) -> Option<&explorer_layout::
 }
 
 #[test]
+fn body_overflow_auto_ne_verrouille_pas_doc_h() {
+    // §B-45 (clubic vol 70) : `html,body{height:100%}` +
+    // `body{overflow-x:hidden}` → `overflow-y` calcule `auto`
+    // (R-120) et se propage au VIEWPORT (css-overflow-3 §3.3) —
+    // le document reste défilable sur toute la hauteur du
+    // contenu, jamais figé à la hauteur de body (page
+    // injoignable sous le fold). Avant : body auto clippait
+    // l'étendue à sa propre bordure → doc_h = ~viewport.
+    let (_dom, bx) = laid(
+        "<body><main>contenu</main></body>",
+        "html,body{height:100%} body{overflow-x:hidden} main{height:5000px}",
+    );
+    let bottom = explorer_layout::scrollable_overflow_bottom(&bx);
+    assert!(
+        bottom >= 5000.0,
+        "le contenu débordant de body:auto doit compter (doc scrollable) — mesuré {bottom}"
+    );
+}
+
+#[test]
+fn overflow_hidden_interne_clippe_toujours_doc_h() {
+    // Non-régression §B-45 : hors chaîne racine, un conteneur
+    // `overflow` non visible clippe — son débord scrolle en
+    // interne, il n'allonge pas le document.
+    let (_dom, bx) = laid(
+        "<body><div id=c><p>loin</p></div></body>",
+        "body{margin:0} #c{overflow:auto;height:100px} p{height:4000px;margin:0}",
+    );
+    let bottom = explorer_layout::scrollable_overflow_bottom(&bx);
+    assert!(
+        bottom < 1000.0,
+        "débord interne d'un scroll conteneur ne doit pas allonger doc_h — mesuré {bottom}"
+    );
+}
+
+#[test]
 fn abs_top_bottom_height_auto_setire() {
     // R-121 / B-23 — stretched-link vinted : `<a>`
     // `position:absolute; inset:0` dans un parent `relative`
@@ -2279,6 +2315,55 @@ fn hit_sticky_epingle_gagne_au_scroll() {
         id == "h" || id == "l",
         "clic sur header sticky épinglé → h/l attendu, obtenu {id}"
     );
+}
+
+#[test]
+fn hit_test_layer_ferme_invisible_passe_au_travers() {
+    // B-43 (auchan vol 69) : `.layer` fermé = `position:fixed`
+    // inset:0 + `visibility:hidden` + `opacity:0` +
+    // `pointer-events:none` + `transform:translate3d(100%,0,0)`
+    // — non peint, mais sa boîte couvrant le viewport avalait
+    // tous les clics (`edited` sur toute ancre). Le hit-test
+    // doit traverser tout le sous-arbre : `visibility:hidden`
+    // rend chaque boîte non ciblable ET le `pointer-events:auto`
+    // du wrapper ne se relève pas (contrairement à
+    // `visibility:visible` explicite).
+    let dom = TreeBuilder::parse(
+        "<body><mini-cart class=\"layer rtl\">\
+         <div class=\"layer__wrapper\"><a id=close href=\"#\">x</a></div>\
+         </mini-cart>\
+         <div id=page><a id=target href=\"#\">Promos</a></div></body>",
+    );
+    let mut e = StyleEngine::new();
+    e.add_css(
+        "body{margin:0}\
+         .layer{display:flex;pointer-events:none;overflow:hidden;position:fixed;\
+                top:0;left:0;bottom:0;right:0;z-index:111;opacity:0;\
+                visibility:hidden;transform:scale(.9)}\
+         .layer.rtl{transform:translate3d(100%,0,0)}\
+         .layer__wrapper{pointer-events:auto;width:600px;height:900px}\
+         #target{display:block;height:50px}",
+        Origin::Author,
+    );
+    let styles = e.compute_tree(&dom, dom.document(), &StyleEnv::default());
+    let root_el = dom
+        .children(dom.document())
+        .into_iter()
+        .flatten()
+        .find(|&c| dom.element(c).is_ok())
+        .unwrap();
+    let mut bx = build_box_tree(&dom, root_el, &styles).unwrap();
+    layout_tree(&mut bx, VIEW, &BlockCtx::default());
+    let hit_of = |x: f32, y: f32| {
+        explorer_layout::hit_test(&bx, x, y)
+            .and_then(|n| dom.attribute(n, "id").ok().flatten())
+            .unwrap_or_default()
+    };
+    // Clic dans le wrapper (x<600) puis hors wrapper (x>600,
+    // toujours dans le layer plein viewport) : jamais `close` ni
+    // le layer — le contenu réel en dessous doit gagner.
+    assert_eq!(hit_of(295.0, 40.0), "target");
+    assert_eq!(hit_of(760.0, 40.0), "target");
 }
 
 #[test]
