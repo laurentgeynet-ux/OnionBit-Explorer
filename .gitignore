@@ -29,3 +29,21 @@ fuzz/artifacts/
 **/tests/probe*.rs
 test-run/
 .playwright-mcp/
+
+# Déchets de session vol/débogage à la racine (convention `_`)
+# — journaux de daemons lancés à la main, sondes, chunks décodés.
+_vol*
+_daemon_*
+_*.log
+_*.js
+_*.txt
+_scratch/
+nul
+OnionBit-flightprofile/
+.pv.toml
+
+# Répertoires de build alternatifs / binaires de terrain —
+# les worktrees parallèles épinglent des `CARGO_TARGET_DIR`
+# dédiés (AGENTS §10) ; leurs artefacts ne se commitent pas.
+target*/
+terrain-bin/
