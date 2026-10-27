@@ -1007,6 +1007,11 @@ impl Session {
                 })
                 .as_deref()
                 .unwrap_or("∅"),
+            hit_path = hit
+                .and_then(|n| entry.dom.as_ref().and_then(|d| element_path(d, n)))
+                .map(|p| format!("{p:?}"))
+                .as_deref()
+                .unwrap_or("∅"),
             "clic hit-test"
         );
         hit
