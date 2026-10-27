@@ -7,6 +7,36 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **JS-C166 — délégations proxy/bound
+  bornées, plus de récursion Rust hors
+  `call_depth`** (`explorer-jscore`, J2) —
+  mur alpinejs.dev : chaque méthode
+  interne re-sautait récursivement de
+  proxy en proxy quand la trap manquait —
+  `new Proxy(proxy, {})` ×20 000 puis
+  `o.x` = `STATUS_STACK_OVERFLOW` natif
+  (reproduit en sonde). Toutes les
+  délégations trap-less bouclent
+  désormais avec borne `deleg_hop`
+  (`MAX_PROTO_DEPTH` = 512 → `RangeError`
+  spec) : `read_prop`, `write_prop`
+  (maillon réel `own` suivi — le
+  `set_prop` final écrit la cible, pas
+  le wrapper), `has_prop`,
+  `delete_result`, `own_keys_trapped`,
+  `get_own_prop`, `Object.`{get,set}
+  `PrototypeOf`, `preventExtensions`,
+  `isExtensible`, `defineProperty` —
+  `getPrototypeOf` délègue aussi à
+  travers les proxies imbriqués (leurs
+  traps ne sont plus sautés). Chaîne
+  `bind` ×N sur `instanceof` itérée
+  (même classe : `BoundFunction`
+  `[[HasInstance]]` re-sautait hors
+  `call_depth`). Sondes `depth_probe` :
+  10 nouvelles chaînes ×20 000 — 47/47
+  verts, le crash devenu `RangeError`.
+
 - **JS-C165 — traps Proxy : clés-symboles
   livrées en `Symbol`** (`explorer-jscore`) —
   `[[Get]]`/`[[Set]]`/`[[Has]]`/

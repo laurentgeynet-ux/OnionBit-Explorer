@@ -7202,6 +7202,27 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   l'overflow (récursion d'appel
   hors `call_depth`).
 
+- [x] **JS-C166. Délégations proxy/
+  bound bornées — chemin runtime
+  de l'overflow nommé** (`explorer-
+  jscore`, J2) — les méthodes
+  internes re-sautaient
+  récursivement de proxy en proxy
+  sans trap (hors `call_depth`) :
+  `Proxy(proxy,{})` ×20k + `o.x` =
+  overflow natif (reproduit).
+  Boucles bornées `deleg_hop`
+  (`RangeError` à 512) sur
+  `read_prop`/`write_prop`/`has_prop`/
+  `delete_result`/`own_keys_trapped`/
+  `get_own_prop`/`defineProperty`/
+  `{get,set}PrototypeOf`/
+  `preventExtensions`/`isExtensible`
+  + `bind`×N sur `instanceof` ;
+  `stack_guard` plancher pile native
+  pour les récursions callbacks.
+  Sondes `depth_probe` ×20k : 47/47.
+
 - [x] **JS-C133. `initCustomEvent`
   (DOM L2, strate polymer/shady)**
   (`explorer-jscore`) — `createEvent`

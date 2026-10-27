@@ -97,3 +97,85 @@ deep!(deep_textcontent, 40_000, |n| format!(
     "var d=document.createElement('div');d.innerHTML='{}';d.textContent.length",
     rep(n, "<b>x</b>")
 ));
+
+// --- Transporteurs runtime (J2) — récursions d'appel hors
+// `call_depth` : walk stringify, proto-chaîne proxy→proxy,
+// flat récursif, RegExp backtrack, coercion chaînée.
+
+deep!(deep_stringify_nested, 30_000, |n| format!(
+    "var o={{}};for(var i=0;i<{n};i++)o={{a:o}};JSON.stringify(o).length"
+));
+deep!(deep_stringify_cyc, 20_000, |n| format!(
+    "var o={{}};for(var i=0;i<{n};i++)o={{a:o}};o.a=o;try{{JSON.stringify(o)}}catch(e){{e.name}}"
+));
+deep!(deep_proxy_proto_chain, 20_000, |n| format!(
+    "var o={{x:1}};for(var i=0;i<{n};i++)o=new Proxy(o,{{}});o.x"
+));
+deep!(deep_proxy_target_chain, 20_000, |n| {
+    format!(
+    "var o={{x:1}};for(var i=0;i<{n};i++)o=new Proxy(o,{{ownKeys:function(t){{return Reflect.ownKeys(t)}}}});Object.keys(o).join()"
+)
+});
+deep!(deep_flat_nested, 30_000, |n| rep(n, "[")
+    + "1"
+    + &rep(n, "]")
+    + ".flat(Infinity).length");
+deep!(deep_regex_backtrack, 15_000, |n| format!(
+    "'{}' + 'x' .match(/(a+)+$/).index",
+    "a".repeat(28)
+) + &format!(";{n}"));
+deep!(deep_tostring_chain, 40_000, |n| format!(
+    "var o={{toString:function(){{return 'x'}}}};var s=o;for(var i=0;i<{n};i++)s=[s];String(s)"
+));
+deep!(deep_concat_chain, 30_000, |n| format!(
+    "var a=[1];for(var i=0;i<{n};i++)a=[a];a.flat(Infinity).length"
+));
+deep!(deep_getters_native, 10_000, |n| {
+    format!(
+    "var o={{}};var cur=o;for(var i=0;i<{n};i++){{var nxt={{}};Object.defineProperty(cur,'n',{{get:function(){{return nxt}}}});cur=nxt}}o.n.x"
+)
+});
+
+// --- Chaînes de délégation (J2) — chaque méthode interne qui
+// re-sautait de proxy en proxy (ou de bound en bound) hors
+// `call_depth` : get/set/has/delete/ownKeys/getOwnPropertyDescriptor
+// + Reflect/Object statics + instanceof sur bind chaîné.
+
+deep!(deep_proxy_has_chain, 20_000, |n| format!(
+    "var o={{x:1}};for(var i=0;i<{n};i++)o=new Proxy(o,{{}});'x' in o"
+));
+deep!(deep_proxy_delete_chain, 20_000, |n| format!(
+    "var o={{x:1}};for(var i=0;i<{n};i++)o=new Proxy(o,{{}});delete o.x"
+));
+deep!(deep_proxy_set_chain, 20_000, |n| format!(
+    "var o={{x:1}};for(var i=0;i<{n};i++)o=new Proxy(o,{{}});o.x=2;o.x"
+));
+deep!(deep_proxy_ownkeys_chain, 20_000, |n| format!(
+    "var o={{x:1}};for(var i=0;i<{n};i++)o=new Proxy(o,{{}});Object.keys(o).length"
+));
+deep!(deep_proxy_getowndesc_chain, 20_000, |n| {
+    format!(
+    "var o={{x:1}};for(var i=0;i<{n};i++)o=new Proxy(o,{{}});Object.getOwnPropertyDescriptor(o,'x').value"
+)
+});
+deep!(deep_proxy_defineprop_chain, 20_000, |n| {
+    format!(
+    "var o={{}};for(var i=0;i<{n};i++)o=new Proxy(o,{{}});Object.defineProperty(o,'y',{{value:7,configurable:true}});o.y"
+)
+});
+deep!(deep_proxy_getproto_chain, 20_000, |n| format!(
+    "var o={{}};for(var i=0;i<{n};i++)o=new Proxy(o,{{}});typeof Object.getPrototypeOf(o)"
+));
+deep!(deep_proxy_setproto_chain, 20_000, |n| {
+    format!(
+    "var o={{}};for(var i=0;i<{n};i++)o=new Proxy(o,{{}});try{{Object.setPrototypeOf(o,{{}});'ok'}}catch(e){{e.name}}"
+)
+});
+deep!(deep_proxy_preventext_chain, 20_000, |n| {
+    format!(
+    "var o={{}};for(var i=0;i<{n};i++)o=new Proxy(o,{{}});Object.preventExtensions(o);Object.isExtensible(o)"
+)
+});
+deep!(deep_bind_instanceof_chain, 20_000, |n| format!(
+    "function F(){{}};var b=F;for(var i=0;i<{n};i++)b=b.bind(null);(new F()) instanceof b"
+));
