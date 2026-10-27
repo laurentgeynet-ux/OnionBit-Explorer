@@ -96,6 +96,8 @@ pub(crate) struct BrowsingContext {
     pub protos: crate::interp::Protos,
     pub gen_ctor: Value,
     pub async_gen_ctor: Value,
+    pub async_ctor: Value,
+    pub async_fn_proto: Value,
     pub gen_fn_proto: Value,
     pub gen_proto: Value,
     pub async_gen_fn_proto: Value,
@@ -256,6 +258,8 @@ impl BrowsingContext {
         ids.extend(self.protos.all());
         crate::heap::push_value(ids, self.gen_ctor);
         crate::heap::push_value(ids, self.async_gen_ctor);
+        crate::heap::push_value(ids, self.async_ctor);
+        crate::heap::push_value(ids, self.async_fn_proto);
         crate::heap::push_value(ids, self.gen_fn_proto);
         crate::heap::push_value(ids, self.gen_proto);
         crate::heap::push_value(ids, self.async_gen_fn_proto);
@@ -364,6 +368,8 @@ impl BrowsingContext {
             },
             gen_ctor: Value::Undefined,
             async_gen_ctor: Value::Undefined,
+            async_ctor: Value::Undefined,
+            async_fn_proto: Value::Undefined,
             gen_fn_proto: Value::Undefined,
             gen_proto: Value::Undefined,
             async_gen_fn_proto: Value::Undefined,

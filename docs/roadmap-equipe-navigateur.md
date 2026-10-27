@@ -7223,6 +7223,27 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   pour les récursions callbacks.
   Sondes `depth_probe` ×20k : 47/47.
 
+- [x] **JS-C168. `%AsyncFunction%`
+  caché — `new AsyncFunction` rend
+  une promesse** (`explorer-jscore`)
+  — mur alpinejs.dev au vol (post
+  B-3) : `(async f).constructor`
+  retombait sur `Function` → corps
+  sync → `.catch` TypeError par
+  `evaluate` → init composants en
+  échec. `%AsyncFunction%` + proto
+  installés (chaîne spec ctor/
+  `@@toStringTag`/proto Function) ;
+  `function_ctor_kind` par genre —
+  `GeneratorFunction` et
+  `AsyncGeneratorFunction`
+  produisent leur corps aussi
+  (avant : sync quoi qu'il arrive) ;
+  `async function` rejetée en
+  `new`. Vol : erreurs 11 → 2 —
+  résidu scopes `x-for`/composants.
+  Test `b29_async_function_ctor`.
+
 - [x] **JS-C167. B-3 tué — tueur
   réel nommé : `loose_eq`↔
   `to_primitive` ping-pong `Symbol`**

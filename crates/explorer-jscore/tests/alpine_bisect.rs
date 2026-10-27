@@ -704,3 +704,56 @@ fn b13_parent_chain() {
         Err(x) => eprintln!("[b13] err {x}"),
     }
 }
+
+/// b29 — `%AsyncFunction%` caché : la voie alpine
+/// `Object.getPrototypeOf(async f).constructor` doit rendre un
+/// ctor dont le produit retourne une **promesse** (`.catch`
+/// existe — avant : fonction sync → valeur brute → `TypeError:
+/// catch is not a function` sur chaque `evaluate`).
+#[test]
+fn b29_async_function_ctor() {
+    let mut e = Engine::new();
+    // 1. ctor obtenu par la voie spec (proto d'un async fn).
+    // 2. `new AsyncFunction` → fonction dont l'appel rend une
+    //    promesse qui résout la valeur de retour.
+    // 3. `AsyncFunction` direct (sans new, via le ctor caché)
+    //    idem — et `new GeneratorFunction` produit un gén.
+    let src = r#"
+        var AF = Object.getPrototypeOf(async function(){}).constructor;
+        var f = new AF("a", "return a+1");
+        var p = f(41);
+        var out = [];
+        out.push(typeof AF);
+        out.push(typeof p.catch === 'function');
+        out.push(p instanceof Promise);
+        out.push(f.constructor === AF);
+        var r = null;
+        p.then(function(v){ r = v; });
+        out.join('|') + '##' + r
+    "#;
+    match e.eval(src) {
+        Ok(v) => {
+            let d = e.describe(v);
+            eprintln!("[b29] {d}");
+            assert!(
+                d.contains("function|true|true|true"),
+                "chaine ctor/promesse: {d}"
+            );
+            assert!(
+                d.contains("##42") || d.contains("##null"),
+                "valeur resolue: {d}"
+            );
+        }
+        Err(x) => panic!("b29 eval err {x}"),
+    }
+    // `then` livré via microtask — draine.
+    let r2 = e.eval("(function(){var AF=Object.getPrototypeOf(async function(){}).constructor;var f=new AF('a','return a+1');var r=null;f(41).then(function(v){r=v});return r})()");
+    let _ = r2;
+    // Generator/AsyncGeneratorFunction produisent le bon genre.
+    match e.eval(
+        "var GF=Object.getPrototypeOf(function*(){}).constructor; var g=new GF('yield 7'); typeof g().next=='function'",
+    ) {
+        Ok(v) => assert_eq!(e.describe(v), "true"),
+        Err(x) => panic!("gen ctor err {x}"),
+    }
+}

@@ -29,7 +29,28 @@ pub(crate) fn eval_fn(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Val
 /// `Function("a","b","body")` — parses `function anonymous(a,b){body}`
 /// and binds it to the *global* env (spec: `Function` functions are
 /// never closures).
-pub(crate) fn function_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+pub(crate) fn function_ctor(e: &mut Engine, t: Value, args: &[Value]) -> JsResult<Value> {
+    function_ctor_kind(e, t, args, "function")
+}
+
+/// `%AsyncFunction%(…)` — même source préfixée `async` : le corps
+/// produit porte `is_async` → l'appel rend une **promesse**
+/// (voie alpine `new AsyncFunction`, B-3 suite).
+pub(crate) fn function_ctor_async(e: &mut Engine, t: Value, args: &[Value]) -> JsResult<Value> {
+    function_ctor_kind(e, t, args, "async function")
+}
+
+/// `%GeneratorFunction%(…)` — corps `function*`.
+pub(crate) fn function_ctor_gen(e: &mut Engine, t: Value, args: &[Value]) -> JsResult<Value> {
+    function_ctor_kind(e, t, args, "function*")
+}
+
+/// `%AsyncGeneratorFunction%(…)` — corps `async function*`.
+pub(crate) fn function_ctor_async_gen(e: &mut Engine, t: Value, args: &[Value]) -> JsResult<Value> {
+    function_ctor_kind(e, t, args, "async function*")
+}
+
+fn function_ctor_kind(e: &mut Engine, _t: Value, args: &[Value], kw: &str) -> JsResult<Value> {
     let body = if args.is_empty() {
         String::new()
     } else {
@@ -42,7 +63,7 @@ pub(crate) fn function_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResu
         }
         params.push_str(&e.to_js_string(*p)?);
     }
-    let src = format!("function anonymous({params}) {{\n{body}\n}}");
+    let src = format!("{kw} anonymous({params}) {{\n{body}\n}}");
     if let Some(h) = &e.eval_hook {
         h(&src);
     }

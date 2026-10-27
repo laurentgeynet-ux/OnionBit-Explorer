@@ -332,11 +332,15 @@ pub(crate) fn install(e: &mut Engine) {
     // `Function(p1,…,body)` ctor + `Symbol` + `Reflect` (JS-7f).
     let function_v = ctor(e, "Function", function_ctor, p_fun);
     e.set_own(g, "Function", function_v, false);
-    // `%GeneratorFunction%`/`%AsyncGeneratorFunction%` — ctors
-    // cachés (pas de global, spec) : own `constructor` des
-    // générateurs, délèguent à `Function` en approximation.
-    e.gen_ctor = e.native_fn("GeneratorFunction", function_ctor);
-    e.async_gen_ctor = e.native_fn("AsyncGeneratorFunction", function_ctor);
+    // `%GeneratorFunction%`/`%AsyncGeneratorFunction%`/`%AsyncFunction%`
+    // — ctors cachés (pas de global, spec) : own `constructor`
+    // des générateurs / fonctions async. Chacun produit le corps
+    // de son espèce (`function*` / `async function*` / `async
+    // function`) — `new AsyncFunction` doit rendre une promesse
+    // à l'appel (voie alpine `evaluate`, B-3 suite).
+    e.gen_ctor = e.native_fn("GeneratorFunction", function_ctor_gen);
+    e.async_gen_ctor = e.native_fn("AsyncGeneratorFunction", function_ctor_async_gen);
+    e.async_ctor = e.native_fn("AsyncFunction", function_ctor_async);
     // Chaîne prototype (spec) :
     //   %GeneratorFunction%.prototype          = %GeneratorFunction.prototype% (gfp)
     //   gfp.constructor                        = %GeneratorFunction%
@@ -376,6 +380,22 @@ pub(crate) fn install(e: &mut Engine) {
             }
         }
     }
+    // `%AsyncFunction.prototype%` — chaîne spec :
+    //   afp.constructor = %AsyncFunction% (la voie alpine :
+    //   `Object.getPrototypeOf(async f).constructor` → `new
+    //   AsyncFunction`), afp[@@toStringTag] = "AsyncFunction",
+    //   afp.[[Prototype]] = %Function.prototype%. Les `async
+    //   function` n'ont **pas** de `.prototype` own prop en spec
+    //   — le nôtre reste posé par `make_function` (déviation
+    //   inerte, même classe que les flèches).
+    let afp = e.heap.alloc_obj(crate::heap::Object::ordinary(fn_proto));
+    e.set_own(afp, "constructor", e.async_ctor, false);
+    let at = e.str_val("AsyncFunction");
+    e.set_own(afp, crate::interp::SYM_TO_STRING_TAG, at, false);
+    if let Value::Obj(cid) = e.async_ctor {
+        e.set_own(cid, "prototype", Value::Obj(afp), false);
+    }
+    e.async_fn_proto = Value::Obj(afp);
     // `Symbol` — son propre prototype (`protos.symbol`) ; passer
     // `p_obj` écraserait `Object.prototype.constructor`.
     let sym = ctor(e, "Symbol", symbol_ctor, e.protos.symbol);

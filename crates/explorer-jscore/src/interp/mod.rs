@@ -226,6 +226,14 @@ pub struct Engine {
     pub(crate) gen_ctor: Value,
     /// Voir `gen_ctor`.
     pub(crate) async_gen_ctor: Value,
+    /// `%AsyncFunction%` — ctor caché des `async function`
+    /// (obtenu via `Object.getPrototypeOf(async f).constructor`
+    /// — la voie alpine `new AsyncFunction`). Contrairement à
+    /// `Function`, sa construction produit un corps `is_async`
+    /// → appel = promesse (B-3 suite : `.catch` d'alpine).
+    pub(crate) async_ctor: Value,
+    /// `%AsyncFunction.prototype%` — proto des `async function`.
+    pub(crate) async_fn_proto: Value,
     /// `%GeneratorFunction.prototype%` — proto des fonctions
     /// `function*` (own `.constructor` = `gen_ctor`,
     /// own `.prototype` = `gen_proto`, spec).
@@ -768,6 +776,8 @@ impl Engine {
             finregs: Vec::new(),
             gen_ctor: Value::Undefined,
             async_gen_ctor: Value::Undefined,
+            async_ctor: Value::Undefined,
+            async_fn_proto: Value::Undefined,
             gen_fn_proto: Value::Undefined,
             gen_proto: Value::Undefined,
             async_gen_fn_proto: Value::Undefined,
@@ -957,6 +967,8 @@ impl Engine {
         swap(&mut self.protos, &mut ctx.protos);
         swap(&mut self.gen_ctor, &mut ctx.gen_ctor);
         swap(&mut self.async_gen_ctor, &mut ctx.async_gen_ctor);
+        swap(&mut self.async_ctor, &mut ctx.async_ctor);
+        swap(&mut self.async_fn_proto, &mut ctx.async_fn_proto);
         swap(&mut self.gen_fn_proto, &mut ctx.gen_fn_proto);
         swap(&mut self.gen_proto, &mut ctx.gen_proto);
         swap(&mut self.async_gen_fn_proto, &mut ctx.async_gen_fn_proto);
@@ -2363,6 +2375,8 @@ impl Engine {
         }
         crate::heap::push_value(&mut ids, self.gen_ctor);
         crate::heap::push_value(&mut ids, self.async_gen_ctor);
+        crate::heap::push_value(&mut ids, self.async_ctor);
+        crate::heap::push_value(&mut ids, self.async_fn_proto);
         crate::heap::push_value(&mut ids, self.gen_fn_proto);
         crate::heap::push_value(&mut ids, self.gen_proto);
         crate::heap::push_value(&mut ids, self.async_gen_fn_proto);
@@ -6118,11 +6132,15 @@ impl Engine {
                 return self.construct_nt(target, &a, nt);
             }
         }
-        // `new (() => {})` — arrows are not constructors.
+        // `new (() => {})`/`new (async f)` — ni flèches ni async
+        // ne sont des constructeurs (spec `IsConstructor`).
         if let Some(o) = self.heap.obj(fid) {
             if let ObjKind::Fun(Fun::Script { lit, .. }) = &o.kind {
                 if lit.is_arrow {
                     return Err(self.type_error("arrow function is not a constructor"));
+                }
+                if lit.is_async {
+                    return Err(self.type_error("async function is not a constructor"));
                 }
             }
         }
@@ -6158,6 +6176,11 @@ impl Engine {
                 (self.gen_fn_proto, self.gen_proto)
             };
             (fp, gp)
+        } else if lit.is_async && self.async_fn_proto != Value::Undefined {
+            // `async function` → `%AsyncFunction.prototype%` :
+            // `(async f).constructor` = `%AsyncFunction%` — la
+            // voie que suit alpine pour `new AsyncFunction`.
+            (self.async_fn_proto, Value::Obj(self.protos.object))
         } else {
             (
                 Value::Obj(self.protos.function),

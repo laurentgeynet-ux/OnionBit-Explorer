@@ -7,6 +7,33 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **JS-C168 — `%AsyncFunction%` caché :
+  `new AsyncFunction` rend une
+  promesse** (`explorer-jscore`) —
+  mur alpinejs.dev au vol (post
+  B-3) : `Object.getPrototypeOf(
+  async f).constructor` retombait
+  sur `Function` → corps construit
+  **sync** → `TypeError: catch is
+  not a function` sur chaque
+  `evaluate` → init composants en
+  échec (`ReferenceError` en rafale
+  sur les props `x-data`). Installé :
+  `%AsyncFunction%` +
+  `%AsyncFunction.prototype%` (proto
+  des `async function`,
+  `@@toStringTag`, ctor dédié via
+  `function_ctor_kind` —
+  `GeneratorFunction`/`Async
+  GeneratorFunction` produisent
+  aussi leur genre désormais, avant
+  sync) ; `async function` rejetée
+  en `new` (spec `IsConstructor`).
+  Vol : erreurs pipeline 11 → 2
+  (résidu honnête : scopes `x-for`
+  / props de composants nommés).
+  Test `b29_async_function_ctor`.
+
 - **JS-C167 — B-3 tué : le crash alpine
   était `loose_eq`↔`to_primitive` en
   ping-pong sur `Symbol`** (`explorer-
