@@ -193,6 +193,12 @@ impl Heap {
         self.cells.len() - self.free.len()
     }
 
+    /// Octets JS vivants estimés — relu par le message de kill
+    /// heap (J4 : fuite vs borne trop serrée nommée au kill).
+    pub fn bytes(&self) -> usize {
+        self.bytes
+    }
+
     // -----------------------------------------------------------------
     // Rooting explicite (ADR-0008)
     // -----------------------------------------------------------------

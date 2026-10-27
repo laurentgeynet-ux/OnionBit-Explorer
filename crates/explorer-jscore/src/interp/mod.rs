@@ -2891,7 +2891,17 @@ impl Engine {
             // garbage alors que le vrai live est sous la borne).
             self.collect();
             if self.heap.over_limit() {
-                return Err(self.range_error("heap memory limit exceeded"));
+                // Stats vivantes post-collecte dans le message
+                // (J4 — la rafale « heap memory limit exceeded »
+                // nomme alors son gabarit : fuite si live croît,
+                // borne trop serrée si live < limite — mesuré
+                // marmiton/bookshop en rafale ×3/×14).
+                let live = self.heap.live_count();
+                let bytes = self.heap.bytes();
+                let lim = self.heap.mem_limit();
+                return Err(self.range_error(format!(
+                    "heap memory limit exceeded ({live} cells, {bytes} B live > {lim} B)"
+                )));
             }
         }
         self.ops_left -= 1;
