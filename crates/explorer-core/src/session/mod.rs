@@ -888,6 +888,11 @@ pub struct Session {
     /// `take_next_apply`, relâché aux quatre sorties
     /// (commit, rejet, parc orphelin, panic réarmé).
     pub(crate) paint_in_flight: std::collections::HashMap<TabId, std::time::Instant>,
+    /// Série de rejets `UnmappedKey` consécutifs par onglet
+    /// (B-52 — bouygues : rafale ~1 re-parse/5 s, churn sans
+    /// wedge) — au-delà du plafond, la voie journal est
+    /// sautée au profit du re-parse direct.
+    unmapped_streaks: std::collections::HashMap<TabId, u32>,
     /// Série de pompes JS productives consécutives par onglet
     /// (B-41 — flixbus : `pump.js_run_sync` persistant, rafale
     /// `UnmappedKey` re-parse→éval sans fin) — lue par
@@ -1024,6 +1029,7 @@ impl Session {
             paint_in_flight: std::collections::HashMap::new(),
             last_pipeline_error: None,
             pump_streaks: std::collections::HashMap::new(),
+            unmapped_streaks: std::collections::HashMap::new(),
             orphaned_paints: std::sync::Arc::new(std::sync::Mutex::new(
                 std::collections::HashMap::new(),
             )),

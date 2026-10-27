@@ -666,6 +666,7 @@ pub async fn drain_applies_shared(sess: &tokio::sync::Mutex<Session>, _tab: TabI
             Ok((g, Ok(o), job)) => {
                 if job.journal.is_some() {
                     s.journal_applies += 1;
+                    s.unmapped_streaks.insert(tab, 0);
                 }
                 s.commit_apply_detached(tab, epoch, g.into_payload(), &o);
             }

@@ -1931,6 +1931,20 @@ impl Session {
     /// enfilée est déjà la plus récente. Moteur absent
     /// (pompe hors verrou en vol) → idem, repli conservateur.
     fn freshen_apply(&mut self, tab: TabId, job: &mut PendingApply) {
+        // B-52 : une série de rejets `UnmappedKey` fait payer
+        // la tentative journal à chaque cycle (rafale ~1×/5 s
+        // sans wedge — churn). Au-delà de 8 consécutifs, la
+        // voie journal est sautée : re-parse direct, comme si
+        // le journal n'existait pas — la série retombe à un
+        // succès journal (`commit_apply_detached`).
+        if job.journal.is_some()
+            && self.unmapped_streaks.get(&tab).copied().unwrap_or(0) >= 8
+        {
+            job.journal = None;
+            job.html.clear();
+            job.ids.clear();
+            job.tags.clear();
+        }
         let Some(entry) = self.tabs.get_mut(&tab) else {
             return;
         };
@@ -2170,6 +2184,16 @@ impl Session {
         self.applies_fin += 1;
         self.paint_in_flight.remove(&tab);
         self.journal_fallbacks += 1;
+                if matches!(why, JournalReject::UnmappedKey) {
+            let n = self.unmapped_streaks.entry(tab).or_insert(0);
+            *n += 1;
+            if *n == 8 {
+                tracing::warn!(tab,
+                    "série UnmappedKey — voie journal sautée pour cet onglet (B-52)");
+            }
+        } else {
+            self.unmapped_streaks.insert(tab, 0);
+        }
         tracing::warn!(tab, ?why, "journal DOM rejeté → repli re-parse (ADR-0025)");
         if let Some(entry) = self.tabs.get_mut(&tab) {
             entry.paint_detached = false;
