@@ -452,7 +452,27 @@ pub(crate) fn flow_flex_children(
                 for &k in line {
                     let b = items[k].base.unwrap_or(0.0);
                     sizes_l.push(if denom > 0.0 && free < 0.0 {
-                        (b + free * (items[k].shrink * b) / denom).max(0.0)
+                        // §4.5 : le shrink est planché par la
+                        // taille min automatique — `min-width`
+                        // spécifié (longueur/mot-clé) sinon
+                        // min-content du contenu. Sans plancher,
+                        // le seul item shrinkable absorbait tout
+                        // le dépassement → 0 px (vol 32 todoist :
+                        // `.details` face à `.illustration
+                        // {flex-shrink:0}` 1590 px → héro à 0).
+                        let c = &bx.children[order_idx[k]];
+                        let cfs = font_size_px(&c.style, fs, ctx);
+                        let floor = match c.style.get("min-width").map(|v| v.trim()) {
+                            None | Some("") | Some("auto") => {
+                                crate::intrinsic::min_content_size_px(c, cfs, ctx)
+                            }
+                            _ => crate::intrinsic::intrinsic_size_px(
+                                &c.style, "min-width", c, main_cb, cfs, ctx,
+                            )
+                            .or_else(|| css_px(&c.style, "min-width", main_cb, cfs, ctx))
+                            .unwrap_or(0.0),
+                        };
+                        (b + free * (items[k].shrink * b) / denom).max(floor)
                     } else {
                         b
                     });
