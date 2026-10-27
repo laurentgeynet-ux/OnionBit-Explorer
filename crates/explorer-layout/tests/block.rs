@@ -2590,3 +2590,126 @@ fn transform_translate3d_projection_2d() {
         "x peint attendu ~320, obtenu {px}"
     );
 }
+
+#[test]
+fn svg_inline_size_remplacant_honore() {
+    // B-36 (indeed vol 57) : `<svg class=css-bdxuab>` avec
+    // `inline-size:1.5rem;block-size:1.5rem` sortait a
+    // 94x94 au lieu de 24x24 — les proprietes logiques
+    // doivent dimensionner le remplace svg.
+    let dom = TreeBuilder::parse("<svg></svg>");
+    let mut e = StyleEngine::new();
+    e.add_css(
+        "html{font-size:16px}svg{inline-size:1.5rem;block-size:1.5rem;display:block}",
+        Origin::Author,
+    );
+    let styles = e.compute_tree(&dom, dom.document(), &StyleEnv::default());
+    let root_el = dom
+        .children(dom.document())
+        .into_iter()
+        .flatten()
+        .find(|&c| dom.element(c).is_ok())
+        .unwrap();
+    let mut bx = build_box_tree(&dom, root_el, &styles).unwrap();
+    layout_tree(&mut bx, VIEW, &BlockCtx::default());
+    let mut stack = vec![&bx];
+    let mut svg = None;
+    while let Some(b) = stack.pop() {
+        if b.intrinsic.is_some() {
+            svg = Some(b);
+            break;
+        }
+        stack.extend(b.children.iter().rev());
+    }
+    let s = svg.expect("boite svg");
+    assert!(
+        (s.rect.width - 24.0).abs() < 1.0 && (s.rect.height - 24.0).abs() < 1.0,
+        "svg attendu 24x24, obtenu {:?}",
+        s.rect
+    );
+}
+
+#[test]
+fn svg_flex_item_dans_inline_flex() {
+    // B-36 (indeed vol 57) : svg `flex:0 0 auto;
+    // inline-size:1.5rem;block-size:1.5rem` dans un bouton
+    // `display:inline-flex` sortait a 94x94 au lieu de 24x24.
+    let dom = TreeBuilder::parse("<button><svg></svg></button>");
+    let mut e = StyleEngine::new();
+    e.add_css(
+        "html{font-size:16px}\
+         button{display:inline-flex;inline-size:auto}\
+         svg{inline-size:1.5rem;block-size:1.5rem;display:block;\
+             flex:0 0 auto;margin-inline-start:0.5rem}",
+        Origin::Author,
+    );
+    let styles = e.compute_tree(&dom, dom.document(), &StyleEnv::default());
+    let root_el = dom
+        .children(dom.document())
+        .into_iter()
+        .flatten()
+        .find(|&c| dom.element(c).is_ok())
+        .unwrap();
+    let mut bx = build_box_tree(&dom, root_el, &styles).unwrap();
+    layout_tree(&mut bx, VIEW, &BlockCtx::default());
+    fn walk(bx: &LayoutBox, f: &mut impl FnMut(&LayoutBox)) {
+        f(bx);
+        bx.children.iter().for_each(|c| walk(c, f));
+    }
+    let mut svg = None;
+    walk(&bx, &mut |b| {
+        if svg.is_none() && b.intrinsic.is_some() {
+            svg = Some(b.rect);
+        }
+    });
+    let r = svg.expect("svg");
+    assert!(
+        (r.width - 24.0).abs() < 1.0 && (r.height - 24.0).abs() < 1.0,
+        "svg attendu 24x24, obtenu {r:?}"
+    );
+}
+
+#[test]
+fn svg_display_cascade_vendor_inline_flex() {
+    // B-36 : la vraie regle indeed empile
+    // `display:-webkit-inline-box;display:-webkit-inline-flex;
+    // display:-ms-inline-flexbox;display:inline-flex` — si la
+    // cascade garde une valeur vendeur, le bouton n'est plus
+    // flex et le svg block s'etale.
+    let dom = TreeBuilder::parse("<div>x<button><svg></svg></button>y</div>");
+    let mut e = StyleEngine::new();
+    e.add_css(
+        "html{font-size:16px}\
+         button{display:-webkit-inline-box;display:-webkit-inline-flex;\
+             display:-ms-inline-flexbox;display:inline-flex;inline-size:auto;\
+             padding-inline-start:3rem;padding-inline-end:3rem;\
+             min-block-size:2.75rem}\
+         svg{inline-size:1.5rem;block-size:1.5rem;display:block;\
+             flex:0 0 auto;margin-inline-start:0.5rem}",
+        Origin::Author,
+    );
+    let styles = e.compute_tree(&dom, dom.document(), &StyleEnv::default());
+    let root_el = dom
+        .children(dom.document())
+        .into_iter()
+        .flatten()
+        .find(|&c| dom.element(c).is_ok())
+        .unwrap();
+    let mut bx = build_box_tree(&dom, root_el, &styles).unwrap();
+    layout_tree(&mut bx, VIEW, &BlockCtx::default());
+    fn walk(bx: &LayoutBox, f: &mut impl FnMut(&LayoutBox)) {
+        f(bx);
+        bx.children.iter().for_each(|c| walk(c, f));
+    }
+    let mut svg = None;
+    walk(&bx, &mut |b| {
+        if svg.is_none() && b.intrinsic.is_some() {
+            svg = Some(b.rect);
+        }
+    });
+    let r = svg.expect("svg");
+    assert!(
+        (r.width - 24.0).abs() < 1.0 && (r.height - 24.0).abs() < 1.0,
+        "svg attendu 24x24, obtenu {r:?}"
+    );
+}
