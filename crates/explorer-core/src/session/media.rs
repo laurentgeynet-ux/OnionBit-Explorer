@@ -338,13 +338,18 @@ impl Session {
             });
         }
         for s in offered {
-            // 139b — tout flux de lecture passe par le proxy
-            // local (même câblage `local_proxy` de référence) ;
+            // 139b — tout flux de lecture http(s) passe par le
+            // proxy local (même câblage `local_proxy` de
+            // référence) ; `file:` et autres schémas restent
+            // directs (le proxy ne sait servir que du http) ;
             // proxy pas encore prêt → URL directe (repli).
-            let url = self
-                .media_proxy
-                .get()
-                .map_or_else(|| s.url.clone(), |p| p.url(&s.url));
+            let url = if s.url.starts_with("http") {
+                self.media_proxy
+                    .get()
+                    .map_or_else(|| s.url.clone(), |p| p.url(&s.url))
+            } else {
+                s.url.clone()
+            };
             let _ = self.events.send(CoreEvent::MediaOffered {
                 tab,
                 media: s.id,

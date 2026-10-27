@@ -7,6 +7,30 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **139c — lecteur `OnionMediaPlayer` (FFI
+  `onionmedia_ffi`) derrière la seam
+  `MediaPlayer`** (`app/`) — nouveau
+  backend : `onionmedia_new`/
+  `open_url`/`open_path`/frames RGBA
+  tirées par `frame_seq`/`frame_pull`
+  → `ui.Image` (~30 FPS), audio
+  native OnionMedia, repli `fvp` si
+  DLL absente ou `create` échoue.
+  Variables : `ONIONMEDIA_FFI_LIB`
+  > `onionmedia_ffi.dll`. URLs
+  `file:` converties en chemin
+  filesystem avant `open_path`.
+
+- **139b-fix — les URLs `file:` ne sont
+  plus proxyfiées** (`explorer-core`,
+  `session/media.rs`) — le proxy
+  média ne sert que du http(s) ; les
+  schémas locaux passaient dans
+  `/m?u=file:///...` et mouraient.
+  Désormais `http` → proxy, le reste
+  → URL directe.
+
+
 - **B-50 — parenthèse non fermée dans
   un `style=` : boucle infinie de la
   cascade tuée** (`explorer-css`) —
