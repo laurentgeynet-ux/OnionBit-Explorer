@@ -155,6 +155,9 @@ plateforme net** (ops jscore Encrypt/Decrypt restent à livrer) ·
 | 38 | **Item flex layouté à 5 839 px** — nav expulsée hors viewport (x=5 879), logo en ellipse aplatie | `explorer-layout`/`css` | developer.chrome.com `[V4-main]` vol 58 (`vol58_chrome_dev_layout.txt` l.11-14) | **OUVERT — terrain V4** |
 | 39 | **`DELETE /api/tabs` → deadlock** — mémoire libérée, CPU nul, port LISTENING, API muette >20 s | `explorer-core`/`api` | vol 58 tab 1 — distinct de §B-33 (pas de spin) et §B-30 (pas de fuite) | **CRITIQUE — nouvelle classe d'arrêt** |
 
+| 40 | **Hit-test `ignored` sur ancre réelle à scroll_y>0** — `<a href>` layoutée, clic refusé en position scrollée alors que clic en haut navigue | `explorer-core`/hit-test | trainline `[V4-main]` vol 60 : « FAQs » `[510,2233,45×26]` → `ignored` à scroll_y=1600 ; « Railcards » → `navigated` à 0 — décalage scroll suspect | **OUVERT — terrain V4** |
+| 41 | **Wedge starvation phases `event.*` sans fin** — boucle `poll_net` 5-31 s / `mirror_sync` 10-13 s / `dispatch` ~5 s en continu, navigate jamais retourné, API affamée, RAM stable | `explorer-core` | flixbus `[V4-main]` vol 60 — **repro déterministe 2/2**, corrélé à `UnmappedKey` re-parse ; distinct de §B-26 (pas de dernier `apply: layout`) et §B-33 (journal non muet, fallback>0) | **CRITIQUE — déclencheur fiable ; prudence vol : flixbus wedge garanti** |
+
 ### 🟡 Moyen — perf, métriques, observabilité résiduelle
 
 - **Framebuffer pleine page** : PNG 48-54 Mo (guardian, youtube) —
