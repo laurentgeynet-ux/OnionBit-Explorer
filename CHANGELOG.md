@@ -41,6 +41,18 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
     JS — la feuille préchargée est
     traitée comme un stylesheet
     (`media=` toujours honoré).
+  - **Scripts — fin des morts muettes**
+    (`explorer-core`, vol 33 radiogarden :
+    33 scripts, app jamais initialisée,
+    console vide) : échec de fetch, statut
+    non-2xx et refus nosniff/CORP/SRI d'un
+    `<script src>` sont désormais
+    `warn`-logués **et** rapportés en
+    `PipelineError` ; le refus en plan
+    (résolution, mixed-content,
+    `script-src`) est warn-logué — un slot
+    `script_srcs` laissé vide n'est plus
+    invisible à l'éval.
 
 - **Vol 2026-10-26 — correctifs de vol,
   vague 3 (FIX-3, vols 18/19)**

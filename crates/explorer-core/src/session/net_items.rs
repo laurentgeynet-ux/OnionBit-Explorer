@@ -979,6 +979,25 @@ impl SubJob {
                             });
                         }
                     }
+                    // Un script dont le fetch meurt laissait
+                    // `script_srcs[slot]` à None puis était sauté
+                    // en silence à l'éval (vol 33 radiogarden —
+                    // 33 scripts, app jamais initialisée, console
+                    // vide).
+                    if let SubTag::Script(slot) = tag {
+                        if let Some(u) = self
+                            .scripts
+                            .get(slot_items[slot])
+                            .and_then(|it| it.src.as_ref())
+                        {
+                            tracing::warn!(url = %u, error = %e,
+                                "script : fetch en échec — jamais évalué");
+                            let _ = self.events.send(CoreEvent::PipelineError {
+                                tab: Some(tab),
+                                message: format!("script — fetch échoué : {u} ({e})"),
+                            });
+                        }
+                    }
                     // Un `<iframe src>` en échec laissait un
                     // cadre blanc sans trace (vol 18).
                     if let SubTag::Frame(i) = tag {
@@ -999,6 +1018,20 @@ impl SubJob {
                         let _ = self.events.send(CoreEvent::PipelineError {
                             tab: Some(tab),
                             message: format!("stylesheet — statut {} : {u}", resp.status),
+                        });
+                    }
+                }
+                if let SubTag::Script(slot) = tag {
+                    if let Some(u) = self
+                        .scripts
+                        .get(slot_items[slot])
+                        .and_then(|it| it.src.as_ref())
+                    {
+                        tracing::warn!(url = %u, status = resp.status,
+                            "script : statut non-2xx — jamais évalué");
+                        let _ = self.events.send(CoreEvent::PipelineError {
+                            tab: Some(tab),
+                            message: format!("script — statut {} : {u}", resp.status),
                         });
                     }
                 }
@@ -1057,6 +1090,15 @@ impl SubJob {
                         } else {
                             self.script_srcs[slot] = Some(text);
                         }
+                    } else if let Some(u) = &item.src {
+                        tracing::warn!(url = %u,
+                            "script : réponse refusée (nosniff/CORP ou SRI)");
+                        let _ = self.events.send(CoreEvent::PipelineError {
+                            tab: Some(tab),
+                            message: format!(
+                                "script — réponse refusée (nosniff/CORP/SRI) : {u}"
+                            ),
+                        });
                     }
                 }
                 SubTag::Img(u) => {
