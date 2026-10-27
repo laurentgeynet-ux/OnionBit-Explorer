@@ -6359,10 +6359,10 @@ impl explorer_js::JsEngine for BarrierEngine {
         Ok("undefined".to_string())
     }
 
-    fn run_pending_bounded(&mut self, _max: usize) -> usize {
+    fn run_pending_bounded(&mut self, _max: usize) -> Result<usize, explorer_js::JsError> {
         let _ = self.entered.send(());
         let _ = self.release.recv();
-        1
+        Ok(1)
     }
 
     fn set_budget(&mut self, _ops: u64) {}
@@ -14002,4 +14002,35 @@ async fn wedging_script_does_not_freeze_session() {
         }
     );
     assert!(r.is_ok(), "le script boucle a figé la session");
+}
+
+/// J3 — `data:` dans le graphe de modules statique : le
+/// collecteur décode inline (aucune requête possible) au
+/// lieu de laisser le bras en frontier → « module non
+/// chargé ». Reddit : chunk polyfill `data:` dans un import
+/// réel.
+#[tokio::test]
+async fn module_graph_data_url_decoded_inline() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/p",
+        200,
+        "<!doctype html><html><body><div id=\"x\">avant</div>\
+         <script type=\"module\">import 'data:text/javascript,document.getElementById%28%22x%22%29.textContent%3D%22DATA%22'</script></body></html>",
+    );
+    t.route(
+        "/stat",
+        200,
+        "<!doctype html><html><body><div id=\"x\">DATA</div></body></html>",
+    );
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+
+    let a = s.open_tab();
+    s.navigate(a, "http://h.test/p").await.unwrap();
+    let b = s.open_tab();
+    s.navigate(b, "http://h.test/stat").await.unwrap();
+
+    // Page + page statique — le module data: ne requête pas.
+    assert_eq!(t.calls(), 2);
+    assert_eq!(s.frame_png(a), s.frame_png(b));
 }

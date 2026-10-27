@@ -13145,3 +13145,15 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   elle meurt en ms désormais.
   `run_pending_bounded` typé Result.
   Tests deadline eval+rafale verts.
+
+- **Étape 145 — `data:` dans le graphe
+  de modules** (`explorer-core`) —
+  `fetch_module_sources` décode inline
+  les specs `data:` (corps auto-porteur,
+  aucune requête) + enfile leurs deps
+  nichées — avant : bras en frontier →
+  fetch impossible → « module non
+  chargé » (reddit polyfill chunk).
+  Complète le plafond 256 + troncation
+  nommée (2b61012). Test
+  `module_graph_data_url_decoded_inline`.

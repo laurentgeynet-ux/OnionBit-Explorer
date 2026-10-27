@@ -3075,7 +3075,33 @@ impl Session {
                     &u,
                 );
             if allowed && queued.insert(u.as_str()) {
-                frontier.push((spec, u));
+                // `data:` — corps auto-porteur : décodé inline
+                // (J3 — aucune requête possible ; `import()`
+                // le fait déjà côté dyn). Ses deps nichées
+                // partent en frontier comme un module fetché.
+                if let Some(body) = data_url_bytes(&u.as_str()) {
+                    let text = String::from_utf8_lossy(&body).into_owned();
+                    for (spec2, u2) in module_deps(&text, &u, import_specs) {
+                        let u2 = explorer_net::csp::csp_upgrade(csp, &u2).unwrap_or(u2);
+                        graph
+                            .alias
+                            .entry(spec2.clone())
+                            .or_insert_with(|| u2.as_str());
+                        let ok = !is_mixed_content(page, &u2)
+                            && explorer_net::csp::csp_allows(
+                                csp,
+                                page,
+                                explorer_net::http::FetchDest::Script,
+                                &u2,
+                            );
+                        if ok && queued.insert(u2.as_str()) {
+                            frontier.push((spec2, u2));
+                        }
+                    }
+                    graph.sources.insert(u.as_str(), text);
+                } else {
+                    frontier.push((spec, u));
+                }
             }
         }
         while !frontier.is_empty() && graph.sources.len() < max_modules {
@@ -3126,7 +3152,31 @@ impl Session {
                             &u2,
                         );
                     if allowed && queued.insert(u2.as_str()) {
-                        next.push((spec2, u2));
+                        // `data:` niché — décodé inline, ses
+                        // deps remontent en `next` (J3).
+                        if let Some(body) = data_url_bytes(&u2.as_str()) {
+                            let text2 = String::from_utf8_lossy(&body).into_owned();
+                            for (spec3, u3) in module_deps(&text2, &u2, import_specs) {
+                                let u3 = explorer_net::csp::csp_upgrade(csp, &u3).unwrap_or(u3);
+                                graph
+                                    .alias
+                                    .entry(spec3.clone())
+                                    .or_insert_with(|| u3.as_str());
+                                let ok3 = !is_mixed_content(page, &u3)
+                                    && explorer_net::csp::csp_allows(
+                                        csp,
+                                        page,
+                                        explorer_net::http::FetchDest::Script,
+                                        &u3,
+                                    );
+                                if ok3 && queued.insert(u3.as_str()) {
+                                    next.push((spec3, u3));
+                                }
+                            }
+                            graph.sources.insert(u2.as_str(), text2);
+                        } else {
+                            next.push((spec2, u2));
+                        }
                     }
                 }
             }
