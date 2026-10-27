@@ -6,7 +6,7 @@
 //! d'événements, pompe de timers, sync miroir.
 use super::*;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use explorer_dom::NodeId;
 use explorer_js::{EventProp, JsEngine, UrlResolver};
@@ -264,7 +264,14 @@ impl Session {
                 // doc 20,6 s — attribution fine des ~800 ms/round :
                 // chaque livraison exécute du moteur sous verrou).
                 let mut t = Instant::now();
-                if stall.is_none() {
+                // B-39/vol59 : le disjoncteur stall couvre un
+                // moteur MORT, pas un worker lent-mais-vivant —
+                // ~90 s de livraisons sous verrou ont figé l'API
+                // (commit_lock us=89,9 M, tab DELETÉ). Plafond
+                // temps de la section : au-delà, tampons jetés +
+                // stall marqué (le moteur se réévalue sans verrou).
+                let expired = |t: &Instant| t.elapsed() > Duration::from_secs(45);
+                if stall.is_none() && !expired(&t) {
                     for resp in std::mem::take(&mut entry.js_pending_net) {
                         if let Err(e) = eng.deliver_net_response(resp) {
                             if Self::is_engine_stall(&e) {
@@ -275,7 +282,7 @@ impl Session {
                     }
                 }
                 t = sync_phase(tab, "commit.dl_net", t);
-                if stall.is_none() {
+                if stall.is_none() && !expired(&t) {
                     for resp in std::mem::take(&mut entry.js_pending_crypto) {
                         if let Err(e) = eng.deliver_crypto_response(resp) {
                             if Self::is_engine_stall(&e) {
@@ -286,7 +293,7 @@ impl Session {
                     }
                 }
                 t = sync_phase(tab, "commit.dl_crypto", t);
-                if stall.is_none() {
+                if stall.is_none() && !expired(&t) {
                     for (ctx, handle, ev) in std::mem::take(&mut entry.js_pending_es) {
                         if let Err(e) = eng.deliver_es_event(ctx, handle, ev) {
                             if Self::is_engine_stall(&e) {
@@ -297,7 +304,7 @@ impl Session {
                     }
                 }
                 t = sync_phase(tab, "commit.dl_es", t);
-                if stall.is_none() {
+                if stall.is_none() && !expired(&t) {
                     for (ctx, handle, ev) in std::mem::take(&mut entry.js_pending_ws) {
                         if let Err(e) = eng.deliver_ws_event(ctx, handle, ev) {
                             if Self::is_engine_stall(&e) {
@@ -312,7 +319,7 @@ impl Session {
                     eng.deliver_dyn_script(ctx, seq, body);
                 }
                 t = sync_phase(tab, "commit.dl_dyn", t);
-                if stall.is_none() {
+                if stall.is_none() && !expired(&t) {
                     for (ctx, seq, me) in std::mem::take(&mut entry.js_pending_mod) {
                         let ok = me.is_some_and(|me| Self::eval_mod(eng.as_mut(), &me).is_ok());
                         eng.deliver_dyn_module(ctx, seq, ok);
@@ -338,6 +345,9 @@ impl Session {
                     }
                 };
                 sync_phase(tab, "commit.attrs_sync", t);
+                if stall.is_none() && expired(&t) {
+                    stall = Some(explorer_js::JsError::Timeout);
+                }
                 mutated
             };
             if let Some(e) = stall {
@@ -892,10 +902,13 @@ impl Session {
                 "script sauté — disjoncteur moteur ouvert"
             );
             let origin = url.map(|u| format!("{u} — ")).unwrap_or_default();
-            self.emit_pipeline_error(tab, format!(
+            self.emit_pipeline_error(
+                tab,
+                format!(
                     "moteur figé — éval sautée — {origin}src «{}»",
                     src_head(src)
-                ));
+                ),
+            );
             return;
         }
         let t_eval = std::time::Instant::now();
