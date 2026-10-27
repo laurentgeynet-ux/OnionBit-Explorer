@@ -106,7 +106,11 @@ fn spawn_console_recorder(session: &Arc<tokio::sync::Mutex<Session>>, ring: &Con
 ///   survivent — « ring = erreurs de la page courante ».
 fn record_console_event(ring: &ConsoleRing, ev: &CoreEvent) {
     match ev {
-        CoreEvent::Navigated { tab, .. } => {
+        // B-51 : purge au `Navigating` (début de fetch), pas
+        // au `Navigated` — les erreurs d'éval de boot de la
+        // navigation en cours précédaient son commit et
+        // étaient vidées avec lui (invisibles à `/console`).
+        CoreEvent::Navigating { tab, .. } => {
             if let Some(q) = ring
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -1118,6 +1122,10 @@ fn event_json(ev: &CoreEvent) -> (&'static str, String) {
         CoreEvent::TabClosed { tab } => {
             ("tab_closed", serde_json::json!({ "tab": tab }).to_string())
         }
+        CoreEvent::Navigating { tab, url } => (
+            "navigating",
+            serde_json::json!({ "tab": tab, "url": url }).to_string(),
+        ),
         CoreEvent::Navigated { tab, url, title } => (
             "navigated",
             serde_json::json!({ "tab": tab, "url": url, "title": title }).to_string(),

@@ -854,6 +854,14 @@ impl Session {
         // volontaire et documentée.
         let dl_id = self.next_download_id;
         self.next_download_id += 1;
+        // B-51 : `Navigating` émis **avant** les évals de
+        // boot — le ring console purge ici (vieille page),
+        // pas au `Navigated` qui effaçait les erreurs de
+        // la navigation en cours (messenger/sosh/edf).
+        let _ = self.events.send(CoreEvent::Navigating {
+            tab,
+            url: req.url.as_str(),
+        });
         Ok(NavJob {
             tab,
             epoch: entry.nav_epoch,

@@ -21,6 +21,16 @@ pub enum CoreEvent {
         /// Nouvel onglet.
         tab: TabId,
     },
+    /// Navigation engagée (début du fetch) — précède les
+    /// évals de boot : le ring console purge ici (B-51),
+    /// pas au commit `Navigated` qui effaçait les erreurs
+    /// de la navigation en cours.
+    Navigating {
+        /// Onglet concerné.
+        tab: TabId,
+        /// URL demandée.
+        url: String,
+    },
     /// Navigation aboutie (page posée + peinte).
     Navigated {
         /// Onglet concerné.
