@@ -401,6 +401,27 @@ pub(crate) fn css_px(
     raw_length_px(style.get(prop)?, pct_basis, em_basis, ctx)
 }
 
+/// `aspect-ratio` (css-sizing-4 §5.4 — R-123) : parse
+/// `"w/h"` (ou nombre nu, ou `auto w/h`) → `w/h` ; `auto`
+/// seul ou invalide → `None`. Le ratio s'applique quand la
+/// dimension est `auto` — branché à la hauteur dans
+/// [`layout_block`].
+fn aspect_ratio(st: &ComputedStyle) -> Option<f32> {
+    let v = st.get("aspect-ratio")?.trim();
+    if v == "auto" || v.is_empty() {
+        return None;
+    }
+    // `auto 16/9` → le ratio l'emporte quand une dimension
+    // est auto — ignorer le mot-clé `auto`.
+    let v = v.trim_start_matches("auto").trim();
+    if let Some((w, h)) = v.split_once('/') {
+        let (w, h) = (w.trim().parse::<f32>().ok()?, h.trim().parse::<f32>().ok()?);
+        (w.is_finite() && h > 0.0).then_some(w / h)
+    } else {
+        v.parse::<f32>().ok().filter(|r| r.is_finite() && *r > 0.0)
+    }
+}
+
 /// Même résolution que [`css_px`] mais sur la valeur brute —
 /// pour les syntaxes multi-valeurs (`flex`, `gap`…) qui ne
 /// sont pas une propriété unique.
@@ -1323,7 +1344,14 @@ fn layout_block_inner(
     };
 
     let content_h = cursor - (y + bt + pt);
-    let mut used_h = h_spec.unwrap_or(content_h);
+    let mut used_h = h_spec.unwrap_or_else(|| {
+        // css-sizing-4 §5.4 (R-123) : `aspect-ratio` s'applique
+        // quand la hauteur est `auto` — le ratio du ratio
+        // préféré donne `content_w / r` (`aspect-video` des
+        // feuilles Tailwind). `min|max-height` clampent en
+        // aval comme toute autre hauteur calculée.
+        aspect_ratio(&st).map_or(content_h, |r| content_w / r)
+    });
     // `min-height`/`max-height` : mêmes bases % que `height`
     // (hauteur du bloc conteneur définie, sinon ignorées).
     let vert_spec = |prop: &str| {

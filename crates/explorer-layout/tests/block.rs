@@ -2081,9 +2081,7 @@ fn hit_positionne_gagne_sur_statique() {
     // B-24/qwant (variante §B-13) : un `<input>` positionné
     // doit gagner le hit-test au même point qu'une <img>
     // statique frère — la couche la plus haute frappe d'abord.
-    let dom = TreeBuilder::parse(
-        "<div id=p><img id=i><input id=s></div>",
-    );
+    let dom = TreeBuilder::parse("<div id=p><img id=i><input id=s></div>");
     let mut e = StyleEngine::new();
     e.add_css(
         "body{margin:0} #p{position:relative;height:300px}\
@@ -2106,5 +2104,33 @@ fn hit_positionne_gagne_sur_statique() {
         hit.and_then(|n| dom.attribute(n, "id").ok().flatten().map(|s| s.to_string())),
         Some("s".to_string()),
         "l'input positionné doit gagner sur l'img statique"
+    );
+}
+
+#[test]
+fn aspect_ratio_auto_height() {
+    // R-123 : `aspect-ratio` dimensionne la hauteur auto —
+    // `aspect-video` (16/9) Tailwind.
+    let dom = TreeBuilder::parse("<div id=v></div>");
+    let mut e = StyleEngine::new();
+    e.add_css(
+        "body{margin:0} #v{width:320px;aspect-ratio:16/9}",
+        Origin::Author,
+    );
+    let styles = e.compute_tree(&dom, dom.document(), &StyleEnv::default());
+    let root_el = dom
+        .children(dom.document())
+        .into_iter()
+        .flatten()
+        .find(|&c| dom.element(c).is_ok())
+        .unwrap();
+    let mut bx = build_box_tree(&dom, root_el, &styles).unwrap();
+    layout_tree(&mut bx, VIEW, &BlockCtx::default());
+    let v = find(&bx, by_id(&dom, "v"));
+    // 320 / (16/9) = 180 — hauteur dérivée du ratio.
+    assert!(
+        (v.rect.height - 180.0).abs() < 1.0,
+        "aspect-ratio 16/9 sur 320px → ~180, obtenu {}",
+        v.rect.height
     );
 }
