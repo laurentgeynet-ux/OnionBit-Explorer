@@ -151,6 +151,10 @@ plateforme net** (ops jscore Encrypt/Decrypt restent à livrer) ·
 | 35 | **Colonne `block` effondrée à largeur 0** — texte mot-par-ligne (h2/p dans `0x876`) | `explorer-layout`/`css` | welcometothejungle `[V4-main]` vol 57 — famille §B-24/§B-28 mais en largeur | **OUVERT — terrain V4** |
 | 36 | **SVG peint/placé hors de sa boîte** — `block<svg>` positionné hors du bouton parent (x décalé) ou à échelle géante (wordmark 700 px dans boîte 300×81) | `explorer-layout`/`render` | wttj smear + indeed wordmark `[V4-main]` vol 57 — recoupe §B-32 pixelisé | **OUVERT — terrain V4** |
 
+| 37 | **Panic `index out of bounds` `dom.rs:2691` en `event.dispatch`** — NodeId obsolète post re-parse ADR-0025 (24 rejets `Fingerprint` en rafale) → garde-fou a rattrapé (disjoncteur, onglet JS mort) — **violation ADR-0008**, 2ᵉ panic jscore, 1ᵉ rattrapé | `explorer-jscore` | caniuse `[V4-main]` vol 58 | **CRITIQUE — handle JS invalide après re-parse** |
+| 38 | **Item flex layouté à 5 839 px** — nav expulsée hors viewport (x=5 879), logo en ellipse aplatie | `explorer-layout`/`css` | developer.chrome.com `[V4-main]` vol 58 (`vol58_chrome_dev_layout.txt` l.11-14) | **OUVERT — terrain V4** |
+| 39 | **`DELETE /api/tabs` → deadlock** — mémoire libérée, CPU nul, port LISTENING, API muette >20 s | `explorer-core`/`api` | vol 58 tab 1 — distinct de §B-33 (pas de spin) et §B-30 (pas de fuite) | **CRITIQUE — nouvelle classe d'arrêt** |
+
 ### 🟡 Moyen — perf, métriques, observabilité résiduelle
 
 - **Framebuffer pleine page** : PNG 48-54 Mo (guardian, youtube) —
