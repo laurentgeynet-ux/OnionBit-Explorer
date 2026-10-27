@@ -7,6 +7,19 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **B-45 — `doc_h` déverrouillé sur
+  `body{overflow-x:hidden}`**
+  (`explorer-layout`) — l'overflow de
+  la chaîne racine (`html`, puis
+  `body` quand `html` est visible)
+  se propage au viewport
+  (css-overflow-3 §3.3) :
+  `auto`/`scroll` ne bornaient plus
+  l'étendue — clubic figé à 900 px
+  pour ~13 450 px de contenu (vol
+  70). Scroll conteneurs internes
+  inchangés.
+
 - **B-47 — `charset=utf-8` annoncé
   sur les réponses JSON de l'API**
   (`explorer-api`) — `application/json`
