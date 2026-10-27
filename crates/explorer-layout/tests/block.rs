@@ -2652,12 +2652,8 @@ fn svg_flex_item_dans_inline_flex() {
         .unwrap();
     let mut bx = build_box_tree(&dom, root_el, &styles).unwrap();
     layout_tree(&mut bx, VIEW, &BlockCtx::default());
-    fn walk(bx: &LayoutBox, f: &mut impl FnMut(&LayoutBox)) {
-        f(bx);
-        bx.children.iter().for_each(|c| walk(c, f));
-    }
     let mut svg = None;
-    walk(&bx, &mut |b| {
+    walk_boxes(&bx, &mut |b| {
         if svg.is_none() && b.intrinsic.is_some() {
             svg = Some(b.rect);
         }
@@ -2697,12 +2693,8 @@ fn svg_display_cascade_vendor_inline_flex() {
         .unwrap();
     let mut bx = build_box_tree(&dom, root_el, &styles).unwrap();
     layout_tree(&mut bx, VIEW, &BlockCtx::default());
-    fn walk(bx: &LayoutBox, f: &mut impl FnMut(&LayoutBox)) {
-        f(bx);
-        bx.children.iter().for_each(|c| walk(c, f));
-    }
     let mut svg = None;
-    walk(&bx, &mut |b| {
+    walk_boxes(&bx, &mut |b| {
         if svg.is_none() && b.intrinsic.is_some() {
             svg = Some(b.rect);
         }
@@ -2712,4 +2704,10 @@ fn svg_display_cascade_vendor_inline_flex() {
         (r.width - 24.0).abs() < 1.0 && (r.height - 24.0).abs() < 1.0,
         "svg attendu 24x24, obtenu {r:?}"
     );
+}
+
+/// Parcours récursif des boîtes — helper partagé des sondes.
+fn walk_boxes(bx: &LayoutBox, f: &mut impl FnMut(&LayoutBox)) {
+    f(bx);
+    bx.children.iter().for_each(|c| walk_boxes(c, f));
 }
