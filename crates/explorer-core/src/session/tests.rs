@@ -2473,6 +2473,23 @@ fn noscript_meta_refresh_fallback_pure_only() {
     assert!(noscript_meta_refresh(&tb.into_dom()).is_none());
 }
 
+/// Vol 32 dropbox — `<link rel="preload" as="style">` : le
+/// swap JS `onload→rel=stylesheet` meurt quand le JS l'est ;
+/// la feuille préchargée est collectée comme un stylesheet
+/// (repli produit — un `as=style` existe pour être appliqué).
+/// `as=script` et `preload` nu restent hors collecte.
+#[test]
+fn collect_stylesheet_links_preload_as_style() {
+    let dom = test_dom(
+        r#"<link rel=preload as=style href="/a.css"><link rel=preload as=script href="/b.js"><link rel=stylesheet href="/c.css"><link rel="stylesheet preload" as=style href="/d.css">"#,
+    );
+    let hrefs: Vec<String> = collect_stylesheet_links(&dom)
+        .into_iter()
+        .map(|(h, ..)| h)
+        .collect();
+    assert_eq!(hrefs, vec!["/a.css", "/c.css", "/d.css"]);
+}
+
 /// Vol 13 lemonde/bbc — les `<img>` à `data-src` (lazy JS
 /// mort) n'étaient jamais fetchées : repli produit sur les
 /// attributs lazy usuels quand ni `srcset` ni `src` n'est
@@ -2542,11 +2559,13 @@ fn noscript_head_meta_refresh_honored_on_rich_page() {
 }
 
 /// Vol 25 (kayak) — signature du disjoncteur « moteur
-/// figé » : `Dead` et l'éval dépassée du proxy arment ;
-/// une vraie exception JS n'arme pas.
+/// figé » : `Dead` et `Timeout` (kind typé — JS-C156)
+/// arment ; la chaîne héritée du proxy reste acceptée en
+/// repli ; une vraie exception JS n'arme pas.
 #[test]
 fn engine_stall_signature() {
     assert!(Session::is_engine_stall(&explorer_js::JsError::Dead));
+    assert!(Session::is_engine_stall(&explorer_js::JsError::Timeout));
     assert!(Session::is_engine_stall(&explorer_js::JsError::Uncaught(
         "moteur figé — éval dépassée".into()
     )));

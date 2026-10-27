@@ -961,33 +961,52 @@ impl SubJob {
             // CAP-185 : `load`/`error` de fin de feuille —
             // enregistré sur toutes les issues (fetch refusé,
             // non-2xx, sécurité/SRI) ; livré au commit.
-            // Vol 2026-10-26 : tout échec est aussi rapporté
-            // en console (`PipelineError`) — les pages
-            // blanches old.reddit/archive.org n'avaient
-            // **aucune** trace des sous-ressources mortes.
-            let Ok(resp) = res else {
-                report_sub_failure(
-                    &events,
-                    tab,
-                    &tag,
-                    &self.sheet_urls,
-                    &self.scripts,
-                    &slot_items,
-                    &self.frame_urls,
-                    "échec réseau",
-                );
-                if let SubTag::Css(i) = tag {
-                    let ord = self.sheet_urls.get(i).map_or(0, |(.., lord)| *lord);
-                    self.link_events.push((ord, false));
-                }
-                // Un `<iframe src>` en échec laissait un
-                // cadre blanc sans trace (vol 18).
-                if let SubTag::Frame(i) = tag {
-                    if let Some((u, ..)) = self.frame_urls.get(i) {
-                        tracing::warn!(url = %u, "iframe : fetch en échec — cadre vide");
+            let resp = match res {
+                Ok(resp) => resp,
+                Err(e) => {
+                    if let SubTag::Css(i) = tag {
+                        let ord = self.sheet_urls.get(i).map_or(0, |(.., lord)| *lord);
+                        self.link_events.push((ord, false));
+                        // Une feuille jamais livrée laissait la
+                        // page sans cascade, sans trace (vol 32
+                        // dropbox — 0 CSS, console vide).
+                        if let Some((u, ..)) = self.sheet_urls.get(i) {
+                            tracing::warn!(url = %u, error = %e,
+                                "stylesheet : fetch en échec — feuille non appliquée");
+                            let _ = self.events.send(CoreEvent::PipelineError {
+                                tab: Some(tab),
+                                message: format!("stylesheet — fetch échoué : {u} ({e})"),
+                            });
+                        }
                     }
+                    // Un script dont le fetch meurt laissait
+                    // `script_srcs[slot]` à None puis était sauté
+                    // en silence à l'éval (vol 33 radiogarden —
+                    // 33 scripts, app jamais initialisée, console
+                    // vide).
+                    if let SubTag::Script(slot) = tag {
+                        if let Some(u) = self
+                            .scripts
+                            .get(slot_items[slot])
+                            .and_then(|it| it.src.as_ref())
+                        {
+                            tracing::warn!(url = %u, error = %e,
+                                "script : fetch en échec — jamais évalué");
+                            let _ = self.events.send(CoreEvent::PipelineError {
+                                tab: Some(tab),
+                                message: format!("script — fetch échoué : {u} ({e})"),
+                            });
+                        }
+                    }
+                    // Un `<iframe src>` en échec laissait un
+                    // cadre blanc sans trace (vol 18).
+                    if let SubTag::Frame(i) = tag {
+                        if let Some((u, ..)) = self.frame_urls.get(i) {
+                            tracing::warn!(url = %u, "iframe : fetch en échec — cadre vide");
+                        }
+                    }
+                    return;
                 }
-                return;
             };
             if !(200..300).contains(&resp.status) {
                 report_sub_failure(
@@ -1003,6 +1022,28 @@ impl SubJob {
                 if let SubTag::Css(i) = tag {
                     let ord = self.sheet_urls.get(i).map_or(0, |(.., lord)| *lord);
                     self.link_events.push((ord, false));
+                    if let Some((u, ..)) = self.sheet_urls.get(i) {
+                        tracing::warn!(url = %u, status = resp.status,
+                            "stylesheet : statut non-2xx — feuille non appliquée");
+                        let _ = self.events.send(CoreEvent::PipelineError {
+                            tab: Some(tab),
+                            message: format!("stylesheet — statut {} : {u}", resp.status),
+                        });
+                    }
+                }
+                if let SubTag::Script(slot) = tag {
+                    if let Some(u) = self
+                        .scripts
+                        .get(slot_items[slot])
+                        .and_then(|it| it.src.as_ref())
+                    {
+                        tracing::warn!(url = %u, status = resp.status,
+                            "script : statut non-2xx — jamais évalué");
+                        let _ = self.events.send(CoreEvent::PipelineError {
+                            tab: Some(tab),
+                            message: format!("script — statut {} : {u}", resp.status),
+                        });
+                    }
                 }
                 if let SubTag::Frame(i) = tag {
                     if let Some((u, ..)) = self.frame_urls.get(i) {
@@ -1019,16 +1060,14 @@ impl SubJob {
                     if ok {
                         self.css_slots[*i] = Some(decode_stylesheet(&resp.body, &resp.headers));
                     } else {
-                        report_sub_failure(
-                            &events,
-                            tab,
-                            &tag,
-                            &self.sheet_urls,
-                            &self.scripts,
-                            &slot_items,
-                            &self.frame_urls,
-                            "en-têtes de sécurité ou SRI",
-                        );
+                        tracing::warn!(url = %su,
+                            "stylesheet : réponse refusée (nosniff/CORP ou SRI)");
+                        let _ = self.events.send(CoreEvent::PipelineError {
+                            tab: Some(tab),
+                            message: format!(
+                                "stylesheet — réponse refusée (nosniff/CORP/SRI) : {su}"
+                            ),
+                        });
                     }
                     self.link_events.push((*lord, ok));
                 }
@@ -1061,17 +1100,15 @@ impl SubJob {
                         } else {
                             self.script_srcs[*slot] = Some(text);
                         }
-                    } else {
-                        report_sub_failure(
-                            &events,
-                            tab,
-                            &tag,
-                            &self.sheet_urls,
-                            &self.scripts,
-                            &slot_items,
-                            &self.frame_urls,
-                            "en-têtes de sécurité ou SRI",
-                        );
+                    } else if let Some(u) = &item.src {
+                        tracing::warn!(url = %u,
+                            "script : réponse refusée (nosniff/CORP ou SRI)");
+                        let _ = self.events.send(CoreEvent::PipelineError {
+                            tab: Some(tab),
+                            message: format!(
+                                "script — réponse refusée (nosniff/CORP/SRI) : {u}"
+                            ),
+                        });
                     }
                 }
                 SubTag::Img(u) => {
