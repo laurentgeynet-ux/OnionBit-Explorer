@@ -2280,3 +2280,32 @@ fn hit_sticky_epingle_gagne_au_scroll() {
         "clic sur header sticky épinglé → h/l attendu, obtenu {id}"
     );
 }
+
+#[test]
+fn flex_grow_1_recupere_espace_libre() {
+    // B-35 (wttj) : item `flex:1` (basis 0%→0, grow 1) dans
+    // un conteneur row doit recevoir l'espace libre après
+    // le sibling — pas rester à 0.
+    let dom = TreeBuilder::parse(
+        "<div id=f><div id=txt><h2>titre long qui doit avoir de la place</h2></div>\
+         <div id=imgc style=\"width:600px;height:100px\"></div></div>",
+    );
+    let mut e = StyleEngine::new();
+    e.add_css("#f{display:flex} #txt{flex:1}", Origin::Author);
+    let styles = e.compute_tree(&dom, dom.document(), &StyleEnv::default());
+    let root_el = dom
+        .children(dom.document())
+        .into_iter()
+        .flatten()
+        .find(|&c| dom.element(c).is_ok())
+        .unwrap();
+    let mut bx = build_box_tree(&dom, root_el, &styles).unwrap();
+    layout_tree(&mut bx, VIEW, &BlockCtx::default());
+    let txt = find(&bx, by_id(&dom, "txt"));
+    // f=800, imgc=600 → txt doit recevoir ~200 (800-600).
+    assert!(
+        txt.rect.width >= 150.0,
+        "flex:1 doit recevoir l'espace libre (~200), obtenu {}",
+        txt.rect.width
+    );
+}
