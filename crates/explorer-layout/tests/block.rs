@@ -2217,3 +2217,25 @@ fn height_pct_chain_absolute_map() {
         map.rect.height
     );
 }
+
+#[test]
+fn remplace_max_height_pct_bridant_la_hauteur() {
+    // B-34 (cjoint vol56) : `<img>` intrinsèque 703×994 dans
+    // `div{height:192px}` avec `max-height:100%` → ≤192 px.
+    // Le cb_h des atomes inline = h_spec du conteneur (avant
+    // le fix : cb_h brut du grand-parent → souvent None →
+    // pas de clamp → 994 px débordaient).
+    let html = "<!doctype html><div style=\"height:192px\"><img style=\"max-height:100%\"></div>";
+    let dom_probe = TreeBuilder::parse(html);
+    let sizes = ratio_sizes(&dom_probe, "img", 703.0, 994.0);
+    let (dom, bx) = {
+        let (dom, bx) = laid_sized(html, "", &sizes);
+        (dom, bx)
+    };
+    let img = find(&bx, by_tag(&dom, "img"));
+    assert!(
+        img.rect.height <= 192.5,
+        "img max-height:100% → ≤192, obtenu {}",
+        img.rect.height
+    );
+}

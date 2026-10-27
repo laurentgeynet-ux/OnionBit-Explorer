@@ -1318,8 +1318,14 @@ fn layout_block_inner(
         // d'un inline-block gardaient un rect 0×0 et leur
         // texte n'était jamais peint.
         _ if bx.kind == BoxKind::Inline && bx.children.iter().all(|c| c.kind.is_inline_level()) => {
+            // `cb_h` des atomes en-ligne (img…) = la hauteur
+            // **résolue de cette boîte** (`h_spec`), pas le
+            // cb du grand-parent — B-34 : `<img>` à
+            // `max-height:100%` dans `div.h-48` restait à sa
+            // taille intrinsèque (la base % venait d'un cran
+            // au-dessus → souvent `None` → aucun clamp).
             let used = crate::inline::layout_inline(
-                bx, content_x, cursor, content_w, ctx, fs, pos_cb, fl, cb_h,
+                bx, content_x, cursor, content_w, ctx, fs, pos_cb, fl, h_spec,
             );
             cursor + used
         }
