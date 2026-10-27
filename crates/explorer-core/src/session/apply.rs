@@ -1937,9 +1937,7 @@ impl Session {
         // voie journal est sautée : re-parse direct, comme si
         // le journal n'existait pas — la série retombe à un
         // succès journal (`commit_apply_detached`).
-        if job.journal.is_some()
-            && self.unmapped_streaks.get(&tab).copied().unwrap_or(0) >= 8
-        {
+        if job.journal.is_some() && self.unmapped_streaks.get(&tab).copied().unwrap_or(0) >= 8 {
             job.journal = None;
             job.html.clear();
             job.ids.clear();
@@ -2184,12 +2182,14 @@ impl Session {
         self.applies_fin += 1;
         self.paint_in_flight.remove(&tab);
         self.journal_fallbacks += 1;
-                if matches!(why, JournalReject::UnmappedKey) {
+        if matches!(why, JournalReject::UnmappedKey) {
             let n = self.unmapped_streaks.entry(tab).or_insert(0);
             *n += 1;
             if *n == 8 {
-                tracing::warn!(tab,
-                    "série UnmappedKey — voie journal sautée pour cet onglet (B-52)");
+                tracing::warn!(
+                    tab,
+                    "série UnmappedKey — voie journal sautée pour cet onglet (B-52)"
+                );
             }
         } else {
             self.unmapped_streaks.insert(tab, 0);

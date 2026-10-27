@@ -98,12 +98,15 @@ fn spawn_console_recorder(session: &Arc<tokio::sync::Mutex<Session>>, ring: &Con
 /// — testable sans tâche). Deux règles :
 /// - `PipelineError{tab}` → poussé sous le cap
 ///   [`CONSOLE_RING`] ;
-/// - `Navigated{tab}` → **le ring de l'onglet est vidé**
+/// - `Navigating{tab}` → **le ring de l'onglet est vidé**
 ///   (vol 24 : erreurs substack encore visibles sur
 ///   ghost.org — attribution ambiguë). Le canal broadcast
-///   est ordonné : les erreurs émises avant `Navigated`
+///   est ordonné : les erreurs émises avant `Navigating`
 ///   partent avec lui, celles de la nouvelle page
 ///   survivent — « ring = erreurs de la page courante ».
+///   B-51 : purge au `Navigating` (début de fetch), pas au
+///   `Navigated` — les erreurs d'éval de boot précédaient
+///   le commit et étaient vidées avec lui.
 fn record_console_event(ring: &ConsoleRing, ev: &CoreEvent) {
     match ev {
         // B-51 : purge au `Navigating` (début de fetch), pas
@@ -1235,7 +1238,10 @@ mod tests {
     #[test]
     fn console_ring_vide_a_la_navigation() {
         // Vol 24 : les erreurs du site précédent ne doivent
-        // plus être attribuées à la nouvelle page.
+        // plus être attribuées à la nouvelle page. B-51 :
+        // la purge se fait au `Navigating` (début de fetch),
+        // pas au `Navigated` — sinon les erreurs d'éval de
+        // boot mouraient avec le commit de leur propre page.
         let ring = ConsoleRing::default();
         let tab: TabId = 7;
         let err = |m: &str| CoreEvent::PipelineError {
@@ -1245,10 +1251,9 @@ mod tests {
         record_console_event(&ring, &err("avant nav"));
         record_console_event(
             &ring,
-            &CoreEvent::Navigated {
+            &CoreEvent::Navigating {
                 tab,
                 url: "https://ghost.org".to_string(),
-                title: None,
             },
         );
         assert!(
@@ -1256,7 +1261,7 @@ mod tests {
                 .unwrap()
                 .get(&tab)
                 .is_none_or(std::collections::VecDeque::is_empty),
-            "le ring doit être vidé à Navigated"
+            "le ring doit être vidé à Navigating"
         );
         record_console_event(&ring, &err("après nav"));
         let g = ring.lock().unwrap();

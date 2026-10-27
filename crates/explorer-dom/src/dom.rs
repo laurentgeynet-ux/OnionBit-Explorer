@@ -624,7 +624,7 @@ impl Dom {
     /// figure, **plus tous les éléments natifs** (un élément
     /// sans tiret dans son nom local est toujours défini).
     /// Le tri par nom est délégué à l'appelant
-    /// ([`explorer_css::state::is_defined`] côté cascade).
+    /// (`explorer_css::state::is_defined` côté cascade).
     #[must_use]
     pub fn is_defined_name(&self, name: &str) -> bool {
         self.defined_names.contains(name)
