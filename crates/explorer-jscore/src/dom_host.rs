@@ -1724,6 +1724,37 @@ impl Engine {
         self.set_own(nav, "doNotTrack", Value::Null, true);
         self.set_own(nav, "maxTouchPoints", Value::Num(0.0), true);
         self.set_own(nav, "hardwareConcurrency", Value::Num(4.0), true);
+        // `navigator.geolocation` (B-14 marmiton vol63) — les
+        // feature-detects lisent l'objet (« le navigateur n'a
+        // pas de GPS ») ; les méthodes rejettent honnêtement
+        // `POSITION_UNAVAILABLE` (code 2) au lieu d'être
+        // `undefined` et de casser la détection.
+        let geo = self.new_object();
+        let geop = geo;
+        let tag = self.str_val("Geolocation");
+        self.set_own(geop, crate::interp::SYM_TO_STRING_TAG, tag, false);
+        for m in ["getCurrentPosition", "watchPosition"] {
+            let name = self.str_val(m);
+            let f = self.native_fn(m, |e: &mut Engine, _t: Value, args: &[Value]| {
+                // `success` jamais appelée — pas de GPS ;
+                // `error(err)` reçoit `GeolocationPositionError`
+                // {code:2,message} (spec), appelée async-borne.
+                if let Some(cb) = args.get(1).or_else(|| args.first()) {
+                    if e.is_callable(*cb) {
+                        let err = e.new_object();
+                        e.set_own(err, "code", Value::Num(2.0), true);
+                        let msg = e.str_val("position unavailable");
+                        e.set_own(err, "message", msg, true);
+                        let _ = e.call_value(*cb, Value::Undefined, &[Value::Obj(err)]);
+                    }
+                }
+                Ok(Value::Num(0.0))
+            });
+            self.set_own(geop, m, f, true);
+        }
+        let cw = self.native_fn("clearWatch", |_e, _t, _a| Ok(Value::Undefined));
+        self.set_own(geop, "clearWatch", cw, true);
+        self.set_own(nav, "geolocation", Value::Obj(geop), true);
         self.set_own(g, "navigator", Value::Obj(nav), false);
 
         // `Worker` borné (JS-C29) — le constructeur est présent
