@@ -160,6 +160,8 @@ plateforme net** (ops jscore Encrypt/Decrypt restent à livrer) ·
 
 | 42 | **Hit-test traverse un overlay `position:fixed`** — clic sur bouton consentement résolu en coords document sur l'ancre pleine-largeur SOUS l'overlay → `navigated` vers la mauvaise cible | `explorer-core`/hit-test | culture.gouv `[V4-main]` vol 62 : clic « Tout accepter » (804,809) → nav `/thematiques/audiovisuel` (ancre 1366×48 à doc-y 2409) — preuve géométrique complète | **CRITIQUE — variante §B-13/§B-17 ; z-order hit-test vs fixed** |
 
+| 43 | **Tiroir off-canvas invisible avale tous les clics** — `<mini-cart class="layer…">` fermé (non peint) mais boîte `[0 0 1366x900]` prioritaire au hit-test : 2/2 clics → `edited` (« livré au DOM — aucune action par défaut »), aucune ancre atteignable | `explorer-core`/hit-test | auchan `[V6-main]` vol 69 : clics « Promos » (295,40) + « Politique de confidentialité » (760,712) interceptés ; transform/état fermé ignoré par le hit-test — variante §B-42 croisée §B-17 | **OUVERT — terrain V6** |
+
 ### 🟡 Moyen — perf, métriques, observabilité résiduelle
 
 - **Framebuffer pleine page** : PNG 48-54 Mo (guardian, youtube) —
