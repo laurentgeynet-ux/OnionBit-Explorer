@@ -88,6 +88,28 @@ fn find_opt(b: &LayoutBox, id: NodeId) -> Option<&LayoutBox> {
 }
 
 #[test]
+fn espace_entre_elements_inline_adjacents() {
+    // Vol 31 CNN : « Live Updates7 min ago » collé — le
+    // nœud texte blanc entre deux `<span>` inline doit
+    // produire une espace réelle (§16.6.1).
+    let (dom, bx) = laid(
+        "<!doctype html><p><span>AAAA</span> <span>BBBB</span></p>",
+        "p{font-size:10px;width:400px}",
+    );
+    let p = find(&bx, by_tag(&dom, "p"));
+    let anon = &p.children[0];
+    let frags = &anon.lines[0].fragments;
+    let texts: Vec<&str> = frags.iter().map(|f| f.text.as_str()).collect();
+    // AAAA (20px) + espace (5px) + BBBB — le deuxième run
+    // doit démarrer à ≥ 25px, pas 20px.
+    let b = frags
+        .iter()
+        .find(|f| f.text == "BBBB")
+        .unwrap_or_else(|| panic!("frags={texts:?}"));
+    assert!(b.rect.x >= 24.9, "BBBB.x = {} (frags={texts:?})", b.rect.x);
+}
+
+#[test]
 fn lignes_wrappent_sur_largeur() {
     // p 100px, texte 5px/car → ~20 car/ligne.
     let (dom, bx) = laid(
