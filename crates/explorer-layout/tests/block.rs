@@ -2018,12 +2018,16 @@ fn overflow_x_seul_ne_clippe_pas_y() {
         .unwrap();
     let mut bx = build_box_tree(&dom, root_el, &styles).unwrap();
     layout_tree(&mut bx, VIEW, &BlockCtx::default());
-    fn find(bx: &explorer_layout::LayoutBox) -> Option<&explorer_layout::LayoutBox> {
-        if bx.overflow_x == explorer_layout::Overflow::Hidden {
-            return Some(bx);
-        }
-        bx.children.iter().find_map(find)
-    }
-    let d = find(&bx).expect("div overflow-x");
+    let d = find_overflow_x(&bx).expect("div overflow-x");
     assert_eq!(d.overflow, explorer_layout::Overflow::Auto);
+}
+
+/// Cherche la boîte `overflow-x:hidden` dans l'arbre (R-120).
+fn find_overflow_x(
+    bx: &explorer_layout::LayoutBox,
+) -> Option<&explorer_layout::LayoutBox> {
+    if bx.overflow_x == explorer_layout::Overflow::Hidden {
+        return Some(bx);
+    }
+    bx.children.iter().find_map(find_overflow_x)
 }

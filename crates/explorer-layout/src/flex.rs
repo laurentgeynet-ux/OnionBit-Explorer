@@ -462,8 +462,8 @@ pub(crate) fn flow_flex_children(
                         // {flex-shrink:0}` 1590 px → héro à 0).
                         let c = &bx.children[order_idx[k]];
                         let cfs = font_size_px(&c.style, fs, ctx);
-                        let floor = match c.style.get("min-width").map(|v| v.trim()) {
-                            None | Some("") | Some("auto") => {
+                        let floor = match c.style.get("min-width").map(str::trim) {
+                            None | Some("" | "auto") => {
                                 crate::intrinsic::min_content_size_px(c, cfs, ctx)
                             }
                             _ => crate::intrinsic::intrinsic_size_px(

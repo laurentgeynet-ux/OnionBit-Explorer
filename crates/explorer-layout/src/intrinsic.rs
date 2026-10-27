@@ -122,6 +122,7 @@ fn content_px_opt(bx: &LayoutBox, fs: f32, ctx: &BlockCtx, max: bool, ignore_w: 
 /// par [`content_px`]). La branche « taille directe »
 /// (`width`/intrinsèque remplacé) se borne déjà elle-même
 /// — le re-bridage du wrapper est idempotent.
+#[allow(clippy::too_many_lines)] // chaîne de priorités §5 — 101 lignes, bornée
 fn content_px_unclamped(bx: &LayoutBox, fs: f32, ctx: &BlockCtx, max: bool, ignore_w: bool) -> f32 {
     // Taille directe : `width` explicite (hors %) fait foi
     // AVANT l'intrinsèque remplacé (§5.1 : la contribution
