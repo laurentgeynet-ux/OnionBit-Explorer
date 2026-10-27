@@ -1334,6 +1334,13 @@ impl Session {
                 true
             }
         });
+        // B-30 (manomano) : payloads garées/jobs en file de
+        // l'onglet libérés — sinon une payload détachée
+        // survivait au DELETE (fuite post-mortem +28 Mo/s).
+        if let Ok(mut orphans) = self.orphaned_paints.lock() {
+            orphans.remove(&tab);
+        }
+        self.pending_applies.retain(|j| j.tab != tab);
         let _ = self.events.send(CoreEvent::TabClosed { tab });
         Ok(())
     }
