@@ -1353,7 +1353,34 @@ impl Dom {
                 .find(|(name, _)| name == k)
                 .map_or("", |(_, v)| v.as_str())
         };
-        let key = format!("{}\u{0}{}\u{0}{}", get("srcset"), get("sizes"), get("src"));
+        // B-20 (marmiton) : `data-src`-family = repli lazy-load
+        // — un `<img data-src>` sans `src` n'entrait jamais
+        // dans la clé → jamais enfilé (le repli session ne
+        // voyait aucune requête). L'attribut repli alimente
+        // le slot `src`/`srcset` de la clé.
+        let src_eff = {
+            let s = get("src");
+            if s.is_empty() {
+                ["data-src", "data-lazy-src", "data-original", "data-url"]
+                    .iter()
+                    .find_map(|a| {
+                        let v = get(a);
+                        if v.is_empty() { None } else { Some(v) }
+                    })
+                    .unwrap_or("")
+            } else {
+                s
+            }
+        };
+        let srcset_eff = {
+            let s = get("srcset");
+            if s.is_empty() {
+                get("data-srcset")
+            } else {
+                s
+            }
+        };
+        let key = format!("{}\u{0}{}\u{0}{}", srcset_eff, get("sizes"), src_eff);
         if key == "\u{0}\u{0}" {
             return;
         }

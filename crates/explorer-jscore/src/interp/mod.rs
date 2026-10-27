@@ -22,7 +22,7 @@ use crate::parser;
 use crate::value::{num_to_js_string, to_uint32, ObjId, Value};
 use std::collections::HashSet;
 use std::rc::Rc;
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::SyncSender;
 use std::sync::Arc;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
@@ -58,6 +58,23 @@ const STACK_TRACE_LIMIT: usize = 10;
 /// use private-use code points so no source identifier can collide
 /// (`super.x` / `super()` resolve through these).
 pub(crate) const HOME_BIND: &str = "\u{f120}home";
+
+/// DIAG B-3 — compteurs de famille lus par un thread moniteur de
+/// test pendant la jambe fatale : le compteur qui grimpe sans
+/// plafond nomme le transporteur. Relaxed, ~gratuits.
+pub static DG_TICKS: AtomicU64 = AtomicU64::new(0);
+pub static DG_EXPR: AtomicU64 = AtomicU64::new(0);
+pub static DG_CALLS: AtomicU64 = AtomicU64::new(0);
+pub static DG_CDEPTH: AtomicU64 = AtomicU64::new(0);
+pub static DG_HGET: AtomicU64 = AtomicU64::new(0);
+pub static DG_HINVOKE: AtomicU64 = AtomicU64::new(0);
+pub static DG_HSET: AtomicU64 = AtomicU64::new(0);
+pub static DG_HKEYS: AtomicU64 = AtomicU64::new(0);
+pub static DG_RPROP: AtomicU64 = AtomicU64::new(0);
+pub static DG_NODEVAL: AtomicU64 = AtomicU64::new(0);
+pub static DG_ENVGET: AtomicU64 = AtomicU64::new(0);
+pub static DG_MT: AtomicU64 = AtomicU64::new(0);
+pub static DG_ITER: AtomicU64 = AtomicU64::new(0);
 /// Parent constructor value for `super(...)`.
 pub(crate) const SUPER_BIND: &str = "\u{f120}super";
 /// Liaison cachée `new.target` dans l'env local d'une
@@ -1669,10 +1686,17 @@ impl Engine {
                         "use-credentials" => crate::xhr::FetchCredentials::Include,
                         _ => crate::xhr::FetchCredentials::SameOrigin,
                     });
+                // B-20 (marmiton) : repli lazy-load `data-src`/
+                // `data-srcset` quand `src`/`srcset` absents —
+                // le miroir `note_img` enfile déjà sur la même
+                // famille d'attributs.
+                let lazy = |a: &str, fallbacks: &[&str]| {
+                    attr(a).or_else(|| fallbacks.iter().find_map(|f| attr(f)))
+                };
                 out.push(crate::dom_host::DynImgReq {
                     seq,
-                    src: attr("src"),
-                    srcset: attr("srcset"),
+                    src: lazy("src", &["data-src", "data-lazy-src", "data-original", "data-url"]),
+                    srcset: lazy("srcset", &["data-srcset"]),
                     sizes: attr("sizes"),
                     crossorigin,
                     referrerpolicy: attr("referrerpolicy"),
@@ -2652,6 +2676,7 @@ impl Engine {
         let Some(h) = self.host_of(id) else {
             return Ok(Value::Undefined);
         };
+        DG_HINVOKE.fetch_add(1, Ordering::Relaxed);
         Ok(h.invoke(self, this, &name, &args[1..])?
             .unwrap_or(Value::Undefined))
     }
@@ -2958,6 +2983,7 @@ impl Engine {
     }
 
     pub(crate) fn tick(&mut self) -> JsResult<()> {
+        DG_TICKS.fetch_add(1, Ordering::Relaxed);
         self.lowstack_tick();
         if let Some(d) = self.eval_deadline {
             if Instant::now() >= d {
@@ -3041,6 +3067,7 @@ impl Engine {
     /// binding) ; `visited` borne les chaînes cycliques
     /// (`export {a} from 'b'` ↔ `export {b} from 'a'`).
     pub(crate) fn env_get(&mut self, env: &EnvRef, name: &str) -> Option<Value> {
+        DG_ENVGET.fetch_add(1, Ordering::Relaxed);
         self.env_get_seen(env, name, &mut HashSet::new())
     }
 
@@ -3068,7 +3095,11 @@ impl Engine {
             };
             if let Some(oid) = with_oid {
                 // Traps proxy en échec → nom non lié (tolérance).
-                let bound = self.with_has(oid, &name).unwrap_or(false);
+                let wh = self.with_has(oid, &name);
+                if std::env::var("DBG_WITH").is_ok() {
+                    eprintln!("[with_has] {name} -> {:?}", wh.as_ref().map(|b| *b));
+                }
+                let bound = wh.unwrap_or(false);
                 cur = {
                     let b = e.borrow();
                     b.parent.clone()
@@ -3076,14 +3107,22 @@ impl Engine {
                 if bound {
                     // `get_prop` seul est aveugle aux props
                     // host (`NodeHost` réfléchit `id`/`value`…
-                    // via `get`, pas de props propres) —
-                    // JS-C45 : `with(el){id}` doit la voir.
+                    // via `get`, pas de props propres) ET aux
+                    // traps proxy : `with(p){x}` où `p` est un
+                    // Proxy doit invoquer `get` (B-3 — alpine
+                    // `mergeProxies` : `with(scope)` cassé →
+                    // `ReferenceError` en chaîne). Erreur de
+                    // trap → non lié, même tolérance que `has`.
                     if let Some(h) = self.host_of(oid) {
+                        DG_HGET.fetch_add(1, Ordering::Relaxed);
                         if let Ok(Some(v)) = h.get(self, Value::Obj(oid), &name) {
                             return Some(v);
                         }
                     }
-                    return self.get_prop(oid, &name);
+                    match self.read_prop(Value::Obj(oid), Value::Obj(oid), &name) {
+                        Ok(v) => return Some(v),
+                        Err(_) => return self.get_prop(oid, &name),
+                    }
                 }
                 continue;
             }
@@ -4347,6 +4386,26 @@ impl Engine {
     /// getter calls it with `this = recv` (differs from `base` only
     /// for `super.x` reads).
     pub(crate) fn read_prop(&mut self, base: Value, recv: Value, key: &str) -> JsResult<Value> {
+        DG_RPROP.fetch_add(1, Ordering::Relaxed);
+        if std::env::var("EXPLORER_LOWSTACK").is_ok() {
+            if let Some(rem) = stacker::remaining_stack() {
+                if rem < 1_450_000 {
+                    thread_local! {
+                        static DONE3: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+                    }
+                    let n = DONE3.get();
+                    if n < 3 {
+                        DONE3.set(n + 1);
+                        eprintln!(
+                            "[lowbt-rp{n}] rem={}KiB cd={} key={key}",
+                            rem / 1024,
+                            self.call_depth
+                        );
+                        eprintln!("{}", std::backtrace::Backtrace::force_capture());
+                    }
+                }
+            }
+        }
         self.lowstack_tick();
         let Value::Obj(mut id) = base else {
             return self.get_prop_value(base, key);
@@ -4663,6 +4722,7 @@ impl Engine {
             Value::Obj(id) => {
                 let h = self.host_of(id);
                 if let Some(h) = &h {
+                    DG_HGET.fetch_add(1, Ordering::Relaxed);
                     if let Some(v) = h.get(self, base, key)? {
                         return Ok(v);
                     }
@@ -4740,6 +4800,7 @@ impl Engine {
             }
             Value::Obj(id) => {
                 if let Some(h) = self.host_of(id) {
+                    DG_HSET.fetch_add(1, Ordering::Relaxed);
                     if h.set(self, base, key, v)? {
                         // Réactions CE synchrones (JS-C68) — un
                         // setter host a pu muter le miroir
@@ -5004,6 +5065,7 @@ impl Engine {
             self.deleg_hop(&mut depth)?;
         }
         if let Some(h) = self.host_of(id) {
+            DG_HGET.fetch_add(1, Ordering::Relaxed);
             if h.get(self, Value::Obj(id), key)?.is_some() {
                 return Ok(true);
             }
@@ -5368,6 +5430,7 @@ impl Engine {
         let mut out = Vec::new();
         let mut seen = HashSet::new();
         if let Some(h) = self.host_of(id) {
+            DG_HKEYS.fetch_add(1, Ordering::Relaxed);
             for k in h.keys(self, Value::Obj(id)) {
                 if seen.insert(k.clone()) {
                     out.push(k);
@@ -5697,6 +5760,25 @@ impl Engine {
     /// classes refusent l'appel sans `new`). `new`/`super()` passent
     /// par [`call_value_ctor`].
     pub(crate) fn call_value(&mut self, f: Value, this: Value, args: &[Value]) -> JsResult<Value> {
+        if std::env::var("EXPLORER_LOWSTACK").is_ok() {
+            if let Some(rem) = stacker::remaining_stack() {
+                if rem < 1_450_000 {
+                    thread_local! {
+                        static DONE2: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+                    }
+                    let n = DONE2.get();
+                    if n < 3 {
+                        DONE2.set(n + 1);
+                        eprintln!(
+                            "[lowbt-cv{n}] rem={}KiB cd={}",
+                            rem / 1024,
+                            self.call_depth
+                        );
+                        eprintln!("{}", std::backtrace::Backtrace::force_capture());
+                    }
+                }
+            }
+        }
         if let Value::Obj(fid) = f {
             if self.find_own(fid, CLASS_CTOR).is_some() {
                 return Err(self.type_error("class constructor cannot be invoked without `new`"));
@@ -5728,6 +5810,29 @@ impl Engine {
         args: &[Value],
     ) -> JsResult<Value> {
         self.call_depth += 1;
+        DG_CALLS.fetch_add(1, Ordering::Relaxed);
+        DG_CDEPTH.fetch_max(self.call_depth as u64, Ordering::Relaxed);
+        // DIAG B-3 — la jambe fatale part d'un Call : backtrace
+        // Rust dès que le segment courant est entamé (>0,6 Mio
+        // consommés), une seule fois.
+        if std::env::var("EXPLORER_LOWSTACK").is_ok() {
+            if let Some(rem) = stacker::remaining_stack() {
+                if rem < 1_400_000 {
+                    thread_local! {
+                        static DONE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+                    }
+                    if !DONE.replace(true) {
+                        eprintln!(
+                            "[lowbt] rem={}KiB cd={} frames={}",
+                            rem / 1024,
+                            self.call_depth,
+                            self.call_stack.len()
+                        );
+                        eprintln!("{}", std::backtrace::Backtrace::force_capture());
+                    }
+                }
+            }
+        }
         if self.call_depth > self.call_depth_limit {
             self.call_depth -= 1;
             return Err(self.range_error("maximum call stack exceeded"));
@@ -5869,6 +5974,8 @@ impl Engine {
         nt: Value,
     ) -> JsResult<Value> {
         self.call_depth += 1;
+        DG_CALLS.fetch_add(1, Ordering::Relaxed);
+        DG_CDEPTH.fetch_max(self.call_depth as u64, Ordering::Relaxed);
         // JS-C41 : borne logique d'appels — la pile elle-
         // même est protégée par `maybe_grow` au corps.
         if self.call_depth > self.call_depth_limit {
