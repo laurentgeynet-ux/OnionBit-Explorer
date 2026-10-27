@@ -98,7 +98,19 @@ fn width_bounds(st: &ComputedStyle, fs: f32, ctx: &BlockCtx) -> (Option<f32>, Op
 /// Les boîtes `Text` portent le style du parent : leur
 /// borne s'applique au niveau de l'agrégat parent.
 fn content_px(bx: &LayoutBox, fs: f32, ctx: &BlockCtx, max: bool) -> f32 {
-    let w = content_px_unclamped(bx, fs, ctx, max);
+    content_px_opt(bx, fs, ctx, max, false)
+}
+
+/// `min-content` de `bx` pour le plancher §4.5 du shrink
+/// flex : le `width` propre de l'item est IGNORÉ (la taille
+/// spécifiée n'est pas un minimum de contenu — un item
+/// `width:80px` peut rétrécir sous 80) ; `max-width` borne.
+pub(crate) fn min_content_size_px(bx: &LayoutBox, fs: f32, ctx: &BlockCtx) -> f32 {
+    content_px_opt(bx, fs, ctx, false, true)
+}
+
+fn content_px_opt(bx: &LayoutBox, fs: f32, ctx: &BlockCtx, max: bool, ignore_w: bool) -> f32 {
+    let w = content_px_unclamped(bx, fs, ctx, max, ignore_w);
     if bx.kind == BoxKind::Text {
         return w;
     }
@@ -110,7 +122,7 @@ fn content_px(bx: &LayoutBox, fs: f32, ctx: &BlockCtx, max: bool) -> f32 {
 /// par [`content_px`]). La branche « taille directe »
 /// (`width`/intrinsèque remplacé) se borne déjà elle-même
 /// — le re-bridage du wrapper est idempotent.
-fn content_px_unclamped(bx: &LayoutBox, fs: f32, ctx: &BlockCtx, max: bool) -> f32 {
+fn content_px_unclamped(bx: &LayoutBox, fs: f32, ctx: &BlockCtx, max: bool, ignore_w: bool) -> f32 {
     // Taille directe : `width` explicite (hors %) fait foi
     // AVANT l'intrinsèque remplacé (§5.1 : la contribution
     // d'un remplacé est sa taille utilisée — un
@@ -151,7 +163,12 @@ fn content_px_unclamped(bx: &LayoutBox, fs: f32, ctx: &BlockCtx, max: bool) -> f
     // grille 236px). Un non-remplacé retombe sur son contenu
     // (`bx.intrinsic` absent → `None` → mesure des enfants).
     let pct = st.get("width").is_some_and(|v| v.contains('%'));
-    let base = if pct && bx.intrinsic.is_some() {
+    // `ignore_w` (racine seulement — mesure §4.5 du plancher
+    // de shrink flex) : le `width` spécifié de l'item n'est
+    // pas un minimum de contenu ; l'intrinsèque remplacé reste.
+    let base = if ignore_w {
+        bx.intrinsic.map(|i| i.0)
+    } else if pct && bx.intrinsic.is_some() {
         Some(0.0)
     } else {
         bound("width").or(bx.intrinsic.map(|i| i.0))

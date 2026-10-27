@@ -1171,3 +1171,8 @@ fn min_avec_calc_imbrique() {
     let a = find(&bx, by_id(&dom, "a"));
     assert!(approx(a.rect.width, 500.0), "min(calc) : {}", a.rect.width);
 }
+
+#[test]
+fn repro_probe() {
+    assert!(true);
+}
