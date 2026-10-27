@@ -276,6 +276,15 @@ pub struct Engine {
     /// jobs (`run_microtasks`), jamais pendant une évaluation
     /// (la pile d'appel n'est pas une racine).
     gc_threshold: usize,
+    /// Verrou J4 : le tas déclaré mort (dépassement **vivant**
+    /// mesuré post-collecte) fige le moteur — tout eval ultérieur
+    /// échoue au premier `tick` en réémettant le message initial.
+    /// Avant : chaque eval rejouait une GC complète puis un
+    /// message aux compteurs variables → rafale de signatures
+    /// distinctes non déduplicables (mesuré marmiton ×3,
+    /// bookshop ×14). `set_mem_limit` réarme (borne relevée =
+    /// seconde chance honnête).
+    heap_dead: Option<String>,
     /// Total cumulé des `tick` — compteur d'ops exposé par
     /// [`Engine::heap_stats`]/[`Engine::ops_used`] (métriques).
     ops_total: u64,
@@ -790,6 +799,7 @@ impl Engine {
             nat_trace_counts: std::collections::HashMap::new(),
             nat_trace_total: 0,
             nest_limit: crate::parser::DEFAULT_NEST_LIMIT,
+            heap_dead: None,
             ops_left: DEFAULT_OP_LIMIT,
             op_limit: DEFAULT_OP_LIMIT,
             eval_deadline: None,
@@ -916,6 +926,9 @@ impl Engine {
     /// ajoutées à un objet vivant n'entrent qu'au GC).
     pub fn set_mem_limit(&mut self, bytes: usize) {
         self.heap.set_mem_limit(bytes);
+        // Borne changée → le verrou J4 retombe : si la nouvelle
+        // borne passe au-dessus du vivant, le moteur revit.
+        self.heap_dead = None;
     }
 
     /// Seuil de GC automatique en cellules vivantes (JS-C37) —
@@ -2954,6 +2967,12 @@ impl Engine {
             return Err(self.range_error("script execution limit exceeded"));
         }
         if self.heap.over_limit() {
+            // Verrou J4 : tas déjà déclaré mort → échec immédiat
+            // avec la **même** signature (une occurrence dans les
+            // journaux, zéro GC rejouée par eval).
+            if let Some(msg) = &self.heap_dead {
+                return Err(self.range_error(msg.clone()));
+            }
             // Le drapeau est *estimé* (posé à l'alloc, recalculé
             // au sweep) — les déchets entre deux GC peuvent le
             // faire passer : collecter d'abord, ne tuer que sur
@@ -2969,9 +2988,10 @@ impl Engine {
                 let live = self.heap.live_count();
                 let bytes = self.heap.bytes();
                 let lim = self.heap.mem_limit();
-                return Err(self.range_error(format!(
-                    "heap memory limit exceeded ({live} cells, {bytes} B live > {lim} B)"
-                )));
+                let msg =
+                    format!("heap memory limit exceeded ({live} cells, {bytes} B live > {lim} B)");
+                self.heap_dead = Some(msg.clone());
+                return Err(self.range_error(msg));
             }
         }
         self.ops_left -= 1;

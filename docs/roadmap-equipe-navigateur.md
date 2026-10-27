@@ -7223,6 +7223,23 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   pour les récursions callbacks.
   Sondes `depth_probe` ×20k : 47/47.
 
+- [x] **JS-C170. Verrou `heap_dead` —
+  `heap memory limit` en une seule
+  signature** (`explorer-jscore`::tick)
+  — tâche J4 du vol : une fois le
+  dépassement **vivant** mesuré
+  post-collecte, tout eval ultérieur
+  échoue au premier `tick` en réémettant
+  le message initial (stats live/bytes/
+  lim). Avant : chaque eval rejouait une
+  GC complète puis un message aux
+  compteurs variables → rafale de
+  signatures distinctes non
+  déduplicables (marmiton ×3,
+  bookshop ×14). `set_mem_limit`
+  réarme. Test
+  `j4_heap_dead_latch_single_signature`.
+
 - [x] **JS-C169. `Array.isArray`
   déballe les proxies — `x-for`
   alpine fonctionne**

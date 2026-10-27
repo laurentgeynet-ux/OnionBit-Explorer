@@ -771,10 +771,10 @@ fn b30_xfor_scope_render() {
     };
     let mut e = Engine::new();
     e.install_dom(&Rc::new(RefCell::new(Dom::from_html(
-        r##"<html><body>
+        r#"<html><body>
           <div x-data="{items:[10,20]}"><template x-for="i in items"><span x-text="i"></span></template></div>
           <div x-data="{step:1}"><p x-text="step"></p><div x-data="{own:2}"><b x-text="step"></b></div></div>
-        </body></html>"##,
+        </body></html>"#,
     ))));
     if let Err(x) = e.eval(&src) {
         eprintln!("[b30] bundle err {x}");
@@ -812,10 +812,10 @@ fn b31_xfor_dom_dump() {
     };
     let mut e = Engine::new();
     e.install_dom(&Rc::new(RefCell::new(Dom::from_html(
-        r##"<html><body>
+        r#"<html><body>
           <div id=a x-data="{items:[10,20]}"><template x-for="i in items"><span x-text="i"></span></template></div>
           <div id=b x-data="{step:1}"><p x-text="step"></p></div>
-        </body></html>"##,
+        </body></html>"#,
     ))));
     let _ = e.eval(&src);
     let _ = e.eval("void 0");
@@ -844,9 +844,9 @@ fn b32_xfor_scope_probe() {
     };
     let mut e = Engine::new();
     e.install_dom(&Rc::new(RefCell::new(Dom::from_html(
-        r##"<html><body>
+        r#"<html><body>
           <div id=a x-data="{items:[10,20]}"><template x-for="i in items"><span x-text="i"></span></template></div>
-        </body></html>"##,
+        </body></html>"#,
     ))));
     let _ = e.eval(&src);
     let _ = e.eval("void 0");
@@ -879,9 +879,9 @@ fn b33_xfor_items_probe() {
     };
     let mut e = Engine::new();
     e.install_dom(&Rc::new(RefCell::new(Dom::from_html(
-        r##"<html><body>
+        r#"<html><body>
           <div id=a x-data="{items:[10,20,30]}"><template x-for="i in items"><span x-text="i"></span></template></div>
-        </body></html>"##,
+        </body></html>"#,
     ))));
     let _ = e.eval(&src);
     let _ = e.eval("void 0");
@@ -915,11 +915,11 @@ fn b34_xfor_object_key_parent_scope() {
     };
     let mut e = Engine::new();
     e.install_dom(&Rc::new(RefCell::new(Dom::from_html(
-        r##"<html><body><div id=r x-data="{currentStep:'a', steps:{a:[15,'A'],b:[6,'B']}}">
+        r#"<html><body><div id=r x-data="{currentStep:'a', steps:{a:[15,'A'],b:[6,'B']}}">
           <template x-for="([number,name],key) in steps">
             <button :class="currentStep===key && 'on'" @click="currentStep=key"><b x-text="number"></b><i x-text="name"></i></button>
           </template>
-        </div></body></html>"##,
+        </div></body></html>"#,
     ))));
     if let Err(x) = e.eval(&src) {
         eprintln!("[b34] bundle err {x}");
@@ -948,13 +948,13 @@ fn b35_xfor_click_watch() {
     };
     let mut e = Engine::new();
     e.install_dom(&Rc::new(RefCell::new(Dom::from_html(
-        r##"<html><body><div id=r x-data="{currentStep:'a', direction:'right',
+        r#"<html><body><div id=r x-data="{currentStep:'a', direction:'right',
              steps:{a:[15,'A'],b:[6,'B']}}"
              x-init="$watch('currentStep',(v,o)=>{var k=Object.keys(steps);direction=k.indexOf(v)>k.indexOf(o)?'right':'left'})">
           <template x-for="([number,name],key) in steps">
             <button :class="currentStep===key && 'on'" @click="currentStep=key"><b x-text="number"></b></button>
           </template>
-        </div></body></html>"##,
+        </div></body></html>"#,
     ))));
     let _ = e.eval(&src);
     let _ = e.eval("void 0");

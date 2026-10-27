@@ -7,6 +7,18 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **JS-C170 — verrou `heap_dead` :
+  `heap memory limit exceeded` en une
+  seule signature** (`explorer-jscore`) —
+  tâche J4 : après un dépassement vivant
+  mesuré, les evals suivants échouent au
+  premier tick avec le message initial
+  (live/bytes/lim) au lieu de rejouer une
+  GC et d'émettre des compteurs
+  variables → une seule ligne déduplicable
+  dans les journaux (marmiton ×3,
+  bookshop ×14). `set_mem_limit` réarme.
+
 - **JS-C169 — `Array.isArray` déballe
   les proxies — `x-for` alpine
   fonctionne** (`explorer-jscore`) —

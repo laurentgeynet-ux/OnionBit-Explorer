@@ -3957,6 +3957,33 @@ fn c37_mem_limit_soft_kill() {
 }
 
 #[test]
+fn j4_heap_dead_latch_single_signature() {
+    // J4 : une fois le tas déclaré mort (dépassement vivant mesuré
+    // post-collecte), tout eval ultérieur échoue au premier tick en
+    // réémettant le **même** message — une seule signature d'erreur
+    // dans les journaux, zéro GC rejouée par eval. `set_mem_limit`
+    // réarme le moteur.
+    let mut e = Engine::new();
+    e.collect();
+    let base = e.heap_stats().estimated_bytes;
+    e.set_mem_limit(base + 128 * 1024);
+    let kill = "var a=[]; for (var i=0;i<30000;i++) a.push('xxxxxxxxxxxxxxxxxxxxxxxx'+i);";
+    let first = e.eval(kill).unwrap_err();
+    assert!(format!("{first}").contains("heap memory limit"));
+    for _ in 0..3 {
+        let err = e.eval("1+1").unwrap_err();
+        assert_eq!(
+            format!("{err}"),
+            format!("{first}"),
+            "eval verrouillé = même signature d'erreur"
+        );
+    }
+    // Borne relevée → le moteur revit (le latch retombe).
+    e.set_mem_limit(0);
+    e.eval("1+1").unwrap_or_else(|err| panic!("revive: {err}"));
+}
+
+#[test]
 fn c37_gc_threshold_auto_collect() {
     // Seuil de cellules vivantes → passe GC à la frontière de job
     // (fin d'eval / drain microtasks), jamais pendant l'éval.
