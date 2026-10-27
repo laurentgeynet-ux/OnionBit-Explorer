@@ -243,7 +243,7 @@ fn inject_external_refs(dom: &Dom, doc_root: NodeId, svg: NodeId, src: &mut Stri
     if defs.is_empty() {
         return;
     }
-    let close = format!("</svg>");
+    let close = "</svg>".to_string();
     if let Some(i) = src.rfind(&close) {
         let defs_tag = format!("<defs>{defs}</defs>");
         src.insert_str(i, &defs_tag);

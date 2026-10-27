@@ -108,110 +108,127 @@ pub(crate) fn collect_scripts(
         if dom.tag_name(n).is_ok_and(|t| t == "script") {
             let el_ord = els;
             els += 1;
-            let ty = dom
-                .attribute(n, "type")
-                .ok()
-                .flatten()
-                .map_or_else(String::new, |t| t.trim().to_ascii_lowercase());
-            let module = ty == "module";
-            if module || CLASSIC_SCRIPT_TYPES.contains(&ty.as_str()) {
-                // `nomodule` n'a d'effet que sur les classiques.
-                let nomodule = dom.attribute(n, "nomodule").ok().flatten().is_some();
-                if module || !nomodule {
-                    let src_attr = dom
-                        .attribute(n, "src")
-                        .ok()
-                        .flatten()
-                        .filter(|s| !s.trim().is_empty());
-                    if let Some(raw) = src_attr {
-                        // Externe : `async` l'emporte sur `defer`
-                        // (spec — les deux présents = async).
-                        let async_ = dom.attribute(n, "async").ok().flatten().is_some();
-                        let defer = !async_ && dom.attribute(n, "defer").ok().flatten().is_some();
-                        let resolved = Url::resolve(base, raw.trim())
-                            .ok()
-                            .filter(|u| !is_mixed_content(page, u))
-                            .filter(|u| {
-                                explorer_net::csp::csp_allows(
-                                    csp,
-                                    page,
-                                    explorer_net::http::FetchDest::Script,
-                                    u,
-                                )
-                            });
-                        if resolved.is_none() {
-                            // Plan-time — vol 33 radiogarden : un
-                            // script refusé ici (URL irrésoluble,
-                            // mixed-content, `script-src`) mourait
-                            // sans trace, console vide.
-                            tracing::warn!(src = %raw.trim(),
-                                "script refusé en plan — résolution/mixed-content/CSP");
-                        }
-                        if let (Some(u), true) = (resolved, slots < max_src) {
-                            out.push(ScriptItem {
-                                src: Some(u),
-                                inline: None,
-                                charset: if module {
-                                    None
-                                } else {
-                                    dom.attribute(n, "charset").ok().flatten()
-                                },
-                                integrity: dom.attribute(n, "integrity").ok().flatten(),
-                                crossorigin: super::dom_helpers::crossorigin_attr(dom, n),
-                                module,
-                                exec: if async_ {
-                                    ScriptExec::Arrival
-                                } else if module || defer {
-                                    ScriptExec::Post
-                                } else {
-                                    ScriptExec::Parse
-                                },
-                                slot: {
-                                    let s = slots;
-                                    slots += 1;
-                                    Some(s)
-                                },
-                                el_ord,
-                            });
-                        }
-                        // Hors borne / irrésoluble / bloqué :
-                        // balise inerte, non collectée.
-                    } else {
-                        let text = dom.text_content(n).unwrap_or_default();
-                        let nonce = dom.attribute(n, "nonce").ok().flatten();
-                        let inline_ok = explorer_net::csp::csp_inline_allowed(
-                            csp,
-                            explorer_net::csp::InlineKind::Script,
-                            nonce.as_deref(),
-                        );
-                        if !text.trim().is_empty() && inline_ok {
-                            // Inline : `async`/`defer` sans effet —
-                            // classique = file parse, module = post.
-                            out.push(ScriptItem {
-                                src: None,
-                                inline: Some(text),
-                                charset: None,
-                                integrity: None,
-                                crossorigin: None,
-                                module,
-                                exec: if module {
-                                    ScriptExec::Post
-                                } else {
-                                    ScriptExec::Parse
-                                },
-                                slot: None,
-                                el_ord,
-                            });
-                        }
-                    }
-                }
-            }
+            collect_script_el(
+                dom, n, page, base, csp, el_ord, &mut slots, max_src, &mut out,
+            );
         }
         if let Ok(ch) = dom.children(n) {
             queue.extend(ch.iter().rev());
         }
     }
     out
+}
+
+/// Un `<script>` : externe (src résolu + CSP) ou inline —
+/// corps de boucle de [`collect_scripts`] extrait pour la
+/// borne clippy, sémantique inchangée.
+#[allow(clippy::too_many_arguments)]
+fn collect_script_el(
+    dom: &Dom,
+    n: explorer_dom::NodeId,
+    page: &Url,
+    base: &Url,
+    csp: &[explorer_net::csp::CspPolicy],
+    el_ord: usize,
+    slots: &mut usize,
+    max_src: usize,
+    out: &mut Vec<ScriptItem>,
+) {
+    let ty = dom
+        .attribute(n, "type")
+        .ok()
+        .flatten()
+        .map_or_else(String::new, |t| t.trim().to_ascii_lowercase());
+    let module = ty == "module";
+    if !(module || CLASSIC_SCRIPT_TYPES.contains(&ty.as_str())) {
+        return;
+    }
+    // `nomodule` n'a d'effet que sur les classiques.
+    let nomodule = dom.attribute(n, "nomodule").ok().flatten().is_some();
+    if !module && nomodule {
+        return;
+    }
+    let src_attr = dom
+        .attribute(n, "src")
+        .ok()
+        .flatten()
+        .filter(|s| !s.trim().is_empty());
+    if let Some(raw) = src_attr {
+        // Externe : `async` l'emporte sur `defer`
+        // (spec — les deux présents = async).
+        let async_ = dom.attribute(n, "async").ok().flatten().is_some();
+        let defer = !async_ && dom.attribute(n, "defer").ok().flatten().is_some();
+        let resolved = Url::resolve(base, raw.trim())
+            .ok()
+            .filter(|u| !is_mixed_content(page, u))
+            .filter(|u| {
+                explorer_net::csp::csp_allows(csp, page, explorer_net::http::FetchDest::Script, u)
+            });
+        if resolved.is_none() {
+            // Plan-time — vol 33 radiogarden : un
+            // script refusé ici (URL irrésoluble,
+            // mixed-content, `script-src`) mourait
+            // sans trace, console vide.
+            tracing::warn!(src = %raw.trim(),
+                "script refusé en plan — résolution/mixed-content/CSP");
+        }
+        if let (Some(u), true) = (resolved, *slots < max_src) {
+            out.push(ScriptItem {
+                src: Some(u),
+                inline: None,
+                charset: if module {
+                    None
+                } else {
+                    dom.attribute(n, "charset").ok().flatten()
+                },
+                integrity: dom.attribute(n, "integrity").ok().flatten(),
+                crossorigin: super::dom_helpers::crossorigin_attr(dom, n),
+                module,
+                exec: if async_ {
+                    ScriptExec::Arrival
+                } else if module || defer {
+                    ScriptExec::Post
+                } else {
+                    ScriptExec::Parse
+                },
+                slot: {
+                    let s = *slots;
+                    *slots += 1;
+                    Some(s)
+                },
+                el_ord,
+            });
+        }
+        // Hors borne / irrésoluble / bloqué :
+        // balise inerte, non collectée.
+    } else {
+        let text = dom.text_content(n).unwrap_or_default();
+        let nonce = dom.attribute(n, "nonce").ok().flatten();
+        let inline_ok = explorer_net::csp::csp_inline_allowed(
+            csp,
+            explorer_net::csp::InlineKind::Script,
+            nonce.as_deref(),
+        );
+        if !text.trim().is_empty() && inline_ok {
+            // Inline : `async`/`defer` sans effet —
+            // classique = file parse, module = post.
+            out.push(ScriptItem {
+                src: None,
+                inline: Some(text),
+                charset: None,
+                integrity: None,
+                crossorigin: None,
+                module,
+                exec: if module {
+                    ScriptExec::Post
+                } else {
+                    ScriptExec::Parse
+                },
+                slot: None,
+                el_ord,
+            });
+        }
+    }
 }
 
 /// Corps des `<script type="importmap">` du document, ordre

@@ -1940,6 +1940,19 @@ impl Session {
                 }
             }
             self.freshen_apply(job.tab, &mut job);
+            // B-25 (caf) : un job baseline sans `html` —
+            // rejet de journal re-enfilé dont la resync n'a
+            // rien livré (moteur mort, stall, dirty absent).
+            // Un apply « vide » commettrait un document vide
+            // qui détruit la payload vivante : `/dom` 404
+            // permanent. On jette le job plutôt que la page.
+            if job.journal.is_none() && job.html.is_empty() {
+                tracing::warn!(
+                    tab = job.tab,
+                    "baseline apply sans html livré — job jeté (resync vide)"
+                );
+                continue;
+            }
             let entry = self.tabs.get_mut(&job.tab)?;
             entry.paint_detached = true;
             let p = entry.take_paint();

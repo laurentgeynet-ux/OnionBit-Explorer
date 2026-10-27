@@ -288,6 +288,16 @@ impl Engine {
     /// Propagates the op-limit error or an uncaught `queueMicrotask`
     /// callback exception.
     pub fn run_microtasks(&mut self) -> JsResult<usize> {
+        // DIAG temporaire J2 — réentrance native de la pompe.
+        thread_local! {
+            static MT_DEPTH: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+        }
+        struct MtGuard;
+        impl Drop for MtGuard {
+            fn drop(&mut self) {
+                MT_DEPTH.with(|c| c.set(c.get().saturating_sub(1)));
+            }
+        }
         /// Jobs max par drain — large pour les chaînes légitimes
         /// (hydratation/diff de milliers de promesses), fini pour
         /// les files auto-régénérantes. Le reliquat attend le
@@ -299,6 +309,15 @@ impl Engine {
         /// aussi : sans ce plafond la boucle externe ne revient
         /// jamais tester `microtasks.is_empty()`.
         const DELIVERY_ROUNDS_CAP: usize = 128;
+        let mt_d = MT_DEPTH.with(|c| {
+            let d = c.get() + 1;
+            c.set(d);
+            d
+        });
+        if mt_d > 1 {
+            eprintln!("[mt-depth {mt_d}] rem={:?}", stacker::remaining_stack());
+        }
+        let _g = MtGuard;
         let mut ran = 0usize;
         let mut rounds = 0usize;
         let home = self.cur_ctx;

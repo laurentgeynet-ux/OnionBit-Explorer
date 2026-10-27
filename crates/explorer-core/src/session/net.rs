@@ -121,71 +121,15 @@ impl Session {
             }
         }
         if let Some(eng) = eng.as_mut() {
-            // Étape 134 : un realm JS par `<iframe>` fetché —
-            // créé avant les scripts du parent pour qu'un
-            // `frames[n]`/`contentWindow` lu en cours de
-            // parse résolve un vrai contexte.
-            self.wire_frame_contexts(tab, eng.as_mut());
-            // Issue #6 : les import maps arment la résolution des
-            // bare specifiers — la spec les veut enregistrées avant
-            // le premier module évalué (le prefetch, lui, a déjà
-            // réécrit les spécificateurs via `import_specs`).
-            for json in &import_maps {
-                eng.set_import_map(json);
-            }
-            let mut evals = 0usize;
-            for item in scripts.iter().filter(|i| i.exec == ScriptExec::Parse) {
-                let Some(src) = item_source(item, &script_srcs) else {
-                    continue;
-                };
-                let url = item.src.as_ref().map(Url::as_str);
-                self.eval_or_report(tab, eng.as_mut(), src, url.as_deref(), Some(item.el_ord));
-                evals += 1;
-            }
-            for me in arrival_evals {
-                self.eval_module_graph(tab, eng.as_mut(), &me);
-                evals += 1;
-            }
-            let mut post_evals = post_evals.into_iter();
-            for item in scripts.iter().filter(|i| i.exec == ScriptExec::Post) {
-                if item.module {
-                    if let Some(me) = post_evals.next() {
-                        self.eval_module_graph(tab, eng.as_mut(), &me);
-                        evals += 1;
-                    }
-                } else if let Some(src) = item_source(item, &script_srcs) {
-                    let url = item.src.as_ref().map(Url::as_str);
-                    self.eval_or_report(tab, eng.as_mut(), src, url.as_deref(), Some(item.el_ord));
-                    evals += 1;
-                }
-            }
-            let n = eng.run_pending();
-            tracing::trace!(tab, jobs = n, "jobs js exécutés");
-            // Miroir muté ? → re-parse : le relayout qui suit
-            // rend les modifications (dirty bit consommé côté
-            // moteur).
-            let mutated = if let Some(k) = eng.sync_dom_keyed() {
-                self.apply_dom_sync(tab, &k.html, None, false, Some(k.ids), Some(k.tags));
-                true
-            } else if let Some((mutated, _)) = eng.sync_dom_path() {
-                self.apply_dom_sync(tab, &mutated, None, false, None, None);
-                true
-            } else {
-                false
-            };
-            // T2 `evals_sans_mutation` (B-4) : ≥8 évals exécutées
-            // sans aucune mutation DOM = signature « boot muet »
-            // (twitch : 88 ok=true, 0 mutation, shell vide — un
-            // lecteur INFO/WARN concluait « tout vert »). Une
-            // page à scripts purement passifs reste rare au-
-            // delà du seuil.
-            if !mutated && evals >= 8 {
-                tracing::warn!(
-                    tab,
-                    evals,
-                    "evals_sans_mutation — boot possiblement muet (aucune mutation DOM)"
-                );
-            }
+            self.run_commit_scripts(
+                tab,
+                eng.as_mut(),
+                &scripts,
+                &script_srcs,
+                arrival_evals,
+                post_evals,
+                &import_maps,
+            );
         }
         if let Some(entry) = self.tabs.get_mut(&tab) {
             entry.js = eng;
@@ -219,6 +163,89 @@ impl Session {
             bg_bodies,
             mask_aliases,
         }))
+    }
+
+    /// Bras JS du commit (`sub_commit_head`) : realms des
+    /// cadres, import maps, files d'éval (parse → arrival →
+    /// post), `run_pending`, resynchro du miroir et compteur
+    /// T2 `evals_sans_mutation`. Extrait pour la borne
+    /// clippy — pas de changement de sémantique.
+    #[allow(clippy::too_many_arguments)]
+    fn run_commit_scripts(
+        &mut self,
+        tab: TabId,
+        eng: &mut dyn JsEngine,
+        scripts: &[ScriptItem],
+        script_srcs: &[Option<String>],
+        arrival_evals: Vec<ModEval>,
+        post_evals: Vec<ModEval>,
+        import_maps: &[String],
+    ) {
+        // Étape 134 : un realm JS par `<iframe>` fetché —
+        // créé avant les scripts du parent pour qu'un
+        // `frames[n]`/`contentWindow` lu en cours de
+        // parse résolve un vrai contexte.
+        self.wire_frame_contexts(tab, eng);
+        // Issue #6 : les import maps arment la résolution des
+        // bare specifiers — la spec les veut enregistrées avant
+        // le premier module évalué (le prefetch, lui, a déjà
+        // réécrit les spécificateurs via `import_specs`).
+        for json in import_maps {
+            eng.set_import_map(json);
+        }
+        let mut evals = 0usize;
+        for item in scripts.iter().filter(|i| i.exec == ScriptExec::Parse) {
+            let Some(src) = item_source(item, script_srcs) else {
+                continue;
+            };
+            let url = item.src.as_ref().map(Url::as_str);
+            self.eval_or_report(tab, eng, src, url.as_deref(), Some(item.el_ord));
+            evals += 1;
+        }
+        for me in arrival_evals {
+            self.eval_module_graph(tab, eng, &me);
+            evals += 1;
+        }
+        let mut post_evals = post_evals.into_iter();
+        for item in scripts.iter().filter(|i| i.exec == ScriptExec::Post) {
+            if item.module {
+                if let Some(me) = post_evals.next() {
+                    self.eval_module_graph(tab, eng, &me);
+                    evals += 1;
+                }
+            } else if let Some(src) = item_source(item, script_srcs) {
+                let url = item.src.as_ref().map(Url::as_str);
+                self.eval_or_report(tab, eng, src, url.as_deref(), Some(item.el_ord));
+                evals += 1;
+            }
+        }
+        let n = eng.run_pending();
+        tracing::trace!(tab, jobs = n, "jobs js exécutés");
+        // Miroir muté ? → re-parse : le relayout qui suit
+        // rend les modifications (dirty bit consommé côté
+        // moteur).
+        let mutated = if let Some(k) = eng.sync_dom_keyed() {
+            self.apply_dom_sync(tab, &k.html, None, false, Some(k.ids), Some(k.tags));
+            true
+        } else if let Some((mutated, _)) = eng.sync_dom_path() {
+            self.apply_dom_sync(tab, &mutated, None, false, None, None);
+            true
+        } else {
+            false
+        };
+        // T2 `evals_sans_mutation` (B-4) : ≥8 évals exécutées
+        // sans aucune mutation DOM = signature « boot muet »
+        // (twitch : 88 ok=true, 0 mutation, shell vide — un
+        // lecteur INFO/WARN concluait « tout vert »). Une
+        // page à scripts purement passifs reste rare au-
+        // delà du seuil.
+        if !mutated && evals >= 8 {
+            tracing::warn!(
+                tab,
+                evals,
+                "evals_sans_mutation — boot possiblement muet (aucune mutation DOM)"
+            );
+        }
     }
 
     /// Queue du commit — après le rendu (inline ou détaché) :
@@ -3084,47 +3111,16 @@ impl Session {
             std::iter::once(entry_base.as_str()).collect();
         let mut frontier: Vec<(String, Url)> = Vec::new();
         for (spec, u) in module_deps(entry_src, entry_base, import_specs) {
-            let u = explorer_net::csp::csp_upgrade(csp, &u).unwrap_or(u);
-            graph
-                .alias
-                .entry(spec.clone())
-                .or_insert_with(|| u.as_str());
-            let allowed = !is_mixed_content(page, &u)
-                && explorer_net::csp::csp_allows(
-                    csp,
-                    page,
-                    explorer_net::http::FetchDest::Script,
-                    &u,
-                );
-            if allowed && queued.insert(u.as_str()) {
-                // `data:` — corps auto-porteur : décodé inline
-                // (J3 — aucune requête possible ; `import()`
-                // le fait déjà côté dyn). Ses deps nichées
-                // partent en frontier comme un module fetché.
-                if let Some(body) = data_url_bytes(&u.as_str()) {
-                    let text = String::from_utf8_lossy(&body).into_owned();
-                    for (spec2, u2) in module_deps(&text, &u, import_specs) {
-                        let u2 = explorer_net::csp::csp_upgrade(csp, &u2).unwrap_or(u2);
-                        graph
-                            .alias
-                            .entry(spec2.clone())
-                            .or_insert_with(|| u2.as_str());
-                        let ok = !is_mixed_content(page, &u2)
-                            && explorer_net::csp::csp_allows(
-                                csp,
-                                page,
-                                explorer_net::http::FetchDest::Script,
-                                &u2,
-                            );
-                        if ok && queued.insert(u2.as_str()) {
-                            frontier.push((spec2, u2));
-                        }
-                    }
-                    graph.sources.insert(u.as_str(), text);
-                } else {
-                    frontier.push((spec, u));
-                }
-            }
+            Self::queue_module_dep(
+                spec,
+                u,
+                page,
+                csp,
+                import_specs,
+                graph,
+                &mut queued,
+                &mut frontier,
+            );
         }
         while !frontier.is_empty() && graph.sources.len() < max_modules {
             let room = (max_modules - graph.sources.len()).min(frontier.len());
@@ -3161,45 +3157,16 @@ impl Session {
                 let text = decode_subresource(&resp.body, None);
                 graph.sources.insert(key, text.clone());
                 for (spec2, u2) in module_deps(&text, &u, import_specs) {
-                    let u2 = explorer_net::csp::csp_upgrade(csp, &u2).unwrap_or(u2);
-                    graph
-                        .alias
-                        .entry(spec2.clone())
-                        .or_insert_with(|| u2.as_str());
-                    let allowed = !is_mixed_content(page, &u2)
-                        && explorer_net::csp::csp_allows(
-                            csp,
-                            page,
-                            explorer_net::http::FetchDest::Script,
-                            &u2,
-                        );
-                    if allowed && queued.insert(u2.as_str()) {
-                        // `data:` niché — décodé inline, ses
-                        // deps remontent en `next` (J3).
-                        if let Some(body) = data_url_bytes(&u2.as_str()) {
-                            let text2 = String::from_utf8_lossy(&body).into_owned();
-                            for (spec3, u3) in module_deps(&text2, &u2, import_specs) {
-                                let u3 = explorer_net::csp::csp_upgrade(csp, &u3).unwrap_or(u3);
-                                graph
-                                    .alias
-                                    .entry(spec3.clone())
-                                    .or_insert_with(|| u3.as_str());
-                                let ok3 = !is_mixed_content(page, &u3)
-                                    && explorer_net::csp::csp_allows(
-                                        csp,
-                                        page,
-                                        explorer_net::http::FetchDest::Script,
-                                        &u3,
-                                    );
-                                if ok3 && queued.insert(u3.as_str()) {
-                                    next.push((spec3, u3));
-                                }
-                            }
-                            graph.sources.insert(u2.as_str(), text2);
-                        } else {
-                            next.push((spec2, u2));
-                        }
-                    }
+                    Self::queue_module_dep(
+                        spec2,
+                        u2,
+                        page,
+                        csp,
+                        import_specs,
+                        graph,
+                        &mut queued,
+                        &mut next,
+                    );
                 }
             }
             frontier = next;
@@ -3214,6 +3181,43 @@ impl Session {
                 restants = frontier.len(),
                 "graphe de modules tronqué (max_modules)"
             );
+        }
+    }
+
+    /// Enfile une dépendance de module après CSP/dédup
+    /// (`fetch_module_sources`, J3) — `data:` décodé inline
+    /// (corps auto-porteur, aucune requête ; ses deps nichées
+    /// repassent par ce même bras, récursion bornée par
+    /// `queued`), sinon poussé à `out` pour la vague de fetch.
+    #[allow(clippy::too_many_arguments)]
+    fn queue_module_dep(
+        spec: String,
+        u: Url,
+        page: &Url,
+        csp: &[explorer_net::csp::CspPolicy],
+        import_specs: &[(String, String)],
+        graph: &mut ModuleGraph,
+        queued: &mut std::collections::HashSet<String>,
+        out: &mut Vec<(String, Url)>,
+    ) {
+        let u = explorer_net::csp::csp_upgrade(csp, &u).unwrap_or(u);
+        graph
+            .alias
+            .entry(spec.clone())
+            .or_insert_with(|| u.as_str());
+        let allowed = !is_mixed_content(page, &u)
+            && explorer_net::csp::csp_allows(csp, page, explorer_net::http::FetchDest::Script, &u);
+        if !(allowed && queued.insert(u.as_str())) {
+            return;
+        }
+        if let Some(body) = data_url_bytes(&u.as_str()) {
+            let text = String::from_utf8_lossy(&body).into_owned();
+            for (spec2, u2) in module_deps(&text, &u, import_specs) {
+                Self::queue_module_dep(spec2, u2, page, csp, import_specs, graph, queued, out);
+            }
+            graph.sources.insert(u.as_str(), text);
+        } else {
+            out.push((spec, u));
         }
     }
 
