@@ -176,6 +176,8 @@ plateforme net** (ops jscore Encrypt/Decrypt restent à livrer) ·
 
 | 51 | **Évals `ok=false ms=0` silencieuses** — même script ré-évalué après chaque re-parse `UnmappedKey`, zéro trace `/console` | `explorer-jscore`/glue | messenger `[V6-main]` vol 78 + **élargi aux évals initiales `ms>0`** (challenge Incapsula micromania : 103 Ko `ok=false ms=703` sans trace, vol 81) — trou d'observabilité §B-4-adjacent | **OUVERT — plateforme RTL (rtl+funradio vol 82 : bundle 4,1 Mo `ok=false` silencieux ×2, js_heap=0) ; mécanisme nommé vol 79 : erreurs éval de boot émises *avant* `Navigated` → vidées au commit (api/lib.rs) — purge uniquement sur Navigated cross-doc suggérée** |
 
+| 52 | **Rafale `UnmappedKey` continue** — mutations DOM périodiques → re-parse ~1×/5 s (56×/2,5 min) sans wedge | `explorer-core` | bouygues-immobilier `[V7-main]` vol 84 : contenu, API vivante — famille §B-41 atténuée | **OUVERT — V7** |
+
 ### 🟡 Moyen — perf, métriques, observabilité résiduelle
 
 - **Framebuffer pleine page** : PNG 48-54 Mo (guardian, youtube) —
@@ -200,7 +202,7 @@ plateforme net** (ops jscore Encrypt/Decrypt restent à livrer) ·
 
 ### ⚪ Externe — hors moteur (catalogue à jour)
 
-Anti-bot : 403 sec (ebay, etsy, stackoverflow, tripadvisor, sncf-connect, affinity.serif, hardware.fr, liberation.fr, logic-immo, lacentrale, intersport, cultura, · vhost TLS mort www.figaro.fr (UnrecognisedName, curl idem — externe) ·
+Anti-bot : 403 sec (ebay, etsy, stackoverflow, tripadvisor, sncf-connect, affinity.serif, hardware.fr, liberation.fr, logic-immo, lacentrale, intersport, cultura, nexity, · vhost TLS mort www.figaro.fr (UnrecognisedName, curl idem — externe) ·
 seloger, medium, khanacademy, apec, nytimes) · Datadome (leboncoin) ·
 Akamai Bot Manager (cdiscount, zalando→`supported-browsers`) ·
 x5sec Alibaba (aliexpress→punish) · **AWS WAF insolvable** (imdb,
