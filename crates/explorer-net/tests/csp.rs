@@ -262,6 +262,44 @@ fn path_source_trailing_slash_is_prefix() {
     ));
 }
 
+/// Vol 32 (dropbox `style-src https://*`) — `*` nu en
+/// position hôte d'une host-source = tout hôte (spec
+/// §matching). Avant le fix, `https://*` tombait dans
+/// l'égalité littérale `h == "*"` → chaque feuille/script
+/// derrière `https://*` était refusé au plan (0 CSS, muet).
+#[test]
+fn scheme_star_host_matches_any_host() {
+    let page = u(PAGE);
+    let csp = p("style-src https://* 'unsafe-inline'");
+    assert!(csp_allows(
+        &csp,
+        &page,
+        FetchDest::Style,
+        &u("https://cdn.exemple.com/s.css")
+    ));
+    // Le schéma reste contraignant.
+    assert!(!csp_allows(
+        &csp,
+        &page,
+        FetchDest::Style,
+        &u("http://cdn.exemple.com/s.css")
+    ));
+    // `*` + port : tout hôte, port contraignant.
+    let csp = p("img-src https://*:8443");
+    assert!(csp_allows(
+        &csp,
+        &page,
+        FetchDest::Image,
+        &u("https://h.test:8443/i")
+    ));
+    assert!(!csp_allows(
+        &csp,
+        &page,
+        FetchDest::Image,
+        &u("https://h.test/i")
+    ));
+}
+
 #[test]
 fn star_and_scheme_sources() {
     let page = u(PAGE);

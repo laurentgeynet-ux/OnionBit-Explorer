@@ -139,6 +139,14 @@ pub(crate) fn collect_scripts(
                                     u,
                                 )
                             });
+                        if resolved.is_none() {
+                            // Plan-time — vol 33 radiogarden : un
+                            // script refusé ici (URL irrésoluble,
+                            // mixed-content, `script-src`) mourait
+                            // sans trace, console vide.
+                            tracing::warn!(src = %raw.trim(),
+                                "script refusé en plan — résolution/mixed-content/CSP");
+                        }
                         if let (Some(u), true) = (resolved, slots < max_src) {
                             out.push(ScriptItem {
                                 src: Some(u),

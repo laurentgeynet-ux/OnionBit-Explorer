@@ -694,6 +694,53 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   (renommages, `map_or`, cast
   borné `unit_to_u8`).
 - **Vol 2026-10-26 — correctifs de vol,
+  vague 14 (FIX-3, vols 32/33)**
+  - **`JsError::Timeout` branché sur le
+    disjoncteur** : kind typé livré par
+    FIX-1 (JS-C156, cherry-pick `429ec26`)
+    — `is_engine_stall` reconnaît
+    `JsError::Timeout` ; la signature
+    chaîne « moteur figé » reste acceptée
+    en repli.
+  - **CSP — host-source `*` nu**
+    (`explorer-net`) : `style-src https://*`
+    refusait chaque feuille (le `*` hôte
+    était comparé littéralement) — vol 32
+    dropbox rendu 1995, et tout site à
+    CSP `https://*` perdait styles, images
+    et `fetch()` (`connect-src`). Le `*`
+    nu en position hôte matche désormais
+    tout hôte, le schéma et le port
+    restent contraignants.
+  - **Feuilles de style — fin des morts
+    muettes** (`explorer-core`) : échec de
+    fetch, statut non-2xx et refus
+    nosniff/CORP/SRI d'un `<link
+    rel=stylesheet>` sont désormais
+    `warn`-logués **et** rapportés en
+    `PipelineError` (`/console`) ; les
+    refus en plan (mixed-content,
+    `style-src`) sont warn-logués.
+  - **`rel="preload" as="style"` collecté**
+    (repli produit, vol 32) : le swap JS
+    `onload→rel=stylesheet` meurt avec le
+    JS — la feuille préchargée est
+    traitée comme un stylesheet
+    (`media=` toujours honoré).
+  - **Scripts — fin des morts muettes**
+    (`explorer-core`, vol 33 radiogarden :
+    33 scripts, app jamais initialisée,
+    console vide) : échec de fetch, statut
+    non-2xx et refus nosniff/CORP/SRI d'un
+    `<script src>` sont désormais
+    `warn`-logués **et** rapportés en
+    `PipelineError` ; le refus en plan
+    (résolution, mixed-content,
+    `script-src`) est warn-logué — un slot
+    `script_srcs` laissé vide n'est plus
+    invisible à l'éval.
+
+- **Vol 2026-10-26 — correctifs de vol,
   vague 3 (FIX-3, vols 18/19)**
   - **Console perdue après navigation**
     (x.com) : `event_capacity` 64 → 512 —
@@ -709,6 +756,16 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
     défaut viewport dans tous les cas,
     `?full=1` document ; le 200 à corps
     vide reste impossible (204 + Retry-After).
+- **JS-C156 — `JsError::Timeout`
+  typé** (`explorer-js`) — le
+  disjoncteur « moteur figé »
+  rendait `Uncaught("moteur figé —
+  éval dépassée")` (signature
+  chaîne fragile) ; nouveau kind
+  `Timeout` distinct de
+  `Uncaught`/`Dead` — la session
+  peut distinguer un stall d'une
+  exception du script.
 
 - **Vol 2026-10-26 — correctifs de vol,
   vague 2 (FIX-3, vols 13/16/17)**
