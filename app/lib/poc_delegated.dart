@@ -10,9 +10,12 @@ import 'features/browser/presentation/delegated_webview.dart';
 /// aucun wiring navigate. Lanceur séparé :
 /// `flutter run -d windows -t lib/poc_delegated.dart`.
 ///
-/// Charge une page DRM-capable pour vérifier que le HWND natif
-/// s'affiche ; la lecture DRM réelle (login requis) se mesure
-/// au terrain, pas ici.
+/// URL cible par `--dart-define=POC_URL=…` (défaut : la page
+/// de test DRM publique de Bitmovin — Widevine/PlayReady
+/// mesurables **sans compte** : la pastille de statut CDM et
+/// la lecture de test se vérifient en vrai). Exemples :
+///   POC_URL=https://bitmovin.com/demos/drm-test/
+///   POC_URL=https://www.youtube.com/   (rendu + MSE natifs)
 void main() {
   runApp(const _DelegatedPocApp());
 }
@@ -20,12 +23,15 @@ void main() {
 class _DelegatedPocApp extends StatelessWidget {
   const _DelegatedPocApp();
 
+  static const _url = String.fromEnvironment(
+    'POC_URL',
+    defaultValue: 'https://bitmovin.com/demos/drm-test/',
+  );
+
   @override
   Widget build(BuildContext context) {
     return const MaterialApp(
-      home: Scaffold(
-        body: DelegatedWebView(url: 'https://www.netflix.com/'),
-      ),
+      home: Scaffold(body: DelegatedWebView(url: _url)),
     );
   }
 }

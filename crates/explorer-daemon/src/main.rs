@@ -365,17 +365,17 @@ fn main() {
     // crochet Rust) ; une entrée `panic:` = crochet exécuté
     // → le panic est nommé. `EXPLORER_DEATH_LOG` surchage le
     // chemin (défaut `$TEMP/explorer_daemon_death.log`).
-    let death_log = std::env::var("EXPLORER_DEATH_LOG")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| std::env::temp_dir().join("explorer_daemon_death.log"));
+    let death_log = std::env::var("EXPLORER_DEATH_LOG").map_or_else(
+        |_| std::env::temp_dir().join("explorer_daemon_death.log"),
+        PathBuf::from,
+    );
     let _ = std::fs::write(&death_log, "alive\n");
     {
         let p = death_log.clone();
         std::panic::set_hook(Box::new(move |info| {
             let loc = info
                 .location()
-                .map(|l| format!("{l}"))
-                .unwrap_or_else(|| "?".to_string());
+                .map_or_else(|| "?".to_string(), |l| format!("{l}"));
             let _ = std::fs::write(&p, format!("panic: {info} @ {loc}\n"));
             eprintln!("explorer-daemon : panic {info} @ {loc}");
         }));

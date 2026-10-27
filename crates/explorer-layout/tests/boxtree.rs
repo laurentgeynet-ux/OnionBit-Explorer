@@ -588,5 +588,8 @@ fn commentaire_ne_peint_pas() {
         !texts.iter().any(|t| t.contains("secret")),
         "commentaire peint : {texts:?}"
     );
-    assert!(texts.iter().any(|t| t.contains("visible")), "texte perdu : {texts:?}");
+    assert!(
+        texts.iter().any(|t| t.contains("visible")),
+        "texte perdu : {texts:?}"
+    );
 }
