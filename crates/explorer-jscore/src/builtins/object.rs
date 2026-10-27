@@ -130,9 +130,12 @@ pub(crate) fn object_keys(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult
 pub(crate) fn object_get_proto(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     match arg(args, 0) {
         // Proxy : trap `getPrototypeOf` (objet ou null requis),
-        // sinon proto de la cible.
-        Value::Obj(id) => {
-            if let Some((tid, target, handler)) = e.proxy_th(id)? {
+        // sinon délégation à la cible — boucle bornée : un proxy
+        // sans trap transfère `[[GetPrototypeOf]]` à sa cible,
+        // qui peut elle-même proxifier (J2, chaîne alpine).
+        Value::Obj(mut id) => {
+            let mut depth = 0;
+            while let Some((tid, target, handler)) = e.proxy_th(id)? {
                 let trap = e.proxy_trap(handler, "getPrototypeOf")?;
                 if matches!(trap, Value::Obj(_)) {
                     let r = e.call_value(trap, handler, &[target])?;
@@ -157,7 +160,8 @@ pub(crate) fn object_get_proto(e: &mut Engine, _t: Value, args: &[Value]) -> JsR
                         }
                     }
                 }
-                return Ok(e.heap.obj(tid).map_or(Value::Null, |o| o.proto));
+                id = tid;
+                e.deleg_hop(&mut depth)?;
             }
             Ok(e.heap.obj(id).map_or(Value::Null, |o| o.proto))
         }
@@ -186,10 +190,13 @@ pub(crate) fn object_set_proto(e: &mut Engine, _t: Value, args: &[Value]) -> JsR
         Value::Null | Value::Undefined => Value::Null,
         _ => return Err(e.type_error("setPrototypeOf: proto must be an object or null")),
     };
-    let Value::Obj(id) = target else {
+    let Value::Obj(mut id) = target else {
         return Ok(target); // primitives are ignored, per spec
     };
-    if let Some((tid, tv, handler)) = e.proxy_th(id)? {
+    // Délégation bornée — chaîne `Proxy(proxy)×N` sans trap
+    // récurait ici hors `call_depth` (J2, classe alpine).
+    let mut depth = 0;
+    while let Some((tid, tv, handler)) = e.proxy_th(id)? {
         let trap = e.proxy_trap(handler, "setPrototypeOf")?;
         if matches!(trap, Value::Obj(_)) {
             let ok = e.call_value(trap, handler, &[tv, proto])?;
@@ -208,7 +215,8 @@ pub(crate) fn object_set_proto(e: &mut Engine, _t: Value, args: &[Value]) -> JsR
             }
             return Ok(target);
         }
-        return object_set_proto(e, Value::Undefined, &[Value::Obj(tid), proto]);
+        id = tid;
+        e.deleg_hop(&mut depth)?;
     }
     if !e.heap.obj(id).is_some_and(|o| o.extensible) {
         return Err(e.type_error("cannot set prototype of non-extensible object"));
@@ -300,7 +308,10 @@ pub(crate) fn define_one_prop(
     key: &str,
     desc_id: ObjId,
 ) -> JsResult<()> {
-    if let Some((tid, target, handler)) = e.proxy_th(id)? {
+    // Délégation bornée — même motif que `object_set_proto` (J2).
+    let mut id = id;
+    let mut depth = 0;
+    while let Some((tid, target, handler)) = e.proxy_th(id)? {
         let trap = e.proxy_trap(handler, "defineProperty")?;
         if matches!(trap, Value::Obj(_)) {
             let kv = e.str_val(key);
@@ -321,7 +332,8 @@ pub(crate) fn define_one_prop(
                 Err(e.type_error(format!("cannot define property `{key}`")))
             };
         }
-        return define_one_prop(e, tid, key, desc_id);
+        id = tid;
+        e.deleg_hop(&mut depth)?;
     }
     let desc = Value::Obj(desc_id);
     let (has_value, has_writable, has_enumerable, has_configurable, has_get, has_set) = {

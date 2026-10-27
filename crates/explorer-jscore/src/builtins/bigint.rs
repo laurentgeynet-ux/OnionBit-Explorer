@@ -838,8 +838,11 @@ pub(crate) fn object_prevent_extensions(
     _t: Value,
     args: &[Value],
 ) -> JsResult<Value> {
-    if let Value::Obj(id) = arg(args, 0) {
-        if let Some((tid, target, handler)) = e.proxy_th(id)? {
+    if let Value::Obj(mut id) = arg(args, 0) {
+        // Délégation bornée — chaîne `Proxy(proxy)×N` sans trap
+        // récurait ici hors `call_depth` (J2, classe alpine).
+        let mut depth = 0;
+        while let Some((tid, target, handler)) = e.proxy_th(id)? {
             let trap = e.proxy_trap(handler, "preventExtensions")?;
             if matches!(trap, Value::Obj(_)) {
                 let ok = e.call_value(trap, handler, &[target])?;
@@ -853,7 +856,8 @@ pub(crate) fn object_prevent_extensions(
                 }
                 return Ok(arg(args, 0));
             }
-            return object_prevent_extensions(e, Value::Undefined, &[Value::Obj(tid)]);
+            id = tid;
+            e.deleg_hop(&mut depth)?;
         }
         if let Some(o) = e.heap.obj_mut(id) {
             o.extensible = false;
@@ -863,8 +867,10 @@ pub(crate) fn object_prevent_extensions(
 }
 
 pub(crate) fn object_is_extensible(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
-    if let Value::Obj(id) = arg(args, 0) {
-        if let Some((tid, target, handler)) = e.proxy_th(id)? {
+    if let Value::Obj(mut id) = arg(args, 0) {
+        // Délégation bornée — même motif que `object_prevent_extensions` (J2).
+        let mut depth = 0;
+        while let Some((tid, target, handler)) = e.proxy_th(id)? {
             let trap = e.proxy_trap(handler, "isExtensible")?;
             if matches!(trap, Value::Obj(_)) {
                 let r = e.call_value(trap, handler, &[target])?;
@@ -876,7 +882,8 @@ pub(crate) fn object_is_extensible(e: &mut Engine, _t: Value, args: &[Value]) ->
                 }
                 return Ok(Value::Bool(rb));
             }
-            return object_is_extensible(e, Value::Undefined, &[Value::Obj(tid)]);
+            id = tid;
+            e.deleg_hop(&mut depth)?;
         }
         return Ok(Value::Bool(e.heap.obj(id).is_some_and(|o| o.extensible)));
     }

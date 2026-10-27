@@ -229,7 +229,7 @@ impl Engine {
     /// body threw or a specifier could not be resolved/loaded.
     pub fn eval_module(&mut self, src: &str, name: &str) -> Result<Value> {
         self.ops_left = self.op_limit;
-        self.arm_eval_deadline();
+        self.arm_eval_deadline_boot();
         let prev = std::mem::replace(&mut self.current_module, name.to_string());
         let r = self.eval_module_inner(src, name);
         self.current_module = prev;

@@ -40,6 +40,12 @@ const DEFAULT_OP_LIMIT: u64 = 10_000_000;
 /// le timeout canal (30 s) : une rafale rend la main aux pompes
 /// ~10× plus tôt (allrecipes : 6 pompes × 30 s ≈ 3-6 min muets).
 const DEFAULT_EVAL_MS: u64 = 10_000;
+/// Budget des évals **boot** (`run_program`, `eval_module`) —
+/// `EXPLORER_JS_EVAL_BOOT_TIMEOUT_MS`. B-22 : un bundle légitime
+/// (cryptpad `less.min.js` > 10 s à compiler) ne doit pas mourir
+/// comme une rafale hostile — la deadline serrée vaut pour les
+/// pompes timers/microtasks, pas pour la passe de chargement.
+const DEFAULT_EVAL_BOOT_MS: u64 = 60_000;
 /// Seuil GC par défaut (JS-C37) — ~130 K cellules vivantes
 /// déclenchent une passe à la frontière de job suivante.
 const DEFAULT_GC_THRESHOLD: usize = 131_072;
@@ -273,6 +279,10 @@ pub struct Engine {
     /// Budget wall-clock d'un batch, ms — `EXPLORER_JS_EVAL_
     /// TIMEOUT_MS` lu une fois (défaut : voir `DEFAULT_EVAL_MS`).
     eval_timeout_ms: u64,
+    /// Budget wall-clock des évals boot (`run_program`/
+    /// `eval_module`), ms — `EXPLORER_JS_EVAL_BOOT_TIMEOUT_MS`
+    /// (défaut `DEFAULT_EVAL_BOOT_MS`, B-22 : compile légitime).
+    eval_timeout_boot_ms: u64,
     /// Posé par `tick` quand la deadline échoue — les bords
     /// publics convertissent en `Error::Deadline` (→ `JsError::
     /// Timeout` côté adaptateur → disjoncteur moteur figé).
@@ -772,6 +782,10 @@ impl Engine {
             ops_left: DEFAULT_OP_LIMIT,
             op_limit: DEFAULT_OP_LIMIT,
             eval_deadline: None,
+            eval_timeout_boot_ms: std::env::var("EXPLORER_JS_EVAL_BOOT_TIMEOUT_MS")
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(DEFAULT_EVAL_BOOT_MS),
             eval_timeout_ms: std::env::var("EXPLORER_JS_EVAL_TIMEOUT_MS")
                 .ok()
                 .and_then(|v| v.parse().ok())
@@ -2476,7 +2490,7 @@ impl Engine {
     /// retour (une frontière de job).
     fn run_program(&mut self, prog: &crate::ast::Program) -> Result<Value> {
         self.ops_left = self.op_limit;
-        self.arm_eval_deadline();
+        self.arm_eval_deadline_boot();
         let r = match self.exec_program(prog) {
             Ok(v) => Ok(v),
             Err(Thrown(_v)) if self.deadline_hit => Err(Error::Deadline),
@@ -2772,13 +2786,14 @@ impl Engine {
         Thrown(self.error_value(proto, "SyntaxError", &msg.into()))
     }
 
-    /// Borne partagée des chaînes de délégation proxy —
-    /// `new Proxy(p,…)` ×N : chaque maillon sans trap re-saute
-    /// vers sa cible *hors* `call_depth` (J2 : la chaîne
-    /// `Proxy(proxy)×20k` overflowait la pile native, classe du
-    /// crash alpine). Au-delà de `MAX_PROTO_DEPTH` → `RangeError`,
-    /// cohérent avec les moteurs natifs (stack overflow).
-    pub(crate) fn proxy_hop(&mut self, depth: &mut u32) -> JsResult<()> {
+    /// Borne partagée des chaînes de délégation objet —
+    /// `new Proxy(p,…)` ×N ou `f.bind()…` ×N : chaque maillon
+    /// sans trap re-saute vers sa cible *hors* `call_depth`
+    /// (J2 : la chaîne `Proxy(proxy)×20k` overflowait la pile
+    /// native, classe du crash alpine). Au-delà de
+    /// `MAX_PROTO_DEPTH` → `RangeError`, cohérent avec les
+    /// moteurs natifs (stack overflow).
+    pub(crate) fn deleg_hop(&mut self, depth: &mut u32) -> JsResult<()> {
         *depth += 1;
         if *depth > MAX_PROTO_DEPTH {
             return Err(self.range_error("maximum proxy delegation depth exceeded"));
@@ -2865,6 +2880,15 @@ impl Engine {
 
     /// Arme la deadline wall-clock pour le batch qui entre
     /// (éval / drain timers / microtasks). `0` ms = illimité.
+    /// Armement boot — `run_program`/`eval_module` : la passe
+    /// de chargement est un job unique (B-22 : bundle légitime
+    /// `> 10 s` à compiler — cryptpad `less.min.js`), pas une
+    /// rafale hostile — budget propre plus large.
+    pub(crate) fn arm_eval_deadline_boot(&mut self) {
+        self.eval_deadline = (self.eval_timeout_boot_ms > 0)
+            .then(|| Instant::now() + std::time::Duration::from_millis(self.eval_timeout_boot_ms));
+    }
+
     pub(crate) fn arm_eval_deadline(&mut self) {
         self.eval_deadline = (self.eval_timeout_ms > 0)
             .then(|| Instant::now() + std::time::Duration::from_millis(self.eval_timeout_ms));
@@ -2879,8 +2903,15 @@ impl Engine {
 
     /// Budget wall-clock d'un batch d'éval, en ms (hôte/tests —
     /// `0` = deadline désactivée).
+    /// Budget **boot** seul (`run_program`/`eval_module`) —
+    /// les pompes ne sont pas touchées (B-22).
+    pub fn set_eval_timeout_boot_ms(&mut self, ms: u64) {
+        self.eval_timeout_boot_ms = ms;
+    }
+
     pub fn set_eval_timeout_ms(&mut self, ms: u64) {
         self.eval_timeout_ms = ms;
+        self.eval_timeout_boot_ms = ms;
     }
 
     /// Operation budget tick — also counts microtasks so a
@@ -4002,6 +4033,7 @@ impl Engine {
     /// Own-property lookup with array/`length` semantics — returns
     /// the raw `Prop` so accessor pairs are visible to the caller.
     pub(crate) fn find_own(&mut self, id: ObjId, key: &str) -> Option<Prop> {
+        self.lowstack_tick();
         // `arguments` mappé : l'indice renvoie au slot env du
         // paramètre formel (spec `MappedArgumentsObject` [[Get]]).
         if let Some(i) = array_index(key) {
@@ -4353,7 +4385,7 @@ impl Engine {
                 return Ok(v);
             }
             id = tid;
-            self.proxy_hop(&mut depth)?;
+            self.deleg_hop(&mut depth)?;
         }
         match self.find_prop(id, key) {
             Some(Prop::Data { value, .. }) => Ok(value),
@@ -4406,7 +4438,7 @@ impl Engine {
                 // Chaîne de délégation proxy hostile → erreur
                 // (spec : RangeError) ; la marche proto ordinaire
                 // garde sa borne silencieuse `break` historique.
-                self.proxy_hop(&mut phops)?;
+                self.deleg_hop(&mut phops)?;
                 if depth > MAX_PROTO_DEPTH {
                     break;
                 }
@@ -4969,7 +5001,7 @@ impl Engine {
                 return Ok(self.to_boolean(r));
             }
             id = tid;
-            self.proxy_hop(&mut depth)?;
+            self.deleg_hop(&mut depth)?;
         }
         if let Some(h) = self.host_of(id) {
             if h.get(self, Value::Obj(id), key)?.is_some() {
@@ -5043,7 +5075,7 @@ impl Engine {
                 self.to_boolean(r)
             } else {
                 id = tid;
-                self.proxy_hop(&mut depth)?;
+                self.deleg_hop(&mut depth)?;
                 continue;
             };
             if ok {
@@ -5209,7 +5241,7 @@ impl Engine {
                 return Ok(out);
             }
             id = tid;
-            self.proxy_hop(&mut depth)?;
+            self.deleg_hop(&mut depth)?;
         }
         Ok(self.own_keys(id))
     }
@@ -5270,7 +5302,7 @@ impl Engine {
                 };
             }
             id = tid;
-            self.proxy_hop(&mut depth)?;
+            self.deleg_hop(&mut depth)?;
         }
         Ok(self.find_own(id, key))
     }
@@ -5477,16 +5509,35 @@ impl Engine {
             return Err(self.type_error("`instanceof` requires an object"));
         };
         // `@@hasInstance` d'abord (spec : le hook prime sur
-        // l'exigence callable).
-        let m = self.get_prop_value(target, SYM_HAS_INSTANCE)?;
-        if self.is_callable(m) {
-            let b = self.call_value(m, target, &[v])?;
-            return Ok(self.to_boolean(b));
+        // l'exigence callable) — revérifié à chaque maillon bound.
+        // La délégation `BoundFunction[[HasInstance]]` boucle ici :
+        // `bind` chaîné ×N récurait hors `call_depth` (J2).
+        let mut c = target;
+        let mut depth = 0;
+        loop {
+            let m = self.get_prop_value(c, SYM_HAS_INSTANCE)?;
+            if self.is_callable(m) {
+                let b = self.call_value(m, c, &[v])?;
+                return Ok(self.to_boolean(b));
+            }
+            if !self.is_callable(c) {
+                return Err(self.type_error("right side of `instanceof` is not callable"));
+            }
+            let bound = match c {
+                Value::Obj(id) => match self.heap.obj(id).map(|o| &o.kind) {
+                    Some(ObjKind::Fun(Fun::Bound { target, .. })) => Some(*target),
+                    _ => None,
+                },
+                _ => None,
+            };
+            match bound {
+                Some(t) => {
+                    c = t;
+                    self.deleg_hop(&mut depth)?;
+                }
+                None => return self.ordinary_has_instance(c, v),
+            }
         }
-        if !self.is_callable(target) {
-            return Err(self.type_error("right side of `instanceof` is not callable"));
-        }
-        self.ordinary_has_instance(target, v)
     }
 
     /// `OrdinaryHasInstance(C, O)` : chaîne de prototypes de `O`
