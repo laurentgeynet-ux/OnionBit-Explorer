@@ -1705,6 +1705,20 @@ impl Engine {
         // Valeurs low-fingerprint, pas des stubs promettant.
         self.set_own(nav, "onLine", Value::Bool(true), true);
         self.set_own(nav, "cookieEnabled", Value::Bool(true), true);
+        // `navigator.userAgentData` (B-24 qwant) — l'absence
+        // laissait les détects modernes en fallback « inconnu
+        // → mobile » : réponse desktop spec-honnête
+        // (`mobile:false`) au lieu de `undefined`, low-
+        // fingerprint (`brands` vide, `platform` figé).
+        let uad = self.new_object();
+        let empty = self.new_array(vec![]);
+        self.set_own(uad, "brands", empty, true);
+        self.set_own(uad, "mobile", Value::Bool(false), true);
+        let win = self.str_val("Windows");
+        self.set_own(uad, "platform", win, true);
+        let tag = self.str_val("NavigatorUAData");
+        self.set_own(uad, crate::interp::SYM_TO_STRING_TAG, tag, false);
+        self.set_own(nav, "userAgentData", Value::Obj(uad), true);
         self.set_own(nav, "webdriver", Value::Bool(false), true);
         self.set_own(nav, "globalPrivacyControl", Value::Bool(false), true);
         self.set_own(nav, "doNotTrack", Value::Null, true);
@@ -2477,6 +2491,12 @@ impl Engine {
             "SourceBuffer",
             "RTCPeerConnection",
             "Geolocation",
+            // marmiton (V4) : `x instanceof GeolocationPosition`
+            // — le nom absent tuait le feature-detect en
+            // ReferenceError ; le callback du position porte
+            // `coords` → `GeolocationCoordinates` avec.
+            "GeolocationPosition",
+            "GeolocationCoordinates",
             "PushManager",
             "ServiceWorker",
             "ServiceWorkerContainer",
@@ -3763,6 +3783,17 @@ impl Host for DocumentHost {
                 let v = crate::misc_apis::get_selection(e, Value::Undefined, &[])?;
                 Ok(Some(v))
             }
+            // `document.contains(node)` — `Node.contains` au
+            // niveau document (ratp vol 45 : la nav off-canvas
+            // teste `document.contains(el)` — absent → `of
+            // Undefined` dans son handler).
+            "contains" => {
+                let r = node_for_in(e, arg(args, 0), &self.dom).is_some_and(|o| {
+                    let d = self.dom.borrow();
+                    d.contains(d.root, o)
+                });
+                Ok(Some(Value::Bool(r)))
+            }
             "getElementById" => {
                 let id = e.to_js_string(arg(args, 0))?;
                 let found = self.dom.borrow().by_id(&id);
@@ -4313,6 +4344,7 @@ const DOC_METHODS: &[&str] = &[
     "caretPositionFromPoint",
     "getSelection",
     "hasFocus",
+    "contains",
     "getElementById",
     "getElementsByTagName",
     "getElementsByClassName",

@@ -6514,3 +6514,35 @@ fn component_name_and_function_name_probe() {
         }
     }
 }
+
+#[test]
+fn document_contains_nodes() {
+    // ratp (vol 45) : `document.contains(el)` — Node.contains
+    // au niveau document.
+    let (mut e, _jar, _navs) = engine_full(PAGE);
+    assert_eq!(
+        evf(&mut e, "document.contains(document.getElementById('main'))"),
+        "true"
+    );
+    assert_eq!(evf(&mut e, "document.contains(document.body)"), "true");
+    assert_eq!(evf(&mut e, "document.contains(null)"), "false");
+}
+
+#[test]
+fn geolocation_names_defined() {
+    // marmiton (V4) : `GeolocationPosition`/`GeolocationCoordinates`
+    // nommés (détection, jamais construits).
+    let (mut e, _jar, _navs) = engine_full(PAGE);
+    assert_eq!(evf(&mut e, "typeof GeolocationPosition"), "function");
+    assert_eq!(evf(&mut e, "typeof GeolocationCoordinates"), "function");
+}
+
+#[test]
+fn user_agent_data_desktop() {
+    // B-24 qwant : `userAgentData.mobile` répond `false` —
+    // l'absence laissait les détects en fallback mobile.
+    let (mut e, _jar, _navs) = engine_full(PAGE);
+    assert_eq!(evf(&mut e, "typeof navigator.userAgentData"), "object");
+    assert_eq!(evf(&mut e, "navigator.userAgentData.mobile"), "false");
+    assert_eq!(evf(&mut e, "navigator.userAgentData.platform"), "Windows");
+}
