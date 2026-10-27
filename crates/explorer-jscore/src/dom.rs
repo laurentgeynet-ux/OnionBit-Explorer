@@ -389,6 +389,10 @@ impl Default for CanvasState {
 /// playback R-11 reste linéaire (règle « budgets » — boucles
 /// de dessin hostiles).
 const DEFAULT_CANVAS_OP_LIMIT: usize = 65_536;
+/// Borne d`iframes dynamiques attachés par onglet (B-29) —
+/// AdSense `sodar` en crée en continu (~90/min, heap +40 Mo/min) ;
+/// au-delà l`élément monte sans realm (mort douce télémétrie).
+pub(crate) const MAX_DYN_FRAMES: usize = 64;
 
 /// Snapshot « chemin élément → op-list cumulée » exporté par
 /// [`Dom::canvas_ops`] (JS-C28) — même format de chemin que
@@ -1301,6 +1305,15 @@ impl Dom {
         }
         let el = &self.nodes[node as usize];
         if el.kind != NodeKind::Element || el.tag != "iframe" {
+            return;
+        }
+        // B-29 (linuxmint) : AdSense `sodar` crée des iframes
+        // de télémétrie en continu (~90/min → 419 nœuds, heap
+        // +40 Mo/min). Au-delà du cap, l'élément monte mais
+        // n'est jamais enfilé : pas de realm, pas de fetch,
+        // `contentWindow`/`contentDocument` restent `null`
+        // — mort douce pour la télémétrie, page intacte.
+        if self.dyn_frame_seen.len() >= MAX_DYN_FRAMES {
             return;
         }
         self.dyn_frame_seen.insert(node);
