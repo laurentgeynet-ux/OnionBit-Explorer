@@ -437,16 +437,40 @@ impl Session {
     /// Évalue un `<script type="module">` dont le graphe est
     /// déjà rempli (prefetch détaché dans [`SubJob::run`]) —
     /// `eval_module` + `PipelineError` sans faire échouer la
+    /// `PipelineError` dédupliqué (B-12) — une erreur en
+    /// rafale (`heap memory limit` ×14 bookshop, `X is
+    /// not defined` ×512 genius) noyait le ring console :
+    /// 1ère occurrence émise, répétitions *consécutives*
+    /// identiques tues et re-émises toutes les 16 avec
+    /// `×N`. Un message différent réarme la série.
+    fn emit_pipeline_error(&mut self, tab: TabId, message: String) {
+        let n = match self.last_pipeline_error.as_mut() {
+            Some((t, m, n)) if *t == tab && *m == message => {
+                *n += 1;
+                *n
+            }
+            _ => {
+                self.last_pipeline_error = Some((tab, message.clone(), 1));
+                1
+            }
+        };
+        if n == 1 || n % 16 == 0 {
+            let msg = if n > 1 {
+                format!("{message} — ×{n}")
+            } else {
+                message
+            };
+            self.emit_pipeline_error(tab, msg);
+        }
+    }
+
     /// page.
     pub(crate) fn eval_module_graph(&mut self, tab: TabId, eng: &mut dyn JsEngine, me: &ModEval) {
         tracing::debug!(tab, name = %me.name, "module eval…");
         let t0 = std::time::Instant::now();
         if let Err(e) = Self::eval_mod(eng, me) {
             tracing::debug!(tab, error = %e, "module en échec");
-            let _ = self.events.send(CoreEvent::PipelineError {
-                tab: Some(tab),
-                message: format!("{e} — module «{}»", me.name),
-            });
+            self.emit_pipeline_error(tab, format!("{e} — module «{}»", me.name));
         } else {
             tracing::debug!(tab, ms = t0.elapsed().as_millis(), "module eval fin");
         }
@@ -679,10 +703,7 @@ impl Session {
             if Self::is_engine_stall(&e) {
                 self.mark_js_stall(tab, &e);
             }
-            let _ = self.events.send(CoreEvent::PipelineError {
-                tab: Some(tab),
-                message: format!("{e} — iframe — src «{}»", src_head(src)),
-            });
+            self.emit_pipeline_error(tab, format!("{e} — iframe — src «{}»", src_head(src)));
         }
     }
 
@@ -703,10 +724,7 @@ impl Session {
     #[allow(dead_code)]
     pub(crate) fn report_unhandled_rejection(&mut self, tab: TabId, message: &str) {
         tracing::warn!(tab, error = %message, "promesse rejetée non rattrapée");
-        let _ = self.events.send(CoreEvent::PipelineError {
-            tab: Some(tab),
-            message: format!("unhandledrejection — {message}"),
-        });
+        self.emit_pipeline_error(tab, format!("unhandledrejection — {message}"));
     }
 
     /// `true` si l'erreur trahit un worker moteur saturé ou
@@ -874,13 +892,10 @@ impl Session {
                 "script sauté — disjoncteur moteur ouvert"
             );
             let origin = url.map(|u| format!("{u} — ")).unwrap_or_default();
-            let _ = self.events.send(CoreEvent::PipelineError {
-                tab: Some(tab),
-                message: format!(
+            self.emit_pipeline_error(tab, format!(
                     "moteur figé — éval sautée — {origin}src «{}»",
                     src_head(src)
-                ),
-            });
+                ));
             return;
         }
         let t_eval = std::time::Instant::now();
@@ -904,10 +919,7 @@ impl Session {
                 self.mark_js_stall(tab, &e);
             }
             let origin = url.map(|u| format!("{u} — ")).unwrap_or_default();
-            let _ = self.events.send(CoreEvent::PipelineError {
-                tab: Some(tab),
-                message: format!("{e} — {origin}src «{}»", src_head(src)),
-            });
+            self.emit_pipeline_error(tab, format!("{e} — {origin}src «{}»", src_head(src)));
         }
     }
 
@@ -982,6 +994,7 @@ impl Session {
     ) -> bool {
         let t0 = Instant::now();
         let cooldown = self.js_stall_cooldown;
+        let mut emit_err = None;
         let (prevented, mut t, mutated) = {
             let Some(entry) = self.tabs.get_mut(&tab) else {
                 return false;
@@ -1020,10 +1033,7 @@ impl Session {
                         entry.js_stall_until = Some(Instant::now() + cooldown);
                     }
                     tracing::debug!(tab, ty, error = %e, "listener dom en échec");
-                    let _ = self.events.send(CoreEvent::PipelineError {
-                        tab: Some(tab),
-                        message: e.to_string(),
-                    });
+                    emit_err = Some(e.to_string());
                     false
                 }
             };
@@ -1033,6 +1043,9 @@ impl Session {
             let m = Self::sync_for_apply(eng.as_mut());
             (p, sync_phase(tab, "event.mirror_sync", t1), m)
         };
+        if let Some(m) = emit_err {
+            self.emit_pipeline_error(tab, m);
+        }
         if let Some(s) = mutated {
             let ta = Instant::now();
             // Mutation enfilée — l'apply tourne hors verrou

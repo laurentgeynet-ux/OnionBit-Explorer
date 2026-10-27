@@ -882,6 +882,10 @@ pub struct Session {
     /// `take_next_apply`, relâché aux quatre sorties
     /// (commit, rejet, parc orphelin, panic réarmé).
     pub(crate) paint_in_flight: std::collections::HashMap<TabId, std::time::Instant>,
+    /// Déduplieur des erreurs pipeline en rafale (B-12) —
+    /// `(onglet, message, occurrences)` : répétitions
+    /// consécutives identiques tues, re-émises ×16.
+    last_pipeline_error: Option<(TabId, String, u32)>,
 }
 
 impl Session {
@@ -1007,6 +1011,7 @@ impl Session {
             applies_started: 0,
             applies_fin: 0,
             paint_in_flight: std::collections::HashMap::new(),
+            last_pipeline_error: None,
             orphaned_paints: std::sync::Arc::new(std::sync::Mutex::new(
                 std::collections::HashMap::new(),
             )),
