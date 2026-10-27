@@ -1718,6 +1718,56 @@ impl Engine {
         self.set_own(uad, "platform", win, true);
         let tag = self.str_val("NavigatorUAData");
         self.set_own(uad, crate::interp::SYM_TO_STRING_TAG, tag, false);
+        // `getHighEntropyValues` (speedtest vol78) — spec :
+        // promesse résolue aux hints demandés, mêmes valeurs
+        // low-fingerprint que l'objet — jamais `undefined`.
+        let ghev = self.native_fn(
+            "getHighEntropyValues",
+            |e: &mut Engine, _t: Value, args: &[Value]| {
+                let hints: Vec<String> = match args.first() {
+                    Some(v @ Value::Obj(_)) => {
+                        let len = e
+                            .get_prop_value(*v, "length")
+                            .ok()
+                            .and_then(|l| match l {
+                                Value::Num(n) => Some(n as u32),
+                                _ => None,
+                            })
+                            .unwrap_or(0);
+                        (0..len)
+                            .filter_map(|i| {
+                                e.get_prop_value(*v, &i.to_string())
+                                    .ok()
+                                    .and_then(|x| e.to_js_string(x).ok())
+                            })
+                            .collect()
+                    }
+                    _ => Vec::new(),
+                };
+                let out = e.new_object();
+                let vals: Vec<(&str, Value)> = vec![
+                    ("brands", e.new_array(vec![])),
+                    ("mobile", Value::Bool(false)),
+                    ("platform", e.str_val("Windows")),
+                    ("platformVersion", e.str_val("15.0.0")),
+                    ("architecture", e.str_val("x86")),
+                    ("bitness", e.str_val("64")),
+                    ("model", e.str_val("")),
+                    ("uaFullVersion", e.str_val("0.1.0")),
+                    ("fullVersionList", e.new_array(vec![])),
+                    ("wow64", Value::Bool(false)),
+                ];
+                for (k, v) in vals {
+                    if hints.iter().any(|h| h == k) {
+                        e.set_own(out, k, v, true);
+                    }
+                }
+                let pid = e.new_promise();
+                e.resolve_promise(pid, Value::Obj(out));
+                Ok(Value::Obj(pid))
+            },
+        );
+        self.set_own(uad, "getHighEntropyValues", ghev, true);
         self.set_own(nav, "userAgentData", Value::Obj(uad), true);
         self.set_own(nav, "webdriver", Value::Bool(false), true);
         self.set_own(nav, "globalPrivacyControl", Value::Bool(false), true);
