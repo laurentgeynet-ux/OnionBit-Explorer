@@ -37,6 +37,11 @@ struct Timer {
     cb_args: Vec<Value>,
 }
 
+/// Échecs consécutifs tolérés d'un callback d'intervalle avant
+/// qu'il ne soit plus réarmé (J8 — boucle applicative bornée ;
+/// genius : `r is not defined` ×512 par retry setInterval).
+const TIMER_FAIL_CAP: u32 = 8;
+
 /// Pending timers for one engine (page).
 #[derive(Debug, Default)]
 pub(crate) struct TimerQueue {
@@ -47,6 +52,12 @@ pub(crate) struct TimerQueue {
     /// antérieur) l'annule : `cancel` le marque ici, la pompe le
     /// saute/ne le réarme pas.
     cancelled: HashSet<u64>,
+    /// Échecs consécutifs par id d'intervalle (J8) — un
+    /// `setInterval` dont le callback jette est rapporté et
+    /// réarmé (spec : l'intervalle continue), mais au-delà du
+    /// plafond il meurt — la boucle applicative ×512 devient
+    /// bornée (genius `r is not defined` en rafale).
+    fail_streak: std::collections::HashMap<u64, u32>,
 }
 
 impl TimerQueue {
@@ -192,14 +203,46 @@ impl Engine {
             }
             // Each callback gets a fresh op budget.
             self.ops_left = self.op_limit;
-            if self.is_callable(t.cb) {
+            // Isolation par callback (J8) : un timer qui jette est
+            // rapporté (`uncaught`) et les autres timers gardent
+            // leur tour — spec : l'exception ne bloque pas la file.
+            // Les morts de budget (deadline, ops) restent fatales
+            // au batch, pas isolables.
+            let fire = if self.is_callable(t.cb) {
                 let args = t.cb_args.clone();
-                self.call_value(t.cb, Value::Obj(self.global), &args)?;
+                self.call_value(t.cb, Value::Obj(self.global), &args)
             } else if let Value::Str(sid) = t.cb {
                 // Legacy string form — parsed & run in global scope
                 // at fire time, not at schedule time.
                 let src = self.heap.string(sid).unwrap_or_default();
-                self.eval_source(&src)?;
+                self.eval_source(&src).map(|_| Value::Undefined)
+            } else {
+                Ok(Value::Undefined)
+            };
+            if let Err(crate::heap::Thrown(v)) = fire {
+                if self.deadline_hit || self.ops_left == 0 {
+                    return Err(crate::heap::Thrown(v));
+                }
+                let streak = {
+                    let s = self.timers.fail_streak.entry(t.id).or_insert(0);
+                    *s += 1;
+                    *s
+                };
+                let dead = streak >= TIMER_FAIL_CAP;
+                let desc = self.describe(v);
+                self.unhandled_reports.push(format!("uncaught: {desc}"));
+                if dead && t.interval_ms.is_some() {
+                    // Intervalle mort-né : ≥cap échecs → pas de
+                    // réarmement (borne hostile — trace une fois).
+                    tracing::warn!(
+                        id = t.id,
+                        streak = streak,
+                        "intervalle en boucle d'échecs tué (fail cap)"
+                    );
+                    continue;
+                }
+            } else {
+                self.timers.fail_streak.remove(&t.id);
             }
             // `clearInterval` dans son propre callback — le pattern
             // canonique — empêche le réarmement (sinon boucle

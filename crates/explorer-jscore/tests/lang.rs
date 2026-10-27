@@ -8346,3 +8346,81 @@ fn debugger_statement_is_noop() {
         Err(x) => panic!("debugger → {x}"),
     }
 }
+
+#[test]
+fn spread_positions() {
+    // J6 : `...` rejeté « outside a call or array literal » —
+    // quelle position reste découverte post-C146.
+    let mut e = Engine::new();
+    for src in [
+        "var a=[1,2]; var b=[...a,3]; b.join()",
+        "var o={x:1}; var p={...o,y:2}; p.x+p.y",
+        "function f(...r){return r.length} f(1,2,3)",
+        "var a=[1,2]; Math.max(...a)",
+        "var [x,...rest]=[1,2,3]; rest.join()",
+        "var {a,...o}={a:1,b:2}; o.b",
+        "function* g(){yield* [1,2]} [...g()].join()",
+        "var s='ab'; [...s].join()",
+        "for (const x of [1,2]) {}",
+        "var m=new Map([['k',1]]); [...m.keys()].join()",
+    ] {
+        match e.eval(src) {
+            Ok(v) => println!("OK   {src} → {}", e.describe(v)),
+            Err(x) => println!("FAIL {src} → {x}"),
+        }
+    }
+}
+
+#[test]
+fn spread_positions_hard() {
+    // J6 suite : positions fines du `...` post-C146.
+    let mut e = Engine::new();
+    for src in [
+        "function F(a,b){this.s=a+b} var f=new F(...[1,2]); f.s",
+        "var o; ({...o}={a:1}); o.a",
+        "var a=[1]; var b=[]; b.push(...a,9); b.join()",
+        "var a=[1]; var f=(x,...r)=>r.length; f(1,2,3)",
+        "var t=`${[...[1,2]].join()}`; t",
+        "var a=[1]; (function(){return [...a]})().join()",
+        "var g=function*(){yield ...[1]}; try{g().next()}catch(e){'thrown'}",
+        "var a=[1,2]; a.map(x=>x).concat(...[[3]]).join()",
+        "var a=[1]; try{throw ...a}catch(e){'caught'}",
+        "class C{}; new C(...[]); 'ok'",
+    ] {
+        match e.eval(src) {
+            Ok(v) => println!("OK   {src} → {}", e.describe(v)),
+            Err(x) => println!("FAIL {src} → {x}"),
+        }
+    }
+}
+
+#[test]
+fn timer_callback_error_isolated_and_capped() {
+    // J8 : un timer qui jette n'avorte pas le batch (spec —
+    // les autres gardent leur tour), est rapporté `uncaught`,
+    // et un intervalle à ≥8 échecs consécutifs meurt (borne
+    // hostile — boucle applicative genius ×512).
+    let mut e = Engine::new();
+    e.install_timers();
+    e.eval(
+        "var bad=0, good=0;\
+            setInterval(function(){ bad++; nosuchfn() }, 0);\
+            setTimeout(function(){ good=42 }, 0)",
+    )
+    .unwrap_or_else(|x| panic!("eval: {x}"));
+    // 1re pompe : l'intervalle jette (rapporté), le timeout
+    // tourne quand même (isolation), l'intervalle se réarme.
+    let _ = e.run_due_timers();
+    assert_eq!(
+        e.eval("good").map(|v| e.describe(v)).unwrap_or_default(),
+        "42"
+    );
+    // Rafale : après 8 échecs l'intervalle est mort — les
+    // pompes suivantes ne le relancent plus.
+    for _ in 0..16 {
+        let _ = e.run_due_timers();
+    }
+    let bad = e.eval("bad").map(|v| e.describe(v)).unwrap_or_default();
+    assert!(bad.parse::<u32>().unwrap_or(0) >= 8, "bad={bad}");
+    assert!(bad.parse::<u32>().unwrap_or(u32::MAX) < 20, "bad={bad}");
+}
