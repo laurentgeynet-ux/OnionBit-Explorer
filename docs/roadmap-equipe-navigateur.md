@@ -7164,6 +7164,20 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   → re-test — kill sur vivant seul.
   `c37_mem_limit_soft_kill` refondu.
 
+- [x] **JS-C134. Récursions non
+  bornées : drops AST + walks
+  runtime** (`explorer-jscore`) —
+  mur alpinejs.dev (`overflowed
+  its stack`, crash process) :
+  `Drop` itératif `Stmt`/`FnLit`/
+  `Pat`/`ClassLit` (seul `Expr`
+  l'était), `internalize` JSON sous
+  `maybe_grow`. Suite `stack_probe`
+  17 sondes profondeur. Ouvert :
+  chemin runtime exact de
+  l'overflow (récursion d'appel
+  hors `call_depth`).
+
 - [x] **JS-C133. `initCustomEvent`
   (DOM L2, strate polymer/shady)**
   (`explorer-jscore`) — `createEvent`

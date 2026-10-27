@@ -286,6 +286,21 @@ fn internalize(
     name: Value,
     reviver: Value,
 ) -> JsResult<Value> {
+    // JS-C121 : marche récursive sur le graphe objet —
+    // segment tas avant épuisement natif.
+    stacker::maybe_grow(
+        crate::parser::STACK_RED_ZONE,
+        crate::parser::STACK_GROW,
+        || internalize_inner(e, holder, name, reviver),
+    )
+}
+
+fn internalize_inner(
+    e: &mut Engine,
+    holder: crate::value::ObjId,
+    name: Value,
+    reviver: Value,
+) -> JsResult<Value> {
     let key = match name {
         Value::Str(sid) => e.heap.string(sid).unwrap_or_default(),
         Value::Num(n) => crate::value::num_to_js_string(n),

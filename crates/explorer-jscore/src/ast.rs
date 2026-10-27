@@ -727,3 +727,116 @@ pub enum ChainStep {
     /// `?.(args)`
     OptCall(Vec<Expr>),
 }
+
+impl Stmt {
+    /// Déplace les sous-statements possédés dans `out` en
+    /// laissant `Empty` — Drop itératif (JS-C121) : corps de
+    /// fonctions imbriquées (IIFEs/bundles générés) sans
+    /// récursion native à la destruction.
+    fn take_children(&mut self, out: &mut Vec<Stmt>) {
+        let take = |b: &mut Box<Stmt>, out: &mut Vec<Stmt>| {
+            out.push(std::mem::replace(&mut **b, Stmt::Empty));
+        };
+        match self {
+            Stmt::Block(items) => out.append(items),
+            Stmt::If { then, else_, .. } => {
+                take(then, out);
+                if let Some(e) = else_ {
+                    take(e, out);
+                }
+            }
+            Stmt::While { body, .. }
+            | Stmt::DoWhile { body, .. }
+            | Stmt::With { body, .. }
+            | Stmt::Labeled { body, .. }
+            | Stmt::For { body, .. }
+            | Stmt::ForIn { body, .. }
+            | Stmt::ForOf { body, .. } => take(body, out),
+            Stmt::Try {
+                block,
+                catch,
+                finally,
+            } => {
+                out.append(block);
+                if let Some((_, b)) = catch {
+                    out.append(b);
+                }
+                if let Some(b) = finally {
+                    out.append(b);
+                }
+            }
+            Stmt::Switch { cases, .. } => {
+                for c in cases.iter_mut() {
+                    out.append(&mut c.body);
+                }
+            }
+            Stmt::Export(ExportDecl::Decl(inner)) => take(inner, out),
+            _ => {}
+        }
+    }
+}
+
+impl Drop for Stmt {
+    /// Destruction itérative — même pattern que `Expr::drop` :
+    /// les corps `Block`/`If`/`Try`/fonctions imbriquées des
+    /// bundles ne débordent plus la pile (mur alpine.js).
+    fn drop(&mut self) {
+        let mut queue = Vec::new();
+        self.take_children(&mut queue);
+        while let Some(mut s) = queue.pop() {
+            s.take_children(&mut queue);
+        }
+    }
+}
+
+impl Drop for FnLit {
+    /// Corps de fonction vidé dans la file `Stmt` — les
+    /// fonctions imbriquées (closures/webpack) droppent sans
+    /// récursion (JS-C121).
+    fn drop(&mut self) {
+        let mut queue = Vec::new();
+        for s in self.body.drain(..) {
+            queue.push(s);
+        }
+        while let Some(mut s) = queue.pop() {
+            s.take_children(&mut queue);
+        }
+    }
+}
+
+impl Pat {
+    /// Sous-patterns possédés dans `out` — drop itératif
+    /// (destructurings imbriqués profonds, JS-C121).
+    fn take_children(&mut self, out: &mut Vec<Pat>) {
+        match self {
+            Pat::Rest(p) | Pat::Default(p, _) => {
+                out.push(std::mem::replace(&mut **p, Pat::Ident(String::new())));
+            }
+            Pat::Array(elems) => {
+                for e in elems.drain(..).flatten() {
+                    out.push(e);
+                }
+            }
+            Pat::Object { props, rest } => {
+                for (_, p) in props.drain(..) {
+                    out.push(p);
+                }
+                if let Some(p) = rest.take() {
+                    out.push(*p);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+impl Drop for Pat {
+    /// Destruction itérative des patterns imbriqués (JS-C121).
+    fn drop(&mut self) {
+        let mut queue = Vec::new();
+        self.take_children(&mut queue);
+        while let Some(mut p) = queue.pop() {
+            p.take_children(&mut queue);
+        }
+    }
+}

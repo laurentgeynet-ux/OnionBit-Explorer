@@ -7,6 +7,35 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **JS-C134 — récursions non
+  bornées : drops AST + walk JSON**
+  (`explorer-jscore`) — mur
+  alpinejs.dev (`has overflowed
+  its stack`, seul crash process
+  du panier de vol) : le bundle
+  évalue sain in-process mais le
+  site meurt runtime — audit des
+  chemins échappant aux compteurs.
+  Durci : `Drop` itératif pour
+  `Stmt`/`FnLit`/`Pat`/`ClassLit`
+  (seul `Expr` l'était — bundles =
+  fonctions imbriquées, drop
+  récursif non protégé) ;
+  `internalize` (`JSON.parse`
+  reviver) passe sous
+  `maybe_grow`+segment tas comme
+  `hoist_vars_only`/`bind_pat`.
+  Suite sonde `stack_probe.rs` :
+  17 constructions profondes
+  (arrays, flèches, ternaires,
+  try, regex, statements ×5000)
+  — aucune ne doit tuer le thread.
+  Reste ouvert : le chemin runtime
+  exact de l'overflow alpine
+  (récursion d'appel JS non
+  comptée par `call_depth` —
+  natives/callbacks/walk DOM).
+
 - **JS-C133 — `initCustomEvent`
   (DOM L2, strate polymer/shady)**
   (`explorer-jscore`) — mur ytd-app

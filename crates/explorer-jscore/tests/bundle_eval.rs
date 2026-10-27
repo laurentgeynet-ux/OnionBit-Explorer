@@ -49,13 +49,15 @@ fn real_bundles_first_error() {
         for ent in rd.flatten() {
             let p = ent.path();
             let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
-            let js = name.ends_with(".js")
+            let js = p
+                .extension()
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("js"))
                 && (p.parent() == Some(d)
                     && (d.ends_with("Temp") || name.starts_with('_') || name.starts_with('.')));
             if !js {
                 continue;
             }
-            let size = ent.metadata().map(|m| m.len()).unwrap_or(0);
+            let size = ent.metadata().map_or(0, |m| m.len());
             let r = try_eval(&p);
             eprintln!("[bundle] {name:40} {size:>9} o → {r}");
         }
