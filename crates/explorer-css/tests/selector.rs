@@ -560,3 +560,22 @@ fn etat_user_invalid_gatee_par_state() {
         &|n| n == "user-invalid"
     ));
 }
+
+#[test]
+fn has_descendant_matche() {
+    // R-119 — `:has(list)` relationnel (Tailwind ×105) : un
+    // élément matche si un descendant matche la liste.
+    let mut dom = Dom::new();
+    let div = dom.create_element("div").unwrap();
+    let p = dom.create_element("p").unwrap();
+    let span = dom.create_element("span").unwrap();
+    let img = dom.create_element("img").unwrap();
+    dom.append_child(dom.document(), div).unwrap();
+    dom.append_child(div, p).unwrap();
+    dom.append_child(p, span).unwrap();
+    dom.append_child(div, img).unwrap();
+    let sel = parse_selector_list("div:has(span)").unwrap().remove(0);
+    assert!(matches(&dom, div, &sel));
+    let sel2 = parse_selector_list("div:has(table)").unwrap().remove(0);
+    assert!(!matches(&dom, div, &sel2));
+}

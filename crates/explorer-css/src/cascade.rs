@@ -692,8 +692,14 @@ impl StyleEngine {
                 _ => {}
             }
         }
-        self.property_registry
-            .insert(name.to_string(), RegisteredProp { syntax, inherits, initial });
+        self.property_registry.insert(
+            name.to_string(),
+            RegisteredProp {
+                syntax,
+                inherits,
+                initial,
+            },
+        );
     }
 
     /// Moteur préchargé avec la feuille UA intégrée (règles
