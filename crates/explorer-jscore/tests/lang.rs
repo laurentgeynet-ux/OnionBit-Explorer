@@ -8114,3 +8114,22 @@ fn regex_astral_class_quantifier() {
         }
     }
 }
+
+#[test]
+fn tolowercase_receivers() {
+    // `toLowerCase is not a function` (legifrance/jquery) —
+    // la méthode vit sur String.prototype ; le mur est le
+    // récepteur : objet String boxed, valueOf, ou prop host.
+    let mut e = Engine::new();
+    for src in [
+        "'A'.toLowerCase()",
+        "new String('A').toLowerCase()",
+        "String('A').toLowerCase()",
+        "('A').toLowerCase.call('B')",
+    ] {
+        match e.eval(src) {
+            Ok(v) => println!("OK   {src} → {}", e.describe(v)),
+            Err(x) => println!("FAIL {src} → {x}"),
+        }
+    }
+}

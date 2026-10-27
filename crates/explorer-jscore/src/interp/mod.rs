@@ -5450,13 +5450,14 @@ impl Engine {
             return self.call_value(target, this, args);
         }
         let fun = match self.heap.obj(id) {
-            Some(o) => match &o.kind {
-                ObjKind::Fun(fu) => fu.clone(),
-                _ => {
+            Some(o) => {
+                if let ObjKind::Fun(fu) = &o.kind {
+                    fu.clone()
+                } else {
                     let d: String = self.describe(f).chars().take(80).collect();
                     return Err(self.type_error(format!("object is not a function: {d}")));
                 }
-            },
+            }
             None => return Err(self.type_error("value is not a function")),
         };
         match fun {

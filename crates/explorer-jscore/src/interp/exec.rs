@@ -302,10 +302,26 @@ impl Engine {
             }
             // Function decls were installed by hoisting; re-installing
             // keeps block-level decls working (Annex-B-ish tolerance).
+            // Ne pas ré-instancier quand le binding tient déjà la
+            // fonction de CETTE déclaration : le pattern babel/webpack
+            // `e.registerId=…; function e(){}` (IIFE styled-components,
+            // vaadin terrain) posait ses statiques sur l'objet hissé —
+            // un nouvel objet les perdait (`th.registerId` undefined).
+            // Décl de bloc : binding `undefined` → installe toujours ;
+            // ré-exécution en boucle : lit différent → nouvelle closure.
             Stmt::FunctionDecl(f) => {
                 if let Some(name) = &f.name {
-                    let fv = self.make_function(f, env, Value::Undefined);
-                    self.env_set(env, name, fv)?;
+                    let hoisted = matches!(self.env_get(env, name), Some(Value::Obj(id)) if {
+                        matches!(
+                            self.heap.obj(id).map(|o| &o.kind),
+                            Some(ObjKind::Fun(Fun::Script { lit, .. }))
+                                if Rc::ptr_eq(lit, f)
+                        )
+                    });
+                    if !hoisted {
+                        let fv = self.make_function(f, env, Value::Undefined);
+                        self.env_set(env, name, fv)?;
+                    }
                 }
                 Ok(Flow::Normal)
             }
