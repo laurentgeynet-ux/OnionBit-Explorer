@@ -672,6 +672,30 @@ impl StyleMap {
 }
 
 impl StyleEngine {
+    /// `@property --name { syntax; inherits; initial-value }`
+    /// (R-118) — enregistre dans [`Self::property_registry`].
+    /// `syntax` stockée non typée v1 ; `initial-value` absent
+    /// → guaranteed-invalid à l'usage (registration invalide
+    /// spec quand `syntax` ≠ `*`).
+    fn register_property(&mut self, prelude: &str, declarations: &[Declaration]) {
+        let name = prelude.trim();
+        if !name.starts_with("--") {
+            return;
+        }
+        let (mut syntax, mut inherits, mut initial) = ("*".to_string(), true, None);
+        for d in declarations {
+            let v = d.value.trim().to_string();
+            match d.name.trim() {
+                "syntax" => syntax = v.trim_matches('"').trim_matches('\'').into(),
+                "inherits" => inherits = v == "true",
+                "initial-value" => initial = Some(v),
+                _ => {}
+            }
+        }
+        self.property_registry
+            .insert(name.to_string(), RegisteredProp { syntax, inherits, initial });
+    }
+
     /// Moteur préchargé avec la feuille UA intégrée (règles
     /// standards + règles conditionnelles quirks).
     #[must_use]
@@ -847,30 +871,7 @@ impl StyleEngine {
                                 declarations: declarations.clone(),
                             });
                         } else if at.name.eq_ignore_ascii_case("property") {
-                            let name = prelude.trim();
-                            if name.starts_with("--") {
-                                let (mut syntax, mut inherits, mut initial) =
-                                    ("*".to_string(), true, None);
-                                for d in declarations {
-                                    let v = d.value.trim().to_string();
-                                    match d.name.trim() {
-                                        "syntax" => {
-                                            syntax = v.trim_matches('"').trim_matches('\'').into();
-                                        }
-                                        "inherits" => inherits = v == "true",
-                                        "initial-value" => initial = Some(v),
-                                        _ => {}
-                                    }
-                                }
-                                self.property_registry.insert(
-                                    name.to_string(),
-                                    RegisteredProp {
-                                        syntax,
-                                        inherits,
-                                        initial,
-                                    },
-                                );
-                            }
+                            self.register_property(prelude, declarations);
                         }
                     } else if let AtKind::Keyframes { name, frames } = &at.kind {
                         // `@media` englobant appliqué ? La table
@@ -1356,10 +1357,10 @@ impl StyleEngine {
                     .initial
                     .clone()
                     .unwrap_or_else(|| GUARANTEED_INVALID.to_string());
-                if !reg.inherits || !vars.contains_key(name) {
-                    if vars.get(name).map(String::as_str) != Some(v.as_str()) {
-                        Arc::make_mut(&mut vars).insert(name.clone(), v);
-                    }
+                if (!reg.inherits || !vars.contains_key(name))
+                    && vars.get(name).map(String::as_str) != Some(v.as_str())
+                {
+                    Arc::make_mut(&mut vars).insert(name.clone(), v);
                 }
             }
         }
