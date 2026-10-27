@@ -313,6 +313,38 @@ fn incr_float_et_positionnes() {
 }
 
 #[test]
+fn incr_fixed_dans_contexte_empilement() {
+    // §B-26 — `push_z` triait sur la file entière, préfixe
+    // déjà drainé inclus : un `fixed` (z=0) remonté pendant
+    // l'émission d'un contexte d'empilement différé (z=2)
+    // s'insérait AVANT l'entrée z=2 déjà émise, la déplaçant
+    // au-delà du curseur → re-émission en boucle (cycle de
+    // report borné par MAX_EMIT_PER_PATH seul) — et l'entrée
+    // insérée sous le curseur n'était jamais drainée
+    // (under-paint). La fusion doit trier parmi les non-lues.
+    let (bx, prev) = tree_of(
+        "<div id=r><div id=a></div><div id=f></div></div>",
+        "body{margin:0} #r{position:relative;z-index:2;height:60px;background-color:#eee}\
+         #a{position:absolute;z-index:1;top:0;left:30px;width:20px;height:20px;background-color:#0f0}\
+         #f{position:fixed;top:0;left:0;width:20px;height:20px;background-color:#f00}",
+    );
+    let full = full_of(&bx, 0.0);
+    assert_eq!(
+        full.dropped_emits, 0,
+        "cycle de report au plein build : {:?}",
+        full.first_cycle_path
+    );
+    let inc = inc_of(&bx, 0.0, &prev, true);
+    assert_eq!(
+        inc.dropped_emits, 0,
+        "cycle de report à l'incrémental : {:?}",
+        inc.first_cycle_path
+    );
+    assert_inc_eq_full(&bx, 0.0, &prev, true);
+    assert_inc_eq_full(&bx, 20.0, &prev, true);
+}
+
+#[test]
 fn incr_image_jamais_reusee() {
     // Contenu remplacé : F_NO_REUSE — le bitmap (Arc
     // nouvelle à chaque build) n'est jamais copié.

@@ -7,6 +7,45 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **R-98 — cause racine du cycle de
+  report §B-26 : deux bugs sous la
+  borne** (`explorer-render`) — la
+  garde `MAX_EMIT_PER_PATH` (`1e24942`)
+  masquait deux défauts réels des
+  files de porteurs reportés :
+  1. **`push_z` triait sur la file
+     entière, préfixe déjà drainé
+     inclus** : un `fixed` (z=0)
+     remonté pendant l'émission d'un
+     contexte d'empilement différé
+     (z≥0) s'insérait *avant* l'entrée
+     z déjà émise, la déplaçant au-delà
+     du curseur → re-émission en
+     boucle (le cycle `[0,0,0,0]` des
+     vols) ; l'entrée insérée sous le
+     curseur n'était jamais drainée
+     (under-paint). `push_z` gagne un
+     plancher `lo` : le tri ne porte
+     que sur les entrées non lues, et
+     les poussées pendant l'émission
+     passent par un `pending` fusionné
+     au-delà du curseur (drains
+     `pos_defer` racine et `my_pos`).
+  2. **`emit_scoped`/`emit_scoped_at`
+     enregistraient `escaped=∅`** :
+     les porteurs poussés pendant la
+     fenêtre scoped n'étaient re-poussés
+     par personne à la copie → ré-usage
+     incrémental qui *perdait* les
+     descendants différés. Capture
+     `pbase`/`fbase` + `repush_escaped`
+     (partagé avec `emit_child`) aux
+     deux sites.
+  Repro synthétique fidèle (contexte
+  d'empilement + `fixed` descendant) :
+  `dropped=1` systématique par passe
+  → `0` ; verrou
+  `incr_fixed_dans_contexte_empilement`.
 - **JS-C172 — `hostile_dom_depth`
   résolu : parse de fragment
   O(n²)→O(n)** (`explorer-jscore`) —

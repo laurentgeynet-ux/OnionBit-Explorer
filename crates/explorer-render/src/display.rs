@@ -1003,9 +1003,19 @@ fn build_list(
     // positionné peut à son tour remonter des `fixed`
     // (descendants fixés d'un absolu…).
     for (p, c) in std::mem::take(&mut fixed_defer) {
-        push_z(&mut pos_defer, p, c);
+        push_z(&mut pos_defer, 0, p, c);
     }
     // Positionnés reportés — déjà triés stable par z (`push_z`).
+    // `pending` absorbe les porteurs poussés pendant l'émission
+    // (positionnés/fixed descendants découverts en peignant un
+    // différé, ou `escaped` re-poussés par une copie de span) :
+    // ils rejoignent `pos_defer` **au-delà du curseur** — triés
+    // parmi les non-lues. Trier sur la file entière compterait
+    // le préfixe déjà drainé : une entrée fusionnée sous le
+    // curseur ne serait jamais drainée, et l'entrée déjà émise
+    // qu'elle déplace refait surface indéfiniment (cycle de
+    // report §B-26).
+    let mut pending: Vec<(Vec<u16>, &LayoutBox)> = Vec::new();
     let mut i = 0;
     while i < pos_defer.len() {
         let (p, c) = pos_defer[i].clone();
@@ -1016,11 +1026,14 @@ fn build_list(
             &mut items,
             (-scroll.0, -scroll.1),
             &mut cx,
-            &mut pos_defer,
+            &mut pending,
             &mut fixed_defer,
         );
         for (p, c) in std::mem::take(&mut fixed_defer) {
-            push_z(&mut pos_defer, p, c);
+            push_z(&mut pos_defer, i, p, c);
+        }
+        for (p, c) in std::mem::take(&mut pending) {
+            push_z(&mut pos_defer, i, p, c);
         }
     }
     let (dropped_emits, first_cycle_path) = (cx.dropped, cx.first_cycle_path.take());
@@ -2373,26 +2386,7 @@ fn emit_child<'a>(
     cx.path.push(u16::try_from(idx).unwrap_or(u16::MAX));
     if let Some((d, s, sig)) = reuse_delta(bx, off, cx) {
         copy_span(bx, s, d, sig, items, off, cx);
-        // Re-pousse les porteurs échappés de la plage —
-        // relatifs → absolus ; le drain englobant les
-        // ré-émettra via leurs propres spans. La file cible
-        // se re-déduit (inlines → `defer`, positionnés →
-        // `pos_defer`, `fixed` → `fixed_defer`).
-        for rel in &s.escaped {
-            if let Some(target) = resolve_rel(bx, rel) {
-                let mut p = cx.path.clone();
-                p.extend(rel.iter().copied());
-                if target.position == Position::Fixed {
-                    push_z(fixed_defer, p, target);
-                } else if !matches!(target.position, Position::Static | Position::Sticky)
-                    && target.z_index >= 0
-                {
-                    push_z(pos_defer, p, target);
-                } else {
-                    defer.push((p, target));
-                }
-            }
-        }
+        repush_escaped(bx, &s.escaped, cx, pos_defer, fixed_defer, Some(defer));
     } else {
         let start = u32::try_from(items.len()).unwrap_or(u32::MAX);
         let base = defer.len();
@@ -2433,16 +2427,68 @@ fn emit_scoped<'a>(
     cx.path.push(u16::try_from(idx).unwrap_or(u16::MAX));
     if let Some((d, s, sig)) = reuse_delta(bx, off, cx) {
         copy_span(bx, s, d, sig, items, off, cx);
+        repush_escaped(bx, &s.escaped, cx, pos_defer, fixed_defer, None);
     } else {
         let start = u32::try_from(items.len()).unwrap_or(u32::MAX);
+        let pbase = pos_defer.len();
+        let fbase = fixed_defer.len();
         explorer_common::deep(|| {
             paint_scoped(bx, items, off, cx, pos_defer, fixed_defer);
         });
         let end = u32::try_from(items.len()).unwrap_or(u32::MAX);
         let sig = box_sig(bx);
-        cx.record_span(bx, start, end, effective_off(bx, off), sig, Box::default());
+        // §B-26 : les porteurs poussés pendant cette fenêtre
+        // (positionnés/`fixed` descendants) doivent survivre à
+        // la copie — sinon un ré-usage perd leurs items
+        // (under-paint incrémental). Les inlines restent
+        // internes à `paint_scoped` : couverts par la plage.
+        let mut esc = escaped_paths(pos_defer, pbase, &cx.path).into_vec();
+        esc.extend(escaped_paths(fixed_defer, fbase, &cx.path).into_vec());
+        cx.record_span(
+            bx,
+            start,
+            end,
+            effective_off(bx, off),
+            sig,
+            esc.into_boxed_slice(),
+        );
     }
     cx.path.pop();
+}
+
+/// Re-pousse les porteurs `escaped` d'un span copié — chemins
+/// relatifs à `bx` → absolus ; le drain englobant ré-émettra
+/// chaque cible via son propre span. La file se re-déduit :
+/// `fixed` → `fixed_defer`, positionnés `z ≥ 0` → `pos_defer`,
+/// autre → `else_q` (le `defer` de portée quand il existe —
+/// sinon `pos_defer` : une boîte mutée de classe sous nos
+/// pieds s'émet scoped plutôt que de disparaître).
+fn repush_escaped<'a>(
+    bx: &'a LayoutBox,
+    escaped: &[Box<[u16]>],
+    cx: &mut PaintCx<'a>,
+    pos_defer: &mut Vec<(Vec<u16>, &'a LayoutBox)>,
+    fixed_defer: &mut Vec<(Vec<u16>, &'a LayoutBox)>,
+    mut else_q: Option<&mut Vec<(Vec<u16>, &'a LayoutBox)>>,
+) {
+    for rel in escaped {
+        let Some(target) = resolve_rel(bx, rel) else {
+            continue;
+        };
+        let mut p = cx.path.clone();
+        p.extend(rel.iter().copied());
+        if target.position == Position::Fixed {
+            push_z(fixed_defer, 0, p, target);
+        } else if !matches!(target.position, Position::Static | Position::Sticky)
+            && target.z_index >= 0
+        {
+            push_z(pos_defer, 0, p, target);
+        } else if let Some(d) = &mut else_q {
+            d.push((p, target));
+        } else {
+            push_z(pos_defer, 0, p, target);
+        }
+    }
 }
 
 /// Variante pour les porteurs inline reportés — leur vrai
@@ -2501,14 +2547,29 @@ fn emit_scoped_at<'a>(
     let saved = std::mem::replace(&mut cx.path, path);
     if let Some((d, s, sig)) = reuse_delta(bx, off, cx) {
         copy_span(bx, s, d, sig, items, off, cx);
+        repush_escaped(bx, &s.escaped, cx, pos_defer, fixed_defer, None);
     } else {
         let start = u32::try_from(items.len()).unwrap_or(u32::MAX);
+        let pbase = pos_defer.len();
+        let fbase = fixed_defer.len();
         explorer_common::deep(|| {
             paint_scoped(bx, items, off, cx, pos_defer, fixed_defer);
         });
         let end = u32::try_from(items.len()).unwrap_or(u32::MAX);
         let sig = box_sig(bx);
-        cx.record_span(bx, start, end, effective_off(bx, off), sig, Box::default());
+        // §B-26 : porteurs poussés pendant la fenêtre —
+        // même bookkeeping que `emit_scoped` (sans `defer`,
+        // portée interne à `paint_scoped`).
+        let mut esc = escaped_paths(pos_defer, pbase, &cx.path).into_vec();
+        esc.extend(escaped_paths(fixed_defer, fbase, &cx.path).into_vec());
+        cx.record_span(
+            bx,
+            start,
+            end,
+            effective_off(bx, off),
+            sig,
+            esc.into_boxed_slice(),
+        );
     }
     cx.path = saved;
 }
@@ -3052,9 +3113,20 @@ fn stacking_ctx(bx: &LayoutBox) -> bool {
 /// Enfile un enfant positionné dans la file de son contexte
 /// d'empilement — insertion triée par `z-index`, stable (les
 /// égalités gardent l'ordre d'arbre — App. E étapes 8-9).
-fn push_z<'a>(q: &mut Vec<(Vec<u16>, &'a LayoutBox)>, path: Vec<u16>, bx: &'a LayoutBox) {
+/// Insère `(path, bx)` trié par `z-index` (stable) — `lo` est la
+/// frontière du préfixe déjà drainé : la position se calcule
+/// parmi les entrées non lues seulement. Sans elle, une file en
+/// cours de drain verrait une entrée fusionnée s'insérer sous le
+/// curseur — jamais drainée — ou déplacer une entrée déjà émise
+/// au-delà du curseur, qui refait surface sans fin (§B-26).
+fn push_z<'a>(
+    q: &mut Vec<(Vec<u16>, &'a LayoutBox)>,
+    lo: usize,
+    path: Vec<u16>,
+    bx: &'a LayoutBox,
+) {
     let z = bx.z_index;
-    let at = q.partition_point(|(_, c)| c.z_index <= z);
+    let at = lo + q[lo.min(q.len())..].partition_point(|(_, c)| c.z_index <= z);
     q.insert(at, (path, bx));
 }
 
@@ -3347,7 +3419,7 @@ fn paint_box<'a>(
                 // `overflow` ancêtre (voir `fixed_defer`).
                 let mut p = cx.path.clone();
                 p.push(u16::try_from(ci).unwrap_or(u16::MAX));
-                push_z(fixed_defer, p, child);
+                push_z(fixed_defer, 0, p, child);
             } else {
                 emit_scoped(ci, child, items, off, cx, pd, fixed_defer);
             }
@@ -3403,16 +3475,23 @@ fn paint_box<'a>(
             let mut p = cx.path.clone();
             p.push(u16::try_from(ci).unwrap_or(u16::MAX));
             if child.position == Position::Fixed {
-                push_z(fixed_defer, p, child);
+                push_z(fixed_defer, 0, p, child);
             } else {
-                push_z(pd, p, child);
+                push_z(pd, 0, p, child);
             }
         }
+        // Même discipline que le drain racine : les poussées
+        // pendant l'émission passent par `pending` et rejoignent
+        // la file triée au-delà du curseur (§B-26).
+        let mut pending = Vec::new();
         let mut i = 0;
         while i < my_pos.len() {
             let (p, c) = my_pos[i].clone();
             i += 1;
-            emit_scoped_at(p, c, items, off, cx, &mut my_pos, fixed_defer);
+            emit_scoped_at(p, c, items, off, cx, &mut pending, fixed_defer);
+            for (p, c) in std::mem::take(&mut pending) {
+                push_z(&mut my_pos, i, p, c);
+            }
         }
         if clipped {
             items.push(DisplayItem::PopClip);
