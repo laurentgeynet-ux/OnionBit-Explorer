@@ -162,6 +162,8 @@ plateforme net** (ops jscore Encrypt/Decrypt restent à livrer) ·
 
 | 43 | **Tiroir off-canvas invisible avale tous les clics** — `<mini-cart class="layer…">` fermé (non peint) mais boîte `[0 0 1366x900]` prioritaire au hit-test : 2/2 clics → `edited` (« livré au DOM — aucune action par défaut »), aucune ancre atteignable | `explorer-core`/hit-test | auchan `[V6-main]` vol 69 : clics « Promos » (295,40) + « Politique de confidentialité » (760,712) interceptés ; transform/état fermé ignoré par le hit-test — variante §B-42 croisée §B-17 | **OUVERT — terrain V6** |
 
+| 44 | **Escalade quadratique du coût par apply** — `repaint ms=363→9 558→199 721`, cascade 46 s/boxtree 55 s/layout 72 s sur la même page ; borne §B-26 non déclenchée, mécanisme distinct (invalidation qui grandit) | `explorer-core`/`layout` | radiofrance `[V6-main]` vol 68 — API vivante, purge complète post-apply ; stabilité OK, perf seule | **OUVERT — perf, à profiler** |
+
 ### 🟡 Moyen — perf, métriques, observabilité résiduelle
 
 - **Framebuffer pleine page** : PNG 48-54 Mo (guardian, youtube) —
