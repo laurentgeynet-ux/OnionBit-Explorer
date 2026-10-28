@@ -933,7 +933,14 @@ pub struct Session {
     /// pour le moteur : une occurrence par document suffit —
     /// le verrou suit la vie du moteur (ré-armé à la nav,
     /// oublié à la fermeture de l'onglet).
-    heap_dead_reported: std::collections::HashSet<TabId>,
+    /// Le flag est un `Arc` partagé : la vague détachée de
+    /// sous-ressources (scripts `async` évalués hors verrou
+    /// sur le moteur embarqué — `SubJob`) le consulte et
+    /// l'arme par le même canal (§B-12 vol 100 — bookshop
+    /// ×5 via `eval_async_arrival` qui court-circuitait la
+    /// porte en envoyant directement sur le bus).
+    heap_dead_reported:
+        std::collections::HashMap<TabId, std::sync::Arc<std::sync::atomic::AtomicBool>>,
     /// Compteur de moteurs déroutés vers une destruction
     /// hors verrou (§B-30 — GC d'un heap multi-Go sous
     /// verrou figeait l'API). Témoigne du déroutage pour
@@ -1048,7 +1055,7 @@ impl Session {
             applies_fin: 0,
             paint_in_flight: std::collections::HashMap::new(),
             last_pipeline_error: None,
-            heap_dead_reported: std::collections::HashSet::new(),
+            heap_dead_reported: std::collections::HashMap::new(),
             engines_dropped_offlock: 0,
             pump_streaks: std::collections::HashMap::new(),
             unmapped_streaks: std::collections::HashMap::new(),

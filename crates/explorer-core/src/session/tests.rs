@@ -2866,6 +2866,71 @@ fn heap_dead_errors_reported_once_per_document() {
     assert_eq!(heap_errors, 1, "tas mort = 1 occurrence par document");
 }
 
+/// §B-12 vol 100 (bookshop ×5) — les scripts `async` sont
+/// évalués par la vague détachée (`eval_async_arrival`,
+/// moteur hors verrou) : chaque éval post-mortem émettait
+/// son `PipelineError` **en direct**, contournant le cap
+/// « une occurrence par document ». Le flag partagé borne
+/// désormais les deux côtés du verrou.
+#[test]
+fn heap_dead_capped_across_detached_wave() {
+    let mut s = Session::with_config(
+        Arc::new(FailTransport),
+        Arc::new(TestFont),
+        SessionConfig {
+            js_mem_limit_mib: 1,
+            ..SessionConfig::default()
+        },
+    );
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let mut rx = s.subscribe();
+    let tab = s.open_tab();
+    let mut eng = Some(
+        s.spawn_engine(
+            tab,
+            "<!doctype html><html><body><script>1</script></body></html>",
+            true,
+            "",
+        )
+        .expect("moteur"),
+    );
+    // Flag partagé, comme à la construction du `SubJob`.
+    let flag = s.heap_dead_reported.entry(tab).or_default().clone();
+    let evs = s.events.clone();
+    let bomb = "var keep=[]; for(var i=0;i<50000;i++){ keep.push('cellule'+i); }";
+    // La bombe tue le tas ; la 1ʳᵉ erreur heap de la vague
+    // détachée est émise (et arme le flag), les suivantes —
+    // piles différentes, même signature — sont tuées.
+    crate::session::net_items::eval_async_arrival(&mut eng, bomb, 0, tab, &evs, &flag);
+    crate::session::net_items::eval_async_arrival(
+        &mut eng,
+        "for(var i=0;i<10;i++){}",
+        1,
+        tab,
+        &evs,
+        &flag,
+    );
+    // Le même flag borne le côté session — une erreur heap
+    // arrivant par `emit_pipeline_error` après le signalement
+    // de la vague est tue pareil.
+    s.emit_pipeline_error(
+        tab,
+        "RangeError: heap memory limit exceeded (pile post-commit)".into(),
+    );
+    let mut heap_errors = 0usize;
+    while let Ok(ev) = rx.try_recv() {
+        if let CoreEvent::PipelineError { message, .. } = ev {
+            if message.contains("heap memory limit exceeded") {
+                heap_errors += 1;
+            }
+        }
+    }
+    assert_eq!(
+        heap_errors, 1,
+        "tas mort = 1 occurrence par document, vague détachée incluse"
+    );
+}
+
 /// §B-30 — pompe orpheline post-DELETE (flixbus vol 96) :
 /// `commit_js_pump` sur un onglet fermé pendant le
 /// détachement, ou sur une époque supplantée, rapportait un

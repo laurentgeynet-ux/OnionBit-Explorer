@@ -7,6 +7,36 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **Étape 156 — §B-12 : cap « tas
+  mort » étendu aux chemins
+  détachés et livraisons**
+  (`explorer-core`) — bookshop
+  vol 100 : ×5 `heap memory
+  limit exceeded` au ring malgré
+  `heap_dead_reported` — les
+  scripts `async` évalués par la
+  vague détachée
+  (`eval_async_arrival`, moteur
+  hors verrou dans `SubJob`)
+  émettaient `PipelineError` en
+  direct, idem les livraisons
+  réseau/crypto/WS/SSE et les
+  évals d'iframes dynamiques
+  (klaviyo/beacon). Le verrou
+  devient un
+  `Arc<AtomicBool>` par document
+  **partagé** : `SubJob` le porte
+  dans la vague, la porte
+  `emit_pipeline_error` l'arme par
+  `swap` atomique — une occurrence
+  par document des deux côtés du
+  verrou. Les 5 sites live sont
+  collectés puis routés par la
+  porte. Verrou
+  `heap_dead_capped_across_
+  detached_wave` : vague détachée
+  ×2 + erreur post-commit → 1
+  occurrence.
 - **JS-C181 — §B-57 bras 2 :
   `fn.length` absent des builtins
   natives** (`explorer-jscore`) —

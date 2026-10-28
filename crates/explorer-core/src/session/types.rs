@@ -13,6 +13,13 @@ use explorer_net::url::Url;
 /// Identifiant d'onglet (monotone, jamais réutilisé).
 pub type TabId = u64;
 
+/// Signature textuelle de la mort du tas JS (§B-12) — les
+/// erreurs la portant sont plafonnées à une par document,
+/// quel que soit le chemin d'émission (évals session,
+/// scripts `async` évalués sur le moteur détaché de la
+/// vague de sous-ressources, livraisons réseau/WS/SSE).
+pub(crate) const HEAP_DEAD_SIG: &str = "heap memory limit exceeded";
+
 /// Événement de session poussé aux abonnés (SSE côté API).
 #[derive(Debug, Clone)]
 pub enum CoreEvent {

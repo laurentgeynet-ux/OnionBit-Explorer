@@ -536,7 +536,13 @@ impl Session {
         // est définitif pour ce moteur : une occurrence par
         // document suffit ; le verrou est ré-armé quand le
         // moteur meurt (`entry.js = None` à la nav).
-        if message.contains("heap memory limit exceeded") && !self.heap_dead_reported.insert(tab) {
+        if message.contains(types::HEAP_DEAD_SIG)
+            && self
+                .heap_dead_reported
+                .entry(tab)
+                .or_default()
+                .swap(true, std::sync::atomic::Ordering::SeqCst)
+        {
             return;
         }
         let n = match self.last_pipeline_error.as_mut() {

@@ -1961,7 +1961,7 @@ impl Session {
         };
         // Phase 3 : miroir installé, scripts évalués, cycle
         // `readyState` complet puis `load` sur l'élément.
-        let evs = self.events.clone();
+        let mut errs = Vec::new();
         let Some(entry) = self.tabs.get_mut(&tab) else {
             return;
         };
@@ -1975,10 +1975,11 @@ impl Session {
         eng.set_ready_state(ctx, "loading");
         for src in scripts {
             if let Err(e) = eng.eval_ctx(ctx, &src, None) {
-                let _ = evs.send(CoreEvent::PipelineError {
-                    tab: Some(tab),
-                    message: format!("{e} — iframe dynamique"),
-                });
+                // §B-12 vol 100 : collecte puis passage par la
+                // porte — l'envoi direct contournait le cap
+                // « tas mort » (klaviyo/beacon tournent en
+                // cadres dynamiques).
+                errs.push(format!("{e} — iframe dynamique"));
             }
         }
         eng.set_ready_state(ctx, "interactive");
@@ -2001,6 +2002,9 @@ impl Session {
         let n = eng.run_pending();
         tracing::trace!(tab, jobs = n, "jobs js après iframe dynamique");
         self.after_script(tab);
+        for m in errs {
+            self.emit_pipeline_error(tab, m);
+        }
     }
 
     /// Phase 1 de [`Self::install_dyn_frame_ctx`] (CAP-171) :
@@ -2402,19 +2406,24 @@ impl Session {
             let Some(eng) = entry.js.as_mut() else {
                 return;
             };
+            let mut errs = Vec::new();
             for k in kinds {
                 if let Err(e) = eng.deliver_ws_event(ctx, handle, k) {
                     tracing::debug!(tab, error = %e, "livraison websocket js");
-                    let _ = self.events.send(CoreEvent::PipelineError {
-                        tab: Some(tab),
-                        message: e.to_string(),
-                    });
+                    errs.push(e.to_string());
                 }
             }
             let n = eng.run_pending();
             tracing::trace!(tab, jobs = n, "jobs js après événement ws");
-            Self::sync_for_apply(eng.as_mut())
+            (Self::sync_for_apply(eng.as_mut()), errs)
         };
+        let (mutated, errs) = mutated;
+        for m in errs {
+            // §B-12 vol 100 : les erreurs de livraison passent
+            // par la porte (un tas mort rendait chaque
+            // callback fautif en `PipelineError` direct).
+            self.emit_pipeline_error(tab, m);
+        }
         if let Some(s) = mutated {
             self.queue_apply_sync(tab, s);
         }
@@ -2531,17 +2540,21 @@ impl Session {
             let Some(eng) = entry.js.as_mut() else {
                 return;
             };
+            let mut emit_err = None;
             if let Err(e) = eng.deliver_net_response(resp) {
                 tracing::debug!(tab, error = %e, "livraison réseau js");
-                let _ = self.events.send(CoreEvent::PipelineError {
-                    tab: Some(tab),
-                    message: e.to_string(),
-                });
+                emit_err = Some(e.to_string());
             }
             let n = eng.run_pending();
             tracing::trace!(tab, jobs = n, "jobs js après réponse réseau");
-            Self::sync_for_apply(eng.as_mut())
+            (Self::sync_for_apply(eng.as_mut()), emit_err)
         };
+        let (mutated, emit_err) = mutated;
+        if let Some(m) = emit_err {
+            // §B-12 vol 100 : les erreurs de livraison
+            // passent par la porte partagée.
+            self.emit_pipeline_error(tab, m);
+        }
         if let Some(s) = mutated {
             self.queue_apply_sync(tab, s);
         }
@@ -2566,17 +2579,19 @@ impl Session {
             let Some(eng) = entry.js.as_mut() else {
                 return;
             };
+            let mut emit_err = None;
             if let Err(e) = eng.deliver_crypto_response(resp) {
                 tracing::debug!(tab, error = %e, "livraison crypto js");
-                let _ = self.events.send(CoreEvent::PipelineError {
-                    tab: Some(tab),
-                    message: e.to_string(),
-                });
+                emit_err = Some(e.to_string());
             }
             let n = eng.run_pending();
             tracing::trace!(tab, jobs = n, "jobs js après réponse crypto");
-            Self::sync_for_apply(eng.as_mut())
+            (Self::sync_for_apply(eng.as_mut()), emit_err)
         };
+        let (mutated, emit_err) = mutated;
+        if let Some(m) = emit_err {
+            self.emit_pipeline_error(tab, m);
+        }
         if let Some(s) = mutated {
             self.queue_apply_sync(tab, s);
         }
@@ -2607,17 +2622,19 @@ impl Session {
             let Some(eng) = entry.js.as_mut() else {
                 return;
             };
+            let mut emit_err = None;
             if let Err(e) = eng.deliver_es_event(ctx, handle, ev) {
                 tracing::debug!(tab, error = %e, "livraison eventsource js");
-                let _ = self.events.send(CoreEvent::PipelineError {
-                    tab: Some(tab),
-                    message: e.to_string(),
-                });
+                emit_err = Some(e.to_string());
             }
             let n = eng.run_pending();
             tracing::trace!(tab, jobs = n, "jobs js après événement sse");
-            Self::sync_for_apply(eng.as_mut())
+            (Self::sync_for_apply(eng.as_mut()), emit_err)
         };
+        let (mutated, emit_err) = mutated;
+        if let Some(m) = emit_err {
+            self.emit_pipeline_error(tab, m);
+        }
         if let Some(s) = mutated {
             self.queue_apply_sync(tab, s);
         }

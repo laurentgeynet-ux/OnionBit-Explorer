@@ -812,6 +812,15 @@ pub(crate) struct SubJob {
     /// Bus d'événements — `PipelineError` des évaluations
     /// « arrival » pendant la vague.
     pub(crate) events: broadcast::Sender<CoreEvent>,
+    /// Verrou « tas mort rapporté » **partagé** avec la
+    /// session (§B-12 vol 100 — bookshop ×5) : les scripts
+    /// `async` sont évalués ici, hors verrou, sur le moteur
+    /// embarqué — chaque éval post-mortem échouait avec la
+    /// signature heap et partait en `PipelineError` direct,
+    /// contournant la porte `heap_dead_reported`. Le même
+    /// `Arc` borne à une occurrence par document, des deux
+    /// côtés du verrou.
+    pub(crate) heap_dead_flag: std::sync::Arc<std::sync::atomic::AtomicBool>,
     /// URL de la page — politique mixed-content/`Referer`
     /// du prefetch modules.
     pub(crate) page: Url,
@@ -990,8 +999,9 @@ impl SubJob {
 
         let tab = self.tab;
         let events = self.events.clone();
+        let heap_flag = std::sync::Arc::clone(&self.heap_dead_flag);
         let eval_arrival = |eng: &mut Option<Box<dyn JsEngine>>, src: &str, ord: usize| {
-            eval_async_arrival(eng, src, ord, tab, &events);
+            eval_async_arrival(eng, src, ord, tab, &events, &heap_flag);
         };
         // Émission par priorité : CSS → scripts → images.
         let jobs = sub_jobs(
@@ -2098,12 +2108,13 @@ pub(crate) fn frame_request(base: &Url, url: &Url, policy: Option<ReferrerPolicy
 /// `async`/arrivée désordonnée (étape 51) : le corps reçu
 /// est évalué immédiatement sur le moteur embarqué — un
 /// échec est rapporté en `PipelineError`, jamais fatal.
-fn eval_async_arrival(
+pub(crate) fn eval_async_arrival(
     eng: &mut Option<Box<dyn JsEngine>>,
     src: &str,
     el_ord: usize,
     tab: TabId,
     events: &broadcast::Sender<CoreEvent>,
+    heap_dead_flag: &std::sync::atomic::AtomicBool,
 ) {
     if let Some(e) = eng.as_mut() {
         // `name` = étiquette de pile (`at fn (inline:N:l:c)`)
@@ -2113,9 +2124,18 @@ fn eval_async_arrival(
         let label = format!("inline:{el_ord}");
         if let Err(err) = e.eval_script_el(explorer_js::JS_CTX_TOP, src, Some(&label), el_ord) {
             tracing::debug!(tab, error = %err, "script async en échec");
+            let message = err.to_string();
+            // §B-12 vol 100 : chemin hors verrou — la porte
+            // `heap_dead_reported` est ici un `Arc` partagé,
+            // même borne « une occurrence par document ».
+            if message.contains(crate::session::types::HEAP_DEAD_SIG)
+                && heap_dead_flag.swap(true, std::sync::atomic::Ordering::SeqCst)
+            {
+                return;
+            }
             let _ = events.send(CoreEvent::PipelineError {
                 tab: Some(tab),
-                message: err.to_string(),
+                message,
             });
         }
     }
