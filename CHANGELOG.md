@@ -7,6 +7,27 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **JS-C176 — §B-23 : drain
+  microtasks boot sur deadline boot**
+  (`explorer-jscore`) — cryptpad
+  vol 95 : `unhandledrejection:
+  RangeError: eval deadline exceeded`
+  au splash — le corps de boot
+  (requirejs/less) tient 60 s
+  (`eval_timeout_boot_ms`) mais
+  `run_microtasks` ré-armait la
+  borne **standard** de 10 s à
+  l'entrée du drain → la chaîne
+  promise boot mourait à 10 s.
+  Nouvelle variante
+  `run_microtasks_in_boot` partageant
+  l'armement boot ; `run_program` et
+  `eval_module` la consomment —
+  pompes timers/événements inchangées
+  (borne standard). Verrou
+  `boot_microtask_drain_shares_
+  boot_budget` (handler ~0,4 s sous
+  deadline std 200 ms / boot 3 s).
 - **R-129 — §B-27 : mosaïque géante
   ouest-france — deux défauts flex**
   (`explorer-css`, `explorer-layout`)

@@ -268,6 +268,23 @@ impl Engine {
         self.microtasks.push_back((self.cur_ctx, Job::Plain(f)));
     }
 
+    /// [`run_microtasks`] dans une frontière **boot** —
+    /// `run_program`/`eval_module` : le drain partage la
+    /// deadline boot (B-22/§B-23) au lieu de ré-armer la borne
+    /// standard de `eval_timeout_ms`. Une chaîne de microtasks
+    /// légitime produite par un corps de boot (requirejs/less
+    /// de cryptpad — `unhandledrejection: eval deadline
+    /// exceeded` au splash) a le même wall-clock que ce corps.
+    /// Les pompes et livraisons d'événements gardent la borne
+    /// standard via [`run_microtasks`].
+    ///
+    /// # Errors
+    /// Mêmes erreurs que [`run_microtasks`] — deadline,
+    /// budget d'ops ou tas épuisé pendant le drain.
+    pub fn run_microtasks_in_boot(&mut self) -> JsResult<usize> {
+        self.run_microtasks_impl(true)
+    }
+
     /// Drain the microtask queue until empty. Runs at every job
     /// boundary. Job count is bounded by `ops_left` so a self-feeding
     /// microtask loop dies like an infinite `while`.
@@ -288,6 +305,10 @@ impl Engine {
     /// Propagates the op-limit error or an uncaught `queueMicrotask`
     /// callback exception.
     pub fn run_microtasks(&mut self) -> JsResult<usize> {
+        self.run_microtasks_impl(false)
+    }
+
+    fn run_microtasks_impl(&mut self, boot_boundary: bool) -> JsResult<usize> {
         // DIAG temporaire J2 — réentrance native de la pompe.
         thread_local! {
             static MT_DEPTH: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
@@ -331,8 +352,15 @@ impl Engine {
         self.ops_left = self.op_limit;
         // Frontière de batch aussi pour la deadline (J1) —
         // une file auto-régénérante meurt au wall-clock, pas
-        // au timeout canal.
-        self.arm_eval_deadline();
+        // au timeout canal. Frontière boot (`run_program`/
+        // `eval_module`) : la borne boot s'applique à tout le
+        // drain (§B-23, cryptpad) — sinon le ré-armement à
+        // `eval_timeout_ms` tuait la chaîne à 10 s.
+        if boot_boundary {
+            self.arm_eval_deadline_boot();
+        } else {
+            self.arm_eval_deadline();
+        }
         loop {
             loop {
                 if ran >= MICROTASK_DRAIN_CAP {

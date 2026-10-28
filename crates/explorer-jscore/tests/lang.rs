@@ -8351,6 +8351,31 @@ fn eval_deadline_kills_infinite_loop() {
 }
 
 #[test]
+fn boot_microtask_drain_shares_boot_budget() {
+    // §B-23 (cryptpad vol 95 — `unhandledrejection: eval
+    // deadline exceeded` au splash) : le drain de microtasks
+    // d'un eval boot ré-armait la borne *standard* (10 s par
+    // défaut) au lieu de la borne boot — une chaîne légitime
+    // (requirejs/less) mourait à 10 s. Ici : standard 50 ms,
+    // boot 2 s — un handler `.then` > 50 ms doit aboutir.
+    let mut e = Engine::new();
+    e.set_eval_timeout_ms(200);
+    e.set_eval_timeout_boot_ms(3_000);
+    let src = "var out=''; Promise.resolve().then(() => {
+        var s = 0;
+        for (var i = 0; i < 40000; i++) { s += i; }
+        out = 'done' + s;
+    });";
+    match e.eval(src) {
+        Ok(_) => {}
+        Err(x) => panic!("boot drain tué à la borne standard : {x}"),
+    }
+    // Le job a bien couru dans le même drain.
+    let v = e.eval("out").unwrap_or_else(|x| panic!("relecture: {x}"));
+    assert!(e.describe(v).starts_with("done"));
+}
+
+#[test]
 fn eval_deadline_kills_timer_burst() {
     // Rafale timers post-apply (allrecipes) : un callback en
     // boucle meurt au wall-clock et `deadline_hit` remonte.

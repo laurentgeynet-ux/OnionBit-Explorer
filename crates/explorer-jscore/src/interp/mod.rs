@@ -2534,7 +2534,7 @@ impl Engine {
             Err(Thrown(_v)) if self.deadline_hit => Err(Error::Deadline),
             Err(Thrown(v)) => Err(Error::Uncaught(self.describe(v))),
         };
-        if let Err(Thrown(v)) = self.run_microtasks() {
+        if let Err(Thrown(v)) = self.run_microtasks_in_boot() {
             if self.deadline_hit {
                 return Err(Error::Deadline);
             }
