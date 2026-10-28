@@ -7960,25 +7960,33 @@ fn c41_moderate_nesting_still_parses() {
 /// `1+1+…`/`a&&a&&…` sont parsées **itérativement** — elles
 /// produisent une AST à 15 K+ maillons sans déclencher la
 /// borne `nest` du parseur, puis la détruisent. Le `Drop`
-/// d'`Expr` est itératif : ni `eval` (erreur typée de la
-/// borne `expr_depth`) ni `module_specifiers` (parse + drop
-/// immédiat, aucun `eval`) ne débordent la pile native.
+/// d'`Expr` est itératif : ni `eval` ni `module_specifiers`
+/// (parse + drop immédiat, aucun `eval`) ne débordent la
+/// pile native. Depuis JS-C178 (§B-57) l'épine gauche est
+/// dépilée par trampoline — ces chaînes s'évaluent
+/// désormais ; le cas `undeclared` garde un chemin d'erreur
+/// typé sur AST profonde (destruction sur remontée `Err`).
 #[test]
 fn c41_deep_operand_chain_drops_iteratively() {
     for src in [
         "1+".repeat(15_000) + "1",
         "true&&".repeat(15_000) + "true",
         format!("var r;r={};r", "1+".repeat(15_000) + "1"),
+        // Erreur typée (ReferenceError à la feuille) — la
+        // destruction de l'AST profonde sur remontée `Err`
+        // ne doit pas déborder la pile.
+        format!("z0+{}", "1+".repeat(15_000) + "1"),
     ] {
         // Parse + destruction immédiate — l'ancien crash
         // (drop récursif) vivait ici, sans aucun `eval`.
         let specs = explorer_jscore::module_specifiers(&src);
         assert_eq!(specs, Vec::<String>::new());
-        // `eval` : la borne `expr_depth` rend une erreur
-        // typée — la destruction de l'AST d'erreur ne doit
-        // pas déborder non plus.
         let mut e = Engine::new();
-        assert!(e.eval(&src).is_err(), "chaîne bornée attendue");
+        if src.starts_with("z0+") {
+            assert!(e.eval(&src).is_err(), "référence fautive attendue");
+        } else {
+            assert!(e.eval(&src).is_ok(), "chaîne {src} doit évaluer");
+        }
     }
 }
 

@@ -7,6 +7,42 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **JS-C178 — §B-57 : `expression
+  too deeply nested` sur bundles
+  réels** (`explorer-jscore`) —
+  manomano vol 96 + caniuse vol
+  97 : `RangeError` sur le
+  polyfill cdnjs et `bundle.js`
+  → mur « navigateur
+  incompatible » / SPA non
+  montée. Racine : le parseur
+  produit `a+b+…`, `a.b.…`,
+  `a[k]…`, `f()()…` par boucle
+  itérative (borne `nest` ~1)
+  mais l'AST est profonde à
+  gauche — `eval_expr` récurait
+  chaque maillon et comptait la
+  chaîne entière dans
+  `expr_depth` (borne 4096,
+  pensée pour la profondeur
+  *syntaxique* déjà limitée au
+  parse). `eval_spine` dépile
+  l'épine gauche
+  (`Binary`/`Member`/`Index`/
+  `Call←Call`) sur une pile
+  explicite — la profondeur ne
+  mesure plus que la branche
+  droite/feuille, bornée au
+  parse ; court-circuits
+  `&&`/`||`/`??`, ordre d'éval
+  et `this` des appels membres
+  préservés ; la récursion reste
+  plafonnée `call_depth` +
+  `maybe_grow`. Verrous
+  `b57_probe.rs` (chaînes ×5000
+  évaluées, sémantique intacte,
+  right-deep toujours rejeté) +
+  contrat JS-C41 restaté.
 - **JS-C177 — §B-56 : `{n,m}` sur
   grosse classe Unicode rejeté**
   (`explorer-jscore`) — frandroid

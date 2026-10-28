@@ -20,10 +20,87 @@ impl Engine {
         let r = stacker::maybe_grow(
             crate::parser::STACK_RED_ZONE,
             crate::parser::STACK_GROW,
-            || self.eval_inner(env, this, e),
+            || self.eval_spine(env, this, e),
         );
         self.expr_depth -= 1;
         r
+    }
+
+    /// Trampoline sur l'épine *gauche* — le parseur produit
+    /// `a+b+…`, `a.b.…`, `a[k]…`, `f()()…` par boucle
+    /// itérative (sa borne `nest` reste ~1) mais l'AST est
+    /// profonde à gauche : l'éval récursive comptait chaque
+    /// niveau dans `expr_depth` → `RangeError: expression too
+    /// deeply nested` sur les chaînes ×4 K+ des bundles
+    /// minifiés réels (§B-57 — polyfill manomano, bundle
+    /// caniuse). L'épine est dépilée sur une pile explicite ;
+    /// `expr_depth` ne mesure plus que la profondeur
+    /// droite/feuille, bornée au parse. La récursion
+    /// applicative reste plafonnée par `call_depth` et
+    /// `maybe_grow`.
+    fn eval_spine(&mut self, env: &EnvRef, this: Value, e: &Expr) -> JsResult<Value> {
+        enum Spine<'a> {
+            Bin(BinOp, &'a Expr),
+            Member(&'a str),
+            Index(&'a Expr),
+            Call(&'a [Expr]),
+        }
+        let mut spine: Vec<Spine<'_>> = Vec::new();
+        let mut cur = e;
+        loop {
+            cur = match cur {
+                Expr::Binary(op, l, r) => {
+                    spine.push(Spine::Bin(*op, r));
+                    l
+                }
+                Expr::Member(b, name) => {
+                    spine.push(Spine::Member(name.as_str()));
+                    b
+                }
+                Expr::Index(b, k) => {
+                    spine.push(Spine::Index(k));
+                    b
+                }
+                // `f()()` : seule la chaîne Call←Call est
+                // dépilée — un callee Member/Index garde le
+                // bras `Expr::Call` complet (référence
+                // receveur/`this`).
+                Expr::Call(f, args) if matches!(&**f, Expr::Call(..)) => {
+                    spine.push(Spine::Call(args));
+                    f
+                }
+                _ => break,
+            };
+        }
+        if spine.is_empty() {
+            return self.eval_inner(env, this, cur);
+        }
+        let mut acc = self.eval_expr(env, this, cur)?;
+        for node in spine.into_iter().rev() {
+            acc = match node {
+                Spine::Bin(op, r) => match op {
+                    BinOp::And if !self.to_boolean(acc) => acc,
+                    BinOp::Or if self.to_boolean(acc) => acc,
+                    BinOp::Nullish if !matches!(acc, Value::Null | Value::Undefined) => acc,
+                    BinOp::And | BinOp::Or | BinOp::Nullish => self.eval_expr(env, this, r)?,
+                    _ => {
+                        let rv = self.eval_expr(env, this, r)?;
+                        self.binary_op(op, acc, rv)?
+                    }
+                },
+                Spine::Member(name) => self.get_prop_value(acc, name)?,
+                Spine::Index(k) => {
+                    let kv = self.eval_expr(env, this, k)?;
+                    let key = self.prop_key(kv)?;
+                    self.get_prop_value(acc, &key)?
+                }
+                Spine::Call(arg_exprs) => {
+                    let args = self.eval_args(env, this, arg_exprs)?;
+                    self.call_value(acc, Value::Undefined, &args)?
+                }
+            };
+        }
+        Ok(acc)
     }
 
     #[allow(clippy::too_many_lines)]
