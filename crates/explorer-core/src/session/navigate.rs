@@ -969,6 +969,7 @@ impl Session {
             imgs: img_urls,
             frames: frame_urls,
             srcdoc_frames,
+            mod_preloads,
         } = self.plan_subresources(&dom, &url, &base, scripting, &csp);
         let doc_sheets = collect_style_sheets(&dom, &csp)
             .into_iter()
@@ -1158,6 +1159,7 @@ impl Session {
             csp,
             import_maps,
             import_specs,
+            mod_preloads,
             doc_sheets,
             eng,
             scripting,

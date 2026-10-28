@@ -54,6 +54,11 @@ pub(crate) struct SubPlan {
     /// quel en `SubFrame` (`about:srcdoc`) à la vague ; les
     /// `sandbox` de l'élément suivent (CAP-149).
     pub(crate) srcdoc_frames: Vec<(String, Option<SandboxFlags>)>,
+    /// `<link rel=modulepreload>` / `preload as=script|module`
+    /// résolus (B-4) — sèment la frontier initiale de
+    /// `fetch_module_sources` pour les chunks que le
+    /// graphe statique n'expose pas encore (Nuxt).
+    pub(crate) mod_preloads: Vec<Url>,
 }
 
 /// Routage d'une complétion de sous-ressource (étape 50).
@@ -810,6 +815,11 @@ pub(crate) struct SubJob {
     /// document) — poussés au moteur avant le premier
     /// `eval_module` (issue #6).
     pub(crate) import_maps: Vec<String>,
+    /// `<link rel=modulepreload>`/`preload as=script|module`
+    /// résolus (B-4) — semés dans la frontier initiale de
+    /// `fetch_module_sources` pour les chunks hors graphe
+    /// statique (Nuxt data.gouv).
+    pub(crate) mod_preloads: Vec<Url>,
     /// `imports` fusionné (`merge_import_maps`) — sert au
     /// prefetch : `module_deps` réécrit les bare specifiers
     /// avant `Url::resolve`, comme le moteur à l'eval.
@@ -1468,6 +1478,7 @@ impl SubJob {
                 &base,
                 &src,
                 &self.import_specs,
+                &self.mod_preloads,
                 &mut graph,
             )
             .await;

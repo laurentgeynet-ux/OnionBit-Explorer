@@ -699,6 +699,46 @@ pub(crate) fn collect_stylesheet_links(dom: &Dom) -> Vec<SheetLink> {
     out
 }
 
+/// `href` bruts des `<link rel=modulepreload>` et
+/// `<link rel=preload as=script|module>` dans l'ordre
+/// document — sèment la frontier initiale de
+/// `fetch_module_sources` (B-4 data.gouv : Nuxt importmap
+/// déclare ~34 chunks que le graphe statique n'atteint pas
+/// encore). Résolution/dédup/CSP en plan
+/// (`plan_subresources`) ; un `preload` à autre `as` n'est
+/// **pas** un module — jamais préfetché ici.
+pub(crate) fn collect_module_preloads(dom: &Dom) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut queue = vec![dom.document()];
+    while let Some(n) = queue.pop() {
+        if dom.tag_name(n).is_ok_and(|t| t == "link") {
+            let rel = dom
+                .attribute(n, "rel")
+                .ok()
+                .flatten()
+                .unwrap_or_default()
+                .to_ascii_lowercase();
+            let is_mod_preload = rel.split_whitespace().any(|w| w == "modulepreload")
+                || (rel.split_whitespace().any(|w| w == "preload")
+                    && dom.attribute(n, "as").ok().flatten().is_some_and(|a| {
+                        let a = a.trim();
+                        a.eq_ignore_ascii_case("script") || a.eq_ignore_ascii_case("module")
+                    }));
+            if is_mod_preload {
+                if let Ok(Some(href)) = dom.attribute(n, "href") {
+                    if !href.is_empty() {
+                        out.push(href);
+                    }
+                }
+            }
+        }
+        if let Ok(ch) = dom.children(n) {
+            queue.extend(ch.iter().rev());
+        }
+    }
+    out
+}
+
 /// Descripteur d'un candidat `srcset` (CAP-157) — `X` =
 /// densité de pixels (`2x`), `W` = largeur source en px
 /// (`640w`). Les descripteurs `h` et les candidats sans

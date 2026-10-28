@@ -7,6 +7,43 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **Étape 148 — §B-4 : prefetch
+  `modulepreload`/`preload as=script|module`**
+  (`explorer-core`) — data.gouv
+  (Nuxt + importmap, ~34 liens
+  `preload`) affichait **0 fetch /
+  0 éval** : les chunks déclarés en
+  import map n'apparaissent dans
+  aucun `import` statique avant
+  l'évaluation — la frontier de
+  `fetch_module_sources` (seuls
+  `module_deps` de l'entrée) ne les
+  atteignait jamais.
+  `collect_module_preloads`
+  (`dom_helpers`) extrait les
+  `<link>` `rel=modulepreload` et
+  `rel=preload` à `as=script`/`module`
+  (ordre document, `as` autre exclu
+  — pas des modules) ;
+  `plan_subresources` les résout sur
+  `doc_base`, filtre CSP
+  `script-src`/mixed-content,
+  déduplique et borne à
+  `max_modules` (collecte vide sans
+  scripting). Le champ voyage
+  `SubPlan.mod_preloads` →
+  `SubJob.mod_preloads` → paramètre
+  `mod_preloads` de
+  `fetch_module_sources` : chaque
+  URL est enfilée par
+  `queue_module_dep` en spec=URL
+  résolue (la spec modulepreload
+  mappe par URL) — dédupliquée des
+  deps réelles via `queued`, `data:`
+  décodé inline. Le chemin
+  `import()` dynamique reste à
+  `&[]` (graphe par requête). Test :
+  `collect_module_preloads_filters_as`.
 - **Étape 147 — §B-17 suite : dette de
   restyle `style_dirty`** (`explorer-core`)
   — le vol de confirmation santemag a

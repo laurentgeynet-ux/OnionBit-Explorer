@@ -2604,6 +2604,22 @@ fn collect_stylesheet_links_preload_as_style() {
     assert_eq!(hrefs, vec!["/a.css", "/c.css", "/d.css"]);
 }
 
+/// B-4 data.gouv — `<link rel=modulepreload>` et
+/// `rel=preload as=script|module` sèment le prefetch des
+/// graphes de modules (chunks Nuxt hors `import`
+/// statique). `preload` nu et `as=style|font|image`
+/// restent hors collecte — pas des modules.
+#[test]
+fn collect_module_preloads_filters_as() {
+    let dom = test_dom(
+        r#"<link rel=modulepreload href="/a.js"><link rel=preload as=script href="/b.js"><link rel=preload as=module href="/c.mjs"><link rel=preload as=style href="/d.css"><link rel=preload as=font href="/e.woff2"><link rel=preload href="/f.js"><link rel=stylesheet href="/g.css">"#,
+    );
+    assert_eq!(
+        collect_module_preloads(&dom),
+        vec!["/a.js", "/b.js", "/c.mjs"]
+    );
+}
+
 /// Vol 13 lemonde/bbc — les `<img>` à `data-src` (lazy JS
 /// mort) n'étaient jamais fetchées : repli produit sur les
 /// attributs lazy usuels quand ni `srcset` ni `src` n'est

@@ -952,6 +952,7 @@ impl Session {
                         &url_g,
                         &entry_src,
                         &import_specs,
+                        &[],
                         &mut graph,
                     )
                     .await;
@@ -1237,6 +1238,7 @@ impl Session {
                 &csp,
                 &entry_base,
                 &entry_src,
+                &[],
                 &[],
                 &mut graph,
             )
@@ -3016,6 +3018,30 @@ impl Session {
             .take(self.max_sheets)
             .collect();
         let scripts = collect_scripts(dom, page, base, scripting, self.max_scripts, csp);
+        // B-4 (data.gouv/Nuxt) : `<link rel=modulepreload>`
+        // et `preload as=script|module` sèment le prefetch
+        // des graphes de modules — les chunks déclarés en
+        // importmap n'apparaissent dans aucun `import`
+        // statique avant eval. Résolus sur `base`, CSP/
+        // mixed-content filtrés comme tout `script-src`,
+        // dédupliqués, bornés `max_modules` ; rien à semer
+        // sans scripting.
+        let mut seen_preload = std::collections::HashSet::new();
+        let mod_preloads: Vec<Url> = if scripting {
+            collect_module_preloads(dom)
+                .into_iter()
+                .filter_map(|h| Url::resolve(base, &h).ok())
+                .map(&upg)
+                .filter(|u| {
+                    !is_mixed_content(page, u)
+                        && allow(explorer_net::http::FetchDest::Script, u)
+                        && seen_preload.insert(u.as_str())
+                })
+                .take(self.max_modules)
+                .collect()
+        } else {
+            Vec::new()
+        };
         let mut seen_img = std::collections::HashSet::new();
         let imgs: Vec<Url> = collect_images(dom, self.viewport.0, self.scale)
             .into_iter()
@@ -3082,6 +3108,7 @@ impl Session {
             imgs,
             frames,
             srcdoc_frames,
+            mod_preloads,
         }
     }
 
@@ -3105,6 +3132,7 @@ impl Session {
         entry_base: &Url,
         entry_src: &str,
         import_specs: &[(String, String)],
+        mod_preloads: &[Url],
         graph: &mut ModuleGraph,
     ) {
         let mut queued: std::collections::HashSet<String> =
@@ -3114,6 +3142,24 @@ impl Session {
             Self::queue_module_dep(
                 spec,
                 u,
+                page,
+                csp,
+                import_specs,
+                graph,
+                &mut queued,
+                &mut frontier,
+            );
+        }
+        // B-4 : `<link rel=modulepreload>`/`preload
+        // as=script|module` ensemencent la frontier — les
+        // chunks importmap (Nuxt) hors `import` statique.
+        // spec = URL résolue (la spec modulepreload mappe
+        // par URL) ; `queued` déduplique avec les deps
+        // réelles, `queue_module_dep` refiltre CSP.
+        for u in mod_preloads {
+            Self::queue_module_dep(
+                u.as_str(),
+                u.clone(),
                 page,
                 csp,
                 import_specs,
