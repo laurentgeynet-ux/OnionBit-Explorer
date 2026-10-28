@@ -135,7 +135,7 @@ plateforme net** (ops jscore Encrypt/Decrypt restent à livrer) ·
 
 | 27 | **Image en mosaïque géante plein viewport au scroll** | `explorer-render`/`layout` | ouest-france `[V4-main]` vol 48 scroll_y=1800 — tuile répétée couvrant tout l'écran (background-repeat ? border-image ?) | **OUVERT — terrain V4** |
 
-| 28 | **`height:100%` plein-viewport effondrée à 0** — chaîne `html`/`body`/`#map` = `1366x0` → Leaflet lit `clientHeight≈0`, ne demande qu'1 tuile | `explorer-layout`/`css` | uMap éditeur `[V4-main]` vol 50 — tuiles OSM peintes mais page à hauteur 0 (paradoxe : tuiles visibles) | **OUVERT — terrain V4** |
+| 28 | **`height:100%` plein-viewport effondrée à 0** — chaîne `html`/`body`/`#map` = `1366x0` → Leaflet lit `clientHeight≈0`, ne demande qu'1 tuile | `explorer-layout`/`css` | uMap éditeur `[V4-main]` vol 50 — tuiles OSM peintes mais page à hauteur 0 (paradoxe : tuiles visibles) | **CORRECTIF `816f7c9` a re-voler** — motif plausible : unites viewport dynamiques `100dvh`/`svh`/`lvh` non parsees -> chaine `height` ignoree -> html/body/#map a 0 (dump : 1366x0). Fix : projection d*/s*/l* sur vh/vw (sans chrome mobile, §6.1.3). Si le re-vol persiste : motif `min-height`/`flex` wrapper a isoler |
 
 | 29 | **Boucle iframes `sodar` non bornée** — AdSense crée des iframes télémétrie en continu : 419 dans le DOM (+~90/min), `js_heap` 53→160 Mo (~40 Mo/min), cycles apply ~1,3 s | `explorer-core`/budget | linuxmint `[V4-main]` vol 51 — ad-tech fonctionnel (slot peint) mais DOM+heap gonflent ; API responsive, RAM libérée au DELETE | **OUVERT — famille §B-1/§B-21, signature DOM+heap** |
 
