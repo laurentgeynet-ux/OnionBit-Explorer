@@ -7,6 +7,31 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **R-131 — §B-58 : `transform`
+  rejoué par les boîtes anonymes**
+  (`explorer-layout`) — letterboxd
+  vol 98 : texte « miré » alors que
+  le CSS porte `rotate(-90deg)`
+  légitime. Les enveloppes anonymes
+  (`wrap_anonymous`, feuilles
+  `Text`) clonent le style parent
+  entier — `transform` compris —
+  et `box_transform` repoussait la
+  matrice à chaque niveau : texte
+  sous M²/M³ (`rotate(45)`→90°,
+  `rotate(90)`→180°,
+  `rotate(180)`/`scaleX(-1)`→
+  identité — repro in-process). Fix
+  conforme CSS Transforms :
+  seule une boîte générée par un
+  élément est « transformable » —
+  `box_transform` ignore
+  `AnonymousBlock`/`Text` (peinture
+  et hit-test, source unique).
+  Verrous : profondeur
+  `PushTransform` = 1 au point
+  d'émission du texte (flux,
+  absolu, motif letterboxd).
 - **Étape 155 — §B-51 :
   observabilité scripts vus vs
   évals** (`explorer-core`) —

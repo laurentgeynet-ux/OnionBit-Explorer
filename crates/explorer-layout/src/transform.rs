@@ -17,7 +17,7 @@
 use explorer_css::value::parse_length;
 use explorer_css::ComputedStyle;
 
-use crate::boxtree::{LayoutBox, Rect};
+use crate::boxtree::{BoxKind, LayoutBox, Rect};
 
 /// Matrice affine 2D `[a c e ; b d f]` — composantes nommées
 /// comme la fonction `matrix()` CSS (a·x + c·y + e,
@@ -310,6 +310,17 @@ fn origin_px(st: &ComputedStyle, rect: &Rect) -> (f32, f32) {
 /// inverse appliquée au point sondé).
 #[must_use]
 pub fn box_transform(bx: &LayoutBox, rect: &Rect) -> Option<Affine> {
+    // Boîtes anonymes / runs texte : jamais « transformable »
+    // (CSS Transforms — transformable = boîte générée par un
+    // élément ou pseudo-élément). Leur style clone celui du
+    // parent (`wrap_anonymous`/feuilles texte) : `transform`
+    // s'y rejouerait à chaque niveau d'enveloppe — matrice
+    // re-poussée M²/M³, texte peint vrillé/miré (§B-58,
+    // letterboxd `.backdrop-metadata` `rotate(-90deg)` lu
+    // comme `rotate(-180deg)` = miroir).
+    if matches!(bx.kind, BoxKind::AnonymousBlock | BoxKind::Text) {
+        return None;
+    }
     let raw = bx.style.get("transform")?;
     let m = transform_matrix(raw, rect)?;
     let (ox, oy) = origin_px(&bx.style, rect);
