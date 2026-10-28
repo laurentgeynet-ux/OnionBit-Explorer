@@ -107,6 +107,7 @@ impl JsRegExp {
         )?);
         let re = fancy_regex::RegexBuilder::new(&pat)
             .backtrack_limit(BACKTRACK_LIMIT)
+            .delegate_size_limit(DELEGATE_SIZE_LIMIT)
             .build()
             .map_err(|e| format!("invalid regex /{source}/: {}", short_regex_error(&e)))?;
         Ok(JsRegExp {
@@ -1544,6 +1545,15 @@ fn hex4(cs: &[char], at: usize) -> Option<u32> {
 /// Backtrack step bound — a hostile pattern must not freeze the
 /// engine (the web is hostile by default).
 const BACKTRACK_LIMIT: usize = 100_000;
+
+/// Borne NFA des sous-regex déléguées au backend `regex` —
+/// `{n,m}` sur une grosse classe Unicode (`\w`, `[\s\S]`)
+/// déroule ~`m` copies d'états : le défaut 10 Mio tuait des
+/// patterns valides du web réel (§B-56 — frandroid
+/// `/^[\w:-]{32,512}$/` ≈ 30 Mio d'états). 64 Mio couvre
+/// `{…,≤~1024}` sur `\w` ; au-delà `SyntaxError`
+/// (dégradation bornée, pas de gel).
+const DELEGATE_SIZE_LIMIT: usize = 64 << 20;
 
 /// Trim the regex engine's multi-line error down to its first line.
 fn short_regex_error(e: &fancy_regex::Error) -> String {

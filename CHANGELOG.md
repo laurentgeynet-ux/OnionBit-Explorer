@@ -7,6 +7,31 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **JS-C177 — §B-56 : `{n,m}` sur
+  grosse classe Unicode rejeté**
+  (`explorer-jscore`) — frandroid
+  vol 96 : `/^[\w:-]{32,512}$/`
+  valide jetait `SyntaxError`
+  (« error building NFA ») : le
+  backend `regex` déroule ~`m`
+  copies d'états pour une
+  répétition bornée et le
+  `delegate_size_limit` par
+  défaut (10 Mio) était dépassé
+  (~30 Mio d'états). Borne
+  relevée à 64 Mio
+  (`DELEGATE_SIZE_LIMIT`) —
+  couvre `{…,≤~1024}` sur `\w`,
+  au-delà `SyntaxError` borné.
+  `\p{Pat_Syn}`/`\p{Pat_WS}`
+  (airfrance vol 95) déjà
+  fonctionnels, verrouillés ;
+  `\141` octal conforme Annex B
+  (sloppy OK, `u` → SyntaxError
+  spec). Verrous
+  `b56_probe.rs` (littéral +
+  constructeur + `\w{1,1024}` +
+  props dépréciées).
 - **Étape 152 — §B-12/J4 : erreur
   heap plafonnée à 1 occurrence**
   (`explorer-core`) — bookshop
