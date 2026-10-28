@@ -7,6 +7,41 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **R-127 — §B-17 : `inert` exclu du
+  hit-test ; `pointer-events` hérite**
+  (`explorer-css`, `explorer-layout`)
+  — le drawer santemagazine
+  `inert`+`aria-hidden` **peint ouvert**
+  (vol 71) volait les clics de la page
+  dessous. Deux fixes spécifiés :
+  (a) règle UA `[inert] {
+  pointer-events: none }` — HTML
+  §6.4.2 : un sous-arbre inert est
+  exclu du hit-test « as if the
+  pointer-events property were set to
+  none », tout en restant **peint
+  normalement** (le masquage visuel
+  relève des styles/scripts du site —
+  les boots morts restent la cause du
+  « peint ouvert », piste JS) ;
+  (b) `pointer-events` ajouté à
+  `INHERITED_PROPS` — propriété
+  `inherited:yes` de css-ui-4 absente
+  de la liste : un `none` posé sur un
+  conteneur ne se propageait pas aux
+  enfants, chacun restait ciblable
+  sans `auto` explicite (bug auteur
+  aussi, pas seulement `inert`).
+  `aria-hidden` reste volontairement
+  sans effet paint/hit (accessibilité
+  seule, conforme). Verrou
+  `hit_test_inert_transparent` : ancre
+  dans un sous-arbre inert sautée,
+  cible dessous gagnante. Limite
+  documentée : un `pointer-events:
+  auto` auteur ré-armerait un enfant
+  d'inert (l'inertie est absolue en
+  spec).
 - **Étape 146 — §B-48 : recorder
   `/console` garanti à la naissance**
   (`explorer-api`) — le kill du

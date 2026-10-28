@@ -2370,6 +2370,7 @@ const INHERITED_PROPS: &[&str] = &[
     "list-style-position",
     "list-style-type",
     "orphans",
+    "pointer-events",
     "quotes",
     "text-align",
     "text-indent",
@@ -2494,6 +2495,15 @@ dialog:not([open]) { display: none }
    showPopover() n'existe pas (vol 2026-10-26 : mega-menu
    github/tool-tips popover=manual peints deplies). */
 [popover]:not(:popover-open) { display: none }
+/* HTML §6.4.2 : un sous-arbre `inert` est exclu du hit-test —
+   spec : « as if the pointer-events property were set to
+   none » — mais PEINT normalement (le masquage vient des
+   styles/scripts du site). Vol 71 santemag : drawer
+   `inert`+`aria-hidden` peint ouvert volait les clics de la
+   page dessous (§B-17). Limite : un `pointer-events:auto`
+   auteur re-armerait un enfant alors que l'inertie est
+   absolue — pattern rare, accepté au titre de la règle UA. */
+[inert] { pointer-events: none }
 audio:not([controls]) { display: none }
 @media (scripting) { noscript { display: none !important } }
 li { display: list-item }

@@ -658,6 +658,36 @@ fn hit_test_pointer_events_enfant_reactive() {
     );
 }
 
+/// §B-17 — `[inert]` exclut tout le sous-arbre du hit-test
+/// (HTML §6.4.2 : « as if the pointer-events property were
+/// set to none », porté par la règle UA) : le drawer santemag
+/// `inert`+`aria-hidden` peint ouvert volait les clics de la
+/// page dessous — ici l'ancre DANS l'inert est sauté aussi.
+#[test]
+fn hit_test_inert_transparent() {
+    let (dom, bx) = laid(
+        "<div id=o inert style=\"position:absolute;inset:0;width:100px;height:100px\">\
+         <a id=a href=# style=\"display:block;width:20px;height:20px\">x</a>\
+         </div><p id=u style=\"width:50px;height:50px\">y</p>",
+        "body{margin:0} p{position:absolute;top:0;left:0}",
+    );
+    let p = by_tag(&dom, "p");
+    let hit = explorer_layout::hit_test(&bx, 10.0, 18.0);
+    // (10,18) est dans le <a> (inert) ET dans le <p>
+    // sous-jacent : la cible gagnante est le <p> — remonter
+    // au porteur d'élément comme les verrous pointer-events.
+    let node = hit.and_then(|n| {
+        let mut cur = n;
+        loop {
+            match dom.tag_name(cur) {
+                Ok(_) => return Some(cur),
+                Err(_) => cur = dom.parent(cur).ok().flatten()?,
+            }
+        }
+    });
+    assert_eq!(node, Some(p), "drawer inert : {hit:?}");
+}
+
 #[test]
 fn hit_test_transform_translate_suit_la_peinture() {
     // Vol : `transform` appliqué à la display list mais
