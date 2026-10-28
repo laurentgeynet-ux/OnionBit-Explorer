@@ -368,8 +368,11 @@ pub(crate) fn flow_flex_children(
             let mut f = item_flex(c, true, main_cb, true, ch, cfs, ctx);
             if f.base.is_none() {
                 // R-3 : mesure max-content réelle du contenu
-                // (était : texte direct seulement).
-                f.base = Some(crate::intrinsic::max_content_px(c, cfs, ctx));
+                // (était : texte direct seulement). Base `%` =
+                // taille main du conteneur (§9.9.3 — les
+                // bornes `%` des descendants se résolvent
+                // contre elle, §B-38).
+                f.base = Some(crate::intrinsic::max_content_px_cb(c, cfs, ctx, main_cb));
             }
             items.push(f);
         }
@@ -484,7 +487,7 @@ pub(crate) fn flow_flex_children(
                         let cfs = font_size_px(&c.style, fs, ctx);
                         let floor = match c.style.get("min-width").map(str::trim) {
                             None | Some("" | "auto") => {
-                                crate::intrinsic::min_content_size_px(c, cfs, ctx)
+                                crate::intrinsic::min_content_size_px_cb(c, cfs, ctx, main_cb)
                             }
                             _ => crate::intrinsic::intrinsic_size_px(
                                 &c.style,
@@ -800,8 +803,8 @@ pub(crate) fn flow_flex_children(
                 let mr = side_px(&c.style, "margin-right", content_w, cfs, ctx, 0.0);
                 let avail = (content_w - ml - mr - ch_h).max(0.0);
                 let (mc, nc) = (
-                    crate::intrinsic::max_content_px(c, cfs, ctx),
-                    crate::intrinsic::min_content_px(c, cfs, ctx),
+                    crate::intrinsic::max_content_px_cb(c, cfs, ctx, content_w),
+                    crate::intrinsic::min_content_px_cb(c, cfs, ctx, content_w),
                 );
                 let fit = avail.min(mc).max(nc);
                 let w = if c.style.get("box-sizing") == Some("border-box") {

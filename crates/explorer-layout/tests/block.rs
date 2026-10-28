@@ -2711,3 +2711,47 @@ fn walk_boxes(bx: &LayoutBox, f: &mut impl FnMut(&LayoutBox)) {
     f(bx);
     bx.children.iter().for_each(|c| walk_boxes(c, f));
 }
+
+#[test]
+fn img_intrinseque_geant_max_width_pct_ne_pousse_pas_item() {
+    // B-38 (chrome.dev vol 58/80) : `img{max-width:100%}` a
+    // intrinseque 5839 dans un item flex — la borne `%` doit
+    // se resoudre contre la taille main du conteneur
+    // (§9.9.3), sinon l'item garde un plancher 5839 et la
+    // nav est expulsee a x=5879.
+    let dom = TreeBuilder::parse("<div id=wrap><div id=logo><a><img></a></div><nav></nav></div>");
+    let mut e = StyleEngine::new();
+    e.add_css(
+        "#wrap{display:flex;justify-content:space-between;width:1366px;height:48px}\
+         #logo{height:36px}\n         #logo a{display:flex;align-items:center}\
+         nav{width:421px;height:48px}\
+         img{max-width:100%;height:28px}",
+        Origin::Author,
+    );
+    let styles = e.compute_tree(&dom, dom.document(), &StyleEnv::default());
+    let root_el = dom
+        .children(dom.document())
+        .into_iter()
+        .flatten()
+        .find(|&c| dom.element(c).is_ok())
+        .unwrap();
+    let mut bx = build_box_tree_sized(
+        &dom,
+        root_el,
+        &styles,
+        &std::collections::HashMap::from([(by_tag(&dom, "img"), (5839.0, 745.0))]),
+    )
+    .unwrap();
+    layout_tree(&mut bx, VIEW, &BlockCtx::default());
+    let mut nav_x = f32::MAX;
+    walk_boxes(&bx, &mut |b| {
+        eprintln!("{:?} {:?} intrinsic={:?}", b.kind, b.rect, b.intrinsic);
+        if b.node == Some(by_tag(&dom, "nav")) {
+            nav_x = b.rect.x;
+        }
+    });
+    assert!(
+        nav_x < 1366.0,
+        "nav expulsee hors viewport : x={nav_x} (item logo trop large)"
+    );
+}

@@ -63,11 +63,20 @@ pub(crate) fn min_content_px(bx: &LayoutBox, fs: f32, ctx: &BlockCtx) -> f32 {
     content_px(bx, fs, ctx, false)
 }
 
-/// `min|max-width` non-% converties en contenu — les bornes
-/// de la contribution intrinsèque (Sizing §5.1 : toute
-/// taille intrinsèque utilisée est bridée par elles). Un `%`
-/// est indéfini en mesure intrinsèque → ignoré.
-fn width_bounds(st: &ComputedStyle, fs: f32, ctx: &BlockCtx) -> (Option<f32>, Option<f32>) {
+/// `min|max-width` converties en contenu — les bornes de la
+/// contribution intrinsèque (Sizing §5.1 : toute taille
+/// intrinsèque utilisée est bridée par elles). Un `%` est
+/// indéfini en mesure intrinsèque → ignoré, **sauf** si une
+/// base `cb` définitive est fournie (Flexbox §9.9.3 : les
+/// descendants d'un item flex résolvent leurs `%` contre la
+/// taille main du conteneur — `img{max-width:100%}` sous un
+/// ancêtre `auto` borne à la ligne, §B-38).
+fn width_bounds(
+    st: &ComputedStyle,
+    fs: f32,
+    ctx: &BlockCtx,
+    cb: Option<f32>,
+) -> (Option<f32>, Option<f32>) {
     let chassis: f32 = [
         "padding-left",
         "padding-right",
@@ -80,7 +89,8 @@ fn width_bounds(st: &ComputedStyle, fs: f32, ctx: &BlockCtx) -> (Option<f32>, Op
     let bound = |p: &str| -> Option<f32> {
         let v = st.get(p)?;
         if v.contains('%') {
-            return None;
+            let c = cb?;
+            return css_px(st, p, c, fs, ctx).map(|v| box_size_to_content(st, v, chassis));
         }
         css_px(st, p, 0.0, fs, ctx).map(|v| box_size_to_content(st, v, chassis))
     };
@@ -98,23 +108,43 @@ fn width_bounds(st: &ComputedStyle, fs: f32, ctx: &BlockCtx) -> (Option<f32>, Op
 /// Les boîtes `Text` portent le style du parent : leur
 /// borne s'applique au niveau de l'agrégat parent.
 fn content_px(bx: &LayoutBox, fs: f32, ctx: &BlockCtx, max: bool) -> f32 {
-    content_px_opt(bx, fs, ctx, max, false)
+    content_px_opt(bx, fs, ctx, max, false, None)
+}
+
+/// Variantes avec base `%` définitive `cb` — Flexbox §9.9.3 :
+/// la mesure du contenu d'un item résout les `%` des
+/// descendants contre la taille main du conteneur (définie).
+pub(crate) fn max_content_px_cb(bx: &LayoutBox, fs: f32, ctx: &BlockCtx, cb: f32) -> f32 {
+    content_px_opt(bx, fs, ctx, true, false, Some(cb))
+}
+
+/// [`max_content_px_cb`] — variante min-content.
+pub(crate) fn min_content_px_cb(bx: &LayoutBox, fs: f32, ctx: &BlockCtx, cb: f32) -> f32 {
+    content_px_opt(bx, fs, ctx, false, false, Some(cb))
 }
 
 /// `min-content` de `bx` pour le plancher §4.5 du shrink
 /// flex : le `width` propre de l'item est IGNORÉ (la taille
 /// spécifiée n'est pas un minimum de contenu — un item
 /// `width:80px` peut rétrécir sous 80) ; `max-width` borne.
-pub(crate) fn min_content_size_px(bx: &LayoutBox, fs: f32, ctx: &BlockCtx) -> f32 {
-    content_px_opt(bx, fs, ctx, false, true)
+/// Base `%` `cb` = taille main du conteneur flex.
+pub(crate) fn min_content_size_px_cb(bx: &LayoutBox, fs: f32, ctx: &BlockCtx, cb: f32) -> f32 {
+    content_px_opt(bx, fs, ctx, false, true, Some(cb))
 }
 
-fn content_px_opt(bx: &LayoutBox, fs: f32, ctx: &BlockCtx, max: bool, ignore_w: bool) -> f32 {
-    let w = content_px_unclamped(bx, fs, ctx, max, ignore_w);
+fn content_px_opt(
+    bx: &LayoutBox,
+    fs: f32,
+    ctx: &BlockCtx,
+    max: bool,
+    ignore_w: bool,
+    cb: Option<f32>,
+) -> f32 {
+    let w = content_px_unclamped(bx, fs, ctx, max, ignore_w, cb);
     if bx.kind == BoxKind::Text {
         return w;
     }
-    let (mn, mx) = width_bounds(&bx.style, fs, ctx);
+    let (mn, mx) = width_bounds(&bx.style, fs, ctx, cb);
     mx.map_or(w, |m| w.min(m)).max(mn.unwrap_or(0.0))
 }
 
@@ -123,7 +153,14 @@ fn content_px_opt(bx: &LayoutBox, fs: f32, ctx: &BlockCtx, max: bool, ignore_w: 
 /// (`width`/intrinsèque remplacé) se borne déjà elle-même
 /// — le re-bridage du wrapper est idempotent.
 #[allow(clippy::too_many_lines)] // chaîne de priorités §5 — 101 lignes, bornée
-fn content_px_unclamped(bx: &LayoutBox, fs: f32, ctx: &BlockCtx, max: bool, ignore_w: bool) -> f32 {
+fn content_px_unclamped(
+    bx: &LayoutBox,
+    fs: f32,
+    ctx: &BlockCtx,
+    max: bool,
+    ignore_w: bool,
+    cb: Option<f32>,
+) -> f32 {
     // Taille directe : `width` explicite (hors %) fait foi
     // AVANT l'intrinsèque remplacé (§5.1 : la contribution
     // d'un remplacé est sa taille utilisée — un
@@ -137,7 +174,7 @@ fn content_px_unclamped(bx: &LayoutBox, fs: f32, ctx: &BlockCtx, max: bool, igno
     // du contenu (les marges restent hors — comptées par
     // `own_sides` côté appelant).
     let st = &bx.style;
-    let (min_b, max_b) = width_bounds(st, fs, ctx);
+    let (min_b, max_b) = width_bounds(st, fs, ctx, cb);
     let chassis: f32 = [
         "padding-left",
         "padding-right",
@@ -150,9 +187,17 @@ fn content_px_unclamped(bx: &LayoutBox, fs: f32, ctx: &BlockCtx, max: bool, igno
     let bound = |p: &str| -> Option<f32> {
         let v = st.get(p)?;
         if v.contains('%') {
-            return None;
+            let c = cb?;
+            return css_px(st, p, c, fs, ctx).map(|v| box_size_to_content(st, v, chassis));
         }
         css_px(st, p, 0.0, fs, ctx).map(|v| box_size_to_content(st, v, chassis))
+    };
+    let bound_v = |p: &str| -> Option<f32> {
+        let v = st.get(p)?;
+        if v.contains('%') {
+            return None;
+        }
+        css_px(st, p, 0.0, fs, ctx)
     };
     // §4.1 : un `width:%` en mesure intrinsèque est indéfini
     // (le bloc contenant dépend de cette mesure) — un
@@ -171,11 +216,27 @@ fn content_px_unclamped(bx: &LayoutBox, fs: f32, ctx: &BlockCtx, max: bool, igno
         // et leur `width` propre).
         None
     } else if ignore_w {
-        bx.intrinsic.map(|i| i.0)
+        // Même sous `ignore_w`, un remplacé à `height`
+        // résolue contribue par son ratio (§10.6.2), pas par
+        // sa largeur brute — le `width` ignoré n'invalide
+        // pas la hauteur spécifiée.
+        bx.intrinsic
+            .map(|(iw, ih)| bound_v("height").map_or(iw, |h| h * iw / ih))
     } else if pct && bx.intrinsic.is_some() {
         Some(0.0)
     } else {
-        bound("width").or(bx.intrinsic.map(|i| i.0))
+        bound("width")
+            .or_else(|| {
+                // §10.6.2 en mesure intrinsèque : remplacé à
+                // `height` résolue → la contribution suit le
+                // ratio (h × iw/ih), pas la largeur brute
+                // (§B-38 : logo svg intrinsèque 5839×745 +
+                // `height:28px` mesurait 5839 — l'item flex
+                // le voisin devenait irrétrécissable).
+                bx.intrinsic
+                    .and_then(|(iw, ih)| bound_v("height").map(|h| h * iw / ih))
+            })
+            .or(bx.intrinsic.map(|i| i.0))
     };
     if let Some(mut w) = base {
         if let Some(mx) = max_b {
@@ -210,7 +271,8 @@ fn content_px_unclamped(bx: &LayoutBox, fs: f32, ctx: &BlockCtx, max: bool, igno
                 .iter()
                 .map(|c| {
                     let cfs = font_size_px(&c.style, fs, ctx);
-                    explorer_common::deep(|| content_px(c, cfs, ctx, max)) + own_sides(c, fs, ctx)
+                    explorer_common::deep(|| content_px_opt(c, cfs, ctx, max, false, cb))
+                        + own_sides(c, fs, ctx)
                 })
                 .collect();
             if max || !wrap {
@@ -227,8 +289,9 @@ fn content_px_unclamped(bx: &LayoutBox, fs: f32, ctx: &BlockCtx, max: bool, igno
             .children
             .iter()
             .map(|c| {
-                explorer_common::deep(|| content_px(c, font_size_px(&c.style, fs, ctx), ctx, max))
-                    + own_sides(c, fs, ctx)
+                explorer_common::deep(|| {
+                    content_px_opt(c, font_size_px(&c.style, fs, ctx), ctx, max, false, cb)
+                }) + own_sides(c, fs, ctx)
             })
             .sum();
     }
@@ -247,7 +310,7 @@ fn content_px_unclamped(bx: &LayoutBox, fs: f32, ctx: &BlockCtx, max: bool, igno
         }
         let cfs = font_size_px(&c.style, fs, ctx);
         if inline_level(c) {
-            let w = explorer_common::deep(|| content_px(c, cfs, ctx, max));
+            let w = explorer_common::deep(|| content_px_opt(c, cfs, ctx, max, false, cb));
             if max {
                 run += w;
             } else {
@@ -261,7 +324,8 @@ fn content_px_unclamped(bx: &LayoutBox, fs: f32, ctx: &BlockCtx, max: bool, igno
             // (§4.2 : la contribution inclut marges, padding
             // et bordures). Le style est lu ici : `c.float`
             // n'est posé que lors de la pose de l'enfant.
-            let w = explorer_common::deep(|| content_px(c, cfs, ctx, max)) + own_sides(c, fs, ctx);
+            let w = explorer_common::deep(|| content_px_opt(c, cfs, ctx, max, false, cb))
+                + own_sides(c, fs, ctx);
             if max {
                 run += w;
             } else {
@@ -271,7 +335,8 @@ fn content_px_unclamped(bx: &LayoutBox, fs: f32, ctx: &BlockCtx, max: bool, igno
             best = best.max(run);
             run = 0.0;
             best = best.max(
-                explorer_common::deep(|| content_px(c, cfs, ctx, max)) + own_sides(c, fs, ctx),
+                explorer_common::deep(|| content_px_opt(c, cfs, ctx, max, false, cb))
+                    + own_sides(c, fs, ctx),
             );
         }
     }

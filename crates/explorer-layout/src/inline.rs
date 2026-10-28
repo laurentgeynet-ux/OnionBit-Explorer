@@ -400,9 +400,36 @@ fn size_atomics_walk(
             // entière par story, interlignes ~180 px). Les
             // remplacés (`intrinsic`) se dimensionnent déjà.
             let own = crate::intrinsic::own_sides(child, fs, ctx);
-            let cb_w = if child.intrinsic.is_none()
-                && css_px(&child.style, "width", w, fs, ctx).is_none()
-            {
+            let cb_w = if child.intrinsic.is_some() {
+                // Remplacé : son cb est sa **taille utilisée**,
+                // pas la ligne — §10.3.9. `width`/`height`
+                // résolus d'abord (`height` → ratio, §10.6.2),
+                // bornés par `min|max-width` contre la ligne
+                // (B-38 : `img{height:28px}` intrinsèque
+                // 5839×745 recevait la ligne entière → item
+                // flex irrétrécissable → nav à x=5879).
+                let h_css = if child.style.get("height").is_some_and(|v| v.contains('%')) {
+                    cb_h.and_then(|h| css_px(&child.style, "height", h, fs, ctx))
+                } else {
+                    css_px(&child.style, "height", 0.0, fs, ctx)
+                };
+                let own_w = css_px(&child.style, "width", w, fs, ctx).or_else(|| {
+                    child.intrinsic.and_then(|(iw, ih)| {
+                        h_css.map_or(Some(iw), |h| (ih > 0.0).then(|| h * iw / ih))
+                    })
+                });
+                own_w
+                    .map_or(w, |mut ow| {
+                        if let Some(mx) = css_px(&child.style, "max-width", w, fs, ctx) {
+                            ow = ow.min(mx);
+                        }
+                        if let Some(mn) = css_px(&child.style, "min-width", w, fs, ctx) {
+                            ow = ow.max(mn);
+                        }
+                        ow
+                    })
+                    .max(0.0)
+            } else if css_px(&child.style, "width", w, fs, ctx).is_none() {
                 (w - own)
                     .max(0.0)
                     .min(crate::intrinsic::max_content_px(child, fs, ctx))
