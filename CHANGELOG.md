@@ -13550,3 +13550,21 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   Complète le plafond 256 + troncation
   nommée (2b61012). Test
   `module_graph_data_url_decoded_inline`.
+
+- **B-38 — contribution d'un remplacé
+  bornée par `max-width:%` et
+  `height`→ratio** (`explorer-layout`) —
+  le logo `lockup.svg` (viewBox
+  5839×745) à `img{max-width:100%}`
+  + `height:28px` contribuait sa
+  largeur brute en mesure de contenu
+  → item flex 5 839 px, nav expulsée
+  (developer.chrome.com, vols 58/80).
+  §9.9.3 : les `%` des descendants
+  d'un item flex se résolvent contre
+  la taille main du conteneur ;
+  §10.6.2 : `height` résolue dérive
+  la contribution par ratio ; chemin
+  atome : le remplacé reçoit sa
+  taille utilisée, pas la ligne.
+  Repro verbatim verte (~220 px).
