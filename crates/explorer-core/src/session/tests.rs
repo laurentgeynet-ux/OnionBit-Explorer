@@ -2784,3 +2784,72 @@ fn poll_net_budget_defere_les_livraisons_excedentaires() {
     assert_eq!(n, 4);
     assert!(s.pending_net_done.is_empty());
 }
+
+/// J4/§B-12 (bookshop vol 95) — une fois `heap_dead` armé,
+/// chaque éval suivante échoue avec la même signature « heap
+/// memory limit exceeded » mais une pile JS différente par
+/// site d'appel : le dédup sur message exact ne les
+/// regroupait pas (×9, ×5 + variantes noyaient `/console`).
+/// Une occurrence par document suffit.
+#[test]
+fn heap_dead_errors_reported_once_per_document() {
+    let mut s = Session::with_config(
+        Arc::new(FailTransport),
+        Arc::new(TestFont),
+        SessionConfig {
+            js_mem_limit_mib: 1,
+            ..SessionConfig::default()
+        },
+    );
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let mut rx = s.subscribe();
+    let tab = s.open_tab();
+    let mut eng = s
+        .spawn_engine(
+            tab,
+            "<!doctype html><html><body><script>1</script></body></html>",
+            true,
+            "",
+        )
+        .expect("moteur");
+    // Tas de 1 Mio : cette éval retient ~50 000 chaînes
+    // vivantes → `heap_dead` s'arme. Les deux évals
+    // suivantes meurent alors sous d'autres piles/sources —
+    // messages exacts distincts, même signature heap.
+    let bomb = "var keep=[]; for(var i=0;i<50000;i++){ keep.push('cellule'+i); }";
+    s.eval_or_report(tab, eng.as_mut(), bomb, Some("http://t.test/one.js"), None);
+    s.eval_or_report(
+        tab,
+        eng.as_mut(),
+        "for(var i=0;i<10;i++){}",
+        Some("http://t.test/two.js"),
+        None,
+    );
+    s.eval_or_report(
+        tab,
+        eng.as_mut(),
+        "var z = 1 + 1; z.toString();",
+        Some("http://t.test/three.js"),
+        None,
+    );
+    // Pré-condition du verrou : le tas est bien mort et les
+    // évals suivantes échouent réellement (sinon le comptage
+    // ci-dessous ne prouverait rien).
+    let probe = eng.eval("1+1");
+    assert!(
+        probe
+            .as_ref()
+            .err()
+            .is_some_and(|e| e.to_string().contains("heap memory limit exceeded")),
+        "éval post-mortem attendue en échec heap, reçu : {probe:?}"
+    );
+    let mut heap_errors = 0usize;
+    while let Ok(ev) = rx.try_recv() {
+        if let CoreEvent::PipelineError { message, .. } = ev {
+            if message.contains("heap memory limit exceeded") {
+                heap_errors += 1;
+            }
+        }
+    }
+    assert_eq!(heap_errors, 1, "tas mort = 1 occurrence par document");
+}

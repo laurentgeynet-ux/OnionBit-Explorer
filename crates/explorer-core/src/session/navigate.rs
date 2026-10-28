@@ -1093,6 +1093,11 @@ impl Session {
                 }
             }
             entry.js = None;
+            // J4/§B-12 — le plafond « 1 erreur heap » suit la
+            // vie du moteur : le document neuf repart d'un
+            // moteur frais, son premier `heap memory limit`
+            // doit être rapporté à nouveau.
+            self.heap_dead_reported.remove(&tab);
             // Le cycle de vie tamponné appartenait au
             // document mort — comme les autres tampons 53f,
             // il ne rejoue pas sur le document neuf.

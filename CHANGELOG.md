@@ -7,6 +7,32 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **Étape 152 — §B-12/J4 : erreur
+  heap plafonnée à 1 occurrence**
+  (`explorer-core`) — bookshop
+  vol 95 : une fois `heap_dead`
+  armé côté moteur (JS-C170),
+  chaque éval suivante échoue
+  avec la même signature « heap
+  memory limit exceeded » mais
+  une pile JS différente par
+  site d'appel → le dédup sur
+  message exact ne les regroupait
+  pas (×9, ×5 + variantes de
+  piles noyaient `/console` —
+  dedup `83916a6` inopérante
+  terrain). Nouveau verrou
+  `heap_dead_reported` par onglet :
+  la première erreur heap d'un
+  moteur est rapportée, les
+  suivantes tues quelle que soit
+  la pile ; ré-armé quand le
+  moteur meurt à la nav
+  (`entry.js = None`), oublié à
+  `close_tab`. Verrou
+  `heap_dead_errors_reported_once_
+  per_document` (tas 1 Mio,
+  3 évals fautives, 1 occurrence).
 - **JS-C176 — §B-23 : drain
   microtasks boot sur deadline boot**
   (`explorer-jscore`) — cryptpad

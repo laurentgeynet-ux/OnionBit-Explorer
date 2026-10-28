@@ -924,6 +924,16 @@ pub struct Session {
     /// `(onglet, message, occurrences)` : répétitions
     /// consécutives identiques tues, re-émises ×16.
     last_pipeline_error: Option<(TabId, String, u32)>,
+    /// J4/§B-12 (bookshop vol 95) — une fois le tas JS
+    /// déclaré mort (verrou `heap_dead` côté moteur), chaque
+    /// éval suivante échoue avec la même signature mais une
+    /// pile JS différente par site d'appel : le dédup sur
+    /// message exact ne les regroupe pas (×9, ×5 +
+    /// variantes observées). La mort du tas est définitive
+    /// pour le moteur : une occurrence par document suffit —
+    /// le verrou suit la vie du moteur (ré-armé à la nav,
+    /// oublié à la fermeture de l'onglet).
+    heap_dead_reported: std::collections::HashSet<TabId>,
 }
 
 impl Session {
@@ -1033,6 +1043,7 @@ impl Session {
             applies_fin: 0,
             paint_in_flight: std::collections::HashMap::new(),
             last_pipeline_error: None,
+            heap_dead_reported: std::collections::HashSet::new(),
             pump_streaks: std::collections::HashMap::new(),
             unmapped_streaks: std::collections::HashMap::new(),
             orphaned_paints: std::sync::Arc::new(std::sync::Mutex::new(
@@ -1412,6 +1423,7 @@ impl Session {
             orphans.remove(&tab);
         }
         self.pending_applies.retain(|j| j.tab != tab);
+        self.heap_dead_reported.remove(&tab);
         let _ = self.events.send(CoreEvent::TabClosed { tab });
         Ok(())
     }

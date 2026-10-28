@@ -493,6 +493,18 @@ impl Session {
     /// identiques tues et re-émises toutes les 16 avec
     /// `×N`. Un message différent réarme la série.
     fn emit_pipeline_error(&mut self, tab: TabId, message: String) {
+        // J4/§B-12 (bookshop vol 95) : une fois `heap_dead`
+        // armé côté moteur, chaque éval suivante échoue avec
+        // la même signature « heap memory limit exceeded »
+        // mais une pile JS différente par site d'appel — le
+        // dédup exact ci-dessous ne les regroupe pas (×9, ×5
+        // + variantes de piles noyaient le ring). Le tas mort
+        // est définitif pour ce moteur : une occurrence par
+        // document suffit ; le verrou est ré-armé quand le
+        // moteur meurt (`entry.js = None` à la nav).
+        if message.contains("heap memory limit exceeded") && !self.heap_dead_reported.insert(tab) {
+            return;
+        }
         let n = match self.last_pipeline_error.as_mut() {
             Some((t, m, n)) if *t == tab && *m == message => {
                 *n += 1;
