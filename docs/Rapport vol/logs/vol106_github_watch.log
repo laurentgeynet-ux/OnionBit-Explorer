@@ -1,0 +1,6 @@
+watch start pid=3572 max=5120 Mo interval=10s
+watch end: pid 3572 disparu
+watch start pid=2176 max=5120 Mo interval=15s
+2026-10-29T00:42:50.6361622+01:00 pid=2176 356 Mo
+2026-10-29T00:43:06.6606154+01:00 pid=2176 430 Mo
+2026-10-29T00:43:21.6872821+01:00 WATCHDOG: pid 2176 8079 Mo > 5120 — kill
