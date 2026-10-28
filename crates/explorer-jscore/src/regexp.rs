@@ -340,6 +340,34 @@ fn translate_pattern(src: &str, unicode: bool, fold: bool) -> Result<String, Str
     while i < cs.len() {
         let c = cs[i];
         if c == '\\' {
+            // `\p`/`\P` sloppy **en classe** : identité
+            // littérale `p`/`P` (Annex B — Chrome matche la
+            // lettre, pas une propriété : `[^\p{Pat_Syn}
+            // \p{Pat_WS}]` d'airfrance est le set négatif
+            // `{p,{,P,a,t,…}}`). `escape` rendait `\p` nu
+            // et le `{Nom}` suivant devenait des littéraux
+            // échappés → le backend lisait `\p\x{7b}…` →
+            // « error parsing pattern » (§B-56 bras 2,
+            // vol 98). En `u`, `\p{…}` reste une vraie
+            // propriété — valide en classe côté backend.
+            if in_class && !t.unicode && matches!(cs.get(i + 1), Some('p' | 'P')) {
+                let ch = u32::from(cs[i + 1]);
+                class_char(&mut out, ch);
+                class_emitted = true;
+                if t.fold {
+                    let is_bound = class_dash
+                        || (cs.get(i + 2) == Some(&'-')
+                            && !matches!(class_atom_of(&cs, i + 3), ClassAtom::End));
+                    if !is_bound {
+                        emit_fold_variants(&mut out, ch);
+                    }
+                }
+                class_prev = Some(ClassAtom::Char(ch));
+                class_prev_bound = class_dash;
+                class_dash = false;
+                i += 2;
+                continue;
+            }
             let (frag, next) = t.escape(&cs, i, src)?;
             if in_class {
                 // Surrogate : nos strings UTF-8 n'en contiennent

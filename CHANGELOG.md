@@ -7,6 +7,27 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **JS-C180 — §B-56 bras 2 :
+  `\p`/`\P` sloppy en classe =
+  identité littérale**
+  (`explorer-jscore`) — airfrance
+  vol 98 : `[^\p{Pat_Syn}
+  \p{Pat_WS}]` rejetée. `escape`
+  rendait `\p` nu hors mode `u`
+  et le `{Nom}` suivant devenait
+  des littéraux échappés → le
+  backend lisait `\p\x{7b}…` →
+  « error parsing pattern ».
+  Annex B : en classe sloppy,
+  `\p` matche la lettre `p`
+  (Chrome : le set négatif
+  `{p,{,P,a,t,_,S,y,n,W,}}`) —
+  émission char complète (fold +
+  borne de range `[\p-z]` =
+  `p`-`z`). `u` inchangé :
+  `[\p{Lu}]` reste une propriété
+  réelle. Verrous `b56b_probe.rs`
+  (set littéral, range, `u`).
 - **Étape 154 — §B-30 : destruction
   des moteurs orphelins hors
   verrou** (`explorer-core`) —
