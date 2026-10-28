@@ -7,6 +7,33 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **R-129 — §B-27 : mosaïque géante
+  ouest-france — deux défauts flex**
+  (`explorer-css`, `explorer-layout`)
+  — le fils `_b#focus_1_4_6` posait
+  `13387.949px` dans une colonne
+  1260px (vol 48). (a) `expand_flex`
+  éclatait `flex: 0 0 calc(75% - 5px)`
+  sur l'espace *interne* du `calc` →
+  `flex-basis = "calc(75%"` refusé →
+  repli `max_content` du sous-arbre
+  (13387.949 = somme des max-contents),
+  figé par `flex-shrink:0`. Split
+  paren-aware `bg_tokens` partagé avec
+  le parseur de repli `item_flex`.
+  (b) `layout_item` passait la taille
+  allouée de l'item comme `cb_w` → les
+  `%`/`max-width` de l'item se
+  résolvaient contre lui-même
+  (`calc(75% - 5px)` → 700 au lieu de
+  940). Le cb de référence d'un item
+  flex = la boîte de contenu du
+  conteneur (`main_cb` en rangée,
+  `content_w` en colonne, `cell_w` en
+  grille). Chaîne vérifiée : col-16/18
+  = 940, col-8/6 = 300, img = 940×528.
+  Verrous `b27_probe_*` (markup+CSS
+  réels ouest-france en fixtures).
 - **JS-C174 — `style.cssText`**
   (`explorer-jscore`) — l'anti-FOUC
   réel (`<body style=visibility:

@@ -706,19 +706,24 @@ fn expand_flex(value: &str) -> Option<Vec<(String, String)>> {
             let mut grow = "1";
             let mut shrink = "1";
             let mut basis = "0%";
-            let mut nums = t.split_whitespace().filter(|s| s.parse::<f32>().is_ok());
-            if let Some(g) = nums.next() {
+            // Tokenisation paren-consciente : `calc(75% - 5px)`
+            // reste un atome unique — un split sur espaces brisait
+            // la base en `calc(75%` → `flex-basis` invalide →
+            // repli layout sur le max-content de l'item (§B-27,
+            // ouest-france `su-col-*` : colonne à 13387px).
+            let toks = bg_tokens(t);
+            let mut nums = toks.iter().filter(|s| s.parse::<f32>().is_ok());
+            if let Some(&g) = nums.next() {
                 grow = g;
-                if let Some(s) = nums.next() {
+                if let Some(&s) = nums.next() {
                     shrink = s;
                 }
-                if let Some(b) = t.split_whitespace().find(|s| s.parse::<f32>().is_err()) {
+                if let Some(&b) = toks.iter().find(|s| s.parse::<f32>().is_err()) {
                     basis = b;
                 }
             } else {
                 // `flex: <basis>` seul (ex. "30px") → `1 1 <basis>`.
-                let mut it = t.split_whitespace();
-                if let (Some(b), None) = (it.next(), it.next()) {
+                if let (Some(b), None) = (toks.first().copied(), toks.get(1)) {
                     basis = b;
                 } else {
                     return None;

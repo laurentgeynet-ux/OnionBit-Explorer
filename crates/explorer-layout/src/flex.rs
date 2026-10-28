@@ -80,6 +80,35 @@ pub(crate) fn gap_px(st: &ComputedStyle, row: bool, basis: f32, fs: f32, ctx: &B
 /// base en `%` ne se résout que si elle l'est (§9.2 : contre
 /// une taille indéfinie, la base `%` vaut `content`).
 /// `chassis` = padding+bordure main de l'item — `box-sizing`
+/// Découpe la valeur `flex` sur les espaces hors parenthèses —
+/// `0 0 calc(75% - 5px)` → `["0", "0", "calc(75% - 5px)"]`.
+fn flex_tokens(value: &str) -> Vec<&str> {
+    let mut toks = Vec::new();
+    let mut depth = 0u32;
+    let mut start = 0usize;
+    let mut in_tok = false;
+    for (i, ch) in value.char_indices() {
+        match ch {
+            '(' => depth += 1,
+            ')' => depth = depth.saturating_sub(1),
+            _ => {}
+        }
+        if ch.is_whitespace() && depth == 0 {
+            if in_tok {
+                toks.push(&value[start..i]);
+                in_tok = false;
+            }
+        } else if !in_tok {
+            start = i;
+            in_tok = true;
+        }
+    }
+    if in_tok {
+        toks.push(&value[start..]);
+    }
+    toks
+}
+
 /// convertit `flex-basis`/`width`/`height` en contenu (R-43).
 fn item_flex(
     c: &LayoutBox,
@@ -112,14 +141,19 @@ fn item_flex(
                 }
                 "initial" => {}
                 _ => {
-                    let mut nums = t.split_whitespace().filter_map(|s| s.parse::<f32>().ok());
+                    // Découpe paren-consciente : la base peut être
+                    // `calc(75% - 5px)` — un split sur espaces
+                    // tronquait l'atome en `calc(75%` → base
+                    // invalide → repli max-content géant (§B-27).
+                    let toks = flex_tokens(t);
+                    let mut nums = toks.iter().filter_map(|s| s.parse::<f32>().ok());
                     grow = nums.next().or(grow);
                     shrink = nums.next().or(shrink);
-                    if let Some(b) = t
-                        .split_whitespace()
-                        .find(|s| s.parse::<f32>().is_err() && *s != "auto")
+                    if let Some(b) = toks
+                        .iter()
+                        .find(|s| s.parse::<f32>().is_err() && **s != "auto")
                     {
-                        basis_raw = Some(b.to_string());
+                        basis_raw = Some((*b).to_string());
                     }
                 }
             }
@@ -190,6 +224,7 @@ pub(crate) fn layout_item(
     ix: f32,
     iy: f32,
     iw: f32,
+    cb_w: f32,
     ctx: &BlockCtx,
     fs: f32,
     pos_cb: Rect,
@@ -207,12 +242,17 @@ pub(crate) fn layout_item(
         // dépend du contenu, §10.5) ; grid passe la
         // hauteur de sa cellule — l'aire de grille EST
         // le bloc conteneur des % de l'item (§6.5).
+        // `cb_w` = largeur de contenu du CONTENEUR : le
+        // bloc conteneur d'un item est le conteneur flex,
+        // pas sa propre taille fléchie — sans quoi un
+        // `max-width:75%` se résolvait contre l'item
+        // lui-même (§B-27, `su-col-*` ouest-france).
         c.fc_root = true;
         layout_block(
             c,
             ix,
             iy,
-            iw,
+            cb_w,
             cb_h,
             ctx,
             fs,
@@ -593,6 +633,7 @@ pub(crate) fn flow_flex_children(
                     pen,
                     start_cursor,
                     sizes_l[lk] + extras[k] + line_margins[k].0 + line_margins[k].1,
+                    main_cb,
                     ctx,
                     fs,
                     pos_cb,
@@ -825,6 +866,7 @@ pub(crate) fn flow_flex_children(
                 content_x,
                 start_cursor,
                 content_w,
+                content_w,
                 ctx,
                 fs,
                 pos_cb,
@@ -966,7 +1008,17 @@ pub(crate) fn flow_flex_children(
                         sizes_l[lk]
                     };
                     c.style.set("height", &format!("{h}px"));
-                    layout_item(c, content_x, start_cursor, content_w, ctx, fs, pos_cb, None);
+                    layout_item(
+                        c,
+                        content_x,
+                        start_cursor,
+                        content_w,
+                        content_w,
+                        ctx,
+                        fs,
+                        pos_cb,
+                        None,
+                    );
                 }
             }
             let used: f32 = line
