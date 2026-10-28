@@ -159,6 +159,16 @@ class _SettingsDialogState extends ConsumerState<SettingsDialog> {
                 },
               ),
             ),
+            row(
+              'HW decode',
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Switch(
+                  value: settings.hwAccel,
+                  onChanged: (v) => ctrl.setHwAccel(v),
+                ),
+              ),
+            ),
             Align(
               alignment: Alignment.centerLeft,
               child: Padding(

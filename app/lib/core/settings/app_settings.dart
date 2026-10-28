@@ -23,10 +23,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 class AppSettings {
   const AppSettings({
     this.theme = 'system',
-    this.engine = 'auto',
+    this.engine = 'ffi',
     this.profileDir = '',
     this.language = '',
     this.uiLanguage = '',
+    this.hwAccel = true,
   });
 
   final String theme;
@@ -40,18 +41,25 @@ class AppSettings {
   /// quotidien. `''` = pas encore choisi.
   final String uiLanguage;
 
+  /// Décodage matériel (D3D11VA) — opt-in OnionMedia : le
+  /// lecteur pose `spec.hw_accel` quand le réglage est on.
+  /// Sans effet hors Windows / DLL sans le chemin HW.
+  final bool hwAccel;
+
   AppSettings copyWith({
     String? theme,
     String? engine,
     String? profileDir,
     String? language,
     String? uiLanguage,
+    bool? hwAccel,
   }) => AppSettings(
     theme: theme ?? this.theme,
     engine: engine ?? this.engine,
     profileDir: profileDir ?? this.profileDir,
     language: language ?? this.language,
     uiLanguage: uiLanguage ?? this.uiLanguage,
+    hwAccel: hwAccel ?? this.hwAccel,
   );
 
   Map<String, dynamic> toJson() => {
@@ -60,6 +68,7 @@ class AppSettings {
     'profileDir': profileDir,
     'language': language,
     'uiLanguage': uiLanguage,
+    'hwAccel': hwAccel,
   };
 
   /// Tolérant : entrée absente/invalide → valeur par défaut
@@ -73,7 +82,7 @@ class AppSettings {
 
     return AppSettings(
       theme: pick('theme', 'system', const {'system', 'dark', 'light'}),
-      engine: pick('engine', 'auto', const {'auto', 'rest', 'ffi'}),
+      engine: pick('engine', 'ffi', const {'auto', 'rest', 'ffi'}),
       profileDir: json['profileDir'] is String
           ? json['profileDir'] as String
           : '',
@@ -83,6 +92,9 @@ class AppSettings {
         '',
         const {'', 'fr', 'en', 'es', 'pt', 'zh', 'hi', 'id', 'de', 'ru', 'ja'},
       ),
+      hwAccel: json['hwAccel'] is bool
+          ? json['hwAccel'] as bool
+          : const AppSettings().hwAccel,
     );
   }
 }
@@ -186,6 +198,10 @@ class SettingsController extends Notifier<AppSettings> {
   /// réglée dans le dialogue Réglages.
   Future<void> setUiLanguage(String lang) =>
       _save(state.copyWith(uiLanguage: lang.trim()));
+
+  /// Décodage matériel (D3D11VA) — posé au lecteur OnionMedia
+  /// à la création de chaque surface vidéo.
+  Future<void> setHwAccel(bool v) => _save(state.copyWith(hwAccel: v));
 }
 
 /// Provider des réglages — `main.dart` en dérive `themeMode`,

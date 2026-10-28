@@ -105,7 +105,10 @@ class OnionMediaPlayer implements MediaPlayer {
   /// Ouvre `url` (http(s) proxyfiée ou chemin `file`/brut).
   /// `StateError` si la DLL ou l'ouverture échoue — la factory
   /// retombe alors sur `VideoMediaPlayer` (fvp).
-  static Future<MediaPlayer> create(String url) async {
+  static Future<MediaPlayer> create(
+    String url, {
+    bool hwAccel = false,
+  }) async {
     final lib = _load();
     /// `file:///D:/x.mkv` -> `D:/x.mkv` ; chemin nu inchangé.
   String localPath(String url) {
@@ -125,6 +128,20 @@ class OnionMediaPlayer implements MediaPlayer {
       throw StateError('onionmedia_new a échoué');
     }
     final p = OnionMediaPlayer._(lib, h);
+    // Décodage matériel opt-in : l'export
+    // `onionmedia_set_hwaccel` peut ne pas exister encore —
+    // lookup gardé, ignoré silencieusement si absent.
+    for (final sym in ['onionmedia_set_hw_accel', 'onionmedia_set_hwaccel']) {
+      try {
+        final setHw = lib.lookupFunction<
+            ffi.Int32 Function(ffi.Pointer, ffi.Int32),
+            int Function(ffi.Pointer, int)>(sym);
+        setHw(h, hwAccel ? 1 : 0);
+        break;
+      } on Object {
+        // export absent — HW non piloté, comportement antérieur.
+      }
+    }
     try {
       final isHttp = url.startsWith('http');
       // `file:///D:/x.mkv` -> chemin filesystem pour

@@ -146,12 +146,15 @@ class BrowserState {
 /// Fabrique de lecteurs natifs pour la seam `MediaSurface` —
 /// `VideoMediaPlayer` (MDK/`fvp`) en prod, fake en test.
 final mediaPlayerFactoryProvider = Provider<MediaPlayerFactory>(
-  (ref) => (url) async {
-    try {
-      return await OnionMediaPlayer.create(url);
-    } on Object {
-      return VideoMediaPlayer.create(url);
-    }
+  (ref) {
+    final hw = ref.watch(settingsProvider).hwAccel;
+    return (url) async {
+      try {
+        return await OnionMediaPlayer.create(url, hwAccel: hw);
+      } on Object {
+        return VideoMediaPlayer.create(url);
+      }
+    };
   },
 );
 

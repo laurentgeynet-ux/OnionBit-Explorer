@@ -7,6 +7,24 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **139d — interrupteur `HW decode` +
+  moteur `ffi` par défaut** (`app/`) —
+  réglage `hwAccel` persisté
+  (défaut **on**, opt-in D3D11VA
+  OnionMedia) + switch dans le
+  dialogue Réglages ; la factory
+  média pose
+  `onionmedia_set_hw_accel(h, 1)` à
+  la création du lecteur (lookup
+  gardé sur les deux noms de symbole
+  — DLL sans l'export = comportement
+  antérieur). `engine` passe `ffi`
+  par défaut (DLL embarquée avant
+  REST) ; `fromJson` : clé absente
+  → défaut constructeur au lieu de
+  `false` forcé.
+
+
 - **R-98 — cause racine du cycle de
   report §B-26 : deux bugs sous la
   borne** (`explorer-render`) — la
