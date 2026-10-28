@@ -104,6 +104,14 @@ frame-moteur vs fenêtre-app est un constat en soi (bug UI).
 - **Arrêt** : fermer les onglets (`DELETE /api/tabs/{id}`) puis
   tuer le process par **son PID** — jamais `taskkill /IM` (risque
   de toucher le daemon de l'utilisateur).
+- **Watchdog mémoire obligatoire** : un daemon wedged a monté à
+  ~7 Go + swap et crashé la station (vol 106). Lancer en tâche de
+  fond dès le démarrage du daemon :
+  `pwsh -File scripts/vol_memwatch.ps1 -DaemonPid <PID>
+  [-MaxMB 5120] [-IntervalSec 15] [-Log <file>]` — kill **par PID**
+  au-delà du seuil, journal dans `_vol*_watch.log`. Le wedge
+  reste un constat §B à rapporter ; le watchdog protège la
+  machine, pas le diagnostic.
 
 ## 6. Différences avec le vol humain
 

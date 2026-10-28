@@ -100,6 +100,10 @@ $env:EXPLORER_VIEWPORT="1366x900"
   noter le **PID** (arrêt par PID uniquement — jamais
   `taskkill /IM`, les daemons voisins appartiennent à d'autres
   sessions).
+- **Watchdog mémoire obligatoire** : lancer en fond dès le
+  démarrage — `pwsh -File scripts/vol_memwatch.ps1 -DaemonPid
+  <PID>` (seuil 5 120 Mo, kill par PID). Un daemon wedged à 7 Go
+  a crashé la station (vol 106).
 - **Un daemon par vol.** Si le vol précédent s'est terminé
   proprement, le daemon peut être réutilisé seulement s'il reste
   sain (`GET /api/tabs` répond < 5 s, RAM stable).
