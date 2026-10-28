@@ -7,6 +7,35 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **Étape 151 — §B-54/N7 : bornes
+  wall-clock du chemin `event.*`**
+  (`explorer-core`) — flixbus vol 93 :
+  `poll_net`/`dispatch`/`mirror_sync`
+  multi-secondes tenaient le verrou
+  session global → `POST navigate`
+  jamais servi, API morte (le
+  disjoncteur §B-41 vise la
+  *fréquence* des stalls, pas les
+  phases longues). Deux bornes de
+  config : `poll_net_budget` (2 s) —
+  une passe de livraisons `NetDone`
+  hors budget reporte le reste en
+  `pending_net_done` (ordre conservé,
+  relivré en tête à la passe
+  suivante, warn tracé) ; et
+  `event_tail_budget` (15 s) —
+  dispatch+miroir déjà hors budget →
+  la queue `after_script`/`poll_net`
+  est sautéee (récurrente, la pompe
+  battante la livre ; l'apply enfilé
+  est conservé). `ZERO` = désactivé
+  pour les deux. Limite honnête :
+  `mirror_sync` (sérialisation DOM,
+  chemin non-journal) reste coûté au
+  DOM — non tronçonnable sans
+  chirurgie moteur. Verrou
+  `poll_net_budget_defere_les_
+  livraisons_excedentaires`.
 - **JS-C173 — sonde §J6 sur le
   bundle réel vol 34**
   (`explorer-jscore`) — le chunk

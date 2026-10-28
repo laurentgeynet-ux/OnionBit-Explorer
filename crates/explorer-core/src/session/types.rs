@@ -936,6 +936,22 @@ pub struct SessionConfig {
     /// vite, l'onglet perd son JS le temps du refroidissement.
     /// `Duration::ZERO` = disjoncteur désactivé. Défaut 10 s.
     pub js_stall_cooldown: std::time::Duration,
+    /// Budget wall-clock d'une passe de livraisons `poll_net`
+    /// (Étape 151 / §B-54 — flixbus vol 93 : des livraisons
+    /// `NetDone` chaînées multi-secondes tenaient le verrou
+    /// session → API morte). Au-delà, le reste de la passe est
+    /// différé en `pending_net_done` et relivré **en tête** à
+    /// la passe suivante — la pompe bat en continu, rien n'est
+    /// perdu. `Duration::ZERO` = borne désactivée. Défaut 2 s.
+    pub poll_net_budget: std::time::Duration,
+    /// Budget du chemin `event.*` sous verrou (Étape 151 /
+    /// §B-54) : dispatch + synchro miroir mesurés depuis
+    /// l'entrée de l'événement — au-delà, la queue
+    /// `after_script`/`poll_net` est sautéee (récurrente, la
+    /// prochaine pompe la livre — l'apply enfilé est
+    /// conservé). `Duration::ZERO` = borne désactivée.
+    /// Défaut 15 s.
+    pub event_tail_budget: std::time::Duration,
 }
 
 impl Default for SessionConfig {
@@ -969,6 +985,8 @@ impl Default for SessionConfig {
             dom_journal_max_ops: 512,
             js_mem_limit_mib: 512,
             js_stall_cooldown: std::time::Duration::from_secs(10),
+            poll_net_budget: std::time::Duration::from_secs(2),
+            event_tail_budget: std::time::Duration::from_secs(15),
         }
     }
 }

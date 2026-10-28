@@ -292,7 +292,7 @@ vols/observabilité (transverse).
 | N4 | Morts silencieuses résiduelles : MapLoader bras + drains modules (pinterest, twitch, windy/flightradar importmap) | §B-4 | en décroissance — bras (d) data.gouv **RÉSOLU `[V9-main]` vol 93** (modulepreload É148 validé) ; tracé à compléter |
 | N5 | `document.write` ordonnancé post-commit (avec J7) | §B-19 | chantier profond |
 | N6 | `data-src` marmiton gris en V3 — re-valider sur binaire post-fix | §B-20 | à re-voler — binaire post-Étape 149 attendu (`data-srcset`+`max_images 256`) |
-| N7 | **Bornes phases `event.*`** (poll_net/dispatch/mirror_sync multi-secondes) — wedge `navigate` → verrou session global → API morte ; disjoncteur §B-41 inopérant (phases longues, pas fréquence) | §B-54 | ouvert — terrain vol 93 (flixbus) |
+| N7 | **Bornes phases `event.*`** (poll_net/dispatch/mirror_sync multi-secondes) — wedge `navigate` → verrou session global → API morte ; disjoncteur §B-41 inopérant (phases longues, pas fréquence) | §B-54 | **CORRECTIF Étape 151 — à re-voler** : `poll_net_budget` 2 s (livraisons `NetDone` excédentaires différées en `pending_net_done`, ordre conservé) + `event_tail_budget` 15 s (dispatch+miroir hors budget → queue `after_script`/`poll_net` sautéee, récurrente) ; limite : `mirror_sync` non-journal reste coûté au DOM |
 
 ### PIPE — `html` / `css` / `layout` / `render`
 

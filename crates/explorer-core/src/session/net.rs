@@ -2741,7 +2741,14 @@ impl Session {
     /// sous `&mut self`.
     #[allow(clippy::too_many_lines)] // dispatch séquentiel des NetDone — chaque variante documentée in situ
     pub fn poll_net(&mut self) -> usize {
-        let mut done = Vec::new();
+        // Le budget est mesuré d'ici (Étape 151 / §B-54) : les
+        // drains crypto/ES/WS précédant `drain_net_done`
+        // comptent dans la même passe.
+        let start = std::time::Instant::now();
+        // `pending_net_done` d'abord (livraisons différées par
+        // la borne — Étape 151) puis les arrivées du canal :
+        // l'ordre d'émission global est conservé.
+        let mut done: Vec<NetDone> = self.pending_net_done.drain(..).collect();
         while let Ok(d) = self.net_rx.try_recv() {
             done.push(d);
         }
@@ -2764,7 +2771,7 @@ impl Session {
         self.drain_es_events();
         self.drain_ws_events();
         let n = done.len();
-        self.drain_net_done(done);
+        self.drain_net_done(done, start);
         // Des `Set-Cookie` XHR ont pu enrichir le jar —
         // persistance au même point de synchro.
         if n > 0 {
@@ -2837,8 +2844,26 @@ impl Session {
     /// ont fait passer la fonction au-delà de 100 lignes) :
     /// `<script>` dynamique, graphe module, `<img>`, `<link>`,
     /// WS et fetch/XHR y sont livrés dans l'ordre d'arrivée.
-    fn drain_net_done(&mut self, done: Vec<NetDone>) {
-        for mut d in done {
+    /// `start` = instant d'entrée de `poll_net` — la borne
+    /// `poll_net_budget` (Étape 151 / §B-54) s'y mesure :
+    /// au-delà, les `NetDone` restants sont différés en
+    /// `pending_net_done` (ordre conservé, relivrés en tête à
+    /// la passe suivante) au lieu de tenir le verrou session
+    /// sur une rafale de livraisons multi-secondes.
+    pub(crate) fn drain_net_done(&mut self, done: Vec<NetDone>, start: std::time::Instant) {
+        let mut it = done.into_iter();
+        while let Some(mut d) = it.next() {
+            if !self.poll_net_budget.is_zero() && start.elapsed() > self.poll_net_budget {
+                let deferred = 1 + it.len();
+                self.pending_net_done.push_back(d);
+                self.pending_net_done.extend(it);
+                tracing::warn!(
+                    deferred,
+                    budget_ms = self.poll_net_budget.as_millis(),
+                    "poll_net : livraisons différées à la prochaine passe (B-54)"
+                );
+                return;
+            }
             // `<script>` dynamique (CAP-169) — la tâche vit
             // dans `dyn_tasks` (son `handle` est le `seq`
             // moteur, espace distinct des handles fetch) :

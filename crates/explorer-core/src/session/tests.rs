@@ -2734,3 +2734,51 @@ fn engine_stall_signature() {
         "TypeError: x is not a function".into()
     )));
 }
+
+/// Étape 151 / §B-54 (flixbus vol 93) — une passe `poll_net`
+/// qui dépasse `poll_net_budget` reporte les `NetDone`
+/// restants en `pending_net_done` (ordre conservé, relivrés
+/// en tête à la passe suivante) au lieu de tenir le verrou
+/// session sur une rafale de livraisons multi-secondes.
+#[test]
+fn poll_net_budget_defere_les_livraisons_excedentaires() {
+    let mut s = Session::with_config(
+        Arc::new(FailTransport),
+        Arc::new(TestFont),
+        SessionConfig::default(),
+    );
+    let tab = s.open_tab();
+    let mk = |handle: u64| NetDone {
+        tab,
+        handle,
+        cross: false,
+        mode: explorer_net::http::FetchMode::Cors,
+        credentials: explorer_net::http::FetchCredentials::Omit,
+        page_origin: "https://x.test".to_string(),
+        req_url: Url::parse("https://x.test/r").expect("url"),
+        partition: None,
+        out: Err(explorer_net::error::NetError::InvalidResponse(
+            "t".to_string(),
+        )),
+        script: None,
+        frame: None,
+        img: None,
+        link: None,
+        dyn_module: None,
+        import: None,
+    };
+    // Passe déjà hors budget → tout est reporté, ordre intact.
+    s.drain_net_done(
+        vec![mk(0), mk(1), mk(2)],
+        std::time::Instant::now() - std::time::Duration::from_secs(60),
+    );
+    assert_eq!(s.pending_net_done.len(), 3);
+    assert_eq!(s.pending_net_done.front().map(|d| d.handle), Some(0));
+    assert_eq!(s.pending_net_done.back().map(|d| d.handle), Some(2));
+    // La passe suivante (budget frais) relivre la file en
+    // tête — avant toute nouvelle arrivée.
+    s.net_tx.send(mk(3)).expect("send");
+    let n = s.poll_net();
+    assert_eq!(n, 4);
+    assert!(s.pending_net_done.is_empty());
+}

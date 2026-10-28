@@ -1115,6 +1115,20 @@ impl Session {
             self.queue_apply_sync(tab, s);
             t = sync_phase(tab, "event.apply_queued", ta);
         }
+        // §B-54 (flixbus vol 93) : si dispatch + miroir ont
+        // déjà brûlé le budget du chemin, la queue — drains
+        // cookies/storage + livraisons `NetDone` — ajouterait
+        // des secondes de tenue du verrou session. Elle est
+        // récurrente (pompe battante) : différée, rien perdu
+        // — l'apply enfilé au-dessus est conservé.
+        if !self.event_tail_budget.is_zero() && t0.elapsed() > self.event_tail_budget {
+            tracing::warn!(
+                tab,
+                elapsed_ms = t0.elapsed().as_millis(),
+                "event.* au-delà du budget — queue différée à la pompe (B-54)"
+            );
+            return prevented;
+        }
         // Les listeners ont pu émettre XHR/cookies/storage
         // (étape 51) — drains + livraison de ce qui est déjà
         // arrivé, sans yield (point de synchro interne).

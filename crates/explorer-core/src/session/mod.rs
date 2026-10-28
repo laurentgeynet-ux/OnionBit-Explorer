@@ -768,6 +768,10 @@ pub struct Session {
     /// ré-entrant dans le pipeline).
     net_tx: Sender<NetDone>,
     net_rx: Receiver<NetDone>,
+    /// `NetDone` différés par la borne `poll_net_budget`
+    /// (Étape 151 / §B-54) — relivrés **en tête** à la passe
+    /// suivante, l'ordre d'arrivée est conservé.
+    pending_net_done: std::collections::VecDeque<NetDone>,
     /// Canal des résultats `crypto.subtle` (JS-C79) — les
     /// tâches `spawn_blocking` de `drain_script_net` y livrent
     /// leur `CryptoDone` (même discipline `pump_net` : intentions
@@ -852,6 +856,12 @@ pub struct Session {
     /// Refroidissement du disjoncteur « moteur figé »
     /// (`js_stall_cooldown` de config, vol 25).
     js_stall_cooldown: std::time::Duration,
+    /// Budget d'une passe de livraisons `poll_net` (Étape 151 /
+    /// §B-54 — `poll_net_budget` de config ; `ZERO` = illimité).
+    poll_net_budget: std::time::Duration,
+    /// Budget du chemin `event.*` sous verrou (Étape 151 /
+    /// §B-54 — `event_tail_budget` de config ; `ZERO` = illimité).
+    event_tail_budget: std::time::Duration,
     /// Pages gelées par onglet dans le bfcache
     /// (`bfcache_pages` de config, étape 56).
     bfcache_pages: usize,
@@ -1013,6 +1023,7 @@ impl Session {
             local_storage: HashMap::new(),
             net_tx,
             net_rx,
+            pending_net_done: std::collections::VecDeque::new(),
             crypto_tx,
             crypto_rx,
             es_tx,
@@ -1030,6 +1041,8 @@ impl Session {
             paint_interval: std::time::Duration::from_millis(cfg.paint_interval_ms),
             resync_gap_max: std::time::Duration::from_millis(cfg.resync_gap_max_ms),
             js_stall_cooldown: cfg.js_stall_cooldown,
+            poll_net_budget: cfg.poll_net_budget,
+            event_tail_budget: cfg.event_tail_budget,
             bfcache_pages: cfg.bfcache_pages,
             incremental_syncs: 0,
             dom_journal_max_ops: cfg.dom_journal_max_ops,
