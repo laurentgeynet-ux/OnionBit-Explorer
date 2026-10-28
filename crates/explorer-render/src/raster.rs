@@ -1171,10 +1171,19 @@ fn paint_image(
     );
 }
 
-/// Blit nearest-neighbor dans la bbox de `rect` transformée
-/// par `cur` (scale/translate/flip — le miroir de contenu
-/// n'est pas reproduit : approximation documentée).
-#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+/// Blit bilinéaire dans la bbox de `rect` transformée par
+/// `cur` (scale/translate/flip — le miroir de contenu n'est
+/// pas reproduit : approximation documentée). §B-32 : le
+/// nearest-neighbor historique aliassait tout `<img>`
+/// redimensionné — les rasters terrain étaient « pixelisés »
+/// (un downscale ×4 ne gardait qu'un pixel sur quatre). La
+/// filtration se fait en **prémultiplié** : les texels à
+/// bord transparent n'injectent pas de couleur fantôme.
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    clippy::cast_precision_loss
+)]
 fn paint_image_axis(
     pixmap: &mut Pixmap,
     rect: &explorer_layout::Rect,
@@ -1206,30 +1215,61 @@ fn paint_image_axis(
     let clip_data = clip.map(tiny_skia::Mask::data);
     let dst = pixmap.pixels_mut();
     let (pw_u, dw, dh) = (pw as usize, x1 - x0, y1 - y0);
+    // Centre de pixel → source : u = (dx − x0 + ½)·(iw/dw) − ½.
+    let du = iw as f32 / (dw.max(1)) as f32;
+    let dv = ih as f32 / (dh.max(1)) as f32;
     for dy in dy0..dy1 {
-        let sy = ((dy - y0) as usize * ih) / dh.max(1) as usize;
+        // Bord clampé : un `v` légèrement hors-borne
+        // (arrondi de `phys`) échantillonne la ligne extrême
+        // plutôt que de sauter la rangée.
+        let vf = ((dy - y0) as f32 + 0.5)
+            .mul_add(dv, -0.5)
+            .clamp(0.0, ih as f32 - 1.0);
+        let vy = vf.floor();
+        let wy = vf - vy;
+        let (ya, yb) = (vy as usize, ((vy as usize) + 1).min(ih - 1));
         for dx in dx0..dx1 {
             let i = dy as usize * pw_u + dx as usize;
             if clip_data.is_some_and(|m| m[i] == 0) {
                 continue;
             }
-            let sx = ((dx - x0) as usize * iw) / dw.max(1) as usize;
-            let s = (sy.min(ih - 1) * iw + sx.min(iw - 1)) * 4;
-            let (sa, sr, sg, sb) = (
-                u32::from(img.rgba[s + 3]),
-                u32::from(img.rgba[s]),
-                u32::from(img.rgba[s + 1]),
-                u32::from(img.rgba[s + 2]),
-            );
-            // Source-over prémultiplié : src + dst·(1−α).
-            let inv = 255 - sa;
-            let d = dst[i];
-            let blend = |sv: u32, dv: u8| ((sv * sa + u32::from(dv) * inv + 127) / 255) as u8;
+            let uf = ((dx - x0) as f32 + 0.5)
+                .mul_add(du, -0.5)
+                .clamp(0.0, iw as f32 - 1.0);
+            let ux = uf.floor();
+            let wx = uf - ux;
+            let (xa, xb) = (ux as usize, ((ux as usize) + 1).min(iw - 1));
+            // Bilinear en prémultiplié : p = Σ w·(c·a, a).
+            let mut fa = 0.0f32;
+            let mut fr = 0.0f32;
+            let mut fg = 0.0f32;
+            let mut fb = 0.0f32;
+            for (yy, wy_) in [(ya, 1.0 - wy), (yb, wy)] {
+                for (xx, wx_) in [(xa, 1.0 - wx), (xb, wx)] {
+                    let src_i = (yy * iw + xx) * 4;
+                    let wgt = wx_ * wy_;
+                    let tex_a = f32::from(img.rgba[src_i + 3]);
+                    fa += tex_a * wgt;
+                    fr += f32::from(img.rgba[src_i]) * tex_a * wgt;
+                    fg += f32::from(img.rgba[src_i + 1]) * tex_a * wgt;
+                    fb += f32::from(img.rgba[src_i + 2]) * tex_a * wgt;
+                }
+            }
+            // Source-over prémultiplié : src + dst·(1−α) —
+            // `fr`… sont des canaux ×α·255 → /255 = canal
+            // prémultiplié 0–255 ; `fa` est l'α filtré.
+            let inv = 255.0 - fa;
+            let prev = dst[i];
+            let blend = |sv: f32, pv: u8| {
+                (sv + f32::from(pv) * inv / 255.0).round().clamp(0.0, 255.0) as u8
+            };
             dst[i] = tiny_skia::PremultipliedColorU8::from_rgba(
-                blend(sr, d.red()),
-                blend(sg, d.green()),
-                blend(sb, d.blue()),
-                (sa + u32::from(d.alpha()) * inv / 255) as u8,
+                blend(fr / 255.0, prev.red()),
+                blend(fg / 255.0, prev.green()),
+                blend(fb / 255.0, prev.blue()),
+                (fa + f32::from(prev.alpha()) * inv / 255.0)
+                    .round()
+                    .clamp(0.0, 255.0) as u8,
             )
             .unwrap_or(tiny_skia::PremultipliedColorU8::TRANSPARENT);
         }

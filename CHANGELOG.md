@@ -61,6 +61,26 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   CSS (solde du même budget).
   Verrou `collect_images_parses_
   lazy_data_srcset`.
+- **R-128 — §B-32 : échantillonnage
+  bilinéaire des `<img>`
+  redimensionnés** (`explorer-render`)
+  — `paint_image_axis` (chemin
+  axis-aligned, le cas commun)
+  blittait en nearest-neighbor :
+  tout `<img>` réduit ou agrandi
+  sortait en blocs aliasés
+  (« rasters pixelisés » terrain).
+  Échantillonnage bilinéaire 2×2 en
+  **prémultiplié** (pas de couleur
+  fantôme au bord alpha), bord
+  clampé, arrondi au pixel (la
+  troncature produisait 254/255 et
+  cassait deux reftests WPT).
+  `paint_tiled` inchangé (tuiles à
+  taille naturelle, 1:1). Verrou
+  `image_redimensionnee_
+  echantillonne_en_bilineaire` ;
+  reftests WPT 115/151 conservés.
 - **Étape 148 — §B-4 : prefetch
   `modulepreload`/`preload as=script|module`**
   (`explorer-core`) — data.gouv

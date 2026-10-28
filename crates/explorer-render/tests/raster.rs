@@ -795,3 +795,48 @@ fn atlas_repaint_a_chaud_reproduit_la_frame() {
     let chaud = explorer_render::rasterize_cached(&list, src, 1.0, &mut gc).expect("frame chaude");
     assert_eq!(froid.pixels, chaud.pixels, "atlas : repaint divergent");
 }
+
+// ── B-32 : <img> redimensionné en bilinéaire ────────────────
+
+#[test]
+fn image_redimensionnee_echantillonne_en_bilineaire() {
+    // Source 4x1 : noir, blanc, noir, blanc (opaque). Réduite
+    // à 2 px de large, le nearest-neighbor historique rendait
+    // [noir, noir] (texels 0 et 2) ; le bilinéaire doit
+    // produire deux pixels ~127 (moyenne des paires).
+    let img = std::sync::Arc::new(explorer_render::DecodedImage {
+        width: 4,
+        height: 1,
+        rgba: vec![
+            0, 0, 0, 255, 255, 255, 255, 255, 0, 0, 0, 255, 255, 255, 255, 255,
+        ],
+    });
+    let list = explorer_render::DisplayList {
+        items: vec![explorer_render::DisplayItem::Image {
+            rect: explorer_layout::Rect {
+                x: 0.0,
+                y: 0.0,
+                width: 2.0,
+                height: 1.0,
+            },
+            img,
+        }],
+        width: 2.0,
+        height: 1.0,
+        spans: std::collections::HashMap::default(),
+        tree_epoch: 0,
+        dropped_emits: 0,
+        first_cycle_path: None,
+    };
+    let f = rasterize(&list, font_src(), 1.0).expect("frame allouée");
+    for x in 0..2 {
+        let p = px(&f, x, 0);
+        assert!(
+            (110..=145).contains(&p[0]),
+            "pixel {x} attendu ~127 (bilineaire), got {p:?}"
+        );
+        assert_eq!(p[0], p[1]);
+        assert_eq!(p[1], p[2]);
+        assert_eq!(p[3], 255);
+    }
+}
