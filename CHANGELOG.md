@@ -7,6 +7,23 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **JS-C174 — `style.cssText`**
+  (`explorer-jscore`) — l'anti-FOUC
+  réel (`<body style=visibility:
+  hidden>` — geeksforgeeks vol 36,
+  §B-7) se lève souvent par
+  `cssText`, pas par propriété :
+  `camel_to_kebab("cssText")`
+  produisait la pseudo-propriété
+  `css-text`, `visibility` survivait
+  à vie. Getter = sérialisation
+  `k: v` de l'inline ; setter =
+  re-parse tolérant de la liste
+  (`parse_decls` partagé avec
+  `style_map`) — vide → attribut
+  `style` retiré. Verrou
+  `style_css_text_replaces_
+  declarations`.
 - **Étape 151 — §B-54/N7 : bornes
   wall-clock du chemin `event.*`**
   (`explorer-core`) — flixbus vol 93 :

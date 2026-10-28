@@ -357,6 +357,38 @@ fn style_property() {
     );
 }
 
+/// JS-C174 / §B-7 (geeksforgeeks vol 36) — `style.cssText`
+/// remplace toute la liste de déclarations inline : l'anti-FOUC
+/// `<body style=visibility:hidden>` redevient visible quand
+/// l'hydrate pose `cssText` (avant : `cssText` → pseudo-
+/// propriété `css-text`, `visibility` survivait à vie).
+#[test]
+fn style_css_text_replaces_declarations() {
+    // Écriture : remplace tout, normalisé `k: v`.
+    assert_eq!(
+        ev("var el=document.createElement('div');\
+            el.setAttribute('style','visibility:hidden;min-height:100vh');\
+            el.style.cssText='color: red; margin:0';\
+            el.getAttribute('style')"),
+        "color: red; margin: 0"
+    );
+    // Vide → attribut retiré (lève le masquage anti-FOUC).
+    assert_eq!(
+        ev("var el=document.createElement('div');\
+            el.setAttribute('style','visibility:hidden');\
+            el.style.cssText='';\
+            el.hasAttribute('style')"),
+        "false"
+    );
+    // Lecture : sérialise l'inline — pas une propriété CSS.
+    assert_eq!(
+        ev("var el=document.createElement('div');\
+            el.setAttribute('style','visibility:hidden; color:blue');\
+            el.style.cssText"),
+        "visibility: hidden; color: blue"
+    );
+}
+
 #[test]
 fn form_like_properties() {
     assert_eq!(ev("document.getElementById('inp').value"), "init");

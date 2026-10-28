@@ -279,7 +279,7 @@ vols/observabilité (transverse).
 | J6 | Spread/rest `...` « outside a call or array literal » — position non couverte par C146 | §B-9 | **non reproduit en-process** — JS-C173 : sonde sur le bundle réel BBC `_app` vol 34 (fixture verbatim) : eval top-level + 8 rounds microtasks/timers + drain rejets = propre ; les positions `...` hors call/array qui échouent encore (`yield ...x`, `throw ...x`) sont spec-correctes ; l'erreur terrain venait d'un rejet de promesse tardif — à confirmer au re-vol de la cible |
 | J7 | `document.write`/async : ordonnancement post-commit vs ordre de parse (tumblr) | §B-19 | chantier profond documenté |
 | J8 | Boucle applicative non bornée (`r is not defined` ×512 — intervalle retry en rafale) | §B-21 | **livré** — `TIMER_FAIL_CAP=8` : intervalle mort-né désarmé + isolation par callback + dédup visuel |
-| J9 | `visibility:hidden` jamais levé (geeksforgeeks — hydrate JS) | §B-7 | ouvert |
+| J9 | `visibility:hidden` jamais levé (geeksforgeeks — hydrate JS) | §B-7 | **CORRECTIF JS-C174 — à re-voler** : `style.cssText` posé (get+set, remplace toute la liste inline — avant : pseudo-propriété `css-text`, `visibility` survivait) ; si le re-vol persiste : hydrate mort en amont (console vol 36 vide — à nommer) |
 | J10 | Proxy : traps reçoivent `PropertyKey` symbol (immer/mastodon `isDraft`) | §B-9/19 | **RÉSOLU** — JS-C165 : `prop_trap_key` démange `sym_index`, re-vol mastodon : `ownKeys` TypeError disparu, app atteint `createStore` |
 
 ### NAV — `explorer-core` / `net` / `daemon` / `api`

@@ -7597,18 +7597,21 @@ fn prop_key(raw: &str) -> String {
 }
 
 fn style_map(dom: &Dom, node: NodeId) -> Vec<(String, String)> {
-    let mut out = Vec::new();
-    if let Some(style) = dom.attr(node, "style") {
-        for decl in style.split(';') {
-            if let Some((k, v)) = decl.split_once(':') {
-                let k = prop_key(k.trim());
-                if !k.is_empty() {
-                    out.push((k, v.trim().to_string()));
-                }
-            }
-        }
-    }
-    out
+    dom.attr(node, "style").map_or_else(Vec::new, parse_decls)
+}
+
+/// Déclarations `k: v` d'une liste `style` — tolérante :
+/// segments sans `:` et noms vides ignorés, noms standard
+/// minuscules, custom `--*` préservées (prop_key).
+fn parse_decls(style: &str) -> Vec<(String, String)> {
+    style
+        .split(';')
+        .filter_map(|decl| {
+            let (k, v) = decl.split_once(':')?;
+            let k = prop_key(k.trim());
+            (!k.is_empty()).then(|| (k, v.trim().to_string()))
+        })
+        .collect()
 }
 
 /// `ElementInternals` (stub issue #25) — objet minimal
@@ -7691,6 +7694,19 @@ impl Host for StyleHost {
                 None => Value::Undefined,
             }));
         }
+        // `cssText` (JS-C174 / §B-7) — sérialisation inline de
+        // la déclaration entière, pas une propriété CSS.
+        if key == "cssText" {
+            let css = {
+                let d = self.dom.borrow();
+                style_map(&d, self.node)
+                    .iter()
+                    .map(|(k, v)| format!("{k}: {v}"))
+                    .collect::<Vec<_>>()
+                    .join("; ")
+            };
+            return Ok(Some(e.str_val(css)));
+        }
         let kebab = camel_to_kebab(key);
         let v = {
             let d = self.dom.borrow();
@@ -7719,8 +7735,27 @@ impl Host for StyleHost {
     }
 
     fn set(&self, e: &mut Engine, _t: Value, key: &str, v: Value) -> JsResult<bool> {
-        let kebab = camel_to_kebab(key);
         let val = e.to_js_string(v)?;
+        // `cssText` (JS-C174 / §B-7 — geeksforgeeks hydrate)
+        // : remplace **toute** la liste inline — écrire
+        // `css-text: …` laisserait `visibility:hidden` en
+        // place et la page anti-FOUC resterait invisible.
+        if key == "cssText" {
+            let map = parse_decls(&val);
+            let mut d = self.dom.borrow_mut();
+            if map.is_empty() {
+                d.remove_attr(self.node, "style");
+            } else {
+                let css = map
+                    .iter()
+                    .map(|(k, v)| format!("{k}: {v}"))
+                    .collect::<Vec<_>>()
+                    .join("; ");
+                d.set_attr(self.node, "style", &css);
+            }
+            return Ok(true);
+        }
+        let kebab = camel_to_kebab(key);
         style_set(&mut self.dom.borrow_mut(), self.node, &kebab, &val);
         Ok(true)
     }
