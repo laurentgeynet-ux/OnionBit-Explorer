@@ -2865,3 +2865,55 @@ fn heap_dead_errors_reported_once_per_document() {
     }
     assert_eq!(heap_errors, 1, "tas mort = 1 occurrence par document");
 }
+
+/// §B-30 — pompe orpheline post-DELETE (flixbus vol 96) :
+/// `commit_js_pump` sur un onglet fermé pendant le
+/// détachement, ou sur une époque supplantée, rapportait un
+/// moteur orphelin **droppé sous le verrou** — sa GC d'un
+/// heap multi-Go figeait l'API pendant la libération. Le
+/// moteur est désormais dérouté vers un fil de destruction
+/// dédié (`engines_dropped_offlock` témoigne du déroutage).
+#[test]
+fn detached_pump_past_delete_destroys_engine_offlock() {
+    let mut s = Session::new(Arc::new(FailTransport), Arc::new(TestFont));
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let html = "<!doctype html><html><body><script>1</script></body></html>";
+    let install = |s: &mut Session, tab: TabId| {
+        s.tabs.get_mut(&tab).unwrap().js = s.spawn_engine(tab, html, true, "");
+    };
+    let tab = s.open_tab();
+    install(&mut s, tab);
+    // La pompe détache le moteur, puis le DELETE atterrit
+    // pendant qu'elle tourne.
+    let (eng, _budget, epoch, sync_ok) = s.take_js_engine(tab).unwrap();
+    s.close_tab(tab).unwrap();
+    // Au commit l'onglet n'existe plus : l'orphelin part en
+    // destruction hors verrou, rien n'est réinséré.
+    s.commit_js_pump(tab, epoch, Some((0, None, eng)), sync_ok);
+    assert_eq!(
+        s.engines_dropped_offlock, 1,
+        "moteur orphelin dérouté hors verrou au commit post-DELETE"
+    );
+    // Époque supplantée (nav suivante commise entre take et
+    // commit) : même déroutage, moteur non réinséré.
+    let tab2 = s.open_tab();
+    install(&mut s, tab2);
+    let (eng2, _b2, epoch2, sync2) = s.take_js_engine(tab2).unwrap();
+    s.commit_js_pump(tab2, epoch2 + 1, Some((0, None, eng2)), sync2);
+    assert_eq!(
+        s.engines_dropped_offlock, 2,
+        "époque périmée : moteur dérouté hors verrou pareil"
+    );
+    assert!(
+        s.tabs.get(&tab2).unwrap().js.is_none(),
+        "moteur périmé jamais réinséré sur le document neuf"
+    );
+    // `close_tab` avec moteur attaché : même traitement.
+    let tab3 = s.open_tab();
+    install(&mut s, tab3);
+    s.close_tab(tab3).unwrap();
+    assert_eq!(
+        s.engines_dropped_offlock, 3,
+        "close_tab : moteur attaché détruit hors verrou aussi"
+    );
+}

@@ -164,6 +164,28 @@ impl Session {
         Some((eng, self.max_timer_jobs, entry.nav_epoch, sync_ok))
     }
 
+    /// Destruction d'un moteur **hors verrou** — sa GC
+    /// (heap multi-Go, millions de cellules) sous le verrou
+    /// de session figeait l'API le temps de la libération :
+    /// pompe orpheline post-DELETE (§B-30, flixbus vol 96 —
+    /// `commit_js_pump` sur onglet mort), `close_tab`,
+    /// commit de nav. Un fil dédié avale le `drop` — borné
+    /// au nombre de moteurs morts (un par appel, jamais de
+    /// file), `engines_dropped_offlock` témoigne du
+    /// déroutage pour les tests.
+    pub(crate) fn destroy_engine_offlock(&mut self, eng: Box<dyn JsEngine>) {
+        self.engines_dropped_offlock += 1;
+        if let Err(e) = std::thread::Builder::new()
+            .name("js-engine-drop".into())
+            .spawn(move || drop(eng))
+        {
+            // Spawn refusé — `eng` a été consommé par la
+            // closure ratée et meurt ici : dégradation vers
+            // le comportement d'avant, jamais pire.
+            tracing::warn!(error = %e, "fil de drop moteur refusé — drop synchrone");
+        }
+    }
+
     /// Phase « commit » de la pompe détachée (53f) : réinsère
     /// le moteur si l'onglet n'a pas navigué pendant le run —
     /// une epoch différente jette le moteur et ses tampons
@@ -185,6 +207,14 @@ impl Session {
         let t0 = Instant::now();
         let phase = {
             let Some(entry) = self.tabs.get_mut(&tab) else {
+                // Onglet supprimé pendant le détachement —
+                // le moteur rapatrié est orphelin : sa GC
+                // (heap multi-Go) part sur un fil dédié,
+                // jamais droppée sous le verrou (§B-30,
+                // pompe orpheline post-DELETE, flixbus).
+                if let Some((_, _, eng)) = out {
+                    self.destroy_engine_offlock(eng);
+                }
                 return 0;
             };
             entry.js_detached = None;
@@ -206,6 +236,10 @@ impl Session {
                 entry.js_pending_dyn.clear();
                 entry.js_pending_attrs.clear();
                 entry.pending_doc_lifecycle.clear();
+                // Epoch supplantée : la nav suivante a fait
+                // mourir ce moteur — destruction hors
+                // verrou, pas de drop sous verrou (§B-30).
+                self.destroy_engine_offlock(eng);
                 return 0;
             }
             // Disjoncteur « moteur figé » (vol 25) : chaque

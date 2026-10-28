@@ -7,6 +7,40 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **Étape 154 — §B-30 : destruction
+  des moteurs orphelins hors
+  verrou** (`explorer-core`) —
+  flixbus vol 96 : DELETE pendant
+  une pompe détachée → au commit
+  le moteur rapatrié (~heap
+  multi-Go) était **droppé sous
+  le verrou de session** — sa GC
+  figeait l'API le temps de la
+  libération. Même classe au
+  `close_tab` (drop de
+  `entry.js` avec l'entrée), au
+  commit de nav (`entry.js =
+  None`) et au re-take dyn-module
+  (onglet mort entre take et
+  réinsertion). Les quatre sites
+  déroutent vers un fil dédié
+  `js-engine-drop` (`destroy_
+  engine_offlock`) — borné un
+  fil par moteur mort, compteur
+  `engines_dropped_offlock`
+  témoin. `close_tab` purge en
+  outre `dyn_tasks` (imports/
+  scripts dynamiques survivaient
+  au DELETE — `net_tasks` seuls
+  étaient avortés) ainsi que
+  `pump_streaks`/`unmapped_
+  streaks` (fuite par onglet).
+  Verrou `detached_pump_past_
+  delete_destroys_engine_offlock`
+  : DELETE pendant détachement,
+  époque supplantée, close_tab
+  attaché — trois déroutages,
+  moteur jamais réinséré.
 - **Étape 153 — §B-12 : rejets non
   gérés routés par le cap heap**
   (`explorer-core`) — bookshop

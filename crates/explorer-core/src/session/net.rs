@@ -1309,8 +1309,15 @@ impl Session {
         let n = eng.run_pending();
         tracing::trace!(tab, jobs = n, "jobs js après module dynamique");
         let mutated = Self::sync_for_apply(eng.as_mut());
+        let mut eng = Some(eng);
         if let Some(entry) = self.tabs.get_mut(&tab) {
-            entry.js = Some(eng);
+            entry.js = eng.take();
+        }
+        // Onglet mort pendant l'éval : le moteur est orphelin
+        // — destruction sur fil dédié, jamais droppé sous le
+        // verrou (§B-30).
+        if let Some(eng) = eng {
+            self.destroy_engine_offlock(eng);
         }
         if let Some(s) = mutated {
             self.queue_apply_sync(tab, s);

@@ -934,6 +934,11 @@ pub struct Session {
     /// le verrou suit la vie du moteur (ré-armé à la nav,
     /// oublié à la fermeture de l'onglet).
     heap_dead_reported: std::collections::HashSet<TabId>,
+    /// Compteur de moteurs déroutés vers une destruction
+    /// hors verrou (§B-30 — GC d'un heap multi-Go sous
+    /// verrou figeait l'API). Témoigne du déroutage pour
+    /// les tests ; chaque incrément = un fil `js-engine-drop`.
+    pub(crate) engines_dropped_offlock: usize,
 }
 
 impl Session {
@@ -1044,6 +1049,7 @@ impl Session {
             paint_in_flight: std::collections::HashMap::new(),
             last_pipeline_error: None,
             heap_dead_reported: std::collections::HashSet::new(),
+            engines_dropped_offlock: 0,
             pump_streaks: std::collections::HashMap::new(),
             unmapped_streaks: std::collections::HashMap::new(),
             orphaned_paints: std::sync::Arc::new(std::sync::Mutex::new(
@@ -1405,10 +1411,29 @@ impl Session {
             e.nav_alive
                 .store(false, std::sync::atomic::Ordering::Relaxed);
         }
+        // Moteur attaché à l'onglet : sa GC (heap multi-Go)
+        // part sur un fil dédié — droppé avec l'entrée, il
+        // tenait le verrou le temps de la libération et
+        // figeait l'API au DELETE (§B-30, flixbus vol 96).
+        if let Some(eng) = self.tabs.get_mut(&tab).and_then(|e| e.js.take()) {
+            self.destroy_engine_offlock(eng);
+        }
         self.tabs.remove(&tab).ok_or(CoreError::UnknownTab(tab))?;
         // Requêtes script-initiées en vol : annulées — leurs
         // réponses éventuelles arriveraient à un onglet mort.
         self.net_tasks.retain(|(t, _), j| {
+            if *t == tab {
+                j.abort();
+                false
+            } else {
+                true
+            }
+        });
+        // Même purge pour les imports/scripts dynamiques :
+        // jusqu'ici `dyn_tasks` survivait au DELETE — une
+        // rafale `import()`/`<script>` dynamique continuait
+        // de livrer à un onglet mort (§B-30).
+        self.dyn_tasks.retain(|(t, _), j| {
             if *t == tab {
                 j.abort();
                 false
@@ -1424,6 +1449,8 @@ impl Session {
         }
         self.pending_applies.retain(|j| j.tab != tab);
         self.heap_dead_reported.remove(&tab);
+        self.pump_streaks.remove(&tab);
+        self.unmapped_streaks.remove(&tab);
         let _ = self.events.send(CoreEvent::TabClosed { tab });
         Ok(())
     }

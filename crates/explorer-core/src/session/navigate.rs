@@ -1006,6 +1006,11 @@ impl Session {
         // closes avant le gel — le snapshot ne les porte
         // pas, la restauration ré-offre ids neufs (71b).
         self.close_media(tab);
+        // Moteur du document sortant, le cas échéant —
+        // collecté dans le bloc puis détruit **hors
+        // verrou** (§B-30) : sa GC multi-Go sous verrou
+        // figeait l'API au commit de nav.
+        let dead_eng;
         {
             let entry = self.tabs.get_mut(&tab).ok_or(CoreError::UnknownTab(tab))?;
             // bfcache (étape 56) : la page quittée est gelée
@@ -1092,7 +1097,7 @@ impl Session {
                     eng.context_destroy(f.ctx);
                 }
             }
-            entry.js = None;
+            dead_eng = entry.js.take();
             // J4/§B-12 — le plafond « 1 erreur heap » suit la
             // vie du moteur : le document neuf repart d'un
             // moteur frais, son premier `heap memory limit`
@@ -1124,6 +1129,11 @@ impl Session {
             entry.transitions.clear();
             entry.sync_floor = None;
             entry.dom = Some(dom);
+        }
+        // Le moteur sortant (non gelé bfcache) meurt ici —
+        // fil dédié, jamais droppé sous le verrou (§B-30).
+        if let Some(eng) = dead_eng {
+            self.destroy_engine_offlock(eng);
         }
         if let Ok(mut wf) = self.webfonts.lock() {
             wf.clear();
