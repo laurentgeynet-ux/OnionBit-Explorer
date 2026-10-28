@@ -1,0 +1,3235 @@
+| <html>
+|   lang="en"
+|   <head>
+|     "
+  "
+|     <title>
+|       "Home - Linux Mint"
+|     "
+  "
+|     <meta>
+|       charset="utf-8"
+|     "
+  "
+|     <meta>
+|       content="IE=edge"
+|       http-equiv="X-UA-Compatible"
+|     "
+  "
+|     <meta>
+|       content="width=device-width, initial-scale=1"
+|       name="viewport"
+|     "
+  "
+|     <meta>
+|       content="Linux Mint"
+|       name="author"
+|     "
+  "
+|     <meta>
+|       content="Linux Mint is an elegant, easy to use, up to date and comfortable desktop operating system."
+|       name="description"
+|     "
+  "
+|     <meta>
+|       content="Linux Mint, Free, Operating system, FOSS, Linux, easy to use"
+|       name="keywords"
+|     "
+  "
+|     <meta>
+|       content="all"
+|       name="robots"
+|     "
+
+  
+  "
+|     <link>
+|       href="/web/img/favicon.ico"
+|       rel="shortcut icon"
+|     "
+
+  
+  "
+|     <link>
+|       href="/web/css/fonts/fonts.css"
+|       rel="stylesheet"
+|       type="text/css"
+|     "
+
+  
+  "
+|     <link>
+|       href="/web/fontawesome/css/all.min.css"
+|       rel="stylesheet"
+|     "
+  "
+|     <link>
+|       href="/web/wizixo/template/assets/vendor/themify-icons/css/themify-icons.css"
+|       rel="stylesheet"
+|       type="text/css"
+|     "
+  "
+|     <link>
+|       href="/web/wizixo/template/assets/vendor/animate/animate.min.css"
+|       rel="stylesheet"
+|       type="text/css"
+|     "
+  "
+|     <link>
+|       href="/web/wizixo/template/assets/vendor/fancybox/css/jquery.fancybox.min.css"
+|       rel="stylesheet"
+|       type="text/css"
+|     "
+  "
+|     <link>
+|       href="/web/wizixo/template/assets/vendor/owlcarousel/css/owl.carousel.min.css"
+|       rel="stylesheet"
+|       type="text/css"
+|     "
+
+  
+  "
+|     <link>
+|       href="/web/wizixo/template/assets/css/style.css"
+|       rel="stylesheet"
+|       type="text/css"
+|     "
+
+  
+  "
+|     <link>
+|       href="/web/css/grid-gallery.css"
+|       rel="stylesheet"
+|       type="text/css"
+|     "
+  "
+|     <link>
+|       href="/web/css/mint.css"
+|       rel="stylesheet"
+|       type="text/css"
+|     "
+  "
+|     <link>
+|       href="/web/css/cryptofont/cryptofont.css"
+|       rel="stylesheet"
+|     "
+
+"
+|   "
+
+"
+|   <body>
+|     "
+
+  
+  "
+|     <header>
+|       class="navbar-transparent navbar-sticky navbar-primary"
+|       "
+
+    "
+|       <div>
+|         class="navbar-top d-none d-lg-block"
+|         "
+      "
+|         <div>
+|           class="container"
+|           "
+        "
+|           <div>
+|             class="d-flex justify-content-between align-items-center"
+|             "
+          
+          "
+|             <div>
+|               class="d-flex align-items-center"
+|               "
+          "
+|             "
+
+          
+          "
+|             <div>
+|               class="d-flex align-items-center"
+|               "
+            
+
+            
+            "
+|               <ul>
+|                 class="social-icons"
+|                 "
+              "
+|                 <li>
+|                   class="social-icons-item m-0"
+|                   "
+                "
+|                   <a>
+|                     class="social-icons-link w-auto px-2"
+|                     href="https://blog.linuxmint.com/?feed=rss2"
+|                     title="RSS Feed"
+|                     <i>
+|                       class="fa fa-rss"
+|                   "
+              "
+|                 "
+              "
+|                 <li>
+|                   class="social-icons-item m-0"
+|                   "
+                "
+|                   <a>
+|                     class="social-icons-link w-auto px-2"
+|                     href="mailto:root@linuxmint.com"
+|                     title="Email"
+|                     <i>
+|                       class="fa fa-envelope"
+|                   "
+              "
+|                 "
+              "
+|                 <li>
+|                   class="social-icons-item m-0"
+|                   "
+                "
+|                   <a>
+|                     class="social-icons-link w-auto px-2"
+|                     href="https://app.element.io/#/room/#linuxmint-space:matrix.org"
+|                     target="_blank"
+|                     title="Chat Rooms"
+|                     <i>
+|                       class="fa fa-commenting"
+|                   "
+              "
+|                 "
+              "
+|                 <li>
+|                   class="social-icons-item m-0"
+|                   "
+                "
+|                   <a>
+|                     class="social-icons-link w-auto px-2"
+|                     href="https://www.facebook.com/pages/Linux-Mint/185238108180410"
+|                     target="_blank"
+|                     title="Facebook"
+|                     <i>
+|                       class="fa-brands fa-facebook"
+|                   "
+              "
+|                 "
+              "
+|                 <li>
+|                   class="social-icons-item m-0"
+|                   "
+                "
+|                   <a>
+|                     class="social-icons-link w-auto px-2"
+|                     href="https://www.github.com/linuxmint"
+|                     target="_blank"
+|                     title="Github"
+|                     <i>
+|                       class="fa-brands fa-github"
+|                   "
+              "
+|                 "
+              "
+|                 <li>
+|                   class="social-icons-item m-0"
+|                   "
+                "
+|                   <a>
+|                     class="social-icons-link w-auto px-2"
+|                     href="https://twitter.com/linux_mint"
+|                     target="_blank"
+|                     title="Twitter"
+|                     <i>
+|                       class="fa-brands fa-twitter"
+|                   "
+              "
+|                 "
+              "
+|                 <li>
+|                   class="social-icons-item m-0"
+|                   "
+                "
+|                   <a>
+|                     class="social-icons-link w-auto px-2"
+|                     href="https://mastodon.social/@linuxmint"
+|                     target="_blank"
+|                     title="Mastodon"
+|                     <i>
+|                       class="fa-brands fa-mastodon"
+|                   "
+              "
+|                 "
+            "
+|               "
+          "
+|             "
+        "
+|           "
+      "
+|         "
+    "
+|       "
+
+    
+    "
+|       <nav>
+|         class="navbar navbar-expand-lg"
+|         "
+      "
+|         <div>
+|           class="container"
+|           "
+        
+        "
+|           <a>
+|             class="navbar-brand"
+|             href="/"
+|             "
+          "
+|             <img>
+|               src="/web/img/logo-mono.svg"
+|               width="200"
+|             "
+        "
+|           "
+        
+        "
+|           <button>
+|             aria-controls="navbarCollapse"
+|             aria-expanded="false"
+|             aria-label="Toggle navigation"
+|             class="navbar-toggler ml-auto"
+|             data-target="#navbarCollapse"
+|             data-toggle="collapse"
+|             type="button"
+|             "
+          "
+|             <span>
+|               class="navbar-toggler-icon"
+|               " "
+|             "
+        "
+|           "
+        
+        "
+|           <div>
+|             class="collapse navbar-collapse"
+|             id="navbarCollapse"
+|             "
+          "
+|             <ul>
+|               class="navbar-nav ml-auto"
+|               "
+
+            
+            "
+|               <li>
+|                 class="nav-item"
+|                 "
+              "
+|                 <a>
+|                   class="nav-link  active "
+|                   href="/"
+|                   "Home"
+|                 "
+            "
+|               "
+
+            
+            "
+|               <li>
+|                 class="nav-item dropdown"
+|                 "
+              "
+|                 <a>
+|                   aria-expanded="false"
+|                   aria-haspopup="true"
+|                   class="nav-link dropdown-toggle "
+|                   data-toggle="dropdown"
+|                   href="#"
+|                   id="demosMenu"
+|                   "Download"
+|                 "
+              "
+|                 <div>
+|                   aria-labelledby="demosMenu"
+|                   class="dropdown-menu pb-3 pb-lg-0"
+|                   "
+                "
+|                   <div>
+|                     class="d-block d-sm-flex"
+|                     "
+                  "
+|                     <ul>
+|                       class="list-unstyled w-100 w-sm-50 pr-0 pr-lg-5"
+|                       "
+                    "
+|               <li>
+|                 class="dropdown-header"
+|                 "Latest version"
+|               "
+                    "
+|               <li>
+|                 " "
+|                 <a>
+|                   class="dropdown-item"
+|                   href="download.php"
+|                   "Linux Mint 22.3"
+|                   <span>
+|                     class="badge badge-success ml-2"
+|                     "Recommended"
+|                 " "
+|               "
+                  "
+|             "
+                  "
+|             <ul>
+|               class="list-unstyled w-100 w-sm-50 pr-0 pr-lg-5"
+|               "
+                    "
+|               <li>
+|                 class="dropdown-header"
+|                 "Other versions"
+|               "
+                    "
+|               <li>
+|                 " "
+|                 <a>
+|                   class="dropdown-item"
+|                   href="download_lmde.php"
+|                   "LMDE 7"
+|                 " "
+|               "
+                    "
+|               <li>
+|                 " "
+|                 <a>
+|                   class="dropdown-item"
+|                   href="download_all.php"
+|                   "All versions"
+|                 " "
+|               "
+                  "
+|             "
+                "
+|           "
+                
+                "
+|           <div>
+|             class="w-100 bg-grad pattern-overlay-2 p-4 mt-3 all-text-white d-none d-lg-flex"
+|             "
+                  "
+|             <div>
+|               class="align-self-center mr-4"
+|               "
+                    "
+|               <h4>
+|                 class="mb-0 text-nowrap"
+|                 "Checkout the doc!"
+|               "
+                    "
+|               <p>
+|                 class="mb-0 small"
+|                 "Follow the guide to learn how to download and install Linux Mint."
+|               "
+                  "
+|             "
+                  "
+|             <a>
+|               class="btn btn-outline-white btn-sm mb-0 align-self-center ml-auto overflow-visible"
+|               href="https://linuxmint-installation-guide.readthedocs.io/en/latest/"
+|               target="_blank"
+|               "Installation Guide"
+|             "
+                "
+|           "
+              "
+|         "
+            
+
+            
+            "
+|         <li>
+|           class="nav-item dropdown"
+|           "
+              "
+|           <a>
+|             aria-expanded="false"
+|             aria-haspopup="true"
+|             class="nav-link dropdown-toggle "
+|             data-toggle="dropdown"
+|             href="#"
+|             id="demosMenu"
+|             "Project"
+|           "
+              "
+|           <div>
+|             aria-labelledby="demosMenu"
+|             class="dropdown-menu pb-3 pb-lg-0"
+|             "
+                "
+|             <div>
+|               class="d-block d-sm-flex"
+|               "
+                  "
+|               <ul>
+|                 class="list-unstyled w-100 w-sm-50 pr-0 pr-lg-5"
+|                 "
+                    "
+|         <li>
+|           class="dropdown-header"
+|           "Funding"
+|         "
+                    "
+|         <li>
+|           " "
+|           <a>
+|             class="dropdown-item"
+|             href="donors.php"
+|             "Donors"
+|           " "
+|         "
+                    "
+|         <li>
+|           " "
+|           <a>
+|             class="dropdown-item"
+|             href="sponsors.php"
+|             "Sponsors"
+|           " "
+|         "
+                    "
+|         <li>
+|           " "
+|           <a>
+|             class="dropdown-item"
+|             href="partners.php"
+|             "Partners"
+|           " "
+|         "
+                    "
+|         <li>
+|           " "
+|           <a>
+|             class="dropdown-item"
+|             href="store.php"
+|             "Store"
+|           " "
+|         "
+                  
+                  "
+|         <ul>
+|           class="list-unstyled w-100 w-sm-50 pr-0 pr-lg-5"
+|           "
+                    "
+|           <li>
+|             class="dropdown-header"
+|             "Contributing"
+|           "
+                    "
+|           <li>
+|             " "
+|             <a>
+|               class="dropdown-item"
+|               href="getinvolved.php"
+|               "Get Involved"
+|             " "
+|           "
+                    "
+|           <li>
+|             " "
+|             <a>
+|               class="dropdown-item"
+|               href="mirrors.php"
+|               "Mirrors"
+|             " "
+|           "
+                  "
+|         "
+                
+                
+                "
+|         <div>
+|           class="w-100 bg-grad pattern-overlay-2 p-4 mt-3 all-text-white d-none d-lg-flex"
+|           "
+                  "
+|           <div>
+|             class="align-self-center mr-4"
+|             "
+                    "
+|             <p>
+|               class="mb-0 small"
+|               "Every little helps, don't hesitate to get involved."
+|             "
+                  "
+|           "
+                "
+|         "
+              
+            
+
+            
+            "
+|         <li>
+|           class="nav-item dropdown"
+|           "
+              "
+|           <a>
+|             aria-expanded="false"
+|             aria-haspopup="true"
+|             class="nav-link dropdown-toggle "
+|             data-toggle="dropdown"
+|             href="#"
+|             id="demosMenu"
+|             "About"
+|           "
+              "
+|           <div>
+|             aria-labelledby="demosMenu"
+|             class="dropdown-menu pb-4 pb-lg-3"
+|             "
+                "
+|             <div>
+|               class="d-block d-sm-flex"
+|               "
+                  "
+|               <ul>
+|                 class="list-unstyled w-100 w-sm-50 pr-0 pr-lg-5"
+|                 "
+                    "
+|         <li>
+|           " "
+|           <a>
+|             class="dropdown-item"
+|             href="about.php"
+|             "About Linux Mint"
+|           " "
+|         "
+                    "
+|         <li>
+|           " "
+|           <a>
+|             class="dropdown-item"
+|             href="faq.php"
+|             "FAQ"
+|           " "
+|         "
+                    "
+|         <li>
+|           " "
+|           <a>
+|             class="dropdown-item"
+|             href="documentation.php"
+|             "Documentation"
+|           " "
+|         "
+                    "
+|         <li>
+|           " "
+|           <a>
+|             class="dropdown-item"
+|             href="screenshots.php"
+|             "Screenshots"
+|           " "
+|         "
+                  
+                  "
+|         <ul>
+|           class="list-unstyled w-100 w-sm-50 pr-0 pr-lg-5"
+|           "
+                    "
+|           <li>
+|             " "
+|             <a>
+|               class="dropdown-item"
+|               href="privacy.php"
+|               "Privacy & Cookies"
+|             " "
+|           "
+                    "
+|           <li>
+|             " "
+|             <a>
+|               class="dropdown-item"
+|               href="teams.php"
+|               "Team"
+|             " "
+|           "
+                    "
+|           <li>
+|             " "
+|             <a>
+|               class="dropdown-item"
+|               href="contactus.php"
+|               "Contact Us"
+|             " "
+|           "
+                  "
+|         "
+                
+              
+            
+
+            
+            "
+|         <li>
+|           class="nav-item dropdown"
+|           "
+              "
+|           <a>
+|             aria-expanded="false"
+|             aria-haspopup="true"
+|             class="nav-link dropdown-toggle "
+|             data-toggle="dropdown"
+|             href="#"
+|             id="demosMenu"
+|             "Links"
+|           "
+              "
+|           <div>
+|             aria-labelledby="demosMenu"
+|             class="dropdown-menu pb-3 pb-lg-0"
+|             "
+                "
+|             <div>
+|               class="d-block d-sm-flex"
+|               "
+                  "
+|               <ul>
+|                 class="list-unstyled w-100 w-sm-50 pr-0 pr-lg-5"
+|                 "
+                    "
+|         <li>
+|           class="dropdown-header"
+|           "Official"
+|         "
+                    "
+|         <li>
+|           " "
+|           <a>
+|             class="dropdown-item"
+|             href="/"
+|             <i>
+|               class="fa fa-igloo"
+|             " Website"
+|             <span>
+|               class="badge badge-success ml-2"
+|               "Here"
+|           " "
+|         "
+                    "
+|         <li>
+|           " "
+|           <a>
+|             class="dropdown-item"
+|             href="https://blog.linuxmint.com"
+|             target="_blank"
+|             <i>
+|               class="fas fa-blog"
+|             " Blog"
+|           " "
+|         "
+                    "
+|         <li>
+|           " "
+|           <a>
+|             class="dropdown-item"
+|             href="https://forums.linuxmint.com"
+|             target="_blank"
+|             <i>
+|               class="fa fa-comments"
+|             " Forums"
+|           " "
+|         "
+                    "
+|         <li>
+|           " "
+|           <a>
+|             class="dropdown-item"
+|             href="https://app.element.io/#/room/#linuxmint-space:matrix.org"
+|             target="_blank"
+|             <i>
+|               class="fa fa-commenting"
+|             " Chat Rooms"
+|         "
+                    "
+|         <li>
+|           " "
+|           <a>
+|             class="dropdown-item"
+|             href="https://community.linuxmint.com"
+|             target="_blank"
+|             <i>
+|               class="fas fa-users"
+|             " Community website"
+|           " "
+|         "
+                  
+                  "
+|         <ul>
+|           class="list-unstyled w-100 w-sm-50 pr-0 pr-lg-5"
+|           "
+                    "
+|           <li>
+|             class="dropdown-header"
+|             "Social"
+|           "
+                    "
+|           <li>
+|             " "
+|             <a>
+|               class="dropdown-item"
+|               href="https://www.github.com/linuxmint"
+|               target="_blank"
+|               <i>
+|                 class="fa-brands fa-github"
+|               " Github"
+|             " "
+|           "
+                    "
+|           <li>
+|             " "
+|             <a>
+|               class="dropdown-item"
+|               href="https://www.facebook.com/pages/Linux-Mint/185238108180410"
+|               target="_blank"
+|               <i>
+|                 class="fa-brands fa-facebook"
+|               " Facebook"
+|             " "
+|           "
+                    "
+|           <li>
+|             " "
+|             <a>
+|               class="dropdown-item"
+|               href="https://twitter.com/linux_mint"
+|               target="_blank"
+|               <i>
+|                 class="fa-brands fa-twitter"
+|               " Twitter"
+|             " "
+|           "
+                    "
+|           <li>
+|             " "
+|             <a>
+|               class="dropdown-item"
+|               href="https://mastodon.social/@linuxmint"
+|               target="_blank"
+|               <i>
+|                 class="fa-brands fa-mastodon"
+|               " Mastodon"
+|             " "
+|           "
+                  "
+|         "
+                  "
+|         <ul>
+|           class="list-unstyled w-100 w-sm-50 pr-0 pr-lg-5"
+|           "
+                    "
+|           <li>
+|             class="dropdown-header mt-3 mt-sm-0"
+|             "Community"
+|           "
+                    "
+|           <li>
+|             " "
+|             <a>
+|               class="dropdown-item"
+|               href="https://www.reddit.com/r/linuxmint/"
+|               target="_blank"
+|               <i>
+|                 class="fa-brands fa-reddit-alien"
+|               " Reddit"
+|             " "
+|           "
+                    "
+|           <li>
+|             " "
+|             <a>
+|               class="dropdown-item"
+|               href="https://discord.gg/mint"
+|               target="_blank"
+|               <i>
+|                 class="fa-brands fa-discord"
+|               " Discord"
+|             " "
+|           "
+                    "
+|           <li>
+|             " "
+|             <a>
+|               class="dropdown-item"
+|               href="https://kiwiirc.com/client/irc.spotchat.org/#linuxmint-help"
+|               target="_blank"
+|               <i>
+|                 class="fa fa-hashtag"
+|               " IRC"
+|             " "
+|           "
+                    "
+|           <li>
+|             " "
+|             <a>
+|               class="dropdown-item"
+|               href="https://mintcast.org"
+|               target="_blank"
+|               <i>
+|                 class="fas fa-podcast"
+|               " mintCast Podcast"
+|             " "
+|           "
+                    "
+|           <li>
+|             " "
+|             <a>
+|               class="dropdown-item"
+|               href="links.php"
+|               <i>
+|                 class="fas fa-globe"
+|               " Local communities"
+|             " "
+|           "
+                  "
+|         "
+                
+                
+                "
+|         <div>
+|           class="w-100 bg-grad pattern-overlay-2 p-4 mt-3 all-text-white d-none d-lg-flex"
+|           "
+                  "
+|           <div>
+|             class="align-self-center mr-4"
+|             "
+                    "
+|             <p>
+|               class="mb-0 small"
+|               "Websites in the right column are maintained by the community."
+|             "
+                  "
+|           "
+                "
+|         "
+              
+            
+          
+        
+        
+        
+        "
+|         <div>
+|           class="navbar-nav"
+|           "
+          
+          "
+|           <div>
+|             class="nav-item border-0 d-none d-lg-inline-block align-self-center border-0 px-lg-4"
+|             "
+            "
+|             <a>
+|               class=" btn btn-sm btn-white mb-0"
+|               href="donors.php"
+|               "Donate"
+|             "
+          "
+|           "
+        "
+|         "
+        
+      
+    "
+|       "
+    
+  "
+|     "
+  
+
+
+
+
+
+
+	
+	"
+|     <section>
+|       class="p-0 py-5 bg-grad pattern-overlay-2"
+|       "
+		"
+|       <div>
+|         class="container"
+|         "
+			"
+|         <div>
+|           class="row py-0 py-md-5 justify-content-between align-items-center"
+|           "
+				"
+|           <div>
+|             class="col-sm-10 col-lg-5 all-text-white my-5 mt-md-0"
+|             "
+					"
+|             <div>
+|               class="text-left py-0 py-md-5 my-5"
+|               "
+						"
+|               <h6>
+|                 ""Zena""
+|               "
+						"
+|               <h2>
+|                 class="display-5 display-lg-4 font-weight-normal"
+|                 "Linux Mint 22.3"
+|               "
+						"
+|               <p>
+|                 class="mb-4 display-8 font-weight-normal"
+|                 "The latest version of the friendly operating system is here. Install it on your computer today!"
+|               "
+						"
+|               <a>
+|                 class="btn btn-white mr-3"
+|                 href="download.php"
+|                 "Download"
+|               "
+						"
+|               <a>
+|                 class="btn btn-outline-white"
+|                 href="https://linuxmint-installation-guide.readthedocs.io/en/latest/"
+|                 "Installation Instructions"
+|               "
+					"
+|             "
+				"
+|           "
+				"
+|           <div>
+|             class="col-sm-10 col-md-7 d-none d-lg-block mb-5"
+|             "
+					"
+|             <img>
+|               alt=""
+|               src="web/img/devices.png"
+|             "
+				"
+|           "
+			"
+|         "
+		"
+|       "
+		"
+|       <div>
+|         class="position-absolute bottom-0 left-0 w-100 d-none d-md-block mb-n3"
+|         "
+			"
+|         <svg>
+|           height="150"
+|           preserveAspectRatio="none"
+|           viewBox="0 0 500 150"
+|           width="100%"
+|           "
+				"
+|           <path>
+|             d="M0,150 L0,40 Q250,150 500,40 L580,150 Z"
+|             fill="#fbfbfb"
+|           "
+			"
+|         "
+		"
+|       "
+	"
+|     "
+	
+
+
+
+
+	
+
+
+"
+|     <section>
+|       class="pb-3"
+|       "
+		"
+|       <div>
+|         class="container"
+|         "
+			"
+|         <div>
+|           class="row"
+|           "
+
+				
+				"
+|           <div>
+|             class="col-md-4"
+|             "
+					
+					"
+|             <h5>
+|               class="text-primary"
+|               "Features"
+|             "
+					"
+|             <h2>
+|               class="h1"
+|               "What is Linux Mint?"
+|             "
+					"
+|             <p>
+|               "Linux Mint is an operating system for desktop and laptop computers. It is designed to work 'out of the box' and comes fully equipped with the apps most people need."
+|             "
+					
+					"
+|             <div>
+|               class="bg-light p-4 p-lg-5 "
+|               "
+						"
+|               <span>
+|                 class="display-5 icon-primary"
+|                 <i>
+|                   class="ti-ruler-pencil"
+|               "
+						"
+|               <h5>
+|                 "Graphic Design"
+|               "
+						"
+|               <p>
+|                 class="mb-0"
+|                 "Work in 3D with Blender, draw or edit pictures in Gimp, use Inkscape for vector graphics."
+|               "
+					"
+|             "
+				"
+|           "
+
+				
+				"
+|           <div>
+|             class="col-md-4 mt-5"
+|             "
+					
+					"
+|             <div>
+|               class="bg-light p-4 p-lg-5 mb-5"
+|               "
+						"
+|               <span>
+|                 class="display-5 icon-primary"
+|                 <i>
+|                   class="ti-pencil-alt"
+|               "
+						"
+|               <h5>
+|                 "Productivity"
+|               "
+						"
+|               <p>
+|                 class="mb-0"
+|                 "With LibreOffice's complete office suite, use the word processor, make presentations, drawings, spreadsheets or even databases. Easily import from or export to PDF or Microsoft Office documents."
+|               "
+					"
+|             "
+					
+					"
+|             <div>
+|               class="bg-light p-4 p-lg-5 mb-5"
+|               "
+						"
+|               <span>
+|                 class="display-5 icon-primary"
+|                 <i>
+|                   class="ti-video-clapper"
+|               "
+						"
+|               <h5>
+|                 "Multimedia"
+|               "
+						"
+|               <p>
+|                 class="mb-0"
+|                 "Enjoy your music, watch TV and movies, listen to podcasts, Spotify and online radio."
+|               "
+					"
+|             "
+				"
+|           "
+
+				
+				"
+|           <div>
+|             class="col-md-4"
+|             "
+					
+					"
+|             <div>
+|               class="bg-grad all-text-white p-4 p-lg-5 mb-5"
+|               "
+						"
+|               <span>
+|                 class="display-5"
+|                 <i>
+|                   class="ti-world icon-white"
+|               "
+						"
+|               <h5>
+|                 "Web"
+|               "
+						"
+|               <p>
+|                 class="mb-0"
+|                 "Browse the Web, watch Youtube and Netflix with Firefox. Turn any website into a desktop app for immediate access."
+|               "
+					"
+|             "
+					
+					"
+|             <div>
+|               class="bg-light p-4 p-lg-5 mb-5"
+|               "
+						"
+|               <span>
+|                 class="display-5 icon-primary"
+|                 <i>
+|                   class="ti-game"
+|               "
+						"
+|               <h5>
+|                 "Gaming"
+|               "
+						"
+|               <p>
+|                 class="mb-0"
+|                 "Access more than 7,800 games with Steam. Install the Heroic Games Launcher or Lutris to get even more."
+|               "
+					"
+|             "
+				"
+|           "
+			"
+|         "
+		"
+|       "
+	"
+|     "
+
+	"
+|     <section>
+|       class="bg-dark all-text-white pattern-overlay-2"
+|       "
+		"
+|       <div>
+|         class="container"
+|         "
+			"
+|         <div>
+|           class="col-md-12 col-lg-9 mx-auto p-4 p-sm-5"
+|           "
+				"
+|           <div>
+|             class="text-center px-0 px-sm-5"
+|             "
+					"
+|             <h2>
+|               "Give it a try. You’ll Love it!"
+|             "
+					"
+|             <p>
+|               class="mb-3 h6"
+|               "Most of our users come from Windows and they never look back."
+|             "
+				"
+|           "
+			"
+|         "
+		"
+|       "
+	"
+|     "
+
+	"
+|     <section>
+|       "
+		"
+|       <div>
+|         class="container"
+|         "
+			"
+|         <div>
+|           class="row"
+|           "
+				"
+|           <div>
+|             class="col-12 col-lg-8 mx-auto"
+|             "
+					"
+|             <div>
+|               class="title text-center"
+|               "
+						"
+|               <span>
+|                 class="pre-title"
+|                 "Why choose Linux Mint?"
+|               "
+						"
+|               <h2>
+|                 "Easy to use, fast and comfortable."
+|               "
+						"
+|               <p>
+|                 class="mb-0"
+|                 "Give your hardware the operating system it deserves and feel right at home."
+|               "
+					"
+|             "
+				"
+|           "
+			"
+|         "
+
+			"
+|         <div>
+|           class="row"
+|           "
+				"
+|           <div>
+|             class="col-md-4 mt-4"
+|             "
+					"
+|             <div>
+|               class="feature-box f-style-4 h-100 icon-grad"
+|               "
+						"
+|               <div>
+|                 class="feature-box-icon"
+|                 <i>
+|                   class="ti-wand"
+|               "
+						"
+|               <h3>
+|                 class="feature-box-title"
+|                 "OOTB"
+|               "
+						"
+|               <p>
+|                 class="feature-box-desc"
+|                 "Everything just works "Out Of The Box", without the need to configure anything or to install extra applications. It's ready to go. Although it's very configurable, everything is set and tuned nicely by default and no unnecessary questions are asked."
+|               "
+					"
+|             "
+				"
+|           "
+				"
+|           <div>
+|             class="col-md-4 mt-4"
+|             "
+					"
+|             <div>
+|               class="feature-box f-style-4 h-100 icon-grad"
+|               "
+						"
+|               <div>
+|                 class="feature-box-icon"
+|                 <i>
+|                   class="ti-heart"
+|               "
+						"
+|               <h3>
+|                 class="feature-box-title"
+|                 "KISS"
+|               "
+						"
+|               <p>
+|                 class="feature-box-desc"
+|                 "It's very easy to use. It features an intuitive desktop and adopts KISS principles. Anyone can rapidly feel at home and use Linux Mint. User experience, workflow and comfort is key."
+|               "
+					"
+|             "
+				"
+|           "
+				"
+|           <div>
+|             class="col-md-4 mt-4"
+|             "
+					"
+|             <div>
+|               class="feature-box f-style-4 h-100 icon-grad"
+|               "
+						"
+|               <div>
+|                 class="feature-box-icon"
+|                 <i>
+|                   class="ti-crown"
+|               "
+						"
+|               <h3>
+|                 class="feature-box-title"
+|                 "Home rule"
+|               "
+						"
+|               <p>
+|                 class="feature-box-desc"
+|                 "It's your computer, your rules. This is a key principle at Linux Mint. We don't collect data, we don't work against you. You're the boss. Your operating system is designed to do what you want without getting in your way."
+|               "
+					"
+|             "
+				"
+|           "
+				"
+|           <div>
+|             class="col-md-4 mt-4"
+|             "
+					"
+|             <div>
+|               class="feature-box f-style-4 h-100 icon-grad"
+|               "
+						"
+|               <div>
+|                 class="feature-box-icon"
+|                 <i>
+|                   class="ti-lock"
+|               "
+						"
+|               <h3>
+|                 class="feature-box-title"
+|                 "Rock solid"
+|               "
+						"
+|               <p>
+|                 class="feature-box-desc"
+|                 "With centralized software updates, system snapshots, a unique Update Manager and the robustness of its Linux architecture, Linux Mint requires very little maintenance. It works, it's safe and it doesn't break."
+|               "
+					"
+|             "
+				"
+|           "
+				"
+|           <div>
+|             class="col-md-4 mt-4"
+|             "
+					"
+|             <div>
+|               class="feature-box f-style-4 h-100 icon-grad"
+|               "
+						"
+|               <div>
+|                 class="feature-box-icon"
+|                 <i>
+|                   class="ti-check-box"
+|               "
+						"
+|               <h3>
+|                 class="feature-box-title"
+|                 "Free and Open Source"
+|               "
+						"
+|               <p>
+|                 class="feature-box-desc"
+|                 "It is completely free of cost and almost all of its components are Open Source. Linux Mint stands on the shoulder of giants, it is based on Debian and Ubuntu."
+|               "
+					"
+|             "
+				"
+|           "
+				"
+|           <div>
+|             class="col-md-4 mt-4"
+|             "
+					"
+|             <div>
+|               class="feature-box f-style-4 h-100 icon-grad"
+|               "
+						"
+|               <div>
+|                 class="feature-box-icon"
+|                 <i>
+|                   class="ti-face-smile"
+|               "
+						"
+|               <h3>
+|                 class="feature-box-title"
+|                 "Community-centric"
+|               "
+						"
+|               <p>
+|                 class="feature-box-desc"
+|                 "There is a tight bond and a great relationship between the development team and the community. We communicate with our users and constantly use their feedback to improve Linux Mint."
+|               "
+					"
+|             "
+				"
+|           "
+			"
+|         "
+
+		"
+|       "
+	"
+|     "
+
+	
+	"
+|     <section>
+|       class="bg-dark"
+|       "
+		"
+|       <div>
+|         class="container"
+|         "
+			"
+|         <div>
+|           class="row"
+|           "
+				"
+|           <div>
+|             class="col-12 col-lg-8 mx-auto"
+|             "
+					"
+|             <div>
+|               class="title text-center all-text-white"
+|               "
+						"
+|               <span>
+|                 class="pre-title"
+|                 "Have any questions?"
+|               "
+						"
+|               <h2>
+|                 "Fun, helpful and passionate."
+|               "
+						"
+|               <p>
+|                 "If you're making your first steps with Linux don't hesitate to join the "
+|                 <a>
+|                   href="https://forums.linuxmint.com"
+|                   "forums"
+|                 ". Linux users are often welcoming, helpful and eager to share their experience."
+|               "
+					"
+|             "
+				"
+|           "
+			"
+|         "
+			"
+|         <div>
+|           class="row"
+|           "
+				"
+|           <div>
+|             class="col-md-3 mt-4 all-text-white py-4"
+|             "
+					"
+|             <h4>
+|               "Is it free?"
+|             "
+					"
+|             <p>
+|               "Yes, Linux Mint is completely free of charge. Almost everything in Linux Mint is also open-source."
+|             "
+				"
+|           "
+				"
+|           <div>
+|             class="col-md-3 mt-4 all-text-white primary-border-left-dotted py-4"
+|             "
+					"
+|             <h4>
+|               "Will it work on my computer?"
+|             "
+					"
+|             <p>
+|               "Yes, Linux Mint works on most computers. It can also be run from a live USB stick to make sure everything works fine without having to install anything."
+|             "
+				"
+|           "
+				"
+|           <div>
+|             class="col-md-3 mt-4 all-text-white primary-border-left-dotted py-4"
+|             "
+					"
+|             <h4>
+|               "Can I keep Windows?"
+|             "
+					"
+|             <p>
+|               "Yes, you can have both Windows and Linux Mint. A menu asks you which one to use when you start the computer."
+|             "
+				"
+|           "
+				"
+|           <div>
+|             class="col-md-3 mt-4 all-text-white primary-border-left-dotted py-4"
+|             "
+					"
+|             <h4>
+|               "Will it suit my needs?"
+|             "
+					"
+|             <p>
+|               "Hopefully. Linux Mint comes with what most people need out of the box as well as easy access to more than 60,000 software packages and 7,800 games. "
+|             "
+				"
+|           "
+			"
+|         "
+			"
+|         <div>
+|           class="row"
+|           "
+				"
+|           <div>
+|             class="col-12 mx-auto text-center mt-5"
+|             "
+					"
+|             <a>
+|               class="btn btn-grad"
+|               href="faq.php"
+|               "Read more FAQs"
+|             "
+				"
+|           "
+			"
+|         "
+		"
+|       "
+	"
+|     "
+	
+
+	
+	"
+|     <section>
+|       class="testimonials"
+|       "
+		"
+|       <div>
+|         class="container"
+|         "
+			"
+|         <div>
+|           class="row"
+|           "
+				"
+|           <div>
+|             class="col-12"
+|             "
+					"
+|             <div>
+|               class="title text-center"
+|               "
+						"
+|               <span>
+|                 class="pre-title"
+|                 "From the press"
+|               "
+					"
+|             "
+					"
+|             <div>
+|               class="owl-carousel testi-full testi-big arrow-md-none arrow-border arrow-large arrow-round owl-grab owl-loaded owl-drag"
+|               data-arrow="true"
+|               data-autoplay="4500"
+|               data-items="1"
+|               "
+						
+						
+						
+						
+						
+						
+						
+						
+						
+						
+						
+						
+					"
+|               <div>
+|                 class="owl-stage-outer"
+|                 <div>
+|                   class="owl-stage"
+|                   style="transform: translate3d(-120px,0px,0px); transition: 0.8s; width: 360px; padding-left: ; padding-right: "
+|                   <div>
+|                     class="owl-item cloned"
+|                     style="width: 0px; margin-left: ; margin-right: 30px"
+|                     <div>
+|                       class="item"
+|                       "
+							"
+|                       <div>
+|                         class="testimonials-wrap"
+|                         "
+								"
+|                         <div>
+|                           class="testi-text"
+|                           "
+									"
+|                           <p>
+|                             "There's a good reason for that popularity: Linux Mint just works. It isn't "changing the desktop computer paradigm," or "innovating" in "groundbreaking" ways. The team behind Mint is just building a desktop operating system that looks and functions a lot like every other desktop operating system you've used, which is to say you'll be immediately comfortable and stop thinking about your desktop and start using it to do actual work."
+|                           "
+									"
+|                           <span>
+|                             <i>
+|                               class="fa fa-quote-left text-primary display-8"
+|                           "
+									"
+|                           <h6>
+|                             class="mb-0 mt-3"
+|                             "Scott Gilbertson"
+|                           "
+									"
+|                           <h6>
+|                             class="small"
+|                             "ars technica"
+|                           "
+								"
+|                         "
+							"
+|                       "
+						"
+|                   <div>
+|                     class="owl-item cloned"
+|                     style="width: 0px; margin-left: ; margin-right: 30px"
+|                     <div>
+|                       class="item"
+|                       "
+							"
+|                       <div>
+|                         class="testimonials-wrap"
+|                         "
+								"
+|                         <div>
+|                           class="testi-text"
+|                           "
+									"
+|                           <p>
+|                             "Exploring the bevy of Linux distributions out there is a fun part of the hobby, but for your first installation, you will likely want something popular and beginner-friendly, so it's easy to get help when you need it. That's why I recommend starting with Linux Mint."
+|                           "
+									"
+|                           <span>
+|                             <i>
+|                               class="fa fa-quote-left text-primary display-8"
+|                           "
+									"
+|                           <h6>
+|                             class="mb-0 mt-3"
+|                             "Whitson Gordon"
+|                           "
+									"
+|                           <h6>
+|                             class="small"
+|                             "PCMag"
+|                           "
+								"
+|                         "
+							"
+|                       "
+						"
+|                   <div>
+|                     class="owl-item cloned"
+|                     style="width: 0px; margin-left: ; margin-right: 30px"
+|                     <div>
+|                       class="item"
+|                       "
+							"
+|                       <div>
+|                         class="testimonials-wrap"
+|                         "
+								"
+|                         <div>
+|                           class="testi-text"
+|                           "
+									"
+|                           <p>
+|                             "Linux Mint has again shown why it deserves to stay among the best Linux distribution for beginners. If you’re thinking to migrate from Windows to Linux, you should definitely get your hand on Linux Mint."
+|                           "
+									"
+|                           <span>
+|                             <i>
+|                               class="fa fa-quote-left text-primary display-8"
+|                           "
+									"
+|                           <h6>
+|                             class="mb-0 mt-3"
+|                             "Sarvottam Kumar"
+|                           "
+									"
+|                           <h6>
+|                             class="small"
+|                             "FossBytes"
+|                           "
+								"
+|                         "
+							"
+|                       "
+						"
+|                   <div>
+|                     class="owl-item"
+|                     style="width: 0px; margin-left: ; margin-right: 30px"
+|                     <div>
+|                       class="item"
+|                       "
+							"
+|                       <div>
+|                         class="testimonials-wrap"
+|                         "
+								"
+|                         <div>
+|                           class="testi-text"
+|                           "
+									"
+|                           <p>
+|                             "The years go by, and I keep trying one Linux desktop distro after the other. But for more than a decade now, I come back to Linux Mint. Why? It's simple: Year in and year out, Mint remains the best, easiest-to-use Linux desktop."
+|                           "
+									"
+|                           <span>
+|                             <i>
+|                               class="fa fa-quote-left text-primary display-8"
+|                           "
+									"
+|                           <h6>
+|                             class="mb-0 mt-3"
+|                             "Steven J. Vaughan-Nichols"
+|                           "
+									"
+|                           <h6>
+|                             class="small"
+|                             "ZDNet"
+|                           "
+								"
+|                         "
+							"
+|                       "
+						"
+|                   <div>
+|                     class="owl-item active"
+|                     style="width: 0px; margin-left: ; margin-right: 30px"
+|                     <div>
+|                       class="item"
+|                       "
+							"
+|                       <div>
+|                         class="testimonials-wrap"
+|                         "
+								"
+|                         <div>
+|                           class="testi-text"
+|                           "
+									"
+|                           <p>
+|                             "Mint has become the very best example of what a Linux desktop should be: fast, easy, pleasing to the eye, useful and productive. Others, still, see Mint as the ideal desktop for Windows refugees, or those who are trying out Linux for the first time, and want an operating system that essentially works 'out of the box'."
+|                           "
+									"
+|                           <span>
+|                             <i>
+|                               class="fa fa-quote-left text-primary display-8"
+|                           "
+									"
+|                           <h6>
+|                             class="mb-0 mt-3"
+|                             "David Hayward"
+|                           "
+									"
+|                           <h6>
+|                             class="small"
+|                             "Linux Format"
+|                           "
+								"
+|                         "
+							"
+|                       "
+						"
+|                   <div>
+|                     class="owl-item"
+|                     style="width: 0px; margin-left: ; margin-right: 30px"
+|                     <div>
+|                       class="item"
+|                       "
+							"
+|                       <div>
+|                         class="testimonials-wrap"
+|                         "
+								"
+|                         <div>
+|                           class="testi-text"
+|                           "
+									"
+|                           <p>
+|                             "Linux Mint's latest release will have an exceptionally wide appeal. Anyone looking for an incredibly stable, robust, fast, clean, and user-friendly desktop operating system could do a whole lot worse. [...] Every Linux desktop distribution should strive to do exactly what Linux Mint 20.1 has accomplished--create a desktop that is the perfect balance of speed, features, and user-friendliness."
+|                           "
+									"
+|                           <span>
+|                             <i>
+|                               class="fa fa-quote-left text-primary display-8"
+|                           "
+									"
+|                           <h6>
+|                             class="mb-0 mt-3"
+|                             "Jack Wallen"
+|                           "
+									"
+|                           <h6>
+|                             class="small"
+|                             "TechRepublic"
+|                           "
+								"
+|                         "
+							"
+|                       "
+						"
+|                   <div>
+|                     class="owl-item"
+|                     style="width: 0px; margin-left: ; margin-right: 30px"
+|                     <div>
+|                       class="item"
+|                       "
+							"
+|                       <div>
+|                         class="testimonials-wrap"
+|                         "
+								"
+|                         <div>
+|                           class="testi-text"
+|                           "
+									"
+|                           <p>
+|                             "There's a good reason for that popularity: Linux Mint just works. It isn't "changing the desktop computer paradigm," or "innovating" in "groundbreaking" ways. The team behind Mint is just building a desktop operating system that looks and functions a lot like every other desktop operating system you've used, which is to say you'll be immediately comfortable and stop thinking about your desktop and start using it to do actual work."
+|                           "
+									"
+|                           <span>
+|                             <i>
+|                               class="fa fa-quote-left text-primary display-8"
+|                           "
+									"
+|                           <h6>
+|                             class="mb-0 mt-3"
+|                             "Scott Gilbertson"
+|                           "
+									"
+|                           <h6>
+|                             class="small"
+|                             "ars technica"
+|                           "
+								"
+|                         "
+							"
+|                       "
+						"
+|                   <div>
+|                     class="owl-item"
+|                     style="width: 0px; margin-left: ; margin-right: 30px"
+|                     <div>
+|                       class="item"
+|                       "
+							"
+|                       <div>
+|                         class="testimonials-wrap"
+|                         "
+								"
+|                         <div>
+|                           class="testi-text"
+|                           "
+									"
+|                           <p>
+|                             "Exploring the bevy of Linux distributions out there is a fun part of the hobby, but for your first installation, you will likely want something popular and beginner-friendly, so it's easy to get help when you need it. That's why I recommend starting with Linux Mint."
+|                           "
+									"
+|                           <span>
+|                             <i>
+|                               class="fa fa-quote-left text-primary display-8"
+|                           "
+									"
+|                           <h6>
+|                             class="mb-0 mt-3"
+|                             "Whitson Gordon"
+|                           "
+									"
+|                           <h6>
+|                             class="small"
+|                             "PCMag"
+|                           "
+								"
+|                         "
+							"
+|                       "
+						"
+|                   <div>
+|                     class="owl-item"
+|                     style="width: 0px; margin-left: ; margin-right: 30px"
+|                     <div>
+|                       class="item"
+|                       "
+							"
+|                       <div>
+|                         class="testimonials-wrap"
+|                         "
+								"
+|                         <div>
+|                           class="testi-text"
+|                           "
+									"
+|                           <p>
+|                             "Linux Mint has again shown why it deserves to stay among the best Linux distribution for beginners. If you’re thinking to migrate from Windows to Linux, you should definitely get your hand on Linux Mint."
+|                           "
+									"
+|                           <span>
+|                             <i>
+|                               class="fa fa-quote-left text-primary display-8"
+|                           "
+									"
+|                           <h6>
+|                             class="mb-0 mt-3"
+|                             "Sarvottam Kumar"
+|                           "
+									"
+|                           <h6>
+|                             class="small"
+|                             "FossBytes"
+|                           "
+								"
+|                         "
+							"
+|                       "
+						"
+|                   <div>
+|                     class="owl-item cloned"
+|                     style="width: 0px; margin-left: ; margin-right: 30px"
+|                     <div>
+|                       class="item"
+|                       "
+							"
+|                       <div>
+|                         class="testimonials-wrap"
+|                         "
+								"
+|                         <div>
+|                           class="testi-text"
+|                           "
+									"
+|                           <p>
+|                             "The years go by, and I keep trying one Linux desktop distro after the other. But for more than a decade now, I come back to Linux Mint. Why? It's simple: Year in and year out, Mint remains the best, easiest-to-use Linux desktop."
+|                           "
+									"
+|                           <span>
+|                             <i>
+|                               class="fa fa-quote-left text-primary display-8"
+|                           "
+									"
+|                           <h6>
+|                             class="mb-0 mt-3"
+|                             "Steven J. Vaughan-Nichols"
+|                           "
+									"
+|                           <h6>
+|                             class="small"
+|                             "ZDNet"
+|                           "
+								"
+|                         "
+							"
+|                       "
+						"
+|                   <div>
+|                     class="owl-item cloned"
+|                     style="width: 0px; margin-left: ; margin-right: 30px"
+|                     <div>
+|                       class="item"
+|                       "
+							"
+|                       <div>
+|                         class="testimonials-wrap"
+|                         "
+								"
+|                         <div>
+|                           class="testi-text"
+|                           "
+									"
+|                           <p>
+|                             "Mint has become the very best example of what a Linux desktop should be: fast, easy, pleasing to the eye, useful and productive. Others, still, see Mint as the ideal desktop for Windows refugees, or those who are trying out Linux for the first time, and want an operating system that essentially works 'out of the box'."
+|                           "
+									"
+|                           <span>
+|                             <i>
+|                               class="fa fa-quote-left text-primary display-8"
+|                           "
+									"
+|                           <h6>
+|                             class="mb-0 mt-3"
+|                             "David Hayward"
+|                           "
+									"
+|                           <h6>
+|                             class="small"
+|                             "Linux Format"
+|                           "
+								"
+|                         "
+							"
+|                       "
+						"
+|                   <div>
+|                     class="owl-item cloned"
+|                     style="width: 0px; margin-left: ; margin-right: 30px"
+|                     <div>
+|                       class="item"
+|                       "
+							"
+|                       <div>
+|                         class="testimonials-wrap"
+|                         "
+								"
+|                         <div>
+|                           class="testi-text"
+|                           "
+									"
+|                           <p>
+|                             "Linux Mint's latest release will have an exceptionally wide appeal. Anyone looking for an incredibly stable, robust, fast, clean, and user-friendly desktop operating system could do a whole lot worse. [...] Every Linux desktop distribution should strive to do exactly what Linux Mint 20.1 has accomplished--create a desktop that is the perfect balance of speed, features, and user-friendliness."
+|                           "
+									"
+|                           <span>
+|                             <i>
+|                               class="fa fa-quote-left text-primary display-8"
+|                           "
+									"
+|                           <h6>
+|                             class="mb-0 mt-3"
+|                             "Jack Wallen"
+|                           "
+									"
+|                           <h6>
+|                             class="small"
+|                             "TechRepublic"
+|                           "
+								"
+|                         "
+							"
+|                       "
+						"
+|               <div>
+|                 class="owl-nav"
+|                 <button>
+|                   class="owl-prev"
+|                   role="presentation"
+|                   type="button"
+|                   <i>
+|                     class="ti-angle-left"
+|                 <button>
+|                   class="owl-next"
+|                   role="presentation"
+|                   type="button"
+|                   <i>
+|                     class="ti-angle-right"
+|               <div>
+|                 class="owl-dots"
+|                 ",,,,,,,,,,,,"
+|                 ",,,,,,"
+|                 ",,,,,,"
+|                 ",,,,,,"
+|                 ",,,,,,"
+|                 ",,,,,,"
+|                 ",,,,,,"
+|                 ",,,,,,"
+|             "
+				"
+|           "
+			"
+|         "
+		"
+|       "
+	"
+|     "
+	
+
+
+
+
+	"
+|     <div>
+|       class="divider m-0"
+|     "
+
+
+	
+	"
+|     <section>
+|       class="blog bg-light"
+|       "
+		"
+|       <div>
+|         class="container"
+|         "
+			"
+|         <div>
+|           class="row"
+|           "
+				"
+|           <div>
+|             class="col-12 col-lg-8 mx-auto"
+|             "
+					"
+|             <div>
+|               class="title text-center"
+|               "
+						"
+|               <span>
+|                 class="pre-title"
+|                 "From the blog"
+|               "
+						"
+|               <h2>
+|                 "Latest news"
+|               "
+						"
+|               <p>
+|                 "Click a news title to get to the article."
+|               "
+					"
+|             "
+				"
+|           "
+			"
+|         "
+
+			"
+|         <div>
+|           class="row"
+|           "
+				"
+|           <div>
+|             class="col-md-12"
+|             "
+					"
+|             <div>
+|               class="owl-carousel post-style-3 arrow-dark arrow-hover owl-loaded owl-drag"
+|               data-dots="false"
+|               data-items-lg="3"
+|               data-items-md="2"
+|               data-items-sm="2"
+|               data-items-xl="3"
+|               data-items-xs="1"
+|               "
+						
+
+
+
+
+
+
+
+
+					"
+|               <div>
+|                 class="owl-stage-outer"
+|                 <div>
+|                   class="owl-stage"
+|                   style="transform: translate3d(-30px,0px,0px); transition: 0s; width: 90px; padding-left: ; padding-right: "
+|                   <div>
+|                     class="owl-item cloned"
+|                     style="width: 0px; margin-left: ; margin-right: 30px"
+|                     <div>
+|                       class="item"
+|                       "
+    "
+|                       <div>
+|                         class="post"
+|                         "
+        "
+|                         <div>
+|                           class="post-info"
+|                           "
+            "
+|                           <span>
+|                             class="post-tag bg-grad text-white mb-3 clearfix"
+|                             <a>
+|                               href="https://blog.linuxmint.com/?p=5086"
+|                               "Blog"
+|                           "
+            "
+|                           <div>
+|                             class="post-time"
+|                             <a>
+|                               href="https://blog.linuxmint.com/?p=5086"
+|                               "Tue, 13 Oct 2026"
+|                           "
+            "
+|                           <a>
+|                             class="post-title"
+|                             href="https://blog.linuxmint.com/?p=5086"
+|                             "Monthly News – September 2026"
+|                           "
+            "
+|                           <p>
+|                             class="mb-0"
+|                             "Many thanks to all of you for your donations and your amazing support. Please note that the features presented in this blog post are a preview. They’re still being worked on and are planned for the next version of Linux Mint. Release Strategy and Development Cycle This is the first time we’ve taken a full […]"
+|                           "
+        "
+|                         "
+    "
+|                       "
+"
+|                   <div>
+|                     class="owl-item cloned"
+|                     style="width: 0px; margin-left: ; margin-right: 30px"
+|                     <div>
+|                       class="item"
+|                       "
+    "
+|                       <div>
+|                         class="post"
+|                         "
+        "
+|                         <div>
+|                           class="post-info"
+|                           "
+            "
+|                           <span>
+|                             class="post-tag bg-grad text-white mb-3 clearfix"
+|                             <a>
+|                               href="https://blog.linuxmint.com/?p=5067"
+|                               "Blog"
+|                           "
+            "
+|                           <div>
+|                             class="post-time"
+|                             <a>
+|                               href="https://blog.linuxmint.com/?p=5067"
+|                               "Fri, 11 Sep 2026"
+|                           "
+            "
+|                           <a>
+|                             class="post-title"
+|                             href="https://blog.linuxmint.com/?p=5067"
+|                             "Monthly News – August 2026"
+|                           "
+            "
+|                           <p>
+|                             class="mb-0"
+|                             "Hi everyone, Many thanks for your support and for your donations. We’ve got quite a bit of news this month. As usual, the features and improvements presented in this blog post are a preview. They’re still being worked on and are planned for the next version of Linux Mint. XApp The XApp project started within […]"
+|                           "
+        "
+|                         "
+    "
+|                       "
+"
+|                   <div>
+|                     class="owl-item cloned"
+|                     style="width: 0px; margin-left: ; margin-right: 30px"
+|                     <div>
+|                       class="item"
+|                       "
+    "
+|                       <div>
+|                         class="post"
+|                         "
+        "
+|                         <div>
+|                           class="post-info"
+|                           "
+            "
+|                           <span>
+|                             class="post-tag bg-grad text-white mb-3 clearfix"
+|                             <a>
+|                               href="https://blog.linuxmint.com/?p=5050"
+|                               "Blog"
+|                           "
+            "
+|                           <div>
+|                             class="post-time"
+|                             <a>
+|                               href="https://blog.linuxmint.com/?p=5050"
+|                               "Mon, 10 Aug 2026"
+|                           "
+            "
+|                           <a>
+|                             class="post-title"
+|                             href="https://blog.linuxmint.com/?p=5050"
+|                             "Monthly News – July 2026"
+|                           "
+            "
+|                           <p>
+|                             class="mb-0"
+|                             "Hi everyone, Before we begin, let me thank all our donors and sponsors. Many thanks to all of you for the help you’re providing us! We’ve got new HWE ISOs this month and some really exciting news. As always, please be aware that the features and improvements mentioned in this blog are a work in […]"
+|                           "
+        "
+|                         "
+    "
+|                       "
+"
+|                   <div>
+|                     class="owl-item active"
+|                     style="width: 0px; margin-left: ; margin-right: 30px"
+|                     <div>
+|                       class="item"
+|                       "
+    "
+|                       <div>
+|                         class="post"
+|                         "
+        "
+|                         <div>
+|                           class="post-info"
+|                           "
+            "
+|                           <span>
+|                             class="post-tag bg-grad text-white mb-3 clearfix"
+|                             <a>
+|                               href="https://blog.linuxmint.com/?p=5086"
+|                               "Blog"
+|                           "
+            "
+|                           <div>
+|                             class="post-time"
+|                             <a>
+|                               href="https://blog.linuxmint.com/?p=5086"
+|                               "Tue, 13 Oct 2026"
+|                           "
+            "
+|                           <a>
+|                             class="post-title"
+|                             href="https://blog.linuxmint.com/?p=5086"
+|                             "Monthly News – September 2026"
+|                           "
+            "
+|                           <p>
+|                             class="mb-0"
+|                             "Many thanks to all of you for your donations and your amazing support. Please note that the features presented in this blog post are a preview. They’re still being worked on and are planned for the next version of Linux Mint. Release Strategy and Development Cycle This is the first time we’ve taken a full […]"
+|                           "
+        "
+|                         "
+    "
+|                       "
+"
+|                   <div>
+|                     class="owl-item active"
+|                     style="width: 0px; margin-left: ; margin-right: 30px"
+|                     <div>
+|                       class="item"
+|                       "
+    "
+|                       <div>
+|                         class="post"
+|                         "
+        "
+|                         <div>
+|                           class="post-info"
+|                           "
+            "
+|                           <span>
+|                             class="post-tag bg-grad text-white mb-3 clearfix"
+|                             <a>
+|                               href="https://blog.linuxmint.com/?p=5067"
+|                               "Blog"
+|                           "
+            "
+|                           <div>
+|                             class="post-time"
+|                             <a>
+|                               href="https://blog.linuxmint.com/?p=5067"
+|                               "Fri, 11 Sep 2026"
+|                           "
+            "
+|                           <a>
+|                             class="post-title"
+|                             href="https://blog.linuxmint.com/?p=5067"
+|                             "Monthly News – August 2026"
+|                           "
+            "
+|                           <p>
+|                             class="mb-0"
+|                             "Hi everyone, Many thanks for your support and for your donations. We’ve got quite a bit of news this month. As usual, the features and improvements presented in this blog post are a preview. They’re still being worked on and are planned for the next version of Linux Mint. XApp The XApp project started within […]"
+|                           "
+        "
+|                         "
+    "
+|                       "
+"
+|                   <div>
+|                     class="owl-item active"
+|                     style="width: 0px; margin-left: ; margin-right: 30px"
+|                     <div>
+|                       class="item"
+|                       "
+    "
+|                       <div>
+|                         class="post"
+|                         "
+        "
+|                         <div>
+|                           class="post-info"
+|                           "
+            "
+|                           <span>
+|                             class="post-tag bg-grad text-white mb-3 clearfix"
+|                             <a>
+|                               href="https://blog.linuxmint.com/?p=5050"
+|                               "Blog"
+|                           "
+            "
+|                           <div>
+|                             class="post-time"
+|                             <a>
+|                               href="https://blog.linuxmint.com/?p=5050"
+|                               "Mon, 10 Aug 2026"
+|                           "
+            "
+|                           <a>
+|                             class="post-title"
+|                             href="https://blog.linuxmint.com/?p=5050"
+|                             "Monthly News – July 2026"
+|                           "
+            "
+|                           <p>
+|                             class="mb-0"
+|                             "Hi everyone, Before we begin, let me thank all our donors and sponsors. Many thanks to all of you for the help you’re providing us! We’ve got new HWE ISOs this month and some really exciting news. As always, please be aware that the features and improvements mentioned in this blog are a work in […]"
+|                           "
+        "
+|                         "
+    "
+|                       "
+"
+|                   <div>
+|                     class="owl-item cloned"
+|                     style="width: 0px; margin-left: ; margin-right: 30px"
+|                     <div>
+|                       class="item"
+|                       "
+    "
+|                       <div>
+|                         class="post"
+|                         "
+        "
+|                         <div>
+|                           class="post-info"
+|                           "
+            "
+|                           <span>
+|                             class="post-tag bg-grad text-white mb-3 clearfix"
+|                             <a>
+|                               href="https://blog.linuxmint.com/?p=5086"
+|                               "Blog"
+|                           "
+            "
+|                           <div>
+|                             class="post-time"
+|                             <a>
+|                               href="https://blog.linuxmint.com/?p=5086"
+|                               "Tue, 13 Oct 2026"
+|                           "
+            "
+|                           <a>
+|                             class="post-title"
+|                             href="https://blog.linuxmint.com/?p=5086"
+|                             "Monthly News – September 2026"
+|                           "
+            "
+|                           <p>
+|                             class="mb-0"
+|                             "Many thanks to all of you for your donations and your amazing support. Please note that the features presented in this blog post are a preview. They’re still being worked on and are planned for the next version of Linux Mint. Release Strategy and Development Cycle This is the first time we’ve taken a full […]"
+|                           "
+        "
+|                         "
+    "
+|                       "
+"
+|                   <div>
+|                     class="owl-item cloned"
+|                     style="width: 0px; margin-left: ; margin-right: 30px"
+|                     <div>
+|                       class="item"
+|                       "
+    "
+|                       <div>
+|                         class="post"
+|                         "
+        "
+|                         <div>
+|                           class="post-info"
+|                           "
+            "
+|                           <span>
+|                             class="post-tag bg-grad text-white mb-3 clearfix"
+|                             <a>
+|                               href="https://blog.linuxmint.com/?p=5067"
+|                               "Blog"
+|                           "
+            "
+|                           <div>
+|                             class="post-time"
+|                             <a>
+|                               href="https://blog.linuxmint.com/?p=5067"
+|                               "Fri, 11 Sep 2026"
+|                           "
+            "
+|                           <a>
+|                             class="post-title"
+|                             href="https://blog.linuxmint.com/?p=5067"
+|                             "Monthly News – August 2026"
+|                           "
+            "
+|                           <p>
+|                             class="mb-0"
+|                             "Hi everyone, Many thanks for your support and for your donations. We’ve got quite a bit of news this month. As usual, the features and improvements presented in this blog post are a preview. They’re still being worked on and are planned for the next version of Linux Mint. XApp The XApp project started within […]"
+|                           "
+        "
+|                         "
+    "
+|                       "
+"
+|                   <div>
+|                     class="owl-item cloned"
+|                     style="width: 0px; margin-left: ; margin-right: 30px"
+|                     <div>
+|                       class="item"
+|                       "
+    "
+|                       <div>
+|                         class="post"
+|                         "
+        "
+|                         <div>
+|                           class="post-info"
+|                           "
+            "
+|                           <span>
+|                             class="post-tag bg-grad text-white mb-3 clearfix"
+|                             <a>
+|                               href="https://blog.linuxmint.com/?p=5050"
+|                               "Blog"
+|                           "
+            "
+|                           <div>
+|                             class="post-time"
+|                             <a>
+|                               href="https://blog.linuxmint.com/?p=5050"
+|                               "Mon, 10 Aug 2026"
+|                           "
+            "
+|                           <a>
+|                             class="post-title"
+|                             href="https://blog.linuxmint.com/?p=5050"
+|                             "Monthly News – July 2026"
+|                           "
+            "
+|                           <p>
+|                             class="mb-0"
+|                             "Hi everyone, Before we begin, let me thank all our donors and sponsors. Many thanks to all of you for the help you’re providing us! We’ve got new HWE ISOs this month and some really exciting news. As always, please be aware that the features and improvements mentioned in this blog are a work in […]"
+|                           "
+        "
+|                         "
+    "
+|                       "
+"
+|               <div>
+|                 class="owl-nav disabled"
+|                 <button>
+|                   class="owl-prev"
+|                   role="presentation"
+|                   type="button"
+|                   <i>
+|                     class="ti-angle-left"
+|                 <button>
+|                   class="owl-next"
+|                   role="presentation"
+|                   type="button"
+|                   <i>
+|                     class="ti-angle-right"
+|               <div>
+|                 class="owl-dots disabled"
+|             "
+				"
+|           "
+			"
+|         "
+		"
+|       "
+	"
+|     "
+	
+
+	"
+|     <section>
+|       class="bg-primary all-text-white pattern-overlay-4"
+|       "
+		"
+|       <div>
+|         class="container"
+|         "
+			"
+|         <div>
+|           class="col-md-12 col-lg-9 mx-auto p-4 p-sm-5"
+|           "
+				"
+|           <div>
+|             class="text-center px-0 px-sm-5"
+|             "
+					"
+|             <h2>
+|               "A fantastic community!"
+|             "
+					"
+|             <p>
+|               class="mb-3 h6"
+|               "We receive more than 300 donations a month. Our users love what we do and they mean the World to us. Around the desktop operating system Linux Mint is also a fantastic community."
+|             "
+				"
+|           "
+			"
+|         "
+		"
+|       "
+	"
+|     "
+
+"
+|     <section>
+|       "
+		"
+|       <div>
+|         class="container"
+|         "
+			"
+|         <div>
+|           class="row"
+|           "
+				"
+|           <div>
+|             class="col-12 col-lg-8 mx-auto"
+|             "
+					"
+|             <div>
+|               class="title text-center"
+|               "
+						"
+|               <span>
+|                 class="pre-title"
+|                 "Brought to you by"
+|               "
+						"
+|               <h2>
+|                 "Partners and sponsors"
+|               "
+						"
+|               <p>
+|                 "Linux Mint is also supported by an amazing network of partners and sponsors."
+|               "
+					"
+|             "
+				"
+|           "
+			"
+|         "
+			"
+|         <div>
+|           class="row text-center justify-content-center"
+|           "
+				
+                        "
+|           <div>
+|             class="col-4 col-md-2 mb-5"
+|             "
+                        	"
+|             <a>
+|               href="https://www.eukhost.com/vps-hosting"
+|               target="_blank"
+|               "
+                        		"
+|               <img>
+|                 class="gold-main-logo"
+|                 src="web/img/sponsors/main/eukhost.svg"
+|                 title="Linux VPS Hosting"
+|               "
+                        	"
+|             "
+                        "
+|           "
+                
+                        "
+|           <div>
+|             class="col-4 col-md-2 mb-5"
+|             "
+                        	"
+|             <a>
+|               href="https://bmail.ag"
+|               target="_blank"
+|               "
+                        		"
+|               <img>
+|                 class="gold-main-logo"
+|                 src="web/img/sponsors/main/bmail.svg"
+|                 title="bmail"
+|               "
+                        	"
+|             "
+                        "
+|           "
+                
+				"
+|           <div>
+|             class="col-4 col-md-2 mb-5"
+|             <a>
+|               href="http://www.fit-pc.com/web/purchase/order-direct-mintbox/"
+|               target="_blank"
+|               <img>
+|                 alt=""
+|                 class="gold-main-logo"
+|                 src="web/img/sponsors/main/compulab.png"
+|           "
+			"
+|         "
+			"
+|         <div>
+|           class="row text-center justify-content-center"
+|           "
+				
+                        "
+|           <div>
+|             class="col-4 col-md-2 mb-5"
+|             "
+                        	"
+|             <a>
+|               href="https://www.datadoghq.com/"
+|               target="_blank"
+|               "
+                        		"
+|               <img>
+|                 class="silver-main-logo"
+|                 src="web/img/sponsors/main/datadog.svg"
+|                 title="Datadog"
+|               "
+                        	"
+|             "
+                        "
+|           "
+                
+                        "
+|           <div>
+|             class="col-4 col-md-2 mb-5"
+|             "
+                        	"
+|             <a>
+|               href="https://sucuri.net/"
+|               target="_blank"
+|               "
+                        		"
+|               <img>
+|                 class="silver-main-logo"
+|                 src="web/img/sponsors/main/sucuri.svg"
+|                 title="Sucuri"
+|               "
+                        	"
+|             "
+                        "
+|           "
+                
+                        "
+|           <div>
+|             class="col-4 col-md-2 mb-5"
+|             "
+                        	"
+|             <a>
+|               href="https://linuxmint.thinkpenguin.com/"
+|               target="_blank"
+|               "
+                        		"
+|               <img>
+|                 class="silver-main-logo"
+|                 src="web/img/sponsors/main/think-penguin.png"
+|                 title="ThinkPenguin: For Everything Freedom"
+|               "
+                        	"
+|             "
+                        "
+|           "
+                
+                        "
+|           <div>
+|             class="col-4 col-md-2 mb-5"
+|             "
+                        	"
+|             <a>
+|               href="https://www.thomas-krenn.com"
+|               target="_blank"
+|               "
+                        		"
+|               <img>
+|                 class="silver-main-logo"
+|                 src="web/img/sponsors/main/thomas-krenn.svg"
+|                 title="Thomas-Krenn.AG"
+|               "
+                        	"
+|             "
+                        "
+|           "
+                
+			"
+|         "
+			"
+|         <div>
+|           class="row text-center justify-content-center"
+|           "
+				"
+|           <div>
+|             class="col-4 col-md-2 mb-5"
+|             <a>
+|               href="http://duckduckgo.com/?t=lm"
+|               target="_blank"
+|               <img>
+|                 alt=""
+|                 class="silver-main-logo"
+|                 src="web/img/sponsors/main/duckduckgo.svg"
+|           "
+				"
+|           <div>
+|             class="col-4 col-md-2 mb-5"
+|             <a>
+|               href="https://www.yahoo.com"
+|               target="_blank"
+|               <img>
+|                 alt=""
+|                 class="silver-main-logo"
+|                 src="web/img/sponsors/main/yahoo.svg"
+|           "
+				"
+|           <div>
+|             class="col-4 col-md-2 mb-5"
+|             <a>
+|               href="https://www.hellotux.com/linux_mint"
+|               target="_blank"
+|               <img>
+|                 alt=""
+|                 class="bronze-main-logo"
+|                 src="web/img/sponsors/main/hellotux.svg"
+|           "
+			"
+|         "
+			"
+|         <div>
+|           class="row text-center justify-content-center"
+|           "
+				"
+|           <a>
+|             class=""
+|             href="sponsors.php"
+|             "View all sponsors"
+|           "
+			"
+|         "
+		"
+|       "
+	"
+|     "
+
+
+
+
+
+
+
+  "
+|     <footer>
+|       class="footer footer-dark pt-6 position-relative"
+|       "
+    "
+|       <div>
+|         class="footer-content"
+|         "
+      "
+|         <div>
+|           class="container"
+|           "
+        "
+|           <div>
+|             class="row"
+|             "
+          
+          "
+|             <div>
+|               class="col-md-3 col-sm-6 order-sm-1"
+|               "
+            "
+|               <div>
+|                 class="widget address"
+|                 "
+              "
+|                 <a>
+|                   class="footer-logo mb-3 d-block"
+|                   href="/"
+|                   "
+              "
+|                   <img>
+|                     src="/web/img/logo.svg"
+|                   "
+              "
+|                 "
+              "
+|                 <p>
+|                   "Thanks to your donations and advertising Linux Mint is completely free of charge. We hope you'll enjoy using it as much as we enjoy working on it."
+|                 "
+            "
+|               "
+          "
+|             "
+          
+          "
+|             <div>
+|               class="col-md-2 col-sm-4 order-sm-3"
+|               "
+            "
+|               <div>
+|                 class="widget"
+|                 "
+              "
+|                 <h6>
+|                   "Quick Links"
+|                 "
+              "
+|                 <ul>
+|                   class="nav flex-column"
+|                   "
+                "
+|                   <li>
+|                     class="nav-item"
+|                     <a>
+|                       class="nav-link"
+|                       href="download.php"
+|                       "Download"
+|                   "
+                "
+|                   <li>
+|                     class="nav-item"
+|                     <a>
+|                       class="nav-link"
+|                       href="donors.php"
+|                       "Donate"
+|                   "
+                "
+|                   <li>
+|                     class="nav-item"
+|                     <a>
+|                       class="nav-link"
+|                       href="getinvolved.php"
+|                       "Get Involved"
+|                   "
+              "
+|                 "
+            "
+|               "
+          "
+|             "
+          
+          "
+|             <div>
+|               class="col-md-2 col-sm-4 order-sm-4"
+|               "
+            "
+|               <div>
+|                 class="widget"
+|                 "
+              "
+|                 <h6>
+|                   "Info"
+|                 "
+              "
+|                 <ul>
+|                   class="nav flex-column primary-hover"
+|                   "
+                "
+|                   <li>
+|                     class="nav-item"
+|                     <a>
+|                       class="nav-link"
+|                       href="about.php"
+|                       "About"
+|                   "
+                "
+|                   <li>
+|                     class="nav-item"
+|                     <a>
+|                       class="nav-link"
+|                       href="faq.php"
+|                       "FAQ"
+|                   "
+                "
+|                   <li>
+|                     class="nav-item"
+|                     <a>
+|                       class="nav-link"
+|                       href="privacy.php"
+|                       "Privacy & Cookies"
+|                   "
+              "
+|                 "
+            "
+|               "
+          "
+|             "
+          
+          "
+|             <div>
+|               class="col-md-2 col-sm-4 order-sm-5"
+|               "
+            "
+|               <div>
+|                 class="widget"
+|                 "
+              "
+|                 <h6>
+|                   "Support"
+|                 "
+              "
+|                 <ul>
+|                   class="nav flex-column primary-hover"
+|                   "
+                "
+|                   <li>
+|                     class="nav-item"
+|                     <a>
+|                       class="nav-link"
+|                       href="https://linuxmint-installation-guide.readthedocs.io/en/latest/"
+|                       target="_blank"
+|                       "Installation Guide"
+|                   "
+                "
+|                   <li>
+|                     class="nav-item"
+|                     <a>
+|                       class="nav-link"
+|                       href="https://linuxmint-user-guide.readthedocs.io/en/latest/"
+|                       target="_blank"
+|                       "User Guide"
+|                   "
+                "
+|                   <li>
+|                     class="nav-item"
+|                     <a>
+|                       class="nav-link"
+|                       href="https://forums.linuxmint.com"
+|                       target="_blank"
+|                       "Forums"
+|                   "
+              "
+|                 "
+            "
+|               "
+          "
+|             "
+          
+          "
+|             <div>
+|               class="col-md-3 col-sm-6 order-sm-2"
+|               "
+            "
+|               <p>
+|                 "Almost all the packages we distribute are open-source. You can find their source code on "
+|                 <a>
+|                   href="https://packages.ubuntu.com"
+|                   target="_blank"
+|                   "https://packages.ubuntu.com"
+|                 ", "
+|                 <a>
+|                   href="http://packages.linuxmint.com"
+|                   "http://packages.linuxmint.com"
+|                 " or "
+|                 <a>
+|                   href="https://github.com/linuxmint"
+|                   target="_blank"
+|                   "https://github.com/linuxmint"
+|                 ". If you can't find what you're looking for contact us."
+|               "
+          "
+|             "
+        "
+|           "
+      "
+|         "
+    "
+|       "
+    "
+|       <div>
+|         class="divider mt-3"
+|       "
+    
+    "
+|       <div>
+|         class="footer-copyright py-3"
+|         "
+      "
+|         <div>
+|           class="container"
+|           "
+        "
+|           <div>
+|             class="d-md-flex justify-content-between align-items-center py-3 text-center text-md-left"
+|             "
+          
+          "
+|             <div>
+|               class="copyright-text"
+|               "Linux Mint is copyrighted since 2006 and trademarked through the Linux Mark Institute. All rights reserved."
+|               <br>
+|               "Linux® is the registered trademark of Linus Torvalds in the U.S. and other countries."
+|             "
+        "
+|           "
+      "
+|         "
+    "
+|       "
+  "
+|     "
+  
+
+  "
+|     <div>
+|       " "
+|       <a>
+|         class="back-top btn btn-grad"
+|         href="#"
+|         <i>
+|           class="ti-angle-up"
+|       " "
+|     "
+
+  
+  "
+|     <script>
+|       src="/web/wizixo/template/assets/vendor/jquery/jquery.min.js"
+|     "
+  "
+|     <script>
+|       src="/web/wizixo/template/assets/vendor/popper.js/umd/popper.min.js"
+|     "
+  "
+|     <script>
+|       src="/web/wizixo/template/assets/vendor/bootstrap/dist/js/bootstrap.min.js"
+|     "
+  "
+|     <script>
+|       src="/web/wizixo/template/assets/vendor/jquery-easing/jquery.easing.min.js"
+|     "
+
+  
+  "
+|     <script>
+|       src="/web/wizixo/template/assets/vendor/fancybox/js/jquery.fancybox.min.js"
+|     "
+  "
+|     <script>
+|       src="/web/wizixo/template/assets/vendor/owlcarousel/js/owl.carousel.min.js"
+|     "
+
+  
+  "
+|     <script>
+|       src="/web/wizixo/template/assets/js/functions.js"
+|     "
+
+
+"
