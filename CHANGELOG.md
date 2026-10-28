@@ -7,6 +7,36 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **JS-C179 — §B-23 : fenêtre boot
+  partagée par les pompes du
+  contexte** (`explorer-jscore`) —
+  cryptpad vol 97 : `eval deadline
+  exceeded` sur `/lib/less.min.js`
+  **malgré JS-C176** — la factory
+  d'init (requirejs/less compile)
+  court dans un callback
+  `setTimeout`/promise de pompe,
+  pas dans l'éval du script : le
+  batch armait la borne standard
+  (~10 s) alors que le document
+  bootait → `unhandledrejection`,
+  splash figé. `CtxMeta.boot_phase`
+  (`Idle`/`Open`/`Done`) : ouverte
+  par `arm_eval_deadline_boot`,
+  les armements de pompe
+  (`run_due_timers_ctx`,
+  `run_microtasks` non-boot)
+  choisissent le budget boot tant
+  que la fenêtre tient ; fermée
+  définitivement à
+  `readyState "complete"` (un
+  chunk paresseux post-load ne la
+  rouvre pas — borne hostile
+  intacte). Verrou
+  `boot_window_extends_to_timer_
+  pump` (callback ~400 ms survit
+  sous fenêtre, hostile post-load
+  tué au standard).
 - **JS-C178 — §B-57 : `expression
   too deeply nested` sur bundles
   réels** (`explorer-jscore`) —

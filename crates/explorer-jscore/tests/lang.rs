@@ -8384,6 +8384,43 @@ fn boot_microtask_drain_shares_boot_budget() {
 }
 
 #[test]
+fn boot_window_extends_to_timer_pump() {
+    // §B-23 résiduel (cryptpad vol 97 — `eval deadline
+    // exceeded` sur `/lib/less.min.js` MALGRÉ JS-C176) :
+    // la factory d'init court dans un callback
+    // `setTimeout`/promise de pompe — le batch armait la
+    // borne *standard* alors que le document bootait. La
+    // fenêtre boot du contexte partage le budget boot
+    // jusqu'à `readyState "complete"`.
+    let mut e = Engine::new();
+    e.set_eval_timeout_ms(200);
+    e.set_eval_timeout_boot_ms(3_000);
+    e.install_timers();
+    // Le script boot (bras boot via `run_program`, fenêtre
+    // ouverte) planifie un callback > borne standard —
+    // signature requirejs : l'init lourde court dans un
+    // `setTimeout`.
+    e.eval(
+        "var done=''; setTimeout(function(){ var s=0; \
+         for (var i=0;i<40000;i++){ s+=i; } done='done'+s; },0)",
+    )
+    .unwrap_or_else(|x| panic!("eval boot: {x}"));
+    e.run_due_timers()
+        .unwrap_or_else(|x| panic!("timer boot tué à la borne standard : {x:?}"));
+    let v = e.eval("done").unwrap_or_else(|x| panic!("relecture: {x}"));
+    assert!(e.describe(v).starts_with("done"));
+    // `load` observé → la fenêtre se ferme : un timer
+    // hostile post-boot retrouve la borne standard.
+    e.set_ready_state(0, "complete");
+    e.eval("setTimeout(function(){ while(true){} },0)")
+        .unwrap_or_else(|x| panic!("eval2: {x}"));
+    assert!(
+        e.run_due_timers().is_err(),
+        "timer post-load doit mourir à la borne standard"
+    );
+}
+
+#[test]
 fn eval_deadline_kills_timer_burst() {
     // Rafale timers post-apply (allrecipes) : un callback en
     // boucle meurt au wall-clock et `deadline_hit` remonte.

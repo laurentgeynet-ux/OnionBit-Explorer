@@ -872,6 +872,7 @@ impl Engine {
                 global: None,
                 alive: true,
                 defer_msgs: false,
+                boot_phase: crate::context::BootPhase::Idle,
             }],
             parked: std::collections::HashMap::new(),
             pending_msgs: std::collections::VecDeque::new(),
@@ -1077,6 +1078,7 @@ impl Engine {
             global: None,
             alive: true,
             defer_msgs: false,
+            boot_phase: crate::context::BootPhase::Idle,
         });
         if let Some(m) = self.ctxs.get_mut(parent as usize) {
             m.children.push(id);
@@ -1281,6 +1283,12 @@ impl Engine {
         // vide alors au prochain checkpoint.
         if let Some(m) = self.ctxs.get_mut(ctx as usize) {
             m.defer_msgs = v == "loading";
+            // §B-23 : `load` atteint — la fenêtre boot se
+            // ferme définitivement pour ce contexte (les
+            // pompes repassent au budget standard).
+            if v == "complete" {
+                m.boot_phase = crate::context::BootPhase::Done;
+            }
         }
     }
 
@@ -2925,11 +2933,33 @@ impl Engine {
     pub(crate) fn arm_eval_deadline_boot(&mut self) {
         self.eval_deadline = (self.eval_timeout_boot_ms > 0)
             .then(|| Instant::now() + std::time::Duration::from_millis(self.eval_timeout_boot_ms));
+        // §B-23 : ouvre la fenêtre boot du contexte — les
+        // pompes armées pendant le chargement partagent le
+        // budget boot (les factories d'init courent dans des
+        // callbacks de pompe, pas dans l'éval du script).
+        if let Some(m) = self.ctxs.get_mut(self.cur_ctx as usize) {
+            if m.boot_phase != crate::context::BootPhase::Done {
+                m.boot_phase = crate::context::BootPhase::Open;
+            }
+        }
     }
 
     pub(crate) fn arm_eval_deadline(&mut self) {
-        self.eval_deadline = (self.eval_timeout_ms > 0)
-            .then(|| Instant::now() + std::time::Duration::from_millis(self.eval_timeout_ms));
+        // §B-23 : pendant la fenêtre boot du contexte, le
+        // batch de pompe partage le budget boot — sinon une
+        // factory d'init lourde (less compile) mourait à la
+        // borne standard malgré le bras boot de son script.
+        let ms = if self
+            .ctxs
+            .get(self.cur_ctx as usize)
+            .is_some_and(|m| m.boot_phase == crate::context::BootPhase::Open)
+        {
+            self.eval_timeout_boot_ms
+        } else {
+            self.eval_timeout_ms
+        };
+        self.eval_deadline =
+            (ms > 0).then(|| Instant::now() + std::time::Duration::from_millis(ms));
     }
 
     /// Consomme le drapeau `deadline_hit` — l'adaptateur

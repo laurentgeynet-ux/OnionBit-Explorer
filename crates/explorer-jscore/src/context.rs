@@ -84,6 +84,32 @@ pub(crate) struct CtxMeta {
     /// `interactive`/`complete`. Défaut `false` : hors session
     /// (harnais), la livraison est immédiate comme avant.
     pub defer_msgs: bool,
+    /// Fenêtre **boot** du document — voir [`BootPhase`].
+    pub boot_phase: BootPhase,
+}
+
+/// Phase du budget boot d'un contexte (§B-23, cryptpad :
+/// les factories d'init — requirejs/`less.min.js` — courent
+/// dans des callbacks `setTimeout`/promise de pompe, pas
+/// dans l'éval du script elle-même ; la borne standard les
+/// tuait à ~10 s → `eval deadline exceeded` nommant la
+/// source du script).
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum BootPhase {
+    /// Aucune éval boot vue — les pompes du contexte arment
+    /// le budget standard.
+    Idle,
+    /// Fenêtre ouverte par `arm_eval_deadline_boot` — tant
+    /// qu'elle tient, les batches timers/microtasks du
+    /// contexte arment le budget *boot*
+    /// (`eval_timeout_boot_ms`).
+    Open,
+    /// `ready_state "complete"` observé — fenêtre fermée
+    /// définitivement (un chunk paresseux post-load ne la
+    /// rouvre pas ; les évals post-load gardent leur
+    /// budget boot propre à `run_program`, mais les pompes
+    /// repassent au standard).
+    Done,
 }
 
 /// Champs document-local d'un contexte garé — miroir exact des
