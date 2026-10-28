@@ -900,16 +900,23 @@ pub(crate) fn collect_images(dom: &Dom, img_w: f32, dpr: f32) -> Vec<(NodeId, St
     while let Some(n) = queue.pop() {
         match dom.tag_name(n) {
             Ok("img") => {
-                let srcset = dom
-                    .attribute(n, "srcset")
-                    .ok()
-                    .flatten()
-                    .filter(|s| !s.is_empty());
-                let picked = srcset.and_then(|ss| {
-                    let eff_w = resolve_sizes(dom.attribute(n, "sizes").ok().flatten(), img_w);
-                    pick_srcset(&ss, eff_w, dpr)
-                });
-                let src = picked
+                // `srcset` ET sa variante lazy `data-srcset`
+                // (§B-20 — la valeur `url 1x, url2 2x` résolue
+                // comme URL brute ne produisait rien : elle
+                // passe par `pick_srcset` comme `srcset`, et
+                // prime `src`/`data-src` de même préséance).
+                let srcset_of = |attr: &str| {
+                    dom.attribute(n, attr)
+                        .ok()
+                        .flatten()
+                        .filter(|s| !s.is_empty())
+                        .and_then(|ss| {
+                            let eff_w =
+                                resolve_sizes(dom.attribute(n, "sizes").ok().flatten(), img_w);
+                            pick_srcset(&ss, eff_w, dpr)
+                        })
+                };
+                let src = srcset_of("srcset")
                     .or_else(|| {
                         dom.attribute(n, "src")
                             .ok()
@@ -925,14 +932,10 @@ pub(crate) fn collect_images(dom: &Dom, img_w: f32, dpr: f32) -> Vec<(NodeId, St
                     // produit : les attributs lazy usuels
                     // servent de source, dans cet ordre —
                     // mieux que jamais peint.
+                    .or_else(|| srcset_of("data-srcset"))
                     .or_else(|| {
-                        const LAZY_SRCS: &[&str] = &[
-                            "data-src",
-                            "data-lazy-src",
-                            "data-original",
-                            "data-url",
-                            "data-srcset",
-                        ];
+                        const LAZY_SRCS: &[&str] =
+                            &["data-src", "data-lazy-src", "data-original", "data-url"];
                         LAZY_SRCS.iter().find_map(|a| {
                             dom.attribute(n, a).ok().flatten().filter(|s| !s.is_empty())
                         })

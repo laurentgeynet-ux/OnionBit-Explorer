@@ -2634,6 +2634,37 @@ fn collect_images_falls_back_to_lazy_data_src() {
     assert_eq!(srcs, vec!["/a.png", "/b.png", "/d.png"]);
 }
 
+/// §B-20 marmiton — `data-srcset` porte une **syntaxe
+/// srcset** (`url 1x, url2 2x`), pas une URL : rangée dans
+/// `LAZY_SRCS` brute, `Url::resolve` la rejetait et l'image
+/// ne partait jamais. Elle passe par `pick_srcset` comme
+/// `srcset` (sélection `w`/`x` + `sizes`), et prime
+/// `data-src` de même préséance que `srcset` sur `src`.
+#[test]
+fn collect_images_parses_lazy_data_srcset() {
+    let dom = test_dom(
+        r#"<img data-srcset="/w46.webp 1x, /w92.webp 2x" data-src="/fallback.png">
+           <img data-srcset="/w200.webp 200w, /w800.webp 800w" sizes="200px">
+           <img data-srcset="/a.webp 1x" data-src="/b.webp">
+           <img srcset="/s1.png 1x, /s2.png 2x" data-srcset="/never.webp 1x">"#,
+    );
+    let srcs: Vec<String> = collect_images(&dom, 800.0, 1.0)
+        .into_iter()
+        .map(|(_, s)| s)
+        .collect();
+    // dpr=1 → candidat `1x` ; `sizes=200px` → `200w` à
+    // densité 1. `srcset` réel toujours premier.
+    assert_eq!(srcs, vec!["/w46.webp", "/w200.webp", "/a.webp", "/s1.png"]);
+    // dpr=2 → le candidat `2x` l'emporte sur `data-src`.
+    let dom =
+        test_dom(r#"<img data-srcset="/w46.webp 1x, /w92.webp 2x" data-src="/fallback.png">"#);
+    let srcs: Vec<String> = collect_images(&dom, 800.0, 2.0)
+        .into_iter()
+        .map(|(_, s)| s)
+        .collect();
+    assert_eq!(srcs, vec!["/w92.webp"]);
+}
+
 /// Vol 13 franceinfo — un `Scroll` pendant la peinture
 /// détachée (apply hors verrou) est **accepté** : le
 /// `scroll_y` rapporté projette les deltas en file, le

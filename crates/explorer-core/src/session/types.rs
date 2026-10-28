@@ -816,6 +816,13 @@ pub struct SessionConfig {
     pub js_ops: u64,
     /// Nombre max d'`<img>` fetchés par document (règle
     /// budgets — une page peut déclarer des milliers de src).
+    /// Défaut 256 : corpus de vol §B-20 — marmiton ~216
+    /// `data-src` par document, lemonde ~195 ; à 32 la
+    /// première vague (icônes de menus cachés) épuisait
+    /// tout le budget et les images éditoriales n'étaient
+    /// jamais fetchées. La borne borne toujours les pages
+    /// hostiles et couvre `fetch_backgrounds` (solde du
+    /// même budget).
     pub max_images: usize,
     /// Budget pixels par image décodée (≈ 4 octets/pixel —
     /// borne l'allocation avant décodage).
@@ -938,7 +945,7 @@ impl Default for SessionConfig {
             viewport: (1024.0, 768.0),
             scale: 1.0,
             js_ops: 5_000_000,
-            max_images: 32,
+            max_images: 256,
             image_max_px: 16_000_000,
             max_sheets: 32,
             max_imports: 16,

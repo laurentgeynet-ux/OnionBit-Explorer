@@ -7,6 +7,32 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **Étape 149 — §B-20 :
+  `data-srcset` parsé en srcset +
+  budget images 32→256**
+  (`explorer-core`) — deux trous
+  mesurés sur marmiton (~216
+  `data-src` par document) :
+  (a) `data-srcset` était rangé
+  dans `LAZY_SRCS` comme URL brute
+  — sa valeur `url 1x, url2 2x`
+  échouait à `Url::resolve` et
+  l'image n'était jamais fetchée ;
+  elle passe désormais par
+  `pick_srcset` comme `srcset`
+  (sélection `w`/`x` + `sizes`,
+  même préséance : `data-srcset`
+  prime `data-src`) ; (b)
+  `SessionConfig::max_images` 32 →
+  256 — la première vague (icônes
+  de menus cachés) épuisait le
+  budget avant les images
+  éditoriales (lemonde ~195,
+  marmiton ~216) ; la borne reste
+  hostile-safe et couvre les fonds
+  CSS (solde du même budget).
+  Verrou `collect_images_parses_
+  lazy_data_srcset`.
 - **Étape 148 — §B-4 : prefetch
   `modulepreload`/`preload as=script|module`**
   (`explorer-core`) — data.gouv
