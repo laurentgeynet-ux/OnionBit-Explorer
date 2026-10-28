@@ -1,0 +1,1490 @@
+| <html>
+|   lang="en"
+|   <head>
+|   <body>
+|     class="html"
+|     <span>
+|       data-but-why="see: common-interface.js"
+|       id="alertifyCSS"
+|     "
+    "
+|     <title>
+|       data-localization="main_title"
+|       "CryptPad: Collaboration suite, encrypted and open-source"
+|     "
+    "
+|     <meta>
+|       content="https://cryptpad.fr/index.html"
+|       property="og:url"
+|     "
+    "
+|     <meta>
+|       content="website"
+|       property="og:type"
+|     "
+    "
+|     <meta>
+|       content="CryptPad: end-to-end encrypted collaboration suite"
+|       property="og:title"
+|     "
+    "
+|     <meta>
+|       content="CryptPad: end-to-end encrypted collaboration suite"
+|       property="og:description"
+|     "
+    "
+|     <meta>
+|       content="https://cryptpad.fr/customize/images/opengraph_preview/og-default.png"
+|       property="og:image"
+|     "
+    "
+|     <meta>
+|       content="summary_large_image"
+|       property="twitter:card"
+|     "
+    "
+|     <meta>
+|       content="text/html; charset=utf-8"
+|       http-equiv="content-type"
+|     "
+    "
+|     <meta>
+|       content="width=device-width, initial-scale=1"
+|       name="viewport"
+|     "
+    "
+|     <link>
+|       href="/customize/favicon/main-favicon.png"
+|       id="favicon"
+|       rel="icon"
+|       type="image/png"
+|     "
+    "
+|     <script>
+|       src="/customize/pre-loading.js?ver=1711537599563"
+|     "
+    "
+|     <link>
+|       href="/customize/src/pre-loading.css?ver=1711537599563"
+|       rel="stylesheet"
+|       type="text/css"
+|     "
+    "
+|     <script>
+|       async=""
+|       data-bootload="/customize/template.js"
+|       data-main="/common/boot.js?ver=1.0"
+|       src="/components/requirejs/require.js?ver=2.3.5"
+|     "
+"
+|     <script>
+|       data-requirecontext="_"
+|       data-requiremodule="/common/boot.js?ver=1.0"
+|       src="/common/boot.js?ver=1.0"
+|       type="text/javascript"
+|     <script>
+|       data-requirecontext="_"
+|       data-requiremodule="/api/config?cb=1a1848c0a42"
+|       src="/api/config?cb=1a1848c0a42"
+|       type="text/javascript"
+|     <script>
+|       data-requirecontext="_"
+|       data-requiremodule="/common/boot2.js"
+|       src="/common/boot2.js?ver=2026.10.0-1793116816764"
+|       type="text/javascript"
+|     <script>
+|       data-requirecontext="_"
+|       data-requiremodule="/common/requireconfig.js"
+|       src="/common/requireconfig.js?ver=2026.10.0-1793116816764"
+|       type="text/javascript"
+|     <script>
+|       data-requirecontext="_"
+|       data-requiremodule="/customize/application_config.js"
+|       src="/customize/application_config.js?ver=2026.10.0-1793116816764"
+|       type="text/javascript"
+|     <script>
+|       data-requirecontext="_"
+|       data-requiremodule="/api/config"
+|       src="/api/config?ver=2026.10.0-1793116816764"
+|       type="text/javascript"
+|     <script>
+|       data-requirecontext="_"
+|       data-requiremodule="/common/application_config_internal.js"
+|       src="/common/application_config_internal.js?ver=2026.10.0-1793116816764"
+|       type="text/javascript"
+|     <script>
+|       data-requirecontext="_"
+|       data-requiremodule="/customize/template.js"
+|       src="/customize/template.js?ver=2026.10.0-1793116816764"
+|       type="text/javascript"
+|     <script>
+|       data-requirecontext="_"
+|       data-requiremodule="jquery"
+|       src="/components/jquery/dist/jquery.min.js?ver=2026.10.0-1793116816764"
+|       type="text/javascript"
+|     <script>
+|       data-requirecontext="_"
+|       data-requiremodule="/common/hyperscript.js"
+|       src="/common/hyperscript.js?ver=2026.10.0-1793116816764"
+|       type="text/javascript"
+|     <script>
+|       data-requirecontext="_"
+|       data-requiremodule="/customize/pages.js"
+|       src="/customize/pages.js?ver=2026.10.0-1793116816764"
+|       type="text/javascript"
+|     <script>
+|       data-requirecontext="_"
+|       data-requiremodule="/components/nthen/index.js"
+|       src="/components/nthen/index.js?ver=2026.10.0-1793116816764"
+|       type="text/javascript"
+|     <script>
+|       data-requirecontext="_"
+|       data-requiremodule="/common/common-language.js"
+|       src="/common/common-language.js?ver=2026.10.0-1793116816764"
+|       type="text/javascript"
+|     <script>
+|       data-requirecontext="_"
+|       data-requiremodule="/common/common-util.js"
+|       src="/common/common-util.js?ver=2026.10.0-1793116816764"
+|       type="text/javascript"
+|     <script>
+|       data-requirecontext="_"
+|       data-requiremodule="/customize/messages.js"
+|       src="/customize/messages.js?ver=2026.10.0-1793116816764"
+|       type="text/javascript"
+|     <script>
+|       data-requirecontext="_"
+|       data-requiremodule="/common/extensions.js"
+|       src="/common/extensions.js?ver=2026.10.0-1793116816764"
+|       type="text/javascript"
+|     <script>
+|       data-requirecontext="_"
+|       data-requiremodule="optional"
+|       src="/lib/optional/optional.js?ver=2026.10.0-1793116816764"
+|       type="text/javascript"
+|     <script>
+|       data-requirecontext="_"
+|       data-requiremodule="/common/common-icons.js"
+|       src="/common/common-icons.js?ver=2026.10.0-1793116816764"
+|       type="text/javascript"
+|     <script>
+|       data-requirecontext="_"
+|       data-requiremodule="/customize/translations/messages.js"
+|       src="/customize/translations/messages.js?ver=2026.10.0-1793116816764"
+|       type="text/javascript"
+|     <script>
+|       data-requirecontext="_"
+|       data-requiremodule="/components/tweetnacl-util/nacl-util.min.js"
+|       src="/components/tweetnacl-util/nacl-util.min.js?ver=2026.10.0-1793116816764"
+|       type="text/javascript"
+|     <script>
+|       data-requirecontext="_"
+|       data-requiremodule="/api/instance"
+|       src="/api/instance?ver=2026.10.0-1793116816764"
+|       type="text/javascript"
+|     <script>
+|       data-requirecontext="_"
+|       data-requiremodule="/customize/lucide.js"
+|       src="/customize/lucide.js?ver=2026.10.0-1793116816764"
+|       type="text/javascript"
+|     <script>
+|       data-requirecontext="_"
+|       data-requiremodule="/extensions.js"
+|       src="/extensions.js?ver=2026.10.0-1793116816764"
+|       type="text/javascript"
+|     <script>
+|       data-requirecontext="_"
+|       data-requiremodule="json"
+|       src="/components/requirejs-plugins/src/json.js?ver=2026.10.0-1793116816764"
+|       type="text/javascript"
+|     <script>
+|       data-requirecontext="_"
+|       data-requiremodule="/accounts/extensions.js"
+|       src="/accounts/extensions.js?ver=2026.10.0-1793116816764"
+|       type="text/javascript"
+|     <script>
+|       data-requirecontext="_"
+|       data-requiremodule="text"
+|       src="/components/requirejs-plugins/lib/text.js?ver=2026.10.0-1793116816764"
+|       type="text/javascript"
+|     <script>
+|       data-requirecontext="_"
+|       data-requiremodule="/common/RequireLess.js"
+|       src="/common/RequireLess.js?ver=2026.10.0-1793116816764"
+|       type="text/javascript"
+|     <script>
+|       data-requirecontext="_"
+|       data-requiremodule="/accounts/plans.js"
+|       src="/accounts/plans.js?ver=2026.10.0-1793116816764"
+|       type="text/javascript"
+|     <script>
+|       data-requirecontext="_"
+|       data-requiremodule="/common/common-interface.js"
+|       src="/common/common-interface.js?ver=2026.10.0-1793116816764"
+|       type="text/javascript"
+|     <script>
+|       data-requirecontext="_"
+|       data-requiremodule="/common/outer/local-store.js"
+|       src="/common/outer/local-store.js?ver=2026.10.0-1793116816764"
+|       type="text/javascript"
+|     <script>
+|       data-requirecontext="_"
+|       data-requiremodule="/common/LessLoader.js"
+|       src="/common/LessLoader.js?ver=2026.10.0-1793116816764"
+|       type="text/javascript"
+|     <script>
+|       data-requirecontext="_"
+|       data-requiremodule="/common/common-hash.js"
+|       src="/common/common-hash.js?ver=2026.10.0-1793116816764"
+|       type="text/javascript"
+|     <script>
+|       data-requirecontext="_"
+|       data-requiremodule="/common/common-notifier.js"
+|       src="/common/common-notifier.js?ver=2026.10.0-1793116816764"
+|       type="text/javascript"
+|     <script>
+|       data-requirecontext="_"
+|       data-requiremodule="/components/alertify.js/dist/js/alertify.js"
+|       src="/components/alertify.js/dist/js/alertify.js?ver=2026.10.0-1793116816764"
+|       type="text/javascript"
+|     <script>
+|       data-requirecontext="_"
+|       data-requiremodule="/lib/tippy/tippy.min.js"
+|       src="/lib/tippy/tippy.min.js?ver=2026.10.0-1793116816764"
+|       type="text/javascript"
+|     <script>
+|       data-requirecontext="_"
+|       data-requiremodule="/customize/loading.js"
+|       src="/customize/loading.js?ver=2026.10.0-1793116816764"
+|       type="text/javascript"
+|     <script>
+|       data-requirecontext="_"
+|       data-requiremodule="/common/clipboard.js"
+|       src="/common/clipboard.js?ver=2026.10.0-1793116816764"
+|       type="text/javascript"
+|     <script>
+|       data-requirecontext="_"
+|       data-requiremodule="/lib/jquery-ui/jquery-ui.min.js"
+|       src="/lib/jquery-ui/jquery-ui.min.js?ver=2026.10.0-1793116816764"
+|       type="text/javascript"
+|     <script>
+|       data-requirecontext="_"
+|       data-requiremodule="/components/bootstrap-tokenfield/dist/bootstrap-tokenfield.js"
+|       src="/components/bootstrap-tokenfield/dist/bootstrap-tokenfield.js?ver=2026.10.0-1793116816764"
+|       type="text/javascript"
+|     <script>
+|       data-requirecontext="_"
+|       data-requiremodule="/components/require-css/css.js"
+|       src="/components/require-css/css.js?ver=2026.10.0-1793116816764"
+|       type="text/javascript"
+|     <script>
+|       data-requirecontext="_"
+|       data-requiremodule="/common/common-constants.js"
+|       src="/common/common-constants.js?ver=2026.10.0-1793116816764"
+|       type="text/javascript"
+|     <script>
+|       data-requirecontext="_"
+|       data-requiremodule="/common/cache-store.js"
+|       src="/common/cache-store.js?ver=2026.10.0-1793116816764"
+|       type="text/javascript"
+|     <script>
+|       data-requirecontext="_"
+|       data-requiremodule="/components/localforage/dist/localforage.min.js"
+|       src="/components/localforage/dist/localforage.min.js?ver=2026.10.0-1793116816764"
+|       type="text/javascript"
+|     <script>
+|       data-requirecontext="_"
+|       data-requiremodule="/accounts/api.js"
+|       src="/accounts/api.js?ver=2026.10.0-1793116816764"
+|       type="text/javascript"
+|     <script>
+|       data-requirecontext="_"
+|       data-requiremodule="/components/marked/marked.min.js"
+|       src="/components/marked/marked.min.js?ver=2026.10.0-1793116816764"
+|       type="text/javascript"
+|     <style>
+|       data-original-src="/accounts/style.less"
+|       type="text/css"
+|       "body .cp-spinner svg {
+  animation: spin 10s linear infinite;
+}
+body .cp-accounts-list {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0px;
+}
+body .cp-accounts-list .cp-accounts-list-group {
+  display: flex;
+  flex-wrap: wrap;
+  flex-shrink: 1;
+  justify-content: center;
+  gap: 0px;
+}
+body .cp-accounts-list .cp-accounts-custom-msg:empty {
+  display: none;
+}
+body .cp-accounts-list .cp-accounts-custom-msg {
+  flex-basis: 100%;
+  display: flex;
+  justify-content: center;
+  padding: 10px;
+}
+body .cp-accounts-list .cp-accounts-custom-msg div.alert.alert-info {
+  font-size: 16px;
+  max-width: 600px;
+}
+body .cp-accounts-list .cp-accounts-custom-msg div.alert.alert-info *:last-child {
+  margin-bottom: 0;
+}
+body .cp-accounts-list .cp-accounts-yearly-toggle {
+  flex-basis: 100%;
+  display: flex;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+body .cp-accounts-list .cp-accounts-yearly-toggle .cp-accounts-toggle {
+  flex: 1 1 0px;
+  display: flex;
+}
+body .cp-accounts-list .cp-accounts-yearly-toggle .cp-accounts-toggle.cp-selected {
+  font-weight: 800;
+}
+body .cp-accounts-list .cp-accounts-yearly-toggle .cp-accounts-toggle:first-child {
+  justify-content: flex-end;
+}
+body .cp-accounts-list .cp-accounts-yearly-toggle .cp-accounts-toggle:last-child {
+  justify-content: flex-start;
+}
+body .cp-accounts-list .cp-accounts-yearly-toggle .cp-accounts-toggle .btn-primary {
+  cursor: default;
+}
+body .cp-accounts-list .cp-accounts-yearly-toggle .cp-accounts-toggle-btn button {
+  width: 50px;
+  height: 25px;
+  border-radius: 20px;
+  padding: 0 2px;
+  display: inline-flex;
+  align-items: center;
+  border-color: #424242;
+  background: #FAFAFA;
+}
+body .cp-accounts-list .cp-accounts-yearly-toggle .cp-accounts-toggle-btn button[aria-pressed=true] {
+  justify-content: flex-end;
+}
+body .cp-accounts-list .cp-accounts-yearly-toggle .cp-accounts-toggle-btn button[aria-pressed=false] {
+  justify-content: flex-start;
+}
+body .cp-accounts-list .cp-accounts-yearly-toggle .cp-accounts-toggle-btn button .cp-toggle {
+  height: 20px;
+  width: 20px;
+  background: #424242;
+  border-radius: 25px;
+}
+body .cp-accounts-list .cp-accounts-org-title {
+  flex-basis: 100%;
+  display: flex;
+  justify-content: center;
+  font-family: IBM Plex Mono;
+  font-size: 36px;
+  margin-top: 40px;
+  margin-bottom: 20px;
+}
+body [data-accounts-plan=free] .cp-colored {
+  color: #424242;
+  border-color: #424242;
+}
+body [data-accounts-plan=free].cp-accounts-card {
+  background-color: rgba(66, 66, 66, 0.15);
+}
+body [data-accounts-plan=cloud] .cp-colored {
+  color: #424242;
+  border-color: #424242;
+}
+body [data-accounts-plan=cloud].cp-accounts-card {
+  background-color: rgba(66, 66, 66, 0.15);
+}
+body [data-accounts-plan=basic] .cp-colored {
+  color: #0087ff;
+  border-color: #0087ff;
+}
+body [data-accounts-plan=basic].cp-accounts-card {
+  background-color: rgba(0, 135, 255, 0.15);
+}
+body [data-accounts-plan=pro] .cp-colored {
+  color: #48ab71;
+  border-color: #48ab71;
+}
+body [data-accounts-plan=pro].cp-accounts-card {
+  background-color: rgba(72, 171, 113, 0.15);
+}
+body [data-accounts-plan=power] .cp-colored {
+  color: #9631ff;
+  border-color: #9631ff;
+}
+body [data-accounts-plan=power].cp-accounts-card {
+  background-color: rgba(150, 49, 255, 0.15);
+}
+body [data-accounts-plan=org_s] .cp-colored {
+  color: #ff3b3b;
+  border-color: #ff3b3b;
+}
+body [data-accounts-plan=org_s].cp-accounts-card {
+  background-color: rgba(255, 59, 59, 0.15);
+}
+body [data-accounts-plan=org_large] .cp-colored {
+  color: #ff7f31;
+  border-color: #ff7f31;
+}
+body [data-accounts-plan=org_large].cp-accounts-card {
+  background-color: rgba(255, 127, 49, 0.15);
+}
+body .cp-accounts-yourplan {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 20px;
+}
+body .cp-accounts-yourplan button {
+  font-size: 1.25em;
+}
+body .cp-accounts-card {
+  margin: 10px 10px;
+  display: flex;
+  flex-flow: column;
+  align-items: center;
+  min-height: 380px;
+  width: 250px;
+  font-size: 18px;
+  border-radius: 10px;
+  padding: 10px;
+}
+body .cp-accounts-card[data-org=true] {
+  width: 300px;
+}
+body .cp-accounts-card .cp-accounts-card-name,
+body .cp-accounts-card .cp-price-value {
+  font-family: IBM Plex Mono;
+}
+body .cp-accounts-card .cp-accounts-card-name {
+  font-size: 36px;
+  text-align: center;
+}
+body .cp-accounts-card .cp-accounts-card-price {
+  display: flex;
+  flex-flow: column;
+  align-items: center;
+}
+body .cp-accounts-card .cp-accounts-card-price .cp-price-value {
+  font-size: 72px;
+  font-weight: 700;
+  margin-bottom: -10px;
+}
+body .cp-accounts-card .cp-accounts-card-price .cp-price-value .cp-cent {
+  font-size: 36px;
+}
+body .cp-accounts-card .cp-accounts-card-desc {
+  margin-top: 20px;
+  width: 100%;
+}
+body .cp-accounts-card .cp-accounts-card-button {
+  display: flex;
+  flex-flow: column;
+  flex: 1;
+  width: 100%;
+  justify-content: flex-end;
+  margin-top: 1.5rem;
+}
+body .cp-accounts-card .cp-accounts-card-button button {
+  font-weight: 700;
+  font-size: 18px;
+  margin-top: 0.5rem;
+  white-space: unset;
+}
+"
+|     <script>
+|       data-requirecontext="_"
+|       data-requiremodule="/components/chainpad-crypto/crypto.js"
+|       src="/components/chainpad-crypto/crypto.js?ver=2026.10.0-1793116816764"
+|       type="text/javascript"
+|     <script>
+|       data-requirecontext="_"
+|       data-requiremodule="/common/common-signing-keys.js"
+|       src="/common/common-signing-keys.js?ver=2026.10.0-1793116816764"
+|       type="text/javascript"
+|     <script>
+|       data-requirecontext="_"
+|       data-requiremodule="/components/tweetnacl/nacl-fast.min.js"
+|       src="/components/tweetnacl/nacl-fast.min.js?ver=2026.10.0-1793116816764"
+|       type="text/javascript"
+|     <script>
+|       data-requirecontext="_"
+|       data-requiremodule="/common/visible.js"
+|       src="/common/visible.js?ver=2026.10.0-1793116816764"
+|       type="text/javascript"
+|     <script>
+|       data-requirecontext="_"
+|       data-requiremodule="/common/notify.js"
+|       src="/common/notify.js?ver=2026.10.0-1793116816764"
+|       type="text/javascript"
+|     <style>
+|       data-original-src="/customize/src/less2/include/loading.less"
+|       type="text/css"
+|       "/*
+ * SPDX-FileCopyrightText: 2023 XWiki CryptPad Team <contact@cryptpad.org> and contributors
+ *
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ */
+#cp-loading {
+  --LessLoader_require: "/customize/src/less2/include/password-input.less?ver=2026.10.0-1793116816764";
+  --LessLoader_require: "/customize/src/less2/include/forms.less?ver=2026.10.0-1793116816764";
+  visibility: visible;
+  position: fixed;
+  z-index: 10000000;
+  top: 0px;
+  bottom: 0px;
+  left: 0px;
+  right: 0px;
+  background-color: #FFF;
+  color: #424242;
+  font-size: 1.3em;
+  line-height: 120%;
+  opacity: 1;
+  display: flex;
+  flex-flow: column;
+  justify-content: space-between;
+  align-items: center;
+  font: 20px Open Sans, Helvetica Neue, sans-serif !important;
+}
+@font-face {
+  font-family: Open Sans;
+  src: url(/components/open-sans-fontface/fonts/Regular/OpenSans-Regular.eot?ver=2026.10.0-1793116816764);
+  src: url(/components/open-sans-fontface/fonts/Regular/OpenSans-Regular.eot?&ver=2026.10.0-1793116816764#iefix) format(embedded-opentype), url(/components/open-sans-fontface/fonts/Regular/OpenSans-Regular.woff?ver=2026.10.0-1793116816764) format(woff), url(/components/open-sans-fontface/fonts/Regular/OpenSans-Regular.ttf?ver=2026.10.0-1793116816764) format(truetype), url(/components/open-sans-fontface/fonts/Regular/OpenSans-Regular.svg?ver=2026.10.0-1793116816764#OpenSansRegular) format(svg);
+  font-weight: normal;
+  font-style: normal;
+}
+#cp-loading.cp-loading-transparent {
+  background-color: rgba(255, 255, 255, 0.7);
+}
+#cp-loading.cp-loading-hidden {
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.75s, visibility 0s 0.75s;
+}
+#cp-loading .cp-loading-logo {
+  flex: 0 1 auto;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  color: #939393;
+}
+#cp-loading .cp-loading-logo img {
+  margin: 0;
+  max-height: 60px;
+}
+#cp-loading .cp-loading-logo span {
+  font-size: 40px;
+  font-family: IBM Plex Mono;
+  user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  -khtml-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+}
+#cp-loading .cp-loading-container {
+  width: 700px;
+  max-width: 90vw;
+  max-height: calc(100vh - 20px);
+  flex-shrink: 0;
+  display: flex;
+  flex-flow: column;
+  align-items: center;
+}
+#cp-loading .cp-loading-cryptofist {
+  margin-left: auto;
+  margin-right: auto;
+  max-width: 90vw;
+  max-height: max(40vh, 250px);
+  width: auto;
+  height: auto;
+  margin-bottom: 2em;
+}
+#cp-loading.cp-loading-empty {
+  justify-content: center;
+}
+#cp-loading.cp-loading-empty > :not(.cp-loading-empty) {
+  display: none !important;
+}
+@media screen and (max-width: 500px) {
+  #cp-loading {
+    font-size: 16px !important;
+  }
+}
+@media screen and (max-width: 300px) {
+  #cp-loading .cp-loading-logo img {
+    max-height: 40px;
+  }
+  #cp-loading .cp-loading-logo span {
+    font-size: 20px;
+  }
+}
+@media screen and (max-height: 600px) {
+  #cp-loading {
+    font-size: 16px !important;
+  }
+}
+#cp-loading #cp-loading-spinner-message {
+  color: #616161;
+}
+#cp-loading #cp-loading-message {
+  background: #EEEEEE;
+  padding: 1rem;
+  width: 100%;
+  border-radius: 5px;
+  color: #424242;
+  text-align: left;
+  overflow-y: auto;
+}
+#cp-loading #cp-loading-message.cp-error-message,
+#cp-loading #cp-loading-message.cp-error-message-alt {
+  margin: 0;
+  font-size: 16px;
+  padding: 0.5rem;
+  width: auto;
+}
+#cp-loading #cp-loading-message.cp-error-message {
+  background-color: #FFD4D4;
+  color: #6b0000;
+}
+#cp-loading #cp-loading-message.cp-error-message-alt {
+  background-color: #6b0000;
+  color: #FFD4D4;
+}
+#cp-loading #cp-loading-message:empty {
+  display: none;
+}
+#cp-loading #cp-loading-message a {
+  color: #0087ff;
+  border-radius: 5px;
+}
+#cp-loading #cp-loading-message p:last-child {
+  margin-bottom: 0;
+}
+#cp-loading #cp-loading-message svg {
+  margin: 0;
+}
+#cp-loading #cp-loading-status {
+  display: flex;
+  color: #616161;
+  align-items: center;
+  font-family: IBM Plex Mono;
+  font-size: 0.75em;
+  margin-top: 2rem;
+  gap: 0.5rem;
+}
+#cp-loading #cp-loading-status svg {
+  margin: 0;
+}
+#cp-loading #cp-loading-footer {
+  margin-bottom: 2rem;
+  display: flex;
+  flex-flow: column;
+  align-items: center;
+}
+#cp-loading #cp-loading-password-prompt p.cp-password-error {
+  margin: 0;
+  margin-bottom: 0.5rem;
+  font-size: 16px;
+  padding: 0.5rem;
+  background-color: #FFD4D4;
+  color: #6b0000;
+  border-radius: 5px;
+}
+#cp-loading #cp-loading-password-prompt .cp-password-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  width: 100%;
+}
+#cp-loading #cp-loading-password-prompt .cp-password-form .cp-password-container {
+  flex: 1;
+  min-width: 0;
+}
+#cp-loading #cp-loading-password-prompt .cp-password-form .cp-password-reveal {
+  margin-left: 0.5rem;
+}
+#cp-loading #cp-loading-password-prompt .cp-password-form .cp-password-reveal:focus-visible {
+  outline: #0087ff solid 2px;
+  border-radius: 5px;
+}
+#cp-loading #cp-loading-password-prompt .cp-password-input {
+  font-size: 16px;
+}
+#cp-loading #cp-loading-password-prompt .cp-password-input:focus-visible {
+  outline: #0087ff solid 2px;
+}
+#cp-loading #cp-loading-password-prompt::-webkit-input-placeholder {
+  /* WebKit, Blink, Edge */
+  color: rgba(66, 66, 66, 0.75);
+  font-weight: normal;
+}
+#cp-loading #cp-loading-password-prompt::placeholder {
+  /* Chrome, Firefox, Opera, Safari 10.1+ */
+  color: rgba(66, 66, 66, 0.75);
+  opacity: 1;
+  /* Firefox */
+  font-weight: normal;
+}
+#cp-loading #cp-loading-password-prompt:-ms-input-placeholder {
+  /* Internet Explorer 10-11 */
+  color: rgba(66, 66, 66, 0.75);
+  font-weight: normal;
+}
+#cp-loading #cp-loading-password-prompt::-ms-input-placeholder {
+  /* Microsoft Edge */
+  color: rgba(66, 66, 66, 0.75);
+  font-weight: normal;
+}
+#cp-loading p.cp-password-info {
+  text-align: left;
+  margin-bottom: 0.5rem;
+}
+#cp-loading .cp-loading-progress {
+  width: 100%;
+  text-align: center;
+}
+#cp-loading .cp-loading-progress p {
+  margin: 5px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+#cp-loading .cp-loading-progress .cp-loading-progress-list {
+  display: inline-block;
+  max-width: 100%;
+  color: #616161;
+}
+#cp-loading .cp-loading-progress .cp-loading-progress-bar {
+  margin: 1rem 0;
+  height: 5px;
+  background: #EEEEEE;
+  border: 0;
+  border-radius: 5px;
+}
+#cp-loading .cp-loading-progress .cp-loading-progress-bar-value {
+  height: 100%;
+  background: #0087ff;
+  border-radius: 5px;
+}
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(1800deg);
+  }
+}
+#cp-loading .cp-loading-spinner-container {
+  margin: 1rem 0;
+  height: 5px;
+  width: 100%;
+  border: 0;
+  overflow: hidden;
+  background: #EEEEEE;
+  border-radius: 5px;
+}
+#cp-loading .cp-spinner-main {
+  width: 100%;
+  height: 5px;
+  background: #0087ff;
+  border-radius: 5px;
+  animation: loading-animation 1s infinite linear;
+  transform-origin: 0% 50%;
+}
+@keyframes loading-animation {
+  0% {
+    transform: translateX(0) scaleX(0);
+  }
+  40% {
+    transform: translateX(0) scaleX(0.4);
+  }
+  100% {
+    transform: translateX(100%) scaleX(0.5);
+  }
+}
+#cp-loading button .cp-spinner svg {
+  animation: spin 10s linear infinite ;
+  margin: 0 0 0.1rem 0.3rem;
+}
+"
+|     <style>
+|       data-original-src="/customize/src/less2/include/password-input.less"
+|       type="text/css"
+|       "/*
+ * SPDX-FileCopyrightText: 2023 XWiki CryptPad Team <contact@cryptpad.org> and contributors
+ *
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ */
+.cp-password-container {
+  display: flex;
+  align-items: center;
+}
+.cp-password-container input {
+  flex: 1;
+  min-width: 0;
+}
+.cp-password-container svg:hover {
+  color: #006ccc;
+}
+.cp-password-change-container {
+  display: flex;
+  align-items: center;
+}
+.cp-password-change-container .cp-password-container {
+  margin-bottom: 0 !important;
+  flex: 1;
+}
+.cp-password-change-container button {
+  margin: 0 !important;
+}
+"
+|     <script>
+|       data-requirecontext="_"
+|       data-requiremodule="/lib/less.min.js"
+|       src="/lib/less.min.js?ver=2026.10.0-1793116816764"
+|       type="text/javascript"
+|     <link>
+|       href="/lib/tippy/tippy.css?ver=2026.10.0-1793116816764"
+|       rel="stylesheet"
+|       type="text/css"
+|     <link>
+|       href="/lib/jquery-ui/jquery-ui.min.css?ver=2026.10.0-1793116816764"
+|       rel="stylesheet"
+|       type="text/css"
+|     <script>
+|       data-requirecontext="_"
+|       data-requiremodule="/accounts/http-command.js"
+|       src="/accounts/http-command.js?ver=2026.10.0-1793116816764"
+|       type="text/javascript"
+|     <script>
+|       data-requirecontext="_"
+|       data-requiremodule="/components/file-saver/FileSaver.min.js"
+|       src="/components/file-saver/FileSaver.min.js?ver=2026.10.0-1793116816764"
+|       type="text/javascript"
+|     <style>
+|       data-original-src="/customize/src/less2/include/forms.less"
+|       type="text/css"
+|       "/*
+ * SPDX-FileCopyrightText: 2023 XWiki CryptPad Team <contact@cryptpad.org> and contributors
+ *
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ */
+input:not(.numInput):not(.form-control):not([type="checkbox"]),
+textarea,
+div.cp-textarea {
+  color: #424242;
+  background-color: #F5F5F5;
+  border: 1px solid #0087ff;
+  border-radius: 5px;
+  font-size: 100%;
+  padding: 12px;
+}
+input:not(.numInput):not(.form-control):not([type="checkbox"]):not(.tui-full-calendar-content),
+textarea:not(.tui-full-calendar-content),
+div.cp-textarea:not(.tui-full-calendar-content) {
+  width: 100%;
+}
+input:not(.numInput):not(.form-control):not([type="checkbox"]).tui-full-calendar-content,
+textarea.tui-full-calendar-content,
+div.cp-textarea.tui-full-calendar-content {
+  font-size: 16px;
+}
+input:not(.numInput):not(.form-control):not([type="checkbox"]).tui-full-calendar-content:focus-visible,
+textarea.tui-full-calendar-content:focus-visible,
+div.cp-textarea.tui-full-calendar-content:focus-visible {
+  outline: #0087ff solid 2px;
+}
+input:not(.numInput):not(.form-control):not([type="checkbox"])[readonly],
+textarea[readonly],
+div.cp-textarea[readonly] {
+  background-color: rgba(0, 135, 255, 0.25);
+  border-color: #0087ff;
+  color: #424242;
+}
+input:not(.numInput):not(.form-control):not([type="checkbox"])::-webkit-input-placeholder,
+textarea::-webkit-input-placeholder,
+div.cp-textarea::-webkit-input-placeholder {
+  /* WebKit, Blink, Edge */
+  color: rgba(66, 66, 66, 0.75);
+  font-weight: normal;
+}
+input:not(.numInput):not(.form-control):not([type="checkbox"])::placeholder,
+textarea::placeholder,
+div.cp-textarea::placeholder {
+  /* Chrome, Firefox, Opera, Safari 10.1+ */
+  color: rgba(66, 66, 66, 0.75);
+  opacity: 1;
+  /* Firefox */
+  font-weight: normal;
+}
+input:not(.numInput):not(.form-control):not([type="checkbox"]):-ms-input-placeholder,
+textarea:-ms-input-placeholder,
+div.cp-textarea:-ms-input-placeholder {
+  /* Internet Explorer 10-11 */
+  color: rgba(66, 66, 66, 0.75);
+  font-weight: normal;
+}
+input:not(.numInput):not(.form-control):not([type="checkbox"])::-ms-input-placeholder,
+textarea::-ms-input-placeholder,
+div.cp-textarea::-ms-input-placeholder {
+  /* Microsoft Edge */
+  color: rgba(66, 66, 66, 0.75);
+  font-weight: normal;
+}
+input:not(.form-control) {
+  height: 38px;
+}
+div.cp-alertify-type {
+  display: flex;
+}
+div.cp-alertify-type input {
+  margin: 0 !important;
+  flex: 1;
+  border-radius: 5px 0 0 5px !important;
+  min-width: 0;
+}
+div.cp-alertify-type span button {
+  margin: 0;
+  height: 100%;
+  margin-left: -1px;
+  text-transform: unset !important;
+  border-radius: 0 5px 5px 0;
+}
+.mfa-enabled span,
+.mfa-enabled i,
+.mfa-enabled svg {
+  color: #3f7f00;
+}
+.mfa-disabled span,
+.mfa-disabled i,
+.mfa-disabled svg {
+  color: #9e0000;
+}
+textarea,
+div.cp-textarea {
+  padding: 8px 12px;
+}
+textarea[readonly],
+div.cp-textarea[readonly] {
+  overflow: hidden;
+  resize: none;
+}
+div.cp-textarea {
+  height: 60px;
+  width: 100%;
+  cursor: text;
+  outline: none;
+  white-space: pre-wrap;
+  overflow-y: auto;
+  word-break: break-word;
+  resize: vertical;
+}
+div.cp-button-confirm {
+  display: inline-block;
+}
+div.cp-button-confirm.new {
+  vertical-align: top;
+}
+div.cp-button-confirm.new button {
+  height: 35px;
+}
+div.cp-button-confirm button {
+  margin: 0 !important;
+  border-bottom-left-radius: 0px;
+  border-bottom-right-radius: 0px;
+}
+div.cp-button-confirm .cp-button-timer {
+  height: 3px;
+}
+div.cp-button-confirm .cp-button-timer > div {
+  height: 100%;
+  border-bottom-left-radius: 3px;
+  border-bottom-right-radius: 3px;
+  background-color: #424242;
+}
+div.cp-button-confirm .cp-button-timer > div.btn-primary,
+div.cp-button-confirm .cp-button-timer > div.btn-secondary {
+  background-color: #0087ff;
+}
+div.cp-button-confirm .cp-button-timer > div.danger,
+div.cp-button-confirm .cp-button-timer > div.btn-danger,
+div.cp-button-confirm .cp-button-timer > div.danger-alt,
+div.cp-button-confirm .cp-button-timer > div.btn-danger-alt {
+  background-color: #E55236;
+}
+div.cp-palette-container {
+  display: flex;
+  justify-content: space-between;
+}
+div.cp-palette-container .cp-palette-color {
+  display: inline-block;
+  border-radius: 50%;
+  height: 30px;
+  width: 30px;
+  text-align: center;
+  line-height: 30px;
+  color: #424242;
+  border: 1px solid rgba(66, 66, 66, 0.4);
+  outline: none;
+}
+div.cp-palette-container .cp-palette-color.svg {
+  color: #424242;
+}
+div.cp-palette-container .cp-palette-color:focus-visible {
+  outline: #0087ff solid 2px;
+}
+button.btn {
+  background-color: #ffffff;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 20px;
+  padding: 8px 6px;
+  white-space: nowrap;
+  text-align: center;
+  text-transform: uppercase;
+  font-size: 14px;
+  text-decoration: none;
+  cursor: pointer;
+  border-radius: 5px;
+  transition: none;
+  color: #0087ff;
+  border: 1px solid #0087ff;
+  outline: none;
+}
+button.btn.no-margin {
+  margin: 0;
+}
+button.btn.small {
+  line-height: initial;
+  padding: 5px;
+  height: auto !important;
+}
+button.btn:hover,
+button.btn:not(:disabled):not(.disabled):active,
+button.btn:focus {
+  color: #0087ff;
+  border: 1px solid #0087ff;
+  background-color: rgba(0, 135, 255, 0.25);
+}
+button.btn.btn-default {
+  border-color: #424242;
+  color: #424242;
+}
+button.btn.btn-default:hover,
+button.btn.btn-default:not(:disabled):active,
+button.btn.btn-default:focus {
+  border-color: #424242;
+  color: #424242;
+  background-color: #CCC;
+}
+button.btn.btn-toolbar {
+  background-color: #EEEEEE;
+  color: #424242;
+  border-color: #EEEEEE;
+}
+button.btn.btn-toolbar:hover,
+button.btn.btn-toolbar:not(:disabled):active,
+button.btn.btn-toolbar:focus {
+  background-color: rgba(66, 66, 66, 0.2);
+  border-color: #424242;
+  color: #424242;
+}
+button.btn.btn-toolbar-alt {
+  border-color: #424242;
+  color: #424242;
+  background-color: #FFF;
+}
+button.btn.btn-toolbar-alt:hover,
+button.btn.btn-toolbar-alt:not(:disabled):active,
+button.btn.btn-toolbar-alt:focus {
+  background-color: rgba(66, 66, 66, 0.2);
+}
+button.btn.danger,
+button.btn.btn-danger {
+  background-color: #E55236;
+  border-color: transparent;
+  color: #FFF;
+}
+button.btn.danger:hover,
+button.btn.btn-danger:hover,
+button.btn.danger:not(:disabled):active,
+button.btn.btn-danger:not(:disabled):active,
+button.btn.danger:focus,
+button.btn.btn-danger:focus {
+  border-color: transparent;
+  color: #FFF;
+  background-color: #cd371b;
+}
+button.btn.danger-alt,
+button.btn.btn-danger-alt,
+button.btn.btn-danger-outline {
+  border-color: #E55236;
+  color: #E55236;
+}
+button.btn.danger-alt:hover,
+button.btn.btn-danger-alt:hover,
+button.btn.btn-danger-outline:hover,
+button.btn.danger-alt:not(:disabled):active,
+button.btn.btn-danger-alt:not(:disabled):active,
+button.btn.btn-danger-outline:not(:disabled):active,
+button.btn.danger-alt:focus,
+button.btn.btn-danger-alt:focus,
+button.btn.btn-danger-outline:focus {
+  border-color: #E55236;
+  color: #FFF;
+  background-color: #E55236;
+}
+button.btn.primary,
+button.btn.btn-primary,
+button.btn.btn-success,
+button.btn.disable-button {
+  background-color: #0087ff;
+  color: #FFFFFF;
+  border-color: transparent;
+}
+button.btn.primary:hover,
+button.btn.btn-primary:hover,
+button.btn.btn-success:hover,
+button.btn.disable-button:hover,
+button.btn.primary:not(:disabled):active,
+button.btn.btn-primary:not(:disabled):active,
+button.btn.btn-success:not(:disabled):active,
+button.btn.disable-button:not(:disabled):active,
+button.btn.primary:focus,
+button.btn.btn-primary:focus,
+button.btn.btn-success:focus,
+button.btn.disable-button:focus {
+  color: #FFFFFF;
+  border-color: transparent;
+  background-color: #006ccc;
+}
+button.btn.btn-case {
+  text-transform: capitalize;
+  font-size: 16px;
+}
+button.btn.btn-primary-alt {
+  background-color: #99cfff;
+  border-color: #99cfff;
+  color: #424242;
+}
+button.btn.btn-primary-alt:hover,
+button.btn.btn-primary-alt:not(:disabled):active,
+button.btn.btn-primary-alt:focus {
+  color: #424242;
+  border-color: #99cfff;
+  background-color: #b3dbff;
+}
+button.btn.btn-light {
+  border-color: #424242;
+  color: #424242;
+  background-color: transparent;
+}
+button.btn.btn-light:hover,
+button.btn.btn-light:not(:disabled):active,
+button.btn.btn-light:focus {
+  border-color: #424242;
+  color: #424242;
+  background-color: rgba(66, 66, 66, 0.1);
+}
+button.btn.cancel,
+button.btn.btn-cancel {
+  border-color: #949494;
+  color: #949494;
+}
+button.btn.cancel:hover,
+button.btn.btn-cancel:hover,
+button.btn.cancel:not(:disabled):active,
+button.btn.btn-cancel:not(:disabled):active,
+button.btn.cancel:focus,
+button.btn.btn-cancel:focus {
+  border-color: #949494;
+  color: #949494;
+  background-color: rgba(148, 148, 148, 0.25);
+}
+button.btn.btn-register {
+  margin-top: 10px !important;
+  white-space: normal;
+}
+button.btn:focus-visible {
+  outline: #0087ff solid 2px;
+}
+button.btn::-moz-focus-inner {
+  border: 0;
+}
+button.btn:disabled {
+  cursor: not-allowed !important;
+  background-color: #6c757d;
+  color: #ffffff;
+  border-color: #6c757d;
+}
+button.btn:disabled:hover,
+button.btn:disabled:active {
+  background-color: #6c757d;
+}
+body .alert {
+  margin: 0px 0px 12px 0px;
+  font-size: 12px;
+  padding: 5px;
+  border-radius: 5px;
+}
+body .alert.cp-alert-top {
+  margin-top: 12px;
+}
+body .alert a {
+  color: #424242;
+  text-decoration: underline;
+}
+body .alert.alert-primary {
+  background-color: rgba(0, 135, 255, 0.15);
+  color: #0087ff;
+  border-color: #0087ff;
+}
+body .alert.alert-primary a {
+  color: #0087ff;
+  text-decoration: underline;
+}
+body .alert.alert-warning {
+  background-color: rgba(255, 230, 156, 0.5);
+  color: #836200;
+  border-color: #FFE69C;
+}
+body .alert.alert-danger {
+  background-color: #FFD4D4;
+  color: #6b0000;
+  border-color: #FFD4D4;
+}
+body .alert.alert-info {
+  background-color: rgba(0, 135, 255, 0.15);
+  color: #0087ff;
+  border-color: #0087ff;
+}
+body .alert.alert-success {
+  background-color: rgba(197, 255, 168, 0.2);
+  color: #357935;
+  border-color: #5cb85c;
+}
+body .alert.dismissable {
+  display: flex;
+  align-items: center;
+}
+.cp-banner {
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: bold;
+  text-transform: uppercase;
+  cursor: default;
+  border-radius: 5px;
+}
+.cp-banner.cp-banner-danger {
+  background-color: rgba(255, 212, 212, 0.75);
+  color: #bb0000;
+  border: 1px solid #bb0000;
+}
+.cp-banner.cp-banner-info {
+  background-color: rgba(0, 135, 255, 0.25);
+  color: #424242;
+}
+body .flatpickr-calendar {
+  background: #FAFAFA;
+  color: #424242;
+  border-radius: 5px;
+  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.2);
+  -webkit-box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.2);
+}
+body .flatpickr-calendar.arrowTop::before,
+body .flatpickr-calendar.arrowTop::after {
+  border-bottom: 0;
+}
+body .flatpickr-calendar .flatpickr-months .flatpickr-month,
+body .flatpickr-calendar .flatpickr-months .flatpickr-months,
+body .flatpickr-calendar .flatpickr-months .flatpickr-next-month,
+body .flatpickr-calendar .flatpickr-months .flatpickr-prev-month {
+  color: #424242;
+  fill: #424242;
+}
+body .flatpickr-calendar .flatpickr-months .flatpickr-month:hover svg,
+body .flatpickr-calendar .flatpickr-months .flatpickr-months:hover svg,
+body .flatpickr-calendar .flatpickr-months .flatpickr-next-month:hover svg,
+body .flatpickr-calendar .flatpickr-months .flatpickr-prev-month:hover svg {
+  fill: #424242;
+}
+body .flatpickr-calendar .flatpickr-months .flatpickr-month .flatpickr-monthDropdown-month,
+body .flatpickr-calendar .flatpickr-months .flatpickr-months .flatpickr-monthDropdown-month,
+body .flatpickr-calendar .flatpickr-months .flatpickr-next-month .flatpickr-monthDropdown-month,
+body .flatpickr-calendar .flatpickr-months .flatpickr-prev-month .flatpickr-monthDropdown-month {
+  background: #FAFAFA;
+}
+body .flatpickr-calendar .flatpickr-months .flatpickr-current-month span.cur-month:hover {
+  background: rgba(66, 66, 66, 0.1);
+}
+body .flatpickr-calendar .flatpickr-months .flatpickr-current-month .numInputWrapper span.arrowUp:after {
+  border-bottom-color: #424242;
+}
+body .flatpickr-calendar .flatpickr-months .flatpickr-current-month .numInputWrapper span.arrowDown:after {
+  border-top-color: #424242;
+}
+body .flatpickr-calendar .flatpickr-innerContainer {
+  border-bottom: 0;
+}
+body .flatpickr-calendar .flatpickr-innerContainer .flatpickr-weekdays span.flatpickr-weekday {
+  color: #424242;
+}
+body .flatpickr-calendar .flatpickr-innerContainer .flatpickr-days {
+  border-left: 0;
+  border-right: 0;
+}
+body .flatpickr-calendar .flatpickr-innerContainer .flatpickr-days .flatpickr-day {
+  color: #424242;
+}
+body .flatpickr-calendar .flatpickr-innerContainer .flatpickr-days .flatpickr-day:hover {
+  background-color: rgba(66, 66, 66, 0.1);
+  border: 0;
+}
+body .flatpickr-calendar .flatpickr-innerContainer .flatpickr-days .flatpickr-day.selected {
+  background: rgba(0, 135, 255, 0.25);
+  color: #424242;
+  border: 0;
+}
+body .flatpickr-calendar .flatpickr-innerContainer .flatpickr-days .flatpickr-disabled {
+  color: rgba(66, 66, 66, 0.2);
+}
+body .flatpickr-calendar .flatpickr-time {
+  border-top: none;
+}
+body .flatpickr-calendar .flatpickr-time .flatpickr-time-separator,
+body .flatpickr-calendar .flatpickr-time .flatpickr-am-pm {
+  color: #424242;
+}
+body .flatpickr-calendar .flatpickr-time .flatpickr-am-pm:hover {
+  background-color: rgba(66, 66, 66, 0.1);
+}
+body .flatpickr-calendar .flatpickr-time .numInputWrapper .numInput,
+body .flatpickr-calendar .flatpickr-time .numInputWrapper .arrowUp,
+body .flatpickr-calendar .flatpickr-time .numInputWrapper .arrowDown {
+  color: #424242;
+}
+body .flatpickr-calendar .flatpickr-time .numInputWrapper .numInput:hover,
+body .flatpickr-calendar .flatpickr-time .numInputWrapper .arrowUp:hover,
+body .flatpickr-calendar .flatpickr-time .numInputWrapper .arrowDown:hover,
+body .flatpickr-calendar .flatpickr-time .numInputWrapper .numInput:focus,
+body .flatpickr-calendar .flatpickr-time .numInputWrapper .arrowUp:focus,
+body .flatpickr-calendar .flatpickr-time .numInputWrapper .arrowDown:focus {
+  background-color: rgba(66, 66, 66, 0.1);
+}
+body .flatpickr-calendar .flatpickr-time .numInputWrapper span.arrowDown::after,
+body .flatpickr-calendar .flatpickr-time .numInputWrapper span.arrowUp::after {
+  border-top-color: #424242;
+  border-bottom-color: #424242;
+}
+"
+|     "
+
+    "
+|     <noscript>
+|       "
+        <p class="noscript">JavaScript must be enabled to perform encryption in your browser</p>
+        <p class="noscript">يجب أن يكون جافاسكربت مُمَكن لتمكين التشفير في متصفحك</p>
+        <p class="noscript">El JavaScript ha d'estar habilitat per a realitzar l'encriptatge al navegador</p>
+        <p class="noscript">JavaScript muss aktiviert sein, um die Verschlüsselung in deinem Browser zu ermöglichen</p>
+        <p class="noscript">JavaScript debe estar activado para realizar la encriptación en tu navegador</p>
+        <p class="noscript">JavaScript gaituta egon behar da zure nabigatzailean enkriptaketak egiteko</p>
+        <p class="noscript">JavaScriptin tulee olla käytössä, jotta salaus on mahdollista tehdä selaimessa</p>
+        <p class="noscript">JavaScript doit être activé pour effectuer le chiffrement dans votre navigateur</p>
+        <p class="noscript">JavaScript harus diaktifkan untuk melakukan enkripsi dalam peramban Anda</p>
+        <p class="noscript">JavaScript deve essere abilitato per eseguire la crittografia nel browser</p>
+        <p class="noscript">ブラウザーで暗号化を行うにはJavaScriptが有効になっている必要があります</p>
+        <p class="noscript">O JavaScript deve estar ativado para executar a criptografia em seu navegador</p>
+        <p class="noscript">Для выполнения шифрования в вашем браузере должен быть включен JavaScript</p>
+        <p class="noscript">JavaScript måste vara aktiverat för att utföra kryptering i din webbläsare</p>
+        <p class="noscript">必须启用 JavaScript 才能在浏览器中进行加密</p>
+    "
+|     "
+"
+|     <div>
+|       id="placeholder"
+|       "
+"
+|       <div>
+|       "
+"
+|       <div>
+|         class="placeholder-message-container"
+|         style="opacity: 100"
+|         "
+    "
+|         <p>
+|           "Loading..."
+|         "
+"
+|       "
+"
+|       <div>
+|         id="placeholder-loading-footer"
+|         "
+    "
+|         <div>
+|           class="placeholder-logo-container"
+|           style="opacity: 100"
+|           "
+        "
+|           <img>
+|             alt=""
+|             aria-hidden="true"
+|             class="placeholder-logo"
+|             src="/customize/CryptPad_logo_grey.svg"
+|           <span>
+|             "CryptPad"
+|           "
+    "
+|         "
+    "
+|         <div>
+|           id="placeholder-loading-status"
+|           "
+        "
+|           <svg>
+|             aria-hidden="true"
+|             data-lucide="lock"
+|             fill="none"
+|             height="24"
+|             stroke-linecap="round"
+|             stroke-linejoin="round"
+|             stroke-width="2"
+|             stroke="currentColor"
+|             viewBox="0 0 24 24"
+|             width="24"
+|             xmlns="http://www.w3.org/2000/svg"
+|             <rect>
+|               height="11"
+|               rx="2"
+|               ry="2"
+|               width="18"
+|               x="3"
+|               y="11"
+|             <path>
+|               d="M7 11V7a5 5 0 0 1 10 0v4"
+|           "
+        "
+|           <span>
+|             "End-to-end encrypted"
+|           "
+    "
+|         "
+"
+|       "
+"
