@@ -7,6 +7,22 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **Étape 155 — §B-51 :
+  observabilité scripts vus vs
+  évals** (`explorer-core`) —
+  twitch vol 98 : coquille blanche,
+  0 entrée console, silence total —
+  « évals reçus vs scripts du DOM »
+  inobservable. `info!` au commit
+  nav : `scripts=N` collectés +
+  `inline_handlers` ; le chemin
+  `type=module` passait en
+  `debug!` (invisible aux journaux
+  de vol) → `info!` aligné sur
+  `script: eval…`. L'écart
+  vus/livrées tranche « extracteur
+  aveugle » vs « éval jamais
+  atteinte ».
 - **JS-C180 — §B-56 bras 2 :
   `\p`/`\P` sloppy en classe =
   identité littérale**

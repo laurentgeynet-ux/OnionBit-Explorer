@@ -569,13 +569,16 @@ impl Session {
 
     /// page.
     pub(crate) fn eval_module_graph(&mut self, tab: TabId, eng: &mut dyn JsEngine, me: &ModEval) {
-        tracing::debug!(tab, name = %me.name, "module eval…");
+        // `info` comme `script: eval…` (§B-51 — twitch : les
+        // bundles React sont `type=module`, leur livraison
+        // doit être visible dans les journaux de vol).
+        tracing::info!(tab, name = %me.name, "module eval…");
         let t0 = std::time::Instant::now();
         if let Err(e) = Self::eval_mod(eng, me) {
-            tracing::debug!(tab, error = %e, "module en échec");
+            tracing::info!(tab, error = %e, "module en échec");
             self.emit_pipeline_error(tab, format!("{e} — module «{}»", me.name));
         } else {
-            tracing::debug!(tab, ms = t0.elapsed().as_millis(), "module eval fin");
+            tracing::info!(tab, ms = t0.elapsed().as_millis(), "module eval fin");
         }
     }
 

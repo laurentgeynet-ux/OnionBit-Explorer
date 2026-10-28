@@ -985,6 +985,18 @@ impl Session {
             Vec::new()
         };
         let import_specs = merge_import_maps(&import_maps);
+        // §B-51-adjacent (twitch vol 98 — silence total :
+        // « évals reçus vs scripts du DOM » inobservable).
+        // Le comptage collecté est émis ici — `script: eval…`
+        // par livraison existe déjà : l'écart vus/livrées
+        // tranche « extracteur aveugle » vs « éval jamais
+        // atteinte » (plan mort, fetch bloqué, type ignoré).
+        tracing::info!(
+            tab,
+            scripts = scripts.len(),
+            inline_handlers = has_inline_handlers(&dom),
+            "nav: scripts collectés"
+        );
         // JS-C45 : les handlers inline `on*` exigent un moteur
         // même sans `<script>` — sinon clic muet (page à
         // `onclick=` seul : premier bug site-réel mesuré M24).
