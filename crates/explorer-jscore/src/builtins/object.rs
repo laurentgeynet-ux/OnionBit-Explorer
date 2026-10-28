@@ -123,7 +123,15 @@ pub(crate) fn object_keys(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult
         return Ok(arr_of(e, Vec::new()));
     };
     let keys = e.own_enum_keys_trapped(id)?;
-    let vals: Vec<Value> = keys.iter().map(|k| e.str_val(k.clone())).collect();
+    // Spec : `Object.keys` = clés **string** énumérables — les
+    // clés-symboles `\u{f130}…` énumérables ne doivent pas fuir
+    // comme strings sentinelles (même classe que `Reflect.ownKeys`,
+    // §B-57).
+    let vals: Vec<Value> = keys
+        .iter()
+        .filter(|k| !crate::builtins::bigint::is_sentinel_key(k))
+        .map(|k| e.str_val(k.clone()))
+        .collect();
     Ok(arr_of(e, vals))
 }
 
@@ -242,6 +250,11 @@ pub(crate) fn object_values(e: &mut Engine, _t: Value, args: &[Value]) -> JsResu
     let keys = e.own_enum_keys_trapped(id)?;
     let mut vals = Vec::with_capacity(keys.len());
     for k in keys {
+        // Spec `Object.values` : valeurs des props **string**
+        // énumérables — les clés-symboles sont exclues.
+        if crate::builtins::bigint::is_sentinel_key(&k) {
+            continue;
+        }
         // Getter-aware read (class accessors are own props).
         vals.push(e.get_prop_value(Value::Obj(id), &k)?);
     }

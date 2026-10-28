@@ -40,6 +40,11 @@ pub(crate) fn object_entries(e: &mut Engine, _t: Value, args: &[Value]) -> JsRes
     let keys = e.own_enum_keys_trapped(id)?;
     let mut out = Vec::with_capacity(keys.len());
     for k in keys {
+        // Spec `Object.entries` : paires des props **string**
+        // énumérables — les clés-symboles sont exclues.
+        if crate::builtins::bigint::is_sentinel_key(&k) {
+            continue;
+        }
         // Lecture `[[Get]]` (getters et traps proxy déclenchés).
         let v = e.get_prop_value(Value::Obj(id), &k)?;
         let ks = e.str_val(k);

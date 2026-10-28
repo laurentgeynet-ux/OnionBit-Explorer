@@ -97,10 +97,9 @@ const CLASS_CTOR: &str = "\u{f131}ctor";
 /// `Symbol.iterator` property key — a private-use sentinel string
 /// (symbols are represented as opaque string keys; `typeof sym`
 /// yields `"string"`, a documented deviation).
-/// Préfixe sentinelle des clés-symboles `\u{f130}Symbol.*` —
-/// jamais énumérable (`for-in`, `Object.keys`, `JSON`).
-pub(crate) const SYM_PREFIX: &str = "\u{f130}Symbol.";
-
+/// Toute clé `\u{f120}…\u{f13f}` est sentinelle interne —
+/// `builtins::bigint::is_sentinel_key` fait foi pour l'exclusion
+/// (`for-in`, `Object.keys`, `JSON`, §B-57).
 pub(crate) const SYM_ITERATOR: &str = "\u{f130}Symbol.iterator";
 
 /// `Symbol.asyncIterator` property key — same private-use sentinel
@@ -5217,8 +5216,11 @@ impl Engine {
             }
             let mut rest = Vec::new();
             for (k, p) in &o.props {
-                // Clés-symboles sentinelles : jamais énumérées.
-                if p.enumerable() && !k.starts_with(SYM_PREFIX) {
+                // Clés sentinelles `\u{f120}…\u{f13f}` (symboles,
+                // privés, métadonnées) : jamais énumérées — le
+                // préfixe seul `Symbol.` laissait fuir les
+                // anonymes `sym{N}` (§B-57).
+                if p.enumerable() && !crate::builtins::bigint::is_sentinel_key(k) {
                     rest.push(k.clone());
                 }
             }
@@ -5443,6 +5445,11 @@ impl Engine {
                 // Proxy : ses props propres passent par les traps ;
                 // la chaîne repart du proto du *target*.
                 for k in self.own_enum_keys_trapped(cid)? {
+                    // for-in = clés string : les sentinelles
+                    // rapportées par la trap sont exclues (§B-57).
+                    if crate::builtins::bigint::is_sentinel_key(&k) {
+                        continue;
+                    }
                     if seen.insert(k.clone()) {
                         out.push(k);
                     }
@@ -5465,7 +5472,7 @@ impl Engine {
                 let pkeys: Vec<String> = o
                     .props
                     .iter()
-                    .filter(|(k, p)| p.enumerable() && !k.starts_with(SYM_PREFIX))
+                    .filter(|(k, p)| p.enumerable() && !crate::builtins::bigint::is_sentinel_key(k))
                     .map(|(k, _)| k.clone())
                     .collect();
                 for k in spec_key_order(pkeys) {

@@ -7,6 +7,51 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **JS-C183 — §B-57 bras 3 :
+  `Reflect.ownKeys` rend les
+  `Symbol`, sentinelle jamais
+  string-matérialisée**
+  (`explorer-jscore`) — caniuse
+  vol 103 : `maximum call stack
+  exceeded` (bundle.js:2:51736) —
+  `Reflect.ownKeys` rendait les
+  clés-symboles comme strings
+  sentinelles `\u{f130}sym{N}`
+  au lieu des `Symbol`. MobX
+  `makeObservable` fait
+  `Set(ownKeys).delete(z)` : le
+  symbole admin `z` survivait
+  comme string → `make_("sym{N}")`
+  posait un accesseur `qr` sur le
+  slot du symbole → `this[z]` →
+  getter auto-réentrant → ∞.
+  Fix : `ownKeys` convertit les
+  clés `\u{f130}` en `Value::Obj`
+  symbole (`sym_index` + live
+  check, même règle que
+  `getOwnPropertySymbols`).
+  Bras sœurs colmatés :
+  `Object.keys`/`entries`/`values`
+  et `for-in` excluent toute
+  sentinelle `\u{f120}-\u{f13f}`
+  énumérable (spec : clés string
+  seulement) ; `spec_key_order`
+  trie les anonymes `sym{N}`
+  après les strings comme les
+  well-knowns. `Object.assign`/
+  spread/rest copient toujours
+  les props symboles (sentinelle
+  interne → sentinelle).
+  Verrous `b57_probe.rs`
+  (ownKeys rend `Symbol`,
+  `Set.delete` réel, enum string
+  -only, copie symbole
+  conservée) ; le bundle caniuse
+  réel (331 Ko) dépasse
+  l'ancien mur — plus de
+  `RangeError` (le résidu est un
+  `Invalid URL` environnemental,
+  `location` hors harnais).
 - **JS-C182 — §B-56 bras 3 :
   octales Annex B en classe et
   nombre entier hors classe**

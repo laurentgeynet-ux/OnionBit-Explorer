@@ -144,3 +144,100 @@ fn native_fns_portent_length() {
         Err(t) => panic!("motif manomano => ERR {t}"),
     }
 }
+
+/// §B-57 bras 3 (caniuse vol 103) — `Reflect.ownKeys` rendait
+/// les clés-symboles comme strings sentinelles `\u{f130}sym{N}`
+/// au lieu des `Symbol` (spec `[[OwnPropertyKeys]]`). `MobX`
+/// `makeObservable` fait `Set(ownKeys).delete(z)` : le symbole
+/// `z` survivait comme string → `make_("sym{N}")` posait un
+/// accesseur `qr` sur le slot du symbole → `this[z]` →
+/// getter → ∞ (`maximum call stack exceeded`, bundle.js:2:51736).
+/// Bras sœurs colmatés : `Object.keys`/`entries`/`values` et
+/// `for-in` excluent désormais toute sentinelle `\u{f120}-\u{f13f}`
+/// énumérable (spec : clés string seulement).
+#[test]
+fn own_keys_rend_les_symboles() {
+    let mut e = Engine::new();
+    // `Reflect.ownKeys` : strings ET `Symbol` réels (identité).
+    for (src, want) in [
+        (
+            "var z=Symbol('z');var o={};o[z]=1;o.a=2;Reflect.ownKeys(o).length",
+            "2",
+        ),
+        (
+            "var z=Symbol('z');var o={};o[z]=1;o.a=2;Reflect.ownKeys(o)[1]===z",
+            "true",
+        ),
+        (
+            "var z=Symbol('z');var o={};o[z]=1;typeof Reflect.ownKeys(o)[0]",
+            "symbol",
+        ),
+        // Le mécanisme MobX exact : `delete(sym)` sur l'ensemble.
+        (
+            "var z=Symbol('z');var o={};o[z]=1;o.x=1;var s=new Set(Reflect.ownKeys(o));s.delete(z);s.size",
+            "1",
+        ),
+        // Well-known : `Symbol.toStringTag` clé propre → Symbol rendu.
+        (
+            "var o={};o[Symbol.toStringTag]='T';Reflect.ownKeys(o)[0]===Symbol.toStringTag",
+            "true",
+        ),
+    ] {
+        match e.eval(src) {
+            Ok(v) => assert_eq!(e.describe(v), want, "{src}"),
+            Err(t) => panic!("{src} => ERR {t}"),
+        }
+    }
+}
+
+/// Bras sœurs : les sentinelle `\u{f130}sym{N}` ne doivent
+/// jamais sortir comme strings par `keys`/`entries`/`values`/
+/// `for-in` — même sur prop symbole `enumerable:true`.
+#[test]
+fn enum_ne_fuit_pas_les_symboles() {
+    let mut e = Engine::new();
+    for (src, want) in [
+        // `Object.keys` : strings énumérables seulement.
+        (
+            "var z=Symbol('z');var o={};Object.defineProperty(o,z,{value:1,enumerable:true});o.a=1;Object.keys(o).join(',')",
+            "a",
+        ),
+        // `Object.entries`/`values` : idem.
+        (
+            "var z=Symbol('z');var o={};Object.defineProperty(o,z,{value:7,enumerable:true});o.a=2;Object.entries(o).length+','+Object.values(o)[0]",
+            "1,2",
+        ),
+        // `for-in` : la sentinelle anonyme n'est jamais une clé.
+        (
+            "var z=Symbol('z');var o={};Object.defineProperty(o,z,{value:1,enumerable:true});o.a=1;var out='';for(var k in o)out+=k;out",
+            "a",
+        ),
+        // `getOwnPropertyNames` : filtré (comportement conservé).
+        (
+            "var z=Symbol('z');var o={};o[z]=1;o.a=2;Object.getOwnPropertyNames(o).join(',')",
+            "a",
+        ),
+    ] {
+        match e.eval(src) {
+            Ok(v) => assert_eq!(e.describe(v), want, "{src}"),
+            Err(t) => panic!("{src} => ERR {t}"),
+        }
+    }
+    // Non-régression : `Object.assign` et le spread copient
+    // toujours les props symboles énumérables (spec).
+    for (src, want) in [
+        (
+            "var z=Symbol('z');var o={};Object.defineProperty(o,z,{value:9,enumerable:true});var t=Object.assign({},o);t[z]",
+            "9",
+        ),
+        (
+            "var z=Symbol('z');var o={};Object.defineProperty(o,z,{value:8,enumerable:true});var t={...o};t[z]",
+            "8",
+        ),
+    ] {
+        match e.eval(src) {
+            Ok(v) => assert_eq!(e.describe(v), want, "{src}"),
+            Err(t) => panic!("{src} => ERR {t}"),
+        }
+    }
+}

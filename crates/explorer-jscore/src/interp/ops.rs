@@ -84,7 +84,10 @@ pub(crate) fn spec_key_order(keys: Vec<String>) -> Vec<String> {
     for k in keys {
         if let Some(i) = array_index(&k) {
             ints.push((i, k));
-        } else if k.starts_with(SYM_PREFIX) {
+        } else if k.starts_with('\u{f130}') {
+            // Toutes les clés-symboles (`Symbol.*` well-knowns ET
+            // anonymes `sym{N}`) après les strings (ordre spec
+            // `[[OwnPropertyKeys]]`, §B-57).
             syms.push(k);
         } else {
             strs.push(k);

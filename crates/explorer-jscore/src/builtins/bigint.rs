@@ -217,12 +217,34 @@ pub(crate) fn reflect_own_keys(e: &mut Engine, _t: Value, args: &[Value]) -> JsR
         return Ok(e.new_array(Vec::new()));
     };
     let keys = e.own_keys_trapped(id)?;
-    // Clés-symboles `\u{f130}…` rendues ; internes `\u{f131}…` filtrées.
-    let vals = keys
-        .iter()
-        .filter(|k| !k.starts_with('\u{f131}'))
-        .map(|k| e.str_val(k.clone()))
-        .collect();
+    // Spec `[[OwnPropertyKeys]]` : les clés-symboles `\u{f130}…`
+    // sont rendues comme `Symbol` (même live-check que
+    // `getOwnPropertySymbols`), jamais leur clé sentinelle — une
+    // string `sym{N}` qui fuit permet `Set(ownKeys).delete(sym)`
+    // manqué puis `defineProperty(obj, "sym{N}", accesseur)` qui
+    // écrase le slot du symbole (caniuse/MobX `makeObservable` :
+    // `z` devenait un getter `qr` → `this[z]` → ∞, §B-57).
+    // Les internes `\u{f131}…` restent filtrées.
+    let mut vals = Vec::new();
+    for k in &keys {
+        if k.starts_with('\u{f131}') {
+            continue;
+        }
+        if k.starts_with('\u{f130}') {
+            let Some(sid) = e.sym_index.get(k).copied() else {
+                continue;
+            };
+            let live = matches!(
+                e.heap.obj(sid).map(|o| &o.kind),
+                Some(ObjKind::Symbol { key, .. }) if key == k
+            );
+            if live {
+                vals.push(Value::Obj(sid));
+            }
+        } else {
+            vals.push(e.str_val(k.clone()));
+        }
+    }
     Ok(e.new_array(vals))
 }
 
