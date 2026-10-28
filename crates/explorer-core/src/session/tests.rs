@@ -2843,6 +2843,18 @@ fn heap_dead_errors_reported_once_per_document() {
             .is_some_and(|e| e.to_string().contains("heap memory limit exceeded")),
         "éval post-mortem attendue en échec heap, reçu : {probe:?}"
     );
+    // Étape 153 (§B-12 vol 97 — bookshop ×3) : le drain
+    // `unhandledrejection` émettait `PipelineError` en
+    // direct, contournant le cap — un rejet de promesse
+    // portant la signature heap doit être tué pareil.
+    s.emit_pipeline_error(
+        tab,
+        "unhandledrejection — RangeError: heap memory limit exceeded (pile A)".into(),
+    );
+    s.emit_pipeline_error(
+        tab,
+        "unhandledrejection — RangeError: heap memory limit exceeded (pile B)".into(),
+    );
     let mut heap_errors = 0usize;
     while let Ok(ev) = rx.try_recv() {
         if let CoreEvent::PipelineError { message, .. } = ev {

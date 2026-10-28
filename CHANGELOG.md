@@ -7,6 +7,25 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **Étape 153 — §B-12 : rejets non
+  gérés routés par le cap heap**
+  (`explorer-core`) — bookshop
+  vol 97 : 3 occurrences `heap
+  memory limit exceeded` malgré
+  `heap_dead_reported` (É152) —
+  le drain `unhandledrejection`
+  émettait `PipelineError` en
+  envoi direct, contournant
+  dédup **et** cap. Routé par
+  `emit_pipeline_error` (rendu
+  `pub(crate)`) — un rejet de
+  promesse portant la signature
+  heap est désormais tué comme
+  une erreur d'éval. Verrou
+  étendu (`emit_pipeline_error`
+  direct ×2 messages
+  `unhandledrejection — heap…`
+  → 0 émission supplémentaire).
 - **JS-C179 — §B-23 : fenêtre boot
   partagée par les pompes du
   contexte** (`explorer-jscore`) —

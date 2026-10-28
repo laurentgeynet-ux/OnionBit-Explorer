@@ -492,7 +492,7 @@ impl Session {
     /// 1ère occurrence émise, répétitions *consécutives*
     /// identiques tues et re-émises toutes les 16 avec
     /// `×N`. Un message différent réarme la série.
-    fn emit_pipeline_error(&mut self, tab: TabId, message: String) {
+    pub(crate) fn emit_pipeline_error(&mut self, tab: TabId, message: String) {
         // J4/§B-12 (bookshop vol 95) : une fois `heap_dead`
         // armé côté moteur, chaque éval suivante échoue avec
         // la même signature « heap memory limit exceeded »

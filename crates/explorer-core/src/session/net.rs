@@ -811,16 +811,18 @@ impl Session {
         // gérés étaient des morts silencieuses (pinterest,
         // airbnb) : le moteur tire l'event au checkpoint, la
         // session verse la description au ring console.
+        // Via `emit_pipeline_error` (Étape 153) — l'envoi
+        // direct contournait le cap `heap_dead_reported`
+        // (§B-12 vol 97 : les erreurs heap qui rejettent des
+        // promesses — `unhandledrejection — heap memory
+        // limit exceeded` — repassaient ×3 sur bookshop).
         for msg in self
             .tabs
             .get_mut(&tab)
             .and_then(|e| e.js.as_mut())
             .map_or_else(Vec::new, |eng| eng.drain_unhandled_rejections())
         {
-            let _ = self.events.send(CoreEvent::PipelineError {
-                tab: Some(tab),
-                message: msg,
-            });
+            self.emit_pipeline_error(tab, msg);
         }
     }
 
