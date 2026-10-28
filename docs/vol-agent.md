@@ -139,6 +139,19 @@ frame-moteur vs fenêtre-app est un constat en soi (bug UI).
 - **En file** : sonde `/net` (verdicts sous-ressources
   CSP/SRI/CORS par URL) — entaille session, file NAV.
 
+### Garde anti-crash — ne jamais `read` un PNG brut
+
+Les frames font 2-6 Mo (1366×900 RGBA). Injectées entières dans le
+contexte par l'outil `read`, elles peuvent dépasser la limite de
+requête du client → **crash de session non reprenable** (l'image
+fautive rejoue à chaque reprise). Observé terrain vol 99.
+
+- Télécharger la capture normalement (`/frame` → PNG preuve).
+- Produire la vignette : `pwsh -File scripts/shrink_capture.ps1
+  <capture.png>` → `_view_<nom>.png` (~300 Ko, largeur 900 px).
+- **`read` uniquement la vignette `_view_*`** — jamais le PNG
+  d'origine. Le brut reste la preuve archivée dans `captures/`.
+
 ## 8. Traçabilité — synchro avec `Rapport vol/SYNTHESE.md`
 
 Protocole complet : `docs/Rapport vol/SYNTHESE.md` §G.

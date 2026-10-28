@@ -116,8 +116,11 @@ Invoke-RestMethod "$BASE/api/tabs/$tab/navigate" -Method Post `
 ```
 
 - **Yeux** : `GET /api/tabs/{id}/frame` →
-  `docs/Rapport vol/captures/vol<N>_<site>.png` — lire le PNG.
-  Zoom : `?x=&y=&w=&h=` ; document : `?full=1`.
+  `docs/Rapport vol/captures/vol<N>_<site>.png` — puis
+  `pwsh -File scripts/shrink_capture.ps1 <png>` et **lire
+  uniquement `_view_<nom>.png`** (PNG brut 2-6 Mo = crash de
+  session garanti à la lecture, garde vol-agent §7). Zoom :
+  `?x=&y=&w=&h=` ; document : `?full=1`.
 - **Premier réflexe** : `GET /api/tabs/{id}/console` **avant** le
   DOM (erreurs persistées, ring 512).
 - **Télémétrie** : `/mem`, `/dom`, `/layout` — un **404
@@ -201,5 +204,7 @@ preuve immuable.
 - Jamais « ça a l'air de marcher » — mesurer.
 - Jamais deux missions dans un même rapport.
 - Jamais un % sans dénominateur dans les synthèses (§8 AGENTS).
+- Jamais `read` sur une capture PNG brute (> ~1 Mo) — vignette
+  `_view_*` via `scripts/shrink_capture.ps1` uniquement.
 - Jamais de pause en attente de confirmation entre deux vols —
   la campagne est autonome ; l'opérateur interrompt quand il veut.
