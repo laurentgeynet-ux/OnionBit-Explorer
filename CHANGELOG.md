@@ -7,6 +7,20 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **JS-C173 — sonde §J6 sur le
+  bundle réel vol 34**
+  (`explorer-jscore`) — le chunk
+  `_app-17549fe9bc647c9c.js` BBC
+  Good Food (1,4 Mo, fixture
+  verbatim `tests/data/vol34_bbc_app.js`)
+  est évalué puis pompé (microtasks
+  + timers + drain des rejets) :
+  tout est propre — le `` `...`
+  outside a call or array literal ``
+  du vol 34 est couvert par
+  JS-C171 et ne se reproduit plus
+  en-process ; à confirmer au
+  prochain re-vol de la cible.
 - **Étape 150 — §N2 : marqueurs de
   phase dans `NavJob`/`SubJob`**
   (`explorer-core`) — les quatre
