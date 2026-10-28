@@ -72,26 +72,33 @@ const CONSOLE_RING: usize = 512;
 
 /// Enregistre les `PipelineError` par onglet dans `ring` —
 /// la sonde `/console` survit à l'éphémère SSE (vol github :
-/// les erreurs de boot mouraient avec la connexion).
-fn spawn_console_recorder(session: &Arc<tokio::sync::Mutex<Session>>, ring: &ConsoleRing) {
-    let mut rx = {
-        // Subscribe sans garder le verrou : subscribe() est
-        // sync, le lock ne sert qu'à atteindre la session.
-        let Ok(s) = session.try_lock() else {
-            return; // session occupée : pas de recorder (dégradé, jamais bloquant)
-        };
-        s.subscribe()
-    };
+/// les erreurs de boot mouraient avec la connexion). Le
+/// handle est rendu pour les tests (prouver que la tâche vit
+/// même quand la session est occupée à l'appel — §B-48).
+fn spawn_console_recorder(
+    session: &Arc<tokio::sync::Mutex<Session>>,
+    ring: &ConsoleRing,
+) -> tokio::task::JoinHandle<()> {
+    let session = Arc::clone(session);
     let ring = std::sync::Arc::clone(ring);
     tokio::spawn(async move {
+        // `subscribe()` est sync — le lock ne sert qu'à
+        // l'atteindre. `lock().await` et non `try_lock` :
+        // l'unique essai synchrone au démarrage pouvait
+        // échouer sous contention → aucun recorder pour
+        // toute la session → `/console` vide mensonger
+        // (kill disjoncteur invisible, §B-48 kayak vol 72).
+        let mut rx = session.lock().await.subscribe();
         loop {
             match rx.recv().await {
                 Ok(ev) => record_console_event(&ring, &ev),
-                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                    tracing::warn!(dropped = n, "ring console — événements perdus sous rafale");
+                }
                 Err(tokio::sync::broadcast::error::RecvError::Closed) => return,
             }
         }
-    });
+    })
 }
 
 /// Un événement → mutation du ring console (fonction pure
@@ -184,7 +191,7 @@ pub fn router_with_egress(
     egress: String,
 ) -> Router {
     let console = ConsoleRing::default();
-    spawn_console_recorder(&session, &console);
+    let _recorder = spawn_console_recorder(&session, &console);
     let r = Router::new()
         .route("/api/status", get(status))
         .route("/api/egress", get(egress_info))
@@ -1213,6 +1220,50 @@ fn media_event_json(ev: &CoreEvent) -> (&'static str, String) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Session minimale pour les tests du recorder.
+    fn test_session() -> Arc<tokio::sync::Mutex<Session>> {
+        use explorer_net::error::NetResult;
+        use explorer_net::http::{HttpTransport, Response};
+        struct NullFont;
+        impl explorer_layout::font::FontSource for NullFont {
+            fn font_data(&self, _: &explorer_layout::font::FontRequest) -> Option<Vec<u8>> {
+                None
+            }
+        }
+        struct NullTransport;
+        #[async_trait::async_trait]
+        impl HttpTransport for NullTransport {
+            async fn fetch(&self, _: &Request) -> NetResult<Response> {
+                unreachable!("le test n'émet aucune requête")
+            }
+        }
+        Arc::new(tokio::sync::Mutex::new(Session::new(
+            Arc::new(NullTransport),
+            Arc::new(NullFont),
+        )))
+    }
+
+    #[tokio::test]
+    async fn recorder_vit_meme_sous_verrou() {
+        // §B-48 (kayak vol 72) : avant, `try_lock` était tenté
+        // une seule fois au démarrage et rendait la main
+        // silencieusement sous contention — aucun recorder
+        // pour toute la session → `/console` vide mensonger
+        // (kill disjoncteur invisible). Le recorder doit
+        // être spawné et attendre le verrou.
+        let session = test_session();
+        let ring = ConsoleRing::default();
+        let guard = session.lock().await;
+        let h = spawn_console_recorder(&session, &ring);
+        drop(guard);
+        tokio::task::yield_now().await;
+        assert!(
+            !h.is_finished(),
+            "le recorder doit vivre (souscrire puis consommer), pas rendre la main"
+        );
+        h.abort();
+    }
 
     #[tokio::test]
     async fn json_charset_utf8_annonce() {

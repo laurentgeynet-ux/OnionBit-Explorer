@@ -7,6 +7,28 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **Étape 146 — §B-48 : recorder
+  `/console` garanti à la naissance**
+  (`explorer-api`) — le kill du
+  disjoncteur JS était **absent de
+  `/console`** (« pas de journal »
+  mensonger, kayak vol 72) : le
+  recorder du ring console essayait
+  `try_lock` **une seule fois** au
+  démarrage et rendait la main
+  silencieusement sous contention —
+  aucun recorder pour toute la
+  session. Désormais `lock().await`
+  dans la tâche elle-même (retourne
+  `JoinHandle` pour le verrou de test
+  `recorder_vit_meme_sous_verrou`) ;
+  `Lagged` journalisé en warn au lieu
+  d'être avalé (`tracing` ajouté au
+  crate — la lib n'avait aucun canal
+  de log). Les scripts sautés par le
+  disjoncteur sont déjà rapportés en
+  `PipelineError` — ils seront
+  désormais visibles.
 - **139d — interrupteur `HW decode` +
   moteur `ffi` par défaut** (`app/`) —
   réglage `hwAccel` persisté
