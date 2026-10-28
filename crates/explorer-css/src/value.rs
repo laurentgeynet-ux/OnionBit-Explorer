@@ -96,10 +96,15 @@ impl Unit {
             "cm" => Self::Cm,
             "mm" => Self::Mm,
             "q" => Self::Q,
-            "vw" => Self::Vw,
-            "vh" => Self::Vh,
-            "vmin" => Self::Vmin,
-            "vmax" => Self::Vmax,
+            // `d*`/`s*`/`l*` (viewport dynamique/petit/large,
+            // css-values-4 §6.1.3) : sans chrome mobile les
+            // trois bases coïncident → projection sur les
+            // unités statiques (motif `100dvh` des éditeurs
+            // plein écran — uMap §B-28).
+            "vw" | "dvw" | "svw" | "lvw" => Self::Vw,
+            "vh" | "dvh" | "svh" | "lvh" => Self::Vh,
+            "vmin" | "dvmin" | "svmin" | "lvmin" => Self::Vmin,
+            "vmax" | "dvmax" | "svmax" | "lvmax" => Self::Vmax,
             _ => return None,
         })
     }

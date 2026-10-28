@@ -422,3 +422,24 @@ fn expand_place_shorthands() {
         ]
     );
 }
+
+#[test]
+fn unites_viewport_dynamiques_dvh() {
+    // B-28 (uMap) : `100dvh`/`100svh`/`100lvh` doivent
+    // résoudre comme `100vh` — sans chrome mobile les bases
+    // coïncident (css-values-4 §6.1.3).
+    for u in ["dvh", "svh", "lvh", "dvw", "svw", "lvw"] {
+        let l = parse_length(&format!("100{u}")).expect(u);
+        let expected = if u.ends_with('w') { Unit::Vw } else { Unit::Vh };
+        assert_eq!(l.unit, expected, "{u}");
+    }
+    for u in ["dvmin", "svmin", "lvmin", "dvmax", "svmax", "lvmax"] {
+        let l = parse_length(&format!("100{u}")).expect(u);
+        let expected = if u.ends_with("min") {
+            Unit::Vmin
+        } else {
+            Unit::Vmax
+        };
+        assert_eq!(l.unit, expected, "{u}");
+    }
+}
