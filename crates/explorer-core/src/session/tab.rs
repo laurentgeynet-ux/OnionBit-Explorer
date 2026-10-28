@@ -81,6 +81,7 @@ impl Tab {
             img_bodies: std::mem::take(&mut self.img_bodies),
             bg_aliases: std::mem::take(&mut self.bg_aliases),
             mask_aliases: std::mem::take(&mut self.mask_aliases),
+            style_dirty: std::mem::take(&mut self.style_dirty),
         };
         // Étape 133 — le gelé ne garde que les corps
         // compressés : les bitmaps `DecodedImage` sont
@@ -189,6 +190,11 @@ impl Tab {
         self.img_bodies = snap.img_bodies;
         self.bg_aliases = snap.bg_aliases;
         self.mask_aliases = snap.mask_aliases;
+        // §B-17 — la dette de restyle survit au gel : sans
+        // elle, les boîtes restaurées garderaient le style
+        // d'avant mutation sans recours (le DOM gelé a déjà
+        // les attributs → plus de diff détectable).
+        self.style_dirty = snap.style_dirty;
         self.transitions.clear();
         // Idem animations : la restauration repart sur les
         // déclarations — lecture réenregistrée au premier

@@ -410,6 +410,12 @@ pub(crate) struct Tab {
     /// identiques sur meteofrance). Vidé à la navigation,
     /// voyage avec la payload.
     cycle_warned: std::collections::HashSet<Box<[u16]>>,
+    /// Dette de restyle — sous-arbres dont les attributs ont
+    /// changé pendant une synchro `relayout=false` (§B-17 :
+    /// sans couverture ultérieure, `bx.style` reste figé —
+    /// burger `inert` santemag ciblable). Voyage avec la
+    /// payload comme `cycle_warned`, vidé à la navigation.
+    style_dirty: Vec<Vec<(String, u32)>>,
     /// Styles calculés de la dernière mise en page, indexés
     /// par **ordinal d'élément** (ordre document) — la clé
     /// survit au re-parse des synchronisations DOM, là où un
@@ -662,6 +668,12 @@ pub(crate) struct PageSnapshot {
     /// avec `images` (étape 129) — la purge composite les
     /// retrouve après restauration.
     frame_nodes: Vec<explorer_dom::NodeId>,
+    /// Dette de restyle gelée avec la page (§B-17) — le
+    /// DOM gelé porte déjà les attributs mutés, un diff
+    /// post-restauration ne les redétecterait plus : la
+    /// dette voyage pour que le prochain apply couvrant
+    /// restyle réellement les sous-arbres.
+    style_dirty: Vec<Vec<(String, u32)>>,
     /// Politique `Referer` de la page gelée (étape 132) —
     /// restaurée : les requêtes émises après un retour
     /// bfcache suivent la même politique.
@@ -1345,6 +1357,7 @@ impl Session {
                 img_bodies: HashMap::new(),
                 dom_keymap: HashMap::new(),
                 cycle_warned: std::collections::HashSet::new(),
+                style_dirty: Vec::new(),
                 prev_styles: HashMap::new(),
                 transitions: Vec::new(),
                 animations: Vec::new(),

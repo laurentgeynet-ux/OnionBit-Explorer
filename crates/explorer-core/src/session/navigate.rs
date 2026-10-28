@@ -1109,6 +1109,7 @@ impl Session {
             entry.bg_decoded.clear();
             entry.img_bodies.clear();
             entry.cycle_warned.clear();
+            entry.style_dirty.clear();
             entry.linked_sheets.clear();
             entry.adopted_sheets.clear();
             entry.defined_names.clear();

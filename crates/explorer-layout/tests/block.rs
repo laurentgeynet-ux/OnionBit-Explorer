@@ -688,6 +688,34 @@ fn hit_test_inert_transparent() {
     assert_eq!(node, Some(p), "drawer inert : {hit:?}");
 }
 
+/// §B-17 variante santemag : ancre PROFONDE (niveau 4) dans
+/// le sous-menu d'un drawer inert — l'héritage
+/// `pointer-events` doit couvrir toute la descendance, pas
+/// seulement l'enfant direct.
+#[test]
+fn hit_test_inert_ancre_profonde_sautee() {
+    let (dom, bx) = laid(
+        "<div inert style=\"position:absolute;left:0;top:0;width:384px\">\
+         <nav><ul><li><a id=a href=/pilule style=\"display:block;width:384px;height:24px\">x</a></li></ul></nav>\
+         </div><p id=u style=\"position:absolute;left:0;top:0;width:50px;height:50px\">y</p>",
+        "body{margin:0}",
+    );
+    let p = by_tag(&dom, "p");
+    // (10,20) : dans l'ancre inert (h 24) ET dans le `p` posé
+    // sous sa marge UA 1em (y 16..66).
+    let hit = explorer_layout::hit_test(&bx, 10.0, 20.0);
+    let node = hit.and_then(|n| {
+        let mut cur = n;
+        loop {
+            match dom.tag_name(cur) {
+                Ok(_) => return Some(cur),
+                Err(_) => cur = dom.parent(cur).ok().flatten()?,
+            }
+        }
+    });
+    assert_eq!(node, Some(p), "ancre profonde inert : {hit:?}");
+}
+
 #[test]
 fn hit_test_transform_translate_suit_la_peinture() {
     // Vol : `transform` appliqué à la display list mais

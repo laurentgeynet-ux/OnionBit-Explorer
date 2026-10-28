@@ -7,6 +7,55 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **Étape 147 — §B-17 suite : dette de
+  restyle `style_dirty`** (`explorer-core`)
+  — le vol de confirmation santemag a
+  révélé le trou adjacent au fix
+  R-127 : `inert` vivait dans le DOM
+  commis mais le drawer restait
+  **ciblable** — sa boîte gardait le
+  `bx.style` d'avant mutation.
+  Cause : synchro cléée
+  `relayout=false` (sous-ressources
+  en vol) ou apply en attente évincé
+  (`retain`) — le sous-arbre muté
+  n'était couvert par aucun relayout,
+  définitivement. Portée : tout
+  sélecteur d'attribut (`[inert]`,
+  `[hidden]`, classes, `+`/`~`,
+  `:nth-*`). Fix : (a) **diff
+  d'attributs** sur la baseline
+  cléée — les clés miroir partagées
+  comparent l'ancien DOM au re-parse,
+  chaque nœud changé produit le
+  `element_path` de son **parent**
+  (couvre self + descendants +
+  frères) ; (b) **dette `style_dirty`**
+  transportée par la payload comme
+  `cycle_warned` — alimentée par les
+  synchros `relayout=false`, les
+  `dirty` des apply évincés et les
+  journaux sans relayout, fusionnée
+  au `dirty` du prochain relayout
+  (préfixe commun = ancêtre
+  couvrant), vidée à la navigation,
+  **gelée dans le `PageSnapshot`**
+  (le DOM gelé porte déjà les
+  attributs → le diff ne les
+  redétecterait plus) ; (c) voie
+  **journal** : `SetAttr` cible le
+  parent (sélecteurs frères) et le
+  relayout journal draine la dette.
+  Verrou `attr_diff_restyle_subtree_
+  hors_dirty` : `inert` livré sans
+  relayout → hit stale sur l'overlay,
+  apply à `dirty` disjoint → le
+  sous-arbre est restylé et l'ancre
+  dessous reprend le hit. Terrain :
+  après `rerender` forcé, l'ancre
+  burger-unique santemag retournait
+  `ignored` — mécanisme confirmé, la
+  dette ferme la fenêtre stale.
 - **R-127 — §B-17 : `inert` exclu du
   hit-test ; `pointer-events` hérite**
   (`explorer-css`, `explorer-layout`)

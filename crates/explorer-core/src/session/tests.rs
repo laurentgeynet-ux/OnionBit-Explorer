@@ -161,6 +161,7 @@ fn paintless_snapshot_repairs_on_restore() {
             bg_aliases: HashMap::new(),
             mask_aliases: HashMap::new(),
             frame_ctxs: Vec::new(),
+            style_dirty: Vec::new(),
         });
     }
 
@@ -258,6 +259,7 @@ async fn back_during_inflight_nav_restores_previous() {
             bg_aliases: HashMap::new(),
             mask_aliases: HashMap::new(),
             frame_ctxs: Vec::new(),
+            style_dirty: Vec::new(),
         });
     }
 
@@ -1738,6 +1740,116 @@ fn nav_paint_commit_on_cleared_flag_is_parked() {
     // réinsère (epoch encore vivante).
     s.reclaim_orphaned_paint(tab);
     assert!(s.dom_dump(tab).unwrap().contains("page vivante"));
+}
+
+/// §B-17 — trou de cohérence DOM↔styles de boîte : un
+/// `setAttribute` livré par une synchro **`relayout=false`**
+/// (sous-ressources en vol) atteint le DOM commis sans
+/// déclencher de relayout ; si l'apply relayout suivant a un
+/// `dirty` ailleurs dans le document, le sous-arbre muté
+/// garde son `bx.style` d'avant mutation **indéfiniment**
+/// (vol santemag : drawer `inert` resté ciblable — ancres du
+/// sous-menu navigables). Le diff d'attributs sur la baseline
+/// cléée doit transformer la mutation en dette de restyle,
+/// fusionnée à la cible du prochain relayout.
+#[test]
+fn attr_diff_restyle_subtree_hors_dirty() {
+    // Le hit peut être un texte — on remonte au premier
+    // ancêtre élément (déclarée en tête :
+    // `items_after_statements`).
+    fn first_el(dom: &Dom, mut cur: explorer_dom::NodeId) -> Option<explorer_dom::NodeId> {
+        loop {
+            if dom.tag_name(cur).is_ok() {
+                return Some(cur);
+            }
+            cur = dom.parent(cur).ok().flatten()?;
+        }
+    }
+    let mut s = Session::new(Arc::new(FailTransport), Arc::new(TestFont));
+    let tab = s.open_tab();
+    s.tabs.get_mut(&tab).unwrap().nav_epoch = 1;
+    // `tags` vide → `build_keymap` tombe sur le zip
+    // positionnel : tout nœud moteur prend la clé = rang
+    // pré-ordre + 1 — baseline cléée complète sans compter.
+    let ids: Vec<u64> = (1..=64).collect();
+    // `div#o` APRÈS le `a` dans le document → peint
+    // par-dessus : tant que `inert` n'a pas restylé le
+    // sous-arbre (`pe:none`), le hit doit tomber sur `div#o`.
+    let v1 = "<html><body>\
+        <a href=/cible style=\"position:absolute;left:0;top:0;width:200px;height:40px;display:block\">lien</a>\
+        <div id=o style=\"position:absolute;left:0;top:0;width:300px;height:300px\">ov</div>\
+        <div id=z>z</div>\
+        </body></html>";
+    let v2 = v1.replace("<div id=o ", "<div id=o inert ");
+    // sync1 : baseline cléée + relayout complet → keymap
+    // peuplée, boîtes initiales (overlay ciblable).
+    s.apply_dom_sync(tab, v1, None, true, Some(ids.clone()), Some(Vec::new()));
+    // sync2 : `inert` livré SANS relayout — DOM commis
+    // patché, boîtes figées ; le diff doit partir en dette.
+    s.apply_dom_sync(tab, &v2, None, false, Some(ids.clone()), Some(Vec::new()));
+    assert!(
+        !s.tabs.get(&tab).unwrap().style_dirty.is_empty(),
+        "le changement `inert` sans relayout doit devenir dette de restyle"
+    );
+    // État stale (le bug §B-17) : `inert` est dans le DOM
+    // commis mais la boîte garde `pe:auto` → l'overlay
+    // continue de voler le hit.
+    let stale = s
+        .node_at(tab, 10.0, 20.0)
+        .and_then(|n| first_el(s.tabs.get(&tab).unwrap().dom.as_ref().unwrap(), n))
+        .and_then(|n| {
+            s.tabs
+                .get(&tab)
+                .unwrap()
+                .dom
+                .as_ref()?
+                .attributes(n)
+                .ok()?
+                .iter()
+                .find(|a| a.name == "id")
+                .map(|a| a.value.clone())
+        });
+    assert_eq!(
+        stale.as_deref(),
+        Some("o"),
+        "boîte figée attendue avant couverture"
+    );
+    // sync3 : relayout dont le `dirty` ne couvre que `#z` —
+    // sans la dette, l'overlay garderait `pointer-events:auto`.
+    let dirty_z = vec![
+        ("html".to_string(), 0u32),
+        ("body".to_string(), 0u32),
+        ("div".to_string(), 1u32),
+    ];
+    s.apply_dom_sync(
+        tab,
+        &v2,
+        Some(&dirty_z),
+        true,
+        Some(ids.clone()),
+        Some(Vec::new()),
+    );
+    // Clic dans l'overlay posé sur le lien : la dette a dû
+    // restylé le sous-arbre — `pe:none` hérité → le hit
+    // traverse l'overlay et frappe l'ancre dessous.
+    let hit = s.node_at(tab, 10.0, 20.0);
+    let tag = hit
+        .and_then(|n| first_el(s.tabs.get(&tab).unwrap().dom.as_ref().unwrap(), n))
+        .and_then(|n| {
+            s.tabs
+                .get(&tab)
+                .unwrap()
+                .dom
+                .as_ref()?
+                .tag_name(n)
+                .ok()
+                .map(str::to_string)
+        });
+    assert_eq!(
+        tag.as_deref(),
+        Some("a"),
+        "l'overlay `inert` doit être transparent au hit-test (hit={hit:?} tag={tag:?})"
+    );
 }
 
 // ------------------------------------------------------------------

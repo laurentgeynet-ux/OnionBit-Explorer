@@ -354,6 +354,20 @@ pub(crate) struct PaintPayload {
     /// meteofrance noyaient le journal) : un WARN par chemin
     /// suffit, les suivants passent en `debug`.
     pub cycle_warned: std::collections::HashSet<Box<[u16]>>,
+    /// Dette de restyle : chemins moteur de sous-arbres dont
+    /// les attributs ont changé lors d'une synchro **sans
+    /// relayout** (`apply_dom_sync` `relayout=false` — DOM
+    /// re-parsé et titre seulement pendant que les
+    /// sous-ressources arrivent). Un sélecteur d'attribut
+    /// (`[inert]`, classe, `+`/`~`, `:nth-*`) resterait figé
+    /// dans `bx.style` jusqu'au prochain relayout couvrant —
+    /// vol santemag (§B-17) : le drawer `inert` restait
+    /// ciblable car aucun apply couvrant n'était passé
+    /// depuis sa pose. Chaque entrée = `element_path` du
+    /// **parent** du nœud changé (couvre self et descendants
+    /// et frères) ; fusionnée au `dirty` du prochain apply
+    /// relayout, purgée au commit.
+    pub style_dirty: Vec<Vec<(String, u32)>>,
 }
 
 /// Titre courant de l'onglet — lu au début d'apply pour
@@ -479,6 +493,7 @@ impl Tab {
             img_bodies: std::mem::take(&mut self.img_bodies),
             keymap: std::mem::take(&mut self.dom_keymap),
             cycle_warned: std::mem::take(&mut self.cycle_warned),
+            style_dirty: std::mem::take(&mut self.style_dirty),
         }
     }
 
@@ -533,6 +548,7 @@ impl Tab {
         self.img_bodies = p.img_bodies;
         self.dom_keymap = p.keymap;
         self.cycle_warned = p.cycle_warned;
+        self.style_dirty = p.style_dirty;
         // Issue #19 — la table de géométrie publiée au JS se
         // re-remplit à chaque état commis (nav, apply,
         // relayout, reclaim) : `getBoundingClientRect` &
@@ -653,11 +669,32 @@ pub(crate) fn apply_payload(
     // re-parse.
     new_dom.set_defined_names(p.defined_names.iter().cloned());
     let new_title = extract_title(&new_dom);
+    // §B-17 : la baseline cléée sert aussi de **diff
+    // d'attributs** — les mutations d'attributs que le chemin
+    // `dirty` du miroir a perdues (synchro `relayout=false`,
+    // apply en attente évincé, marquage sauté sur nœud
+    // détaché) figeraient sinon `bx.style` des sous-arbres
+    // jamais reconstruits (vol santemag : le drawer `inert`
+    // restait ciblable alors que l'attribut était dans le
+    // DOM commis). Snapshot de la vieille table avant la RAZ.
+    let old_keymap = std::mem::take(&mut p.keymap);
+    build_keymap(&mut p.keymap, &new_dom, &job.ids, &job.tags);
+    tracing::debug!(
+        ms = u64::try_from(t0.elapsed().as_millis()).unwrap_or(u64::MAX),
+        "apply: keymap"
+    );
+    // Chemins des **parents** des nœuds dont les attributs
+    // ont changé (le parent couvre self + descendants +
+    // frères — `+`/`~`/`:nth-*`) + dette accumulée des
+    // synchros sans relayout.
+    let mut extra = attrs_dirty_paths(p.dom.as_ref(), &old_keymap, &new_dom, &p.keymap);
+    extra.append(&mut p.style_dirty);
+    let eff_dirty = merged_dirty(job.dirty.clone(), &extra);
     // Relayout incrémental (étape 55f) avant tout
     // remplacement — il a besoin de l'ancien DOM et de
     // l'ancien arbre, tous deux dans la payload.
     let incremental = job.relayout
-        && job.dirty.as_deref().is_some_and(|path| {
+        && eff_dirty.as_deref().is_some_and(|path| {
             let (Some(t_old), Some(t_new)) = (
                 p.dom.as_ref().and_then(|d| dom_path_node(d, path)),
                 dom_path_node(&new_dom, path),
@@ -680,12 +717,7 @@ pub(crate) fn apply_payload(
     // ADR-0025 : baseline cléée — la table `miroir → NodeId`
     // suit le DOM frais (vide hors synchro cléée → le journal
     // suivant tombera en `NoBaseline` → re-parse, jamais à
-    // faux).
-    build_keymap(&mut p.keymap, &new_dom, &job.ids, &job.tags);
-    tracing::debug!(
-        ms = u64::try_from(t0.elapsed().as_millis()).unwrap_or(u64::MAX),
-        "apply: keymap"
-    );
+    // faux) — reconstruite plus haut, avant le diff §B-17.
     p.dom = Some(new_dom);
     p.images = PaintImages::default();
     p.images.canvases = canvases;
@@ -720,6 +752,9 @@ pub(crate) fn apply_payload(
             if let Some(dom) = p.dom.take() {
                 if relayout_dom_payload(p, ctx, &dom, &job.canvas_ops).is_err() {
                     p.dom = Some(dom);
+                    // Rien n'a été stylé : la dette repart
+                    // entière (diff de ce tour inclus).
+                    p.style_dirty = extra;
                     out.cost = t0.elapsed();
                     return out;
                 }
@@ -727,6 +762,15 @@ pub(crate) fn apply_payload(
             }
         }
         out.repainted = true;
+    } else {
+        // Synchro sans relayout (sous-ressources en vol) :
+        // ni le sous-arbre `job.dirty` ni les changements
+        // d'attributs détectés ne sont stylés — tout part en
+        // dette pour le prochain apply relayout.
+        p.style_dirty = extra;
+        if let Some(d) = &job.dirty {
+            p.style_dirty.push(d.clone());
+        }
     }
     out.cost = t0.elapsed();
     out
@@ -884,6 +928,84 @@ fn build_keymap(
     for (e, m) in engine.into_iter().zip(ids.iter().copied()) {
         keymap.insert(m, e);
     }
+}
+
+/// §B-17 — nœuds **conservés** au re-parse dont l'ensemble
+/// d'attributs a changé, détectés sur les clés miroir
+/// présentes des deux côtés de la baseline (ADR-0025). Un
+/// `setAttribute` peut retourner un sélecteur d'attribut ou
+/// de classe (`[inert]`, `[hidden]`, `.open`, `:nth-*`,
+/// `+`/`~`) **hors du sous-arbre `dirty`** que le miroir
+/// rapporte : sans ce diff, les boîtes du sous-arbre gardent
+/// le style d'avant mutation indéfiniment (vol santemag —
+/// le drawer `inert` restait ciblable alors que l'attribut
+/// vivait dans le DOM commis). Rend l'`element_path` du
+/// **parent** de chaque nœud changé : le sous-arbre parent
+/// couvre le nœud, ses descendants et ses frères.
+fn attrs_dirty_paths(
+    old_dom: Option<&Dom>,
+    old_keymap: &HashMap<u64, explorer_dom::NodeId>,
+    new_dom: &Dom,
+    new_keymap: &HashMap<u64, explorer_dom::NodeId>,
+) -> Vec<Vec<(String, u32)>> {
+    let Some(old_dom) = old_dom else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for (mid, &new_n) in new_keymap {
+        let Some(&old_n) = old_keymap.get(mid) else {
+            continue;
+        };
+        if attrs_eq(old_dom.attributes(old_n), new_dom.attributes(new_n)) {
+            continue;
+        }
+        // Parent — couvre aussi les frères (`+`/`~`, `:nth-*`)
+        // dont la correspondance dépend de l'attribut muté.
+        let target = new_dom.parent(new_n).ok().flatten().unwrap_or(new_n);
+        if let Some(path) = element_path(new_dom, target) {
+            out.push(path);
+        }
+    }
+    out
+}
+
+/// Égalité d'**ensembles** d'attributs — l'ordre de
+/// sérialisation n'est pas garanti entre miroir et re-parse.
+/// Double inclusion (≈O(n²) par nœud, n = nb d'attributs ≤
+/// ~10 : plus léger que deux tris alloués, appelé sur chaque
+/// nœud de la baseline). `Err` d'un côté = non comparable →
+/// égal (pas de fausse dette sur nœud invalide).
+fn attrs_eq(
+    a: Result<&[explorer_dom::Attribute], explorer_dom::DomError>,
+    b: Result<&[explorer_dom::Attribute], explorer_dom::DomError>,
+) -> bool {
+    let (Ok(a), Ok(b)) = (a, b) else {
+        return true;
+    };
+    let has = |x: &explorer_dom::Attribute, s: &[explorer_dom::Attribute]| {
+        s.iter().any(|y| x.name == y.name && x.value == y.value)
+    };
+    a.len() == b.len() && a.iter().all(|x| has(x, b)) && b.iter().all(|x| has(x, a))
+}
+
+/// Cible de relayout effective = `dirty` du miroir ∪ dette
+/// d'attributs : le **plus long préfixe commun** de tous les
+/// chemins est le plus profond ancêtre dont le sous-arbre
+/// couvre chaque mutation (`element_path` ordonne racine →
+/// nœud — le préfixe commun est l'ancêtre partagé).
+/// `Some(vec![])` = racine (≈ relayout complet), `None` =
+/// rien de sale.
+fn merged_dirty(
+    dirty: Option<Vec<(String, u32)>>,
+    extra: &[Vec<(String, u32)>],
+) -> Option<Vec<(String, u32)>> {
+    let mut it = dirty.into_iter().chain(extra.iter().cloned());
+    let mut acc = it.next()?;
+    for p in it {
+        let n = acc.iter().zip(p.iter()).take_while(|(a, b)| a == b).count();
+        acc.truncate(n);
+    }
+    Some(acc)
 }
 
 /// Appariement monotone **par tag** d'une séquence moteur
@@ -1146,7 +1268,12 @@ fn apply_journal(
                     None => dom.remove_attribute(id, name).map(|_| ()),
                 }
                 .map_err(|_| JournalReject::Dom)?;
-                touched.push(id);
+                // §B-17 — le **parent** : `+`/`~`/`:nth-*` des
+                // frères dépendent aussi de l'attribut muté
+                // (même règle que `SetText`/`Remove` ; un
+                // `[inert]` posé ici doit exclure le
+                // sous-arbre, pas seulement la boîte cible).
+                touched.push(dom.parent(id).ok().flatten().unwrap_or(id));
             }
             explorer_js::DomMutation::SetText { key, text } => {
                 let id = key_node(p, *key)?;
@@ -1191,6 +1318,20 @@ fn apply_journal(
     }
     if job.relayout {
         journal_relayout(p, ctx, job, &touched, &mut out)?;
+    } else {
+        // §B-17 — même trou que la voie re-parse : les
+        // sous-arbres touchés ne seront pas restylés, leurs
+        // chemins partent en dette pour le prochain apply
+        // couvrant (journal ou cléé — les deux drainent).
+        let mut paths = Vec::with_capacity(touched.len());
+        if let Some(dom) = p.dom.as_ref() {
+            for &n in &touched {
+                if let Some(path) = element_path(dom, n) {
+                    paths.push(path);
+                }
+            }
+        }
+        p.style_dirty.extend(paths);
     }
     out.cost = t0.elapsed();
     Ok(out)
@@ -1225,10 +1366,26 @@ fn journal_relayout(
     out: &mut ApplyOutcome,
 ) -> Result<(), JournalReject> {
     let dom = p.dom.take().ok_or(JournalReject::NoDom)?;
+    // §B-17 — la dette de restyle des synchros `relayout=
+    // false` (voie re-parse) fusionne à la couverture
+    // journal : un chemin non résolu replie sur la racine
+    // (couverture conservatrice, jamais de dette perdue).
+    let debt = std::mem::take(&mut p.style_dirty);
+    let mut touched_all;
+    let touched: &[explorer_dom::NodeId] = if debt.is_empty() {
+        touched
+    } else {
+        touched_all = touched.to_vec();
+        for path in &debt {
+            touched_all.push(dom_path_node(&dom, path).unwrap_or_else(|| dom.document()));
+        }
+        &touched_all
+    };
     let incremental = journal_cover(&dom, touched)
         .is_some_and(|t| try_incr_payload(p, ctx, Some(&dom), &dom, t, t, &job.canvas_ops));
     if !incremental && relayout_dom_payload(p, ctx, &dom, &job.canvas_ops).is_err() {
         p.dom = Some(dom);
+        p.style_dirty = debt;
         return Err(JournalReject::Dom);
     }
     out.incremental = incremental;
@@ -1847,7 +2004,20 @@ impl Session {
             .as_deref_mut()
             .map_or_else(CanvasOpsTable::new, explorer_js::JsEngine::canvas_ops);
         let epoch = entry.nav_epoch;
-        self.pending_applies.retain(|p| p.tab != tab);
+        // §B-17 — l'apply évincé emportait sa couverture
+        // `dirty` : des mutations purement structurelles
+        // (insertions sans changement d'attribut) n'étaient
+        // jamais re-posées. Le `dirty` survit en dette —
+        // le prochain relayout le fusionne à sa cible.
+        self.pending_applies.retain(|p| {
+            if p.tab != tab {
+                return true;
+            }
+            if let Some(d) = &p.dirty {
+                entry.style_dirty.push(d.clone());
+            }
+            false
+        });
         self.pending_applies.push_back(PendingApply {
             tab,
             epoch,
@@ -1875,7 +2045,17 @@ impl Session {
             .as_deref_mut()
             .map_or_else(CanvasOpsTable::new, explorer_js::JsEngine::canvas_ops);
         let epoch = entry.nav_epoch;
-        self.pending_applies.retain(|p| p.tab != tab);
+        // §B-17 — même sauvegarde que `queue_apply_keyed` :
+        // le `dirty` de l'apply évincé part en dette.
+        self.pending_applies.retain(|p| {
+            if p.tab != tab {
+                return true;
+            }
+            if let Some(d) = &p.dirty {
+                entry.style_dirty.push(d.clone());
+            }
+            false
+        });
         self.pending_applies.push_back(PendingApply {
             tab,
             epoch,
