@@ -155,7 +155,7 @@ plateforme net** (ops jscore Encrypt/Decrypt restent à livrer) ·
   (paris.fr peinte) ; **§B-51 bras silence RÉSOLU ×3**
   (sosh/edf nommés, twitch détecté `evals_sans_mutation` —
   WARN non routée au ring, trou résiduel) ; **§B-56 PARTIEL**
-  (bras `\p` nié fermé, octal `a`/`@` persistant) ;
+  (bras `\p` nié fermé, octal `\141`/`\100` persistant) ;
   §B-32 persistant (regex101 + `Response.json` → §B-14) ;
   §B-23 stable ×2 ; 7 DELETE propres.
 
