@@ -2628,9 +2628,9 @@ mod tests {
         let tags = [
             "div".to_string(),
             "p".to_string(),
-            format!("#text {:016x}", fnv64("x")),
+            format!("#text\x00{:016x}", fnv64("x")),
             "b".to_string(),
-            format!("#text {:016x}", fnv64("y")),
+            format!("#text\x00{:016x}", fnv64("y")),
         ];
         let ids = [10u64, 11, 12, 13, 14];
         let mut map = HashMap::new();
@@ -2651,7 +2651,7 @@ mod tests {
         let engine = engine_preorder(&dom);
         // Miroir : div, #text "a" (le moteur a fusionné
         // `a`+`b` en "ab" — hash différent → pas de map).
-        let tags = ["div".to_string(), format!("#text {:016x}", fnv64("a"))];
+        let tags = ["div".to_string(), format!("#text\x00{:016x}", fnv64("a"))];
         let ids = [20u64, 21];
         let mut map = HashMap::new();
         align_keyed(&mut map, &dom, &engine, &ids, &tags);

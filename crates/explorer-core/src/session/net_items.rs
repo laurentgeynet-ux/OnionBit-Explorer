@@ -426,6 +426,12 @@ fn wants_clear_cookies(headers: &[(String, String)]) -> bool {
     })
 }
 
+/// `Instant` → millisecondes `u64` pour les marqueurs de
+/// phase N2 — saturation, jamais d'unwrap sur une durée.
+fn ms_u64(t: Instant) -> u64 {
+    u64::try_from(t.elapsed().as_millis()).unwrap_or(u64::MAX)
+}
+
 impl NavJob {
     /// Fetch + parse incrémental hors session : chaque
     /// morceau décodé alimente le tree-builder —
@@ -435,6 +441,12 @@ impl NavJob {
     /// est livré à `paint`. Aucun `&mut Session` ne
     /// traverse l'`await` : le verrou hôte reste libre
     /// pendant tout le téléchargement (étape 53d).
+    ///
+    /// Marqueurs N2 : `nav: en-têtes → corps → arbre` —
+    /// un timeout outil (jprobe 25 s) lit la dernière ligne
+    /// et sait quelle jambe a calé : attente de réponse,
+    /// corps en vol (possible `recv` sans fin) ou finition
+    /// d'arbre. Sans eux, `fetch+parse` restait opaque.
     #[allow(clippy::too_many_lines)] // flux séquentiel — chaque phase est documentée in situ
     pub(crate) async fn run<F>(&mut self, mut paint: F) -> Result<NavOutcome, CoreError>
     where
@@ -443,11 +455,29 @@ impl NavJob {
         if let Some(outcome) = self.about_blank() {
             return Ok(outcome);
         }
-        let mut resp = self
-            .transport
-            .fetch_stream(&self.req)
-            .await
-            .map_err(|e| CoreError::Fetch(e.to_string()))?;
+        let t_phase = Instant::now();
+        let mut resp = match self.transport.fetch_stream(&self.req).await {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::info!(
+                    tab = self.tab,
+                    ms = ms_u64(t_phase),
+                    error = %e,
+                    "nav: fetch en échec"
+                );
+                return Err(CoreError::Fetch(e.to_string()));
+            }
+        };
+        tracing::info!(
+            tab = self.tab,
+            ms = ms_u64(t_phase),
+            status = resp.status,
+            "nav: en-têtes reçus → corps"
+        );
+        if !(200..300).contains(&resp.status) {
+            return Err(CoreError::HttpStatus(resp.status));
+        }
+        let t_body = Instant::now();
         if !(200..300).contains(&resp.status) {
             return Err(CoreError::HttpStatus(resp.status));
         }
@@ -534,11 +564,23 @@ impl NavJob {
                 last_paint = Instant::now();
             }
         }
+        tracing::info!(
+            tab = self.tab,
+            ms = ms_u64(t_body),
+            bytes = html.len(),
+            "nav: corps reçu → arbre"
+        );
+        let t_tree = Instant::now();
         let text = dec.finish();
         html.push_str(&text);
         tb.push(&text);
         tb.finish();
         let dom = tb.into_dom();
+        tracing::info!(
+            tab = self.tab,
+            ms = ms_u64(t_tree),
+            "nav: arbre posé → métadonnées"
+        );
         let title = extract_title(&dom);
         let csp = collect_response_csp(&resp.headers, &dom);
         let clear_cookies = wants_clear_cookies(&resp.headers);
@@ -960,6 +1002,8 @@ impl SubJob {
             &self.frame_urls,
             self.page_policy,
         );
+        let jobs_n = jobs.len();
+        let t_wave = Instant::now();
         let mut eng = self.eng.take();
         // Scripting du parent (CAP-155) — hissé hors de la
         // closure `!Sync`-sûre (le moteur n'est pas Sync,
@@ -1153,13 +1197,32 @@ impl SubJob {
                 frame_scripting(parent_scripting, *sandbox),
             ));
         }
+        tracing::info!(
+            tab,
+            ms = ms_u64(t_wave),
+            jobs = jobs_n,
+            imgs = self.img_bodies.len(),
+            "sub: vague reçue → @import"
+        );
         self.eng = eng;
         self.async_mods = async_mods;
         self.frames = frames;
+        // Marqueurs N2 : chaque jambe de fin de vague est
+        // horodatée — un stall jprobe montre laquelle a calé
+        // (le `debug` par module de `prefetch_modules`
+        // reste, mais n'apparaît qu'au niveau debug).
+        let t_phase = Instant::now();
         self.fetch_imports().await;
+        tracing::info!(tab, ms = ms_u64(t_phase), "sub: @import expansés");
+        let t_phase = Instant::now();
         self.fetch_backgrounds().await;
+        tracing::info!(tab, ms = ms_u64(t_phase), "sub: fonds fetchés");
+        let t_phase = Instant::now();
         self.fetch_fonts().await;
+        tracing::info!(tab, ms = ms_u64(t_phase), "sub: fontes fetchées");
+        let t_phase = Instant::now();
         self.prefetch_modules().await;
+        tracing::info!(tab, ms = ms_u64(t_phase), "sub: modules prefetchés");
     }
 
     /// Expansion des `@import` des feuilles liées (étape 96) :

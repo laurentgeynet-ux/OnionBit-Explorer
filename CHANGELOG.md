@@ -7,6 +7,34 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **Étape 150 — §N2 : marqueurs de
+  phase dans `NavJob`/`SubJob`**
+  (`explorer-core`) — les quatre
+  lignes `nav:` macro existantes
+  ne disaient pas *où* un timeout
+  jprobe 25 s calait. `NavJob::run`
+  trace désormais `nav: en-têtes
+  reçus → corps` (ms + statut, et
+  `nav: fetch en échec` chronométré
+  sur erreur transport), `nav:
+  corps reçu → arbre` (ms + octets
+  décodés) et `nav: arbre posé →
+  métadonnées` — un `recv` sans fin
+  ou une finition d'arbre lente est
+  nommé par la dernière ligne.
+  `SubJob::run` horodate chaque
+  jambe : `sub: vague reçue`
+  (jobs + images reçues), `sub:
+  @import expansés`, `sub: fonds
+  fetchés`, `sub: fontes fetchées`,
+  `sub: modules prefetchés`.
+  Hygiène jointe : trois octets NUL
+  littéraux dans des chaînes de
+  test d'`apply.rs` remplacés par
+  l'échappement `\x00` équivalent —
+  le fichier redevient indexable
+  par ripgrep (il était classé
+  binaire et sauté des recherches).
 - **Étape 149 — §B-20 :
   `data-srcset` parsé en srcset +
   budget images 32→256**
