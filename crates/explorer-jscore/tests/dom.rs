@@ -6371,6 +6371,29 @@ fn host_focus_dispatch_updates_active_element() {
     assert_eq!(evf(&mut e, "document.activeElement.tagName"), "BODY");
 }
 
+/// §B-37 (vol 94, caniuse — panic `dom.rs` index out of bounds)
+/// : un `NodeId` obsolète — arène reconstruite par un re-parse
+/// pendant que l'hôte tient un id — injecté dans le chemin de
+/// dispatch (`propagate_event`) et les requêtes d'arbre doit
+/// dégrader (no-op/`None`/`[]`), jamais paniquer.
+#[test]
+fn stale_node_id_dispatch_and_queries_degrade() {
+    let dom = Rc::new(RefCell::new(Dom::from_html("<body><p>x</p></body>")));
+    let mut e = Engine::new();
+    e.install_dom(&dom);
+    let stale = 386u32; // arène ≪ 386 nœuds
+    assert!(!dom.borrow().node_valid(stale));
+    // Dispatch hôte sur id mort : no-op, pas de panic.
+    e.dom_event_on("click", stale).expect("dispatch stale");
+    // Requêtes d'arbre sur id mort : dégradé vide.
+    let d = dom.borrow();
+    assert_eq!(d.ancestors(stale), [] as [u32; 0]);
+    assert_eq!(d.element_children(stale), [] as [u32; 0]);
+    assert_eq!(d.slots_in(stale), [] as [u32; 0]);
+    assert_eq!(d.slot_assigned(stale, true), [] as [u32; 0]);
+    assert!(d.assigned_slot(stale).is_none());
+}
+
 /// JS-C106 — `RangeError: expression too deeply nested` sur du
 /// minifié réel (caniuse bundle.js) : les bundles nichent des
 /// chaînes `&&`/`?:`/parenthèses bien au-delà de 512 — la borne

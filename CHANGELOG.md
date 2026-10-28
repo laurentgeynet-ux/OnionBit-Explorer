@@ -52,6 +52,25 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   illisible. Verrou
   `svg_filtres_regions_divergentes_
   ne_panique_pas`.
+- **JS-C175 — §B-37 : `NodeId`
+  obsolète hors arène** (`explorer-
+  jscore`) — re-parse/re-sync du
+  miroir pendant qu'un handle JS
+  survit → `ancestors`/`element_
+  children`/`slots_in`/`slot_
+  assigned`/`assigned_slot` indexaient
+  `nodes[id]` en direct → `index out
+  of bounds` (caniuse vol 94, site
+  `dom.rs:2752`, rattrapé disjoncteur,
+  signature ×3 — 2691→2752→…). Les
+  cinq requêtes passent en `.get()`
+  (dégradé `[]`/`None`) et
+  `propagate_event` déclare
+  `node_valid(target)` en entrée —
+  dispatch sur id mort = no-op,
+  jamais panic. Verrou `stale_node_
+  id_dispatch_and_queries_degrade`
+  (id 386 sur arène ~6 nœuds).
 - **JS-C174 — `style.cssText`**
   (`explorer-jscore`) — l'anti-FOUC
   réel (`<body style=visibility:

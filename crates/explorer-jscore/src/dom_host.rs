@@ -3207,6 +3207,12 @@ impl Engine {
         ev: &Rc<EventState>,
     ) -> JsResult<()> {
         let target = ev.target.get();
+        // §B-37 : un handle JS peut survivre à une arène
+        // reconstruite (re-parse `document.open`, mirror resync)
+        // — dispatcher sur un id hors arène = no-op, jamais panic.
+        if !dom.borrow().node_valid(target) {
+            return Ok(());
+        }
         let path = {
             let d = dom.borrow();
             let mut p = d.ancestors(target); // parent … root
@@ -7602,7 +7608,7 @@ fn style_map(dom: &Dom, node: NodeId) -> Vec<(String, String)> {
 
 /// Déclarations `k: v` d'une liste `style` — tolérante :
 /// segments sans `:` et noms vides ignorés, noms standard
-/// minuscules, custom `--*` préservées (prop_key).
+/// minuscules, custom `--*` préservées (`prop_key`).
 fn parse_decls(style: &str) -> Vec<(String, String)> {
     style
         .split(';')

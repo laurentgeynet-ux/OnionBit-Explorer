@@ -1581,7 +1581,9 @@ impl Dom {
         let mut out = Vec::new();
         let mut stack = vec![root];
         while let Some(n) = stack.pop() {
-            let node = &self.nodes[n as usize];
+            let Some(node) = self.nodes.get(n as usize) else {
+                continue;
+            };
             if node.kind == NodeKind::Element && node.tag == "slot" {
                 out.push(n);
             }
@@ -1604,7 +1606,7 @@ impl Dom {
         // Hôte = parent de la racine shadow contenant `slot`.
         let mut cur = slot;
         let host = loop {
-            match self.nodes[cur as usize].parent {
+            match self.nodes.get(cur as usize).and_then(|n| n.parent) {
                 Some(p) if self.is_shadow_root(p) => match self.shadow_host(p) {
                     Some(h) => break h,
                     None => return Vec::new(),
@@ -1636,7 +1638,7 @@ impl Dom {
     /// pas de slot correspondant — borne flat).
     #[must_use]
     pub fn assigned_slot(&self, el: NodeId) -> Option<NodeId> {
-        let parent = self.nodes[el as usize].parent?;
+        let parent = self.nodes.get(el as usize)?.parent?;
         let (root, _) = self.shadow_roots.get(&parent).copied()?;
         let want = self.attr(el, "slot").unwrap_or_default();
         self.slots_in(root)
@@ -2745,27 +2747,38 @@ impl Dom {
     }
 
     /// Ancestor chain of `node`, parent first, `#document` root last
-    /// (empty for the root itself).
+    /// (empty for the root itself or a stale id — §B-37 : un
+    /// handle survivant à une arène reconstruite dégrade en
+    /// chaîne vide, jamais panic).
     #[must_use]
     pub fn ancestors(&self, node: NodeId) -> Vec<NodeId> {
         let mut out = Vec::new();
-        let mut cur = self.nodes[node as usize].parent;
+        let mut cur = self.nodes.get(node as usize).and_then(|n| n.parent);
         while let Some(p) = cur {
             out.push(p);
-            cur = self.nodes[p as usize].parent;
+            cur = self.nodes.get(p as usize).and_then(|n| n.parent);
         }
         out
     }
 
-    /// Element children of `node` (text nodes filtered out).
+    /// Element children of `node` (text nodes filtered out) —
+    /// `[]` pour un id obsolète (§B-37).
     #[must_use]
     pub fn element_children(&self, node: NodeId) -> Vec<NodeId> {
-        self.nodes[node as usize]
-            .children
-            .iter()
-            .copied()
-            .filter(|&c| self.nodes[c as usize].kind == NodeKind::Element)
-            .collect()
+        self.nodes
+            .get(node as usize)
+            .map(|n| {
+                n.children
+                    .iter()
+                    .copied()
+                    .filter(|&c| {
+                        self.nodes
+                            .get(c as usize)
+                            .is_some_and(|cn| cn.kind == NodeKind::Element)
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
     }
 
     /// `getElementById` — first match, document order. Seuls les
