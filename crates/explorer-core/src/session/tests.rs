@@ -2770,7 +2770,9 @@ fn poll_net_budget_defere_les_livraisons_excedentaires() {
     // Passe déjà hors budget → tout est reporté, ordre intact.
     s.drain_net_done(
         vec![mk(0), mk(1), mk(2)],
-        std::time::Instant::now() - std::time::Duration::from_secs(60),
+        std::time::Instant::now()
+            .checked_sub(std::time::Duration::from_secs(60))
+            .expect("instant passé"),
     );
     assert_eq!(s.pending_net_done.len(), 3);
     assert_eq!(s.pending_net_done.front().map(|d| d.handle), Some(0));

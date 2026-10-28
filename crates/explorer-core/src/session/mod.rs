@@ -956,27 +956,7 @@ impl Session {
         // `set_accept_language` (réglages app → API) et elle
         // couvre navigations, sous-ressources et XHR d'un coup.
         let accept_language = explorer_net::lang::accept_language_cell(None);
-        // `Accept-Language` au-dessus de toute la pile (étape
-        // 118) ; `CorsTransport` en dessous (étape 126) — il
-        // émet le preflight `OPTIONS` et vérifie `ACAO`/`ACAC`
-        // sur les requêtes `mode:cors` portant `req.cors`
-        // (posé par `script_request`), tout le reste passe.
-        // `ClientHintsTransport` sous Cors (CAP-146) : les
-        // `Sec-CH-UA*` basse-entropie sur chaque requête,
-        // preflights compris — jamais écrasés si l'hôte a
-        // posé les siens dans sa pile interne.
-        // `AcceptTransport` tout au fond (CAP-141) : `Accept`
-        // par destination, posé seulement si absent — y compris
-        // sur les preflights `OPTIONS` (`*/*`, dest `Empty`).
-        let transport: Arc<dyn HttpTransport> = Arc::new(explorer_net::lang::LangTransport::wrap(
-            Arc::new(explorer_net::policy::CorsTransport::wrap(Arc::new(
-                explorer_net::policy::ClientHintsTransport::wrap(
-                    Arc::new(explorer_net::policy::AcceptTransport::wrap(transport)),
-                    explorer_net::policy::ClientHints::default(),
-                ),
-            ))),
-            accept_language.clone(),
-        ));
+        let transport = wrap_transport_stack(transport, accept_language.clone());
         // Proxy média (139a/b) : bind en tâche tokio — daemon,
         // CLI et FFI tournent tous sous runtime ; si l'écoute
         // échoue les offres gardent l'URL directe (repli).
@@ -1574,6 +1554,35 @@ impl Session {
         let (tree, dom) = (entry.tree.as_ref()?, entry.dom.as_ref()?);
         Some(tree.dump(dom))
     }
+}
+
+/// Pile de transports politiques de la session.
+///
+/// `Accept-Language` au-dessus de toute la pile (étape
+/// 118) ; `CorsTransport` en dessous (étape 126) — il
+/// émet le preflight `OPTIONS` et vérifie `ACAO`/`ACAC`
+/// sur les requêtes `mode:cors` portant `req.cors`
+/// (posé par `script_request`), tout le reste passe.
+/// `ClientHintsTransport` sous Cors (CAP-146) : les
+/// `Sec-CH-UA*` basse-entropie sur chaque requête,
+/// preflights compris — jamais écrasés si l'hôte a
+/// posé les siens dans sa pile interne.
+/// `AcceptTransport` tout au fond (CAP-141) : `Accept`
+/// par destination, posé seulement si absent — y compris
+/// sur les preflights `OPTIONS` (`*/*`, dest `Empty`).
+fn wrap_transport_stack(
+    transport: Arc<dyn HttpTransport>,
+    accept_language: explorer_net::lang::AcceptLanguage,
+) -> Arc<dyn HttpTransport> {
+    Arc::new(explorer_net::lang::LangTransport::wrap(
+        Arc::new(explorer_net::policy::CorsTransport::wrap(Arc::new(
+            explorer_net::policy::ClientHintsTransport::wrap(
+                Arc::new(explorer_net::policy::AcceptTransport::wrap(transport)),
+                explorer_net::policy::ClientHints::default(),
+            ),
+        ))),
+        accept_language,
+    ))
 }
 
 #[cfg(test)]
