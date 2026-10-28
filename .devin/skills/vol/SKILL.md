@@ -137,6 +137,17 @@ Invoke-RestMethod "$BASE/api/tabs/$tab/navigate" -Method Post `
   arrêt forcé **par PID**, archiver le journal, relancer un
   daemon neuf sur un autre port et **continuer le vol** avec les
   cibles restantes — le wedge termine la cible, pas la campagne.
+- **Fraîcheur au retour du vol** — à la fin de chaque vol,
+  `git log -1 main` : si HEAD a bougé depuis le build du daemon
+  **et** que les nouveaux commits portent des fixes
+  (`fix(`/`feat(`) touchant le catalogue §B, le vol suivant
+  **repart sur un binaire neuf** : kill PID, worktree à jour,
+  rebuild (`Finished` attendu), daemon neuf, re-sélection des
+  cibles (les re-vols dus ont changé — les anomalies corrigées
+  passent en priorité 1). Pas de contrôle entre les cibles
+  d'un même vol — un vol se joue entier sur son binaire ;
+  un constat fait juste avant le commit d'un fix reste une
+  preuve valable (noter « constat pré-`<sha>` »).
 
 ### d) Rédiger LE rapport du vol
 
