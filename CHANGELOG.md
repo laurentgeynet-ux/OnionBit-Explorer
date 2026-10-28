@@ -7,6 +7,34 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **JS-C182 — §B-56 bras 3 :
+  octales Annex B en classe et
+  nombre entier hors classe**
+  (`explorer-jscore`) — airfrance
+  vol 101 : regex jscrambler
+  rejetée « Invalid character
+  class » — `[\r\100]` rendait
+  `\1(?:00)` (backref + reste)
+  dans la classe ; et `(a)\141`
+  matchait « 41 » au lieu de 'a'
+  (le « plus long préfixe »
+  coupait `\1`+`41` alors que
+  l'Annex B lit le nombre entier
+  → 141 > groupes → octale).
+  En classe : interception des
+  chiffres via `class_octal`
+  (`\0`+≤2 octaux, `\1`–`\7`+≤2,
+  `\8`/`\9` identité — consommation
+  exacte, `\18` = `\x{1}`+`8`).
+  Hors classe : le chemin préfixe
+  supprimé de `decimal_escape` —
+  octale/identité directe quand
+  l'entier dépasse les groupes.
+  Backrefs valides/forward
+  inchangées. Verrous
+  `b56c_probe.rs` (motif
+  jscrambler verbatim compilé,
+  sémantique octale/backref).
 - **Étape 157 — §B-54 : drain
   `animationstart` borné au
   budget `event.*`**

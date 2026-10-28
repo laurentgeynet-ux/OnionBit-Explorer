@@ -368,6 +368,34 @@ fn translate_pattern(src: &str, unicode: bool, fold: bool) -> Result<String, Str
                 i += 2;
                 continue;
             }
+            // `\N` chiffre **en classe** : toujours octale /
+            // identité Annex B, jamais une backref — `escape`
+            // rendait `\1(?:00)` pour `\100` → backref dans la
+            // classe → « Invalid character class » (§B-56
+            // bras 3, jscrambler airfrance vol 101). En `u`
+            // l'échappe reste une erreur — la voie `escape`
+            // ci-dessous rejette proprement.
+            if in_class && !t.unicode && matches!(cs.get(i + 1), Some('0'..='9')) {
+                let (v, next) = class_octal(&cs, i);
+                // `\x{…}` comme `escape()` — sûr pour les
+                // spéciaux de classe (`[`/`&`/`~`/`-`) et
+                // uniforme avec le format octal d'avant.
+                out.push_str(&format!("\\x{{{v:x}}}"));
+                class_emitted = true;
+                if t.fold {
+                    let is_bound = class_dash
+                        || (cs.get(next) == Some(&'-')
+                            && !matches!(class_atom_of(&cs, next + 1), ClassAtom::End));
+                    if !is_bound {
+                        emit_fold_variants(&mut out, v);
+                    }
+                }
+                class_prev = Some(ClassAtom::Char(v));
+                class_prev_bound = class_dash;
+                class_dash = false;
+                i = next;
+                continue;
+            }
             let (frag, next) = t.escape(&cs, i, src)?;
             if in_class {
                 // Surrogate : nos strings UTF-8 n'en contiennent
@@ -950,6 +978,52 @@ enum ClassAtom {
     End,
 }
 
+/// Échappe décimal **en classe** (Annex B — jamais une
+/// backref) : `\0`+≤2 octaux, `\1`–`\7`+≤2 octaux (3 max),
+/// `\8`/`\9` identité. Retourne `(valeur, index après)`.
+/// `\18` = `\x{1}` puis `8` littéral (la consommation
+/// s'arrête au premier non-octal) — §B-56 bras 3 : la
+/// voie `escape()`/`decimal_escape` lisait `\N` comme
+/// backref et émettait `\1(?:00)` dans la classe →
+/// « Invalid character class » (jscrambler airfrance vol 101).
+fn class_octal(cs: &[char], i: usize) -> (u32, usize) {
+    debug_assert_eq!(cs.get(i), Some(&'\\'));
+    let d = cs[i + 1];
+    if d == '0' {
+        return if cs.get(i + 2).is_some_and(char::is_ascii_digit) {
+            let (mut v, mut j, mut nd) = (0u32, i + 2, 0);
+            while nd < 2 {
+                match cs.get(j).and_then(|x| x.to_digit(8)) {
+                    Some(o) => {
+                        v = v * 8 + o;
+                        j += 1;
+                        nd += 1;
+                    }
+                    None => break,
+                }
+            }
+            (v, j)
+        } else {
+            (0, i + 2)
+        };
+    }
+    if matches!(d, '8' | '9') {
+        return (u32::from(d), i + 2);
+    }
+    let (mut v, mut j, mut nd) = (0u32, i + 1, 0);
+    while nd < 3 {
+        match cs.get(j).and_then(|x| x.to_digit(8)) {
+            Some(o) => {
+                v = v * 8 + o;
+                j += 1;
+                nd += 1;
+            }
+            None => break,
+        }
+    }
+    (v, j)
+}
+
 /// Classifie l'atome de classe à `cs[i]` (sans l'émettre) —
 /// décode les échappements comme `escape()` : `\xHH`, `\uHHHH`
 /// (paires de surrogates fusionnées), `\u{…}`, `\0`/octales
@@ -1495,32 +1569,11 @@ impl Trans {
         if self.unicode {
             return Err(format!("invalid backref \\{n} in /{src}/"));
         }
-        // Annex B : plus long préfixe désignant un groupe (`\12`
-        // avec 3 groupes → `\1` + '2'), sinon octale/identité.
-        let mut k = i + 1;
-        let mut v = 0usize;
-        let mut best = None;
-        while k < j {
-            v = v * 10 + (u32::from(cs[k]) - u32::from('0')) as usize;
-            k += 1;
-            if (1..=self.n_groups).contains(&v) {
-                best = Some(k);
-            }
-        }
-        if let Some(k) = best {
-            let prefix: String = cs[i + 1..k].iter().collect();
-            let rest: String = cs[k..j].iter().collect();
-            // `(?:rest)` après la backref : `\1` + `23` écrit `\123`
-            // serait relu comme la backref 123. Préfixe « vers
-            // l'avant » → match vide, comme la branche au-dessus.
-            let pn: usize = prefix.parse().unwrap_or(0);
-            let head = if self.closed.contains(&pn) {
-                format!("\\{prefix}")
-            } else {
-                "(?:)".to_string()
-            };
-            return Ok((format!("{head}(?:{rest})"), j));
-        }
+        // Annex B : le nombre **entier** tranche — `n` au-delà
+        // des groupes → retombe en octale/identité ci-dessous
+        // (`\141` = `\x{61}` même avec des groupes — le « plus
+        // long préfixe » émettait `\1`+`41`, matchait la
+        // chaîne « 41 » au lieu de 'a' : §B-56 bras 3).
         let d0 = cs[i + 1];
         if matches!(d0, '8' | '9') {
             return Ok((d0.to_string(), i + 2));
@@ -1647,6 +1700,32 @@ mod tests {
         let probe = |src: &str, hay: &str| super::JsRegExp::compile(src, "").unwrap().exec(hay, 0);
         assert!(probe(r"\uD83D\uDCA5", "\u{1f4a5}").is_some());
         assert!(probe(r"\uD83C[\uDFFB-\uDFFF]", "\u{1f3fd}").is_some());
+    }
+
+    /// §B-56 bras 3 (airfrance vol 101 — jscrambler) —
+    /// `\N` chiffre EN CLASSE = octale/identité Annex B,
+    /// jamais backref : `escape` rendait `\1(?:00)` pour
+    /// `[\r\100]` → « Invalid character class ». Hors
+    /// classe, le nombre **entier** tranche : `\141` >
+    /// groupes → octale `\x{61}` (le « plus long préfixe »
+    /// émettait `\1`+`41` — matchait « 41 » au lieu de 'a').
+    #[test]
+    fn class_decimal_is_octal_not_backref() {
+        // Format `\x{…}` uniforme avec `escape()`.
+        assert_eq!(tr(r"[\100]"), "[\\x{40}]");
+        assert_eq!(tr(r"[\141]"), "[\\x{61}]");
+        // `\18` = `\x{1}` puis `8` littéral (non-octal stoppe).
+        assert_eq!(tr(r"[\18]"), "[\\x{1}8]");
+        // Identité `\8` puis `9` littéral.
+        assert_eq!(tr(r"[\89]"), "[\\x{38}9]");
+        // Hors classe avec groupes : entier > groupes → octale.
+        assert_eq!(tr(r"(a)\141"), "(a)\\x{61}");
+        // Verbatim jscrambler airfrance — compile entier.
+        super::JsRegExp::compile(
+            r"(?:^|\141\164[\f\u1680-\u2000\u200a\t\u2029 \ufeff\r\u202f\u00a0\u205f\v\u2028\n\u3000]{1,})(?:([^\n\r\u2028\u2029]{0,}?)[\v\u3000\u00a0\f\u200a\ufeff\u202f\u2028 \u1680-\u2000\n\u2029\u205f\t\r\100]\x28){0,1}([^\u2028\r\n\u2029]{1,}?)\u003a([0-9]{1,})\u003a([0-9]{1,})\051{0,1}$",
+            "",
+        )
+        .unwrap();
     }
 
     /// Bornes de plage : les échappements sont décodés — bug
