@@ -908,6 +908,45 @@ async fn animationstart_fires_for_new_keyframe_animation() {
     assert_eq!(out.trim(), "ghz@DIV", "animationstart livré : {out}");
 }
 
+/// §B-54 (flixbus vol 100) — `drain_anim_births` dispatchait
+/// chaque naissance `animationstart` sans borne temps :
+/// dispatch+miroir ~15 s chacun sous verrou → boucle ×N =
+/// livelock API pendant la vie de l'onglet. Le drain partage
+/// le budget `event.*` — au moins un item par passe
+/// (progression), le reste différé.
+#[test]
+fn anim_births_drain_bounded_by_event_budget() {
+    let mut s = Session::new(Arc::new(FailTransport), Arc::new(TestFont));
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let tab = s.open_tab();
+    let html = "<!doctype html><html><body><div id=\"x\"></div></body></html>";
+    let eng = s.spawn_engine(tab, html, true, "");
+    {
+        let e = s.tabs.get_mut(&tab).unwrap();
+        let mut tb = TreeBuilder::new();
+        tb.push(html);
+        tb.finish();
+        e.dom = Some(tb.into_dom());
+        e.url = Some(Url::parse("http://h.test/as").unwrap());
+        e.js = eng;
+        for i in 0..3u32 {
+            e.pending_anim_births
+                .push_back((explorer_dom::NodeId::from_parts(1, i), "k".into()));
+        }
+    }
+    // Budget ~nul : un seul dispatch par passe, deque
+    // conservée — la pompe ne peut plus séquestrer le verrou.
+    s.event_tail_budget = std::time::Duration::from_nanos(1);
+    for attendu in [2usize, 1, 0] {
+        s.drain_anim_births(tab);
+        let reste = s
+            .tabs
+            .get(&tab)
+            .map_or(usize::MAX, |e| e.pending_anim_births.len());
+        assert_eq!(reste, attendu, "drain borné — reste attendu {attendu}");
+    }
+}
+
 /// Étape 143 — pont lazy-CE : feuille **construite**
 /// (`new CSSStyleSheet` + `insertRule` + `adoptedStyleSheets`)
 /// cascadée réellement, et `:defined` lu sur le registre

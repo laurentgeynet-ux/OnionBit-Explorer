@@ -468,8 +468,36 @@ impl Session {
     /// invisible à jamais. Nœud reparti entre passe et
     /// drain → sauté (dispatcher vers un mort est sans
     /// sens, son miroir n'existe plus non plus).
-    fn drain_anim_births(&mut self, tab: TabId) {
+    pub(crate) fn drain_anim_births(&mut self, tab: TabId) {
+        // §B-54 (flixbus vol 100) : chaque dispatch
+        // `animationstart` peut brûler dispatch+miroir
+        // (~15 s mesuré sous listener lourd) **sous le
+        // verrou session** — une boucle non bornée de
+        // naissances = livelock API. Le drain partage le
+        // budget `event.*` : au-delà, le reste de la deque
+        // survit pour la prochaine passe (cap
+        // `MAX_ANIM_BIRTHS` déjà en place).
+        let budget = self.event_tail_budget;
+        let t0 = Instant::now();
+        // Au moins une naissance par passe — la deque ne
+        // stagne jamais tant que le moteur répond.
+        let mut drained = 0usize;
         loop {
+            if drained > 0 && !budget.is_zero() && t0.elapsed() > budget {
+                let rest = self
+                    .tabs
+                    .get(&tab)
+                    .map_or(0, |e| e.pending_anim_births.len());
+                if rest > 0 {
+                    tracing::warn!(
+                        tab,
+                        rest,
+                        elapsed_ms = t0.elapsed().as_millis(),
+                        "drain_anim_births au-delà du budget — reste différé (B-54)"
+                    );
+                }
+                return;
+            }
             let Some(entry) = self.tabs.get(&tab) else {
                 return;
             };
@@ -486,6 +514,7 @@ impl Session {
             self.tabs
                 .get_mut(&tab)
                 .map(|e| e.pending_anim_births.pop_front());
+            drained += 1;
             let Some(path) = path else {
                 continue;
             };

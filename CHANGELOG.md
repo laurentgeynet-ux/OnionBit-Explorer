@@ -7,6 +7,29 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **Étape 157 — §B-54 : drain
+  `animationstart` borné au
+  budget `event.*`**
+  (`explorer-core`) — flixbus
+  vol 100 : API morte >60 s
+  **pendant la vie de l'onglet**
+  (livelock) — `drain_anim_
+  births` bouclait un dispatch
+  par naissance sans borne :
+  dispatch ~5 s + `mirror_sync`
+  ~10 s chacun sous verrou,
+  ×51 événements mesurés. Le
+  drain partage désormais
+  `event_tail_budget` : au moins
+  une naissance par passe
+  (progression garantie), le
+  reste survit dans la deque
+  pour la prochaine pompe
+  (`MAX_ANIM_BIRTHS` cap déjà en
+  place) — WARN tracée
+  « reste différé ». Verrou
+  `anim_births_drain_bounded_
+  by_event_budget`.
 - **Étape 156 — §B-12 : cap « tas
   mort » étendu aux chemins
   détachés et livraisons**
