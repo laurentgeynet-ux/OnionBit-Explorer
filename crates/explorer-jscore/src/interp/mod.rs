@@ -2711,10 +2711,29 @@ impl Engine {
     /// New native function value.
     pub(crate) fn native_fn(&mut self, name: &'static str, f: crate::heap::NativeFn) -> Value {
         let proto = Value::Obj(self.protos.function);
-        Value::Obj(
-            self.heap
-                .alloc_obj(Object::fun(Fun::Native { name, f }, proto)),
-        )
+        let id = self
+            .heap
+            .alloc_obj(Object::fun(Fun::Native { name, f }, proto));
+        // `fn.length` — `Fun::Native` ne porte pas d'arité
+        // déclarée : 0 en own prop (les builtins dont la spec
+        // fixe une arité la posent eux-mêmes après — prop own
+        // prioritaire). `undefined` faisait échouer les
+        // détects `0 === Ctor.length` (§B-57 bras 2 : gate
+        // polyfill.io `0===self.Symbol.length` → faux Symbol
+        // installé → le `Object.prototype.toString` polyfillé
+        // lit le faux symbole-objet en clé → `toString` →
+        // récursion infinie `e↔Get`).
+        self.set_own_attrs(
+            id,
+            "length",
+            Value::Num(0.0),
+            crate::heap::PropAttrs {
+                writable: false,
+                enumerable: false,
+                configurable: true,
+            },
+        );
+        Value::Obj(id)
     }
 
     /// Native function with args prepended (`bound ++ args` per call).

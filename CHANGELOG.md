@@ -7,6 +7,30 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **JS-C181 — §B-57 bras 2 :
+  `fn.length` absent des builtins
+  natives** (`explorer-jscore`) —
+  manomano vol 100 : `deeply
+  nested at ToObject` sur
+  polyfill.min.js cdnjs, encore
+  présent post-JS-C178. Racine
+  nommée (repro in-process, bundle
+  1,26 Mo) : `Fun::Native` ne
+  portait pas `length` → gate
+  `0===self.Symbol.length`
+  échouait → faux Symbol
+  polyfill.io installé → le
+  `Object.prototype.toString`
+  polyfillé lisait le faux
+  symbole-objet en clé →
+  `toString` → récursion infinie
+  `e↔Get` (« maximum call stack »).
+  `native_fn` pose désormais
+  `length:0` en own prop
+  `{w:false,e:false,c:true}` —
+  défaut spec builtins, arités
+  précises posables après. Bundle
+  manomano : éval `OK`.
 - **R-131 — §B-58 : `transform`
   rejoué par les boîtes anonymes**
   (`explorer-layout`) — letterboxd

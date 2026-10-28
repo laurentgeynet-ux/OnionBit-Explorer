@@ -110,3 +110,37 @@ fn right_deep_still_bounded() {
         Ok(v) => panic!("right-deep ×5000 devrait échouer, obtenu {v:?}"),
     }
 }
+
+/// §B-57 bras 2 (manomano vol 100) — les builtins natifs
+/// portaient `length` = `undefined` : le gate polyfill.io
+/// `0===self.Symbol.length` échouait → faux Symbol installé →
+/// le `Object.prototype.toString` polyfillé lisait le faux
+/// symbole-objet en clé → `toString` → récursion `e↔Get` ∞.
+/// `Fun::Native` porte désormais `length:0` (own prop,
+/// défaut spec builtins).
+#[test]
+fn native_fns_portent_length() {
+    let mut e = Engine::new();
+    for (src, want) in [
+        ("Symbol.length", "0"),
+        ("typeof parseInt.length", "number"),
+        ("typeof Object.prototype.toString.length", "number"),
+        ("Symbol.hasOwnProperty('length')", "true"),
+        (
+            "Object.getOwnPropertyDescriptor(Symbol,'length').enumerable",
+            "false",
+        ),
+    ] {
+        match e.eval(src) {
+            Ok(v) => assert_eq!(e.describe(v), want, "{src}"),
+            Err(t) => panic!("{src} => ERR {t}"),
+        }
+    }
+    // Le motif exact du rapport : toString polyfillé lisant
+    // `Symbol.toStringTag` natif ne doit pas récurer.
+    let src = "var t=Object.prototype.toString;Object.prototype.toString=function e(){if(void 0===this)return'[object Undefined]';if(null===this)return'[object Null]';var r=Object(this),o=r[Symbol.toStringTag];return'string'!==typeof o?t.call(r):'[object '+o+']'};Object.prototype.toString.call({})+ '|' + Object.prototype.toString.call(Symbol('x'))";
+    match e.eval(src) {
+        Ok(v) => assert_eq!(e.describe(v), "[object Object]|[object Symbol]"),
+        Err(t) => panic!("motif manomano => ERR {t}"),
+    }
+}
