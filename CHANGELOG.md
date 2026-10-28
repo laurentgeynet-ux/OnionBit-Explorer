@@ -34,6 +34,24 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   = 940, col-8/6 = 300, img = 940×528.
   Verrous `b27_probe_*` (markup+CSS
   réels ouest-france en fixtures).
+- **R-130 — §B-55 : panic `resvg`
+  confiné** (`explorer-render`) — un
+  SVG hostile (`filter="url(#a)
+  url(#b)"` à régions divergentes →
+  `feComposite arithmetic` avec
+  `src` 200×200 vs `dest` 100×100)
+  paniquait la dépendance
+  (`composite.rs:25`, ici.fr vol 94 —
+  rattrapé thread, process vivant).
+  `catch_unwind` autour du parse
+  `usvg` et du `render` resvg dans
+  `decode_svg_raster` — couvre
+  `<img src=*.svg>` et `<svg>` inline
+  (`svg.rs:60`) — dégradation `None`
+  = repli alt/fond, comme tout
+  illisible. Verrou
+  `svg_filtres_regions_divergentes_
+  ne_panique_pas`.
 - **JS-C174 — `style.cssText`**
   (`explorer-jscore`) — l'anti-FOUC
   réel (`<body style=visibility:

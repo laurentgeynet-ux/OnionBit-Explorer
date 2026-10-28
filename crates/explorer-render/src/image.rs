@@ -148,7 +148,13 @@ fn looks_like_svg(bytes: &[u8]) -> bool {
 // dessus — le cast ne peut ni tronquer ni perdre le signe.
 /// Aussi utilisé par le `<svg>` inline (R-9, module `svg`).
 pub(crate) fn decode_svg_raster(bytes: &[u8], max_px: u32) -> Option<DecodedImage> {
-    let tree = resvg::usvg::Tree::from_data(bytes, &resvg::usvg::Options::default()).ok()?;
+    // Parse confiné aussi — un document hostile peut faire
+    // paniquer `usvg` (même politique §B-55 que `resvg::render`).
+    let tree = std::panic::catch_unwind(|| {
+        resvg::usvg::Tree::from_data(bytes, &resvg::usvg::Options::default())
+    })
+    .ok()?
+    .ok()?;
     let size = tree.size();
     let (w, h) = (f64::from(size.width()), f64::from(size.height()));
     if !(w.is_finite() && h.is_finite()) || w <= 0.0 || h <= 0.0 {
@@ -169,7 +175,17 @@ pub(crate) fn decode_svg_raster(bytes: &[u8], max_px: u32) -> Option<DecodedImag
     }
     let mut pm = tiny_skia::Pixmap::new(iw, ih)?;
     let tf = tiny_skia::Transform::from_scale(scale as f32, scale as f32);
-    resvg::render(&tree, tf, &mut pm.as_mut());
+    // §B-55 : un SVG hostile (filtre `feComposite` à sources de
+    // tailles divergentes) panique **dans** la dépendance resvg
+    // (`filter/composite.rs` assert). Un asset ne doit jamais
+    // emporter le raster — le panic est confiné et l'image
+    // dégrade en `None` (repli alt/fond), comme tout illisible.
+    let rendered = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        resvg::render(&tree, tf, &mut pm.as_mut());
+    }));
+    if rendered.is_err() {
+        return None;
+    }
     // tiny-skia stocke du prémultiplié — `DecodedImage`
     // contracte du RGBA droit : démultiplie pixel à pixel.
     let mut rgba = pm.data().to_vec();

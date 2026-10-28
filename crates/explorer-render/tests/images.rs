@@ -165,6 +165,27 @@ fn svg_viewbox_geant_borne() {
 }
 
 #[test]
+fn svg_filtres_regions_divergentes_ne_panique_pas() {
+    // §B-55 (vol 94, ici.fr) : `filter="url(#a) url(#b)"` — le
+    // calque resvg couvre l'union des régions (200×200) mais
+    // `feComposite arithmetic` détruit à la région de f1
+    // (100×100) → `assertion src1.width == dest.width` dans la
+    // dépendance. Confiné par `catch_unwind` → `None`.
+    let hostile = r#"<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100">
+      <filter id="f1" x="0" y="0" width="1" height="1">
+        <feComposite in="SourceGraphic" in2="SourceGraphic" operator="arithmetic" k1="1" k2="0" k3="0" k4="0"/>
+      </filter>
+      <filter id="f2" x="0" y="0" width="2" height="2">
+        <feFlood flood-color="blue"/>
+      </filter>
+      <rect width="100" height="100" fill="red" filter="url(#f1) url(#f2)"/>
+    </svg>"#;
+    assert!(decode_image(hostile.as_bytes(), 1_000_000).is_none());
+    // Un SVG sain au même budget doit toujours décoder.
+    assert!(decode_image(GREEN_SVG.as_bytes(), 1_000_000).is_some());
+}
+
+#[test]
 fn svg_malforme_est_none() {
     assert!(decode_image(b"<svg><rect", 1_000_000).is_none());
     // HTML portant un svg inline : root non-SVG → refus (un
