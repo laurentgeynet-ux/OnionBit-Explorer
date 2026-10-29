@@ -6712,3 +6712,62 @@ fn native_construct_dom_probe() {
         }
     }
 }
+
+// -- JS-C208 : Document = nœud parent (Node/ParentNode) -------------
+
+#[test]
+fn document_body_autovivifies_on_bare_document() {
+    // `iframe.contentDocument`/`about:blank` portent toujours
+    // `<html><head><body>` (spec) — `document.body` doit rendre
+    // l'élément BODY, jamais le nœud racine (sinon `f.body.
+    // appendChild` jette `(on HTMLDocument)` — moin/degiro).
+    assert_eq!(ev_in("", "document.body.tagName"), "BODY");
+    assert_eq!(ev_in("", "document.body.parentElement.tagName"), "HTML");
+    assert_eq!(
+        ev_in("", "var d=document.createElement('div'); document.body.appendChild(d); d.parentElement===document.body"),
+        "true"
+    );
+}
+
+#[test]
+fn document_node_mutation_methods() {
+    // Spec : `document` est un nœud parent — les méthodes Node/
+    // ParentNode existent dessus (turbolinks `replaceChild`,
+    // loaders morph `documentElement`).
+    assert_eq!(ev("typeof document.appendChild"), "function");
+    assert_eq!(ev("typeof document.replaceChild"), "function");
+    assert_eq!(ev("typeof document.prepend"), "function");
+    assert_eq!(ev("typeof document.insertBefore"), "function");
+    // replaceChild : le nouvel élément devient documentElement.
+    assert_eq!(
+        ev("var m=document.createElement('section'); document.replaceChild(m, document.documentElement); document.documentElement===m"),
+        "true"
+    );
+    // insertBefore devant un documentElement présent (le
+    // `firstChild` reste le doctype — spec).
+    assert_eq!(
+        ev("var c=document.createComment('x'); document.insertBefore(c, document.documentElement); document.documentElement.previousSibling===c"),
+        "true"
+    );
+    // prepend : passe devant tous les enfants, doctype inclus.
+    assert_eq!(
+        ev("var c2=document.createComment('y'); document.prepend(c2); document.firstChild===c2"),
+        "true"
+    );
+    // removeChild : retourne l'enfant retiré.
+    assert_eq!(
+        ev("var h=document.documentElement; document.removeChild(h)===h && document.documentElement===null"),
+        "true"
+    );
+    // Texte directement sous Document → HierarchyRequestError
+    // (spec — pas de nœud texte enfant du document).
+    assert_eq!(
+        ev("try{document.append('str')}catch(x){x.message}"),
+        "HierarchyRequestError: text into document"
+    );
+    // appendChild document→document → cycle refusé.
+    assert_eq!(
+        ev("try{document.appendChild(document)}catch(x){x.message}"),
+        "HierarchyRequestError: ancestor"
+    );
+}

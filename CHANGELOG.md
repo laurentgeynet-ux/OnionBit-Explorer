@@ -7,6 +7,42 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **JS-C208 — `document` est un nœud
+  parent : mutation Node/ParentNode +
+  `body` auto-vivifié** (§B-14, bras
+  `` `appendChild` is not a function
+  (on HTMLDocument) `` récurrent —
+  moin/degiro vol 148, web-agri
+  vol 174). Diagnostic : `Dom::body()`
+  repliant sur la racine faisait de
+  `iframe.contentDocument.body` le
+  nœud Document (doc de cadre sans
+  `<body>` parsé) → les loaders
+  (moin `e.contentDocument.body.
+  appendChild`) mouraient sur un
+  receveur HTMLDocument. Spec : un
+  document de cadre porte toujours
+  `<html><head><body>` — le getter
+  `body` auto-vit le squelette comme
+  `head` (JS-C89) et
+  `getElementsByTagName`. Le Document
+  expose désormais les méthodes
+  Node/ParentNode de mutation —
+  `appendChild`/`append`/`prepend`/
+  `insertBefore`/`removeChild`/
+  `replaceChild`/`replaceChildren`/
+  `hasChildNodes` (receveur = racine,
+  enfant Text → spec
+  `HierarchyRequestError`, ancêtre/
+  soi refusé — turbolinks fait
+  `document.replaceChild`) — et les
+  accesseurs `firstChild`/`lastChild`/
+  `childNodes`/`children`/
+  `firstElementChild`/`lastElementChild`/
+  `childElementCount`. Verrous
+  `document_body_autovivifies_on_bare_
+  document` + `document_node_mutation_
+  methods` (dom.rs).
 - **MSE-3 — Transport segments :
   `appendBuffer` stocke, pull
   FIFO `GET …/segments`**

@@ -3702,6 +3702,26 @@ fn ensure_doc_part(dom: &DomRef, tag: &str) {
         "body" => {
             let b = d.create_element("body");
             d.append(html_el, b);
+            // Un miroir fragmentaire (`DOMParser.parseFrom
+            // String`, `from_html` sur fragment) laisse le
+            // contenu à plat sous la racine — spec `text/html` :
+            // tout ce qui n'est pas `head`/doctype vit dans
+            // `body`. Le body auto-vivifié adopte ces
+            // orphelins (les commentaires restent au niveau
+            // document) sinon `d.body` rendait un élément vide
+            // pendant que `<p>` traînait sous la racine.
+            let strays: Vec<NodeId> = d
+                .child_nodes(root)
+                .into_iter()
+                .filter(|&c| c != html_el && d.nodes[c as usize].kind != NodeKind::Comment)
+                .collect();
+            for c in strays {
+                if d.nodes[c as usize].tag == "head" {
+                    d.insert_before(html_el, c, Some(b));
+                } else {
+                    d.append(b, c);
+                }
+            }
         }
         _ => {}
     }
@@ -3732,6 +3752,15 @@ impl Host for DocumentHost {
     fn get(&self, e: &mut Engine, this: Value, key: &str) -> JsResult<Option<Value>> {
         match key {
             "body" => {
+                // Un document de cadre (`iframe.contentDocument`,
+                // `about:blank` inclus) porte toujours le
+                // squelette `<html><head><body>` — auto-vit `body`
+                // comme `head` (JS-C89) et `getElementsByTagName`.
+                // Sans ça, `d.body()` repliant sur la racine
+                // rendait le nœud Document → `f.contentDocument.
+                // body.appendChild` jettait `(on HTMLDocument)`
+                // (moin/degiro, web-agri — JS-C208).
+                ensure_doc_part(&self.dom, "body");
                 let n = self.dom.borrow().body();
                 Ok(Some(node_value(e, &self.dom, &self.cache, n)))
             }
@@ -3767,6 +3796,74 @@ impl Host for DocumentHost {
                     Some(n) => node_value(e, &self.dom, &self.cache, n),
                     None => Value::Null,
                 }))
+            }
+            // Accesseurs Node/ParentNode du Document (spec —
+            // JS-C208 : `document.firstChild`/`childNodes`/
+            // `children` existent ; receveur = racine).
+            "firstChild" | "lastChild" => {
+                let n = {
+                    let d = self.dom.borrow();
+                    let kids = d.child_nodes(d.root);
+                    if key == "firstChild" {
+                        kids.first().copied()
+                    } else {
+                        kids.last().copied()
+                    }
+                };
+                Ok(Some(match n {
+                    Some(n) => node_value(e, &self.dom, &self.cache, n),
+                    None => Value::Null,
+                }))
+            }
+            "childNodes" => {
+                let ids = {
+                    let d = self.dom.borrow();
+                    d.child_nodes(d.root)
+                };
+                Ok(Some(dom_collection(
+                    e,
+                    &self.dom,
+                    &self.cache,
+                    &ids,
+                    false,
+                    "NodeList",
+                )))
+            }
+            "children" => {
+                let ids = {
+                    let d = self.dom.borrow();
+                    d.element_children(d.root)
+                };
+                Ok(Some(dom_collection(
+                    e,
+                    &self.dom,
+                    &self.cache,
+                    &ids,
+                    false,
+                    "HTMLCollection",
+                )))
+            }
+            "firstElementChild" | "lastElementChild" => {
+                let n = {
+                    let d = self.dom.borrow();
+                    let kids = d.element_children(d.root);
+                    if key == "firstElementChild" {
+                        kids.first().copied()
+                    } else {
+                        kids.last().copied()
+                    }
+                };
+                Ok(Some(match n {
+                    Some(n) => node_value(e, &self.dom, &self.cache, n),
+                    None => Value::Null,
+                }))
+            }
+            "childElementCount" => {
+                let n = {
+                    let d = self.dom.borrow();
+                    d.element_children(d.root).len()
+                };
+                Ok(Some(Value::Num(n as f64)))
             }
             // `document.adoptedStyleSheets` (CAP-195 — mesuré :
             // le polyfill Popover de github `[C, ...e.adopted
@@ -4479,6 +4576,111 @@ impl Host for DocumentHost {
                 d.parse_fragment_into(body, &s);
                 Ok(Some(Value::Undefined))
             }
+            // Méthodes Node/ParentNode du Document (spec :
+            // `document` EST un nœud parent — `appendChild`,
+            // `insertBefore`, `replaceChild`, `prepend`… y
+            // existent ; turbolinks fait `document.replaceChild`,
+            // les loaders morph `documentElement`). Receveur =
+            // racine ; enfant Text illégal → spec
+            // `HierarchyRequestError` (JS-C208).
+            "append" | "prepend" | "replaceChildren" => {
+                let mut kids = Vec::with_capacity(args.len());
+                for &a in args {
+                    let Some(n) = node_for_in(e, a, &self.dom)
+                        .or_else(|| adopt_into(e, a, &self.dom, &self.cache))
+                    else {
+                        // Chaîne → Text ; Text interdit sous
+                        // Document (spec `HierarchyRequestError`).
+                        return Err(e.type_error("HierarchyRequestError: text into document"));
+                    };
+                    if self.dom.borrow().nodes[n as usize].kind == NodeKind::Text {
+                        return Err(e.type_error("HierarchyRequestError: text into document"));
+                    }
+                    kids.push(n);
+                }
+                let root = self.dom.borrow().root;
+                match name {
+                    "prepend" => {
+                        let first = self.dom.borrow().child_nodes(root).first().copied();
+                        for &k in &kids {
+                            self.dom.borrow_mut().insert_before(root, k, first);
+                        }
+                    }
+                    "replaceChildren" => {
+                        self.dom.borrow_mut().replace_children(root, &kids);
+                        return Ok(Some(Value::Undefined));
+                    }
+                    _ => {
+                        for &k in &kids {
+                            self.dom.borrow_mut().append(root, k);
+                        }
+                    }
+                }
+                Ok(Some(arg(args, 0)))
+            }
+            "appendChild" | "insertBefore" => {
+                let child = node_for_in(e, arg(args, 0), &self.dom)
+                    .or_else(|| adopt_into(e, arg(args, 0), &self.dom, &self.cache));
+                let Some(child) = child else {
+                    return Err(e.type_error("appendChild: not a node"));
+                };
+                if self.dom.borrow().nodes[child as usize].kind == NodeKind::Text {
+                    return Err(e.type_error("HierarchyRequestError: text into document"));
+                }
+                let root = self.dom.borrow().root;
+                // Ancêtre/soi → cycle (spec `HierarchyRequestError`
+                // — le document ne peut se contenir).
+                if self.dom.borrow().is_ancestor_or_self(root, child) {
+                    return Err(e.type_error("HierarchyRequestError: ancestor"));
+                }
+                if name == "insertBefore" {
+                    let ref_node = match arg(args, 1) {
+                        Value::Null | Value::Undefined => None,
+                        v => node_for_in(e, v, &self.dom),
+                    };
+                    self.dom.borrow_mut().insert_before(root, child, ref_node);
+                } else {
+                    self.dom.borrow_mut().append(root, child);
+                }
+                Ok(Some(arg(args, 0)))
+            }
+            "replaceChild" => {
+                let child = node_for_in(e, arg(args, 0), &self.dom)
+                    .or_else(|| adopt_into(e, arg(args, 0), &self.dom, &self.cache));
+                let Some(child) = child else {
+                    return Err(e.type_error("replaceChild: not a node"));
+                };
+                if self.dom.borrow().nodes[child as usize].kind == NodeKind::Text {
+                    return Err(e.type_error("HierarchyRequestError: text into document"));
+                }
+                let Some(old) = node_for_in(e, arg(args, 1), &self.dom) else {
+                    return Err(e.type_error("replaceChild: old not a node"));
+                };
+                let root = self.dom.borrow().root;
+                if self.dom.borrow().is_ancestor_or_self(root, child) {
+                    return Err(e.type_error("HierarchyRequestError: ancestor"));
+                }
+                self.dom.borrow_mut().insert_before(root, child, Some(old));
+                self.dom.borrow_mut().detach(old);
+                Ok(Some(arg(args, 1)))
+            }
+            "removeChild" => {
+                let target = node_for_in(e, arg(args, 0), &self.dom);
+                match target {
+                    Some(child) => {
+                        self.dom.borrow_mut().detach(child);
+                        Ok(Some(arg(args, 0)))
+                    }
+                    None => Err(e.type_error("removeChild: not a node")),
+                }
+            }
+            "hasChildNodes" => {
+                let has = {
+                    let d = self.dom.borrow();
+                    !d.child_nodes(d.root).is_empty()
+                };
+                Ok(Some(Value::Bool(has)))
+            }
             _ => Ok(None),
         }
     }
@@ -4733,6 +4935,16 @@ const DOC_METHODS: &[&str] = &[
     "close",
     "write",
     "writeln",
+    // Node/ParentNode sur le Document (spec — JS-C208 :
+    // `document.appendChild`/`replaceChild` existent).
+    "appendChild",
+    "append",
+    "prepend",
+    "insertBefore",
+    "removeChild",
+    "replaceChild",
+    "replaceChildren",
+    "hasChildNodes",
 ];
 
 /// Méthodes d'élément universelles (Node + Element — hors
