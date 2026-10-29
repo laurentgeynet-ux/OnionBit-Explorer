@@ -259,6 +259,9 @@ plateforme net** (ops jscore Encrypt/Decrypt restent à livrer) ·
 - **Agent 134 (`[V10-main]`, LIGHT)** : HN/dev.to/larousse
   consoles **vides** (~85-95 %) ; corriere doc_h 48k +
   `allocation exceeds` ×N.
+- **Agent 135 (`[V10-main]`, AIR)** : transavia ~85 %
+  (`[object Object]` sérialisation trou) ; eurostar
+  challenge ; easyjet/kingjouet 403.
 - **Agent 107 (`[V10-main]`, PRESSE2)** : franceinfo ~70 %
   (panneau compte → §B-17), deezer ~60 % ; §B-14 +3 ;
   watchdog nominal (pic 1,98 Go, seuil non approché).
