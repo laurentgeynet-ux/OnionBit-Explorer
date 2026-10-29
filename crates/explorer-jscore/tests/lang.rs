@@ -5766,6 +5766,19 @@ fn c16_url() {
     // URL invalide → TypeError.
     assert!(Engine::new().eval("new URL('not a url')").is_err());
     assert!(Engine::new().eval("new URL('rel', 'not a base')").is_err());
+    // L'input fautif est nommé dans le message — la console
+    // terrain identifie la valeur rejetée (bras `Invalid URL`
+    // récurrent vols 150-166).
+    let msg = Engine::new()
+        .eval("new URL('badinput42')")
+        .unwrap_err()
+        .to_string();
+    assert!(msg.contains("badinput42"), "attendu input nommé : {msg}");
+    let msg = Engine::new()
+        .eval("new URL('x', 'badbase99')")
+        .unwrap_err()
+        .to_string();
+    assert!(msg.contains("badbase99"), "attendu base nommée : {msg}");
 }
 
 #[test]

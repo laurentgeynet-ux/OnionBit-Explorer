@@ -4267,6 +4267,37 @@ fn document_current_script() {
     assert_eq!(evf(&mut e, "document.currentScript === null"), "true");
 }
 
+/// `document.currentScript` dans une microtâche drainée par
+/// l'éval du même script — Chrome/Safari gardent l'élément
+/// jusqu'à la fin du task (bugzilla 1620505, webpack #10510) ;
+/// seules les continuations cross-task voient `null`. Verrou
+/// de parité : `getAssetPrefix` turbopack (`new URL(
+/// currentScript.src)`) exige ce comportement.
+#[test]
+fn document_current_script_visible_in_microtask() {
+    let mut e = engine_with(
+        "<html><body>\
+         <script>var a = 0;</script>\
+         <script src=b.js></script>\
+         </body></html>",
+    );
+    // `.then` schedulé pendant l'éval de l'élément 1 : drainé
+    // dans le même task — l'élément reste visible (Chrome).
+    e.eval_script_el(
+        "globalThis.__seen = 'unset';\
+         Promise.resolve().then(function(){\
+           var s = document.currentScript;\
+           globalThis.__seen = s ? s.getAttribute('src') : 'null';\
+         });",
+        None,
+        1,
+    )
+    .unwrap();
+    assert_eq!(evf(&mut e, "globalThis.__seen"), "b.js");
+    // Et toujours `null` après.
+    assert_eq!(evf(&mut e, "document.currentScript"), "null");
+}
+
 /// CAP-184 — `document.currentScript` sous auto-suppression :
 /// un `<script>` qui se `remove()` ne décale pas le lookup
 /// des suivants (pattern stream `$_TSR` de x.com : chaque

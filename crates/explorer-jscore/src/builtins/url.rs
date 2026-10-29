@@ -352,10 +352,17 @@ pub(crate) fn url_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Va
     };
     let base = base_s.as_deref().and_then(|b| url_parse_absolute(b.trim()));
     if base_s.is_some() && base.is_none() {
-        return Err(e.type_error("Invalid base URL"));
+        let b: String = base_s.unwrap_or_default().chars().take(80).collect();
+        return Err(e.type_error(format!("Invalid base URL: {b}")));
     }
     let Some(p) = url_parse(&href, base.as_ref()) else {
-        return Err(e.type_error("Invalid URL"));
+        // L'input fautif nommé — la console terrain identifie
+        // la valeur rejetée (bras `Invalid URL` ×5 sites =
+        // `new URL(currentScript.src)` turbopack : `""` sur
+        // script inline — reproduction fidèle du bug Next.js,
+        // identique sous Chrome dans le même ordonnancement).
+        let h: String = href.chars().take(80).collect();
+        return Err(e.type_error(format!("Invalid URL: {h}")));
     };
     let proto = Value::Obj(e.protos.url);
     let id = e.heap.alloc_obj(crate::heap::Object::ordinary(proto));

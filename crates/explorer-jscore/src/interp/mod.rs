@@ -1556,7 +1556,9 @@ impl Engine {
                 // (spec : `error` n'est que transport/CSP).
                 // `eval_named` (JS-C87) : la pile d'erreur
                 // attribue le chunk (`at fn (url:l:c)`) —
-                // src sinon étiquette seq.
+                // src sinon étiquette seq. `currentScript`
+                // reste posé pendant le drain des microtasks
+                // (parité Chrome — cf. `eval_script_el`).
                 let label = {
                     let d = dom.borrow();
                     d.attr(node, "src")
@@ -2588,6 +2590,11 @@ impl Engine {
             Ok(p) => self.run_program(&p),
             Err(e) => Err(e),
         };
+        // Chrome/Safari : `currentScript` survit aux microtasks
+        // du même task (checkpoint avant restore — bugzilla
+        // 1620505, webpack #10510) ; une continuité `await`
+        // échappée à un drain ultérieur lit l'élément du
+        // checkpoint qui la court — parité stricte.
         self.hooks.current_script = prev;
         r
     }
