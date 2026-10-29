@@ -180,6 +180,39 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   l'identique. Verrous adapter :
   claim livré par repli url + jamais
   sur le mauvais élément.
+- **MSE-8 — drain `media_commands`
+  hors gate `jobs>0`** (vol MSE-DLL,
+  ADR-0029) — `drain_media_commands`
+  vivait dans `after_script`, gaté
+  `jobs > 0` : un `play()` posé par
+  une éval API (ou entre deux jobs)
+  dormait à vie dans `d.media_cmds`
+  — jamais émis en `MediaCommand`,
+  la promesse `play()` JS pendait
+  sans réponse. Déplacé à côté de
+  `drain_script_net`/`drain_anim_
+  births` (dégatés, « bon marché à
+  vide ») aux deux points de pompe.
+  Vérifié live : `play` reçu côté
+  app, état `playing` rapporté,
+  `position_ms`/`currentTime`
+  avancent, `v.paused` passe à
+  `false`.
+- **139i — signature FFI réelle
+  `open_mse`** (`app/`) — la DLL
+  prend 8 params `ptr+len` UTF-8
+  (`base`, `base_len`, `tab` u64,
+  `media` u64, `buffer` u32, `ext`,
+  `ext_len`), pas 6 avec C-strings :
+  `ext` tombait dans le slot
+  `buffer` et `ext_ptr` lisait un
+  registre poubelle →
+  « extension mse invalide (utf-8) ».
+  Corrigé + `debugPrint` sur échec
+  claim/réception `media_command`
+  (échec silencieux masquait la
+  couture). Vérifié : `open_mse` 0,
+  `MseSource` pull le vrai flux.
 - **139g — branche MSE dormante dans le
   lecteur** (`app/`) — `MediaOffer.mse`
   parsé de l'offre (`mse:true` du

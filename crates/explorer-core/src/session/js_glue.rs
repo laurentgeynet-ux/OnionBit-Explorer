@@ -111,6 +111,11 @@ impl Session {
         // il court à chaque battement.
         self.drain_script_net(tab);
         self.drain_anim_births(tab);
+        // Même famille pour `media_cmds` (vol MSE-DLL) : un
+        // `play()` posé par une éval API avec `jobs==0` dormait
+        // dans la file — jamais émis en `MediaCommand`, la
+        // promesse JS pendait sans réponse.
+        self.drain_media_commands(tab);
         // Les applies enfilés par cette pompe sont exécutés
         // ici (hôte `&mut` synchrone — étape 55h).
         self.drain_applies();
@@ -428,6 +433,7 @@ impl Session {
         if !drain_expired {
             self.drain_script_net(tab);
             self.drain_anim_births(tab);
+            self.drain_media_commands(tab);
         }
         // B-41 (flixbus) : une rafale `UnmappedKey` →
         // re-parse → éval produisait des jobs à chaque
