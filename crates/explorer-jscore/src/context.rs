@@ -247,7 +247,14 @@ impl BrowsingContext {
         {
             ids.push(p);
         }
-        self.mutobs.root_ids(ids);
+        // §B-59 — même règle que `Engine::gc_seed_ids` :
+        // wrapper raciné uniquement si registrations vivantes.
+        let live_mutobs = self
+            .dom_ctx
+            .as_ref()
+            .map(|(dom, _)| dom.borrow().live_observer_ids())
+            .unwrap_or_default();
+        self.mutobs.root_ids(ids, &live_mutobs);
         self.obs.root_ids(ids);
         self.files.root_ids(ids);
         self.streams.root_ids(ids);
@@ -260,10 +267,17 @@ impl BrowsingContext {
             ids.push(*promise);
         }
         if let Some((dom, cache)) = &self.dom_ctx {
-            for &id in cache.borrow().values() {
-                ids.push(id);
+            let d = dom.borrow();
+            // §B-59 — même filtre que `Engine::gc_seed_ids` :
+            // seuls les wrappers de nœuds attachés ou retenus
+            // restent racinés.
+            let extra = d.extra_kept_nodes();
+            for (nid, &id) in cache.borrow().iter() {
+                if d.is_attached(*nid) || extra.contains(nid) {
+                    ids.push(id);
+                }
             }
-            for node in &dom.borrow().nodes {
+            for node in &d.nodes {
                 for (_, cb, _) in &node.listeners {
                     crate::heap::push_value(ids, *cb);
                 }

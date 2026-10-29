@@ -58,6 +58,8 @@ mod idb;
 mod interp;
 mod intl;
 mod json;
+#[cfg(test)]
+mod leak_probe;
 mod lexer;
 mod mediaq;
 mod misc_apis;

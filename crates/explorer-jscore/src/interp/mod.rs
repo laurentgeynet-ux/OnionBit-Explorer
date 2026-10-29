@@ -2328,6 +2328,38 @@ impl Engine {
                 mark(id);
             }
         });
+        // 4. §B-59 — entrées d'observers dont le wrapper vient
+        //    d'être balayé : elles ne se vident pas toutes
+        //    seules (`disconnect` JS n'est pas garanti) et
+        //    continueraient à produire des records pour un
+        //    objet mort. Purge + retrait des registrations Dom.
+        let dead_mutobs = self.mutobs.purge_dead(&self.heap);
+        if !dead_mutobs.is_empty() {
+            if let Some((dom, _)) = &self.dom_ctx {
+                let mut d = dom.borrow_mut();
+                for id in dead_mutobs {
+                    d.disconnect_observer(id);
+                }
+            }
+        }
+        self.obs.purge_dead(&self.heap);
+        // Sweep miroir : les entrées `NodeCache` dont le
+        // wrapper est mort partent (un nœud détaché et
+        // déréférencé ne garde plus de wrapper) ; puis les
+        // nœuds non attachés non retenus perdent leurs
+        // payloads lourds — l'arène reste append-only (les
+        // `NodeId` indexent `nodes` et ne se réutilisent pas,
+        // journal DomSync intact) mais le churn `innerHTML`
+        // n'accumule plus attrs/texte/enfants.
+        if let Some((dom, cache)) = &self.dom_ctx {
+            let mut c = cache.borrow_mut();
+            c.retain(|_, &mut oid| self.heap.obj(oid).is_some());
+            let mut seeds: std::collections::HashSet<crate::dom::NodeId> =
+                c.keys().copied().collect();
+            drop(c);
+            seeds.extend(self.obs.live_target_ids());
+            dom.borrow_mut().collect_garbage(&seeds);
+        }
         // 4. `FinalizationRegistry` — purge des registres morts,
         //    puis cleanup en microtask pour les cibles balayées
         //    (spec `HostEnqueueFinalizationRegistryCleanupJob` :
@@ -2451,11 +2483,21 @@ impl Engine {
                 crate::promise::Job::Plain(v) => crate::heap::push_value(&mut ids, *v),
             }
         }
-        // `MutationObserver` (JS-C26) — callbacks + wrappers
-        // racines tant que l'engine vit (ré-armement possible).
-        self.mutobs.root_ids(&mut ids);
-        // `IntersectionObserver`/`ResizeObserver` (JS-C69) —
-        // même traitement : callbacks + wrappers enregistrés.
+        // `MutationObserver` (JS-C26, §B-59) — wrapper raciné
+        // uniquement si des registrations Dom vivent (la cible
+        // observe garde l'observer, Chrome) ; le `cb` suit le
+        // wrapper via `Host::trace`. Un observer déconnecté/
+        // non-référencé devient récupérable → `cbs` s'élimine
+        // au sweep (auparavant raciné à vie → fuite).
+        let live_mutobs = self
+            .dom_ctx
+            .as_ref()
+            .map(|(dom, _)| dom.borrow().live_observer_ids())
+            .unwrap_or_default();
+        self.mutobs.root_ids(&mut ids, &live_mutobs);
+        // `IntersectionObserver`/`ResizeObserver` (JS-C69,
+        // §B-59) — même règle : wrapper raciné seulement si
+        // cibles ou notifications en attente.
         self.obs.root_ids(&mut ids);
         // `Blob`/`File`/`FileReader` (JS-C70) — protos +
         // readers en cours de lecture (le `Host::trace`
@@ -2471,10 +2513,20 @@ impl Engine {
         self.mse.root_ids(&mut ids);
         self.misc.root_ids(&mut ids);
         if let Some((dom, cache)) = &self.dom_ctx {
-            for &id in cache.borrow().values() {
-                ids.push(id);
+            let d = dom.borrow();
+            // §B-59 — le cache n'est plus raciné en bloc : un
+            // wrapper de nœud **détaché et non retenu** meurt
+            // avec ses expandos (déviation documentée vs
+            // Chrome qui le garde par weak-map — ici la borne
+            // mémoire prime). Les nœuds attachés, observés ou
+            // cités par des records en attente restent racinés.
+            let extra = d.extra_kept_nodes();
+            for (nid, &id) in cache.borrow().iter() {
+                if d.is_attached(*nid) || extra.contains(nid) {
+                    ids.push(id);
+                }
             }
-            for node in &dom.borrow().nodes {
+            for node in &d.nodes {
                 for (_, cb, _) in &node.listeners {
                     crate::heap::push_value(&mut ids, *cb);
                 }

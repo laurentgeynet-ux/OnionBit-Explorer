@@ -235,6 +235,11 @@ pub struct Node {
     /// par mutation rendait le parsing profond quadratique
     /// (JS-C55).
     pub attached: bool,
+    /// Slot libéré par [`Dom::collect_garbage`] et déjà
+    /// comptabilisé (`free_nodes`/`dead_blocked`) — interne à
+    /// l'arène (§B-59) ; jamais sérialisé ni observé côté JS.
+    /// Le miroir est un harnais : `serde` n'y lit pas ce champ.
+    pub(crate) free: bool,
 }
 
 /// Opération `CanvasRenderingContext2D` enregistrée sur le
@@ -587,6 +592,14 @@ pub struct Dom {
     /// par `document.write`, chemin non tracé) — le prochain
     /// drain déclare « re-parse » plutôt que rejouer à faux.
     journal_poisoned: bool,
+    /// Slots libres recyclables par [`Dom::alloc`] — remplis
+    /// par [`Dom::collect_garbage`] (§B-59 : borne l'arène
+    /// sous churn continu ; un id n'entre que si le journal
+    /// ne le cite plus).
+    free_nodes: Vec<NodeId>,
+    /// Slots morts encore cités par des ops de journal en
+    /// attente — passent en `free_nodes` une fois drainés.
+    dead_blocked: Vec<NodeId>,
     /// Ops drainées mais **non rejouées** — empoisonnement ou
     /// classement « re-parse » côté adaptateur (ADR-0025 :
     /// mesure du périmètre du pilote — un taux élevé signale
@@ -786,6 +799,8 @@ impl Dom {
             observers: HashMap::new(),
             mutations: Vec::new(),
             journal: Vec::new(),
+            free_nodes: Vec::new(),
+            dead_blocked: Vec::new(),
             journal_poisoned: false,
             journal_dropped: 0,
             canvases: HashMap::new(),
@@ -853,6 +868,150 @@ impl Dom {
         self.mutations.retain(|(o, _)| *o != id);
     }
 
+    /// Ids d'observers ayant encore des registrations —
+    /// racinage GC conditionnel (§B-59 : un observer encore
+    /// enregistré garde son wrapper vivant ; déconnecté il
+    /// devient récupérable).
+    pub(crate) fn live_observer_ids(&self) -> std::collections::HashSet<u64> {
+        self.observers
+            .values()
+            .flat_map(|regs| regs.iter().map(|r| r.id))
+            .collect()
+    }
+
+    /// Nœuds retenus **en dehors** du drapeau `attached` —
+    /// §B-59 : référencés par des records en attente, des
+    /// registrations d'observers, les racines shadow ou toute
+    /// side-table du miroir (canvas, media, templates, CE,
+    /// files `dyn_*`). Conservateur = sûr : un slot réutilisé
+    /// ne doit jamais aliasser une référence encore stockée.
+    pub(crate) fn extra_kept_nodes(&self) -> std::collections::HashSet<NodeId> {
+        let mut keep = std::collections::HashSet::new();
+        for (_, rec) in &self.mutations {
+            keep.insert(rec.target);
+            keep.extend(rec.added.iter().copied());
+            keep.extend(rec.removed.iter().copied());
+        }
+        keep.extend(self.observers.keys().copied());
+        keep.extend(self.shadow_roots.values().map(|(r, _)| *r));
+        keep.extend(self.shadow_roots.keys().copied());
+        keep.extend(self.shadow_hosts.keys().copied());
+        keep.extend(self.shadow_hosts.values().copied());
+        keep.extend(self.canvases.keys().copied());
+        keep.extend(self.media.keys().copied());
+        keep.extend(self.template_contents.keys().copied());
+        keep.extend(self.template_contents.values().copied());
+        keep.extend(self.ce.upgraded.keys().copied());
+        keep.extend(self.ce.failed.iter().copied());
+        keep.extend(self.dyn_started.iter().copied());
+        keep.extend(self.pending_dyn.iter().copied());
+        keep.extend(self.dyn_frame_seen.iter().copied());
+        keep.extend(self.pending_dyn_frames.iter().copied());
+        keep.extend(self.dyn_img_seen.keys().copied());
+        keep.extend(self.pending_dyn_imgs.iter().copied());
+        keep.extend(self.dyn_link_seen.keys().copied());
+        keep.extend(self.pending_dyn_links.iter().copied());
+        keep
+    }
+
+    /// `NodeId`s cités par les ops de journal en attente — un
+    /// slot recyclé ne doit pas aliasser une op qui sera
+    /// rejouée au prochain drain (§B-59).
+    fn journal_kept_nodes(&self) -> std::collections::HashSet<NodeId> {
+        let mut keep = std::collections::HashSet::new();
+        for op in &self.journal {
+            match op {
+                JournalOp::Insert { parent, added, .. } => {
+                    keep.insert(*parent);
+                    keep.extend(added.iter().copied());
+                }
+                JournalOp::Remove { key }
+                | JournalOp::SetAttr { key, .. }
+                | JournalOp::SetText { key } => {
+                    keep.insert(*key);
+                }
+                JournalOp::AttachShadow { host, root, .. } => {
+                    keep.insert(*host);
+                    keep.insert(*root);
+                }
+            }
+        }
+        keep
+    }
+
+    /// Libère les payloads des nœuds **morts** : non attachés
+    /// et non retenus par `seeds` (wrappers JS encore vivants,
+    /// cibles IO/RO, records — §B-59). Le slot reste valide —
+    /// `NodeId` indexe l'arène et n'est jamais réutilisé (le
+    /// journal `DomSync` et les records y font foi) ; seules les
+    /// allocations lourdes sont rendues (attrs, texte,
+    /// enfants, listeners). Les `seeds` sont closes sur les
+    /// descendants : un wrapper vivant sur un nœud détaché
+    /// retient tout son sous-arbre.
+    pub(crate) fn collect_garbage(&mut self, seeds: &std::collections::HashSet<NodeId>) -> usize {
+        let mut keep = self.extra_kept_nodes();
+        keep.extend(seeds.iter().copied());
+        let mut stack: Vec<NodeId> = keep.iter().copied().collect();
+        while let Some(n) = stack.pop() {
+            if !self.node_valid(n) {
+                continue;
+            }
+            for &c in &self.nodes[n as usize].children {
+                if keep.insert(c) {
+                    stack.push(c);
+                }
+            }
+        }
+        let jids = self.journal_kept_nodes();
+        // Slots morts restés bloqués par le journal la passe
+        // précédente — recyclables dès que leurs ops sont
+        // drainées. `node.free` marque « déjà comptabilisé »
+        // (free_nodes ou dead_blocked) — sans lui un slot vidé
+        // serait repoussé à chaque passe et `alloc`
+        // aliasserait.
+        let mut blocked = std::mem::take(&mut self.dead_blocked);
+        blocked.retain(|&id| {
+            let reusable = !jids.contains(&id) && !self.nodes[id as usize].attached;
+            if reusable {
+                self.free_nodes.push(id);
+            }
+            !reusable
+        });
+        self.dead_blocked = blocked;
+        let mut freed = 0;
+        for (i, node) in self.nodes.iter_mut().enumerate() {
+            let id = i as NodeId;
+            if node.free || node.attached || keep.contains(&id) {
+                continue;
+            }
+            if !(node.attrs.is_empty()
+                && node.text.is_empty()
+                && node.children.is_empty()
+                && node.listeners.is_empty()
+                && node.inline_handlers.is_empty()
+                && node.parent.is_none())
+            {
+                node.attrs = Vec::new();
+                node.text = String::new();
+                node.children = Vec::new();
+                node.listeners = Vec::new();
+                node.inline_handlers = Vec::new();
+                node.parent = None;
+                freed += 1;
+            }
+            // Réutilisable seulement si aucune op de journal
+            // en attente ne cite cet id — sinon l'op rejouerait
+            // sur le futur occupant du slot.
+            node.free = true;
+            if jids.contains(&id) {
+                self.dead_blocked.push(id);
+            } else {
+                self.free_nodes.push(id);
+            }
+        }
+        freed
+    }
+
     /// `observer.takeRecords()` — purge et rend la file d'un
     /// observer (les autres conservent la leur).
     pub fn take_mutation_records(&mut self, id: u64) -> Vec<MutationRecord> {
@@ -873,6 +1032,19 @@ impl Dom {
     /// à la charge du moteur (microtask checkpoint).
     pub fn drain_mutations(&mut self) -> Vec<(u64, MutationRecord)> {
         std::mem::take(&mut self.mutations)
+    }
+
+    /// §B-59 instrumentation — tailles des structures qui
+    /// peuvent croître sous flux continu (sonde `leak_probe`).
+    #[cfg(test)]
+    pub(crate) fn b59_counts(&self) -> (usize, usize, usize, usize, usize) {
+        (
+            self.nodes.len(),
+            self.mutations.len(),
+            self.observers.values().map(Vec::len).sum(),
+            self.journal.len(),
+            self.media_cmds.len() + self.pending_dyn_imgs.len(),
+        )
     }
 
     // -- Journal de synchro (ADR-0025) ---------------------------------
@@ -1502,6 +1674,17 @@ impl Dom {
     }
 
     fn alloc(&mut self, kind: NodeKind, tag: &str) -> NodeId {
+        // §B-59 — réutilise un slot libéré (payloads déjà
+        // vidés, `parent` nul) : le churn `innerHTML` borne
+        // l'arène au lieu de croître sans fin.
+        if let Some(id) = self.free_nodes.pop() {
+            let n = &mut self.nodes[id as usize];
+            n.kind = kind;
+            n.tag = tag.to_lowercase();
+            n.attached = false;
+            n.free = false;
+            return id;
+        }
         self.nodes.push(Node {
             kind,
             tag: tag.to_lowercase(),
@@ -1512,6 +1695,7 @@ impl Dom {
             listeners: Vec::new(),
             inline_handlers: Vec::new(),
             attached: false,
+            free: false,
         });
         (self.nodes.len() - 1) as NodeId
     }

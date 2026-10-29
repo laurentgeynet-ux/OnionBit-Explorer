@@ -42,27 +42,59 @@ pub(crate) struct MutObsState {
 }
 
 impl MutObsState {
-    /// Racines GC : callbacks et wrappers de tous les observers
-    /// enregistrés — le `MutObsHost` ne référence pas le
-    /// callback (corrélé par `id`) et un observer déconnecté
-    /// peut être ré-armé par `observe` : son cb doit survivre.
-    pub(crate) fn root_ids(&self, ids: &mut Vec<ObjId>) {
-        for (cb, wrapper) in self.cbs.values() {
-            crate::heap::push_value(ids, *cb);
-            ids.push(*wrapper);
+    /// Racines GC : le **wrapper** des observers encore
+    /// enregistrés (`live` = ids avec registrations Dom) —
+    /// `new MO(cb).observe(el)` sans référence JS survit
+    /// pendant l'observation (Chrome : la cible garde
+    /// l'observer vivant). Le `cb` n'est plus raciné ici : il
+    /// vit dans le host (`trace` le fait suivre le wrapper) —
+    /// §B-59 : auparavant tout observer créé restait raciné à
+    /// vie, déconnecté ou non.
+    pub(crate) fn root_ids(&self, ids: &mut Vec<ObjId>, live: &std::collections::HashSet<u64>) {
+        for (id, (_, wrapper)) in &self.cbs {
+            if live.contains(id) {
+                ids.push(*wrapper);
+            }
         }
         if let Some(p) = self.proto {
             crate::heap::push_value(ids, p);
         }
     }
+
+    /// Élagage post-sweep : entrées dont le wrapper a été
+    /// balayé — l'observer est mort, ses enregistrements et
+    /// son `cb` stocké partent avec (§B-59).
+    pub(crate) fn purge_dead(&mut self, heap: &crate::heap::Heap) -> Vec<u64> {
+        let dead: Vec<u64> = self
+            .cbs
+            .iter()
+            .filter(|(_, (_, w))| heap.obj(*w).is_none())
+            .map(|(id, _)| *id)
+            .collect();
+        for id in &dead {
+            self.cbs.remove(id);
+        }
+        dead
+    }
+
+    /// §B-59 instrumentation — `cbs` est suspecté de croître
+    /// sans borne (sonde `leak_probe`).
+    #[cfg(test)]
+    pub(crate) fn b59_len(&self) -> usize {
+        self.cbs.len()
+    }
 }
 
 /// Host object `MutationObserver` — `id` corrèle les
-/// registrations du `Dom` et le callback ici.
+/// registrations du `Dom`. Le `cb` vit dans le host : son
+/// tracé fait suivre sa survie à celle du wrapper (§B-59 —
+/// avant, `cbs` racinait chaque `(cb, wrapper)` à vie :
+/// observer créé = immortel).
 struct MutObsHost {
     dom: DomRef,
     cache: NodeCache,
     id: u64,
+    cb: Value,
 }
 
 impl Engine {
@@ -144,7 +176,7 @@ fn mutobs_ctor(e: &mut Engine, _this: Value, args: &[Value]) -> JsResult<Value> 
     };
     e.mutobs.next_id += 1;
     let id = e.mutobs.next_id;
-    let v = e.new_host_object(Rc::new(MutObsHost { dom, cache, id }));
+    let v = e.new_host_object(Rc::new(MutObsHost { dom, cache, id, cb }));
     if let Value::Obj(oid) = v {
         e.mutobs.cbs.insert(id, (cb, oid));
         // `mo instanceof MutationObserver` — proto capturé à
@@ -243,6 +275,7 @@ impl Host for MutObsHost {
 
     fn trace(&self, out: &mut Vec<ObjId>) {
         crate::dom_host::trace_node_cache(&self.cache, out);
+        crate::heap::push_value(out, self.cb);
     }
 
     fn invoke(

@@ -91,17 +91,46 @@ enum ObsKind {
 }
 
 impl ObsState {
-    /// Racines GC : callbacks et wrappers des observers
-    /// enregistrés (un observer déconnecté est retiré de
-    /// `regs` — le reste doit survivre comme `MutObsState`).
+    /// Racines GC : **wrapper uniquement** des observers
+    /// actifs — cibles encore observées ou notifications
+    /// en attente (le `new IO(cb).observe(el)` sans référence
+    /// survit pendant l'observation, comme Chrome). Le `cb`
+    /// n'est plus raciné ici : il vit dans le host et suit le
+    /// wrapper — §B-59 : auparavant tout observer créé
+    /// restait raciné à vie, `disconnect` inclus.
     pub(crate) fn root_ids(&self, ids: &mut Vec<ObjId>) {
         for reg in self.regs.values() {
-            crate::heap::push_value(ids, reg.cb);
-            ids.push(reg.wrapper);
+            if !reg.targets.is_empty() || !reg.pending.is_empty() {
+                ids.push(reg.wrapper);
+            }
         }
         for p in [self.proto_io, self.proto_ro].into_iter().flatten() {
             crate::heap::push_value(ids, p);
         }
+    }
+
+    /// Élagage post-sweep : entrées dont le wrapper a été
+    /// balayé — l'observer est mort, sa registration part
+    /// avec (§B-59).
+    pub(crate) fn purge_dead(&mut self, heap: &crate::heap::Heap) {
+        self.regs.retain(|_, reg| heap.obj(reg.wrapper).is_some());
+    }
+
+    /// Cibles encore surveillées — retenues Dom-side pour le
+    /// sweep §B-59 (une cible détachée mais observée par un
+    /// observer vivant garde son payload).
+    pub(crate) fn live_target_ids(&self) -> std::collections::HashSet<crate::dom::NodeId> {
+        self.regs
+            .values()
+            .flat_map(|reg| reg.targets.iter().copied())
+            .collect()
+    }
+
+    /// §B-59 instrumentation — `regs` est suspecté de croître
+    /// sans borne (sonde `leak_probe`).
+    #[cfg(test)]
+    pub(crate) fn b59_len(&self) -> usize {
+        self.regs.len()
     }
 }
 
@@ -113,6 +142,10 @@ struct ObsHost {
     cache: NodeCache,
     id: u64,
     kind: ObsKind,
+    /// Callback — vit dans le host pour que sa survie suive
+    /// le wrapper via `Host::trace` (§B-59 : `regs` ne racine
+    /// plus `cb`/`wrapper` à vie).
+    cb: Value,
 }
 
 impl Engine {
@@ -568,6 +601,7 @@ fn new_obs(
         cache,
         id,
         kind,
+        cb,
     }));
     let Value::Obj(oid) = v else {
         return Err(e.type_error("observer: allocation impossible"));
@@ -634,6 +668,7 @@ impl Host for ObsHost {
 
     fn trace(&self, out: &mut Vec<ObjId>) {
         crate::dom_host::trace_node_cache(&self.cache, out);
+        crate::heap::push_value(out, self.cb);
     }
 
     fn get(&self, e: &mut Engine, _t: Value, key: &str) -> JsResult<Option<Value>> {
