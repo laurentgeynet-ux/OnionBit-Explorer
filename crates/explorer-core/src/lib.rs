@@ -24,6 +24,6 @@ pub use session::{
     media_codecs_from_json, media_event_json, media_host_state_str, media_offer_json,
     media_report_from_json, navigate_shared, pump_timers_shared, Bookmark, CoreError, CoreEvent,
     EvalReply, FrameRegion, InputEvent, InputOutcome, KeyMods, MediaCmd, MediaError,
-    MediaHostState, MediaKind, MediaOfferInfo, MediaRect, MediaReport, ProfileStore, Session,
-    SessionConfig, StoredCookie, TabId, TabInfo, Visit,
+    MediaHostState, MediaKind, MediaOfferInfo, MediaRect, MediaReport, MsePull, ProfileStore,
+    Session, SessionConfig, StoredCookie, TabId, TabInfo, Visit,
 };

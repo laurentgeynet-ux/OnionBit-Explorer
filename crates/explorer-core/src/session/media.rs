@@ -66,6 +66,18 @@ pub(crate) struct MediaSurface {
     pub(crate) mse: bool,
 }
 
+/// Résultat d'un pull de segments MSE (§B-63) — `Pending`
+/// distingue l'absence transitoire de moteur de la mort de
+/// surface : `410` doit rester terminal.
+pub enum MsePull {
+    /// Segments drainés : octets, curseur absolu, fin de flux.
+    Ready(Vec<u8>, u64, bool),
+    /// Moteur momentanément absent (fenêtre pompe) — re-sonder.
+    Pending,
+    /// Surface morte / non-MSE / index de buffer hors rang.
+    Dead,
+}
+
 /// Surface morte au `refresh_media` (71c) — `path` et
 /// `claimed` servent à purger le claim du nœud miroir s'il
 /// survit à l'apply (ex. `src` retirée par JS : l'offre
@@ -440,23 +452,35 @@ impl Session {
 
     /// Pull de segments MSE (MSE-3, ADR-0029) — drain FIFO
     /// du `SourceBuffer` `buffer` de la `MediaSource` attachée
-    /// à la surface `mid` : `(octets, curseur, eos)` pour le
-    /// `MseSource` `ByteSource` côté hôte. `None` : surface
-    /// morte, non-MSE, moteur absent ou buffer hors rang.
+    /// à la surface `mid`. Tri-état : `Ready` = octets +
+    /// curseur + eos ; `Pending` = surface MSE vivante mais
+    /// moteur momentanément absent (fenêtre pompe — §B-63 :
+    /// un `410` terminal tuait le `MseSource` sur un état
+    /// transitoire, l'hôte doit re-sonder) ; `Dead` = surface
+    /// morte, non-MSE ou buffer hors rang → 410.
     pub fn media_segments_pull(
         &mut self,
         tab: TabId,
         mid: u64,
         buffer: usize,
         max: usize,
-    ) -> Option<(Vec<u8>, u64, bool)> {
-        let entry = self.tabs.get_mut(&tab)?;
-        let m = entry.media.iter().find(|m| m.id == mid)?;
+    ) -> MsePull {
+        let Some(entry) = self.tabs.get_mut(&tab) else {
+            return MsePull::Dead;
+        };
+        let Some(m) = entry.media.iter().find(|m| m.id == mid) else {
+            return MsePull::Dead;
+        };
         if !m.mse {
-            return None;
+            return MsePull::Dead;
         }
-        let url = m.url.clone();
-        entry.js.as_mut()?.mse_pull(&url, buffer, max)
+        let Some(eng) = entry.js.as_mut() else {
+            return MsePull::Pending;
+        };
+        match eng.mse_pull(&m.url.clone(), buffer, max) {
+            Some((data, cursor, eos)) => MsePull::Ready(data, cursor, eos),
+            None => MsePull::Dead,
+        }
     }
 
     /// Claim d'une surface par l'hôte (premier arrivé gagne)

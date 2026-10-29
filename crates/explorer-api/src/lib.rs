@@ -974,15 +974,24 @@ async fn media_segments(
         .unwrap_or(crate::MSE_PULL_BULK_MAX);
     let mut session = st.session.lock().await;
     match session.media_segments_pull(id, mid, buffer, max) {
-        Some((data, cursor, eos)) => axum::http::Response::builder()
+        explorer_core::MsePull::Ready(data, cursor, eos) => axum::http::Response::builder()
             .status(axum::http::StatusCode::OK)
             .header(axum::http::header::CONTENT_TYPE, "application/octet-stream")
             .header("X-Mse-Cursor", cursor.to_string())
             .header("X-Mse-Eos", if eos { "1" } else { "0" })
             .body(axum::body::Body::from(data))
             .unwrap_or_else(|_| axum::http::Response::new(axum::body::Body::empty())),
-        None => {
-            // Surface morte ou non-MSE — réponse honnête.
+        // §B-63 : surface MSE vivante, moteur momentanément
+        // absent sous pompe — corps vide + `X-Mse-Pending`
+        // invitant le `MseSource` à re-sonder ; `410`
+        // reste réservé à la mort réelle (terminal pour lui).
+        explorer_core::MsePull::Pending => axum::http::Response::builder()
+            .status(axum::http::StatusCode::OK)
+            .header(axum::http::header::CONTENT_TYPE, "application/octet-stream")
+            .header("X-Mse-Pending", "1")
+            .body(axum::body::Body::empty())
+            .unwrap_or_else(|_| axum::http::Response::new(axum::body::Body::empty())),
+        explorer_core::MsePull::Dead => {
             if session.media_list(id).iter().any(|m| m.id == mid && !m.mse) {
                 Json(serde_json::json!({ "mse": false })).into_response()
             } else {
