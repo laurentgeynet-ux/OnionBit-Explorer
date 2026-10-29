@@ -7,6 +7,23 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **JS-C188 — §B-14 : positions
+  `insertAdjacent*` ASCII
+  case-insensitive**
+  (`explorer-jscore`) — jvc vol 114
+  : `insertAdjacentHTML: bad
+  position` tuait la page
+  d'accueil — jQuery écrit
+  `"beforeEnd"`/`"afterBegin"`
+  camelCase ; spec : les quatre
+  positions sont ASCII case-
+  insensitive. `insert_adjacent`
+  (HTML) et `insert_at_position`
+  (rail partagé Text/Element)
+  normalisent `pos` en lowercase
+  avant le switch ; `SyntaxError`
+  préservé hors jeu. Verrou
+  `b14_probe.rs`.
 - **JS-C187 — §B-14 : `IDBRequest`
   devient un `EventTarget`**
   (`explorer-jscore`) — mastodon

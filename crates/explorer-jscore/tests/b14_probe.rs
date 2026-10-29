@@ -229,3 +229,33 @@ fn style_decl_only_serves_css_property_names() {
         "1"
     );
 }
+
+#[test]
+fn insert_adjacent_position_is_ascii_case_insensitive() {
+    let mut e = engine();
+    // jvc vol 114 : `insertAdjacentHTML("beforeEnd", …)` (jQuery
+    // camelCase) jetait `bad position` — spec : les quatre
+    // positions sont ASCII case-insensitive.
+    assert_eq!(
+        ev(
+            &mut e,
+            "var t=document.body;\
+             t.insertAdjacentHTML('beforeEnd','<b id=b1>B</b>');\
+             t.insertAdjacentHTML('AfterBegin','<i id=i1>I</i>');\
+             t.insertAdjacentText('beforeEND','TX');\
+             var k=t.childNodes;\
+             (k[0].id)+'|'+(k[k.length-2].id)+'|'+(typeof k[k.length-1].data==='string'?k[k.length-1].data:'?')"
+        ),
+        "i1|b1|TX"
+    );
+    // Variante élément : `insertAdjacentElement` même rail.
+    assert_eq!(
+        ev(
+            &mut e,
+            "var c=document.createElement('u');\
+             document.getElementById('b1').insertAdjacentElement('AfterEnd',c);\
+             document.getElementById('b1').nextSibling===c"
+        ),
+        "true"
+    );
+}

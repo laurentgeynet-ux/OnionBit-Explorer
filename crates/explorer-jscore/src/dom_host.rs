@@ -1111,6 +1111,11 @@ impl NodeHost {
     /// container then splices its children at `pos` relative to `node`.
     /// Positions: `beforebegin`/`afterbegin`/`beforeend`/`afterend`.
     fn insert_adjacent(&self, e: &mut Engine, node: NodeId, pos: &str, html: &str) -> JsResult<()> {
+        // Spec : position ASCII case-insensitive — jQuery écrit
+        // `"beforeEnd"` (jvc vol 114 : `bad position` tuait la
+        // page d'accueil).
+        let pos_lower = pos.to_ascii_lowercase();
+        let pos = pos_lower.as_str();
         // Detached scratch parent — its parsed children are then
         // re-parented at the right slot (keeps order).
         let scratch = self.dom.borrow_mut().create_element("div");
@@ -1193,7 +1198,10 @@ impl NodeHost {
         pos: &str,
         child: NodeId,
     ) -> JsResult<()> {
-        match pos {
+        // Position ASCII case-insensitive (spec — voir
+        // `insert_adjacent`).
+        let pos = pos.to_ascii_lowercase();
+        match pos.as_str() {
             "beforebegin" => {
                 if let Some(p) = dom_parent(&self.dom, node) {
                     self.dom.borrow_mut().insert_before(p, child, Some(node));
