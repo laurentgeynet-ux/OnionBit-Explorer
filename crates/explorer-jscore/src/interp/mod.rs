@@ -2083,19 +2083,30 @@ impl Engine {
         target: crate::context::CtxId,
         args: &[Value],
     ) -> JsResult<Value> {
-        if args.len() < 2 {
-            return Err(self.syntax_error(
-                "Failed to execute 'postMessage' on 'Window': 2 arguments required",
-            ));
+        if args.is_empty() {
+            return Err(self
+                .syntax_error("Failed to execute 'postMessage' on 'Window': 1 argument required"));
         }
-        // `undefined` explicit n'est pas une origine (spec →
-        // SyntaxError, même règle qu'un argument absent).
-        if matches!(args[1], Value::Undefined) {
-            return Err(self.syntax_error(
-                "Failed to execute 'postMessage' on 'Window': 'targetOrigin' is required",
-            ));
-        }
-        let target_origin = self.to_js_string(args[1])?;
+        // Spec WHATWG moderne : `postMessage(message, options)` —
+        // le 2ᵉ arg peut être une origine string, un objet
+        // `{targetOrigin, transfer}` ou absent (`targetOrigin`
+        // défaut `"/"` = same-origin). Steam vol 115 appelle
+        // `postMessage(msg)` 1-arg → SyntaxError intempestive.
+        let raw_origin = args.get(1).copied().unwrap_or(Value::Undefined);
+        let target_origin = match raw_origin {
+            Value::Undefined => "/".to_string(),
+            Value::Obj(oid) => {
+                let v = self
+                    .get_prop(oid, "targetOrigin")
+                    .unwrap_or(Value::Undefined);
+                if matches!(v, Value::Undefined) {
+                    "/".to_string()
+                } else {
+                    self.to_js_string(v)?
+                }
+            }
+            _ => self.to_js_string(raw_origin)?,
+        };
         if target_origin.is_empty() {
             return Err(self.syntax_error(
                 "Failed to execute 'postMessage' on 'Window': 'targetOrigin' is required",
@@ -2106,20 +2117,24 @@ impl Engine {
         }
         // `'*'` (spec) = livrer sans vérification d'origine —
         // la cible reçoit `origin`/`source` honnêtes et décide.
-        // Une origine explicite non concordante → retour
-        // silencieux (le message n'est jamais livré).
+        // `'/'` (défaut) = same-origin uniquement. Une origine
+        // explicite non concordante → retour silencieux (le
+        // message n'est jamais livré).
+        let src = self.native_caller.last().copied().unwrap_or(self.cur_ctx);
         let dest_origin = self.ctx_origin(target);
-        if target_origin != "*" && dest_origin != target_origin {
-            // Origine non concordante → pas de livraison (spec —
-            // échec silencieux, pas d'erreur).
+        let origin_ok = match target_origin.as_str() {
+            "*" => true,
+            "/" => dest_origin == self.ctx_origin(src),
+            _ => dest_origin == target_origin,
+        };
+        if !origin_ok {
             return Ok(Value::Undefined);
         }
         let wire = self.wire_encode(args[0])?;
         // `source`/`origin` = realm de l'APPELANT (spec
-        // « incumbent settings object ») — sous switch natif,
-        // `cur_ctx` est la CIBLE ; le vrai appelant est en tête
-        // de `native_caller`.
-        let src = self.native_caller.last().copied().unwrap_or(self.cur_ctx);
+        // « incumbent settings object ») — `src` déjà résolu
+        // pour le check `"/"` (native_caller = vrai appelant
+        // sous switch natif).
         let origin = self.ctx_origin(src);
         self.pending_msgs.push_back(crate::context::PendingMsg {
             target,

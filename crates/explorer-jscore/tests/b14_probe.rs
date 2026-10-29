@@ -128,6 +128,32 @@ fn font_face_set_add_returns_set_and_is_detectable() {
 }
 
 #[test]
+fn font_face_set_is_event_target() {
+    let mut e = engine();
+    // impots DSFR vol 115 : `addEventListener is not a function`
+    // sur `FontFaceSet` — spec : `FontFaceSet` hérite
+    // `EventTarget` (loading/loadingdone/loadingerror). Rail
+    // `__et` partagé via `invoke`.
+    assert_eq!(
+        ev(&mut e, "typeof document.fonts.addEventListener"),
+        "function"
+    );
+    assert_eq!(
+        ev(
+            &mut e,
+            "var f=document.fonts, n=0;\
+             var cb=function(){n++};\
+             f.addEventListener('loadingdone',cb);\
+             f.dispatchEvent({type:'loadingdone'});\
+             f.removeEventListener('loadingdone',cb);\
+             f.dispatchEvent({type:'loadingdone'});\
+             n"
+        ),
+        "1"
+    );
+}
+
+#[test]
 fn html_document_interface_exists_and_chains() {
     let mut e = engine();
     // orange vol 109 : `HTMLDocument is not defined` tuait

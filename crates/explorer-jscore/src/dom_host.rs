@@ -9275,7 +9275,7 @@ impl Host for FontFaceSetHost {
         e: &mut Engine,
         t: Value,
         name: &str,
-        _args: &[Value],
+        args: &[Value],
     ) -> JsResult<Option<Value>> {
         match name {
             // `load(font, text?)` → Promise<FontFace[]> — résolu
@@ -9291,12 +9291,22 @@ impl Host for FontFaceSetHost {
             // surface honnête (boursorama §B-14).
             "add" => Ok(Some(t)),
             "check" => Ok(Some(Value::Bool(true))),
+            // Spec : `FontFaceSet` est un `EventTarget`
+            // (loading/loadingdone/loadingerror) — impots DSFR
+            // vol 115 enregistre `fonts.addEventListener`. Rail
+            // `__et` partagé (map paresseuse).
+            "addEventListener" => Ok(Some(et_add_listener(e, t, args)?)),
+            "removeEventListener" => Ok(Some(et_remove_listener(e, t, args)?)),
+            "dispatchEvent" => Ok(Some(et_dispatch_event(e, t, args)?)),
             _ => Ok(None),
         }
     }
 
     fn has_method(&self, name: &str) -> bool {
-        matches!(name, "load" | "check" | "add")
+        matches!(
+            name,
+            "load" | "check" | "add" | "addEventListener" | "removeEventListener" | "dispatchEvent"
+        )
     }
 }
 

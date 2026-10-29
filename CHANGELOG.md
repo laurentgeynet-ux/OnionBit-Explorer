@@ -7,6 +7,31 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **JS-C189 — §B-14 : `postMessage`
+  1-arg + options objet,
+  `FontFaceSet` EventTarget**
+  (`explorer-jscore`) — steam vol
+  115 : `postMessage(msg)` sans
+  `targetOrigin` → SyntaxError
+  intempestive (spec WHATWG
+  moderne : défaut `"/"` =
+  same-origin) ; impots DSFR :
+  `addEventListener is not a
+  function` sur `FontFaceSet`.
+  Fix : (a) `post_message` accepte
+  la forme 1-arg (`targetOrigin`
+  `"/"` same-origin), l'objet
+  `options.targetOrigin`, `'*'`
+  inchangé, `''` toujours rejeté ;
+  (b) `FontFaceSet` délègue
+  `addEventListener`/
+  `removeEventListener`/
+  `dispatchEvent` au rail `__et`
+  partagé (spec `EventTarget`,
+  loading/loadingdone/loadingerror).
+  Verrous `c78_contexts.rs` +
+  `b14_probe.rs` ; suite jscore
+  complète verte.
 - **JS-C188 — §B-14 : positions
   `insertAdjacent*` ASCII
   case-insensitive**

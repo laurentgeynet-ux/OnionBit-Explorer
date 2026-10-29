@@ -292,14 +292,26 @@ fn c78_post_message_target_origin_enforced() {
 fn c78_post_message_origin_required_and_star_rejected() {
     let (mut e, d) = top_engine();
     let _child = add_child(&mut e, &d, CHILD_URL);
-    // `targetOrigin` absent → SyntaxError.
+    // Spec WHATWG moderne (JS-C189 — steam vol 115) :
+    // `postMessage(msg)` sans `targetOrigin` = `"/"` (same-origin
+    // only), **pas** SyntaxError — l'ancienne forme 2-args
+    // obligatoire tuait `shared_global.js`. Ici enfant =
+    // origine différente → drop silencieux, pas de throw.
     let r = e.eval("frames[0].postMessage('x')");
-    assert!(r.is_err(), "targetOrigin absent doit jeter");
-    let msg = format!("{:?}", r.unwrap_err());
-    assert!(
-        msg.contains("SyntaxError"),
-        "SyntaxError attendu, obtenu : {msg}"
+    assert!(r.is_ok(), "1-arg légal (défaut '/'), obtenu : {r:?}");
+    // `'/'` = same-origin : l'enfant `top.example` le reçoit.
+    ev_ctx(
+        &mut e,
+        1,
+        "var got1 = 0; window.addEventListener('message', function() { got1++; });",
     );
+    ev(&mut e, "frames[0].postMessage('x', '/')");
+    e.run_microtasks().expect("microtasks");
+    assert_eq!(ev_ctx(&mut e, 1, "got1"), "1");
+    // Forme objet `options` (spec) : `{targetOrigin}`.
+    ev(&mut e, "frames[0].postMessage('y', {targetOrigin: '/'})");
+    e.run_microtasks().expect("microtasks");
+    assert_eq!(ev_ctx(&mut e, 1, "got1"), "2");
     // `''` → SyntaxError (origine vide illégale).
     let r = e.eval("frames[0].postMessage('x', '')");
     assert!(r.is_err(), "'' doit jeter SyntaxError");
