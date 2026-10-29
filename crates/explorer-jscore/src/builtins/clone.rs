@@ -40,6 +40,8 @@ enum CloneShape {
     /// `Blob`/`File` (JS-C70) — octets immuables partagés,
     /// props propres énumérables clonées (File `name`…).
     Blb(std::rc::Rc<Vec<u8>>, String, Value),
+    /// Host — `serializable_clone` tranche (JS-C196).
+    Hst(std::rc::Rc<dyn crate::heap::Host>),
     Ordinary,
     Err(&'static str),
 }
@@ -78,7 +80,10 @@ pub(crate) fn clone_deep(
         Some(ObjKind::RegExp(re)) => CloneShape::Re(re.source.clone(), re.flag_string()),
         Some(ObjKind::Fun(_)) => CloneShape::Err("function"),
         Some(ObjKind::Promise(_)) => CloneShape::Err("Promise"),
-        Some(ObjKind::Host(_)) => CloneShape::Err("host object"),
+        // Host cloneable-spec → `serializable_clone` (JS-C196) ;
+        // non cloneable → `DataCloneError` nommant la classe
+        // (diagnostic vol : `host object` ne nommait rien).
+        Some(ObjKind::Host(h)) => CloneShape::Hst(h.clone()),
         Some(ObjKind::Symbol { .. }) => CloneShape::Err("Symbol"),
         Some(ObjKind::Proxy { .. }) => CloneShape::Err("Proxy"),
         Some(ObjKind::Iter { .. }) => CloneShape::Err("iterator"),
@@ -91,6 +96,10 @@ pub(crate) fn clone_deep(
     };
     match shape {
         CloneShape::Err(w) => Err(e.type_error(format!("structuredClone: cannot clone {w}"))),
+        CloneShape::Hst(h) => match h.serializable_clone(e)? {
+            Some(v) => clone_deep(e, v, seen, depth + 1),
+            None => Err(e.type_error(format!("structuredClone: cannot clone {}", h.class_name()))),
+        },
         CloneShape::Buf(b) => Ok(Value::Obj(e.heap.alloc_obj(Object {
             proto: Value::Obj(e.protos.array_buffer),
             props: Vec::new(),

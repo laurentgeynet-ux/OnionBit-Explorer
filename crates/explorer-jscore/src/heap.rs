@@ -1424,6 +1424,20 @@ pub trait Host: std::any::Any {
         "HostObject"
     }
 
+    /// Sérialisation spec `StructuredSerialize` pour les hosts
+    /// **cloneables** (`postMessage`/`structuredClone` — JS-C196,
+    /// lequipe vol 124 : `cannot clone host object`). `Some(v)`
+    /// = valeur de remplacement sérialisable (slots copiés dans
+    /// un objet ordinaire — le prototype ne traverse pas le fil,
+    /// déviation documentée) ; `None` (défaut) = non cloneable
+    /// → `DataCloneError` nommant `class_name`.
+    ///
+    /// # Errors
+    /// Propage les exceptions levées en lisant les slots.
+    fn serializable_clone(&self, _e: &mut crate::Engine) -> JsResult<Option<Value>> {
+        Ok(None)
+    }
+
     /// Snapshot des valeurs itérées par `obj[Symbol.iterator]()`
     /// (`for-of`, spread, helpers closure `makeIterator` de la
     /// cible — JS-C76) : `Some(items)` expose `@@iterator`,

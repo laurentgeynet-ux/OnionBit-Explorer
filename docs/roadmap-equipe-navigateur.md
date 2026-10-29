@@ -7639,6 +7639,21 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   aucun faux succès. Verrous
   `c193_mse.rs` ×6.
 
+- [x] **JS-C196. `postMessage`/
+  `structuredClone` des cloneables
+  spec** — lequipe vol 124 :
+  `cannot clone host object`.
+  Hook `Host::serializable_clone`
+  (défaut non cloneable → erreur
+  nommant `class_name`, diagnostic
+  vol) ; `AbortSignal` sérialise
+  `(aborted, reason)` ;
+  `WireValue::Blob` encode/décode
+  un vrai `ObjKind::Blob` + props
+  `File` (avant : `{}` silencieux) ;
+  `clone_deep` même rail.
+  Verrous `c196_clone.rs` ×5.
+
 ## Tâches continues
 
 - **Spécialiste JS** : divergence miroir ↔ `explorer-dom` quand
