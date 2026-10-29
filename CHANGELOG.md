@@ -7,6 +7,20 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **§B-63 — `GET …/segments` :
+  `410` transitoire sous pompe
+  corrigé** (`explorer-core`/api)
+  — le pull rendait `410 Dead`
+  quand `entry.js` était
+  momentanément absent (fenêtre
+  pompe) ; terminal pour le
+  `MseSource` OnionMedia sur un
+  état re-sondable. Tri-état
+  `MsePull` : `Ready` (octets+
+  curseur+eos), `Pending`
+  (corps vide + `X-Mse-Pending:
+  1` — re-sonder), `Dead` (410
+  réservé à la mort réelle).
 - **139f — YouTube retiré de l'allowlist
   WebView2** (`app/`) — `youtube.com`/
   `youtu.be` sortis des hosts délégués :
