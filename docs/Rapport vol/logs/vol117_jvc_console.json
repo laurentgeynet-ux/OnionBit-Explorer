@@ -1,0 +1,1 @@
+{"console":["unhandledrejection: fetch: network error","unhandledrejection: fetch: network error (×2)","uncaught: TypeError: cannot read `category` of Undefined\n    at <anonymous> (https://cdn.lib.getjan.io/library/jv.js:5:7001)\n    at <anonymous> (https://cdn.lib.getjan.io/library/jv.js:5:9848)"]}
