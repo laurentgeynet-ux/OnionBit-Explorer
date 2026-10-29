@@ -46,14 +46,13 @@ void main() {
     expect(a.hosts, isNot(contains('')));
   });
 
-  test('seed produit : YouTube (MSE hors moteur + DRM) délégué', () {
+  test('seed produit : YouTube NON délégué — MSE moteur natif', () {
     final a = DrmAllowlist(const AppConfig().drmDelegateHosts);
-    expect(a.delegatesUrl('https://www.youtube.com/watch?v=x'), isTrue);
-    expect(a.delegatesUrl('https://m.youtube.com'), isTrue);
-    expect(a.delegatesUrl('https://music.youtube.com'), isTrue);
-    expect(a.delegatesUrl('https://youtu.be/abc'), isTrue);
-    // Google lui-même reste sur le moteur.
-    expect(a.delegatesUrl('https://www.google.com'), isFalse);
+    // Retrait 139f : YouTube joue via la pile MSE/OnionMedia —
+    // plus de délégation WebView2.
+    expect(a.delegatesUrl('https://www.youtube.com/watch?v=x'), isFalse);
+    expect(a.delegatesUrl('https://youtu.be/abc'), isFalse);
+    expect(a.delegatesUrl('https://music.youtube.com'), isFalse);
   });
 
   test('seed produit : catalogue streaming étendu', () {

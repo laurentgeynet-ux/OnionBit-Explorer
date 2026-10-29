@@ -7,6 +7,16 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **139f — YouTube retiré de l'allowlist
+  WebView2** (`app/`) — `youtube.com`/
+  `youtu.be` sortis des hosts délégués :
+  la vidéo repasse par la pile native
+  (MSE → `segments` → OnionMedia).
+  Netflix/Disney/Prime/canal+ restent
+  délégués (VOD DRM uniquement). Test
+  allowlist inversé : YouTube `isFalse`.
+
+
 - **JS-C208 — `document` est un nœud
   parent : mutation Node/ParentNode +
   `body` auto-vivifié** (§B-14, bras

@@ -39,10 +39,6 @@ class AppConfig {
       'canalplus.com', // myCANAL (portail canal+)
       'mycanal.fr', // domaine historique myCANAL
       'primevideo.com', // Prime Video standalone
-      'youtube.com', // YouTube — MSE hors portée du moteur
-      // (ADR-0024) + DRM films/Premium : onglet délégué
-      // entier (page + lecteur natifs WebView2).
-      'youtu.be', // liens courts — la 301 part déjà en WebView2
       // ── Majors US ──
       'hulu.com', // Disney US
       'max.com', // HBO/Max
