@@ -589,15 +589,31 @@ fn idb_event(e: &mut Engine, ty: &str, target: Value, vers: Option<(u64, u64)>) 
     Value::Obj(o)
 }
 
-/// `fire_event` — `on<ty>` own-prop sur le wrapper (listeners
-/// `addEventListener` non modélisés — `on*` suffit aux apps
-/// IDB classiques ; documenté).
+/// `fire_event` — `on<ty>` own-prop + listeners
+/// `addEventListener` (rail `__et` partagé `EventTarget` — mastodon
+/// vol 102 passe par `req.addEventListener('success',…)`, les
+/// `on*` seuls ne couvraient pas dexie/idb-keyval).
 fn fire_idb(e: &mut Engine, wrapper: ObjId, ty: &str, vers: Option<(u64, u64)>) -> JsResult<()> {
+    let ev = idb_event(e, ty, Value::Obj(wrapper), vers);
     let key = format!("on{ty}");
     if let Some(f) = e.get_prop(wrapper, &key) {
         if e.is_callable(f) {
-            let ev = idb_event(e, ty, Value::Obj(wrapper), vers);
             e.call_value(f, Value::Obj(wrapper), &[ev])?;
+        }
+    }
+    if let Some(Value::Obj(map)) = e.get_prop(wrapper, "__et") {
+        if let Some(Value::Obj(l)) = e.get_prop(map, ty) {
+            let len = match e.get_prop(l, "length") {
+                Some(Value::Num(n)) => n as usize,
+                _ => 0,
+            };
+            for i in 0..len {
+                if let Some(cb) = e.get_prop(l, &i.to_string()) {
+                    if e.is_callable(cb) {
+                        e.call_value(cb, Value::Obj(wrapper), &[ev])?;
+                    }
+                }
+            }
         }
     }
     Ok(())
@@ -620,6 +636,16 @@ fn req_proto(e: &mut Engine) -> ObjId {
         return p;
     }
     let p = new_tagged_proto(e, "IDBRequest");
+    // Spec : `IDBRequest` est un `EventTarget` — rail `__et`
+    // partagé (map créée paresseusement au premier
+    // `addEventListener`).
+    e.add_method(p, "addEventListener", crate::dom_host::et_add_listener);
+    e.add_method(
+        p,
+        "removeEventListener",
+        crate::dom_host::et_remove_listener,
+    );
+    e.add_method(p, "dispatchEvent", crate::dom_host::et_dispatch_event);
     e.idb.req_proto = Some(p);
     p
 }

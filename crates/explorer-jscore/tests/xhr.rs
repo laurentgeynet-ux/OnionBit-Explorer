@@ -1275,6 +1275,41 @@ fn c72_idb_open_upgrade_create_store() {
 }
 
 #[test]
+fn c187_idb_request_is_event_target() {
+    let (mut e, _t) = engine();
+    // mastodon vol 102 : `addEventListener is not a function` sur
+    // `IDBRequest` tuait la boot idb (dexie/idb-keyval passent par
+    // des listeners, pas des `on*`). Spec : `IDBRequest` est un
+    // `EventTarget` — rail `__et` partagé, créé paresseusement.
+    describe(
+        &mut e,
+        "var log = ''; var rq = indexedDB.open('etdb', 1);\
+         log += typeof rq.addEventListener + ':';\
+         rq.addEventListener('upgradeneeded', function (ev) {\
+           log += 'up' + ev.oldVersion + ':';\
+           ev.target.result.createObjectStore('kv');\
+         });\
+         rq.addEventListener('success', function (ev) {\
+           log += 'ok:' + ev.target.result.name;\
+         });\
+         rq.onsuccess = function () { log += '|ons'; };",
+    );
+    // Ordre : `on*` d'abord puis les listeners (approximation
+    // documentée — spec = ordre d'enregistrement).
+    assert_eq!(describe(&mut e, "log"), "function:up0:|onsok:etdb");
+    // `removeEventListener` retire ; `dispatchEvent` appelle.
+    describe(
+        &mut e,
+        "var r2 = indexedDB.open('etdb2', 1), seen = '';\
+         var cb = function () { seen += 'F'; };\
+         r2.addEventListener('success', cb);\
+         r2.removeEventListener('success', cb);\
+         r2.onsuccess = function () { seen += '|clean'; };",
+    );
+    assert_eq!(describe(&mut e, "seen"), "|clean");
+}
+
+#[test]
 fn c72_idb_put_get_delete() {
     let (mut e, _t) = engine();
     describe(

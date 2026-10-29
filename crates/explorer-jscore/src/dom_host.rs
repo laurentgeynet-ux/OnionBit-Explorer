@@ -10066,7 +10066,11 @@ fn event_target_ctor(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Valu
 }
 
 /// `et.addEventListener(type, cb)` — pousse sur `__et[type]`.
-fn et_add_listener(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+/// La map `__et` est créée paresseusement : les wrappers non-
+/// `EventTarget` qui exposent la méthode (`IDBRequest` — JS-C187)
+/// et les greffes `EventTarget.prototype.addEventListener.call(o)`
+/// des polyfills fonctionnent sans ctor préalable.
+pub(crate) fn et_add_listener(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let Value::Obj(sid) = this else {
         return Ok(Value::Undefined);
     };
@@ -10074,6 +10078,10 @@ fn et_add_listener(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Valu
     let cb = arg(args, 1);
     if !e.is_callable(cb) {
         return Ok(Value::Undefined); // spec : non-appelable ignoré
+    }
+    if e.get_prop(sid, "__et").is_none() {
+        let mid = e.new_object();
+        e.set_own(sid, "__et", Value::Obj(mid), true);
     }
     if let Some(Value::Obj(map)) = e.get_prop(sid, "__et") {
         let list = e.get_prop(map, &ty).unwrap_or(Value::Undefined);
@@ -10093,7 +10101,7 @@ fn et_add_listener(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Valu
 }
 
 /// `et.removeEventListener(type, cb)` — retire de `__et[type]`.
-fn et_remove_listener(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+pub(crate) fn et_remove_listener(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let Value::Obj(sid) = this else {
         return Ok(Value::Undefined);
     };
@@ -10126,7 +10134,7 @@ fn et_remove_listener(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<V
 /// `et.dispatchEvent(ev)` — appelle chaque cb de `__et[ev.type]`
 /// (`target`/`currentTarget` = l'objet), `false` si
 /// `preventDefault` fut tiré.
-fn et_dispatch_event(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+pub(crate) fn et_dispatch_event(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let Value::Obj(sid) = this else {
         return Err(e.type_error("dispatchEvent: cible invalide"));
     };

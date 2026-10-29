@@ -7,6 +7,29 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **JS-C187 — §B-14 : `IDBRequest`
+  devient un `EventTarget`**
+  (`explorer-jscore`) — mastodon
+  vol 102 : `addEventListener is
+  not a function` (sur `IDBRequest`)
+  tuait la boot idb — dexie/
+  idb-keyval passent par des
+  listeners, pas des `on*`. Fix :
+  les trois méthodes `EventTarget`
+  exposées sur le proto
+  `IDBRequest` via le rail `__et`
+  partagé (map créée
+  paresseusement au premier
+  `addEventListener` — couvre aussi
+  les greffes
+  `EventTarget.prototype.
+  addEventListener.call(o)` des
+  polyfills) ; `fire_idb` tire
+  désormais `__et[type]` après les
+  `on*`. `removeEventListener`/
+  `dispatchEvent` inclus. Verrou
+  `xhr.rs` `c187` ; suite jscore
+  complète verte.
 - **JS-C186 — §B-14 : named-getter
   `CSSStyleDeclaration` borné aux
   propriétés CSS** (`explorer-jscore`)
