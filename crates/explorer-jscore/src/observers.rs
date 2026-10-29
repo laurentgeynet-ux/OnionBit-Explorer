@@ -596,6 +596,10 @@ impl Host for ObsHost {
         self
     }
 
+    fn trace(&self, out: &mut Vec<ObjId>) {
+        crate::dom_host::trace_node_cache(&self.cache, out);
+    }
+
     fn get(&self, e: &mut Engine, _t: Value, key: &str) -> JsResult<Option<Value>> {
         if key != "root" {
             return Ok(None);

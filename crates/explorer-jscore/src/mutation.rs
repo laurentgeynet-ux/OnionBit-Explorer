@@ -203,6 +203,10 @@ impl Host for MutObsHost {
         self
     }
 
+    fn trace(&self, out: &mut Vec<ObjId>) {
+        crate::dom_host::trace_node_cache(&self.cache, out);
+    }
+
     fn invoke(
         &self,
         e: &mut Engine,

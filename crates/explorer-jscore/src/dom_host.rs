@@ -545,6 +545,17 @@ impl Engine {
 /// lifetime.
 pub(crate) type NodeCache = Rc<RefCell<HashMap<NodeId, ObjId>>>;
 
+/// Trace GC (ADR-0008) du `NodeCache` — les wrappers y sont
+/// retenus par `ObjId` : sans trace, le mark-sweep réclame un
+/// wrapper toujours référencé par le cache et `node_value` rend
+/// un `ObjId` mort (« `x` is not a function (on ?) »,
+/// `cannot read … of Undefined` sur les pages réelles — trigger
+/// jQuery `implementation.createHTMLDocument`, assemblee vol
+/// 137).
+pub(crate) fn trace_node_cache(cache: &NodeCache, out: &mut Vec<ObjId>) {
+    out.extend(cache.borrow().values().copied());
+}
+
 /// `document` object.
 struct DocumentHost {
     dom: DomRef,
@@ -1459,7 +1470,13 @@ struct EventHost {
 
 pub(crate) fn node_value(e: &mut Engine, dom: &DomRef, cache: &NodeCache, node: NodeId) -> Value {
     if let Some(&id) = cache.borrow().get(&node) {
-        return Value::Obj(id);
+        // Garde GC : un `ObjId` balayé ne doit jamais être
+        // rendu (zombie → « of Undefined » / « (on ?) ») — on
+        // recrée le wrapper et on nettoie la entrée morte.
+        if e.heap.obj(id).is_some() {
+            return Value::Obj(id);
+        }
+        cache.borrow_mut().remove(&node);
     }
     let v = e.new_host_object(Rc::new(NodeHost {
         dom: dom.clone(),
@@ -3674,6 +3691,16 @@ impl Host for DocumentHost {
         self
     }
 
+    fn trace(&self, out: &mut Vec<ObjId>) {
+        trace_node_cache(&self.cache, out);
+        if let Some(v) = *self.implementation.borrow() {
+            crate::heap::push_value(out, v);
+        }
+        if let Some(v) = *self.adopted_sheets.borrow() {
+            crate::heap::push_value(out, v);
+        }
+    }
+
     fn get(&self, e: &mut Engine, this: Value, key: &str) -> JsResult<Option<Value>> {
         match key {
             "body" => {
@@ -3780,10 +3807,15 @@ impl Host for DocumentHost {
             // (spec) ; `createHTMLDocument` sert le DOM de
             // parsing détaché de jQuery.
             "implementation" => {
-                let v = *self
-                    .implementation
-                    .borrow_mut()
-                    .get_or_insert_with(|| e.new_host_object(Rc::new(DomImplementationHost)));
+                let mut slot = self.implementation.borrow_mut();
+                // Garde GC — un `Value::Obj` balayé est recréé
+                // plutôt que rendu zombie (même logique que
+                // `node_value`).
+                if slot.is_some_and(|v| matches!(v, Value::Obj(id) if e.heap.obj(id).is_none())) {
+                    *slot = None;
+                }
+                let v =
+                    *slot.get_or_insert_with(|| e.new_host_object(Rc::new(DomImplementationHost)));
                 Ok(Some(v))
             }
             "title" => {
@@ -5343,6 +5375,10 @@ impl Host for NodeHost {
 
     fn as_any(&self) -> &dyn std::any::Any {
         self
+    }
+
+    fn trace(&self, out: &mut Vec<ObjId>) {
+        trace_node_cache(&self.cache, out);
     }
 
     fn get(&self, e: &mut Engine, this: Value, key: &str) -> JsResult<Option<Value>> {
@@ -7801,6 +7837,13 @@ impl Host for EventHost {
         self
     }
 
+    fn trace(&self, out: &mut Vec<ObjId>) {
+        trace_node_cache(&self.cache, out);
+        for (_, v) in self.state.props.borrow().iter() {
+            crate::heap::push_value(out, *v);
+        }
+    }
+
     fn get(&self, e: &mut Engine, _t: Value, key: &str) -> JsResult<Option<Value>> {
         Ok(Some(match key {
             "type" => e.str_val(self.state.ty.borrow().clone()),
@@ -8013,6 +8056,10 @@ impl Host for ElementInternalsHost {
 
     fn as_any(&self) -> &dyn std::any::Any {
         self
+    }
+
+    fn trace(&self, out: &mut Vec<ObjId>) {
+        trace_node_cache(&self.cache, out);
     }
 
     fn get(&self, e: &mut Engine, _t: Value, key: &str) -> JsResult<Option<Value>> {
@@ -8476,6 +8523,10 @@ impl Host for AttributesHost {
         self
     }
 
+    fn trace(&self, out: &mut Vec<ObjId>) {
+        trace_node_cache(&self.cache, out);
+    }
+
     fn get(&self, e: &mut Engine, _t: Value, key: &str) -> JsResult<Option<Value>> {
         if key == "length" {
             return Ok(Some(Value::Num(self.attrs().len() as f64)));
@@ -8636,6 +8687,10 @@ impl Host for CustomElementsHost {
 
     fn as_any(&self) -> &dyn std::any::Any {
         self
+    }
+
+    fn trace(&self, out: &mut Vec<ObjId>) {
+        trace_node_cache(&self.cache, out);
     }
 
     fn invoke(
@@ -11165,6 +11220,10 @@ impl Host for Ctx2dHost {
 
     fn as_any(&self) -> &dyn std::any::Any {
         self
+    }
+
+    fn trace(&self, out: &mut Vec<ObjId>) {
+        trace_node_cache(&self.cache, out);
     }
 
     fn get(&self, e: &mut Engine, _this: Value, key: &str) -> JsResult<Option<Value>> {

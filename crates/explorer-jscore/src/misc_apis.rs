@@ -839,7 +839,9 @@ impl Host for SelectionHost {
         }
     }
 
-    fn trace(&self, _out: &mut Vec<ObjId>) {}
+    fn trace(&self, out: &mut Vec<ObjId>) {
+        crate::dom_host::trace_node_cache(&self.cache, out);
+    }
 }
 
 // ------------------------------------------------------------------
@@ -1120,6 +1122,10 @@ impl Host for RangeHost {
 
     fn as_any(&self) -> &dyn std::any::Any {
         self
+    }
+
+    fn trace(&self, out: &mut Vec<ObjId>) {
+        crate::dom_host::trace_node_cache(&self.cache, out);
     }
 
     fn has_method(&self, name: &str) -> bool {
@@ -1532,6 +1538,11 @@ impl Host for TreeWalkerHost {
         self
     }
 
+    fn trace(&self, out: &mut Vec<ObjId>) {
+        crate::dom_host::trace_node_cache(&self.cache, out);
+        crate::heap::push_value(out, self.data.borrow().filter);
+    }
+
     fn has_method(&self, name: &str) -> bool {
         matches!(
             name,
@@ -1746,6 +1757,11 @@ impl Host for NiHost {
 
     fn as_any(&self) -> &dyn std::any::Any {
         self
+    }
+
+    fn trace(&self, out: &mut Vec<ObjId>) {
+        crate::dom_host::trace_node_cache(&self.cache, out);
+        crate::heap::push_value(out, self.data.borrow().filter);
     }
 
     fn has_method(&self, name: &str) -> bool {
@@ -2870,6 +2886,10 @@ impl Host for XrHost {
 
     fn as_any(&self) -> &dyn std::any::Any {
         self
+    }
+
+    fn trace(&self, out: &mut Vec<ObjId>) {
+        crate::dom_host::trace_node_cache(&self.cache, out);
     }
 
     fn has_method(&self, name: &str) -> bool {

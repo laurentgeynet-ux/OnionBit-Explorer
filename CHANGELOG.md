@@ -7,6 +7,55 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **JS-C203 — §B-14 : GC — les
+  hosts DOM/IDB tracent leurs
+  `Value` retenues**
+  (`explorer-jscore`) —
+  assemblee vol 137 :
+  `` `createHTMLDocument` is
+  not a function (on ?) `` —
+  jQuery lit `document.
+  implementation.createHTML
+  Document` ; l'objet
+  `implementation` (caché dans
+  le host `Document`) n'était
+  pas tracé par le mark-sweep
+  → balayé → `ObjId` mort →
+  `(on ?)`. Inventaire complet
+  des hosts retenant des
+  `Value`/`ObjId` : `trace`
+  ajoutée à `DocumentHost`
+  (`implementation`,
+  `adopted_sheets`, cache),
+  `NodeHost`, `EventHost`
+  (`state.props` —
+  `event.detail`/`data`),
+  `ElementInternals`,
+  `Attributes`, `CustomElement
+  Registry`, `Ctx2d`,
+  `Selection`, `Range`,
+  `TreeWalker`/`NodeIterator`
+  (+ `filter` callbacks),
+  `XPathResult`, `Mutation
+  Observer`, `Intersection`/
+  `ResizeObserver`, `IDBDatab
+  ase`/`IDBObjectStore`
+  (enregistrements — structured
+  clone balayé en pleine base).
+  Le cache principal `dom_ctx`
+  était déjà raciné ; les
+  caches des documents
+  secondaires (`createHTML
+  Document`/`DOMParser`) ne
+  l'étaient que via leurs
+  hosts — désormais tracés.
+  Gardes défensives :
+  `node_value`/`implementation`
+  recréent un `ObjId` balayé
+  plutôt que rendre un zombie.
+  Verrou `gc_preserves_cached_
+  dom_wrappers`
+  (`b14_probe.rs`).
 - **JS-C202 — §B-14 : User
   Timing (`performance.mark`/
   `measure`/`getEntries*`)**

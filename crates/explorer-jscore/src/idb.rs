@@ -78,6 +78,20 @@ fn arg(args: &[Value], i: usize) -> Value {
 /// exigerait une sérialisation, hors scope JS-C72).
 pub type IdbRegistry = Rc<RefCell<HashMap<String, IdbDb>>>;
 
+/// Trace GC (ADR-0008) des enregistrements — les valeurs
+/// `put()` sont des `Value` moteur (structured clone) : sans
+/// trace, le mark-sweep réclame un objet encore présent en
+/// base et le prochain `get` rend un `ObjId` mort.
+fn trace_registry(reg: &IdbRegistry, out: &mut Vec<ObjId>) {
+    for db in reg.borrow().values() {
+        for st in db.stores.values() {
+            for v in st.records.values() {
+                crate::heap::push_value(out, *v);
+            }
+        }
+    }
+}
+
 /// Base `indexedDB` — nom, version, stores.
 pub struct IdbDb {
     /// `db.version`.
@@ -2449,6 +2463,7 @@ impl Host for IdbDbHost {
 
     fn trace(&self, out: &mut Vec<ObjId>) {
         crate::heap::push_value(out, *self.upgrade_txn.borrow());
+        trace_registry(&self.reg, out);
     }
 
     fn class_name(&self) -> &'static str {
@@ -2497,6 +2512,7 @@ impl Host for IdbStoreHost {
             crate::heap::push_value(out, tb.db_wrapper);
             crate::heap::push_value(out, tb.error);
         }
+        trace_registry(&self.ctx.reg, out);
     }
 
     fn class_name(&self) -> &'static str {

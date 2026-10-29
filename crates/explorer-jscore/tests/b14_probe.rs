@@ -723,3 +723,44 @@ fn user_timing_entries_are_stored_and_filterable() {
         "1|0"
     );
 }
+
+// JS-C203 — GC : les `Value` retenues dans les hosts DOM
+// (`NodeCache`, `implementation`, `EventState.props`, records
+// IDB) doivent être tracées — sinon le mark-sweep rend des
+// `ObjId` morts : « `x` is not a function (on ?) » /
+// `of Undefined` (assemblee vol 137 : jQuery `implementation.
+// createHTMLDocument` tué après une collecte).
+#[test]
+fn gc_preserves_cached_dom_wrappers() {
+    let mut e = engine();
+    // Wrappers créés puis **lâchés** : seuls les caches host les
+    // retiennent — c'est eux que le mark-sweep doit tracer.
+    e.eval(
+        "document.getElementById('u');document.implementation;\
+            document.querySelector('svg')",
+    )
+    .unwrap();
+    let _ = e.collect();
+    // Le wrapper caché est toujours vivant : identité + méthodes.
+    assert_eq!(ev(&mut e, "document.getElementById('u').localName"), "use");
+    assert_eq!(
+        ev(
+            &mut e,
+            "document.getElementById('u').getAttribute('href')+'|'+\
+             (document.getElementById('u')===document.querySelector('svg use'))"
+        ),
+        "b|true"
+    );
+    // `implementation` lazy-cachée : méthode encore fonction.
+    assert_eq!(
+        ev(
+            &mut e,
+            "document.implementation.createHTMLDocument('t').title"
+        ),
+        "t"
+    );
+    // Après un second GC + allocation fraîche, tout tient.
+    e.eval("for(let i=0;i<50;i++)({a:i})").unwrap();
+    let _ = e.collect();
+    assert_eq!(ev(&mut e, "document.getElementById('u').tagName"), "USE");
+}
