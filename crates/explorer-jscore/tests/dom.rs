@@ -5871,13 +5871,25 @@ fn cap188_xpath_subset() {
         ),
         "hwo"
     );
-    // Syntaxe non portée → TypeError honnête.
+    // `position()`/`last()`/`contains()`/axes/union portés
+    // (JS-C197 — insee vol 122) : `position()=1` évalue → 1er
+    // `<p>` (nth global borné).
     assert_eq!(
         evf(
             &mut e,
-            "var t='';try{d.evaluate('//p[position()=1]',d,null,7,null)}catch(v){t=v.name}t"
+            "d.evaluate('//p[position()=1]',d,null,9,null).singleNodeValue.textContent"
         ),
-        "TypeError"
+        "hello"
+    );
+    // Syntaxe valide hors sous-ensemble → résultat vide +
+    // warn console (dégradé — le `TypeError` tuait le script
+    // insee entier).
+    assert_eq!(
+        evf(
+            &mut e,
+            "var t='';try{var r=d.evaluate('//x:y',d,null,7,null);t='snap:'+r.snapshotLength}catch(v){t='thrown'}t"
+        ),
+        "snap:0"
     );
 }
 

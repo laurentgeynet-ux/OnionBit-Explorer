@@ -7,6 +7,69 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **JS-C197 — §B-14 : `XPath`
+  élargi + `navigator.vendor`**
+  (`explorer-jscore`) — insee
+  vol 122 : `evaluate:
+  unsupported XPath` tuait le
+  script — la grammaire ne
+  couvrait que `//tag[@a]`/`[n]`.
+  Étendue : axes `ancestor::`/
+  `ancestor-or-self::`/
+  `descendant::`/`descendant-
+  or-self::`/`self::`/`child::`/
+  `parent::`/`following(-
+  sibling)::`/`preceding(-
+  sibling)::`/`attribute::`/`@x`
+  (borné : élément porteur),
+  prédicats `contains`/`starts-
+  with`/`ends-with`/`text()`/
+  `last()`/`position()`/`not()`,
+  union `|` (fusion ordre doc
+  dédupée). XPath valide hors
+  sous-ensemble → résultat vide
+  + `console.warn` (dégradé —
+  le `TypeError` tuait le script
+  insee entier). ryanair vol 127
+  : `navigator.vendor.toString()`
+  jetait `toString of Undefined`
+  → zone incomplète →
+  `MutationObserver: callback
+  requis` en cascade ; `vendor`
+  (`""` non-Google honnête),
+  `appCodeName`, `product`,
+  `productSub`, `vendorSub`
+  ajoutés. Verrous
+  `xpath_evaluate_common_axes
+  _and_predicates` +
+  `navigator_java_enabled_
+  returns_false` (étendu)
+  (`b14_probe.rs`), carve-out
+  `cap188_xpath_subset` (`dom.rs`).
+- **JS-C196 — `postMessage`/
+  `structuredClone` des cloneables
+  spec** (`explorer-jscore` —
+  lequipe vol 124 : `postMessage:
+  cannot clone host object`) —
+  nouveau hook `Host::serializable_clone`
+  (défaut `None` = non cloneable) :
+  `AbortSignal` sérialise
+  `(aborted, reason)` ; les erreurs
+  nomment désormais la classe
+  (`cannot clone HTMLVideoElement`,
+  plus `host object` muet —
+  diagnostic vol). `WireValue::Blob`
+  : un `Blob`/`File` posté traversait
+  en `{}` **silencieux** — rail
+  wire complet encode `(octets,
+  type, props propres)` et décode
+  un vrai `ObjKind::Blob` + props
+  restaurées (`File.name` — proto
+  `Blob`, déviation documentée).
+  `clone_deep` suit le même hook
+  (cohérence `structuredClone`).
+  Verrous `c196_clone.rs` ×5 ;
+  clippy/suite jscore verts.
 - **JS-C195 — §B-14 :
   `scheduler.postTask` (Scheduler
   API)** (`explorer-jscore`) —

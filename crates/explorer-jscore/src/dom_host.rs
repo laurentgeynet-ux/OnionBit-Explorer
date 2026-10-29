@@ -1786,6 +1786,17 @@ impl Engine {
             ("platform", "Win32"),
             ("language", "en-US"),
             ("appVersion", "5.0"),
+            // `vendor`/`product*` — props spec lues par les
+            // fingerprint/feature-detects réels. `vendor` vide
+            // (style Firefox — honnête, pas "Google Inc.") ;
+            // ryanair vol 127 : `navigator.vendor.toString()`
+            // tuait le boot → zone incomplète →
+            // `MutationObserver: callback requis` en cascade.
+            ("vendor", ""),
+            ("appCodeName", "Mozilla"),
+            ("product", "Gecko"),
+            ("productSub", "20030107"),
+            ("vendorSub", ""),
         ] {
             let s = self.str_val(v);
             self.set_own(nav, k, s, true);

@@ -447,6 +447,96 @@ fn scheduler_post_task_resolves_via_timer() {
 }
 
 #[test]
+fn xpath_evaluate_common_axes_and_predicates() {
+    // insee vol 122 : `evaluate: unsupported XPath` tuait le
+    // script — la grammaire ne couvrait que `//tag[@a]`/`[n]`.
+    // Étendue : axes `ancestor::`/`self::`/`following-sibling::`/
+    // `preceding-sibling::`/`parent::`/`descendant*`/`attribute::`,
+    // prédicats `contains`/`starts-with`/`ends-with`/`text()`/
+    // `last()`/`position()`/`not()`, union `|`. Le reste →
+    // résultat vide + warn console (dégradé, plus de throw).
+    let mut e = Engine::new();
+    e.install_dom(&Rc::new(RefCell::new(Dom::from_html(
+        "<html><body><div id=a class='x'><p>t1</p><p>t2</p></div>\
+         <div id=b class='xy'><span>S</span></div>\
+         <ul><li>1</li><li>2</li><li>3</li></ul></body></html>",
+    ))));
+    assert_eq!(
+        ev(
+            &mut e,
+            "document.evaluate('//p',document,null,7,null).snapshotLength"
+        ),
+        "2"
+    );
+    assert_eq!(
+        ev(
+            &mut e,
+            "document.evaluate(\"//div[@class='x']\",document,null,7,null).snapshotLength"
+        ),
+        "1"
+    );
+    assert_eq!(
+        ev(
+            &mut e,
+            "document.evaluate(\"//div[contains(@class,'x')]\",document,null,7,null).snapshotLength"
+        ),
+        "2"
+    );
+    assert_eq!(
+        ev(
+            &mut e,
+            "document.evaluate('//span/ancestor::div',document,null,7,null).snapshotLength"
+        ),
+        "1"
+    );
+    assert_eq!(
+        ev(
+            &mut e,
+            "document.evaluate('//div[@id=\"a\"]/following-sibling::div',document,null,7,null).snapshotLength"
+        ),
+        "1"
+    );
+    assert_eq!(
+        ev(
+            &mut e,
+            "document.evaluate('//p|//span',document,null,7,null).snapshotLength"
+        ),
+        "3"
+    );
+    assert_eq!(
+        ev(
+            &mut e,
+            "document.evaluate('//li[last()]',document,null,7,null).snapshotItem(0).textContent"
+        ),
+        "3"
+    );
+    assert_eq!(
+        ev(
+            &mut e,
+            "document.evaluate(\"//p[text()='t2']\",document,null,7,null).snapshotLength"
+        ),
+        "1"
+    );
+    // XPath valide hors sous-ensemble → résultat vide (warn
+    // console émis), plus de `TypeError`.
+    assert_eq!(
+        ev(
+            &mut e,
+            "document.evaluate('//x:y',document,null,7,null).snapshotLength"
+        ),
+        "0"
+    );
+    // `id()`/`count()`/`..`/`.` inchangés.
+    assert_eq!(
+        ev(
+            &mut e,
+            "document.evaluate('count(//li)',document,null,1,null).numberValue"
+        ),
+        "3"
+    );
+}
+
+#[test]
 fn navigator_java_enabled_returns_false() {
     // maif vol 122 : `javaEnabled is not a function` — méthode
     // spec (dépréciée) lue par les feature-detects ; spec :
@@ -458,5 +548,18 @@ fn navigator_java_enabled_returns_false() {
             "typeof navigator.javaEnabled+'|'+navigator.javaEnabled()"
         ),
         "function|false"
+    );
+    // ryanair vol 127 : `navigator.vendor.toString()` tuait le
+    // boot (`toString of Undefined`) → zone incomplète →
+    // `MutationObserver: callback requis` en cascade. `vendor`
+    // vide (spec — non-Google honnête) mais *défini*.
+    assert_eq!(
+        ev(
+            &mut e,
+            "typeof navigator.vendor+'|'+navigator.vendor.toString()+'|'\
+             +navigator.appCodeName+'|'+navigator.product+'|'\
+             +navigator.productSub+'|'+(typeof navigator.vendorSub)"
+        ),
+        "string||Mozilla|Gecko|20030107|string"
     );
 }

@@ -2299,50 +2299,121 @@ enum Step {
     SelfNode,
     /// `..` parent.
     Parent,
+    /// `@a` — test d'attribut (les nœuds attributs ne sont
+    /// pas modélisés : l'étape sélectionne l'élément porteur
+    /// — déviation bornée documentée).
+    Attr(String),
 }
 
-/// Pas parsé : nom + prédicats `[@a]`, `[@a='v']`, `[n]`.
+/// Axe `XPath` — `child`/`descendant` sont le défaut implicite
+/// (`/`/`//`), les autres viennent de `axe::nom` explicite
+/// (insee vol 122 : `evaluate: unsupported XPath` sur du
+/// `XPath` réel).
+#[derive(Clone, Copy, PartialEq)]
+enum Axis {
+    Child,
+    Descendant,
+    SelfNode,
+    Parent,
+    Ancestor,
+    AncestorOrSelf,
+    DescendantOrSelf,
+    FollowingSibling,
+    PrecedingSibling,
+    Following,
+    Preceding,
+    /// `attribute::` — déviation bornée : l'étape teste la
+    /// présence de l'attribut sur l'élément courant.
+    Attribute,
+}
+
+/// Prédicat `[…]` — formes courantes du web réel.
+enum Pred {
+    /// `[@a]` — présence.
+    AttrHas(String),
+    /// `[@a='v']` — égalité.
+    AttrEq(String, String),
+    /// `[n]` — n-ième (spec : par axe/parent — borné global).
+    Nth(usize),
+    /// `[contains(@a,'v')]` / `[starts-with(@a,'v')]` /
+    /// `[ends-with(@a,'v')]` — sous-chaîne sur attribut.
+    AttrContains(String, String),
+    AttrStartsWith(String, String),
+    AttrEndsWith(String, String),
+    /// `[text()='v']` — texte direct exact.
+    TextEq(String),
+    /// `[contains(text(),'v')]` — sous-chaîne sur texte.
+    TextContains(String),
+    /// `[last()]` — dernier de l'ensemble (borné global).
+    Last,
+    /// `[position()=n]` — index dans l'ensemble.
+    Position(usize),
+    /// `[not(@a)]` / `[not(@a='v')]` — négation.
+    NotAttrHas(String),
+    NotAttrEq(String, String),
+}
+
+/// Pas parsé : axe + nom + prédicats (tous requis).
 struct ParsedStep {
     step: Step,
-    pred_attr: Option<String>,
-    pred_val: Option<String>,
-    pred_nth: Option<usize>,
+    axis: Axis,
+    /// `true` si l'axe vient de l'expression (`axis::`, `.`,
+    /// `..`, `@x`) — un `//` englobant ne doit pas l'écraser
+    /// en `Descendant`.
+    axis_explicit: bool,
+    preds: Vec<Pred>,
 }
 
-/// Parse d'un pas — `None` sur syntaxe non portée
-/// (honnête : `TypeError` remonté).
+/// Parse d'un pas — `axis::nom[pred]…`. `None` sur syntaxe non
+/// portée (l'évaluatrice dégrade en résultat vide + warn —
+/// insee vol 122 : le `TypeError` tuait le script entier).
 fn parse_step(raw: &str) -> Option<ParsedStep> {
-    let (name, preds) = raw.find('[').map_or((raw, ""), |i| (&raw[..i], &raw[i..]));
-    let step = match name {
-        "*" => Step::Tag("*".into()),
-        "text()" => Step::Text,
-        "node()" => Step::Any,
-        "." => Step::SelfNode,
-        ".." => Step::Parent,
-        _ => Step::Tag(name.to_ascii_lowercase()),
+    // `axis::step` — `child`/`descendant` arrivent déjà fixés
+    // par le séparateur (`/`/`//`) ; ici les axes explicites.
+    let (axis, raw) = match raw.split_once("::") {
+        Some((a, s)) => {
+            let ax = match a {
+                "ancestor" => Axis::Ancestor,
+                "ancestor-or-self" => Axis::AncestorOrSelf,
+                "attribute" => Axis::Attribute,
+                "child" => Axis::Child,
+                "descendant" => Axis::Descendant,
+                "descendant-or-self" => Axis::DescendantOrSelf,
+                "following" => Axis::Following,
+                "following-sibling" => Axis::FollowingSibling,
+                "parent" => Axis::Parent,
+                "preceding" => Axis::Preceding,
+                "preceding-sibling" => Axis::PrecedingSibling,
+                "self" => Axis::SelfNode,
+                _ => return None,
+            };
+            (Some(ax), s)
+        }
+        None => (None, raw),
     };
+    let (name, preds) = raw.find('[').map_or((raw, ""), |i| (&raw[..i], &raw[i..]));
+    let (step, axis2) = match name {
+        "*" => (Step::Tag("*".into()), None),
+        "text()" => (Step::Text, None),
+        "node()" | "comment()" => (Step::Any, None),
+        "." => (Step::SelfNode, Some(Axis::SelfNode)),
+        ".." => (Step::Parent, Some(Axis::Parent)),
+        _ if name.starts_with('@') => (Step::Attr(name[1..].into()), Some(Axis::Attribute)),
+        _ => (Step::Tag(name.to_ascii_lowercase()), None),
+    };
+    let explicit = axis.is_some() || axis2.is_some();
+    let axis = axis.or(axis2).unwrap_or(Axis::Child);
     let mut s = ParsedStep {
         step,
-        pred_attr: None,
-        pred_val: None,
-        pred_nth: None,
+        axis,
+        axis_explicit: explicit,
+        preds: Vec::new(),
     };
     let mut rest = preds;
     while rest.starts_with('[') {
         let end = rest.find(']')?;
         let p = rest[1..end].trim();
-        if let Some(a) = p.strip_prefix('@') {
-            if let Some((k, v)) = a.split_once('=') {
-                s.pred_attr = Some(k.trim().into());
-                s.pred_val = Some(v.trim().trim_matches('\'').trim_matches('"').into());
-            } else {
-                s.pred_attr = Some(a.trim().into());
-            }
-        } else if let Ok(n) = p.parse::<usize>() {
-            s.pred_nth = Some(n.max(1));
-        } else {
-            return None;
-        }
+        s.preds.push(parse_pred(p)?);
         rest = &rest[end + 1..];
     }
     if !rest.is_empty() {
@@ -2351,28 +2422,100 @@ fn parse_step(raw: &str) -> Option<ParsedStep> {
     Some(s)
 }
 
-/// `true` si le nœud passe le pas (nom + prédicat attr).
+/// Parse d'un prédicat `[…]` — `None` sur forme non portée.
+fn parse_pred(p: &str) -> Option<Pred> {
+    let p = p.trim();
+    let quoted = |v: &str| v.trim().trim_matches('\'').trim_matches('"').to_string();
+    // Fonctions `contains(a,b)`/`starts-with`/`ends-with` —
+    // argument attribut `@a` ou `text()`/`.`.
+    for fname in ["contains(", "starts-with(", "ends-with("] {
+        if let Some(inner) = p.strip_prefix(fname).and_then(|r| r.strip_suffix(')')) {
+            let (a, b) = inner.split_once(',')?;
+            let a = a.trim();
+            let b = quoted(b);
+            if let Some(at) = a.strip_prefix('@') {
+                let at = at.trim().to_string();
+                return Some(match fname {
+                    "contains(" => Pred::AttrContains(at, b),
+                    "starts-with(" => Pred::AttrStartsWith(at, b),
+                    _ => Pred::AttrEndsWith(at, b),
+                });
+            }
+            if a == "text()" || a == "." {
+                // `*-with(text(),…)` borné → contient.
+                return Some(Pred::TextContains(b));
+            }
+            return None;
+        }
+    }
+    if let Some(inner) = p.strip_prefix("not(").and_then(|r| r.strip_suffix(')')) {
+        let inner = inner.trim();
+        if let Some(a) = inner.strip_prefix('@') {
+            if let Some((k, v)) = a.split_once('=') {
+                return Some(Pred::NotAttrEq(k.trim().into(), quoted(v)));
+            }
+            return Some(Pred::NotAttrHas(a.trim().into()));
+        }
+        return None;
+    }
+    if p == "last()" {
+        return Some(Pred::Last);
+    }
+    if let Some(v) = p.strip_prefix("position()") {
+        let n = v.trim().strip_prefix('=')?.trim().parse::<usize>().ok()?;
+        return Some(Pred::Position(n.max(1)));
+    }
+    if let Some(a) = p.strip_prefix('@') {
+        if let Some((k, v)) = a.split_once('=') {
+            return Some(Pred::AttrEq(k.trim().into(), quoted(v)));
+        }
+        return Some(Pred::AttrHas(a.trim().into()));
+    }
+    if let Some(v) = p.strip_prefix("text()") {
+        let v = v.trim().strip_prefix('=')?;
+        return Some(Pred::TextEq(quoted(v)));
+    }
+    if let Ok(n) = p.parse::<usize>() {
+        return Some(Pred::Nth(n.max(1)));
+    }
+    None
+}
+
+/// `true` si le nœud passe le pas (nom + prédicats).
 fn xp_match(d: &crate::dom::Dom, n: NodeId, ps: &ParsedStep) -> bool {
     let node = &d.nodes[n as usize];
     let ok = match &ps.step {
         Step::Tag(t) => t == "*" || (node.kind == crate::dom::NodeKind::Element && node.tag == *t),
         Step::Text => node.kind == crate::dom::NodeKind::Text,
         Step::Any | Step::SelfNode | Step::Parent => true,
+        Step::Attr(a) => {
+            // Déviation bornée : l'étape `@a` sélectionne
+            // l'élément porteur (nœuds attributs non modélisés).
+            node.kind == crate::dom::NodeKind::Element && d.attr(n, a).is_some()
+        }
     };
     if !ok {
         return false;
     }
-    if let Some(a) = &ps.pred_attr {
-        let Some(v) = d.attr(n, a) else {
-            return false;
-        };
-        if let Some(want) = &ps.pred_val {
-            if v != want {
-                return false;
-            }
-        }
+    ps.preds.iter().all(|p| xp_pred(d, n, p))
+}
+
+/// Un prédicat appliqué à un nœud.
+fn xp_pred(d: &crate::dom::Dom, n: NodeId, p: &Pred) -> bool {
+    match p {
+        Pred::AttrHas(a) => d.attr(n, a).is_some(),
+        Pred::AttrEq(a, want) => d.attr(n, a).is_some_and(|v| v == want),
+        Pred::AttrContains(a, w) => d.attr(n, a).is_some_and(|v| v.contains(w.as_str())),
+        Pred::AttrStartsWith(a, w) => d.attr(n, a).is_some_and(|v| v.starts_with(w.as_str())),
+        Pred::AttrEndsWith(a, w) => d.attr(n, a).is_some_and(|v| v.ends_with(w.as_str())),
+        Pred::NotAttrHas(a) => d.attr(n, a).is_none(),
+        Pred::NotAttrEq(a, w) => d.attr(n, a).is_none_or(|v| v != w),
+        Pred::TextEq(w) => d.text_content(n).trim() == w,
+        Pred::TextContains(w) => d.text_content(n).contains(w.as_str()),
+        // `Nth`/`Last`/`Position` sont appliqués à l'ensemble
+        // dans `xp_apply` — ici ils laissent passer.
+        Pred::Nth(_) | Pred::Last | Pred::Position(_) => true,
     }
-    true
 }
 
 /// Tous les descendants en ordre document.
@@ -2389,43 +2532,125 @@ fn xp_descendants(d: &crate::dom::Dom, n: NodeId) -> Vec<NodeId> {
     out
 }
 
-/// Un niveau de pas — `desc` = `//` (descendants du set
-/// courant), sinon enfants directs.
+/// `d.child_nodes(n)` sans garder le `Ref` sur le scrutinee.
+fn xp_kids(d: &crate::dom::Dom, n: NodeId) -> Vec<NodeId> {
+    d.child_nodes(n)
+}
+
+/// Un niveau de pas — l'axe dirige le parcours depuis chaque
+/// nœud du set (`//` pré-positionne `Descendant`).
 fn xp_apply(d: &crate::dom::Dom, set: &[NodeId], ps: &ParsedStep, desc: bool) -> Vec<NodeId> {
-    let mut out = Vec::new();
+    let axis = if desc && !ps.axis_explicit {
+        Axis::Descendant
+    } else {
+        ps.axis
+    };
+    let mut out: Vec<NodeId> = Vec::new();
     for &n in set {
-        match ps.step {
-            Step::SelfNode => out.push(n),
-            Step::Parent => {
-                if let Some(p) = d.parent(n) {
-                    out.push(p);
+        let candidates: Vec<NodeId> = match axis {
+            Axis::SelfNode => vec![n],
+            Axis::Parent => d.parent(n).into_iter().collect(),
+            Axis::Child | Axis::Attribute => xp_kids(d, n),
+            Axis::Descendant => xp_descendants(d, n),
+            Axis::DescendantOrSelf => {
+                let mut v = vec![n];
+                v.extend(xp_descendants(d, n));
+                v
+            }
+            Axis::Ancestor | Axis::AncestorOrSelf => {
+                let mut v = Vec::new();
+                let mut cur = d.parent(n);
+                while let Some(p) = cur {
+                    v.push(p);
+                    cur = d.parent(p);
+                }
+                if axis == Axis::AncestorOrSelf {
+                    v.insert(0, n);
+                }
+                v
+            }
+            Axis::FollowingSibling | Axis::PrecedingSibling => {
+                let Some(p) = d.parent(n) else { continue };
+                let kids = xp_kids(d, p);
+                let Some(pos) = kids.iter().position(|&k| k == n) else {
+                    continue;
+                };
+                if axis == Axis::FollowingSibling {
+                    kids[pos + 1..].to_vec()
+                } else {
+                    let mut v = kids[..pos].to_vec();
+                    v.reverse();
+                    v
                 }
             }
-            _ => {
-                if desc {
-                    for m in xp_descendants(d, n) {
-                        if xp_match(d, m, ps) {
-                            out.push(m);
-                        }
+            Axis::Following | Axis::Preceding => {
+                // Ordre document depuis la racine — borné
+                // (spec exclut descendants/ancêtres).
+                let all = xp_descendants(d, d.root);
+                match all.iter().position(|&m| m == n) {
+                    Some(pos) if axis == Axis::Following => {
+                        let desc: std::collections::HashSet<NodeId> =
+                            xp_descendants(d, n).into_iter().collect();
+                        all[pos + 1..]
+                            .iter()
+                            .copied()
+                            .filter(|m| !desc.contains(m))
+                            .collect()
                     }
-                } else {
-                    for m in d.child_nodes(n) {
-                        if xp_match(d, m, ps) {
-                            out.push(m);
-                        }
+                    Some(pos) => {
+                        let anc: std::collections::HashSet<NodeId> = {
+                            let mut v = std::collections::HashSet::new();
+                            let mut cur = d.parent(n);
+                            while let Some(p) = cur {
+                                v.insert(p);
+                                cur = d.parent(p);
+                            }
+                            v
+                        };
+                        let mut v: Vec<NodeId> = all[..pos]
+                            .iter()
+                            .copied()
+                            .filter(|m| !anc.contains(m))
+                            .collect();
+                        v.reverse();
+                        v
                     }
+                    None => Vec::new(),
                 }
+            }
+        };
+        // `attribute::`/`@x` : le candidat est l'élément
+        // **courant** testé pour l'attribut (déviation bornée).
+        let attr_step = matches!(ps.step, Step::Attr(_));
+        if axis == Axis::Attribute || attr_step {
+            if xp_match(d, n, ps) {
+                out.push(n);
+            }
+            continue;
+        }
+        for m in candidates {
+            if xp_match(d, m, ps) {
+                out.push(m);
             }
         }
     }
-    if let Some(k) = ps.pred_nth {
-        // Borné : n-ième de l'ensemble global (spec : n-ième
-        // par parent — documenté).
-        out = out
-            .into_iter()
-            .nth(k.saturating_sub(1))
-            .into_iter()
-            .collect();
+    // Prédicats positionnels — appliqués à l'ensemble global
+    // (spec : par axe/parent — déviation bornée documentée).
+    for p in &ps.preds {
+        match p {
+            Pred::Nth(k) | Pred::Position(k) => {
+                out = out
+                    .iter()
+                    .copied()
+                    .nth(k.saturating_sub(1))
+                    .into_iter()
+                    .collect();
+            }
+            Pred::Last => {
+                out = out.last().into_iter().copied().collect();
+            }
+            _ => {}
+        }
     }
     out
 }
@@ -2482,6 +2707,77 @@ pub(crate) fn create_ns_resolver(e: &mut Engine, _this: Value, args: &[Value]) -
     Ok(Value::Null)
 }
 
+/// Découpe `a|b|c` aux `|` hors `[]`/`()`/guillemets.
+fn xpath_union_split(path: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut depth = 0i32;
+    let mut quote = '\0';
+    let mut cur = String::new();
+    for c in path.chars() {
+        match c {
+            '\'' | '"' if quote == '\0' => quote = c,
+            _ if c == quote => quote = '\0',
+            '[' | '(' if quote == '\0' => depth += 1,
+            ']' | ')' if quote == '\0' => depth -= 1,
+            '|' if depth == 0 && quote == '\0' => {
+                out.push(std::mem::take(&mut cur));
+                continue;
+            }
+            _ => {}
+        }
+        cur.push(c);
+    }
+    out.push(cur);
+    out
+}
+
+/// Séparateur `/` suivant hors `[]`/`()`/guillemets.
+fn xpath_step_end(r: &str) -> usize {
+    let mut depth = 0i32;
+    let mut quote = '\0';
+    for (i, c) in r.char_indices() {
+        match c {
+            '\'' | '"' if quote == '\0' => quote = c,
+            _ if c == quote => quote = '\0',
+            '[' | '(' if quote == '\0' => depth += 1,
+            ']' | ')' if quote == '\0' => depth -= 1,
+            '/' if depth == 0 && quote == '\0' => return i,
+            _ => {}
+        }
+    }
+    r.len()
+}
+
+/// Évalue une branche de chemin (pas d'union) — `None` si un
+/// pas sort du sous-ensemble porté.
+fn xpath_eval_branch(d: &crate::dom::Dom, ctx: NodeId, path: &str) -> Option<Vec<NodeId>> {
+    let mut set = vec![ctx];
+    let mut rest = path.trim();
+    // Racine absolue `//x` ou `/x` depuis le contexte (borné :
+    // `/` initial n'ancre pas au document root — spec stricte,
+    // mais le web réel l'emploie comme descendant du ctx).
+    while !rest.is_empty() {
+        let (step_raw, desc, next) = if let Some(r) = rest.strip_prefix("//") {
+            let i = xpath_step_end(r);
+            (&r[..i], true, &r[i..])
+        } else if let Some(r) = rest.strip_prefix('/') {
+            let i = xpath_step_end(r);
+            (&r[..i], false, &r[i..])
+        } else {
+            let i = xpath_step_end(rest);
+            (&rest[..i], false, &rest[i..])
+        };
+        if step_raw.is_empty() {
+            rest = next;
+            continue;
+        }
+        let ps = parse_step(step_raw)?;
+        set = xp_apply(d, &set, &ps, desc);
+        rest = next;
+    }
+    Some(set)
+}
+
 pub(crate) fn xpath_evaluate(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let _ = this;
     let Some((dom, cache)) = e.dom_ctx.clone() else {
@@ -2508,48 +2804,27 @@ pub(crate) fn xpath_evaluate(e: &mut Engine, this: Value, args: &[Value]) -> JsR
                 nodes.push(n);
             }
         } else {
-            let mut set = vec![ctx];
-            let mut rest = path.as_str();
-            while !rest.is_empty() {
-                // `.`/`..` préfixe — `self`/`parent::node()`.
-                if let Some(r) = rest.strip_prefix("..") {
-                    set = xp_apply(
-                        &d,
-                        &set,
-                        &ParsedStep {
-                            step: Step::Parent,
-                            pred_attr: None,
-                            pred_val: None,
-                            pred_nth: None,
-                        },
-                        false,
-                    );
-                    rest = r;
-                    continue;
+            // Union `a|b` — découpe aux `|` hors `[]`/`()`/quotes ;
+            // chaque branche évaluée, résultats fusionnés en
+            // ordre document (index d'arène) dédupé (spec).
+            let mut saw_unsupported = false;
+            for branch in xpath_union_split(&path) {
+                match xpath_eval_branch(&d, ctx, &branch) {
+                    Some(mut set) => nodes.append(&mut set),
+                    None => saw_unsupported = true,
                 }
-                if let Some(r) = rest.strip_prefix('.') {
-                    rest = r;
-                    continue;
-                }
-                let (step_raw, desc, next) = if let Some(r) = rest.strip_prefix("//") {
-                    let i = r.find('/').unwrap_or(r.len());
-                    (&r[..i], true, &r[i..])
-                } else if let Some(r) = rest.strip_prefix('/') {
-                    let i = r.find('/').unwrap_or(r.len());
-                    (&r[..i], false, &r[i..])
-                } else {
-                    (rest, false, "")
-                };
-                if step_raw.is_empty() {
-                    return Err(e.type_error("evaluate: unsupported XPath"));
-                }
-                let Some(ps) = parse_step(step_raw) else {
-                    return Err(e.type_error("evaluate: unsupported XPath"));
-                };
-                set = xp_apply(&d, &set, &ps, desc);
-                rest = next;
             }
-            nodes = set;
+            if saw_unsupported {
+                // XPath valide hors sous-ensemble : résultat
+                // partiel/vide + warn console (le `TypeError`
+                // tuait le script entier — insee vol 122).
+                // Vide = « aucun match » → les sites enchaînent
+                // sur leur fallback.
+                let w = e.str_val(format!("evaluate: unsupported XPath — {expr}"));
+                let _ = crate::dom_host::console_line(e, Value::Undefined, &[w]);
+            }
+            nodes.sort_unstable();
+            nodes.dedup();
         }
     }
     let flag = !nodes.is_empty();
