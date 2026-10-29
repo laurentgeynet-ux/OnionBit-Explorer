@@ -158,6 +158,28 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   Vérifié live : `isTypeSupported
   ("video/mp4;codecs=avc1.42E01E")
   → "maybe"` après claim exact.
+- **MSE-7 — claim média par identité
+  URL** (vol 176-ter, ADR-0029) —
+  `mirror_node(path)` échoue quand le
+  JS réordonne le miroir plus vite que
+  les applies ne resynchronisent le
+  réel : l'élément n'était jamais
+  claimé (`play()` retombait sur les
+  stubs). `set_media_claim` reçoit
+  désormais `url` (identité de repli)
+  → `mirror_node_by_url` retrouve le
+  `video`/`audio` du miroir par son
+  `src` (ou le `src` d'un `<source>`
+  enfant — `blob:` littéral compris) ;
+  une map `media → NodeId` retient la
+  résolution pour les rapports `state`
+  suivants (`deliver_media_state`
+  gagne l'id de surface) et est purgée
+  à l'unclaim et au `install_dom`.
+  Unclaim `GoneSurface` porte `url` à
+  l'identique. Verrous adapter :
+  claim livré par repli url + jamais
+  sur le mauvais élément.
 - **139g — branche MSE dormante dans le
   lecteur** (`app/`) — `MediaOffer.mse`
   parsé de l'offre (`mse:true` du

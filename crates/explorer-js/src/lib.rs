@@ -1315,10 +1315,16 @@ pub trait JsEngine: Send {
     /// 71c, contrat `MediaSurface`. L'id `media` est rappelé
     /// dans les commandes drainées (l'identité de surface est
     /// côté session, le chemin sert juste à résoudre le nœud
-    /// miroir une fois). Défaut : rien (pas de surface média).
+    /// miroir une fois). `url` = URL média de la surface
+    /// (`src` résolue ou `blob:`) — identité de repli quand
+    /// le path diverge du miroir (vol 176-ter : le JS peut
+    /// réordonner le miroir plus vite que les applies ne
+    /// resynchronisent le réel → path frais obsolète).
+    /// Défaut : rien (pas de surface média).
     fn set_media_claim(
         &mut self,
         _path: &[(String, u32)],
+        _url: &str,
         _media: u64,
         _codecs: Option<Vec<String>>,
     ) {
@@ -1328,8 +1334,16 @@ pub trait JsEngine: Send {
     /// l'élément `path` (étape 71c) — props refletées,
     /// promesses `play()` tranchées, events DOM tirés.
     /// Rapport sur élément non claimé/mort → ignoré.
-    /// Défaut : rien.
-    fn deliver_media_state(&mut self, _path: &[(String, u32)], _report: JsMediaReport) {}
+    /// `media` = id de surface session — permet de retrouver
+    /// le nœud déjà résolu au claim sans re-tenter un path
+    /// obsolète. Défaut : rien.
+    fn deliver_media_state(
+        &mut self,
+        _path: &[(String, u32)],
+        _media: u64,
+        _report: JsMediaReport,
+    ) {
+    }
 
     /// Draine les ordres média émis par la page depuis le
     /// dernier appel (`play()`/`pause()`/seek/volume/rate
@@ -1666,11 +1680,13 @@ enum Cmd {
     },
     SetMediaClaim {
         path: Vec<(String, u32)>,
+        url: String,
         media: u64,
         codecs: Option<Vec<String>>,
     },
     DeliverMediaState {
         path: Vec<(String, u32)>,
+        media: u64,
         report: JsMediaReport,
     },
     DrainMediaCommands {
@@ -1960,6 +1976,11 @@ impl JscoreEngine {
         // meurt sur ce thread). Le `Dom` y reste mutable par les
         // bindings ; `DomSync` lit le dirty bit et sérialise.
         let mut jsd: Option<explorer_jscore::DomRef> = None;
+        // `media id → nœud miroir` des surfaces claimées :
+        // le claim résout le nœud une fois (path, repli url)
+        // et les rapports `state` suivants le retrouvent sans
+        // re-tenter un path déjà obsolète (vol 176-ter).
+        let mut media_nodes: HashMap<u64, explorer_jscore::NodeId> = HashMap::new();
         // Intentions de navigation script (`location`,
         // `history`) — hooks `Rc` du thread moteur, drainées
         // par `DrainNav` (jamais de navigation re-entrante).
@@ -2067,6 +2088,9 @@ impl JscoreEngine {
                     page_url,
                     history_len,
                 } => {
+                    // Nouveau miroir → les nœuds claimés de la
+                    // map sont invalides (NodeId de l'ancien Dom).
+                    media_nodes.clear();
                     jsd = Some(install_dom(
                         &mut eng,
                         &nav_q,
@@ -2566,7 +2590,15 @@ impl JscoreEngine {
                 Cmd::Shutdown => return,
                 // Surfaces script-initiées (JS-C27/C28) déléguées.
                 net => {
-                    if !serve_side(&mut eng, jsd.as_ref(), &net_q, &jar, &mut local_store, net) {
+                    if !serve_side(
+                        &mut eng,
+                        jsd.as_ref(),
+                        &net_q,
+                        &jar,
+                        &mut local_store,
+                        &mut media_nodes,
+                        net,
+                    ) {
                         return;
                     }
                 }
@@ -3241,17 +3273,25 @@ impl JsEngine for JscoreEngine {
         rx.recv_timeout(Self::EVAL_CMD_TIMEOUT).unwrap_or_default()
     }
 
-    fn set_media_claim(&mut self, path: &[(String, u32)], media: u64, codecs: Option<Vec<String>>) {
+    fn set_media_claim(
+        &mut self,
+        path: &[(String, u32)],
+        url: &str,
+        media: u64,
+        codecs: Option<Vec<String>>,
+    ) {
         let _ = self.tx.send(Cmd::SetMediaClaim {
             path: path.to_vec(),
+            url: url.to_string(),
             media,
             codecs,
         });
     }
 
-    fn deliver_media_state(&mut self, path: &[(String, u32)], report: JsMediaReport) {
+    fn deliver_media_state(&mut self, path: &[(String, u32)], media: u64, report: JsMediaReport) {
         let _ = self.tx.send(Cmd::DeliverMediaState {
             path: path.to_vec(),
+            media,
             report,
         });
     }
@@ -3366,6 +3406,7 @@ fn serve_side(
     net_q: &std::rc::Rc<std::cell::RefCell<Vec<NetRequest>>>,
     jar: &std::rc::Rc<SnapshotJar>,
     local_store: &mut Option<explorer_jscore::Storage>,
+    media_nodes: &mut HashMap<u64, explorer_jscore::NodeId>,
     cmd: Cmd,
 ) -> bool {
     match cmd {
@@ -3379,16 +3420,19 @@ fn serve_side(
         // l'id de surface session.
         Cmd::SetMediaClaim {
             path,
+            url,
             media,
             codecs,
         } => {
-            deliver_media_claim(eng, jsd, &path, media, codecs);
+            deliver_media_claim(eng, jsd, media_nodes, &path, &url, media, codecs);
             true
         }
-        Cmd::DeliverMediaState { path, report } => {
-            if let Some(n) = jsd.and_then(|d| mirror_node(&d.borrow(), &path)) {
-                let _ = eng.deliver_media_state(n, &media_report_of(report));
-            }
+        Cmd::DeliverMediaState {
+            path,
+            media,
+            report,
+        } => {
+            deliver_media_state(eng, jsd, media_nodes, &path, media, report);
             true
         }
         Cmd::DrainMediaCommands { tx } => {
@@ -3685,22 +3729,40 @@ fn js_media_cmd(c: explorer_jscore::MediaCmd) -> JsMediaCmd {
 }
 
 /// Livraison du claim média au nœud miroir résolu — path non
-/// résolu (miroir divergent du réel) : warn nommé et les
-/// codecs déclarés alimentent quand même la table document-
-/// locale `isTypeSupported` (vol 176-bis : le claim entier
-/// mourait silencieusement, codecs inclus).
+/// résolu (miroir divergent du réel) : repli sur l'URL média
+/// (`src` de l'élément ou de son `<source>` — vol 176-ter :
+/// le JS réordonne le miroir plus vite que les applies ne
+/// resynchronisent le réel). Succès → `media_nodes` retient
+/// la résolution pour les rapports `state` suivants.
+/// Échec total : warn nommé et les codecs déclarés alimentent
+/// quand même la table document-locale `isTypeSupported`
+/// (vol 176-bis : le claim entier mourait silencieusement,
+/// codecs inclus).
 fn deliver_media_claim(
     eng: &mut explorer_jscore::Engine,
     jsd: Option<&explorer_jscore::DomRef>,
+    media_nodes: &mut HashMap<u64, explorer_jscore::NodeId>,
     path: &[(String, u32)],
+    url: &str,
     media: u64,
     codecs: Option<Vec<String>>,
 ) {
-    if let Some(n) = jsd.and_then(|d| mirror_node(&d.borrow(), path)) {
+    let node = jsd.and_then(|d| {
+        let d = d.borrow();
+        mirror_node(&d, path).or_else(|| mirror_node_by_url(&d, url))
+    });
+    if let Some(n) = node {
+        let is_claim = codecs.is_some();
         eng.set_media_claim(n, media, codecs);
+        if is_claim {
+            media_nodes.insert(media, n);
+        } else {
+            media_nodes.remove(&media);
+        }
     } else {
         tracing::warn!(
             media,
+            url,
             ?path,
             "set_media_claim: nœud miroir introuvable — claim ignoré"
         );
@@ -3708,6 +3770,57 @@ fn deliver_media_claim(
             eng.note_media_codecs(&c);
         }
     }
+}
+
+/// Livraison d'un rapport `state` hôte — le nœud est
+/// d'abord retrouvé par son id de surface (résolution
+/// d'identité faite au claim — le path peut être déjà
+/// obsolète sous divergence miroir, vol 176-ter), repli
+/// sur `mirror_node(path)` qui rafraîchit la map.
+fn deliver_media_state(
+    eng: &mut explorer_jscore::Engine,
+    jsd: Option<&explorer_jscore::DomRef>,
+    media_nodes: &mut HashMap<u64, explorer_jscore::NodeId>,
+    path: &[(String, u32)],
+    media: u64,
+    report: JsMediaReport,
+) {
+    let n = media_nodes.get(&media).copied().or_else(|| {
+        jsd.and_then(|d| mirror_node(&d.borrow(), path))
+            .inspect(|&n| {
+                media_nodes.insert(media, n);
+            })
+    });
+    if let Some(n) = n {
+        let _ = eng.deliver_media_state(n, &media_report_of(report));
+    }
+}
+
+/// Repli d'identité média : élément `video`/`audio` du
+/// miroir dont `src` (ou le `src` d'un enfant `<source>`)
+/// égale l'URL de la surface — `blob:` compris (attache
+/// `URL.createObjectURL` : la chaîne est littérale des deux
+/// côtés). Miroir de `media_source` côté core.
+fn mirror_node_by_url(d: &explorer_jscore::Dom, url: &str) -> Option<explorer_jscore::NodeId> {
+    if url.is_empty() {
+        return None;
+    }
+    let mut stack = vec![d.root];
+    while let Some(n) = stack.pop() {
+        let tag = d.nodes[n as usize].tag.as_str();
+        if tag == "video" || tag == "audio" {
+            if d.attr(n, "src") == Some(url) {
+                return Some(n);
+            }
+            for c in d.element_children(n) {
+                if d.nodes[c as usize].tag == "source" && d.attr(c, "src") == Some(url) {
+                    return Some(n);
+                }
+            }
+        }
+        stack.extend(d.element_children(n));
+    }
+    None
 }
 
 fn mirror_node(

@@ -98,6 +98,9 @@ struct GoneSurface {
     id: u64,
     /// Chemin `(tag, index)` vers le nœud miroir.
     path: Vec<(String, u32)>,
+    /// URL média — identité de repli du unclaim si le
+    /// miroir a divergé (même rôle qu'au claim, MSE-7).
+    url: String,
     /// La surface était claimée par l'hôte.
     claimed: bool,
 }
@@ -303,7 +306,7 @@ fn lazy_mark_mse(m: &mut MediaSurface, js: &mut Option<Box<dyn JsEngine>>) {
 fn sync_claim_to_engine(m: &mut MediaSurface, js: &mut Option<Box<dyn JsEngine>>) {
     if m.claim_pending {
         if let Some(e) = js.as_mut() {
-            e.set_media_claim(&m.path, m.id, m.claim.clone());
+            e.set_media_claim(&m.path, &m.url, m.id, m.claim.clone());
             m.claim_pending = false;
         }
     }
@@ -384,6 +387,7 @@ impl Session {
                     gone.push(GoneSurface {
                         id: o.id,
                         path: o.path.clone(),
+                        url: o.url.clone(),
                         claimed: o.claim.is_some(),
                     });
                 }
@@ -446,7 +450,7 @@ impl Session {
         for g in gone {
             if g.claimed {
                 if let Some(eng) = self.tabs.get_mut(&tab).and_then(|e| e.js.as_mut()) {
-                    eng.set_media_claim(&g.path, g.id, None);
+                    eng.set_media_claim(&g.path, &g.url, g.id, None);
                 }
             }
             let _ = self.events.send(CoreEvent::MediaGone { tab, media: g.id });
@@ -666,6 +670,7 @@ impl Session {
         if let Some(eng) = entry.js.as_mut() {
             eng.deliver_media_state(
                 &m.path,
+                m.id,
                 explorer_js::JsMediaReport {
                     position_ms: report.position_ms,
                     duration_ms: report.duration_ms,

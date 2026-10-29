@@ -490,3 +490,67 @@ fn sync_mirror_attr_textarea_writes_text() {
     let v = eng.eval("document.getElementById('t').value").unwrap();
     assert_eq!(v, "ligne");
 }
+
+/// Claim média : path obsolète (miroir divergent du DOM réel,
+/// vol 176-ter) → repli sur l'URL de la surface. Un `<video>`
+/// claimé reçoit `play()` → ordre `Play` routé sur l'id ;
+/// non claimé, la promesse retombe sur le rejet stub ADR-0023
+/// et rien ne se draine.
+#[test]
+fn media_claim_falls_back_to_url_when_path_diverges() {
+    let mut eng = JscoreEngine::new();
+    eng.install_dom(
+        "<html><body><div><video src=\"blob:https://h.test/1\"></video></div></body></html>",
+        "http://h.test/p",
+        1,
+    );
+    let wrong = vec![
+        ("html".to_string(), 0),
+        ("body".to_string(), 0),
+        ("div".to_string(), 7),
+        ("video".to_string(), 0),
+    ];
+    eng.set_media_claim(
+        &wrong,
+        "blob:https://h.test/1",
+        42,
+        Some(vec!["avc1".into()]),
+    );
+    let _ = eng.eval("document.querySelector('video').play()");
+    let cmds = eng.drain_media_commands();
+    assert!(
+        cmds.iter()
+            .any(|c| c.media == 42 && c.cmd == explorer_js::JsMediaCmd::Play),
+        "le claim par repli url doit livrer l'élément — {cmds:?}"
+    );
+}
+
+/// Garde-fou : sans `src` concordante, le repli ne claim pas
+/// un élément arbitraire (l'honnêteté ADR-0023 tient).
+#[test]
+fn media_claim_url_fallback_never_matches_wrong_element() {
+    let mut eng = JscoreEngine::new();
+    eng.install_dom(
+        "<html><body><div><video src=\"blob:https://h.test/1\"></video></div></body></html>",
+        "http://h.test/p",
+        1,
+    );
+    let wrong = vec![
+        ("html".to_string(), 0),
+        ("body".to_string(), 0),
+        ("div".to_string(), 7),
+        ("video".to_string(), 0),
+    ];
+    eng.set_media_claim(
+        &wrong,
+        "blob:https://h.test/999",
+        7,
+        Some(vec!["avc1".into()]),
+    );
+    let _ = eng.eval("document.querySelector('video').play()");
+    let cmds = eng.drain_media_commands();
+    assert!(
+        cmds.is_empty(),
+        "aucun élément ne doit être claimé — {cmds:?}"
+    );
+}
