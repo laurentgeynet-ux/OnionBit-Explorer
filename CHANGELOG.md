@@ -7,6 +7,43 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **JS-C210 — protos observer
+  résistants aux wrappers**
+  (`explorer-jscore`, §B-14 gog vol 149
+  « `observe` on Object », leclerc
+  vol 141 « `observe` on Zm ») — les
+  agents terrain (ruxit/Dynatrace,
+  zone.js, analytics) remplacent
+  `window.XObserver` par un wrapper
+  ou greffent `X.prototype.observe` ;
+  nos ctors relisaient le **global**
+  au `new` → instances chaînées sur
+  le proto nu du wrapper → méthodes
+  perdues. Correctifs : protos
+  `IntersectionObserver`/
+  `ResizeObserver` complets (méthodes
+  `observe`/`unobserve`/`disconnect`/
+  `takeRecords` + `constructor` —
+  `X.prototype.observe` lisible),
+  protos **capturés à
+  l'installation** (`mutobs.proto`,
+  `obs.proto_io`/`proto_ro`, racinés
+  GC), méthodes propres retirées des
+  instances (les greffes proto ne
+  sont plus shadowées), et
+  `host_method_shadowed` : une
+  définition scriptée en propre ou
+  en chaîne proto (greffe agent,
+  accesseur) prime le rail
+  `Host::invoke` à l'appel —
+  `x.m()`/`x?.m()` ; les membres
+  `Native`/`BoundNative` ne masquent
+  pas, le rail reste le chemin par
+  défaut. Verrou
+  `observer_protos_survive_global_
+  wrappers_and_grafts`.
+
+
 - **JS-C209 — `window.navigation`
   (Navigation API)** (`explorer-jscore`,
   §B-14 cowcotland vol 172) —

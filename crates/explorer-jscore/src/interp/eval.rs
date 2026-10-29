@@ -466,15 +466,18 @@ impl Engine {
                     Callee::Member(recv, name) => {
                         // Host method dispatch first: `hostObj.m(…)`
                         // hits the host's `invoke` before prop lookup —
-                        // sauf shadow own-prop : `hostObj.m = f` (patch
+                        // sauf shadow : `hostObj.m = f` (patch
                         // de polyfill/shim — motif `patchDefine` de
-                        // reddit, census shadow DOM) prime la méthode,
-                        // spec [[Get]] avant l'appel ; le trampoline
-                        // `n.call(t)` contourne le repli (référence
-                        // capturée avant le patch → invoke original).
+                        // reddit, census shadow DOM) ou greffe proto
+                        // `X.prototype.m = f` des agents (zone.js/ruxit
+                        // — `host_method_shadowed`, JS-C210) prime la
+                        // méthode, spec [[Get]] avant l'appel ; le
+                        // trampoline `n.call(t)` contourne le repli
+                        // (référence capturée avant le patch → invoke
+                        // original).
                         if let Value::Obj(bid) = recv {
                             if let Some(h) = self.host_of(bid) {
-                                let shadowed = self.find_own(bid, &name).is_some();
+                                let shadowed = self.host_method_shadowed(bid, &name);
                                 if !shadowed {
                                     if let Some(v) = h.invoke(self, recv, &name, &args)? {
                                         // Réactions CE synchrones
@@ -1096,15 +1099,18 @@ impl Engine {
                     let args = self.eval_args(env, this, arg_exprs)?;
                     // Même ordre que `Callee::Member` : `invoke` du
                     // host d'abord, la valeur lue ensuite (un host
-                    // peut exposer les deux pour des noms distincts).
+                    // peut exposer les deux pour des noms distincts)
+                    // — mêmes masques `host_method_shadowed`.
                     let mut done = false;
                     if let (Some(key), Value::Obj(bid)) = (&recv_key, recv) {
                         if let Some(h) = self.host_of(bid) {
-                            if let Some(v) = h.invoke(self, recv, key, &args)? {
-                                cur = v;
-                                done = true;
-                                // Réactions CE synchrones (JS-C68).
-                                self.drain_ce_reactions()?;
+                            if !self.host_method_shadowed(bid, key) {
+                                if let Some(v) = h.invoke(self, recv, key, &args)? {
+                                    cur = v;
+                                    done = true;
+                                    // Réactions CE synchrones (JS-C68).
+                                    self.drain_ce_reactions()?;
+                                }
                             }
                         }
                     }

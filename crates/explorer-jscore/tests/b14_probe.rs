@@ -950,3 +950,82 @@ fn window_navigation_is_event_target_and_sloppy_proof() {
         "1|true|true|function|true"
     );
 }
+
+#[test]
+fn observer_protos_survive_global_wrappers_and_grafts() {
+    let mut e = engine();
+    // Surface WebIDL : méthodes sur le proto (gog vol 149 /
+    // leclerc vol 141 — les agents qui greffent ou stubs
+    // lisent `X.prototype.observe` ; un proto nu rendait
+    // `undefined` → wrappers nés sans `observe`).
+    assert_eq!(
+        ev(
+            &mut e,
+            "typeof IntersectionObserver.prototype.observe+'|'+\
+             typeof ResizeObserver.prototype.disconnect+'|'+\
+             typeof MutationObserver.prototype.takeRecords+'|'+\
+             (IntersectionObserver.prototype.constructor===IntersectionObserver)"
+        ),
+        "function|function|function|true"
+    );
+    // `instanceof` via le proto du ctor.
+    assert_eq!(
+        ev(
+            &mut e,
+            "var io=new IntersectionObserver(function(){});\
+             var ro=new ResizeObserver(function(){});\
+             io instanceof IntersectionObserver && ro instanceof ResizeObserver"
+        ),
+        "true"
+    );
+    // Global remplacé par un wrapper agent : l'instance réelle
+    // garde le proto capturé à l'installation — pas le proto nu
+    // du wrapper (le global n'est pas relu au `new`).
+    assert_eq!(
+        ev(
+            &mut e,
+            "var OO=window.MutationObserver;\
+             window.MutationObserver=function(c){this.inn=new OO(c)};\
+             var w=new MutationObserver(function(){});\
+             typeof w.inn.observe"
+        ),
+        "function"
+    );
+    assert_eq!(
+        ev(
+            &mut e,
+            "var OI=window.IntersectionObserver;\
+             window.IntersectionObserver=function(c){return new OI(c)};\
+             var w3=new IntersectionObserver(function(){});\
+             typeof w3.observe+'|'+typeof w3.disconnect"
+        ),
+        "function|function"
+    );
+    // Greffe scriptée sur le proto VUE À L'APPEL : le rail
+    // `invoke` cède devant le masque (`host_method_shadowed`) —
+    // `io.observe()` invoque le wrapper de l'agent ; sur `?.`
+    // pareil. Sans greffe le rail reste le chemin.
+    assert_eq!(
+        ev(
+            &mut e,
+            "var __c=0;var __d=0;\
+             OI.prototype.observe=function(){__c++};\
+             OO.prototype.observe=function(){__d++};\
+             var io2=new OI(function(){});io2.observe(document.body);\
+             var mo2=new OO(function(){});mo2?.observe(document.body,{childList:true});\
+             __c+'|'+__d"
+        ),
+        "1|1"
+    );
+    // Rail intact : cibles Element/Document, ops complètes.
+    assert_eq!(
+        ev(
+            &mut e,
+            "var io3=new OI(function(){});\
+             io3.observe(document.body);io3.observe(document);\
+             io3.unobserve(document.body);io3.disconnect();\
+             Array.isArray(io3.takeRecords())"
+        ),
+        "true"
+    );
+}

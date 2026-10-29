@@ -45,6 +45,13 @@ pub(crate) struct ObsState {
     next_id: u64,
     /// Observers vivants par id — `disconnect` les retire.
     regs: HashMap<u64, ObsReg>,
+    /// Protos capturés à l'installation — même défense que
+    /// `MutObsState::proto` : un global remplacé par un
+    /// wrapper d'agent ne doit pas déchaîner les instances
+    /// vers un proto nu (bras « `observe` sur Zm/Object »,
+    /// vols 141/149).
+    proto_io: Option<Value>,
+    proto_ro: Option<Value>,
 }
 
 /// Registration d'un observer — callback + wrapper + cibles
@@ -92,6 +99,9 @@ impl ObsState {
             crate::heap::push_value(ids, reg.cb);
             ids.push(reg.wrapper);
         }
+        for p in [self.proto_io, self.proto_ro].into_iter().flatten() {
+            crate::heap::push_value(ids, p);
+        }
     }
 }
 
@@ -110,17 +120,38 @@ impl Engine {
     /// passives JS-C56 (le miroir est requis à l'usage, pas à
     /// l'installation ; les ctors lisent `dom_ctx` à l'appel).
     pub(crate) fn install_observers(&mut self) {
-        for (name, f) in [
+        for (name, kind, f) in [
             (
                 "IntersectionObserver",
+                ObsKind::Intersection,
                 intersection_observer_ctor as crate::heap::NativeFn,
             ),
-            ("ResizeObserver", resize_observer_ctor),
+            ("ResizeObserver", ObsKind::Resize, resize_observer_ctor),
         ] {
             let fv = self.native_fn(name, f);
             if let Value::Obj(fid) = fv {
+                // `X.prototype` avec ses méthodes — spec WebIDL
+                // (même rail que `MutationObserver`, JS-C204) :
+                // les agents terrain (ruxit, zone.js) lisent et
+                // re-graffent `X.prototype.observe` ; un proto nu
+                // rendait la lecture `undefined` et leurs
+                // wrappers naissaient sans `observe` — bras
+                // « `observe` is not a function (on Object) /
+                // (on Zm) » (gog vol 149, leclerc vol 141).
+                // `takeRecords` est exposé aussi sur RO
+                // (sur-ensemble tolérant, l'impl le fournit).
                 let p = self.new_object();
+                for m in ["observe", "unobserve", "disconnect", "takeRecords"] {
+                    let mv = self.str_val(m);
+                    let f = self.bound_native("hostMethod", Self::host_method, vec![mv]);
+                    self.set_own(p, m, f, true);
+                }
+                self.set_own(p, "constructor", fv, false);
                 self.set_own(fid, "prototype", Value::Obj(p), false);
+                match kind {
+                    ObsKind::Intersection => self.obs.proto_io = Some(Value::Obj(p)),
+                    ObsKind::Resize => self.obs.proto_ro = Some(Value::Obj(p)),
+                }
             }
             let g = self.global;
             self.set_own(g, name, fv, false);
@@ -554,18 +585,23 @@ fn new_obs(
             last: HashMap::new(),
         },
     );
-    // Méthodes en props natives sur l'instance — `typeof
-    // io.observe` doit rendre « function » (vol github : le
-    // rail dispatch-only rendait « undefined » → les
-    // feature-detects sautent l'API qui existe).
-    for (m, f) in [
-        ("observe", obs_observe as crate::heap::NativeFn),
-        ("unobserve", obs_unobserve),
-        ("disconnect", obs_disconnect),
-        ("takeRecords", obs_take_records),
-    ] {
-        let fv = e.native_fn(m, f);
-        e.set_own(oid, m, fv, true);
+    // Méthodes sur le prototype du ctor (spec WebIDL) — pas
+    // en own-props : les greffes `X.prototype.m = wrapper`
+    // des agents doivent être vues par les instances (une
+    // own-prop les shadowait → instrumentation silencieusement
+    // contournée). `typeof io.observe` reste « function »
+    // (lecture de prop suit la chaîne de prototypes). Proto
+    // capturé à l'installation, pas relu via le global : un
+    // `window.X = wrapper` en amont ne déchaîne pas les
+    // instances vers le proto nu du wrapper.
+    let pp = match kind {
+        ObsKind::Intersection => e.obs.proto_io,
+        ObsKind::Resize => e.obs.proto_ro,
+    };
+    if let Some(pp) = pp {
+        if let Some(o) = e.heap.obj_mut(oid) {
+            o.proto = pp;
+        }
     }
     // Options exposées (`observer.thresholds`/`rootMargin` —
     // figées à l'instanciation, spec).
@@ -644,6 +680,11 @@ impl Host for ObsHost {
                 if let Some(reg) = e.obs.regs.get_mut(&self.id) {
                     reg.targets.retain(|&n| n != node);
                     reg.pending.retain(|&n| n != node);
+                    // L'état rapporté part avec la cible — un
+                    // re-`observe` postérieur repart d'une
+                    // notification initiale (spec), pas d'un
+                    // diff contre l'ancien `last`.
+                    reg.last.remove(&node);
                 }
                 Ok(Some(Value::Undefined))
             }
@@ -652,6 +693,7 @@ impl Host for ObsHost {
                 if let Some(reg) = e.obs.regs.get_mut(&self.id) {
                     reg.targets.clear();
                     reg.pending.clear();
+                    reg.last.clear();
                 }
                 Ok(Some(Value::Undefined))
             }
@@ -662,107 +704,25 @@ impl Host for ObsHost {
                 };
                 let entries: Vec<Value> = pending
                     .iter()
-                    .map(|&n| e.observer_entry(kind, &self.dom, &self.cache, root, n))
+                    .map(|&n| {
+                        // Les entries prises sont rapportées :
+                        // la ré-évaluation au checkpoint diff
+                        // contre ce `last` — sans lui, l'état
+                        // `None → intersectant` re-pendait et
+                        // le callback revoyait la cible déjà
+                        // vidée (régression du rail invoke).
+                        if kind == ObsKind::Intersection {
+                            let cur = e.is_intersecting(&self.dom, root, None, n);
+                            if let Some(reg) = e.obs.regs.get_mut(&self.id) {
+                                reg.last.insert(n, cur);
+                            }
+                        }
+                        e.observer_entry(kind, &self.dom, &self.cache, root, n)
+                    })
                     .collect();
                 Ok(Some(e.new_array(entries)))
             }
             _ => Ok(None),
         }
     }
-}
-
-// ------------------------------------------------------------------
-// Méthodes en props natives (typeof honnête — vol github :
-// `typeof io.observe` rendait « undefined » car le rail
-// `invoke` est invisible en lecture de prop ; les loaders
-// feature-detect sautaient l'API fonctionnelle).
-// ------------------------------------------------------------------
-
-/// `(id, dom, cache)` de l'`ObsHost` receveur — `this` doit
-/// être un observer instancié par `new_obs`.
-fn obs_parts(e: &mut Engine, this: Value) -> Option<(u64, DomRef, NodeCache)> {
-    let Value::Obj(oid) = this else {
-        return None;
-    };
-    match e.heap.obj(oid).map(|o| &o.kind) {
-        Some(ObjKind::Host(h)) => {
-            let oh = h.as_any().downcast_ref::<ObsHost>()?;
-            Some((oh.id, oh.dom.clone(), oh.cache.clone()))
-        }
-        _ => None,
-    }
-}
-
-/// `io.observe(target)` — enfile cible + notification
-/// initiale (re-observe = no-op spec).
-fn obs_observe(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
-    let Some((id, dom, _)) = obs_parts(e, this) else {
-        return Ok(Value::Undefined);
-    };
-    let target = args.first().copied().unwrap_or(Value::Undefined);
-    let Some(node) = node_for_in(e, target, &dom) else {
-        return Err(e.type_error("observe: Element requis"));
-    };
-    if let Some(reg) = e.obs.regs.get_mut(&id) {
-        if !reg.targets.contains(&node) {
-            reg.targets.push(node);
-            reg.pending.push(node);
-        }
-    }
-    Ok(Value::Undefined)
-}
-
-/// `io.unobserve(target)` — retire la cible et sa
-/// notification pendante.
-fn obs_unobserve(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
-    let Some((id, dom, _)) = obs_parts(e, this) else {
-        return Ok(Value::Undefined);
-    };
-    let target = args.first().copied().unwrap_or(Value::Undefined);
-    let Some(node) = node_for_in(e, target, &dom) else {
-        return Err(e.type_error("unobserve: Element requis"));
-    };
-    if let Some(reg) = e.obs.regs.get_mut(&id) {
-        reg.targets.retain(|&n| n != node);
-        reg.pending.retain(|&n| n != node);
-        reg.last.remove(&node);
-    }
-    Ok(Value::Undefined)
-}
-
-/// `io.disconnect()` — purge cibles et notifications.
-fn obs_disconnect(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
-    let Some((id, _, _)) = obs_parts(e, this) else {
-        return Ok(Value::Undefined);
-    };
-    if let Some(reg) = e.obs.regs.get_mut(&id) {
-        reg.targets.clear();
-        reg.pending.clear();
-        reg.last.clear();
-    }
-    Ok(Value::Undefined)
-}
-
-/// `io.takeRecords()` — vide la file et rend les entries.
-fn obs_take_records(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
-    let Some((id, dom, cache)) = obs_parts(e, this) else {
-        return Ok(e.new_array(Vec::new()));
-    };
-    let (kind, root, pending) = match e.obs.regs.get_mut(&id) {
-        Some(reg) => (reg.kind, reg.root, std::mem::take(&mut reg.pending)),
-        None => (ObsKind::Intersection, None, Vec::new()),
-    };
-    let entries: Vec<Value> = pending
-        .iter()
-        .map(|&n| {
-            if kind == ObsKind::Intersection {
-                let cur = e.is_intersecting(&dom, root, None, n);
-                if let Some(reg) = e.obs.regs.get_mut(&id) {
-                    reg.last.insert(n, cur);
-                }
-            }
-            e.observer_entry(kind, &dom, &cache, root, n)
-        })
-        .collect();
-    Ok(e.new_array(entries))
 }

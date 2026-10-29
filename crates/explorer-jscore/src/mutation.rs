@@ -30,6 +30,15 @@ pub(crate) struct MutObsState {
     next_id: u64,
     /// Observers vivants : `id → (callback, wrapper JS)`.
     cbs: HashMap<u64, (Value, ObjId)>,
+    /// `MutationObserver.prototype` capturé à l'installation —
+    /// le proto des instances ne dépend **pas** du global au
+    /// moment du `new` : un site qui remplace
+    /// `window.MutationObserver` par un wrapper (ruxit, zone.js,
+    /// agents analytics) laissait les instances chaînées sur le
+    /// proto nu du wrapper → `observe` introuvable →
+    /// « `observe` is not a function (on Object) » (gog vol 149,
+    /// leclerc vol 141).
+    proto: Option<Value>,
 }
 
 impl MutObsState {
@@ -41,6 +50,9 @@ impl MutObsState {
         for (cb, wrapper) in self.cbs.values() {
             crate::heap::push_value(ids, *cb);
             ids.push(*wrapper);
+        }
+        if let Some(p) = self.proto {
+            crate::heap::push_value(ids, p);
         }
     }
 }
@@ -72,6 +84,7 @@ impl Engine {
             }
             self.set_own(cid, "prototype", Value::Obj(p), false);
             self.set_own(p, "constructor", v, false);
+            self.mutobs.proto = Some(Value::Obj(p));
         }
         let g = self.global;
         self.set_own(g, "MutationObserver", v, false);
@@ -134,15 +147,15 @@ fn mutobs_ctor(e: &mut Engine, _this: Value, args: &[Value]) -> JsResult<Value> 
     let v = e.new_host_object(Rc::new(MutObsHost { dom, cache, id }));
     if let Value::Obj(oid) = v {
         e.mutobs.cbs.insert(id, (cb, oid));
-        // `mo instanceof MutationObserver` — chaîne le proto
-        // du ctor global (spec ; `new_host_object` pose
-        // `Object.prototype`).
-        let g = e.global;
-        if let Some(Value::Obj(cid)) = e.get_prop(g, "MutationObserver") {
-            if let Some(pp @ Value::Obj(_)) = e.get_prop(cid, "prototype") {
-                if let Some(o) = e.heap.obj_mut(oid) {
-                    o.proto = pp;
-                }
+        // `mo instanceof MutationObserver` — proto capturé à
+        // l'installation (pas le global : un site peut avoir
+        // remplacé `window.MutationObserver` par un wrapper —
+        // les instances réelles gardent le vrai proto, comme
+        // dans Chrome où `new OrigCtor()` interne ne lit pas
+        // la propriété globale).
+        if let Some(pp) = e.mutobs.proto {
+            if let Some(o) = e.heap.obj_mut(oid) {
+                o.proto = pp;
             }
         }
     }

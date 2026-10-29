@@ -2778,6 +2778,54 @@ impl Engine {
             .unwrap_or(Value::Undefined))
     }
 
+    /// `true` si `bid.name` est masqué par du code script —
+    /// propre sur `bid` (patch `o.m = f`, motif `patchDefine`)
+    /// ou première définition de la chaîne proto non intégrée
+    /// (greffe `X.prototype.m = f` des agents : zone.js/ruxit
+    /// patchent `X.prototype.observe`/`addEventListener`).
+    /// Le rail `invoke` n'est un raccourci valide que quand la
+    /// lecture `[[Get]]` produirait la méthode installée : une
+    /// définition scriptée (`Fun::Script`, `Bound`, proxy,
+    /// accesseur) doit primer — spec `[[Call]]` = `Get` puis
+    /// `Call`. Les valeurs intégrées (`Native`, `BoundNative
+    /// hostMethod`, données non-fonction) ne masquent pas :
+    /// `location.toString` garde le rail host.
+    pub(crate) fn host_method_shadowed(&mut self, bid: ObjId, name: &str) -> bool {
+        let mut cur = Some(bid);
+        let mut depth = 0;
+        let mut own = true;
+        while let Some(cid) = cur {
+            if let Some(p) = self.find_own(cid, name) {
+                if own {
+                    // Own-prop quelconque — comportement
+                    // historique (patch direct ou méthode own).
+                    return true;
+                }
+                return match p {
+                    Prop::Data {
+                        value: Value::Obj(fid),
+                        ..
+                    } => !matches!(
+                        self.heap.obj(fid).map(|o| &o.kind),
+                        Some(ObjKind::Fun(Fun::Native { .. } | Fun::BoundNative { .. }))
+                    ),
+                    Prop::Data { .. } => false,
+                    Prop::Acc { .. } => true,
+                };
+            }
+            own = false;
+            cur = match self.heap.obj(cid).map(|o| o.proto) {
+                Some(Value::Obj(p)) => Some(p),
+                _ => None,
+            };
+            depth += 1;
+            if depth > MAX_PROTO_DEPTH {
+                return false;
+            }
+        }
+        false
+    }
+
     /// New array value.
     pub(crate) fn new_array(&mut self, elems: Vec<Value>) -> Value {
         let proto = Value::Obj(self.protos.array);
