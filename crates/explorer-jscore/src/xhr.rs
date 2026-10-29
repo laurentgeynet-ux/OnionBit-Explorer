@@ -2101,6 +2101,20 @@ impl Engine {
         self.set_own(g, "AbortController", ac, false);
         let asig = self.native_fn("AbortSignal", abort_signal_ctor);
         if let Value::Obj(cid) = asig {
+            // `AbortSignal.prototype` — `sig instanceof
+            // AbortSignal` exige le proto sur le ctor (les
+            // signaux le chaînent dans `abort_signal_value`) ;
+            // parent `EventTarget.prototype` si installé.
+            let p = self.new_object();
+            if let Some(Value::Obj(etc)) = self.get_prop(g, "EventTarget") {
+                if let Some(pp @ Value::Obj(_)) = self.get_prop(etc, "prototype") {
+                    if let Some(o) = self.heap.obj_mut(p) {
+                        o.proto = pp;
+                    }
+                }
+            }
+            self.set_own(cid, "prototype", Value::Obj(p), false);
+            self.set_own(p, "constructor", asig, false);
             // `AbortSignal.abort(reason?)` — signal déjà aborted.
             let f = self.native_fn("abort", abort_signal_static_abort);
             self.set_own(cid, "abort", f, false);
@@ -2109,6 +2123,11 @@ impl Engine {
             // lu sur le ctor → `of Undefined`).
             let f = self.native_fn("throwIfAborted", abort_signal_static_throw_if);
             self.set_own(cid, "throwIfAborted", f, false);
+            // `AbortSignal.timeout(ms)` — statique spec : signal
+            // qui aborte après `ms` (raison `TimeoutError`) via
+            // la file de timers (maif vol 122).
+            let f = self.native_fn("timeout", abort_signal_static_timeout);
+            self.set_own(cid, "timeout", f, false);
         }
         self.set_own(g, "AbortSignal", asig, false);
     }
@@ -2205,6 +2224,17 @@ impl Host for AbortSignalHost {
     fn keys(&self, _e: &mut Engine, _t: Value) -> Vec<String> {
         vec!["aborted".into()]
     }
+
+    /// `AbortSignal` est sérialisable spec — l'état utile au
+    /// receveur est `(aborted, reason)` ; proto perdu au
+    /// décodage (objet ordinaire — déviation documentée).
+    fn serializable_clone(&self, e: &mut Engine) -> JsResult<Option<Value>> {
+        let d = self.data.borrow();
+        let o = e.new_object();
+        e.set_own(o, "aborted", Value::Bool(d.aborted), true);
+        e.set_own(o, "reason", d.reason, true);
+        Ok(Some(Value::Obj(o)))
+    }
 }
 
 /// `new AbortSignal()` — `TypeError` per spec ("illegal
@@ -2217,13 +2247,13 @@ fn abort_signal_ctor(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value>
 /// `AbortSignal.abort(reason?)` — signal déjà aborted.
 fn abort_signal_static_abort(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     let reason = arg(args, 0);
-    Ok(e.new_host_object(Rc::new(AbortSignalHost {
-        data: Rc::new(RefCell::new(AbortData {
-            aborted: true,
-            reason,
-            listeners: Vec::new(),
-        })),
-    })))
+    let sig = abort_signal_value(e);
+    if let Some(data) = abort_data(e, sig) {
+        let mut d = data.borrow_mut();
+        d.aborted = true;
+        d.reason = reason;
+    }
+    Ok(sig)
 }
 
 /// `AbortSignal.throwIfAborted(sig)` — statique spec : jette
@@ -2246,16 +2276,51 @@ fn abort_signal_static_throw_if(e: &mut Engine, _t: Value, args: &[Value]) -> Js
     Ok(Value::Undefined)
 }
 
+/// `AbortSignal.timeout(ms)` — statique spec : produit un
+/// signal qui aborte après `ms` ms (raison `TimeoutError`),
+/// schedulé sur la file de timers du moteur.
+fn abort_signal_static_timeout(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let sig = abort_signal_value(e);
+    let ms = match arg(args, 0) {
+        Value::Num(n) if n.is_finite() => n.max(0.0) as u64,
+        _ => 0,
+    };
+    let cb = e.bound_native("abort", abort_signal_timeout_fire, vec![sig]);
+    e.timers.schedule(cb, ms, false, Vec::new());
+    Ok(sig)
+}
+
+/// Callback différé de `AbortSignal.timeout` : aborte le
+/// signal avec raison `TimeoutError` en réutilisant le chemin
+/// de tir de `controller.abort` (onabort + listeners).
+fn abort_signal_timeout_fire(e: &mut Engine, t: Value, args: &[Value]) -> JsResult<Value> {
+    let sig = arg(args, 0);
+    let reason = e.error_value(e.protos.error, "TimeoutError", "signal timed out");
+    controller_abort(e, t, &[sig, reason])
+}
+
 /// `AbortSignal` neuf non-aborté — signal par défaut de
 /// `new Request` quand `init.signal` est absent (JS-C66).
 fn abort_signal_value(e: &mut Engine) -> Value {
-    e.new_host_object(Rc::new(AbortSignalHost {
+    let sig = e.new_host_object(Rc::new(AbortSignalHost {
         data: Rc::new(RefCell::new(AbortData {
             aborted: false,
             reason: Value::Undefined,
             listeners: Vec::new(),
         })),
-    }))
+    }));
+    // `sig instanceof AbortSignal` — proto = le
+    // `AbortSignal.prototype` global s'il est installé.
+    if let Value::Obj(sid) = sig {
+        if let Some(Value::Obj(cid)) = e.get_prop(e.global, "AbortSignal") {
+            if let Some(pp @ Value::Obj(_)) = e.get_prop(cid, "prototype") {
+                if let Some(o) = e.heap.obj_mut(sid) {
+                    o.proto = pp;
+                }
+            }
+        }
+    }
+    sig
 }
 
 /// `new AbortController()` — `{signal, abort()}` : le signal est un

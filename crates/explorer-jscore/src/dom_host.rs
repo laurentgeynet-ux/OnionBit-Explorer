@@ -1805,6 +1805,10 @@ impl Engine {
         // via le transport XHR (staple de télémétrie des pages
         // réelles ; `false` sans connecteur, comme la spec).
         self.add_method(nav, "sendBeacon", nav_send_beacon);
+        // `navigator.javaEnabled()` — méthode spec (dépréciée)
+        // rendant `false` : pas de plugin Java ; les
+        // feature-detects réels l'appellent (maif vol 122).
+        self.add_method(nav, "javaEnabled", nav_java_enabled);
         // `navigator.credentials` (JS-C93) — surface spec
         // `CredentialsContainer` : `create`/`get` rejettent
         // `NotSupportedError` (pas d'authentificateur
@@ -10570,6 +10574,13 @@ fn nav_send_beacon(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value>
         ctx: e.cur_ctx,
     });
     Ok(Value::Bool(true))
+}
+
+/// `navigator.javaEnabled()` — spec : `false` (aucun plugin
+/// Java n'existe — la méthode est un vestige lu par les
+/// feature-detects de fingerprinting, maif vol 122).
+fn nav_java_enabled(_e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
+    Ok(Value::Bool(false))
 }
 
 /// `credentials.create`/`get` (JS-C93) — stub honnête : pas

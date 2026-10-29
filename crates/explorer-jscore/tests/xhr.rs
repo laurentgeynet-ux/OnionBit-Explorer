@@ -1797,3 +1797,35 @@ fn xhr_upload_stub_stable() {
         "object|true||ok"
     );
 }
+
+/// `AbortSignal.timeout(ms)` (JS-C194, maif vol 122) — statique
+/// spec : signal qui aborte après `ms` via la file de timers,
+/// raison `TimeoutError`, `onabort` + listeners dispatchés.
+#[test]
+fn c194_abort_signal_timeout() {
+    let (mut e, _t) = engine();
+    assert_eq!(describe(&mut e, "typeof AbortSignal.timeout"), "function");
+    assert_eq!(
+        describe(
+            &mut e,
+            "var s=AbortSignal.timeout(0);var f='';\
+             s.addEventListener('abort',function(){f='l'});\
+             s.aborted+'|'+(s instanceof AbortSignal)"
+        ),
+        "false|true"
+    );
+    e.run_due_timers().expect("timers");
+    assert_eq!(
+        describe(
+            &mut e,
+            "f+'|'+s.aborted+'|'+s.reason.name+'|'+(function(){try{s.throwIfAborted();return 'no'}catch(x){return x.name}})()"
+        ),
+        "l|true|TimeoutError|TimeoutError"
+    );
+    // Délai > 0 : le signal reste vivant tant que le timer
+    // n'est pas dû.
+    assert_eq!(
+        describe(&mut e, "var s2=AbortSignal.timeout(50);s2.aborted"),
+        "false"
+    );
+}

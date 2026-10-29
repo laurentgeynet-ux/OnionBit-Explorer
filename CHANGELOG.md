@@ -7,6 +7,43 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **JS-C194 — §B-14 :
+  `AbortSignal.timeout` +
+  `navigator.javaEnabled`**
+  (`explorer-jscore`) — maif vol
+  122 : `javaEnabled is not a
+  function` + `timeout is not a
+  function (on native
+  AbortSignal)`. Deux mondes
+  `AbortSignal` coexistaient :
+  `install_dom` (statiques
+  `abort`/`timeout`/`any` sur
+  signaux plain-objets) et
+  `install_abort` de xhr
+  (statiques `abort`/
+  `throwIfAborted` sur signaux
+  host que `fetch` consomme via
+  `abort_data`) — le ctor xhr
+  écrasait le riche en session.
+  `AbortSignal.timeout(ms)`
+  ajouté au ctor xhr : signal
+  host qui aborte après `ms` via
+  la file de timers (raison
+  `TimeoutError`), en réutilisant
+  le chemin de tir de
+  `controller.abort` ; `Abort
+  Signal.prototype` créé et
+  chaîné sur tous les signaux
+  (`sig instanceof AbortSignal`,
+  `AbortSignal.prototype.constructor`)
+  — il manquait au ctor xhr.
+  `navigator.javaEnabled()`
+  ajouté : `false` spec (aucun
+  plugin Java). Verrous
+  `c194_abort_signal_timeout`
+  (`xhr.rs`) +
+  `navigator_java_enabled_
+  returns_false` (`b14_probe.rs`).
 - **JS-C193 — Surface MSE honnête
   sans lecture** (`explorer-jscore`,
   nouveau `mse.rs`) — amorce de la

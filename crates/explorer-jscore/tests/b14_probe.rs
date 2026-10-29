@@ -399,3 +399,18 @@ fn elements_have_tag_specific_dom_interfaces() {
         "true"
     );
 }
+
+#[test]
+fn navigator_java_enabled_returns_false() {
+    // maif vol 122 : `javaEnabled is not a function` — méthode
+    // spec (dépréciée) lue par les feature-detects ; spec :
+    // toujours `false` (aucun plugin Java).
+    let mut e = engine();
+    assert_eq!(
+        ev(
+            &mut e,
+            "typeof navigator.javaEnabled+'|'+navigator.javaEnabled()"
+        ),
+        "function|false"
+    );
+}
