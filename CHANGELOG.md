@@ -7,6 +7,20 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **139e — retrait de `fvp`/`video_player`
+  (MDK)** (`app/`) — OnionMedia devient
+  l'unique backend média : deps
+  `fvp`/`video_player` sorties du
+  `pubspec`, `fvp.registerWith`
+  retiré du `main`, `VideoMediaPlayer`
+  supprimé (la seam `MediaPlayer`
+  reste), fallback fvp de la factory
+  enlevé — un échec `create` remonte
+  désormais en erreur de claim
+  honnête. `mdk.dll`/`fvp.dll`
+  évacués du binaire.
+
+
 - **MSE-2 — Attache `blob:` →
   `<video>` → `sourceopen` +
   offre marquée `mse`**

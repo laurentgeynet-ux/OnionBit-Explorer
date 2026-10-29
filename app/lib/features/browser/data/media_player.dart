@@ -5,7 +5,6 @@
 import 'dart:async';
 
 import 'package:flutter/widgets.dart';
-import 'package:video_player/video_player.dart';
 
 /// Instantané de lecture rapporté au moteur — contrat
 /// `MediaReport` (étape 71, `docs/interface-equipes.md`) :
@@ -68,80 +67,5 @@ abstract class MediaPlayer {
 /// Fabrique de lecteurs — injectable (fake en test).
 typedef MediaPlayerFactory = Future<MediaPlayer> Function(String url);
 
-/// Implémentation réelle : `VideoPlayerController` (MDK via
-/// `fvp` sur desktop — `fvp.registerWith` posé dans `main`).
-class VideoMediaPlayer implements MediaPlayer {
-  VideoMediaPlayer._(this._c);
-
-  final VideoPlayerController _c;
-
-  /// Volume restauré au dé-mute — `muted` est distinct de
-  /// `volume=0` dans le contrat (le moteur attend que le
-  /// dé-mute rende le niveau courant, pas un 1.0 aveugle).
-  double _savedVolume = 1.0;
-
-  static Future<MediaPlayer> create(String url) async {
-    final c = VideoPlayerController.networkUrl(Uri.parse(url));
-    await c.initialize();
-    return VideoMediaPlayer._(c);
-  }
-
-  @override
-  Widget get view => VideoPlayer(_c);
-
-  @override
-  bool get ready => _c.value.isInitialized;
-
-  @override
-  MediaSnapshot get snapshot {
-    final v = _c.value;
-    final pos = v.position.inMilliseconds;
-    final dur = v.duration.inMilliseconds;
-    var buffered = 0;
-    for (final r in v.buffered) {
-      if (r.end.inMilliseconds > buffered) buffered = r.end.inMilliseconds;
-    }
-    final state = v.hasError
-        ? 'error'
-        : v.isPlaying
-        ? 'playing'
-        : dur > 0 && pos >= dur
-        ? 'ended'
-        : 'paused';
-    return MediaSnapshot(
-      positionMs: pos,
-      bufferedMs: buffered,
-      durationMs: dur > 0 ? dur : null,
-      state: state,
-      error: v.errorDescription,
-    );
-  }
-
-  @override
-  void addListener(void Function() l) => _c.addListener(l);
-  @override
-  void removeListener(void Function() l) => _c.removeListener(l);
-
-  @override
-  Future<void> play() => _c.play();
-  @override
-  Future<void> pause() => _c.pause();
-  @override
-  Future<void> seekTo(Duration pos) => _c.seekTo(pos);
-  @override
-  Future<void> setVolume(double v) => _c.setVolume(v.clamp(0.0, 1.0));
-  @override
-  Future<void> setRate(double r) => _c.setPlaybackSpeed(r.clamp(0.25, 4.0));
-  @override
-  Future<void> setMuted(bool on) async {
-    if (on) {
-      _savedVolume = _c.value.volume;
-      await _c.setVolume(0.0);
-    } else {
-      await _c.setVolume(_savedVolume.clamp(0.0, 1.0));
-    }
-  }
-
-  @override
-  Future<void> dispose() => _c.dispose();
-}
+/// `OnionMediaPlayer` (FFI `onionmedia_ffi`) en prod,
+/// fake en test.

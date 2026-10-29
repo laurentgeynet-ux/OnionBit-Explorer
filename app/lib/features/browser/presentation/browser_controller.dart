@@ -148,13 +148,7 @@ class BrowserState {
 final mediaPlayerFactoryProvider = Provider<MediaPlayerFactory>(
   (ref) {
     final hw = ref.watch(settingsProvider).hwAccel;
-    return (url) async {
-      try {
-        return await OnionMediaPlayer.create(url, hwAccel: hw);
-      } on Object {
-        return VideoMediaPlayer.create(url);
-      }
-    };
+    return (url) => OnionMediaPlayer.create(url, hwAccel: hw);
   },
 );
 

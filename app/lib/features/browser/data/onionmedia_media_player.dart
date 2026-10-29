@@ -15,11 +15,11 @@ import 'media_player.dart';
 
 /// Lecteur `onionmedia_ffi` (OnionMedia/OnionCodec — pur Rust, MIT/Apache)
 /// derrière la seam `MediaPlayer` (ADR-0024) — backend
-/// alternatif à `VideoMediaPlayer` (fvp/MDK). Les frames RGBA
+/// via FFI (`onionmedia_ffi.dll`). Les frames RGBA
 /// sont tirées par polling (`onionmedia_frame_seq`/`pull`, patron
 /// `dirty_rects`) puis décodées en `ui.Image` — l'audio joue en
 /// natif dans la DLL (cpal). Aucun codec n'est embarqué côté
-/// Dart : un échec d'ouverture retombe sur la factory (fvp).
+/// Dart : un échec d'ouverture remonte en erreur de claim.
 class OnionMediaPlayer implements MediaPlayer {
   OnionMediaPlayer._(this._lib, this._h);
 
@@ -104,7 +104,7 @@ class OnionMediaPlayer implements MediaPlayer {
 
   /// Ouvre `url` (http(s) proxyfiée ou chemin `file`/brut).
   /// `StateError` si la DLL ou l'ouverture échoue — la factory
-  /// retombe alors sur `VideoMediaPlayer` (fvp).
+  /// échoue, l'erreur remonte au claim.
   static Future<MediaPlayer> create(
     String url, {
     bool hwAccel = false,

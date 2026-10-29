@@ -169,7 +169,7 @@ class AppConfig {
   final double scrollSyncEpsilon;
 
   /// Types média déclarés dans `POST …/media/{id}/claim` —
-  /// containers/codecs que le backend MDK (`fvp`) sait jouer ;
+  /// containers/codecs que le backend OnionMedia sait jouer ;
   /// `canPlayType` côté JS se reflète dessus.
   final List<String> mediaCodecs;
 

@@ -40,8 +40,6 @@ dependencies:
   cupertino_icons: ^1.0.8
   flutter_riverpod: ^3.4.3
   ffi: ^2.2.0
-  video_player: ^2.14.1
-  fvp: ^0.39.1
   # Onglet délégué WebView2 pour domaines DRM (étape 136, ADR-0027) —
   # HWND natif au-dessus de la fenêtre : le contenu protégé (Widevine
   # L1/PlayReady) se rend, contrairement aux plugins par capture de

@@ -6,7 +6,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'core/l10n/app_localizations.dart';
-import 'package:fvp/fvp.dart' as fvp;
 
 import 'core/design/app_theme.dart';
 import 'core/design/design_tokens.dart';
@@ -15,13 +14,6 @@ import 'core/settings/app_settings.dart';
 import 'features/browser/presentation/browser_page.dart';
 
 void main() {
-  // Backend MDK pour `video_player` sur desktop (étape 71d —
-  // seam MediaSurface) ; mobile/web gardent l'impl officielle.
-  fvp.registerWith(
-    options: {
-      'platforms': ['windows', 'linux', 'macos'],
-    },
-  );
   runApp(const ProviderScope(child: ExplorerApp()));
 }
 
