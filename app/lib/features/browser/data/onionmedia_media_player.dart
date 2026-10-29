@@ -208,24 +208,32 @@ class OnionMediaPlayer implements MediaPlayer {
           // export absent — HW non piloté.
         }
       }
-      // open_mse(h, apiBase, tab, mid, buffer, ext) — signature
-      // confirmée à l'arrivée de la DLL ; les ids passent en
-      // int64, apiBase/ext en char* UTF-8.
+      // Vraie signature (onionmedia-ffi/lib.rs P-51) :
+      // open_mse(h, base_ptr, base_len, tab u64, media u64,
+      // buffer u32, ext_ptr, ext_len) — paires ptr+len UTF-8,
+      // PAS de C-string NUL (vol MSE-DLL : la signature à 6
+      // params supposée envoyait ext dans le slot buffer et
+      // ext_ptr recevait un registre poubelle →
+      // « extension mse invalide (utf-8) »).
       final openMse = lib.lookupFunction<
           ffi.Int32 Function(
               ffi.Pointer,
               ffi.Pointer<ffi.Char>,
-              ffi.Int64,
-              ffi.Int64,
-              ffi.Int32,
-              ffi.Pointer<ffi.Char>),
+              ffi.IntPtr,
+              ffi.Uint64,
+              ffi.Uint64,
+              ffi.Uint32,
+              ffi.Pointer<ffi.Char>,
+              ffi.IntPtr),
           int Function(
               ffi.Pointer,
               ffi.Pointer<ffi.Char>,
               int,
               int,
               int,
-              ffi.Pointer<ffi.Char>)>('onionmedia_open_mse');
+              int,
+              ffi.Pointer<ffi.Char>,
+              int)>('onionmedia_open_mse');
       final ab = apiBase.codeUnits;
       final ext = (offer.mime ?? 'mp4').codeUnits;
       final cAb = calloc<ffi.Char>(ab.length);
@@ -237,7 +245,7 @@ class OnionMediaPlayer implements MediaPlayer {
         cExt[i] = ext[i];
       }
       final tab = int.tryParse(tabId) ?? 0;
-      final rc = openMse(h, cAb, tab, offer.id, 0, cExt);
+      final rc = openMse(h, cAb, ab.length, tab, offer.id, 0, cExt, ext.length);
       calloc.free(cAb);
       calloc.free(cExt);
       if (rc != 0) {

@@ -763,6 +763,7 @@ class BrowserController extends Notifier<BrowserState> {
           if (mid != null) _dropMedia(tabId, mid);
         }
       case 'media_command':
+        debugPrint('media_command recv tab $tabId: ${ev.data}');
         _onMediaCommand(tabId, ev.data);
       case 'pipeline_error':
         _patch(tabId, (t) => t.copyWith(loading: false));
@@ -887,8 +888,11 @@ class BrowserController extends Notifier<BrowserState> {
       // initial pour refléter `paused`/`readyState`.
       unawaited(_reportMedia(tabId, offer.id, force: true));
       if (offer.autoplay) unawaited(player.play());
-    } on Object {
+    } on Object catch (e) {
       // Claim refusé ou lecteur en échec — non claimé honnête.
+      // L'échec silencieux masquait le bug FFI (vol MSE-DLL) —
+      // trace minimale pour diagnostiquer la couture.
+      debugPrint('claimMedia ${offer.id} tab $tabId: $e');
     }
   }
 
@@ -899,6 +903,7 @@ class BrowserController extends Notifier<BrowserState> {
     final p = mid == null ? null : _players[tabId]?[mid];
     final cmd = data['cmd'];
     if (p == null || cmd is! Map<String, dynamic>) return;
+    debugPrint('media_command ${cmd['type']} media $mid tab $tabId');
     switch (cmd['type']) {
       case 'play':
         unawaited(p.play());
