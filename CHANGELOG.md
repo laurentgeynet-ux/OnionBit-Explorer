@@ -7,6 +7,35 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **JS-C202 — §B-14 : User
+  Timing (`performance.mark`/
+  `measure`/`getEntries*`)**
+  (`explorer-jscore`) —
+  yves-rocher vol 136 :
+  `startTime of Undefined` —
+  bv.js fait
+  `performance.measure(e)` puis
+  `getEntriesByType("measure")
+  .at(-1).startTime` ; nos
+  `mark`/`measure` étaient des
+  no-ops → tableau vide →
+  `.startTime` sur `undefined`.
+  User Timing L2 : entrées
+  réelles `{name,entryType,
+  startTime,duration}` stockées
+  en slots cachés ; `measure`
+  résout les bornes mark-nommées
+  et `{start,duration,end}` ;
+  `getEntries`/`ByName`/`ByType`
+  filtrent, `clearMarks`/
+  `clearMeasures` vident (nom
+  optionnel). Borné honnête :
+  `navigation`/`resource`
+  restent `[]` (pas de timeline
+  réseau/nav). Verrou
+  `user_timing_entries_are_
+  stored_and_filterable`
+  (`b14_probe.rs`).
 - **JS-C201 — §B-14 : `lang`/
   `dir` reflétés sur les
   éléments**

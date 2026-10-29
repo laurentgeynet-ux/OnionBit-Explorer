@@ -461,13 +461,269 @@ pub(crate) fn performance_noop(_e: &mut Engine, _t: Value, _a: &[Value]) -> JsRe
     Ok(Value::Undefined)
 }
 
-/// `performance.getEntries*` — rien n'est collecté → `[]`.
-pub(crate) fn performance_empty_entries(
+/// Slots cachés de l'objet `performance` — User Timing Level 2 :
+/// les `mark`/`measure` produisent de vraies entrées (bazaarvoice
+// yves-rocher vol 136 : `getEntriesByType("measure").at(-1)`
+// tombait sur un tableau vide → `startTime of Undefined`).
+const PERF_MARKS: &str = "__ut_marks";
+const PERF_MEASURES: &str = "__ut_measures";
+
+/// Lit (et crée au besoin) le slot-tableau caché `slot` de `this`.
+fn perf_slot(e: &mut Engine, this: Value, slot: &str) -> Option<ObjId> {
+    let Value::Obj(id) = this else {
+        return None;
+    };
+    if let Some(Value::Obj(arr)) = e.heap.obj(id).and_then(|o| o.get_own(slot)) {
+        return Some(arr);
+    }
+    let v = e.new_array(Vec::new());
+    let Value::Obj(arr) = v else {
+        return None;
+    };
+    e.set_own(id, slot, v, false);
+    Some(arr)
+}
+
+/// Entrée `PerformanceMark`/`PerformanceMeasure` — props spec
+/// + `toJSON` + `Symbol.toStringTag`.
+fn perf_entry(e: &mut Engine, ty: &str, name: &str, start: f64, dur: f64) -> Value {
+    let o = e.new_object();
+    let n = e.str_val(name.to_string());
+    e.set_own(o, "name", n, true);
+    let t = e.str_val(ty);
+    e.set_own(o, "entryType", t, true);
+    e.set_own(o, "startTime", Value::Num(start), true);
+    e.set_own(o, "duration", Value::Num(dur), true);
+    e.set_own(o, "detail", Value::Null, true);
+    let tag = e.str_val(if ty == "mark" {
+        "PerformanceMark"
+    } else {
+        "PerformanceMeasure"
+    });
+    e.set_own(o, crate::interp::SYM_TO_STRING_TAG, tag, false);
+    Value::Obj(o)
+}
+
+fn perf_now(e: &Engine) -> f64 {
+    e.t0.elapsed().as_secs_f64() * 1000.0
+}
+
+/// Prop d'une entrée (`Value` → `ObjId` → own/proto read).
+fn entry_prop(e: &mut Engine, v: Value, key: &str) -> Option<Value> {
+    let Value::Obj(id) = v else {
+        return None;
+    };
+    e.get_prop(id, key)
+}
+
+fn entry_num(e: &mut Engine, v: Value, key: &str) -> Option<f64> {
+    match entry_prop(e, v, key) {
+        Some(Value::Num(n)) => Some(n),
+        _ => None,
+    }
+}
+
+fn entry_str_eq(e: &mut Engine, v: Value, key: &str, want: &str) -> bool {
+    match entry_prop(e, v, key) {
+        Some(Value::Str(s)) => e.heap.string(s).as_deref() == Some(want),
+        _ => false,
+    }
+}
+
+/// `performance.mark(name, opts?)` — User Timing L2 : produit
+/// une entrée `mark` stockée (lisible via `getEntries*`).
+pub(crate) fn performance_mark(e: &mut Engine, this: Value, a: &[Value]) -> JsResult<Value> {
+    let name = match a.first() {
+        Some(v) => e.to_js_string(*v)?,
+        None => return Err(e.type_error("mark: name required")),
+    };
+    let entry = perf_entry(e, "mark", &name, perf_now(e), 0.0);
+    if let Some(arr) = perf_slot(e, this, PERF_MARKS) {
+        if let Some(o) = e.heap.obj_mut(arr) {
+            if let ObjKind::Array(elems) = &mut o.kind {
+                elems.push(entry);
+            }
+        }
+    }
+    Ok(entry)
+}
+
+/// `performance.measure(name, startOrOpts?, endOrName?)` —
+/// résout les bornes : nom de mark existant, `{start,duration,
+/// end}` ou défaut (0 → now). Produit une entrée `measure`.
+pub(crate) fn performance_measure(e: &mut Engine, this: Value, a: &[Value]) -> JsResult<Value> {
+    let name = match a.first() {
+        Some(v) => e.to_js_string(*v)?,
+        None => return Err(e.type_error("measure: name required")),
+    };
+    let mark_time = |e: &mut Engine, this: Value, nm: &str| -> Option<f64> {
+        let arr = perf_slot(e, this, PERF_MARKS)?;
+        let elems = match e.heap.obj(arr).map(|o| &o.kind) {
+            Some(ObjKind::Array(elems)) => elems.clone(),
+            _ => return None,
+        };
+        for m in elems {
+            if entry_str_eq(e, m, "name", nm) {
+                return entry_num(e, m, "startTime");
+            }
+        }
+        None
+    };
+    let now = perf_now(e);
+    let (start, dur) = match a.get(1) {
+        // `measure(name, startMark[, endMark])`.
+        Some(v @ (Value::Str(_) | Value::Undefined)) => {
+            let start_nm = e.to_js_string(*v)?;
+            let s = mark_time(e, this, &start_nm).unwrap_or(0.0);
+            let end = match a.get(2) {
+                Some(ee @ Value::Str(_)) => {
+                    let end_nm = e.to_js_string(*ee)?;
+                    mark_time(e, this, &end_nm).unwrap_or(now)
+                }
+                _ => now,
+            };
+            (s, end - s)
+        }
+        // `measure(name, {start,duration,end})`.
+        Some(v @ Value::Obj(_)) => {
+            let s = entry_num(e, *v, "start");
+            let d = entry_num(e, *v, "duration");
+            let en = entry_num(e, *v, "end");
+            match (s, d, en) {
+                (Some(s), _, Some(en)) => (s, en - s),
+                (Some(s), Some(d), _) => (s, d),
+                (Some(s), None, _) => (s, now - s),
+                (_, Some(d), Some(en)) => (en - d, d),
+                (_, Some(d), _) => (now - d, d),
+                _ => (0.0, now),
+            }
+        }
+        // `measure(name)` ou borne inconnue — depuis l'origine
+        // (spec : défaut `startTime` 0, `endTime` now).
+        _ => (0.0, now),
+    };
+    let entry = perf_entry(e, "measure", &name, start, dur.max(0.0));
+    if let Some(arr) = perf_slot(e, this, PERF_MEASURES) {
+        if let Some(o) = e.heap.obj_mut(arr) {
+            if let ObjKind::Array(elems) = &mut o.kind {
+                elems.push(entry);
+            }
+        }
+    }
+    Ok(entry)
+}
+
+/// Vide un slot User Timing (`name?` filtre, spec).
+fn perf_clear_slot(e: &mut Engine, this: Value, slot: &str, a: &[Value]) -> JsResult<()> {
+    let filter_nm = match a.first() {
+        Some(v) => Some(e.to_js_string(*v)?),
+        None => None,
+    };
+    if let Some(arr) = perf_slot(e, this, slot) {
+        let cur: Vec<Value> = match e.heap.obj(arr).map(|o| &o.kind) {
+            Some(ObjKind::Array(elems)) => elems.clone(),
+            _ => Vec::new(),
+        };
+        let keep: Vec<Value> = match &filter_nm {
+            None => Vec::new(),
+            Some(nm) => cur
+                .into_iter()
+                .filter(|m| !entry_str_eq(e, *m, "name", nm))
+                .collect(),
+        };
+        if let Some(o) = e.heap.obj_mut(arr) {
+            if let ObjKind::Array(elems) = &mut o.kind {
+                *elems = keep;
+            }
+        }
+    }
+    Ok(())
+}
+
+/// `performance.clearMarks(name?)`.
+pub(crate) fn performance_clear_marks(e: &mut Engine, this: Value, a: &[Value]) -> JsResult<Value> {
+    perf_clear_slot(e, this, PERF_MARKS, a)?;
+    Ok(Value::Undefined)
+}
+
+/// `performance.clearMeasures(name?)`.
+pub(crate) fn performance_clear_measures(
     e: &mut Engine,
-    _t: Value,
+    this: Value,
+    a: &[Value],
+) -> JsResult<Value> {
+    perf_clear_slot(e, this, PERF_MEASURES, a)?;
+    Ok(Value::Undefined)
+}
+
+/// Collecte un slot en `Vec<Value>`.
+fn perf_collect(e: &mut Engine, this: Value, slot: &str) -> Vec<Value> {
+    let Some(arr) = perf_slot(e, this, slot) else {
+        return Vec::new();
+    };
+    match e.heap.obj(arr).map(|o| &o.kind) {
+        Some(ObjKind::Array(elems)) => elems.clone(),
+        _ => Vec::new(),
+    }
+}
+
+/// `performance.getEntries()` — marks puis measures (ordre
+/// d'insertion — déviation bornée vs le tri `startTime`).
+pub(crate) fn performance_get_entries(
+    e: &mut Engine,
+    this: Value,
     _a: &[Value],
 ) -> JsResult<Value> {
-    Ok(e.new_array(Vec::new()))
+    let mut v = perf_collect(e, this, PERF_MARKS);
+    v.extend(perf_collect(e, this, PERF_MEASURES));
+    Ok(e.new_array(v))
+}
+
+/// `performance.getEntriesByType(type)` — `mark`/`measure`
+/// servis ; `navigation`/`resource` → `[]` (pas de timeline).
+pub(crate) fn performance_get_entries_by_type(
+    e: &mut Engine,
+    this: Value,
+    a: &[Value],
+) -> JsResult<Value> {
+    let ty = match a.first() {
+        Some(v) => e.to_js_string(*v)?,
+        None => return Ok(e.new_array(Vec::new())),
+    };
+    let v = match ty.as_str() {
+        "mark" => perf_collect(e, this, PERF_MARKS),
+        "measure" => perf_collect(e, this, PERF_MEASURES),
+        _ => Vec::new(),
+    };
+    Ok(e.new_array(v))
+}
+
+/// `performance.getEntriesByName(name, type?)` — filtre nom
+/// (+ type optionnel, spec).
+pub(crate) fn performance_get_entries_by_name(
+    e: &mut Engine,
+    this: Value,
+    a: &[Value],
+) -> JsResult<Value> {
+    let nm = match a.first() {
+        Some(v) => e.to_js_string(*v)?,
+        None => return Ok(e.new_array(Vec::new())),
+    };
+    let ty = match a.get(1) {
+        Some(Value::Str(_)) => Some(e.to_js_string(a[1])?),
+        _ => None,
+    };
+    let mut v = match ty.as_deref() {
+        Some("mark") => perf_collect(e, this, PERF_MARKS),
+        Some("measure") => perf_collect(e, this, PERF_MEASURES),
+        _ => {
+            let mut v = perf_collect(e, this, PERF_MARKS);
+            v.extend(perf_collect(e, this, PERF_MEASURES));
+            v
+        }
+    };
+    v.retain(|m| entry_str_eq(e, *m, "name", &nm));
+    Ok(e.new_array(v))
 }
 
 // -- encodeURI / decodeURI -------------------------------------------

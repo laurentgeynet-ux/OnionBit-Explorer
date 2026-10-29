@@ -688,3 +688,38 @@ fn lang_dir_reflected_as_strings_on_elements() {
         "en-GB"
     );
 }
+
+// yves-rocher vol 136 : `startTime of Undefined` — bv.js fait
+// `performance.measure(e)` puis `getEntriesByType("measure")
+// .at(-1).startTime` ; nos `mark`/`measure` étaient des no-ops
+// → tableau vide → `.startTime` sur `undefined`. User Timing L2
+// : entrées réelles (borné : `navigation`/`resource` restent
+// `[]` — pas de timeline réseau/nav).
+#[test]
+fn user_timing_entries_are_stored_and_filterable() {
+    let mut e = engine();
+    assert_eq!(
+        ev(
+            &mut e,
+            "(()=>{performance.mark('m0');performance.measure('x','m0');\
+             performance.measure('y');\
+             const ms=performance.getEntriesByType('measure');\
+             const last=ms[ms.length-1];\
+             return [last.entryType,typeof last.startTime,last.name,\
+             performance.getEntriesByName('x','measure').length,\
+             performance.getEntries().length,\
+             performance.getEntriesByType('navigation').length].join('|')})()"
+        ),
+        "measure|number|y|1|3|0"
+    );
+    // clear* : filtre par nom puis vidage complet.
+    assert_eq!(
+        ev(
+            &mut e,
+            "performance.clearMeasures('y');\
+             performance.getEntriesByType('measure').length+'|'+\
+             (performance.clearMarks(),performance.getEntriesByType('mark').length)"
+        ),
+        "1|0"
+    );
+}

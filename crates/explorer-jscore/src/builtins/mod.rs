@@ -473,20 +473,29 @@ pub(crate) fn install(e: &mut Engine) {
     e.set_own(g, "Proxy", proxy, false);
     let performance = e.new_object();
     e.add_method(performance, "now", performance_now);
-    // `mark`/`measure` — instrumentation : mesurées par la télémétrie
-    // des pages réelles, jamais relues (getEntries* → `[]` honnêtement
-    // vide, les marks ne sont pas stockés — ADR perf : pas de
-    // timeline dans ce moteur).
-    e.add_method(performance, "mark", performance_noop);
-    e.add_method(performance, "measure", performance_noop);
-    e.add_method(performance, "clearMarks", performance_noop);
-    e.add_method(performance, "clearMeasures", performance_noop);
-    e.add_method(performance, "getEntries", performance_empty_entries);
-    e.add_method(performance, "getEntriesByName", performance_empty_entries);
-    e.add_method(performance, "getEntriesByType", performance_empty_entries);
-    // Resource Timing : mêmes no-ops honnêtes que `mark`/`measure`
-    // (pas de timeline — Dynatrace ruxitagentjs les appelle au boot,
-    // vol 131 axa/laposte).
+    // User Timing L2 — `mark`/`measure` produisent de vraies
+    // entrées (bazaarvoice vol 136 : `getEntriesByType("measure")
+    // .at(-1)` tombait sur `[]` → `startTime of Undefined`).
+    // `navigation`/`resource` restent `[]` — ADR perf : pas de
+    // timeline réseau/nav dans ce moteur.
+    e.add_method(performance, "mark", performance_mark);
+    e.add_method(performance, "measure", performance_measure);
+    e.add_method(performance, "clearMarks", performance_clear_marks);
+    e.add_method(performance, "clearMeasures", performance_clear_measures);
+    e.add_method(performance, "getEntries", performance_get_entries);
+    e.add_method(
+        performance,
+        "getEntriesByName",
+        performance_get_entries_by_name,
+    );
+    e.add_method(
+        performance,
+        "getEntriesByType",
+        performance_get_entries_by_type,
+    );
+    // Resource Timing : no-ops honnêtes (pas de timeline —
+    // Dynatrace ruxitagentjs les appelle au boot, vol 131
+    // axa/laposte).
     e.add_method(performance, "setResourceTimingBufferSize", performance_noop);
     e.add_method(performance, "clearResourceTimings", performance_noop);
     // `timeOrigin` — wall-clock de création du moteur (≙
