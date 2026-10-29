@@ -98,6 +98,52 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   `mse4_is_type_supported_…` +
   `mse_surface_state_survives_
   engine_absent_window` (core).
+- **MSE-6 — sonde MSE au contact**
+  (vol 176-bis, ADR-0029) — une
+  surface `blob:` créée post-commit
+  était scannée à l'aveugle tant
+  que la pompe détenait le moteur
+  → `mse:false` permanent sous
+  tempête §B-41 (youtube : offre
+  MSE jamais visible). List/pull/
+  claim re-sondent désormais
+  `is_media_source` au contact
+  quand le moteur est présent et
+  mettent l'offre à jour en place
+  (`mse` + `mseBuffers`) ;
+  `blob:` + moteur absent au pull
+  → `Pending`/`X-Mse-Pending`
+  (inconnu re-sondable), jamais
+  `Dead` terminal. `Session::
+  media_list` passe `&mut`.
+  Même famille : un claim posé
+  pendant la fenêtre moteur-absent
+  sautait `set_media_claim` →
+  codecs jamais déclarés,
+  `isTypeSupported` `""` après un
+  claim exact (mesuré live) ;
+  `claim_pending` + livraison
+  différée au prochain contact
+  moteur-présent (claim et release
+  couverts). Verrous `blob_unmarked
+  _pull_is_pending_not_dead…` +
+  `media_claim_delivered_late_
+  when_engine_returns` (vrai
+  `JscoreEngine` détaché/rattaché).
+  Même vol : `mirror_node`
+  introuvable (path divergé
+  miroir/réel) droppait le claim
+  **codecs inclus** — désormais
+  warn nommé `set_media_claim:
+  nœud miroir introuvable` +
+  `Engine::note_media_codecs`
+  (la table `isTypeSupported` est
+  document-locale, pas
+  élément-locale) ; dep `tracing`
+  ajoutée à `explorer-js`.
+  Vérifié live : `isTypeSupported
+  ("video/mp4;codecs=avc1.42E01E")
+  → "maybe"` après claim exact.
 - **139g — branche MSE dormante dans le
   lecteur** (`app/`) — `MediaOffer.mse`
   parsé de l'offre (`mse:true` du

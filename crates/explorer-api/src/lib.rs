@@ -938,7 +938,7 @@ fn media_err(e: explorer_core::MediaError) -> Response {
 /// `GET /api/tabs/{id}/media` → surfaces média vivantes de
 /// l'onglet (étape 71b, contrat `MediaSurface`).
 async fn list_media(State(st): State<ApiState>, Path(id): Path<TabId>) -> impl IntoResponse {
-    let session = st.session.lock().await;
+    let mut session = st.session.lock().await;
     let v: Vec<_> = session.media_list(id).iter().map(media_json).collect();
     Json(serde_json::json!({ "media": v }))
 }
@@ -946,7 +946,7 @@ async fn list_media(State(st): State<ApiState>, Path(id): Path<TabId>) -> impl I
 /// `GET /api/tabs/{id}/media/{mid}` → fiche d'une surface
 /// (diagnostics) — `410` si l'id est mort.
 async fn get_media(State(st): State<ApiState>, Path((id, mid)): Path<(TabId, u64)>) -> Response {
-    let session = st.session.lock().await;
+    let mut session = st.session.lock().await;
     match session.media_list(id).into_iter().find(|m| m.id == mid) {
         Some(m) => Json(media_json(&m)).into_response(),
         None => media_err(explorer_core::MediaError::Dead),

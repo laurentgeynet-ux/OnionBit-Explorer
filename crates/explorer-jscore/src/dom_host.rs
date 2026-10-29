@@ -3297,6 +3297,14 @@ impl Engine {
         }
     }
 
+    /// Déclare les codecs hôte sans nœud résolu — la table
+    /// `isTypeSupported` est document-locale : un claim dont
+    /// le path ne résout plus (miroir divergent) doit quand
+    /// même alimenter les capacités déclarées (vol 176-bis).
+    pub fn note_media_codecs(&mut self, codecs: &[String]) {
+        crate::mse::note_declared_codecs(self, codecs);
+    }
+
     /// `deliver_media_state` (étape 71c) : l'embedder relaie le
     /// rapport `state` de l'hôte claimé. Les props reflètent le
     /// rapport, les promesses `play()` tranchent (`playing` →

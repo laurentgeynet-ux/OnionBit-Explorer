@@ -37,6 +37,7 @@ use super::*;
 /// Surface média vivante d'un onglet — offre émise, état
 /// claim + dernier rapport hôte. Ordre du vecteur = ordre
 /// du document (correspondance positionnelle du refresh).
+#[allow(clippy::struct_excessive_bools)] // drapeaux d'offre orthogonaux.
 pub(crate) struct MediaSurface {
     /// Identifiant émis dans `MediaOffered`.
     pub(crate) id: u64,
@@ -54,6 +55,12 @@ pub(crate) struct MediaSurface {
     pub(crate) autoplay: bool,
     /// Codecs déclarés par l'hôte claimé (`None` = stub).
     pub(crate) claim: Option<Vec<String>>,
+    /// Claim enregistré mais pas encore livré au moteur —
+    /// `set_media_claim` est sauté quand `entry.js` est
+    /// détenu (vol 176-bis : codecs jamais déclarés →
+    /// `isTypeSupported` restait `""` après un claim exact).
+    /// Livré au prochain contact moteur-présent.
+    pub(crate) claim_pending: bool,
     /// Dernier `state` rapporté par l'hôte.
     pub(crate) report: Option<MediaReport>,
     /// Chemin `(tag, index)` DOM de l'élément — résolution
@@ -271,6 +278,37 @@ fn mark_mse_surfaces(scanned: &mut [ScannedMedia], js: &mut Option<Box<dyn JsEng
     }
 }
 
+/// Sonde MSE au contact (vol 176-bis) — une surface `blob:`
+/// scannée pendant que le moteur était détenu reste
+/// `mse:false` inconnu tant que la tempête dure (les applies
+/// scannent presque toujours à l'aveugle). List/pull/claim
+/// re-sondent quand le moteur est présent et mettent l'offre
+/// à jour en place — `blob:` non-MSE reste `false`, moteur
+/// absent → rien déduit (Pending/unknown honnête).
+fn lazy_mark_mse(m: &mut MediaSurface, js: &mut Option<Box<dyn JsEngine>>) {
+    if m.mse || !m.url.starts_with("blob:") {
+        return;
+    }
+    if let Some(e) = js.as_mut() {
+        if e.is_media_source(&m.url) {
+            m.mse = true;
+            m.mse_buffers = e.mse_buffers(&m.url);
+        }
+    }
+}
+
+/// Livre au moteur le claim en attente (claim/release posé
+/// pendant une fenêtre moteur-absent) — idempotent : le
+/// drapeau tombe à la première livraison réussie.
+fn sync_claim_to_engine(m: &mut MediaSurface, js: &mut Option<Box<dyn JsEngine>>) {
+    if m.claim_pending {
+        if let Some(e) = js.as_mut() {
+            e.set_media_claim(&m.path, m.id, m.claim.clone());
+            m.claim_pending = false;
+        }
+    }
+}
+
 impl Session {
     /// Recalcule les surfaces média de l'onglet au point de
     /// cohérence courant (post-commit, post-apply repeint) :
@@ -366,6 +404,7 @@ impl Session {
                         controls: s.controls,
                         autoplay: s.autoplay,
                         claim: None,
+                        claim_pending: false,
                         report: None,
                         path: s.path,
                         mse: s.mse,
@@ -381,6 +420,7 @@ impl Session {
                         controls: surf.controls,
                         autoplay: surf.autoplay,
                         claim: None,
+                        claim_pending: false,
                         report: None,
                         path: surf.path.clone(),
                         mse: surf.mse,
@@ -467,12 +507,17 @@ impl Session {
     }
 
     /// Surfaces média vivantes de l'onglet (debug REST,
-    /// parité FFI future).
-    #[must_use]
-    pub fn media_list(&self, tab: TabId) -> Vec<MediaOfferInfo> {
+    /// parité FFI future). `&mut` : la lecture re-sonde les
+    /// `blob:` scannées à l'aveugle quand le moteur est
+    /// présent (`lazy_mark_mse`, vol 176-bis).
+    pub fn media_list(&mut self, tab: TabId) -> Vec<MediaOfferInfo> {
         self.tabs
-            .get(&tab)
+            .get_mut(&tab)
             .map(|e| {
+                for m in &mut e.media {
+                    lazy_mark_mse(m, &mut e.js);
+                    sync_claim_to_engine(m, &mut e.js);
+                }
                 e.media
                     .iter()
                     .map(|m| MediaOfferInfo {
@@ -512,11 +557,22 @@ impl Session {
         let Some(entry) = self.tabs.get_mut(&tab) else {
             return MsePull::Dead;
         };
-        let Some(m) = entry.media.iter().find(|m| m.id == mid) else {
+        let Some(m) = entry.media.iter_mut().find(|m| m.id == mid) else {
             return MsePull::Dead;
         };
         if !m.mse {
-            return MsePull::Dead;
+            // Surface scannée à l'aveugle (fenêtre pompe) :
+            // le contact re-sonde — `blob:` vraiment non-MSE
+            // → Dead ; `blob:` + moteur encore absent →
+            // Pending, inconnu honnête (§B-63, jamais de 410
+            // sur un état re-sondable).
+            lazy_mark_mse(m, &mut entry.js);
+            if !m.mse {
+                if m.url.starts_with("blob:") && entry.js.is_none() {
+                    return MsePull::Pending;
+                }
+                return MsePull::Dead;
+            }
         }
         let Some(eng) = entry.js.as_mut() else {
             return MsePull::Pending;
@@ -552,10 +608,15 @@ impl Session {
         if m.claim.is_some() {
             return Err(MediaError::Taken);
         }
-        m.claim = Some(codecs.clone());
-        if let Some(eng) = entry.js.as_mut() {
-            eng.set_media_claim(&m.path, media, Some(codecs));
-        }
+        // Claim sur une `blob:` scannée aveugle : moteur
+        // présent → l'offre se corrige au contact (les
+        // pulls/list suivants verront `mse:true`).
+        lazy_mark_mse(m, &mut entry.js);
+        m.claim = Some(codecs);
+        // Moteur détenu → la livraison est différée au
+        // prochain contact (`claim_pending`), jamais perdue.
+        m.claim_pending = true;
+        sync_claim_to_engine(m, &mut entry.js);
         Ok(())
     }
 
@@ -573,9 +634,8 @@ impl Session {
             return Err(MediaError::Dead);
         };
         m.claim = None;
-        if let Some(eng) = entry.js.as_mut() {
-            eng.set_media_claim(&m.path, media, None);
-        }
+        m.claim_pending = true;
+        sync_claim_to_engine(m, &mut entry.js);
         Ok(())
     }
 

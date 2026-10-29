@@ -3382,9 +3382,7 @@ fn serve_side(
             media,
             codecs,
         } => {
-            if let Some(n) = jsd.and_then(|d| mirror_node(&d.borrow(), &path)) {
-                eng.set_media_claim(n, media, codecs);
-            }
+            deliver_media_claim(eng, jsd, &path, media, codecs);
             true
         }
         Cmd::DeliverMediaState { path, report } => {
@@ -3683,6 +3681,32 @@ fn js_media_cmd(c: explorer_jscore::MediaCmd) -> JsMediaCmd {
         explorer_jscore::MediaCmd::Volume { v } => JsMediaCmd::Volume { v },
         explorer_jscore::MediaCmd::Muted { on } => JsMediaCmd::Muted { on },
         explorer_jscore::MediaCmd::Rate { r } => JsMediaCmd::Rate { r },
+    }
+}
+
+/// Livraison du claim média au nœud miroir résolu — path non
+/// résolu (miroir divergent du réel) : warn nommé et les
+/// codecs déclarés alimentent quand même la table document-
+/// locale `isTypeSupported` (vol 176-bis : le claim entier
+/// mourait silencieusement, codecs inclus).
+fn deliver_media_claim(
+    eng: &mut explorer_jscore::Engine,
+    jsd: Option<&explorer_jscore::DomRef>,
+    path: &[(String, u32)],
+    media: u64,
+    codecs: Option<Vec<String>>,
+) {
+    if let Some(n) = jsd.and_then(|d| mirror_node(&d.borrow(), path)) {
+        eng.set_media_claim(n, media, codecs);
+    } else {
+        tracing::warn!(
+            media,
+            ?path,
+            "set_media_claim: nœud miroir introuvable — claim ignoré"
+        );
+        if let Some(c) = codecs {
+            eng.note_media_codecs(&c);
+        }
     }
 }
 

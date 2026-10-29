@@ -1122,7 +1122,7 @@ fn media_events(rx: &mut broadcast::Receiver<CoreEvent>) -> Vec<CoreEvent> {
 
 #[test]
 fn media_offered_scan_kinds_and_rects() {
-    let (s, tab, mut rx) = media_page(
+    let (mut s, tab, mut rx) = media_page(
         "<video src=\"v.mp4\" controls autoplay></video>\
          <video><source src=\"w.webm\" type=\"video/webm\"></video>\
          <audio src=\"a.mp3\"></audio>\
@@ -1257,6 +1257,59 @@ fn mse_surface_state_survives_engine_absent_window() {
         list[0].mse_buffers,
         vec!["video/mp4".to_string()],
         "mse_buffers perdu pendant la fenêtre pompe"
+    );
+}
+
+/// Vol 176-bis — une `blob:` scannée à l'aveugle (moteur
+/// détenu au scan → `mse:false` inconnu) n'est ni morte ni
+/// MSE prouvée : le pull rend `Pending` tant que le moteur
+/// est absent — jamais `Dead`/410 sur un état re-sondable.
+#[test]
+fn blob_unmarked_pull_is_pending_not_dead_when_engine_absent() {
+    let (mut s, tab, mut rx) = media_page("<video src=\"blob:http://h.test/1\"></video>");
+    let _ = media_events(&mut rx);
+    {
+        let e = s.tabs.get_mut(&tab).unwrap();
+        e.media[0].mse = false;
+        e.js = None;
+    }
+    match s.media_segments_pull(tab, 1, 0, 64) {
+        crate::session::MsePull::Pending => {}
+        _ => panic!("blob: aveugle + moteur absent doit rendre Pending"),
+    }
+}
+
+/// Vol 176-bis — un claim posé pendant une fenêtre moteur-
+/// absent doit être **livré** au prochain contact moteur-
+/// présent : avant `claim_pending`, les codecs déclarés
+/// n'atteignaient jamais le moteur (`isTypeSupported`
+/// restait `""` après un claim exact).
+#[test]
+fn media_claim_delivered_late_when_engine_returns() {
+    let (mut s, tab, mut rx) = media_page("<video src=\"v.mp4\"></video>");
+    let _ = media_events(&mut rx);
+    // Vrai moteur installé puis « détaché » (fenêtre pompe).
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let eng = s.spawn_engine(tab, "<html><body></body></html>", true, "");
+    let held = {
+        let e = s.tabs.get_mut(&tab).unwrap();
+        e.js = eng;
+        e.js.take()
+    };
+    // Claim pendant l'absence → stocké, livraison différée.
+    s.media_claim(tab, 1, vec!["video/mp4".to_string()])
+        .unwrap();
+    {
+        let e = s.tabs.get_mut(&tab).unwrap();
+        assert!(e.media[0].claim_pending, "claim non marqué en attente");
+        e.js = held; // moteur de retour (même instance)
+    }
+    // Contact moteur-présent (media_list) → livraison.
+    let _ = s.media_list(tab);
+    let e = s.tabs.get_mut(&tab).unwrap();
+    assert!(
+        !e.media[0].claim_pending,
+        "claim encore en attente après contact moteur-présent"
     );
 }
 

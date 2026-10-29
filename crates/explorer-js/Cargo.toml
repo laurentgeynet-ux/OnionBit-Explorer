@@ -13,6 +13,7 @@ workspace = true
 explorer-dom.workspace = true
 explorer-jscore.workspace = true
 thiserror.workspace = true
+tracing.workspace = true
 
 [dev-dependencies]
 # JS-C39 : test croisé miroir ↔ explorer-dom — le HTML sérialisé

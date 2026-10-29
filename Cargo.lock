@@ -588,6 +588,7 @@ dependencies = [
  "explorer-html",
  "explorer-jscore",
  "thiserror",
+ "tracing",
 ]
 
 [[package]]
