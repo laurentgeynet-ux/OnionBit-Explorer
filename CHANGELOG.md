@@ -17,7 +17,13 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   → `(créées, réglées)` — un gap
   stable ≥1 trace le gel (vol
   twitch = 44 évals inertes sans
-  console). Verrous ×2 : host
+  console). Port `JsEngine::
+  promise_stats` : le warn T2
+  `evals_sans_mutation` les logue
+  (`pending>0` = await gelé,
+  `0` = retour avalé synchrone —
+  les deux familles distinguées
+  au vol). Verrous ×2 : host
   promises saines (`fonts.ready`
   immédiat, `whenDefined` pending→
   `define` résout) + le compteur

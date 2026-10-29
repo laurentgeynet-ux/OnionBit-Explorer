@@ -240,9 +240,17 @@ impl Session {
         // page à scripts purement passifs reste rare au-
         // delà du seuil.
         if !mutated && evals >= 8 {
+            // §B-4(c) : le gap `promises` nomme la thèse —
+            // `await` gelé = promesse créée jamais réglée,
+            // invisible aux erreurs ; `pending=0` = boot
+            // muet *sans* promesse en attente (retour avalé
+            // synchrone — autre famille).
+            let (promises_created, promises_settled) = eng.promise_stats();
             tracing::warn!(
                 tab,
                 evals,
+                promises_created,
+                promises_settled,
                 "evals_sans_mutation — boot possiblement muet (aucune mutation DOM)"
             );
         }
