@@ -7671,6 +7671,25 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   squelette `{data:[], eos:false}`.
   Verrous `mse2_attach.rs` ×5.
 
+- [x] **MSE-3. Transport segments —
+  `appendBuffer` stocke + pull
+  FIFO `GET …/segments`** —
+  ADR-0029 : file `VecDeque`
+  bornée par `SourceBuffer`
+  (cap 64 Mio, ordre d'append =
+  flux `ByteSource` réel) ;
+  `abort`/`remove` la vident ;
+  `mse_pull_segments(url, buf,
+  max)` → `(octets, curseur,
+  eos)` via `JsEngine::mse_pull`
+  + `Session::media_segments_
+  pull` ; REST octet-stream +
+  `X-Mse-Cursor`/`X-Mse-Eos`,
+  `?buffer=N` (deux files A+V),
+  `?max` borné 4 Mio ; non-MSE
+  → `{mse:false}`. Verrous
+  `mse3_transport.rs` ×5.
+
 ## Tâches continues
 
 - **Spécialiste JS** : divergence miroir ↔ `explorer-dom` quand

@@ -438,6 +438,27 @@ impl Session {
             .unwrap_or_default()
     }
 
+    /// Pull de segments MSE (MSE-3, ADR-0029) — drain FIFO
+    /// du `SourceBuffer` `buffer` de la `MediaSource` attachée
+    /// à la surface `mid` : `(octets, curseur, eos)` pour le
+    /// `MseSource` `ByteSource` côté hôte. `None` : surface
+    /// morte, non-MSE, moteur absent ou buffer hors rang.
+    pub fn media_segments_pull(
+        &mut self,
+        tab: TabId,
+        mid: u64,
+        buffer: usize,
+        max: usize,
+    ) -> Option<(Vec<u8>, u64, bool)> {
+        let entry = self.tabs.get_mut(&tab)?;
+        let m = entry.media.iter().find(|m| m.id == mid)?;
+        if !m.mse {
+            return None;
+        }
+        let url = m.url.clone();
+        entry.js.as_mut()?.mse_pull(&url, buffer, max)
+    }
+
     /// Claim d'une surface par l'hôte (premier arrivé gagne)
     /// — `codecs` = capacités déclarées (alimentent
     /// `canPlayType`). Le miroir JS est marqué claimé : les

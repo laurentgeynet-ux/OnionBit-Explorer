@@ -70,6 +70,12 @@ pub type ConsoleRing = std::sync::Arc<
 /// Capacité par onglet — assez pour un boot de bundle.
 const CONSOLE_RING: usize = 512;
 
+/// Taille max d'un paquet rendu par `GET …/segments` (MSE-3,
+/// ADR-0029) — borne le bulk que `read()` du `MseSource`
+/// hôte amortit en une requête loopback. Config nommée, pas
+/// en dur dans le handler.
+pub(crate) const MSE_PULL_BULK_MAX: usize = 4 * 1024 * 1024;
+
 /// Enregistre les `PipelineError` par onglet dans `ring` —
 /// la sonde `/console` survit à l'éphémère SSE (vol github :
 /// les erreurs de boot mouraient avec la connexion). Le
@@ -948,25 +954,41 @@ async fn get_media(State(st): State<ApiState>, Path((id, mid)): Path<(TabId, u64
 }
 
 /// `GET /api/tabs/{id}/media/{mid}/segments` — pull MSE
-/// (ADR-0029, MSE-2) : le `MseSource` `ByteSource` de
-/// l'hôte consomme `{mse, data, eos}` par curseur.
-/// Squelette d'attache : `data: []`/`eos: false` tant que
-/// le transport segments n'est pas livré (étape suivante —
-/// `appendBuffer` stockera et le pull rendra les octets).
-/// `410` id mort.
+/// (ADR-0029, MSE-3) : le `MseSource` `ByteSource` de
+/// l'hôte lit le corps `application/octet-stream` (bulk
+/// `?buffer=N` index `addSourceBuffer`, défaut 0 ;
+/// `?max=N` borne la paquet, cap config) ; en-têtes
+/// `X-Mse-Cursor` (position absolue consommée) et
+/// `X-Mse-Eos` (`1` quand `endOfStream` est appelé et la
+/// file vide — le `read()` suivant rend `0`). Surface
+/// non-MSE → JSON `{mse:false}` honnête ; `410` id mort.
 async fn media_segments(
     State(st): State<ApiState>,
     Path((id, mid)): Path<(TabId, u64)>,
+    axum::extract::Query(q): axum::extract::Query<std::collections::HashMap<String, String>>,
 ) -> Response {
-    let session = st.session.lock().await;
-    match session.media_list(id).into_iter().find(|m| m.id == mid) {
-        Some(m) => Json(serde_json::json!({
-            "mse": m.mse,
-            "data": Vec::<u8>::new(),
-            "eos": false,
-        }))
-        .into_response(),
-        None => media_err(explorer_core::MediaError::Dead),
+    let buffer = q.get("buffer").and_then(|s| s.parse().ok()).unwrap_or(0);
+    let max = q
+        .get("max")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(crate::MSE_PULL_BULK_MAX);
+    let mut session = st.session.lock().await;
+    match session.media_segments_pull(id, mid, buffer, max) {
+        Some((data, cursor, eos)) => axum::http::Response::builder()
+            .status(axum::http::StatusCode::OK)
+            .header(axum::http::header::CONTENT_TYPE, "application/octet-stream")
+            .header("X-Mse-Cursor", cursor.to_string())
+            .header("X-Mse-Eos", if eos { "1" } else { "0" })
+            .body(axum::body::Body::from(data))
+            .unwrap_or_else(|_| axum::http::Response::new(axum::body::Body::empty())),
+        None => {
+            // Surface morte ou non-MSE — réponse honnête.
+            if session.media_list(id).iter().any(|m| m.id == mid && !m.mse) {
+                Json(serde_json::json!({ "mse": false })).into_response()
+            } else {
+                media_err(explorer_core::MediaError::Dead)
+            }
+        }
     }
 }
 

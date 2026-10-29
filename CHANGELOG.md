@@ -7,6 +7,47 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **MSE-3 — Transport segments :
+  `appendBuffer` stocke, pull
+  FIFO `GET …/segments`**
+  (ADR-0029) — `SourceBuffer`
+  passe du comptage au stockage
+  : file `VecDeque<Vec<u8>>`
+  bornée (`SB_BYTE_CAP` 64 Mio
+  → `QuotaExceededError` — la
+  file est le flux `ByteSource`
+  exact qu'OnionCodec consomme :
+  init puis media segments dans
+  l'ordre d'append) ; `abort()`/
+  `remove()` abandonnent la file
+  (spec : reset/éviction —
+  approximation bornée sans
+  timestamps par segment).
+  `Engine::mse_pull_segments
+  (url, buffer, max)` → `(octets,
+  curseur, eos)` — curseur
+  absolu consommé, `eos` quand
+  `endOfStream` est appelé **et**
+  la file vide ; `None` hors
+  rang/URL inconnue. Port
+  `JsEngine::mse_pull` (`Cmd`
+  `MsePull`) + `Session::
+  media_segments_pull` — le
+  handler REST rend le corps
+  `application/octet-stream` +
+  `X-Mse-Cursor`/`X-Mse-Eos`
+  (`?buffer=N` index
+  `addSourceBuffer` — deux
+  files pour le cas A+V),
+  `?max=` borné `MSE_PULL_BULK_
+  MAX` (4 Mio) ; surface non-MSE
+  → `{mse:false}`, morte → `410`.
+  Le `MseSource` OnionMedia peut
+  désormais lire : octets réels
+  par curseur. Verrous
+  `mse3_transport.rs` ×5 (FIFO,
+  bulk, eos, abort/remove,
+  multi-buffer, URL inconnue).
 - **139e — retrait de `fvp`/`video_player`
   (MDK)** (`app/`) — OnionMedia devient
   l'unique backend média : deps
@@ -54,6 +95,43 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   4 crates + tests jscore/core
   verts (flake worker isolé
   passé seul).
+- **JS-C207 — §B-14 : `Invalid
+  URL` nomme son input ; bras
+  analysé = parité Chrome**
+  (`explorer-jscore`) — le bras
+  récurrent ×5 sites (arte/
+  doctipharma/ubisoft/latribune/
+  dezeen vols 150-166) est
+  `new URL(document.current
+  Script.src)` dans
+  `getAssetPrefix` turbopack/
+  Next.js, appelé depuis une
+  continuation `await` :
+  quand elle atterrit dans le
+  drain d'un script **inline**
+  (`src=""`) l'entrée vide
+  produit `Invalid URL` —
+  erreur **identique sous
+  Chrome** dans le même
+  ordonnancement (le bug
+  Next.js est réel, cf.
+  InvariantError des moteurs
+  stricts). Le moteur est
+  donc conforme : `current
+  Script` survit aux micro-
+  tasks du même task — parité
+  Chrome/Safari vérifiée par
+  verrou (bugzilla 1620505,
+  webpack #10510). Livré :
+  le message nomme désormais
+  l'input rejeté (`Invalid
+  URL: <valeur>`, `Invalid
+  base URL: <valeur>` —
+  triage des bras suivants)
+  + verrou `document_current
+  _script_visible_in_micro
+  task` et verrous du
+  nommage dans `c16_url`.
 - **JS-C206 — §B-14 : GC plus
   jamais mid-eval (racine
   `` `push` is not a function

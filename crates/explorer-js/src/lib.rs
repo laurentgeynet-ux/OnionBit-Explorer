@@ -625,6 +625,22 @@ pub trait JsEngine: Send {
         false
     }
 
+    /// Pull FIFO des segments `appendBuffer` du `SourceBuffer`
+    /// `buffer` (index `addSourceBuffer`) de la `MediaSource`
+    /// enregistrée sous `url` — transport MSE-3 (ADR-0029) :
+    /// au plus `max` octets, retour `(octets, curseur, eos)`.
+    /// `eos` vrai quand `endOfStream` est appelé **et** la
+    /// file est vide. `None` : pas de source sous `url` ou
+    /// index hors rang. Défaut : `None`.
+    fn mse_pull(
+        &mut self,
+        _url: &str,
+        _buffer: usize,
+        _max: usize,
+    ) -> Option<(Vec<u8>, u64, bool)> {
+        None
+    }
+
     /// Pousse un attribut du DOM hôte vers le nœud miroir
     /// désigné par `path` — quand la session mute le document
     /// **hors JS** (champ édité, case basculée), le miroir
@@ -1509,6 +1525,14 @@ enum Cmd {
         url: String,
         tx: Sender<bool>,
     },
+    /// Pull segments du `SourceBuffer` `buffer` (MSE-3
+    /// transport, ADR-0029) — `(octets, curseur, eos)`.
+    MsePull {
+        url: String,
+        buffer: usize,
+        max: usize,
+        tx: Sender<Option<(Vec<u8>, u64, bool)>>,
+    },
     SyncField {
         path: Vec<(String, u32)>,
         attr: String,
@@ -1986,6 +2010,16 @@ impl JscoreEngine {
                 }
                 Cmd::IsMediaSource { url, tx } => {
                     if tx.send(eng.is_media_source_url(&url)).is_err() {
+                        return;
+                    }
+                }
+                Cmd::MsePull {
+                    url,
+                    buffer,
+                    max,
+                    tx,
+                } => {
+                    if tx.send(eng.mse_pull_segments(&url, buffer, max)).is_err() {
                         return;
                     }
                 }
@@ -2559,6 +2593,23 @@ impl JsEngine for JscoreEngine {
             return false;
         }
         rx.recv_timeout(Self::EVAL_CMD_TIMEOUT).unwrap_or(false)
+    }
+
+    fn mse_pull(&mut self, url: &str, buffer: usize, max: usize) -> Option<(Vec<u8>, u64, bool)> {
+        let (tx, rx) = channel();
+        if self
+            .tx
+            .send(Cmd::MsePull {
+                url: url.to_string(),
+                buffer,
+                max,
+                tx,
+            })
+            .is_err()
+        {
+            return None;
+        }
+        rx.recv_timeout(Self::EVAL_CMD_TIMEOUT).ok().flatten()
     }
 
     fn sync_mirror_attr(&mut self, path: &[(String, u32)], attr: &str, value: Option<&str>) {

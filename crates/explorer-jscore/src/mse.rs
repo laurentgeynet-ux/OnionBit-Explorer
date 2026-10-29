@@ -124,9 +124,14 @@ struct SbData {
     timestamp_offset: f64,
     append_start: f64,
     append_end: f64,
-    /// Octets acceptés — comptabilisés, jamais stockés (C173 :
-    /// pas de transport, `buffered` reste vide).
+    /// File FIFO des segments `appendBuffer` (MSE-3 transport)
+    /// — ordre d'append strict (init puis media segments, le
+    /// flux qu'un `ByteSource` MSE doit lire). `bytes` =
+    /// total en file pour le cap `SB_BYTE_CAP` ; `pulled` =
+    /// position absolue consommée (curseur du pull).
+    segments: std::collections::VecDeque<Vec<u8>>,
     bytes: usize,
+    pulled: u64,
 }
 
 struct MsHost {
@@ -417,7 +422,9 @@ fn ms_add_source_buffer(e: &mut Engine, this: Value, args: &[Value]) -> JsResult
         timestamp_offset: 0.0,
         append_start: 0.0,
         append_end: f64::INFINITY,
+        segments: std::collections::VecDeque::new(),
         bytes: 0,
+        pulled: 0,
     }));
     let v = e.new_host_object(Rc::new(SbHost { d: sb }));
     if let Value::Obj(id) = v {
@@ -531,6 +538,10 @@ fn sb_append_buffer(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Val
                 "SourceBuffer: byte quota exceeded",
             ));
         }
+        // MSE-3 transport : le segment est stocké en file
+        // FIFO (ordre d'append — le flux `ByteSource` exact
+        // qu'OnionCodec consomme côté hôte, ADR-0029).
+        sd.segments.push_back(bytes);
         sd.bytes = next;
         sd.updating = true;
     }
@@ -548,11 +559,18 @@ fn sb_append_buffer(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Val
 }
 
 /// `sb.abort()` — `updating` retombé + `abort`/`updateend`.
+/// Spec : abort vide le buffer — les octets en file non
+/// consommés sont abandonnés (MSE-3).
 fn sb_abort(e: &mut Engine, this: Value, _args: &[Value]) -> JsResult<Value> {
     let Some(d) = sb_data(e, this) else {
         return Err(e.type_error("SourceBuffer.abort: Illegal invocation"));
     };
-    d.borrow_mut().updating = false;
+    {
+        let mut sd = d.borrow_mut();
+        sd.updating = false;
+        sd.segments.clear();
+        sd.bytes = 0;
+    }
     let Value::Obj(sid) = this else {
         return Ok(Value::Undefined);
     };
@@ -572,7 +590,16 @@ fn sb_remove(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     if !(s.is_finite() && s >= 0.0) || t <= s {
         return Err(e.type_error("SourceBuffer.remove: bad range"));
     }
-    d.borrow_mut().updating = true;
+    // MSE-3 : `remove` abandonne la file d'octets non
+    // consommés — approximation bornée (sans timestamps par
+    // segment, l'éviction par plage n'existe pas ; la file
+    // entière est traitée comme la queue du buffer).
+    {
+        let mut sd = d.borrow_mut();
+        sd.updating = true;
+        sd.segments.clear();
+        sd.bytes = 0;
+    }
     let Value::Obj(sid) = this else {
         return Ok(Value::Undefined);
     };
@@ -685,6 +712,49 @@ impl Engine {
     #[must_use]
     pub fn is_media_source_url(&self, url: &str) -> bool {
         self.mse.object_urls.contains_key(url)
+    }
+
+    /// Pull de segments du `SourceBuffer` `buffer` (index
+    /// `addSourceBuffer`) de la `MediaSource` enregistrée
+    /// sous `url` — transport MSE-3 (ADR-0029) : le
+    /// `MseSource` `ByteSource` hôte draine la file FIFO par
+    /// `max` octets en vrac. Retour `(octets, curseur_suivant,
+    /// eos)` : le curseur avance du nombre d'octets rendus ;
+    /// `eos` vrai quand `readyState == "ended"` **et** la
+    /// file est vide (la lecture bloque autrement — le
+    /// site peut encore appender).
+    /// `None` : `url` inconnue ou index de buffer hors rang.
+    pub fn mse_pull_segments(
+        &mut self,
+        url: &str,
+        buffer: usize,
+        max: usize,
+    ) -> Option<(Vec<u8>, u64, bool)> {
+        let mid = self.mse.object_urls.get(url).copied()?;
+        let ms = ms_data(self, Value::Obj(mid))?;
+        let sbv = ms.borrow().buffers.get(buffer).copied()?;
+        let sd = sb_data(self, sbv)?;
+        let mut sd = sd.borrow_mut();
+        let mut out = Vec::new();
+        while out.len() < max {
+            let Some(seg) = sd.segments.pop_front() else {
+                break;
+            };
+            let take = (max - out.len()).min(seg.len());
+            out.extend_from_slice(&seg[..take]);
+            if take < seg.len() {
+                // Fin de paquet atteinte — le reste du
+                // segment repasse en tête de file.
+                sd.segments.push_front(seg[take..].to_vec());
+            }
+        }
+        sd.bytes = sd.bytes.saturating_sub(out.len());
+        sd.pulled = sd.pulled.saturating_add(out.len() as u64);
+        let cursor = sd.pulled;
+        let empty = sd.segments.is_empty();
+        drop(sd);
+        let eos = empty && ms.borrow().ready_state == "ended";
+        Some((out, cursor, eos))
     }
 }
 
