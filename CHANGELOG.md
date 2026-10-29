@@ -51,6 +51,39 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   non-MSE). Verrous
   `mse4_is_type_supported_…` +
   `mse4_source_buffers_…` ×2.
+- **MSE-5 — claims MIME complets +
+  état MSE retenu sous pompe** (vol
+  177, ADR-0029) — `note_declared_
+  codecs` extrait désormais le
+  paramètre `codecs=` d'un claim
+  MIME entier (`video/mp4;codecs=
+  avc1.42E01E` → famille `avc1`,
+  multi-codecs `,`-séparés inclus,
+  conteneur nu ignoré) : avant,
+  `isTypeSupported(mime+codecs)`
+  rendait toujours `""` malgré un
+  claim exact. Côté core, un
+  `refresh_media` pendant que la
+  pompe détient le moteur ne
+  déduit plus rien — `mse` et
+  `mse_buffers` des surfaces
+  retenues sont préservés (le scan
+  aveugle dégradait l'offre à
+  `mse:false` → `Dead` au pull,
+  410 transitoire réintroduit par
+  la porte du scan ; youtube :
+  offre MSE invisible en
+  permanence sous tempête §B-41).
+  Moteur présent : `mse_buffers`
+  est rafraîchi — les
+  `SourceBuffer` ajoutés après
+  l'offre la complètent désormais
+  (`mseBuffers` restait `[]` à
+  vie). Verrous : lock MIME
+  complet dans
+  `mse4_is_type_supported_…` +
+  `mse_surface_state_survives_
+  engine_absent_window` (core).
 - **139g — branche MSE dormante dans le
   lecteur** (`app/`) — `MediaOffer.mse`
   parsé de l'offre (`mse:true` du

@@ -21,7 +21,9 @@ fn engine() -> Engine {
     // storage (le vrai chemin les ajoute via ) —
     // la matrice teste la livraison, pas le défaut d'install.
     e.install_timers();
-    e.install_storage(&Storage::new(RefCell::new(std::collections::BTreeMap::new())));
+    e.install_storage(&Storage::new(RefCell::new(
+        std::collections::BTreeMap::new(),
+    )));
     e.install_dom(&Rc::new(RefCell::new(Dom::from_html(PAGE))));
     e
 }

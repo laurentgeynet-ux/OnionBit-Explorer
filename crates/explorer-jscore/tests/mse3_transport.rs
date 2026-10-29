@@ -176,6 +176,47 @@ fn mse4_is_type_supported_reflects_declared_codecs() {
         ev(&mut e, "MediaSource.isTypeSupported('video/quicktime')"),
         ""
     );
+    // Claim déclaré en MIME complet (`video/mp4;codecs=…`) —
+    // le cas réel du contrat `claim` : la table doit extraire
+    // la liste `codecs=` (vol 177 : le MIME entier devenait un
+    // « préfixe » jamais rejoint → `""` malgré le claim).
+    let mut e2 = engine();
+    e2.set_media_claim(
+        explorer_jscore::NodeId::from(0u32),
+        2,
+        Some(vec![
+            "video/mp4;codecs=avc1.42E01E".to_string(),
+            "audio/mp4;codecs=mp4a.40.2".to_string(),
+        ]),
+    );
+    assert_eq!(
+        ev(
+            &mut e2,
+            "MediaSource.isTypeSupported('video/mp4; codecs=\"avc1.42E01E\"')"
+        ),
+        "maybe"
+    );
+    assert_eq!(
+        ev(
+            &mut e2,
+            "MediaSource.isTypeSupported('video/mp4; codecs=\"avc1.42E01E,mp4a.40.2\"')"
+        ),
+        "maybe"
+    );
+    // Conteneur nu dans le claim → rien de déclaré en plus.
+    let mut e3 = engine();
+    e3.set_media_claim(
+        explorer_jscore::NodeId::from(0u32),
+        3,
+        Some(vec!["video/mp4".to_string()]),
+    );
+    assert_eq!(
+        ev(
+            &mut e3,
+            "MediaSource.isTypeSupported('video/mp4; codecs=\"avc1\"')"
+        ),
+        ""
+    );
 }
 
 #[test]

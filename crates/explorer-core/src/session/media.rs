@@ -253,6 +253,24 @@ fn scan_media(tree: &LayoutBox, dom: &Dom, base: &Url) -> Vec<ScannedMedia> {
     out
 }
 
+/// Marque `mse`/`mse_buffers` des surfaces scannées depuis le
+/// registre moteur — à n'appeler que moteur présent : `js` absent
+/// (fenêtre pompe) ne doit rien déduire (§B-63 adjacent, vol 177).
+fn mark_mse_surfaces(scanned: &mut [ScannedMedia], js: &mut Option<Box<dyn JsEngine>>) {
+    for s in scanned.iter_mut() {
+        s.mse =
+            s.url.starts_with("blob:") && js.as_mut().is_some_and(|e| e.is_media_source(&s.url));
+        // Les `SourceBuffer` déjà ajoutés sont publiés
+        // dans l'offre (`?buffer=N` les indexe — P-53).
+        if s.mse {
+            s.mse_buffers = js
+                .as_mut()
+                .map(|e| e.mse_buffers(&s.url))
+                .unwrap_or_default();
+        }
+    }
+}
+
 impl Session {
     /// Recalcule les surfaces média de l'onglet au point de
     /// cohérence courant (post-commit, post-apply repeint) :
@@ -278,18 +296,16 @@ impl Session {
             // Marquage MSE (MSE-2, ADR-0029) — le registre
             // vit dans le moteur : `blob:` + `is_media_source`
             // → l'offre route vers `GET …/segments`.
-            for s in &mut scanned {
-                s.mse = s.url.starts_with("blob:")
-                    && entry.js.as_mut().is_some_and(|e| e.is_media_source(&s.url));
-                // Les `SourceBuffer` déjà ajoutés sont publiés
-                // dans l'offre (`?buffer=N` les indexe — P-53).
-                if s.mse {
-                    s.mse_buffers = entry
-                        .js
-                        .as_mut()
-                        .map(|e| e.mse_buffers(&s.url))
-                        .unwrap_or_default();
-                }
+            // §B-63 adjacent : `entry.js` est `None` tant que la
+            // pompe détient le moteur — le scan marquait alors
+            // `mse:false`/`mseBuffers:[]` à tort (youtube : la
+            // tempête §B-41 rendait le drapeau mort en
+            // permanence, l'offre MSE invisible pour l'hôte).
+            // Moteur absent → on ne déduit rien, les surfaces
+            // retenues conservent leur état précédent.
+            let js_present = entry.js.is_some();
+            if js_present {
+                mark_mse_surfaces(&mut scanned, &mut entry.js);
             }
             let old = std::mem::take(&mut entry.media);
             let mut matched = vec![false; scanned.len()];
@@ -315,7 +331,16 @@ impl Session {
                     o.controls = s.controls;
                     o.autoplay = s.autoplay;
                     o.path.clone_from(&s.path);
-                    o.mse = s.mse;
+                    // Moteur absent → drapeau/buffers retenus
+                    // (scan à l'aveugle : ne rien dégrader) ;
+                    // moteur présent → rafraîchir, y compris
+                    // `mse_buffers` — les `SourceBuffer` ajoutés
+                    // APRÈS l'offre doivent la compléter (vol
+                    // 177 : `mseBuffers` restait `[]` à vie).
+                    if js_present {
+                        o.mse = s.mse;
+                        o.mse_buffers.clone_from(&s.mse_buffers);
+                    }
                     retained[pos] = Some(o);
                 } else {
                     gone.push(GoneSurface {

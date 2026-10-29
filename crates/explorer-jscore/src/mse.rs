@@ -394,8 +394,27 @@ fn tr_illegal_ctor(e: &mut Engine, _t: Value, _args: &[Value]) -> JsResult<Value
 /// `OnionCodec` joue réellement — honnête par construction).
 pub(crate) fn note_declared_codecs(e: &mut Engine, codecs: &[String]) {
     for c in codecs {
-        if let Some(p) = codec_prefix(c) {
-            e.mse.declared_codecs.insert(p);
+        let c = c.trim();
+        // L'hôte déclare soit un codec nu (`avc1.42E01E`), soit
+        // un MIME complet (`video/mp4;codecs="avc1.4d,mp4a.40"`)
+        // — la liste `codecs=` prime ; sans elle, la valeur est
+        // prise pour un codec nu (vol 177 : le claim en MIME
+        // complet n'alimentait jamais la table →
+        // `isTypeSupported(mime;codecs)` restait `""`).
+        let raw = match c.find("codecs=") {
+            Some(pos) => &c[pos + 7..],
+            None => c,
+        };
+        for part in raw.trim_matches(|ch| ch == '"' || ch == '\'').split(',') {
+            let part = part.trim().trim_matches(|ch| ch == '"' || ch == '\'');
+            // `video/mp4` nu (sans `codecs=`) = conteneur, pas un
+            // codec — rien à déclarer.
+            if part.contains('/') {
+                continue;
+            }
+            if let Some(p) = codec_prefix(part) {
+                e.mse.declared_codecs.insert(p);
+            }
         }
     }
 }

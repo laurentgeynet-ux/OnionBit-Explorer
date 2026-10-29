@@ -1232,6 +1232,34 @@ fn media_gone_on_close_and_navigation() {
     );
 }
 
+/// §B-63 adjacent (vol 177) — un `refresh_media` pendant que la
+/// pompe détient le moteur (`entry.js = None`) ne doit pas
+/// dégrader l'état MSE d'une surface retenue : `mse`/`mseBuffers`
+/// restent — sinon `media_segments_pull` rend `Dead` sur une
+/// surface vivante, réintroduisant le 410 transitoire par le scan.
+#[test]
+fn mse_surface_state_survives_engine_absent_window() {
+    let (mut s, tab, mut rx) = media_page("<video src=\"blob:http://h.test/1\"></video>");
+    let _ = media_events(&mut rx);
+    // Surface déjà vue MSE avec un SourceBuffer, puis le moteur
+    // part en pompe (js = None — même état que « pompe en vol »).
+    {
+        let e = s.tabs.get_mut(&tab).unwrap();
+        e.media[0].mse = true;
+        e.media[0].mse_buffers = vec!["video/mp4".to_string()];
+        e.js = None;
+    }
+    s.refresh_media(tab);
+    let list = s.media_list(tab);
+    assert_eq!(list.len(), 1);
+    assert!(list[0].mse, "drapeau mse dégradé pendant la fenêtre pompe");
+    assert_eq!(
+        list[0].mse_buffers,
+        vec!["video/mp4".to_string()],
+        "mse_buffers perdu pendant la fenêtre pompe"
+    );
+}
+
 #[test]
 fn media_claim_first_wins_and_state() {
     let (mut s, tab, _rx) = media_page("<video src=\"v.mp4\"></video>");
