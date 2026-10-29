@@ -7,6 +7,20 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **139g — branche MSE dormante dans le
+  lecteur** (`app/`) — `MediaOffer.mse`
+  parsé de l'offre (`mse:true` du
+  moteur) ; la factory média reçoit
+  l'offre complète et aiguille :
+  `mse` → `OnionMediaPlayer.createMse`
+  (lookup défensif
+  `onionmedia_open_mse` — symbole
+  absent = erreur de claim honnête,
+  pas de crash FFI), sinon `create`
+  inchangé. Prête pour la DLL —
+  non-MSE intact.
+
+
 - **§B-63 — `GET …/segments` :
   `410` transitoire sous pompe
   corrigé** (`explorer-core`/api)

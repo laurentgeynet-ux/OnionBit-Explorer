@@ -6,6 +6,8 @@ import 'dart:async';
 
 import 'package:flutter/widgets.dart';
 
+import '../domain/media_offer.dart';
+
 /// Instantané de lecture rapporté au moteur — contrat
 /// `MediaReport` (étape 71, `docs/interface-equipes.md`) :
 /// `position_ms`/`buffered_ms`/`duration_ms` entiers,
@@ -64,8 +66,14 @@ abstract class MediaPlayer {
   Future<void> dispose();
 }
 
-/// Fabrique de lecteurs — injectable (fake en test).
-typedef MediaPlayerFactory = Future<MediaPlayer> Function(String url);
+/// Fabrique de lecteurs — injectable (fake en test). L'offre
+/// complète passe (branche `mse` : le lecteur a besoin du
+/// flag MSE + de l'identité de surface, pas juste l'URL).
+typedef MediaPlayerFactory = Future<MediaPlayer> Function(
+  MediaOffer offer, {
+  required String tabId,
+  String apiBase,
+});
 
 /// `OnionMediaPlayer` (FFI `onionmedia_ffi`) en prod,
 /// fake en test.

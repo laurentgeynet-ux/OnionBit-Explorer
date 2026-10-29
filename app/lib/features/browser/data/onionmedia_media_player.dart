@@ -4,6 +4,7 @@
 
 import 'dart:async';
 import 'dart:ffi' as ffi;
+import '../domain/media_offer.dart';
 import 'dart:io';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
@@ -166,6 +167,90 @@ class OnionMediaPlayer implements MediaPlayer {
     p._startPump();
     return p;
   }
+
+  /// Chemin MSE (dormant — la DLL expose
+  /// `onionmedia_open_mse` une fois packagée) : offre
+  /// `mse:true` → le lecteur pull ses octets via
+  /// `…/segments` au lieu de fetcher `url`. Lookup gardé :
+  /// symbole absent → erreur de claim honnête (pas de
+  /// crash FFI).
+  static Future<MediaPlayer> createMse(
+    MediaOffer offer, {
+    String tabId = '',
+    String apiBase = '',
+    bool hwAccel = false,
+  }) async {
+    final lib = _load();
+    // Le symbole peut ne pas exister encore — erreur propre.
+    try {
+      lib.lookup<ffi.NativeFunction<ffi.Void Function()>>(
+          'onionmedia_open_mse');
+    } on Object {
+      throw StateError(
+        'onionmedia_open_mse absent — DLL sans le chemin MSE',
+      );
+    }
+    final h = lib.lookupFunction<ffi.Pointer Function(), ffi.Pointer Function()>(
+        'onionmedia_new')();
+    if (h == ffi.nullptr) {
+      throw StateError('onionmedia_new a échoué');
+    }
+    final p = OnionMediaPlayer._(lib, h);
+    try {
+      for (final s2 in ['onionmedia_set_hw_accel', 'onionmedia_set_hwaccel']) {
+        try {
+          final setHw = lib.lookupFunction<
+              ffi.Int32 Function(ffi.Pointer, ffi.Int32),
+              int Function(ffi.Pointer, int)>(s2);
+          setHw(h, hwAccel ? 1 : 0);
+          break;
+        } on Object {
+          // export absent — HW non piloté.
+        }
+      }
+      // open_mse(h, apiBase, tab, mid, buffer, ext) — signature
+      // confirmée à l'arrivée de la DLL ; les ids passent en
+      // int64, apiBase/ext en char* UTF-8.
+      final openMse = lib.lookupFunction<
+          ffi.Int32 Function(
+              ffi.Pointer,
+              ffi.Pointer<ffi.Char>,
+              ffi.Int64,
+              ffi.Int64,
+              ffi.Int32,
+              ffi.Pointer<ffi.Char>),
+          int Function(
+              ffi.Pointer,
+              ffi.Pointer<ffi.Char>,
+              int,
+              int,
+              int,
+              ffi.Pointer<ffi.Char>)>('onionmedia_open_mse');
+      final ab = apiBase.codeUnits;
+      final ext = (offer.mime ?? 'mp4').codeUnits;
+      final cAb = calloc<ffi.Char>(ab.length);
+      final cExt = calloc<ffi.Char>(ext.length);
+      for (var i = 0; i < ab.length; i++) {
+        cAb[i] = ab[i];
+      }
+      for (var i = 0; i < ext.length; i++) {
+        cExt[i] = ext[i];
+      }
+      final tab = int.tryParse(tabId) ?? 0;
+      final rc = openMse(h, cAb, tab, offer.id, 0, cExt);
+      calloc.free(cAb);
+      calloc.free(cExt);
+      if (rc != 0) {
+        throw StateError('onionmedia_open_mse: ${p._lastError()}');
+      }
+    } catch (_) {
+      p._qtavFree(h);
+      rethrow;
+    }
+    p._startPump();
+    return p;
+  }
+
 
   void _startPump() {
     _pump = Timer.periodic(const Duration(milliseconds: 33), (_) async {

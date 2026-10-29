@@ -148,7 +148,14 @@ class BrowserState {
 final mediaPlayerFactoryProvider = Provider<MediaPlayerFactory>(
   (ref) {
     final hw = ref.watch(settingsProvider).hwAccel;
-    return (url) => OnionMediaPlayer.create(url, hwAccel: hw);
+    return (offer, {tabId = '', apiBase = ''}) => offer.mse
+        ? OnionMediaPlayer.createMse(
+            offer,
+            tabId: tabId,
+            apiBase: apiBase,
+            hwAccel: hw,
+          )
+        : OnionMediaPlayer.create(offer.url, hwAccel: hw);
   },
 );
 
@@ -865,7 +872,7 @@ class BrowserController extends Notifier<BrowserState> {
       final ok = await _repo.claimMedia(tabId, offer.id, _cfg.mediaCodecs);
       if (!ok || !ref.mounted) return;
       _patchMedia(tabId, offer.id, (m) => m.copyWith(claimed: true));
-      final player = await _playerFactory(offer.url);
+      final player = await _playerFactory(offer, tabId: tabId);
       if (!ref.mounted || state.media[tabId]?[offer.id] == null) {
         unawaited(player.dispose());
         return;

@@ -20,6 +20,7 @@ class MediaOffer {
     this.controls = false,
     this.autoplay = false,
     this.claimed = false,
+    this.mse = false,
   });
 
   /// Identité stable de l'instance (`media: u64` session).
@@ -47,6 +48,11 @@ class MediaOffer {
   /// Claim posé par l'hôte (REST `…/claim` accepté).
   final bool claimed;
 
+  /// Surface MSE (MSE-2, ADR-0029) : la `src` est un `blob:`
+  /// `MediaSource` — le lecteur pull ses octets via
+  /// `…/segments` au lieu de fetcher `url`.
+  final bool mse;
+
   bool get isVideo => kind == 'video';
 
   /// Une surface positionnable : vidéo avec boîte non vide.
@@ -61,6 +67,7 @@ class MediaOffer {
     controls: controls,
     autoplay: autoplay,
     claimed: claimed ?? this.claimed,
+    mse: mse,
   );
 
   factory MediaOffer.fromJson(Map<String, dynamic> j) {
@@ -76,6 +83,7 @@ class MediaOffer {
       controls: j['controls'] == true,
       autoplay: j['autoplay'] == true,
       claimed: j['claimed'] == true,
+      mse: j['mse'] == true,
     );
   }
 }

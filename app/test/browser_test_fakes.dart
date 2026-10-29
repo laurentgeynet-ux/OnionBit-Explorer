@@ -332,8 +332,12 @@ class FakePlayer implements MediaPlayer {
 
 /// Fabrique enregistrant ses instances — les tests lisent le
 /// dernier `FakePlayer` pour vérifier commandes et dispose.
-Future<MediaPlayer> fakeMediaPlayerFactory(String url) async {
-  final p = FakePlayer(url);
+Future<MediaPlayer> fakeMediaPlayerFactory(
+  MediaOffer offer, {
+  String tabId = '',
+  String apiBase = '',
+}) async {
+  final p = FakePlayer(offer.url);
   FakePlayer.instances.add(p);
   return p;
 }
