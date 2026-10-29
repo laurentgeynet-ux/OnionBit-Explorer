@@ -29,6 +29,25 @@ class AppConfig {
       'audio/wav',
       'audio/webm',
       'application/vnd.apple.mpegurl',
+      // Préfixes codec (RFC 6381) — le claim les déclare au
+      // moteur : `MediaSource.isTypeSupported` matche sur
+      // cette forme (`codecs="avc1.42E01E"` → `avc1`) — les
+      // entrées = familles décodables par les crates
+      // `onioncodec-*` (capacités déclarées, pas promises).
+      'avc1',
+      'hvc1',
+      'hev1',
+      'vp09',
+      'vp08',
+      'av01',
+      'mp4a',
+      'mp3',
+      'opus',
+      'vorbis',
+      'flac',
+      'ac-3',
+      'ec-3',
+      'alac',
     ],
     this.drmDelegateHosts = const [
       // Chaque entrée = un arbitrage (ADR-0027 §2 : périmètre

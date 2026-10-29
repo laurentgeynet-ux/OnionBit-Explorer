@@ -7,6 +7,20 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **139h — `mediaCodecs` déclare les
+  préfixes codec** (`app/`) — le
+  claim poussait les seules MIME de
+  conteneurs (`video/mp4`…) :
+  `isTypeSupported` (MSE-4) matche
+  les préfixes RFC 6381 (`avc1`/
+  `mp4a`/`vp09`/`av01`/`hvc1`/
+  `hev1`/`vp08`/`mp3`/`opus`/
+  `vorbis`/`flac`/`ac-3`/`ec-3`/
+  `alac` = familles `onioncodec-*`)
+  — sans eux la table restait vide
+  pour tout `codecs="…"` réel.
+  Ajoutés : la table moteur
+  s'allume dès le premier claim.
 - **§B-4(c) — compteur
   `promise_stats` + sonde
   promesses host** (`explorer-jscore`)
