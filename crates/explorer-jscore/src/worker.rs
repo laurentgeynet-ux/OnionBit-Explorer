@@ -111,6 +111,11 @@ pub(crate) enum WireValue {
     Set(Vec<WireValue>),
     /// `BigInt`.
     Big(num_bigint::BigInt),
+    /// `Blob`/`File` (JS-C196) — octets + type + props propres
+    /// (`File` : `name`/`lastModified` — le proto décodé est
+    /// `Blob`, déviation documentée ; avant, un `Blob` posté
+    /// sortait en objet vide `{}` — mensonge silencieux).
+    Blob(Vec<u8>, String, Vec<(String, WireValue)>),
     /// Référence arrière — index dans l'ordre de création des
     /// conteneurs (cycles préservés, spec `StructuredSerialize`).
     Ref(u32),
@@ -347,6 +352,30 @@ impl Engine {
     pub(crate) fn install_worker_ctor(&mut self) {
         let v = self.native_fn("Worker", worker_ctor_pub);
         let g = self.global;
+        // `Worker.prototype` — spec WebIDL : les instruments
+        // (Dynatrace ruxitagentjs, axa/laposte vol 131) patchent
+        // `Worker.prototype.addEventListener.call(w, …)` ; sans
+        // proto, la lecture jetait `of Undefined` et tuait
+        // l'agent entier. L'héritage `EventTarget.prototype`
+        // est câblé par la boucle de chaînage de `install_dom`
+        // (installée après — l'ordre d'installation ne suffit
+        // pas à l'exprimer ici).
+        let p = self.new_object();
+        for name in [
+            "postMessage",
+            "terminate",
+            "addEventListener",
+            "removeEventListener",
+            "dispatchEvent",
+        ] {
+            let namev = self.str_val(name);
+            let f = self.bound_native("hostMethod", Self::host_method, vec![namev]);
+            self.set_own(p, name, f, true);
+        }
+        if let Value::Obj(cid) = v {
+            self.set_own(cid, "prototype", Value::Obj(p), false);
+            self.set_own(p, "constructor", v, false);
+        }
         self.set_own(g, "Worker", v, false);
     }
 
@@ -512,6 +541,12 @@ impl Engine {
                     Re(String, String),
                     Map(Vec<(Value, Value)>),
                     Set(Vec<Value>),
+                    /// `Blob`/`File` — octets `Rc` partagés +
+                    /// props propres data (JS-C196).
+                    Blb(std::rc::Rc<Vec<u8>>, String, Vec<(String, Value)>),
+                    /// Host — passe par `Host::serializable_clone`
+                    /// (JS-C196) ; `None` → `Bad(class_name)`.
+                    Hst(std::rc::Rc<dyn crate::heap::Host>),
                     Bad(&'static str),
                 }
                 if let Some(i) = seen.iter().position(|s| *s == id) {
@@ -523,7 +558,22 @@ impl Engine {
                     Some(ObjKind::RegExp(re)) => Shape::Re(re.source.clone(), re.flag_string()),
                     Some(ObjKind::Fun(_)) => Shape::Bad("function"),
                     Some(ObjKind::Promise(_)) => Shape::Bad("Promise"),
-                    Some(ObjKind::Host(_)) => Shape::Bad("host object"),
+                    Some(ObjKind::Host(h)) => Shape::Hst(h.clone()),
+                    Some(ObjKind::Blob { data, ty }) => {
+                        // Props propres data (`File.name`…), même
+                        // extraction que `Shape::Obj`.
+                        let props: Vec<(String, Value)> = self
+                            .heap
+                            .obj(id)
+                            .map(|o| {
+                                o.props
+                                    .iter()
+                                    .filter_map(|(k, p)| p.data_value().map(|d| (k.clone(), d)))
+                                    .collect()
+                            })
+                            .unwrap_or_default();
+                        Shape::Blb(data.clone(), ty.clone(), props)
+                    }
                     Some(ObjKind::Symbol { .. }) => Shape::Bad("Symbol"),
                     Some(ObjKind::Proxy { .. }) => Shape::Bad("Proxy"),
                     Some(ObjKind::Iter { .. }) => Shape::Bad("iterator"),
@@ -546,6 +596,22 @@ impl Engine {
                 };
                 match shape {
                     Shape::Bad(w) => Err(self.type_error(format!("postMessage: cannot clone {w}"))),
+                    // `serializable_clone` rend une valeur
+                    // sérialisable (slots en objet ordinaire) —
+                    // elle emprunte `self` → le host est passé
+                    // par `Rc` hors du match d'extraction.
+                    Shape::Hst(h) => match h.serializable_clone(self)? {
+                        Some(v) => self.wire_enc(v, seen),
+                        None => Err(self
+                            .type_error(format!("postMessage: cannot clone {}", h.class_name()))),
+                    },
+                    Shape::Blb(data, ty, props) => {
+                        let mut wprops = Vec::with_capacity(props.len());
+                        for (k, v) in props {
+                            wprops.push((k, self.wire_enc(v, seen)?));
+                        }
+                        Ok(WireValue::Blob(data.as_ref().clone(), ty, wprops))
+                    }
                     Shape::Buf(b) => Ok(WireValue::Buf(b)),
                     Shape::Re(s, f) => Ok(WireValue::Re(s, f)),
                     Shape::Arr(elems) => {
@@ -662,6 +728,19 @@ impl Engine {
                 }
                 s
             }
+            WireValue::Blob(data, ty, props) => {
+                // Vrai `ObjKind::Blob` (JS-C196) — proto `Blob`,
+                // props propres restaurées (`File.name`…).
+                let b = crate::files::blob_value(self, data.clone(), ty.clone());
+                if let Value::Obj(id) = b {
+                    for (k, wv) in props {
+                        let v = self.wire_dec(wv, memo);
+                        self.set_own(id, k, v, true);
+                    }
+                }
+                memo.push(b);
+                b
+            }
             WireValue::Arr(items) => {
                 let arr = self.new_array(Vec::new());
                 memo.push(arr);
@@ -718,6 +797,17 @@ pub(crate) fn worker_ctor_pub(e: &mut Engine, _this: Value, args: &[Value]) -> J
         alive: Arc::clone(&alive),
         idx,
     }));
+    // `w instanceof Worker` — les instances chaînent
+    // `Worker.prototype` (spec ; `new_host_object` pose
+    // `Object.prototype` par défaut).
+    let g = e.global;
+    if let (Some(Value::Obj(wc)), Value::Obj(hid)) = (e.get_prop(g, "Worker"), host) {
+        if let Some(pp @ Value::Obj(_)) = e.get_prop(wc, "prototype") {
+            if let Some(o) = e.heap.obj_mut(hid) {
+                o.proto = pp;
+            }
+        }
+    }
     e.workers.push(WorkerSlot {
         rx: out_rx,
         pending: Some(WorkerPending {

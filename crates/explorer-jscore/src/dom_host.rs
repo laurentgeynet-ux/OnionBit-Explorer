@@ -2282,6 +2282,7 @@ impl Engine {
             ("Node", "EventTarget"),
             ("Element", "Node"),
             ("HTMLElement", "Element"),
+            ("Worker", "EventTarget"),
         ] {
             if let Some(Value::Obj(cid)) = self.get_prop(g, child) {
                 if let Some(Value::Obj(cp)) = self.get_prop(cid, "prototype") {

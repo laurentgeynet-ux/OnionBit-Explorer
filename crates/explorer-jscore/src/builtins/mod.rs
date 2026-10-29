@@ -484,6 +484,11 @@ pub(crate) fn install(e: &mut Engine) {
     e.add_method(performance, "getEntries", performance_empty_entries);
     e.add_method(performance, "getEntriesByName", performance_empty_entries);
     e.add_method(performance, "getEntriesByType", performance_empty_entries);
+    // Resource Timing : mêmes no-ops honnêtes que `mark`/`measure`
+    // (pas de timeline — Dynatrace ruxitagentjs les appelle au boot,
+    // vol 131 axa/laposte).
+    e.add_method(performance, "setResourceTimingBufferSize", performance_noop);
+    e.add_method(performance, "clearResourceTimings", performance_noop);
     // `timeOrigin` — wall-clock de création du moteur (≙
     // navigationStart ; `now()` reste monotique depuis `t0`).
     let origin_ms = SystemTime::now()

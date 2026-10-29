@@ -7,6 +7,39 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **JS-C200 — §B-14 :
+  `Worker.prototype` WebIDL +
+  `performance.setResourceTiming
+  BufferSize`**
+  (`explorer-jscore`) — axa/
+  laposte vol 131 : `cannot read
+  addEventListener of Undefined`
+  en exception — Dynatrace
+  `ruxitagentjs` patche
+  `Worker.prototype.addEvent
+  Listener.call(w, …)` ; le
+  ctor `Worker` n'avait pas de
+  `prototype` → agent entier
+  mort. Spec WebIDL : proto
+  posé (méthodes IDL
+  `postMessage`/`terminate`/
+  `addEventListener`/
+  `removeEventListener`/
+  `dispatchEvent`), héritage
+  `EventTarget.prototype`
+  chaîné, `constructor` back-
+  prop, instances chaînées
+  (`w instanceof Worker`).
+  `performance.setResource
+  TimingBufferSize`/
+  `clearResourceTimings` en
+  no-ops honnêtes (rail perf
+  sans timeline). Le bundle
+  ruxit réel (400 Ko) s'évalue
+  sans exception. Verrou
+  `worker_prototype_exposes_
+  event_target_surface`
+  (`b14_probe.rs`).
 - **JS-C199 — §B-14 : adoption
   cross-document complétée**
   (`explorer-jscore`) — sfr

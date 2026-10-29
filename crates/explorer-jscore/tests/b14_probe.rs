@@ -615,3 +615,36 @@ fn append_family_adopts_foreign_document_nodes() {
     })()";
     assert_eq!(ev(&mut e, html), "true|3|true|true");
 }
+
+// axa/laposte vol 131 : `addEventListener of Undefined` en
+// exception — Dynatrace `ruxitagentjs` patche
+// `Worker.prototype.addEventListener.call(w, …)` ; le ctor
+// `Worker` n'avait pas de `prototype` → l'agent entier mourait.
+// Spec WebIDL : `Worker.prototype` expose les méthodes IDL et
+// hérite `EventTarget.prototype`.
+#[test]
+fn worker_prototype_exposes_event_target_surface() {
+    let mut e = engine();
+    assert_eq!(
+        ev(
+            &mut e,
+            "typeof Worker.prototype.addEventListener+'|'\
+             +typeof Worker.prototype.postMessage+'|'\
+             +typeof Worker.prototype.terminate+'|'\
+             +(Object.getPrototypeOf(Worker.prototype)===EventTarget.prototype)+'|'\
+             +(Worker.prototype.constructor===Worker)"
+        ),
+        "function|function|function|true|true"
+    );
+    // `performance.setResourceTimingBufferSize`/
+    // `clearResourceTimings` — no-ops honnêtes du rail perf
+    // (l'agent ruxit les appelle au boot).
+    assert_eq!(
+        ev(
+            &mut e,
+            "typeof performance.setResourceTimingBufferSize+'|'\
+             +typeof performance.clearResourceTimings"
+        ),
+        "function|function"
+    );
+}
