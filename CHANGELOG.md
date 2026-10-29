@@ -7,6 +7,32 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **JS-C199 — §B-14 : adoption
+  cross-document complétée**
+  (`explorer-jscore`) — sfr
+  vol 131 : `node is from a
+  different document` en rejet
+  de promesse — `parseHTML`
+  produit des nœuds hors-
+  document puis `.append()`/
+  `insertAdjacentElement()`.
+  JS-C185 câblait l'adoption
+  (`[[adopt]]` spec : move +
+  rebind de la référence JS)
+  sur `appendChild`/
+  `insertBefore`/`replaceChild`
+  mais `norm_children`
+  (`append`/`prepend`/`before`/
+  `after`/`replaceWith`) et
+  `insertAdjacentElement`
+  rejetaient encore. Câblés —
+  seul `removeChild` reste en
+  rejet borné. Verrou
+  `append_family_adopts_
+  foreign_document_nodes`
+  (`b14_probe.rs`), carve-out
+  `cross_document_node_args_
+  are_adopted` (`dom.rs`).
 - **JS-C198 — §B-14 : `localName`
   sur les éléments**
   (`explorer-jscore`) — SG

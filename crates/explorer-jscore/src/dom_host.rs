@@ -1103,12 +1103,13 @@ impl NodeHost {
     fn norm_children(&self, e: &mut Engine, args: &[Value]) -> JsResult<Vec<NodeId>> {
         let mut out = Vec::with_capacity(args.len());
         for &a in args {
-            if let Some(n) = node_for_in(e, a, &self.dom) {
+            if let Some(n) =
+                node_for_in(e, a, &self.dom).or_else(|| adopt_into(e, a, &self.dom, &self.cache))
+            {
                 out.push(n);
             } else if node_for(e, a).is_some() {
-                // Nœud d'une autre arène (`DOMParser`, iframe)
-                // — la spec l'adopterait ; non fusionnable →
-                // TypeError plutôt que texte fantaisiste inséré.
+                // Nœud d'une autre arène non adoptable (id invalide)
+                // — TypeError plutôt que texte fantaisiste inséré.
                 return Err(e.type_error("node is from a different document"));
             } else {
                 let s = e.to_js_string(a)?;
@@ -7005,7 +7006,9 @@ impl Host for NodeHost {
             // vide puis insère (React/lit-html l'utilisent).
             "insertAdjacentElement" => {
                 let pos = e.to_js_string(arg(args, 0))?;
-                let Some(child) = node_for_in(e, arg(args, 1), &self.dom) else {
+                let Some(child) = node_for_in(e, arg(args, 1), &self.dom)
+                    .or_else(|| adopt_into(e, arg(args, 1), &self.dom, &self.cache))
+                else {
                     return Err(e.type_error("insertAdjacentElement: not a node"));
                 };
                 self.insert_at_position(e, node, &pos, child)?;

@@ -5247,9 +5247,11 @@ fn dom_parser_constructs_and_parses() {
 /// amont, jamais de corruption.
 #[test]
 fn cross_document_node_args_are_adopted() {
-    // Mutateurs structurels : adoption sur les trois sites
-    // câblés (nœud frais à chaque essai — l'adoption détache la
-    // source), rejet borné sur le reste.
+    // Mutateurs structurels : adoption sur les sites câblés
+    // (nœud frais à chaque essai — l'adoption détache la
+    // source), rejet borné sur le reste. `norm_children`
+    // (prepend/append/before/after/replaceWith) adopte aussi
+    // depuis JS-C198 — `p` ne rejette plus (sfr vol 131).
     assert_eq!(
         ev(
             "var fx=function(){return new DOMParser().parseFromString('<div id=x>y</div>','text/html').getElementById('x')};\
@@ -5262,7 +5264,7 @@ fn cross_document_node_args_are_adopted() {
             try{document.body.prepend(fx())}catch(e){out.push('p')}\
             out.join('')"
         ),
-        "djp"
+        "d"
     );
     // L'adoption préserve l'identité JS : la référence désigne le
     // nœud inséré dans le document cible.

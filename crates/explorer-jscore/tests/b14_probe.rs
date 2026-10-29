@@ -591,3 +591,27 @@ fn local_name_stops_ancestor_walkers_at_body() {
         "stop@2"
     );
 }
+
+// sfr vol 131 : `node is from a different document` en rejet de
+// promesse — `parseHTML` crée des nœuds hors-document puis
+// `mainContainer.append(frag)`. JS-C185 câblait l'adoption sur
+// `appendChild`/`insertBefore`/`replaceChild` mais `norm_children`
+// (`append`/`prepend`/`before`/`after`/`replaceWith`) rejetait
+// encore. Spec : adoption partout (move + rebind de la référence).
+#[test]
+fn append_family_adopts_foreign_document_nodes() {
+    let mut e = engine();
+    let html = "(()=>{
+      const d=document.implementation.createHTMLDocument('x');
+      const c=document.createElement('div');
+      const frag=d.createElement('div'); frag.id='r';
+      const p=d.createElement('b'); const a=d.createElement('i');
+      c.append(frag); c.prepend(p); frag.before(a);
+      const ok=frag.parentNode===c && frag===c.childNodes[2];
+      const rw=d.createElement('u'); frag.replaceWith(rw);
+      return [ok, c.childNodes.length,
+              rw.parentNode===c && rw===c.childNodes[2] && frag.parentNode===null,
+              d.getElementById('r')===null].join('|');
+    })()";
+    assert_eq!(ev(&mut e, html), "true|3|true|true");
+}
