@@ -7,6 +7,25 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **JS-C190 — §B-14 : `IDBRequest`
+  thenable (`then`/`await`)**
+  (`explorer-jscore`) — mastodon
+  vol 116 : `then is not a
+  function (on IDBRequest)` —
+  les wrappers idb `await`-ent
+  la request directement. `then`
+  exposé sur le proto : promesse
+  interne résolue `result` au
+  `success` / rejetée `error` au
+  `error` (listeners `BoundNative`
+  sur rail `__et`), chaînage délégué
+  au vrai `Promise.prototype.then`.
+  Déviation spec assumée : V8 rend
+  `await req` = request, nous
+  rendons le résultat — c'est ce
+  que les apps réelles attendent.
+  Verrous `xhr.rs` `c190` ; suite
+  jscore complète verte.
 - **JS-C189 — §B-14 : `postMessage`
   1-arg + options objet,
   `FontFaceSet` EventTarget**

@@ -646,8 +646,51 @@ fn req_proto(e: &mut Engine) -> ObjId {
         crate::dom_host::et_remove_listener,
     );
     e.add_method(p, "dispatchEvent", crate::dom_host::et_dispatch_event);
+    // Thenable : `await req`/`req.then(f)` — les wrappers idb
+    // (mastodon vol 116 : `then is not a function`) attendent
+    // une promesse du RESULT, pas l'objet request. Déviation
+    // spec assumée (V8 rend `await req` = request) : les apps
+    // réelles qui `await` une request veulent son résultat.
+    e.add_method(p, "then", req_then);
     e.idb.req_proto = Some(p);
     p
+}
+
+/// `req.then(onF, onR)` — pont thenable : promesse interne
+/// résolue `result` au `success`, rejetée `error` au `error`,
+/// puis vrai `Promise.prototype.then` dessus (chaînage spec).
+fn req_then(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let Value::Obj(sid) = this else {
+        return Err(e.type_error("then: Illegal invocation"));
+    };
+    // Requête déjà complétée → promesse immédiatement résolue.
+    let pid = e.new_promise();
+    let ok = e.bound_native("idbThenOk", idb_then_ok, vec![Value::Obj(pid)]);
+    let ko = e.bound_native("idbThenKo", idb_then_ko, vec![Value::Obj(pid)]);
+    let t_ok = e.str_val("success");
+    let t_ko = e.str_val("error");
+    crate::dom_host::et_add_listener(e, Value::Obj(sid), &[t_ok, ok])?;
+    crate::dom_host::et_add_listener(e, Value::Obj(sid), &[t_ko, ko])?;
+    let then_f = e.get_prop(pid, "then").unwrap_or(Value::Undefined);
+    e.call_value(then_f, Value::Obj(pid), args)
+}
+
+/// `success` → résout la promesse thenable avec `result`.
+fn idb_then_ok(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    if let Some(Value::Obj(pid)) = args.first() {
+        let res = req_data(e, this).map_or(Value::Undefined, |d| d.borrow().result);
+        e.resolve_promise(*pid, res);
+    }
+    Ok(Value::Undefined)
+}
+
+/// `error` → rejette la promesse thenable avec `error`.
+fn idb_then_ko(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    if let Some(Value::Obj(pid)) = args.first() {
+        let err = req_data(e, this).map_or(Value::Undefined, |d| d.borrow().error);
+        e.reject_promise(*pid, err);
+    }
+    Ok(Value::Undefined)
 }
 
 fn db_proto(e: &mut Engine) -> ObjId {

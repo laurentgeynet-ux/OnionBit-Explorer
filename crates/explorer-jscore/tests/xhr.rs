@@ -1310,6 +1310,41 @@ fn c187_idb_request_is_event_target() {
 }
 
 #[test]
+fn c190_idb_request_thenable() {
+    let (mut e, _t) = engine();
+    // mastodon vol 116 : `then is not a function (on IDBRequest)`
+    // — les wrappers idb `await`-ent la request directement.
+    // `req.then(f)` = promesse du RESULT (déviation spec assumée :
+    // `await req` attendu = résultat par les apps réelles).
+    describe(
+        &mut e,
+        "var out = ''; var rq = indexedDB.open('thdb', 1);\
+         rq.onupgradeneeded = function (ev) {\
+           ev.target.result.createObjectStore('kv');\
+         };\
+         rq.then(function (db) { out += 'then:' + db.name + '@' + db.version; });",
+    );
+    e.run_microtasks().expect("microtasks");
+    assert_eq!(describe(&mut e, "out"), "then:thdb@1");
+    // `await req` sur une sous-request (get) — adopte le thenable.
+    describe(
+        &mut e,
+        "var out2 = '';\
+         var r0 = indexedDB.open('thdb2', 1);\
+         r0.onupgradeneeded = function (ev) {\
+           ev.target.result.createObjectStore('s');\
+         };\
+         r0.onsuccess = function (ev) {\
+           var st = ev.target.result.transaction(['s'],'readwrite').objectStore('s');\
+           st.put(42, 'k');\
+           st.get('k').then(function (v) { out2 = 'got:' + v; });\
+         };",
+    );
+    e.run_microtasks().expect("microtasks");
+    assert_eq!(describe(&mut e, "out2"), "got:42");
+}
+
+#[test]
 fn c72_idb_put_get_delete() {
     let (mut e, _t) = engine();
     describe(
