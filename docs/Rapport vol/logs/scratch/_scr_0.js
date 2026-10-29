@@ -1,1 +1,0 @@
-window.google = window.google || {};window.google.c = window.google.c || {cap:0};

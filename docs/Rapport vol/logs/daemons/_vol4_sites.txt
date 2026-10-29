@@ -1,6 +1,0 @@
-https://www.reddit.com/r/rust
-https://mastodon.social/
-https://www.openstreetmap.org/
-https://github.com/trending
-https://spectrum.adobe.com/
-https://lit.dev/

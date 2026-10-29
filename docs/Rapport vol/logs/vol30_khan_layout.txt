@@ -1,5 +1,0 @@
-block<html> [0 0 1366x16.098633]
-  block<body> [0 0 1366x16.098633]
-    block<div> [0 0 1366x16.098633]
-      anon [0 0 1366x16.098633]
-        text "\n      A required part of this site coul" [0 0 1271.2861x16.098633]

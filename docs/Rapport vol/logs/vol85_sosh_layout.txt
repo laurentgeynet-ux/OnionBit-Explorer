@@ -1,6 +1,0 @@
-block<html> [0 0 1366x101]
-  block<body> [0 0 1366x101]
-    block<header> [0 0 1366x101]
-      block<div> [0 0 1366x50]
-      block<div> [0 50 1366x51]
-    block<main> [0 101 1366x0]

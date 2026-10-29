@@ -18,8 +18,9 @@ allowed-tools:
 Une invocation = **une campagne continue** : l'agent enchaîne les
 vols sans attendre l'opérateur. Chaque itération fait exactement :
 
-> **1 vol → 1 rapport → 1 synchro `SYNTHESE.md` → 1 commit →
-> vol suivant.**
+> **1 vol → 1 rapport → 1 synchro `SYNTHESE.md` →
+> vol suivant** (preuves écrites dans `docs/Rapport vol/` —
+> dossier local **non suivi**, rien à committer).
 
 Il n'y a **pas d'étape de fin** : la campagne tourne jusqu'à ce que
 l'opérateur l'interrompe, ou jusqu'à épuisement des cibles ET
@@ -193,9 +194,7 @@ preuve immuable.
   par son PID (ou le garder s'il est sain et réutilisé au vol
   suivant).
 2. Archiver le journal dans `docs/Rapport vol/logs/daemons/`.
-3. Commit dédié : `docs(vol): agent <N> — <mission>` (rapport +
-   SYNTHESE + captures + logs dans le même commit).
-4. **Enchaîner immédiatement** : N+1, re-sélection des cibles
+3. **Enchaîner immédiatement** : N+1, re-sélection des cibles
    (les « re-vols reportés » du rapport qui vient d'être écrit
    alimentent la priorité 1), retour à l'étape a).
 

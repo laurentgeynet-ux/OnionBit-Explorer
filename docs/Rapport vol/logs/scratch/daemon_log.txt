@@ -1,4 +1,0 @@
-2026-10-23T15:30:50.222408Z  INFO explorer_core::session::apply: apply: cascade ms=32
-2026-10-23T15:30:50.393102Z  INFO explorer_core::session::apply: apply: boxtree ms=203
-2026-10-23T15:30:50.587403Z  INFO explorer_core::session::apply: apply: layout ms=397
-2026-10-23T15:30:50.649492Z  INFO explorer_core::session::apply: apply: repaint ms=459

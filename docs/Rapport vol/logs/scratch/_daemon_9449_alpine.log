@@ -1,5 +1,0 @@
-[mt-run] reaction-ok ctx=0
-[mt-run] plain ctx=0
-[mt-run] plain ctx=0
-
-thread 'explorer-jscore' (11380) has overflowed its stack

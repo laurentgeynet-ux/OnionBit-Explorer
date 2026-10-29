@@ -1,2 +1,0 @@
-2026-10-26T12:28:12.288829Z  WARN explorer_core::session::apply: journal DOM rejeté → repli re-parse (ADR-0025) tab=1 why=UnmappedKey
-[journal : 0 appliqués / 1 replis / 3 classées]

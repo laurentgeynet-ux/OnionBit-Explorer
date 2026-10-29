@@ -1,8 +1,0 @@
-# Fichier de gouvernance — dossier de preuves de vol.
-# Les binaires et les captures de sessions (exe, caches,
-# arbres de profil) ne sont pas des preuves : ils se
-# rebuildent. Ne jamais les indexer ici.
-*.exe
-*.dll
-*.pdb
-_dirs/

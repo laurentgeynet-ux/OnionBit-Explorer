@@ -1,5 +1,0 @@
-block<html> [0 0 1366x900]
-  block<body> [0 0 1366x0]
-    block<div> [0 0 0x0]
-      block<svg> [0 -50 0x0]
-    block<div> [0 0 1366x0]

@@ -1,8 +1,0 @@
-block<html> [0 0 1366x24]
-  block<body> [0 0 1366x24]
-    block<svg> [0 750 300x150]
-    block<div> [0 0 1366x0]
-    block<div> [0 0 1366x24]
-      block<div> [0 0 1366x24]
-        anon [0 0 1366x24]
-          text "Could not connect to the reCAPTCHA servi" [0 0 892.6406x24]

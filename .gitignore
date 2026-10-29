@@ -47,3 +47,7 @@ OnionBit-flightprofile/
 # dédiés (AGENTS §10) ; leurs artefacts ne se commitent pas.
 target*/
 terrain-bin/
+
+# Preuves de vol — dossier local, non suivi (rapports SYNTHESE/
+# RAPPORT_VOL_* + captures + logs restent sur disque)
+docs/Rapport vol/

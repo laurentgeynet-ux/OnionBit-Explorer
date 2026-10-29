@@ -1,7 +1,0 @@
-block<html> [0 0 1366x900]
-  block<body> [0 0 1366x900]
-    anon [0 0 1366x13.798828]
-      inline<punish-component> [0 0 0x0]
-      text "\n\n  	" [0 0 0x0]
-      text "\n\n    " [0 0 0x0]
-      text "\n\n<#comment>" [0 0 64.18945x13.798828]
