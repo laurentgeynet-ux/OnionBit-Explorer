@@ -508,6 +508,95 @@ fn perf_now(e: &Engine) -> f64 {
     e.t0.elapsed().as_secs_f64() * 1000.0
 }
 
+/// Entrée `PerformanceNavigationTiming` honnête — toutes les
+/// bornes à 0 (relatives à `timeOrigin` ≙ création moteur, même
+/// convention que `performance.timing` legacy posé à
+/// l'install) : le moteur n'a pas de timeline réseau/nav à
+/// mesurer, mais l'**entrée existe** — les instrumentations
+/// réelles (WP-interactivity techcrunch vol 188, analytics)
+/// lisent `getEntriesByType('navigation')[0].*` en aveugle
+/// → `of Undefined` sur `[]`. `name` = URL de page (spec :
+/// adresse du document), `type` = `"navigate"`,
+/// `responseStatus` = 200 (la page a été servie et évaluée),
+/// `nextHopProtocol`/`serverTiming`/`sizes` = honnêtes vides.
+fn perf_nav_entry(e: &mut Engine) -> Value {
+    let o = e.new_object();
+    let name = e.str_val(e.hooks.page_url.clone());
+    e.set_own(o, "name", name, true);
+    let ty = e.str_val("navigation");
+    e.set_own(o, "entryType", ty, true);
+    e.set_own(o, "startTime", Value::Num(0.0), true);
+    e.set_own(o, "duration", Value::Num(0.0), true);
+    // Navigation Timing L2 + Resource Timing (même entrée).
+    for k in [
+        "unloadEventStart",
+        "unloadEventEnd",
+        "domInteractive",
+        "domContentLoadedEventStart",
+        "domContentLoadedEventEnd",
+        "domComplete",
+        "loadEventStart",
+        "loadEventEnd",
+        "redirectStart",
+        "redirectEnd",
+        "connectStart",
+        "connectEnd",
+        "secureConnectionStart",
+        "domainLookupStart",
+        "domainLookupEnd",
+        "fetchStart",
+        "requestStart",
+        "responseStart",
+        "responseEnd",
+        "firstInterimResponseStart",
+        "workerStart",
+        "activationStart",
+        "criticalCHRestart",
+        "transferSize",
+        "encodedBodySize",
+        "decodedBodySize",
+    ] {
+        e.set_own(o, k, Value::Num(0.0), true);
+    }
+    e.set_own(o, "redirectCount", Value::Num(0.0), true);
+    e.set_own(o, "responseStatus", Value::Num(200.0), true);
+    let nhp = e.str_val("");
+    e.set_own(o, "nextHopProtocol", nhp, true);
+    let st = e.new_array(Vec::new());
+    e.set_own(o, "serverTiming", st, true);
+    let nav_ty = e.str_val("navigate");
+    e.set_own(o, "type", nav_ty, true);
+    // `toJSON` — la sérialisation own-props suffit (les champs
+    // sont tous own énumérables) : rendre l'entrée elle-même.
+    let toj = e.bound_native("perfToJson", perf_entry_to_json, Vec::new());
+    e.set_own(o, "toJSON", toj, false);
+    let tag = e.str_val("PerformanceNavigationTiming");
+    e.set_own(o, crate::interp::SYM_TO_STRING_TAG, tag, false);
+    Value::Obj(o)
+}
+
+/// `entry.toJSON()` — copie des props énumérables dans un
+/// objet nu : rendre `this` bouclerait (`stringify` relit
+/// `toJSON` sur le résultat).
+fn perf_entry_to_json(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
+    let out = e.new_object();
+    let Value::Obj(sid) = this else {
+        return Ok(Value::Obj(out));
+    };
+    let props: Vec<(String, crate::heap::Prop)> =
+        e.heap.obj(sid).map_or_else(Vec::new, |o| o.props.clone());
+    for (k, p) in props {
+        let crate::heap::Prop::Data { value, attrs } = p else {
+            continue;
+        };
+        if !attrs.enumerable || k == "toJSON" {
+            continue;
+        }
+        e.set_own(out, &k, value, true);
+    }
+    Ok(Value::Obj(out))
+}
+
 /// Prop d'une entrée (`Value` → `ObjId` → own/proto read).
 fn entry_prop(e: &mut Engine, v: Value, key: &str) -> Option<Value> {
     let Value::Obj(id) = v else {
@@ -667,20 +756,24 @@ fn perf_collect(e: &mut Engine, this: Value, slot: &str) -> Vec<Value> {
     }
 }
 
-/// `performance.getEntries()` — marks puis measures (ordre
-/// d'insertion — déviation bornée vs le tri `startTime`).
+/// `performance.getEntries()` — entrée `navigation` puis marks
+/// puis measures (ordre d'insertion — déviation bornée vs le
+/// tri `startTime`).
 pub(crate) fn performance_get_entries(
     e: &mut Engine,
     this: Value,
     _a: &[Value],
 ) -> JsResult<Value> {
-    let mut v = perf_collect(e, this, PERF_MARKS);
+    let mut v = vec![perf_nav_entry(e)];
+    v.extend(perf_collect(e, this, PERF_MARKS));
     v.extend(perf_collect(e, this, PERF_MEASURES));
     Ok(e.new_array(v))
 }
 
 /// `performance.getEntriesByType(type)` — `mark`/`measure`
-/// servis ; `navigation`/`resource` → `[]` (pas de timeline).
+/// servis + une entrée `navigation` honnête (techcrunch vol
+/// 188 : `[0].domContentLoadedEventStart` → `of Undefined`
+/// sur `[]`) ; `resource` → `[]` (pas de timeline réseau).
 pub(crate) fn performance_get_entries_by_type(
     e: &mut Engine,
     this: Value,
@@ -693,13 +786,15 @@ pub(crate) fn performance_get_entries_by_type(
     let v = match ty.as_str() {
         "mark" => perf_collect(e, this, PERF_MARKS),
         "measure" => perf_collect(e, this, PERF_MEASURES),
+        "navigation" => vec![perf_nav_entry(e)],
         _ => Vec::new(),
     };
     Ok(e.new_array(v))
 }
 
 /// `performance.getEntriesByName(name, type?)` — filtre nom
-/// (+ type optionnel, spec).
+/// (+ type optionnel, spec ; `navigation` couvre l'entrée —
+/// `name` = URL de page).
 pub(crate) fn performance_get_entries_by_name(
     e: &mut Engine,
     this: Value,
@@ -716,8 +811,10 @@ pub(crate) fn performance_get_entries_by_name(
     let mut v = match ty.as_deref() {
         Some("mark") => perf_collect(e, this, PERF_MARKS),
         Some("measure") => perf_collect(e, this, PERF_MEASURES),
+        Some("navigation") => vec![perf_nav_entry(e)],
         _ => {
-            let mut v = perf_collect(e, this, PERF_MARKS);
+            let mut v = vec![perf_nav_entry(e)];
+            v.extend(perf_collect(e, this, PERF_MARKS));
             v.extend(perf_collect(e, this, PERF_MEASURES));
             v
         }

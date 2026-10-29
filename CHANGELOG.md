@@ -7,6 +7,40 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **JS-C211 — entrée
+  `PerformanceNavigationTiming`
+  honnête** (`explorer-jscore`,
+  §B-14 techcrunch vol 188 —
+  WP-interactivity lit
+  `getEntriesByType('navigation')
+  [0].domContentLoadedEventStart` en
+  aveugle → `of Undefined` sur `[]`) —
+  `getEntriesByType('navigation')`,
+  `getEntries()` et
+  `getEntriesByName` servent une
+  entrée navigation réelle : champs
+  Navigation Timing L2 + Resource
+  Timing complets (`domInteractive`,
+  `domContentLoadedEventStart/End`,
+  `domComplete`, `loadEvent*`,
+  `connectStart/End`, `response*`,
+  `transferSize`, …) à 0 (relatifs à
+  `timeOrigin` ≙ création moteur —
+  même convention que le `timing`
+  legacy), `name` = URL de page,
+  `type`=`"navigate"`, `entryType`=
+  `"navigation"`, `responseStatus`=200
+  (la page a été servie et évaluée),
+  `serverTiming`/`nextHopProtocol`/
+  tailles honnêtes vides, `toJSON`
+  copiant les props énumérables (un
+  `this` nu bouclait sous
+  `JSON.stringify`). `resource` reste
+  `[]` — pas de timeline réseau.
+  Verrou `navigation_timing_entry_is
+  _honest_and_complete` ; carve-out
+  `user_timing_entries` (3|0 → 4|1).
+
 - **JS-C210 — protos observer
   résistants aux wrappers**
   (`explorer-jscore`, §B-14 gog vol 149

@@ -710,7 +710,7 @@ fn user_timing_entries_are_stored_and_filterable() {
              performance.getEntries().length,\
              performance.getEntriesByType('navigation').length].join('|')})()"
         ),
-        "measure|number|y|1|3|0"
+        "measure|number|y|1|4|1"
     );
     // clear* : filtre par nom puis vidage complet.
     assert_eq!(
@@ -1027,5 +1027,35 @@ fn observer_protos_survive_global_wrappers_and_grafts() {
              Array.isArray(io3.takeRecords())"
         ),
         "true"
+    );
+}
+
+#[test]
+fn navigation_timing_entry_is_honest_and_complete() {
+    let mut e = engine();
+    // techcrunch vol 188 (WP-interactivity) : `[0].domContentLoadedEventStart`
+    // tombait sur `[]` → `of Undefined` — l'entrée navigation existe
+    // désormais, bornes honnêtes à 0 (relatives à timeOrigin).
+    assert_eq!(
+        ev(
+            &mut e,
+            "var n=performance.getEntriesByType('navigation')[0];\
+             [typeof n.domContentLoadedEventStart,typeof n.domInteractive,\
+              typeof n.loadEventEnd,n.entryType,n.type,n.name===location.href,\
+              n.responseStatus,n.redirectCount,n.startTime,n.duration,\
+              typeof n.toJSON,n.toJSON().name===n.name].join('|')"
+        ),
+        "number|number|number|navigation|navigate|true|200|0|0|0|function|true"
+    );
+    // `getEntries`/`getEntriesByName` la couvrent aussi.
+    assert_eq!(
+        ev(
+            &mut e,
+            "performance.getEntries().some(function(x){return x.entryType==='navigation'})+'|'+\
+             performance.getEntriesByName(location.href,'navigation').length+'|'+\
+             (JSON.stringify(n).indexOf('domContentLoadedEventStart')>=0)+'|'+\
+             performance.getEntriesByType('resource').length"
+        ),
+        "true|1|true|0"
     );
 }
