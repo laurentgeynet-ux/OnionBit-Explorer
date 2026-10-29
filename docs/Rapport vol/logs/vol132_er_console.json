@@ -1,0 +1,1 @@
+{"console":["exception js : Error: ORDONNANCEUR_NO_CONFIG\n    at <anonymous> (inline:27:1:487)","unhandledrejection: TypeError: `postTask` is not a function (on Object)\n    at OptimizeLongTaskPostTasks (https://cdn-files.prsmedia.fr/files/REDAC/min/javascript/bundle-vendor-JQuery3.7.1.4A5773756AEA9DBD8FB4A7F4ECFFBE74.min.js:1:842)"]}
