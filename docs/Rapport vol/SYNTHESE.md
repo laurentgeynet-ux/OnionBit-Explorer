@@ -254,6 +254,8 @@ plateforme net** (ops jscore Encrypt/Decrypt restent à livrer) ·
 - **Agent 132 (`[V10-main]`, EXPLOR15)** : estrepublicain/
   capital/ouigo/pappers peints ; `postTask` 3ᵉ site ;
   `Invalid scheme` §B-11 résiduel ; §B-14 +4.
+- **Agent 133 (`[V10-main]`, INTL)** : guardian ~80 %
+  (fetch storm §B-60) ; reuters 401, elpais/lemoniteur 403.
 - **Agent 107 (`[V10-main]`, PRESSE2)** : franceinfo ~70 %
   (panneau compte → §B-17), deezer ~60 % ; §B-14 +3 ;
   watchdog nominal (pic 1,98 Go, seuil non approché).
