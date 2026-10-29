@@ -1059,3 +1059,23 @@ fn navigation_timing_entry_is_honest_and_complete() {
         "true|1|true|0"
     );
 }
+
+#[test]
+fn tcfapi_honest_cmp_less_stub() {
+    let mut e = engine();
+    // all.rugby vol 183 (Sourcepoint banner.js) : `__tcfapi`
+    // absent → `is not a function (on Object)`. Stub TCF v2
+    // honnête : `ping` = descripteur CMP-less, commandes data
+    // → `(null, false)` pour armer les fallbacks.
+    assert_eq!(
+        ev(
+            &mut e,
+            "var out=''; __tcfapi('ping',2,function(r,ok){\
+             out=[typeof __tcfapi,ok,r.gdprApplies,r.cmpLoaded,r.cmpStatus,\
+             typeof r.apiVersion].join('|')});\
+             __tcfapi('getTCData',2,function(d,ok2){out+='|'+d+'/'+ok2});\
+             __tcfapi('addEventListener',2,function(d,ok3){out+='|'+ok3}); out"
+        ),
+        "function|true|false|false|stub|string|null/false|false"
+    );
+}

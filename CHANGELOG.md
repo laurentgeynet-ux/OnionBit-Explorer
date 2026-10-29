@@ -7,6 +7,83 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **JS-C213 — `window.__tcfapi`
+  stub honnête TCF v2** (`explorer-jscore`,
+  §B-14 all.rugby vol 183 —
+  Sourcepoint `banner.js` :
+  `` `__tcfapi` is not a function
+  (on Object) `` — l'API IAB
+  consentement n'existait pas) —
+  `install_misc` : `ping` rend le
+  descripteur CMP-less canonique
+  (`gdprApplies:false`,
+  `cmpLoaded:false`,
+  `cmpStatus:'stub'`,
+  `apiVersion`, `displayStatus`,
+  `tcfPolicyVersion`, ids 0 —
+  matrice légale « TCF hors
+  scope ») ; `getTCData`/
+  `addEventListener`/`getVendorList`/
+  … → `(null, false)` pour armer
+  les fallbacks ;
+  `removeEventListener` → `true`.
+  Verrou
+  `tcfapi_honest_cmp_less_stub`.
+
+- **JS-C212 — bornage mémoire
+  flux continu** (`explorer-jscore`,
+  §B-59 — « fuite pompe post-nav »
+  +250-600 Mo/s ×10 vols : github,
+  lindependant, francemusique,
+  actugaming, franceinter, reporterre,
+  maison-travaux, routard, gameblog,
+  melty) — instrumentation `leak_probe`
+  (croissance mesurée par tick :
+  `mutobs.cbs` +1, `obs.regs` +2,
+  arène +5, heap +63 — jamais
+  réclamé). Trois fuites conjointes
+  fermées : (1) **observers
+  immortels** — `MutObsState.cbs`/
+  `ObsState.regs` racinaient chaque
+  `(callback, wrapper)` à vie même
+  après `disconnect()` ; désormais le
+  callback vit dans le host
+  (`Host::trace` le fait suivre le
+  wrapper) et `root_ids` ne racine
+  le wrapper que si registrations
+  vivantes (Dom) ou cibles/
+  notifications restantes (IO/RO) —
+  sémantique Chrome « la cible garde
+  l'observer » préservée, ré-armement
+  `observe()` post-GC verrouillé ;
+  (2) **purge post-sweep** —
+  `Engine::collect()` retire les
+  entrées dont le wrapper est balayé
+  (+ `disconnect_observer` Dom) et
+  purge le `NodeCache` des wrappers
+  morts (le cache n'est plus raciné
+  en bloc : wrappers de nœuds
+  attachés/observés/cités par records
+  seulement — un nœud détaché
+  déréférencé perd wrapper et
+  expandos, déviation documentée) ;
+  (3) **arène Dom bornée** —
+  `Dom::collect_garbage` vide les
+  payloads des nœuds morts (non
+  attachés, non retenus par records/
+  observers/side-tables/seeds
+  clôturés sur sous-arbres) et
+  `alloc` réutilise les slots
+  (`free_nodes` ; ids cités par des
+  ops de journal en attente passent
+  par `dead_blocked` jusqu'au drain
+  — aucun aliasing). Verrous
+  `b59_flux_continu_borne` (compteurs
+  stables sur 16 rounds) +
+  `b59_rearm_after_disconnect_and_gc`.
+  Re-vol presse exigé avant
+  RÉSOLU.
+
 - **JS-C211 — entrée
   `PerformanceNavigationTiming`
   honnête** (`explorer-jscore`,

@@ -952,6 +952,63 @@ pub(crate) fn install_misc(e: &mut Engine) {
         let gs = e.native_fn("getSelection", get_selection as crate::heap::NativeFn);
         e.set_own(g, "getSelection", gs, false);
     }
+    // `__tcfapi` — stub honnête TCF v2 (IAB) : aucune CMP n'est
+    // embarquée → `cmpLoaded:false`/`cmpStatus:'stub'` (réponse
+    // canonique de la stub spec quand le CMP n'a pas chargé) ;
+    // `ping` rend le descripteur standard `gdprApplies:false`
+    // (matrice légale « TCF hors scope » — réponse réelle d'un
+    // user non-EU), les commandes data répondent
+    // `(null, false)` — les fallbacks des sites s'arment (bras
+    // « `__tcfapi` is not a function » all.rugby vol 183).
+    let tcf = e.native_fn("__tcfapi", tcfapi as crate::heap::NativeFn);
+    e.set_own(g, "__tcfapi", tcf, false);
+}
+
+/// `window.__tcfapi(command, version, callback, parameter)` —
+/// IAB TCF v2. `ping` → descripteur CMP-less ; commandes
+/// connues → `(null, false)` honnête (pas de tcData sans CMP).
+fn tcfapi(e: &mut Engine, _t: Value, a: &[Value]) -> JsResult<Value> {
+    let cmd = match a.first() {
+        Some(v) => e.to_js_string(*v)?,
+        None => String::new(),
+    };
+    let cb = arg(a, 2);
+    if !e.is_callable(cb) {
+        return Ok(Value::Undefined);
+    }
+    match cmd.as_str() {
+        "ping" => {
+            let o = e.new_object();
+            e.set_own(o, "gdprApplies", Value::Bool(false), true);
+            e.set_own(o, "cmpLoaded", Value::Bool(false), true);
+            for (k, s) in [
+                ("cmpStatus", "stub"),
+                ("apiVersion", "2.2"),
+                ("displayStatus", "disabled"),
+            ] {
+                let sv = e.str_val(s);
+                e.set_own(o, k, sv, true);
+            }
+            for (k, n) in [
+                ("cmpId", 0.0),
+                ("cmpVersion", 0.0),
+                ("tcfPolicyVersion", 4.0),
+                ("gvlVersion", 0.0),
+            ] {
+                e.set_own(o, k, Value::Num(n), true);
+            }
+            e.call_value(cb, Value::Undefined, &[Value::Obj(o), Value::Bool(true)])?;
+        }
+        "removeEventListener" => {
+            e.call_value(cb, Value::Undefined, &[Value::Bool(true)])?;
+        }
+        // `addEventListener`/`getTCData`/`getInAppTCData`/
+        // `getVendorList`/`getCustomVendorConsents`/inconnues.
+        _ => {
+            e.call_value(cb, Value::Undefined, &[Value::Null, Value::Bool(false)])?;
+        }
+    }
+    Ok(Value::Undefined)
 }
 
 /// `args[i]` ou `Undefined` (même convention que `xhr::arg`).
