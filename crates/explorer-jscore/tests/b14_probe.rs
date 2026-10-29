@@ -154,6 +154,58 @@ fn font_face_set_is_event_target() {
 }
 
 #[test]
+fn collections_carry_spec_to_string_tag() {
+    let mut e = engine();
+    // allociné vol 118 : `addEventListener is not a function
+    // (on Array)` — le détecteur `i()` (motif jQuery/lodash)
+    // teste `/^\[object (HTMLCollection|NodeList|Object)\]$/`
+    // via `Object.prototype.toString` ; nos collections étaient
+    // des Array nus → `[object Array]` → branche rejetée.
+    // Spec : qSA=NodeList, byTag/byClass/children=HTMLCollection,
+    // childNodes=NodeList.
+    assert_eq!(
+        ev(
+            &mut e,
+            "Object.prototype.toString.call(document.querySelectorAll('use'))"
+        ),
+        "[object NodeList]"
+    );
+    assert_eq!(
+        ev(
+            &mut e,
+            "Object.prototype.toString.call(document.getElementsByTagName('use'))"
+        ),
+        "[object HTMLCollection]"
+    );
+    assert_eq!(
+        ev(
+            &mut e,
+            "Object.prototype.toString.call(document.body.children)"
+        ),
+        "[object HTMLCollection]"
+    );
+    assert_eq!(
+        ev(
+            &mut e,
+            "Object.prototype.toString.call(document.body.childNodes)"
+        ),
+        "[object NodeList]"
+    );
+    // Le détecteur verbatim d'allociné prend désormais la
+    // branche par-élément (addEventListener sur les nodes).
+    assert_eq!(
+        ev(
+            &mut e,
+            r"var e=document.querySelectorAll('use');
+            var i=function(x){var t=Object.prototype.toString.call(x);
+              return typeof x==='object'&&/^\[object (HTMLCollection|NodeList|Object)\]$/.test(t)&&x.length!==undefined&&(x.length===0||typeof x[0]==='object'&&x[0].nodeType>0)};
+            i(e)"
+        ),
+        "true"
+    );
+}
+
+#[test]
 fn html_document_interface_exists_and_chains() {
     let mut e = engine();
     // orange vol 109 : `HTMLDocument is not defined` tuait

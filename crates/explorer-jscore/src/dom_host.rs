@@ -1576,10 +1576,19 @@ fn dom_collection(
     cache: &NodeCache,
     ids: &[NodeId],
     named: bool,
+    tag: &'static str,
 ) -> Value {
     let vals: Vec<Value> = ids.iter().map(|&n| node_value(e, dom, cache, n)).collect();
     let arr = e.new_array(vals);
     if let Value::Obj(id) = arr {
+        // `Symbol.toStringTag` : `Object.prototype.toString.call`
+        // rend `[object NodeList]`/`[object HTMLCollection]` —
+        // les détecteurs de collection type jQuery/allocine
+        // (`/^\[object (HTMLCollection|NodeList|Object)]$/`)
+        // rejetaient nos Array nus → `arr.addEventListener` tuait
+        // le boot (vol 118).
+        let tv = e.str_val(tag);
+        e.set_own(id, crate::interp::SYM_TO_STRING_TAG, tv, false);
         e.add_method(id, "item", collection_item);
         if named {
             e.add_method(id, "namedItem", collection_named_item);
@@ -2520,6 +2529,12 @@ impl Engine {
         // `Blob`/`File`/`FileReader` + `URL.createObjectURL`
         // (JS-C70) — uploads et lectures client-side.
         crate::files::install_files(self);
+        // `MediaSource`/`SourceBuffer`/`SourceBufferList`/
+        // `TimeRanges` (JS-C173) — surface honnête sans
+        // lecture : classes réelles, `isTypeSupported` → `""`,
+        // `createObjectURL` → rail registre MSE (transport
+        // vers l'hôte = étape dédiée).
+        crate::mse::install_mse(self);
         // `ReadableStream`/`WritableStream`/`TransformStream`
         // (JS-C71) — `for await` sur les corps, bundlers.
         crate::streams::install_streams(self);
@@ -2609,8 +2624,6 @@ impl Engine {
             "OfflineAudioContext",
             "MediaStream",
             "MediaRecorder",
-            "MediaSource",
-            "SourceBuffer",
             "RTCPeerConnection",
             "Geolocation",
             // marmiton (V4) : `x instanceof GeolocationPosition`
@@ -3698,7 +3711,14 @@ impl Host for DocumentHost {
                     let d = self.dom.borrow();
                     d.by_tag(d.root, tag)
                 };
-                Ok(Some(dom_collection(e, &self.dom, &self.cache, &ids, true)))
+                Ok(Some(dom_collection(
+                    e,
+                    &self.dom,
+                    &self.cache,
+                    &ids,
+                    true,
+                    "HTMLCollection",
+                )))
             }
             "head" => {
                 // Spec : `head` existe TOUJOURS (le parseur
@@ -3947,7 +3967,14 @@ impl Host for DocumentHost {
                     let d = self.dom.borrow();
                     d.by_tag(d.root, &tag)
                 };
-                Ok(Some(dom_collection(e, &self.dom, &self.cache, &ids, false)))
+                Ok(Some(dom_collection(
+                    e,
+                    &self.dom,
+                    &self.cache,
+                    &ids,
+                    false,
+                    "HTMLCollection",
+                )))
             }
             "getElementsByClassName" => {
                 let cls = e.to_js_string(arg(args, 0))?;
@@ -3955,7 +3982,14 @@ impl Host for DocumentHost {
                     let d = self.dom.borrow();
                     d.by_class(d.root, &cls)
                 };
-                Ok(Some(dom_collection(e, &self.dom, &self.cache, &ids, false)))
+                Ok(Some(dom_collection(
+                    e,
+                    &self.dom,
+                    &self.cache,
+                    &ids,
+                    false,
+                    "HTMLCollection",
+                )))
             }
             // `getElementsByName` — attribut `name` (JS-C76).
             "getElementsByName" => {
@@ -3972,7 +4006,14 @@ impl Host for DocumentHost {
                         .map(|(i, _)| i as NodeId)
                         .collect::<Vec<_>>()
                 };
-                Ok(Some(dom_collection(e, &self.dom, &self.cache, &ids, false)))
+                Ok(Some(dom_collection(
+                    e,
+                    &self.dom,
+                    &self.cache,
+                    &ids,
+                    false,
+                    "NodeList",
+                )))
             }
             "querySelector" => {
                 let sel = e.to_js_string(arg(args, 0))?;
@@ -3987,7 +4028,14 @@ impl Host for DocumentHost {
                 let sel = e.to_js_string(arg(args, 0))?;
                 let root = self.dom.borrow().root;
                 let ids = self.dom.borrow().query(root, &sel);
-                Ok(Some(dom_collection(e, &self.dom, &self.cache, &ids, false)))
+                Ok(Some(dom_collection(
+                    e,
+                    &self.dom,
+                    &self.cache,
+                    &ids,
+                    false,
+                    "NodeList",
+                )))
             }
             "createElement" => {
                 let tag = e.to_js_string(arg(args, 0))?;
@@ -5384,6 +5432,7 @@ impl Host for NodeHost {
                     &self.cache,
                     &kids,
                     false,
+                    "HTMLCollection",
                 )));
             }
             // `el.attributes` — `NamedNodeMap` vivante (JS-C76) :
@@ -5410,7 +5459,14 @@ impl Host for NodeHost {
                         let d = self.dom.borrow();
                         listed_controls(&d, node)
                     };
-                    return Ok(Some(dom_collection(e, &self.dom, &self.cache, &ids, true)));
+                    return Ok(Some(dom_collection(
+                        e,
+                        &self.dom,
+                        &self.cache,
+                        &ids,
+                        true,
+                        "HTMLFormControlsCollection",
+                    )));
                 }
             }
             // `select.options`/`selectedOptions` —
@@ -5436,6 +5492,7 @@ impl Host for NodeHost {
                         &self.cache,
                         &opts,
                         false,
+                        "HTMLOptionsCollection",
                     )));
                 }
             }
@@ -5496,6 +5553,7 @@ impl Host for NodeHost {
                     &self.cache,
                     &kids,
                     false,
+                    "NodeList",
                 )));
             }
             "childElementCount" => {
@@ -5983,7 +6041,7 @@ impl Host for NodeHost {
                 return Ok(Some(if ids.len() == 1 {
                     node_value(e, &self.dom, &self.cache, ids[0])
                 } else {
-                    dom_collection(e, &self.dom, &self.cache, &ids, false)
+                    dom_collection(e, &self.dom, &self.cache, &ids, false, "RadioNodeList")
                 }));
             }
         }
@@ -6175,12 +6233,26 @@ impl Host for NodeHost {
             "getElementsByTagName" => {
                 let tag = e.to_js_string(arg(args, 0))?;
                 let ids = self.dom.borrow().by_tag(node, &tag);
-                Ok(Some(dom_collection(e, &self.dom, &self.cache, &ids, false)))
+                Ok(Some(dom_collection(
+                    e,
+                    &self.dom,
+                    &self.cache,
+                    &ids,
+                    false,
+                    "HTMLCollection",
+                )))
             }
             "getElementsByClassName" => {
                 let cls = e.to_js_string(arg(args, 0))?;
                 let ids = self.dom.borrow().by_class(node, &cls);
-                Ok(Some(dom_collection(e, &self.dom, &self.cache, &ids, false)))
+                Ok(Some(dom_collection(
+                    e,
+                    &self.dom,
+                    &self.cache,
+                    &ids,
+                    false,
+                    "HTMLCollection",
+                )))
             }
             // `DocumentFragment.getElementById` (spec — exposé
             // sur ShadowRoot ; les hydratations CE le lisent,
@@ -6214,7 +6286,14 @@ impl Host for NodeHost {
             "querySelectorAll" => {
                 let sel = e.to_js_string(arg(args, 0))?;
                 let ids = self.dom.borrow().query(node, &sel);
-                Ok(Some(dom_collection(e, &self.dom, &self.cache, &ids, false)))
+                Ok(Some(dom_collection(
+                    e,
+                    &self.dom,
+                    &self.cache,
+                    &ids,
+                    false,
+                    "NodeList",
+                )))
             }
             "appendChild" | "append" => {
                 let target = node_for_in(e, arg(args, 0), &self.dom)
@@ -9832,7 +9911,7 @@ fn element_query_selector_all(e: &mut Engine, this: Value, args: &[Value]) -> Js
         return Err(e.type_error("querySelectorAll: receiver is not an Element"));
     };
     let ids = dom.borrow().query(node, &sel);
-    Ok(dom_collection(e, &dom, &cache, &ids, false))
+    Ok(dom_collection(e, &dom, &cache, &ids, false, "NodeList"))
 }
 
 /// `el.getElementsByTagName(tag)` en native
@@ -9844,7 +9923,14 @@ fn element_get_by_tag(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<V
         return Err(e.type_error("getElementsByTagName: receiver is not an Element"));
     };
     let ids = dom.borrow().by_tag(node, &tag);
-    Ok(dom_collection(e, &dom, &cache, &ids, false))
+    Ok(dom_collection(
+        e,
+        &dom,
+        &cache,
+        &ids,
+        false,
+        "HTMLCollection",
+    ))
 }
 
 /// `el.getElementsByClassName(cls)` en native
@@ -9855,7 +9941,14 @@ fn element_get_by_class(e: &mut Engine, this: Value, args: &[Value]) -> JsResult
         return Err(e.type_error("getElementsByClassName: receiver is not an Element"));
     };
     let ids = dom.borrow().by_class(node, &cls);
-    Ok(dom_collection(e, &dom, &cache, &ids, false))
+    Ok(dom_collection(
+        e,
+        &dom,
+        &cache,
+        &ids,
+        false,
+        "HTMLCollection",
+    ))
 }
 
 /// `el.scrollIntoView(arg?)` — no-op honnête (JS-C74) : le

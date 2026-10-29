@@ -7,6 +7,36 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **JS-C191 — §B-14 :
+  `Symbol.toStringTag` sur les
+  collections DOM** (`explorer-jscore`)
+  — allociné vol 118 :
+  `addEventListener is not a
+  function (on Array)` — les
+  détecteurs de collection (motif
+  jQuery/lodash) testent
+  `/^\[object (HTMLCollection|
+  NodeList|Object)\]$/` via
+  `Object.prototype.toString` ;
+  nos collections étaient des
+  Array nus → `[object Array]` →
+  branche rejetée → `.addEventListener`
+  sur le tableau. `dom_collection`
+  pose le tag spec :
+  `querySelectorAll`/`getElementsByName`/
+  `childNodes` → `NodeList`,
+  `getElementsBy*`/`children`/
+  `document.links/images/forms` →
+  `HTMLCollection`,
+  `form.elements` →
+  `HTMLFormControlsCollection`,
+  `select.options` →
+  `HTMLOptionsCollection`,
+  `form[name]` multi →
+  `RadioNodeList`. Verrou
+  `b14_probe.rs` (détecteur
+  allociné verbatim) ; suite
+  jscore complète verte.
 - **JS-C190 — §B-14 : `IDBRequest`
   thenable (`then`/`await`)**
   (`explorer-jscore`) — mastodon
