@@ -1,0 +1,5 @@
+{
+    "console": [
+        "exception js : TypeError: cannot read `textContent` of Undefined\n    at <anonymous> (https://www.20minutes.fr/js/main-2.48.10.min.js:1:109235)\n    at <anonymous> (https://www.20minutes.fr/js/main-2.48.10.min.js:1:109175)\n    at <anonymous> (https://www.20minutes.fr/js/main-2.48.10.min.js:1:109470)\n    at <anonymous> (https://www.20minutes.fr/js/main-2.48.10.min.js:1:127231)\n    at <anonymous> (https://www.20minutes.fr/js/main-2.48.10.min.js:1:2) \u00e2\u20ac\u201d https://www.20minutes.fr/js/main-2.48.10.min.js \u00e2\u20ac\u201d src \u00c2\u00ab(function(){var e=Object.create,t=Object.defineProperty,n=Object.getOwnPropertyDescriptor,r=Obje\u00e2\u20ac\u00a6\u00c2\u00bb"
+    ]
+}

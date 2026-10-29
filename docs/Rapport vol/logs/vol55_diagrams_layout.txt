@@ -1,0 +1,4 @@
+block<html> [0 0 1366x0]
+  block<body> [0 0 1366x900]
+    block<div> [0 0 1366x900]
+      block<svg> [647 16 72x72]

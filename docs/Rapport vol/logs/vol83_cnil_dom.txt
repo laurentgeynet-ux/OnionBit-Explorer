@@ -1,0 +1,3848 @@
+| <html>
+|   class=" js"
+|   dir="ltr"
+|   lang="fr"
+|   prefix="content: http://purl.org/rss/1.0/modules/content/  dc: http://purl.org/dc/terms/  foaf: http://xmlns.com/foaf/0.1/  og: http://ogp.me/ns#  rdfs: http://www.w3.org/2000/01/rdf-schema#  schema: http://schema.org/  sioc: http://rdfs.org/sioc/ns#  sioct: http://rdfs.org/sioc/types#  skos: http://www.w3.org/2004/02/skos/core#  xsd: http://www.w3.org/2001/XMLSchema# "
+|   <head>
+|     <style>
+|       "article,aside,dialog,figcaption,figure,footer,header,hgroup,main,nav,section{display:block}mark{background:#FF0;color:#000}template{display:none}"
+|     "
+  "
+|     <meta>
+|       content="width=device-width, initial-scale=1.0"
+|       name="viewport"
+|     "
+  "
+|     <meta>
+|       charset="utf-8"
+|     "
+"
+|     <script>
+|       src="https://piwik.cnil.fr/matomo.js"
+|       type="text/javascript"
+|     <script>
+|       "var _paq = _paq || [];(function(){var u=(("https:" == document.location.protocol) ? "https://piwik.cnil.fr/" : "http://piwik.cnil.fr/");_paq.push(["setSiteId", "1"]);_paq.push(["setTrackerUrl", u+"matomo.php"]);_paq.push(["setDoNotTrack", 1]);if (!window.matomo_search_results_active) {_paq.push(["trackPageView"]);}_paq.push(["setIgnoreClasses", ["no-tracking","colorbox"]]);_paq.push(["enableLinkTracking"]);var d=document,g=d.createElement("script"),s=d.getElementsByTagName("script")[0];g.type="text/javascript";g.defer=true;g.async=true;g.src=u+"matomo.js";s.parentNode.insertBefore(g,s);})();"
+|     "
+"
+|     <link>
+|       href="https://www.cnil.fr/fr"
+|       rel="shortlink"
+|     "
+"
+|     <link>
+|       href="https://www.cnil.fr/fr"
+|       rel="canonical"
+|     "
+"
+|     <meta>
+|       content="width"
+|       name="MobileOptimized"
+|     "
+"
+|     <meta>
+|       content="true"
+|       name="HandheldFriendly"
+|     "
+"
+|     <meta>
+|       content="width=device-width, initial-scale=1.0"
+|       name="viewport"
+|     "
+"
+|     <link>
+|       href="/themes/custom/bootstrap_cnil/favicon.ico"
+|       rel="icon"
+|       type="image/vnd.microsoft.icon"
+|     "
+
+    "
+|     <title>
+|       "Particulier | CNIL"
+|     "
+    "
+|     <link>
+|       href="/core/modules/system/css/components/align.module.css?tmyi9c"
+|       media="all"
+|       rel="stylesheet"
+|     "
+"
+|     <link>
+|       href="/core/modules/system/css/components/fieldgroup.module.css?tmyi9c"
+|       media="all"
+|       rel="stylesheet"
+|     "
+"
+|     <link>
+|       href="/core/modules/system/css/components/container-inline.module.css?tmyi9c"
+|       media="all"
+|       rel="stylesheet"
+|     "
+"
+|     <link>
+|       href="/core/modules/system/css/components/clearfix.module.css?tmyi9c"
+|       media="all"
+|       rel="stylesheet"
+|     "
+"
+|     <link>
+|       href="/core/modules/system/css/components/details.module.css?tmyi9c"
+|       media="all"
+|       rel="stylesheet"
+|     "
+"
+|     <link>
+|       href="/core/modules/system/css/components/hidden.module.css?tmyi9c"
+|       media="all"
+|       rel="stylesheet"
+|     "
+"
+|     <link>
+|       href="/core/modules/system/css/components/item-list.module.css?tmyi9c"
+|       media="all"
+|       rel="stylesheet"
+|     "
+"
+|     <link>
+|       href="/core/modules/system/css/components/js.module.css?tmyi9c"
+|       media="all"
+|       rel="stylesheet"
+|     "
+"
+|     <link>
+|       href="/core/modules/system/css/components/nowrap.module.css?tmyi9c"
+|       media="all"
+|       rel="stylesheet"
+|     "
+"
+|     <link>
+|       href="/core/modules/system/css/components/position-container.module.css?tmyi9c"
+|       media="all"
+|       rel="stylesheet"
+|     "
+"
+|     <link>
+|       href="/core/modules/system/css/components/reset-appearance.module.css?tmyi9c"
+|       media="all"
+|       rel="stylesheet"
+|     "
+"
+|     <link>
+|       href="/core/modules/system/css/components/resize.module.css?tmyi9c"
+|       media="all"
+|       rel="stylesheet"
+|     "
+"
+|     <link>
+|       href="/core/modules/system/css/components/system-status-counter.css?tmyi9c"
+|       media="all"
+|       rel="stylesheet"
+|     "
+"
+|     <link>
+|       href="/core/modules/system/css/components/system-status-report-counters.css?tmyi9c"
+|       media="all"
+|       rel="stylesheet"
+|     "
+"
+|     <link>
+|       href="/core/modules/system/css/components/system-status-report-general-info.css?tmyi9c"
+|       media="all"
+|       rel="stylesheet"
+|     "
+"
+|     <link>
+|       href="/core/modules/system/css/components/tablesort.module.css?tmyi9c"
+|       media="all"
+|       rel="stylesheet"
+|     "
+"
+|     <link>
+|       href="/modules/commons/cnil_libraries/css/typography.css?tmyi9c"
+|       media="all"
+|       rel="stylesheet"
+|     "
+"
+|     <link>
+|       href="/modules/contrib/paragraphs/css/paragraphs.unpublished.css?tmyi9c"
+|       media="all"
+|       rel="stylesheet"
+|     "
+"
+|     <link>
+|       href="/modules/contrib/tacjs/assets/vendor/tarteaucitron.js/css/tarteaucitron.css?tmyi9c"
+|       media="all"
+|       rel="stylesheet"
+|     "
+"
+|     <link>
+|       href="/modules/contrib/webform/modules/webform_bootstrap/css/webform_bootstrap.css?tmyi9c"
+|       media="all"
+|       rel="stylesheet"
+|     "
+"
+|     <link>
+|       href="/themes/custom/bootstrap_base/css/overrides.css?tmyi9c"
+|       media="all"
+|       rel="stylesheet"
+|     "
+"
+|     <link>
+|       href="/themes/custom/bootstrap_base/css/search.css?tmyi9c"
+|       media="all"
+|       rel="stylesheet"
+|     "
+"
+|     <link>
+|       href="/themes/custom/bootstrap_base/css/navigation.css?tmyi9c"
+|       media="all"
+|       rel="stylesheet"
+|     "
+"
+|     <link>
+|       href="/themes/custom/bootstrap_base/css/webform.css?tmyi9c"
+|       media="all"
+|       rel="stylesheet"
+|     "
+"
+|     <link>
+|       href="/themes/custom/bootstrap_base/css/page_liste.css?tmyi9c"
+|       media="all"
+|       rel="stylesheet"
+|     "
+"
+|     <link>
+|       href="/themes/custom/bootstrap_base/css/views.css?tmyi9c"
+|       media="all"
+|       rel="stylesheet"
+|     "
+"
+|     <link>
+|       href="/themes/custom/bootstrap_base/css/timeline.css?tmyi9c"
+|       media="all"
+|       rel="stylesheet"
+|     "
+"
+|     <link>
+|       href="/themes/custom/bootstrap_base/css/auteur.css?tmyi9c"
+|       media="all"
+|       rel="stylesheet"
+|     "
+"
+|     <link>
+|       href="/themes/custom/bootstrap_base/css/node_only_body.css?tmyi9c"
+|       media="all"
+|       rel="stylesheet"
+|     "
+"
+|     <link>
+|       href="/themes/custom/bootstrap_cnil/css/base/content.css?tmyi9c"
+|       media="all"
+|       rel="stylesheet"
+|     "
+"
+|     <link>
+|       href="/themes/custom/bootstrap_cnil/css/jquery.mCustomScrollbar.min.css?tmyi9c"
+|       media="all"
+|       rel="stylesheet"
+|     "
+"
+|     <link>
+|       href="/themes/custom/bootstrap_cnil/css/style.css?tmyi9c"
+|       media="all"
+|       rel="stylesheet"
+|     "
+"
+|     <link>
+|       href="/themes/custom/bootstrap_cnil/css/mode-view-grid.css?tmyi9c"
+|       media="all"
+|       rel="stylesheet"
+|     "
+"
+|     <link>
+|       href="/themes/custom/bootstrap_base/css/print.css?tmyi9c"
+|       media="print"
+|       rel="stylesheet"
+|     "
+"
+|     <link>
+|       href="/themes/custom/bootstrap_cnil/css/print.css?tmyi9c"
+|       media="print"
+|       rel="stylesheet"
+|     "
+
+    
+"
+|   "
+"
+|   <body>
+|     class="path-frontpage has-glyphicons"
+|     "
+
+  "
+|     <div>
+|       class="dialog-off-canvas-main-canvas"
+|       data-off-canvas-main-canvas=""
+|       "
+    "
+|       <a>
+|         class="visually-hidden focusable skip-link"
+|         href="#main-content"
+|         "
+    Aller au contenu principal
+"
+|       "
+"
+|       <header>
+|         class="page--header notsticky"
+|         role="banner"
+|         "
+  
+  
+  "
+|         <div>
+|           class="mobile-navbar"
+|           "
+    "
+|           <button>
+|             aria-expanded="false"
+|             class="navbar-toggle js-navbar-toggle"
+|             data-target="#navbar-main"
+|             data-toggle="collapse"
+|             type="button"
+|             "
+      "
+|             <span>
+|               class="icon-bar"
+|             "
+      "
+|             <span>
+|               class="icon-bar"
+|             "
+      "
+|             <span>
+|               class="icon-bar"
+|             "
+      "
+|             <p>
+|               class="sr-only"
+|               "Menu de navigation"
+|             "
+    "
+|           "
+    "
+|           <a>
+|             href="https://www.cnil.fr/fr"
+|             "
+      "
+|             <picture>
+|               "
+        "
+|               <source>
+|                 media="(min-width: 601px)"
+|                 srcset="/themes/custom/bootstrap_cnil/logo.png"
+|               "
+        "
+|               <source>
+|                 media="(max-width: 600px)"
+|                 srcset="/themes/custom/bootstrap_cnil/logo-cnil-mini.png"
+|               "
+        "
+|               <img>
+|                 alt="Accueil - CNIL - Protéger
+          les données personnelles, Accompagner l'innovation, Préserver les libertés
+          individuelles"
+|                 src="/themes/custom/bootstrap_cnil/logo.png"
+|               "
+      "
+|             "
+    "
+|           "
+    "
+|           <div>
+|             class="search"
+|             "
+      "
+|             <button>
+|               aria-expanded="false"
+|               class="search-btn js-search-btn"
+|               "
+        "
+|               <p>
+|                 class="sr-only"
+|                 "Rechercher"
+|               "
+      "
+|             "
+    "
+|           "
+  "
+|         "
+  "
+|         <div>
+|           class="custom-collapse navbar-collapse js-navbar-collapse"
+|           "
+    "
+|           <div>
+|             class="region region-header"
+|             "
+      "
+|             <div>
+|               class="inner"
+|               "
+        "
+|               <div>
+|                 class="sticky-large-screen-only"
+|                 "
+            "
+|                 <div>
+|                   class="user-space-switcher"
+|                   <a>
+|                     class="particulier active"
+|                     data-value="Part"
+|                     href="/fr/particulier"
+|                     "Particuliers"
+|                   <a>
+|                     class="professionnel"
+|                     data-value="Pro"
+|                     href="/fr/professionnel"
+|                     "Professionnels"
+|                   <a>
+|                     class="presse"
+|                     data-value="presse"
+|                     href="/fr/espace-presse"
+|                     "Presse"
+|                 "
+
+
+            "
+|                 <div>
+|                   class="nav--top-nav"
+|                   <a>
+|                     class="fr is-active"
+|                     href="/fr"
+|                     hreflang="fr"
+|                     "Fr"
+|                   <a>
+|                     class="en"
+|                     href="/en"
+|                     hreflang="en"
+|                     "En"
+|                   <a>
+|                     class="cookies"
+|                     href="/fr/gestion-des-cookies"
+|                     "Gestionnaire de cookies"
+|                 "
+
+
+        "
+|               "
+                  
+      "
+|               <div>
+|                 class="site-logo"
+|                 "
+      "
+|                 <a>
+|                   href="/fr"
+|                   rel="home"
+|                   "
+        "
+|                   <img>
+|                     alt="Accueil - CNIL - Protéger
+          les données personnelles, Accompagner l'innovation, Préserver les libertés
+          individuelles"
+|                     src="/themes/custom/bootstrap_cnil/logo.png"
+|                   "
+      "
+|                 "
+    "
+|               "
+    
+          "
+|               <div>
+|                 class="user-space-switcher"
+|                 <a>
+|                   class="particulier active"
+|                   data-value="Part"
+|                   href="/fr/particulier"
+|                   "Particuliers"
+|                 <a>
+|                   class="professionnel"
+|                   data-value="Pro"
+|                   href="/fr/professionnel"
+|                   "Professionnels"
+|                 <a>
+|                   class="presse"
+|                   data-value="presse"
+|                   href="/fr/espace-presse"
+|                   "Presse"
+|               "
+
+
+        
+        
+        
+  
+
+      "
+|               <nav>
+|                 aria-label="Navigation principal"
+|                 role="navigation"
+|                 "
+"
+|                 <ul>
+|                   block="header_menu_part_fr"
+|                   class="js-dropdown-wrapper nav menu--menu-menu-header"
+|                   data-region="header"
+|                   "
+                        "
+|                   <li>
+|                     class="menu-item menu-item-0"
+|                     "
+                          "
+|                     <button>
+|                       aria-controls="menu-level-406574064"
+|                       aria-expanded="false"
+|                       class="menu-link menu-link-0 js-dropdown-toggle"
+|                       id="menu-toggler-406574064"
+|                       rel="406574064"
+|                       type="button"
+|                       "Mon quotidien"
+|                     "
+                                  "
+|                     <ul>
+|                       class="menu-level-1"
+|                       "
+                          "
+|                   <li>
+|                     class="menu-item menu-item-1"
+|                     "
+                                    "
+|                     <a>
+|                       class="menu-link menu-link-1"
+|                       data-drupal-link-system-path="node/163997"
+|                       href="/fr/mon-quotidien/ma-securite-numerique"
+|                       "Ma sécurité numérique"
+|                     "
+                      "
+|                   "
+                      "
+|                   <li>
+|                     class="menu-item menu-item-1"
+|                     "
+                                    "
+|                     <a>
+|                       class="menu-link menu-link-1"
+|                       data-drupal-link-system-path="node/1026"
+|                       href="/fr/mon-quotidien/sites-web-et-reseaux-sociaux"
+|                       "Sites web et réseaux sociaux"
+|                     "
+                      "
+|                   "
+                      "
+|                   <li>
+|                     class="menu-item menu-item-1"
+|                     "
+                                    "
+|                     <a>
+|                       class="menu-link menu-link-1"
+|                       href="/fr/utiliser-votre-smartphone-et-vos-applications"
+|                       "Téléphones et applications"
+|                     "
+                      "
+|                   "
+                      "
+|                   <li>
+|                     class="menu-item menu-item-1"
+|                     "
+                                    "
+|                     <a>
+|                       class="menu-link menu-link-1"
+|                       data-drupal-link-system-path="node/1128"
+|                       href="/fr/technologies/objets-connectes"
+|                       "Objets connectés"
+|                     "
+                      "
+|                   "
+                      "
+|                   <li>
+|                     class="menu-item menu-item-1"
+|                     "
+                                    "
+|                     <a>
+|                       class="menu-link menu-link-1"
+|                       data-drupal-link-system-path="node/858"
+|                       href="/fr/thematiques/enfants-et-ados"
+|                       "Enfants et ados"
+|                     "
+                      "
+|                   "
+                      "
+|                   <li>
+|                     class="menu-item menu-item-1"
+|                     "
+                                    "
+|                     <a>
+|                       class="menu-link menu-link-1"
+|                       data-drupal-link-system-path="node/164015"
+|                       href="/fr/sante-particulier"
+|                       "Santé"
+|                     "
+                      "
+|                   "
+                      "
+|                   <li>
+|                     class="menu-item menu-item-1"
+|                     "
+                                    "
+|                     <a>
+|                       class="menu-link menu-link-1"
+|                       data-drupal-link-system-path="node/166257"
+|                       href="/fr/mon-quotidien/social"
+|                       "Social"
+|                     "
+                      "
+|                   "
+                      "
+|                   <li>
+|                     class="menu-item menu-item-1"
+|                     "
+                                    "
+|                     <a>
+|                       class="menu-link menu-link-1"
+|                       data-drupal-link-system-path="node/164012"
+|                       href="/fr/logement-particulier"
+|                       "Logement"
+|                     "
+                      "
+|                   "
+                      "
+|                   <li>
+|                     class="menu-item menu-item-1"
+|                     "
+                                    "
+|                     <a>
+|                       class="menu-link menu-link-1"
+|                       data-drupal-link-system-path="node/164033"
+|                       href="/fr/travail-particuliers"
+|                       "Travail"
+|                     "
+                      "
+|                   "
+                      "
+|                   <li>
+|                     class="menu-item menu-item-1"
+|                     "
+                                    "
+|                     <a>
+|                       class="menu-link menu-link-1"
+|                       data-drupal-link-system-path="node/165258"
+|                       href="/fr/particulier-intelligence-artificielle-ia"
+|                       "Intelligence artificielle (IA)"
+|                     "
+                      "
+|                   "
+                      "
+|                   <li>
+|                     class="menu-item menu-item-1"
+|                     "
+                                    "
+|                     <a>
+|                       class="menu-link menu-link-1"
+|                       data-drupal-link-system-path="node/164009"
+|                       href="/fr/achats-et-publicite"
+|                       "Achats et publicité"
+|                     "
+                      "
+|                   "
+                      "
+|                   <li>
+|                     class="menu-item menu-item-1"
+|                     "
+                                    "
+|                     <a>
+|                       class="menu-link menu-link-1"
+|                       data-drupal-link-system-path="node/164042"
+|                       href="/fr/mon-quotidien/banque-et-credit"
+|                       "Banque/Assurance"
+|                     "
+                      "
+|                   "
+                      "
+|                   <li>
+|                     class="menu-item menu-item-1"
+|                     "
+                                    "
+|                     <a>
+|                       class="menu-link menu-link-1"
+|                       data-drupal-link-system-path="node/164039"
+|                       href="/fr/mon-quotidien/citoyennete"
+|                       "Citoyenneté"
+|                     "
+                      "
+|                   "
+                      "
+|                   <li>
+|                     class="menu-item menu-item-1"
+|                     "
+                                    "
+|                     <a>
+|                       class="menu-link menu-link-1"
+|                       data-drupal-link-system-path="node/9101"
+|                       href="/fr/sport-amateur-hors-contrat/questions-reponses"
+|                       "Sport"
+|                     "
+                      "
+|                   "
+                      "
+|                   <li>
+|                     class="menu-item menu-item-1"
+|                     "
+                                    "
+|                     <a>
+|                       class="menu-link menu-link-1"
+|                       data-drupal-link-system-path="node/166046"
+|                       href="/fr/transports-et-mobilite-particulier"
+|                       "Transports et mobilité"
+|                     "
+                      "
+|                   "
+                      "
+|                   <li>
+|                     class="menu-item menu-item-1"
+|                     "
+                                    "
+|                     <a>
+|                       class="menu-link menu-link-1"
+|                       data-drupal-link-system-path="node/164606"
+|                       href="/fr/mon-quotidien/associations"
+|                       "Vie associative"
+|                     "
+                      "
+|                   "
+              "
+|                   <li>
+|                     class="action"
+|                     "
+        "
+|                     <button>
+|                       class="js-dropdown-close dropdown-close"
+|                       type="button"
+|                       "Fermer"
+|                     "
+      "
+|                   "
+          "
+|                 "
+    
+              
+                      "
+|                 <li>
+|                   class="menu-item menu-item-0"
+|                   "
+                          "
+|                   <button>
+|                     aria-controls="menu-level-837240570"
+|                     aria-expanded="false"
+|                     class="menu-link menu-link-0 js-dropdown-toggle"
+|                     id="menu-toggler-837240570"
+|                     rel="837240570"
+|                     type="button"
+|                     "Exercer mes droits"
+|                   "
+                                  "
+|                   <ul>
+|                     class="menu-level-1"
+|                     "
+                          "
+|                 <li>
+|                   class="menu-item menu-item-1"
+|                   "
+                                    "
+|                   <a>
+|                     class="menu-link menu-link-1"
+|                     data-drupal-link-system-path="node/1191"
+|                     href="/fr/mes-demarches/les-droits-pour-maitriser-vos-donnees-personnelles"
+|                     "Quels sont mes droits ?"
+|                   "
+                                  "
+|                   <ul>
+|                     class="menu-level-2"
+|                     "
+                          "
+|                 <li>
+|                   class="menu-item menu-item-2"
+|                   "
+                                    "
+|                   <a>
+|                     class="menu-link menu-link-2"
+|                     data-drupal-link-system-path="node/1348"
+|                     href="/fr/comprendre-mes-droits/le-droit-detre-informe-sur-lutilisation-de-vos-donnees"
+|                     "Être informé"
+|                   "
+                      "
+|                 "
+                      "
+|                 <li>
+|                   class="menu-item menu-item-2"
+|                   "
+                                    "
+|                   <a>
+|                     class="menu-link menu-link-2"
+|                     data-drupal-link-system-path="node/522"
+|                     href="/fr/comprendre-mes-droits/le-droit-dopposition-refuser-lutilisation-de-vos-donnees"
+|                     "M'opposer"
+|                   "
+                      "
+|                 "
+                      "
+|                 <li>
+|                   class="menu-item menu-item-2"
+|                   "
+                                    "
+|                   <a>
+|                     class="menu-link menu-link-2"
+|                     data-drupal-link-system-path="node/519"
+|                     href="/fr/comprendre-mes-droits/le-droit-dacces-connaitre-les-donnees-quun-organisme-detient-sur-vous"
+|                     "Accéder à mes données"
+|                   "
+                      "
+|                 "
+                      "
+|                 <li>
+|                   class="menu-item menu-item-2"
+|                   "
+                                    "
+|                   <a>
+|                     class="menu-link menu-link-2"
+|                     data-drupal-link-system-path="node/520"
+|                     href="/fr/comprendre-mes-droits/le-droit-de-rectification-corriger-vos-informations"
+|                     "Rectifier mes données"
+|                   "
+                      "
+|                 "
+                      "
+|                 <li>
+|                   class="menu-item menu-item-2"
+|                   "
+                                    "
+|                   <a>
+|                     class="menu-link menu-link-2"
+|                     data-drupal-link-system-path="node/1347"
+|                     href="/fr/comprendre-mes-droits/le-droit-leffacement-supprimer-vos-donnees-en-ligne"
+|                     "Effacer mes données"
+|                   "
+                      "
+|                 "
+                      "
+|                 <li>
+|                   class="menu-item menu-item-2"
+|                   "
+                                    "
+|                   <a>
+|                     class="menu-link menu-link-2"
+|                     data-drupal-link-system-path="node/1143"
+|                     href="/fr/comprendre-mes-droits/droit-au-dereferencement"
+|                     "Être déréférencé"
+|                   "
+                      "
+|                 "
+                      "
+|                 <li>
+|                   class="menu-item menu-item-2"
+|                   "
+                                    "
+|                   <a>
+|                     class="menu-link menu-link-2"
+|                     data-drupal-link-system-path="node/1343"
+|                     href="/fr/comprendre-mes-droits/le-droit-la-portabilite-obtenir-et-reutiliser-une-copie-de-vos-donnees"
+|                     "Emporter mes données avec moi"
+|                   "
+                      "
+|                 "
+                      "
+|                 <li>
+|                   class="menu-item menu-item-2"
+|                   "
+                                    "
+|                   <a>
+|                     class="menu-link menu-link-2"
+|                     data-drupal-link-system-path="node/1345"
+|                     href="/fr/vos-droits-lintervention-humaine-face-votre-profilage-ou-une-decision-automatisee"
+|                     "Faire vérifier une décision automatisée"
+|                   "
+                      "
+|                 "
+                      "
+|                 <li>
+|                   class="menu-item menu-item-2"
+|                   "
+                                    "
+|                   <a>
+|                     class="menu-link menu-link-2"
+|                     data-drupal-link-system-path="node/1344"
+|                     href="/fr/comprendre-mes-droits/le-droit-la-limitation-du-traitement-geler-lutilisation-de-vos-donnees"
+|                     "Limiter l'utilisation de mes données"
+|                   "
+                      "
+|                 "
+                      "
+|                 <li>
+|                   class="menu-item menu-item-2"
+|                   "
+                                    "
+|                   <a>
+|                     class="menu-link menu-link-2"
+|                     data-drupal-link-system-path="node/911"
+|                     href="/fr/enjeux-numeriques/les-droits-numeriques-des-mineurs"
+|                     "Les droits des mineurs"
+|                   "
+                      "
+|                 "
+                      "
+|                 <li>
+|                   class="menu-item menu-item-2"
+|                   "
+                                    "
+|                   <a>
+|                     class="menu-link menu-link-2"
+|                     data-drupal-link-system-path="modeles/courrier"
+|                     href="/fr/modeles/courrier"
+|                     "Nos modèles de courrier"
+|                   "
+                      "
+|                 "
+              
+    
+              
+                      "
+|                 <li>
+|                   class="menu-item menu-item-1"
+|                   "
+                                    "
+|                   <a>
+|                     class="menu-link menu-link-1"
+|                     data-drupal-link-system-path="node/855"
+|                     href="/fr/agir/saisir-la-cnil"
+|                     "Saisir la CNIL"
+|                   "
+                                  "
+|                   <ul>
+|                     class="menu-level-2"
+|                     "
+                          "
+|                 <li>
+|                   class="menu-item menu-item-2"
+|                   "
+                                    "
+|                   <a>
+|                     class="menu-link menu-link-2"
+|                     data-drupal-link-system-path="node/404"
+|                     href="/fr/adresser-une-plainte"
+|                     "Adresser une plainte"
+|                   "
+                      "
+|                 "
+                      "
+|                 <li>
+|                   class="menu-item menu-item-2"
+|                   "
+                                    "
+|                   <a>
+|                     class="menu-link menu-link-2"
+|                     data-drupal-link-system-path="node/83655"
+|                     href="/fr/saisir-la-cnil/ficoba-fichier-national-des-comptes-bancaires-et-assimiles"
+|                     "Accéder au FICOBA"
+|                   "
+                      "
+|                 "
+                      "
+|                 <li>
+|                   class="menu-item menu-item-2"
+|                   "
+                                    "
+|                   <a>
+|                     class="menu-link menu-link-2"
+|                     data-drupal-link-system-path="node/9124"
+|                     href="/fr/demander-une-verification-sur-un-fichier-de-police-ou-de-renseignement"
+|                     "Accéder à un fichier de police, de gendarmerie ou de renseignement"
+|                   "
+                      "
+|                 "
+                      "
+|                 <li>
+|                   class="menu-item menu-item-2"
+|                   "
+                                    "
+|                   <a>
+|                     class="menu-link menu-link-2"
+|                     data-drupal-link-system-path="node/8812"
+|                     href="/fr/saisir-la-cnil/lanceurs-dalerte-adresser-une-alerte-la-cnil"
+|                     "Adresser une alerte à la CNIL"
+|                   "
+                      "
+|                 "
+                      "
+|                 <li>
+|                   class="menu-item menu-item-2"
+|                   "
+                                    "
+|                   <a>
+|                     class="menu-link menu-link-2"
+|                     data-drupal-link-system-path="node/745"
+|                     href="/fr/saisir-la-cnil/nous-contacter"
+|                     "Poser une question à la CNIL"
+|                   "
+                      "
+|                 "
+              
+    
+              
+                      "
+|                 <li>
+|                   class="menu-item menu-item-1"
+|                   "
+                                      
+            "
+|                   <div>
+|                     class="field-menu-push-visuel"
+|                     <div>
+|                       "
+  
+  
+            "
+|                       <div>
+|                         class="field-media-image"
+|                         "  
+"
+|                         <img>
+|                           alt="FAQ"
+|                           class="img-responsive"
+|                           height="130"
+|                           loading="lazy"
+|                           src="/sites/default/files/styles/menu_header_thumbnail/public/2023-08/faq_rouge.png?itok=xe8lS8gZ"
+|                           typeof="foaf:Image"
+|                           width="200"
+|                         "
+
+
+"
+|                       "
+      
+"
+|                     "
+"
+|                   "
+      
+                    "
+|                   <a>
+|                     class="menu-link menu-link-1"
+|                     data-drupal-link-query="{"visiteur":"part"}"
+|                     data-drupal-link-system-path="cnil-direct"
+|                     href="/fr/cnil-direct?visiteur=part"
+|                     "Questions/réponses"
+|                   "
+                      "
+|                 "
+              "
+|                 <li>
+|                   class="action"
+|                   "
+        "
+|                   <button>
+|                     class="js-dropdown-close dropdown-close"
+|                     type="button"
+|                     "Fermer"
+|                   "
+      "
+|                 "
+          
+    
+              
+                      "
+|                 <li>
+|                   class="menu-item menu-item-0"
+|                   "
+                          "
+|                   <button>
+|                     aria-controls="menu-level-1444015825"
+|                     aria-expanded="false"
+|                     class="menu-link menu-link-0 js-dropdown-toggle"
+|                     id="menu-toggler-1444015825"
+|                     rel="1444015825"
+|                     type="button"
+|                     "À télécharger"
+|                   "
+                                  "
+|                   <ul>
+|                     class="menu-level-1"
+|                     "
+                          "
+|                 <li>
+|                   class="menu-item menu-item-1"
+|                   "
+                                    "
+|                   <a>
+|                     class="menu-link menu-link-1"
+|                     data-drupal-link-query="{"field_scald_collection_tid":"674"}"
+|                     data-drupal-link-system-path="mediatheque"
+|                     href="/fr/mediatheque?field_scald_collection_tid=674"
+|                     "Ressources pédagogiques"
+|                   "
+                      "
+|                 "
+                      "
+|                 <li>
+|                   class="menu-item menu-item-1"
+|                   "
+                                    "
+|                   <a>
+|                     class="menu-link menu-link-1"
+|                     data-drupal-link-query="{"field_scald_collection_tid":"210"}"
+|                     data-drupal-link-system-path="mediatheque"
+|                     href="/fr/mediatheque?field_scald_collection_tid=210"
+|                     "Affiches"
+|                   "
+                      "
+|                 "
+                      "
+|                 <li>
+|                   class="menu-item menu-item-1"
+|                   "
+                                    "
+|                   <a>
+|                     class="menu-link menu-link-1"
+|                     data-drupal-link-query="{"field_scald_collection_tid":"31"}"
+|                     data-drupal-link-system-path="mediatheque"
+|                     href="/fr/mediatheque?field_scald_collection_tid=31"
+|                     "Rapports et chiffres clés"
+|                   "
+                      "
+|                 "
+                      "
+|                 <li>
+|                   class="menu-item menu-item-1"
+|                   "
+                                    "
+|                   <a>
+|                     class="menu-link menu-link-1"
+|                     data-drupal-link-query="{"field_scald_collection_tid":"116"}"
+|                     data-drupal-link-system-path="mediatheque"
+|                     href="/fr/mediatheque?field_scald_collection_tid=116"
+|                     "Cahiers Innovation & Prospective"
+|                   "
+                      "
+|                 "
+                      "
+|                 <li>
+|                   class="menu-item menu-item-1"
+|                   "
+                                    "
+|                   <a>
+|                     class="menu-link menu-link-1"
+|                     data-drupal-link-query="{"field_scald_collection_tid":"323"}"
+|                     data-drupal-link-system-path="mediatheque"
+|                     href="/fr/mediatheque?field_scald_collection_tid=323"
+|                     "Livres blancs"
+|                   "
+                      "
+|                 "
+              "
+|                 <li>
+|                   class="action"
+|                   "
+        "
+|                   <button>
+|                     class="js-dropdown-close dropdown-close"
+|                     type="button"
+|                     "Fermer"
+|                   "
+      "
+|                 "
+          
+    
+              
+                      "
+|                 <li>
+|                   class="menu-item menu-item-0"
+|                   "
+                          "
+|                   <button>
+|                     aria-controls="menu-level-782721179"
+|                     aria-expanded="false"
+|                     class="menu-link menu-link-0 js-dropdown-toggle"
+|                     id="menu-toggler-782721179"
+|                     rel="782721179"
+|                     type="button"
+|                     "La CNIL"
+|                   "
+                                  "
+|                   <ul>
+|                     class="menu-level-1"
+|                     "
+                          "
+|                 <li>
+|                   class="menu-item menu-item-1"
+|                   "
+                                    "
+|                   <a>
+|                     class="menu-link menu-link-1"
+|                     data-drupal-link-system-path="node/1190"
+|                     href="/fr/la-cnil/les-missions-de-la-cnil"
+|                     "Missions"
+|                   "
+                                  "
+|                   <ul>
+|                     class="menu-level-2"
+|                     "
+                          "
+|                 <li>
+|                   class="menu-item menu-item-2"
+|                   "
+                                    "
+|                   <a>
+|                     class="menu-link menu-link-2"
+|                     data-drupal-link-system-path="node/1186"
+|                     href="/fr/missions/mission-1-informer-proteger-les-droits"
+|                     "Informer et protéger"
+|                   "
+                      "
+|                 "
+                      "
+|                 <li>
+|                   class="menu-item menu-item-2"
+|                   "
+                                    "
+|                   <a>
+|                     class="menu-link menu-link-2"
+|                     data-drupal-link-system-path="node/1187"
+|                     href="/fr/missions/mission-2-accompagner-la-conformite-conseiller"
+|                     "Accompagner et conseiller"
+|                   "
+                      "
+|                 "
+                      "
+|                 <li>
+|                   class="menu-item menu-item-2"
+|                   "
+                                    "
+|                   <a>
+|                     class="menu-link menu-link-2"
+|                     data-drupal-link-system-path="node/1188"
+|                     href="/fr/mission-de-la-CNIL-anticiper-innovation"
+|                     "Anticiper et innover"
+|                   "
+                      "
+|                 "
+                      "
+|                 <li>
+|                   class="menu-item menu-item-2"
+|                   "
+                                    "
+|                   <a>
+|                     class="menu-link menu-link-2"
+|                     data-drupal-link-system-path="node/1189"
+|                     href="/fr/missions/mission-4-controler-et-sanctionner"
+|                     "Contrôler et sanctionner"
+|                   "
+                      "
+|                 "
+                      "
+|                 <li>
+|                   class="menu-item menu-item-2"
+|                   "
+                                    "
+|                   <a>
+|                     class="menu-link menu-link-2"
+|                     data-drupal-link-system-path="node/1053"
+|                     href="/fr/missions/air-avenirs-innovations-revolutions-la-mission-ethique-de-la-cnil"
+|                     "La mission éthique de la CNIL"
+|                   "
+                      "
+|                 "
+                      "
+|                 <li>
+|                   class="menu-item menu-item-2"
+|                   "
+                                    "
+|                   <a>
+|                     class="menu-link menu-link-2"
+|                     data-drupal-link-system-path="evenements"
+|                     href="/fr/evenements"
+|                     "Tous les évènements de la CNIL"
+|                   "
+                      "
+|                 "
+              
+    
+              
+                      "
+|                 <li>
+|                   class="menu-item menu-item-1"
+|                   "
+                                    "
+|                   <a>
+|                     class="menu-link menu-link-1"
+|                     data-drupal-link-system-path="node/1101"
+|                     href="/fr/la-cnil/fonctionnement-de-la-cnil"
+|                     "Fonctionnement"
+|                   "
+                                  "
+|                   <ul>
+|                     class="menu-level-2"
+|                     "
+                          "
+|                 <li>
+|                   class="menu-item menu-item-2"
+|                   "
+                                    "
+|                   <a>
+|                     class="menu-link menu-link-2"
+|                     data-drupal-link-system-path="node/589"
+|                     href="/fr/fonctionnement/statut-et-organisation-de-la-cnil"
+|                     "Statut et organisation"
+|                   "
+                      "
+|                 "
+                      "
+|                 <li>
+|                   class="menu-item menu-item-2"
+|                   "
+                                    "
+|                   <a>
+|                     class="menu-link menu-link-2"
+|                     data-drupal-link-system-path="taxonomy/term/76"
+|                     href="/fr/tag/ODJ"
+|                     "Ordres du jour des séances"
+|                   "
+                      "
+|                 "
+                      "
+|                 <li>
+|                   class="menu-item menu-item-2"
+|                   "
+                                    "
+|                   <a>
+|                     class="menu-link menu-link-2"
+|                     data-drupal-link-system-path="actualites/agenda"
+|                     href="/fr/actualites/agenda"
+|                     "Agenda"
+|                   "
+                      "
+|                 "
+                      "
+|                 <li>
+|                   class="menu-item menu-item-2"
+|                   "
+                                    "
+|                   <a>
+|                     class="menu-link menu-link-2"
+|                     data-drupal-link-system-path="taxonomy/term/79"
+|                     href="/fr/tag/avis"
+|                     "Les avis de la CNIL"
+|                   "
+                      "
+|                 "
+                      "
+|                 <li>
+|                   class="menu-item menu-item-2"
+|                   "
+                                    "
+|                   <a>
+|                     class="menu-link menu-link-2"
+|                     data-drupal-link-system-path="la-cnil/interregulation-et-partenariats"
+|                     href="/fr/la-cnil/interregulation-et-partenariats"
+|                     "Interrégulation et partenariats"
+|                   "
+                      "
+|                 "
+              
+    
+              
+                      "
+|                 <li>
+|                   class="menu-item menu-item-1"
+|                   "
+                                    "
+|                   <a>
+|                     class="menu-link menu-link-1"
+|                     data-drupal-link-system-path="node/1176"
+|                     href="/fr/la-cnil/en-europe-et-dans-le-monde"
+|                     "En Europe et dans le monde"
+|                   "
+                                  "
+|                   <ul>
+|                     class="menu-level-2"
+|                     "
+                          "
+|                 <li>
+|                   class="menu-item menu-item-2"
+|                   "
+                                    "
+|                   <a>
+|                     class="menu-link menu-link-2"
+|                     data-drupal-link-system-path="node/168034"
+|                     href="/fr/en-europe-et-dans-le-monde/la-cnil-en-europe"
+|                     "La CNIL en Europe"
+|                   "
+                      "
+|                 "
+                      "
+|                 <li>
+|                   class="menu-item menu-item-2"
+|                   "
+                                    "
+|                   <a>
+|                     class="menu-link menu-link-2"
+|                     data-drupal-link-system-path="node/168037"
+|                     href="/fr/la-cnil-dans-le-monde"
+|                     "La CNIL dans le monde"
+|                   "
+                      "
+|                 "
+                      "
+|                 <li>
+|                   class="menu-item menu-item-2"
+|                   "
+                                    "
+|                   <a>
+|                     class="menu-link menu-link-2"
+|                     href="https://www.cnil.fr/fr/la-protection-des-donnees-dans-le-monde"
+|                     "La carte de la protection des données dans le monde"
+|                   "
+                      "
+|                 "
+                      "
+|                 <li>
+|                   class="menu-item menu-item-2"
+|                   "
+                                    "
+|                   <a>
+|                     class="menu-link menu-link-2"
+|                     data-drupal-link-system-path="node/167037"
+|                     href="/fr/la-cnil-publie-sa-strategie-europeenne-et-internationale-pour-2025-2028"
+|                     "La stratégie européenne et internationale de la CNIL"
+|                   "
+                      "
+|                 "
+              
+    
+              
+                      "
+|                 <li>
+|                   class="menu-item menu-item-1"
+|                   "
+                                      
+            "
+|                   <div>
+|                     class="field-menu-push-visuel"
+|                     <div>
+|                       "
+  
+  
+            "
+|                       <div>
+|                         class="field-media-image"
+|                         "  
+"
+|                         <img>
+|                           alt=""
+|                           class="img-responsive"
+|                           height="130"
+|                           loading="lazy"
+|                           src="/sites/default/files/styles/menu_header_thumbnail/public/2023-02/push_cnil.jpg?itok=0PwAX_DI"
+|                           typeof="foaf:Image"
+|                           width="200"
+|                         "
+
+
+"
+|                       "
+      
+"
+|                     "
+"
+|                   "
+      
+                    "
+|                   <a>
+|                     class="menu-link menu-link-1"
+|                     data-drupal-link-system-path="node/163534"
+|                     href="/fr/lhistoire-de-la-cnil-en-video"
+|                     "L’histoire de la CNIL en vidéo"
+|                   "
+                      "
+|                 "
+                      "
+|                 <li>
+|                   class="menu-item menu-item-1"
+|                   "
+                                    "
+|                   <a>
+|                     class="menu-link menu-link-1"
+|                     data-drupal-link-system-path="node/871"
+|                     href="/fr/la-cnil/travailler-la-cnil"
+|                     "Travailler à la CNIL"
+|                   "
+                      "
+|                 "
+                      "
+|                 <li>
+|                   class="menu-item menu-item-1"
+|                   "
+                                    "
+|                   <a>
+|                     class="menu-link menu-link-1"
+|                     data-drupal-link-system-path="marches-publics"
+|                     href="/fr/marches-publics"
+|                     "Marchés publics"
+|                   "
+                      "
+|                 "
+                      "
+|                 <li>
+|                   class="menu-item menu-item-1"
+|                   "
+                                    "
+|                   <a>
+|                     class="menu-link menu-link-1"
+|                     data-drupal-link-system-path="taxonomy/term/72"
+|                     href="/fr/tag/consultation"
+|                     "Consultations publiques"
+|                   "
+                      "
+|                 "
+              "
+|                 <li>
+|                   class="action"
+|                   "
+        "
+|                   <button>
+|                     class="js-dropdown-close dropdown-close"
+|                     type="button"
+|                     "Fermer"
+|                   "
+      "
+|                 "
+          
+    
+              
+                  "
+|                 <li>
+|                   class="search-button"
+|                   "
+        "
+|                   <button>
+|                     aria-controls="cnil-search-form"
+|                     aria-expanded="false"
+|                     class="search-btn js-search-btn"
+|                     type="button"
+|                     "
+          "
+|                     <span>
+|                       class="sr-only"
+|                       "Rechercher"
+|                     "
+        "
+|                   "
+      "
+|                 "
+        "
+|               "
+      
+    
+
+
+        
+        
+          "
+|               <div>
+|                 class="nav--top-nav"
+|                 <a>
+|                   class="fr is-active"
+|                   href="/fr"
+|                   hreflang="fr"
+|                   "Fr"
+|                 <a>
+|                   class="en"
+|                   href="/en"
+|                   hreflang="en"
+|                   "En"
+|                 <a>
+|                   class="cookies"
+|                   href="/fr/gestion-des-cookies"
+|                   "Gestionnaire de cookies"
+|               "
+
+
+      "
+|             "
+    "
+|           "
+  "
+|         "
+  "
+|         <div>
+|           class="block-search-wrapper js-block-search-wrapper"
+|           role="search"
+|           "
+    "
+|           <div>
+|             class="cnil-search-form block block-cnil-search block-cnil-search-form-block"
+|             data-drupal-selector="cnil-search-form"
+|             id="block-search"
+|             "
+  
+      "
+|             <h2>
+|               class="visually-hidden"
+|               "CNIL : Formulaire de recherche"
+|             "
+    
+      "
+|             <form>
+|               accept-charset="UTF-8"
+|               action="/fr"
+|               id="cnil-search-form"
+|               method="post"
+|               "
+  
+
+
+
+
+
+
+
+"
+|               <div>
+|                 class="form-item js-form-item form-type-textfield js-form-type-textfield form-item-keyword js-form-item-keyword form-group"
+|                 "
+      
+  "
+|                 <label>
+|                   class="control-label"
+|                   for="edit-keyword"
+|                   "Poser une question ou rechercher un article, une délibération... "
+|                 "
+  
+  
+  "
+|                 <input>
+|                   class="form-text form-control"
+|                   data-drupal-selector="edit-keyword"
+|                   id="edit-keyword"
+|                   maxlength="128"
+|                   name="keyword"
+|                   size="60"
+|                   type="text"
+|                   value=""
+|                 "
+
+  
+  
+  "
+|               "
+"
+|               <button>
+|                 class="button js-form-submit form-submit btn-default btn"
+|                 data-drupal-selector="edit-submit"
+|                 id="edit-submit"
+|                 name="op"
+|                 type="submit"
+|                 value="Rechercher"
+|                 "Rechercher"
+|               <input>
+|                 autocomplete="off"
+|                 data-drupal-selector="form-nx5v3sursw3qwvipyxcylvbfw8fw8kp7a-nqktreuze"
+|                 name="form_build_id"
+|                 type="hidden"
+|                 value="form-nx5v3SuRsw3qWVIpYxCYLVBfw8Fw8kP7A_nQKtREuzE"
+|               <input>
+|                 data-drupal-selector="edit-cnil-search-form"
+|                 name="form_id"
+|                 type="hidden"
+|                 value="cnil_search_form"
+|               "
+"
+|             "
+
+  "
+|           "
+
+  "
+|         "
+
+"
+|       "
+
+
+
+"
+|       <main>
+|         class="main-wrapper"
+|         id="main-content"
+|         role="main"
+|         "
+  "
+|         <div>
+|           class=""
+|           "
+
+    "
+|           <div>
+|             class="page"
+|             "
+
+      
+      "
+|             <section>
+|               "
+        "
+|               <div>
+|                 class="container"
+|                 "
+                  "
+|               "
+
+                  
+        
+        
+
+                  "
+|               <div>
+|                 class="container"
+|                 "
+            
+          "
+|               "
+        
+        "
+|               <div>
+|                 class="container"
+|                 "
+                  "
+|               "
+        "
+|               <div>
+|                 class="container"
+|                 "
+                  "
+|               "
+
+    "
+|               <div>
+|                 class="region region-content"
+|                 "
+    "
+|                 <div>
+|                   class="hidden"
+|                   data-drupal-messages-fallback=""
+|                 "  "
+|                 <div>
+|                   class="contenu-accueil"
+|                   "
+  "
+|                   <div>
+|                     class="homepage-inner"
+|                     "
+    "
+|                     <div>
+|                       class="row js-mobile-carousel"
+|                       "
+                "
+|                       <div>
+|                         class="paragraph paragraph--type--home-demarches paragraph--view-mode--default"
+|                         "
+          
+            "
+|                         <div>
+|                           class="field-image"
+|                           "  
+"
+|                           <img>
+|                             aria-hidden="true"
+|                             class="img-responsive"
+|                             height="103"
+|                             loading="lazy"
+|                             src="/sites/default/files/styles/accueil_demarches/public/2023-10/je_m_informe.png?itok=E5r7aAdP"
+|                             typeof="foaf:Image"
+|                             width="103"
+|                           "
+
+
+"
+|                         "
+      
+            "
+|                         <div>
+|                           class="field-title"
+|                           <h2>
+|                             "Je m'informe"
+|                           "
+"
+|                         "
+      
+            "
+|                         <div>
+|                           class="field-description"
+|                           <p>
+|                             "Comment accéder à vos données personnelles, les rectifier, les supprimer ?"
+|                           "
+"
+|                         "
+      
+            "
+|                         <div>
+|                           class="field-link"
+|                           <a>
+|                             href="/fr/mes-demarches/les-droits-pour-maitriser-vos-donnees-personnelles"
+|                             "Découvrir vos droits"
+|                         "
+      
+      "
+|                       "
+
+                "
+|                       <div>
+|                         class="paragraph paragraph--type--home-demarches paragraph--view-mode--default"
+|                         "
+          
+            "
+|                         <div>
+|                           class="field-image"
+|                           "  
+"
+|                           <img>
+|                             aria-hidden="true"
+|                             class="img-responsive"
+|                             height="103"
+|                             loading="lazy"
+|                             src="/sites/default/files/styles/accueil_demarches/public/2023-10/j_agis.png?itok=jyvik10e"
+|                             typeof="foaf:Image"
+|                             width="103"
+|                           "
+
+
+"
+|                         "
+      
+            "
+|                         <div>
+|                           class="field-title"
+|                           <h2>
+|                             "J'agis"
+|                           "
+"
+|                         "
+      
+            "
+|                         <div>
+|                           class="field-description"
+|                           <p>
+|                             "Comment faire valoir vos droits sur vos données ou agir en cas de problème ?"
+|                           "
+"
+|                         "
+      
+            "
+|                         <div>
+|                           class="field-link"
+|                           <a>
+|                             href="/fr/agir/saisir-la-cnil"
+|                             "Découvrir vos moyens d'actions"
+|                         "
+      
+      "
+|                       "
+
+                "
+|                       <div>
+|                         class="paragraph paragraph--type--home-demarches paragraph--view-mode--default"
+|                         "
+          
+            "
+|                         <div>
+|                           class="field-image"
+|                           "  
+"
+|                           <img>
+|                             aria-hidden="true"
+|                             class="img-responsive"
+|                             height="103"
+|                             loading="lazy"
+|                             src="/sites/default/files/styles/accueil_demarches/public/2023-10/j_ai_besoin_d_aide.png?itok=RFepxuS7"
+|                             typeof="foaf:Image"
+|                             width="103"
+|                           "
+
+
+"
+|                         "
+      
+            "
+|                         <div>
+|                           class="field-title"
+|                           <h2>
+|                             "J'ai besoin d'aide"
+|                           "
+"
+|                         "
+      
+            "
+|                         <div>
+|                           class="field-description"
+|                           <p>
+|                             "Vous recherchez une information ? Retrouvez les questions les plus fréquemment posées."
+|                           "
+"
+|                         "
+      
+            "
+|                         <div>
+|                           class="field-link"
+|                           <a>
+|                             href="/fr/cnil-direct?visiteur=part"
+|                             "Découvrir nos questions/réponses"
+|                         "
+      
+      "
+|                       "
+
+          "
+|                     "
+  "
+|                   "
+"
+|                 "
+
+
+"
+|                 <div>
+|                   class="clearfix accueil-main"
+|                   "
+  "
+|                   <div>
+|                     class="row"
+|                     "
+    "
+|                     <div>
+|                       class="col-xs-12 col-sm-12 col-md-12 col-lg-12"
+|                       "
+      "
+|                       <div>
+|                         class="cnil-carousel-desk"
+|                         id="carousel_accueil"
+|                         "
+        "
+|                         <div>
+|                           class="carousel-inner js-carousel"
+|                           role="listbox"
+|                           "
+
+                      "
+|                           <div>
+|                             class="item"
+|                             "
+              "
+|                             <div>
+|                               class="accueil_carrousel_block_droite_image"
+|                               "
+
+  "
+|                               <div>
+|                                 class="homepage-inner"
+|                                 "
+    "
+|                                 <div>
+|                                   class="row"
+|                                   "
+      "
+|                                   <div>
+|                                     class="element col-sm-6"
+|                                     "
+        "
+|                                     <div>
+|                                       class="element-inner"
+|                                       "
+                      "
+|                                       <span>
+|                                         class="element-htag hidden-xs"
+|                                         <a>
+|                                           href="/fr/tag/Num%C3%A9rique%2Badolescent"
+|                                           "#Numérique adolescent"
+|                                       "
+                              "
+|                                       <div>
+|                                         <h3>
+|                                           class="element-title"
+|                                           <a>
+|                                             href="/fr/audeladelecran"
+|                                             hreflang="fr"
+|                                             "La CNIL publie le tome 2 de L’Agence Privacy : une nouvelle enquête pour mieux comprendre la cybercriminalité"
+|                                       "
+
+                      "
+|                                       <div>
+|                                         class="element-intro"
+|                                         <p>
+|                                           class="hidden-xs"
+|                                           "Avec « Au-delà de l’écran », l’Agence Privacy revient avec de nouvelles aventures ! Hypertrucage (deepfakes), arnaque aux sentiments, défis nocifs…"
+|                                       "
+                  "
+|                                     "
+
+      "
+|                                   "
+    "
+|                                 "
+  "
+|                               "
+
+      
+"
+|                               <img>
+|                                 alt=""
+|                                 class="img-responsive"
+|                                 height="425"
+|                                 loading="lazy"
+|                                 src="/sites/default/files/styles/accueil_carousel_block_droite/public/2026-09/manga_carrousel.png?itok=RiQ9T-p4"
+|                                 typeof="foaf:Image"
+|                                 width="1280"
+|                               "
+
+
+  "
+|                             "
+
+            "
+|                           "
+                      "
+|                           <div>
+|                             class="item"
+|                             "
+              "
+|                             <div>
+|                               class="accueil_carrousel_block_droite_image"
+|                               "
+
+  "
+|                               <div>
+|                                 class="homepage-inner"
+|                                 "
+    "
+|                                 <div>
+|                                   class="row"
+|                                   "
+      "
+|                                   <div>
+|                                     class="element col-sm-6"
+|                                     "
+        "
+|                                     <div>
+|                                       class="element-inner"
+|                                       "
+                      "
+|                                       <span>
+|                                         class="element-htag hidden-xs"
+|                                         <a>
+|                                           href="/fr/tag/Objets%2Bconnect%C3%A9s"
+|                                           "#Objets connectés"
+|                                       "
+                              "
+|                                       <div>
+|                                         <h3>
+|                                           class="element-title"
+|                                           <a>
+|                                             href="/fr/lunettes-connectees-appel-a-la-vigilance"
+|                                             hreflang="fr"
+|                                             "Les lunettes connectées : la CNIL appelle à la vigilance"
+|                                       "
+
+                      "
+|                                       <div>
+|                                         class="element-intro"
+|                                         <p>
+|                                           class="hidden-xs"
+|                                           "L’essor des lunettes connectées constitue un nouveau défi pour la vie privée et soulève des enjeux éthiques et sociétaux forts. La CNIL alerte sur…"
+|                                       "
+                  "
+|                                     "
+
+      "
+|                                   "
+    "
+|                                 "
+  "
+|                               "
+
+      
+"
+|                               <img>
+|                                 alt=""
+|                                 class="img-responsive"
+|                                 height="425"
+|                                 loading="lazy"
+|                                 src="/sites/default/files/styles/accueil_carousel_block_droite/public/2026-05/lunettes_connectees.jpg?itok=S4UgcyJV"
+|                                 typeof="foaf:Image"
+|                                 width="1280"
+|                               "
+
+
+  "
+|                             "
+
+            "
+|                           "
+                      "
+|                           <div>
+|                             class="item"
+|                             "
+              "
+|                             <div>
+|                               class="accueil_carrousel_block_droite_image"
+|                               "
+
+  "
+|                               <div>
+|                                 class="homepage-inner"
+|                                 "
+    "
+|                                 <div>
+|                                   class="row"
+|                                   "
+      "
+|                                   <div>
+|                                     class="element col-sm-6"
+|                                     "
+        "
+|                                     <div>
+|                                       class="element-inner"
+|                                       "
+                      "
+|                                       <span>
+|                                         class="element-htag hidden-xs"
+|                                         <a>
+|                                           href="/fr/tag/Violation%2Bde%2Bdonn%C3%A9es"
+|                                           "#Violation de données"
+|                                       "
+                              "
+|                                       <div>
+|                                         <h3>
+|                                           class="element-title"
+|                                           <a>
+|                                             href="/fr/vigilance-accompagnement-violation-de-donnees"
+|                                             hreflang="fr"
+|                                             "Victimes de violations de données : restez vigilants face aux offres d’accompagnement"
+|                                       "
+
+                      "
+|                                       <div>
+|                                         class="element-intro"
+|                                         <p>
+|                                           class="hidden-xs"
+|                                           "Des victimes de violations de données personnelles reçoivent des courriels proposant une aide pour faire supprimer leurs informations en ligne. La…"
+|                                       "
+                  "
+|                                     "
+
+      "
+|                                   "
+    "
+|                                 "
+  "
+|                               "
+
+      
+"
+|                               <img>
+|                                 alt=""
+|                                 class="img-responsive"
+|                                 height="425"
+|                                 loading="lazy"
+|                                 src="/sites/default/files/styles/accueil_carousel_block_droite/public/2026-06/phishing_carrousel.png?itok=WC9QrnrC"
+|                                 typeof="foaf:Image"
+|                                 width="1280"
+|                               "
+
+
+  "
+|                             "
+
+            "
+|                           "
+          
+        "
+|                         "
+
+      "
+|                       "
+
+    "
+|                     "
+  "
+|                   "
+"
+|                 "
+
+
+
+
+  "
+|                 <div>
+|                   class="clearfix accueil-actualite-communique"
+|                   "
+    "
+|                   <div>
+|                     class="homepage-inner"
+|                     "
+      "
+|                     <div>
+|                       class="row actu-wrapper"
+|                       "
+                          
+        "
+|                       <div>
+|                         class="col-xs-12 col-sm-12 col-md-12 col-lg-12 accueil-actualite"
+|                         "
+          "
+|                         <p>
+|                           <span>
+|                             class="accueil-actualite-titre"
+|                             "Actualités"
+|                         "
+          "
+|                         <div>
+|                           class="row"
+|                           "
+                          
+"
+|                           <div>
+|                             class="col-xs-12 col-sm-6 col-md-4 col-lg-4 element"
+|                             "
+  "
+|                             <div>
+|                               class="all-wrapper"
+|                               "
+        
+"
+|                               <img>
+|                                 alt="Journée RGPD - Poitiers, 1er décembre 2026 à partir de 9h"
+|                                 class="img-responsive"
+|                                 height="280"
+|                                 loading="lazy"
+|                                 src="/sites/default/files/styles/accueil_actualite/public/2026-09/rgpd_poitiers.jpg?itok=W7RB0WYN"
+|                                 typeof="foaf:Image"
+|                                 width="385"
+|                               "
+
+
+    "
+|                               <div>
+|                                 class="element-bg"
+|                                 "
+              "
+|                                 <div>
+|                                   class="element-titre"
+|                                   "
+          "
+|                                   <a>
+|                                     href="/fr/journee-rgpd-2026-poitiers"
+|                                     hreflang="fr"
+|                                     "Journée RGPD à Poitiers : cybersécurité, IA et conformité au cœur des enjeux de protection des données"
+|                                   "
+        "
+|                                 "
+                          "
+|                                 <span>
+|                                   class="element-date"
+|                                   "Publié le  20/10/2026"
+|                                 "
+              "
+|                               "
+    "
+|                             "
+          "
+|                             <span>
+|                               class="element-htag hidden-xs"
+|                               <a>
+|                                 href="/fr/tag/Journ%C3%A9es%2BRGPD"
+|                                 "#Journées RGPD"
+|                             "
+      "
+|                           "
+  "
+|                           <div>
+|                             class="col-xs-12 col-sm-6 col-md-4 col-lg-4 element"
+|                             "
+  "
+|                             <div>
+|                               class="all-wrapper"
+|                               "
+        
+"
+|                               <img>
+|                                 alt=""
+|                                 class="img-responsive"
+|                                 height="280"
+|                                 loading="lazy"
+|                                 src="/sites/default/files/styles/accueil_actualite/public/2026-10/reconstitution-email-pro.png?itok=edI6HyC4"
+|                                 typeof="foaf:Image"
+|                                 width="385"
+|                               "
+
+
+    "
+|                               <div>
+|                                 class="element-bg"
+|                                 "
+              "
+|                                 <div>
+|                                   class="element-titre"
+|                                   "
+          "
+|                                   <a>
+|                                     href="/fr/reconstitution-adresses-professionnelles-vos-droits"
+|                                     hreflang="fr"
+|                                     "Reconstitution d’adresses électroniques professionnelles : quels sont vos droits ?"
+|                                   "
+        "
+|                                 "
+                          "
+|                                 <span>
+|                                   class="element-date"
+|                                   "Publié le  16/10/2026"
+|                                 "
+              "
+|                               "
+    "
+|                             "
+          "
+|                             <span>
+|                               class="element-htag hidden-xs"
+|                               <a>
+|                                 href="/fr/tag/Courriels"
+|                                 "#Courriels"
+|                             "
+      "
+|                           "
+  "
+|                           <div>
+|                             class="col-xs-12 col-sm-6 col-md-4 col-lg-4 element"
+|                             "
+  "
+|                             <div>
+|                               class="all-wrapper"
+|                               "
+        
+"
+|                               <img>
+|                                 alt=""
+|                                 class="img-responsive"
+|                                 height="280"
+|                                 loading="lazy"
+|                                 src="/sites/default/files/styles/accueil_actualite/public/2024-09/cloture_inj.png?itok=pXUw7c4j"
+|                                 typeof="foaf:Image"
+|                                 width="385"
+|                               "
+
+
+    "
+|                               <div>
+|                                 class="element-bg"
+|                                 "
+              "
+|                                 <div>
+|                                   class="element-titre"
+|                                   "
+          "
+|                                   <a>
+|                                     href="/fr/cloture-injonction-google"
+|                                     hreflang="fr"
+|                                     "Clôture de l’injonction prononcée à l’encontre de GOOGLE"
+|                                   "
+        "
+|                                 "
+                          "
+|                                 <span>
+|                                   class="element-date"
+|                                   "Publié le  14/10/2026"
+|                                 "
+              "
+|                               "
+    "
+|                             "
+          "
+|                             <span>
+|                               class="element-htag hidden-xs"
+|                               <a>
+|                                 href="/fr/tag/Cookies%2Bet%2Btraceurs"
+|                                 "#Cookies et traceurs"
+|                             "
+      "
+|                           "
+  "
+|                           <div>
+|                             class="col-xs-12 col-sm-6 col-md-4 col-lg-4 element"
+|                             "
+  "
+|                             <div>
+|                               class="all-wrapper"
+|                               "
+        
+"
+|                               <img>
+|                                 alt="EDPB"
+|                                 class="img-responsive"
+|                                 height="280"
+|                                 loading="lazy"
+|                                 src="/sites/default/files/styles/accueil_actualite/public/2026-09/logo_edpb_2026.png?itok=DeAkF9Wf"
+|                                 typeof="foaf:Image"
+|                                 width="385"
+|                               "
+
+
+    "
+|                               <div>
+|                                 class="element-bg"
+|                                 "
+              "
+|                                 <div>
+|                                   class="element-titre"
+|                                   "
+          "
+|                                   <a>
+|                                     href="/fr/cepd-declaration-lunettes-connectees"
+|                                     hreflang="fr"
+|                                     "Le CEPD publie une déclaration sur les enjeux de protection des données liés aux lunettes connectées"
+|                                   "
+        "
+|                                 "
+                          "
+|                                 <span>
+|                                   class="element-date"
+|                                   "Publié le  13/10/2026"
+|                                 "
+              "
+|                               "
+    "
+|                             "
+          "
+|                             <span>
+|                               class="element-htag hidden-xs"
+|                               <a>
+|                                 href="/fr/tag/CEPD"
+|                                 "#CEPD"
+|                             "
+      "
+|                           "
+  "
+|                           <div>
+|                             class="col-xs-12 col-sm-6 col-md-4 col-lg-4 element"
+|                             "
+  "
+|                             <div>
+|                               class="all-wrapper"
+|                               "
+        
+"
+|                               <img>
+|                                 alt=""
+|                                 class="img-responsive"
+|                                 height="280"
+|                                 loading="lazy"
+|                                 src="/sites/default/files/styles/accueil_actualite/public/2024-09/cloture_inj.png?itok=pXUw7c4j"
+|                                 typeof="foaf:Image"
+|                                 width="385"
+|                               "
+
+
+    "
+|                               <div>
+|                                 class="element-bg"
+|                                 "
+              "
+|                                 <div>
+|                                   class="element-titre"
+|                                   "
+          "
+|                                   <a>
+|                                     href="/fr/cloture-injonction-france-travail"
+|                                     hreflang="fr"
+|                                     "Clôture de l’injonction prononcée à l’encontre de FRANCE TRAVAIL"
+|                                   "
+        "
+|                                 "
+                          "
+|                                 <span>
+|                                   class="element-date"
+|                                   "Publié le  08/10/2026"
+|                                 "
+              "
+|                               "
+    "
+|                             "
+          "
+|                             <span>
+|                               class="element-htag hidden-xs"
+|                               <a>
+|                                 href="/fr/tag/Sanction"
+|                                 "#Sanction"
+|                             "
+      "
+|                           "
+  "
+|                           <div>
+|                             class="col-xs-12 col-sm-6 col-md-4 col-lg-4 element"
+|                             "
+  "
+|                             <div>
+|                               class="all-wrapper"
+|                               "
+        
+"
+|                               <img>
+|                                 alt="CyberMois"
+|                                 class="img-responsive"
+|                                 height="280"
+|                                 loading="lazy"
+|                                 src="/sites/default/files/styles/accueil_actualite/public/2026-09/cybermois_visuel.png?itok=Zot6WHlB"
+|                                 typeof="foaf:Image"
+|                                 width="385"
+|                               "
+
+
+    "
+|                               <div>
+|                                 class="element-bg"
+|                                 "
+              "
+|                                 <div>
+|                                   class="element-titre"
+|                                   "
+          "
+|                                   <a>
+|                                     href="/fr/cybermois-2026"
+|                                     hreflang="fr"
+|                                     "Cybermois 2026 : la CNIL et Cybermalveillance.gouv.fr publient une nouvelle ressource pour adopter les bons réflexes face à une violation de données"
+|                                   "
+        "
+|                                 "
+                          "
+|                                 <span>
+|                                   class="element-date"
+|                                   "Publié le  01/10/2026"
+|                                 "
+              "
+|                               "
+    "
+|                             "
+          "
+|                             <span>
+|                               class="element-htag hidden-xs"
+|                               <a>
+|                                 href="/fr/tag/Cybermois"
+|                                 "#Cybermois"
+|                             "
+      "
+|                           "
+            "
+|                         "
+          "
+|                         <p>
+|                           class="col-xs-12 col-sm-12 all"
+|                           <a>
+|                             href="/fr/actualite"
+|                             hreflang="fr"
+|                             "Voir toutes les actualités"
+|                         "
+        "
+|                       "
+
+              "
+|                     "
+    "
+|                   "
+  "
+|                 "
+
+
+  
+            "
+|                 <div>
+|                   class="field-focus"
+|                   <div>
+|                     class="focus-block"
+|                     "
+  
+  "
+|                     <div>
+|                       class="focus-block--wrapper js-focus-block--wrapper"
+|                       "
+      "
+|                       <div>
+|                         class="section--focus-block"
+|                         "
+        "
+|                         <div>
+|                           class="inner-wrapper"
+|                           "
+          
+                      
+"
+|                           <img>
+|                             alt="Mockup de l'application FantomApp"
+|                             class="img-responsive"
+|                             height="400"
+|                             loading="lazy"
+|                             src="/sites/default/files/styles/focus_main/public/2025-12/fantomapp_probleme.png?itok=J2DX1qWT"
+|                             typeof="foaf:Image"
+|                             width="584"
+|                           "
+
+
+          
+          "
+|                           <div>
+|                             class="section-text"
+|                             "
+                          "
+|                             <h3>
+|                               class="section--focus-block-title"
+|                               "FantomApp : l’application pour aider les adolescents à se protéger sur les réseaux sociaux"
+|                             "
+            
+                      "
+|                           "
+                      "
+|                           <div>
+|                             class="read-more"
+|                             <a>
+|                               href="/fr/fantomapp-lapplication-de-la-cnil-pour-se-proteger-sur-les-reseaux-sociaux"
+|                               "Lire la suite"
+|                           "
+                  "
+|                         "
+      "
+|                       "
+
+                      "
+|                       <div>
+|                         class="section--focus-block section--document-block"
+|                         "
+            "
+|                         <div>
+|                           class="inner-wrapper"
+|                           "
+              "
+|                           <div>
+|                             class="section-sub-title"
+|                             "Documents"
+|                           "
+                              
+"
+|                           <img>
+|                             alt=""
+|                             class="img-responsive"
+|                             height="400"
+|                             loading="lazy"
+|                             src="/sites/default/files/styles/focus_secondary/public/2026-09/couv-audeladelecran-t2.png?itok=niSGqjES"
+|                             typeof="foaf:Image"
+|                             width="289"
+|                           "
+
+
+                            "
+|                           <div>
+|                             class="section-text"
+|                             "
+                "
+|                             <div>
+|                               class="section--focus-block-title"
+|                               "L'agence Privacy : Au-delà de l'écran - Chapitre 1"
+|                             "
+              "
+|                           "
+                              "
+|                           <div>
+|                             class="read-more"
+|                             <a>
+|                               href="https://www.cnil.fr/sites/default/files/2026-09/agence_privacy_t2_chap1.pdf"
+|                               "Lire la suite"
+|                           "
+                          "
+|                         "
+          "
+|                       "
+                  "
+|                       <div>
+|                         class="section--focus-block section--document-block"
+|                         "
+            "
+|                         <div>
+|                           class="inner-wrapper"
+|                           "
+              "
+|                           <div>
+|                             class="section-sub-title"
+|                             "Documents"
+|                           "
+                              
+"
+|                           <img>
+|                             alt=""
+|                             class="img-responsive"
+|                             height="400"
+|                             loading="lazy"
+|                             src="/sites/default/files/styles/focus_secondary/public/2025-03/flyer_cyber_reflexes_page_1.png?itok=NsslXhMF"
+|                             typeof="foaf:Image"
+|                             width="289"
+|                           "
+
+
+                            "
+|                           <div>
+|                             class="section-text"
+|                             "
+                "
+|                             <div>
+|                               class="section--focus-block-title"
+|                               "Cyber réflexes : se protéger sur Internet"
+|                             "
+              "
+|                           "
+                              "
+|                           <div>
+|                             class="read-more"
+|                             <a>
+|                               href="https://www.cnil.fr/sites/default/files/2025-03/flyer_cyber_reflexes.pdf"
+|                               "Lire la suite"
+|                           "
+                          "
+|                         "
+          "
+|                       "
+              "
+|                     "
+"
+|                   "
+
+"
+|                 "
+      
+
+
+  "
+|               "
+
+"
+|             "
+"
+|           "
+"
+|         "
+"
+|       "
+"
+|       <footer>
+|         class="footer"
+|         role="contentinfo"
+|         "
+  "
+|         <div>
+|           class="container"
+|           "
+    "
+|           <div>
+|             class="cnildirect"
+|             <a>
+|               class="direct"
+|               href="/fr/cnil-direct"
+|               title="Besoin d'aide"
+|               "Besoin d'aide"
+|           "
+
+    
+
+          "
+|           <nav>
+|             aria-label="Navigation secondaire"
+|             role="navigation"
+|             "
+
+  "
+|             <div>
+|               class="row"
+|               "
+    "
+|               <div>
+|                 class="col-sm-4 col-12"
+|                 "
+        "
+|                 <div>
+|                   class="site-branding"
+|                   "
+"
+|                   <img>
+|                     alt="CNIL"
+|                     class="img-responsive"
+|                     src="/themes/custom/bootstrap_cnil/logo-footer.png"
+|                     typeof="foaf:Image"
+|                   "
+"
+|                   <p>
+|                     class="baseline"
+|                     "Commission Nationale de l’Informatique et des Libertés"
+|                   "
+"
+|                 "
+
+
+    "
+|               "
+
+    "
+|               <div>
+|                 class="col-sm-8 col-12 pull-right"
+|                 style="min-height: 68px"
+|                 "
+      "
+|                 <div>
+|                   class="menu-footer-sitemap"
+|                   "
+        "
+|                   <div>
+|                     class="row"
+|                     "
+          
+          
+          
+  
+  "
+|                     <div>
+|                       class="well col-sm-4 col-md-4 col-lg-4 menuControl"
+|                       "
+
+                
+                              "
+|                       <div>
+|                         class="item"
+|                         "
+              "
+|                         <span>
+|                           class="menu-footer-sitemap-title"
+|                           "Mon quotidien"
+|                         "
+                                          
+                  "
+|                         <ul>
+|                           "
+                                        "
+|                           <li>
+|                             "
+                                  "
+|                             <a>
+|                               data-drupal-link-system-path="node/163997"
+|                               href="/fr/mon-quotidien/ma-securite-numerique"
+|                               "Ma sécurité numérique"
+|                             "
+                
+                              "
+|                           "
+                                        "
+|                           <li>
+|                             "
+                                  "
+|                             <a>
+|                               data-drupal-link-system-path="node/1026"
+|                               href="/fr/mon-quotidien/sites-web-et-reseaux-sociaux"
+|                               "Sites web et réseaux sociaux"
+|                             "
+                
+                              "
+|                           "
+                                        "
+|                           <li>
+|                             "
+                                  "
+|                             <a>
+|                               href="/fr/utiliser-votre-smartphone-et-vos-applications"
+|                               "Téléphones et applications"
+|                             "
+                
+                              "
+|                           "
+                                        "
+|                           <li>
+|                             "
+                                  "
+|                             <a>
+|                               data-drupal-link-system-path="node/1128"
+|                               href="/fr/technologies/objets-connectes"
+|                               "Objets connectés"
+|                             "
+                
+                              "
+|                           "
+                                        "
+|                           <li>
+|                             "
+                                  "
+|                             <a>
+|                               data-drupal-link-system-path="node/858"
+|                               href="/fr/thematiques/enfants-et-ados"
+|                               "Enfants et ados"
+|                             "
+                
+                              "
+|                           "
+                                        "
+|                           <li>
+|                             "
+                                  "
+|                             <a>
+|                               data-drupal-link-system-path="node/164015"
+|                               href="/fr/sante-particulier"
+|                               "Santé"
+|                             "
+                
+                              "
+|                           "
+                                        "
+|                           <li>
+|                             "
+                                  "
+|                             <a>
+|                               data-drupal-link-system-path="node/166257"
+|                               href="/fr/mon-quotidien/social"
+|                               "Social"
+|                             "
+                
+                              "
+|                           "
+                                        "
+|                           <li>
+|                             "
+                                  "
+|                             <a>
+|                               data-drupal-link-system-path="node/164012"
+|                               href="/fr/logement-particulier"
+|                               "Logement"
+|                             "
+                
+                              "
+|                           "
+                                        "
+|                           <li>
+|                             "
+                                  "
+|                             <a>
+|                               data-drupal-link-system-path="node/164033"
+|                               href="/fr/travail-particuliers"
+|                               "Travail"
+|                             "
+                
+                              "
+|                           "
+                                        "
+|                           <li>
+|                             "
+                                  "
+|                             <a>
+|                               data-drupal-link-system-path="node/165258"
+|                               href="/fr/particulier-intelligence-artificielle-ia"
+|                               "Intelligence artificielle (IA)"
+|                             "
+                
+                              "
+|                           "
+                                        "
+|                           <li>
+|                             "
+                                  "
+|                             <a>
+|                               data-drupal-link-system-path="node/164009"
+|                               href="/fr/achats-et-publicite"
+|                               "Achats et publicité"
+|                             "
+                
+                              "
+|                           "
+                                        "
+|                           <li>
+|                             "
+                                  "
+|                             <a>
+|                               data-drupal-link-system-path="node/164042"
+|                               href="/fr/mon-quotidien/banque-et-credit"
+|                               "Banque/Assurance"
+|                             "
+                
+                              "
+|                           "
+                                        "
+|                           <li>
+|                             "
+                                  "
+|                             <a>
+|                               data-drupal-link-system-path="node/164039"
+|                               href="/fr/mon-quotidien/citoyennete"
+|                               "Citoyenneté"
+|                             "
+                
+                              "
+|                           "
+                                        "
+|                           <li>
+|                             "
+                                  "
+|                             <a>
+|                               data-drupal-link-system-path="node/9101"
+|                               href="/fr/sport-amateur-hors-contrat/questions-reponses"
+|                               "Sport"
+|                             "
+                
+                              "
+|                           "
+                                        "
+|                           <li>
+|                             "
+                                  "
+|                             <a>
+|                               data-drupal-link-system-path="node/166046"
+|                               href="/fr/transports-et-mobilite-particulier"
+|                               "Transports et mobilité"
+|                             "
+                
+                              "
+|                           "
+                                        "
+|                           <li>
+|                             "
+                                  "
+|                             <a>
+|                               data-drupal-link-system-path="node/164606"
+|                               href="/fr/mon-quotidien/associations"
+|                               "Vie associative"
+|                             "
+                
+                              "
+|                           "
+                      "
+|                         "
+        
+          
+              
+               "
+|                         <hr>
+|                           class="menu-footer-sitemap-hr"
+|                         "             "
+|                       "
+                      "
+|                       <div>
+|                         class="item"
+|                         "
+              "
+|                         <span>
+|                           class="menu-footer-sitemap-title"
+|                           "La CNIL"
+|                         "
+                                          
+                  "
+|                         <ul>
+|                           "
+                                        "
+|                           <li>
+|                             "
+                                  "
+|                             <a>
+|                               data-drupal-link-system-path="node/1190"
+|                               href="/fr/la-cnil/les-missions-de-la-cnil"
+|                               "Missions"
+|                             "
+                
+                                              
+        
+          
+                              "
+|                           "
+                                        "
+|                           <li>
+|                             "
+                                  "
+|                             <a>
+|                               data-drupal-link-system-path="node/1101"
+|                               href="/fr/la-cnil/fonctionnement-de-la-cnil"
+|                               "Fonctionnement"
+|                             "
+                
+                                              
+        
+          
+                              "
+|                           "
+                                        "
+|                           <li>
+|                             "
+                                  "
+|                             <a>
+|                               data-drupal-link-system-path="node/1176"
+|                               href="/fr/la-cnil/en-europe-et-dans-le-monde"
+|                               "En Europe et dans le monde"
+|                             "
+                
+                                              
+        
+          
+                              "
+|                           "
+                                        "
+|                           <li>
+|                             "
+                                  "
+|                             <a>
+|                               data-drupal-link-system-path="node/163534"
+|                               href="/fr/lhistoire-de-la-cnil-en-video"
+|                               "L’histoire de la CNIL en vidéo"
+|                             "
+                
+                              "
+|                           "
+                                        "
+|                           <li>
+|                             "
+                                  "
+|                             <a>
+|                               data-drupal-link-system-path="node/871"
+|                               href="/fr/la-cnil/travailler-la-cnil"
+|                               "Travailler à la CNIL"
+|                             "
+                
+                              "
+|                           "
+                                        "
+|                           <li>
+|                             "
+                                  "
+|                             <a>
+|                               data-drupal-link-system-path="marches-publics"
+|                               href="/fr/marches-publics"
+|                               "Marchés publics"
+|                             "
+                
+                              "
+|                           "
+                                        "
+|                           <li>
+|                             "
+                                  "
+|                             <a>
+|                               data-drupal-link-system-path="taxonomy/term/72"
+|                               href="/fr/tag/consultation"
+|                               "Consultations publiques"
+|                             "
+                
+                              "
+|                           "
+                      "
+|                         "
+        
+          
+              
+                          "
+|                       "
+          
+        
+          
+
+      "
+|                     "
+  "
+|                     <div>
+|                       class="well col-sm-4 col-md-4 col-lg-4 menuControl"
+|                       "
+
+                
+                              "
+|                       <div>
+|                         class="item"
+|                         "
+              "
+|                         <span>
+|                           class="menu-footer-sitemap-title"
+|                           "Exercer mes droits"
+|                         "
+                                          
+                  "
+|                         <ul>
+|                           "
+                                        "
+|                           <li>
+|                             "
+                                  "
+|                             <a>
+|                               data-drupal-link-system-path="node/1191"
+|                               href="/fr/mes-demarches/les-droits-pour-maitriser-vos-donnees-personnelles"
+|                               "Quels sont mes droits ?"
+|                             "
+                
+                                              
+        
+          
+                              "
+|                           "
+                                        "
+|                           <li>
+|                             "
+                                  "
+|                             <a>
+|                               data-drupal-link-system-path="node/855"
+|                               href="/fr/agir/saisir-la-cnil"
+|                               "Saisir la CNIL"
+|                             "
+                
+                                              
+        
+          
+                              "
+|                           "
+                                        "
+|                           <li>
+|                             "
+                                  "
+|                             <a>
+|                               data-drupal-link-query="{"visiteur":"part"}"
+|                               data-drupal-link-system-path="cnil-direct"
+|                               href="/fr/cnil-direct?visiteur=part"
+|                               "Questions/réponses"
+|                             "
+                
+                              "
+|                           "
+                      "
+|                         "
+        
+          
+              
+                          "
+|                       "
+          
+        
+          
+
+      "
+|                     "
+  "
+|                     <div>
+|                       class="well col-sm-4 col-md-4 col-lg-4 menuControl"
+|                       "
+
+                
+                              "
+|                       <div>
+|                         class="item"
+|                         "
+              "
+|                         <span>
+|                           class="menu-footer-sitemap-title"
+|                           "À télécharger"
+|                         "
+                                          
+                  "
+|                         <ul>
+|                           "
+                                        "
+|                           <li>
+|                             "
+                                  "
+|                             <a>
+|                               data-drupal-link-query="{"field_scald_collection_tid":"674"}"
+|                               data-drupal-link-system-path="mediatheque"
+|                               href="/fr/mediatheque?field_scald_collection_tid=674"
+|                               "Ressources pédagogiques"
+|                             "
+                
+                              "
+|                           "
+                                        "
+|                           <li>
+|                             "
+                                  "
+|                             <a>
+|                               data-drupal-link-query="{"field_scald_collection_tid":"210"}"
+|                               data-drupal-link-system-path="mediatheque"
+|                               href="/fr/mediatheque?field_scald_collection_tid=210"
+|                               "Affiches"
+|                             "
+                
+                              "
+|                           "
+                                        "
+|                           <li>
+|                             "
+                                  "
+|                             <a>
+|                               data-drupal-link-query="{"field_scald_collection_tid":"31"}"
+|                               data-drupal-link-system-path="mediatheque"
+|                               href="/fr/mediatheque?field_scald_collection_tid=31"
+|                               "Rapports et chiffres clés"
+|                             "
+                
+                              "
+|                           "
+                                        "
+|                           <li>
+|                             "
+                                  "
+|                             <a>
+|                               data-drupal-link-query="{"field_scald_collection_tid":"116"}"
+|                               data-drupal-link-system-path="mediatheque"
+|                               href="/fr/mediatheque?field_scald_collection_tid=116"
+|                               "Cahiers Innovation & Prospective"
+|                             "
+                
+                              "
+|                           "
+                                        "
+|                           <li>
+|                             "
+                                  "
+|                             <a>
+|                               data-drupal-link-query="{"field_scald_collection_tid":"323"}"
+|                               data-drupal-link-system-path="mediatheque"
+|                               href="/fr/mediatheque?field_scald_collection_tid=323"
+|                               "Livres blancs"
+|                             "
+                
+                              "
+|                           "
+                      "
+|                         "
+        
+          
+              
+                          "
+|                       "
+          
+        
+          
+
+      "
+|                     "
+
+
+          
+          
+        "
+|                   "
+      "
+|                 "
+    "
+|               "
+
+    "
+|               <div>
+|                 class="col-sm-4 col-12 custom_column"
+|                 "
+      "
+|                 <div>
+|                   class="menu-footer-policy"
+|                   "
+          "
+|                   <div>
+|                     class="social-links"
+|                     <div>
+|                       class="title"
+|                       "Suivez-nous"
+|                     <ul>
+|                       <li>
+|                         <a>
+|                           class="twitter"
+|                           href="http://twitter.com/cnil"
+|                           target="_blank"
+|                           title="twitter - CNIL"
+|                           "twitter"
+|                       <li>
+|                         <a>
+|                           class="linkedin"
+|                           href="https://fr.linkedin.com/company/cnil---commission-nationale-de-l%27informatique-et-des-libert-s"
+|                           target="_blank"
+|                           title="linkedin - CNIL"
+|                           "linkedin"
+|                   "
+
+        
+  
+        "
+|                   <ul>
+|                     "
+                "
+|                     <li>
+|                       "
+                  "
+|                       <a>
+|                         data-drupal-link-system-path="mediatheque"
+|                         href="/fr/mediatheque"
+|                         "Médiathèque"
+|                       "
+                      "
+|                     "
+                "
+|                     <li>
+|                       "
+                  "
+|                       <a>
+|                         data-drupal-link-system-path="glossaire"
+|                         href="/fr/glossaire"
+|                         "Glossaire"
+|                       "
+                      "
+|                     "
+                "
+|                     <li>
+|                       "
+                  "
+|                       <a>
+|                         data-drupal-link-system-path="node/84640"
+|                         href="/fr/lexique-francais-anglais-sur-la-protection-des-donnees"
+|                         "Lexique FR-EN"
+|                       "
+                      "
+|                     "
+                "
+|                     <li>
+|                       "
+                  "
+|                       <a>
+|                         data-drupal-link-system-path="cnil-direct"
+|                         href="/fr/cnil-direct"
+|                         "Besoin d'aide"
+|                       "
+                      "
+|                     "
+                "
+|                     <li>
+|                       "
+                  "
+|                       <a>
+|                         data-drupal-link-system-path="node/1180"
+|                         href="/fr/espace-presse"
+|                         "Presse"
+|                       "
+                      "
+|                     "
+                "
+|                     <li>
+|                       "
+                  "
+|                       <span>
+|                         class="item-languages"
+|                         "Langue"
+|                       "
+                                  "
+|                       <ul>
+|                         "
+                "
+|                     <li>
+|                       "
+                  "
+|                       <a>
+|                         aria-current="page"
+|                         class="is-active"
+|                         data-drupal-link-system-path="<front>"
+|                         href="/fr"
+|                         "Fr"
+|                       "
+                      "
+|                     "
+                "
+|                     <li>
+|                       "
+                  "
+|                       <a>
+|                         href="https://www.cnil.fr/en/home"
+|                         "En"
+|                       "
+                      "
+|                     "
+        "
+|                   "
+  
+              
+                "
+|                   <li>
+|                     "
+                  "
+|                     <a>
+|                       data-drupal-link-system-path="gestion-des-cookies"
+|                       href="/fr/gestion-des-cookies"
+|                       "Gestion des cookies"
+|                     "
+                      "
+|                   "
+                "
+|                   <li>
+|                     "
+                  "
+|                     <a>
+|                       href="https://forms.information.cnil.fr/603cfc32b95cee69378a54cd/4fR4m1PsT-W5cBQRkjVMmA/gNAvYERSS_Sl9nJsDCCU2Q/form.html"
+|                       target="_blank"
+|                       "S'inscrire à la lettre d'information "
+|                     "
+                      "
+|                   "
+                "
+|                   <li>
+|                     "
+                  "
+|                     <a>
+|                       href="https://linc.cnil.fr/"
+|                       "Le Laboratoire d'Innovation Numérique de la CNIL (LINC)"
+|                     "
+                      "
+|                   "
+        
+  
+
+
+
+        
+      "
+|                 "
+    "
+|               "
+  "
+|             "
+
+  "
+|             <div>
+|               class="row"
+|               "
+    "
+|               <div>
+|                 class="col-xs-12 col-sm-12 col-md-12 col-lg-12"
+|                 "
+      "
+|                 <div>
+|                   class="menu-footer"
+|                   "
+        
+  
+
+                    "
+|                   <a>
+|                     data-drupal-link-system-path="node/84679"
+|                     href="/fr/mentions-legales"
+|                     "Mentions légales"
+|                   "
+       |                       "
+|                   <a>
+|                     data-drupal-link-system-path="node/84677"
+|                     href="/fr/donnees-personnelles"
+|                     "Données personnelles"
+|                   "
+       |                       "
+|                   <a>
+|                     data-drupal-link-system-path="node/9573"
+|                     href="/fr/accessibilite"
+|                     "Accessibilité : partiellement conforme"
+|                   "
+       |                       "
+|                   <a>
+|                     data-drupal-link-system-path="node/84655"
+|                     href="/fr/informations-publiques"
+|                     "Informations publiques"
+|                   "
+       |                       "
+|                   <a>
+|                     data-drupal-link-system-path="recrutement/offres"
+|                     href="/fr/recrutement/offres"
+|                     "Recrutement"
+|                   "
+       |                       "
+|                   <a>
+|                     href="https://services.cnil.fr/"
+|                     "Mon compte"
+|                   "
+       |                       "
+|                   <a>
+|                     data-drupal-link-system-path="node/745"
+|                     href="/fr/saisir-la-cnil/nous-contacter"
+|                     "Nous contacter"
+|                   "
+                  
+
+
+
+        
+      "
+|                 "
+    "
+|               "
+  "
+|             "
+  "
+|           "
+
+
+    
+  "
+|         "
+"
+|       "
+
+
+  "
+|     "
+
+"
+|     <script>
+|       "window.dataLayer = window.dataLayer || []; window.dataLayer.push({"drupalLanguage":"fr","drupalCountry":"FR","siteName":"CNIL","userUid":0});"
+|     "
+
+"
+|     <script>
+|       data-drupal-selector="drupal-settings-json"
+|       type="application/json"
+|       "{"path":{"baseUrl":"\/","pathPrefix":"fr\/","currentPath":"homepage","currentPathIsAdmin":false,"isFront":true,"currentLanguage":"fr"},"pluralDelimiter":"\u0003","suppressDeprecationErrors":true,"tacjs":{"dialog":{"privacyUrl":"","bodyPosition":"bottom","hashtag":"#tarteaucitron","cookieName":"tarteaucitron","orientation":"bottom","groupServices":false,"serviceDefaultState":"wait","showAlertSmall":false,"cookieslist":false,"showIcon":false,"iconSrc":"","iconPosition":"BottomRight","adblocker":false,"DenyAllCta":true,"AcceptAllCta":true,"highPrivacy":true,"handleBrowserDNTRequest":false,"removeCredit":true,"moreInfoLink":true,"useExternalCss":true,"useExternalJs":true,"cookieDomain":"","readmoreLink":"","mandatory":true,"mandatoryCta":false,"closePopup":false,"customCloserId":"","showDialog":0},"services":{"amplitude":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"abtasty":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"metrica":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"addthis":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"addtoanyfeed":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"addtoanyshare":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"aduptech_ads":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"aduptech_conversion":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"aduptech_retargeting":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"alexa":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"amazon":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"calameo":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"clicky":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"clicmanager":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"contentsquare":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"crazyegg":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"clarity":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"criteo":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"dailymotion":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"datingaffiliation":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"datingaffiliationpopup":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"disqus":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"ekomi":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"etracker":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"facebook":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"facebooklikebox":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"facebookcomment":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"ferank":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"simpleanalytics":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"ferankpub":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"getplus":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"gplus":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"gplusbadge":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"adsense":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":true},"googlepartners":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"adsensesearchform":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"adsensesearchresult":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"googleadwordsconversion":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"googleadwordsremarketing":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"gajs":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"analytics":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"gtag":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"googlemaps":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"googlemapssearch":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"googletagmanager":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"multiplegoogletagmanager":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"googlefonts":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"hubspot":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"jsapi":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"twitterwidgetsapi":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"recaptcha":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"linkedin":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"mautic":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"microsoftcampaignanalytics":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"pinterest":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"prelinker":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"prezi":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"pubdirecte":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"purechat":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"shareaholic":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"shareasale":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"sharethis":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"slideshare":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"soundcloud":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"statcounter":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"timelinejs":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"tagcommander":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"typekit":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"twenga":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"twitter":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"twitterembed":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"twittertimeline":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"twitteruwt":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"uservoice":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"vimeo":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"visualrevenue":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"verizondottag":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"vshop":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"wysistat":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"xiti":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"atinternet":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"youtube":{"status":false,"languages":[],"readMore":"test","readmoreLink":"","needConsent":false},"zopim":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"kameleoon":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"linkedininsighttag":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"facebookpixel":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"issuu":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"webmecanik":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"multiplegtag":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"koban":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"matomo":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"matomohightrack":{"status":true,"languages":{"fr":"fr"},"readMore":"","readmoreLink":"","needConsent":false},"hotjar":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"bingads":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"adform":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"activecampaign":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":true},"tawkto":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"getquanty":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"youtubeapi":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"faciliti":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"userlike":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"adobeanalytics":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"woopra":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"compteur":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"onesignal":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"stonly":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"serviceperso":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"artetv":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"affilae":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"criteoonetag":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"outbrain":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"pinterestpixel":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"xandr":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"xandrconversion":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"xandrsegment":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"firebase":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"matomocloud":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"openwebanalytics":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"pardot":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"plezi":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"sharpspring":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"visiblee":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"genially":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"helloasso":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"m6meteo":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"marketomunchkin":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"meteofrance":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"mtcaptcha":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"pingdom":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"gagenda":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"gallica":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"gdocs":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"gforms":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"goptimize":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"gsheets":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"gslides":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"hcaptcha":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"maps_noapi":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"studizz":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"discord":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"facebookpost":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"instagram":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"elfsight":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"intercomChat":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"smartsupp":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"acast":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"archive":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"ausha":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"bandcamp":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"canalu":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"deezer":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"fculture":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"mixcloud":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"podcloud":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"spotify":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"webtvnu":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"adsenseauto":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"adsensesearch":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"antvoice":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"doubleclick":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"googleads":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"klaviyo":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"kwanko":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"leadforensics":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"microanalytics":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"piwikpro":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"plausible":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"snapchat":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"tiktok":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"userpilot":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"weborama":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"wysistathightrack":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"arcio":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"geoportail":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"matomotm":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"myfeelback":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"openstreetmap":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"crisp":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"robofabrica":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"trustpilot":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"ubib":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"facebookcustomerchat":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false},"videas":{"status":false,"languages":[],"readMore":"","readmoreLink":"","needConsent":false}},"user":[],"texts":{"title":"Gestion de vos pr\u00e9f\u00e9rences sur les cookies (t\u00e9moins de connexion)"},"expire":180},"dataLayer":{"defaultLang":"fr","languages":{"fr":{"id":"fr","name":"French","direction":"ltr","weight":-10},"en":{"id":"en","name":"English","direction":"ltr","weight":-9}}},"matomo":{"disableCookies":false,"trackMailto":true},"cnil_config":{"tarteaucitron":"facebook,twitter,youtube,dailymotion"},"bootstrap":{"forms_has_error_value_toggle":1,"tooltip_enabled":1,"tooltip_animation":1,"tooltip_container":"body","tooltip_delay":"0","tooltip_html":0,"tooltip_placement":"auto left","tooltip_selector":"","tooltip_trigger":"hover","modal_animation":1,"modal_backdrop":"true","modal_focus_input":1,"modal_keyboard":1,"modal_select_text":1,"modal_show":1,"modal_size":"","popover_enabled":1,"popover_animation":1,"popover_auto_close":1,"popover_container":"body","popover_content":"","popover_delay":"0","popover_html":0,"popover_placement":"right","popover_selector":"","popover_title":"","popover_trigger":"click"},"ajaxTrustedUrl":{"form_action_p_pvdeGsVG5zNF_XLGPTvYSKCf43t8qZYSwcfZl2uzM":true},"send_mail_settings":{"title":"CNIL.fr","body":""},"user":{"uid":0,"permissionsHash":"e91320d4ba65c28343200be970ecf156d2f8f2531d36c481286fb5898cc60dbd"}}"
+|     "
+"
+|     <script>
+|       src="/core/assets/vendor/jquery/jquery.min.js?v=3.7.1"
+|     "
+"
+|     <script>
+|       src="/core/assets/vendor/underscore/underscore-min.js?v=1.13.8"
+|     "
+"
+|     <script>
+|       src="/core/assets/vendor/once/once.min.js?v=1.0.1"
+|     "
+"
+|     <script>
+|       src="/sites/default/files/languages/fr_WDxFA2r49JBSRCFKQxTY_ogFWB4ieLusK-3KRukSnqU.js?tmyi9c"
+|     "
+"
+|     <script>
+|       src="/core/misc/drupalSettingsLoader.js?v=10.6.19"
+|     "
+"
+|     <script>
+|       src="/core/misc/drupal.js?v=10.6.19"
+|     "
+"
+|     <script>
+|       src="/core/misc/drupal.init.js?v=10.6.19"
+|     "
+"
+|     <script>
+|       src="/themes/contrib/bootstrap/js/bootstrap-pre-init.js?tmyi9c"
+|     "
+"
+|     <script>
+|       src="/themes/contrib/bootstrap/js/drupal.bootstrap.js?tmyi9c"
+|     "
+"
+|     <script>
+|       src="/themes/contrib/bootstrap/js/attributes.js?tmyi9c"
+|     "
+"
+|     <script>
+|       src="/themes/contrib/bootstrap/js/theme.js?tmyi9c"
+|     "
+"
+|     <script>
+|       src="/themes/contrib/bootstrap/js/popover.js?tmyi9c"
+|     "
+"
+|     <script>
+|       src="/themes/contrib/bootstrap/js/tooltip.js?tmyi9c"
+|     "
+"
+|     <script>
+|       src="/themes/custom/bootstrap_base/js/html5shiv.min.js?tmyi9c"
+|     "
+"
+|     <script>
+|       src="/themes/custom/bootstrap_base/bootstrap/js/alert.js?tmyi9c"
+|     "
+"
+|     <script>
+|       src="/themes/custom/bootstrap_base/bootstrap/js/carousel.js?tmyi9c"
+|     "
+"
+|     <script>
+|       src="/themes/custom/bootstrap_base/bootstrap/js/collapse.js?tmyi9c"
+|     "
+"
+|     <script>
+|       src="/themes/custom/bootstrap_base/bootstrap/js/dropdown.js?tmyi9c"
+|     "
+"
+|     <script>
+|       src="/themes/custom/bootstrap_base/bootstrap/js/modal.js?tmyi9c"
+|     "
+"
+|     <script>
+|       src="/themes/custom/bootstrap_base/bootstrap/js/tooltip.js?tmyi9c"
+|     "
+"
+|     <script>
+|       src="/themes/custom/bootstrap_base/bootstrap/js/popover.js?tmyi9c"
+|     "
+"
+|     <script>
+|       src="/themes/custom/bootstrap_base/bootstrap/js/tab.js?tmyi9c"
+|     "
+"
+|     <script>
+|       src="/themes/custom/bootstrap_base/bootstrap/js/onglets.js?tmyi9c"
+|     "
+"
+|     <script>
+|       src="/themes/custom/bootstrap_base/js/respond.min.js?tmyi9c"
+|     "
+"
+|     <script>
+|       src="/themes/custom/bootstrap_base/js/page.js?tmyi9c"
+|     "
+"
+|     <script>
+|       src="/themes/custom/bootstrap_base/js/bef-buttons.js?tmyi9c"
+|     "
+"
+|     <script>
+|       src="/themes/custom/bootstrap_cnil/bootstrap/js/alert.js?tmyi9c"
+|     "
+"
+|     <script>
+|       src="/themes/custom/bootstrap_cnil/bootstrap/js/carousel.js?tmyi9c"
+|     "
+"
+|     <script>
+|       src="/themes/custom/bootstrap_cnil/bootstrap/js/collapse.js?tmyi9c"
+|     "
+"
+|     <script>
+|       src="/themes/custom/bootstrap_cnil/bootstrap/js/dropdown.js?tmyi9c"
+|     "
+"
+|     <script>
+|       src="/themes/custom/bootstrap_cnil/bootstrap/js/modal.js?tmyi9c"
+|     "
+"
+|     <script>
+|       src="/themes/custom/bootstrap_cnil/bootstrap/js/tooltip.js?tmyi9c"
+|     "
+"
+|     <script>
+|       src="/themes/custom/bootstrap_cnil/bootstrap/js/popover.js?tmyi9c"
+|     "
+"
+|     <script>
+|       src="/themes/custom/bootstrap_cnil/bootstrap/js/tab.js?tmyi9c"
+|     "
+"
+|     <script>
+|       src="/themes/custom/bootstrap_cnil/js/slick.min.js?tmyi9c"
+|     "
+"
+|     <script>
+|       src="/themes/custom/bootstrap_cnil/js/jquery.mousewheel.min.js?tmyi9c"
+|     "
+"
+|     <script>
+|       src="/themes/custom/bootstrap_cnil/js/respond.min.js?tmyi9c"
+|     "
+"
+|     <script>
+|       src="/themes/custom/bootstrap_cnil/js/jquery.mCustomScrollbar.js?tmyi9c"
+|     "
+"
+|     <script>
+|       src="/themes/custom/bootstrap_cnil/js/page.js?tmyi9c"
+|     "
+"
+|     <script>
+|       src="/themes/custom/bootstrap_cnil/js/header.js?tmyi9c"
+|     "
+"
+|     <script>
+|       src="/themes/custom/bootstrap_cnil/js/accessibility.js?tmyi9c"
+|     "
+"
+|     <script>
+|       src="/themes/custom/bootstrap_cnil/js/main.js?tmyi9c"
+|     "
+"
+|     <script>
+|       src="/themes/custom/bootstrap_cnil/js/display_cookies.js?tmyi9c"
+|     "
+"
+|     <script>
+|       src="/themes/custom/bootstrap_cnil/js/matomo.js?tmyi9c"
+|     "
+"
+|     <script>
+|       src="/modules/custom/cnil_global/js/user-space-switcher.js?v=10.6.19"
+|     "
+"
+|     <script>
+|       src="/modules/commons/cnil_site/assets/js/video.js?v=10.6.19"
+|     "
+"
+|     <script>
+|       src="/modules/contrib/tacjs/assets/vendor/tarteaucitron.js/tarteaucitron.js?v=1.20.0"
+|     "
+"
+|     <script>
+|       src="/modules/contrib/tacjs/assets/vendor/tarteaucitron.js/tarteaucitron.services.js?v=1.20.0"
+|     "
+"
+|     <script>
+|       src="/modules/contrib/tacjs/js/main.js?tmyi9c"
+|     "
+"
+|     <script>
+|       src="/modules/commons/cnil_tacjs_page/js/tarteaucitron.services.js?tmyi9c"
+|     "
+"
+|     <script>
+|       src="/modules/commons/cnil_tacjs_page/js/main.js?tmyi9c"
+|     "
+"
+|     <script>
+|       src="/modules/contrib/datalayer/js/datalayer.js?v=1.x"
+|     "
+"
+|     <script>
+|       src="/modules/contrib/matomo/js/matomo.js?v=10.6.19"
+|     "
+"
+|     <script>
+|       src="/modules/commons/cnil_tacjs_page/js/lang/tarteaucitron.fr.js?tmyi9c"
+|     "
+"
+|     <script>
+|       src="/modules/contrib/webform/js/webform.behaviors.js?v=10.6.19"
+|     "
+"
+|     <script>
+|       src="/core/misc/states.js?v=10.6.19"
+|     "
+"
+|     <script>
+|       src="/themes/contrib/bootstrap/js/misc/states.js?tmyi9c"
+|     "
+"
+|     <script>
+|       src="/modules/contrib/webform/js/webform.states.js?v=10.6.19"
+|     "
+"
+|     <script>
+|       src="/modules/contrib/webform/modules/webform_bootstrap/js/webform_bootstrap.states.js?v=10.6.19"
+|     "
+
+
+
+"

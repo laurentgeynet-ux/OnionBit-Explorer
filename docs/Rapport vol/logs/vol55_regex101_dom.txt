@@ -1,0 +1,2972 @@
+| <html>
+|   class="notranslate"
+|   data-text-size="medium"
+|   data-theme="light"
+|   lang="en"
+|   translate="no"
+|   <head>
+|     "
+  "
+|     <meta>
+|       charset="UTF-8"
+|     "
+  "
+|     <meta>
+|       content="notranslate"
+|       name="google"
+|     "
+  "
+|     <meta>
+|       content="regex101"
+|       name="title"
+|     "
+  "
+|     <meta>
+|       content="Build, test, debug and convert regex across flavors with real-time matches and clear explanations. Supports PCRE2, JavaScript, Python and more. Save and share examples."
+|       name="description"
+|     "
+  "
+|     <meta>
+|       content="index, follow"
+|       name="robots"
+|     "
+  "
+|     <noscript>
+|       "<style>#app-loading { display: none !important; }</style>"
+|     "
+  "
+|     <meta>
+|       content="Firas Dib"
+|       name="author"
+|     "
+
+  "
+|     <link>
+|       href="https://regex101.com"
+|       rel="home"
+|     "
+  "
+|     <link>
+|       href="https://regex101.com/"
+|       rel="canonical"
+|     "
+
+  
+  "
+|     <meta>
+|       content="yes"
+|       name="mobile-web-app-capable"
+|     "
+  "
+|     <meta>
+|       content="black-translucent"
+|       name="apple-mobile-web-app-status-bar-style"
+|     "
+  "
+|     <meta>
+|       content="regex101: Online Regex Tester, Builder, Converter & Debugger"
+|       name="apple-mobile-web-app-title"
+|     "
+  "
+|     <meta>
+|       content="regex101: Online Regex Tester, Builder, Converter & Debugger"
+|       name="application-name"
+|     "
+  "
+|     <meta>
+|       content="telephone=no"
+|       name="format-detection"
+|     "
+
+  "
+|     <meta>
+|       content="#2c5c97"
+|       name="theme-color"
+|     "
+  "
+|     <meta>
+|       content="#0f2c48"
+|       media="(prefers-color-scheme: dark)"
+|       name="theme-color"
+|     "
+
+  "
+|     <link>
+|       href="/static/assets/manifest.webmanifest"
+|       rel="manifest"
+|     "
+
+  "
+|     <link>
+|       href="/static/assets/icons/favicon-196.png"
+|       rel="icon"
+|       sizes="196x196"
+|       type="image/png"
+|     "
+"
+|     <link>
+|       href="/static/assets/icons/apple-icon-180.png"
+|       rel="apple-touch-icon"
+|     "
+"
+|     <meta>
+|       content="yes"
+|       name="apple-mobile-web-app-capable"
+|     "
+"
+|     <link>
+|       href="/static/assets/splash/light/apple-splash-2048-2732.png"
+|       media="(device-width: 1024px) and (device-height: 1366px) and (-webkit-device-pixel-ratio: 2) and (orientation: portrait)"
+|       rel="apple-touch-startup-image"
+|     "
+"
+|     <link>
+|       href="/static/assets/splash/light/apple-splash-2732-2048.png"
+|       media="(device-width: 1024px) and (device-height: 1366px) and (-webkit-device-pixel-ratio: 2) and (orientation: landscape)"
+|       rel="apple-touch-startup-image"
+|     "
+"
+|     <link>
+|       href="/static/assets/splash/light/apple-splash-1668-2388.png"
+|       media="(device-width: 834px) and (device-height: 1194px) and (-webkit-device-pixel-ratio: 2) and (orientation: portrait)"
+|       rel="apple-touch-startup-image"
+|     "
+"
+|     <link>
+|       href="/static/assets/splash/light/apple-splash-2388-1668.png"
+|       media="(device-width: 834px) and (device-height: 1194px) and (-webkit-device-pixel-ratio: 2) and (orientation: landscape)"
+|       rel="apple-touch-startup-image"
+|     "
+"
+|     <link>
+|       href="/static/assets/splash/light/apple-splash-1536-2048.png"
+|       media="(device-width: 768px) and (device-height: 1024px) and (-webkit-device-pixel-ratio: 2) and (orientation: portrait)"
+|       rel="apple-touch-startup-image"
+|     "
+"
+|     <link>
+|       href="/static/assets/splash/light/apple-splash-2048-1536.png"
+|       media="(device-width: 768px) and (device-height: 1024px) and (-webkit-device-pixel-ratio: 2) and (orientation: landscape)"
+|       rel="apple-touch-startup-image"
+|     "
+"
+|     <link>
+|       href="/static/assets/splash/light/apple-splash-1640-2360.png"
+|       media="(device-width: 820px) and (device-height: 1180px) and (-webkit-device-pixel-ratio: 2) and (orientation: portrait)"
+|       rel="apple-touch-startup-image"
+|     "
+"
+|     <link>
+|       href="/static/assets/splash/light/apple-splash-2360-1640.png"
+|       media="(device-width: 820px) and (device-height: 1180px) and (-webkit-device-pixel-ratio: 2) and (orientation: landscape)"
+|       rel="apple-touch-startup-image"
+|     "
+"
+|     <link>
+|       href="/static/assets/splash/light/apple-splash-1668-2224.png"
+|       media="(device-width: 834px) and (device-height: 1112px) and (-webkit-device-pixel-ratio: 2) and (orientation: portrait)"
+|       rel="apple-touch-startup-image"
+|     "
+"
+|     <link>
+|       href="/static/assets/splash/light/apple-splash-2224-1668.png"
+|       media="(device-width: 834px) and (device-height: 1112px) and (-webkit-device-pixel-ratio: 2) and (orientation: landscape)"
+|       rel="apple-touch-startup-image"
+|     "
+"
+|     <link>
+|       href="/static/assets/splash/light/apple-splash-1620-2160.png"
+|       media="(device-width: 810px) and (device-height: 1080px) and (-webkit-device-pixel-ratio: 2) and (orientation: portrait)"
+|       rel="apple-touch-startup-image"
+|     "
+"
+|     <link>
+|       href="/static/assets/splash/light/apple-splash-2160-1620.png"
+|       media="(device-width: 810px) and (device-height: 1080px) and (-webkit-device-pixel-ratio: 2) and (orientation: landscape)"
+|       rel="apple-touch-startup-image"
+|     "
+"
+|     <link>
+|       href="/static/assets/splash/light/apple-splash-1488-2266.png"
+|       media="(device-width: 744px) and (device-height: 1133px) and (-webkit-device-pixel-ratio: 2) and (orientation: portrait)"
+|       rel="apple-touch-startup-image"
+|     "
+"
+|     <link>
+|       href="/static/assets/splash/light/apple-splash-2266-1488.png"
+|       media="(device-width: 744px) and (device-height: 1133px) and (-webkit-device-pixel-ratio: 2) and (orientation: landscape)"
+|       rel="apple-touch-startup-image"
+|     "
+"
+|     <link>
+|       href="/static/assets/splash/light/apple-splash-1320-2868.png"
+|       media="(device-width: 440px) and (device-height: 956px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)"
+|       rel="apple-touch-startup-image"
+|     "
+"
+|     <link>
+|       href="/static/assets/splash/light/apple-splash-2868-1320.png"
+|       media="(device-width: 440px) and (device-height: 956px) and (-webkit-device-pixel-ratio: 3) and (orientation: landscape)"
+|       rel="apple-touch-startup-image"
+|     "
+"
+|     <link>
+|       href="/static/assets/splash/light/apple-splash-1206-2622.png"
+|       media="(device-width: 402px) and (device-height: 874px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)"
+|       rel="apple-touch-startup-image"
+|     "
+"
+|     <link>
+|       href="/static/assets/splash/light/apple-splash-2622-1206.png"
+|       media="(device-width: 402px) and (device-height: 874px) and (-webkit-device-pixel-ratio: 3) and (orientation: landscape)"
+|       rel="apple-touch-startup-image"
+|     "
+"
+|     <link>
+|       href="/static/assets/splash/light/apple-splash-1260-2736.png"
+|       media="(device-width: 420px) and (device-height: 912px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)"
+|       rel="apple-touch-startup-image"
+|     "
+"
+|     <link>
+|       href="/static/assets/splash/light/apple-splash-2736-1260.png"
+|       media="(device-width: 420px) and (device-height: 912px) and (-webkit-device-pixel-ratio: 3) and (orientation: landscape)"
+|       rel="apple-touch-startup-image"
+|     "
+"
+|     <link>
+|       href="/static/assets/splash/light/apple-splash-1290-2796.png"
+|       media="(device-width: 430px) and (device-height: 932px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)"
+|       rel="apple-touch-startup-image"
+|     "
+"
+|     <link>
+|       href="/static/assets/splash/light/apple-splash-2796-1290.png"
+|       media="(device-width: 430px) and (device-height: 932px) and (-webkit-device-pixel-ratio: 3) and (orientation: landscape)"
+|       rel="apple-touch-startup-image"
+|     "
+"
+|     <link>
+|       href="/static/assets/splash/light/apple-splash-1179-2556.png"
+|       media="(device-width: 393px) and (device-height: 852px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)"
+|       rel="apple-touch-startup-image"
+|     "
+"
+|     <link>
+|       href="/static/assets/splash/light/apple-splash-2556-1179.png"
+|       media="(device-width: 393px) and (device-height: 852px) and (-webkit-device-pixel-ratio: 3) and (orientation: landscape)"
+|       rel="apple-touch-startup-image"
+|     "
+"
+|     <link>
+|       href="/static/assets/splash/light/apple-splash-1170-2532.png"
+|       media="(device-width: 390px) and (device-height: 844px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)"
+|       rel="apple-touch-startup-image"
+|     "
+"
+|     <link>
+|       href="/static/assets/splash/light/apple-splash-2532-1170.png"
+|       media="(device-width: 390px) and (device-height: 844px) and (-webkit-device-pixel-ratio: 3) and (orientation: landscape)"
+|       rel="apple-touch-startup-image"
+|     "
+"
+|     <link>
+|       href="/static/assets/splash/light/apple-splash-1284-2778.png"
+|       media="(device-width: 428px) and (device-height: 926px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)"
+|       rel="apple-touch-startup-image"
+|     "
+"
+|     <link>
+|       href="/static/assets/splash/light/apple-splash-2778-1284.png"
+|       media="(device-width: 428px) and (device-height: 926px) and (-webkit-device-pixel-ratio: 3) and (orientation: landscape)"
+|       rel="apple-touch-startup-image"
+|     "
+"
+|     <link>
+|       href="/static/assets/splash/light/apple-splash-1125-2436.png"
+|       media="(device-width: 375px) and (device-height: 812px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)"
+|       rel="apple-touch-startup-image"
+|     "
+"
+|     <link>
+|       href="/static/assets/splash/light/apple-splash-2436-1125.png"
+|       media="(device-width: 375px) and (device-height: 812px) and (-webkit-device-pixel-ratio: 3) and (orientation: landscape)"
+|       rel="apple-touch-startup-image"
+|     "
+"
+|     <link>
+|       href="/static/assets/splash/light/apple-splash-1242-2688.png"
+|       media="(device-width: 414px) and (device-height: 896px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)"
+|       rel="apple-touch-startup-image"
+|     "
+"
+|     <link>
+|       href="/static/assets/splash/light/apple-splash-2688-1242.png"
+|       media="(device-width: 414px) and (device-height: 896px) and (-webkit-device-pixel-ratio: 3) and (orientation: landscape)"
+|       rel="apple-touch-startup-image"
+|     "
+"
+|     <link>
+|       href="/static/assets/splash/light/apple-splash-828-1792.png"
+|       media="(device-width: 414px) and (device-height: 896px) and (-webkit-device-pixel-ratio: 2) and (orientation: portrait)"
+|       rel="apple-touch-startup-image"
+|     "
+"
+|     <link>
+|       href="/static/assets/splash/light/apple-splash-1792-828.png"
+|       media="(device-width: 414px) and (device-height: 896px) and (-webkit-device-pixel-ratio: 2) and (orientation: landscape)"
+|       rel="apple-touch-startup-image"
+|     "
+"
+|     <link>
+|       href="/static/assets/splash/light/apple-splash-1242-2208.png"
+|       media="(device-width: 414px) and (device-height: 736px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)"
+|       rel="apple-touch-startup-image"
+|     "
+"
+|     <link>
+|       href="/static/assets/splash/light/apple-splash-2208-1242.png"
+|       media="(device-width: 414px) and (device-height: 736px) and (-webkit-device-pixel-ratio: 3) and (orientation: landscape)"
+|       rel="apple-touch-startup-image"
+|     "
+"
+|     <link>
+|       href="/static/assets/splash/light/apple-splash-750-1334.png"
+|       media="(device-width: 375px) and (device-height: 667px) and (-webkit-device-pixel-ratio: 2) and (orientation: portrait)"
+|       rel="apple-touch-startup-image"
+|     "
+"
+|     <link>
+|       href="/static/assets/splash/light/apple-splash-1334-750.png"
+|       media="(device-width: 375px) and (device-height: 667px) and (-webkit-device-pixel-ratio: 2) and (orientation: landscape)"
+|       rel="apple-touch-startup-image"
+|     "
+"
+|     <link>
+|       href="/static/assets/splash/light/apple-splash-640-1136.png"
+|       media="(device-width: 320px) and (device-height: 568px) and (-webkit-device-pixel-ratio: 2) and (orientation: portrait)"
+|       rel="apple-touch-startup-image"
+|     "
+"
+|     <link>
+|       href="/static/assets/splash/light/apple-splash-1136-640.png"
+|       media="(device-width: 320px) and (device-height: 568px) and (-webkit-device-pixel-ratio: 2) and (orientation: landscape)"
+|       rel="apple-touch-startup-image"
+|     "
+"
+|     <link>
+|       href="/static/assets/splash/dark/apple-splash-dark-2048-2732.png"
+|       media="(prefers-color-scheme: dark) and (device-width: 1024px) and (device-height: 1366px) and (-webkit-device-pixel-ratio: 2) and (orientation: portrait)"
+|       rel="apple-touch-startup-image"
+|     "
+"
+|     <link>
+|       href="/static/assets/splash/dark/apple-splash-dark-2732-2048.png"
+|       media="(prefers-color-scheme: dark) and (device-width: 1024px) and (device-height: 1366px) and (-webkit-device-pixel-ratio: 2) and (orientation: landscape)"
+|       rel="apple-touch-startup-image"
+|     "
+"
+|     <link>
+|       href="/static/assets/splash/dark/apple-splash-dark-1668-2388.png"
+|       media="(prefers-color-scheme: dark) and (device-width: 834px) and (device-height: 1194px) and (-webkit-device-pixel-ratio: 2) and (orientation: portrait)"
+|       rel="apple-touch-startup-image"
+|     "
+"
+|     <link>
+|       href="/static/assets/splash/dark/apple-splash-dark-2388-1668.png"
+|       media="(prefers-color-scheme: dark) and (device-width: 834px) and (device-height: 1194px) and (-webkit-device-pixel-ratio: 2) and (orientation: landscape)"
+|       rel="apple-touch-startup-image"
+|     "
+"
+|     <link>
+|       href="/static/assets/splash/dark/apple-splash-dark-1536-2048.png"
+|       media="(prefers-color-scheme: dark) and (device-width: 768px) and (device-height: 1024px) and (-webkit-device-pixel-ratio: 2) and (orientation: portrait)"
+|       rel="apple-touch-startup-image"
+|     "
+"
+|     <link>
+|       href="/static/assets/splash/dark/apple-splash-dark-2048-1536.png"
+|       media="(prefers-color-scheme: dark) and (device-width: 768px) and (device-height: 1024px) and (-webkit-device-pixel-ratio: 2) and (orientation: landscape)"
+|       rel="apple-touch-startup-image"
+|     "
+"
+|     <link>
+|       href="/static/assets/splash/dark/apple-splash-dark-1640-2360.png"
+|       media="(prefers-color-scheme: dark) and (device-width: 820px) and (device-height: 1180px) and (-webkit-device-pixel-ratio: 2) and (orientation: portrait)"
+|       rel="apple-touch-startup-image"
+|     "
+"
+|     <link>
+|       href="/static/assets/splash/dark/apple-splash-dark-2360-1640.png"
+|       media="(prefers-color-scheme: dark) and (device-width: 820px) and (device-height: 1180px) and (-webkit-device-pixel-ratio: 2) and (orientation: landscape)"
+|       rel="apple-touch-startup-image"
+|     "
+"
+|     <link>
+|       href="/static/assets/splash/dark/apple-splash-dark-1668-2224.png"
+|       media="(prefers-color-scheme: dark) and (device-width: 834px) and (device-height: 1112px) and (-webkit-device-pixel-ratio: 2) and (orientation: portrait)"
+|       rel="apple-touch-startup-image"
+|     "
+"
+|     <link>
+|       href="/static/assets/splash/dark/apple-splash-dark-2224-1668.png"
+|       media="(prefers-color-scheme: dark) and (device-width: 834px) and (device-height: 1112px) and (-webkit-device-pixel-ratio: 2) and (orientation: landscape)"
+|       rel="apple-touch-startup-image"
+|     "
+"
+|     <link>
+|       href="/static/assets/splash/dark/apple-splash-dark-1620-2160.png"
+|       media="(prefers-color-scheme: dark) and (device-width: 810px) and (device-height: 1080px) and (-webkit-device-pixel-ratio: 2) and (orientation: portrait)"
+|       rel="apple-touch-startup-image"
+|     "
+"
+|     <link>
+|       href="/static/assets/splash/dark/apple-splash-dark-2160-1620.png"
+|       media="(prefers-color-scheme: dark) and (device-width: 810px) and (device-height: 1080px) and (-webkit-device-pixel-ratio: 2) and (orientation: landscape)"
+|       rel="apple-touch-startup-image"
+|     "
+"
+|     <link>
+|       href="/static/assets/splash/dark/apple-splash-dark-1488-2266.png"
+|       media="(prefers-color-scheme: dark) and (device-width: 744px) and (device-height: 1133px) and (-webkit-device-pixel-ratio: 2) and (orientation: portrait)"
+|       rel="apple-touch-startup-image"
+|     "
+"
+|     <link>
+|       href="/static/assets/splash/dark/apple-splash-dark-2266-1488.png"
+|       media="(prefers-color-scheme: dark) and (device-width: 744px) and (device-height: 1133px) and (-webkit-device-pixel-ratio: 2) and (orientation: landscape)"
+|       rel="apple-touch-startup-image"
+|     "
+"
+|     <link>
+|       href="/static/assets/splash/dark/apple-splash-dark-1320-2868.png"
+|       media="(prefers-color-scheme: dark) and (device-width: 440px) and (device-height: 956px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)"
+|       rel="apple-touch-startup-image"
+|     "
+"
+|     <link>
+|       href="/static/assets/splash/dark/apple-splash-dark-2868-1320.png"
+|       media="(prefers-color-scheme: dark) and (device-width: 440px) and (device-height: 956px) and (-webkit-device-pixel-ratio: 3) and (orientation: landscape)"
+|       rel="apple-touch-startup-image"
+|     "
+"
+|     <link>
+|       href="/static/assets/splash/dark/apple-splash-dark-1206-2622.png"
+|       media="(prefers-color-scheme: dark) and (device-width: 402px) and (device-height: 874px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)"
+|       rel="apple-touch-startup-image"
+|     "
+"
+|     <link>
+|       href="/static/assets/splash/dark/apple-splash-dark-2622-1206.png"
+|       media="(prefers-color-scheme: dark) and (device-width: 402px) and (device-height: 874px) and (-webkit-device-pixel-ratio: 3) and (orientation: landscape)"
+|       rel="apple-touch-startup-image"
+|     "
+"
+|     <link>
+|       href="/static/assets/splash/dark/apple-splash-dark-1260-2736.png"
+|       media="(prefers-color-scheme: dark) and (device-width: 420px) and (device-height: 912px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)"
+|       rel="apple-touch-startup-image"
+|     "
+"
+|     <link>
+|       href="/static/assets/splash/dark/apple-splash-dark-2736-1260.png"
+|       media="(prefers-color-scheme: dark) and (device-width: 420px) and (device-height: 912px) and (-webkit-device-pixel-ratio: 3) and (orientation: landscape)"
+|       rel="apple-touch-startup-image"
+|     "
+"
+|     <link>
+|       href="/static/assets/splash/dark/apple-splash-dark-1290-2796.png"
+|       media="(prefers-color-scheme: dark) and (device-width: 430px) and (device-height: 932px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)"
+|       rel="apple-touch-startup-image"
+|     "
+"
+|     <link>
+|       href="/static/assets/splash/dark/apple-splash-dark-2796-1290.png"
+|       media="(prefers-color-scheme: dark) and (device-width: 430px) and (device-height: 932px) and (-webkit-device-pixel-ratio: 3) and (orientation: landscape)"
+|       rel="apple-touch-startup-image"
+|     "
+"
+|     <link>
+|       href="/static/assets/splash/dark/apple-splash-dark-1179-2556.png"
+|       media="(prefers-color-scheme: dark) and (device-width: 393px) and (device-height: 852px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)"
+|       rel="apple-touch-startup-image"
+|     "
+"
+|     <link>
+|       href="/static/assets/splash/dark/apple-splash-dark-2556-1179.png"
+|       media="(prefers-color-scheme: dark) and (device-width: 393px) and (device-height: 852px) and (-webkit-device-pixel-ratio: 3) and (orientation: landscape)"
+|       rel="apple-touch-startup-image"
+|     "
+"
+|     <link>
+|       href="/static/assets/splash/dark/apple-splash-dark-1170-2532.png"
+|       media="(prefers-color-scheme: dark) and (device-width: 390px) and (device-height: 844px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)"
+|       rel="apple-touch-startup-image"
+|     "
+"
+|     <link>
+|       href="/static/assets/splash/dark/apple-splash-dark-2532-1170.png"
+|       media="(prefers-color-scheme: dark) and (device-width: 390px) and (device-height: 844px) and (-webkit-device-pixel-ratio: 3) and (orientation: landscape)"
+|       rel="apple-touch-startup-image"
+|     "
+"
+|     <link>
+|       href="/static/assets/splash/dark/apple-splash-dark-1284-2778.png"
+|       media="(prefers-color-scheme: dark) and (device-width: 428px) and (device-height: 926px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)"
+|       rel="apple-touch-startup-image"
+|     "
+"
+|     <link>
+|       href="/static/assets/splash/dark/apple-splash-dark-2778-1284.png"
+|       media="(prefers-color-scheme: dark) and (device-width: 428px) and (device-height: 926px) and (-webkit-device-pixel-ratio: 3) and (orientation: landscape)"
+|       rel="apple-touch-startup-image"
+|     "
+"
+|     <link>
+|       href="/static/assets/splash/dark/apple-splash-dark-1125-2436.png"
+|       media="(prefers-color-scheme: dark) and (device-width: 375px) and (device-height: 812px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)"
+|       rel="apple-touch-startup-image"
+|     "
+"
+|     <link>
+|       href="/static/assets/splash/dark/apple-splash-dark-2436-1125.png"
+|       media="(prefers-color-scheme: dark) and (device-width: 375px) and (device-height: 812px) and (-webkit-device-pixel-ratio: 3) and (orientation: landscape)"
+|       rel="apple-touch-startup-image"
+|     "
+"
+|     <link>
+|       href="/static/assets/splash/dark/apple-splash-dark-1242-2688.png"
+|       media="(prefers-color-scheme: dark) and (device-width: 414px) and (device-height: 896px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)"
+|       rel="apple-touch-startup-image"
+|     "
+"
+|     <link>
+|       href="/static/assets/splash/dark/apple-splash-dark-2688-1242.png"
+|       media="(prefers-color-scheme: dark) and (device-width: 414px) and (device-height: 896px) and (-webkit-device-pixel-ratio: 3) and (orientation: landscape)"
+|       rel="apple-touch-startup-image"
+|     "
+"
+|     <link>
+|       href="/static/assets/splash/dark/apple-splash-dark-828-1792.png"
+|       media="(prefers-color-scheme: dark) and (device-width: 414px) and (device-height: 896px) and (-webkit-device-pixel-ratio: 2) and (orientation: portrait)"
+|       rel="apple-touch-startup-image"
+|     "
+"
+|     <link>
+|       href="/static/assets/splash/dark/apple-splash-dark-1792-828.png"
+|       media="(prefers-color-scheme: dark) and (device-width: 414px) and (device-height: 896px) and (-webkit-device-pixel-ratio: 2) and (orientation: landscape)"
+|       rel="apple-touch-startup-image"
+|     "
+"
+|     <link>
+|       href="/static/assets/splash/dark/apple-splash-dark-1242-2208.png"
+|       media="(prefers-color-scheme: dark) and (device-width: 414px) and (device-height: 736px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)"
+|       rel="apple-touch-startup-image"
+|     "
+"
+|     <link>
+|       href="/static/assets/splash/dark/apple-splash-dark-2208-1242.png"
+|       media="(prefers-color-scheme: dark) and (device-width: 414px) and (device-height: 736px) and (-webkit-device-pixel-ratio: 3) and (orientation: landscape)"
+|       rel="apple-touch-startup-image"
+|     "
+"
+|     <link>
+|       href="/static/assets/splash/dark/apple-splash-dark-750-1334.png"
+|       media="(prefers-color-scheme: dark) and (device-width: 375px) and (device-height: 667px) and (-webkit-device-pixel-ratio: 2) and (orientation: portrait)"
+|       rel="apple-touch-startup-image"
+|     "
+"
+|     <link>
+|       href="/static/assets/splash/dark/apple-splash-dark-1334-750.png"
+|       media="(prefers-color-scheme: dark) and (device-width: 375px) and (device-height: 667px) and (-webkit-device-pixel-ratio: 2) and (orientation: landscape)"
+|       rel="apple-touch-startup-image"
+|     "
+"
+|     <link>
+|       href="/static/assets/splash/dark/apple-splash-dark-640-1136.png"
+|       media="(prefers-color-scheme: dark) and (device-width: 320px) and (device-height: 568px) and (-webkit-device-pixel-ratio: 2) and (orientation: portrait)"
+|       rel="apple-touch-startup-image"
+|     "
+"
+|     <link>
+|       href="/static/assets/splash/dark/apple-splash-dark-1136-640.png"
+|       media="(prefers-color-scheme: dark) and (device-width: 320px) and (device-height: 568px) and (-webkit-device-pixel-ratio: 2) and (orientation: landscape)"
+|       rel="apple-touch-startup-image"
+|     "
+
+
+  "
+|     <meta>
+|       content="width=device-width, minimum-scale=1.0, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
+|       name="viewport"
+|     "
+  "
+|     <meta>
+|       content="regex,regex tester,regular expression,debugger,pcre,php,golang,java,javascript,python,.net,c#,rust"
+|       name="keywords"
+|     "
+
+  
+  "
+|     <meta>
+|       content="summary_large_image"
+|       property="twitter:card"
+|     "
+  "
+|     <meta>
+|       content="@regex101"
+|       property="twitter:site"
+|     "
+  "
+|     <meta>
+|       content="regex101: Online Regex Tester, Builder, Converter & Debugger"
+|       property="twitter:title"
+|     "
+  "
+|     <meta>
+|       content="Build, test, debug and convert regex across flavors with real-time matches and clear explanations. Supports PCRE2, JavaScript, Python and more. Save and share examples."
+|       property="twitter:description"
+|     "
+  "
+|     <meta>
+|       content="@regex101"
+|       property="twitter:creator"
+|     "
+  "
+|     <meta>
+|       content="https://regex101.com/preview/"
+|       property="twitter:image"
+|     "
+  "
+|     <meta>
+|       content="regex101.com"
+|       property="twitter:domain"
+|     "
+
+  "
+|     <meta>
+|       content="https://regex101.com/preview/"
+|       property="og:image"
+|     "
+  "
+|     <meta>
+|       content="1200"
+|       property="og:image:width"
+|     "
+  "
+|     <meta>
+|       content="630"
+|       property="og:image:height"
+|     "
+  "
+|     <meta>
+|       content="regex101: Online Regex Tester, Builder, Converter & Debugger"
+|       property="og:title"
+|     "
+  "
+|     <meta>
+|       content="Build, test, debug and convert regex across flavors with real-time matches and clear explanations. Supports PCRE2, JavaScript, Python and more. Save and share examples."
+|       property="og:description"
+|     "
+  "
+|     <meta>
+|       content="https://regex101.com/"
+|       property="og:url"
+|     "
+  "
+|     <meta>
+|       content="regex101"
+|       property="og:site_name"
+|     "
+  "
+|     <meta>
+|       content="website"
+|       property="og:type"
+|     "
+
+
+  "
+|     <script>
+|       "
+    (function () {
+      var theme = 'auto'
+      var textSize = 'medium'
+
+      try {
+        var settings = JSON.parse(localStorage.getItem('persist:settings')) || {}
+        theme = JSON.parse(settings.theme || 'null') || theme
+        textSize = JSON.parse(settings.textSize || 'null') || textSize
+      } catch (error) {
+        console.error('Unable to read appearance settings', error)
+      }
+
+      if (theme !== 'light' && theme !== 'dark') {
+        theme = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches
+          ? 'dark'
+          : 'light'
+      }
+
+      document.documentElement.setAttribute('data-theme', theme)
+      document.documentElement.setAttribute('data-text-size', textSize)
+    })()
+  "
+|     "
+
+  "
+|     <script>
+|       data-domain="regex101.com"
+|       defer=""
+|       fetchpriority="low"
+|       src="https://analytics.regex101.com/js/script.outbound-links.pageview-props.tagged-events.js"
+|     "
+
+  "
+|     <title>
+|       "regex101: Online Regex Tester, Builder, Converter & Debugger"
+|     "
+
+  "
+|     <link>
+|       class="regex101-style"
+|       href="/static/6699.24be64ba38e70788a00f.css"
+|       rel="stylesheet"
+|       type="text/css"
+|     "
+
+  "
+|     <link>
+|       as="style"
+|       href="/static/8067.98936633320b39f8e0a2.css"
+|       rel="preload"
+|     "
+"
+|     <link>
+|       as="script"
+|       href="/static/quickref.6ab55b5fc9dec299b658.chunk.js"
+|       rel="preload"
+|     "
+"
+|     <link>
+|       class="regex101-style"
+|       href="/static/3023.287596fd5cc2ff6e2ad6.css"
+|       rel="stylesheet"
+|       type="text/css"
+|     "
+"
+|     <script>
+|       defer=""
+|       src="/static/vendors-bundle.c169de82873c293c004b.js"
+|     "
+"
+|     <script>
+|       defer=""
+|       src="/static/bundle.d729a099b935313a705a.js"
+|     "
+"
+|   "
+"
+|   <body>
+|     "
+"
+|     <div>
+|       aria-hidden="false"
+|       id="app-loading"
+|       "
+  "
+|       <noscript>
+|         "
+    <a href="https://turnonjs.com">
+      Please enable JavaScript to use regex101
+    </a>
+  "
+|       "
+  "
+|       <div>
+|         aria-label="Loading regex101"
+|         class="app-loading__expression"
+|         role="status"
+|         "
+    "
+|         <span>
+|           aria-hidden="true"
+|           data-token="delimiter"
+|           style="--index: 0"
+|           <b>
+|             "/"
+|           <i>
+|         "
+    "
+|         <span>
+|           aria-hidden="true"
+|           data-token="meta"
+|           style="--index: 1"
+|           <b>
+|             "^"
+|           <i>
+|         "
+    "
+|         <span>
+|           aria-hidden="true"
+|           style="--index: 2"
+|           <b>
+|             "r"
+|           <i>
+|         "
+    "
+|         <span>
+|           aria-hidden="true"
+|           style="--index: 3"
+|           <b>
+|             "e"
+|           <i>
+|         "
+    "
+|         <span>
+|           aria-hidden="true"
+|           style="--index: 4"
+|           <b>
+|             "g"
+|           <i>
+|         "
+    "
+|         <span>
+|           aria-hidden="true"
+|           style="--index: 5"
+|           <b>
+|             "e"
+|           <i>
+|         "
+    "
+|         <span>
+|           aria-hidden="true"
+|           style="--index: 6"
+|           <b>
+|             "x"
+|           <i>
+|         "
+    "
+|         <span>
+|           aria-hidden="true"
+|           data-token="char-class"
+|           style="--index: 7"
+|           <b>
+|             "["
+|           <i>
+|         "
+    "
+|         <span>
+|           aria-hidden="true"
+|           data-token="char-class-escape"
+|           style="--index: 8"
+|           <b>
+|             "\"
+|           <i>
+|         "
+    "
+|         <span>
+|           aria-hidden="true"
+|           data-token="char-class-escape"
+|           style="--index: 9"
+|           <b>
+|             "-"
+|           <i>
+|         "
+    "
+|         <span>
+|           aria-hidden="true"
+|           data-token="char-class"
+|           style="--index: 10"
+|           <b>
+|             "_"
+|           <i>
+|         "
+    "
+|         <span>
+|           aria-hidden="true"
+|           data-token="char-class"
+|           style="--index: 11"
+|           <b>
+|             " "
+|           <i>
+|         "
+    "
+|         <span>
+|           aria-hidden="true"
+|           data-token="char-class"
+|           style="--index: 12"
+|           <b>
+|             "]"
+|           <i>
+|         "
+    "
+|         <span>
+|           aria-hidden="true"
+|           data-token="meta"
+|           style="--index: 13"
+|           <b>
+|             "?"
+|           <i>
+|         "
+    "
+|         <span>
+|           aria-hidden="true"
+|           style="--index: 14"
+|           <b>
+|             "1"
+|           <i>
+|         "
+    "
+|         <span>
+|           aria-hidden="true"
+|           style="--index: 15"
+|           <b>
+|             "0"
+|           <i>
+|         "
+    "
+|         <span>
+|           aria-hidden="true"
+|           style="--index: 16"
+|           <b>
+|             "1"
+|           <i>
+|         "
+    "
+|         <span>
+|           aria-hidden="true"
+|           data-token="meta"
+|           data-waiting=""
+|           style="--index: 17"
+|           <b>
+|             "$"
+|           <i>
+|         "
+    "
+|         <span>
+|           aria-hidden="true"
+|           data-token="delimiter"
+|           data-waiting=""
+|           style="--index: 18"
+|           <b>
+|             "/"
+|           <i>
+|         "
+    "
+|         <span>
+|           aria-hidden="true"
+|           data-token="modifier"
+|           data-waiting=""
+|           style="--index: 19"
+|           <b>
+|             "i"
+|           <i>
+|         "
+  "
+|       "
+"
+|     "
+"
+|     <div>
+|       id="regex-app"
+|       <div>
+|         class="ubMhU"
+|         <header>
+|           class="Mt50K pJyAj"
+|           <button>
+|             aria-label="Collapse navigation panel"
+|             aria-pressed="true"
+|             class="C6U5L Tbe4j s_nse q8Eke hybaM"
+|             data-base-ui-tooltip-trigger=""
+|             id="base-ui-_R_3p8mm_"
+|             tabindex="0"
+|             type="button"
+|             <span>
+|               class="lC6kT"
+|               <svg>
+|                 class="dxtjI kcIdU"
+|                 fill="none"
+|                 height="1em"
+|                 stroke-linecap="round"
+|                 stroke-linejoin="round"
+|                 stroke-width="2"
+|                 stroke="currentColor"
+|                 viewBox="0 0 24 24"
+|                 width="1em"
+|                 xmlns="http://www.w3.org/2000/svg"
+|                 <rect>
+|                   height="18"
+|                   rx="2"
+|                   width="18"
+|                   x="3"
+|                   y="3"
+|                 <path>
+|                   d="M9 3v18"
+|           <h1>
+|             <a>
+|               aria-label="regular expressions 101"
+|               class="W6KiV JhGf4"
+|               href="/"
+|               rel="noopener"
+|               <span>
+|                 class="aKIlx"
+|                 <span>
+|                   class="FMl1u"
+|                   "Reg"
+|                   <span>
+|                     class="hOj1C"
+|                     "ular"
+|                 <span>
+|                   class="hOj1C"
+|                   " "
+|                 <span>
+|                   class="f4WR9"
+|                   "Ex"
+|                   <span>
+|                     class="hOj1C"
+|                     "pressions"
+|                 <span>
+|                   class="hOj1C"
+|                   " "
+|                 <span>
+|                   class="Tp_GT"
+|                   "101"
+|           <div>
+|             class="McSFM"
+|             <button>
+|               aria-expanded="false"
+|               aria-haspopup="dialog"
+|               aria-label="Upgrade to Pro"
+|               class="C6U5L hkevj WmbbB Oi2zP qDpGx"
+|               data-base-ui-click-trigger=""
+|               data-base-ui-tooltip-trigger=""
+|               id="base-ui-_R_b8mm_"
+|               tabindex="0"
+|               type="button"
+|               <svg>
+|                 class="dxtjI"
+|                 fill="none"
+|                 height="1em"
+|                 stroke-linecap="round"
+|                 stroke-linejoin="round"
+|                 stroke-width="2"
+|                 stroke="currentColor"
+|                 viewBox="0 0 24 24"
+|                 width="1em"
+|                 xmlns="http://www.w3.org/2000/svg"
+|                 <path>
+|                   d="M6 3h12l4 6-10 13L2 9Z"
+|                 <path>
+|                   d="M11 3 8 9l4 13 4-13-3-6"
+|                 <path>
+|                   d="M2 9h20"
+|               <span>
+|                 class="MDYSF PM3QQ"
+|                 "Upgrade to Pro"
+|             <button>
+|               aria-expanded="false"
+|               aria-haspopup="dialog"
+|               aria-label="Enterprise"
+|               class="C6U5L hkevj WmbbB KQttJ qDpGx"
+|               data-base-ui-click-trigger=""
+|               data-base-ui-tooltip-trigger=""
+|               id="base-ui-_R_j8mm_"
+|               tabindex="0"
+|               type="button"
+|               <svg>
+|                 class="dxtjI"
+|                 fill="none"
+|                 height="1em"
+|                 stroke-linecap="round"
+|                 stroke-linejoin="round"
+|                 stroke-width="2"
+|                 stroke="currentColor"
+|                 viewBox="0 0 24 24"
+|                 width="1em"
+|                 xmlns="http://www.w3.org/2000/svg"
+|                 <path>
+|                   d="M6 22V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v18Z"
+|                 <path>
+|                   d="M6 12H4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h2"
+|                 <path>
+|                   d="M18 9h2a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-2"
+|                 <path>
+|                   d="M10 6h4"
+|                 <path>
+|                   d="M10 10h4"
+|                 <path>
+|                   d="M10 14h4"
+|                 <path>
+|                   d="M10 18h4"
+|               <span>
+|                 class="MDYSF PM3QQ"
+|                 "Enterprise"
+|         <div>
+|           class="cl_J2"
+|           <nav>
+|             aria-label="Application navigation"
+|             class="fQPgL iJQFh"
+|             <div>
+|               class="Pwlzh"
+|               <a>
+|                 aria-current="page"
+|                 aria-label="Regex Editor"
+|                 class="KMTIT"
+|                 data-base-ui-tooltip-trigger=""
+|                 data-discover="true"
+|                 href="/"
+|                 id="base-ui-_R_7olgmm_"
+|                 <svg>
+|                   aria-hidden="true"
+|                   class="dxtjI"
+|                   fill="none"
+|                   height="1em"
+|                   stroke-linecap="round"
+|                   stroke-linejoin="round"
+|                   stroke-width="2"
+|                   stroke="currentColor"
+|                   viewBox="0 0 24 24"
+|                   width="1em"
+|                   xmlns="http://www.w3.org/2000/svg"
+|                   <path>
+|                     d="M17 3v10"
+|                   <path>
+|                     d="m12.67 5.5 8.66 5"
+|                   <path>
+|                     d="m12.67 10.5 8.66-5"
+|                   <path>
+|                     d="M9 17a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v2a2 2 0 0 0 2 2h2a2 2 0 0 0 2-2v-2z"
+|               <a>
+|                 aria-label="Text Pipeline"
+|                 class="KMTIT"
+|                 data-base-ui-tooltip-trigger=""
+|                 data-discover="true"
+|                 href="/pipeline"
+|                 id="base-ui-_R_7p5gmm_"
+|                 <svg>
+|                   aria-hidden="true"
+|                   class="dxtjI"
+|                   fill="none"
+|                   height="1em"
+|                   stroke-linecap="round"
+|                   stroke-linejoin="round"
+|                   stroke-width="2"
+|                   stroke="currentColor"
+|                   viewBox="0 0 24 24"
+|                   width="1em"
+|                   xmlns="http://www.w3.org/2000/svg"
+|                   <rect>
+|                     height="8"
+|                     rx="2"
+|                     width="8"
+|                     x="3"
+|                     y="3"
+|                   <path>
+|                     d="M7 11v4a2 2 0 0 0 2 2h4"
+|                   <rect>
+|                     height="8"
+|                     rx="2"
+|                     width="8"
+|                     x="13"
+|                     y="13"
+|               <div>
+|                 aria-orientation="horizontal"
+|                 class="B2Nzi"
+|                 data-orientation="horizontal"
+|                 role="separator"
+|               <a>
+|                 aria-label="Library"
+|                 class="KMTIT"
+|                 data-base-ui-tooltip-trigger=""
+|                 data-discover="true"
+|                 href="/library"
+|                 id="base-ui-_R_7plgmm_"
+|                 <svg>
+|                   aria-hidden="true"
+|                   class="dxtjI"
+|                   fill="none"
+|                   height="1em"
+|                   stroke-linecap="round"
+|                   stroke-linejoin="round"
+|                   stroke-width="2"
+|                   stroke="currentColor"
+|                   viewBox="0 0 24 24"
+|                   width="1em"
+|                   xmlns="http://www.w3.org/2000/svg"
+|                   <path>
+|                     d="m16 6 4 14"
+|                   <path>
+|                     d="M12 6v14"
+|                   <path>
+|                     d="M8 8v12"
+|                   <path>
+|                     d="M4 4v16"
+|               <a>
+|                 aria-label="My workspaces"
+|                 class="KMTIT"
+|                 data-base-ui-tooltip-trigger=""
+|                 data-discover="true"
+|                 href="/account/mine"
+|                 id="base-ui-_R_7q5gmm_"
+|                 <svg>
+|                   aria-hidden="true"
+|                   class="dxtjI"
+|                   fill="none"
+|                   height="1em"
+|                   stroke-linecap="round"
+|                   stroke-linejoin="round"
+|                   stroke-width="2"
+|                   stroke="currentColor"
+|                   viewBox="0 0 24 24"
+|                   width="1em"
+|                   xmlns="http://www.w3.org/2000/svg"
+|                   <path>
+|                     d="m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2"
+|               <a>
+|                 aria-label="Quiz"
+|                 class="KMTIT"
+|                 data-base-ui-tooltip-trigger=""
+|                 data-discover="true"
+|                 href="/quiz"
+|                 id="base-ui-_R_7qlgmm_"
+|                 <svg>
+|                   aria-hidden="true"
+|                   class="dxtjI"
+|                   fill="none"
+|                   height="1em"
+|                   stroke-linecap="round"
+|                   stroke-linejoin="round"
+|                   stroke-width="2"
+|                   stroke="currentColor"
+|                   viewBox="0 0 24 24"
+|                   width="1em"
+|                   xmlns="http://www.w3.org/2000/svg"
+|                   <path>
+|                     d="M21.42 10.922a1 1 0 0 0-.019-1.838L12.83 5.18a2 2 0 0 0-1.66 0L2.6 9.08a1 1 0 0 0 0 1.832l8.57 3.908a2 2 0 0 0 1.66 0z"
+|                   <path>
+|                     d="M22 10v6"
+|                   <path>
+|                     d="M6 12.5V16a6 3 0 0 0 12 0v-3.5"
+|             <div>
+|               class="Pwlzh"
+|               <button>
+|                 aria-description="Unread release notes"
+|                 aria-expanded="false"
+|                 aria-haspopup="menu"
+|                 aria-label="Help"
+|                 class="C6U5L Tbe4j OAVUl qUIkn i7muD KMTIT"
+|                 data-base-ui-tooltip-trigger=""
+|                 id="base-ui-_R_qpgmm_"
+|                 tabindex="0"
+|                 type="button"
+|                 <span>
+|                   class="lC6kT"
+|                   <svg>
+|                     aria-hidden="true"
+|                     class="bosqB kcIdU"
+|                     height="1em"
+|                     width="1em"
+|                     <defs>
+|                       <mask>
+|                         height="100%"
+|                         id="_R_duqpgmm_"
+|                         maskUnits="userSpaceOnUse"
+|                         width="100%"
+|                         x="0"
+|                         y="0"
+|                         <rect>
+|                           fill="white"
+|                           height="100%"
+|                           width="100%"
+|                         <circle>
+|                           class="uGucy"
+|                           fill="black"
+|                     <g>
+|                       fill="none"
+|                       stroke-linecap="round"
+|                       stroke-linejoin="round"
+|                       stroke-width="2"
+|                       stroke="currentColor"
+|                       <g>
+|                         mask="url(#_R_duqpgmm_)"
+|                         <svg>
+|                           height="100%"
+|                           viewBox="0 0 24 24"
+|                           width="100%"
+|                           <circle>
+|                             cx="12"
+|                             cy="12"
+|                             r="10"
+|                       <svg>
+|                         height="100%"
+|                         viewBox="0 0 24 24"
+|                         width="100%"
+|                         <path>
+|                           d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"
+|                         <path>
+|                           d="M12 17h.01"
+|                     <circle>
+|                       class="I1Vi1"
+|                       fill="var(--new-indicator-dot-color)"
+|               <button>
+|                 aria-expanded="false"
+|                 aria-haspopup="menu"
+|                 aria-label="Account"
+|                 class="C6U5L KMTIT"
+|                 data-base-ui-tooltip-trigger=""
+|                 id="base-ui-_R_ur9gmm_"
+|                 tabindex="0"
+|                 type="button"
+|                 <span>
+|                   aria-hidden="true"
+|                   class="Y5Cyk"
+|                   <svg>
+|                     class="dxtjI"
+|                     fill="none"
+|                     height="1em"
+|                     stroke-linecap="round"
+|                     stroke-linejoin="round"
+|                     stroke-width="2"
+|                     stroke="currentColor"
+|                     viewBox="0 0 24 24"
+|                     width="1em"
+|                     xmlns="http://www.w3.org/2000/svg"
+|                     <path>
+|                       d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"
+|                     <circle>
+|                       cx="12"
+|                       cy="7"
+|                       r="4"
+|           <div>
+|             class="lPvIQ YIlkl BQ04d"
+|             <aside>
+|               aria-label="Navigation panel"
+|               class="cAgJZ"
+|               style="--sidebar-width:240px"
+|               <div>
+|                 class="_7EOv"
+|                 <div>
+|                   class="MW8T1"
+|                   <h2>
+|                     class="tv8Jw daWRx hdfIT"
+|                     <span>
+|                       class="BtaMj"
+|                       "Manage Workspace"
+|                   <div>
+|                     class="SUpas"
+|                     <button>
+|                       aria-expanded="false"
+|                       aria-haspopup="menu"
+|                       class="C6U5L tEO7W HDxFb aZSvC"
+|                       id="base-ui-_R_3aikmgmm_"
+|                       tabindex="0"
+|                       type="button"
+|                       <span>
+|                         aria-hidden="true"
+|                         class="ZzqCi"
+|                         <svg>
+|                           class="dxtjI"
+|                           fill="none"
+|                           height="1em"
+|                           stroke-linecap="round"
+|                           stroke-linejoin="round"
+|                           stroke-width="2"
+|                           stroke="currentColor"
+|                           viewBox="0 0 24 24"
+|                           width="1em"
+|                           xmlns="http://www.w3.org/2000/svg"
+|                           <path>
+|                             d="M15.2 3a2 2 0 0 1 1.4.6l3.8 3.8a2 2 0 0 1 .6 1.4V19a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z"
+|                           <path>
+|                             d="M17 21v-7a1 1 0 0 0-1-1H8a1 1 0 0 0-1 1v7"
+|                           <path>
+|                             d="M7 3v4a1 1 0 0 0 1 1h7"
+|                       <span>
+|                         class="OvIG3 PM3QQ"
+|                         "Save & Share"
+|                       <span>
+|                         class="IUVXm"
+|                         <svg>
+|                           aria-hidden="true"
+|                           class="dxtjI"
+|                           fill="none"
+|                           height="1em"
+|                           stroke-linecap="round"
+|                           stroke-linejoin="round"
+|                           stroke-width="2"
+|                           stroke="currentColor"
+|                           viewBox="0 0 24 24"
+|                           width="1em"
+|                           xmlns="http://www.w3.org/2000/svg"
+|                           <path>
+|                             d="m9 18 6-6-6-6"
+|                     <button>
+|                       aria-disabled="true"
+|                       aria-haspopup="dialog"
+|                       class="C6U5L tEO7W HDxFb aZSvC"
+|                       data-base-ui-tooltip-trigger=""
+|                       data-disabled=""
+|                       id="base-ui-_R_3sikmgmm_"
+|                       tabindex="0"
+|                       type="button"
+|                       <span>
+|                         aria-hidden="true"
+|                         class="ZzqCi"
+|                         <svg>
+|                           class="dxtjI"
+|                           fill="none"
+|                           height="1em"
+|                           stroke-linecap="round"
+|                           stroke-linejoin="round"
+|                           stroke-width="2"
+|                           stroke="currentColor"
+|                           viewBox="0 0 24 24"
+|                           width="1em"
+|                           xmlns="http://www.w3.org/2000/svg"
+|                           <path>
+|                             d="M12 13v8"
+|                           <path>
+|                             d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242"
+|                           <path>
+|                             d="m8 17 4-4 4 4"
+|                       <span>
+|                         class="OvIG3 PM3QQ"
+|                         "Publish to Library"
+|                 <div>
+|                   class="MW8T1"
+|                   <h2>
+|                     class="tv8Jw daWRx hdfIT"
+|                     <span>
+|                       class="BtaMj"
+|                       "Editor"
+|                   <div>
+|                     class="SUpas"
+|                     <button>
+|                       aria-expanded="false"
+|                       aria-haspopup="menu"
+|                       class="C6U5L tEO7W HDxFb aZSvC"
+|                       id="base-ui-_R_6lkkmgmm_"
+|                       tabindex="0"
+|                       type="button"
+|                       <span>
+|                         aria-hidden="true"
+|                         class="ZzqCi"
+|                         <svg>
+|                           class="dxtjI"
+|                           fill="none"
+|                           height="1em"
+|                           stroke-linecap="round"
+|                           stroke-linejoin="round"
+|                           stroke-width="2"
+|                           stroke="currentColor"
+|                           viewBox="0 0 24 24"
+|                           width="1em"
+|                           xmlns="http://www.w3.org/2000/svg"
+|                           <path>
+|                             d="M17 3v10"
+|                           <path>
+|                             d="m12.67 5.5 8.66 5"
+|                           <path>
+|                             d="m12.67 10.5 8.66-5"
+|                           <path>
+|                             d="M9 17a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v2a2 2 0 0 0 2 2h2a2 2 0 0 0 2-2v-2z"
+|                       <span>
+|                         class="OvIG3 PM3QQ"
+|                         <span>
+|                           "Flavor: "
+|                           <strong>
+|                             class="WCdrD"
+|                             "PCRE2 (PHP)"
+|                       <span>
+|                         class="IUVXm"
+|                         <svg>
+|                           aria-hidden="true"
+|                           class="dxtjI"
+|                           fill="none"
+|                           height="1em"
+|                           stroke-linecap="round"
+|                           stroke-linejoin="round"
+|                           stroke-width="2"
+|                           stroke="currentColor"
+|                           viewBox="0 0 24 24"
+|                           width="1em"
+|                           xmlns="http://www.w3.org/2000/svg"
+|                           <path>
+|                             d="m9 18 6-6-6-6"
+|                     <a>
+|                       aria-current="page"
+|                       class="tEO7W HDxFb aZSvC"
+|                       data-discover="true"
+|                       href="/"
+|                       <span>
+|                         aria-hidden="true"
+|                         class="ZzqCi"
+|                         <svg>
+|                           class="dxtjI"
+|                           fill="none"
+|                           height="1em"
+|                           stroke-linecap="round"
+|                           stroke-linejoin="round"
+|                           stroke-width="2"
+|                           stroke="currentColor"
+|                           viewBox="0 0 24 24"
+|                           width="1em"
+|                           xmlns="http://www.w3.org/2000/svg"
+|                           <polyline>
+|                             points="4 17 10 11 4 5"
+|                           <line>
+|                             x1="12"
+|                             x2="20"
+|                             y1="19"
+|                             y2="19"
+|                       <span>
+|                         class="OvIG3 PM3QQ"
+|                         "Match"
+|                       <span>
+|                         class="IUVXm"
+|                         <svg>
+|                           aria-hidden="true"
+|                           class="dxtjI"
+|                           fill="none"
+|                           height="1em"
+|                           stroke-linecap="round"
+|                           stroke-linejoin="round"
+|                           stroke-width="2"
+|                           stroke="currentColor"
+|                           viewBox="0 0 24 24"
+|                           width="1em"
+|                           xmlns="http://www.w3.org/2000/svg"
+|                           <path>
+|                             d="M20 6 9 17l-5-5"
+|                     <a>
+|                       class="tEO7W HDxFb aZSvC"
+|                       data-discover="true"
+|                       href="/substitution"
+|                       <span>
+|                         aria-hidden="true"
+|                         class="ZzqCi"
+|                         <svg>
+|                           class="dxtjI"
+|                           fill="none"
+|                           height="1em"
+|                           stroke-linecap="round"
+|                           stroke-linejoin="round"
+|                           stroke-width="2"
+|                           stroke="currentColor"
+|                           viewBox="0 0 24 24"
+|                           width="1em"
+|                           xmlns="http://www.w3.org/2000/svg"
+|                           <path>
+|                             d="M14 4a2 2 0 0 1 2-2"
+|                           <path>
+|                             d="M16 10a2 2 0 0 1-2-2"
+|                           <path>
+|                             d="M20 2a2 2 0 0 1 2 2"
+|                           <path>
+|                             d="M22 8a2 2 0 0 1-2 2"
+|                           <path>
+|                             d="m3 7 3 3 3-3"
+|                           <path>
+|                             d="M6 10V5a3 3 0 0 1 3-3h1"
+|                           <rect>
+|                             height="8"
+|                             rx="2"
+|                             width="8"
+|                             x="2"
+|                             y="14"
+|                       <span>
+|                         class="OvIG3 PM3QQ"
+|                         "Substitution"
+|                       <span>
+|                         class="IUVXm"
+|                     <a>
+|                       class="tEO7W HDxFb aZSvC"
+|                       data-discover="true"
+|                       href="/extraction"
+|                       <span>
+|                         aria-hidden="true"
+|                         class="ZzqCi"
+|                         <svg>
+|                           class="dxtjI"
+|                           fill="none"
+|                           height="1em"
+|                           stroke-linecap="round"
+|                           stroke-linejoin="round"
+|                           stroke-width="2"
+|                           stroke="currentColor"
+|                           viewBox="0 0 24 24"
+|                           width="1em"
+|                           xmlns="http://www.w3.org/2000/svg"
+|                           <polygon>
+|                             points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"
+|                       <span>
+|                         class="OvIG3 PM3QQ"
+|                         "Extraction"
+|                       <span>
+|                         class="IUVXm"
+|                     <a>
+|                       class="tEO7W HDxFb aZSvC"
+|                       data-discover="true"
+|                       href="/unit-tests"
+|                       <span>
+|                         aria-hidden="true"
+|                         class="ZzqCi"
+|                         <svg>
+|                           class="dxtjI"
+|                           fill="none"
+|                           height="1em"
+|                           stroke-linecap="round"
+|                           stroke-linejoin="round"
+|                           stroke-width="2"
+|                           stroke="currentColor"
+|                           viewBox="0 0 24 24"
+|                           width="1em"
+|                           xmlns="http://www.w3.org/2000/svg"
+|                           <path>
+|                             d="M21 7 6.82 21.18a2.83 2.83 0 0 1-3.99-.01a2.83 2.83 0 0 1 0-4L17 3"
+|                           <path>
+|                             d="m16 2 6 6"
+|                           <path>
+|                             d="M12 16H4"
+|                       <span>
+|                         class="OvIG3 PM3QQ"
+|                         "Unit Tests"
+|                       <span>
+|                         class="IUVXm"
+|                 <div>
+|                   class="MW8T1"
+|                   <h2>
+|                     class="tv8Jw daWRx hdfIT"
+|                     <span>
+|                       class="BtaMj"
+|                       "Tools"
+|                   <div>
+|                     class="SUpas"
+|                     <button>
+|                       aria-disabled="true"
+|                       aria-haspopup="dialog"
+|                       class="C6U5L tEO7W HDxFb aZSvC"
+|                       data-base-ui-tooltip-trigger=""
+|                       data-disabled=""
+|                       id="base-ui-_R_3qmkmgmm_"
+|                       tabindex="0"
+|                       type="button"
+|                       <span>
+|                         aria-hidden="true"
+|                         class="ZzqCi"
+|                         <svg>
+|                           class="dxtjI"
+|                           fill="none"
+|                           height="1em"
+|                           stroke-linecap="round"
+|                           stroke-linejoin="round"
+|                           stroke-width="2"
+|                           stroke="currentColor"
+|                           viewBox="0 0 24 24"
+|                           width="1em"
+|                           xmlns="http://www.w3.org/2000/svg"
+|                           <path>
+|                             d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"
+|                           <path>
+|                             d="M14 2v4a2 2 0 0 0 2 2h4"
+|                           <path>
+|                             d="M10 12a1 1 0 0 0-1 1v1a1 1 0 0 1-1 1 1 1 0 0 1 1 1v1a1 1 0 0 0 1 1"
+|                           <path>
+|                             d="M14 18a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1 1 1 0 0 1-1-1v-1a1 1 0 0 0-1-1"
+|                       <span>
+|                         class="OvIG3 PM3QQ"
+|                         "Code Generator"
+|                       <span>
+|                         class="IUVXm"
+|                     <button>
+|                       aria-disabled="true"
+|                       aria-haspopup="dialog"
+|                       class="C6U5L tEO7W HDxFb aZSvC"
+|                       data-base-ui-tooltip-trigger=""
+|                       data-disabled=""
+|                       id="base-ui-_R_3rmkmgmm_"
+|                       tabindex="0"
+|                       type="button"
+|                       <span>
+|                         aria-hidden="true"
+|                         class="ZzqCi"
+|                         <svg>
+|                           class="dxtjI"
+|                           fill="none"
+|                           height="1em"
+|                           stroke-linecap="round"
+|                           stroke-linejoin="round"
+|                           stroke-width="2"
+|                           stroke="currentColor"
+|                           viewBox="0 0 24 24"
+|                           width="1em"
+|                           xmlns="http://www.w3.org/2000/svg"
+|                           <path>
+|                             d="m8 2 1.88 1.88"
+|                           <path>
+|                             d="M14.12 3.88 16 2"
+|                           <path>
+|                             d="M9 7.13v-1a3.003 3.003 0 1 1 6 0v1"
+|                           <path>
+|                             d="M12 20c-3.3 0-6-2.7-6-6v-3a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v3c0 3.3-2.7 6-6 6"
+|                           <path>
+|                             d="M12 20v-9"
+|                           <path>
+|                             d="M6.53 9C4.6 8.8 3 7.1 3 5"
+|                           <path>
+|                             d="M6 13H2"
+|                           <path>
+|                             d="M3 21c0-2.1 1.7-3.9 3.8-4"
+|                           <path>
+|                             d="M20.97 5c0 2.1-1.6 3.8-3.5 4"
+|                           <path>
+|                             d="M22 13h-4"
+|                           <path>
+|                             d="M17.2 17c2.1.1 3.8 1.9 3.8 4"
+|                       <span>
+|                         class="OvIG3 PM3QQ"
+|                         "Regex Debugger"
+|                       <span>
+|                         class="IUVXm"
+|                         <span>
+|                           class="r2Vpq RhIVy lSEhl"
+|                           "New"
+|                     <button>
+|                       aria-disabled="true"
+|                       aria-haspopup="dialog"
+|                       class="C6U5L tEO7W HDxFb aZSvC"
+|                       data-base-ui-tooltip-trigger=""
+|                       data-disabled=""
+|                       id="base-ui-_R_3smkmgmm_"
+|                       tabindex="0"
+|                       type="button"
+|                       <span>
+|                         aria-hidden="true"
+|                         class="ZzqCi"
+|                         <svg>
+|                           class="dxtjI"
+|                           fill="none"
+|                           height="1em"
+|                           stroke-linecap="round"
+|                           stroke-linejoin="round"
+|                           stroke-width="2"
+|                           stroke="currentColor"
+|                           viewBox="0 0 24 24"
+|                           width="1em"
+|                           xmlns="http://www.w3.org/2000/svg"
+|                           <path>
+|                             d="m16 3 4 4-4 4"
+|                           <path>
+|                             d="M20 7H4"
+|                           <path>
+|                             d="m8 21-4-4 4-4"
+|                           <path>
+|                             d="M4 17h16"
+|                       <span>
+|                         class="OvIG3 PM3QQ"
+|                         "Regex Converter"
+|                       <span>
+|                         class="IUVXm"
+|                         <span>
+|                           class="r2Vpq RhIVy lSEhl"
+|                           "New"
+|                     <button>
+|                       aria-disabled="true"
+|                       aria-haspopup="dialog"
+|                       class="C6U5L tEO7W HDxFb aZSvC"
+|                       data-base-ui-tooltip-trigger=""
+|                       data-disabled=""
+|                       id="base-ui-_R_3tmkmgmm_"
+|                       tabindex="0"
+|                       type="button"
+|                       <span>
+|                         aria-hidden="true"
+|                         class="ZzqCi"
+|                         <svg>
+|                           class="dxtjI"
+|                           fill="none"
+|                           height="1em"
+|                           stroke-linecap="round"
+|                           stroke-linejoin="round"
+|                           stroke-width="2"
+|                           stroke="currentColor"
+|                           viewBox="0 0 24 24"
+|                           width="1em"
+|                           xmlns="http://www.w3.org/2000/svg"
+|                           <path>
+|                             d="M14 2v4a2 2 0 0 0 2 2h4"
+|                           <path>
+|                             d="M4 7V4a2 2 0 0 1 2-2 2 2 0 0 0-2 2"
+|                           <path>
+|                             d="M4.063 20.999a2 2 0 0 0 2 1L18 22a2 2 0 0 0 2-2V7l-5-5H6"
+|                           <path>
+|                             d="m5 11-3 3"
+|                           <path>
+|                             d="m5 17-3-3h10"
+|                       <span>
+|                         class="OvIG3 PM3QQ"
+|                         "Export Matches"
+|                       <span>
+|                         class="IUVXm"
+|                         <span>
+|                           class="r2Vpq RhIVy lSEhl"
+|                           "New"
+|                     <button>
+|                       aria-disabled="true"
+|                       aria-haspopup="dialog"
+|                       class="C6U5L tEO7W HDxFb aZSvC"
+|                       data-base-ui-tooltip-trigger=""
+|                       data-disabled=""
+|                       id="base-ui-_R_3umkmgmm_"
+|                       tabindex="0"
+|                       type="button"
+|                       <span>
+|                         aria-hidden="true"
+|                         class="ZzqCi"
+|                         <svg>
+|                           class="dxtjI"
+|                           fill="none"
+|                           height="1em"
+|                           stroke-linecap="round"
+|                           stroke-linejoin="round"
+|                           stroke-width="2"
+|                           stroke="currentColor"
+|                           viewBox="0 0 24 24"
+|                           width="1em"
+|                           xmlns="http://www.w3.org/2000/svg"
+|                           <path>
+|                             d="M13 16a3 3 0 0 1 2.24 5"
+|                           <path>
+|                             d="M18 12h.01"
+|                           <path>
+|                             d="M18 21h-8a4 4 0 0 1-4-4 7 7 0 0 1 7-7h.2L9.6 6.4a1 1 0 1 1 2.8-2.8L15.8 7h.2c3.3 0 6 2.7 6 6v1a2 2 0 0 1-2 2h-1a3 3 0 0 0-3 3"
+|                           <path>
+|                             d="M20 8.54V4a2 2 0 1 0-4 0v3"
+|                           <path>
+|                             d="M7.612 12.524a3 3 0 1 0-1.6 4.3"
+|                       <span>
+|                         class="OvIG3 PM3QQ"
+|                         "Benchmark Regex"
+|                       <span>
+|                         class="IUVXm"
+|                         <span>
+|                           class="r2Vpq RhIVy lSEhl"
+|                           "New"
+|                     <button>
+|                       aria-disabled="true"
+|                       class="C6U5L tEO7W HDxFb aZSvC"
+|                       data-base-ui-tooltip-trigger=""
+|                       data-disabled=""
+|                       id="base-ui-_R_3vmkmgmm_"
+|                       tabindex="0"
+|                       type="button"
+|                       <span>
+|                         aria-hidden="true"
+|                         class="ZzqCi"
+|                         <svg>
+|                           class="dxtjI"
+|                           fill="none"
+|                           height="1em"
+|                           stroke-linecap="round"
+|                           stroke-linejoin="round"
+|                           stroke-width="2"
+|                           stroke="currentColor"
+|                           viewBox="0 0 24 24"
+|                           width="1em"
+|                           xmlns="http://www.w3.org/2000/svg"
+|                           <path>
+|                             d="m21.64 3.64-1.28-1.28a1.21 1.21 0 0 0-1.72 0L2.36 18.64a1.21 1.21 0 0 0 0 1.72l1.28 1.28a1.2 1.2 0 0 0 1.72 0L21.64 5.36a1.2 1.2 0 0 0 0-1.72"
+|                           <path>
+|                             d="m14 7 3 3"
+|                           <path>
+|                             d="M5 6v4"
+|                           <path>
+|                             d="M19 14v4"
+|                           <path>
+|                             d="M10 2v2"
+|                           <path>
+|                             d="M7 8H3"
+|                           <path>
+|                             d="M21 16h-4"
+|                           <path>
+|                             d="M11 3H9"
+|                       <span>
+|                         class="OvIG3 PM3QQ"
+|                         "Format Regex"
+|                       <span>
+|                         class="IUVXm"
+|                         <span>
+|                           class="r2Vpq RhIVy lSEhl"
+|                           "New"
+|               <section>
+|                 aria-label="Sponsors"
+|                 class="FRCYv"
+|               <div>
+|                 aria-label="Resize navigation panel"
+|                 aria-orientation="vertical"
+|                 class="n4YC7 wKDUk"
+|                 role="separator"
+|                 tabindex="0"
+|             <div>
+|               class="CGFPs"
+|               <div>
+|                 class="Cicxv"
+|                 <aside>
+|                   aria-label="Details panel"
+|                   class="ZtiXL WnjPk"
+|                   data-details-rail="expanded"
+|                   <div>
+|                     aria-label="Resize details panel"
+|                     aria-orientation="vertical"
+|                     class="n4YC7 y5BIK"
+|                     role="separator"
+|                     tabindex="0"
+|                   <div>
+|                     class="h70K4 P67lm"
+|                     style="--panel-count:3;--panel-rows:minmax(var(--panel-minimum), 1fr) var(--panel-gap) minmax(var(--panel-minimum), 1fr) var(--panel-gap) minmax(var(--panel-minimum), 1fr)"
+|                     <div>
+|                       class="NyUZB"
+|                       data-panel="explanation"
+|                       <section>
+|                         aria-label="Explanation"
+|                         class="Bespd"
+|                         data-section="explanation"
+|                         <div>
+|                           class="iPDGb"
+|                           <h2>
+|                             class="OJgR8 daWRx PM3QQ"
+|                             "Explanation"
+|                           <div>
+|                             class="G9deL"
+|                             <span>
+|                               class="DQOcp lSEhl yChdj"
+|                               "Pro"
+|                             <button>
+|                               aria-disabled="true"
+|                               aria-expanded="false"
+|                               aria-haspopup="dialog"
+|                               aria-label="Copy explanation"
+|                               class="C6U5L Tbe4j s_nse tK5iV qUIkn"
+|                               data-base-ui-click-trigger=""
+|                               data-base-ui-tooltip-trigger=""
+|                               data-disabled=""
+|                               id="base-ui-_R_v9iragmm_"
+|                               tabindex="0"
+|                               type="button"
+|                               <span>
+|                                 class="lC6kT"
+|                                 <svg>
+|                                   class="dxtjI kcIdU"
+|                                   fill="none"
+|                                   height="1em"
+|                                   stroke-linecap="round"
+|                                   stroke-linejoin="round"
+|                                   stroke-width="2"
+|                                   stroke="currentColor"
+|                                   viewBox="0 0 24 24"
+|                                   width="1em"
+|                                   xmlns="http://www.w3.org/2000/svg"
+|                                   <rect>
+|                                     height="14"
+|                                     rx="2"
+|                                     ry="2"
+|                                     width="14"
+|                                     x="8"
+|                                     y="8"
+|                                   <path>
+|                                     d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"
+|                         <div>
+|                           class="POcmy"
+|                           <div>
+|                             class="T7QyX p0ZgQ"
+|                             <span>
+|                               "Understand your regular expression with detailed explanations of its tokens, groups, and flags. "
+|                               <a>
+|                                 class="W6KiV"
+|                                 href="https://docs.regex101.com/application/regex101-pro/regex-converter/"
+|                                 rel="noopener"
+|                                 "Regex conversion"
+|                               " adapts patterns, flags, and replacement text between any supported flavors, with compatibility checks and a breakdown of changes."
+|                             <div>
+|                               class="xpKUu"
+|                               <span>
+|                                 class="Hk0yi"
+|                                 "Supports:"
+|                               <ul>
+|                                 class="fIF5f"
+|                                 <li>
+|                                   "PCRE2 (PHP)"
+|                                 <li>
+|                                   "JavaScript"
+|                                 <li>
+|                                   "Python"
+|                                 <li>
+|                                   "Golang"
+|                                 <li>
+|                                   "Java"
+|                                 <li>
+|                                   ".NET 10.0 (C#)"
+|                                 <li>
+|                                   "Rust"
+|                                 <li>
+|                                   "POSIX ERE"
+|                                 <li>
+|                                   "POSIX BRE (grep/sed)"
+|                                 <li>
+|                                   "PCRE (Legacy)"
+|                     <div>
+|                       class="VAvoV"
+|                       data-gutter="true"
+|                       <div>
+|                         aria-label="Resize Explanation and Match Information"
+|                         aria-orientation="horizontal"
+|                         class="n4YC7 l1j45"
+|                         role="separator"
+|                         tabindex="0"
+|                     <div>
+|                       class="NyUZB"
+|                       data-panel="match-info"
+|                       <section>
+|                         aria-label="Match Information"
+|                         class="Bespd"
+|                         data-section="match-info"
+|                         <div>
+|                           class="iPDGb"
+|                           <h2>
+|                             class="OJgR8 daWRx PM3QQ"
+|                             "Match Information"
+|                           <div>
+|                             class="G9deL"
+|                             <button>
+|                               aria-disabled="true"
+|                               aria-haspopup="dialog"
+|                               aria-label="Export Matches"
+|                               class="C6U5L Tbe4j s_nse tK5iV qUIkn"
+|                               data-base-ui-tooltip-trigger=""
+|                               data-disabled=""
+|                               id="base-ui-_R_7pkragmm_"
+|                               tabindex="0"
+|                               type="button"
+|                               <span>
+|                                 class="lC6kT"
+|                                 <svg>
+|                                   class="dxtjI kcIdU"
+|                                   fill="none"
+|                                   height="1em"
+|                                   stroke-linecap="round"
+|                                   stroke-linejoin="round"
+|                                   stroke-width="2"
+|                                   stroke="currentColor"
+|                                   viewBox="0 0 24 24"
+|                                   width="1em"
+|                                   xmlns="http://www.w3.org/2000/svg"
+|                                   <path>
+|                                     d="M14 2v4a2 2 0 0 0 2 2h4"
+|                                   <path>
+|                                     d="M4 7V4a2 2 0 0 1 2-2 2 2 0 0 0-2 2"
+|                                   <path>
+|                                     d="M4.063 20.999a2 2 0 0 0 2 1L18 22a2 2 0 0 0 2-2V7l-5-5H6"
+|                                   <path>
+|                                     d="m5 11-3 3"
+|                                   <path>
+|                                     d="m5 17-3-3h10"
+|                         <div>
+|                           class="POcmy"
+|                           <div>
+|                             class="T7QyX Ta0pA"
+|                             "See what matched and what each group captured, including named groups and values reusable in replacements or backreferences. Investigate unexpected results with the regex debugger and export them to JSON, JSON Lines, CSV, or Plain Text afterwards."
+|                     <div>
+|                       class="VAvoV"
+|                       data-gutter="true"
+|                       <div>
+|                         aria-label="Resize Match Information and Quick Reference"
+|                         aria-orientation="horizontal"
+|                         class="n4YC7 l1j45"
+|                         role="separator"
+|                         tabindex="0"
+|                     <div>
+|                       class="NyUZB"
+|                       data-panel="quickref"
+|                       <section>
+|                         aria-label="Quick Reference"
+|                         class="Bespd"
+|                         data-section="quickref"
+|                         <div>
+|                           class="iPDGb"
+|                           <h2>
+|                             class="OJgR8 daWRx PM3QQ"
+|                             "Quick Reference"
+|                           <div>
+|                             class="G9deL"
+|                             <button>
+|                               aria-expanded="false"
+|                               aria-label="Search reference"
+|                               class="C6U5L Tbe4j s_nse qUIkn"
+|                               data-base-ui-tooltip-trigger=""
+|                               id="base-ui-_R_7pmragmm_"
+|                               tabindex="0"
+|                               type="button"
+|                               <span>
+|                                 class="lC6kT"
+|                                 <svg>
+|                                   class="dxtjI kcIdU"
+|                                   fill="none"
+|                                   height="1em"
+|                                   stroke-linecap="round"
+|                                   stroke-linejoin="round"
+|                                   stroke-width="2"
+|                                   stroke="currentColor"
+|                                   viewBox="0 0 24 24"
+|                                   width="1em"
+|                                   xmlns="http://www.w3.org/2000/svg"
+|                                   <circle>
+|                                     cx="11"
+|                                     cy="11"
+|                                     r="8"
+|                                   <path>
+|                                     d="m21 21-4.3-4.3"
+|                         <div>
+|                           class="POcmy"
+|                           <div>
+|                             class="Js8jV"
+|                             <div>
+|                               class="NehNh"
+|                               <button>
+|                                 aria-expanded="false"
+|                                 aria-haspopup="listbox"
+|                                 aria-label="Reference category"
+|                                 class="dN3VB C6U5L xOgjl QhzHN"
+|                                 id="base-ui-_R_mmragmm_"
+|                                 role="combobox"
+|                                 tabindex="0"
+|                                 type="button"
+|                                 <span>
+|                                   class="dtlBr PM3QQ"
+|                                   <span>
+|                                     class="IVh6c"
+|                                     <svg>
+|                                       aria-hidden="true"
+|                                       class="dxtjI lrRZw"
+|                                       fill="none"
+|                                       height="1em"
+|                                       stroke-linecap="round"
+|                                       stroke-linejoin="round"
+|                                       stroke-width="2"
+|                                       stroke="currentColor"
+|                                       viewBox="0 0 24 24"
+|                                       width="1em"
+|                                       xmlns="http://www.w3.org/2000/svg"
+|                                       <path>
+|                                         d="M10 2v8l3-3 3 3V2"
+|                                       <path>
+|                                         d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H19a1 1 0 0 1 1 1v18a1 1 0 0 1-1 1H6.5a1 1 0 0 1 0-5H20"
+|                                     <span>
+|                                       class="O4Rsu PM3QQ"
+|                                       "Frequently Used Tokens"
+|                                 <span>
+|                                   aria-hidden="true"
+|                                   class="ZQwVd"
+|                                   <svg>
+|                                     class="dxtjI"
+|                                     fill="none"
+|                                     height="1em"
+|                                     stroke-linecap="round"
+|                                     stroke-linejoin="round"
+|                                     stroke-width="2"
+|                                     stroke="currentColor"
+|                                     viewBox="0 0 24 24"
+|                                     width="1em"
+|                                     xmlns="http://www.w3.org/2000/svg"
+|                                     <path>
+|                                       d="m6 9 6 6 6-6"
+|                               <input>
+|                                 aria-hidden="true"
+|                                 id="base-ui-_R_mmragmm_-hidden-input"
+|                                 style="clip-path:inset(50%);overflow:hidden;white-space:nowrap;border:0;padding:0;width:1px;height:1px;margin:0;position:fixed;top:0;left:0"
+|                                 tabindex="-1"
+|                                 value="COMMON_TOKENS"
+|                               <span>
+|                                 class="uJ68v"
+|                                 role="status"
+|                                 "25 tokens"
+|                             <div>
+|                               class="MW8T1 Bbpyp"
+|                               <div>
+|                                 class="SUpas"
+|                                 <button>
+|                                   aria-expanded="false"
+|                                   aria-haspopup="dialog"
+|                                   class="C6U5L tEO7W HDxFb aZSvC bUSFv"
+|                                   data-base-ui-click-trigger=""
+|                                   id="base-ui-_R_3amragmm_"
+|                                   tabindex="0"
+|                                   type="button"
+|                                   <span>
+|                                     class="OvIG3 PM3QQ"
+|                                     "A single character of: a, b or c"
+|                                   <span>
+|                                     class="IUVXm"
+|                                     <code>
+|                                       class="ZrcGj"
+|                                       "[abc]"
+|                                 <button>
+|                                   aria-expanded="false"
+|                                   aria-haspopup="dialog"
+|                                   class="C6U5L tEO7W HDxFb aZSvC bUSFv"
+|                                   data-base-ui-click-trigger=""
+|                                   id="base-ui-_R_5amragmm_"
+|                                   tabindex="0"
+|                                   type="button"
+|                                   <span>
+|                                     class="OvIG3 PM3QQ"
+|                                     "A character except: a, b or c"
+|                                   <span>
+|                                     class="IUVXm"
+|                                     <code>
+|                                       class="ZrcGj"
+|                                       "[^abc]"
+|                                 <button>
+|                                   aria-expanded="false"
+|                                   aria-haspopup="dialog"
+|                                   class="C6U5L tEO7W HDxFb aZSvC bUSFv"
+|                                   data-base-ui-click-trigger=""
+|                                   id="base-ui-_R_7amragmm_"
+|                                   tabindex="0"
+|                                   type="button"
+|                                   <span>
+|                                     class="OvIG3 PM3QQ"
+|                                     "A character in the range: a-z"
+|                                   <span>
+|                                     class="IUVXm"
+|                                     <code>
+|                                       class="ZrcGj"
+|                                       "[a-z]"
+|                                 <button>
+|                                   aria-expanded="false"
+|                                   aria-haspopup="dialog"
+|                                   class="C6U5L tEO7W HDxFb aZSvC bUSFv"
+|                                   data-base-ui-click-trigger=""
+|                                   id="base-ui-_R_9amragmm_"
+|                                   tabindex="0"
+|                                   type="button"
+|                                   <span>
+|                                     class="OvIG3 PM3QQ"
+|                                     "A character not in the range: a-z"
+|                                   <span>
+|                                     class="IUVXm"
+|                                     <code>
+|                                       class="ZrcGj"
+|                                       "[^a-z]"
+|                                 <button>
+|                                   aria-expanded="false"
+|                                   aria-haspopup="dialog"
+|                                   class="C6U5L tEO7W HDxFb aZSvC bUSFv"
+|                                   data-base-ui-click-trigger=""
+|                                   id="base-ui-_R_bamragmm_"
+|                                   tabindex="0"
+|                                   type="button"
+|                                   <span>
+|                                     class="OvIG3 PM3QQ"
+|                                     "A character in the range: a-z or A-Z"
+|                                   <span>
+|                                     class="IUVXm"
+|                                     <code>
+|                                       class="ZrcGj"
+|                                       "[a-zA-Z]"
+|                                 <button>
+|                                   aria-expanded="false"
+|                                   aria-haspopup="dialog"
+|                                   class="C6U5L tEO7W HDxFb aZSvC bUSFv"
+|                                   data-base-ui-click-trigger=""
+|                                   id="base-ui-_R_damragmm_"
+|                                   tabindex="0"
+|                                   type="button"
+|                                   <span>
+|                                     class="OvIG3 PM3QQ"
+|                                     "Any single character"
+|                                   <span>
+|                                     class="IUVXm"
+|                                     <code>
+|                                       class="ZrcGj"
+|                                       "."
+|                                 <button>
+|                                   aria-expanded="false"
+|                                   aria-haspopup="dialog"
+|                                   class="C6U5L tEO7W HDxFb aZSvC bUSFv"
+|                                   data-base-ui-click-trigger=""
+|                                   id="base-ui-_R_famragmm_"
+|                                   tabindex="0"
+|                                   type="button"
+|                                   <span>
+|                                     class="OvIG3 PM3QQ"
+|                                     "Alternate - match either a or b"
+|                                   <span>
+|                                     class="IUVXm"
+|                                     <code>
+|                                       class="ZrcGj"
+|                                       "a|b"
+|                                 <button>
+|                                   aria-expanded="false"
+|                                   aria-haspopup="dialog"
+|                                   class="C6U5L tEO7W HDxFb aZSvC bUSFv"
+|                                   data-base-ui-click-trigger=""
+|                                   id="base-ui-_R_hamragmm_"
+|                                   tabindex="0"
+|                                   type="button"
+|                                   <span>
+|                                     class="OvIG3 PM3QQ"
+|                                     "Any whitespace character"
+|                                   <span>
+|                                     class="IUVXm"
+|                                     <code>
+|                                       class="ZrcGj"
+|                                       "\s"
+|                                 <button>
+|                                   aria-expanded="false"
+|                                   aria-haspopup="dialog"
+|                                   class="C6U5L tEO7W HDxFb aZSvC bUSFv"
+|                                   data-base-ui-click-trigger=""
+|                                   id="base-ui-_R_jamragmm_"
+|                                   tabindex="0"
+|                                   type="button"
+|                                   <span>
+|                                     class="OvIG3 PM3QQ"
+|                                     "Any non-whitespace character"
+|                                   <span>
+|                                     class="IUVXm"
+|                                     <code>
+|                                       class="ZrcGj"
+|                                       "\S"
+|                                 <button>
+|                                   aria-expanded="false"
+|                                   aria-haspopup="dialog"
+|                                   class="C6U5L tEO7W HDxFb aZSvC bUSFv"
+|                                   data-base-ui-click-trigger=""
+|                                   id="base-ui-_R_lamragmm_"
+|                                   tabindex="0"
+|                                   type="button"
+|                                   <span>
+|                                     class="OvIG3 PM3QQ"
+|                                     "Any digit"
+|                                   <span>
+|                                     class="IUVXm"
+|                                     <code>
+|                                       class="ZrcGj"
+|                                       "\d"
+|                                 <button>
+|                                   aria-expanded="false"
+|                                   aria-haspopup="dialog"
+|                                   class="C6U5L tEO7W HDxFb aZSvC bUSFv"
+|                                   data-base-ui-click-trigger=""
+|                                   id="base-ui-_R_namragmm_"
+|                                   tabindex="0"
+|                                   type="button"
+|                                   <span>
+|                                     class="OvIG3 PM3QQ"
+|                                     "Any non-digit"
+|                                   <span>
+|                                     class="IUVXm"
+|                                     <code>
+|                                       class="ZrcGj"
+|                                       "\D"
+|                                 <button>
+|                                   aria-expanded="false"
+|                                   aria-haspopup="dialog"
+|                                   class="C6U5L tEO7W HDxFb aZSvC bUSFv"
+|                                   data-base-ui-click-trigger=""
+|                                   id="base-ui-_R_pamragmm_"
+|                                   tabindex="0"
+|                                   type="button"
+|                                   <span>
+|                                     class="OvIG3 PM3QQ"
+|                                     "Any word character"
+|                                   <span>
+|                                     class="IUVXm"
+|                                     <code>
+|                                       class="ZrcGj"
+|                                       "\w"
+|                                 <button>
+|                                   aria-expanded="false"
+|                                   aria-haspopup="dialog"
+|                                   class="C6U5L tEO7W HDxFb aZSvC bUSFv"
+|                                   data-base-ui-click-trigger=""
+|                                   id="base-ui-_R_ramragmm_"
+|                                   tabindex="0"
+|                                   type="button"
+|                                   <span>
+|                                     class="OvIG3 PM3QQ"
+|                                     "Any non-word character"
+|                                   <span>
+|                                     class="IUVXm"
+|                                     <code>
+|                                       class="ZrcGj"
+|                                       "\W"
+|                                 <button>
+|                                   aria-expanded="false"
+|                                   aria-haspopup="dialog"
+|                                   class="C6U5L tEO7W HDxFb aZSvC bUSFv"
+|                                   data-base-ui-click-trigger=""
+|                                   id="base-ui-_R_tamragmm_"
+|                                   tabindex="0"
+|                                   type="button"
+|                                   <span>
+|                                     class="OvIG3 PM3QQ"
+|                                     "Non-capturing group"
+|                                   <span>
+|                                     class="IUVXm"
+|                                     <code>
+|                                       class="ZrcGj"
+|                                       "(?:...)"
+|                                 <button>
+|                                   aria-expanded="false"
+|                                   aria-haspopup="dialog"
+|                                   class="C6U5L tEO7W HDxFb aZSvC bUSFv"
+|                                   data-base-ui-click-trigger=""
+|                                   id="base-ui-_R_vamragmm_"
+|                                   tabindex="0"
+|                                   type="button"
+|                                   <span>
+|                                     class="OvIG3 PM3QQ"
+|                                     "Capturing Group"
+|                                   <span>
+|                                     class="IUVXm"
+|                                     <code>
+|                                       class="ZrcGj"
+|                                       "(...)"
+|                                 <button>
+|                                   aria-expanded="false"
+|                                   aria-haspopup="dialog"
+|                                   class="C6U5L tEO7W HDxFb aZSvC bUSFv"
+|                                   data-base-ui-click-trigger=""
+|                                   id="base-ui-_R_11amragmm_"
+|                                   tabindex="0"
+|                                   type="button"
+|                                   <span>
+|                                     class="OvIG3 PM3QQ"
+|                                     "Zero or one of a"
+|                                   <span>
+|                                     class="IUVXm"
+|                                     <code>
+|                                       class="ZrcGj"
+|                                       "a?"
+|                                 <button>
+|                                   aria-expanded="false"
+|                                   aria-haspopup="dialog"
+|                                   class="C6U5L tEO7W HDxFb aZSvC bUSFv"
+|                                   data-base-ui-click-trigger=""
+|                                   id="base-ui-_R_13amragmm_"
+|                                   tabindex="0"
+|                                   type="button"
+|                                   <span>
+|                                     class="OvIG3 PM3QQ"
+|                                     "Zero or more of a"
+|                                   <span>
+|                                     class="IUVXm"
+|                                     <code>
+|                                       class="ZrcGj"
+|                                       "a*"
+|                                 <button>
+|                                   aria-expanded="false"
+|                                   aria-haspopup="dialog"
+|                                   class="C6U5L tEO7W HDxFb aZSvC bUSFv"
+|                                   data-base-ui-click-trigger=""
+|                                   id="base-ui-_R_15amragmm_"
+|                                   tabindex="0"
+|                                   type="button"
+|                                   <span>
+|                                     class="OvIG3 PM3QQ"
+|                                     "One or more of a"
+|                                   <span>
+|                                     class="IUVXm"
+|                                     <code>
+|                                       class="ZrcGj"
+|                                       "a+"
+|                                 <button>
+|                                   aria-expanded="false"
+|                                   aria-haspopup="dialog"
+|                                   class="C6U5L tEO7W HDxFb aZSvC bUSFv"
+|                                   data-base-ui-click-trigger=""
+|                                   id="base-ui-_R_17amragmm_"
+|                                   tabindex="0"
+|                                   type="button"
+|                                   <span>
+|                                     class="OvIG3 PM3QQ"
+|                                     "Exactly 3 of a"
+|                                   <span>
+|                                     class="IUVXm"
+|                                     <code>
+|                                       class="ZrcGj"
+|                                       "a{3}"
+|                                 <button>
+|                                   aria-expanded="false"
+|                                   aria-haspopup="dialog"
+|                                   class="C6U5L tEO7W HDxFb aZSvC bUSFv"
+|                                   data-base-ui-click-trigger=""
+|                                   id="base-ui-_R_19amragmm_"
+|                                   tabindex="0"
+|                                   type="button"
+|                                   <span>
+|                                     class="OvIG3 PM3QQ"
+|                                     "3 or more of a"
+|                                   <span>
+|                                     class="IUVXm"
+|                                     <code>
+|                                       class="ZrcGj"
+|                                       "a{3,}"
+|                                 <button>
+|                                   aria-expanded="false"
+|                                   aria-haspopup="dialog"
+|                                   class="C6U5L tEO7W HDxFb aZSvC bUSFv"
+|                                   data-base-ui-click-trigger=""
+|                                   id="base-ui-_R_1bamragmm_"
+|                                   tabindex="0"
+|                                   type="button"
+|                                   <span>
+|                                     class="OvIG3 PM3QQ"
+|                                     "Between 3 and 6 of a"
+|                                   <span>
+|                                     class="IUVXm"
+|                                     <code>
+|                                       class="ZrcGj"
+|                                       "a{3,6}"
+|                                 <button>
+|                                   aria-expanded="false"
+|                                   aria-haspopup="dialog"
+|                                   class="C6U5L tEO7W HDxFb aZSvC bUSFv"
+|                                   data-base-ui-click-trigger=""
+|                                   id="base-ui-_R_1damragmm_"
+|                                   tabindex="0"
+|                                   type="button"
+|                                   <span>
+|                                     class="OvIG3 PM3QQ"
+|                                     "Start of string"
+|                                   <span>
+|                                     class="IUVXm"
+|                                     <code>
+|                                       class="ZrcGj"
+|                                       "^"
+|                                 <button>
+|                                   aria-expanded="false"
+|                                   aria-haspopup="dialog"
+|                                   class="C6U5L tEO7W HDxFb aZSvC bUSFv"
+|                                   data-base-ui-click-trigger=""
+|                                   id="base-ui-_R_1famragmm_"
+|                                   tabindex="0"
+|                                   type="button"
+|                                   <span>
+|                                     class="OvIG3 PM3QQ"
+|                                     "End of string"
+|                                   <span>
+|                                     class="IUVXm"
+|                                     <code>
+|                                       class="ZrcGj"
+|                                       "$"
+|                                 <button>
+|                                   aria-expanded="false"
+|                                   aria-haspopup="dialog"
+|                                   class="C6U5L tEO7W HDxFb aZSvC bUSFv"
+|                                   data-base-ui-click-trigger=""
+|                                   id="base-ui-_R_1hamragmm_"
+|                                   tabindex="0"
+|                                   type="button"
+|                                   <span>
+|                                     class="OvIG3 PM3QQ"
+|                                     "A word boundary"
+|                                   <span>
+|                                     class="IUVXm"
+|                                     <code>
+|                                       class="ZrcGj"
+|                                       "\b"
+|                                 <button>
+|                                   aria-expanded="false"
+|                                   aria-haspopup="dialog"
+|                                   class="C6U5L tEO7W HDxFb aZSvC bUSFv"
+|                                   data-base-ui-click-trigger=""
+|                                   id="base-ui-_R_1jamragmm_"
+|                                   tabindex="0"
+|                                   type="button"
+|                                   <span>
+|                                     class="OvIG3 PM3QQ"
+|                                     "Non-word boundary"
+|                                   <span>
+|                                     class="IUVXm"
+|                                     <code>
+|                                       class="ZrcGj"
+|                                       "\B"
+|                   <div>
+|                     aria-label="Details sections"
+|                     class="PxQ_N iJQFh Pwlzh WnjPk"
+|                     role="group"
+|                     <button>
+|                       aria-busy="false"
+|                       aria-describedby="DndDescribedBy-551070"
+|                       aria-disabled="false"
+|                       aria-label="Explanation"
+|                       aria-pressed="true"
+|                       aria-roledescription="sortable"
+|                       class="C6U5L KMTIT vv96O"
+|                       data-base-ui-tooltip-trigger=""
+|                       id="base-ui-_R_7lbbagmm_"
+|                       role="button"
+|                       tabindex="0"
+|                       type="button"
+|                       <svg>
+|                         aria-hidden="true"
+|                         class="dxtjI"
+|                         fill="none"
+|                         height="1em"
+|                         stroke-linecap="round"
+|                         stroke-linejoin="round"
+|                         stroke-width="2"
+|                         stroke="currentColor"
+|                         viewBox="0 0 24 24"
+|                         width="1em"
+|                         xmlns="http://www.w3.org/2000/svg"
+|                         <path>
+|                           d="M21 12h-8"
+|                         <path>
+|                           d="M21 6H8"
+|                         <path>
+|                           d="M21 18h-8"
+|                         <path>
+|                           d="M3 6v4c0 1.1.9 2 2 2h3"
+|                         <path>
+|                           d="M3 10v6c0 1.1.9 2 2 2h3"
+|                     <button>
+|                       aria-busy="false"
+|                       aria-describedby="DndDescribedBy-551070"
+|                       aria-disabled="false"
+|                       aria-label="Match Information"
+|                       aria-pressed="true"
+|                       aria-roledescription="sortable"
+|                       class="C6U5L KMTIT vv96O"
+|                       data-base-ui-tooltip-trigger=""
+|                       id="base-ui-_R_7pbbagmm_"
+|                       role="button"
+|                       tabindex="0"
+|                       type="button"
+|                       <svg>
+|                         aria-hidden="true"
+|                         class="dxtjI"
+|                         fill="none"
+|                         height="1em"
+|                         stroke-linecap="round"
+|                         stroke-linejoin="round"
+|                         stroke-width="2"
+|                         stroke="currentColor"
+|                         viewBox="0 0 24 24"
+|                         width="1em"
+|                         xmlns="http://www.w3.org/2000/svg"
+|                         <path>
+|                           d="m3 17 2 2 4-4"
+|                         <path>
+|                           d="m3 7 2 2 4-4"
+|                         <path>
+|                           d="M13 6h8"
+|                         <path>
+|                           d="M13 12h8"
+|                         <path>
+|                           d="M13 18h8"
+|                     <button>
+|                       aria-busy="false"
+|                       aria-describedby="DndDescribedBy-551070"
+|                       aria-disabled="false"
+|                       aria-label="Quick Reference"
+|                       aria-pressed="true"
+|                       aria-roledescription="sortable"
+|                       class="C6U5L KMTIT vv96O"
+|                       data-base-ui-tooltip-trigger=""
+|                       id="base-ui-_R_7tbbagmm_"
+|                       role="button"
+|                       tabindex="0"
+|                       type="button"
+|                       <svg>
+|                         aria-hidden="true"
+|                         class="dxtjI"
+|                         fill="none"
+|                         height="1em"
+|                         stroke-linecap="round"
+|                         stroke-linejoin="round"
+|                         stroke-width="2"
+|                         stroke="currentColor"
+|                         viewBox="0 0 24 24"
+|                         width="1em"
+|                         xmlns="http://www.w3.org/2000/svg"
+|                         <path>
+|                           d="M12 7v14"
+|                         <path>
+|                           d="M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z"
+|                 <main>
+|                   class="lSMl4"
+|                   <div>
+|                     class="rdT6t"
+|                     <div>
+|                       class="h70K4 oR0KW"
+|                       style="--panel-count:2;--panel-rows:var(--content-track) var(--panel-gap) minmax(var(--panel-minimum), 1fr)"
+|                       <div>
+|                         class="NyUZB"
+|                         data-panel="regex"
+|                         <div>
+|                           class="JeE3Q"
+|                           <h2>
+|                             class="tv8Jw daWRx leBVR"
+|                             <span>
+|                               class="BtaMj"
+|                               "Regular Expression"
+|                             <div>
+|                               class="eDIc6 abuLs n1Uzp"
+|                           <div>
+|                             aria-disabled="false"
+|                             class="V86qC D01Co iCccl wSxeZ VaTtc Dc0Vc"
+|                             <button>
+|                               aria-expanded="false"
+|                               aria-haspopup="menu"
+|                               aria-label="Regex delimiter"
+|                               class="C6U5L rL38g"
+|                               data-base-ui-tooltip-trigger=""
+|                               id="base-ui-_R_fd6jqgmm_"
+|                               tabindex="0"
+|                               type="button"
+|                               <svg>
+|                                 class="dxtjI N3nky"
+|                                 fill="none"
+|                                 height="1em"
+|                                 stroke-linecap="round"
+|                                 stroke-linejoin="round"
+|                                 stroke-width="2"
+|                                 stroke="currentColor"
+|                                 viewBox="0 0 24 24"
+|                                 width="1em"
+|                                 xmlns="http://www.w3.org/2000/svg"
+|                                 <circle>
+|                                   cx="12"
+|                                   cy="12"
+|                                   r="1"
+|                                 <circle>
+|                                   cx="12"
+|                                   cy="5"
+|                                   r="1"
+|                                 <circle>
+|                                   cx="12"
+|                                   cy="19"
+|                                   r="1"
+|                               "/"
+|                             <textarea>
+|                               aria-label="Insert your regular expression here"
+|                               class="qwkiI"
+|                               dir="ltr"
+|                               placeholder="Insert your regular expression here"
+|                               readonly=""
+|                               translate="no"
+|                               wrap="soft"
+|                             <button>
+|                               aria-expanded="false"
+|                               aria-haspopup="menu"
+|                               aria-label="Regex options"
+|                               class="C6U5L iavBR"
+|                               data-base-ui-tooltip-trigger=""
+|                               id="base-ui-_R_fdejqgmm_"
+|                               tabindex="0"
+|                               type="button"
+|                               "/"
+|                               <div>
+|                                 class="gOGN8"
+|                                 "gm"
+|                             <div>
+|                               class="hSBEQ"
+|                               <button>
+|                                 aria-disabled="true"
+|                                 aria-label="Copy to clipboard"
+|                                 class="C6U5L Tbe4j OAVUl tK5iV qUIkn w8AO0"
+|                                 data-base-ui-tooltip-trigger=""
+|                                 data-disabled=""
+|                                 id="base-ui-_R_fijqgmm_"
+|                                 tabindex="0"
+|                                 type="button"
+|                                 <span>
+|                                   class="lC6kT"
+|                                   <svg>
+|                                     class="dxtjI kcIdU"
+|                                     fill="none"
+|                                     height="1em"
+|                                     stroke-linecap="round"
+|                                     stroke-linejoin="round"
+|                                     stroke-width="2"
+|                                     stroke="currentColor"
+|                                     viewBox="0 0 24 24"
+|                                     width="1em"
+|                                     xmlns="http://www.w3.org/2000/svg"
+|                                     <rect>
+|                                       height="14"
+|                                       rx="2"
+|                                       ry="2"
+|                                       width="14"
+|                                       x="8"
+|                                       y="8"
+|                                     <path>
+|                                       d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"
+|                       <div>
+|                         class="VAvoV"
+|                         data-gutter="true"
+|                         <div>
+|                           aria-label="Resize Regular Expression and Test Strings"
+|                           aria-orientation="horizontal"
+|                           class="n4YC7 l1j45"
+|                           role="separator"
+|                           tabindex="0"
+|                       <div>
+|                         class="NyUZB"
+|                         data-panel="input"
+|                         <div>
+|                           class="iZ6ZD gIhot"
+|                           <div>
+|                             class="tBzAV"
+|                             data-activation-direction="none"
+|                             data-orientation="horizontal"
+|                             <div>
+|                               class="f92SH oTLAr"
+|                               <div>
+|                                 class="k1a11"
+|                                 <div>
+|                                   class="goMpm"
+|                                   data-activation-direction="none"
+|                                   data-orientation="horizontal"
+|                                   data-scroll-left="false"
+|                                   data-scroll-right="false"
+|                                   role="tablist"
+|                                   <div>
+|                                     class="PVvBb"
+|                                     data-sorting="false"
+|                                     style="-webkit-touch-callout:none"
+|                                     <button>
+|                                       aria-disabled="false"
+|                                       aria-label="Input 1"
+|                                       aria-selected="true"
+|                                       class="C6U5L U19b9 csJDS"
+|                                       data-activation-direction="none"
+|                                       data-active=""
+|                                       data-base-ui-tooltip-trigger=""
+|                                       data-composite-item-active=""
+|                                       data-orientation="horizontal"
+|                                       id="base-ui-_R_3relamdqgmm_"
+|                                       role="tab"
+|                                       tabindex="-1"
+|                                       type="button"
+|                                       <svg>
+|                                         aria-hidden="true"
+|                                         class="dxtjI"
+|                                         color="var(--color-text-dimmed)"
+|                                         fill="none"
+|                                         height="1em"
+|                                         stroke-linecap="round"
+|                                         stroke-linejoin="round"
+|                                         stroke-width="2"
+|                                         stroke="currentColor"
+|                                         style="color:var(--color-text-dimmed)"
+|                                         viewBox="0 0 24 24"
+|                                         width="1em"
+|                                         xmlns="http://www.w3.org/2000/svg"
+|                                         <circle>
+|                                           cx="12"
+|                                           cy="12"
+|                                           r="10"
+|                                       <span>
+|                                         class="rKIXi PM3QQ"
+|                                         "Input 1"
+|                                     <button>
+|                                       aria-disabled="false"
+|                                       aria-expanded="false"
+|                                       aria-haspopup="menu"
+|                                       aria-label="Tab actions"
+|                                       class="C6U5L Tbe4j s_nse qUIkn f0GjI"
+|                                       data-base-ui-tooltip-trigger=""
+|                                       id="base-ui-_R_1mrrelamdqgmm_"
+|                                       tabindex="-1"
+|                                       type="button"
+|                                       <span>
+|                                         class="lC6kT"
+|                                         <svg>
+|                                           class="dxtjI kcIdU"
+|                                           fill="none"
+|                                           height="1em"
+|                                           stroke-linecap="round"
+|                                           stroke-linejoin="round"
+|                                           stroke-width="2"
+|                                           stroke="currentColor"
+|                                           viewBox="0 0 24 24"
+|                                           width="1em"
+|                                           xmlns="http://www.w3.org/2000/svg"
+|                                           <circle>
+|                                             cx="12"
+|                                             cy="12"
+|                                             r="1"
+|                                           <circle>
+|                                             cx="12"
+|                                             cy="5"
+|                                             r="1"
+|                                           <circle>
+|                                             cx="12"
+|                                             cy="19"
+|                                             r="1"
+|                                 <div>
+|                                   class="wPXc1"
+|                                   <div>
+|                                     class="PD7pa"
+|                                     <button>
+|                                       aria-label="Add test string"
+|                                       class="C6U5L Tbe4j OAVUl qUIkn"
+|                                       data-base-ui-tooltip-trigger=""
+|                                       id="base-ui-_R_1timdqgmm_"
+|                                       tabindex="0"
+|                                       type="button"
+|                                       <span>
+|                                         class="lC6kT"
+|                                         <svg>
+|                                           class="dxtjI kcIdU"
+|                                           fill="none"
+|                                           height="1em"
+|                                           stroke-linecap="round"
+|                                           stroke-linejoin="round"
+|                                           stroke-width="2"
+|                                           stroke="currentColor"
+|                                           viewBox="0 0 24 24"
+|                                           width="1em"
+|                                           xmlns="http://www.w3.org/2000/svg"
+|                                           <path>
+|                                             d="M5 12h14"
+|                                           <path>
+|                                             d="M12 5v14"
+|                                     <span>
+|                                       class="r2Vpq RhIVy lSEhl"
+|                                       "New"
+|                             <div>
+|                               class="YLzN7"
+|                               data-activation-direction="none"
+|                               data-index="-1"
+|                               data-orientation="horizontal"
+|                               id="base-ui-_R_16dqgmm_"
+|                               role="tabpanel"
+|                               tabindex="0"
+|                               <div>
+|                                 class="xwCUz"
+|                                 <div>
+|                                   class="tpOIA D01Co iCccl wSxeZ VaTtc"
+|                                   <textarea>
+|                                     aria-label="Test String"
+|                                     class="MS5Bt"
+|                                     dir="ltr"
+|                                     readonly=""
+|                                     translate="no"
+|                                     wrap="soft"
+|       <script>
+|         "window.__staticRouterHydrationData = JSON.parse("{\"loaderData\":{\"0-0-6\":null},\"actionData\":null,\"errors\":null}");"
+|       "
+"
+|     "
+"
+|     <script>
+|       "
+  window.__INITIAL_STATE__ = {"api":{"queries":{},"provided":{"tags":{},"keys":{}}},"miscApi":{"queries":{},"provided":{"tags":{},"keys":{}}},"leftSidebar":{"visible":true,"width":240},"rightSidebar":{"activeSubsection":"explanation","sectionOrder":["explanation","match-info","quickref"],"visibleSections":["explanation","match-info","quickref"],"width":null},"regexEditor":{"routeLoadId":1,"flavor":"pcre2","flags":"gm","delimiter":"/","parserState":{"result":null,"isParsing":false,"hasParsed":false},"regex":"","testStrings":[{"key":"p9gjh8dm7i","name":null,"value":null,"disabled":false}],"selectedTestStringKey":"p9gjh8dm7i","substString":"","extractionString":""},"workspace":{"identity":"unsaved:regex:","editorMode":"match","persistedEditorMode":"match","libraryDetails":{"description":null,"author":null,"title":null},"userDetails":{"isOwner":false,"isFavorite":false},"permalinkDetails":{"isLibraryEntry":false,"isPrivate":false,"isLocked":false,"fragment":null,"version":null,"isEditable":false,"permalinkDeleteCode":null,"permalinkVersionDeleteCode":null,"tags":[],"title":null}},"textPipeline":{"initialInput":"","inputMetrics":null,"layers":[],"selectedLayerKey":null,"isDirty":false,"executionInputRevision":0,"executionRevision":null,"status":"not-run","results":{},"validation":{}},"settings":{"defaultFlavor":"pcre2","defaultFlags":"gm","defaultDelimiter":"/","maxExecutionTime":2000,"regexConversionMode":"loose","regexFlavorConversion":"ask","autoRunUnitTests":true,"autoRunTextPipeline":true,"theme":"auto","regexColorScheme":"default","matchColorScheme":"default","nonParticipatingGroups":false,"displayWhitespace":true,"colorizeSyntax":true,"wrapLines":true,"textSize":"medium","testAreaLineNumbers":false,"regexAreaLineNumbers":false,"language":"ENGLISH","editorTooltips":true,"intellisenseEnabled":true,"defaultFunction":"MATCH","showWarningUnsavedProgress":true,"confirmTabDeletion":true,"saveMode":"public","defaultCodeGenLanguage":"","copyExplanationStyle":"verbose","calculateRegexSteps":true,"defaultTabBehavior":true,"fileLoadingMode":"ask","disableKeyboardShortcuts":false,"lineSeparator":"","textExplanationMode":"PLAIN_TEXT_BOTH","matchInfoPanel":true,"benchmarkDuration":10000,"formatRegexIndentationWidth":2,"formatRegexMaxLineWidth":80,"analyzeRedos":true,"redosAnalysisMinimumSeverity":"low","updatedAt":0},"unitTests":{"tests":[],"invalidatedTestKeys":[],"testResults":{},"runningTestKeys":[],"testFilter":"all","expandedTestKeys":[],"highlightedTest":null,"focusTestKey":null},"general":{"documentTitle":"Online Regex Tester, Builder, Converter & Debugger","metaDescription":"Build, test, debug and convert regex across flavors with real-time matches and clear explanations. Supports PCRE2, JavaScript, Python and more. Save and share examples.","currentTheme":"light"},"user":{"signedIn":false,"userId":null,"accountName":null,"email":null,"avatarLabel":null,"avatarUrl":null,"serviceProvider":null,"isLibraryModerator":false,"userClass":"free","isProTrialEligible":false},"quiz":{"currentTaskData":{}},"sponsors":{"sponsorData":null,"sponsors":[],"adBlock":false,"isLoading":true,"hasRequestedCarbonAd":false},"config":{"featureAccess":{"tier":"free","supportedFeatures":["accounts","save-and-share","mcp","highlight-color-schemes","format-regex","benchmark-regex","multiple-test-strings","text-pipeline","regex-debugger","regex-converter","file-loading","api-explain-regex"]},"forceOffline":false,"hostBlocked":false,"blockedHostname":null,"licenseInfo":{"exp":"2099-01-01T00:00:00.000Z","lastValidated":"2026-10-24T13:04:29.136Z","contactEmail":"firas@regex101.com","company":"regex101 ApS"},"isEmbedded":false,"minimalInterface":false}};
+"
+|     "
+
+"

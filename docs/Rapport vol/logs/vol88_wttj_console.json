@@ -1,0 +1,1 @@
+{"console":["unhandledrejection: Error: Invariant: Expected document.currentScript to be a <script> element. Received [object HTMLScriptElement] instead. This is a bug in Next.js.\n    at <anonymous> (inline:2:22:251)\n    at a (inline:4:1:5370)\n    at l (inline:4:1:305)\n    at <anonymous> (inline:4:1:4749)\n    at I (inline:5:1:6185)\n    at <anonymous> (inline:5:1:9861)"]}

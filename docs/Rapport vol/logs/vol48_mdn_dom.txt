@@ -1,0 +1,3868 @@
+| <html>
+|   data-renderer="Homepage"
+|   data-theme="light dark"
+|   lang="en-US"
+|   <head>
+|     "
+          "
+|     <meta>
+|       charset="UTF-8"
+|     "
+          "
+|     <meta>
+|       content="width=device-width, initial-scale=1.0"
+|       name="viewport"
+|     "
+          "
+|     <title>
+|       "MDN Web Docs"
+|     "
+          
+          "
+|     <script>
+|       "try {
+  document.documentElement.dataset.theme =
+    localStorage.getItem("theme") || "light dark";
+} catch (error) {
+  console.warn("Unable to set theme", error);
+}
+
+try {
+  if (localStorage.getItem("nop") === "yes") {
+    document.documentElement.dataset["nop"] = "yes";
+  }
+} catch (error) {
+  console.warn("Unable to set nop", error);
+}
+"
+|     "
+          "
+|     <link>
+|       fetchpriority="high"
+|       href="/static/client/styles-global.19cc0c980e463125.css"
+|       rel="stylesheet"
+|     <link>
+|       fetchpriority="high"
+|       href="/static/client/styles-homepage.0980eec27925cc11.css"
+|       rel="stylesheet"
+|     <link>
+|       fetchpriority="high"
+|       href="/static/client/styles-homepage-header.da8a69fafe1cfb00.css"
+|       rel="stylesheet"
+|     <link>
+|       fetchpriority="high"
+|       href="/static/client/styles-homepage-hero.61cf31e2c2f1b72c.css"
+|       rel="stylesheet"
+|     <link>
+|       fetchpriority="high"
+|       href="/static/client/styles-mandala.8fbfeb0567dbde40.css"
+|       rel="stylesheet"
+|     <link>
+|       fetchpriority="high"
+|       href="/static/client/styles-homepage-body.22274e9a4a78b7ae.css"
+|       rel="stylesheet"
+|     <link>
+|       fetchpriority="high"
+|       href="/static/client/styles-featured-articles.770034368883a9ae.css"
+|       rel="stylesheet"
+|     <link>
+|       fetchpriority="high"
+|       href="/static/client/styles-latest-news.4e8f60fdbf19d588.css"
+|       rel="stylesheet"
+|     <link>
+|       fetchpriority="high"
+|       href="/static/client/styles-recent-contributions.ddcab7ad78446b98.css"
+|       rel="stylesheet"
+|     <link>
+|       fetchpriority="high"
+|       href="/static/client/styles-homepage-footer.5d6588cf8c9b4dc6.css"
+|       rel="stylesheet"
+|     <link>
+|       fetchpriority="high"
+|       href="/static/client/3391.b611fbe2dc694a57.css"
+|       rel="stylesheet"
+|     <link>
+|       fetchpriority="high"
+|       href="/static/client/styles-homepage-contributor-spotlight.9d9b306c201f94e2.css"
+|       rel="stylesheet"
+|     <link>
+|       fetchpriority="high"
+|       href="/static/client/styles-page-layout.5a4354f33e894319.css"
+|       rel="stylesheet"
+|     <link>
+|       fetchpriority="high"
+|       href="/static/client/styles-a11y-menu.5796ee87cb69f93f.css"
+|       rel="stylesheet"
+|     <link>
+|       fetchpriority="high"
+|       href="/static/client/styles-navigation.c3ebf384e65df345.css"
+|       rel="stylesheet"
+|     <link>
+|       fetchpriority="high"
+|       href="/static/client/styles-logo.aea5ff6edf1b9cfb.css"
+|       rel="stylesheet"
+|     <link>
+|       fetchpriority="high"
+|       href="/static/client/styles-menu.e2c5c8a53a8854c2.css"
+|       rel="stylesheet"
+|     <link>
+|       fetchpriority="high"
+|       href="/static/client/styles-breadcrumbs-bar.2d1bed1ab424b6b3.css"
+|       rel="stylesheet"
+|     <link>
+|       fetchpriority="high"
+|       href="/static/client/styles-breadcrumbs.87eb742f4e711dc3.css"
+|       rel="stylesheet"
+|     <link>
+|       fetchpriority="high"
+|       href="/static/client/styles-footer.66072dd619a4ef50.css"
+|       rel="stylesheet"
+|     "
+          "
+|     <link>
+|       as="font"
+|       crossorigin="anonymous"
+|       fetchpriority="low"
+|       href="/static/client/jetbrains-mono-latin.119994ed445212c7.woff2"
+|       rel="preload"
+|       type="font/woff2"
+|     <link>
+|       as="font"
+|       crossorigin="anonymous"
+|       fetchpriority="low"
+|       href="/static/client/inter-latin.9a3b1bc220d426ef.woff2"
+|       rel="preload"
+|       type="font/woff2"
+|     "
+          
+          "
+|     <script>
+|       src="/static/client/runtime.5df19022d1b28328.js"
+|       type="module"
+|     <script>
+|       src="/static/client/5909.489e266d049aa182.js"
+|       type="module"
+|     <script>
+|       src="/static/client/4585.e30f706b333273cd.js"
+|       type="module"
+|     <script>
+|       src="/static/client/1216.2fdb44f0bb574bc2.js"
+|       type="module"
+|     <script>
+|       src="/static/client/index.016ac320c2222096.js"
+|       type="module"
+|     "
+          
+    "
+|     <link>
+|       href="https://developer.mozilla.org/favicon.ico"
+|       rel="icon"
+|       sizes="32x32"
+|     "
+    "
+|     <link>
+|       href="https://developer.mozilla.org/favicon.svg"
+|       rel="icon"
+|       type="image/svg+xml"
+|     "
+   "
+|     <meta>
+|       content="The MDN Web Docs site provides information about Open Web technologies including HTML, CSS, and APIs for both Web sites and progressive web apps."
+|       name="description"
+|     <meta>
+|       content="https://developer.mozilla.org/en-US/"
+|       name="og:url"
+|     <meta>
+|       content="MDN Web Docs"
+|       name="og:title"
+|     <meta>
+|       content="en_US"
+|       name="og:locale"
+|     <meta>
+|       content="The MDN Web Docs site provides information about Open Web technologies including HTML, CSS, and APIs for both Web sites and progressive web apps."
+|       name="og:description"
+|     <meta>
+|       content="https://developer.mozilla.org/mdn-social-image.46ac2375.png"
+|       name="og:image"
+|     <meta>
+|       content="image/png"
+|       name="og:image:type"
+|     <meta>
+|       content="1024"
+|       name="og:image:height"
+|     <meta>
+|       content="1024"
+|       name="og:image:width"
+|     <meta>
+|       content="The MDN logo"
+|       name="og:image:alt"
+|     <meta>
+|       content="MDN Web Docs"
+|       name="og:site_name"
+|     <meta>
+|       content="summary"
+|       name="twitter:card"
+|     <meta>
+|       content="MozDevNet"
+|       name="twitter:creator"
+|     "
+          "
+|     <link>
+|       href="https://developer.mozilla.org/en-US/"
+|       rel="canonical"
+|     "
+          "
+|     <link>
+|       href="/apple-touch-icon.png"
+|       rel="apple-touch-icon"
+|     "
+          "
+|     <link>
+|       href="/manifest.json"
+|       rel="manifest"
+|     "
+          "
+|     <link>
+|       href="/opensearch.xml?locale=en-US"
+|       rel="search"
+|       title="MDN"
+|       type="application/opensearchdescription+xml"
+|     "
+          "
+|     <link>
+|       href="https://developer.mozilla.org/en-US/blog/rss.xml"
+|       rel="alternate"
+|       title="MDN Blog RSS Feed"
+|       type="application/rss+xml"
+|     "
+        "
+|   "
+        
+      "
+|   <body>
+|     class="page-layout"
+|     "
+        "
+|     <ul>
+|       class="a11y-menu"
+|       "
+      "
+|       <li>
+|         "
+        "
+|         <a>
+|           data-glean-id="a11y_menu: click #content"
+|           href="#content"
+|           "Skip to main content"
+|         "
+      "
+|       "
+      "
+|       <li>
+|         "
+        "
+|         <a>
+|           data-glean-id="a11y_menu: click #search"
+|           href="#mdn-search"
+|           "Skip to search"
+|         "
+      "
+|       "
+    "
+|     "
+        "
+|     <div>
+|       class="page-layout__banner"
+|       data-scheme="dark"
+|       "
+          "
+|       <mdn-placement-top>
+|         <template>
+|           shadowrootmode="open"
+|       "
+        "
+|     "
+        "
+|     <header>
+|       class="page-layout__header"
+|       "
+          
+      "
+|       <nav>
+|         class="navigation"
+|         data-open="false"
+|         data-scheme="dark"
+|         "
+        "
+|         <div>
+|           class="navigation__logo"
+|           "
+      "
+|           <a>
+|             class="logo"
+|             href="/en-US/"
+|             "
+        "
+|             <svg>
+|               class="logo__image"
+|               height="24"
+|               role="img"
+|               viewBox="0 0 83 24"
+|               width="83"
+|               "
+          "
+|               <title>
+|                 "MDN"
+|               "
+          "
+|               <path>
+|                 class="logo__letter"
+|                 d="M9.4 0 2.81 21.17H.12L6.69 0H9.4Zm2.38 0v21.17H9.4V0h2.4Zm9.27 0-6.56 21.17H11.8L18.36 0h2.69Zm2.39 0v21.17h-2.4V0h2.4Z"
+|               "
+          "
+|               <path>
+|                 class="logo__text"
+|                 d="M45.55 16.83h-3.93v-1.27h.87v-3.63c0-.85-.16-1.45-.48-1.82a1.65 1.65 0 0 0-1.3-.52c-.74 0-1.3.25-1.66.78a2.98 2.98 0 0 0-.58 1.58v3.59h1.38v1.26h-3.93v-1.26h.87v-3.6c0-.88-.16-1.48-.48-1.83a1.7 1.7 0 0 0-1.29-.52 1.93 1.93 0 0 0-1.65.75 2.85 2.85 0 0 0-.58 1.6v3.62h1.59v1.27h-4.64v-1.27h1.37V9.75h-1.4V8.46h3.08v1.47c.28-.48.62-.87 1.08-1.2a3 3 0 0 1 1.68-.45c.67 0 1.22.16 1.73.48.5.32.85.8 1.03 1.47.25-.57.62-1.03 1.13-1.4.5-.37 1.1-.55 1.81-.55.8 0 1.5.25 2.05.75.55.51.85 1.3.85 2.35v4.18h1.4v1.27Zm9.77 0H52.3v-1.66c-.27.51-.66.95-1.13 1.29-.56.4-1.23.59-1.9.55-1.11 0-2-.37-2.67-1.12a4.41 4.41 0 0 1-1-3.06c0-1.15.3-2.2.93-3.15.6-.94 1.58-1.43 2.94-1.43 1.36 0 2.25.5 2.83 1.5V5.22h-2V3.93h3.63v11.63h1.38v1.27Zm-3.06-3.86v-1.02a2.28 2.28 0 0 0-.73-1.67 2.4 2.4 0 0 0-1.66-.65 2.18 2.18 0 0 0-1.88.9 3.63 3.63 0 0 0-.65 2.2c0 .95.23 1.68.7 2.19.45.5 1.03.76 1.7.76.73 0 1.33-.3 1.79-.88.48-.6.71-1.21.73-1.83Zm14.14 3.86h-4.43v-1.27h1.37v-3.63c0-.85-.16-1.45-.5-1.82a1.68 1.68 0 0 0-1.31-.52c-.71 0-1.29.23-1.7.69a2.52 2.52 0 0 0-.67 1.6v3.66h1.38v1.26H56.1v-1.26h1.38v-5.8h-1.42V8.47h3.12V9.9c.6-1.06 1.57-1.6 2.92-1.6.83 0 1.54.26 2.12.77.57.5.85 1.28.85 2.34v4.19h1.38v1.24h-.05Z"
+|               "
+          "
+|               <path>
+|                 class="logo__cursor"
+|                 d="M67.71 21.98H83V24H67.71v-2.02Z"
+|               "
+        "
+|             "
+      "
+|           "
+    "
+|         "
+        "
+|         <div>
+|           class="navigation__search"
+|           data-view="mobile"
+|           "
+          "
+|           <mdn-search-button>
+|             <template>
+|               shadowrootmode="open"
+|             <template>
+|               shadowroot="open"
+|               shadowrootmode="open"
+|           "
+        "
+|         "
+        "
+|         <button>
+|           aria-controls="navigation__popup"
+|           aria-expanded="false"
+|           aria-label="Toggle navigation"
+|           class="navigation__button"
+|           type="button"
+|         "
+        "
+|         <div>
+|           class="navigation__popup"
+|           id="navigation__popup"
+|           "
+          "
+|           <div>
+|             class="navigation__menu"
+|             "
+      "
+|             <nav>
+|               class="menu"
+|               "
+        "
+|               <div>
+|                 class="menu__tab"
+|                 data-section="html"
+|                 "
+            "
+|                 <mdn-dropdown>
+|                   data-glean-toggle-open="menu_toggle: html"
+|                   <template>
+|                     shadowrootmode="open"
+|                   <template>
+|                     shadowroot="open"
+|                     shadowrootmode="open"
+|                   "
+                    "
+|                   <button>
+|                     class="menu__tab-button"
+|                     slot="button"
+|                     type="button"
+|                     "
+                      "
+|                     <span>
+|                       class="menu__tab-label"
+|                       "HTML"
+|                     "
+                    "
+|                   "
+                    "
+|                   <div>
+|                     class="menu__panel"
+|                     slot="dropdown"
+|                     "
+                      "
+|                     <p>
+|                       class="menu__panel-title"
+|                       "
+                        "
+|                       <a>
+|                         data-glean-id="menu_click_menu: html -> /en-US/docs/Web/HTML"
+|                         href="/en-US/docs/Web/HTML"
+|                         "HTML: Markup language"
+|                       "
+                      "
+|                     "
+                      "
+|                     <div>
+|                       class="menu__panel-content"
+|                       "
+                        "
+|                       <dl>
+|                         "
+                                "
+|                         <dt>
+|                           "HTML reference"
+|                         "
+                                "
+|                         <dd>
+|                           <ul>
+|                             "
+                            "
+|                         <li>
+|                           "
+                                  "
+|                           <a>
+|                             data-glean-id="menu_click_submenu: html -> /en-US/docs/Web/HTML/Reference/Elements"
+|                             href="/en-US/docs/Web/HTML/Reference/Elements"
+|                             "Elements"
+|                           "
+                                "
+|                         <li>
+|                           "
+                                  "
+|                           <a>
+|                             data-glean-id="menu_click_submenu: html -> /en-US/docs/Web/HTML/Reference/Global_attributes"
+|                             href="/en-US/docs/Web/HTML/Reference/Global_attributes"
+|                             "Global attributes"
+|                           "
+                                "
+|                         <li>
+|                           "
+                                  "
+|                           <a>
+|                             data-glean-id="menu_click_submenu: html -> /en-US/docs/Web/HTML/Reference/Attributes"
+|                             href="/en-US/docs/Web/HTML/Reference/Attributes"
+|                             "Attributes"
+|                           "
+                                "
+|                         <li>
+|                           "
+                                  "
+|                           <a>
+|                             aria-label="See all HTML references"
+|                             data-glean-id="menu_click_submenu: html -> /en-US/docs/Web/HTML/Reference"
+|                             href="/en-US/docs/Web/HTML/Reference"
+|                             title="See all HTML references"
+|                             "See all…"
+|                           "
+                                "
+|                         "
+                          
+                              "
+|                       <dl>
+|                         "
+                                "
+|                         <dt>
+|                           "HTML guides"
+|                         "
+                                "
+|                         <dd>
+|                           <ul>
+|                             "
+                            "
+|                         <li>
+|                           "
+                                  "
+|                           <a>
+|                             data-glean-id="menu_click_submenu: html -> /en-US/docs/Web/HTML/Guides/Responsive_images"
+|                             href="/en-US/docs/Web/HTML/Guides/Responsive_images"
+|                             "Responsive images"
+|                           "
+                                "
+|                         <li>
+|                           "
+                                  "
+|                           <a>
+|                             data-glean-id="menu_click_submenu: html -> /en-US/docs/Web/HTML/Guides/Cheatsheet"
+|                             href="/en-US/docs/Web/HTML/Guides/Cheatsheet"
+|                             "HTML cheatsheet"
+|                           "
+                                "
+|                         <li>
+|                           "
+                                  "
+|                           <a>
+|                             data-glean-id="menu_click_submenu: html -> /en-US/docs/Web/HTML/Guides/Date_and_time_formats"
+|                             href="/en-US/docs/Web/HTML/Guides/Date_and_time_formats"
+|                             "Date & time formats"
+|                           "
+                                "
+|                         <li>
+|                           "
+                                  "
+|                           <a>
+|                             aria-label="See all HTML guides"
+|                             data-glean-id="menu_click_submenu: html -> /en-US/docs/Web/HTML/Guides"
+|                             href="/en-US/docs/Web/HTML/Guides"
+|                             title="See all HTML guides"
+|                             "See all…"
+|                           "
+                                "
+|                         "
+                          
+                              "
+|                       <dl>
+|                         "
+                                "
+|                         <dt>
+|                           "Markup languages"
+|                         "
+                                "
+|                         <dd>
+|                           <ul>
+|                             "
+                            "
+|                         <li>
+|                           "
+                                  "
+|                           <a>
+|                             data-glean-id="menu_click_submenu: html -> /en-US/docs/Web/SVG"
+|                             href="/en-US/docs/Web/SVG"
+|                             "SVG"
+|                           "
+                                "
+|                         <li>
+|                           "
+                                  "
+|                           <a>
+|                             data-glean-id="menu_click_submenu: html -> /en-US/docs/Web/MathML"
+|                             href="/en-US/docs/Web/MathML"
+|                             "MathML"
+|                           "
+                                "
+|                         <li>
+|                           "
+                                  "
+|                           <a>
+|                             data-glean-id="menu_click_submenu: html -> /en-US/docs/Web/XML"
+|                             href="/en-US/docs/Web/XML"
+|                             "XML"
+|                           "
+                                "
+|                         "
+                          
+                              "
+|                       "
+                      "
+|                     "
+                    "
+|                   "
+                  "
+|                 "
+          "
+|               <div>
+|                 class="menu__tab"
+|                 data-section="css"
+|                 "
+            "
+|                 <mdn-dropdown>
+|                   data-glean-toggle-open="menu_toggle: css"
+|                   <template>
+|                     shadowrootmode="open"
+|                   <template>
+|                     shadowroot="open"
+|                     shadowrootmode="open"
+|                   "
+                    "
+|                   <button>
+|                     class="menu__tab-button"
+|                     slot="button"
+|                     type="button"
+|                     "
+                      "
+|                     <span>
+|                       class="menu__tab-label"
+|                       "CSS"
+|                     "
+                    "
+|                   "
+                    "
+|                   <div>
+|                     class="menu__panel"
+|                     slot="dropdown"
+|                     "
+                      "
+|                     <p>
+|                       class="menu__panel-title"
+|                       "
+                        "
+|                       <a>
+|                         data-glean-id="menu_click_menu: css -> /en-US/docs/Web/CSS"
+|                         href="/en-US/docs/Web/CSS"
+|                         "CSS: Styling language"
+|                       "
+                      "
+|                     "
+                      "
+|                     <div>
+|                       class="menu__panel-content"
+|                       "
+                        "
+|                       <dl>
+|                         "
+                                "
+|                         <dt>
+|                           "CSS reference"
+|                         "
+                                "
+|                         <dd>
+|                           <ul>
+|                             "
+                            "
+|                         <li>
+|                           "
+                                  "
+|                           <a>
+|                             data-glean-id="menu_click_submenu: css -> /en-US/docs/Web/CSS/Reference/Properties"
+|                             href="/en-US/docs/Web/CSS/Reference/Properties"
+|                             "Properties"
+|                           "
+                                "
+|                         <li>
+|                           "
+                                  "
+|                           <a>
+|                             data-glean-id="menu_click_submenu: css -> /en-US/docs/Web/CSS/Reference/Selectors"
+|                             href="/en-US/docs/Web/CSS/Reference/Selectors"
+|                             "Selectors"
+|                           "
+                                "
+|                         <li>
+|                           "
+                                  "
+|                           <a>
+|                             data-glean-id="menu_click_submenu: css -> /en-US/docs/Web/CSS/Reference/At-rules"
+|                             href="/en-US/docs/Web/CSS/Reference/At-rules"
+|                             "At-rules"
+|                           "
+                                "
+|                         <li>
+|                           "
+                                  "
+|                           <a>
+|                             data-glean-id="menu_click_submenu: css -> /en-US/docs/Web/CSS/Reference/Values"
+|                             href="/en-US/docs/Web/CSS/Reference/Values"
+|                             "Values"
+|                           "
+                                "
+|                         <li>
+|                           "
+                                  "
+|                           <a>
+|                             aria-label="See all CSS references"
+|                             data-glean-id="menu_click_submenu: css -> /en-US/docs/Web/CSS/Reference"
+|                             href="/en-US/docs/Web/CSS/Reference"
+|                             title="See all CSS references"
+|                             "See all…"
+|                           "
+                                "
+|                         "
+                          
+                              "
+|                       <dl>
+|                         "
+                                "
+|                         <dt>
+|                           "CSS guides"
+|                         "
+                                "
+|                         <dd>
+|                           <ul>
+|                             "
+                            "
+|                         <li>
+|                           "
+                                  "
+|                           <a>
+|                             data-glean-id="menu_click_submenu: css -> /en-US/docs/Web/CSS/Guides/Box_model/Introduction"
+|                             href="/en-US/docs/Web/CSS/Guides/Box_model/Introduction"
+|                             "Box model"
+|                           "
+                                "
+|                         <li>
+|                           "
+                                  "
+|                           <a>
+|                             data-glean-id="menu_click_submenu: css -> /en-US/docs/Web/CSS/Guides/Animations/Using"
+|                             href="/en-US/docs/Web/CSS/Guides/Animations/Using"
+|                             "Animations"
+|                           "
+                                "
+|                         <li>
+|                           "
+                                  "
+|                           <a>
+|                             data-glean-id="menu_click_submenu: css -> /en-US/docs/Web/CSS/Guides/Flexible_box_layout/Basic_concepts"
+|                             href="/en-US/docs/Web/CSS/Guides/Flexible_box_layout/Basic_concepts"
+|                             "Flexbox"
+|                           "
+                                "
+|                         <li>
+|                           "
+                                  "
+|                           <a>
+|                             data-glean-id="menu_click_submenu: css -> /en-US/docs/Web/CSS/Guides/Colors/Applying_color"
+|                             href="/en-US/docs/Web/CSS/Guides/Colors/Applying_color"
+|                             "Colors"
+|                           "
+                                "
+|                         <li>
+|                           "
+                                  "
+|                           <a>
+|                             aria-label="See all CSS guides"
+|                             data-glean-id="menu_click_submenu: css -> /en-US/docs/Web/CSS/Guides"
+|                             href="/en-US/docs/Web/CSS/Guides"
+|                             title="See all CSS guides"
+|                             "See all…"
+|                           "
+                                "
+|                         "
+                          
+                              "
+|                       <dl>
+|                         "
+                                "
+|                         <dt>
+|                           "Layout cookbook"
+|                         "
+                                "
+|                         <dd>
+|                           <ul>
+|                             "
+                            "
+|                         <li>
+|                           "
+                                  "
+|                           <a>
+|                             data-glean-id="menu_click_submenu: css -> /en-US/docs/Web/CSS/How_to/Layout_cookbook/Column_layouts"
+|                             href="/en-US/docs/Web/CSS/How_to/Layout_cookbook/Column_layouts"
+|                             "Column layouts"
+|                           "
+                                "
+|                         <li>
+|                           "
+                                  "
+|                           <a>
+|                             data-glean-id="menu_click_submenu: css -> /en-US/docs/Web/CSS/How_to/Layout_cookbook/Center_an_element"
+|                             href="/en-US/docs/Web/CSS/How_to/Layout_cookbook/Center_an_element"
+|                             "Centering an element"
+|                           "
+                                "
+|                         <li>
+|                           "
+                                  "
+|                           <a>
+|                             data-glean-id="menu_click_submenu: css -> /en-US/docs/Web/CSS/How_to/Layout_cookbook/Card"
+|                             href="/en-US/docs/Web/CSS/How_to/Layout_cookbook/Card"
+|                             "Card component"
+|                           "
+                                "
+|                         <li>
+|                           "
+                                  "
+|                           <a>
+|                             data-glean-id="menu_click_submenu: css -> /en-US/docs/Web/CSS/How_to/Layout_cookbook"
+|                             href="/en-US/docs/Web/CSS/How_to/Layout_cookbook"
+|                             "See all…"
+|                           "
+                                "
+|                         "
+                          
+                              "
+|                       "
+                      "
+|                     "
+                    "
+|                   "
+                  "
+|                 "
+          "
+|               <div>
+|                 class="menu__tab"
+|                 data-section="javascript"
+|                 "
+            "
+|                 <mdn-dropdown>
+|                   data-glean-toggle-open="menu_toggle: javascript"
+|                   <template>
+|                     shadowrootmode="open"
+|                   <template>
+|                     shadowroot="open"
+|                     shadowrootmode="open"
+|                   "
+                    "
+|                   <button>
+|                     class="menu__tab-button"
+|                     slot="button"
+|                     type="button"
+|                     "
+                      "
+|                     <span>
+|                       class="menu__tab-label"
+|                       data-type="long"
+|                       "JavaScript"
+|                     <span>
+|                       class="menu__tab-label"
+|                       data-type="short"
+|                       "JS"
+|                     "
+                    "
+|                   "
+                    "
+|                   <div>
+|                     class="menu__panel"
+|                     slot="dropdown"
+|                     "
+                      "
+|                     <p>
+|                       class="menu__panel-title"
+|                       "
+                        "
+|                       <a>
+|                         data-glean-id="menu_click_menu: javascript -> /en-US/docs/Web/JavaScript"
+|                         href="/en-US/docs/Web/JavaScript"
+|                         "JavaScript: Scripting language"
+|                       "
+                      "
+|                     "
+                      "
+|                     <div>
+|                       class="menu__panel-content"
+|                       "
+                        "
+|                       <dl>
+|                         "
+                                "
+|                         <dt>
+|                           "JS reference"
+|                         "
+                                "
+|                         <dd>
+|                           <ul>
+|                             "
+                            "
+|                         <li>
+|                           "
+                                  "
+|                           <a>
+|                             data-glean-id="menu_click_submenu: javascript -> /en-US/docs/Web/JavaScript/Reference/Global_Objects"
+|                             href="/en-US/docs/Web/JavaScript/Reference/Global_Objects"
+|                             "Standard built-in objects"
+|                           "
+                                "
+|                         <li>
+|                           "
+                                  "
+|                           <a>
+|                             data-glean-id="menu_click_submenu: javascript -> /en-US/docs/Web/JavaScript/Reference/Operators"
+|                             href="/en-US/docs/Web/JavaScript/Reference/Operators"
+|                             "Expressions & operators"
+|                           "
+                                "
+|                         <li>
+|                           "
+                                  "
+|                           <a>
+|                             data-glean-id="menu_click_submenu: javascript -> /en-US/docs/Web/JavaScript/Reference/Statements"
+|                             href="/en-US/docs/Web/JavaScript/Reference/Statements"
+|                             "Statements & declarations"
+|                           "
+                                "
+|                         <li>
+|                           "
+                                  "
+|                           <a>
+|                             data-glean-id="menu_click_submenu: javascript -> /en-US/docs/Web/JavaScript/Reference/Functions"
+|                             href="/en-US/docs/Web/JavaScript/Reference/Functions"
+|                             "Functions"
+|                           "
+                                "
+|                         <li>
+|                           "
+                                  "
+|                           <a>
+|                             aria-label="See all JavaScript references"
+|                             data-glean-id="menu_click_submenu: javascript -> /en-US/docs/Web/JavaScript/Reference"
+|                             href="/en-US/docs/Web/JavaScript/Reference"
+|                             title="See all JavaScript references"
+|                             "See all…"
+|                           "
+                                "
+|                         "
+                          
+                              "
+|                       <dl>
+|                         "
+                                "
+|                         <dt>
+|                           "JS guides"
+|                         "
+                                "
+|                         <dd>
+|                           <ul>
+|                             "
+                            "
+|                         <li>
+|                           "
+                                  "
+|                           <a>
+|                             data-glean-id="menu_click_submenu: javascript -> /en-US/docs/Web/JavaScript/Guide/Control_flow_and_error_handling"
+|                             href="/en-US/docs/Web/JavaScript/Guide/Control_flow_and_error_handling"
+|                             "Control flow & error handling"
+|                           "
+                                "
+|                         <li>
+|                           "
+                                  "
+|                           <a>
+|                             data-glean-id="menu_click_submenu: javascript -> /en-US/docs/Web/JavaScript/Guide/Loops_and_iteration"
+|                             href="/en-US/docs/Web/JavaScript/Guide/Loops_and_iteration"
+|                             "Loops and iteration"
+|                           "
+                                "
+|                         <li>
+|                           "
+                                  "
+|                           <a>
+|                             data-glean-id="menu_click_submenu: javascript -> /en-US/docs/Web/JavaScript/Guide/Working_with_objects"
+|                             href="/en-US/docs/Web/JavaScript/Guide/Working_with_objects"
+|                             "Working with objects"
+|                           "
+                                "
+|                         <li>
+|                           "
+                                  "
+|                           <a>
+|                             data-glean-id="menu_click_submenu: javascript -> /en-US/docs/Web/JavaScript/Guide/Using_classes"
+|                             href="/en-US/docs/Web/JavaScript/Guide/Using_classes"
+|                             "Using classes"
+|                           "
+                                "
+|                         <li>
+|                           "
+                                  "
+|                           <a>
+|                             aria-label="See all JavaScript guides"
+|                             data-glean-id="menu_click_submenu: javascript -> /en-US/docs/Web/JavaScript/Guide"
+|                             href="/en-US/docs/Web/JavaScript/Guide"
+|                             title="See all JavaScript guides"
+|                             "See all…"
+|                           "
+                                "
+|                         "
+                          
+                              "
+|                       "
+                      "
+|                     "
+                    "
+|                   "
+                  "
+|                 "
+          "
+|               <div>
+|                 class="menu__tab"
+|                 data-section="webapis"
+|                 "
+            "
+|                 <mdn-dropdown>
+|                   data-glean-toggle-open="menu_toggle: webapis"
+|                   <template>
+|                     shadowrootmode="open"
+|                   <template>
+|                     shadowroot="open"
+|                     shadowrootmode="open"
+|                   "
+                    "
+|                   <button>
+|                     class="menu__tab-button"
+|                     slot="button"
+|                     type="button"
+|                     "
+                      "
+|                     <span>
+|                       class="menu__tab-label"
+|                       "Web APIs"
+|                     "
+                    "
+|                   "
+                    "
+|                   <div>
+|                     class="menu__panel"
+|                     slot="dropdown"
+|                     "
+                      "
+|                     <p>
+|                       class="menu__panel-title"
+|                       "
+                        "
+|                       <a>
+|                         data-glean-id="menu_click_menu: webapis -> /en-US/docs/Web/API"
+|                         href="/en-US/docs/Web/API"
+|                         "Web APIs: Programming interfaces"
+|                       "
+                      "
+|                     "
+                      "
+|                     <div>
+|                       class="menu__panel-content"
+|                       "
+                        "
+|                       <dl>
+|                         "
+                                "
+|                         <dt>
+|                           "Web API reference"
+|                         "
+                                "
+|                         <dd>
+|                           <ul>
+|                             "
+                            "
+|                         <li>
+|                           "
+                                  "
+|                           <a>
+|                             data-glean-id="menu_click_submenu: webapis -> /en-US/docs/Web/API/File_System_API"
+|                             href="/en-US/docs/Web/API/File_System_API"
+|                             "File system API"
+|                           "
+                                "
+|                         <li>
+|                           "
+                                  "
+|                           <a>
+|                             data-glean-id="menu_click_submenu: webapis -> /en-US/docs/Web/API/Fetch_API"
+|                             href="/en-US/docs/Web/API/Fetch_API"
+|                             "Fetch API"
+|                           "
+                                "
+|                         <li>
+|                           "
+                                  "
+|                           <a>
+|                             data-glean-id="menu_click_submenu: webapis -> /en-US/docs/Web/API/Geolocation_API"
+|                             href="/en-US/docs/Web/API/Geolocation_API"
+|                             "Geolocation API"
+|                           "
+                                "
+|                         <li>
+|                           "
+                                  "
+|                           <a>
+|                             data-glean-id="menu_click_submenu: webapis -> /en-US/docs/Web/API/HTML_DOM_API"
+|                             href="/en-US/docs/Web/API/HTML_DOM_API"
+|                             "HTML DOM API"
+|                           "
+                                "
+|                         <li>
+|                           "
+                                  "
+|                           <a>
+|                             data-glean-id="menu_click_submenu: webapis -> /en-US/docs/Web/API/Push_API"
+|                             href="/en-US/docs/Web/API/Push_API"
+|                             "Push API"
+|                           "
+                                "
+|                         <li>
+|                           "
+                                  "
+|                           <a>
+|                             data-glean-id="menu_click_submenu: webapis -> /en-US/docs/Web/API/Service_Worker_API"
+|                             href="/en-US/docs/Web/API/Service_Worker_API"
+|                             "Service worker API"
+|                           "
+                                "
+|                         <li>
+|                           "
+                                  "
+|                           <a>
+|                             aria-label="See all Web API guides"
+|                             data-glean-id="menu_click_submenu: webapis -> /en-US/docs/Web/API"
+|                             href="/en-US/docs/Web/API"
+|                             title="See all Web API guides"
+|                             "See all…"
+|                           "
+                                "
+|                         "
+                          
+                              "
+|                       <dl>
+|                         "
+                                "
+|                         <dt>
+|                           "Web API guides"
+|                         "
+                                "
+|                         <dd>
+|                           <ul>
+|                             "
+                            "
+|                         <li>
+|                           "
+                                  "
+|                           <a>
+|                             data-glean-id="menu_click_submenu: webapis -> /en-US/docs/Web/API/Web_Animations_API/Using_the_Web_Animations_API"
+|                             href="/en-US/docs/Web/API/Web_Animations_API/Using_the_Web_Animations_API"
+|                             "Using the Web animation API"
+|                           "
+                                "
+|                         <li>
+|                           "
+                                  "
+|                           <a>
+|                             data-glean-id="menu_click_submenu: webapis -> /en-US/docs/Web/API/Fetch_API/Using_Fetch"
+|                             href="/en-US/docs/Web/API/Fetch_API/Using_Fetch"
+|                             "Using the Fetch API"
+|                           "
+                                "
+|                         <li>
+|                           "
+                                  "
+|                           <a>
+|                             data-glean-id="menu_click_submenu: webapis -> /en-US/docs/Web/API/History_API/Working_with_the_History_API"
+|                             href="/en-US/docs/Web/API/History_API/Working_with_the_History_API"
+|                             "Working with the History API"
+|                           "
+                                "
+|                         <li>
+|                           "
+                                  "
+|                           <a>
+|                             data-glean-id="menu_click_submenu: webapis -> /en-US/docs/Web/API/Web_Speech_API/Using_the_Web_Speech_API"
+|                             href="/en-US/docs/Web/API/Web_Speech_API/Using_the_Web_Speech_API"
+|                             "Using the Web speech API"
+|                           "
+                                "
+|                         <li>
+|                           "
+                                  "
+|                           <a>
+|                             data-glean-id="menu_click_submenu: webapis -> /en-US/docs/Web/API/Web_Workers_API/Using_web_workers"
+|                             href="/en-US/docs/Web/API/Web_Workers_API/Using_web_workers"
+|                             "Using web workers"
+|                           "
+                                "
+|                         "
+                          
+                              "
+|                       "
+                      "
+|                     "
+                    "
+|                   "
+                  "
+|                 "
+          "
+|               <div>
+|                 class="menu__tab"
+|                 data-section="all"
+|                 "
+            "
+|                 <mdn-dropdown>
+|                   data-glean-toggle-open="menu_toggle: all"
+|                   <template>
+|                     shadowrootmode="open"
+|                   <template>
+|                     shadowroot="open"
+|                     shadowrootmode="open"
+|                   "
+                    "
+|                   <button>
+|                     class="menu__tab-button"
+|                     slot="button"
+|                     type="button"
+|                     "
+                      "
+|                     <span>
+|                       class="menu__tab-label"
+|                       "All"
+|                     "
+                    "
+|                   "
+                    "
+|                   <div>
+|                     class="menu__panel"
+|                     slot="dropdown"
+|                     "
+                      "
+|                     <p>
+|                       class="menu__panel-title"
+|                       "
+                        "
+|                       <a>
+|                         data-glean-id="menu_click_menu: all -> /en-US/docs/Web"
+|                         href="/en-US/docs/Web"
+|                         "All web technology"
+|                       "
+                      "
+|                     "
+                      "
+|                     <div>
+|                       class="menu__panel-content"
+|                       "
+                        "
+|                       <dl>
+|                         "
+                                "
+|                         <dt>
+|                           "Technologies"
+|                         "
+                                "
+|                         <dd>
+|                           <ul>
+|                             "
+                            "
+|                         <li>
+|                           "
+                                  "
+|                           <a>
+|                             data-glean-id="menu_click_submenu: all -> /en-US/docs/Web/Accessibility"
+|                             href="/en-US/docs/Web/Accessibility"
+|                             "Accessibility"
+|                           "
+                                "
+|                         <li>
+|                           "
+                                  "
+|                           <a>
+|                             data-glean-id="menu_click_submenu: all -> /en-US/docs/Web/HTTP"
+|                             href="/en-US/docs/Web/HTTP"
+|                             "HTTP"
+|                           "
+                                "
+|                         <li>
+|                           "
+                                  "
+|                           <a>
+|                             data-glean-id="menu_click_submenu: all -> /en-US/docs/Web/URI"
+|                             href="/en-US/docs/Web/URI"
+|                             "URI"
+|                           "
+                                "
+|                         <li>
+|                           "
+                                  "
+|                           <a>
+|                             data-glean-id="menu_click_submenu: all -> /en-US/docs/Mozilla/Add-ons/WebExtensions"
+|                             href="/en-US/docs/Mozilla/Add-ons/WebExtensions"
+|                             "Web extensions"
+|                           "
+                                "
+|                         <li>
+|                           "
+                                  "
+|                           <a>
+|                             data-glean-id="menu_click_submenu: all -> /en-US/docs/WebAssembly"
+|                             href="/en-US/docs/WebAssembly"
+|                             "WebAssembly"
+|                           "
+                                "
+|                         <li>
+|                           "
+                                  "
+|                           <a>
+|                             data-glean-id="menu_click_submenu: all -> /en-US/docs/Web/WebDriver"
+|                             href="/en-US/docs/Web/WebDriver"
+|                             "WebDriver"
+|                           "
+                                "
+|                         <li>
+|                           "
+                                  "
+|                           <a>
+|                             aria-label="See all web technology references"
+|                             data-glean-id="menu_click_submenu: all -> /en-US/docs/Web"
+|                             href="/en-US/docs/Web"
+|                             title="See all web technology references"
+|                             "See all…"
+|                           "
+                                "
+|                         "
+                          
+                              "
+|                       <dl>
+|                         "
+                                "
+|                         <dt>
+|                           "Topics"
+|                         "
+                                "
+|                         <dd>
+|                           <ul>
+|                             "
+                            "
+|                         <li>
+|                           "
+                                  "
+|                           <a>
+|                             data-glean-id="menu_click_submenu: all -> /en-US/docs/Web/Media"
+|                             href="/en-US/docs/Web/Media"
+|                             "Media"
+|                           "
+                                "
+|                         <li>
+|                           "
+                                  "
+|                           <a>
+|                             data-glean-id="menu_click_submenu: all -> /en-US/docs/Web/Performance"
+|                             href="/en-US/docs/Web/Performance"
+|                             "Performance"
+|                           "
+                                "
+|                         <li>
+|                           "
+                                  "
+|                           <a>
+|                             data-glean-id="menu_click_submenu: all -> /en-US/docs/Web/Privacy"
+|                             href="/en-US/docs/Web/Privacy"
+|                             "Privacy"
+|                           "
+                                "
+|                         <li>
+|                           "
+                                  "
+|                           <a>
+|                             data-glean-id="menu_click_submenu: all -> /en-US/docs/Web/Security"
+|                             href="/en-US/docs/Web/Security"
+|                             "Security"
+|                           "
+                                "
+|                         <li>
+|                           "
+                                  "
+|                           <a>
+|                             data-glean-id="menu_click_submenu: all -> /en-US/docs/Web/Progressive_web_apps"
+|                             href="/en-US/docs/Web/Progressive_web_apps"
+|                             "Progressive web apps"
+|                           "
+                                "
+|                         "
+                          
+                              "
+|                       "
+                      "
+|                     "
+                    "
+|                   "
+                  "
+|                 "
+          "
+|               <div>
+|                 class="menu__tab"
+|                 data-section="learn"
+|                 "
+            "
+|                 <mdn-dropdown>
+|                   data-glean-toggle-open="menu_toggle: learn"
+|                   <template>
+|                     shadowrootmode="open"
+|                   <template>
+|                     shadowroot="open"
+|                     shadowrootmode="open"
+|                   "
+                    "
+|                   <button>
+|                     class="menu__tab-button"
+|                     slot="button"
+|                     type="button"
+|                     "
+                      "
+|                     <span>
+|                       class="menu__tab-label"
+|                       "Learn"
+|                     "
+                    "
+|                   "
+                    "
+|                   <div>
+|                     class="menu__panel"
+|                     slot="dropdown"
+|                     "
+                      "
+|                     <p>
+|                       class="menu__panel-title"
+|                       "
+                        "
+|                       <a>
+|                         data-glean-id="menu_click_menu: learn -> /en-US/docs/Learn_web_development"
+|                         href="/en-US/docs/Learn_web_development"
+|                         "Learn web development"
+|                       "
+                      "
+|                     "
+                      "
+|                     <div>
+|                       class="menu__panel-content"
+|                       "
+                        "
+|                       <dl>
+|                         "
+                                "
+|                         <dt>
+|                           "Frontend developer course"
+|                         "
+                                "
+|                         <dd>
+|                           <ul>
+|                             "
+                            "
+|                         <li>
+|                           "
+                                  "
+|                           <a>
+|                             data-glean-id="menu_click_submenu: learn -> /en-US/docs/Learn_web_development/Getting_started"
+|                             href="/en-US/docs/Learn_web_development/Getting_started"
+|                             "Getting started modules"
+|                           "
+                                "
+|                         <li>
+|                           "
+                                  "
+|                           <a>
+|                             data-glean-id="menu_click_submenu: learn -> /en-US/docs/Learn_web_development/Core"
+|                             href="/en-US/docs/Learn_web_development/Core"
+|                             "Core modules"
+|                           "
+                                "
+|                         <li>
+|                           "
+                                  "
+|                           <a>
+|                             class=""
+|                             data-glean-id="menu_click_submenu: learn -> /en-US/curriculum/"
+|                             href="/en-US/curriculum/"
+|                             "MDN Curriculum"
+|                           "
+                                "
+|                         <li>
+|                           "
+                                  "
+|                           <a>
+|                             class="external"
+|                             data-glean-id="menu_click_submenu: learn -> https://scrimba.com/frontend-path-c0j?via=mdn-learn-navbar"
+|                             href="https://scrimba.com/frontend-path-c0j?via=mdn-learn-navbar"
+|                             "Check out the video course from Scrimba, our partner"
+|                           "
+                                "
+|                         "
+                          
+                              "
+|                       <dl>
+|                         "
+                                "
+|                         <dt>
+|                           "Learn HTML"
+|                         "
+                                "
+|                         <dd>
+|                           <ul>
+|                             "
+                            "
+|                         <li>
+|                           "
+                                  "
+|                           <a>
+|                             data-glean-id="menu_click_submenu: learn -> /en-US/docs/Learn_web_development/Core/Structuring_content"
+|                             href="/en-US/docs/Learn_web_development/Core/Structuring_content"
+|                             "Structuring content with HTML module"
+|                           "
+                                "
+|                         "
+                          
+                              "
+|                       <dl>
+|                         "
+                                "
+|                         <dt>
+|                           "Learn CSS"
+|                         "
+                                "
+|                         <dd>
+|                           <ul>
+|                             "
+                            "
+|                         <li>
+|                           "
+                                  "
+|                           <a>
+|                             data-glean-id="menu_click_submenu: learn -> /en-US/docs/Learn_web_development/Core/Styling_basics"
+|                             href="/en-US/docs/Learn_web_development/Core/Styling_basics"
+|                             "CSS styling basics module"
+|                           "
+                                "
+|                         <li>
+|                           "
+                                  "
+|                           <a>
+|                             data-glean-id="menu_click_submenu: learn -> /en-US/docs/Learn_web_development/Core/CSS_layout"
+|                             href="/en-US/docs/Learn_web_development/Core/CSS_layout"
+|                             "CSS layout module"
+|                           "
+                                "
+|                         "
+                          
+                              "
+|                       <dl>
+|                         "
+                                "
+|                         <dt>
+|                           "Learn JavaScript"
+|                         "
+                                "
+|                         <dd>
+|                           <ul>
+|                             "
+                            "
+|                         <li>
+|                           "
+                                  "
+|                           <a>
+|                             data-glean-id="menu_click_submenu: learn -> /en-US/docs/Learn_web_development/Core/Scripting"
+|                             href="/en-US/docs/Learn_web_development/Core/Scripting"
+|                             "Dynamic scripting with JavaScript module"
+|                           "
+                                "
+|                         "
+                          
+                              "
+|                       "
+                      "
+|                     "
+                    "
+|                   "
+                  "
+|                 "
+          "
+|               <div>
+|                 class="menu__tab"
+|                 data-section="tools"
+|                 "
+            "
+|                 <mdn-dropdown>
+|                   data-glean-toggle-open="menu_toggle: tools"
+|                   <template>
+|                     shadowrootmode="open"
+|                   <template>
+|                     shadowroot="open"
+|                     shadowrootmode="open"
+|                   "
+                    "
+|                   <button>
+|                     class="menu__tab-button"
+|                     slot="button"
+|                     type="button"
+|                     "
+                      "
+|                     <span>
+|                       class="menu__tab-label"
+|                       "Tools"
+|                     "
+                    "
+|                   "
+                    "
+|                   <div>
+|                     class="menu__panel"
+|                     slot="dropdown"
+|                     "
+                      "
+|                     <p>
+|                       class="menu__panel-title"
+|                       "
+                        Discover our tools
+                      "
+|                     "
+                      "
+|                     <div>
+|                       class="menu__panel-content"
+|                       "
+                        "
+|                       <ul>
+|                         "
+                            "
+|                         <li>
+|                           "
+                                  "
+|                           <a>
+|                             class="menu__panel-icon"
+|                             data-glean-id="menu_click_submenu: tools -> /en-US/play"
+|                             data-icon="circle-play"
+|                             href="/en-US/play"
+|                             "Playground"
+|                           "
+                                "
+|                         <li>
+|                           "
+                                  "
+|                           <a>
+|                             class="menu__panel-icon"
+|                             data-glean-id="menu_click_submenu: tools -> /en-US/observatory"
+|                             data-icon="shield-check"
+|                             href="/en-US/observatory"
+|                             "HTTP Observatory"
+|                           "
+                                "
+|                         "
+                          "
+|                       <ul>
+|                         "
+                            "
+|                         <li>
+|                           "
+                                  "
+|                           <a>
+|                             data-glean-id="menu_click_submenu: tools -> /en-US/docs/Web/CSS/Guides/Backgrounds_and_borders/Border-image_generator"
+|                             href="/en-US/docs/Web/CSS/Guides/Backgrounds_and_borders/Border-image_generator"
+|                             "Border-image generator"
+|                           "
+                                "
+|                         <li>
+|                           "
+                                  "
+|                           <a>
+|                             data-glean-id="menu_click_submenu: tools -> /en-US/docs/Web/CSS/Guides/Backgrounds_and_borders/Border-radius_generator"
+|                             href="/en-US/docs/Web/CSS/Guides/Backgrounds_and_borders/Border-radius_generator"
+|                             "Border-radius generator"
+|                           "
+                                "
+|                         <li>
+|                           "
+                                  "
+|                           <a>
+|                             data-glean-id="menu_click_submenu: tools -> /en-US/docs/Web/CSS/Guides/Backgrounds_and_borders/Box-shadow_generator"
+|                             href="/en-US/docs/Web/CSS/Guides/Backgrounds_and_borders/Box-shadow_generator"
+|                             "Box-shadow generator"
+|                           "
+                                "
+|                         <li>
+|                           "
+                                  "
+|                           <a>
+|                             data-glean-id="menu_click_submenu: tools -> /en-US/docs/Web/CSS/Guides/Colors/Color_format_converter"
+|                             href="/en-US/docs/Web/CSS/Guides/Colors/Color_format_converter"
+|                             "Color format converter"
+|                           "
+                                "
+|                         <li>
+|                           "
+                                  "
+|                           <a>
+|                             data-glean-id="menu_click_submenu: tools -> /en-US/docs/Web/CSS/Guides/Colors/Color_mixer"
+|                             href="/en-US/docs/Web/CSS/Guides/Colors/Color_mixer"
+|                             "Color mixer"
+|                           "
+                                "
+|                         <li>
+|                           "
+                                  "
+|                           <a>
+|                             data-glean-id="menu_click_submenu: tools -> /en-US/docs/Web/CSS/Guides/Shapes/Shape_generator"
+|                             href="/en-US/docs/Web/CSS/Guides/Shapes/Shape_generator"
+|                             "Shape generator"
+|                           "
+                                "
+|                         "
+                          "
+|                       "
+                      "
+|                     "
+                    "
+|                   "
+                  "
+|                 "
+          "
+|               <div>
+|                 class="menu__tab"
+|                 data-section="about"
+|                 "
+            "
+|                 <mdn-dropdown>
+|                   data-glean-toggle-open="menu_toggle: about"
+|                   <template>
+|                     shadowrootmode="open"
+|                   <template>
+|                     shadowroot="open"
+|                     shadowrootmode="open"
+|                   "
+                    "
+|                   <button>
+|                     class="menu__tab-button"
+|                     slot="button"
+|                     type="button"
+|                     "
+                      "
+|                     <span>
+|                       class="menu__tab-label"
+|                       "About"
+|                     "
+                    "
+|                   "
+                    "
+|                   <div>
+|                     class="menu__panel"
+|                     slot="dropdown"
+|                     "
+                      "
+|                     <p>
+|                       class="menu__panel-title"
+|                       "
+                        Get to know MDN better
+                      "
+|                     "
+                      "
+|                     <div>
+|                       class="menu__panel-content"
+|                       "
+                        "
+|                       <ul>
+|                         "
+                            "
+|                         <li>
+|                           "
+                                  "
+|                           <a>
+|                             class="menu__panel-icon"
+|                             data-glean-id="menu_click_submenu: about -> /en-US/about"
+|                             data-icon="mdn-m"
+|                             href="/en-US/about"
+|                             "About MDN"
+|                           "
+                                "
+|                         <li>
+|                           "
+                                  "
+|                           <a>
+|                             class="menu__panel-icon"
+|                             data-glean-id="menu_click_submenu: about -> /en-US/advertising"
+|                             data-icon="chart-no-axes-combined"
+|                             href="/en-US/advertising"
+|                             "Advertise with us"
+|                           "
+                                "
+|                         "
+                          "
+|                       <ul>
+|                         "
+                            "
+|                         <li>
+|                           "
+                                  "
+|                           <a>
+|                             class="menu__panel-icon"
+|                             data-glean-id="menu_click_submenu: about -> /en-US/community"
+|                             data-icon="users"
+|                             href="/en-US/community"
+|                             "Community"
+|                           "
+                                "
+|                         <li>
+|                           "
+                                  "
+|                           <a>
+|                             class="menu__panel-icon external"
+|                             data-glean-id="menu_click_submenu: about -> https://github.com/mdn"
+|                             data-icon="github"
+|                             href="https://github.com/mdn"
+|                             "MDN on GitHub"
+|                           "
+                                "
+|                         "
+                          "
+|                       "
+                      "
+|                     "
+                    "
+|                   "
+                  "
+|                 "
+          "
+|               <div>
+|                 class="menu__tab"
+|                 data-section="blog"
+|                 "
+            "
+|                 <a>
+|                   class="menu__tab-link"
+|                   data-glean-id="menu_click_link: top-level -> /en-US/blog/"
+|                   href="/en-US/blog/"
+|                   "Blog"
+|                 "
+          "
+|               "
+      "
+|             "
+    "
+|           "
+          "
+|           <div>
+|             class="navigation__search"
+|             data-view="desktop"
+|             "
+            "
+|             <mdn-search-button>
+|               <template>
+|                 shadowrootmode="open"
+|               <template>
+|                 shadowroot="open"
+|                 shadowrootmode="open"
+|             "
+          "
+|           "
+          "
+|           <mdn-user-menu>
+|             <template>
+|               shadowrootmode="open"
+|           "
+        "
+|         "
+      "
+|       "
+      "
+|       <mdn-search-modal>
+|         id="mdn-search"
+|         <template>
+|           shadowrootmode="open"
+|       "
+     
+      "
+|       <div>
+|         class="breadcrumbs-bar"
+|         data-scheme="dark"
+|         "
+         
+      "
+|         <ol>
+|           class="breadcrumbs"
+|           typeof="BreadcrumbList"
+|           vocab="https://schema.org/"
+|           "
+        
+            "
+|           <li>
+|             property="itemListElement"
+|             typeof="ListItem"
+|             "
+              "
+|             <a>
+|               data-glean-id="breadcrumb_click: 1/1"
+|               href="/en-US/"
+|               property="item"
+|               typeof="WebPage"
+|               <span>
+|                 property="name"
+|                 "MDN"
+|             "
+              "
+|             <meta>
+|               content="1"
+|               property="position"
+|             "
+            "
+|           "
+          
+      "
+|         "
+    
+        
+        "
+|         <mdn-color-theme>
+|           <template>
+|             shadowrootmode="open"
+|           <template>
+|             shadowroot="open"
+|             shadowrootmode="open"
+|         "
+        "
+|         <mdn-language-switcher>
+|           locale="en-US"
+|           native="English (US)"
+|           translations="[{"locale":"en-US","title":"MDN Web Docs","native":"English (US)"},{"locale":"es","title":"MDN Web Docs","native":"Español"},{"locale":"fr","title":"MDN Web Docs","native":"Français"},{"locale":"ja","title":"MDN Web Docs","native":"日本語"},{"locale":"ko","title":"MDN Web Docs","native":"한국어"},{"locale":"pt-BR","title":"MDN Web Docs","native":"Português (do Brasil)"},{"locale":"ru","title":"MDN Web Docs","native":"Русский"},{"locale":"zh-CN","title":"MDN Web Docs","native":"中文 (简体)"},{"locale":"zh-TW","title":"MDN Web Docs","native":"正體中文 (繁體)"},{"locale":"de","title":"MDN Web Docs","native":"Deutsch"}]"
+|           url="/en-US/"
+|           <template>
+|             shadowrootmode="open"
+|           <template>
+|             shadowroot="open"
+|             shadowrootmode="open"
+|         "
+      "
+|       "
+    
+        "
+|     "
+        "
+|     <div>
+|       class="page-layout__main"
+|       "
+        "
+|       <div>
+|         class="homepage homepage--dark"
+|         id="content"
+|         "
+          
+      "
+|         <div>
+|           class="homepage-header"
+|           "
+        "
+|           <div>
+|             class="homepage-header__copy"
+|             <section>
+|               class="homepage-hero"
+|               "
+      "
+|               <h1>
+|                 "
+        Resources for Developers,"
+|                 <br>
+|                 " by Developers
+      "
+|               "
+      "
+|               <p>
+|                 "
+        Documenting "
+|                 <a>
+|                   data-glean-id="homepage_hero: css"
+|                   href="/en-US/docs/Web/CSS"
+|                   "CSS"
+|                 ", "
+|                 <a>
+|                   data-glean-id="homepage_hero: html"
+|                   href="/en-US/docs/Web/HTML"
+|                   "HTML"
+|                 ", and "
+|                 <a>
+|                   data-glean-id="homepage_hero: js"
+|                   href="/en-US/docs/Web/JavaScript"
+|                   "JavaScript"
+|                 ", since 2005.
+      "
+|               "
+    "
+|           "
+        "
+|           <div>
+|             class="homepage-header__search"
+|             "
+          "
+|             <mdn-homepage-search>
+|               <template>
+|                 shadowrootmode="open"
+|               <template>
+|                 shadowroot="open"
+|                 shadowrootmode="open"
+|             "
+        "
+|           "
+        "
+|           <div>
+|             class="homepage-header__mandala"
+|             <div>
+|               aria-hidden="true"
+|               class="mandala"
+|               "
+      "
+|               <svg>
+|                 class="mandala"
+|                 fill="none"
+|                 viewBox="50 50 575 575"
+|                 xmlns="http://www.w3.org/2000/svg"
+|                 "
+        "
+|                 <title>
+|                   "Mandala"
+|                 "
+        "
+|                 <defs>
+|                   "
+          "
+|                   <path>
+|                     d="M337.5,337.5 m-320,0 a320,320 0 1,1 640,0 a320,320 0 1,1 -640,0"
+|                     id="circle1"
+|                   "
+          "
+|                   <path>
+|                     d="M337.5,337.5 m-280,0 a280,280 0 1,1 560,0 a280,280 0 1,1 -560,0"
+|                     id="circle2"
+|                   "
+          "
+|                   <path>
+|                     d="M337.5,337.5 m-240,0 a240,240 0 1,1 480,0 a240,240 0 1,1 -480,0"
+|                     id="circle3"
+|                   "
+          "
+|                   <path>
+|                     d="M337.5,337.5 m-200,0 a200,200 0 1,1 400,0 a200,200 0 1,1 -400,0"
+|                     id="circle4"
+|                   "
+          "
+|                   <path>
+|                     d="M337.5,337.5 m-160,0 a160,160 0 1,1 320,0 a160,160 0 1,1 -320,0"
+|                     id="circle5"
+|                   "
+        "
+|                 "
+        "
+|                 <text>
+|                   dy="70"
+|                   textLength="2010"
+|                   "
+          "
+|                   <textPath>
+|                     href="#circle1"
+|                     textLength="2010"
+|                     "
+               /
+            "
+|                     <tspan>
+|                       "/"
+|                     "
+            /
+            "
+|                     <tspan>
+|                       "/"
+|                     "
+            /
+            "
+|                     <tspan>
+|                       "/"
+|                     "
+            /
+            "
+|                     <tspan>
+|                       "/"
+|                     "
+            /
+            "
+|                     <tspan>
+|                       "/"
+|                     "
+            /
+            "
+|                     <tspan>
+|                       "/"
+|                     "
+               /
+            "
+|                     <tspan>
+|                       "/"
+|                     "
+            /
+            "
+|                     <tspan>
+|                       "/"
+|                     "
+            /
+            "
+|                     <tspan>
+|                       "/"
+|                     "
+            /
+            "
+|                     <tspan>
+|                       "/"
+|                     "
+            /
+            "
+|                     <tspan>
+|                       "/"
+|                     "
+            /
+            "
+|                     <tspan>
+|                       "/"
+|                     "
+               /
+            "
+|                     <tspan>
+|                       "/"
+|                     "
+            /
+            "
+|                     <tspan>
+|                       "/"
+|                     "
+            /
+            "
+|                     <tspan>
+|                       "/"
+|                     "
+            /
+            "
+|                     <tspan>
+|                       "/"
+|                     "
+            /
+            "
+|                     <tspan>
+|                       "/"
+|                     "
+            /
+            "
+|                     <tspan>
+|                       "/"
+|                     "
+               /
+            "
+|                     <tspan>
+|                       "/"
+|                     "
+            /
+            "
+|                     <tspan>
+|                       "/"
+|                     "
+            /
+            "
+|                     <tspan>
+|                       "/"
+|                     "
+            /
+            "
+|                     <tspan>
+|                       "/"
+|                     "
+            /
+            "
+|                     <tspan>
+|                       "/"
+|                     "
+            /
+            "
+|                     <tspan>
+|                       "/"
+|                     "
+               /
+            "
+|                     <tspan>
+|                       "/"
+|                     "
+            /
+            "
+|                     <tspan>
+|                       "/"
+|                     "
+            /
+            "
+|                     <tspan>
+|                       "/"
+|                     "
+            /
+            "
+|                     <tspan>
+|                       "/"
+|                     "
+            /
+            "
+|                     <tspan>
+|                       "/"
+|                     "
+            /
+            "
+|                     <tspan>
+|                       "/"
+|                     "
+               /
+            "
+|                     <tspan>
+|                       "/"
+|                     "
+            /
+            "
+|                     <tspan>
+|                       "/"
+|                     "
+            /
+            "
+|                     <tspan>
+|                       "/"
+|                     "
+            /
+            "
+|                     <tspan>
+|                       "/"
+|                     "
+            /
+            "
+|                     <tspan>
+|                       "/"
+|                     "
+            /
+            "
+|                     <tspan>
+|                       "/"
+|                     "
+               /
+            "
+|                     <tspan>
+|                       "/"
+|                     "
+            /
+            "
+|                     <tspan>
+|                       "/"
+|                     "
+            /
+            "
+|                     <tspan>
+|                       "/"
+|                     "
+            /
+            "
+|                     <tspan>
+|                       "/"
+|                     "
+            /
+            "
+|                     <tspan>
+|                       "/"
+|                     "
+            /
+            "
+|                     <tspan>
+|                       "/"
+|                     "
+          "
+|                   "
+        "
+|                 "
+        "
+|                 <text>
+|                   dy="70"
+|                   textLength="1760"
+|                   "
+          "
+|                   <textPath>
+|                     href="#circle2"
+|                     textLength="1760"
+|                     "
+              +
+            "
+|                     <tspan>
+|                       "+"
+|                     "
+            +
+            "
+|                     <tspan>
+|                       "+"
+|                     "
+            +
+            "
+|                     <tspan>
+|                       "+"
+|                     "
+              +
+            "
+|                     <tspan>
+|                       "+"
+|                     "
+            +
+            "
+|                     <tspan>
+|                       "+"
+|                     "
+            +
+            "
+|                     <tspan>
+|                       "+"
+|                     "
+              +
+            "
+|                     <tspan>
+|                       "+"
+|                     "
+            +
+            "
+|                     <tspan>
+|                       "+"
+|                     "
+            +
+            "
+|                     <tspan>
+|                       "+"
+|                     "
+              +
+            "
+|                     <tspan>
+|                       "+"
+|                     "
+            +
+            "
+|                     <tspan>
+|                       "+"
+|                     "
+            +
+            "
+|                     <tspan>
+|                       "+"
+|                     "
+              +
+            "
+|                     <tspan>
+|                       "+"
+|                     "
+            +
+            "
+|                     <tspan>
+|                       "+"
+|                     "
+            +
+            "
+|                     <tspan>
+|                       "+"
+|                     "
+              +
+            "
+|                     <tspan>
+|                       "+"
+|                     "
+            +
+            "
+|                     <tspan>
+|                       "+"
+|                     "
+            +
+            "
+|                     <tspan>
+|                       "+"
+|                     "
+              +
+            "
+|                     <tspan>
+|                       "+"
+|                     "
+            +
+            "
+|                     <tspan>
+|                       "+"
+|                     "
+            +
+            "
+|                     <tspan>
+|                       "+"
+|                     "
+          "
+|                   "
+        "
+|                 "
+        "
+|                 <text>
+|                   dy="70"
+|                   textLength="1507"
+|                   "
+          "
+|                   <textPath>
+|                     href="#circle3"
+|                     textLength="1507"
+|                     "
+            "
+|                     <tspan>
+|                       "{"
+|                     "
+            {
+            "
+|                     <tspan>
+|                       "{"
+|                     "
+            { 
+            "
+|                     <tspan>
+|                       "}"
+|                     "
+            }
+            "
+|                     <tspan>
+|                       "}"
+|                     "
+            }  
+            "
+|                     <tspan>
+|                       "{"
+|                     "
+            {
+            "
+|                     <tspan>
+|                       "{"
+|                     "
+            { 
+            "
+|                     <tspan>
+|                       "}"
+|                     "
+            }
+            "
+|                     <tspan>
+|                       "}"
+|                     "
+            }  
+            "
+|                     <tspan>
+|                       "{"
+|                     "
+            {
+            "
+|                     <tspan>
+|                       "{"
+|                     "
+            { 
+            "
+|                     <tspan>
+|                       "}"
+|                     "
+            }
+            "
+|                     <tspan>
+|                       "}"
+|                     "
+            }  
+            "
+|                     <tspan>
+|                       "{"
+|                     "
+            {
+            "
+|                     <tspan>
+|                       "{"
+|                     "
+            { 
+            "
+|                     <tspan>
+|                       "}"
+|                     "
+            }
+            "
+|                     <tspan>
+|                       "}"
+|                     "
+            }  
+            "
+|                     <tspan>
+|                       "{"
+|                     "
+            {
+            "
+|                     <tspan>
+|                       "{"
+|                     "
+            { 
+            "
+|                     <tspan>
+|                       "}"
+|                     "
+            }
+            "
+|                     <tspan>
+|                       "}"
+|                     "
+            }  
+            "
+|                     <tspan>
+|                       "{"
+|                     "
+            {
+            "
+|                     <tspan>
+|                       "{"
+|                     "
+            { 
+            "
+|                     <tspan>
+|                       "}"
+|                     "
+            }
+            "
+|                     <tspan>
+|                       "}"
+|                     "
+            }  
+          "
+|                   "
+        "
+|                 "
+        "
+|                 <text>
+|                   dy="70"
+|                   textLength="1257"
+|                   "
+          "
+|                   <textPath>
+|                     href="#circle4"
+|                     textLength="1257"
+|                     "
+               ../../    ../../
+               ../../    ../../
+               ../../    ../../
+               ../../
+          "
+|                   "
+        "
+|                 "
+        "
+|                 <text>
+|                   dy="70"
+|                   textLength="1005"
+|                   "
+          "
+|                   <textPath>
+|                     href="#circle5"
+|                     textLength="1005"
+|                     "
+            "
+|                     <tspan>
+|                       "<>"
+|                     "
+            </>
+            "
+|                     <tspan>
+|                       "<>"
+|                     "
+            </>
+            "
+|                     <tspan>
+|                       "<>"
+|                     "
+            </>
+            "
+|                     <tspan>
+|                       "<>"
+|                     "
+            </>
+            "
+|                     <tspan>
+|                       "<>"
+|                     "
+            </>
+            "
+|                     <tspan>
+|                       "<>"
+|                     "
+            </>
+            "
+|                     <tspan>
+|                       "<>"
+|                     "
+            </>
+            "
+|                     <tspan>
+|                       "<>"
+|                     "
+            </>
+            "
+|                     <tspan>
+|                       "<>"
+|                     "
+            </>
+            "
+|                     <tspan>
+|                       "<>"
+|                     "
+            </>
+            "
+|                     <tspan>
+|                       "<>"
+|                     "
+            </>
+            "
+|                     <tspan>
+|                       "<>"
+|                     "
+            </>
+            "
+|                     <tspan>
+|                       "<>"
+|                     "
+            </>
+            "
+|                     <tspan>
+|                       "<>"
+|                     "
+            </>
+            "
+|                     <tspan>
+|                       "<>"
+|                     "
+            </>
+            "
+|                     <tspan>
+|                       "<>"
+|                     "
+            </>
+          "
+|                   "
+        "
+|                 "
+      "
+|               "
+    "
+|           "
+      "
+|         "
+    
+        "
+|       "
+        "
+|       <div>
+|         class="homepage"
+|         "
+          "
+|         <mdn-placement-hp-main>
+|           <template>
+|             shadowrootmode="open"
+|         "
+          "
+|         <div>
+|           class="homepage-body"
+|           "
+      
+      "
+|           <section>
+|             "
+        "
+|             <h2>
+|               "
+          Featured articles
+        "
+|             "
+        "
+|             <ul>
+|               class="featured-articles"
+|               "
+      "
+|               <li>
+|                 "
+            "
+|                 <article>
+|                   class="featured-articles__article"
+|                   "
+              "
+|                   <a>
+|                     class="featured-articles__tag"
+|                     data-glean-id="homepage: article_tag 1 -> /en-US/blog/"
+|                     href="/en-US/blog/"
+|                     "Blog"
+|                   "
+              "
+|                   <h3>
+|                     class="featured-articles__title"
+|                     "
+                "
+|                     <a>
+|                       data-glean-id="homepage: article 1 -> /en-US/blog/mdn-turns-20/"
+|                       href="/en-US/blog/mdn-turns-20/"
+|                       "Celebrating 20 years of MDN"
+|                     "
+              "
+|                   "
+              "
+|                   <p>
+|                     class="featured-articles__summary"
+|                     "MDN turns 20! Let's look at how we started, how MDN became the most trusted resource for web developers, the impact it's had on the open web, and yes, there's cake, too.
+"
+|                   "
+            "
+|                 "
+          "
+|               <li>
+|                 "
+            "
+|                 <article>
+|                   class="featured-articles__article"
+|                   "
+              "
+|                   <a>
+|                     class="featured-articles__tag"
+|                     data-glean-id="homepage: article_tag 2 -> /en-US/docs/Web/API"
+|                     href="/en-US/docs/Web/API"
+|                     "Web APIs"
+|                   "
+              "
+|                   <h3>
+|                     class="featured-articles__title"
+|                     "
+                "
+|                     <a>
+|                       data-glean-id="homepage: article 2 -> /en-US/docs/Web/API/Navigation_API"
+|                       href="/en-US/docs/Web/API/Navigation_API"
+|                       "Navigation API"
+|                     "
+              "
+|                   "
+              "
+|                   <p>
+|                     class="featured-articles__summary"
+|                     "The Navigation API provides the ability to initiate, intercept, and manage browser navigation actions. It can also examine an application's history entries. This is a successor to previous web platform features such as the History API and window.location, which solves their shortcomings and is specifically aimed at the needs of single-page applications (SPAs).
+"
+|                   "
+            "
+|                 "
+          "
+|               <li>
+|                 "
+            "
+|                 <article>
+|                   class="featured-articles__article"
+|                   "
+              "
+|                   <a>
+|                     class="featured-articles__tag"
+|                     data-glean-id="homepage: article_tag 3 -> /en-US/docs/Web/API"
+|                     href="/en-US/docs/Web/API"
+|                     "Web APIs"
+|                   "
+              "
+|                   <h3>
+|                     class="featured-articles__title"
+|                     "
+                "
+|                     <a>
+|                       data-glean-id="homepage: article 3 -> /en-US/docs/Web/API/Trusted_Types_API"
+|                       href="/en-US/docs/Web/API/Trusted_Types_API"
+|                       "Trusted Types API"
+|                     "
+              "
+|                   "
+              "
+|                   <p>
+|                     class="featured-articles__summary"
+|                     "The Trusted Types API gives web developers a way to ensure that input has been passed through a user-specified transformation function before being passed to an API that might execute that input. This can help to protect against client-side cross-site scripting (XSS) attacks. Most commonly the transformation function sanitizes the input.
+"
+|                   "
+            "
+|                 "
+          "
+|               <li>
+|                 "
+            "
+|                 <article>
+|                   class="featured-articles__article"
+|                   "
+              "
+|                   <a>
+|                     class="featured-articles__tag"
+|                     data-glean-id="homepage: article_tag 4 -> /en-US/docs/Web/CSS"
+|                     href="/en-US/docs/Web/CSS"
+|                     "CSS"
+|                   "
+              "
+|                   <h3>
+|                     class="featured-articles__title"
+|                     "
+                "
+|                     <a>
+|                       data-glean-id="homepage: article 4 -> /en-US/docs/Web/CSS/Guides/Anchor_positioning/Using"
+|                       href="/en-US/docs/Web/CSS/Guides/Anchor_positioning/Using"
+|                       "Using CSS anchor positioning"
+|                     "
+              "
+|                   "
+              "
+|                   <p>
+|                     class="featured-articles__summary"
+|                     "The CSS anchor positioning module defines features that allow you to tether elements together. Elements can be defined as anchor elements and anchor-positioned elements. Anchor-positioned elements can be bound to anchor elements. The anchor-positioned elements can then have their size and position set relative to the size and location of the anchor elements to which they are bound.
+"
+|                   "
+            "
+|                 "
+          "
+|               "
+    "
+|             "
+      "
+|           "
+      "
+|           <section>
+|             "
+        "
+|             <h2>
+|               "Latest news"
+|             "
+        "
+|             <ul>
+|               class="latest-news"
+|               "
+      "
+|               <li>
+|                 "
+            "
+|                 <article>
+|                   class="latest-news__item"
+|                   "
+              "
+|                   <a>
+|                     class="latest-news__source"
+|                     data-glean-id="homepage: news_source 1 -> /en-US/blog/"
+|                     href="/en-US/blog/"
+|                     "developer.mozilla.org"
+|                   "
+              "
+|                   <h3>
+|                     class="latest-news__title"
+|                     "
+                "
+|                     <a>
+|                       data-glean-id="homepage: news 1 -> /en-US/blog/introducing-mdn-mcp-server/"
+|                       href="/en-US/blog/introducing-mdn-mcp-server/"
+|                       "Introducing the MDN MCP server"
+|                     "
+              "
+|                   "
+              "
+|                   <time>
+|                     class="latest-news__date"
+|                     datetime="2026-06-15"
+|                     "
+                4 months ago
+              "
+|                   "
+              "
+|                   <p>
+|                     class="latest-news__summary"
+|                     "MDN's MCP server brings MDN's documentation and browser compatibility data directly into your editor or IDE, giving your LLM or coding agent access to accurate, up-to-date web platform information.
+"
+|                   "
+            "
+|                 "
+          "
+|               <li>
+|                 "
+            "
+|                 <article>
+|                   class="latest-news__item"
+|                   "
+              "
+|                   <a>
+|                     class="latest-news__source"
+|                     data-glean-id="homepage: news_source 2 -> /en-US/blog/"
+|                     href="/en-US/blog/"
+|                     "developer.mozilla.org"
+|                   "
+              "
+|                   <h3>
+|                     class="latest-news__title"
+|                     "
+                "
+|                     <a>
+|                       data-glean-id="homepage: news 2 -> /en-US/blog/mdn-front-end-deep-dive/"
+|                       href="/en-US/blog/mdn-front-end-deep-dive/"
+|                       "Under the hood of MDN's new frontend"
+|                     "
+              "
+|                   "
+              "
+|                   <time>
+|                     class="latest-news__date"
+|                     datetime="2026-04-08"
+|                     "
+                7 months ago
+              "
+|                   "
+              "
+|                   <p>
+|                     class="latest-news__summary"
+|                     "You may have spotted that MDN has a new frontend. There's plenty happening under the surface, so let's unpack the technologies we chose, the architectural decisions we made, and why we did a rebuild at all.
+"
+|                   "
+            "
+|                 "
+          "
+|               <li>
+|                 "
+            "
+|                 <article>
+|                   class="latest-news__item"
+|                   "
+              "
+|                   <a>
+|                     class="latest-news__source"
+|                     data-glean-id="homepage: news_source 3 -> /en-US/blog/"
+|                     href="/en-US/blog/"
+|                     "developer.mozilla.org"
+|                   "
+              "
+|                   <h3>
+|                     class="latest-news__title"
+|                     "
+                "
+|                     <a>
+|                       data-glean-id="homepage: news 3 -> /en-US/blog/image-formats-codecs-compression-tools/"
+|                       href="/en-US/blog/image-formats-codecs-compression-tools/"
+|                       "Image formats: Codecs and compression tools"
+|                     "
+              "
+|                   "
+              "
+|                   <time>
+|                     class="latest-news__date"
+|                     datetime="2025-11-05"
+|                     "
+                12 months ago
+              "
+|                   "
+              "
+|                   <p>
+|                     class="latest-news__summary"
+|                     "Image compression involves countless trade-offs between quality, size, and speed. In this final part of the series, we experiment with codecs, metrics, and tools to find practical ways to balance efficiency and visual fidelity."
+|                   "
+            "
+|                 "
+          "
+|               <li>
+|                 "
+            "
+|                 <article>
+|                   class="latest-news__item"
+|                   "
+              "
+|                   <a>
+|                     class="latest-news__source"
+|                     data-glean-id="homepage: news_source 4 -> /en-US/blog/"
+|                     href="/en-US/blog/"
+|                     "developer.mozilla.org"
+|                   "
+              "
+|                   <h3>
+|                     class="latest-news__title"
+|                     "
+                "
+|                     <a>
+|                       data-glean-id="homepage: news 4 -> /en-US/blog/view-transitions-beginner-guide/"
+|                       href="/en-US/blog/view-transitions-beginner-guide/"
+|                       "A beginner-friendly guide to view transitions in CSS"
+|                     "
+              "
+|                   "
+              "
+|                   <time>
+|                     class="latest-news__date"
+|                     datetime="2025-10-09"
+|                     "
+                1 year ago
+              "
+|                   "
+              "
+|                   <p>
+|                     class="latest-news__summary"
+|                     "Learn how to bring smooth, animated navigation to multi-page apps with view transitions. With just one line of CSS, you can enable seamless transitions between pages.
+"
+|                   "
+            "
+|                 "
+          "
+|               "
+    "
+|             "
+      "
+|           "
+      "
+|           <section>
+|             "
+        "
+|             <h2>
+|               "
+          Recent contributions
+        "
+|             "
+        "
+|             <ul>
+|               class="recent-contributions"
+|               "
+      "
+|               <li>
+|                 class="recent-contributions__item"
+|                 "
+            "
+|                 <span>
+|                   class="recent-contributions__repo"
+|                   "
+              "
+|                   <a>
+|                     class="external"
+|                     data-glean-id="homepage: contribution_repo 1"
+|                     href="https://github.com/mdn/translated-content"
+|                     "mdn/translated-content"
+|                   "
+            "
+|                 "
+            "
+|                 <time>
+|                   class="recent-contributions__date"
+|                   datetime="2026-10-26T17:01:17Z"
+|                   "
+              8 hours ago
+            "
+|                 "
+            "
+|                 <div>
+|                   class="recent-contributions__title"
+|                   "
+              "
+|                   <a>
+|                     class="external"
+|                     data-glean-id="homepage: contribution 1 -> https://github.com/mdn/translated-content/pull/39659"
+|                     href="https://github.com/mdn/translated-content/pull/39659"
+|                     "sync: glossary/abstraction [es]"
+|                   "
+            "
+|                 "
+          "
+|               <li>
+|                 class="recent-contributions__item"
+|                 "
+            "
+|                 <span>
+|                   class="recent-contributions__repo"
+|                   "
+              "
+|                   <a>
+|                     class="external"
+|                     data-glean-id="homepage: contribution_repo 2"
+|                     href="https://github.com/mdn/translated-content"
+|                     "mdn/translated-content"
+|                   "
+            "
+|                 "
+            "
+|                 <time>
+|                   class="recent-contributions__date"
+|                   datetime="2026-10-26T17:02:11Z"
+|                   "
+              8 hours ago
+            "
+|                 "
+            "
+|                 <div>
+|                   class="recent-contributions__title"
+|                   "
+              "
+|                   <a>
+|                     class="external"
+|                     data-glean-id="homepage: contribution 2 -> https://github.com/mdn/translated-content/pull/39658"
+|                     href="https://github.com/mdn/translated-content/pull/39658"
+|                     "sync: mdn/guides [es]"
+|                   "
+            "
+|                 "
+          "
+|               <li>
+|                 class="recent-contributions__item"
+|                 "
+            "
+|                 <span>
+|                   class="recent-contributions__repo"
+|                   "
+              "
+|                   <a>
+|                     class="external"
+|                     data-glean-id="homepage: contribution_repo 3"
+|                     href="https://github.com/mdn/translated-content"
+|                     "mdn/translated-content"
+|                   "
+            "
+|                 "
+            "
+|                 <time>
+|                   class="recent-contributions__date"
+|                   datetime="2026-10-26T17:02:37Z"
+|                   "
+              8 hours ago
+            "
+|                 "
+            "
+|                 <div>
+|                   class="recent-contributions__title"
+|                   "
+              "
+|                   <a>
+|                     class="external"
+|                     data-glean-id="homepage: contribution 3 -> https://github.com/mdn/translated-content/pull/39599"
+|                     href="https://github.com/mdn/translated-content/pull/39599"
+|                     "sync: web/api/document_object_model [es]"
+|                   "
+            "
+|                 "
+          "
+|               <li>
+|                 class="recent-contributions__item"
+|                 "
+            "
+|                 <span>
+|                   class="recent-contributions__repo"
+|                   "
+              "
+|                   <a>
+|                     class="external"
+|                     data-glean-id="homepage: contribution_repo 4"
+|                     href="https://github.com/mdn/translated-content"
+|                     "mdn/translated-content"
+|                   "
+            "
+|                 "
+            "
+|                 <time>
+|                   class="recent-contributions__date"
+|                   datetime="2026-10-26T17:03:46Z"
+|                   "
+              8 hours ago
+            "
+|                 "
+            "
+|                 <div>
+|                   class="recent-contributions__title"
+|                   "
+              "
+|                   <a>
+|                     class="external"
+|                     data-glean-id="homepage: contribution 4 -> https://github.com/mdn/translated-content/pull/39580"
+|                     href="https://github.com/mdn/translated-content/pull/39580"
+|                     "translate: learn_web_development/core/scripting/event_bubbling [es]"
+|                   "
+            "
+|                 "
+          "
+|               <li>
+|                 class="recent-contributions__item"
+|                 "
+            "
+|                 <span>
+|                   class="recent-contributions__repo"
+|                   "
+              "
+|                   <a>
+|                     class="external"
+|                     data-glean-id="homepage: contribution_repo 5"
+|                     href="https://github.com/mdn/translated-content"
+|                     "mdn/translated-content"
+|                   "
+            "
+|                 "
+            "
+|                 <time>
+|                   class="recent-contributions__date"
+|                   datetime="2026-10-26T17:06:37Z"
+|                   "
+              8 hours ago
+            "
+|                 "
+            "
+|                 <div>
+|                   class="recent-contributions__title"
+|                   "
+              "
+|                   <a>
+|                     class="external"
+|                     data-glean-id="homepage: contribution 5 -> https://github.com/mdn/translated-content/pull/39557"
+|                     href="https://github.com/mdn/translated-content/pull/39557"
+|                     "sync: api_event_subpage_template [es]"
+|                   "
+            "
+|                 "
+          "
+|               "
+    "
+|             "
+      "
+|           "
+    "
+|         "
+        "
+|       "
+        "
+|       <div>
+|         class="homepage homepage--dark"
+|         "
+          "
+|         <div>
+|           class="homepage-footer"
+|           "
+      "
+|           <section>
+|             class="homepage-contributor-spotlight"
+|             "
+      "
+|             <div>
+|               class="homepage-contributor-spotlight__spotlight"
+|               "
+        "
+|               <h2>
+|                 "
+          Contributor Spotlight
+        "
+|               "
+        "
+|               <a>
+|                 class="homepage-contributor-spotlight__name"
+|                 href="/en-US/community/spotlight/shrinivass-arunachalam-balasubramanian"
+|                 "Shrinivass Arunachalam Balasubramanian"
+|               "
+        "
+|               <blockquote>
+|                 class="homepage-contributor-spotlight__quote"
+|                 "
+          MDN closely follows W3C standards which helps me keep up with important topics. It's a complete package as it caters to everything; complex APIs, new browser functionalities, and best practices. MDN serves as a truly valuable resource and continues to assist me in my everyday development.
+        "
+|               "
+
+        
+        "
+|               <a>
+|                 aria-labelledby="label-6khxjwh087g"
+|                 class="button"
+|                 data-variant="primary"
+|                 href="/en-US/community"
+|                 part="button"
+|                 "
+          
+    "
+|                 <span>
+|                   class="label"
+|                   id="label-6khxjwh087g"
+|                   part="label"
+|                   "Get involved"
+|                 "
+  "
+|                 <span>
+|                   class="icon"
+|                   part="icon"
+|                   <svg>
+|                     fill="none"
+|                     height="24"
+|                     stroke-linecap="round"
+|                     stroke-linejoin="round"
+|                     stroke-width="2"
+|                     stroke="currentColor"
+|                     viewBox="0 0 24 24"
+|                     width="24"
+|                     xmlns="http://www.w3.org/2000/svg"
+|                     <path>
+|                       d="M5 12h14m-7-7 7 7-7 7"
+|                 "
+        "
+|               "
+      
+      "
+|             "
+
+      "
+|             <figure>
+|               class="homepage-contributor-spotlight__logo"
+|               "
+        "
+|               <img>
+|                 alt="Tiled Mozilla Logo"
+|                 height="323"
+|                 loading="lazy"
+|                 src="/static/ssr/mdn_contributor.9e2a105f50828d5a.png"
+|                 width="512"
+|               "
+      "
+|             "
+    "
+|           "
+    "
+|         "
+        "
+|       "
+      "
+|     "
+        "
+|     <div>
+|       class="page-layout__footer"
+|       "
+      "
+|       <mdn-placement-bottom>
+|         <template>
+|           shadowrootmode="open"
+|       "
+      "
+|       <footer>
+|         class="footer"
+|         "
+        "
+|         <div>
+|           class="footer__mdn"
+|           "
+          "
+|           <div>
+|             class="footer__intro"
+|             "
+            "
+|             <a>
+|               aria-label="MDN logo"
+|               class="footer__logo"
+|               href="/"
+|               <svg>
+|                 height="24"
+|                 viewBox="0 0 83 24"
+|                 width="83"
+|                 xmlns="http://www.w3.org/2000/svg"
+|                 <title>
+|                   "MDN"
+|                 <path>
+|                   d="M9.4 0 2.81 21.17H.12L6.69 0zm2.38 0v21.17H9.4V0h2.4Zm9.27 0-6.56 21.17H11.8L18.36 0zm2.39 0v21.17h-2.4V0zm22.11 16.83h-3.93v-1.27h.87v-3.63c0-.85-.16-1.45-.48-1.82a1.65 1.65 0 0 0-1.3-.52c-.74 0-1.3.25-1.66.78a3 3 0 0 0-.58 1.58v3.59h1.38v1.26h-3.93v-1.26h.87v-3.6c0-.88-.16-1.48-.48-1.83a1.7 1.7 0 0 0-1.29-.52 1.93 1.93 0 0 0-1.65.75 2.85 2.85 0 0 0-.58 1.6v3.62h1.59v1.27h-4.64v-1.27h1.37V9.75h-1.4V8.46h3.08v1.47c.28-.48.62-.87 1.08-1.2a3 3 0 0 1 1.68-.45c.67 0 1.22.16 1.73.48.5.32.85.8 1.03 1.47.25-.57.62-1.03 1.13-1.4.5-.37 1.1-.55 1.81-.55.8 0 1.5.25 2.05.75.55.51.85 1.3.85 2.35v4.18h1.4zm9.77 0H52.3v-1.66c-.27.51-.66.95-1.13 1.29-.56.4-1.23.59-1.9.55-1.11 0-2-.37-2.67-1.12a4.4 4.4 0 0 1-1-3.06c0-1.15.3-2.2.93-3.15.6-.94 1.58-1.43 2.94-1.43s2.25.5 2.83 1.5V5.22h-2V3.93h3.63v11.63h1.38v1.27Zm-3.06-3.86v-1.02a2.28 2.28 0 0 0-.73-1.67 2.4 2.4 0 0 0-1.66-.65 2.18 2.18 0 0 0-1.88.9 3.63 3.63 0 0 0-.65 2.2c0 .95.23 1.68.7 2.19.45.5 1.03.76 1.7.76.73 0 1.33-.3 1.79-.88.48-.6.71-1.21.73-1.83m14.14 3.86h-4.43v-1.27h1.37v-3.63c0-.85-.16-1.45-.5-1.82a1.68 1.68 0 0 0-1.31-.52c-.71 0-1.29.23-1.7.69a2.52 2.52 0 0 0-.67 1.6v3.66h1.38v1.26H56.1v-1.26h1.38v-5.8h-1.42V8.47h3.12V9.9c.6-1.06 1.57-1.6 2.92-1.6.83 0 1.54.26 2.12.77.57.5.85 1.28.85 2.34v4.19h1.38v1.24h-.05Zm1.31 5.15H83V24H67.71z"
+|             "
+            "
+|             <p>
+|               "
+              Your blueprint for a better internet.
+            "
+|             "
+          "
+|           "
+
+          "
+|           <ul>
+|             class="footer__socials"
+|             "
+            
+                "
+|             <li>
+|               "
+                  "
+|               <a>
+|                 aria-label="MDN on GitHub"
+|                 data-glean-id="footer: social -> github"
+|                 data-icon="github"
+|                 href="https://github.com/mdn/"
+|                 rel="noopener"
+|                 target="_blank"
+|               "
+                "
+|             "
+              
+                "
+|             <li>
+|               "
+                  "
+|               <a>
+|                 aria-label="MDN on Bluesky"
+|                 data-glean-id="footer: social -> bluesky"
+|                 data-icon="bluesky"
+|                 href="https://bsky.app/profile/developer.mozilla.org"
+|                 rel="noopener"
+|                 target="_blank"
+|               "
+                "
+|             "
+              
+                "
+|             <li>
+|               "
+                  "
+|               <a>
+|                 aria-label="MDN on X"
+|                 data-glean-id="footer: social -> x"
+|                 data-icon="x"
+|                 href="https://x.com/mozdevnet"
+|                 rel="noopener"
+|                 target="_blank"
+|               "
+                "
+|             "
+              
+                "
+|             <li>
+|               "
+                  "
+|               <a>
+|                 aria-label="MDN on Mastodon"
+|                 data-glean-id="footer: social -> mastodon"
+|                 data-icon="mastodon"
+|                 href="https://mastodon.social/@mdn"
+|                 rel="noopener"
+|                 target="_blank"
+|               "
+                "
+|             "
+              
+                "
+|             <li>
+|               "
+                  "
+|               <a>
+|                 aria-label="MDN blog RSS feed"
+|                 data-glean-id="footer: social -> rss"
+|                 data-icon="rss"
+|                 href="/en-US/blog/rss.xml"
+|                 rel="noopener"
+|                 target="_blank"
+|               "
+                "
+|             "
+              
+          "
+|           "
+
+          
+              "
+|           <dl>
+|             class="footer__links"
+|             "
+                "
+|             <dt>
+|               "MDN"
+|             "
+                "
+|             <dd>
+|               "
+                  "
+|               <ul>
+|                 "
+                    
+                        "
+|             <li>
+|               "
+                          "
+|               <a>
+|                 class=""
+|                 data-glean-id="footer: link -> /en-US/about"
+|                 href="/en-US/about"
+|                 rel=""
+|                 target=""
+|                 "
+                            About
+                          "
+|               "
+                        "
+|             "
+                      
+                        "
+|             <li>
+|               "
+                          "
+|               <a>
+|                 class=""
+|                 data-glean-id="footer: link -> /en-US/blog/"
+|                 href="/en-US/blog/"
+|                 rel=""
+|                 target=""
+|                 "
+                            Blog
+                          "
+|               "
+                        "
+|             "
+                      
+                        "
+|             <li>
+|               "
+                          "
+|               <a>
+|                 class="external"
+|                 data-glean-id="footer: link -> https://www.mozilla.org/en-US/careers/listings/"
+|                 href="https://www.mozilla.org/en-US/careers/listings/"
+|                 rel="noopener"
+|                 target="_blank"
+|                 "
+                            Mozilla careers
+                          "
+|               "
+                        "
+|             "
+                      
+                        "
+|             <li>
+|               "
+                          "
+|               <a>
+|                 class=""
+|                 data-glean-id="footer: link -> /en-US/advertising"
+|                 href="/en-US/advertising"
+|                 rel=""
+|                 target=""
+|                 "
+                            Advertise with us
+                          "
+|               "
+                        "
+|             "
+                      
+                        "
+|             <li>
+|               "
+                          "
+|               <a>
+|                 class=""
+|                 data-glean-id="footer: link -> /en-US/plus"
+|                 href="/en-US/plus"
+|                 rel=""
+|                 target=""
+|                 "
+                            MDN Plus
+                          "
+|               "
+                        "
+|             "
+                      
+                        "
+|             <li>
+|               "
+                          "
+|               <a>
+|                 class="external"
+|                 data-glean-id="footer: link -> https://support.mozilla.org/products/mdn-plus"
+|                 href="https://support.mozilla.org/products/mdn-plus"
+|                 rel="noopener"
+|                 target="_blank"
+|                 "
+                            Product help
+                          "
+|               "
+                        "
+|             "
+                      
+                  
+                
+              "
+|           "
+            
+              "
+|           <dl>
+|             class="footer__links"
+|             "
+                "
+|             <dt>
+|               "Contribute"
+|             "
+                "
+|             <dd>
+|               "
+                  "
+|               <ul>
+|                 "
+                    
+                        "
+|             <li>
+|               "
+                          "
+|               <a>
+|                 class=""
+|                 data-glean-id="footer: link -> /en-US/community"
+|                 href="/en-US/community"
+|                 rel=""
+|                 target=""
+|                 "
+                            MDN Community
+                          "
+|               "
+                        "
+|             "
+                      
+                        "
+|             <li>
+|               "
+                          "
+|               <a>
+|                 class=""
+|                 data-glean-id="footer: link -> /en-US/docs/MDN/Community"
+|                 href="/en-US/docs/MDN/Community"
+|                 rel=""
+|                 target=""
+|                 "
+                            Community resources
+                          "
+|               "
+                        "
+|             "
+                      
+                        "
+|             <li>
+|               "
+                          "
+|               <a>
+|                 class=""
+|                 data-glean-id="footer: link -> /en-US/docs/MDN/Writing_guidelines"
+|                 href="/en-US/docs/MDN/Writing_guidelines"
+|                 rel=""
+|                 target=""
+|                 "
+                            Writing guidelines
+                          "
+|               "
+                        "
+|             "
+                      
+                        "
+|             <li>
+|               "
+                          "
+|               <a>
+|                 class="external"
+|                 data-glean-id="footer: link -> /discord"
+|                 href="/discord"
+|                 rel="noopener"
+|                 target="_blank"
+|                 "
+                            MDN Discord
+                          "
+|               "
+                        "
+|             "
+                      
+                        "
+|             <li>
+|               "
+                          "
+|               <a>
+|                 class="external"
+|                 data-glean-id="footer: link -> https://github.com/mdn"
+|                 href="https://github.com/mdn"
+|                 rel="noopener"
+|                 target="_blank"
+|                 "
+                            MDN on GitHub
+                          "
+|               "
+                        "
+|             "
+                      
+                  
+                
+              "
+|           "
+            
+              "
+|           <dl>
+|             class="footer__links"
+|             "
+                "
+|             <dt>
+|               "Developers"
+|             "
+                "
+|             <dd>
+|               "
+                  "
+|               <ul>
+|                 "
+                    
+                        "
+|             <li>
+|               "
+                          "
+|               <a>
+|                 class=""
+|                 data-glean-id="footer: link -> /en-US/docs/Web"
+|                 href="/en-US/docs/Web"
+|                 rel=""
+|                 target=""
+|                 "
+                            Web technologies
+                          "
+|               "
+                        "
+|             "
+                      
+                        "
+|             <li>
+|               "
+                          "
+|               <a>
+|                 class=""
+|                 data-glean-id="footer: link -> /en-US/docs/Learn_web_development"
+|                 href="/en-US/docs/Learn_web_development"
+|                 rel=""
+|                 target=""
+|                 "
+                            Learn web development
+                          "
+|               "
+                        "
+|             "
+                      
+                        "
+|             <li>
+|               "
+                          "
+|               <a>
+|                 class=""
+|                 data-glean-id="footer: link -> /en-US/docs/MDN/Guides"
+|                 href="/en-US/docs/MDN/Guides"
+|                 rel=""
+|                 target=""
+|                 "
+                            Guides
+                          "
+|               "
+                        "
+|             "
+                      
+                        "
+|             <li>
+|               "
+                          "
+|               <a>
+|                 class=""
+|                 data-glean-id="footer: link -> /en-US/docs/MDN/Tutorials"
+|                 href="/en-US/docs/MDN/Tutorials"
+|                 rel=""
+|                 target=""
+|                 "
+                            Tutorials
+                          "
+|               "
+                        "
+|             "
+                      
+                        "
+|             <li>
+|               "
+                          "
+|               <a>
+|                 class=""
+|                 data-glean-id="footer: link -> /en-US/docs/Glossary"
+|                 href="/en-US/docs/Glossary"
+|                 rel=""
+|                 target=""
+|                 "
+                            Glossary
+                          "
+|               "
+                        "
+|             "
+                      
+                        "
+|             <li>
+|               "
+                          "
+|               <a>
+|                 class="external"
+|                 data-glean-id="footer: link -> https://hacks.mozilla.org/"
+|                 href="https://hacks.mozilla.org/"
+|                 rel="noopener"
+|                 target="_blank"
+|                 "
+                            Hacks blog
+                          "
+|               "
+                        "
+|             "
+                      
+                  
+                
+              "
+|           "
+            
+        "
+|         "
+
+        "
+|         <div>
+|           class="footer__mozilla"
+|           "
+          "
+|           <a>
+|             aria-label="Mozilla logo"
+|             class="footer__logo"
+|             href="https://www.mozilla.org/"
+|             <svg>
+|               height="30"
+|               viewBox="0 0 256 60"
+|               width="128"
+|               xmlns="http://www.w3.org/2000/svg"
+|               <title>
+|                 "Mozilla"
+|               <path>
+|                 d="m13.32 22.1 5.1 24.3h2.1l5.1-24.3H39.3v37.34h-7.26V28.46h-2.1l-6.96 30.98h-7.02L9.02 28.46h-2.1v31H-.35V22.1h13.66Zm45.12 8.74c8.73 0 13.8 5.15 13.8 14.57S67.14 60 58.44 60c-8.73 0-13.8-5.17-13.8-14.59 0-9.43 5.07-14.57 13.8-14.57m0 23.34c4.1 0 6.16-2.1 6.16-6.73v-4.12c0-4.62-2.06-6.73-6.16-6.73s-6.15 2.1-6.15 6.73v4.12c0 4.63 2.05 6.73 6.15 6.73m17.68-.14 14.82-17.26H76.32v-5.41h23.31v5.4L84.84 54.05h15.03v5.4H76.13v-5.41Zm28.07-22.67h10.7v28.07h-7.25V36.77h-3.48v-5.4zm3.44-9.27h7.26v5.4h-7.25v-5.4Zm12.62 0h10.72v37.34h-7.24V27.5h-3.48zm16.08 0h10.7v37.34h-7.25V27.5h-3.48v-5.4zm27.8 8.74c4.24 0 7.08 2.05 7.87 5.63h2.1v-5.1h8.88v5.4h-3.47v17.28h3.47v5.4h-4.25c-3 0-4.63-1.63-4.63-4.62v-.48H172c-.78 3.58-3.63 5.63-7.88 5.63-6.68 0-11.4-5.59-11.4-14.58 0-9 4.72-14.55 11.4-14.55m2.2 23.34c4.1 0 5.93-2.1 5.93-6.73v-4.12c0-4.62-1.82-6.73-5.94-6.73-3.99 0-5.92 2.1-5.92 6.73v4.13c0 4.62 1.92 6.72 5.93 6.72m46.28 5.27h-7.26V0h7.26zm6.3-28.41h30.8v-2.1l-20.4-7.32v-5.88l20.4-7.33v-2.1h-24.27V0h30.79v12l-16.62 5.63v2.11l16.61 5.64v12H218.9zm0-24.73h6.5v6.52h-6.5z"
+|           "
+          "
+|           <ul>
+|             "
+            
+                "
+|             <li>
+|               "
+                  "
+|               <a>
+|                 class="external"
+|                 data-glean-id="footer: mozilla -> https://www.mozilla.org/privacy/websites/"
+|                 href="https://www.mozilla.org/privacy/websites/"
+|                 "Website Privacy Notice"
+|               "
+                "
+|             "
+              
+                "
+|             <li>
+|               "
+                  "
+|               <a>
+|                 class="external"
+|                 data-glean-id="footer: mozilla -> https://www.mozilla.org/en-US/privacy/websites/data-preferences/"
+|                 href="https://www.mozilla.org/en-US/privacy/websites/data-preferences/"
+|                 "Telemetry Settings"
+|               "
+                "
+|             "
+              
+                "
+|             <li>
+|               "
+                  "
+|               <a>
+|                 class="external"
+|                 data-glean-id="footer: mozilla -> https://www.mozilla.org/about/legal/terms/mozilla"
+|                 href="https://www.mozilla.org/about/legal/terms/mozilla"
+|                 "Legal"
+|               "
+                "
+|             "
+              
+                "
+|             <li>
+|               "
+                  "
+|               <a>
+|                 class="external"
+|                 data-glean-id="footer: mozilla -> https://www.mozilla.org/about/governance/policies/participation/"
+|                 href="https://www.mozilla.org/about/governance/policies/participation/"
+|                 "Community Participation Guidelines"
+|               "
+                "
+|             "
+              
+          "
+|           "
+          "
+|           <p>
+|             "
+            Portions of this content are ©1998–2026 by individual mozilla.org contributors. Content available under "
+|             <a>
+|               href="/docs/MDN/Writing_guidelines/Attrib_copyright_license"
+|               "a Creative Commons license"
+|             ".
+          "
+|           "
+        "
+|         "
+      "
+|       "
+    "
+|     "
+      
+    
+      
+    "

@@ -1,0 +1,996 @@
+| <html>
+|   translate="no"
+|   <head>
+|     "
+		"
+|     <meta>
+|       charset="utf-8"
+|     "
+		"
+|     <meta>
+|       content="width=device-width, minimum-scale=1.0, maximum-scale=5.0, initial-scale=1.0"
+|       name="viewport"
+|     "
+		"
+|     <meta>
+|       content="https://www.photopea.com/promo/screens/scr5.png"
+|       name="thumbnail"
+|     "
+		"
+|     <meta>
+|       content="#474747"
+|       name="theme-color"
+|     "
+		
+		"
+|     <title>
+|       "Photopea | Online Photo Editor"
+|     "
+		"
+|     <meta>
+|       content="Photopea Online Photo Editor lets you edit photos, apply effects, filters, add text, crop or resize pictures. Do Online Photo Editing in your browser for free!"
+|       name="description"
+|     "
+		
+		"
+|     <link>
+|       href="https://www.photopea.com/"
+|       rel="canonical"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/"
+|       hreflang="en"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/"
+|       hreflang="x-default"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/af_za/"
+|       hreflang="af"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/ar_eg/"
+|       hreflang="ar"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/az_az/"
+|       hreflang="az"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/bg_bg/"
+|       hreflang="bg"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/bn_bd/"
+|       hreflang="bn"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/ca_es/"
+|       hreflang="ca"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/cs_cz/"
+|       hreflang="cs"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/da_dk/"
+|       hreflang="da"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/de_de/"
+|       hreflang="de"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/el_gr/"
+|       hreflang="el"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/es_es/"
+|       hreflang="es"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/et_ee/"
+|       hreflang="et"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/eu_es/"
+|       hreflang="eu"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/fa_ir/"
+|       hreflang="fa"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/fi_fi/"
+|       hreflang="fi"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/fr_fr/"
+|       hreflang="fr"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/gl_es/"
+|       hreflang="gl"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/gu_in/"
+|       hreflang="gu"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/he_il/"
+|       hreflang="he"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/hi_in/"
+|       hreflang="hi"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/hr_hr/"
+|       hreflang="hr"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/hu_hu/"
+|       hreflang="hu"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/id_id/"
+|       hreflang="id"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/it_it/"
+|       hreflang="it"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/ja_jp/"
+|       hreflang="ja"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/ka_ge/"
+|       hreflang="ka"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/km_kh/"
+|       hreflang="km"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/kn_in/"
+|       hreflang="kn"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/ko_kr/"
+|       hreflang="ko"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/ky_kg/"
+|       hreflang="ky"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/lt_lt/"
+|       hreflang="lt"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/lv_lv/"
+|       hreflang="lv"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/mk_mk/"
+|       hreflang="mk"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/ml_in/"
+|       hreflang="ml"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/mr_in/"
+|       hreflang="mr"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/ms_my/"
+|       hreflang="ms"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/my_mn/"
+|       hreflang="my"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/nb_no/"
+|       hreflang="nb"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/ne_np/"
+|       hreflang="ne"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/nl_nl/"
+|       hreflang="nl"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/pa_pk/"
+|       hreflang="pa-PK"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/pa_in/"
+|       hreflang="pa"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/pl_pl/"
+|       hreflang="pl"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/pt_br/"
+|       hreflang="pt-BR"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/pt_pt/"
+|       hreflang="pt"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/ro_ro/"
+|       hreflang="ro"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/ru_ru/"
+|       hreflang="ru"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/sk_sk/"
+|       hreflang="sk"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/sl_si/"
+|       hreflang="sl"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/sq_al/"
+|       hreflang="sq"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/sv_se/"
+|       hreflang="sv"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/sw_ke/"
+|       hreflang="sw"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/ta_in/"
+|       hreflang="ta"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/te_in/"
+|       hreflang="te"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/th_th/"
+|       hreflang="th"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/tl_ph/"
+|       hreflang="tl"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/tr_tr/"
+|       hreflang="tr"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/uk_ua/"
+|       hreflang="uk"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/ur_pk/"
+|       hreflang="ur"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/uz_uz/"
+|       hreflang="uz"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/vi_vn/"
+|       hreflang="vi"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/zh_cn/"
+|       hreflang="zh-Hans"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/zh_hk/"
+|       hreflang="zh-HK"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/zh_tw/"
+|       hreflang="zh-TW"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/zu_za/"
+|       hreflang="zu"
+|       rel="alternate"
+|     "
+		
+		"
+|     <link>
+|       href="promo/icon512.png"
+|       rel="apple-touch-icon"
+|     "
+		"
+|     <link>
+|       href="promo/icon512.png"
+|       rel="icon"
+|       sizes="512x512"
+|     "
+		"
+|     <link>
+|       href="promo/icon512.png"
+|       rel="image_src"
+|       type="image/png"
+|     "
+		"
+|     <link>
+|       crossorigin="use-credentials"
+|       href="manifest.json"
+|       rel="manifest"
+|     "
+		"
+|     <link>
+|       href="//chrome.google.com/webstore/detail/fmophgdjdipcbfjiopifpngdjmemonko"
+|       rel="chrome-webstore-item"
+|     "
+		
+		"
+|     <style>
+|       "		
+			body, button, input, textarea, select {  font-family: "Open Sans", "Segoe UI",  sans-serif;  }
+			body, input, select, button {  font-size: 13px;  }
+			
+			body {  margin:0;  background:#111418;  background-image: radial-gradient(52% 57% at 75% 12%, rgba(255, 90, 210, 0.23), transparent 72%), radial-gradient(45% 48% at 53% 43%, rgba(0, 190, 255, 0.18), transparent 72%), radial-gradient(45% 55% at 21% 21%, rgba(255, 170, 20, 0.19), transparent 72%);  }
+			#cap { 
+				font-size:1.2em;
+				color:#e6e6e6;
+				user-select:text;
+			}
+			#cap #ccont {  padding:0 2% 1em 2%;   }
+			#cap a { color:inherit;  font-weight:bold;  }
+			#cap p { margin-bottom:1.5em;  line-height:1.5em;  }
+			#cap button {  color:white;  font-weight:bold;  background-color:rgba(255,255,255,0.03);  border:1px solid rgba(255,255,255,0.5); cursor:pointer; font-size:1.3em; padding:0.7em 1.3em 0.8em 1.3em;  border-radius:500px;  display:block;  margin:30px auto;  transition: box-shadow .3s, background-color .3s;  }
+			#cap button:hover {  box-shadow: 0 0 30px #3482f6;  background-color:rgba(255,255,255,0.1);  }
+			#cap h1 { text-align:center;  font-size: 4em;  margin:0.5em 0 0 0;  }
+			.pair img, .pair video {  border-radius:1.6em;  }
+			
+			#cap h1, #cap h2 {  letter-spacing: -0.03em;  }
+			
+			#mid {  max-width:1100px;  margin:0px auto;  }
+			#bar {  padding:0.4em 0;  line-height:2.5em;  background:#111418;  padding:0.7em 2.5%;    }
+			#bar a {  text-decoration:none;  font-weight:normal;  margin:0 10px;  bottom:4px;  position:relative;  }
+			
+			
+			
+			.pair {  display:flex;  margin:3em 0;  }
+			.pair div {  width:50%;  }
+			.pair h2 {  margin:0;  }
+			
+			@media (max-width: 600px) {
+			.pair {  display:block;  margin:3em 1em;  }
+			.pair div {  width:100%;  }
+			}
+			
+			.pair p {  margin: 0.2em 0;  opacity:0.6;  }
+			.pair div {padding: 1em 0;}
+		"
+|     "		
+	"
+|   "
+	
+	"
+|   <body>
+|     class="theme0"
+|     "		
+		
+		"
+|     <div>
+|       id="cap"
+|       style="display: "
+|       "
+			"
+|       <div>
+|         id="bar"
+|         "
+				"
+|         <img>
+|           alt="Photopea logo"
+|           height="512"
+|           loading="lazy"
+|           src="promo/icon512.png"
+|           style="width:36px; height:auto; margin:0 6px -6px 0"
+|           width="512"
+|         " 
+				"
+|         <b>
+|           style="font-size:34px;  margin-right:20px"
+|           "Photopea"
+|         "
+				"
+|         <a>
+|           href="//www.photopea.com/learn"
+|           target="_blank"
+|           title="Learn photo editing"
+|           "Learn"
+|         "
+				"
+|         <a>
+|           href="//www.photopea.com/tuts"
+|           target="_blank"
+|           title="Graphics tutorials"
+|           "Tutorials"
+|         "
+				"
+|         <a>
+|           href="//www.photopea.com/templates"
+|           target="_blank"
+|           title="Free PSD templates"
+|           "Templates"
+|         "
+				"
+|         <a>
+|           href="//www.photopea.com/api"
+|           target="_blank"
+|           title="Insert a photo editor into your product"
+|           "API"
+|         "
+			"
+|       "
+			
+			"
+|       <div>
+|         id="ccont"
+|         "
+			"
+|         <h1>
+|           "Free Online Photo Editor"
+|         "
+			"
+|         <h2>
+|           style="text-align:center"
+|           "Unlock your creativity with the best free photo editor."
+|         "
+			"
+|         <p>
+|           style="text-align:center; font-size:1em; opacity:0.6"
+|           "Transform your photos with professional-grade tools in a free online photo editor that works right in your browser. No downloads, no hassle."
+|         "
+			"
+|         <button>
+|           onclick="addPP()"
+|           "Start using Photopea"
+|         "
+			
+			"
+|         <div>
+|           id="mid"
+|           "								
+				"
+|           <div>
+|             class="pair"
+|             "
+					"
+|             <div>
+|               style="text-align:center;"
+|               "
+						"
+|               <img>
+|                 alt="Photo editor on a laptop"
+|                 height="800"
+|                 loading="lazy"
+|                 src="img/table.webp"
+|                 style="width:80%; height:auto;"
+|                 width="800"
+|               "
+					"
+|             "
+					"
+|             <div>
+|               "
+						"
+|               <h2>
+|                 "Fully Local"
+|               "
+						"
+|               <p>
+|                 "There are no uploads. Photopea runs on your device, using your CPU and your GPU. All files open instantly, and never leave your device."
+|               "
+						
+						"
+|               <h2>
+|                 "Cost-Effective"
+|               "
+						"
+|               <p>
+|                 "Enjoy all the premium features without spending a dime."
+|               "
+						
+						"
+|               <h2>
+|                 "Convenient Editor"
+|               "
+						"
+|               <p>
+|                 "No need to install heavy software on your device. Just open your browser and start editing."
+|               "
+						
+						"
+|               <h2>
+|                 "Runs Everywhere"
+|               "
+						"
+|               <p>
+|                 "Our photo editor runs on any device. The better hardware you have, the better it runs."
+|               "
+						
+						"
+|               <button>
+|                 onclick="addPP()"
+|                 "Start using Photopea"
+|               "
+						
+					"
+|             "
+				"
+|           "
+				
+				
+				"
+|           <div>
+|             class="pair"
+|             "
+					"
+|             <div>
+|               "
+						
+						"
+|               <h2>
+|                 "Professional Editor"
+|               "
+						"
+|               <p>
+|                 "Photopea offers a full suite of editing tools, from basic features like cropping and resizing to advanced features such as layering, masking, and blending."
+|               "
+						
+						"
+|               <h2>
+|                 "Full PSD support"
+|               "
+						"
+|               <p>
+|                 "Photopea fully supports a popular PSD format, both opening and saving files. It is the main format of Photopea."
+|               "
+						
+						"
+|               <h2>
+|                 "Swiss knife for graphics"
+|               "
+						"
+|               <p>
+|                 "Open and edit PNG, JPG, GIF, BMP, WEBP, SVG, PDF, AI, AVIF, DDS, HEIC, TIFF, MP4, TGA, CDR, PDN, EPS, INDD, Figma and 
+						"
+|                 <a>
+|                   href="//github.com/photopea/photopea?tab=readme-ov-file#supported-formats"
+|                   target="_blank"
+|                   "40 other formats"
+|                 "."
+|               "
+					
+						"
+|               <h2>
+|                 "Perfect RAW support"
+|               "
+						"
+|               <p>
+|                 "Photopea opens DNG, CR2, CR3, NEF, ARW, RW2, RAF, ORF and FFF files. Set the Exposure, Color Balance, 
+						Contrast, Highlights and Shadows, etc."
+|               "
+						"
+|               <button>
+|                 onclick="addPP()"
+|                 "Start using Photopea"
+|               "
+					"
+|             "
+					"
+|             <div>
+|               style="text-align:center;"
+|               "
+						"
+|               <img>
+|                 alt="Photo editor on a phone"
+|                 height="1328"
+|                 loading="lazy"
+|                 src="img/hand_phone.webp"
+|                 style="width:70%; height:auto;"
+|                 width="1044"
+|               "
+					"
+|             "
+				"
+|           "
+				
+				
+				"
+|           <div>
+|             class="pair"
+|             "
+					"
+|             <div>
+|               style="text-align:center"
+|               "
+						"
+|               <video>
+|                 autoplay=""
+|                 id="goats"
+|                 loop=""
+|                 muted=""
+|                 preload="none"
+|                 src="img/goats.mp4"
+|                 style="width:80%; height:auto;"
+|               "
+						
+					"
+|             "
+					"
+|             <div>
+|               "
+						"
+|               <h2>
+|                 "State-of-the-art AI"
+|               "
+						"
+|               <p>
+|                 <a>
+|                   href="//x.com/photopeacom/status/1735723561950539852/video/1"
+|                   target="_blank"
+|                   "Remove background with one click"
+|                 ",
+						or "
+|                 <a>
+|                   href="//x.com/photopeacom/status/1661425407944425494/video/1"
+|                   target="_blank"
+|                   "replace any part of an image"
+|                 "
+						with a new content through a text description."
+|               "
+						
+						"
+|               <h2>
+|                 "All Essential Features"
+|               "
+						"
+|               <p>
+|                 "We have Layers, Masks, Layer Styles, Smart Objects, Adjustment Layers, Channels, Paths and more!"
+|               "
+						
+						"
+|               <h2>
+|                 "Adjustments and Filters"
+|               "
+						"
+|               <p>
+|                 "Do you need Levels and Curves? A Gaussian Blur? Or advanced stuff such as Liquify or Puppet Warp? We have it all!"
+|               "
+						
+						"
+|               <h2>
+|                 "Vector Graphics"
+|               "
+						"
+|               <p>
+|                 "Create and edit vector graphics directly within the editor. Perfect for designers working on logos, icons, or illustrations."
+|               "
+						
+						"
+|               <button>
+|                 onclick="addPP()"
+|                 "Start using Photopea"
+|               "
+					"
+|             "
+				"
+|           "
+				
+				"
+|           <h2>
+|             style="text-align:center"
+|             "Who Can Benefit from our Free Photo Editor?"
+|           "
+				"
+|           <div>
+|             class="pair"
+|             "
+					"
+|             <div>
+|               "
+						"
+|               <h2>
+|                 "Social Media Enthusiasts"
+|               "
+						"
+|               <p>
+|                 "Enhance your photos before sharing them on platforms like Instagram, Facebook, or Twitter. Make every post stand out with unique edits."
+|               "
+
+						"
+|               <h2>
+|                 "Students and Educators"
+|               "
+						"
+|               <p>
+|                 "Create stunning visuals for presentations, assignments, and more. Our free online photo editor is a great tool for educational projects."
+|               "
+
+						"
+|               <h2>
+|                 "Small Business Owners"
+|               "
+						"
+|               <p>
+|                 "Design promotional materials, edit product photos, and create engaging content for your website or online store, all without spending on expensive software."
+|               "
+
+						"
+|               <h2>
+|                 "Graphic Designers"
+|               "
+						"
+|               <p>
+|                 "Whether you’re a freelancer or part of a design team, Photopea’s free photo editor offers all the features you need to produce professional-quality work."
+|               "
+							
+						"
+|               <button>
+|                 onclick="addPP()"
+|                 "Start using Photopea"
+|               "
+					"
+|             "
+					"
+|             <div>
+|               style="text-align:center;"
+|               "
+						"
+|               <img>
+|                 alt="Freelancer using a photo editor"
+|                 height="853"
+|                 loading="lazy"
+|                 src="img/laptop.webp"
+|                 style="width:80%; height:auto;"
+|                 width="853"
+|               "
+					"
+|             "
+				"
+|           "
+				
+				"
+|           <p>
+|             style="text-align:center"
+|             "
+				  "
+|             <a>
+|               href="mailto:support@photopea.com"
+|               "support@photopea.com"
+|             " 
+				| "
+|             <a>
+|               href="/privacy.html"
+|               target="_blank"
+|               "Privacy Policy"
+|             "
+				| "
+|             <a>
+|               href="//x.com/photopeacom"
+|               target="_blank"
+|               "Twitter"
+|             "
+				| "
+|             <a>
+|               href="//facebook.com/photopea/"
+|               target="_blank"
+|               "Facebook"
+|             "
+				| "
+|             <a>
+|               href="//reddit.com/r/photopea/"
+|               target="_blank"
+|               "Reddit"
+|             "
+				"
+|           "
+			"
+|         "
+			"
+|       "
+		"
+|     "
+		
+		
+		"
+|     <script>
+|       "
+			window.___osw = window.innerWidth;  console.log(window.innerWidth);
+			var cap = document.getElementById("cap"), added=false;
+			var href = window.location.href;
+			var ls = window.localStorage, ppp=null;  if(ls) {  ppp=ls.getItem("_ppp");  if(ppp) ppp=JSON.parse(ppp);  }  if(ppp==null) ppp={};
+			
+			function addPP() {
+				cap.style.display="none";  
+				if(ppp) {  ppp["capShown"]="false";  ls.setItem("_ppp", JSON.stringify(ppp));   }
+				if(added) return;  added=true;  console.log("adding");
+				var fls = [
+					"style/all10.css",
+					"code/ext/ext1792610350.js",
+					"code/dbs/DBS1792677468.js",
+					"code/pp/pp1792675746.js"
+				];
+				var fromCDN = false;  //window.location.host=="www.photopea.com" && !window.location.href.endsWith("nocdn");
+				var ao = window.location.ancestorOrigins;
+				if(ao) for(var i=0; i<ao.length; i++) if(ao[i].indexOf("figma.com")!=-1) fromCDN=false;
+				
+				for(var i=0; i<fls.length; i++) {
+					var url = (fromCDN?"//vecpea.com/":"")+fls[i], isJS = url.endsWith(".js");
+					var el = document.createElement(isJS ? "script" : "link");
+					el.setAttribute(isJS ? "src" : "href",url);
+					if(!isJS) el.setAttribute("rel","stylesheet");
+					else el.async=false;
+					
+					(isJS ? document.body : document.head).appendChild(el);
+				}
+			}
+			
+			if(href.indexOf("#")!=-1 || href.indexOf("=")!=-1 || ppp["capShown"]=="false") addPP();
+			else {
+				cap.style.display="";	
+				window.addEventListener("load", function () {  var v = document.getElementById("goats");  v.src = "img/goats.mp4";  v.play();  });
+				if(Math.random()<0.1) {
+					fetch("//www.photopea.com/papi/event.php?id=fst_Visit");
+					window.__otime = Date.now();
+					window.addEventListener("unload", function(e) {
+						if((Date.now()-window.__otime)<10000 && ppp && ppp["capShown"]!="false") fetch("//www.photopea.com/papi/event.php?id=fst_Left");  // User left in less than 10 seconds without clicking on "Start using Photopea"
+					});
+				}
+			}				
+		"
+|     "
+	
+
+
+"

@@ -1,0 +1,858 @@
+| <html>
+|   class="js  supports no-touchevents no-cssfilters"
+|   lang="fr"
+|   prefix="og: http://ogp.me/ns#"
+|   <head>
+|     <style>
+|       type="text/css"
+|       ".truste_cursor_pointer {cursor: pointer;}.truste_border_none {border: none;}"
+|     <style>
+|       type="text/css"
+|       ".ta-display-none { display: none; }"
+|     "
+        "
+|     <title>
+|       "
+                            OpenClassrooms
+                    "
+|     "
+                "
+|     <meta>
+|       content="width=device-width, initial-scale=1"
+|       name="viewport"
+|     "
+        "
+|     <meta>
+|       charset="utf-8"
+|     "
+        "
+|     <meta>
+|       content="OpenClassrooms"
+|       name="application-name"
+|     "
+        "
+|     <meta>
+|       content="#7451eb"
+|       name="msapplication-TileColor"
+|     "
+        "
+|     <meta>
+|       content="/fav-icon.png?v=3"
+|       name="msapplication-TileImage"
+|     "
+        "
+|     <meta>
+|       content="#7451eb"
+|       name="theme-color"
+|     "
+        "
+|     <meta>
+|       content="yes"
+|       name="apple-mobile-web-app-capable"
+|     "
+        "
+|     <meta>
+|       content="default"
+|       name="apple-mobile-web-app-status-bar-style"
+|     "
+        "
+|     <meta>
+|       content="OpenClassrooms"
+|       name="apple-mobile-web-app-title"
+|     "
+        "
+|     <link>
+|       crossorigin="use-credentials"
+|       href="/manifest.json?3c0b069"
+|       rel="manifest"
+|     "
+        "
+|     <meta>
+|       content="fr"
+|       property="og:locale"
+|     "
+        "
+|     <script>
+|       src="https://www.googletagmanager.com/gtm.js?id=GTM-5WM9PV"
+|     <script>
+|       src="https://www.datadoghq-browser-agent.com/eu1/v6/datadog-rum.js"
+|     <script>
+|       type="application/ld+json"
+|       "
+{
+  "@context": "https://schema.org",
+  "@type": "Organization",
+  "@id": "https://openclassrooms.com/#organization",
+  "name": "OpenClassrooms",
+  "legalName": "OpenClassrooms",
+  "url": "https://openclassrooms.com",
+  "logo": "https://openclassrooms.com/icon-512x512.png",
+  "taxID": "493861363",
+  "sameAs": [
+    "https://www.wikidata.org/wiki/Q3485432",
+    "https://en.wikipedia.org/wiki/OpenClassrooms",
+    "https://fr.wikipedia.org/wiki/OpenClassrooms",
+    "https://www.linkedin.com/company/openclassrooms",
+    "https://instagram.com/openclassrooms",
+    "https://annuaire-entreprises.data.gouv.fr/entreprise/493861363",
+    "https://ledger.openclassrooms.com"
+  ]
+}
+        "
+|     "
+
+                
+        "
+|     <link>
+|       as="script"
+|       crossorigin="anonymous"
+|       href="https://cdn.oc-static.com/production/js/index.js?v=3"
+|       rel="prefetch"
+|     "
+        "
+|     <link>
+|       as="fetch"
+|       href="https://api.openclassrooms.com"
+|       rel="preconnect"
+|     "
+
+                                "
+|     <link>
+|       href="/fav-icon.png?v=3"
+|       rel="icon"
+|       sizes="144x144"
+|     "
+            "
+|     <link>
+|       href="/apple-touch-icon.png?v=3"
+|       rel="apple-touch-icon"
+|     "
+            "
+|     <link>
+|       href="/apple-touch-icon-iphone.png?v=3"
+|       rel="apple-touch-icon"
+|     "
+            "
+|     <link>
+|       href="/apple-touch-icon-ipad.png?v=3"
+|       rel="apple-touch-icon"
+|       sizes="72x72"
+|     "
+            "
+|     <link>
+|       href="/apple-touch-icon-iphone-retina-display.png?v=3"
+|       rel="apple-touch-icon"
+|       sizes="114x114"
+|     "
+            "
+|     <link>
+|       href="/apple-touch-icon-ipad-retina-display.png?v=3"
+|       rel="apple-touch-icon"
+|       sizes="144x144"
+|     "
+
+            "
+|     <link>
+|       href="/apple-touch-icon-precomposed.png?v=3"
+|       rel="apple-touch-icon-precomposed"
+|     "
+            "
+|     <link>
+|       href="/favicon.ico?3c0b069"
+|       rel="shortcut icon"
+|     "
+        
+                "
+|     <link>
+|       as="font"
+|       crossorigin=""
+|       fetchpriority="high"
+|       href="/fonts/inter-300-core.woff2"
+|       rel="preload"
+|       type="font/woff2"
+|     "
+        "
+|     <link>
+|       as="font"
+|       crossorigin=""
+|       fetchpriority="high"
+|       href="/fonts/inter-700-core.woff2"
+|       rel="preload"
+|       type="font/woff2"
+|     "
+        "
+|     <link>
+|       as="font"
+|       crossorigin=""
+|       fetchpriority="high"
+|       href="/fonts/inter-500-core.woff2"
+|       rel="preload"
+|       type="font/woff2"
+|     "
+
+        "
+|     <style>
+|       "
+            /* 400 */
+            @font-face {
+                font-family: 'Inter';
+                src: url('/fonts/inter-300-core.woff2') format('woff2');
+                font-weight: 400;
+                font-style: normal;
+                font-display: swap;
+                unicode-range:
+                U+0000-007F, U+00A0-00FF, U+0152, U+0153, U+2010-2015, U+2018-201F, U+2022, U+2026, U+2009,
+                U+202F, U+20AC, U+2122;
+            }
+            @font-face {
+                font-family: 'Inter';
+                src: url('/fonts/inter-300-extended.woff2') format('woff2');
+                font-weight: 400;
+                font-style: normal;
+                font-display: optional;
+                unicode-range: U+0100-024F, U+1E00-1EFF;
+            }
+            @font-face {
+                font-family: 'Inter';
+                src: url('/fonts/inter-300-math.woff2') format('woff2');
+                font-weight: 400;
+                font-style: normal;
+                font-display: optional;
+                unicode-range: U+2190-21FF, U+2200-22FF, U+25A0-25FF;
+            }
+
+            /* 500 */
+            @font-face {
+                font-family: 'Inter';
+                src: url('/fonts/inter-500-core.woff2') format('woff2');
+                font-weight: 500;
+                font-style: normal;
+                font-display: swap;
+                unicode-range:
+                U+0000-007F, U+00A0-00FF, U+0152, U+0153, U+2010-2015, U+2018-201F, U+2022, U+2026, U+2009,
+                U+202F, U+20AC, U+2122;
+            }
+            @font-face {
+                font-family: 'Inter';
+                src: url('/fonts/inter-500-extended.woff2') format('woff2');
+                font-weight: 500;
+                font-style: normal;
+                font-display: optional;
+                unicode-range: U+0100-024F, U+1E00-1EFF;
+            }
+            @font-face {
+                font-family: 'Inter';
+                src: url('/fonts/inter-500-math.woff2') format('woff2');
+                font-weight: 500;
+                font-style: normal;
+                font-display: optional;
+                unicode-range: U+2190-21FF, U+2200-22FF, U+25A0-25FF;
+            }
+
+            /* 700 */
+            @font-face {
+                font-family: 'Inter';
+                src: url('/fonts/inter-700-core.woff2') format('woff2');
+                font-weight: 700;
+                font-style: normal;
+                font-display: swap;
+                unicode-range:
+                U+0000-007F, U+00A0-00FF, U+0152, U+0153, U+2010-2015, U+2018-201F, U+2022, U+2026, U+2009,
+                U+202F, U+20AC, U+2122;
+            }
+            @font-face {
+                font-family: 'Inter';
+                src: url('/fonts/inter-700-extended.woff2') format('woff2');
+                font-weight: 700;
+                font-style: normal;
+                font-display: optional;
+                unicode-range: U+0100-024F, U+1E00-1EFF;
+            }
+            @font-face {
+                font-family: 'Inter';
+                src: url('/fonts/inter-700-math.woff2') format('woff2');
+                font-weight: 700;
+                font-style: normal;
+                font-display: optional;
+                unicode-range: U+2190-21FF, U+2200-22FF, U+25A0-25FF;
+            }
+
+            @font-face {
+                font-family: "inter-fallback";
+                src: local("Arial");
+                font-weight: 400;
+                font-style: normal;
+                size-adjust: 106.9%;
+                ascent-override: 96.875%;
+                descent-override: 24.15%;
+                line-gap-override: 0%;
+            }
+
+                @font-face {
+                font-family: "inter-fallback";
+                src: local("Arial");
+                font-weight: 500;
+                font-style: normal;
+                size-adjust: 108.0%;
+                ascent-override: 96.875%;
+                descent-override: 24.15%;
+                line-gap-override: 0%;
+            }
+
+            @font-face {
+                font-family: "inter-fallback";
+                src:
+                    local("Arial Bold"),
+                    local("Arial-BoldMT"),    /* macOS */
+                    local("Arial BoldMT"),    /* variante */
+                    local("Arial-Bold"),      /* Linux/variantes */
+                    local("Arial");           /* dernier recours */
+                font-weight: 700;
+                font-style: normal;
+                size-adjust: 101.6%;
+                ascent-override: 96.875%;
+                descent-override: 24.15%;
+                line-gap-override: 0%;
+            }
+
+            /* Pile par défaut */
+            html { font-family: "Inter", "inter-fallback", Arial, system-ui, sans-serif; }
+        "
+|     "
+
+                    "
+|     <link>
+|       as="style"
+|       fetchpriority="high"
+|       href="/legacy/css/main_webapp-42a8f1fd.css"
+|       rel="preload"
+|     "
+    "
+|     <link>
+|       href="/legacy/css/main_webapp-42a8f1fd.css"
+|       media="all"
+|       rel="stylesheet"
+|       type="text/css"
+|     "
+
+                   "
+|     <link>
+|       as="style"
+|       href="/css/classify/colorDecisions.css?3c0b069"
+|       onload="this.onload=null;this.rel='stylesheet'"
+|       rel="stylesheet"
+|     "
+            "
+|     <noscript>
+|       "
+                <link rel="stylesheet" href="/css/classify/colorDecisions.css?3c0b069">
+            "
+|     "
+        
+            "
+|     <style>
+|       "#oc-header{display: none}"
+|     "
+
+                        "
+|     <script>
+|       "
+            (function(h,o,u,n,d) {
+                h=h[d]=h[d]||{q:[],onReady:function(c){h.q.push(c)}}
+                d=o.createElement(u);d.async=1;d.src=n
+                n=o.getElementsByTagName(u)[0];n.parentNode.insertBefore(d,n)
+            })(window,document,'script','https://www.datadoghq-browser-agent.com/eu1/v6/datadog-rum.js','DD_RUM')
+            window.DD_RUM.onReady(function() {
+                const botPattern = "(googlebot\/|bot|Googlebot-Mobile|Googlebot-Image|Google favicon|Mediapartners-Google|bingbot|slurp|java|wget|curl|Commons-HttpClient|Python-urllib|libwww|httpunit|nutch|phpcrawl|msnbot|jyxobot|FAST-WebCrawler|FAST Enterprise Crawler|biglotron|teoma|convera|seekbot|gigablast|exabot|ngbot|ia_archiver|GingerCrawler|webmon |httrack|webcrawler|grub.org|UsineNouvelleCrawler|antibot|netresearchserver|speedy|fluffy|bibnum.bnf|findlink|msrbot|panscient|yacybot|AISearchBot|IOI|ips-agent|tagoobot|MJ12bot|dotbot|woriobot|yanga|buzzbot|mlbot|yandexbot|purebot|Linguee Bot|Voyager|CyberPatrol|voilabot|baiduspider|citeseerxbot|spbot|twengabot|postrank|turnitinbot|scribdbot|page2rss|sitebot|linkdex|Adidxbot|blekkobot|ezooms|dotbot|Mail.RU_Bot|discobot|heritrix|findthatfile|europarchive.org|NerdByNature.Bot|sistrix crawler|ahrefsbot|Aboundex|domaincrawler|wbsearchbot|summify|ccbot|edisterbot|seznambot|ec2linkfinder|gslfbot|aihitbot|intelium_bot|facebookexternalhit|yeti|RetrevoPageAnalyzer|lb-spider|sogou|lssbot|careerbot|wotbox|wocbot|ichiro|DuckDuckBot|lssrocketcrawler|drupact|webcompanycrawler|acoonbot|openindexspider|gnam gnam spider|web-archive-net.com.bot|backlinkcrawler|coccoc|integromedb|content crawler spider|toplistbot|seokicks-robot|it2media-domain-crawler|ip-web-crawler.com|siteexplorer.info|elisabot|proximic|changedetection|blexbot|arabot|WeSEE:Search|niki-bot|CrystalSemanticsBot|rogerbot|360Spider|psbot|InterfaxScanBot|Lipperhey SEO Service|CC Metadata Scaper|g00g1e.net|GrapeshotCrawler|urlappendbot|brainobot|fr-crawler|binlar|SimpleCrawler|Livelapbot|Twitterbot|cXensebot|smtbot|bnf.fr_bot|A6-Indexer|ADmantX|Facebot|Twitterbot|OrangeBot|memorybot|AdvBot|MegaIndex|SemanticScholarBot|ltx71|nerdybot|xovibot|BUbiNG|Qwantify|archive.org_bot|Applebot|TweetmemeBot|crawler4j|findxbot|SemrushBot|yoozBot|lipperhey|y!j-asr|Domain Re-Animator Bot|AddThis)";
+                const regex = new RegExp(botPattern, 'i');
+                const isBot = regex.test(navigator.userAgent);
+
+                window.DD_RUM.init({
+                    clientToken: 'pubd99897e44e8dca553f55eed6c6187daf',
+                    applicationId: 'e01e4c42-f91f-417d-9608-2d812e48fb02',
+                    site: 'datadoghq.eu',
+                    service: 'sdzv4-frontend',
+                    env: 'production',
+                    version: 'v4.886.0',
+                    allowedTracingUrls: [
+                        (url) => url.startsWith('https://openclassrooms.com'),
+                        (url) => url.startsWith('https://api.openclassrooms.com')
+                    ],
+                    sessionSampleRate: isBot ? 5 : 30,
+                    sessionReplaySampleRate: isBot ? 0 : 2,
+                    traceSampleRate: isBot ? 0 : 10,
+                    defaultPrivacyLevel: 'mask',
+                    trackResources: true,
+                    trackLongTasks: true,
+                    trackUserInteractions: true,
+
+                    // For technical reasons, this configuration is duplicated there
+                    // /modules/nextjs-openclassrooms.com/src/datadog-rum.client.tsx
+                    beforeSend: (event) => {
+                        if (event.type === 'error') {
+                            const message = event.error?.message || '';
+                            const stack = event.error?.stack || '';
+                            const isNoisyThirdParty = [
+                                'google',
+                                'analytics',
+                                'doubleclick',
+                                'linkedin',
+                                'facebook.net',
+                                'hubspot',
+                                'hotjar',
+                            ].some(
+                                (term) => message.toLowerCase().includes(term) || stack.toLowerCase().includes(term)
+                            );
+
+                            if (isNoisyThirdParty) {
+                                return false;
+                            }
+
+                            // Discard generic cross-origin errors triggered by blocked/interrupted 3rd party scripts
+                            if (message === 'Script error.') {
+                                return false;
+                            }
+                        }
+
+                        return true;
+                    },
+                });
+
+                            });
+        "
+|     "
+        
+                "
+|     <script>
+|       "
+    window.dataLayer = window.dataLayer || [];
+"
+|     "
+
+"
+|     <script>
+|       "
+    (function(w, d, s, l) {
+        w[l] = w[l] || [];
+        w[l].push({
+            'gtm.start': new Date().getTime(),
+            event: 'gtm.js'
+        });
+        var f = d.getElementsByTagName(s)[0],
+            j = d.createElement(s),
+            dl = l != 'dataLayer' ? '&l=' + l : '',
+            auth = '',
+            preview = '';
+
+        j.async = true;
+        j.src = 'https://www.googletagmanager.com/gtm.js?id=GTM-5WM9PV' + dl;
+
+        if (auth && preview) {
+            j.src +='&gtm_auth=' + auth + '&gtm_preview=' + preview + '&gtm_cookies_win=x'
+        }
+
+        f.parentNode.insertBefore(j, f);
+    })(window, document, 'script', 'dataLayer');
+"
+|     "
+
+        
+    "
+|     <script>
+|       "
+    /*! modernizr 3.3.1 (Custom Build) | MIT *
+    * https://modernizr.com/download/?-cssfilters-touchevents-setclasses !*/
+    !function(e,n,t){function o(e,n){return typeof e===n}function r(){var e,n,t,r,s,i,a;for(var l in C)if(C.hasOwnProperty(l)){if(e=[],n=C[l],n.name&&(e.push(n.name.toLowerCase()),n.options&&n.options.aliases&&n.options.aliases.length))for(t=0;t<n.options.aliases.length;t++)e.push(n.options.aliases[t].toLowerCase());for(r=o(n.fn,"function")?n.fn():n.fn,s=0;s<e.length;s++)i=e[s],a=i.split("."),1===a.length?Modernizr[a[0]]=r:(!Modernizr[a[0]]||Modernizr[a[0]]instanceof Boolean||(Modernizr[a[0]]=new Boolean(Modernizr[a[0]])),Modernizr[a[0]][a[1]]=r),g.push((r?"":"no-")+a.join("-"))}}function s(e){var n=w.className,t=Modernizr._config.classPrefix||"";if(x&&(n=n.baseVal),Modernizr._config.enableJSClass){var o=new RegExp("(^|\\s)"+t+"no-js(\\s|$)");n=n.replace(o,"$1"+t+"js$2")}Modernizr._config.enableClasses&&(n+=" "+t+e.join(" "+t),x?w.className.baseVal=n:w.className=n)}function i(){return"function"!=typeof n.createElement?n.createElement(arguments[0]):x?n.createElementNS.call(n,"http://www.w3.org/2000/svg",arguments[0]):n.createElement.apply(n,arguments)}function a(){var e=n.body;return e||(e=i(x?"svg":"body"),e.fake=!0),e}function l(e,t,o,r){var s,l,u,f,p="modernizr",c=i("div"),d=a();if(parseInt(o,10))for(;o--;)u=i("div"),u.id=r?r[o]:p+(o+1),c.appendChild(u);return s=i("style"),s.type="text/css",s.id="s"+p,(d.fake?d:c).appendChild(s),d.appendChild(c),s.styleSheet?s.styleSheet.cssText=e:s.appendChild(n.createTextNode(e)),c.id=p,d.fake&&(d.style.background="",d.style.overflow="hidden",f=w.style.overflow,w.style.overflow="hidden",w.appendChild(d)),l=t(c,e),d.fake?(d.parentNode.removeChild(d),w.style.overflow=f,w.offsetHeight):c.parentNode.removeChild(c),!!l}function u(e,n){return!!~(""+e).indexOf(n)}function f(e){return e.replace(/([a-z])-([a-z])/g,function(e,n,t){return n+t.toUpperCase()}).replace(/^-/,"")}function p(e,n){return function(){return e.apply(n,arguments)}}function c(e,n,t){var r;for(var s in e)if(e[s]in n)return t===!1?e[s]:(r=n[e[s]],o(r,"function")?p(r,t||n):r);return!1}function d(e){return e.replace(/([A-Z])/g,function(e,n){return"-"+n.toLowerCase()}).replace(/^ms-/,"-ms-")}function m(n,o){var r=n.length;if("CSS"in e&&"supports"in e.CSS){for(;r--;)if(e.CSS.supports(d(n[r]),o))return!0;return!1}if("CSSSupportsRule"in e){for(var s=[];r--;)s.push("("+d(n[r])+":"+o+")");return s=s.join(" or "),l("@supports ("+s+") { #modernizr { position: absolute; } }",function(e){return"absolute"==getComputedStyle(e,null).position})}return t}function h(e,n,r,s){function a(){p&&(delete k.style,delete k.modElem)}if(s=o(s,"undefined")?!1:s,!o(r,"undefined")){var l=m(e,r);if(!o(l,"undefined"))return l}for(var p,c,d,h,v,y=["modernizr","tspan","samp"];!k.style&&y.length;)p=!0,k.modElem=i(y.shift()),k.style=k.modElem.style;for(d=e.length,c=0;d>c;c++)if(h=e[c],v=k.style[h],u(h,"-")&&(h=f(h)),k.style[h]!==t){if(s||o(r,"undefined"))return a(),"pfx"==n?h:!0;try{k.style[h]=r}catch(g){}if(k.style[h]!=v)return a(),"pfx"==n?h:!0}return a(),!1}function v(e,n,t,r,s){var i=e.charAt(0).toUpperCase()+e.slice(1),a=(e+" "+j.join(i+" ")+i).split(" ");return o(n,"string")||o(n,"undefined")?h(a,n,r,s):(a=(e+" "+E.join(i+" ")+i).split(" "),c(a,n,t))}function y(e,n,o){return v(e,t,t,n,o)}var g=[],C=[],S={_version:"3.3.1",_config:{classPrefix:"",enableClasses:!0,enableJSClass:!0,usePrefixes:!0},_q:[],on:function(e,n){var t=this;setTimeout(function(){n(t[e])},0)},addTest:function(e,n,t){C.push({name:e,fn:n,options:t})},addAsyncTest:function(e){C.push({name:null,fn:e})}},Modernizr=function(){};Modernizr.prototype=S,Modernizr=new Modernizr;var w=n.documentElement,x="svg"===w.nodeName.toLowerCase(),_=S._config.usePrefixes?" -webkit- -moz- -o- -ms- ".split(" "):["",""];S._prefixes=_;var b="CSS"in e&&"supports"in e.CSS,T="supportsCSS"in e;Modernizr.addTest("supports",b||T);var z=S.testStyles=l;Modernizr.addTest("touchevents",function(){var t;if("ontouchstart"in e||e.DocumentTouch&&n instanceof DocumentTouch)t=!0;else{var o=["@media (",_.join("touch-enabled),("),"heartz",")","{#modernizr{top:9px;position:absolute}}"].join("");z(o,function(e){t=9===e.offsetTop})}return t});var P="Moz O ms Webkit",j=S._config.usePrefixes?P.split(" "):[];S._cssomPrefixes=j;var E=S._config.usePrefixes?P.toLowerCase().split(" "):[];S._domPrefixes=E;var N={elem:i("modernizr")};Modernizr._q.push(function(){delete N.elem});var k={style:N.elem.style};Modernizr._q.unshift(function(){delete k.style}),S.testAllProps=v,S.testAllProps=y,Modernizr.addTest("cssfilters",function(){if(Modernizr.supports)return y("filter","blur(2px)");var e=i("a");return e.style.cssText=_.join("filter:blur(2px); "),!!e.style.length&&(n.documentMode===t||n.documentMode>9)}),r(),s(g),delete S.addTest,delete S.addAsyncTest;for(var A=0;A<Modernizr._q.length;A++)Modernizr._q[A]();e.Modernizr=Modernizr}(window,document);
+    "
+|     "
+
+
+        
+    
+"
+|     <script>
+|       type="text/javascript"
+|       "
+    var App = {
+        startTime: (new Date()).getTime(),
+        pageGenerationDate: 1793112974000
+    };
+
+    App.user = {
+                    locale: 'fr',
+            language: 'fr',
+            country: 'FR',
+            isPremium: false,
+            isMentor: false,
+            anonymous: true
+            };
+
+    App.preferences = {
+        debug: false,
+        assetVersion: '3c0b069',
+        contactPhone: '\u002B33\u00201\u002080\u002088\u002080\u002030',
+        adyenPublicKey: '10001\u007C889EBFD4D434B82683E21DCA26E77C3E20E0EE09A5ECE3830B0ED51F2FA721A2F7E9EC871C6AB9A1E12C4492F4717673047757E02C5256D8E265CD51E413E5EFCCFEAC41B39C662A424ADC13EE187C38C372A7FCCEC1EA5DF841989437D78B252A8EB51008E60BB55B1E55A7A80DE1A9D60D998C128A576BFAE1DDB97D514AF0A073AEDDE84CEE40D1F8F6ECE85D0FFA50C95C06DB274021C1371376C6EB16561FD65C5E2704B570A7504D617D0F3820F176A0609F6162BDF5890533289FDC3DA7DB03B50BB3BD60A613E1FF72060F22987627E8F1A29F0128A94EC4C8FF7CF6B7AB9558D8433BF86D7A388AB927641CD6C02689139CEE3AAC9ACBFFE83806CB',
+        application: {
+            form: {
+              funnelUrl: 'https\u003A\/\/www.tfaforms.com\/responses\/processor',
+              fields: {"firstname":"tfa_6","lastname":"tfa_4","email":"tfa_2","path_id":"tfa_138","source_name":"tfa_165","record_type_id":"tfa_217","utm_medium":"tfa_203","utm_source":"tfa_201","utm_term":"tfa_207","utm_campaign":"tfa_205","utm_content":"tfa_225","gclid":"tfa_209","fbclid":"tfa_211","dclid":"tfa_233","msclkid":"tfa_231","ttclid":"tfa_232","referrerId":"tfa_229","placement":"tfa_228","consent":"tfa_150","user_locale":"tfa_125","userId":"tfa_3","gender":"tfa_10","user_study_motivation":"tfa_171","diploma_level":"tfa_292","language_proficiency_fr":"tfa_40","language_proficiency_en":"tfa_42","ha_addressline_1":"tfa_16","ha_city":"tfa_18","ha_zip_code":"tfa_24","ha_state":"tfa_163","ha_country":"tfa_22","professional_status":"tfa_94","public_employment_agency_id":"tfa_159","public_employment_validation":"tfa_290","user_pe_advisor_email":"tfa_199","disabled_worker":"tfa_67","disabled_worker_arrangements":"tfa_294","veteran":"tfa_73","athlete":"tfa_79","refugee":"tfa_85","rsa":"tfa_91","are":"tfa_175","api":"tfa_177","cui":"tfa_179","aah":"tfa_222","other_allocs":"tfa_223","user_can_work_in_countryOfStudy":"tfa_142","online_cv":"tfa_157","user_has_mobility":"tfa_193","user_mobility_departamental":"tfa_187","user_mobility_national":"tfa_189","user_mobility_regional":"tfa_191","user_mobility_cities":"tfa_195","work_location_1":"tfa_128","work_location_2":"tfa_130","work_location_3":"tfa_132","work_location_4":"tfa_134","work_location_5":"tfa_136","career_motivation":"tfa_123","has_online_courses_xp":"tfa_118","has_online_courses_xp_text":"tfa_121","found_a_company":"tfa_146","date_of_birth":"tfa_9","phone_number":"tfa_126","user_desired_start_date":"tfa_161","tfa_dbFormId":"tfa_dbFormId","tfa_dbControl":"tfa_dbControl","experiment_id":"tfa_219","full_time_available":"tfa_220","with_prerequisite":"tfa_221","student_application_id":"tfa_226","company_name":"tfa_227","opportunity_id":"tfa_230","user_has_all_requirements":"tfa_239","user_is_working_in_company":"tfa_240","last_class_attended":"tfa_241","vae_request_type":"tfa_242","vae_sworn_statement":"tfa_245","funding_option":"tfa_264","funding_option_other":"tfa_282","user_resume_url":"tfa_265","user_diploma_url":"tfa_266","language_proficiency_proof_url":"tfa_267","user_public_employment_agency_certificate_url":"tfa_268","VAE_first_request_url":"tfa_269","VAE_delivered_notification_url":"tfa_270","latest_diploma_field_of_study":"tfa_273","is_latest_diploma":"tfa_274","latest_diploma_level":"tfa_275","highest_diploma_field_of_study":"tfa_276","user_job_title":"tfa_271","user_job_start_date":"tfa_272","company_contact_name":"tfa_283","company_contact_firstName":"tfa_284","company_contact_email":"tfa_286","company_contact_phonenumber":"tfa_288","apprenticeship_company_name":"tfa_227","apprenticeship_company_contact_name":"tfa_283","apprenticeship_company_contact_firstName":"tfa_284","apprenticeship_company_contact_email":"tfa_286","apprenticeship_company_contact_phonenumber":"tfa_288","apprenticeship_coaching":"tfa_291","company_source":"tfa_297","file_created":"tfa_296","user_state":"tfa_163","eligible_paths":"tfa_302","eligible_under_condition_paths":"tfa_304"}
+            },
+        },
+        routes: {
+            COURSE_EVENT: '/components/courses/:courseId',
+            COURSE_PART_EVENT: '/components/courses/:courseId/parts/:partId',
+
+            ACCEPT_COOKIE: '\/ajax\/components\/user\u002Daccept\u002Dconsent\u002Dcookie'
+        },
+
+                    };
+
+    App.preferences.navigationPreference = {
+            };
+
+    App.preferences.modules = {
+        'smiley': {
+            basePath: '/bundles/common/images/smiley/'
+        }
+    };
+
+    App.notifications = {};
+    App.scripts = [];
+
+    if (App.user.id) {
+        (function(){
+            var userData = { userId: App.user.id };
+
+            if (App.user.premiumType) {
+                userData.status = (App.user.premiumType === 'Premium Solo') ? 'premium solo student' : 'path student';
+            } else {
+                userData.status = 'free student';
+            }
+
+            if (App.user.isMentor) {
+                userData.status = App.user.premiumType ? (userData.status + '|mentor') : 'mentor';
+            }
+
+            if (!window.dataLayer) {
+              return;
+            }
+            window.dataLayer.push(userData);
+        })();
+    }
+"
+|     "
+
+        "
+|     <script>
+|     "
+
+        
+        "
+|     <script>
+|       "
+  App.translations = {};
+
+  App.script = {
+      DASHBOARD: 'dashboard',
+      MENTORSHIP_STUDENT_DASHBOARD: 'mentorshipStudentdashboard',
+      SHOP: 'shop',
+      PAYMENT: 'payment',
+      PROJECTS: 'projects',
+      TEAM: 'team',
+      ADMIN: 'admin',
+      JOB_SURVEY: 'jobSurvey',
+      MCQ_EDIT: 'mcqEdit',
+      MCQ_VIEW: 'mcqView',
+    PATHS: 'paths',
+    PRIVATE_CONVERSATIONS: 'privateConversations',
+    USER_PROFILE: 'userProfile',
+    WELCOME: 'welcome',
+    APPRENTICESHIP: 'apprenticeship',
+    WEBAPP: 'webapp',
+    PROJECTS_ADMIN: 'projectsAdmin',
+    SECURITY: 'security',
+  };
+
+  const staticBuildBaseUrl = 'https://cdn.oc-static.com/production';
+  const scriptUrl = `${staticBuildBaseUrl}/js/index.js?v=3`;
+
+  const scriptElement = document.createElement('script');
+  scriptElement.src = scriptUrl;
+  scriptElement.defer = true;
+
+  window.App.remoteUrl = `${staticBuildBaseUrl}/modules`;
+  window.App.staticBuildBaseUrl = `${staticBuildBaseUrl}/`;
+
+  document.head.appendChild(scriptElement);
+"
+|     "
+
+        
+                
+    "
+|     <script>
+|       "App.scriptToLoad = App.script.WEBAPP"
+|     "
+        
+
+                        
+                        
+    "
+|     <script>
+|       src="https://cdn.oc-static.com/production/js/index.js?v=3"
+|   "
+
+    "
+|   <body>
+|     class=" oc-body   "
+|     "
+                
+        
+    "
+|     <script>
+|       id="_EVENTS-IDENTIFY"
+|       type="application/json"
+|       "
+        "
+|     "
+
+
+    "
+|     <script>
+|       id="_EVENTS-PAGE"
+|       type="application/json"
+|       "
+        {"type":"page","integrations":{"Blueshift":false,"HubSpot":false},"properties":{"pageCategory":"home"}}
+    "
+|     "
+
+                    
+
+    
+
+
+"
+|     <script>
+|       id="fundingMechanisms"
+|       type="application/json"
+|       "
+    {
+        "fundingMechanisms": [{"country":"FR","createdAt":{"date":"2019-08-23 13:47:19.000000","timezone_type":3,"timezone":"UTC"},"eligibleCountries":["FR","RE","GP","MQ","PF","GF","YT","NC","BL","PM","WF"],"id":24,"name":"Action de Formation Pr\u00e9alable au Recrutement","shortName":"AFPR","type":"scholarship","updatedAt":{"date":"2019-08-23 13:47:19.000000","timezone_type":3,"timezone":"UTC"}},{"country":"FR","createdAt":{"date":"2019-08-23 13:47:19.000000","timezone_type":3,"timezone":"UTC"},"eligibleCountries":["FR","RE","GP","MQ","PF","GF","YT","NC","BL","PM","WF"],"id":25,"name":"Aide collective priv\u00e9e \u00e0 la formation","shortName":"Aide collective priv\u00e9e","type":"scholarship","updatedAt":{"date":"2019-08-23 13:47:19.000000","timezone_type":3,"timezone":"UTC"}},{"country":"FR","createdAt":{"date":"2019-08-23 13:47:19.000000","timezone_type":3,"timezone":"UTC"},"eligibleCountries":["FR","RE","GP","MQ","PF","GF","YT","NC","BL","PM","WF"],"id":20,"name":"Aide Individuelle \u00e0 la Formation","shortName":"AIF","type":"scholarship","updatedAt":{"date":"2019-08-23 13:47:19.000000","timezone_type":3,"timezone":"UTC"}},{"country":"FR","createdAt":{"date":"2019-08-23 13:47:19.000000","timezone_type":3,"timezone":"UTC"},"eligibleCountries":["FR","RE","GP","MQ","PF","GF","YT","NC","BL","PM","WF"],"id":28,"name":"Aide individuelle priv\u00e9e \u00e0 la formation","shortName":"Aide individuelle priv\u00e9e","type":"scholarship","updatedAt":{"date":"2019-08-23 13:47:19.000000","timezone_type":3,"timezone":"UTC"}},{"country":"FR","createdAt":{"date":"2019-08-23 13:47:19.000000","timezone_type":3,"timezone":"UTC"},"eligibleCountries":["FR","RE","GP","MQ","PF","GF","YT","NC","BL","PM","WF"],"id":21,"name":"Compte Personnel de Formation","shortName":"CPF","type":"scholarship","updatedAt":{"date":"2019-08-23 13:47:19.000000","timezone_type":3,"timezone":"UTC"}},{"country":"FR","createdAt":{"date":"2019-08-23 13:47:19.000000","timezone_type":3,"timezone":"UTC"},"eligibleCountries":["FR","RE","GP","MQ","PF","GF","YT","NC","BL","PM","WF"],"id":15,"name":"Contrat d'apprentissage - FR","shortName":"Apprentissage","type":"apprenticeship","updatedAt":{"date":"2019-08-23 13:47:19.000000","timezone_type":3,"timezone":"UTC"}},{"country":"FR","createdAt":{"date":"2019-08-23 13:47:19.000000","timezone_type":3,"timezone":"UTC"},"eligibleCountries":["FR","RE","GP","MQ","PF","GF","YT","NC","BL","PM","WF"],"id":16,"name":"Contrat de professionnalisation","shortName":"Contrat pro","type":"apprenticeship","updatedAt":{"date":"2019-08-23 13:47:19.000000","timezone_type":3,"timezone":"UTC"}},{"country":"FR","createdAt":{"date":"2024-12-06 14:53:10.000000","timezone_type":3,"timezone":"UTC"},"eligibleCountries":["FR","RE","GP","MQ","PF","GF","YT","NC","BL","PM","WF"],"id":135,"name":"Contrat de s\u00e9curisation professionnelle - Financement entreprise - CSP","shortName":"CSP","type":"scholarship","updatedAt":{"date":"2024-12-06 14:53:10.000000","timezone_type":3,"timezone":"UTC"}},{"country":"FR","createdAt":{"date":"2019-08-23 13:47:19.000000","timezone_type":3,"timezone":"UTC"},"eligibleCountries":["FR","RE","GP","MQ","PF","GF","YT","NC","BL","PM","WF"],"id":19,"name":"P\u00e9riode de professionnalisation","shortName":"P\u00e9riode pro","type":"apprenticeship","updatedAt":{"date":"2019-08-23 13:47:19.000000","timezone_type":3,"timezone":"UTC"}},{"country":"FR","createdAt":{"date":"2024-11-28 14:14:28.000000","timezone_type":3,"timezone":"UTC"},"eligibleCountries":["AF","AX","AL","DZ","AS","AD","AO","AI","AQ","AG","AR","AM","AW","AU","AT","AZ","BS","BH","BD","BB","BY","BE","BZ","BJ","BM","BT","BO","BQ","BA","BW","BV","BR","IO","BN","BG","BF","BI","CV","KH","CM","CA","KY","CF","TD","CL","CN","CX","CC","CO","KM","CG","CD","CK","CR","CI","HR","CU","CW","CY","CZ","DK","DJ","DM","DO","EC","EG","SV","GQ","ER","EE","SZ","ET","FK","FO","FJ","FI","FR","GF","PF","TF","GA","GM","GE","DE","GH","GI","GR","GL","GD","GP","GU","GT","GG","GN","GW","GY","HT","HM","VA","HN","HK","HU","IS","IN","ID","IR","IQ","IE","IM","IL","IT","JM","JP","JE","JO","KZ","KE","KI","KP","KR","KW","KG","LA","LV","LB","LS","LR","LY","LI","LT","LU","MO","MG","MW","MY","MV","ML","MT","MH","MQ","MR","MU","YT","MX","FM","MD","MC","MN","ME","MS","MA","MZ","MM","NA","NR","NP","NL","NC","NZ","NI","NE","NG","NU","NF","MK","MP","NO","OM","PK","PW","PS","PA","PG","PY","PE","PH","PN","PL","PT","PR","QA","RE","RO","RU","RW","BL","SH","KN","LC","MF","PM","VC","WS","SM","ST","SA","SN","RS","SC","SL","SG","SX","SK","SI","SB","SO","ZA","GS","SS","ES","LK","SD","SR","SJ","SE","CH","SY","TW","TJ","TZ","TH","TL","TG","TK","TO","TT","TN","TR","TM","TC","TV","UG","UA","AE","GB","UM","US","UY","UZ","VU","VE","VN","VG","VI","WF","EH","YE","ZM","ZW"],"id":128,"name":"Plan de d\u00e9veloppement des comp\u00e9tences - Financement entreprise","shortName":"PDC","type":"scholarship","updatedAt":{"date":"2024-11-28 14:14:28.000000","timezone_type":3,"timezone":"UTC"}},{"country":"FR","createdAt":{"date":"2019-08-23 13:47:19.000000","timezone_type":3,"timezone":"UTC"},"eligibleCountries":["FR","RE","GP","MQ","PF","GF","YT","NC","BL","PM","WF"],"id":23,"name":"Pr\u00e9paration Op\u00e9rationnelle \u00e0 l'Emploi Collective","shortName":"POEC","type":"scholarship","updatedAt":{"date":"2019-08-23 13:47:19.000000","timezone_type":3,"timezone":"UTC"}},{"country":"FR","createdAt":{"date":"2019-08-23 13:47:19.000000","timezone_type":3,"timezone":"UTC"},"eligibleCountries":["FR","RE","GP","MQ","PF","GF","YT","NC","BL","PM","WF"],"id":17,"name":"Pr\u00e9paration Op\u00e9rationnelle \u00e0 l'Emploi Individuelle","shortName":"POEI","type":"scholarship","updatedAt":{"date":"2019-08-23 13:47:19.000000","timezone_type":3,"timezone":"UTC"}},{"country":"FR","createdAt":{"date":"2024-11-28 14:17:11.000000","timezone_type":3,"timezone":"UTC"},"eligibleCountries":["FR","RE","GP","MQ","PF","GF","YT","NC","BL","PM","WF"],"id":130,"name":"Programme National de Formation \u00e0 Distance France Travail","shortName":"FOAD","type":"scholarship","updatedAt":{"date":"2024-11-28 14:17:11.000000","timezone_type":3,"timezone":"UTC"}},{"country":"FR","createdAt":{"date":"2019-08-23 13:47:19.000000","timezone_type":3,"timezone":"UTC"},"eligibleCountries":["FR","RE","GP","MQ","PF","GF","YT","NC","BL","PM","WF"],"id":22,"name":"Programme R\u00e9gional de Formation pour l'Emploi","shortName":"PRFE","type":"scholarship","updatedAt":{"date":"2019-08-23 13:47:19.000000","timezone_type":3,"timezone":"UTC"}},{"country":"FR","createdAt":{"date":"2024-11-28 14:19:18.000000","timezone_type":3,"timezone":"UTC"},"eligibleCountries":["FR"],"id":134,"name":"Programme R\u00e9gional de Formation pour l\u2019Emploi - AURA","shortName":"AURA","type":"scholarship","updatedAt":{"date":"2024-11-28 14:19:18.000000","timezone_type":3,"timezone":"UTC"}},{"country":"FR","createdAt":{"date":"2024-11-28 14:19:03.000000","timezone_type":3,"timezone":"UTC"},"eligibleCountries":["FR","GF"],"id":133,"name":"Programme R\u00e9gional de Formation pour l\u2019Emploi - Guyane","shortName":"Guyane","type":"scholarship","updatedAt":{"date":"2024-11-28 14:19:03.000000","timezone_type":3,"timezone":"UTC"}},{"country":"FR","createdAt":{"date":"2024-11-28 14:16:28.000000","timezone_type":3,"timezone":"UTC"},"eligibleCountries":["FR","RE","GP","MQ","PF","GF","YT","NC","BL","PM","WF"],"id":129,"name":"Programme R\u00e9gional de Formation pour l\u2019Emploi - IDFE","shortName":"IDFE","type":"scholarship","updatedAt":{"date":"2024-11-28 14:16:28.000000","timezone_type":3,"timezone":"UTC"}},{"country":"FR","createdAt":{"date":"2024-11-28 14:18:28.000000","timezone_type":3,"timezone":"UTC"},"eligibleCountries":["FR"],"id":132,"name":"Programme R\u00e9gional de Formation pour l\u2019Emploi - PACA","shortName":"PACA","type":"scholarship","updatedAt":{"date":"2024-11-28 14:18:28.000000","timezone_type":3,"timezone":"UTC"}},{"country":"FR","createdAt":{"date":"2024-11-28 14:06:51.000000","timezone_type":3,"timezone":"UTC"},"eligibleCountries":["FR","RE","GP","MQ","PF","GF","YT","NC","BL","PM","WF"],"id":127,"name":"Projet de Transition Professionnelle","shortName":"PTP","type":"scholarship","updatedAt":{"date":"2024-11-28 14:06:51.000000","timezone_type":3,"timezone":"UTC"}},{"country":"FR","createdAt":{"date":"2019-08-23 13:47:19.000000","timezone_type":3,"timezone":"UTC"},"eligibleCountries":["FR","RE","GP","MQ","PF","GF","YT","NC","BL","PM","WF"],"id":18,"name":"Reconversion ou promotion par l'alternance","shortName":"Pro-A","type":"apprenticeship","updatedAt":{"date":"2019-08-23 13:47:19.000000","timezone_type":3,"timezone":"UTC"}},{"country":"FR","createdAt":{"date":"2024-11-22 13:20:51.000000","timezone_type":3,"timezone":"UTC"},"eligibleCountries":["AF","AX","AL","DZ","AS","AD","AO","AI","AQ","AG","AR","AM","AW","AU","AT","AZ","BS","BH","BD","BB","BY","BE","BZ","BJ","BM","BT","BO","BQ","BA","BW","BV","BR","IO","BN","BG","BF","BI","CV","KH","CM","CA","KY","CF","TD","CL","CN","CX","CC","CO","KM","CG","CD","CK","CR","CI","HR","CU","CW","CY","CZ","DK","DJ","DM","DO","EC","EG","SV","GQ","ER","EE","SZ","ET","FK","FO","FJ","FI","FR","GF","PF","TF","GA","GM","GE","DE","GH","GI","GR","GL","GD","GP","GU","GT","GG","GN","GW","GY","HT","HM","VA","HN","HK","HU","IS","IN","ID","IR","IQ","IE","IM","IL","IT","JM","JP","JE","JO","KZ","KE","KI","KP","KR","KW","KG","LA","LV","LB","LS","LR","LY","LI","LT","LU","MO","MG","MW","MY","MV","ML","MT","MH","MQ","MR","MU","YT","MX","FM","MD","MC","MN","ME","MS","MA","MZ","MM","NA","NR","NP","NL","NC","NZ","NI","NE","NG","NU","NF","MK","MP","NO","OM","PK","PW","PS","PA","PG","PY","PE","PH","PN","PL","PT","PR","QA","RE","RO","RU","RW","BL","SH","KN","LC","MF","PM","VC","WS","SM","ST","SA","SN","RS","SC","SL","SG","SX","SK","SI","SB","SO","ZA","GS","SS","ES","LK","SD","SR","SJ","SE","CH","SY","TW","TJ","TZ","TH","TL","TG","TK","TO","TT","TN","TR","TM","TC","TV","UG","UA","AE","GB","UM","US","UY","UZ","VU","VE","VN","VG","VI","WF","EH","YE","ZM","ZW"],"id":94,"name":"Self-paid","shortName":"Self-paid","type":"scholarship","updatedAt":{"date":"2024-11-22 13:20:51.000000","timezone_type":3,"timezone":"UTC"}}]
+    }
+"
+|     "
+
+
+"
+|     <div>
+|       id="oc-header"
+|     "
+"
+|     <div>
+|       id="disclaimers-container"
+|       style="display:none;"
+|       "
+        
+
+    
+    "
+|       <div>
+|         id="modern-ie-disclaimer"
+|         style="display:none"
+|         "
+        "
+|         <div>
+|           class="alertMessage"
+|           "
+            "
+|           <span>
+|             class="bullet bullet--small bullet--orange alertMessage__icon"
+|             " "
+|             <i>
+|               class="icon-exclamation"
+|           "
+            "
+|           <p>
+|             class="alertMessage__text"
+|             "
+                Vous utilisez un navigateur obsolète, veuillez le "
+|             <a>
+|               href="https://browser-update.org/update.html"
+|               "mettre à jour"
+|             ".
+            "
+|           "
+        "
+|         "
+    "
+|       "
+        "
+|       <script>
+|         id="webapp-ie-disclaimer"
+|         type="application/json"
+|         "{"message":"Vous utilisez un navigateur obsol\u00e8te, veuillez le <a href=\"https:\/\/browser-update.org\/update.html\">mettre \u00e0 jour<\/a>."}"
+|       "
+    "
+|       <script>
+|         "
+      var isModernIE =  document.documentMode === 10 || document.documentMode === 11;
+      var isEdgeLegacy = navigator.userAgent.indexOf('Edge') > -1; // Luckily for us, Edge Chromium uses string "Edg" without final "e"
+
+      if (isModernIE || isEdgeLegacy) {
+        document.getElementById('modern-ie-disclaimer').style.display = 'block';
+        document.getElementById('webapp-ie-disclaimer').setAttribute('data-role', 'disclaimer-message-data');
+      }
+    "
+|       "
+
+    "
+|       <noscript>
+|         "
+        <div class="alertMessage">
+            <span class="bullet bullet--small bullet--orange alertMessage__icon"> <i class="icon-exclamation"></i></span>
+            <p class="alertMessage__text">
+                Veuillez utiliser un <a href="https://browser-update.org/update.html">navigateur internet moderne</a> avec JavaScript activé pour naviguer sur OpenClassrooms.com
+            </p>
+        </div>
+    "
+|       "
+
+    "
+|     "
+
+        
+        "
+|     <div>
+|       id="mainContentWithHeader"
+|       "
+                            
+                        "
+|       <div>
+|         id="pre-main-part"
+|         "
+                            "
+|       "
+
+                "
+|       <div>
+|         id="webapp"
+|         "      "
+|         <div>
+|           class="oc-spinnerPage"
+|           "
+      "
+|           <div>
+|             class="oc-spinner"
+|             "
+      "
+|             <div>
+|               class="oc-spinner__loader"
+|               "
+        "
+|               <svg>
+|                 class="oc-spinner__icon"
+|                 viewBox="25 25 50 50"
+|                 "
+          "
+|                 <circle>
+|                   class="oc-spinner__path"
+|                   cx="50"
+|                   cy="50"
+|                   fill="none"
+|                   r="20"
+|                   stroke-miterlimit="10"
+|                   stroke-width="3"
+|                 "
+        "
+|               "
+      "
+|             "
+    "
+|           "
+  "
+|         "
+"
+|       "        "
+|     "
+
+        "
+|     <div>
+|       class="mainSearch"
+|       id="mainSearchLegacy"
+|     "
+
+        
+        "
+|     <div>
+|       class="cookiesDisclaimer"
+|       id="showDisclaimer"
+|     "
+
+                            
+                            "
+|     <script>
+|       crossorigin="anonymous"
+|       data-cf-beacon="{"version":"2024.11.0","token":"8e698008242e427fae12788d79d12ecf","spa":2}"
+|       integrity="sha512-UKNk8GbxkABxKcXYuLkO16EleLGUkcvJWtpSNmExE0Too3ZaFAxTscNWEc1OdAv5/BikHawapSCaiD2XCmp+Bw=="
+|       src="https://static.cloudflareinsights.com/beacon.min.js/vce701823e78c4301a35b7e07294d87301792088814092"
+|       type="module"
+|     "
+"
+|     <script>
+|       id=""
+|       type="text/javascript"
+|     <script>
+|       id=""
+|       type="text/javascript"
+|     <script>
+|       id=""
+|       type="text/javascript"
+|     <script>
+|       id=""
+|       type="text/javascript"
+|     <div>
+|       style="display: none; visibility: hidden"
+|       <script>
+|       "
+"
+|       <style>
+|         type="text/css"
+|         "  
+  #teconsent a {
+  	display: none;
+  }
+"
+|       "
+
+"
+|       <script>
+|         async="async"
+|         crossorigin="null"
+|         id="truste_0.6761970824730694"
+|         src="//consent.trustarc.com/notice?domain=openclassrooms.com&language=fr&gtm=1&c=teconsent&js=nj&noticeType=bb&text=true"
+|         type="text/javascript"
+|       "
+
+"
+|       <script>
+|         type="text/javascript"
+|     <script>
+|       id=""
+|       type="text/javascript"
+|     <script>
+|       id=""
+|       type="text/javascript"
+|     <script>
+|       async="async"
+|       crossorigin=""
+|       importance="high"
+|       src="https://consent.trustarc.com/asset/notice.js/v/0aa19f7"
+|     <script>
+|       importance="high"
+|       src="https://consent.trustarc.com/asset/uspapi.js"
+|     <iframe>
+|       name="__uspapiLocator"
+|       style="css-text: display:none"
+|     "
+
+"

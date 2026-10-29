@@ -1,0 +1,1837 @@
+| <!DOCTYPE html>
+| <html>
+|   <head>
+|     "
+  "
+|     <meta>
+|       content="text/html; charset=UTF-8"
+|       http-equiv="content-type"
+|     "
+  "
+|     <meta>
+|       content="width=device-width, initial-scale=1.0, maximum-scale=3.0, user-scalable=1;"
+|       name="viewport"
+|     "
+  "
+|     <meta>
+|       content="origin"
+|       name="referrer"
+|     "
+  "
+|     <meta>
+|       content="true"
+|       name="HandheldFriendly"
+|     "
+  "
+|     <meta>
+|       content="noindex, nofollow"
+|       name="robots"
+|     "
+  "
+|     <title>
+|       "explorer at DuckDuckGo"
+|     "
+  "
+|     <link>
+|       href="//duckduckgo.com/opensearch_lite_v2.xml"
+|       rel="search"
+|       title="DuckDuckGo (Lite)"
+|       type="application/opensearchdescription+xml"
+|     "
+  "
+|     <link>
+|       href="//duckduckgo.com/favicon.ico"
+|       rel="shortcut icon"
+|     "
+  "
+|     <link>
+|       href="//duckduckgo.com/favicon.ico"
+|       rel="icon"
+|       type="image/x-icon"
+|     "
+  "
+|     <link>
+|       href="//duckduckgo.com/assets/icons/meta/DDG-iOS-icon_60x60.png?v=2"
+|       id="icon60"
+|       rel="apple-touch-icon"
+|     "
+  "
+|     <link>
+|       href="//duckduckgo.com/assets/icons/meta/DDG-iOS-icon_76x76.png?v=2"
+|       id="icon76"
+|       rel="apple-touch-icon"
+|       sizes="76x76"
+|     "
+  "
+|     <link>
+|       href="//duckduckgo.com/assets/icons/meta/DDG-iOS-icon_120x120.png?v=2"
+|       id="icon120"
+|       rel="apple-touch-icon"
+|       sizes="120x120"
+|     "
+  "
+|     <link>
+|       href="//duckduckgo.com/assets/icons/meta/DDG-iOS-icon_152x152.png?v=2"
+|       id="icon152"
+|       rel="apple-touch-icon"
+|       sizes="152x152"
+|     "
+  "
+|     <link>
+|       href="//duckduckgo.com/assets/icons/meta/DDG-icon_256x256.png"
+|       rel="image_src"
+|     "
+  "
+|     <link>
+|       href="//duckduckgo.com/dist/lr.48ddfe4eadf6a534e93f.css"
+|       media="handheld, all"
+|       rel="stylesheet"
+|       type="text/css"
+|     "
+"
+|   "
+
+"
+|   <body>
+|     "
+  "
+|     <p>
+|       class="extra"
+|       " "
+|     "
+  "
+|     <div>
+|       class="header"
+|       "
+    DuckDuckGo
+  "
+|     "
+  "
+|     <p>
+|       class="extra"
+|       " "
+|     "
+
+  "
+|     <form>
+|       action="/lite/"
+|       method="post"
+|       "
+      "
+|       <input>
+|         class="query"
+|         name="q"
+|         size="40"
+|         type="text"
+|         value="explorer"
+|       "
+      "
+|       <input>
+|         class="submit"
+|         type="submit"
+|         value="Search"
+|       "
+      
+      
+      
+      
+
+      "
+|       <div>
+|         class="filters"
+|         "
+        "
+|         <select>
+|           class="submit"
+|           name="kl"
+|           "
+          
+            "
+|           <option>
+|             value=""
+|             "All Regions"
+|           "
+          
+            "
+|           <option>
+|             value="ar-es"
+|             "Argentina"
+|           "
+          
+            "
+|           <option>
+|             value="au-en"
+|             "Australia"
+|           "
+          
+            "
+|           <option>
+|             value="at-de"
+|             "Austria"
+|           "
+          
+            "
+|           <option>
+|             value="be-fr"
+|             "Belgium (fr)"
+|           "
+          
+            "
+|           <option>
+|             value="be-nl"
+|             "Belgium (nl)"
+|           "
+          
+            "
+|           <option>
+|             value="br-pt"
+|             "Brazil"
+|           "
+          
+            "
+|           <option>
+|             value="bg-bg"
+|             "Bulgaria"
+|           "
+          
+            "
+|           <option>
+|             value="ca-en"
+|             "Canada (en)"
+|           "
+          
+            "
+|           <option>
+|             value="ca-fr"
+|             "Canada (fr)"
+|           "
+          
+            "
+|           <option>
+|             value="ct-ca"
+|             "Catalonia"
+|           "
+          
+            "
+|           <option>
+|             value="cl-es"
+|             "Chile"
+|           "
+          
+            "
+|           <option>
+|             value="cn-zh"
+|             "China"
+|           "
+          
+            "
+|           <option>
+|             value="co-es"
+|             "Colombia"
+|           "
+          
+            "
+|           <option>
+|             value="hr-hr"
+|             "Croatia"
+|           "
+          
+            "
+|           <option>
+|             value="cz-cs"
+|             "Czech Republic"
+|           "
+          
+            "
+|           <option>
+|             value="dk-da"
+|             "Denmark"
+|           "
+          
+            "
+|           <option>
+|             value="ee-et"
+|             "Estonia"
+|           "
+          
+            "
+|           <option>
+|             value="fi-fi"
+|             "Finland"
+|           "
+          
+            "
+|           <option>
+|             value="fr-fr"
+|             "France"
+|           "
+          
+            "
+|           <option>
+|             value="de-de"
+|             "Germany"
+|           "
+          
+            "
+|           <option>
+|             value="gr-el"
+|             "Greece"
+|           "
+          
+            "
+|           <option>
+|             value="hk-tzh"
+|             "Hong Kong"
+|           "
+          
+            "
+|           <option>
+|             value="hu-hu"
+|             "Hungary"
+|           "
+          
+            "
+|           <option>
+|             value="is-is"
+|             "Iceland"
+|           "
+          
+            "
+|           <option>
+|             value="in-en"
+|             "India (en)"
+|           "
+          
+            "
+|           <option>
+|             value="id-en"
+|             "Indonesia (en)"
+|           "
+          
+            "
+|           <option>
+|             value="ie-en"
+|             "Ireland"
+|           "
+          
+            "
+|           <option>
+|             value="il-en"
+|             "Israel (en)"
+|           "
+          
+            "
+|           <option>
+|             value="it-it"
+|             "Italy"
+|           "
+          
+            "
+|           <option>
+|             value="jp-jp"
+|             "Japan"
+|           "
+          
+            "
+|           <option>
+|             value="kr-kr"
+|             "Korea"
+|           "
+          
+            "
+|           <option>
+|             value="lv-lv"
+|             "Latvia"
+|           "
+          
+            "
+|           <option>
+|             value="lt-lt"
+|             "Lithuania"
+|           "
+          
+            "
+|           <option>
+|             value="my-en"
+|             "Malaysia (en)"
+|           "
+          
+            "
+|           <option>
+|             value="mx-es"
+|             "Mexico"
+|           "
+          
+            "
+|           <option>
+|             value="nl-nl"
+|             "Netherlands"
+|           "
+          
+            "
+|           <option>
+|             value="nz-en"
+|             "New Zealand"
+|           "
+          
+            "
+|           <option>
+|             value="no-no"
+|             "Norway"
+|           "
+          
+            "
+|           <option>
+|             value="pk-en"
+|             "Pakistan (en)"
+|           "
+          
+            "
+|           <option>
+|             value="pe-es"
+|             "Peru"
+|           "
+          
+            "
+|           <option>
+|             value="ph-en"
+|             "Philippines (en)"
+|           "
+          
+            "
+|           <option>
+|             value="pl-pl"
+|             "Poland"
+|           "
+          
+            "
+|           <option>
+|             value="pt-pt"
+|             "Portugal"
+|           "
+          
+            "
+|           <option>
+|             value="ro-ro"
+|             "Romania"
+|           "
+          
+            "
+|           <option>
+|             value="ru-ru"
+|             "Russia"
+|           "
+          
+            "
+|           <option>
+|             value="xa-ar"
+|             "Saudi Arabia"
+|           "
+          
+            "
+|           <option>
+|             value="sg-en"
+|             "Singapore"
+|           "
+          
+            "
+|           <option>
+|             value="sk-sk"
+|             "Slovakia"
+|           "
+          
+            "
+|           <option>
+|             value="sl-sl"
+|             "Slovenia"
+|           "
+          
+            "
+|           <option>
+|             value="za-en"
+|             "South Africa"
+|           "
+          
+            "
+|           <option>
+|             value="es-ca"
+|             "Spain (ca)"
+|           "
+          
+            "
+|           <option>
+|             value="es-es"
+|             "Spain (es)"
+|           "
+          
+            "
+|           <option>
+|             value="se-sv"
+|             "Sweden"
+|           "
+          
+            "
+|           <option>
+|             value="ch-de"
+|             "Switzerland (de)"
+|           "
+          
+            "
+|           <option>
+|             value="ch-fr"
+|             "Switzerland (fr)"
+|           "
+          
+            "
+|           <option>
+|             value="tw-tzh"
+|             "Taiwan"
+|           "
+          
+            "
+|           <option>
+|             value="th-en"
+|             "Thailand (en)"
+|           "
+          
+            "
+|           <option>
+|             value="tr-tr"
+|             "Turkey"
+|           "
+          
+            "
+|           <option>
+|             value="us-en"
+|             "US (English)"
+|           "
+          
+            "
+|           <option>
+|             value="us-es"
+|             "US (Spanish)"
+|           "
+          
+            "
+|           <option>
+|             value="ua-uk"
+|             "Ukraine"
+|           "
+          
+            "
+|           <option>
+|             value="uk-en"
+|             "United Kingdom"
+|           "
+          
+            "
+|           <option>
+|             value="vn-en"
+|             "Vietnam (en)"
+|           "
+          
+        "
+|         "
+
+        "
+|         <select>
+|           class="submit"
+|           name="df"
+|           "
+          
+            "
+|           <option>
+|             selected=""
+|             value=""
+|             "Any Time"
+|           "
+          
+            "
+|           <option>
+|             value="d"
+|             "Past Day"
+|           "
+          
+            "
+|           <option>
+|             value="w"
+|             "Past Week"
+|           "
+          
+            "
+|           <option>
+|             value="m"
+|             "Past Month"
+|           "
+          
+            "
+|           <option>
+|             value="y"
+|             "Past Year"
+|           "
+          
+        "
+|         "
+      "
+|       "
+  "
+|     "
+
+  
+    "
+|     <p>
+|       class="extra"
+|       " "
+|     "
+    "
+|     <table>
+|       border="0"
+|       "
+      "
+|       <tbody>
+|         <tr>
+|           "
+        "
+|           <td>
+|             "
+          
+        "
+|           "
+        "
+|           <td>
+|             "
+          
+            "
+|             <!--  Next Page Button Sub-template  -->
+|             "
+"
+|             <form>
+|               action="/lite/"
+|               class="next_form"
+|               method="post"
+|               "
+    "
+|               <input>
+|                 class="navbutton"
+|                 type="submit"
+|                 value="Next Page >"
+|               "
+    "
+|               <input>
+|                 name="q"
+|                 type="hidden"
+|                 value="explorer"
+|               "
+    "
+|               <input>
+|                 name="s"
+|                 type="hidden"
+|                 value="10"
+|               "
+    "
+|               <input>
+|                 name="nextParams"
+|                 type="hidden"
+|                 value=""
+|               "
+    "
+|               <input>
+|                 name="v"
+|                 type="hidden"
+|                 value="l"
+|               "
+    "
+|               <input>
+|                 name="o"
+|                 type="hidden"
+|                 value="json"
+|               "
+    "
+|               <input>
+|                 name="dc"
+|                 type="hidden"
+|                 value="11"
+|               "
+    "
+|               <input>
+|                 name="api"
+|                 type="hidden"
+|                 value="d.js"
+|               "
+    "
+|               <input>
+|                 name="vqd"
+|                 type="hidden"
+|                 value="4-265148443682121450902817405779106680775"
+|               "
+        
+    
+    
+    
+      "
+|               <input>
+|                 name="kl"
+|                 type="hidden"
+|                 value="wt-wt"
+|               "
+    
+    
+    
+    
+"
+|             "
+          
+        "
+|           "
+      "
+|         "
+    "
+|     "
+  
+
+  
+
+  "
+|     <p>
+|       class="extra"
+|       " "
+|     "
+
+  "
+|     <table>
+|       border="0"
+|       "
+    
+  "
+|     "
+
+  "
+|     <table>
+|       border="0"
+|       "
+    
+      
+      "
+|       <!--  Web results are present  -->
+|       "
+      
+        
+            "
+|       <tbody>
+|         <tr>
+|           "
+              
+                "
+|           <td>
+|             valign="top"
+|             "
+                  
+                    1. 
+                  
+                "
+|           "
+                "
+|           <td>
+|             "
+                  "
+|             <a>
+|               class="result-link"
+|               href="https://www.microsoft.com/en-us/download/internet-explorer"
+|               rel="nofollow"
+|               "Internet Explorer - Microsoft Download Center"
+|             "
+                "
+|           "
+                
+            "
+|         "
+
+            
+              
+                "
+|         <!--  Only show abstract separately if there's a click URL (not EOF)  -->
+|         "
+                "
+|         <tr>
+|           "
+                  "
+|           <td>
+|             "   "
+|           "
+                  "
+|           <td>
+|             class="result-snippet"
+|             "
+                    Download add ons, extensions, service packs, and other tools to use with Internet "
+|             <b>
+|               "Explorer"
+|             ".
+                  "
+|           "
+                "
+|         "
+              
+            
+
+            
+              "
+|         <tr>
+|           "
+                "
+|           <td>
+|             "   "
+|           "
+                "
+|           <td>
+|             "
+                  "
+|             <span>
+|               class="link-text"
+|               "www.microsoft.com/en-us/download/internet-explorer"
+|             "
+                  
+                "
+|           "
+              "
+|         "
+            
+
+            "
+|         <tr>
+|           "
+              "
+|           <td>
+|             " "
+|           "
+              "
+|           <td>
+|             " "
+|           "
+            "
+|         "
+
+        
+      
+        
+            "
+|         <tr>
+|           "
+              
+                "
+|           <td>
+|             valign="top"
+|             "
+                  
+                    2. 
+                  
+                "
+|           "
+                "
+|           <td>
+|             "
+                  "
+|             <a>
+|               class="result-link"
+|               href="https://explorerplusplus.com/download"
+|               rel="nofollow"
+|               "Explorer++ - Download"
+|             "
+                "
+|           "
+                
+            "
+|         "
+
+            
+              
+                "
+|         <!--  Only show abstract separately if there's a click URL (not EOF)  -->
+|         "
+                "
+|         <tr>
+|           "
+                  "
+|           <td>
+|             "   "
+|           "
+                  "
+|           <td>
+|             class="result-snippet"
+|             "
+                    Explorer++ 1.4.0 You can download Explorer++ 1.4.0 below. There's no need to install anything, simply extract the executable and run it. Download 32-bit Download 64 ...
+                  "
+|           "
+                "
+|         "
+              
+            
+
+            
+              "
+|         <tr>
+|           "
+                "
+|           <td>
+|             "   "
+|           "
+                "
+|           <td>
+|             "
+                  "
+|             <span>
+|               class="link-text"
+|               "explorerplusplus.com/download"
+|             "
+                  
+                "
+|           "
+              "
+|         "
+            
+
+            "
+|         <tr>
+|           "
+              "
+|           <td>
+|             " "
+|           "
+              "
+|           <td>
+|             " "
+|           "
+            "
+|         "
+
+        
+      
+        
+            "
+|         <tr>
+|           "
+              
+                "
+|           <td>
+|             valign="top"
+|             "
+                  
+                    3. 
+                  
+                "
+|           "
+                "
+|           <td>
+|             "
+                  "
+|             <a>
+|               class="result-link"
+|               href="https://internet-explorer-9-vista-32.en.softonic.com/"
+|               rel="nofollow"
+|               "Internet Explorer - Download"
+|             "
+                "
+|           "
+                
+            "
+|         "
+
+            
+              
+                "
+|         <!--  Only show abstract separately if there's a click URL (not EOF)  -->
+|         "
+                "
+|         <tr>
+|           "
+                  "
+|           <td>
+|             "   "
+|           "
+                  "
+|           <td>
+|             class="result-snippet"
+|             "
+                    Internet "
+|             <b>
+|               "Explorer"
+|             " remains a notable, free web browser that shaped how many users first experienced the internet. It is a mature internet software built around compatibility, familiarity, and long-standing standards that continue to support legacy websites and internal systems.
+                  "
+|           "
+                "
+|         "
+              
+            
+
+            
+              "
+|         <tr>
+|           "
+                "
+|           <td>
+|             "   "
+|           "
+                "
+|           <td>
+|             "
+                  "
+|             <span>
+|               class="link-text"
+|               "internet-explorer-9-vista-32.en.softonic.com"
+|             "
+                  
+                "
+|           "
+              "
+|         "
+            
+
+            "
+|         <tr>
+|           "
+              "
+|           <td>
+|             " "
+|           "
+              "
+|           <td>
+|             " "
+|           "
+            "
+|         "
+
+        
+      
+        
+            "
+|         <tr>
+|           "
+              
+                "
+|           <td>
+|             valign="top"
+|             "
+                  
+                    4. 
+                  
+                "
+|           "
+                "
+|           <td>
+|             "
+                  "
+|             <a>
+|               class="result-link"
+|               href="https://support.microsoft.com/en-us/windows/experience/fileexplorer/file-explorer-in-windows"
+|               rel="nofollow"
+|               "File Explorer in Windows | Microsoft Support"
+|             "
+                "
+|           "
+                
+            "
+|         "
+
+            
+              
+                "
+|         <!--  Only show abstract separately if there's a click URL (not EOF)  -->
+|         "
+                "
+|         <tr>
+|           "
+                  "
+|           <td>
+|             "   "
+|           "
+                  "
+|           <td>
+|             class="result-snippet"
+|             "
+                    Find and open File "
+|             <b>
+|               "Explorer"
+|             " in Windows, and customize Quick access by pinning and removing files and folders.
+                  "
+|           "
+                "
+|         "
+              
+            
+
+            
+              "
+|         <tr>
+|           "
+                "
+|           <td>
+|             "   "
+|           "
+                "
+|           <td>
+|             "
+                  "
+|             <span>
+|               class="link-text"
+|               "support.microsoft.com/en-us/windows/experience/fileexplorer/file-explorer-in-windows"
+|             "
+                  
+                "
+|           "
+              "
+|         "
+            
+
+            "
+|         <tr>
+|           "
+              "
+|           <td>
+|             " "
+|           "
+              "
+|           <td>
+|             " "
+|           "
+            "
+|         "
+
+        
+      
+        
+            "
+|         <tr>
+|           "
+              
+                "
+|           <td>
+|             valign="top"
+|             "
+                  
+                    5. 
+                  
+                "
+|           "
+                "
+|           <td>
+|             "
+                  "
+|             <a>
+|               class="result-link"
+|               href="https://www.microsoft.com/en-us/windows/tips/file-explorer"
+|               rel="nofollow"
+|               "File Explorer | Microsoft Windows"
+|             "
+                "
+|           "
+                
+            "
+|         "
+
+            
+              
+                "
+|         <!--  Only show abstract separately if there's a click URL (not EOF)  -->
+|         "
+                "
+|         <tr>
+|           "
+                  "
+|           <td>
+|             "   "
+|           "
+                  "
+|           <td>
+|             class="result-snippet"
+|             "
+                    Get the most out of your Windows 11 experience with File "
+|             <b>
+|               "Explorer"
+|             ". File "
+|             <b>
+|               "Explorer"
+|             " in Windows makes it easier to find and access files.
+                  "
+|           "
+                "
+|         "
+              
+            
+
+            
+              "
+|         <tr>
+|           "
+                "
+|           <td>
+|             "   "
+|           "
+                "
+|           <td>
+|             "
+                  "
+|             <span>
+|               class="link-text"
+|               "www.microsoft.com/en-us/windows/tips/file-explorer"
+|             "
+                  
+                "
+|           "
+              "
+|         "
+            
+
+            "
+|         <tr>
+|           "
+              "
+|           <td>
+|             " "
+|           "
+              "
+|           <td>
+|             " "
+|           "
+            "
+|         "
+
+        
+      
+        
+            "
+|         <tr>
+|           "
+              
+                "
+|           <td>
+|             valign="top"
+|             "
+                  
+                    6. 
+                  
+                "
+|           "
+                "
+|           <td>
+|             "
+                  "
+|             <a>
+|               class="result-link"
+|               href="https://en.wikipedia.org/wiki/Internet_Explorer"
+|               rel="nofollow"
+|               "Internet Explorer - Wikipedia"
+|             "
+                "
+|           "
+                
+            "
+|         "
+
+            
+              
+                "
+|         <!--  Only show abstract separately if there's a click URL (not EOF)  -->
+|         "
+                "
+|         <tr>
+|           "
+                  "
+|           <td>
+|             "   "
+|           "
+                  "
+|           <td>
+|             class="result-snippet"
+|             "
+                    Internet "
+|             <b>
+|               "Explorer"
+|             " is a retired series of web browsers developed by Microsoft for Windows and other platforms. Learn about its history, features, controversies, and successors.
+                  "
+|           "
+                "
+|         "
+              
+            
+
+            
+              "
+|         <tr>
+|           "
+                "
+|           <td>
+|             "   "
+|           "
+                "
+|           <td>
+|             "
+                  "
+|             <span>
+|               class="link-text"
+|               "en.wikipedia.org/wiki/Internet_Explorer"
+|             "
+                  
+                "
+|           "
+              "
+|         "
+            
+
+            "
+|         <tr>
+|           "
+              "
+|           <td>
+|             " "
+|           "
+              "
+|           <td>
+|             " "
+|           "
+            "
+|         "
+
+        
+      
+        
+            "
+|         <tr>
+|           "
+              
+                "
+|           <td>
+|             valign="top"
+|             "
+                  
+                    7. 
+                  
+                "
+|           "
+                "
+|           <td>
+|             "
+                  "
+|             <a>
+|               class="result-link"
+|               href="https://explore.microsoft.com/en-us/edge/download"
+|               rel="nofollow"
+|               "Download Microsoft Edge | Windows, Mac & Linux"
+|             "
+                "
+|           "
+                
+            "
+|         "
+
+            
+              
+                "
+|         <!--  Only show abstract separately if there's a click URL (not EOF)  -->
+|         "
+                "
+|         <tr>
+|           "
+                  "
+|           <td>
+|             "   "
+|           "
+                  "
+|           <td>
+|             class="result-snippet"
+|             "
+                    Download Microsoft Edge for Windows, Mac, and Linux. Browse faster with built-in security, AI features, and sync across your devices.
+                  "
+|           "
+                "
+|         "
+              
+            
+
+            
+              "
+|         <tr>
+|           "
+                "
+|           <td>
+|             "   "
+|           "
+                "
+|           <td>
+|             "
+                  "
+|             <span>
+|               class="link-text"
+|               "explore.microsoft.com/en-us/edge/download"
+|             "
+                  
+                "
+|           "
+              "
+|         "
+            
+
+            "
+|         <tr>
+|           "
+              "
+|           <td>
+|             " "
+|           "
+              "
+|           <td>
+|             " "
+|           "
+            "
+|         "
+
+        
+      
+        
+            "
+|         <tr>
+|           "
+              
+                "
+|           <td>
+|             valign="top"
+|             "
+                  
+                    8. 
+                  
+                "
+|           "
+                "
+|           <td>
+|             "
+                  "
+|             <a>
+|               class="result-link"
+|               href="https://www.wikihow.com/Open-Windows-Explorer"
+|               rel="nofollow"
+|               "How to Open Windows File Explorer: Windows 11, 10, 8, 7 - wikiHow"
+|             "
+                "
+|           "
+                
+            "
+|         "
+
+            
+              
+                "
+|         <!--  Only show abstract separately if there's a click URL (not EOF)  -->
+|         "
+                "
+|         <tr>
+|           "
+                  "
+|           <td>
+|             "   "
+|           "
+                  "
+|           <td>
+|             class="result-snippet"
+|             "
+                    The Windows "
+|             <b>
+|               "Explorer"
+|             " (or File "
+|             <b>
+|               "Explorer"
+|             ") allows you to find and browse all the files on your computer. Whether you're running Windows 11, 10, 8, 7, or earlier, you can easily open this tool in the Start menu or with a quick keyboard shortcut. Here's how to open Windows "
+|             <b>
+|               "Explorer"
+|             " on your Windows desktop computer or laptop.
+                  "
+|           "
+                "
+|         "
+              
+            
+
+            
+              "
+|         <tr>
+|           "
+                "
+|           <td>
+|             "   "
+|           "
+                "
+|           <td>
+|             "
+                  "
+|             <span>
+|               class="link-text"
+|               "www.wikihow.com/Open-Windows-Explorer"
+|             "
+                  
+                "
+|           "
+              "
+|         "
+            
+
+            "
+|         <tr>
+|           "
+              "
+|           <td>
+|             " "
+|           "
+              "
+|           <td>
+|             " "
+|           "
+            "
+|         "
+
+        
+      
+        
+            "
+|         <tr>
+|           "
+              
+                "
+|           <td>
+|             valign="top"
+|             "
+                  
+                    9. 
+                  
+                "
+|           "
+                "
+|           <td>
+|             "
+                  "
+|             <a>
+|               class="result-link"
+|               href="https://explorerplusplus.com/"
+|               rel="nofollow"
+|               "Explorer++ - A small and fast file manager for Windows"
+|             "
+                "
+|           "
+                
+            "
+|         "
+
+            
+              
+                "
+|         <!--  Only show abstract separately if there's a click URL (not EOF)  -->
+|         "
+                "
+|         <tr>
+|           "
+                  "
+|           <td>
+|             "   "
+|           "
+                  "
+|           <td>
+|             class="result-snippet"
+|             "
+                    About Explorer++ Explorer++ is a small and fast file manager for Windows. With tabs, bookmarks and advanced file operations, it allows you to be much more productive!
+                  "
+|           "
+                "
+|         "
+              
+            
+
+            
+              "
+|         <tr>
+|           "
+                "
+|           <td>
+|             "   "
+|           "
+                "
+|           <td>
+|             "
+                  "
+|             <span>
+|               class="link-text"
+|               "explorerplusplus.com"
+|             "
+                  
+                "
+|           "
+              "
+|         "
+            
+
+            "
+|         <tr>
+|           "
+              "
+|           <td>
+|             " "
+|           "
+              "
+|           <td>
+|             " "
+|           "
+            "
+|         "
+
+        
+      
+        
+            "
+|         <tr>
+|           "
+              
+                "
+|           <td>
+|             valign="top"
+|             "
+                  
+                    10. 
+                  
+                "
+|           "
+                "
+|           <td>
+|             "
+                  "
+|             <a>
+|               class="result-link"
+|               href="https://explore.microsoft.com/"
+|               rel="nofollow"
+|               "Get to Know Microsoft Edge"
+|             "
+                "
+|           "
+                
+            "
+|         "
+
+            
+              
+                "
+|         <!--  Only show abstract separately if there's a click URL (not EOF)  -->
+|         "
+                "
+|         <tr>
+|           "
+                  "
+|           <td>
+|             "   "
+|           "
+                  "
+|           <td>
+|             class="result-snippet"
+|             "
+                    On Microsoft Edge, what starts here, gets done here. Learn more about built-in Edge features and capabilities that help you achieve more.
+                  "
+|           "
+                "
+|         "
+              
+            
+
+            
+              "
+|         <tr>
+|           "
+                "
+|           <td>
+|             "   "
+|           "
+                "
+|           <td>
+|             "
+                  "
+|             <span>
+|               class="link-text"
+|               "explore.microsoft.com"
+|             "
+                  
+                "
+|           "
+              "
+|         "
+            
+
+            "
+|         <tr>
+|           "
+              "
+|           <td>
+|             " "
+|           "
+              "
+|           <td>
+|             " "
+|           "
+            "
+|         "
+
+        
+      
+    
+
+    
+      
+      "
+|         <tr>
+|           "
+        "
+|           <td>
+|             colspan="2"
+|             "
+          
+          
+            "
+|             <!--  Next Page Button Sub-template  -->
+|             "
+"
+|             <form>
+|               action="/lite/"
+|               class="next_form"
+|               method="post"
+|               "
+    "
+|               <input>
+|                 class="navbutton"
+|                 type="submit"
+|                 value="Next Page >"
+|               "
+    "
+|               <input>
+|                 name="q"
+|                 type="hidden"
+|                 value="explorer"
+|               "
+    "
+|               <input>
+|                 name="s"
+|                 type="hidden"
+|                 value="10"
+|               "
+    "
+|               <input>
+|                 name="nextParams"
+|                 type="hidden"
+|                 value=""
+|               "
+    "
+|               <input>
+|                 name="v"
+|                 type="hidden"
+|                 value="l"
+|               "
+    "
+|               <input>
+|                 name="o"
+|                 type="hidden"
+|                 value="json"
+|               "
+    "
+|               <input>
+|                 name="dc"
+|                 type="hidden"
+|                 value="11"
+|               "
+    "
+|               <input>
+|                 name="api"
+|                 type="hidden"
+|                 value="d.js"
+|               "
+    "
+|               <input>
+|                 name="vqd"
+|                 type="hidden"
+|                 value="4-265148443682121450902817405779106680775"
+|               "
+        
+    
+    
+    
+      "
+|               <input>
+|                 name="kl"
+|                 type="hidden"
+|                 value="wt-wt"
+|               "
+    
+    
+    
+    
+"
+|             "
+          
+          
+        "
+|           "
+      "
+|         "
+    
+  "
+|     "
+
+  "
+|     <p>
+|       class="extra"
+|       " "
+|     "
+
+  "
+|     <form>
+|       action="/lite/"
+|       method="post"
+|       "
+      "
+|       <input>
+|         class="query"
+|         name="q"
+|         size="40"
+|         type="text"
+|         value="explorer"
+|       "
+      "
+|       <input>
+|         class="submit"
+|         type="submit"
+|         value="Search"
+|       "
+      
+      
+      
+      
+      
+        "
+|       <input>
+|         name="kl"
+|         type="hidden"
+|         value="wt-wt"
+|       "
+      
+  "
+|     "
+
+  "
+|     <p>
+|       class="extra"
+|       " "
+|     "
+
+  
+    "
+|     <img>
+|       src="//duckduckgo.com/t/sl_l"
+|     "
+  
+  "
+|     <div>
+|       id="end-spacer"
+|       " "
+|     "
+
+
+"

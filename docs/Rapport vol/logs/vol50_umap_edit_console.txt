@@ -1,0 +1,4 @@
+{"console":["unhandledrejection: TypeError: cannot set `hidden` of Undefined\n    at <anonymous> (./ui/controls.d1d0f5d4cb36.js:181:1)\n    at <anonymous> (./ui/controls.d1d0f5d4cb36.js:6:1)\n    at <anonymous> (./ui/controls.d1d0f5d4cb36.js:18:1)\n    at <anonymous> (./ui/controls.d1d0f5d4cb36.js:259:1)\n    at <anonymous> (../modules/app.395ccf268de3.js:33:1)\n    at <anonymous> (../modules/app.395ccf268de3.js:30:51)"]}
+
+# note vol : première lecture /console (post-clic « Create a map », +4 s) → erreur ci-dessus ;
+# seconde lecture (~+10 s) → « pas de journal » (entrée évincée/ring vidé — à qualifier).

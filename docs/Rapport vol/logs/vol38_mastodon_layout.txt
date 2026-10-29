@@ -1,0 +1,8 @@
+block<html> [0 0 1366x0]
+  block<body> [0 0 1366x0]
+    block<div> [0 0 1366x0]
+    block<div> [0 0 0x0]
+      anon [0 0 0x145]
+        inline<svg> [0 0 79x79]
+        text "\n" [0 0 0x0]
+        inline<svg> [0 79 261x66]

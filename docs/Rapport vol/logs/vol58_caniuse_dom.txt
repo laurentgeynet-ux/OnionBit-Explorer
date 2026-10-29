@@ -1,0 +1,1785 @@
+| <html>
+|   class="no-js"
+|   dir="ltr"
+|   lang="en-US"
+|   <head>
+|     "
+	"
+|     <meta>
+|       charset="utf-8"
+|     "
+	"
+|     <title>
+|       "Can I use... Support tables for HTML5, CSS3, etc"
+|     "
+
+	"
+|     <meta>
+|       content="width=device-width"
+|       name="viewport"
+|     "
+
+	"
+|     <link>
+|       href="/feed"
+|       rel="alternate"
+|       title="Can I Use updates"
+|       type="application/atom+xml"
+|     "
+    "
+|     <link>
+|       href="//fonts.googleapis.com/css?family=Inconsolata&display=swap"
+|       rel="stylesheet"
+|     "
+	"
+|     <link>
+|       href="/img/favicon-128.png"
+|       rel="icon"
+|       sizes="16x16 32x32 64x64 128x128"
+|       type="image/png"
+|     "
+	"
+|     <link>
+|       href="/img/favicon-128.png"
+|       rel="apple-touch-icon"
+|     "
+
+	"
+|     <link>
+|       href="/css/main.css?1792647723"
+|       media="all"
+|       rel="stylesheet"
+|     "
+			"
+|     <link>
+|       href="/css/home.css?1792647723"
+|       media="all"
+|       rel="stylesheet"
+|     "
+		"
+|     <link>
+|       data-theme="light"
+|       href="/css/theme-light.css?1792647723"
+|       media="all"
+|       rel="stylesheet"
+|     "
+	"
+|     <link>
+|       data-theme="dark"
+|       href="/css/theme-dark.css?1792647723"
+|       media="(prefers-color-scheme: dark)"
+|       rel="stylesheet"
+|     "
+    "
+|     <meta>
+|       content=""Can I use" provides up-to-date browser support tables for support of front-end web technologies on desktop and mobile web browsers."
+|       name="Description"
+|     "
+	"
+|     <meta>
+|       content="web browser compatibility support html css svg html5 css3 opera chrome firefox safari internet explorer"
+|       name="keywords"
+|     "
+	"
+|     <link>
+|       href="/opensearch.xml"
+|       rel="search"
+|       title="Can I use"
+|       type="application/opensearchdescription+xml"
+|     "
+	"
+|     <link>
+|       href="https://ipinfo.io"
+|       rel="preconnect"
+|     "
+	"
+|     <link>
+|       href="https://www.google-analytics.com"
+|       rel="preconnect"
+|     "
+	"
+|     <base>
+|       href="/"
+|     "
+	"
+|     <script>
+|       fetchpriority="high"
+|       src="https://pagead2.googlesyndication.com/pagead/managed/js/adsense/m202610220101/show_ads_impl.js"
+|     <script>
+|       "
+		document.write('<style>.static-only {display:none}</style>');
+	"
+|     "
+	
+"
+|     <script>
+|       async=""
+|       src="https://www.googletagmanager.com/gtag/js?id=G-8SCDSGDGKM"
+|     "
+"
+|     <script>
+|       "
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-8SCDSGDGKM');
+"
+|     "
+
+	"
+|     <script>
+|       "
+(function() {
+    if (!window.customElements) {
+        var s = document.createElement('script');
+        s.src = '/legacy-handler.js';
+        document.getElementsByTagName('head')[0].appendChild(s);
+    }
+}());
+"
+|     "
+"
+|     <script>
+|       defer=""
+|       src="js-data/data.js?1793059463"
+|     <script>
+|       defer=""
+|       src="js/bundle.js?1792647724"
+|     <meta>
+|     <meta>
+|     <meta>
+|     <meta>
+|     <meta>
+|   "
+"
+|   <body>
+|     class="is-home"
+|     "
+		"
+|     <div>
+|       class="ciu-main-wrap"
+|       id="main"
+|       "
+
+		"
+|       <header>
+|         class="ciu-page-header"
+|         "
+            "
+|         <nav>
+|           id="tab-container"
+|           role="navigation"
+|           "
+                "
+|           <ul>
+|             class="ciu-page-header__primary-nav"
+|             "
+                    "
+|             <li>
+|               class="site-nav-item  js-site-nav"
+|               <a>
+|                 data-route="home"
+|                 href="/"
+|                 "Home"
+|             "
+                    "
+|             <li>
+|               class="site-nav-item  js-site-nav  site-nav-item--news"
+|               <a>
+|                 data-route="news"
+|                 href="/ciu/news"
+|                 "News"
+|             "
+                "
+|           "
+
+                "
+|           <ul>
+|             class="ciu-page-header__secondary-nav"
+|             "
+                    "
+|             <li>
+|               class="site-nav-item  js-site-nav  site-nav-item--comparison"
+|               <a>
+|                 data-route="comparison"
+|                 href="/ciu/comparison"
+|                 "Compare"
+|                 <span>
+|                   class="site-nav__extra-text"
+|                   " browsers"
+|             "
+ 					"
+|             <li>
+|               class="site-nav-item  js-site-nav  site-nav-item--last  "
+|               <a>
+|                 data-route="about"
+|                 href="/ciu/about"
+|                 "About"
+|             "
+                "
+|           "
+
+                "
+|           <a>
+|             class="news  js-news"
+|             data-newstime="1772668800"
+|             href="https://caniuse.com/loading-lazy-media"
+|             <span>
+|               class="date"
+|               "March 5, 2026 -"
+|             " New feature: Lazy loading via attribute for video & audio"
+|           "            "
+|         "
+			
+			            
+            "
+|         <section>
+|           class="ciu-search"
+|           "
+				"
+|           <div>
+|             class="ciu-search__inner  js-search"
+|             "
+					"
+|             <a>
+|               class="ciu-search__label"
+|               href="/"
+|               "Can I use"
+|             "
+					"
+|             <form>
+|               action="/"
+|               class="ciu-search__form"
+|               "
+						"
+|               <label>
+|                 class="ciu-search__a11y-label"
+|                 for="feat_search"
+|                 "Search"
+|               "
+						"
+|               <input>
+|                 autocapitalize="off"
+|                 autocomplete="off"
+|                 autocorrect="off"
+|                 autofocus=""
+|                 class="ciu-search__input"
+|                 id="feat_search"
+|                 name="search"
+|                 spellcheck="false"
+|                 type="text"
+|                 value=""
+|               "
+						"
+|               <input>
+|                 name="static"
+|                 type="hidden"
+|                 value="1"
+|               "
+					"
+|             "
+					?
+					"
+|             <button>
+|               class="options-toggle  js-options-toggle"
+|               "
+						"
+|               <svg>
+|                 class="icon"
+|                 height="16"
+|                 viewBox="0 0 16 16"
+|                 width="16"
+|                 xmlns="http://www.w3.org/2000/svg"
+|                 "
+							"
+|                 <path>
+|                   d="M16,8.87V7L15.74,7l-1.95-.64-.52-1.25,1-2.12L13,1.67l-.25.12-1.82.93L9.66,2.2,8.87,0H7.05L7,.26,6.33,2.21l-1.25.52L3,1.73,1.67,3l.12.25.93,1.82L2.2,6.34,0,7.13V8.95L.26,9l2,.64.52,1.25L1.73,13,3,14.33l.25-.12,1.82-.93,1.26.52L7.13,16H8.95L9,15.74l.64-2,1.26-.52,2.11,1L14.33,13l-.12-.25-.93-1.82.52-1.26ZM8,10.55A2.55,2.55,0,1,1,10.55,8,2.55,2.55,0,0,1,8,10.55Z"
+|                 "
+						"
+|               "
+						"
+|               <span>
+|                 "
+							Settings
+						"
+|               "
+					"
+|             "
+				"
+|           "
+				
+									"
+|           <div>
+|             class="search-result-info  js-search-result-info  hidden"
+|           "
+				            "
+|         "
+
+        "
+|       "
+
+		"
+|       <main>
+|         class="ciu-page-content  js-content"
+|         data-static-id="home"
+|         "
+			
+"
+|         <section>
+|           class="section__home  clearfix"
+|           id="home"
+|           "
+    "
+|           <h3>
+|             class="ciu-section-heading  hidden-from-screen"
+|             "Home"
+|           "
+    "
+|           <div>
+|             class="home__index-strip  js-index-strip"
+|             "
+        "
+|             <a>
+|               href="/ciu/index"
+|               "Index of features"
+|             "
+    "
+|           "
+    
+    "
+|           <div>
+|             class="home-sections"
+|             "
+        "
+|             <div>
+|               class="home__section  home__section--latest"
+|               "
+            "
+|               <h4>
+|                 class="home__subheading"
+|                 "Latest features"
+|               "
+            "
+|               <ol>
+|                 class="home__list  js-latest-features"
+|                 "
+                "
+|                 <li>
+|                   class="home__list-item"
+|                   <a>
+|                     href="/loading-lazy-media"
+|                     "Lazy loading via attribute for video & audio"
+|                 "
+"
+|                 <li>
+|                   class="home__list-item"
+|                   <a>
+|                     href="/css-grid-lanes"
+|                     "CSS Grid Lanes"
+|                 "
+"
+|                 <li>
+|                   class="home__list-item"
+|                   <a>
+|                     href="/css-if"
+|                     "CSS if() function"
+|                 "
+"
+|                 <li>
+|                   class="home__list-item"
+|                   <a>
+|                     href="/cross-document-view-transitions"
+|                     "View Transitions (cross-document)"
+|                 "
+"
+|                 <li>
+|                   class="home__list-item"
+|                   <a>
+|                     href="/wasm-mutable-globals"
+|                     "WebAssembly Import/Export of Mutable Globals"
+|                 "
+            "
+|               "
+        "
+|             "
+        
+        "
+|             <div>
+|               class="home__section  home__section--most-searched"
+|               "
+            "
+|               <h4>
+|                 class="home__subheading"
+|                 "Most searched features"
+|               "
+            "
+|               <ol>
+|                 class="home__list  home__list--numbered  js-most-searched"
+|                 "
+                "
+|                 <li>
+|                   class="home__list-item"
+|                   <a>
+|                     href="avif"
+|                     "AVIF"
+|                 "
+                "
+|                 <li>
+|                   class="home__list-item"
+|                   <a>
+|                     href="webp"
+|                     "WebP"
+|                 "
+                "
+|                 <li>
+|                   class="home__list-item"
+|                   <a>
+|                     href="css-grid"
+|                     "CSS Grid"
+|                 "
+                "
+|                 <li>
+|                   class="home__list-item"
+|                   <a>
+|                     href="viewport-unit-variants"
+|                     "dvh (Small, Large, and Dynamic viewport units)"
+|                 "
+                "
+|                 <li>
+|                   class="home__list-item"
+|                   <a>
+|                     href="flexbox"
+|                     "Flexbox"
+|                 "
+            "
+|               "
+        "
+|             "
+        
+        "
+|             <div>
+|               class="home__section  home__section--browserstack  is-static"
+|               "
+        "
+|               <h4>
+|                 class="home__subheading"
+|                 "Test a feature"
+|               "
+            "
+|               <p>
+|                 class="home__p"
+|                 "
+                Our partnership with "
+|                 <a>
+|                   href="https://www.browserstack.com?ref=caniuse-source&caniuse_source=brand-asset&utm_source=caniuse&utm_medium=partnered&utm_campaigncode=701OW000008y9C1YAI"
+|                   "BrowserStack"
+|                 "
+                now lets you test your website for compatibility across 2,000+ real browsers and devices.
+            "
+|               "
+            "
+|               <p>
+|                 class="home__p"
+|                 "
+                Test on:
+                "
+|               <div>
+|                 class="home__col-wrap"
+|                 "
+                    "
+|                 <ul>
+|                   class="home__list"
+|                   "
+                        "
+|                   <li>
+|                     class="home__list-item"
+|                     "
+                            "
+|                     <a>
+|                       href="https://live.browserstack.com/#os=Windows&os_version=8.1&browser=IE&browser_version=11.0&start=true&ref=caniuse-source&source=landing_page&utm_source=caniuse&utm_medium=partnered&utm_campaigncode=701OW000008y9C1YAI"
+|                       "
+                                IE 11
+                            "
+|                     "
+                        "
+|                   "
+                        "
+|                   <li>
+|                     class="home__list-item"
+|                     "
+                            "
+|                     <a>
+|                       href="https://live.browserstack.com/#os=OS+X&os_version=Sonoma&browser=Safari&browser_version=17.3&device_browser=chrome&ref=caniuse-source&source=landing_page&start=true&utm_source=caniuse&utm_medium=partnered&utm_campaigncode=701OW000008y9C1YAI"
+|                       "
+                                Safari 17
+                            "
+|                     "
+                        "
+|                   "
+                    "
+|                 "
+                    "
+|                 <ul>
+|                   class="home__list"
+|                   "
+                        "
+|                   <li>
+|                     class="home__list-item"
+|                     "
+                            "
+|                     <a>
+|                       href="https://live.browserstack.com/#os=iOS&os_version=16.0&device_browser=safari&device=iPhone+14&start=true&ref=caniuse-source&source=landing_page&utm_source=caniuse&utm_medium=partnered&utm_campaigncode=701OW000008y9C1YAI"
+|                       "
+                                Safari on iPhone 14
+                            "
+|                     "
+                        "
+|                   "
+                        "
+|                   <li>
+|                     class="home__list-item"
+|                     "
+                            "
+|                     <a>
+|                       href="https://live.browserstack.com/#os=android&os_version=13.0&device=Samsung+Galaxy+S23&device_browser=chrome&ref=caniuse-source&source=landing_page&start=true&utm_source=caniuse&utm_medium=partnered&utm_campaigncode=701OW000008y9C1YAI"
+|                       "
+                                Chrome on Galaxy S23
+                            "
+|                     "
+                        "
+|                   "
+                    "
+|                 "
+                "
+|               "
+        "
+|               <p>
+|             "
+
+        "
+|             <div>
+|               class="home__section  home__section--dyk  is-static"
+|               "
+            "
+|               <h4>
+|                 class="home__subheading"
+|                 "Did you know?"
+|               "
+            "
+|               <ciu-button>
+|                 class="home__next-dyk-button  js-next-dyk"
+|                 size="small"
+|                 variant="text"
+|                 "Next"
+|               "
+            "
+|               <ul>
+|                 class="home__dyk-list  js-dyk-list"
+|                 "
+                "
+|                 <li>
+|                   class="home__list-item"
+|                   "
+                    "
+|                   <p>
+|                     class="home__p"
+|                     "
+                        If a feature you're looking for is not available on the site, you can "
+|                     <a>
+|                       href="https://github.com/fyrd/caniuse/issues"
+|                       "vote to have it included"
+|                     ". Better yet, if you've done the research you can even "
+|                     <a>
+|                       href="https://github.com/Fyrd/caniuse/blob/main/CONTRIBUTING.md#adding-a-feature"
+|                       "submit it yourself"
+|                     "!
+                    "
+|                   "
+                "
+|                 "
+                "
+|                 <li>
+|                   class="home__list-item"
+|                   "
+                    "
+|                   <p>
+|                     class="home__p"
+|                     "
+                        You can import usage data from your "
+|                     <b>
+|                       "Google Analytics"
+|                     " account and see exactly how well a feature is supported among your own site's visitors. Look under the "
+|                     <b>
+|                       class="show-settings  js-show-settings"
+|                       "Settings panel"
+|                     " to get started!
+                    "
+|                   "
+                "
+|                 "
+                "
+|                 <li>
+|                   class="home__list-item"
+|                   "
+                    "
+|                   <p>
+|                     class="home__p"
+|                     "
+                        Usage data for all countries and continents can be imported via the "
+|                     <b>
+|                       class="show-settings  js-show-settings"
+|                       "Settings panel"
+|                     ".
+                    "
+|                   "
+                "
+|                 "
+                "
+|                 <li>
+|                   class="home__list-item"
+|                   "
+                    "
+|                   <p>
+|                     class="home__p"
+|                     "
+                        By default, older browser versions are only shown if they have >= 0.5% usage share. You can increase or decrease this value from the "
+|                     <b>
+|                       class="show-settings  js-show-settings"
+|                       "Settings panel"
+|                     ". 
+                    "
+|                   "
+                "
+|                 "
+                "
+|                 <li>
+|                   class="home__list-item"
+|                   "
+                    "
+|                   <p>
+|                     class="home__p"
+|                     "
+                        Each feature support table includes a "Usage relative" button. This will resize each browser version cell to be relative to the amount of support it has for the selected usage source.
+                    "
+|                   "
+                "
+|                 "
+            "
+|               "
+        "
+|             "
+        
+        "
+|             <div>
+|               class="home__section  home__section--third-party"
+|               "
+            "
+|               <h4>
+|                 class="home__subheading"
+|                 "Third party tools"
+|               "
+            "
+|               <ol>
+|                 class="home__list"
+|                 "
+                "
+|                 <li>
+|                   class="home__list-item"
+|                   "
+                    "
+|                   <a>
+|                     href="https://caniuse.bitsofco.de/"
+|                     "The CanIUse Embed — Add support tables to your site"
+|                   "
+                "
+|                 "
+                "
+|                 <li>
+|                   class="home__list-item"
+|                   "
+                    "
+|                   <a>
+|                     href="https://github.com/una/caniuse-component"
+|                     "Caniuse Component — Add support tables to your presentations"
+|                   "
+                "
+|                 "
+                "
+|                 <li>
+|                   class="home__list-item"
+|                   "
+                    "
+|                   <a>
+|                     href="https://github.com/sgentle/caniuse-cmd"
+|                     "Caniuse command line tool "
+|                   "
+                "
+|                 "
+                "
+|                 <li>
+|                   class="home__list-item"
+|                   "
+                    "
+|                   <a>
+|                     href="https://github.com/anandthakker/doiuse"
+|                     "Doiuse...? — Lint your CSS to check what features work"
+|                   "
+                "
+|                 "
+                "
+|                 <li>
+|                   class="home__list-item"
+|                   "
+                    "
+|                   <a>
+|                     href="http://iwanttouse.com"
+|                     "I want to use — Select multiple features and see what % of users can use them"
+|                   "
+                "
+|                 "
+            "
+|               "
+            "
+|               <p>
+|                 class="home__p"
+|                 <a>
+|                   class="external-link"
+|                   href="https://github.com/Fyrd/caniuse/wiki/Third-party-tools"
+|                   "See full list"
+|               "
+        "
+|             "
+
+        "
+|             <div>
+|               class="home__section  home__section--browser-scores"
+|               "
+            "
+|               <h4>
+|                 class="home__subheading"
+|                 "Browser scores"
+|               "
+            "
+|               <ol>
+|                 class="home__list  js-browser-scores"
+|                 "
+                "
+|                 <li>
+|                   class="home__list-item"
+|                   data-score-json="{"featCount":492,"current":{"name":"Chrome 156","full":444,"partial":22},"latest":{"name":"Chrome 159","full":444,"partial":22}}"
+|                   "
+"
+|                   <span>
+|                     class="home__browser-bar  home__browser-bar--full  browser-bg--chrome"
+|                     style="width: 90.2%;"
+|                     title="Full support: 444pts"
+|                     "Chrome 156: 444"
+|                   <span>
+|                     class="home__browser-bar  home__browser-bar--partial  browser-bg--chrome"
+|                     style="width: 4.5%;"
+|                     title="Partial support: 22pts"
+|                 "
+"
+|                 <li>
+|                   class="home__list-item"
+|                   data-score-json="{"featCount":492,"current":{"name":"Safari 27","full":419,"partial":30},"latest":{"name":"Safari TP","full":421,"partial":31}}"
+|                   "
+"
+|                   <span>
+|                     class="home__browser-bar  home__browser-bar--full  browser-bg--safari"
+|                     style="width: 85.2%;"
+|                     title="Full support: 419pts"
+|                     "Safari 27: 419"
+|                   <span>
+|                     class="home__browser-bar  home__browser-bar--partial  browser-bg--safari"
+|                     style="width: 6.1%;"
+|                     title="Partial support: 30pts"
+|                 "
+"
+|                 <li>
+|                   class="home__list-item"
+|                   data-score-json="{"featCount":492,"current":{"name":"Firefox 158","full":423,"partial":23},"latest":{"name":"Firefox 161","full":423,"partial":23}}"
+|                   "
+"
+|                   <span>
+|                     class="home__browser-bar  home__browser-bar--full  browser-bg--firefox"
+|                     style="width: 86%;"
+|                     title="Full support: 423pts"
+|                     "Firefox 158: 423"
+|                   <span>
+|                     class="home__browser-bar  home__browser-bar--partial  browser-bg--firefox"
+|                     style="width: 4.7%;"
+|                     title="Partial support: 23pts"
+|                 "
+            "
+|               "
+        "
+|             "
+        
+        "
+|             <div>
+|               class="home__section  home__section--similar"
+|               "
+            "
+|               <h4>
+|                 class="home__subheading"
+|                 "Other support sites"
+|               "
+            "
+|               <ol>
+|                 class="home__list"
+|                 "
+                "
+|                 <li>
+|                   class="home__list-item"
+|                   "
+                    "
+|                   <a>
+|                     href="https://caniemail.com"
+|                     "Can I email... — Support tables for HTML & CSS in emails"
+|                   "
+                "
+|                 "
+                "
+|                 <li>
+|                   class="home__list-item"
+|                   "
+                    "
+|                   <a>
+|                     href="https://a11ysupport.io"
+|                     "Accessibility Support — Support information for web accessibility features in assistive technologies"
+|                   "
+                "
+|                 "
+                "
+|                 <li>
+|                   class="home__list-item"
+|                   "
+                    "
+|                   <a>
+|                     href="https://caniwebview.com"
+|                     "Can I Webview — Documentation for WebView capabilities, limitations & features"
+|                   "
+                "
+|                 "
+                
+            "
+|               "
+        "
+|             "
+    "
+|           "
+
+"
+|         "		"
+|       "
+
+		"
+|       <aside>
+|         class="bottom-ad"
+|         "
+	"
+|         <script>
+|           async=""
+|           src="//pagead2.googlesyndication.com/pagead/js/adsbygoogle.js"
+|         "
+	
+	"
+|         <ins>
+|           class="adsbygoogle"
+|           data-ad-client="ca-pub-3347535679733957"
+|           data-ad-slot="1205929339"
+|           data-adsbygoogle-status="done"
+|           style="display:inline-block;width:728px;height:90px"
+|           <div>
+|             id="aswift_0_host"
+|             style="border: none; height: 90px; width: 728px; margin: 0px; padding: 0px; position: relative; visibility: visible; background-color: transparent; display: inline-block"
+|             <iframe>
+|               allowtransparency="true"
+|               aria-label="Advertisement"
+|               data-google-container-id="a!1"
+|               frameborder="0"
+|               height="90"
+|               hspace="0"
+|               id="aswift_0"
+|               marginheight="0"
+|               marginwidth="0"
+|               name="aswift_0"
+|               scrolling="no"
+|               src="https://pagead2.googlesyndication.com/pagead/ads?client=ca-pub-3347535679733957&output=html&h=90&slotname=1205929339&adk=3550829770&adf=527848370&pi=t.ma~as.1205929339&abgtt=9&w=728&format=728x90&url=https%3A%2F%2Fcaniuse.com%2F&aiof=14&asro=0&aimartd=4&aieuf=1&aicrs=1&dt=1793094152833&bpp=10&bdt=3709&idt=367&shv=r20261023&mjsv=m202610220101&ptt=9&saldr=aa&abxe=1&eoidce=1&correlator=6046936691058&frm=20&pv=2&u_tz=0&u_his=0&u_h=900&u_w=1366&u_ah=900&u_aw=1366&u_cd=24&u_sd=1&adx=319&ady=2401&biw=1366&bih=900&scr_x=0&scr_y=0&eid=95407149&oid=2&pvsid=4541544117407765&tmod=1454682749&uas=0&nvt=1&fc=896&brdim=%2C%2C%2C%2C1366%2C%2C1366%2C900%2C1366%2C900&vis=1&rsz=%7C%7CEbr%7C&abl=CS&pfx=0&fu=0&bc=25&bz=1&ifi=1&uci=a!1&btvi=1&dtd=634"
+|               style="left:0;position:absolute;top:0;border:0;width:728px;height:90px;min-height:auto;max-height:none;min-width:auto;max-width:none;"
+|               tabindex="0"
+|               title="Advertisement"
+|               vspace="0"
+|               width="728"
+|         "
+	"
+|         <script>
+|           "
+	(adsbygoogle = window.adsbygoogle || []).push({});
+	"
+|         "
+"
+|       "
+	
+		"
+|       <footer>
+|         class="ciu-footer"
+|         "
+			"
+|         <div>
+|           class="footer__section  footer__primary"
+|           "
+				"
+|           <h3>
+|             class="footer__heading"
+|             "Can I use..."
+|           "
+					"
+|           <p>
+|             class="site-description"
+|             "Browser support tables for modern web technologies"
+|           "
+	"
+|           <p>
+|             "Created & maintained by "
+|             <a>
+|               class="external-link"
+|               href="https://front-end.social/@fyrd"
+|               "@Fyrd"
+|             ", design by "
+|             <a>
+|               class="external-link"
+|               href="https://mastodon.world/@lensco"
+|               "@Lensco"
+|             "."
+|           "
+	"
+|           <p>
+|             "Support data contributions by the GitHub "
+|             <a>
+|               class="external-link"
+|               href="https://github.com/Fyrd/caniuse/graphs/contributors"
+|               "community"
+|             ".
+	
+	"
+|           <p>
+|             id="usage_note"
+|             "
+		Usage share statistics by "
+|             <a>
+|               class="external-link"
+|               href="http://gs.statcounter.com/"
+|               "StatCounter GlobalStats"
+|             " for September, 2026	"
+|           "
+		
+	"
+|           <p>
+|             "Location detection provided by "
+|             <a>
+|               class="external-link"
+|               href="//ipinfo.io"
+|               "ipinfo.io"
+|             ".
+	"
+|           "
+
+	"
+|           <p>
+|             "
+		Browser testing done via 
+		"
+|             <a>
+|               class="external-link"
+|               href="https://www.browserstack.com?ref=caniuse-source&caniuse_source=brand-asset&utm_source=caniuse&utm_medium=partnered&utm_campaigncode=701OW000008y9C1YAI"
+|               target="_blank"
+|               "
+			"
+|               <img>
+|                 alt="BrowserStack"
+|                 height="28"
+|                 loading="lazy"
+|                 src="/img/browserstack.svg"
+|                 width="140"
+|               "
+		"
+|             "
+	"
+|           "
+	
+			"
+|         "
+			
+			"
+|         <div>
+|           class="footer__section  footer__patreon"
+|           "
+				"
+|           <h3>
+|             class="footer__heading"
+|             "Support via Patreon"
+|           "
+				
+														"
+|           <p>
+|             "Become a caniuse Patron to support the site and disable ads for only $1/month!"
+|           "
+				
+					"
+|           <div>
+|             class="patreon-button"
+|             "
+						"
+|             <a>
+|               href="https://www.patreon.com/join/caniuse"
+|               "
+							"
+|               <img>
+|                 alt="Become a Patron!"
+|                 height="38"
+|                 loading="lazy"
+|                 src="/img/become_a_patron_button.png"
+|                 width="163"
+|               "
+						"
+|             "
+											"
+|           "
+											"
+|           <p>
+|             "
+							or "
+|             <a>
+|               class="external-link"
+|               href="http://www.patreon.com/oauth2/authorize?response_type=code&client_id=ayH01_if_QL-WweWwGpi-rsWKDxp_38jKmzX5WKtHEv0ssfTLjL_hu1XIPQPRuvW&redirect_uri=https%3A%2F%2Fcaniuse.com&scope=identity+identity.memberships+identity%5Bemail%5D"
+|               "Log in"
+|             "
+						"
+|           "
+												"
+|         "
+			
+			"
+|         <div>
+|           class="footer__section  footer__links"
+|           "
+				"
+|           <h3>
+|             class="footer__heading"
+|             "Site links"
+|           "
+				"
+|           <ol>
+|             class="footer__list"
+|             "
+					"
+|             <li>
+|               class="footer__list-item"
+|               "
+						"
+|               <a>
+|                 href="/"
+|                 "Home"
+|               "
+					"
+|             "
+					"
+|             <li>
+|               class="footer__list-item"
+|               "
+						"
+|               <a>
+|                 href="/ciu/index"
+|                 "Feature index"
+|               "
+					"
+|             "
+					"
+|             <li>
+|               class="footer__list-item"
+|               "
+						"
+|               <a>
+|                 href="/usage-table"
+|                 "Browser usage table"
+|               "
+					"
+|             "
+					"
+|             <li>
+|               class="footer__list-item"
+|               "
+						"
+|               <a>
+|                 href="/issue-list"
+|                 "Feature suggestion list"
+|               "
+					"
+|             "
+					"
+|             <li>
+|               class="footer__list-item"
+|               "
+						"
+|               <a>
+|                 href="https://github.com/fyrd/caniuse"
+|                 "Caniuse data on GitHub"
+|               "
+					"
+|             "
+				"
+|           "
+			"
+|         "
+			
+			"
+|         <div>
+|           class="footer__section  footer__legend"
+|           "
+					"
+|           <section>
+|             class="ciu-legend  js-legend"
+|             "
+		"
+|             <h2>
+|               class="ciu-legend__header"
+|               "Legend"
+|             "
+		"
+|             <ul>
+|               class="ciu-legend__list"
+|               "
+		    "
+|               <li>
+|                 class="ciu-legend__item"
+|                 "
+    			"
+|                 <span>
+|                   class="y  ciu-legend__color"
+|                   "Green"
+|                 "
+				"
+|                 <span>
+|                   class="ciu-legend__symbol"
+|                   "✅"
+|                 "
+				= Supported
+    		"
+|               "
+		    "
+|               <li>
+|                 class="ciu-legend__item"
+|                 "
+    		    "
+|                 <span>
+|                   class="n  ciu-legend__color"
+|                   "Red"
+|                 "
+				"
+|                 <span>
+|                   class="ciu-legend__symbol"
+|                   "❌"
+|                 "
+				= Not supported
+    		"
+|               "
+		    "
+|               <li>
+|                 class="ciu-legend__item"
+|                 "
+    		    "
+|                 <span>
+|                   class="a  ciu-legend__color"
+|                   "Greenish yellow"
+|                 "
+				"
+|                 <span>
+|                   class="ciu-legend__symbol"
+|                   "◐"
+|                 "
+				= Partial support
+    		"
+|               "
+		    "
+|               <li>
+|                 class="ciu-legend__item"
+|                 "
+    		    "
+|                 <span>
+|                   class="u  ciu-legend__color"
+|                   "Gray"
+|                 "
+				"
+|                 <span>
+|                   class="ciu-legend__symbol"
+|                   "﹖"
+|                 "
+				= Support unknown
+    		"
+|               "
+		"
+|             "
+	"
+|           "
+							"
+|         "
+		"
+|       "
+	"
+|     "
+"
+|     <style>
+|       ".static-only {display:none}"
+|     <ins>
+|       class="adsbygoogle adsbygoogle-noablate"
+|       data-ad-hi="true"
+|       data-ad-status="unfilled"
+|       data-adsbygoogle-status="done"
+|       style="display: none"
+|       <div>
+|         id="aswift_1_host"
+|         style="border: none; height: 0px; width: 0px; margin: 0px; padding: 0px; position: relative; visibility: visible; background-color: transparent; display: inline-block"
+|         <iframe>
+|           allowtransparency="true"
+|           aria-label="Advertisement"
+|           data-google-container-id="a!2"
+|           data-load-complete="true"
+|           frameborder="0"
+|           hspace="0"
+|           id="aswift_1"
+|           marginheight="0"
+|           marginwidth="0"
+|           name="aswift_1"
+|           scrolling="no"
+|           src="https://pagead2.googlesyndication.com/pagead/ads?client=ca-pub-3347535679733957&output=html&adk=1812271804&adf=3025194257&abgtt=9&plaf=1%3A2%2C2%3A2%2C7%3A2&plat=1%3A128%2C2%3A128%2C3%3A128%2C4%3A128%2C8%3A128%2C9%3A134250504%2C16%3A8388608%2C17%3A32%2C24%3A32%2C25%3A32%2C30%3A1081344%2C32%3A32%2C41%3A32%2C42%3A32%2C43%3A32%2C44%3A32&format=0x0&url=https%3A%2F%2Fcaniuse.com%2F&pra=7&aiof=14&asro=0&itsi=-1&aimartd=4&aieuf=1&aicrs=1&dt=1793094153038&bpp=6&bdt=3915&idt=464&shv=r20261023&mjsv=m202610220101&ptt=9&saldr=aa&abxe=1&eoidce=1&prev_fmts=728x90&nras=1&correlator=6046936691058&frm=20&pv=1&u_tz=0&u_his=0&u_h=900&u_w=1366&u_ah=900&u_aw=1366&u_cd=24&u_sd=1&adx=-12245933&ady=-12245933&biw=1366&bih=900&scr_x=0&scr_y=0&eid=95407149&oid=2&pvsid=4541544117407765&tmod=1454682749&uas=0&nvt=1&fsapi=1&fc=896&brdim=%2C%2C%2C%2C1366%2C%2C1366%2C900%2C1366%2C900&vis=1&rsz=%7C%7Cs%7C&abl=NS&fu=32768&bc=25&bz=1&ifi=2&uci=a!2&dtd=699"
+|           style="left:0;position:absolute;top:0;border:0;width:undefinedpx;height:undefinedpx;min-height:auto;max-height:none;min-width:auto;max-width:none;"
+|           tabindex="0"
+|           title="Advertisement"
+|           vspace="0"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <script>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2.js"
+|       type="text/javascript"
+|     <script>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2.js"
+|       type="text/javascript"
+|     <script>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2.js"
+|       type="text/javascript"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <iframe>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2/255/runner.html"
+|       style="display: none"
+|     <script>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2.js"
+|       type="text/javascript"
+|     <script>
+|       src="https://ep2.adtrafficquality.google/sodar/sodar2.js"
+|       type="text/javascript"
+|     "
+"
+|     <iframe>
+|       id="google_esf"
+|       name="google_esf"
+|       src="https://pagead2.googlesyndication.com/pagead/html/r20261023/r20190131/zrt_lookup.html"
+|       style="display: none"
+|     <iframe>
+|       id="google_esf"
+|       name="google_esf"
+|       src="https://pagead2.googlesyndication.com/pagead/html/r20261023/r20190131/zrt_lookup.html"
+|       style="display: none"
+|     "
+"

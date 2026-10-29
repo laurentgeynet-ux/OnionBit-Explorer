@@ -1,0 +1,1314 @@
+| <html>
+|   style="--base: #474747; --bg-panel: #252525; --bg-canvas: #252525; --bg-input: #252525; --bg-bbtn: #5d5d5d; --bg-bbtnOver: #6a6a6a; --brdr: #252525; --text-color: #d5d5d5; --brdrLgt: rgba(255,255,255,0.15); --brdrDrk: rgba(  0,  0,  0,0.6); --alphaDark: 0.25; --gs-invert: 0.78; --accent: #3482f6; --sh-clr: rgba(0,0,0, 0.45); --absc: 0; --abs255: 0; --img20: 20px; --img18: 18px; --img15: 15px; --icon_eye: url(data:image/png; --icon_eye_invrt: 0.78; --icon_square: url(data:image/png; --icon_square_invrt: 0.78; --icon_arrow_down: url(data:image/png; --icon_arrow_down_invrt: 0.78; --icon_arrow_right: url(data:image/png; --icon_arrow_right_invrt: 0.78; --icon_chain: url(data:image/png; --icon_chain_invrt: 0.78; --icon_link: url(data:image/png; --icon_link_invrt: 0.78; --icon_linkX: url(data:image/png; --icon_linkX_invrt: 0.78; --icon_clipping: url(data:image/png; --icon_clipping_invrt: 0.78; --icon_lock: url(data:image/png; --icon_lock_invrt: 0.78; --icon_fx: url(data:image/png; --icon_fx_invrt: 0.78; --icon_folder: url(data:image/png; --icon_folder_invrt: 0.78; --icon_vfolder: url(data:image/png; --icon_vfolder_invrt: 0.78; --icon_cross: url(data:image/svg+xml; --icon_cross_invrt: 0.78; --icon_cshape: url(data:image/png; --icon_cshape_invrt: 0.78; --icon_checkmark: url(data:image/png; --icon_checkmark_invrt: 0.78"
+|   translate="no"
+|   <head>
+|     "
+		"
+|     <meta>
+|       charset="utf-8"
+|     "
+		"
+|     <meta>
+|       content="width=device-width, minimum-scale=1.0, maximum-scale=5.0, initial-scale=1.0"
+|       name="viewport"
+|     "
+		"
+|     <meta>
+|       content="https://www.photopea.com/promo/screens/scr5.png"
+|       name="thumbnail"
+|     "
+		"
+|     <meta>
+|       content="#474747"
+|       name="theme-color"
+|     "
+		
+		"
+|     <title>
+|       "Photopea | Online Photo Editor"
+|     "
+		"
+|     <meta>
+|       content="Photopea Online Photo Editor lets you edit photos, apply effects, filters, add text, crop or resize pictures. Do Online Photo Editing in your browser for free!"
+|       name="description"
+|     "
+		
+		"
+|     <link>
+|       href="https://www.photopea.com/"
+|       rel="canonical"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/"
+|       hreflang="en"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/"
+|       hreflang="x-default"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/af_za/"
+|       hreflang="af"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/ar_eg/"
+|       hreflang="ar"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/az_az/"
+|       hreflang="az"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/bg_bg/"
+|       hreflang="bg"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/bn_bd/"
+|       hreflang="bn"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/ca_es/"
+|       hreflang="ca"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/cs_cz/"
+|       hreflang="cs"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/da_dk/"
+|       hreflang="da"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/de_de/"
+|       hreflang="de"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/el_gr/"
+|       hreflang="el"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/es_es/"
+|       hreflang="es"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/et_ee/"
+|       hreflang="et"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/eu_es/"
+|       hreflang="eu"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/fa_ir/"
+|       hreflang="fa"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/fi_fi/"
+|       hreflang="fi"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/fr_fr/"
+|       hreflang="fr"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/gl_es/"
+|       hreflang="gl"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/gu_in/"
+|       hreflang="gu"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/he_il/"
+|       hreflang="he"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/hi_in/"
+|       hreflang="hi"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/hr_hr/"
+|       hreflang="hr"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/hu_hu/"
+|       hreflang="hu"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/id_id/"
+|       hreflang="id"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/it_it/"
+|       hreflang="it"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/ja_jp/"
+|       hreflang="ja"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/ka_ge/"
+|       hreflang="ka"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/km_kh/"
+|       hreflang="km"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/kn_in/"
+|       hreflang="kn"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/ko_kr/"
+|       hreflang="ko"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/ky_kg/"
+|       hreflang="ky"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/lt_lt/"
+|       hreflang="lt"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/lv_lv/"
+|       hreflang="lv"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/mk_mk/"
+|       hreflang="mk"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/ml_in/"
+|       hreflang="ml"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/mr_in/"
+|       hreflang="mr"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/ms_my/"
+|       hreflang="ms"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/my_mn/"
+|       hreflang="my"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/nb_no/"
+|       hreflang="nb"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/ne_np/"
+|       hreflang="ne"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/nl_nl/"
+|       hreflang="nl"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/pa_pk/"
+|       hreflang="pa-PK"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/pa_in/"
+|       hreflang="pa"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/pl_pl/"
+|       hreflang="pl"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/pt_br/"
+|       hreflang="pt-BR"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/pt_pt/"
+|       hreflang="pt"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/ro_ro/"
+|       hreflang="ro"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/ru_ru/"
+|       hreflang="ru"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/sk_sk/"
+|       hreflang="sk"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/sl_si/"
+|       hreflang="sl"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/sq_al/"
+|       hreflang="sq"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/sv_se/"
+|       hreflang="sv"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/sw_ke/"
+|       hreflang="sw"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/ta_in/"
+|       hreflang="ta"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/te_in/"
+|       hreflang="te"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/th_th/"
+|       hreflang="th"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/tl_ph/"
+|       hreflang="tl"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/tr_tr/"
+|       hreflang="tr"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/uk_ua/"
+|       hreflang="uk"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/ur_pk/"
+|       hreflang="ur"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/uz_uz/"
+|       hreflang="uz"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/vi_vn/"
+|       hreflang="vi"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/zh_cn/"
+|       hreflang="zh-Hans"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/zh_hk/"
+|       hreflang="zh-HK"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/zh_tw/"
+|       hreflang="zh-TW"
+|       rel="alternate"
+|     "
+		"
+|     <link>
+|       href="https://www.photopea.com/l/zu_za/"
+|       hreflang="zu"
+|       rel="alternate"
+|     "
+		
+		"
+|     <link>
+|       href="promo/icon512.png"
+|       rel="apple-touch-icon"
+|     "
+		"
+|     <link>
+|       href="promo/icon512.png"
+|       rel="icon"
+|       sizes="512x512"
+|     "
+		"
+|     <link>
+|       href="promo/icon512.png"
+|       rel="image_src"
+|       type="image/png"
+|     "
+		"
+|     <link>
+|       crossorigin="use-credentials"
+|       href="manifest.json"
+|       rel="manifest"
+|     "
+		"
+|     <link>
+|       href="//chrome.google.com/webstore/detail/fmophgdjdipcbfjiopifpngdjmemonko"
+|       rel="chrome-webstore-item"
+|     "
+		
+		"
+|     <style>
+|       "		
+			body, button, input, textarea, select {  font-family: "Open Sans", "Segoe UI",  sans-serif;  }
+			body, input, select, button {  font-size: 13px;  }
+			
+			body {  margin:0;  background:#111418;  background-image: radial-gradient(52% 57% at 75% 12%, rgba(255, 90, 210, 0.23), transparent 72%), radial-gradient(45% 48% at 53% 43%, rgba(0, 190, 255, 0.18), transparent 72%), radial-gradient(45% 55% at 21% 21%, rgba(255, 170, 20, 0.19), transparent 72%);  }
+			#cap { 
+				font-size:1.2em;
+				color:#e6e6e6;
+				user-select:text;
+			}
+			#cap #ccont {  padding:0 2% 1em 2%;   }
+			#cap a { color:inherit;  font-weight:bold;  }
+			#cap p { margin-bottom:1.5em;  line-height:1.5em;  }
+			#cap button {  color:white;  font-weight:bold;  background-color:rgba(255,255,255,0.03);  border:1px solid rgba(255,255,255,0.5); cursor:pointer; font-size:1.3em; padding:0.7em 1.3em 0.8em 1.3em;  border-radius:500px;  display:block;  margin:30px auto;  transition: box-shadow .3s, background-color .3s;  }
+			#cap button:hover {  box-shadow: 0 0 30px #3482f6;  background-color:rgba(255,255,255,0.1);  }
+			#cap h1 { text-align:center;  font-size: 4em;  margin:0.5em 0 0 0;  }
+			.pair img, .pair video {  border-radius:1.6em;  }
+			
+			#cap h1, #cap h2 {  letter-spacing: -0.03em;  }
+			
+			#mid {  max-width:1100px;  margin:0px auto;  }
+			#bar {  padding:0.4em 0;  line-height:2.5em;  background:#111418;  padding:0.7em 2.5%;    }
+			#bar a {  text-decoration:none;  font-weight:normal;  margin:0 10px;  bottom:4px;  position:relative;  }
+			
+			
+			
+			.pair {  display:flex;  margin:3em 0;  }
+			.pair div {  width:50%;  }
+			.pair h2 {  margin:0;  }
+			
+			@media (max-width: 600px) {
+			.pair {  display:block;  margin:3em 1em;  }
+			.pair div {  width:100%;  }
+			}
+			
+			.pair p {  margin: 0.2em 0;  opacity:0.6;  }
+			.pair div {padding: 1em 0;}
+		"
+|     "		
+	"
+|     <link>
+|       href="style/all10.css"
+|       rel="stylesheet"
+|   "
+	
+	"
+|   <body>
+|     class="theme0"
+|     style="overscroll-behavior: contain"
+|     "		
+		
+		"
+|     <div>
+|       id="cap"
+|       style="display: none"
+|       "
+			"
+|       <div>
+|         id="bar"
+|         "
+				"
+|         <img>
+|           alt="Photopea logo"
+|           height="512"
+|           loading="lazy"
+|           src="promo/icon512.png"
+|           style="width:36px; height:auto; margin:0 6px -6px 0"
+|           width="512"
+|         " 
+				"
+|         <b>
+|           style="font-size:34px;  margin-right:20px"
+|           "Photopea"
+|         "
+				"
+|         <a>
+|           href="//www.photopea.com/learn"
+|           target="_blank"
+|           title="Learn photo editing"
+|           "Learn"
+|         "
+				"
+|         <a>
+|           href="//www.photopea.com/tuts"
+|           target="_blank"
+|           title="Graphics tutorials"
+|           "Tutorials"
+|         "
+				"
+|         <a>
+|           href="//www.photopea.com/templates"
+|           target="_blank"
+|           title="Free PSD templates"
+|           "Templates"
+|         "
+				"
+|         <a>
+|           href="//www.photopea.com/api"
+|           target="_blank"
+|           title="Insert a photo editor into your product"
+|           "API"
+|         "
+			"
+|       "
+			
+			"
+|       <div>
+|         id="ccont"
+|         "
+			"
+|         <h1>
+|           "Free Online Photo Editor"
+|         "
+			"
+|         <h2>
+|           style="text-align:center"
+|           "Unlock your creativity with the best free photo editor."
+|         "
+			"
+|         <p>
+|           style="text-align:center; font-size:1em; opacity:0.6"
+|           "Transform your photos with professional-grade tools in a free online photo editor that works right in your browser. No downloads, no hassle."
+|         "
+			"
+|         <button>
+|           onclick="addPP()"
+|           "Start using Photopea"
+|         "
+			
+			"
+|         <div>
+|           id="mid"
+|           "								
+				"
+|           <div>
+|             class="pair"
+|             "
+					"
+|             <div>
+|               style="text-align:center;"
+|               "
+						"
+|               <img>
+|                 alt="Photo editor on a laptop"
+|                 height="800"
+|                 loading="lazy"
+|                 src="img/table.webp"
+|                 style="width:80%; height:auto;"
+|                 width="800"
+|               "
+					"
+|             "
+					"
+|             <div>
+|               "
+						"
+|               <h2>
+|                 "Fully Local"
+|               "
+						"
+|               <p>
+|                 "There are no uploads. Photopea runs on your device, using your CPU and your GPU. All files open instantly, and never leave your device."
+|               "
+						
+						"
+|               <h2>
+|                 "Cost-Effective"
+|               "
+						"
+|               <p>
+|                 "Enjoy all the premium features without spending a dime."
+|               "
+						
+						"
+|               <h2>
+|                 "Convenient Editor"
+|               "
+						"
+|               <p>
+|                 "No need to install heavy software on your device. Just open your browser and start editing."
+|               "
+						
+						"
+|               <h2>
+|                 "Runs Everywhere"
+|               "
+						"
+|               <p>
+|                 "Our photo editor runs on any device. The better hardware you have, the better it runs."
+|               "
+						
+						"
+|               <button>
+|                 onclick="addPP()"
+|                 "Start using Photopea"
+|               "
+						
+					"
+|             "
+				"
+|           "
+				
+				
+				"
+|           <div>
+|             class="pair"
+|             "
+					"
+|             <div>
+|               "
+						
+						"
+|               <h2>
+|                 "Professional Editor"
+|               "
+						"
+|               <p>
+|                 "Photopea offers a full suite of editing tools, from basic features like cropping and resizing to advanced features such as layering, masking, and blending."
+|               "
+						
+						"
+|               <h2>
+|                 "Full PSD support"
+|               "
+						"
+|               <p>
+|                 "Photopea fully supports a popular PSD format, both opening and saving files. It is the main format of Photopea."
+|               "
+						
+						"
+|               <h2>
+|                 "Swiss knife for graphics"
+|               "
+						"
+|               <p>
+|                 "Open and edit PNG, JPG, GIF, BMP, WEBP, SVG, PDF, AI, AVIF, DDS, HEIC, TIFF, MP4, TGA, CDR, PDN, EPS, INDD, Figma and 
+						"
+|                 <a>
+|                   href="//github.com/photopea/photopea?tab=readme-ov-file#supported-formats"
+|                   target="_blank"
+|                   "40 other formats"
+|                 "."
+|               "
+					
+						"
+|               <h2>
+|                 "Perfect RAW support"
+|               "
+						"
+|               <p>
+|                 "Photopea opens DNG, CR2, CR3, NEF, ARW, RW2, RAF, ORF and FFF files. Set the Exposure, Color Balance, 
+						Contrast, Highlights and Shadows, etc."
+|               "
+						"
+|               <button>
+|                 onclick="addPP()"
+|                 "Start using Photopea"
+|               "
+					"
+|             "
+					"
+|             <div>
+|               style="text-align:center;"
+|               "
+						"
+|               <img>
+|                 alt="Photo editor on a phone"
+|                 height="1328"
+|                 loading="lazy"
+|                 src="img/hand_phone.webp"
+|                 style="width:70%; height:auto;"
+|                 width="1044"
+|               "
+					"
+|             "
+				"
+|           "
+				
+				
+				"
+|           <div>
+|             class="pair"
+|             "
+					"
+|             <div>
+|               style="text-align:center"
+|               "
+						"
+|               <video>
+|                 autoplay=""
+|                 id="goats"
+|                 loop=""
+|                 muted=""
+|                 preload="none"
+|                 src="img/goats.mp4"
+|                 style="width:80%; height:auto;"
+|               "
+						
+					"
+|             "
+					"
+|             <div>
+|               "
+						"
+|               <h2>
+|                 "State-of-the-art AI"
+|               "
+						"
+|               <p>
+|                 <a>
+|                   href="//x.com/photopeacom/status/1735723561950539852/video/1"
+|                   target="_blank"
+|                   "Remove background with one click"
+|                 ",
+						or "
+|                 <a>
+|                   href="//x.com/photopeacom/status/1661425407944425494/video/1"
+|                   target="_blank"
+|                   "replace any part of an image"
+|                 "
+						with a new content through a text description."
+|               "
+						
+						"
+|               <h2>
+|                 "All Essential Features"
+|               "
+						"
+|               <p>
+|                 "We have Layers, Masks, Layer Styles, Smart Objects, Adjustment Layers, Channels, Paths and more!"
+|               "
+						
+						"
+|               <h2>
+|                 "Adjustments and Filters"
+|               "
+						"
+|               <p>
+|                 "Do you need Levels and Curves? A Gaussian Blur? Or advanced stuff such as Liquify or Puppet Warp? We have it all!"
+|               "
+						
+						"
+|               <h2>
+|                 "Vector Graphics"
+|               "
+						"
+|               <p>
+|                 "Create and edit vector graphics directly within the editor. Perfect for designers working on logos, icons, or illustrations."
+|               "
+						
+						"
+|               <button>
+|                 onclick="addPP()"
+|                 "Start using Photopea"
+|               "
+					"
+|             "
+				"
+|           "
+				
+				"
+|           <h2>
+|             style="text-align:center"
+|             "Who Can Benefit from our Free Photo Editor?"
+|           "
+				"
+|           <div>
+|             class="pair"
+|             "
+					"
+|             <div>
+|               "
+						"
+|               <h2>
+|                 "Social Media Enthusiasts"
+|               "
+						"
+|               <p>
+|                 "Enhance your photos before sharing them on platforms like Instagram, Facebook, or Twitter. Make every post stand out with unique edits."
+|               "
+
+						"
+|               <h2>
+|                 "Students and Educators"
+|               "
+						"
+|               <p>
+|                 "Create stunning visuals for presentations, assignments, and more. Our free online photo editor is a great tool for educational projects."
+|               "
+
+						"
+|               <h2>
+|                 "Small Business Owners"
+|               "
+						"
+|               <p>
+|                 "Design promotional materials, edit product photos, and create engaging content for your website or online store, all without spending on expensive software."
+|               "
+
+						"
+|               <h2>
+|                 "Graphic Designers"
+|               "
+						"
+|               <p>
+|                 "Whether you’re a freelancer or part of a design team, Photopea’s free photo editor offers all the features you need to produce professional-quality work."
+|               "
+							
+						"
+|               <button>
+|                 onclick="addPP()"
+|                 "Start using Photopea"
+|               "
+					"
+|             "
+					"
+|             <div>
+|               style="text-align:center;"
+|               "
+						"
+|               <img>
+|                 alt="Freelancer using a photo editor"
+|                 height="853"
+|                 loading="lazy"
+|                 src="img/laptop.webp"
+|                 style="width:80%; height:auto;"
+|                 width="853"
+|               "
+					"
+|             "
+				"
+|           "
+				
+				"
+|           <p>
+|             style="text-align:center"
+|             "
+				  "
+|             <a>
+|               href="mailto:support@photopea.com"
+|               "support@photopea.com"
+|             " 
+				| "
+|             <a>
+|               href="/privacy.html"
+|               target="_blank"
+|               "Privacy Policy"
+|             "
+				| "
+|             <a>
+|               href="//x.com/photopeacom"
+|               target="_blank"
+|               "Twitter"
+|             "
+				| "
+|             <a>
+|               href="//facebook.com/photopea/"
+|               target="_blank"
+|               "Facebook"
+|             "
+				| "
+|             <a>
+|               href="//reddit.com/r/photopea/"
+|               target="_blank"
+|               "Reddit"
+|             "
+				"
+|           "
+			"
+|         "
+			"
+|       "
+		"
+|     "
+		
+		
+		"
+|     <script>
+|       "
+			window.___osw = window.innerWidth;  console.log(window.innerWidth);
+			var cap = document.getElementById("cap"), added=false;
+			var href = window.location.href;
+			var ls = window.localStorage, ppp=null;  if(ls) {  ppp=ls.getItem("_ppp");  if(ppp) ppp=JSON.parse(ppp);  }  if(ppp==null) ppp={};
+			
+			function addPP() {
+				cap.style.display="none";  
+				if(ppp) {  ppp["capShown"]="false";  ls.setItem("_ppp", JSON.stringify(ppp));   }
+				if(added) return;  added=true;  console.log("adding");
+				var fls = [
+					"style/all10.css",
+					"code/ext/ext1792610350.js",
+					"code/dbs/DBS1792677468.js",
+					"code/pp/pp1792675746.js"
+				];
+				var fromCDN = false;  //window.location.host=="www.photopea.com" && !window.location.href.endsWith("nocdn");
+				var ao = window.location.ancestorOrigins;
+				if(ao) for(var i=0; i<ao.length; i++) if(ao[i].indexOf("figma.com")!=-1) fromCDN=false;
+				
+				for(var i=0; i<fls.length; i++) {
+					var url = (fromCDN?"//vecpea.com/":"")+fls[i], isJS = url.endsWith(".js");
+					var el = document.createElement(isJS ? "script" : "link");
+					el.setAttribute(isJS ? "src" : "href",url);
+					if(!isJS) el.setAttribute("rel","stylesheet");
+					else el.async=false;
+					
+					(isJS ? document.body : document.head).appendChild(el);
+				}
+			}
+			
+			if(href.indexOf("#")!=-1 || href.indexOf("=")!=-1 || ppp["capShown"]=="false") addPP();
+			else {
+				cap.style.display="";	
+				window.addEventListener("load", function () {  var v = document.getElementById("goats");  v.src = "img/goats.mp4";  v.play();  });
+				if(Math.random()<0.1) {
+					fetch("//www.photopea.com/papi/event.php?id=fst_Visit");
+					window.__otime = Date.now();
+					window.addEventListener("unload", function(e) {
+						if((Date.now()-window.__otime)<10000 && ppp && ppp["capShown"]!="false") fetch("//www.photopea.com/papi/event.php?id=fst_Left");  // User left in less than 10 seconds without clicking on "Start using Photopea"
+					});
+				}
+			}				
+		"
+|     "
+	"
+|     <script>
+|       src="code/ext/ext1792610350.js"
+|     <script>
+|       src="code/dbs/DBS1792677468.js"
+|     <script>
+|       src="code/pp/pp1792675746.js"
+|     <input>
+|       class=""
+|       multiple=""
+|       style="display:none"
+|       type="file"
+|     <div>
+|       class="flexrow app"
+|       <div>
+|         <div>
+|           class=""
+|         <div>
+|           class="cmanager"
+|           <div>
+|             class="alertcont"
+|             style="pointer-events:none"
+|           <div>
+|             class="alertcont"
+|             style="pointer-events:none; transition: transform 0.7s;  margin-top: 5.5em;  transform: translateY(0em);"
+|         <div>
+|           style="position:relative; width: 1186px; height: 31px; overflow:hidden; white-space: nowrap; app-region:drag;"
+|           <div>
+|             style="float: right; padding: 4px; display: ; position: relative; z-index: 1; app-region: no-drag; right: 0px"
+|             <button>
+|               class="fitem"
+|               style="margin-left: 4px; cursor: pointer; display: "
+|               "About"
+|             <button>
+|               class="fitem"
+|               style="margin-left: 4px; cursor: pointer; display: "
+|               "Report a bug"
+|             <button>
+|               class="fitem"
+|               style="margin-left: 4px; cursor: pointer; display: "
+|               "Learn"
+|             <button>
+|               class="fitem"
+|               style="margin-left: 4px; cursor: pointer; display: "
+|               "Blog"
+|             <button>
+|               class="fitem"
+|               style="margin-left: 4px; cursor: pointer; display: "
+|               "API"
+|             <button>
+|               class="fitem"
+|               style="margin-left: 4px; cursor: pointer; display: "
+|               <svg>
+|                 class="gsicon"
+|                 height="20"
+|                 viewBox="0 0 24 24"
+|                 width="20"
+|                 xmlns="http://www.w3.org/2000/svg"
+|                 <path>
+|                   d="m21.325 9.308c-.758 0-1.425.319-1.916.816-1.805-1.268-4.239-2.084-6.936-2.171l1.401-6.406 4.461 1.016c0 1.108.89 2.013 1.982 2.013 1.113 0 2.008-.929 2.008-2.038s-.889-2.038-2.007-2.038c-.779 0-1.451.477-1.786 1.129l-4.927-1.108c-.248-.067-.491.113-.557.365l-1.538 7.062c-2.676.113-5.084.928-6.895 2.197-.491-.518-1.184-.837-1.942-.837-2.812 0-3.733 3.829-1.158 5.138-.091.405-.132.837-.132 1.268 0 4.301 4.775 7.786 10.638 7.786 5.888 0 10.663-3.485 10.663-7.786 0-.431-.045-.883-.156-1.289 2.523-1.314 1.594-5.115-1.203-5.117zm-15.724 5.41c0-1.129.89-2.038 2.008-2.038 1.092 0 1.983.903 1.983 2.038 0 1.109-.89 2.013-1.983 2.013-1.113.005-2.008-.904-2.008-2.013zm10.839 4.798c-1.841 1.868-7.036 1.868-8.878 0-.203-.18-.203-.498 0-.703.177-.18.491-.18.668 0 1.406 1.463 6.07 1.488 7.537 0 .177-.18.491-.18.668 0 .207.206.207.524.005.703zm-.041-2.781c-1.092 0-1.982-.903-1.982-2.011 0-1.129.89-2.038 1.982-2.038 1.113 0 2.008.903 2.008 2.038-.005 1.103-.895 2.011-2.008 2.011z"
+|             <button>
+|               class="fitem"
+|               style="margin-left: 4px; cursor: pointer; display: "
+|               <svg>
+|                 class="gsicon"
+|                 height="20"
+|                 viewBox="0 0 24 24"
+|                 width="20"
+|                 xmlns="http://www.w3.org/2000/svg"
+|                 <path>
+|                   d="M23.954 4.569c-.885.389-1.83.654-2.825.775 1.014-.611 1.794-1.574 2.163-2.723-.951.555-2.005.959-3.127 1.184-.896-.959-2.173-1.559-3.591-1.559-2.717 0-4.92 2.203-4.92 4.917 0 .39.045.765.127 1.124C7.691 8.094 4.066 6.13 1.64 3.161c-.427.722-.666 1.561-.666 2.475 0 1.71.87 3.213 2.188 4.096-.807-.026-1.566-.248-2.228-.616v.061c0 2.385 1.693 4.374 3.946 4.827-.413.111-.849.171-1.296.171-.314 0-.615-.03-.916-.086.631 1.953 2.445 3.377 4.604 3.417-1.68 1.319-3.809 2.105-6.102 2.105-.39 0-.779-.023-1.17-.067 2.189 1.394 4.768 2.209 7.557 2.209 9.054 0 13.999-7.496 13.999-13.986 0-.209 0-.42-.015-.63.961-.689 1.8-1.56 2.46-2.548l-.047-.02z"
+|             <button>
+|               class="fitem"
+|               style="margin-left: 0px; cursor: pointer; display: "
+|               <svg>
+|                 class="gsicon"
+|                 height="20"
+|                 viewBox="0 0 24 24"
+|                 width="20"
+|                 xmlns="http://www.w3.org/2000/svg"
+|                 <path>
+|                   d="M23.9981 11.9991C23.9981 5.37216 18.626 0 11.9991 0C5.37216 0 0 5.37216 0 11.9991C0 17.9882 4.38789 22.9522 10.1242 23.8524V15.4676H7.07758V11.9991H10.1242V9.35553C10.1242 6.34826 11.9156 4.68714 14.6564 4.68714C15.9692 4.68714 17.3424 4.92149 17.3424 4.92149V7.87439H15.8294C14.3388 7.87439 13.8739 8.79933 13.8739 9.74824V11.9991H17.2018L16.6698 15.4676H13.8739V23.8524C19.6103 22.9522 23.9981 17.9882 23.9981 11.9991Z"
+|           <div>
+|             style="position: absolute; app-region: no-drag; left: 0; top: 0"
+|             <div>
+|               class="topbar"
+|               style="left: 0px; position: relative"
+|               <span>
+|                 <button>
+|                   "File"
+|                 <button>
+|                   "Edit"
+|                 <button>
+|                   "Image"
+|                 <button>
+|                   "Layer"
+|                 <button>
+|                   "Select"
+|                 <button>
+|                   "Filter"
+|                 <button>
+|                   "View"
+|                 <button>
+|                   "Window"
+|                 <button>
+|                   "More"
+|               <span>
+|                 <button>
+|                   class="fitem bbtn"
+|                   style="color:#ffffff; background-color:#bb0000"
+|                   "Account"
+|                 <button>
+|                   class="fitem"
+|                   style="padding:2px"
+|                   title="Find"
+|                   <img>
+|                     alt=""
+|                     class="autoscale gsicon"
+|                     src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAKAAAACgBAMAAAB54XoeAAAAHlBMVEUAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAC3KG9qAAAACnRSTlMA/oNIHAXwxtytrZ5dxAAAA+5JREFUeJztmz1zEzEQhm9sHwylAthOd4kDpMQZCJQmyQToEjIToCN8TegwCcxQms8Wp4C/S2Isne5O0r5a7WRSsO0p7z2rXe1JKyfLXLa5/OfHQffw8/Id5+NIy9d+K2PvBjupenuW3Ezybpre2oGqWXeQIJffq8ud2RHb7fy+S0+pr1xFj96pIk/voU9PqWOO3hO/nlI34vU645BgbxQtuB7SU+pVrF7QYYbTYYcZTgcirC0q0p0JLdiPQXxE6yn1jQ/4YbCVZVtrt9iI1Rn8YirW3ipvFvOx9VfVclUpZz20SLRsvZXqsw1bsQAFh9bfrNQfblgPr2J6HQvCMU3WBHdHkODT8i9eup7fLJ9/hASXiMSwkmoB0bM89uRF6TTk8xUzfNGTFvnUDPkFCJYxLnxDyrwC4pxPKEAbsU/ndhsJYZkIt0nBZ+EQ/7My0N9JQTOFwenBRs1sTIbkzExYepReGxxp3ktNYgv05QHkyKntgwPNi98Qgnq2qUVlFigVFZ2y5LLXJWSRGKdf/JoS3NauhNeKCTK56k0NCYe5hQ2zX11A7+1Telk2gXy5hMakjMqL4Cidr0Cd0wl2DRp1nRbchd6t/XhPC16GZkcLFrRgCxKcxguGl8oYTcMyEcN1bhIvGE5ZvZRHtGBnPrR7voJ6gQJbyVyPPV/Biz+H4mkjntjiS0+8OIiXr+F8lFiBFf8EiH+k9GeU2A+cWq7XQPgzKv6hF9+KGEfCU53BmyX57ZxOBrENp/iW2AwkJnEIvlj+WCF+8AEPXevQqJmJHx7Fj7fiB3DxFoF8E4Nuszw2A7DWknQjKKZVRSfNjMBqph01H9vdSowQb/ehHUS4IYkiVlqmqtoyVTXDEGtNXXNZtrla1wMRHW3nnbzRdo5BhBrjKYghwxCBy4VIxLE0InlBE4tIXSHFI0Y4DSIGnR4wEMMXhUMGYvAqs10pEiBi8LK1ErSFDLtaCV0HVxGVevvzBLlxD1xYO/IK8dx/pe5Y71Bw/Jf+jpKEIGbenyVwEf3mSFQQ0WOO1XnREHNxxOfiiNOLj7gkjbgvjThsCqYhOgTTEJtzmIjoEkxCdAqmIDoFUxDdggmIrignIXoE+Yi7bkE+YssjyEZ01NhERN+Wio3o3UeyEX1HED6i7wjCRtz2CPIRGzu0VETfgYGNWN97/kcUReQK+soiX7AtLehD5At6EPmCbkTgtwNxiFRfPxoxaZfjQiTvPGIRgcu3OMQiSbCJCP76D0dM3L83Eckf7cQiAnfAUYhJae1CTPY4q5XudI+rpTs5xjOzEAsRwXIbIQNYbsZ6EjN4ZvP9Yi/xfzBsxeVP6vBkzvcXqtJVkbl96cQAAAAASUVORK5CYII="
+|                 <button>
+|                   class="fitem"
+|                   style="padding:2px"
+|                   title="Fullscreen"
+|                   <svg>
+|                     class="gsicon"
+|                     height="20"
+|                     version="1.1"
+|                     viewBox="8 8 20 20"
+|                     width="20"
+|                     <path>
+|                       d="m 10,16 2,0 0,-4 4,0 0,-2 L 10,10 l 0,6 0,0 z"
+|                     <path>
+|                       d="m 20,10 0,2 4,0 0,4 2,0 L 26,10 l -6,0 0,0 z"
+|                     <path>
+|                       d="m 24,24 -4,0 0,2 L 26,26 l 0,-6 -2,0 0,4 0,0 z"
+|                     <path>
+|                       d="M 12,20 10,20 10,26 l 6,0 0,-2 -4,0 0,-4 0,0 z"
+|         <div>
+|           class="flexrow"
+|           <div>
+|             <div>
+|               class="panelblock mainblock"
+|               <div>
+|                 class="block"
+|                 <div>
+|                   class="panelhead"
+|                   style="max-width: NaNpx; position: relative; padding: 0px"
+|                 <div>
+|                   class="body"
+|                   style="cursor:auto; height:868px; width:NaNpx; overflow:hidden; position:relative;"
+|                   <div>
+|                     class="flexrow storageset"
+|                     style="background: var(--bg-panel); width: NaNpx; height: 868px"
+|                     <div>
+|                       style="width: 210px; padding-top: 32px"
+|                       <div>
+|                         class=" active"
+|                         style="padding: 8px 36px; cursor: pointer; display: ; margin-left: 0px"
+|                         <img>
+|                           class="gsicon"
+|                           src="data:image/svg+xml;base64,PHN2ZyB2ZXJzaW9uPSIxLjIiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyIgdmlld0JveD0iMCAwIDQ5MCA0OTAiIHdpZHRoPSI0OTAiIGhlaWdodD0iNDkwIj48c3R5bGU+PC9zdHlsZT48cGF0aCBmaWxsLXJ1bGU9ImV2ZW5vZGQiIGQ9Im00ODMuNSAyNDkuOWMtMy4xIDUuMi0xMy45IDEyLjYtMjkuMSAyLjFsLTIuMS0ydjIxOS4zYy0xIDEwLjQtOS40IDE5LjgtMjAuOCAxOS44aC0zNzIuNGMtMTEuNCAwLTIwLjgtOS40LTIwLjgtMjAuOHYtMjIwLjRsLTMuMSAzYy04LjMgOC40LTIwLjcgNy4zLTI5LjEtMWMtOC40LTguMy03LjMtMjAuOCAxLTI5LjFsMjIzLjYtMjE1LjNjOC4zLTcuMyAyMC44LTcuMyAyOC4xIDBsNjYuNiA2NC4xdi00OC41YzAtMTEuNCA5LjQtMjAuOCAyMC44LTIwLjhjMTEuNCAwIDIwLjggOS40IDIwLjggMjAuOHY4OC41bDExNS41IDExMS4yYzguMyA3LjMgOC4zIDIwLjggMSAyOS4xem0tNzIuOC01LjJoLTMzMC44djIwMy45aDg3LjR2LTEzMi4xYzAtMTEuNCA5LjQtMjAuOCAyMC44LTIwLjhoMTEzLjRjMTEuNCAwIDIwLjggOS40IDIwLjggMjAuOHYxMzIuMWg4OC40em0tMTI5IDkyLjZoLTcyLjh2MTExLjNoNzIuOHptMTIzLjQtMTMzLjFsLTE1OS44LTE1NWwtMTYxLjQgMTU1eiIvPjwvc3ZnPg=="
+|                           style="margin:0 10px -6px 0; width:22px;"
+|                         " Home"
+|                       <div>
+|                         style="padding: 8px 36px; cursor: pointer; display: ; margin-left: 0px"
+|                         <img>
+|                           class="gsicon"
+|                           src="data:image/svg+xml;base64,PHN2ZyB2ZXJzaW9uPSIxLjIiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyIgdmlld0JveD0iMCAwIDQ5MCA0OTAiIHdpZHRoPSI0OTAiIGhlaWdodD0iNDkwIj48cGF0aCBmaWxsLXJ1bGU9ImV2ZW5vZGQiIGQ9Im0wIDMzNy45di0yNzcuMWMwLTIxLjggMTcuNy0zOS41IDM5LjUtMzkuNWg0MTAuMmMyMS44IDAgMzkuNSAxNy43IDM5LjUgMzkuNXYyNzcuMWMwIDIxLjgtMTcuNyAzOS41LTM5LjUgMzkuNWgtMTYwLjl2NDQuMWgzMS40YzUuMyAwIDkuNSA0LjMgOS41IDkuNXYyNy41YzAgNS4zLTQuMyA5LjUtOS41IDkuNWgtMTUxLjJjLTUuMyAwLTkuNS00LjMtOS41LTkuNXYtMjcuNWMwLTUuMyA0LjMtOS41IDkuNS05LjVoMzEuNHYtNDQuMWgtMTYwLjljLTIxLjggMC0zOS41LTE3LjgtMzkuNS0zOS41em01My45LTE0LjhsMzgxLjQgMC4xdi0yNDhoLTM4MS40eiIvPjwvc3ZnPg=="
+|                           style="margin:0 10px -6px 0; width:22px;"
+|                         " This Device"
+|                       <div>
+|                         style="padding: 8px 36px; cursor: pointer; display: ; margin-left: 0px"
+|                         <img>
+|                           class="gsicon"
+|                           src="data:image/svg+xml;base64,PHN2ZyB2ZXJzaW9uPSIxLjIiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyIgdmlld0JveD0iMCAwIDIwOCAyMDgiIHdpZHRoPSIyMDgiIGhlaWdodD0iMjA4Ij48c3R5bGU+PC9zdHlsZT48cGF0aCAgZD0ibTU1IDI4LjNoMTAxLjZjMTMuNSAwIDI2LjEgNC41IDI4LjMgMTAuNWwyMS45IDU5LjNjNCAxMC43LTguNyAxOS45LTI4LjUgMTkuOWgtMTI1LjhsOS4xLTQ3LjJxMC0wLjEgMC4xLTAuM2MyLjgtMTMuOSAyNi4yLTI0LjEgNTIuNy0yNC4xIDE1LjggMCAyOS42IDYgMzAuOCAxMy45IDEuMyA4LjQtMTIuMSAxNS44LTMwLjIgMTUuOC02IDAtMTAuOC0yLjUtMTAuOC01LjYgMC4xLTIuOSA0LjgtNS4yIDEwLjYtNS4yIDUuNyAwIDEwLjItMi4zIDEwLTUtMC4xLTIuNy00LjctNC45LTEwLjItNC45LTE2LjYgMC0zMC43IDYuNi0zMS42IDE1LjEtMS4xIDkuMyAxMy4zIDE3LjQgMzIuMyAxNy40IDMxLjYgMCA1My45LTEzLjIgNTAuMy0yNy42LTMuMi0xMi45LTI2LTIyLjItNTEuNC0yMi4yLTM1LjYgMC02OC4yIDEzLjMtNzMuOCAzMi40cS0wLjEgMC4yLTAuMSAwLjRoLTAuMmwtMTMuNSA0N2MtMTguMS0wLjktMjguOS05LjctMjQuNy0xOS44bDI0LjMtNTkuM2MyLjQtNiAxNS4yLTEwLjUgMjguOC0xMC41eiIvPjxwYXRoICBkPSJtMCAxMTZjMCAwIDAgMTUgMjcuNiAxNWgxNTUuM2MyNS4xIDAgMjUuMS0xNSAyNS4xLTE1bC0xMCA1MGMwIDAgMCAxNS0yNS42IDE1aC0xMzQuNWMtMjcuOSAwLTI3LjktMTUtMjcuOS0xNSIvPjwvc3ZnPg=="
+|                           style="margin:0 10px -6px 0; width:22px;"
+|                         " PeaDrive"
+|                       <div>
+|                         style="padding: 8px 36px; cursor: pointer; display: ; margin-left: 0px"
+|                         <img>
+|                           class="gsicon"
+|                           src="data:image/svg+xml;base64,PHN2ZyB2ZXJzaW9uPSIxLjIiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyIgdmlld0JveD0iMCAwIDI0MCAyNDAiPjxwYXRoIGQ9Im02MSAyNC45YzIuNC0xLjUgNS42LTEuNSA4IDBsNTEgMzIuNWw1MS0zMi41YzIuNC0xLjUgNS42LTEuNSA4IDBsNTUgMzUuMWMyLjIgMS4zIDMuNSAzLjcgMy41IDYuM2MwIDIuNi0xLjMgNC45LTMuNSA2LjNsLTQ1IDI4LjdsNDUgMjguN2MyLjIgMS40IDMuNSAzLjggMy41IDYuNGMwIDIuNS0xLjMgNC45LTMuNSA2LjNsLTQ2IDI5LjNsMi4yIDEuNWMyIDEuNCAzLjMgMy43IDMuMyA2LjJjMCAyLjYtMS4zIDQuOS0zLjMgNi4zbC02NiA0NGMtMi42IDEuNy01LjggMS43LTguNCAwbC02Ni00NGMtMi0xLjQtMy4zLTMuNy0zLjMtNi4yYzAtMi42IDEuMy00LjkgMy4zLTYuM2wyLjItMS41bC00Ni0yOS4zYy0yLjItMS40LTMuNS0zLjgtMy41LTYuM2MwLTIuNiAxLjMtNSAzLjUtNi40bDQ1LTI4LjdsLTQ1LTI4LjdjLTIuMi0xLjQtMy41LTMuNy0zLjUtNi4zYzAtMi42IDEuMy01IDMuNS02LjN6bTQ0LjggMTExLjJsLTQwLjgtMjUuOWwtNDEgMjYuMWw0MSAyNi4yem02OS4yIDI2LjNsNDEuMS0yNi4ybC00MS4xLTI2LjFsLTQwLjggMjZ6bS01NS0xNy4zbC01Mi41IDM0LjVsNTIuNSAzNWw1Mi41LTM1em0tNDEtNDRsNDEgMjYuMmw0MS0yNi4ybC00MS0yNi4xem0tMTQtNjEuMmwtNDEgMjYuMmw0MSAyNi4xbDQxLjEtMjYuMXptNjkgMjYuMWw0MSAyNi4ybDQxLTI2LjJsLTQxLTI2LjF6Ii8+PC9zdmc+"
+|                           style="margin:0 10px -6px 0; width:22px;"
+|                         " Dropbox"
+|                       <div>
+|                         style="padding: 8px 36px; cursor: pointer; display: ; margin-left: 0px"
+|                         <img>
+|                           class="gsicon"
+|                           src="data:image/svg+xml;base64,PHN2ZyB2ZXJzaW9uPSIxLjIiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyIgdmlld0JveD0iMCAwIDIwMCAyMDAiPjxwYXRoIGQ9Im0xMzguNCA4My4yYzIxLjktMTMuOCA1MCA2LjkgNDIuMiAyOS41IDI1LjctMi4zIDI2LjYgNDEuOC0xLjkgNDIuM2gtMTA4LjZjLTI4LjUtMC4xLTM2LjItNDguNyA0LjItNTIgMi0zNy41IDQyLjgtNDQuNiA2NC4xLTE5Ljh6IE0xNTEuNCA3Mi4ybC0xMS4xIDMuMmMtMTkuOS0yMS45LTY1LjYtMjItNzIuMiAyMC4xLTI4LjQgMy4yLTM3LjUgMjkuMy0yNiA0OS42LTQ2LjUgMTItNTYuNS00NS4xLTE2LjUtNTMtOC43LTMxLjEgMjUuNS00OS4xIDQ1LjMtMzQuMiA2LjYtMjAuNiA1Mi42LTQxLjcgODAuNSAxNC4zeiIvPjwvc3ZnPg=="
+|                           style="margin:0 10px -6px 0; width:22px;"
+|                         " OneDrive"
+|                       <div>
+|                         style="padding: 8px 36px; cursor: pointer; display: ; margin-left: 0px"
+|                         <img>
+|                           class="gsicon"
+|                           src="data:image/svg+xml;base64,PHN2ZyB2ZXJzaW9uPSIxLjIiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyIgdmlld0JveD0iMCAwIDIwOCAyMDgiIHdpZHRoPSIyMDgiIGhlaWdodD0iMjA4Ij48cGF0aCBmaWxsLXJ1bGU9ImV2ZW5vZGQiIGQ9Im0xMzYuNCAxNS43bDcwLjYgMTE2LjJsLTM1IDU5LjVsLTE0My4zIDAuMWwtMjguNy01Mi42bDY5LjktMTIzLjN6bS0xMDMuMiAxNTIuN2w1OC0xMDAuN2wtMTctMjkuNmwtNTcuMSAxMDAuOXptNDIuNy00NC4xaDQ3LjdsLTIzLjgtNDEuNXptMTA5LjMgMTVsLTUyLjkgMC4xdi0wLjFoLTY0LjZsLTIxLjYgMzdoMTE3LjR6bS0wLjMtMTVsLTU3LTkzLjdsLTQwLjctMC4xbDIuOSA1LjFsNTAuOCA4OC43eiIvPjwvc3ZnPg=="
+|                           style="margin:0 10px -6px 0; width:22px;"
+|                         " Google Drive"
+|                       <div>
+|                         style="padding: 8px 36px; cursor: pointer; display: ; margin-left: 0px"
+|                         <img>
+|                           class="gsicon"
+|                           src="data:image/svg+xml;base64,PHN2ZyB2ZXJzaW9uPSIxLjIiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyIgdmlld0JveD0iMCAwIDIwOCAyMDgiIHdpZHRoPSIyMDgiIGhlaWdodD0iMjA4Ij48cGF0aCBmaWxsLXJ1bGU9ImV2ZW5vZGQiIGQ9Im0xMzYuNCAxNS43bDcwLjYgMTE2LjJsLTM1IDU5LjVsLTE0My4zIDAuMWwtMjguNy01Mi42bDY5LjktMTIzLjN6bS0xMDMuMiAxNTIuN2w1OC0xMDAuN2wtMTctMjkuNmwtNTcuMSAxMDAuOXptNDIuNy00NC4xaDQ3LjdsLTIzLjgtNDEuNXptMTA5LjMgMTVsLTUyLjkgMC4xdi0wLjFoLTY0LjZsLTIxLjYgMzdoMTE3LjR6bS0wLjMtMTVsLTU3LTkzLjdsLTQwLjctMC4xbDIuOSA1LjFsNTAuOCA4OC43eiIvPjwvc3ZnPg=="
+|                           style="margin:0 10px -6px 0; width:22px;"
+|                         " Pick any File "
+|                       <div>
+|                         style="padding: 8px 36px; cursor: pointer; display: ; margin-left: 0px"
+|                         <img>
+|                           class="gsicon"
+|                           src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAQAAAAEAAgMAAAAhHED1AAAAAXNSR0IB2cksfwAAAAlwSFlzAAALEwAACxMBAJqcGAAAAAxQTFRFAAAAAAAAAAAAAAAANek3lgAAAAR0Uk5TAP+TQ7iym4QAAAQ/SURBVHic7Vo7khMxEDVsERCwG+0ROIIDsjmCA2s8tTtVTA7BHEGXmCNQRZmAPQBVzCV8BAIyYorCWLblkfojd2syVi/a1aifpe7XrU9psSgoKCgoKCgoKCgoKHg+uNsOhkW9/XXN/idvfcKXmfbGfEjZv7tub8xH3v5WYm/ME2d/M8gI6pEhWMrs2UncSO2NoYcgHoAx7cwB0EMQhdCD8sKgIaix/RuNvTE9InirI2hmudABuvG1lgDOQTkDNAf1DIyZFQOHeA5LPUEs552eYBPav9Tbx4FUB9EhdII6iA6hE3Y5BIETMlTgMDkhQwUO1RwVOKwuBPd5BFM6DHkEl7KUJSMH78VMH05efJVL4L2YpUMH78VdLoHXYq69r0rZQTDGzguCD0N2EIzp5mSCQzsnExyajEyot5+mfzYZUXwK92K1vhw9xk5z6fQCdRpQy4Q+/klLyaBP7RfHWPs9IYM6tUw0IPAdIYM2Je4WaHdFJHOfimwPsqchdGRT2rIgf9dENUiWmBFUkA0ebp3KL1+H78MG0GeTIvAlaBoh9vixDxfH9ZlgeWkZkRCTBL6KTiO0cwkqpGQRwfS9Qn2TBC0i6JHDlSPo5hKsUC4pndgi1Sp1oCTASmxQ4iUJUC5oCVA2Hia1A13SBLAeqAmqo/1N2H0IPtff9/s/rsfdfr//QRGcNjWB/GOCbhGAXHAaIIODW0OCMSQg61oNgnBoCL5GZxDGERUYW0QADvV4zTvPIWSOCFYxAb3q2vimJCKAh1GS4CHcHxwQ9qoAwWAESBHsniEBjMKgJejSYfx298lghD8DhARWTXrnEiUTuJQAa5ZdUPkVEYDLoWXUc0NwQgJfsMggHB2E0yMmiOYAfq2iI1vHTdvt9rPrd3v4Y4h7jkcC5ISNtKieiw36sJGuC2tyXq5dSNCS2nAEwrXxLDIUhkZK4GWOCZYyAp9oA2hvpTuUiiFYaQl2iEC4S+MIOuk+kSPopTtVjqDSEgyg3Up361wYLdKWUkgjamJOLJyU8aCOBEtEwCRTTfh1pOqGL1Yw6Guic0WQsgWlIQg6wlXGX9gsQWtLOKyhr2Uskwp4VPVI7s86MgiuFe2l3v8l7Bl9VERkOFgqOpYSFwNycSXlzYFY3tHGVYvTapF9nUjsvbVAu38tTlWC3FTLYOkcl2Oky5QY+BSoBD7IKoFvA5TwlTY7DHbB1GopvH3u1fZ0ysvMhumUl+nF7kKQeTl+8WGmFsO9+X0OQbizzioJ4fkkS0pVQJAjpfh4kqGE+ICUoYQuIshQgo0I9EoA1x36ogIOmfo5gBmo5wBnoJ4DfoWhnMOICHRaQu8XFsolknxNM8jtsQuVQ2Ce8+yk9o+0vfQ1UeI9kTAQ/Ism2YOkB9b+MAkBA/ucSeiGmnXACeRdUTj+qw/TFvvfWxZf91fNCwoKCgoKCgoKCgoK/iP8A4Y8W8cr97IuAAAAAElFTkSuQmCC"
+|                           style="margin:0 10px -6px 0; width:22px;"
+|                         " PeaGames"
+|                       <div>
+|                         style="padding: 8px 36px; cursor: pointer; display: ; margin-left: 0px"
+|                         <img>
+|                           class=""
+|                           src="https://www.photopea.com/promo/icon512.png"
+|                           style="margin:0 10px -6px 0; width:22px;"
+|                         " Photopea"
+|                       <div>
+|                         style="padding: 8px 36px; cursor: pointer; display: ; margin-left: 0px"
+|                         <img>
+|                           class=""
+|                           src="https://www.photopea.com/promo/icon512_vp.png"
+|                           style="margin:0 10px -6px 0; width:22px;"
+|                         " Vectorpea"
+|                       <div>
+|                         style="padding: 8px 36px; cursor: pointer; display: ; margin-left: 0px"
+|                         <img>
+|                           class=""
+|                           src="https://www.photopea.com/promo/icon512_jp.png"
+|                           style="margin:0 10px -6px 0; width:22px;"
+|                         " Jampea"
+|                     <div>
+|                       <div>
+|                         style="background: var(--bg-canvas); width: NaNpx; height: 868px"
+|                         <div>
+|                           style="position: relative; height: 100%; width: NaNpx; margin-left: NaNpx"
+|                           <img>
+|                             src="data:image/svg+xml;base64,PHN2ZyB2ZXJzaW9uPSIxLjIiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyIgdmlld0JveD0iMCAwIDkwMCAyMDAiIHdpZHRoPSI5MDAiIGhlaWdodD0iMjAwIj48c3R5bGU+LkF7ZmlsbDojZTZlNmU2fS5Ce2ZpbGw6IzE4YTQ5N308L3N0eWxlPjxwYXRoIGNsYXNzPSJBIiBkPSJtMjc2LjggMTUyaC0xOXYtMTAzLjloMzdxMTEuOSAwIDIwLjIgMy42cTguMiAzLjUgMTIuNCAxMXE0LjMgNy40IDQuMyAxOXEwIDExLjctNC4yIDE5LjNxLTQuMiA3LjYtMTIuNCAxMS4zcS04LjIgMy42LTE5LjkgMy42aC0xOC40em0wLTg4djM2LjFoMTYuMnE5LjcgMCAxNC41LTQuNHE0LjktNC40IDQuOS0xMy43cTAtOS40LTQuOS0xMy43cS00LjktNC4zLTE1LTQuM3ptODQuMSA4OGgtMTguNXYtMTExLjNoMTguNXY0OGwtNC4yLTMuM3E0LjctMy4zIDEwLjItNnE1LjUtMi43IDEzLjEtMi43cTkuOCAwIDE2IDQuM3E2LjEgNC4zIDkgMTJxMi45IDcuNyAyLjkgMTcuOHY0MS4yaC0xOC40di0zOS45cTAtMTAuNC0zLjMtMTUuM3EtMy40LTUtMTAuOS01cS02LjUgMC0xMC43IDNxLTQgMy03LjIgOC4xbDMuNS05Ljl6bTk3LjIgMS41cS0xMi4xIDAtMjAuNy01LjNxLTguNS01LjMtMTMtMTRxLTQuNS04LjgtNC41LTE5LjJxMC0xMC40IDQuNS0xOS4zcTQuNS04LjggMTMtMTQuMXE4LjYtNS4zIDIwLjctNS4zcTEyLjEgMCAyMC42IDUuM3E4LjUgNS4zIDEzIDE0LjFxNC41IDguOSA0LjUgMTkuM3EwIDEwLjQtNC41IDE5LjJxLTQuNSA4LjctMTMgMTRxLTguNSA1LjMtMjAuNiA1LjN6bTAtMTUuMnE5LjMgMCAxNC4yLTYuNHE1LjEtNi42IDUuMS0xNi45cTAtMTAuNC01LjEtMTdxLTQuOS02LjYtMTQuMi02LjZxLTkuMiAwLTE0LjMgNi42cS01IDYuNi01IDE3cTAgMTAuMyA1IDE2LjlxNS4xIDYuNCAxNC4zIDYuNHptODcuNCAxNS4yaC0xMy4ycS03IDAtMTEuNC0yLjlxLTQuMy0yLjktNi40LTcuM3EtMi4xLTQuNS0yLjEtOS4zdi00MS4xaC0xMC41bDEuNi0xNS4xaDguOXYtMTYuM2wxOC40LTJ2MTguM2gxNi4zdjE1LjFoLTE2LjN2MzMuNXEwIDUuNyAwLjcgOC4ycTAuNiAyLjUgMyAzLjFxMi40IDAuNiA3LjYgMC42aDV6bTQ3LjQgMHEtMTIuMSAwLTIwLjYtNS4ycS04LjYtNS4zLTEzLjEtMTQuMXEtNC41LTguNy00LjUtMTkuMXEwLTEwLjUgNC41LTE5LjNxNC41LTguOCAxMy4xLTE0LjFxOC41LTUuMyAyMC42LTUuM3ExMi4xIDAgMjAuNiA1LjNxOC42IDUuMyAxMyAxNC4xcTQuNSA4LjggNC41IDE5LjNxMCAxMC40LTQuNSAxOS4xcS00LjQgOC44LTEzIDE0LjFxLTguNSA1LjItMjAuNiA1LjJ6bTAtMTUuMXE5LjMgMCAxNC4yLTYuNXE1LjEtNi41IDUuMS0xNi44cTAtMTAuNS01LjEtMTdxLTQuOS02LjYtMTQuMi02LjZxLTkuMiAwLTE0LjMgNi42cS01IDYuNS01IDE3cTAgMTAuMyA1IDE2LjhxNS4xIDYuNSAxNC4zIDYuNXptNjkuMyA0OS42aC0xOC40di0xMTAuMmgxNC45bDMuNSAxMi40bC01LjUtMnE1LjEtNS4yIDExLjItOC40cTYtMy4xIDE0LjYtMy4xcTExIDAgMTguNCA1LjJxNy40IDUuMyAxMS4yIDE0cTMuOCA4LjggMy44IDE5LjJxMCAxMC40LTMuOCAxOS4xcS0zLjggOC44LTExLjIgMTQuMXEtNy40IDUuMi0xOC40IDUuMnEtOC42IDAtMTQuMS0yLjRxLTUuNC0yLjMtMTAuOS03LjVsNC43LTMuN3ptMTcuNS00OS42cTguMyAwIDEyLjgtNi41cTQuNi02LjUgNC42LTE2LjhxMC0xMC40LTQuNi0xNi44cS00LjUtNi41LTEyLjgtNi41cS02LjQgMC0xMC40IDNxLTQuMSAyLjktNiA4LjJxLTIgNS4yLTIgMTIuMXEwIDYuOSAyIDEyLjJxMS45IDUuMiA2IDguMXE0IDMgMTAuNCAzem04NC44IDE1LjFxLTEzLjQgMC0yMi40LTUuM3EtOC45LTUuNC0xMy40LTE0LjJxLTQuNC05LTQuNC0xOS41cTAtMTAuMiA0LjEtMTguOHE0LjItOC42IDEyLjMtMTMuOHE4LjEtNS4yIDE5LjgtNS4ycTEwLjcgMCAxNy44IDQuM3E3LjEgNC40IDEwLjcgMTEuOHEzLjUgNy4yIDMuNSAxNi4xcTAgMi40LTAuMyA0LjlxLTAuMyAyLjUtMC44IDUuMmgtNDhxMSA2LjkgNC4zIDExLjJxMy40IDQuMiA4LjEgNi4ycTQuOCAyIDEwLjMgMnE2LjUgMCAxMi0xLjZxNS42LTEuNyAxMC4zLTQuNWwwLjkgMTUuNnEtNC4zIDIuMi0xMC42IDMuOXEtNi4zIDEuNy0xNC4yIDEuN3ptLTIwLjYtNDdoMjkuOXEwLTMuMy0xLjItNi43cS0xLjMtMy40LTQuMy01LjdxLTIuOC0yLjMtNy44LTIuM3EtNy4xIDAtMTEuMiA0LjJxLTQuMSA0LjEtNS40IDEwLjV6bTc3LjMgNDdxLTUuOSAwLTEwLjgtMi42cS00LjktMi42LTcuOC03LjZxLTIuOS01LTIuOS0xMnEwLTYuMyAyLjktMTAuOHEyLjktNC41IDcuNy03LjVxNC44LTMgMTAuNC00LjdxNS42LTEuOCAxMS0yLjZxNS41LTAuOCA5LjctMXEtMC4zLTYuNC0zLjMtOS4zcS0zLTIuOS0xMC4xLTIuOXEtNSAwLTkuNyAxLjVxLTQuNyAxLjMtMTAuNiA0LjJsLTEuNy0xNXE2LjctMy4zIDEzLjQtNC45cTYuOC0xLjYgMTMuNy0xLjZxOC4zIDAgMTQuMyAyLjlxNiAzIDkuMyA5LjZxMy4yIDYuNSAzLjIgMTcuM3YyMHEwIDUuNiAwLjYgOC4xcTAuNSAyLjUgMS45IDMuMXExLjQgMC43IDQuMSAwLjdoMi4zbC0xLjYgMTUuMWgtNi43cS00LjEgMC03LjQtMXEtMy4yLTEuMS01LjUtM3EtMi4zLTItMy43LTQuNnEtMy42IDQuMS05LjkgNi40cS02LjEgMi4yLTEyLjggMi4yem03LjctMTQuMXEyLjUgMCA2LjEtMS4ycTMuNi0xLjQgNi41LTQuMXYtMTYuOXEtNS4yIDAuMi0xMC40IDEuN3EtNS4yIDEuNS04LjYgNC40cS0zLjUgMi45LTMuNSA3LjJxMCA0LjYgMi4zIDYuOHEyLjQgMi4xIDcuNiAyLjF6Ii8+PHBhdGggZmlsbC1ydWxlPSJldmVub2RkIiBjbGFzcz0iQiIgZD0ibTU5IDEyLjNoMTE3LjJjMTUuNiAwIDI4LjIgMTIuNyAyOC4yIDI4LjN2MTE3LjJjMCAxNS42LTEyLjYgMjguMi0yOC4yIDI4LjJoLTk5LjJsLTAuNC03NC44cTAtMC4zIDAtMC42YzAtMjguMyAyMi41LTUxLjMgNTAuNC01MS4zYzE2LjcgMCAzMC4zIDEzLjggMzAuMyAzMC44YzAgMTctMTMuNiAzMC44LTMwLjMgMzAuOGMtNS42IDAtMTAuMS00LjYtMTAuMS0xMC4zYzAtNS42IDQuNS0xMC4yIDEwLjEtMTAuMmM1LjYgMCAxMC4xLTQuNiAxMC4xLTEwLjNjMC01LjYtNC41LTEwLjItMTAuMS0xMC4yYy0xNi43IDAtMzAuMiAxMy43LTMwLjIgMzAuN2MwIDE3LjEgMTMuNSAzMC44IDMwLjIgMzAuOGMyNy45IDAgNTAuNC0yMi45IDUwLjQtNTEuM2MwLTI4LjMtMjIuNS01MS4zLTUwLjQtNTEuM2MtMzkgMC03MC42IDMyLjEtNzAuNiA3MS44cTAgMC40IDAgMC43aC0wLjFsMC4zIDc0LjZjLTE0LjUtMS4yLTI1LjktMTMuMy0yNS45LTI4LjF2LTExNy4yYzAtMTUuNiAxMi42LTI4LjMgMjguMy0yOC4zeiIvPjwvc3ZnPg=="
+|                             style="width:100%; filter: drop-shadow(4px 6px 4px rgba(0,0,0,0.25)); padding: 12px 0px"
+|                           <img>
+|                             src="data:image/svg+xml;base64,PHN2ZyB2ZXJzaW9uPSIxLjIiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyIgdmlld0JveD0iMCAwIDk3NyAxNTQiIHdpZHRoPSI5NzciIGhlaWdodD0iMTU0Ij48c3R5bGU+LmF7ZmlsbDojMDAwMjExfS5ie2ZpbGw6IzBjZn0uY3tmaWxsOiNmOTB9LmR7ZmlsbDojZmYwMGM0fS5le2ZpbGw6I2ZkYjMwMH0uZntmaWxsOiNlYTZjMDB9Lmd7ZmlsbDojZmRhZDAwfS5oe2ZpbGw6I2ZkZDIzMX0uaXtmaWxsOiNmZWVlYjd9Lmp7ZmlsbDojZmZmfS5re2ZpbGw6I2VhNGMzYX0ubHtmaWxsOm5vbmU7c3Ryb2tlOiNlYTRjM2E7c3Ryb2tlLWxpbmVqb2luOnJvdW5kO3N0cm9rZS13aWR0aDozLjV9Lm17ZmlsbDojNzA2ZDZkfS5ue2ZpbGw6I2JmYmZiZn0ub3tmaWxsOiM0MTQxNDF9LnB7ZmlsbDojZThlNmU2fS5xe2ZpbGw6IzFjMWMxY30ucntmaWxsOiM2ODY4Njh9LnN7ZmlsbDojZGEwMTAwfS50e2ZpbGw6IzBhY2Y4M30udXtmaWxsOiNhMjU5ZmZ9LnZ7ZmlsbDojZjI0ZTFlfS53e2ZpbGw6I2ZmNzI2Mn0ueHtmaWxsOiMxYWJjZmV9PC9zdHlsZT48cGF0aCBjbGFzcz0iYSIgZD0ibTQxLjggMTguN2g0NGM0LjUgMCA4IDMuNSA4IDh2NTJjMCA0LjQtMy41IDgtOCA4aC00NGMtNC40IDAtOC0zLjYtOC04di01MmMwLTQuNSAzLjYtOCA4LTh6Ii8+PHBhdGggZmlsbC1ydWxlPSJldmVub2RkIiBjbGFzcz0iYiIgZD0ibTQxLjggMTguN2g0NGM0LjUgMCA4IDMuNSA4IDh2NTJjMCA0LjQtMy41IDgtOCA4aC00NGMtNC40IDAtOC0zLjYtOC04di0xMC43aC04LjZjLTMuNCAwLTYuMi0yLjgtNi4yLTYuMnYtMTYuNmMwLTMuNCAyLjgtNi4yIDYuMi02LjJoOC42di0xMi4zYzAtNC41IDMuNi04IDgtOHptLTEuOCA2Mi4zaDQ4di01NmgtNDh2MTRoMjUuOGMzLjQgMCA2LjIgMi44IDYuMiA2LjJ2MTYuNmMwIDMuNC0yLjggNi4yLTYuMiA2LjJoLTI1Ljh6Ii8+PHBhdGggIGQ9Im0yNyA0NS4zaDUuMXEzIDAgNC40IDEuMyAxLjQgMS4zIDEuNCAzLjYgMCAxLTAuMyAyLTAuMyAwLjktMSAxLjYtMC43IDAuOC0xLjkgMS4yLTEuMiAwLjQtMi45IDAuNGgtMS40djUuNmgtMy40em00LjkgMi43aC0xLjV2NC43aDEuMXEwLjkgMCAxLjYtMC4zIDAuNy0wLjIgMS0wLjcgMC40LTAuNiAwLjQtMS40IDAtMS4xLTAuNi0xLjctMC43LTAuNi0yLTAuNnptMTguMiA4LjZxMCAxLjQtMC43IDIuNS0wLjYgMS0xLjkgMS42LTEuMyAwLjUtMy4yIDAuNS0wLjggMC0xLjYtMC4xLTAuNy0wLjEtMS41LTAuMy0wLjctMC4yLTEuMy0wLjV2LTMuMXExLjEgMC41IDIuMyAwLjkgMS4yIDAuNCAyLjQgMC40IDAuOCAwIDEuMy0wLjIgMC41LTAuMyAwLjctMC42IDAuMy0wLjQgMC4zLTAuOSAwLTAuNi0wLjQtMS0wLjQtMC40LTEuMS0wLjgtMC43LTAuNC0xLjYtMC44LTAuNS0wLjItMS4yLTAuNi0wLjYtMC40LTEuMi0wLjktMC42LTAuNS0xLTEuMy0wLjMtMC44LTAuMy0xLjkgMC0xLjQgMC42LTIuNCAwLjctMSAxLjgtMS41IDEuMi0wLjUgMi45LTAuNSAxLjIgMCAyLjMgMC4zIDEuMSAwLjIgMi4zIDAuOGwtMSAyLjZxLTEuMS0wLjUtMi0wLjctMC44LTAuMy0xLjctMC4zLTAuNiAwLTEuMSAwLjMtMC40IDAuMS0wLjcgMC41LTAuMiAwLjQtMC4yIDAuOCAwIDAuNiAwLjMgMSAwLjQgMC40IDEgMC43IDAuNyAwLjQgMS43IDAuOCAxLjIgMC42IDIgMS4yIDAuOSAwLjYgMS40IDEuNSAwLjQgMC44IDAuNCAyem0xNS45LTMuNnEwIDIuNy0xIDQuNC0xIDEuOC0zIDIuNy0xLjkgMC45LTQuNiAwLjloLTQuNHYtMTUuN2g0LjlxMi41IDAgNC4zIDAuOSAxLjggMC45IDIuOCAyLjYgMSAxLjcgMSA0LjJ6bS0zLjUgMC4xcTAtMS44LTAuNS0yLjktMC41LTEuMS0xLjUtMS42LTEtMC42LTIuNC0wLjZoLTEuOHYxMC4zaDEuNHEyLjUgMCAzLjYtMS4zIDEuMi0xLjMgMS4yLTMuOXoiLz48cGF0aCBjbGFzcz0iYSIgZD0ibTE1Ni44IDE4LjdoNDRjNC41IDAgOCAzLjUgOCA4djUyYzAgNC40LTMuNSA4LTggOGgtNDRjLTQuNCAwLTgtMy42LTgtOHYtNTJjMC00LjUgMy42LTggOC04eiIvPjxwYXRoIGZpbGwtcnVsZT0iZXZlbm9kZCIgY2xhc3M9ImMiIGQ9Im0xNTYuOCAxOC43aDQ0YzQuNSAwIDggMy41IDggOHY1MmMwIDQuNC0zLjUgOC04IDhoLTQ0Yy00LjQgMC04LTMuNi04LTh2LTEwLjdoLTguNmMtMy40IDAtNi4yLTIuOC02LjItNi4ydi0xNi42YzAtMy40IDIuOC02LjIgNi4yLTYuMmg4LjZ2LTEyLjNjMC00LjUgMy42LTggOC04em0tMS44IDYyLjNoNDh2LTU2aC00OHYxNGgyNS44YzMuNCAwIDYuMiAyLjggNi4yIDYuMnYxNi42YzAgMy40LTIuOCA2LjItNi4yIDYuMmgtMjUuOHoiLz48cGF0aCAgZD0ibTE2NS4xIDYxaC0zLjZsLTEuMS0zLjdoLTUuN2wtMS4yIDMuN2gtMy42bDUuNi0xNS44aDR6bS05LjYtNi41aDQuMWwtMS4xLTMuN3EtMC4xLTAuMy0wLjMtMC45LTAuMi0wLjYtMC40LTEuMi0wLjEtMC42LTAuMi0xLTAuMSAwLjQtMC4zIDEuMS0wLjIgMC42LTAuNCAxLjItMC4yIDAuNi0wLjIgMC44em0xNC45IDYuNmgtMy4zdi0xNS43aDMuM3oiLz48cGF0aCBjbGFzcz0iYSIgZD0ibTI3NC44IDE4LjdoNDRjNC41IDAgOCAzLjUgOCA4djUyYzAgNC40LTMuNSA4LTggOGgtNDRjLTQuNCAwLTgtMy42LTgtOHYtNTJjMC00LjUgMy42LTggOC04eiIvPjxwYXRoIGZpbGwtcnVsZT0iZXZlbm9kZCIgY2xhc3M9ImQiIGQ9Im0yNzQuOCAxOC43aDQ0YzQuNSAwIDggMy41IDggOHY1MmMwIDQuNC0zLjUgOC04IDhoLTQ0Yy00LjQgMC04LTMuNi04LTh2LTEwLjdoLTguNmMtMy40IDAtNi4yLTIuOC02LjItNi4ydi0xNi42YzAtMy40IDIuOC02LjIgNi4yLTYuMmg4LjZ2LTEyLjNjMC00LjUgMy42LTggOC04em0tMS44IDYyLjNoNDh2LTU2aC00OHYxNGgyNS44YzMuNCAwIDYuMiAyLjggNi4yIDYuMnYxNi42YzAgMy40LTIuOCA2LjItNi4yIDYuMmgtMjUuOHoiLz48cGF0aCAgZD0ibTI3My4xIDUzLjFsNS4zIDcuOWgtMy44bC0zLjctNS45LTMuNiA1LjloLTMuNmw1LjItOC4xLTQuOS03LjZoMy43bDMuNCA1LjYgMy4zLTUuNmgzLjZ6bTIwLjMtMC4xcTAgMi43LTEgNC40LTEgMS44LTMgMi43LTEuOSAwLjktNC42IDAuOWgtNC40di0xNS43aDQuOXEyLjUgMCA0LjMgMC45IDEuOCAwLjkgMi44IDIuNiAxIDEuNyAxIDQuMnptLTMuNSAwLjFxMC0xLjctMC41LTIuOS0wLjUtMS4xLTEuNS0xLjYtMS0wLjYtMi40LTAuNmgtMS44djEwLjNoMS40cTIuNSAwIDMuNi0xLjMgMS4yLTEuMyAxLjItMy45eiIvPjxwYXRoIGZpbGwtcnVsZT0iZXZlbm9kZCIgY2xhc3M9ImUiIGQ9Im01MDYuNyAyNC42bDIxLjUtMi4zIDIxLjQgMi4zIDE2LjYgMjIuMy0zOCA0NC4zLTM4LjEtNDQuM3oiLz48cGF0aCBjbGFzcz0iZiIgZD0ibTUwNS41IDQ2LjlsMjIuNyA0NC4zLTM4LjEtNDQuM3oiLz48cGF0aCBjbGFzcz0iZiIgZD0ibTU1MC44IDQ2LjlsLTIyLjYgNDQuMyAzOC00NC4zeiIvPjxwYXRoIGNsYXNzPSJnIiBkPSJtNTA1LjUgNDYuOWg0NS4zbC0yMi42IDQ0LjN6Ii8+PHBhdGggY2xhc3M9ImgiIGQ9Im01MjguMiAyMi4zbC0yMS41IDIuMy0xLjIgMjIuM3oiLz48cGF0aCBjbGFzcz0iaCIgZD0ibTUyOC4yIDIyLjNsMjEuNCAyLjMgMS4yIDIyLjN6Ii8+PHBhdGggY2xhc3M9ImciIGQ9Im01NjYuMiA0Ni45bC0xNi42LTIyLjMgMS4yIDIyLjN6Ii8+PHBhdGggY2xhc3M9ImciIGQ9Im00OTAuMSA0Ni45bDE2LjYtMjIuMy0xLjIgMjIuM3oiLz48cGF0aCBjbGFzcz0iaSIgZD0ibTUyOC4yIDIyLjNsLTIyLjcgMjQuNmg0NS4zeiIvPjxwYXRoIGNsYXNzPSJqIiBkPSJtNjE1IDkwLjh2LTY2LjhoNzB2NjYuOHoiLz48cGF0aCBmaWxsLXJ1bGU9ImV2ZW5vZGQiIGNsYXNzPSJrIiBkPSJtNjE1IDkwLjl2LTY2LjhoNzB2NjYuOHptNi43LTYuN2g1Ni41di01My40aC01Ni41eiIvPjxwYXRoIGNsYXNzPSJsIiBkPSJtNjUwLjkgMzQuM2MxIDAuNSAwLjggMS4xIDAuNSA0LjItMC40IDMuMS0xLjUgOC44LTMuNiAxNC40LTIuMiA1LjctNS4zIDExLjItOC4xIDE1LjMtMi44IDQuMS01LjEgNi43LTYuOSA4LjMtMS45IDEuNS0zLjEgMS45LTMuOSAyLjEtMC44IDAuMS0xLjIgMC0xLjQtMC40LTAuMi0wLjUtMC4zLTEuMS0wLjEtMiAwLjItMC44IDAuNi0xLjcgMS45LTMgMS4yLTEuMiAzLjMtMi43IDYuMS00LjEgMi45LTEuNCA2LjYtMi43IDkuNi0zLjYgMy4xLTAuOCA1LjQtMS4zIDcuNS0xLjcgMi4xLTAuNCAzLjgtMC42IDUuNi0wLjhxMi42LTAuMiA1LjEgMGMxLjYgMC4yIDMuMiAwLjQgNC42IDAuOCAxLjUgMC4zIDIuNiAwLjcgMy43IDEuNCAxIDAuNiAxLjkgMS41IDIuMyAyLjUgMC41IDEgMC41IDIuMSAwLjEgMi45LTAuNCAwLjctMS4xIDEuMi0yIDEuNS0wLjggMC4zLTEuOCAwLjMtMi45IDAtMS4yLTAuNC0yLjUtMS4xLTMuOS0yLjEtMS40LTEtMi45LTIuMi00LjgtNC4xLTEuOS0xLjktNC4zLTQuNS02LjMtNy0xLjktMi42LTMuNi01LTQuNy03LjEtMS4xLTIuMS0xLjctMy44LTIuMi01LjUtMC40LTEuNy0wLjgtMy40LTAuOS00LjktMC4yLTEuNi0wLjEtMi45IDAtNHEwLjItMS43IDAuOC0yLjVjMC4zLTAuNSAwLjgtMC44IDEuMi0wLjkgMC40LTAuMiAwLjYtMC4yIDAuOC0wLjIgMC4zIDAgMC41LTAuMSAwLjggMCAwLjMgMC4xIDAuOCAwLjMgMS4xIDAuNXoiLz48cGF0aCBjbGFzcz0ibSIgZD0ibTc5My43IDE3aC0yOS40Yy0zLjkgMC03IDMuMS03IDd2Mi40aDQzLjR2LTIuNGMwLTMuOS0zLjEtNy03LTd6Ii8+PHBhdGggY2xhc3M9Im4iIGQ9Im04MjAuNyAyNi40aC04My40Yy00LjYgMC04LjMgMy43LTguMyA4LjN2NDIuNWMwIDQuNiAzLjcgOC4zIDguMyA4LjNoODMuNGM0LjYgMCA4LjMtMy43IDguMy04LjN2LTQyLjVjMC00LjYtMy43LTguMy04LjMtOC4zeiIvPjxwYXRoIGNsYXNzPSJvIiBkPSJtODI5IDM1LjdoLTEwMHY0MC40aDEwMHoiLz48cGF0aCBjbGFzcz0icCIgZD0ibTc3OSAyOC45Yy0xNC45IDAtMjcuMSAxMi4xLTI3LjEgMjcgMCAxNSAxMi4yIDI3LjEgMjcuMSAyNy4xIDE0LjkgMCAyNy4xLTEyLjEgMjcuMS0yNy4xIDAtMTQuOS0xMi4yLTI3LTI3LjEtMjd6Ii8+PHBhdGggY2xhc3M9InEiIGQ9Im03NzkgMzYuOGMtMTAuNiAwLTE5LjIgOC42LTE5LjIgMTkuMSAwIDEwLjYgOC42IDE5LjIgMTkuMiAxOS4yIDEwLjYgMCAxOS4yLTguNiAxOS4yLTE5LjIgMC0xMC41LTguNi0xOS4xLTE5LjItMTkuMXoiLz48cGF0aCBjbGFzcz0iciIgZD0ibTc3MS4xIDQyLjNjLTMuMSAwLTUuNyAyLjUtNS43IDUuNyAwIDMuMSAyLjYgNS42IDUuNyA1LjYgMy4xIDAgNS43LTIuNSA1LjctNS42IDAtMy4yLTIuNi01LjctNS43LTUuN3oiLz48cGF0aCBjbGFzcz0icyIgZD0ibTgyMi44IDM3LjVjLTEuNCAwLTIuNCAxLjEtMi40IDIuNCAwIDEuMyAxIDIuNCAyLjQgMi40IDEuMyAwIDIuMy0xLjEgMi4zLTIuNCAwLTEuMy0xLTIuNC0yLjMtMi40eiIvPjxwYXRoICBkPSJtODcwLjIgMjEuOGg4MS40YzUuNiAwIDEwLjEgNC41IDEwLjEgMTB2NTAuMmMwIDUuNS00LjUgMTAtMTAuMSAxMGgtODEuNGMtNS42IDAtMTAuMi00LjUtMTAuMi0xMHYtNTAuMmMwLTUuNSA0LjYtMTAgMTAuMi0xMHoiLz48cGF0aCBjbGFzcz0iaiIgZD0ibTg3Mi45IDQwLjJxLTEuOSAwLTMtMC45LTEtMC44LTEuNC0yLjdsMi43LTAuM3EwLjEgMC45IDAuNiAxLjQgMC40IDAuNCAxLjIgMC40IDAuNyAwIDEuMS0wLjUgMC41LTAuNSAwLjUtMS41di02LjVoLTIuNnYtMmg1LjJ2OC41cTAgMS45LTEuMSAzLTEuMSAxLjEtMy4yIDEuMXptMTcuMS04LjdxMCAxLjItMC41IDIuMS0wLjYgMS0xLjYgMS41LTEgMC41LTIuNSAwLjVoLTMuMXY0LjRoLTIuNnYtMTIuNGg1LjZxMi4zIDAgMy41IDEgMS4yIDEgMS4yIDIuOXptLTIuNiAwcTAtMS45LTIuNC0xLjloLTIuN3Y0aDIuOHExLjEgMCAxLjctMC41IDAuNi0wLjUgMC42LTEuNnptMTAuNSA2LjZxMSAwIDItMC4zIDAuOS0wLjMgMS41LTAuN3YtMS43aC0zLjF2LTJoNS41djQuNnEtMSAxLTIuNiAxLjYtMS42IDAuNi0zLjQgMC42LTMuMSAwLTQuNy0xLjctMS43LTEuNy0xLjctNC44IDAtMyAxLjctNC43IDEuNi0xLjYgNC44LTEuNiA0LjQgMCA1LjYgMy4ybC0yLjQgMC43cS0wLjQtMC45LTEuMy0xLjQtMC44LTAuNS0xLjktMC41LTEuOSAwLTIuOSAxLjEtMC45IDEuMi0wLjkgMy4yIDAgMi4xIDEgMy4zIDEgMS4xIDIuOCAxLjF6bTI4LjgtNi42cTAgMS4yLTAuNiAyLjEtMC41IDEtMS42IDEuNS0xIDAuNS0yLjQgMC41aC0zLjJ2NC40aC0yLjZ2LTEyLjRoNS43cTIuMiAwIDMuNCAxIDEuMyAxIDEuMyAyLjl6bS0yLjcgMHEwLTEuOS0yLjMtMS45aC0yLjh2NGgyLjhxMS4xIDAgMS43LTAuNSAwLjYtMC41IDAuNi0xLjZ6bTE1LjMgOC41aC0zLjFsLTUuNS05LjZxMC4yIDEuNCAwLjIgMi4zdjcuM2gtMi40di0xMi40aDNsNS42IDkuNnEtMC4yLTEuMy0wLjItMi40di03LjJoMi40em04LjQtMS45cTEuMSAwIDItMC4zIDEtMC4zIDEuNS0wLjd2LTEuOGgtMy4xdi0xLjloNS41djQuNnEtMSAxLTIuNiAxLjYtMS42IDAuNS0zLjMgMC41LTMuMSAwLTQuOC0xLjYtMS42LTEuNy0xLjYtNC44IDAtMy4xIDEuNi00LjcgMS43LTEuNiA0LjgtMS42IDQuNSAwIDUuNyAzLjJsLTIuNSAwLjdxLTAuNC0wLjktMS4yLTEuNC0wLjgtMC41LTItMC41LTEuOCAwLTIuOCAxLjEtMSAxLjEtMSAzLjIgMCAyLjEgMSAzLjMgMSAxLjEgMi44IDEuMXptLTcxLjIgMjBxMSAwIDItMC4zIDEtMC4zIDEuNS0wLjd2LTEuOGgtMy4xdi0xLjloNS41djQuNnEtMSAxLTIuNiAxLjYtMS42IDAuNS0zLjQgMC41LTMgMC00LjctMS42LTEuNy0xLjctMS43LTQuOCAwLTMuMSAxLjctNC43IDEuNy0xLjYgNC44LTEuNiA0LjQgMCA1LjYgMy4ybC0yLjQgMC43cS0wLjQtMC45LTEuMi0xLjQtMC45LTAuNS0yLTAuNS0xLjkgMC0yLjggMS4xLTEgMS4xLTEgMy4yIDAgMi4xIDEgMy4zIDEgMS4xIDIuOCAxLjF6bTEwLjkgMS45aC0yLjZ2LTEyLjVoMi42em0xMS43LTEwLjRoLTYuNnYzLjloNi40djJoLTYuNHY0LjVoLTIuNnYtMTIuNGg5LjJ6bTI3IDBoLTQuMXYxMC40aC0yLjZ2LTEwLjRoLTQuMXYtMmgxMC44em00IDEwLjRoLTIuNnYtMTIuNGgyLjZ6bTExLjgtMTAuNGgtNi43djMuOGg2LjV2MmgtNi41djQuNmgtMi42di0xMi40aDkuM3ptMTEuMiAwaC02Ljd2My44aDYuNHYyaC02LjR2NC42aC0yLjZ2LTEyLjVoOS4zem0tNzMuOSAyNS45cTAgMS44LTEuMyAyLjgtMS40IDAuOS00LjEgMC45LTIuNCAwLTMuOC0wLjgtMS4zLTAuOS0xLjctMi42bDIuNS0wLjRxMC4zIDEgMSAxLjQgMC44IDAuNSAyLjEgMC41IDIuOCAwIDIuOC0xLjcgMC0wLjUtMC4zLTAuOC0wLjQtMC40LTAuOS0wLjYtMC42LTAuMi0yLjItMC42LTEuNS0wLjMtMi0wLjUtMC42LTAuMi0xLTAuNS0wLjUtMC4yLTAuOC0wLjYtMC4zLTAuNC0wLjUtMC45LTAuMS0wLjUtMC4xLTEuMiAwLTEuNyAxLjItMi42IDEuMy0wLjkgMy44LTAuOSAyLjMgMCAzLjUgMC44IDEuMiAwLjcgMS41IDIuNGwtMi41IDAuM3EtMC4yLTAuOC0wLjgtMS4yLTAuNi0wLjQtMS44LTAuNC0yLjQgMC0yLjQgMS41IDAgMC41IDAuMyAwLjggMC4yIDAuMyAwLjcgMC41IDAuNSAwLjIgMi4xIDAuNSAxLjggMC40IDIuNiAwLjcgMC44IDAuNCAxLjIgMC44IDAuNSAwLjQgMC43IDEgMC4yIDAuNiAwLjIgMS40em0xMi45LTguOWwtNC43IDEyLjVoLTIuN2wtNC42LTEyLjVoMi43bDIuNiA4cTAuMyAwLjggMC43IDIuNGwwLjItMC44IDAuNC0xLjYgMi42LTh6bTcuNCAxMC42cTEgMCAyLTAuMyAwLjktMC4zIDEuNC0wLjd2LTEuOGgtM3YtMS45aDUuNXY0LjZxLTEgMS0yLjYgMS42LTEuNyAwLjUtMy40IDAuNS0zLjEgMC00LjctMS42LTEuNy0xLjctMS43LTQuOCAwLTMuMSAxLjctNC43IDEuNi0xLjcgNC44LTEuNyA0LjQgMCA1LjYgMy4zbC0yLjQgMC43cS0wLjQtMC45LTEuMy0xLjQtMC44LTAuNS0xLjktMC41LTEuOSAwLTIuOSAxLjEtMC45IDEuMS0wLjkgMy4yIDAgMi4xIDEgMy4zIDEgMS4xIDIuOCAxLjF6bTI5LjYtNC40cTAgMS45LTAuNyAzLjMtMC44IDEuNC0yLjIgMi4yLTEuNCAwLjgtMy4yIDAuOGgtNS4xdi0xMi41aDQuNnEzLjEgMCA0LjkgMS42IDEuNyAxLjYgMS43IDQuNnptLTIuNiAwcTAtMi0xLjEtMy4xLTEtMS4xLTMtMS4xaC0xLjl2OC41aDIuM3ExLjcgMCAyLjctMS4yIDEtMS4yIDEtMy4xem0xNS45IDBxMCAxLjktMC44IDMuMy0wLjggMS40LTIuMiAyLjItMS40IDAuOC0zLjIgMC44aC01LjF2LTEyLjVoNC42cTMuMiAwIDQuOSAxLjYgMS44IDEuNiAxLjggNC42em0tMi43IDBxMC0yLTEuMS0zLjEtMS0xLjEtMy0xLjFoLTEuOHY4LjVoMi4ycTEuNyAwIDIuNy0xLjIgMS0xLjIgMS0zLjF6bTE0LjkgMi43cTAgMS44LTEuNCAyLjgtMS4zIDAuOS00IDAuOS0yLjQgMC0zLjgtMC44LTEuNC0wLjktMS43LTIuNmwyLjUtMC40cTAuMyAxIDEgMS40IDAuOCAwLjUgMi4xIDAuNSAyLjggMCAyLjgtMS43IDAtMC41LTAuNC0wLjgtMC4zLTAuNC0wLjktMC42LTAuNS0wLjItMi4yLTAuNi0xLjQtMC4zLTEuOS0wLjUtMC42LTAuMi0xLTAuNS0wLjUtMC4yLTAuOC0wLjYtMC4zLTAuNC0wLjUtMC45LTAuMi0wLjUtMC4yLTEuMiAwLTEuNyAxLjMtMi42IDEuMy0wLjkgMy44LTAuOSAyLjMgMCAzLjUgMC44IDEuMiAwLjcgMS41IDIuNGwtMi42IDAuM3EtMC4yLTAuOC0wLjgtMS4yLTAuNi0wLjQtMS43LTAuNC0yLjQgMC0yLjQgMS41IDAgMC41IDAuMyAwLjggMC4yIDAuMyAwLjcgMC41IDAuNSAwLjIgMi4xIDAuNSAxLjggMC40IDIuNSAwLjcgMC44IDAuNCAxLjMgMC44IDAuNCAwLjQgMC43IDEgMC4yIDAuNiAwLjIgMS40em0tNDYuOCAxMi42aC0yLjZ2LTIuN2gyLjZ6bTUuMSAwaC0yLjZ2LTIuN2gyLjZ6bTUuMSAwaC0yLjZ2LTIuNmgyLjZ6Ii8+PHBhdGggY2xhc3M9ImoiIGQ9Im0yNi40IDEzNGgtMy4zdi0zLjZoMy4zem0yNC0xNi4zcTAgMy4zLTIuMiA1LjItMi4xIDItNS45IDJoLTYuOXY5LjFoLTMuMXYtMjMuNGg5LjhxNCAwIDYuMSAxLjkgMi4yIDEuOCAyLjIgNS4yem0tMy4yIDBxMC00LjUtNS41LTQuNWgtNi4zdjkuMmg2LjVxNS4zIDAgNS4zLTQuN3ptMjYuMiA5LjhxMCAzLjMtMi42IDUtMi41IDEuOC03LjEgMS44LTguNiAwLTEwLTUuOWwzLjEtMC42cTAuNSAyLjEgMi4zIDMuMSAxLjcgMC45IDQuNyAwLjkgMy4xIDAgNC43LTEgMS43LTEuMSAxLjctMy4xIDAtMS4yLTAuNS0xLjktMC41LTAuNy0xLjUtMS4xLTAuOS0wLjUtMi4zLTAuOC0xLjMtMC4zLTIuOS0wLjctMi43LTAuNi00LjItMS4yLTEuNC0wLjYtMi4zLTEuNC0wLjgtMC43LTEuMi0xLjgtMC41LTEtMC41LTIuMyAwLTMgMi4zLTQuNiAyLjMtMS42IDYuNi0xLjYgNCAwIDYuMSAxLjIgMi4yIDEuMiAzIDQuMWwtMy4xIDAuNnEtMC41LTEuOS0yLTIuNy0xLjQtMC44LTQtMC44LTIuOCAwLTQuMyAwLjktMS41IDAuOS0xLjUgMi44IDAgMSAwLjYgMS43IDAuNiAwLjcgMS43IDEuMiAxIDAuNSA0LjMgMS4yIDEgMC4zIDIuMSAwLjUgMS4xIDAuMyAyLjEgMC43IDEgMC4zIDEuOCAwLjggMC45IDAuNSAxLjUgMS4yIDAuNiAwLjcgMSAxLjYgMC40IDEgMC40IDIuMnptMjQuNS01LjRxMCAzLjYtMS40IDYuMy0xLjQgMi43LTQgNC4xLTIuNiAxLjUtNiAxLjVoLTguOHYtMjMuNGg3LjhxNS45IDAgOS4xIDMgMy4zIDMgMy4zIDguNXptLTMuMiAwcTAtNC40LTIuNC02LjctMi40LTIuMi02LjktMi4yaC00LjV2MTguMmg1LjJxMi42IDAgNC41LTEuMSAyLTEuMSAzLTMuMiAxLjEtMi4yIDEuMS01em02OCAxMS45aC0zLjN2LTMuN2gzLjN6bTI1LjcgMGgtMy4ybC0yLjctNi44aC0xMC43bC0yLjcgNi44aC0zLjNsOS42LTIzLjNoMy42em0tMTAuOC0xOS42bC0wLjQtMS40LTAuMiAwLjVxLTAuNCAxLjQtMS4yIDMuNWwtMyA3LjdoOC43bC0zLTcuN3EtMC40LTEuMS0wLjktMi42em0xNy4yIDE5LjZoLTMuMnYtMjMuM2gzLjJ6bTc1LjggMGgtMy4zdi0zLjdoMy4zem0yNS4xIDBoLTMuNWwtNy4xLTEwLjItNy4xIDEwLjJoLTMuNmw5LTEyLjEtOC4zLTExLjJoMy41bDYuNiA5LjEgNi4zLTkuMWgzLjVsLTggMTEuMXptMjMuNy0xMS45cTAgMy42LTEuNCA2LjMtMS41IDIuNy00IDQuMS0yLjYgMS41LTYgMS41aC04Ljh2LTIzLjRoNy43cTYgMCA5LjIgMyAzLjMgMyAzLjMgOC41em0tMy4yIDBxMC00LjQtMi40LTYuNi0yLjQtMi4zLTYuOS0yLjNoLTQuNXYxOC4yaDUuMnEyLjYgMCA0LjUtMS4xIDItMS4xIDMtMy4yIDEuMS0yLjEgMS4xLTV6bTY4IDExLjloLTMuM3YtMy42aDMuM3ptMjIuNS0yMC44aC0xMy41djguN2gxMy4xdjIuNmgtMTMuMXY5LjVoLTMuMXYtMjMuNGgxNi42em03LjcgMjAuOGgtMy4ydi0yMy40aDMuMnptNC45LTExLjhxMC01LjYgMy04LjcgMy4xLTMuMiA4LjYtMy4yIDMuOSAwIDYuMyAxLjMgMi41IDEuNCAzLjggNC4ybC0zIDAuOXEtMS0yLTIuOC0yLjktMS44LTAuOS00LjQtMC45LTQgMC02LjIgMi41LTIuMSAyLjQtMi4xIDYuOCAwIDQuNSAyLjMgNyAyLjIgMi42IDYuMyAyLjYgMi4zIDAgNC4yLTAuNyAyLTAuNyAzLjMtMS45di00LjJoLTd2LTIuN2g5Ljl2OC4xcS0xLjkgMS45LTQuNiAyLjktMi43IDEuMS01LjggMS4xLTMuNyAwLTYuNC0xLjUtMi42LTEuNS00LTQuMi0xLjQtMi43LTEuNC02LjV6bTU5LjUgMTEuOGgtMy4zdi0zLjZoMy4zem0xOC45LTVxMCAyLjYtMS45IDQtMS45IDEuMy01LjQgMS4zLTMuNCAwLTUuMi0xLjEtMS44LTEuMS0yLjMtMy40bDIuNi0wLjVxMC40IDEuNCAxLjYgMi4xIDEuMiAwLjcgMy4zIDAuNyAyLjMgMCAzLjMtMC43IDEuMS0wLjcgMS4xLTIuMSAwLTEuMS0wLjctMS43LTAuOC0wLjctMi40LTEuMWwtMi4xLTAuNnEtMi42LTAuNy0zLjctMS4zLTEuMS0wLjYtMS43LTEuNi0wLjYtMC45LTAuNi0yLjIgMC0yLjQgMS43LTMuNyAxLjgtMS4zIDUuMS0xLjMgMyAwIDQuOCAxIDEuNyAxLjEgMi4yIDMuNGwtMi43IDAuM3EtMC4zLTEuMi0xLjQtMS44LTEtMC43LTIuOS0wLjctMiAwLTMgMC43LTAuOSAwLjYtMC45IDEuOCAwIDAuOCAwLjQgMS4zIDAuNCAwLjUgMS4yIDAuOCAwLjcgMC40IDMuMyAxIDIuMyAwLjYgMy40IDEuMSAxIDAuNSAxLjYgMS4xIDAuNiAwLjYgMSAxLjQgMC4zIDAuOCAwLjMgMS44em0xOC4zIDVoLTMuNWwtNi4xLTguMi0yLjIgMS44djYuNGgtM3YtMjQuNmgzdjE1LjRsNy45LTguN2gzLjVsLTcuMyA3Ljd6bTE3LjQtOC40aC0xMi44cTAgMy4xIDEuMyA0LjggMS4yIDEuNyAzLjcgMS43IDEuOSAwIDMuMS0wLjggMS4yLTAuOCAxLjYtMmwyLjYgMC44cS0xLjYgNC4yLTcuMyA0LjItNCAwLTYuMS0yLjQtMi4xLTIuMy0yLjEtNyAwLTQuNCAyLjEtNi44IDIuMS0yLjQgNi0yLjQgNy45IDAgNy45IDkuNXptLTEyLjgtMi4yaDkuN3EtMC4yLTIuOS0xLjQtNC4yLTEuMi0xLjMtMy41LTEuMy0yLjEgMC0zLjQgMS41LTEuMyAxLjQtMS40IDR6bTIzLjYgOC4ydjIuMnEtMS41IDAuNC0zLjEgMC40LTMuNiAwLTMuNi00di0xMmgtMnYtMi4xaDIuMWwwLjktNC4xaDJ2NC4xaDMuNHYyLjFoLTMuNHYxMS4zcTAgMS4zIDAuNCAxLjkgMC41IDAuNSAxLjUgMC41IDAuNiAwIDEuOC0wLjN6bTQuOC02LjdxMCAzLjYgMS4xIDUuMyAxLjEgMS44IDMuNCAxLjggMS42IDAgMi43LTAuOSAxLjEtMC45IDEuMy0yLjdsMyAwLjJxLTAuMyAyLjYtMi4yIDQuMi0xLjggMS41LTQuNyAxLjUtMy44IDAtNS44LTIuNC0yLTIuMy0yLTYuOSAwLTQuNSAyLTYuOSAyLTIuNCA1LjgtMi40IDIuNyAwIDQuNSAxLjQgMS45IDEuNSAyLjMgNGwtMyAwLjJxLTAuMy0xLjUtMS4yLTIuNC0xLTAuOC0yLjctMC44LTIuNCAwLTMuNSAxLjUtMSAxLjYtMSA1LjN6bTE3LjctNS44cTEtMS43IDIuMy0yLjUgMS40LTAuOSAzLjUtMC45IDIuOSAwIDQuMyAxLjUgMS40IDEuNCAxLjQgNC44djEyaC0zdi0xMS40cTAtMS45LTAuNC0yLjgtMC4zLTAuOS0xLjEtMS4zLTAuOC0wLjUtMi4zLTAuNS0yLjEgMC0zLjMgMS41LTEuMyAxLjQtMS4zIDMuOXYxMC42aC0zdi0yNC42aDN2Ni40cTAgMS0wLjEgMi4xIDAgMS4xIDAgMS4yem00OC40IDE0LjloLTMuMnYtMy42aDMuMnptMjQuMS0xNi40cTAgMy4zLTIuMiA1LjMtMi4yIDItNS45IDJoLTYuOXY5LjFoLTMuMnYtMjMuNGg5LjlxMy45IDAgNi4xIDEuOCAyLjIgMS45IDIuMiA1LjJ6bS0zLjIgMC4xcTAtNC42LTUuNS00LjZoLTYuM3Y5LjNoNi41cTUuMyAwIDUuMy00Ljd6bTI3LjkgNC4zcTAgMy43LTEuNCA2LjQtMS40IDIuNy00IDQuMS0yLjYgMS41LTYgMS41aC04Ljd2LTIzLjRoNy43cTYgMCA5LjIgMyAzLjIgMyAzLjIgOC40em0tMy4yIDBxMC00LjMtMi4zLTYuNi0yLjQtMi4zLTctMi4zaC00LjV2MTguM2g1LjNxMi41IDAgNC41LTEuMSAyLTEuMSAzLTMuMyAxLTIuMSAxLTV6bTI0LjMtOC44aC0xMy41djguN2gxMy4xdjIuNmgtMTMuMXY5LjVoLTMuMXYtMjMuNGgxNi42em04MS4yIDIwLjhoLTMuN2wtNi05LjdoLTcuNHY5LjdoLTMuMXYtMjMuNGgxMXE0IDAgNi4xIDEuOCAyLjIgMS44IDIuMiA0LjkgMCAyLjYtMS42IDQuNC0xLjUgMS43LTQuMiAyLjJ6bS00LjEtMTYuNnEwLTIuMS0xLjQtMy4xLTEuNC0xLjEtNC0xLjFoLTcuNXY4LjZoNy43cTIuNSAwIDMuOC0xLjEgMS40LTEuMiAxLjQtMy4zem0yOC40IDE2LjZoLTMuM2wtMi42LTYuOGgtMTAuN2wtMi43IDYuOGgtMy4zbDkuNi0yMy4zaDMuNnptLTEwLjgtMTkuNmwtMC41LTEuNC0wLjEgMC41cS0wLjUgMS4zLTEuMyAzLjVsLTMgNy43aDguOGwtMy03LjdxLTAuNS0xLjItMC45LTIuNnptNDEuNi0zLjhsLTYuOSAyMy40aC0zLjhsLTQtMTQuOXEtMC40LTEuNC0xLjItNC45LTAuNCAxLjktMC43IDMuMi0wLjMgMS4zLTQuNiAxNi42aC0zLjhsLTYuOS0yMy40aDMuM2w0LjIgMTQuOXEwLjggMi43IDEuNCA1LjcgMC40LTEuOCAwLjktNCAwLjYtMi4xIDQuNy0xNi42aDNsNC4xIDE0LjZxMC45IDMuNSAxLjQgNmwwLjItMC42cTAuNC0xLjkgMC43LTMuMSAwLjMtMS4yIDQuNy0xNi45em03Ny43IDIzLjRoLTMuM2wtMi42LTYuOWgtMTAuN2wtMi43IDYuOWgtMy4zbDkuNi0yMy40aDMuNnptLTEwLjgtMTkuNmwtMC41LTEuMy0wLjEgMC40cS0wLjUgMS40LTEuMyAzLjZsLTMgNy42aDguOGwtMy03LjdxLTAuNS0xLjEtMC45LTIuNnptMzIuNyAxOS42aC0zLjlsLTEyLjUtMTkuOSAwLjEgMS42IDAuMSAyLjh2MTUuNWgtMi45di0yMy4zaDMuN2wxMi43IDIwcS0wLjItMy4zLTAuMi00Ljd2LTE1LjNoMi45em0yNC43LTIzLjRsLTkgMTMuN3Y5LjdoLTMuMnYtOS43bC05LTEzLjdoMy41bDcuMSAxMS4yIDcuMS0xMS4yeiIvPjxwYXRoIGNsYXNzPSJ0IiBkPSJtNDAxLjIgOTIuM2M2LjggMCAxMi4zLTUuNSAxMi4zLTEyLjJ2LTEyLjNoLTEyLjNjLTYuNyAwLTEyLjIgNS41LTEyLjIgMTIuMyAwIDYuNyA1LjUgMTIuMiAxMi4yIDEyLjJ6Ii8+PHBhdGggY2xhc3M9InUiIGQ9Im0zODkgNTUuNmMwLTYuOCA1LjUtMTIuMiAxMi4yLTEyLjJoMTIuM3YyNC40aC0xMi4zYy02LjcgMC0xMi4yLTUuNC0xMi4yLTEyLjJ6Ii8+PHBhdGggY2xhc3M9InYiIGQ9Im0zODkgMzEuMWMwLTYuNyA1LjUtMTIuMiAxMi4yLTEyLjJoMTIuM3YyNC41aC0xMi4zYy02LjcgMC0xMi4yLTUuNS0xMi4yLTEyLjN6Ii8+PHBhdGggY2xhc3M9InciIGQ9Im00MTMuNSAxOC45aDEyLjJjNi44IDAgMTIuMiA1LjUgMTIuMiAxMi4yIDAgNi44LTUuNCAxMi4zLTEyLjIgMTIuM2gtMTIuMnoiLz48cGF0aCBjbGFzcz0ieCIgZD0ibTQyNS43IDY3LjhjLTYuOCAwLTEyLjItNS40LTEyLjItMTIuMiAwLTYuOCA1LjQtMTIuMiAxMi4yLTEyLjIgNi44IDAgMTIuMiA1LjQgMTIuMiAxMi4yIDAgNi44LTUuNCAxMi4yLTEyLjIgMTIuMnoiLz48L3N2Zz4="
+|                             style="width:100%; filter: drop-shadow(4px 6px 4px rgba(0,0,0,0.25)); position:absolute;  left:0; bottom:0;"
+|                           <div>
+|                             style="margin:0px;  text-align:center"
+|                             <span>
+|                               class="bhover"
+|                               style="display:inline-block;  font-size:1.25em; border:1px solid #aaa;  border-radius:6px;margin:20px 10px 0 10px; cursor:pointer; padding:12px;"
+|                               <span>
+|                                 style="vertical-align:middle"
+|                                 <img>
+|                                   alt=""
+|                                   class="autoscale gsicon"
+|                                   src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAHgAAAB4AgMAAABECt5BAAAADFBMVEUAAAAAAAAAAAAAAAA16TeWAAAAA3RSTlMAgH8BTzA4AAAApUlEQVRIx+3UoRHDMBAFUQupDJWalJoygnJBmQ1Yfeyx77ObB5bdUXFX5mO75ubm5ubm8/P/7sOPqtfvFF5V78Cz6hN4VNVzz8SViSsTVyauTFyZuDJxZeLKxJWJKxNXJq5MXJm4MnFl4srElYkrE1cmrkxcmbgycWfiysSViSsTdyauTFyZuDJxZeLCxDOvzDPz2DBxJm9wZZ6ZhzPxzCvzFM7xL3aB/p8IYvJLAAAAAElFTkSuQmCC"
+|                               " New Project"
+|                             <span>
+|                               class="bhover"
+|                               style="display:inline-block;  font-size:1.25em; border:1px solid #aaa;  border-radius:6px;margin:20px 10px 0 10px; cursor:pointer; padding:12px;"
+|                               <span>
+|                                 style="vertical-align:middle"
+|                                 <img>
+|                                   alt=""
+|                                   class="autoscale gsicon"
+|                                   src="data:image/svg+xml;base64,PHN2ZyB2ZXJzaW9uPSIxLjIiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyIgdmlld0JveD0iMCAwIDQ5MCA0OTAiIHdpZHRoPSI0OTAiIGhlaWdodD0iNDkwIj48cGF0aCBmaWxsLXJ1bGU9ImV2ZW5vZGQiIGQ9Im0wIDMzNy45di0yNzcuMWMwLTIxLjggMTcuNy0zOS41IDM5LjUtMzkuNWg0MTAuMmMyMS44IDAgMzkuNSAxNy43IDM5LjUgMzkuNXYyNzcuMWMwIDIxLjgtMTcuNyAzOS41LTM5LjUgMzkuNWgtMTYwLjl2NDQuMWgzMS40YzUuMyAwIDkuNSA0LjMgOS41IDkuNXYyNy41YzAgNS4zLTQuMyA5LjUtOS41IDkuNWgtMTUxLjJjLTUuMyAwLTkuNS00LjMtOS41LTkuNXYtMjcuNWMwLTUuMyA0LjMtOS41IDkuNS05LjVoMzEuNHYtNDQuMWgtMTYwLjljLTIxLjggMC0zOS41LTE3LjgtMzkuNS0zOS41em01My45LTE0LjhsMzgxLjQgMC4xdi0yNDhoLTM4MS40eiIvPjwvc3ZnPg=="
+|                               " Open From Computer"
+|                             <span>
+|                               class="bhover"
+|                               style="display:inline-block;  font-size:1.25em; border:1px solid #aaa;  border-radius:6px;margin:20px 10px 0 10px; cursor:pointer; padding:12px;"
+|                               <span>
+|                                 style="vertical-align:middle"
+|                                 <img>
+|                                   alt=""
+|                                   class="autoscale gsicon"
+|                                   src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAHgAAAB4BAMAAADLSivhAAAAAXNSR0IB2cksfwAAAAlwSFlzAAALEwAACxMBAJqcGAAAAB5QTFRFAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAtyhvagAAAAp0Uk5T/wCX0xBS77grc5ah1lUAAAInSURBVHic7dcxT8JAFAfwC4UCY6FA2WqMIW7UmLgKBF0lISZu1YXVmji4gYOskmjix5WWlt57rwc86iB6//F5P3q9e71WYeWI0PhgsM7/Sa4G0fgw8bDTNZ5m++HXqGJ+7IP7cclc8LHTTWqFHhu/pQ1/zsWOn2KDiwdCyhETuzIu8bAj2y3zJrgGsBix8CXEAQvfQFxkYRfijStG8CPEVRbuQlxgYWhF+UfxfDJTYzRtfM81eQ25C+YuawsldiFGW9UGNYKnEN9DHP3VnKlwE+IAWNuPip4KtyEe4eWSF4Lg+MfjoJ2K78nsKbD1LuMKxMk+BioMHmg460ZSLqmwLbUJ6ux6UjdUWD4B0fmXPusjFU77BD/M6Zw8JW7Eg8roVbe+5eRns7DViBp8AlfLslopNtTYsu86L58WzhRvQzbOjithj4lB75WYGHS9wcTweRvxMHwdBDwMD6gKC9vARm2/O0anhKnEw2N/cjqGuA5xuGKZePUdJi6+5OIUYS8bz9fFM+nRcBGuZOK+NMJIL+4jXMjCbTjqIb54A9nwFCTYQe8bYaw+QVsCZ0HxLRlkPocnbZPUPYJrZEw49R75VhHhimGMJ71KeUwWO1wxhK8z7TInPimZPYjtLhmyIQuIBxuG0gQAw5fc1hQB5l1YVGXMu+Nl+8iYeWEpyj3eDdPuZWA3B25vH6PGtPN3j/zvFDtXOazYf590dHT+TKwc0VhjjX8V/gZf7hQYo0YW8QAAAABJRU5ErkJggg=="
+|                               " Templates"
+|                             <span>
+|                               class="bhover"
+|                               style="display: none; font-size: 1.25em; border: 1px solid #aaa; border-radius: 6px; margin: 20px 10px 0 10px; cursor: pointer; padding: 12px"
+|                               <span>
+|                                 style="vertical-align:middle"
+|                                 <img>
+|                                   alt=""
+|                                   class="autoscale gsicon"
+|                                   src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAHgAAAB4BAMAAADLSivhAAAAAXNSR0IB2cksfwAAAAlwSFlzAAALEwAACxMBAJqcGAAAAB5QTFRFAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAtyhvagAAAAp0Uk5TAP+BjG9nd36YkjdmKDYAAAE9SURBVHic7dVNUgIxEAXgLmFqYIki6C7cQG8w3kBvgDeYuQHcAG9shRSjSfo3Kxb91nz1qntIAkBkI4Ryjh07vl/M/sixY8eOHTt27NixY8eOHV/zvjHlMcMPNjzm1Yf2YoCVBZ/KqX/09rVamaG6KgY4a+0T8rXUCw/Yt1YuvFy1qRotVk6NTRyz1uALgeFDtlvKwlLGnySWF46vOmUh4TcGwzdvd5yVph5YzFfTq05h/2ZHAXML51ad0tN4FDFdLRczUwcFpqo1xWS1qhhgwuxeZ/FqZTH6cukmjkEOF3mBKKrrR8JQzZ7jMsXh4s9xmWLhwYTzR/PFZvM73LDqlH93uHSB1On+MHNXU5kXblt1yrzw0IBvh0t7nPJ0zRPHfEX73GbT8zE04vitW4uvCw/NGCb9BVKnPwo/+AWCcpnkoG73owAAAABJRU5ErkJggg=="
+|                               " Install Photopea"
+|                             <span>
+|                               class="bhover"
+|                               style="display:inline-block;  font-size:1.25em; border:1px solid #aaa;  border-radius:6px;margin:20px 10px 0 10px; cursor:pointer; padding:12px;"
+|                               <span>
+|                                 style="vertical-align:middle"
+|                                 <img>
+|                                   alt=""
+|                                   class="autoscale gsicon"
+|                                   src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAHgAAAB4AgMAAABECt5BAAAADFBMVEUAAAAAAAAAAAAAAAA16TeWAAAAA3RSTlMAgH8BTzA4AAAApUlEQVRIx+3UoRHDMBAFUQupDJWalJoygnJBmQ1Yfeyx77ObB5bdUXFX5mO75ubm5ubm8/P/7sOPqtfvFF5V78Cz6hN4VNVzz8SViSsTVyauTFyZuDJxZeLKxJWJKxNXJq5MXJm4MnFl4srElYkrE1cmrkxcmbgycWfiysSViSsTdyauTFyZuDJxZeLCxDOvzDPz2DBxJm9wZZ6ZhzPxzCvzFM7xL3aB/p8IYvJLAAAAAElFTkSuQmCC"
+|                               " Generate"
+|                             <span>
+|                               class="bhover"
+|                               style="display:inline-block;  font-size:1.25em; border:1px solid #aaa;  border-radius:6px;margin:20px 10px 0 10px; cursor:pointer; padding:12px;"
+|                               <span>
+|                                 style="vertical-align:middle"
+|                                 <img>
+|                                   alt=""
+|                                   class="autoscale gsicon"
+|                                   src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAKAAAACgBAMAAAB54XoeAAAAHlBMVEUAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAC3KG9qAAAACnRSTlMA/wfM8iVlhqBLzKW0UQAAAbBJREFUeJzt2sFNw1AMh/GuYAWpHFmCSiwAV0ZAjIDECNw7MhwQqG3y/Lf9NenBHuAnIeBLnl92u56enp6enp6bnUcatC8atA8avGNF+xHfYdCmNxi06QiDNr3CoN1j4i9o+wcYtBdI/APtmRH/QTvQoD3RoBHpOQGJ9JyC9kmD9fTYuVhNzzlYTs8FWE3PJVhMzwxYS88caPuCOAtW0jMPFtKzAObTswSm07MIZtOzDCbTMwBz6RmBqfSMwFR6hmAmPWMwkR4HjKfHA8PpccFoenwwmB4BjKVHAUPpkcBIejQwkB4R1NOjgnJ6ZFBNjwyq6dFBMT0BUEtPBJTSEwKV9MRAIT1B0E9PFHTTEwa99MRBJz03ANI/Mv1Lof9s/H8V2ts2DnS+6MDSjwD8IaU+mGlvq1cR+mWJfp2jXzjpV+LgMYD2Vj/40Ecz+vBIH2/xA3hq6UB7K65Z6EUQvaqil2n0uq+y4qS9NZa69NqZXozTq3v8cqF+oUJ7171Coi+56Gs4+qKQvsrErm9p70oX1vSVOn3pT3+WgH84AX8sgn98gn8e09PT09PT07PZfAMjAekSigPnXwAAAABJRU5ErkJggg=="
+|                               " Video?"
+|                           <br>
+|                           <div>
+|                             style="display:inline-block;  font-size:1.25em; border:1px solid #aaa;  border-radius:6px;padding:60px 0;  margin-top:30px;  text-align:center; opacity:0.3; width:100%;"
+|                             "Drop any files here"
+|                         <style>
+|                           " .bhover       { transition: background 0.2s ease-in-out;  background:rgba(255,255,255,0   );}  .bhover:hover { transition: background 0.2s ease-in-out;  background:rgba(255,255,255,0.05);}"
+|     "
+
+
+"
+dom 200

@@ -1,0 +1,1074 @@
+| <html>
+|   lang="id"
+|   <head>
+|     "
+"
+|     <meta>
+|       charset="UTF-8"
+|     "
+"
+|     <meta>
+|       content="width=device-width, initial-scale=1.0"
+|       name="viewport"
+|     "
+"
+|     <title>
+|       "KINGBET188 Platform Game Online Terbaik Terpercaya 2026"
+|     "
+"
+|     <link>
+|       href="KINGBET188-logo.png"
+|       rel="icon"
+|       type="image/x-icon"
+|     "
+"
+|     <meta>
+|       content="qak3huj-x9LQDMP1h09z-c0DdAKmLgMl4isIjF6SoOo"
+|       name="google-site-verification"
+|     "
+"
+|     <meta>
+|       content="Nikmati pengalaman hiburan online terbaik Bersama KINGBET188. Tersedia berbagai pilihan permainan yang seru, akses yang mudah, dan layanan profesional siap memberikan kenyamanan bagi para pengguna."
+|       name="description"
+|     "
+"
+|     <meta>
+|       content="kingbet188, login kingbet188, daftar kingbet188, link alternatif kingbet188, situs hiburan digital, platform game online terpercaya, RTP kingbet188 hari ini, pragmatic play indonesia, game slot gacor, slot layanan 24 jam"
+|       name="keywords"
+|     "
+"
+|     <link>
+|       href="https://wikiless.org/"
+|       rel="canonical"
+|     "
+"
+|     <link>
+|       href="https://wikiless.org/"
+|       hreflang="id-ID"
+|       rel="alternate"
+|     "
+"
+|     <link>
+|       href="https://fonts.googleapis.com/css2?family=Cinzel+Decorative:wght@700;900&family=Rajdhani:wght@500;600;700&display=swap"
+|       rel="stylesheet"
+|     "
+"
+|     <style>
+|       "
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    /* ── palette lifted from the KINGBET188 crown & gem logo ── */
+    --gold:       #c59211;   /* warm deep gold */
+    --gold2:      #e2c24d;   /* bright royal gold */
+    --gold-light: #f6e272;   /* highlight gold */
+    --gold-dark:  #6e4d00;   /* deep amber shadow */
+    --amber:      #b07a00;
+    --cyan:       #0aa8d8;   /* gem cyan accent */
+    --cyan-light: #6adcf5;   /* gem highlight */
+    --cyan-dark:  #04607a;   /* gem shadow */
+    --bg:         #090c0e;   /* near-black cool-brown page bg */
+    --card-bg:    #12100a;   /* dark card body */
+    --card-mid:   #191408;   /* slightly lighter panel */
+    --card-top:   #241d0a;   /* header/footer panel */
+    --border:     #423308;   /* subtle warm border */
+    --text-dim:   rgba(220,190,110,.65);
+    --text-gold:  #f0cf70;
+  }
+  html, body {
+    min-height: 100vh;
+    background: var(--bg);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: 'Rajdhani', sans-serif;
+    overflow-x: hidden;
+  }
+  /* ambient glow behind card — gold with a cyan gem-light kiss */
+  body::before {
+    content: '';
+    position: fixed; inset: 0;
+    background:
+      radial-gradient(ellipse 70% 55% at 50% 30%, rgba(197,146,17,.30) 0%, transparent 65%),
+      radial-gradient(ellipse 50% 35% at 20% 90%,  rgba(10,168,216,.14)  0%, transparent 60%),
+      radial-gradient(ellipse 40% 30% at 85% 10%,  rgba(226,194,77,.15) 0%, transparent 55%);
+    pointer-events: none;
+    z-index: 0;
+  }
+  /* ── card outer border (gradient gold trim) ── */
+  .card-wrap {
+    position: relative;
+    z-index: 1;
+    width: min(380px, 92vw);
+    padding: 3px;
+    border-radius: 22px;
+    background: linear-gradient(145deg,
+      var(--gold-light) 0%,
+      var(--gold2)      18%,
+      var(--gold-dark)  38%,
+      var(--amber)      52%,
+      var(--gold-dark)  65%,
+      var(--gold2)      82%,
+      var(--gold-light) 100%);
+    box-shadow:
+      0 0 0 1px rgba(197,146,17,.25),
+      0 0 28px rgba(197,146,17,.45),
+      0 0 70px rgba(10,168,216,.15),
+      0 28px 70px rgba(0,0,0,.85);
+    animation: holo 7s ease-in-out infinite;
+  }
+  @keyframes holo {
+    0%,100% {
+      box-shadow:
+        0 0 0 1px rgba(197,146,17,.25),
+        0 0 28px rgba(197,146,17,.45),
+        0 0 70px rgba(10,168,216,.15),
+        0 28px 70px rgba(0,0,0,.85);
+    }
+    50% {
+      box-shadow:
+        0 0 0 1px rgba(226,194,77,.50),
+        0 0 46px rgba(226,194,77,.70),
+        0 0 110px rgba(10,168,216,.30),
+        0 28px 70px rgba(0,0,0,.85);
+    }
+  }
+  /* corner diamonds — gem cyan */
+  .card-wrap::before, .card-wrap::after {
+    content: '♦';
+    position: absolute;
+    font-size: 16px;
+    color: var(--cyan-light);
+    text-shadow: 0 0 7px var(--cyan);
+    z-index: 10;
+  }
+  .card-wrap::before { top: 10px; left: 13px; }
+  .card-wrap::after  { bottom: 10px; right: 13px; transform: rotate(180deg); }
+  /* ── card body ── */
+  .card {
+    border-radius: 19px;
+    background: var(--card-bg);
+    overflow: hidden;
+    position: relative;
+  }
+  /* moving sheen — gold with a thread of cyan */
+  .card::after {
+    content: '';
+    position: absolute; inset: 0;
+    background: linear-gradient(120deg,
+      transparent 28%,
+      rgba(197,146,17,.07) 44%,
+      rgba(10,168,216,.10) 50%,
+      rgba(197,146,17,.07) 56%,
+      transparent 72%);
+    background-size: 200% 200%;
+    animation: sheen 5s ease-in-out infinite;
+    pointer-events: none;
+    z-index: 5;
+    border-radius: 19px;
+  }
+  @keyframes sheen {
+    0%,100% { background-position: 200% 0%; }
+    50%      { background-position: 0% 100%; }
+  }
+  /* ── header ── */
+  .card-header {
+    background: linear-gradient(90deg, var(--card-top), #362808, var(--card-top));
+    border-bottom: 2px solid var(--gold-dark);
+    padding: 8px 16px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .card-header .stars {
+    font-size: 11px;
+    color: var(--gold2);
+    letter-spacing: 3px;
+    text-shadow: 0 0 6px var(--gold);
+  }
+  .card-header .type-label {
+    font-family: 'Cinzel Decorative', cursive;
+    font-size: 8px;
+    color: var(--gold-light);
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    opacity: .80;
+  }
+  /* ── image ── */
+  .card-image {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 1 / 1;
+    overflow: hidden;
+  }
+  .card-image img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+  .level-badge {
+    position: absolute;
+    top: 10px; left: 12px;
+    background: linear-gradient(135deg, var(--gold-dark), var(--gold2));
+    border: 1.5px solid var(--gold-light);
+    border-radius: 6px;
+    padding: 2px 8px;
+    font-family: 'Cinzel Decorative', cursive;
+    font-size: 9px;
+    color: #1a0e00;
+    font-weight: 900;
+    letter-spacing: 1px;
+    box-shadow: 0 0 10px rgba(197,146,17,.5);
+    z-index: 4;
+  }
+  .jackpot-ribbon {
+    position: absolute;
+    top: 10px; right: 12px;
+    background: linear-gradient(135deg, #0d1a1e, #123642);
+    border: 1.5px solid var(--cyan);
+    border-radius: 8px;
+    padding: 4px 10px;
+    text-align: center;
+    z-index: 4;
+    box-shadow: 0 0 14px rgba(10,168,216,.5);
+  }
+  .jackpot-ribbon .jlabel {
+    font-size: 8px;
+    letter-spacing: 2px;
+    color: var(--cyan-light);
+    display: block;
+    font-family: 'Rajdhani', sans-serif;
+    font-weight: 700;
+  }
+  .jackpot-ribbon .jnum {
+    font-family: 'Cinzel Decorative', cursive;
+    font-size: 10px;
+    color: var(--gold-light);
+    text-shadow: 0 0 6px var(--cyan);
+    display: block;
+    white-space: nowrap;
+  }
+  /* fade image into card bg */
+  .card-image::after {
+    content: '';
+    position: absolute;
+    bottom: 0; left: 0; right: 0;
+    height: 55%;
+    background: linear-gradient(to top, var(--card-bg) 0%, transparent 100%);
+    pointer-events: none;
+  }
+  /* ── name plate ── */
+  .name-plate {
+    padding: 0 16px 4px;
+    position: relative;
+    margin-top: -30px;
+    z-index: 3;
+    text-align: center;
+  }
+  .name-plate h1 {
+    font-family: 'Cinzel Decorative', cursive;
+    font-size: clamp(20px, 6vw, 26px);
+    background: linear-gradient(to bottom, var(--gold-light), var(--gold2), var(--gold-dark));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    letter-spacing: 2px;
+    line-height: 1.1;
+    filter: drop-shadow(0 2px 8px rgba(197,146,17,.55));
+  }
+  .name-plate .subtitle {
+    font-size: 11px;
+    color: var(--text-dim);
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    margin-top: 2px;
+  }
+  /* ── divider ── */
+  .divider {
+    margin: 8px 16px;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, var(--gold-dark), var(--gold2), var(--gold-dark), transparent);
+    position: relative;
+  }
+  .divider::before {
+    content: '✦';
+    position: absolute;
+    left: 50%; top: 50%;
+    transform: translate(-50%,-50%);
+    background: var(--card-bg);
+    color: var(--cyan-light);
+    font-size: 10px;
+    padding: 0 6px;
+  }
+  /* ── stats ── */
+  .stats {
+    display: grid;
+    grid-template-columns: 1fr 1px 1fr 1px 1fr;
+    padding: 4px 12px 8px;
+    background: var(--card-mid);
+  }
+  .stat { text-align: center; padding: 6px 6px; }
+  .stat .sv { font-size: 13px; font-weight: 700; color: var(--gold2); }
+  .stat .sl { font-size: 9px; color: var(--text-dim); letter-spacing: 1px; text-transform: uppercase; }
+  .sep { background: linear-gradient(to bottom, transparent, var(--gold-dark), transparent); }
+  /* ── lore box ── */
+  .lore {
+    margin: 8px 12px 10px;
+    background: rgba(10,168,216,.06);
+    border: 1px solid rgba(197,146,17,.25);
+    border-radius: 8px;
+    padding: 8px 12px;
+    font-size: 11px;
+    color: var(--text-gold);
+    line-height: 1.5;
+    text-align: center;
+    letter-spacing: .5px;
+  }
+  .lore strong { color: var(--cyan-light); }
+  /* ── bottom divider ── */
+  .bottom-divider {
+    margin: 2px 16px 10px;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, var(--gold-dark), var(--gold2), var(--gold-dark), transparent);
+  }
+  /* ── buttons ── */
+  .card-buttons {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    padding: 0 14px 16px;
+  }
+  .btn {
+    position: relative;
+    padding: 13px 0;
+    border: none;
+    border-radius: 10px;
+    cursor: pointer;
+    font-family: 'Cinzel Decorative', cursive;
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    overflow: hidden;
+    transition: transform .15s, box-shadow .15s;
+    z-index: 1;
+    text-decoration: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .btn::before {
+    content: '';
+    position: absolute; inset: 0;
+    opacity: 0;
+    transition: opacity .2s;
+    z-index: -1;
+  }
+  .btn:hover { transform: translateY(-2px); }
+  .btn:active { transform: translateY(1px); }
+  /* DAFTAR – amber gold (matches logo crown) */
+  .btn-daftar {
+    background: linear-gradient(135deg, #6e4d00, var(--gold2), #8a6000, var(--amber));
+    color: #1a0e00;
+    box-shadow: 0 4px 20px rgba(197,146,17,.45), inset 0 1px 0 rgba(246,226,114,.4);
+    border: 1.5px solid var(--gold-light);
+  }
+  .btn-daftar::before { background: radial-gradient(circle at 50% 0%, rgba(246,226,114,.45), transparent 70%); }
+  .btn-daftar:hover::before { opacity: 1; }
+  .btn-daftar:hover { box-shadow: 0 6px 28px rgba(197,146,17,.65), inset 0 1px 0 rgba(246,226,114,.4); }
+  /* LOGIN – outlined gem cyan (matches logo gem accent) */
+  .btn-login {
+    background: linear-gradient(135deg, #0d1a1e, #123642, #0d1a1e);
+    color: var(--cyan-light);
+    box-shadow: 0 4px 18px rgba(10,168,216,.30), inset 0 1px 0 rgba(10,168,216,.15);
+    border: 1.5px solid var(--cyan);
+  }
+  .btn-login::before { background: radial-gradient(circle at 50% 0%, rgba(10,168,216,.25), transparent 70%); }
+  .btn-login:hover::before { opacity: 1; }
+  .btn-login:hover {
+    box-shadow: 0 6px 26px rgba(10,168,216,.55), inset 0 1px 0 rgba(10,168,216,.15);
+    border-color: var(--cyan-light);
+    color: var(--cyan-light);
+  }
+  /* shine sweep */
+  .btn::after {
+    content: '';
+    position: absolute;
+    top: 0; left: -100%; width: 60%; height: 100%;
+    background: linear-gradient(90deg, transparent, rgba(246,226,114,.22), transparent);
+    transform: skewX(-20deg);
+    transition: left .5s;
+  }
+  .btn:hover::after { left: 160%; }
+  /* ── footer ── */
+  .card-footer {
+    background: linear-gradient(90deg, var(--card-top), #362808, var(--card-top));
+    border-top: 1px solid var(--border);
+    padding: 7px 14px;
+    display: flex;
+    justify-content: center;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+  .tag {
+    font-size: 9px;
+    color: var(--text-dim);
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    display: flex;
+    align-items: center;
+    gap: 3px;
+  }
+  .tag::before { content: '⚡'; font-size: 9px; color: var(--cyan-light); }
+ .card-legal {
+    background: #0a0703;
+    border-top: 1px solid var(--border);
+    padding: 7px 14px;
+    text-align: center;
+    font-size: 9.5px;
+    letter-spacing: 1px;
+    color: rgba(200,160,60,.55);
+    font-family: 'Rajdhani', sans-serif;
+    font-weight: 500;
+  }
+  .card-legal a {
+    color: inherit;
+  }
+  .card-legal .age {
+    color: var(--cyan-light);
+    font-weight: 700;
+    font-size: 10px;
+  }
+  
+  /* ── particles ── */
+  .particles {
+    position: fixed; inset: 0;
+    pointer-events: none;
+    overflow: hidden;
+    z-index: 0;
+  }
+  .particle {
+    position: absolute;
+    border-radius: 50%;
+    opacity: 0;
+    animation: float linear infinite;
+  }
+  @keyframes float {
+    0%   { transform: translateY(100vh) rotate(0deg); opacity: 0; }
+    10%  { opacity: .7; }
+    90%  { opacity: .3; }
+    100% { transform: translateY(-10vh) rotate(720deg); opacity: 0; }
+  }
+"
+|     "
+"
+|   "
+"
+|   <body>
+|     "
+"
+|     <div>
+|       class="particles"
+|       id="particles"
+|       <div>
+|         class="particle"
+|         style="css-text: 
+      left: 43.073190239923335%;
+      width: 3.127504256955385px; height: 3.127504256955385px;
+      animation-duration: 7.337945715017378s;
+      animation-delay: 6.164011141500641s;
+      background: #e2c24d;
+      box-shadow: 0 0 6.25500851391077px #e2c24d;
+    "
+|       <div>
+|         class="particle"
+|         style="css-text: 
+      left: 61.34473120234271%;
+      width: 2.068090959145361px; height: 2.068090959145361px;
+      animation-duration: 11.345318156728556s;
+      animation-delay: 3.194295502233917s;
+      background: #0aa8d8;
+      box-shadow: 0 0 4.136181918290722px #0aa8d8;
+    "
+|       <div>
+|         class="particle"
+|         style="css-text: 
+      left: 26.285554209706884%;
+      width: 3.5158303259174297px; height: 3.5158303259174297px;
+      animation-duration: 13.397077811376466s;
+      animation-delay: 2.5899855530089764s;
+      background: #e2c24d;
+      box-shadow: 0 0 7.031660651834859px #e2c24d;
+    "
+|       <div>
+|         class="particle"
+|         style="css-text: 
+      left: 63.97735811326897%;
+      width: 3.4845602157973508px; height: 3.4845602157973508px;
+      animation-duration: 8.131963260937308s;
+      animation-delay: 6.650668394014827s;
+      background: #b07a00;
+      box-shadow: 0 0 6.9691204315947015px #b07a00;
+    "
+|       <div>
+|         class="particle"
+|         style="css-text: 
+      left: 97.74613965363561%;
+      width: 1.331527783855597px; height: 1.331527783855597px;
+      animation-duration: 13.17220323828821s;
+      animation-delay: 7.11908715106385s;
+      background: #0aa8d8;
+      box-shadow: 0 0 2.663055567711194px #0aa8d8;
+    "
+|       <div>
+|         class="particle"
+|         style="css-text: 
+      left: 16.29751649216419%;
+      width: 2.4650335374662022px; height: 2.4650335374662022px;
+      animation-duration: 13.28845524526649s;
+      animation-delay: 4.467026945116967s;
+      background: #e2c24d;
+      box-shadow: 0 0 4.9300670749324045px #e2c24d;
+    "
+|       <div>
+|         class="particle"
+|         style="css-text: 
+      left: 37.95751387587746%;
+      width: 2.5283870144311673px; height: 2.5283870144311673px;
+      animation-duration: 7.165052240656568s;
+      animation-delay: 4.1964111059864635s;
+      background: #6adcf5;
+      box-shadow: 0 0 5.056774028862335px #6adcf5;
+    "
+|       <div>
+|         class="particle"
+|         style="css-text: 
+      left: 34.482814743572575%;
+      width: 1.4811573924380972px; height: 1.4811573924380972px;
+      animation-duration: 8.256170401720976s;
+      animation-delay: 7.735256205537409s;
+      background: #c59211;
+      box-shadow: 0 0 2.9623147848761944px #c59211;
+    "
+|       <div>
+|         class="particle"
+|         style="css-text: 
+      left: 77.14956905509239%;
+      width: 1.215572116277586px; height: 1.215572116277586px;
+      animation-duration: 10.070177333735787s;
+      animation-delay: 8.689389274667903s;
+      background: #c59211;
+      box-shadow: 0 0 2.431144232555172px #c59211;
+    "
+|       <div>
+|         class="particle"
+|         style="css-text: 
+      left: 69.29297039551568%;
+      width: 1.231089315793755px; height: 1.231089315793755px;
+      animation-duration: 11.607519956895686s;
+      animation-delay: 10.86171774297407s;
+      background: #6adcf5;
+      box-shadow: 0 0 2.46217863158751px #6adcf5;
+    "
+|       <div>
+|         class="particle"
+|         style="css-text: 
+      left: 57.893511999765224%;
+      width: 2.2858393864412805px; height: 2.2858393864412805px;
+      animation-duration: 11.074740524021866s;
+      animation-delay: 3.086683068350903s;
+      background: #c59211;
+      box-shadow: 0 0 4.571678772882561px #c59211;
+    "
+|       <div>
+|         class="particle"
+|         style="css-text: 
+      left: 14.374662817136574%;
+      width: 1.3082153952709006px; height: 1.3082153952709006px;
+      animation-duration: 11.054044355443262s;
+      animation-delay: 2.276069969198728s;
+      background: #e2c24d;
+      box-shadow: 0 0 2.616430790541801px #e2c24d;
+    "
+|       <div>
+|         class="particle"
+|         style="css-text: 
+      left: 11.238433132131808%;
+      width: 2.7834190748438012px; height: 2.7834190748438012px;
+      animation-duration: 8.238169751161028s;
+      animation-delay: 10.830155515983286s;
+      background: #c59211;
+      box-shadow: 0 0 5.5668381496876025px #c59211;
+    "
+|       <div>
+|         class="particle"
+|         style="css-text: 
+      left: 23.055553360125845%;
+      width: 3.6662660957413205px; height: 3.6662660957413205px;
+      animation-duration: 11.234207444561573s;
+      animation-delay: 10.505603482362186s;
+      background: #e2c24d;
+      box-shadow: 0 0 7.332532191482641px #e2c24d;
+    "
+|       <div>
+|         class="particle"
+|         style="css-text: 
+      left: 90.50221761816685%;
+      width: 1.3707185000194486px; height: 1.3707185000194486px;
+      animation-duration: 11.746782171407425s;
+      animation-delay: 11.589823460235777s;
+      background: #b07a00;
+      box-shadow: 0 0 2.7414370000388972px #b07a00;
+    "
+|       <div>
+|         class="particle"
+|         style="css-text: 
+      left: 50.13319567988822%;
+      width: 2.9098364486939574px; height: 2.9098364486939574px;
+      animation-duration: 13.242068462419178s;
+      animation-delay: 11.452864825685186s;
+      background: #f6e272;
+      box-shadow: 0 0 5.819672897387915px #f6e272;
+    "
+|       <div>
+|         class="particle"
+|         style="css-text: 
+      left: 60.486809163822485%;
+      width: 1.9181338900874754px; height: 1.9181338900874754px;
+      animation-duration: 14.269557556743372s;
+      animation-delay: 11.546205278938583s;
+      background: #0aa8d8;
+      box-shadow: 0 0 3.8362677801749507px #0aa8d8;
+    "
+|       <div>
+|         class="particle"
+|         style="css-text: 
+      left: 9.303954973990269%;
+      width: 1.0313500353665932px; height: 1.0313500353665932px;
+      animation-duration: 9.877899629078703s;
+      animation-delay: 2.7928432147536997s;
+      background: #c59211;
+      box-shadow: 0 0 2.0627000707331864px #c59211;
+    "
+|       <div>
+|         class="particle"
+|         style="css-text: 
+      left: 4.9349387742466%;
+      width: 2.248763791976458px; height: 2.248763791976458px;
+      animation-duration: 10.767127413857319s;
+      animation-delay: 9.462469726635554s;
+      background: #e2c24d;
+      box-shadow: 0 0 4.497527583952916px #e2c24d;
+    "
+|       <div>
+|         class="particle"
+|         style="css-text: 
+      left: 24.328689112599545%;
+      width: 3.9399980459004653px; height: 3.9399980459004653px;
+      animation-duration: 9.948883056518477s;
+      animation-delay: 8.312370111971s;
+      background: #c59211;
+      box-shadow: 0 0 7.879996091800931px #c59211;
+    "
+|       <div>
+|         class="particle"
+|         style="css-text: 
+      left: 37.455543164271376%;
+      width: 3.5818318460551555px; height: 3.5818318460551555px;
+      animation-duration: 14.229321307836369s;
+      animation-delay: 6.584532101632256s;
+      background: #0aa8d8;
+      box-shadow: 0 0 7.163663692110311px #0aa8d8;
+    "
+|       <div>
+|         class="particle"
+|         style="css-text: 
+      left: 10.130330730830606%;
+      width: 1.143646591737462px; height: 1.143646591737462px;
+      animation-duration: 12.078748802876483s;
+      animation-delay: 4.18977100103887s;
+      background: #e2c24d;
+      box-shadow: 0 0 2.287293183474924px #e2c24d;
+    "
+|       <div>
+|         class="particle"
+|         style="css-text: 
+      left: 37.50282615171113%;
+      width: 1.1185949471342698px; height: 1.1185949471342698px;
+      animation-duration: 14.988419543098377s;
+      animation-delay: 9.449524968616256s;
+      background: #f6e272;
+      box-shadow: 0 0 2.2371898942685395px #f6e272;
+    "
+|       <div>
+|         class="particle"
+|         style="css-text: 
+      left: 21.889252648389736%;
+      width: 2.5092081622030857px; height: 2.5092081622030857px;
+      animation-duration: 11.97903773503883s;
+      animation-delay: 9.745922106537469s;
+      background: #f6e272;
+      box-shadow: 0 0 5.0184163244061715px #f6e272;
+    "
+|       <div>
+|         class="particle"
+|         style="css-text: 
+      left: 32.154056505822425%;
+      width: 3.5885017459807735px; height: 3.5885017459807735px;
+      animation-duration: 10.668559855402002s;
+      animation-delay: 9.779811691080894s;
+      background: #f6e272;
+      box-shadow: 0 0 7.177003491961547px #f6e272;
+    "
+|       <div>
+|         class="particle"
+|         style="css-text: 
+      left: 82.97653737293913%;
+      width: 1.6065879428630274px; height: 1.6065879428630274px;
+      animation-duration: 9.889123669795167s;
+      animation-delay: 4.231837134322355s;
+      background: #f6e272;
+      box-shadow: 0 0 3.213175885726055px #f6e272;
+    "
+|       <div>
+|         class="particle"
+|         style="css-text: 
+      left: 94.2825197589921%;
+      width: 2.880923061640889px; height: 2.880923061640889px;
+      animation-duration: 12.037799460413861s;
+      animation-delay: 5.032611248273469s;
+      background: #c59211;
+      box-shadow: 0 0 5.761846123281778px #c59211;
+    "
+|       <div>
+|         class="particle"
+|         style="css-text: 
+      left: 27.102131583347443%;
+      width: 1.67227275398771px; height: 1.67227275398771px;
+      animation-duration: 13.654629240303132s;
+      animation-delay: 5.4824763979331905s;
+      background: #e2c24d;
+      box-shadow: 0 0 3.34454550797542px #e2c24d;
+    "
+|       <div>
+|         class="particle"
+|         style="css-text: 
+      left: 27.637886728645988%;
+      width: 1.7540835181315506px; height: 1.7540835181315506px;
+      animation-duration: 7.760719584476354s;
+      animation-delay: 6.301503445998655s;
+      background: #f6e272;
+      box-shadow: 0 0 3.5081670362631012px #f6e272;
+    "
+|       <div>
+|         class="particle"
+|         style="css-text: 
+      left: 70.01580244950233%;
+      width: 3.3628623588502715px; height: 3.3628623588502715px;
+      animation-duration: 12.601284852077008s;
+      animation-delay: 4.04914598291929s;
+      background: #f6e272;
+      box-shadow: 0 0 6.725724717700543px #f6e272;
+    "
+|       <div>
+|         class="particle"
+|         style="css-text: 
+      left: 63.38893338419391%;
+      width: 2.919574230758576px; height: 2.919574230758576px;
+      animation-duration: 10.095913224038743s;
+      animation-delay: 4.943763671515718s;
+      background: #b07a00;
+      box-shadow: 0 0 5.839148461517152px #b07a00;
+    "
+|       <div>
+|         class="particle"
+|         style="css-text: 
+      left: 22.223799050416027%;
+      width: 1.2200210025297138px; height: 1.2200210025297138px;
+      animation-duration: 6.410022098688067s;
+      animation-delay: 7.564252733436755s;
+      background: #b07a00;
+      box-shadow: 0 0 2.4400420050594276px #b07a00;
+    "
+|       <div>
+|         class="particle"
+|         style="css-text: 
+      left: 26.456533186021534%;
+      width: 2.133903549535834px; height: 2.133903549535834px;
+      animation-duration: 7.990040739003801s;
+      animation-delay: 8.16133194045093s;
+      background: #f6e272;
+      box-shadow: 0 0 4.267807099071668px #f6e272;
+    "
+|       <div>
+|         class="particle"
+|         style="css-text: 
+      left: 26.301101502499723%;
+      width: 3.1748717398479642px; height: 3.1748717398479642px;
+      animation-duration: 11.524534982246864s;
+      animation-delay: 9.62990600473839s;
+      background: #c59211;
+      box-shadow: 0 0 6.3497434796959284px #c59211;
+    "
+|       <div>
+|         class="particle"
+|         style="css-text: 
+      left: 64.57325352413832%;
+      width: 1.877523242790694px; height: 1.877523242790694px;
+      animation-duration: 11.9668138188823s;
+      animation-delay: 9.215169582624661s;
+      background: #6adcf5;
+      box-shadow: 0 0 3.755046485581388px #6adcf5;
+    "
+|     "
+"
+|     <div>
+|       class="card-wrap"
+|       "
+  "
+|       <div>
+|         class="card"
+|         "
+    "
+|         <div>
+|           class="card-header"
+|           "
+      "
+|           <span>
+|             class="stars"
+|             "★ ★ ★ ★ ★"
+|           "
+      "
+|           <span>
+|             class="type-label"
+|             "Legend · Maxwin"
+|           "
+      "
+|           <span>
+|             class="stars"
+|             "★ ★ ★ ★ ★"
+|           "
+    "
+|         "
+    "
+|         <div>
+|           class="card-image"
+|           "
+      "
+|           <img>
+|             alt="KINGBET188 Platform Game Online Terbaik Terpercaya 2026"
+|             src="KINGBET188-promo.png"
+|           "
+      "
+|           <div>
+|             class="level-badge"
+|             "LV. MAX"
+|           "
+      "
+|           <div>
+|             class="jackpot-ribbon"
+|             "
+        "
+|             <span>
+|               class="jlabel"
+|               "JACKPOT"
+|             "
+        "
+|             <span>
+|               class="jnum"
+|               "1,124,567,890"
+|             "
+      "
+|           "
+    "
+|         "
+    "
+|         <div>
+|           class="name-plate"
+|           "
+      "
+|           <h1>
+|             "KingBet188"
+|           "
+      "
+|           <div>
+|             class="subtitle"
+|             "Slot Gacor · Gampang JP"
+|           "
+    "
+|         "
+    "
+|         <div>
+|           class="divider"
+|         "
+    "
+|         <div>
+|           class="stats"
+|           "
+      "
+|           <div>
+|             class="stat"
+|             "
+        "
+|             <div>
+|               class="sv"
+|               "10K"
+|             "
+        "
+|             <div>
+|               class="sl"
+|               "Min Depo"
+|             "
+      "
+|           "
+      "
+|           <div>
+|             class="sep"
+|           "
+      "
+|           <div>
+|             class="stat"
+|             "
+        "
+|             <div>
+|               class="sv"
+|               "400"
+|             "
+        "
+|             <div>
+|               class="sl"
+|               "Min Bet"
+|             "
+      "
+|           "
+      "
+|           <div>
+|             class="sep"
+|           "
+      "
+|           <div>
+|             class="stat"
+|             "
+        "
+|             <div>
+|               class="sv"
+|               "500×"
+|             "
+        "
+|             <div>
+|               class="sl"
+|               "Max Win"
+|             "
+      "
+|           "
+    "
+|         "
+    "
+|         <div>
+|           class="divider"
+|         "
+    "
+|         <div>
+|           class="lore"
+|           "
+      Rasakan sensasi "
+|           <strong>
+|             "MAXWIN"
+|           " setiap hari."
+|           <br>
+|           "
+      Withdraw cepat · JP tanpa henti · 24/7 online.
+    "
+|         "
+    "
+|         <div>
+|           class="bottom-divider"
+|         "
+    "
+|         <div>
+|           class="card-buttons"
+|           "
+      "
+|           <a>
+|             class="btn btn-daftar"
+|             href="https://t2m.io/kb-reff-jayson"
+|             rel="noopener noreferrer"
+|             target="_blank"
+|             "Daftar"
+|           "
+      "
+|           <a>
+|             class="btn btn-login"
+|             href="https://t2m.io/kb-reff-jayson"
+|             rel="noopener noreferrer"
+|             target="_blank"
+|             "Login"
+|           "
+    "
+|         "
+    "
+|         <div>
+|           class="card-footer"
+|           "
+      "
+|           <span>
+|             class="tag"
+|             "Gacor Setiap Hari"
+|           "
+      "
+|           <span>
+|             class="tag"
+|             "WD Cepat"
+|           "
+      "
+|           <span>
+|             class="tag"
+|             "JP Tanpa Henti"
+|           "
+    "
+|         "
+  "
+|       "
+    "
+|       <div>
+|         class="card-legal"
+|         "
+      © 2026 "
+|         <a>
+|           href="https://wikiless.org/"
+|           "KINGBET188"
+|         "  ·  "
+|         <span>
+|           class="age"
+|           "18+"
+|         "  ·  Bermain Bertanggung Jawab
+    "
+|       "
+"
+|     "
+"
+|     <script>
+|       "
+  const container = document.getElementById('particles');
+  // gold + gem-cyan particle palette pulled from the KINGBET188 logo
+  const colors = ['#c59211','#e2c24d','#f6e272','#b07a00','#0aa8d8','#6adcf5'];
+  for (let i = 0; i < 35; i++) {
+    const p = document.createElement('div');
+    p.className = 'particle';
+    const size = Math.random() * 3 + 1;
+    const color = colors[Math.floor(Math.random() * colors.length)];
+    p.style.cssText = `
+      left: ${Math.random()*100}%;
+      width: ${size}px; height: ${size}px;
+      animation-duration: ${Math.random()*9 + 6}s;
+      animation-delay: ${Math.random()*12}s;
+      background: ${color};
+      box-shadow: 0 0 ${size*2}px ${color};
+    `;
+    container.appendChild(p);
+  }
+"
+|     "
+
+
+"

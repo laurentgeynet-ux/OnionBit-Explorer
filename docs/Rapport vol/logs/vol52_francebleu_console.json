@@ -1,0 +1,6 @@
+{
+    "console": [
+        "exception js : TypeError: cannot read `document` of Null\n    at t (1:453)\n    at <anonymous> (1:295)\n    at <anonymous> (1:2) \u00e2\u20ac\u201d src \u00c2\u00ab!function(e){var n=\"https://s.go-mpulse.net/boomerang/\";if(\"False\"==\"True\")e.BOOMR_config=e.BOOM\u00e2\u20ac\u00a6\u00c2\u00bb",
+        "unhandledrejection: TypeError: no module loader for `../chunks/DVd5xze_.js`"
+    ]
+}
