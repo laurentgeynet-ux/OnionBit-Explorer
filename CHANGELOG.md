@@ -7,6 +7,33 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **JS-C186 — §B-14 : named-getter
+  `CSSStyleDeclaration` borné aux
+  propriétés CSS** (`explorer-jscore`)
+  — jvc vol 103 : `hasOwnProperty
+  is not a function` (boot mort,
+  mégamenu peint ouvert §B-17) —
+  `StyleHost::get` servait `""` pour
+  TOUT nom de propriété, avalant
+  `Object.prototype` (`hasOwnProperty`,
+  `toString`, `constructor`),
+  les noms de méthodes host
+  (`typeof s.setProperty ===
+  'string'`) et les clés-symboles.
+  Fix : `get` rend `None` hors
+  propriétés CSS (noms
+  `Object.prototype`, méthodes
+  host, sentinelles `\u{f130}`) →
+  chaîne proto + repli `has_method`
+  restaurés ; `has_method` ajouté
+  (`setProperty`/`getPropertyValue`/
+  `removeProperty`/`item` →
+  `typeof` = `'function'`).
+  Propriété CSS non déclarée →
+  `""` préservé, `s[Symbol.x]` →
+  `undefined`. Verrous
+  `b14_probe.rs` ; suite jscore
+  complète verte.
 - **JS-C185 — §B-14 : interface
   `HTMLDocument` + adoption
   cross-document**

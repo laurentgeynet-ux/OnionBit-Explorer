@@ -196,3 +196,36 @@ fn insert_before_adopts_foreign_document_nodes() {
         "typed"
     );
 }
+
+#[test]
+fn style_decl_only_serves_css_property_names() {
+    let mut e = engine();
+    // jvc vol 103 : `hasOwnProperty is not a function` sur
+    // `CSSStyleDeclaration` — le named-getter servait `""` pour
+    // TOUT nom, avalant `Object.prototype` et les méthodes host.
+    // Spec : le getter nommé ne couvre que les propriétés CSS.
+    e.eval("var s=document.body.style; s.color='red'").unwrap();
+    assert_eq!(
+        ev(
+            &mut e,
+            "typeof s.hasOwnProperty + ':' + s.hasOwnProperty('color')"
+        ),
+        "function:false"
+    );
+    // Méthodes host lisibles en valeur (`typeof` + capture).
+    assert_eq!(ev(&mut e, "typeof s.setProperty"), "function");
+    assert_eq!(ev(&mut e, "typeof s.toString"), "function");
+    // Propriété CSS : non déclarée → `""`, déclarée → valeur.
+    assert_eq!(ev(&mut e, "s.zIndex === ''"), "true");
+    assert_eq!(ev(&mut e, "s.color"), "red");
+    // Lecture symbole → `undefined`, pas `""`.
+    assert_eq!(ev(&mut e, "s[Symbol.iterator] === undefined"), "true");
+    // `invoke` des méthodes host inchangé.
+    assert_eq!(
+        ev(
+            &mut e,
+            "s.setProperty('x-foo','1'); s.getPropertyValue('x-foo')"
+        ),
+        "1"
+    );
+}

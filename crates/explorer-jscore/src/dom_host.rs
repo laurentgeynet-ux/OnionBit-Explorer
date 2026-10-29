@@ -7839,6 +7839,36 @@ impl Host for StyleHost {
             };
             return Ok(Some(e.str_val(css)));
         }
+        // Named-getter spec CSSStyleDeclaration : seules les
+        // propriétés CSS servent `""`. `hasOwnProperty`/`toString`/
+        // les noms de méthodes host/symboles ne sont PAS des
+        // propriétés CSS — `None` laisse la lookup continuer
+        // (proto `Object` → `has_method` → `undefined`), sinon
+        // `style.hasOwnProperty` rendait `""` et le boot jvc
+        // (`s.hasOwnProperty(k)`) mourait en TypeError.
+        if key.starts_with('\u{f130}')
+            || matches!(
+                key,
+                "hasOwnProperty"
+                    | "isPrototypeOf"
+                    | "propertyIsEnumerable"
+                    | "toLocaleString"
+                    | "toString"
+                    | "valueOf"
+                    | "constructor"
+                    | "__proto__"
+                    | "__defineGetter__"
+                    | "__defineSetter__"
+                    | "__lookupGetter__"
+                    | "__lookupSetter__"
+                    | "setProperty"
+                    | "getPropertyValue"
+                    | "removeProperty"
+                    | "item"
+            )
+        {
+            return Ok(None);
+        }
         let kebab = camel_to_kebab(key);
         let v = {
             let d = self.dom.borrow();
@@ -7959,6 +7989,13 @@ impl Host for StyleHost {
             }
             _ => Ok(None),
         }
+    }
+
+    fn has_method(&self, name: &str) -> bool {
+        matches!(
+            name,
+            "setProperty" | "getPropertyValue" | "removeProperty" | "item"
+        )
     }
 }
 
