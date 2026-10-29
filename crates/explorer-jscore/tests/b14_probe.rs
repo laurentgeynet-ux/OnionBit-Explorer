@@ -401,6 +401,52 @@ fn elements_have_tag_specific_dom_interfaces() {
 }
 
 #[test]
+fn scheduler_post_task_resolves_via_timer() {
+    // dna vol 126 : `postTask` Scheduler API absent — spec :
+    // `scheduler.postTask(cb, opts)` → promesse résolue au
+    // retour de `cb` après `opts.delay` ms ; `signal` aborté
+    // → rejet `AbortError` ; `cb` qui jette → rejet.
+    let mut e = engine();
+    assert_eq!(ev(&mut e, "typeof scheduler.postTask"), "function");
+    // cb non-appelable → TypeError spec.
+    assert_eq!(
+        ev(
+            &mut e,
+            "try{scheduler.postTask(1);'no'}catch(x){x instanceof TypeError}"
+        ),
+        "true"
+    );
+    // Résolution au retour du callback via la file de timers.
+    e.eval("var r='';\
+            scheduler.postTask(function(){return 7}).then(function(v){r='ok:'+v},function(x){r='rej:'+x.name});\
+            scheduler.postTask(function(){throw 'boom'}).then(function(){r='no'},function(x){r=r+'|thrown'});")
+        .unwrap_or_else(|x| panic!("{x:?}"));
+    e.run_due_timers().expect("timers");
+    e.run_microtasks().expect("microtasks");
+    assert_eq!(ev(&mut e, "r"), "ok:7|thrown");
+    // `signal` déjà aborté → rejet `AbortError` immédiat.
+    assert_eq!(
+        ev(
+            &mut e,
+            "var s2='';\
+             scheduler.postTask(function(){}, {signal:AbortSignal.abort()}).then(function(){s2='no'},function(x){s2=x.name});\
+             'queued'"
+        ),
+        "queued"
+    );
+    e.run_microtasks().expect("microtasks");
+    assert_eq!(ev(&mut e, "s2"), "AbortError");
+    // `priority` accepté (non ordonnancé — déviation bornée).
+    assert_eq!(
+        ev(
+            &mut e,
+            "scheduler.postTask(function(){return 1},{priority:'background',delay:0}) instanceof Promise"
+        ),
+        "true"
+    );
+}
+
+#[test]
 fn navigator_java_enabled_returns_false() {
     // maif vol 122 : `javaEnabled is not a function` — méthode
     // spec (dépréciée) lue par les feature-detects ; spec :

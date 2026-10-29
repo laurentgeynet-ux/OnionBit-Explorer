@@ -2965,10 +2965,17 @@ impl Engine {
         self.set_own(vv, "onscroll", Value::Null, true);
         self.set_own(g, "visualViewport", Value::Obj(vv), false);
         // `scheduler` — `scheduler.yield()` → promesse résolue
-        // (file microtâche existante ; `postTask` absent).
+        // (file microtâche existante) ; `postTask(cb,{delay,
+        // priority,signal})` (dna vol 126) — promesse résolue
+        // au retour du callback, rejetée si le callback jette
+        // ou si `signal` est aborté (re-lu au tir — couvre les
+        // deux mondes de signaux dom/xhr) ; `priority` accepté
+        // mais non ordonnancé (file FIFO — déviation bornée).
         let sch = self.new_object();
         let y = self.native_fn("yield", scheduler_yield);
         self.set_own(sch, "yield", y, true);
+        let pt = self.native_fn("postTask", scheduler_post_task);
+        self.set_own(sch, "postTask", pt, true);
         self.set_own(g, "scheduler", Value::Obj(sch), false);
         // `cookieStore` — jar vide honnête (get→null,
         // getAll→[], set/delete→resolve) : les guards
@@ -12509,6 +12516,67 @@ fn scheduler_yield(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
     let id = e.new_promise();
     e.resolve_promise(id, Value::Undefined);
     Ok(Value::Obj(id))
+}
+
+/// `scheduler.postTask(cb, {delay?, priority?, signal?})` —
+/// spec Scheduler API : retourne une promesse résolue au
+/// résultat de `cb`, schedulée sur la file de timers après
+/// `delay` ms. `signal.aborted` → rejet `AbortError` (à
+/// l'appel si déjà aborté, sinon re-lu au moment du tir).
+/// `priority` accepté, ignoré (file FIFO unique).
+fn scheduler_post_task(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let cb = arg(args, 0);
+    if !e.is_callable(cb) {
+        return Err(e.type_error("scheduler.postTask: callback is not a function"));
+    }
+    let mut delay = 0u64;
+    let mut signal = Value::Undefined;
+    if let Value::Obj(o) = arg(args, 1) {
+        if let Some(Value::Num(d)) = e.get_prop(o, "delay") {
+            delay = if d.is_finite() { d.max(0.0) as u64 } else { 0 };
+        }
+        if let Some(s) = e.get_prop(o, "signal") {
+            signal = s;
+        }
+    }
+    let pid = e.new_promise();
+    // `signal` déjà aborté → rejet `AbortError` immédiat (spec).
+    if let Value::Obj(s) = signal {
+        if matches!(e.get_prop(s, "aborted"), Some(Value::Bool(true))) {
+            let r = e.error_value(e.protos.error, "AbortError", "signal is aborted");
+            e.reject_promise(pid, r);
+            return Ok(Value::Obj(pid));
+        }
+    }
+    let fire = e.bound_native(
+        "postTask",
+        post_task_fire,
+        vec![cb, Value::Obj(pid), signal],
+    );
+    e.timers.schedule(fire, delay, false, Vec::new());
+    Ok(Value::Obj(pid))
+}
+
+/// Tir différé de `postTask` : re-check `signal.aborted`,
+/// appelle `cb`, résout/rejette la promesse liée.
+fn post_task_fire(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let cb = arg(args, 0);
+    let Value::Obj(pid) = arg(args, 1) else {
+        return Ok(Value::Undefined);
+    };
+    if let Value::Obj(s) = arg(args, 2) {
+        if matches!(e.get_prop(s, "aborted"), Some(Value::Bool(true))) {
+            let r = e.error_value(e.protos.error, "AbortError", "signal is aborted");
+            e.reject_promise(pid, r);
+            return Ok(Value::Undefined);
+        }
+    }
+    match e.call_value(cb, Value::Undefined, &[]) {
+        Ok(v) => e.resolve_promise(pid, v),
+        // Jet du callback → rejet de la promesse (spec).
+        Err(crate::heap::Thrown(t)) => e.reject_promise(pid, t),
+    }
+    Ok(Value::Undefined)
 }
 
 /// `cookieStore.get(name)` → `null` résolu (jar vide).

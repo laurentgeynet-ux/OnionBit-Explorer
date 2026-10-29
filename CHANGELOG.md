@@ -7,6 +7,27 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **JS-C195 — §B-14 :
+  `scheduler.postTask` (Scheduler
+  API)** (`explorer-jscore`) —
+  dna vol 126 : `postTask`
+  absent. Spec :
+  `scheduler.postTask(cb,
+  {delay?, priority?, signal?})`
+  → promesse résolue au retour
+  de `cb`, schedulée sur la file
+  de timers après `delay` ms ;
+  `signal.aborted` → rejet
+  `AbortError` (à l'appel si
+  déjà aborté, sinon re-lu au
+  tir — couvre les deux mondes
+  de signaux dom/xhr) ; callback
+  qui jette → rejet. `priority`
+  accepté, ignoré (file FIFO
+  unique — déviation bornée
+  documentée). Verrou
+  `scheduler_post_task_resolves
+  _via_timer` (`b14_probe.rs`).
 - **JS-C194 — §B-14 :
   `AbortSignal.timeout` +
   `navigator.javaEnabled`**
