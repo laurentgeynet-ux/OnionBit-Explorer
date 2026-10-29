@@ -7,6 +7,25 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **JS-C198 — §B-14 : `localName`
+  sur les éléments**
+  (`explorer-jscore`) — SG
+  vol 128 : `hasAttribute is
+  not a function (on
+  HTMLDocument)` — le marcheur
+  d'ancêtres `parentNode`×n se
+  garde sur `"body"===r.localName`
+  ; `localName` absent →
+  `undefined` → remontée
+  jusqu'au `document` →
+  TypeError. Spec DOM :
+  `localName` = nom qualifié
+  minuscule sur les éléments,
+  `null` sur les nœuds
+  non-élément (texte/comment).
+  Verrou
+  `local_name_stops_ancestor_
+  walkers_at_body` (`b14_probe.rs`).
 - **JS-C197 — §B-14 : `XPath`
   élargi + `navigator.vendor`**
   (`explorer-jscore`) — insee

@@ -5828,6 +5828,22 @@ impl Host for NodeHost {
                     t
                 })));
             }
+            // `localName` — nom qualifié minuscule (spec DOM :
+            // n'existe que sur les éléments, `null` ailleurs).
+            // Son absence cassait les marcheurs d'ancêtres qui se
+            // gardent sur `"body"===r.localName` : le check ratait,
+            // la remontée débordait jusqu'au `document` puis
+            // `document.hasAttribute` tuait le script (SG vol 128,
+            // `localName`/`textContent` nicematin vol 124).
+            "localName" => {
+                let n = &self.dom.borrow().nodes[node as usize];
+                let v = if n.kind == NodeKind::Element {
+                    e.str_val(n.tag.clone())
+                } else {
+                    Value::Null
+                };
+                return Ok(Some(v));
+            }
             "innerHTML" => {
                 let s = self.dom.borrow().inner_html(node);
                 return Ok(Some(e.str_val(s)));

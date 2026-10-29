@@ -563,3 +563,31 @@ fn navigator_java_enabled_returns_false() {
         "string||Mozilla|Gecko|20030107|string"
     );
 }
+
+// SG vol 128 : `hasAttribute is not a function (on HTMLDocument)`
+// — le marcheur d'ancêtres (`parentNode`×n) se gardait sur
+// `"body"===r.localName` ; `localName` absent → remontée jusqu'au
+// `document` → TypeError. Spec : `localName` minuscule sur les
+// éléments, `null` sur les nœuds non-élément.
+#[test]
+fn local_name_stops_ancestor_walkers_at_body() {
+    let mut e = engine();
+    assert_eq!(ev(&mut e, "document.body.localName"), "body");
+    assert_eq!(ev(&mut e, "document.documentElement.localName"), "html");
+    assert_eq!(
+        ev(&mut e, "document.body.firstChild.localName === null"),
+        "true"
+    );
+    // Repro du garde-fou SG : `parentNode` monte jusqu'à `body`,
+    // localName l'arrête avant le `document` (avant : TypeError).
+    assert_eq!(
+        ev(
+            &mut e,
+            "(()=>{const o=(e,t)=>{for(;t-->0;)if(!(e=e.parentNode))return null;return e};\
+             for(let t=0;t<10;t++){const r=o(document.getElementById('u'),t);\
+             if(r===null||'body'===r.localName)return 'stop@'+t;\
+             if(r===document)return 'doc@'+t}return 'never'})()"
+        ),
+        "stop@2"
+    );
+}
