@@ -7,6 +7,21 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **§B-4(c) — compteur
+  `promise_stats` + sonde
+  promesses host** (`explorer-jscore`)
+  — « évals OK, page inerte » =
+  souvent un `await` sur promesse
+  jamais réglée, invisible aux
+  erreurs ; `Engine::promise_stats`
+  → `(créées, réglées)` — un gap
+  stable ≥1 trace le gel (vol
+  twitch = 44 évals inertes sans
+  console). Verrous ×2 : host
+  promises saines (`fonts.ready`
+  immédiat, `whenDefined` pending→
+  `define` résout) + le compteur
+  mesure bien un pending vivant.
 - **MSE-4 — `isTypeSupported` piloté
   par codecs déclarés + offre
   `mseBuffers`** (ADR-0029 —

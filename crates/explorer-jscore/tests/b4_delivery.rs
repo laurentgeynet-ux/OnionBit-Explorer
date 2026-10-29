@@ -21,7 +21,7 @@ fn engine() -> Engine {
     // storage (le vrai chemin les ajoute via ) —
     // la matrice teste la livraison, pas le défaut d'install.
     e.install_timers();
-    e.install_storage(&Storage::new(RefCell::new(Default::default())));
+    e.install_storage(&Storage::new(RefCell::new(std::collections::BTreeMap::new())));
     e.install_dom(&Rc::new(RefCell::new(Dom::from_html(PAGE))));
     e
 }
@@ -230,4 +230,54 @@ fn b4_promise_chain_deep() {
     );
     e.run_microtasks().expect("pump");
     assert_eq!(ev(&mut e, "__p"), "5");
+}
+
+/// (n) `await` sur promesses **host** — `fonts.ready` doit
+/// résoudre, `whenDefined` pend spec-correctement puis
+/// résout à `define` (le gel ne doit pas être un mur
+/// absolu — §B-4(c) : un await host qui pende pour de bon
+/// = le bras).
+#[test]
+fn b4_host_promises_settle() {
+    let mut e = engine();
+    // `document.fonts.ready` — résolution immédiate spec.
+    ev(
+        &mut e,
+        "window.__f=0;document.fonts.ready.then(function(){__f++});",
+    );
+    e.run_microtasks().expect("pump");
+    assert_eq!(ev(&mut e, "__f"), "1");
+    // `whenDefined` avant `define` → pending ; le `define`
+    // qui suit doit résoudre la promesse en attente.
+    ev(
+        &mut e,
+        "window.__w=0;\
+         customElements.whenDefined('x-zz').then(function(){__w++});",
+    );
+    e.run_microtasks().expect("pump1");
+    assert_eq!(ev(&mut e, "__w"), "0");
+    ev(
+        &mut e,
+        "customElements.define('x-zz',class extends HTMLElement{});",
+    );
+    e.run_microtasks().expect("pump2");
+    assert_eq!(ev(&mut e, "__w"), "1");
+}
+
+/// (o) `promise_stats` — le compteur §B-4(c) : un `await`
+/// gelé laisse `créées - réglées ≥ 1` stable.
+#[test]
+fn b4_promise_stats_counts_pending() {
+    let mut e = engine();
+    let (c0, s0) = e.promise_stats();
+    ev(
+        &mut e,
+        "Promise.resolve(1);\
+         new Promise(function(){/*jamais réglée*/});",
+    );
+    e.run_microtasks().expect("pump");
+    let (c1, s1) = e.promise_stats();
+    assert!(c1 > c0, "créées n'ont pas bougé : {c0}→{c1}");
+    assert!(s1 > s0, "réglées n'ont pas bougé : {s0}→{s1}");
+    assert!(c1 > s1, "le pending n'est pas compté : c={c1} s={s1}");
 }

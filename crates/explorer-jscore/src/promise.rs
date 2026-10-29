@@ -89,7 +89,17 @@ pub(crate) enum Job {
 
 impl Engine {
     /// `new Promise()` internals: pending object + bound settle fns.
+    /// Compteurs §B-4(c) — `(créées, réglées)` par moteur : un
+    /// `await` gelé laisse un gap stable `créées - réglées ≥ 1`
+    /// sans erreur — la signature « évals OK, page inerte ».
+    /// Exposé au vol (comparaison entre évals silencieux).
+    #[must_use]
+    pub fn promise_stats(&self) -> (u64, u64) {
+        (self.promises_created, self.promises_settled)
+    }
+
     pub(crate) fn new_promise(&mut self) -> ObjId {
+        self.promises_created += 1;
         let id = self.heap.alloc_obj(crate::heap::Object {
             proto: Value::Obj(self.protos.promise),
             props: Vec::new(),
@@ -139,6 +149,7 @@ impl Engine {
                 return;
             }
             p.state = state;
+            self.promises_settled += 1;
             p.result = result;
             let u = state == PromiseState::Rejected && !p.handled;
             (std::mem::take(&mut p.reactions), u)

@@ -321,6 +321,12 @@ pub struct Engine {
     /// enfant courent dans SON realm (spec « job callback realm »),
     /// switchés à l'exécution par `run_microtasks`.
     pub(crate) microtasks: std::collections::VecDeque<(crate::context::CtxId, crate::promise::Job)>,
+    /// Compteurs §B-4(c) — `promises_created`/`promises_settled`
+    /// par moteur : un gap stable ≥1 = un `await` gelé en silence
+    /// (la signature « évals OK, rien ne se passe » des coquilles).
+    /// Vie du moteur, pas document-local.
+    pub(crate) promises_created: u64,
+    pub(crate) promises_settled: u64,
     /// `MutationObserver` bookkeeping (JS-C26) — callbacks par
     /// id d'observer ; les records vivent dans la file du `Dom`.
     pub(crate) mutobs: crate::mutation::MutObsState,
@@ -844,6 +850,8 @@ impl Engine {
             xhr: crate::xhr::XhrEngineState::default(),
             dom_ctx: None,
             microtasks: std::collections::VecDeque::new(),
+            promises_created: 0,
+            promises_settled: 0,
             mutobs: crate::mutation::MutObsState::default(),
             obs: crate::observers::ObsState::default(),
             files: crate::files::FilesState::default(),
