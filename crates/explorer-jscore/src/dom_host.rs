@@ -753,14 +753,7 @@ impl Engine {
         }
         let pid = self.new_object();
         let proto = Value::Obj(pid);
-        for &prop in dom_acc_props(class) {
-            let nm = self.str_val(prop);
-            let g = self.bound_native("dom.get", dom_acc_get, vec![nm]);
-            let s = self.bound_native("dom.set", dom_acc_set, vec![nm]);
-            if let Some(o) = self.heap.obj_mut(pid) {
-                o.set_accessor(prop, g, s, false);
-            }
-        }
+        self.install_dom_idl_accessors(pid, class);
         let ctor = self.native_fn(class, illegal_ctor);
         if let Value::Obj(cid) = ctor {
             self.set_own(cid, "prototype", proto, false);
@@ -770,6 +763,24 @@ impl Engine {
         }
         self.dom_ctors.insert(class.to_string(), ctor);
         ctor
+    }
+
+    /// Accesseurs IDL de `dom_acc_props` posés sur un proto
+    /// (`set_accessor`) — partagé entre `dom_ctor` et les
+    /// prototypes des ctors globaux : `el.constructor` rend
+    /// le ctor global (identité spec `=== HTMLInputElement`),
+    /// sa surface de descripteurs doit donc être la même
+    /// (JS-C192 — sinon `inputValueTracking` React perçoit un
+    /// proto nu).
+    fn install_dom_idl_accessors(&mut self, pid: ObjId, class: &str) {
+        for &prop in dom_acc_props(class) {
+            let nm = self.str_val(prop);
+            let g = self.bound_native("dom.get", dom_acc_get, vec![nm]);
+            let s = self.bound_native("dom.set", dom_acc_set, vec![nm]);
+            if let Some(o) = self.heap.obj_mut(pid) {
+                o.set_accessor(prop, g, s, false);
+            }
+        }
     }
 }
 
@@ -1466,8 +1477,17 @@ pub(crate) fn node_value(e: &mut Engine, dom: &DomRef, cache: &NodeCache, node: 
             // `instanceof Element`/`Text`/`Comment`/`Node` —
             // chaîne plate par kind (J5 : impots/ameli — sans
             // proto, tout `x instanceof Element` était faux).
+            // Éléments : interface tag-spécifique quand elle
+            // existe (`<script>` → `HTMLScriptElement` — sephora
+            // vol 121 : invariant Next.js
+            // `currentScript instanceof HTMLScriptElement`) ;
+            // tags hors table → `HTMLElement` (spec
+            // `HTMLUnknownElement` non modélisé).
             match kind {
-                Some(crate::dom::NodeKind::Element) => "HTMLElement",
+                Some(crate::dom::NodeKind::Element) => {
+                    let tag = dom.borrow().nodes[node as usize].tag.clone();
+                    tag_interface(&tag).unwrap_or("HTMLElement")
+                }
                 Some(crate::dom::NodeKind::Text) => "Text",
                 Some(crate::dom::NodeKind::Comment) => "Comment",
                 Some(crate::dom::NodeKind::Fragment) => "DocumentFragment",
@@ -1486,6 +1506,77 @@ pub(crate) fn node_value(e: &mut Engine, dom: &DomRef, cache: &NodeCache, node: 
         cache.borrow_mut().insert(node, id);
     }
     v
+}
+
+/// Tag HTML → interface DOM (spec `HTML*Element`) — les
+/// `x instanceof HTML<Name>Element` réels (invariants Next.js,
+/// feature-detects) exigent le proto tag-spécifique ; tags hors
+/// table → `HTMLElement` (spec rend `HTMLUnknownElement`, non
+/// modélisé — déviation documentée).
+fn tag_interface(tag: &str) -> Option<&'static str> {
+    Some(match tag {
+        "a" => "HTMLAnchorElement",
+        "area" => "HTMLAreaElement",
+        "audio" => "HTMLAudioElement",
+        "base" => "HTMLBaseElement",
+        "body" => "HTMLBodyElement",
+        "br" => "HTMLBRElement",
+        "button" => "HTMLButtonElement",
+        "canvas" => "HTMLCanvasElement",
+        "data" => "HTMLDataElement",
+        "datalist" => "HTMLDataListElement",
+        "details" => "HTMLDetailsElement",
+        "dialog" => "HTMLDialogElement",
+        "div" => "HTMLDivElement",
+        "dl" => "HTMLDListElement",
+        "embed" => "HTMLEmbedElement",
+        "fieldset" => "HTMLFieldSetElement",
+        "form" => "HTMLFormElement",
+        "h1" | "h2" | "h3" | "h4" | "h5" | "h6" => "HTMLHeadingElement",
+        "head" => "HTMLHeadElement",
+        "hr" => "HTMLHRElement",
+        "html" => "HTMLHtmlElement",
+        "iframe" => "HTMLIFrameElement",
+        "img" => "HTMLImageElement",
+        "input" => "HTMLInputElement",
+        "label" => "HTMLLabelElement",
+        "legend" => "HTMLLegendElement",
+        "li" => "HTMLLIElement",
+        "link" => "HTMLLinkElement",
+        "map" => "HTMLMapElement",
+        "meta" => "HTMLMetaElement",
+        "meter" => "HTMLMeterElement",
+        "object" => "HTMLObjectElement",
+        "ol" => "HTMLOListElement",
+        "optgroup" => "HTMLOptGroupElement",
+        "option" => "HTMLOptionElement",
+        "output" => "HTMLOutputElement",
+        "p" => "HTMLParagraphElement",
+        "picture" => "HTMLPictureElement",
+        "pre" => "HTMLPreElement",
+        "progress" => "HTMLProgressElement",
+        "q" | "blockquote" | "cite" => "HTMLQuoteElement",
+        "script" => "HTMLScriptElement",
+        "select" => "HTMLSelectElement",
+        "slot" => "HTMLSlotElement",
+        "source" => "HTMLSourceElement",
+        "span" => "HTMLSpanElement",
+        "style" => "HTMLStyleElement",
+        "caption" => "HTMLTableCaptionElement",
+        "td" | "th" => "HTMLTableCellElement",
+        "col" | "colgroup" => "HTMLTableColElement",
+        "table" => "HTMLTableElement",
+        "tr" => "HTMLTableRowElement",
+        "thead" | "tbody" | "tfoot" => "HTMLTableSectionElement",
+        "template" => "HTMLTemplateElement",
+        "textarea" => "HTMLTextAreaElement",
+        "time" => "HTMLTimeElement",
+        "title" => "HTMLTitleElement",
+        "track" => "HTMLTrackElement",
+        "ul" => "HTMLUListElement",
+        "video" => "HTMLVideoElement",
+        _ => return None,
+    })
 }
 
 /// `dom.borrow().parent(n)` without a scrutinee-held `Ref`.
@@ -2104,7 +2195,15 @@ impl Engine {
                     }
                     "HTMLDocument" => Some("Document"),
                     "SVGElement" => Some("Element"),
-                    _ if name.starts_with("HTML") && name.ends_with("Element") => Some("Element"),
+                    // Spec : `HTML*Element.prototype` hérite
+                    // `HTMLElement.prototype` (pas `Element`
+                    // direct) — sinon `el instanceof HTMLElement`
+                    // deviendrait faux dès qu'un proto tag-
+                    // spécifique est posé (JS-C192, sephora
+                    // `currentScript instanceof HTMLScriptElement`).
+                    _ if name.starts_with("HTML") && name.ends_with("Element") => {
+                        Some("HTMLElement")
+                    }
                     _ => None,
                 };
                 if let Some(pn) = parent {
@@ -2117,6 +2216,13 @@ impl Engine {
                     }
                 }
                 self.set_own(fid, "prototype", Value::Obj(p), false);
+                // Accesseurs IDL (`value`/`checked`/…) sur le
+                // proto global — `el.constructor` rend le ctor
+                // global tag-spécifique ; sa surface de
+                // descripteurs doit égaler celle des anciens
+                // `dom_ctor` (React `inputValueTracking`,
+                // JS-C192).
+                self.install_dom_idl_accessors(p, name);
                 // Spec WebIDL : `X.prototype.constructor === X`
                 // (`el.constructor`, `document.constructor`).
                 self.set_own(p, "constructor", f, false);
@@ -2530,7 +2636,7 @@ impl Engine {
         // (JS-C70) — uploads et lectures client-side.
         crate::files::install_files(self);
         // `MediaSource`/`SourceBuffer`/`SourceBufferList`/
-        // `TimeRanges` (JS-C173) — surface honnête sans
+        // `TimeRanges` (JS-C193) — surface honnête sans
         // lecture : classes réelles, `isTypeSupported` → `""`,
         // `createObjectURL` → rail registre MSE (transport
         // vers l'hôte = étape dédiée).
@@ -5373,6 +5479,15 @@ impl Host for NodeHost {
                 .and_then(|n| self.dom.borrow().ce.defs.get(n).map(|d| d.ctor));
             if let Some(ctor) = upgraded {
                 return Ok(Some(ctor));
+            }
+            // `div.constructor === HTMLDivElement` — spec :
+            // le ctor tag-spécifique global (JS-C192, vol 121
+            // sephora). Élément → interface par tag ; autres
+            // kinds → `class_name()` (Text/Comment/Node).
+            let tag = self.dom.borrow().nodes[node as usize].tag.clone();
+            let name = tag_interface(&tag).unwrap_or(self.class_name());
+            if let Some(v @ Value::Obj(_)) = e.get_prop(e.global, name) {
+                return Ok(Some(v));
             }
             return Ok(Some(e.dom_ctor(self.class_name())));
         }

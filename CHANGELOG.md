@@ -7,6 +7,82 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **JS-C193 — Surface MSE honnête
+  sans lecture** (`explorer-jscore`,
+  nouveau `mse.rs`) — amorce de la
+  piste Media Source Extensions
+  (ADR-0024 : la lecture est un
+  service d'hôte, hors périmètre
+  v1). Les stubs `illegal_ctor`
+  deviennent des classes réelles :
+  `new MediaSource()` (machine
+  `readyState`, `addSourceBuffer`,
+  `removeSourceBuffer`,
+  `endOfStream`, `setLiveSeekableRange`),
+  `SourceBuffer` (`appendBuffer`
+  accepté-**comptabilisé**, jamais
+  stocké — cap 64 Mio/buffer et
+  8 buffers/source → `QuotaExceededError`
+  ; séquence synchrone
+  `updatestart`/`update`/`updateend`),
+  `SourceBufferList` indexée
+  (`addsourcebuffer`/`removesourcebuffer`),
+  `TimeRanges` — tous `EventTarget`
+  via le rail `__et` partagé.
+  **Honnêteté ADR-0023** :
+  `MediaSource.isTypeSupported` →
+  `""` pour tout type (aucun
+  conteneur jouable sans transport
+  vers l'hôte — pousse les players
+  vers leurs fallbacks
+  `<video src>` déjà servis par le
+  seam `MediaSurface`) ;
+  `readyState` reste `"closed"`
+  (pas d'attache `blob:`→`<video>`
+  encore — opérations permises en
+  déviation documentée) ;
+  `buffered` vide (octets
+  comptés, rien de lisible
+  bufferisé = vrai).
+  `URL.createObjectURL(mediaSource)`
+  enregistre `blob:` → source dans
+  le registre `mse.object_urls`
+  (compteur partagé `files`,
+  `revokeObjectURL` purge les deux
+  rails) — point d'entrée de la
+  future couture d'offre.
+  `MseState` document-local swappé
+  `BrowsingContext` + racines GC.
+  Verrous `c193_mse.rs` ×6 ;
+  clippy/suite jscore verts.
+- **JS-C192 — §B-14 : interfaces
+  DOM tag-spécifiques**
+  (`explorer-jscore`) — sephora
+  vol 121 : `Invariant: Expected
+  document.currentScript to be a
+  <script> element. Received
+  [object HTMLScriptElement]` —
+  l'invariant Next.js teste
+  `instanceof HTMLScriptElement` ;
+  tout élément portait
+  `HTMLElement.prototype`. Spec :
+  `<script>` → `HTMLScriptElement
+  .prototype`. `node_value` choisit
+  l'interface par tag (table
+  `tag_interface` ~70 entrées,
+  fallback `HTMLElement` — spec
+  `HTMLUnknownElement` non
+  modélisé) ; `HTML*Element
+  .prototype` hérite désormais
+  `HTMLElement.prototype` (au
+  lieu de `Element` direct) pour
+  que `el instanceof HTMLElement`
+  reste vrai ; `el.constructor`
+  résout le ctor tag-spécifique
+  global. Verrou
+  `elements_have_tag_specific_dom
+  _interfaces` (`b14_probe.rs`) ;
+  suite jscore complète verte.
 - **JS-C191 — §B-14 :
   `Symbol.toStringTag` sur les
   collections DOM** (`explorer-jscore`)

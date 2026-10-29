@@ -337,3 +337,65 @@ fn insert_adjacent_position_is_ascii_case_insensitive() {
         "true"
     );
 }
+
+#[test]
+fn elements_have_tag_specific_dom_interfaces() {
+    // sephora vol 121 : invariant Next.js
+    // `document.currentScript instanceof HTMLScriptElement` —
+    // tout élément portait `HTMLElement.prototype`, le proto
+    // tag-spécifique manquait. Spec : `<script>` →
+    // `HTMLScriptElement.prototype` → `HTMLElement` →
+    // `Element` → `Node` → `EventTarget`.
+    let mut e = Engine::new();
+    e.install_dom(&Rc::new(RefCell::new(Dom::from_html(
+        "<html><body><script>1</script><div id=d>x</div><a href='#'>l</a></body></html>",
+    ))));
+    assert_eq!(
+        ev(
+            &mut e,
+            "var s=document.getElementsByTagName('script')[0];\
+             (s instanceof HTMLScriptElement)+'|'\
+             +(s instanceof HTMLElement)+'|'\
+             +(s instanceof Element)+'|'\
+             +(s instanceof Node)"
+        ),
+        "true|true|true|true"
+    );
+    assert_eq!(
+        ev(
+            &mut e,
+            "(document.getElementById('d') instanceof HTMLDivElement)+'|'\
+             +(document.getElementsByTagName('a')[0] instanceof HTMLAnchorElement)+'|'\
+             +(document.getElementById('d') instanceof HTMLAnchorElement)"
+        ),
+        "true|true|false"
+    );
+    // Chaîne proto spec : `HTML*Element.prototype` hérite
+    // `HTMLElement.prototype` (pas `Element` direct — sinon
+    // `el instanceof HTMLElement` deviendrait faux).
+    assert_eq!(
+        ev(
+            &mut e,
+            "Object.getPrototypeOf(HTMLScriptElement.prototype)===HTMLElement.prototype"
+        ),
+        "true"
+    );
+    // `el.constructor` suit le proto tag-spécifique.
+    assert_eq!(
+        ev(
+            &mut e,
+            "(document.getElementById('d').constructor===HTMLDivElement)+'|'\
+             +(document.getElementsByTagName('script')[0].constructor===HTMLScriptElement)"
+        ),
+        "true|true"
+    );
+    // Tag hors table → `HTMLElement` (spec rend
+    // `HTMLUnknownElement`, non modélisé).
+    assert_eq!(
+        ev(
+            &mut e,
+            "var u=document.createElement('x-foo');u instanceof HTMLElement"
+        ),
+        "true"
+    );
+}

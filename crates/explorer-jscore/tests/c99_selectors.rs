@@ -261,10 +261,12 @@ fn c102_upgraded_element_constructor() {
             el.constructor === C"),
         "true"
     );
-    // Les éléments non-CE gardent le ctor d'interface.
+    // Les éléments non-CE gardent le ctor d'interface —
+    // tag-spécifique depuis JS-C192 (spec : `<div>` →
+    // `HTMLDivElement`, avant : `HTMLElement` générique).
     assert_eq!(
         ev("document.createElement('div').constructor.name"),
-        "HTMLElement"
+        "HTMLDivElement"
     );
     // `this.constructor.elementProperties` dans le corps ctor
     // résout via la chaîne CE → statique héritée (verrou
