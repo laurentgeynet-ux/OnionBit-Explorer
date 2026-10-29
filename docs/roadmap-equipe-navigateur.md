@@ -7616,6 +7616,29 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   terrain** : `sl-button` CDN
   `sr=SR`. Test `c102_*`.
 
+- [x] **JS-C193. Surface MSE
+  honnête sans lecture** —
+  amorce piste Media Source
+  Extensions (ADR-0024) :
+  `mse.rs` nouveau module —
+  `MediaSource`/`SourceBuffer`/
+  `SourceBufferList`/`TimeRanges`
+  réels (constructibles ou
+  `Illegal constructor` spec +
+  protos réels pour `instanceof`),
+  `EventTarget` par rail `__et`,
+  `isTypeSupported` → `""` honnête
+  (fallbacks players → seam
+  `MediaSurface`), `appendBuffer`
+  comptabilisé-borné (64 Mio,
+  `QuotaExceededError`),
+  `createObjectURL(ms)` → registre
+  `blob:` mse pour la couture
+  d'offre future. `readyState`
+  `"closed"`/`buffered` vide —
+  aucun faux succès. Verrous
+  `c193_mse.rs` ×6.
+
 ## Tâches continues
 
 - **Spécialiste JS** : divergence miroir ↔ `explorer-dom` quand

@@ -62,6 +62,7 @@ mod lexer;
 mod mediaq;
 mod misc_apis;
 mod module;
+mod mse;
 mod mutation;
 mod observers;
 mod parser;

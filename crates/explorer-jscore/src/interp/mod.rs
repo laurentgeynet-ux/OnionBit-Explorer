@@ -348,6 +348,10 @@ pub struct Engine {
     /// vivants `(handle, wrapper)` racines GC tant que non
     /// CLOSED, refus différés sans transport.
     pub(crate) es: crate::eventsource::EsState,
+    /// `MediaSource`/`SourceBuffer` bookkeeping (JS-C193) —
+    /// protos paresseux + registre `blob:` → source pour la
+    /// future couture d'offre `mse`.
+    pub(crate) mse: crate::mse::MseState,
     /// `Notification`/`BroadcastChannel`/`Selection`/
     /// `reportError` bookkeeping (JS-C74) — protos, registre
     /// de canaux et messages livrés au checkpoint microtask.
@@ -824,6 +828,7 @@ impl Engine {
             idb: crate::idb::IdbState::default(),
             ws: crate::websocket::WsState::default(),
             es: crate::eventsource::EsState::default(),
+            mse: crate::mse::MseState::default(),
             misc: crate::misc_apis::MiscState::default(),
             crypto: crate::crypto::CryptoState::default(),
             crypto_transport: None,
@@ -1000,6 +1005,7 @@ impl Engine {
         swap(&mut self.idb, &mut ctx.idb);
         swap(&mut self.ws, &mut ctx.ws);
         swap(&mut self.es, &mut ctx.es);
+        swap(&mut self.mse, &mut ctx.mse);
         swap(&mut self.misc, &mut ctx.misc);
         swap(&mut self.crypto, &mut ctx.crypto);
         swap(&mut self.ce_upgrade_slot, &mut ctx.ce_upgrade_slot);
@@ -2368,6 +2374,7 @@ impl Engine {
         self.idb.root_ids(&mut ids);
         self.ws.root_ids(&mut ids);
         self.es.root_ids(&mut ids);
+        self.mse.root_ids(&mut ids);
         self.misc.root_ids(&mut ids);
         if let Some((dom, cache)) = &self.dom_ctx {
             for &id in cache.borrow().values() {

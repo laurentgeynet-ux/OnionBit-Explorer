@@ -642,24 +642,39 @@ fn object_url_origin(e: &Engine) -> String {
     )
 }
 
-/// `URL.createObjectURL(blob)` — registre `blob:<origin>/<n>`
-/// (contenu gardé en vie par le `Rc`, spec).
+/// Prochain suffixe `blob:<origin>/<n>` — compteur **partagé**
+/// avec le registre MSE (`createObjectURL(mediaSource)` —
+/// JS-C193) : l'unicité des URLs objet couvre les deux
+/// registres.
+pub(crate) fn alloc_object_url(e: &mut Engine) -> String {
+    e.files.next_url += 1;
+    format!("blob:{}/{}", object_url_origin(e), e.files.next_url)
+}
+
+/// `URL.createObjectURL(blob|mediaSource)` — registre
+/// `blob:<origin>/<n>` (contenu gardé en vie par le `Rc`,
+/// spec). Un `MediaSource` prend le rail du registre MSE
+/// (JS-C193 — octets à venir via la couture d'offre).
 pub(crate) fn url_create_object_url(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     let v = arg(args, 0);
+    if let Some(url) = crate::mse::object_url_for(e, v) {
+        return Ok(e.str_val(url));
+    }
     let Some((data, ty)) = blob_parts(e, v) else {
-        return Err(e.type_error("URL.createObjectURL: argument is not a Blob"));
+        return Err(e.type_error("URL.createObjectURL: argument is not a Blob or MediaSource"));
     };
-    e.files.next_url += 1;
-    let url = format!("blob:{}/{}", object_url_origin(e), e.files.next_url);
+    let url = alloc_object_url(e);
     e.files.blob_urls.insert(url.clone(), (data, ty));
     Ok(e.str_val(url))
 }
 
 /// `URL.revokeObjectURL(url)` — suppression silencieuse
-/// (spec : aucune erreur sur URL inconnue).
+/// (spec : aucune erreur sur URL inconnue) dans les deux
+/// registres (blobs + sources MSE).
 pub(crate) fn url_revoke_object_url(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     if let Ok(u) = e.to_js_string(arg(args, 0)) {
         e.files.blob_urls.remove(&u);
+        crate::mse::revoke_object_url(e, &u);
     }
     Ok(Value::Undefined)
 }

@@ -144,6 +144,9 @@ pub(crate) struct BrowsingContext {
     /// `EventSource` du document (JS-C92) — flux vivants +
     /// refus différés, garés avec le contexte.
     pub es: crate::eventsource::EsState,
+    /// `MediaSource`/`SourceBuffer` du document (JS-C193) —
+    /// protos + registre `blob:` garés avec le contexte.
+    pub mse: crate::mse::MseState,
     pub misc: crate::misc_apis::MiscState,
     /// Opérations `crypto.subtle` en vol (JS-C79) — le
     /// transport est engine-global (`Engine::crypto_
@@ -251,6 +254,7 @@ impl BrowsingContext {
         self.idb.root_ids(ids);
         self.ws.root_ids(ids);
         self.es.root_ids(ids);
+        self.mse.root_ids(ids);
         self.misc.root_ids(ids);
         for (_, promise, _) in &self.crypto.pending {
             ids.push(*promise);
@@ -414,6 +418,7 @@ impl BrowsingContext {
             idb: crate::idb::IdbState::default(),
             ws: crate::websocket::WsState::default(),
             es: crate::eventsource::EsState::default(),
+            mse: crate::mse::MseState::default(),
             misc: crate::misc_apis::MiscState::default(),
             crypto: crate::crypto::CryptoState::default(),
             ce_upgrade_slot: None,
