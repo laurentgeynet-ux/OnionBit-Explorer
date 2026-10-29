@@ -5231,33 +5231,48 @@ fn dom_parser_constructs_and_parses() {
     );
 }
 
-/// Cross-document (vol spectrum) : un nœud d'une **autre arène**
-/// (`DOMParser`, `iframe.contentDocument`, `xhr.responseXML`)
-/// passé aux mutateurs du document courant validait l'id contre
-/// SA propre arène puis l'indexait dans celle du receveur —
-/// hors-limites = panic (`is_ancestor_or_self`), in-bounds =
-/// mutation du mauvais nœud (le `<main>` de la page détaché
-/// puis propagé au DOM session par le journal). `node_for_in`
-/// borne à l'arène du receveur → `TypeError` amont, jamais de
-/// corruption. La spec adopterait cross-document ; les arènes
-/// ne fusionnant pas, le dégradé honnête est le rejet.
+/// Cross-document (vol spectrum → vol appconsent) : un nœud d'une
+/// **autre arène** (`DOMParser`, `iframe.contentDocument`,
+/// `createHTMLDocument`) passé à `appendChild`/`insertBefore`/
+/// `replaceChild` est **adopté** (spec `[[Insert]]`) : le
+/// sous-arbre est copié dans l'arène du receveur et l'objet JS
+/// rebindé dessus — move sémantique, pas clone. Avant l'adoption,
+/// le rejet `not a node` cassait l'injecteur appconsent
+/// (`head.insertBefore(style)` cross-document) ; avant le borneage
+/// arène, la validation contre la mauvaise arène indexait hors-
+/// limites (`panic is_ancestor_or_self`) ou mutait le mauvais
+/// nœud (le `<main>` spectrum détaché). Les mutateurs non câblés
+/// (`removeChild` d'un non-enfant, `insertAdjacentElement`,
+/// `prepend`) et les observateurs restent bornés : `TypeError`
+/// amont, jamais de corruption.
 #[test]
-fn cross_document_node_args_are_rejected() {
-    // Mutateurs structurels : TypeError sur nœud étranger.
+fn cross_document_node_args_are_adopted() {
+    // Mutateurs structurels : adoption sur les trois sites
+    // câblés (nœud frais à chaque essai — l'adoption détache la
+    // source), rejet borné sur le reste.
     assert_eq!(
         ev(
-            "var d=new DOMParser().parseFromString('<div id=x>y</div>','text/html');\
-            var fx=d.getElementById('x');\
+            "var fx=function(){return new DOMParser().parseFromString('<div id=x>y</div>','text/html').getElementById('x')};\
             var out=[];\
-            try{document.body.appendChild(fx)}catch(e){out.push('a')}\
-            try{document.body.insertBefore(fx,null)}catch(e){out.push('i')}\
-            try{document.body.replaceChild(fx,document.body.firstChild)}catch(e){out.push('r')}\
-            try{document.body.removeChild(fx)}catch(e){out.push('d')}\
-            try{document.body.insertAdjacentElement('beforeend',fx)}catch(e){out.push('j')}\
-            try{document.body.prepend(fx)}catch(e){out.push('p')}\
+            try{document.body.appendChild(fx())}catch(e){out.push('a')}\
+            try{document.body.insertBefore(fx(),null)}catch(e){out.push('i')}\
+            try{document.body.replaceChild(fx(),document.body.firstChild)}catch(e){out.push('r')}\
+            try{document.body.removeChild(fx())}catch(e){out.push('d')}\
+            try{document.body.insertAdjacentElement('beforeend',fx())}catch(e){out.push('j')}\
+            try{document.body.prepend(fx())}catch(e){out.push('p')}\
             out.join('')"
         ),
-        "airdjp"
+        "djp"
+    );
+    // L'adoption préserve l'identité JS : la référence désigne le
+    // nœud inséré dans le document cible.
+    assert_eq!(
+        ev(
+            "var d=new DOMParser().parseFromString('<div id=z>y</div>','text/html');\
+            var el=d.getElementById('z');\
+            (document.body.appendChild(el)===el)+'/'+(document.getElementById('z')===el)"
+        ),
+        "true/true"
     );
     // Prédicats : pas de throw, mais jamais d'égalité/
     // contenance factice cross-document.

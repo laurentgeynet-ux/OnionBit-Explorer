@@ -126,3 +126,73 @@ fn font_face_set_add_returns_set_and_is_detectable() {
         "function:function"
     );
 }
+
+#[test]
+fn html_document_interface_exists_and_chains() {
+    let mut e = engine();
+    // orange vol 109 : `HTMLDocument is not defined` tuait
+    // cookie-monster woopic. Spec : `document` →
+    // `HTMLDocument.prototype` → `Document.prototype`.
+    assert_eq!(ev(&mut e, "typeof HTMLDocument"), "function");
+    assert_eq!(ev(&mut e, "document instanceof HTMLDocument"), "true");
+    // Transitivité préservée : Document/Node/EventTarget.
+    assert_eq!(ev(&mut e, "document instanceof Document"), "true");
+    assert_eq!(ev(&mut e, "document instanceof Node"), "true");
+    assert_eq!(ev(&mut e, "document.constructor === HTMLDocument"), "true");
+    // `implementation.createHTMLDocument` hérite aussi
+    // `HTMLDocument.prototype` (spec).
+    assert_eq!(
+        ev(
+            &mut e,
+            "document.implementation.createHTMLDocument('t') instanceof HTMLDocument"
+        ),
+        "true"
+    );
+    // Non-régression : le feature-detect github sur le proto
+    // Document reste vrai.
+    assert_eq!(
+        ev(&mut e, "'adoptedStyleSheets' in Document.prototype"),
+        "true"
+    );
+}
+
+#[test]
+fn insert_before_adopts_foreign_document_nodes() {
+    let mut e = engine();
+    // appconsent vol 110 : `insertBefore: not a node` — le
+    // conteneur styled-components vit dans un autre document ;
+    // spec `[[adopt]]` : le nœud change de document (move).
+    assert_eq!(
+        ev(
+            &mut e,
+            "var d2=document.implementation.createHTMLDocument('t');\
+             var el=d2.createElement('div'); el.id='adopted';\
+             el.textContent='X'; document.body.insertBefore(el,null);\
+             document.getElementById('adopted')===el"
+        ),
+        "true"
+    );
+    // `el` rebindé : il désigne le nœud dans le document cible.
+    assert_eq!(ev(&mut e, "el.ownerDocument === document"), "true");
+    // Sous-arbre entier adopté + appendChild idem.
+    assert_eq!(
+        ev(
+            &mut e,
+            "var d3=document.implementation.createHTMLDocument('t2');\
+             var p=d3.createElement('p'); var c=d3.createElement('b');\
+             c.textContent='deep'; p.appendChild(c);\
+             document.body.appendChild(p);\
+             document.querySelector('body b').textContent"
+        ),
+        "deep"
+    );
+    // Arg non-nœud : `TypeError` typé préservé.
+    assert_eq!(
+        ev(
+            &mut e,
+            "try{document.body.insertBefore({},null);'NO'}\
+             catch(er){/node/.test(er.message)?'typed':'?'}"
+        ),
+        "typed"
+    );
+}

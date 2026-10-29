@@ -2352,6 +2352,47 @@ impl Dom {
         id
     }
 
+    /// Adoption cross-document (spec `insertBefore`/`appendChild`/
+    /// `replaceChild` — `[[adopt]]`) : clone profond du sous-arbre
+    /// `src` de `src_dom` dans `self`. Itératif — la profondeur
+    /// DOM est contrôlée par le script (JS-C55). La détache de la
+    /// source reste à la charge de l'appelant (les emprunts sont
+    /// disjoints).
+    pub fn adopt_from(&mut self, src_dom: &Dom, src: NodeId) -> NodeId {
+        let (kind, tag, attrs, text, kids) = {
+            let n = &src_dom.nodes[src as usize];
+            (
+                n.kind,
+                n.tag.clone(),
+                n.attrs.clone(),
+                n.text.clone(),
+                n.children.clone(),
+            )
+        };
+        let id = self.alloc(kind, &tag);
+        self.nodes[id as usize].attrs = attrs;
+        self.nodes[id as usize].text = text;
+        let mut work: Vec<(NodeId, NodeId)> = kids.iter().rev().map(|&c| (c, id)).collect();
+        while let Some((src_id, dst_parent)) = work.pop() {
+            let (k2, t2, a2, x2, kids2) = {
+                let n = &src_dom.nodes[src_id as usize];
+                (
+                    n.kind,
+                    n.tag.clone(),
+                    n.attrs.clone(),
+                    n.text.clone(),
+                    n.children.clone(),
+                )
+            };
+            let cid = self.alloc(k2, &t2);
+            self.nodes[cid as usize].attrs = a2;
+            self.nodes[cid as usize].text = x2;
+            self.append(dst_parent, cid);
+            work.extend(kids2.iter().rev().map(|&g| (g, cid)));
+        }
+        id
+    }
+
     /// `a.contains(b)` — `b` is `a` itself or a descendant.
     #[must_use]
     pub fn contains(&self, a: NodeId, b: NodeId) -> bool {

@@ -2039,6 +2039,10 @@ impl Engine {
             "HTMLVideoElement",
             "SVGElement",
             "Document",
+            // `HTMLDocument` — interface legacy de `document`
+            // (cookie-monster/woopic : `x instanceof HTMLDocument`,
+            // orange §B-14). Proto chaîné `Document.prototype`.
+            "HTMLDocument",
             "DocumentFragment",
             "ShadowRoot",
             "CharacterData",
@@ -2081,6 +2085,7 @@ impl Engine {
                     "Document" | "DocumentFragment" | "CharacterData" | "Attr" | "DocumentType" => {
                         Some("Node")
                     }
+                    "HTMLDocument" => Some("Document"),
                     "SVGElement" => Some("Element"),
                     _ if name.starts_with("HTML") && name.ends_with("Element") => Some("Element"),
                     _ => None,
@@ -2095,6 +2100,9 @@ impl Engine {
                     }
                 }
                 self.set_own(fid, "prototype", Value::Obj(p), false);
+                // Spec WebIDL : `X.prototype.constructor === X`
+                // (`el.constructor`, `document.constructor`).
+                self.set_own(p, "constructor", f, false);
             }
             self.set_own(g, name, f, false);
         }
@@ -2285,26 +2293,29 @@ impl Engine {
                 }
             }
         }
-        // `document` hérite de `Document.prototype` — les sites
+        // `document` hérite de `HTMLDocument.prototype` (spec —
+        // lui-même chaîné `Document.prototype` : `instanceof
+        // Document`/`HTMLDocument`/`Node` tous vrais) — les sites
         // monkey-patchent le proto DOM (mesuré dev.to :
         // `Document.prototype.ready = new Promise(…)` puis
-        // `document.ready.then`); l'héritage rend aussi
-        // `document instanceof Document` vrai, comme la spec.
-        if let (Value::Obj(did), Some(Value::Obj(cid))) = (doc, self.get_prop(g, "Document")) {
+        // `document.ready.then`).
+        if let (Value::Obj(did), Some(Value::Obj(cid))) = (doc, self.get_prop(g, "HTMLDocument")) {
             if let Some(proto @ Value::Obj(_)) = self.get_prop(cid, "prototype") {
-                // `adoptedStyleSheets` sur le prototype (IDL) —
-                // la feature-detect github l'exige
-                // (`"adoptedStyleSheets" in Document.prototype`)
-                // avant d'injecter ses règles lazy-detect en
-                // feuille construite. Propriété propre `undefined`
-                // : la lecture passe par le getter hôte du
-                // `document` (proprio `in`, jamais résolution).
-                if let Value::Obj(pid) = proto {
-                    self.set_own(pid, "adoptedStyleSheets", Value::Undefined, true);
-                }
                 if let Some(o) = self.heap.obj_mut(did) {
                     o.proto = proto;
                 }
+            }
+        }
+        // `adoptedStyleSheets` sur `Document.prototype` (IDL) —
+        // la feature-detect github l'exige
+        // (`"adoptedStyleSheets" in Document.prototype`)
+        // avant d'injecter ses règles lazy-detect en feuille
+        // construite. Propriété propre `undefined` : la lecture
+        // passe par le getter hôte du `document` (proprio `in`,
+        // jamais résolution).
+        if let Some(Value::Obj(cid)) = self.get_prop(g, "Document") {
+            if let Some(Value::Obj(pid)) = self.get_prop(cid, "prototype") {
+                self.set_own(pid, "adoptedStyleSheets", Value::Undefined, true);
             }
         }
         // `Event` + famille — constructibles : l'objet produit est
@@ -6198,7 +6209,8 @@ impl Host for NodeHost {
                 Ok(Some(dom_collection(e, &self.dom, &self.cache, &ids, false)))
             }
             "appendChild" | "append" => {
-                let target = node_for_in(e, arg(args, 0), &self.dom);
+                let target = node_for_in(e, arg(args, 0), &self.dom)
+                    .or_else(|| adopt_into(e, arg(args, 0), &self.dom, &self.cache));
                 match target {
                     Some(child) => {
                         // Spec `HierarchyRequestError` : append un
@@ -6460,7 +6472,8 @@ impl Host for NodeHost {
             }
             // -- JS-7g structural ops ------------------------------------
             "insertBefore" => {
-                let new_n = node_for_in(e, arg(args, 0), &self.dom);
+                let new_n = node_for_in(e, arg(args, 0), &self.dom)
+                    .or_else(|| adopt_into(e, arg(args, 0), &self.dom, &self.cache));
                 let ref_n = node_for_in(e, arg(args, 1), &self.dom);
                 match new_n {
                     Some(c) => {
@@ -6474,7 +6487,8 @@ impl Host for NodeHost {
                 }
             }
             "replaceChild" => {
-                let new_n = node_for_in(e, arg(args, 0), &self.dom);
+                let new_n = node_for_in(e, arg(args, 0), &self.dom)
+                    .or_else(|| adopt_into(e, arg(args, 0), &self.dom, &self.cache));
                 let old_n = node_for_in(e, arg(args, 1), &self.dom);
                 match (new_n, old_n) {
                     (Some(n), Some(o)) => {
@@ -7096,6 +7110,40 @@ pub(crate) fn node_for_in(e: &mut Engine, v: Value, dom: &DomRef) -> Option<Node
         return Some(dh.dom.borrow().root);
     }
     None
+}
+
+/// Spec `[[adopt]]` — clone le sous-arbre étranger dans `dst`,
+/// détache la source **et rebinde l'objet JS** vers le nœud
+/// adopté (move sémantique : `el` désigne le nœud dans le nouveau
+/// document après `insertBefore`). Styled-components/portal :
+/// conteneur d'un autre document (appconsent §B-14). `None` si
+/// `v` n'est pas un nœud étranger valide.
+fn adopt_into(e: &mut Engine, v: Value, dst: &DomRef, dst_cache: &NodeCache) -> Option<NodeId> {
+    let Value::Obj(id) = v else {
+        return None;
+    };
+    let h = match e.heap.obj(id).map(|o| &o.kind) {
+        Some(ObjKind::Host(h)) => h.clone(),
+        _ => return None,
+    };
+    let n = h.as_any().downcast_ref::<NodeHost>()?;
+    if Rc::ptr_eq(&n.dom, dst) || !n.dom.borrow().node_valid(n.node) {
+        return None;
+    }
+    let new_id = {
+        let s = n.dom.borrow();
+        dst.borrow_mut().adopt_from(&s, n.node)
+    };
+    n.dom.borrow_mut().detach(n.node);
+    if let Some(o) = e.heap.obj_mut(id) {
+        o.kind = ObjKind::Host(Rc::new(NodeHost {
+            dom: dst.clone(),
+            cache: dst_cache.clone(),
+            node: new_id,
+        }));
+    }
+    dst_cache.borrow_mut().insert(new_id, id);
+    Some(new_id)
 }
 
 /// `(node, dom, cache)` d'un receveur **élément** — pour les
@@ -8691,13 +8739,25 @@ impl Host for DomImplementationHost {
                         d.append(tn, t);
                     }
                 }
-                Ok(Some(e.new_host_object(Rc::new(DocumentHost {
+                let doc_v = e.new_host_object(Rc::new(DocumentHost {
                     dom: Rc::new(RefCell::new(d)),
                     cache: Rc::new(RefCell::new(HashMap::new())),
                     implementation: RefCell::new(None),
                     domain_override: RefCell::new(None),
                     adopted_sheets: RefCell::new(None),
-                }))))
+                }));
+                // Spec : le document produit hérite
+                // `HTMLDocument.prototype` (comme `document`).
+                if let Value::Obj(did) = doc_v {
+                    if let Some(Value::Obj(cid)) = e.get_prop(e.global, "HTMLDocument") {
+                        if let Some(proto @ Value::Obj(_)) = e.get_prop(cid, "prototype") {
+                            if let Some(o) = e.heap.obj_mut(did) {
+                                o.proto = proto;
+                            }
+                        }
+                    }
+                }
+                Ok(Some(doc_v))
             }
             // `hasFeature()` — spec : retourne toujours `true`
             // (API historique sans substance).

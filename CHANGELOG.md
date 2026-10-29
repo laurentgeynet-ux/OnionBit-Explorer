@@ -7,6 +7,51 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **JS-C185 — §B-14 : interface
+  `HTMLDocument` + adoption
+  cross-document**
+  (`explorer-jscore`) — orange
+  vol 109 : `HTMLDocument is not
+  defined` ; appconsent :
+  `insertBefore: not a node`
+  (injecteur `n.insertBefore(style)`
+  avec conteneur d'un autre
+  document). Fix : (a) constructeur
+  `HTMLDocument` global,
+  `HTMLDocument.prototype` hérite
+  `Document.prototype`, `document`
+  et les documents de
+  `createHTMLDocument` portent le
+  proto `HTMLDocument.prototype` —
+  `document instanceof
+  HTMLDocument|Document|Node|
+  EventTarget` vrai, back-props
+  `constructor` posées sur les
+  protos DOM (`document.constructor
+  === HTMLDocument`),
+  `adoptedStyleSheets` resté own
+  de `Document.prototype` ;
+  (b) `Dom::adopt_from` — copie
+  itérative cross-arène (pas de
+  récursion Rust sur sous-arbres
+  profonds), adoption spec
+  `[[Insert]]` câblée sur
+  `appendChild`/`append`,
+  `insertBefore`, `replaceChild` :
+  le nœud étranger est cloné dans
+  l'arène cible puis l'objet JS
+  existant **rebindé** dessus —
+  move sémantique, `el` désigne le
+  nœud inséré (`getElementById` le
+  revoit, `appendChild(el)===el`),
+  `insertBefore(_,null)` supporté.
+  `removeChild`/`insertAdjacentElement`
+  /`prepend` et observateurs
+  restent bornés au rejet typé.
+  Verrous `b14_probe.rs` +
+  `dom.rs` restaté
+  (`cross_document_node_args_are_
+  adopted`) ; suite jscore verte.
 - **JS-C184 — §B-14 : `*AttributeNS`
   DOM + `FontFaceSet.add`**
   (`explorer-jscore`) — boursorama
