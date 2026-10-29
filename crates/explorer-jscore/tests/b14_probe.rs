@@ -892,3 +892,61 @@ fn reflect_construct_foreign_newtarget_and_bound_ctor() {
         "1|9"
     );
 }
+
+// cowcotland vol 172 (cloudflare-insights) : `addEventListener is
+// not a function (on function)` — `window.navigation` absent, un
+// `function navigation()` sloppy la remplaçait ; `navigation.
+// addEventListener('navigate',…)` mourrait sur le receveur
+// fonction. Navigation API WHATWG : `Navigation` est un
+// `EventTarget` non clobbable par déclaration sloppy.
+#[test]
+fn window_navigation_is_event_target_and_sloppy_proof() {
+    let mut e = engine();
+    // Surface : EventTarget + méthodes de déplacement.
+    assert_eq!(
+        ev(
+            &mut e,
+            "typeof navigation.addEventListener+'|'+typeof navigation.navigate+'|'+typeof navigation.currentEntry.url+'|'+(navigation instanceof EventTarget)+'|'+(navigation instanceof Navigation)"
+        ),
+        "function|function|string|true|true"
+    );
+    // `function navigation()`/`var navigation` sloppy : la prop
+    // non-inscriptible survit (comportement Chrome — l'attribut
+    // window n'est pas écrasé).
+    ev(&mut e, "function navigation(){return 7}; var navigation");
+    assert_eq!(ev(&mut e, "typeof navigation.addEventListener"), "function");
+    // Rail `__et` : enregistrement + dispatch manuel + retrait.
+    assert_eq!(
+        ev(
+            &mut e,
+            "var n=0;var cb=function(){n++};\
+             navigation.addEventListener('navigate',cb);\
+             navigation.dispatchEvent({type:'navigate'});\
+             navigation.removeEventListener('navigate',cb);\
+             navigation.dispatchEvent({type:'navigate'});\
+             n"
+        ),
+        "1"
+    );
+    // `navigate()`/`back()` → `NavigationResult` promesses
+    // résolues (hook embedder absent — résolution honnête).
+    assert_eq!(
+        ev(
+            &mut e,
+            "var r=navigation.navigate('/x');\
+             typeof r.committed.then+'|'+typeof r.finished.then+'|'+\
+             (typeof navigation.back().committed.then)+'|'+navigation.canGoForward+'|'+navigation.transition"
+        ),
+        "function|function|function|false|null"
+    );
+    // `entries()` = entrée courante, `getState()` sans état posé →
+    // `undefined` ; `updateCurrentEntry` partage `history.state`.
+    assert_eq!(
+        ev(
+            &mut e,
+            "var es=navigation.entries();\
+             es.length+'|'+(es[0]===navigation.currentEntry===false)+'|'+es[0].sameDocument+'|'+typeof es[0].getState+'|'+(es[0].getState()===undefined)"
+        ),
+        "1|true|true|function|true"
+    );
+}

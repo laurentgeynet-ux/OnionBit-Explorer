@@ -7,6 +7,43 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **JS-C209 — `window.navigation`
+  (Navigation API)** (`explorer-jscore`,
+  §B-14 cowcotland vol 172) —
+  `addEventListener is not a
+  function (on function)` : la cible
+  était une fonction `navigation`
+  sloppy qui remplaçait la propriété
+  `window` absente (cloudflare-insights
+  fait `navigation.addEventListener
+  ('navigate',…)` au boot — la
+  Navigation API est un `EventTarget`).
+  `NavigationHost` posé : rail `__et`
+  partagé (`addEventListener`/
+  `removeEventListener`/`dispatchEvent`),
+  `Navigation.prototype` →
+  `EventTarget.prototype` (instanceof
+  transitif) — la liste générique
+  `Navigation` est retirée (install
+  riche = sur-ensemble) — méthodes
+  `navigate`/`back`/`forward`/`reload`
+  déléguées aux hooks nav/history,
+  `traverseTo` rejette les clés
+  inconnues, `updateCurrentEntry`
+  partage `history.state`,
+  `currentEntry`/`entries()`/
+  `activation`/`transition`/
+  `canGoBack`/`canGoForward` honnêtes,
+  `{committed,finished}` = promesses
+  résolues. La propriété `window.
+  navigation` est **non inscriptible**
+  : déclaration `function`/`var`
+  sloppy et assignations ignorées
+  (comportement Chrome). Événements
+  `navigate`/`navigatesuccess` non
+  tirés (borne documentée). Verrou
+  `window_navigation_is_event_target
+  _and_sloppy_proof`.
 - **139i — `apiBase` câblé au claim
   MSE** (`app/`, vol DLL) — la
   factory recevait `apiBase=''` :

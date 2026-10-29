@@ -2015,6 +2015,42 @@ impl Engine {
         let hist = self.new_host_object(Rc::new(HistoryHost));
         self.set_own(g, "location", loc, false);
         self.set_own(g, "history", hist, false);
+        // `window.navigation` — Navigation API (WHATWG).
+        // `Navigation` est un `EventTarget` : cloudflare-insights
+        // et les routeurs SPA (Next.js app-router) font
+        // `navigation.addEventListener('navigate', …)` au boot.
+        // Sans la propriété, un `function navigation()` sloppy la
+        // remplaçait et le listener mourait « addEventListener is
+        // not a function (on function) » (cowcotland §B-14) —
+        // posée **non inscriptible** : la déclaration/assignation
+        // sloppy est ignorée comme sous Chrome.
+        let navapi = self.new_host_object(Rc::new(NavigationHost));
+        let nf = self.native_fn("Navigation", illegal_ctor);
+        if let Value::Obj(nfid) = nf {
+            let np = self.new_object();
+            let tag = self.str_val("Navigation");
+            self.set_own(np, crate::interp::SYM_TO_STRING_TAG, tag, false);
+            // `Navigation.prototype` → `EventTarget.prototype` :
+            // chaînage effectué dans la boucle protos DOM plus bas
+            // (`EventTarget` est installé après ce bloc).
+            self.set_own(nfid, "prototype", Value::Obj(np), false);
+            if let Value::Obj(nav_id) = navapi {
+                if let Some(o) = self.heap.obj_mut(nav_id) {
+                    o.proto = Value::Obj(np);
+                }
+            }
+        }
+        self.set_own(g, "Navigation", nf, false);
+        self.set_own_attrs(
+            g,
+            "navigation",
+            navapi,
+            crate::heap::PropAttrs {
+                writable: false,
+                enumerable: true,
+                configurable: true,
+            },
+        );
 
         // JS-7f window surface — dialogs, screen geometry.
         // (`console` is installed engine-wide in `builtins::install`
@@ -2304,6 +2340,9 @@ impl Engine {
             // `EventTarget` par `install_channel_ctor` ; la
             // boucle le chaîne ici.
             ("MessagePort", "EventTarget"),
+            // `Navigation` (cowcotland §B-14) — installé plus haut
+            // avec `location`/`history`, avant `EventTarget`.
+            ("Navigation", "EventTarget"),
         ] {
             if let Some(Value::Obj(cid)) = self.get_prop(g, child) {
                 if let Some(Value::Obj(cp)) = self.get_prop(cid, "prototype") {
@@ -2813,7 +2852,6 @@ impl Engine {
             "EditContext",
             "Sanitizer",
             "XPathExpression",
-            "Navigation",
             "VisualViewport",
             "Performance",
             "CSSFontFaceRule",
@@ -9803,6 +9841,196 @@ fn history_push_state(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Val
 
 fn history_replace_state(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     history_push_replace(e, args, true)
+}
+
+/// `window.navigation` — Navigation API (WHATWG). `Navigation`
+/// est un `EventTarget` (rail `__et` partagé) dont les
+/// déplacements délèguent aux hooks nav/history, et dont les
+/// entrées sont des `NavigationHistoryEntry` minimales
+/// (url/key/id/index/sameDocument/getState = `history.state`
+/// désérialisé). `navigate`/`back`/`forward`/`reload`/
+/// `traverseTo` rendent `{committed, finished}` — promesses
+/// résolues (le hook est fire-and-forget comme `location.assign`) ;
+/// `traverseTo` d'une clé inconnue les rejette. Les événements
+/// `navigate`/`navigatesuccess` ne sont pas tirés (borne
+/// documentée : pas de notifieuse same-document) — les listeners
+/// s'enregistrent et la surface ne jette pas.
+struct NavigationHost;
+
+/// `NavigationHistoryEntry` minimal — `key`/`id` opaques stables
+/// par entrée (une seule entrée modélisée : `"0"`).
+fn nav_history_entry(e: &mut Engine) -> Value {
+    let entry = e.new_object();
+    let u = e.hooks.page_url.clone();
+    let v = e.str_val(u);
+    e.set_own(entry, "url", v, true);
+    let v = e.str_val("0");
+    e.set_own(entry, "key", v, true);
+    e.set_own(entry, "id", v, true);
+    e.set_own(entry, "index", Value::Num(0.0), true);
+    e.set_own(entry, "sameDocument", Value::Bool(true), true);
+    let gs = e.native_fn("getState", nav_entry_get_state);
+    e.set_own(entry, "getState", gs, true);
+    Value::Obj(entry)
+}
+
+/// `entry.getState()` — état JSON de l'entrée (`history.state`
+/// désérialisé, `undefined` absent — spec : pas d'état posé).
+fn nav_entry_get_state(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
+    let v = match e.hooks.history_state.clone() {
+        Some(s) => {
+            let sv = e.str_val(&s);
+            crate::json::parse(e, sv).unwrap_or(Value::Null)
+        }
+        None => Value::Undefined,
+    };
+    Ok(v)
+}
+
+/// `NavigationResult` `{committed, finished}` — les deux
+/// promesses résolues par l'entrée (`ok=true`) ou rejetées
+/// (`ok=false`, raison `InvalidStateError` — clé `traverseTo`
+/// inconnue).
+fn nav_result(e: &mut Engine, ok: bool) -> JsResult<Value> {
+    let entry = nav_history_entry(e);
+    let res = e.new_object();
+    for k in ["committed", "finished"] {
+        let pid = e.new_promise();
+        if ok {
+            e.resolve_promise(pid, entry);
+        } else {
+            let m = e.str_val("InvalidStateError: unknown navigation key");
+            e.reject_promise(pid, m);
+        }
+        e.set_own(res, k, Value::Obj(pid), true);
+    }
+    Ok(Value::Obj(res))
+}
+
+impl Host for NavigationHost {
+    fn class_name(&self) -> &'static str {
+        "Navigation"
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
+    fn get(&self, e: &mut Engine, _t: Value, key: &str) -> JsResult<Option<Value>> {
+        match key {
+            "currentEntry" => Ok(Some(nav_history_entry(e))),
+            // `canGoBack` = historique conjoint > 1 entrée ;
+            // `canGoForward` honnêtement `false` (l'index n'est
+            // pas suivi — un `true` spéculatif serait un mensonge).
+            "canGoBack" => Ok(Some(Value::Bool(e.hooks.history_len > 1))),
+            "canGoForward" => Ok(Some(Value::Bool(false))),
+            // Pas de transition en cours — `null` spec.
+            "transition" => Ok(Some(Value::Null)),
+            // `activation` : `entry` = courante, `from` = `null`
+            // (pas de document précédent dans ce modèle),
+            // `navigationType` `"push"` (entrée poussée).
+            "activation" => {
+                let a = e.new_object();
+                let entry = nav_history_entry(e);
+                e.set_own(a, "entry", entry, true);
+                e.set_own(a, "from", Value::Null, true);
+                let ty = e.str_val("push");
+                e.set_own(a, "navigationType", ty, true);
+                Ok(Some(Value::Obj(a)))
+            }
+            _ => Ok(None),
+        }
+    }
+
+    fn invoke(
+        &self,
+        e: &mut Engine,
+        t: Value,
+        name: &str,
+        args: &[Value],
+    ) -> JsResult<Option<Value>> {
+        match name {
+            "entries" => {
+                let entry = nav_history_entry(e);
+                Ok(Some(e.new_array(vec![entry])))
+            }
+            // `navigate(url, options?)` — navigation réelle via le
+            // hook (la session résout la base comme `location.assign`).
+            "navigate" => {
+                let u = e.to_js_string(arg(args, 0))?;
+                if !u.is_empty() {
+                    if let Some(nav) = &e.hooks.navigate {
+                        let nav = nav.clone();
+                        nav(&u);
+                    }
+                }
+                nav_result(e, true).map(Some)
+            }
+            "back" => {
+                history_nav(e, -1)?;
+                nav_result(e, true).map(Some)
+            }
+            "forward" => {
+                history_nav(e, 1)?;
+                nav_result(e, true).map(Some)
+            }
+            "reload" => {
+                if let Some(rel) = &e.hooks.navigate_reload {
+                    let rel = rel.clone();
+                    rel();
+                } else {
+                    let u = e.hooks.page_url.clone();
+                    if let Some(nav) = &e.hooks.navigate {
+                        nav(&u);
+                    }
+                }
+                nav_result(e, true).map(Some)
+            }
+            // Clé inconnue → `InvalidStateError` (seule l'entrée
+            // `"0"` existe dans ce modèle).
+            "traverseTo" => {
+                let ok = e.to_js_string(arg(args, 0))? == "0";
+                nav_result(e, ok).map(Some)
+            }
+            // `updateCurrentEntry({state})` — état sérialisé
+            // partagé avec `history.state` (même store).
+            "updateCurrentEntry" => {
+                let st = e
+                    .get_prop_value(arg(args, 0), "state")
+                    .unwrap_or(Value::Undefined);
+                e.hooks.history_state = match st {
+                    Value::Undefined => None,
+                    v => match crate::json::stringify(e, v) {
+                        Ok(s) if !matches!(s, Value::Undefined) => e.to_js_string(s).ok(),
+                        _ => None,
+                    },
+                };
+                Ok(Some(Value::Undefined))
+            }
+            // Rail `EventTarget` partagé — `navigation.addEventListener`
+            // (cloudflare-insights / app-router §B-14).
+            "addEventListener" => Ok(Some(et_add_listener(e, t, args)?)),
+            "removeEventListener" => Ok(Some(et_remove_listener(e, t, args)?)),
+            "dispatchEvent" => Ok(Some(et_dispatch_event(e, t, args)?)),
+            _ => Ok(None),
+        }
+    }
+
+    fn has_method(&self, name: &str) -> bool {
+        matches!(
+            name,
+            "entries"
+                | "navigate"
+                | "back"
+                | "forward"
+                | "reload"
+                | "traverseTo"
+                | "updateCurrentEntry"
+                | "addEventListener"
+                | "removeEventListener"
+                | "dispatchEvent"
+        )
+    }
 }
 
 /// `document.fonts` — `FontFaceSet` minimal. Pas de pipeline de
