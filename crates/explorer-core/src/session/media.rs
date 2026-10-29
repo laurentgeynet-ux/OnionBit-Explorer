@@ -61,6 +61,9 @@ pub(crate) struct MediaSurface {
     /// 71c). Maintenu à jour au refresh (l'élément peut avoir
     /// bougé dans l'arbre entre deux applies).
     pub(crate) path: Vec<(String, u32)>,
+    /// Source `blob:` `MediaSource` (MSE-2, ADR-0029) —
+    /// l'hôte pull `GET …/segments` plutôt que `url`.
+    pub(crate) mse: bool,
 }
 
 /// Surface morte au `refresh_media` (71c) — `path` et
@@ -95,6 +98,10 @@ struct ScannedMedia {
     autoplay: bool,
     /// Chemin `(tag, index)` de l'élément (71c — miroir JS).
     path: Vec<(String, u32)>,
+    /// `url` = object URL `MediaSource` enregistré côté
+    /// moteur (MSE-2, ADR-0029) — remplie au refresh via
+    /// `JsEngine::is_media_source`.
+    mse: bool,
 }
 
 /// MIME média déduit du suffixe d'URL (contrat : `type` >
@@ -190,7 +197,15 @@ fn scan_media(tree: &LayoutBox, dom: &Dom, base: &Url) -> Vec<ScannedMedia> {
         };
         if let Some(kind) = kind {
             if let Some((src, ty)) = media_source(dom, n) {
-                if let Ok(u) = Url::resolve(base, &src) {
+                // `blob:` object URL — le resolveur peut ne
+                // pas connaître le schéma opaque ; la chaîne
+                // brute suffit (registre moteur, MSE-2).
+                let parsed = Url::resolve(base, &src).ok();
+                let url_s = parsed
+                    .as_ref()
+                    .map(ToString::to_string)
+                    .or_else(|| src.starts_with("blob:").then(|| src.clone()));
+                if let Some(url_s) = url_s {
                     let controls = has_bool_attr(dom, n, "controls");
                     // `audio` sans UI : offre 0×0 quelle que
                     // soit la boîte — rien à positionner.
@@ -202,11 +217,12 @@ fn scan_media(tree: &LayoutBox, dom: &Dom, base: &Url) -> Vec<ScannedMedia> {
                     out.push(ScannedMedia {
                         kind,
                         rect,
-                        mime: ty.or_else(|| media_mime_from_url(&u)),
-                        url: u.to_string(),
+                        mime: ty.or_else(|| parsed.as_ref().and_then(media_mime_from_url)),
+                        url: url_s,
                         controls,
                         autoplay: has_bool_attr(dom, n, "autoplay"),
                         path: element_path(dom, n).unwrap_or_default(),
+                        mse: false,
                     });
                 }
             }
@@ -239,7 +255,14 @@ impl Session {
             else {
                 return;
             };
-            let scanned = scan_media(tree, dom, base);
+            let mut scanned = scan_media(tree, dom, base);
+            // Marquage MSE (MSE-2, ADR-0029) — le registre
+            // vit dans le moteur : `blob:` + `is_media_source`
+            // → l'offre route vers `GET …/segments`.
+            for s in &mut scanned {
+                s.mse = s.url.starts_with("blob:")
+                    && entry.js.as_mut().is_some_and(|e| e.is_media_source(&s.url));
+            }
             let old = std::mem::take(&mut entry.media);
             let mut matched = vec![false; scanned.len()];
             // Retenue : chaque ancienne offre cherche la
@@ -264,6 +287,7 @@ impl Session {
                     o.controls = s.controls;
                     o.autoplay = s.autoplay;
                     o.path.clone_from(&s.path);
+                    o.mse = s.mse;
                     retained[pos] = Some(o);
                 } else {
                     gone.push(GoneSurface {
@@ -291,6 +315,7 @@ impl Session {
                         claim: None,
                         report: None,
                         path: s.path,
+                        mse: s.mse,
                     };
                     offered.push(MediaSurface {
                         id,
@@ -303,6 +328,7 @@ impl Session {
                         claim: None,
                         report: None,
                         path: surf.path.clone(),
+                        mse: surf.mse,
                     });
                     media.push(surf);
                 }
@@ -359,6 +385,7 @@ impl Session {
                 mime: s.mime,
                 controls: s.controls,
                 autoplay: s.autoplay,
+                mse: s.mse,
             });
         }
     }
@@ -404,6 +431,7 @@ impl Session {
                         autoplay: m.autoplay,
                         claim: m.claim.clone(),
                         state: m.report.clone(),
+                        mse: m.mse,
                     })
                     .collect()
             })
@@ -567,6 +595,7 @@ pub fn media_offer_json(m: &MediaOfferInfo) -> serde_json::Value {
         },
         "rect": { "x": m.rect.x, "y": m.rect.y, "w": m.rect.w, "h": m.rect.h },
         "url": m.url, "mime": m.mime,
+        "mse": m.mse,
         "controls": m.controls, "autoplay": m.autoplay,
         "claimed": m.claim.is_some(),
         "codecs": m.claim,
@@ -595,6 +624,7 @@ pub fn media_event_json(ev: &CoreEvent) -> Option<(&'static str, String)> {
             mime,
             controls,
             autoplay,
+            mse,
         } => (
             "media_offered",
             serde_json::json!({
@@ -604,7 +634,7 @@ pub fn media_event_json(ev: &CoreEvent) -> Option<(&'static str, String)> {
                     MediaKind::Audio => "audio",
                 },
                 "rect": { "x": rect.x, "y": rect.y, "w": rect.w, "h": rect.h },
-                "url": url, "mime": mime,
+                "url": url, "mime": mime, "mse": mse,
                 "controls": controls, "autoplay": autoplay,
             })
             .to_string(),

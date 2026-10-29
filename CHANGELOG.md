@@ -7,6 +7,74 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **MSE-2 — Attache `blob:` →
+  `<video>` → `sourceopen` +
+  offre marquée `mse`**
+  (ADR-0029 ; piste MSE propre,
+  MSE-1 = surface JS-C193) —
+  `video.src`/`setAttribute`
+  reçoivent un `blob:` enregistré
+  `kind=mse` → `readyState
+  "closed"` → `"open"` +
+  `sourceopen` (idempotent au
+  second attache, `ended`
+  préservé — `mse.rs::maybe_attach`,
+  rail `set` + `setAttribute` de
+  `dom_host`). Port `JsEngine
+  ::is_media_source` (`Cmd`
+  `IsMediaSource` JscoreEngine) :
+  le scan média core marque
+  `ScannedMedia`/`MediaSurface`/
+  `MediaOffered`/`MediaOfferInfo`
+  `mse: true` — l'hôte route un
+  `MseSource` `ByteSource` au
+  lieu du lecteur URL et peut
+  refuser le claim sans faux
+  succès. `GET /api/tabs/{id}/
+  media/{mid}/segments` posé en
+  squelette honnête (`{mse,
+  data: [], eos}` — le pull
+  d'octets vient avec le
+  transport, MSE-3). Verrous
+  `mse2_attach.rs` ×5 ; clippy
+  4 crates + tests jscore/core
+  verts (flake worker isolé
+  passé seul).
+- **JS-C206 — §B-14 : GC plus
+  jamais mid-eval (racine
+  `` `push` is not a function
+  (on ?) `` nommée — incapsula
+  volotea/generali vol 161/162)**
+  (`explorer-jscore`) — le
+  `tick` `over_limit` lançait
+  `collect()` **pendant**
+  l'évaluation alors que la
+  pile d'appel n'est pas une
+  racine : les temporaires
+  (receveurs de méthodes, args
+  en vol) étaient balayés →
+  `ObjId` morts → signature
+  `(on ?)` transverse. Le tick
+  fait désormais **`mark_live`**
+  (phase mark seule, aucune
+  libération — mesure le vivant
+  en toute sécurité mid-eval) :
+  vivant > borne → kill J4
+  identique ; vivant ≤ borne →
+  `gc_due` et le sweep est
+  différé à `maybe_collect`
+  (frontière de job). Cap de
+  re-mesure ×4 roulant : une
+  fuite réelle finit par
+  dépasser en vivant, un simple
+  déchet monte le cap (la borne
+  absolue reste le budget
+  ops/deadline pré-existant).
+  Verrou `c37_mideval_overlimit
+  _keeps_stack_temps`
+  (`lang.rs`) — `mk().concat
+  (heavy())` temp pending à
+  travers un franchissement.
 - **JS-C205 — §B-14 : racine
   `ctor without new` nommée
   (materiel/rdc vol 160 — bras

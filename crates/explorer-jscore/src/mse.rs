@@ -649,11 +649,43 @@ pub(crate) fn revoke_object_url(e: &mut Engine, url: &str) -> bool {
 
 /// `blob:` → wrapper `MediaSource` enregistré — point d'entrée
 /// de la future couture d'offre `mse` côté `explorer-core`
-/// (scan média → attache → `sourceopen`). Inutilisé tant que
-/// cette couture n'existe pas.
-#[allow(dead_code)]
+/// `url` → `ObjId` `MediaSource` enregistré (`createObjectURL`).
+/// Consulté par le scan média core (MSE-2) et par
+/// l'attache `src = blob:`.
 pub(crate) fn object_url_media(e: &Engine, url: &str) -> Option<ObjId> {
     e.mse.object_urls.get(url).copied()
+}
+
+/// Attache tentative (MSE-2, ADR-0029) — appelée quand un
+/// `<video>`/`<audio>` reçoit `src = blob:…` (prop directe ou
+/// `setAttribute`) : `url` enregistrée `kind=mse` →
+/// `readyState` `"closed"` → `"open"` + `sourceopen`
+/// synchrone (spec : file d'événements — approximation
+/// documentée, cohérente avec les autres événements du module).
+/// Idempotent : une source déjà `open`/`ended` n'est pas
+/// re-tirée — la spec ignore le second attachement.
+pub(crate) fn maybe_attach(e: &mut Engine, url: &str) {
+    let Some(mid) = object_url_media(e, url) else {
+        return;
+    };
+    let Some(d) = ms_data(e, Value::Obj(mid)) else {
+        return;
+    };
+    if d.borrow().ready_state != "closed" {
+        return;
+    }
+    d.borrow_mut().ready_state = "open";
+    let _ = fire_mse(e, mid, "sourceopen");
+}
+
+impl Engine {
+    /// `true` si `url` est un object URL `MediaSource`
+    /// enregistré — port `JsEngine` consulté par le scan
+    /// média core pour marquer l'offre `mse` (ADR-0029).
+    #[must_use]
+    pub fn is_media_source_url(&self, url: &str) -> bool {
+        self.mse.object_urls.contains_key(url)
+    }
 }
 
 // ------------------------------------------------------------------

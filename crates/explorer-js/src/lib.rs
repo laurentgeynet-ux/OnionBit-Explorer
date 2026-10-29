@@ -616,6 +616,15 @@ pub trait JsEngine: Send {
         None
     }
 
+    /// `url` est-elle un object URL `MediaSource` enregistré
+    /// (`createObjectURL(ms)`) — le scan média core marque
+    /// l'offre `mse` pour que l'hôte rout son `MseSource`
+    /// (MSE-2, ADR-0029). Défaut : `false` (pas de
+    /// registre MSE — moteur nu).
+    fn is_media_source(&mut self, _url: &str) -> bool {
+        false
+    }
+
     /// Pousse un attribut du DOM hôte vers le nœud miroir
     /// désigné par `path` — quand la session mute le document
     /// **hors JS** (champ édité, case basculée), le miroir
@@ -1494,6 +1503,12 @@ enum Cmd {
     TimerDeadline {
         tx: Sender<Option<std::time::Duration>>,
     },
+    /// `url` enregistrée `kind=mse` ? (MSE-2 — scan média,
+    /// ADR-0029).
+    IsMediaSource {
+        url: String,
+        tx: Sender<bool>,
+    },
     SyncField {
         path: Vec<(String, u32)>,
         attr: String,
@@ -1966,6 +1981,11 @@ impl JscoreEngine {
                         .next_timer_deadline()
                         .map(|at| at.saturating_duration_since(std::time::Instant::now()));
                     if tx.send(d).is_err() {
+                        return;
+                    }
+                }
+                Cmd::IsMediaSource { url, tx } => {
+                    if tx.send(eng.is_media_source_url(&url)).is_err() {
                         return;
                     }
                 }
@@ -2524,6 +2544,21 @@ impl JsEngine for JscoreEngine {
             return None;
         }
         rx.recv_timeout(Self::EVAL_CMD_TIMEOUT).unwrap_or(None)
+    }
+
+    fn is_media_source(&mut self, url: &str) -> bool {
+        let (tx, rx) = channel();
+        if self
+            .tx
+            .send(Cmd::IsMediaSource {
+                url: url.to_string(),
+                tx,
+            })
+            .is_err()
+        {
+            return false;
+        }
+        rx.recv_timeout(Self::EVAL_CMD_TIMEOUT).unwrap_or(false)
     }
 
     fn sync_mirror_attr(&mut self, path: &[(String, u32)], attr: &str, value: Option<&str>) {

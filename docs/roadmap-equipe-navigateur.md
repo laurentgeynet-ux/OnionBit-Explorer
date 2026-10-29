@@ -7654,6 +7654,23 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   `clone_deep` même rail.
   Verrous `c196_clone.rs` ×5.
 
+- [x] **MSE-2. Attache `blob:` →
+  `<video>` → `sourceopen` +
+  offre `mse`** — ADR-0029 (piste
+  MSE dédiée : MSE-1 = surface
+  JS-C193). `maybe_attach` au
+  rail `src`/`setAttribute` :
+  `readyState` `closed`→`open` +
+  `sourceopen` (idempotent,
+  `ended` préservé) ; port
+  `JsEngine::is_media_source` →
+  marquage `mse` de la surface
+  (`MediaOffered`/DTO) — hôte
+  route `MseSource` ou refuse
+  honnêtement ; `GET …/segments`
+  squelette `{data:[], eos:false}`.
+  Verrous `mse2_attach.rs` ×5.
+
 ## Tâches continues
 
 - **Spécialiste JS** : divergence miroir ↔ `explorer-dom` quand

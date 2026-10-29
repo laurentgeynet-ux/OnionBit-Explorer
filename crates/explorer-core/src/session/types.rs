@@ -158,6 +158,11 @@ pub enum CoreEvent {
         controls: bool,
         /// Lecture automatique demandée par la page.
         autoplay: bool,
+        /// Source `blob:` enregistrée `MediaSource` (MSE-2,
+        /// ADR-0029) — l'hôte route un `MseSource` `ByteSource`
+        /// au lieu du lecteur URL ; refuse le claim sinon
+        /// (honnêteté : pas de faux succès MSE).
+        mse: bool,
     },
     /// Le `rect` d'une surface offerte a changé (relayout,
     /// resize). Coalescence à la cadence de peinture : au
@@ -306,6 +311,9 @@ pub struct MediaOfferInfo {
     pub claim: Option<Vec<String>>,
     /// Dernier état rapporté par l'hôte.
     pub state: Option<MediaReport>,
+    /// Source `MediaSource` (MSE-2, ADR-0029) — l'hôte
+    /// consomme `GET …/segments` plutôt que `url`.
+    pub mse: bool,
 }
 
 /// Refus sur une surface média (étape 71b) — mappé `409`/

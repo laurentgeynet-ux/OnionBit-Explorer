@@ -214,6 +214,7 @@ pub fn router_with_egress(
         .route("/api/tabs/{id}/media", get(list_media))
         .route("/api/tabs/{id}/media/{mid}", get(get_media))
         .route("/api/tabs/{id}/media/{mid}/claim", post(media_claim))
+        .route("/api/tabs/{id}/media/{mid}/segments", get(media_segments))
         .route("/api/tabs/{id}/media/{mid}/release", post(media_release))
         .route("/api/tabs/{id}/media/{mid}/state", post(media_state))
         .route("/api/tabs/{id}/downloads", get(list_downloads))
@@ -942,6 +943,29 @@ async fn get_media(State(st): State<ApiState>, Path((id, mid)): Path<(TabId, u64
     let session = st.session.lock().await;
     match session.media_list(id).into_iter().find(|m| m.id == mid) {
         Some(m) => Json(media_json(&m)).into_response(),
+        None => media_err(explorer_core::MediaError::Dead),
+    }
+}
+
+/// `GET /api/tabs/{id}/media/{mid}/segments` — pull MSE
+/// (ADR-0029, MSE-2) : le `MseSource` `ByteSource` de
+/// l'hôte consomme `{mse, data, eos}` par curseur.
+/// Squelette d'attache : `data: []`/`eos: false` tant que
+/// le transport segments n'est pas livré (étape suivante —
+/// `appendBuffer` stockera et le pull rendra les octets).
+/// `410` id mort.
+async fn media_segments(
+    State(st): State<ApiState>,
+    Path((id, mid)): Path<(TabId, u64)>,
+) -> Response {
+    let session = st.session.lock().await;
+    match session.media_list(id).into_iter().find(|m| m.id == mid) {
+        Some(m) => Json(serde_json::json!({
+            "mse": m.mse,
+            "data": Vec::<u8>::new(),
+            "eos": false,
+        }))
+        .into_response(),
         None => media_err(explorer_core::MediaError::Dead),
     }
 }

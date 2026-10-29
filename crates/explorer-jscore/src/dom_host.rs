@@ -6334,6 +6334,16 @@ impl Host for NodeHost {
                 }
                 Ok(false)
             }
+            // `HTMLMediaElement.src = blob:` (étape attache
+            // MSE, ADR-0029) — object URL `MediaSource` →
+            // `readyState "open"` + `sourceopen`. Attribut
+            // reflété normalement d'abord.
+            "src" if is_media(&self.dom, node) => {
+                let s = e.to_js_string(v)?;
+                self.dom.borrow_mut().set_attr(node, "src", &s);
+                crate::mse::maybe_attach(e, &s);
+                Ok(true)
+            }
             // `HTMLMediaElement` (étape 58/71c) — non claimé :
             // l'écriture est acceptée-ignorée (le stub n'a pas
             // d'état de lecture à muter) plutôt qu'échouée.
@@ -6554,7 +6564,13 @@ impl Host for NodeHost {
             "setAttribute" => {
                 let k = e.to_js_string(arg(args, 0))?;
                 let v = e.to_js_string(arg(args, 1))?;
+                // Même attache que la prop `src` — les players
+                // empruntent les deux voies (étape MSE).
+                let attach = k == "src" && is_media(&self.dom, node);
                 self.dom.borrow_mut().set_attr(node, &k, &v);
+                if attach {
+                    crate::mse::maybe_attach(e, &v);
+                }
                 Ok(Some(Value::Undefined))
             }
             "getAttribute" => {
