@@ -641,6 +641,14 @@ pub trait JsEngine: Send {
         None
     }
 
+    /// MIME des `SourceBuffer` (index = ordre `addSourceBuffer`)
+    /// de la `MediaSource` enregistrée sous `url` — l'offre
+    /// `mse` les publie pour `open_mse_multi` (MSE-3/P-53).
+    /// Défaut : vide.
+    fn mse_buffers(&mut self, _url: &str) -> Vec<String> {
+        Vec::new()
+    }
+
     /// Pousse un attribut du DOM hôte vers le nœud miroir
     /// désigné par `path` — quand la session mute le document
     /// **hors JS** (champ édité, case basculée), le miroir
@@ -1533,6 +1541,12 @@ enum Cmd {
         max: usize,
         tx: Sender<Option<(Vec<u8>, u64, bool)>>,
     },
+    /// MIME des `SourceBuffer` sous `url` (`?buffer=N` indexe
+    /// ce tableau — offre `mseBuffers`, P-53 multi-source).
+    MseBuffers {
+        url: String,
+        tx: Sender<Vec<String>>,
+    },
     SyncField {
         path: Vec<(String, u32)>,
         attr: String,
@@ -2020,6 +2034,11 @@ impl JscoreEngine {
                     tx,
                 } => {
                     if tx.send(eng.mse_pull_segments(&url, buffer, max)).is_err() {
+                        return;
+                    }
+                }
+                Cmd::MseBuffers { url, tx } => {
+                    if tx.send(eng.mse_source_buffers(&url)).is_err() {
                         return;
                     }
                 }
@@ -2610,6 +2629,21 @@ impl JsEngine for JscoreEngine {
             return None;
         }
         rx.recv_timeout(Self::EVAL_CMD_TIMEOUT).ok().flatten()
+    }
+
+    fn mse_buffers(&mut self, url: &str) -> Vec<String> {
+        let (tx, rx) = channel();
+        if self
+            .tx
+            .send(Cmd::MseBuffers {
+                url: url.to_string(),
+                tx,
+            })
+            .is_err()
+        {
+            return Vec::new();
+        }
+        rx.recv_timeout(Self::EVAL_CMD_TIMEOUT).unwrap_or_default()
     }
 
     fn sync_mirror_attr(&mut self, path: &[(String, u32)], attr: &str, value: Option<&str>) {

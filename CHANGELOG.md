@@ -7,6 +7,29 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **MSE-4 — `isTypeSupported` piloté
+  par codecs déclarés + offre
+  `mseBuffers`** (ADR-0029 —
+  dormant, s'allume à la DLL) —
+  le claim média `set_media_claim`
+  alimente la table document-locale
+  de préfixes (`avc1`/`mp4a`/
+  `vp09`…) que `isTypeSupported`
+  consulte : conteneur connu +
+  codecs tous déclarés → `"maybe"`,
+  table vide → `""` (état C173
+  préservé — jamais de promesse
+  sans stack déclarée). `Engine::
+  mse_source_buffers` + port
+  `JsEngine::mse_buffers` →
+  `MediaSurface`/`MediaOfferInfo`
+  publiant les MIME des
+  `SourceBuffer` (`?buffer=N` les
+  indexe — descripteurs P-53
+  `open_mse_multi` ; vide pour le
+  non-MSE). Verrous
+  `mse4_is_type_supported_…` +
+  `mse4_source_buffers_…` ×2.
 - **139g — branche MSE dormante dans le
   lecteur** (`app/`) — `MediaOffer.mse`
   parsé de l'offre (`mse:true` du

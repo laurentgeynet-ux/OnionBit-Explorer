@@ -68,6 +68,11 @@ pub(crate) struct MseState {
     /// `revokeObjectURL` ou la mort du document — consommée par
     /// la future couture d'offre `mse` (transport vers l'hôte).
     object_urls: HashMap<String, ObjId>,
+    /// Préfixes de codecs déclarés par l'hôte (MSE-4) —
+    /// alimentés par `set_media_claim` (`OnionCodec` déclare
+    /// ce qu'il joue réellement) ; vide = `isTypeSupported`
+    /// rend `""` partout (comportement C173 préservé).
+    declared_codecs: std::collections::HashSet<String>,
 }
 
 impl MseState {
@@ -382,12 +387,70 @@ fn tr_illegal_ctor(e: &mut Engine, _t: Value, _args: &[Value]) -> JsResult<Value
     Err(e.type_error("TimeRanges: Illegal constructor"))
 }
 
-/// `MediaSource.isTypeSupported(mime)` → `""` **pour tout type**
-/// (C173 : aucun conteneur jouable sans transport vers l'hôte —
-/// réponse honnête qui pousse les players vers leurs fallbacks,
-/// jamais un faux succès — ADR-0023).
-fn ms_is_type_supported(e: &mut Engine, _t: Value, _args: &[Value]) -> JsResult<Value> {
-    Ok(e.str_val(""))
+/// Codecs déclarés par l'hôte (claim média) — normalisés en
+/// préfixe (`avc1.42E01E` → `avc1`) et fusionnés dans la
+/// table document-locale que `isTypeSupported` consulte
+/// (MSE-4, ADR-0029 : la table déclare ce que la stack
+/// `OnionCodec` joue réellement — honnête par construction).
+pub(crate) fn note_declared_codecs(e: &mut Engine, codecs: &[String]) {
+    for c in codecs {
+        if let Some(p) = codec_prefix(c) {
+            e.mse.declared_codecs.insert(p);
+        }
+    }
+}
+
+/// Préfixe codec normalisé : `avc1.42E01E`→`avc1`,
+/// `vp09.00.10.08`→`vp09`, `mp4a.40.2`→`mp4a` — la famille
+/// suffit au matching déclaré (profil/niveau = affinement).
+fn codec_prefix(s: &str) -> Option<String> {
+    let base = s.trim();
+    let p = base.split('.').next()?.trim();
+    if p.is_empty() {
+        return None;
+    }
+    Some(p.to_ascii_lowercase())
+}
+
+/// `MediaSource.isTypeSupported(mime)` — MSE-4 : pilote par
+/// la table de codecs **déclarés par l'hôte** (`set_media_claim`
+/// — `OnionCodec` dit ce qu'il joue). Conteneur connu + tous les
+/// codecs du param `codecs` déclarés → `"maybe"` ; conteneur
+/// connu sans `codecs` → `"maybe"` ; sinon `""`. Table vide →
+/// `""` partout (état C173 préservé — jamais de promesse sans
+/// transport déclaré, ADR-0023).
+fn ms_is_type_supported(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let mime = e
+        .to_js_string(args.first().copied().unwrap_or(Value::Undefined))?
+        .to_lowercase();
+    // Conteneur `type/subtype` — la borne `;` isole `codecs`.
+    let container = mime.split(';').next().unwrap_or("").trim();
+    let known = matches!(
+        container,
+        "video/mp4"
+            | "audio/mp4"
+            | "video/webm"
+            | "audio/webm"
+            | "video/x-matroska"
+            | "audio/mpeg"
+            | "video/mp2t"
+            | "audio/ogg"
+            | "audio/wav"
+            | "audio/x-wav"
+    );
+    let ok = known
+        && match mime.split("codecs=").nth(1) {
+            Some(cstr) => {
+                let cstr = cstr.trim_matches(|c| c == '"' || c == '\'');
+                cstr.split(',')
+                    .filter_map(codec_prefix)
+                    .all(|p| e.mse.declared_codecs.contains(&p))
+            }
+            // Pas de liste : le conteneur connu suffit —
+            // `"maybe"` honnête (le codec réel peut manquer).
+            None => !e.mse.declared_codecs.is_empty(),
+        };
+    Ok(e.str_val(if ok { "maybe" } else { "" }))
 }
 
 // ------------------------------------------------------------------
@@ -755,6 +818,26 @@ impl Engine {
         drop(sd);
         let eos = empty && ms.borrow().ready_state == "ended";
         Some((out, cursor, eos))
+    }
+
+    /// MIME des `SourceBuffer` de la `MediaSource` sous `url`
+    /// (index = ordre `addSourceBuffer`) — l'offre `mse` les
+    /// publie pour que l'hôte compose ses `MseSource` (P-53
+    /// `open_mse_multi` : un descripteur par buffer — MSE-3
+    /// transport déjà indexé `?buffer=N`). `[]` hors registre.
+    pub fn mse_source_buffers(&mut self, url: &str) -> Vec<String> {
+        let Some(mid) = self.mse.object_urls.get(url).copied() else {
+            return Vec::new();
+        };
+        let Some(ms) = ms_data(self, Value::Obj(mid)) else {
+            return Vec::new();
+        };
+        let buffers = ms.borrow().buffers.clone();
+        buffers
+            .into_iter()
+            .filter_map(|v| sb_data(self, v))
+            .map(|d| d.borrow().mime.clone())
+            .collect()
     }
 }
 

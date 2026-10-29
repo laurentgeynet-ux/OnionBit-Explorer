@@ -3270,6 +3270,10 @@ impl Engine {
             let mut d = dom.borrow_mut();
             match codecs {
                 Some(c) => {
+                    // MSE-4 : les codecs que l'hôte déclare
+                    // au claim alimentent la table consultée
+                    // par `MediaSource.isTypeSupported`.
+                    crate::mse::note_declared_codecs(self, &c);
                     match d.media.get_mut(&node) {
                         Some(st) => {
                             st.media = media;

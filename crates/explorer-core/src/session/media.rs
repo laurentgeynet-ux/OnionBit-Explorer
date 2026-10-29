@@ -64,6 +64,9 @@ pub(crate) struct MediaSurface {
     /// Source `blob:` `MediaSource` (MSE-2, ADR-0029) —
     /// l'hôte pull `GET …/segments` plutôt que `url`.
     pub(crate) mse: bool,
+    /// MIME des `SourceBuffer` publiés dans l'offre
+    /// (`?buffer=N` indexe ce tableau — P-53 `open_mse_multi`).
+    pub(crate) mse_buffers: Vec<String>,
 }
 
 /// Résultat d'un pull de segments MSE (§B-63) — `Pending`
@@ -114,6 +117,9 @@ struct ScannedMedia {
     /// moteur (MSE-2, ADR-0029) — remplie au refresh via
     /// `JsEngine::is_media_source`.
     mse: bool,
+    /// MIME des `SourceBuffer` (index `?buffer=N` — offre
+    /// `mseBuffers` pour `open_mse_multi`).
+    mse_buffers: Vec<String>,
 }
 
 /// MIME média déduit du suffixe d'URL (contrat : `type` >
@@ -235,6 +241,7 @@ fn scan_media(tree: &LayoutBox, dom: &Dom, base: &Url) -> Vec<ScannedMedia> {
                         autoplay: has_bool_attr(dom, n, "autoplay"),
                         path: element_path(dom, n).unwrap_or_default(),
                         mse: false,
+                        mse_buffers: Vec::new(),
                     });
                 }
             }
@@ -274,6 +281,15 @@ impl Session {
             for s in &mut scanned {
                 s.mse = s.url.starts_with("blob:")
                     && entry.js.as_mut().is_some_and(|e| e.is_media_source(&s.url));
+                // Les `SourceBuffer` déjà ajoutés sont publiés
+                // dans l'offre (`?buffer=N` les indexe — P-53).
+                if s.mse {
+                    s.mse_buffers = entry
+                        .js
+                        .as_mut()
+                        .map(|e| e.mse_buffers(&s.url))
+                        .unwrap_or_default();
+                }
             }
             let old = std::mem::take(&mut entry.media);
             let mut matched = vec![false; scanned.len()];
@@ -328,11 +344,13 @@ impl Session {
                         report: None,
                         path: s.path,
                         mse: s.mse,
+                        mse_buffers: s.mse_buffers,
                     };
                     offered.push(MediaSurface {
                         id,
                         kind: surf.kind,
                         rect: surf.rect,
+                        mse_buffers: surf.mse_buffers.clone(),
                         url: surf.url.clone(),
                         mime: surf.mime.clone(),
                         controls: surf.controls,
@@ -444,6 +462,7 @@ impl Session {
                         claim: m.claim.clone(),
                         state: m.report.clone(),
                         mse: m.mse,
+                        mse_buffers: m.mse_buffers.clone(),
                     })
                     .collect()
             })
@@ -640,7 +659,7 @@ pub fn media_offer_json(m: &MediaOfferInfo) -> serde_json::Value {
         },
         "rect": { "x": m.rect.x, "y": m.rect.y, "w": m.rect.w, "h": m.rect.h },
         "url": m.url, "mime": m.mime,
-        "mse": m.mse,
+        "mse": m.mse, "mseBuffers": m.mse_buffers,
         "controls": m.controls, "autoplay": m.autoplay,
         "claimed": m.claim.is_some(),
         "codecs": m.claim,

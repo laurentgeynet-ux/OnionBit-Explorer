@@ -141,3 +141,56 @@ fn mse3_unknown_url_pulls_none() {
         .expect("blob url");
     assert!(e.mse_pull_segments(&u, 0, 16).is_none());
 }
+
+#[test]
+fn mse4_is_type_supported_reflects_declared_codecs() {
+    let mut e = engine();
+    // Table vide → `""` (état C173 honnête préservé).
+    assert_eq!(ev(&mut e, "MediaSource.isTypeSupported('video/mp4')"), "");
+    // L'hôte déclare ses codecs au claim → la table MSE
+    // s'alimente des préfixes normalisés (avc1/mp4a).
+    e.set_media_claim(
+        explorer_jscore::NodeId::from(0u32),
+        1,
+        Some(vec!["avc1.42E01E".to_string(), "mp4a.40.2".to_string()]),
+    );
+    assert_eq!(
+        ev(
+            &mut e,
+            "MediaSource.isTypeSupported('video/mp4; codecs=\"avc1.42E01E, mp4a.40.2\"')"
+        ),
+        "maybe"
+    );
+    assert_eq!(
+        ev(
+            &mut e,
+            "MediaSource.isTypeSupported('video/mp4; codecs=\"hvc1\"')"
+        ),
+        ""
+    );
+    assert_eq!(
+        ev(&mut e, "MediaSource.isTypeSupported('video/mp4')"),
+        "maybe"
+    );
+    assert_eq!(
+        ev(&mut e, "MediaSource.isTypeSupported('video/quicktime')"),
+        ""
+    );
+}
+
+#[test]
+fn mse4_source_buffers_enumerated_for_offer() {
+    let mut e = engine();
+    let u = attached_url(&mut e);
+    assert_eq!(e.mse_source_buffers(&u), Vec::<String>::new());
+    ev(
+        &mut e,
+        "__ms.addSourceBuffer('video/mp4');\
+         __ms.addSourceBuffer('audio/mp4');",
+    );
+    assert_eq!(
+        e.mse_source_buffers(&u),
+        vec!["video/mp4".to_string(), "audio/mp4".to_string()]
+    );
+    assert_eq!(e.mse_source_buffers("blob:null/x"), Vec::<String>::new());
+}

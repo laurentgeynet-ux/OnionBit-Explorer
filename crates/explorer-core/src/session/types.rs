@@ -314,6 +314,10 @@ pub struct MediaOfferInfo {
     /// Source `MediaSource` (MSE-2, ADR-0029) — l'hôte
     /// consomme `GET …/segments` plutôt que `url`.
     pub mse: bool,
+    /// MIME des `SourceBuffer` (index = `?buffer=N` du
+    /// pull segments — P-53 `open_mse_multi` : un rail par
+    /// buffer ; vide pour le non-MSE).
+    pub mse_buffers: Vec<String>,
 }
 
 /// Refus sur une surface média (étape 71b) — mappé `409`/

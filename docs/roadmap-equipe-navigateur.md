@@ -7690,6 +7690,18 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   → `{mse:false}`. Verrous
   `mse3_transport.rs` ×5.
 
+- [x] **MSE-4. `isTypeSupported` piloté
+  par codecs déclarés + offre
+  `mseBuffers`** — dormant jusqu'à la
+  DLL : `set_media_claim` alimente la
+  table de préfixes `OnionCodec` →
+  `"maybe"` conteneur+codecs déclarés,
+  `""` sinon (honnêteté C173 intacte)
+  ; `mse_source_buffers` →
+  `MediaSurface`/`MediaOfferInfo`
+  `mseBuffers` (`?buffer=N` — rails
+  P-53 `open_mse_multi`). Verrous ×2.
+
 ## Tâches continues
 
 - **Spécialiste JS** : divergence miroir ↔ `explorer-dom` quand
