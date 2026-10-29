@@ -4444,6 +4444,12 @@ const MAPPED_ATTRS: &[&str] = &[
     "method",
     "target",
     "rel",
+    // `HTMLElement` globaux (JS-C201) — `documentElement.lang`
+    // lu par les pluralizers des bundles i18n (orpi vol 136 :
+    // `.lang.replace` tuait le chunk → `Translator` jamais défini
+    // → traductions mortes en cascade). Attr absent → `""` (spec).
+    "lang",
+    "dir",
     // `HTMLMediaElement` (étape 58) — attributs réfléchis
     // de même nom sur `<video>`/`<audio>`.
     "poster",

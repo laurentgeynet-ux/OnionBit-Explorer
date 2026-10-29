@@ -648,3 +648,43 @@ fn worker_prototype_exposes_event_target_surface() {
         "function|function"
     );
 }
+
+// orpi vol 136 : `replace of Undefined` tuait le chunk swipers
+// — pluralizer i18n `document.documentElement.lang.replace(
+// "-","_")` ; `lang`/`dir` (globals `HTMLElement`, spec IDL)
+// n'étaient pas réfléchis → `undefined` → TypeError → chunk mort
+// → `Translator` jamais défini → `Translator is not defined`.
+// Attr absent → `""` (spec — jamais `undefined`).
+#[test]
+fn lang_dir_reflected_as_strings_on_elements() {
+    let mut e = engine();
+    // fixture : pas d'attribut `lang` → `""` (spec).
+    assert_eq!(
+        ev(&mut e, "document.documentElement.lang.replace('-','_')"),
+        ""
+    );
+    // attribut présent → valeur reflétée.
+    e.eval("document.documentElement.setAttribute('lang','fr')")
+        .unwrap();
+    assert_eq!(
+        ev(&mut e, "document.documentElement.lang.replace('-','_')"),
+        "fr"
+    );
+    assert_eq!(
+        ev(
+            &mut e,
+            "const d=document.createElement('div');\
+             [d.lang,d.dir,typeof d.lang].join('|')"
+        ),
+        "||string"
+    );
+    // écriture → attribut
+    assert_eq!(
+        ev(
+            &mut e,
+            "const d=document.createElement('div');d.lang='en-GB';\
+             d.getAttribute('lang')"
+        ),
+        "en-GB"
+    );
+}

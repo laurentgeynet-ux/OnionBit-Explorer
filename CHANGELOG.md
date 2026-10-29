@@ -7,6 +7,26 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **JS-C201 — §B-14 : `lang`/
+  `dir` reflétés sur les
+  éléments**
+  (`explorer-jscore`) — orpi
+  vol 136 : `replace of
+  Undefined` tuait le chunk
+  swipers — pluralizer i18n
+  `document.documentElement.lang
+  .replace("-","_")` ; `lang`/
+  `dir` (globaux `HTMLElement`,
+  spec IDL) n'étaient pas dans
+  `MAPPED_ATTRS` → `undefined`
+  → TypeError → chunk mort →
+  `Translator` jamais défini →
+  `Translator is not defined`
+  en cascade. Attr absent →
+  `""` (spec). Verrou
+  `lang_dir_reflected_as_
+  strings_on_elements`
+  (`b14_probe.rs`).
 - **JS-C200 — §B-14 :
   `Worker.prototype` WebIDL +
   `performance.setResourceTiming
