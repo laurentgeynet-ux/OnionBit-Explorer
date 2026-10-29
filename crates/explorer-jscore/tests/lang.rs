@@ -3957,6 +3957,35 @@ fn c37_mem_limit_soft_kill() {
 }
 
 #[test]
+fn c37_mideval_overlimit_keeps_stack_temps() {
+    // JS-C206 : avant, un `tick` `over_limit` lançait
+    // `collect()` PENDANT l'éval — la pile d'appel n'est pas
+    // une racine → un receveur temporaire était balayé →
+    // `` `push` is not a function (on ?) `` (incapsula
+    // vol 161/162). Désormais `mark_live` mesure le vivant
+    // sans libérer ; le sweep attend la frontière de job.
+    //
+    // `mk().concat(heavy())` : le tableau frais de `mk()` vit
+    // dans la pile pendant que `heavy()` alloue du déchet au-
+    // delà de la borne — sous l'ancien schéma il était balayé.
+    let mut e = Engine::new();
+    e.collect();
+    let base = e.heap_stats().estimated_bytes;
+    e.set_mem_limit(base + 96 * 1024);
+    let r = e.eval(
+        "var mk = function() { return [1,2,3]; };\
+         var heavy = function() { var s='x';\
+             for (var i=0;i<200000;i++){ var t=s+i+'aaaaaaaaaaaaaaaa'; }\
+             return 1 };\
+         mk().concat(heavy()).join(',')",
+    );
+    match r {
+        Ok(v) => assert_eq!(e.describe(v), "1,2,3,1"),
+        Err(err) => panic!("temp balayé mid-eval ou kill sur garbage : {err}"),
+    }
+}
+
+#[test]
 fn j4_heap_dead_latch_single_signature() {
     // J4 : une fois le tas déclaré mort (dépassement vivant mesuré
     // post-collecte), tout eval ultérieur échoue au premier tick en

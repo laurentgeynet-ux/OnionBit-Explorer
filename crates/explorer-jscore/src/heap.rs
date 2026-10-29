@@ -447,6 +447,61 @@ impl Heap {
         swept
     }
 
+    /// Phase mark **seule**, sans libération — mesure le vivant
+    /// (cellules, octets) avec les mêmes racines que
+    /// [`Heap::collect`]. Contrairement à `collect`, elle est
+    /// sûre **pendant une évaluation** : rien n'est balayé, les
+    /// temporaires de la pile d'appel (non racines) survivent —
+    /// c'est le garde-fou qui permet au `tick` `over_limit` de
+    /// distinguer fuite réelle et simple déchets sans corrompre
+    /// les `ObjId` des receveurs en vol (« `push` is not a
+    /// function (on ?) », incapsula vol 161/162 — JS-C206).
+    /// Le sweep reste différé à la frontière de job
+    /// (`Engine::maybe_collect` consomme `gc_due`).
+    pub(crate) fn mark_live<F>(&mut self, mut seed: F) -> (usize, usize)
+    where
+        F: FnMut(&mut dyn FnMut(ObjId)),
+    {
+        self.marks.fill(false);
+        let mut worklist: Vec<ObjId> = Vec::new();
+        let mut envs: HashSet<usize> = HashSet::new();
+        let mut discovered: Vec<ObjId> = Vec::new();
+        for &id in self.roots.keys() {
+            if (id as usize) < self.marks.len() && !self.marks[id as usize] {
+                self.marks[id as usize] = true;
+                worklist.push(id);
+            }
+        }
+        let marks = &mut self.marks;
+        seed(&mut |id| {
+            if (id as usize) < marks.len() && !marks[id as usize] {
+                marks[id as usize] = true;
+                worklist.push(id);
+            }
+        });
+        while let Some(id) = worklist.pop() {
+            self.trace_cell(id, &mut discovered, &mut envs);
+            for d in discovered.drain(..) {
+                if !self.marks[d as usize] {
+                    self.marks[d as usize] = true;
+                    worklist.push(d);
+                }
+            }
+        }
+        let mut live = 0usize;
+        let mut bytes = 0usize;
+        for (i, slot) in self.cells.iter().enumerate() {
+            if let Some(c) = slot {
+                if self.marks[i] {
+                    live += 1;
+                    bytes += cell_bytes(&c.data);
+                }
+            }
+        }
+        self.marks.fill(false);
+        (live, bytes)
+    }
+
     /// Borne mémoire par contexte (ADR-0019) — `0` = illimité.
     /// Le dépassement n'empêche pas l'alloc (signature non
     /// faillible) : il lève le drapeau `over_limit`, lu au `tick`

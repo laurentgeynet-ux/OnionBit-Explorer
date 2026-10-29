@@ -534,6 +534,21 @@ pub struct Engine {
     /// `Reflect.construct(Boolean,[],fn)` chaîne
     /// `fn.prototype`).
     pub(crate) ctor_fresh: Option<ObjId>,
+    /// Sweep GC différé : posé quand `tick` constate
+    /// `over_limit` alors que le **vivant** (mesuré par
+    /// `mark_live`, sans libérer) est sous la borne — le
+    /// sweep proprement dit attend la prochaine frontière
+    /// de job (`maybe_collect`) puisque la pile d'appel
+    /// n'est pas une racine (JS-C206). `gc_cap` est le
+    /// prochain seuil de re-mesure : chaque franchissement
+    /// re-marque (une fuite réelle finit par montrer un
+    /// vivant > borne → kill), un simple déchet fait
+    /// monter le cap ×4 — les ticks intermédiaires ne
+    /// re-marquent pas (coût O(heap) par tick).
+    pub(crate) gc_due: bool,
+    /// Seuil `bytes` du prochain re-marquage sous `gc_due`
+    /// (voir ci-dessus). `0` = inactif.
+    pub(crate) gc_cap: usize,
 }
 
 /// Dernier match `RegExp` — `RegExp.$1…$9`/`input`/`lastMatch`/…
@@ -892,6 +907,8 @@ impl Engine {
             dom_ctors: std::collections::HashMap::new(),
             native_caller: Vec::new(),
             ctor_fresh: None,
+            gc_due: false,
+            gc_cap: 0,
         };
         crate::builtins::install(&mut e);
         crate::collections::install(&mut e);
@@ -2292,6 +2309,64 @@ impl Engine {
         // 1. Rassemble les `ObjId` tenus par les structures
         //    annexes (RefCell/NodeCache — leurs borrows doivent
         //    être relâchés avant la passe).
+        let ids = self.gc_seed_ids();
+        self.gc_due = false;
+        self.gc_cap = 0;
+        // 3. Mark-sweep.
+        let n = self.heap.collect(|mark| {
+            for &id in &ids {
+                mark(id);
+            }
+        });
+        // 4. `FinalizationRegistry` — purge des registres morts,
+        //    puis cleanup en microtask pour les cibles balayées
+        //    (spec `HostEnqueueFinalizationRegistryCleanupJob` :
+        //    jamais synchrone).
+        let heap = &self.heap;
+        self.finregs
+            .retain(|&rid| matches!(heap.obj(rid).map(|o| &o.kind), Some(ObjKind::FinReg { .. })));
+        let mut pending: Vec<(Value, Value)> = Vec::new();
+        for &rid in &self.finregs {
+            let Some((cb, entries)) = self.heap.obj_mut(rid).and_then(|o| match &mut o.kind {
+                ObjKind::FinReg { cb, entries } => Some((*cb, std::mem::take(entries))),
+                _ => None,
+            }) else {
+                continue;
+            };
+            let mut keep = Vec::new();
+            for en in entries {
+                if self.heap.obj(en.target).is_some() {
+                    keep.push(en);
+                } else {
+                    pending.push((cb, en.held));
+                }
+            }
+            if let Some(o) = self.heap.obj_mut(rid) {
+                if let ObjKind::FinReg { entries: es, .. } = &mut o.kind {
+                    *es = keep;
+                }
+            }
+        }
+        for (cb, held) in pending {
+            let f = self.bound_native(
+                "FinalizationRegistry.cleanup",
+                crate::builtins::finreg_cleanup,
+                vec![cb, held],
+            );
+            self.microtasks
+                .push_back((self.cur_ctx, crate::promise::Job::Plain(f)));
+        }
+        n
+    }
+
+    /// Graines de marquage GC — rassemble les `ObjId` tenus par
+    /// les structures annexes (`RefCell`/`NodeCache`, leurs
+    /// borrows doivent être relâchés avant la passe). Factorisé
+    /// entre [`Engine::collect`] (mark-sweep, frontière de job)
+    /// et la mesure `mark_live` mid-eval (JS-C206) — les deux
+    /// passes doivent semer exactement le même jeu de racines,
+    /// sinon la mesure sous-estime le vivant.
+    fn gc_seed_ids(&mut self) -> Vec<ObjId> {
         let mut ids: Vec<ObjId> = Vec::new();
         let mut vs = Vec::new();
         self.timers.roots(&mut vs);
@@ -2453,51 +2528,7 @@ impl Engine {
                 ids.push(p);
             }
         }
-        // 3. Mark-sweep.
-        let n = self.heap.collect(|mark| {
-            for &id in &ids {
-                mark(id);
-            }
-        });
-        // 4. `FinalizationRegistry` — purge des registres morts,
-        //    puis cleanup en microtask pour les cibles balayées
-        //    (spec `HostEnqueueFinalizationRegistryCleanupJob` :
-        //    jamais synchrone).
-        let heap = &self.heap;
-        self.finregs
-            .retain(|&rid| matches!(heap.obj(rid).map(|o| &o.kind), Some(ObjKind::FinReg { .. })));
-        let mut pending: Vec<(Value, Value)> = Vec::new();
-        for &rid in &self.finregs {
-            let Some((cb, entries)) = self.heap.obj_mut(rid).and_then(|o| match &mut o.kind {
-                ObjKind::FinReg { cb, entries } => Some((*cb, std::mem::take(entries))),
-                _ => None,
-            }) else {
-                continue;
-            };
-            let mut keep = Vec::new();
-            for en in entries {
-                if self.heap.obj(en.target).is_some() {
-                    keep.push(en);
-                } else {
-                    pending.push((cb, en.held));
-                }
-            }
-            if let Some(o) = self.heap.obj_mut(rid) {
-                if let ObjKind::FinReg { entries: es, .. } = &mut o.kind {
-                    *es = keep;
-                }
-            }
-        }
-        for (cb, held) in pending {
-            let f = self.bound_native(
-                "FinalizationRegistry.cleanup",
-                crate::builtins::finreg_cleanup,
-                vec![cb, held],
-            );
-            self.microtasks
-                .push_back((self.cur_ctx, crate::promise::Job::Plain(f)));
-        }
-        n
+        ids
     }
 
     /// Parse and run `src`; returns the completion value of the last
@@ -3052,25 +3083,50 @@ impl Engine {
             if let Some(msg) = &self.heap_dead {
                 return Err(self.range_error(msg.clone()));
             }
-            // Le drapeau est *estimé* (posé à l'alloc, recalculé
-            // au sweep) — les déchets entre deux GC peuvent le
-            // faire passer : collecter d'abord, ne tuer que sur
-            // dépassement **vivant** (mesuré hubspot : kill sur
-            // garbage alors que le vrai live est sous la borne).
-            self.collect();
-            if self.heap.over_limit() {
-                // Stats vivantes post-collecte dans le message
-                // (J4 — la rafale « heap memory limit exceeded »
-                // nomme alors son gabarit : fuite si live croît,
-                // borne trop serrée si live < limite — mesuré
-                // marmiton/bookshop en rafale ×3/×14).
-                let live = self.heap.live_count();
-                let bytes = self.heap.bytes();
-                let lim = self.heap.mem_limit();
-                let msg =
-                    format!("heap memory limit exceeded ({live} cells, {bytes} B live > {lim} B)");
-                self.heap_dead = Some(msg.clone());
-                return Err(self.range_error(msg));
+            let lim = self.heap.mem_limit();
+            if self.gc_due && self.heap.bytes() <= self.gc_cap {
+                // Déjà mesuré sous la borne, cap non atteint —
+                // le sweep attend la frontière de job.
+            } else {
+                // Le drapeau est *estimé* (posé à l'alloc,
+                // recalculé au sweep) — les déchets entre deux
+                // GC peuvent le faire passer : mesurer le vivant
+                // d'abord, ne tuer que sur dépassement **vivant**
+                // (mesuré hubspot : kill sur garbage alors que le
+                // vrai live est sous la borne). `mark_live`
+                // n'efface rien — un `collect` mid-eval
+                // balaierait les temporaires de la pile, non
+                // racines (« `push` is not a function (on ?) »
+                // incapsula — JS-C206). Le sweep est différé à
+                // `maybe_collect` via `gc_due` ; entre-temps le
+                // cap remonte ×4 à chaque mesure propre (une
+                // fuite réelle finit par dépasser la borne en
+                // vivant → kill, un déchet seul monte le cap —
+                // la borne absolue reste le budget ops/deadline
+                // de l'éval).
+                let (live, live_bytes) = {
+                    let ids = self.gc_seed_ids();
+                    self.heap.mark_live(|mark| {
+                        for &id in &ids {
+                            mark(id);
+                        }
+                    })
+                };
+                if lim > 0 && live_bytes > lim {
+                    // Stats vivantes post-marque dans le message
+                    // (J4 — la rafale « heap memory limit
+                    // exceeded » nomme alors son gabarit : fuite
+                    // si live croît, borne trop serrée si live
+                    // < limite — mesuré marmiton/bookshop en
+                    // rafale ×3/×14).
+                    let msg = format!(
+                        "heap memory limit exceeded ({live} cells, {live_bytes} B live > {lim} B)"
+                    );
+                    self.heap_dead = Some(msg.clone());
+                    return Err(self.range_error(msg));
+                }
+                self.gc_due = true;
+                self.gc_cap = self.heap.bytes().saturating_mul(4);
             }
         }
         self.ops_left -= 1;
@@ -3109,7 +3165,13 @@ impl Engine {
         // `over_limit` aussi : la frontière de job est la première
         // occasion sûre de recalculer `bytes` — si le sweep repasse
         // sous la borne, le drapeau retombe et le job suivant vit.
-        if self.heap.over_limit()
+        // `gc_due` : un `tick` a mesuré `over_limit` sur déchets
+        // mid-eval et a différé le sweep ici (JS-C206).
+        let due = self.gc_due;
+        self.gc_due = false;
+        self.gc_cap = 0;
+        if due
+            || self.heap.over_limit()
             || (self.gc_threshold > 0 && self.heap.live_count() > self.gc_threshold)
         {
             self.collect()
