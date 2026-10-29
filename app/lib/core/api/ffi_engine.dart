@@ -81,6 +81,12 @@ class FfiEngine implements BrowserRepository {
   @override
   String get engineLabel => 'FFI $libPath';
 
+  /// Aucune base REST en mode in-process — `…/segments`
+  /// n'existe que via le daemon (ADR-0003) : `''` honnête,
+  /// un claim MSE échoue proprement plutôt que de pull à vide.
+  @override
+  String get apiBase => '';
+
   /// Tente de charger la bibliothèque dynamique — `null` si
   /// absente (mode dégradé → REST, jamais d'exception hors
   /// du `tryLoad`). La sonde (`open` + lookup
