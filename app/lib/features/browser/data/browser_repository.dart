@@ -27,6 +27,12 @@ class BrowserRepository {
   /// `FfiEngine` le surcharge avec le chemin de la dll.
   String get engineLabel => 'REST ${_api.config.daemonBaseUrl}';
 
+  /// Base REST du daemon (`http://127.0.0.1:PORT`) — le
+  /// `MseSource` OnionMedia pull `…/segments` dessus (P-51 :
+  /// `apiBase` de `onionmedia_open_mse`, sinon `''` = jamais
+  /// de lecture — trou nommé au vol DLL).
+  String get apiBase => _api.config.daemonBaseUrl;
+
   /// Crée un onglet côté daemon et le traduit en entité métier.
   Future<BrowserTab> createTab() async {
     final res = await _api.postJson('/api/tabs');

@@ -872,7 +872,8 @@ class BrowserController extends Notifier<BrowserState> {
       final ok = await _repo.claimMedia(tabId, offer.id, _cfg.mediaCodecs);
       if (!ok || !ref.mounted) return;
       _patchMedia(tabId, offer.id, (m) => m.copyWith(claimed: true));
-      final player = await _playerFactory(offer, tabId: tabId);
+      final player =
+          await _playerFactory(offer, tabId: tabId, apiBase: _repo.apiBase);
       if (!ref.mounted || state.media[tabId]?[offer.id] == null) {
         unawaited(player.dispose());
         return;

@@ -7,6 +7,20 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **139i — `apiBase` câblé au claim
+  MSE** (`app/`, vol DLL) — la
+  factory recevait `apiBase=''` :
+  `onionmedia_open_mse` aurait eu
+  une base vide → jamais de pull
+  `…/segments`. `BrowserRepository
+  .apiBase` (`_api.config.
+  daemonBaseUrl`) exposé et passé
+  à `_playerFactory` au claim —
+  `MseSource` sait désormais où
+  lire. Bras restant séparé :
+  `mirror_node` (claim élément
+  sous divergence miroir → stubs
+  `play()` conservés).
 - **139h — `mediaCodecs` déclare les
   préfixes codec** (`app/`) — le
   claim poussait les seules MIME de
