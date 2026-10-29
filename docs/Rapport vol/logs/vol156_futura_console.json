@@ -1,0 +1,1 @@
+{"console":["uncaught: RangeError: heap memory limit exceeded (942479 cells, 545472001 B live > 536870912 B)\n    at r (https://sync.sparteo.com/crossfire.js:1:42537)"]}
