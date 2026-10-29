@@ -526,6 +526,14 @@ pub struct Engine {
     /// `None` = refus différé au checkpoint (stub JS-C73,
     /// fallbacks long-polling armés).
     pub(crate) ws_transport: Option<Rc<dyn crate::websocket::WsTransport>>,
+    /// Objet frais de la construction en cours (`new` /
+    /// `Reflect.construct` / `super()`) — posé par
+    /// `construct_nt` pour que les natives reconnaissent un
+    /// `this` construit sous un `newTarget` étranger
+    /// (`constructed_this` : le proto seul ne suffit pas,
+    /// `Reflect.construct(Boolean,[],fn)` chaîne
+    /// `fn.prototype`).
+    pub(crate) ctor_fresh: Option<ObjId>,
 }
 
 /// Dernier match `RegExp` — `RegExp.$1…$9`/`input`/`lastMatch`/…
@@ -883,6 +891,7 @@ impl Engine {
             port_msgs: std::collections::VecDeque::new(),
             dom_ctors: std::collections::HashMap::new(),
             native_caller: Vec::new(),
+            ctor_fresh: None,
         };
         crate::builtins::install(&mut e);
         crate::collections::install(&mut e);
@@ -6245,12 +6254,39 @@ impl Engine {
         // Le [[Prototype]] de l'instance vient de
         // `newTarget.prototype` — spec `OrdinaryCreateFromConstructor`
         // (`Reflect.construct(f, args, other)` prend le proto
-        // d'`other`).
-        let proto_src = match nt {
+        // d'`other`). Une bound fn n'a pas de `.prototype` —
+        // `new (ctor.bind(…))` (Angular DI
+        // `new (t.bind.apply(t,[null].concat(i)))`) : les moteurs
+        // réels résolvent à travers la chaîne bound jusqu'au
+        // proto de la cible, sinon l'instance hérite
+        // `Object.prototype` et `this instanceof ctor` casse
+        // (`_classCallCheck` Babel → `Cannot call a class`).
+        let mut proto_src = match nt {
             Value::Obj(nid) => nid,
             _ => fid,
         };
-        let proto = match self.get_prop_value(Value::Obj(proto_src), "prototype")? {
+        let mut proto = match self.get_prop_value(Value::Obj(proto_src), "prototype")? {
+            p @ Value::Obj(_) => p,
+            _ => Value::Undefined,
+        };
+        for _ in 0..8 {
+            if matches!(proto, Value::Obj(_)) {
+                break;
+            }
+            let next = match self.heap.obj(proto_src).map(|o| &o.kind) {
+                Some(ObjKind::Fun(Fun::Bound {
+                    target: Value::Obj(t),
+                    ..
+                })) => *t,
+                _ => break,
+            };
+            proto_src = next;
+            proto = match self.get_prop_value(Value::Obj(proto_src), "prototype")? {
+                p @ Value::Obj(_) => p,
+                _ => Value::Undefined,
+            };
+        }
+        let proto = match proto {
             p @ Value::Obj(_) => p,
             _ => Value::Obj(self.protos.object),
         };
@@ -6258,7 +6294,18 @@ impl Engine {
         // Champs d'instance d'une classe de base : installés à
         // l'entrée du corps (spec `DefineField` en tête de ctor).
         self.install_class_fields(fid, FLD_FIELDS, obj, nt)?;
-        let r = self.call_value_ctor(f, obj, args, nt)?;
+        // Marque l'objet frais — les natives-ctor
+        // (`Boolean`/`String`/`Proxy`/…) reconnaissent `this`
+        // construit même sous `newTarget` étranger
+        // (`Reflect.construct(f, args, nt)`).
+        let prev_fresh = self.ctor_fresh;
+        self.ctor_fresh = match obj {
+            Value::Obj(id) => Some(id),
+            _ => None,
+        };
+        let r = self.call_value_ctor(f, obj, args, nt);
+        self.ctor_fresh = prev_fresh;
+        let r = r?;
         Ok(if r.is_object() { r } else { obj })
     }
 

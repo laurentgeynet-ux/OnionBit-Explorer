@@ -42,12 +42,21 @@ pub(crate) fn array_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<
 pub(crate) const PRIM: &str = "__prim";
 
 /// `this` est-il l'objet frais d'un `new` sur le proto donné ?
-/// (Les natifs ne voient pas le drapeau construct — l'heuristique
-/// est le proto exact, assez pour `String/Number/Boolean`.)
+/// Deux signaux : le proto exact (`new String()`…) ou
+/// `ctor_fresh` — `construct_nt` marque l'objet alloué pour la
+/// construction en cours, ce qui couvre
+/// `Reflect.construct(String/Number/Boolean, args, newTarget)`
+/// où le proto vient de `newTarget.prototype` (spec
+/// `OrdinaryCreateFromConstructor` + slot interne initialisé —
+/// le feature-detect `Reflect.construct` des helpers Babel
+/// `_callSuper`/`_isNativeReflectConstruct` en dépend).
 pub(crate) fn constructed_this(e: &Engine, this: Value, proto: ObjId) -> Option<ObjId> {
     let Value::Obj(id) = this else {
         return None;
     };
+    if e.ctor_fresh == Some(id) {
+        return Some(id);
+    }
     match e.heap.obj(id).map(|o| o.proto) {
         Some(Value::Obj(p)) if p == proto => Some(id),
         _ => None,

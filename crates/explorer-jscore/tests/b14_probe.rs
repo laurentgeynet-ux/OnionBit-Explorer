@@ -820,3 +820,75 @@ fn event_target_ctor_prototypes_are_exposed() {
         "true|function|function"
     );
 }
+
+/// JS-C205 — `Cannot call a class as a function` /
+/// `class constructor cannot be invoked without new`
+/// (materiel/rdc vol 160, bras récurrent ×3 sites).
+///
+/// (a) `Reflect.construct(Boolean, [], fn)` sous newTarget
+/// étranger : l'objet frais doit recevoir le slot interne
+/// (`__prim`) — sans lui `Boolean.prototype.valueOf.call`
+/// jette, le feature-detect Babel `_isNativeReflectConstruct`
+/// tombe à `false` et `_callSuper` rebascule sur
+/// `e.apply(t, r)` = appel de classe sans `new` → `TypeError`.
+///
+/// (b) `new (ctor.bind(…))` : la bound fn n'a pas de
+/// `.prototype` — les moteurs réels résolvent le proto à
+/// travers la chaîne bound (Angular DI
+/// `new (t.bind.apply(t,[null].concat(i)))`), sinon
+/// `this instanceof ctor` est faux et `_classCallCheck` jette.
+#[test]
+fn reflect_construct_foreign_newtarget_and_bound_ctor() {
+    let mut e = engine();
+    // (a) slot interne posé sous newTarget étranger — c'est le
+    // test exact du helper Babel `_isNativeReflectConstruct`.
+    assert_eq!(
+        ev(
+            &mut e,
+            "var A=function(){try{\
+             var t=!Boolean.prototype.valueOf.call(Reflect.construct(Boolean,[],(function(){})))\
+             }catch(e){}return!!t};A()"
+        ),
+        "true"
+    );
+    assert_eq!(
+        ev(
+            &mut e,
+            "class K2{constructor(){this.k=3}};\
+             var rk=Reflect.construct(K2,[],K2.bind(null));\
+             rk.k+'|'+(rk instanceof K2)"
+        ),
+        "3|true"
+    );
+    // (b) `new (babelClass.bind(…))` — `_classCallCheck` passe.
+    assert_eq!(
+        ev(
+            &mut e,
+            "var E=(function(){function E(a){\
+             if(!(this instanceof E))throw new TypeError('Cannot call a class as a function');\
+             this.a=a}return E})();\
+             var b=new(E.bind.apply(E,[null,42]))();\
+             b.a+'|'+(b instanceof E)"
+        ),
+        "42|true"
+    );
+    // Chaîne bound×2 résolue + `.prototype` propre posé sur la
+    // bound fn honoré en priorité.
+    assert_eq!(
+        ev(
+            &mut e,
+            "var G=(function(){function G(){this.g=7}return G})();\
+             var bg=new(G.bind(null).bind(null))();\
+             bg.g+'|'+(bg instanceof G)"
+        ),
+        "7|true"
+    );
+    assert_eq!(
+        ev(
+            &mut e,
+            "function H(){this.h=1}; var bh=H.bind(null);\
+             bh.prototype={x:9}; var ih=new bh(); ih.h+'|'+ih.x"
+        ),
+        "1|9"
+    );
+}

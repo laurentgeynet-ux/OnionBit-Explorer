@@ -7,6 +7,48 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **JS-C205 — §B-14 : racine
+  `ctor without new` nommée
+  (materiel/rdc vol 160 — bras
+  récurrent ×3 sites)**
+  (`explorer-jscore`) — deux
+  moteurs cassaient le bootstrap
+  `Babel` des classes :
+  (a) `Reflect.construct(F, args,
+  newTarget)` sous `newTarget`
+  étranger n'initialisait pas le
+  slot interne — `Boolean.
+  prototype.valueOf.call(result)`
+  jetait → le feature-detect
+  `_isNativeReflectConstruct`
+  tombait à `false` → `_callSuper`
+  rebasculait sur `e.apply(t,r)` =
+  classe appelée sans `new` →
+  `TypeError` spec ; fix :
+  `ctor_fresh` marque l'objet
+  alloué par `construct_nt`, les
+  natives-ctor (`String`/`Number`/
+  `Boolean`/`BigInt`/`Proxy`)
+  reconnaissent `this` construit
+  quel que soit le proto
+  (`class extends String` natif
+  couvert en bonus) ; (b) `new
+  (ctor.bind(…))` (Angular DI
+  `new (t.bind.apply(t,[null].
+  concat(i)))`) : la bound fn n'a
+  pas de `.prototype` → le proto
+  est désormais résolu à travers
+  la chaîne bound jusqu'au proto
+  de la cible (`.prototype` propre
+  posé sur la bound fn honoré en
+  priorité), sinon `this
+  instanceof ctor` était faux →
+  `_classCallCheck` jetait
+  `Cannot call a class as a
+  function`. Verrou
+  `reflect_construct_foreign_
+  newtarget_and_bound_ctor`
+  (`b14_probe.rs`).
 - **JS-C204 — §B-14 : protos
   `WebIDL` `EventSource`/
   `MessagePort`/`SharedWorker`/
