@@ -764,3 +764,59 @@ fn gc_preserves_cached_dom_wrappers() {
     let _ = e.collect();
     assert_eq!(ev(&mut e, "document.getElementById('u').tagName"), "USE");
 }
+
+// JS-C204 — surface `X.prototype` WebIDL des ctors
+// `EventTarget`/`Observer` : les instruments (ruxit
+// mondialrelay vol 140, zone.js) patchent
+// `X.prototype.addEventListener.call(x, …)` au boot — sans
+// proto exposé la lecture jetait `of Undefined` et tuait
+// l'agent entier.
+#[test]
+fn event_target_ctor_prototypes_are_exposed() {
+    let mut e = engine();
+    // Présence du prototype + méthodes IDL.
+    assert_eq!(
+        ev(
+            &mut e,
+            "['EventSource','SharedWorker','MessageChannel','MessagePort','MutationObserver','Worker']\
+             .map(n=>n+':'+typeof globalThis[n].prototype+'/'+(globalThis[n].prototype&&typeof globalThis[n].prototype.addEventListener||'-')).join('|')"
+        ),
+        // Spec : `MessageChannel`/`MutationObserver` ne sont
+        // pas des `EventTarget` — `addEventListener` absent
+        // est le comportement attendu.
+        "EventSource:object/function|SharedWorker:object/function|MessageChannel:object/undefined|MessagePort:object/function|MutationObserver:object/undefined|Worker:object/function"
+    );
+    // Chaînage `EventTarget.prototype` (spec).
+    assert_eq!(
+        ev(
+            &mut e,
+            "['EventSource','SharedWorker','MessagePort']\
+             .map(n=>Object.getPrototypeOf(globalThis[n].prototype)===EventTarget.prototype)\
+             .join(',')"
+        ),
+        "true,true,true"
+    );
+    // Greffe `.call` sur un port vivant (motif ruxit).
+    assert_eq!(
+        ev(
+            &mut e,
+            "(()=>{const c=new MessageChannel();\
+             let hit=false;\
+             MessagePort.prototype.addEventListener.call(c.port1,'message',()=>hit=true);\
+             c.port2.postMessage(1);\
+             return (c.port1 instanceof MessagePort)+'|'+(typeof c.port1.postMessage)})()"
+        ),
+        "true|function"
+    );
+    // MutationObserver : proto + instanceof.
+    assert_eq!(
+        ev(
+            &mut e,
+            "(()=>{const mo=new MutationObserver(()=>{});\
+             return (mo instanceof MutationObserver)+'|'+\
+             (typeof MutationObserver.prototype.observe)+'|'+\
+             (typeof MutationObserver.prototype.takeRecords)})()"
+        ),
+        "true|function|function"
+    );
+}

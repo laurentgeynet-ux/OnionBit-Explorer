@@ -239,9 +239,31 @@ impl Engine {
         });
         let p1 = self.new_host_object(h1.clone());
         let p2 = self.new_host_object(h2.clone());
+        // `port instanceof MessagePort` — les instances
+        // chaînent `MessagePort.prototype` (spec ;
+        // `new_host_object` pose `Object.prototype`).
+        for pv in [p1, p2] {
+            if let Value::Obj(pid) = pv {
+                self.chain_port_proto(pid);
+            }
+        }
         h1.peer.set(p2);
         h2.peer.set(p1);
         (p1, p2)
+    }
+
+    /// Chaîne un port → `MessagePort.prototype` (résolu sur
+    /// le global — posé par `install_channel_ctor`).
+    fn chain_port_proto(&mut self, pid: crate::value::ObjId) {
+        let g = self.global;
+        let pp = self
+            .get_prop(g, "MessagePort")
+            .and_then(|c| self.get_prop_value(c, "prototype").ok());
+        if let Some(pp @ Value::Obj(_)) = pp {
+            if let Some(o) = self.heap.obj_mut(pid) {
+                o.proto = pp;
+            }
+        }
     }
 
     /// `new MessageChannel()` — `{port1, port2}` entrelacés.
@@ -256,12 +278,52 @@ impl Engine {
         Ok(ch)
     }
 
-    /// Installe le constructeur `MessageChannel` global
-    /// (appelé par `install_dom`, à côté de `Worker`).
+    /// Installe les constructeurs `MessageChannel` et
+    /// `MessagePort` globaux (appelé par `install_dom`, à côté
+    /// de `Worker`).
     pub(crate) fn install_channel_ctor(&mut self) {
         let v = self.native_fn("MessageChannel", Self::channel_ctor);
+        if let Value::Obj(cid) = v {
+            // `MessageChannel.prototype` — surface WebIDL
+            // (spec : proto ordinaire, pas d'héritage
+            // EventTarget).
+            let p = self.new_object();
+            self.set_own(cid, "prototype", Value::Obj(p), false);
+            self.set_own(p, "constructor", v, false);
+        }
         let g = self.global;
         self.set_own(g, "MessageChannel", v, false);
+        // `MessagePort` — interface globale non constructible
+        // (spec : `Illegal constructor`) ; les instruments la
+        // patchent (`MessagePort.prototype.postMessage`,
+        // zone.js) et les ports des canaux en héritent.
+        // Le chaînage `EventTarget.prototype` est posé par la
+        // boucle `install_dom` (ce ctor précède `EventTarget`).
+        let mp = self.native_fn("MessagePort", Self::port_illegal_ctor);
+        let mp_proto = self.new_object();
+        for name in [
+            "postMessage",
+            "close",
+            "start",
+            "addEventListener",
+            "removeEventListener",
+            "dispatchEvent",
+        ] {
+            let namev = self.str_val(name);
+            let f = self.bound_native("hostMethod", Self::host_method, vec![namev]);
+            self.set_own(mp_proto, name, f, true);
+        }
+        if let Value::Obj(cid) = mp {
+            self.set_own(cid, "prototype", Value::Obj(mp_proto), false);
+            self.set_own(mp_proto, "constructor", mp, false);
+        }
+        self.set_own(g, "MessagePort", mp, false);
+    }
+
+    /// `new MessagePort()` — interface abstraite spec :
+    /// `Illegal constructor` (comme `Node`/`Element`).
+    fn port_illegal_ctor(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
+        Err(e.type_error("MessagePort: illegal constructor"))
     }
 
     /// Livre les messages en file vers leurs ports — événement

@@ -146,14 +146,46 @@ fn es_data(e: &Engine, v: Value) -> Option<Rc<RefCell<EsData>>> {
 
 /// `EventSource.prototype` paresseux — constantes +
 /// toStringTag (méthodes via `invoke` du host).
+/// Chaîne `p` → `EventTarget.prototype` (spec `WebIDL`) si le
+/// global existe — l'ordre d'installation varie
+/// (`install_dom`/xhr) ; sans `EventTarget`, `Object.prototype`
+/// reste. Idempotent : retenté à chaque appel — un proto créé
+/// tôt (chemin xhr) se chaîne dès que `EventTarget` arrive.
+fn chain_et(e: &mut Engine, p: ObjId) {
+    let g = e.global;
+    if let Some(Value::Obj(etc)) = e.get_prop(g, "EventTarget") {
+        if let Some(pp @ Value::Obj(_)) = e.get_prop(etc, "prototype") {
+            if let Some(o) = e.heap.obj_mut(p) {
+                o.proto = pp;
+            }
+        }
+    }
+}
+
 fn es_proto(e: &mut Engine) -> ObjId {
     if let Some(p) = e.es.es_proto {
+        chain_et(e, p);
         return p;
     }
     let p = e.new_object();
     for (k, n) in [("CONNECTING", 0.0), ("OPEN", 1.0), ("CLOSED", 2.0)] {
         e.set_own(p, k, Value::Num(n), true);
     }
+    // Méthodes IDL — les instruments (ruxit/Dynatrace,
+    // mondialrelay vol 140) patchent `EventSource.prototype.
+    // addEventListener` ; sans proto exposé la lecture jetait
+    // `of Undefined` et tuait l'agent entier.
+    for name in [
+        "close",
+        "addEventListener",
+        "removeEventListener",
+        "dispatchEvent",
+    ] {
+        let namev = e.str_val(name);
+        let f = e.bound_native("hostMethod", Engine::host_method, vec![namev]);
+        e.set_own(p, name, f, true);
+    }
+    chain_et(e, p);
     let tag = e.str_val("EventSource");
     e.set_own(p, crate::interp::SYM_TO_STRING_TAG, tag, false);
     e.es.es_proto = Some(p);
@@ -472,6 +504,12 @@ pub(crate) fn install_eventsource(e: &mut Engine) {
         for (k, n) in [("CONNECTING", 0.0), ("OPEN", 1.0), ("CLOSED", 2.0)] {
             e.set_own(cid, k, Value::Num(n), true);
         }
+        // `EventSource.prototype` exposé (spec WebIDL) — posé
+        // d'emblée : les instruments le patchent sans jamais
+        // instancier (`X.prototype.addEventListener` lu au boot).
+        let p = es_proto(e);
+        e.set_own(cid, "prototype", Value::Obj(p), false);
+        e.set_own(p, "constructor", ctor, false);
     }
     e.set_own(g, "EventSource", ctor, true);
 }

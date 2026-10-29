@@ -2006,6 +2006,17 @@ pub(crate) fn shared_worker_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> J
     let host = crate::worker::worker_ctor_pub(e, Value::Undefined, args)?;
     let o = e.new_object();
     e.set_own(o, "port", host, true);
+    // `sw instanceof SharedWorker` — la valeur chaîne
+    // `SharedWorker.prototype` (spec) si le ctor global est
+    // posé.
+    let g = e.global;
+    if let Some(Value::Obj(cid)) = e.get_prop(g, "SharedWorker") {
+        if let Some(pp @ Value::Obj(_)) = e.get_prop(cid, "prototype") {
+            if let Some(ob) = e.heap.obj_mut(o) {
+                ob.proto = pp;
+            }
+        }
+    }
     let tag = e.str_val("SharedWorker");
     e.set_own(o, crate::interp::SYM_TO_STRING_TAG, tag, false);
     Ok(Value::Obj(o))

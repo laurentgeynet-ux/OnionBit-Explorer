@@ -59,6 +59,20 @@ impl Engine {
     /// l'installation).
     pub(crate) fn install_mutation_observer(&mut self) {
         let v = self.native_fn("MutationObserver", mutobs_ctor);
+        if let Value::Obj(cid) = v {
+            // `MutationObserver.prototype` — spec WebIDL :
+            // les instruments (ruxit, zone.js) patchent
+            // `MutationObserver.prototype.observe` ; sans
+            // proto, la lecture jetait `of Undefined`.
+            let p = self.new_object();
+            for name in ["observe", "disconnect", "takeRecords"] {
+                let namev = self.str_val(name);
+                let f = self.bound_native("hostMethod", Self::host_method, vec![namev]);
+                self.set_own(p, name, f, true);
+            }
+            self.set_own(cid, "prototype", Value::Obj(p), false);
+            self.set_own(p, "constructor", v, false);
+        }
         let g = self.global;
         self.set_own(g, "MutationObserver", v, false);
     }
@@ -120,6 +134,17 @@ fn mutobs_ctor(e: &mut Engine, _this: Value, args: &[Value]) -> JsResult<Value> 
     let v = e.new_host_object(Rc::new(MutObsHost { dom, cache, id }));
     if let Value::Obj(oid) = v {
         e.mutobs.cbs.insert(id, (cb, oid));
+        // `mo instanceof MutationObserver` — chaîne le proto
+        // du ctor global (spec ; `new_host_object` pose
+        // `Object.prototype`).
+        let g = e.global;
+        if let Some(Value::Obj(cid)) = e.get_prop(g, "MutationObserver") {
+            if let Some(pp @ Value::Obj(_)) = e.get_prop(cid, "prototype") {
+                if let Some(o) = e.heap.obj_mut(oid) {
+                    o.proto = pp;
+                }
+            }
+        }
     }
     Ok(v)
 }

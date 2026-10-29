@@ -7,6 +7,44 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **JS-C204 — §B-14 : protos
+  `WebIDL` `EventSource`/
+  `MessagePort`/`SharedWorker`/
+  `MessageChannel`/`Mutation
+  Observer`** (`explorer-jscore`)
+  — mondialrelay vol 140 :
+  `addEventListener` lu sur
+  `undefined` — ruxit/Dynatrace
+  patche `X.prototype.addEvent
+  Listener` au boot ; sans
+  `.prototype` l'agent entier
+  mourait. Spec `WebIDL` posée :
+  `EventSource.prototype`
+  (constantes + `close` + trio
+  `EventTarget`, chaîné sur
+  `EventTarget.prototype`),
+  `MessagePort` (global non
+  constructible `Illegal
+  constructor` + proto port +
+  chaînage ET — l'entrée
+  générique `event_ctor` qui
+  l'écrasait est retirée),
+  `SharedWorker.prototype`
+  (trio ET + chaînage),
+  `MessageChannel.prototype`
+  (nu — pas un `EventTarget`,
+  spec), `MutationObserver.
+  prototype` (`observe`/
+  `disconnect`/`takeRecords`).
+  Instances chaînées :
+  `port instanceof MessagePort`,
+  `mo instanceof Mutation
+  Observer`, `sw instanceof
+  SharedWorker`, `es instanceof
+  EventSource` (déjà). Verrou
+  `event_target_ctor_
+  prototypes_are_exposed`
+  (`b14_probe.rs`).
 - **JS-C203 — §B-14 : GC — les
   hosts DOM/IDB tracent leurs
   `Value` retenues**

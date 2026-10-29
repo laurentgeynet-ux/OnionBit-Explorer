@@ -2300,6 +2300,10 @@ impl Engine {
             ("Element", "Node"),
             ("HTMLElement", "Element"),
             ("Worker", "EventTarget"),
+            // `MessagePort` (JS-C204) — ctor posé avant
+            // `EventTarget` par `install_channel_ctor` ; la
+            // boucle le chaîne ici.
+            ("MessagePort", "EventTarget"),
         ] {
             if let Some(Value::Obj(cid)) = self.get_prop(g, child) {
                 if let Some(Value::Obj(cp)) = self.get_prop(cid, "prototype") {
@@ -2383,6 +2387,28 @@ impl Engine {
         let f = self.native_fn("SharedWorker", |e, t, a| {
             crate::misc_apis::shared_worker_ctor(e, t, a)
         });
+        if let Value::Obj(cid) = f {
+            // `SharedWorker.prototype` — spec WebIDL : les
+            // instruments patchent `X.prototype.addEventListener`
+            // (même bras ruxit que `Worker`/`EventSource`).
+            // `EventTarget` est déjà installé ici → chaînage
+            // direct.
+            let p = self.new_object();
+            for name in ["addEventListener", "removeEventListener", "dispatchEvent"] {
+                let namev = self.str_val(name);
+                let bm = self.bound_native("hostMethod", Self::host_method, vec![namev]);
+                self.set_own(p, name, bm, true);
+            }
+            if let Some(Value::Obj(etc)) = self.get_prop(g, "EventTarget") {
+                if let Some(pp @ Value::Obj(_)) = self.get_prop(etc, "prototype") {
+                    if let Some(o) = self.heap.obj_mut(p) {
+                        o.proto = pp;
+                    }
+                }
+            }
+            self.set_own(cid, "prototype", Value::Obj(p), false);
+            self.set_own(p, "constructor", f, false);
+        }
         self.set_own(g, "SharedWorker", f, false);
         // `NodeFilter` — constantes `SHOW_*`/`FILTER_*` lues
         // par `createTreeWalker(root, NodeFilter.SHOW_…)`.
@@ -2739,7 +2765,9 @@ impl Engine {
             "FileList",
             "MediaQueryList",
             "CustomElementRegistry",
-            "MessagePort",
+            // `MessagePort` — vrai ctor + proto WebIDL posé
+            // par `install_channel_ctor` (JS-C204) ; l'entrée
+            // générique l'écrasait avec un proto nu.
             "IntersectionObserverEntry",
             "ResizeObserverEntry",
             "DOMStringList",
