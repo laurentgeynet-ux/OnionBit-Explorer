@@ -317,6 +317,9 @@ plateforme net** (ops jscore Encrypt/Decrypt restent à livrer) ·
 - **Agent 153 (`[V10-main]`, OCCASION)** : autoscout/
   interencheres ~75-70 % consoles vides ; ecole-directe
   boot mort (`export outside module`) ; lacentrale 403.
+- **Agent 154 (`[V10-main]`, FEMININ)** : jdf/parents
+  ~75-70 % consoles vides, aufeminin ~75 % (marfeel) ;
+  ter.sncf 403 ; §B-14 +3.
 - **Agent 107 (`[V10-main]`, PRESSE2)** : franceinfo ~70 %
   (panneau compte → §B-17), deezer ~60 % ; §B-14 +3 ;
   watchdog nominal (pic 1,98 Go, seuil non approché).
