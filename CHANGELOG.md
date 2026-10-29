@@ -7,6 +7,30 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **JS-C184 — §B-14 : `*AttributeNS`
+  DOM + `FontFaceSet.add`**
+  (`explorer-jscore`) — boursorama
+  vol 104 : `getAttributeNS` et
+  `add` is not a function (on
+  HTMLElement/FontFaceSet). Fix :
+  (a) `getAttributeNS`/
+  `hasAttributeNS`/`removeAttributeNS`
+  /`setAttributeNS` implémentés —
+  l'arène ne trace pas les espaces
+  de noms : un attr `p:l` a pour
+  partie locale `l` (`ns` donné →
+  match local ; `ns` nul/undefined
+  /`""` → attr non préfixé, spec
+  no-namespace) — couvre les
+  helpers SVG `xlink:href` ;
+  (b) `FontFaceSet.add(face)`
+  retourne le set (spec chaînage)
+  et `has_method` déclare
+  `load`/`check`/`add` pour que
+  `typeof fonts.add === 'function'`
+  voie la surface. Verrous
+  `b14_probe.rs` ; suite jscore
+  complète verte (test262 inclus).
 - **JS-C183 — §B-57 bras 3 :
   `Reflect.ownKeys` rend les
   `Symbol`, sentinelle jamais

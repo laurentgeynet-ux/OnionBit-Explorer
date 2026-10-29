@@ -1489,6 +1489,29 @@ fn arg(args: &[Value], i: usize) -> Value {
     args.get(i).copied().unwrap_or(Value::Undefined)
 }
 
+/// `*AttributeNS` — l'arène ne trace pas les espaces de noms :
+/// un attr `p:l` a pour partie locale `l`. `ns` nul → seul un
+/// attr non préfixé matche (spec no-namespace) ; `ns` donné →
+/// partie locale après le dernier `:`.
+/// `*AttributeNS` — `ns` null/undefined/`""` compte comme
+/// no-namespace (spec DOM : chaîne vide ≡ null).
+fn attr_ns_is_null(e: &mut Engine, v: Value) -> JsResult<bool> {
+    Ok(match v {
+        Value::Null | Value::Undefined => true,
+        _ => e.to_js_string(v)?.is_empty(),
+    })
+}
+
+fn attr_ns_match(key: &str, ns_null: bool, local: &str) -> bool {
+    if ns_null {
+        return key.eq_ignore_ascii_case(local);
+    }
+    match key.rsplit_once(':') {
+        Some((_, l)) => l.eq_ignore_ascii_case(local),
+        None => false,
+    }
+}
+
 /// `collection.item(i)` — `null` hors-bornes (spec `NodeList`/
 /// `HTMLCollection` ; l'accès indexé `collection[i]` rend
 /// `undefined`, différence assumée).
@@ -4485,6 +4508,10 @@ const NODE_METHODS: &[&str] = &[
     "hasAttributes",
     "getAttributeNames",
     "removeAttribute",
+    "setAttributeNS",
+    "getAttributeNS",
+    "hasAttributeNS",
+    "removeAttributeNS",
     "toggleAttribute",
     "insertAdjacentElement",
     "insertAdjacentHTML",
@@ -6246,6 +6273,57 @@ impl Host for NodeHost {
             "removeAttribute" => {
                 let k = e.to_js_string(arg(args, 0))?;
                 self.dom.borrow_mut().remove_attr(node, &k);
+                Ok(Some(Value::Undefined))
+            }
+            // `*AttributeNS` (spec Element) — l'arène ne trace pas
+            // les espaces de noms : un attr `p:l` a pour partie
+            // locale `l`. `ns` nul/absent → seul un attr non
+            // préfixé matche (no-namespace). Requis par les
+            // helpers SVG (`xlink:href`) — §B-14 boursorama.
+            "getAttributeNS" => {
+                let ns_null = attr_ns_is_null(e, arg(args, 0))?;
+                let local = e.to_js_string(arg(args, 1))?;
+                let v = {
+                    let d = self.dom.borrow();
+                    d.nodes[node as usize]
+                        .attrs
+                        .iter()
+                        .find(|(k, _)| attr_ns_match(k, ns_null, &local))
+                        .map(|(_, v)| v.clone())
+                };
+                Ok(Some(match v {
+                    Some(v) => e.str_val(v),
+                    None => Value::Null,
+                }))
+            }
+            "hasAttributeNS" => {
+                let ns_null = attr_ns_is_null(e, arg(args, 0))?;
+                let local = e.to_js_string(arg(args, 1))?;
+                let has = self.dom.borrow().nodes[node as usize]
+                    .attrs
+                    .iter()
+                    .any(|(k, _)| attr_ns_match(k, ns_null, &local));
+                Ok(Some(Value::Bool(has)))
+            }
+            "removeAttributeNS" => {
+                let ns_null = attr_ns_is_null(e, arg(args, 0))?;
+                let local = e.to_js_string(arg(args, 1))?;
+                let key = self.dom.borrow().nodes[node as usize]
+                    .attrs
+                    .iter()
+                    .find(|(k, _)| attr_ns_match(k, ns_null, &local))
+                    .map(|(k, _)| k.clone());
+                if let Some(k) = key {
+                    self.dom.borrow_mut().remove_attr(node, &k);
+                }
+                Ok(Some(Value::Undefined))
+            }
+            "setAttributeNS" => {
+                // `qname` porte le préfixe (`xlink:href`) — posé tel
+                // quel, le namespace n'est pas tracé.
+                let q = e.to_js_string(arg(args, 1))?;
+                let v = e.to_js_string(arg(args, 2))?;
+                self.dom.borrow_mut().set_attr(node, &q, &v);
                 Ok(Some(Value::Undefined))
             }
             // Issue #16 — spec Element.toggleAttribute : `force`
@@ -9090,7 +9168,7 @@ impl Host for FontFaceSetHost {
     fn invoke(
         &self,
         e: &mut Engine,
-        _t: Value,
+        t: Value,
         name: &str,
         _args: &[Value],
     ) -> JsResult<Option<Value>> {
@@ -9103,9 +9181,17 @@ impl Host for FontFaceSetHost {
                 e.resolve_promise(pid, arr);
                 Ok(Some(Value::Obj(pid)))
             }
+            // `add(face)` — spec : retourne le set (chaînage).
+            // La fonte est acceptée sans pipeline de chargement —
+            // surface honnête (boursorama §B-14).
+            "add" => Ok(Some(t)),
             "check" => Ok(Some(Value::Bool(true))),
             _ => Ok(None),
         }
+    }
+
+    fn has_method(&self, name: &str) -> bool {
+        matches!(name, "load" | "check" | "add")
     }
 }
 
