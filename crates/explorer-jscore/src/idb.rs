@@ -289,9 +289,9 @@ pub(crate) struct IdbState {
     /// `swap_ctx_fields`) : la fuite cross-origine du
     /// registre unique est close — un `<iframe>` d'origine
     /// B a son propre registre (PR-10d).
-    pub(crate) regs: HashMap<ObjId, IdbRegistry>,
+    pub(crate) regs: HashMap<String, IdbRegistry>,
     /// Registres `caches` par realm — même isolation.
-    pub(crate) cache_regs: HashMap<ObjId, CacheRegistry>,
+    pub(crate) cache_regs: HashMap<String, CacheRegistry>,
     /// Requests `IDBRequest`/`IDBOpenDBRequest` en attente —
     /// FIFO, livrées au checkpoint.
     pub(crate) pending: VecDeque<ObjId>,
@@ -1119,13 +1119,44 @@ fn idb_val_decode(e: &mut Engine, v: Value, depth: u32) -> Value {
     }
 }
 
+/// Clé d'origine du realm courant — spec IDB : les bases
+/// sont **par origine** (partagées entre contextes de même
+/// origine, isolées sinon — PR-10d partage inter-onglets) :
+/// deux onglets ou frames de même origine voient le même
+/// `regs[origine]`. URL illisible/non-absolue ou origine
+/// opaque → clé propre au ctx (`opaque:{i}` — jamais
+/// partagée ni persistée).
+fn idb_key(e: &Engine) -> String {
+    let g = e.global;
+    let Some(i) = e.ctxs.iter().position(|c| c.global == Some(g)) else {
+        return format!("orphan:{g:?}");
+    };
+    crate::builtins::url::url_parse_absolute(&e.ctxs[i].url)
+        .map(|p| crate::builtins::url::url_origin(&p))
+        .filter(|o| o != "null")
+        .unwrap_or_else(|| format!("opaque:{i}"))
+}
+
+/// Clé d'origine du ctx `i` (drain/restore côté session —
+/// même règle que [`idb_key`]).
+fn idb_key_ctx(e: &Engine, i: usize) -> String {
+    e.ctxs
+        .get(i)
+        .and_then(|c| {
+            crate::builtins::url::url_parse_absolute(&c.url)
+                .map(|p| crate::builtins::url::url_origin(&p))
+                .filter(|o| o != "null")
+        })
+        .unwrap_or_else(|| format!("opaque:{i}"))
+}
+
 /// Registre ou création paresseuse (sans `install_idb`
 /// explicite — `install_dom` appelle `install_idb` avec un
 /// registre neuf si l'embedder n'en a pas injecté).
 fn reg(e: &mut Engine) -> IdbRegistry {
     e.idb
         .regs
-        .entry(e.global)
+        .entry(idb_key(e))
         .or_insert_with(|| Rc::new(RefCell::new(HashMap::new())))
         .clone()
 }
@@ -1134,7 +1165,7 @@ fn reg(e: &mut Engine) -> IdbRegistry {
 fn cache_reg(e: &mut Engine) -> CacheRegistry {
     e.idb
         .cache_regs
-        .entry(e.global)
+        .entry(idb_key(e))
         .or_insert_with(|| Rc::new(RefCell::new(HashMap::new())))
         .clone()
 }
@@ -3188,7 +3219,8 @@ impl Host for CacheHost {
 /// **remplace** le registre — c'est la voie d'injection.
 pub(crate) fn install_idb(e: &mut Engine, inject: Option<IdbRegistry>) {
     if let Some(r) = inject {
-        e.idb.regs.insert(e.global, r);
+        let k = idb_key(e);
+        e.idb.regs.insert(k, r);
     }
     // `indexedDB` factory — objet ordinaire + méthodes.
     let f = e.new_object();
@@ -3293,7 +3325,8 @@ fn idb_illegal_ctor(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> 
 /// global. Même modèle d'injection que `install_idb`.
 pub(crate) fn install_caches(e: &mut Engine, inject: Option<CacheRegistry>) {
     if let Some(r) = inject {
-        e.idb.cache_regs.insert(e.global, r);
+        let k = idb_key(e);
+        e.idb.cache_regs.insert(k, r);
     }
     let sp = cachestorage_proto(e);
     let cs = e.new_object();
@@ -3333,7 +3366,7 @@ impl Engine {
     /// `Map`/`TypedArray`/fonctions arrondis ou omis,
     /// dégradation documentée).
     pub fn idb_snapshot(&mut self) -> String {
-        self.idb_snapshot_reg(self.idb.regs.get(&self.global).cloned())
+        self.idb_snapshot_reg(self.idb.regs.get(&idb_key(self)).cloned())
     }
 
     /// Corps de [`Self::idb_snapshot`] sur un registre donné
@@ -3507,10 +3540,8 @@ impl Engine {
     /// même format que [`Self::idb_snapshot`]. `ctx` inconnu
     /// → `"{}"`.
     pub fn idb_snapshot_ctx(&mut self, ctx: u32) -> String {
-        let Some(g) = self.ctxs.get(ctx as usize).and_then(|c| c.global) else {
-            return "{}".to_string();
-        };
-        let reg = self.idb.regs.get(&g).cloned();
+        let key = idb_key_ctx(self, ctx as usize);
+        let reg = self.idb.regs.get(&key).cloned();
         self.idb_snapshot_reg(reg)
     }
 
@@ -3520,9 +3551,17 @@ impl Engine {
         if json.is_empty() {
             return;
         }
-        let Some(g) = self.ctxs.get(ctx as usize).and_then(|c| c.global) else {
+        let key = idb_key_ctx(self, ctx as usize);
+        let reg_existing = self.idb.regs.get(&key).cloned();
+        // Registre partagé par origine déjà vivant → le
+        // restore clobbererait les écritures d'un ctx voisin ;
+        // le snapshot n'est pris que sur un registre vide.
+        if reg_existing
+            .as_ref()
+            .is_some_and(|r| !r.borrow().is_empty())
+        {
             return;
-        };
+        }
         let s = self.str_val(json);
         let Ok(root) = crate::json::parse(self, s) else {
             return;
@@ -3536,7 +3575,7 @@ impl Engine {
         let reg = self
             .idb
             .regs
-            .entry(g)
+            .entry(key)
             .or_insert_with(|| std::rc::Rc::new(std::cell::RefCell::new(HashMap::new())))
             .clone();
         self.idb_restore_into(&reg, dbs);

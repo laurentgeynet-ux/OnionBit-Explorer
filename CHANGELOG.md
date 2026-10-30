@@ -7,6 +7,21 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **PR-10d — partage IDB
+  inter-onglets** (`explorer-jscore`)
+  — `regs`/`cache_regs` indexés
+  par **origine** (`idb_key` via
+  `url_origin` du ctx) plutôt que
+  par global de realm : deux
+  contextes de même origine
+  partagent leurs bases et caches
+  (spec) ; origines opaques →
+  clé par ctx (`opaque:{i}` —
+  isolées). `idb_restore_ctx`
+  ne clobber pas un registre
+  déjà vivant (restore seulement
+  sur vide).
+
 - **JS-C229 — `cookieStore`
   EventTarget** (`explorer-jscore`,
   §B-14 vol 344 kleinezeitung) —
