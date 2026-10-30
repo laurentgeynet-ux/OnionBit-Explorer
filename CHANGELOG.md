@@ -7,6 +7,17 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **Verrou profil partagé**
+  (`explorer-core`, daemon+FFI) —
+  `acquire_profile_lock` monté
+  dans le core : le daemon prend
+  aussi `state/explorer.lock` au
+  boot et refuse un second
+  accès au même profil (exit 2).
+  FFI et daemon ne peuvent plus
+  écrire le même `state/` en
+  concurrence.
+
 - **PR-10a — persistance
   `IndexedDB`** (`explorer-jscore`,
   `explorer-js`, `explorer-core`)

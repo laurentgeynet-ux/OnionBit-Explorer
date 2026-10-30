@@ -189,7 +189,7 @@ fn create_inner(profile_dir: Option<PathBuf>) -> *mut ExplorerHandle {
     };
     let fonts = DirFontSource::new(&default_fonts_dir());
     let dir = profile_dir.unwrap_or_else(explorer_core::JsonFileStore::default_dir);
-    let profile_lock = match acquire_profile_lock(&dir) {
+    let profile_lock = match explorer_core::acquire_profile_lock(&dir) {
         Ok(l) => l,
         Err(msg) => {
             set_err(msg);
@@ -209,32 +209,6 @@ fn create_inner(profile_dir: Option<PathBuf>) -> *mut ExplorerHandle {
         media_pending: String::new(),
         _profile_lock: profile_lock,
     }))
-}
-
-/// Verrou d'instance unique sur le profil (`<dir>/explorer.lock`)
-/// — deux processus sur le même profil = deux writers JSON
-/// (miroir de l'instance unique par `state_dir` du modèle
-/// portable). Le lock OS (`fslock`) est relâché à la mort du
-/// processus : pas de lockfile résiduel après crash.
-///
-/// `Err` = profil déjà utilisé (refus explicite, message pour
-/// l'appelant). `Ok(None)` = verrou impossible (FS sans locking)
-/// — best-effort, on ne bloque pas le démarrage.
-fn acquire_profile_lock(dir: &Path) -> Result<Option<fslock::LockFile>, String> {
-    if std::fs::create_dir_all(dir).is_err() {
-        return Ok(None);
-    }
-    let Ok(mut lock) = fslock::LockFile::open(&dir.join("explorer.lock")) else {
-        return Ok(None);
-    };
-    match lock.try_lock() {
-        Ok(true) => Ok(Some(lock)),
-        Ok(false) => Err(format!(
-            "profil déjà utilisé par une autre instance : {}",
-            dir.display()
-        )),
-        Err(_) => Ok(None),
-    }
 }
 
 /// Journal fichier `<profil>/logs/engine.log` — une fois par

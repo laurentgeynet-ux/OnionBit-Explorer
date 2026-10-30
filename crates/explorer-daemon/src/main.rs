@@ -444,6 +444,17 @@ async fn amain() {
     let profile_dir = cli
         .profile
         .unwrap_or_else(store::JsonFileStore::default_dir);
+    // Verrou d'instance unique sur le profil — partagé avec le
+    // mode FFI (`acquire_profile_lock`, même sémantique :
+    // deux processus sur le même state/ = deux writers JSON).
+    // Gardé en vie jusqu'à la fin du processus.
+    let _profile_lock = match explorer_core::acquire_profile_lock(&profile_dir) {
+        Ok(l) => l,
+        Err(msg) => {
+            eprintln!("explorer-daemon : {msg}");
+            std::process::exit(2);
+        }
+    };
     let store = Arc::new(store::JsonFileStore::open(&profile_dir));
     tracing::info!(dir = %profile_dir.display(), "profil chargé");
     // Jar partagé transport ↔ session (étape 51) :

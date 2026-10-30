@@ -706,3 +706,32 @@ fn idb_name(origin: &str) -> String {
         .collect();
     format!("idb-{slug}.json")
 }
+
+/// Verrou d'instance unique sur le profil (`<dir>/explorer.lock`)
+/// — deux processus sur le même profil = deux writers JSON en
+/// concurrence. Partagé par les hôtes (FFI `create_inner` et
+/// daemon boot) : le lock OS (`fslock`) est relâché à la mort
+/// du processus, pas de lockfile résiduel après crash.
+///
+/// `Ok(None)` = verrou impossible (FS sans locking) —
+/// best-effort, on ne bloque pas le démarrage.
+///
+/// # Errors
+/// `Err` = profil déjà utilisé par une autre instance
+/// (refus explicite, message pour l'appelant).
+pub fn acquire_profile_lock(dir: &Path) -> Result<Option<fslock::LockFile>, String> {
+    if std::fs::create_dir_all(dir).is_err() {
+        return Ok(None);
+    }
+    let Ok(mut lock) = fslock::LockFile::open(&dir.join("explorer.lock")) else {
+        return Ok(None);
+    };
+    match lock.try_lock() {
+        Ok(true) => Ok(Some(lock)),
+        Ok(false) => Err(format!(
+            "profil déjà utilisé par une autre instance : {}",
+            dir.display()
+        )),
+        Err(_) => Ok(None),
+    }
+}
