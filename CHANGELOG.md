@@ -630,6 +630,13 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   tirés (borne documentée). Verrou
   `window_navigation_is_event_target
   _and_sloppy_proof`.
+- **139k-bis — `MediaOffered` SSE
+  porte `loop`+`mseBuffers`** —
+  extension additive du variant
+  `CoreEvent::MediaOffered` et du
+  JSON `media_offered` (parité
+  `media_offer_json` — SSE et drain
+  FFI, `media_event_json`).
 - **139k — contrat `buffering` +
   `loop` + `bufferedMs` réels**
   (`explorer-core`, `app/`) —

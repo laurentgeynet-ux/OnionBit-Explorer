@@ -493,6 +493,8 @@ impl Session {
                 controls: s.controls,
                 autoplay: s.autoplay,
                 mse: s.mse,
+                looping: s.looping,
+                mse_buffers: s.mse_buffers.clone(),
             });
         }
     }
@@ -793,6 +795,8 @@ pub fn media_event_json(ev: &CoreEvent) -> Option<(&'static str, String)> {
             controls,
             autoplay,
             mse,
+            looping,
+            mse_buffers,
         } => (
             "media_offered",
             serde_json::json!({
@@ -804,6 +808,7 @@ pub fn media_event_json(ev: &CoreEvent) -> Option<(&'static str, String)> {
                 "rect": { "x": rect.x, "y": rect.y, "w": rect.w, "h": rect.h },
                 "url": url, "mime": mime, "mse": mse,
                 "controls": controls, "autoplay": autoplay,
+                "loop": looping, "mseBuffers": mse_buffers,
             })
             .to_string(),
         ),

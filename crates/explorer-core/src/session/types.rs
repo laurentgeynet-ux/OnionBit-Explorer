@@ -163,6 +163,13 @@ pub enum CoreEvent {
         /// au lieu du lecteur URL ; refuse le claim sinon
         /// (honnêteté : pas de faux succès MSE).
         mse: bool,
+        /// Attribut `loop` présent (139k — `<video loop>`,
+        /// parité avec `media_offer_json`).
+        looping: bool,
+        /// MIME des `SourceBuffer` (139k — parité
+        /// `media_offer_json` ; un rail `open_mse_multi`
+        /// par entrée, index `?buffer=N`). Vide hors MSE.
+        mse_buffers: Vec<String>,
     },
     /// Le `rect` d'une surface offerte a changé (relayout,
     /// resize). Coalescence à la cadence de peinture : au
