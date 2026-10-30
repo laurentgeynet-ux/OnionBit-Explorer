@@ -5209,48 +5209,11 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
     « Renvoyer le formulaire ? »
     côté app.
 
-### File « profil complet `state/` » (décidé 2026-10-30)
+### File « profil complet `state/` »
 
-Le bundle portable (Étape 167) rend le profil déplaçable ; cette
-file énumère ce qu'un vrai profil navigateur doit finir par
-contenir. Présents : `history`, `bookmarks`, `cookies` (CHIPS),
-`storage-*` (localStorage), `cache/`, `downloads/`,
-`ui_settings.json`, `logs/`. Règles transverses : **un JSON par
-domaine** (écriture atomique tmp+rename, pattern
-`JsonFileStore`), **rien d'absolu persisté** (chemins relatifs à
-`state/` — lettre de clé variable), **borné** (cap par store,
-comme l'historique à 5000), et tout accès fichier profil via le
-port `ProfileStore` — jamais `fs` direct — pour que
-`ProfileVault` (ADR-0028) puisse sceller sans refactor.
-
-- [ ] **P1 — petits stores** (un fichier chacun, pas de
-  sous-système) :
-  `downloads.json` (historique des téléchargements : URL,
-  chemin relatif, taille, date, état), `zoom.json` (origine →
-  niveau, le zoom UI existe — ADR-0021), `hsts.json` (capte
-  `Strict-Transport-Security`, upgrade http→https au fetch +
-  expiry — branchement `RedirectTransport`/policy), et
-  `session.json` (restauration onglets/URLs/scroll au boot,
-  touche `Session`). État fenêtre → dans `ui_settings.json`
-  (côté app).
-- [ ] **P2 — stores avec consommateur à créer** :
-  `autofill.json` (**chiffré** — détection `<form>` ADR-0014
-  existe, exige ProfileVault), `permissions.json` (notifications/
-  géoloc/cam — **store mort tant qu'aucune API ne le consomme**,
-  à faire avec le premier consommateur), `cert_decisions.json`
-  (exceptions certificats — rustls custom verifier, sensible
-  sécurité), `dns_cache.json` (borné, TTL respecté).
-- [ ] **P3 — étapes dédiées (ADR probable chacune)** :
-  `IndexedDB` (moteur clé-valeur transactionnel par origine —
-  base embarquée, pas un JSON), **mots de passe** (exige
-  ProfileVault + UI de remplissage), **Service Workers +
-  CacheStorage** (cycle de vie + interception fetch — réécrit
-  une partie du rail réseau), **extensions** (manifest,
-  sandboxing, surface API — produit à part), **PWA** (manifest,
-  icônes, standalone — après SW), **Widevine/licences**
-  (délégation CDM — ADR-0024/0027), **sync multi-device**
-  (protocole + serveur), **crash dumps** (minidump —
-  instrumentation plus que store).
+Déplacée dans **`docs/roadmap-profil.md`** (désignation `PR-N`,
+distincte des `Étape NN` de cette piste — pas de collision de
+numérotation).
 
 ## Piste JS (JS-C26+) — spécialiste `explorer-jscore`
 

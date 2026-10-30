@@ -10,6 +10,8 @@ est dans les roadmaps dédiées :
 - **`docs/roadmap-equipe-navigateur.md`** — plateforme produit :
   `net`, `core`, `api`, `ffi`, `app`, + surface JS
   (piste produit étapes 50+, piste JS JS-C26+).
+- **`docs/roadmap-profil.md`** — contenu du profil `state/`
+  (piste `PR-N`, équipe NAVIGATEUR).
 
 Ce fichier-ci est tenu par le lead : cases cochées historiques,
 état des phases, jalons. Une étape est cochée quand :
@@ -1052,7 +1054,8 @@ La phase 10 se poursuit désormais sur deux pistes disjointes
   56, UI v2 57, médias 58, release 0.2 étape 59) ; piste JS —
   J-A (MutationObserver C26, traverse net/storage C27, canvas
   C28, workers C29), J-B (couverture réactive C30–C35),
-  J-C (mesure/perf C36–C38).
+  J-C (mesure/perf C36–C38) ; piste profil `state/` →
+  `docs/roadmap-profil.md` (`PR-N`).
 
 ## Hors périmètre assumé (documenté, non planifié)
 
