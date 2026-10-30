@@ -144,7 +144,7 @@ mod tests {
     /// §B-59 — la concat `s = s + s` en boucle est la signature
     /// exacte du crash terrain (`allocation of 34359738368 bytes
     /// failed` = 2³⁵, demande unique après rampe ~1 Go/s) : elle
-    /// doit rendre un RangeError JS, jamais avorter le processus.
+    /// doit rendre un `RangeError` JS, jamais avorter le processus.
     #[test]
     fn b59_string_doubling_is_range_error() {
         let mut e = Engine::new();
@@ -154,7 +154,7 @@ mod tests {
     }
 
     /// §B-59 — sortie `replaceAll` bornée pendant la boucle :
-    /// beaucoup de matches × remplacement long → RangeError,
+    /// beaucoup de matches × remplacement long → `RangeError`,
     /// pas de croissance d'alloc non bornée.
     #[test]
     fn b59_replace_all_output_bounded() {

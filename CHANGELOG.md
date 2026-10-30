@@ -7,6 +7,44 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **JS-C214 — `RSASSA-PKCS1-v1_5`
+  + format `jwk`** (§B-14, wamiz
+  vol 165 — `importKey: unknown
+  algorithm` tuait le paywall
+  poool, SDK dominant de la presse
+  FR) : `KeyAlgo::RsaPkcs1{hash}`
+  posé côté moteur (`{name,hash}`
+  requis, nom tolérant `-`/`_`),
+  `ImportFormat::Jwk` extrait
+  `{kty:"RSA",n,e}` côté moteur
+  (base64url → `n‖e` empaqueté,
+  clé privée `d` rejetée
+  `DataError`, `jwk` hors RSA
+  `NotSupportedError`/`DataError`)
+  ; plateforme `explorer-net` :
+  forme canonique = `RSAPublicKey`
+  DER nu (ce que `RsaParameters`
+  de ring parse — pas le wrapper
+  SPKI), `jwk` reconstruit le DER
+  (`der_int`/`der_seq`/`der_len`
+  bornés), `spki` déballé par un
+  mini-parseur DER tolérant,
+  `verify` via
+  `RSA_PKCS1_2048_8192_SHA{256,
+  384,512}`, `sign` via
+  `RsaKeyPair::from_pkcs8`.
+  Verrous : fixture RSA-2048 réelle
+  .NET (`rsa_jwk_spki_canonical_
+  et_verify` — canonique octet-
+  exact, signature acceptée,
+  signature corrompue/message
+  altéré refusés en `false`),
+  dispatch moteur
+  `c214_rsa_jwk_importkey_dispatch`
+  (op `Jwk`/`RsaPkcs1`, `CryptoKey`
+  `public`, rejets honnêtes). À
+  re-voler (poool wamiz/paywalls).
+
 - **Étape 158 — §B-59 : borne
   ligne streamée `conn.buf`**
   (`explorer-net`) — cause racine

@@ -610,6 +610,9 @@ impl Session {
                                 explorer_js::KeyAlgo::EcdsaP256 => nc::KeyAlgo::EcdsaP256,
                                 explorer_js::KeyAlgo::Ed25519 => nc::KeyAlgo::Ed25519,
                                 explorer_js::KeyAlgo::AesGcm => nc::KeyAlgo::AesGcm,
+                                explorer_js::KeyAlgo::RsaPkcs1 { hash } => {
+                                    nc::KeyAlgo::RsaPkcs1(digest_of(hash))
+                                }
                             }
                         }
                         let result = match op {
@@ -621,6 +624,7 @@ impl Session {
                                     explorer_js::ImportFormat::Raw => nc::KeyFormat::Raw,
                                     explorer_js::ImportFormat::Pkcs8 => nc::KeyFormat::Pkcs8,
                                     explorer_js::ImportFormat::Spki => nc::KeyFormat::Spki,
+                                    explorer_js::ImportFormat::Jwk => nc::KeyFormat::Jwk,
                                 };
                                 nc::import_key(key_of(algo), f, &data)
                             }

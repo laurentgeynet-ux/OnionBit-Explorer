@@ -120,10 +120,17 @@ pub enum KeyAlgo {
     /// `AES-GCM` — `{name:"AES-GCM", length}` ; seal/open
     /// `ring::aead` côté plateforme (JS-C160, marinetraffic).
     AesGcm,
+    /// `RSASSA-PKCS1-v1_5` — `{name, hash}` (JS-C214,
+    /// poool/paywalls : vérification de licence signée).
+    RsaPkcs1 {
+        /// Hash du padding PKCS#1 v1.5.
+        hash: DigestAlgo,
+    },
 }
 
-/// Format d'`importKey` (JS-C93) — `jwk` n'entre pas dans
-/// cette tranche (rejet `NotSupportedError` côté moteur).
+/// Format d'`importKey` (JS-C93) — `jwk` couvre les clés
+/// publiques RSA à cette tranche (JS-C214) : le moteur
+/// décode `n`/`e` base64url et les transmet empaquetés.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ImportFormat {
     /// `raw` — octets bruts.
@@ -132,6 +139,8 @@ pub enum ImportFormat {
     Pkcs8,
     /// `spki` — clé publique `SubjectPublicKeyInfo`.
     Spki,
+    /// `jwk` — `{kty:"RSA", n, e}` (composants pré-découpés).
+    Jwk,
 }
 
 /// Algorithme `digest` normalisé (`WebCrypto` — les noms
@@ -359,42 +368,59 @@ fn key_algo(e: &mut Engine, v: Value) -> JsResult<Option<(KeyAlgo, &'static str)
         },
         _ => e.to_js_string(v)?,
     };
-    Ok(match name.to_ascii_uppercase().replace('-', "").as_str() {
-        "HMAC" => {
-            let hash = if let Value::Obj(id) = v {
-                let hv = e.get_prop(id, "hash").unwrap_or(Value::Undefined);
-                digest_algo(e, hv)?
-            } else {
-                None
-            };
-            hash.map(|h| (KeyAlgo::Hmac { hash: h }, "HMAC"))
-        }
-        "ECDSA" => {
-            let curve_ok = if let Value::Obj(id) = v {
-                e.get_prop(id, "namedCurve")
-                    .and_then(|c| e.heap_string_of(c))
-                    .is_some_and(|c| c.eq_ignore_ascii_case("P-256"))
-            } else {
-                false
-            };
-            curve_ok.then_some((KeyAlgo::EcdsaP256, "ECDSA"))
-        }
-        "ED25519" | "NODEED25519" => Some((KeyAlgo::Ed25519, "Ed25519")),
-        // `AES-GCM` — `length` accepté 128/256 (la plateforme
-        // sélectionne par taille de clé, `ring::aead`).
-        "AESGCM" => {
-            let len_ok = if let Value::Obj(id) = v {
-                match e.get_prop(id, "length") {
-                    Some(Value::Num(n)) => (128.0..=256.0).contains(&n) && n % 8.0 == 0.0,
-                    _ => true, // absent = toute taille acceptée par la plateforme
-                }
-            } else {
-                true
-            };
-            len_ok.then_some((KeyAlgo::AesGcm, "AES-GCM"))
-        }
-        _ => None,
-    })
+    // `-` et `_` ignorés (`RSASSA-PKCS1-v1_5` → `RSASSAPKCS1V15`).
+    Ok(
+        match name.to_ascii_uppercase().replace(['-', '_'], "").as_str() {
+            "HMAC" => {
+                let hash = if let Value::Obj(id) = v {
+                    let hv = e.get_prop(id, "hash").unwrap_or(Value::Undefined);
+                    digest_algo(e, hv)?
+                } else {
+                    None
+                };
+                hash.map(|h| (KeyAlgo::Hmac { hash: h }, "HMAC"))
+            }
+            "ECDSA" => {
+                let curve_ok = if let Value::Obj(id) = v {
+                    e.get_prop(id, "namedCurve")
+                        .and_then(|c| e.heap_string_of(c))
+                        .is_some_and(|c| c.eq_ignore_ascii_case("P-256"))
+                } else {
+                    false
+                };
+                curve_ok.then_some((KeyAlgo::EcdsaP256, "ECDSA"))
+            }
+            "ED25519" | "NODEED25519" => Some((KeyAlgo::Ed25519, "Ed25519")),
+            // `RSASSA-PKCS1-v1_5` (JS-C214) — hash requis à
+            // l'`importKey` (spec `RsaHashedImportParams`) ;
+            // aux ops `sign`/`verify` l'algo ne porte souvent que
+            // le nom → repli SHA-256 (le hash de la CLÉ gouverne
+            // de toute façon la signature réelle).
+            "RSASSAPKCS1V15" | "RSASSAPKCS1" => {
+                let hash = if let Value::Obj(id) = v {
+                    let hv = e.get_prop(id, "hash").unwrap_or(Value::Undefined);
+                    digest_algo(e, hv)?.unwrap_or(DigestAlgo::Sha256)
+                } else {
+                    DigestAlgo::Sha256
+                };
+                Some((KeyAlgo::RsaPkcs1 { hash }, "RSASSA-PKCS1-v1_5"))
+            }
+            // `AES-GCM` — `length` accepté 128/256 (la plateforme
+            // sélectionne par taille de clé, `ring::aead`).
+            "AESGCM" => {
+                let len_ok = if let Value::Obj(id) = v {
+                    match e.get_prop(id, "length") {
+                        Some(Value::Num(n)) => (128.0..=256.0).contains(&n) && n % 8.0 == 0.0,
+                        _ => true, // absent = toute taille acceptée par la plateforme
+                    }
+                } else {
+                    true
+                };
+                len_ok.then_some((KeyAlgo::AesGcm, "AES-GCM"))
+            }
+            _ => None,
+        },
+    )
 }
 
 /// `usages` de l'init — tableau de chaînes normalisé (spec :
@@ -421,6 +447,72 @@ fn key_usages(e: &mut Engine, v: Value) -> JsResult<Vec<String>> {
         }
     }
     Ok(out)
+}
+
+/// `keyData` JWK `{kty:"RSA", n, e}` → `len(n):u16be ‖
+/// n ‖ e` empaqueté pour la couture — la plateforme
+/// reconstruit le `SubjectPublicKeyInfo` DER (JS-C214).
+/// `None` → `DataError` côté appelant : objet non-RSA,
+/// clé privée (`d` présent — hors tranche), composant
+/// absent ou base64url invalide.
+fn pack_rsa_jwk(e: &mut Engine, v: Value) -> JsResult<Option<Vec<u8>>> {
+    let Value::Obj(id) = v else {
+        return Ok(None);
+    };
+    let kty = match e.get_prop(id, "kty") {
+        Some(x) => e.to_js_string(x)?,
+        None => String::new(),
+    };
+    if !kty.eq_ignore_ascii_case("rsa") || e.get_prop(id, "d").is_some() {
+        return Ok(None);
+    }
+    let (Some(nv), Some(ev)) = (e.get_prop(id, "n"), e.get_prop(id, "e")) else {
+        return Ok(None);
+    };
+    let Some(n) = b64url_decode(&e.to_js_string(nv)?) else {
+        return Ok(None);
+    };
+    let Some(x) = b64url_decode(&e.to_js_string(ev)?) else {
+        return Ok(None);
+    };
+    if n.is_empty() || n.len() > u16::MAX as usize {
+        return Ok(None);
+    }
+    let mut out = Vec::with_capacity(n.len() + x.len() + 2);
+    out.extend_from_slice(&(n.len() as u16).to_be_bytes());
+    out.extend_from_slice(&n);
+    out.extend_from_slice(&x);
+    Ok(Some(out))
+}
+
+/// Base64**url** (`-`/`_`, padding `=` toléré, pas
+/// d'espace) — alphabet JWK (RFC 7515 §2). `None` sur
+/// caractère hors alphabet.
+fn b64url_decode(s: &str) -> Option<Vec<u8>> {
+    let mut acc = 0u32;
+    let mut nbits = 0u32;
+    let mut out = Vec::with_capacity(s.len() * 3 / 4);
+    for &b in s.as_bytes() {
+        if b == b'=' {
+            break;
+        }
+        let v = match b {
+            b'A'..=b'Z' => b - b'A',
+            b'a'..=b'z' => b - b'a' + 26,
+            b'0'..=b'9' => b - b'0' + 52,
+            b'-' => 62,
+            b'_' => 63,
+            _ => return None,
+        };
+        acc = (acc << 6) | u32::from(v);
+        nbits += 6;
+        if nbits >= 8 {
+            nbits -= 8;
+            out.push((acc >> nbits) as u8);
+            acc &= (1 << nbits) - 1;
+        }
+    }
+    Some(out)
 }
 
 /// `CryptoKey` → octets + nom d'algo — `None` si l'objet
@@ -479,35 +571,44 @@ fn algo_name_of(e: &mut Engine, v: Value) -> JsResult<Option<String>> {
 /// (usage hors liste).
 fn subtle_import_key(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     let format_s = e.to_js_string(arg(args, 0))?;
-    let Some(data) = crate::typed_array::bytes_of_value(e, arg(args, 1)) else {
-        return Err(e.type_error("subtle.importKey: keyData must be a BufferSource"));
-    };
-    let algo_v = arg(args, 2);
-    let extractable = e.to_boolean(arg(args, 3));
-    let usages = key_usages(e, arg(args, 4))?;
-    let pid = e.new_promise();
     let format = match format_s.to_ascii_lowercase().as_str() {
-        "raw" => Some(ImportFormat::Raw),
-        "pkcs8" => Some(ImportFormat::Pkcs8),
-        "spki" => Some(ImportFormat::Spki),
-        "jwk" => {
-            let err = dom_exc(
-                e,
-                "NotSupportedError",
-                "subtle.importKey: jwk not supported",
-            );
-            e.reject_promise(pid, err);
-            return Ok(Value::Obj(pid));
-        }
+        "raw" => ImportFormat::Raw,
+        "pkcs8" => ImportFormat::Pkcs8,
+        "spki" => ImportFormat::Spki,
+        "jwk" => ImportFormat::Jwk,
         _ => {
+            let pid = e.new_promise();
             let err = dom_exc(e, "TypeError", "subtle.importKey: unknown format");
             e.reject_promise(pid, err);
             return Ok(Value::Obj(pid));
         }
     };
-    let Some(format) = format else {
-        return Ok(Value::Obj(pid));
+    // `keyData` : `BufferSource` sauf `jwk` — objet
+    // `{kty,n,e}` (JS-C214). JWK privé (`d` présent) rejeté
+    // honnêtement — seules les clés publiques RSA entrent.
+    let data = if format == ImportFormat::Jwk {
+        if let Some(d) = pack_rsa_jwk(e, arg(args, 1))? {
+            d
+        } else {
+            let pid = e.new_promise();
+            let err = dom_exc(
+                e,
+                "DataError",
+                "subtle.importKey: invalid jwk (RSA {kty,n,e} attendu)",
+            );
+            e.reject_promise(pid, err);
+            return Ok(Value::Obj(pid));
+        }
+    } else {
+        let Some(d) = crate::typed_array::bytes_of_value(e, arg(args, 1)) else {
+            return Err(e.type_error("subtle.importKey: keyData must be a BufferSource"));
+        };
+        d
     };
+    let algo_v = arg(args, 2);
+    let extractable = e.to_boolean(arg(args, 3));
+    let usages = key_usages(e, arg(args, 4))?;
+    let pid = e.new_promise();
     match key_algo(e, algo_v)? {
         None => {
             let err = dom_exc(
@@ -518,6 +619,18 @@ fn subtle_import_key(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Valu
             e.reject_promise(pid, err);
         }
         Some((algo, algo_name)) => {
+            // `jwk` n'entre que pour RSA publique (JS-C214) —
+            // les autres algos/locations sont rejetés
+            // `NotSupportedError` sans émission au transport.
+            if format == ImportFormat::Jwk && !matches!(algo, KeyAlgo::RsaPkcs1 { .. }) {
+                let err = dom_exc(
+                    e,
+                    "NotSupportedError",
+                    "subtle.importKey: jwk n'est supporté que pour RSASSA-PKCS1-v1_5",
+                );
+                e.reject_promise(pid, err);
+                return Ok(Value::Obj(pid));
+            }
             let key_type: &'static str = match format {
                 ImportFormat::Raw => {
                     if matches!(algo, KeyAlgo::Hmac { .. } | KeyAlgo::AesGcm) {
@@ -527,7 +640,7 @@ fn subtle_import_key(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Valu
                     }
                 }
                 ImportFormat::Pkcs8 => "private",
-                ImportFormat::Spki => "public",
+                ImportFormat::Spki | ImportFormat::Jwk => "public",
             };
             match e.crypto_transport.clone() {
                 None => {

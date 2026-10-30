@@ -174,7 +174,7 @@ impl SseParser {
                 // borné — une ligne qui ferait dépasser le budget
                 // est ignorée (événement tronqué plutôt que flux
                 // sans fin).
-                if self.data.len() + value.len() + 1 <= MAX_SSE_DATA_BYTES {
+                if self.data.len() + value.len() < MAX_SSE_DATA_BYTES {
                     self.data.push_str(value);
                     self.data.push('\n');
                 }
@@ -264,7 +264,7 @@ mod tests {
     #[test]
     fn unterminated_line_is_dropped() {
         let mut p = SseParser::new();
-        let flood = vec![b'x'; (MAX_SSE_LINE_BYTES + 1) as usize];
+        let flood = vec![b'x'; MAX_SSE_LINE_BYTES + 1];
         assert_eq!(p.feed(&flood).len(), 0);
         // Le parseur repart proprement au morceau suivant.
         let evs = p.feed(b"data: ok\n\n");
@@ -277,7 +277,7 @@ mod tests {
     #[test]
     fn giant_event_data_is_bounded() {
         let mut p = SseParser::new();
-        let big = format!("data: {}\n", "y".repeat((MAX_SSE_DATA_BYTES + 1024) as usize));
+        let big = format!("data: {}\n", "y".repeat(MAX_SSE_DATA_BYTES + 1024));
         let evs = p.feed(format!("{big}data: tail\n\n").as_bytes());
         assert_eq!(evs.len(), 1);
         assert_eq!(evs[0].data, "tail");

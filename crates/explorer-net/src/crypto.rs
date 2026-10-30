@@ -155,11 +155,17 @@ pub enum KeyAlgo {
     /// (tag GCM 128 bits collé au chiffré, convention
     /// `WebCrypto` `tagLength` par défaut).
     AesGcm,
+    /// `RSASSA-PKCS1-v1_5` (JS-C214, poool/paywalls) — hash
+    /// `{name:"SHA-*"}` obligatoire ; publique `spki`/`jwk`,
+    /// privée `pkcs8` ; ops `sign`/`verify` via
+    /// `ring::signature` RSA.
+    RsaPkcs1(CryptoAlgo),
 }
 
-/// Format d'`importKey` — `jwk` non supporté à cette
-/// tranche (le moteur le rejette `NotSupportedError` avant
-/// émission).
+/// Format d'`importKey` — `jwk` couvre `kty:"RSA"` public
+/// à cette tranche (JS-C214) ; le moteur a déjà extrait
+/// `n`/`e` et les paque `len(n):u16be ‖ n ‖ e` dans `bytes`
+/// (l'objet JSON JWK ne traverse pas la couture).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum KeyFormat {
     /// Octets bruts (`HMAC`, clés publiques SEC1).
@@ -168,6 +174,8 @@ pub enum KeyFormat {
     Pkcs8,
     /// `SubjectPublicKeyInfo` — clé publique.
     Spki,
+    /// `JSON Web Key` — matière prédécoupée côté moteur.
+    Jwk,
 }
 
 /// `subtle.importKey` — valide la matière et la rend
@@ -183,11 +191,21 @@ pub fn import_key(algo: KeyAlgo, format: KeyFormat, bytes: &[u8]) -> Result<Vec<
         (KeyAlgo::Hmac(_), KeyFormat::Pkcs8 | KeyFormat::Spki) => {
             Err("importKey: HMAC accepts raw only".to_string())
         }
+        // RSA `spki` (JS-C214) — déballé **avant** le
+        // passthrough générique : la forme canonique est
+        // `RSAPublicKey` nu, ce que `RsaParameters` de ring
+        // parse à `verify`.
+        (KeyAlgo::RsaPkcs1(_), KeyFormat::Spki) => unwrap_spki_rsapub(bytes),
         // `HMAC` accepte n'importe quelle longueur (spec —
         // la clé est normalisée à l'usage par le hash).
+        // RSA `pkcs8` — conservé tel quel pour `sign` (un
+        // `verify` sur clé privée est rejeté en amont par
+        // les usages WebCrypto).
         // `spki` ECDSA/Ed25519 : passthrough — la matière est
         // validée à l'usage (`verify`), pas de parse ASN.1 ici.
-        (KeyAlgo::Hmac(_), KeyFormat::Raw) | (_, KeyFormat::Spki) => Ok(bytes.to_vec()),
+        (KeyAlgo::Hmac(_), KeyFormat::Raw)
+        | (KeyAlgo::RsaPkcs1(_), KeyFormat::Pkcs8)
+        | (_, KeyFormat::Spki) => Ok(bytes.to_vec()),
         (KeyAlgo::AesGcm, KeyFormat::Raw) => match bytes.len() {
             16 | 32 => Ok(bytes.to_vec()),
             _ => Err("importKey: invalid raw key (AES-GCM veut 128/256 bits)".to_string()),
@@ -222,7 +240,131 @@ pub fn import_key(algo: KeyAlgo, format: KeyFormat, bytes: &[u8]) -> Result<Vec<
                 Err("importKey: invalid raw key (Ed25519)".to_string())
             }
         }
+        (KeyAlgo::RsaPkcs1(_), KeyFormat::Jwk) => rsa_pub_der_from_packed_jwk(bytes),
+        (KeyAlgo::RsaPkcs1(_), KeyFormat::Raw) => {
+            Err("importKey: RSASSA-PKCS1-v1_5 n'accepte que jwk/spki/pkcs8".to_string())
+        }
+        (_, KeyFormat::Jwk) => {
+            Err("importKey: jwk n'est supporté que pour RSA à cette tranche".to_string())
+        }
     }
+}
+
+// -- RSA : canonique `RSAPublicKey` (JS-C214) ------------------------------
+//
+// `RsaParameters` de ring parse à `verify` le seul
+// `RSAPublicKey ::= SEQUENCE { modulus INTEGER,
+// publicExponent INTEGER }` (RFC 8017) — pas l'enveloppe
+// `SubjectPublicKeyInfo` (RFC 5280). Forme canonique
+// retenue : le `RSAPublicKey` DER nu. `jwk` le reconstruit,
+// `spki` le déballe — parseur DER minimal et borné.
+
+/// `n‖e` JWK empaquetés côté moteur (`len(n):u16be ‖ n ‖ e`)
+/// → `RSAPublicKey` DER.
+fn rsa_pub_der_from_packed_jwk(bytes: &[u8]) -> Result<Vec<u8>, String> {
+    let n_len = u16::from_be_bytes([
+        *bytes.first().ok_or("jwk: trame vide")?,
+        *bytes.get(1).ok_or("jwk: trame tronquée")?,
+    ]) as usize;
+    let n = bytes.get(2..2 + n_len).ok_or("jwk: modulus tronqué")?;
+    let e = bytes.get(2 + n_len..).ok_or("jwk: exposant absent")?;
+    if n.is_empty() || e.is_empty() || n.len() > 1024 || e.len() > 8 {
+        // Borne : modulus ≤ 8192 bits (ring) ; `e` tient dans
+        // 64 bits en pratique (3/65537 couvre le web).
+        return Err("jwk: composants RSA hors bornes".to_string());
+    }
+    let mut out = Vec::with_capacity(n.len() + e.len() + 8);
+    der_seq(&[der_int(n), der_int(e)].concat(), &mut out);
+    Ok(out)
+}
+
+/// `SubjectPublicKeyInfo` DER → contenu du `BIT STRING`
+/// (`RSAPublicKey`). Tolérant au parse minimal : enveloppe
+/// `SEQ{ SEQ{…}, BITSTRING{…} }`, longueurs courtes/longues,
+/// rien d'autre — pas de validation d'OID (un `rsaEncryption`
+/// ou paramètres absents passent ; la clé est revérifiée à
+/// l'usage par `RsaParameters`).
+fn unwrap_spki_rsapub(spki: &[u8]) -> Result<Vec<u8>, String> {
+    fn bad() -> String {
+        "importKey: invalid spki (RSA)".to_string()
+    }
+    let (tag, outer, rest) = der_tlv(spki).ok_or_else(bad)?;
+    if tag != 0x30 || !rest.is_empty() {
+        return Err(bad());
+    }
+    let (tag, _alg, rest2) = der_tlv(outer).ok_or_else(bad)?;
+    if tag != 0x30 {
+        return Err(bad());
+    }
+    let (tag, bitstr, _r) = der_tlv(rest2).ok_or_else(bad)?;
+    if tag != 0x03 || bitstr.first() != Some(&0x00) {
+        return Err(bad());
+    }
+    let inner = bitstr.get(1..).ok_or_else(bad)?;
+    Ok(inner.to_vec())
+}
+
+/// Un TLV DER → `(tag, contenu, reste)` ; `None` sur trame
+/// tronquée ou longueur malformée.
+fn der_tlv(d: &[u8]) -> Option<(u8, &[u8], &[u8])> {
+    let tag = *d.first()?;
+    let b1 = usize::from(*d.get(1)?);
+    let (hlen, len) = if b1 & 0x80 == 0 {
+        (2usize, b1)
+    } else {
+        let n = b1 & 0x7f;
+        if n == 0 || n > 3 {
+            return None; // forme indéfinie / >16 Mio : hors propos
+        }
+        let mut v = 0usize;
+        for i in 0..n {
+            v = (v << 8) | usize::from(*d.get(2 + i)?);
+        }
+        (2 + n, v)
+    };
+    let end = hlen.checked_add(len)?;
+    Some((tag, d.get(hlen..end)?, d.get(end..)?))
+}
+
+/// Écrit `SEQUENCE { content }` en DER dans `out`.
+fn der_seq(content: &[u8], out: &mut Vec<u8>) {
+    out.push(0x30);
+    der_len(content.len(), out);
+    out.extend_from_slice(content);
+}
+
+/// Longueur DER (forme courte < 128, longue sinon — un
+/// modulus 2048 bits produit ~256 octets → 2 octets de
+/// longueur, jamais plus ici).
+fn der_len(len: usize, out: &mut Vec<u8>) {
+    // `len < 0x80` tient dans `u8`, `len ≤ 0xffff` dans
+    // `u16` — les branches garantissent le domaine.
+    #[allow(clippy::cast_possible_truncation)]
+    if len < 0x80 {
+        out.push(len as u8);
+    } else if len <= 0xffff {
+        out.push(0x82);
+        out.extend_from_slice(&(len as u16).to_be_bytes());
+    } else {
+        out.push(0x83);
+        out.extend_from_slice(&len.to_be_bytes()[5..]);
+    }
+}
+
+/// `INTEGER` DER — l'entier non signé est préfixé d'un
+/// octet `0x00` quand son bit de poids fort est levé
+/// (sinon lu négatif — un modulus RSA lève presque
+/// toujours le sien).
+fn der_int(be: &[u8]) -> Vec<u8> {
+    let first_nonzero = be.iter().position(|&b| b != 0).unwrap_or(be.len());
+    let v = &be[first_nonzero.min(be.len().saturating_sub(1))..];
+    let pad = usize::from(v.first().is_some_and(|b| b & 0x80 != 0));
+    let mut out = Vec::with_capacity(v.len() + 3);
+    out.push(0x02);
+    der_len(v.len() + pad, &mut out);
+    out.extend(std::iter::repeat_n(0, pad));
+    out.extend_from_slice(v);
+    out
 }
 
 /// `subtle.encrypt` AES-GCM — `nonce` 96 bits, `aad` libre ;
@@ -318,6 +460,19 @@ pub fn sign(algo: KeyAlgo, key: &[u8], data: &[u8]) -> Result<Vec<u8>, String> {
             .map(|kp| kp.sign(data).as_ref().to_vec())
             .map_err(|_| "sign: Ed25519 failed".to_string()),
         KeyAlgo::AesGcm => Err("sign: AES-GCM ne signe pas (encrypt/decrypt)".to_string()),
+        KeyAlgo::RsaPkcs1(hash) => {
+            let kp = ring::signature::RsaKeyPair::from_pkcs8(key)
+                .map_err(|_| "sign: invalid pkcs8 (RSA)".to_string())?;
+            let pad = match hash {
+                CryptoAlgo::Sha256 => &ring::signature::RSA_PKCS1_SHA256,
+                CryptoAlgo::Sha384 => &ring::signature::RSA_PKCS1_SHA384,
+                CryptoAlgo::Sha512 => &ring::signature::RSA_PKCS1_SHA512,
+            };
+            let mut sig = vec![0u8; kp.public().modulus_len()];
+            kp.sign(pad, &ring::rand::SystemRandom::new(), data, &mut sig)
+                .map(|()| sig)
+                .map_err(|_| "sign: RSASSA-PKCS1-v1_5 failed".to_string())
+        }
     }
 }
 
@@ -350,6 +505,16 @@ pub fn verify(algo: KeyAlgo, key: &[u8], sig: &[u8], data: &[u8]) -> Result<Vec<
             .verify(data, sig)
             .is_ok(),
         KeyAlgo::AesGcm => return Err("verify: AES-GCM ne signe pas".to_string()),
+        KeyAlgo::RsaPkcs1(hash) => {
+            let params = match hash {
+                CryptoAlgo::Sha256 => &ring::signature::RSA_PKCS1_2048_8192_SHA256,
+                CryptoAlgo::Sha384 => &ring::signature::RSA_PKCS1_2048_8192_SHA384,
+                CryptoAlgo::Sha512 => &ring::signature::RSA_PKCS1_2048_8192_SHA512,
+            };
+            ring::signature::UnparsedPublicKey::new(params, key)
+                .verify(data, sig)
+                .is_ok()
+        }
     };
     // Booléen encodé sur un octet — le moteur le décode en
     // `true`/`false` à la livraison (la promesse `verify`
@@ -469,5 +634,128 @@ mod tests {
         assert!(import_key(KeyAlgo::AesGcm, KeyFormat::Raw, &[0u8; 16]).is_ok());
         assert!(import_key(KeyAlgo::AesGcm, KeyFormat::Raw, &[0u8; 24]).is_err());
         assert!(import_key(KeyAlgo::AesGcm, KeyFormat::Pkcs8, &[0u8; 16]).is_err());
+    }
+
+    /// RSA-PKCS1 (JS-C214) — fixture réelle générée par
+    /// `System.Security.Cryptography.RSA` (2048, SHA-256) :
+    /// le JWK empaqueté doit rendre le SPKI **octet-exact**
+    /// et `verify` accepter la vraie signature, refuser une
+    /// signature corrompue ou un message altéré.
+    #[test]
+    #[allow(clippy::too_many_lines, clippy::cast_possible_truncation)]
+    fn rsa_jwk_spki_canonical_et_verify() {
+        fn b64url(s: &str) -> Vec<u8> {
+            let mut acc = 0u32;
+            let mut nb = 0u32;
+            let mut out = Vec::new();
+            for &b in s.as_bytes() {
+                let v = match b {
+                    b'A'..=b'Z' => b - b'A',
+                    b'a'..=b'z' => b - b'a' + 26,
+                    b'0'..=b'9' => b - b'0' + 52,
+                    b'-' => 62,
+                    b'_' => 63,
+                    _ => panic!("hors alphabet"),
+                };
+                acc = (acc << 6) | u32::from(v);
+                nb += 6;
+                if nb >= 8 {
+                    nb -= 8;
+                    out.push((acc >> nb) as u8);
+                    acc &= (1 << nb) - 1;
+                }
+            }
+            out
+        }
+        fn unhex(s: &str) -> Vec<u8> {
+            (0..s.len())
+                .step_by(2)
+                .map(|i| u8::from_str_radix(&s[i..i + 2], 16).expect("hex"))
+                .collect()
+        }
+        let n = b64url(
+            "2iewfMZgOuTGqnPqzW6Lzh5iJyh056_kRbdlp-I8MdirTxmOlGKAhlDm3lsr4wENIA7388\
+             yfE7kYpJ32eScorS11lIowIIfdosDHpajaJkqsopENr6tffDJAegYI8gwBqreHnAkDGhpucRW\
+             vto-5Ig2V9jKafiMeKpNGR0Cf9XhBj52nFJ_wRz-iNkvhqLPIU09abfjGUPvVb1BaISGA7hJB\
+             u97Bj1R7q1Kx5WQRpiR7Io2YW1aa_d4xsZhnuh783MC7WJKGNLHgjFvOm_Rjy35VbzMCdasp4\
+             yBKUYQuGf2SzM6WPYJnDGPso1Eqxo7Rw7nFqz8SwFzr-wY1nLaHDQ",
+        );
+        let e = b64url("AQAB");
+        assert_eq!(n.len(), 256);
+        let mut packed = Vec::new();
+        packed.extend_from_slice(&(n.len() as u16).to_be_bytes());
+        packed.extend_from_slice(&n);
+        packed.extend_from_slice(&e);
+        let key = import_key(
+            KeyAlgo::RsaPkcs1(CryptoAlgo::Sha256),
+            KeyFormat::Jwk,
+            &packed,
+        )
+        .expect("import jwk");
+        // Canonique = `RSAPublicKey` DER nu (= le contenu du
+        // BIT STRING du SPKI .NET — ce que `RsaParameters`
+        // de ring parse à `verify`).
+        let rsapub_want = unhex(
+            "3082010A0282010100DA27B07CC6603AE4C6AA73EACD6E8BCE1E62272874E7AFE445B765A7E23C31\
+             D8AB4F198E9462808650E6DE5B2BE3010D200EF7F3CC9F13B918A49DF6792728AD2D75948A302087DD\
+             A2C0C7A5A8DA264AACA2910DAFAB5F7C32407A0608F20C01AAB7879C09031A1A6E7115AFB68FB9220D\
+             95F6329A7E231E2A934647409FF578418F9DA7149FF0473FA2364BE1A8B3C8534F5A6DF8C650FBD56F\
+             505A212180EE1241BBDEC18F547BAB52B1E56411A6247B228D985B569AFDDE31B19867BA1EFCDCC0BB\
+             58928634B1E08C5BCE9BF463CB7E556F330275AB29E3204A51842E19FD92CCCE963D82670C63ECA351\
+             2AC68ED1C3B9C5AB3F12C05CEBFB06359CB6870D0203010001",
+        );
+        assert_eq!(key, rsapub_want, "RSAPublicKey DER canonique");
+        // `spki` → même canonique (enveloppe déballée).
+        let spki_dotnet = unhex(
+            "30820122300D06092A864886F70D01010105000382010F003082010A0282010100DA27B07CC660\
+             3AE4C6AA73EACD6E8BCE1E62272874E7AFE445B765A7E23C31D8AB4F198E9462808650E6DE5B2BE3\
+             010D200EF7F3CC9F13B918A49DF6792728AD2D75948A302087DDA2C0C7A5A8DA264AACA2910DAFAB\
+             5F7C32407A0608F20C01AAB7879C09031A1A6E7115AFB68FB9220D95F6329A7E231E2A934647409F\
+             F578418F9DA7149FF0473FA2364BE1A8B3C8534F5A6DF8C650FBD56F505A212180EE1241BBDEC18F\
+             547BAB52B1E56411A6247B228D985B569AFDDE31B19867BA1EFCDCC0BB58928634B1E08C5BCE9BF4\
+             63CB7E556F330275AB29E3204A51842E19FD92CCCE963D82670C63ECA3512AC68ED1C3B9C5AB3F12\
+             C05CEBFB06359CB6870D0203010001",
+        );
+        let key2 = import_key(
+            KeyAlgo::RsaPkcs1(CryptoAlgo::Sha256),
+            KeyFormat::Spki,
+            &spki_dotnet,
+        )
+        .expect("import spki");
+        assert_eq!(key2, rsapub_want, "spki déballé → RSAPublicKey");
+        let sig = unhex(
+            "2D30623EC7B23DC6A6C97D8269B08C8AC7E000CC0D58B34D5D71701C9AC86198C07C66B2FF727B\
+             FC96321B8DC29AA7700D9E3929C44A1B293ED1E32D5EF0F4D7A5FF5AA4AC94385FDBAA5DF02040AE\
+             D385E2F2A85212A32ED444ACEEFEEE264E6B6439741F4993166A65DD83BA99B90E47D8AAEEBD4AFE\
+             1B2FACDD42DC3AD3E0021D6F119CEC7B920BC5CA96DC371D05EE08E4A22645027A94F9B17820B467\
+             0A48B3227A6AA1B4B7EAAD3089A166AA7AC86A5AD7A1BC1959CF4FF653B6C4268C5942748A402975\
+             02346A278CDCBF34AB9A0C5B27D40D83BF5D4B112DEEEF5DE45FFC56BA77851C812B6E4FE799D21E\
+             5C8B8F011BB68DAC08BBE54D0443572AFC",
+        );
+        let msg = b"poool-license-test";
+        assert_eq!(
+            verify(KeyAlgo::RsaPkcs1(CryptoAlgo::Sha256), &key, &sig, msg).expect("verify"),
+            vec![1]
+        );
+        // Signature corrompue → `false`, jamais d'erreur.
+        let mut bad = sig.clone();
+        bad[10] ^= 1;
+        assert_eq!(
+            verify(KeyAlgo::RsaPkcs1(CryptoAlgo::Sha256), &key, &bad, msg).expect("verify bad"),
+            vec![0]
+        );
+        assert_eq!(
+            verify(KeyAlgo::RsaPkcs1(CryptoAlgo::Sha256), &key, &sig, b"autre").expect("verify"),
+            vec![0]
+        );
+        // Rejets honnêtes : trame tronquée, modulus borné.
+        assert!(import_key(
+            KeyAlgo::RsaPkcs1(CryptoAlgo::Sha256),
+            KeyFormat::Jwk,
+            &[0, 4, 1]
+        )
+        .is_err());
+        assert!(import_key(KeyAlgo::RsaPkcs1(CryptoAlgo::Sha256), KeyFormat::Raw, &n).is_err());
+        assert!(import_key(KeyAlgo::Hmac(CryptoAlgo::Sha256), KeyFormat::Jwk, &packed).is_err());
     }
 }

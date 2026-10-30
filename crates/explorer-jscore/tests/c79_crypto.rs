@@ -359,3 +359,73 @@ fn c160_aes_gcm_op_dispatch() {
     );
     e.run_microtasks().expect("pump");
 }
+
+/// JS-C214 — `importKey('jwk', {kty:'RSA',n,e},
+/// {name:'RSASSA-PKCS1-v1_5',hash:{name:'SHA-256'}})` émet
+/// `ImportKey{Jwk, RsaPkcs1{Sha256}}` avec `n‖e` empaquetés
+/// (`len(n):u16be‖n‖e`), résout un `CryptoKey` `public`
+/// nommé `RSASSA-PKCS1-v1_5` ; `jwk` hors RSA et clé privée
+/// (`d`) rejetés honnêtement (poool/paywalls wamiz vol 165).
+#[test]
+fn c214_rsa_jwk_importkey_dispatch() {
+    let (mut e, t) = engine();
+    let n_b64 = "AQABAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB\
+                 AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE";
+    eval(
+        &mut e,
+        &format!(
+            "crypto.subtle.importKey('jwk',{{kty:'RSA',n:'{n_b64}',e:'AQAB'}},\
+                 {{name:'RSASSA-PKCS1-v1_5',hash:{{name:'SHA-256'}}}},\
+                 false,['verify']).then(k=>{{globalThis.__k=k}});"
+        ),
+    );
+    {
+        let reqs = t.requests.borrow();
+        let CryptoOp::ImportKey { format, algo } = reqs[0].1.op else {
+            panic!("importKey op attendu");
+        };
+        assert_eq!(format, ImportFormat::Jwk);
+        assert!(matches!(
+            algo,
+            KeyAlgo::RsaPkcs1 {
+                hash: DigestAlgo::Sha256
+            }
+        ));
+        let data = &reqs[0].1.data;
+        let n_len = u16::from_be_bytes([data[0], data[1]]) as usize;
+        assert!(n_len > 0 && data.len() == 2 + n_len + 3, "packed n‖e");
+        assert_eq!(&data[2 + n_len..], &[1, 0, 1], "exposant 65537");
+    }
+    let h = t.requests.borrow()[0].0;
+    e.deliver_crypto_response(CryptoResponse {
+        handle: h,
+        result: Ok(vec![0x30, 8]),
+    })
+    .expect("deliver importKey");
+    assert_eq!(describe(&mut e, "__k.algorithm.name"), "RSASSA-PKCS1-v1_5");
+    assert_eq!(describe(&mut e, "__k.type"), "public");
+    assert_eq!(describe(&mut e, "__k.extractable"), "false");
+    // `jwk` hors RSA (kty EC) → DataError ; `d` privé → DataError.
+    eval(
+        &mut e,
+        "globalThis.__r='';globalThis.__p='';\
+         crypto.subtle.importKey('jwk',{kty:'EC',crv:'P-256',x:'a',y:'b'},\
+             {name:'RSASSA-PKCS1-v1_5',hash:'SHA-256'},false,['verify'])\
+             .catch(x=>{__r=x.name});\
+         crypto.subtle.importKey('jwk',{kty:'RSA',n:'AQ',e:'AQAB',d:'x'},\
+             {name:'RSASSA-PKCS1-v1_5',hash:'SHA-256'},false,['verify'])\
+             .catch(x=>{__p=x.name});",
+    );
+    e.run_microtasks().expect("pump");
+    assert_eq!(describe(&mut e, "__r"), "DataError");
+    assert_eq!(describe(&mut e, "__p"), "DataError");
+    // `jwk` pour un algo non-RSA → NotSupportedError.
+    eval(
+        &mut e,
+        "globalThis.__n='';\
+         crypto.subtle.importKey('jwk',{kty:'oct',k:'AA'},'HMAC',false,['sign'])\
+             .catch(x=>{__n=x.name});",
+    );
+    e.run_microtasks().expect("pump");
+    assert_eq!(describe(&mut e, "__n"), "DataError");
+}
