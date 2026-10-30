@@ -1874,6 +1874,24 @@ impl Engine {
         let tag = self.str_val("Clipboard");
         self.set_own(clip, crate::interp::SYM_TO_STRING_TAG, tag, false);
         self.set_own(nav, "clipboard", Value::Obj(clip), true);
+        // `navigator.serviceWorker` (§B-14 vol 323, bras
+        // `register`) — surface spec `ServiceWorkerContainer` :
+        // présence honnête (navigateur moderne), mais pas de
+        // runtime SW — `register` rejette `NotSupportedError`
+        // (le `.catch` du site tourne, jamais de faux succès) ;
+        // `controller`=null, `ready` reste pending (spec : sans
+        // registration active, elle ne résout jamais),
+        // `getRegistration`→`undefined`, `getRegistrations`→`[]`.
+        let sw = self.new_object();
+        self.add_method(sw, "register", sw_register);
+        self.add_method(sw, "getRegistration", sw_get_registration);
+        self.add_method(sw, "getRegistrations", sw_get_registrations);
+        self.set_own(sw, "controller", Value::Null, true);
+        let ready = self.new_promise(); // jamais résolue — spec.
+        self.set_own(sw, "ready", Value::Obj(ready), true);
+        let tag = self.str_val("ServiceWorkerContainer");
+        self.set_own(sw, crate::interp::SYM_TO_STRING_TAG, tag, false);
+        self.set_own(nav, "serviceWorker", Value::Obj(sw), true);
         // Props triviales honnêtes (JS-C157) — lues par les
         // CMP/feature-detects : `undefined` cassait la lecture
         // (`navigator.onLine`, `hardwareConcurrency`…).
@@ -11731,6 +11749,36 @@ fn creds_unsupported(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value>
     let m = e.str_val("credentials: no platform authenticator");
     e.set_own(o, "message", m, true);
     e.reject_promise(pid, Value::Obj(o));
+    Ok(Value::Obj(pid))
+}
+
+/// `serviceWorker.register` (§B-14 vol 323) — pas de runtime
+/// SW : `NotSupportedError` rejetée — le `.catch` du site
+/// tourne, jamais de faux succès.
+fn sw_register(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
+    let pid = e.new_promise();
+    let o = e.new_object();
+    let n = e.str_val("NotSupportedError");
+    e.set_own(o, "name", n, true);
+    let m = e.str_val("serviceWorker: no SW runtime");
+    e.set_own(o, "message", m, true);
+    e.reject_promise(pid, Value::Obj(o));
+    Ok(Value::Obj(pid))
+}
+
+/// `serviceWorker.getRegistration` — spec : `undefined` quand
+/// aucune registration — promesse résolue `undefined`.
+fn sw_get_registration(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
+    let pid = e.new_promise();
+    e.resolve_promise(pid, Value::Undefined);
+    Ok(Value::Obj(pid))
+}
+
+/// `serviceWorker.getRegistrations` — `[]` honnête.
+fn sw_get_registrations(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
+    let pid = e.new_promise();
+    let arr = e.new_array(Vec::new());
+    e.resolve_promise(pid, arr);
     Ok(Value::Obj(pid))
 }
 

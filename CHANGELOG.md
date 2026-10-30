@@ -7,6 +7,54 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **JS-C224 — `navigator.
+  serviceWorker` surface
+  honnête** (`explorer-jscore`,
+  §B-14 vol 323 — bras
+  `register`) —
+  `ServiceWorkerContainer` posé :
+  `register` rejette
+  `NotSupportedError` (pas de
+  runtime SW — le `.catch`
+  tourne, jamais de faux
+  succès), `controller` null,
+  `ready` pending spec (sans
+  registration active elle ne
+  résout jamais),
+  `getRegistration`→`undefined`,
+  `getRegistrations`→`[]`.
+  Verrou
+  `navigator_service_worker_honest_stub`.
+
+- **Étape 168 — `mem_diag`/`mem_report`
+  : réservoirs de livrées JS**
+  (`explorer-core`, §B-59) —
+  `MemReport` mesure désormais les
+  tampons `js_pending_*` en octets
+  exacts : corps réseau
+  (`pending_net_bytes`), scripts
+  dynamiques + graphes de modules
+  (`pending_dyn_bytes`), charges
+  `crypto.subtle`/`EventSource`/
+  `WebSocket` (`pending_aux_bytes`),
+  textes CSS `linked_sheets`/
+  `adopted_sheets` (`sheets_bytes`)
+  et corps POST d'historique
+  (`hist_body_bytes`) ; comptes
+  `pending_events`, `hist_entries`,
+  `prev_styles`, `media_surfaces` ;
+  surfaces `frame_bitmaps` jointes
+  au `images_bytes` dé-dupliqué.
+  La ligne `mem_diag` du log pompe
+  aligne les mêmes champs
+  (`dynpend_b`, `auxpend_b`,
+  `sheets_b`, `frames_b`, `media_n`,
+  `hist`, `styles`). Lecture au
+  prochain vol §B-59 : `total_bytes`
+  plat pendant que le RSS grimpe =
+  fuite native hors session ; un
+  réservoir `pending_*` qui grimpe =
+  bras nommé.
 - **JS-C223 — `SVGGeometryElement`
   géométrie réelle**
   (`explorer-jscore`, §B-14

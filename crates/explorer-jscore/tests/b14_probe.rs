@@ -1606,3 +1606,47 @@ fn svg_geometry_total_length_and_point_at() {
         "undefined"
     );
 }
+
+/// §B-14 vol 323 — `navigator.serviceWorker` : surface
+/// `ServiceWorkerContainer` honnête — `register` rejette
+/// `NotSupportedError` (jamais de faux succès), `ready`
+/// pending spec, `controller` null, `getRegistrations` → [].
+#[test]
+fn navigator_service_worker_honest_stub() {
+    let mut e = engine();
+    assert_eq!(ev(&mut e, "typeof navigator.serviceWorker"), "object");
+    assert_eq!(
+        ev(
+            &mut e,
+            "typeof navigator.serviceWorker.register + ':' \
+             + navigator.serviceWorker.controller"
+        ),
+        "function:null"
+    );
+    // register() → promesse rejetée NotSupportedError
+    assert_eq!(
+        ev(
+            &mut e,
+            "globalThis.__r='p';\
+             navigator.serviceWorker.register('/sw.js')\
+               .then(()=>{__r='resolved'})\
+               .catch(x=>{__r=x.name});\
+             __r"
+        ),
+        "p"
+    );
+    let _ = e.eval("0"); // drain microtasks
+    assert_eq!(ev(&mut e, "globalThis.__r"), "NotSupportedError");
+    // getRegistration → undefined résolu ; getRegistrations → []
+    assert_eq!(
+        ev(
+            &mut e,
+            "globalThis.__r='p';\
+             navigator.serviceWorker.getRegistrations()\
+               .then(v=>{__r='len:'+v.length});__r"
+        ),
+        "p"
+    );
+    let _ = e.eval("0");
+    assert_eq!(ev(&mut e, "globalThis.__r"), "len:0");
+}
