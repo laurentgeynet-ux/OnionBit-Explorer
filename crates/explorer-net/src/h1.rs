@@ -458,6 +458,7 @@ impl H1Client {
                 io_timeout: self.cfg.io_timeout,
                 target: target_of(req),
                 max_body: self.cfg.max_body_bytes,
+                max_head: self.cfg.max_head_bytes,
                 deadline: std::time::Instant::now() + self.cfg.request_timeout,
             },
             method: req.method,
@@ -730,7 +731,9 @@ impl H1Client {
                 16,
             )
             .map_err(|_| NetError::InvalidChunked("taille hex illisible"))?;
-            if body.len() + size > self.cfg.max_body_bytes {
+            // `saturating` : une taille forgée (`ffffffffffffffff`)
+            // bouclerait `body.len() + size` → borne contournée.
+            if body.len().saturating_add(size) > self.cfg.max_body_bytes {
                 return Err(NetError::BodyTooLarge(self.cfg.max_body_bytes));
             }
             if size == 0 {
@@ -794,6 +797,12 @@ struct IoCtx {
     io_timeout: std::time::Duration,
     target: String,
     max_body: usize,
+    /// Borne d'une ligne en-tête/chunk-size (§B-59) — même
+    /// budget que `read_line` bufferisé : sans elle un serveur
+    /// qui pousse un flux sans `\r\n` gonfle `conn.buf` à
+    /// vitesse réseau jusqu'à l'abort alloc (mesuré terrain :
+    /// `allocation of 34359738368 bytes failed`, ~1 Go/s).
+    max_head: usize,
     /// Borne totale du corps streamé (`request_timeout` ouvert
     /// au lancement de la tâche) — un serveur qui goutte sous
     /// `io_timeout` par lecture est quand même coupé au budget.
@@ -978,8 +987,10 @@ impl BodyTask {
                 16,
             )
             .map_err(|_| NetError::InvalidChunked("taille hex illisible"))?;
-            if total + size > self.ctx.max_body {
-                return Err(NetError::BodyTooLarge(total + size));
+            // `saturating` : une taille forgée bouclerait `total +
+            // size` → borne contournée → buffer non borné (§B-59).
+            if total.saturating_add(size) > self.ctx.max_body {
+                return Err(NetError::BodyTooLarge(self.ctx.max_body));
             }
             if size == 0 {
                 // Trailers optionnels — coupure tolérée (53c).
@@ -1026,6 +1037,9 @@ impl BodyTask {
                 let line: Vec<u8> = self.conn.buf.drain(..i + 2).collect();
                 return Ok(Some(String::from_utf8_lossy(&line).into_owned()));
             }
+            if self.conn.buf.len() > self.ctx.max_head {
+                return Err(NetError::InvalidChunked("ligne > budget en-tête"));
+            }
             let mut chunk = [0u8; 8192];
             let n = self.ctx.io(self.conn.stream.read(&mut chunk)).await?;
             if n == 0 {
@@ -1042,6 +1056,9 @@ impl BodyTask {
             if let Some(i) = find_seq(&self.conn.buf, b"\r\n") {
                 let line: Vec<u8> = self.conn.buf.drain(..i + 2).collect();
                 return Ok(String::from_utf8_lossy(&line).into_owned());
+            }
+            if self.conn.buf.len() > self.ctx.max_head {
+                return Err(NetError::InvalidChunked("ligne > budget en-tête"));
             }
             let mut chunk = [0u8; 8192];
             let n = self.ctx.io(self.conn.stream.read(&mut chunk)).await?;

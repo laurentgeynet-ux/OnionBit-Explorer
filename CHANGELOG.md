@@ -7,6 +7,38 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **Étape 158 — §B-59 : borne
+  ligne streamée `conn.buf`**
+  (`explorer-net`) — cause racine
+  terrain de la « fuite » ~1 Go/s :
+  `BodyTask::stream_line`/
+  `stream_line_opt` (corps
+  `fetch_stream`, chunked) lisaient
+  jusqu'à `\r\n` **sans budget** —
+  parité rompue avec `read_line`
+  bufferisé (`max_head_bytes`). Un
+  serveur poussant un flux sans CRLF
+  (ligne de taille malformée, stream
+  cassé) gonflait `conn.buf` par
+  blocs de 8 Kio à vitesse fil →
+  `Vec` dédoublé → `allocation of
+  34359738368 bytes failed` (2³⁵)
+  après saturation machine (melty,
+  actugaming). Fix : `IoCtx.max_head`
+  (=`cfg.max_head_bytes`) + check
+  `conn.buf.len() > max_head →
+  InvalidChunked` dans les deux
+  lecteurs ; `saturating_add` sur
+  les bornes `body.len()+size`/
+  `total+size` (taille forgée
+  `ffffffffffffffff` ne boucle
+  plus). Verrou
+  `stream_chunked_size_line_is_bounded`
+  (flot 128 Kio sans CRLF → erreur
+  typée, pas de croissance). Voir
+  JS-C212 pour la moitié jscore du
+  §B-59.
+
 - **JS-C213 — `window.__tcfapi`
   stub honnête TCF v2** (`explorer-jscore`,
   §B-14 all.rugby vol 183 —

@@ -611,3 +611,31 @@ async fn stream_chunked_close_after_last_chunk_is_clean() {
     assert_eq!(all, b"abc");
     let _ = srv;
 }
+
+/// §B-59 — ligne de taille chunk **sans `\r\n`** : avant le fix,
+/// `stream_line` gonflait `conn.buf` sans borne à vitesse réseau
+/// (mesuré terrain : ~1 Go/s puis `allocation of 34359738368
+/// bytes failed`). Parité avec `read_line` : budget en-tête.
+#[tokio::test]
+async fn stream_chunked_size_line_is_bounded() {
+    let mut flood = String::from("HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n");
+    flood.push_str(&"A".repeat(128 * 1024));
+    let srv = serve(vec![flood.leak()], false).await;
+    let resp = client()
+        .fetch_stream(&Request::get(url(srv.port, "/")))
+        .await
+        .unwrap();
+    let mut bounded = false;
+    let mut body = resp.body;
+    while let Some(item) = body.recv().await {
+        if matches!(item, Err(NetError::InvalidChunked(_))) {
+            bounded = true;
+            break;
+        }
+        if let Err(e) = item {
+            panic!("erreur inattendue: {e}");
+        }
+    }
+    assert!(bounded, "ligne de taille sans CRLF non bornée");
+    let _ = srv;
+}
