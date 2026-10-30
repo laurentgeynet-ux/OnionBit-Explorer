@@ -60,8 +60,11 @@ décidée 2026-10-30 avec le bundle portable (Étape 167).
 - [ ] ~~**PR-7. `permissions.json`**~~ — **annulé** : store mort
   tant qu'aucune API permissionnée n'existe ; à recréer le jour
   où un consommateur arrive (hors file pour l'instant).
-- [ ] **PR-8. `cert_decisions.json`** — exceptions certificats
-  (rustls custom verifier — sensible sécurité).
+- [x] **PR-8. Erreur cert lisible (version réduite)** — page
+  sécurité dédiée « Connexion non sécurisée » sur
+  `NetError::Tls`, détail + **aucun bypass** (étape 69
+  `error_document`). `cert_decisions.json` (exceptions par
+  fingerprint, verifier custom) reste à faire en étape dédiée.
 - [x] **PR-9. `dns_cache.json`** — borné (cap 4000), TTL 300 s
   (`getaddrinfo` ne rapporte pas le TTL RR — borne documentée) ;
   `CachingResolver` + `JsonDnsStore`, câblé daemon + FFI.

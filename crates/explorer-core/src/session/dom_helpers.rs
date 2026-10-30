@@ -1337,7 +1337,34 @@ pub(crate) fn esc_html(s: &str) -> String {
 /// document vide) produit une page lisible plutôt qu'un
 /// vide — statut, URL tentée, cause. Markup minimal volontaire
 /// (UA stylesheet + styles inline, zéro dépendance UI).
+///
+/// Les échecs TLS (PR-8, version réduite) ont droit à une page
+/// **sécurité** distincte : détail du refus, **aucun
+/// contournement proposé** — un `cert_decisions`/bypass
+/// demandera sa propre étape (verifier rustls custom).
 pub(crate) fn error_document(url: &Url, err: &CoreError) -> String {
+    // `NetError::Tls` est stringifié en amont — son préfixe
+    // d'affichage (`TLS vers …`, contrat net) discrimine le
+    // bras sécurité sans plomber un variant dédié.
+    if let CoreError::Fetch(m) = err {
+        if let Some(detail) = m.strip_prefix("TLS vers") {
+            return format!(
+                "<!doctype html><html><head><title>Connexion non sécurisée</title></head>\
+                 <body style=\"font-family:sans-serif;margin:3em auto;max-width:34em\">\
+                 <h1>Connexion non sécurisée</h1>\
+                 <p>La connexion vers <code>{}</code> a été interrompue : \
+                 le certificat du serveur n'a pas pu être validé.</p>\
+                 <p><strong>Détail :</strong> TLS{}</p>\
+                 <p>Un attaquant pourrait tenter d'intercepter vos données. \
+                 <strong>Aucun contournement n'est proposé</strong> — \
+                 le certificat doit être corrigé côté serveur.</p>\
+                 <p>Revenez à la page précédente.</p>\
+                 </body></html>",
+                esc_html(&url.to_string()),
+                esc_html(detail),
+            );
+        }
+    }
     let cause = match err {
         CoreError::HttpStatus(s) => format!("Le serveur a répondu « HTTP {s} »."),
         CoreError::Fetch(m) => format!("Impossible de joindre le serveur ({m})."),

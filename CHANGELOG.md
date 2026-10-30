@@ -7,6 +7,21 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **PR-8 — page d'erreur TLS**
+  (`explorer-core`, version
+  réduite) — un échec de
+  certificat (`NetError::Tls`)
+  ne rend plus la page générique
+  « Page inaccessible » mais une
+  page **« Connexion non
+  sécurisée »** : détail du refus
+  et **aucun contournement
+  proposé**. Le bypass par
+  fingerprint persisté
+  (`cert_decisions`) demandera
+  sa propre étape (verifier
+  rustls custom).
+
 - **PR-6 — `autofill.json`**
   (`explorer-core`) — les valeurs
   textuelles d'un formulaire
