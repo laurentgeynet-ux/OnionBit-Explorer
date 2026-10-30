@@ -2962,6 +2962,11 @@ fn translate_item(it: &DisplayItem, d: (f32, f32)) -> DisplayItem {
 
 /// Élément remplacé : bitmap par-dessus bordure (contenu —
 /// ordre CSS 2.1 App. E : fond → bordure → contenu).
+/// Budget pixels d'un `<svg>` re-rasterisé à la taille
+/// utilisée (R-133) — borne mémoire par image, indépendante
+/// du contexte session (inaccessible ici).
+const SVG_RESCALE_MAX_PX: u32 = 4_000_000;
+
 fn paint_replaced(
     bx: &LayoutBox,
     items: &mut Vec<DisplayItem>,
@@ -2994,7 +2999,46 @@ fn paint_replaced(
         // débordent (`cover`, `none` trop grand, position
         // décalée) sont clipés à la content box.
         let content = shifted(content_rect(bx), off);
-        let (dst, clip) = object_fit_dst(bx, &img, content);
+        let (mut dst, mut clip) = object_fit_dst(bx, &img, content);
+        // R-133 (§B-32/§B-36) : un `<svg>` inline est
+        // pré-rasterisé à sa taille **naturelle** (collecte
+        // pré-layout) — peint dans une boîte plus grande, le
+        // bitmap s'étire en blocs (icône `viewBox` 24 peinte
+        // 130 px = ×5,4 — logo regex101, wordmark indeed).
+        // La source XML étant conservée (`svg_sources`), on
+        // re-rasterise à la destination exacte quand
+        // l'agrandissement est notable (> 1,25× — sous ce
+        // seuil le coût usvg ne sert à rien). `none`/
+        // `scale-down` peignent à la taille naturelle :
+        // re-rasteriser gonflerait la taille peinte.
+        #[allow(clippy::cast_precision_loss)] // bitmaps < 2^24 px par axe.
+        if !matches!(
+            bx.style.get("object-fit").map(str::trim),
+            Some("none" | "scale-down")
+        ) && (dst.width > img.width as f32 * 1.25
+            || dst.height > img.height as f32 * 1.25)
+        {
+            // `svg_sources` n'est peuplé que pour les racines
+            // `<svg>` — sa présence suffit à identifier le cas.
+            if let Some(src) = bx.node.and_then(|n| images.svg_sources.get(&n)) {
+                if let Some(big) = crate::image::decode_svg_raster_sized(
+                    src.as_bytes(),
+                    SVG_RESCALE_MAX_PX,
+                    (dst.width, dst.height),
+                ) {
+                    let img = std::sync::Arc::new(big);
+                    (dst, clip) = object_fit_dst(bx, &img, content);
+                    if clip {
+                        items.push(DisplayItem::PushClip(content));
+                    }
+                    items.push(DisplayItem::Image { rect: dst, img });
+                    if clip {
+                        items.push(DisplayItem::PopClip);
+                    }
+                    return;
+                }
+            }
+        }
         if clip {
             items.push(DisplayItem::PushClip(content));
         }

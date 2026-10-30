@@ -61,12 +61,12 @@ fn svg_flex_min_width_auto_ne_depasse_pas_width_specifie() {
     // (flexbox §9.9.2). Avant le fix : item utilisé 32 px et
     // débordement `justify-content:center` → svg peint à
     // gauche du bouton.
-    let (_dom, bx) = laid(
-        r##"<button><svg></svg><div id="w"></div></button>"##,
+    let (dom, bx) = laid(
+        r#"<button><svg></svg><div id="w"></div></button>"#,
         "button{display:flex;justify-content:center;width:120px}\
          svg{width:16px;height:16px;display:block}#w{width:200px}",
     );
-    let svg = find_svg(&bx, &_dom);
+    let svg = find_svg(&bx, &dom);
     assert!(
         (svg.rect.width - 16.0).abs() < 0.5,
         "svg min-width:auto planché à 16 (spec §9.9.2), obtenu {}",
@@ -78,12 +78,12 @@ fn svg_flex_min_width_auto_ne_depasse_pas_width_specifie() {
 fn svg_flex_min_width_auto_sans_width_garde_contenu() {
     // Contrôle : `width:auto` — le plancher reste la mesure
     // de contenu (ratio intrinsèque), pas 0.
-    let (_dom, bx) = laid(
-        r##"<button><svg></svg><div id="w"></div></button>"##,
+    let (dom, bx) = laid(
+        r#"<button><svg></svg><div id="w"></div></button>"#,
         "button{display:flex;justify-content:center;width:120px}\
          svg{height:16px;display:block}#w{width:200px}",
     );
-    let svg = find_svg(&bx, &_dom);
+    let svg = find_svg(&bx, &dom);
     assert!(
         svg.rect.width > 16.0,
         "svg width:auto → plancher contenu (h×ratio=32), obtenu {}",

@@ -42,7 +42,22 @@ pub const SVG_MAX_SOURCE: usize = 4 * 1024 * 1024;
 /// peints, comme un `<img>` cassé).
 #[must_use]
 pub fn collect_svg(dom: &Dom, root: NodeId, max_px: u32) -> ImageTable {
+    collect_svg_with_sources(dom, root, max_px).0
+}
+
+/// [`collect_svg`] + la source sérialisée de chaque `<svg>`
+/// (`NodeId` → XML, R-133) : le bitmap pré-rasterisé est à la
+/// taille naturelle ; la display list re-rasterise la source à
+/// la taille utilisée quand la boîte est plus grande (§B-32 —
+/// icône 24 px peinte 130 px = blocs, sinon).
+#[must_use]
+pub fn collect_svg_with_sources(
+    dom: &Dom,
+    root: NodeId,
+    max_px: u32,
+) -> (ImageTable, std::collections::HashMap<NodeId, Arc<str>>) {
     let mut out = ImageTable::new();
+    let mut sources = std::collections::HashMap::new();
     let mut stack = vec![root];
     while let Some(n) = stack.pop() {
         if let Ok(NodeData::Element(_)) = dom.data(n) {
@@ -57,6 +72,7 @@ pub fn collect_svg(dom: &Dom, root: NodeId, max_px: u32) -> ImageTable {
                 // `<defs>` avant `</svg>` pour la résolution.
                 inject_external_refs(dom, root, n, &mut src);
                 if src.len() <= SVG_MAX_SOURCE {
+                    sources.insert(n, Arc::<str>::from(src.as_str()));
                     if let Some(img) = crate::image::decode_svg_raster(src.as_bytes(), max_px) {
                         out.insert(n, Arc::new(img));
                     }
@@ -68,7 +84,7 @@ pub fn collect_svg(dom: &Dom, root: NodeId, max_px: u32) -> ImageTable {
             }
         }
     }
-    out
+    (out, sources)
 }
 
 /// `true` si `n` est l'élément `<svg>` dans le namespace SVG

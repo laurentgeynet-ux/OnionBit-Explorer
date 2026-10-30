@@ -44,6 +44,14 @@ pub struct PaintImages {
     /// `<svg>` inline rasterisés (`NodeId` → bitmap) — R-9,
     /// produits par [`crate::svg::collect_svg`].
     pub svgs: ImageTable,
+    /// Source sérialisée des `<svg>` inline (`NodeId` → XML —
+    /// R-133) : le bitmap pré-rasterisé de `svgs` est à la
+    /// taille **naturelle** ; peint dans une boîte plus
+    /// grande il s'étire en blocs. `paint_replaced`
+    /// re-rasterise à la taille utilisée quand la source est
+    /// là — produite par [`crate::svg::collect_svg_with_sources`]
+    /// (table vide = repli sur le bitmap, comportement R-9).
+    pub svg_sources: HashMap<NodeId, Arc<str>>,
     /// `mask-image: url(...)` décodés (`NodeId` de l'élément
     /// masqué → bitmap dont l'**alpha** sert de mask — R-52,
     /// motif « icône colorée » : `background-color` ne doit
@@ -72,6 +80,7 @@ impl PaintImages {
             replaced,
             backgrounds: ImageTable::new(),
             svgs: ImageTable::new(),
+            svg_sources: HashMap::new(),
             masks: ImageTable::new(),
             masks_url: HashMap::new(),
             canvases: crate::canvas::CanvasTable::new(),
@@ -160,6 +169,29 @@ fn looks_like_svg(bytes: &[u8]) -> bool {
 // dessus — le cast ne peut ni tronquer ni perdre le signe.
 /// Aussi utilisé par le `<svg>` inline (R-9, module `svg`).
 pub(crate) fn decode_svg_raster(bytes: &[u8], max_px: u32) -> Option<DecodedImage> {
+    decode_svg_raster_at(bytes, max_px, None)
+}
+
+/// Variante de [`decode_svg_raster`] visant une taille
+/// **destination** (R-133) : `Some((tw, th))` = pixels cibles
+/// — l'échelle couvre la cible et reste bornée par `max_px`
+/// (jamais < 1 : la destination plus petite que le naturel
+/// reste un repli « naturel » du paint en aval).
+pub(crate) fn decode_svg_raster_sized(
+    bytes: &[u8],
+    max_px: u32,
+    target: (f32, f32),
+) -> Option<DecodedImage> {
+    decode_svg_raster_at(bytes, max_px, Some(target))
+}
+
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+// les dims sont vérifiées finies, > 0 et ≤ `max_px` avant le cast.
+fn decode_svg_raster_at(
+    bytes: &[u8],
+    max_px: u32,
+    target: Option<(f32, f32)>,
+) -> Option<DecodedImage> {
     // Parse confiné aussi — un document hostile peut faire
     // paniquer `usvg` (même politique §B-55 que `resvg::render`).
     let tree = std::panic::catch_unwind(|| {
@@ -174,12 +206,22 @@ pub(crate) fn decode_svg_raster(bytes: &[u8], max_px: u32) -> Option<DecodedImag
     }
     // Borne pixels : échelle de réduction si le naturel
     // dépasse le budget — un SVG « infini » (viewBox géant)
-    // reste plafonné comme un bitmap hostile.
-    let scale = if w * h > f64::from(max_px) {
+    // reste plafonné comme un bitmap hostile. Cible demandée
+    // (R-133) : l'échelle couvre le rect de destination, bornée
+    // par le même budget — un `<svg>` peint 130 px part d'un
+    // bitmap 24 px intrinsèque seulement sans elle (§B-32 :
+    // logo regex101 en blocs à ×5,4).
+    let mut scale = if w * h > f64::from(max_px) {
         (f64::from(max_px) / (w * h)).sqrt()
     } else {
         1.0
     };
+    if let Some((tw, th)) = target {
+        let want = (f64::from(tw) / w).max(f64::from(th) / h);
+        if want.is_finite() && want > scale {
+            scale = want.min((f64::from(max_px) / (w * h)).sqrt());
+        }
+    }
     let iw = u32::try_from((w * scale).ceil() as u64).ok()?.max(1);
     let ih = u32::try_from((h * scale).ceil() as u64).ok()?.max(1);
     if u64::from(iw) * u64::from(ih) > u64::from(max_px) {

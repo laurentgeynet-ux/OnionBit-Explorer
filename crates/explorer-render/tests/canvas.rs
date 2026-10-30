@@ -44,7 +44,7 @@ fn canvas_geant_est_degrade_pas_alloue() {
         CanvasOp::FillColor(RED),
         CanvasOp::FillRect(0.0, 0.0, 1.0, 1.0),
     ];
-    assert!(raster_ops(&ops, 131072, 65536).is_none(), "2^33 px → refus");
+    assert!(raster_ops(&ops, 131_072, 65_536).is_none(), "2^33 px → refus");
     assert!(raster_ops(&ops, 8192, 8192).is_none(), "64 Mpx → refus");
     assert!(raster_ops(&ops, 4000, 4000).is_some(), "16 Mpx pile → OK");
 }

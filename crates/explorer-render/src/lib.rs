@@ -38,5 +38,5 @@ pub use raster::{
     rasterize, rasterize_cached, rasterize_dirty, rasterize_dirty_cached, rasterize_window,
     rasterize_window_cached, Frame,
 };
-pub use svg::{collect_svg, svg_sizes, SVG_MAX_SOURCE};
+pub use svg::{collect_svg, collect_svg_with_sources, svg_sizes, SVG_MAX_SOURCE};
 pub use woff::decode_font;

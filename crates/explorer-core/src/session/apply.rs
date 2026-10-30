@@ -1493,7 +1493,11 @@ fn try_incr_payload(
             .entry(n)
             .or_insert_with(|| composite::iframe_intrinsic(new_dom, n));
     }
-    let svgs = explorer_render::svg::collect_svg(new_dom, root_el, ctx.image_max_px);
+    // R-133 : les sources XML suivent les bitmaps — la
+    // display list re-rasterise à la taille utilisée quand
+    // la boîte dépasse le naturel (§B-32/§B-36).
+    let (svgs, svg_sources) =
+        explorer_render::svg::collect_svg_with_sources(new_dom, root_el, ctx.image_max_px);
     let block = layout_ctx(ctx, p);
     // Reliquat R-88 : `relayout_subtree` ne pose pas
     // `root_font_size`, contrairement à `layout_tree` —
@@ -1533,6 +1537,7 @@ fn try_incr_payload(
     };
     p.doc_h = doc_h;
     p.images.svgs = svgs;
+    p.images.svg_sources = svg_sources;
     p.images.canvases = canvas_table_from_ops(canvas_ops, new_dom);
     // Sous-contextes `<iframe>` (étape 129) : bitmaps
     // re-blittés sur les boîtes du nouvel arbre — les
@@ -1675,7 +1680,10 @@ pub(crate) fn relayout_dom_payload(
             .entry(n)
             .or_insert_with(|| composite::iframe_intrinsic(dom, n));
     }
-    let svgs = explorer_render::svg::collect_svg(dom, root_el, ctx.image_max_px);
+    // R-133 : sources XML conservées pour le re-raster à
+    // taille utilisée dans `paint_replaced` (§B-32/§B-36).
+    let (svgs, svg_sources) =
+        explorer_render::svg::collect_svg_with_sources(dom, root_el, ctx.image_max_px);
     let Some(mut bx) = build_box_tree_sized(dom, root_el, &styles, &sizes) else {
         return Err(CoreError::NothingToPaint);
     };
@@ -1698,6 +1706,7 @@ pub(crate) fn relayout_dom_payload(
     p.tree = Some(bx);
     p.tree_epoch = p.tree_epoch.wrapping_add(1);
     p.images.svgs = svgs;
+    p.images.svg_sources = svg_sources;
     // `<canvas>` 2D (JS-C28) : op-lists cumulées du miroir,
     // re-résolues par chemin d'élément dans `dom`.
     p.images.canvases = canvas_table_from_ops(canvas_ops, dom);

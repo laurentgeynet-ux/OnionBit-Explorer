@@ -1023,6 +1023,55 @@ fn svg_inline_boite_remplacee_et_image() {
 }
 
 #[test]
+fn svg_inline_reraster_a_la_taille_utilisee() {
+    // R-133 (§B-32/§B-36) : `<svg viewBox 24>` peint dans une
+    // boîte 200×200 — le bitmap pré-rasterisé à la taille
+    // naturelle s'étirait ×8 en blocs ; la source conservée
+    // doit re-rasteriser à la destination (≈200 px).
+    let dom = TreeBuilder::parse(
+        "<svg viewBox=\"0 0 24 24\"><rect width=\"24\" height=\"24\" fill=\"red\"/></svg>",
+    );
+    let mut eng = StyleEngine::new();
+    eng.add_css(
+        "body{margin:0} svg{width:200px;height:200px;display:block}",
+        Origin::Author,
+    );
+    let styles = eng.compute_tree(&dom, dom.document(), &StyleEnv::default());
+    let root_el = dom
+        .children(dom.document())
+        .into_iter()
+        .flatten()
+        .find(|&c| dom.element(c).is_ok())
+        .expect("racine");
+    let sizes = explorer_render::svg_sizes(&dom, root_el);
+    let (svgs, svg_sources) = explorer_render::collect_svg_with_sources(&dom, root_el, 1_000_000);
+    assert_eq!(svgs.len(), 1, "un svg collecté");
+    assert_eq!(svg_sources.len(), 1, "source conservée");
+    let mut bx = build_box_tree_sized(&dom, root_el, &styles, &sizes).expect("arbre");
+    layout_tree(&mut bx, VIEW, &ctx());
+    let images = explorer_render::PaintImages {
+        svgs,
+        svg_sources,
+        ..explorer_render::PaintImages::default()
+    };
+    let list = build_display_list_full(&bx, VIEW, 200.0, 0.0, &images);
+    let img = list
+        .items
+        .iter()
+        .find_map(|i| match i {
+            DisplayItem::Image { img, .. } => Some(img.clone()),
+            _ => None,
+        })
+        .expect("svg → item Image");
+    assert!(
+        img.width >= 150 && img.height >= 150,
+        "re-raster à la taille utilisée (~200px), obtenu {}×{}",
+        img.width,
+        img.height
+    );
+}
+
+#[test]
 fn svg_inline_rasterise_des_pixels() {
     // Le rect rouge du SVG doit produire des pixels rouges.
     let dom = TreeBuilder::parse(

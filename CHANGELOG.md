@@ -1609,6 +1609,29 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   défaut spec builtins, arités
   précises posables après. Bundle
   manomano : éval `OK`.
+- **R-133 — §B-32/§B-36 : `<svg>`
+  re-rasterisé à la taille utilisée**
+  (`explorer-render`) — un `<svg>`
+  inline était pré-rasterisé à sa
+  taille **naturelle** en collecte
+  (pré-layout) puis le bitmap
+  étiré à la boîte : icône
+  `viewBox 24` peinte 130 px =
+  ×5,4 en blocs (logo regex101,
+  wordmark indeed, icônes wttj).
+  `PaintImages` porte désormais
+  `svg_sources` (XML sérialisé —
+  `collect_svg_with_sources`,
+  champ additif) ; `paint_replaced`
+  re-rasterise via
+  `decode_svg_raster_sized` quand
+  la destination dépasse le bitmap
+  de >1,25× (budget 4 Mpx, hors
+  `object-fit:none|scale-down`).
+  Câblage core `apply` (×2 sites,
+  carve-out journal). Verrou
+  `svg_inline_reraster_a_la_
+  taille_utilisee` (24→200 px).
 - **R-132 — §B-36 : `min-width:auto`
   plafonne à la taille spécifiée**
   (`explorer-layout`) — icône svg
