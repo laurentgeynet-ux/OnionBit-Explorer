@@ -7954,11 +7954,24 @@ fn foreign_node_in(e: &mut Engine, v: Value, dom: &DomRef) -> Option<(NodeId, Do
         Some(ObjKind::Host(h)) => h.clone(),
         _ => return None,
     };
-    let n = h.as_any().downcast_ref::<NodeHost>()?;
-    if Rc::ptr_eq(&n.dom, dom) || !n.dom.borrow().node_valid(n.node) {
-        return None;
+    if let Some(n) = h.as_any().downcast_ref::<NodeHost>() {
+        if Rc::ptr_eq(&n.dom, dom) || !n.dom.borrow().node_valid(n.node) {
+            return None;
+        }
+        return Some((n.node, n.dom.clone()));
     }
-    Some((n.node, n.dom.clone()))
+    // Document étranger (usnews §B-14 — `importNode` d'un
+    // document auxiliaire jQuery `createHTMLDocument`) : la
+    // racine de son arène est la cible du clone, comme
+    // `node_for_in` pour le document local.
+    if let Some(dh) = h.as_any().downcast_ref::<DocumentHost>() {
+        if Rc::ptr_eq(&dh.dom, dom) {
+            return None;
+        }
+        let root = dh.dom.borrow().root;
+        return Some((root, dh.dom.clone()));
+    }
+    None
 }
 
 /// Objet `Attr` porteur (spec) — l'arène stocke les

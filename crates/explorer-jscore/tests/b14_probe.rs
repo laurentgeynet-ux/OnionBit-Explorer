@@ -217,6 +217,23 @@ fn import_node_clones_foreign_document_nodes() {
         ),
         "P"
     );
+    // §B-14 REVALID3 usnews — `importNode(document entier
+    // étranger)` (jQuery `parseHTML` importe le document
+    // auxiliaire) : le `DocumentHost` étranger clone sa
+    // racine, sans rejet « nœud requis ». Modèle d'arène :
+    // la racine `#document` est un `Element` — le clone en
+    // hérite (nodeType 1, `getElementsByTagName` vivant) ;
+    // le `nodeType` 9 spec exigerait un `NodeKind::Document`.
+    assert_eq!(
+        ev(
+            &mut e,
+            "var d2=document.implementation.createHTMLDocument('x');\
+             d2.body.innerHTML='<b>w</b>';\
+             var c=document.importNode(d2,true);\
+             c.nodeType+':'+c.getElementsByTagName('b').length"
+        ),
+        "1:1"
+    );
 }
 
 #[test]
@@ -330,6 +347,24 @@ fn intersection_observer_threshold_typed_array() {
             "new IntersectionObserver(function(){},{threshold:0.25}).thresholds[0]"
         ),
         "0.25"
+    );
+    // §B-14 REVALID3 CNN — `threshold is not a number` sur
+    // valeur primitive : WebIDL `double` = `ToNumber` — une
+    // string est acceptée ; `sequence<double>` accepte tout
+    // iterable (`Set`).
+    assert_eq!(
+        ev(
+            &mut e,
+            "new IntersectionObserver(function(){},{threshold:'0.5'}).thresholds[0]"
+        ),
+        "0.5"
+    );
+    assert_eq!(
+        ev(
+            &mut e,
+            "new IntersectionObserver(function(){},{threshold:new Set([0,0.75])}).thresholds.length"
+        ),
+        "2"
     );
 }
 

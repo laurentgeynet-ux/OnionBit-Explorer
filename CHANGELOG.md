@@ -175,6 +175,33 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   threshold_typed_array` — à
   re-voler.
 
+- **JS-C220 (suite REVALID3)** —
+  2/4 bras validés au vol 309
+  (`createAttribute` npr,
+  `scrollTo` iltalehti) ;
+  complète les deux persistants :
+  `importNode` accepte aussi un
+  **`DocumentHost` étranger**
+  (usnews — clone de la racine
+  `#document` ; le `nodeType` 9
+  spec exigerait un
+  `NodeKind::Document`, l'arène
+  porte la racine en `Element`)
+  et `threshold` applique la
+  conversion WebIDL complète —
+  `double` = `ToNumber` (string
+  `"0.5"`, booléen — CNN :
+  `threshold is not a number`
+  sur primitive non-Num) et
+  `sequence<double>` = protocole
+  `@@iterator` générique
+  (`iter_values` : `Set`,
+  générateurs, arrays,
+  `TypedArray` partagent le
+  rail). Verrous ajoutés dans
+  les deux tests existants — à
+  re-voler.
+
 - **Étape 163 — §B-1 : disjoncteur
   lent couvre toutes les voies
   d'éval** (`explorer-core`, REVALID7

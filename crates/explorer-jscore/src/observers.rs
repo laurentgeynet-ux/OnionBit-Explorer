@@ -32,7 +32,7 @@ use std::rc::Rc;
 
 use crate::dom::NodeId;
 use crate::dom_host::{element_geom_rect, node_for_in, node_value, DomRef, NodeCache};
-use crate::heap::{Host, JsResult, ObjKind};
+use crate::heap::{Host, JsResult};
 use crate::value::{ObjId, Value};
 use crate::Engine;
 
@@ -541,30 +541,24 @@ fn obs_opt_thresholds(e: &mut Engine, opts: Value) -> JsResult<Vec<f64>> {
     let v = obs_opt(e, opts, "threshold");
     let raw: Vec<f64> = match v {
         Value::Undefined => vec![0.0],
-        Value::Num(n) => vec![n],
-        Value::Obj(o) => match e.heap.obj(o).map(|ob| &ob.kind) {
-            Some(ObjKind::Array(elems)) => {
-                let elems = elems.clone();
-                elems
-                    .iter()
-                    .map(|x| e.to_number(*x))
-                    .collect::<JsResult<Vec<f64>>>()?
+        // `double` WebIDL = `ToNumber` — une string `"0.5"` ou
+        // un booléen sont acceptés (CNN §B-14 REVALID3 :
+        // `threshold is not a number` sur valeur primitive
+        // non-Num).
+        Value::Obj(o) => {
+            // `sequence<double>` = protocole `@@iterator`
+            // complet (arrays, `TypedArray`, `Set`,
+            // générateurs…) — `iter_values` couvre le rail.
+            let is_iter = e.get_prop(o, crate::interp::SYM_ITERATOR).is_some();
+            if !is_iter {
+                return Err(e.type_error("IntersectionObserver: threshold is not a number"));
             }
-            // `sequence<double>` WebIDL accepte tout iterable —
-            // les libs passent des `Float32Array`/`Uint8Array`
-            // (CNN §B-14 EXPLOR73 : `threshold` rejeté).
-            Some(ObjKind::TypedArray { len, .. }) => {
-                let len = (*len).min(64);
-                let mut out = Vec::with_capacity(len);
-                for i in 0..len {
-                    let x = e.get_prop_value(v, &i.to_string())?;
-                    out.push(e.to_number(x)?);
-                }
-                out
-            }
-            _ => return Err(e.type_error("IntersectionObserver: threshold is not a number")),
-        },
-        _ => return Err(e.type_error("IntersectionObserver: threshold is not a number")),
+            let vals = e.iter_values(v)?;
+            vals.into_iter()
+                .map(|x| e.to_number(x))
+                .collect::<JsResult<Vec<f64>>>()?
+        }
+        _ => vec![e.to_number(v)?],
     };
     if raw.iter().any(|t| !(0.0..=1.0).contains(t)) {
         return Err(e.type_error("IntersectionObserver: threshold out of range [0, 1]"));
