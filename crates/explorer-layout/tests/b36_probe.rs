@@ -90,3 +90,52 @@ fn svg_flex_min_width_auto_sans_width_garde_contenu() {
         svg.rect.width
     );
 }
+
+fn find_text<'a>(b: &'a LayoutBox, dom: &'a Dom, needle: &str) -> Option<&'a LayoutBox> {
+    if b.node
+        .is_some_and(|n| dom.text(n).is_ok_and(|t| t.contains(needle)))
+    {
+        return Some(b);
+    }
+    b.children.iter().find_map(|c| find_text(c, dom, needle))
+}
+
+/// §B-64 bras (b) — google.com vol 309 : liens « Gmail »/« Images »
+/// empilés. `.gb_4d{display:flex}` > `.gb_R{padding-right:15px}` >
+/// deux `.gb_9{display:inline-block;padding-left:15px}` —
+/// l'item flex mesuré à son max-content (106,57) en border-box au
+/// lieu de content-box → ligne utile 91,57 < contenu 106,57 → le
+/// second lien passe à la ligne alors que les deux tiennent.
+#[test]
+fn flex_item_padding_ne_rogne_pas_sa_ligne() {
+    let (dom, bx) = laid(
+        "<body><div style='display:flex;justify-content:flex-end'>\
+           <div style='padding-right:15px'>\
+             <div style='display:inline-block;padding-left:15px'>\
+               <a>AAA</a></div>\
+             <div style='display:inline-block;padding-left:15px'>\
+               <a>BBBB</a></div>\
+           </div></div></body>",
+        "",
+    );
+    let a = find_text(&bx, &dom, "AAA").expect("AAA");
+    let b = find_text(&bx, &dom, "BBBB").expect("BBBB");
+    assert_eq!(
+        a.rect.y, b.rect.y,
+        "les deux liens doivent tenir sur une ligne (y {} vs {})",
+        a.rect.y, b.rect.y
+    );
+}
+#[test]
+fn flex_item_padding_sans_espace_ok() {
+    let (dom, bx) = laid(
+        "<body><div style='display:flex;justify-content:flex-end'>\
+           <div style='padding-right:15px'>\
+             <div style='display:inline-block;padding-left:15px'><a>A</a></div><div style='display:inline-block;padding-left:15px'><a>BBBB</a></div>\
+           </div></div></body>",
+        "",
+    );
+    let a = find_text(&bx, &dom, "A").expect("A");
+    let b = find_text(&bx, &dom, "BBBB").expect("BBBB");
+    assert_eq!(a.rect.y, b.rect.y, "y {} vs {}", a.rect.y, b.rect.y);
+}

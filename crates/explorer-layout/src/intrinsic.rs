@@ -310,7 +310,25 @@ fn content_px_unclamped(
         }
         let cfs = font_size_px(&c.style, fs, ctx);
         if inline_level(c) {
-            let w = explorer_common::deep(|| content_px_opt(c, cfs, ctx, max, false, cb));
+            // En-ligne atomique (`inline-block`, remplacé) :
+            // la contribution est la boîte de marge entière
+            // (Sizing §4.2) — châssis compris, comme les
+            // branches flottant/bloc ci-dessous. Sans lui,
+            // le max-content d'un parent `padding` se mesure
+            // court → enroulement de ligne dans les
+            // shrink-to-fit (liens nav google.com §B-64).
+            // Les `AnonymousBlock` clonent le style parent
+            // (padding et display inclus) : leur `own_sides`
+            // compte déjà le châssis du vrai parent ou serait
+            // compté en double — exclus.
+            let chassis = if !matches!(c.kind, BoxKind::AnonymousBlock)
+                && (c.display() == "inline-block" || c.intrinsic.is_some())
+            {
+                own_sides(c, fs, ctx)
+            } else {
+                0.0
+            };
+            let w = explorer_common::deep(|| content_px_opt(c, cfs, ctx, max, false, cb)) + chassis;
             if max {
                 run += w;
             } else {
@@ -365,7 +383,16 @@ fn text_px(st: &ComputedStyle, text: &str, fs: f32, ctx: &BlockCtx, max: bool) -
 /// Marges + padding + bordures horizontales propres d'un
 /// enfant — comptées dans l'intrinsèque du parent (la boîte
 /// de marge déborde la content box du conteneur).
+/// Un `AnonymousBlock` clone le style de son parent —
+/// padding, marges et display compris : son « propre »
+/// châssis n'existe pas ; le compter reviendrait à mesurer
+/// deux fois le châssis du conteneur (§B-64 — un
+/// `padding-right` parent gonflait la mesure de sa propre
+/// boîte via le clone anonyme).
 pub(crate) fn own_sides(c: &LayoutBox, fs: f32, ctx: &BlockCtx) -> f32 {
+    if matches!(c.kind, BoxKind::AnonymousBlock) {
+        return 0.0;
+    }
     let st = &c.style;
     let cfs = font_size_px(st, fs, ctx);
     let mut acc = 0.0f32;

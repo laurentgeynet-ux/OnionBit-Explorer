@@ -1883,6 +1883,42 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   défaut spec builtins, arités
   précises posables après. Bundle
   manomano : éval `OK`.
+- **R-135 — §B-64 : intrinsèque
+  des en-lignes atomiques et
+  tolérance de fit** (`explorer-
+  layout`) — deux trous nommés
+  sur accueil google.com (vol
+  309) : (a) la contribution
+  `max-content`/`min-content`
+  d'un enfant `inline-block`/
+  remplacé ignorait ses marges
+  + padding + bordures (Sizing
+  §4.2 — seuls les flottants et
+  les blocs comptaient leur
+  châssis) → le shrink-to-fit
+  d'un item flex avec
+  `padding-right:15px`
+  mesurait court → ligne utile
+  < somme des atomes →
+  enroulement (« Gmail »/
+  « Images » empilés) ; (b)
+  un `AnonymousBlock` clone le
+  style parent **padding
+  compris** → `own_sides` le
+  comptait : châssis du parent
+  doublé dans sa propre mesure
+  → `own_sides` vaut 0 pour
+  les anonymes ; (c) le fit
+  atomique de `break_into_
+  lines` exigeait `<= line_w`
+  strict alors que le test
+  texte tolère `+0.01` → les
+  atomes sommant exactement
+  `line_w` s'enroulaient sur
+  bruit f32. Verrous
+  `flex_item_padding_*` +
+  variantes float ; suite
+  layout 12/12 binaires.
 - **R-134 — §B-36 : `position:sticky`
   peint en phase positionnée**
   (`explorer-render`) — `sticky`

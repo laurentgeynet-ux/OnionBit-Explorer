@@ -861,7 +861,12 @@ fn break_into_lines(
             // `[y, y+h]` ; si elle n'y tient pas, elle descend
             // sous le premier flottant finissant dans l'étendue.
             let (mut ebx, mut ebw) = fl.band_over(cursor_y, outer_h, x, w);
-            let fits = cursor_x - line_x + outer <= line_w
+            // `+ 0.01` comme le test texte et `descend_band!`
+            // : les atomes sommant exactement `line_w`
+            // (shrink-to-fit mesuré à l'identique)
+            // s'enroulaient sur le bruit f32 — liens nav
+            // google.com empilés (§B-64).
+            let fits = cursor_x - line_x + outer <= line_w + 0.01
                 && cursor_x >= ebx - 0.01
                 && cursor_x + outer <= ebx + ebw + 0.01;
             if !fits && !acc.is_empty() {
