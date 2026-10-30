@@ -1363,6 +1363,7 @@ async fn client_hints_emitted_on_http_requests() {
             hdr(r, "sec-ch-ua-platform").is_some_and(|v| !v.is_empty()),
             "plateforme absente sur cet OS ou omise : {r:?}"
         );
+        assert_eq!(hdr(r, "upgrade-insecure-requests"), Some("1"), "{r:?}");
     }
 }
 
@@ -1412,6 +1413,14 @@ async fn client_hints_skipped_on_non_http() {
     let seen = inner.seen();
     assert!(
         !seen[0].headers.iter().any(|(n, _)| n.starts_with("sec-ch")),
+        "{:?}",
+        seen[0].headers
+    );
+    assert!(
+        !seen[0]
+            .headers
+            .iter()
+            .any(|(n, _)| n.eq_ignore_ascii_case("upgrade-insecure-requests")),
         "{:?}",
         seen[0].headers
     );

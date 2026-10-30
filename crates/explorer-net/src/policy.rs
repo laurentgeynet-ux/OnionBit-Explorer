@@ -1285,6 +1285,18 @@ impl ClientHintsTransport {
                     .push(("Sec-CH-UA-Platform".to_string(), p.clone()));
             }
         }
+        // `Upgrade-Insecure-Requests: 1` (upgrade-insecure-
+        // requests §4.3) : Chrome l'émet sur toutes les
+        // requêtes — navigations, sous-ressources, fetch —
+        // pour annoncer que le client préfère l'URL https
+        // équivalente. Honnête ici : le moteur résout et
+        // suit bien les upgrades http→https ; l'absence de
+        // cet en-tête est un écart d'empreinte mesuré sur
+        // les vols réels (google.com SERP, vol 2026-10-30).
+        if !has("upgrade-insecure-requests") {
+            req.headers
+                .push(("upgrade-insecure-requests".to_string(), "1".to_string()));
+        }
         req
     }
 }

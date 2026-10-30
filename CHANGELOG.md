@@ -7,6 +7,31 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **Étape 162 —
+  `Upgrade-Insecure-Requests: 1`
+  émis** (`explorer-net`, vol
+  google.com 2026-10-30 — SERP
+  servie en page de repli
+  « difficultés à accéder » /
+  429 sous-ressource : écart
+  d'empreinte navigateur mesuré
+  à l'en-tête absent) —
+  `ClientHintsTransport::stamp`
+  pose désormais
+  `upgrade-insecure-requests: 1`
+  sur **toute** requête http(s)
+  (navigations, sous-ressources,
+  fetch — spec upgrade-insecure-
+  requests §4.3, comportement
+  Chrome), jamais d'écrasement
+  d'un en-tête auteur, rien hors
+  http(s). Verrous : assertions
+  UIR ajoutées aux tests
+  `client_hints_*` existants.
+  Google SERP reste partiellement
+  bloquée côté serveur
+  (anti-bot 429) — à re-voler.
+
 - **JS-C216 — `document.write`
   insère au point du parseur**
   (§B-19, tumblr vols 102/216 —
