@@ -202,6 +202,26 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   les deux tests existants — à
   re-voler.
 
+- **JS-C220 (suite REVALID5)** —
+  `importNode` sur usnews
+  persistant au vol 317 : l'arg
+  n'était ni `NodeHost` ni
+  `DocumentHost` — suspect
+  **Attr-shaped** (custom
+  elements copiant des
+  attributs). Spec :
+  `importNode(Attr)` rend un
+  Attr cloné — `attr_shape_in`
+  reconnaît les porteurs
+  `{nodeType:2,name,value}` et
+  clone via `attr_obj`. Le
+  `TypeError` restant porte
+  désormais `reçu=<type>` —
+  diagnostique le bras au
+  prochain vol si l'arg était
+  autre chose (parité Chrome
+  pour `undefined`/`null`).
+
 - **Étape 163 — §B-1 : disjoncteur
   lent couvre toutes les voies
   d'éval** (`explorer-core`, REVALID7

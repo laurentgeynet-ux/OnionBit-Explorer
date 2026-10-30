@@ -234,6 +234,30 @@ fn import_node_clones_foreign_document_nodes() {
         ),
         "1:1"
     );
+    // §B-14 REVALID5 usnews — spec : `importNode(Attr)` rend
+    // un Attr cloné (nos porteurs `{nodeType:2}` ne sont pas
+    // des `Host`).
+    assert_eq!(
+        ev(
+            &mut e,
+            "var a=document.createAttribute('data-x');\
+             a.value='v';\
+             var b=document.importNode(a);\
+             b.nodeType+':'+b.name+':'+b.value"
+        ),
+        "2:data-x:v"
+    );
+    // Message diagnostique : le type reçu nomme le bras au
+    // prochain vol (TypeError maintenu — parité Chrome pour
+    // `importNode(undefined)`).
+    assert_eq!(
+        ev(
+            &mut e,
+            "try{document.importNode(undefined);'no'}\
+             catch(x){x.message.indexOf('reçu=undefined')>=0}"
+        ),
+        "true"
+    );
 }
 
 #[test]

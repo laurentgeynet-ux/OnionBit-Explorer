@@ -4504,8 +4504,26 @@ impl Host for DocumentHost {
                         let s = src_dom.borrow();
                         self.dom.borrow_mut().clone_shallow_from(&s, src)
                     }
+                } else if let Some((name, value, ns)) = attr_shape_in(e, v)? {
+                    // §B-14 usnews REVALID5 — spec :
+                    // `importNode(Attr)` rend un Attr cloné
+                    // dans le document cible (nos porteurs
+                    // `{nodeType:2}` ne sont pas des `Host`).
+                    return Ok(Some(attr_obj(e, &name, &value, ns)));
                 } else {
-                    return Err(e.type_error("importNode: nœud requis"));
+                    // Message diagnostique : le type reçu nomme
+                    // le bras au prochain vol (spec = TypeError
+                    // aussi pour undefined/null — parité Chrome).
+                    let t = match v {
+                        Value::Undefined => "undefined",
+                        Value::Null => "null",
+                        Value::Bool(_) => "boolean",
+                        Value::Num(_) => "number",
+                        Value::Str(_) => "string",
+                        Value::Big(_) => "bigint",
+                        _ => "object non-nœud",
+                    };
+                    return Err(e.type_error(format!("importNode: nœud requis (reçu={t})")));
                 };
                 ce_upgrade_subtree(e, &self.dom, &self.cache, c)?;
                 Ok(Some(node_value(e, &self.dom, &self.cache, c)))
@@ -7972,6 +7990,36 @@ fn foreign_node_in(e: &mut Engine, v: Value, dom: &DomRef) -> Option<(NodeId, Do
         return Some((root, dh.dom.clone()));
     }
     None
+}
+
+/// Reconnaît un objet **Attr-shaped** (`{nodeType:2, name,
+/// value, namespaceURI?}`) — nos porteurs `attr_obj` ou tout
+/// objet étranger de même forme. `importNode(attr)` (spec)
+/// clone l'attribut dans le document cible.
+// nodeType Attr — comparaison exacte d'un discriminant
+// entier stocké en f64 (pas une mesure flottante).
+#[allow(clippy::float_cmp)]
+fn attr_shape_in(e: &mut Engine, v: Value) -> JsResult<Option<(String, String, Option<String>)>> {
+    let Value::Obj(_) = v else {
+        return Ok(None);
+    };
+    let nt = e.get_prop_value(v, "nodeType")?;
+    if !matches!(nt, Value::Num(n) if n == 2.0) {
+        return Ok(None);
+    }
+    let name_v = e.get_prop_value(v, "name")?;
+    let name = e.to_js_string(name_v)?;
+    if name.is_empty() {
+        return Ok(None);
+    }
+    let value_v = e.get_prop_value(v, "value")?;
+    let value = e.to_js_string(value_v)?;
+    let ns = e.get_prop_value(v, "namespaceURI")?;
+    let ns = match ns {
+        Value::Str(_) => Some(e.to_js_string(ns)?),
+        _ => None,
+    };
+    Ok(Some((name, value, ns)))
 }
 
 /// Objet `Attr` porteur (spec) — l'arène stocke les
