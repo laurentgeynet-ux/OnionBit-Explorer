@@ -569,6 +569,41 @@ fn crypto_key_of(e: &Engine, v: Value) -> Option<CryptoKeyParts> {
     }
 }
 
+/// Description courte d'un argument non-`CryptoKey` — même
+/// rail que le nommage de receveur JS-C228 : constructeur,
+/// `@@toStringTag`, puis propres clés (un JWK brut passé à
+/// `decrypt` se lit `Object{kty,n,e}` — vol 344 wamiz).
+fn crypto_arg_desc(e: &mut Engine, v: Value) -> String {
+    match v {
+        Value::Obj(id) => {
+            let desc = e
+                .get_prop(id, "constructor")
+                .and_then(|c| e.get_prop_value(c, "name").ok())
+                .and_then(|n| e.heap_string_of(n))
+                .filter(|n| !n.is_empty())
+                .unwrap_or_else(|| "Object".to_string());
+            if desc != "Object" {
+                return desc;
+            }
+            if let Some(t) = e
+                .get_prop(id, crate::interp::SYM_TO_STRING_TAG)
+                .and_then(|t| e.heap_string_of(t))
+                .filter(|t| !t.is_empty())
+            {
+                return format!("Object@@{t}");
+            }
+            let keys = e.own_keys(id);
+            let shown: Vec<&str> = keys.iter().take(6).map(String::as_str).collect();
+            if shown.is_empty() {
+                desc
+            } else {
+                format!("Object{{{}}}", shown.join(","))
+            }
+        }
+        _ => format!("{v:?}"),
+    }
+}
+
 /// Nom d'algorithme seul (`"HMAC"` ou `{name:"HMAC"}`) — la
 /// vérification `sign`/`verify` se fait sur le NOM : les
 /// détails (hash, courbe) viennent de la clé (spec `WebCrypto`
@@ -723,7 +758,12 @@ fn subtle_sign(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     let pid = e.new_promise();
     let Some((key_bytes, key_type, algo_name, key_algo, usages, _)) = crypto_key_of(e, key_v)
     else {
-        let err = dom_exc(e, "InvalidAccessError", "subtle.sign: not a CryptoKey");
+        let desc = crypto_arg_desc(e, key_v);
+        let err = dom_exc(
+            e,
+            "InvalidAccessError",
+            &format!("subtle.sign: not a CryptoKey (« {desc} »)"),
+        );
         e.reject_promise(pid, err);
         return Ok(Value::Obj(pid));
     };
@@ -778,7 +818,12 @@ fn subtle_verify(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     let pid = e.new_promise();
     let Some((key_bytes, key_type, algo_name, key_algo, usages, _)) = crypto_key_of(e, key_v)
     else {
-        let err = dom_exc(e, "InvalidAccessError", "subtle.verify: not a CryptoKey");
+        let desc = crypto_arg_desc(e, key_v);
+        let err = dom_exc(
+            e,
+            "InvalidAccessError",
+            &format!("subtle.verify: not a CryptoKey (« {desc} »)"),
+        );
         e.reject_promise(pid, err);
         return Ok(Value::Obj(pid));
     };
@@ -966,7 +1011,12 @@ fn subtle_aead(
     let name_ok = algo_name_of(e, algo_v)?
         .is_some_and(|n| n.to_ascii_uppercase().replace('-', "") == "AESGCM");
     let Some((key_bytes, key_type, _an, key_algo, usages, _)) = crypto_key_of(e, key_v) else {
-        let err = dom_exc(e, "InvalidAccessError", "subtle: not a CryptoKey");
+        let desc = crypto_arg_desc(e, key_v);
+        let err = dom_exc(
+            e,
+            "InvalidAccessError",
+            &format!("subtle.{usage}: not a CryptoKey (« {desc} »)"),
+        );
         e.reject_promise(pid, err);
         return Ok(Value::Obj(pid));
     };
@@ -1027,7 +1077,12 @@ fn subtle_rsa_oaep(
     };
     let pid = e.new_promise();
     let Some((key_bytes, key_type, _an, key_algo, usages, _)) = crypto_key_of(e, key_v) else {
-        let err = dom_exc(e, "InvalidAccessError", "subtle: not a CryptoKey");
+        let desc = crypto_arg_desc(e, key_v);
+        let err = dom_exc(
+            e,
+            "InvalidAccessError",
+            &format!("subtle.{usage}: not a CryptoKey (« {desc} »)"),
+        );
         e.reject_promise(pid, err);
         return Ok(Value::Obj(pid));
     };

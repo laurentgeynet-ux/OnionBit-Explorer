@@ -7,6 +7,20 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **JS-C232 — `not a CryptoKey`
+  nomme l'argument** (`explorer-jscore`,
+  §B-14 vol 344 wamiz poool) —
+  `subtle.{sign,verify,encrypt,
+  decrypt}` rejetait un argument
+  non-`CryptoKey` sans le nommer :
+  le message porte désormais
+  `« <desc> »` (constructeur /
+  `@@toStringTag` / propres clés —
+  rail JS-C228). Un JWK brut passé
+  à `decrypt` se lira
+  `Object{kty,n,e}`.
+
+
 - **JS-C231 — `RSA-OAEP`**
   (`explorer-jscore`,
   `explorer-net`, `explorer-core`,
