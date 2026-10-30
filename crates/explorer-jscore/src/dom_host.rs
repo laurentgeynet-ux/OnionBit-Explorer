@@ -1936,6 +1936,16 @@ impl Engine {
         self.set_own(sw, "controller", Value::Null, true);
         let ready = self.new_promise(); // jamais résolue — spec.
         self.set_own(sw, "ready", Value::Obj(ready), true);
+        // `ServiceWorkerContainer` hérite `EventTarget` (§B-14
+        // ×5 vols 345/346 — `sw.addEventListener('message'|
+        // 'controllerchange')` cassait les sites SW-guardés) :
+        // rail `__et` + handlers `on*` de l'interface.
+        self.add_method(sw, "addEventListener", et_add_listener);
+        self.add_method(sw, "removeEventListener", et_remove_listener);
+        self.add_method(sw, "dispatchEvent", et_dispatch_event);
+        for h in ["oncontrollerchange", "onmessage", "onmessageerror"] {
+            self.set_own(sw, h, Value::Null, true);
+        }
         let tag = self.str_val("ServiceWorkerContainer");
         self.set_own(sw, crate::interp::SYM_TO_STRING_TAG, tag, false);
         self.set_own(nav, "serviceWorker", Value::Obj(sw), true);

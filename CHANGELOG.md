@@ -7,6 +7,19 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **JS-C234 — `ServiceWorkerContainer`
+  EventTarget** (`explorer-jscore`,
+  §B-14 ×5 vols 345 MAGHREB/ME +
+  346 PH/ID/TH) — le stub JS-C224
+  avait `register`/`ready` mais pas
+  le rail : `sw.addEventListener(
+  'controllerchange'|'message')`
+  cassait les sites SW-guardés.
+  Rail `__et` greffé +
+  `oncontrollerchange`/`onmessage`/
+  `onmessageerror` spec. Verrou
+  `service_worker_container_event_target`.
+
 - **Deadlock `explorer_tick`
   FFI** (`explorer-ffi`, suite
   « Pompe hôte FFI ») —

@@ -1871,3 +1871,33 @@ fn svg_elements_typed_with_webidl_chain() {
         "true|true"
     );
 }
+
+/// §B-14 ×5 (vols 345 MAGHREB/ME + 346 PH/ID/TH) —
+/// `ServiceWorkerContainer` hérite `EventTarget` :
+/// `sw.addEventListener('controllerchange'|'message')`
+/// cassait les sites SW-guardés.
+#[test]
+fn service_worker_container_event_target() {
+    let mut e = engine();
+    assert_eq!(
+        ev(
+            &mut e,
+            "typeof navigator.serviceWorker.addEventListener + ':' \
+             + typeof navigator.serviceWorker.removeEventListener + ':' \
+             + typeof navigator.serviceWorker.dispatchEvent + ':' \
+             + navigator.serviceWorker.oncontrollerchange + ':' \
+             + navigator.serviceWorker.onmessage"
+        ),
+        "function:function:function:null:null"
+    );
+    // listeners stockés + tirables
+    assert_eq!(
+        ev(
+            &mut e,
+            "var hit=0,f=function(){hit++};\
+             navigator.serviceWorker.addEventListener('controllerchange',f);\
+             navigator.serviceWorker.dispatchEvent({type:'controllerchange'});hit"
+        ),
+        "1"
+    );
+}
