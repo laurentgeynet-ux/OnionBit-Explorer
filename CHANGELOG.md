@@ -7,6 +7,21 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **JS-C228 — TypeError `on Object`
+  nomme le receveur** (`explorer-jscore`,
+  §B-14 vol 343 kleinezeitung) —
+  `` `x` is not a function (on Object) ``
+  est aveugle pour les objets littéraux
+  (event-bus/bus d'événements Nuxt) ;
+  le descripteur expose désormais
+  `@@toStringTag` (`on Object@@EvtBus`)
+  ou les propres clés
+  (`on Object{_events,on,emit}`),
+  `Object` nu inchangé quand l'objet
+  n'a ni tag ni clés — même rail que
+  le `reçu=` de `importNode` (JS-C220).
+  Verrou
+  `missing_method_on_bare_object_names_own_keys`.
 - **JS-C227 — `performance` et
   `screen.orientation`
   EventTarget** (`explorer-jscore`,

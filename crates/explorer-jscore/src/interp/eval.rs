@@ -522,12 +522,42 @@ impl Engine {
                                         .and_then(|n| self.heap_string_of(n))
                                         .filter(|n| !n.is_empty())
                                         .unwrap_or_else(|| "Function".to_string()),
-                                    Some(_) => self
-                                        .get_prop(rid, "constructor")
-                                        .and_then(|c| self.get_prop_value(c, "name").ok())
-                                        .and_then(|n| self.heap_string_of(n))
-                                        .filter(|n| !n.is_empty())
-                                        .unwrap_or_else(|| "Object".to_string()),
+                                    Some(_) => {
+                                        let desc = self
+                                            .get_prop(rid, "constructor")
+                                            .and_then(|c| self.get_prop_value(c, "name").ok())
+                                            .and_then(|n| self.heap_string_of(n))
+                                            .filter(|n| !n.is_empty())
+                                            .unwrap_or_else(|| "Object".to_string());
+                                        // « on Object » ne nomme rien —
+                                        // enrichir par `@@toStringTag`
+                                        // puis les propres clés (objets
+                                        // nus/event-bus reconnaissables :
+                                        // §B-14 kleinezeitung vol 343).
+                                        if desc == "Object" {
+                                            let tag = self
+                                                .get_prop(rid, SYM_TO_STRING_TAG)
+                                                .and_then(|t| self.heap_string_of(t))
+                                                .filter(|t| !t.is_empty());
+                                            if let Some(t) = tag {
+                                                format!("Object@@{t}")
+                                            } else {
+                                                let keys = self.own_keys(rid);
+                                                let shown: Vec<&str> = keys
+                                                    .iter()
+                                                    .take(6)
+                                                    .map(String::as_str)
+                                                    .collect();
+                                                if shown.is_empty() {
+                                                    desc
+                                                } else {
+                                                    format!("Object{{{}}}", shown.join(","))
+                                                }
+                                            }
+                                        } else {
+                                            desc
+                                        }
+                                    }
                                     None => "?".to_string(),
                                 },
                                 _ => format!("{recv:?}"),

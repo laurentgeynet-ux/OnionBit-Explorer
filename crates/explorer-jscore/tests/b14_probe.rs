@@ -1731,3 +1731,40 @@ fn performance_and_orientation_event_target() {
     let _ = e.eval("0");
     assert_eq!(ev(&mut e, "globalThis.__r"), "NotSupportedError");
 }
+
+/// §B-14 vol 343 (kleinezeitung) — le `TypeError` `on Object`
+/// nu ne nommait pas le receveur : les propres clés l'identifient
+/// (event-bus/objet littéral) — même rail que `reçu=` d'importNode.
+#[test]
+fn missing_method_on_bare_object_names_own_keys() {
+    let mut e = Engine::new();
+    // Objet event-bus à la Nuxt : clés propres exposées.
+    assert_eq!(
+        ev(
+            &mut e,
+            "var bus={_events:{},on:function(){},emit:function(){}};\
+             try{bus.addEventListener('x',function(){});'no'}\
+             catch(x){x.message.indexOf('_events')>=0?'keys':'?'}"
+        ),
+        "keys"
+    );
+    // `@@toStringTag` nommé prime les clés.
+    assert_eq!(
+        ev(
+            &mut e,
+            "var o={};o[Symbol.toStringTag]='EvtBus';\
+             try{o.missing();'no'}\
+             catch(x){x.message.indexOf('EvtBus')>=0?'tag':'?'}"
+        ),
+        "tag"
+    );
+    // Objet vide → desc « Object » inchangée (pas de bruit).
+    assert_eq!(
+        ev(
+            &mut e,
+            "try{({}).missing();'no'}\
+             catch(x){x.message.indexOf('(on Object)')>=0?'plain':'?'}"
+        ),
+        "plain"
+    );
+}
