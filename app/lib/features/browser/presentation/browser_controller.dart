@@ -367,9 +367,17 @@ final sessionStoreProvider = Provider<SessionStore>(
 );
 
 /// Origine canonique d'une URL de tab (`scheme://host[:port]`)
-/// — clé du store ; invalide → chaîne vide (jamais persistée).
-String _zoomOrigin(String? url) =>
-    url == null ? '' : (Uri.tryParse(url)?.origin ?? '');
+/// — clé du store ; invalide **ou schéma non-http(s)**
+/// (`about:`/`data:`/`file:`… → `Uri.origin` lève) → chaîne
+/// vide, jamais persistée.
+String _zoomOrigin(String? url) {
+  if (url == null) return '';
+  final u = Uri.tryParse(url);
+  if (u == null || (u.scheme != 'http' && u.scheme != 'https')) {
+    return '';
+  }
+  return u.origin;
+}
 
 /// Facteur de zoom d'affichage (étape 57) — implémenté
 /// côté UI via le viewport moteur : `setViewport(w/z, h/z,
