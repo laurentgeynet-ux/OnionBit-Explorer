@@ -1679,3 +1679,55 @@ fn visual_viewport_event_target() {
         "1"
     );
 }
+
+/// §B-14 vol 343 (kleinezeitung Nuxt) — `Performance` et
+/// `ScreenOrientation` héritent `EventTarget` : rail `__et`
+/// greffé sur les deux.
+#[test]
+fn performance_and_orientation_event_target() {
+    let mut e = engine();
+    assert_eq!(
+        ev(
+            &mut e,
+            "typeof performance.addEventListener + ':' \
+             + typeof performance.removeEventListener + ':' \
+             + typeof performance.dispatchEvent"
+        ),
+        "function:function:function"
+    );
+    // listeners stockés + tirables sur performance
+    assert_eq!(
+        ev(
+            &mut e,
+            "var hit=0,f=function(){hit++};\
+             performance.addEventListener('resourcetimingbufferfull',f);\
+             performance.dispatchEvent({type:'resourcetimingbufferfull'});hit"
+        ),
+        "1"
+    );
+    // screen.orientation — ScreenOrientation + ET rail
+    assert_eq!(
+        ev(
+            &mut e,
+            "typeof screen.orientation + ':' \
+             + typeof screen.orientation.addEventListener + ':' \
+             + screen.orientation.angle + ':' \
+             + (screen.orientation.type.indexOf('landscape')>=0 \
+                || screen.orientation.type.indexOf('portrait')>=0)"
+        ),
+        "object:function:0:true"
+    );
+    // lock() → promesse rejetée NotSupportedError (honnête)
+    assert_eq!(
+        ev(
+            &mut e,
+            "globalThis.__r='p';\
+             screen.orientation.lock('landscape')\
+               .then(()=>{__r='resolved'})\
+               .catch(x=>{__r=x.name});__r"
+        ),
+        "p"
+    );
+    let _ = e.eval("0");
+    assert_eq!(ev(&mut e, "globalThis.__r"), "NotSupportedError");
+}

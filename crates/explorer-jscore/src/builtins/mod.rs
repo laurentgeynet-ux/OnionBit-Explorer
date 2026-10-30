@@ -532,6 +532,25 @@ pub(crate) fn install(e: &mut Engine) {
     e.set_own(navigation, "type", Value::Num(0.0), true);
     e.set_own(navigation, "redirectCount", Value::Num(0.0), true);
     e.set_own(performance, "navigation", Value::Obj(navigation), true);
+    // `Performance` hérite `EventTarget` (§B-14 vol 343,
+    // kleinezeitung — `performance.addEventListener(
+    // 'resourcetimingbufferfull', cb)` est un pattern Nuxt/
+    // perf-monitoring réel) : rail `__et` générique.
+    e.add_method(
+        performance,
+        "addEventListener",
+        crate::dom_host::et_add_listener,
+    );
+    e.add_method(
+        performance,
+        "removeEventListener",
+        crate::dom_host::et_remove_listener,
+    );
+    e.add_method(
+        performance,
+        "dispatchEvent",
+        crate::dom_host::et_dispatch_event,
+    );
     e.set_own(g, "performance", Value::Obj(performance), false);
 
     // `TextEncoder`/`TextDecoder` — UTF-8 only. Chacun a SON

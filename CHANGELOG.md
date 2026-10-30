@@ -7,6 +7,23 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **JS-C227 — `performance` et
+  `screen.orientation`
+  EventTarget** (`explorer-jscore`,
+  §B-14 vol 343 kleinezeitung,
+  receveur #2 après `visualViewport`)
+  — `Performance` et
+  `ScreenOrientation` héritent
+  `EventTarget` en spec : rail
+  `__et` greffé sur les deux.
+  `screen.orientation` posé :
+  `type` (landscape/portrait selon
+  viewport), `angle` 0, `lock()`
+  rejette `NotSupportedError`
+  honnête, `unlock()` `undefined`.
+  Verrou
+  `performance_and_orientation_event_target`.
+
 - **PR-10d (partiel) —
   structured-clone IDB**
   (`explorer-jscore`) — `Date`,

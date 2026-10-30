@@ -2815,6 +2815,30 @@ impl Engine {
             self.set_own(screen, k, Value::Num(f64::from(v)), true);
         }
         self.hooks.screen_obj = Some(screen);
+        // `screen.orientation` (§B-14 vol 343) — `ScreenOrientation`
+        // hérite `EventTarget` : `orientation.addEventListener(
+        // 'change', cb)` est un pattern news/mobile standard.
+        // Métriques dérivées du viewport à l'install ;
+        // `lock()` rejette `NotSupportedError` (pas de verrou
+        // d'orientation hôte — honnête), `unlock()` = `undefined`.
+        let so = self.new_object();
+        let oty = if w >= h {
+            "landscape-primary"
+        } else {
+            "portrait-primary"
+        };
+        let oty = self.str_val(oty);
+        self.set_own(so, "type", oty, true);
+        self.set_own(so, "angle", Value::Num(0.0), true);
+        self.set_own(so, "onchange", Value::Null, true);
+        self.add_method(so, "lock", so_lock);
+        self.add_method(so, "unlock", |_e, _t, _a| Ok(Value::Undefined));
+        self.add_method(so, "addEventListener", et_add_listener);
+        self.add_method(so, "removeEventListener", et_remove_listener);
+        self.add_method(so, "dispatchEvent", et_dispatch_event);
+        let tag = self.str_val("ScreenOrientation");
+        self.set_own(so, crate::interp::SYM_TO_STRING_TAG, tag, false);
+        self.set_own(screen, "orientation", Value::Obj(so), true);
         self.set_own(g, "screen", Value::Obj(screen), false);
         self.set_own(g, "innerWidth", Value::Num(f64::from(w)), false);
         self.set_own(g, "innerHeight", Value::Num(f64::from(h)), false);
@@ -11770,6 +11794,19 @@ fn sw_register(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
     let n = e.str_val("NotSupportedError");
     e.set_own(o, "name", n, true);
     let m = e.str_val("serviceWorker: no SW runtime");
+    e.set_own(o, "message", m, true);
+    e.reject_promise(pid, Value::Obj(o));
+    Ok(Value::Obj(pid))
+}
+
+/// `screen.orientation.lock` (§B-14 vol 343) — pas de verrou
+/// d'orientation hôte → `NotSupportedError` rejetée.
+fn so_lock(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
+    let pid = e.new_promise();
+    let o = e.new_object();
+    let n = e.str_val("NotSupportedError");
+    e.set_own(o, "name", n, true);
+    let m = e.str_val("orientation lock: no host support");
     e.set_own(o, "message", m, true);
     e.reject_promise(pid, Value::Obj(o));
     Ok(Value::Obj(pid))
