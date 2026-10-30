@@ -3313,7 +3313,12 @@ fn media_offer_json_carries_loop_and_mse_buffers() {
         id: 7,
         tab: 3,
         kind: MediaKind::Video,
-        rect: MediaRect { x: 0.0, y: 0.0, w: 640.0, h: 360.0 },
+        rect: MediaRect {
+            x: 0.0,
+            y: 0.0,
+            w: 640.0,
+            h: 360.0,
+        },
         url: "blob:http://x/1".into(),
         mime: Some("video/mp4".into()),
         controls: true,
