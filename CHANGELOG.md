@@ -7,6 +7,21 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **JS-C229 — `cookieStore`
+  EventTarget** (`explorer-jscore`,
+  §B-14 vol 344 kleinezeitung) —
+  receveur #2 nommé par JS-C228 :
+  `Object{get,getAll,set,delete}` =
+  notre jar `cookieStore` nu, or
+  `CookieStore` hérite `EventTarget`
+  — le `addEventListener('change')`
+  de Nuxt `entry.js` cassait la page
+  (500). Rail `__et` greffé +
+  `onchange` + `@@toStringTag`
+  `CookieStore` ; le jar reste vide
+  et honnête.
+  Verrou `cookie_store_event_target`.
+
 - **PR-10d — isolation IDB par
   contexte** (`explorer-jscore`,
   `explorer-js`, `explorer-core`)

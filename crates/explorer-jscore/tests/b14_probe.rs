@@ -1768,3 +1768,43 @@ fn missing_method_on_bare_object_names_own_keys() {
         "plain"
     );
 }
+
+/// §B-14 vol 344 (kleinezeitung) — le receveur nommé par JS-C228
+/// était `cookieStore` (`{get,getAll,set,delete}` nu) :
+/// `CookieStore` hérite `EventTarget` — `addEventListener(
+/// 'change', cb)` est le pattern Nuxt qui cassait entry.js.
+#[test]
+fn cookie_store_event_target() {
+    let mut e = engine();
+    assert_eq!(
+        ev(
+            &mut e,
+            "typeof cookieStore.addEventListener + ':' \
+             + typeof cookieStore.removeEventListener + ':' \
+             + typeof cookieStore.dispatchEvent + ':' \
+             + ({}).toString.call(cookieStore)"
+        ),
+        "function:function:function:[object CookieStore]"
+    );
+    // listener 'change' stocké + tirable sur cookieStore.
+    assert_eq!(
+        ev(
+            &mut e,
+            "var hit=0,f=function(){hit++};\
+             cookieStore.addEventListener('change',f);\
+             cookieStore.dispatchEvent({type:'change'});hit"
+        ),
+        "1"
+    );
+    // jar vide honnête conservé.
+    assert_eq!(
+        ev(
+            &mut e,
+            "globalThis.__r='p';\
+             cookieStore.get('x').then(v=>{__r=''+v});__r"
+        ),
+        "p"
+    );
+    let _ = e.eval("0");
+    assert_eq!(ev(&mut e, "globalThis.__r"), "null");
+}

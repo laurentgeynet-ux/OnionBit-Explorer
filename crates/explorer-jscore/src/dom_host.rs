@@ -3169,6 +3169,10 @@ impl Engine {
         // `cookieStore` — jar vide honnête (get→null,
         // getAll→[], set/delete→resolve) : les guards
         // `cookieStore && …` des loaders passent.
+        // `CookieStore` hérite `EventTarget` (§B-14 vol 344,
+        // bras nommé par JS-C228 : `addEventListener on
+        // Object{get,getAll,set,delete}` — Nuxt entry.js) :
+        // `change` est le seul événement de l'interface.
         let cs = self.new_object();
         for (k, f2) in [
             ("get", cookie_get as crate::heap::NativeFn),
@@ -3179,6 +3183,12 @@ impl Engine {
             let m = self.native_fn(k, f2);
             self.set_own(cs, k, m, true);
         }
+        self.set_own(cs, "onchange", Value::Null, true);
+        self.add_method(cs, "addEventListener", et_add_listener);
+        self.add_method(cs, "removeEventListener", et_remove_listener);
+        self.add_method(cs, "dispatchEvent", et_dispatch_event);
+        let tag = self.str_val("CookieStore");
+        self.set_own(cs, crate::interp::SYM_TO_STRING_TAG, tag, false);
         self.set_own(g, "cookieStore", Value::Obj(cs), false);
         // `WebAssembly` — namespace honnête : les binaires wasm
         // sont hors périmètre moteur ; `validate` → `false` (un
