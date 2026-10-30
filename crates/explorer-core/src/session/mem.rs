@@ -16,21 +16,33 @@
 //!
 //! - **Octets exacts** où NAV possède les tampons : `frame.
 //!   pixels`, `png`, bitmaps `DecodedImage.rgba`, corps
-//!   `bg_bodies` — et le heap JS via `JsEngine::heap_stats`.
+//!   `bg_bodies`/`img_bodies`, corps POST de l'historique,
+//!   textes CSS `linked_sheets`/`adopted_sheets` — et le
+//!   heap JS via `JsEngine::heap_stats`.
+//! - **Tampons de livrées JS** (`js_pending_*`) : corps
+//!   réseau, scripts dynamiques/modules, résultats
+//!   `crypto.subtle`, charges `EventSource`/`WebSocket`
+//!   accumulées pendant un détachement moteur — un burst
+//!   fetch/XHR non drainé y vit en octets exacts (étape
+//!   168 : premier suspect octet-identifié du bras
+//!   §B-59 après le bornage `flow_columns` R-136).
 //! - **Comptes** pour les structures domaine sans accesseur
 //!   de capacité (`Dom.live_count`, boîtes de layout, items
 //!   de display list) : le rapport distingue `_nodes`/`_boxes`
 //!   (comptes) de `_bytes` (octets mesurés) — jamais un faux
 //!   total octet inventé sur les structures PIPE.
 //! - **Dédup `Arc`** : une même `DecodedImage` peut figurer
-//!   dans `images.*`, les items de la display list et les
-//!   caches `img_decoded`/`bg_decoded` — l'empreinte ne la
-//!   compte qu'une fois par onglet.
+//!   dans `images.*`, les items de la display list, les
+//!   surfaces `frame_bitmaps` et les caches `img_decoded`/
+//!   `bg_decoded` — l'empreinte ne la compte qu'une fois
+//!   par onglet.
 //! - Non mesuré, documenté : les caches de fontes
 //!   (`GlyphCache`/`FontCache` — pas d'accesseur), les styles
-//!   calculés `prev_styles`, le DOM **miroir** interne de
-//!   `explorer-jscore` (hors `heap_stats`) et les registres
-//!   IndexedDB/caches (JS-C72 — `Rc` injectables hors heap).
+//!   calculés `prev_styles` (compte seul), le DOM **miroir**
+//!   interne de `explorer-jscore` (hors `heap_stats`), les
+//!   buffers MSE des surfaces média claimées par l'hôte et
+//!   les registres IndexedDB/caches (JS-C72 — `Rc`
+//!   injectables hors heap).
 
 use std::collections::HashMap as StdHashMap;
 
@@ -66,6 +78,42 @@ pub struct MemReport {
     /// Corps compressés retenus de la page vivante (étape
     /// 133 — source du re-décodage au retour bfcache).
     pub img_bodies_bytes: usize,
+    /// Corps réseau tamponnés pendant un détachement JS
+    /// (`js_pending_net` — livrés à la réinsertion ; un
+    /// burst fetch/XHR non drainé gonfle ce réservoir —
+    /// bras §B-59 instrumenté étape 168).
+    pub pending_net_bytes: usize,
+    /// Corps des `<script>` dynamiques et sources de
+    /// graphes de modules tamponnés pendant le même
+    /// détachement (`js_pending_dyn`/`js_pending_mod`).
+    pub pending_dyn_bytes: usize,
+    /// Charges des livrées auxiliaires en attente :
+    /// résultats `crypto.subtle`, `data` `EventSource`,
+    /// messages `WebSocket` (texte/binaire).
+    pub pending_aux_bytes: usize,
+    /// Livrées en attente tous tampons confondus (compte :
+    /// `js_pending_*`, cycle de vie document, naissances
+    /// d'animations, pushes d'attributs, intentions de
+    /// navigation, inputs différés).
+    pub pending_events: usize,
+    /// Textes CSS `linked_sheets` + `adopted_sheets` de la
+    /// page vivante (octets exacts).
+    pub sheets_bytes: usize,
+    /// Corps POST conservés dans l'historique local —
+    /// l'entrée stocke la **requête** entière pour la
+    /// rejouer à la traversée (étape 56).
+    pub hist_body_bytes: usize,
+    /// Entrées de l'historique local (compte).
+    pub hist_entries: usize,
+    /// Styles calculés de la dernière mise en page
+    /// (`prev_styles`, indexés par ordinal d'élément —
+    /// compte seulement : `ComputedStyle` n'est pas
+    /// mesurable à l'octet sans instrumentation PIPE).
+    pub prev_styles: usize,
+    /// Surfaces média offertes de la page vivante (compte —
+    /// les buffers MSE vivent dans le moteur ou l'hôte
+    /// claimé, hors ce rapport).
+    pub media_surfaces: usize,
     /// Heap JS du contexte vivant (`heap_stats().estimated_bytes`).
     pub js_heap_bytes: usize,
     /// Nombre de pages gelées dans le bfcache.
@@ -158,6 +206,7 @@ impl Session {
     /// stats du moteur JS vivant et gelé (`heap_stats` est
     /// `&mut` : le worker jscore répond sur son canal — appel
     /// synchrone borné comme tout `JsEngine`).
+    #[allow(clippy::too_many_lines)] // attribution par réservoir : somme plate, pas de sous-fonction nette
     pub fn mem_report(&mut self, tab: TabId) -> Option<MemReport> {
         let entry = self.tabs.get_mut(&tab)?;
         let mut r = MemReport::default();
@@ -181,6 +230,79 @@ impl Session {
         }
         r.bg_bodies_bytes = entry.bg_bodies.values().map(Vec::len).sum();
         r.img_bodies_bytes = entry.img_bodies.values().map(Vec::len).sum();
+        // Tampons de livrées JS — octets exacts, premier
+        // suspect du bras §B-59 post-R-136 (un détachement
+        // long + burst réseau = octets retenus hors heap).
+        r.pending_net_bytes = entry.js_pending_net.iter().map(|d| d.body.len()).sum();
+        r.pending_dyn_bytes = entry
+            .js_pending_dyn
+            .iter()
+            .filter_map(|d| d.2.as_ref())
+            .map(String::len)
+            .sum::<usize>()
+            + entry
+                .js_pending_mod
+                .iter()
+                .filter_map(|d| d.2.as_ref())
+                .map(|m| m.graph.sources.values().map(String::len).sum::<usize>())
+                .sum::<usize>();
+        r.pending_aux_bytes = entry
+            .js_pending_crypto
+            .iter()
+            .filter_map(|c| c.result.as_ref().ok())
+            .map(Vec::len)
+            .sum::<usize>()
+            + entry
+                .js_pending_es
+                .iter()
+                .map(|(_, _, ev)| match ev {
+                    explorer_js::EsEvent::Message { data, event, id } => {
+                        data.len() + event.as_ref().map_or(0, String::len) + id.len()
+                    }
+                    _ => 0,
+                })
+                .sum::<usize>()
+            + entry
+                .js_pending_ws
+                .iter()
+                .map(|(_, _, ev)| match ev {
+                    explorer_js::WsEventKind::Text(t) => t.len(),
+                    explorer_js::WsEventKind::Binary(b) => b.len(),
+                    explorer_js::WsEventKind::Open(s) => s.len(),
+                    explorer_js::WsEventKind::Close { reason, .. } => reason.len(),
+                    explorer_js::WsEventKind::Error => 0,
+                })
+                .sum::<usize>();
+        r.pending_events = entry.js_pending_net.len()
+            + entry.js_pending_dyn.len()
+            + entry.js_pending_mod.len()
+            + entry.js_pending_crypto.len()
+            + entry.js_pending_es.len()
+            + entry.js_pending_ws.len()
+            + entry.js_pending_attrs.len()
+            + entry.pending_doc_lifecycle.len()
+            + entry.pending_anim_births.len()
+            + entry.pending_nav.len()
+            + entry.pending_nav_reqs.len()
+            + entry.pending_push.len()
+            + usize::from(entry.pending_replace.is_some())
+            + entry.deferred_inputs.len();
+        r.sheets_bytes = entry
+            .linked_sheets
+            .iter()
+            .chain(entry.adopted_sheets.iter())
+            .map(String::len)
+            .sum();
+        r.hist_entries = entry.hist.len();
+        r.hist_body_bytes = entry
+            .hist
+            .iter()
+            .filter_map(|e| e.req.body.as_ref())
+            .map(Vec::len)
+            .sum();
+        r.prev_styles = entry.prev_styles.len();
+        r.media_surfaces = entry.media.len();
+        collect_imgs(&mut seen, entry.frame_bitmaps.values());
         if let Some(js) = entry.js.as_mut() {
             if let Some(s) = js.heap_stats() {
                 r.js_heap_bytes = s.estimated_bytes;
@@ -230,6 +352,11 @@ impl Session {
             + r.images_bytes
             + r.bg_bodies_bytes
             + r.img_bodies_bytes
+            + r.pending_net_bytes
+            + r.pending_dyn_bytes
+            + r.pending_aux_bytes
+            + r.sheets_bytes
+            + r.hist_body_bytes
             + r.js_heap_bytes
             + r.bfcache_frame_bytes
             + r.bfcache_png_bytes

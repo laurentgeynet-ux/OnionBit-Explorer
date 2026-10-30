@@ -288,6 +288,54 @@ impl Session {
         let bodies_b: usize = entry.img_bodies.values().map(Vec::len).sum::<usize>()
             + entry.bg_bodies.values().map(Vec::len).sum::<usize>();
         let netpend_b: usize = entry.js_pending_net.iter().map(|d| d.body.len()).sum();
+        // §B-59 — mêmes réservoirs que `Session::mem_report`
+        // (étape 168) : scripts dynamiques/modules, livrées
+        // auxiliaires, feuilles CSS, surfaces sous-frames —
+        // le bras fuyard vit peut-être dans ces tampons.
+        let dynpend_b: usize = entry
+            .js_pending_dyn
+            .iter()
+            .filter_map(|d| d.2.as_ref())
+            .map(String::len)
+            .sum::<usize>()
+            + entry
+                .js_pending_mod
+                .iter()
+                .filter_map(|d| d.2.as_ref())
+                .map(|m| m.graph.sources.values().map(String::len).sum::<usize>())
+                .sum::<usize>();
+        let auxpend_b: usize = entry
+            .js_pending_crypto
+            .iter()
+            .filter_map(|c| c.result.as_ref().ok())
+            .map(Vec::len)
+            .sum::<usize>()
+            + entry
+                .js_pending_es
+                .iter()
+                .map(|(_, _, ev)| match ev {
+                    explorer_js::EsEvent::Message { data, .. } => data.len(),
+                    _ => 0,
+                })
+                .sum::<usize>()
+            + entry
+                .js_pending_ws
+                .iter()
+                .map(|(_, _, ev)| match ev {
+                    explorer_js::WsEventKind::Text(t) => t.len(),
+                    explorer_js::WsEventKind::Binary(b) => b.len(),
+                    explorer_js::WsEventKind::Open(s) => s.len(),
+                    explorer_js::WsEventKind::Close { reason, .. } => reason.len(),
+                    explorer_js::WsEventKind::Error => 0,
+                })
+                .sum::<usize>();
+        let sheets_b: usize = entry
+            .linked_sheets
+            .iter()
+            .chain(entry.adopted_sheets.iter())
+            .map(String::len)
+            .sum();
+        let frames_b: usize = entry.frame_bitmaps.values().map(|i| i.rgba.len()).sum();
         let pend = entry.js_pending_net.len()
             + entry.js_pending_dyn.len()
             + entry.js_pending_mod.len()
@@ -306,7 +354,14 @@ impl Session {
             bg_b,
             bodies_b,
             netpend_b,
+            dynpend_b,
+            auxpend_b,
+            sheets_b,
+            frames_b,
             pend,
+            media_n = entry.media.len(),
+            hist = entry.hist.len(),
+            styles = entry.prev_styles.len(),
             js = %eng.diag_line().unwrap_or_default(),
             "mem_diag"
         );
