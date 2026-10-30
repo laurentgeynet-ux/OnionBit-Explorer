@@ -113,13 +113,14 @@ fn set_err(msg: impl std::fmt::Display) {
 /// de [`explorer_create`], libéré par [`explorer_destroy`].
 pub struct ExplorerHandle {
     rt: std::sync::Arc<tokio::runtime::Runtime>,
-    /// `Arc<Mutex>` — le thread pompe (`spawn_pump`) partage
-    /// la session avec les exports : le daemon prouve
-    /// `Session: Send` (même schéma `Arc<Mutex>` dans son
-    /// `ApiState`). Les exports verrouillent par appel ; la
-    /// pompe verrouille par battement — un call JS long
-    /// garde le verrou (bounded par les deadlines internes).
-    session: std::sync::Arc<std::sync::Mutex<Session>>,
+    /// `Arc<tokio::Mutex>` — partagée entre exports et le
+    /// thread pompe (`spawn_pump`) — le daemon prouve
+    /// `Session: Send` (même `Arc<Mutex>` dans son
+    /// `ApiState`). tokio car la pompe consomme
+    /// [`pump_timers_shared`]/[`drain_applies_shared`]
+    /// (JS hors verrou via take/commit — les exports ne
+    /// patientent jamais derrière un burst JS).
+    session: std::sync::Arc<tokio::sync::Mutex<Session>>,
     /// Canal d'événements de session — drainé par
     /// [`explorer_media_events`] (filtré sur le bras
     /// `MediaSurface`, étape 71e ; le pull des frames reste
@@ -145,13 +146,11 @@ impl Drop for ExplorerHandle {
     }
 }
 
-/// Verrouille la session — poison = on récupère le guard
-/// (un panic d'un appel précédent ne doit pas figer les
-/// suivants — `Mutex` std, jamais d'`unwrap` nu).
-fn sess(h: &ExplorerHandle) -> std::sync::MutexGuard<'_, Session> {
-    h.session
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
+/// Verrouille la session (tokio `Mutex` — `lock().await`
+/// conduit par `block_on` ; le poison tokio n'existe pas,
+/// un panic précédent ne fige pas le mutex).
+fn sess(h: &ExplorerHandle) -> tokio::sync::MutexGuard<'_, Session> {
+    h.rt.block_on(h.session.lock())
 }
 
 /// Répertoire de fontes par défaut — `EXPLORER_FONT_DIR` en
@@ -241,28 +240,35 @@ unsafe fn read_str<'a>(ptr: *const u8, len: usize, max: usize) -> Option<&'a str
 /// bornée — jamais busy-loop, jamais le sommeil complet
 /// quand un timer plus court est en file.
 fn spawn_pump(
-    session: &std::sync::Arc<std::sync::Mutex<Session>>,
+    rt: &std::sync::Arc<tokio::runtime::Runtime>,
+    session: &std::sync::Arc<tokio::sync::Mutex<Session>>,
     stop: &std::sync::Arc<std::sync::atomic::AtomicBool>,
 ) {
     const PUMP_MS: std::time::Duration = std::time::Duration::from_millis(10);
-    fn pump_once(s: &mut Session) -> std::time::Duration {
-        let _ = s.poll_net();
-        let _ = s.pump_timers_all();
-        s.drain_applies();
-        s.next_timer_deadline().unwrap_or(PUMP_MS).min(PUMP_MS)
-    }
+    let rt = std::sync::Arc::clone(rt);
     let s = std::sync::Arc::clone(session);
     let stop = std::sync::Arc::clone(stop);
     std::thread::spawn(move || {
         while !stop.load(std::sync::atomic::Ordering::Relaxed) {
-            let wait = match s.try_lock() {
-                Ok(mut g) => pump_once(&mut g),
-                Err(std::sync::TryLockError::Poisoned(p)) => pump_once(&mut p.into_inner()),
-                // Un export tient la session (navigate, tick,
-                // frame…) — la pompe est un remplisseur, pas
-                // un compétiteur : elle cède ce battement.
-                Err(std::sync::TryLockError::WouldBlock) => PUMP_MS,
-            };
+            let wait = rt.block_on(async {
+                let (wait, tabs) = {
+                    let mut sess = s.lock().await;
+                    let _ = sess.poll_net();
+                    let w = sess.next_timer_deadline().unwrap_or(PUMP_MS).min(PUMP_MS);
+                    (w, sess.tabs())
+                };
+                // Miroir du daemon (main.rs étape 51/52) :
+                // applies + pompe JS par onglet via les
+                // helpers partagés — le moteur est extrait
+                // (take/commit), le run JS tourne hors
+                // verrou — un export n'attend jamais un
+                // burst JS sous le mutex.
+                for tab in &tabs {
+                    explorer_core::drain_applies_shared(&s, *tab).await;
+                    explorer_core::pump_timers_shared(&s, *tab).await;
+                }
+                wait
+            });
             std::thread::sleep(wait);
         }
     });
@@ -305,9 +311,9 @@ fn create_inner(profile_dir: Option<PathBuf>) -> *mut ExplorerHandle {
     session.set_js_factory(explorer_js::JscoreEngine::factory());
     session.set_store(Arc::new(explorer_core::JsonFileStore::open(&dir)));
     let events = session.subscribe();
-    let session = std::sync::Arc::new(std::sync::Mutex::new(session));
+    let session = std::sync::Arc::new(tokio::sync::Mutex::new(session));
     let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-    spawn_pump(&session, &stop);
+    spawn_pump(&rt, &session, &stop);
     Box::into_raw(Box::new(ExplorerHandle {
         rt,
         session,
@@ -1547,7 +1553,7 @@ mod tests {
         let events = session.subscribe();
         Box::into_raw(Box::new(ExplorerHandle {
             rt: std::sync::Arc::new(rt),
-            session: std::sync::Arc::new(std::sync::Mutex::new(session)),
+            session: std::sync::Arc::new(tokio::sync::Mutex::new(session)),
             events,
             media_pending: String::new(),
             _profile_lock: None,
