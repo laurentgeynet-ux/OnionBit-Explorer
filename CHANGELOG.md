@@ -7,6 +7,28 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **PR-10a — persistance
+  `IndexedDB`** (`explorer-jscore`,
+  `explorer-js`, `explorer-core`)
+  — la sémantique JS-C72
+  (`open`/transactions/index/
+  cursors) devient durable :
+  `Engine::idb_snapshot()`/
+  `idb_restore(json)` sérialisent
+  le registre via le `stringify`/
+  `parse` interne (sous-ensemble
+  structured-clone — `Map`/
+  `TypedArray` arrondis, arrêté
+  documenté) ; `idb-<slug>.json`
+  par origine via
+  `ProfileStore::load_idb`/
+  `save_idb` ; restore au
+  bootstrap du contexte, drain
+  + save aux points
+  `after_script` (changement
+  réel seulement — snapshot
+  vide jamais écrit).
+
 - **PR-17 — crash dumps**
   (`explorer-ffi`) — un panic
   du moteur écrit

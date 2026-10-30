@@ -71,8 +71,22 @@ décidée 2026-10-30 avec le bundle portable (Étape 167).
 
 ## Palier PR-P3 — étapes dédiées (ADR probable chacune)
 
-- [ ] **PR-10. IndexedDB** — moteur clé-valeur transactionnel
-  par origine : base embarquée, pas un JSON.
+- [ ] **PR-10. IndexedDB** — magasin d'objets transactionnel
+  par origine. **Approche polyfill** : primitives KV host
+  (`__idb_*`, backend `state/idb-<slug>.json`) + shim JS
+  portant la sémantique spec (IDBRequest, transactions,
+  cursors). Découpé :
+  - [x] **PR-10a** — persistance : `Engine::idb_snapshot`/
+    `idb_restore` (enveloppe JSON via `stringify`/`parse`
+    internes, borne 100k records/store) + `idb-<slug>.json`
+    par origine (`ProfileStore::load_idb`/`save_idb`,
+    atomique) + bridge `explorer-js` (Cmd InstallIdb/DrainIdb)
+    + wiring session (restore au ctx, drain à `after_script`).
+  - [ ] **PR-10b** — shim : `open`/`createObjectStore`/
+    `put`/`get`/`delete`/`getAll` + transactions
+    `readonly`/`readwrite` + clés nombre/chaîne.
+  - [ ] **PR-10c** — `IDBIndex`, `IDBCursor`/`keyRange`,
+    `DOMException` fidèles, `versionchange` upgrade.
 - [ ] **PR-11. Mots de passe** — ProfileVault (AEAD par
   fichier, passphrase/invité) + détection + UI remplissage.
 - [ ] **PR-12. Service Workers + CacheStorage** — cycle de

@@ -777,6 +777,10 @@ pub struct Session {
     /// installé au spawn du contexte, map drainée aux points
     /// de synchro, persistée via le profil.
     local_storage: HashMap<String, BTreeMap<String, String>>,
+    /// Snapshots `IndexedDB` par origine — dernier JSON
+    /// persisté, pour n'écrire `idb-*.json` qu'au changement
+    /// réel (PR-10).
+    idb_snapshots: HashMap<String, String>,
     /// Canal des réponses de requêtes script-initiées
     /// (tâches tokio → points de synchro — ADR-0019 exige
     /// des intentions drainées, jamais de callback
@@ -1053,6 +1057,7 @@ impl Session {
             max_inflight: cfg.max_inflight,
             cookies: Arc::new(CookieJar::new()),
             local_storage: HashMap::new(),
+            idb_snapshots: HashMap::new(),
             net_tx,
             net_rx,
             pending_net_done: std::collections::VecDeque::new(),

@@ -2798,12 +2798,13 @@ impl Session {
         if self.js_stalled(tab) {
             return;
         }
-        let Some((page, writes, map)) = self.tabs.get_mut(&tab).and_then(|e| {
+        let Some((page, writes, map, idb)) = self.tabs.get_mut(&tab).and_then(|e| {
             e.js.as_mut().map(|eng| {
                 (
                     e.url.clone(),
                     eng.drain_cookie_writes(),
                     eng.drain_storage(),
+                    eng.drain_idb(),
                 )
             })
         }) else {
@@ -2834,6 +2835,19 @@ impl Session {
                 self.local_storage.insert(key.clone(), map.clone());
                 if let Some(s) = &self.store {
                     s.save_storage(&key, &map);
+                }
+            }
+            // PR-10 : snapshot IndexedDB persisté — même règle
+            // « changement réel » que localStorage (un contexte
+            // qui n'a jamais touché IDB n'écrit rien : le
+            // snapshot `{}` ne vaut pas une écriture).
+            if idb != "{}" && idb != "{\"dbs\":{}}" && !idb.is_empty() {
+                let changed = self.idb_snapshots.get(&key).is_none_or(|prev| *prev != idb);
+                if changed {
+                    self.idb_snapshots.insert(key.clone(), idb.clone());
+                    if let Some(s) = &self.store {
+                        s.save_idb(&key, &idb);
+                    }
                 }
             }
         }

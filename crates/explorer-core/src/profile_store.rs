@@ -319,6 +319,21 @@ impl ProfileStore for JsonFileStore {
             .and_then(|m| m.get(name).cloned())
             .unwrap_or_default()
     }
+
+    /// `idb-<slug>.json` (PR-10) — snapshot `IndexedDB` brut de
+    /// l'origine ; contenu opaque côté store (le moteur parse).
+    fn load_idb(&self, origin: &str) -> String {
+        fs::read_to_string(self.dir.join(idb_name(origin))).unwrap_or_default()
+    }
+
+    fn save_idb(&self, origin: &str, json: &str) {
+        let _guard = self.io.lock().ok();
+        let dst = self.dir.join(idb_name(origin));
+        let tmp = self.dir.join(format!("{}.tmp", idb_name(origin)));
+        if fs::write(&tmp, json).is_ok() {
+            let _ = fs::rename(&tmp, &dst);
+        }
+    }
 }
 
 /// Forme sérialisée d'une entrée `downloads.json` (PR-1).
@@ -674,4 +689,20 @@ fn storage_name(origin: &str) -> String {
         .take(64)
         .collect();
     format!("storage-{slug}.json")
+}
+
+/// `idb-<slug>.json` — même slug que `storage_name` (PR-10).
+fn idb_name(origin: &str) -> String {
+    let slug: String = origin
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .take(64)
+        .collect();
+    format!("idb-{slug}.json")
 }

@@ -78,6 +78,11 @@ fn arg(args: &[Value], i: usize) -> Value {
 /// exigerait une sérialisation, hors scope JS-C72).
 pub type IdbRegistry = Rc<RefCell<HashMap<String, IdbDb>>>;
 
+/// Borne de restauration `idb_restore` (PR-10a) : records par
+/// store — un snapshot tronqué/corrompu ne doit pas boucler
+/// indéfiniment ni saturer la mémoire.
+const IDB_SNAPSHOT_CAP: usize = 100_000;
+
 /// Trace GC (ADR-0008) des enregistrements — les valeurs
 /// `put()` sont des `Value` moteur (structured clone) : sans
 /// trace, le mark-sweep réclame un objet encore présent en
@@ -3149,5 +3154,170 @@ impl Engine {
     /// même couture que [`Engine::install_idb`].
     pub fn install_caches(&mut self, reg: &CacheRegistry) {
         install_caches(self, Some(reg.clone()));
+    }
+
+    /// Snapshot JSON du registre `IndexedDB` (PR-10a) :
+    /// `{name:{version,stores:{sname:{keyPath,autoInc,nextKey,
+    /// indexes:{iname:{keyPath,unique,multi}},records:[[key,
+    /// value],…]}}}}` — la valeur passe par le `stringify`
+    /// interne (sous-ensemble structured-clone JSON :
+    /// `Map`/`TypedArray`/fonctions arrondis ou omis,
+    /// dégradation documentée).
+    pub fn idb_snapshot(&mut self) -> String {
+        let dbs = self.new_object();
+        {
+            let reg = self.idb.reg.clone();
+            if let Some(reg) = reg {
+                let map = reg.borrow();
+                for (db_name, db) in &*map {
+                    let d = self.new_object();
+                    self.set_own(d, "version", Value::Num(db.version as f64), true);
+                    let stores = self.new_object();
+                    for (s_name, store) in &db.stores {
+                        let s = self.new_object();
+                        match &store.key_path {
+                            Some(kp) => {
+                                let v = self.str_val(kp.clone());
+                                self.set_own(s, "keyPath", v, true);
+                            }
+                            None => self.set_own(s, "keyPath", Value::Null, true),
+                        }
+                        self.set_own(s, "autoInc", Value::Bool(store.auto_inc), true);
+                        self.set_own(s, "nextKey", Value::Num(store.next_key), true);
+                        let idxs = self.new_object();
+                        for (i_name, idef) in &store.indexes {
+                            let io = self.new_object();
+                            let kp = self.str_val(idef.key_path.clone());
+                            self.set_own(io, "keyPath", kp, true);
+                            self.set_own(io, "unique", Value::Bool(idef.unique), true);
+                            self.set_own(io, "multi", Value::Bool(idef.multi), true);
+                            self.set_own(idxs, i_name, Value::Obj(io), true);
+                        }
+                        self.set_own(s, "indexes", Value::Obj(idxs), true);
+                        let mut recs = Vec::with_capacity(store.records.len());
+                        for (k, v) in &store.records {
+                            let kv = k.to_value(self);
+                            recs.push(self.new_array(vec![kv, *v]));
+                        }
+                        let ra = self.new_array(recs);
+                        self.set_own(s, "records", ra, true);
+                        self.set_own(stores, s_name, Value::Obj(s), true);
+                    }
+                    self.set_own(d, "stores", Value::Obj(stores), true);
+                    self.set_own(dbs, db_name, Value::Obj(d), true);
+                }
+            }
+        }
+        let root = self.new_object();
+        self.set_own(root, "dbs", Value::Obj(dbs), true);
+        crate::json::stringify(self, Value::Obj(root))
+            .ok()
+            .and_then(|v| self.to_js_string(v).ok())
+            .unwrap_or_else(|| "{}".to_string())
+    }
+
+    /// Restaure un snapshot `idb_snapshot` dans le registre
+    /// (PR-10a) — entrée illisible/structure invalide = les
+    /// branches concernées sont ignorées, jamais d'échec.
+    /// Les valeurs sont re-parsées en `Value` vivants (le
+    /// registre reste engine-local, comme avant).
+    pub fn idb_restore(&mut self, json: &str) {
+        if json.is_empty() {
+            return;
+        }
+        let s = self.str_val(json);
+        let Ok(root) = crate::json::parse(self, s) else {
+            return;
+        };
+        let Value::Obj(root_id) = root else {
+            return;
+        };
+        let Some(Value::Obj(dbs)) = self.get_prop(root_id, "dbs") else {
+            return;
+        };
+        let reg_rc = reg(self);
+        for db_name in self.own_keys(dbs) {
+            let Some(Value::Obj(dbv)) = self.get_prop(dbs, &db_name) else {
+                continue;
+            };
+            let version = self
+                .get_prop(dbv, "version")
+                .and_then(|v| self.to_number(v).ok())
+                .unwrap_or(0.0) as u64;
+            let mut db = IdbDb {
+                version,
+                stores: HashMap::new(),
+            };
+            if let Some(Value::Obj(stores)) = self.get_prop(dbv, "stores") {
+                for s_name in self.own_keys(stores) {
+                    let Some(Value::Obj(sv)) = self.get_prop(stores, &s_name) else {
+                        continue;
+                    };
+                    let key_path = self
+                        .get_prop(sv, "keyPath")
+                        .and_then(|v| self.to_js_string(v).ok());
+                    let auto_inc = self
+                        .get_prop(sv, "autoInc")
+                        .is_some_and(|v| self.to_boolean(v));
+                    let next_key = self
+                        .get_prop(sv, "nextKey")
+                        .and_then(|v| self.to_number(v).ok())
+                        .unwrap_or(1.0);
+                    let mut store = IdbStore {
+                        key_path,
+                        auto_inc,
+                        next_key,
+                        records: BTreeMap::new(),
+                        indexes: HashMap::new(),
+                    };
+                    if let Some(Value::Obj(idxs)) = self.get_prop(sv, "indexes") {
+                        for i_name in self.own_keys(idxs) {
+                            let Some(Value::Obj(io)) = self.get_prop(idxs, &i_name) else {
+                                continue;
+                            };
+                            let Some(kp) = self
+                                .get_prop(io, "keyPath")
+                                .and_then(|v| self.to_js_string(v).ok())
+                            else {
+                                continue;
+                            };
+                            store.indexes.insert(
+                                i_name,
+                                IdbIndexDef {
+                                    key_path: kp,
+                                    unique: self
+                                        .get_prop(io, "unique")
+                                        .is_some_and(|v| self.to_boolean(v)),
+                                    multi: self
+                                        .get_prop(io, "multi")
+                                        .is_some_and(|v| self.to_boolean(v)),
+                                },
+                            );
+                        }
+                    }
+                    if let Some(Value::Obj(recs)) = self.get_prop(sv, "records") {
+                        let n = self
+                            .get_prop(recs, "length")
+                            .and_then(|v| self.to_number(v).ok())
+                            .unwrap_or(0.0) as usize;
+                        for i in 0..n.min(IDB_SNAPSHOT_CAP) {
+                            let Some(Value::Obj(pair)) = self.get_prop(recs, &i.to_string()) else {
+                                continue;
+                            };
+                            let (Some(k), Some(v)) =
+                                (self.get_prop(pair, "0"), self.get_prop(pair, "1"))
+                            else {
+                                continue;
+                            };
+                            if let Some(key) = idb_key_of(self, k, 0) {
+                                store.records.insert(key, v);
+                            }
+                        }
+                    }
+                    db.stores.insert(s_name, store);
+                }
+            }
+            reg_rc.borrow_mut().insert(db_name, db);
+        }
     }
 }

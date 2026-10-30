@@ -829,6 +829,14 @@ pub trait ProfileStore: Send + Sync {
     fn autofill(&self, _name: &str) -> Vec<String> {
         Vec::new()
     }
+    /// Snapshot `IndexedDB` d'une origine (PR-10 — JSON ;
+    /// défaut : chaîne vide = registre neuf).
+    fn load_idb(&self, _origin: &str) -> String {
+        String::new()
+    }
+    /// Persiste le snapshot `IndexedDB` d'une origine
+    /// (défaut : ignorer — registre volatil).
+    fn save_idb(&self, _origin: &str, _json: &str) {}
 }
 
 /// Erreur de session — typée, jamais de panic.

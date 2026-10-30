@@ -1298,6 +1298,17 @@ pub trait JsEngine: Send {
         std::collections::BTreeMap::new()
     }
 
+    /// Restaure un snapshot `IndexedDB` (JSON —
+    /// [`Engine::idb_restore`], PR-10a). Défaut : noop.
+    fn install_idb(&mut self, _json: &str) {}
+
+    /// Snapshot JSON du registre `IndexedDB` courant — la
+    /// session le persiste par origine (`idb-<slug>.json`).
+    /// Défaut : chaîne vide.
+    fn drain_idb(&mut self) -> String {
+        String::new()
+    }
+
     /// Pose le snapshot `document.cookie` : fragment
     /// `« k=v; k2=v2 »` pré-filtré par la session pour l'origine
     /// de la page (le vrai jar applique HttpOnly/Secure/SameSite
@@ -1753,6 +1764,12 @@ enum Cmd {
     },
     DrainStorage {
         tx: Sender<std::collections::BTreeMap<String, String>>,
+    },
+    InstallIdb {
+        json: String,
+    },
+    DrainIdb {
+        tx: Sender<String>,
     },
     CookieSnap {
         header: String,
@@ -3313,6 +3330,23 @@ impl JsEngine for JscoreEngine {
         rx.recv_timeout(Self::EVAL_CMD_TIMEOUT).unwrap_or_default()
     }
 
+    fn install_idb(&mut self, json: &str) {
+        if json.is_empty() {
+            return;
+        }
+        let _ = self.tx.send(Cmd::InstallIdb {
+            json: json.to_string(),
+        });
+    }
+
+    fn drain_idb(&mut self) -> String {
+        let (tx, rx) = channel();
+        if self.tx.send(Cmd::DrainIdb { tx }).is_err() {
+            return String::new();
+        }
+        rx.recv_timeout(Self::EVAL_CMD_TIMEOUT).unwrap_or_default()
+    }
+
     fn set_cookie_snapshot(&mut self, header: &str) {
         let _ = self.tx.send(Cmd::CookieSnap {
             header: header.to_string(),
@@ -3454,6 +3488,7 @@ fn dispatch_event(
 /// miroir). `false` = canal de réponse fermé → le worker
 /// s'arrête ; tout autre `Cmd` est ignoré (invariant :
 /// l'appelant ne délègue que ces commandes).
+#[allow(clippy::too_many_lines)] // match de dispatch, chaque bras documenté in situ
 fn serve_side(
     eng: &mut explorer_jscore::Engine,
     jsd: Option<&explorer_jscore::DomRef>,
@@ -3555,6 +3590,11 @@ fn serve_side(
                 .map_or_else(std::collections::BTreeMap::new, |m| m.borrow().clone());
             tx.send(out).is_ok()
         }
+        Cmd::InstallIdb { json } => {
+            eng.idb_restore(&json);
+            true
+        }
+        Cmd::DrainIdb { tx } => tx.send(eng.idb_snapshot()).is_ok(),
         Cmd::CookieSnap { header } => {
             jar.set_header(&header);
             true

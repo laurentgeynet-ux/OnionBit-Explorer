@@ -870,6 +870,12 @@ impl Session {
                     .or_else(|| self.store.as_ref().map(|s| s.load_storage(&key)))
                     .unwrap_or_default();
                 e.install_storage(local);
+                // PR-10 : snapshot IndexedDB de l'origine
+                // restauré dans le contexte (registre partagé
+                // mémoire — la persistance est au drain).
+                if let Some(s) = &self.store {
+                    e.install_idb(&s.load_idb(&key));
+                }
                 e.set_cookie_snapshot(&self.cookies.header_for(&u, false));
             }
             e
