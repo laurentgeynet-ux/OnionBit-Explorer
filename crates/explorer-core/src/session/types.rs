@@ -266,6 +266,11 @@ pub enum MediaHostState {
     Ended,
     /// Erreur hôte — `MediaReport::error` porte la cause.
     Error,
+    /// Lecture demandée mais affamée — tampon décode vide
+    /// (`paused-for-cache` mpv ≈ `waiting` HTML5 ; extension
+    /// contractuelle 139k — l'hôte le rapporte via
+    /// `onionmedia_buffer_underrun`).
+    Buffering,
 }
 
 /// Rapport `state` hôte → moteur : positions en
@@ -306,6 +311,8 @@ pub struct MediaOfferInfo {
     pub controls: bool,
     /// Lecture automatique demandée.
     pub autoplay: bool,
+    /// Attribut `loop` présent (139k — `<video loop>`).
+    pub looping: bool,
     /// Codecs déclarés par l'hôte claimé, `None` = non
     /// claimée (la surface reste un stub ADR-0023).
     pub claim: Option<Vec<String>>,

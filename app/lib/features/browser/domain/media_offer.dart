@@ -22,6 +22,7 @@ class MediaOffer {
     this.claimed = false,
     this.mse = false,
     this.mseBuffers = const [],
+    this.loops = false,
   });
 
   /// Identité stable de l'instance (`media: u64` session).
@@ -60,6 +61,11 @@ class MediaOffer {
   /// Vide hors MSE ou mono-buffer.
   final List<String> mseBuffers;
 
+  /// Attribut `<video loop>` (champ `loop` du moteur, 139k)
+  /// — `onionmedia_set_loop(-1)` quand posé ; hors MSE
+  /// (source live non seekable, réarmement ignoré).
+  final bool loops;
+
   bool get isVideo => kind == 'video';
 
   /// Une surface positionnable : vidéo avec boîte non vide.
@@ -97,6 +103,7 @@ class MediaOffer {
               ?.map((e) => e.toString())
               .toList(growable: false) ??
           const [],
+      loops: j['loop'] == true,
     );
   }
 }

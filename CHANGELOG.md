@@ -630,6 +630,24 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   tirés (borne documentée). Verrou
   `window_navigation_is_event_target
   _and_sloppy_proof`.
+- **139k — contrat `buffering` +
+  `loop` + `bufferedMs` réels**
+  (`explorer-core`, `app/`) —
+  `MediaHostState::Buffering`
+  (`waiting` HTML5 ; mappé
+  `Playing` côté JS, pas d'état
+  DOM), `media_report_from_json`
+  accepte `buffering` ; attribut
+  `loop` collecté
+  (`ScannedMedia`/`MediaSurface`/
+  `MediaOfferInfo` → `loop` JSON) ;
+  Dart : `MediaOffer.loops` →
+  `onionmedia_set_loop(-1)`,
+  `snapshot.bufferedMs` →
+  `onionmedia_buffered_ms` (P-60,
+  repli `pos` hors ABI 3), état
+  `buffering` via
+  `onionmedia_buffer_underrun`.
 - **139j — lecteur `OnionMediaPlayer`
   sur ABI 3** (`app/`) — adoption de
   la surface P-59 d'`onionmedia_ffi`

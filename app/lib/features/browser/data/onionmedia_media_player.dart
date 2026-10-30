@@ -164,6 +164,19 @@ class OnionMediaPlayer implements MediaPlayer {
   /// degrés horaires (vidéos de téléphone) ; `0` inconnu.
   int Function(ffi.Pointer)? _videoRotation;
 
+  /// `onionmedia_buffered_ms` (P-60) — fin de la plage
+  /// tamponnée en ms (`cache-end` mpv ≈ `buffered` HTML5) ;
+  /// `-1` hors lecture.
+  int Function(ffi.Pointer)? _bufferedMs;
+
+  /// `onionmedia_buffer_underrun` (P-31) — `1` = piste
+  /// maître affamée → état `buffering` du contrat (139k).
+  int Function(ffi.Pointer)? _bufferUnderrun;
+
+  /// `onionmedia_set_loop` (P-29) — `loop-file` mpv ;
+  /// `-1` = infini (`<video loop>`).
+  int Function(ffi.Pointer, int)? _setLoop;
+
   void _optionalBindings() {
     try {
       _acquire = _lib.lookupFunction<
@@ -215,6 +228,25 @@ class OnionMediaPlayer implements MediaPlayer {
           int Function(ffi.Pointer)>('onionmedia_video_rotation');
     } on Object {
       _videoRotation = null;
+    }
+    try {
+      _bufferedMs = _lib.lookupFunction<ffi.Int64 Function(ffi.Pointer),
+          int Function(ffi.Pointer)>('onionmedia_buffered_ms');
+    } on Object {
+      _bufferedMs = null;
+    }
+    try {
+      _bufferUnderrun = _lib.lookupFunction<ffi.Int32 Function(ffi.Pointer),
+          int Function(ffi.Pointer)>('onionmedia_buffer_underrun');
+    } on Object {
+      _bufferUnderrun = null;
+    }
+    try {
+      _setLoop = _lib.lookupFunction<
+          ffi.Int32 Function(ffi.Pointer, ffi.Int64),
+          int Function(ffi.Pointer, int)>('onionmedia_set_loop');
+    } on Object {
+      _setLoop = null;
     }
   }
 
@@ -277,6 +309,7 @@ class OnionMediaPlayer implements MediaPlayer {
   static Future<MediaPlayer> create(
     String url, {
     bool hwAccel = false,
+    bool loop = false,
   }) async {
     final lib = _load();
     /// `file:///D:/x.mkv` -> `D:/x.mkv` ; chemin nu inchangé.
@@ -319,8 +352,18 @@ class OnionMediaPlayer implements MediaPlayer {
       p._qtavFree(h);
       rethrow;
     }
+    p._applyLoop(loop);
     p._startPump();
     return p;
+  }
+
+  /// `<video loop>` → `onionmedia_set_loop(-1)` (P-29,
+  /// `loop-file` mpv) ; no-op sans l'export ou l'attribut.
+  /// MSE : live non seekable, réarmement ignoré côté DLL.
+  void _applyLoop(bool loop) {
+    if (loop) {
+      _setLoop?.call(_h, -1);
+    }
   }
 
   /// Chemin MSE : offre `mse:true` → le lecteur pull ses
@@ -377,6 +420,7 @@ class OnionMediaPlayer implements MediaPlayer {
       p._qtavFree(h);
       rethrow;
     }
+    p._applyLoop(offer.loops);
     p._startPump();
     return p;
   }
@@ -711,14 +755,19 @@ class OnionMediaPlayer implements MediaPlayer {
     final pos = _qtavPos(_h).clamp(0, 1 << 62);
     final dur = _qtavDur(_h);
     final state = switch (st) {
+      // `underrun` = file décode affamée en pleine lecture
+      // → `buffering` (contrat étendu 139k, `waiting` HTML5).
+      2 when _bufferUnderrun?.call(_h) == 1 => 'buffering',
       2 => 'playing',
       3 => 'paused',
       _ when _qtavEof(_h) == 1 => 'ended',
       _ => 'paused',
     };
+    final buffered = _bufferedMs?.call(_h) ?? -1;
     return MediaSnapshot(
       positionMs: pos,
-      bufferedMs: pos, // tampon interne borné — approximation v1
+      bufferedMs:
+          buffered >= 0 ? buffered : pos, // P-60, sinon approximation v1
       durationMs: dur > 0 ? dur : null,
       state: state,
       error: _playerError(),

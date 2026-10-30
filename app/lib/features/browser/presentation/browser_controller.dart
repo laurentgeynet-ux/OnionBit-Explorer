@@ -155,7 +155,8 @@ final mediaPlayerFactoryProvider = Provider<MediaPlayerFactory>(
             apiBase: apiBase,
             hwAccel: hw,
           )
-        : OnionMediaPlayer.create(offer.url, hwAccel: hw);
+        : OnionMediaPlayer.create(offer.url,
+            hwAccel: hw, loop: offer.loops);
   },
 );
 

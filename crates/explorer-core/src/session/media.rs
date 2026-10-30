@@ -53,6 +53,8 @@ pub(crate) struct MediaSurface {
     pub(crate) controls: bool,
     /// Lecture automatique demandée.
     pub(crate) autoplay: bool,
+    /// Attribut `loop` présent (`<video loop>` — 139k).
+    pub(crate) looping: bool,
     /// Codecs déclarés par l'hôte claimé (`None` = stub).
     pub(crate) claim: Option<Vec<String>>,
     /// Claim enregistré mais pas encore livré au moteur —
@@ -121,6 +123,8 @@ struct ScannedMedia {
     controls: bool,
     /// Attribut `autoplay` présent.
     autoplay: bool,
+    /// Attribut `loop` présent.
+    looping: bool,
     /// Chemin `(tag, index)` de l'élément (71c — miroir JS).
     path: Vec<(String, u32)>,
     /// `url` = object URL `MediaSource` enregistré côté
@@ -249,6 +253,7 @@ fn scan_media(tree: &LayoutBox, dom: &Dom, base: &Url) -> Vec<ScannedMedia> {
                         url: url_s,
                         controls,
                         autoplay: has_bool_attr(dom, n, "autoplay"),
+                        looping: has_bool_attr(dom, n, "loop"),
                         path: element_path(dom, n).unwrap_or_default(),
                         mse: false,
                         mse_buffers: Vec::new(),
@@ -371,6 +376,7 @@ impl Session {
                     o.mime.clone_from(&s.mime);
                     o.controls = s.controls;
                     o.autoplay = s.autoplay;
+                    o.looping = s.looping;
                     o.path.clone_from(&s.path);
                     // Moteur absent → drapeau/buffers retenus
                     // (scan à l'aveugle : ne rien dégrader) ;
@@ -407,6 +413,7 @@ impl Session {
                         mime: s.mime,
                         controls: s.controls,
                         autoplay: s.autoplay,
+                        looping: s.looping,
                         claim: None,
                         claim_pending: false,
                         report: None,
@@ -423,6 +430,7 @@ impl Session {
                         mime: surf.mime.clone(),
                         controls: surf.controls,
                         autoplay: surf.autoplay,
+                        looping: surf.looping,
                         claim: None,
                         claim_pending: false,
                         report: None,
@@ -533,6 +541,7 @@ impl Session {
                         mime: m.mime.clone(),
                         controls: m.controls,
                         autoplay: m.autoplay,
+                        looping: m.looping,
                         claim: m.claim.clone(),
                         state: m.report.clone(),
                         mse: m.mse,
@@ -680,6 +689,10 @@ impl Session {
                         MediaHostState::Paused => explorer_js::JsMediaHostState::Paused,
                         MediaHostState::Ended => explorer_js::JsMediaHostState::Ended,
                         MediaHostState::Error => explorer_js::JsMediaHostState::Error,
+                        // `waiting` reste « playing » côté JS —
+                        // le DOM n'a pas d'état buffering dans
+                        // la couture `MediaState`.
+                        MediaHostState::Buffering => explorer_js::JsMediaHostState::Playing,
                     },
                     error: report.error.clone(),
                 },
@@ -733,6 +746,7 @@ pub fn media_host_state_str(s: MediaHostState) -> &'static str {
         MediaHostState::Paused => "paused",
         MediaHostState::Ended => "ended",
         MediaHostState::Error => "error",
+        MediaHostState::Buffering => "buffering",
     }
 }
 
@@ -750,7 +764,7 @@ pub fn media_offer_json(m: &MediaOfferInfo) -> serde_json::Value {
         "rect": { "x": m.rect.x, "y": m.rect.y, "w": m.rect.w, "h": m.rect.h },
         "url": m.url, "mime": m.mime,
         "mse": m.mse, "mseBuffers": m.mse_buffers,
-        "controls": m.controls, "autoplay": m.autoplay,
+        "controls": m.controls, "autoplay": m.autoplay, "loop": m.looping,
         "claimed": m.claim.is_some(),
         "codecs": m.claim,
         "state": m.state.as_ref().map(|r| serde_json::json!({
@@ -860,6 +874,7 @@ pub fn media_report_from_json(v: &serde_json::Value) -> Option<MediaReport> {
         Some("paused") => MediaHostState::Paused,
         Some("ended") => MediaHostState::Ended,
         Some("error") => MediaHostState::Error,
+        Some("buffering") => MediaHostState::Buffering,
         _ => return None,
     };
     Some(MediaReport {
