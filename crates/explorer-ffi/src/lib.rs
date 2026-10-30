@@ -1079,6 +1079,79 @@ pub unsafe extern "C" fn explorer_media_state(
     }
 }
 
+
+/// Signets du profil — JSON `[{"url":…,"title":…}]` dans `buf`
+/// (même contrat UTF-8/`cap` que [`explorer_last_error`]).
+///
+/// # Safety
+///
+/// `h` issu de [`explorer_create`] ; `buf..buf+cap` inscriptible.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn explorer_bookmarks(
+    h: *mut ExplorerHandle,
+    buf: *mut u8,
+    cap: usize,
+) -> isize {
+    let Some(h) = (unsafe { handle(h) }) else {
+        return -1;
+    };
+    let list: Vec<serde_json::Value> = h
+        .session
+        .bookmarks()
+        .iter()
+        .map(|b| serde_json::json!({"url": b.url, "title": b.title}))
+        .collect();
+    let s = serde_json::to_string(&serde_json::json!({"bookmarks": list}))
+        .unwrap_or_else(|_| "{\"bookmarks\":[]}".to_string());
+    unsafe { write_str(&s, buf, cap) }
+}
+
+/// Ajoute un signet (`url`+`title` UTF-8) — `1` ajouté,
+/// `0` refusé (doublon/vide), `-1` handle invalide.
+///
+/// # Safety
+///
+/// `h` issu de [`explorer_create`] ; pointeurs UTF-8 valides
+/// sur `*_len` octets.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn explorer_bookmark_add(
+    h: *mut ExplorerHandle,
+    url: *const u8,
+    url_len: usize,
+    title: *const u8,
+    title_len: usize,
+) -> i32 {
+    let Some(h) = (unsafe { handle(h) }) else {
+        return -1;
+    };
+    let Some(u) = (unsafe { read_str(url, url_len, MAX_URL) }) else {
+        return 0;
+    };
+    let t = unsafe { read_str(title, title_len, MAX_URL) };
+    i32::from(h.session.add_bookmark(u.to_string(), t.map(str::to_string)))
+}
+
+/// Retire un signet par URL (`url` UTF-8) — `1` retiré,
+/// `0` absent, `-1` handle invalide.
+///
+/// # Safety
+///
+/// `h` issu de [`explorer_create`] ; `url..url+len` valide.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn explorer_bookmark_del(
+    h: *mut ExplorerHandle,
+    url: *const u8,
+    url_len: usize,
+) -> i32 {
+    let Some(h) = (unsafe { handle(h) }) else {
+        return -1;
+    };
+    let Some(u) = (unsafe { read_str(url, url_len, MAX_URL) }) else {
+        return 0;
+    };
+    i32::from(h.session.remove_bookmark(u))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

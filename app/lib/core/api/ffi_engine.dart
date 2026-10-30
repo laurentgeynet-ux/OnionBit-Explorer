@@ -332,21 +332,34 @@ class FfiEngine implements BrowserRepository {
   }
 
   // ------------------------------------------------------------------
-  // Bibliothèque — dégradation documentée (étape 57) : l'ABI
-  // n'exporte ni signets ni historique (le store du profil est
-  // câblé côté daemon uniquement). Listes vides / no-op → l'UI
-  // affiche le panneau vide plutôt que crasher ; à étendre via
-  // de nouveaux exports quand le profil FFI existera.
+  // Bibliothèque — favoris pontés FFI (`explorer_bookmarks`,
+  // `_add`, `_del` — exports additifs : dll antérieure → liste
+  // vide / code -1). L'historique reste sans export ABI
+  // (panneau vide dégradé, étape 57).
   // ------------------------------------------------------------------
 
   @override
-  Future<List<Bookmark>> bookmarks() async => const [];
+  Future<List<Bookmark>> bookmarks() async {
+    final r = await _worker.call(opBookmarks);
+    final list = r?['bookmarks'] as List? ?? const [];
+    return [
+      for (final b in list)
+        if (b is Map<String, dynamic>) Bookmark.fromJson(b),
+    ];
+  }
 
   @override
-  Future<bool> addBookmark(String url, {String title = ''}) async => false;
+  Future<bool> addBookmark(String url, {String title = ''}) async {
+    final r =
+        await _worker.call(opBookmarkAdd, {'url': url, 'title': title});
+    return (r?['code'] as num?)?.toInt() == 1;
+  }
 
   @override
-  Future<bool> removeBookmark(String url) async => false;
+  Future<bool> removeBookmark(String url) async {
+    final r = await _worker.call(opBookmarkDel, {'url': url});
+    return (r?['code'] as num?)?.toInt() == 1;
+  }
 
   @override
   Future<List<HistoryEntry>> history() async => const [];
