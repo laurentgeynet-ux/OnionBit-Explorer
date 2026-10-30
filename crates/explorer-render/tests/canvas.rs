@@ -35,6 +35,20 @@ fn px(img: &explorer_render::DecodedImage, x: u32, y: u32) -> [u8; 4] {
     ]
 }
 
+/// §B-59 — attributs `width`/`height` hostiles : le raster
+/// dégrade en `None` au lieu de demander `Pixmap::new(w,h)`
+/// = alloc unique jusqu'à 2³⁵ octets (abort mesuré terrain).
+#[test]
+fn canvas_geant_est_degrade_pas_alloue() {
+    let ops = vec![
+        CanvasOp::FillColor(RED),
+        CanvasOp::FillRect(0.0, 0.0, 1.0, 1.0),
+    ];
+    assert!(raster_ops(&ops, 131072, 65536).is_none(), "2^33 px → refus");
+    assert!(raster_ops(&ops, 8192, 8192).is_none(), "64 Mpx → refus");
+    assert!(raster_ops(&ops, 4000, 4000).is_some(), "16 Mpx pile → OK");
+}
+
 #[test]
 fn fill_rect_produit_un_bitmap_rouge() {
     let ops = vec![

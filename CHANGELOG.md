@@ -39,6 +39,57 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   JS-C212 pour la moitié jscore du
   §B-59.
 
+- **Étape 159 — §B-59 : audit
+  allocations pilotées par le
+  contenu** — l'abort reproduit
+  après la borne `conn.buf` a mené
+  un balayage de toute alloc
+  `O(contenu)` : chaque trou fermé
+  dégrade (`None`/erreur typée)
+  au lieu d'allouer. Trous fermés :
+  (1) **concat JS `s = s + s`** —
+  `binary_op` Add construisait la
+  chaîne sans `alloc_guard` : le
+  dédoublement demande exactement
+  2³⁵ octets après une rampe
+  ~1 Go/s de copies mémoire —
+  signature exacte du terrain ;
+  garde ajoutée, + template literal
+  + `replace`/`replaceAll` (sortie
+  matches × remplacement)
+  (`explorer-jscore`) ; (2)
+  **`decode_image`** — les `Limits`
+  du crate `image` comparent chaque
+  côté au budget **pixels** : un
+  en-tête 131072×65536 passait les
+  deux → alloc 2³⁵ dans le
+  décodeur ; `into_dimensions` lit
+  l'en-tête et borne `w×h ≤ max_px`
+  avant `decode()`
+  (`explorer-render`) ; (3)
+  **`raster_ops` canvas** — `Pixmap
+  ::new(w,h)`/`Mask::new` sur les
+  attributs `<canvas>` sans borne →
+  `MAX_CANVAS_PX` 16 Mpx
+  (`explorer-render`) ; (4) **WS
+  `rbuf`** — trame déclarée géante
+  jamais complétée → buffer non
+  borné + `off + plen` bouclant ;
+  borne `max_message` + `checked_add`
+  (`explorer-net`) ; (5) **SSE
+  `buf`/`data`** — ligne sans
+  terminateur ou `data:` sans ligne
+  vide gonflaient à vitesse fil ;
+  budgets 1 Mio/4 Mio avec reprise
+  (`explorer-net`). Verrous :
+  `b59_string_doubling_is_range_error`,
+  `b59_replace_all_output_bounded`,
+  `b59_template_literal_bounded`,
+  `decode_rejects_huge_product_before_decode`,
+  `canvas_geant_est_degrade_pas_alloue`,
+  `unterminated_line_is_dropped`,
+  `giant_event_data_is_bounded`.
+
 - **JS-C213 — `window.__tcfapi`
   stub honnête TCF v2** (`explorer-jscore`,
   §B-14 all.rugby vol 183 —

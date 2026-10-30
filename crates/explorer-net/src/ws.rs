@@ -211,7 +211,7 @@ fn parse_frame(buf: &[u8]) -> Result<Option<(usize, Frame)>, String> {
         return Err("ws: masked server frame".into());
     }
     let mut len = u64::from(buf[1] & 0x7f);
-    let mut off = 2;
+    let mut off: usize = 2;
     if len == 126 {
         if buf.len() < 4 {
             return Ok(None);
@@ -240,15 +240,22 @@ fn parse_frame(buf: &[u8]) -> Result<Option<(usize, Frame)>, String> {
         return Err(format!("ws: unknown opcode {opcode}"));
     }
     let plen = usize::try_from(len).map_err(|_| "ws: frame too large".to_string())?;
-    if buf.len() < off + plen {
+    // `checked_add` : `off + plen` bouclerait sur une taille
+    // forgée proche `usize::MAX` (§B-59) — la borne naturelle
+    // `max_message` du receveur coupe de toute façon la trame
+    // avant accumulation ; ici on refuse proprement.
+    let Some(end) = off.checked_add(plen) else {
+        return Err("ws: frame length overflow".into());
+    };
+    if buf.len() < end {
         return Ok(None);
     }
     Ok(Some((
-        off + plen,
+        end,
         Frame {
             fin,
             opcode,
-            payload: buf[off..off + plen].to_vec(),
+            payload: buf[off..end].to_vec(),
         },
     )))
 }
@@ -421,6 +428,18 @@ impl WsDial for RealWsDial {
                         }
                         Ok(n) => {
                             rbuf.extend_from_slice(&chunk[..n]);
+                            // §B-59 : une trame déclarée géante
+                            // ne se complète jamais → `rbuf`
+                            // gonflerait sans fin à vitesse fil.
+                            // Une trame saine ne peut pas excéder
+                            // `max_message` (+ en-tête) — au-delà,
+                            // la connexion est hostile : erreur.
+                            if rbuf.len() > limits.max_message + 64 {
+                                let _ = events.send(WsEvent::Error(
+                                    "ws: frame exceeds message budget".into(),
+                                )).await;
+                                return Ok(());
+                            }
                             loop {
                                 match parse_frame(&rbuf) {
                                     Err(e) => {

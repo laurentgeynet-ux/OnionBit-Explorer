@@ -140,4 +140,39 @@ mod tests {
         let hits = e.eval("hits").unwrap();
         assert!(matches!(hits, crate::value::Value::Num(n) if n > 0.0));
     }
+
+    /// §B-59 — la concat `s = s + s` en boucle est la signature
+    /// exacte du crash terrain (`allocation of 34359738368 bytes
+    /// failed` = 2³⁵, demande unique après rampe ~1 Go/s) : elle
+    /// doit rendre un RangeError JS, jamais avorter le processus.
+    #[test]
+    fn b59_string_doubling_is_range_error() {
+        let mut e = Engine::new();
+        e.set_mem_limit(1 << 20); // 1 Mio pour la démo
+        let r = e.eval("var s='x'.repeat(65536); for (var i=0;i<8;i++){ s=s+s; } s");
+        assert!(r.is_err(), "concat géante doit lever RangeError");
+    }
+
+    /// §B-59 — sortie `replaceAll` bornée pendant la boucle :
+    /// beaucoup de matches × remplacement long → RangeError,
+    /// pas de croissance d'alloc non bornée.
+    #[test]
+    fn b59_replace_all_output_bounded() {
+        let mut e = Engine::new();
+        e.set_mem_limit(1 << 20);
+        let r = e.eval(
+            "var s='a'.repeat(200000); var rep='z'.repeat(64);\
+             s.replaceAll('a', rep)",
+        );
+        assert!(r.is_err(), "replaceAll géant doit lever RangeError");
+    }
+
+    /// §B-59 — template literal géant borné aussi.
+    #[test]
+    fn b59_template_literal_bounded() {
+        let mut e = Engine::new();
+        e.set_mem_limit(1 << 20);
+        let r = e.eval("var a='x'.repeat(700000); var b='y'.repeat(700000); `${a}${b}`");
+        assert!(r.is_err(), "template géant doit lever RangeError");
+    }
 }

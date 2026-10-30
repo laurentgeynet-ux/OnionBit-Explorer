@@ -44,6 +44,15 @@ pub struct SseParser {
     started: bool,
 }
 
+/// §B-59 — budgets des accumulateurs : un flux qui pousse des
+/// octets sans terminateur de ligne gonflerait `buf` à vitesse
+/// fil (même signature que la fuite terrain ~1 Go/s), et des
+/// champs `data:` sans ligne vide gonfleraient `data`. Au-delà
+/// du budget on jette l'état partiel et on repart — jamais
+/// d'allocation sans fin.
+const MAX_SSE_LINE_BYTES: usize = 1 << 20; // 1 Mio par ligne non terminée
+const MAX_SSE_DATA_BYTES: usize = 4 << 20; // 4 Mio de data par événement
+
 impl SseParser {
     /// Nouveau parseur vide.
     #[must_use]
@@ -75,6 +84,13 @@ impl SseParser {
             } else {
                 self.field(&line);
             }
+        }
+        // Reliquat de ligne jamais terminée au-delà du budget →
+        // la jeter (dégradé : l'événement en cours est perdu,
+        // le flux reprend au prochain terminateur — §B-59).
+        if self.buf.len() > MAX_SSE_LINE_BYTES {
+            self.buf.clear();
+            self.cr_pending = false;
         }
         out
     }
@@ -154,8 +170,14 @@ impl SseParser {
         };
         match name {
             "data" => {
-                self.data.push_str(value);
-                self.data.push('\n');
+                // §B-59 : `data:` accumulé sans ligne vide est
+                // borné — une ligne qui ferait dépasser le budget
+                // est ignorée (événement tronqué plutôt que flux
+                // sans fin).
+                if self.data.len() + value.len() + 1 <= MAX_SSE_DATA_BYTES {
+                    self.data.push_str(value);
+                    self.data.push('\n');
+                }
             }
             "event" => self.event = Some(value.to_string()),
             "id" => self.id = value.to_string(),
@@ -235,6 +257,30 @@ mod tests {
         let evs = p.feed(b"\n\n");
         assert_eq!(evs.len(), 1);
         assert_eq!(evs[0].data, "hello");
+    }
+
+    /// §B-59 — un flot sans terminateur de ligne est jeté au
+    /// budget au lieu de gonfler `buf` à vitesse fil.
+    #[test]
+    fn unterminated_line_is_dropped() {
+        let mut p = SseParser::new();
+        let flood = vec![b'x'; (MAX_SSE_LINE_BYTES + 1) as usize];
+        assert_eq!(p.feed(&flood).len(), 0);
+        // Le parseur repart proprement au morceau suivant.
+        let evs = p.feed(b"data: ok\n\n");
+        assert_eq!(evs.len(), 1);
+        assert_eq!(evs[0].data, "ok");
+    }
+
+    /// §B-59 — `data:` accumulé sans ligne vide est borné :
+    /// la ligne qui dépasserait le budget est ignorée.
+    #[test]
+    fn giant_event_data_is_bounded() {
+        let mut p = SseParser::new();
+        let big = format!("data: {}\n", "y".repeat((MAX_SSE_DATA_BYTES + 1024) as usize));
+        let evs = p.feed(format!("{big}data: tail\n\n").as_bytes());
+        assert_eq!(evs.len(), 1);
+        assert_eq!(evs[0].data, "tail");
     }
 
     #[test]

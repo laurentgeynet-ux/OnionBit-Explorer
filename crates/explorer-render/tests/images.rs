@@ -41,6 +41,35 @@ fn decode_bounds_rejects_huge() {
     assert!(decode_image(&red_png(), 3).is_none());
 }
 
+/// CRC32 (PNG) minimal pour forger un IHDR valide en test.
+fn crc32(bytes: &[u8]) -> u32 {
+    let mut crc = 0xFFFF_FFFFu32;
+    for &b in bytes {
+        crc ^= u32::from(b);
+        for _ in 0..8 {
+            crc = if crc & 1 != 0 { (crc >> 1) ^ 0xEDB8_8320 } else { crc >> 1 };
+        }
+    }
+    !crc
+}
+
+/// §B-59 — un en-tête PNG dont chaque côté passe la limite
+/// `image` (côté vs côté) mais dont le PRODUIT dépasse le budget
+/// pixels : 131072×65536 = 2³³ px → `w*h*4` = alloc 2³⁵ octets
+/// dans le décodeur (`allocation of 34359738368 bytes failed`
+/// mesuré terrain). Le produit doit être vérifié sur l'en-tête
+/// AVANT `decode()` — refus `None`, jamais l'allocation.
+#[test]
+fn decode_rejects_huge_product_before_decode() {
+    let mut forged = red_png();
+    // IHDR : sig(8) + len(4) + "IHDR"(4) + w(4) + h(4) + 5 + crc(4).
+    forged[16..20].copy_from_slice(&131_072u32.to_be_bytes());
+    forged[20..24].copy_from_slice(&65_536u32.to_be_bytes());
+    let crc = crc32(&forged[12..29]); // "IHDR" + données
+    forged[29..33].copy_from_slice(&crc.to_be_bytes());
+    assert!(decode_image(&forged, 16_000_000).is_none());
+}
+
 #[test]
 fn decode_garbage_is_none() {
     assert!(decode_image(b"pas une image du tout", 1_000_000).is_none());

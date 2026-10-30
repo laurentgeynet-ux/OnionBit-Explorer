@@ -101,17 +101,29 @@ pub fn decode_image(bytes: &[u8], max_px: u32) -> Option<DecodedImage> {
     if looks_like_svg(bytes) {
         return decode_svg_raster(bytes, max_px);
     }
-    let reader = image::ImageReader::new(std::io::Cursor::new(bytes))
+    // §B-59 : vérifier le PRODUIT `w×h` sur l'en-tête **avant**
+    // `decode()` — les `Limits` du crate comparent chaque côté
+    // séparément : un PNG 131072×65536 passait les deux bornes
+    // et le décodeur allouait `w*h*4` = 2³⁵ octets en interne
+    // (`allocation of 34359738368 bytes failed` mesuré terrain).
+    let (w0, h0) = image::ImageReader::new(std::io::Cursor::new(bytes))
+        .with_guessed_format()
+        .ok()?
+        .into_dimensions()
+        .ok()?;
+    if w0 == 0 || h0 == 0 || u64::from(w0) * u64::from(h0) > u64::from(max_px) {
+        return None;
+    }
+    let mut reader = image::ImageReader::new(std::io::Cursor::new(bytes))
         .with_guessed_format()
         .ok()?;
     // Borne de décodage : côté carré max déduit du budget
     // pixels (une dimension peut excéder si l'autre est
-    // minuscule — le produit reste borné à la vérification).
+    // minuscule — le produit est déjà vérifié ci-dessus).
     let side = max_px;
     let mut limits = image::Limits::no_limits();
     limits.max_image_width = Some(side);
     limits.max_image_height = Some(side);
-    let mut reader = reader;
     reader.limits(limits);
     let dyn_img = reader.decode().ok()?;
     let (w, h) = (dyn_img.width(), dyn_img.height());

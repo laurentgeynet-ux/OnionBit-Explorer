@@ -250,6 +250,8 @@ pub(crate) fn replace_impl(
         return Ok(e.str_val(s));
     }
     let positions: Vec<usize> = if all {
+        let n = s.matches(&pat).count();
+        e.alloc_guard(n.saturating_mul(std::mem::size_of::<usize>()))?;
         s.match_indices(&pat).map(|(i, _)| i).collect()
     } else {
         s.find(&pat).into_iter().collect()
@@ -257,9 +259,13 @@ pub(crate) fn replace_impl(
     if positions.is_empty() {
         return Ok(e.str_val(s));
     }
+    // §B-59 : la sortie peut dépasser l'entrée × le remplacement
+    // — vérifier la croissance pendant la boucle (RangeError,
+    // pas abort de l'allocateur).
     let mut out = String::with_capacity(s.len());
     let mut cur = 0usize;
     for pos in positions {
+        e.alloc_guard(out.len())?;
         out.push_str(&s[cur..pos]);
         out.push_str(&expand_rep(
             e,
@@ -417,6 +423,10 @@ pub(crate) fn splice_matches(
     let mut out = String::with_capacity(s.len() + matches.len() * 8);
     let mut cur = 0usize; // byte offset
     for (mi, m) in matches.iter().enumerate() {
+        // §B-59 : borne de croissance de la sortie — une regex à
+        // beaucoup de matches × remplacement long gonflerait `out`
+        // jusqu'à l'abort d'alloc (même signature 2³⁵).
+        e.alloc_guard(out.len())?;
         if std::env::var("DBG_DRIVE").is_ok() && mi % 64 == 0 {
             eprintln!(
                 "[splice] i={mi}/{} idx={} end={}",

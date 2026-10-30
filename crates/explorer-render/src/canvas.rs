@@ -106,14 +106,23 @@ impl Default for Ctx {
     }
 }
 
+/// Budget pixels d'une surface canvas — même ordre que
+/// `image_max_px` (16 Mpx ≈ 64 Mio RGBA). §B-59 : `w`/`h`
+/// viennent des attributs `width`/`height` du `<canvas>`
+/// (contenu non fiable) — un `width="131072" height="65536"`
+/// demandait `Pixmap::new` = alloc unique 2³⁵ octets → abort
+/// (`allocation of 34359738368 bytes failed` mesuré terrain).
+const MAX_CANVAS_PX: u64 = 16_000_000;
+
 /// Rejoue `ops` dans un pixmap `w`×`h` (dimensions intrinsèques
 /// de l'élément — attributs `width`/`height`). Retourne le
 /// bitmap RGBA (alpha non prémultiplié, comme `decode_image`)
-/// — `None` si la surface est invalide/vide.
+/// — `None` si la surface est invalide/vide ou hors budget
+/// pixels (dégradé, jamais crash).
 #[must_use]
 #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
 pub fn raster_ops(ops: &[CanvasOp], w: u32, h: u32) -> Option<DecodedImage> {
-    if ops.is_empty() || w == 0 || h == 0 {
+    if ops.is_empty() || w == 0 || h == 0 || u64::from(w) * u64::from(h) > MAX_CANVAS_PX {
         return None;
     }
     let mut pm = Pixmap::new(w, h)?;

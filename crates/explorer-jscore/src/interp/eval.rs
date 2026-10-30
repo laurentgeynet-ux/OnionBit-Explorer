@@ -206,10 +206,13 @@ impl Engine {
             Expr::Template { parts, exprs } => {
                 let mut out = String::new();
                 for (i, part) in parts.iter().enumerate() {
+                    self.alloc_guard(out.len().saturating_add(part.len()))?;
                     out.push_str(part);
                     if let Some(e) = exprs.get(i) {
                         let v = self.eval_expr(env, this, e)?;
-                        out.push_str(&self.to_js_string(v)?);
+                        let sv = self.to_js_string(v)?;
+                        self.alloc_guard(out.len().saturating_add(sv.len()))?;
+                        out.push_str(&sv);
                     }
                 }
                 Ok(self.str_val(out))
@@ -954,6 +957,12 @@ impl Engine {
                 if matches!(lp, Value::Str(_)) || matches!(rp, Value::Str(_)) {
                     let ls = self.to_js_string(lp)?;
                     let rs = self.to_js_string(rp)?;
+                    // §B-59 : `s = s + s` en boucle double la
+                    // chaîne — la demande d'alloc exacte 2³⁵
+                    // (`allocation of 34359738368 bytes failed`
+                    // mesuré terrain) doit être un RangeError,
+                    // pas un abort de l'allocateur.
+                    self.alloc_guard(ls.len().saturating_add(rs.len()))?;
                     self.str_val(format!("{ls}{rs}"))
                 } else if matches!(lp, Value::Big(_)) || matches!(rp, Value::Big(_)) {
                     // `1n + 2n` → `3n` ; mixte Num/Big → `TypeError`
