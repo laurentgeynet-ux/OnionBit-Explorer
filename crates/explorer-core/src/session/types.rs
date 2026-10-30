@@ -301,6 +301,10 @@ pub struct MediaReport {
 /// — exposée par `Session::media_list` et l'API (debug,
 /// parité FFI future).
 #[derive(Debug, Clone)]
+/// Attributs d'élément orthogonaux (présences HTML), pas
+/// une machine à états — `clippy::struct_excessive_bools`
+/// désactivé à juste titre.
+#[allow(clippy::struct_excessive_bools)]
 pub struct MediaOfferInfo {
     /// Identifiant de la surface.
     pub id: u64,

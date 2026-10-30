@@ -109,6 +109,10 @@ struct GoneSurface {
 
 /// Élément média détecté sur le boxtree posé — image fixe
 /// de l'offre avant allocation d'id.
+/// Record d'attributs d'élément — les booléens sont des
+/// présences HTML orthogonales (`controls`/`autoplay`/
+/// `loop`/`mse`), pas une machine à états.
+#[allow(clippy::struct_excessive_bools)]
 struct ScannedMedia {
     /// `video` ou `audio`.
     kind: MediaKind,
@@ -687,14 +691,15 @@ impl Session {
                     duration_ms: report.duration_ms,
                     buffered_ms: report.buffered_ms,
                     state: match report.state {
-                        MediaHostState::Playing => explorer_js::JsMediaHostState::Playing,
                         MediaHostState::Paused => explorer_js::JsMediaHostState::Paused,
                         MediaHostState::Ended => explorer_js::JsMediaHostState::Ended,
                         MediaHostState::Error => explorer_js::JsMediaHostState::Error,
                         // `waiting` reste « playing » côté JS —
                         // le DOM n'a pas d'état buffering dans
                         // la couture `MediaState`.
-                        MediaHostState::Buffering => explorer_js::JsMediaHostState::Playing,
+                        MediaHostState::Playing | MediaHostState::Buffering => {
+                            explorer_js::JsMediaHostState::Playing
+                        }
                     },
                     error: report.error.clone(),
                 },
