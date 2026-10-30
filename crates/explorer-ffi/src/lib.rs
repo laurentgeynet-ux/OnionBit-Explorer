@@ -76,8 +76,14 @@ fn set_err(msg: impl std::fmt::Display) {
 /// Handle opaque — `struct` possédé par le pointeur retourné
 /// de [`explorer_create`], libéré par [`explorer_destroy`].
 pub struct ExplorerHandle {
-    rt: tokio::runtime::Runtime,
-    session: Session,
+    rt: std::sync::Arc<tokio::runtime::Runtime>,
+    /// `Arc<Mutex>` — le thread pompe (`spawn_pump`) partage
+    /// la session avec les exports : le daemon prouve
+    /// `Session: Send` (même schéma `Arc<Mutex>` dans son
+    /// `ApiState`). Les exports verrouillent par appel ; la
+    /// pompe verrouille par battement — un call JS long
+    /// garde le verrou (bounded par les deadlines internes).
+    session: std::sync::Arc<std::sync::Mutex<Session>>,
     /// Canal d'événements de session — drainé par
     /// [`explorer_media_events`] (filtré sur le bras
     /// `MediaSurface`, étape 71e ; le pull des frames reste
@@ -91,6 +97,25 @@ pub struct ExplorerHandle {
     /// gardé jusqu'à la destruction du handle ; le lock OS est
     /// relâché à la mort du processus, pas de résidu après crash.
     _profile_lock: Option<fslock::LockFile>,
+    /// Arrêt du thread pompe — posé par [`explorer_destroy`] /
+    /// `Drop` (le thread détaché s'arrête à sa prochaine
+    /// battement — jamais d'usage post-mortem du mutex).
+    stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl Drop for ExplorerHandle {
+    fn drop(&mut self) {
+        self.stop.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
+/// Verrouille la session — poison = on récupère le guard
+/// (un panic d'un appel précédent ne doit pas figer les
+/// suivants — `Mutex` std, jamais d'`unwrap` nu).
+fn sess(h: &ExplorerHandle) -> std::sync::MutexGuard<'_, Session> {
+    h.session
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 /// Répertoire de fontes par défaut — `EXPLORER_FONT_DIR` en
@@ -171,6 +196,35 @@ unsafe fn read_str<'a>(ptr: *const u8, len: usize, max: usize) -> Option<&'a str
     }
 }
 
+/// Battement hôte (miroir du `tokio::spawn` du daemon,
+/// main.rs étape 51/52) : sans pompe propre la session
+/// n'avance que pendant les appels FFI — fetchs réseau,
+/// timers JS et applies gelés entre deux ticks UI de
+/// ~50 ms (mesuré : minutes sur une page lourde). La
+/// pompe tourne à la cadence `next_timer_deadline`
+/// bornée — jamais busy-loop, jamais le sommeil complet
+/// quand un timer plus court est en file.
+fn spawn_pump(
+    session: &std::sync::Arc<std::sync::Mutex<Session>>,
+    stop: &std::sync::Arc<std::sync::atomic::AtomicBool>,
+) {
+    const PUMP_MS: std::time::Duration = std::time::Duration::from_millis(10);
+    let s = std::sync::Arc::clone(session);
+    let stop = std::sync::Arc::clone(stop);
+    std::thread::spawn(move || {
+        while !stop.load(std::sync::atomic::Ordering::Relaxed) {
+            let wait = {
+                let mut g = s.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                let _ = g.poll_net();
+                let _ = g.pump_timers_all();
+                g.drain_applies();
+                g.next_timer_deadline().unwrap_or(PUMP_MS).min(PUMP_MS)
+            };
+            std::thread::sleep(wait);
+        }
+    });
+}
+
 /// Corps commun de création : runtime tokio privé, pile
 /// réseau réelle, fabrique JS, store de profil dans `dir`
 /// (`None` = [`explorer_core::JsonFileStore::default_dir`] — honore
@@ -187,7 +241,7 @@ fn create_inner(profile_dir: Option<PathBuf>) -> *mut ExplorerHandle {
         .enable_all()
         .build()
     {
-        Ok(rt) => rt,
+        Ok(rt) => std::sync::Arc::new(rt),
         Err(e) => {
             set_err(e);
             return std::ptr::null_mut();
@@ -208,12 +262,16 @@ fn create_inner(profile_dir: Option<PathBuf>) -> *mut ExplorerHandle {
     session.set_js_factory(explorer_js::JscoreEngine::factory());
     session.set_store(Arc::new(explorer_core::JsonFileStore::open(&dir)));
     let events = session.subscribe();
+    let session = std::sync::Arc::new(std::sync::Mutex::new(session));
+    let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    spawn_pump(&session, &stop);
     Box::into_raw(Box::new(ExplorerHandle {
         rt,
         session,
         events,
         media_pending: String::new(),
         _profile_lock: profile_lock,
+        stop,
     }))
 }
 
@@ -365,7 +423,7 @@ unsafe fn write_str(s: &str, buf: *mut u8, cap: usize) -> isize {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn explorer_open_tab(h: *mut ExplorerHandle) -> u64 {
     match unsafe { handle(h) } {
-        Some(h) => h.session.open_tab(),
+        Some(h) => sess(h).open_tab(),
         None => 0,
     }
 }
@@ -378,7 +436,7 @@ pub unsafe extern "C" fn explorer_open_tab(h: *mut ExplorerHandle) -> u64 {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn explorer_close_tab(h: *mut ExplorerHandle, tab: u64) -> i32 {
     match unsafe { handle(h) } {
-        Some(h) => match h.session.close_tab(tab) {
+        Some(h) => match sess(h).close_tab(tab) {
             Ok(()) => 0,
             Err(e) => {
                 set_err(e);
@@ -407,7 +465,7 @@ pub unsafe extern "C" fn explorer_navigate(
     let Some(url) = (unsafe { read_str(url, len, MAX_URL) }) else {
         return -1;
     };
-    match h.rt.block_on(h.session.navigate(tab, url)) {
+    match h.rt.block_on(sess(h).navigate(tab, url)) {
         Ok(()) => 0,
         Err(e) => {
             set_err(e);
@@ -424,7 +482,7 @@ pub unsafe extern "C" fn explorer_navigate(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn explorer_reload(h: *mut ExplorerHandle, tab: u64) -> i32 {
     match unsafe { handle(h) } {
-        Some(h) => match h.rt.block_on(h.session.reload(tab)) {
+        Some(h) => match h.rt.block_on(sess(h).reload(tab)) {
             Ok(()) => 0,
             Err(e) => {
                 set_err(e);
@@ -443,7 +501,7 @@ pub unsafe extern "C" fn explorer_reload(h: *mut ExplorerHandle, tab: u64) -> i3
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn explorer_go_back(h: *mut ExplorerHandle, tab: u64) -> i32 {
     match unsafe { handle(h) } {
-        Some(h) => match h.rt.block_on(h.session.go_back(tab)) {
+        Some(h) => match h.rt.block_on(sess(h).go_back(tab)) {
             Ok(()) => 0,
             Err(e) => {
                 set_err(e);
@@ -462,7 +520,7 @@ pub unsafe extern "C" fn explorer_go_back(h: *mut ExplorerHandle, tab: u64) -> i
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn explorer_go_forward(h: *mut ExplorerHandle, tab: u64) -> i32 {
     match unsafe { handle(h) } {
-        Some(h) => match h.rt.block_on(h.session.go_forward(tab)) {
+        Some(h) => match h.rt.block_on(sess(h).go_forward(tab)) {
             Ok(()) => 0,
             Err(e) => {
                 set_err(e);
@@ -487,7 +545,7 @@ pub unsafe extern "C" fn explorer_set_viewport(
 ) -> i32 {
     match unsafe { handle(h) } {
         Some(h) => {
-            h.session.set_viewport(w, hgt, scale);
+            sess(h).set_viewport(w, hgt, scale);
             0
         }
         None => -1,
@@ -507,7 +565,7 @@ pub unsafe extern "C" fn explorer_set_viewport(
 pub unsafe extern "C" fn explorer_set_color_scheme(h: *mut ExplorerHandle, dark: i32) -> i32 {
     match unsafe { handle(h) } {
         Some(h) => {
-            h.session.set_color_scheme(if dark == 0 {
+            sess(h).set_color_scheme(if dark == 0 {
                 explorer_core::ColorScheme::Light
             } else {
                 explorer_core::ColorScheme::Dark
@@ -541,7 +599,7 @@ pub unsafe extern "C" fn explorer_set_accept_language(
             None => return -1,
         }
     };
-    h.session.set_accept_language(lang);
+    sess(h).set_accept_language(lang);
     0
 }
 
@@ -608,7 +666,7 @@ pub unsafe extern "C" fn explorer_input(
             return -1;
         }
     };
-    match h.rt.block_on(h.session.handle_input(tab, ev)) {
+    match h.rt.block_on(sess(h).handle_input(tab, ev)) {
         Ok(O::Ignored) => 0,
         Ok(O::Scrolled { .. }) => 1,
         Ok(O::Navigated) => 2,
@@ -635,9 +693,9 @@ pub unsafe extern "C" fn explorer_tick(h: *mut ExplorerHandle, tab: u64) -> i32 
         // `tick_animations` pompe aussi les timers JS (étape
         // 52) — leurs `location.href` sont drainés ici en
         // synchrone (l'hôte FFI n'a pas de battement).
-        Some(h) => match h.session.tick_animations(tab) {
+        Some(h) => match sess(h).tick_animations(tab) {
             Ok(worked) => {
-                if h.rt.block_on(h.session.drain_script_nav(tab)) > 0 {
+                if h.rt.block_on(sess(h).drain_script_nav(tab)) > 0 {
                     1
                 } else {
                     i32::from(worked)
@@ -671,7 +729,7 @@ pub unsafe extern "C" fn explorer_frame_size(
     }
     match unsafe { handle(h) } {
         Some(h) => {
-            if let Some((fw, fh, _)) = h.session.frame_pixels(tab) {
+            if let Some((fw, fh, _)) = sess(h).frame_pixels(tab) {
                 // SAFETY : pointeurs de sortie non nuls vérifiés.
                 unsafe {
                     *w = fw;
@@ -704,7 +762,7 @@ pub unsafe extern "C" fn explorer_frame_copy(
     let Some(h) = (unsafe { handle(h) }) else {
         return -1;
     };
-    match h.session.frame_pixels(tab) {
+    match sess(h).frame_pixels(tab) {
         Some((_, _, px)) => {
             if px.len() > cap || out.is_null() {
                 set_err("buffer trop petit ou nul");
@@ -746,7 +804,7 @@ pub unsafe extern "C" fn explorer_frame_copy_region(
     let Some(h) = (unsafe { handle(h) }) else {
         return -1;
     };
-    match h.session.frame_region(tab, x, y, w, hgt) {
+    match sess(h).frame_region(tab, x, y, w, hgt) {
         Some((_, _, px)) => {
             if px.len() > cap || out.is_null() {
                 set_err("buffer trop petit ou nul");
@@ -788,7 +846,7 @@ pub unsafe extern "C" fn explorer_dirty_rects(
         set_err("buffer nul");
         return -1;
     }
-    let rects = h.session.take_dirty(tab);
+    let rects = sess(h).take_dirty(tab);
     let need = rects.len() * 4;
     if need > cap {
         set_err("buffer trop petit");
@@ -824,7 +882,7 @@ pub unsafe extern "C" fn explorer_tab_url(
     let Some(h) = (unsafe { handle(h) }) else {
         return -1;
     };
-    match h.session.tab_url(tab) {
+    match sess(h).tab_url(tab) {
         Some(url) => unsafe { write_str(&url, buf, cap) },
         None => 0,
     }
@@ -851,7 +909,7 @@ pub unsafe extern "C" fn explorer_tab_title(
     let Some(h) = (unsafe { handle(h) }) else {
         return -1;
     };
-    match h.session.tab_info(tab).and_then(|t| t.title) {
+    match sess(h).tab_info(tab).and_then(|t| t.title) {
         Some(title) => unsafe { write_str(&title, buf, cap) },
         None => 0,
     }
@@ -869,7 +927,7 @@ pub unsafe extern "C" fn explorer_tab_scroll(h: *mut ExplorerHandle, tab: u64) -
     let Some(h) = (unsafe { handle(h) }) else {
         return -1.0;
     };
-    h.session
+    sess(h)
         .tab_info(tab)
         .map_or(-1.0, |t| f64::from(t.scroll_y))
 }
@@ -971,8 +1029,7 @@ pub unsafe extern "C" fn explorer_media_list(
     let Some(h) = (unsafe { handle(h) }) else {
         return -1;
     };
-    let list: Vec<serde_json::Value> = h
-        .session
+    let list: Vec<serde_json::Value> = sess(h)
         .media_list(tab)
         .iter()
         .map(explorer_core::media_offer_json)
@@ -1019,7 +1076,7 @@ pub unsafe extern "C" fn explorer_media_claim(
             .map(|v: serde_json::Value| explorer_core::media_codecs_from_json(&v))
             .unwrap_or_default()
     };
-    match h.session.media_claim(tab, media, codecs) {
+    match sess(h).media_claim(tab, media, codecs) {
         Ok(()) => 0,
         Err(e) => media_err_code(e),
     }
@@ -1041,7 +1098,7 @@ pub unsafe extern "C" fn explorer_media_release(
     let Some(h) = (unsafe { handle(h) }) else {
         return -1;
     };
-    match h.session.media_release(tab, media) {
+    match sess(h).media_release(tab, media) {
         Ok(()) => 0,
         Err(e) => media_err_code(e),
     }
@@ -1079,7 +1136,7 @@ pub unsafe extern "C" fn explorer_media_state(
         set_err("state invalide (∈ playing|paused|ended|error requis)");
         return -400;
     };
-    match h.session.media_report(tab, media, report) {
+    match sess(h).media_report(tab, media, report) {
         Ok(()) => 0,
         Err(e) => media_err_code(e),
     }
@@ -1107,7 +1164,7 @@ pub unsafe extern "C" fn explorer_download_url(
     let Some(u) = (unsafe { read_str(url, len, MAX_URL) }) else {
         return -1;
     };
-    match h.rt.block_on(h.session.download_url(tab, u)) {
+    match h.rt.block_on(sess(h).download_url(tab, u)) {
         Ok(_) => 0,
         Err(e) => {
             set_err(e);
@@ -1141,7 +1198,7 @@ pub unsafe extern "C" fn explorer_download_accept(
         return -1;
     };
     let opt = unsafe { read_str(path, path_len, MAX_URL) }.map(std::path::PathBuf::from);
-    match h.session.accept_download(tab, dl, opt) {
+    match sess(h).accept_download(tab, dl, opt) {
         Ok(t) => unsafe { write_str(&t.display().to_string(), buf, cap) },
         Err(e) => {
             set_err(e);
@@ -1166,7 +1223,7 @@ pub unsafe extern "C" fn explorer_download_decline(
     let Some(h) = (unsafe { handle(h) }) else {
         return -1;
     };
-    match h.rt.block_on(h.session.decline_download(tab, dl)) {
+    match h.rt.block_on(sess(h).decline_download(tab, dl)) {
         Ok(_) => 0,
         Err(e) => {
             set_err(e);
@@ -1200,9 +1257,9 @@ pub unsafe extern "C" fn explorer_find(
     };
     let q = unsafe { read_str(query, len, MAX_URL) }.unwrap_or("");
     let (count, index) = if dir == 0 {
-        (h.session.find_in_page(tab, q), 0)
+        (sess(h).find_in_page(tab, q), 0)
     } else {
-        let (i, n) = h.session.find_step(tab, dir);
+        let (i, n) = sess(h).find_step(tab, dir);
         (n, i)
     };
     let s = serde_json::json!({"count": count, "index": index, "query": q}).to_string();
@@ -1226,8 +1283,7 @@ pub unsafe extern "C" fn explorer_history(
     let Some(h) = (unsafe { handle(h) }) else {
         return -1;
     };
-    let list: Vec<serde_json::Value> = h
-        .session
+    let list: Vec<serde_json::Value> = sess(h)
         .history()
         .iter()
         .map(|v| serde_json::json!({"url": v.url, "title": v.title}))
@@ -1252,8 +1308,7 @@ pub unsafe extern "C" fn explorer_bookmarks(
     let Some(h) = (unsafe { handle(h) }) else {
         return -1;
     };
-    let list: Vec<serde_json::Value> = h
-        .session
+    let list: Vec<serde_json::Value> = sess(h)
         .bookmarks()
         .iter()
         .map(|b| serde_json::json!({"url": b.url, "title": b.title}))
@@ -1285,7 +1340,7 @@ pub unsafe extern "C" fn explorer_bookmark_add(
         return 0;
     };
     let t = unsafe { read_str(title, title_len, MAX_URL) };
-    i32::from(h.session.add_bookmark(u.to_string(), t.map(str::to_string)))
+    i32::from(sess(h).add_bookmark(u.to_string(), t.map(str::to_string)))
 }
 
 /// Retire un signet par URL (`url` UTF-8) — `1` retiré,
@@ -1306,7 +1361,7 @@ pub unsafe extern "C" fn explorer_bookmark_del(
     let Some(u) = (unsafe { read_str(url, url_len, MAX_URL) }) else {
         return 0;
     };
-    i32::from(h.session.remove_bookmark(u))
+    i32::from(sess(h).remove_bookmark(u))
 }
 
 #[cfg(test)]
@@ -1410,11 +1465,12 @@ mod tests {
             .unwrap();
         let events = session.subscribe();
         Box::into_raw(Box::new(ExplorerHandle {
-            rt,
-            session,
+            rt: std::sync::Arc::new(rt),
+            session: std::sync::Arc::new(std::sync::Mutex::new(session)),
             events,
             media_pending: String::new(),
             _profile_lock: None,
+            stop: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
         }))
     }
 

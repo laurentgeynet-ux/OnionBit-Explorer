@@ -7,6 +7,58 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **Pompe hôte FFI** (`explorer-ffi`)
+  — la session n'avançait que
+  pendant les appels FFI (tick UI
+  ~50 ms) : fetchs, timers JS et
+  applies gelés entre deux
+  sondages → minutes par page,
+  backlog de jobs accumulé.
+  `Session` devient
+  `Arc<Mutex<Session>>` partagé
+  avec un thread pompe interne
+  miroir du daemon (`poll_net` +
+  `pump_timers_all` +
+  `drain_applies`, cadence
+  `next_timer_deadline` ≤ 10 ms) ;
+  arrêt propre à `Drop`.
+
+- **JS-C233 — typage SVG réel**
+  (`explorer-jscore`, §B-14 vol 345
+  vivus — `Vivus [constructor]:
+  "element" parameter is not valid` :
+  les nœuds SVG étaient des
+  `HTMLElement` génériques, les
+  checks `instanceof SVGSVGElement`/
+  `constructor` des bibliothèques
+  dessin échouaient avant tout appel
+  `getTotalLength`) — la famille
+  `SVG*Element` est installée avec la
+  hiérarchie WebIDL complète
+  (`SVGElement` < `Element` ;
+  `SVGGraphicsElement` /
+  `SVGGeometryElement` /
+  `SVGTextContentElement` / … puis
+  les ~35 feuilles : `SVGPathElement`,
+  `SVGCircleElement`, `SVGGElement`,
+  `SVGUseElement`…) et `tag_interface`
+  mappe les tags uniquement-SVG vers
+  leur interface — `instanceof`,
+  `constructor.name`, `tagName`
+  (casse foreign elements conservée)
+  et `namespaceURI`
+  (`http://www.w3.org/2000/svg`) sont
+  désormais spec. Les collisions HTML
+  (`a`, `script`, `style`, `title`)
+  gardent l'interface HTML
+  (namespaces non tracés par l'arène,
+  déviation documentée) ;
+  `getTotalLength`/`getPointAtLength`
+  (JS-C223) s'exposent en lecture
+  (`typeof` = 'function') via
+  `has_method`. Verrou
+  `svg_elements_typed_with_webidl_chain`.
+
 - **JS-C232 — `not a CryptoKey`
   nomme l'argument** (`explorer-jscore`,
   §B-14 vol 344 wamiz poool) —
