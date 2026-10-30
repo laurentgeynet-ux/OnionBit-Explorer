@@ -1043,7 +1043,9 @@ fn gc_preserves_cached_dom_wrappers() {
     // Après un second GC + allocation fraîche, tout tient.
     e.eval("for(let i=0;i<50;i++)({a:i})").unwrap();
     let _ = e.collect();
-    assert_eq!(ev(&mut e, "document.getElementById('u').tagName"), "USE");
+    // `use` = tag SVG — le nom qualifié garde sa casse
+    // (spec foreign elements, JS-C233).
+    assert_eq!(ev(&mut e, "document.getElementById('u').tagName"), "use");
 }
 
 // JS-C204 — surface `X.prototype` WebIDL des ctors
@@ -1807,4 +1809,65 @@ fn cookie_store_event_target() {
     );
     let _ = e.eval("0");
     assert_eq!(ev(&mut e, "globalThis.__r"), "null");
+}
+
+// JS-C233 — typage SVG réel (vivus vol 345 : `element`
+// rejeté `not valid` parce que `instanceof SVGSVGElement`/
+// `constructor` échouaient — les nœuds SVG étaient des
+// `HTMLElement` génériques). Chaîne WebIDL complète +
+// ctor global + `tagName`/`namespaceURI` spec.
+#[test]
+fn svg_elements_typed_with_webidl_chain() {
+    let mut e = engine();
+    // `<svg>` → `SVGSVGElement`, `<use>` → `SVGUseElement` —
+    // instanceof transitif jusqu'à `EventTarget`, plus
+    // `instanceof HTMLElement` désormais FAUX (spec).
+    assert_eq!(
+        ev(
+            &mut e,
+            "var s=document.querySelector('svg'),u=document.getElementById('u');\
+             (s instanceof SVGSVGElement)+'|'\
+             +(s instanceof SVGElement)+'|'\
+             +(s instanceof SVGGraphicsElement)+'|'\
+             +(s instanceof Element)+'|'\
+             +(s instanceof Node)+'|'\
+             +(s instanceof EventTarget)+'|'\
+             +(u instanceof SVGUseElement)+'|'\
+             +(s instanceof HTMLElement)"
+        ),
+        "true|true|true|true|true|true|true|false"
+    );
+    // ctor global installé + `constructor` tag-spécifique.
+    assert_eq!(ev(&mut e, "typeof SVGGeometryElement"), "function");
+    assert_eq!(
+        ev(&mut e, "s.constructor.name+'|'+u.constructor.name"),
+        "SVGSVGElement|SVGUseElement"
+    );
+    // `tagName`/`namespaceURI` spec foreign elements.
+    assert_eq!(ev(&mut e, "s.tagName+'|'+u.tagName"), "svg|use");
+    assert_eq!(
+        ev(&mut e, "s.namespaceURI+'|'+document.body.namespaceURI"),
+        "http://www.w3.org/2000/svg|http://www.w3.org/1999/xhtml"
+    );
+    // Feuille géométrie : `path` est `SVGGeometryElement` et
+    // porte la géométrie JS-C223 réelle — le verrou historique.
+    assert_eq!(
+        ev(
+            &mut e,
+            "var p=document.createElement('path');\
+             (p instanceof SVGGeometryElement)+'|'\
+             +(p instanceof SVGPathElement)+'|'\
+             +(typeof p.getTotalLength)"
+        ),
+        "true|true|function"
+    );
+    // `createElementNS` — même typage via le tag stocké.
+    assert_eq!(
+        ev(
+            &mut e,
+            "var r=document.createElementNS('http://www.w3.org/2000/svg','rect');\
+             (r instanceof SVGRectElement)+'|'+(r instanceof SVGGeometryElement)"
+        ),
+        "true|true"
+    );
 }

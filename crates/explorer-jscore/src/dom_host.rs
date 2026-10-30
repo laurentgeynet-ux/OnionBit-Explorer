@@ -1535,11 +1535,21 @@ pub(crate) fn node_value(e: &mut Engine, dom: &DomRef, cache: &NodeCache, node: 
     v
 }
 
-/// Tag HTML → interface DOM (spec `HTML*Element`) — les
-/// `x instanceof HTML<Name>Element` réels (invariants Next.js,
-/// feature-detects) exigent le proto tag-spécifique ; tags hors
-/// table → `HTMLElement` (spec rend `HTMLUnknownElement`, non
-/// modélisé — déviation documentée).
+/// Tag → interface DOM (spec `HTML*Element`/`SVG*Element`) —
+/// les `x instanceof HTML<Name>Element` réels (invariants
+/// Next.js, feature-detects) exigent le proto tag-spécifique ;
+/// tags hors table → `HTMLElement` (spec rend
+/// `HTMLUnknownElement`, non modélisé — déviation documentée).
+///
+/// SVG (JS-C233) : l'arène ne trace pas les namespaces — les
+/// tags qui ne vivent que dans `<svg>` rendent l'interface SVG
+/// ; les collisions HTML (`a`, `script`, `style`, `title`)
+/// gardent l'interface HTML. Un `<path>` écrit hors `<svg>`
+/// dans un document HTML serait `SVGPathElement` au lieu de
+/// `HTMLUnknownElement` — déviation bornée et inoffensive
+/// (une telle balise est invalide et rare) ; l'inverse — vivus/
+/// d3/mxgraph qui testent `instanceof`/`constructor` sur les
+/// nœuds SVG réels — est la norme du web.
 fn tag_interface(tag: &str) -> Option<&'static str> {
     Some(match tag {
         "a" => "HTMLAnchorElement",
@@ -1602,6 +1612,43 @@ fn tag_interface(tag: &str) -> Option<&'static str> {
         "track" => "HTMLTrackElement",
         "ul" => "HTMLUListElement",
         "video" => "HTMLVideoElement",
+        // Famille SVG (JS-C233, vivus §B-14) — minuscule =
+        // forme stockée dans l'arène. `fe*` = primitives de
+        // filtre, toutes `SVGElement` directes (spec).
+        "svg" => "SVGSVGElement",
+        "circle" => "SVGCircleElement",
+        "clippath" => "SVGClipPathElement",
+        "defs" => "SVGDefsElement",
+        "desc" => "SVGDescElement",
+        "ellipse" => "SVGEllipseElement",
+        "foreignobject" => "SVGForeignObjectElement",
+        "g" => "SVGGElement",
+        "image" => "SVGImageElement",
+        "line" => "SVGLineElement",
+        "lineargradient" => "SVGLinearGradientElement",
+        "marker" => "SVGMarkerElement",
+        "mask" => "SVGMaskElement",
+        "metadata" => "SVGMetadataElement",
+        "path" => "SVGPathElement",
+        "pattern" => "SVGPatternElement",
+        "polygon" => "SVGPolygonElement",
+        "polyline" => "SVGPolylineElement",
+        "radialgradient" => "SVGRadialGradientElement",
+        "rect" => "SVGRectElement",
+        "stop" => "SVGStopElement",
+        "switch" => "SVGSwitchElement",
+        "symbol" => "SVGSymbolElement",
+        "text" => "SVGTextElement",
+        "textpath" => "SVGTextPathElement",
+        "tspan" => "SVGTSpanElement",
+        "use" => "SVGUseElement",
+        "view" => "SVGViewElement",
+        "animate" => "SVGAnimateElement",
+        "animatemotion" => "SVGAnimateMotionElement",
+        "animatetransform" => "SVGAnimateTransformElement",
+        "set" => "SVGSetElement",
+        "filter" => "SVGFilterElement",
+        _ if tag.starts_with("fe") => "SVGElement",
         _ => return None,
     })
 }
@@ -2244,6 +2291,48 @@ impl Engine {
             "HTMLUListElement",
             "HTMLVideoElement",
             "SVGElement",
+            // Famille SVG (JS-C233) — parents avant enfants :
+            // le `match` parent résout le proto déjà posé.
+            "SVGGraphicsElement",
+            "SVGAnimationElement",
+            "SVGGradientElement",
+            "SVGTextContentElement",
+            "SVGTextPositioningElement",
+            "SVGGeometryElement",
+            "SVGSVGElement",
+            "SVGAElement",
+            "SVGCircleElement",
+            "SVGClipPathElement",
+            "SVGDefsElement",
+            "SVGDescElement",
+            "SVGEllipseElement",
+            "SVGFilterElement",
+            "SVGForeignObjectElement",
+            "SVGGElement",
+            "SVGImageElement",
+            "SVGLineElement",
+            "SVGLinearGradientElement",
+            "SVGMarkerElement",
+            "SVGMaskElement",
+            "SVGMetadataElement",
+            "SVGPathElement",
+            "SVGPatternElement",
+            "SVGPolygonElement",
+            "SVGPolylineElement",
+            "SVGRadialGradientElement",
+            "SVGRectElement",
+            "SVGStopElement",
+            "SVGSwitchElement",
+            "SVGSymbolElement",
+            "SVGTextElement",
+            "SVGTextPathElement",
+            "SVGTSpanElement",
+            "SVGUseElement",
+            "SVGViewElement",
+            "SVGAnimateElement",
+            "SVGAnimateMotionElement",
+            "SVGAnimateTransformElement",
+            "SVGSetElement",
             "Document",
             // `HTMLDocument` — interface legacy de `document`
             // (cookie-monster/woopic : `x instanceof HTMLDocument`,
@@ -2293,6 +2382,42 @@ impl Engine {
                     }
                     "HTMLDocument" => Some("Document"),
                     "SVGElement" => Some("Element"),
+                    // Hiérarchie WebIDL SVG (JS-C233) :
+                    // graphics/geometry/text < SVGElement,
+                    // feuilles géométrie < SVGGeometryElement,
+                    // feuilles graphics < SVGGraphicsElement.
+                    "SVGGraphicsElement" | "SVGAnimationElement" | "SVGGradientElement" => {
+                        Some("SVGElement")
+                    }
+                    "SVGGeometryElement"
+                    | "SVGTextContentElement"
+                    | "SVGSVGElement"
+                    | "SVGAElement"
+                    | "SVGGElement"
+                    | "SVGDefsElement"
+                    | "SVGUseElement"
+                    | "SVGSymbolElement"
+                    | "SVGSwitchElement"
+                    | "SVGForeignObjectElement"
+                    | "SVGImageElement" => Some("SVGGraphicsElement"),
+                    "SVGTextPositioningElement" | "SVGTextPathElement" => {
+                        Some("SVGTextContentElement")
+                    }
+                    "SVGPathElement" | "SVGRectElement" | "SVGCircleElement"
+                    | "SVGEllipseElement" | "SVGLineElement" | "SVGPolylineElement"
+                    | "SVGPolygonElement" => Some("SVGGeometryElement"),
+                    "SVGTextElement" | "SVGTSpanElement" => Some("SVGTextPositioningElement"),
+                    "SVGAnimateElement"
+                    | "SVGAnimateMotionElement"
+                    | "SVGAnimateTransformElement"
+                    | "SVGSetElement" => Some("SVGAnimationElement"),
+                    "SVGLinearGradientElement" | "SVGRadialGradientElement" => {
+                        Some("SVGGradientElement")
+                    }
+                    // Feuilles restantes (marker/clip/mask/stop/
+                    // desc/metadata/view/filter…) : `SVGElement`
+                    // direct, spec WebIDL.
+                    _ if name.starts_with("SVG") && name.ends_with("Element") => Some("SVGElement"),
                     // Spec : `HTML*Element.prototype` hérite
                     // `HTMLElement.prototype` (pas `Element`
                     // direct) — sinon `el instanceof HTMLElement`
@@ -2883,7 +3008,9 @@ impl Engine {
         // ReferenceError au premier `typeof`/accès direct.
         for name in [
             "HTMLSummaryElement",
-            "SVGSVGElement",
+            // `SVGSVGElement` — installé chaîné dans la liste
+            // DOM principale (JS-C233) ; l'entrée census
+            // écrasait ctor+proto par des nus.
             "Selection",
             "FileList",
             "MediaQueryList",
@@ -5875,6 +6002,11 @@ impl Host for NodeHost {
                 && name == "reset")
             || (self.dom.borrow().nodes[self.node as usize].tag.as_str() == "img"
                 && name == "decode")
+            // JS-C223/233 — `typeof path.getTotalLength` =
+            // 'function' (proto `SVGGeometryElement`), pas
+            // seulement appelable via `x.m()`.
+            || (is_svg_geom(&self.dom, self.node)
+                && matches!(name, "getTotalLength" | "getPointAtLength"))
             // CAP-179 — fullscreen sur tout élément attaché
             // (spec) ; popover gaté par l'attribut `popover`
             // (`typeof el.showPopover` = 'function' seulement
@@ -6395,11 +6527,18 @@ impl Host for NodeHost {
                     let n = &self.dom.borrow().nodes[node as usize];
                     (n.kind, n.tag.clone())
                 };
-                // Majuscule = éléments HTML (spec) ; les sentinels
-                // non-élément gardent leur forme (`#text`,
-                // `#comment`, `#document-fragment`, `#document`).
+                // Majuscule = éléments HTML (spec) ; les éléments
+                // SVG gardent le nom qualifié stocké (spec foreign
+                // elements — vivus/pathformer comparent en
+                // minuscule, JS-C233). Les sentinels non-élément
+                // gardent leur forme (`#text`, `#comment`,
+                // `#document-fragment`, `#document`).
                 return Ok(Some(e.str_val(if k == NodeKind::Element {
-                    t.to_uppercase()
+                    if tag_interface(&t).is_some_and(|n| n.starts_with("SVG")) {
+                        t
+                    } else {
+                        t.to_uppercase()
+                    }
                 } else {
                     t
                 })));
@@ -6415,6 +6554,24 @@ impl Host for NodeHost {
                 let n = &self.dom.borrow().nodes[node as usize];
                 let v = if n.kind == NodeKind::Element {
                     e.str_val(n.tag.clone())
+                } else {
+                    Value::Null
+                };
+                return Ok(Some(v));
+            }
+            // `namespaceURI` — l'arène ne trace pas les
+            // namespaces : dérivé du tag (JS-C233 — d3/vivas
+            // comparent l'URI SVG). Non-élément → `null` spec.
+            "namespaceURI" => {
+                let n = &self.dom.borrow().nodes[node as usize];
+                let v = if n.kind == NodeKind::Element {
+                    e.str_val(
+                        if tag_interface(&n.tag).is_some_and(|i| i.starts_with("SVG")) {
+                            "http://www.w3.org/2000/svg"
+                        } else {
+                            "http://www.w3.org/1999/xhtml"
+                        },
+                    )
                 } else {
                     Value::Null
                 };

@@ -513,7 +513,7 @@ fn rsa_oaep_end_to_end_ops() {
                     hash: DigestAlgo::Sha256
                 }
             ));
-            assert!(iv.is_empty());
+            assert_eq!(iv, [] as [u8; 0]);
             assert_eq!(aad, vec![9u8, 8]);
         }
         op => panic!("Encrypt attendu, reçu {op:?}"),
