@@ -394,8 +394,16 @@ class FfiEngine implements BrowserRepository {
   /// (`explorer_download_accept`/`_decline` — exports
   /// additifs : dll antérieure → `code -1`/`FfiException`).
   @override
-  Future<String> acceptDownload(String tabId, int dlId, {String? path}) =>
-      throw UnsupportedError('downloads : non exposé en FFI (étape 70)');
+  Future<String> acceptDownload(String tabId, int dlId, {String? path}) async {
+    final r = await _worker.call(opDownloadAccept, {
+      'tab': _idOf(tabId),
+      'dl': dlId,
+      'path': ?path,
+    });
+    final code = (r?['code'] as num?)?.toInt() ?? -1;
+    if (code == 0) return r?['path'] as String? ?? '';
+    throw FfiException('accept_download : code $code');
+  }
 
   /// « Enregistrer la source » (média) — `explorer_download_url`
   /// : la pile transport complète (cookies, cache, HSTS) repasse
