@@ -4628,14 +4628,46 @@ impl Host for DocumentHost {
                 if name == "writeln" {
                     s.push('\n');
                 }
+                // §B-19 — point d'insertion spec : pendant le
+                // chargement le fragment s'insère **après le
+                // script courant** (marqueur du parseur), pas
+                // en queue de `<body>` — tumblr écrit
+                // `main-*.js` via `document.write` et
+                // l'ordre de découverte des scripts suivants
+                // est préservé. `currentScript` absent ou
+                // détaché → repli `<body>` (comportement
+                // historique).
+                let anchor = e
+                    .hooks
+                    .current_script
+                    .filter(|n| self.dom.borrow().is_attached(*n));
                 let mut d = self.dom.borrow_mut();
                 if !d.doc_open {
                     let root = d.root;
                     d.replace_children(root, &[]);
                     d.doc_open = true;
                 }
-                let body = d.body();
-                d.parse_fragment_into(body, &s);
+                if let Some(cs) = anchor {
+                    if let Some(parent) = d.parent(cs) {
+                        // Fragment en scratch puis re-parenté
+                        // avant le frère suivant — ordre
+                        // conservé (`insertAdjacentHTML`
+                        // fait de même).
+                        let scratch = d.create_element("div");
+                        d.parse_fragment_into(scratch, &s);
+                        let kids = d.child_nodes(scratch);
+                        let next = d.sibling(cs, true);
+                        for k in kids {
+                            d.insert_before(parent, k, next);
+                        }
+                    } else {
+                        let body = d.body();
+                        d.parse_fragment_into(body, &s);
+                    }
+                } else {
+                    let body = d.body();
+                    d.parse_fragment_into(body, &s);
+                }
                 Ok(Some(Value::Undefined))
             }
             // Méthodes Node/ParentNode du Document (spec :

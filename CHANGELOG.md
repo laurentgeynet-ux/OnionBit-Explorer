@@ -7,6 +7,35 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **JS-C216 — `document.write`
+  insère au point du parseur**
+  (§B-19, tumblr vols 102/216 —
+  `main-*.js` écrit par le
+  chargeur jamais évalué) :
+  pendant le chargement
+  (`doc_open`) le fragment était
+  append en **queue de `<body>`**,
+  après le contenu frère —
+  ordre de découverte cassé.
+  Désormais le fragment est parsé
+  en scratch puis inséré **après
+  `document.currentScript`** (avant
+  le frère suivant — spec
+  « insertion point »), repli
+  `<body>` quand il n'y a pas
+  d'élément porteur attaché. Les
+  `<script>` écrits restent
+  enfilés `pending_dyn` par
+  `insert_before` →
+  `note_attached_scripts`
+  (fetch+éval dyn inchangés) ;
+  `write` sur document fermé
+  efface toujours d'abord (spec
+  `document open steps`, verrous
+  existants verts). Verrou
+  `document_write_insere_apres_current_script`.
+  À re-voler (tumblr, dw).
+
 - **Étape 161 — §B-1 : disjoncteur
   rafale d'évals lentes** —
   variante vimeo (vols 104/105/

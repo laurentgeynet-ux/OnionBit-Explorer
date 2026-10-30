@@ -6771,3 +6771,40 @@ fn document_node_mutation_methods() {
         "HierarchyRequestError: ancestor"
     );
 }
+
+/// §B-19 — `document.write` pendant le chargement insère au
+/// point du parseur (après `currentScript`, avant le frère
+/// suivant), pas en queue de `<body>` : l'ordre de
+/// découverte des scripts écrits est celui du document.
+#[test]
+fn document_write_insere_apres_current_script() {
+    let mut e = engine_with(
+        "<html><body>\
+         <script src=a.js></script>\
+         <div id=after>marker</div>\
+         <script src=b.js></script>\
+         </body></html>",
+    );
+    // Pendant l'éval de l'élément ordinal 0 : le fragment
+    // écrit doit atterrir entre `<script a>` et `#after`.
+    e.eval_script_el("document.write('<div id=w>written</div>')", None, 0)
+        .unwrap();
+    let v = evf(
+        &mut e,
+        "var w = document.getElementById('w');\
+         var a = document.querySelector('script');\
+         var after = document.getElementById('after');\
+         (w.previousSibling === a) + '|' + (w.nextSibling === after) + '|' + \
+         w.parentNode.tagName",
+    );
+    assert_eq!(v, "true|true|BODY");
+    // Sans `currentScript` (éval ordinaire) : repli queue de
+    // `<body>` — comportement historique conservé.
+    evf(&mut e, "document.write('<div id=w2>x</div>')");
+    let v = evf(
+        &mut e,
+        "var w2 = document.getElementById('w2');\
+         w2.parentNode.lastChild === w2",
+    );
+    assert_eq!(v, "true");
+}
