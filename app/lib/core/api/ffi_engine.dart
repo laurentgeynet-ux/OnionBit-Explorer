@@ -332,10 +332,10 @@ class FfiEngine implements BrowserRepository {
   }
 
   // ------------------------------------------------------------------
-  // Bibliothèque — favoris pontés FFI (`explorer_bookmarks`,
-  // `_add`, `_del` — exports additifs : dll antérieure → liste
-  // vide / code -1). L'historique reste sans export ABI
-  // (panneau vide dégradé, étape 57).
+  // Bibliothèque — favoris et historique pontés FFI
+  // (`explorer_bookmarks`/`_add`/`_del`, `explorer_history`
+  // — exports additifs : dll antérieure → liste vide /
+  // code -1).
   // ------------------------------------------------------------------
 
   @override
@@ -362,7 +362,14 @@ class FfiEngine implements BrowserRepository {
   }
 
   @override
-  Future<List<HistoryEntry>> history() async => const [];
+  Future<List<HistoryEntry>> history() async {
+    final r = await _worker.call(opHistory);
+    final list = r?['history'] as List? ?? const [];
+    return [
+      for (final e in list)
+        if (e is Map<String, dynamic>) HistoryEntry.fromJson(e),
+    ];
+  }
 
   /// Find-in-page — même dégradation que la bibliothèque :
   /// l'ABI n'exporte pas la recherche moteur (étape 57bis).

@@ -1080,6 +1080,34 @@ pub unsafe extern "C" fn explorer_media_state(
 }
 
 
+/// Journal de navigation du profil — JSON
+/// `[{"url":…,"title":…}]` dans `buf` (même contrat
+/// UTF-8/`cap` que [`explorer_last_error`]).
+///
+/// # Safety
+///
+/// `h` issu de [`explorer_create`] ; `buf..buf+cap`
+/// inscriptible.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn explorer_history(
+    h: *mut ExplorerHandle,
+    buf: *mut u8,
+    cap: usize,
+) -> isize {
+    let Some(h) = (unsafe { handle(h) }) else {
+        return -1;
+    };
+    let list: Vec<serde_json::Value> = h
+        .session
+        .history()
+        .iter()
+        .map(|v| serde_json::json!({"url": v.url, "title": v.title}))
+        .collect();
+    let s = serde_json::to_string(&serde_json::json!({"history": list}))
+        .unwrap_or_else(|_| "{\"history\":[]}".to_string());
+    unsafe { write_str(&s, buf, cap) }
+}
+
 /// Signets du profil — JSON `[{"url":…,"title":…}]` dans `buf`
 /// (même contrat UTF-8/`cap` que [`explorer_last_error`]).
 ///

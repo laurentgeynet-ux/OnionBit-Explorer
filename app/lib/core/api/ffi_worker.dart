@@ -231,6 +231,7 @@ const opSetAcceptLanguage = 18;
 const opBookmarks = 19;
 const opBookmarkAdd = 20;
 const opBookmarkDel = 21;
+const opHistory = 22;
 
 /// Point d'entrée de l'isolate — `args` = `{'reply': SendPort,
 /// 'path': String}`. Envoie `{'port': SendPort}` puis
@@ -327,6 +328,7 @@ class _WorkerImpl {
   static _BmListD? _bookmarks;
   static _BmAddD? _bookmarkAdd;
   static _SetLangD? _bookmarkDel;
+  static _BmListD? _history;
   final _MediaEventsD? _mediaEvents;
   final _TabUrlD? _mediaList;
   final _MediaClaimD? _mediaClaim;
@@ -434,6 +436,13 @@ class _WorkerImpl {
       try {
         _bookmarkDel = lib.lookupFunction<_SetLangN, _SetLangD>(
           'explorer_bookmark_del',
+        );
+      } on Object {
+        /* export absent */
+      }
+      try {
+        _history = lib.lookupFunction<_BmListN, _BmListD>(
+          'explorer_history',
         );
       } on Object {
         /* export absent */
@@ -590,6 +599,8 @@ class _WorkerImpl {
         } finally {
           calloc.free(u);
         }
+      case opHistory:
+        return {'history': _readHistory()};
       case opFrame:
         return _frameOp(m);
       case opFrameRegion:
@@ -837,6 +848,27 @@ class _WorkerImpl {
       if (n <= 0) return const [];
       final v = jsonDecode(utf8.decode(buf.asTypedList(n)));
       return v is Map && v['media'] is List ? v['media'] as List : const [];
+    } on Object {
+      return const [];
+    } finally {
+      calloc.free(buf);
+    }
+  }
+
+  /// `explorer_history` → `[{url,title}]` ; export absent →
+  /// `[]` (dll antérieure).
+  List<Object?> _readHistory() {
+    final f = _history;
+    if (f == null) return const [];
+    const cap = 64 * 1024;
+    final buf = calloc<ffi.Uint8>(cap);
+    try {
+      final n = f(_handle, buf, cap);
+      if (n <= 0) return const [];
+      final v = jsonDecode(utf8.decode(buf.asTypedList(n)));
+      return v is Map && v['history'] is List
+          ? v['history'] as List
+          : const [];
     } on Object {
       return const [];
     } finally {

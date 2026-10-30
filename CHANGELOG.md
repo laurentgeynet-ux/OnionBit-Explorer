@@ -7,20 +7,19 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
-- **Pont favoris FFI**
-  (`explorer-ffi`, app) —
+- **Pont favoris + historique
+  FFI** (`explorer-ffi`, app) —
   `explorer_bookmarks`,
   `explorer_bookmark_add`,
-  `explorer_bookmark_del` :
-  la bibliothèque de l'app
+  `explorer_bookmark_del`,
+  `explorer_history` : la
+  bibliothèque de l'app
   fonctionne aussi en mode
   portable in-process (stubs
   liste-vide/false supprimés ;
   exports additifs — dll
   antérieure → dégradation
-  documentée inchangée). Le
-  panneau historique reste
-  sans export ABI.
+  documentée inchangée).
 
 - **Verrou profil partagé**
   (`explorer-core`, daemon+FFI) —
