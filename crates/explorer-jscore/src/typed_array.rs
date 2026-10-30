@@ -1599,7 +1599,7 @@ pub(crate) fn b64_encode(bytes: &[u8]) -> String {
     out
 }
 
-fn b64_decode(s: &str) -> Option<Vec<u8>> {
+pub(crate) fn b64_decode(s: &str) -> Option<Vec<u8>> {
     let mut bits = 0u32;
     let mut nbits = 0u32;
     let mut out = Vec::new();

@@ -200,10 +200,19 @@ impl Engine {
     /// import-map à défaut) — identité du module pour
     /// `import.meta.url` et les référents aval.
     fn load_source(&mut self, spec: &str, referrer: &str) -> JsResult<(String, String)> {
+        let resolved = self.resolve_bare(spec).unwrap_or_else(|| spec.to_string());
+        // `data:` module — spec : résolu SANS réseau ni loader
+        // (google SERP : le lazy-loader Closure avalait le rejet
+        // « fetch échoué » puis mourait en silence — page vide).
+        if resolved.starts_with("data:") {
+            return match decode_data_module(&resolved) {
+                Ok(src) => Ok((resolved, src)),
+                Err(m) => Err(self.type_error(format!("cannot load module `{spec}`: {m}"))),
+            };
+        }
         let Some(loader) = self.module_loader.clone() else {
             return Err(self.type_error(format!("no module loader for `{spec}`")));
         };
-        let resolved = self.resolve_bare(spec).unwrap_or_else(|| spec.to_string());
         let url = loader
             .borrow_mut()
             .resolve(&resolved, referrer)
@@ -737,6 +746,71 @@ pub fn rewrite_bare_specifier(map: &[(String, String)], spec: &str) -> Option<St
         }
     }
     best.map(|(key, t)| format!("{t}{}", &spec[key.len()..]))
+}
+
+/// MIMEs JavaScript acceptés pour un module `data:` —
+/// ensemble spec (« JavaScript MIME type ») ; tout autre
+/// (y compris absent → `text/plain` par défaut data: URL)
+/// rejette honnêtement.
+const JS_MIMES: &[&str] = &[
+    "text/javascript",
+    "application/javascript",
+    "text/ecmascript",
+    "application/ecmascript",
+    "application/x-javascript",
+    "text/x-javascript",
+];
+
+/// Décode un module `data:` : `data:[<mime>][;<params>]
+/// [;base64],<payload>` → source UTF-8. Spec : le MIME doit
+/// être JavaScript (absent = `text/plain` → rejet honnête) ;
+/// `;base64` bascule le décodage ; le payload est sinon
+/// percent-encodé (`+` reste littéral — ce n'est pas un
+/// formulaire). Aucun réseau : le module vit dans l'URL.
+fn decode_data_module(url: &str) -> std::result::Result<String, String> {
+    let Some(rest) = url.strip_prefix("data:") else {
+        return Err("pas une URL data:".to_string());
+    };
+    let Some(comma) = rest.find(',') else {
+        return Err("data: sans séparateur `,`".to_string());
+    };
+    let head = &rest[..comma];
+    let body = &rest[comma + 1..];
+    let mut parts = head.split(';');
+    let mime = parts.next().unwrap_or_default().trim().to_ascii_lowercase();
+    let is_b64 = parts.any(|p| p.eq_ignore_ascii_case("base64"));
+    if !JS_MIMES.contains(&mime.as_str()) {
+        return Err(format!("data: MIME non-JavaScript `{mime}`"));
+    }
+    let bytes = if is_b64 {
+        crate::typed_array::b64_decode(body).ok_or_else(|| "data: base64 malformé".to_string())?
+    } else {
+        pct_decode(body)
+    };
+    String::from_utf8(bytes).map_err(|_| "data: source non-UTF-8".to_string())
+}
+
+/// Percent-décodage spec `data:` — pas de `+`→espace (sémantique
+/// `decodeURIComponent`, pas `application/x-www-form-urlencoded`) ;
+/// séquences invalides copiées telles quelles (tolérant).
+fn pct_decode(s: &str) -> Vec<u8> {
+    let b = s.as_bytes();
+    let mut out = Vec::with_capacity(b.len());
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] == b'%' && i + 2 < b.len() {
+            let h = (b[i + 1] as char).to_digit(16);
+            let l = (b[i + 2] as char).to_digit(16);
+            if let (Some(h), Some(l)) = (h, l) {
+                out.push((h * 16 + l) as u8);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(b[i]);
+        i += 1;
+    }
+    out
 }
 
 /// Spécificateur « bare » au sens de la spec import map : ni

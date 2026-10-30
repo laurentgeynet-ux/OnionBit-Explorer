@@ -126,3 +126,50 @@ fn c101_delivered_module_deps_seeded() {
     let r = e.eval("globalThis.__r").expect("eval __r");
     assert_eq!(e.describe(r), "ns:42");
 }
+
+/// Verrou google SERP : `import("data:…")` se résout inline,
+/// SANS réseau ni loader (le lazy-loader Closure avalait le
+/// rejet « fetch échoué » — bootstrap muet, page vide).
+/// Percent + base64 servis ; MIME non-JS → rejet honnête spec.
+#[test]
+fn data_url_module_resolves_inline() {
+    let mut e = Engine::new();
+    // Aucun loader posé — le rail `data:` n'en a pas besoin.
+    e.eval_module(
+        "globalThis.__r='start';\
+         import('data:text/javascript,export%20const%20answer%20=%2042;')\
+           .then(m=>{globalThis.__r='ns:'+m.answer;})\
+           .catch(()=>{globalThis.__r='rej';});",
+        "main.js",
+    )
+    .expect("module eval");
+    let _ = e.eval("0"); // drain microtasks → `.then` tourné.
+    let r = e.eval("globalThis.__r").expect("eval __r");
+    assert_eq!(e.describe(r), "ns:42");
+    // Variante base64 + param charset.
+    e.eval_module(
+        "globalThis.__r='start';\
+         import('data:text/javascript;charset=utf-8;base64,ZXhwb3J0IGNvbnN0IGFuc3dlciA9IDk5Ow==')\
+           .then(m=>{globalThis.__r='b64:'+m.answer;})\
+           .catch(()=>{globalThis.__r='rej';});",
+        "m2.js",
+    )
+    .expect("module eval b64");
+    let _ = e.eval("0");
+    let r = e.eval("globalThis.__r").expect("eval __r b64");
+    assert_eq!(e.describe(r), "b64:99");
+    // MIME non-JS → rejet spec (`text/plain` n'est pas JS).
+    e.eval_module(
+        "globalThis.__r='start';\
+         import('data:text/plain,hello')\
+           .then(()=>{globalThis.__r='no';})\
+           .catch(()=>{globalThis.__r='rej';});",
+        "m3.js",
+    )
+    .expect("module eval mime");
+    let _ = e.eval("0");
+    let r = e.eval("globalThis.__r").expect("eval __r mime");
+    assert_eq!(e.describe(r), "rej");
+    // Tout s'est résolu inline — aucune requête drainée.
+    assert!(e.drain_dyn_imports().is_empty());
+}
