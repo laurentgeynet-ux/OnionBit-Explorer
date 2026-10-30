@@ -7,6 +7,25 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **JS-C219 — `relList`
+  (DOMTokenList `rel`)**
+  (`explorer-jscore`, §B-14
+  philharmonie vols 141/216 —
+  addtoany `link.relList.
+  supports('modulepreload')`
+  → `supports of Undefined` :
+  `relList` n'existait pas) —
+  `ClassListHost` généralisé
+  sur le nom d'attribut
+  reflété (`class`/`rel`,
+  mêmes rails vivants
+  `attr`/`set_attr`), arm
+  `relList` posée sur les tags
+  spec `link`/`a`/`area`/`form`
+  (ailleurs `undefined`).
+  Verrou `link_rel_list_
+  supports_modulepreload`.
+
 - **Étape 163 — §B-1 : disjoncteur
   lent couvre toutes les voies
   d'éval** (`explorer-core`, REVALID7

@@ -1264,10 +1264,15 @@ struct StyleHost {
     computed: bool,
 }
 
-/// `el.classList` — token ops over the `class` attr.
+/// `el.classList`/`el.relList` — token ops over un attribut
+/// à jetons (`class`, `rel` — spec DOMTokenList : mêmes
+/// rails, le nom d'attribut seul change).
 struct ClassListHost {
     dom: DomRef,
     node: NodeId,
+    /// Attribut reflété — `"class"` pour `classList`, `"rel"`
+    /// pour `relList` (link/a/area/form, spec DOMTokenList).
+    attr: &'static str,
 }
 
 /// Propriété d'événement plateforme portée par l'embedder
@@ -5923,7 +5928,29 @@ impl Host for NodeHost {
                 return Ok(Some(e.new_iterable_host(Rc::new(ClassListHost {
                     dom: self.dom.clone(),
                     node,
+                    attr: "class",
                 }))));
+            }
+            // `relList` (§B-14 vol 141/216 philharmonie —
+            // addtoany `link.relList.supports('modulepreload')`)
+            // — DOMTokenList reflétant `rel`, spec restreinte
+            // à `link`/`a`/`area`/`form`.
+            "relList" => {
+                let n = &self.dom.borrow().nodes[node as usize];
+                let tag = match n.kind {
+                    NodeKind::Element => n.tag.as_str(),
+                    _ => "",
+                };
+                return Ok(Some(match tag {
+                    "link" | "a" | "area" | "form" => {
+                        e.new_iterable_host(Rc::new(ClassListHost {
+                            dom: self.dom.clone(),
+                            node,
+                            attr: "rel",
+                        }))
+                    }
+                    _ => Value::Undefined,
+                }));
             }
             "parentNode" => {
                 let p = self.dom.borrow().nodes[node as usize].parent;
@@ -8674,7 +8701,7 @@ impl ClassListHost {
     fn tokens(&self) -> Vec<String> {
         self.dom
             .borrow()
-            .attr(self.node, "class")
+            .attr(self.node, self.attr)
             .map(|c| c.split_whitespace().map(str::to_string).collect())
             .unwrap_or_default()
     }
@@ -8810,7 +8837,7 @@ impl Host for ClassListHost {
                 }
                 self.dom
                     .borrow_mut()
-                    .set_attr(self.node, "class", &tokens.join(" "));
+                    .set_attr(self.node, self.attr, &tokens.join(" "));
                 return Ok(Some(Value::Bool(true)));
             }
             _ => {}
@@ -8818,7 +8845,7 @@ impl Host for ClassListHost {
         let cls = e.to_js_string(arg(args, 0))?;
         let mut d = self.dom.borrow_mut();
         let mut tokens: Vec<String> = d
-            .attr(self.node, "class")
+            .attr(self.node, self.attr)
             .map(|c| c.split_whitespace().map(str::to_string).collect())
             .unwrap_or_default();
         let contains = tokens.iter().any(|t| t == &cls);
@@ -8846,7 +8873,7 @@ impl Host for ClassListHost {
             "contains" => return Ok(Some(Value::Bool(contains))),
             _ => return Ok(None),
         }
-        d.set_attr(self.node, "class", &tokens.join(" "));
+        d.set_attr(self.node, self.attr, &tokens.join(" "));
         Ok(Some(match name {
             "toggle" => Value::Bool(tokens.iter().any(|t| t == &cls)),
             _ => Value::Undefined,

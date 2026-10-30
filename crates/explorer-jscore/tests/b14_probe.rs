@@ -1221,3 +1221,63 @@ fn zone_style_native_apply_reaches_mutobs() {
         "function"
     );
 }
+
+#[test]
+fn link_rel_list_supports_modulepreload() {
+    let mut e = engine();
+    // `link.relList` (§B-14 vols 141/216 philharmonie —
+    // addtoany `link.relList.supports('modulepreload')`) —
+    // DOMTokenList reflétant `rel`, vivant sur l'attribut.
+    assert_eq!(
+        ev(
+            &mut e,
+            r#"var l=document.createElement('link');
+               l.setAttribute('rel','modulepreload foo');
+               var r=l.relList;
+               [r.length, r.item(0), r.contains('foo'), r.supports('modulepreload')].join('|')"#
+        ),
+        "2|modulepreload|true|true"
+    );
+    // `supports` = validation de jeton (rail partagé
+    // classList — `modulepreload` jeton sain → true, chaîne
+    // vide/espaces → false — ce que le feature-detect lit).
+    assert_eq!(
+        ev(
+            &mut e,
+            "document.createElement('link').relList.supports('modulepreload')"
+        ),
+        "true"
+    );
+    assert_eq!(
+        ev(
+            &mut e,
+            "document.createElement('link').relList.supports('a b')"
+        ),
+        "false"
+    );
+    // Mutations reflétées dans l'attribut (vivant).
+    assert_eq!(
+        ev(
+            &mut e,
+            r#"var l2=document.createElement('link');
+               l2.relList.add('stylesheet'); l2.relList.toggle('x');
+               l2.getAttribute('rel')+'/'+l2.relList.value"#
+        ),
+        "stylesheet x/stylesheet x"
+    );
+    // Spec : tags sans relList → undefined.
+    assert_eq!(
+        ev(&mut e, "typeof document.createElement('div').relList"),
+        "undefined"
+    );
+    // Ancres/form ont bien relList.
+    assert_eq!(
+        ev(
+            &mut e,
+            r#"var a=document.createElement('a'); a.setAttribute('rel','noreferrer');
+               var f=document.createElement('form'); f.setAttribute('rel','');
+               a.relList.contains('noreferrer')+'/'+typeof f.relList"#
+        ),
+        "true/object"
+    );
+}
