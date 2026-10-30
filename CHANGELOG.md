@@ -630,6 +630,52 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   tirés (borne documentée). Verrou
   `window_navigation_is_event_target
   _and_sloppy_proof`.
+- **139j — lecteur `OnionMediaPlayer`
+  sur ABI 3** (`app/`) — adoption de
+  la surface P-59 d'`onionmedia_ffi`
+  (lookups gardés, replis DLL < 3) :
+  - **frames zéro-copie** :
+    `onionmedia_frame_acquire`/
+    `release` via `_OnionMediaFrame`
+    `repr(C)` — `asTypedList` direct
+    sur le snapshot `Arc`, fin du
+    `calloc(w*h*4)` + memcpy par image
+    (~8 Mo @1080p, ~33 Mo @4K) ;
+    repli `frame_pull_ex` (sonde
+    `buf NULL` → `-2` + dims, pull
+    atomique dimensionné) puis paire
+    `frame_size`/`frame_pull` legacy.
+  - **cadence `frame_wait`** :
+    isolate dédié bloqué côté natif
+    (latence frame→pull ~0, CPU nul
+    en pause) ; `dispose` attend la
+    mort réelle de l'isolate
+    (`onExit`) avant `onionmedia_free`
+    — jamais de `free` sous un wait
+    actif ; repli `Timer` 33 ms.
+  - **MSE multi-rail** : `MediaOffer
+    .mseBuffers` (`mseBuffers` du
+    moteur déjà exposé, non consommé)
+    → `onionmedia_open_mse_multi`
+    avec un `MseDesc` par
+    `SourceBuffer` (A+V YouTube/
+    Twitch) ; mono-rail inchangé.
+  - **rotation `tkhd`** :
+    `onionmedia_video_rotation` →
+    `RotatedBox` autour du `RawImage`
+    (vidéos de téléphone couchées).
+  - **erreurs par handle** :
+    `snapshot.error` lit
+    `onionmedia_player_error` —
+    insensible aux migrations
+    d'isolate (le TLS de
+    `last_error` ne l'était pas,
+    réponse possiblement vide).
+  - réparations de gate : `FakeRepo
+    .apiBase` (oublié par 139i) et
+    `settings_test` attendait `auto`
+    pour le défaut moteur (`ffi`
+    depuis 21acf409).
 - **139i — `apiBase` câblé au claim
   MSE** (`app/`, vol DLL) — la
   factory recevait `apiBase=''` :

@@ -21,6 +21,7 @@ class MediaOffer {
     this.autoplay = false,
     this.claimed = false,
     this.mse = false,
+    this.mseBuffers = const [],
   });
 
   /// Identité stable de l'instance (`media: u64` session).
@@ -53,6 +54,12 @@ class MediaOffer {
   /// `…/segments` au lieu de fetcher `url`.
   final bool mse;
 
+  /// MIME de chaque `SourceBuffer` (`mseBuffers` du moteur —
+  /// index = `?buffer=` du pull) : `> 1` = multi-rail A+V
+  /// (cas YouTube/Twitch → `onionmedia_open_mse_multi`).
+  /// Vide hors MSE ou mono-buffer.
+  final List<String> mseBuffers;
+
   bool get isVideo => kind == 'video';
 
   /// Une surface positionnable : vidéo avec boîte non vide.
@@ -68,6 +75,7 @@ class MediaOffer {
     autoplay: autoplay,
     claimed: claimed ?? this.claimed,
     mse: mse,
+    mseBuffers: mseBuffers,
   );
 
   factory MediaOffer.fromJson(Map<String, dynamic> j) {
@@ -84,6 +92,11 @@ class MediaOffer {
       autoplay: j['autoplay'] == true,
       claimed: j['claimed'] == true,
       mse: j['mse'] == true,
+      mseBuffers:
+          (j['mseBuffers'] as List?)
+              ?.map((e) => e.toString())
+              .toList(growable: false) ??
+          const [],
     );
   }
 }

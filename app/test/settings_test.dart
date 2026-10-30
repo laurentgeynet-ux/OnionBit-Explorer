@@ -27,7 +27,7 @@ void main() {
       'profileDir': 42,
     });
     expect(bad.theme, 'system');
-    expect(bad.engine, 'auto');
+    expect(bad.engine, 'ffi'); // défaut 'ffi' depuis 21acf409
     expect(bad.profileDir, '');
 
     // Corps non-JSON → défauts.

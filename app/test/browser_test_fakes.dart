@@ -177,6 +177,11 @@ class FakeRepo implements BrowserRepository {
   @override
   String get engineLabel => 'TEST fake';
 
+  /// Base REST factice pour le claim MSE (139i) — le fake ne
+  /// sert jamais de `…/segments` : chaîne vide honnête.
+  @override
+  String get apiBase => '';
+
   @override
   Future<List<Bookmark>> bookmarks() async => List.of(marks);
 
