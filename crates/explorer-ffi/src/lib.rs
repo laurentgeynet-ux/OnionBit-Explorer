@@ -67,42 +67,6 @@ thread_local! {
     static LAST_ERROR: RefCell<String> = const { RefCell::new(String::new()) };
 }
 
-/// Chronométrage d'un export FFI — `tracing::info!` vers
-/// `engine.log` (`ffi_perf` : le bottleneck de l'host
-/// in-process est identifié par op, pas deviné).
-macro_rules! ffi_perf {
-    ($op:expr, $start:expr) => {
-        tracing::info!(
-            target: "ffi_perf",
-            op = $op,
-            us = u64::try_from($start.elapsed().as_micros()).unwrap_or(u64::MAX),
-            "ffi op"
-        )
-    };
-}
-
-/// Guard d'instrumentation — log `ffi_perf` à la sortie
-/// de l'export (retours anticipés compris). À poser en
-/// tête de corps : `let _perf = PerfLog::new("op", now());`.
-struct PerfLog(&'static str, std::time::Instant);
-
-impl PerfLog {
-    /// `op="…" phase="enter"` à la construction — un export
-    /// qui n'émet jamais `enter` n'a jamais été appelé ;
-    /// `enter` sans `exit` = bloqué dedans.
-    fn new(op: &'static str) -> Self {
-        let t = std::time::Instant::now();
-        tracing::info!(target: "ffi_perf", op, phase = "enter", "ffi op");
-        Self(op, t)
-    }
-}
-
-impl Drop for PerfLog {
-    fn drop(&mut self) {
-        ffi_perf!(self.0, self.1);
-    }
-}
-
 fn set_err(msg: impl std::fmt::Display) {
     LAST_ERROR.with(|e| {
         *e.borrow_mut() = msg.to_string();
@@ -335,13 +299,9 @@ fn init_file_logging(profile_dir: &Path) {
             return;
         }
         let file = tracing_appender::rolling::never(logs, "engine.log");
-        // `RUST_LOG` honoré s'il est posé ; sinon `info`
-        // par défaut — un log vide ne diagnostique rien.
-        let filter = tracing_subscriber::EnvFilter::try_from_default_env()
-            .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
         let _ = tracing_subscriber::fmt()
             .with_writer(file)
-            .with_env_filter(filter)
+            .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
             .with_ansi(false)
             .try_init();
     });
@@ -409,7 +369,6 @@ pub unsafe extern "C" fn explorer_create_with_profile(
     dir: *const u8,
     len: usize,
 ) -> *mut ExplorerHandle {
-    let _perf = PerfLog::new("create_with_profile");
     if len == 0 {
         return create_inner(None);
     }
@@ -429,7 +388,6 @@ pub unsafe extern "C" fn explorer_create_with_profile(
 /// qu'une fois.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn explorer_destroy(h: *mut ExplorerHandle) {
-    let _perf = PerfLog::new("destroy");
     if h.is_null() {
         return;
     }
@@ -447,7 +405,6 @@ pub unsafe extern "C" fn explorer_destroy(h: *mut ExplorerHandle) {
 /// `buf..buf+cap` doit être inscriptible.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn explorer_last_error(buf: *mut u8, cap: usize) -> isize {
-    let _perf = PerfLog::new("last_error");
     let msg = LAST_ERROR.with(|e| e.borrow().clone());
     write_str(&msg, buf, cap)
 }
@@ -478,7 +435,6 @@ unsafe fn write_str(s: &str, buf: *mut u8, cap: usize) -> isize {
 /// `h` issu de [`explorer_create`].
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn explorer_open_tab(h: *mut ExplorerHandle) -> u64 {
-    let _perf = PerfLog::new("open_tab");
     match unsafe { handle(h) } {
         Some(h) => sess(h).open_tab(),
         None => 0,
@@ -492,7 +448,6 @@ pub unsafe extern "C" fn explorer_open_tab(h: *mut ExplorerHandle) -> u64 {
 /// `h` issu de [`explorer_create`].
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn explorer_close_tab(h: *mut ExplorerHandle, tab: u64) -> i32 {
-    let _perf = PerfLog::new("close_tab");
     match unsafe { handle(h) } {
         Some(h) => match sess(h).close_tab(tab) {
             Ok(()) => 0,
@@ -517,7 +472,6 @@ pub unsafe extern "C" fn explorer_navigate(
     url: *const u8,
     len: usize,
 ) -> i32 {
-    let _perf = PerfLog::new("navigate");
     let Some(h) = (unsafe { handle(h) }) else {
         return -1;
     };
@@ -540,7 +494,6 @@ pub unsafe extern "C" fn explorer_navigate(
 /// `h` issu de [`explorer_create`].
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn explorer_reload(h: *mut ExplorerHandle, tab: u64) -> i32 {
-    let _perf = PerfLog::new("reload");
     match unsafe { handle(h) } {
         Some(h) => match h.rt.block_on(sess(h).reload(tab)) {
             Ok(()) => 0,
@@ -560,7 +513,6 @@ pub unsafe extern "C" fn explorer_reload(h: *mut ExplorerHandle, tab: u64) -> i3
 /// `h` issu de [`explorer_create`].
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn explorer_go_back(h: *mut ExplorerHandle, tab: u64) -> i32 {
-    let _perf = PerfLog::new("go_back");
     match unsafe { handle(h) } {
         Some(h) => match h.rt.block_on(sess(h).go_back(tab)) {
             Ok(()) => 0,
@@ -580,7 +532,6 @@ pub unsafe extern "C" fn explorer_go_back(h: *mut ExplorerHandle, tab: u64) -> i
 /// `h` issu de [`explorer_create`].
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn explorer_go_forward(h: *mut ExplorerHandle, tab: u64) -> i32 {
-    let _perf = PerfLog::new("go_forward");
     match unsafe { handle(h) } {
         Some(h) => match h.rt.block_on(sess(h).go_forward(tab)) {
             Ok(()) => 0,
@@ -605,7 +556,6 @@ pub unsafe extern "C" fn explorer_set_viewport(
     hgt: f32,
     scale: f32,
 ) -> i32 {
-    let _perf = PerfLog::new("set_viewport");
     match unsafe { handle(h) } {
         Some(h) => {
             sess(h).set_viewport(w, hgt, scale);
@@ -626,7 +576,6 @@ pub unsafe extern "C" fn explorer_set_viewport(
 /// `h` issu de [`explorer_create`].
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn explorer_set_color_scheme(h: *mut ExplorerHandle, dark: i32) -> i32 {
-    let _perf = PerfLog::new("set_color_scheme");
     match unsafe { handle(h) } {
         Some(h) => {
             sess(h).set_color_scheme(if dark == 0 {
@@ -652,7 +601,6 @@ pub unsafe extern "C" fn explorer_set_accept_language(
     lang: *const u8,
     len: usize,
 ) -> i32 {
-    let _perf = PerfLog::new("set_accept_language");
     let Some(h) = (unsafe { handle(h) }) else {
         return -1;
     };
@@ -705,7 +653,6 @@ pub unsafe extern "C" fn explorer_input(
     key_len: usize,
     mods: u8,
 ) -> i32 {
-    let _perf = PerfLog::new("input");
     let Some(h) = (unsafe { handle(h) }) else {
         return -1;
     };
@@ -755,7 +702,6 @@ pub unsafe extern "C" fn explorer_input(
 /// `h` issu de [`explorer_create`].
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn explorer_tick(h: *mut ExplorerHandle, tab: u64) -> i32 {
-    let _perf = PerfLog::new("tick");
     match unsafe { handle(h) } {
         // `tick_animations` pompe aussi les timers JS (étape
         // 52) — leurs `location.href` sont drainés ici en
@@ -797,7 +743,6 @@ pub unsafe extern "C" fn explorer_frame_size(
     w: *mut u32,
     hgt: *mut u32,
 ) -> i32 {
-    let _perf = PerfLog::new("frame_size");
     if w.is_null() || hgt.is_null() {
         set_err("sortie nulle");
         return -1;
@@ -834,7 +779,6 @@ pub unsafe extern "C" fn explorer_frame_copy(
     out: *mut u8,
     cap: usize,
 ) -> isize {
-    let _perf = PerfLog::new("frame_copy");
     let Some(h) = (unsafe { handle(h) }) else {
         return -1;
     };
@@ -877,7 +821,6 @@ pub unsafe extern "C" fn explorer_frame_copy_region(
     out: *mut u8,
     cap: usize,
 ) -> isize {
-    let _perf = PerfLog::new("frame_copy_region");
     let Some(h) = (unsafe { handle(h) }) else {
         return -1;
     };
@@ -916,7 +859,6 @@ pub unsafe extern "C" fn explorer_dirty_rects(
     out: *mut f32,
     cap: usize,
 ) -> isize {
-    let _perf = PerfLog::new("dirty_rects");
     let Some(h) = (unsafe { handle(h) }) else {
         return -1;
     };
@@ -957,7 +899,6 @@ pub unsafe extern "C" fn explorer_tab_url(
     buf: *mut u8,
     cap: usize,
 ) -> isize {
-    let _perf = PerfLog::new("tab_url");
     let Some(h) = (unsafe { handle(h) }) else {
         return -1;
     };
@@ -985,7 +926,6 @@ pub unsafe extern "C" fn explorer_tab_title(
     buf: *mut u8,
     cap: usize,
 ) -> isize {
-    let _perf = PerfLog::new("tab_title");
     let Some(h) = (unsafe { handle(h) }) else {
         return -1;
     };
@@ -1004,7 +944,6 @@ pub unsafe extern "C" fn explorer_tab_title(
 /// `h` issu de [`explorer_create`].
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn explorer_tab_scroll(h: *mut ExplorerHandle, tab: u64) -> f64 {
-    let _perf = PerfLog::new("tab_scroll");
     let Some(h) = (unsafe { handle(h) }) else {
         return -1.0;
     };
@@ -1048,7 +987,6 @@ pub unsafe extern "C" fn explorer_media_events(
     buf: *mut u8,
     cap: usize,
 ) -> isize {
-    let _perf = PerfLog::new("media_events");
     let Some(h) = (unsafe { handle(h) }) else {
         return -1;
     };
@@ -1108,7 +1046,6 @@ pub unsafe extern "C" fn explorer_media_list(
     buf: *mut u8,
     cap: usize,
 ) -> isize {
-    let _perf = PerfLog::new("media_list");
     let Some(h) = (unsafe { handle(h) }) else {
         return -1;
     };
@@ -1146,7 +1083,6 @@ pub unsafe extern "C" fn explorer_media_claim(
     json: *const u8,
     len: usize,
 ) -> i32 {
-    let _perf = PerfLog::new("media_claim");
     let Some(h) = (unsafe { handle(h) }) else {
         return -1;
     };
@@ -1179,7 +1115,6 @@ pub unsafe extern "C" fn explorer_media_release(
     tab: u64,
     media: u64,
 ) -> i32 {
-    let _perf = PerfLog::new("media_release");
     let Some(h) = (unsafe { handle(h) }) else {
         return -1;
     };
@@ -1208,7 +1143,6 @@ pub unsafe extern "C" fn explorer_media_state(
     json: *const u8,
     len: usize,
 ) -> i32 {
-    let _perf = PerfLog::new("media_state");
     let Some(h) = (unsafe { handle(h) }) else {
         return -1;
     };
@@ -1244,7 +1178,6 @@ pub unsafe extern "C" fn explorer_download_url(
     url: *const u8,
     len: usize,
 ) -> i32 {
-    let _perf = PerfLog::new("download_url");
     let Some(h) = (unsafe { handle(h) }) else {
         return -1;
     };
@@ -1281,7 +1214,6 @@ pub unsafe extern "C" fn explorer_download_accept(
     buf: *mut u8,
     cap: usize,
 ) -> isize {
-    let _perf = PerfLog::new("download_accept");
     let Some(h) = (unsafe { handle(h) }) else {
         return -1;
     };
@@ -1308,7 +1240,6 @@ pub unsafe extern "C" fn explorer_download_decline(
     tab: u64,
     dl: u64,
 ) -> i32 {
-    let _perf = PerfLog::new("download_decline");
     let Some(h) = (unsafe { handle(h) }) else {
         return -1;
     };
@@ -1341,7 +1272,6 @@ pub unsafe extern "C" fn explorer_find(
     buf: *mut u8,
     cap: usize,
 ) -> isize {
-    let _perf = PerfLog::new("find");
     let Some(h) = (unsafe { handle(h) }) else {
         return -1;
     };
@@ -1370,7 +1300,6 @@ pub unsafe extern "C" fn explorer_history(
     buf: *mut u8,
     cap: usize,
 ) -> isize {
-    let _perf = PerfLog::new("history");
     let Some(h) = (unsafe { handle(h) }) else {
         return -1;
     };
@@ -1396,7 +1325,6 @@ pub unsafe extern "C" fn explorer_bookmarks(
     buf: *mut u8,
     cap: usize,
 ) -> isize {
-    let _perf = PerfLog::new("bookmarks");
     let Some(h) = (unsafe { handle(h) }) else {
         return -1;
     };
@@ -1425,7 +1353,6 @@ pub unsafe extern "C" fn explorer_bookmark_add(
     title: *const u8,
     title_len: usize,
 ) -> i32 {
-    let _perf = PerfLog::new("bookmark_add");
     let Some(h) = (unsafe { handle(h) }) else {
         return -1;
     };
@@ -1448,7 +1375,6 @@ pub unsafe extern "C" fn explorer_bookmark_del(
     url: *const u8,
     url_len: usize,
 ) -> i32 {
-    let _perf = PerfLog::new("bookmark_del");
     let Some(h) = (unsafe { handle(h) }) else {
         return -1;
     };
