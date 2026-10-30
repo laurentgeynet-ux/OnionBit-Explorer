@@ -177,6 +177,163 @@ fn font_face_set_setlike_tracks_added_faces() {
 }
 
 #[test]
+fn import_node_clones_foreign_document_nodes() {
+    let mut e = engine();
+    // §B-14 EXPLOR78 usnews ×5 — `importNode: nœud requis`
+    // sur nœud d'un autre document (template jQuery). Spec :
+    // clone sans détacher ni rebind — deep ET shallow.
+    assert_eq!(
+        ev(
+            &mut e,
+            "var d2=document.implementation.createHTMLDocument('x');\
+             d2.body.innerHTML='<div id=a><span>hi</span></div>';\
+             var src=d2.getElementById('a');\
+             var c=document.importNode(src,true);\
+             c.tagName+':'+c.childNodes.length+':'+src.childNodes.length"
+        ),
+        "DIV:1:1"
+    );
+    // shallow : pas d'enfants clonés, source intacte.
+    assert_eq!(
+        ev(
+            &mut e,
+            "var d2=document.implementation.createHTMLDocument('x');\
+             d2.body.innerHTML='<div id=a><span>hi</span></div>';\
+             var src=d2.getElementById('a');\
+             var c=document.importNode(src,false);\
+             c.tagName+':'+c.childNodes.length+':'+src.childNodes.length"
+        ),
+        "DIV:0:1"
+    );
+    // le clone est insérable dans le document hôte.
+    assert_eq!(
+        ev(
+            &mut e,
+            "var d2=document.implementation.createHTMLDocument('x');\
+             d2.body.innerHTML='<p>z</p>';\
+             var c=document.importNode(d2.body.firstChild,true);\
+             document.body.appendChild(c);\
+             document.body.lastChild.tagName"
+        ),
+        "P"
+    );
+}
+
+#[test]
+fn attr_node_rails_roundtrip() {
+    let mut e = engine();
+    // §B-14 EXPLOR74 npr ×4 — `createAttribute is not a
+    // function` + rails `*AttributeNode` des polyfills.
+    assert_eq!(ev(&mut e, "typeof document.createAttribute"), "function");
+    assert_eq!(
+        ev(
+            &mut e,
+            "var a=document.createAttribute('data-x');\
+             a.nodeType+':'+a.name+':'+(a.value==='')"
+        ),
+        "2:data-x:true"
+    );
+    assert_eq!(
+        ev(
+            &mut e,
+            "var el=document.createElement('div');\
+             var a=document.createAttribute('data-y');\
+             a.value='42';\
+             (el.setAttributeNode(a)===null)+':'+el.getAttribute('data-y')"
+        ),
+        "true:42"
+    );
+    assert_eq!(
+        ev(
+            &mut e,
+            "var el=document.createElement('div');\
+             el.setAttribute('data-y','1');\
+             var old=document.createAttribute('data-y'); old.value='2';\
+             var rep=el.setAttributeNode(old);\
+             rep.value+':'+el.getAttribute('data-y')"
+        ),
+        "1:2"
+    );
+    assert_eq!(
+        ev(
+            &mut e,
+            "var el=document.createElement('div');\
+             el.setAttribute('id','q');\
+             var a=el.getAttributeNode('id');\
+             (a&&a.value)+':'+typeof el.getAttributeNode('zz')"
+        ),
+        "q:object"
+    );
+    // removeAttributeNode rend l'attr retiré ; absent → NotFoundError.
+    assert_eq!(
+        ev(
+            &mut e,
+            "var el=document.createElement('div');\
+             el.setAttribute('id','q');\
+             var a=el.getAttributeNode('id');\
+             var r=el.removeAttributeNode(a);\
+             (r===a)+':'+el.hasAttribute('id')"
+        ),
+        "true:false"
+    );
+}
+
+#[test]
+fn scroll_methods_exist_and_are_noop() {
+    let mut e = engine();
+    // §B-14 EXPLOR68 iltalehti — `scrollTo` absent ; lazy-
+    // loaders référencent la méthode librement (no-op honnête,
+    // le scroll page vit côté session).
+    assert_eq!(
+        ev(
+            &mut e,
+            "typeof scrollTo+':'+typeof scroll+':'+typeof scrollBy"
+        ),
+        "function:function:function"
+    );
+    assert_eq!(
+        ev(
+            &mut e,
+            "var el=document.createElement('div');\
+             typeof el.scrollTo+':'+typeof el.scroll+':'+typeof el.scrollBy"
+        ),
+        "function:function:function"
+    );
+    // Args coords ou objet options acceptés, jamais d'erreur.
+    assert_eq!(
+        ev(
+            &mut e,
+            "scrollTo(0,100); scroll({top:50,behavior:'smooth'}); 'ok'"
+        ),
+        "ok"
+    );
+}
+
+#[test]
+fn intersection_observer_threshold_typed_array() {
+    let mut e = engine();
+    // §B-14 EXPLOR73 CNN — `threshold` passé en
+    // `Float32Array` (spec `sequence<double>` = iterable) :
+    // notre rejet « not a number » tuait le constructeur.
+    assert_eq!(
+        ev(
+            &mut e,
+            "var io=new IntersectionObserver(function(){},{threshold:new Float32Array([0,0.5,1])});\
+             io.thresholds.length+':'+io.thresholds[1]"
+        ),
+        "3:0.5"
+    );
+    // number / array / undefined inchangés.
+    assert_eq!(
+        ev(
+            &mut e,
+            "new IntersectionObserver(function(){},{threshold:0.25}).thresholds[0]"
+        ),
+        "0.25"
+    );
+}
+
+#[test]
 fn font_face_set_is_singleton_per_document() {
     let mut e = engine();
     // Spec : `document.fonts` est l'unique `FontFaceSet` du
@@ -1231,10 +1388,10 @@ fn link_rel_list_supports_modulepreload() {
     assert_eq!(
         ev(
             &mut e,
-            r#"var l=document.createElement('link');
+            r"var l=document.createElement('link');
                l.setAttribute('rel','modulepreload foo');
                var r=l.relList;
-               [r.length, r.item(0), r.contains('foo'), r.supports('modulepreload')].join('|')"#
+               [r.length, r.item(0), r.contains('foo'), r.supports('modulepreload')].join('|')"
         ),
         "2|modulepreload|true|true"
     );
@@ -1259,9 +1416,9 @@ fn link_rel_list_supports_modulepreload() {
     assert_eq!(
         ev(
             &mut e,
-            r#"var l2=document.createElement('link');
+            r"var l2=document.createElement('link');
                l2.relList.add('stylesheet'); l2.relList.toggle('x');
-               l2.getAttribute('rel')+'/'+l2.relList.value"#
+               l2.getAttribute('rel')+'/'+l2.relList.value"
         ),
         "stylesheet x/stylesheet x"
     );
@@ -1274,9 +1431,9 @@ fn link_rel_list_supports_modulepreload() {
     assert_eq!(
         ev(
             &mut e,
-            r#"var a=document.createElement('a'); a.setAttribute('rel','noreferrer');
+            r"var a=document.createElement('a'); a.setAttribute('rel','noreferrer');
                var f=document.createElement('form'); f.setAttribute('rel','');
-               a.relList.contains('noreferrer')+'/'+typeof f.relList"#
+               a.relList.contains('noreferrer')+'/'+typeof f.relList"
         ),
         "true/object"
     );

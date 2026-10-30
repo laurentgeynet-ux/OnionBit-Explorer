@@ -2536,6 +2536,27 @@ impl Dom {
         id
     }
 
+    /// Clone **superficiel** cross-arène — nœud + attrs +
+    /// texte, jamais les enfants (spec `importNode(n, false)`
+    /// sur un nœud d'un autre document — §B-14 vol 304 :
+    /// `importNode` rejetait les nœuds étrangers, ×5 sites).
+    /// Miroir exact du bras shallow de [`Self::clone_node`].
+    pub fn clone_shallow_from(&mut self, src_dom: &Dom, src: NodeId) -> NodeId {
+        let (kind, tag, attrs, text) = {
+            let n = &src_dom.nodes[src as usize];
+            (
+                n.kind,
+                n.tag.clone(),
+                n.attrs.clone(),
+                n.text.clone(),
+            )
+        };
+        let id = self.alloc(kind, &tag);
+        self.nodes[id as usize].attrs = attrs;
+        self.nodes[id as usize].text = text;
+        id
+    }
+
     /// Adoption cross-document (spec `insertBefore`/`appendChild`/
     /// `replaceChild` — `[[adopt]]`) : clone profond du sous-arbre
     /// `src` de `src_dom` dans `self`. Itératif — la profondeur

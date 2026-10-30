@@ -24,7 +24,47 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   spec `link`/`a`/`area`/`form`
   (ailleurs `undefined`).
   Verrou `link_rel_list_
-  supports_modulepreload`.
+  supports_modulepreload` ;
+  `supports` aligné spec :
+  jetons **supportés** du
+  `rel` (link types — vrai
+  même sans attribut, faux
+  hors liste ; `classList.
+  supports` → `TypeError`).
+
+- **JS-C220 — bras DOM/API des
+  vols EXPLOR68-78** (`explorer-
+  jscore`, §B-14) —
+  `document.importNode` accepte
+  les nœuds **étrangers** (usnews
+  ×5 : `adopt_from` profond /
+  `clone_shallow_from` nouveau —
+  clone sans détacher ni rebind,
+  ≠ `adoptNode`) ;
+  `createAttribute`/`createAttribute
+  NS` + rails `*AttributeNode`
+  (npr ×4) — `Attr` en objet
+  porteur `{nodeType:2,name,
+  value,…}` (arène en paires,
+  pas de nœud Attr) :
+  `set` rend l'attr remplacé,
+  `remove` l'attr retiré,
+  `NotFoundError` si absent ;
+  `el.scroll`/`scrollTo`/`scrollBy`
+  + `window.scroll*` no-op
+  honnêtes (iltalehti —
+  lazy-loaders) ;
+  `IntersectionObserver` option
+  `threshold` accepte les
+  iterables (CNN — `Float32Array`,
+  spec `sequence<double>`).
+  Verrous : `import_node_clones_
+  foreign_document_nodes`,
+  `attr_node_rails_roundtrip`,
+  `scroll_methods_exist_and_are_
+  noop`, `intersection_observer_
+  threshold_typed_array` — à
+  re-voler.
 
 - **Étape 163 — §B-1 : disjoncteur
   lent couvre toutes les voies

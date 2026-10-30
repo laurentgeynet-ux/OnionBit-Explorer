@@ -1265,13 +1265,13 @@ struct StyleHost {
 }
 
 /// `el.classList`/`el.relList` — token ops over un attribut
-/// à jetons (`class`, `rel` — spec DOMTokenList : mêmes
+/// à jetons (`class`, `rel` — spec `DOMTokenList` : mêmes
 /// rails, le nom d'attribut seul change).
 struct ClassListHost {
     dom: DomRef,
     node: NodeId,
     /// Attribut reflété — `"class"` pour `classList`, `"rel"`
-    /// pour `relList` (link/a/area/form, spec DOMTokenList).
+    /// pour `relList` (link/a/area/form, spec `DOMTokenList`).
     attr: &'static str,
 }
 
@@ -2509,6 +2509,13 @@ impl Engine {
                     // même motif de lisibilité que `matches`.
                     ("scrollIntoView", element_scroll_into_view),
                     ("scrollIntoViewIfNeeded", element_scroll_into_view),
+                    // `scroll`/`scrollTo`/`scrollBy` (§B-14
+                    // EXPLOR68 iltalehti) — même stub no-op
+                    // honnête que `scrollIntoView` : pas de
+                    // scroll d'élément dans le miroir.
+                    ("scroll", element_scroll_noop),
+                    ("scrollTo", element_scroll_noop),
+                    ("scrollBy", element_scroll_noop),
                     // `attachShadow` stub (issue #25) — la
                     // référence doit être **lisible** : le
                     // polyfill Invoker Commands fait
@@ -2812,6 +2819,18 @@ impl Engine {
                 o.set_accessor("pageXOffset", px, Value::Undefined, true);
                 o.set_accessor("pageYOffset", py, Value::Undefined, true);
             }
+        }
+        // `window.scroll*` — no-op honnêtes : le scroll page
+        // vit côté session (input), aucune intention JS→
+        // session n'est câblée — la méthode existe pour les
+        // lazy-loaders qui la référencent (§B-14 iltalehti).
+        for (n, f) in [
+            ("scroll", win_scroll_noop as crate::heap::NativeFn),
+            ("scrollTo", win_scroll_noop),
+            ("scrollBy", win_scroll_noop),
+        ] {
+            let f = self.native_fn(n, f);
+            self.set_own(g, n, f, true);
         }
 
         // -- JS-C98 — complétude de surface (census) ----------
@@ -4442,15 +4461,52 @@ impl Host for DocumentHost {
                 let n = self.dom.borrow_mut().create_comment(&t);
                 Ok(Some(node_value(e, &self.dom, &self.cache, n)))
             }
+            // `document.createAttribute(name)` — spec Attr :
+            // l'arène stocke les attributs en paires
+            // `(nom, valeur)` — l'`Attr` est un objet porteur
+            // `{nodeType:2, name, value:"", ownerElement:null…}`
+            // que `setAttributeNode`/`getAttributeNode`/
+            // `removeAttributeNode` lisent (§B-14 EXPLOR74
+            // npr ×4 sites — `createAttribute is not a
+            // function`).
+            "createAttribute" => {
+                let name = e.to_js_string(arg(args, 0))?;
+                Ok(Some(attr_obj(e, &name, "", None)))
+            }
+            // `document.createAttributeNS(ns, qualifiedName)` —
+            // même rail : l'URI est conservée en
+            // `namespaceURI`, le nom qualifié garde son
+            // préfixe (`p:l` → `prefix`/`localName`).
+            "createAttributeNS" => {
+                let ns = e.to_js_string(arg(args, 0))?;
+                let name = e.to_js_string(arg(args, 1))?;
+                Ok(Some(attr_obj(e, &name, "", Some(ns))))
+            }
             // `document.importNode(node, deep)` (CAP-177) —
             // spec : clone dans le document cible ; le miroir
             // n'a qu'un document → même rail que `cloneNode`.
+            // `document.importNode(node, deep?)` — spec : clone
+            // du nœud (propre ou **étranger**) sans détacher ni
+            // rebind (≠ `adoptNode`). §B-14 vol 304 usnews ×5 :
+            // nœud d'un document auxiliaire (template parse
+            // jQuery) rejeté « nœud requis » — clone cross-arène
+            // posé (`adopt_from` profond / `clone_shallow_from`).
             "importNode" => {
-                let Some(src) = node_for_in(e, arg(args, 0), &self.dom) else {
+                let v = arg(args, 0);
+                let deep = e.to_boolean(arg(args, 1));
+                let c = if let Some(src) = node_for_in(e, v, &self.dom) {
+                    self.dom.borrow_mut().clone_node(src, deep)
+                } else if let Some((src, src_dom)) = foreign_node_in(e, v, &self.dom) {
+                    if deep {
+                        let s = src_dom.borrow();
+                        self.dom.borrow_mut().adopt_from(&s, src)
+                    } else {
+                        let s = src_dom.borrow();
+                        self.dom.borrow_mut().clone_shallow_from(&s, src)
+                    }
+                } else {
                     return Err(e.type_error("importNode: nœud requis"));
                 };
-                let deep = e.to_boolean(arg(args, 1));
-                let c = self.dom.borrow_mut().clone_node(src, deep);
                 ce_upgrade_subtree(e, &self.dom, &self.cache, c)?;
                 Ok(Some(node_value(e, &self.dom, &self.cache, c)))
             }
@@ -5045,6 +5101,8 @@ const DOC_METHODS: &[&str] = &[
     "querySelectorAll",
     "createElement",
     "createElementNS",
+    "createAttribute",
+    "createAttributeNS",
     "createTextNode",
     "createComment",
     "createDocumentFragment",
@@ -5105,6 +5163,11 @@ const NODE_METHODS: &[&str] = &[
     "getAttributeNS",
     "hasAttributeNS",
     "removeAttributeNS",
+    "getAttributeNode",
+    "getAttributeNodeNS",
+    "setAttributeNode",
+    "setAttributeNodeNS",
+    "removeAttributeNode",
     "toggleAttribute",
     "insertAdjacentElement",
     "insertAdjacentHTML",
@@ -5121,6 +5184,9 @@ const NODE_METHODS: &[&str] = &[
     "getAnimations",
     "scrollIntoView",
     "scrollIntoViewIfNeeded",
+    "scroll",
+    "scrollTo",
+    "scrollBy",
     "attachShadow",
     "attachInternals",
     "focus",
@@ -5942,13 +6008,11 @@ impl Host for NodeHost {
                     _ => "",
                 };
                 return Ok(Some(match tag {
-                    "link" | "a" | "area" | "form" => {
-                        e.new_iterable_host(Rc::new(ClassListHost {
-                            dom: self.dom.clone(),
-                            node,
-                            attr: "rel",
-                        }))
-                    }
+                    "link" | "a" | "area" | "form" => e.new_iterable_host(Rc::new(ClassListHost {
+                        dom: self.dom.clone(),
+                        node,
+                        attr: "rel",
+                    })),
                     _ => Value::Undefined,
                 }));
             }
@@ -6491,6 +6555,11 @@ impl Host for NodeHost {
                     e.native_fn("scrollIntoView", element_scroll_into_view),
                 ));
             }
+            // `el.scroll*()` — no-op honnêtes (EXPLOR68 :
+            // `scrollTo` absent tuait le lazy-load iltalehti).
+            "scroll" | "scrollTo" | "scrollBy" => {
+                return Ok(Some(e.native_fn("scroll", element_scroll_noop)));
+            }
             // `<dialog>`/`<details>` (CAP-176) — `open`
             // reflété bool ; `returnValue` = slot spec sur
             // `<dialog>` (pas un attribut — il n'en est
@@ -7017,6 +7086,84 @@ impl Host for NodeHost {
                 let v = e.to_js_string(arg(args, 2))?;
                 self.dom.borrow_mut().set_attr(node, &q, &v);
                 Ok(Some(Value::Undefined))
+            }
+            // Rails `*AttributeNode` (spec Attr) — objets
+            // porteurs de `createAttribute` : `getAttributeNode`
+            // enveloppe l'attr existant, `setAttributeNode`
+            // écrit `name`/`value` et rend l'attr remplacé (ou
+            // `null`), `removeAttributeNode` rend l'attr retiré
+            // (§B-14 npr vol EXPLOR74 — `createAttribute` seul
+            // ne suffit pas, les polyfills chaînent).
+            "getAttributeNode" => {
+                let k = e.to_js_string(arg(args, 0))?;
+                let v = self.dom.borrow().attr(node, &k).map(str::to_string);
+                Ok(Some(match v {
+                    Some(v) => attr_obj(e, &k, &v, None),
+                    None => Value::Null,
+                }))
+            }
+            "getAttributeNodeNS" => {
+                let ns_null = attr_ns_is_null(e, arg(args, 0))?;
+                let local = e.to_js_string(arg(args, 1))?;
+                let found = {
+                    let d = self.dom.borrow();
+                    d.nodes[node as usize]
+                        .attrs
+                        .iter()
+                        .find(|(k, _)| attr_ns_match(k, ns_null, &local))
+                        .map(|(k, v)| (k.clone(), v.clone()))
+                };
+                Ok(Some(match found {
+                    Some((k, v)) => attr_obj(e, &k, &v, None),
+                    None => Value::Null,
+                }))
+            }
+            "setAttributeNode" | "setAttributeNodeNS" => {
+                let a = arg(args, 0);
+                let name = match a {
+                    Value::Obj(id) => e
+                        .get_prop(id, "name")
+                        .filter(|v| !matches!(v, Value::Undefined)),
+                    _ => None,
+                };
+                let Some(name_v) = name else {
+                    return Err(e.type_error("setAttributeNode: Attr requis"));
+                };
+                let name = e.to_js_string(name_v)?;
+                let value_v = match a {
+                    Value::Obj(id) => e.get_prop(id, "value").unwrap_or(Value::Undefined),
+                    _ => Value::Undefined,
+                };
+                let value = e.to_js_string(value_v)?;
+                let old = self.dom.borrow().attr(node, &name).map(str::to_string);
+                self.dom.borrow_mut().set_attr(node, &name, &value);
+                Ok(Some(match old {
+                    Some(v) => attr_obj(e, &name, &v, None),
+                    None => Value::Null,
+                }))
+            }
+            "removeAttributeNode" => {
+                let a = arg(args, 0);
+                let name = match a {
+                    Value::Obj(id) => e
+                        .get_prop(id, "name")
+                        .filter(|v| !matches!(v, Value::Undefined)),
+                    _ => None,
+                };
+                let Some(name_v) = name else {
+                    return Err(e.type_error("removeAttributeNode: Attr requis"));
+                };
+                let name = e.to_js_string(name_v)?;
+                // Spec : `NotFoundError` si l'attr n'est pas
+                // sur l'élément.
+                if !self.dom.borrow().has_attr(node, &name) {
+                    let o = e.new_object();
+                    let n = e.str_val("NotFoundError");
+                    e.set_own(o, "name", n, true);
+                    return Err(crate::heap::Thrown(Value::Obj(o)));
+                }
+                self.dom.borrow_mut().remove_attr(node, &name);
+                Ok(Some(a))
             }
             // Issue #16 — spec Element.toggleAttribute : `force`
             // absent (ou `undefined` explicite) → bascule ; présent
@@ -7792,6 +7939,61 @@ pub(crate) fn node_for_in(e: &mut Engine, v: Value, dom: &DomRef) -> Option<Node
         return Some(dh.dom.borrow().root);
     }
     None
+}
+
+/// `(node, dom)` d'un `NodeHost` d'un **autre** miroir que
+/// `dom` — résolveur d'`importNode` (spec : le nœud source
+/// peut vivre dans n'importe quel document). `None` si même
+/// miroir (cas couvert par [`node_for_in`]), non-nœud, ou
+/// nœud obsolète dans sa propre arène.
+fn foreign_node_in(e: &mut Engine, v: Value, dom: &DomRef) -> Option<(NodeId, DomRef)> {
+    let Value::Obj(id) = v else {
+        return None;
+    };
+    let h = match e.heap.obj(id).map(|o| &o.kind) {
+        Some(ObjKind::Host(h)) => h.clone(),
+        _ => return None,
+    };
+    let n = h.as_any().downcast_ref::<NodeHost>()?;
+    if Rc::ptr_eq(&n.dom, dom) || !n.dom.borrow().node_valid(n.node) {
+        return None;
+    }
+    Some((n.node, n.dom.clone()))
+}
+
+/// Objet `Attr` porteur (spec) — l'arène stocke les
+/// attributs en paires `(nom, valeur)` sans nœud `Attr` :
+/// `createAttribute`/`getAttributeNode` rendent cet objet ;
+/// `setAttributeNode`/`removeAttributeNode` relisent
+/// `name`/`value` dessus (§B-14 npr vol EXPLOR74 ×4 sites).
+fn attr_obj(e: &mut Engine, qualified: &str, value: &str, ns: Option<String>) -> Value {
+    let local = qualified
+        .rsplit(':')
+        .next()
+        .unwrap_or(qualified)
+        .to_string();
+    let prefix = qualified.rsplit_once(':').map(|(p, _)| p.to_string());
+    let node_name = e.str_val(qualified);
+    let name = e.str_val(qualified);
+    let local_v = e.str_val(&local);
+    let value_v = e.str_val(value);
+    let node_value_v = e.str_val(value);
+    let text_content_v = e.str_val(value);
+    let ns_v = ns.map_or(Value::Null, |s| e.str_val(s));
+    let prefix_v = prefix.map_or(Value::Null, |s| e.str_val(s));
+    let o = e.new_object();
+    e.set_own(o, "nodeType", Value::Num(2.0), true);
+    e.set_own(o, "nodeName", node_name, true);
+    e.set_own(o, "name", name, true);
+    e.set_own(o, "localName", local_v, true);
+    e.set_own(o, "value", value_v, true);
+    e.set_own(o, "nodeValue", node_value_v, true);
+    e.set_own(o, "textContent", text_content_v, true);
+    e.set_own(o, "specified", Value::Bool(true), true);
+    e.set_own(o, "ownerElement", Value::Null, true);
+    e.set_own(o, "namespaceURI", ns_v, true);
+    e.set_own(o, "prefix", prefix_v, true);
+    Value::Obj(o)
 }
 
 /// Spec `[[adopt]]` — clone le sous-arbre étranger dans `dst`,
@@ -8696,6 +8898,36 @@ impl Host for StyleHost {
 // classList
 // ------------------------------------------------------------------
 
+/// Types de liens supportés pour `relList.supports` (spec
+/// linkTypes courants — la liste exacte évolue avec le moteur ;
+/// les types chargés par le pipeline figurent tous).
+const LINK_REL_SUPPORTED: &[&str] = &[
+    "stylesheet",
+    "preload",
+    "modulepreload",
+    "prefetch",
+    "preconnect",
+    "dns-prefetch",
+    "icon",
+    "shortcut icon",
+    "apple-touch-icon",
+    "manifest",
+    "canonical",
+    "alternate",
+    "next",
+    "prev",
+    "author",
+    "license",
+    "help",
+    "search",
+    "tag",
+    "bookmark",
+    "nofollow",
+    "noopener",
+    "noreferrer",
+    "opener",
+];
+
 impl ClassListHost {
     /// Jetons `class` courants — relus à chaque appel (vivants).
     fn tokens(&self) -> Vec<String> {
@@ -8814,11 +9046,17 @@ impl Host for ClassListHost {
                 let proto = e.protos.array_iter;
                 return Ok(Some(crate::collections::iter_obj(e, items, proto)));
             }
+            // Spec DOMTokenList.supports : jeton dans la
+            // liste des jetons **supportés** de l'attribut —
+            // indépendante du contenu courant. `rel` sur
+            // link/a/area/form → types de liens ; `class` →
+            // pas de jetons supportés → TypeError (Chrome).
             "supports" => {
                 let t = e.to_js_string(arg(args, 0))?;
-                return Ok(Some(Value::Bool(
-                    !t.is_empty() && !t.chars().any(char::is_whitespace),
-                )));
+                if self.attr == "rel" {
+                    return Ok(Some(Value::Bool(LINK_REL_SUPPORTED.contains(&t.as_str()))));
+                }
+                return Err(e.type_error("DOMTokenList has no supported tokens"));
             }
             "toString" | "toLocaleString" => {
                 return Ok(Some(e.str_val(self.tokens().join(" "))));
@@ -10841,6 +11079,17 @@ fn element_get_by_class(e: &mut Engine, this: Value, args: &[Value]) -> JsResult
 fn element_scroll_into_view(e: &mut Engine, this: Value, _args: &[Value]) -> JsResult<Value> {
     if element_receiver(e, this).is_none() {
         return Err(e.type_error("scrollIntoView: receiver is not an Element"));
+    }
+    Ok(Value::Undefined)
+}
+
+/// `el.scroll(x, y)`/`scrollTo`/`scrollBy` — no-op honnête
+/// (les éléments ne scrollent pas dans le miroir — même
+/// rail que `scrollIntoView`). Receveur non-Element →
+/// `TypeError` spec ; coords/options acceptés et ignorés.
+fn element_scroll_noop(e: &mut Engine, this: Value, _args: &[Value]) -> JsResult<Value> {
+    if element_receiver(e, this).is_none() {
+        return Err(e.type_error("scroll: receiver is not an Element"));
     }
     Ok(Value::Undefined)
 }
@@ -13220,6 +13469,15 @@ fn create_image_bitmap(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Va
 /// sélection de texte ici — CAP-178).
 fn win_find(_e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
     Ok(Value::Bool(false))
+}
+
+/// `window.scroll*` — no-op honnête : le scroll de la page
+/// vit côté session (input utilisateur), aucune intention
+/// JS→session n'existe — la méthode est servie pour les
+/// lazy-loaders qui la référencent/avancent sans erreur
+/// (§B-14 EXPLOR68 iltalehti `scrollTo` absent).
+fn win_scroll_noop(_e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
+    Ok(Value::Undefined)
 }
 
 /// No-op window (`stop`/`print`/`close` d'`ImageBitmap`…).

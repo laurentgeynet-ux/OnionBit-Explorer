@@ -550,6 +550,18 @@ fn obs_opt_thresholds(e: &mut Engine, opts: Value) -> JsResult<Vec<f64>> {
                     .map(|x| e.to_number(*x))
                     .collect::<JsResult<Vec<f64>>>()?
             }
+            // `sequence<double>` WebIDL accepte tout iterable —
+            // les libs passent des `Float32Array`/`Uint8Array`
+            // (CNN §B-14 EXPLOR73 : `threshold` rejeté).
+            Some(ObjKind::TypedArray { len, .. }) => {
+                let len = (*len).min(64);
+                let mut out = Vec::with_capacity(len);
+                for i in 0..len {
+                    let x = e.get_prop_value(v, &i.to_string())?;
+                    out.push(e.to_number(x)?);
+                }
+                out
+            }
             _ => return Err(e.type_error("IntersectionObserver: threshold is not a number")),
         },
         _ => return Err(e.type_error("IntersectionObserver: threshold is not a number")),
