@@ -1438,3 +1438,35 @@ fn link_rel_list_supports_modulepreload() {
         "true/object"
     );
 }
+
+
+#[test]
+fn reflect_get_apply_inside_proxy_trap() {
+    let mut e = engine();
+    // Rail prebid fun-hooks (footmercato vol 183 — `install of
+    // Undefined`) : trap `get` fait `Reflect.get.apply(Reflect,
+    // arguments)` — dépend de l'étalement array-like (JS-C217).
+    assert_eq!(
+        ev(
+            &mut e,
+            r#"var tgt = { after: 'h1', name: 'n' };
+               var p = new Proxy(tgt, { get: function(r, k) {
+                 return Reflect.get.apply(Reflect, arguments);
+               }});
+               p.after + '|' + p.name"#
+        ),
+        "h1|n"
+    );
+    // Avec fallback `||` (rail réel : `v[e] || Reflect.get.apply`).
+    assert_eq!(
+        ev(
+            &mut e,
+            r#"var v = { special: 'V' };
+               var p2 = new Proxy({ after: 'h2' }, { get: function(r, k) {
+                 return v[k] || Reflect.get.apply(Reflect, arguments);
+               }});
+               p2.special + '|' + p2.after"#
+        ),
+        "V|h2"
+    );
+}
