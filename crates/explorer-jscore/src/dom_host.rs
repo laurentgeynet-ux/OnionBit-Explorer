@@ -2343,6 +2343,18 @@ impl Engine {
             // `Navigation` (cowcotland §B-14) — installé plus haut
             // avec `location`/`history`, avant `EventTarget`.
             ("Navigation", "EventTarget"),
+            // IDB (JS-C215) — WebIDL : `IDBRequest`,
+            // `IDBOpenDBRequest`, `IDBTransaction` et
+            // `IDBDatabase` sont des `EventTarget` ;
+            // `IDBOpenDBRequest` < `IDBRequest`,
+            // `IDBCursorWithValue` < `IDBCursor` —
+            // `instanceof` + greffes proto (ruxit/workbox
+            // patchent `X.prototype`) réels.
+            ("IDBRequest", "EventTarget"),
+            ("IDBOpenDBRequest", "IDBRequest"),
+            ("IDBTransaction", "EventTarget"),
+            ("IDBDatabase", "EventTarget"),
+            ("IDBCursorWithValue", "IDBCursor"),
         ] {
             if let Some(Value::Obj(cid)) = self.get_prop(g, child) {
                 if let Some(Value::Obj(cp)) = self.get_prop(cid, "prototype") {

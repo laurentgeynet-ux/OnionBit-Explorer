@@ -1829,3 +1829,74 @@ fn c194_abort_signal_timeout() {
         "false"
     );
 }
+
+/// §B-14 — coinbase vol 148 : `get is not a function (on
+/// IDBRequest)` + JS-C215 : les interfaces IDB partagent les
+/// protos **réels** des instances — `instanceof`,
+/// `constructor.name`, héritage `EventTarget` et
+/// `IDBOpenDBRequest < IDBRequest`. Verrou surface +
+/// chaînage.
+#[test]
+fn b14_idb_request_surfaces_spec() {
+    let (mut e, _t) = engine();
+    e.eval(
+        "var out='';\
+         var rq=indexedDB.open('pdb',1);\
+         rq.onupgradeneeded=function(ev){\
+           ev.target.result.createObjectStore('kv',{keyPath:'k'});\
+         };\
+         rq.onsuccess=function(ev){\
+           var db=ev.target.result;\
+           var tx=db.transaction('kv','readwrite');\
+           var st=tx.objectStore('kv');\
+           var g=st.get('x');\
+           out=[typeof g.get,typeof g.source.get,typeof st.get,\
+                typeof tx.get,typeof db.get,\
+                rq instanceof IDBRequest,\
+                rq instanceof IDBOpenDBRequest,\
+                g instanceof IDBRequest,\
+                !(g instanceof IDBOpenDBRequest),\
+                rq.constructor.name,g.constructor.name,\
+                st.constructor.name,tx.constructor.name,db.constructor.name,\
+                indexedDB instanceof IDBFactory].join('|');\
+         };",
+    )
+    .expect("eval");
+    assert_eq!(
+        describe(&mut e, "out"),
+        "undefined|function|function|undefined|undefined\
+         |true|true|true|true\
+         |IDBOpenDBRequest|IDBRequest|IDBObjectStore|IDBTransaction|IDBDatabase|true"
+    );
+}
+
+/// JS-C215 — greffe sur le proto réel : `IDBRequest.prototype`
+/// modifiée par un script (ruxit/workbox patchent les protos
+/// au boot) doit être visible par les vraies requests —
+/// l'ancien proto nu distinct absorbait la greffe.
+#[test]
+fn c215_idb_proto_graft_reaches_instances() {
+    let (mut e, _t) = engine();
+    e.eval(
+        "globalThis.__hit=0;\
+         IDBRequest.prototype.__probe=function(){__hit++};",
+    )
+    .expect("graft");
+    e.eval(
+        "var rq=indexedDB.open('gdb',1);\
+         rq.onupgradeneeded=function(ev){\
+           ev.target.result.createObjectStore('kv');\
+         };\
+         rq.onsuccess=function(){\
+           var st=rq.result.transaction('kv').objectStore('kv');\
+           var g=st.get('x');\
+           g.__probe();rq.__probe();\
+         };",
+    )
+    .expect("eval");
+    assert_eq!(describe(&mut e, "__hit"), "2");
+    // `onupgradeneeded`/`onblocked` restent des props
+    // `IDBOpenDBRequest` : une request `store.get` ne doit
+    // pas être `instanceof IDBOpenDBRequest` (vérifié plus
+    // haut) mais `open` l'est.
+}

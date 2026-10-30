@@ -292,8 +292,14 @@ pub(crate) struct IdbState {
     store_proto: Option<ObjId>,
     index_proto: Option<ObjId>,
     cursor_proto: Option<ObjId>,
+    /// `IDBCursor` — super-proto de `cursor_proto`
+    /// (`openKeyCursor` rend un cursor sans `value`).
+    cursor_base_proto: Option<ObjId>,
     keyrange_proto: Option<ObjId>,
     req_proto: Option<ObjId>,
+    /// `IDBOpenDBRequest` — sous-proto de `req_proto`
+    /// (`WebIDL` — `open`/`deleteDatabase` chaînent ici).
+    openreq_proto: Option<ObjId>,
     cache_proto: Option<ObjId>,
     cachestorage_proto: Option<ObjId>,
 }
@@ -557,8 +563,15 @@ fn req_data(e: &Engine, v: Value) -> Option<Rc<RefCell<ReqData>>> {
 }
 
 /// Nouvelle `IDBRequest` enfilée — `source`/`txn` props.
+/// `open`/`deleteDatabase` rendent une `IDBOpenDBRequest`
+/// (`WebIDL` : sous-classe — `onupgradeneeded`/`onblocked`
+/// n'existent que là, le proto hérite `IDBRequest`).
 fn new_request(e: &mut Engine, op: IdbOp, source: Value, txn: Value) -> Value {
-    let rp = req_proto(e);
+    let rp = if matches!(op, IdbOp::Open { .. } | IdbOp::DeleteDb { .. }) {
+        openreq_proto(e)
+    } else {
+        req_proto(e)
+    };
     let d = Rc::new(RefCell::new(ReqData {
         done: false,
         result: Value::Undefined,
@@ -772,16 +785,47 @@ fn index_proto(e: &mut Engine) -> ObjId {
     p
 }
 
+fn openreq_proto(e: &mut Engine) -> ObjId {
+    if let Some(p) = e.idb.openreq_proto {
+        return p;
+    }
+    let p = new_tagged_proto(e, "IDBOpenDBRequest");
+    // WebIDL : `IDBOpenDBRequest` < `IDBRequest` —
+    // hérite `addEventListener`/`then`/`readyState`…
+    let rp = req_proto(e);
+    if let Some(o) = e.heap.obj_mut(p) {
+        o.proto = Value::Obj(rp);
+    }
+    e.idb.openreq_proto = Some(p);
+    p
+}
+
 fn cursor_proto(e: &mut Engine) -> ObjId {
     if let Some(p) = e.idb.cursor_proto {
         return p;
     }
     let p = new_tagged_proto(e, "IDBCursorWithValue");
+    // WebIDL : `IDBCursorWithValue` < `IDBCursor`.
+    let cp = cursor_base_proto(e);
+    if let Some(o) = e.heap.obj_mut(p) {
+        o.proto = Value::Obj(cp);
+    }
     e.add_method(p, "continue", cursor_continue);
     e.add_method(p, "advance", cursor_advance);
     e.add_method(p, "update", cursor_update);
     e.add_method(p, "delete", cursor_delete);
     e.idb.cursor_proto = Some(p);
+    p
+}
+
+/// `IDBCursor` — super-proto de `cursor_proto` (les
+/// `openKeyCursor` rendent un cursor sans `value`).
+fn cursor_base_proto(e: &mut Engine) -> ObjId {
+    if let Some(p) = e.idb.cursor_base_proto {
+        return p;
+    }
+    let p = new_tagged_proto(e, "IDBCursor");
+    e.idb.cursor_base_proto = Some(p);
     p
 }
 
@@ -2982,6 +3026,21 @@ pub(crate) fn install_idb(e: &mut Engine, inject: Option<IdbRegistry>) {
     e.set_own(f, crate::interp::SYM_TO_STRING_TAG, tag, false);
     let g = e.global;
     e.set_own(g, "indexedDB", Value::Obj(f), false);
+    // `IDBFactory` — interface WebIDL de `indexedDB`
+    // (`indexedDB instanceof IDBFactory`,
+    // `indexedDB.constructor.name`).
+    {
+        let c = e.native_fn("IDBFactory", idb_illegal_ctor);
+        let fp = new_tagged_proto(e, "IDBFactory");
+        if let Value::Obj(cid) = c {
+            e.set_own(cid, "prototype", Value::Obj(fp), false);
+            e.set_own(fp, "constructor", c, false);
+        }
+        e.set_own(g, "IDBFactory", c, false);
+        if let Some(o) = e.heap.obj_mut(f) {
+            o.proto = Value::Obj(fp);
+        }
+    }
 
     // `IDBKeyRange` — ctor + statiques (`only`/`bound`…).
     let kc = e.native_fn("IDBKeyRange", idb_keyrange_ctor);
@@ -3017,13 +3076,35 @@ pub(crate) fn install_idb_interfaces(e: &mut Engine) {
         "IDBDatabase",
         "IDBVersionChangeEvent",
     ] {
+        // `prototype` = le proto **réel** chaîné par les
+        // instances (JS-C215) — `x instanceof IDBRequest`,
+        // `x.constructor.name` et les greffes
+        // `X.prototype.m` (ruxit/workbox patchent les protos)
+        // fonctionnent ; un proto nu distinct rendait
+        // `constructor.name` = "Object" et `instanceof` faux.
+        let proto = match name {
+            "IDBIndex" => index_proto(e),
+            "IDBObjectStore" => store_proto(e),
+            "IDBCursor" => cursor_base_proto(e),
+            "IDBCursorWithValue" => cursor_proto(e),
+            "IDBTransaction" => txn_proto(e),
+            "IDBRequest" => req_proto(e),
+            "IDBOpenDBRequest" => openreq_proto(e),
+            "IDBDatabase" => db_proto(e),
+            _ => {
+                // `IDBVersionChangeEvent` — proto nu honnête
+                // (les events vivent comme objets shape, pas
+                // de proto dédié à cette tranche).
+                let p = e.new_object();
+                let tag = e.str_val(name);
+                e.set_own(p, crate::interp::SYM_TO_STRING_TAG, tag, false);
+                p
+            }
+        };
         let c = e.native_fn(name, idb_illegal_ctor);
         if let Value::Obj(cid) = c {
-            let p = e.new_object();
-            let tag = e.str_val(name);
-            e.set_own(p, crate::interp::SYM_TO_STRING_TAG, tag, false);
-            e.set_own(cid, "prototype", Value::Obj(p), false);
-            e.set_own(p, "constructor", c, false);
+            e.set_own(cid, "prototype", Value::Obj(proto), false);
+            e.set_own(proto, "constructor", c, false);
         }
         e.set_own(e.global, name, c, false);
     }

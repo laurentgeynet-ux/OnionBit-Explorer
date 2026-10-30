@@ -7,6 +7,49 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **JS-C215 — interfaces IDB sur
+  les protos réels** (§B-14,
+  coinbase vol 148 `get is not a
+  function (on IDBRequest)` — bras
+  à nommer, le plus plausible :
+  les greffes proto ruxit/workbox
+  n'atteignaient pas les
+  instances) : `install_idb_
+  interfaces` chaînait des protos
+  **nus distincts** de ceux des
+  instances → `instanceof` faux,
+  `constructor.name` = `"Object"`,
+  `X.prototype.m = f` invisible
+  sur les vrais objets. Désormais
+  `IDBRequest.prototype`,
+  `IDBOpenDBRequest` (sous-proto
+  WebIDL de `IDBRequest` — les
+  requests `open`/`deleteDatabase`
+  y chaînent), `IDBObjectStore`,
+  `IDBIndex`, `IDBCursor` (super-
+  proto de `IDBCursorWithValue`),
+  `IDBTransaction`, `IDBDatabase`
+  et `IDBFactory` (`indexedDB`
+  chaîné) partagent les protos
+  paresseux réels ; la passe
+  `dom_host` les hérite à
+  `EventTarget` (WebIDL —
+  `IDBRequest`/`IDBOpenDBRequest`/
+  `IDBTransaction`/`IDBDatabase`
+  sont des `EventTarget`,
+  `IDBOpenDBRequest` <
+  `IDBRequest`,
+  `IDBCursorWithValue` <
+  `IDBCursor`). Verrous :
+  `b14_idb_request_surfaces_spec`
+  (surfaces + `instanceof` +
+  `constructor.name`), `c215_idb_
+  proto_graft_reaches_instances`
+  (greffe `IDBRequest.prototype`
+  visible sur les vraies
+  requests). À re-voler coinbase
+  + sites ruxit/workbox.
+
 - **JS-C214 — `RSASSA-PKCS1-v1_5`
   + format `jwk`** (§B-14, wamiz
   vol 165 — `importKey: unknown
