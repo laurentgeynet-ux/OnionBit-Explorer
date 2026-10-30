@@ -1566,6 +1566,26 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   défaut spec builtins, arités
   précises posables après. Bundle
   manomano : éval `OK`.
+- **R-132 — §B-36 : `min-width:auto`
+  plafonne à la taille spécifiée**
+  (`explorer-layout`) — icône svg
+  wttj (`width:16px;height:16px`,
+  intrinsèque 300×150) dans un
+  bouton flex : le plancher
+  `min-width:auto` retenait le
+  min-content `h × iw/ih` = 32 px
+  au lieu de la suggestion de taille
+  spécifiée (flexbox §9.9.2 —
+  `min(spécifié, contenu)`) → item
+  irréductible, débordement
+  `justify-content:center` → icône
+  peinte hors du bouton (vols
+  57/88/102). Le `width` défini de
+  l'item borne désormais le
+  plancher de shrink. Verrous
+  `b36_probe` : svg spécifié → 16,
+  svg `width:auto` → plancher
+  contenu conservé.
 - **R-131 — §B-58 : `transform`
   rejoué par les boîtes anonymes**
   (`explorer-layout`) — letterboxd

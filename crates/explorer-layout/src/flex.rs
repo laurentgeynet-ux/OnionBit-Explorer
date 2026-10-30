@@ -527,7 +527,20 @@ pub(crate) fn flow_flex_children(
                         let cfs = font_size_px(&c.style, fs, ctx);
                         let floor = match c.style.get("min-width").map(str::trim) {
                             None | Some("" | "auto") => {
-                                crate::intrinsic::min_content_size_px_cb(c, cfs, ctx, main_cb)
+                                // §9.9.2 : la taille min automatique
+                                // = min(suggestion de taille
+                                // spécifiée, min basée sur le
+                                // contenu) — un `width` défini
+                                // plafonne le plancher : un
+                                // remplacé à `width:16px` +
+                                // `height:16px` + intrinsèque
+                                // 300×150 ne tient pas un
+                                // min-content `h×iw/ih`=32
+                                // (icône svg wttj §B-36).
+                                let content =
+                                    crate::intrinsic::min_content_size_px_cb(c, cfs, ctx, main_cb);
+                                css_px(&c.style, "width", main_cb, cfs, ctx)
+                                    .map_or(content, |w| content.min(w))
                             }
                             _ => crate::intrinsic::intrinsic_size_px(
                                 &c.style,
