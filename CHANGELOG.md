@@ -6013,6 +6013,7 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   `c97_offset_parent_top_left`.
 
 ### Fixed
+- MIME média par suffixe d'URL (`media_mime_from_url`) : couverture étendue — `mkv`/`mka`, `ts`/`m2ts`, `avi`, `asf`/`wmv`/`wma`, `mpg`/`vob`, `dts`, `ac3`/`eac3`, `adts`, `3gp`, `weba`, `m4b`/`m4p`, `ogm`/`spx` — toutes mappées vers des MIME acceptés par `container_hint` côté `onionmedia_ffi.dll` (MSE tatillon).
 
 - **Étape 142 — `animationstart`
   synthétique depuis les naissances
