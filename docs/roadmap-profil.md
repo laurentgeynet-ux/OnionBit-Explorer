@@ -51,11 +51,15 @@ décidée 2026-10-30 avec le bundle portable (Étape 167).
 
 ## Palier PR-P2 — stores avec consommateur à créer
 
-- [ ] **PR-6. `autofill.json` (chiffré)** — détection `<form>`
-  ADR-0014 existante ; exige ProfileVault.
-- [ ] **PR-7. `permissions.json`** — notifications/géoloc/cam :
-  store mort tant qu'aucune API ne le consomme — à faire avec
-  le premier consommateur.
+- [x] **PR-6. `autofill.json`** — enregistre les valeurs
+  textuelles à la soumission (`collect_autofill_data` +
+  `record_autofill`/`autofill`). **En clair, déviation
+  ADR-0030** : secrets exclus en amont (`password`/`hidden`
+  jamais persistés) ; `ProfileVault` obligatoire avant
+  release prod.
+- [ ] ~~**PR-7. `permissions.json`**~~ — **annulé** : store mort
+  tant qu'aucune API permissionnée n'existe ; à recréer le jour
+  où un consommateur arrive (hors file pour l'instant).
 - [ ] **PR-8. `cert_decisions.json`** — exceptions certificats
   (rustls custom verifier — sensible sécurité).
 - [x] **PR-9. `dns_cache.json`** — borné (cap 4000), TTL 300 s

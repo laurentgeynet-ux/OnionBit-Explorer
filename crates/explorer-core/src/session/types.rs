@@ -818,6 +818,17 @@ pub trait ProfileStore: Send + Sync {
     fn downloads(&self) -> Vec<DownloadRecord> {
         Vec::new()
     }
+    /// Mémorise une valeur de champ pour l'autofill (PR-6 —
+    /// défaut : ignorer). **Store en clair** — ADR-0030 :
+    /// chiffrement `ProfileVault` obligatoire avant release
+    /// prod. Les secrets (`password`/`hidden`) ne sont jamais
+    /// transmis ici — filtrage en amont.
+    fn record_autofill(&self, _name: &str, _value: &str) {}
+    /// Valeurs mémorisées pour un nom de champ (suggestions —
+    /// plus récentes en tête ; défaut : vide).
+    fn autofill(&self, _name: &str) -> Vec<String> {
+        Vec::new()
+    }
 }
 
 /// Erreur de session — typée, jamais de panic.

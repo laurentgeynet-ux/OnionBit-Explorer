@@ -7,6 +7,20 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **PR-6 — `autofill.json`**
+  (`explorer-core`) — les valeurs
+  textuelles d'un formulaire
+  soumis sont mémorisées par nom
+  de champ (`record_autofill` /
+  `autofill` pour suggestions).
+  **En clair — déviation
+  ADR-0030** : `password`/
+  `hidden`/`file`/cases jamais
+  persistés ; sealing
+  `ProfileVault` obligatoire
+  avant release prod. Borné :
+  10 valeurs/nom, 2000 noms.
+
 - **PR-9 — `dns_cache.json`**
   (`explorer-net`, `explorer-core`,
   hôtes) — cache DNS persisté :

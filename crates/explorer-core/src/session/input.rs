@@ -710,6 +710,14 @@ impl Session {
                 return Err(CoreError::EmptyDocument);
             };
             let pairs = collect_form_data(dom, form, submitter);
+            // Autofill (PR-6) : les valeurs textuelles
+            // soumises sont mémorisées par nom de champ —
+            // secrets exclus en amont (jamais `password`).
+            for (name, value) in collect_autofill_data(dom, form) {
+                if let Some(s) = &self.store {
+                    s.record_autofill(&name, &value);
+                }
+            }
             let mut action = dom
                 .attribute(form, "action")
                 .ok()

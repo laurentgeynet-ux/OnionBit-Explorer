@@ -455,6 +455,67 @@ pub(crate) fn select_value(dom: &Dom, sel: NodeId) -> String {
     })
 }
 
+/// Contrôles candidats à l'autofill du formulaire (PR-6) —
+/// `(name, valeur)` des champs **textuels** : inputs libres,
+/// `textarea`, `select`. Exclus **à jamais** : `password`,
+/// `hidden`, `file`, `checkbox`/`radio` (choix, pas saisie),
+/// boutons — aucun secret ou donnée opaques ne doit finir en
+/// clair dans `autofill.json` (déviation ADR-0030 : store en
+/// clair tant que `ProfileVault` n'existe pas — à sceller
+/// avant release prod).
+pub(crate) fn collect_autofill_data(dom: &Dom, form: NodeId) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    let mut queue = vec![form];
+    while let Some(n) = queue.pop() {
+        let tag = dom.tag_name(n).unwrap_or("");
+        if n != form
+            && dom.element(n).is_ok()
+            && dom.attribute(n, "disabled").ok().flatten().is_none()
+        {
+            match tag {
+                "input" => {
+                    let ty = attr_lower(dom, n, "type");
+                    match ty.as_str() {
+                        "password" | "hidden" | "file" | "submit" | "image" | "button"
+                        | "reset" | "checkbox" | "radio" => {}
+                        _ => {
+                            if let Some(name) = attr_opt(dom, n, "name").filter(|s| !s.is_empty()) {
+                                let v = input_value(dom, n, &ty);
+                                if !v.trim().is_empty() {
+                                    out.push((name, v));
+                                }
+                            }
+                        }
+                    }
+                }
+                "textarea" => {
+                    if let Some(name) = attr_opt(dom, n, "name").filter(|s| !s.is_empty()) {
+                        let v = dom.text_content(n).unwrap_or_default();
+                        if !v.trim().is_empty() {
+                            out.push((name, v));
+                        }
+                    }
+                }
+                "select" => {
+                    if let Some(name) = attr_opt(dom, n, "name").filter(|s| !s.is_empty()) {
+                        let v = select_value(dom, n);
+                        if !v.is_empty() {
+                            out.push((name, v));
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        if n == form || tag != "form" {
+            if let Ok(ch) = dom.children(n) {
+                queue.extend(ch.iter().rev());
+            }
+        }
+    }
+    out
+}
+
 /// Encodage `application/x-www-form-urlencoded` : espace→`+`,
 /// non-réservés conservés, le reste en `%XX`.
 /// Encodage `application/x-www-form-urlencoded` : espace→`+`,

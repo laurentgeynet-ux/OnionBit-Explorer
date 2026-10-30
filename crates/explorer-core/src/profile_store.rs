@@ -38,6 +38,10 @@ const HISTORY_CAP: usize = 5000;
 /// Borne du journal de téléchargements (PR-1).
 const DOWNLOADS_CAP: usize = 2000;
 
+/// Bornes autofill (PR-6) : valeurs par nom / noms distincts.
+const AUTOFILL_VALUES_CAP: usize = 10;
+const AUTOFILL_NAMES_CAP: usize = 2000;
+
 /// Store fichiers : `dir/history.json` + `dir/bookmarks.json`.
 /// Mutex interne — écritures sérialisées (le `Session`
 /// single-writer rend les courses improbables, mais le port
@@ -265,6 +269,55 @@ impl ProfileStore for JsonFileStore {
         self.downloads
             .lock()
             .map_or_else(|_| Vec::new(), |v| v.clone())
+    }
+
+    /// Autofill (PR-6) : `autofill.json` =
+    /// `{nom → [valeurs]}` — plus récente en tête, bornée à
+    /// [`AUTOFILL_VALUES_CAP`] par nom et [`AUTOFILL_NAMES_CAP`]
+    /// noms (éviction arbitraire quand la map déborde — dev
+    /// store, ADR-0030). **En clair** : à sceller par
+    /// `ProfileVault` avant release prod.
+    fn record_autofill(&self, name: &str, value: &str) {
+        if name.is_empty() || value.trim().is_empty() {
+            return;
+        }
+        let _guard = self.io.lock().ok();
+        let mut map: std::collections::HashMap<String, Vec<String>> =
+            read_json(&self.dir.join("autofill.json"))
+                .and_then(|v| serde_json::from_value(v).ok())
+                .unwrap_or_default();
+        let vals = map.entry(name.to_string()).or_default();
+        // Déduplication par valeur : la plus récente en tête.
+        vals.retain(|v| v != value);
+        vals.insert(0, value.to_string());
+        vals.truncate(AUTOFILL_VALUES_CAP);
+        if map.len() > AUTOFILL_NAMES_CAP {
+            let extra: Vec<String> = map
+                .keys()
+                .take(map.len() - AUTOFILL_NAMES_CAP)
+                .cloned()
+                .collect();
+            for k in extra {
+                map.remove(&k);
+            }
+        }
+        let Some(s) = serde_json::to_string(&map).ok() else {
+            return;
+        };
+        let dst = self.dir.join("autofill.json");
+        let tmp = self.dir.join("autofill.json.tmp");
+        if fs::write(&tmp, s).is_ok() {
+            let _ = fs::rename(&tmp, &dst);
+        }
+    }
+
+    fn autofill(&self, name: &str) -> Vec<String> {
+        read_json(&self.dir.join("autofill.json"))
+            .and_then(|v| {
+                serde_json::from_value::<std::collections::HashMap<String, Vec<String>>>(v).ok()
+            })
+            .and_then(|m| m.get(name).cloned())
+            .unwrap_or_default()
     }
 }
 
