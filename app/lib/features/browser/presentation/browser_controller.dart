@@ -303,7 +303,9 @@ class SessionStore {
   }
 
   /// Session sauvegardée — `null` si absente/cassée/vide
-  /// (démarrage vierge, jamais fatal).
+  /// (démarrage vierge, jamais fatal). `scroll` par index —
+  /// les ids d'onglets changent à la restauration, la
+  /// correspondance est positionnelle.
   Future<({List<Map<String, String>> tabs, int active})?> read() async {
     try {
       final v = jsonDecode(await file.readAsString());
@@ -311,7 +313,11 @@ class SessionStore {
         final tabs = [
           for (final t in v['tabs'] as List)
             if (t is Map && t['url'] is String)
-              {'url': '${t['url']}', 'title': '${t['title'] ?? ''}'},
+              {
+                'url': '${t['url']}',
+                'title': '${t['title'] ?? ''}',
+                'scroll': '${t['scroll'] ?? 0.0}',
+              },
         ];
         if (tabs.isEmpty) return null;
         return (
@@ -325,15 +331,26 @@ class SessionStore {
     return null;
   }
 
-  /// Persiste onglets (url+titre) + index actif (best-effort).
-  Future<void> write(List<BrowserTab> tabs, String? activeId) async {
+  /// Persiste onglets (url+titre+scroll) + index actif
+  /// (best-effort). `scrollY` est indexé par id courant —
+  /// écrit positionnellement (index onglet → scroll).
+  Future<void> write(
+    List<BrowserTab> tabs,
+    String? activeId,
+    Map<String, double> scrollY,
+  ) async {
     try {
       final active = tabs.indexWhere((t) => t.id == activeId);
       await file.parent.create(recursive: true);
       await file.writeAsString(
         jsonEncode({
           'tabs': [
-            for (final t in tabs) {'url': t.url, 'title': t.title},
+            for (final t in tabs)
+              {
+                'url': t.url,
+                'title': t.title,
+                'scroll': scrollY[t.id] ?? 0.0,
+              },
           ],
           'active': active < 0 ? 0 : active,
         }),
@@ -785,6 +802,10 @@ class BrowserController extends Notifier<BrowserState> {
             if (url.isNotEmpty && url != 'about:blank') {
               unawaited(_repo.navigate(tab.id, url));
             }
+            // Scroll positionnel → `scroll(dy)` envoyé au
+            // moteur après sa première nav (`navigated`).
+            final y = double.tryParse(t['scroll']!) ?? 0.0;
+            if (y != 0.0) _pendingScroll[tab.id] = y;
           }
           tabs = restored;
           _restoredActiveId =
@@ -847,10 +868,16 @@ class BrowserController extends Notifier<BrowserState> {
   /// par `_bootstrap` quand le moteur démarre sans onglets.
   String? _restoredActiveId;
 
-  /// Persiste `state.tabs`/`activeId` — fire-and-forget.
+  /// Scrolls à rejouer après la première nav d'un onglet
+  /// restauré (PR-4 — `id → dy` ; consommé par `navigated`).
+  final Map<String, double> _pendingScroll = {};
+
+  /// Persiste `state.tabs`/`activeId`/`scrollY` — fire-and-forget.
   void _persistSession() {
     unawaited(
-      ref.read(sessionStoreProvider).write(state.tabs, state.activeId),
+      ref
+          .read(sessionStoreProvider)
+          .write(state.tabs, state.activeId, state.scrollY),
     );
   }
 
@@ -898,6 +925,14 @@ class BrowserController extends Notifier<BrowserState> {
         // la purge couvre tout ordre inattendu côté daemon.
         if (state.media.containsKey(tabId) && state.media[tabId]!.isNotEmpty) {
           _dropAllMedia(tabId);
+        }
+        // Scroll restauré (PR-4) : la page neuve part à 0 —
+        // un `scroll(dy)` la ramène à la position persistée.
+        final restoreY = _pendingScroll.remove(tabId);
+        if (restoreY != null) {
+          unawaited(
+            _repo.sendInput(tabId, {'type': 'scroll', 'dy': restoreY}),
+          );
         }
       case 'title_changed':
         _patch(

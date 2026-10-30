@@ -9,9 +9,9 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 - **PR-4 — `session.json`** (app) —
   **restauration d'onglets au
-  boot** : `{tabs:[{url,title}],
-  active}` persisté à côté de
-  `ui_settings.json` (sous
+  boot** : `{tabs:[{url,title,
+  scroll}], active}` persisté à
+  côté de `ui_settings.json` (sous
   `state/` en portable) ;
   écriture debouncée sur
   `navigated`/`title_changed`/
@@ -20,8 +20,10 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   moteur démarrant sans onglet
   recrée chaque onglet et
   re-navigue vers son URL ;
-  l'onglet actif persisté est
-  restauré.
+  l'onglet actif et le **scroll**
+  positionnel sont restaurés
+  (`scroll(dy)` rejoué au premier
+  `navigated` de l'onglet).
 
 - **PR-2 — `zoom.json`** (app) —
   le zoom par onglet est désormais
