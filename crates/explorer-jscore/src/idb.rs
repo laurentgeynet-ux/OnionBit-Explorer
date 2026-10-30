@@ -284,10 +284,14 @@ fn key_path_value(e: &mut Engine, v: Value, path: &str) -> Option<Value> {
 /// livrer au checkpoint microtask (modèle FileReader/observers).
 #[derive(Default)]
 pub(crate) struct IdbState {
-    /// Registre injecté (`install_idb`) ou créé à la volée.
-    pub(crate) reg: Option<IdbRegistry>,
-    /// Registre `caches` injecté (`install_caches`).
-    pub(crate) cache_reg: Option<CacheRegistry>,
+    /// Registres IDB **par realm** (clé = `global` du
+    /// contexte — `e.global` bascule à l'entrée de ctx,
+    /// `swap_ctx_fields`) : la fuite cross-origine du
+    /// registre unique est close — un `<iframe>` d'origine
+    /// B a son propre registre (PR-10d).
+    pub(crate) regs: HashMap<ObjId, IdbRegistry>,
+    /// Registres `caches` par realm — même isolation.
+    pub(crate) cache_regs: HashMap<ObjId, CacheRegistry>,
     /// Requests `IDBRequest`/`IDBOpenDBRequest` en attente —
     /// FIFO, livrées au checkpoint.
     pub(crate) pending: VecDeque<ObjId>,
@@ -330,7 +334,7 @@ impl IdbState {
             ids.push(p);
         }
         ids.extend(self.pending.iter().copied());
-        if let Some(reg) = &self.reg {
+        for reg in self.regs.values() {
             for db in reg.borrow().values() {
                 for s in db.stores.values() {
                     for v in s.records.values() {
@@ -339,7 +343,7 @@ impl IdbState {
                 }
             }
         }
-        if let Some(reg) = &self.cache_reg {
+        for reg in self.cache_regs.values() {
             for c in reg.borrow().values() {
                 for _ in c.values() {}
             }
@@ -1120,16 +1124,18 @@ fn idb_val_decode(e: &mut Engine, v: Value, depth: u32) -> Value {
 /// registre neuf si l'embedder n'en a pas injecté).
 fn reg(e: &mut Engine) -> IdbRegistry {
     e.idb
-        .reg
-        .get_or_insert_with(|| Rc::new(RefCell::new(HashMap::new())))
+        .regs
+        .entry(e.global)
+        .or_insert_with(|| Rc::new(RefCell::new(HashMap::new())))
         .clone()
 }
 
 /// Registre `caches` paresseux.
 fn cache_reg(e: &mut Engine) -> CacheRegistry {
     e.idb
-        .cache_reg
-        .get_or_insert_with(|| Rc::new(RefCell::new(HashMap::new())))
+        .cache_regs
+        .entry(e.global)
+        .or_insert_with(|| Rc::new(RefCell::new(HashMap::new())))
         .clone()
 }
 
@@ -3182,7 +3188,7 @@ impl Host for CacheHost {
 /// **remplace** le registre — c'est la voie d'injection.
 pub(crate) fn install_idb(e: &mut Engine, inject: Option<IdbRegistry>) {
     if let Some(r) = inject {
-        e.idb.reg = Some(r);
+        e.idb.regs.insert(e.global, r);
     }
     // `indexedDB` factory — objet ordinaire + méthodes.
     let f = e.new_object();
@@ -3287,7 +3293,7 @@ fn idb_illegal_ctor(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> 
 /// global. Même modèle d'injection que `install_idb`.
 pub(crate) fn install_caches(e: &mut Engine, inject: Option<CacheRegistry>) {
     if let Some(r) = inject {
-        e.idb.cache_reg = Some(r);
+        e.idb.cache_regs.insert(e.global, r);
     }
     let sp = cachestorage_proto(e);
     let cs = e.new_object();
@@ -3327,9 +3333,14 @@ impl Engine {
     /// `Map`/`TypedArray`/fonctions arrondis ou omis,
     /// dégradation documentée).
     pub fn idb_snapshot(&mut self) -> String {
+        self.idb_snapshot_reg(self.idb.regs.get(&self.global).cloned())
+    }
+
+    /// Corps de [`Self::idb_snapshot`] sur un registre donné
+    /// (le realm courant ou celui d'un ctx frame).
+    fn idb_snapshot_reg(&mut self, reg: Option<IdbRegistry>) -> String {
         let dbs = self.new_object();
         {
-            let reg = self.idb.reg.clone();
             if let Some(reg) = reg {
                 let map = reg.borrow();
                 for (db_name, db) in &*map {
@@ -3400,6 +3411,11 @@ impl Engine {
             return;
         };
         let reg_rc = reg(self);
+        self.idb_restore_into(&reg_rc, dbs);
+    }
+
+    /// Corps de [`Self::idb_restore`] dans un registre donné.
+    fn idb_restore_into(&mut self, reg_rc: &IdbRegistry, dbs: ObjId) {
         for db_name in self.own_keys(dbs) {
             let Some(Value::Obj(dbv)) = self.get_prop(dbs, &db_name) else {
                 continue;
@@ -3484,5 +3500,45 @@ impl Engine {
             }
             reg_rc.borrow_mut().insert(db_name, db);
         }
+    }
+
+    /// Snapshot `IndexedDB` du registre du **realm de `ctx`**
+    /// (frame — PR-10d isolation : chaque ctx a le sien) —
+    /// même format que [`Self::idb_snapshot`]. `ctx` inconnu
+    /// → `"{}"`.
+    pub fn idb_snapshot_ctx(&mut self, ctx: u32) -> String {
+        let Some(g) = self.ctxs.get(ctx as usize).and_then(|c| c.global) else {
+            return "{}".to_string();
+        };
+        let reg = self.idb.regs.get(&g).cloned();
+        self.idb_snapshot_reg(reg)
+    }
+
+    /// Restaure un snapshot dans le registre du realm de `ctx`
+    /// — miroir de [`Self::idb_restore`] par contexte.
+    pub fn idb_restore_ctx(&mut self, ctx: u32, json: &str) {
+        if json.is_empty() {
+            return;
+        }
+        let Some(g) = self.ctxs.get(ctx as usize).and_then(|c| c.global) else {
+            return;
+        };
+        let s = self.str_val(json);
+        let Ok(root) = crate::json::parse(self, s) else {
+            return;
+        };
+        let Value::Obj(root_id) = root else {
+            return;
+        };
+        let Some(Value::Obj(dbs)) = self.get_prop(root_id, "dbs") else {
+            return;
+        };
+        let reg = self
+            .idb
+            .regs
+            .entry(g)
+            .or_insert_with(|| std::rc::Rc::new(std::cell::RefCell::new(HashMap::new())))
+            .clone();
+        self.idb_restore_into(&reg, dbs);
     }
 }

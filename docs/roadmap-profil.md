@@ -93,16 +93,14 @@ décidée 2026-10-30 avec le bundle portable (Étape 167).
     `Date`/`Map`/`ArrayBuffer` encodés taggés
     `{__idb_t,v}` au snapshot, reconstruits au restore
     (vue `TypedArray` → `ArrayBuffer`, arrondi
-    documenté ; profondeur bornée). Reste :
-    **isolation par contexte** — `e.idb.reg` est un
-    registre unique au moteur : un `<iframe>`
-    d'origine B voit les bases de A **et** ses
-    écritures atterrissent dans le snapshot
-    top-level (fuite cross-origine, pas juste
-    persistance) — fixer par registre par realm
-    (modèle `ctx_stores` du localStorage) puis
-    drain par contexte ; partage live entre
-    onglets de même origine ensuite.
+    documenté ; profondeur bornée). **Isolation
+    par contexte livrée** : `regs`/`cache_regs`
+    indexés par `e.global` (bascule par realm)
+    — fuite cross-origine fermée, drain/restore
+    par ctx (`idb_snapshot_ctx`/`idb_restore_ctx`)
+    persisté sous l'origine de chaque enfant.
+    Reste : partage live entre onglets de même
+    origine.
 - [ ] **PR-11. Mots de passe** — ProfileVault (AEAD par
   fichier, passphrase/invité) + détection + UI remplissage.
 - [ ] **PR-12. Service Workers + CacheStorage** — cycle de

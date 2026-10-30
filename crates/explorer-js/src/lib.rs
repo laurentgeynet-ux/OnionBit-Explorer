@@ -1309,6 +1309,18 @@ pub trait JsEngine: Send {
         String::new()
     }
 
+    /// Restaure un snapshot `IndexedDB` dans le realm du ctx
+    /// `ctx` (frame — PR-10d isolation par contexte).
+    /// Défaut : noop.
+    fn install_idb_ctx(&mut self, _ctx: JsCtxId, _json: &str) {}
+
+    /// Snapshot `IndexedDB` du realm de `ctx` — persisté par
+    /// l'origine **de l'enfant** (pas du top-level).
+    /// Défaut : chaîne vide.
+    fn drain_idb_ctx(&mut self, _ctx: JsCtxId) -> String {
+        String::new()
+    }
+
     /// Pose le snapshot `document.cookie` : fragment
     /// `« k=v; k2=v2 »` pré-filtré par la session pour l'origine
     /// de la page (le vrai jar applique HttpOnly/Secure/SameSite
@@ -1769,6 +1781,14 @@ enum Cmd {
         json: String,
     },
     DrainIdb {
+        tx: Sender<String>,
+    },
+    InstallIdbCtx {
+        ctx: JsCtxId,
+        json: String,
+    },
+    DrainIdbCtx {
+        ctx: JsCtxId,
         tx: Sender<String>,
     },
     CookieSnap {
@@ -3347,6 +3367,24 @@ impl JsEngine for JscoreEngine {
         rx.recv_timeout(Self::EVAL_CMD_TIMEOUT).unwrap_or_default()
     }
 
+    fn install_idb_ctx(&mut self, ctx: JsCtxId, json: &str) {
+        if json.is_empty() {
+            return;
+        }
+        let _ = self.tx.send(Cmd::InstallIdbCtx {
+            ctx,
+            json: json.to_string(),
+        });
+    }
+
+    fn drain_idb_ctx(&mut self, ctx: JsCtxId) -> String {
+        let (tx, rx) = channel();
+        if self.tx.send(Cmd::DrainIdbCtx { ctx, tx }).is_err() {
+            return String::new();
+        }
+        rx.recv_timeout(Self::EVAL_CMD_TIMEOUT).unwrap_or_default()
+    }
+
     fn set_cookie_snapshot(&mut self, header: &str) {
         let _ = self.tx.send(Cmd::CookieSnap {
             header: header.to_string(),
@@ -3595,6 +3633,11 @@ fn serve_side(
             true
         }
         Cmd::DrainIdb { tx } => tx.send(eng.idb_snapshot()).is_ok(),
+        Cmd::InstallIdbCtx { ctx, json } => {
+            eng.idb_restore_ctx(ctx, &json);
+            true
+        }
+        Cmd::DrainIdbCtx { ctx, tx } => tx.send(eng.idb_snapshot_ctx(ctx)).is_ok(),
         Cmd::CookieSnap { header } => {
             jar.set_header(&header);
             true

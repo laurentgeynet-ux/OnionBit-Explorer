@@ -2794,6 +2794,7 @@ impl Session {
     /// (`HttpOnly` filtré — non posable par un script), le
     /// `localStorage` vers la map d'origine + le profil, et
     /// les nouvelles requêtes réseau vers le scheduler.
+    #[allow(clippy::too_many_lines)] // drains séquentiels, chaque bras documenté
     pub(crate) fn after_script(&mut self, tab: TabId) {
         if self.js_stalled(tab) {
             return;
@@ -2867,14 +2868,15 @@ impl Session {
                         .iter()
                         .map(|f| {
                             let (writes, map) = eng.drain_sinks_ctx(f.ctx);
-                            (f.url.clone(), f.opaque, f.ctx, writes, map)
+                            let idb = eng.drain_idb_ctx(f.ctx);
+                            (f.url.clone(), f.opaque, f.ctx, writes, map, idb)
                         })
                         .collect()
                 })
             })
             .unwrap_or_default();
         if let Some(page) = self.tabs.get(&tab).and_then(|e| e.url.clone()) {
-            for (furl, opaque, ctx, writes, map) in sinks {
+            for (furl, opaque, ctx, writes, map, idb) in sinks {
                 // Origine opaque (CAP-149) : `document.cookie`
                 // est muet (écritures jetées — pas de fuite
                 // vers le vrai jar) et `localStorage` vit
@@ -2909,6 +2911,18 @@ impl Session {
                     self.local_storage.insert(key.clone(), map.clone());
                     if let Some(s) = &self.store {
                         s.save_storage(&key, &map);
+                    }
+                }
+                // PR-10d : IndexedDB de l'enfant persisté sous
+                // **son** origine (le registre est isolé par
+                // realm — plus de pollution du top-level).
+                if !idb.is_empty() && idb != "{\"dbs\":{}}" && idb != "{}" {
+                    let changed = self.idb_snapshots.get(&key).is_none_or(|prev| *prev != idb);
+                    if changed {
+                        self.idb_snapshots.insert(key.clone(), idb.clone());
+                        if let Some(s) = &self.store {
+                            s.save_idb(&key, &idb);
+                        }
                     }
                 }
             }
@@ -3836,4 +3850,7 @@ type FrameSink = (
     u32,
     Vec<String>,
     std::collections::BTreeMap<String, String>,
+    // Snapshot `IndexedDB` du ctx (PR-10d — registre par
+    // realm, persisté sous l'origine de l'enfant).
+    String,
 );

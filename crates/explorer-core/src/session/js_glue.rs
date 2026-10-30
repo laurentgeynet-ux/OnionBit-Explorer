@@ -980,6 +980,14 @@ impl Session {
                 self.origin_state(&fp.url)
             };
             eng.install_dom_ctx(ctx, &fp.html, &fp.url.to_string(), local, &cookie);
+            // PR-10d : snapshot IndexedDB de l'origine **de
+            // l'enfant** restauré dans son realm (opaque =
+            // éphémère, jamais restauré ni persisté).
+            if !fp.opaque {
+                if let Some(s) = &self.store {
+                    eng.install_idb_ctx(ctx, &s.load_idb(&fp.url.origin().to_string()));
+                }
+            }
             // « loading » jusqu'au cycle interactive/complete
             // ci-dessous — retient les `postMessage` entrants
             // pendant les scripts du cadre (étape 130).

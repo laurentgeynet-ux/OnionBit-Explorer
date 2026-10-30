@@ -7,6 +7,24 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **PR-10d — isolation IDB par
+  contexte** (`explorer-jscore`,
+  `explorer-js`, `explorer-core`)
+  — `e.idb.reg` unique au moteur
+  devient `regs` indexés par
+  `e.global` (bascule par realm
+  via `swap_ctx_fields`) : la
+  fuite cross-origine est fermée —
+  un `<iframe>` d'origine B a **son**
+  registre. `CacheStorage` reçoit la
+  même isolation (`cache_regs`).
+  Snapshot/restore par realm
+  (`idb_snapshot_ctx`/`idb_restore_ctx`)
+  : chaque frame persiste sous **son**
+  origine ; les frames opaques restent
+  éphémères ; GC trace tous les
+  registres.
+
 - **JS-C228 — TypeError `on Object`
   nomme le receveur** (`explorer-jscore`,
   §B-14 vol 343 kleinezeitung) —
