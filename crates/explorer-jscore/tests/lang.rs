@@ -1628,6 +1628,19 @@ fn destructuring_declarations() {
     assert_eq!(num(ev("var let = 5; let")), 5.0);
 }
 
+/// Vol 339 (finance perso) — `[a,b,...rest]` sur tableau
+/// plus court que le rest : la slice `items[i..]` paniquait
+/// quand `i > len` (panic natif — intolérable). Rest = `[]`.
+#[test]
+fn array_rest_pattern_past_end_is_empty() {
+    assert_eq!(ev_str("var [a,b,...r] = [1]; a+':'+r.length"), "1:0");
+    assert_eq!(ev_str("var [x,y,z,...r] = []; r.length"), "0");
+    // Position exacte (i == len) : rest vide aussi.
+    assert_eq!(ev_str("var [a,...r] = [1]; r.length"), "0");
+    // Fonction : même rail `Pat::Rest` via déclaration de param.
+    assert_eq!(ev_str("function f(a,b,...r){return r.length} f(1)"), "0");
+}
+
 #[test]
 fn destructuring_assignment_and_params() {
     // `({a, b} = o)` — needs parens, assigns existing bindings.

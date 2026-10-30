@@ -3916,7 +3916,12 @@ impl Engine {
                     match el {
                         None => {}
                         Some(Pat::Rest(p)) => {
-                            let rest = self.new_array(items[i..].to_vec());
+                            // `i` peut dépasser `items.len()`
+                            // (`[a,b,...rest]` sur tableau
+                            // court) — slice bornée, sinon
+                            // panic (vol 339 finance perso).
+                            let rest =
+                                self.new_array(items.get(i..).map_or_else(Vec::new, <[_]>::to_vec));
                             self.bind_pat(env, this, p, rest, mode)?;
                             break;
                         }

@@ -7,6 +7,24 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **JS-C222 — panic `Pat::Rest`
+  tué** (`explorer-jscore`,
+  vol 339 finance perso) —
+  `[a,b,...rest]` sur tableau
+  plus court que la position
+  du rest : la slice
+  `items[i..]` paniquait quand
+  `i > len` (panic natif dans
+  le moteur — intolérable).
+  Slice bornée par
+  `items.get(i..)` ; rest =
+  `[]` spec. Couvre décl
+  `var`/`let`/`const`,
+  assignment et params de
+  fonction (même rail
+  `Pat::Rest`). Verrou
+  `array_rest_pattern_past_end_is_empty`.
+
 - **« Enregistrer la source » média**
   (core, api, ffi, app) —
   `Session::download_url` repasse
