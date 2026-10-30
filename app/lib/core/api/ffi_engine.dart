@@ -380,9 +380,9 @@ class FfiEngine implements BrowserRepository {
       FindResult.empty;
 
   /// Téléchargements (étape 70) : pas de canal d'acceptation
-  /// en mode in-process — le pending resterait bloqué ; la
-  /// dégradation honnête est le rejet (rejeu document) —
-  /// à étendre via un export `explorer_download_*`.
+  /// accept/decline pontés FFI
+  /// (`explorer_download_accept`/`_decline` — exports
+  /// additifs : dll antérieure → `code -1`/`FfiException`).
   @override
   Future<String> acceptDownload(String tabId, int dlId, {String? path}) =>
       throw UnsupportedError('downloads : non exposé en FFI (étape 70)');
@@ -401,8 +401,10 @@ class FfiEngine implements BrowserRepository {
 
   /// Voir [acceptDownload].
   @override
-  Future<void> declineDownload(String tabId, int dlId) =>
-      throw UnsupportedError('downloads : non exposé en FFI (étape 70)');
+  Future<void> declineDownload(String tabId, int dlId) async {
+    await _worker
+        .call(opDownloadDecline, {'tab': _idOf(tabId), 'dl': dlId});
+  }
 
   /// Seam MediaSurface (étape 71e) : l'ABI `explorer_media_*`
   /// porte le cycle complet — fiches, claim/release/state

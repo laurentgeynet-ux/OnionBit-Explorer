@@ -204,6 +204,17 @@ typedef _BmAddN = ffi.Int32 Function(
 typedef _BmAddD = int Function(
     _NativeHandle, ffi.Pointer<ffi.Uint8>, int,
     ffi.Pointer<ffi.Uint8>, int);
+// Offres de download — exports additifs.
+typedef _DlAcceptN = ffi.IntPtr Function(
+    _NativeHandle, ffi.Uint64, ffi.Uint64,
+    ffi.Pointer<ffi.Uint8>, ffi.UintPtr,
+    ffi.Pointer<ffi.Uint8>, ffi.UintPtr);
+typedef _DlAcceptD = int Function(
+    _NativeHandle, int, int,
+    ffi.Pointer<ffi.Uint8>, int,
+    ffi.Pointer<ffi.Uint8>, int);
+typedef _DlDeclN = ffi.Int32 Function(_NativeHandle, ffi.Uint64, ffi.Uint64);
+typedef _DlDeclD = int Function(_NativeHandle, int, int);
 
 // ---------------------------------------------------------------------------
 // Ops RPC — les entiers sont le contrat wire, ne pas réordonner.
@@ -233,6 +244,8 @@ const opBookmarkAdd = 20;
 const opBookmarkDel = 21;
 const opHistory = 22;
 const opDownloadUrl = 23;
+const opDownloadAccept = 24;
+const opDownloadDecline = 25;
 
 /// Point d'entrée de l'isolate — `args` = `{'reply': SendPort,
 /// 'path': String}`. Envoie `{'port': SendPort}` puis
@@ -331,6 +344,8 @@ class _WorkerImpl {
   static _SetLangD? _bookmarkDel;
   static _BmListD? _history;
   static _NavigateD? _downloadUrl;
+  static _DlAcceptD? _downloadAccept;
+  static _DlDeclD? _downloadDecline;
   final _MediaEventsD? _mediaEvents;
   final _TabUrlD? _mediaList;
   final _MediaClaimD? _mediaClaim;
@@ -452,6 +467,20 @@ class _WorkerImpl {
       try {
         _downloadUrl = lib.lookupFunction<_NavigateN, _NavigateD>(
           'explorer_download_url',
+        );
+      } on Object {
+        /* export absent */
+      }
+      try {
+        _downloadAccept = lib.lookupFunction<_DlAcceptN, _DlAcceptD>(
+          'explorer_download_accept',
+        );
+      } on Object {
+        /* export absent */
+      }
+      try {
+        _downloadDecline = lib.lookupFunction<_DlDeclN, _DlDeclD>(
+          'explorer_download_decline',
         );
       } on Object {
         /* export absent */
@@ -619,6 +648,35 @@ class _WorkerImpl {
         } finally {
           calloc.free(u);
         }
+      case opDownloadAccept:
+        final f = _downloadAccept;
+        if (f == null) return const {'code': -1};
+        final p = (m['path'] as String? ?? '').toNativeUtf8();
+        const cap = 4 * 1024;
+        final buf = calloc<ffi.Uint8>(cap);
+        try {
+          final n = f(
+            _handle,
+            _tab(m),
+            (m['dl'] as num?)?.toInt() ?? 0,
+            p.cast<ffi.Uint8>(),
+            p.length,
+            buf,
+            cap,
+          );
+          return n < 0
+              ? {'code': n}
+              : {'code': 0, 'path': utf8.decode(buf.asTypedList(n))};
+        } finally {
+          calloc.free(p);
+          calloc.free(buf);
+        }
+      case opDownloadDecline:
+        final f = _downloadDecline;
+        if (f == null) return const {'code': -1};
+        return {
+          'code': f(_handle, _tab(m), (m['dl'] as num?)?.toInt() ?? 0),
+        };
       case opFrame:
         return _frameOp(m);
       case opFrameRegion:

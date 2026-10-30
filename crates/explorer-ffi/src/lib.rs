@@ -1079,7 +1079,6 @@ pub unsafe extern "C" fn explorer_media_state(
     }
 }
 
-
 /// Télécharge `url` directement sous `state/downloads/`
 /// (« enregistrer la source » média / « enregistrer sous » —
 /// pile transport complète : cookies, cache, HSTS). `0`
@@ -1103,6 +1102,66 @@ pub unsafe extern "C" fn explorer_download_url(
         return -1;
     };
     match h.rt.block_on(h.session.download_url(tab, u)) {
+        Ok(_) => 0,
+        Err(e) => {
+            set_err(e);
+            -2
+        }
+    }
+}
+
+/// Accepte une offre de téléchargement (`dl` = identifiant
+/// de `download_offered`) — `path` UTF-8 optionnel
+/// (`path_len` `0` = `download_dir` du profil + nom suggéré).
+/// Copie le chemin écrit dans `buf` (contrat `cap` UTF-8),
+/// longueur rendue ; `-1` handle/arg invalide, `-2` erreur
+/// moteur ([`explorer_last_error`]).
+///
+/// # Safety
+///
+/// `h` issu de [`explorer_create`] ; `path..path+len` lisible,
+/// `buf..buf+cap` inscriptible.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn explorer_download_accept(
+    h: *mut ExplorerHandle,
+    tab: u64,
+    dl: u64,
+    path: *const u8,
+    path_len: usize,
+    buf: *mut u8,
+    cap: usize,
+) -> isize {
+    let Some(h) = (unsafe { handle(h) }) else {
+        return -1;
+    };
+    let opt = unsafe { read_str(path, path_len, MAX_URL) }
+        .map(std::path::PathBuf::from);
+    match h.session.accept_download(tab, dl, opt) {
+        Ok(t) => unsafe { write_str(&t.display().to_string(), buf, cap) },
+        Err(e) => {
+            set_err(e);
+            -2
+        }
+    }
+}
+
+/// Rejette une offre de téléchargement — le corps est
+/// rejoué comme document (« dump texte »). `0` succès,
+/// `-1` handle invalide, `-2` erreur moteur.
+///
+/// # Safety
+///
+/// `h` issu de [`explorer_create`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn explorer_download_decline(
+    h: *mut ExplorerHandle,
+    tab: u64,
+    dl: u64,
+) -> i32 {
+    let Some(h) = (unsafe { handle(h) }) else {
+        return -1;
+    };
+    match h.rt.block_on(h.session.decline_download(tab, dl)) {
         Ok(_) => 0,
         Err(e) => {
             set_err(e);
