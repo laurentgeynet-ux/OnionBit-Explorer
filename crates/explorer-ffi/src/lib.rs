@@ -177,7 +177,13 @@ unsafe fn read_str<'a>(ptr: *const u8, len: usize, max: usize) -> Option<&'a str
 /// `EXPLORER_PROFILE`, étape 61 : le mode in-process
 /// persistait dans le vide auparavant).
 fn create_inner(profile_dir: Option<PathBuf>) -> *mut ExplorerHandle {
-    let rt = match tokio::runtime::Builder::new_current_thread()
+    // `multi_thread`, pas `current_thread` : en mono-thread
+    // les tâches `spawn` (fetchs, timers, canaux) ne
+    // progressent QUE pendant un `block_on` actif — elles
+    // gelaient entre les appels FFI (~50 ms de tick →
+    // minutes sur une page lourde). Le multi-thread fait
+    // vivre le runtime en continu comme le daemon.
+    let rt = match tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
     {
@@ -1134,8 +1140,7 @@ pub unsafe extern "C" fn explorer_download_accept(
     let Some(h) = (unsafe { handle(h) }) else {
         return -1;
     };
-    let opt = unsafe { read_str(path, path_len, MAX_URL) }
-        .map(std::path::PathBuf::from);
+    let opt = unsafe { read_str(path, path_len, MAX_URL) }.map(std::path::PathBuf::from);
     match h.session.accept_download(tab, dl, opt) {
         Ok(t) => unsafe { write_str(&t.display().to_string(), buf, cap) },
         Err(e) => {
@@ -1200,8 +1205,7 @@ pub unsafe extern "C" fn explorer_find(
         let (i, n) = h.session.find_step(tab, dir);
         (n, i)
     };
-    let s = serde_json::json!({"count": count, "index": index, "query": q})
-        .to_string();
+    let s = serde_json::json!({"count": count, "index": index, "query": q}).to_string();
     unsafe { write_str(&s, buf, cap) }
 }
 
