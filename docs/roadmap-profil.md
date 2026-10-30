@@ -38,8 +38,9 @@ décidée 2026-10-30 avec le bundle portable (Étape 167).
   `HstsTransport` (`explorer-net`, port `HstsStore` injecté) +
   store `JsonHstsStore` (`explorer-core`) câblé dans les deux
   piles (daemon + FFI).
-- [ ] **PR-4. `session.json`** — restauration onglets/URLs/
-  scroll au boot ; touche `Session`.
+- [x] **PR-4. `session.json`** — restauration onglets/URLs au
+  boot (`SessionStore` côté app, voisin de `ui_settings.json` ;
+  `scroll` = reste à faire — non persisté).
 - [ ] **PR-5. État fenêtre** — taille/position/maximisé dans
   `ui_settings.json` (côté app).
 

@@ -7,6 +7,22 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **PR-4 — `session.json`** (app) —
+  **restauration d'onglets au
+  boot** : `{tabs:[{url,title}],
+  active}` persisté à côté de
+  `ui_settings.json` (sous
+  `state/` en portable) ;
+  écriture debouncée sur
+  `navigated`/`title_changed`/
+  `tab_closed`/`selectTab`/
+  `newTab`. Au bootstrap, un
+  moteur démarrant sans onglet
+  recrée chaque onglet et
+  re-navigue vers son URL ;
+  l'onglet actif persisté est
+  restauré.
+
 - **PR-2 — `zoom.json`** (app) —
   le zoom par onglet est désormais
   **persisté par origine**

@@ -287,6 +287,68 @@ final zoomStoreProvider = Provider<ZoomStore>(
   (_) => ZoomStore(ZoomStore.defaultFile()),
 );
 
+/// Store `session.json` — `{tabs:[{url,title}], active}` de la
+/// dernière session (PR-4) : voisin de `ui_settings.json`
+/// (sous `state/` en bundle portable). Restauration à froid
+/// dans `_bootstrap` quand le moteur démarre sans onglets.
+class SessionStore {
+  const SessionStore(this.file);
+
+  final File file;
+
+  /// Chemin par défaut — voisin de `ui_settings.json`.
+  static File defaultFile() {
+    final s = SettingsStore.defaultFile();
+    return File('${s.parent.path}${Platform.pathSeparator}session.json');
+  }
+
+  /// Session sauvegardée — `null` si absente/cassée/vide
+  /// (démarrage vierge, jamais fatal).
+  Future<({List<Map<String, String>> tabs, int active})?> read() async {
+    try {
+      final v = jsonDecode(await file.readAsString());
+      if (v is Map && v['tabs'] is List) {
+        final tabs = [
+          for (final t in v['tabs'] as List)
+            if (t is Map && t['url'] is String)
+              {'url': '${t['url']}', 'title': '${t['title'] ?? ''}'},
+        ];
+        if (tabs.isEmpty) return null;
+        return (
+          tabs: tabs,
+          active: v['active'] is int ? v['active'] as int : 0,
+        );
+      }
+    } on Object {
+      // Lecture impossible → démarrage vierge.
+    }
+    return null;
+  }
+
+  /// Persiste onglets (url+titre) + index actif (best-effort).
+  Future<void> write(List<BrowserTab> tabs, String? activeId) async {
+    try {
+      final active = tabs.indexWhere((t) => t.id == activeId);
+      await file.parent.create(recursive: true);
+      await file.writeAsString(
+        jsonEncode({
+          'tabs': [
+            for (final t in tabs) {'url': t.url, 'title': t.title},
+          ],
+          'active': active < 0 ? 0 : active,
+        }),
+      );
+    } on Object {
+      // Répertoire non inscriptible → session gardée en mémoire.
+    }
+  }
+}
+
+/// Store injectable (tests : fichier temporaire).
+final sessionStoreProvider = Provider<SessionStore>(
+  (_) => SessionStore(SessionStore.defaultFile()),
+);
+
 /// Origine canonique d'une URL de tab (`scheme://host[:port]`)
 /// — clé du store ; invalide → chaîne vide (jamais persistée).
 String _zoomOrigin(String? url) =>
@@ -703,19 +765,40 @@ class BrowserController extends Notifier<BrowserState> {
   }
 
   /// Premier contact : liste les onglets existants ou en crée
-  /// un — prouve aussi que le daemon répond.
+  /// un — prouve aussi que le daemon répond. Démarrage à froid
+  /// (aucun onglet moteur) : **restaure la session** persistée
+  /// `session.json` — un onglet recréé par URL (PR-4).
   Future<void> _bootstrap() async {
     try {
       var tabs = await _repo.listTabs();
       if (tabs.isEmpty) {
-        tabs = [await _repo.createTab()];
+        final saved = await ref.read(sessionStoreProvider).read();
+        if (saved != null) {
+          // Onglets recréés moteur + re-navigation vers l'URL
+          // persistée ; les `delegated` repassent par l'engine
+          // (la délégation les re-intercepte au besoin).
+          final restored = <BrowserTab>[];
+          for (final t in saved.tabs) {
+            final tab = await _repo.createTab();
+            restored.add(tab);
+            final url = t['url']!;
+            if (url.isNotEmpty && url != 'about:blank') {
+              unawaited(_repo.navigate(tab.id, url));
+            }
+          }
+          tabs = restored;
+          _restoredActiveId =
+              tabs[saved.active.clamp(0, tabs.length - 1)].id;
+        } else {
+          tabs = [await _repo.createTab()];
+        }
       }
       if (!ref.mounted) return;
       _daemonRetry?.cancel();
       _daemonRetry = null;
       state = state.copyWith(
         tabs: tabs,
-        activeId: state.activeId ?? tabs.first.id,
+        activeId: state.activeId ?? _restoredActiveId ?? tabs.first.id,
         daemonOnline: true,
         // « daemon injoignable » résolu par la reconnexion —
         // l'erreur persistante est purgée (étape 88).
@@ -756,9 +839,35 @@ class BrowserController extends Notifier<BrowserState> {
   /// Réessaie la connexion (bouton « daemon absent »).
   Future<void> retry() => _bootstrap();
 
+  /// Debounce de persistance session (PR-4) — les tempêtes
+  /// d'événements n'écrivent qu'une fois.
+  Timer? _sessionDebounce;
+
+  /// Onglet actif restauré depuis `session.json` — appliqué
+  /// par `_bootstrap` quand le moteur démarre sans onglets.
+  String? _restoredActiveId;
+
+  /// Persiste `state.tabs`/`activeId` — fire-and-forget.
+  void _persistSession() {
+    unawaited(
+      ref.read(sessionStoreProvider).write(state.tabs, state.activeId),
+    );
+  }
+
   /// `navigated`/`title_changed`/`frame_invalidated`/`tab_*` →
   /// mise à jour de l'état d'affichage.
   void _onEvent(ServerEvent ev) {
+    // Mutations de session persistées — debouncées : les
+    // tempêtes navigated/title n'écrivent `session.json`
+    // qu'une fois (PR-4).
+    if (const {'navigated', 'title_changed', 'tab_closed'}
+        .contains(ev.name)) {
+      _sessionDebounce?.cancel();
+      _sessionDebounce = Timer(
+        const Duration(milliseconds: 500),
+        _persistSession,
+      );
+    }
     final tabId = '${ev.data['tab']}';
     switch (ev.name) {
       case 'navigated':
@@ -1190,6 +1299,7 @@ class BrowserController extends Notifier<BrowserState> {
         activeId: t.id,
         daemonOnline: true,
       );
+      _persistSession();
     } on ApiException catch (e) {
       state = state.copyWith(lastError: () => e.message);
     }
@@ -1219,6 +1329,7 @@ class BrowserController extends Notifier<BrowserState> {
   /// l'onglet entrant sera re-appris au prochain clic).
   void selectTab(String id) {
     state = state.copyWith(activeId: id, fieldFocused: false);
+    _persistSession();
     // Un onglet délégué n'a pas de frame moteur — pas de pull.
     if (_tabById(id)?.kind != TabKind.delegated &&
         !_frameImages.containsKey(id)) {
