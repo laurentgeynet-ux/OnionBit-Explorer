@@ -29,11 +29,14 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
-use crate::{Bookmark, ProfileStore, StoredCookie, Visit};
+use crate::{Bookmark, DownloadRecord, ProfileStore, StoredCookie, Visit};
 
 /// Borne du journal de visites (règle 13 : constante de
 /// config, pas de magie dans la boucle).
 const HISTORY_CAP: usize = 5000;
+
+/// Borne du journal de téléchargements (PR-1).
+const DOWNLOADS_CAP: usize = 2000;
 
 /// Store fichiers : `dir/history.json` + `dir/bookmarks.json`.
 /// Mutex interne — écritures sérialisées (le `Session`
@@ -45,6 +48,9 @@ pub struct JsonFileStore {
     io: Mutex<()>,
     /// Journal en mémoire — miroir de `history.json`.
     history: Mutex<Vec<Visit>>,
+    /// Journal des téléchargements — miroir de
+    /// `downloads.json` (PR-1).
+    downloads: Mutex<Vec<DownloadRecord>>,
 }
 
 impl JsonFileStore {
@@ -65,10 +71,15 @@ impl JsonFileStore {
                     .collect()
             })
             .unwrap_or_default();
+        let downloads = read_json(&dir.join("downloads.json"))
+            .and_then(|v| serde_json::from_value::<Vec<RawDownload>>(v).ok())
+            .map(|v| v.into_iter().map(RawDownload::into_record).collect())
+            .unwrap_or_default();
         Self {
             dir: dir.to_path_buf(),
             io: Mutex::new(()),
             history: Mutex::new(history),
+            downloads: Mutex::new(downloads),
         }
     }
 
@@ -217,6 +228,80 @@ impl ProfileStore for JsonFileStore {
         let tmp = self.dir.join("cookies.json.tmp");
         if fs::write(&tmp, s).is_ok() {
             let _ = fs::rename(&tmp, &dst);
+        }
+    }
+
+    /// Journal des téléchargements (PR-1) : `downloads.json` —
+    /// `path` réécrit **relatif au profil** quand le fichier y
+    /// vit (invariant portable : rien d'absolu persisté — la
+    /// lettre de clé USB change).
+    fn record_download(&self, d: &DownloadRecord) {
+        if let Ok(mut v) = self.downloads.lock() {
+            let mut rec = d.clone();
+            rec.path = match std::path::Path::new(&d.path).strip_prefix(&self.dir) {
+                Ok(rel) => rel.to_string_lossy().replace('\\', "/"),
+                Err(_) => d.path.clone(),
+            };
+            v.push(rec);
+            if v.len() > DOWNLOADS_CAP {
+                let over = v.len() - DOWNLOADS_CAP;
+                v.drain(..over);
+            }
+            let entries: Vec<RawDownload> = v.iter().map(RawDownload::from).collect();
+            drop(v);
+            let _guard = self.io.lock().ok();
+            let Some(s) = serde_json::to_string(&entries).ok() else {
+                return;
+            };
+            let dst = self.dir.join("downloads.json");
+            let tmp = self.dir.join("downloads.json.tmp");
+            if fs::write(&tmp, s).is_ok() {
+                let _ = fs::rename(&tmp, &dst);
+            }
+        }
+    }
+
+    fn downloads(&self) -> Vec<DownloadRecord> {
+        self.downloads
+            .lock()
+            .map_or_else(|_| Vec::new(), |v| v.clone())
+    }
+}
+
+/// Forme sérialisée d'une entrée `downloads.json` (PR-1).
+#[derive(serde::Serialize, serde::Deserialize)]
+struct RawDownload {
+    url: String,
+    #[serde(default)]
+    filename: String,
+    #[serde(default)]
+    path: String,
+    #[serde(default)]
+    size: u64,
+    #[serde(default)]
+    finished_unix: u64,
+}
+
+impl From<&DownloadRecord> for RawDownload {
+    fn from(d: &DownloadRecord) -> Self {
+        Self {
+            url: d.url.clone(),
+            filename: d.filename.clone(),
+            path: d.path.clone(),
+            size: d.size,
+            finished_unix: d.finished_unix,
+        }
+    }
+}
+
+impl RawDownload {
+    fn into_record(self) -> DownloadRecord {
+        DownloadRecord {
+            url: self.url,
+            filename: self.filename,
+            path: self.path,
+            size: self.size,
+            finished_unix: self.finished_unix,
         }
     }
 }

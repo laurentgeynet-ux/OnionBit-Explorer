@@ -557,6 +557,22 @@ pub struct Visit {
     pub title: Option<String>,
 }
 
+/// Téléchargement terminé enregistré dans le profil (PR-1).
+#[derive(Debug, Clone)]
+pub struct DownloadRecord {
+    /// URL servie (post-redirection).
+    pub url: String,
+    /// Nom de fichier écrit (suggéré `Content-Disposition`/URL).
+    pub filename: String,
+    /// Chemin du fichier — le store le réécrit relatif à
+    /// `state/` quand le fichier y vit (rien d'absolu persisté).
+    pub path: String,
+    /// Taille du corps écrit (octets).
+    pub size: u64,
+    /// Fin d'écriture — secondes unix.
+    pub finished_unix: u64,
+}
+
 /// Cookie persisté (étape 56) — miroir sérialisable neutre
 /// de `explorer_net::cookies::Cookie` : expiration en
 /// secondes unix (`SystemTime` n'est pas sérialisable tel
@@ -794,6 +810,14 @@ pub trait ProfileStore: Send + Sync {
     /// Persiste le jar complet (étape 56 — liste bornée par
     /// `CookieConfig` ; défaut : ignorer, jar volatil).
     fn save_cookies(&self, _cookies: &[StoredCookie]) {}
+    /// Enregistre un téléchargement terminé (PR-1 — défaut :
+    /// ignorer, pas de journal).
+    fn record_download(&self, _d: &DownloadRecord) {}
+    /// Journal des téléchargements (plus ancien en tête — choix
+    /// de l'impl ; défaut : vide).
+    fn downloads(&self) -> Vec<DownloadRecord> {
+        Vec::new()
+    }
 }
 
 /// Erreur de session — typée, jamais de panic.

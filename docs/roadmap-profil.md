@@ -25,9 +25,11 @@ décidée 2026-10-30 avec le bundle portable (Étape 167).
 
 ## Palier PR-P1 — petits stores (un fichier chacun)
 
-- [ ] **PR-1. `downloads.json`** — historique des
+- [x] **PR-1. `downloads.json`** — historique des
   téléchargements : URL, chemin relatif à `state/downloads`,
-  taille, date, état.
+  taille, date, état. `ProfileStore::record_download` au
+  succès de `accept_download`, `downloads()` pour la lecture ;
+  cap 2000, écriture atomique.
 - [ ] **PR-2. `zoom.json`** — origine → niveau de zoom
   (l'UI zoom existe, ADR-0021 ; persistance côté app dans
   `state/` via la résolution portable).

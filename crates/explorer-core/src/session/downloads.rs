@@ -149,6 +149,19 @@ impl Session {
         }
         match std::fs::write(&target, &dl.body) {
             Ok(()) => {
+                // Journal de profil (PR-1) — le store relativise
+                // le chemin sous `state/` (invariant portable).
+                if let Some(s) = &self.store {
+                    s.record_download(&crate::DownloadRecord {
+                        url: dl.url.to_string(),
+                        filename: suggested_filename(&dl),
+                        path: target.display().to_string(),
+                        size: dl.body.len() as u64,
+                        finished_unix: std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .map_or(0, |d| d.as_secs()),
+                    });
+                }
                 let _ = self.events.send(CoreEvent::DownloadDone {
                     tab,
                     id,

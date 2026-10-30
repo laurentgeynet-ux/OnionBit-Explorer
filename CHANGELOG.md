@@ -7,6 +7,18 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **PR-1 — `downloads.json`**
+  (`explorer-core`) — journal des
+  téléchargements persisté :
+  `ProfileStore::record_download`
+  appelé au succès de
+  `accept_download` ; `path`
+  réécrit relatif au profil
+  quand le fichier vit sous
+  `state/` (invariant portable —
+  rien d'absolu). Borné à 2000
+  entrées, écriture atomique.
+
 - **JS-C221 — modules `data:`
   pour `import()`** — bras
   nommé sur google SERP
