@@ -194,9 +194,29 @@ preuve immuable.
   par son PID (ou le garder s'il est sain et réutilisé au vol
   suivant).
 2. Archiver le journal dans `docs/Rapport vol/logs/daemons/`.
-3. **Enchaîner immédiatement** : N+1, re-sélection des cibles
-   (les « re-vols reportés » du rapport qui vient d'être écrit
-   alimentent la priorité 1), retour à l'étape a).
+3. **Enchaîner immédiatement, dans le même tour** : N+1,
+   re-sélection des cibles (les « re-vols reportés » du rapport
+   qui vient d'être écrit alimentent la priorité 1), retour à
+   l'étape a). La réponse de clôture d'un vol est un **résumé
+   intermédiaire**, pas une fin de campagne : dès qu'un vol est
+   bouclé (rapport + SYNTHESE écrits, daemon sain ou remplacé),
+   le vol suivant démarre dans la foulée — même réponse, sans
+   attendre un message de l'opérateur.
+
+## Reprise automatique
+
+- La campagne **ne s'arrête jamais d'elle-même** entre deux
+  vols : seuls arrêtent la boucle (a) un message explicite de
+  l'opérateur (« pause », « stop »), (b) un blocage matériel
+  (build impossible, API morte persistante).
+- Une interruption de session n'est pas un arrêt : dès que
+  l'agent reprend la main (mot « vol », « reprend », ou simple
+  continuation), la campagne **repart au vol N+1** sur un
+  binaire vérifié frais, comme si elle n'avait jamais cessé.
+- Les réponses de bilan intermédiaires (tableau de vol,
+  verdicts) ne doivent **pas** se terminer par « j'attends » ou
+  « prochain vol ? » — elles s'ouvrent directement sur
+  l'annonce du vol N+1 en cours.
 
 ## Interdits de vol
 

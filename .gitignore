@@ -51,3 +51,4 @@ terrain-bin/
 # Preuves de vol — dossier local, non suivi (rapports SYNTHESE/
 # RAPPORT_VOL_* + captures + logs restent sur disque)
 docs/Rapport vol/
+.devin/skills/vol/SKILL.md
