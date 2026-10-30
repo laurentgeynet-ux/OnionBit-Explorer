@@ -7,6 +7,32 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **JS-C231 — `RSA-OAEP`**
+  (`explorer-jscore`,
+  `explorer-net`, `explorer-core`,
+  §B-14 vol 344 wamiz poool —
+  `importKey: unknown algorithm
+  (« RSA-OAEP »)` nommé par JS-C230
+  tuait la vérification de licence
+  → `signature_error`) : algo
+  `RsaOaep{hash}` bout en bout —
+  `importKey` `jwk`/`spki`/`pkcs8`,
+  `encrypt` clé `public`, `decrypt`
+  clé `private`, `label` porté par
+  l'op (conversion `&str` lossy
+  bornée — le crate `rsa` ne prend
+  pas de `BufferSource`). Chiffrement
+  réel via **`rsa` + `sha2`** (pur
+  Rust, RustCrypto — `ring` ne
+  chiffre pas RSA, dépendance
+  justifiée) ; MGF1 au même hash ;
+  `decrypt_blinded` côté privée.
+  Verrous `rsa_oaep_roundtrip`
+  (paire 2048 réelle, label/hash
+  divergents rejetés) et
+  `rsa_oaep_end_to_end_ops`
+  (dispatch + usages).
+
 - **PR-10d — partage IDB
   inter-onglets** (`explorer-jscore`)
   — `regs`/`cache_regs` indexés

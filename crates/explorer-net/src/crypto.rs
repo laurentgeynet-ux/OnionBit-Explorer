@@ -160,6 +160,13 @@ pub enum KeyAlgo {
     /// privée `pkcs8` ; ops `sign`/`verify` via
     /// `ring::signature` RSA.
     RsaPkcs1(CryptoAlgo),
+    /// `RSA-OAEP` (JS-C231, poool wamiz vol 344) — hash
+    /// `{name:"SHA-*"}` du padding OAEP+MGF1 ; publique
+    /// `spki`/`jwk`, privée `pkcs8` ; ops `encrypt`/`decrypt`
+    /// via le crate `rsa` (`ring` ne fait pas de chiffrement
+    /// RSA — dépendance justifiée par l'absence d'équivalent
+    /// pur-Rust dans le lockfile).
+    RsaOaep(CryptoAlgo),
 }
 
 /// Format d'`importKey` — `jwk` couvre `kty:"RSA"` public
@@ -195,7 +202,7 @@ pub fn import_key(algo: KeyAlgo, format: KeyFormat, bytes: &[u8]) -> Result<Vec<
         // passthrough générique : la forme canonique est
         // `RSAPublicKey` nu, ce que `RsaParameters` de ring
         // parse à `verify`.
-        (KeyAlgo::RsaPkcs1(_), KeyFormat::Spki) => unwrap_spki_rsapub(bytes),
+        (KeyAlgo::RsaPkcs1(_) | KeyAlgo::RsaOaep(_), KeyFormat::Spki) => unwrap_spki_rsapub(bytes),
         // `HMAC` accepte n'importe quelle longueur (spec —
         // la clé est normalisée à l'usage par le hash).
         // RSA `pkcs8` — conservé tel quel pour `sign` (un
@@ -204,7 +211,7 @@ pub fn import_key(algo: KeyAlgo, format: KeyFormat, bytes: &[u8]) -> Result<Vec<
         // `spki` ECDSA/Ed25519 : passthrough — la matière est
         // validée à l'usage (`verify`), pas de parse ASN.1 ici.
         (KeyAlgo::Hmac(_), KeyFormat::Raw)
-        | (KeyAlgo::RsaPkcs1(_), KeyFormat::Pkcs8)
+        | (KeyAlgo::RsaPkcs1(_) | KeyAlgo::RsaOaep(_), KeyFormat::Pkcs8)
         | (_, KeyFormat::Spki) => Ok(bytes.to_vec()),
         (KeyAlgo::AesGcm, KeyFormat::Raw) => match bytes.len() {
             16 | 32 => Ok(bytes.to_vec()),
@@ -240,9 +247,15 @@ pub fn import_key(algo: KeyAlgo, format: KeyFormat, bytes: &[u8]) -> Result<Vec<
                 Err("importKey: invalid raw key (Ed25519)".to_string())
             }
         }
-        (KeyAlgo::RsaPkcs1(_), KeyFormat::Jwk) => rsa_pub_der_from_packed_jwk(bytes),
-        (KeyAlgo::RsaPkcs1(_), KeyFormat::Raw) => {
-            Err("importKey: RSASSA-PKCS1-v1_5 n'accepte que jwk/spki/pkcs8".to_string())
+        // `RSA-OAEP` (JS-C231) — mêmes formes canoniques que
+        // `RsaPkcs1` (`spki`/`jwk` → `RSAPublicKey` DER nu,
+        // `pkcs8` tel quel — la clé décodée par le crate
+        // `rsa` à l'usage).
+        (KeyAlgo::RsaPkcs1(_) | KeyAlgo::RsaOaep(_), KeyFormat::Jwk) => {
+            rsa_pub_der_from_packed_jwk(bytes)
+        }
+        (KeyAlgo::RsaPkcs1(_) | KeyAlgo::RsaOaep(_), KeyFormat::Raw) => {
+            Err("importKey: RSA n'accepte que jwk/spki/pkcs8".to_string())
         }
         (_, KeyFormat::Jwk) => {
             Err("importKey: jwk n'est supporté que pour RSA à cette tranche".to_string())
@@ -414,6 +427,134 @@ pub fn aead_open(
     Ok(pt.to_vec())
 }
 
+/// `subtle.encrypt` RSA-OAEP (JS-C231) — clé publique
+/// `RSAPublicKey` DER canonique (même forme que
+/// `RsaPkcs1`), `label` porté par l'op (`WebCrypto`
+/// `RsaOaepParams.label`, vide par défaut). Padding OAEP
+/// + MGF1 au hash déclaré — crate `rsa` (pur Rust).
+///
+/// # Errors
+/// `Err` (`OperationError`) si la clé est invalide ou le
+/// clair dépasse `k - 2*hLen - 2` (borne spec).
+pub fn rsa_oaep_seal(
+    hash: CryptoAlgo,
+    key: &[u8],
+    label: &[u8],
+    plaintext: &[u8],
+) -> Result<Vec<u8>, String> {
+    use rsa::pkcs1::DecodeRsaPublicKey;
+    let pk = rsa::RsaPublicKey::from_pkcs1_der(key)
+        .map_err(|_| "encrypt: invalid public key (RSA-OAEP)".to_string())?;
+    let mut rng = RingRng;
+    match hash {
+        CryptoAlgo::Sha256 => rsa_oaep_seal_at::<sha2::Sha256>(&pk, &mut rng, label, plaintext),
+        CryptoAlgo::Sha384 => rsa_oaep_seal_at::<sha2::Sha384>(&pk, &mut rng, label, plaintext),
+        CryptoAlgo::Sha512 => rsa_oaep_seal_at::<sha2::Sha512>(&pk, &mut rng, label, plaintext),
+    }
+}
+
+/// `subtle.decrypt` RSA-OAEP (JS-C231) — clé privée
+/// `pkcs8` DER ; même padding que le sceau. `Ok` = clair,
+/// `Err` = échec de padding (`OperationError` — l'échec
+/// de déchiffrement est une erreur, pas `false`).
+///
+/// # Errors
+/// `Err` (`OperationError`) si clé invalide ou padding refusé.
+pub fn rsa_oaep_open(
+    hash: CryptoAlgo,
+    key: &[u8],
+    label: &[u8],
+    ciphertext: &[u8],
+) -> Result<Vec<u8>, String> {
+    use rsa::pkcs8::DecodePrivateKey;
+    let sk = rsa::RsaPrivateKey::from_pkcs8_der(key)
+        .map_err(|_| "decrypt: invalid private key (RSA-OAEP pkcs8)".to_string())?;
+    let mut rng = RingRng;
+    match hash {
+        CryptoAlgo::Sha256 => rsa_oaep_open_at::<sha2::Sha256>(&sk, &mut rng, label, ciphertext),
+        CryptoAlgo::Sha384 => rsa_oaep_open_at::<sha2::Sha384>(&sk, &mut rng, label, ciphertext),
+        CryptoAlgo::Sha512 => rsa_oaep_open_at::<sha2::Sha512>(&sk, &mut rng, label, ciphertext),
+    }
+}
+
+/// Le `label` `WebCrypto` est un `BufferSource` arbitraire ;
+/// le crate `rsa` le veut `&str` — conversion lossy bornée
+/// (les labels réels sont vides ou ASCII).
+fn rsa_oaep_pad<D>(label: &[u8]) -> rsa::Oaep
+where
+    D: sha2::Digest + sha2::digest::DynDigest + Send + Sync + 'static,
+{
+    if label.is_empty() {
+        rsa::Oaep::new::<D>()
+    } else {
+        rsa::Oaep::new_with_label::<D, _>(String::from_utf8_lossy(label))
+    }
+}
+
+fn rsa_oaep_seal_at<D>(
+    pk: &rsa::RsaPublicKey,
+    rng: &mut RingRng,
+    label: &[u8],
+    plaintext: &[u8],
+) -> Result<Vec<u8>, String>
+where
+    D: sha2::Digest + sha2::digest::DynDigest + Send + Sync + 'static,
+{
+    pk.encrypt(rng, rsa_oaep_pad::<D>(label), plaintext)
+        .map_err(|_| "encrypt: RSA-OAEP failed (clair trop long ou clé invalide)".to_string())
+}
+
+fn rsa_oaep_open_at<D>(
+    sk: &rsa::RsaPrivateKey,
+    rng: &mut RingRng,
+    label: &[u8],
+    ciphertext: &[u8],
+) -> Result<Vec<u8>, String>
+where
+    D: sha2::Digest + sha2::digest::DynDigest + Send + Sync + 'static,
+{
+    sk.decrypt_blinded(rng, rsa_oaep_pad::<D>(label), ciphertext)
+        .map_err(|_| "decrypt: RSA-OAEP open failed (padding invalide)".to_string())
+}
+
+/// `ring::rand::SystemRandom` adapté aux traits
+/// `rand_core` 0.6 — `rsa` exige un `CryptoRngCore`
+/// (aveuglement côté privée, remplissage OAEP côté
+/// publique) et `ring` n'expose pas ce trait.
+struct RingRng;
+
+impl rsa::rand_core::RngCore for RingRng {
+    fn next_u32(&mut self) -> u32 {
+        let mut b = [0u8; 4];
+        self.fill_bytes(&mut b);
+        u32::from_le_bytes(b)
+    }
+
+    fn next_u64(&mut self) -> u64 {
+        let mut b = [0u8; 8];
+        self.fill_bytes(&mut b);
+        u64::from_le_bytes(b)
+    }
+
+    fn fill_bytes(&mut self, dest: &mut [u8]) {
+        if self.try_fill_bytes(dest).is_err() {
+            // `ring` ne faillit jamais en pratique (syscall
+            // OS) — borne documentée : remplissage nul plutôt
+            // qu'un panic (AGENTS §4.3).
+            dest.fill(0);
+        }
+    }
+
+    fn try_fill_bytes(&mut self, dest: &mut [u8]) -> Result<(), rsa::rand_core::Error> {
+        use ring::rand::SecureRandom;
+        ring::rand::SystemRandom::new()
+            .fill(dest)
+            .map_err(|_| rsa::rand_core::Error::new("ring rng fill failed"))
+    }
+}
+
+impl rsa::rand_core::CryptoRng for RingRng {}
+
 /// `ring::aead::UnboundKey` depuis les octets canoniques —
 /// 128/256 sélectionnés par taille de clé.
 fn aead_unbound(algo: KeyAlgo, key: &[u8]) -> Result<ring::aead::UnboundKey, String> {
@@ -459,7 +600,9 @@ pub fn sign(algo: KeyAlgo, key: &[u8], data: &[u8]) -> Result<Vec<u8>, String> {
         KeyAlgo::Ed25519 => ring::signature::Ed25519KeyPair::from_pkcs8(key)
             .map(|kp| kp.sign(data).as_ref().to_vec())
             .map_err(|_| "sign: Ed25519 failed".to_string()),
-        KeyAlgo::AesGcm => Err("sign: AES-GCM ne signe pas (encrypt/decrypt)".to_string()),
+        KeyAlgo::AesGcm | KeyAlgo::RsaOaep(_) => {
+            Err("sign: cet algorithme ne signe pas (encrypt/decrypt)".to_string())
+        }
         KeyAlgo::RsaPkcs1(hash) => {
             let kp = ring::signature::RsaKeyPair::from_pkcs8(key)
                 .map_err(|_| "sign: invalid pkcs8 (RSA)".to_string())?;
@@ -504,7 +647,9 @@ pub fn verify(algo: KeyAlgo, key: &[u8], sig: &[u8], data: &[u8]) -> Result<Vec<
         KeyAlgo::Ed25519 => ring::signature::UnparsedPublicKey::new(&ring::signature::ED25519, key)
             .verify(data, sig)
             .is_ok(),
-        KeyAlgo::AesGcm => return Err("verify: AES-GCM ne signe pas".to_string()),
+        KeyAlgo::AesGcm | KeyAlgo::RsaOaep(_) => {
+            return Err("verify: cet algorithme ne signe pas".to_string());
+        }
         KeyAlgo::RsaPkcs1(hash) => {
             let params = match hash {
                 CryptoAlgo::Sha256 => &ring::signature::RSA_PKCS1_2048_8192_SHA256,
@@ -525,6 +670,35 @@ pub fn verify(algo: KeyAlgo, key: &[u8], sig: &[u8], data: &[u8]) -> Result<Vec<
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `RSA-OAEP` (JS-C231) — roundtrip sceau/ouverture sur
+    /// une vraie paire RSA-2048 (`rsa` crate), label vide et
+    /// label fourni ; label divergent → échec de padding.
+    #[test]
+    fn rsa_oaep_roundtrip() {
+        use rsa::pkcs1::EncodeRsaPublicKey;
+        use rsa::pkcs8::EncodePrivateKey;
+        let mut rng = RingRng;
+        let sk = rsa::RsaPrivateKey::new(&mut rng, 2048).expect("keygen");
+        let pk = rsa::RsaPublicKey::from(&sk);
+        let pub_der = pk.to_pkcs1_der().expect("pkcs1").as_bytes().to_vec();
+        let priv_der = sk.to_pkcs8_der().expect("pkcs8").as_bytes().to_vec();
+        let msg = b"license-token-42";
+        // Sceau/ouverture SHA-256, label vide.
+        let ct = rsa_oaep_seal(CryptoAlgo::Sha256, &pub_der, b"", msg).expect("seal");
+        assert_ne!(&ct[..], &msg[..]);
+        let pt = rsa_oaep_open(CryptoAlgo::Sha256, &priv_der, b"", &ct).expect("open");
+        assert_eq!(&pt[..], &msg[..]);
+        // Label cohérent → ok ; label divergent → échec.
+        let ctl = rsa_oaep_seal(CryptoAlgo::Sha256, &pub_der, b"lic", msg).expect("seal label");
+        assert_eq!(
+            &rsa_oaep_open(CryptoAlgo::Sha256, &priv_der, b"lic", &ctl).expect("open label")[..],
+            &msg[..]
+        );
+        assert!(rsa_oaep_open(CryptoAlgo::Sha256, &priv_der, b"autre", &ctl).is_err());
+        // Hash divergent → échec aussi.
+        assert!(rsa_oaep_open(CryptoAlgo::Sha512, &priv_der, b"lic", &ctl).is_err());
+    }
 
     /// Vecteurs FIPS 180-4 — « abc ».
     #[test]

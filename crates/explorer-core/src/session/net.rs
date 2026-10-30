@@ -720,6 +720,9 @@ impl Session {
                                 explorer_js::KeyAlgo::RsaPkcs1 { hash } => {
                                     nc::KeyAlgo::RsaPkcs1(digest_of(hash))
                                 }
+                                explorer_js::KeyAlgo::RsaOaep { hash } => {
+                                    nc::KeyAlgo::RsaOaep(digest_of(hash))
+                                }
                             }
                         }
                         let result = match op {
@@ -743,12 +746,20 @@ impl Session {
                             }
                             // AES-GCM (JS-C160) — nonce/aad dans
                             // l'op, `chiffré‖tag` dans `data`.
-                            explorer_js::CryptoOp::Encrypt { algo, iv, aad } => {
-                                nc::aead_seal(key_of(algo), &key, &iv, &aad, &data)
-                            }
-                            explorer_js::CryptoOp::Decrypt { algo, iv, aad } => {
-                                nc::aead_open(key_of(algo), &key, &iv, &aad, &data)
-                            }
+                            // RSA-OAEP (JS-C231) — `iv` inutilisé,
+                            // `aad` = `label` du padding.
+                            explorer_js::CryptoOp::Encrypt { algo, iv, aad } => match algo {
+                                explorer_js::KeyAlgo::RsaOaep { hash } => {
+                                    nc::rsa_oaep_seal(digest_of(hash), &key, &aad, &data)
+                                }
+                                _ => nc::aead_seal(key_of(algo), &key, &iv, &aad, &data),
+                            },
+                            explorer_js::CryptoOp::Decrypt { algo, iv, aad } => match algo {
+                                explorer_js::KeyAlgo::RsaOaep { hash } => {
+                                    nc::rsa_oaep_open(digest_of(hash), &key, &aad, &data)
+                                }
+                                _ => nc::aead_open(key_of(algo), &key, &iv, &aad, &data),
+                            },
                         };
                         let _ = tx.send(CryptoDone {
                             tab,

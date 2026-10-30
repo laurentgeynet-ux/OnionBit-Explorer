@@ -118,6 +118,12 @@ webpki-roots = "0.26"
 # Provider direct pour `crypto.subtle` (JS-C79) — même `ring`
 # que rustls : version alignée sur le lockfile, zéro ajout.
 ring = "0.17"
+# `RSA-OAEP` pour `crypto.subtle` (JS-C231, poool/paywalls) —
+# `ring` ne fait pas de chiffrement RSA ; `rsa` est le crate
+# de référence pur Rust (RustCrypto), `sha2` requis pour le
+# padding OAEP+MGF1 (OID associé au hash).
+rsa = "0.9"
+sha2 = { version = "0.10", features = ["oid"] }
 # Décodage corps explorer-net (ADR-0002, étape 6) — pur Rust :
 # flate2 sur miniz_oxide (gzip/deflate), brotli, encoding_rs
 # (transcodage charset WHATWG — la référence de Firefox).

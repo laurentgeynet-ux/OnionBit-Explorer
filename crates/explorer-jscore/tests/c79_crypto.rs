@@ -439,12 +439,92 @@ fn import_key_unknown_algorithm_names_it() {
     eval(
         &mut e,
         "globalThis.__r='';globalThis.__s='';\
-         crypto.subtle.importKey('raw',new Uint8Array(8),'RSA-OAEP',false,['encrypt'])\
+         crypto.subtle.importKey('raw',new Uint8Array(8),'ECDH',false,['deriveKey'])\
              .catch(x=>{__r=x.name+':'+x.message});\
          crypto.subtle.importKey('raw',new Uint8Array(8),{name:'AES-KW'},false,['wrapKey'])\
              .catch(x=>{__s=x.message});",
     );
     e.run_microtasks().expect("pump");
-    assert!(describe(&mut e, "__r").contains("« RSA-OAEP »"));
+    assert!(describe(&mut e, "__r").contains("« ECDH »"));
     assert!(describe(&mut e, "__s").contains("« AES-KW »"));
+}
+
+/// JS-C231 — `RSA-OAEP` traverse la couture de bout en bout :
+/// `importKey` jwk RSA → `CryptoKey{algorithm:"RSA-OAEP"}`,
+/// `encrypt` émet `CryptoOp::Encrypt{RsaOaep, label dans aad}`,
+/// `decrypt` exige une clé `private`.
+#[test]
+fn rsa_oaep_end_to_end_ops() {
+    let (mut e, crypto) = engine();
+    let n_b64 = "AQABAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEB\
+                 AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE";
+    eval(
+        &mut e,
+        &format!(
+            "globalThis.__k=null;\
+             crypto.subtle.importKey('jwk',{{kty:'RSA',n:'{n_b64}',e:'AQAB'}},\
+                 {{name:'RSA-OAEP',hash:'SHA-256'}},false,['encrypt'])\
+                 .then(k=>{{__k=k}});"
+        ),
+    );
+    // La requête `ImportKey{RsaOaep}` est émise — on la
+    // complète avec la matière canonique (jouet).
+    let (h, req) = crypto
+        .requests
+        .borrow()
+        .last()
+        .cloned()
+        .expect("import émis");
+    assert!(matches!(
+        req.op,
+        CryptoOp::ImportKey {
+            format: ImportFormat::Jwk,
+            algo: KeyAlgo::RsaOaep {
+                hash: DigestAlgo::Sha256
+            }
+        }
+    ));
+    e.deliver_crypto_response(CryptoResponse {
+        handle: h,
+        result: Ok(vec![1u8, 2, 3]),
+    })
+    .expect("deliver importKey");
+    e.run_microtasks().expect("pump");
+    assert_eq!(describe(&mut e, "__k.algorithm.name"), "RSA-OAEP");
+    assert_eq!(describe(&mut e, "__k.type"), "public");
+    // `encrypt` émet `Encrypt{RsaOaep}` — `label` porté par
+    // `aad`, `iv` vide.
+    eval(
+        &mut e,
+        "crypto.subtle.encrypt({name:'RSA-OAEP',label:new Uint8Array([9,8])},\
+             __k,new Uint8Array([1,2,3]));",
+    );
+    let (_h2, req2) = crypto
+        .requests
+        .borrow()
+        .last()
+        .cloned()
+        .expect("encrypt émis");
+    match req2.op {
+        CryptoOp::Encrypt { algo, iv, aad } => {
+            assert!(matches!(
+                algo,
+                KeyAlgo::RsaOaep {
+                    hash: DigestAlgo::Sha256
+                }
+            ));
+            assert!(iv.is_empty());
+            assert_eq!(aad, vec![9u8, 8]);
+        }
+        op => panic!("Encrypt attendu, reçu {op:?}"),
+    }
+    // `decrypt` sur clé `public` → InvalidAccessError (spec).
+    eval(
+        &mut e,
+        "globalThis.__d='';\
+         crypto.subtle.decrypt({name:'RSA-OAEP'},__k,new Uint8Array([1]))\
+             .catch(x=>{__d=x.name});",
+    );
+    e.run_microtasks().expect("pump");
+    assert_eq!(describe(&mut e, "__d"), "InvalidAccessError");
 }

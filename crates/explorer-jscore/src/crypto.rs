@@ -126,6 +126,15 @@ pub enum KeyAlgo {
         /// Hash du padding PKCS#1 v1.5.
         hash: DigestAlgo,
     },
+    /// `RSA-OAEP` — `{name, hash}` (JS-C231, poool wamiz
+    /// vol 344 : déchiffrement du jeton de licence —
+    /// padding OAEP+MGF1 au hash, via le crate `rsa`
+    /// plateforme — `ring` ne chiffre pas RSA).
+    RsaOaep {
+        /// Hash du padding OAEP (label optionnel porté
+        /// par l'op, pas la clé).
+        hash: DigestAlgo,
+    },
 }
 
 /// Format d'`importKey` (JS-C93) — `jwk` couvre les clés
@@ -405,6 +414,19 @@ fn key_algo(e: &mut Engine, v: Value) -> JsResult<Option<(KeyAlgo, &'static str)
                 };
                 Some((KeyAlgo::RsaPkcs1 { hash }, "RSASSA-PKCS1-v1_5"))
             }
+            // `RSA-OAEP` (JS-C231) — `{name, hash}` requis à
+            // l'`importKey` (même `RsaHashedImportParams`) ;
+            // aux `encrypt`/`decrypt` l'algo porte `label`
+            // (lu par la branche dédiée, pas ici).
+            "RSAOAEP" => {
+                let hash = if let Value::Obj(id) = v {
+                    let hv = e.get_prop(id, "hash").unwrap_or(Value::Undefined);
+                    digest_algo(e, hv)?.unwrap_or(DigestAlgo::Sha256)
+                } else {
+                    DigestAlgo::Sha256
+                };
+                Some((KeyAlgo::RsaOaep { hash }, "RSA-OAEP"))
+            }
             // `AES-GCM` — `length` accepté 128/256 (la plateforme
             // sélectionne par taille de clé, `ring::aead`).
             "AESGCM" => {
@@ -633,7 +655,9 @@ fn subtle_import_key(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Valu
             // `jwk` n'entre que pour RSA publique (JS-C214) —
             // les autres algos/locations sont rejetés
             // `NotSupportedError` sans émission au transport.
-            if format == ImportFormat::Jwk && !matches!(algo, KeyAlgo::RsaPkcs1 { .. }) {
+            if format == ImportFormat::Jwk
+                && !matches!(algo, KeyAlgo::RsaPkcs1 { .. } | KeyAlgo::RsaOaep { .. })
+            {
                 let err = dom_exc(
                     e,
                     "NotSupportedError",
@@ -985,8 +1009,85 @@ fn subtle_aead(
     Ok(Value::Obj(pid))
 }
 
+/// `subtle.encrypt`/`decrypt` RSA-OAEP (JS-C231) — clé
+/// `public`/`private` `RSA-OAEP` portant l'usage demandé ;
+/// `label` optionnel (`BufferSource`, vide par défaut) porté
+/// dans le champ `aad` de l'op (`iv` inutilisé — borne
+/// documentée de la couture).
+fn subtle_rsa_oaep(
+    e: &mut Engine,
+    args: &[Value],
+    usage: &str,
+    op_kind: fn(KeyAlgo, Vec<u8>, Vec<u8>) -> CryptoOp,
+) -> JsResult<Value> {
+    let algo_v = arg(args, 0);
+    let key_v = arg(args, 1);
+    let Some(data) = crate::typed_array::bytes_of_value(e, arg(args, 2)) else {
+        return Err(e.type_error("subtle: data must be a BufferSource"));
+    };
+    let pid = e.new_promise();
+    let Some((key_bytes, key_type, _an, key_algo, usages, _)) = crypto_key_of(e, key_v) else {
+        let err = dom_exc(e, "InvalidAccessError", "subtle: not a CryptoKey");
+        e.reject_promise(pid, err);
+        return Ok(Value::Obj(pid));
+    };
+    // Spec : `encrypt` = clé publique, `decrypt` = privée.
+    let want_type = if usage == "encrypt" {
+        "public"
+    } else {
+        "private"
+    };
+    if !(matches!(key_algo, KeyAlgo::RsaOaep { .. })
+        && key_type == want_type
+        && usages.iter().any(|u| u == usage))
+    {
+        let err = dom_exc(
+            e,
+            "InvalidAccessError",
+            "subtle: key algorithm/usages mismatch",
+        );
+        e.reject_promise(pid, err);
+        return Ok(Value::Obj(pid));
+    }
+    let label = if let Value::Obj(id) = algo_v {
+        e.get_prop(id, "label")
+            .and_then(|lv| crate::typed_array::bytes_of_value(e, lv))
+            .unwrap_or_default()
+    } else {
+        Vec::new()
+    };
+    match e.crypto_transport.clone() {
+        None => {
+            let err = dom_exc(
+                e,
+                "NotSupportedError",
+                "subtle: no crypto backend installed",
+            );
+            e.reject_promise(pid, err);
+        }
+        Some(tr) => {
+            let h = tr.submit(CryptoRequest {
+                op: op_kind(key_algo, Vec::new(), label),
+                data,
+                key: key_bytes,
+            });
+            e.crypto.pending.push((h, pid, PendingKind::Bytes));
+        }
+    }
+    Ok(Value::Obj(pid))
+}
+
 /// `subtle.encrypt` — `CryptoOp::Encrypt`.
 fn subtle_encrypt(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    if algo_name_of(e, arg(args, 0))?
+        .is_some_and(|n| n.to_ascii_uppercase().replace('-', "") == "RSAOAEP")
+    {
+        return subtle_rsa_oaep(e, args, "encrypt", |algo, iv, aad| CryptoOp::Encrypt {
+            algo,
+            iv,
+            aad,
+        });
+    }
     subtle_aead(e, args, "encrypt", |algo, iv, aad| CryptoOp::Encrypt {
         algo,
         iv,
@@ -996,6 +1097,15 @@ fn subtle_encrypt(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> 
 
 /// `subtle.decrypt` — `CryptoOp::Decrypt`.
 fn subtle_decrypt(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    if algo_name_of(e, arg(args, 0))?
+        .is_some_and(|n| n.to_ascii_uppercase().replace('-', "") == "RSAOAEP")
+    {
+        return subtle_rsa_oaep(e, args, "decrypt", |algo, iv, aad| CryptoOp::Decrypt {
+            algo,
+            iv,
+            aad,
+        });
+    }
     subtle_aead(e, args, "decrypt", |algo, iv, aad| CryptoOp::Decrypt {
         algo,
         iv,

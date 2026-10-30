@@ -29,9 +29,12 @@ bytes.workspace = true
 futures-util.workspace = true
 axum.workspace = true
 # Provider crypto de `crypto.subtle` (JS-C79) — même `ring`
-# que rustls (exception ADR-0002 déjà consignée), aucune
-# nouvelle dépendance externe n'entre dans le lockfile.
+# que rustls (exception ADR-0002 déjà consignée).
 ring.workspace = true
+# `RSA-OAEP` (JS-C231) — `rsa` pur Rust (RustCrypto) +
+# `sha2` pour le padding OAEP : `ring` ne chiffre pas RSA.
+rsa.workspace = true
+sha2.workspace = true
 
 [dev-dependencies]
 # Certificats de test TLS auto-signés (étape 5) — pur Rust,
