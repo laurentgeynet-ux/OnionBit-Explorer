@@ -7,6 +7,28 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **Deadlock `explorer_tick`
+  FFI** (`explorer-ffi`, suite
+  « Pompe hôte FFI ») —
+  `sess(h).tick_animations(tab)`
+  en scrutinee de `match`
+  gardait le `MutexGuard`
+  vivant jusqu'à la fin du
+  match ; le second `sess(h)`
+  (`drain_script_nav`) dans le
+  bras reverrouillait le même
+  mutex non-réentrant sur le
+  même thread → tick gelé à
+  vie, file RPC du worker
+  bloquée, navigation
+  inutilisable en mode DLL.
+  Le résultat est désormais
+  lié par `let` avant le
+  `match` — le guard meurt
+  au `;`. Verdict terrain :
+  tick ~30-100 µs, navigate
+  atteint (vol réel).
+
 - **Pompe hôte FFI** (`explorer-ffi`)
   — la session n'avançait que
   pendant les appels FFI (tick UI

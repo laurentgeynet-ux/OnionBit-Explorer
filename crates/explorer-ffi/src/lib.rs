@@ -760,19 +760,26 @@ pub unsafe extern "C" fn explorer_tick(h: *mut ExplorerHandle, tab: u64) -> i32 
         // `tick_animations` pompe aussi les timers JS (étape
         // 52) — leurs `location.href` sont drainés ici en
         // synchrone (l'hôte FFI n'a pas de battement).
-        Some(h) => match sess(h).tick_animations(tab) {
-            Ok(worked) => {
-                if h.rt.block_on(sess(h).drain_script_nav(tab)) > 0 {
-                    1
-                } else {
-                    i32::from(worked)
+        // `let` (pas scrutinee de `match`) : le `MutexGuard`
+        // temporaire doit mourir au `;` — en scrutinee il
+        // vivrait jusqu'à la fin du match et le second
+        // `sess(h)` ci-dessous s'auto-bloquerait à vie.
+        Some(h) => {
+            let worked = sess(h).tick_animations(tab);
+            match worked {
+                Ok(w) => {
+                    if h.rt.block_on(sess(h).drain_script_nav(tab)) > 0 {
+                        1
+                    } else {
+                        i32::from(w)
+                    }
+                }
+                Err(e) => {
+                    set_err(e);
+                    -2
                 }
             }
-            Err(e) => {
-                set_err(e);
-                -2
-            }
-        },
+        }
         None => -1,
     }
 }
