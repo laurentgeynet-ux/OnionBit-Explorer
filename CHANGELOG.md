@@ -656,6 +656,14 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   tirés (borne documentée). Verrou
   `window_navigation_is_event_target
   _and_sloppy_proof`.
+- **139k-ter — verrou de contrat
+  `loop`/`mseBuffers`/`buffering`**
+  — `media_offer_json` émet
+  `"loop"`+`"mseBuffers"`,
+  `media_report_from_json` accepte
+  `"buffering"` (test
+  `media_offer_json_carries_loop
+  _and_mse_buffers`).
 - **139k-bis — `MediaOffered` SSE
   porte `loop`+`mseBuffers`** —
   extension additive du variant

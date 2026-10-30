@@ -3303,3 +3303,38 @@ fn slow_eval_streak_saute_la_rafale_lente() {
         "sautée : streak inchangé (moteur non appelé)"
     );
 }
+
+/// Contrat 139k : `loop`/`mseBuffers` de l'offre JSON (SSE +
+/// `media_list`) et l'état `buffering` du rapport
+/// (`media_report_from_json`).
+#[test]
+fn media_offer_json_carries_loop_and_mse_buffers() {
+    let offer = MediaOfferInfo {
+        id: 7,
+        tab: 3,
+        kind: MediaKind::Video,
+        rect: MediaRect { x: 0.0, y: 0.0, w: 640.0, h: 360.0 },
+        url: "blob:http://x/1".into(),
+        mime: Some("video/mp4".into()),
+        controls: true,
+        autoplay: false,
+        looping: true,
+        claim: None,
+        state: None,
+        mse: true,
+        mse_buffers: vec!["video/mp4".into(), "audio/mp4".into()],
+    };
+    let j = media_offer_json(&offer);
+    assert_eq!(j["loop"], true, "attribut loop propagé");
+    assert_eq!(
+        j["mseBuffers"],
+        serde_json::json!(["video/mp4", "audio/mp4"]),
+        "rails SourceBuffer propagés"
+    );
+    let report = media_report_from_json(&serde_json::json!({
+        "state": "buffering", "position_ms": 12, "buffered_ms": 900
+    }))
+    .expect("buffering accepté");
+    assert_eq!(report.state, MediaHostState::Buffering);
+    assert_eq!(media_host_state_str(report.state), "buffering");
+}
