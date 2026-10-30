@@ -7,6 +7,24 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **JS-C225 — regex littérale
+  après `of`** (`explorer-jscore`,
+  §B-14 vol 325 news.at, parseur
+  Turbopack — `unexpected '\'`) —
+  `for (x of /re/)` : `of` non
+  réservé → lexé `Ident` →
+  `ends_operand` rendait `true`
+  → `/` lu en division au lieu de
+  regex. Après `of` le lexer
+  attend un opérande (division
+  `of / n` légale mais quasi
+  inexistante — compromis
+  accepté, commentaire en place).
+  Verrou
+  `regex_literal_after_of_in_for_of`
+  + chunk Turbopack réel 17 Ko
+  validé in-process.
+
 - **JS-C224 — `navigator.
   serviceWorker` surface
   honnête** (`explorer-jscore`,

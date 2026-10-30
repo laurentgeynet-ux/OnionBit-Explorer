@@ -385,6 +385,16 @@ impl Lexer {
                 Some(_) => Tok::P(self.punct()?),
             };
             expect_operand = !ends_operand(&tok);
+            // `of` contextuel (`for (x of /re/)`, Turbopack
+            // news.at vol 325) : non réservé → lexé `Ident`
+            // → `ends_operand` rendait `true` et le `/` qui
+            // suit se lisait division (`unexpected '\'`).
+            // Après `of` un opérande est toujours attendu ;
+            // la division `of / n` (ident `of` en valeur)
+            // reste légale mais quasi inexistante en pratique.
+            if matches!(&tok, Tok::Ident(s) if s == "of") {
+                expect_operand = true;
+            }
             if tok == Tok::P(P::LParen) {
                 clause_parens
                     .push(matches!(out.last().map(|t| &t.tok), Some(Tok::Kw(k)) if clause_kw(k)));

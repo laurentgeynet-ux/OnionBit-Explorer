@@ -8651,3 +8651,20 @@ fn j6_spread_in_optional_chain_call() {
         }
     }
 }
+
+/// Vol 325 news.at Turbopack — `for (x of /re/)` : `of` lexé
+/// `Ident` → `ends_operand` rendait `true` → `/` lu division
+/// → `unexpected '\'`. Après `of` un opérande est attendu.
+#[test]
+fn regex_literal_after_of_in_for_of() {
+    assert_eq!(
+        ev_str("var out=[];for(var c of /b+/i.test('abc')?['ok']:[])out.push(c);out.join(',')"),
+        "ok"
+    );
+    // for await + ternaire contenant une regex — forme exacte
+    // du chunk news.at (`for await(var c of/re/.test(o)?a:b)`).
+    assert_eq!(
+        ev_str(r"var c;for(var x of /multipart\/mixed/i.test('multipart/mixed')?[7]:[])c=x;c"),
+        "7"
+    );
+}
