@@ -7,6 +7,20 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **Downloads FFI accept/decline**
+  (`explorer-ffi`, app) —
+  `explorer_download_accept`
+  (path optionnel → écrit +
+  rend le chemin) et
+  `explorer_download_decline`
+  (rejeu document) : les offres
+  `Content-Disposition`
+  fonctionnent en portable —
+  les stubs `UnsupportedError`
+  partent. `download_url`
+  + accept + decline = cycle
+  complet en FFI.
+
 - **JS-C226 — `visualViewport`
   EventTarget** (`explorer-jscore`,
   §B-14 ×4 — edf/lcl/
