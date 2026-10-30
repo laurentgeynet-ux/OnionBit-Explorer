@@ -96,7 +96,7 @@ try {
     # (find_portable_root remonte depuis l'exe jusqu'au marqueur).
     $marker = Join-Path $bundleRoot "Explorer.portable"
     "Bundle portable Explorer : state/ vit a cote de ce marqueur.`n" +
-        "Ne pas supprimer — deplacable tel quel sur cle USB ou disque externe." |
+        "Ne pas supprimer - deplacable tel quel sur cle USB ou disque externe." |
         Set-Content $marker -Encoding ascii
 
     # Payload : exe Flutter + DLLs + data\ ; la DLL moteur compilee

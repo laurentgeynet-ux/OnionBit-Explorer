@@ -27,15 +27,19 @@ final lightTokensProvider = FutureProvider<DesignTokens>(
   (ref) => DesignTokens.loadVariant('light'),
 );
 
-/// Mode moteur effectif — `AppSettings.engine` l'emporte ;
-/// `'auto'` défère à `AppConfig.engineMode` (env `EXPLORER_ENGINE`).
+/// Mode moteur effectif — un `AppConfig.engineMode` compilé
+/// non-`auto` (`EXPLORER_ENGINE` au build, ex. bundle portable
+/// `ffi`) est une décision produit : il l'emporte sur le
+/// réglage persisté. Sinon `AppSettings.engine` décide, son
+/// `'auto'` déférant à l'env.
 final effectiveEngineModeProvider = Provider<String>((ref) {
   // `.select` — seule la clé `engine` déclenche la re-création ;
   // sans elle, tout réglage (thème…) reconstruisait le repo et
   // ré-exécutait `BrowserController.build()` sur le même
   // notifier (late final réassigné → LateInitializationError).
   final s = ref.watch(settingsProvider.select((s) => s.engine));
-  return s == 'auto' ? ref.watch(configProvider).engineMode : s;
+  final cfg = ref.watch(configProvider).engineMode;
+  return cfg != 'auto' ? cfg : s;
 });
 
 /// Client REST du daemon (dispose au shutdown du provider scope).

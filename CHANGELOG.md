@@ -7,6 +7,32 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **JS-C221 — modules `data:`
+  pour `import()`** — bras
+  nommé sur google SERP
+  (banc §B-14) : sonde
+  `import("data:text/javascript,…")`
+  rejetait « fetch échoué »
+  — le spécificateur partait
+  au fetch session ; spec :
+  un module `data:` se résout
+  **sans réseau ni loader**.
+  `load_source` sert le rail
+  `data:` inline avant tout
+  chargeur : MIME JavaScript
+  spec exigé (absent/non-JS →
+  rejet honnête), `;base64`
+  bascule le décodage, payload
+  percent-encodé (`+` littéral
+  — pas de form-urlencoded) ;
+  `b64_decode` partagé
+  pub(crate). Couvre aussi
+  les `import 'data:…'`
+  statiques. Verrou
+  `data_url_module_resolves_inline`
+  — lazy-loaders Closure/Next/
+  webpack par chunks `data:`.
+
 - **Étape 167 — bundle portable**
   (`Explorer.portable` +
   `windows/`) — même architecture
@@ -46,6 +72,15 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   (supplante `package.ps1`) +
   `dist_lisezmoi.txt` + zip
   `Explorer-<ver>-windows-x64`.
+  Côté app : `ui_settings.json`
+  vit sous `state\` quand le
+  marqueur est trouvé (remontée
+  `Platform.resolvedExecutable`),
+  et un `EXPLORER_ENGINE`
+  compilé non-`auto` l'emporte
+  sur le réglage persisté
+  (`rest` figeait le bundle en
+  écran « daemon unreachable »).
   Invariant : rien d'absolu
   persisté sous `state\`.
 

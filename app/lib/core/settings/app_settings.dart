@@ -99,8 +99,31 @@ class AppSettings {
   }
 }
 
+/// Marqueur de bundle portable à la racine — miroir de
+/// `explorer-core::paths::PORTABLE_MARKER` : sa présence fait
+/// vivre `state/` à côté de l'exe (étape 167).
+const _portableMarker = 'Explorer.portable';
+
+/// `<racine>/state` si l'exe vit dans un bundle marqué
+/// `Explorer.portable` (payload `windows/` un niveau sous la
+/// racine) ; `null` hors bundle — même remontée que
+/// `find_portable_root` côté moteur.
+Directory? _portableStateDir() {
+  final sep = Platform.pathSeparator;
+  var dir = File(Platform.resolvedExecutable).parent;
+  while (true) {
+    if (File('${dir.path}$sep$_portableMarker').existsSync()) {
+      return Directory('${dir.path}${sep}state');
+    }
+    final parent = dir.parent;
+    if (parent.path == dir.path) return null;
+    dir = parent;
+  }
+}
+
 /// Persistance JSON — résolution du chemin : `EXPLORER_UI_CONFIG`
-/// > répertoire config OS (`%APPDATA%` Windows,
+/// > bundle portable (`state/ui_settings.json` à côté du
+/// marqueur) > répertoire config OS (`%APPDATA%` Windows,
 /// `~/Library/Application Support` macOS, `$XDG_CONFIG_HOME` ou
 /// `~/.config` ailleurs). Absent/corrompu → [AppSettings] par
 /// défaut ; écriture best-effort (un répertoire non accessible
@@ -116,6 +139,10 @@ class SettingsStore {
     final forced = Platform.environment['EXPLORER_UI_CONFIG'];
     if (forced != null && forced.isNotEmpty) return File(forced);
     final sep = Platform.pathSeparator;
+    final portable = _portableStateDir();
+    if (portable != null) {
+      return File('${portable.path}${sep}ui_settings.json');
+    }
     String base;
     if (Platform.isWindows) {
       base = Platform.environment['APPDATA'] ?? Directory.current.path;
