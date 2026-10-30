@@ -7,6 +7,23 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **Étape 166 — débit tick :
+  deadline relue périodiquement**
+  (`explorer-jscore`, bras débit
+  youtube/ytembed ×3 sites) —
+  `tick()` lisait l'horloge à
+  chaque op (`Instant::now()` ≈
+  syscall 20-40 ns : ×10⁷-10⁸
+  ops = des secondes d'horloge
+  pure sur un gros eval) ;
+  relecture toutes les 256 ops
+  (granularité sous-ms — le
+  deadline ne tire déjà qu'entre
+  ops). Suite `env_get` emprunté
+  (Étape 164b) : hot-path
+  interprète, mur de débit
+  §B-1/deadline confirmé en vol.
+
 - **Étape 165 — empreinte
   navigateur + bras deadline**
   — (a) bras 403 (dailymotion

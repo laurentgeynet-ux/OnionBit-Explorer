@@ -3220,14 +3220,25 @@ impl Engine {
     /// La borne mémoire heap (JS-C37, ADR-0019) est relue ici :
     /// l'alloc lève le drapeau, le `tick` transforme en kill doux.
     pub(crate) fn tick(&mut self) -> JsResult<()> {
-        if let Some(d) = self.eval_deadline {
-            if Instant::now() >= d {
-                self.deadline_hit = true;
-                return Err(self.range_error("eval deadline exceeded"));
-            }
-        }
         if self.ops_left == 0 {
             return Err(self.range_error("script execution limit exceeded"));
+        }
+        self.ops_left -= 1;
+        self.ops_total += 1;
+        // Deadline relue périodiquement (bras débit youtube/
+        // ytembed — `Instant::now()` est un syscall de ~20-40 ns
+        // : ×10⁷ ticks ≈ des secondes d'horloge pure sur un gros
+        // eval). 256 ops ≈ granularité sous-ms à débit courant —
+        // le deadline ne tire déjà qu'entre ops, jamais au sein
+        // d'un builtin natif : la sémantique de borne est
+        // préservée.
+        if self.ops_total.trailing_zeros() >= 8 {
+            if let Some(d) = self.eval_deadline {
+                if Instant::now() >= d {
+                    self.deadline_hit = true;
+                    return Err(self.range_error("eval deadline exceeded"));
+                }
+            }
         }
         if self.heap.over_limit() {
             // Verrou J4 : tas déjà déclaré mort → échec immédiat
@@ -3282,8 +3293,6 @@ impl Engine {
                 self.gc_cap = self.heap.bytes().saturating_mul(4);
             }
         }
-        self.ops_left -= 1;
-        self.ops_total += 1;
         Ok(())
     }
 
