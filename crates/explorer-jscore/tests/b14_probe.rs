@@ -1439,7 +1439,6 @@ fn link_rel_list_supports_modulepreload() {
     );
 }
 
-
 #[test]
 fn reflect_get_apply_inside_proxy_trap() {
     let mut e = engine();
@@ -1449,11 +1448,11 @@ fn reflect_get_apply_inside_proxy_trap() {
     assert_eq!(
         ev(
             &mut e,
-            r#"var tgt = { after: 'h1', name: 'n' };
+            r"var tgt = { after: 'h1', name: 'n' };
                var p = new Proxy(tgt, { get: function(r, k) {
                  return Reflect.get.apply(Reflect, arguments);
                }});
-               p.after + '|' + p.name"#
+               p.after + '|' + p.name"
         ),
         "h1|n"
     );
@@ -1461,11 +1460,11 @@ fn reflect_get_apply_inside_proxy_trap() {
     assert_eq!(
         ev(
             &mut e,
-            r#"var v = { special: 'V' };
+            r"var v = { special: 'V' };
                var p2 = new Proxy({ after: 'h2' }, { get: function(r, k) {
                  return v[k] || Reflect.get.apply(Reflect, arguments);
                }});
-               p2.special + '|' + p2.after"#
+               p2.special + '|' + p2.after"
         ),
         "V|h2"
     );

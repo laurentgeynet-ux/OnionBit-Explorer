@@ -657,6 +657,15 @@ pub trait JsEngine: Send {
         (0, 0)
     }
 
+    /// `(timers en attente, microtasks en file, readyState)`
+    /// — §B-4(c) : discrimine « bootstrap garé sur un job
+    /// jamais drainé » (jobs > 0) de « retour avalé
+    /// synchrone » (tout à 0 + `complete`). Défaut : moteur
+    /// nu.
+    fn boot_diag(&mut self) -> (usize, usize, &'static str) {
+        (0, 0, "loading")
+    }
+
     /// Pousse un attribut du DOM hôte vers le nœud miroir
     /// désigné par `path` — quand la session mute le document
     /// **hors JS** (champ édité, case basculée), le miroir
@@ -1581,6 +1590,11 @@ enum Cmd {
     PromiseStats {
         tx: Sender<(u64, u64)>,
     },
+    /// `(timers en attente, microtasks en file, readyState)` —
+    /// instantané §B-4(c).
+    BootDiag {
+        tx: Sender<(usize, usize, &'static str)>,
+    },
     SyncField {
         path: Vec<(String, u32)>,
         attr: String,
@@ -2090,6 +2104,11 @@ impl JscoreEngine {
                 }
                 Cmd::PromiseStats { tx } => {
                     if tx.send(eng.promise_stats()).is_err() {
+                        return;
+                    }
+                }
+                Cmd::BootDiag { tx } => {
+                    if tx.send(eng.boot_diag()).is_err() {
                         return;
                     }
                 }
@@ -2719,6 +2738,15 @@ impl JsEngine for JscoreEngine {
             return (0, 0);
         }
         rx.recv_timeout(Self::EVAL_CMD_TIMEOUT).unwrap_or((0, 0))
+    }
+
+    fn boot_diag(&mut self) -> (usize, usize, &'static str) {
+        let (tx, rx) = channel();
+        if self.tx.send(Cmd::BootDiag { tx }).is_err() {
+            return (0, 0, "loading");
+        }
+        rx.recv_timeout(Self::EVAL_CMD_TIMEOUT)
+            .unwrap_or((0, 0, "loading"))
     }
 
     fn sync_mirror_attr(&mut self, path: &[(String, u32)], attr: &str, value: Option<&str>) {

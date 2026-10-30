@@ -98,6 +98,21 @@ impl Engine {
         (self.promises_created, self.promises_settled)
     }
 
+    /// Instantané « boot muet » §B-4(c) — `(timers en attente,
+    /// microtasks en file, readyState du ctx courant)`.
+    /// Discriminateur : jobs > 0 = bootstrap garé sur un job
+    /// jamais drainé (pompe) ; tout à 0 + `complete` = retour
+    /// avalé synchrone (gate de feature-detect, autre
+    /// famille).
+    #[must_use]
+    pub fn boot_diag(&self) -> (usize, usize, &'static str) {
+        (
+            self.pending_timers(),
+            self.microtasks.len(),
+            self.ready_state_ctx(self.cur_ctx),
+        )
+    }
+
     pub(crate) fn new_promise(&mut self) -> ObjId {
         self.promises_created += 1;
         let id = self.heap.alloc_obj(crate::heap::Object {

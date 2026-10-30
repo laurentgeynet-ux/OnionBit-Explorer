@@ -279,11 +279,21 @@ impl Session {
             // muet *sans* promesse en attente (retour avalé
             // synchrone — autre famille).
             let (promises_created, promises_settled) = eng.promise_stats();
+            // §B-4(c) bis — discriminant « pourquoi muet » :
+            // `timers_pending`/`microtasks_pending` > 0 = la
+            // continuation est garée sur un job jamais drainé
+            // (pompe) ; tout à 0 + `ready_state` = `complete`
+            // = retour avalé synchrone (gate de feature-
+            // detect — autre famille à nommer par bundle).
+            let (timers_pending, microtasks_pending, ready_state) = eng.boot_diag();
             tracing::warn!(
                 tab,
                 evals,
                 promises_created,
                 promises_settled,
+                timers_pending,
+                microtasks_pending,
+                ready_state,
                 "evals_sans_mutation — boot possiblement muet (aucune mutation DOM)"
             );
         }

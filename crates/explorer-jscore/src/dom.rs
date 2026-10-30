@@ -2544,12 +2544,7 @@ impl Dom {
     pub fn clone_shallow_from(&mut self, src_dom: &Dom, src: NodeId) -> NodeId {
         let (kind, tag, attrs, text) = {
             let n = &src_dom.nodes[src as usize];
-            (
-                n.kind,
-                n.tag.clone(),
-                n.attrs.clone(),
-                n.text.clone(),
-            )
+            (n.kind, n.tag.clone(), n.attrs.clone(), n.text.clone())
         };
         let id = self.alloc(kind, &tag);
         self.nodes[id as usize].attrs = attrs;

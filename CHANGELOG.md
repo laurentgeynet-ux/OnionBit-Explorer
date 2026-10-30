@@ -7,6 +7,32 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **T2-bis — discriminant
+  `evals_sans_mutation` §B-4(c)**
+  (`explorer-jscore`,
+  `explorer-js`,
+  `explorer-core`) — le WARN
+  « boot muet » porte
+  désormais
+  `timers_pending` /
+  `microtasks_pending` /
+  `ready_state` en plus des
+  compteurs promesses
+  (trait `JsEngine::
+  boot_diag`, Cmd `BootDiag`
+  distant) : jobs > 0 au
+  commit = continuation
+  garée sur un job jamais
+  drainé (pompe) ; tout à
+  0 + `complete` = retour
+  avalé synchrone (gate de
+  feature-detect — famille
+  à nommer par bundle).
+  Vise le cas twitch
+  (44 évals ok, 0 promesse,
+  0 mutation) à trancher au
+  prochain vol.
+
 - **JS-C219 — `relList`
   (DOMTokenList `rel`)**
   (`explorer-jscore`, §B-14
