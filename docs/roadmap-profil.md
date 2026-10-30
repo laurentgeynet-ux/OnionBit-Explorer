@@ -115,4 +115,9 @@ décidée 2026-10-30 avec le bundle portable (Étape 167).
 - [x] **PR-17. Crash dumps** — panic hook FFI →
   `state/crash/panic-<ts>.txt` (payload + site + backtrace),
   chaîné au hook hôte. Le daemon garde sa sentinelle
-  `alive/panic` existante.
+  `alive/panic` existante. **Minidump natif refusé** : un
+  `.dmp` est un snapshot mémoire complet (cookies session,
+  contenus de pages, chaînes JS — mots de passe compris)
+  — sur bundle portable perdu c'est une fuite entière ;
+  le dump texte suffit pour les panics Rust (le crash
+  dominant).
