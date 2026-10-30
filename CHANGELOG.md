@@ -7,6 +7,32 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **Étape 164 — bras deadline
+  §B-4(c)/§B-1** — (a) le WARN
+  `evals_sans_mutation` arme
+  désormais un
+  **ré-échantillon `boot_diag`
+  post-`load`** (`boot_mute_
+  warned` onglet, log
+  `… post-load`) : un
+  `ready_state` encore
+  `loading` après le cycle de
+  vie nomme le bras « cycle
+  jamais livré », `complete`
+  confirme le tir mid-commit
+  (vol youtube/twitch : tir vu
+  `loading` par artefact) ;
+  (b) hot-path interprète :
+  `env_get` ne clonait plus le
+  nom à chaque lookup —
+  `&str` emprunté, alloc
+  limitée au bras d'alias de
+  module (millions d'ops ×
+  alloc String économisées —
+  chantier débit contre les
+  rafales d'évals lentes
+  §B-1/vimeo).
+
 - **T2-bis — discriminant
   `evals_sans_mutation` §B-4(c)**
   (`explorer-jscore`,

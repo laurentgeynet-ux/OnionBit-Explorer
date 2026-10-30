@@ -3350,7 +3350,6 @@ impl Engine {
         visited: &mut HashSet<(usize, String)>,
     ) -> Option<Value> {
         let mut cur = Some(env.clone());
-        let name = name.to_string();
         while let Some(e) = cur {
             enum Next {
                 Up(Option<EnvRef>),
@@ -3367,7 +3366,7 @@ impl Engine {
             };
             if let Some(oid) = with_oid {
                 // Traps proxy en échec → nom non lié (tolérance).
-                let bound = self.with_has(oid, &name).unwrap_or(false);
+                let bound = self.with_has(oid, name).unwrap_or(false);
                 cur = {
                     let b = e.borrow();
                     b.parent.clone()
@@ -3382,13 +3381,13 @@ impl Engine {
                     // `ReferenceError` en chaîne). Erreur de
                     // trap → non lié, même tolérance que `has`.
                     if let Some(h) = self.host_of(oid) {
-                        if let Ok(Some(v)) = h.get(self, Value::Obj(oid), &name) {
+                        if let Ok(Some(v)) = h.get(self, Value::Obj(oid), name) {
                             return Some(v);
                         }
                     }
-                    match self.read_prop(Value::Obj(oid), Value::Obj(oid), &name) {
+                    match self.read_prop(Value::Obj(oid), Value::Obj(oid), name) {
                         Ok(v) => return Some(v),
-                        Err(_) => return self.get_prop(oid, &name),
+                        Err(_) => return self.get_prop(oid, name),
                     }
                 }
                 continue;
@@ -3396,12 +3395,12 @@ impl Engine {
             let next = {
                 let b = e.borrow();
                 match &b.kind {
-                    EnvKind::Local(m) | EnvKind::Block(m) => match m.get(&name) {
+                    EnvKind::Local(m) | EnvKind::Block(m) => match m.get(name) {
                         Some(EnvCell::Bind(v)) => return Some(v.value),
                         Some(EnvCell::Alias(t, n)) => Next::Alias(t.clone(), n.clone()),
                         None => Next::Up(b.parent.clone()),
                     },
-                    EnvKind::Global(m) => match m.get(&name) {
+                    EnvKind::Global(m) => match m.get(name) {
                         Some(EnvCell::Bind(v)) => return Some(v.value),
                         Some(EnvCell::Alias(t, n)) => Next::Alias(t.clone(), n.clone()),
                         None => {
@@ -3411,7 +3410,7 @@ impl Engine {
                             // sont des getters posés sur le global —
                             // un identifiant libre doit les invoquer).
                             let g = self.global;
-                            match self.find_prop(g, &name) {
+                            match self.find_prop(g, name) {
                                 Some(Prop::Data { value, .. }) => return Some(value),
                                 Some(Prop::Acc {
                                     get: Value::Obj(gf),

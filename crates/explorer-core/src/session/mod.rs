@@ -157,6 +157,7 @@ pub(crate) struct HistEntry {
 
 /// État d'un onglet : pipeline complet gardé — le re-render
 /// (`resize`) repart du `dom` sans re-fetch.
+#[allow(clippy::struct_excessive_bools)]
 pub(crate) struct Tab {
     /// Drapeau vie partagé avec les phases détachées
     /// (`navigate_shared` fetch/sub — B-30) : `false` au
@@ -498,6 +499,12 @@ pub(crate) struct Tab {
     /// saute les suivantes (erreur pipeline, page dégradée
     /// mais API vivante) ; une éval rapide referme la série.
     slow_eval_streak: u32,
+    /// §B-4(c) T2-bis — le WARN `evals_sans_mutation` a tiré
+    /// pendant le commit : `sub_commit_tail` ré-échantillonne
+    /// `boot_diag` post-`load` (le premier tir voit
+    /// `ready_state="loading"` — le cycle de vie court après
+    /// les scripts).
+    boot_mute_warned: bool,
     /// État de peinture détaché pour un apply hors verrou
     /// (étape 55h) — les champs `dom`/`tree`/`list`/`frame`
     /// sont vides le temps du `spawn_blocking` : la session
@@ -1414,6 +1421,7 @@ impl Session {
                 js_detached: None,
                 js_stall_until: None,
                 slow_eval_streak: 0,
+                boot_mute_warned: false,
                 paint_detached: false,
                 deferred_inputs: VecDeque::new(),
                 js_pending_net: Vec::new(),

@@ -296,6 +296,14 @@ impl Session {
                 ready_state,
                 "evals_sans_mutation — boot possiblement muet (aucune mutation DOM)"
             );
+            // Le tir voit le commit en cours — `ready_state`
+            // `loading` est attendu ici ; `sub_commit_tail`
+            // ré-échantillonne post-`load` pour trancher
+            // « cycle de vie jamais livré » vs « échantillon
+            // trop tôt ».
+            if let Some(e) = self.tabs.get_mut(&tab) {
+                e.boot_mute_warned = true;
+            }
         }
     }
 
@@ -415,6 +423,29 @@ impl Session {
         // `load` : tout est commis (sous-ressources, peinture,
         // historique) — dernier événement du cycle de vie.
         self.dispatch_doc_event(tab, "load");
+        // §B-4(c) T2-bis : le WARN `evals_sans_mutation` a
+        // tiré pendant le commit — ré-échantillonne le
+        // diagnostic **après** le cycle de vie : un
+        // `ready_state` toujours `loading` ici nomme le bras
+        // « cycle jamais livré » ; `complete` confirme le tir
+        // mid-commit (famille « retour avalé synchrone » si
+        // les compteurs restent à 0).
+        let warned = self.tabs.get(&tab).is_some_and(|e| e.boot_mute_warned);
+        if warned {
+            if let Some(entry) = self.tabs.get_mut(&tab) {
+                entry.boot_mute_warned = false;
+                if let Some(eng) = entry.js.as_mut() {
+                    let (timers_pending, microtasks_pending, ready_state) = eng.boot_diag();
+                    tracing::warn!(
+                        tab,
+                        timers_pending,
+                        microtasks_pending,
+                        ready_state,
+                        "evals_sans_mutation — ré-échantillon post-load (§B-4(c))"
+                    );
+                }
+            }
+        }
         title
     }
 
