@@ -2395,6 +2395,26 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   défaut spec builtins, arités
   précises posables après. Bundle
   manomano : éval `OK`.
+- **R-136 — §B-59 : `column-count`
+  hostile plafonné à 1 024**
+  (`explorer-layout`) — vol 334
+  postimees : `memory allocation
+  of 34359738368 bytes failed`
+  en `apply` (OOM allocator, ×51).
+  `flow_columns` calculait
+  `n = min(count, content_w)` —
+  un `column-count` u32 géant
+  sur conteneur `width` énorme
+  laissait `vec![None; ~4,3e9]`
+  (Option<f32> 8 o → 34,36 Go
+  exactement). Plafond dur 1 024
+  colonnes (le web réel n'en
+  demande jamais tant). Verrou
+  `column_count_hostile_borne`
+  (`width:4 000 000 px` +
+  `column-count:u32::MAX` →
+  layout aboutit) ; suite
+  layout 13/13 binaires.
 - **R-135 — §B-64 : intrinsèque
   des en-lignes atomiques et
   tolérance de fit** (`explorer-

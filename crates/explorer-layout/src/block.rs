@@ -1685,7 +1685,11 @@ fn flow_columns(
     }
     // Borne de tolérance : une colonne < 1 px est sans objet —
     // plafonner à `content_w` évite `vec![None; n]` absurde.
-    let n = (n as usize).min(content_w.max(1.0) as usize);
+    // Borne dure : `content_w` peut lui-même être énorme
+    // (conteneur `width` hostile) — 1 024 colonnes suffisent
+    // au web réel ; sans elle `vec![None; ~4,3e9]` demandait
+    // 34,3 Go (§B-59 ×51 postimees, OOM allocator en apply).
+    let n = (n as usize).min(content_w.max(1.0) as usize).min(1024);
     let col_w = (content_w - gap * (n as f32 - 1.0)) / n as f32;
     if col_w <= 0.0 {
         return None;

@@ -139,3 +139,18 @@ fn flex_item_padding_sans_espace_ok() {
     let b = find_text(&bx, &dom, "BBBB").expect("BBBB");
     assert_eq!(a.rect.y, b.rect.y, "y {} vs {}", a.rect.y, b.rect.y);
 }
+
+/// §B-59 ×51 (postimees vol 334) — `column-count` hostile +
+/// conteneur géant : `vec![None; n]` demandait ~34 Go avant le
+// plafond 1 024 (Option<f32> 8 o × 4,3e9). Le layout doit aboutir
+/// sans allocation explosive.
+#[test]
+fn column_count_hostile_borne() {
+    let (dom, bx) = laid(
+        "<body><div style='width:4000000px;column-count:4294967295'>\
+           <p>AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA</p></div></body>",
+        "",
+    );
+    let _ = find_text(&bx, &dom, "AAAA");
+    assert!(bx.rect.width > 0.0);
+}
