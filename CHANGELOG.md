@@ -7,6 +7,34 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **JS-C217 —
+  `Function.prototype.apply`
+  étale les array-likes**
+  (`explorer-jscore`, §B-14
+  ryanair vol 215 + Zone-wrap
+  résiduel post-JS-C210) —
+  l'impl ne copiait que
+  `ObjKind::Array` : `arguments`,
+  NodeList, `{length,0:…}`
+  tombaient en args vides.
+  Zone-lite `T.apply(this,
+  arguments)` atteignait le
+  natif `MutationObserver` sans
+  cb → « callback requis ».
+  Spec `CreateListFromArrayLike`
+  : `undefined`/`null` → `[]`,
+  autres objets → `length` +
+  `[[Get]]` par indice (getters/
+  proxies traversés, bornes
+  `this_array_like` — tick/1e6),
+  non-objet → TypeError.
+  Verrous `apply_spreads_
+  array_like` + `zone_style_
+  native_apply_reaches_mutobs`
+  (repro réelle du polyfill
+  ryanair évalué en bundle :
+  avant ERR, après ok).
+
 - **Étape 162 —
   `Upgrade-Insecure-Requests: 1`
   émis** (`explorer-net`, vol

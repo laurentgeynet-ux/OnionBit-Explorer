@@ -18,12 +18,33 @@ pub(crate) fn function_call(e: &mut Engine, this: Value, args: &[Value]) -> JsRe
 
 pub(crate) fn function_apply(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let this_arg = arg(args, 0);
-    let arr_args = match arg(args, 1) {
-        Value::Obj(id) => match e.heap.obj(id).map(|o| &o.kind) {
-            Some(ObjKind::Array(elems)) => elems.clone(),
-            _ => Vec::new(),
-        },
-        _ => Vec::new(),
+    let arr = arg(args, 1);
+    // `CreateListFromArrayLike` (ES §) : `undefined`/`null` →
+    // liste vide ; tout objet passe par `length` + `[[Get]]`
+    // par indice (`arguments`, NodeList, `{length:2,…}`) ;
+    // non-objet → TypeError. Bornes identiques à
+    // `this_array_like` (`{length:1e9}` hostile → tick).
+    let arr_args = match arr {
+        Value::Undefined | Value::Null => Vec::new(),
+        Value::Obj(id) => {
+            if let Some(ObjKind::Array(elems)) = e.heap.obj(id).map(|o| &o.kind) {
+                elems.clone()
+            } else {
+                let len = match e.get_prop_value(arr, "length")? {
+                    Value::Num(n) => (n.max(0.0) as usize).min(1_000_000),
+                    _ => 0,
+                };
+                let mut out = Vec::with_capacity(len.min(65_536));
+                for i in 0..len {
+                    out.push(e.get_prop_value(arr, &i.to_string())?);
+                    if i % 8192 == 0 {
+                        e.tick()?;
+                    }
+                }
+                out
+            }
+        }
+        _ => return Err(e.type_error("CreateListFromArrayLike called on non-object")),
     };
     e.call_value(this, this_arg, &arr_args)
 }

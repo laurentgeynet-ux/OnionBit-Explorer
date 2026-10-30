@@ -1079,3 +1079,80 @@ fn tcfapi_honest_cmp_less_stub() {
         "function|true|false|false|stub|string|null/false|false"
     );
 }
+
+#[test]
+fn apply_spreads_array_like() {
+    let mut e = engine();
+    // `f.apply(this, arrayLike)` — CreateListFromArrayLike :
+    // `length` + `[[Get]]` par indice, pas seulement les vrais
+    // Arrays (Zone-lite `T.apply(this, arguments)` — ryanair
+    // vol 215 : `MutationObserver: callback requis`).
+    assert_eq!(
+        ev(
+            &mut e,
+            r"function f(){ return arguments.length; }
+               f.apply(null, {length:3, 0:'a', 1:'b', 2:'c'})"
+        ),
+        "3"
+    );
+    // `arguments` réel passé à une autre fonction.
+    assert_eq!(
+        ev(
+            &mut e,
+            r"function f(){ return arguments.length; }
+               function g(){ return f.apply(null, arguments); }
+               g(1,2)"
+        ),
+        "2"
+    );
+    // null/undefined → aucun arg (spec).
+    assert_eq!(ev(&mut e, "f.apply(null, null)"), "0");
+    assert_eq!(ev(&mut e, "f.apply(null, undefined)"), "0");
+    // non-objet → TypeError (spec).
+    let err = e
+        .eval("try { f.apply(null, 5); 'no' } catch(x) { 'err' }")
+        .unwrap();
+    assert_eq!(e.describe(err), "err");
+    // length getter + getter d'indice traversés.
+    assert_eq!(
+        ev(
+            &mut e,
+            r"var al = { get length(){ return 1; }, get 0(){ return 7; } };
+               function g2(){ return arguments[0]; }
+               g2.apply(null, al)"
+        ),
+        "7"
+    );
+}
+
+#[test]
+fn zone_style_native_apply_reaches_mutobs() {
+    let mut e = engine();
+    // Rail Zone-lite exact : méthode patchée →
+    // `orig.apply(this, arguments)` — l'original natif reçoit
+    // le callback (ryanair vol 215 : `callback requis`).
+    assert_eq!(
+        ev(
+            &mut e,
+            r"var out='?'; try {
+               var m = MutationObserver.prototype.constructor.call(
+                 MutationObserver, function(){});
+               out = typeof m.observe;
+             } catch(x) { out='ERR:'+x; } out"
+        ),
+        "function"
+    );
+    // Via le wrapper exact `T.apply(this, Fe(arguments))`.
+    assert_eq!(
+        ev(
+            &mut e,
+            r"var out='?'; try {
+               var orig = MutationObserver.prototype.constructor;
+               var wrapped = function(){ return orig.apply(this, arguments); };
+               var w = wrapped(function(){});
+               out = typeof w.observe;
+             } catch(x) { out='ERR:'+x; } out"
+        ),
+        "function"
+    );
+}
