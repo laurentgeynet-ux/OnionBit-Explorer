@@ -7,6 +7,19 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **PR-17 — crash dumps**
+  (`explorer-ffi`) — un panic
+  du moteur écrit
+  `state/crash/panic-<ts>.txt`
+  (payload, site, backtrace) en
+  bundle portable — diagnostic
+  survivant à la mort du
+  processus (miroir de la
+  sentinelle du daemon). Le
+  hook est chaîné au précédent
+  (celui de l'hôte Flutter
+  reste exécuté).
+
 - **PR-8 — page d'erreur TLS**
   (`explorer-core`, version
   réduite) — un échec de

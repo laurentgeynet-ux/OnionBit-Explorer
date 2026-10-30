@@ -197,6 +197,7 @@ fn create_inner(profile_dir: Option<PathBuf>) -> *mut ExplorerHandle {
         }
     };
     init_file_logging(&dir);
+    init_crash_hook(&dir);
     let mut session = Session::new(http_stack(&dir), Arc::new(fonts));
     session.set_js_factory(explorer_js::JscoreEngine::factory());
     session.set_store(Arc::new(explorer_core::JsonFileStore::open(&dir)));
@@ -252,6 +253,43 @@ fn init_file_logging(profile_dir: &Path) {
             .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
             .with_ansi(false)
             .try_init();
+    });
+}
+
+/// Crash dumps (PR-17) : un panic dans le moteur écrit
+/// `<profil>/crash/panic-<ts_ms>.txt` (payload, site,
+/// backtrace) — le diagnostic survit à la mort du processus
+/// en bundle portable (miroir de la sentinelle du daemon).
+/// Le hook est **chaîné** au précédent (celui de l'hôte
+/// Flutter reste exécuté) — jamais de panic dans le hook.
+fn init_crash_hook(profile_dir: &Path) {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        let crash = profile_dir.join("crash");
+        if std::fs::create_dir_all(&crash).is_err() {
+            return;
+        }
+        let prev = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |info| {
+            let loc = info
+                .location()
+                .map_or_else(|| "?".to_string(), ToString::to_string);
+            let payload = info
+                .payload()
+                .downcast_ref::<&str>()
+                .map(|s| (*s).to_string())
+                .or_else(|| info.payload().downcast_ref::<String>().cloned())
+                .unwrap_or_else(|| "<non-string>".to_string());
+            let stamp = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| d.as_millis());
+            let bt = std::backtrace::Backtrace::capture();
+            let _ = std::fs::write(
+                crash.join(format!("panic-{stamp}.txt")),
+                format!("panic: {payload}\nat: {loc}\n\n{bt}\n"),
+            );
+            prev(info);
+        }));
     });
 }
 

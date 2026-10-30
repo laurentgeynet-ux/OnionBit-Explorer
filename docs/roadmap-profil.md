@@ -84,5 +84,7 @@ décidée 2026-10-30 avec le bundle portable (Étape 167).
 - [ ] **PR-15. Widevine/licences** — délégation CDM
   (ADR-0024/0027).
 - [ ] **PR-16. Sync multi-device** — protocole + serveur.
-- [ ] **PR-17. Crash dumps** — minidump ; instrumentation
-  plus que store.
+- [x] **PR-17. Crash dumps** — panic hook FFI →
+  `state/crash/panic-<ts>.txt` (payload + site + backtrace),
+  chaîné au hook hôte. Le daemon garde sa sentinelle
+  `alive/panic` existante.
