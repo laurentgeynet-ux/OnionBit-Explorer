@@ -7,6 +7,58 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **Étape 160 — §B-60 : backoff
+  sur tempête `fetch`** —
+  `fetch: network error` en rafale
+  infinie non bornée (mastodon
+  `/about` ×117+, uMap ×9, vols
+  120/209 — retries applicatifs à
+  l'infini saturant le ring,
+  `unhandledrejection` ×N, app
+  jamais montée, `doc_h=0`). Fix
+  session-side (`explorer-core`,
+  NAV) : streak d'échecs
+  `status: 0` par `(tab, url)`
+  alimenté à la livraison
+  `NetDone → NetResponse` ; au-delà
+  de `FETCH_BACKOFF_START` (4) le
+  `NetRequest::Fetch` n'est plus
+  spawned mais **retenu** dans
+  `fetch_held` (`HeldFetch`) pour
+  `250 ms << n` plafonné à `10 s`
+  — la promesse reste pending
+  (ni succès forgé ni échec
+  accéléré), le transport et le
+  ring respirent. `poll_net`
+  draine les retenues échues ;
+  quota `max_script_net` plein →
+  retenue repoussée d'une base
+  (pas de `status: 0` accéléré) ;
+  échec sec du spawn (ctx mort,
+  CSP) → `status: 0` livré,
+  jamais pendue à l'infini.
+  Bornes : `MAX_HELD_FETCHES` 512
+  (débordement → `status: 0`
+  immédiat comme un quota),
+  `MAX_STREAK_URLS` 512 (urls
+  nouvelles non suivies au-delà).
+  `Abort` purge la retenue hors
+  `net_tasks` ; `close_tab` purge
+  retenues + streaks ; succès
+  referme le streak (retry
+  suivant immédiat) ;
+  `net_pending` compte les
+  retenues (pompes bornées ne
+  sortent pas prématurément).
+  Verrous :
+  `fetch_backoff_delay_monotone_et_plafonnee`,
+  `fetch_backoff_retient_les_retries_dune_url_en_echec`
+  (retenue + Abort + drain échu +
+  purge onglet),
+  `fetch_backoff_succes_referme_le_streak`.
+  À re-voler (mastodon, uMap,
+  gitlab, mariages, guardian).
+
 - **JS-C215 — interfaces IDB sur
   les protos réels** (§B-14,
   coinbase vol 148 `get is not a

@@ -17,6 +17,39 @@ use explorer_net::policy::is_mixed_content;
 use explorer_net::url::Url;
 use explorer_render::{data_url_bytes, decode_image, DecodedImage};
 
+/// Échecs `status: 0` consécutifs tolérés sur une même URL
+/// avant d'engager le backoff §B-60 — un échec transitoire
+/// (réseau qui revient) ne doit pas ralentir le retry
+/// suivant : les premiers repartent immédiatement.
+pub(crate) const FETCH_BACKOFF_START: u32 = 4;
+/// Backoff de base §B-60 : `BASE << (streak - START)`
+/// plafonné à [`FETCH_BACKOFF_CAP`] — la tempête de retries
+/// applicative (mastodon ×117 / uMap ×9 vols 209) devient
+/// une goutte bornée sans casser un retry raisonnable.
+pub(crate) const FETCH_BACKOFF_BASE: std::time::Duration = std::time::Duration::from_millis(250);
+/// Plafond du délai de retenue §B-60 — ~6 émissions/min/URL
+/// au pire, la promesse finit toujours par se livrer.
+pub(crate) const FETCH_BACKOFF_CAP: std::time::Duration = std::time::Duration::from_secs(10);
+/// File de retenue §B-60 : borne mémoire — au-delà la
+/// requête échoue immédiatement en `status: 0` (comme un
+/// quota atteint), la tempête reste bornée par le quota
+/// `max_script_net` des tâches vivantes.
+const MAX_HELD_FETCHES: usize = 512;
+/// URLs suivies par le streak §B-60 : borne mémoire — une
+/// page balayant des milliers d'URL distinctes ne fait pas
+/// gonfler la map (les nouvelles URLs passent sans streak).
+const MAX_STREAK_URLS: usize = 1_024;
+
+/// Délai de retenue §B-60 pour un streak donné —
+/// `250 ms → 10 s` en doublement plafonné.
+pub(crate) fn fetch_backoff_delay(streak: u32) -> std::time::Duration {
+    let shift = streak.saturating_sub(FETCH_BACKOFF_START).min(16);
+    FETCH_BACKOFF_BASE
+        .checked_mul(1u32 << shift)
+        .unwrap_or(FETCH_BACKOFF_CAP)
+        .min(FETCH_BACKOFF_CAP)
+}
+
 impl Session {
     /// Le commit complet sous `&mut self` (hôtes synchrones :
     /// CLI, FFI, tests) = tête + rendu inline + queue. Les
@@ -420,7 +453,7 @@ impl Session {
 
     /// Distribution des `NetRequest` drainées (fetch/abort/
     /// crypto/EventSource) — extrait de `drain_script_net`.
-    fn dispatch_net_requests(
+    pub(crate) fn dispatch_net_requests(
         &mut self,
         tab: TabId,
         page: &Url,
@@ -469,6 +502,34 @@ impl Session {
                     credentials,
                     ctx,
                 } => {
+                    // §B-60 — backoff sur tempête de retries :
+                    // une URL qui échoue `status: 0` en boucle
+                    // voit son émission différée (`fetch_held`
+                    // drainée à échéance par `poll_net`) au
+                    // lieu de frapper le transport — le rejet
+                    // n'est pas accéléré, la promesse attend.
+                    let streak = self
+                        .fetch_fail_streak
+                        .get(&(tab, url.clone()))
+                        .copied()
+                        .unwrap_or(0);
+                    if streak >= FETCH_BACKOFF_START && self.fetch_held.len() < MAX_HELD_FETCHES {
+                        self.fetch_held.push_back(net_items::HeldFetch {
+                            at: std::time::Instant::now() + fetch_backoff_delay(streak),
+                            tab,
+                            page: page.clone(),
+                            base: base.clone(),
+                            handle,
+                            method,
+                            url,
+                            headers,
+                            body,
+                            mode,
+                            credentials,
+                            ctx,
+                        });
+                        continue;
+                    }
                     if self
                         .spawn_script_fetch(
                             tab,
@@ -492,6 +553,11 @@ impl Session {
                     if let Some(j) = self.net_tasks.remove(&(tab, handle)) {
                         j.abort();
                     }
+                    // Une retenue backoff annulée ne part
+                    // jamais (§B-60) — `xhr.abort()` doit la
+                    // trouver hors de `net_tasks`.
+                    self.fetch_held
+                        .retain(|h| !(h.tab == tab && h.handle == handle));
                 }
                 // Opération `crypto.subtle` (JS-C79) — pas une
                 // requête réseau : le calcul tourne en
@@ -2790,6 +2856,58 @@ impl Session {
         while let Ok(d) = self.net_rx.try_recv() {
             done.push(d);
         }
+        // Retenues §B-60 échues : émises enfin sur le
+        // transport (quota `max_script_net` re-vérifié au
+        // spawn — saturé = retenue repoussée d'une base,
+        // jamais de `status: 0` accéléré).
+        let now = std::time::Instant::now();
+        let mut still_held = std::collections::VecDeque::new();
+        while let Some(h) = self.fetch_held.pop_front() {
+            if h.at > now {
+                still_held.push_back(h);
+                continue;
+            }
+            // Quota plein pendant une tempête : repousser
+            // plutôt qu'échouer — la boucle applicative reste
+            // goutte-à-goutte (sinon elle repartirait en
+            // rafale d'échecs immédiats). Les autres échecs
+            // du spawn (contexte mort, requête refusée) sont
+            // permanents → `status: 0` livré, jamais de
+            // promesse pendue à l'infini.
+            let inflight = self.net_tasks.keys().filter(|(t, _)| *t == h.tab).count();
+            if inflight >= self.max_script_net {
+                let mut h = h;
+                h.at = now + FETCH_BACKOFF_BASE;
+                still_held.push_back(h);
+            } else if self
+                .spawn_script_fetch(
+                    h.tab,
+                    &h.page,
+                    &h.base,
+                    h.handle,
+                    &h.method,
+                    &h.url,
+                    &h.headers,
+                    h.body.as_deref(),
+                    h.mode,
+                    h.credentials,
+                    h.ctx,
+                )
+                .is_err()
+            {
+                self.deliver_net_response(
+                    h.tab,
+                    NetResponse {
+                        handle: h.handle,
+                        status: 0,
+                        status_text: String::new(),
+                        headers: Vec::new(),
+                        body: Vec::new(),
+                    },
+                );
+            }
+        }
+        self.fetch_held = still_held;
         // Résultats `crypto.subtle` (JS-C79) — même pompe :
         // la livraison passe par `deliver_crypto_response`
         // (buffer détaché + tour post-script inclus).
@@ -2989,6 +3107,22 @@ impl Session {
                     body: Vec::new(),
                 },
             };
+            // Streak §B-60 : `status: 0` (échec transport ou
+            // réponse cross non-lisible livrée opaque) allonge
+            // la série de l'URL — un succès la ferme. La map
+            // reste bornée (`MAX_STREAK_URLS`) : au-delà les
+            // nouvelles URLs ne sont pas suivies.
+            let key = (d.tab, d.req_url.to_string());
+            if resp.status == 0 {
+                let n = self.fetch_fail_streak.get(&key).copied().unwrap_or(0);
+                if self.fetch_fail_streak.len() < MAX_STREAK_URLS
+                    || self.fetch_fail_streak.contains_key(&key)
+                {
+                    self.fetch_fail_streak.insert(key, n.saturating_add(1));
+                }
+            } else {
+                self.fetch_fail_streak.remove(&key);
+            }
             self.deliver_net_response(d.tab, resp);
         }
     }
@@ -3017,7 +3151,7 @@ impl Session {
     /// (CLI, tests).
     #[must_use]
     pub fn net_pending(&self) -> usize {
-        self.net_tasks.len() + self.dyn_tasks.len()
+        self.net_tasks.len() + self.dyn_tasks.len() + self.fetch_held.len()
     }
 
     /// Collecte des sous-ressources du document (étape 50) :

@@ -2437,3 +2437,39 @@ fn collect_decl_urls(rules: &[Rule], env: &StyleEnv, props: &[&str], out: &mut V
         }
     }
 }
+
+/// `fetch`/XHR script-initié retenu par le backoff §B-60 —
+/// l'application retente en boucle une URL qui échoue au
+/// réseau (`status: 0`) : au lieu de frapper le transport à
+/// chaque retry (tempête ×117 mesurée mastodon/uMap —
+/// `doc_h` reste à 0, app jamais montée), l'émission est
+/// différée jusqu'à `at` dans `Session::fetch_held` et
+/// drainée par `poll_net`. La promesse moteur reste pending
+/// pendant la retenue — ni succès forgé ni échec accéléré.
+pub(crate) struct HeldFetch {
+    /// Échéance d'émission (`Instant::now() + backoff`).
+    pub(crate) at: Instant,
+    /// Onglet émetteur (nettoyage `close_tab`, `Abort`).
+    pub(crate) tab: TabId,
+    /// Document ancres — `ctx_net_origin` re-résout les
+    /// politiques à l'émission (un ctx mort avorte alors).
+    pub(crate) page: Url,
+    /// Base de résolution du document émetteur.
+    pub(crate) base: Url,
+    /// Corrélation moteur (`NetRequest::Fetch.handle`).
+    pub(crate) handle: u64,
+    /// Méthode HTTP telle qu'écrite.
+    pub(crate) method: String,
+    /// URL demandée — clé du streak de backoff.
+    pub(crate) url: String,
+    /// En-têtes de la requête.
+    pub(crate) headers: Vec<(String, String)>,
+    /// Corps `send/fetch`, si présent.
+    pub(crate) body: Option<String>,
+    /// `Request.mode` (JS-C77).
+    pub(crate) mode: explorer_js::FetchMode,
+    /// `Request.credentials` (JS-C77).
+    pub(crate) credentials: explorer_js::FetchCredentials,
+    /// Contexte de navigation émetteur (étape 134).
+    pub(crate) ctx: explorer_js::JsCtxId,
+}

@@ -3102,3 +3102,152 @@ fn detached_pump_past_delete_destroys_engine_offlock() {
         "close_tab : moteur attaché détruit hors verrou aussi"
     );
 }
+
+/// §B-60 — le backoff est croissant et plafonné (250 ms →
+/// 10 s en doublement à partir de `FETCH_BACKOFF_START`).
+#[test]
+fn fetch_backoff_delay_monotone_et_plafonnee() {
+    use crate::session::net::{fetch_backoff_delay, FETCH_BACKOFF_CAP, FETCH_BACKOFF_START};
+    let d0 = fetch_backoff_delay(FETCH_BACKOFF_START);
+    let d1 = fetch_backoff_delay(FETCH_BACKOFF_START + 1);
+    let d2 = fetch_backoff_delay(FETCH_BACKOFF_START + 2);
+    assert_eq!(d0, std::time::Duration::from_millis(250));
+    assert_eq!(d1, std::time::Duration::from_millis(500));
+    assert_eq!(d2, std::time::Duration::from_millis(1_000));
+    assert_eq!(
+        fetch_backoff_delay(u32::MAX),
+        FETCH_BACKOFF_CAP,
+        "streak hostile plafonné — jamais de dépassement"
+    );
+}
+
+/// §B-60 — une URL qui échoue `status: 0` en rafale voit
+/// ses retries **retenus** dans `fetch_held` (émission
+/// différée) au lieu de frapper le transport ; `Abort`
+/// purge la retenue ; `poll_net` émet les retenues échues.
+#[tokio::test(flavor = "current_thread")]
+async fn fetch_backoff_retient_les_retries_dune_url_en_echec() {
+    use std::time::{Duration, Instant};
+    let mut s = Session::with_config(
+        Arc::new(FailTransport),
+        Arc::new(TestFont),
+        SessionConfig::default(),
+    );
+    let tab = s.open_tab();
+    let page = Url::parse("https://x.test/").expect("page");
+    let api = Url::parse("https://x.test/api").expect("api");
+    // 4 échecs `status: 0` livrés → streak au seuil.
+    let fail = |handle: u64| NetDone {
+        tab,
+        handle,
+        cross: false,
+        mode: explorer_net::http::FetchMode::Cors,
+        credentials: explorer_net::http::FetchCredentials::Omit,
+        page_origin: "https://x.test".to_string(),
+        req_url: api.clone(),
+        partition: None,
+        out: Err(explorer_net::error::NetError::InvalidResponse(
+            "t".to_string(),
+        )),
+        script: None,
+        frame: None,
+        img: None,
+        link: None,
+        dyn_module: None,
+        import: None,
+    };
+    for h in 0..4 {
+        s.drain_net_done(vec![fail(h)], Instant::now());
+    }
+    assert_eq!(
+        s.fetch_fail_streak.get(&(tab, api.to_string())).copied(),
+        Some(4),
+        "streak compté à la livraison status: 0"
+    );
+    let fetch = |handle: u64| explorer_js::NetRequest::Fetch {
+        handle,
+        method: "GET".to_string(),
+        url: api.to_string(),
+        headers: Vec::new(),
+        body: None,
+        mode: explorer_js::FetchMode::Cors,
+        credentials: explorer_js::FetchCredentials::SameOrigin,
+        ctx: explorer_js::JS_CTX_TOP,
+    };
+    // Retry au seuil → retenu, pas de tâche transport.
+    s.dispatch_net_requests(tab, &page, &page, vec![fetch(10)]);
+    assert_eq!(s.fetch_held.len(), 1, "retry retenu en backoff");
+    assert!(s.net_tasks.is_empty(), "rien ne frappe le transport");
+    // `xhr.abort()` atteint la retenue (hors `net_tasks`).
+    s.dispatch_net_requests(
+        tab,
+        &page,
+        &page,
+        vec![explorer_js::NetRequest::Abort { handle: 10 }],
+    );
+    assert!(s.fetch_held.is_empty(), "Abort purge la retenue");
+    // Retenue échue → `poll_net` l'émet (ctx mort ici →
+    // échec sec livré `status: 0`, jamais pendue).
+    s.dispatch_net_requests(tab, &page, &page, vec![fetch(11)]);
+    s.fetch_held[0].at = Instant::now()
+        .checked_sub(Duration::from_secs(1))
+        .expect("passé");
+    s.poll_net();
+    assert!(
+        s.fetch_held.is_empty(),
+        "retenue échue drainée par poll_net"
+    );
+    // Fermeture : retenues + streaks purgés avec l'onglet.
+    s.dispatch_net_requests(tab, &page, &page, vec![fetch(12)]);
+    assert_eq!(s.fetch_held.len(), 1);
+    s.close_tab(tab).expect("close");
+    assert!(s.fetch_held.is_empty(), "close_tab purge les retenues");
+    assert!(
+        s.fetch_fail_streak.is_empty(),
+        "close_tab purge les streaks"
+    );
+}
+
+/// §B-60 — un succès referme le streak : le retry suivant
+/// repart immédiatement (pas de retenue résiduelle).
+#[test]
+fn fetch_backoff_succes_referme_le_streak() {
+    use std::time::Instant;
+    let mut s = Session::with_config(
+        Arc::new(FailTransport),
+        Arc::new(TestFont),
+        SessionConfig::default(),
+    );
+    let tab = s.open_tab();
+    let api = Url::parse("https://x.test/api").expect("api");
+    s.fetch_fail_streak.insert((tab, api.to_string()), 9);
+    let ok = NetDone {
+        tab,
+        handle: 1,
+        cross: false,
+        mode: explorer_net::http::FetchMode::Cors,
+        credentials: explorer_net::http::FetchCredentials::Omit,
+        page_origin: "https://x.test".to_string(),
+        req_url: api,
+        partition: None,
+        out: Ok(explorer_net::http::Response {
+            status: 200,
+            reason: "ok".to_string(),
+            headers: Vec::new(),
+            body: Vec::new(),
+            reused_connection: false,
+            resolved_url: None,
+        }),
+        script: None,
+        frame: None,
+        img: None,
+        link: None,
+        dyn_module: None,
+        import: None,
+    };
+    s.drain_net_done(vec![ok], Instant::now());
+    assert!(
+        s.fetch_fail_streak.is_empty(),
+        "succès : streak refermé — retry suivant immédiat"
+    );
+}

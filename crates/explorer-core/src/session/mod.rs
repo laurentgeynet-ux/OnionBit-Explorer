@@ -809,6 +809,17 @@ pub struct Session {
     /// `(tab, seq)` → tâche tokio, livrés sur `net_rx` avec
     /// `NetDone.script` posé (pump [`Session::poll_net`]).
     dyn_tasks: HashMap<(TabId, u64), JoinHandle<()>>,
+    /// Échecs réseau consécutifs par `(tab, url)` de `fetch`/
+    /// XHR script-initiés (§B-60) — alimenté à la livraison
+    /// `status: 0`, remis à zéro au premier succès ; au-delà
+    /// de `FETCH_BACKOFF_START` l'émission est différée dans
+    /// `fetch_held` au lieu de frapper le transport.
+    fetch_fail_streak: HashMap<(TabId, String), u32>,
+    /// `fetch`/XHR retenus par le backoff §B-60 (tempête de
+    /// retries applicative — mastodon ×117, uMap ×9 vols
+    /// 209) — émis à leur échéance `at` par `poll_net`,
+    /// annulés par `Abort`/fermeture d'onglet.
+    fetch_held: std::collections::VecDeque<net_items::HeldFetch>,
     /// Téléchargements bufferisés en attente de décision
     /// (étape 70), `id → corps + méta`.
     downloads: HashMap<u64, PendingDownload>,
@@ -1036,6 +1047,8 @@ impl Session {
             ws_sends: HashMap::new(),
             net_tasks: HashMap::new(),
             dyn_tasks: HashMap::new(),
+            fetch_fail_streak: HashMap::new(),
+            fetch_held: std::collections::VecDeque::new(),
             max_script_net: cfg.max_script_net,
             max_timer_jobs: cfg.max_timer_jobs,
             max_auto_navs: cfg.max_auto_navs,
@@ -1436,6 +1449,10 @@ impl Session {
                 true
             }
         });
+        // Retenues backoff §B-60 + streaks de l'onglet mort —
+        // sans purge, une promesse retenue pendrait à jamais.
+        self.fetch_held.retain(|h| h.tab != tab);
+        self.fetch_fail_streak.retain(|(t, _), _| *t != tab);
         // Même purge pour les imports/scripts dynamiques :
         // jusqu'ici `dyn_tasks` survivait au DELETE — une
         // rafale `import()`/`<script>` dynamique continuait
