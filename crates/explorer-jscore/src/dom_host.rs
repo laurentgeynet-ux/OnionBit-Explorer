@@ -3119,6 +3119,15 @@ impl Engine {
         }
         self.set_own(vv, "onresize", Value::Null, true);
         self.set_own(vv, "onscroll", Value::Null, true);
+        // `vv.addEventListener('resize'|'scroll')` (§B-14 ×4 —
+        // edf/lcl/kleinezeitung/hvg vols 329+) : rail
+        // EventTarget générique — listeners stockés sur `__et`
+        // (un hook viewport pourra les tirer ; aujourd'hui les
+        // enregistrer suffit aux guards qui n'attendent que le
+        // non-crash).
+        self.add_method(vv, "addEventListener", et_add_listener);
+        self.add_method(vv, "removeEventListener", et_remove_listener);
+        self.add_method(vv, "dispatchEvent", et_dispatch_event);
         self.set_own(g, "visualViewport", Value::Obj(vv), false);
         // `scheduler` — `scheduler.yield()` → promesse résolue
         // (file microtâche existante) ; `postTask(cb,{delay,

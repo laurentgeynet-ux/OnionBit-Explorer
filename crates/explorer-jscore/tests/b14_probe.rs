@@ -1650,3 +1650,32 @@ fn navigator_service_worker_honest_stub() {
     let _ = e.eval("0");
     assert_eq!(ev(&mut e, "globalThis.__r"), "len:0");
 }
+
+/// §B-14 ×4 (edf/lcl/kleinezeitung/hvg vols 329+) —
+/// `visualViewport.addEventListener` : rail `EventTarget`
+/// greffé, listeners stockés sur `__et`.
+#[test]
+fn visual_viewport_event_target() {
+    let mut e = engine();
+    assert_eq!(
+        ev(
+            &mut e,
+            "typeof visualViewport.addEventListener + ':' \
+             + typeof visualViewport.removeEventListener + ':' \
+             + typeof visualViewport.dispatchEvent"
+        ),
+        "function:function:function"
+    );
+    // add/remove/dispatch vivent sans jeter
+    assert_eq!(
+        ev(
+            &mut e,
+            "var hit=0,f=function(){hit++};\
+             visualViewport.addEventListener('resize',f);\
+             visualViewport.dispatchEvent({type:'resize'});\
+             visualViewport.removeEventListener('resize',f);\
+             visualViewport.dispatchEvent({type:'resize'});hit"
+        ),
+        "1"
+    );
+}

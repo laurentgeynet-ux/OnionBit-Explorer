@@ -7,6 +7,21 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **JS-C226 — `visualViewport`
+  EventTarget** (`explorer-jscore`,
+  §B-14 ×4 — edf/lcl/
+  kleinezeitung/hvg vols 329+) —
+  `addEventListener`/
+  `removeEventListener`/
+  `dispatchEvent` greffés sur le
+  rail générique `__et` :
+  `vv.addEventListener('resize')`
+  cassait `addEventListener is
+  not a function (on Object)`
+  sur les sites à viewport
+  events. Verrou
+  `visual_viewport_event_target`.
+
 - **JS-C225 — regex littérale
   après `of`** (`explorer-jscore`,
   §B-14 vol 325 news.at, parseur
