@@ -7,6 +7,23 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **PR-10d (partiel) —
+  structured-clone IDB**
+  (`explorer-jscore`) — `Date`,
+  `Map` et binaires
+  (`ArrayBuffer`/vues) ne sont
+  plus détruits au snapshot :
+  encodage taggé `{__idb_t:"date"
+  |"map"|"bin",v}` (entrées de
+  `Map` récursives, profondeur
+  bornée) et reconstruction à
+  `idb_restore` (un
+  `TypedArray` revient en
+  `ArrayBuffer` — arrondi
+  documenté). Reste : drain des
+  contextes `<iframe>`, partage
+  inter-onglets.
+
 - **Find-in-page FFI**
   (`explorer-ffi`, app) —
   `explorer_find` (nouvelle

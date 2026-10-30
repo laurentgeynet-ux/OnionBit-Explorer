@@ -56,7 +56,7 @@ use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::rc::Rc;
 
-use crate::heap::{Host, JsResult, ObjKind};
+use crate::heap::{Host, JsResult, ObjKind, Object};
 use crate::value::{ObjId, Value};
 use crate::Engine;
 
@@ -949,6 +949,169 @@ fn range_of(e: &mut Engine, v: Value) -> JsResult<Option<Range>> {
     match idb_key_of(e, v, 0) {
         Some(k) => Ok(Some(Range::only(k))),
         None => Err(e.type_error("IDB: invalid key/range argument")),
+    }
+}
+
+/// Tag d'encodage structured-clone (PR-10d) — les valeurs
+/// que le `stringify` de l'enveloppe détruit (`Date` →
+/// chaîne, `Map` → `{}`, binaires → `{0:…}`) sont wrappées
+/// `{__idb_t:"…",v:…}` au snapshot et reconstruites au
+/// restore. Les entrées de `Map` sont encodées
+/// récursivement (profondeur bornée — au-delà, dégradation
+/// au JSON brut documentée).
+const IDB_TAG: &str = "__idb_t";
+
+/// Valeur extraite du heap pour encodage (`Map` clonée,
+/// binaire copié) — levée avant les allocations moteur
+/// (double emprunt évité).
+enum IdbEnc {
+    /// Entrées `Map` clonées.
+    Map(Vec<(Value, Value)>),
+    /// Octets copiés (`ByteBuf` ou vue bornée).
+    Bin(Vec<u8>),
+}
+
+/// Wrappe `v` dans le marqueur `{__idb_t: tag, v}`.
+fn idb_tag_wrap(e: &mut Engine, tag: &str, v: Value) -> Value {
+    let t = e.new_object();
+    let s = e.str_val(tag);
+    e.set_own(t, IDB_TAG, s, true);
+    e.set_own(t, "v", v, true);
+    Value::Obj(t)
+}
+
+/// Encode une valeur de record pour le snapshot : `Date`,
+/// `Map` et binaires (`ByteBuf`/`TypedArray`/`DataView`) en
+/// objets taggés, tout le reste passe au `stringify`
+/// standard.
+fn idb_val_encode(e: &mut Engine, v: Value, depth: u32) -> Value {
+    let Value::Obj(id) = v else {
+        return v;
+    };
+    if depth > 4 {
+        return Value::Null;
+    }
+    if let Some(ms) = date_time_of(e, id) {
+        return idb_tag_wrap(e, "date", Value::Num(ms));
+    }
+    let enc: Option<IdbEnc> = match e.heap.obj(id).map(|o| &o.kind) {
+        Some(ObjKind::Map(pairs)) => Some(IdbEnc::Map(pairs.clone())),
+        Some(ObjKind::ByteBuf(b)) => Some(IdbEnc::Bin(b.clone())),
+        Some(
+            ObjKind::TypedArray {
+                buffer,
+                offset,
+                len,
+                ..
+            }
+            | ObjKind::DataView {
+                buffer,
+                offset,
+                len,
+                ..
+            },
+        ) => {
+            if let Value::Obj(bid) = *buffer {
+                e.heap.obj(bid).and_then(|o| match &o.kind {
+                    ObjKind::ByteBuf(b) => Some(IdbEnc::Bin(
+                        b[*offset..(*offset + *len).min(b.len())].to_vec(),
+                    )),
+                    _ => None,
+                })
+            } else {
+                None
+            }
+        }
+        _ => None,
+    };
+    match enc {
+        Some(IdbEnc::Map(pairs)) => {
+            let mut entries = Vec::with_capacity(pairs.len());
+            for (k, v) in pairs {
+                let ek = idb_val_encode(e, k, depth + 1);
+                let ev = idb_val_encode(e, v, depth + 1);
+                entries.push(e.new_array(vec![ek, ev]));
+            }
+            let arr = e.new_array(entries);
+            idb_tag_wrap(e, "map", arr)
+        }
+        Some(IdbEnc::Bin(bytes)) => {
+            let s = e.str_val(crate::typed_array::b64_encode(&bytes));
+            idb_tag_wrap(e, "bin", s)
+        }
+        None => v,
+    }
+}
+
+/// Inverse de [`idb_val_encode`] au restore : les objets
+/// `{__idb_t:"…",v}` sont reconstruits (`Date` proto
+/// `Date.prototype`, `Map`, `ArrayBuffer` — une vue
+/// `TypedArray` devient son buffer, dégradation documentée).
+fn idb_val_decode(e: &mut Engine, v: Value, depth: u32) -> Value {
+    let Value::Obj(id) = v else {
+        return v;
+    };
+    if depth > 4 {
+        return v;
+    }
+    let Some(tag) = e.get_prop(id, IDB_TAG).and_then(|t| e.to_js_string(t).ok()) else {
+        return v;
+    };
+    let Some(vv) = e.get_prop(id, "v") else {
+        return v;
+    };
+    match tag.as_str() {
+        "date" => {
+            let ms = e.to_number(vv).unwrap_or(0.0);
+            let o = e.heap.alloc_obj(Object {
+                proto: Value::Obj(e.protos.date),
+                props: Vec::new(),
+                kind: ObjKind::Ordinary,
+                extensible: true,
+                elem_integrity: 0,
+                args_map: None,
+            });
+            e.set_own(o, "__time", Value::Num(ms), false);
+            Value::Obj(o)
+        }
+        "map" => {
+            let Value::Obj(arr) = vv else { return v };
+            let n = e
+                .get_prop(arr, "length")
+                .and_then(|v| e.to_number(v).ok())
+                .unwrap_or(0.0) as usize;
+            let mut pairs = Vec::new();
+            for i in 0..n.min(IDB_SNAPSHOT_CAP) {
+                let Some(Value::Obj(pair)) = e.get_prop(arr, &i.to_string()) else {
+                    continue;
+                };
+                let (Some(k), Some(vv)) = (e.get_prop(pair, "0"), e.get_prop(pair, "1")) else {
+                    continue;
+                };
+                pairs.push((
+                    idb_val_decode(e, k, depth + 1),
+                    idb_val_decode(e, vv, depth + 1),
+                ));
+            }
+            let o = e.heap.alloc_obj(Object {
+                proto: Value::Obj(e.protos.map),
+                props: Vec::new(),
+                kind: ObjKind::Map(pairs),
+                extensible: true,
+                elem_integrity: 0,
+                args_map: None,
+            });
+            Value::Obj(o)
+        }
+        "bin" => match e
+            .to_js_string(vv)
+            .ok()
+            .and_then(|s| crate::typed_array::b64_decode(&s))
+        {
+            Some(bytes) => crate::typed_array::new_array_buffer(e, bytes),
+            None => v,
+        },
+        _ => v,
     }
 }
 
@@ -3197,7 +3360,8 @@ impl Engine {
                         let mut recs = Vec::with_capacity(store.records.len());
                         for (k, v) in &store.records {
                             let kv = k.to_value(self);
-                            recs.push(self.new_array(vec![kv, *v]));
+                            let ev = idb_val_encode(self, *v, 0);
+                            recs.push(self.new_array(vec![kv, ev]));
                         }
                         let ra = self.new_array(recs);
                         self.set_own(s, "records", ra, true);
@@ -3310,7 +3474,8 @@ impl Engine {
                                 continue;
                             };
                             if let Some(key) = idb_key_of(self, k, 0) {
-                                store.records.insert(key, v);
+                                let dv = idb_val_decode(self, v, 0);
+                                store.records.insert(key, dv);
                             }
                         }
                     }

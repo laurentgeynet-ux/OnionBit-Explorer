@@ -89,13 +89,15 @@ décidée 2026-10-30 avec le bundle portable (Étape 167).
   - [x] **PR-10c** — ~~index/cursors~~ **couvert par JS-C72** :
     `IDBIndex`, `IDBCursor`/`keyRange`, `DOMException`,
     `versionchange` déjà implémentés.
-  - [ ] **PR-10d — gaps de fidélité** : structured-clone
-    complet (`Map`/`TypedArray`/`ArrayBuffer`/`Date`
-    arrondis par le `stringify` JSON — encodage taggé à
-    faire) ; drain/persistance des registres des
-    **contextes `<iframe>`** (seul le top-level est
-    persisté aujourd'hui) ; partage live d'un registre
-    entre onglets de même origine.
+  - [x] **PR-10d (partiel) — structured-clone** :
+    `Date`/`Map`/`ArrayBuffer` encodés taggés
+    `{__idb_t,v}` au snapshot, reconstruits au restore
+    (vue `TypedArray` → `ArrayBuffer`, arrondi
+    documenté ; profondeur bornée). Reste : drain/
+    persistance des registres des **contextes
+    `<iframe>`** (seul le top-level est persisté) ;
+    partage live d'un registre entre onglets de même
+    origine.
 - [ ] **PR-11. Mots de passe** — ProfileVault (AEAD par
   fichier, passphrase/invité) + détection + UI remplissage.
 - [ ] **PR-12. Service Workers + CacheStorage** — cycle de
