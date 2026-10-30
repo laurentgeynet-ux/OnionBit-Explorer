@@ -611,10 +611,21 @@ fn subtle_import_key(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Valu
     let pid = e.new_promise();
     match key_algo(e, algo_v)? {
         None => {
+            // Nom reçu dans le message (même rail que JS-C228)
+            // — un `unknown algorithm` sans le nom demandé ne
+            // permet pas de nommer le bras en vol (wamiz poool
+            // vol 344 : l'algo réel restait inconnu).
+            let asked = match algo_v {
+                Value::Obj(id) => match e.get_prop(id, "name") {
+                    Some(n) => e.to_js_string(n)?,
+                    None => e.to_js_string(algo_v)?,
+                },
+                _ => e.to_js_string(algo_v)?,
+            };
             let err = dom_exc(
                 e,
                 "NotSupportedError",
-                "subtle.importKey: unknown algorithm",
+                &format!("subtle.importKey: unknown algorithm (« {asked} »)"),
             );
             e.reject_promise(pid, err);
         }

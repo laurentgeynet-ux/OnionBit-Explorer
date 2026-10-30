@@ -429,3 +429,22 @@ fn c214_rsa_jwk_importkey_dispatch() {
     e.run_microtasks().expect("pump");
     assert_eq!(describe(&mut e, "__n"), "DataError");
 }
+
+/// JS-C230 — l'`unknown algorithm` nomme l'algo demandé
+/// (§B-14 vol 344 wamiz poool : le bras restait anonyme —
+/// même rail que le nommage de receveur JS-C228).
+#[test]
+fn import_key_unknown_algorithm_names_it() {
+    let (mut e, _crypto) = engine();
+    eval(
+        &mut e,
+        "globalThis.__r='';globalThis.__s='';\
+         crypto.subtle.importKey('raw',new Uint8Array(8),'RSA-OAEP',false,['encrypt'])\
+             .catch(x=>{__r=x.name+':'+x.message});\
+         crypto.subtle.importKey('raw',new Uint8Array(8),{name:'AES-KW'},false,['wrapKey'])\
+             .catch(x=>{__s=x.message});",
+    );
+    e.run_microtasks().expect("pump");
+    assert!(describe(&mut e, "__r").contains("« RSA-OAEP »"));
+    assert!(describe(&mut e, "__s").contains("« AES-KW »"));
+}

@@ -22,6 +22,19 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   déjà vivant (restore seulement
   sur vide).
 
+- **JS-C230 — `importKey` nomme
+  l'algo demandé** (`explorer-jscore`,
+  §B-14 vol 344 wamiz poool) —
+  `unknown algorithm` anonyme : le
+  bras « algo WebCrypto non couvert »
+  ne pouvait être identifié. Le
+  message porte désormais
+  `« <algo demandé> »` (même rail
+  que JS-C228 `reçu=`/own-keys) — le
+  prochain vol nomme l'algo réel.
+  Verrou `import_key_unknown_algorithm
+  _names_it`.
+
 - **JS-C229 — `cookieStore`
   EventTarget** (`explorer-jscore`,
   §B-14 vol 344 kleinezeitung) —
