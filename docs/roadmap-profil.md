@@ -42,7 +42,11 @@ décidée 2026-10-30 avec le bundle portable (Étape 167).
   boot (`SessionStore` côté app, voisin de `ui_settings.json` ;
   `scroll` = reste à faire — non persisté).
 - [ ] **PR-5. État fenêtre** — taille/position/maximisé dans
-  `ui_settings.json` (côté app).
+  `ui_settings.json` (côté app). **Reporté** : exige un plugin
+  fenêtre (`window_manager` refusé pour l'instant) — sans lui
+  l'app lit la taille mais ne peut pas la fixer ; persister
+  des bounds non restorables = store mort. À reprendre si un
+  plugin fenêtre entre dans `pubspec`.
 
 ## Palier PR-P2 — stores avec consommateur à créer
 
