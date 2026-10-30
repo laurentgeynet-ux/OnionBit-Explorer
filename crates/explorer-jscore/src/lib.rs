@@ -72,6 +72,7 @@ mod promise;
 mod regexp;
 mod storage;
 mod streams;
+mod svg_path;
 mod temporal;
 mod timers;
 mod typed_array;

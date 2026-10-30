@@ -7,6 +7,29 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **JS-C223 — `SVGGeometryElement`
+  géométrie réelle**
+  (`explorer-jscore`, §B-14
+  vol 331 GRC — bras neuf
+  `getTotalLength`) —
+  `getTotalLength`/
+  `getPointAtLength` sur
+  `path`/`line`/`polyline`/
+  `polygon`/`rect`/`circle`/
+  `ellipse` : parseur `d`
+  tolérant (M/L/H/V/C/S/Q/T/A/Z,
+  courbes subdivisées de
+  Casteljau ~16 segments,
+  arc SVG endpoint→centre
+  spec F.6.5) + formules
+  exactes non-`path`
+  (Ramanujan ellipse, fermeture
+  polygon). Point rendu
+  `{x,y,z:0,w:1}` DOMPoint-like,
+  clamp extrémités hors bornes.
+  Verrou
+  `svg_geometry_total_length_and_point_at`.
+
 - **JS-C222 — panic `Pat::Rest`
   tué** (`explorer-jscore`,
   vol 339 finance perso) —

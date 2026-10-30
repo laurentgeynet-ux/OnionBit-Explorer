@@ -5399,6 +5399,15 @@ fn is_dialog(dom: &DomRef, node: NodeId) -> bool {
     dom.borrow().nodes[node as usize].tag.as_str() == "dialog"
 }
 
+/// `true` si `node` est une forme `SVGGeometryElement`
+/// (§B-14 vol 331 — `getTotalLength`/`getPointAtLength`).
+fn is_svg_geom(dom: &DomRef, node: NodeId) -> bool {
+    matches!(
+        dom.borrow().nodes[node as usize].tag.as_str(),
+        "path" | "line" | "polyline" | "polygon" | "rect" | "circle" | "ellipse"
+    )
+}
+
 /// DOMException-like `{name, message}` — les erreurs DOM
 /// standard hors idb (`InvalidStateError` de `showModal`…).
 pub(crate) fn dom_ex_pub(e: &mut Engine, name: &str, msg: &str) -> Value {
@@ -7760,6 +7769,58 @@ impl Host for NodeHost {
             // non claimé : stubs honnêtes, jamais de faux
             // succès. Claimé : délégation hôte (`play()` tenu
             // par le premier `playing` rapporté).
+            // `SVGGeometryElement` (§B-14 vol 331, GRC) —
+            // `getTotalLength`/`getPointAtLength` sur les
+            // formes réelles — géométrie calculée, jamais
+            // de valeur bidon.
+            "getTotalLength" | "getPointAtLength" if is_svg_geom(&self.dom, node) => {
+                let (tag, d_attr, attrs) = {
+                    let d = self.dom.borrow();
+                    let n = &d.nodes[node as usize];
+                    (
+                        if n.kind == NodeKind::Element {
+                            n.tag.clone()
+                        } else {
+                            String::new()
+                        },
+                        d.attr(node, "d").unwrap_or("").to_string(),
+                        n.attrs.clone(),
+                    )
+                };
+                if name == "getTotalLength" {
+                    let len = if tag == "path" {
+                        crate::svg_path::path_total_length(&d_attr)
+                    } else {
+                        crate::svg_path::shape_length(
+                            &tag,
+                            &mut attrs.iter().map(|(k, v)| (k.as_str(), v.as_str())),
+                        )
+                        .unwrap_or(0.0)
+                    };
+                    return Ok(Some(Value::Num(len)));
+                }
+                let dist = e.to_number(arg(args, 0))?;
+                let pt = if tag == "path" {
+                    crate::svg_path::path_point_at(&d_attr, dist)
+                } else {
+                    crate::svg_path::shape_point_at(
+                        &tag,
+                        &mut attrs.iter().map(|(k, v)| (k.as_str(), v.as_str())),
+                        dist,
+                    )
+                };
+                Ok(Some(match pt {
+                    Some((x, y)) => {
+                        let o = e.new_object();
+                        e.set_own(o, "x", Value::Num(x), true);
+                        e.set_own(o, "y", Value::Num(y), true);
+                        e.set_own(o, "z", Value::Num(0.0), true);
+                        e.set_own(o, "w", Value::Num(1.0), true);
+                        Value::Obj(o)
+                    }
+                    None => Value::Null,
+                }))
+            }
             "play" | "pause" | "load" | "fastSeek" | "canPlayType" | "setSinkId"
             | "addTextTrack" | "captureStream" | "setMediaKeys"
                 if is_media(&self.dom, node) =>

@@ -1528,3 +1528,81 @@ fn reflect_get_apply_inside_proxy_trap() {
         "V|h2"
     );
 }
+
+/// §B-14 vol 331 (GRC) — `SVGGeometryElement.getTotalLength`/
+/// `getPointAtLength` : géométrie réelle calculée, jamais de
+/// stub. path/ligne/rect/cercle/ellipse/poly couverts.
+#[test]
+fn svg_geometry_total_length_and_point_at() {
+    let mut e = Engine::new();
+    e.install_dom(&Rc::new(RefCell::new(Dom::from_html(
+        r#"<html><body>
+<svg>
+<path id="p" d="M0,0 L30,0 L30,40"/>
+<line id="l" x1="0" y1="0" x2="3" y2="4"/>
+<rect id="r" x="0" y="0" width="10" height="5"/>
+<circle id="c" r="10"/>
+<polyline id="pl" points="0,0 10,0 10,10"/>
+<polygon id="pg" points="0,0 10,0 10,10"/>
+</svg></body></html>"#,
+    ))));
+    // path : 30+40 = 70
+    assert_eq!(
+        ev(&mut e, "document.getElementById('p').getTotalLength()"),
+        "70"
+    );
+    // ligne : hypot(3,4) = 5
+    assert_eq!(
+        ev(&mut e, "document.getElementById('l').getTotalLength()"),
+        "5"
+    );
+    // rect : 2*(10+5) = 30
+    assert_eq!(
+        ev(&mut e, "document.getElementById('r').getTotalLength()"),
+        "30"
+    );
+    // cercle : 2π·10 ≈ 62.83
+    assert_eq!(
+        ev(
+            &mut e,
+            "document.getElementById('c').getTotalLength().toFixed(1)"
+        ),
+        "62.8"
+    );
+    // polyline ouverte : 10+10 = 20 ; polygon fermée :
+    // 10+10+hypoténuse de fermeture √200 ≈ 34.14.
+    assert_eq!(
+        ev(&mut e, "document.getElementById('pl').getTotalLength()"),
+        "20"
+    );
+    assert_eq!(
+        ev(
+            &mut e,
+            "document.getElementById('pg').getTotalLength().toFixed(2)"
+        ),
+        "34.14"
+    );
+    // getPointAtLength : mi-chemin du path (35 sur 70) = (30,5)
+    assert_eq!(
+        ev(
+            &mut e,
+            "var q=document.getElementById('p').getPointAtLength(35);\
+             q.x+':'+q.y+':'+q.z+':'+q.w"
+        ),
+        "30:5:0:1"
+    );
+    // clamp hors bornes → extrémités
+    assert_eq!(
+        ev(
+            &mut e,
+            "var q=document.getElementById('p').getPointAtLength(999);\
+             q.x+':'+q.y"
+        ),
+        "30:40"
+    );
+    // tag non-géométrie → undefined (pas de méthode fantôme)
+    assert_eq!(
+        ev(&mut e, "typeof document.body.getTotalLength"),
+        "undefined"
+    );
+}
