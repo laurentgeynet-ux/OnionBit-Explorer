@@ -5057,6 +5057,27 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   `doc_lifecycle_replays_after_
   detached_pump`.
 
+- [x] **Étape 167. Bundle portable**
+  (`explorer-launcher`,
+  `explorer-core::paths`,
+  `explorer-ffi`,
+  `scripts/build_dist.ps1`) —
+  architecture de dossiers du
+  produit OnionBit : marqueur
+  `Explorer.portable` à la racine
+  → `state/` portable détecté par
+  `JsonFileStore::default_dir`
+  (remontée depuis l'exe) ;
+  lanceur GUI →
+  `windows\explorer_app.exe` ;
+  verrou d'instance
+  `explorer.lock` (fslock) ;
+  journal `state/logs/engine.log`.
+  `dist\Explorer\` + zip
+  `Explorer-<ver>-windows-x64` —
+  cohabite avec OnionBit sur le
+  même support ou vit seul.
+
 - [ ] **Écarts terrain — vol humain
   22/10 (release `39ab821`, FFI)** :
   second run humain — trois constats

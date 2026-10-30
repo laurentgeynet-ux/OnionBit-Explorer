@@ -7,6 +7,48 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **Étape 167 — bundle portable**
+  (`Explorer.portable` +
+  `windows/`) — même architecture
+  de dossiers que le produit
+  OnionBit : les deux cohabitent
+  sur un même support amovible
+  (ou vivent indépendamment).
+  `dist\Explorer\` = `Explorer.exe`
+  (nouveau crate
+  `explorer-launcher` — GUI sans
+  console, cible
+  `windows\explorer_app.exe`
+  résolue relativement à
+  `current_exe`, jamais de
+  chemin absolu figé) +
+  marqueur `Explorer.portable` +
+  `windows\` (explorer_app +
+  `explorer_ffi.dll` + runtime
+  Flutter, moteur FFI in-process)
+  + `build-manifest.json` ;
+  `state\` créé au premier
+  lancement (profil, cache,
+  downloads, `logs\engine.log`).
+  `JsonFileStore::default_dir`
+  détecte le marqueur en
+  remontant depuis l'exe
+  (`EXPLORER_PROFILE` reste
+  prioritaire) — daemon et FFI
+  deviennent portables sans
+  autre changement. Verrou
+  d'instance `state\explorer.lock`
+  (fslock — lock OS relâché à la
+  mort du processus) : deux
+  navigateurs sur le même profil
+  = deux writers JSON, refusé.
+  `scripts\build_dist.ps1`
+  (supplante `package.ps1`) +
+  `dist_lisezmoi.txt` + zip
+  `Explorer-<ver>-windows-x64`.
+  Invariant : rien d'absolu
+  persisté sous `state\`.
+
 - **Étape 166 — débit tick :
   deadline relue périodiquement**
   (`explorer-jscore`, bras débit

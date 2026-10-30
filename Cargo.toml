@@ -14,6 +14,7 @@ members = [
     "crates/explorer-cli",
     "crates/explorer-ffi",
     "crates/explorer-daemon",
+    "crates/explorer-launcher",
     "crates/explorer-test-support",
     # Moteur JavaScript de l'équipe dédiée (ADR-0007) — nom de produit
     # propre, adapté derrière `explorer-js::JsEngine` en phase 8.
@@ -59,6 +60,17 @@ owned_ttf_parser = "0.25"
 tiny-skia = "0.11"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "env-filter"] }
+# Sortie tracing fichier (`state/logs/engine.log` du bundle
+# portable) — appendeur officiel de l'écosystème tracing.
+tracing-appender = "0.2"
+# Verrou de fichier inter-processus (instance unique du profil
+# portable — lock OS relâché à la mort du processus, pas de
+# lockfile résiduel après crash).
+fslock = "0.2"
+# Boîte de dialogue native pour le lanceur portable (GUI sans
+# console — équivalent safe de MessageBoxW, évite une dérogation
+# unsafe supplémentaire à ADR-0018).
+rfd = "0.15"
 # Moteur regex de explorer-jscore (pur Rust) — lookahead/backrefs non
 # supportés, dégradation SyntaxError documentée (ADR-0007).
 regex = "1.11"

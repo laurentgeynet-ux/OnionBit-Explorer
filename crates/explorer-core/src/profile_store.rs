@@ -73,11 +73,16 @@ impl JsonFileStore {
     }
 
     /// Répertoire de profil par défaut selon la plateforme
-    /// (`EXPLORER_PROFILE` prioritaire — déplaçable).
+    /// (`EXPLORER_PROFILE` prioritaire — déplaçable ; puis bundle
+    /// portable détecté par le marqueur
+    /// [`crate::paths::PORTABLE_MARKER`] → `<racine>/state`).
     #[must_use]
     pub fn default_dir() -> PathBuf {
         if let Some(d) = std::env::var_os("EXPLORER_PROFILE") {
             return PathBuf::from(d);
+        }
+        if let Some(d) = crate::paths::portable_state_dir() {
+            return d;
         }
         #[cfg(windows)]
         {

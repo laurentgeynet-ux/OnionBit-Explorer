@@ -48,6 +48,10 @@ OnionBit-flightprofile/
 target*/
 terrain-bin/
 
+# Bundle portable assemblé par scripts/build_dist.ps1 — le
+# `state/` qu'il contient est de la donnée utilisateur.
+dist/
+
 # Preuves de vol — dossier local, non suivi (rapports SYNTHESE/
 # RAPPORT_VOL_* + captures + logs restent sur disque)
 docs/Rapport vol/

@@ -14,6 +14,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod paths;
 pub mod profile_store;
 pub mod session;
 

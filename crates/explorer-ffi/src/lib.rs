@@ -40,7 +40,7 @@
 //! `-2` échec moteur (détail via [`explorer_last_error`]).
 
 use std::cell::RefCell;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use explorer_core::{CoreEvent, InputEvent, InputOutcome as O, KeyMods, Session};
@@ -87,6 +87,10 @@ pub struct ExplorerHandle {
     /// faute de place dans le buffer appelant — réémises à
     /// l'appel suivant (jamais tronquées à mi-ligne).
     media_pending: String,
+    /// Verrou d'instance unique du profil (`explorer.lock`) —
+    /// gardé jusqu'à la destruction du handle ; le lock OS est
+    /// relâché à la mort du processus, pas de résidu après crash.
+    _profile_lock: Option<fslock::LockFile>,
 }
 
 /// Répertoire de fontes par défaut — `EXPLORER_FONT_DIR` en
@@ -173,6 +177,14 @@ fn create_inner(profile_dir: Option<PathBuf>) -> *mut ExplorerHandle {
     let mut session = Session::new(http_stack(), Arc::new(fonts));
     session.set_js_factory(explorer_js::JscoreEngine::factory());
     let dir = profile_dir.unwrap_or_else(explorer_core::JsonFileStore::default_dir);
+    let profile_lock = match acquire_profile_lock(&dir) {
+        Ok(l) => l,
+        Err(msg) => {
+            set_err(msg);
+            return std::ptr::null_mut();
+        }
+    };
+    init_file_logging(&dir);
     session.set_store(Arc::new(explorer_core::JsonFileStore::open(&dir)));
     let events = session.subscribe();
     Box::into_raw(Box::new(ExplorerHandle {
@@ -180,16 +192,63 @@ fn create_inner(profile_dir: Option<PathBuf>) -> *mut ExplorerHandle {
         session,
         events,
         media_pending: String::new(),
+        _profile_lock: profile_lock,
     }))
+}
+
+/// Verrou d'instance unique sur le profil (`<dir>/explorer.lock`)
+/// — deux processus sur le même profil = deux writers JSON
+/// (miroir de l'instance unique par `state_dir` du modèle
+/// portable). Le lock OS (`fslock`) est relâché à la mort du
+/// processus : pas de lockfile résiduel après crash.
+///
+/// `Err` = profil déjà utilisé (refus explicite, message pour
+/// l'appelant). `Ok(None)` = verrou impossible (FS sans locking)
+/// — best-effort, on ne bloque pas le démarrage.
+fn acquire_profile_lock(dir: &Path) -> Result<Option<fslock::LockFile>, String> {
+    if std::fs::create_dir_all(dir).is_err() {
+        return Ok(None);
+    }
+    let Ok(mut lock) = fslock::LockFile::open(&dir.join("explorer.lock")) else {
+        return Ok(None);
+    };
+    match lock.try_lock() {
+        Ok(true) => Ok(Some(lock)),
+        Ok(false) => Err(format!(
+            "profil déjà utilisé par une autre instance : {}",
+            dir.display()
+        )),
+        Err(_) => Ok(None),
+    }
+}
+
+/// Journal fichier `<profil>/logs/engine.log` — une fois par
+/// processus, best-effort (échec silencieux : le mode FFI n'a
+/// pas de console, l'absence de journal n'est pas fatale).
+fn init_file_logging(profile_dir: &Path) {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        let logs = profile_dir.join("logs");
+        if std::fs::create_dir_all(&logs).is_err() {
+            return;
+        }
+        let file = tracing_appender::rolling::never(logs, "engine.log");
+        let _ = tracing_subscriber::fmt()
+            .with_writer(file)
+            .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+            .with_ansi(false)
+            .try_init();
+    });
 }
 
 /// Crée une session moteur in-process (runtime tokio privé,
 /// pile réseau réelle, fabrique JS branchée). `NULL` si le
 /// runtime n'a pas pu être construit.
 ///
-/// Le profil persistant vient de `EXPLORER_PROFILE`
-/// (repli plateforme) — voir [`explorer_create_with_profile`]
-/// pour un chemin explicite.
+/// Le profil persistant vient de `EXPLORER_PROFILE`, sinon du
+/// marqueur `Explorer.portable` (bundle portable → `<racine>/
+/// state`), sinon du repli plateforme — voir
+/// [`explorer_create_with_profile`] pour un chemin explicite.
 #[unsafe(no_mangle)]
 pub extern "C" fn explorer_create() -> *mut ExplorerHandle {
     create_inner(None)
@@ -1099,6 +1158,7 @@ mod tests {
             session,
             events,
             media_pending: String::new(),
+            _profile_lock: None,
         }))
     }
 

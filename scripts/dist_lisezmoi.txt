@@ -1,0 +1,45 @@
+================================================================
+ Explorer {{VERSION}} — Windows x64
+ Navigateur web from scratch (moteur Rust + UI Flutter)
+================================================================
+
+CONTENU
+  Explorer.exe          Lanceur — demarre l'application
+  Explorer.portable     Marqueur de mode portable — ne pas supprimer
+  windows\              Application et runtime — ne pas separer
+                        du lanceur
+  build-manifest.json   Version, commit, compilateur
+  LICENSE*              MIT OR Apache-2.0
+
+DEMARRAGE RAPIDE
+  1. Extraire le zip complet dans un dossier (ex. E:\Explorer
+     sur une cle USB, ou C:\Explorer).
+  2. Lancer Explorer.exe.
+  3. Premier lancement : l'etat est cree dans state\ a cote
+     des fichiers (historique, signets, cookies, cache,
+     telechargements, logs). Le dossier entier est deplacable
+     tel quel — aucune donnee n'est ecrite hors du dossier.
+
+COHABITATION
+  Le bundle cohabite avec OnionBit sur le meme support :
+  deux dossiers independants, aucun etat partage.
+  E:\OnionBit\ et E:\Explorer\ fonctionnent cote a cote.
+
+UNE SEULE INSTANCE PAR PROFIL
+  Un second lancement sur le meme state\ est refuse (verrou
+  explorer.lock) — deux navigateurs ecriraient dans les memes
+  fichiers. Deux copies du bundle dans des dossiers distincts
+  peuvent tourner en parallele.
+
+VARIABLES D'ENVIRONNEMENT (optionnel)
+  EXPLORER_PROFILE=<chemin>   force un autre repertoire de profil
+                            (prioritaire sur le mode portable)
+  EXPLORER_COLOR_SCHEME       dark | light (defaut : light)
+
+AVERTISSEMENT — VERSION ALPHA
+  Moteur de navigateur en developpement actif : rendu, layout
+  et JavaScript sont partiels. Ne pas utiliser pour des besoins
+  critiques.
+
+SOURCE / RAPPORTS DE BUGS
+  https://github.com/laurentgeynet-ux/OnionBit-Explorer

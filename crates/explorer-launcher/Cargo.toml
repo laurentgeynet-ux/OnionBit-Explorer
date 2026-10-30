@@ -1,0 +1,15 @@
+[package]
+name = "explorer-launcher"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Lanceur portable du bundle Windows — relaie vers windows\\explorer_app.exe (étape bundle portable)"
+
+[lints]
+workspace = true
+
+[target.'cfg(windows)'.dependencies]
+# Boîte d'erreur native (lanceur GUI sans console) — équivalent
+# safe de MessageBoxW, pas de dérogation unsafe.
+rfd.workspace = true
