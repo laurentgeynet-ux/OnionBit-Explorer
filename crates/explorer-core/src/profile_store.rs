@@ -331,11 +331,7 @@ impl JsonHstsStore {
             .and_then(|v| {
                 serde_json::from_value::<std::collections::HashMap<String, RawHsts>>(v).ok()
             })
-            .map(|m| {
-                m.into_iter()
-                    .filter(|(_, e)| e.exp > now)
-                    .collect()
-            })
+            .map(|m| m.into_iter().filter(|(_, e)| e.exp > now).collect())
             .unwrap_or_default();
         Self {
             dir: dir.to_path_buf(),
@@ -365,9 +361,7 @@ impl JsonHstsStore {
 
 impl explorer_net::hsts::HstsStore for JsonHstsStore {
     fn is_secure(&self, host: &str) -> bool {
-        self.map
-            .lock()
-            .is_ok_and(|m| Self::covered(&m, host))
+        self.map.lock().is_ok_and(|m| Self::covered(&m, host))
     }
 
     /// RFC 6797 §8.1 : `max-age=0` retire la politique ; sinon
@@ -408,6 +402,104 @@ struct RawHsts {
     /// `includeSubDomains`.
     #[serde(default)]
     subs: bool,
+}
+
+/// Store DNS persisté (`dns_cache.json`, PR-9) —
+/// `host → {ips, exp}` ; implémente le port
+/// [`explorer_net::resolver::DnsStore`] injecté dans
+/// `CachingResolver`. Borné : entrées périmées élaguées à la
+/// lecture et à chaque hit, map plafonnée — les plus anciennes
+/// expirations sortent d'abord.
+pub struct JsonDnsStore {
+    dir: PathBuf,
+    /// `host → (ips, expires_unix)`.
+    map: Mutex<std::collections::HashMap<String, RawDns>>,
+    /// Sérialise les écritures.
+    io: Mutex<()>,
+}
+
+/// Borne du cache DNS persisté (PR-9).
+const DNS_CACHE_CAP: usize = 4000;
+
+impl JsonDnsStore {
+    /// Ouvre (ou crée) `<dir>/dns_cache.json` — entrées
+    /// expirées élaguées à la lecture.
+    #[must_use]
+    pub fn open(dir: &Path) -> Self {
+        let _ = fs::create_dir_all(dir);
+        let now = unix_now();
+        let map = read_json(&dir.join("dns_cache.json"))
+            .and_then(|v| {
+                serde_json::from_value::<std::collections::HashMap<String, RawDns>>(v).ok()
+            })
+            .map(|m| m.into_iter().filter(|(_, e)| e.exp > now).collect())
+            .unwrap_or_default();
+        Self {
+            dir: dir.to_path_buf(),
+            map: Mutex::new(map),
+            io: Mutex::new(()),
+        }
+    }
+}
+
+impl explorer_net::resolver::DnsStore for JsonDnsStore {
+    fn lookup(&self, host: &str) -> Option<Vec<std::net::IpAddr>> {
+        self.map.lock().ok().and_then(|mut m| {
+            let e = m.get(host)?;
+            if e.exp <= unix_now() {
+                m.remove(host);
+                return None;
+            }
+            Some(
+                e.ips
+                    .iter()
+                    .filter_map(|s| s.parse::<std::net::IpAddr>().ok())
+                    .collect(),
+            )
+        })
+    }
+
+    fn record(&self, host: &str, ips: &[std::net::IpAddr], ttl: std::time::Duration) {
+        if let Ok(mut m) = self.map.lock() {
+            m.insert(
+                host.to_string(),
+                RawDns {
+                    ips: ips.iter().map(ToString::to_string).collect(),
+                    exp: unix_now() + ttl.as_secs(),
+                },
+            );
+            // Borne : hors capacité, les expirations les plus
+            // proches (les plus périmées) sortent d'abord.
+            if m.len() > DNS_CACHE_CAP {
+                let mut by_exp: Vec<(u64, String)> =
+                    m.iter().map(|(h, e)| (e.exp, h.clone())).collect();
+                by_exp.sort_unstable();
+                for (_, h) in by_exp.into_iter().take(m.len() - DNS_CACHE_CAP) {
+                    m.remove(&h);
+                }
+            }
+            let snapshot = m.clone();
+            drop(m);
+            let _guard = self.io.lock().ok();
+            let Some(s) = serde_json::to_string(&snapshot).ok() else {
+                return;
+            };
+            let dst = self.dir.join("dns_cache.json");
+            let tmp = self.dir.join("dns_cache.json.tmp");
+            if fs::write(&tmp, s).is_ok() {
+                let _ = fs::rename(&tmp, &dst);
+            }
+        }
+    }
+}
+
+/// Entrée `dns_cache.json` sérialisée (PR-9).
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
+struct RawDns {
+    /// Adresses IP textuelles.
+    ips: Vec<String>,
+    /// Expiration — secondes unix.
+    exp: u64,
 }
 
 /// Secondes unix courantes.

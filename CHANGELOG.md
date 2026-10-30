@@ -7,6 +7,21 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **PR-9 — `dns_cache.json`**
+  (`explorer-net`, `explorer-core`,
+  hôtes) — cache DNS persisté :
+  `CachingResolver` enveloppe le
+  résolveur injecté (`system`/
+  `doh`) dans les piles daemon
+  **et** FFI ; hits non expirés
+  évitent la requête `getaddrinfo`,
+  TTL bornée à 300 s (`getaddrinfo`
+  ne rapporte pas le TTL RR).
+  `JsonDnsStore` en
+  `state/dns_cache.json` — cap
+  4000, élagage des expirées,
+  écriture atomique.
+
 - **PR-4 — `session.json`** (app) —
   **restauration d'onglets au
   boot** : `{tabs:[{url,title,

@@ -299,13 +299,19 @@ fn http_stack(
     resolver: Option<Arc<dyn explorer_net::resolver::Resolver>>,
 ) -> Arc<dyn HttpTransport> {
     // Résolution injectable (étape 72) : `system` (défaut)
-    // ou `doh` — le connecteur tente chaque IP résolue.
-    let tls = Arc::new(match resolver {
-        Some(r) => {
-            TlsConnector::web_roots_over(Arc::new(explorer_net::h1::ResolvingConnector::new(r)))
-        }
-        None => TlsConnector::web_roots(),
-    });
+    // ou `doh` — le connecteur tente chaque IP résolue. Le
+    // cache DNS persisté (PR-9) enveloppe le résolveur choisi.
+    let base: Arc<dyn explorer_net::resolver::Resolver> =
+        resolver.unwrap_or_else(|| Arc::new(explorer_net::resolver::SystemResolver));
+    let tls = Arc::new(TlsConnector::web_roots_over(Arc::new(
+        explorer_net::h1::ResolvingConnector::new(Arc::new(
+            explorer_net::resolver::CachingResolver::wrap(
+                base,
+                Arc::new(explorer_core::JsonDnsStore::open(profile)),
+                explorer_net::resolver::DNS_CACHE_TTL,
+            ),
+        )),
+    )));
     // ALPN : h2 si le serveur le propose, h1 sinon (etape 41).
     let h1: Arc<dyn HttpTransport> = Arc::new(AutoClient::new(tls, HttpConfig::default()));
     let decoded: Arc<dyn HttpTransport> = Arc::new(DecodingTransport::wrap(h1, cfg.max_body));

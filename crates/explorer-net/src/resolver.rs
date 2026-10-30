@@ -19,7 +19,7 @@
 
 use std::collections::HashMap;
 use std::net::IpAddr;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
@@ -300,6 +300,60 @@ fn skip_name(buf: &[u8], mut pos: usize) -> Option<usize> {
             return pos.checked_add(2); // pointeur : 2 octets
         }
         pos = pos.checked_add(1 + len)?;
+    }
+}
+
+/// TTL par défaut d'une entrée du cache DNS persisté (PR-9) —
+/// `getaddrinfo` ne rapporte pas le TTL RR, on borne à une
+/// durée courte et documentée (5 min) plutôt que de retenir
+/// des adresses périmées.
+pub const DNS_CACHE_TTL: Duration = Duration::from_secs(300);
+
+/// Store de cache DNS persisté — injecté dans
+/// [`CachingResolver`] ; la persistance vit chez l'hôte
+/// (`state/dns_cache.json` — `JsonDnsStore` côté
+/// `explorer-core`, PR-9).
+pub trait DnsStore: Send + Sync {
+    /// Adresses mémorisées non expirées — `None` = miss.
+    fn lookup(&self, host: &str) -> Option<Vec<IpAddr>>;
+    /// Mémorise `ips` pour `host` avec la TTL fournie
+    /// (bornée côté store).
+    fn record(&self, host: &str, ips: &[IpAddr], ttl: Duration);
+}
+
+/// Résolveur à cache persisté (PR-9) : hit non expiré → les
+/// adresses mémorisées évitent la requête DNS ; miss →
+/// résolution amont puis enregistrement. `describe` chaîne le
+/// descripteur amont (`system`, `doh:…`).
+pub struct CachingResolver {
+    inner: Arc<dyn Resolver>,
+    store: Arc<dyn DnsStore>,
+    ttl: Duration,
+}
+
+impl CachingResolver {
+    /// Enveloppe `inner` avec le `store` injecté.
+    #[must_use]
+    pub fn wrap(inner: Arc<dyn Resolver>, store: Arc<dyn DnsStore>, ttl: Duration) -> Self {
+        Self { inner, store, ttl }
+    }
+}
+
+#[async_trait]
+impl Resolver for CachingResolver {
+    async fn resolve(&self, host: &str) -> NetResult<Vec<IpAddr>> {
+        if let Some(ips) = self.store.lookup(host) {
+            return Ok(ips);
+        }
+        let ips = self.inner.resolve(host).await?;
+        if !ips.is_empty() {
+            self.store.record(host, &ips, self.ttl);
+        }
+        Ok(ips)
+    }
+
+    fn describe(&self) -> String {
+        format!("cache({})", self.inner.describe())
     }
 }
 

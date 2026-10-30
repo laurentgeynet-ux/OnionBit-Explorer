@@ -113,7 +113,16 @@ fn default_fonts_dir() -> PathBuf {
 /// h1/h2 → décodage → HSTS (store du profil, PR-3) →
 /// redirections bornées.
 fn http_stack(profile: &Path) -> Arc<dyn HttpTransport> {
-    let tls = Arc::new(TlsConnector::web_roots());
+    // Cache DNS persisté (PR-9) — même pile que le démon.
+    let tls = Arc::new(TlsConnector::web_roots_over(Arc::new(
+        explorer_net::h1::ResolvingConnector::new(Arc::new(
+            explorer_net::resolver::CachingResolver::wrap(
+                Arc::new(explorer_net::resolver::SystemResolver),
+                Arc::new(explorer_core::JsonDnsStore::open(profile)),
+                explorer_net::resolver::DNS_CACHE_TTL,
+            ),
+        )),
+    )));
     let h1: Arc<dyn HttpTransport> = Arc::new(AutoClient::new(tls, HttpConfig::default()));
     let decoded: Arc<dyn HttpTransport> = Arc::new(DecodingTransport::wrap(h1, MAX_BODY));
     let hsts: Arc<dyn HttpTransport> = Arc::new(explorer_net::hsts::HstsTransport::wrap(

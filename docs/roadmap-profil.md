@@ -58,7 +58,9 @@ décidée 2026-10-30 avec le bundle portable (Étape 167).
   le premier consommateur.
 - [ ] **PR-8. `cert_decisions.json`** — exceptions certificats
   (rustls custom verifier — sensible sécurité).
-- [ ] **PR-9. `dns_cache.json`** — borné, TTL respecté.
+- [x] **PR-9. `dns_cache.json`** — borné (cap 4000), TTL 300 s
+  (`getaddrinfo` ne rapporte pas le TTL RR — borne documentée) ;
+  `CachingResolver` + `JsonDnsStore`, câblé daemon + FFI.
 
 ## Palier PR-P3 — étapes dédiées (ADR probable chacune)
 

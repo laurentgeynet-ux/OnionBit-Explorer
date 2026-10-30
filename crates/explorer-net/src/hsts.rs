@@ -95,8 +95,7 @@ impl HttpTransport for HstsTransport {
         if req.url.scheme() == "https" {
             if let Some(v) = resp.header("strict-transport-security") {
                 if let Some((age, subs)) = parse_sts(v) {
-                    self.store
-                        .record(req.url.host().as_str(), age, subs);
+                    self.store.record(req.url.host().as_str(), age, subs);
                 }
             }
         }

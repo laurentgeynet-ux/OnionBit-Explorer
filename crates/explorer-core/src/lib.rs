@@ -19,13 +19,12 @@ pub mod profile_store;
 pub mod session;
 
 pub use explorer_css::ColorScheme;
-pub use profile_store::{JsonFileStore, JsonHstsStore};
+pub use profile_store::{JsonDnsStore, JsonFileStore, JsonHstsStore};
 pub use session::{
     drain_applies_shared, drain_navs_shared, eval_shared, history_move_shared,
     media_codecs_from_json, media_event_json, media_host_state_str, media_offer_json,
     media_report_from_json, navigate_shared, pump_timers_shared, Bookmark, CoreError, CoreEvent,
-    DownloadRecord,
-    EvalReply, FrameRegion, InputEvent, InputOutcome, KeyMods, MediaCmd, MediaError,
-    MediaHostState, MediaKind, MediaOfferInfo, MediaRect, MediaReport, MsePull, ProfileStore,
-    Session, SessionConfig, StoredCookie, TabId, TabInfo, Visit,
+    DownloadRecord, EvalReply, FrameRegion, InputEvent, InputOutcome, KeyMods, MediaCmd,
+    MediaError, MediaHostState, MediaKind, MediaOfferInfo, MediaRect, MediaReport, MsePull,
+    ProfileStore, Session, SessionConfig, StoredCookie, TabId, TabInfo, Visit,
 };
