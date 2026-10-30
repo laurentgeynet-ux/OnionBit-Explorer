@@ -82,11 +82,20 @@ décidée 2026-10-30 avec le bundle portable (Étape 167).
     par origine (`ProfileStore::load_idb`/`save_idb`,
     atomique) + bridge `explorer-js` (Cmd InstallIdb/DrainIdb)
     + wiring session (restore au ctx, drain à `after_script`).
-  - [ ] **PR-10b** — shim : `open`/`createObjectStore`/
-    `put`/`get`/`delete`/`getAll` + transactions
-    `readonly`/`readwrite` + clés nombre/chaîne.
-  - [ ] **PR-10c** — `IDBIndex`, `IDBCursor`/`keyRange`,
-    `DOMException` fidèles, `versionchange` upgrade.
+  - [x] **PR-10b** — ~~shim~~ **couvert par JS-C72** :
+    `open`/`createObjectStore`/`put`/`get`/`delete`/`getAll` +
+    transactions `readonly`/`readwrite` + clés nombre/chaîne
+    (déjà implémenté côté moteur — pas de shim à écrire).
+  - [x] **PR-10c** — ~~index/cursors~~ **couvert par JS-C72** :
+    `IDBIndex`, `IDBCursor`/`keyRange`, `DOMException`,
+    `versionchange` déjà implémentés.
+  - [ ] **PR-10d — gaps de fidélité** : structured-clone
+    complet (`Map`/`TypedArray`/`ArrayBuffer`/`Date`
+    arrondis par le `stringify` JSON — encodage taggé à
+    faire) ; drain/persistance des registres des
+    **contextes `<iframe>`** (seul le top-level est
+    persisté aujourd'hui) ; partage live d'un registre
+    entre onglets de même origine.
 - [ ] **PR-11. Mots de passe** — ProfileVault (AEAD par
   fichier, passphrase/invité) + détection + UI remplissage.
 - [ ] **PR-12. Service Workers + CacheStorage** — cycle de
