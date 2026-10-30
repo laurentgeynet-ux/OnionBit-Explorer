@@ -1080,6 +1080,37 @@ pub unsafe extern "C" fn explorer_media_state(
 }
 
 
+/// Télécharge `url` directement sous `state/downloads/`
+/// (« enregistrer la source » média / « enregistrer sous » —
+/// pile transport complète : cookies, cache, HSTS). `0`
+/// succès, `-1` handle/arg invalide, `-2` erreur moteur
+/// ([`explorer_last_error`]).
+///
+/// # Safety
+///
+/// `h` issu de [`explorer_create`] ; `url..url+len` lisible.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn explorer_download_url(
+    h: *mut ExplorerHandle,
+    tab: u64,
+    url: *const u8,
+    len: usize,
+) -> i32 {
+    let Some(h) = (unsafe { handle(h) }) else {
+        return -1;
+    };
+    let Some(u) = (unsafe { read_str(url, len, MAX_URL) }) else {
+        return -1;
+    };
+    match h.rt.block_on(h.session.download_url(tab, u)) {
+        Ok(_) => 0,
+        Err(e) => {
+            set_err(e);
+            -2
+        }
+    }
+}
+
 /// Journal de navigation du profil — JSON
 /// `[{"url":…,"title":…}]` dans `buf` (même contrat
 /// UTF-8/`cap` que [`explorer_last_error`]).

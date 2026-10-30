@@ -376,7 +376,7 @@ fn forced_download_meta(headers: &[(String, String)], attr: &str) -> DownloadMet
 /// espaces tolérés ; `filename*=` (RFC 5987) non décodé
 /// en v1 (déviation documentée, le repli est le segment
 /// d'URL).
-fn disposition_filename(disposition: &str) -> Option<String> {
+pub(crate) fn disposition_filename(disposition: &str) -> Option<String> {
     for part in disposition.split(';').skip(1) {
         let Some((k, v)) = part.split_once('=') else {
             continue;

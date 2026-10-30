@@ -232,6 +232,7 @@ const opBookmarks = 19;
 const opBookmarkAdd = 20;
 const opBookmarkDel = 21;
 const opHistory = 22;
+const opDownloadUrl = 23;
 
 /// Point d'entrée de l'isolate — `args` = `{'reply': SendPort,
 /// 'path': String}`. Envoie `{'port': SendPort}` puis
@@ -329,6 +330,7 @@ class _WorkerImpl {
   static _BmAddD? _bookmarkAdd;
   static _SetLangD? _bookmarkDel;
   static _BmListD? _history;
+  static _NavigateD? _downloadUrl;
   final _MediaEventsD? _mediaEvents;
   final _TabUrlD? _mediaList;
   final _MediaClaimD? _mediaClaim;
@@ -443,6 +445,13 @@ class _WorkerImpl {
       try {
         _history = lib.lookupFunction<_BmListN, _BmListD>(
           'explorer_history',
+        );
+      } on Object {
+        /* export absent */
+      }
+      try {
+        _downloadUrl = lib.lookupFunction<_NavigateN, _NavigateD>(
+          'explorer_download_url',
         );
       } on Object {
         /* export absent */
@@ -601,6 +610,15 @@ class _WorkerImpl {
         }
       case opHistory:
         return {'history': _readHistory()};
+      case opDownloadUrl:
+        final f = _downloadUrl;
+        if (f == null) return const {'code': -1};
+        final u = (m['url'] as String? ?? '').toNativeUtf8();
+        try {
+          return {'code': f(_handle, _tab(m), u.cast<ffi.Uint8>(), u.length)};
+        } finally {
+          calloc.free(u);
+        }
       case opFrame:
         return _frameOp(m);
       case opFrameRegion:

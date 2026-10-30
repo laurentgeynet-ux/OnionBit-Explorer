@@ -7,6 +7,23 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **« Enregistrer la source » média**
+  (core, api, ffi, app) —
+  `Session::download_url` repasse
+  une URL dans la pile transport
+  complète (cookies, cache, HSTS,
+  DNS) et écrit sous
+  `downloads/` + journal. REST
+  `POST /api/tabs/{id}/downloads`
+  `{url}` ; FFI
+  `explorer_download_url` ; UI :
+  icône ⬇ sur les surfaces
+  `<video>`/`<audio>` progressives
+  (non-MSE — un média streamé n'a
+  pas de ressource unique à
+  sauver). Chemin écrit dans un
+  snackbar.
+
 - **Pont favoris + historique
   FFI** (`explorer-ffi`, app) —
   `explorer_bookmarks`,

@@ -1079,6 +1079,17 @@ class BrowserController extends Notifier<BrowserState> {
 
   /// Toggle play/pause pour les surfaces `controls` (UI hôte
   /// minimale v1 : tap = play/pause).
+  /// « Enregistrer la source » d'une offre média — retourne
+  /// le chemin écrit (`''` si la DLL/repo n'a rien rendu,
+  /// `null` = échec → l'UI affiche un message d'erreur).
+  Future<String?> downloadUrl(String tabId, String url) async {
+    try {
+      return await _repo.downloadUrl(tabId, url);
+    } on Object {
+      return null;
+    }
+  }
+
   void mediaToggle(String tabId, int mediaId) {
     final p = _players[tabId]?[mediaId];
     if (p == null) return;

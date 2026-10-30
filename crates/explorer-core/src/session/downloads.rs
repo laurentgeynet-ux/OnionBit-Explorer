@@ -20,8 +20,10 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+use explorer_net::http::Request;
 use explorer_net::url::Url;
 
+use super::net_items::disposition_filename;
 use super::{
     collect_meta_csp, document_base, extract_title, meta_referrer_policy, meta_refresh,
     noscript_meta_refresh, CoreError, CoreEvent, DownloadInfo, NavDone, NavTail, Session,
@@ -111,6 +113,71 @@ impl Session {
             size: tail_size(&self.downloads, info.id),
         });
         Some(())
+    }
+
+    /// Télécharge `url` directement (bouton « enregistrer
+    /// la source » média / « enregistrer sous » — pas
+    /// d'offre ni d'epoch : la requête repasse la pile
+    /// transport complète — cookies, cache, HSTS, DNS — puis
+    /// le corps est écrit sous `download_dir`, journalisé
+    /// `downloads.json` (PR-1) et `DownloadDone` émis.
+    ///
+    /// # Errors
+    /// [`CoreError::Download`] — URL invalide, aucun
+    /// répertoire configuré, fetch en échec, corps au-delà
+    /// de `max_download_bytes`, ou écriture en échec.
+    pub async fn download_url(&mut self, tab: TabId, url: &str) -> Result<PathBuf, CoreError> {
+        let Some(dir) = self.download_dir.clone() else {
+            return Err(CoreError::Download(
+                "aucun répertoire configuré".to_string(),
+            ));
+        };
+        let Ok(u) = Url::parse(url) else {
+            return Err(CoreError::Download("URL invalide".to_string()));
+        };
+        let resp = self
+            .transport
+            .fetch(&Request::get(u.clone()))
+            .await
+            .map_err(|e| CoreError::Download(format!("{e}")))?;
+        if resp.body.len() > self.max_download_bytes {
+            return Err(CoreError::Download(format!(
+                "corps trop volumineux (> {} octets)",
+                self.max_download_bytes
+            )));
+        }
+        let hint = resp
+            .header("content-disposition")
+            .and_then(disposition_filename);
+        let filename = sanitize_filename(
+            &hint
+                .or_else(|| last_path_segment(&u))
+                .unwrap_or_else(|| "download".to_string()),
+        );
+        let target = unique_path(&dir, &filename);
+        if let Some(parent) = target.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| CoreError::Download(format!("répertoire : {e}")))?;
+        }
+        std::fs::write(&target, &resp.body)
+            .map_err(|e| CoreError::Download(format!("écriture : {e}")))?;
+        if let Some(s) = &self.store {
+            s.record_download(&crate::DownloadRecord {
+                url: u.to_string(),
+                filename,
+                path: target.display().to_string(),
+                size: resp.body.len() as u64,
+                finished_unix: std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map_or(0, |d| d.as_secs()),
+            });
+        }
+        let _ = self.events.send(CoreEvent::DownloadDone {
+            tab,
+            id: 0,
+            path: target.display().to_string(),
+        });
+        Ok(target)
     }
 
     /// Accepte un téléchargement en attente : écrit le corps

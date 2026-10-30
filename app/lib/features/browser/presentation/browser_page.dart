@@ -1479,6 +1479,46 @@ class _FrameViewState extends ConsumerState<_FrameView> {
         child: child,
       );
     }
+    // « Enregistrer la source » — la ressource progressive
+    // (media URL non-MSE) peut être sauvée directement sous
+    // `state/downloads/` via la pile transport (étape 70
+    // suite). Overlay discret en haut à droite ; `mse` ne
+    // l'est pas (segments multiples, hors scope).
+    if (m.url.isNotEmpty && !m.mse) {
+      child = Stack(
+        children: [
+          child,
+          Positioned(
+            top: 4,
+            right: 4,
+            child: IconButton(
+              visualDensity: VisualDensity.compact,
+              style: IconButton.styleFrom(
+                backgroundColor: Colors.black54,
+                foregroundColor: Colors.white,
+              ),
+              icon: const Icon(Icons.download, size: 18),
+              tooltip: AppLocalizations.of(context).save,
+              onPressed: () async {
+                final messenger = ScaffoldMessenger.of(context);
+                final l10n = AppLocalizations.of(context);
+                final path = await widget.ctrl.downloadUrl(tabId, m.url);
+                if (!context.mounted) return;
+                messenger.showSnackBar(
+                  SnackBar(
+                    content: Text(
+                      path == null
+                          ? l10n.downloadError(m.url)
+                          : l10n.downloadSaved(path),
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+        ],
+      );
+    }
     return child;
   }
 

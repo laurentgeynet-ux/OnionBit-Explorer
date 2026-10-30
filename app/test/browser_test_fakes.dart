@@ -227,6 +227,10 @@ class FakeRepo implements BrowserRepository {
   final List<String> declinedDownloads = [];
 
   @override
+  Future<String> downloadUrl(String tabId, String url) async =>
+      throw UnimplementedError('FakeRepo.downloadUrl');
+
+  @override
   Future<String> acceptDownload(String tabId, int dlId, {String? path}) async {
     acceptedDownloads.add('$tabId:$dlId');
     return path ?? '/dl/file.bin';

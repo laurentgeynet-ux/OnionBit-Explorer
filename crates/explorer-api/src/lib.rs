@@ -223,7 +223,10 @@ pub fn router_with_egress(
         .route("/api/tabs/{id}/media/{mid}/segments", get(media_segments))
         .route("/api/tabs/{id}/media/{mid}/release", post(media_release))
         .route("/api/tabs/{id}/media/{mid}/state", post(media_state))
-        .route("/api/tabs/{id}/downloads", get(list_downloads))
+        .route(
+            "/api/tabs/{id}/downloads",
+            get(list_downloads).post(download_url),
+        )
         .route(
             "/api/tabs/{id}/downloads/{dl}/accept",
             post(accept_download),
@@ -876,6 +879,29 @@ async fn list_downloads(State(st): State<ApiState>, Path(id): Path<TabId>) -> im
         })
         .collect();
     Json(serde_json::json!({ "downloads": v }))
+}
+
+/// `POST /api/tabs/{id}/downloads` — `{ "url": "…" }` :
+/// télécharge la ressource directement sous le répertoire
+/// de téléchargements (bouton « enregistrer la source »
+/// média — pile transport complète, journal + `DownloadDone`).
+async fn download_url(
+    State(st): State<ApiState>,
+    Path(id): Path<TabId>,
+    Json(v): Json<serde_json::Value>,
+) -> Response {
+    let Some(url) = v.get("url").and_then(|u| u.as_str()) else {
+        return err(StatusCode::BAD_REQUEST, &"champ url requis");
+    };
+    let url = url.to_string();
+    let mut session = st.session.lock().await;
+    match session.download_url(id, &url).await {
+        Ok(target) => Json(serde_json::json!({
+            "path": target.display().to_string()
+        }))
+        .into_response(),
+        Err(e) => err(StatusCode::BAD_REQUEST, &e),
+    }
 }
 
 /// `POST /api/tabs/{id}/downloads/{dl}/accept`

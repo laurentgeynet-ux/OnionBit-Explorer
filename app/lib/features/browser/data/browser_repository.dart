@@ -248,6 +248,22 @@ class BrowserRepository {
     throw const ApiException('POST /downloads/accept : réponse inattendue');
   }
 
+  /// Télécharge `url` directement sous le répertoire de
+  /// téléchargements (bouton « enregistrer la source » média
+  /// — `POST /api/tabs/{id}/downloads` `{url}`, étape 70
+  /// suite). Retourne le chemin écrit ; vide si le serveur
+  /// n'en rend pas.
+  Future<String> downloadUrl(String tabId, String url) async {
+    final res = await _api.postJson(
+      '/api/tabs/$tabId/downloads',
+      body: {'url': url},
+    );
+    if (res is Map<String, dynamic>) {
+      return res['path'] as String? ?? '';
+    }
+    throw const ApiException('POST /downloads : réponse inattendue');
+  }
+
   /// Rejette un téléchargement : le corps est rejoué comme
   /// document (dégradation « dump texte » historique).
   Future<void> declineDownload(String tabId, int dlId) =>
