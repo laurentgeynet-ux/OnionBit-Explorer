@@ -30,9 +30,9 @@ décidée 2026-10-30 avec le bundle portable (Étape 167).
   taille, date, état. `ProfileStore::record_download` au
   succès de `accept_download`, `downloads()` pour la lecture ;
   cap 2000, écriture atomique.
-- [ ] **PR-2. `zoom.json`** — origine → niveau de zoom
-  (l'UI zoom existe, ADR-0021 ; persistance côté app dans
-  `state/` via la résolution portable).
+- [x] **PR-2. `zoom.json`** — origine → niveau de zoom
+  (`ZoomStore` + `ZoomController` par origine — recharge au
+  changement d'URL active ; voisin de `ui_settings.json`).
 - [x] **PR-3. `hsts.json`** — capte `Strict-Transport-Security`,
   upgrade `http→https` avant fetch + expiry. Décorateur
   `HstsTransport` (`explorer-net`, port `HstsStore` injecté) +

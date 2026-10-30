@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:ui' as ui;
 
@@ -240,22 +241,102 @@ final historyProvider = FutureProvider.autoDispose<List<HistoryEntry>>(
   (ref) => ref.watch(browserRepositoryProvider).history(),
 );
 
+/// Store `zoom.json` — `origine → facteur` persisté dans le
+/// profil (PR-2) : le fichier vit à côté de `ui_settings.json`
+/// (même résolution portable `state/`).
+class ZoomStore {
+  const ZoomStore(this.file);
+
+  final File file;
+
+  /// Chemin par défaut — voisin de `ui_settings.json`.
+  static File defaultFile() {
+    final s = SettingsStore.defaultFile();
+    return File('${s.parent.path}${Platform.pathSeparator}zoom.json');
+  }
+
+  /// `origine → facteur` ; fichier absent/cassé → map vide.
+  Future<Map<String, double>> read() async {
+    try {
+      final v = jsonDecode(await file.readAsString());
+      if (v is Map) {
+        return {
+          for (final e in v.entries)
+            if (e.value is num) e.key.toString(): (e.value as num).toDouble(),
+        };
+      }
+    } on Object {
+      // Lecture impossible → zoom repart vierge, jamais fatal.
+    }
+    return {};
+  }
+
+  /// Persiste la map complète (best-effort).
+  Future<void> write(Map<String, double> map) async {
+    try {
+      await file.parent.create(recursive: true);
+      await file.writeAsString(jsonEncode(map));
+    } on Object {
+      // Répertoire non inscriptible → zoom gardé en mémoire.
+    }
+  }
+}
+
+/// Store injectable (tests : fichier temporaire).
+final zoomStoreProvider = Provider<ZoomStore>(
+  (_) => ZoomStore(ZoomStore.defaultFile()),
+);
+
+/// Origine canonique d'une URL de tab (`scheme://host[:port]`)
+/// — clé du store ; invalide → chaîne vide (jamais persistée).
+String _zoomOrigin(String? url) =>
+    url == null ? '' : (Uri.tryParse(url)?.origin ?? '');
+
 /// Facteur de zoom d'affichage (étape 57) — implémenté
 /// côté UI via le viewport moteur : `setViewport(w/z, h/z,
 /// z×dpr)` refond le layout à `w/z` unités CSS puis rasterise
 /// net à `w×dpr` px physiques (ADR-0021 — aucune API moteur).
 /// Borné pour rester dans les budgets de frame.
+///
+/// Persisté **par origine** (PR-2 — `zoom.json`) : le build
+/// se réévalue quand l'URL de l'onglet actif change et rend
+/// le facteur mémorisé pour cette origine.
 class ZoomController extends Notifier<double> {
   static const min = 0.25;
   static const max = 4.0;
   static const step = 1.25;
 
-  @override
-  double build() => 1.0;
+  Map<String, double> _map = {};
+  bool _loaded = false;
 
-  void zoomIn() => state = (state * step).clamp(min, max);
-  void zoomOut() => state = (state / step).clamp(min, max);
-  void reset() => state = 1.0;
+  /// Charge la map une fois puis ré-applique si l'origine
+  /// courante a un facteur mémorisé.
+  Future<void> _load() async {
+    if (_loaded) return;
+    _loaded = true;
+    _map = await ref.read(zoomStoreProvider).read();
+    final z = _map[_zoomOrigin(ref.read(browserProvider).active?.url)];
+    if (z != null && z != state) state = z;
+  }
+
+  @override
+  double build() {
+    _load();
+    final url = ref.watch(browserProvider.select((s) => s.active?.url));
+    return _map[_zoomOrigin(url)] ?? 1.0;
+  }
+
+  void _set(double v) {
+    state = v.clamp(min, max);
+    final origin = _zoomOrigin(ref.read(browserProvider).active?.url);
+    if (origin.isEmpty) return;
+    _map[origin] = state;
+    unawaited(ref.read(zoomStoreProvider).write(Map.of(_map)));
+  }
+
+  void zoomIn() => _set(state * step);
+  void zoomOut() => _set(state / step);
+  void reset() => _set(1.0);
 }
 
 final zoomProvider = NotifierProvider<ZoomController, double>(

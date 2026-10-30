@@ -7,6 +7,19 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **PR-2 — `zoom.json`** (app) —
+  le zoom par onglet est désormais
+  **persisté par origine**
+  (`scheme://host[:port]` →
+  facteur) : `ZoomController`
+  recharge le niveau mémorisé
+  quand l'URL de l'onglet actif
+  change, et écrit la map à
+  chaque `zoomIn`/`zoomOut`/
+  `reset`. Le fichier vit à côté
+  de `ui_settings.json` — sous
+  `state/` en bundle portable.
+
 - **PR-3 — `hsts.json` (HSTS,
   RFC 6797)** (`explorer-net`,
   `explorer-core`, hôtes) —
