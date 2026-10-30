@@ -1694,6 +1694,32 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   défaut spec builtins, arités
   précises posables après. Bundle
   manomano : éval `OK`.
+- **R-134 — §B-36 : `position:sticky`
+  peint en phase positionnée**
+  (`explorer-render`) — `sticky`
+  était classé en flux dans
+  `emit_scoped` (`in_flow` =
+  Static|Sticky) → un en-tête
+  sticky + `z-index` peignait
+  **avant** la couche absolue
+  d'une section voisine →
+  en-tête recouvert (wttj :
+  `fdTXRG_layout-header` sticky
+  + `z-998` ignoré sous le fond
+  hero absolu — smear jaune,
+  vol 218 persistant post-R-133).
+  Spec css-position : sticky
+  peint comme `relative` (App. E
+  étape 8) — désormais positionné,
+  `z-index` honnêtable. Le delta
+  d'épingle part dans
+  `cx.sticky_deltas` (réglé par le
+  parent qui connaît `bound`),
+  appliqué par `emit_scoped`/
+  `emit_scoped_at` quel que soit
+  le drain. Verrou
+  `sticky_peint_comme_positionne_
+  pas_en_flux` ; 19/19 binaires.
 - **R-133 — §B-32/§B-36 : `<svg>`
   re-rasterisé à la taille utilisée**
   (`explorer-render`) — un `<svg>`

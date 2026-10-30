@@ -1110,6 +1110,31 @@ fn svg_inline_rasterise_des_pixels() {
 }
 
 #[test]
+fn sticky_peint_comme_positionne_pas_en_flux() {
+    // R-134 (§B-36 wttj) : `position:sticky` est un positionné
+    // (css-position — peint comme `relative`, App. E) — un
+    // en-tête sticky à `z-index` doit peindre APRÈS une couche
+    // absolue de section voisine, pas avant comme du flux.
+    let (_dom, _bx, items) = dl(
+        "<div id=\"st\">S</div><div id=\"ab\"></div>",
+        "body{margin:0}#st{position:sticky;top:0;z-index:998;background:#0000ff;height:20px}\
+         #ab{position:absolute;top:0;left:0;width:50px;height:50px;background:#ff0000}",
+    );
+    let idx_of = |r: u8, g: u8, b: u8| {
+        items.iter().position(|i| {
+            matches!(i, DisplayItem::FillRect { color, .. }
+                if color.r == r && color.g == g && color.b == b)
+        })
+    };
+    let st = idx_of(0, 0, 255).expect("fond sticky");
+    let ab = idx_of(255, 0, 0).expect("fond absolu");
+    assert!(
+        st > ab,
+        "sticky (z=998) doit peindre après l'absolu : st={st} ab={ab}"
+    );
+}
+
+#[test]
 fn controle_input_peint_sa_valeur() {
     // R-21 : la valeur synthétique d'un `<input>` doit
     // produire un item Text (avant : enfant Text nu dans une

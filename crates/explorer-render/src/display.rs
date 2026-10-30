@@ -923,6 +923,7 @@ fn build_list(
         same_tree,
         canvas_bg_src: None,
         emit_per_path: std::collections::HashMap::new(),
+        sticky_deltas: std::collections::HashMap::new(),
         emits_total: 0,
         dropped: 0,
         first_cycle_path: None,
@@ -1080,6 +1081,12 @@ struct PaintCx<'a> {
     /// de report) et on casse la boucle plutôt que de figer
     /// le processus.
     emit_per_path: std::collections::HashMap<Box<[u16]>, u32>,
+    /// Décalages sticky `(dx, dy)` des enfants reportés —
+    /// indexés par pointeur de boîte : le parent connaît son
+    /// `bound` à l'enfilement (R-134 — un sticky peint en
+    /// phase positionnée, plus en flux, doit garder sa
+    /// translation d'épingle quel que soit le drain final).
+    sticky_deltas: std::collections::HashMap<usize, (f32, f32)>,
     /// Total d'émissions reportées de la passe (§B-26) —
     /// plafond dur [`MAX_EMITS_TOTAL`] couvrant les cycles à
     /// chemins divergents que le cap par chemin ne voit pas.
@@ -2425,6 +2432,15 @@ fn emit_scoped<'a>(
     fixed_defer: &mut Vec<(Vec<u16>, &'a LayoutBox)>,
 ) {
     cx.path.push(u16::try_from(idx).unwrap_or(u16::MAX));
+    // R-134 : translation sticky enregistrée par le parent à
+    // l'enfilement — entoure l'émission quel que soit le chemin
+    // d'émission (phase z<0, flottant, inline reporté).
+    let delta = cx.sticky_deltas.remove(&(std::ptr::from_ref(bx) as usize));
+    if let Some(d) = delta {
+        items.push(DisplayItem::PushTransform(
+            tiny_skia::Transform::from_translate(d.0, d.1),
+        ));
+    }
     if let Some((d, s, sig)) = reuse_delta(bx, off, cx) {
         copy_span(bx, s, d, sig, items, off, cx);
         repush_escaped(bx, &s.escaped, cx, pos_defer, fixed_defer, None);
@@ -2452,6 +2468,9 @@ fn emit_scoped<'a>(
             sig,
             esc.into_boxed_slice(),
         );
+    }
+    if delta.is_some() {
+        items.push(DisplayItem::PopTransform);
     }
     cx.path.pop();
 }
@@ -2545,6 +2564,15 @@ fn emit_scoped_at<'a>(
         return;
     }
     let saved = std::mem::replace(&mut cx.path, path);
+    // R-134 : translation sticky — même discipline que
+    // `emit_scoped` (file reportée, drain en contexte
+    // d'empilement quelconque).
+    let delta = cx.sticky_deltas.remove(&(std::ptr::from_ref(bx) as usize));
+    if let Some(d) = delta {
+        items.push(DisplayItem::PushTransform(
+            tiny_skia::Transform::from_translate(d.0, d.1),
+        ));
+    }
     if let Some((d, s, sig)) = reuse_delta(bx, off, cx) {
         copy_span(bx, s, d, sig, items, off, cx);
         repush_escaped(bx, &s.escaped, cx, pos_defer, fixed_defer, None);
@@ -2570,6 +2598,9 @@ fn emit_scoped_at<'a>(
             sig,
             esc.into_boxed_slice(),
         );
+    }
+    if delta.is_some() {
+        items.push(DisplayItem::PopTransform);
     }
     cx.path = saved;
 }
@@ -3015,8 +3046,7 @@ fn paint_replaced(
         if !matches!(
             bx.style.get("object-fit").map(str::trim),
             Some("none" | "scale-down")
-        ) && (dst.width > img.width as f32 * 1.25
-            || dst.height > img.height as f32 * 1.25)
+        ) && (dst.width > img.width as f32 * 1.25 || dst.height > img.height as f32 * 1.25)
         {
             // `svg_sources` n'est peuplé que pour les racines
             // `<svg>` — sa présence suffit à identifier le cas.
@@ -3449,7 +3479,27 @@ fn paint_box<'a>(
             pos_defer
         };
         let bound = bx.rect;
-        let in_flow = |c: &&LayoutBox| matches!(c.position, Position::Static | Position::Sticky);
+        // R-134 : `sticky` est un positionné (css-position —
+        // peint comme `relative`, App. E étape 8), pas un
+        // élément en flux. Le laisser dans `in_flow` faisait
+        // peindre un en-tête sticky AVANT la couche absolue
+        // d'une section voisine → en-tête recouvert (smear
+        // jaune wttj §B-36 : `fdTXRG_layout-header` sticky +
+        // `z-998` ignoré, fond hero absolu par-dessus).
+        let in_flow = |c: &&LayoutBox| matches!(c.position, Position::Static);
+        // Les deltas sticky se règlent ICI : le `bound` (bloc
+        // conteneur = cette boîte) n'est connu que du parent —
+        // la file reportée les consomme au drain, quel que soit
+        // le contexte d'empilement englobant atteint.
+        for child in &bx.children {
+            if child.position == Position::Sticky {
+                let d = sticky_offset(child, off, bound, cx.vp);
+                if d != (0.0, 0.0) {
+                    cx.sticky_deltas
+                        .insert(std::ptr::from_ref(child) as usize, d);
+                }
+            }
+        }
         let mut neg_z: Vec<(usize, &LayoutBox)> = bx
             .children
             .iter()
@@ -3468,22 +3518,14 @@ fn paint_box<'a>(
                 emit_scoped(ci, child, items, off, cx, pd, fixed_defer);
             }
         }
-        // (a) blocs en flux — `sticky` garde sa translation de
-        // peinture ; récursion `deep` ∝ profondeur (R-24).
+        // (a) blocs en flux ; récursion `deep` ∝ profondeur
+        // (R-24). Les sticky sont positionnés depuis R-134 —
+        // leur translation part dans la file (`sticky_deltas`).
         for (ci, child) in bx.children.iter().enumerate() {
             if !in_flow(&child) || child.float != Float::None || inline_carrier(child) {
                 continue;
             }
-            let stick = sticky_offset(child, off, bound, cx.vp);
-            if stick != (0.0, 0.0) {
-                items.push(DisplayItem::PushTransform(
-                    tiny_skia::Transform::from_translate(stick.0, stick.1),
-                ));
-            }
             emit_child(ci, child, items, off, cx, d, pd, fixed_defer);
-            if stick != (0.0, 0.0) {
-                items.push(DisplayItem::PopTransform);
-            }
         }
         // (b) flottants non positionnés — portée propre.
         for (ci, child) in bx.children.iter().enumerate() {
