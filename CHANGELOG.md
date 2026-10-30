@@ -7,6 +7,46 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **Étape 165 — empreinte
+  navigateur + bras deadline**
+  — (a) bras 403 (dailymotion
+  embed — anti-bot) : nav
+  document porte désormais
+  `Accept` navigateur + `Upgrade-
+  Insecure-Requests: 1` (verrou
+  `top_nav_carries_browser_
+  accept_headers`), et
+  `User-Agent` par défaut prend
+  la forme mainstream honnête
+  (`Mozilla/5.0 … Explorer/0.2
+  Safari/537.36` — token Explorer
+  conservé) ; (b) `js_ops` 5 M →
+  50 M (youtube embed `script
+  execution limit exceeded` —
+  la deadline wall-clock borne
+  les boucles, l'op-limit est
+  une garde de coût) — bras
+  deadline = débit interprète.
+
+- **`scripts/build_terrain_desktop.ps1`
+  — livraison « test terrain » en un
+  appel** : enrobe
+  `build_terrain.ps1` vers
+  `%USERPROFILE%\Desktop\
+  Onion explorer\` (app Flutter
+  release + `explorer_ffi.dll`
+  adjacente = moteur in-process,
+  daemon + cli release), purge
+  le dossier `app\` livré avant
+  copie (DLL de plugin périmée —
+  leçon étape 119), crée
+  `rapports\` (préservé d'une
+  livraison à l'autre) et
+  `LANCE-MOI.txt` (aide-mémoire
+  lancement + captures cli).
+  Cible : vol humain et rapports
+  de terrain.
+
 - **Étape 164 — bras deadline
   §B-4(c)/§B-1** — (a) le WARN
   `evals_sans_mutation` arme

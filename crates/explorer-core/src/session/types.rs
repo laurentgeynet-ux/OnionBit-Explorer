@@ -997,7 +997,12 @@ impl Default for SessionConfig {
             event_capacity: 512,
             viewport: (1024.0, 768.0),
             scale: 1.0,
-            js_ops: 5_000_000,
+            // Bras deadline (youtube embed vol — bundle légitime
+            // >5 M ops) : la deadline wall-clock borne déjà les
+            // boucles ; l'op-limit est une garde de coût, pas
+            // l'autorité temporelle. 50 M ≈ tête du budget boot
+            // à débit interprète courant.
+            js_ops: 50_000_000,
             max_images: 256,
             image_max_px: 16_000_000,
             max_sheets: 32,

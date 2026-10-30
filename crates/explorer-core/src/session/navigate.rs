@@ -800,6 +800,31 @@ impl Session {
         {
             req.headers.extend(sec_fetch_headers(&req));
         }
+        // Empreinte navigateur du document (bras 403 dailymotion
+        // embed — anti-bot) : les navigateurs réels portent
+        // `Accept`/`Upgrade-Insecure-Requests` sur toute nav
+        // document ; leur absence trahit le client. Plateforme
+        // seule — le contenu ne peut pas les poser (noms
+        // interdits côté script déjà couverts par la politique).
+        if !req
+            .headers
+            .iter()
+            .any(|(n, _)| n.eq_ignore_ascii_case("accept"))
+        {
+            req.headers.push((
+                "accept".to_string(),
+                "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8"
+                    .to_string(),
+            ));
+        }
+        if !req
+            .headers
+            .iter()
+            .any(|(n, _)| n.eq_ignore_ascii_case("upgrade-insecure-requests"))
+        {
+            req.headers
+                .push(("upgrade-insecure-requests".to_string(), "1".to_string()));
+        }
         // `Referer` de navigation (étape 132) : la page
         // initiatrice gouverne — politique du document
         // source (`Referrer-Policy:`/`<meta name=referrer>`)

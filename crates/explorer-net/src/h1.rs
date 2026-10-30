@@ -201,7 +201,16 @@ impl Default for HttpConfig {
             request_timeout: Duration::from_secs(45),
             max_head_bytes: 64 * 1024,
             max_body_bytes: 64 * 1024 * 1024,
-            user_agent: "Explorer/0.1".to_string(),
+            // Forme mainstream (bras 403 dailymotion embed — les
+            // anti-bot rejettent les UA non-navigateur) : le token
+            // `Explorer` reste présent honnêtement à côté des
+            // tokens standards que les détecteurs exigent.
+            user_agent: concat!(
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) ",
+                "AppleWebKit/537.36 (KHTML, like Gecko) ",
+                "Explorer/0.2 Safari/537.36"
+            )
+            .to_string(),
             pool_max_per_origin: 4,
         }
     }

@@ -7337,6 +7337,28 @@ async fn iframe_fetch_emits_navigate_metadata() {
     assert_eq!(t.req_header("/f", "sec-fetch-user"), None);
 }
 
+/// La requête document porte l'empreinte navigateur minimale
+/// (`accept` html + `upgrade-insecure-requests`) — bras 403
+/// anti-bot (dailymotion embed) : leur absence trahit le
+/// client.
+#[tokio::test]
+async fn top_nav_carries_browser_accept_headers() {
+    let (mut s, t) = test_session();
+    t.route("/", 200, "<!doctype html><html><body>x</body></html>");
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    assert_eq!(
+        t.req_header("/", "accept").as_deref(),
+        Some(
+            "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8"
+        )
+    );
+    assert_eq!(
+        t.req_header("/", "upgrade-insecure-requests").as_deref(),
+        Some("1")
+    );
+}
+
 /// `<iframe>` cross-site : `sec-fetch-site: cross-site`,
 /// et la politique `SameSite` retient les cookies `Lax` —
 /// seuls les `Partitioned` du seau parent voyagent (CHIPS).
