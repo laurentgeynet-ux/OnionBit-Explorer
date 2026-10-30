@@ -154,3 +154,45 @@ fn column_count_hostile_borne() {
     let _ = find_text(&bx, &dom, "AAAA");
     assert!(bx.rect.width > 0.0);
 }
+
+/// §B-64 bras (d) — google.com vol 309 : `<td>` réduit au
+/// min-content alors que la table auto a de la marge —
+/// « Recherche avancée » (53,2 px) déborde sa cellule
+/// 30,95 px / `<a>` 17,96 px. La table automatique doit
+/// donner sa taille préférée à la cellule.
+#[test]
+fn table_cell_lien_recoit_sa_taille_preferee() {
+    let (dom, bx) = laid(
+        "<body><table><tr>\
+           <td></td>\
+           <td><div style='width:700px;height:20px'></div></td>\
+           <td><a>Recherche avancée</a></td>\
+         </tr></table></body>",
+        "",
+    );
+    let a = find_text(&bx, &dom, "Recherche").expect("lien");
+    let td = find_td(&bx, &dom);
+    assert!(
+        td.rect.width >= a.rect.width - 0.5,
+        "td {} vs lien {} — la cellule déborde",
+        td.rect.width,
+        a.rect.width
+    );
+}
+
+fn find_td<'a>(b: &'a LayoutBox, dom: &'a Dom) -> &'a LayoutBox {
+    // dernier td de la première ligne
+    fn last_td<'a>(b: &'a LayoutBox, dom: &'a Dom, out: &mut Vec<&'a LayoutBox>) {
+        if b.node
+            .is_some_and(|n| dom.tag_name(n).is_ok_and(|t| t == "td"))
+        {
+            out.push(b);
+        }
+        for c in &b.children {
+            last_td(c, dom, out);
+        }
+    }
+    let mut v = Vec::new();
+    last_td(b, dom, &mut v);
+    v.last().copied().expect("td")
+}
