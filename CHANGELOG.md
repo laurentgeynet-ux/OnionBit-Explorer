@@ -7,6 +7,16 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **Find-in-page FFI**
+  (`explorer-ffi`, app) —
+  `explorer_find` (nouvelle
+  requête `dir=0` / étape `±1`)
+  miroir du `POST /find` REST
+  `{count,index,query}` : la
+  recherche dans la page
+  fonctionne en portable, le
+  stub `FindResult.empty` part.
+
 - **Downloads FFI accept/decline**
   (`explorer-ffi`, app) —
   `explorer_download_accept`

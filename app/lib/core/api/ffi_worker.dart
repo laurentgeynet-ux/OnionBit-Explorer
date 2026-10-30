@@ -215,6 +215,15 @@ typedef _DlAcceptD = int Function(
     ffi.Pointer<ffi.Uint8>, int);
 typedef _DlDeclN = ffi.Int32 Function(_NativeHandle, ffi.Uint64, ffi.Uint64);
 typedef _DlDeclD = int Function(_NativeHandle, int, int);
+// Find-in-page — export additif.
+typedef _FindN = ffi.IntPtr Function(
+    _NativeHandle, ffi.Uint64,
+    ffi.Pointer<ffi.Uint8>, ffi.UintPtr, ffi.Int64,
+    ffi.Pointer<ffi.Uint8>, ffi.UintPtr);
+typedef _FindD = int Function(
+    _NativeHandle, int,
+    ffi.Pointer<ffi.Uint8>, int, int,
+    ffi.Pointer<ffi.Uint8>, int);
 
 // ---------------------------------------------------------------------------
 // Ops RPC — les entiers sont le contrat wire, ne pas réordonner.
@@ -246,6 +255,7 @@ const opHistory = 22;
 const opDownloadUrl = 23;
 const opDownloadAccept = 24;
 const opDownloadDecline = 25;
+const opFind = 26;
 
 /// Point d'entrée de l'isolate — `args` = `{'reply': SendPort,
 /// 'path': String}`. Envoie `{'port': SendPort}` puis
@@ -346,6 +356,7 @@ class _WorkerImpl {
   static _NavigateD? _downloadUrl;
   static _DlAcceptD? _downloadAccept;
   static _DlDeclD? _downloadDecline;
+  static _FindD? _find;
   final _MediaEventsD? _mediaEvents;
   final _TabUrlD? _mediaList;
   final _MediaClaimD? _mediaClaim;
@@ -482,6 +493,11 @@ class _WorkerImpl {
         _downloadDecline = lib.lookupFunction<_DlDeclN, _DlDeclD>(
           'explorer_download_decline',
         );
+      } on Object {
+        /* export absent */
+      }
+      try {
+        _find = lib.lookupFunction<_FindN, _FindD>('explorer_find');
       } on Object {
         /* export absent */
       }
@@ -677,6 +693,31 @@ class _WorkerImpl {
         return {
           'code': f(_handle, _tab(m), (m['dl'] as num?)?.toInt() ?? 0),
         };
+      case opFind:
+        final f = _find;
+        if (f == null) return const {'count': 0, 'index': 0};
+        final q = (m['query'] as String? ?? '').toNativeUtf8();
+        const cap = 4 * 1024;
+        final buf = calloc<ffi.Uint8>(cap);
+        try {
+          final n = f(
+            _handle,
+            _tab(m),
+            q.cast<ffi.Uint8>(),
+            q.length,
+            (m['dir'] as num?)?.toInt() ?? 0,
+            buf,
+            cap,
+          );
+          if (n <= 0) return const {'count': 0, 'index': 0};
+          final v = jsonDecode(utf8.decode(buf.asTypedList(n)));
+          return v is Map ? v : const {'count': 0, 'index': 0};
+        } on Object {
+          return const {'count': 0, 'index': 0};
+        } finally {
+          calloc.free(q);
+          calloc.free(buf);
+        }
       case opFrame:
         return _frameOp(m);
       case opFrameRegion:

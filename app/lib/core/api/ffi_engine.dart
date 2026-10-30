@@ -371,13 +371,23 @@ class FfiEngine implements BrowserRepository {
     ];
   }
 
-  /// Find-in-page — même dégradation que la bibliothèque :
-  /// l'ABI n'exporte pas la recherche moteur (étape 57bis).
-  /// Retour vide → la barre affiche « 0 résultat » plutôt
-  /// que crasher ; à étendre via un export `explorer_find`.
+  /// Find-in-page — `explorer_find` ponté (miroir du
+  /// `POST /find` REST ; export additif → count/index 0
+  /// sur dll antérieure).
   @override
-  Future<FindResult> find(String tabId, String query, {int dir = 0}) async =>
-      FindResult.empty;
+  Future<FindResult> find(String tabId, String query, {int dir = 0}) async {
+    final r = await _worker.call(opFind, {
+      'tab': _idOf(tabId),
+      'query': query,
+      'dir': dir,
+    });
+    final m = r ?? const <String, Object?>{};
+    return FindResult(
+      count: (m['count'] as num?)?.toInt() ?? 0,
+      index: (m['index'] as num?)?.toInt() ?? 0,
+      query: query,
+    );
+  }
 
   /// Téléchargements (étape 70) : pas de canal d'acceptation
   /// accept/decline pontés FFI

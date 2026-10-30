@@ -1170,6 +1170,41 @@ pub unsafe extern "C" fn explorer_download_decline(
     }
 }
 
+/// Recherche dans la page — `dir` `0` : nouvelle requête
+/// (`find_in_page`) ; `±1` : occurrence suivante/précédente
+/// (`find_step`). JSON `{count, index, query}` dans `buf`
+/// (même contrat que [`explorer_last_error`] ; miroir du
+/// `POST /find` REST). `-1` handle/arg invalide.
+///
+/// # Safety
+///
+/// `h` issu de [`explorer_create`] ; `query..query+len`
+/// lisible, `buf..buf+cap` inscriptible.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn explorer_find(
+    h: *mut ExplorerHandle,
+    tab: u64,
+    query: *const u8,
+    len: usize,
+    dir: i64,
+    buf: *mut u8,
+    cap: usize,
+) -> isize {
+    let Some(h) = (unsafe { handle(h) }) else {
+        return -1;
+    };
+    let q = unsafe { read_str(query, len, MAX_URL) }.unwrap_or("");
+    let (count, index) = if dir == 0 {
+        (h.session.find_in_page(tab, q), 0)
+    } else {
+        let (i, n) = h.session.find_step(tab, dir);
+        (n, i)
+    };
+    let s = serde_json::json!({"count": count, "index": index, "query": q})
+        .to_string();
+    unsafe { write_str(&s, buf, cap) }
+}
+
 /// Journal de navigation du profil — JSON
 /// `[{"url":…,"title":…}]` dans `buf` (même contrat
 /// UTF-8/`cap` que [`explorer_last_error`]).
