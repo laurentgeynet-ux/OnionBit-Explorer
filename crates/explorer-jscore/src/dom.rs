@@ -1035,8 +1035,8 @@ impl Dom {
     }
 
     /// §B-59 instrumentation — tailles des structures qui
-    /// peuvent croître sous flux continu (sonde `leak_probe`).
-    #[cfg(test)]
+    /// peuvent croître sous flux continu (sonde `leak_probe` +
+    /// diag session `mem_diag`).
     pub(crate) fn b59_counts(&self) -> (usize, usize, usize, usize, usize) {
         (
             self.nodes.len(),

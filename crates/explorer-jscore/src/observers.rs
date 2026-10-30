@@ -127,8 +127,7 @@ impl ObsState {
     }
 
     /// §B-59 instrumentation — `regs` est suspecté de croître
-    /// sans borne (sonde `leak_probe`).
-    #[cfg(test)]
+    /// sans borne (sonde `leak_probe` + diag session).
     pub(crate) fn b59_len(&self) -> usize {
         self.regs.len()
     }

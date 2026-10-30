@@ -1087,6 +1087,14 @@ pub trait JsEngine: Send {
         None
     }
 
+    /// Ligne de diagnostic des réservoirs internes (§B-59 —
+    /// `mem_diag` session pendant la pompe) : heap, observers,
+    /// timers, miroir Dom, files. `None` = moteur non
+    /// instrumenté.
+    fn diag_line(&mut self) -> Option<String> {
+        None
+    }
+
     /// Passe GC forcée (T3 — trim bfcache) : le gel d'une
     /// page emporte le moteur (~50 Mio/page) — la session
     /// demande une passe avant parc pour ne retenir que le
@@ -1655,6 +1663,11 @@ enum Cmd {
     },
     HeapStats {
         tx: Sender<HeapStats>,
+    },
+    /// Ligne diag réservoirs internes (§B-59 — `mem_diag`
+    /// session) — `Engine::b59_diag` côté worker.
+    DiagLine {
+        tx: Sender<String>,
     },
     /// Passe GC forcée (T3) — sans réponse, la file ordonne.
     Gc,
@@ -2249,6 +2262,11 @@ impl JscoreEngine {
                 }
                 Cmd::HeapStats { tx } => {
                     if tx.send(eng.heap_stats()).is_err() {
+                        return;
+                    }
+                }
+                Cmd::DiagLine { tx } => {
+                    if tx.send(eng.b59_diag()).is_err() {
                         return;
                     }
                 }
@@ -3092,6 +3110,14 @@ impl JsEngine for JscoreEngine {
     fn heap_stats(&mut self) -> Option<HeapStats> {
         let (tx, rx) = channel();
         if self.tx.send(Cmd::HeapStats { tx }).is_err() {
+            return None;
+        }
+        rx.recv_timeout(Self::EVAL_CMD_TIMEOUT).ok()
+    }
+
+    fn diag_line(&mut self) -> Option<String> {
+        let (tx, rx) = channel();
+        if self.tx.send(Cmd::DiagLine { tx }).is_err() {
             return None;
         }
         rx.recv_timeout(Self::EVAL_CMD_TIMEOUT).ok()

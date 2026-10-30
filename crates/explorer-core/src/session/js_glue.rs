@@ -191,6 +191,81 @@ impl Session {
         }
     }
 
+    /// §B-59 — `EXPLORER_MEM_DIAG` lu une fois : une ligne
+    /// `mem_diag` par passe de pompe (env-var d'instrumentation
+    /// terrain, off par défaut — zéro coût hors diag).
+    fn mem_diag_enabled() -> bool {
+        static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        *ON.get_or_init(|| std::env::var_os("EXPLORER_MEM_DIAG").is_some_and(|v| v == "1"))
+    }
+
+    /// Queue de `commit_js_pump` — disjoncteur stall, ligne
+    /// `mem_diag` (§B-59) puis réinsertion du moteur dans
+    /// l'onglet. Extraite pour tenir la borne de lignes.
+    fn reinsert_engine(
+        tab: TabId,
+        entry: &mut Tab,
+        mut eng: Box<dyn JsEngine>,
+        stall: Option<explorer_js::JsError>,
+        jobs: usize,
+        cooldown: Duration,
+    ) {
+        if let Some(e) = stall {
+            tracing::warn!(tab, error = %e,
+                "livrée moteur en timeout — disjoncteur armé");
+            entry.js_stall_until = Some(Instant::now() + cooldown);
+        }
+        Self::log_mem_diag(tab, jobs, entry, eng.as_mut());
+        entry.js = Some(eng);
+    }
+
+    /// Émet la ligne `mem_diag` de la passe si
+    /// `EXPLORER_MEM_DIAG=1` — réservoirs session (dom, bitmaps
+    /// décodées `img/bg_decoded`+`images.*`, corps en attente,
+    /// display list, files `js_pending_*`) + compteurs internes
+    /// du moteur via `diag_line` (§B-59 : le compteur qui suit
+    /// la RSS nomme le fuyard).
+    fn log_mem_diag(tab: TabId, jobs: usize, entry: &mut Tab, eng: &mut dyn JsEngine) {
+        if !Self::mem_diag_enabled() {
+            return;
+        }
+        let (cells, heap_b, gc) = eng
+            .heap_stats()
+            .map_or((0, 0, 0), |s| (s.live_cells, s.estimated_bytes, s.gc_runs));
+        let img_b: usize = entry.img_decoded.values().map(|i| i.rgba.len()).sum();
+        let bg_b: usize = entry
+            .bg_decoded
+            .values()
+            .filter_map(Option::as_ref)
+            .map(|i| i.rgba.len())
+            .sum();
+        let bodies_b: usize = entry.img_bodies.values().map(Vec::len).sum::<usize>()
+            + entry.bg_bodies.values().map(Vec::len).sum::<usize>();
+        let netpend_b: usize = entry.js_pending_net.iter().map(|d| d.body.len()).sum();
+        let pend = entry.js_pending_net.len()
+            + entry.js_pending_dyn.len()
+            + entry.js_pending_mod.len()
+            + entry.js_pending_attrs.len()
+            + entry.pending_doc_lifecycle.len();
+        tracing::info!(
+            target: "mem_diag",
+            tab,
+            jobs,
+            cells,
+            heap_b,
+            gc,
+            dom = entry.dom.as_ref().map_or(0, explorer_dom::Dom::live_count),
+            dl = entry.list.as_ref().map_or(0, |l| l.items.len()),
+            img_b,
+            bg_b,
+            bodies_b,
+            netpend_b,
+            pend,
+            js = %eng.diag_line().unwrap_or_default(),
+            "mem_diag"
+        );
+    }
+
     /// Phase « commit » de la pompe détachée (53f) : réinsère
     /// le moteur si l'onglet n'a pas navigué pendant le run —
     /// une epoch différente jette le moteur et ses tampons
@@ -389,12 +464,8 @@ impl Session {
                 }
                 mutated
             };
-            if let Some(e) = stall {
-                tracing::warn!(tab, error = %e,
-                    "livrée moteur en timeout — disjoncteur armé");
-                entry.js_stall_until = Some(Instant::now() + self.js_stall_cooldown);
-            }
-            entry.js = Some(eng);
+            let cooldown = self.js_stall_cooldown;
+            Self::reinsert_engine(tab, entry, eng, stall, jobs, cooldown);
             (jobs, mutated)
         };
         let (jobs, mutated) = phase;

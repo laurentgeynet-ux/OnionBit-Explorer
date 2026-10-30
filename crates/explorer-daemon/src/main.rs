@@ -469,6 +469,42 @@ async fn amain() {
         resolver,
     )));
 
+    // §B-59 — échantillonneur `mem_diag` (EXPLORER_MEM_DIAG=1) :
+    // `mem_report` complet par onglet toutes les 500 ms — la
+    // pompe ne suffit pas : la fuite constatée sur le terrain
+    // (~1 Go/s) se joue hors fenêtre de commit (run détaché,
+    // tâches réseau/décode d'arrière-plan). Le compteur qui
+    // suit la RSS nomme le réservoir.
+    if std::env::var_os("EXPLORER_MEM_DIAG").is_some_and(|v| v == "1") {
+        let s = session.clone();
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                let mut sess = s.lock().await;
+                for tab in sess.tabs() {
+                    if let Some(r) = sess.mem_report(tab) {
+                        tracing::info!(
+                            target: "mem_diag",
+                            tab,
+                            dom = r.dom_nodes,
+                            boxes = r.layout_boxes,
+                            dl = r.display_items,
+                            frame_b = r.frame_bytes,
+                            png_b = r.png_bytes,
+                            img_b = r.images_bytes,
+                            bodies_b = r.bg_bodies_bytes + r.img_bodies_bytes,
+                            heap_b = r.js_heap_bytes,
+                            bf_dom = r.bfcache_dom_nodes,
+                            bf_img_b = r.bfcache_images_bytes,
+                            total_b = r.total_bytes,
+                            "mem_diag"
+                        );
+                    }
+                }
+            }
+        });
+    }
+
     // Battement des réponses réseau script-initiées (étape
     // 51) + timers JS (étape 52) : la session n'a pas
     // d'horloge — un XHR asynchrone est livré à la prochaine

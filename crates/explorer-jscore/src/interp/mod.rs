@@ -984,6 +984,44 @@ impl Engine {
         self.heap.stats()
     }
 
+    /// Ligne de diagnostic §B-59 — compteurs des réservoirs
+    /// qui peuvent croître sous flux continu (heap, observers,
+    /// timers, miroir Dom, files internes). Jouée par la
+    /// session dans `mem_diag` pendant la pompe : le compteur
+    /// qui suit la RSS désigne le réservoir fuyard.
+    #[must_use]
+    pub fn b59_diag(&self) -> String {
+        let (nodes, muts, oregs, journal, pend) = match &self.dom_ctx {
+            Some((d, _)) => d.borrow().b59_counts(),
+            None => (0, 0, 0, 0, 0),
+        };
+        let cache = match &self.dom_ctx {
+            Some((_, c)) => c.borrow().len(),
+            None => 0,
+        };
+        let hs = self.heap.stats();
+        format!(
+            "cells={} heap_b={} gc={} | cbs={} regs={} timers={} \
+             | nodes={} muts={} oregs={} journal={} pend={} \
+             | cache={} parked={} unhand={} micro={}",
+            hs.live_cells,
+            hs.estimated_bytes,
+            hs.gc_runs,
+            self.mutobs.b59_len(),
+            self.obs.b59_len(),
+            self.pending_timers(),
+            nodes,
+            muts,
+            oregs,
+            journal,
+            pend,
+            cache,
+            self.parked.len(),
+            self.unhandled_reports.len(),
+            self.microtasks.len(),
+        )
+    }
+
     /// Nombre cumulé de ticks d'exécution depuis la création —
     /// compteur d'ops brut (métrique, non remis à zéro par `eval`).
     #[must_use]
