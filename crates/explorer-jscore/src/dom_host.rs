@@ -563,6 +563,10 @@ struct DocumentHost {
     /// `document.implementation` — objet unique par document
     /// (spec), paresseusement construit.
     implementation: RefCell<Option<Value>>,
+    /// `document.fonts` — `FontFaceSet` unique par document
+    /// (spec) : l'état setlike (`add`/`has`) exige une
+    /// instance stable entre accès.
+    fonts: RefCell<Option<Value>>,
     /// `document.domain` (issue #24) — suffixe enregistrable
     /// posé par le setter ; `None` = hostname courant.
     domain_override: RefCell<Option<String>>,
@@ -1767,6 +1771,7 @@ pub(crate) fn document_value(e: &mut Engine, dom: &DomRef) -> Value {
         dom: dom.clone(),
         cache: Rc::new(RefCell::new(HashMap::new())),
         implementation: RefCell::new(None),
+        fonts: RefCell::new(None),
         domain_override: RefCell::new(None),
         adopted_sheets: RefCell::new(None),
     }))
@@ -1783,6 +1788,7 @@ impl Engine {
             dom: dom.clone(),
             cache: cache.clone(),
             implementation: RefCell::new(None),
+            fonts: RefCell::new(None),
             domain_override: RefCell::new(None),
             adopted_sheets: RefCell::new(None),
         }));
@@ -3806,6 +3812,9 @@ impl Host for DocumentHost {
         if let Some(v) = *self.implementation.borrow() {
             crate::heap::push_value(out, v);
         }
+        if let Some(v) = *self.fonts.borrow() {
+            crate::heap::push_value(out, v);
+        }
         if let Some(v) = *self.adopted_sheets.borrow() {
             crate::heap::push_value(out, v);
         }
@@ -4104,9 +4113,19 @@ impl Host for DocumentHost {
                         .map_or("loading", |ctx| e.ready_state_ctx(ctx)),
                 ),
             )),
-            // `document.fonts` — FontFaceSet stub : pas de pipeline
-            // de fontes web, `load()`/`ready` résolvent toujours.
-            "fonts" => Ok(Some(e.new_host_object(Rc::new(FontFaceSetHost)))),
+            // `document.fonts` — FontFaceSet stub **unique par
+            // document** (spec) : pas de pipeline de fontes web,
+            // `load()`/`ready` résolvent toujours ; l'unicité
+            // rend l'état setlike (`add`/`has`) observable
+            // entre accès — excalidraw vol 222.
+            "fonts" => {
+                let mut slot = self.fonts.borrow_mut();
+                if slot.is_some_and(|v| matches!(v, Value::Obj(id) if e.heap.obj(id).is_none())) {
+                    *slot = None;
+                }
+                let v = *slot.get_or_insert_with(|| e.new_host_object(Rc::new(FontFaceSetHost)));
+                Ok(Some(v))
+            }
             // Page affichée = visible/active — pas d'onglet caché
             // dans ce modèle.
             "visibilityState" => Ok(Some(e.str_val("visible"))),
@@ -9435,6 +9454,7 @@ impl Host for DomImplementationHost {
                     dom: Rc::new(RefCell::new(d)),
                     cache: Rc::new(RefCell::new(HashMap::new())),
                     implementation: RefCell::new(None),
+                    fonts: RefCell::new(None),
                     domain_override: RefCell::new(None),
                     adopted_sheets: RefCell::new(None),
                 }));
@@ -10084,6 +10104,23 @@ impl Host for NavigationHost {
 /// (mesuré : bootstrap `Google Sans` de google.com).
 struct FontFaceSetHost;
 
+/// Faces posées par `document.fonts.add()` — prop cachée
+/// `__faces` : le host est recréé à chaque accès
+/// `document.fonts`, l'état du set vit donc sur l'objet.
+/// Identité `strict_eq` (spec setlike).
+fn font_faces(e: &Engine, this: Value) -> Vec<Value> {
+    let Value::Obj(id) = this else {
+        return Vec::new();
+    };
+    let Some(Value::Obj(arr)) = e.heap.obj(id).and_then(|o| o.get_own("__faces")) else {
+        return Vec::new();
+    };
+    match e.heap.obj(arr).map(|o| &o.kind) {
+        Some(ObjKind::Array(elems)) => elems.clone(),
+        _ => Vec::new(),
+    }
+}
+
 impl Host for FontFaceSetHost {
     fn class_name(&self) -> &'static str {
         "FontFaceSet"
@@ -10095,7 +10132,9 @@ impl Host for FontFaceSetHost {
 
     fn get(&self, e: &mut Engine, this: Value, key: &str) -> JsResult<Option<Value>> {
         match key {
-            "size" => Ok(Some(Value::Num(0.0))),
+            // Setlike : la taille reflète les `add()` posés —
+            // `has`/`delete`/`forEach` suivent la même prop.
+            "size" => Ok(Some(Value::Num(font_faces(e, this).len() as f64))),
             "status" => Ok(Some(e.str_val("loaded"))),
             // `fonts.ready` — résolue avec le set lui-même (spec).
             "ready" => {
@@ -10123,10 +10162,60 @@ impl Host for FontFaceSetHost {
                 e.resolve_promise(pid, arr);
                 Ok(Some(Value::Obj(pid)))
             }
-            // `add(face)` — spec : retourne le set (chaînage).
-            // La fonte est acceptée sans pipeline de chargement —
-            // surface honnête (boursorama §B-14).
-            "add" => Ok(Some(t)),
+            // `add(face)` — spec : retourne le set (chaînage),
+            // dédup identité comme un `Set`. La face reste
+            // connue de `has`/`forEach` (excalidraw vol 222 :
+            // `fonts.has(f)` après `add(f)` pilotait le boot —
+            // `has` absent cassait la chaîne, `has` toujours
+            // faux re-chargeait la fonte à l'infini).
+            "add" => {
+                let mut faces = font_faces(e, t);
+                let face = arg(args, 0);
+                if !faces.iter().any(|&f| e.strict_eq(f, face)) {
+                    faces.push(face);
+                    let arr = e.new_array(faces);
+                    if let Value::Obj(id) = t {
+                        e.set_own(id, "__faces", arr, false);
+                    }
+                }
+                Ok(Some(t))
+            }
+            // `has(face)`/`delete(face)` — identité stricte
+            // (spec setlike) ; `clear()` vide.
+            "has" => {
+                let face = arg(args, 0);
+                Ok(Some(Value::Bool(
+                    font_faces(e, t).iter().any(|&f| e.strict_eq(f, face)),
+                )))
+            }
+            "delete" => {
+                let face = arg(args, 0);
+                let mut faces = font_faces(e, t);
+                let n = faces.len();
+                faces.retain(|&f| !e.strict_eq(f, face));
+                let removed = faces.len() != n;
+                let arr = e.new_array(faces);
+                if let Value::Obj(id) = t {
+                    e.set_own(id, "__faces", arr, false);
+                }
+                Ok(Some(Value::Bool(removed)))
+            }
+            "clear" => {
+                let arr = e.new_array(Vec::new());
+                if let Value::Obj(id) = t {
+                    e.set_own(id, "__faces", arr, false);
+                }
+                Ok(Some(Value::Undefined))
+            }
+            // `forEach(cb, thisArg?)` — setlike : `cb(v, v, set)`.
+            "forEach" => {
+                let cb = arg(args, 0);
+                let this_arg = args.get(1).copied().unwrap_or(Value::Undefined);
+                for f in font_faces(e, t) {
+                    e.call_value(cb, this_arg, &[f, f, t])?;
+                }
+                Ok(Some(Value::Undefined))
+            }
             "check" => Ok(Some(Value::Bool(true))),
             // Spec : `FontFaceSet` est un `EventTarget`
             // (loading/loadingdone/loadingerror) — impots DSFR
@@ -10142,7 +10231,16 @@ impl Host for FontFaceSetHost {
     fn has_method(&self, name: &str) -> bool {
         matches!(
             name,
-            "load" | "check" | "add" | "addEventListener" | "removeEventListener" | "dispatchEvent"
+            "load"
+                | "check"
+                | "add"
+                | "has"
+                | "delete"
+                | "clear"
+                | "forEach"
+                | "addEventListener"
+                | "removeEventListener"
+                | "dispatchEvent"
         )
     }
 }

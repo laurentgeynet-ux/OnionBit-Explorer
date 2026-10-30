@@ -28,6 +28,37 @@ pub(crate) const SLOW_EVAL_MS: u64 = 2_000;
 pub(crate) const SLOW_EVAL_CAP: u32 = 8;
 
 impl Session {
+    /// Disjoncteur §B-1 ouvert sur l'onglet ? — la série
+    /// d'évals lentes a atteint `SLOW_EVAL_CAP` (variante
+    /// vimeo : rafale `ok=true` hors portée de la deadline
+    /// par-script). Partagé par `eval_or_report`,
+    /// `eval_ctx_or_report`, `eval_module_graph` et les
+    /// livraisons dyn (vol 221 : les rafales passaient par
+    /// `deliver_dyn_script`, hors des deux seuls sites
+    /// couverts — 0 disjoncteur tiré).
+    pub(crate) fn slow_eval_open(&self, tab: TabId) -> bool {
+        self.tabs
+            .get(&tab)
+            .is_some_and(|e| e.slow_eval_streak >= SLOW_EVAL_CAP)
+    }
+
+    /// Comptabilise la durée d'une éval bloquante §B-1 :
+    /// ≥ seuil allonge `slow_eval_streak`, rapide la referme.
+    /// Appelé par **tous** les chemins qui font tourner du
+    /// script sous verrou (évals `eval_or_report`/`eval_ctx`/
+    /// modules + livraisons dyn `deliver_dyn_script` —
+    /// l'éval interne du moteur n'est visible que par son
+    /// temps de traversée).
+    pub(crate) fn note_eval_ms(&mut self, tab: TabId, eval_ms: u128) {
+        if let Some(e) = self.tabs.get_mut(&tab) {
+            if eval_ms >= u128::from(self.slow_eval_ms) {
+                e.slow_eval_streak = e.slow_eval_streak.saturating_add(1);
+            } else {
+                e.slow_eval_streak = 0;
+            }
+        }
+    }
+
     /// Pompe les jobs JS dus d'un onglet — timers bornés à
     /// `max_timer_jobs` (ADR-0019) + microtasks +
     /// `MutationObserver` (JS-C26, livré au même checkpoint) —
@@ -698,11 +729,7 @@ impl Session {
     pub(crate) fn eval_module_graph(&mut self, tab: TabId, eng: &mut dyn JsEngine, me: &ModEval) {
         // Même disjoncteur §B-1 que `eval_or_report` : une
         // rafale `type=module` lente produit le même wedge.
-        if self
-            .tabs
-            .get(&tab)
-            .is_some_and(|e| e.slow_eval_streak >= SLOW_EVAL_CAP)
-        {
+        if self.slow_eval_open(tab) {
             tracing::warn!(
                 tab,
                 name = %me.name,
@@ -947,7 +974,7 @@ impl Session {
         // tombée en timeout fige le worker 30 s — relancer
         // les scripts suivants dans le même commit = N×30 s
         // de verrou → daemon entier mort. On saute l'appel.
-        if self.js_stalled(tab) {
+        if self.js_stalled(tab) || self.slow_eval_open(tab) {
             tracing::debug!(
                 tab,
                 ctx,
@@ -956,7 +983,10 @@ impl Session {
             );
             return;
         }
-        if let Err(e) = eng.eval_ctx(ctx, src, None) {
+        let t = std::time::Instant::now();
+        let res = eng.eval_ctx(ctx, src, None);
+        self.note_eval_ms(tab, t.elapsed().as_millis());
+        if let Err(e) = res {
             tracing::debug!(tab, ctx, error = %e, "script iframe en échec");
             if Self::is_engine_stall(&e) {
                 self.mark_js_stall(tab, &e);
@@ -1165,11 +1195,7 @@ impl Session {
         // >260 s, navigate jamais retourné, API morte. Au
         // cap, les suivantes sont sautées comme un stall —
         // page dégradée, API vivante.
-        if self
-            .tabs
-            .get(&tab)
-            .is_some_and(|e| e.slow_eval_streak >= SLOW_EVAL_CAP)
-        {
+        if self.slow_eval_open(tab) {
             tracing::warn!(
                 tab,
                 bytes = src.len(),
@@ -1195,16 +1221,7 @@ impl Session {
             },
         };
         let eval_ms = t_eval.elapsed().as_millis();
-        // Streak §B-1 : lente allonge, rapide referme — la
-        // page alternant scripts lourds/légers n'est jamais
-        // coupée, la rafale continue l'est.
-        if let Some(e) = self.tabs.get_mut(&tab) {
-            if eval_ms >= u128::from(self.slow_eval_ms) {
-                e.slow_eval_streak = e.slow_eval_streak.saturating_add(1);
-            } else {
-                e.slow_eval_streak = 0;
-            }
-        }
+        self.note_eval_ms(tab, eval_ms);
         tracing::info!(
             tab,
             ms = u64::try_from(eval_ms).unwrap_or(u64::MAX),

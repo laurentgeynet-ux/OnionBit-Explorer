@@ -7,6 +7,54 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **Étape 163 — §B-1 : disjoncteur
+  lent couvre toutes les voies
+  d'éval** (`explorer-core`, REVALID7
+  vol 221 vimeo) — Étape 161 ne
+  comptait que `eval_or_report` +
+  `eval_module_graph` : la rafale
+  d'évals lentes passait par les
+  **livraisons dyn** (`deliver_
+  dyn_script`, webpack chunk
+  loader) et les évals de contexte
+  (`eval_ctx_or_report`, scripts
+  iframe dyn) — 0 disjoncteur
+  tiré, nav >150 s, API morte.
+  Factorisation `slow_eval_open`
+  /`note_eval_ms` partagés ; dyn
+  scripts : disjoncteur ouvert →
+  livraison `error` (script sauté,
+  tour moteur continu) ; boucle
+  de scripts iframe dyn : streak
+  mesuré à même `entry`. Verrou
+  `slow_eval_streak_saute_la_
+  rafale_lente` vert — à
+  re-voler sur vimeo.
+
+- **JS-C218 — `FontFaceSet` setlike
+  + singleton par document**
+  (`explorer-jscore`, §B-14
+  excalidraw vol 222, 2ᵉ site
+  après boursorama) — `has`/
+  `delete`/`clear`/`forEach`/
+  `size` absents du stub :
+  `fonts.has(face)` cassait le
+  boot. Spec setlike : faces
+  `add()`ées suivies en prop
+  cachée `__faces`, dédup
+  `strict_eq`, `has` honnête
+  (un `has` toujours faux
+  re-chargerait la fonte à
+  l'infini). `document.fonts`
+  devient l'objet **unique** du
+  document (slot DocumentHost +
+  trace GC — l'état survit aux
+  accès répétés). Verrous :
+  `font_face_set_setlike_tracks_
+  added_faces`, `font_face_set_
+  is_singleton_per_document` —
+  à re-voler excalidraw.
+
 - **JS-C217 —
   `Function.prototype.apply`
   étale les array-likes**

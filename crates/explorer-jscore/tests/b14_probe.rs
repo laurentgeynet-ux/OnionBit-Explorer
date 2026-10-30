@@ -128,6 +128,71 @@ fn font_face_set_add_returns_set_and_is_detectable() {
 }
 
 #[test]
+fn font_face_set_setlike_tracks_added_faces() {
+    let mut e = engine();
+    // §B-14 vol 222 excalidraw — `fonts.has(face)` absent
+    // cassait le boot ; un `has` toujours faux re-chargerait
+    // la fonte en boucle. Setlike : identité, dedup, delete,
+    // clear, size, unicité entre accès `document.fonts`.
+    assert_eq!(ev(&mut e, "typeof document.fonts.has"), "function");
+    assert_eq!(
+        ev(
+            &mut e,
+            "var ff={family:'x'};\
+             document.fonts.add(ff);\
+             document.fonts.has(ff)+':'+document.fonts.size"
+        ),
+        "true:1"
+    );
+    assert_eq!(
+        ev(
+            &mut e,
+            "var ff={family:'x'}, out=[];\
+             document.fonts.clear();\
+             document.fonts.add(ff); document.fonts.add(ff);\
+             document.fonts.forEach(function(v){out.push(v===ff)});\
+             out.length+':'+out[0]"
+        ),
+        "1:true"
+    );
+    assert_eq!(
+        ev(
+            &mut e,
+            "var ff={family:'x'};\
+             document.fonts.clear();\
+             document.fonts.add(ff);\
+             document.fonts.delete(ff)+':'+document.fonts.has(ff)+':'+document.fonts.size"
+        ),
+        "true:false:0"
+    );
+    assert_eq!(
+        ev(
+            &mut e,
+            "document.fonts.add({});\
+             document.fonts.clear();\
+             document.fonts.size"
+        ),
+        "0"
+    );
+}
+
+#[test]
+fn font_face_set_is_singleton_per_document() {
+    let mut e = engine();
+    // Spec : `document.fonts` est l'unique `FontFaceSet` du
+    // document — l'état setlike persiste entre accès.
+    assert_eq!(ev(&mut e, "document.fonts===document.fonts"), "true");
+    assert_eq!(
+        ev(
+            &mut e,
+            "var ff={a:1};\
+             document.fonts.add(ff); document.fonts.has(ff)"
+        ),
+        "true"
+    );
+}
+
+#[test]
 fn font_face_set_is_event_target() {
     let mut e = engine();
     // impots DSFR vol 115 : `addEventListener is not a function`

@@ -1415,7 +1415,19 @@ impl Session {
         seq: u64,
         body: Option<String>,
     ) {
-        let mutated = {
+        if self.slow_eval_open(tab) {
+            // §B-1 (vol 221 : la rafale d'évals lentes
+            // passait ici — livraisons dyn, hors des deux
+            // sites couverts par Étape 161). Livrer
+            // `error` plutôt qu'évaluer : le script
+            // saute, le tour moteur continue.
+            let entry = self.tabs.get_mut(&tab);
+            if let Some(eng) = entry.and_then(|e| e.js.as_mut()) {
+                eng.deliver_dyn_script(ctx, seq, None);
+            }
+            return;
+        }
+        let (mutated, eval_ms) = {
             let Some(entry) = self.tabs.get_mut(&tab) else {
                 return;
             };
@@ -1426,11 +1438,14 @@ impl Session {
             let Some(eng) = entry.js.as_mut() else {
                 return;
             };
+            let t = std::time::Instant::now();
             eng.deliver_dyn_script(ctx, seq, body);
+            let eval_ms = t.elapsed().as_millis();
             let n = eng.run_pending();
             tracing::trace!(tab, jobs = n, "jobs js après script dynamique");
-            Self::sync_for_apply(eng.as_mut())
+            (Self::sync_for_apply(eng.as_mut()), eval_ms)
         };
+        self.note_eval_ms(tab, eval_ms);
         if let Some(s) = mutated {
             self.queue_apply_sync(tab, s);
         }
@@ -2052,7 +2067,21 @@ impl Session {
         // scripts du cadre dynamique (étape 130).
         eng.set_ready_state(ctx, "loading");
         for src in scripts {
-            if let Err(e) = eng.eval_ctx(ctx, &src, None) {
+            // §B-1 : même disjoncteur que `eval_ctx_or_report`
+            // — accès direct aux champs, `eng` tient déjà
+            // l'emprunt mutable sur l'entrée.
+            if entry.slow_eval_streak >= js_glue::SLOW_EVAL_CAP {
+                errs.push("rafale d'évals lentes — disjoncteur §B-1".to_string());
+                break;
+            }
+            let t = std::time::Instant::now();
+            let res = eng.eval_ctx(ctx, &src, None);
+            if t.elapsed().as_millis() >= u128::from(self.slow_eval_ms) {
+                entry.slow_eval_streak = entry.slow_eval_streak.saturating_add(1);
+            } else {
+                entry.slow_eval_streak = 0;
+            }
+            if let Err(e) = res {
                 // §B-12 vol 100 : collecte puis passage par la
                 // porte — l'envoi direct contournait le cap
                 // « tas mort » (klaviyo/beacon tournent en
