@@ -306,6 +306,117 @@ impl RawDownload {
     }
 }
 
+/// Store HSTS persisté (`hsts.json`, PR-3) — `host → {exp,
+/// subs}` ; implémente le port
+/// [`explorer_net::hsts::HstsStore`] injecté dans la pile
+/// transport. `is_secure` couvre l'hôte exact et les domaines
+/// parents `includeSubDomains` non expirés ; les entrées
+/// périmées sont purgées à la lecture et ignorées partout.
+pub struct JsonHstsStore {
+    dir: PathBuf,
+    /// `host → (expires_unix, include_subdomains)`.
+    map: Mutex<std::collections::HashMap<String, RawHsts>>,
+    /// Sérialise les écritures.
+    io: Mutex<()>,
+}
+
+impl JsonHstsStore {
+    /// Ouvre (ou crée) `<dir>/hsts.json` — entrées expirées
+    /// élaguées à la lecture, fichier cassé → map vide.
+    #[must_use]
+    pub fn open(dir: &Path) -> Self {
+        let _ = fs::create_dir_all(dir);
+        let now = unix_now();
+        let map = read_json(&dir.join("hsts.json"))
+            .and_then(|v| {
+                serde_json::from_value::<std::collections::HashMap<String, RawHsts>>(v).ok()
+            })
+            .map(|m| {
+                m.into_iter()
+                    .filter(|(_, e)| e.exp > now)
+                    .collect()
+            })
+            .unwrap_or_default();
+        Self {
+            dir: dir.to_path_buf(),
+            map: Mutex::new(map),
+            io: Mutex::new(()),
+        }
+    }
+
+    /// `true` si `host` (ou un parent `subs`) a une entrée
+    /// active.
+    fn covered(map: &std::collections::HashMap<String, RawHsts>, host: &str) -> bool {
+        let now = unix_now();
+        let mut h = host;
+        loop {
+            if let Some(e) = map.get(h) {
+                if e.exp > now && (h == host || e.subs) {
+                    return true;
+                }
+            }
+            match h.split_once('.') {
+                Some((_, parent)) => h = parent,
+                None => return false,
+            }
+        }
+    }
+}
+
+impl explorer_net::hsts::HstsStore for JsonHstsStore {
+    fn is_secure(&self, host: &str) -> bool {
+        self.map
+            .lock()
+            .is_ok_and(|m| Self::covered(&m, host))
+    }
+
+    /// RFC 6797 §8.1 : `max-age=0` retire la politique ; sinon
+    /// `host → exp` réécrit (`hsts.json`, atomique).
+    fn record(&self, host: &str, max_age: u64, include_subdomains: bool) {
+        if let Ok(mut m) = self.map.lock() {
+            if max_age == 0 {
+                m.remove(host);
+            } else {
+                m.insert(
+                    host.to_string(),
+                    RawHsts {
+                        exp: unix_now() + max_age,
+                        subs: include_subdomains,
+                    },
+                );
+            }
+            let snapshot: std::collections::HashMap<String, RawHsts> = m.clone();
+            drop(m);
+            let _guard = self.io.lock().ok();
+            let Some(s) = serde_json::to_string(&snapshot).ok() else {
+                return;
+            };
+            let dst = self.dir.join("hsts.json");
+            let tmp = self.dir.join("hsts.json.tmp");
+            if fs::write(&tmp, s).is_ok() {
+                let _ = fs::rename(&tmp, &dst);
+            }
+        }
+    }
+}
+
+/// Entrée `hsts.json` sérialisée.
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
+struct RawHsts {
+    /// Expiration — secondes unix.
+    exp: u64,
+    /// `includeSubDomains`.
+    #[serde(default)]
+    subs: bool,
+}
+
+/// Secondes unix courantes.
+fn unix_now() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs())
+}
+
 /// Forme sérialisée commune `{"url", "title"}` — visites et
 /// signets partagent le même schéma.
 #[derive(serde::Serialize, serde::Deserialize)]

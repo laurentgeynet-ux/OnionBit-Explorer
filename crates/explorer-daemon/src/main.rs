@@ -322,7 +322,14 @@ fn http_stack(
         disk,
         explorer_net::cache::CacheConfig::default(),
     ));
-    Arc::new(RedirectTransport::wrap(cached, cfg.max_redirects))
+    // HSTS (PR-3) : upgrade http→https + mémorise STS — sous la
+    // couche redirection, au-dessus du cache (les upgrades
+    // réutilisent les entrées existantes).
+    let hsts: Arc<dyn HttpTransport> = Arc::new(explorer_net::hsts::HstsTransport::wrap(
+        cached,
+        Arc::new(explorer_core::JsonHstsStore::open(profile)),
+    ));
+    Arc::new(RedirectTransport::wrap(hsts, cfg.max_redirects))
 }
 
 /// Construction de la `Session` — pile HTTP + dial WebSocket

@@ -33,9 +33,11 @@ décidée 2026-10-30 avec le bundle portable (Étape 167).
 - [ ] **PR-2. `zoom.json`** — origine → niveau de zoom
   (l'UI zoom existe, ADR-0021 ; persistance côté app dans
   `state/` via la résolution portable).
-- [ ] **PR-3. `hsts.json`** — capte `Strict-Transport-Security`,
-  upgrade `http→https` avant fetch + expiry ; branchement
-  `RedirectTransport`/policy.
+- [x] **PR-3. `hsts.json`** — capte `Strict-Transport-Security`,
+  upgrade `http→https` avant fetch + expiry. Décorateur
+  `HstsTransport` (`explorer-net`, port `HstsStore` injecté) +
+  store `JsonHstsStore` (`explorer-core`) câblé dans les deux
+  piles (daemon + FFI).
 - [ ] **PR-4. `session.json`** — restauration onglets/URLs/
   scroll au boot ; touche `Session`.
 - [ ] **PR-5. État fenêtre** — taille/position/maximisé dans

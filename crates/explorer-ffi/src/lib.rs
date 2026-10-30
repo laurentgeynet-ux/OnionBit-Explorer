@@ -110,12 +110,17 @@ fn default_fonts_dir() -> PathBuf {
 }
 
 /// Pile réseau identique au démon : TLS web-roots + ALPN
-/// h1/h2 → décodage → redirections bornées.
-fn http_stack() -> Arc<dyn HttpTransport> {
+/// h1/h2 → décodage → HSTS (store du profil, PR-3) →
+/// redirections bornées.
+fn http_stack(profile: &Path) -> Arc<dyn HttpTransport> {
     let tls = Arc::new(TlsConnector::web_roots());
     let h1: Arc<dyn HttpTransport> = Arc::new(AutoClient::new(tls, HttpConfig::default()));
     let decoded: Arc<dyn HttpTransport> = Arc::new(DecodingTransport::wrap(h1, MAX_BODY));
-    Arc::new(RedirectTransport::wrap(decoded, MAX_REDIRECTS))
+    let hsts: Arc<dyn HttpTransport> = Arc::new(explorer_net::hsts::HstsTransport::wrap(
+        decoded,
+        Arc::new(explorer_core::JsonHstsStore::open(profile)),
+    ));
+    Arc::new(RedirectTransport::wrap(hsts, MAX_REDIRECTS))
 }
 
 /// `*mut ExplorerHandle` → `&mut` validé, ou erreur FFI.
@@ -174,8 +179,6 @@ fn create_inner(profile_dir: Option<PathBuf>) -> *mut ExplorerHandle {
         }
     };
     let fonts = DirFontSource::new(&default_fonts_dir());
-    let mut session = Session::new(http_stack(), Arc::new(fonts));
-    session.set_js_factory(explorer_js::JscoreEngine::factory());
     let dir = profile_dir.unwrap_or_else(explorer_core::JsonFileStore::default_dir);
     let profile_lock = match acquire_profile_lock(&dir) {
         Ok(l) => l,
@@ -185,6 +188,8 @@ fn create_inner(profile_dir: Option<PathBuf>) -> *mut ExplorerHandle {
         }
     };
     init_file_logging(&dir);
+    let mut session = Session::new(http_stack(&dir), Arc::new(fonts));
+    session.set_js_factory(explorer_js::JscoreEngine::factory());
     session.set_store(Arc::new(explorer_core::JsonFileStore::open(&dir)));
     let events = session.subscribe();
     Box::into_raw(Box::new(ExplorerHandle {

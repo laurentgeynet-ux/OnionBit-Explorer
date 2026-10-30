@@ -7,6 +7,24 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **PR-3 — `hsts.json` (HSTS,
+  RFC 6797)** (`explorer-net`,
+  `explorer-core`, hôtes) —
+  décorateur `HstsTransport`
+  injecté dans les piles daemon
+  et FFI : upgrade `http→https`
+  interne pour les hôtes connus
+  (hôte exact ou parent
+  `includeSubDomains`, non
+  expiré) et mémorisation de
+  `Strict-Transport-Security`
+  sur réponses `https`
+  (`max-age=0` = retrait, §8.1).
+  Store `JsonHstsStore` persisté
+  en `state/hsts.json` — élagage
+  des entrées périmées à la
+  lecture, écriture atomique.
+
 - **PR-1 — `downloads.json`**
   (`explorer-core`) — journal des
   téléchargements persisté :

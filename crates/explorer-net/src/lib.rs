@@ -20,6 +20,7 @@ pub mod decode;
 pub mod error;
 pub mod h1;
 pub mod h2;
+pub mod hsts;
 pub mod http;
 pub mod lang;
 pub mod media_proxy;

@@ -19,7 +19,7 @@ pub mod profile_store;
 pub mod session;
 
 pub use explorer_css::ColorScheme;
-pub use profile_store::JsonFileStore;
+pub use profile_store::{JsonFileStore, JsonHstsStore};
 pub use session::{
     drain_applies_shared, drain_navs_shared, eval_shared, history_move_shared,
     media_codecs_from_json, media_event_json, media_host_state_str, media_offer_json,
