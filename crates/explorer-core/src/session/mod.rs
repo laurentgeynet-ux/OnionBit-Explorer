@@ -490,6 +490,14 @@ pub(crate) struct Tab {
     /// reprennent plus le verrou session (API muette ~90 s
     /// sur kayak). Durée : `SessionConfig::js_stall_cooldown`.
     js_stall_until: Option<std::time::Instant>,
+    /// Évals **lentes** consécutives (`≥ SLOW_EVAL_MS` —
+    /// disjoncteur §B-1 variante vimeo) : la deadline
+    /// par-script ne couvre pas la série — 47 évals `ok=true`
+    /// × 5,5 s = >260 s de verrou, navigate jamais retourné,
+    /// API morte. Au cap `SLOW_EVAL_CAP`, `eval_or_report`
+    /// saute les suivantes (erreur pipeline, page dégradée
+    /// mais API vivante) ; une éval rapide referme la série.
+    slow_eval_streak: u32,
     /// État de peinture détaché pour un apply hors verrou
     /// (étape 55h) — les champs `dom`/`tree`/`list`/`frame`
     /// sont vides le temps du `spawn_blocking` : la session
@@ -867,6 +875,10 @@ pub struct Session {
     /// Refroidissement du disjoncteur « moteur figé »
     /// (`js_stall_cooldown` de config, vol 25).
     js_stall_cooldown: std::time::Duration,
+    /// Seuil « éval lente » du disjoncteur §B-1 (ms —
+    /// `SLOW_EVAL_MS` en prod, mutable en tests unitaires
+    /// pour exercer le streak sans attendre).
+    pub(crate) slow_eval_ms: u64,
     /// Budget d'une passe de livraisons `poll_net` (Étape 151 /
     /// §B-54 — `poll_net_budget` de config ; `ZERO` = illimité).
     poll_net_budget: std::time::Duration,
@@ -1056,6 +1068,7 @@ impl Session {
             paint_interval: std::time::Duration::from_millis(cfg.paint_interval_ms),
             resync_gap_max: std::time::Duration::from_millis(cfg.resync_gap_max_ms),
             js_stall_cooldown: cfg.js_stall_cooldown,
+            slow_eval_ms: js_glue::SLOW_EVAL_MS,
             poll_net_budget: cfg.poll_net_budget,
             event_tail_budget: cfg.event_tail_budget,
             bfcache_pages: cfg.bfcache_pages,
@@ -1400,6 +1413,7 @@ impl Session {
                 spec_paint: false,
                 js_detached: None,
                 js_stall_until: None,
+                slow_eval_streak: 0,
                 paint_detached: false,
                 deferred_inputs: VecDeque::new(),
                 js_pending_net: Vec::new(),

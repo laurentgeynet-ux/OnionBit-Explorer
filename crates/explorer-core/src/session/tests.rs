@@ -3251,3 +3251,55 @@ fn fetch_backoff_succes_referme_le_streak() {
         "succès : streak refermé — retry suivant immédiat"
     );
 }
+
+/// §B-1 (variante vimeo) — la deadline **par-script** ne
+/// couvre pas la rafale d'évals lentes `ok=true` : le
+/// streak d'évals ≥ seuil ouvre le disjoncteur et les
+/// suivantes sont sautées (erreur pipeline) au lieu de
+/// tenir le verrou session indéfiniment.
+#[test]
+fn slow_eval_streak_saute_la_rafale_lente() {
+    let mut s = Session::new(Arc::new(FailTransport), Arc::new(TestFont));
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let mut rx = s.subscribe();
+    let tab = s.open_tab();
+    let html = "<!doctype html><html><body></body></html>";
+    let mut eng = s.spawn_engine(tab, html, true, "");
+    // Seuil à 0 : toute éval compte « lente » pour la
+    // mesure (la coupure elle-même reste `SLOW_EVAL_CAP`).
+    s.slow_eval_ms = 0;
+    let e = eng.as_mut().expect("engine").as_mut();
+    s.eval_or_report(tab, e, "1", None, None);
+    assert_eq!(
+        s.tabs.get(&tab).unwrap().slow_eval_streak,
+        1,
+        "éval lente mesurée allonge le streak"
+    );
+    s.eval_or_report(tab, e, "2", None, None);
+    assert_eq!(s.tabs.get(&tab).unwrap().slow_eval_streak, 2);
+    // Une éval rapide referme la série — vérifié en
+    // remettant le seuil : streak à 0 après éval « courte ».
+    s.slow_eval_ms = u64::MAX;
+    s.eval_or_report(tab, e, "3", None, None);
+    assert_eq!(
+        s.tabs.get(&tab).unwrap().slow_eval_streak,
+        0,
+        "éval rapide referme la série"
+    );
+    // Au cap : l'éval est sautée, erreur pipeline émise,
+    // moteur jamais appelé (streak figé au cap).
+    s.tabs.get_mut(&tab).unwrap().slow_eval_streak = crate::session::js_glue::SLOW_EVAL_CAP;
+    s.eval_or_report(tab, e, "4", None, None);
+    let mut seen = false;
+    while let Ok(ev) = rx.try_recv() {
+        if let CoreEvent::PipelineError { message, .. } = ev {
+            seen |= message.contains("évals lentes");
+        }
+    }
+    assert!(seen, "éval sautée rapportée en PipelineError");
+    assert_eq!(
+        s.tabs.get(&tab).unwrap().slow_eval_streak,
+        crate::session::js_glue::SLOW_EVAL_CAP,
+        "sautée : streak inchangé (moteur non appelé)"
+    );
+}

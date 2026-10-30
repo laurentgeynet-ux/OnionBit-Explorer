@@ -7,6 +7,39 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **Étape 161 — §B-1 : disjoncteur
+  rafale d'évals lentes** —
+  variante vimeo (vols 104/105/
+  144/215, ×4 reproduit vol 215) :
+  évals ~5,5 s `ok=true` en rafale
+  continue sur scripts ≤ 497 o,
+  navigate jamais retourné
+  (>260 s), API morte — la
+  deadline **par-script** (30/65 s)
+  couvre chaque éval isolément,
+  pas la série (budget global N3
+  restait ouvert). Fix :
+  `slow_eval_streak` par onglet —
+  une éval de script
+  (`eval_or_report`) ou module
+  (`eval_module_graph`) ≥ 2 000 ms
+  (`SLOW_EVAL_MS`) l'allonge, une
+  éval rapide la referme ; au cap
+  `SLOW_EVAL_CAP` (8) les
+  suivantes sont sautées comme un
+  stall — `PipelineError`
+  « rafale d'évals lentes — éval
+  sautée », page dégradée mais
+  API vivante et navigate
+  retourné. Pire cas borné à
+  ~8 × deadline vs ∞. Champ
+  `slow_eval_ms` mutable en tests.
+  Verrou
+  `slow_eval_streak_saute_la_rafale_lente`
+  (mesure, refermeture sur rapide,
+  saut+erreur au cap). À re-voler
+  (vimeo, allrecipes).
+
 - **Étape 160 — §B-60 : backoff
   sur tempête `fetch`** —
   `fetch: network error` en rafale

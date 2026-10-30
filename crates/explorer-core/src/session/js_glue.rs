@@ -12,6 +12,21 @@ use explorer_dom::NodeId;
 use explorer_js::{EventProp, JsEngine, UrlResolver};
 use explorer_net::url::Url;
 
+/// Seuil « éval lente » du disjoncteur §B-1 (variante
+/// vimeo) : une éval de script au-delà de cette durée allonge
+/// `slow_eval_streak`. La deadline **par-script** (30/65 s)
+/// ne couvre pas la *série* — vols 104/105/144/215 : évals
+/// ~5,5 s `ok=true` en rafale (×47+, scripts ≤ 497 o) →
+/// navigate jamais retourné (>260 s), API morte.
+pub(crate) const SLOW_EVAL_MS: u64 = 2_000;
+/// Évals lentes consécutives tolérées avant coupure §B-1 :
+/// le pire des cas (lente = juste sous la deadline 65 s du
+/// boot) borne le verrou à ~8 × 65 s ≈ 8,7 min vs ∞ — et en
+/// pratique ~8 × 5,5 s ≈ 45 s sur la signature observée.
+/// Une éval rapide referme la série : la page qui alterne
+/// scripts lourds et légers n'est jamais pénalisée.
+pub(crate) const SLOW_EVAL_CAP: u32 = 8;
+
 impl Session {
     /// Pompe les jobs JS dus d'un onglet — timers bornés à
     /// `max_timer_jobs` (ADR-0019) + microtasks +
@@ -681,6 +696,24 @@ impl Session {
 
     /// page.
     pub(crate) fn eval_module_graph(&mut self, tab: TabId, eng: &mut dyn JsEngine, me: &ModEval) {
+        // Même disjoncteur §B-1 que `eval_or_report` : une
+        // rafale `type=module` lente produit le même wedge.
+        if self
+            .tabs
+            .get(&tab)
+            .is_some_and(|e| e.slow_eval_streak >= SLOW_EVAL_CAP)
+        {
+            tracing::warn!(
+                tab,
+                name = %me.name,
+                "module sauté — rafale d'évals lentes (§B-1)"
+            );
+            self.emit_pipeline_error(
+                tab,
+                format!("rafale d'évals lentes — éval sautée — module «{}»", me.name),
+            );
+            return;
+        }
         // `info` comme `script: eval…` (§B-51 — twitch : les
         // bundles React sont `type=module`, leur livraison
         // doit être visible dans les journaux de vol).
@@ -691,6 +724,13 @@ impl Session {
             self.emit_pipeline_error(tab, format!("{e} — module «{}»", me.name));
         } else {
             tracing::info!(tab, ms = t0.elapsed().as_millis(), "module eval fin");
+        }
+        if let Some(e) = self.tabs.get_mut(&tab) {
+            if t0.elapsed().as_millis() >= u128::from(self.slow_eval_ms) {
+                e.slow_eval_streak = e.slow_eval_streak.saturating_add(1);
+            } else {
+                e.slow_eval_streak = 0;
+            }
         }
     }
 
@@ -1119,6 +1159,32 @@ impl Session {
             );
             return;
         }
+        // Disjoncteur §B-1 (variante vimeo) : la deadline
+        // par-script n'attrape pas une *rafale* d'évals
+        // lentes `ok=true` — 47 × 5,5 s tiennent le verrou
+        // >260 s, navigate jamais retourné, API morte. Au
+        // cap, les suivantes sont sautées comme un stall —
+        // page dégradée, API vivante.
+        if self
+            .tabs
+            .get(&tab)
+            .is_some_and(|e| e.slow_eval_streak >= SLOW_EVAL_CAP)
+        {
+            tracing::warn!(
+                tab,
+                bytes = src.len(),
+                "script sauté — rafale d'évals lentes (§B-1)"
+            );
+            let origin = url.map(|u| format!("{u} — ")).unwrap_or_default();
+            self.emit_pipeline_error(
+                tab,
+                format!(
+                    "rafale d'évals lentes — éval sautée — {origin}src «{}»",
+                    src_head(src)
+                ),
+            );
+            return;
+        }
         let t_eval = std::time::Instant::now();
         tracing::info!(tab, bytes = src.len(), "script: eval…");
         let r = match el_ord {
@@ -1128,9 +1194,20 @@ impl Session {
                 None => eng.eval(src),
             },
         };
+        let eval_ms = t_eval.elapsed().as_millis();
+        // Streak §B-1 : lente allonge, rapide referme — la
+        // page alternant scripts lourds/légers n'est jamais
+        // coupée, la rafale continue l'est.
+        if let Some(e) = self.tabs.get_mut(&tab) {
+            if eval_ms >= u128::from(self.slow_eval_ms) {
+                e.slow_eval_streak = e.slow_eval_streak.saturating_add(1);
+            } else {
+                e.slow_eval_streak = 0;
+            }
+        }
         tracing::info!(
             tab,
-            ms = u64::try_from(t_eval.elapsed().as_millis()).unwrap_or(u64::MAX),
+            ms = u64::try_from(eval_ms).unwrap_or(u64::MAX),
             ok = r.is_ok(),
             "script: eval fin"
         );
