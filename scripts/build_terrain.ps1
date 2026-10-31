@@ -82,6 +82,22 @@ if (-not $SkipApp -and (Test-Path 'app/pubspec.yaml')) {
     Copy-Item (Join-Path $release 'explorer_ffi.dll') -Destination $appOut -Force
 }
 
+# onionmedia_ffi.dll — source officielle = le package
+# C:\Onion-explorer-media (OnionMedia sur-mesure ; l'ancien
+# repo D:\Projet\OnionMedia est obsolete pour Explorer).
+# Re-deployee a chaque terrain : une DLL stale dans runner/
+# apres un `flutter clean` resterait sinon en place, et le
+# daemon de vol la resout adjacente a explorer-daemon.exe.
+$mediaDll = 'C:\Onion-explorer-media\target\release\onionmedia_ffi.dll'
+if (Test-Path $mediaDll) {
+    Copy-Item $mediaDll -Destination $OutDir -Force
+    if ($appOut -and (Test-Path $appOut)) {
+        Copy-Item $mediaDll -Destination $appOut -Force
+    }
+} else {
+    Write-Warning "onionmedia_ffi.dll package absente : $mediaDll (build le package avant terrain)"
+}
+
 $etat = if ($dirty) { 'MODIFIE — verdict terrain a risque (WIP)' } else { 'propre' }
 $manifest = @"
 OnionBit Explorer — binaires terrain
