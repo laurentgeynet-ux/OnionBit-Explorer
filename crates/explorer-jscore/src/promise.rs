@@ -576,8 +576,28 @@ impl Engine {
     /// le drain session (`report_unhandled_rejection` côté core,
     /// FIX-3). Les handlers qui jettent sont avalés (un mur
     /// d'event ne doit pas casser le drain).
+    /// Rejets distincts rapportés par checkpoint (§B-21) —
+    /// borne anti-tempête : une boucle applicative qui
+    /// produit des rejets de promesses variés à chaque tick
+    /// (genius `reactAds`, retry non borné) ne peut pas
+    /// saturer le drain. Au-delà, les rejets sont avalés
+    /// avec une ligne de synthèse.
+    const UNHANDLED_REPORT_CAP: u32 = 32;
+
     fn fire_unhandled_rejections(&mut self) {
         let pending = std::mem::take(&mut self.pending_unhandled);
+        // Dédup des descriptions **consécutives** identiques
+        // (§B-21 — reactAds : ×255 `r is not defined`
+        // strictement identiques en rafale, chaque tick de
+        // l'intervalle créant une promesse qui rejette hors
+        // du chemin `TIMER_FAIL_CAP`). Le report est
+        // regroupé en `(×N)` ; l'event n'est tiré qu'une
+        // fois par motif — un handler invité ×255 fois ne
+        // change rien au comportement.
+        let mut last_desc = String::new();
+        let mut same_desc = 0u32;
+        let mut reported = 0u32;
+        let mut capped = false;
         for (pv, reason) in pending {
             // `.then` tardif → « rejectionhandled » silencieux :
             // la promesse ne remonte plus.
@@ -596,6 +616,21 @@ impl Engine {
                 continue;
             }
             let desc = self.describe(reason);
+            if desc == last_desc {
+                same_desc += 1;
+                continue;
+            }
+            if same_desc > 0 {
+                self.unhandled_reports
+                    .push(format!("unhandledrejection: {last_desc} (×{})", same_desc + 1));
+                same_desc = 0;
+            }
+            last_desc = desc.clone();
+            if reported >= Self::UNHANDLED_REPORT_CAP {
+                capped = true;
+                continue;
+            }
+            reported += 1;
             self.unhandled_reports
                 .push(format!("unhandledrejection: {desc}"));
             // Event minimal spec (PromiseRejectionEvent).
@@ -632,6 +667,14 @@ impl Engine {
                     }
                 }
             }
+        }
+        if same_desc > 0 {
+            self.unhandled_reports
+                .push(format!("unhandledrejection: {last_desc} (×{})", same_desc + 1));
+        }
+        if capped {
+            self.unhandled_reports
+                .push("unhandledrejection: … — rafale de rejets bornée".to_string());
         }
     }
 }
