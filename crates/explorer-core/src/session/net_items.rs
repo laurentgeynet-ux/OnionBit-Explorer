@@ -19,14 +19,14 @@ use explorer_dom::Dom;
 use explorer_html::TreeBuilder;
 use explorer_js::JsEngine;
 use explorer_net::cookies::{partition_key, CookieJar};
-use explorer_net::error::NetResult;
+use explorer_net::error::{NetError, NetResult};
 use explorer_net::http::{
     FetchCredentials, FetchDest, FetchMode, HttpTransport, Initiator, Method, ReferrerPolicy,
     Request, Response, StreamedResponse,
 };
 use explorer_net::policy::{initiator_headers_policy, sec_fetch_headers};
 use explorer_net::url::Url;
-use explorer_render::decode_font;
+use explorer_render::{data_url_bytes, decode_font};
 use futures_util::stream::{FuturesUnordered, StreamExt};
 use tokio::sync::broadcast;
 
@@ -1481,7 +1481,7 @@ impl SubJob {
                     self.page_policy.unwrap_or_default(),
                 ));
                 req.headers.extend(sec_fetch_headers(&req));
-                let Ok(resp) = self.transport.fetch(&req).await else {
+                let Ok(resp) = fetch_maybe_data(&self.transport, &req).await else {
                     continue;
                 };
                 if !(200..300).contains(&resp.status) {
@@ -2367,7 +2367,7 @@ pub(crate) async fn fetch_wave<T>(
             };
             let tr = Arc::clone(transport);
             inflight.push(async move {
-                let res = tr.fetch(&req).await;
+                let res = fetch_maybe_data(&tr, &req).await;
                 (tag, res)
             });
         }
@@ -2379,6 +2379,84 @@ pub(crate) async fn fetch_wave<T>(
         };
         on_done(tag, res);
     }
+}
+
+/// Fetch de sous-ressource avec court-circuit `data:`
+/// (RFC 2397 — §B-65) : le corps voyage dans l'URL
+/// elle-même, aucune requête transport n'est émise — le
+/// transport refuse `data:` (`UnsupportedScheme`), ce qui
+/// tuait les `<link href="data:text/css,…">` (facebook) et
+/// tout autre sous-type (`data:` `<script>`/`<iframe>`/
+/// `@font-face`/`fetch()`). Le mediatype de l'URL devient
+/// le `Content-Type` (`text/plain;charset=US-ASCII` par
+/// défaut, RFC 2397 §3) pour que les pipelines de décodage
+/// (charset transport en amorce) se comportent comme sur
+/// réseau ; payload cassé → échec typé, jamais de corps
+/// « deviné ». CSP/mixed-content ont déjà filtré l'URL en
+/// amont — `data:` n'est admis ici qu'en sous-ressource
+/// explicitement collectée/demandée.
+pub(crate) async fn fetch_maybe_data(
+    transport: &Arc<dyn HttpTransport>,
+    req: &Request,
+) -> NetResult<Response> {
+    if req.url.scheme() == "data" {
+        return data_url_response(&req.url);
+    }
+    transport.fetch(req).await
+}
+
+/// `data:` → `Response` synthétique 200 (corps décodé
+/// RFC 2397, `Content-Type` du mediatype de l'URL).
+/// `Err(UnsupportedScheme)` si le payload est cassé —
+/// traité comme un échec réseau par le demandeur.
+pub(crate) fn data_url_response(url: &Url) -> NetResult<Response> {
+    let Some(body) = data_url_bytes(&url.as_str()) else {
+        return Err(NetError::UnsupportedScheme("data".to_string()));
+    };
+    Ok(Response {
+        status: 200,
+        reason: "OK".to_string(),
+        headers: vec![(
+            "content-type".to_string(),
+            data_url_mediatype(&url.as_str()),
+        )],
+        body,
+        reused_connection: false,
+        resolved_url: None,
+    })
+}
+
+/// `data:[<mediatype>][;base64],…` → le mediatype pour
+/// `Content-Type` : `text/plain;charset=US-ASCII` par
+/// défaut (RFC 2397 §3) ; `base64` est un drapeau de
+/// l'encodage, jamais un paramètre du type. Type présent
+/// sans paramètres → tel quel (`data:text/css,…` →
+/// `text/css`).
+fn data_url_mediatype(url: &str) -> String {
+    let Some((meta, _)) = url
+        .strip_prefix("data:")
+        .and_then(|rest| rest.split_once(','))
+    else {
+        return "text/plain;charset=US-ASCII".to_string();
+    };
+    let mut params = meta.split(';');
+    let ty = params.next().unwrap_or_default();
+    let mut out = if ty.is_empty() { "text/plain" } else { ty }.to_string();
+    let mut has_charset = false;
+    for p in params {
+        if p.is_empty() || p.eq_ignore_ascii_case("base64") {
+            continue;
+        }
+        has_charset |= p
+            .split_once('=')
+            .is_some_and(|(k, _)| k.eq_ignore_ascii_case("charset"));
+        out.push(';');
+        out.push_str(p);
+    }
+    if ty.is_empty() && !has_charset {
+        out.push_str(";charset=US-ASCII");
+    }
+    out
 }
 
 /// Spécificateurs statiques `(spec brut, url résolue)` d'un

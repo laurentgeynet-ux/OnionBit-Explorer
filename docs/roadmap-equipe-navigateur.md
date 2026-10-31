@@ -5078,6 +5078,39 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   cohabite avec OnionBit sur le
   même support ou vit seul.
 
+- [x] **Étape 168. Transport `data:`
+  pour les sous-ressources**
+  (`explorer-core`, §B-65) —
+  `fetch_maybe_data` court-circuite
+  le transport sur les URL `data:`
+  (corps décodé RFC 2397 +
+  `Content-Type` du mediatype) :
+  feuilles `<link>`/`@font-face`/
+  scripts/iframes dynamiques, vague
+  statique et `fetch()`/XHR —
+  facebook `data:text/css` mort
+  réparée.
+
+- [x] **Étape 169. `getComputedStyle()
+  .position` réelle** (`explorer-core`
+  → `explorer-jscore`, §B-28) —
+  `GeomPosition` publié dans
+  `ElementGeom` par `collect_geometry`
+  ; `StyleHost` sert la valeur
+  calculée (uMap/Leaflet : `absolute`
+  lu → pas de `relative` inline
+  destructeur du stretch `top/bottom`).
+
+- [x] **JS-C235. `illegal constructor`
+  nommé** (`explorer-jscore`, §B-66) —
+  `illegal_ctor_named` bound sur le
+  nom de l'interface → `TypeError:
+  illegal constructor (X)` : le
+  constructeur mort de la chaîne
+  `__d` Meta se nomme à l'erreur
+  (repro vol, plus besoin
+  d'in-process).
+
 - [ ] **Écarts terrain — vol humain
   22/10 (release `39ab821`, FFI)** :
   second run humain — trois constats

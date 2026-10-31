@@ -1307,7 +1307,7 @@ impl Session {
         let tx = self.net_tx.clone();
         let seq = d.seq;
         let j = tokio::spawn(async move {
-            let out = tr.fetch(&req).await;
+            let out = fetch_maybe_data(&tr, &req).await;
             let _ = tx.send(NetDone {
                 tab,
                 handle: seq,
@@ -1623,7 +1623,7 @@ impl Session {
         let tx = self.net_tx.clone();
         let seq = d.seq;
         let j = tokio::spawn(async move {
-            let out = tr.fetch(&req).await;
+            let out = fetch_maybe_data(&tr, &req).await;
             let _ = tx.send(NetDone {
                 tab,
                 handle: seq,
@@ -1739,7 +1739,7 @@ impl Session {
         let tx = self.net_tx.clone();
         let seq = d.seq;
         let j = tokio::spawn(async move {
-            let out = tr.fetch(&req).await;
+            let out = fetch_maybe_data(&tr, &req).await;
             let _ = tx.send(NetDone {
                 tab,
                 handle: seq,
@@ -1892,7 +1892,7 @@ impl Session {
         let seq = d.seq;
         tracing::debug!(tab, seq, url = %req_url, "dyn link : fetch émis");
         let j = tokio::spawn(async move {
-            let out = tr.fetch(&req).await;
+            let out = fetch_maybe_data(&tr, &req).await;
             let _ = tx.send(NetDone {
                 tab,
                 handle: seq,
@@ -2383,7 +2383,7 @@ impl Session {
         let partition = explorer_net::cookies::request_partition(&req);
         let fetch_mode = req.fetch_mode;
         let j = tokio::spawn(async move {
-            let out = tr.fetch(&req).await;
+            let out = fetch_maybe_data(&tr, &req).await;
             let _ = tx.send(NetDone {
                 tab,
                 handle,

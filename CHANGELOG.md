@@ -7,6 +7,75 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **Étape 168 — transport `data:` pour
+  les sous-ressources** (`explorer-core`,
+  §B-65, vols 365/366 SOCIAL) —
+  `<link href="data:text/css,…">`,
+  `@font-face src: url(data:…)`,
+  `<script>`/`<iframe>`/`fetch()`
+  `data:` mouraient sur
+  `UnsupportedScheme` au transport
+  (facebook : stylesheet refusée,
+  boot mort). `fetch_maybe_data`
+  décode le corps en local (RFC 2397)
+  et sert une `Response` 200
+  synthétique dont le
+  `Content-Type` est le mediatype de
+  l'URL (`text/plain;charset=US-ASCII`
+  par défaut) — vague statique,
+  `<link>`/`<script>`/`<iframe>`
+  dynamiques, fetch/XHR et fontes.
+
+- **Étape 169 — `getComputedStyle()
+  .position` = valeur calculée
+  réelle** (`explorer-core` →
+  `explorer-jscore`, §B-28 uMap) —
+  `ElementGeom` ne portait que
+  `fixed`/`positioned` : Leaflet
+  lisait `""`, posait
+  `position:relative` inline, tuait
+  le stretch `top:0;bottom:0` →
+  `#map` effondré à 1366×0.
+  `GeomPosition` publié par
+  `collect_geometry` (variante
+  `Position` du layout) ; `StyleHost`
+  sert la valeur réelle, `"static"`
+  en repli (inline prime toujours).
+
+- **R-137 — hit-test : rang de
+  sous-arbre = rang max atteint par
+  un descendant positionné**
+  (`explorer-layout`, §B-42
+  culture.gouv ×3 vols) — un overlay
+  `position:fixed` enfoui sous un
+  wrapper statique (bandeau
+  consentement DSFR en fin de
+  document) était testé APRÈS les
+  sous-arbres positionnés voisins :
+  clic « Tout accepter » résolu sur
+  l'ancre du mégamenu **sous** le
+  bandeau. `subtree_rank` hisse le
+  rang du sommet — l'ordre
+  d'empilement se décide au
+  `z-index`, pas à la profondeur du
+  porteur. Verrou
+  `hit_test_overlay_fixed_sous_
+  wrapper_statique_gagne`.
+
+- **JS-C235 — `illegal constructor`
+  nommé** (`explorer-jscore`, §B-66
+  Meta) — le stub des interfaces
+  inconstructibles rendait
+  `TypeError: illegal constructor`
+  anonyme : le tueur `__d` Meta
+  (instagram/whatsapp) ne pouvait
+  être nommé sans repro in-process.
+  `illegal_ctor_named` (bound arg =
+  nom de l'interface, `length: 0`
+  conservé) → `illegal constructor
+  (X)` identifie le constructeur au
+  prochain vol.
+
 - **JS-C234 — `ServiceWorkerContainer`
   EventTarget** (`explorer-jscore`,
   §B-14 ×5 vols 345 MAGHREB/ME +

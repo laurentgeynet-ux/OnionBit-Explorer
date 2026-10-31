@@ -762,6 +762,28 @@ impl Engine {
     /// `getOwnPropertyDescriptor`/`defineProperty` complète que
     /// `inputValueTracking` (React) exploite. Cache rooté par
     /// nom de classe.
+    /// Ctor « illegal constructor » **nommé** (§B-66) —
+    /// `bound_native` portant le nom d'interface dans l'arg
+    /// liée, même `length: 0` own prop que `native_fn`
+    /// (JS-C181 : les gates `Ctor.length` lisent l'arité).
+    fn illegal_ctor_bound(&mut self, name: &'static str) -> Value {
+        let nm = self.str_val(name);
+        let f = self.bound_native(name, illegal_ctor_named, vec![nm]);
+        if let Value::Obj(id) = f {
+            self.set_own_attrs(
+                id,
+                "length",
+                Value::Num(0.0),
+                crate::heap::PropAttrs {
+                    writable: false,
+                    enumerable: false,
+                    configurable: true,
+                },
+            );
+        }
+        f
+    }
+
     pub(crate) fn dom_ctor(&mut self, class: &'static str) -> Value {
         if let Some(v) = self.dom_ctors.get(class) {
             return *v;
@@ -769,7 +791,7 @@ impl Engine {
         let pid = self.new_object();
         let proto = Value::Obj(pid);
         self.install_dom_idl_accessors(pid, class);
-        let ctor = self.native_fn(class, illegal_ctor);
+        let ctor = self.illegal_ctor_bound(class);
         if let Value::Obj(cid) = ctor {
             self.set_own(cid, "prototype", proto, false);
             self.set_own(pid, "constructor", ctor, false);
@@ -2085,7 +2107,7 @@ impl Engine {
         // existe comme nom global — `location instanceof
         // Location` requiert le proto chaîné (pattern `Document`).
         let loc = self.new_host_object(Rc::new(LocationHost));
-        let lf = self.native_fn("Location", illegal_ctor);
+        let lf = self.illegal_ctor_bound("Location");
         if let Value::Obj(lfid) = lf {
             let lp = self.new_object();
             let tag = self.str_val("Location");
@@ -2111,7 +2133,7 @@ impl Engine {
         // posée **non inscriptible** : la déclaration/assignation
         // sloppy est ignorée comme sous Chrome.
         let navapi = self.new_host_object(Rc::new(NavigationHost));
-        let nf = self.native_fn("Navigation", illegal_ctor);
+        let nf = self.illegal_ctor_bound("Navigation");
         if let Value::Obj(nfid) = nf {
             let np = self.new_object();
             let tag = self.str_val("Navigation");
@@ -2375,7 +2397,7 @@ impl Engine {
             // — détection seule, jamais construit.
             "Window",
         ] {
-            let f = self.native_fn(name, illegal_ctor);
+            let f = self.illegal_ctor_bound(name);
             if let Value::Obj(fid) = f {
                 let p = self.new_object();
                 // Chaîne d'héritage des protos DOM (J5) —
@@ -2865,7 +2887,7 @@ impl Engine {
             let tag = self.str_val("AbortSignal");
             self.set_own(sig_proto, crate::interp::SYM_TO_STRING_TAG, tag, false);
         }
-        let as_f = self.native_fn("AbortSignal", illegal_ctor);
+        let as_f = self.illegal_ctor_bound("AbortSignal");
         if let Value::Obj(fid) = as_f {
             let m = self.native_fn("abort", signal_static_abort);
             self.set_own(fid, "abort", m, true);
@@ -3082,7 +3104,7 @@ impl Engine {
             "CanvasRenderingContext2D",
             "WebGLRenderingContext",
         ] {
-            let f = self.native_fn(name, illegal_ctor);
+            let f = self.illegal_ctor_bound(name);
             if let Value::Obj(fid) = f {
                 let p = self.new_object();
                 self.set_own(fid, "prototype", Value::Obj(p), false);
@@ -3091,7 +3113,7 @@ impl Engine {
         }
         // `XPathResult` — stub + constantes `*_TYPE` lues en
         // argument de `document.evaluate(…, type, …)` (CAP-188).
-        let xr_f = self.native_fn("XPathResult", illegal_ctor);
+        let xr_f = self.illegal_ctor_bound("XPathResult");
         if let Value::Obj(fid) = xr_f {
             for (k, v) in [
                 ("ANY_TYPE", 0),
@@ -3349,7 +3371,7 @@ impl Engine {
             "Tag",
             "Exception",
         ] {
-            let f = self.native_fn(n, illegal_ctor);
+            let f = self.illegal_ctor_bound(n);
             if let Value::Obj(fid) = f {
                 let p = self.new_object();
                 self.set_own(fid, "prototype", Value::Obj(p), false);
@@ -8465,6 +8487,23 @@ fn element_geom_size(dom: &DomRef, node: NodeId) -> Option<(f64, f64)> {
     Some((f64::from(r.w), f64::from(r.h)))
 }
 
+/// `position` calculée publiée pour `node` (§B-28) —
+/// valeur CSS `getComputedStyle` ; `"static"` sans table
+/// injectée (harnais) ni boîte publiée (`display:none`,
+/// divergence miroir/session bornée).
+fn geom_position(dom: &DomRef, node: NodeId) -> &'static str {
+    let Some((map, path)) = ({
+        let d = dom.borrow();
+        d.geometry.clone().zip(d.element_path(node))
+    }) else {
+        return "static";
+    };
+    map.lock()
+        .ok()
+        .and_then(|g| g.rects.get(&path).copied())
+        .map_or("static", |eg| eg.position.as_str())
+}
+
 /// `positioned` publié pour `node` (JS-C97) — `true` si une
 /// boîte contributrice a `position` ≠ `static`.
 fn geom_positioned(dom: &DomRef, node: NodeId) -> bool {
@@ -9122,20 +9161,22 @@ impl Host for StyleHost {
                 .find(|(k, _)| k == &kebab)
                 .map(|(_, v)| v)
         };
-        // CAP-196 — `getComputedStyle(el).position` : la feuille
-        // de style n'a pas de relais vers JS, mais la session a
-        // vu la cascade au layout — quand la géométrie publiée
-        // marque la boîte `fixed` (i#19), servir `"fixed"`.
-        // Mur mesuré : garde `"fixed"===position` du script
-        // `--marketing-header-fixed-top` de github. Inline
-        // prime toujours ; `el.style` (computed=false) reste
-        // pur inline.
+        // CAP-196 + §B-28 — `getComputedStyle(el).position` :
+        // la géométrie publiée porte désormais la valeur
+        // calculée (`ElementGeom.position`, collecte au commit
+        // layout) — la valeur **réelle** est servie, plus le
+        // seul bit `fixed` (mur mesuré : garde
+        // `"fixed"===position` du script
+        // `--marketing-header-fixed-top` de github ; mur uMap :
+        // Leaflet pose `position:relative` inline quand la
+        // lecture ne rend pas `"absolute"` → stretch tué,
+        // `#map` effondré 1366×0). Sans géométrie publiée
+        // (harnais, `display:none`) → `"static"`, valeur
+        // initiale spec. Inline prime toujours ; `el.style`
+        // (computed=false) reste pur inline.
         let v = match (v, self.computed && kebab == "position") {
             (Some(v), _) => v,
-            (None, true) => match element_geom(&self.dom, self.node) {
-                Some((_, true, _, _)) => "fixed".to_string(),
-                _ => String::new(),
-            },
+            (None, true) => geom_position(&self.dom, self.node).to_string(),
             (None, false) => String::new(),
         };
         Ok(Some(e.str_val(v)))
@@ -11024,8 +11065,18 @@ fn dom_parser_ctor(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
     Ok(e.new_host_object(Rc::new(DomParserHost)))
 }
 
-fn illegal_ctor(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
-    Err(e.type_error("illegal constructor"))
+/// `illegal_ctor` **nommée** (arg liée `bound_native` =
+/// nom de l'interface, §B-66) — l'exception identifie le
+/// constructeur mort : le tueur Meta `illegal constructor`
+/// → cascade `__d is not defined` (instagram/whatsapp)
+/// restait anonyme ; `TypeError: illegal constructor (X)`
+/// le nomme au prochain vol sans reproduction in-process.
+fn illegal_ctor_named(e: &mut Engine, _t: Value, a: &[Value]) -> JsResult<Value> {
+    let name = a
+        .first()
+        .and_then(|v| e.to_js_string(*v).ok())
+        .unwrap_or_else(|| "?".to_string());
+    Err(e.type_error(&format!("illegal constructor ({name})")))
 }
 
 /// `HTMLElement` — inconstructible directement (« illegal

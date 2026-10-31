@@ -1423,7 +1423,7 @@ pub use explorer_jscore::MediaEnv;
 // (ré-export : le type reste unique — la session construit et
 // remplit, le moteur lit).
 pub use explorer_jscore::{is_bare_specifier, rewrite_bare_specifier};
-pub use explorer_jscore::{ElementGeom, GeoRect, GeometryMap, GeometrySlot};
+pub use explorer_jscore::{ElementGeom, GeoRect, GeomPosition, GeometryMap, GeometrySlot};
 // JS-C77 — `Request.mode`/`Request.credentials` transportés par
 // `NetRequest::Fetch` (ré-export : le type reste unique).
 /// Réémis : requête de `<iframe>` dynamique (CAP-171) —

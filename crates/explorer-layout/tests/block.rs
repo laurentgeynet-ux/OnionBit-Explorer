@@ -2813,3 +2813,45 @@ fn img_intrinseque_geant_max_width_pct_ne_pousse_pas_item() {
         "nav expulsee hors viewport : x={nav_x} (item logo trop large)"
     );
 }
+
+/// §B-42 — overlay `position:fixed` enfoui sous des ancêtres
+/// en flux : le bandeau de consentement DSFR vit dans un
+/// wrapper statique en fin de document (rang local 0) mais
+/// est peint AU-DESSUS du mégamenu positionné voisin. Le
+/// rang local laissait les sous-arbres positionnés du body
+/// tester avant → clic « Tout accepter » résolu sur l'ancre
+/// du mégamenu sous l'overlay (culture.gouv, ×3 vols). Le
+/// rang d'un sous-arbre = le rang max atteint par un
+/// descendant positionné.
+#[test]
+fn hit_test_overlay_fixed_sous_wrapper_statique_gagne() {
+    let (dom, bx) = laid(
+        "<nav id=m style=\"position:fixed;left:0;top:0;width:600px;height:900px;z-index:1750\">\
+         <a id=a href=/metiers style=\"display:block;position:absolute;left:0;top:800px;width:1366px;height:48px\">lien</a>\
+         </nav>\
+         <div id=w>\
+         <div id=o style=\"position:fixed;left:403px;top:572px;width:640px;height:288px;z-index:4000\">\
+         <button id=b style=\"position:absolute;left:327px;top:216px;width:280px;height:40px\">Tout accepter</button>\
+         </div></div>",
+        "body{margin:0}",
+    );
+    let b = by_tag(&dom, "button");
+    // (804,809) : dans le bouton de l'overlay ET dans l'ancre
+    // pleine-largeur du mégamenu — l'overlay (z 4000 > 1750)
+    // doit gagner malgré son porteur statique.
+    let hit = explorer_layout::hit_test(&bx, 804.0, 809.0);
+    let node = hit.and_then(|n| {
+        let mut cur = n;
+        loop {
+            match dom.tag_name(cur) {
+                Ok(_) => return Some(cur),
+                Err(_) => cur = dom.parent(cur).ok().flatten()?,
+            }
+        }
+    });
+    assert_eq!(
+        node,
+        Some(b),
+        "overlay fixed sous wrapper statique : {hit:?}"
+    );
+}

@@ -2693,6 +2693,13 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   corpus datatracker, §14.3.9) : règles attribut-sélecteur
   `1/a/A/i/I`→decimal/alpha/roman — pas un hint (perdrait
   contre `ol{decimal}`). 1 test.
+- [x] **R-137. Hit-test : rang de sous-arbre = max des rangs
+  positionnés descendants** (`hit.rs`, §B-42 culture.gouv
+  ×3 vols) — un overlay `position:fixed` sous wrapper
+  statique était testé après les sous-arbres positionnés
+  voisins → clic résolu sur l'ancre du mégamenu sous le
+  bandeau. `subtree_rank` dans `hit_order` ; verrou
+  `hit_test_overlay_fixed_sous_wrapper_statique_gagne`.
 - [x] **R-110. `::part` chaîné + `exportparts` + slots nichés**
   (bornes Shadow) : `::part(a)::part(b)` marche par frontière,
   `exportparts` expose `i` sous `o` (§3.5) ; slots nichés

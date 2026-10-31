@@ -69,6 +69,40 @@ impl GeoRect {
     }
 }
 
+/// Valeur calculée `position` publiée par l'embedder (§B-28)
+/// — miroir de `explorer_layout::Position`, gardé énuméré
+/// dans ce crate autonome (aucune dépendance interne) ;
+/// l'embedder traduit sa variante à la collecte.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum GeomPosition {
+    /// Flux normal.
+    #[default]
+    Static,
+    /// `relative`.
+    Relative,
+    /// `absolute`.
+    Absolute,
+    /// `fixed`.
+    Fixed,
+    /// `sticky`.
+    Sticky,
+}
+
+impl GeomPosition {
+    /// Sérialisation CSS `position` — la valeur servie par
+    /// `getComputedStyle(el).position`.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Static => "static",
+            Self::Relative => "relative",
+            Self::Absolute => "absolute",
+            Self::Fixed => "fixed",
+            Self::Sticky => "sticky",
+        }
+    }
+}
+
 /// Géométrie d'un élément du document.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct ElementGeom {
@@ -86,6 +120,16 @@ pub struct ElementGeom {
     /// (plus proche ancêtre positionné — le miroir marche sa
     /// propre chaîne et consulte ce bit par `element_path`).
     pub positioned: bool,
+    /// `position` **calculée** de l'élément (§B-28) — la
+    /// géométrie ne portait que `positioned`/`fixed` : un
+    /// script lisant `getComputedStyle(el).position` pour
+    /// décider de son propre ancrage (Leaflet pose
+    /// `position:relative` inline quand la lecture ne rend
+    /// pas `"absolute"` → stretch `top/bottom` tué, uMap
+    /// effondré à 1366×0) n'avait aucun canal. Dernière
+    /// boîte contributrice gagne (un nœud ne porte qu'une
+    /// position calculée).
+    pub position: GeomPosition,
 }
 
 /// Table publiée — reconstruite entièrement par l'embedder à

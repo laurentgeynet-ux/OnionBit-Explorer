@@ -153,12 +153,32 @@ fn paint_rank(c: &LayoutBox) -> i64 {
     1_000_000_000 + z.signum() * 1_000_000_000 + z.clamp(-999_999_999, 999_999_999)
 }
 
+/// Rang de peinture **au sommet** d'un sous-arbre : le rang
+/// maximal atteint par un descendant positionné (§B-42).
+/// Une couche `position:fixed`/`absolute` enfouie sous des
+/// ancêtres en flux (bandeau de consentement DSFR sous un
+/// wrapper statique en fin de document) est **peinte
+/// au-dessus** des sous-arbres positionnés voisins — l'ordre
+/// d'empilement se décide au `z-index`, pas à la profondeur
+/// du porteur. Le rang local du porteur statique (0) laissait
+/// ces overlays tester APRÈS les sous-arbres positionnés de
+/// leur parent : clic « Tout accepter » culture.gouv résolu
+/// sur l'ancre du mégamenu **sous** le bandeau. Approximation
+/// assumée : les contextes d'empilement intermédiaires
+/// (`transform`, `opacity < 1`, `filter`…) qui confineraient
+/// le descendant ne sont pas modélisés.
+fn subtree_rank(bx: &LayoutBox) -> i64 {
+    bx.children.iter().fold(paint_rank(bx), |acc, c| {
+        acc.max(explorer_common::deep(|| subtree_rank(c)))
+    })
+}
+
 /// Indices des enfants dans l'ordre de **peinture inversé**
 /// (la dernière couche peinte, la plus haute, testée en
 /// premier) — à rang égal, le dernier du document gagne.
 fn hit_order(bx: &LayoutBox) -> Vec<usize> {
     let mut idx: Vec<usize> = (0..bx.children.len()).collect();
-    idx.sort_by_key(|&i| paint_rank(&bx.children[i]));
+    idx.sort_by_key(|&i| subtree_rank(&bx.children[i]));
     idx.reverse();
     idx
 }

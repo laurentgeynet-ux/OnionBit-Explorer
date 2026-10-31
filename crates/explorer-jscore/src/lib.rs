@@ -94,7 +94,7 @@ pub use dom_host::{
 };
 pub use error::{Error, Result};
 pub use eventsource::{EsEvent, EsRequest, EsTransport};
-pub use geom::{ElementGeom, GeoRect, GeometryMap, GeometrySlot};
+pub use geom::{ElementGeom, GeoRect, GeomPosition, GeometryMap, GeometrySlot};
 pub use heap::{HeapStats, Host};
 pub use idb::{CacheEntry, CacheRegistry, IdbDb, IdbIndexDef, IdbRegistry, IdbStore};
 pub use interp::Engine;

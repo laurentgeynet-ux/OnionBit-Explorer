@@ -93,6 +93,18 @@ pub(crate) fn collect_geometry(
             // `offsetParent` aux descendants — la marche des
             // ancêtres vit côté miroir (`positioned` ≠ static).
             e.positioned |= bx.position != explorer_layout::Position::Static;
+            // §B-28 : la valeur `position` calculée est
+            // publiée — `getComputedStyle(el).position` la
+            // sert quand l'inline ne dit rien (uMap/Leaflet
+            // lisent `absolute` pour ne pas écraser le
+            // stretch `top/bottom` d'un `relative`).
+            e.position = match bx.position {
+                explorer_layout::Position::Static => explorer_js::GeomPosition::Static,
+                explorer_layout::Position::Relative => explorer_js::GeomPosition::Relative,
+                explorer_layout::Position::Absolute => explorer_js::GeomPosition::Absolute,
+                explorer_layout::Position::Fixed => explorer_js::GeomPosition::Fixed,
+                explorer_layout::Position::Sticky => explorer_js::GeomPosition::Sticky,
+            };
         }
     }
     for c in &bx.children {
