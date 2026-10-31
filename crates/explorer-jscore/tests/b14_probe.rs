@@ -2046,3 +2046,40 @@ fn xml_serializer_accepts_foreign_document_nodes() {
         "serializeToString: nœud requis"
     );
 }
+
+/// §B-14 bras bbva (vol 429) — `parseHTMLUnsafe` feature-détecté
+/// par les frameworks modernes (static `Document` + méthode
+/// `Element`) : fragment retourné, rien d'inséré, scripts
+/// inertes (spec — même rail `innerHTML`).
+#[test]
+fn parse_html_unsafe_surfaces() {
+    let mut e = engine();
+    // Feature-detect : statique + méthode visibles.
+    assert_eq!(ev(&mut e, "typeof Document.parseHTMLUnsafe"), "function");
+    assert_eq!(
+        ev(
+            &mut e,
+            "typeof document.createElement('div').parseHTMLUnsafe"
+        ),
+        "function"
+    );
+    // Statique : document neuf, contenu présent.
+    assert_eq!(
+        ev(
+            &mut e,
+            "Document.parseHTMLUnsafe('<p id=\"q\">hi</p>').getElementById('q').textContent"
+        ),
+        "hi"
+    );
+    // Instance : `DocumentFragment` retourné, nœuds dedans,
+    // receveur intact.
+    assert_eq!(
+        ev(
+            &mut e,
+            "var el=document.createElement('div');\
+             var f=el.parseHTMLUnsafe('<b>A</b><i>B</i>');\
+             f.nodeName+'|'+f.childNodes.length+'|'+el.childNodes.length"
+        ),
+        "#document-fragment|2|0"
+    );
+}

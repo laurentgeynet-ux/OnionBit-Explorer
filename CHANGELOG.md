@@ -7,6 +7,18 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **JS-C249 — `parseHTMLUnsafe`**
+  (`explorer-jscore`, §B-14 bras
+  bbva vol 429) — statique
+  `Document.parseHTMLUnsafe(html)`
+  (document neuf, rail `DOMParser`
+  `text/html`) + méthode
+  `Element` (`DocumentFragment`
+  retourné, rien d'inséré) ;
+  scripts inertes, feature-detect
+  `typeof` visible. Verrou
+  `parse_html_unsafe_surfaces`.
+
 - **JS-C248 — WebIDL `required` = arg
   absent + `page_url` vide →
   `about:blank`** (`explorer-jscore`,

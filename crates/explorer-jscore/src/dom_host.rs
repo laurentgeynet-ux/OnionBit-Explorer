@@ -2807,6 +2807,12 @@ impl Engine {
             if let Some(Value::Obj(pid)) = self.get_prop(cid, "prototype") {
                 self.set_own(pid, "adoptedStyleSheets", Value::Undefined, true);
             }
+            // `Document.parseHTMLUnsafe(html)` — statique spec :
+            // document neuf, équivalent `DOMParser(text/html)`
+            // (bras §B-14 bbva — feature-detect des frameworks
+            // modernes avant `DOMParser`).
+            let f = self.native_fn("parseHTMLUnsafe", document_parse_html_unsafe);
+            self.set_own(cid, "parseHTMLUnsafe", f, true);
         }
         // `Event` + famille — constructibles : l'objet produit est
         // dispatchable (`type`/`bubbles` lus par `dispatchEvent`).
@@ -5485,6 +5491,7 @@ const NODE_METHODS: &[&str] = &[
     "insertAdjacentText",
     "getHTML",
     "setHTMLUnsafe",
+    "parseHTMLUnsafe",
     "checkVisibility",
     "replaceChildren",
     "closest",
@@ -7970,6 +7977,21 @@ impl Host for NodeHost {
                 let html = e.to_js_string(arg(args, 0))?;
                 self.set_inner_html(node, &html);
                 Ok(Some(Value::Undefined))
+            }
+            // `el.parseHTMLUnsafe(html)` — spec : parse en
+            // `DocumentFragment` **retourné**, rien d'inséré ;
+            // scripts marqués « already started » (inertes),
+            // même rail qu'`innerHTML` (bras §B-14 bbva ×1).
+            "parseHTMLUnsafe" => {
+                let html = e.to_js_string(arg(args, 0))?;
+                let n = {
+                    let mut d = self.dom.borrow_mut();
+                    let tmp = d.create_fragment();
+                    d.parse_fragment_into(tmp, &html);
+                    d.mark_scripts_started(tmp);
+                    tmp
+                };
+                Ok(Some(node_value(e, &self.dom, &self.cache, n)))
             }
             "checkVisibility" => {
                 let d = self.dom.borrow();
@@ -11166,6 +11188,15 @@ impl Host for DomParserHost {
 
 fn dom_parser_ctor(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
     Ok(e.new_host_object(Rc::new(DomParserHost)))
+}
+
+/// `Document.parseHTMLUnsafe(html)` — statique (spec) : document
+/// neuf parseé par le même rail que `DOMParser.parseFromString
+/// (html,"text/html")` — scripts inertes, miroir détaché.
+fn document_parse_html_unsafe(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let src = e.to_js_string(arg(args, 0))?;
+    let domref: DomRef = Rc::new(RefCell::new(crate::dom::Dom::from_html(&src)));
+    Ok(document_value(e, &domref))
 }
 
 /// `illegal_ctor` **nommée** (arg liée `bound_native` =
