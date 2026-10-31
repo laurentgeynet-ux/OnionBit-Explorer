@@ -7,6 +7,31 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **JS-C244 — `AudioContext`
+  constructible-stub** (`explorer-jscore`,
+  §B-66 instagram/whatsapp/threads) —
+  le loader Meta mourrait `illegal
+  constructor` au probe audio non
+  rattrapé → cascade `__d is not
+  defined` ×3 sites : `AudioContext`
+  sort du census illegal-ctor, vrai
+  ctor (spec : constructible) —
+  instance proto-typée portant
+  `state`/`sampleRate`/`baseLatency`/
+  `destination`, proto chaîné
+  `EventTarget` (spec
+  `BaseAudioContext`), `resume`/
+  `close`/`suspend` → promesse
+  résolue, `create*` → nœud
+  générique (`connect` rend sa cible,
+  params `{value}`). Aucun graphe
+  audio réel — honnêteté : pas de
+  son, mais la construction survit.
+  Verrou `audio_context_constructible_stub`.
+  Entretien gate : `match`→`if let`
+  (JS-C243), `clone_from` (JS-C239),
+  docs backticks, `dom.rs` comblé du
+  champ `position` (R-137).
 - **JS-C243 — `not a node` nomme
   la valeur** (`explorer-jscore`,
   §B-14 `appendChild: not a node`

@@ -1931,3 +1931,41 @@ fn shared_worker_event_target_via_proto() {
         "1"
     );
 }
+
+/// §B-66 vol instagram/whatsapp/threads — `illegal constructor`
+/// (JS-C235) au `new AudioContext()` du loader Meta → cascade
+/// `__d is not defined`. Ctor stub : instance proto-typée,
+/// surface fingerprint (`state`/`sampleRate`/`destination`),
+/// proto chaîné `EventTarget` (spec `BaseAudioContext`).
+#[test]
+fn audio_context_constructible_stub() {
+    let mut e = engine();
+    assert_eq!(
+        ev(
+            &mut e,
+            "var c=new AudioContext();\
+             (c instanceof AudioContext)+':'+(c instanceof EventTarget)+':'\
+             +c.state+':'+c.sampleRate+':'+typeof c.createOscillator+':'\
+             +typeof c.resume"
+        ),
+        "true:true:suspended:48000:function:function"
+    );
+    // `create*` → nœud générique chaînable, `connect` rend sa cible.
+    assert_eq!(
+        ev(
+            &mut e,
+            "var c=new AudioContext(),o=c.createOscillator(),g=c.createGain();\
+             o.connect(g).connect(c.destination)===c.destination"
+        ),
+        "true"
+    );
+    // `resume()`/`close()` → promesse résolue (pas de rejet armé).
+    assert_eq!(
+        ev(
+            &mut e,
+            "var c=new AudioContext(),hit=0;\
+             c.resume().then(function(){hit++});hit"
+        ),
+        "0"
+    );
+}

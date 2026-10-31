@@ -2484,6 +2484,40 @@ impl Engine {
             }
             self.set_own(g, name, f, false);
         }
+        // `AudioContext` — constructible-stub (§B-66 : probe
+        // audio du loader Meta — `illegal constructor` non rattrapé
+        // tuait `require` → cascade `__d is not defined` ×3 sites).
+        let ac_f = self.native_fn("AudioContext", audio_context_ctor);
+        if let Value::Obj(fid) = ac_f {
+            let p = self.new_object();
+            let tag = self.str_val("AudioContext");
+            self.set_own(p, crate::interp::SYM_TO_STRING_TAG, tag, false);
+            self.set_own(p, "constructor", ac_f, false);
+            for name in ["resume", "close", "suspend"] {
+                let m = self.native_fn(name, audio_ctx_promise);
+                self.set_own(p, name, m, true);
+            }
+            for name in [
+                "createOscillator",
+                "createGain",
+                "createDynamicsCompressor",
+                "createAnalyser",
+                "createBiquadFilter",
+                "createBufferSource",
+                "createDelay",
+                "createChannelSplitter",
+                "createChannelMerger",
+                "createStereoPanner",
+                "createWaveShaper",
+                "createPanner",
+                "createConvolver",
+            ] {
+                let m = self.native_fn(name, audio_node_stub);
+                self.set_own(p, name, m, true);
+            }
+            self.set_own(fid, "prototype", Value::Obj(p), false);
+        }
+        self.set_own(g, "AudioContext", ac_f, false);
         // `EventTarget` — constructible spec (corpus css-tricks :
         // wp-polyfill/core-js meurt au feature-detect sinon).
         // Listeners = map cachée `__et` type → [cb] (rail `__ls`).
@@ -2529,6 +2563,9 @@ impl Engine {
             // `Navigation` (cowcotland §B-14) — installé plus haut
             // avec `location`/`history`, avant `EventTarget`.
             ("Navigation", "EventTarget"),
+            // `AudioContext` (§B-66) — spec WebIDL :
+            // `AudioContext` < `BaseAudioContext` < `EventTarget`.
+            ("AudioContext", "EventTarget"),
             // IDB (JS-C215) — WebIDL : `IDBRequest`,
             // `IDBOpenDBRequest`, `IDBTransaction` et
             // `IDBDatabase` sont des `EventTarget` ;
@@ -3073,7 +3110,9 @@ impl Engine {
             "IdleDetector",
             "WakeLock",
             "ImageBitmap",
-            "AudioContext",
+            // `AudioContext` — vrai ctor stub posé avant
+            // `EventTarget` (§B-66 probe Meta) ; l'entrée census
+            // l'écrasait avec un illegal-ctor nu.
             "OfflineAudioContext",
             "MediaStream",
             "MediaRecorder",
@@ -5089,15 +5128,12 @@ impl Host for DocumentHost {
             }
             "removeChild" => {
                 let target = node_for_in(e, arg(args, 0), &self.dom);
-                match target {
-                    Some(child) => {
-                        self.dom.borrow_mut().detach(child);
-                        Ok(Some(arg(args, 0)))
-                    }
-                    None => {
-                        let d = e.describe(arg(args, 0));
-                        Err(e.type_error(format!("removeChild: not a node: {d}")))
-                    }
+                if let Some(child) = target {
+                    self.dom.borrow_mut().detach(child);
+                    Ok(Some(arg(args, 0)))
+                } else {
+                    let d = e.describe(arg(args, 0));
+                    Err(e.type_error(format!("removeChild: not a node: {d}")))
                 }
             }
             "hasChildNodes" => {
@@ -7261,15 +7297,12 @@ impl Host for NodeHost {
             }
             "removeChild" => {
                 let target = node_for_in(e, arg(args, 0), &self.dom);
-                match target {
-                    Some(child) => {
-                        self.dom.borrow_mut().detach(child);
-                        Ok(Some(arg(args, 0)))
-                    }
-                    None => {
-                        let d = e.describe(arg(args, 0));
-                        Err(e.type_error(format!("removeChild: not a node: {d}")))
-                    }
+                if let Some(child) = target {
+                    self.dom.borrow_mut().detach(child);
+                    Ok(Some(arg(args, 0)))
+                } else {
+                    let d = e.describe(arg(args, 0));
+                    Err(e.type_error(format!("removeChild: not a node: {d}")))
                 }
             }
             "remove" => {
@@ -7596,36 +7629,30 @@ impl Host for NodeHost {
                 let new_n = node_for_in(e, arg(args, 0), &self.dom)
                     .or_else(|| adopt_into(e, arg(args, 0), &self.dom, &self.cache));
                 let ref_n = node_for_in(e, arg(args, 1), &self.dom);
-                match new_n {
-                    Some(c) => {
-                        if self.dom.borrow().is_ancestor_or_self(node, c) {
-                            return Err(e.type_error("HierarchyRequestError: ancestor"));
-                        }
-                        self.dom.borrow_mut().insert_before(node, c, ref_n);
-                        Ok(Some(arg(args, 0)))
+                if let Some(c) = new_n {
+                    if self.dom.borrow().is_ancestor_or_self(node, c) {
+                        return Err(e.type_error("HierarchyRequestError: ancestor"));
                     }
-                    None => {
-                        let d = e.describe(arg(args, 0));
-                        Err(e.type_error(format!("insertBefore: not a node: {d}")))
-                    }
+                    self.dom.borrow_mut().insert_before(node, c, ref_n);
+                    Ok(Some(arg(args, 0)))
+                } else {
+                    let d = e.describe(arg(args, 0));
+                    Err(e.type_error(format!("insertBefore: not a node: {d}")))
                 }
             }
             "replaceChild" => {
                 let new_n = node_for_in(e, arg(args, 0), &self.dom)
                     .or_else(|| adopt_into(e, arg(args, 0), &self.dom, &self.cache));
                 let old_n = node_for_in(e, arg(args, 1), &self.dom);
-                match (new_n, old_n) {
-                    (Some(n), Some(o)) => {
-                        if self.dom.borrow().is_ancestor_or_self(node, n) {
-                            return Err(e.type_error("HierarchyRequestError: ancestor"));
-                        }
-                        self.dom.borrow_mut().replace_child(node, n, o);
-                        Ok(Some(arg(args, 1)))
+                if let (Some(n), Some(o)) = (new_n, old_n) {
+                    if self.dom.borrow().is_ancestor_or_self(node, n) {
+                        return Err(e.type_error("HierarchyRequestError: ancestor"));
                     }
-                    _ => {
-                        let d = e.describe(arg(args, 0));
-                        Err(e.type_error(format!("replaceChild: not a node: {d}")))
-                    }
+                    self.dom.borrow_mut().replace_child(node, n, o);
+                    Ok(Some(arg(args, 1)))
+                } else {
+                    let d = e.describe(arg(args, 0));
+                    Err(e.type_error(format!("replaceChild: not a node: {d}")))
                 }
             }
             "cloneNode" => {
@@ -11759,6 +11786,65 @@ fn event_target_ctor(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Valu
         let mid = e.new_object();
         e.set_own(oid, "__et", Value::Obj(mid), true);
     }
+    Ok(Value::Undefined)
+}
+
+/// `new AudioContext()` — stub honnête (§B-66 instagram/
+/// whatsapp/threads : `illegal constructor` au probe audio du
+/// loader Meta → cascade `__d is not defined`). L'instance porte
+/// la surface lue par les empreintes (`state`/`sampleRate`/
+/// `destination`/`baseLatency`) ; `this` arrive chaîné à
+/// `AudioContext.prototype` (`construct_nt`) — rendre `Undefined`
+/// garde l'objet proto-typé.
+fn audio_context_ctor(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
+    if let Value::Obj(id) = this {
+        let st = e.str_val("suspended");
+        e.set_own(id, "state", st, true);
+        e.set_own(id, "sampleRate", Value::Num(48000.0), true);
+        e.set_own(id, "baseLatency", Value::Num(0.0), true);
+        let dst = audio_node_stub(e, this, &[])?;
+        e.set_own(id, "destination", dst, true);
+        e.set_own(id, "onstatechange", Value::Null, true);
+    }
+    Ok(Value::Undefined)
+}
+
+/// `ctx.resume()`/`close()`/`suspend()` — promesse résolue
+/// (spec : `Promise<void>` ; pas de graphe audio réel).
+fn audio_ctx_promise(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
+    let pid = e.new_promise();
+    e.resolve_promise(pid, Value::Undefined);
+    Ok(Value::Obj(pid))
+}
+
+/// `ctx.createXxx()` — nœud audio générique : `connect` rend sa
+/// cible (chaînage `a.connect(b).connect(dst)`), `start`/`stop`/
+/// `disconnect` no-op, `frequency`/`gain`/`Q`/`detune` posés en
+/// `{value}` (empreintes lisent `param.value`).
+fn audio_node_stub(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
+    let o = e.new_object();
+    let cn = e.native_fn("connect", audio_node_connect);
+    e.set_own(o, "connect", cn, true);
+    for m in ["disconnect", "start", "stop"] {
+        let f = e.native_fn(m, audio_noop);
+        e.set_own(o, m, f, true);
+    }
+    for p in ["frequency", "gain", "Q", "detune", "pan"] {
+        let param = e.new_object();
+        e.set_own(param, "value", Value::Num(0.0), true);
+        e.set_own(o, p, Value::Obj(param), true);
+    }
+    Ok(Value::Obj(o))
+}
+
+/// `node.connect(dst)` → `dst` (spec : rend la destination —
+/// permet le chaînage des probes).
+fn audio_node_connect(_e: &mut Engine, _t: Value, a: &[Value]) -> JsResult<Value> {
+    Ok(arg(a, 0))
+}
+
+/// no-op `undefined` pour les méthodes de nœud sans effet.
+fn audio_noop(_e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
     Ok(Value::Undefined)
 }
 

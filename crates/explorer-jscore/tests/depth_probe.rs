@@ -185,7 +185,7 @@ deep!(deep_bind_instanceof_chain, 20_000, |n| format!(
 /// corps profond survit dans le tas via `Rc<FnLit>` → la
 /// chute de l'engine détruit l'AST **récursivement**, hors
 /// toute garde `maybe_grow` → débordement pile native en
-/// `Drop`. `Engine::drop` vide modules/call_stack/heap/
+/// `Drop`. `Engine::drop` vide `modules`/`call_stack`/`heap`/
 /// parked sous `stacker` — le test meurt en crash si la
 /// garde saute.
 #[test]

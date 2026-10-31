@@ -627,7 +627,7 @@ impl Engine {
                 ));
                 same_desc = 0;
             }
-            last_desc = desc.clone();
+            last_desc.clone_from(&desc);
             if reported >= Self::UNHANDLED_REPORT_CAP {
                 capped = true;
                 continue;

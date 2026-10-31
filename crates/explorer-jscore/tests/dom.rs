@@ -3898,6 +3898,7 @@ fn c117_io_reevaluates_on_scroll() {
                 },
                 fixed: false,
                 positioned: false,
+                position: explorer_jscore::GeomPosition::Static,
             },
         );
     }
@@ -4667,6 +4668,7 @@ fn geometry_bridge_gbrect_and_dims() {
                 },
                 fixed: false,
                 positioned: false,
+                position: explorer_jscore::GeomPosition::Static,
             },
         );
         // #list → html>body>ul[0] — sous un ancêtre fixed :
@@ -4686,6 +4688,7 @@ fn geometry_bridge_gbrect_and_dims() {
                 },
                 fixed: true,
                 positioned: true,
+                position: explorer_jscore::GeomPosition::Absolute,
             },
         );
     }
@@ -5530,6 +5533,7 @@ fn cap180_inverse_geometry() {
                 },
                 fixed: false,
                 positioned: false,
+                position: explorer_jscore::GeomPosition::Static,
             },
         );
         // #list ul — fixed, déjà viewport (10,15)-(110,65)
@@ -5549,6 +5553,7 @@ fn cap180_inverse_geometry() {
                 },
                 fixed: true,
                 positioned: true,
+                position: explorer_jscore::GeomPosition::Absolute,
             },
         );
     }
@@ -6314,6 +6319,7 @@ fn cap196_computed_position_from_geometry() {
                 },
                 fixed: true,
                 positioned: true,
+                position: explorer_jscore::GeomPosition::Absolute,
             },
         );
     }
@@ -6361,6 +6367,7 @@ fn c97_offset_parent_top_left() {
                 },
                 fixed: false,
                 positioned: true,
+                position: explorer_jscore::GeomPosition::Absolute,
             },
         );
         // #main div (statique) → html>body>div[0]
@@ -6379,6 +6386,7 @@ fn c97_offset_parent_top_left() {
                 },
                 fixed: false,
                 positioned: false,
+                position: explorer_jscore::GeomPosition::Static,
             },
         );
         // #list ul (fixed) → html>body>ul[0]
@@ -6397,6 +6405,7 @@ fn c97_offset_parent_top_left() {
                 },
                 fixed: true,
                 positioned: true,
+                position: explorer_jscore::GeomPosition::Absolute,
             },
         );
     }
