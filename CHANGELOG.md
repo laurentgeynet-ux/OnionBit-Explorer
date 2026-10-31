@@ -7,6 +7,19 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **JS-C243 — `not a node` nomme
+  la valeur** (`explorer-jscore`,
+  §B-14 `appendChild: not a node`
+  voltalis) — le rejet ne nommait
+  pas le type de l'argument :
+  `X: not a node: <descr>` à 11
+  sites (appendChild/insertBefore/
+  replaceChild/removeChild/
+  compareDocumentPosition/
+  insertAdjacentElement/
+  customElements.upgrade) — le
+  prochain vol nomme le producteur.
+
 - **JS-C242 — cap d'ops boot ×8**
   (`explorer-jscore`, §B-23 bras
   É166 — youtube `script execution

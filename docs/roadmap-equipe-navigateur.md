@@ -5148,6 +5148,15 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   `ModuleLoader`, clés `resolved`/
   `spec`/`resolved`@`referrer`.
 
+- [x] **JS-C243. `not a node`
+  nomme la valeur**
+  (`explorer-jscore`, §B-14
+  voltalis) — `X: not a node:
+  <descr>` à 11 sites structurels
+  : le prochain vol nomme le type
+  de l'argument rejeté (résiduel
+  d'adoption à identifier).
+
 - [x] **JS-C242. Cap d'ops boot
   ×8** (`explorer-jscore`, §B-23
   bras É166 — youtube vol 368) —

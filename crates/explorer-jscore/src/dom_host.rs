@@ -5042,7 +5042,8 @@ impl Host for DocumentHost {
                 let child = node_for_in(e, arg(args, 0), &self.dom)
                     .or_else(|| adopt_into(e, arg(args, 0), &self.dom, &self.cache));
                 let Some(child) = child else {
-                    return Err(e.type_error("appendChild: not a node"));
+                    let d = e.describe(arg(args, 0));
+                    return Err(e.type_error(format!("appendChild: not a node: {d}")));
                 };
                 if self.dom.borrow().nodes[child as usize].kind == NodeKind::Text {
                     return Err(e.type_error("HierarchyRequestError: text into document"));
@@ -5068,13 +5069,15 @@ impl Host for DocumentHost {
                 let child = node_for_in(e, arg(args, 0), &self.dom)
                     .or_else(|| adopt_into(e, arg(args, 0), &self.dom, &self.cache));
                 let Some(child) = child else {
-                    return Err(e.type_error("replaceChild: not a node"));
+                    let d = e.describe(arg(args, 0));
+                    return Err(e.type_error(format!("replaceChild: not a node: {d}")));
                 };
                 if self.dom.borrow().nodes[child as usize].kind == NodeKind::Text {
                     return Err(e.type_error("HierarchyRequestError: text into document"));
                 }
                 let Some(old) = node_for_in(e, arg(args, 1), &self.dom) else {
-                    return Err(e.type_error("replaceChild: old not a node"));
+                    let d = e.describe(arg(args, 1));
+                    return Err(e.type_error(format!("replaceChild: old not a node: {d}")));
                 };
                 let root = self.dom.borrow().root;
                 if self.dom.borrow().is_ancestor_or_self(root, child) {
@@ -5091,7 +5094,10 @@ impl Host for DocumentHost {
                         self.dom.borrow_mut().detach(child);
                         Ok(Some(arg(args, 0)))
                     }
-                    None => Err(e.type_error("removeChild: not a node")),
+                    None => {
+                        let d = e.describe(arg(args, 0));
+                        Err(e.type_error(format!("removeChild: not a node: {d}")))
+                    }
                 }
             }
             "hasChildNodes" => {
@@ -7260,7 +7266,10 @@ impl Host for NodeHost {
                         self.dom.borrow_mut().detach(child);
                         Ok(Some(arg(args, 0)))
                     }
-                    None => Err(e.type_error("removeChild: not a node")),
+                    None => {
+                        let d = e.describe(arg(args, 0));
+                        Err(e.type_error(format!("removeChild: not a node: {d}")))
+                    }
                 }
             }
             "remove" => {
@@ -7595,7 +7604,10 @@ impl Host for NodeHost {
                         self.dom.borrow_mut().insert_before(node, c, ref_n);
                         Ok(Some(arg(args, 0)))
                     }
-                    None => Err(e.type_error("insertBefore: not a node")),
+                    None => {
+                        let d = e.describe(arg(args, 0));
+                        Err(e.type_error(format!("insertBefore: not a node: {d}")))
+                    }
                 }
             }
             "replaceChild" => {
@@ -7610,7 +7622,10 @@ impl Host for NodeHost {
                         self.dom.borrow_mut().replace_child(node, n, o);
                         Ok(Some(arg(args, 1)))
                     }
-                    _ => Err(e.type_error("replaceChild: not a node")),
+                    _ => {
+                        let d = e.describe(arg(args, 0));
+                        Err(e.type_error(format!("replaceChild: not a node: {d}")))
+                    }
                 }
             }
             "cloneNode" => {
@@ -7678,7 +7693,8 @@ impl Host for NodeHost {
             }
             "compareDocumentPosition" => {
                 let Some(o) = node_for_in(e, arg(args, 0), &self.dom) else {
-                    return Err(e.type_error("compareDocumentPosition: not a node"));
+                    let d = e.describe(arg(args, 0));
+                    return Err(e.type_error(format!("compareDocumentPosition: not a node: {d}")));
                 };
                 let bits = self.dom.borrow().compare_position(node, o);
                 Ok(Some(Value::Num(f64::from(bits))))
@@ -7880,7 +7896,8 @@ impl Host for NodeHost {
                 let Some(child) = node_for_in(e, arg(args, 1), &self.dom)
                     .or_else(|| adopt_into(e, arg(args, 1), &self.dom, &self.cache))
                 else {
-                    return Err(e.type_error("insertAdjacentElement: not a node"));
+                    let d = e.describe(arg(args, 1));
+                    return Err(e.type_error(format!("insertAdjacentElement: not a node: {d}")));
                 };
                 self.insert_at_position(e, node, &pos, child)?;
                 Ok(Some(arg(args, 1)))
@@ -9878,7 +9895,8 @@ impl Host for CustomElementsHost {
             "upgrade" => {
                 let root = arg(args, 0);
                 let Some(node) = node_for_in(e, root, &self.dom) else {
-                    return Err(e.type_error("customElements.upgrade: not a node"));
+                    let d = e.describe(arg(args, 0));
+                    return Err(e.type_error(format!("customElements.upgrade: not a node: {d}")));
                 };
                 ce_upgrade_subtree(e, &self.dom, &self.cache, node)?;
                 Ok(Some(Value::Undefined))
