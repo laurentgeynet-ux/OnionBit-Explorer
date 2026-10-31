@@ -36,8 +36,9 @@ final class _OnionMediaFrame extends ffi.Struct {
 
 /// Descripteur `repr(C)` `MseDesc` (onionmedia-ffi P-53) —
 /// un rail par `SourceBuffer` (`buffer` = `?buffer=` du pull
-/// `…/segments`). Layout : base@0, baseLen@8, tab@16,
-/// media@24, buffer@32 (+pad), ext@40, extLen@48 = 56 octets.
+/// `…/segments`). Layout ABI 4 : base@0, baseLen@8, tab@16,
+/// media@24, buffer@32 (+pad), ext@40, extLen@48,
+/// ptsOffsetSecs@56 = 64 octets.
 final class _MseDesc extends ffi.Struct {
   external ffi.Pointer<ffi.Char> base;
   @ffi.Size()
@@ -51,6 +52,8 @@ final class _MseDesc extends ffi.Struct {
   external ffi.Pointer<ffi.Char> ext;
   @ffi.Size()
   external int extLen;
+  @ffi.Double()
+  external double ptsOffsetSecs;
 }
 
 /// Lecteur `onionmedia_ffi` (OnionMedia/OnionCodec — pur Rust, MIT/Apache)
