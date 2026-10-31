@@ -313,7 +313,10 @@ impl CookieJar {
     /// `CookieConfig` honorés. `false` si déjà expiré.
     pub fn insert_stored(&self, cookie: Cookie) -> bool {
         let now = SystemTime::now();
-        if cookie.is_expired(now) {
+        if cookie.is_expired(now)
+            || cookie.name.bytes().any(|b| b < 32 || b == 127)
+            || cookie.value.bytes().any(|b| b < 32 || b == 127)
+        {
             return false;
         }
         let key = Key {
@@ -342,7 +345,16 @@ impl CookieJar {
         let mut parts = header.split(';');
         let (name, value) = parts.next()?.split_once('=')?;
         let name = name.trim();
-        if name.is_empty() {
+        let value = value.trim();
+        // Caractères de contrôle interdits (`cookie-octet` RFC 6265
+        // §4.1.1 les exclut) — un `document.cookie` ou un
+        // `set-cookie` biscornu ne doit pas empoisonner le jar : la
+        // valeur finirait dans l'en-tête `Cookie` de la requête
+        // suivante et la rendrait non sérialisable.
+        if name.is_empty()
+            || name.bytes().any(|b| b < 32 || b == 127)
+            || value.bytes().any(|b| b < 32 || b == 127)
+        {
             return None;
         }
         let https = url.scheme() == "https";
@@ -350,7 +362,7 @@ impl CookieJar {
 
         let mut c = Cookie {
             name: name.to_string(),
-            value: value.trim().to_string(),
+            value: value.to_string(),
             domain: host.clone(),
             host_only: true,
             path: default_path(url.path()),

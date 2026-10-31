@@ -139,9 +139,29 @@ impl AutoClient {
             .uri(req.url.as_str())
             .header("user-agent", &self.cfg.user_agent);
         for (n, v) in &req.headers {
-            if !forbidden_h2(n) {
-                builder = builder.header(n.as_str(), v.as_str());
+            // Dégradation gracieuse : un en-tête que `http` ne peut
+            // pas sérialiser (nom ou valeur hors grammaire — ex.
+            // cookie malformé d'un site hostile) est ignoré plutôt
+            // que de faire échouer la navigation entière.
+            let bad_byte = v
+                .as_bytes()
+                .iter()
+                .position(|&b| b < 32 && b != b'\t' || b == 127);
+            if forbidden_h2(n)
+                || http::header::HeaderName::try_from(n.as_str()).is_err()
+                || bad_byte.is_some()
+            {
+                if !forbidden_h2(n) {
+                    tracing::warn!(
+                        header = %n,
+                        bad_byte = bad_byte.map(|i| v.as_bytes()[i]),
+                        bad_pos = bad_byte,
+                        "en-tête h2 non sérialisable — ignoré"
+                    );
+                }
+                continue;
             }
+            builder = builder.header(n.as_str(), v.as_str());
         }
         let hreq = builder
             .body(())

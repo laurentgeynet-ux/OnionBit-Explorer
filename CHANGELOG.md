@@ -7,6 +7,28 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **Cookie jar étanche aux CTL
+  + h2 tolérant** (`explorer-net`,
+  vol google.com/search) — une
+  écriture `document.cookie` avec
+  `\n` intérieur (stack trace
+  sérialisée par le JS de la page,
+  `sg_ss` Google) empoisonnait le
+  jar : la requête suivante portait
+  un `Cookie` non sérialisable →
+  `HTTP/2 : request build failed
+  to parse header value`, nav
+  morte en 33 ms. `Cookie::parse`
+  et `insert_stored` rejettent
+  désormais nom/valeur contenant
+  un octet `<32` ou `127`
+  (`cookie-octet` RFC 6265 §4.1.1
+  les exclut déjà) ; `h2_request`
+  ignore en `warn!` tout en-tête
+  non sérialisable au lieu de
+  faire échouer la navigation
+  (nom de l'en-tête + position
+  d'octet logués, valeur jamais).
 - **JS-C252 — garde `ImageData`
   `w*h*4`** (`explorer-jscore`,
   §B-59 second vecteur R-136,
