@@ -190,7 +190,7 @@ impl Engine {
                         // silencieusement (`sloppy_silent`), strict
                         // garde le `TypeError`.
                         m.insert(
-                            name.clone(),
+                            Self::intern(name),
                             EnvCell::Bind(Binding {
                                 value: fv,
                                 mutable: false,

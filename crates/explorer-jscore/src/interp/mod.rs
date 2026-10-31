@@ -3241,6 +3241,28 @@ impl Engine {
     /// Compte l'appel natif `name` (diagnostic wedge — gov.uk) :
     /// tous les 8192 appels sous `EXPLORER_NAT_TRACE`, dump du
     /// top des dominants — un natif en boucle se nomme au sommet.
+    /// Interne un nom de binding (§B-59) — les `let`/`var`/
+    /// paramètres d'hydratation répètent leurs identifiants :
+    /// hit → `Rc` cloné (zéro alloc), miss → une alloc pour
+    /// toute la session. `thread_local` : le moteur est
+    /// mono-thread par design (`Rc` partout), la dédup est
+    /// partagée entre contextes d'une même page.
+    pub(crate) fn intern(name: &str) -> Rc<str> {
+        thread_local! {
+            static INTERNED: std::cell::RefCell<std::collections::HashSet<Rc<str>>> =
+                std::cell::RefCell::new(std::collections::HashSet::new());
+        }
+        INTERNED.with(|set| {
+            let mut set = set.borrow_mut();
+            if let Some(s) = set.get(name) {
+                return s.clone();
+            }
+            let s: Rc<str> = Rc::from(name);
+            set.insert(s.clone());
+            s
+        })
+    }
+
     /// Échantillonneur de pile (§B-59/J11) — sous
     /// `EXPLORER_JS_PROFILE`, chaque dispatch natif échantillonne
     /// le sommet `call_stack` (la fonction JS appelante) : le top
@@ -3911,7 +3933,7 @@ impl Engine {
             match &mut b.kind {
                 EnvKind::Local(m) | EnvKind::Global(m) | EnvKind::Block(m) => {
                     m.insert(
-                        name.to_string(),
+                        Self::intern(name),
                         EnvCell::Bind(Binding {
                             value: v,
                             mutable,
@@ -3941,7 +3963,7 @@ impl Engine {
             match &mut b.kind {
                 EnvKind::Local(m) | EnvKind::Global(m) | EnvKind::Block(m) => {
                     m.insert(
-                        name.to_string(),
+                        Self::intern(name),
                         EnvCell::Bind(Binding {
                             value: Value::Undefined,
                             mutable,
@@ -6553,7 +6575,7 @@ impl Engine {
             let mut b = local.borrow_mut();
             if let (EnvKind::Local(m), Some(argv)) = (&mut b.kind, argv) {
                 m.insert(
-                    "arguments".into(),
+                    "arguments",
                     EnvCell::Bind(Binding {
                         value: argv,
                         mutable: true,

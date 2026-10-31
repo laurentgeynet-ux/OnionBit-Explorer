@@ -942,7 +942,7 @@ fn env_alias(env: &EnvRef, local: &str, dep_env: &EnvRef, binding: &str) {
         | crate::heap::EnvKind::Global(m)
         | crate::heap::EnvKind::Block(m) => {
             m.insert(
-                local.to_string(),
+                Engine::intern(local),
                 EnvCell::Alias(dep_env.clone(), binding.to_string()),
             );
         }

@@ -1616,9 +1616,9 @@ const BINDING_MAP_SMALL: usize = 16;
 #[derive(Clone)]
 pub enum BindingMap {
     /// Petites portées — `(nom, cell)` en insertion order.
-    Small(Vec<(String, EnvCell)>),
+    Small(Vec<(Rc<str>, EnvCell)>),
     /// Grandes portées — hachage classique.
-    Map(HashMap<String, EnvCell>),
+    Map(HashMap<Rc<str>, EnvCell>),
 }
 
 impl BindingMap {
@@ -1629,7 +1629,7 @@ impl BindingMap {
     /// Lookup partagé — le `Vec` est scanné sur `str`.
     pub fn get(&self, name: &str) -> Option<&EnvCell> {
         match self {
-            BindingMap::Small(v) => v.iter().find(|(k, _)| k == name).map(|(_, c)| c),
+            BindingMap::Small(v) => v.iter().find(|(k, _)| &**k == name).map(|(_, c)| c),
             BindingMap::Map(m) => m.get(name),
         }
     }
@@ -1637,7 +1637,7 @@ impl BindingMap {
     /// Variante mutable de [`Self::get`].
     pub fn get_mut(&mut self, name: &str) -> Option<&mut EnvCell> {
         match self {
-            BindingMap::Small(v) => v.iter_mut().find(|(k, _)| k == name).map(|(_, c)| c),
+            BindingMap::Small(v) => v.iter_mut().find(|(k, _)| &**k == name).map(|(_, c)| c),
             BindingMap::Map(m) => m.get_mut(name),
         }
     }
@@ -1649,15 +1649,16 @@ impl BindingMap {
 
     /// Insert/overwrite — promeut en `Map` au seuil (une seule
     /// fois : la table est hachée ensuite).
-    pub fn insert(&mut self, name: String, cell: EnvCell) {
+    pub fn insert(&mut self, name: impl Into<Rc<str>>, cell: EnvCell) {
+        let name = name.into();
         match self {
             BindingMap::Small(v) => {
-                if let Some(slot) = v.iter_mut().find(|(k, _)| *k == name) {
+                if let Some(slot) = v.iter_mut().find(|(k, _)| k.as_ref() == name.as_ref()) {
                     slot.1 = cell;
                     return;
                 }
                 if v.len() >= BINDING_MAP_SMALL {
-                    let mut m: HashMap<String, EnvCell> = HashMap::with_capacity(v.len() + 8);
+                    let mut m: HashMap<Rc<str>, EnvCell> = HashMap::with_capacity(v.len() + 8);
                     m.extend(v.drain(..));
                     m.insert(name, cell);
                     *self = BindingMap::Map(m);
@@ -1684,9 +1685,9 @@ impl BindingMap {
 /// Itérateur sur les [`EnvCell`] d'une [`BindingMap`].
 pub enum BindingMapValues<'a> {
     /// Branche `Vec`.
-    Small(std::slice::Iter<'a, (String, EnvCell)>),
+    Small(std::slice::Iter<'a, (Rc<str>, EnvCell)>),
     /// Branche `HashMap`.
-    Map(std::collections::hash_map::Values<'a, String, EnvCell>),
+    Map(std::collections::hash_map::Values<'a, Rc<str>, EnvCell>),
 }
 
 impl<'a> Iterator for BindingMapValues<'a> {
