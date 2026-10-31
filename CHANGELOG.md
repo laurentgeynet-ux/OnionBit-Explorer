@@ -7,6 +7,41 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **JS-C251 — moteur survit au burst**
+  (`explorer-js`, `explorer-jscore`,
+  §B-59 youtube/sudouest) — deux
+  décapitations du thread moteur
+  mesurées en vol : (a) un panic
+  jscore (capacity overflow, borne)
+  tuait le thread → chaque commande
+  suivante `Dead` (« moteur js
+  inerte ») alors que le churn rend
+  la mémoire après le pic ;
+  (b) un `tx.send` vers un appelant
+  déjà parti (deadline côté session
+  pendant le job géant) faisait
+  `return` → thread mort, même
+  symptôme. Désormais le dispatch
+  tourne sous `catch_unwind` par
+  commande : le job meurt seul
+  (son `tx` droppé → `Dead` borné
+  côté appelant), le hook panic
+  écrit site+ligne au death_log,
+  et les envois échoués sortent du
+  bras sans sortir du thread.
+  `Cmd::Shutdown` reste la seule
+  sortie délibérée. Côté jscore,
+  le verrou `heap_dead` devient
+  réversible : à la frontière de
+  job, si le verrou est posé,
+  `maybe_collect` collecte puis
+  re-mesure — un vivant retombé
+  sous la borne (temporaires de
+  burst partis) rallume le moteur
+  au lieu de l'enterrer ; un
+  vivant réel > borne garde le
+  verrou (verrou j4 inchangé).
+
 - **JS-C250 — deadline par job +
   yield de drains + grâce boot
   post-`complete`** (`explorer-jscore`,

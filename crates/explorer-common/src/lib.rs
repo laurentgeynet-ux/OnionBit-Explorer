@@ -78,6 +78,7 @@ thread_local! {
 /// Delta d'alloc natif depuis l'appel précédent **de ce fil** —
 /// `(octets demandés, nombre d'appels alloc)`. `None` si le
 /// traceur est inactif (`EXPLORER_ALLOC_TRACE` non posé).
+#[must_use]
 pub fn alloc_delta() -> Option<(usize, usize)> {
     if !alloc_trace() {
         return None;

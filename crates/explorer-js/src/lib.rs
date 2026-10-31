@@ -2095,605 +2095,568 @@ impl JscoreEngine {
         let crypto_next: std::rc::Rc<std::cell::Cell<u64>> =
             std::rc::Rc::new(std::cell::Cell::new(0));
         while let Ok(cmd) = rx.recv() {
-            match cmd {
-                Cmd::Eval { src, name, tx } => {
-                    let res = match &name {
-                        Some(n) => eng.eval_named(&src, n),
-                        None => eng.eval(&src),
-                    };
-                    let out = match res {
-                        Ok(v) => Ok(eng.describe(v)),
-                        Err(e) => Err(JsError::from(e)),
-                    };
-                    if tx.send(out).is_err() {
-                        return;
-                    }
-                }
-                Cmd::RunPending { max_timers, tx } => {
-                    let r = eng
-                        .run_due_timers_bounded(max_timers)
-                        .and_then(|n| eng.run_microtasks().map(|m| n + m))
-                        .map_err(|e| {
-                            if eng.take_deadline_hit() {
-                                JsError::Timeout
-                            } else {
-                                JsError::Uncaught(eng.describe(e.0))
-                            }
-                        });
-                    if tx.send(r).is_err() {
-                        return;
-                    }
-                }
-                Cmd::TimerDeadline { tx } => {
-                    let d = eng
-                        .next_timer_deadline()
-                        .map(|at| at.saturating_duration_since(std::time::Instant::now()));
-                    if tx.send(d).is_err() {
-                        return;
-                    }
-                }
-                Cmd::IsMediaSource { url, tx } => {
-                    if tx.send(eng.is_media_source_url(&url)).is_err() {
-                        return;
-                    }
-                }
-                Cmd::MsePull {
-                    url,
-                    buffer,
-                    max,
-                    tx,
-                } => {
-                    if tx.send(eng.mse_pull_segments(&url, buffer, max)).is_err() {
-                        return;
-                    }
-                }
-                Cmd::MseBuffers { url, tx } => {
-                    if tx.send(eng.mse_source_buffers(&url)).is_err() {
-                        return;
-                    }
-                }
-                Cmd::MseOffsets { url, tx } => {
-                    if tx.send(eng.mse_buffer_offsets(&url)).is_err() {
-                        return;
-                    }
-                }
-                Cmd::PromiseStats { tx } => {
-                    if tx.send(eng.promise_stats()).is_err() {
-                        return;
-                    }
-                }
-                Cmd::BootDiag { tx } => {
-                    if tx.send(eng.boot_diag()).is_err() {
-                        return;
-                    }
-                }
-                Cmd::SyncField { path, attr, value } => {
-                    sync_field(jsd.as_ref(), &path, &attr, value.as_deref());
-                }
-                Cmd::InstallDom {
-                    html,
-                    page_url,
-                    history_len,
-                } => {
-                    // Nouveau miroir → les nœuds claimés de la
-                    // map sont invalides (NodeId de l'ancien Dom).
-                    media_nodes.clear();
-                    jsd = Some(install_dom(
-                        &mut eng,
-                        &nav_q,
-                        &net_q,
-                        &jar,
-                        &html,
-                        &page_url,
-                        history_len,
-                        &xhr_next,
-                        &crypto_next,
-                    ));
-                    // ADR-0025 : l'install est la baseline —
-                    // les records du parse initial n'ont rien à
-                    // rejouer (le DOM commis est déjà ce
-                    // document) ; sans ce clear, l'`Insert` de
-                    // `<html>` sous `#document` classifierait
-                    // chaque futur journal « parent risqué ».
-                    if let Some(d) = jsd.as_ref() {
-                        d.borrow_mut().clear_journal();
-                    }
-                }
-                Cmd::DrainNav { tx } => {
-                    let out = std::mem::take(&mut *nav_q.borrow_mut());
-                    if tx.send(out).is_err() {
-                        return;
-                    }
-                }
-                Cmd::SyncCtxUrl {
-                    ctx,
-                    url,
-                    history_len,
-                } => {
-                    eng.sync_ctx_url(ctx, &url, history_len);
-                }
-                Cmd::SyncCtxState {
-                    ctx,
-                    url,
-                    history_len,
-                    state,
-                    popstate,
-                } => {
-                    eng.sync_ctx_state(ctx, &url, history_len, state.as_deref(), popstate);
-                }
-                Cmd::SetCtxName { ctx, name } => {
-                    eng.set_ctx_name(ctx, &name);
-                }
-                Cmd::FireHashchange { ctx, old, new } => {
-                    eng.fire_hashchange(ctx, &old, &new);
-                }
-                Cmd::SetReadyState { ctx, state } => {
-                    eng.set_ready_state(ctx, &state);
-                }
-                Cmd::SetMediaEnv { env } => {
-                    eng.set_media_env(env);
-                }
-                Cmd::SetViewport { w, h } => {
-                    eng.set_viewport(w, h);
-                }
-                Cmd::SetGeometry { ctx, slot } => {
-                    eng.set_geometry_ctx(ctx, slot);
-                }
-                Cmd::SetPageReferrer { referrer } => {
-                    eng.set_page_referrer(&referrer);
-                }
-                Cmd::DomSync { tx } => {
-                    let out = jsd.as_ref().and_then(|d| {
-                        let d = d.borrow();
-                        d.take_dirty()
-                            .then(|| (d.serialize_document(), d.take_dirty_path()))
-                    });
-                    if tx.send(out).is_err() {
-                        return;
-                    }
-                }
-                // ADR-0025 : baseline cléée = sérialisation +
-                // ids miroir en pré-ordre ; elle **clôt le
-                // journal** (les ops antérieures sont subsumées).
-                Cmd::DomSyncKeyed { force, tx } => {
-                    let out = jsd.as_ref().and_then(|d| {
-                        let mut d = d.borrow_mut();
-                        (force || d.take_dirty()).then(|| {
-                            let (html, ids, tags) = d.serialize_keyed();
-                            let dirty = d.take_dirty_path();
-                            d.clear_journal();
-                            DomSyncKeyed {
-                                html,
-                                dirty,
-                                ids,
-                                tags,
-                            }
-                        })
-                    });
-                    if tx.send(out).is_err() {
-                        return;
-                    }
-                }
-                // ADR-0025 : drain du journal — `None` = « voie
-                // sérialisation » (journal vide **ou** classé
-                // non rejouable ; `dirty` n'est alors PAS
-                // consommé → l'appelant enchaîne
-                // `DomSyncKeyed`, la sérialisation complète
-                // subsume toutes les mutations).
-                Cmd::DomJournal { tx } => {
-                    let out = jsd.as_ref().and_then(|d| {
-                        let mut d = d.borrow_mut();
-                        let ops = d.take_journal()?; // poisonné → None
-                        if ops.is_empty() {
-                            // Mutations sur nœuds détachés
-                            // seulement — invisibles au rendu ;
-                            // consommer `dirty` tout de même
-                            // (l'attachement journalisera).
-                            d.take_dirty();
-                            d.take_dirty_path();
-                            return None;
-                        }
-                        let n = ops.len() as u64;
-                        match journal_ops_to_seam(&d, ops) {
-                            None => {
-                                // Classé re-parse : dirty intact
-                                // — comptabilisé (mesure du
-                                // périmètre du pilote).
-                                d.note_journal_classified(n);
-                                None
-                            }
-                            Some(ops) => {
-                                d.take_dirty();
-                                d.take_dirty_path();
-                                Some(DomJournal {
-                                    ops,
-                                    fingerprint: d.structural_fingerprint(),
-                                })
-                            }
-                        }
-                    });
-                    if tx.send(out).is_err() {
-                        return;
-                    }
-                }
-                // JS-C39 : les compteurs miroir (appels/octets/
-                // micros de `serialize_document`) sont la mesure
-                // par synchro — `syncs` = sérialisations produites.
-                Cmd::DomSyncStats { tx } => {
-                    let st = jsd.as_ref().map(|d| {
-                        let d = d.borrow();
-                        let s = d.serialize_stats();
-                        DomSyncStats {
-                            syncs: s.calls,
-                            bytes: s.bytes,
-                            micros: s.micros,
-                            journal_classified: d.journal_dropped(),
-                        }
-                    });
-                    if tx.send(st).is_err() {
-                        return;
-                    }
-                }
-                Cmd::HeapStats { tx } => {
-                    if tx.send(eng.heap_stats()).is_err() {
-                        return;
-                    }
-                }
-                Cmd::DiagLine { tx } => {
-                    if tx.send(eng.b59_diag()).is_err() {
-                        return;
-                    }
-                }
-                Cmd::Gc => {
-                    eng.collect();
-                }
-                Cmd::EvalModule {
-                    entry,
-                    sources,
-                    resolve,
-                    tx,
-                } => {
-                    let out = eval_module(&mut eng, &entry, sources, resolve);
-                    if tx.send(out).is_err() {
-                        return;
-                    }
-                }
-                Cmd::SetImportMap { json } => eng.set_import_map(&json),
-                Cmd::Dispatch {
-                    ty,
-                    path,
-                    props,
-                    tx,
-                } => {
-                    let out = dispatch_event(&mut eng, jsd.as_ref(), &ty, &path, &props);
-                    if tx.send(out).is_err() {
-                        return;
-                    }
-                }
-                // Étape 134 — realm par `<iframe>` (JS-C78 sous
-                // le capot). Chaque commande adressée à `ctx`
-                // fait `context_switch` puis **restaure** le
-                // contexte précédent : l'état courant ne fuit
-                // jamais d'une commande à l'autre.
-                Cmd::ContextNew { url, frame_ord, tx } => {
-                    // `frame_node` = (pointeur du miroir parent,
-                    // NodeId miroir du nième <iframe>) — sert
-                    // `contentWindow`/`contentDocument`/`frameElement`.
-                    let frame = jsd.as_ref().and_then(|d| {
-                        frame_ord.and_then(|o| {
-                            d.borrow()
-                                .nodes
-                                .iter()
-                                .enumerate()
-                                .filter(|(_, n)| n.tag == "iframe")
-                                .nth(o as usize)
-                                .map(|(i, _)| {
-                                    (
-                                        std::rc::Rc::as_ptr(d) as usize,
-                                        u32::try_from(i).unwrap_or(u32::MAX),
-                                    )
-                                })
-                        })
-                    });
-                    let prev = eng.current_context();
-                    let id = eng.context_new(&url, frame);
-                    eng.context_switch(prev);
-                    if tx.send(Some(id)).is_err() {
-                        return;
-                    }
-                }
-                Cmd::ContextNewIn {
-                    parent,
-                    url,
-                    frame_ord,
-                    tx,
-                } => {
-                    // Même résolution `frame_ord → frame_node`
-                    // que `ContextNew` mais dans le miroir du
-                    // **parent explicite** (CAP-171 — cadre
-                    // inséré dans un sous-contexte) ; le switch
-                    // rattache aussi le realm au bon parent
-                    // (`context_new` prend `cur_ctx`).
-                    let pdom = if parent == JS_CTX_TOP {
-                        jsd.as_ref()
-                    } else {
-                        ctx_doms.get(&parent)
-                    };
-                    let frame = pdom.and_then(|d| {
-                        frame_ord.and_then(|o| {
-                            d.borrow()
-                                .nodes
-                                .iter()
-                                .enumerate()
-                                .filter(|(_, n)| n.tag == "iframe")
-                                .nth(o as usize)
-                                .map(|(i, _)| {
-                                    (
-                                        std::rc::Rc::as_ptr(d) as usize,
-                                        u32::try_from(i).unwrap_or(u32::MAX),
-                                    )
-                                })
-                        })
-                    });
-                    let prev = eng.current_context();
-                    eng.context_switch(parent);
-                    let id = eng.context_new(&url, frame);
-                    eng.context_switch(prev);
-                    if tx.send(Some(id)).is_err() {
-                        return;
-                    }
-                }
-                Cmd::ContextDestroy { ctx } => {
-                    eng.context_destroy(ctx);
-                    ctx_doms.remove(&ctx);
-                    ctx_jars.remove(&ctx);
-                    ctx_stores.remove(&ctx);
-                }
-                Cmd::InstallDomCtx {
-                    ctx,
-                    html,
-                    page_url,
-                    local,
-                    cookie_header,
-                } => {
-                    let prev = eng.current_context();
-                    eng.context_switch(ctx);
-                    if eng.current_context() == ctx {
-                        // Jar et storage isolés du cadre : la
-                        // vue `document.cookie`/`localStorage`
-                        // est celle de SON origine ; ses
-                        // écritures sont drainées vers la
-                        // session sous la même origine
-                        // (`DrainSinksCtx`), jamais celle du
-                        // parent — pas de fuite croisée.
-                        let cjar = std::rc::Rc::new(SnapshotJar::default());
-                        cjar.set_header(&cookie_header);
-                        let storage: explorer_jscore::Storage =
-                            std::rc::Rc::new(std::cell::RefCell::new(local));
-                        let d = install_dom_ctx(
-                            &mut eng,
-                            &net_q,
-                            &cjar,
-                            &storage,
-                            &html,
-                            &page_url,
-                            &xhr_next,
-                            &crypto_next,
-                        );
-                        ctx_jars.insert(ctx, cjar);
-                        ctx_stores.insert(ctx, storage);
-                        ctx_doms.insert(ctx, d);
-                        eng.context_switch(prev);
-                    } else {
-                        // Contexte mort/inconnu : le switch est
-                        // un no-op côté moteur — rien à installer.
-                        eng.context_switch(prev);
-                    }
-                }
-                Cmd::EvalCtx { ctx, src, name, tx } => {
-                    let prev = eng.current_context();
-                    eng.context_switch(ctx);
-                    let out = if eng.current_context() == ctx {
+            let mut stopped = false;
+            {
+                // Confinement du panic au job (JS-C251) : un
+                // panic interne jscore (capacity overflow,
+                // borne) tuait le thread → chaque commande
+                // suivante `Dead` (« moteur js inerte »),
+                // alors que le burst §B-59 rend la mémoire
+                // après le pic. Désormais le job meurt seul
+                // (son `tx` droppé → `Dead` borné côté client),
+                // le hook panic écrit site+payload au
+                // death_log, et les jobs suivants vivent.
+                let eng = &mut eng;
+                let stopped = &mut stopped;
+                let jsd = &mut jsd;
+                let ctx_doms = &mut ctx_doms;
+                let ctx_jars = &mut ctx_jars;
+                let ctx_stores = &mut ctx_stores;
+                let local_store = &mut local_store;
+                let media_nodes = &mut media_nodes;
+                let net_q = &net_q;
+                let nav_q = &nav_q;
+                let jar = &jar;
+                let xhr_next = &xhr_next;
+                let crypto_next = &crypto_next;
+                let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || match cmd {
+                    Cmd::Eval { src, name, tx } => {
                         let res = match &name {
                             Some(n) => eng.eval_named(&src, n),
                             None => eng.eval(&src),
                         };
-                        match res {
+                        let out = match res {
                             Ok(v) => Ok(eng.describe(v)),
                             Err(e) => Err(JsError::from(e)),
+                        };
+                        let _ = tx.send(out);
+                    }
+                    Cmd::RunPending { max_timers, tx } => {
+                        let r = eng
+                            .run_due_timers_bounded(max_timers)
+                            .and_then(|n| eng.run_microtasks().map(|m| n + m))
+                            .map_err(|e| {
+                                if eng.take_deadline_hit() {
+                                    JsError::Timeout
+                                } else {
+                                    JsError::Uncaught(eng.describe(e.0))
+                                }
+                            });
+                        let _ = tx.send(r);
+                    }
+                    Cmd::TimerDeadline { tx } => {
+                        let d = eng
+                            .next_timer_deadline()
+                            .map(|at| at.saturating_duration_since(std::time::Instant::now()));
+                        let _ = tx.send(d);
+                    }
+                    Cmd::IsMediaSource { url, tx } => {
+                        let _ = tx.send(eng.is_media_source_url(&url));
+                    }
+                    Cmd::MsePull {
+                        url,
+                        buffer,
+                        max,
+                        tx,
+                    } => {
+                        let _ = tx.send(eng.mse_pull_segments(&url, buffer, max));
+                    }
+                    Cmd::MseBuffers { url, tx } => {
+                        let _ = tx.send(eng.mse_source_buffers(&url));
+                    }
+                    Cmd::MseOffsets { url, tx } => {
+                        let _ = tx.send(eng.mse_buffer_offsets(&url));
+                    }
+                    Cmd::PromiseStats { tx } => {
+                        let _ = tx.send(eng.promise_stats());
+                    }
+                    Cmd::BootDiag { tx } => {
+                        let _ = tx.send(eng.boot_diag());
+                    }
+                    Cmd::SyncField { path, attr, value } => {
+                        sync_field(jsd.as_ref(), &path, &attr, value.as_deref());
+                    }
+                    Cmd::InstallDom {
+                        html,
+                        page_url,
+                        history_len,
+                    } => {
+                        // Nouveau miroir → les nœuds claimés de la
+                        // map sont invalides (NodeId de l'ancien Dom).
+                        media_nodes.clear();
+                        *jsd = Some(install_dom(
+                            eng,
+                            nav_q,
+                            net_q,
+                            jar,
+                            &html,
+                            &page_url,
+                            history_len,
+                            xhr_next,
+                            crypto_next,
+                        ));
+                        // ADR-0025 : l'install est la baseline —
+                        // les records du parse initial n'ont rien à
+                        // rejouer (le DOM commis est déjà ce
+                        // document) ; sans ce clear, l'`Insert` de
+                        // `<html>` sous `#document` classifierait
+                        // chaque futur journal « parent risqué ».
+                        if let Some(d) = jsd.as_ref() {
+                            d.borrow_mut().clear_journal();
                         }
-                    } else {
-                        Err(JsError::Dead)
-                    };
-                    eng.context_switch(prev);
-                    if tx.send(out).is_err() {
-                        return;
                     }
-                }
-                Cmd::EvalScriptEl {
-                    ctx,
-                    src,
-                    name,
-                    ord,
-                    tx,
-                } => {
-                    let prev = eng.current_context();
-                    eng.context_switch(ctx);
-                    let out = if eng.current_context() == ctx {
-                        match eng.eval_script_el(&src, name.as_deref(), ord) {
-                            Ok(v) => Ok(eng.describe(v)),
-                            Err(e) => Err(JsError::from(e)),
+                    Cmd::DrainNav { tx } => {
+                        let out = std::mem::take(&mut *nav_q.borrow_mut());
+                        let _ = tx.send(out);
+                    }
+                    Cmd::SyncCtxUrl {
+                        ctx,
+                        url,
+                        history_len,
+                    } => {
+                        eng.sync_ctx_url(ctx, &url, history_len);
+                    }
+                    Cmd::SyncCtxState {
+                        ctx,
+                        url,
+                        history_len,
+                        state,
+                        popstate,
+                    } => {
+                        eng.sync_ctx_state(ctx, &url, history_len, state.as_deref(), popstate);
+                    }
+                    Cmd::SetCtxName { ctx, name } => {
+                        eng.set_ctx_name(ctx, &name);
+                    }
+                    Cmd::FireHashchange { ctx, old, new } => {
+                        eng.fire_hashchange(ctx, &old, &new);
+                    }
+                    Cmd::SetReadyState { ctx, state } => {
+                        eng.set_ready_state(ctx, &state);
+                    }
+                    Cmd::SetMediaEnv { env } => {
+                        eng.set_media_env(env);
+                    }
+                    Cmd::SetViewport { w, h } => {
+                        eng.set_viewport(w, h);
+                    }
+                    Cmd::SetGeometry { ctx, slot } => {
+                        eng.set_geometry_ctx(ctx, slot);
+                    }
+                    Cmd::SetPageReferrer { referrer } => {
+                        eng.set_page_referrer(&referrer);
+                    }
+                    Cmd::DomSync { tx } => {
+                        let out = jsd.as_ref().and_then(|d| {
+                            let d = d.borrow();
+                            d.take_dirty()
+                                .then(|| (d.serialize_document(), d.take_dirty_path()))
+                        });
+                        let _ = tx.send(out);
+                    }
+                    // ADR-0025 : baseline cléée = sérialisation +
+                    // ids miroir en pré-ordre ; elle **clôt le
+                    // journal** (les ops antérieures sont subsumées).
+                    Cmd::DomSyncKeyed { force, tx } => {
+                        let out = jsd.as_ref().and_then(|d| {
+                            let mut d = d.borrow_mut();
+                            (force || d.take_dirty()).then(|| {
+                                let (html, ids, tags) = d.serialize_keyed();
+                                let dirty = d.take_dirty_path();
+                                d.clear_journal();
+                                DomSyncKeyed {
+                                    html,
+                                    dirty,
+                                    ids,
+                                    tags,
+                                }
+                            })
+                        });
+                        let _ = tx.send(out);
+                    }
+                    // ADR-0025 : drain du journal — `None` = « voie
+                    // sérialisation » (journal vide **ou** classé
+                    // non rejouable ; `dirty` n'est alors PAS
+                    // consommé → l'appelant enchaîne
+                    // `DomSyncKeyed`, la sérialisation complète
+                    // subsume toutes les mutations).
+                    Cmd::DomJournal { tx } => {
+                        let out = jsd.as_ref().and_then(|d| {
+                            let mut d = d.borrow_mut();
+                            let ops = d.take_journal()?; // poisonné → None
+                            if ops.is_empty() {
+                                // Mutations sur nœuds détachés
+                                // seulement — invisibles au rendu ;
+                                // consommer `dirty` tout de même
+                                // (l'attachement journalisera).
+                                d.take_dirty();
+                                d.take_dirty_path();
+                                return None;
+                            }
+                            let n = ops.len() as u64;
+                            match journal_ops_to_seam(&d, ops) {
+                                None => {
+                                    // Classé re-parse : dirty intact
+                                    // — comptabilisé (mesure du
+                                    // périmètre du pilote).
+                                    d.note_journal_classified(n);
+                                    None
+                                }
+                                Some(ops) => {
+                                    d.take_dirty();
+                                    d.take_dirty_path();
+                                    Some(DomJournal {
+                                        ops,
+                                        fingerprint: d.structural_fingerprint(),
+                                    })
+                                }
+                            }
+                        });
+                        let _ = tx.send(out);
+                    }
+                    // JS-C39 : les compteurs miroir (appels/octets/
+                    // micros de `serialize_document`) sont la mesure
+                    // par synchro — `syncs` = sérialisations produites.
+                    Cmd::DomSyncStats { tx } => {
+                        let st = jsd.as_ref().map(|d| {
+                            let d = d.borrow();
+                            let s = d.serialize_stats();
+                            DomSyncStats {
+                                syncs: s.calls,
+                                bytes: s.bytes,
+                                micros: s.micros,
+                                journal_classified: d.journal_dropped(),
+                            }
+                        });
+                        let _ = tx.send(st);
+                    }
+                    Cmd::HeapStats { tx } => {
+                        let _ = tx.send(eng.heap_stats());
+                    }
+                    Cmd::DiagLine { tx } => {
+                        let _ = tx.send(eng.b59_diag());
+                    }
+                    Cmd::Gc => {
+                        eng.collect();
+                    }
+                    Cmd::EvalModule {
+                        entry,
+                        sources,
+                        resolve,
+                        tx,
+                    } => {
+                        let out = eval_module(eng, &entry, sources, resolve);
+                        let _ = tx.send(out);
+                    }
+                    Cmd::SetImportMap { json } => eng.set_import_map(&json),
+                    Cmd::Dispatch {
+                        ty,
+                        path,
+                        props,
+                        tx,
+                    } => {
+                        let out = dispatch_event(eng, jsd.as_ref(), &ty, &path, &props);
+                        let _ = tx.send(out);
+                    }
+                    // Étape 134 — realm par `<iframe>` (JS-C78 sous
+                    // le capot). Chaque commande adressée à `ctx`
+                    // fait `context_switch` puis **restaure** le
+                    // contexte précédent : l'état courant ne fuit
+                    // jamais d'une commande à l'autre.
+                    Cmd::ContextNew { url, frame_ord, tx } => {
+                        // `frame_node` = (pointeur du miroir parent,
+                        // NodeId miroir du nième <iframe>) — sert
+                        // `contentWindow`/`contentDocument`/`frameElement`.
+                        let frame = jsd.as_ref().and_then(|d| {
+                            frame_ord.and_then(|o| {
+                                d.borrow()
+                                    .nodes
+                                    .iter()
+                                    .enumerate()
+                                    .filter(|(_, n)| n.tag == "iframe")
+                                    .nth(o as usize)
+                                    .map(|(i, _)| {
+                                        (
+                                            std::rc::Rc::as_ptr(d) as usize,
+                                            u32::try_from(i).unwrap_or(u32::MAX),
+                                        )
+                                    })
+                            })
+                        });
+                        let prev = eng.current_context();
+                        let id = eng.context_new(&url, frame);
+                        eng.context_switch(prev);
+                        let _ = tx.send(Some(id));
+                    }
+                    Cmd::ContextNewIn {
+                        parent,
+                        url,
+                        frame_ord,
+                        tx,
+                    } => {
+                        // Même résolution `frame_ord → frame_node`
+                        // que `ContextNew` mais dans le miroir du
+                        // **parent explicite** (CAP-171 — cadre
+                        // inséré dans un sous-contexte) ; le switch
+                        // rattache aussi le realm au bon parent
+                        // (`context_new` prend `cur_ctx`).
+                        let pdom = if parent == JS_CTX_TOP {
+                            jsd.as_ref()
+                        } else {
+                            ctx_doms.get(&parent)
+                        };
+                        let frame = pdom.and_then(|d| {
+                            frame_ord.and_then(|o| {
+                                d.borrow()
+                                    .nodes
+                                    .iter()
+                                    .enumerate()
+                                    .filter(|(_, n)| n.tag == "iframe")
+                                    .nth(o as usize)
+                                    .map(|(i, _)| {
+                                        (
+                                            std::rc::Rc::as_ptr(d) as usize,
+                                            u32::try_from(i).unwrap_or(u32::MAX),
+                                        )
+                                    })
+                            })
+                        });
+                        let prev = eng.current_context();
+                        eng.context_switch(parent);
+                        let id = eng.context_new(&url, frame);
+                        eng.context_switch(prev);
+                        let _ = tx.send(Some(id));
+                    }
+                    Cmd::ContextDestroy { ctx } => {
+                        eng.context_destroy(ctx);
+                        ctx_doms.remove(&ctx);
+                        ctx_jars.remove(&ctx);
+                        ctx_stores.remove(&ctx);
+                    }
+                    Cmd::InstallDomCtx {
+                        ctx,
+                        html,
+                        page_url,
+                        local,
+                        cookie_header,
+                    } => {
+                        let prev = eng.current_context();
+                        eng.context_switch(ctx);
+                        if eng.current_context() == ctx {
+                            // Jar et storage isolés du cadre : la
+                            // vue `document.cookie`/`localStorage`
+                            // est celle de SON origine ; ses
+                            // écritures sont drainées vers la
+                            // session sous la même origine
+                            // (`DrainSinksCtx`), jamais celle du
+                            // parent — pas de fuite croisée.
+                            let cjar = std::rc::Rc::new(SnapshotJar::default());
+                            cjar.set_header(&cookie_header);
+                            let storage: explorer_jscore::Storage =
+                                std::rc::Rc::new(std::cell::RefCell::new(local));
+                            let d = install_dom_ctx(
+                                eng,
+                                net_q,
+                                &cjar,
+                                &storage,
+                                &html,
+                                &page_url,
+                                xhr_next,
+                                crypto_next,
+                            );
+                            ctx_jars.insert(ctx, cjar);
+                            ctx_stores.insert(ctx, storage);
+                            ctx_doms.insert(ctx, d);
+                            eng.context_switch(prev);
+                        } else {
+                            // Contexte mort/inconnu : le switch est
+                            // un no-op côté moteur — rien à installer.
+                            eng.context_switch(prev);
                         }
-                    } else {
-                        Err(JsError::Dead)
-                    };
-                    eng.context_switch(prev);
-                    if tx.send(out).is_err() {
-                        return;
                     }
-                }
-                Cmd::DrainDynScripts { tx } => {
-                    if tx.send(eng.drain_dyn_scripts()).is_err() {
-                        return;
+                    Cmd::EvalCtx { ctx, src, name, tx } => {
+                        let prev = eng.current_context();
+                        eng.context_switch(ctx);
+                        let out = if eng.current_context() == ctx {
+                            let res = match &name {
+                                Some(n) => eng.eval_named(&src, n),
+                                None => eng.eval(&src),
+                            };
+                            match res {
+                                Ok(v) => Ok(eng.describe(v)),
+                                Err(e) => Err(JsError::from(e)),
+                            }
+                        } else {
+                            Err(JsError::Dead)
+                        };
+                        eng.context_switch(prev);
+                        let _ = tx.send(out);
                     }
-                }
-                Cmd::DrainUnhandledRejections { tx } => {
-                    if tx.send(eng.drain_unhandled_rejections()).is_err() {
-                        return;
+                    Cmd::EvalScriptEl {
+                        ctx,
+                        src,
+                        name,
+                        ord,
+                        tx,
+                    } => {
+                        let prev = eng.current_context();
+                        eng.context_switch(ctx);
+                        let out = if eng.current_context() == ctx {
+                            match eng.eval_script_el(&src, name.as_deref(), ord) {
+                                Ok(v) => Ok(eng.describe(v)),
+                                Err(e) => Err(JsError::from(e)),
+                            }
+                        } else {
+                            Err(JsError::Dead)
+                        };
+                        eng.context_switch(prev);
+                        let _ = tx.send(out);
                     }
-                }
-                Cmd::DeliverDynScript { ctx, seq, body } => {
-                    let prev = eng.current_context();
-                    eng.context_switch(ctx);
-                    if eng.current_context() == ctx {
-                        eng.deliver_dyn_script(seq, body.as_deref());
+                    Cmd::DrainDynScripts { tx } => {
+                        let _ = tx.send(eng.drain_dyn_scripts());
                     }
-                    eng.context_switch(prev);
-                }
-                Cmd::DrainDynFrames { tx } => {
-                    if tx.send(eng.drain_dyn_frames()).is_err() {
-                        return;
+                    Cmd::DrainUnhandledRejections { tx } => {
+                        let _ = tx.send(eng.drain_unhandled_rejections());
                     }
-                }
-                Cmd::DeliverDynFrame { ctx, seq, ok } => {
-                    let prev = eng.current_context();
-                    eng.context_switch(ctx);
-                    if eng.current_context() == ctx {
-                        eng.deliver_dyn_frame(seq, ok);
-                    }
-                    eng.context_switch(prev);
-                }
-                Cmd::DrainDynImgs { tx } => {
-                    if tx.send(eng.drain_dyn_imgs()).is_err() {
-                        return;
-                    }
-                }
-                Cmd::DeliverDynImg { ctx, seq, ok } => {
-                    let prev = eng.current_context();
-                    eng.context_switch(ctx);
-                    if eng.current_context() == ctx {
-                        eng.deliver_dyn_img(seq, ok);
-                    }
-                    eng.context_switch(prev);
-                }
-                Cmd::AdoptedSheetsCss { tx } => {
-                    if tx.send(eng.adopted_sheets_css()).is_err() {
-                        break;
-                    }
-                }
-                Cmd::DefinedCeNames { tx } => {
-                    if tx.send(eng.defined_ce_names()).is_err() {
-                        break;
-                    }
-                }
-                Cmd::DrainDynLinks { tx } => {
-                    if tx.send(eng.drain_dyn_links()).is_err() {
-                        return;
-                    }
-                }
-                Cmd::DeliverDynLink { ctx, seq, ok } => {
-                    let prev = eng.current_context();
-                    eng.context_switch(ctx);
-                    if eng.current_context() == ctx {
-                        eng.deliver_dyn_link(seq, ok);
-                    }
-                    eng.context_switch(prev);
-                }
-                Cmd::DrainDynImports { tx } => {
-                    if tx.send(eng.drain_dyn_imports()).is_err() {
-                        return;
-                    }
-                }
-                Cmd::DeliverDynImport {
-                    ctx,
-                    seq,
-                    src,
-                    deps,
-                } => {
-                    let prev = eng.current_context();
-                    eng.context_switch(ctx);
-                    if eng.current_context() == ctx {
-                        // JS-C101 — deps seedées avant l'entrée :
-                        // `load_source` des imports statiques du
-                        // module livré les trouve en map.
-                        for (u, s) in deps {
-                            eng.seed_module_source(u, s);
+                    Cmd::DeliverDynScript { ctx, seq, body } => {
+                        let prev = eng.current_context();
+                        eng.context_switch(ctx);
+                        if eng.current_context() == ctx {
+                            eng.deliver_dyn_script(seq, body.as_deref());
                         }
-                        eng.deliver_import(seq, src.map_or_else(|| Err("fetch échoué".into()), Ok));
+                        eng.context_switch(prev);
                     }
-                    eng.context_switch(prev);
-                }
-                Cmd::DeliverStaticLink { ctx, ord, ok } => {
-                    let prev = eng.current_context();
-                    eng.context_switch(ctx);
-                    if eng.current_context() == ctx {
-                        eng.deliver_static_link(ord, ok);
+                    Cmd::DrainDynFrames { tx } => {
+                        let _ = tx.send(eng.drain_dyn_frames());
                     }
-                    eng.context_switch(prev);
-                }
-                Cmd::DeliverDynModule { ctx, seq, ok } => {
-                    let prev = eng.current_context();
-                    eng.context_switch(ctx);
-                    if eng.current_context() == ctx {
-                        eng.deliver_dyn_module(seq, ok);
+                    Cmd::DeliverDynFrame { ctx, seq, ok } => {
+                        let prev = eng.current_context();
+                        eng.context_switch(ctx);
+                        if eng.current_context() == ctx {
+                            eng.deliver_dyn_frame(seq, ok);
+                        }
+                        eng.context_switch(prev);
                     }
-                    eng.context_switch(prev);
-                }
-                Cmd::DispatchCtx { ctx, ty, path, tx } => {
-                    let prev = eng.current_context();
-                    eng.context_switch(ctx);
-                    let out = if eng.current_context() == ctx {
-                        dispatch_event(&mut eng, ctx_doms.get(&ctx), &ty, &path, &[])
-                    } else {
-                        Ok(false)
-                    };
-                    eng.context_switch(prev);
-                    if tx.send(out).is_err() {
-                        return;
+                    Cmd::DrainDynImgs { tx } => {
+                        let _ = tx.send(eng.drain_dyn_imgs());
                     }
-                }
-                Cmd::DomSyncCtx { ctx, tx } => {
-                    let out = ctx_doms.get(&ctx).and_then(|d| {
-                        let mut d = d.borrow_mut();
-                        d.take_dirty().then(|| {
-                            let html = d.serialize_document();
-                            d.clear_journal();
-                            html
-                        })
-                    });
-                    if tx.send(out).is_err() {
-                        return;
+                    Cmd::DeliverDynImg { ctx, seq, ok } => {
+                        let prev = eng.current_context();
+                        eng.context_switch(ctx);
+                        if eng.current_context() == ctx {
+                            eng.deliver_dyn_img(seq, ok);
+                        }
+                        eng.context_switch(prev);
                     }
-                }
-                Cmd::DrainSinksCtx { ctx, tx } => {
-                    let writes = ctx_jars
-                        .get(&ctx)
-                        .map(|j| std::mem::take(&mut *j.writes.borrow_mut()))
-                        .unwrap_or_default();
-                    let map = ctx_stores
-                        .get(&ctx)
-                        .map_or_else(std::collections::BTreeMap::new, |m| m.borrow().clone());
-                    if tx.send((writes, map)).is_err() {
-                        return;
+                    Cmd::AdoptedSheetsCss { tx } => {
+                        let _ = tx.send(eng.adopted_sheets_css());
                     }
-                }
-                Cmd::SetBudget { ops } => eng.set_op_limit(ops),
-                Cmd::SetMemLimit { bytes } => eng.set_mem_limit(bytes),
-                Cmd::Shutdown => return,
-                // Surfaces script-initiées (JS-C27/C28) déléguées.
-                net => {
-                    if !serve_side(
-                        &mut eng,
-                        jsd.as_ref(),
-                        &net_q,
-                        &jar,
-                        &mut local_store,
-                        &mut media_nodes,
-                        net,
-                    ) {
-                        return;
+                    Cmd::DefinedCeNames { tx } => {
+                        let _ = tx.send(eng.defined_ce_names());
                     }
-                }
+                    Cmd::DrainDynLinks { tx } => {
+                        let _ = tx.send(eng.drain_dyn_links());
+                    }
+                    Cmd::DeliverDynLink { ctx, seq, ok } => {
+                        let prev = eng.current_context();
+                        eng.context_switch(ctx);
+                        if eng.current_context() == ctx {
+                            eng.deliver_dyn_link(seq, ok);
+                        }
+                        eng.context_switch(prev);
+                    }
+                    Cmd::DrainDynImports { tx } => {
+                        let _ = tx.send(eng.drain_dyn_imports());
+                    }
+                    Cmd::DeliverDynImport {
+                        ctx,
+                        seq,
+                        src,
+                        deps,
+                    } => {
+                        let prev = eng.current_context();
+                        eng.context_switch(ctx);
+                        if eng.current_context() == ctx {
+                            // JS-C101 — deps seedées avant l'entrée :
+                            // `load_source` des imports statiques du
+                            // module livré les trouve en map.
+                            for (u, s) in deps {
+                                eng.seed_module_source(u, s);
+                            }
+                            eng.deliver_import(
+                                seq,
+                                src.map_or_else(|| Err("fetch échoué".into()), Ok),
+                            );
+                        }
+                        eng.context_switch(prev);
+                    }
+                    Cmd::DeliverStaticLink { ctx, ord, ok } => {
+                        let prev = eng.current_context();
+                        eng.context_switch(ctx);
+                        if eng.current_context() == ctx {
+                            eng.deliver_static_link(ord, ok);
+                        }
+                        eng.context_switch(prev);
+                    }
+                    Cmd::DeliverDynModule { ctx, seq, ok } => {
+                        let prev = eng.current_context();
+                        eng.context_switch(ctx);
+                        if eng.current_context() == ctx {
+                            eng.deliver_dyn_module(seq, ok);
+                        }
+                        eng.context_switch(prev);
+                    }
+                    Cmd::DispatchCtx { ctx, ty, path, tx } => {
+                        let prev = eng.current_context();
+                        eng.context_switch(ctx);
+                        let out = if eng.current_context() == ctx {
+                            dispatch_event(eng, ctx_doms.get(&ctx), &ty, &path, &[])
+                        } else {
+                            Ok(false)
+                        };
+                        eng.context_switch(prev);
+                        let _ = tx.send(out);
+                    }
+                    Cmd::DomSyncCtx { ctx, tx } => {
+                        let out = ctx_doms.get(&ctx).and_then(|d| {
+                            let mut d = d.borrow_mut();
+                            d.take_dirty().then(|| {
+                                let html = d.serialize_document();
+                                d.clear_journal();
+                                html
+                            })
+                        });
+                        let _ = tx.send(out);
+                    }
+                    Cmd::DrainSinksCtx { ctx, tx } => {
+                        let writes = ctx_jars
+                            .get(&ctx)
+                            .map(|j| std::mem::take(&mut *j.writes.borrow_mut()))
+                            .unwrap_or_default();
+                        let map = ctx_stores
+                            .get(&ctx)
+                            .map_or_else(std::collections::BTreeMap::new, |m| m.borrow().clone());
+                        let _ = tx.send((writes, map));
+                    }
+                    Cmd::SetBudget { ops } => eng.set_op_limit(ops),
+                    Cmd::SetMemLimit { bytes } => eng.set_mem_limit(bytes),
+                    Cmd::Shutdown => *stopped = true,
+                    // Surfaces script-initiées (JS-C27/C28) déléguées.
+                    net => {
+                        let _ = serve_side(
+                            eng,
+                            jsd.as_ref(),
+                            net_q,
+                            jar,
+                            local_store,
+                            media_nodes,
+                            net,
+                        );
+                    }
+                }));
+            }
+            if stopped {
+                return;
             }
         }
     }

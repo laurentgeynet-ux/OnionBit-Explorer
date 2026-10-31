@@ -3428,6 +3428,22 @@ impl Engine {
     /// une passe mark-sweep. Jamais appelé pendant une évaluation
     /// — la pile d'appel n'est pas une racine.
     pub(crate) fn maybe_collect(&mut self) -> usize {
+        // Verrou J4 réversible (JS-C251) : le kill « heap memory
+        // limit exceeded » est pris sur le vivant **du job en
+        // vol** — ses temporaires comptent comme vivants tant
+        // que la pile les tient. Au retour de job la pile est
+        // vide : une passe réelle les libère et, si le vivant
+        // repasse sous la borne, le moteur revit — mesuré
+        // terrain §B-59 : burst ~6 Go → libération totale, le
+        // verrou tuait l'hydratation sur un pic transitoire.
+        // Si le vivant reste au-dessus après sweep (fuite
+        // réelle), le verrou tient et chaque job re-mesure.
+        if self.heap_dead.is_some() {
+            self.collect();
+            if !self.heap.over_limit() {
+                self.heap_dead = None;
+            }
+        }
         // `over_limit` aussi : la frontière de job est la première
         // occasion sûre de recalculer `bytes` — si le sweep repasse
         // sous la borne, le drapeau retombe et le job suivant vit.

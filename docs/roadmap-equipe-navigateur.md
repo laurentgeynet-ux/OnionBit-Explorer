@@ -5201,6 +5201,26 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   `complete` (`EXPLORER_JS_BOOT_
   GRACE_MS`).
 
+- [x] **JS-C251. Moteur survit au
+  burst** (`explorer-js`,
+  `explorer-jscore`, §B-59
+  youtube/sudouest) — un panic
+  jscore ou un `tx.send` vers un
+  appelant parti (deadline session
+  pendant le job géant) tuait le
+  thread moteur → `Dead` sur
+  toutes les commandes suivantes
+  (« moteur js inerte ») alors que
+  le churn rend la mémoire après
+  le pic. `catch_unwind` par
+  commande : le job meurt seul,
+  le hook écrit site+ligne au
+  death_log ; verrou `heap_dead`
+  réversible à la frontière de job
+  (collecte + re-mesure — vivant
+  retombé sous borne rallume,
+  vivant réel garde le verrou).
+
 - [ ] **Écarts terrain — vol humain
   22/10 (release `39ab821`, FFI)** :
   second run humain — trois constats
