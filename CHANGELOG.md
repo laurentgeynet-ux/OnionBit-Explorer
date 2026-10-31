@@ -7,6 +7,31 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **Churn §B-59 — salve perf**
+  (`explorer-jscore`) — suite de
+  JS-C253, mesuré YouTube cumulé :
+  `pump.offlock` ~5 Go/31 M →
+  2,47 Go/6,5 M allocs (**−5×
+  événements, −2× octets**).
+  Clés `Rc<str>` internées en
+  `BindingMap` (`Engine::intern`
+  thread_local — fin de l'alloc
+  `String` par liaison, dédup
+  partagée entre contextes) ;
+  fast-path `ToPrimitive` pour les
+  `Ordinary` sous `Object.prototype`
+  sans overrides (`"[object
+  Object]"` direct — les ~19 M
+  coercitions ytcfg/boot deviennent
+  quasi gratuites sur le cas
+  dominant). Sondes bissection :
+  `EXPLORER_TIMER_BLOCKLIST="ids"`
+  (tue des timers au drain) et
+  `EXPLORER_DISABLE_TIMERS` (file
+  neutralisée — a prouvé la
+  starvation pompe de la VM
+  botguard Google : jobs=0, RSS
+  plat, muts=0).
 - **JS-C253 — `BindingMap` adaptatif
   + sondes de diagnostic §B-59**
   (`explorer-jscore`) — les scopes
