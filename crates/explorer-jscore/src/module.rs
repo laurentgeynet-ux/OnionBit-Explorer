@@ -267,7 +267,10 @@ impl Engine {
     /// `Error::Syntax` on parse failure, `Error::Uncaught` if a module
     /// body threw or a specifier could not be resolved/loaded.
     pub fn eval_module(&mut self, src: &str, name: &str) -> Result<Value> {
-        self.ops_left = self.op_limit;
+        // Même relèvement `BOOT_OPS_FACTOR` que `run_program`
+        // (§B-23 bras É166 — modules lourds légitimes dans la
+        // fenêtre boot 60 s).
+        self.ops_left = self.op_limit.saturating_mul(crate::interp::BOOT_OPS_FACTOR);
         self.arm_eval_deadline_boot();
         let prev = std::mem::replace(&mut self.current_module, name.to_string());
         let r = self.eval_module_inner(src, name);

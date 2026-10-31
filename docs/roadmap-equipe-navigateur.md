@@ -5148,6 +5148,15 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   `ModuleLoader`, clés `resolved`/
   `spec`/`resolved`@`referrer`.
 
+- [x] **JS-C242. Cap d'ops boot
+  ×8** (`explorer-jscore`, §B-23
+  bras É166 — youtube vol 368) —
+  `run_program`/`eval_module`
+  arment `op_limit × 8` dans la
+  fenêtre boot 60 s : les bundles
+  légitimes lourds ne meurent plus
+  au compteur avant la deadline.
+
 - [x] **JS-C241. `Drop` de
   `Engine` sous `stacker`** (§B-59
   second tueur ×4 — snapchat vol

@@ -7,6 +7,20 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **JS-C242 — cap d'ops boot ×8**
+  (`explorer-jscore`, §B-23 bras
+  É166 — youtube `script execution
+  limit exceeded` vol 368) — le
+  batch boot partageait le budget
+  wall 60 s mais gardait le cap
+  hostile 10 M ops : un bundle
+  légitime lourd mourait au
+  compteur avant sa deadline.
+  `run_program`/`eval_module`
+  arment `op_limit × BOOT_OPS_
+  FACTOR` — la deadline wall
+  identique borne les hostiles.
+
 - **R-138 — `<use>` SVG cross-îlots
   transitif + `xmlns:xlink`**
   (`explorer-render`, P3) —

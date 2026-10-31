@@ -35,6 +35,14 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 const DEFAULT_CALL_DEPTH: u32 = 256;
 const MAX_PROTO_DEPTH: u32 = 512;
 const DEFAULT_OP_LIMIT: u64 = 10_000_000;
+
+/// Facteur d'ops des évals **boot** (§B-23 bras É166 —
+/// youtube `script execution limit exceeded` vol 368) : le
+/// batch de chargement partage le budget wall 60 s mais
+/// gardait le cap hostile 10 M — un bundle légitime lourd
+/// mourait au compteur avant sa deadline. La deadline wall
+/// identique borne toujours les hostiles.
+pub(crate) const BOOT_OPS_FACTOR: u64 = 8;
 /// Budget wall-clock par défaut d'un batch d'éval, en ms —
 /// surchargeable par `EXPLORER_JS_EVAL_TIMEOUT_MS`. Choisi sous
 /// le timeout canal (30 s) : une rafale rend la main aux pompes
@@ -2701,7 +2709,15 @@ impl Engine {
     /// ré-armé, programme exécuté, microtasks drainées avant le
     /// retour (une frontière de job).
     fn run_program(&mut self, prog: &crate::ast::Program) -> Result<Value> {
-        self.ops_left = self.op_limit;
+        // §B-23 bras É166 (youtube `script execution limit
+        // exceeded` vol 368) : le batch boot partage le
+        // budget **wall** 60 s (`arm_eval_deadline_boot`) mais
+        // gardait le cap d'ops hostile 10 M — un bundle
+        // légitime lourd mourait au compteur avant sa
+        // deadline. ×8 borné par la deadline wall identique :
+        // un script hostile perd la même guerre, plus lent
+        // mais pas plus vivant.
+        self.ops_left = self.op_limit.saturating_mul(BOOT_OPS_FACTOR);
         self.arm_eval_deadline_boot();
         let r = match self.exec_program(prog) {
             Ok(v) => Ok(v),
