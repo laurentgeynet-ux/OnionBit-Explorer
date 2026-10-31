@@ -968,6 +968,18 @@ impl Session {
             // propre au contexte (`opaque:{ctx}` — jamais
             // chargé ni persisté) et `document.cookie`
             // vide/muet ; sinon l'état réel de l'origine.
+            // `about:` hérite l'origine de l'initiateur
+            // (HTML §7.11.3 — un cadre blanc voit le
+            // storage/cookie/IDB du parent, spec `inherit
+            // origin`).
+            let eff_url = if fp.url.as_str().starts_with("about:") {
+                self.tabs
+                    .get(&tab)
+                    .and_then(|e| e.url.clone())
+                    .unwrap_or_else(|| fp.url.clone())
+            } else {
+                fp.url.clone()
+            };
             let (local, cookie) = if fp.opaque {
                 (
                     self.local_storage
@@ -977,7 +989,7 @@ impl Session {
                     String::new(),
                 )
             } else {
-                self.origin_state(&fp.url)
+                self.origin_state(&eff_url)
             };
             eng.install_dom_ctx(ctx, &fp.html, &fp.url.to_string(), local, &cookie);
             // PR-10d : snapshot IndexedDB de l'origine **de
@@ -985,7 +997,7 @@ impl Session {
             // éphémère, jamais restauré ni persisté).
             if !fp.opaque {
                 if let Some(s) = &self.store {
-                    eng.install_idb_ctx(ctx, &s.load_idb(&fp.url.origin().to_string()));
+                    eng.install_idb_ctx(ctx, &s.load_idb(&eff_url.origin().to_string()));
                 }
             }
             // « loading » jusqu'au cycle interactive/complete
@@ -1603,29 +1615,42 @@ fn frame_context_plan(entry: &Tab) -> Vec<FramePlan> {
         // `src` = par URL.
         let srcdoc = dom.attribute(node, "srcdoc").ok().flatten();
         let sub = if let Some(sd) = srcdoc.as_deref() {
-            let Some(sub) = entry
+            match entry
                 .frames
                 .iter()
                 .position(|f| f.srcdoc.as_deref() == Some(sd))
-            else {
-                continue;
-            };
-            sub
+            {
+                Some(sub) => sub,
+                // `srcdoc` sans `SubFrame` — cadre blanc tout
+                // de même (son contexte existe spec — §B-14
+                // `document of Null`).
+                None => {
+                    plan.push(blank_frame_plan(dom, node, ord, base));
+                    continue;
+                }
+            }
         } else {
-            let Ok(Some(src)) = dom.attribute(node, "src") else {
-                continue;
-            };
-            let Ok(url) = Url::resolve(base, &src) else {
-                continue;
-            };
-            let Some(sub) = entry
-                .frames
-                .iter()
-                .position(|f| f.srcdoc.is_none() && f.url == url)
-            else {
-                continue;
-            };
-            sub
+            let src = dom.attribute(node, "src").ok().flatten();
+            let url = src.and_then(|s| Url::resolve(base, &s).ok());
+            match url.and_then(|u| {
+                entry
+                    .frames
+                    .iter()
+                    .position(|f| f.srcdoc.is_none() && f.url == u)
+            }) {
+                Some(sub) => sub,
+                // Pas de `src`/`srcdoc`, `about:blank`, ou
+                // cadre non fetché/irréductible : le `Window`
+                // existe spec dès l'insertion → contexte
+                // `about:blank` same-origin (§B-14 bras
+                // `document of Null` ×7 — `iframe.contentWindow
+                // .document` mourait sur le `null` de
+                // `ctx_of_frame`).
+                None => {
+                    plan.push(blank_frame_plan(dom, node, ord, base));
+                    continue;
+                }
+            }
         };
         let f = &entry.frames[sub];
         // Politiques du document enfant (132/CAP-145) —
@@ -1675,6 +1700,31 @@ fn frame_context_plan(entry: &Tab) -> Vec<FramePlan> {
         });
     }
     plan
+}
+
+/// `FramePlan` « blanc » (§B-14 bras `document of Null` ×7
+/// sites — dw/asos/qobuz…) : un `<iframe>` sans `SubFrame`
+/// rattaché (sans `src`/`srcdoc`, `src="about:blank"`, ou
+/// fetch non abouti) reçoit un contexte `about:blank` —
+/// spec : son `Window`/`Document` existent **immédiatement**
+/// à l'insertion, en origine héritée du parent
+/// (`ctx_origin` propage déjà `about:` → origine du parent →
+/// `contentDocument` accessible). `sub = usize::MAX` : pas
+/// de `SubFrame` — les lecteurs (`sync_frame_mirrors`,
+/// `frames.get`) tolèrent le hors-bornes. `sandbox` de
+/// l'élément est respecté pour `opaque` (scripts déjà vides
+/// — un cadre blanc n'a pas de source à évaluer).
+fn blank_frame_plan(dom: &Dom, node: NodeId, ord: usize, base: &Url) -> FramePlan {
+    let sb = parse_sandbox(dom.attribute(node, "sandbox").ok().flatten().as_deref());
+    FramePlan {
+        ord: u32::try_from(ord).unwrap_or(u32::MAX),
+        node,
+        sub: usize::MAX,
+        url: Url::resolve(base, "about:blank").unwrap_or_else(|_| base.clone()),
+        html: "<!doctype html><html><head></head><body></body></html>".to_string(),
+        scripts: Vec::new(),
+        opaque: sb.is_some_and(|s| !s.same_origin),
+    }
 }
 
 /// Props `KeyboardEvent` d'une touche DOM `key` (étape 103) :

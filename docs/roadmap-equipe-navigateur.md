@@ -5159,6 +5159,16 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   `maybe_grow`. Verrou
   `engine_drop_deep_ast_under_stacker`.
 
+- [x] **Étape 170. Contexte
+  `about:blank` cadres sans
+  `SubFrame`** (`explorer-core`,
+  §B-14 `document of Null` ×7) —
+  `blank_frame_plan` pour les
+  iframes sans src/fetch : Window
+  + Document same-origin spec ;
+  origine parent héritée pour
+  `about:` (storage/cookie/IDB).
+
 - [ ] **Écarts terrain — vol humain
   22/10 (release `39ab821`, FFI)** :
   second run humain — trois constats

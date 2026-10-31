@@ -7,6 +7,23 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **Étape 170 — contexte
+  `about:blank` pour les cadres
+  sans `SubFrame`** (`explorer-core`,
+  §B-14 bras `document of Null`
+  ×7 — dw/asos/qobuz/francemusique) —
+  un `<iframe>` sans `src`/`srcdoc`,
+  `src="about:blank"` ou non fetché
+  ne recevait aucun realm :
+  `frame.contentWindow.document`
+  mourait sur `of Null`. Spec : le
+  `Window`/`Document` existent à
+  l'insertion. `blank_frame_plan`
+  (`sub = usize::MAX`, html
+  squelette, `opaque` par `sandbox`)
+  + origine héritée du parent pour
+  `about:` (storage/cookie/IDB).
+
 - **JS-C241 — `Drop` de `Engine`
   sous `stacker`** (`explorer-jscore`,
   §B-59 second tueur ×4 — snapchat
