@@ -71,6 +71,18 @@ pub fn collect_svg_with_sources(
                 // usvg rend l'usage vide. On l'injecte dans
                 // `<defs>` avant `</svg>` pour la résolution.
                 inject_external_refs(dom, root, n, &mut src);
+                // P3 — `xlink:href` survivant sans déclaration :
+                // HTML range `xlink:href` dans les attrs mais ne
+                // porte pas l'`xmlns` — le XML sérialisé est
+                // invalide pour usvg (namespace non déclaré) et
+                // TOUT l'îlot tombait (pas seulement la ref).
+                if src.contains("xlink:") && !src.contains("xmlns:xlink") {
+                    if let Some(i) = src.find("<svg") {
+                        if let Some(gt) = src[i..].find('>') {
+                            src.insert_str(i + gt, " xmlns:xlink=\"http://www.w3.org/1999/xlink\"");
+                        }
+                    }
+                }
                 if src.len() <= SVG_MAX_SOURCE {
                     sources.insert(n, Arc::<str>::from(src.as_str()));
                     if let Some(img) = crate::image::decode_svg_raster(src.as_bytes(), max_px) {
@@ -236,10 +248,19 @@ fn inject_external_refs(dom: &Dom, doc_root: NodeId, svg: NodeId, src: &mut Stri
                 if matches!(a.name.as_str(), "href" | "xlink:href") {
                     needed.push(id.to_string());
                 }
-            } else if let Some(i) = a.value.find("url(#") {
-                let rest = &a.value[i + 5..];
-                if let Some(end) = rest.find(')') {
-                    needed.push(rest[..end].to_string());
+            } else {
+                // `url(#x)` quelque part dans la valeur —
+                // fill/stroke/clip/filter peuvent en porter
+                // plusieurs (P3 — seul le premier était lu).
+                let mut rest = a.value.as_str();
+                while let Some(i) = rest.find("url(#") {
+                    rest = &rest[i + 5..];
+                    if let Some(end) = rest.find(')') {
+                        needed.push(rest[..end].to_string());
+                        rest = &rest[end..];
+                    } else {
+                        break;
+                    }
                 }
             }
         }
@@ -247,22 +268,55 @@ fn inject_external_refs(dom: &Dom, doc_root: NodeId, svg: NodeId, src: &mut Stri
             stack.extend(ch.iter().rev());
         }
     }
-    let mut defs = String::new();
-    for id in &needed {
-        if defined.contains(id) {
-            continue;
+    // P3 — fixpoint borné : la cible injectée (`<symbol>`)
+    // peut référencer d'AUTRES ids externes (`<use>` dans un
+    // `<symbol>`, `fill="url(#g)"`…) — une seule passe les
+    // laissait non résolus (îlot rendu vide quand même).
+    // 8 passes suffisent aux chaînes réelles ; chaque cible
+    // injectée joint `defined` (pas de réinjection).
+    let mut injected = Vec::<NodeId>::new();
+    for _ in 0..8 {
+        let mut defs = String::new();
+        let mut progress = false;
+        for id in &needed {
+            if defined.contains(id) {
+                continue;
+            }
+            if let Some(target) = find_by_id(dom, doc_root, id) {
+                serialize_into(dom, target, &mut defs);
+                defined.push(id.clone());
+                injected.push(target);
+                progress = true;
+            }
         }
-        if let Some(target) = find_by_id(dom, doc_root, id) {
-            serialize_into(dom, target, &mut defs);
+        if !progress {
+            break;
         }
-    }
-    if defs.is_empty() {
-        return;
-    }
-    let close = "</svg>".to_string();
-    if let Some(i) = src.rfind(&close) {
-        let defs_tag = format!("<defs>{defs}</defs>");
-        src.insert_str(i, &defs_tag);
+        // Rescan des cibles injectées pour leurs refs propres.
+        let mut st = std::mem::take(&mut injected);
+        while let Some(n) = st.pop() {
+            let Ok(e) = dom.element(n) else { continue };
+            for a in &e.attributes {
+                if let Some(id) = a.value.strip_prefix('#') {
+                    if matches!(a.name.as_str(), "href" | "xlink:href") {
+                        needed.push(id.to_string());
+                    }
+                } else if let Some(i) = a.value.find("url(#") {
+                    let rest = &a.value[i + 5..];
+                    if let Some(end) = rest.find(')') {
+                        needed.push(rest[..end].to_string());
+                    }
+                }
+            }
+            if let Ok(ch) = dom.children(n) {
+                st.extend(ch.iter().rev());
+            }
+        }
+        let close = "</svg>".to_string();
+        if let Some(i) = src.rfind(&close) {
+            let defs_tag = format!("<defs>{defs}</defs>");
+            src.insert_str(i, &defs_tag);
+        }
     }
 }
 

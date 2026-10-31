@@ -7,6 +7,23 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **R-138 — `<use>` SVG cross-îlots
+  transitif + `xmlns:xlink`**
+  (`explorer-render`, P3) —
+  `inject_external_refs` ne
+  rescanait pas les cibles
+  injectées : un `<symbol>` portant
+  `use`/`fill="url(#x)"` vers
+  d'autres ids restait vide.
+  Fixpoint borné (8 passes) +
+  multi-`url(#)` par attribut ; et
+  `xlink:href` survivant sans
+  déclaration rendait l'îlot
+  XML-invalide entier —
+  `xmlns:xlink` injecté à la
+  racine. Verrou
+  `svg_use_cross_ilot_transitif`.
+
 - **Étape 170 — contexte
   `about:blank` pour les cadres
   sans `SubFrame`** (`explorer-core`,

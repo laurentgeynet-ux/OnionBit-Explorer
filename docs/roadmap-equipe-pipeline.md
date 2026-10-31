@@ -2700,6 +2700,12 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   voisins → clic résolu sur l'ancre du mégamenu sous le
   bandeau. `subtree_rank` dans `hit_order` ; verrou
   `hit_test_overlay_fixed_sous_wrapper_statique_gagne`.
+- [x] **R-138. `<use>` SVG cross-îlots transitif +
+  `xmlns:xlink`** (`svg.rs`, P3) — fixpoint borné 8 passes
+  sur les refs des cibles injectées (`symbol` chaîné),
+  multi-`url(#)` par attribut ; déclaration `xmlns:xlink`
+  injectée si des attrs `xlink:` survivent (îlot XML-invalide
+  entier sinon). Verrou `svg_use_cross_ilot_transitif`.
 - [x] **R-110. `::part` chaîné + `exportparts` + slots nichés**
   (bornes Shadow) : `::part(a)::part(b)` marche par frontière,
   `exportparts` expose `i` sous `o` (§3.5) ; slots nichés

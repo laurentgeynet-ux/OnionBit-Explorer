@@ -1996,3 +1996,44 @@ fn svg_use_cross_ilot_resolu() {
     // viewBox par défaut — usvg résout le contenu injecté).
     assert!(!svgs.is_empty(), "aucun svg rasterisé");
 }
+
+/// P3 — `<use>` cross-îlots transitif : la cible injectée
+/// (`<symbol>` dans un autre îlot) portait ses propres refs
+/// non résolues (îlot vide quand même). Le fixpoint borné
+/// rescanne les cibles injectées. `xlink:href` sans
+/// `xmlns:xlink` rendait tout l'îlot XML-invalide.
+#[test]
+fn svg_use_cross_ilot_transitif() {
+    let dom = TreeBuilder::parse(
+        "<svg id=defs style=\"display:none\">\
+         <symbol id=sym><path id=p1 d=\"M0 0h10v10z\"/><use href=\"#inner\"/></symbol>\
+         <path id=inner d=\"M1 1h2v2z\"/>\
+         </svg>\
+         <svg id=u width=32 height=32><use href=\"#sym\"/></svg>",
+    );
+    let mut u = None;
+    let mut queue = vec![dom.document()];
+    while let Some(n) = queue.pop() {
+        if let Ok(id) = dom.attribute(n, "id") {
+            if id.as_deref() == Some("u") {
+                u = Some(n);
+            }
+        }
+        if let Ok(ch) = dom.children(n) {
+            queue.extend(ch.iter().rev());
+        }
+    }
+    let u = u.expect("svg u");
+    let root_el = dom
+        .children(dom.document())
+        .into_iter()
+        .flatten()
+        .find(|&c| dom.element(c).is_ok())
+        .expect("racine");
+    let (_imgs, sources) = explorer_render::collect_svg_with_sources(&dom, root_el, 256);
+    let src = sources.get(&u).expect("source svg u");
+    // sym ET inner transitif + p1 (contenu de sym).
+    assert!(src.contains("id=\"sym\""), "symbol injecté : {src}");
+    assert!(src.contains("id=\"inner\""), "ref transitive : {src}");
+    assert!(src.contains("id=\"p1\""), "contenu symbol : {src}");
+}
