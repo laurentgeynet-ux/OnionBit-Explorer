@@ -5148,6 +5148,17 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   `ModuleLoader`, clés `resolved`/
   `spec`/`resolved`@`referrer`.
 
+- [x] **JS-C241. `Drop` de
+  `Engine` sous `stacker`** (§B-59
+  second tueur ×4 — snapchat vol
+  368, clubmed vol 158) — les
+  graphes AST/tas se détruisaient
+  récursivement hors garde →
+  débordement pile native → daemon
+  tué. Champs à graphe vidés sous
+  `maybe_grow`. Verrou
+  `engine_drop_deep_ast_under_stacker`.
+
 - [ ] **Écarts terrain — vol humain
   22/10 (release `39ab821`, FFI)** :
   second run humain — trois constats

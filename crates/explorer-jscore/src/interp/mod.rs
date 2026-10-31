@@ -6698,6 +6698,34 @@ impl Engine {
         }
     }
 }
+impl Drop for Engine {
+    /// Un moteur mort lâche son tas + son AST : les graphes
+    /// `Object`/`Rc<FnLit>`/`Stmt` se détruisent
+    /// **récursivement** — la chute d'un heap de bundle
+    /// lourd (~9 Mo, snapchat vol 368) déborde la pile
+    /// native et tue le **process** (PID perdu post-
+    /// disjoncteur, non-mémoire — §B-59 second tueur ;
+    /// même signature clubmed vol 158 : nav 69 s tuée →
+    /// daemon parti). Le `Drop` ne passe par aucune garde
+    /// `maybe_grow` de l'éval : les champs à graphe
+    /// récursif sont vidés **sous `stacker`** (même
+    /// zone/taille que le parse). Les autres champs sont
+    /// plats (arènes, maps, scalaires) — drop ordinaire
+    /// après retour.
+    fn drop(&mut self) {
+        stacker::maybe_grow(
+            crate::parser::STACK_RED_ZONE,
+            crate::parser::STACK_GROW,
+            || {
+                let _modules = std::mem::take(&mut self.modules);
+                let _stack = std::mem::take(&mut self.call_stack);
+                let _heap = std::mem::replace(&mut self.heap, crate::heap::Heap::new());
+                let _parked = std::mem::take(&mut self.parked);
+            },
+        );
+    }
+}
+
 // ------------------------------------------------------------------
 // JS-C40 — découpage interne (mécanique, sémantique inchangée) :
 // `exec` = exécution de statements/programmes, `eval` = évaluation

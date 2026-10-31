@@ -179,3 +179,19 @@ deep!(deep_proxy_preventext_chain, 20_000, |n| {
 deep!(deep_bind_instanceof_chain, 20_000, |n| format!(
     "function F(){{}};var b=F;for(var i=0;i<{n};i++)b=b.bind(null);(new F()) instanceof b"
 ));
+
+/// §B-59 second tueur / vol 368 (snapchat éval 9 Mo → kill →
+/// PID daemon perdu ; même signature clubmed vol 158) : un
+/// corps profond survit dans le tas via `Rc<FnLit>` → la
+/// chute de l'engine détruit l'AST **récursivement**, hors
+/// toute garde `maybe_grow` → débordement pile native en
+/// `Drop`. `Engine::drop` vide modules/call_stack/heap/
+/// parked sous `stacker` — le test meurt en crash si la
+/// garde saute.
+#[test]
+fn engine_drop_deep_ast_under_stacker() {
+    let mut e = Engine::new();
+    let body = "(".repeat(40_000) + "1" + &")".repeat(40_000);
+    let _ = e.eval(&format!("globalThis.f = function(){{ return {body} }}"));
+    drop(e); // avant le correctif : stack overflow en Drop
+}

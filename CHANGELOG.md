@@ -7,6 +7,26 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **JS-C241 — `Drop` de `Engine`
+  sous `stacker`** (`explorer-jscore`,
+  §B-59 second tueur ×4 — snapchat
+  vol 368, clubmed vol 158, gog/
+  postimees morts silencieuses) —
+  la chute d'un moteur de bundle
+  lourd (~9 Mo) détruit les graphes
+  `Object`/`Rc<FnLit>`/`Stmt`
+  **récursivement en `Drop`**, hors
+  toute garde `maybe_grow` de
+  l'éval → débordement pile native
+  → daemon tué (PID perdu post-
+  disjoncteur, non-mémoire).
+  `modules`/`call_stack`/`heap`/
+  `parked` vidés sous `stacker::
+  maybe_grow` (même zone que le
+  parse). Verrou
+  `engine_drop_deep_ast_under_stacker`
+  (depth_probe).
+
 - **JS-C240 — `load_source` :
   seed avant loader** (`explorer-jscore`,
   §B-14 bras « no module loader »
