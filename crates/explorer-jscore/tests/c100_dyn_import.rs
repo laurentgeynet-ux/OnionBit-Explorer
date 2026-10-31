@@ -173,3 +173,68 @@ fn data_url_module_resolves_inline() {
     // Tout s'est résolu inline — aucune requête drainée.
     assert!(e.drain_dyn_imports().is_empty());
 }
+
+/// JS-C245 — chaîne de modules profonde : `instantiate`/
+/// `evaluate_module` récursaient sans garde `maybe_grow` là
+/// où parser et éval classiques en ont une (vols 380/381 —
+/// `thread 'explorer-jscore' has overflowed its stack` en
+/// `module eval`, RSS modeste). Le verrou évalue un graphe
+/// de 190 modules chaînés (sous le cap `MAX_MODULE_DEPTH`)
+/// : sans la garde, les frames natives lourdes débordent la
+/// pile du fil de test (2 Mio).
+#[test]
+fn deep_module_chain_evaluates_under_stacker() {
+    /// `mod_N.js` → `import {v as w} from './mod_N+1.js';
+    /// export const v = w + 1` — chaîne de N niveaux.
+    struct ChainLoader {
+        depth: u32,
+        seen: std::cell::Cell<u32>,
+    }
+    impl explorer_jscore::ModuleLoader for ChainLoader {
+        fn load(
+            &mut self,
+            specifier: &str,
+            _referrer: &str,
+        ) -> std::result::Result<String, String> {
+            self.seen.set(self.seen.get() + 1);
+            let n: u32 = specifier
+                .trim_start_matches("./mod_")
+                .trim_end_matches(".js")
+                .parse()
+                .unwrap_or(0);
+            if n + 1 >= self.depth {
+                Ok("export const v = 1;".to_string())
+            } else {
+                Ok(format!(
+                    "import {{ v as w }} from './mod_{}.js'; export const v = w + 1;",
+                    n + 1
+                ))
+            }
+        }
+        fn resolve(&mut self, specifier: &str, _referrer: &str) -> Option<String> {
+            Some(specifier.to_string())
+        }
+    }
+
+    const DEPTH: u32 = 190;
+    let mut e = Engine::new();
+    let loader = Rc::new(RefCell::new(ChainLoader {
+        depth: DEPTH,
+        seen: std::cell::Cell::new(0),
+    }));
+    e.set_module_loader(loader.clone());
+    let ns = e
+        .eval_module(
+            "import { v } from './mod_0.js'; globalThis.__out = v; export const out = v;",
+            "entry.js",
+        )
+        .expect("module eval chaîne profonde");
+    // `out` = DEPTH (chaque niveau ajoute 1 à la feuille 1).
+    let r = e.eval("globalThis.__out").expect("eval __out");
+    assert_eq!(e.describe(r), DEPTH.to_string());
+    // §B-3/B-67 : `describe`/`String` sur un namespace
+    // (proto=null) ne doit pas déborder — `to_primitive` nomme
+    // l'échec via `describe_shallow`, jamais `describe`.
+    let _ = e.describe(ns);
+    let _ = loader;
+}

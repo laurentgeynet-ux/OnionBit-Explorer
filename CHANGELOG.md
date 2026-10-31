@@ -7,6 +7,43 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **JS-C245 — overflow `module eval`
+  nommé : `to_primitive` rappelait
+  `describe`** (`explorer-jscore`,
+  §B-3/B-67 — régression quasi-
+  universelle vols 380-398, 8+
+  porteurs umap/gog/github/linear) —
+  le chemin d'erreur de `to_primitive`
+  (JS-C243) nommait l'objet via
+  `describe` → `to_js_string` →
+  `to_primitive` : **récursion
+  infinie** sur tout objet sans
+  `toString`/`valueOf` utilisable —
+  cible canonique : **namespaces de
+  module (`proto=null`, spec)** et
+  `Object.create(null)` (dictionnaires
+  webpack). `eval_module` décrit
+  lui-même les valeurs lancées → mort
+  silencieuse `overflowed its stack`
+  dans la fenêtre `module eval` à RSS
+  modeste. Correctif : `describe_shallow`
+  nomme par props **propres data**
+  (`@@toStringTag`/`name`/`ctor.name`,
+  host → `class_name`) — jamais de
+  getter ni d'appel ; `ns` gagne
+  `@@toStringTag="Module"` (spec).
+  Ceinture : gardes `maybe_grow`
+  sur `eval_module` (entrée, miroir
+  de `run_program`), `instantiate`
+  (récursion deps), `evaluate_module`
+  (DFS deps) — la voie module était
+  la seule sans garde stacker (fil
+  32 Mio). Bissection : revert isolé
+  de JS-C241 sur umap → overflow
+  **persistant** (exonéré). Verrou
+  `deep_module_chain_evaluates_
+  under_stacker` (graphe 190 +
+  `describe(ns)` sans overflow).
 - **JS-C244 — `AudioContext`
   constructible-stub** (`explorer-jscore`,
   §B-66 instagram/whatsapp/threads) —

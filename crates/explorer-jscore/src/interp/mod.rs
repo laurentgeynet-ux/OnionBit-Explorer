@@ -2767,6 +2767,55 @@ impl Engine {
         }
     }
 
+    /// Nommage **non-réentrant** de `v` pour les chemins d'erreur
+    /// qui ne peuvent pas rappeler `describe` : `to_primitive`
+    /// échouant appellait `describe` → `to_js_string` →
+    /// `to_primitive` — récursion infinie sur tout objet sans
+    /// `toString`/`valueOf` utilisable (objets namespace de
+    /// module `proto=null`, §B-3/B-67 — JS-C243 avait introduit
+    /// la boucle). Ne lit que des **props propres data** via
+    /// `find_own` : jamais de getter, jamais d'appel, jamais de
+    /// chaîne de prototypes.
+    pub(crate) fn describe_shallow(&mut self, id: ObjId) -> String {
+        if let Some(o) = self.heap.obj(id) {
+            if let ObjKind::Host(h) = &o.kind {
+                return h.class_name().to_string();
+            }
+        }
+        let own_str = |e: &mut Self, key: &str| -> Option<String> {
+            match e.find_own(id, key) {
+                Some(Prop::Data {
+                    value: Value::Str(s),
+                    ..
+                }) => e.heap.string(s).filter(|n| !n.is_empty()),
+                _ => None,
+            }
+        };
+        if let Some(n) = own_str(self, SYM_TO_STRING_TAG).or_else(|| own_str(self, "name")) {
+            return n;
+        }
+        // `ctor`/`constructor` propre data → `name` propre data du
+        // constructeur (deux lookups bornés, zéro appel).
+        for k in ["ctor", "constructor"] {
+            if let Some(Prop::Data {
+                value: Value::Obj(cid),
+                ..
+            }) = self.find_own(id, k)
+            {
+                if let Some(Prop::Data {
+                    value: Value::Str(s),
+                    ..
+                }) = self.find_own(cid, "name")
+                {
+                    if let Some(n) = self.heap.string(s).filter(|n| !n.is_empty()) {
+                        return n;
+                    }
+                }
+            }
+        }
+        "Object".into()
+    }
+
     // -- allocation helpers -------------------------------------------
 
     /// Allocate a JS string value.
@@ -5842,7 +5891,9 @@ impl Engine {
         // §B-14 (telerama `cannot convert`) — nomme l'objet
         // en échec : le prochain vol nomme l'hôte sans
         // `valueOf`/`toString` utile (même rail que JS-C235).
-        let d = self.describe(v);
+        // `describe_shallow` — jamais `describe` : il
+        // ré-entrerait `to_primitive` (§B-3/B-67).
+        let d = self.describe_shallow(id);
         Err(self.type_error(format!("cannot convert object to primitive: {d}")))
     }
 

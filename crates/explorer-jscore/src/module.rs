@@ -273,18 +273,34 @@ impl Engine {
         self.ops_left = self.op_limit.saturating_mul(crate::interp::BOOT_OPS_FACTOR);
         self.arm_eval_deadline_boot();
         let prev = std::mem::replace(&mut self.current_module, name.to_string());
-        let r = self.eval_module_inner(src, name);
+        // JS-C245 — garde d'entrée stacker, miroir exact de
+        // `run_program` (eval.rs) : sans elle l'éval module
+        // partait sur la pile ambiante du fil 32 Mio, déjà
+        // consommée par les couches pompe/session — les graphes
+        // réels (umap, vols 380/381 `overflowed its stack` à
+        // RSS modeste) débordaient avant tout segment tas.
+        let r = stacker::maybe_grow(
+            crate::parser::STACK_RED_ZONE,
+            crate::parser::STACK_GROW,
+            || self.eval_module_inner(src, name),
+        );
         self.current_module = prev;
         let out = match r {
             Ok(v) => Ok(v),
             Err(Thrown(_v)) if self.deadline_hit => Err(Error::Deadline),
             Err(Thrown(v)) => Err(Error::Uncaught(self.describe(v))),
         };
+        if std::env::var("DBG_DRIVE").is_ok() {
+            eprintln!("[eval_mod] microtasks début");
+        }
         if let Err(Thrown(v)) = self.run_microtasks_in_boot() {
             if self.deadline_hit {
                 return Err(Error::Deadline);
             }
             return Err(Error::Uncaught(self.describe(v)));
+        }
+        if std::env::var("DBG_DRIVE").is_ok() {
+            eprintln!("[eval_mod] retour eval_module");
         }
         out
     }
@@ -292,7 +308,14 @@ impl Engine {
     fn eval_module_inner(&mut self, src: &str, name: &str) -> JsResult<Value> {
         let idx = self.instantiate(name, name, src, 0)?;
         self.evaluate_module(idx)?;
-        Ok(self.module_ns_object(idx))
+        if std::env::var("DBG_DRIVE").is_ok() {
+            eprintln!("[eval_mod] ns_object idx={idx}");
+        }
+        let r = self.module_ns_object(idx);
+        if std::env::var("DBG_DRIVE").is_ok() {
+            eprintln!("[eval_mod] ns_object fin idx={idx}");
+        }
+        Ok(r)
     }
 
     /// `import(spec)` — resolve, instantiate, evaluate → namespace.
@@ -549,7 +572,17 @@ impl Engine {
             // `./x` depuis un module relatif chaîne les chemins
             // bruts au lieu de repartir de la racine du site.
             let (dep_url, dep_src) = self.load_source(&dep_spec, url)?;
-            let dep_idx = self.instantiate(&dep_spec, &dep_url, &dep_src, depth + 1)?;
+            // JS-C245 — garde stacker au point de récursion : les
+            // frames `instantiate` sont lourdes (prog+env+deps
+            // clonés) et le fil moteur est borné à 32 Mio — un
+            // graphe profond (vols 380/381 `module eval`
+            // `overflowed its stack` à RSS modeste) débordait là
+            // où parser et éval classiques sont déjà gardés.
+            let dep_idx = stacker::maybe_grow(
+                crate::parser::STACK_RED_ZONE,
+                crate::parser::STACK_GROW,
+                || self.instantiate(&dep_spec, &dep_url, &dep_src, depth + 1),
+            )?;
             self.modules[idx].deps.push(dep_idx);
         }
 
@@ -672,7 +705,15 @@ impl Engine {
         self.modules[idx].state = ModState::Evaluating;
         let deps = self.modules[idx].deps.clone();
         for dep in deps {
-            self.evaluate_module(dep)?;
+            // JS-C245 — même garde au point de récursion DFS :
+            // chaque frame chaîne ensuite l'`exec` du corps du
+            // module, dont les frames JS s'empilent sous les
+            // frames `evaluate_module` déjà posées.
+            stacker::maybe_grow(
+                crate::parser::STACK_RED_ZONE,
+                crate::parser::STACK_GROW,
+                || self.evaluate_module(dep),
+            )?;
         }
         let env = self.modules[idx].env.clone();
         let body = std::mem::take(&mut self.modules[idx].body);
@@ -711,6 +752,12 @@ impl Engine {
         self.current_module = prev_mod;
         self.strict = outer_strict;
         self.modules[idx].state = ModState::Evaluated;
+        if std::env::var("DBG_DRIVE").is_ok() {
+            eprintln!(
+                "[eval_mod] sortie idx={idx} spec={}",
+                self.modules[idx].spec
+            );
+        }
         r.map(|_| ())
     }
 
@@ -719,6 +766,21 @@ impl Engine {
     /// (spec : `[[]]` namespace, `[[Prototype]]: null`).
     fn module_ns_object(&mut self, idx: usize) -> Value {
         let obj = self.heap.alloc_obj(Object::ordinary(Value::Null));
+        // `ns[Symbol.toStringTag] === "Module"` (spec) — nomme
+        // aussi l'objet pour `describe_shallow` (chemin d'erreur
+        // `to_primitive`, proto=null).
+        let tag = self.str_val("Module");
+        if let Some(o) = self.heap.obj_mut(obj) {
+            o.define_data(
+                crate::interp::SYM_TO_STRING_TAG,
+                tag,
+                PropAttrs {
+                    writable: false,
+                    enumerable: false,
+                    configurable: false,
+                },
+            );
+        }
         let exports = self.modules[idx].exports.clone();
         for (exported, denv, bnd) in exports {
             let eidx = self.env_index(&denv);

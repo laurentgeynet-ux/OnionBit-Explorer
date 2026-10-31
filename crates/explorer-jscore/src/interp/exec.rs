@@ -118,6 +118,14 @@ impl Engine {
     }
 
     pub(crate) fn exec_body(&mut self, env: &EnvRef, this: Value, body: &[Stmt]) -> JsResult<Flow> {
+        if std::env::var("DBG_DRIVE").is_ok() {
+            eprintln!(
+                "[exec_body] call body={} stmts depth={} cur_mod={}",
+                body.len(),
+                self.call_depth,
+                self.current_module
+            );
+        }
         // `using` (ES2026) : chaque décl pousse un disposeur sur la
         // frame courante, dépilée LIFO à TOUTE sortie du corps —
         // normal, break, return et throw (spec `DisposeResources`).

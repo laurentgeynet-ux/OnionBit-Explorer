@@ -786,13 +786,16 @@ fn create_element_ns_creates_local_name() {
     // `document.createElementNS('http://www.w3.org/2000/svg',
     // 'svg')` — l'URI est acceptée/ignorée, le nœud est créé
     // par son nom local (préfixe `ns:tag` dépouillé).
+    // JS-C233 : `tagName` conserve la casse spec pour les
+    // éléments du namespace SVG (foreign elements) — `svg`,
+    // et le préfixe `ns:` reste dépouillé → `circle`.
     assert_eq!(
         ev("document.createElementNS('http://www.w3.org/2000/svg','svg').tagName"),
-        "SVG"
+        "svg"
     );
     assert_eq!(
         ev("document.createElementNS('http://www.w3.org/2000/svg','svg:circle').tagName"),
-        "CIRCLE"
+        "circle"
     );
 }
 
@@ -5022,7 +5025,7 @@ fn idl_accessors_descriptor_surface() {
     // `new HTMLInputElement()` — illegal constructor (spec).
     assert_eq!(
         ev("try{new document.getElementById('inp').constructor()}catch(e){e.message}"),
-        "illegal constructor"
+        "illegal constructor (HTMLInputElement)"
     );
 }
 
@@ -6319,15 +6322,15 @@ fn cap196_computed_position_from_geometry() {
                 },
                 fixed: true,
                 positioned: true,
-                position: explorer_jscore::GeomPosition::Absolute,
+                position: explorer_jscore::GeomPosition::Fixed,
             },
         );
     }
     e.set_geometry_ctx(0, geom);
     // `position` feuille-only : la cascade l'a vue au layout
-    // (fixed publié) → `"fixed"` ; le non-publié et `el.style`
-    // (inline pur, spec) restent honnêtes `""` ; idem via
-    // `getPropertyValue`.
+    // (fixed publié) → `"fixed"` ; le non-publié rend le défaut
+    // spec `"static"`, `el.style` (inline pur, spec) reste
+    // honnête `""` ; idem via `getPropertyValue`.
     assert_eq!(
         evf(
             &mut e,
@@ -6337,7 +6340,7 @@ fn cap196_computed_position_from_geometry() {
             document.getElementById('list').style.position+'/'+\
             s.getPropertyValue('position')"
         ),
-        "fixed///fixed"
+        "fixed/static//fixed"
     );
 }
 
