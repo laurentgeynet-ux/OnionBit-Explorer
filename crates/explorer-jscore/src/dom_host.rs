@@ -3082,6 +3082,11 @@ impl Engine {
             // `coords` → `GeolocationCoordinates` avec.
             "GeolocationPosition",
             "GeolocationCoordinates",
+            // `PushSubscription` — interface déclarée (§B-14,
+            // mastodon : `PushSubscription is not defined`
+            // tuait le boot — inconstructible spec, la garde
+            // `typeof`/`in` suffit).
+            "PushSubscription",
             "PushManager",
             "ServiceWorker",
             "ServiceWorkerContainer",
