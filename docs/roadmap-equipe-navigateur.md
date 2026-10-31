@@ -5201,6 +5201,20 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   `complete` (`EXPLORER_JS_BOOT_
   GRACE_MS`).
 
+- [x] **JS-C252. Garde `ImageData`
+  `w*h*4`** (`explorer-jscore`,
+  §B-59 second vecteur, actugaming
+  vol 497) — `new ImageData(w,h)`
+  sur dims hostiles demandait
+  `vec![0; w*h*4]` = 34,36 Go →
+  abort allocateur (constante
+  2³²×8, même signature que github
+  vol 374 `commit.deliver`) ;
+  `alloc_guard` avant
+  materialisation → RangeError.
+  Verrou `imagedata_hostile_dims_
+  refuses_proprement`.
+
 - [x] **JS-C251. Moteur survit au
   burst** (`explorer-js`,
   `explorer-jscore`, §B-59

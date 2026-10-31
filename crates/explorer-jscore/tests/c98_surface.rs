@@ -240,6 +240,27 @@ fn c98_imagedata() {
     );
 }
 
+/// `ImageData` hostile — `w*h*4` au-delà du budget : `RangeError`
+/// bornée, jamais de requête 34 Go à l'allocateur (§B-59 second
+/// vecteur R-136, actugaming vol 497 — abort `alloc 34,36 Go`).
+#[test]
+fn imagedata_hostile_dims_refuses_proprement() {
+    let mut e = engine();
+    let err = e.eval("new ImageData(4294967296, 2)").unwrap_err();
+    assert!(
+        err.to_string().contains("allocation exceeds engine limits"),
+        "{err}"
+    );
+    let mut e = engine();
+    let err = e.eval("new ImageData(1e10, 4)").unwrap_err();
+    assert!(
+        err.to_string().contains("allocation exceeds engine limits"),
+        "{err}"
+    );
+    // Le moteur survit : un usage normal reste licite ensuite.
+    assert_eq!(ev("var d=new ImageData(4,4); d.data.length"), "64");
+}
+
 /// `Path2D` — enregistreur d'ops (méthodes lisibles, stockage).
 #[test]
 fn c98_path2d() {

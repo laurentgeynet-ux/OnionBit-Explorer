@@ -7,6 +7,28 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **JS-C252 — garde `ImageData`
+  `w*h*4`** (`explorer-jscore`,
+  §B-59 second vecteur R-136,
+  actugaming vol 497) — abort
+  `memory allocation of
+  34359738368 bytes failed` ~40 s
+  post-nav, même constante 2³²×8
+  que github vol 374 : le seul
+  site `w*h` non gardé du
+  workspace était `imagedata_ctor`
+  — `new ImageData(w,h)` avec
+  `w`/`h` f64 hostiles demandait
+  `vec![0; w*h*4]` = 34,36 Go
+  direct à l'allocateur (image.rs,
+  canvas.rs, flow_columns déjà
+  bornés). `alloc_guard` avant
+  materialisation → `RangeError
+  allocation exceeds engine
+  limits`, moteur vivant. Verrou
+  `imagedata_hostile_dims_
+  refuses_proprement`.
+
 - **JS-C251 — moteur survit au burst**
   (`explorer-js`, `explorer-jscore`,
   §B-59 youtube/sudouest) — deux

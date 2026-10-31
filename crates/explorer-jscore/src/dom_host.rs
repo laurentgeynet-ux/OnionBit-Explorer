@@ -13925,6 +13925,13 @@ fn imagedata_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> 
                 e.to_number(arg(args, 0))? as usize,
                 e.to_number(arg(args, 1))? as usize,
             );
+            // Garde d'alloc (JS-C55, §B-59 second vecteur R-136) :
+            // `new ImageData(w,h)` sur dims hostiles demandait
+            // `vec![0; w*h*4]` = 34,36 Go → abort allocateur
+            // mesuré terrain (actugaming vol 497 — même
+            // constante 2³²×8 que github vol 374). RangeError
+            // bornée, jamais de requête géante à l'allocateur.
+            e.alloc_guard(w.saturating_mul(h).saturating_mul(4))?;
             let buf = crate::typed_array::new_array_buffer(
                 e,
                 vec![0; w.saturating_mul(h).saturating_mul(4)],
