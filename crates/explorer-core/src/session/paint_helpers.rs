@@ -53,11 +53,17 @@ pub(crate) const DIRTY_DIFF_MAX_ITEMS: usize = 2_000;
 /// l'instant courant pour chaîner les phases.
 pub(crate) fn sync_phase(tab: TabId, phase: &'static str, start: Instant) -> Instant {
     let now = Instant::now();
+    // §B-59 — attribution alloc natif par phase
+    // (`EXPLORER_ALLOC_TRACE` : octets demandés + nombre
+    // d'appels depuis la phase précédente de ce fil).
+    let (alloc_b, alloc_n) = explorer_common::alloc_delta().unwrap_or((0, 0));
     tracing::info!(
         target: "sync_profile",
         tab,
         phase,
         us = u64::try_from(now.duration_since(start).as_micros()).unwrap_or(u64::MAX),
+        alloc_b,
+        alloc_n,
         "phase sync"
     );
     now

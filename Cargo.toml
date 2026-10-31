@@ -78,6 +78,10 @@ regex = "1.11"
 # lookaround et backrefs JS ((?=), (?<=, refs numerotees et
 # nommees) que regex ne compile pas (JS-C3, ADR-0007).
 fancy-regex = "0.16"
+# Compteur d'alloc natif processus (§B-59 — nommer la fuite
+# hors réservoirs) — wrapping d'allocateur pur Rust, mesure
+# de phase via `Region`/`stats` (EXPLORER_ALLOC_TRACE).
+stats_alloc = "0.1"
 # IDNA/punycode UTS-46 pour explorer-net::url (ADR-0002, étape 3) —
 # pur Rust, pas de *-sys.
 idna = "1.0"

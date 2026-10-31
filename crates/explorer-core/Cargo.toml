@@ -10,6 +10,7 @@ description = "Session : onglets, navigation, pipeline fetch→parse→style→l
 workspace = true
 
 [dependencies]
+explorer-common.workspace = true
 explorer-css.workspace = true
 explorer-dom.workspace = true
 explorer-html.workspace = true

@@ -11,3 +11,4 @@ workspace = true
 
 [dependencies]
 stacker.workspace = true
+stats_alloc.workspace = true
