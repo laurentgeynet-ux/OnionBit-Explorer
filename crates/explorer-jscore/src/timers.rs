@@ -23,6 +23,18 @@ use crate::Engine;
 use std::collections::HashSet;
 use std::time::{Duration, Instant};
 
+/// `EXPLORER_TIMER_BLOCKLIST="7,18"` — ids de timers à tuer au
+/// drain (diagnostic : supprimer la boucle d'un scheduler hostile
+/// sans toucher le moteur ni la page). Lu à chaque pompe.
+fn timer_blocklisted(id: u64) -> bool {
+    let Some(list) = std::env::var_os("EXPLORER_TIMER_BLOCKLIST") else {
+        return false;
+    };
+    list.to_string_lossy()
+        .split(',')
+        .any(|s| s.trim().parse::<u64>() == Ok(id))
+}
+
 /// One scheduled timer.
 #[derive(Debug)]
 struct Timer {
@@ -182,7 +194,20 @@ impl Engine {
         let now = Instant::now();
         let mut due: Vec<Timer> = Vec::new();
         let mut kept = Vec::with_capacity(self.timers.timers.len());
+        // Bissection §B-59/J11 : `EXPLORER_DISABLE_TIMERS=1`
+        // neutralise TOUTE la file — si le DOM mute ensuite,
+        // la starvation venait des timers (boucle scheduler),
+        // sinon le bloc est ailleurs (microtasks/fetch/API).
+        if std::env::var_os("EXPLORER_DISABLE_TIMERS").is_some() {
+            return Ok(0);
+        }
         for t in self.timers.timers.drain(..) {
+            // Sonde §B-59/J11 : `EXPLORER_TIMER_BLOCKLIST="7,18"`
+            // tue définitivement les ids listés — jamais tirés,
+            // jamais réarmés (bissection de boucle hostile).
+            if timer_blocklisted(t.id) {
+                continue;
+            }
             if t.at <= now {
                 due.push(t);
             } else {
