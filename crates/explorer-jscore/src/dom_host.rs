@@ -766,7 +766,7 @@ impl Engine {
     /// `bound_native` portant le nom d'interface dans l'arg
     /// liée, même `length: 0` own prop que `native_fn`
     /// (JS-C181 : les gates `Ctor.length` lisent l'arité).
-    fn illegal_ctor_bound(&mut self, name: &'static str) -> Value {
+    pub(crate) fn illegal_ctor_bound(&mut self, name: &'static str) -> Value {
         let nm = self.str_val(name);
         let f = self.bound_native(name, illegal_ctor_named, vec![nm]);
         if let Value::Obj(id) = f {
@@ -1918,6 +1918,11 @@ impl Engine {
         // rendant `false` : pas de plugin Java ; les
         // feature-detects réels l'appellent (maif vol 122).
         self.add_method(nav, "javaEnabled", nav_java_enabled);
+        // `navigator.getInstalledRelatedApps()` (§B-14 vol 378
+        // franceinfo ×2) — spec : promesse de `[]` (aucune app
+        // native associée installée — honnête, pas de stub de
+        // résultat).
+        self.add_method(nav, "getInstalledRelatedApps", nav_get_installed_apps);
         // `navigator.credentials` (JS-C93) — surface spec
         // `CredentialsContainer` : `create`/`get` rejettent
         // `NotSupportedError` (pas d'authentificateur
@@ -2121,6 +2126,24 @@ impl Engine {
         }
         self.set_own(g, "Location", lf, false);
         let hist = self.new_host_object(Rc::new(HistoryHost));
+        // Interface `History` (§B-14 vol 366 chess ×81 —
+        // rolldown-runtime `x instanceof History`/`History is
+        // not defined` : l'instance `history` était orpheline).
+        // Ctor illégal spec + `History.prototype` chaîné.
+        let hf = self.illegal_ctor_bound("History");
+        let hp = self.new_object();
+        let htag = self.str_val("History");
+        self.set_own(hp, crate::interp::SYM_TO_STRING_TAG, htag, false);
+        if let Value::Obj(hcid) = hf {
+            self.set_own(hcid, "prototype", Value::Obj(hp), false);
+            self.set_own(hp, "constructor", hf, false);
+        }
+        if let Value::Obj(hid) = hist {
+            if let Some(o) = self.heap.obj_mut(hid) {
+                o.proto = Value::Obj(hp);
+            }
+        }
+        self.set_own(g, "History", hf, false);
         self.set_own(g, "location", loc, false);
         self.set_own(g, "history", hist, false);
         // `window.navigation` — Navigation API (WHATWG).
@@ -12176,6 +12199,15 @@ fn so_lock(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
     let m = e.str_val("orientation lock: no host support");
     e.set_own(o, "message", m, true);
     e.reject_promise(pid, Value::Obj(o));
+    Ok(Value::Obj(pid))
+}
+
+/// `navigator.getInstalledRelatedApps()` (§B-14 vol 378) —
+/// `Promise<[]>` honnête : aucune app native installée.
+fn nav_get_installed_apps(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
+    let pid = e.new_promise();
+    let arr = e.new_array(Vec::new());
+    e.resolve_promise(pid, arr);
     Ok(Value::Obj(pid))
 }
 

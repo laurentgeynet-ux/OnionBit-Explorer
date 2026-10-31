@@ -1969,3 +1969,47 @@ fn audio_context_constructible_stub() {
         "0"
     );
 }
+
+/// §B-14 vols 366/403/378 — interfaces `Storage`/`History` +
+/// `getInstalledRelatedApps` : globals orphelins nommés —
+/// `instanceof` spec, `Promise<[]>` honnête.
+#[test]
+fn storage_history_interfaces_and_related_apps() {
+    let mut e = engine();
+    e.install_storage(&Rc::new(RefCell::new(std::collections::BTreeMap::new())));
+    assert_eq!(
+        ev(
+            &mut e,
+            "typeof Storage + ':' + typeof History + ':' \
+             + typeof navigator.getInstalledRelatedApps"
+        ),
+        "function:function:function"
+    );
+    // instanceof — les instances portent le proto de l'interface
+    assert_eq!(
+        ev(
+            &mut e,
+            "(localStorage instanceof Storage) + ':' \
+             + (sessionStorage instanceof Storage) + ':' \
+             + (history instanceof History)"
+        ),
+        "true:true:true"
+    );
+    // Ctor illégal nommé (§B-66 rail)
+    assert_eq!(
+        ev(&mut e, "try{new Storage()}catch(x){x.message}"),
+        "illegal constructor (Storage)"
+    );
+    // getInstalledRelatedApps → Promise<[]>
+    assert_eq!(
+        ev(
+            &mut e,
+            "globalThis.__r='p';\
+             navigator.getInstalledRelatedApps()\
+               .then(v=>{__r='len:'+v.length});__r"
+        ),
+        "p"
+    );
+    let _ = e.eval("0");
+    assert_eq!(ev(&mut e, "globalThis.__r"), "len:0");
+}

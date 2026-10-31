@@ -7,6 +7,24 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **JS-C246 — interfaces `Storage`/
+  `History` + `getInstalledRelatedApps`**
+  (`explorer-jscore`, §B-14 vols
+  366/378/403) — les globals
+  `localStorage`/`sessionStorage`/
+  `history` étaient orphelins :
+  `x instanceof Storage`/`History`
+  rendait `ReferenceError` (chess
+  rolldown-runtime ×81, vite.dev).
+  Ctor illégal nommé (rail §B-66)
+  + `prototype` chaîné aux
+  instances pour les deux
+  interfaces ; `navigator.
+  getInstalledRelatedApps()`
+  → `Promise<[]>` honnête.
+  Verrou
+  `storage_history_interfaces_and_related_apps`.
+
 - **JS-C245 — overflow `module eval`
   nommé : `to_primitive` rappelait
   `describe`** (`explorer-jscore`,

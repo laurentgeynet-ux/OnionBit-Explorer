@@ -40,6 +40,27 @@ impl Engine {
             map: Rc::new(RefCell::new(BTreeMap::new())),
         }));
         let g = self.global;
+        // Interface `Storage` (§B-14 vol 403 vite.dev —
+        // `x instanceof Storage`/`typeof Storage` : les globals
+        // `localStorage`/`sessionStorage` orphelins rendaient
+        // `Storage is not defined`). Ctor illégal spec +
+        // `Storage.prototype` chaîné aux deux instances.
+        let f = self.illegal_ctor_bound("Storage");
+        let p = self.new_object();
+        let tag = self.str_val("Storage");
+        self.set_own(p, crate::interp::SYM_TO_STRING_TAG, tag, false);
+        if let Value::Obj(cid) = f {
+            self.set_own(cid, "prototype", Value::Obj(p), false);
+            self.set_own(p, "constructor", f, false);
+        }
+        for v in [lv, sv] {
+            if let Value::Obj(id) = v {
+                if let Some(o) = self.heap.obj_mut(id) {
+                    o.proto = Value::Obj(p);
+                }
+            }
+        }
+        self.set_own(g, "Storage", f, false);
         self.set_own(g, "localStorage", lv, false);
         self.set_own(g, "sessionStorage", sv, false);
     }
