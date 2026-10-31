@@ -17,7 +17,9 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   replaceChild/removeChild/
   compareDocumentPosition/
   insertAdjacentElement/
-  customElements.upgrade) — le
+  customElements.upgrade) +
+  `cannot convert object to
+  primitive: <descr>` — le
   prochain vol nomme le producteur.
 
 - **JS-C242 — cap d'ops boot ×8**

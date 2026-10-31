@@ -5839,7 +5839,11 @@ impl Engine {
                 }
             }
         }
-        Err(self.type_error("cannot convert object to primitive"))
+        // §B-14 (telerama `cannot convert`) — nomme l'objet
+        // en échec : le prochain vol nomme l'hôte sans
+        // `valueOf`/`toString` utile (même rail que JS-C235).
+        let d = self.describe(v);
+        Err(self.type_error(format!("cannot convert object to primitive: {d}")))
     }
 
     /// `InstanceofOperator(V, target)` complet : dispatch
