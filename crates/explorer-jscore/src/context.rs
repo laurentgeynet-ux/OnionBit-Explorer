@@ -86,6 +86,13 @@ pub(crate) struct CtxMeta {
     pub defer_msgs: bool,
     /// Fenêtre **boot** du document — voir [`BootPhase`].
     pub boot_phase: BootPhase,
+    /// Grâce post-`readyState "complete"` (J11, youtube
+    /// kevlar) : l'hydratation d'une SPA continue *après*
+    /// `load` — la fenêtre boot se ferme à `complete` mais
+    /// les pompes gardent le budget boot tant que cet instant
+    /// n'est pas passé (borne hostile préservée : durée fixe
+    /// `boot_grace_ms`, pas une détection de travail restant).
+    pub boot_grace_until: Option<std::time::Instant>,
 }
 
 /// Phase du budget boot d'un contexte (§B-23, cryptpad :

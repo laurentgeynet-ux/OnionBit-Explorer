@@ -382,14 +382,35 @@ impl Engine {
         // `eval_module`) : la borne boot s'applique à tout le
         // drain (§B-23, cryptpad) — sinon le ré-armement à
         // `eval_timeout_ms` tuait la chaîne à 10 s.
-        if boot_boundary {
-            self.arm_eval_deadline_boot();
+        // J11 : la deadline se ré-arme désormais **par job**
+        // (spec : chaque microtask = une tâche) — une chaîne
+        // d'hydratation de N jobs × quelques s chacun ne meurt
+        // plus au cumul ; le drain global rend simplement la
+        // main au budget (yield) et les jobs restants attendent
+        // la pompe suivante. Un job unique reste borné par la
+        // deadline (hostile ou légitime-lourd).
+        let drain_budget_ms = if boot_boundary {
+            self.eval_timeout_boot_ms
         } else {
-            self.arm_eval_deadline();
-        }
+            self.batch_budget_ms()
+        };
+        let drain_start = std::time::Instant::now();
+        let mut yielded = false;
         loop {
             loop {
                 if ran >= MICROTASK_DRAIN_CAP {
+                    break;
+                }
+                // J11 — yield de drain : budget global écoulé
+                // → sortie gracieuse `Ok(ran)`, la file reste
+                // pour la pompe suivante (une chaîne
+                // d'hydratation progresse à travers les pompes
+                // au lieu de mourir à la borne du drain).
+                if ran > 0
+                    && drain_budget_ms > 0
+                    && drain_start.elapsed() >= std::time::Duration::from_millis(drain_budget_ms)
+                {
+                    yielded = true;
                     break;
                 }
                 let Some((ctx, job)) = self.microtasks.pop_front() else {
@@ -412,6 +433,21 @@ impl Engine {
                         eprintln!("[prom-job-drop] ctx={ctx} cur={}", self.cur_ctx);
                     }
                     continue;
+                }
+                // J11 — budget **par job** (spec : chaque
+                // microtask = une tâche) : ops et deadline
+                // réarmés à chaque job ; le cumul d'une chaîne
+                // légitime ne meurt plus à la borne du drain
+                // (le yield ci-dessus borne le drain global).
+                self.ops_left = if boot_boundary {
+                    self.op_limit.saturating_mul(crate::interp::BOOT_OPS_FACTOR)
+                } else {
+                    self.op_limit
+                };
+                if boot_boundary {
+                    self.arm_eval_deadline_boot();
+                } else {
+                    self.arm_eval_deadline();
                 }
                 if let Err(e) = self.tick() {
                     // Budget/heap épuisé : le job n'a **pas**
@@ -491,6 +527,14 @@ impl Engine {
                         self.call_value(f, Value::Undefined, &[])?;
                     }
                 }
+            }
+            // J11 — sortie gracieuse sur yield : jobs restants
+            // en file, mêmes sorties qu'un drain apaisé.
+            if yielded {
+                self.fire_unhandled_rejections();
+                self.switch_to(home);
+                self.maybe_collect();
+                return Ok(ran);
             }
             // JS-C26 : livraison MutationObserver en fin de
             // checkpoint — leurs callbacks peuvent enqueuer de

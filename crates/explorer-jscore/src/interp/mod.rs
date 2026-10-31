@@ -54,6 +54,14 @@ const DEFAULT_EVAL_MS: u64 = 10_000;
 /// comme une rafale hostile — la deadline serrée vaut pour les
 /// pompes timers/microtasks, pas pour la passe de chargement.
 const DEFAULT_EVAL_BOOT_MS: u64 = 60_000;
+/// Grâce boot post-`readyState "complete"`, en ms —
+/// `EXPLORER_JS_BOOT_GRACE_MS`. J11 (youtube kevlar) :
+/// l'hydratation SPA se poursuit après `load` — sans grâce,
+/// le premier batch de pompe post-`complete` retombait à la
+/// borne standard 10 s et l'hydratation mourait en
+/// `unhandledrejection` (`eval deadline exceeded`). Durée
+/// fixe bornée — la protection rafale reprend ensuite.
+const DEFAULT_BOOT_GRACE_MS: u64 = 120_000;
 /// Seuil GC par défaut (JS-C37) — ~130 K cellules vivantes
 /// déclenchent une passe à la frontière de job suivante.
 const DEFAULT_GC_THRESHOLD: usize = 131_072;
@@ -303,11 +311,16 @@ pub struct Engine {
     eval_deadline: Option<Instant>,
     /// Budget wall-clock d'un batch, ms — `EXPLORER_JS_EVAL_
     /// TIMEOUT_MS` lu une fois (défaut : voir `DEFAULT_EVAL_MS`).
-    eval_timeout_ms: u64,
+    pub(crate) eval_timeout_ms: u64,
     /// Budget wall-clock des évals boot (`run_program`/
     /// `eval_module`), ms — `EXPLORER_JS_EVAL_BOOT_TIMEOUT_MS`
     /// (défaut `DEFAULT_EVAL_BOOT_MS`, B-22 : compile légitime).
-    eval_timeout_boot_ms: u64,
+    pub(crate) eval_timeout_boot_ms: u64,
+    /// Grâce post-`complete` pendant laquelle les pompes gardent
+    /// le budget boot, ms — `EXPLORER_JS_BOOT_GRACE_MS`
+    /// (défaut `DEFAULT_BOOT_GRACE_MS`, J11 : hydratation SPA
+    /// post-`load`).
+    boot_grace_ms: u64,
     /// Posé par `tick` quand la deadline échoue — les bords
     /// publics convertissent en `Error::Deadline` (→ `JsError::
     /// Timeout` côté adaptateur → disjoncteur moteur figé).
@@ -851,6 +864,10 @@ impl Engine {
                 .ok()
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(DEFAULT_EVAL_MS),
+            boot_grace_ms: std::env::var("EXPLORER_JS_BOOT_GRACE_MS")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(DEFAULT_BOOT_GRACE_MS),
             deadline_hit: false,
             gc_threshold: DEFAULT_GC_THRESHOLD,
             ops_total: 0,
@@ -916,6 +933,7 @@ impl Engine {
                 alive: true,
                 defer_msgs: false,
                 boot_phase: crate::context::BootPhase::Idle,
+                boot_grace_until: None,
             }],
             parked: std::collections::HashMap::new(),
             pending_msgs: std::collections::VecDeque::new(),
@@ -1164,6 +1182,7 @@ impl Engine {
             alive: true,
             defer_msgs: false,
             boot_phase: crate::context::BootPhase::Idle,
+            boot_grace_until: None,
         });
         if let Some(m) = self.ctxs.get_mut(parent as usize) {
             m.children.push(id);
@@ -1373,6 +1392,14 @@ impl Engine {
             // pompes repassent au budget standard).
             if v == "complete" {
                 m.boot_phase = crate::context::BootPhase::Done;
+                // J11 : l'hydratation SPA continue après `load`
+                // — grâce bornée pendant laquelle les pompes du
+                // contexte gardent le budget boot.
+                let grace = self.boot_grace_ms;
+                if grace > 0 {
+                    m.boot_grace_until =
+                        Some(Instant::now() + std::time::Duration::from_millis(grace));
+                }
             }
         }
     }
@@ -3242,20 +3269,32 @@ impl Engine {
         }
     }
 
+    /// Budget batch courant en ms — sélection identique à
+    /// [`Self::arm_eval_deadline`] : boot si la fenêtre boot
+    /// ou la grâce post-`complete` du contexte courant est
+    /// active, borne standard sinon (J11 — relu par les yields
+    /// de drains timers/microtasks).
+    pub(crate) fn batch_budget_ms(&self) -> u64 {
+        let m = self.ctxs.get(self.cur_ctx as usize);
+        let boot = m.is_some_and(|m| {
+            m.boot_phase == crate::context::BootPhase::Open
+                || m.boot_grace_until.is_some_and(|u| Instant::now() < u)
+        });
+        if boot {
+            self.eval_timeout_boot_ms
+        } else {
+            self.eval_timeout_ms
+        }
+    }
+
     pub(crate) fn arm_eval_deadline(&mut self) {
         // §B-23 : pendant la fenêtre boot du contexte, le
         // batch de pompe partage le budget boot — sinon une
         // factory d'init lourde (less compile) mourait à la
         // borne standard malgré le bras boot de son script.
-        let ms = if self
-            .ctxs
-            .get(self.cur_ctx as usize)
-            .is_some_and(|m| m.boot_phase == crate::context::BootPhase::Open)
-        {
-            self.eval_timeout_boot_ms
-        } else {
-            self.eval_timeout_ms
-        };
+        // J11 : la grâce post-`complete` prolonge la même
+        // sélection (hydratation SPA post-`load`).
+        let ms = self.batch_budget_ms();
         self.eval_deadline =
             (ms > 0).then(|| Instant::now() + std::time::Duration::from_millis(ms));
     }

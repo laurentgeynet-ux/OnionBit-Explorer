@@ -167,11 +167,14 @@ impl Engine {
     /// pompe partagé par [`Self::run_due_timers_bounded`] pour
     /// chaque contexte visité (JS-C78).
     fn run_due_timers_ctx(&mut self, max: usize) -> JsResult<usize> {
-        // Deadline **par batch** (J1) — armée une fois : un
-        // `setInterval` auto-régénérant (allrecipes) sature
-        // jusqu'au wall-clock puis tout le reste de la rafale
-        // meurt ensemble, au lieu de N callbacks × budget.
-        self.arm_eval_deadline();
+        // J11 : deadline **par callback** (spec : chaque timer
+        // qui tire = une tâche) — ré-armée dans la boucle ; le
+        // batch rend la main au budget (yield, reliquat
+        // re-fileé) au lieu de tuer la rafale entière au
+        // wall-clock cumulé — une chaîne légitime progresse à
+        // travers les pompes, un callback unique reste borné.
+        let batch_budget_ms = self.batch_budget_ms();
+        let batch_start = Instant::now();
         // Snapshot the due timers first: an interval rescheduled to
         // `now` would otherwise be picked up again in this same pump
         // and loop forever. One pump = each due timer fires at most
@@ -194,15 +197,18 @@ impl Engine {
             self.timers.timers.extend(due.split_off(max));
         }
         let mut ran = 0usize;
-        for t in due {
+        let mut due_it = due.into_iter();
+        while let Some(t) = due_it.next() {
             // Annulé par un callback *plus tôt dans cette même pompe*
             // (le timer était déjà extrait quand `clearTimeout` a
             // tourné → `retain` ne l'a pas vu).
             if self.timers.cancelled.remove(&t.id) {
                 continue;
             }
-            // Each callback gets a fresh op budget.
+            // Each callback gets a fresh op budget — et sa
+            // propre deadline (J11 : tâche par tâche).
             self.ops_left = self.op_limit;
+            self.arm_eval_deadline();
             // Isolation par callback (J8) : un timer qui jette est
             // rapporté (`uncaught`) et les autres timers gardent
             // leur tour — spec : l'exception ne bloque pas la file.
@@ -256,6 +262,14 @@ impl Engine {
                 }
             }
             ran += 1;
+            // J11 — yield de batch : budget global écoulé →
+            // reliquat re-fileé pour la pompe suivante.
+            if batch_budget_ms > 0
+                && batch_start.elapsed() >= Duration::from_millis(batch_budget_ms)
+            {
+                self.timers.timers.extend(due_it.by_ref());
+                break;
+            }
         }
         Ok(ran)
     }

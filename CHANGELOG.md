@@ -7,6 +7,31 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **JS-C250 — deadline par job +
+  yield de drains + grâce boot
+  post-`complete`** (`explorer-jscore`,
+  J11 §E-bis, youtube kevlar vol 482)
+  — la deadline wall-clock s'armait
+  une fois par drain timers/microtasks
+  : une chaîne d'hydratation de N jobs
+  × quelques s chacun mourait au cumul
+  (`unhandledrejection: eval deadline
+  exceeded` → squelette shimmer
+  jamais hydraté). Spec : chaque
+  microtask/callback = une tâche —
+  ops + deadline réarmés par job ;
+  le drain global rend la main au
+  budget (yield `Ok(ran)`, jobs
+  restants en file pour la pompe
+  suivante) au lieu de tuer la
+  chaîne. Et `CtxMeta.boot_grace_until`
+  : après `readyState "complete"`,
+  les pompes gardent le budget boot
+  pendant `EXPLORER_JS_BOOT_GRACE_MS`
+  (défaut 120 s) — un job
+  d'hydratation unique >10 s
+  (kevlar `H()`) n'est plus coupé.
+
 - **JS-C249 — `parseHTMLUnsafe`**
   (`explorer-jscore`, §B-14 bras
   bbva vol 429) — statique

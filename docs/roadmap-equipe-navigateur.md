@@ -5187,6 +5187,20 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   origine parent héritée pour
   `about:` (storage/cookie/IDB).
 
+- [x] **JS-C250. Deadline par job +
+  yield de drains + grâce boot
+  post-`complete`** (`explorer-jscore`,
+  J11, youtube kevlar vol 482) — la
+  deadline armée une fois par drain
+  tuait les chaînes d'hydratation au
+  cumul (`eval deadline exceeded` en
+  `unhandledrejection` → squelette) ;
+  ops/deadline réarmés par job (spec
+  tâche), drains yields `Ok(ran)` au
+  budget, grâce boot 120 s post-
+  `complete` (`EXPLORER_JS_BOOT_
+  GRACE_MS`).
+
 - [ ] **Écarts terrain — vol humain
   22/10 (release `39ab821`, FFI)** :
   second run humain — trois constats
