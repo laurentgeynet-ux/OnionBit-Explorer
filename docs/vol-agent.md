@@ -32,6 +32,29 @@ cargo build -p explorer-daemon          # attendre « Finished »
 - La variable `EXPLORER_VIEWPORT=1366x900` cale la fenêtre de vol
   (cohérent avec le radar nightly).
 
+### Profil du daemon — froid, chaud, gabarit
+
+`EXPLORER_PROFILE` choisit l'état persistant (cookies, HSTS,
+DNS, IDB, cache) — trois modes, à **déclarer dans le rapport** :
+
+- **Profil froid** (défaut de preuve) : dir dédié au vol
+  (`EXPLORER_PROFILE=_vol<N>_profile`) — verdict sur premier
+  contact réel. Exigé pour tout constat consentement/first-party.
+- **Profil chaud partagé** : le profil utilisateur
+  (`~/.config/explorer`) — historique cumulé : consentements
+  déjà acceptés, cookies de session, jar rempli. Utile pour les
+  bancs où l'état établi change la forme du challenge (SERP,
+  re-vols §B-14 après premier passage). **Limites dures** :
+  un seul daemon à la fois (`state/explorer.lock` fslock —
+  jamais en flotte parallèle) ; et la chaleur peut **masquer**
+  un mur (un consentement accepté au vol N ne se montre plus —
+  le rapport écrit « profil chaud » en tête).
+- **Profil gabarit** : copier un seed (`_profile_seed/` : fonts,
+  hsts, dns pré-remplis) vers le dir du vol — warm-start
+  reproductible **par agent**, sans collision ni contamination
+  croisée (chaque vol garde son propre état à partir du même
+  point de départ).
+
 ## 2. Séquence de vol
 
 ```powershell

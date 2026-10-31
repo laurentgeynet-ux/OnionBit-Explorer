@@ -26,12 +26,16 @@ param(
 
 "watch start pid=$DaemonPid max=$MaxMB Mo interval=${IntervalSec}s" |
   Out-File -Append $Log
+$daemonStart = $null
 while ($true) {
   $p = Get-Process -Id $DaemonPid -ErrorAction SilentlyContinue
-  if (-not $p) {
-    "watch end: pid $DaemonPid disparu" | Out-File -Append $Log
+  if (-not $p -or $p.ProcessName -ne 'explorer-daemon' -or
+      ($daemonStart -and $p.StartTime -ne $daemonStart)) {
+    "watch end: pid $DaemonPid disparu ou PID réutilisé" |
+      Out-File -Append $Log
     break
   }
+  if (-not $daemonStart) { $daemonStart = $p.StartTime }
   $mb = [math]::Round($p.WorkingSet64 / 1MB)
   if ($mb -gt $MaxMB) {
     "$(Get-Date -Format o) WATCHDOG: pid $DaemonPid ${mb} Mo > $MaxMB — kill" |
