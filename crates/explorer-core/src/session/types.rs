@@ -170,6 +170,10 @@ pub enum CoreEvent {
         /// `media_offer_json` ; un rail `open_mse_multi`
         /// par entrée, index `?buffer=N`). Vide hors MSE.
         mse_buffers: Vec<String>,
+        /// `timestampOffset` de chaque `SourceBuffer` —
+        /// même ordre que `mse_buffers` (`pts_offset_secs`
+        /// par rail, P-54).
+        mse_offsets: Vec<f64>,
     },
     /// Le `rect` d'une surface offerte a changé (relayout,
     /// resize). Coalescence à la cadence de peinture : au
@@ -336,6 +340,9 @@ pub struct MediaOfferInfo {
     /// pull segments — P-53 `open_mse_multi` : un rail par
     /// buffer ; vide pour le non-MSE).
     pub mse_buffers: Vec<String>,
+    /// `timestampOffset` de chaque `SourceBuffer` — même
+    /// ordre que `mse_buffers` (P-54 `pts_offset_secs`).
+    pub mse_offsets: Vec<f64>,
 }
 
 /// Refus sur une surface média (étape 71b) — mappé `409`/

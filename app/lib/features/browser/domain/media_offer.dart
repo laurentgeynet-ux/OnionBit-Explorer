@@ -22,6 +22,7 @@ class MediaOffer {
     this.claimed = false,
     this.mse = false,
     this.mseBuffers = const [],
+    this.mseOffsets = const [],
     this.loops = false,
   });
 
@@ -61,6 +62,10 @@ class MediaOffer {
   /// Vide hors MSE ou mono-buffer.
   final List<String> mseBuffers;
 
+  /// `timestampOffset` de chaque `SourceBuffer` — même ordre
+  /// que [mseBuffers] (`ptsOffsetSecs` `MseDesc`, P-54).
+  final List<double> mseOffsets;
+
   /// Attribut `<video loop>` (champ `loop` du moteur, 139k)
   /// — `onionmedia_set_loop(-1)` quand posé ; hors MSE
   /// (source live non seekable, réarmement ignoré).
@@ -82,6 +87,7 @@ class MediaOffer {
     claimed: claimed ?? this.claimed,
     mse: mse,
     mseBuffers: mseBuffers,
+    mseOffsets: mseOffsets,
   );
 
   factory MediaOffer.fromJson(Map<String, dynamic> j) {
@@ -101,6 +107,11 @@ class MediaOffer {
       mseBuffers:
           (j['mseBuffers'] as List?)
               ?.map((e) => e.toString())
+              .toList(growable: false) ??
+          const [],
+      mseOffsets:
+          (j['mseOffsets'] as List?)
+              ?.map((e) => (e as num).toDouble())
               .toList(growable: false) ??
           const [],
       loops: j['loop'] == true,

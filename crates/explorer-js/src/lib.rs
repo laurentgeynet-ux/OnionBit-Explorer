@@ -649,6 +649,13 @@ pub trait JsEngine: Send {
         Vec::new()
     }
 
+    /// `timestampOffset` des `SourceBuffer` sous `url` — même
+    /// ordre que [`JsEngine::mse_buffers`] ; `0.0` défaut
+    /// spec. Offre `mseOffsets` → `pts_offset_secs` MseDesc.
+    fn mse_offsets(&mut self, _url: &str) -> Vec<f64> {
+        Vec::new()
+    }
+
     /// `(promises créées, réglées)` par moteur — §B-4(c) :
     /// un gap stable ≥1 sur un boot muet = un `await` gelé
     /// (promesse jamais réglée, invisible aux erreurs).
@@ -1609,6 +1616,12 @@ enum Cmd {
         url: String,
         tx: Sender<Vec<String>>,
     },
+    /// `timestampOffset` des `SourceBuffer` sous `url` —
+    /// même ordre que `MseBuffers` (`?buffer=N`).
+    MseOffsets {
+        url: String,
+        tx: Sender<Vec<f64>>,
+    },
     /// `(promises créées, réglées)` — compteur §B-4(c).
     PromiseStats {
         tx: Sender<(u64, u64)>,
@@ -2136,6 +2149,11 @@ impl JscoreEngine {
                 }
                 Cmd::MseBuffers { url, tx } => {
                     if tx.send(eng.mse_source_buffers(&url)).is_err() {
+                        return;
+                    }
+                }
+                Cmd::MseOffsets { url, tx } => {
+                    if tx.send(eng.mse_buffer_offsets(&url)).is_err() {
                         return;
                     }
                 }
@@ -2759,6 +2777,21 @@ impl JsEngine for JscoreEngine {
         if self
             .tx
             .send(Cmd::MseBuffers {
+                url: url.to_string(),
+                tx,
+            })
+            .is_err()
+        {
+            return Vec::new();
+        }
+        rx.recv_timeout(Self::EVAL_CMD_TIMEOUT).unwrap_or_default()
+    }
+
+    fn mse_offsets(&mut self, url: &str) -> Vec<f64> {
+        let (tx, rx) = channel();
+        if self
+            .tx
+            .send(Cmd::MseOffsets {
                 url: url.to_string(),
                 tx,
             })

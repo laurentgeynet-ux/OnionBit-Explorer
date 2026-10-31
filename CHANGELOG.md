@@ -7,6 +7,16 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **Offre `mseOffsets` (`timestampOffset` par rail, P-54)**
+  (`explorer-jscore`, `explorer-js`, `explorer-core`, app) —
+  `SourceBuffer.timestampOffset` propagé de la surface JS
+  au `MseDesc::pts_offset_secs` : `Engine::mse_buffer_offsets`
+  → trait `JsEngine::mse_offsets` (Cmd distant) →
+  `ScannedMedia`/`MediaSurface`/`MediaOfferInfo`/SSE +
+  `media_offer_json` → `MediaOffer.mseOffsets` Dart →
+  `_openMseMulti` pose `ptsOffsetSecs` par rail. `0.0` par
+  défaut partout (spec).
+
 - **JS-C247 — `serializeToString`
   accepte les nœuds étrangers**
   (`explorer-jscore`, §B-14 vol 374

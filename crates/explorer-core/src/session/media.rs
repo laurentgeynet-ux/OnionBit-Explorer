@@ -76,6 +76,9 @@ pub(crate) struct MediaSurface {
     /// MIME des `SourceBuffer` publiés dans l'offre
     /// (`?buffer=N` indexe ce tableau — P-53 `open_mse_multi`).
     pub(crate) mse_buffers: Vec<String>,
+    /// `timestampOffset` des `SourceBuffer` — même ordre
+    /// que `mse_buffers` (P-54 `pts_offset_secs`).
+    pub(crate) mse_offsets: Vec<f64>,
 }
 
 /// Résultat d'un pull de segments MSE (§B-63) — `Pending`
@@ -138,6 +141,9 @@ struct ScannedMedia {
     /// MIME des `SourceBuffer` (index `?buffer=N` — offre
     /// `mseBuffers` pour `open_mse_multi`).
     mse_buffers: Vec<String>,
+    /// `timestampOffset` par rail — même ordre que
+    /// `mse_buffers` (P-54 `pts_offset_secs`).
+    mse_offsets: Vec<f64>,
 }
 
 /// MIME média déduit du suffixe d'URL (contrat : `type` >
@@ -163,10 +169,9 @@ fn media_mime_from_url(url: &Url) -> Option<String> {
         "wmv" => "video/x-ms-wmv",
         "wma" => "audio/x-ms-wma",
         "mpg" | "mpeg" | "mpe" | "m2v" | "mpv" | "vob" => "video/mpeg",
-        "mpa" | "mp2" => "audio/mpeg",
+        "mpa" | "mp2" | "mp3" => "audio/mpeg",
         "m3u8" => "application/vnd.apple.mpegurl",
         "mpd" => "application/dash+xml",
-        "mp3" => "audio/mpeg",
         "aac" | "adts" => "audio/aac",
         "ac3" => "audio/ac3",
         "ec3" | "eac3" => "audio/ec3",
@@ -276,6 +281,7 @@ fn scan_media(tree: &LayoutBox, dom: &Dom, base: &Url) -> Vec<ScannedMedia> {
                         path: element_path(dom, n).unwrap_or_default(),
                         mse: false,
                         mse_buffers: Vec::new(),
+                        mse_offsets: Vec::new(),
                     });
                 }
             }
@@ -301,6 +307,10 @@ fn mark_mse_surfaces(scanned: &mut [ScannedMedia], js: &mut Option<Box<dyn JsEng
                 .as_mut()
                 .map(|e| e.mse_buffers(&s.url))
                 .unwrap_or_default();
+            s.mse_offsets = js
+                .as_mut()
+                .map(|e| e.mse_offsets(&s.url))
+                .unwrap_or_default();
         }
     }
 }
@@ -320,6 +330,7 @@ fn lazy_mark_mse(m: &mut MediaSurface, js: &mut Option<Box<dyn JsEngine>>) {
         if e.is_media_source(&m.url) {
             m.mse = true;
             m.mse_buffers = e.mse_buffers(&m.url);
+            m.mse_offsets = e.mse_offsets(&m.url);
         }
     }
 }
@@ -406,6 +417,7 @@ impl Session {
                     if js_present {
                         o.mse = s.mse;
                         o.mse_buffers.clone_from(&s.mse_buffers);
+                        o.mse_offsets.clone_from(&s.mse_offsets);
                     }
                     retained[pos] = Some(o);
                 } else {
@@ -439,6 +451,7 @@ impl Session {
                         path: s.path,
                         mse: s.mse,
                         mse_buffers: s.mse_buffers,
+                        mse_offsets: s.mse_offsets,
                     };
                     offered.push(MediaSurface {
                         id,
@@ -455,6 +468,7 @@ impl Session {
                         report: None,
                         path: surf.path.clone(),
                         mse: surf.mse,
+                        mse_offsets: surf.mse_offsets.clone(),
                     });
                     media.push(surf);
                 }
@@ -514,6 +528,7 @@ impl Session {
                 mse: s.mse,
                 looping: s.looping,
                 mse_buffers: s.mse_buffers.clone(),
+                mse_offsets: s.mse_offsets.clone(),
             });
         }
     }
@@ -567,6 +582,7 @@ impl Session {
                         state: m.report.clone(),
                         mse: m.mse,
                         mse_buffers: m.mse_buffers.clone(),
+                        mse_offsets: m.mse_offsets.clone(),
                     })
                     .collect()
             })
@@ -786,6 +802,7 @@ pub fn media_offer_json(m: &MediaOfferInfo) -> serde_json::Value {
         "rect": { "x": m.rect.x, "y": m.rect.y, "w": m.rect.w, "h": m.rect.h },
         "url": m.url, "mime": m.mime,
         "mse": m.mse, "mseBuffers": m.mse_buffers,
+        "mseOffsets": m.mse_offsets,
         "controls": m.controls, "autoplay": m.autoplay, "loop": m.looping,
         "claimed": m.claim.is_some(),
         "codecs": m.claim,
@@ -817,6 +834,7 @@ pub fn media_event_json(ev: &CoreEvent) -> Option<(&'static str, String)> {
             mse,
             looping,
             mse_buffers,
+            mse_offsets,
         } => (
             "media_offered",
             serde_json::json!({
@@ -829,6 +847,7 @@ pub fn media_event_json(ev: &CoreEvent) -> Option<(&'static str, String)> {
                 "url": url, "mime": mime, "mse": mse,
                 "controls": controls, "autoplay": autoplay,
                 "loop": looping, "mseBuffers": mse_buffers,
+                "mseOffsets": mse_offsets,
             })
             .to_string(),
         ),

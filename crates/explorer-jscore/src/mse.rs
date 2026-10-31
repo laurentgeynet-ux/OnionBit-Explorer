@@ -858,6 +858,25 @@ impl Engine {
             .map(|d| d.borrow().mime.clone())
             .collect()
     }
+
+    /// `timestampOffset` des `SourceBuffer` sous `url` — même
+    /// ordre que [`Self::mse_source_buffers`] (`?buffer=N`).
+    /// `0.0` par défaut (spec) ; l'offre `mseOffsets` alimente
+    /// `MseDesc::pts_offset_secs` côté `open_mse_multi`.
+    pub fn mse_buffer_offsets(&mut self, url: &str) -> Vec<f64> {
+        let Some(mid) = self.mse.object_urls.get(url).copied() else {
+            return Vec::new();
+        };
+        let Some(ms) = ms_data(self, Value::Obj(mid)) else {
+            return Vec::new();
+        };
+        let buffers = ms.borrow().buffers.clone();
+        buffers
+            .into_iter()
+            .filter_map(|v| sb_data(self, v))
+            .map(|d| d.borrow().timestamp_offset)
+            .collect()
+    }
 }
 
 // ------------------------------------------------------------------

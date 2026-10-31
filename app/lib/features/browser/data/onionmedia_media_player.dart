@@ -415,7 +415,8 @@ class OnionMediaPlayer implements MediaPlayer {
       final tab = int.tryParse(tabId) ?? 0;
       if (offer.mseBuffers.length > 1 && openMulti != null) {
         _openMseMulti(
-            openMulti, p, h, apiBase, tab, offer.id, offer.mseBuffers);
+            openMulti, p, h, apiBase, tab, offer.id, offer.mseBuffers,
+            offer.mseOffsets);
       } else {
         _openMseSingle(lib, p, h, apiBase, tab, offer);
       }
@@ -492,6 +493,7 @@ class OnionMediaPlayer implements MediaPlayer {
     int tab,
     int media,
     List<String> rails,
+    List<double> offsets,
   ) {
     final ab = apiBase.codeUnits;
     final cAb = calloc<ffi.Char>(ab.length);
@@ -515,7 +517,8 @@ class OnionMediaPlayer implements MediaPlayer {
           ..media = media
           ..buffer = i
           ..ext = c
-          ..extLen = e.length;
+          ..extLen = e.length
+          ..ptsOffsetSecs = i < offsets.length ? offsets[i] : 0.0;
       }
       final rc = openMulti(h, descs, rails.length);
       if (rc != 0) {
