@@ -2013,3 +2013,36 @@ fn storage_history_interfaces_and_related_apps() {
     let _ = e.eval("0");
     assert_eq!(ev(&mut e, "globalThis.__r"), "len:0");
 }
+
+/// §B-14 vol 374 service-public (AEM forms) — `serializeToString`
+/// rejette les nœuds d'un **autre** document (`nœud requis`)
+/// alors que spec sérialise tout `Node` — foreign accepté.
+#[test]
+fn xml_serializer_accepts_foreign_document_nodes() {
+    let mut e = engine();
+    // Nœud d'un doc DOMParser (miroir distinct) → sérialisé.
+    assert_eq!(
+        ev(
+            &mut e,
+            "var d=new DOMParser().parseFromString('<div id=\"x\">hi</div>','text/html');\
+             new XMLSerializer().serializeToString(d.body.firstChild)"
+        ),
+        "<div id=\"x\">hi</div>"
+    );
+    // Élément du doc courant — chemin inchangé.
+    assert_eq!(
+        ev(
+            &mut e,
+            "new XMLSerializer().serializeToString(document.createElement('b'))"
+        ),
+        "<b></b>"
+    );
+    // Valeur non-nœud — rejet spec préservé.
+    assert_eq!(
+        ev(
+            &mut e,
+            "try{new XMLSerializer().serializeToString(42)}catch(x){x.message}"
+        ),
+        "serializeToString: nœud requis"
+    );
+}

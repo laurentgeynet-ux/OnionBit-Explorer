@@ -7,6 +7,21 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **JS-C247 — `serializeToString`
+  accepte les nœuds étrangers**
+  (`explorer-jscore`, §B-14 vol 374
+  service-public AEM forms —
+  `serializeToString: nœud requis`) —
+  spec : tout `Node` est
+  sérialisable, y compris d'un
+  autre document (DOMParser/
+  iframe) ; `node_for_in` exigeait
+  le miroir courant. Repli
+  `foreign_node_in` → sérialise
+  via le miroir propriétaire.
+  Verrou
+  `xml_serializer_accepts_foreign_document_nodes`.
+
 - **JS-C246 — interfaces `Storage`/
   `History` + `getInstalledRelatedApps`**
   (`explorer-jscore`, §B-14 vols

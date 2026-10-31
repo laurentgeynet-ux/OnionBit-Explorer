@@ -11233,10 +11233,17 @@ fn xmlserialize_to_string(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult
     let Some((dom, _cache)) = e.dom_ctx.clone() else {
         return Err(e.type_error("serializeToString: no document"));
     };
-    let Some(n) = node_for_in(e, arg(args, 0), &dom) else {
-        return Err(e.type_error("serializeToString: nœud requis"));
+    // Spec : tout `Node` est sérialisable — y compris un nœud
+    // d'un **autre** document (DOMParser/iframe — service-public
+    // AEM forms vol 374 : `nœud requis` sur document étranger).
+    let (n, owner) = match node_for_in(e, arg(args, 0), &dom) {
+        Some(n) => (n, dom),
+        None => match foreign_node_in(e, arg(args, 0), &dom) {
+            Some((n, fdom)) => (n, fdom),
+            None => return Err(e.type_error("serializeToString: nœud requis")),
+        },
     };
-    let s = dom.borrow().outer_html(n);
+    let s = owner.borrow().outer_html(n);
     Ok(e.str_val(s))
 }
 
