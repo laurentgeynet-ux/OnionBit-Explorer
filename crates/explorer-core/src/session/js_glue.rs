@@ -855,10 +855,18 @@ impl Session {
         }
         self.js_factory.clone().map(|f| {
             let (page_url, hist_len) = self.tabs.get(&tab).map_or_else(
-                || (String::new(), 1),
+                || ("about:blank".to_string(), 1),
                 |t| {
                     (
-                        t.url.as_ref().map_or_else(String::new, Url::to_string),
+                        // Contexte jamais navigué → `about:blank`
+                        // (spec : URL initiale du browsing context) ;
+                        // `""` faisait `location.href`/`baseURI` vides
+                        // → `new URL(location.href)` `Invalid URL:`
+                        // arg vide (§B-64) là où Chrome parse
+                        // `about:blank` sainement.
+                        t.url
+                            .as_ref()
+                            .map_or_else(|| "about:blank".to_string(), Url::to_string),
                         u32::try_from(t.hist.len()).unwrap_or(u32::MAX),
                     )
                 },
@@ -1615,30 +1623,30 @@ fn frame_context_plan(entry: &Tab) -> Vec<FramePlan> {
         // `src` = par URL.
         let srcdoc = dom.attribute(node, "srcdoc").ok().flatten();
         let sub = if let Some(sd) = srcdoc.as_deref() {
-            match entry
+            if let Some(sub) = entry
                 .frames
                 .iter()
                 .position(|f| f.srcdoc.as_deref() == Some(sd))
             {
-                Some(sub) => sub,
+                sub
+            } else {
                 // `srcdoc` sans `SubFrame` — cadre blanc tout
                 // de même (son contexte existe spec — §B-14
                 // `document of Null`).
-                None => {
-                    plan.push(blank_frame_plan(dom, node, ord, base));
-                    continue;
-                }
+                plan.push(blank_frame_plan(dom, node, ord, base));
+                continue;
             }
         } else {
             let src = dom.attribute(node, "src").ok().flatten();
             let url = src.and_then(|s| Url::resolve(base, &s).ok());
-            match url.and_then(|u| {
+            if let Some(sub) = url.and_then(|u| {
                 entry
                     .frames
                     .iter()
                     .position(|f| f.srcdoc.is_none() && f.url == u)
             }) {
-                Some(sub) => sub,
+                sub
+            } else {
                 // Pas de `src`/`srcdoc`, `about:blank`, ou
                 // cadre non fetché/irréductible : le `Window`
                 // existe spec dès l'insertion → contexte
@@ -1646,10 +1654,8 @@ fn frame_context_plan(entry: &Tab) -> Vec<FramePlan> {
                 // `document of Null` ×7 — `iframe.contentWindow
                 // .document` mourait sur le `null` de
                 // `ctx_of_frame`).
-                None => {
-                    plan.push(blank_frame_plan(dom, node, ord, base));
-                    continue;
-                }
+                plan.push(blank_frame_plan(dom, node, ord, base));
+                continue;
             }
         };
         let f = &entry.frames[sub];

@@ -1471,7 +1471,9 @@ fn cors_safelisted_author_header(n: &str, v: &str) -> bool {
 fn request_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     let input = arg(args, 0);
     let init = arg(args, 1);
-    if matches!(input, Value::Undefined) {
+    // WebIDL `required` = argument ABSENT ; `new Request(undefined)`
+    // stringify `"undefined"` → résout `<base>/undefined` (spec).
+    if args.is_empty() {
         return Err(e.type_error("Request: url required"));
     }
     let url: String;
@@ -1922,9 +1924,15 @@ pub(crate) fn fetch_fn(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Va
             }
         }
     } else {
-        req.url = match input {
-            Value::Undefined => return Err(e.type_error("fetch: url required")),
-            v => e.to_js_string(v)?,
+        // WebIDL `required` = argument ABSENT ; `fetch(undefined)`
+        // stringify `"undefined"` → résout `<base>/undefined`
+        // (spec — l'appel `fetch(cfg.apiUrl)` à prop absente doit
+        // produire une 404, pas un TypeError fatal ; bras §B-14
+        // `fetch: url required` ×7).
+        req.url = if args.is_empty() {
+            return Err(e.type_error("fetch: url required"));
+        } else {
+            e.to_js_string(input)?
         };
     }
     if let Value::Obj(oid) = opts {

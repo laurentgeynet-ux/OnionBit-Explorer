@@ -7,6 +7,32 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **JS-C248 — WebIDL `required` = arg
+  absent + `page_url` vide →
+  `about:blank`** (`explorer-jscore`,
+  `explorer-core`, §B-14 bras
+  `fetch: url required` ×7 /
+  §B-64 `Invalid URL:` arg vide ×10)
+  — les constructeurs traitaient
+  `undefined` comme absent ;
+  WebIDL : absent → `TypeError`
+  requis, `undefined` → stringify
+  `"undefined"` → résolution
+  `<base>/undefined` (Chrome —
+  `fetch(cfg.apiUrl)` à prop
+  absente doit produire une 404,
+  pas un TypeError fatal).
+  `fetch`/`Request`/`EventSource`/
+  `WebSocket` corrigés ; et un
+  contexte jamais navigué pose
+  `page_url="about:blank"` (spec —
+  `location.href`/`baseURI`/`documentURI`
+  ne rendent plus `""` → `new
+  URL(location.href)` ne jette
+  plus `Invalid URL:` arg vide).
+  Verrou
+  `fetch_undefined_stringifies_not_required`.
+
 - **Offre `mseOffsets` (`timestampOffset` par rail, P-54)**
   (`explorer-jscore`, `explorer-js`, `explorer-core`, app) —
   `SourceBuffer.timestampOffset` propagé de la surface JS

@@ -651,7 +651,7 @@ pub trait JsEngine: Send {
 
     /// `timestampOffset` des `SourceBuffer` sous `url` — même
     /// ordre que [`JsEngine::mse_buffers`] ; `0.0` défaut
-    /// spec. Offre `mseOffsets` → `pts_offset_secs` MseDesc.
+    /// spec. Offre `mseOffsets` → `pts_offset_secs` `MseDesc`.
     fn mse_offsets(&mut self, _url: &str) -> Vec<f64> {
         Vec::new()
     }

@@ -1900,3 +1900,28 @@ fn c215_idb_proto_graft_reaches_instances() {
     // pas être `instanceof IDBOpenDBRequest` (vérifié plus
     // haut) mais `open` l'est.
 }
+
+/// JS-C248 — `WebIDL` `required` = argument **absent** :
+/// `fetch()`/`new Request()` jettent `TypeError`, mais
+/// `fetch(undefined)`/`new Request(undefined)` stringify
+/// `"undefined"` et émettent la requête (spec — un
+/// `fetch(cfg.apiUrl)` à prop absente produit une 404
+/// `<base>/undefined`, pas un `TypeError` fatal ; bras §B-14
+/// `fetch: url required` ×7 sites).
+#[test]
+fn fetch_undefined_stringifies_not_required() {
+    let (mut e, t) = engine();
+    // Argument absent → `TypeError` synchrone (spec).
+    assert!(e.eval("fetch()").is_err());
+    assert!(e.eval("new Request()").is_err());
+    // `undefined`/`null` passés → stringify → émission.
+    e.eval("fetch(undefined)").expect("fetch undefined");
+    e.eval("fetch(null)").expect("fetch null");
+    let reqs = t.requests.borrow();
+    assert_eq!(reqs[0].1.url, "undefined");
+    assert_eq!(reqs[1].1.url, "null");
+    drop(reqs);
+    // `new Request(undefined)` → URL littérale résolue.
+    assert_eq!(describe(&mut e, "new Request(undefined).url"), "undefined");
+    assert_eq!(describe(&mut e, "new Request(null).url"), "null");
+}

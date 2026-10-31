@@ -224,7 +224,9 @@ fn valid_ws_token(s: &str) -> bool {
 /// `protocols` = chaîne ou liste de tokens uniques.
 fn websocket_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     let raw = arg(args, 0);
-    if matches!(raw, Value::Undefined) {
+    // WebIDL `required` = argument ABSENT ; `WebSocket(undefined)`
+    // stringify `"undefined"` → résout `<base>/undefined` (spec).
+    if args.is_empty() {
         return Err(e.type_error("WebSocket: url required"));
     }
     let raw = e.to_js_string(raw)?;

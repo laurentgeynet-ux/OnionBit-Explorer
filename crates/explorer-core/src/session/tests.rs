@@ -3328,6 +3328,7 @@ fn media_offer_json_carries_loop_and_mse_buffers() {
         state: None,
         mse: true,
         mse_buffers: vec!["video/mp4".into(), "audio/mp4".into()],
+        mse_offsets: vec![0.0, 1.25],
     };
     let j = media_offer_json(&offer);
     assert_eq!(j["loop"], true, "attribut loop propagé");
@@ -3335,6 +3336,11 @@ fn media_offer_json_carries_loop_and_mse_buffers() {
         j["mseBuffers"],
         serde_json::json!(["video/mp4", "audio/mp4"]),
         "rails SourceBuffer propagés"
+    );
+    assert_eq!(
+        j["mseOffsets"],
+        serde_json::json!([0.0, 1.25]),
+        "timestampOffset par rail propagé"
     );
     let report = media_report_from_json(&serde_json::json!({
         "state": "buffering", "position_ms": 12, "buffered_ms": 900

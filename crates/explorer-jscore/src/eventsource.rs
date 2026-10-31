@@ -197,7 +197,9 @@ fn es_proto(e: &mut Engine) -> ObjId {
 /// (`SyntaxError` sinon — spec : hérite de l'URL de page).
 fn eventsource_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     let raw = arg(args, 0);
-    if matches!(raw, Value::Undefined) {
+    // WebIDL `required` = argument ABSENT ; `EventSource(undefined)`
+    // stringify `"undefined"` → résout `<base>/undefined` (spec).
+    if args.is_empty() {
         return Err(e.type_error("EventSource: url required"));
     }
     let raw = e.to_js_string(raw)?;
