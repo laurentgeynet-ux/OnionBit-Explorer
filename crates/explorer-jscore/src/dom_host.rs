@@ -9034,7 +9034,12 @@ fn parse_decls(style: &str) -> Vec<(String, String)> {
 /// `ElementInternals` (stub issue #25) — objet minimal
 /// retourné par `attachInternals()` : `shadowRoot` lisible
 /// même en mode `closed` (spec `ElementInternals`), le
-/// reste de la surface reste à l'arc Shadow DOM.
+/// reste de la surface reste à l'arc Shadow DOM. Rail
+/// form-associated (§B-14, nicolas `setFormValue`) :
+/// `setFormValue`/`setValidity` no-ops honnêtes (pas de
+/// soumission FACE moteur — la valeur posée ne voyage pas),
+/// `checkValidity`/`reportValidity` → `true` (élément sans
+/// contrainte = valide, spec pour un stub sans état).
 struct ElementInternalsHost {
     dom: DomRef,
     cache: NodeCache,
@@ -9063,8 +9068,30 @@ impl Host for ElementInternalsHost {
                     None => Value::Null,
                 }))
             }
+            "willValidate" => Ok(Some(Value::Bool(true))),
+            "validationMessage" => Ok(Some(e.str_val(""))),
             _ => Ok(None),
         }
+    }
+
+    fn has_method(&self, name: &str) -> bool {
+        matches!(
+            name,
+            "setFormValue" | "setValidity" | "checkValidity" | "reportValidity" | "focus"
+        )
+    }
+
+    fn invoke(
+        &self,
+        _e: &mut Engine,
+        _t: Value,
+        name: &str,
+        _args: &[Value],
+    ) -> JsResult<Option<Value>> {
+        Ok(Some(match name {
+            "checkValidity" | "reportValidity" => Value::Bool(true),
+            _ => Value::Undefined,
+        }))
     }
 }
 
