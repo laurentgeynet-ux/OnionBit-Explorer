@@ -6014,6 +6014,26 @@ impl Engine {
         ) {
             return Ok(v);
         }
+        // Fast-path §B-59 : objet ordinaire directement sous
+        // `Object.prototype`, sans `@@toPrimitive`/`valueOf`/
+        // `toString`/`@@toStringTag` propres — `OrdinaryToPrimitive`
+        // répond toujours `"[object Object]"` (valueOf rend `this`,
+        // non primitif → toString). Évite 2 lookups proto + 2
+        // dispatchs par coercition — la tempête ytcfg YouTube
+        // (`+obj`/`${obj}` sur des données plain) payait ~19 M
+        // d'appels natifs à la page.
+        if let Some(o) = self.heap.obj(id) {
+            if matches!(o.kind, ObjKind::Ordinary)
+                && matches!(o.proto, Value::Obj(p) if p == self.protos.object)
+                && o.get_own(SYM_TO_PRIMITIVE).is_none()
+                && o.get_own("valueOf").is_none()
+                && o.get_own("toString").is_none()
+                && o.get_own(SYM_TO_STRING_TAG).is_none()
+            {
+                let s = self.str_val("[object Object]".to_string());
+                return Ok(s);
+            }
+        }
         // `@@toPrimitive(hint)` prend le pas (spec `ToPrimitive`).
         if let Some(f) = self.get_prop(id, SYM_TO_PRIMITIVE) {
             if self.is_callable(f) {
