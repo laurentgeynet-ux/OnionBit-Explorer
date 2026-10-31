@@ -1587,18 +1587,116 @@ pub enum EnvKind {
     /// Global scope — `var`/implicit bindings live on the global
     /// object; the map is the declarative global record holding
     /// `let`/`const` names (they do *not* appear on `window`).
-    Global(HashMap<String, EnvCell>),
+    Global(BindingMap),
     /// Function scope (paramètres, corps de fonction/programme).
-    Local(HashMap<String, EnvCell>),
+    Local(BindingMap),
     /// Portée de bloc (`{ … }`, tête de `for`, `switch`, `catch`) —
     /// même stockage que `Local`, mais `var`/déclarations de
     /// fonction la TRAVERSENT jusqu'au scope fonction englobant
     /// (spec `VarDeclaredNames`) ; `let`/`const`/`class` y vivent.
-    Block(HashMap<String, EnvCell>),
+    Block(BindingMap),
     /// `with (obj)` — object-as-scope : la résolution d'un nom
     /// consulte les props de l'objet (sauf `@@unscopables`)
     /// puis remonte au parent.
     With(ObjId),
+}
+
+/// Seuil de promotion [`BindingMap::Small`] → [`BindingMap::Map`]
+/// — en dessous, le scan linéaire d'un Vec bat le hachage (et
+/// n'alloue aucune bucket) ; au-delà on veut le hachage.
+const BINDING_MAP_SMALL: usize = 16;
+
+/// Table de liaisons d'un scope, stockage adaptatif (§B-59) —
+/// le churn `YouTube` a nommé le coût : chaque `Env` portait une
+/// `HashMap` fraîche (buckets alloués à la première liaison)
+/// alors que la majorité des portées tient ≤16 liaisons —
+/// `{ }`, `for`, `catch`, petites fonctions. `Small` scanne un
+/// `Vec` linéaire sans aucune alloc de table ; `Map` garde le
+/// hachage pour les grandes portées (global, modules).
+#[derive(Clone)]
+pub enum BindingMap {
+    /// Petites portées — `(nom, cell)` en insertion order.
+    Small(Vec<(String, EnvCell)>),
+    /// Grandes portées — hachage classique.
+    Map(HashMap<String, EnvCell>),
+}
+
+impl BindingMap {
+    fn new() -> Self {
+        BindingMap::Small(Vec::new())
+    }
+
+    /// Lookup partagé — le `Vec` est scanné sur `str`.
+    pub fn get(&self, name: &str) -> Option<&EnvCell> {
+        match self {
+            BindingMap::Small(v) => v.iter().find(|(k, _)| k == name).map(|(_, c)| c),
+            BindingMap::Map(m) => m.get(name),
+        }
+    }
+
+    /// Variante mutable de [`Self::get`].
+    pub fn get_mut(&mut self, name: &str) -> Option<&mut EnvCell> {
+        match self {
+            BindingMap::Small(v) => v.iter_mut().find(|(k, _)| k == name).map(|(_, c)| c),
+            BindingMap::Map(m) => m.get_mut(name),
+        }
+    }
+
+    /// `name` lié ?
+    pub fn contains_key(&self, name: &str) -> bool {
+        self.get(name).is_some()
+    }
+
+    /// Insert/overwrite — promeut en `Map` au seuil (une seule
+    /// fois : la table est hachée ensuite).
+    pub fn insert(&mut self, name: String, cell: EnvCell) {
+        match self {
+            BindingMap::Small(v) => {
+                if let Some(slot) = v.iter_mut().find(|(k, _)| *k == name) {
+                    slot.1 = cell;
+                    return;
+                }
+                if v.len() >= BINDING_MAP_SMALL {
+                    let mut m: HashMap<String, EnvCell> = HashMap::with_capacity(v.len() + 8);
+                    m.extend(v.drain(..));
+                    m.insert(name, cell);
+                    *self = BindingMap::Map(m);
+                    return;
+                }
+                v.push((name, cell));
+            }
+            BindingMap::Map(m) => {
+                m.insert(name, cell);
+            }
+        }
+    }
+
+    /// Itère les cellules — utilisé par le marquage GC
+    /// (envs = racines) sans allouer.
+    pub fn values(&self) -> BindingMapValues<'_> {
+        match self {
+            BindingMap::Small(v) => BindingMapValues::Small(v.iter()),
+            BindingMap::Map(m) => BindingMapValues::Map(m.values()),
+        }
+    }
+}
+
+/// Itérateur sur les [`EnvCell`] d'une [`BindingMap`].
+pub enum BindingMapValues<'a> {
+    /// Branche `Vec`.
+    Small(std::slice::Iter<'a, (String, EnvCell)>),
+    /// Branche `HashMap`.
+    Map(std::collections::hash_map::Values<'a, String, EnvCell>),
+}
+
+impl<'a> Iterator for BindingMapValues<'a> {
+    type Item = &'a EnvCell;
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            BindingMapValues::Small(it) => it.next().map(|(_, c)| c),
+            BindingMapValues::Map(it) => it.next(),
+        }
+    }
 }
 
 /// A binding cell: a normal [`Binding`], or a module import alias
@@ -1636,7 +1734,7 @@ impl Env {
     /// New local scope chained to `parent`.
     pub fn local(parent: EnvRef) -> EnvRef {
         Rc::new(RefCell::new(Env {
-            kind: EnvKind::Local(HashMap::new()),
+            kind: EnvKind::Local(BindingMap::new()),
             parent: Some(parent),
         }))
     }
@@ -1644,7 +1742,7 @@ impl Env {
     /// The global scope.
     pub fn global() -> EnvRef {
         Rc::new(RefCell::new(Env {
-            kind: EnvKind::Global(HashMap::new()),
+            kind: EnvKind::Global(BindingMap::new()),
             parent: None,
         }))
     }
@@ -1653,7 +1751,7 @@ impl Env {
     /// `var` la traverse (voir [`EnvKind::Block`]).
     pub fn block(parent: EnvRef) -> EnvRef {
         Rc::new(RefCell::new(Env {
-            kind: EnvKind::Block(HashMap::new()),
+            kind: EnvKind::Block(BindingMap::new()),
             parent: Some(parent),
         }))
     }

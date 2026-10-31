@@ -280,6 +280,16 @@ pub struct Engine {
     /// périodiquement dumpé pour nommer un natif en boucle.
     nat_trace_counts: std::collections::HashMap<&'static str, u64>,
     nat_trace_total: u64,
+    /// Comptage par nom des props manquantes sur objets `Host`
+    /// (diagnostic §B-14 — API DOM que le site probe et qu'on
+    /// n'a pas) — alimenté sous `EXPLORER_MISSING_API` au miss
+    /// de `get_prop_value`, dumpé périodiquement comme nat-trace.
+    missing_api_counts: std::collections::HashMap<String, u64>,
+    missing_api_total: u64,
+    /// Échantillons `call_stack.last()` par label (profil §B-59)
+    /// — alimentés sous `EXPLORER_JS_PROFILE` par [`Self::profile_tick`].
+    prof_counts: std::collections::HashMap<String, u64>,
+    prof_total: u64,
     /// Borne d'emboîtement du parseur et de l'évaluateur
     /// d'expressions (JS-C41) — relevable par l'embeddeur sur un
     /// thread moteur à pile large.
@@ -850,6 +860,10 @@ impl Engine {
             eval_hook: None,
             expr_depth: 0,
             nat_trace_counts: std::collections::HashMap::new(),
+            missing_api_counts: std::collections::HashMap::new(),
+            missing_api_total: 0,
+            prof_counts: std::collections::HashMap::new(),
+            prof_total: 0,
             nat_trace_total: 0,
             nest_limit: crate::parser::DEFAULT_NEST_LIMIT,
             heap_dead: None,
@@ -3227,7 +3241,69 @@ impl Engine {
     /// Compte l'appel natif `name` (diagnostic wedge — gov.uk) :
     /// tous les 8192 appels sous `EXPLORER_NAT_TRACE`, dump du
     /// top des dominants — un natif en boucle se nomme au sommet.
+    /// Échantillonneur de pile (§B-59/J11) — sous
+    /// `EXPLORER_JS_PROFILE`, chaque dispatch natif échantillonne
+    /// le sommet `call_stack` (la fonction JS appelante) : le top
+    /// périodique nomme la fonction en boucle, avec son bundle
+    /// et sa position — complément call-site de `nat-trace`.
+    fn profile_tick(&mut self) {
+        if std::env::var_os("EXPLORER_JS_PROFILE").is_none() {
+            return;
+        }
+        let label = self.call_stack.last().map_or_else(
+            || "<top>".to_string(),
+            |lit| {
+                let n = lit.name.as_deref().unwrap_or("<anon>");
+                match &lit.src {
+                    Some(s) if lit.pos.0 > 0 => format!("{n}({s}:{}:{})", lit.pos.0, lit.pos.1),
+                    _ if lit.pos.0 > 0 => format!("{n}(:{}:{})", lit.pos.0, lit.pos.1),
+                    _ => n.to_string(),
+                }
+            },
+        );
+        *self.prof_counts.entry(label).or_insert(0) += 1;
+        self.prof_total += 1;
+        if self.prof_total % 8192 == 0 {
+            let mut v: Vec<_> = self.prof_counts.iter().collect();
+            v.sort_by_key(|(_, n)| std::cmp::Reverse(**n));
+            let top: Vec<String> = v.iter().take(8).map(|(n, c)| format!("{n}={c}")).collect();
+            eprintln!(
+                "[js-profile] total={} top={}",
+                self.prof_total,
+                top.join(" ")
+            );
+        }
+    }
+
+    /// Tic de la sonde « API manquante » (§B-14) — sous
+    /// `EXPLORER_MISSING_API`, compte chaque prop lue et restée
+    /// `undefined` sur un objet `Host`, logue la première
+    /// occurrence et dump le top périodiquement (le nom le plus
+    /// probé est le gate le plus probable).
+    fn missing_api_tick(&mut self, key: &str) {
+        if std::env::var_os("EXPLORER_MISSING_API").is_none() {
+            return;
+        }
+        self.missing_api_total += 1;
+        let c = self.missing_api_counts.entry(key.to_string()).or_insert(0);
+        *c += 1;
+        if *c == 1 {
+            eprintln!("[missing-api] {key}");
+        }
+        if self.missing_api_total % 4096 == 0 {
+            let mut v: Vec<_> = self.missing_api_counts.iter().collect();
+            v.sort_by_key(|(_, n)| std::cmp::Reverse(**n));
+            let top: Vec<String> = v.iter().take(10).map(|(n, c)| format!("{n}={c}")).collect();
+            eprintln!(
+                "[missing-api-trace] total={} top={}",
+                self.missing_api_total,
+                top.join(" ")
+            );
+        }
+    }
+
     fn nat_trace_tick(&mut self, name: &'static str) {
+        self.profile_tick();
         if std::env::var_os("DBG_NAT").is_some() {
             eprintln!("[nat] {name}");
             return;
@@ -3785,11 +3861,16 @@ impl Engine {
             let mut b = env.borrow_mut();
             match &mut b.kind {
                 EnvKind::Local(m) => {
-                    m.entry(name.to_string()).or_insert(EnvCell::Bind(Binding {
-                        value: Value::Undefined,
-                        mutable: true,
-                        sloppy_silent: false,
-                    }));
+                    if !m.contains_key(name) {
+                        m.insert(
+                            name.to_string(),
+                            EnvCell::Bind(Binding {
+                                value: Value::Undefined,
+                                mutable: true,
+                                sloppy_silent: false,
+                            }),
+                        );
+                    }
                     return;
                 }
                 EnvKind::Global(_) => {
@@ -5124,6 +5205,10 @@ impl Engine {
                                 vec![name],
                             ));
                         }
+                        // §B-14 sonde : prop lue sur objet host
+                        // restée `undefined` — candidat API
+                        // manquante (feature-detect kevlar).
+                        self.missing_api_tick(key);
                     }
                 }
                 Ok(v)

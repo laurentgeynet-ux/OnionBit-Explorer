@@ -209,6 +209,16 @@ impl Engine {
             // propre deadline (J11 : tâche par tâche).
             self.ops_left = self.op_limit;
             self.arm_eval_deadline();
+            // Sonde boucle §B-59/J11 : sous `EXPLORER_JOB_TRACE`,
+            // chaque timer tiré s'identifie — un callback en
+            // boucle infinie se dénonce en spammant le log.
+            if std::env::var_os("EXPLORER_JOB_TRACE").is_some() {
+                let desc = self.describe(t.cb);
+                eprintln!(
+                    "[job-trace] timer id={} interval={:?} cb={}",
+                    t.id, t.interval_ms, desc
+                );
+            }
             // Isolation par callback (J8) : un timer qui jette est
             // rapporté (`uncaught`) et les autres timers gardent
             // leur tour — spec : l'exception ne bloque pas la file.

@@ -23,6 +23,7 @@ impl Engine {
         if let Some(h) = &self.eval_hook {
             h(src);
         }
+        Self::dump_eval_source(src);
         let prog = crate::parser::parse_in(
             src,
             self.strict,
@@ -64,6 +65,7 @@ impl Engine {
         if let Some(h) = &self.eval_hook {
             h(src);
         }
+        Self::dump_eval_source(src);
         let prog = crate::parser::parse_in(
             src,
             self.strict,
@@ -78,6 +80,21 @@ impl Engine {
         let r = self.exec_program_in(env, this, &prog);
         self.strict = outer_strict;
         r
+    }
+
+    /// Dump des sources évaluées sous `EXPLORER_EVAL_DUMP`
+    /// (diagnostic §B-59/J11 : nommer le blob `eval()` en
+    /// boucle — `YouTube` hydrate via un gros payload évalué).
+    /// Un fichier `_evaldump_NNN.js` par source, cwd du daemon.
+    fn dump_eval_source(src: &str) {
+        static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        if std::env::var_os("EXPLORER_EVAL_DUMP").is_none() {
+            return;
+        }
+        let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let path = format!("_evaldump_{n:03}.js");
+        let _ = std::fs::write(&path, src);
+        eprintln!("[eval-dump] {path} bytes={}", src.len());
     }
 
     /// Corps de programme dans un couple env/`this` arbitraires —

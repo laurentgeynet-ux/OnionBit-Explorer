@@ -7,6 +7,30 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **JS-C253 — `BindingMap` adaptatif
+  + sondes de diagnostic §B-59**
+  (`explorer-jscore`) — les scopes
+  `Env` portaient une `HashMap`
+  fraîche par appel/bloc (buckets
+  alloués à la 1ʳᵉ liaison) alors
+  que la majorité tient ≤16
+  liaisons : `Small(Vec)` linéaire
+  promu en `Map` au seuil, mêmes
+  signatures → ~30 sites inchangés.
+  Mesuré YouTube : `pump.offlock`
+  5,6 s → 2,62 Go/6,7 M allocs
+  (avant ~5 Go/31 M — **~4,6×
+  moins d'allocs**). Sondes :
+  `EXPLORER_MISSING_API` (props
+  lues `undefined` sur objets
+  `Host`, §B-14), `EXPLORER_JOB_TRACE`
+  (timers tirés + callback),
+  `EXPLORER_JS_PROFILE`
+  (échantillonnage `call_stack` —
+  a nommé la VM botguard Google
+  `<eval>` à 93 % du temps natif),
+  `EXPLORER_EVAL_DUMP` (sources
+  évaluées → fichiers).
 - **Cookie jar étanche aux CTL
   + h2 tolérant** (`explorer-net`,
   vol google.com/search) — une
