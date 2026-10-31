@@ -192,6 +192,11 @@ Protocole complet : `docs/Rapport vol/SYNTHESE.md` §G.
   nouveau = proposition d'entrée §B au numéro suivant.
 - Le rapport indique le **tag de binaire** (`[V1]`/`[V2]`/`[V3]`)
   — un constat sur binaire périmé n'est pas une régression.
+- **Occurrence d'une anomalie §B existante → la ligne §B** :
+  incrémenter le statut de la ligne au format `vol N : site ×N`
+  dans le même passage (le journal §A reste la preuve datée,
+  la ligne §B est le compteur). Exception : **§B-14** (matrice
+  d'APIs géante) — journal seulement, l'intégrateur fusionne.
 - Statuts canoniques : `OUVERT` → `FIX LIVRÉ` → `RÉSOLU`
   (fermé uniquement par re-vol sur binaire post-fix).
 - L'agent FIX référence les IDs tâche §E-bis (`J`/`N`/`P`/`T`)
