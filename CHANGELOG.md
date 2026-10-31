@@ -7,6 +7,21 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **JS-C238 — `SharedWorker.
+  prototype` EventTarget**
+  (`explorer-jscore`, §B-14
+  vol 367 telegram) — le proto
+  liait `hostMethod` mais le
+  wrapper `{port}` produit est un
+  objet plain sans Host : `sw.
+  addEventListener` cassait
+  `on Object@@SharedWorker`.
+  Rail `__et` paresseux posé
+  directement sur le proto —
+  fonctionne sur tout receveur.
+  Verrou
+  `shared_worker_event_target_via_proto`.
+
 - **Étape 168 — transport `data:` pour
   les sous-ressources** (`explorer-core`,
   §B-65, vols 365/366 SOCIAL) —

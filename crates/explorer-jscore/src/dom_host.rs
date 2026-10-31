@@ -2631,11 +2631,14 @@ impl Engine {
             // `EventTarget` est déjà installé ici → chaînage
             // direct.
             let p = self.new_object();
-            for name in ["addEventListener", "removeEventListener", "dispatchEvent"] {
-                let namev = self.str_val(name);
-                let bm = self.bound_native("hostMethod", Self::host_method, vec![namev]);
-                self.set_own(p, name, bm, true);
-            }
+            // `SharedWorker` hérite `EventTarget` (§B-14 vol 367
+            // telegram — le wrapper `{port}` est un objet plain
+            // sans Host : `hostMethod` ne dispatchait pas →
+            // `addEventListener on Object@@SharedWorker`. Rail
+            // `__et` paresseux direct — couvre le receveur).
+            self.add_method(p, "addEventListener", et_add_listener);
+            self.add_method(p, "removeEventListener", et_remove_listener);
+            self.add_method(p, "dispatchEvent", et_dispatch_event);
             if let Some(Value::Obj(etc)) = self.get_prop(g, "EventTarget") {
                 if let Some(pp @ Value::Obj(_)) = self.get_prop(etc, "prototype") {
                     if let Some(o) = self.heap.obj_mut(p) {
@@ -11108,7 +11111,7 @@ fn illegal_ctor_named(e: &mut Engine, _t: Value, a: &[Value]) -> JsResult<Value>
         .first()
         .and_then(|v| e.to_js_string(*v).ok())
         .unwrap_or_else(|| "?".to_string());
-    Err(e.type_error(&format!("illegal constructor ({name})")))
+    Err(e.type_error(format!("illegal constructor ({name})")))
 }
 
 /// `HTMLElement` — inconstructible directement (« illegal

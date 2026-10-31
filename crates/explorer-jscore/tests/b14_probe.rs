@@ -1901,3 +1901,33 @@ fn service_worker_container_event_target() {
         "1"
     );
 }
+
+/// §B-14 vol 367 telegram — `addEventListener on
+/// Object@@SharedWorker` : le proto liait `hostMethod` mais
+/// le wrapper `{port}` est un objet plain sans Host — rail
+/// `__et` paresseux posé directement sur le proto.
+#[test]
+fn shared_worker_event_target_via_proto() {
+    let mut e = engine();
+    // L'instance simule la forme réelle : objet nu + proto.
+    assert_eq!(
+        ev(
+            &mut e,
+            "typeof SharedWorker.prototype.addEventListener + ':' \
+             + typeof SharedWorker.prototype.removeEventListener + ':' \
+             + typeof SharedWorker.prototype.dispatchEvent"
+        ),
+        "function:function:function"
+    );
+    // Proto chainé sur EventTarget — `sw` hérite du rail.
+    assert_eq!(
+        ev(
+            &mut e,
+            "var sw=Object.create(SharedWorker.prototype),hit=0,\
+             f=function(){hit++};\
+             sw.addEventListener('message',f);\
+             sw.dispatchEvent({type:'message'});hit"
+        ),
+        "1"
+    );
+}
