@@ -210,6 +210,39 @@ impl Engine {
                 Err(m) => Err(self.type_error(format!("cannot load module `{spec}`: {m}"))),
             };
         }
+        // JS-C101 — sources livrées à la demande d'abord,
+        // **avant** d'exiger un loader : la session seed le
+        // graphe (`seed_module_source`) sans jamais poser de
+        // `ModuleLoader` — un `import()` livré trouve ses deps
+        // statiques ici, et un miss loader ne doit pas
+        // produire `no module loader` sur une source pourtant
+        // disponible (§B-14 bras « no module loader »,
+        // franceculture/francemusique/lequipe ×3). Clés
+        // essayées : l'URL résolue puis le spécificateur brut
+        // (le seed peut être sous les deux formes selon le
+        // bras de fetch).
+        // Clés essayées : l'URL résolue, le spécificateur
+        // brut, puis `resolved` résolu contre `referrer`
+        // (les deps relatives `./x.js` sont seedées sous leur
+        // URL absolue — le loader posait cette résolution,
+        // absent il faut la faire ici via le parseur URL
+        // interne ; `referrer` = spec résolu du module
+        // important).
+        let seeded = self
+            .module_sources
+            .get(&resolved)
+            .or_else(|| self.module_sources.get(spec))
+            .cloned()
+            .or_else(|| {
+                let base = crate::builtins::url::url_parse_absolute(referrer)?;
+                let abs = crate::builtins::url::url_parse(&resolved, Some(&base))?;
+                self.module_sources
+                    .get(&crate::builtins::url::url_href(&abs))
+                    .cloned()
+            });
+        if let Some(src) = seeded {
+            return Ok((resolved.clone(), src));
+        }
         let Some(loader) = self.module_loader.clone() else {
             return Err(self.type_error(format!("no module loader for `{spec}`")));
         };
@@ -217,9 +250,6 @@ impl Engine {
             .borrow_mut()
             .resolve(&resolved, referrer)
             .unwrap_or_else(|| resolved.clone());
-        // JS-C101 — sources livrées à la demande d'abord :
-        // les deps statiques d'un module `import()` manquent
-        // le préfetch mais la session a seedé leur graphe.
         if let Some(src) = self.module_sources.get(&url) {
             return Ok((url, src.clone()));
         }

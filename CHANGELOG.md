@@ -7,6 +7,42 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **JS-C240 — `load_source` :
+  seed avant loader** (`explorer-jscore`,
+  §B-14 bras « no module loader »
+  ×3 — franceculture/francemusique/
+  lequipe) — `load_source` exigeait
+  un `ModuleLoader` avant de
+  consulter `module_sources` : un
+  contexte sans loader (worker,
+  module livré dont la dep
+  statique n'était pas résolue
+  comme la session l'avait clé)
+  mourait sur `no module loader`
+  alors que la source était seedée.
+  Le seed est consulté d'abord —
+  clés `resolved`, `spec` brut, et
+  `resolved` résolu contre
+  `referrer` (deps relatives
+  `./x.js` seedées sous leur URL
+  absolue — résolution que le
+  loader faisait seul avant).
+
+- **JS-C239 — rafale
+  `unhandledrejection` bornée**
+  (`explorer-jscore`, §B-21,
+  reactAds genius ×255) — rejets
+  de promesses identiques en
+  rafale (intervalle recréant une
+  promesse qui rejette à chaque
+  tick, hors `TIMER_FAIL_CAP`) :
+  dédup des descriptions
+  consécutives identiques en
+  `(×N)` + cap 32 rejets distincts
+  par checkpoint avec ligne de
+  synthèse. (Ex-JS-C238 —
+  renuméroté, collision.)
+
 - **JS-C238 — `SharedWorker.
   prototype` EventTarget**
   (`explorer-jscore`, §B-14

@@ -621,8 +621,10 @@ impl Engine {
                 continue;
             }
             if same_desc > 0 {
-                self.unhandled_reports
-                    .push(format!("unhandledrejection: {last_desc} (×{})", same_desc + 1));
+                self.unhandled_reports.push(format!(
+                    "unhandledrejection: {last_desc} (×{})",
+                    same_desc + 1
+                ));
                 same_desc = 0;
             }
             last_desc = desc.clone();
@@ -669,8 +671,10 @@ impl Engine {
             }
         }
         if same_desc > 0 {
-            self.unhandled_reports
-                .push(format!("unhandledrejection: {last_desc} (×{})", same_desc + 1));
+            self.unhandled_reports.push(format!(
+                "unhandledrejection: {last_desc} (×{})",
+                same_desc + 1
+            ));
         }
         if capped {
             self.unhandled_reports

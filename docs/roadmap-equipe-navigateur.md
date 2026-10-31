@@ -5111,6 +5111,43 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   (repro vol, plus besoin
   d'in-process).
 
+- [x] **JS-C236. `PushSubscription`
+  déclarée** (§B-14 mastodon) —
+  interface stub inconstructible
+  spec, la garde `typeof`/`in`
+  débloque le boot Push.
+
+- [x] **JS-C237. Rail
+  `ElementInternals` FACE** (§B-14
+  nicolas) — `setFormValue`/
+  `setValidity` no-ops honnêtes,
+  `checkValidity`/`reportValidity`
+  → `true`, `willValidate`/
+  `validationMessage`, `focus`.
+
+- [x] **JS-C238. `SharedWorker.
+  prototype` EventTarget** (§B-14
+  telegram) — rail `__et` sur le
+  proto, fonctionne sur le wrapper
+  plain `{port}`.
+
+- [x] **JS-C239. Rafale
+  `unhandledrejection` bornée**
+  (§B-21, reactAds ×255) — dédup
+  descriptions consécutives en
+  `(×N)`, cap 32 rejets distincts
+  par checkpoint. (Ex-JS-C238,
+  renuméroté.)
+
+- [x] **JS-C240. `load_source` :
+  seed avant loader** (§B-14 bras
+  « no module loader » ×3 —
+  franceculture/francemusique/
+  lequipe) — `module_sources`
+  consulté avant d'exiger un
+  `ModuleLoader`, clés `resolved`/
+  `spec`/`resolved`@`referrer`.
+
 - [ ] **Écarts terrain — vol humain
   22/10 (release `39ab821`, FFI)** :
   second run humain — trois constats
