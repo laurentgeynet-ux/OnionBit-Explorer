@@ -271,6 +271,15 @@ impl HttpTransport for FakeTransport {
 
 /// Session de test prête : transport + fixture.
 fn test_session() -> (Session, Arc<FakeTransport>) {
+    test_session_policy(explorer_net::consent::ConsentPolicy::default())
+}
+
+/// `test_session` sous une politique de consentement donnée
+/// (Étape 171) — les tests de plomberie cookie qui attendent
+/// un jar/`Cookie:` exact passent `Honest` (aucune graine).
+fn test_session_policy(
+    policy: explorer_net::consent::ConsentPolicy,
+) -> (Session, Arc<FakeTransport>) {
     test_session_with(SessionConfig {
         event_capacity: 16,
         viewport: (800.0, 600.0),
@@ -296,6 +305,7 @@ fn test_session() -> (Session, Arc<FakeTransport>) {
         dom_journal_max_ops: 512,
         js_mem_limit_mib: 512,
         color_scheme: explorer_css::ColorScheme::default(),
+        consent_policy: policy,
         js_stall_cooldown: std::time::Duration::ZERO,
         poll_net_budget: std::time::Duration::from_secs(2),
         event_tail_budget: std::time::Duration::from_secs(15),
@@ -4143,7 +4153,7 @@ const PAGE_COOKIE_KV: &str = "<!doctype html><html><body><div id=\"x\">k=v</div>
 async fn document_cookie_reaches_shared_jar() {
     use explorer_net::url::Url;
 
-    let (mut s, t) = test_session();
+    let (mut s, t) = test_session_policy(explorer_net::consent::ConsentPolicy::Honest);
     t.route("/set", 200, PAGE_COOKIE_SET);
     t.route("/read", 200, PAGE_COOKIE_READ);
     t.route("/stat", 200, PAGE_COOKIE_KV);
@@ -4171,7 +4181,7 @@ async fn document_cookie_reaches_shared_jar() {
 async fn xhr_set_cookie_same_origin_captured() {
     use explorer_net::url::Url;
 
-    let (mut s, t) = test_session();
+    let (mut s, t) = test_session_policy(explorer_net::consent::ConsentPolicy::Honest);
     t.route("/", 200, PAGE_XHR);
     t.route_headers("/api", 200, "DATA", &[("set-cookie", "s=1;path=/")]);
     s.set_js_factory(explorer_js::JscoreEngine::factory());
@@ -4185,6 +4195,117 @@ async fn xhr_set_cookie_same_origin_captured() {
     let id2 = s.open_tab();
     s.navigate(id2, "http://h.test/").await.unwrap();
     assert_eq!(t.last_header("cookie").as_deref(), Some("s=1"));
+}
+
+// ===== Étape 171 — graines de consentement CMP (§B-4 bras CMP) =====
+
+/// Session câblée « production » : `CookieTransport` partage
+/// le jar de la session (injection `Cookie:` + capture
+/// `Set-Cookie`) — reproduit le branchement du daemon
+/// (`CookieTransport::wrap` + `set_cookie_jar`).
+fn cookie_session_with(cfg: SessionConfig) -> (Session, Arc<FakeTransport>) {
+    let inner = Arc::new(FakeTransport::new());
+    let jar = Arc::new(explorer_net::cookies::CookieJar::new());
+    let t: Arc<dyn explorer_net::http::HttpTransport> = Arc::new(
+        explorer_net::cookies::CookieTransport::wrap(inner.clone(), jar.clone()),
+    );
+    let mut s = Session::with_config(t, Arc::new(FixtureFont), cfg);
+    s.set_cookie_jar(jar);
+    (s, inner)
+}
+
+/// Sous `RejectAll` (défaut), les graines sont semées **avant**
+/// la requête top-level : le `Cookie:` émis porte déjà
+/// `euconsent-v2` — l'état « utilisateur déjà décidé » est
+/// visible côté serveur comme côté `document.cookie`.
+#[tokio::test]
+async fn consent_seeds_sent_on_top_level_request() {
+    use explorer_net::url::Url;
+    let (mut s, t) = cookie_session_with(SessionConfig::default());
+    t.route("/", 200, PAGE);
+    let tab = s.open_tab();
+    s.navigate(tab, "http://h.test/").await.unwrap();
+    let sent = t.last_header("cookie").unwrap_or_default();
+    assert!(sent.contains("euconsent-v2="), "seed dans Cookie: → {sent}");
+    assert!(sent.contains("OptanonConsent="), "seed OneTrust → {sent}");
+    // Le jar partagé reflète la décision.
+    let jar = s.cookie_jar();
+    let u = Url::parse("http://h.test/").unwrap();
+    let jarred = jar.header_for(&u, false);
+    assert!(jarred.contains("cookieconsent_status=deny"));
+    assert!(jarred.contains("usprivacy=1YYY"));
+    assert!(
+        jarred.contains("C0002:0"),
+        "reject : groupes OT à 0 → {jarred}"
+    );
+}
+
+/// `Honest` = statu quo ante Étape 171 : aucune graine, le jar
+/// reste vierge de consentement.
+#[tokio::test]
+async fn consent_seeds_absent_under_honest() {
+    use explorer_net::url::Url;
+    let (mut s, t) = test_session_with(SessionConfig {
+        consent_policy: explorer_net::consent::ConsentPolicy::Honest,
+        ..SessionConfig::default()
+    });
+    t.route("/", 200, PAGE);
+    let tab = s.open_tab();
+    s.navigate(tab, "http://h.test/").await.unwrap();
+    let jar = s.cookie_jar();
+    let u = Url::parse("http://h.test/").unwrap();
+    assert_eq!(jar.header_for(&u, false), "");
+}
+
+/// Un `Set-Cookie` réel du site prime la graine : le seed
+/// `euconsent-v2` saute si le nom existe déjà dans le jar.
+#[tokio::test]
+async fn consent_seed_yields_to_real_set_cookie() {
+    use explorer_net::url::Url;
+    let (mut s, t) = cookie_session_with(SessionConfig::default());
+    t.route_headers(
+        "/a",
+        200,
+        PAGE,
+        &[("set-cookie", "euconsent-v2=SITE_REAL; Path=/")],
+    );
+    t.route("/b", 200, PAGE);
+    let tab = s.open_tab();
+    s.navigate(tab, "http://h.test/a").await.unwrap();
+    s.navigate(tab, "http://h.test/b").await.unwrap();
+    let jar = s.cookie_jar();
+    let u = Url::parse("http://h.test/b").unwrap();
+    let jarred = jar.header_for(&u, false);
+    assert!(
+        jarred.contains("euconsent-v2=SITE_REAL"),
+        "le cookie du site survit à la graine → {jarred}"
+    );
+    assert!(
+        !jarred.contains("euconsent-v2=C"),
+        "pas de doublon de graine → {jarred}"
+    );
+    // Les autres graines (absentes) sont bien semées en revanche.
+    assert!(jarred.contains("notice_behavior="));
+}
+
+/// `AcceptAll` (outil de diagnostic) inverse les valeurs —
+/// `deny`/`1YYY`/`C0002:0` deviennent `allow`/`1YNN`/`C0002:1`.
+#[tokio::test]
+async fn consent_seeds_accept_all() {
+    use explorer_net::url::Url;
+    let (mut s, t) = test_session_with(SessionConfig {
+        consent_policy: explorer_net::consent::ConsentPolicy::AcceptAll,
+        ..SessionConfig::default()
+    });
+    t.route("/", 200, PAGE);
+    let tab = s.open_tab();
+    s.navigate(tab, "http://h.test/").await.unwrap();
+    let jar = s.cookie_jar();
+    let u = Url::parse("http://h.test/").unwrap();
+    let jarred = jar.header_for(&u, false);
+    assert!(jarred.contains("cookieconsent_status=allow"));
+    assert!(jarred.contains("C0002:1"));
+    assert!(!jarred.contains("C0002:0"));
 }
 
 /// `localStorage` : écrit dans un document, relu dans le
@@ -6702,6 +6823,7 @@ async fn redirect_commits_final_url_and_fragment() {
             dom_journal_max_ops: 512,
             js_mem_limit_mib: 512,
             color_scheme: explorer_css::ColorScheme::default(),
+            consent_policy: explorer_net::consent::ConsentPolicy::default(),
             js_stall_cooldown: std::time::Duration::ZERO,
             poll_net_budget: std::time::Duration::from_secs(2),
             event_tail_budget: std::time::Duration::from_secs(15),
@@ -9231,7 +9353,7 @@ async fn clear_site_data_star_covers_whole_site() {
 #[tokio::test]
 async fn no_clear_site_data_keeps_cookies() {
     use explorer_net::url::Url;
-    let (mut s, t) = test_session();
+    let (mut s, t) = test_session_policy(explorer_net::consent::ConsentPolicy::Honest);
     let url = Url::parse("http://h.test/").unwrap();
     s.cookie_jar().set_from_header(&url, "sid=abc;path=/");
     // Type non implémenté seul → rien n'est vidé.
@@ -9706,7 +9828,7 @@ async fn iframe_cookie_written_under_child_url() {
     use explorer_net::http::{Initiator, Request};
     use explorer_net::url::Url;
 
-    let (mut s, t) = test_session();
+    let (mut s, t) = test_session_policy(explorer_net::consent::ConsentPolicy::Honest);
     t.route("/", 200, PAGE_IFRAME_JS);
     t.route("/f", 200, FRAME_COOKIE);
     t.route("/res2", 200, "ok");

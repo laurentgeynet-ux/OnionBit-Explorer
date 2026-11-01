@@ -7,6 +7,47 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **Étape 171 — Politique de
+  consentement CMP + graines de
+  cookies** (`explorer-net`,
+  `explorer-core`,
+  `explorer-daemon`, §B-4 bras
+  CMP — ADR-0031) —
+  `SessionConfig::consent_policy`
+  (`Honest`/`RejectAll`/**défaut**/
+  `AcceptAll`) ; sous politique
+  résolue, `nav_begin` sème les
+  cookies attendus **avant** la
+  requête top-level —
+  `euconsent-v2` (TC string IAB
+  v2 encodée maison, codec
+  segment core : bitfields,
+  ranges, restrictions — round-
+  trip testé), `OptanonConsent`/
+  `OptanonAlertBoxClosed`,
+  `notice_behavior`,
+  `cookieconsent_status`,
+  `usprivacy` — visible côté
+  `Cookie:` serveur comme côté
+  `document.cookie`. Chaque graine
+  **sautée si le nom existe** :
+  un `Set-Cookie` réel (ou état
+  persisté du profil) prime la
+  décision de politique.
+  `cmpId=0`/`vendorListVersion=0`
+  — honnête, pas d'usurpation
+  IAB ; formats signés
+  (`didomi_token`, `sp_`) non
+  forgés. Réglage vol
+  `EXPLORER_CONSENT_POLICY`
+  (`honest`/`reject`/`accept`).
+  Verrous : 8 unitaires net
+  (round-trip, champs relus,
+  ranges étrangers, rejets) +
+  4 session (seed dans `Cookie:`,
+  jar vide sous `Honest`,
+  `Set-Cookie` prioritaire,
+  `AcceptAll` inverse).
 - **JS-C258 — §B-59 bras 4 nommé +
   borné : `[native-burst] apply`**
   (`explorer-jscore`) — sonde RSS

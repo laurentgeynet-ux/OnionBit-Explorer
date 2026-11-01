@@ -5325,6 +5325,45 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   Verrou
   `apply_giant_array_soft_killed`.
 
+- [x] **Étape 171. Politique de
+  consentement CMP + graines de
+  cookies** (`explorer-net`,
+  `explorer-core`,
+  `explorer-daemon`, §B-4 bras
+  CMP — ADR-0031) — le mur de
+  consentement tue le boot avant
+  `<video>` sur quasi tout le
+  corpus EU : le moteur porte
+  désormais une **décision
+  explicite** par session
+  (`SessionConfig::consent_policy`
+  — `Honest`/`RejectAll` défaut/
+  `AcceptAll` diagnostic). Sous
+  politique résolue, les cookies
+  attendus sont semés avant la
+  requête top-level :
+  `euconsent-v2` (TC string IAB
+  v2 — codec segment core propre
+  `explorer-net::consent`, champs
+  réellement relus : versions,
+  langue, bitfields purpose/
+  vendor, ranges + restrictions),
+  `OptanonConsent`,
+  `OptanonAlertBoxClosed`,
+  `notice_behavior`,
+  `cookieconsent_status`,
+  `usprivacy`. Jamais d'écrasement
+  d'un nom existant — le
+  `Set-Cookie` réel du site prime.
+  `cmpId=0` honnête ; formats
+  signés non forgés. Vol :
+  `EXPLORER_CONSENT_POLICY`
+  + verdict `consent_wall:hard`
+  (murs consent-or-pay). File CMP :
+  `__tcfapi` résolveur, réarmement
+  `type=text/plain` marqué CMP,
+  substitution SDKs bornée.
+
 - [ ] **Écarts terrain — vol humain
   22/10 (release `39ab821`, FFI)** :
   second run humain — trois constats

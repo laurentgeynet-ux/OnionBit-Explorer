@@ -871,6 +871,12 @@ impl Session {
                     .push(("origin".to_string(), origin_header_value(&page)));
             }
         }
+        // Graines de consentement CMP (Étape 171, §B-4 bras
+        // CMP — ADR-0031) : semées avant que la requête
+        // top-level ne parte — le `Cookie:` émis porte déjà
+        // l'état « utilisateur déjà décidé » (visible côté
+        // serveur comme côté `document.cookie`).
+        self.seed_consent_cookies(&req);
         let entry = self.tabs.get_mut(&tab).ok_or(CoreError::UnknownTab(tab))?;
         entry.nav_epoch += 1;
         // Un id de téléchargement est réservé par navigation
@@ -903,6 +909,44 @@ impl Session {
             // moteur JS est installé (scripting flag spec).
             scripting: self.js_factory.is_some(),
         })
+    }
+
+    /// Sème les cookies de consentement de la politique
+    /// session pour l'URL de `req` (Étape 171, §B-4 bras CMP —
+    /// ADR-0031). Appelé depuis [`Self::nav_begin`] : le
+    /// `Cookie:` de la requête top-level — et la vue
+    /// `document.cookie` des scripts — portent déjà la
+    /// décision. Chaque graine est **sautée si un cookie du
+    /// même nom existe déjà** pour l'URL : un `Set-Cookie`
+    /// réel du site (ou un état consenti antérieur,
+    /// persistant via le profil) reste prioritaire sur la
+    /// décision de politique.
+    fn seed_consent_cookies(&mut self, req: &Request) {
+        // Les graines sont des cookies : http(s) seulement —
+        // `data:`/`about:`/`file:` n'ont pas de domaine
+        // porteur (partition_key les exclut déjà côté envoi).
+        if !matches!(req.url.scheme(), "http" | "https") {
+            return;
+        }
+        let headers =
+            explorer_net::consent::seed_headers(self.consent_policy, std::time::SystemTime::now());
+        if headers.is_empty() {
+            return;
+        }
+        let existing = self.cookies.header_for(&req.url, false);
+        let present = |name: &str| {
+            existing
+                .split(';')
+                .any(|kv| kv.trim().starts_with(&format!("{name}=")))
+        };
+        let partition = explorer_net::cookies::request_partition(req);
+        for line in headers {
+            let name = line.split('=').next().unwrap_or_default();
+            if !name.is_empty() && !present(name) {
+                self.cookies
+                    .set_from_header_ctx(&req.url, &line, partition.clone());
+            }
+        }
     }
 
     /// Peinture progressive epoch-gardée (étape 53d) : un

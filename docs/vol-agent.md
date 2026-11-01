@@ -202,3 +202,31 @@ Protocole complet : `docs/Rapport vol/SYNTHESE.md` §G.
 - L'agent FIX référence les IDs tâche §E-bis (`J`/`N`/`P`/`T`)
   dans ses commits et met à jour ses lignes §E-bis + statuts §B
   à la clôture.
+
+### Verdicts mur de consentement (Étape 171, ADR-0031)
+
+Depuis `consent_policy` (`EXPLORER_CONSENT_POLICY`,
+défaut `reject`), un mur de consentement se lit sous **deux
+verdicts distincts** — à déclarer dans le rapport avec la
+politique du vol :
+
+- **`consent_wall:soft`** — la page reste un shell inerte
+  (`evals_sans_mutation`, doc_h tronqué) alors que le
+  consentement est résolu : gate `__tcfapi`/vendor jamais
+  servie, balises `type="text/plain"` marquées CMP
+  (`optanon-category`, `data-cookieconsent`, `data-purpose`)
+  non réarmées, SDK CMP crashé (§B-14) ou figé (§B-48).
+  Régression moteur — un site doit booter sur sa partie
+  fonctionnelle après « Tout refuser ».
+- **`consent_wall:hard`** — le site refuse tout contenu sans
+  consentement **d'acceptation** (« consent or pay »,
+  hard-gate serveur) : sous `reject` la page bloque
+  volontairement. **Pas une régression** — un vrai « Tout
+  refuser » produit le même résultat dans un navigateur
+  réel ; le constat documente le modèle du site, pas un
+  défaut. À comparer sous `accept` en diagnostic : si le
+  site s'ouvre, le verdict `hard` tient ; s'il reste inerte
+  sous `accept` aussi, reclasser en `soft`/§B-4.
+
+Tout constat consentement exige un **profil froid** (§1) —
+un consentement persisté dans un profil chaud masque le mur.

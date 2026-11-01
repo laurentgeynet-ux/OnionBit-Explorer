@@ -122,6 +122,7 @@ fn bench_session() -> (Session, Arc<FakeTransport>) {
             dom_journal_max_ops: 512,
             js_mem_limit_mib: 512,
             color_scheme: explorer_css::ColorScheme::default(),
+            consent_policy: explorer_net::consent::ConsentPolicy::default(),
             js_stall_cooldown: std::time::Duration::ZERO,
             poll_net_budget: std::time::Duration::from_secs(2),
             event_tail_budget: std::time::Duration::from_secs(15),

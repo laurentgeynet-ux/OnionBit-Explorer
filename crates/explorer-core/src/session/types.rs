@@ -997,6 +997,16 @@ pub struct SessionConfig {
     /// défauts UA sombres de la cascade (R-59). Défaut
     /// `Light`.
     pub color_scheme: explorer_css::ColorScheme,
+    /// Politique de consentement CMP (Étape 171, §B-4 bras
+    /// CMP — ADR-0031) : décision portée par la session —
+    /// graines de cookies semées dans le jar avant la
+    /// navigation ([`explorer_net::consent::seed_headers`])
+    /// et réponse des résolveurs d'APIs (`__tcfapi`, étape
+    /// suivante). `Honest` = aucun état consenti (statu
+    /// quo) ; `RejectAll` = « Tout refuser » (défaut —
+    /// contenu fonctionnel débloqué, trackers légitimement
+    /// coupés) ; `AcceptAll` = outil de diagnostic.
+    pub consent_policy: explorer_net::consent::ConsentPolicy,
     /// Borne d'ops d'un journal de mutations rejoué tel quel
     /// (ADR-0025, étape 111) — au-delà, le re-parse complet
     /// coûte moins cher que le rejeu + la sérialisation des
@@ -1074,6 +1084,7 @@ impl Default for SessionConfig {
             max_download_bytes: 64 * 1024 * 1024,
             bfcache_pages: 4,
             color_scheme: explorer_css::ColorScheme::default(),
+            consent_policy: explorer_net::consent::ConsentPolicy::default(),
             dom_journal_max_ops: 512,
             js_mem_limit_mib: 512,
             js_stall_cooldown: std::time::Duration::from_secs(10),

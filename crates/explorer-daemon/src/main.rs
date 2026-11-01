@@ -76,6 +76,12 @@ struct DaemonConfig {
     /// 1024×768). Même format que l'argument `LxH` de
     /// `explorer-cli shot`.
     viewport: Option<(f32, f32)>,
+    /// Politique de consentement CMP (`EXPLORER_CONSENT_POLICY`,
+    /// étape 171 — ADR-0031) : `honest` (aucun état consenti),
+    /// `reject` (« Tout refuser », défaut) ou `accept` (outil
+    /// de diagnostic). Réglage de vol autant que produit : les
+    /// agents comparent les murs CMP sous chaque politique.
+    consent_policy: explorer_net::consent::ConsentPolicy,
 }
 
 /// Parse `WxH` (`1366x900`) → `(w, h)` — vide/invalide → `None`
@@ -133,6 +139,11 @@ impl DaemonConfig {
             viewport: std::env::var("EXPLORER_VIEWPORT")
                 .ok()
                 .and_then(|v| parse_viewport(&v)),
+            consent_policy: match std::env::var("EXPLORER_CONSENT_POLICY").as_deref() {
+                Ok("honest") => explorer_net::consent::ConsentPolicy::Honest,
+                Ok("accept" | "acceptall") => explorer_net::consent::ConsentPolicy::AcceptAll,
+                _ => explorer_net::consent::ConsentPolicy::RejectAll,
+            },
         }
     }
 }
@@ -155,8 +166,15 @@ const DEFAULT_DAEMON_JS_OPS: u64 = 20_000_000;
 fn session_config(cfg: &DaemonConfig) -> explorer_core::SessionConfig {
     let mut sc = explorer_core::SessionConfig {
         color_scheme: cfg.color_scheme,
+        consent_policy: cfg.consent_policy,
         ..explorer_core::SessionConfig::default()
     };
+    if cfg.consent_policy != explorer_net::consent::ConsentPolicy::RejectAll {
+        tracing::info!(
+            "EXPLORER_CONSENT_POLICY={:?} — politique de consentement CMP",
+            cfg.consent_policy
+        );
+    }
     if let Some(mib) = cfg.js_mem_mib {
         tracing::info!("EXPLORER_JS_MEM_MIB={mib} — borne heap JS par contexte");
         sc.js_mem_limit_mib = mib;

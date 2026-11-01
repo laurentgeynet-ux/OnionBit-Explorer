@@ -13,6 +13,7 @@
 #![forbid(unsafe_code)]
 
 pub mod cache;
+pub mod consent;
 pub mod cookies;
 pub mod crypto;
 pub mod csp;

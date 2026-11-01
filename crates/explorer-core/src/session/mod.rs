@@ -861,6 +861,12 @@ pub struct Session {
     /// (étape 97) — media queries, filtre `media=` des
     /// sous-ressources, défauts UA de la cascade.
     color_scheme: explorer_css::ColorScheme,
+    /// Politique de consentement CMP de la session (Étape
+    /// 171, §B-4 bras CMP — ADR-0031) : les graines de
+    /// cookies consentement sont semées dans `cookies`
+    /// avant chaque navigation (`nav_begin`), sautées si
+    /// un cookie réel du même nom existe déjà.
+    consent_policy: explorer_net::consent::ConsentPolicy,
     /// Quota de requêtes script-initiées simultanées par
     /// onglet (`max_script_net` de config, ADR-0019).
     max_script_net: usize,
@@ -1107,6 +1113,7 @@ impl Session {
             download_dir: None,
             max_download_bytes: cfg.max_download_bytes,
             color_scheme: cfg.color_scheme,
+            consent_policy: cfg.consent_policy,
         }
     }
 
