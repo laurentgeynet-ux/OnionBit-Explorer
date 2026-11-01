@@ -1004,10 +1004,15 @@ impl Session {
     /// [`Self::frame_ctx_load_events`]. Remplit
     /// `entry.frame_ctxs`.
     pub(crate) fn wire_frame_contexts(&mut self, tab: TabId, eng: &mut dyn JsEngine) {
+        // Réarmement CMP (étape CMP-4) — même politique que
+        // le document parent : un `<script type=text/plain>`
+        // marqué dans un cadre réarme pareil (consentement
+        // de session, pas par frame).
+        let rearm = cmp_rearm(self.consent_policy);
         let Some(entry) = self.tabs.get(&tab) else {
             return;
         };
-        let plan = frame_context_plan(entry);
+        let plan = frame_context_plan(entry, rearm);
         if plan.is_empty() {
             return;
         }
@@ -1657,7 +1662,7 @@ struct FramePlan {
 /// 129) : deux cadres homonymes partagent le `SubFrame`
 /// mais reçoivent chacun un realm propre (spec : realms
 /// distincts).
-fn frame_context_plan(entry: &Tab) -> Vec<FramePlan> {
+fn frame_context_plan(entry: &Tab, rearm: bool) -> Vec<FramePlan> {
     let mut plan = Vec::new();
     let (Some(dom), Some(base)) = (entry.dom.as_ref(), entry.url.as_ref()) else {
         return plan;
@@ -1736,7 +1741,7 @@ fn frame_context_plan(entry: &Tab) -> Vec<FramePlan> {
         let scripts = if sb.is_some_and(|s| !s.scripts) {
             Vec::new()
         } else {
-            collect_scripts(&f.dom, &f.url, &f_base, true, 0, &f_csp)
+            collect_scripts(&f.dom, &f.url, &f_base, true, 0, &f_csp, rearm)
                 .into_iter()
                 .filter_map(|i| (!i.module).then_some(i.inline).flatten())
                 .collect()

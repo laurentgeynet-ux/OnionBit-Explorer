@@ -505,6 +505,14 @@ pub(crate) struct Tab {
     /// `ready_state="loading"` — le cycle de vie court après
     /// les scripts).
     boot_mute_warned: bool,
+    /// Scripts réarmés depuis les marqueurs CMP au commit
+    /// courant (étape CMP-4 — `type` inerte + `optanon-*`/
+    /// `data-cookieconsent` sous politique résolue). Relu
+    /// par le ré-échantillon `evals_sans_mutation` : 0 =
+    /// mur jamais rencontré ; >0 = mur franchi, scripts
+    /// servis — un boot qui reste muet alors nomme un bras
+    /// ailleurs que le consentement.
+    pub(crate) cmp_rearmed: u32,
     /// État de peinture détaché pour un apply hors verrou
     /// (étape 55h) — les champs `dom`/`tree`/`list`/`frame`
     /// sont vides le temps du `spawn_blocking` : la session
@@ -1434,6 +1442,7 @@ impl Session {
                 js_stall_until: None,
                 slow_eval_streak: 0,
                 boot_mute_warned: false,
+                cmp_rearmed: 0,
                 paint_detached: false,
                 deferred_inputs: VecDeque::new(),
                 js_pending_net: Vec::new(),

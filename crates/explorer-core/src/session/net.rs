@@ -214,6 +214,19 @@ impl Session {
         post_evals: Vec<ModEval>,
         import_maps: &[String],
     ) {
+        // Étape CMP-4 : scripts réarmés depuis les marqueurs
+        // « bloqués par consentement » — compteur exposé au
+        // diagnostic §B-4 : un boot muet avec `cmp_rearmed`
+        // >0 = mur franchi mais mort ailleurs ; 0 = le
+        // consentement n'a jamais été le problème (ou
+        // `Honest`, où rien ne réarme).
+        let cmp_rearmed = scripts.iter().filter(|i| i.rearmed).count();
+        if cmp_rearmed > 0 {
+            tracing::info!(tab, cmp_rearmed, "scripts CMP réarmés au commit");
+        }
+        if let Some(e) = self.tabs.get_mut(&tab) {
+            e.cmp_rearmed = u32::try_from(cmp_rearmed).unwrap_or(u32::MAX);
+        }
         // Étape 134 : un realm JS par `<iframe>` fetché —
         // créé avant les scripts du parent pour qu'un
         // `frames[n]`/`contentWindow` lu en cours de
@@ -294,6 +307,7 @@ impl Session {
                 timers_pending,
                 microtasks_pending,
                 ready_state,
+                cmp_rearmed,
                 "evals_sans_mutation — boot possiblement muet (aucune mutation DOM)"
             );
             // Le tir voit le commit en cours — `ready_state`
@@ -434,6 +448,7 @@ impl Session {
         if warned {
             if let Some(entry) = self.tabs.get_mut(&tab) {
                 entry.boot_mute_warned = false;
+                let cmp_rearmed = entry.cmp_rearmed;
                 if let Some(eng) = entry.js.as_mut() {
                     let (timers_pending, microtasks_pending, ready_state) = eng.boot_diag();
                     tracing::warn!(
@@ -441,6 +456,7 @@ impl Session {
                         timers_pending,
                         microtasks_pending,
                         ready_state,
+                        cmp_rearmed,
                         "evals_sans_mutation — ré-échantillon post-load (§B-4(c))"
                     );
                 }
@@ -2182,6 +2198,9 @@ impl Session {
         sf: SubFrame,
         url: &Url,
     ) -> Option<(usize, Vec<String>, explorer_js::JsCtxId)> {
+        // Réarmement CMP (étape CMP-4) — lu avant le
+        // `get_mut` qui suit (emprunt disjoint).
+        let rearm = cmp_rearm(self.consent_policy);
         let entry = self.tabs.get_mut(&tab)?;
         entry.frames.push(sf);
         let sub = entry.frames.len() - 1;
@@ -2208,7 +2227,7 @@ impl Session {
         let scripts = if f.sandbox.is_some_and(|s| !s.scripts) {
             Vec::new()
         } else {
-            collect_scripts(&f.dom, &f.url, &f_base, true, 0, &f_csp)
+            collect_scripts(&f.dom, &f.url, &f_base, true, 0, &f_csp, rearm)
                 .into_iter()
                 .filter_map(|i| (!i.module).then_some(i.inline).flatten())
                 .collect()
@@ -3323,7 +3342,7 @@ impl Session {
             })
             .take(self.max_sheets)
             .collect();
-        let scripts = collect_scripts(dom, page, base, scripting, self.max_scripts, csp);
+        let scripts = self.plan_script_items(dom, page, base, scripting, csp);
         // B-4 (data.gouv/Nuxt) : `<link rel=modulepreload>`
         // et `preload as=script|module` sèment le prefetch
         // des graphes de modules — les chunks déclarés en
@@ -3416,6 +3435,29 @@ impl Session {
             srcdoc_frames,
             mod_preloads,
         }
+    }
+
+    /// `<script>` exécutables du document (étape CMP-4) —
+    /// `collect_scripts` borné `max_scripts`, marqueurs CMP
+    /// réarmés sous politique résolue (`Honest` jamais).
+    /// Extrait pour la borne clippy de `plan_subresources`.
+    fn plan_script_items(
+        &self,
+        dom: &Dom,
+        page: &Url,
+        base: &Url,
+        scripting: bool,
+        csp: &[explorer_net::csp::CspPolicy],
+    ) -> Vec<ScriptItem> {
+        collect_scripts(
+            dom,
+            page,
+            base,
+            scripting,
+            self.max_scripts,
+            csp,
+            cmp_rearm(self.consent_policy),
+        )
     }
 
     /// Remplit `graph` en BFS du graphe statique

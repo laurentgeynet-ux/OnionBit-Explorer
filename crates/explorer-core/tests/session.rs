@@ -4371,6 +4371,122 @@ async fn tcfapi_tcstring_matches_seeded_cookie() {
     );
 }
 
+// ===== Étape CMP-4 — réarmement des balises « bloquées par CMP » =====
+
+/// `OtAutoBlock` réel : `type="text/plain"` + classe
+/// `optanon-category-*` — la balise dort tant que la CMP
+/// n'a pas levé le blocage. Sous politique résolue le moteur
+/// réarme au spawn : c'est l'anti-mur (le site retrouve ses
+/// vrais scripts → mutation DOM, boot vivant).
+const PAGE_OT_BLOCKED: &str = "<!doctype html><html><body><div id=\"x\">?</div>\
+    <script type=\"text/plain\" class=\"optanon-category-C0002\">\
+    document.getElementById('x').textContent='armed'</script>\
+    </body></html>";
+
+#[tokio::test]
+async fn cmp_marked_script_rearmed_under_reject() {
+    let (mut s, t) = test_session_policy(explorer_net::consent::ConsentPolicy::RejectAll);
+    t.route("/", 200, PAGE_OT_BLOCKED);
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let tab = s.open_tab();
+    s.navigate(tab, "http://h.test/").await.unwrap();
+    let dump = s.dom_dump(tab).unwrap_or_default();
+    assert!(
+        dump.contains("\"armed\""),
+        "script CMP réarmé et exécuté → {dump}"
+    );
+}
+
+/// `Honest` ne réarme **jamais** : la balise marquée reste
+/// inerte — aucun consentement simulé sous cette politique
+/// (cohérence avec les graines absentes et le stub CMP-less).
+#[tokio::test]
+async fn cmp_marked_script_inert_under_honest() {
+    let (mut s, t) = test_session_policy(explorer_net::consent::ConsentPolicy::Honest);
+    t.route("/", 200, PAGE_OT_BLOCKED);
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let tab = s.open_tab();
+    s.navigate(tab, "http://h.test/").await.unwrap();
+    let dump = s.dom_dump(tab).unwrap_or_default();
+    assert!(
+        !dump.contains("\"armed\""),
+        "Honest : balise CMP jamais réarmée → {dump}"
+    );
+}
+
+/// Cookiebot : `data-cookieconsent` + vraie URL déplacée en
+/// `data-src` — le script est fetché **et** exécuté sous
+/// `RejectAll`.
+#[tokio::test]
+async fn cmp_marked_data_src_fetched_and_run() {
+    let (mut s, t) = test_session_policy(explorer_net::consent::ConsentPolicy::RejectAll);
+    t.route(
+        "/",
+        200,
+        "<!doctype html><html><body><div id=\"y\">?</div>\
+         <script type=\"text/plain\" data-cookieconsent=\"statistics\" data-src=\"/real.js\"></script>\
+         </body></html>",
+    );
+    t.route(
+        "/real.js",
+        200,
+        "document.getElementById('y').textContent='real'",
+    );
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let tab = s.open_tab();
+    s.navigate(tab, "http://h.test/").await.unwrap();
+    let dump = s.dom_dump(tab).unwrap_or_default();
+    assert!(
+        dump.contains("\"real\""),
+        "data-src réarmé : fetch + éval → {dump}"
+    );
+    assert_eq!(t.calls(), 2, "page + script réarmé fetchés");
+}
+
+/// `data-purpose` (CMPs custom) réarme pareil — l'attribut
+/// dédié suffit, quel que soit le vendeur.
+#[tokio::test]
+async fn cmp_data_purpose_rearmed() {
+    let (mut s, t) = test_session_policy(explorer_net::consent::ConsentPolicy::RejectAll);
+    t.route(
+        "/",
+        200,
+        "<!doctype html><html><body><div id=\"x\">?</div>\
+         <script type=\"text/plain\" data-purpose=\"analytics\">\
+         document.getElementById('x').textContent='armed'</script>\
+         </body></html>",
+    );
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let tab = s.open_tab();
+    s.navigate(tab, "http://h.test/").await.unwrap();
+    let dump = s.dom_dump(tab).unwrap_or_default();
+    assert!(dump.contains("\"armed\""), "data-purpose réarmé → {dump}");
+}
+
+/// `text/plain` nu **sans** marqueur : jamais réarmé — le
+/// marqueur gouverne, pas le type inerte (un `<script
+/// type=text/plain>` de template/données reste des données).
+#[tokio::test]
+async fn unmarked_plain_script_stays_inert() {
+    let (mut s, t) = test_session_policy(explorer_net::consent::ConsentPolicy::RejectAll);
+    t.route(
+        "/",
+        200,
+        "<!doctype html><html><body><div id=\"x\">?</div>\
+         <script type=\"text/plain\">\
+         document.getElementById('x').textContent='nope'</script>\
+         </body></html>",
+    );
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let tab = s.open_tab();
+    s.navigate(tab, "http://h.test/").await.unwrap();
+    let dump = s.dom_dump(tab).unwrap_or_default();
+    assert!(
+        !dump.contains("\"nope\""),
+        "text/plain sans marqueur : inerte → {dump}"
+    );
+}
+
 /// `localStorage` : écrit dans un document, relu dans le
 /// suivant (même origine — map de session drainée/installée).
 const PAGE_LS_SET: &str = "<!doctype html><html><body><p>x</p>\

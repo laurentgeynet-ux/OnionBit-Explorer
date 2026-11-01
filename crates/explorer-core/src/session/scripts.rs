@@ -6,6 +6,7 @@
 //! classiques/module et items d'évaluation.
 
 use explorer_dom::Dom;
+use explorer_net::consent::ConsentPolicy;
 use explorer_net::http::Request;
 use explorer_net::policy::is_mixed_content;
 use explorer_net::url::Url;
@@ -75,6 +76,46 @@ pub(crate) struct ScriptItem {
     /// inconnus) : identifie l'élément miroir pendant
     /// l'éval pour `document.currentScript` (CAP-168).
     pub(crate) el_ord: usize,
+    /// Réarmé depuis un marqueur « bloqué par CMP » (étape
+    /// CMP-4) — `type` inerte + `optanon-category*`/
+    /// `data-cookieconsent`/`data-purpose*` sous politique
+    /// résolue. Distingue « script natif » vs « réarmé » au
+    /// diagnostic : un site qui casse malgré le mur franchi
+    /// nomme la différence.
+    pub(crate) rearmed: bool,
+}
+
+/// Réarmement CMP (étape CMP-4) : la politique est-elle
+/// résolue ? `Honest` = **jamais** — aucun script marqué
+/// « bloqué par consentement » ne doit s'exécuter sous une
+/// session qui déclare n'avoir pas consenti (cohérence avec
+/// les graines absentes et le stub `__tcfapi` CMP-less).
+pub(crate) const fn cmp_rearm(policy: ConsentPolicy) -> bool {
+    !matches!(policy, ConsentPolicy::Honest)
+}
+
+/// L'élément porte-t-il un marqueur « bloqué par CMP » ?
+/// Attributs dédiés (`optanon-category*`, `data-cookieconsent`
+/// Cookiebot, `data-purpose`/`data-purposes`) ou classe
+/// `optanon-category-*` (forme réelle d'`OtAutoBlock`) —
+/// `data-src` n'est **pas** un marqueur : c'est la source
+/// réelle déplacée par la CMP, lue après match.
+fn cmp_marked(dom: &Dom, n: explorer_dom::NodeId) -> bool {
+    let Ok(attrs) = dom.attributes(n) else {
+        return false;
+    };
+    attrs.iter().any(|a| {
+        a.name.starts_with("optanon-category")
+            || matches!(
+                a.name.as_str(),
+                "data-cookieconsent" | "data-purpose" | "data-purposes"
+            )
+    }) || attrs.iter().any(|a| {
+        a.name == "class"
+            && a.value
+                .split_ascii_whitespace()
+                .any(|c| c.starts_with("optanon-category"))
+    })
 }
 
 /// `<script>` exécutables du document, ordre document —
@@ -86,7 +127,12 @@ pub(crate) struct ScriptItem {
 /// de script (spec HTML). Sous CSP `script-src` (CAP-145) :
 /// un `src` doit matcher une source, un inline exige
 /// `'unsafe-inline'` ou `nonce=` valide — balise sinon
-/// inerte, non collectée.
+/// inerte, non collectée. `rearm_cmp` (étape CMP-4) : les
+/// balises à `type` inerte porteuses d'un marqueur CMP sont
+/// collectées comme des classiques — `src` lu aussi depuis
+/// `data-src` (la CMP déplace la vraie URL), `data-type=
+/// "module"` honoré — CSP et mixed-content toujours
+/// appliqués (le navigateur réel réarme puis contrôle).
 pub(crate) fn collect_scripts(
     dom: &Dom,
     page: &Url,
@@ -94,6 +140,7 @@ pub(crate) fn collect_scripts(
     scripting: bool,
     max_src: usize,
     csp: &[explorer_net::csp::CspPolicy],
+    rearm_cmp: bool,
 ) -> Vec<ScriptItem> {
     let mut out = Vec::new();
     if !scripting {
@@ -109,7 +156,7 @@ pub(crate) fn collect_scripts(
             let el_ord = els;
             els += 1;
             collect_script_el(
-                dom, n, page, base, csp, el_ord, &mut slots, max_src, &mut out,
+                dom, n, page, base, csp, el_ord, &mut slots, max_src, &mut out, rearm_cmp,
             );
         }
         if let Ok(ch) = dom.children(n) {
@@ -117,6 +164,23 @@ pub(crate) fn collect_scripts(
         }
     }
     out
+}
+
+/// Décision « réarmé » d'une balise à `type` inerte (étape
+/// CMP-4) — `Some(module)` si marquée CMP sous politique
+/// résolue, `None` sinon ; `data-type="module"` restaure
+/// la file module.
+fn cmp_rearm_module(dom: &Dom, n: explorer_dom::NodeId, rearm_cmp: bool) -> Option<bool> {
+    if !(rearm_cmp && cmp_marked(dom, n)) {
+        return None;
+    }
+    tracing::info!("script marqué CMP réarmé — consentement résolu");
+    Some(
+        dom.attribute(n, "data-type")
+            .ok()
+            .flatten()
+            .is_some_and(|t| t.trim().eq_ignore_ascii_case("module")),
+    )
 }
 
 /// Un `<script>` : externe (src résolu + CSP) ou inline —
@@ -133,16 +197,28 @@ fn collect_script_el(
     slots: &mut usize,
     max_src: usize,
     out: &mut Vec<ScriptItem>,
+    rearm_cmp: bool,
 ) {
     let ty = dom
         .attribute(n, "type")
         .ok()
         .flatten()
         .map_or_else(String::new, |t| t.trim().to_ascii_lowercase());
-    let module = ty == "module";
-    if !(module || CLASSIC_SCRIPT_TYPES.contains(&ty.as_str())) {
-        return;
-    }
+    let mut module = ty == "module";
+    // `type` inerte : balise morte… sauf marqueur « bloqué
+    // par CMP » sous politique résolue (étape CMP-4) — la CMP
+    // réelle réarme au consentement, on le fait au spawn.
+    let rearmed = if module || CLASSIC_SCRIPT_TYPES.contains(&ty.as_str()) {
+        false
+    } else {
+        match cmp_rearm_module(dom, n, rearm_cmp) {
+            Some(m) => {
+                module = m;
+                true
+            }
+            None => return,
+        }
+    };
     // `nomodule` n'a d'effet que sur les classiques.
     let nomodule = dom.attribute(n, "nomodule").ok().flatten().is_some();
     if !module && nomodule {
@@ -152,6 +228,13 @@ fn collect_script_el(
         .attribute(n, "src")
         .ok()
         .flatten()
+        .or_else(|| {
+            // CMP : la vraie URL est souvent déplacée vers
+            // `data-src` (évite le fetch pré-consentement).
+            rearmed
+                .then(|| dom.attribute(n, "data-src").ok().flatten())
+                .flatten()
+        })
         .filter(|s| !s.trim().is_empty());
     if let Some(raw) = src_attr {
         // Externe : `async` l'emporte sur `defer`
@@ -197,6 +280,7 @@ fn collect_script_el(
                     Some(s)
                 },
                 el_ord,
+                rearmed,
             });
         }
         // Hors borne / irrésoluble / bloqué :
@@ -226,6 +310,7 @@ fn collect_script_el(
                 },
                 slot: None,
                 el_ord,
+                rearmed,
             });
         }
     }

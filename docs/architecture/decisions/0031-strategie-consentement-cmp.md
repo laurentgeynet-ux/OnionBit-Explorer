@@ -1,7 +1,7 @@
 # ADR-0031 — Stratégie consentement CMP : politique de session, pas émulation SDK
 
 Date : 2026-11-01 · Statut : **acceptée** — Étape 171 +
-JS-C259 (§B-4 bras CMP).
+JS-C259 + étape CMP-4 (§B-4 bras CMP).
 
 ## Contexte
 
@@ -110,11 +110,21 @@ politique.
   L'état `Engine::cmp` est global au moteur : les realms
   enfants (`install_dom_ctx`) héritent la même décision.
   `Honest` conserve le stub CMP-less JS-C213 inchangé.
-- Travaux suivants (même ADR, étapes dédiées) : réarmement
-  des balises `text/plain` marquées CMP sous politique
-  résolue (`optanon-category`, `data-cookieconsent`,
-  `data-purpose`, `data-src` — le bras dominant du « meurent
-  avant `<video>` ») ; substitution de SDKs CMP
+- **Livré (étape CMP-4)** : réarmement des balises `type`
+  inerte marquées CMP dans `collect_scripts` —
+  `optanon-category*` (attribut **ou** classe — forme réelle
+  d'`OtAutoBlock`), `data-cookieconsent`, `data-purpose`/
+  `data-purposes` ; `data-src` lu quand la CMP a déplacé
+  l'URL, `data-type="module"` honoré. Uniquement sous
+  politique résolue — `Honest` ne simule aucun consentement,
+  la balise reste inerte. CSP et mixed-content appliqués à
+  l'identique (le navigateur réel réarme puis contrôle).
+  `ScriptItem::rearmed` + compteur `cmp_rearmed` dans le
+  diagnostic `evals_sans_mutation` : « mur franchi, site
+  vivant » et « mur franchi, mort ailleurs » se distinguent
+  enfin en vol.
+- Travaux suivants (même ADR, étapes dédiées) : substitution
+  de SDKs CMP
   (`consent_stub_for`) au cas par cas uniquement — chaque
   hôte substitué est une entrée de table documentée, pas une
   émulation générique ; tag `cmp=<vendor>` dans le WARN

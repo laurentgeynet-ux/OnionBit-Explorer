@@ -5325,6 +5325,34 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   Verrou
   `apply_giant_array_soft_killed`.
 
+- [x] **Étape CMP-4. Réarmement
+  des balises « bloquées par CMP »**
+  (`explorer-core`, §B-4 bras CMP
+  — ADR-0031, l'anti-mur) — les
+  étapes 171/JS-C259 ouvrent la
+  porte (décision portée, API qui
+  répond) mais les scripts servis
+  en `type="text/plain"` +
+  marqueurs (`optanon-category*`,
+  `data-cookieconsent`,
+  `data-purpose*`) restaient
+  inertes : la page gardait une
+  coquille. Sous politique
+  résolue, `collect_scripts` les
+  collecte désormais comme des
+  classiques (`data-src` → `src`,
+  `data-type="module"`, CSP/
+  mixed-content inchangés, cadres
+  compris) ; `Honest` ne réarme
+  jamais. Compteur `cmp_rearmed`
+  dans `evals_sans_mutation` +
+  `rearmed` sur `ScriptItem` —
+  « natif » vs « réarmé »
+  distingués au diagnostic.
+  Verrous : 5 session. File CMP
+  restante : substitution SDKs
+  bornée, re-vols terrain.
+
 - [x] **JS-C259. `__tcfapi`
   résolveur + APIs sœurs CMP**
   (`explorer-jscore`,
@@ -5397,9 +5425,10 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   + verdict `consent_wall:hard`
   (murs consent-or-pay). File CMP :
   ~~`__tcfapi` résolveur~~ (livré,
-  JS-C259), réarmement
-  `type=text/plain` marqué CMP,
-  substitution SDKs bornée.
+  JS-C259), ~~réarmement
+  `type=text/plain` marqué CMP~~
+  (livré, CMP-4), substitution
+  SDKs bornée.
 
 - [ ] **Écarts terrain — vol humain
   22/10 (release `39ab821`, FFI)** :

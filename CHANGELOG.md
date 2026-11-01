@@ -7,6 +7,41 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **Étape CMP-4 — Réarmement des
+  balises « bloquées par CMP »**
+  (`explorer-core`, §B-4 bras CMP
+  — ADR-0031, l'anti-mur) — les
+  CMPs servent les vrais scripts
+  du site en `type="text/plain"`
+  + marqueurs (`optanon-category*`
+  attribut/classe, `data-cookieconsent`,
+  `data-purpose`/`data-purposes`,
+  vraie URL en `data-src`) et ne
+  les réarment qu'au consentement :
+  `collect_scripts` ne les voyait
+  jamais. Sous politique résolue
+  (`cmp_rearm` — `RejectAll`/
+  `AcceptAll`, **jamais** `Honest`),
+  les balises marquées sont
+  collectées comme des classiques
+  (`data-src` lu comme `src`,
+  `data-type="module"` honoré) —
+  CSP et mixed-content toujours
+  appliqués, en top-document comme
+  dans les plans de cadres.
+  `ScriptItem::rearmed` distingue
+  les scripts réarmés : compteur
+  `cmp_rearmed=<n>` dans le WARN
+  `evals_sans_mutation` (et son
+  ré-échantillon post-load) +
+  `info!` par commit — un boot
+  muet avec `cmp_rearmed>0` nomme
+  un bras ailleurs que le
+  consentement. Verrous : 5
+  session (réarmé `RejectAll`,
+  inerte `Honest`, `data-src`
+  fetché+évalué, `data-purpose`,
+  `text/plain` non-marqué inerte).
 - **JS-C259 — `__tcfapi` résolveur
   + APIs sœurs CMP** (`explorer-
   jscore`, `explorer-js`,
