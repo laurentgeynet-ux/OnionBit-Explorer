@@ -73,6 +73,13 @@ pub(crate) struct TimerQueue {
 }
 
 impl TimerQueue {
+    /// Nombre de timers en attente — sonde §B-59 (un re-arm
+    /// applicatif en boucle = rétention native de closures/envs
+    /// invisible au compteur heap).
+    pub(crate) fn pending_len(&self) -> usize {
+        self.timers.len()
+    }
+
     /// Toutes les `Value` retenues par les timers en attente —
     /// racines GC (un callback planifié garde ses captures vivantes).
     pub(crate) fn roots(&self, out: &mut Vec<Value>) {

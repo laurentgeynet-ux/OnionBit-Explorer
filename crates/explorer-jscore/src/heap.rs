@@ -502,6 +502,81 @@ impl Heap {
         (live, bytes)
     }
 
+    /// Octets natifs de l'arène elle-même — capacités des
+    /// `Vec` de slab (`cells`/`free`/`marks`), hors payload
+    /// des cellules. Sonde §B-59 : un slab à 10⁵ slots ×
+    /// `size_of::<Cell>()` est une masse native réelle non
+    /// comptée dans `bytes`.
+    pub(crate) fn slab_overhead_bytes(&self) -> usize {
+        self.cells.capacity() * std::mem::size_of::<Slot>()
+            + self.free.capacity() * std::mem::size_of::<u32>()
+            + self.marks.capacity() * std::mem::size_of::<bool>()
+    }
+
+    /// Histogramme `ObjKind` → (cellules, octets estimés) —
+    /// sonde §B-59 : la croissance retenue nomme son kind
+    /// (Str ? Fun/AST ? Promise ? Map ?). `Str`/`Ordinary`
+    /// agrégés, kinds à payload nommés.
+    pub(crate) fn kind_histogram(&self) -> Vec<(&'static str, usize, usize)> {
+        let mut h: std::collections::HashMap<&'static str, (usize, usize)> =
+            std::collections::HashMap::new();
+        for c in self.cells.iter().flatten() {
+            let (name, bytes) = match &c.data {
+                CellData::Str(s) => ("Str", std::mem::size_of::<Cell>() + s.len()),
+                CellData::Obj(o) => {
+                    let kind = match &o.kind {
+                        ObjKind::Ordinary => "Ordinary",
+                        ObjKind::Array(_) => "Array",
+                        ObjKind::Fun(_) => "Fun",
+                        ObjKind::Host(_) => "Host",
+                        ObjKind::RegExp(_) => "RegExp",
+                        ObjKind::Promise(_) => "Promise",
+                        ObjKind::Map(_) => "Map",
+                        ObjKind::Set(_) => "Set",
+                        ObjKind::Iter { .. } => "Iter",
+                        ObjKind::GenLive { .. } => "GenLive",
+                        ObjKind::Temp(_) => "Temp",
+                        ObjKind::WeakRef(_) => "WeakRef",
+                        ObjKind::Symbol { .. } => "Symbol",
+                        ObjKind::BigInt(_) => "BigInt",
+                        ObjKind::ByteBuf(_) => "ByteBuf",
+                        ObjKind::Blob { .. } => "Blob",
+                        _ => "other",
+                    };
+                    (kind, cell_bytes(&c.data))
+                }
+            };
+            let e = h.entry(name).or_default();
+            e.0 += 1;
+            e.1 += bytes;
+        }
+        let mut v: Vec<_> = h.into_iter().map(|(k, (n, b))| (k, n, b)).collect();
+        v.sort_by_key(|e| std::cmp::Reverse(e.2));
+        v
+    }
+
+    /// Recalcule `bytes` sur l'état courant des cellules —
+    /// §B-59 bras actugaming : les mutations post-alloc
+    /// (`arr.push`, `obj[k]=`, `Map.set`…) grossissent sans
+    /// repasser par `alloc` → l'estimé restait plat pendant
+    /// que le RSS explosait (45 Mo comptés / 2,6 Go réels).
+    /// Le `tick` l'appelle périodiquement : les bornes
+    /// (`over_limit`, cap dur) voient alors la vraie
+    /// empreinte. O(cellules + props) — le rythme est borné
+    /// côté appelant.
+    pub fn refresh_estimate(&mut self) {
+        self.bytes = self
+            .cells
+            .iter()
+            .flatten()
+            .map(|c| cell_bytes(&c.data))
+            .sum();
+        if self.bytes > self.peak_bytes {
+            self.peak_bytes = self.bytes;
+        }
+        self.over_mem = self.mem_limit > 0 && self.bytes > self.mem_limit;
+    }
+
     /// Borne mémoire par contexte (ADR-0019) — `0` = illimité.
     /// Le dépassement n'empêche pas l'alloc (signature non
     /// faillible) : il lève le drapeau `over_limit`, lu au `tick`
@@ -566,10 +641,22 @@ fn cell_bytes(data: &CellData) -> usize {
                 // Charges utiles octets (borne mémoire JS-C65 —
                 // un upload géant ne doit pas passer sous le
                 // compteur : `ByteBuf`/`Blob` comptent leur
-                // contenu).
+                // contenu). Vecs de payload (§B-59 bras
+                // actugaming : `arr.push` en boucle — croissance
+                // post-alloc invisible au compteur) : compter
+                // la capacité, relue à chaque mesure.
                 + match &o.kind {
                     ObjKind::ByteBuf(b) => b.len(),
                     ObjKind::Blob { data, .. } => data.len(),
+                    ObjKind::Array(v) | ObjKind::Set(v) => {
+                        v.capacity() * std::mem::size_of::<Value>()
+                    }
+                    ObjKind::Map(v) => {
+                        v.capacity() * std::mem::size_of::<(Value, Value)>()
+                    }
+                    ObjKind::Iter { items, .. } => {
+                        items.capacity() * std::mem::size_of::<Value>()
+                    }
                     _ => 0,
                 }
         }

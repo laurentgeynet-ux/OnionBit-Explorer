@@ -62,6 +62,13 @@ const DEFAULT_EVAL_BOOT_MS: u64 = 60_000;
 /// `unhandledrejection` (`eval deadline exceeded`). Durée
 /// fixe bornée — la protection rafale reprend ensuite.
 const DEFAULT_BOOT_GRACE_MS: u64 = 120_000;
+
+/// Plafond cumulatif `eval`/`Function` (§B-59 bras 3) — l'AST
+/// retenu pèse ~100× la source (mesuré : 390 Ko d'AST par 4 Ko
+/// évalué) ; 8 Mio de source ≈ ~800 Mo d'AST — sous le garde
+/// RSS. Les pages saines évaluent des Ko (JSONP, stubs) ; une
+/// boucle decode→eval est hostile par construction.
+const DEFAULT_EVAL_SRC_CAP: usize = 8 * 1024 * 1024;
 /// Seuil GC par défaut (JS-C37) — ~130 K cellules vivantes
 /// déclenchent une passe à la frontière de job suivante.
 const DEFAULT_GC_THRESHOLD: usize = 131_072;
@@ -591,9 +598,23 @@ pub struct Engine {
     /// monter le cap ×4 — les ticks intermédiaires ne
     /// re-marquent pas (coût O(heap) par tick).
     pub(crate) gc_due: bool,
+    /// Sonde RSS diagnostic §B-59 (`EXPLORER_JS_RSS_WATCH`,
+    /// Mio ; 0 = désarmée) — voir `tick`.
+    pub(crate) rss_watch_mb: usize,
+    /// Dernier palier RSS logué (grains de 64 Mio).
+    pub(crate) rss_watch_last: usize,
     /// Seuil `bytes` du prochain re-marquage sous `gc_due`
     /// (voir ci-dessus). `0` = inactif.
     pub(crate) gc_cap: usize,
+    /// Octets de source cumulés passés par `eval`/`Function`
+    /// (§B-59 bras 3 : chaque éval dynamique retient son AST
+    /// `Rc<FnLit>` via les cellules `Fun` — masse native hors
+    /// `heap.bytes`, mesuré ×41 RSS/compté). Le plafond borne
+    /// la rétention quand le compteur cellules reste aveugle.
+    pub(crate) eval_src_bytes: usize,
+    /// Plafond cumulatif — `EXPLORER_JS_EVAL_SRC_CAP`, défaut
+    /// [`DEFAULT_EVAL_SRC_CAP`].
+    pub(crate) eval_src_cap: usize,
 }
 
 /// Dernier match `RegExp` — `RegExp.$1…$9`/`input`/`lastMatch`/…
@@ -966,7 +987,17 @@ impl Engine {
             native_caller: Vec::new(),
             ctor_fresh: None,
             gc_due: false,
+            rss_watch_mb: std::env::var("EXPLORER_JS_RSS_WATCH")
+                .ok()
+                .and_then(|v| v.parse::<usize>().ok())
+                .unwrap_or(0),
+            rss_watch_last: 0,
             gc_cap: 0,
+            eval_src_bytes: 0,
+            eval_src_cap: std::env::var("EXPLORER_JS_EVAL_SRC_CAP")
+                .ok()
+                .and_then(|v| v.parse::<usize>().ok())
+                .unwrap_or(DEFAULT_EVAL_SRC_CAP),
         };
         crate::builtins::install(&mut e);
         crate::collections::install(&mut e);
@@ -2783,6 +2814,19 @@ impl Engine {
         (self.last_parse_us, self.last_exec_us)
     }
 
+    /// Histogramme `ObjKind` → (kind, cellules, octets estimés)
+    /// — diagnostic §B-59 : la rétention nomme son kind.
+    #[must_use]
+    pub fn heap_kind_histogram(&self) -> Vec<(&'static str, usize, usize)> {
+        self.heap.kind_histogram()
+    }
+
+    /// Octets natifs de l'arène (capacités slab) — §B-59.
+    #[must_use]
+    pub fn slab_overhead_bytes(&self) -> usize {
+        self.heap.slab_overhead_bytes()
+    }
+
     /// Frontière d'entrée publique — le split repart à zéro.
     pub(crate) fn reset_eval_split(&mut self) {
         self.last_parse_us = 0;
@@ -3512,6 +3556,79 @@ impl Engine {
                 if Instant::now() >= d {
                     self.deadline_hit = true;
                     return Err(self.range_error("eval deadline exceeded"));
+                }
+            }
+            // Recalcul périodique de l'estimé heap — §B-59
+            // bras actugaming : croissance post-alloc des
+            // Vecs de payload (props/elems/Map/Set) invisible
+            // au compteur → bornes aveugles. Tous les 64 K
+            // ops : quasi nul sur éval normale, amorti sur
+            // burst (mesuré : heap_b plat 45 Mo / RSS 2,6 Go).
+            if self.ops_total.trailing_zeros() >= 16 {
+                self.heap.refresh_estimate();
+            }
+            // Sonde RSS dans le fil qui alloue (§B-59 bras
+            // hors-compteur — actugaming : heap.bytes < lim
+            // mais RSS 4 Go → croissance native invisible aux
+            // bornes heap). `EXPLORER_JS_RSS_WATCH=<Mio>` armé
+            // → chaque 256 ops au-dessus du seuil, log
+            // `js_alloc` avec rss + heap_bytes + profondeur +
+            // frame JS du haut : le bras natif est nommé
+            // pendant qu'il est encore vivant. Diagnostic —
+            // absent = zéro coût.
+            if self.rss_watch_mb > 0 {
+                if let Some(m) = memory_stats::memory_stats() {
+                    let rss = m.physical_mem / (1024 * 1024);
+                    if rss > self.rss_watch_mb && rss > self.rss_watch_last.saturating_add(64) {
+                        self.rss_watch_last = rss;
+                        let virt = m.virtual_mem / (1024 * 1024);
+                        let top = self
+                            .call_stack
+                            .last()
+                            .map(|lit| {
+                                let n = lit.name.as_deref().unwrap_or("<anon>");
+                                match &lit.src {
+                                    Some(s) => {
+                                        format!("{n}({s}:{}:{})", lit.pos.0, lit.pos.1)
+                                    }
+                                    None => format!("{n}(:{}:{})", lit.pos.0, lit.pos.1),
+                                }
+                            })
+                            .unwrap_or_default();
+                        let (dn, dm, dob, dj, dmd) = self
+                            .dom_ctx
+                            .as_ref()
+                            .map(|(d, _)| d.borrow().b59_counts())
+                            .unwrap_or_default();
+                        let kinds: String = self
+                            .heap
+                            .kind_histogram()
+                            .iter()
+                            .take(3)
+                            .map(|(k, n, b)| format!("{k}:{n}/{b}"))
+                            .collect::<Vec<_>>()
+                            .join(" ");
+                        tracing::warn!(
+                            target: "js_alloc",
+                            rss_mb = rss,
+                            virt_mb = virt,
+                            slab_o = self.heap.slab_overhead_bytes(),
+                            heap_b = self.heap.bytes(),
+                            cells = self.heap.live_count(),
+                            dom_nodes = dn,
+                            dom_muts = dm,
+                            dom_obs = dob,
+                            dom_journal = dj,
+                            dom_media = dmd,
+                            depth = self.call_stack.len(),
+                            ops = self.ops_total,
+                            timers = self.timers.pending_len(),
+                            utasks = self.microtasks.len(),
+                            kinds,
+                            top,
+                            "tick_rss"
+                        );
+                    }
                 }
             }
         }

@@ -17,6 +17,31 @@ impl Engine {
     /// timer callbacks — all global-scope (indirect `eval`
     /// semantics; direct-eval scoping is a documented deviation).
     /// Microtasks are *not* drained here — the enclosing job does.
+    /// Plafond `eval`/`Function` — tests et harnais bornés.
+    pub fn set_eval_src_cap(&mut self, cap: usize) {
+        self.eval_src_cap = cap;
+    }
+
+    /// Borne §B-59 bras 3 — chaque `eval`/`Function` retient un
+    /// AST `Rc<FnLit>` (masse native hors `heap.bytes`, mesuré
+    /// ×41 RSS/compté). Cumul des octets source ; au-delà du
+    /// plafond → `RangeError` nommé, l'AST n'est jamais parsé.
+    pub(crate) fn note_eval_src(&mut self, src: &str) -> JsResult<()> {
+        self.eval_src_bytes = self.eval_src_bytes.saturating_add(src.len());
+        if self.eval_src_bytes > self.eval_src_cap {
+            let msg = format!(
+                "eval source budget exceeded ({} B cumulative > {} B cap — AST retention bound)",
+                self.eval_src_bytes, self.eval_src_cap
+            );
+            return Err(Thrown(self.error_value(
+                self.protos.range_error,
+                "RangeError",
+                &msg,
+            )));
+        }
+        Ok(())
+    }
+
     pub(crate) fn eval_source(&mut self, src: &str) -> JsResult<Value> {
         // `eval` direct : le texte hérite du strict appelant —
         // early errors (`01`, `delete x`) et effets runtime.
@@ -24,6 +49,7 @@ impl Engine {
             h(src);
         }
         Self::dump_eval_source(src);
+        self.note_eval_src(src)?;
         let prog = crate::parser::parse_in(
             src,
             self.strict,
@@ -66,6 +92,7 @@ impl Engine {
             h(src);
         }
         Self::dump_eval_source(src);
+        self.note_eval_src(src)?;
         let prog = crate::parser::parse_in(
             src,
             self.strict,

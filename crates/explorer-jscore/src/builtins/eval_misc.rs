@@ -67,6 +67,7 @@ fn function_ctor_kind(e: &mut Engine, _t: Value, args: &[Value], kw: &str) -> Js
     if let Some(h) = &e.eval_hook {
         h(&src);
     }
+    e.note_eval_src(&src)?;
     let prog = crate::parser::parse_in(
         &src,
         false,

@@ -945,6 +945,7 @@ name = "explorer-jscore"
 version = "0.2.0"
 dependencies = [
  "fancy-regex",
+ "memory-stats",
  "num-bigint",
  "num-traits",
  "regex",
