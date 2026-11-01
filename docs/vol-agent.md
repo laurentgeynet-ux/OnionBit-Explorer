@@ -183,9 +183,21 @@ fautive rejoue à chaque reprise). Observé terrain vol 99.
 - **`read` uniquement la vignette `_view_*`** — jamais le PNG
   d'origine. Le brut reste la preuve archivée dans `captures/`.
 
-## 8. Traçabilité — synchro avec `Rapport vol/SYNTHESE.md`
+## 8. Traçabilité — synchro avec le corpus de vol
 
-Protocole complet : `docs/Rapport vol/SYNTHESE.md` §G.
+Protocole complet : `C:\OnionBit-vol\SYNTHESE.md` §G.
+
+**Le corpus de vol vit hors du repo** : `C:\OnionBit-vol\`
+(dossier dédié, `git init` local SANS remote — versionné
+localement, jamais poussé vers GitHub). Tous les vols lisent et
+écrivent là : `SYNTHESE.md`, `SYNTHESE_JOURNAL.md`,
+`RAPPORT_VOL_*.md`, `logs/`, `captures/` — **peu importe le
+worktree qui fait tourner le daemon**. Un worktree n'a jamais
+de copie locale du corpus : il accède au canon par chemin
+absolu — une copie se diverge, le canon non. L'ancien
+`docs/Rapport vol/` du repo est supprimé (gitignoré depuis
+`df8888eb` ; la migration préserve l'historique dans le git
+local du corpus).
 
 - Chaque constat du rapport porte `crate` + l'**ID §B** s'il
   correspond à une anomalie catalogue (`→ §B-5`) ; un trou
