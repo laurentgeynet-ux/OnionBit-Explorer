@@ -5253,6 +5253,28 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   pas à l'aveugle. Verrou
   `eval_split_surfaces`.
 
+- [x] **JS-C255. Cap dur sur
+  déchets retenus** (`explorer-jscore`,
+  §B-59 bras sudouest) — boucle
+  auto-défense obfuscateur
+  (`arr.push` sous borne `arr.length`
+  relue → O(n²) cellules mortes à
+  vivant petit) : `gc_cap` ratchet
+  ×4 sans plafond → abort 8-12 Go.
+  `tick` tue l'éval en `RangeError`
+  au-delà de `max(lim ×
+  GC_DEAD_MULT, GC_DEAD_FLOOR
+  256 Mio)` — plancher JS-C113
+  (churn transitoire préservé),
+  sweep mid-eval impossible → tuer
+  = seule récupération sûre.
+  Attribution : checkpoint
+  `js_alloc` parse→exec (nomme le
+  script fautif à la mort) + dump
+  `EXPLORER_JS_DUMP_DIR`. Verrous
+  `dead_cell_hard_cap_kills_eval`,
+  `inline25_under_mem_limit`.
+
 - [ ] **Écarts terrain — vol humain
   22/10 (release `39ab821`, FFI)** :
   second run humain — trois constats

@@ -2703,6 +2703,7 @@ impl Engine {
         let tp = Instant::now();
         let prog = parser::parse_in(src, false, self.nest_limit, None)?;
         self.note_parse(tp);
+        self.emit_eval_checkpoint("", src.len());
         self.run_program(&prog)
     }
 
@@ -2718,6 +2719,7 @@ impl Engine {
         let tp = Instant::now();
         let prog = parser::parse_in(src, false, self.nest_limit, Some(std::rc::Rc::from(name)))?;
         self.note_parse(tp);
+        self.emit_eval_checkpoint(name, src.len());
         self.run_program(&prog)
     }
 
@@ -2752,6 +2754,9 @@ impl Engine {
         let tp = Instant::now();
         let prog = parser::parse_in(src, false, self.nest_limit, name.map(std::rc::Rc::from));
         self.note_parse(tp);
+        if prog.is_ok() {
+            self.emit_eval_checkpoint(name.unwrap_or(""), src.len());
+        }
         let r = match prog {
             Ok(p) => self.run_program(&p),
             Err(e) => Err(e),
@@ -2794,6 +2799,22 @@ impl Engine {
         self.last_exec_us = self
             .last_exec_us
             .saturating_add(u64::try_from(start.elapsed().as_micros()).unwrap_or(u64::MAX));
+    }
+
+    /// Checkpoint milieu d'éval (§B-59 burst in-eval) : la
+    /// ligne `js_alloc` du worker n'émet qu'à la FIN d'éval —
+    /// une mort en pleine exécution ne laissait aucun nom.
+    /// Émis entre parse et exec : le dernier checkpoint avant
+    /// un kill nomme le script fautif et borne la mort à exec.
+    pub(crate) fn emit_eval_checkpoint(&self, name: &str, bytes: usize) {
+        tracing::info!(
+            target: "js_alloc",
+            phase = "parse→exec",
+            name,
+            bytes,
+            parse_us = self.last_parse_us,
+            "eval checkpoint"
+        );
     }
 
     /// Corps partagé d'`eval`/`eval_named` : budget d'ops
@@ -3543,8 +3564,27 @@ impl Engine {
                     self.heap_dead = Some(msg.clone());
                     return Err(self.range_error(msg));
                 }
+                // §B-59 — cap dur sur l'**estimé** (déchets
+                // retenus inclus) : le sweep est impossible
+                // mid-eval, un eval dont les cellules mortes
+                // dépassent `lim × GC_DEAD_MULT` est une bombe
+                // même à vivant petit — rien ne libèrera avant
+                // la fin de job. Sudouest : `s += c` en boucle
+                // retient O(n²) d'intermédiaires → 8-12 Go RSS
+                // → abort allocateur ; ici → RangeError borné.
+                let hard = lim
+                    .saturating_mul(Self::GC_DEAD_MULT)
+                    .max(Self::GC_DEAD_FLOOR);
+                if lim > 0 && self.heap.bytes() > hard {
+                    let b = self.heap.bytes();
+                    let msg = format!(
+                        "heap memory limit exceeded ({live} cells, {b} B allocated > {hard} B hard cap — deferred GC unreachable)"
+                    );
+                    self.heap_dead = Some(msg.clone());
+                    return Err(self.range_error(msg));
+                }
                 self.gc_due = true;
-                self.gc_cap = self.heap.bytes().saturating_mul(4);
+                self.gc_cap = self.heap.bytes().saturating_mul(4).min(hard);
             }
         }
         Ok(())
@@ -3557,6 +3597,26 @@ impl Engine {
     /// processus dans l'allocateur Rust avant tout kill doux.
     /// 256 Mio couvre tout usage réaliste d'un builtin unique.
     pub(crate) const MAX_SINGLE_ALLOC: usize = 256 * 1024 * 1024;
+
+    /// Multiplicateur du cap dur sur les octets **estimés**
+    /// (vivants + déchets retenus) — §B-59 : le sweep est
+    /// différé à la frontière de job, un `gc_cap` qui ratchet
+    /// ×4 sans plafond laissait un eval à petit vivant retenir
+    /// des déchets sans borne (sudouest 8-12 Go). ×4 laisse
+    /// passer les transitoires d'hydratation réels (cap
+    /// précédent ×4 à chaque mesure), au-delà l'eval est tué.
+    pub(crate) const GC_DEAD_MULT: usize = 4;
+    /// Plancher absolu du cap dur — le kill sur estimé pur a
+    /// tué des pages réelles (JS-C113, hubspot : déchet
+    /// transitoire à vivant petit). Le cap ne tire donc qu'au-
+    /// delà du **plus grand** de `lim × GC_DEAD_MULT` et ce
+    /// plancher : des contextes à borne serrée (tests, iframes
+    /// confinées) conservent leur droit au churn transitoire,
+    /// et au-delà de 256 Mio de cellules mortes retenues dans
+    /// un seul eval l'RSS du processus est menacé quoi qu'il
+    /// arrive — le sweep mid-eval étant impossible, tuer est
+    /// la seule récupération sûre.
+    pub(crate) const GC_DEAD_FLOOR: usize = 256 * 1024 * 1024;
 
     /// Refuse (`RangeError`) une matérialisation de `bytes` octets
     /// dépassant `min(mem_limit, MAX_SINGLE_ALLOC)` — à appeler

@@ -2121,6 +2121,7 @@ impl JscoreEngine {
                 let crypto_next = &crypto_next;
                 let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || match cmd {
                     Cmd::Eval { src, name, tx } => {
+                        dump_eval_script("eval", name.as_deref(), &src);
                         let _ = explorer_common::alloc_delta();
                         let t0 = std::time::Instant::now();
                         let res = match &name {
@@ -2484,6 +2485,7 @@ impl JscoreEngine {
                         let prev = eng.current_context();
                         eng.context_switch(ctx);
                         let out = if eng.current_context() == ctx {
+                            dump_eval_script("eval_ctx", name.as_deref(), &src);
                             let _ = explorer_common::alloc_delta();
                             let t0 = std::time::Instant::now();
                             let res = match &name {
@@ -2511,6 +2513,7 @@ impl JscoreEngine {
                         let prev = eng.current_context();
                         eng.context_switch(ctx);
                         let out = if eng.current_context() == ctx {
+                            dump_eval_script("script_el", name.as_deref(), &src);
                             let _ = explorer_common::alloc_delta();
                             let t0 = std::time::Instant::now();
                             let r = eng.eval_script_el(&src, name.as_deref(), ord);
@@ -3457,6 +3460,45 @@ impl Drop for JscoreEngine {
 /// `js_alloc` — coût quasi nul, la baseline `alloc_delta`
 /// posée par le bras avant l'éval borne la fenêtre à cette
 /// éval seule sur ce fil (drains/livrées inter-évals exclus).
+/// Dump env-gaté des sources évaluées (§B-59 — l'éval
+/// meurtrière est nommée par le checkpoint parse→exec mais
+/// son corps disparaît avec le process). `EXPLORER_JS_DUMP_DIR`
+/// pointé → chaque source atterrit `<dir>/<seq>_<kind>_<nom>.js`
+/// AVANT l'éval (le fichier survit à l'abort). Borné : src >
+/// 8 Mio ignorée, nom sanitizé à 64 chars. Debug vols
+/// uniquement — absent = zéro coût.
+fn dump_eval_script(kind: &str, name: Option<&str>, src: &str) {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static SEQ: AtomicU64 = AtomicU64::new(0);
+    static DIR: std::sync::OnceLock<Option<std::path::PathBuf>> = std::sync::OnceLock::new();
+    let dir = DIR
+        .get_or_init(|| {
+            std::env::var_os("EXPLORER_JS_DUMP_DIR")
+                .map(std::path::PathBuf::from)
+                .filter(|d| std::fs::create_dir_all(d).is_ok())
+        })
+        .as_ref();
+    let (Some(dir), true) = (dir, src.len() <= 8 * 1024 * 1024) else {
+        return;
+    };
+    let seq = SEQ.fetch_add(1, Ordering::Relaxed);
+    let mut safe: String = name
+        .unwrap_or("anon")
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '.' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .take(64)
+        .collect();
+    safe.truncate(64);
+    let p = dir.join(format!("{seq:04}_{kind}_{safe}.js"));
+    let _ = std::fs::write(p, src);
+}
+
 fn note_eval(
     eng: &explorer_jscore::Engine,
     kind: &'static str,
@@ -3497,6 +3539,7 @@ fn eval_module(
         resolve,
     };
     eng.set_module_loader(std::rc::Rc::new(std::cell::RefCell::new(loader)));
+    dump_eval_script("module", Some(entry), &src);
     match eng.eval_module(&src, entry) {
         Ok(v) => Ok(eng.describe(v)),
         Err(e) => Err(JsError::from(e)),

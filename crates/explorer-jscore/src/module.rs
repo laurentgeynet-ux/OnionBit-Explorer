@@ -308,6 +308,7 @@ impl Engine {
 
     fn eval_module_inner(&mut self, src: &str, name: &str) -> JsResult<Value> {
         let idx = self.instantiate(name, name, src, 0)?;
+        self.emit_eval_checkpoint(name, src.len());
         let tx = std::time::Instant::now();
         self.evaluate_module(idx)?;
         self.note_exec(tx);

@@ -405,6 +405,31 @@ fn main() {
             eprintln!("explorer-daemon : panic {info} @ {loc}");
         }));
     }
+    // Garde-fou RSS interne (§B-59 burst ~3-5 Go/s — sudouest
+    // monte 8-12 Go en 2-3 s : aucun sondage externe ne gagne,
+    // la station encaissait avant chaque kill). Sondage du
+    // WorkingSet propre toutes les 50 ms — à 5 Go/s le
+    // dépassement plafonne à ~250 Mo au lieu de plusieurs Go.
+    // Armé par `EXPLORER_RSS_LIMIT_MB` (vols §B-59 seulement ;
+    // absent = désarmé, aucun coût en production). Au seuil :
+    // marqueur `rss_guard:` au death_log puis abort — la mort
+    // est nommée et reste distincte des kills externes.
+    if let Some(mb) = std::env::var("EXPLORER_RSS_LIMIT_MB")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        .filter(|m| *m > 0)
+    {
+        let p = death_log.clone();
+        std::thread::spawn(move || loop {
+            let cur = memory_stats::memory_stats().map_or(0, |m| m.physical_mem) / (1024 * 1024);
+            if cur > mb {
+                let _ = std::fs::write(&p, format!("rss_guard: {cur} Mo > {mb} Mo\n"));
+                eprintln!("explorer-daemon : rss_guard {cur} Mo > {mb} Mo — abort");
+                std::process::abort();
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        });
+    }
     // Pile large pour **tous** les threads du runtime (workers
     // + pool `spawn_blocking`) : le thread moteur jscore porte
     // déjà 32 Mio (JS-C41) ; un overflow sur un worker —

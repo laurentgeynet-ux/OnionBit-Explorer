@@ -7,6 +7,33 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **JS-C255 — cap dur sur déchets
+  retenus §B-59** (`explorer-jscore`)
+  — le bras sudouest nommé : boucle
+  auto-défense obfuscateur
+  (`arr.push` dans une itération
+  bornée par `arr.length` relue)
+  retenant O(n²) de cellules mortes
+  à vivant minuscule — le `gc_cap`
+  ratchet ×4 sans plafond exonérait
+  l'estimé à chaque `tick` → abort
+  allocateur à 8-12 Go. Désormais
+  `tick` tue l'éval en `RangeError`
+  quand l'estimé dépasse
+  `max(lim × GC_DEAD_MULT, GC_DEAD_FLOOR)`
+  — le plancher 256 Mio préserve le
+  churn transitoire des contextes à
+  borne serrée (JS-C113), le sweep
+  mid-eval restant impossible, tuer
+  est la seule récupération sûre.
+  Verrou `dead_cell_hard_cap_kills_eval`
+  + repro `inline25_under_mem_limit`
+  (bundle capturé : kill propre
+  2 147 568 614 B, 3 849 vivantes,
+  site nommé `inline:25:1:38007`).
+  Chemin d'attribution : checkpoint
+  `js_alloc` parse→exec + dump
+  `EXPLORER_JS_DUMP_DIR`.
 - **JS-C254 — split parse/exec +
   alloc natif par éval**
   (`explorer-jscore`,

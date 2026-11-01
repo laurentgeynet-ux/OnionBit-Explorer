@@ -82,6 +82,10 @@ fancy-regex = "0.16"
 # hors réservoirs) — wrapping d'allocateur pur Rust, mesure
 # de phase via `Region`/`stats` (EXPLORER_ALLOC_TRACE).
 stats_alloc = "0.1"
+# WorkingSet propre du process (§B-59 burst ~5 Go/s — aucun
+# watchdog externe ne gagne : garde-fou interne 50 ms du
+# daemon, abort au seuil EXPLORER_RSS_LIMIT_MB).
+memory-stats = "1.2"
 # IDNA/punycode UTS-46 pour explorer-net::url (ADR-0002, étape 3) —
 # pur Rust, pas de *-sys.
 idna = "1.0"
@@ -175,3 +179,7 @@ debug = true
 [profile.release]
 lto = "thin"
 codegen-units = 1
+# Tables de lignes seules : backtraces nommées (site exact des
+# aborts allocateur §B-59 en vol) sans coût runtime — le symbole
+# collapsé `set_page_referrer` cachait le vrai site fautif.
+debug = "line-tables-only"
