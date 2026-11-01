@@ -44,6 +44,7 @@
 mod ast;
 mod builtins;
 mod channel;
+mod cmp;
 mod collections;
 mod context;
 mod crypto;
@@ -81,6 +82,7 @@ mod websocket;
 mod worker;
 mod xhr;
 
+pub use cmp::{CmpConsent, CmpPolicy};
 pub use context::CtxId;
 pub use crypto::{
     CryptoOp, CryptoRequest, CryptoResponse, CryptoTransport, DigestAlgo, ImportFormat, KeyAlgo,

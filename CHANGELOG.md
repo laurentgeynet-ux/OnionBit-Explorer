@@ -7,6 +7,54 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **JS-C259 — `__tcfapi` résolveur
+  + APIs sœurs CMP** (`explorer-
+  jscore`, `explorer-js`,
+  `explorer-core`, §B-4 bras CMP —
+  ADR-0031, étape CMP-2) — sous
+  politique résolue (`RejectAll`/
+  `AcceptAll`, poussée au spawn
+  via `JsEngine::set_cmp_consent`
+  avant `install_dom`),
+  `__tcfapi` quitte le stub honnête
+  JS-C213 : `ping` → descripteur
+  CMP chargée, `addEventListener`
+  invoque le callback avec un
+  `tcData` IAB v2 complet
+  (`eventStatus:'tcloaded'`,
+  `listenerId` croissant, bitfields
+  purposes/vendors de la
+  politique), `getTCData`/
+  `getInAppTCData`/`getVendorList`/
+  `getCustomVendorConsents`
+  servis. `tcData.tcString` = la
+  valeur `euconsent-v2` réellement
+  dans le jar — cookie ↔ API
+  cohérents. Sœurs bornées aux
+  call-shapes vus au vol :
+  `__cmp` (v1), `__uspapi`,
+  `__gpp` (`ping`), `__sdcmpapi`
+  (Sirdata), `OnetrustActiveGroups`/
+  `OptanonWrapper` (assignation →
+  appel immédiat), `Didomi`/
+  `didomiState`/`didomiOnReady`
+  (`push` intercepté), `_sp_`,
+  `Osano`, `__tcfapiLocator`
+  (marqueur). Tout est `FIXED` :
+  ni assignation ni
+  `Object.defineProperty` ni
+  `didomiOnReady = []` ne
+  remplacent le résolveur —
+  résilience aux redéfinitions,
+  état engine-global hérité par
+  les realms enfants. `Honest`
+  conserve le stub CMP-less.
+  Verrous : 18 jscore (ping par
+  politique, tcData, ids, shims,
+  redéfinitions, realm enfant) +
+  3 session (gate ouvert sous
+  `RejectAll`, inerte sous
+  `Honest`, `tcString` == cookie).
 - **Étape 171 — Politique de
   consentement CMP + graines de
   cookies** (`explorer-net`,

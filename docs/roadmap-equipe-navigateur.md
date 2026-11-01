@@ -5325,6 +5325,42 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   Verrou
   `apply_giant_array_soft_killed`.
 
+- [x] **JS-C259. `__tcfapi`
+  résolveur + APIs sœurs CMP**
+  (`explorer-jscore`,
+  `explorer-js`, `explorer-core`,
+  §B-4 bras CMP — ADR-0031, étape
+  CMP-2) — le stub honnête JS-C213
+  laissait les gates
+  `addEventListener` attendre
+  éternellement : sous politique
+  résolue (poussée par
+  `set_cmp_consent` avant
+  `install_dom`), `__tcfapi` sert
+  un `tcData` IAB v2 complet
+  (`tcloaded`, `listenerId`,
+  bitfields de la politique ;
+  `tcString` = l'`euconsent-v2`
+  du jar — cookie ↔ API cohérents).
+  Sœurs bornées aux call-shapes du
+  corpus : `__cmp`, `__uspapi`,
+  `__gpp`, `__sdcmpapi` (Sirdata),
+  `OnetrustActiveGroups`/
+  `OptanonWrapper`, `Didomi`/
+  `didomiOnReady` (`push` → appel
+  immédiat), `_sp_`, `Osano`. Props
+  `FIXED` partout — résilience aux
+  redéfinitions (`defineProperty`,
+  `didomiOnReady = []`), realms
+  enfants couverts. `Honest` garde
+  le stub CMP-less. Verrous : 18
+  jscore + 3 session. File CMP
+  restante : réarmement
+  `type=text/plain` marqué CMP
+  (le vrai anti-mur),
+  substitution SDKs bornée,
+  re-vols terrain.
+
 - [x] **Étape 171. Politique de
   consentement CMP + graines de
   cookies** (`explorer-net`,
@@ -5360,7 +5396,8 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   `EXPLORER_CONSENT_POLICY`
   + verdict `consent_wall:hard`
   (murs consent-or-pay). File CMP :
-  `__tcfapi` résolveur, réarmement
+  ~~`__tcfapi` résolveur~~ (livré,
+  JS-C259), réarmement
   `type=text/plain` marqué CMP,
   substitution SDKs bornée.
 

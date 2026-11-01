@@ -883,6 +883,12 @@ impl Session {
                 self.viewport.0.max(0.0).round() as u32,
                 self.viewport.1.max(0.0).round() as u32,
             );
+            // Consentement CMP (JS-C259, ADR-0031) — **avant**
+            // `install_dom` : `install_misc` pose `__tcfapi`
+            // (résolveur ou stub honnête) au chargement du
+            // miroir. L'état est engine-global → les contextes
+            // enfants (`install_dom_ctx`) héritent la décision.
+            e.set_cmp_consent(self.cmp_consent(&page_url));
             e.install_dom(html, &page_url, hist_len);
             // « loading » jusqu'au DCL de commit (net.rs) —
             // retient les `postMessage` entrants tant que les
@@ -943,6 +949,46 @@ impl Session {
             }
             e
         })
+    }
+
+    /// Décision CMP poussée au moteur (JS-C259, ADR-0031) —
+    /// miroir de `SessionConfig::consent_policy` sur le type
+    /// autonome d'`explorer-jscore` (jscore reste sans
+    /// dépendance interne ; le mapping vit ici).
+    ///
+    /// `tc_string` = la valeur `euconsent-v2` réellement dans
+    /// le jar : `tcData.tcString` et `document.cookie`
+    /// servent la même chaîne (le jar est semé en
+    /// `nav_begin`, avant le premier hop). Absente — politique
+    /// `Honest`, jar sans graine — encodage frais de la
+    /// politique (même décision, horodatage du spawn).
+    fn cmp_consent(&self, page_url: &str) -> explorer_js::CmpConsent {
+        use explorer_net::consent::{ConsentPolicy, DEFAULT_MAX_VENDOR_ID};
+        let policy = match self.consent_policy {
+            ConsentPolicy::Honest => return explorer_js::CmpConsent::default(),
+            ConsentPolicy::RejectAll => explorer_js::CmpPolicy::RejectAll,
+            ConsentPolicy::AcceptAll => explorer_js::CmpPolicy::AcceptAll,
+        };
+        let tc_string = Url::parse(page_url)
+            .ok()
+            .and_then(|u| {
+                cookie_header_value(&self.cookies.header_for(&u, false), "euconsent-v2")
+                    .map(str::to_string)
+            })
+            .unwrap_or_else(|| {
+                explorer_net::consent::encode_tc_string(
+                    &explorer_net::consent::tc_consent_for_policy(
+                        self.consent_policy,
+                        std::time::SystemTime::now(),
+                    ),
+                )
+            });
+        explorer_js::CmpConsent {
+            policy,
+            tc_string,
+            max_vendor_id: u16::try_from(DEFAULT_MAX_VENDOR_ID).unwrap_or(u16::MAX),
+            gdpr_applies: true,
+        }
     }
 
     /// Étape 134 — câblage `SubFrame` → contexte JS : un
@@ -1814,6 +1860,18 @@ fn key_code_of(key: &str) -> (String, u16) {
         },
         _ => (String::new(), 0),
     }
+}
+
+/// Valeur du cookie `name` dans un header `Cookie:` —
+/// première occurrence (`"a=1; b=2"`), `None` si absente.
+/// `cmp_consent` s'en sert pour servir à `tcData.tcString`
+/// la même TC string que `document.cookie`.
+fn cookie_header_value<'a>(header: &'a str, name: &str) -> Option<&'a str> {
+    header.split(';').map(str::trim).find_map(|kv| {
+        kv.strip_prefix(name)
+            .and_then(|rest| rest.strip_prefix('='))
+            .map(str::trim)
+    })
 }
 
 /// En-tête de source fautive pour le diagnostic — espaces

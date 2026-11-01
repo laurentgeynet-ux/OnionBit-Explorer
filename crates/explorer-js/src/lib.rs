@@ -1025,6 +1025,13 @@ pub trait JsEngine: Send {
     /// (env `Default` : scheme clair, souris fine).
     fn set_media_env(&mut self, _env: explorer_jscore::MediaEnv) {}
 
+    /// Décision de consentement CMP de la session (JS-C259,
+    /// ADR-0031 — miroir de `SessionConfig::consent_policy`) —
+    /// posée avant `install_dom` ; `__tcfapi` répond alors le
+    /// `tcData` de la politique au lieu du stub CMP-less.
+    /// Défaut : no-op (comportement honnête historique).
+    fn set_cmp_consent(&mut self, _c: explorer_jscore::CmpConsent) {}
+
     /// `document.referrer` (CAP-156) : le `Referer` envoyé
     /// par la navigation du document (`""` = aucun) — posé
     /// après `install_dom`, avant la première évaluation.
@@ -1426,6 +1433,7 @@ pub fn null_factory() -> JsFactory {
 
 pub use explorer_jscore::module_specifiers;
 pub use explorer_jscore::MediaEnv;
+pub use explorer_jscore::{CmpConsent, CmpPolicy};
 // Issue #19 / JS-8 — table de géométrie session↔moteur
 // (ré-export : le type reste unique — la session construit et
 // remplit, le moteur lit).
@@ -1675,6 +1683,12 @@ enum Cmd {
     },
     SetMediaEnv {
         env: explorer_jscore::MediaEnv,
+    },
+    /// Décision CMP de la session (JS-C259, ADR-0031) —
+    /// poussée au spawn **avant** `install_dom` : `install_misc`
+    /// pose alors le résolveur `__tcfapi` (ou le stub honnête).
+    SetCmpConsent {
+        c: explorer_jscore::CmpConsent,
     },
     /// Viewport CSS px poussé au moteur (CAP-161) —
     /// `innerWidth`/`screen`/`matchMedia` en dépendent.
@@ -2240,6 +2254,9 @@ impl JscoreEngine {
                     }
                     Cmd::SetMediaEnv { env } => {
                         eng.set_media_env(env);
+                    }
+                    Cmd::SetCmpConsent { c } => {
+                        eng.set_cmp_consent(c);
                     }
                     Cmd::SetViewport { w, h } => {
                         eng.set_viewport(w, h);
@@ -3128,6 +3145,10 @@ impl JsEngine for JscoreEngine {
 
     fn set_media_env(&mut self, env: explorer_jscore::MediaEnv) {
         let _ = self.tx.send(Cmd::SetMediaEnv { env });
+    }
+
+    fn set_cmp_consent(&mut self, c: explorer_jscore::CmpConsent) {
+        let _ = self.tx.send(Cmd::SetCmpConsent { c });
     }
 
     fn set_page_referrer(&mut self, referrer: &str) {

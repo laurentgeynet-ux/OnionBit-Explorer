@@ -408,6 +408,11 @@ pub struct Engine {
     /// `reportError` bookkeeping (JS-C74) — protos, registre
     /// de canaux et messages livrés au checkpoint microtask.
     pub(crate) misc: crate::misc_apis::MiscState,
+    /// Consentement CMP de la session (JS-C259, ADR-0031) —
+    /// poussé par `set_cmp_consent` **avant** `install_dom` ;
+    /// `install_misc` lit `policy` pour installer le
+    /// résolveur `__tcfapi` ou le stub honnête.
+    pub(crate) cmp: crate::cmp::CmpConsent,
     /// `crypto.subtle` bookkeeping (JS-C79) — opérations en
     /// vol du contexte courant (handle → promesse).
     pub(crate) crypto: crate::crypto::CryptoState,
@@ -938,6 +943,7 @@ impl Engine {
             es: crate::eventsource::EsState::default(),
             mse: crate::mse::MseState::default(),
             misc: crate::misc_apis::MiscState::default(),
+            cmp: crate::cmp::CmpConsent::default(),
             crypto: crate::crypto::CryptoState::default(),
             crypto_transport: None,
             es_transport: None,

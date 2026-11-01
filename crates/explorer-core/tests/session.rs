@@ -4308,6 +4308,69 @@ async fn consent_seeds_accept_all() {
     assert!(!jarred.contains("C0002:0"));
 }
 
+// ===== JS-C259 — `__tcfapi` résolveur piloté par la session =====
+
+/// Page gatée `__tcfapi` : le listener `addEventListener`
+/// ouvre la porte quand la CMP répond `tcloaded` (bras
+/// « avalé synchrone » de §B-4 — le gate attend le callback).
+const PAGE_TCF_GATE: &str = "<!doctype html><html><body><div id=\"x\">closed</div>\
+    <script>__tcfapi('addEventListener',2,function(t,s){\
+    if(s&&t.eventStatus==='tcloaded'){document.getElementById('x').textContent='open'}})</script>\
+    </body></html>";
+
+/// `RejectAll` → le résolveur livre `tcloaded`, le gate
+/// s'ouvre (mutation DOM — signature d'un boot débloqué).
+#[tokio::test]
+async fn tcfapi_gate_opens_under_reject() {
+    let (mut s, t) = test_session_policy(explorer_net::consent::ConsentPolicy::RejectAll);
+    t.route("/", 200, PAGE_TCF_GATE);
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let tab = s.open_tab();
+    s.navigate(tab, "http://h.test/").await.unwrap();
+    let dump = s.dom_dump(tab).unwrap_or_default();
+    assert!(dump.contains("\"open\""), "gate `__tcfapi` résolu → {dump}");
+}
+
+/// `Honest` → stub CMP-less inchangé : `(null,false)`, le
+/// gate reste fermé — comportement ante CMP-2 préservé.
+#[tokio::test]
+async fn tcfapi_gate_stays_shut_under_honest() {
+    let (mut s, t) = test_session_policy(explorer_net::consent::ConsentPolicy::Honest);
+    t.route("/", 200, PAGE_TCF_GATE);
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let tab = s.open_tab();
+    s.navigate(tab, "http://h.test/").await.unwrap();
+    let dump = s.dom_dump(tab).unwrap_or_default();
+    assert!(
+        dump.contains("\"closed\""),
+        "gate `__tcfapi` inerte sous Honest → {dump}"
+    );
+}
+
+/// Cohérence cookie ↔ API (ADR-0031) : `tcData.tcString` =
+/// la valeur `euconsent-v2` réellement dans le jar (relue en
+/// `cmp_consent` — un site qui compare les deux trouve la
+/// même chaîne, pas deux encodages horodatés distincts).
+const PAGE_TCF_COHERENT: &str = "<!doctype html><html><body><div id=\"x\">?</div>\
+    <script>__tcfapi('getTCData',2,function(t,s){\
+    var c=(document.cookie.match(/euconsent-v2=([^;]*)/)||[])[1];\
+    document.getElementById('x').textContent=(s&&t.tcString===c)?'same':'diff'})</script>\
+    </body></html>";
+
+#[tokio::test]
+async fn tcfapi_tcstring_matches_seeded_cookie() {
+    let (mut s, t) = test_session_policy(explorer_net::consent::ConsentPolicy::RejectAll);
+    t.route("/", 200, PAGE_TCF_COHERENT);
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let tab = s.open_tab();
+    s.navigate(tab, "http://h.test/").await.unwrap();
+    let dump = s.dom_dump(tab).unwrap_or_default();
+    assert!(
+        dump.contains("\"same\""),
+        "tcData.tcString == cookie euconsent-v2 → {dump}"
+    );
+}
+
 /// `localStorage` : écrit dans un document, relu dans le
 /// suivant (même origine — map de session drainée/installée).
 const PAGE_LS_SET: &str = "<!doctype html><html><body><p>x</p>\

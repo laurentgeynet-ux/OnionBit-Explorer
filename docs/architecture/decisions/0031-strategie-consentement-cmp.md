@@ -1,7 +1,7 @@
 # ADR-0031 — Stratégie consentement CMP : politique de session, pas émulation SDK
 
-Date : 2026-11-01 · Statut : **acceptée** — Étape 171 (§B-4
-bras CMP).
+Date : 2026-11-01 · Statut : **acceptée** — Étape 171 +
+JS-C259 (§B-4 bras CMP).
 
 ## Contexte
 
@@ -23,7 +23,9 @@ Trois mécanismes observés au terrain :
    fifa),
 3. le consentement ne se résout jamais — le stub `__tcfapi`
    honnête (JS-C213) répond « pas de CMP » et les listeners
-   attendent éternellement un `tcData`.
+   attendent éternellement un `tcData` — **résolu en
+   JS-C259** sous politique non-`Honest` : résolveur formé
+   IAB v2 piloté par la session.
 
 Plus profond : OneTrust/Cookiebot/Didomi servent les vrais
 scripts en `type="text/plain"` (+ marqueurs
@@ -85,10 +87,35 @@ politique.
   (défaut `RejectAll`), `seed_consent_cookies` appelé dans
   `nav_begin` — le `Cookie:` de la requête top-level et la vue
   `document.cookie` portent la décision dès le premier hop.
-- Travaux suivants (même ADR, étapes dédiées) : upgrade
-  `__tcfapi` en résolveur formé IAB v2 + APIs sœurs bornées
-  (`__gpp`, `OnetrustActiveGroups`…) ; réarmement des
-  balises `text/plain` marquées CMP sous politique résolue ;
-  substitution de SDKs CMP (`consent_stub_for`) au cas par
-  cas uniquement — chaque hôte substitué est une entrée de
-  table documentée, pas une émulation générique.
+- **Livré (JS-C259)** : `__tcfapi` résolveur formé IAB v2
+  piloté par la session — `CmpConsent`/`CmpPolicy` autonomes
+  dans `explorer-jscore` (aucune dépendance interne),
+  traversée `JsEngine::set_cmp_consent` → `Cmd::SetCmpConsent`
+  → `Engine::set_cmp_consent`, posée avant `install_dom`.
+  `tcData` complet (`tcloaded`, `listenerId` croissant,
+  bitfields purposes/vendors de la politique) ;
+  `tcData.tcString` = l'`euconsent-v2` **relu du jar**
+  (`cmp_consent` dans `js_glue`) — `document.cookie` et
+  l'API servent la même chaîne. APIs sœurs bornées aux
+  call-shapes du corpus : `__cmp` (v1), `__uspapi`, `__gpp`,
+  `__sdcmpapi` (Sirdata), `OnetrustActiveGroups`/
+  `OptanonWrapper` (setter → appel immédiat),
+  `Didomi`/`didomiState`/`didomiOnReady` (`push` intercepté),
+  `_sp_`, `Osano`, `__tcfapiLocator` (marqueur — le pont
+  `postMessage` `__tcfapiCall` reste un trou documenté).
+  Toutes les props sont posées `FIXED` (non-rewritable,
+  non-configurable) : ni assignation ni
+  `Object.defineProperty` ni `didomiOnReady = []` ne
+  remplacent le résolveur — résilience aux redéfinitions.
+  L'état `Engine::cmp` est global au moteur : les realms
+  enfants (`install_dom_ctx`) héritent la même décision.
+  `Honest` conserve le stub CMP-less JS-C213 inchangé.
+- Travaux suivants (même ADR, étapes dédiées) : réarmement
+  des balises `text/plain` marquées CMP sous politique
+  résolue (`optanon-category`, `data-cookieconsent`,
+  `data-purpose`, `data-src` — le bras dominant du « meurent
+  avant `<video>` ») ; substitution de SDKs CMP
+  (`consent_stub_for`) au cas par cas uniquement — chaque
+  hôte substitué est une entrée de table documentée, pas une
+  émulation générique ; tag `cmp=<vendor>` dans le WARN
+  `evals_sans_mutation` + re-vols terrain du corpus EU.
