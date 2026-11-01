@@ -7,6 +7,27 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **JS-C254 — split parse/exec +
+  alloc natif par éval**
+  (`explorer-jscore`,
+  `explorer-js`) — instrument
+  d'ordre de la file perf §B-59 :
+  le mur 34 Ko/s est parse OU
+  interprète — `Engine` accumule
+  `parse_us` (autour de
+  `parse_in`/`parse_module_in`,
+  deps de graphe incluses) et
+  `exec_us` (exécution seule) par
+  entrée publique
+  (`last_eval_split`) ; le worker
+  logue `js_alloc` par éval —
+  `kind`, `name`, `bytes`, `us`,
+  `parse_us`, `exec_us`,
+  `alloc_b`/`alloc_n` fil-local
+  (`EXPLORER_ALLOC_TRACE` pour
+  les compteurs, le split wall
+  est toujours émis). Verrou
+  `eval_split_surfaces`.
 - **Churn §B-59 — salve perf**
   (`explorer-jscore`) — suite de
   JS-C253, mesuré YouTube cumulé :

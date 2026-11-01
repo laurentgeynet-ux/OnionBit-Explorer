@@ -63,3 +63,19 @@ fn real_bundles_first_error() {
         }
     }
 }
+
+/// Verrou instrument §B-59 : `last_eval_split` est câblé —
+/// un script conséquent y laisse un `parse_us` > 0, et le
+/// split repart de zéro à l'éval suivante (accumulation par
+/// entrée publique, pas écrasement des petites évals).
+#[test]
+fn eval_split_surfaces() {
+    let mut e = Engine::new();
+    let big = format!("var s=0;{}", "s+=1;".repeat(20_000));
+    assert!(e.eval(&big).is_ok());
+    let (p1, _x1) = e.last_eval_split();
+    assert!(p1 > 0, "parse_us devrait être >0 sur ~100 Ko");
+    assert!(e.eval("1").is_ok());
+    let (p2, _x2) = e.last_eval_split();
+    assert!(p2 < p1, "split remis à zéro à l'entrée suivante");
+}

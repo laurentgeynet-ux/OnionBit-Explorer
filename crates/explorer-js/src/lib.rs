@@ -2121,10 +2121,13 @@ impl JscoreEngine {
                 let crypto_next = &crypto_next;
                 let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || match cmd {
                     Cmd::Eval { src, name, tx } => {
+                        let _ = explorer_common::alloc_delta();
+                        let t0 = std::time::Instant::now();
                         let res = match &name {
                             Some(n) => eng.eval_named(&src, n),
                             None => eng.eval(&src),
                         };
+                        note_eval(eng, "eval", name.as_deref(), src.len(), t0, res.is_ok());
                         let out = match res {
                             Ok(v) => Ok(eng.describe(v)),
                             Err(e) => Err(JsError::from(e)),
@@ -2345,7 +2348,10 @@ impl JscoreEngine {
                         resolve,
                         tx,
                     } => {
+                        let _ = explorer_common::alloc_delta();
+                        let t0 = std::time::Instant::now();
                         let out = eval_module(eng, &entry, sources, resolve);
+                        note_eval(eng, "module", Some(&entry), 0, t0, out.is_ok());
                         let _ = tx.send(out);
                     }
                     Cmd::SetImportMap { json } => eng.set_import_map(&json),
@@ -2478,10 +2484,13 @@ impl JscoreEngine {
                         let prev = eng.current_context();
                         eng.context_switch(ctx);
                         let out = if eng.current_context() == ctx {
+                            let _ = explorer_common::alloc_delta();
+                            let t0 = std::time::Instant::now();
                             let res = match &name {
                                 Some(n) => eng.eval_named(&src, n),
                                 None => eng.eval(&src),
                             };
+                            note_eval(eng, "eval_ctx", name.as_deref(), src.len(), t0, res.is_ok());
                             match res {
                                 Ok(v) => Ok(eng.describe(v)),
                                 Err(e) => Err(JsError::from(e)),
@@ -2502,7 +2511,11 @@ impl JscoreEngine {
                         let prev = eng.current_context();
                         eng.context_switch(ctx);
                         let out = if eng.current_context() == ctx {
-                            match eng.eval_script_el(&src, name.as_deref(), ord) {
+                            let _ = explorer_common::alloc_delta();
+                            let t0 = std::time::Instant::now();
+                            let r = eng.eval_script_el(&src, name.as_deref(), ord);
+                            note_eval(eng, "script_el", name.as_deref(), src.len(), t0, r.is_ok());
+                            match r {
                                 Ok(v) => Ok(eng.describe(v)),
                                 Err(e) => Err(JsError::from(e)),
                             }
@@ -3434,6 +3447,39 @@ impl Drop for JscoreEngine {
             let _ = j.join();
         }
     }
+}
+
+/// Instrument §B-59 perf (ordre de la file VM) : par éval,
+/// split wall `parse_us`/`exec_us` (mesuré dans le moteur) +
+/// **allocation native fil-locale** `alloc_b`/`alloc_n` —
+/// `EXPLORER_ALLOC_TRACE` requis pour les compteurs alloc
+/// (sinon 0, le split wall reste émis). Émis sur la cible
+/// `js_alloc` — coût quasi nul, la baseline `alloc_delta`
+/// posée par le bras avant l'éval borne la fenêtre à cette
+/// éval seule sur ce fil (drains/livrées inter-évals exclus).
+fn note_eval(
+    eng: &explorer_jscore::Engine,
+    kind: &'static str,
+    name: Option<&str>,
+    bytes: usize,
+    t0: std::time::Instant,
+    ok: bool,
+) {
+    let (parse_us, exec_us) = eng.last_eval_split();
+    let (alloc_b, alloc_n) = explorer_common::alloc_delta().unwrap_or((0, 0));
+    tracing::info!(
+        target: "js_alloc",
+        kind,
+        name = name.unwrap_or(""),
+        bytes,
+        us = u64::try_from(t0.elapsed().as_micros()).unwrap_or(u64::MAX),
+        parse_us,
+        exec_us,
+        alloc_b,
+        alloc_n,
+        ok,
+        "eval split"
+    );
 }
 
 /// `Cmd::EvalModule` côté worker : le graphe préfetché est

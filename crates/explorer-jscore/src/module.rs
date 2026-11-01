@@ -267,6 +267,7 @@ impl Engine {
     /// `Error::Syntax` on parse failure, `Error::Uncaught` if a module
     /// body threw or a specifier could not be resolved/loaded.
     pub fn eval_module(&mut self, src: &str, name: &str) -> Result<Value> {
+        self.reset_eval_split();
         // Même relèvement `BOOT_OPS_FACTOR` que `run_program`
         // (§B-23 bras É166 — modules lourds légitimes dans la
         // fenêtre boot 60 s).
@@ -307,7 +308,9 @@ impl Engine {
 
     fn eval_module_inner(&mut self, src: &str, name: &str) -> JsResult<Value> {
         let idx = self.instantiate(name, name, src, 0)?;
+        let tx = std::time::Instant::now();
         self.evaluate_module(idx)?;
+        self.note_exec(tx);
         if std::env::var("DBG_DRIVE").is_ok() {
             eprintln!("[eval_mod] ns_object idx={idx}");
         }
@@ -468,6 +471,7 @@ impl Engine {
         if depth > MAX_MODULE_DEPTH {
             return Err(self.type_error("module graph too deep"));
         }
+        let tp = std::time::Instant::now();
         let prog =
             parser::parse_module_in(src, self.nest_limit, Some(Rc::from(spec))).map_err(|err| {
                 if std::env::var("DBG_DRIVE").is_ok() {
@@ -484,6 +488,7 @@ impl Engine {
                     &format!("{err} — «{spec}»"),
                 ))
             })?;
+        self.note_parse(tp);
         let env = Env::local(self.global_env.clone());
         // Liaison lexicale du spec résolu — `import.meta.url` et
         // le référent de `import()` se résolvent dans l'env du

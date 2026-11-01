@@ -5235,6 +5235,24 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   retombé sous borne rallume,
   vivant réel garde le verrou).
 
+- [x] **JS-C254. Split parse/exec +
+  alloc natif par éval**
+  (`explorer-jscore`,
+  `explorer-js`, §B-59 file perf)
+  — `Engine::last_eval_split`
+  accumule `parse_us`/`exec_us`
+  par entrée publique
+  (`parse_in`/`parse_module_in`,
+  deps de graphe incluses) ; le
+  worker émet `js_alloc` par éval
+  (`kind/name/bytes/us/parse_us/
+  exec_us/alloc_b/alloc_n`,
+  `EXPLORER_ALLOC_TRACE` pour les
+  compteurs) — la file VM
+  s'ordonne sur l'attribution,
+  pas à l'aveugle. Verrou
+  `eval_split_surfaces`.
+
 - [ ] **Écarts terrain — vol humain
   22/10 (release `39ab821`, FFI)** :
   second run humain — trois constats

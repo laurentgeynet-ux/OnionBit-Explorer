@@ -10,6 +10,7 @@ description = "Trait JsEngine + bindings DOM — couture vers le moteur explorer
 workspace = true
 
 [dependencies]
+explorer-common.workspace = true
 explorer-dom.workspace = true
 explorer-jscore.workspace = true
 thiserror.workspace = true

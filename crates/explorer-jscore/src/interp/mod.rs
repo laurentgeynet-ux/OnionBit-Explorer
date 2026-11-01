@@ -313,6 +313,14 @@ pub struct Engine {
     /// Total cumulé des `tick` — compteur d'ops exposé par
     /// [`Engine::heap_stats`]/[`Engine::ops_used`] (métriques).
     ops_total: u64,
+    /// Split wall-clock de la dernière entrée publique
+    /// (`eval`/`eval_named`/`eval_script_el`/`eval_module`) :
+    /// µs de parse (tokenizer+AST) et µs d'exécution+drains —
+    /// instrument §B-59 perf (34 Ko/s mesuré : le mur est
+    /// parse OU interprète — la file d'optimisation s'ordonne
+    /// sur ce chiffre, pas à l'aveugle).
+    last_parse_us: u64,
+    last_exec_us: u64,
     /// Deadline wall-clock du batch courant (éval / drain timers
     /// / microtasks) — armée par `arm_eval_deadline` aux bornes
     /// publiques, vérifiée dans `tick` (J1 : une rafale post-apply
@@ -885,6 +893,8 @@ impl Engine {
             deadline_hit: false,
             gc_threshold: DEFAULT_GC_THRESHOLD,
             ops_total: 0,
+            last_parse_us: 0,
+            last_exec_us: 0,
             timers: crate::timers::TimerQueue::default(),
             xhr: crate::xhr::XhrEngineState::default(),
             dom_ctx: None,
@@ -2689,7 +2699,10 @@ impl Engine {
     /// `Error::Syntax` on parse failure, `Error::Uncaught` if the
     /// script threw and nothing caught it.
     pub fn eval(&mut self, src: &str) -> Result<Value> {
+        self.reset_eval_split();
+        let tp = Instant::now();
         let prog = parser::parse_in(src, false, self.nest_limit, None)?;
+        self.note_parse(tp);
         self.run_program(&prog)
     }
 
@@ -2701,7 +2714,10 @@ impl Engine {
     /// # Errors
     /// Identique à [`Engine::eval`].
     pub fn eval_named(&mut self, src: &str, name: &str) -> Result<Value> {
+        self.reset_eval_split();
+        let tp = Instant::now();
         let prog = parser::parse_in(src, false, self.nest_limit, Some(std::rc::Rc::from(name)))?;
+        self.note_parse(tp);
         self.run_program(&prog)
     }
 
@@ -2732,7 +2748,10 @@ impl Engine {
         });
         let prev = self.hooks.current_script;
         self.hooks.current_script = el;
+        self.reset_eval_split();
+        let tp = Instant::now();
         let prog = parser::parse_in(src, false, self.nest_limit, name.map(std::rc::Rc::from));
+        self.note_parse(tp);
         let r = match prog {
             Ok(p) => self.run_program(&p),
             Err(e) => Err(e),
@@ -2744,6 +2763,37 @@ impl Engine {
         // checkpoint qui la court — parité stricte.
         self.hooks.current_script = prev;
         r
+    }
+
+    /// Chronométrage parse/exec de la dernière entrée publique
+    /// (`parse_us`, `exec_us`) — accumulé autour de
+    /// `parse_in`/`parse_module_in` (par module d'un graphe,
+    /// deps incluses) et de l'exécution seule (les drains
+    /// microtasks/timers suivants restent imputés au job,
+    /// pas au split). Instrument d'ordre de la file perf
+    /// §B-59 : un mur parse → tokenizer/AST, un mur exec →
+    /// interprète (lookups, allocs par op).
+    #[must_use]
+    pub fn last_eval_split(&self) -> (u64, u64) {
+        (self.last_parse_us, self.last_exec_us)
+    }
+
+    /// Frontière d'entrée publique — le split repart à zéro.
+    pub(crate) fn reset_eval_split(&mut self) {
+        self.last_parse_us = 0;
+        self.last_exec_us = 0;
+    }
+
+    pub(crate) fn note_parse(&mut self, start: Instant) {
+        self.last_parse_us = self
+            .last_parse_us
+            .saturating_add(u64::try_from(start.elapsed().as_micros()).unwrap_or(u64::MAX));
+    }
+
+    pub(crate) fn note_exec(&mut self, start: Instant) {
+        self.last_exec_us = self
+            .last_exec_us
+            .saturating_add(u64::try_from(start.elapsed().as_micros()).unwrap_or(u64::MAX));
     }
 
     /// Corps partagé d'`eval`/`eval_named` : budget d'ops
@@ -2760,11 +2810,13 @@ impl Engine {
         // mais pas plus vivant.
         self.ops_left = self.op_limit.saturating_mul(BOOT_OPS_FACTOR);
         self.arm_eval_deadline_boot();
+        let tx = Instant::now();
         let r = match self.exec_program(prog) {
             Ok(v) => Ok(v),
             Err(Thrown(_v)) if self.deadline_hit => Err(Error::Deadline),
             Err(Thrown(v)) => Err(Error::Uncaught(self.describe(v))),
         };
+        self.note_exec(tx);
         if let Err(Thrown(v)) = self.run_microtasks_in_boot() {
             if self.deadline_hit {
                 return Err(Error::Deadline);
