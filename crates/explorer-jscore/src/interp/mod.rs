@@ -615,6 +615,13 @@ pub struct Engine {
     /// Plafond cumulatif — `EXPLORER_JS_EVAL_SRC_CAP`, défaut
     /// [`DEFAULT_EVAL_SRC_CAP`].
     pub(crate) eval_src_cap: usize,
+    /// Kill doux RSS (§B-59 bras 4 + filet universel) — le
+    /// compteur `heap.bytes` ne voit ni les envs natifs ni le
+    /// churn malloc : seule la lecture RSS nomme la croissance
+    /// réelle. `EXPLORER_JS_RSS_KILL_MB` armé → `tick` tue
+    /// l'éval en `RangeError` (moteur vivant) au lieu de
+    /// l'abort process du garde externe.
+    pub(crate) rss_kill_mb: usize,
 }
 
 /// Dernier match `RegExp` — `RegExp.$1…$9`/`input`/`lastMatch`/…
@@ -998,6 +1005,10 @@ impl Engine {
                 .ok()
                 .and_then(|v| v.parse::<usize>().ok())
                 .unwrap_or(DEFAULT_EVAL_SRC_CAP),
+            rss_kill_mb: std::env::var("EXPLORER_JS_RSS_KILL_MB")
+                .ok()
+                .and_then(|v| v.parse::<usize>().ok())
+                .unwrap_or(0),
         };
         crate::builtins::install(&mut e);
         crate::collections::install(&mut e);
@@ -3544,6 +3555,22 @@ impl Engine {
         }
         self.ops_left -= 1;
         self.ops_total += 1;
+        // Kill doux RSS — hors du gate 256 ops : à ~7 Mo/op
+        // mesurés en burst, une fenêtre de 256 ops = ~1,7 Go
+        // non bornés (actugaming 4 975 → 6 736 Mo entre deux
+        // dumps). Armé via `EXPLORER_JS_RSS_KILL_MB` : check à
+        // chaque tick (~µs `memory_stats`), absent = zéro coût.
+        if self.rss_kill_mb > 0 {
+            if let Some(m) = memory_stats::memory_stats() {
+                let rss = m.physical_mem / (1024 * 1024);
+                if rss > self.rss_kill_mb {
+                    return Err(self.range_error(format!(
+                        "process RSS limit exceeded ({rss} MiB > {} MiB — native reservoir bound)",
+                        self.rss_kill_mb
+                    )));
+                }
+            }
+        }
         // Deadline relue périodiquement (bras débit youtube/
         // ytembed — `Instant::now()` est un syscall de ~20-40 ns
         // : ×10⁷ ticks ≈ des secondes d'horloge pure sur un gros
@@ -3624,6 +3651,7 @@ impl Engine {
                             ops = self.ops_total,
                             timers = self.timers.pending_len(),
                             utasks = self.microtasks.len(),
+                            envs = crate::heap::envs_live(),
                             kinds,
                             top,
                             "tick_rss"
@@ -3746,6 +3774,23 @@ impl Engine {
         };
         if bytes > lim {
             return Err(self.range_error("allocation exceeds engine limits"));
+        }
+        // §B-59 — le kill RSS borne aussi **entre** les ticks :
+        // un span natif unique (`s+s` double, `join` géant,
+        // `repeat`) peut allouer >1 Go sans statement boundary
+        // (actugaming : 5 496 → 6 660 Mo en <256 ops). Toutes
+        // les grosses allocs natives passent ici — check RSS à
+        // la demande, la géante meurt avant l'alloc.
+        if self.rss_kill_mb > 0 {
+            if let Some(m) = memory_stats::memory_stats() {
+                let rss = m.physical_mem / (1024 * 1024);
+                if rss > self.rss_kill_mb {
+                    return Err(self.range_error(format!(
+                        "process RSS limit exceeded ({rss} MiB > {} MiB — native reservoir bound)",
+                        self.rss_kill_mb
+                    )));
+                }
+            }
         }
         Ok(())
     }

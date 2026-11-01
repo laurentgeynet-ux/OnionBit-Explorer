@@ -22,6 +22,11 @@ impl Engine {
         self.eval_src_cap = cap;
     }
 
+    /// Kill doux RSS — tests et harnais bornés.
+    pub fn set_rss_kill_mb(&mut self, mb: usize) {
+        self.rss_kill_mb = mb;
+    }
+
     /// Borne §B-59 bras 3 — chaque `eval`/`Function` retient un
     /// AST `Rc<FnLit>` (masse native hors `heap.bytes`, mesuré
     /// ×41 RSS/compté). Cumul des octets source ; au-delà du

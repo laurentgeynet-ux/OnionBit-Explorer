@@ -151,6 +151,32 @@ fn eval_src_cap_kills_eval_loop() {
     assert_eq!(e.eval("1+1").ok().map(|v| e.describe(v)), Some("2".into()));
 }
 
+/// Verrou §B-59 filet — `EXPLORER_JS_RSS_KILL_MB` : le kill doux
+/// tue l'éval en `RangeError` quand le RSS process dépasse le
+/// seuil (réservoirs natifs hors `heap.bytes` — envs, AST,
+/// churn malloc), moteur vivant après le kill.
+#[test]
+fn rss_kill_soft_kills_eval() {
+    let mut e = Engine::new();
+    e.set_rss_kill_mb(1); // process déjà au-dessus → kill au 1er tick
+    let r = e.eval("var s=0;for(var i=0;i<1000000;i++){s+=i}s;");
+    match r {
+        Err(err) => {
+            let msg = format!("{err}");
+            assert!(
+                msg.contains("process RSS limit exceeded"),
+                "RangeError RSS attendu, obtenu : {msg}"
+            );
+        }
+        Ok(_) => panic!("l'éval aurait dû être tuée par le kill doux RSS"),
+    }
+    // Moteur vivant — kill désarmé, l'éval suivante réussit
+    // (à seuil bas le kill resterait armé : dégradation fatale
+    // documentée, jamais d'abort process).
+    e.set_rss_kill_mb(0);
+    assert_eq!(e.eval("1+1").ok().map(|v| e.describe(v)), Some("2".into()));
+}
+
 #[test]
 #[ignore = "terrain : rejoue le wrap.js §B-59 capturé"]
 fn confiant_wrap_under_mem_limit() {

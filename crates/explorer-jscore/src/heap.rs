@@ -1818,9 +1818,29 @@ pub struct Binding {
 /// Shared env handle.
 pub type EnvRef = Rc<RefCell<Env>>;
 
+thread_local! {
+    /// Envs vivants du fil moteur (§B-59 bras 4) — `Env` est
+    /// natif (`Rc`), hors `heap.bytes` : ce compteur est la
+    /// seule mesure du réservoir. Incrémenté aux 4
+    /// constructeurs, décrémenté au `Drop` — lecture exacte.
+    static ENVS_LIVE: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// Envs vivants — sonde §B-59 bras 4 (churn appels).
+pub fn envs_live() -> usize {
+    ENVS_LIVE.with(std::cell::Cell::get)
+}
+
+impl Drop for Env {
+    fn drop(&mut self) {
+        ENVS_LIVE.with(|c| c.set(c.get().saturating_sub(1)));
+    }
+}
+
 impl Env {
     /// New local scope chained to `parent`.
     pub fn local(parent: EnvRef) -> EnvRef {
+        ENVS_LIVE.with(|c| c.set(c.get() + 1));
         Rc::new(RefCell::new(Env {
             kind: EnvKind::Local(BindingMap::new()),
             parent: Some(parent),
@@ -1829,6 +1849,7 @@ impl Env {
 
     /// The global scope.
     pub fn global() -> EnvRef {
+        ENVS_LIVE.with(|c| c.set(c.get() + 1));
         Rc::new(RefCell::new(Env {
             kind: EnvKind::Global(BindingMap::new()),
             parent: None,
@@ -1838,6 +1859,7 @@ impl Env {
     /// New block scope chained to `parent` — `let`/`const` y vivent,
     /// `var` la traverse (voir [`EnvKind::Block`]).
     pub fn block(parent: EnvRef) -> EnvRef {
+        ENVS_LIVE.with(|c| c.set(c.get() + 1));
         Rc::new(RefCell::new(Env {
             kind: EnvKind::Block(BindingMap::new()),
             parent: Some(parent),
@@ -1846,6 +1868,7 @@ impl Env {
 
     /// `with (obj)` — object-as-scope chained to `parent`.
     pub fn with(parent: EnvRef, obj: ObjId) -> EnvRef {
+        ENVS_LIVE.with(|c| c.set(c.get() + 1));
         Rc::new(RefCell::new(Env {
             kind: EnvKind::With(obj),
             parent: Some(parent),
