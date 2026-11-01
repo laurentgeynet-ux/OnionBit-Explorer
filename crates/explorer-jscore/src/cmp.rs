@@ -15,13 +15,20 @@
 //! (`eventStatus:'tcloaded'`, `listenerId` croissant), les
 //! commandes data répondent la décision de la politique.
 //!
-//! # Résilience (bornage « redéfinition »)
+//! # Résilience (bornage « redéfinition », JS-C260)
 //!
-//! Les props sont posées `FIXED` (non-rewritable,
-//! non-configurable) : un SDK CMP qui réassigne
-//! `window.__tcfapi` (ou un site qui pose
-//! `window.didomiOnReady = []`) n'écrase pas le résolveur —
-//! la décision de politique reste la seule source servie.
+//! Les props sont des **accesseurs absorbants** (non
+//! configurables) : `get` rend notre résolveur/valeur,
+//! `set` avale l'écriture en silence. Un `Object.defineProperty`
+//! hostile échoue toujours (prop non-configurable), mais
+//! l'assignation ordinaire — `window.__tcfapi = fn` hostile,
+//! `didomiOnReady = didomiOnReady || []` **légitime** (idiome
+//! universel des vrais SDKs, §B-70 vol 503) — est absorbée
+//! sans `TypeError` : le résolveur survit ET le SDK ne meurt
+//! pas. `didomiOnReady` draine en plus les callbacks du
+//! tableau réassigné, `OptanonWrapper` appelle la fonction
+//! assignée (consentement déjà décidé) et la mémorise pour
+//! le getter.
 //!
 //! # APIs sœurs (bornées aux call-shapes observés au vol)
 //!
@@ -92,32 +99,35 @@ pub(crate) fn install_cmp(e: &mut Engine) {
         e.set_own(g, "__tcfapi", tcf, false);
         return;
     }
-    // `FIXED` : ni assignation ni `Object.defineProperty` ne
-    // remplacent le résolveur (résilience aux redéfinitions —
-    // le SDK CMP garde la main sur rien).
-    e.set_own_attrs(g, "__tcfapi", tcf, crate::heap::PropAttrs::FIXED);
+    // Accesseur absorbant (JS-C260) : `get` rend le résolveur,
+    // `set` avale — ni l'assignation (légitime `x = x||[]`
+    // comme hostile `x = 0`) ni `Object.defineProperty` ne
+    // remplacent ni ne tuent.
+    absorb_prop(e, g, "__tcfapi", tcf);
     install_cmp_siblings(e, g);
 }
 
 /// APIs sœurs des CMPs rencontrées au vol — chacune bornée
-/// aux entrées réellement lues (pas la spec entière).
+/// aux entrées réellement lues (pas la spec entière). Toutes
+/// les surfaces globales sont des accesseurs absorbants
+/// (JS-C260) : `get` rend la valeur posée, `set` avale.
 fn install_cmp_siblings(e: &mut Engine, g: ObjId) {
     let fixed = crate::heap::PropAttrs::FIXED;
     // `__sdcmpapi` (Sirdata / Sourcepoint Dialogue) — même
     // signature triple que `__tcfapi`, mêmes commandes.
     let sdc = e.native_fn("__sdcmpapi", tcfapi);
-    e.set_own_attrs(g, "__sdcmpapi", sdc, fixed);
+    absorb_prop(e, g, "__sdcmpapi", sdc);
     // `__cmp` (TCF v1) / `__uspapi` (USP) / `__gpp` (GPP).
     let v1 = e.native_fn("__cmp", cmp_v1);
-    e.set_own_attrs(g, "__cmp", v1, fixed);
+    absorb_prop(e, g, "__cmp", v1);
     let usp = e.native_fn("__uspapi", uspapi);
-    e.set_own_attrs(g, "__uspapi", usp, fixed);
+    absorb_prop(e, g, "__uspapi", usp);
     let gpp = e.native_fn("__gpp", gpp);
-    e.set_own_attrs(g, "__gpp", gpp, fixed);
+    absorb_prop(e, g, "__gpp", gpp);
     // `__tcfapiLocator` — marqueur IAB (le pont postMessage
     // `__tcfapiCall` n'est pas implémenté — trou borné).
     let loc = e.new_object();
-    e.set_own_attrs(g, "__tcfapiLocator", Value::Obj(loc), fixed);
+    absorb_prop(e, g, "__tcfapiLocator", Value::Obj(loc));
     // OneTrust — `OnetrustActiveGroups` lu tel quel ; le
     // « nécessaire » `C0001` reste actif même au refus (OT
     // réel idem), les autres groupes suivent la politique.
@@ -128,21 +138,23 @@ fn install_cmp_siblings(e: &mut Engine, g: ObjId) {
         ",C0001,"
     };
     let gv = e.str_val(groups);
-    e.set_own_attrs(g, "OnetrustActiveGroups", gv, fixed);
+    absorb_prop(e, g, "OnetrustActiveGroups", gv);
     // `OptanonWrapper` — le site **assigne** le callback ;
     // consentement déjà décidé → OT l'appellerait d'emblée,
-    // notre setter l'invoque immédiatement (borné : non
-    // callable ignoré, erreur du cb dégradée).
-    let setter = e.native_fn("OptanonWrapper", optanon_set);
+    // notre setter l'invoque immédiatement et la mémorise pour
+    // le getter (borné : non callable ignoré, erreur du cb
+    // dégradée). Non-configurable comme les autres surfaces.
+    let getter = e.native_fn("OptanonWrapper.get", optanon_get);
+    let setter = e.native_fn("OptanonWrapper.set", optanon_set);
     if let Some(o) = e.heap.obj_mut(g) {
         o.define_accessor(
             "OptanonWrapper",
-            Value::Undefined,
+            getter,
             setter,
             crate::heap::PropAttrs {
                 writable: false,
                 enumerable: true,
-                configurable: true,
+                configurable: false,
             },
         );
     }
@@ -163,24 +175,38 @@ fn install_cmp_siblings(e: &mut Engine, g: ObjId) {
     e.add_method(notice, "hide", cmp_noop);
     e.add_method(notice, "toggle", cmp_noop);
     e.set_own(d, "notice", Value::Obj(notice), true);
-    e.set_own_attrs(g, "Didomi", Value::Obj(d), fixed);
+    absorb_prop(e, g, "Didomi", Value::Obj(d));
     // `didomiState` — présence lue par certains gates.
     let ds = e.new_object();
     e.set_own(ds, "didomiExperimentId", Value::Null, true);
     e.set_own(ds, "didomiExperimentUserGroup", Value::Null, true);
     e.set_own(ds, "didomiTimestamp", Value::Num(0.0), true);
-    e.set_own_attrs(g, "didomiState", Value::Obj(ds), fixed);
+    absorb_prop(e, g, "didomiState", Value::Obj(ds));
     // `didomiOnReady` — le site `push` ses callbacks ; le SDK
     // réel les draine. Notre `push` propre appelle chaque
-    // fonction immédiatement (consentement déjà décidé) —
-    // la prop `FIXED` protège le `didomiOnReady = []` des
-    // sites qui réinitialisent la file.
+    // fonction immédiatement (consentement déjà décidé).
+    // Accesseur (§B-70/JS-C260) : le `didomiOnReady =
+    // didomiOnReady || []` du vrai SDK ne jette plus — le
+    // setter draine les callbacks du tableau réassigné.
     let arr = e.new_array(Vec::new());
     if let Value::Obj(aid) = arr {
         let push = e.native_fn("didomiOnReady.push", didomi_push);
         e.set_own_attrs(aid, "push", push, fixed);
     }
-    e.set_own_attrs(g, "didomiOnReady", arr, fixed);
+    let getter = e.bound_native("didomiOnReady.get", cmp_absorb_get, vec![arr]);
+    let setter = e.native_fn("didomiOnReady.set", didomi_onready_set);
+    if let Some(o) = e.heap.obj_mut(g) {
+        o.define_accessor(
+            "didomiOnReady",
+            getter,
+            setter,
+            crate::heap::PropAttrs {
+                writable: false,
+                enumerable: false,
+                configurable: false,
+            },
+        );
+    }
     // `_sp_` (Sourcepoint) — objet de présence + hook de
     // privacy manager (no-op borné).
     let sp = e.new_object();
@@ -189,7 +215,7 @@ fn install_cmp_siblings(e: &mut Engine, g: ObjId) {
     let spc = e.new_object();
     e.set_own(spc, "accountId", Value::Num(0.0), true);
     e.set_own(sp, "config", Value::Obj(spc), true);
-    e.set_own_attrs(g, "_sp_", Value::Obj(sp), fixed);
+    absorb_prop(e, g, "_sp_", Value::Obj(sp));
     // `Osano` — `cm` lu pour ses flags d'état.
     let os = e.new_object();
     let cm = e.new_object();
@@ -198,7 +224,7 @@ fn install_cmp_siblings(e: &mut Engine, g: ObjId) {
     e.add_method(cm, "markedForConsent", osano_marked);
     e.add_method(cm, "getConsents", empty_obj);
     e.set_own(os, "cm", Value::Obj(cm), true);
-    e.set_own_attrs(g, "Osano", Value::Obj(os), fixed);
+    absorb_prop(e, g, "Osano", Value::Obj(os));
 }
 
 // ----------------------------------------------------------------
@@ -587,8 +613,84 @@ fn gpp(e: &mut Engine, _t: Value, a: &[Value]) -> JsResult<Value> {
 /// décidé) → appel immédiat ; erreur dégradée.
 fn optanon_set(e: &mut Engine, _t: Value, a: &[Value]) -> JsResult<Value> {
     if let Some(f) = a.first().copied() {
+        e.misc.cmp_optanon = Some(f);
         if e.is_callable(f) {
             let _ = e.call_value(f, Value::Undefined, &[]);
+        }
+    }
+    Ok(Value::Undefined)
+}
+
+/// Getter `OptanonWrapper` — la dernière valeur assignée.
+fn optanon_get(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
+    Ok(e.misc.cmp_optanon.unwrap_or(Value::Undefined))
+}
+
+// ------------------------------------------------------------------
+// Accesseurs absorbants (JS-C260, §B-70)
+// ------------------------------------------------------------------
+
+/// Borne du drain `didomiOnReady` — la file réelle ne porte
+/// que quelques callbacks ; au-delà, contenu hostile.
+const DIDOMI_DRAIN_CAP: usize = 64;
+
+/// Pose `key` sur `obj` comme accesseur **absorbant** non
+/// configurable : `get` rend `v` (notre résolveur/valeur),
+/// `set` avale l'écriture sans effet ni `TypeError`. Un
+/// `Object.defineProperty` adverse échoue (non-configurable) ;
+/// l'idiome SDK `x = x || []` et l'assignation hostile
+/// `x = 0` sont tous deux absorbés — la valeur servie reste
+/// la nôtre (§B-70 : les props `FIXED` data faisaient jeter
+/// `didomiOnReady = didomiOnReady || []` et tuaient le SDK).
+fn absorb_prop(e: &mut Engine, obj: ObjId, key: &'static str, v: Value) {
+    let getter = e.bound_native("cmp.get", cmp_absorb_get, vec![v]);
+    let setter = e.native_fn("cmp.set", cmp_absorb_set);
+    if let Some(o) = e.heap.obj_mut(obj) {
+        o.define_accessor(
+            key,
+            getter,
+            setter,
+            crate::heap::PropAttrs {
+                writable: false,
+                enumerable: false,
+                configurable: false,
+            },
+        );
+    }
+}
+
+/// Getter absorbant — l'arg bound n°0 est la valeur servie.
+fn cmp_absorb_get(_e: &mut Engine, _t: Value, a: &[Value]) -> JsResult<Value> {
+    Ok(a.first().copied().unwrap_or(Value::Undefined))
+}
+
+/// Setter absorbant — écriture avalée, jamais de `TypeError`.
+fn cmp_absorb_set(_e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
+    Ok(Value::Undefined)
+}
+
+/// Setter `didomiOnReady` — le SDK réassigne une file
+/// (`didomiOnReady = didomiOnReady || []`) : on **draine** ses
+/// callbacks (consentement déjà décidé → appel immédiat, comme
+/// notre `push`) ; callable seul → appel direct ; le reste
+/// est avalé. Jamais de `TypeError`.
+fn didomi_onready_set(e: &mut Engine, _t: Value, a: &[Value]) -> JsResult<Value> {
+    let v = arg(a, 0);
+    if e.is_callable(v) {
+        let _ = e.call_value(v, Value::Undefined, &[]);
+        return Ok(Value::Undefined);
+    }
+    if let Value::Obj(id) = v {
+        let n = match e.get_prop(id, "length") {
+            Some(Value::Num(n)) if n > 0.0 => n as usize,
+            _ => 0,
+        };
+        for i in 0..n.min(DIDOMI_DRAIN_CAP) {
+            if let Some(f) = e.get_prop(id, &i.to_string()) {
+                if e.is_callable(f) {
+                    let _ = e.call_value(f, Value::Undefined, &[]);
+                }
+            }
         }
     }
     Ok(Value::Undefined)

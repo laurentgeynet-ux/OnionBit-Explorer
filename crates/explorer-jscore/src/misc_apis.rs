@@ -77,6 +77,10 @@ pub(crate) struct MiscState {
     /// `listenerId` (JS-C259 : chaque listener reçoit un id
     /// croissant, spec IAB).
     pub(crate) cmp_seq: u32,
+    /// Dernière valeur assignée à `window.OptanonWrapper`
+    /// (JS-C260 : la prop est un accesseur — le setter lance
+    /// le callback ET mémorise la valeur pour le getter).
+    pub(crate) cmp_optanon: Option<Value>,
 }
 
 impl MiscState {
@@ -115,6 +119,9 @@ impl MiscState {
         }
         if let Some(w) = self.sel_wrapper {
             ids.push(w);
+        }
+        if let Some(v) = self.cmp_optanon {
+            crate::heap::push_value(ids, v);
         }
     }
 }

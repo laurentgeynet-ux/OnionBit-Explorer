@@ -7,6 +7,70 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **JS-C260 — surfaces CMP en
+  accesseurs absorbants**
+  (`explorer-jscore`, §B-70 —
+  mesuré vol 503 madmoizelle/
+  wamiz) — les props globales CMP
+  posées `FIXED` data (JS-C259)
+  faisaient **jeter** l'idiome
+  SDK `x = x || []`
+  (`TypeError: cannot write
+  'didomiOnReady'` ×2 madmoizelle,
+  `cannot write '__tcfapi'`
+  wamiz) : le vrai SDK mourait
+  à l'init. Désormais `get` rend
+  notre résolveur et `set` avale
+  en silence (assignation hostile
+  `=0` et légitime `=x||[]`
+  pareillement), toujours
+  non-configurable —
+  `Object.defineProperty` adverse
+  échoue. `didomiOnReady` draine
+  en plus les callbacks de la
+  file réassignée (borné à 64) ;
+  `OptanonWrapper` mémorise la
+  valeur assignée pour le getter
+  (`misc.cmp_optanon`, tracée GC)
+  en plus de l'appel immédiat.
+  Surfaces couvertes : `__tcfapi`,
+  `__sdcmpapi`, `__cmp`,
+  `__uspapi`, `__gpp`,
+  `__tcfapiLocator`,
+  `OnetrustActiveGroups`, `Didomi`,
+  `didomiState`, `didomiOnReady`,
+  `_sp_`, `Osano`. Verrous : 3
+  nouveaux tests c259 (absorption
+  `x||[]` + hostilité `=0`, drain
+  Didomi, getter OptanonWrapper) —
+  les anciens verrous
+  redéfinition restent verts.
+- **JS-C261 — `deadline_hit`
+  réinitialisé à l'armement**
+  (`explorer-jscore`, §B-71 —
+  fifa vol 503) — le drapeau
+  `deadline_hit` n'était consommé
+  que sur `RunPending` : un batch
+  mort deadline le laissait levé,
+  et le `Thrown` ordinaire du
+  batch **suivant** se classait
+  `Error::Deadline` →
+  `JsError::Timeout` → disjoncteur
+  « moteur figé » — l'éval
+  davinci `ok=false` à 1,75 s
+  (sous toutes les bornes : boot
+  60 s, canal 65 s) amputait la
+  page de `main.js` → coquille.
+  `arm_eval_deadline` /
+  `arm_eval_deadline_boot`
+  repartent désormais d'un
+  drapeau propre : une deadline
+  ne vaut que pour le batch qui
+  l'arme, les échecs rapides
+  restent `Uncaught` et les
+  scripts suivants tournent.
+  Verrou : `deadline_flag_does_
+  not_leak_to_next_eval`.
 - **Étape CMP-4 — Réarmement des
   balises « bloquées par CMP »**
   (`explorer-core`, §B-4 bras CMP

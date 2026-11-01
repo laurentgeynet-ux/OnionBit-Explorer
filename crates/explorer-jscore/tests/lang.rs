@@ -8414,6 +8414,33 @@ fn eval_deadline_kills_infinite_loop() {
 }
 
 #[test]
+fn deadline_flag_does_not_leak_to_next_eval() {
+    // §B-71 (fifa vol 503 — « éval dépassée » à 1,75 s sous
+    // toutes les bornes, puis disjoncteur → `main.js` sauté) :
+    // un batch mort deadline laissait `deadline_hit` levé —
+    // le `Thrown` ordinaire de l'éval *suivante* se classait
+    // `Deadline`, et le disjoncteur confondait un échec
+    // rapide avec un wedge. Le drapeau est remis à zéro à
+    // chaque armement de budget.
+    let mut e = Engine::new();
+    e.set_eval_timeout_boot_ms(50);
+    match e.eval("while(1){}") {
+        Err(explorer_jscore::Error::Deadline) => {}
+        other => panic!("deadline attendue, vu {other:?}"),
+    }
+    // Nouveau batch sans deadline : le `throw` ordinaire
+    // doit rester `Uncaught` — jamais reclassé Deadline.
+    e.set_eval_timeout_boot_ms(0);
+    match e.eval("throw 'boom'") {
+        Err(explorer_jscore::Error::Uncaught(_)) => {}
+        Err(explorer_jscore::Error::Deadline) => {
+            panic!("deadline_hit collant — §B-71")
+        }
+        other => panic!("uncaught attendu, vu {other:?}"),
+    }
+}
+
+#[test]
 fn boot_microtask_drain_shares_boot_budget() {
     // §B-23 (cryptpad vol 95 — `unhandledrejection: eval
     // deadline exceeded` au splash) : le drain de microtasks

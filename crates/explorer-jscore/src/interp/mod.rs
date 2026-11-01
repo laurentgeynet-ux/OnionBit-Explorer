@@ -3488,6 +3488,14 @@ impl Engine {
     /// `> 10 s` à compiler — cryptpad `less.min.js`), pas une
     /// rafale hostile — budget propre plus large.
     pub(crate) fn arm_eval_deadline_boot(&mut self) {
+        // §B-71 : le drapeau `deadline_hit` n'était consommé que
+        // sur le chemin `RunPending` — un batch mort deadline
+        // laissait le drapeau levé, et le `Thrown` ordinaire
+        // de l'éval suivante se classait `Deadline` (« éval
+        // dépassée » à 1,75 s sous toutes les bornes — fifa
+        // vol 503). Chaque nouveau budget repart d'un drapeau
+        // propre : l'attribution est honnête.
+        self.deadline_hit = false;
         self.eval_deadline = (self.eval_timeout_boot_ms > 0)
             .then(|| Instant::now() + std::time::Duration::from_millis(self.eval_timeout_boot_ms));
         // §B-23 : ouvre la fenêtre boot du contexte — les
@@ -3527,6 +3535,10 @@ impl Engine {
         // J11 : la grâce post-`complete` prolonge la même
         // sélection (hydratation SPA post-`load`).
         let ms = self.batch_budget_ms();
+        // §B-71 — même remise à zéro du drapeau qu'au bras
+        // boot : une deadline ne vaut que pour le batch qui
+        // l'arme (timers/microtasks/drains inclus).
+        self.deadline_hit = false;
         self.eval_deadline =
             (ms > 0).then(|| Instant::now() + std::time::Duration::from_millis(ms));
     }

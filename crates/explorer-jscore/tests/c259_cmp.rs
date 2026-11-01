@@ -196,6 +196,55 @@ fn didomi_queue_survives_reinit() {
 }
 
 // ----------------------------------------------------------------
+// §B-70 / JS-C260 — accesseurs absorbants
+// ----------------------------------------------------------------
+
+/// L'idiome réel `x = x || []` des SDKs (wamiz vol 503 —
+/// `TypeError: cannot write '__tcfapi'` tuait le stub IAB
+/// sur la prop FIXED) est absorbé silencieusement.
+#[test]
+fn tcfapi_absorbs_sdk_self_init() {
+    let mut e = engine_policy(CmpPolicy::RejectAll);
+    e.eval("window.__tcfapi = window.__tcfapi || []").unwrap();
+    assert_eq!(ev(&mut e, "typeof __tcfapi"), "function");
+    // Hostile absorbé pareil — pas de TypeError, pas d'effet.
+    e.eval("window.__tcfapi = 0").unwrap();
+    e.eval("var p;__tcfapi('ping',2,function(d,ok){p=[ok,d.cmpStatus]})")
+        .unwrap();
+    assert_eq!(ev(&mut e, "p.join(',')"), "true,loaded");
+}
+
+/// `didomiOnReady = didomiOnReady || []` (madmoizelle vol
+/// 503 — `cannot write 'didomiOnReady'` ×2) : absorbé, et le
+/// setter **draine** les callbacks d'une file réassignée.
+#[test]
+fn didomi_onready_absorbs_and_drains() {
+    let mut e = engine_policy(CmpPolicy::RejectAll);
+    e.eval("window.didomiOnReady = window.didomiOnReady || []")
+        .unwrap();
+    e.eval("var hit=0; didomiOnReady.push(function(){hit++})")
+        .unwrap();
+    // File pré-remplie réassignée → callbacks drainés.
+    e.eval("didomiOnReady = [function(){hit++},function(){hit++}]")
+        .unwrap();
+    assert_eq!(ev(&mut e, "hit"), "3");
+    // La prop sert toujours notre tableau instrumenté.
+    e.eval("didomiOnReady.push(function(){hit++})").unwrap();
+    assert_eq!(ev(&mut e, "hit"), "4");
+}
+
+/// `OptanonWrapper` — le setter appelle le callback ET le
+/// mémorise : le getter le rend ensuite au SDK.
+#[test]
+fn optanon_wrapper_get_returns_assigned() {
+    let mut e = engine_policy(CmpPolicy::RejectAll);
+    e.eval("var hit=false; window.OptanonWrapper=function(){hit=true}")
+        .unwrap();
+    assert_eq!(ev(&mut e, "hit"), "true");
+    assert_eq!(ev(&mut e, "typeof OptanonWrapper"), "function");
+}
+
+// ----------------------------------------------------------------
 // APIs sœurs bornées
 // ----------------------------------------------------------------
 

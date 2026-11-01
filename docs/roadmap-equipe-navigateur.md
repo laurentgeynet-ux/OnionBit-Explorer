@@ -5325,6 +5325,36 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   Verrou
   `apply_giant_array_soft_killed`.
 
+- [x] **JS-C260 + JS-C261.
+  Accesseurs CMP absorbants +
+  `deadline_hit` honnête**
+  (`explorer-jscore`, §B-70/§B-71
+  — catalogués vol 503) — les
+  props CMP `FIXED` data faisaient
+  jeter l'idiome SDK `x = x || []`
+  (`cannot write 'didomiOnReady'`
+  madmoizelle, `cannot write
+  '__tcfapi'` wamiz) : désormais
+  `get` rend le résolveur, `set`
+  avale sans `TypeError`
+  (non-configurable conservé) —
+  `didomiOnReady` draine les
+  callbacks de la file réassignée,
+  `OptanonWrapper` mémorise pour
+  le getter. Et le drapeau
+  `deadline_hit`, collant entre
+  batches, reclassait un `Thrown`
+  ordinaire en `Deadline` →
+  `Timeout` → disjoncteur (fifa :
+  davinci `ok=false` à 1,75 s →
+  `main.js` sauté → coquille) :
+  remis à zéro à chaque armement —
+  échec rapide ≠ wedge. Verrous :
+  3 c259 + 1 lang. Reste terrain :
+  re-vols madmoizelle/wamiz
+  (§B-70) et fifa (§B-71) sur
+  binaire frais.
+
 - [x] **Étape CMP-4. Réarmement
   des balises « bloquées par CMP »**
   (`explorer-core`, §B-4 bras CMP
