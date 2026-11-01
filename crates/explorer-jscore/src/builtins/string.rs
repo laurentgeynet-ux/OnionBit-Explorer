@@ -680,6 +680,10 @@ pub(crate) fn string_from_char_code(e: &mut Engine, _t: Value, args: &[Value]) -
     // Code units → string : une paire surrogate forme l'astral
     // (spec), un surrogate isolé devient U+FFFD (déviation
     // documentée — UTF-8 natif).
+    // Garde d'alloc : `String.fromCharCode.apply(null, énorme
+    // tableau)` — `units` + la String de sortie grossissent avec
+    // `args.len()`, sans tick entre les éléments (§B-59).
+    e.alloc_guard(args.len().saturating_mul(4))?;
     let mut units = Vec::with_capacity(args.len());
     for a in args {
         units.push(e.to_number(*a)? as u16);

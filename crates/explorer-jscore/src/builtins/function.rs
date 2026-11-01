@@ -27,6 +27,17 @@ pub(crate) fn function_apply(e: &mut Engine, this: Value, args: &[Value]) -> JsR
     let arr_args = match arr {
         Value::Undefined | Value::Null => Vec::new(),
         Value::Obj(id) => {
+            let arr_len = match e.heap.obj(id).map(|o| &o.kind) {
+                Some(ObjKind::Array(elems)) => Some(elems.len()),
+                _ => None,
+            };
+            if let Some(len) = arr_len {
+                // Garde d'alloc avant le clone : `f.apply(null,
+                // énormeTableau)` matérialise un `Vec<Value>` natif
+                // hors compteur — 50 M éléments = ~800 Mio d'un
+                // coup (§B-59 actugaming, [native-burst] apply).
+                e.alloc_guard(len.saturating_mul(std::mem::size_of::<Value>()))?;
+            }
             if let Some(ObjKind::Array(elems)) = e.heap.obj(id).map(|o| &o.kind) {
                 elems.clone()
             } else {

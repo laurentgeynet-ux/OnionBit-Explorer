@@ -428,6 +428,9 @@ pub(crate) fn string_match_all(e: &mut Engine, this: Value, args: &[Value]) -> J
 /// `String.fromCodePoint(...)` — scalar values; lone surrogates
 /// degrade to U+FFFD (our strings are UTF-8, not UTF-16).
 pub(crate) fn string_from_code_point(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    // Même trou que `fromCharCode` : sortie ≤ 4 octets/arg en
+    // UTF-8 — refuse avant la boucle (§B-59, apply géant).
+    e.alloc_guard(args.len().saturating_mul(4))?;
     let mut s = String::new();
     for &a in args {
         let n = e.to_number(a)?;

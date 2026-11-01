@@ -177,6 +177,38 @@ fn rss_kill_soft_kills_eval() {
     assert_eq!(e.eval("1+1").ok().map(|v| e.describe(v)), Some("2".into()));
 }
 
+/// Verrou §B-59 bras 4 nommé — `f.apply(null, énormeTableau)` :
+/// le clone `Vec<Value>` des args est natif hors compteur
+/// (terrain : `[native-burst] apply` ×26, 36-133 Mio/burst,
+/// `[].fromCharCode.apply` sur tableau géant dans gtag/wrap).
+/// Sous `mem_limit` bas le clone dépasse la borne → `RangeError`,
+/// moteur vivant.
+#[test]
+fn apply_giant_array_soft_killed() {
+    let mut e = Engine::new();
+    // 200 k éléments × 16 o = 3,2 Mio de clone — tableau bâti
+    // sous borne haute, puis borne basse : le clone `apply`
+    // dépasse → RangeError, pas d'abort.
+    e.eval("var a=new Array(200000);for(var i=0;i<a.length;i++)a[i]=65;a;")
+        .unwrap();
+    e.set_mem_limit(2 * 1024 * 1024);
+    let r = e.eval("String.fromCharCode.apply(null,a);");
+    match r {
+        Err(err) => {
+            let msg = format!("{err}");
+            assert!(
+                msg.contains("allocation exceeds engine limits")
+                    || msg.contains("heap memory limit exceeded"),
+                "RangeError d'alloc attendue, obtenu : {msg}"
+            );
+        }
+        Ok(_) => panic!("l'apply géant aurait dû être tué par la garde"),
+    }
+    // Moteur vivant — borne désarmée, l'éval suivante réussit.
+    e.set_mem_limit(0);
+    assert_eq!(e.eval("1+1").ok().map(|v| e.describe(v)), Some("2".into()));
+}
+
 #[test]
 #[ignore = "terrain : rejoue le wrap.js §B-59 capturé"]
 fn confiant_wrap_under_mem_limit() {

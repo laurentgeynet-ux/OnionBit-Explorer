@@ -5275,6 +5275,56 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   `dead_cell_hard_cap_kills_eval`,
   `inline25_under_mem_limit`.
 
+- [x] **JS-C256. §B-59 bras 3 :
+  retention AST eval/Function**
+  (`explorer-jscore`) — chaque
+  `eval`/`new Function` retient
+  son `Rc<FnLit>` (~390 Ko d'AST
+  pour 4 Ko de source) via la
+  cellule `Fun` — ×41 RSS/compté
+  en repro (ratio identique au
+  terrain). Borne :
+  `EXPLORER_JS_EVAL_SRC_CAP`
+  (défaut 8 Mio cumulés) →
+  `RangeError` avant parse aux
+  trois entonnoirs. Verrou
+  `eval_src_cap_kills_eval_loop`.
+
+- [x] **JS-C257. Kill doux RSS +
+  compteur envs live**
+  (`explorer-jscore`, §B-59 bras
+  4) — `EXPLORER_JS_RSS_KILL_MB`
+  tue l'éval en `RangeError` au
+  seuil RSS process (réservoirs
+  natifs hors `heap.bytes`) ; le
+  check est par `tick` (1,7 Go
+  franchis entre deux dumps 256
+  ops) et dans `alloc_guard`
+  (spans natifs géants).
+  `ENVS_LIVE` (Drop) dans
+  `tick_rss` : actugaming envs
+  oscillants — bras « capture
+  hostile » réfuté. Verrou
+  `rss_kill_soft_kills_eval`.
+
+- [x] **JS-C258. §B-59 bras 4
+  nommé : `[native-burst] apply`**
+  (`explorer-jscore`) — sonde RSS
+  par native au dispatch
+  `call_native` (sous
+  `EXPLORER_JS_RSS_WATCH`, delta
+  ≥ 32 Mio logué avec le nom) :
+  terrain actugaming = 26 bursts
+  `apply` 36-133 Mio — pattern
+  `f.apply(null, énormeTableau)`.
+  Gardes : clone `Vec<Value>`
+  args (`function_apply`,
+  `iter_values` — spread/
+  `Reflect.*`), sortie
+  `fromCharCode`/`fromCodePoint`.
+  Verrou
+  `apply_giant_array_soft_killed`.
+
 - [ ] **Écarts terrain — vol humain
   22/10 (release `39ab821`, FFI)** :
   second run humain — trois constats

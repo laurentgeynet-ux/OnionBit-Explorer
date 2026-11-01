@@ -4510,16 +4510,26 @@ impl Engine {
                         return Ok(out);
                     }
                 }
-                let ta_view = match self.heap.obj(id).map(|o| &o.kind) {
-                    Some(ObjKind::Array(elems)) => return Ok(elems.clone()),
+                let (arr_len, ta_view) = match self.heap.obj(id).map(|o| &o.kind) {
+                    Some(ObjKind::Array(elems)) => (Some(elems.len()), None),
                     Some(ObjKind::TypedArray {
                         ta,
                         buffer: Value::Obj(bid),
                         offset,
                         len,
-                    }) => Some((*ta, *bid, *offset, *len)),
-                    _ => None,
+                    }) => (None, Some((*ta, *bid, *offset, *len))),
+                    _ => (None, None),
                 };
+                if let Some(len) = arr_len {
+                    // Garde avant le clone natif : `[...arr]`/
+                    // `f(...arr)`/`Reflect.apply` matérialisent
+                    // un `Vec<Value>` hors compteur (§B-59).
+                    self.alloc_guard(len.saturating_mul(std::mem::size_of::<Value>()))?;
+                    if let Some(ObjKind::Array(elems)) = self.heap.obj(id).map(|o| &o.kind) {
+                        return Ok(elems.clone());
+                    }
+                    return Err(self.type_error("object is not iterable"));
+                }
                 if let Some((ta, bid, off, len)) = ta_view {
                     return Ok(self.ta_elements(ta, bid, off, len));
                 }
@@ -6588,6 +6598,7 @@ impl Engine {
     /// pile native via `maybe_grow` comme le corps Script.
     pub(crate) fn call_native(
         &mut self,
+        name: &'static str,
         f: crate::heap::NativeFn,
         this: Value,
         args: &[Value],
@@ -6597,11 +6608,34 @@ impl Engine {
             self.call_depth -= 1;
             return Err(self.range_error("maximum call stack exceeded"));
         }
+        // Sonde §B-59 bras 4 : sous `EXPLORER_JS_RSS_WATCH`,
+        // mesure le RSS avant/après chaque natif — un span
+        // natif non-tické (concat géant, materialisation Vec)
+        // grandit hors portée des ticks ; le delta nomme la
+        // native fautive au lieu de son callsite JS.
+        let rss_before = if self.rss_watch_mb > 0 {
+            memory_stats::memory_stats().map(|m| m.physical_mem)
+        } else {
+            None
+        };
         let r = stacker::maybe_grow(
             crate::parser::STACK_RED_ZONE,
             crate::parser::STACK_GROW,
             || f(self, this, args),
         );
+        if let Some(before) = rss_before {
+            if let Some(m) = memory_stats::memory_stats() {
+                let delta = m.physical_mem.saturating_sub(before);
+                if delta >= 32 * 1024 * 1024 {
+                    eprintln!(
+                        "[native-burst] {name} rss={}→{} delta={} MiB",
+                        before / 1_048_576,
+                        m.physical_mem / 1_048_576,
+                        delta / 1_048_576,
+                    );
+                }
+            }
+        }
         self.call_depth -= 1;
         r
     }
@@ -6682,14 +6716,14 @@ impl Engine {
         match fun {
             Fun::Native { name, f } => {
                 self.nat_trace_tick(name);
-                self.call_native_ctx(f, this, args_ref)
+                self.call_native_ctx(name, f, this, args_ref)
             }
             Fun::BoundNative { name, f, bound } => {
                 self.nat_trace_tick(name);
                 let mut a = Vec::with_capacity(bound.len() + args_ref.len());
                 a.extend_from_slice(&bound);
                 a.extend_from_slice(args_ref);
-                self.call_native_ctx(f, this, &a)
+                self.call_native_ctx(name, f, this, &a)
             }
             Fun::Bound { .. } => {
                 // Déroulé par la boucle ci-dessus — repli
@@ -6726,6 +6760,7 @@ impl Engine {
     /// la cible).
     fn call_native_ctx(
         &mut self,
+        name: &'static str,
         f: crate::heap::NativeFn,
         this: Value,
         args: &[Value],
@@ -6735,15 +6770,15 @@ impl Engine {
             _ => None,
         };
         let Some(t) = target else {
-            return self.call_native(f, this, args);
+            return self.call_native(name, f, this, args);
         };
         if t == self.cur_ctx {
-            return self.call_native(f, this, args);
+            return self.call_native(name, f, this, args);
         }
         let prev = self.cur_ctx;
         self.native_caller.push(prev);
         self.switch_to(t);
-        let r = self.call_native(f, this, args);
+        let r = self.call_native(name, f, this, args);
         self.native_caller.pop();
         if self.cur_ctx != prev {
             self.switch_to(prev);

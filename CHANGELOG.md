@@ -7,6 +7,46 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **JS-C258 — §B-59 bras 4 nommé +
+  borné : `[native-burst] apply`**
+  (`explorer-jscore`) — sonde RSS
+  par native au dispatch
+  `call_native` (sous
+  `EXPLORER_JS_RSS_WATCH`, delta
+  ≥ 32 Mio logué) : le tueur
+  actugaming se nomme — 26 bursts
+  `apply` 36-133 Mio, pattern
+  `f.apply(null, énormeTableau)`
+  (decoder obfusqué gtag/wrap).
+  Gardes ajoutées : clone
+  `Vec<Value>` des args dans
+  `Function.prototype.apply` et
+  `iter_values` (spread/
+  `Reflect.apply`/for-of), sortie
+  `String.fromCharCode`/
+  `fromCodePoint` proportionnelle à
+  `args.len()`. Verrou
+  `apply_giant_array_soft_killed`
+  — `RangeError`, moteur vivant.
+- **JS-C257 — kill doux RSS +
+  compteur envs live**
+  (`explorer-jscore`, §B-59) —
+  `EXPLORER_JS_RSS_KILL_MB` tue
+  l'éval en `RangeError` au seuil
+  RSS process (réservoirs natifs
+  hors `heap.bytes`) — par tick,
+  pas par gate 256 ops (1,7 Go
+  franchis entre deux dumps) ;
+  check aussi dans `alloc_guard`
+  (spans natifs géants).
+  `ENVS_LIVE` compte les `Env`
+  vivants (Drop) dans `tick_rss`
+  — actugaming : envs oscillent,
+  bras « capture hostile » réfuté.
+- **JS-C256 — §B-59 bras 3 nommé +
+  borné : retention AST
+  eval/Function** — voir entrée
+  dédiée plus bas.
 - **JS-C255 — cap dur sur déchets
   retenus §B-59** (`explorer-jscore`)
   — le bras sudouest nommé : boucle
