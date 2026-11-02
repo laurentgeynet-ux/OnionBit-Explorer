@@ -1301,7 +1301,7 @@ impl GExec {
                                 p.reactions.push(crate::promise::Reaction {
                                     on_fulfilled: ok_f,
                                     on_rejected: err_f,
-                                    next,
+                                    next: crate::promise::ThenSink::Native(next),
                                 });
                             }
                         }

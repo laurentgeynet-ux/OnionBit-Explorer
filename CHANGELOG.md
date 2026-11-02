@@ -7,6 +7,62 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **JS-C280 — `then` honore
+  `@@species`**
+  (`explorer-jscore`, §B-14
+  dailymotion vol 577) —
+  `promise_then` rendait un
+  `new_promise` inconditionnel
+  et ignorait `Species-
+  Constructor` : la détection
+  `FORCED_PROMISE_CONSTRUCTOR`
+  de core-js (embarquée dans
+  le CMP Sourcepoint
+  `wrapperMessagingWithout-
+  Detection.js`, évaluée sous
+  `inline:10`) échouait sur
+  `p.then(…) instanceof
+  FakePromise` →
+  `globalThis.Promise`
+  remplacé par son polyfill,
+  prototype `{then, catch}`
+  sans `finally` →
+  `` `finally` is not a
+  function (on Promise) `` à
+  la chaîne
+  `_dmDynamicImportPolyfill`
+  → player booté mort.
+  `PerformPromiseThen` spec
+  implémenté : `species_ctor`
+  (`[[Get]]` `constructor` →
+  `@@species`, défaut =
+  `%Promise%` intrinsèque via
+  `protos.promise_ctor` —
+  résistant à la réinscription
+  de `proto.constructor` ou
+  `global.Promise`), accesseur
+  `get Promise[@@species]`,
+  `new_promise_capability`
+  (`new C(executor)` + capture
+  `resolve`/`reject` par
+  `BoundNative`), `ThenSink`
+  `Native`|`Foreign` sur
+  `Reaction`/`Job::Reaction`
+  (settle via callables
+  capturés, marquage GC des
+  deux variantes). Hérités :
+  `Promise.resolve`/`reject`
+  recâblés sur
+  `NewPromiseCapability(this)`
+  — `Q.resolve(1) instanceof
+  Q`. Borne : `all`/`race`/
+  `allSettled`/`any` restent
+  natifs (ctor `this` non
+  dérivé — documenté). 13
+  tests `promise_species` ;
+  test262 1046/1046 (31
+  skips) inchangé.
+
 - **Fix tests Flutter + guards
   ref-after-dispose** (`app`) —
   la suite `flutter test`

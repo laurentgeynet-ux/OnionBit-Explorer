@@ -395,6 +395,7 @@ impl BrowsingContext {
                 date,
                 regexp,
                 promise,
+                promise_ctor: 0,
                 iterator,
                 array_iter,
                 map_iter,

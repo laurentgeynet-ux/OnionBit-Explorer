@@ -427,7 +427,13 @@ impl Heap {
                 for r in &p.reactions {
                     push_value(out, r.on_fulfilled);
                     push_value(out, r.on_rejected);
-                    out.push(r.next);
+                    match r.next {
+                        crate::promise::ThenSink::Native(id) => out.push(id),
+                        crate::promise::ThenSink::Foreign { resolve, reject } => {
+                            push_value(out, resolve);
+                            push_value(out, reject);
+                        }
+                    }
                 }
             }
             ObjKind::Map(entries) => {

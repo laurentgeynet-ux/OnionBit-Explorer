@@ -685,6 +685,12 @@ pub(crate) struct Protos {
     pub date: ObjId,
     pub regexp: ObjId,
     pub promise: ObjId,
+    /// `%Promise%` intrinsèque — le **constructeur**, posé par
+    /// `promise::install` (0 avant). `SpeciesConstructor` lit son
+    /// défaut ici, pas `protos.promise.constructor` : la prop
+    /// est réinscriptible par le contenu (polyfill/reflect)
+    /// alors que l'intrinsèque du realm ne l'est pas.
+    pub promise_ctor: ObjId,
     /// Shared `next()`/`[Symbol.iterator]` iterator prototype.
     pub iterator: ObjId,
     /// `%ArrayIteratorPrototype%` — niveau concret entre
@@ -878,6 +884,9 @@ impl Engine {
                 date,
                 regexp,
                 promise,
+                // Posé par `promise::install` (tourne après
+                // construction — `builtins::install`).
+                promise_ctor: 0,
                 iterator,
                 array_iter,
                 map_iter,
@@ -2651,7 +2660,13 @@ impl Engine {
                 crate::promise::Job::Reaction { cb, arg, next, .. } => {
                     crate::heap::push_value(&mut ids, *cb);
                     crate::heap::push_value(&mut ids, *arg);
-                    ids.push(*next);
+                    match *next {
+                        crate::promise::ThenSink::Native(id) => ids.push(id),
+                        crate::promise::ThenSink::Foreign { resolve, reject } => {
+                            crate::heap::push_value(&mut ids, resolve);
+                            crate::heap::push_value(&mut ids, reject);
+                        }
+                    }
                 }
                 crate::promise::Job::Thenable {
                     then_fn,

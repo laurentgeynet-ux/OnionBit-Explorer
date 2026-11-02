@@ -32,14 +32,36 @@ pub enum PromiseState {
     Rejected,
 }
 
+/// Puits d'une réaction `then` — cible du résultat
+/// (`NewPromiseCapability(C)` spec, JS-C280).
+///
+/// `C === %Promise%` intrinsèque → fast-path natif : la promesse
+/// chaînée est un `ObjKind::Promise` settlé en place. Tout autre
+/// `C` (`@@species` ou `constructor` custom — sous-classes,
+/// polyfills, le `FakePromise` de la détection core-js) →
+/// `resolve`/`reject` callables capturés par l'exécuteur
+/// capability, appelés au settle.
+#[derive(Clone, Copy)]
+pub enum ThenSink {
+    /// Capacité `%Promise%` — `resolve_promise`/`settle_promise`.
+    Native(ObjId),
+    /// Capacité étrangère — callables capturés sur `new C(exec)`.
+    Foreign {
+        /// `capability.[[Resolve]]`.
+        resolve: Value,
+        /// `capability.[[Reject]]`.
+        reject: Value,
+    },
+}
+
 /// A `then` subscription.
 pub struct Reaction {
     /// `onFulfilled` — callable or `Undefined`.
     pub on_fulfilled: Value,
     /// `onRejected` — callable or `Undefined`.
     pub on_rejected: Value,
-    /// Promise returned by `then`, settled with the handler result.
-    pub next: ObjId,
+    /// Capability returned by `then`, settled with the handler result.
+    pub next: ThenSink,
 }
 
 /// The `ObjKind::Promise` payload.
@@ -71,8 +93,8 @@ pub(crate) enum Job {
         arg: Value,
         /// `true` when the source promise rejected.
         rejected: bool,
-        /// Promise returned by `then`.
-        next: ObjId,
+        /// Capability returned by `then`.
+        next: ThenSink,
     },
     /// `thenable.then(resolve, reject)` — foreign thenable adoption.
     Thenable {
@@ -202,6 +224,90 @@ impl Engine {
 
     /// `resolve` semantics: promise adoption, thenable `then` call
     /// (deferred to a microtask), plain fulfillment otherwise.
+    /// `SpeciesConstructor(O, %Promise%)` spec (JS-C280) :
+    /// `Get(O,"constructor")` → `Get(C, @@species)` — `undefined`
+    /// à chaque niveau → `%Promise%` intrinsèque du realm
+    /// (`protos.promise_ctor`, jamais `global.Promise` — un
+    /// `Promise` réassigné ne détourne pas la capacité).
+    /// `constructor` non-objet ou `@@species` non-appelable →
+    /// `TypeError` (un callable non-constructible — flèche —
+    /// tombe au `construct` de `new_promise_capability`).
+    pub(crate) fn species_ctor(&mut self, o: Value) -> JsResult<Value> {
+        let c = self.get_prop_value(o, "constructor")?;
+        let s = match c {
+            Value::Undefined => return Ok(Value::Obj(self.protos.promise_ctor)),
+            Value::Obj(_) => self.get_prop_value(c, crate::interp::SYM_SPECIES)?,
+            _ => return Err(self.type_error("SpeciesConstructor: constructor is not an object")),
+        };
+        match s {
+            Value::Undefined | Value::Null => Ok(Value::Obj(self.protos.promise_ctor)),
+            s if self.is_callable(s) => Ok(s),
+            _ => Err(self.type_error("SpeciesConstructor: @@species is not a constructor")),
+        }
+    }
+
+    /// `NewPromiseCapability(C)` spec (JS-C280) : `new C(executor)`
+    /// — les callables `resolve`/`reject` passés à l'exécuteur
+    /// sont capturés dans une boîte-array partagée avec le
+    /// `BoundNative`. Fast-path `C === %Promise%` → `new_promise`
+    /// natif (settle direct, zéro hop).
+    ///
+    /// Retourne `(promise, sink)` — `promise` est la valeur que
+    /// `then` rend à l'appelant, `sink` ce que les réactions
+    /// settlent (`Native` = promesse moteur, `Foreign` =
+    /// callables capturés du ctor `@@species` — dont le
+    /// `FakePromise` de la détection core-js `FORCED_PROMISE_
+    /// CONSTRUCTOR`, qui exige `p.then(…) instanceof C`).
+    pub(crate) fn new_promise_capability(&mut self, c: Value) -> JsResult<(Value, ThenSink)> {
+        if matches!(c, Value::Obj(id) if id == self.protos.promise_ctor) {
+            let id = self.new_promise();
+            return Ok((Value::Obj(id), ThenSink::Native(id)));
+        }
+        let slot = self.new_array(vec![Value::Undefined; 2]);
+        let exec = self.bound_native(
+            "promise capability executor",
+            promise_cap_executor,
+            vec![slot],
+        );
+        let promise = self.construct(c, &[exec])?;
+        let (resolve, reject) = match slot {
+            Value::Obj(sid) => (
+                self.get_prop(sid, "0").unwrap_or(Value::Undefined),
+                self.get_prop(sid, "1").unwrap_or(Value::Undefined),
+            ),
+            _ => (Value::Undefined, Value::Undefined),
+        };
+        if !self.is_callable(resolve) || !self.is_callable(reject) {
+            return Err(
+                self.type_error("promise capability: executor did not capture resolve/reject")
+            );
+        }
+        Ok((promise, ThenSink::Foreign { resolve, reject }))
+    }
+
+    /// Settle la capability `next` d'une réaction — natif en
+    /// place, étranger via les callables capturés (JS-C280).
+    fn sink_resolve(&mut self, next: ThenSink, v: Value) -> JsResult<()> {
+        match next {
+            ThenSink::Native(id) => self.resolve_promise(id, v),
+            ThenSink::Foreign { resolve, .. } => {
+                self.call_value(resolve, Value::Undefined, &[v])?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Rejette la capability `next` — voir [`Self::sink_resolve`].
+    fn sink_reject(&mut self, next: ThenSink, t: Value) -> JsResult<()> {
+        match next {
+            ThenSink::Native(id) => self.settle_promise(id, PromiseState::Rejected, t),
+            ThenSink::Foreign { reject, .. } => {
+                self.call_value(reject, Value::Undefined, &[t])?;
+            }
+        }
+        Ok(())
+    }
+
     pub(crate) fn resolve_promise(&mut self, id: ObjId, v: Value) {
         // Self-resolution cycle → TypeError.
         if matches!(v, Value::Obj(x) if x == id) {
@@ -246,7 +352,7 @@ impl Engine {
                                 // `resolve_promise(next, retour_cb)`
                                 // du job est un no-op (`id` déjà
                                 // settlée par la réaction elle-même).
-                                next: id,
+                                next: ThenSink::Native(id),
                             });
                         }
                     }
@@ -511,7 +617,7 @@ impl Engine {
                     } => {
                         if self.is_callable(cb) {
                             match self.call_value(cb, Value::Undefined, &[arg]) {
-                                Ok(v) => self.resolve_promise(next, v),
+                                Ok(v) => self.sink_resolve(next, v)?,
                                 Err(Thrown(t)) => {
                                     // `EXPLORER_PROM_TRACE` : un cb
                                     // qui jette atterrit en rejet
@@ -522,7 +628,7 @@ impl Engine {
                                     if std::env::var("EXPLORER_PROM_TRACE").is_ok() {
                                         eprintln!("[prom-cb-throw] {}", self.describe(t));
                                     }
-                                    self.settle_promise(next, PromiseState::Rejected, t);
+                                    self.sink_reject(next, t)?;
                                 }
                             }
                         } else {
@@ -531,15 +637,11 @@ impl Engine {
                             if rejected && std::env::var("EXPLORER_PROM_TRACE").is_ok() {
                                 eprintln!("[prom-unhandled] {}", self.describe(arg));
                             }
-                            self.settle_promise(
-                                next,
-                                if rejected {
-                                    PromiseState::Rejected
-                                } else {
-                                    PromiseState::Fulfilled
-                                },
-                                arg,
-                            );
+                            if rejected {
+                                self.sink_reject(next, arg)?;
+                            } else {
+                                self.sink_resolve(next, arg)?;
+                            }
                         }
                     }
                     Job::Thenable {
@@ -812,13 +914,50 @@ fn promise_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
 }
 
 /// `p.then(onF, onR)` → chained promise.
+/// `get Promise [@@species]` — spec `get { return this }` :
+/// le ctor du résultat de `then`/`catch`/`finally` se dérive
+/// par `SpeciesConstructor` — sous-classes héritées (`Q`
+/// reçoit `this === Q` → `q.then() instanceof Q`), la
+/// détection core-js lit `ctor[@@species]` sur le natif
+/// (JS-C280).
+fn promise_species_get(_e: &mut Engine, this: Value, _args: &[Value]) -> JsResult<Value> {
+    Ok(this)
+}
+
+/// Exécuteur `NewPromiseCapability` (spec `GetCapabilitiesExecutor`)
+/// — `bound[0]` = boîte `[resolve, reject]` remplie au premier
+/// appel ; un second appel est un `TypeError` (spec).
+fn promise_cap_executor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let (slot, resolve, reject) = (arg(args, 0), arg(args, 1), arg(args, 2));
+    let Value::Obj(sid) = slot else {
+        return Err(e.type_error("capability executor missing slot"));
+    };
+    if e.get_prop(sid, "0")
+        .is_some_and(|v| !matches!(v, Value::Undefined))
+    {
+        return Err(e.type_error("promise capability executor called twice"));
+    }
+    e.set_prop(sid, "0", resolve)?;
+    e.set_prop(sid, "1", reject)?;
+    Ok(Value::Undefined)
+}
+
 fn promise_then(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let Value::Obj(id) = this else {
         return Err(e.type_error("then called on non-promise"));
     };
     let on_f = args.first().copied().unwrap_or(Value::Undefined);
     let on_r = args.get(1).copied().unwrap_or(Value::Undefined);
-    let next = e.new_promise();
+    // Spec `PerformPromiseThen` : `C = SpeciesConstructor(this,
+    // %Promise%)`, `next = NewPromiseCapability(C)` — le ctor de
+    // résultat se lit via `constructor`/`@@species` (JS-C280 —
+    // la détection `FORCED_PROMISE_CONSTRUCTOR` de core-js exige
+    // `p.then(…) instanceof FakePromise` pour garder le natif ;
+    // un `new_promise` inconditionnel la faisait échouer →
+    // `globalThis.Promise` remplacé par un polyfill sans
+    // `finally` — vol 577 dailymotion).
+    let c = e.species_ctor(this)?;
+    let (cap_promise, next) = e.new_promise_capability(c)?;
     let (state, result) = {
         let Some(o) = e.heap.obj_mut(id) else {
             return Err(e.type_error("then called on non-promise"));
@@ -857,7 +996,7 @@ fn promise_then(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> 
             ));
         }
     }
-    Ok(Value::Obj(next))
+    Ok(cap_promise)
 }
 
 /// `p.catch(onR)` ≡ `then(undefined, onR)`.
@@ -894,23 +1033,42 @@ fn promise_finally(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Valu
     promise_then(e, this, &[ok, err])
 }
 
-/// `Promise.resolve(v)` — a promise already fulfilled, or `v` if it
-/// is already a promise.
-fn promise_static_resolve(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+/// `Promise.resolve(v)` — spec `PromiseResolve(C, v)` : `v` déjà
+/// promesse du ctor `this` → retournée telle quelle ; sinon
+/// `NewPromiseCapability(this)` — `Q.resolve(…)` sur une sous-
+/// classe rend une instance de Q (JS-C280).
+fn promise_static_resolve(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let v = arg(args, 0);
     if e.is_promise(v) {
-        return Ok(v);
+        // `v.constructor === C` → `v` renvoyée (spec) — le `Get`
+        // peut jeter (accesseur hostile) : propagé.
+        if let Ok(c) = e.get_prop_value(v, "constructor") {
+            if matches!((c, this), (Value::Obj(a), Value::Obj(b)) if a == b) {
+                return Ok(v);
+            }
+        }
     }
-    let id = e.new_promise();
-    e.resolve_promise(id, v);
-    Ok(Value::Obj(id))
+    let (promise, sink) = e.new_promise_capability(this)?;
+    match sink {
+        ThenSink::Native(id) => e.resolve_promise(id, v),
+        ThenSink::Foreign { resolve, .. } => {
+            e.call_value(resolve, Value::Undefined, &[v])?;
+        }
+    }
+    Ok(promise)
 }
 
-/// `Promise.reject(r)`.
-fn promise_static_reject(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
-    let id = e.new_promise();
-    e.reject_promise(id, arg(args, 0));
-    Ok(Value::Obj(id))
+/// `Promise.reject(r)` — spec `NewPromiseCapability(this)`.
+fn promise_static_reject(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let (promise, sink) = e.new_promise_capability(this)?;
+    let r = arg(args, 0);
+    match sink {
+        ThenSink::Native(id) => e.reject_promise(id, r),
+        ThenSink::Foreign { reject, .. } => {
+            e.call_value(reject, Value::Undefined, &[r])?;
+        }
+    }
+    Ok(promise)
 }
 
 /// Elements of an array-like value.
@@ -1293,6 +1451,17 @@ pub(crate) fn install(e: &mut Engine) {
     );
     e.set_own(rp, "constructor", ctor, false);
     if let Value::Obj(cid) = ctor {
+        // `%Promise%` intrinsèque du realm — défaut de
+        // `SpeciesConstructor`, résistant à la réécriture de
+        // `Promise.prototype.constructor` ou `global.Promise`
+        // (JS-C280).
+        e.protos.promise_ctor = cid;
+        // `get Promise[@@species] { return this }` — le ctor du
+        // résultat de `then` se dérive par SpeciesConstructor.
+        let sg = e.native_fn("get [Symbol.species]", promise_species_get);
+        if let Some(o) = e.heap.obj_mut(cid) {
+            o.set_accessor(crate::interp::SYM_SPECIES, sg, Value::Undefined, false);
+        }
         e.add_method(cid, "resolve", promise_static_resolve);
         e.add_method(cid, "reject", promise_static_reject);
         e.add_method(cid, "all", promise_all);

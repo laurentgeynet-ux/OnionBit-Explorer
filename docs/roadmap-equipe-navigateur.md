@@ -5550,6 +5550,36 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   11 tests `await_thenable` ;
   test262 1046/1046 (31 skips).
 
+- [x] **JS-C280. `then` honore
+  `@@species`**
+  (`explorer-jscore`, §B-14
+  dailymotion vol 577) —
+  `promise_then` ignorait
+  `SpeciesConstructor` → la
+  détection
+  `FORCED_PROMISE_CONSTRUCTOR`
+  de core-js (CMP Sourcepoint)
+  échouait → `globalThis.
+  Promise` remplacé par un
+  polyfill sans `finally` →
+  boot player mort.
+  `PerformPromiseThen` spec :
+  `species_ctor` +
+  `new_promise_capability`
+  (défaut = `%Promise%`
+  intrinsèque `protos.
+  promise_ctor`), accesseur
+  `get @@species`, `ThenSink`
+  `Native`|`Foreign` sur les
+  réactions. Hérités :
+  `Promise.resolve`/`reject`
+  sur `this` (sous-classes).
+  Borne : `all`/`race`/`any`
+  natifs (ctor `this` non
+  dérivé). 13 tests
+  `promise_species` ; test262
+  1046/1046 (31 skips).
+
 - [x] **Étape CMP-4. Réarmement
   des balises « bloquées par CMP »**
   (`explorer-core`, §B-4 bras CMP
