@@ -295,6 +295,7 @@ fn render_subframe(
         viewport: (w, h),
         scale: ctx.scale,
         image_max_px: ctx.image_max_px,
+        image_max_bytes: ctx.image_max_bytes,
         color_scheme: ctx.color_scheme,
         dom_journal_max_ops: ctx.dom_journal_max_ops,
         // CAP-155 — scripting de l'enfant = celui du parent

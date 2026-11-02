@@ -770,10 +770,11 @@ pub struct Session {
     /// (`js_mem_limit_mib` de config × Mio, saturé — étape
     /// 123 ; `0` = illimité explicite).
     js_mem_bytes: usize,
-    /// Bornes images (`SessionConfig` — nombre par document
-    /// et pixels décodés).
+    /// Bornes images (`SessionConfig` — nombre par document,
+    /// pixels décodés par image et octets retenus en tout).
     max_images: usize,
     image_max_px: u32,
+    image_max_bytes: usize,
     /// Bornes sous-ressources (`max_sheets` feuilles liées,
     /// `max_imports` chaîne `@import` — étape 96).
     max_sheets: usize,
@@ -1083,6 +1084,7 @@ impl Session {
             js_mem_bytes: cfg.js_mem_limit_mib.saturating_mul(1024 * 1024),
             max_images: cfg.max_images,
             image_max_px: cfg.image_max_px,
+            image_max_bytes: cfg.image_max_bytes,
             max_sheets: cfg.max_sheets,
             max_imports: cfg.max_imports,
             max_fonts: cfg.max_fonts,

@@ -914,6 +914,16 @@ pub struct SessionConfig {
     /// Budget pixels par image décodée (≈ 4 octets/pixel —
     /// borne l'allocation avant décodage).
     pub image_max_px: u32,
+    /// Budget octets **global** sur les bitmaps décodés
+    /// retenus par onglet (§B-59) — `image_max_px` borne
+    /// chaque image mais pas leur somme : franceinter
+    /// accumulait 2,1 Gio de RGBA pour 48 Mio compressés,
+    /// ce qui tuait le daemon. Au-delà du budget, l'apply
+    /// évince les bitmaps les plus tardifs du document de
+    /// toutes les tables (repli `alt` peint — dégradation
+    /// bornée) ; les corps compressés `img_bodies` restent
+    /// re-décodables. Défaut 512 Mio.
+    pub image_max_bytes: usize,
     /// Nombre max de feuilles `<link>` fetchées par document
     /// (bornes sous-ressources — une page peut en chaîner
     /// des centaines). La borne s'applique **après** le
@@ -1077,6 +1087,7 @@ impl Default for SessionConfig {
             js_ops: 50_000_000,
             max_images: 256,
             image_max_px: 16_000_000,
+            image_max_bytes: 512 * 1024 * 1024,
             max_sheets: 32,
             max_imports: 16,
             max_fonts: 16,

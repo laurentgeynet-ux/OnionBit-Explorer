@@ -260,6 +260,7 @@ async fn nav_commit_shared(
             &base,
             &bodies,
             ctx.image_max_px,
+            ctx.image_max_bytes,
             ctx.viewport.0,
             ctx.scale,
         );

@@ -159,6 +159,42 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   scripts suivants tournent.
   Verrou : `deadline_flag_does_
   not_leak_to_next_eval`.
+- **Étape 173 — budget octets
+  images décodées** (`explorer-core`)
+  — §B-59 3ᵉ racine (franceinter,
+  vols 555-558) : `image_max_px`
+  bornait chaque bitmap (≤ 64 Mio)
+  mais pas leur **somme** — 256
+  `<img>` retenaient 2 127 Mio de
+  RGBA pour 48 Mio compressés, le
+  daemon mourait d'alloc à
+  l'apply post-script (mesuré
+  `images: 2127,3 Mio` par
+  `cli mem`, mort à
+  `apply: parse` sur le vrai
+  binaire). Nouveau
+  `SessionConfig::image_max_
+  bytes=512 Mio` : borne à
+  l'**insertion** dans les caches
+  persistants (`insert_images_
+  into`, `commit_dyn_img_body`,
+  `restore_images`,
+  `insert_fetched_images`) +
+  élagage fin d'apply par
+  `Arc`-ptr de toutes les tables
+  (orphelins de cache d'abord,
+  puis fin de document) — les
+  corps compressés `img_bodies`
+  restent re-décodables, l'image
+  évincée peint son repli `alt`.
+  Re-vol franceinter : apply
+  post-script complet, `images_
+  bytes=556 Mio`, plateau 4,17 Gio
+  stable (vs mort au cap 5 Gio),
+  purge 386 Mio post-DELETE. Verrou
+  `prune_paint_images_budget_
+  octets`.
+
 - **Étape 172 — borne-temps
   nav-auto** (`explorer-core`) —
   §B-72 bras starvation (fifa vol

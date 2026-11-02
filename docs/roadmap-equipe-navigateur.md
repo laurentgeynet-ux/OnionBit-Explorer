@@ -5524,6 +5524,33 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   (livré, CMP-4), substitution
   SDKs bornée.
 
+- [x] **Étape 173. Budget octets
+  images décodées** (`explorer-core`,
+  §B-59 3ᵉ racine — franceinter,
+  vols 555-558) : le réservoir n'était
+  ni JS ni cycle DOM mais les
+  **bitmaps RGBA retenus sans borne
+  globale** — `image_max_px` borne
+  chaque image, pas leur somme
+  (256 `<img>` → 2 127 Mio mesurés
+  par `cli mem`, mort à
+  `apply: parse`). Nouveau
+  `SessionConfig::image_max_bytes`
+  (défaut 512 Mio) — borne à
+  l'insertion dans `img_decoded`/
+  `bg_decoded` (vague, dyn, bfcache,
+  fonds fetchés) et élagage fin
+  d'apply par `Arc`-ptr sur toutes
+  les tables peintes ; ordre
+  document gardé (haut de page
+  d'abord), corps compressés
+  re-décodables, repli `alt`.
+  Verrou `prune_paint_images_
+  budget_octets` + re-vol :
+  apply complet, `images_bytes=
+  556 Mio`, plateau stable sous
+  le cap, purge propre.
+
 - [x] **Étape 172. Borne-temps
   nav-auto** (`explorer-core`,
   §B-72 bras starvation, fifa vol

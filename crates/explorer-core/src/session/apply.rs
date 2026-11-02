@@ -165,6 +165,9 @@ pub(crate) struct ApplyCtx {
     pub scale: f32,
     /// Cap de pixels des bitmaps embarqués (images, svg).
     pub image_max_px: u32,
+    /// Cap d'octets des bitmaps décodés retenus (§B-59 —
+    /// `SessionConfig::image_max_bytes`).
+    pub image_max_bytes: usize,
     /// Schéma de couleurs réglé — propagé à `StyleEnv`
     /// (étape 97).
     pub color_scheme: explorer_css::ColorScheme,
@@ -1482,7 +1485,7 @@ fn try_incr_payload(
     // ce merge la table (RAZ `PaintImages::default()`)
     // rendait tout `mask-image` aveugle en session.
     p.images.masks_url.extend(data_imgs.masks_url);
-    insert_fetched_images(p, &styles, ctx.image_max_px);
+    insert_fetched_images(p, &styles, ctx.image_max_px, ctx.image_max_bytes);
     let mut sizes = image_sizes(new_dom, &p.images.replaced);
     sizes.extend(explorer_render::svg::svg_sizes(new_dom, root_el));
     // `<iframe>` (étape 129) : gabarit remplacé — un cadre
@@ -1538,6 +1541,7 @@ fn try_incr_payload(
     p.doc_h = doc_h;
     p.images.svgs = svgs;
     p.images.svg_sources = svg_sources;
+    prune_paint_images(p, ctx.image_max_bytes);
     p.images.canvases = canvas_table_from_ops(canvas_ops, new_dom);
     // Sous-contextes `<iframe>` (étape 129) : bitmaps
     // re-blittés sur les boîtes du nouvel arbre — les
@@ -1667,7 +1671,7 @@ pub(crate) fn relayout_dom_payload(
     // plus haut) : masques `data:` sinon invisibles en
     // session depuis R-52.
     p.images.masks_url.extend(data_imgs.masks_url);
-    insert_fetched_images(p, &styles, ctx.image_max_px);
+    insert_fetched_images(p, &styles, ctx.image_max_px, ctx.image_max_bytes);
     let mut sizes = image_sizes(dom, &p.images.replaced);
     sizes.extend(explorer_render::svg::svg_sizes(dom, root_el));
     // `<iframe>` (étape 129) : gabarit remplacé (300×150
@@ -1707,6 +1711,7 @@ pub(crate) fn relayout_dom_payload(
     p.tree_epoch = p.tree_epoch.wrapping_add(1);
     p.images.svgs = svgs;
     p.images.svg_sources = svg_sources;
+    prune_paint_images(p, ctx.image_max_bytes);
     // `<canvas>` 2D (JS-C28) : op-lists cumulées du miroir,
     // re-résolues par chemin d'élément dans `dom`.
     p.images.canvases = canvas_table_from_ops(canvas_ops, dom);
@@ -1976,6 +1981,7 @@ impl Session {
             viewport: self.viewport,
             scale: self.scale,
             image_max_px: self.image_max_px,
+            image_max_bytes: self.image_max_bytes,
             color_scheme: self.color_scheme,
             dom_journal_max_ops: self.dom_journal_max_ops,
             scripting: self.js_factory.is_some(),
@@ -2566,7 +2572,144 @@ pub(crate) type ApplyQueue = VecDeque<PendingApply>;
 /// ré-enregistre `masks_url`, RAZ avec `PaintImages::default()`.
 /// Symétrique de `reinsert_imgs_by_src` ; avant ce cache,
 /// les fonds fetchés mouraient au second apply.
-fn insert_fetched_images(p: &mut PaintPayload, styles: &StyleMap, max_px: u32) {
+/// Budget octets global sur les bitmaps décodés retenus par
+/// onglet (§B-59, `SessionConfig::image_max_bytes`) : un même
+/// bitmap peut être partagé (`Arc`) entre `images.*` (peint),
+/// `img_decoded`/`bg_decoded` (caches par clé) et
+/// `masks_url` — l'éviction retire le bitmap de **toutes**
+/// les tables, sinon l'`Arc` résiduel le garde en vie. Les
+/// bitmaps les plus tardifs du document partent en premier
+/// (le haut de page, visible, reste) ; les entrées de cache
+/// non peintes (nœud supprimé par mutation) sont évincées
+/// avant toute image affichée. Les corps compressés
+/// `img_bodies` survivent — un apply ultérieur peut
+/// re-décoder ; le nœud évincé peint son repli `alt`,
+/// jamais de croissance hors budget.
+#[allow(clippy::too_many_lines)] // motif maison : la collecte par table reste linéaire et lisible en un bloc.
+fn prune_paint_images(p: &mut PaintPayload, max_bytes: usize) {
+    #[derive(Default)]
+    struct Ent {
+        bytes: usize,
+        /// Plus petit ordinal de nœud porteur — `usize::MAX`
+        /// = orphelin de cache, évincé en premier.
+        idx: usize,
+        replaced: Vec<explorer_dom::NodeId>,
+        backgrounds: Vec<explorer_dom::NodeId>,
+        svgs: Vec<explorer_dom::NodeId>,
+        masks: Vec<explorer_dom::NodeId>,
+        mask_urls: Vec<String>,
+        img_keys: Vec<String>,
+        bg_keys: Vec<String>,
+    }
+    fn slot<'a>(by_ptr: &'a mut HashMap<usize, Ent>, img: &Arc<DecodedImage>) -> &'a mut Ent {
+        by_ptr
+            .entry(Arc::as_ptr(img) as usize)
+            .or_insert_with(|| Ent {
+                idx: usize::MAX,
+                ..Ent::default()
+            })
+    }
+    let mut by_ptr: HashMap<usize, Ent> = HashMap::new();
+    for (n, img) in &p.images.replaced {
+        let e = slot(&mut by_ptr, img);
+        e.bytes = img.rgba.len();
+        e.idx = e.idx.min(n.index() as usize);
+        e.replaced.push(*n);
+    }
+    for (n, img) in &p.images.backgrounds {
+        let e = slot(&mut by_ptr, img);
+        e.bytes = img.rgba.len();
+        e.idx = e.idx.min(n.index() as usize);
+        e.backgrounds.push(*n);
+    }
+    for (n, img) in &p.images.svgs {
+        let e = slot(&mut by_ptr, img);
+        e.bytes = img.rgba.len();
+        e.idx = e.idx.min(n.index() as usize);
+        e.svgs.push(*n);
+    }
+    for (n, img) in &p.images.masks {
+        let e = slot(&mut by_ptr, img);
+        e.bytes = img.rgba.len();
+        e.idx = e.idx.min(n.index() as usize);
+        e.masks.push(*n);
+    }
+    // `masks_url` : utilisée au paint par URL (pseudos sans
+    // `NodeId`) — petits bitmaps alpha, gardés (idx 0).
+    for (k, img) in &p.images.masks_url {
+        let e = slot(&mut by_ptr, img);
+        e.bytes = img.rgba.len();
+        e.idx = 0;
+        e.mask_urls.push(k.clone());
+    }
+    // Caches persistants : un bitmap qui n'est peint nulle
+    // part reste de la mémoire — orphelin (`MAX`), évincé
+    // avant les images affichées ; partagé → indice du
+    // nœud peint.
+    for (k, img) in &p.img_decoded {
+        let e = slot(&mut by_ptr, img);
+        e.bytes = img.rgba.len();
+        e.img_keys.push(k.clone());
+    }
+    for (k, img) in p
+        .bg_decoded
+        .iter()
+        .filter_map(|(k, v)| v.as_ref().map(|i| (k, i)))
+    {
+        let e = slot(&mut by_ptr, img);
+        e.bytes = img.rgba.len();
+        e.bg_keys.push(k.clone());
+    }
+    let mut total: usize = by_ptr.values().map(|e| e.bytes).sum();
+    if total <= max_bytes {
+        return;
+    }
+    let mut order: Vec<(usize, usize)> = by_ptr.iter().map(|(&ptr, e)| (e.idx, ptr)).collect();
+    order.sort_unstable_by_key(|a| std::cmp::Reverse(a.0));
+    let mut evicted = 0usize;
+    let mut freed = 0usize;
+    for (_, ptr) in order {
+        if total <= max_bytes {
+            break;
+        }
+        let Some(e) = by_ptr.remove(&ptr) else {
+            continue;
+        };
+        for n in e.replaced {
+            p.images.replaced.remove(&n);
+        }
+        for n in e.backgrounds {
+            p.images.backgrounds.remove(&n);
+        }
+        for n in e.svgs {
+            p.images.svgs.remove(&n);
+        }
+        for n in e.masks {
+            p.images.masks.remove(&n);
+        }
+        for k in e.mask_urls {
+            p.images.masks_url.remove(&k);
+        }
+        for k in e.img_keys {
+            p.img_decoded.remove(&k);
+        }
+        for k in e.bg_keys {
+            p.bg_decoded.remove(&k);
+        }
+        evicted += 1;
+        freed += e.bytes;
+        total = total.saturating_sub(e.bytes);
+    }
+    tracing::info!(
+        evicted,
+        freed,
+        kept = total,
+        budget = max_bytes,
+        "apply: images élaguées (budget octets)"
+    );
+}
+
+fn insert_fetched_images(p: &mut PaintPayload, styles: &StyleMap, max_px: u32, max_bytes: usize) {
     if p.bg_aliases.is_empty() && p.mask_aliases.is_empty() {
         return;
     }
@@ -2575,11 +2718,24 @@ fn insert_fetched_images(p: &mut PaintPayload, styles: &StyleMap, max_px: u32) {
     // retour bfcache). Les applys suivants trouvent
     // `bg_bodies` vide et ne coûtent que la boucle de
     // correspondance styles → cache.
+    // Budget octets global sur les bitmaps retenus (§B-59) :
+    // au-delà, le décodage n'entre pas en cache — le fond
+    // n'est pas peint (dégradation), jamais de dépassement.
+    let mut running = net::decoded_cache_bytes(&p.img_decoded, &p.bg_decoded);
     for (resolved, body) in std::mem::take(&mut p.bg_bodies) {
         net::retain_img_body(&mut p.img_bodies, &resolved, body.clone());
-        p.bg_decoded
-            .entry(resolved)
-            .or_insert_with(|| decode_image(&body, max_px).map(Arc::new));
+        if let std::collections::hash_map::Entry::Vacant(e) = p.bg_decoded.entry(resolved) {
+            let img = decode_image(&body, max_px).map(Arc::new).filter(|i| {
+                let b = i.rgba.len();
+                if running.saturating_add(b) > max_bytes {
+                    false
+                } else {
+                    running += b;
+                    true
+                }
+            });
+            e.insert(img);
+        }
     }
     for (node, st) in styles.iter() {
         let Some(raw) = st.get("background-image").and_then(css_url_arg) else {
@@ -2616,6 +2772,49 @@ fn insert_fetched_images(p: &mut PaintPayload, styles: &StyleMap, max_px: u32) {
 mod tests {
     use super::*;
     use std::collections::HashMap;
+
+    /// §B-59 — le budget octets borne les bitmaps retenus :
+    /// orphelins de cache évincés en premier, puis les images
+    /// les plus tardives du document ; un bitmap partagé
+    /// (`Arc`) disparaît de toutes les tables à la fois.
+    #[test]
+    fn prune_paint_images_budget_octets() {
+        let img = |n: usize| {
+            Arc::new(DecodedImage {
+                width: 1,
+                height: 1,
+                rgba: vec![0u8; n],
+            })
+        };
+        let dom = TreeBuilder::parse_scripting(
+            "<html><body><div><p>x</p><p>y</p></div></body></html>",
+            false,
+        );
+        let ids = engine_preorder(&dom);
+        let (n1, n2) = (ids[2], ids[3]);
+        let mut p = PaintPayload::default();
+        let a = img(100);
+        p.images.replaced.insert(n1, a.clone());
+        p.img_decoded.insert("a".into(), a);
+        let b = img(100);
+        p.images.replaced.insert(n2, b.clone());
+        p.bg_decoded.insert("b".into(), Some(b));
+        p.img_decoded.insert("orphan".into(), img(100));
+        p.images.masks_url.insert("mask".into(), img(10));
+        prune_paint_images(&mut p, 200);
+        // 310 octets → 200 : orphelin (100) puis nœud tardif
+        // (100) évincés ; premier nœud + masque gardés.
+        assert!(p.images.replaced.contains_key(&n1));
+        assert!(!p.images.replaced.contains_key(&n2));
+        assert!(p.img_decoded.contains_key("a"));
+        assert!(!p.img_decoded.contains_key("orphan"));
+        assert!(!p.bg_decoded.contains_key("b"));
+        assert!(p.images.masks_url.contains_key("mask"));
+        // Déjà sous le budget : no-op.
+        let before = p.images.replaced.len();
+        prune_paint_images(&mut p, 200);
+        assert_eq!(p.images.replaced.len(), before);
+    }
 
     /// JS-C129 — le rejeu `Insert` apparie `créés (moteur)` ↔
     /// `ids/tags (miroir)` **par tag**, pas positionnellement :

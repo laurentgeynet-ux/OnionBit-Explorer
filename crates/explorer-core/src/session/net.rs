@@ -1829,9 +1829,16 @@ impl Session {
             let Some(entry) = self.tabs.get_mut(&tab) else {
                 return;
             };
-            entry.img_decoded.insert(src_key, img.clone());
-            entry.bg_decoded.insert(url.as_str(), Some(img));
             retain_img_body(&mut entry.img_bodies, &url.as_str(), body);
+            // Budget octets global sur les bitmaps retenus
+            // (§B-59) — au-delà, le bitmap n'entre pas en cache
+            // (repli `alt` peint) ; le corps compressé reste
+            // disponible pour un re-décodage ultérieur.
+            let held = decoded_cache_bytes(&entry.img_decoded, &entry.bg_decoded);
+            if held.saturating_add(img.rgba.len()) <= self.image_max_bytes {
+                entry.img_decoded.insert(src_key, img.clone());
+                entry.bg_decoded.insert(url.as_str(), Some(img));
+            }
         }
         // Échec de décodage → `error` : un corps invalide
         // n'est pas une image chargée (spec), et rien n'est
@@ -3638,12 +3645,19 @@ impl Session {
         let max_px = self.image_max_px;
         let img_w = self.viewport.0;
         let dpr = self.scale;
+        let max_bytes = self.image_max_bytes;
         let Some(entry) = self.tabs.get_mut(&tab) else {
             return;
         };
         let Some(dom) = entry.dom.as_ref() else {
             return;
         };
+        let bg_bytes = entry
+            .bg_decoded
+            .values()
+            .flatten()
+            .map(|i| i.rgba.len())
+            .sum::<usize>();
         insert_images_into(
             dom,
             &mut entry.images,
@@ -3651,6 +3665,8 @@ impl Session {
             bodies,
             max_px,
             &mut entry.img_decoded,
+            bg_bytes,
+            max_bytes,
             &mut entry.img_bodies,
             img_w,
             dpr,
@@ -3664,11 +3680,18 @@ impl Session {
     /// restaurés — restauration toujours **sans réseau**.
     /// `data:` est auto-porteur (payload dans l'attribut),
     /// les `svg` inline re-rasterisés depuis le DOM.
+    #[allow(clippy::too_many_lines)] // motif maison : les trois boucles de restauration restent lisibles en bloc.
     pub(crate) fn restore_images(&mut self, tab: TabId) {
         let max_px = self.image_max_px;
+        let max_bytes = self.image_max_bytes;
         let Some(entry) = self.tabs.get_mut(&tab) else {
             return;
         };
+        // Budget octets global sur les bitmaps retenus (§B-59)
+        // — la restauration re-décode depuis `img_bodies` ;
+        // au-delà du budget l'image reste absente (repli
+        // `alt`), jamais de croissance hors borne.
+        let mut running = decoded_cache_bytes(&entry.img_decoded, &entry.bg_decoded);
         let Some(dom) = entry.dom.as_ref() else {
             return;
         };
@@ -3735,6 +3758,10 @@ impl Session {
             let Some(img) = decode_image(&bytes, max_px).map(Arc::new) else {
                 continue;
             };
+            if running.saturating_add(img.rgba.len()) > max_bytes {
+                continue;
+            }
+            running += img.rgba.len();
             entry.images.replaced.insert(node, img.clone());
             entry.img_decoded.insert(src, img.clone());
             if let Some(k) = key {
@@ -3750,6 +3777,10 @@ impl Session {
             let Some(img) = decode_image(&bytes, max_px).map(Arc::new) else {
                 continue;
             };
+            if running.saturating_add(img.rgba.len()) > max_bytes {
+                continue;
+            }
+            running += img.rgba.len();
             entry.images.backgrounds.insert(node, img.clone());
             if let Some(k) = key {
                 entry.bg_decoded.insert(k, Some(img));
@@ -3764,6 +3795,10 @@ impl Session {
             let Some(img) = decode_image(&bytes, max_px).map(Arc::new) else {
                 continue;
             };
+            if running.saturating_add(img.rgba.len()) > max_bytes {
+                continue;
+            }
+            running += img.rgba.len();
             if let Some(k) = key {
                 entry.bg_decoded.insert(k, Some(img.clone()));
             }
@@ -3806,6 +3841,21 @@ pub(crate) fn retain_img_body(store: &mut HashMap<String, Vec<u8>>, key: &str, b
 /// `replaced` indexée `NodeId` meurt à chaque re-parse, le
 /// cache survit et permet la ré-insertion sans re-fetch ni
 /// re-décodage.
+/// Octets décodés actuellement retenus dans les deux caches
+/// persistants (`img_decoded` + `bg_decoded`) — référence
+/// du budget §B-59 à l'insertion.
+pub(crate) fn decoded_cache_bytes(
+    img_decoded: &HashMap<String, Arc<DecodedImage>>,
+    bg_decoded: &HashMap<String, Option<Arc<DecodedImage>>>,
+) -> usize {
+    img_decoded.values().map(|i| i.rgba.len()).sum::<usize>()
+        + bg_decoded
+            .values()
+            .flatten()
+            .map(|i| i.rgba.len())
+            .sum::<usize>()
+}
+
 #[allow(clippy::too_many_arguments)]
 fn insert_images_into(
     dom: &Dom,
@@ -3814,12 +3864,22 @@ fn insert_images_into(
     bodies: &HashMap<String, Vec<u8>>,
     max_px: u32,
     decoded_cache: &mut HashMap<String, Arc<DecodedImage>>,
+    bg_bytes: usize,
+    max_bytes: usize,
     bodies_store: &mut HashMap<String, Vec<u8>>,
     img_w: f32,
     dpr: f32,
 ) {
     let items = collect_images(dom, img_w, dpr);
     let mut decoded: HashMap<String, Option<Arc<DecodedImage>>> = HashMap::new();
+    // Budget octets global sur les bitmaps retenus (§B-59) :
+    // `image_max_px` borne chaque image mais pas leur somme —
+    // franceinter accumulait 2,1 Gio de RGBA. Au-delà du
+    // budget l'image n'entre ni en table ni en cache (repli
+    // `alt` peint) ; le corps compressé reste retenu dans
+    // `img_bodies` pour un éventuel re-décodage. L'ordre
+    // document de `collect_images` garde le haut de page.
+    let mut running = bg_bytes + decoded_cache.values().map(|i| i.rgba.len()).sum::<usize>();
     for (node, src) in items {
         let Ok(u) = Url::resolve(base, &src) else {
             continue;
@@ -3827,9 +3887,17 @@ fn insert_images_into(
         let Some(body) = bodies.get(&u.as_str()) else {
             continue;
         };
-        let img = decoded
-            .entry(u.as_str())
-            .or_insert_with(|| decode_image(body, max_px).map(Arc::new));
+        let img = decoded.entry(u.as_str()).or_insert_with(|| {
+            decode_image(body, max_px).map(Arc::new).filter(|i| {
+                let b = i.rgba.len();
+                if running.saturating_add(b) > max_bytes {
+                    false
+                } else {
+                    running += b;
+                    true
+                }
+            })
+        });
         if let Some(img) = img {
             images.replaced.insert(node, img.clone());
             decoded_cache.insert(src, img.clone());
@@ -3870,6 +3938,7 @@ pub(crate) fn insert_images_payload(
     base: &Url,
     bodies: &HashMap<String, Vec<u8>>,
     max_px: u32,
+    max_bytes: usize,
     img_w: f32,
     dpr: f32,
 ) {
@@ -3880,12 +3949,18 @@ pub(crate) fn insert_images_payload(
         dom,
         images,
         img_decoded,
+        bg_decoded,
         img_bodies,
         ..
     } = p;
     let Some(dom) = dom.as_ref() else {
         return;
     };
+    let bg_bytes = bg_decoded
+        .values()
+        .flatten()
+        .map(|i| i.rgba.len())
+        .sum::<usize>();
     insert_images_into(
         dom,
         images,
@@ -3893,6 +3968,8 @@ pub(crate) fn insert_images_payload(
         bodies,
         max_px,
         img_decoded,
+        bg_bytes,
+        max_bytes,
         img_bodies,
         img_w,
         dpr,
