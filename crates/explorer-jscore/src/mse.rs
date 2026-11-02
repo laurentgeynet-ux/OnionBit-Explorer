@@ -153,6 +153,11 @@ struct SbData {
     est_ranges: Vec<(f64, f64)>,
     est_span: f64,
     last_append_t: Option<f64>,
+    /// Timescale média lu dans le `mdhd` de l'init segment
+    /// fMP4 (JS-C285) — sert à convertir `tfdt`/durées
+    /// `trun` des `moof` en secondes. `None` tant qu'aucun
+    /// init fMP4 n'a été appendé (repli estimateur).
+    timescale: Option<u32>,
 }
 
 struct MsHost {
@@ -538,6 +543,7 @@ fn ms_add_source_buffer(e: &mut Engine, this: Value, args: &[Value]) -> JsResult
         est_ranges: Vec::new(),
         est_span: EST_SEGMENT_SPAN,
         last_append_t: None,
+        timescale: None,
         mode: "segments".to_string(),
         timestamp_offset: 0.0,
         append_start: 0.0,
@@ -634,6 +640,245 @@ fn ms_clear_live_range(e: &mut Engine, this: Value, _args: &[Value]) -> JsResult
 // Méthodes SourceBuffer
 // ------------------------------------------------------------------
 
+/// En-tête de box ISO-BMFF → `(taille_totale, fourcc,
+/// taille_header)`. `size32==0` = jusqu'à la fin du chunk
+/// (toléré) ; `1` = largesize 64 bits (bornée à `usize`).
+fn box_header(b: &[u8]) -> Option<(usize, [u8; 4], usize)> {
+    if b.len() < 8 {
+        return None;
+    }
+    let sz32 = u32::from_be_bytes(b[..4].try_into().ok()?);
+    let fourcc: [u8; 4] = b[4..8].try_into().ok()?;
+    match sz32 {
+        0 => Some((b.len(), fourcc, 8)),
+        1 => {
+            if b.len() < 16 {
+                return None;
+            }
+            let sz = u64::from_be_bytes(b[8..16].try_into().ok()?);
+            Some((usize::try_from(sz).ok()?, fourcc, 16))
+        }
+        _ => Some((sz32 as usize, fourcc, 8)),
+    }
+}
+
+/// Itère les boxes enfants de `b` (région payload d'un
+/// conteneur) en passant `(fourcc, payload)` à `f` — stop
+/// net sur box tronqué (contenu hostile : borne, jamais panic).
+fn walk_boxes(b: &[u8], mut f: impl FnMut(&[u8; 4], &[u8])) {
+    let mut pos = 0usize;
+    while let Some((size, fourcc, hdr)) = box_header(&b[pos..]) {
+        let Some(end) = pos
+            .checked_add(size)
+            .filter(|&e| e <= b.len() && e > pos + hdr)
+        else {
+            break;
+        };
+        f(&fourcc, &b[pos + hdr..end]);
+        pos = end;
+    }
+}
+
+/// `mdhd` → timescale média (`u32`) — v0 : champ à offset
+/// 12 du payload, v1 : offset 20.
+fn mdhd_timescale(b: &[u8]) -> Option<u32> {
+    let off = match *b.first()? {
+        0 => 12,
+        1 => 20,
+        _ => return None,
+    };
+    b.get(off..off + 4)
+        .map(|s| u32::from_be_bytes(s.try_into().unwrap_or([0; 4])))
+}
+
+/// `tfdt` → `baseMediaDecodeTime` — v0 `u32`, v1 `u64`.
+fn tfdt_base(b: &[u8]) -> Option<u64> {
+    match *b.first()? {
+        0 => Some(u64::from(u32::from_be_bytes(b.get(4..8)?.try_into().ok()?))),
+        1 => Some(u64::from_be_bytes(b.get(4..12)?.try_into().ok()?)),
+        _ => None,
+    }
+}
+
+/// `tfhd` → `default_sample_duration` (flag 0x8), en sautant
+/// les champs optionnels dans l'ordre spec.
+fn tfhd_default_dur(b: &[u8]) -> Option<u32> {
+    if b.len() < 8 {
+        return None;
+    }
+    let flags = u32::from(b[1]) << 16 | u32::from(b[2]) << 8 | u32::from(b[3]);
+    let mut p = 8usize; // version+flags + track_ID
+    if flags & 0x1 != 0 {
+        p += 8; // base_data_offset
+    }
+    if flags & 0x2 != 0 {
+        p += 4; // sample_description_index
+    }
+    if flags & 0x8 != 0 {
+        return b
+            .get(p..p + 4)
+            .map(|s| u32::from_be_bytes(s.try_into().unwrap_or([0; 4])));
+    }
+    None
+}
+
+/// Durée totale d'un `trun` en unités timescale : somme des
+/// `sample_duration` par échantillon (flag 0x100, premier
+/// champ du record) ; sinon `default_sample_duration` ×
+/// `sample_count` quand connu.
+fn trun_duration(b: &[u8], default_dur: Option<u32>) -> Option<u64> {
+    if b.len() < 8 {
+        return None;
+    }
+    let flags = u32::from(b[1]) << 16 | u32::from(b[2]) << 8 | u32::from(b[3]);
+    let count = u64::from(u32::from_be_bytes(b.get(4..8)?.try_into().ok()?));
+    let mut p = 8usize;
+    if flags & 0x1 != 0 {
+        p += 4; // data_offset
+    }
+    if flags & 0x4 != 0 {
+        p += 4; // first_sample_flags
+    }
+    let rec = 4
+        * (usize::from(flags & 0x100 != 0)
+            + usize::from(flags & 0x200 != 0)
+            + usize::from(flags & 0x400 != 0)
+            + usize::from(flags & 0x800 != 0));
+    if flags & 0x100 == 0 {
+        return default_dur.map(|d| u64::from(d) * count);
+    }
+    let mut sum = 0u64;
+    for _ in 0..count {
+        let s = b.get(p..p + 4)?;
+        sum = sum.saturating_add(u64::from(u32::from_be_bytes(
+            s.try_into().unwrap_or([0; 4]),
+        )));
+        p += rec;
+    }
+    Some(sum)
+}
+
+/// Un `traf` → `(tfdt, durée_totale)` en unités timescale —
+/// deux passes : `tfhd`/`tfdt` d'abord (ordre de box non
+/// garanti), puis somme des `trun`.
+fn traf_range(b: &[u8]) -> Option<(u64, u64)> {
+    let mut tfdt = None;
+    let mut ddef = None;
+    walk_boxes(b, |fourcc, payload| match fourcc {
+        b"tfdt" => tfdt = tfdt_base(payload),
+        b"tfhd" => ddef = tfhd_default_dur(payload),
+        _ => {}
+    });
+    let mut dur = 0u64;
+    walk_boxes(b, |fourcc, payload| {
+        if fourcc == b"trun" {
+            dur = dur.saturating_add(trun_duration(payload, ddef).unwrap_or(0));
+        }
+    });
+    tfdt.map(|t| (t, dur))
+}
+
+/// Scan fMP4 du chunk appendé (JS-C285) : `timescale` = le
+/// `mdhd` du `moov` (init segment) ; `moofs` = les plages
+/// `(tfdt, durée)` en unités timescale, une par `traf`.
+/// Les timestamps **réels** priment l'estimateur : c'est ce
+/// qu'un navigateur lit en démuxant — sans eux
+/// `media.buffered` surestime chaque append et un player
+/// (hls.js) saute des fragments entiers.
+struct Fmp4Scan {
+    timescale: Option<u32>,
+    moofs: Vec<(u64, u64)>,
+    /// Un box fMP4 top-niveau reconnu (`moov`/`moof`/`ftyp`/
+    /// `styp`/`sidx`) — chunk bien formé : sans `moof` il ne
+    /// porte pas de média (init) → **pas** de repli
+    /// estimateur (un init ne couvre aucune plage).
+    recognized: bool,
+}
+
+fn fmp4_scan(bytes: &[u8]) -> Fmp4Scan {
+    let mut out = Fmp4Scan {
+        timescale: None,
+        moofs: Vec::new(),
+        recognized: false,
+    };
+    walk_boxes(bytes, |fourcc, payload| match fourcc {
+        b"moov" => {
+            out.recognized = true;
+            walk_boxes(payload, |f2, p2| {
+                if f2 == b"trak" {
+                    walk_boxes(p2, |f3, p3| {
+                        if f3 == b"mdia" {
+                            walk_boxes(p3, |f4, p4| {
+                                if f4 == b"mdhd" && out.timescale.is_none() {
+                                    out.timescale = mdhd_timescale(p4);
+                                }
+                            });
+                        }
+                    });
+                }
+            });
+        }
+        b"moof" => {
+            out.recognized = true;
+            walk_boxes(payload, |f2, p2| {
+                if f2 == b"traf" {
+                    if let Some(r) = traf_range(p2) {
+                        out.moofs.push(r);
+                    }
+                }
+            });
+        }
+        b"ftyp" | b"styp" | b"sidx" | b"emsg" => out.recognized = true,
+        _ => {}
+    });
+    out
+}
+
+/// Repli estimateur de plage `buffered` (JS-C278/b3 +
+/// JS-C284) — utilisé quand le chunk ne porte pas de
+/// timestamps exploitables (init seul, MPEG-TS, `WebM`…).
+fn est_append_range(sd: &mut SbData) {
+    // JS-C278/b3 — `buffered` estimé : le segment couvre
+    // `[t, t+est_span]` clippé à l'append window ; un
+    // offset croissant affine le span du segment
+    // précédent (delta réel rétroactif).
+    let t = sd.timestamp_offset;
+    if let Some(p) = sd.last_append_t {
+        if t > p {
+            sd.est_span = t - p;
+            if let Some(last) = sd.est_ranges.last_mut() {
+                if last.1 > p && last.1 < t {
+                    last.1 = t;
+                }
+            }
+        }
+    }
+    // JS-C284 — `timestampOffset` **inchangé** entre deux
+    // appends : les timestamps vivent en bande (tfdt
+    // fMP4) — les players réels (hls.js) enchaînent les
+    // segments, la plage estimée doit donc **s'étendre**
+    // d'un segment nominal par append, sinon
+    // `media.buffered.end` plafonne et le loader d'un
+    // player re-cible un fragment déjà livré (stall
+    // observé à ~6 s). Un offset *changeant* repasse en
+    // sémantique spec (plage pilotée par `t`).
+    let sequential = sd.last_append_t == Some(t);
+    sd.last_append_t = Some(t);
+    let s = t.max(sd.append_start);
+    let base = if sequential {
+        sd.est_ranges.last().map_or(s, |&(_, e)| e)
+    } else {
+        s
+    };
+    let end = (base.max(s) + sd.est_span).min(sd.append_end);
+    if end > s {
+        match sd.est_ranges.last_mut() {
+            Some(last) if s <= last.1 => last.1 = last.1.max(end),
+            _ => sd.est_ranges.push((s, end)),
+        }
+    }
+}
+
 /// `sb.appendBuffer(buf)` — octets acceptés-**comptabilisés**
 /// (jamais stockés : pas de transport en C173). Séquence
 /// synchrone `updatestart` → `update` → `updateend` ; le cap
@@ -658,50 +903,43 @@ fn sb_append_buffer(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Val
                 "SourceBuffer: byte quota exceeded",
             ));
         }
+        // JS-C285 — timestamps en bande : scan fMP4 AVANT
+        // l'entrée en file (la donnée réelle — `mdhd` de
+        // l'init, `tfdt`+durées `trun` des `moof` — est ce
+        // qu'un navigateur obtient en démuxant).
+        let scan = fmp4_scan(&bytes);
         // MSE-3 transport : le segment est stocké en file
         // FIFO (ordre d'append — le flux `ByteSource` exact
         // qu'OnionCodec consomme côté hôte, ADR-0029).
         sd.segments.push_back(bytes);
         sd.bytes = next;
         sd.updating = true;
-        // JS-C278/b3 — `buffered` estimé : le segment couvre
-        // `[t, t+est_span]` clippé à l'append window ; un
-        // offset croissant affine le span du segment
-        // précédent (delta réel rétroactif).
-        let t = sd.timestamp_offset;
-        if let Some(p) = sd.last_append_t {
-            if t > p {
-                sd.est_span = t - p;
-                if let Some(last) = sd.est_ranges.last_mut() {
-                    if last.1 > p && last.1 < t {
-                        last.1 = t;
+        if let Some(ts) = scan.timescale {
+            sd.timescale = Some(ts);
+        }
+        match (sd.timescale, scan.moofs.is_empty()) {
+            // Media segment fMP4 : les plages réelles
+            // `tfdt`→`tfdt+dur` (+`timestampOffset`, fenêtre
+            // clippée) — pas d'estimation.
+            (Some(ts), false) => {
+                sd.last_append_t = Some(sd.timestamp_offset);
+                let ts = f64::from(ts);
+                for (start, dur) in scan.moofs {
+                    let s = (sd.timestamp_offset + start as f64 / ts).max(sd.append_start);
+                    let en = (sd.timestamp_offset + (start + dur) as f64 / ts).min(sd.append_end);
+                    if en > s {
+                        match sd.est_ranges.last_mut() {
+                            Some(last) if s <= last.1 => last.1 = last.1.max(en),
+                            _ => sd.est_ranges.push((s, en)),
+                        }
                     }
                 }
             }
-        }
-        // JS-C284 — `timestampOffset` **inchangé** entre deux
-        // appends : les timestamps vivent en bande (tfdt
-        // fMP4) — les players réels (hls.js) enchaînent les
-        // segments, la plage estimée doit donc **s'étendre**
-        // d'un segment nominal par append, sinon
-        // `media.buffered.end` plafonne et le loader d'un
-        // player re-cible un fragment déjà livré (stall
-        // observé à ~6 s). Un offset *changeant* repasse en
-        // sémantique spec (plage pilotée par `t`).
-        let sequential = sd.last_append_t == Some(t);
-        sd.last_append_t = Some(t);
-        let s = t.max(sd.append_start);
-        let base = if sequential {
-            sd.est_ranges.last().map_or(s, |&(_, e)| e)
-        } else {
-            s
-        };
-        let end = (base.max(s) + sd.est_span).min(sd.append_end);
-        if end > s {
-            match sd.est_ranges.last_mut() {
-                Some(last) if s <= last.1 => last.1 = last.1.max(end),
-                _ => sd.est_ranges.push((s, end)),
-            }
+            // fMP4 reconnu sans moof (init `moov`+`mdhd`,
+            // `ftyp`/`sidx` seuls…) : pas de média → aucune
+            // plage — l'init n'est **pas** 6 s de contenu.
+            _ if scan.recognized => {}
+            _ => est_append_range(&mut sd),
         }
     }
     let Value::Obj(sid) = this else {
@@ -709,7 +947,7 @@ fn sb_append_buffer(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Val
     };
     // Approximation documentée : les trois événements partent en
     // séquence synchrone (spec : « queue a task ») — l'ordre vu
-    // par les listeners est correct. JS-C282 : un listener qui
+    // par les listeners est correct. JS-C283 : un listener qui
     // jette n'interrompt plus la séquence — `updating` retombe
     // et `updateend` part quand même, sinon `blockBuffers` d'un
     // player réel gèle (hls.js → `endOfStream` jamais appelé).

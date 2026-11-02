@@ -232,6 +232,57 @@ fn js_c284_media_buffered_union_et_sequentiel() {
     );
 }
 
+/// JS-C285 — `buffered` lu dans les timestamps fMP4 en
+/// bande : `mdhd` timescale=1000 dans le `moov` de l'init ;
+/// `tfdt`+`trun` des `moof` donnent la vraie plage de
+/// chaque segment (1 s chacun). L'init ne produit **pas**
+/// de plage (pas de média) et le rail `video.buffered`
+/// reflète l'union exacte — un estimateur fixe surestime
+/// et fait sauter des fragments au loader hls.js.
+#[test]
+fn js_c285_buffered_timestamps_fmp4_en_bande() {
+    // moov[trak[mdia[mdhd v0 ts=1000]]] — 56 o.
+    const INIT: &str = "000000386d6f6f76\
+                        000000307472616b\
+                        000000286d646961\
+                        000000206d646864\
+                        000000000000000000000000000003e80000000000000000";
+    // moof[traf[tfhd(ddef=500) tfdt(v1,base=0) trun(2×500)]]
+    // + mdat — durée totale 1000/1000 = 1 s → [0,1).
+    const SEG0: &str = "000000506d6f6f66\
+                        0000004874726166\
+                        00000014746668640000000800000001000001f4\
+                        0000001474666474010000000000000000000000\
+                        000000187472756e0000010000000002000001f4000001f4\
+                        0000000c6d646174deadbeef";
+    // Idem, base tfdt=1000 → [1,2).
+    const SEG1: &str = "000000506d6f6f66\
+                        0000004874726166\
+                        00000014746668640000000800000001000001f4\
+                        00000014746664740100000000000000000003e8\
+                        000000187472756e0000010000000002000001f4000001f4\
+                        0000000c6d646174deadbeef";
+    let mut e = engine();
+    let src = format!(
+        "function H(s){{var a=new Uint8Array(s.length/2);\
+         for(var i=0;i<a.length;i++)a[i]=parseInt(s.substr(i*2,2),16);\
+         return a}}\
+         var ms=new MediaSource();\
+         var sb=ms.addSourceBuffer('video/mp4');\
+         var v=document.getElementById('v');\
+         v.src=URL.createObjectURL(ms);\
+         sb.appendBuffer(H('{INIT}').buffer);\
+         var b0=sb.buffered.length;\
+         sb.appendBuffer(H('{SEG0}').buffer);\
+         var b1=sb.buffered.length+'/'+sb.buffered.start(0)+'/'+sb.buffered.end(0);\
+         sb.appendBuffer(H('{SEG1}').buffer);\
+         b0+'|'+b1+'|'+sb.buffered.end(0)+'|'+v.buffered.end(0)",
+    );
+    // Init seul → 0 plage ; seg0 → [0,1) ; seg1 → [0,2)
+    // fusionné ; union média identique.
+    assert_eq!(ev(&mut e, &src), "0|1/0/1|2|2");
+}
+
 #[test]
 fn c193_create_object_url_registers_media_source() {
     let mut e = engine();

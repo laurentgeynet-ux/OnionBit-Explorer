@@ -5717,6 +5717,21 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   `js_c284_media_buffered_union_
   et_sequentiel`.
 
+- [x] **JS-C285. `buffered` = timestamps
+  fMP4 en bande** (`explorer-jscore`,
+  même chantier) — l'estimateur
+  croissait ~6 s/append →
+  `bufferInfo.end` hls.js sautait
+  au dernier fragment. `fmp4_scan` :
+  `mdhd` timescale (init `moov`,
+  cache par SB) + `tfdt`/`trun`/
+  `tfhd` de chaque `traf` → plage
+  réelle `[tfdt,+dur]/ts` ; init
+  sans `moof` = aucune plage ;
+  non-fMP4 → estimateur. Verrou
+  `js_c285_buffered_timestamps_
+  fmp4_en_bande`.
+
 - [x] **Étape CMP-4. Réarmement
   des balises « bloquées par CMP »**
   (`explorer-core`, §B-4 bras CMP
