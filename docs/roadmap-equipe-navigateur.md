@@ -5837,11 +5837,59 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   `</body>`/`</html>`/`</frameset>`
   ignorés aussi (repli « after
   body » — sinon le stray fermait
-  le vrai body). Diagnostics
+  le vrai body). Volet mutateur :
+  `structure_illegal` +
+  `fold_structure_kids` replient le
+  contenu des éléments de structure
+  insérés hors position canonique
+  (`append`/`insert_before`/
+  `splice_fragment`/`replace_
+  children` — `createElement`,
+  clone, adopt DOMParser). Diag
   `apply.rs` conservés :
   `journal_op_desc`, `unmapped`
   + fenêtre de tags. Verrous
-  `c290_stray_body_*` (3/3).
+  `c290_stray_body_*` +
+  `c290_structure_fold_*` (6/6).
+
+- [x] **JS-C291. Marqueurs
+  `data-obreloc*` — parentages
+  DOM-légaux non reparsables**
+  (`explorer-jscore` +
+  `explorer-core`, mur
+  youtube.com — suite JS-C290) —
+  le DOM admet des parentages que
+  le tree-builder spec
+  renormalise au re-parse :
+  `head.appendChild(iconset)` est
+  légal, `<head><iron-iconset-svg>`
+  est foster-parenté dans `body`
+  (preuve : `reloc_tests::
+  c291_head_foster_par_le_parseur`).
+  YouTube stampait ses iconsets
+  Polymer dans `head` → ~970
+  nœuds d'écart d'ordre →
+  `body#79` non mappé (#1053) +
+  `Insert(parent=79)` rejetés.
+  `serialize_keyed_node`
+  enveloppe les runs illégaux en
+  `<template data-obreloc>`
+  (passe-partout du parseur) ;
+  variantes `-prev` (rawtext),
+  `-html="{i}"` (sous `html`),
+  `-x="{path}"` (contexte requis
+  : `div><tr>` → `table>tbody`).
+  `relocate_obreloc` resplice les
+  `template_contents` sous la
+  cible réelle post-parse et
+  post-greffe journal ; le
+  marqueur n'a ni clé ni tag.
+  Whitelists spec : head, table-
+  famille, select-famille,
+  frameset, html, rawtext ; texte
+  non-blanc relocalisé (sauf
+  select). Verrous `c291_*`
+  (5 jscore + 5 core).
 
 - [x] **Étape CMP-4. Réarmement
   des balises « bloquées par CMP »**

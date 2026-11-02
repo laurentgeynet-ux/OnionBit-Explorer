@@ -660,6 +660,14 @@ pub(crate) fn apply_payload(
     let t0 = Instant::now();
     let mut out = ApplyOutcome::default();
     let mut new_dom = TreeBuilder::parse_scripting(&job.html, ctx.scripting);
+    // JS-C291 — resplice les nœuds transportés en marqueurs
+    // `<template data-obreloc*>` : le re-parse spec foster-parente
+    // tout enfant hors modèle de contenu (`document.head.
+    // appendChild(iconset)` légal côté DOM → `<body>` côté
+    // parseur). Sans ce resplice, l'ordre diverge → `UnmappedKey`
+    // + `Fingerprint` → rejet journal en boucle (mur YouTube :
+    // iconsets Polymer stampés dans `head`).
+    relocate_obreloc(&mut new_dom);
     // B-50 (bordeaux) : un apply mort avant « apply: cascade »
     // n'avait aucun jalon — le parse de la sérialisation miroir
     // est maintenant borné temporellement dans le journal.
@@ -1113,13 +1121,31 @@ fn align_keyed(
             continue 'outer;
         }
         unmapped.push(format!("#{i}:{}(key={m})", tags[i]));
-        // Fenêtre miroir autour du premier non-mappé —
-        // localise le sous-arbre divergent (diagnostic JS-C289).
+        // Fenêtres miroir + moteur autour du premier non-mappé —
+        // localise le sous-arbre divergent (diagnostic JS-C289) :
+        // miroir attend `tags[i]` ; le moteur montre ce qui reste
+        // à partir du curseur `j`.
         let lo = i.saturating_sub(6);
         let hi = (i + 4).min(tags.len());
+        let ewin: Vec<String> = engine[j.saturating_sub(6)..engine.len().min(j + 4)]
+            .iter()
+            .map(|&e| {
+                if let Ok(t) = dom.tag_name(e) {
+                    return t.to_string();
+                }
+                match dom.data(e) {
+                    Ok(explorer_dom::NodeData::Text(_)) => "#text".to_string(),
+                    _ => "?".to_string(),
+                }
+            })
+            .collect();
         tracing::warn!(
-            window = %tags[lo..hi].join(","),
-            "fenêtre miroir autour de la clé non mappée"
+            mirror_i = i,
+            mirror_n = tags.len(),
+            mirror = %tags[lo..hi].join(","),
+            engine_j = j,
+            engine = %ewin.join(","),
+            "fenêtres miroir/moteur autour de la clé non mappée"
         );
         break; // plus de moteur : le reste reste non mappé
     }
@@ -1203,6 +1229,112 @@ fn graft_subtree(
         graft_subtree(dom, src, c, new, i)?;
     }
     Ok(new)
+}
+
+/// JS-C291 — resplice les sous-arbres transportés en marqueurs
+/// `<template data-obreloc*>` par la sérialisation miroir : le
+/// DOM autorise des parentages que le parseur spec renormalise
+/// (enfants non-head sous `head`, `td` hors `tr`, éléments sous
+/// `script`/`html`…). Chaque marqueur est dépouillé de ses
+/// `template_contents` — resplicés sous la cible encodée par
+/// l'attribut — puis supprimé. Les marqueurs n'ont ni clé ni
+/// tag : `ids`/`tags`/`engine_preorder` restent alignés.
+fn relocate_obreloc(dom: &mut Dom) {
+    use explorer_dom::NodeData;
+    // Borne : chaque itération supprime un marqueur — au plus
+    // le nombre initial de marqueurs (+ marge), jamais de boucle.
+    let mut budget = engine_preorder(dom).len().saturating_add(8);
+    while budget > 0 {
+        budget -= 1;
+        // Premier marqueur en pré-ordre — les marqueurs
+        // emboîtés (enveloppes `data-obreloc-x` incluses dans
+        // le contenu resplicé) sont traités au passage suivant.
+        let mut found = None;
+        for n in engine_preorder(dom) {
+            if !dom.tag_name(n).is_ok_and(|t| t == "template") {
+                continue;
+            }
+            for a in [
+                "data-obreloc",
+                "data-obreloc-prev",
+                "data-obreloc-html",
+                "data-obreloc-x",
+            ] {
+                if let Ok(Some(v)) = dom.attribute(n, a) {
+                    found = Some((n, a, v));
+                    break;
+                }
+            }
+            if found.is_some() {
+                break;
+            }
+        }
+        let Some((marker, attr, val)) = found else {
+            break;
+        };
+        // Cible + point d'insertion selon le marqueur.
+        let (target, refr) = match attr {
+            "data-obreloc-prev" => {
+                // Frère élément précédent — le parent rawtext ne
+                // peut pas porter le marqueur inline.
+                let p = dom.parent(marker).ok().flatten();
+                let mut prev = None;
+                if let Some(p) = p {
+                    let ks = dom.children(p).unwrap_or_default();
+                    if let Some(mi) = ks.iter().position(|&k| k == marker) {
+                        prev = ks[..mi]
+                            .iter()
+                            .rev()
+                            .copied()
+                            .find(|&k| matches!(dom.data(k), Ok(NodeData::Element(_))));
+                    }
+                }
+                (prev, None)
+            }
+            "data-obreloc-html" => {
+                // Cible = `documentElement` à l'index porté
+                // (le marqueur a atterri sous head/body).
+                let de = dom.document_element();
+                let i = val.parse::<usize>().unwrap_or(usize::MAX);
+                let refr = de
+                    .and_then(|d| dom.children(d).ok())
+                    .and_then(|ks| ks.get(i).copied());
+                (de, refr)
+            }
+            _ => {
+                // `data-obreloc` / `data-obreloc-x` : le marqueur
+                // est à la position exacte — splice avant lui.
+                (dom.parent(marker).ok().flatten(), Some(marker))
+            }
+        };
+        let Ok(Some(frag)) = dom.template_contents(marker) else {
+            let _ = dom.remove(marker);
+            continue;
+        };
+        let mut kids = dom.children(frag).unwrap_or_default();
+        if attr == "data-obreloc-x" {
+            // Déballe les enveloppes de contexte `"table>tbody>tr"`
+            // — la cible reçoit les enfants du dernier niveau.
+            for w in val.split('>') {
+                let Some(inner) = kids
+                    .iter()
+                    .copied()
+                    .find(|&k| dom.tag_name(k).is_ok_and(|t| t == w))
+                else {
+                    kids = Vec::new();
+                    break;
+                };
+                kids = dom.children(inner).unwrap_or_default();
+            }
+        }
+        if let Some(t) = target {
+            for &c in &kids {
+                let _ = dom.insert_before(t, c, refr);
+            }
+        }
+        let _ = dom.remove(marker);
+        let _ = dom.remove(frag);
+    }
 }
 
 /// `NodeId` moteur d'une clé miroir — `Err` = non mappée.
@@ -1390,10 +1522,17 @@ fn journal_insert(
     let to_move = frag.children(body).unwrap_or_default();
     let dom = p.dom.as_mut().ok_or(JournalReject::NoDom)?;
     let base = index as usize;
-    let mut created_all = Vec::new();
+    let mut new_roots = Vec::with_capacity(to_move.len());
     for (i, &src_root) in to_move.iter().enumerate() {
-        let new_root = graft_subtree(dom, &frag, src_root, par, base + i)?;
-        engine_preorder_subtree(dom, new_root, &mut created_all);
+        new_roots.push(graft_subtree(dom, &frag, src_root, par, base + i)?);
+    }
+    // JS-C291 — un insert peut véhiculer des marqueurs
+    // `data-obreloc*` (structure restreinte dans le sous-arbre
+    // inséré) : resplice **avant** le pré-ordre d'alignement.
+    relocate_obreloc(dom);
+    let mut created_all = Vec::new();
+    for &r in &new_roots {
+        engine_preorder_subtree(dom, r, &mut created_all);
     }
     if tags.len() == ids.len() && !ids.is_empty() {
         align_keyed(&mut p.keymap, dom, &created_all, ids, tags);
@@ -3095,5 +3234,103 @@ mod tests {
             ["html", "head", "body", "my-el", "template", "b", "#", "p", "#"],
             "DSD sans doublon (textes « s »/« light ») : {names:?}"
         );
+    }
+}
+
+#[cfg(test)]
+mod reloc_tests {
+    use super::relocate_obreloc;
+    use explorer_html::TreeBuilder;
+
+    fn kids_tags(dom: &explorer_dom::Dom, id: explorer_dom::NodeId) -> Vec<String> {
+        dom.children(id)
+            .unwrap()
+            .iter()
+            .map(|&n| dom.tag_name(n).unwrap_or("?").to_string())
+            .collect()
+    }
+
+    fn find_child(
+        dom: &explorer_dom::Dom,
+        id: explorer_dom::NodeId,
+        tag: &str,
+    ) -> explorer_dom::NodeId {
+        dom.children(id)
+            .unwrap()
+            .iter()
+            .find(|&&n| dom.tag_name(n).is_ok_and(|t| t == tag))
+            .copied()
+            .unwrap()
+    }
+
+    /// Verrouille le comportement **spec** du tree-builder que la
+    /// couture contourne : un `<iron-iconset-svg>` sous `<head>`
+    /// est foster-parenté dans `<body>` (mur youtube.com — JS-C291).
+    #[test]
+    fn c291_head_foster_par_le_parseur() {
+        let html = "<html><head><title>t</title><iron-iconset-svg><svg><defs></defs></svg></iron-iconset-svg></head><body><script>1</script></body></html>";
+        let dom = TreeBuilder::parse_scripting(html, false);
+        let root = dom.document_element().unwrap();
+        let head = find_child(&dom, root, "head");
+        let body = find_child(&dom, root, "body");
+        assert_eq!(kids_tags(&dom, head), ["title"]);
+        assert_eq!(kids_tags(&dom, body), ["iron-iconset-svg", "script"]);
+    }
+
+    /// JS-C291 — `data-obreloc` : les enfants illégaux de `head`
+    /// voyagent dans le marqueur et sont resplicés à l'index.
+    #[test]
+    fn c291_reloc_inline_sous_head() {
+        let html = "<html><head><title>t</title><template data-obreloc><iron-iconset-svg><svg><defs></defs></svg></iron-iconset-svg><div>x</div></template><script>1</script></head><body><p>y</p></body></html>";
+        let mut dom = TreeBuilder::parse_scripting(html, false);
+        relocate_obreloc(&mut dom);
+        let root = dom.document_element().unwrap();
+        let head = find_child(&dom, root, "head");
+        assert_eq!(
+            kids_tags(&dom, head),
+            ["title", "iron-iconset-svg", "div", "script"]
+        );
+    }
+
+    /// JS-C291 — `data-obreloc-x` : l'enfant à contexte requis
+    /// (`tr` sous `div`) voyage enveloppé ; l'enveloppe est
+    /// déballée, le `tr` (avec son `td`) atterrit sous `div`.
+    #[test]
+    fn c291_reloc_contexte_requis() {
+        let html = "<html><body><div><template data-obreloc-x=\"table>tbody\"><table><tbody><tr><td>x</td></tr></tbody></table></template><span>y</span></div></body></html>";
+        let mut dom = TreeBuilder::parse_scripting(html, false);
+        relocate_obreloc(&mut dom);
+        let body = find_child(&dom, dom.document_element().unwrap(), "body");
+        let div = find_child(&dom, body, "div");
+        assert_eq!(kids_tags(&dom, div), ["tr", "span"]);
+        let tr = find_child(&dom, div, "tr");
+        assert_eq!(kids_tags(&dom, tr), ["td"]);
+    }
+
+    /// JS-C291 — `data-obreloc-prev` : les enfants éléments d'un
+    /// parent rawtext (`script`) suivent en marqueur-frère et
+    /// reviennent sous le `script`.
+    #[test]
+    fn c291_reloc_rawtext_prev() {
+        let html = "<html><head><script>x=1</script><template data-obreloc-prev><div>w</div></template></head><body></body></html>";
+        let mut dom = TreeBuilder::parse_scripting(html, false);
+        relocate_obreloc(&mut dom);
+        let head = find_child(&dom, dom.document_element().unwrap(), "head");
+        assert_eq!(kids_tags(&dom, head), ["script"]);
+        let script = find_child(&dom, head, "script");
+        // `?` = le texte `x=1` (rawtext) conservé en place,
+        // `div` resplicé après lui.
+        assert_eq!(kids_tags(&dom, script), ["?", "div"]);
+    }
+
+    /// JS-C291 — `data-obreloc-html` : enfant hors head/body/
+    /// frameset sous `html` — resplicé à l'index porté.
+    #[test]
+    fn c291_reloc_sous_html() {
+        let html = "<html><head></head><body><template data-obreloc-html=\"2\"><div>z</div></template></body></html>";
+        let mut dom = TreeBuilder::parse_scripting(html, false);
+        relocate_obreloc(&mut dom);
+        let root = dom.document_element().unwrap();
+        assert_eq!(kids_tags(&dom, root), ["head", "body", "div"]);
     }
 }

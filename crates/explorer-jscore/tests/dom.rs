@@ -6983,3 +6983,150 @@ fn document_write_insere_apres_current_script() {
     );
     assert_eq!(v, "true");
 }
+// ===== JS-C290 (suite) — éléments de structure hors position
+// canonique, repli au mutateur : un `<body>`/`html`/`head`/
+// `frameset` inséré par API DOM (createElement+append, clone,
+// adopt, fragment, replaceChildren) hors de sa place n'a pas de
+// reflet moteur (le tree-builder l'ignore au re-parse) → la clé
+// miroir devenait orpheline (`body#78` sous les iconsets
+// Polymer, mur youtube.com). Comme « in body », le contenu se
+// replie dans le parent.
+
+#[test]
+fn c290_structure_fold_sur_append_dom_api() {
+    let mut d = Dom::from_html("<!doctype html><html><body><div id=t></div></body></html>");
+    let target = d.by_tag(d.root, "div")[0];
+    let b = d.create_element("body");
+    let s = d.create_element("span");
+    d.append(b, s);
+    d.append(target, b);
+    assert_eq!(d.by_tag(d.root, "body").len(), 1);
+    assert_eq!(d.nodes[s as usize].parent, Some(target));
+}
+
+#[test]
+fn c290_structure_fold_sur_clone_et_replace_children() {
+    let mut d =
+        Dom::from_html("<!doctype html><html><body><div id=t></div><p id=p>x</p></body></html>");
+    let target = d.by_tag(d.root, "div")[0];
+    let body = d.body();
+    let c = d.clone_node(body, true);
+    d.append(target, c);
+    assert_eq!(d.by_tag(d.root, "body").len(), 1);
+    // replaceChildren avec un élément de structure → repli aussi.
+    let b2 = d.create_element("frameset");
+    let i2 = d.create_element("i");
+    d.append(b2, i2);
+    d.replace_children(target, &[b2]);
+    assert_eq!(d.by_tag(d.root, "frameset").len(), 0);
+    assert_eq!(d.nodes[i2 as usize].parent, Some(target));
+}
+
+#[test]
+fn c290_structure_fold_via_js_dom_apis() {
+    let dom = std::rc::Rc::new(std::cell::RefCell::new(Dom::from_html(
+        "<!doctype html><html><body><div id=t></div></body></html>",
+    )));
+    let mut e = Engine::new();
+    e.install_dom(&dom);
+    let v = evf(
+        &mut e,
+        "var d=document.getElementById('t');\
+         var b=document.createElement('body');\
+         var s=document.createElement('span');b.appendChild(s);\
+         d.appendChild(b);\
+         s.parentElement===d && document.getElementsByTagName('body').length===1",
+    );
+    assert_eq!(v, "true");
+    // `<body>` adopté depuis un document DOMParser étranger → repli.
+    let v2 = evf(
+        &mut e,
+        "var d=document.getElementById('t');\
+         var fd=new DOMParser().parseFromString('<html><body><u>u</u></body></html>','text/html');\
+         d.appendChild(fd.body);\
+         d.getElementsByTagName('u').length===1 && document.getElementsByTagName('body').length===1",
+    );
+    assert_eq!(v2, "true");
+}
+
+/// JS-C291 — marqueurs `data-obreloc*` : tout enfant que le
+/// tree-builder spec renormaliserait (foster-parenting) voyage
+/// en `<template data-obreloc>` pour être resplicé par `apply`.
+/// Le marqueur n'émet ni clé ni tag — `ids`/`tags` inchangés.
+#[test]
+fn c291_marqueur_enfants_illegaux_sous_head() {
+    let mut d = Dom::from_html(
+        "<!doctype html><html><head><title>t</title></head><body><script>1</script></body></html>",
+    );
+    let head = d.by_tag(d.root, "head")[0];
+    let ic = d.create_element("iron-iconset-svg");
+    let svg = d.create_element("svg");
+    d.append(ic, svg);
+    d.append(head, ic);
+    let (h, _ids, tags) = d.serialize_keyed();
+    assert_eq!(
+        h,
+        "<html><head><title>t</title><template data-obreloc><iron-iconset-svg><svg></svg></iron-iconset-svg></template></head><body><script>1</script></body></html>",
+        "{h}"
+    );
+    // Les clés voyagent normalement, sans entrée pour le marqueur.
+    assert!(tags.contains(&"iron-iconset-svg".to_string()));
+    assert_eq!(tags.iter().filter(|t| t.as_str() == "template").count(), 0);
+}
+
+#[test]
+fn c291_marqueur_enfants_sous_html() {
+    let mut d = Dom::from_html("<!doctype html><html><head></head><body></body></html>");
+    let html = d.by_tag(d.root, "html")[0];
+    let dv = d.create_element("div");
+    d.append(html, dv);
+    let (h, _ids, _t) = d.serialize_keyed();
+    assert!(h.contains("data-obreloc-html=\"2\""), "{h}");
+}
+
+#[test]
+fn c291_marqueur_prev_parent_rawtext() {
+    let mut d = Dom::from_html("<!doctype html><html><head></head><body></body></html>");
+    let head = d.by_tag(d.root, "head")[0];
+    let s = d.create_element("script");
+    let tx = d.create_text("x=1");
+    d.append(s, tx);
+    let dv = d.create_element("div");
+    d.append(s, dv);
+    d.append(head, s);
+    let (h, _ids, _t) = d.serialize_keyed();
+    assert!(
+        h.contains("</script><template data-obreloc-prev><div></div></template>"),
+        "{h}"
+    );
+}
+
+#[test]
+fn c291_marqueur_contexte_requis() {
+    let mut d = Dom::from_html("<!doctype html><html><head></head><body><div></div></body></html>");
+    let dv = d.by_tag(d.root, "div")[0];
+    let tr = d.create_element("tr");
+    let td = d.create_element("td");
+    d.append(tr, td);
+    d.append(dv, tr);
+    let (h, _ids, _t) = d.serialize_keyed();
+    assert!(
+        h.contains(
+            "<template data-obreloc-x=\"table>tbody\"><table><tbody><tr><td></td></tr></tbody></table></template>"
+        ),
+        "{h}"
+    );
+}
+
+/// Les parents restreints admissibles (`td` sous `tr`, `option`
+/// sous `select`) ne portent AUCUN marqueur — invariance du cas
+/// conforme.
+#[test]
+fn c291_pas_de_marqueur_quand_conforme() {
+    let mut d = Dom::from_html("<!doctype html><html><body><div id=t></div></body></html>");
+    let dv = d.by_tag(d.root, "div")[0];
+    let sp = d.create_element("span");
+    d.append(dv, sp);
+    let (h, _ids, _t) = d.serialize_keyed();
+    assert!(!h.contains("data-obreloc"), "{h}");
+}

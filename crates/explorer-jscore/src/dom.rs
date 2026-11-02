@@ -1217,14 +1217,15 @@ impl Dom {
             Exit(NodeId),
             Rawtext(NodeId),
             /// Balise littérale — `<template shadowrootmode>`
-            /// synthétique d'une racine shadow (R-96) : le
-            /// fragment n'a pas de tag propre à émettre.
-            Lit(&'static str),
+            /// synthétique d'une racine shadow (R-96) ou
+            /// marqueur `data-obreloc*` (JS-C291) : aucune
+            /// entrée `ids`/`tags`.
+            Lit(String),
         }
         let mut stack = vec![Ser::Enter(node)];
         while let Some(ev) = stack.pop() {
             match ev {
-                Ser::Lit(s) => out.push_str(s),
+                Ser::Lit(s) => out.push_str(&s),
                 Ser::Exit(id) => {
                     let n = &self.nodes[id as usize];
                     out.push_str("</");
@@ -1294,14 +1295,128 @@ impl Dom {
                     if VOID_TAGS.contains(&n.tag.as_str()) {
                         continue;
                     }
-                    stack.push(Ser::Exit(id));
-                    let verbatim = RAW_VERBATIM.contains(&n.tag.as_str());
-                    for &c in self.serial_children(id).iter().rev() {
-                        let child = &self.nodes[c as usize];
-                        if verbatim && child.kind == NodeKind::Text {
-                            stack.push(Ser::Rawtext(c));
-                        } else {
-                            stack.push(Ser::Enter(c));
+                    // JS-C291 — rejeu fidèle : `job.html` est
+                    // re-parsé par le tree-builder spec qui
+                    // **renormalise** tout enfant hors modèle de
+                    // contenu (foster-parenting : un `<div>` sous
+                    // `<head>` tombe dans `<body>`, un `<td>` hors
+                    // `<tr>` est éliminé…). Le DOM miroir les porte
+                    // là où l'API les a posés — chaque run
+                    // non-reparsable voyage dans un marqueur
+                    // `<template data-obreloc*>` (le template est
+                    // le passe-partout du parseur : contenu verbatim,
+                    // légal sous tout parent) ; `apply` resplice les
+                    // `template_contents` sous le vrai parent et
+                    // supprime le marqueur. Le marqueur n'émet ni
+                    // clé ni tag → `ids`/`tags` inchangés.
+                    match reloc_parent_spec(&n.tag) {
+                        Some(RelocSpec::Prev) => {
+                            // Parent rawtext/RCDATA (`script`,
+                            // `title`, `textarea`, `xmp`, `iframe`,
+                            // `noembed`, `noframes`, `noscript`) :
+                            // aucun enfant élément ne re-parse en
+                            // ligne — le texte seul voyage en place ;
+                            // le reste suit en marqueur-frère
+                            // `data-obreloc-prev` émis APRÈS `</tag>`.
+                            // Ordre d'empilement (LIFO) : marqueur
+                            // en dernier → `Exit` → textes → pops :
+                            // textes, `</tag>`, marqueur.
+                            let verbatim = RAW_VERBATIM.contains(&n.tag.as_str());
+                            let kids = self.serial_children(id);
+                            let elems: Vec<NodeId> = kids
+                                .iter()
+                                .copied()
+                                .filter(|&c| self.nodes[c as usize].kind != NodeKind::Text)
+                                .collect();
+                            if !elems.is_empty() {
+                                stack.push(Ser::Lit("</template>".to_string()));
+                                for &c in elems.iter().rev() {
+                                    stack.push(Ser::Enter(c));
+                                }
+                                stack.push(Ser::Lit("<template data-obreloc-prev>".to_string()));
+                            }
+                            stack.push(Ser::Exit(id));
+                            for &c in kids.iter().rev() {
+                                if self.nodes[c as usize].kind == NodeKind::Text {
+                                    if verbatim {
+                                        stack.push(Ser::Rawtext(c));
+                                    } else {
+                                        stack.push(Ser::Enter(c));
+                                    }
+                                }
+                            }
+                        }
+                        spec => {
+                            stack.push(Ser::Exit(id));
+                            let kids = self.serial_children(id);
+                            let mut i = kids.len();
+                            while i > 0 {
+                                let c = kids[i - 1];
+                                match reloc_child_mode(spec, &n.tag, &self.nodes[c as usize]) {
+                                    RelocMode::None => {
+                                        stack.push(Ser::Enter(c));
+                                        i -= 1;
+                                    }
+                                    RelocMode::Wrap(path) => {
+                                        // Enfant à contexte requis
+                                        // (`td`/`tr`/`col`…) sous un
+                                        // parent libre : le parseur
+                                        // l'éliminerait — il voyage
+                                        // enveloppé de son contexte
+                                        // dans `data-obreloc-x`.
+                                        let mut open =
+                                            format!("<template data-obreloc-x=\"{path}\">");
+                                        let mut close = String::new();
+                                        for w in path.split('>') {
+                                            open.push('<');
+                                            open.push_str(w);
+                                            open.push('>');
+                                            close.insert_str(0, &format!("</{w}>"));
+                                        }
+                                        stack.push(Ser::Lit(format!("{close}</template>")));
+                                        stack.push(Ser::Enter(c));
+                                        stack.push(Ser::Lit(open));
+                                        i -= 1;
+                                    }
+                                    RelocMode::Inline | RelocMode::Html => {
+                                        // Run d'enfants illégaux
+                                        // sous ce parent restreint —
+                                        // groupés en un marqueur.
+                                        let mut j = i;
+                                        while j > 0
+                                            && matches!(
+                                                reloc_child_mode(
+                                                    spec,
+                                                    &n.tag,
+                                                    &self.nodes[kids[j - 1] as usize],
+                                                ),
+                                                RelocMode::Inline | RelocMode::Html
+                                            )
+                                        {
+                                            j -= 1;
+                                        }
+                                        let open = if matches!(spec, Some(RelocSpec::Html)) {
+                                            // Sous `<html>` aucun
+                                            // emplacement n'est
+                                            // parse-légal : le
+                                            // marqueur porte l'index
+                                            // cible et atterrit où le
+                                            // parseur veut (head/body)
+                                            // — `apply` le retrouve
+                                            // par attribut.
+                                            format!("<template data-obreloc-html=\"{j}\">")
+                                        } else {
+                                            "<template data-obreloc>".to_string()
+                                        };
+                                        stack.push(Ser::Lit("</template>".to_string()));
+                                        for &c in kids[j..i].iter().rev() {
+                                            stack.push(Ser::Enter(c));
+                                        }
+                                        stack.push(Ser::Lit(open));
+                                        i = j;
+                                    }
+                                }
+                            }
                         }
                     }
                     // R-96 — transport DSD : une racine shadow
@@ -1317,7 +1432,7 @@ impl Dom {
                         } else {
                             "<template shadowrootmode=\"closed\">"
                         };
-                        stack.push(Ser::Lit("</template>"));
+                        stack.push(Ser::Lit("</template>".to_string()));
                         // Les enfants de la racine (table
                         // latérale) — même ordre pré-ordre que
                         // le `template_contents` canonique.
@@ -1326,7 +1441,7 @@ impl Dom {
                         }
                         ids.push(u64::from(root));
                         tags.push("template".to_string());
-                        stack.push(Ser::Lit(mode));
+                        stack.push(Ser::Lit(mode.to_string()));
                     }
                 }
             }
@@ -2221,6 +2336,65 @@ impl Dom {
         false
     }
 
+    /// Un élément de structure (`html`/`head`/`body`/`frameset`)
+    /// n'est sérialisable par le canal journal→moteur qu'à sa
+    /// position canonique — `html` enfant de la racine
+    /// `#document`, `head`/`body`/`frameset` enfants du
+    /// `documentElement`. Tout autre parent : le tree-builder
+    /// moteur ignore le tag au re-parse et la clé miroir reste
+    /// orpheline → `UnmappedKey`/`Fingerprint` → re-parse en
+    /// boucle (`body#78` sous les iconsets Polymer, mur
+    /// youtube.com — JS-C290).
+    fn structure_illegal(&self, parent: NodeId, child: NodeId) -> bool {
+        let n = &self.nodes[child as usize];
+        if n.kind != NodeKind::Element {
+            return false;
+        }
+        match n.tag.as_str() {
+            "html" => self.nodes[parent as usize].tag != "#document",
+            "head" | "body" | "frameset" => {
+                // Canonique : enfant du `documentElement`… ou de la
+                // racine `#document` elle-même — un parse sans
+                // enveloppe `<html>` (`from_html("<body>…")`) y
+                // accroche le skeleton directement (comportement
+                // conservé).
+                !matches!(
+                    self.nodes[parent as usize].tag.as_str(),
+                    "html" | "#document"
+                )
+            }
+            _ => false,
+        }
+    }
+
+    /// Détache les enfants de `child` (à replier dans le parent
+    /// — voir [`Self::structure_illegal`]) et les retourne.
+    fn fold_children_of(&mut self, child: NodeId) -> Vec<NodeId> {
+        let kids = std::mem::take(&mut self.nodes[child as usize].children);
+        for &k in &kids {
+            self.nodes[k as usize].parent = None;
+            self.set_attached(k, false);
+        }
+        kids
+    }
+
+    /// `kids` aplatie : tout élément de structure illégal est
+    /// remplacé par ses propres enfants (récursivement — un
+    /// `<html>` plié peut porter `<head>`/`<body>`), comme le
+    /// fait le mode « in body » du parseur.
+    fn fold_structure_kids(&mut self, parent: NodeId, kids: Vec<NodeId>) -> Vec<NodeId> {
+        let mut out = Vec::with_capacity(kids.len());
+        for k in kids {
+            if self.structure_illegal(parent, k) {
+                let inner = self.fold_children_of(k);
+                out.extend(self.fold_structure_kids(parent, inner));
+            } else {
+                out.push(k);
+            }
+        }
+        out
+    }
+
     pub fn append(&mut self, parent: NodeId, child: NodeId) {
         // Id obsolète (arène reconstruite — spectrum
         // `groupChildren`, `nodes[607]` sur 507) → no-op,
@@ -2230,6 +2404,15 @@ impl Dom {
         }
         if self.nodes[child as usize].kind == NodeKind::Fragment {
             self.splice_fragment(parent, child, None);
+            return;
+        }
+        // Structure tag hors position canonique → repli du
+        // contenu, parité parseur/moteur (JS-C290).
+        if self.structure_illegal(parent, child) {
+            let kids = self.fold_children_of(child);
+            for k in self.fold_structure_kids(parent, kids) {
+                self.append(parent, k);
+            }
             return;
         }
         // B-44 : plafond DOM — insertions refusées au-delà,
@@ -2319,6 +2502,7 @@ impl Dom {
             .copied()
             .filter(|&k| !self.is_ancestor_or_self(node, k))
             .collect();
+        let kept = self.fold_structure_kids(node, kept);
         let a = self.nodes[node as usize].attached;
         for &k in &kept {
             self.detach(k);
@@ -2443,6 +2627,15 @@ impl Dom {
         } else {
             ref_node
         };
+        // Structure tag hors position canonique → repli du
+        // contenu en place, parité parseur/moteur (JS-C290).
+        if self.structure_illegal(parent, child) {
+            let kids = self.fold_children_of(child);
+            for k in self.fold_structure_kids(parent, kids) {
+                self.insert_before(parent, k, ref_node);
+            }
+            return;
+        }
         // B-44 : même plafond DOM que `append`.
         if !self.nodes[child as usize].attached && self.nodes.len() >= MAX_DOM_NODES {
             return;
@@ -2508,6 +2701,9 @@ impl Dom {
             .into_iter()
             .filter(|&k| !self.is_ancestor_or_self(parent, k))
             .collect();
+        // Structure tags hors position canonique → repli,
+        // parité parseur/moteur (JS-C290).
+        let kids = self.fold_structure_kids(parent, kids);
         if kids.is_empty() {
             return;
         }
@@ -4078,6 +4274,158 @@ const RAW_TEXT: &[&str] = &["script", "style", "textarea", "title"];
 /// le set doit rester **en correspondance** avec les
 /// entrées non-RCDATA de `RAW_TEXT`.
 const RAW_VERBATIM: &[&str] = &["script", "style"];
+
+// ------------------------------------------------------------------
+// JS-C291 — marqueurs de relocalisation `data-obreloc*`
+//
+// La sérialisation miroir est re-parsée par le tree-builder spec
+// (`TreeBuilder::parse_scripting`) : tout parent à **modèle de
+// contenu restreint** voit ses enfants non conformes foster-parentés
+// ou éliminés — alors que le DOM miroir les a reçus par API
+// (`document.head.appendChild(iconset)` est légal). Les tables
+// ci-dessous couvrent les contextes de foster-parenting HTML5 ;
+// l'**excès** de marqueurs est sûr (apply replace exactement là où
+// le miroir avait les nœuds), le manque est fatal (ordre divergent
+// → `UnmappedKey`/`Fingerprint` — mur YouTube : iconsets Polymer
+// stampés dans `document.head`).
+// ------------------------------------------------------------------
+
+/// Spéc de parent restreint — comment ses enfants illégaux voyagent.
+#[derive(Clone, Copy)]
+enum RelocSpec {
+    /// Marqueur `<template data-obreloc>` inline — le template est
+    /// parse-légal sous tous les parents restreints couverts.
+    Inline(&'static [&'static str]),
+    /// Sous `<html>` rien n'est parse-légal hors head/body/frameset :
+    /// le marqueur `<template data-obreloc-html="{i}">` porte l'index
+    /// cible et atterrit où le parseur veut (head/body).
+    Html,
+    /// Parent rawtext/RCDATA : les enfants éléments suivent en
+    /// `<template data-obreloc-prev>` frère, après `</tag>`.
+    Prev,
+}
+
+/// Mode de transport d'un enfant sous un parent restreint.
+enum RelocMode {
+    /// Re-parse fidèle en l'état.
+    None,
+    /// Illégal sous ce parent → marqueur inline `data-obreloc`.
+    Inline,
+    /// Illégal sous `<html>` → marqueur `data-obreloc-html="{i}"`.
+    Html,
+    /// Enfant à contexte requis sous parent libre (`div><tr>`) —
+    /// enveloppes de contexte dans `data-obreloc-x="{path}"`.
+    Wrap(&'static str),
+}
+
+const HTML_OK: &[&str] = &["head", "body", "frameset"];
+const HEAD_OK: &[&str] = &[
+    "base", "basefont", "bgsound", "link", "meta", "noframes", "noscript", "script", "style",
+    "template", "title",
+];
+const FRAMESET_OK: &[&str] = &["frameset", "frame", "noframes"];
+/// `form` est légal sous `table` (spec « in table » : inséré puis
+/// dépilé — il reste dans la table).
+const TABLE_OK: &[&str] = &[
+    "caption", "colgroup", "tbody", "thead", "tfoot", "script", "style", "template", "form",
+];
+const TSECTION_OK: &[&str] = &["tr", "script", "template"];
+const TR_OK: &[&str] = &["td", "th", "script", "template"];
+const COLGROUP_OK: &[&str] = &["col", "template"];
+const SELECT_OK: &[&str] = &["option", "optgroup", "hr", "script", "template"];
+const OPTGROUP_OK: &[&str] = &["option"];
+
+/// Parent à modèle de contenu restreint — `None` = enfants libres.
+/// L'`option` n'admet aucun enfant élément en mode « in select » ;
+/// hors select elle re-parserait — le marqueur est sûr dans les
+/// deux cas.
+fn reloc_parent_spec(tag: &str) -> Option<RelocSpec> {
+    Some(match tag {
+        "html" => RelocSpec::Html,
+        "head" => RelocSpec::Inline(HEAD_OK),
+        "frameset" => RelocSpec::Inline(FRAMESET_OK),
+        "table" => RelocSpec::Inline(TABLE_OK),
+        "thead" | "tbody" | "tfoot" => RelocSpec::Inline(TSECTION_OK),
+        "tr" => RelocSpec::Inline(TR_OK),
+        "colgroup" => RelocSpec::Inline(COLGROUP_OK),
+        "select" => RelocSpec::Inline(SELECT_OK),
+        "optgroup" => RelocSpec::Inline(OPTGROUP_OK),
+        "option" => RelocSpec::Inline(&[]),
+        // rawtext/RCDATA : aucun enfant élément ne re-parse inline.
+        "script" | "style" | "title" | "textarea" | "xmp" | "iframe" | "noembed" | "noframes"
+        | "noscript" | "plaintext" => RelocSpec::Prev,
+        _ => return None,
+    })
+}
+
+/// Enfant à **contexte requis** — sous un parent libre (mode
+/// « in body » du contenu de template) le parseur l'élimine :
+/// il voyage enveloppé de sa chaîne de contexte.
+fn ctx_wrapper(tag: &str) -> Option<&'static str> {
+    Some(match tag {
+        "td" | "th" => "table>tbody>tr",
+        "tr" => "table>tbody",
+        "tbody" | "thead" | "tfoot" | "caption" | "colgroup" => "table",
+        "col" => "table>colgroup",
+        _ => return None,
+    })
+}
+
+/// Le texte re-parse-t-il en place sous ce parent restreint ?
+/// Sous `html` tout texte est éliminé ; sous `head`/`frameset`/
+/// famille `table` seul le blanc survit ; sous `select`/`option`
+/// tout texte est inséré.
+fn reloc_text_ok(ptag: &str, text: &str) -> bool {
+    match ptag {
+        "html" => false,
+        "select" | "optgroup" | "option" => true,
+        _ => text.trim().is_empty(),
+    }
+}
+
+/// Mode de transport de `child` sous un parent à spéc `spec`.
+fn reloc_child_mode(spec: Option<RelocSpec>, ptag: &str, child: &Node) -> RelocMode {
+    match child.kind {
+        NodeKind::Element => {
+            let legal = match spec {
+                Some(RelocSpec::Inline(wl)) => wl.contains(&child.tag.as_str()),
+                Some(RelocSpec::Html) => HTML_OK.contains(&child.tag.as_str()),
+                Some(RelocSpec::Prev) => false,
+                None => true,
+            };
+            if !legal {
+                return if matches!(spec, Some(RelocSpec::Html)) {
+                    RelocMode::Html
+                } else {
+                    RelocMode::Inline
+                };
+            }
+            // Contexte requis uniquement sous parent **libre** —
+            // sous un parent restreint dont la whitelist l'admet
+            // (`td` sous `tr`), l'enfant re-parse en place.
+            if spec.is_none() {
+                if let Some(p) = ctx_wrapper(&child.tag) {
+                    return RelocMode::Wrap(p);
+                }
+            }
+            RelocMode::None
+        }
+        NodeKind::Text => match spec {
+            // Texte sous parent restreint uniquement : sous un
+            // parent libre tout texte re-parse en place.
+            Some(RelocSpec::Html) => RelocMode::Html,
+            Some(RelocSpec::Inline(_)) => {
+                if reloc_text_ok(ptag, &child.text) {
+                    RelocMode::None
+                } else {
+                    RelocMode::Inline
+                }
+            }
+            _ => RelocMode::None,
+        },
+        _ => RelocMode::None,
+    }
+}
 
 /// Sous-ensemble RCDATA de `RAW_TEXT` — entités décodées à
 /// la parse comme à la re-parse.
