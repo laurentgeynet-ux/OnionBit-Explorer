@@ -57,6 +57,57 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   `await_thenable` ; test262
   1046/1046 (31 skips) inchangé.
 
+- **Étape 176 — surfaces
+  téléchargement** (`explorer-ffi`,
+  `explorer-api`, `explorer-cli`,
+  `app/` — suite étape 174 ;
+  numéro libre après attribution
+  de 175 en worktree parallèle) :
+  **`explorer_download_start`**
+  non bloquant (rend l'`id` en
+  `i64` — `path`/`filename`
+  optionnels) +
+  **`explorer_download_cancel`** ;
+  l'ancien `explorer_download_url`
+  reste (compat, déprécié). Le
+  drain NDJSON
+  `explorer_media_events` relaye
+  désormais aussi les
+  `download_*` (mêmes charges
+  que le SSE —
+  `download_event_json` core
+  mutualisé) : le mode
+  in-process les recevait jamais.
+  **`GET /api/tabs/{id}/hit?x&y`**
+  → `{link, image}` résolus base
+  document (`hit_targets_at` +
+  `ancestor_img` — `<a><img>`
+  rend les deux cibles).
+  **`explorer-cli download <url>
+  <out>`** (chemin explicite via
+  `download_url` — attend par
+  events). App : worker FFI
+  `opDownloadStart`/`Cancel`
+  (exports optionnels, dll
+  antérieure → dégradation),
+  `BrowserRepository.
+  downloadStart`/`cancelDownload`/
+  `hitTarget`/`listDownloads`
+  (FFI : stubs honnêtes `[]`),
+  `state.downloads` alimenté par
+  `download_started`/`progress`/
+  `done`/`failed` — **`started`
+  n'ouvre aucun dialogue**
+  (`download_offered` reste
+  seule décision) ; menu clic
+  droit « Enregistrer le lien
+  sous… / l'image » (hit-test),
+  bouton ⬇ bibliothèque → panneau
+  (en vol : progression +
+  annulation ; journal profil),
+  10 locales (3 clés). 2 tests
+  core + 1 test api.
+
 - **Étape 174 — `download_url` :
   contexte requête, job hors-verrou,
   streaming disque** (`explorer-core`,

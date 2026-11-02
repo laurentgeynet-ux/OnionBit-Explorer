@@ -1032,6 +1032,36 @@ impl Session {
         self.link_node_at(tab, x, y).map(|(_, u)| u)
     }
 
+    /// Cibles « enregistrer sous » sous `(x, y)` viewport
+    /// (étape 176) : `link` = `href` résolu du `<a>`
+    /// ancêtre, `image` = `src` résolu de l'`<img>` —
+    /// les deux remplies sur `<a><img>`. `None` = rien de
+    /// sauvegardable sous le point (ni lien ni image).
+    ///
+    /// # Errors
+    /// [`CoreError::UnknownTab`] — onglet inconnu.
+    pub fn hit_targets_at(&self, tab: TabId, x: f32, y: f32) -> Result<HitTargets, CoreError> {
+        let entry = self.tabs.get(&tab).ok_or(CoreError::UnknownTab(tab))?;
+        let mut out = HitTargets::default();
+        if let (Some(tree), Some(dom)) = (entry.tree.as_ref(), entry.dom.as_ref()) {
+            if let Some(node) = hit_test(tree, x, y, entry.scroll_y, self.viewport) {
+                if let Some(base) = entry.nav_base() {
+                    if let Some(a) = ancestor_link(dom, node) {
+                        if let Ok(Some(href)) = dom.attribute(a, "href") {
+                            out.link = Url::resolve(base, &href).ok().map(|u| u.to_string());
+                        }
+                    }
+                    if let Some(img) = ancestor_img(dom, node) {
+                        if let Ok(Some(src)) = dom.attribute(img, "src") {
+                            out.image = Url::resolve(base, &src).ok().map(|u| u.to_string());
+                        }
+                    }
+                }
+            }
+        }
+        Ok(out)
+    }
+
     /// `(nœud `<a>`, URL résolue)` sous `(x, y)` — le nœud
     /// sert au dispatch `target`/`rel` (étape 131).
     fn link_node_at(&self, tab: TabId, x: f32, y: f32) -> Option<(NodeId, String)> {

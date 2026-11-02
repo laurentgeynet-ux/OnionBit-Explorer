@@ -89,6 +89,15 @@ class AppLocalizationsPt extends AppLocalizations {
   String get save => 'Guardar';
 
   @override
+  String get saveLinkAs => 'Salvar link como…';
+
+  @override
+  String get saveImageAs => 'Salvar imagem como…';
+
+  @override
+  String get downloadStarted => 'Download iniciado';
+
+  @override
   String get cancel => 'Cancelar';
 
   @override
@@ -102,6 +111,9 @@ class AppLocalizationsPt extends AppLocalizations {
 
   @override
   String get emptyHistory => 'Nenhuma página visitada';
+
+  @override
+  String get emptyDownloads => 'Nenhum download';
 
   @override
   String get activeFieldTooltip => 'Campo ativo — escrita enviada ao motor';

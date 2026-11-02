@@ -88,6 +88,15 @@ class AppLocalizationsFr extends AppLocalizations {
   String get save => 'Enregistrer';
 
   @override
+  String get saveLinkAs => 'Enregistrer le lien sous…';
+
+  @override
+  String get saveImageAs => 'Enregistrer l’image sous…';
+
+  @override
+  String get downloadStarted => 'Téléchargement lancé';
+
+  @override
   String get cancel => 'Annuler';
 
   @override
@@ -101,6 +110,9 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get emptyHistory => 'Aucune page visitée';
+
+  @override
+  String get emptyDownloads => 'Aucun téléchargement';
 
   @override
   String get activeFieldTooltip => 'Champ actif — saisie envoyée au moteur';

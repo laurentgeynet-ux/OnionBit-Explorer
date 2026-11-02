@@ -22,6 +22,7 @@ import '../../../core/l10n/app_localizations.dart';
 import '../data/browser_repository.dart';
 import '../data/media_player.dart';
 import '../data/onionmedia_media_player.dart';
+import '../domain/active_download.dart';
 import '../domain/bookmark.dart';
 import '../domain/browser_tab.dart';
 import '../domain/download_offer.dart';
@@ -43,6 +44,7 @@ class BrowserState {
     this.fieldFocused = false,
     this.pageErrors = const {},
     this.downloadOffer,
+    this.downloads = const {},
     this.media = const {},
     this.scrollY = const {},
     this.resubmit,
@@ -87,6 +89,11 @@ class BrowserState {
   /// dès qu'une décision est prise.
   final DownloadOffer? downloadOffer;
 
+  /// Téléchargements directs en vol par id moteur (étape
+  /// 176, `download_started` → `progress` → `done`/`failed`)
+  /// — alimente la liste téléchargements de la bibliothèque.
+  final Map<int, ActiveDownload> downloads;
+
   /// Surfaces média live par onglet (seam `MediaSurface`,
   /// étape 71) : `{tabId: {mediaId: offer}}` — alimenté par
   /// `media_offered`/`moved`/`gone` + `GET …/media` au
@@ -124,6 +131,7 @@ class BrowserState {
     bool? fieldFocused,
     Map<String, String>? pageErrors,
     DownloadOffer? Function()? downloadOffer,
+    Map<int, ActiveDownload>? downloads,
     Map<String, Map<int, MediaOffer>>? media,
     Map<String, double>? scrollY,
     ({String tabId, String method, String url})? Function()? resubmit,
@@ -138,6 +146,7 @@ class BrowserState {
     fieldFocused: fieldFocused ?? this.fieldFocused,
     pageErrors: pageErrors ?? this.pageErrors,
     downloadOffer: downloadOffer != null ? downloadOffer() : this.downloadOffer,
+    downloads: downloads ?? this.downloads,
     media: media ?? this.media,
     scrollY: scrollY ?? this.scrollY,
     resubmit: resubmit != null ? resubmit() : this.resubmit,
@@ -775,8 +784,9 @@ class BrowserController extends Notifier<BrowserState> {
           unawaited(_pullFrame(id));
         }
       }
-      // Ét.71e — events `MediaSurface` drainés dans le tick :
-      // même `ServerEvent`/dispatch que le SSE (`media_*`).
+      // Ét.71e/176 — events drainés dans le tick (média +
+      // téléchargements) : même `ServerEvent`/dispatch que
+      // le SSE (`media_*`, `download_*`).
       for (final e in inv.mediaEvents) {
         final name = e['event'] as String?;
         final data = e['data'];
@@ -1012,9 +1022,52 @@ class BrowserController extends Notifier<BrowserState> {
         state = state.copyWith(
           downloadOffer: () => DownloadOffer.fromJson(ev.data),
         );
+      case 'download_started':
+        // Étape 176 : téléchargement direct décidé — fiche
+        // de suivi, **pas** de dialogue (l'offre utilisateur
+        // reste le seul rôle de `download_offered`).
+        final d = ActiveDownload.fromJson(ev.data);
+        state = state.copyWith(
+          downloads: {...state.downloads, d.id: d},
+        );
+      case 'download_progress':
+        final id = (ev.data['id'] as num?)?.toInt() ?? 0;
+        final cur = state.downloads[id];
+        if (cur != null) {
+          state = state.copyWith(
+            downloads: {
+              ...state.downloads,
+              id: cur.copyWith(
+                received: (ev.data['received'] as num?)?.toInt(),
+                total: () => (ev.data['total'] as num?)?.toInt(),
+              ),
+            },
+          );
+        }
       case 'download_done':
+        final id = (ev.data['id'] as num?)?.toInt() ?? 0;
+        final cur = state.downloads[id];
         state = state.copyWith(
           lastError: () => _l10n.downloadSaved('${ev.data['path']}'),
+          downloads: cur == null
+              ? null
+              : {
+                  ...state.downloads,
+                  id: cur.copyWith(finished: true),
+                },
+        );
+      case 'download_failed':
+        final id = (ev.data['id'] as num?)?.toInt() ?? 0;
+        final cur = state.downloads[id];
+        final err = '${ev.data['error'] ?? 'échec'}';
+        state = state.copyWith(
+          lastError: () => _l10n.downloadError(err),
+          downloads: cur == null
+              ? null
+              : {
+                  ...state.downloads,
+                  id: cur.copyWith(finished: true, error: () => err),
+                },
         );
       case 'tab_closed':
         final tabs = state.tabs.where((t) => t.id != tabId).toList();
@@ -1079,14 +1132,61 @@ class BrowserController extends Notifier<BrowserState> {
 
   /// Toggle play/pause pour les surfaces `controls` (UI hôte
   /// minimale v1 : tap = play/pause).
-  /// « Enregistrer la source » d'une offre média — retourne
-  /// le chemin écrit (`''` si la DLL/repo n'a rien rendu,
-  /// `null` = échec → l'UI affiche un message d'erreur).
-  Future<String?> downloadUrl(String tabId, String url) async {
+  /// « Enregistrer la source » / « Enregistrer sous » —
+  /// démarre un téléchargement direct non bloquant (étape
+  /// 176) : rend l'`id` moteur (> 0, suivi via les events
+  /// `download_*` → fiche `state.downloads`), `0`/`null` =
+  /// échec de démarrage → l'UI affiche une erreur douce.
+  Future<int?> downloadStart(
+    String tabId,
+    String url, {
+    String? filename,
+  }) async {
     try {
-      return await _repo.downloadUrl(tabId, url);
+      final id = await _repo.downloadStart(
+        tabId,
+        url,
+        filename: filename,
+      );
+      return id > 0 ? id : null;
     } on Object {
       return null;
+    }
+  }
+
+  /// Annule un téléchargement direct en cours (le moteur
+  /// purge le `.part` et émet `download_failed`).
+  Future<void> cancelDownload(int dlId) async {
+    final d = state.downloads[dlId];
+    if (d == null) return;
+    try {
+      await _repo.cancelDownload(d.tab, dlId);
+    } on Object {
+      /* échec silencieux — le job finira seul */
+    }
+  }
+
+  /// Cibles « enregistrer sous » sous un point viewport —
+  /// `{link, image}` résolus (menu contextuel frame).
+  Future<({String? link, String? image})> hitTarget(
+    String tabId,
+    double x,
+    double y,
+  ) async {
+    try {
+      return await _repo.hitTarget(tabId, x, y);
+    } on Object {
+      return (link: null, image: null);
+    }
+  }
+
+  /// Journal profil des téléchargements terminés (`[]`
+  /// sans profil / mode FFI sans ABI de lecture).
+  Future<List<Map<String, dynamic>>> listDownloads() async {
+    try {
+      return await _repo.listDownloads();
+    } on Object {
+      return const [];
     }
   }
 

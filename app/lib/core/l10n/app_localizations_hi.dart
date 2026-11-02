@@ -88,6 +88,15 @@ class AppLocalizationsHi extends AppLocalizations {
   String get save => 'सहेजें';
 
   @override
+  String get saveLinkAs => 'लिंक इस रूप में सहेजें…';
+
+  @override
+  String get saveImageAs => 'छवि इस रूप में सहेजें…';
+
+  @override
+  String get downloadStarted => 'डाउनलोड शुरू हुआ';
+
+  @override
   String get cancel => 'रद्द करें';
 
   @override
@@ -101,6 +110,9 @@ class AppLocalizationsHi extends AppLocalizations {
 
   @override
   String get emptyHistory => 'कोई पृष्ठ नहीं देखा गया';
+
+  @override
+  String get emptyDownloads => 'कोई डाउनलोड नहीं';
 
   @override
   String get activeFieldTooltip =>

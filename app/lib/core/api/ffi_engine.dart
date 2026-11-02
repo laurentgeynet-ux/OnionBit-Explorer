@@ -405,17 +405,43 @@ class FfiEngine implements BrowserRepository {
     throw FfiException('accept_download : code $code');
   }
 
-  /// « Enregistrer la source » (média) — `explorer_download_url`
-  /// : la pile transport complète (cookies, cache, HSTS) repasse
-  /// l'URL et écrit sous `state/downloads/`. Export additif :
-  /// dll antérieure → `code -1` → chemin vide (pas de throw —
-  /// la surface média affiche juste une erreur douce).
+  /// Téléchargement direct **non bloquant** (étape 176) —
+  /// `explorer_download_start` rend l'`id` immédiatement ;
+  /// le cycle de vie (`download_started`/`progress`/`done`/
+  /// `failed`) arrive dans le drain NDJSON du tick. Dll
+  /// antérieure → `code -1` → `id` `0` (la surface affiche
+  /// une erreur douce, jamais de throw).
   @override
-  Future<String> downloadUrl(String tabId, String url) async {
-    final r =
-        await _worker.call(opDownloadUrl, {'tab': _idOf(tabId), 'url': url});
-    return (r?['code'] as num?)?.toInt() == 0 ? 'ok' : '';
+  Future<int> downloadStart(String tabId, String url,
+      {String? filename}) async {
+    final r = await _worker.call(opDownloadStart, {
+      'tab': _idOf(tabId),
+      'url': url,
+      'filename': ?filename,
+    });
+    return (r?['code'] as num?)?.toInt() == 0
+        ? (r?['id'] as num?)?.toInt() ?? 0
+        : 0;
   }
+
+  /// Voir [downloadStart] — `explorer_download_cancel`.
+  @override
+  Future<void> cancelDownload(String tabId, int dlId) async {
+    await _worker
+        .call(opDownloadCancel, {'tab': _idOf(tabId), 'dl': dlId});
+  }
+
+  /// Pas d'ABI hit-test FFI (le point n'a pas de résolution
+  /// DOM exportée) — dégradation honnête : cibles vides.
+  @override
+  Future<({String? link, String? image})> hitTarget(
+      String tabId, double x, double y) async =>
+      (link: null, image: null);
+
+  /// Pas d'ABI de lecture du journal profil — `[]`.
+  @override
+  Future<List<Map<String, dynamic>>> listDownloads() async =>
+      const [];
 
   /// Voir [acceptDownload].
   @override

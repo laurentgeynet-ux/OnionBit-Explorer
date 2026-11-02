@@ -248,20 +248,58 @@ class BrowserRepository {
     throw const ApiException('POST /downloads/accept : réponse inattendue');
   }
 
-  /// Télécharge `url` directement sous le répertoire de
-  /// téléchargements (bouton « enregistrer la source » média
-  /// — `POST /api/tabs/{id}/downloads` `{url}`, étape 70
-  /// suite). Retourne le chemin écrit ; vide si le serveur
-  /// n'en rend pas.
-  Future<String> downloadUrl(String tabId, String url) async {
+  /// Démarre un téléchargement direct **non bloquant**
+  /// (étape 176 : `POST /api/tabs/{id}/downloads` rend
+  /// `{id}` immédiatement — le job streame hors verrou ;
+  /// le cycle de vie arrive par `download_started`/
+  /// `progress`/`done`/`failed` SSE). `filename` =
+  /// suggestion de nom (avant `Content-Disposition`).
+  /// Retourne l'identifiant.
+  Future<int> downloadStart(String tabId, String url,
+      {String? filename}) async {
     final res = await _api.postJson(
       '/api/tabs/$tabId/downloads',
-      body: {'url': url},
+      body: {'url': url, 'filename': ?filename},
     );
     if (res is Map<String, dynamic>) {
-      return res['path'] as String? ?? '';
+      return (res['id'] as num?)?.toInt() ?? 0;
     }
     throw const ApiException('POST /downloads : réponse inattendue');
+  }
+
+  /// Annule un téléchargement direct en cours
+  /// (`DELETE …/downloads/{dl}` — la tâche purge son
+  /// `.part` et émet `download_failed`).
+  Future<void> cancelDownload(String tabId, int dlId) =>
+      _api.deleteJson('/api/tabs/$tabId/downloads/$dlId');
+
+  /// Cibles « enregistrer sous » sous un point viewport
+  /// (`GET …/hit?x=&y=` — `{link, image}` résolus base
+  /// document, `null` absents). Pilote le menu contextuel.
+  Future<({String? link, String? image})> hitTarget(
+      String tabId, double x, double y) async {
+    final res =
+        await _api.getJson('/api/tabs/$tabId/hit?x=$x&y=$y');
+    if (res is Map<String, dynamic>) {
+      return (
+        link: res['link'] as String?,
+        image: res['image'] as String?,
+      );
+    }
+    return (link: null, image: null);
+  }
+
+  /// Journal des téléchargements terminés du profil
+  /// (`GET /api/downloads` — `[]` sans profil).
+  Future<List<Map<String, dynamic>>> listDownloads() async {
+    final res = await _api.getJson('/api/downloads');
+    if (res is Map<String, dynamic> && res['downloads'] is List) {
+      return [
+        for (final d in res['downloads'] as List)
+          if (d is Map) Map<String, dynamic>.from(d),
+      ];
+    }
+    return const [];
   }
 
   /// Rejette un téléchargement : le corps est rejoué comme

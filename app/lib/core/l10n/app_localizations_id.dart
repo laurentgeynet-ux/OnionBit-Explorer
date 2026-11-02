@@ -90,6 +90,15 @@ class AppLocalizationsId extends AppLocalizations {
   String get save => 'Simpan';
 
   @override
+  String get saveLinkAs => 'Simpan tautan sebagai…';
+
+  @override
+  String get saveImageAs => 'Simpan gambar sebagai…';
+
+  @override
+  String get downloadStarted => 'Unduhan dimulai';
+
+  @override
   String get cancel => 'Batal';
 
   @override
@@ -104,6 +113,9 @@ class AppLocalizationsId extends AppLocalizations {
 
   @override
   String get emptyHistory => 'Belum ada halaman dikunjungi';
+
+  @override
+  String get emptyDownloads => 'Tidak ada unduhan';
 
   @override
   String get activeFieldTooltip => 'Kolom aktif — ketikan dikirim ke engine';

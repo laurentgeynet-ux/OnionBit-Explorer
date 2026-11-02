@@ -9,6 +9,7 @@ import '../../../core/design/design_tokens.dart';
 import '../../../core/l10n/app_localizations.dart';
 import '../domain/bookmark.dart';
 import '../domain/history_entry.dart';
+import '../domain/active_download.dart';
 import 'browser_controller.dart';
 
 /// Panneau bibliothèque (étape 57) — historique de navigation
@@ -30,6 +31,17 @@ class LibraryPanel extends ConsumerWidget {
     BuildContext context,
     DesignTokens tokens,
   ) => _show(context, tokens, history: false);
+
+  /// Panneau téléchargements (étape 176) : fiches en vol
+  /// (progression SSE + annulation) puis le journal profil
+  /// des terminés — `[]` en mode FFI (pas d'ABI lecture).
+  static Future<void> showDownloads(
+    BuildContext context,
+    DesignTokens tokens,
+  ) => showDialog<void>(
+    context: context,
+    builder: (_) => _DownloadsDialog(tokens: tokens),
+  );
 
   static Future<void> _show(
     BuildContext context,
@@ -91,6 +103,122 @@ class LibraryPanel extends ConsumerWidget {
           child: Text(AppLocalizations.of(context).close),
         ),
       ],
+    );
+  }
+}
+
+/// Dialogue téléchargements — la liste « en vol » vit dans
+/// `state.downloads` (rebuild à chaque event SSE/NDJSON),
+/// le journal est tiré une fois par `listDownloads`.
+class _DownloadsDialog extends ConsumerWidget {
+  const _DownloadsDialog({required this.tokens});
+
+  final DesignTokens tokens;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final t = tokens;
+    final l10n = AppLocalizations.of(context);
+    final ctrl = ref.read(browserProvider.notifier);
+    final actives = ref.watch(
+      browserProvider.select((s) => s.downloads),
+    );
+    return AlertDialog(
+      backgroundColor: t.color('surface', 'raised'),
+      title: Text(l10n.downloads),
+      content: SizedBox(
+        width: 460,
+        height: 380,
+        child: FutureBuilder<List<Map<String, dynamic>>>(
+          future: ctrl.listDownloads(),
+          builder: (_, snap) {
+            final journal = snap.data ?? const <Map<String, dynamic>>[];
+            final live = actives.values.toList()
+              ..sort((a, b) => a.id.compareTo(b.id));
+            if (live.isEmpty && journal.isEmpty) {
+              return _Message(tokens: t, text: l10n.emptyDownloads);
+            }
+            return ListView(
+              children: [
+                for (final d in live)
+                  _ActiveTile(
+                    tokens: t,
+                    dl: d,
+                    onCancel: d.finished
+                        ? null
+                        : () => ctrl.cancelDownload(d.id),
+                  ),
+                for (final j in journal.reversed)
+                  _EntryTile(
+                    tokens: t,
+                    title: '${j['filename'] ?? ''}',
+                    url: '${j['path'] ?? ''}',
+                    onTap: () {},
+                  ),
+              ],
+            );
+          },
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: Text(l10n.close),
+        ),
+      ],
+    );
+  }
+}
+
+/// Fiche d'un téléchargement en vol — barre de progression
+/// bornée (`total` connu) ou indéterminée, annulation tant
+/// que le job n'a pas terminé.
+class _ActiveTile extends StatelessWidget {
+  const _ActiveTile({
+    required this.tokens,
+    required this.dl,
+    this.onCancel,
+  });
+
+  final DesignTokens tokens;
+  final ActiveDownload dl;
+  final VoidCallback? onCancel;
+
+  @override
+  Widget build(BuildContext context) {
+    final muted = tokens.color('onSurface', 'muted');
+    final err = dl.error;
+    return ListTile(
+      dense: true,
+      title: Text(dl.filename, maxLines: 1, overflow: TextOverflow.ellipsis),
+      subtitle: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            err ?? dl.url,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: err != null
+                  ? tokens.color('danger', 'base', fallback: Colors.red)
+                  : muted,
+              fontSize: tokens.dim2('typography', 'size', 'sm', fallback: 12),
+            ),
+          ),
+          if (!dl.finished)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: LinearProgressIndicator(value: dl.fraction),
+            ),
+        ],
+      ),
+      trailing: onCancel == null
+          ? null
+          : IconButton(
+              icon: const Icon(Icons.close),
+              tooltip: AppLocalizations.of(context).cancel,
+              onPressed: onCancel,
+            ),
     );
   }
 }

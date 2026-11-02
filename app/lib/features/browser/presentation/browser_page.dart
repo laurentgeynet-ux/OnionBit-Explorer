@@ -902,6 +902,13 @@ class _NavBar extends ConsumerWidget {
               : null,
         ),
         IconButton(
+          icon: const Icon(Icons.download_outlined),
+          tooltip: AppLocalizations.of(context).downloads,
+          onPressed: enabled
+              ? () => LibraryPanel.showDownloads(context, tokens)
+              : null,
+        ),
+        IconButton(
           icon: const Icon(Icons.find_in_page_outlined),
           tooltip: AppLocalizations.of(context).findInPageShortcut,
           onPressed: enabled
@@ -1010,6 +1017,8 @@ class _NavBar extends ConsumerWidget {
                 LibraryPanel.showHistory(context, tokens);
               case 'marks':
                 LibraryPanel.showBookmarks(context, tokens);
+              case 'downloads':
+                LibraryPanel.showDownloads(context, tokens);
               case 'home':
                 unawaited(ctrl.navigate('about:blank'));
               case 'find':
@@ -1037,6 +1046,12 @@ class _NavBar extends ConsumerWidget {
               'marks',
               Icons.bookmarks_outlined,
               AppLocalizations.of(context).bookmarks,
+              enabled: enabled,
+            ),
+            item(
+              'downloads',
+              Icons.download_outlined,
+              AppLocalizations.of(context).downloads,
               enabled: enabled,
             ),
             item(
@@ -1239,6 +1254,12 @@ class _FrameViewState extends ConsumerState<_FrameView> {
                       onTapUp: (d) => widget.ctrl.click(
                         d.localPosition.dx / cssPerLogical,
                         d.localPosition.dy / cssPerLogical,
+                      ),
+                      // Clic droit — « Enregistrer le lien
+                      // sous… » / « l'image » (hit-test
+                      // moteur au point, étape 176).
+                      onSecondaryTapUp: (d) => unawaited(
+                        _showContextMenu(d, cssPerLogical),
                       ),
                       child: KeyboardListener(
                         focusNode: _keys,
@@ -1467,6 +1488,52 @@ class _FrameViewState extends ConsumerState<_FrameView> {
     );
   }
 
+  /// Menu contextuel du clic droit sur la frame (étape 176)
+  /// : hit-test moteur au point viewport → « Enregistrer le
+  /// lien sous… » et/ou « l'image », chaque entrée démarre
+  /// un téléchargement direct (job streamé, suivi par les
+  /// events `download_*`). Rien n'est montré si le point ne
+  /// porte aucune cible sauvegardable.
+  Future<void> _showContextMenu(
+    TapUpDetails d,
+    double cssPerLogical,
+  ) async {
+    final tabId = widget.state.activeId;
+    if (tabId == null) return;
+    final overlay = Overlay.of(context).context.findRenderObject();
+    final anchor = overlay is RenderBox
+        ? RelativeRect.fromRect(
+            Rect.fromPoints(d.globalPosition, d.globalPosition),
+            Offset.zero & overlay.size,
+          )
+        : RelativeRect.fromLTRB(
+            d.globalPosition.dx, d.globalPosition.dy,
+            d.globalPosition.dx, d.globalPosition.dy,
+          );
+    final t = await widget.ctrl.hitTarget(
+      tabId,
+      d.localPosition.dx / cssPerLogical,
+      d.localPosition.dy / cssPerLogical,
+    );
+    if (!mounted || (t.link == null && t.image == null)) return;
+    final l10n = AppLocalizations.of(context);
+    final v = await showMenu<String>(
+      context: context,
+      position: anchor,
+      items: [
+        if (t.link != null)
+          PopupMenuItem(value: 'link', child: Text(l10n.saveLinkAs)),
+        if (t.image != null)
+          PopupMenuItem(value: 'image', child: Text(l10n.saveImageAs)),
+      ],
+    );
+    if (!mounted || v == null) return;
+    final url = v == 'link' ? t.link : t.image;
+    if (url != null) {
+      unawaited(widget.ctrl.downloadStart(tabId, url));
+    }
+  }
+
   /// La vue native du lecteur, sur fond noir (letterbox) tant
   /// qu'elle n'existe pas — la surface existe dès l'offre, la
   /// texture arrive après `claim` + init asynchrone.
@@ -1502,14 +1569,17 @@ class _FrameViewState extends ConsumerState<_FrameView> {
               onPressed: () async {
                 final messenger = ScaffoldMessenger.of(context);
                 final l10n = AppLocalizations.of(context);
-                final path = await widget.ctrl.downloadUrl(tabId, m.url);
+                // Étape 176 : démarrage non bloquant — le
+                // chemin écrit arrive par `download_done`
+                // (snackbar `lastError` du contrôleur).
+                final id = await widget.ctrl.downloadStart(tabId, m.url);
                 if (!context.mounted) return;
                 messenger.showSnackBar(
                   SnackBar(
                     content: Text(
-                      path == null
+                      id == null
                           ? l10n.downloadError(m.url)
-                          : l10n.downloadSaved(path),
+                          : l10n.downloadStarted,
                     ),
                   ),
                 );

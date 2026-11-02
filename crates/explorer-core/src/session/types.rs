@@ -433,6 +433,18 @@ pub struct DownloadInfo {
     pub total: Option<u64>,
 }
 
+/// Cibles « enregistrer sous » sous un point viewport
+/// (étape 176 — `Session::hit_targets_at`) : un `<a><img>`
+/// rend les deux — l'hôte affiche l'entrée de menu qui
+/// convient. `None` global = rien de sauvegardable là.
+#[derive(Debug, Clone, Default)]
+pub struct HitTargets {
+    /// `href` résolu (base document) du lien ancêtre.
+    pub link: Option<String>,
+    /// `src` résolu de l'`<img>` sous le point.
+    pub image: Option<String>,
+}
+
 /// Région invalide d'une frame (étape 55) — **pixels
 /// physiques** du framebuffer (le `scale` DPI est déjà
 /// appliqué côté core : les rects rapportés par

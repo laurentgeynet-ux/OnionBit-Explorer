@@ -88,6 +88,15 @@ class AppLocalizationsEn extends AppLocalizations {
   String get save => 'Save';
 
   @override
+  String get saveLinkAs => 'Save link as…';
+
+  @override
+  String get saveImageAs => 'Save image as…';
+
+  @override
+  String get downloadStarted => 'Download started';
+
+  @override
   String get cancel => 'Cancel';
 
   @override
@@ -101,6 +110,9 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get emptyHistory => 'No pages visited';
+
+  @override
+  String get emptyDownloads => 'No downloads';
 
   @override
   String get activeFieldTooltip => 'Active field — typing sent to the engine';

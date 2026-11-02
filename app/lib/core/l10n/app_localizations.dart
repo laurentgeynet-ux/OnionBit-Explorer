@@ -270,6 +270,24 @@ abstract class AppLocalizations {
   /// **'Enregistrer'**
   String get save;
 
+  /// No description provided for @saveLinkAs.
+  ///
+  /// In fr, this message translates to:
+  /// **'Enregistrer le lien sous…'**
+  String get saveLinkAs;
+
+  /// No description provided for @saveImageAs.
+  ///
+  /// In fr, this message translates to:
+  /// **'Enregistrer l’image sous…'**
+  String get saveImageAs;
+
+  /// No description provided for @downloadStarted.
+  ///
+  /// In fr, this message translates to:
+  /// **'Téléchargement lancé'**
+  String get downloadStarted;
+
   /// No description provided for @cancel.
   ///
   /// In fr, this message translates to:
@@ -299,6 +317,12 @@ abstract class AppLocalizations {
   /// In fr, this message translates to:
   /// **'Aucune page visitée'**
   String get emptyHistory;
+
+  /// No description provided for @emptyDownloads.
+  ///
+  /// In fr, this message translates to:
+  /// **'Aucun téléchargement'**
+  String get emptyDownloads;
 
   /// No description provided for @activeFieldTooltip.
   ///

@@ -227,8 +227,21 @@ class FakeRepo implements BrowserRepository {
   final List<String> declinedDownloads = [];
 
   @override
-  Future<String> downloadUrl(String tabId, String url) async =>
-      throw UnimplementedError('FakeRepo.downloadUrl');
+  Future<int> downloadStart(String tabId, String url,
+      {String? filename}) async =>
+      throw UnimplementedError('FakeRepo.downloadStart');
+
+  @override
+  Future<void> cancelDownload(String tabId, int dlId) async =>
+      throw UnimplementedError('FakeRepo.cancelDownload');
+
+  @override
+  Future<({String? link, String? image})> hitTarget(
+          String tabId, double x, double y) async =>
+      (link: null, image: null);
+
+  @override
+  Future<List<Map<String, dynamic>>> listDownloads() async => const [];
 
   @override
   Future<String> acceptDownload(String tabId, int dlId, {String? path}) async {

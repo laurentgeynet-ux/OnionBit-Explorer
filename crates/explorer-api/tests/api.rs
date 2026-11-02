@@ -1127,6 +1127,73 @@ async fn download_post_requires_url() {
     assert_eq!(r.status(), StatusCode::BAD_REQUEST);
 }
 
+/// Étape 176 — `GET …/hit?x&y` : `<a><img>` sous le point →
+/// `{link, image}` résolus ; sans `x`/`y` → 400 ; onglet
+/// inconnu → 400.
+#[tokio::test]
+async fn hit_targets_endpoint() {
+    let t: Arc<dyn HttpTransport> = Arc::new(FakeTransport {
+        body: "<!doctype html><html><body>\
+               <a href=\"/f.bin\">\
+               <img src=\"/i.png\" width=\"80\" height=\"80\" alt=\"im\">\
+               </a><p>loin</p></body></html>",
+        log: std::sync::Mutex::new(Vec::new()),
+    });
+    let session = Arc::new(tokio::sync::Mutex::new(Session::new(
+        t,
+        Arc::new(FixtureFont),
+    )));
+    let app = explorer_api::router(session);
+
+    let resp = app
+        .clone()
+        .oneshot(json_post("/api/tabs", "{}"))
+        .await
+        .unwrap();
+    let bytes = axum::body::to_bytes(resp.into_body(), 1024).await.unwrap();
+    let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    let id = v["id"].as_u64().unwrap();
+    let nav = app
+        .clone()
+        .oneshot(json_post(
+            &format!("/api/tabs/{id}/navigate"),
+            r#"{"url":"http://h.test/p"}"#,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(nav.status(), StatusCode::OK);
+
+    let hit = app
+        .clone()
+        .oneshot(
+            HttpRequest::builder()
+                .uri(format!("/api/tabs/{id}/hit?x=8&y=25"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(hit.status(), StatusCode::OK);
+    let bytes = axum::body::to_bytes(hit.into_body(), 4096).await.unwrap();
+    let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(v["link"], "http://h.test/f.bin");
+    assert_eq!(v["image"], "http://h.test/i.png");
+
+    // Paramètres manquants → 400 ; onglet inconnu → 400.
+    for uri in [
+        format!("/api/tabs/{id}/hit"),
+        format!("/api/tabs/{id}/hit?x=1"),
+        "/api/tabs/99/hit?x=1&y=1".to_string(),
+    ] {
+        let r = app
+            .clone()
+            .oneshot(HttpRequest::builder().uri(uri).body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(r.status(), StatusCode::BAD_REQUEST, "{:?}", r.status());
+    }
+}
+
 /// Onglet ouvert + page `/media` commise (video controls +
 /// audio nu) — helper commun des tests `MediaSurface` 71b.
 async fn media_tab() -> (axum::Router, u64) {

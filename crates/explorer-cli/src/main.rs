@@ -52,6 +52,7 @@ fn main() -> ExitCode {
         [_, cmd, url] if cmd == "dom" => dom_live(url),
         [_, cmd, url] if cmd == "mem" => mem_report(url),
         [_, cmd, url, dir] if cmd == "save" => save_fixture(url, dir),
+        [_, cmd, url, out] if cmd == "download" => download(url, out),
         [_, cmd] if cmd == "mcp" => mcp_main("9377"),
         [_, cmd, port] if cmd == "mcp" => mcp_main(port),
         [_, cmd, a, b] if cmd == "diff" => diff_pngs(a, b),
@@ -64,6 +65,7 @@ fn main() -> ExitCode {
             eprintln!("        explorer-cli dom <url>");
             eprintln!("        explorer-cli mem <url>");
             eprintln!("        explorer-cli save <url> <dossier>");
+            eprintln!("        explorer-cli download <url> <sortie>");
             eprintln!("        explorer-cli diff <a.png> <b.png>");
             eprintln!("        explorer-cli mcp [port]  (serveur MCP stdio → daemon)");
             ExitCode::FAILURE
@@ -79,6 +81,31 @@ fn client_stack() -> Arc<dyn HttpTransport> {
     let h1: Arc<dyn HttpTransport> = Arc::new(AutoClient::new(tls, HttpConfig::default()));
     let decoded: Arc<dyn HttpTransport> = Arc::new(DecodingTransport::wrap(h1, 16 * 1024 * 1024));
     Arc::new(RedirectTransport::wrap(decoded, 8))
+}
+
+/// `download <url> <sortie>` — enregistre `url` sous le
+/// chemin explicite `sortie` via la pile transport
+/// complète (étape 176 : job streamé `.part` → rename,
+/// hors verrou — `download_url` n'attend que par events ;
+/// affiche le chemin final sur stdout).
+#[tokio::main(flavor = "current_thread")]
+async fn download(url: &str, out: &str) -> ExitCode {
+    let fonts = explorer_render::DirFontSource::new(&default_fonts_dir());
+    let mut session = session_from_env(fonts);
+    let tab = session.open_tab();
+    match session
+        .download_url(tab, url, Some(std::path::PathBuf::from(out)), None)
+        .await
+    {
+        Ok(p) => {
+            println!("{}", p.display());
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("erreur : {e}");
+            ExitCode::FAILURE
+        }
+    }
 }
 
 /// Répertoire de fontes — `EXPLORER_FONT_DIR` puis défaut

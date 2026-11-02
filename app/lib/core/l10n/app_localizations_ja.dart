@@ -88,6 +88,15 @@ class AppLocalizationsJa extends AppLocalizations {
   String get save => '保存';
 
   @override
+  String get saveLinkAs => 'リンクに名前を付けて保存…';
+
+  @override
+  String get saveImageAs => '画像に名前を付けて保存…';
+
+  @override
+  String get downloadStarted => 'ダウンロードを開始しました';
+
+  @override
   String get cancel => 'キャンセル';
 
   @override
@@ -101,6 +110,9 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get emptyHistory => '訪問したページがありません';
+
+  @override
+  String get emptyDownloads => 'ダウンロードはありません';
 
   @override
   String get activeFieldTooltip => 'アクティブなフィールド — 入力はエンジンに送信されます';

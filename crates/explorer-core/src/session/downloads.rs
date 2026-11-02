@@ -1018,3 +1018,68 @@ async fn download_commit(
         path: target.display().to_string(),
     });
 }
+
+/// `CoreEvent` téléchargement → `(nom SSE, charge JSON)` —
+/// charges **identiques** au mapping SSE REST
+/// (`event_json` d'`explorer-api`, mêmes champs) : une
+/// seule forme pour SSE et NDJSON FFI (étape 176 — le
+/// drain FFI relaye désormais aussi les téléchargements,
+/// l'app in-process les recevait jamais). `None` pour
+/// toute variante hors téléchargement.
+#[must_use]
+pub fn download_event_json(ev: &CoreEvent) -> Option<(&'static str, String)> {
+    let out = match ev {
+        CoreEvent::DownloadOffered {
+            tab,
+            id,
+            url,
+            filename,
+            mime,
+            size,
+        } => (
+            "download_offered",
+            serde_json::json!({
+                "tab": tab, "id": id, "url": url,
+                "filename": filename, "mime": mime, "size": size,
+            })
+            .to_string(),
+        ),
+        CoreEvent::DownloadStarted {
+            tab,
+            id,
+            url,
+            filename,
+            total,
+        } => (
+            "download_started",
+            serde_json::json!({
+                "tab": tab, "id": id, "url": url,
+                "filename": filename, "total": total,
+            })
+            .to_string(),
+        ),
+        CoreEvent::DownloadProgress {
+            tab,
+            id,
+            received,
+            total,
+        } => (
+            "download_progress",
+            serde_json::json!({
+                "tab": tab, "id": id,
+                "received": received, "total": total,
+            })
+            .to_string(),
+        ),
+        CoreEvent::DownloadDone { tab, id, path } => (
+            "download_done",
+            serde_json::json!({ "tab": tab, "id": id, "path": path }).to_string(),
+        ),
+        CoreEvent::DownloadFailed { tab, id, error } => (
+            "download_failed",
+            serde_json::json!({ "tab": tab, "id": id, "error": error }).to_string(),
+        ),
+        _ => return None,
+    };
+    Some(out)
+}

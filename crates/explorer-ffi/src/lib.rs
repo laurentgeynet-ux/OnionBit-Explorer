@@ -966,11 +966,13 @@ fn media_err_code(e: explorer_core::MediaError) -> i32 {
     }
 }
 
-/// Draine les événements `MediaSurface` accumulés vers
-/// `buf` — une ligne NDJSON `{"event": "<nom_sse>", "data":
-/// <charge>}` par événement, charges **identiques** au SSE
-/// (contrat § `MediaSurface`, variante in-process étape
-/// 71e). Seules des lignes complètes sont écrites : si le
+/// Draine les événements `MediaSurface` **et**
+/// téléchargements accumulés vers `buf` — une ligne NDJSON
+/// `{"event": "<nom_sse>", "data": <charge>}` par
+/// événement, charges **identiques** au SSE (contrat §
+/// `MediaSurface`, variante in-process étape 71e ; les
+/// `download_*` rejoignent le drain en étape 176). Seules
+/// des lignes complètes sont écrites : si le
 /// dernier `\n` excède `cap`, le reste est conservé dans le
 /// handle et ressorti à l'appel suivant. Retourne le nombre
 /// d'octets écrits (`0` = rien en attente), `-1` argument
@@ -990,12 +992,17 @@ pub unsafe extern "C" fn explorer_media_events(
     let Some(h) = (unsafe { handle(h) }) else {
         return -1;
     };
-    // Vide le canal dans `media_pending` (filtré média —
-    // les autres events n'ont pas d'ABI aujourd'hui).
+    // Vide le canal dans `media_pending` (filtré média +
+    // téléchargements — étape 176 : les events
+    // `download_*` empruntent le même drain NDJSON, sans
+    // ABI nouvelle ; les autres variants restent sans
+    // canal FFI).
     loop {
         match h.events.try_recv() {
             Ok(ev) => {
-                if let Some((name, data)) = explorer_core::media_event_json(&ev) {
+                let ser = explorer_core::media_event_json(&ev)
+                    .or_else(|| explorer_core::download_event_json(&ev));
+                if let Some((name, data)) = ser {
                     use std::fmt::Write;
                     let _ = writeln!(h.media_pending, "{{\"event\":\"{name}\",\"data\":{data}}}");
                 }
@@ -1168,6 +1175,12 @@ pub unsafe extern "C" fn explorer_media_state(
 /// succès, `-1` handle/arg invalide, `-2` erreur moteur
 /// ([`explorer_last_error`]).
 ///
+/// **Compat** — bloque le worker FFI pendant tout le
+/// transfert (étape 174 : l'attente se fait par events
+/// sous `&mut session`). Préférer
+/// [`explorer_download_start`], qui rend l'id immédiatement
+/// et suit le cycle en events NDJSON.
+///
 /// # Safety
 ///
 /// `h` issu de [`explorer_create`] ; `url..url+len` lisible.
@@ -1186,6 +1199,81 @@ pub unsafe extern "C" fn explorer_download_url(
     };
     match h.rt.block_on(sess(h).download_url(tab, u, None, None)) {
         Ok(_) => 0,
+        Err(e) => {
+            set_err(e);
+            -2
+        }
+    }
+}
+
+/// Démarre un téléchargement direct **non bloquant**
+/// (étape 176) : rend l'`id` (> 0) immédiatement — le job
+/// détaché stream vers `.part` hors verrou session, puis
+/// `download_started`/`download_progress`/`download_done`/
+/// `download_failed` arrivent dans le drain NDJSON de
+/// [`explorer_media_events`]. `path`/`filename`
+/// optionnels (`*_len` `0` = absent — `path` explicite
+/// écrit verbatim, `filename` = suggestion avant
+/// `Content-Disposition`). `-1` handle/arg invalide, `-2`
+/// erreur moteur ([`explorer_last_error`]).
+///
+/// # Safety
+///
+/// `h` issu de [`explorer_create`] ; `url..url+url_len`,
+/// `path..path+path_len`, `filename..filename+filename_len`
+/// lisibles quand `*_len > 0`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn explorer_download_start(
+    h: *mut ExplorerHandle,
+    tab: u64,
+    url: *const u8,
+    url_len: usize,
+    path: *const u8,
+    path_len: usize,
+    filename: *const u8,
+    filename_len: usize,
+) -> i64 {
+    let Some(h) = (unsafe { handle(h) }) else {
+        return -1;
+    };
+    let Some(url_s) = (unsafe { read_str(url, url_len, MAX_URL) }) else {
+        return -1;
+    };
+    let path_opt = unsafe { read_str(path, path_len, MAX_URL) }.map(std::path::PathBuf::from);
+    let hint = unsafe { read_str(filename, filename_len, MAX_URL) }.map(str::to_string);
+    let mut session = sess(h);
+    // `tokio::spawn` du job exige un contexte runtime —
+    // `enter()` le pose sans re-bloquer (`sess` a déjà
+    // rendu son `block_on`).
+    let _rt = h.rt.enter();
+    match session.start_download(tab, url_s, path_opt, hint) {
+        Ok(id) => i64::try_from(id).unwrap_or(-2),
+        Err(e) => {
+            set_err(e);
+            -2
+        }
+    }
+}
+
+/// Annule un téléchargement direct en cours (étape 176)
+/// — la tâche purge son `.part` et émet `download_failed`
+/// (`annulé`). `0` succès, `-1` handle invalide, `-2`
+/// identifiant inconnu / autre onglet.
+///
+/// # Safety
+///
+/// `h` issu de [`explorer_create`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn explorer_download_cancel(
+    h: *mut ExplorerHandle,
+    tab: u64,
+    dl: u64,
+) -> i32 {
+    let Some(h) = (unsafe { handle(h) }) else {
+        return -1;
+    };
+    match sess(h).cancel_download(tab, dl) {
+        Ok(()) => 0,
         Err(e) => {
             set_err(e);
             -2

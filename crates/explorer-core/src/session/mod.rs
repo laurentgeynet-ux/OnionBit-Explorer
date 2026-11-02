@@ -97,6 +97,7 @@ pub(crate) use decode::*;
 #[allow(clippy::wildcard_imports)]
 pub(crate) use dom_helpers::*;
 
+pub use downloads::download_event_json;
 pub(crate) use downloads::*;
 #[allow(clippy::wildcard_imports)]
 pub(crate) use find::*;

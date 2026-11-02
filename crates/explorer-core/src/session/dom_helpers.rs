@@ -218,6 +218,23 @@ pub(crate) fn ancestor_link(dom: &Dom, mut node: NodeId) -> Option<NodeId> {
     }
 }
 
+/// Plus proche ancêtre `<img src>` (le nœud lui-même
+/// compris) — `None` si le point n'est pas sur une image
+/// adressable (étape 176, « enregistrer l'image »).
+pub(crate) fn ancestor_img(dom: &Dom, mut node: NodeId) -> Option<NodeId> {
+    loop {
+        if dom.tag_name(node).is_ok_and(|t| t == "img")
+            && matches!(dom.attribute(node, "src"), Ok(Some(_)))
+        {
+            return Some(node);
+        }
+        node = match dom.parent(node) {
+            Ok(Some(p)) => p,
+            _ => return None,
+        };
+    }
+}
+
 /// Un nom de cible (`target`/`formtarget`/`base target`)
 /// désigne-t-il un contexte neuf ? — `_self`/`_parent`/
 /// `_top` et vide = contexte courant ; `_blank` ou un nom

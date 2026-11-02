@@ -215,6 +215,19 @@ typedef _DlAcceptD = int Function(
     ffi.Pointer<ffi.Uint8>, int);
 typedef _DlDeclN = ffi.Int32 Function(_NativeHandle, ffi.Uint64, ffi.Uint64);
 typedef _DlDeclD = int Function(_NativeHandle, int, int);
+// Démarrage non bloquant (`i64` = id, `<0` erreur) —
+// export additif étape 176. `_DlDeclN/D` sert aussi à
+// `explorer_download_cancel` (même signature).
+typedef _DlStartN = ffi.Int64 Function(
+    _NativeHandle, ffi.Uint64,
+    ffi.Pointer<ffi.Uint8>, ffi.UintPtr,
+    ffi.Pointer<ffi.Uint8>, ffi.UintPtr,
+    ffi.Pointer<ffi.Uint8>, ffi.UintPtr);
+typedef _DlStartD = int Function(
+    _NativeHandle, int,
+    ffi.Pointer<ffi.Uint8>, int,
+    ffi.Pointer<ffi.Uint8>, int,
+    ffi.Pointer<ffi.Uint8>, int);
 // Find-in-page — export additif.
 typedef _FindN = ffi.IntPtr Function(
     _NativeHandle, ffi.Uint64,
@@ -256,6 +269,8 @@ const opDownloadUrl = 23;
 const opDownloadAccept = 24;
 const opDownloadDecline = 25;
 const opFind = 26;
+const opDownloadStart = 27;
+const opDownloadCancel = 28;
 
 /// Point d'entrée de l'isolate — `args` = `{'reply': SendPort,
 /// 'path': String}`. Envoie `{'port': SendPort}` puis
@@ -356,6 +371,8 @@ class _WorkerImpl {
   static _NavigateD? _downloadUrl;
   static _DlAcceptD? _downloadAccept;
   static _DlDeclD? _downloadDecline;
+  static _DlStartD? _downloadStart;
+  static _DlDeclD? _downloadCancel;
   static _FindD? _find;
   final _MediaEventsD? _mediaEvents;
   final _TabUrlD? _mediaList;
@@ -492,6 +509,24 @@ class _WorkerImpl {
       try {
         _downloadDecline = lib.lookupFunction<_DlDeclN, _DlDeclD>(
           'explorer_download_decline',
+        );
+      } on Object {
+        /* export absent */
+      }
+      // Étapes 174/176 : démarrage non bloquant +
+      // annulation — dll antérieure → `null` → l'op
+      // dégrade en `{'code': -1}` et le moteur bascule sur
+      // `downloadUrl` bloquant.
+      try {
+        _downloadStart = lib.lookupFunction<_DlStartN, _DlStartD>(
+          'explorer_download_start',
+        );
+      } on Object {
+        /* export absent */
+      }
+      try {
+        _downloadCancel = lib.lookupFunction<_DlDeclN, _DlDeclD>(
+          'explorer_download_cancel',
         );
       } on Object {
         /* export absent */
@@ -689,6 +724,39 @@ class _WorkerImpl {
         }
       case opDownloadDecline:
         final f = _downloadDecline;
+        if (f == null) return const {'code': -1};
+        return {
+          'code': f(_handle, _tab(m), (m['dl'] as num?)?.toInt() ?? 0),
+        };
+      case opDownloadStart:
+        // Non bloquant : rend `{'id'}` — le cycle de vie
+        // arrive par les events NDJSON (`download_started`,
+        // `progress`, `done`, `failed` — même drain que
+        // média depuis l'étape 176).
+        final f = _downloadStart;
+        if (f == null) return const {'code': -1};
+        final u = (m['url'] as String? ?? '').toNativeUtf8();
+        final p = (m['path'] as String? ?? '').toNativeUtf8();
+        final fn = (m['filename'] as String? ?? '').toNativeUtf8();
+        try {
+          final n = f(
+            _handle,
+            _tab(m),
+            u.cast<ffi.Uint8>(),
+            u.length,
+            p.cast<ffi.Uint8>(),
+            p.length,
+            fn.cast<ffi.Uint8>(),
+            fn.length,
+          );
+          return n < 0 ? {'code': n} : {'code': 0, 'id': n};
+        } finally {
+          calloc.free(u);
+          calloc.free(p);
+          calloc.free(fn);
+        }
+      case opDownloadCancel:
+        final f = _downloadCancel;
         if (f == null) return const {'code': -1};
         return {
           'code': f(_handle, _tab(m), (m['dl'] as num?)?.toInt() ?? 0),

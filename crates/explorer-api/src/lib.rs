@@ -216,6 +216,7 @@ pub fn router_with_egress(
         .route("/api/tabs/{id}/color-scheme", post(color_scheme))
         .route("/api/tabs/{id}/input", post(input))
         .route("/api/tabs/{id}/eval", post(eval_js))
+        .route("/api/tabs/{id}/hit", get(hit_targets))
         .route("/api/tabs/{id}/find", post(find))
         .route("/api/tabs/{id}/media", get(list_media))
         .route("/api/tabs/{id}/media/{mid}", get(get_media))
@@ -863,6 +864,28 @@ async fn eval_js(
             StatusCode::CONFLICT,
             &CoreError::Url("moteur JS indisponible — pompe en vol".to_string()),
         ),
+    }
+}
+
+/// `GET /api/tabs/{id}/hit?x=&y=` → `{ "link": …|null,
+/// "image": …|null }` — cibles « enregistrer sous » sous
+/// le point viewport (étape 176 : menu contextuel hôte —
+/// un `<a><img>` rend les deux entrées).
+async fn hit_targets(
+    State(st): State<ApiState>,
+    Path(id): Path<TabId>,
+    axum::extract::Query(q): axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> Response {
+    let (Some(x), Some(y)) = (
+        q.get("x").and_then(|v| v.parse::<f32>().ok()),
+        q.get("y").and_then(|v| v.parse::<f32>().ok()),
+    ) else {
+        return err(StatusCode::BAD_REQUEST, &"x et y requis");
+    };
+    let session = st.session.lock().await;
+    match session.hit_targets_at(id, x, y) {
+        Ok(t) => Json(serde_json::json!({ "link": t.link, "image": t.image })).into_response(),
+        Err(e) => err(StatusCode::BAD_REQUEST, &e),
     }
 }
 

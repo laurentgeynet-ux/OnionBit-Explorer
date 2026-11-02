@@ -973,6 +973,65 @@ async fn download_url_without_dir_fails() {
     assert_eq!(t.calls(), 0);
 }
 
+// --- Étape 176 : hit-test « enregistrer sous » ----------------------
+
+/// `<a><img width height>` sous le point : les deux cibles
+/// sont rendues, résolues contre la base du document ; un
+/// point sans cible → `None` partout ; onglet inconnu →
+/// `UnknownTab`.
+#[tokio::test]
+async fn hit_targets_link_and_image() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/dir/p",
+        200,
+        "<!doctype html><html><body>\
+         <a href=\"f.bin\"><img src=\"/i.png\" width=\"80\" height=\"80\" alt=\"im\">\
+         </a><p>loin</p></body></html>",
+    );
+    t.route("/i.png", 200, "x");
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/dir/p").await.unwrap();
+
+    let hit = s.hit_targets_at(id, 8.0, 25.0).unwrap();
+    assert_eq!(hit.link.as_deref(), Some("http://h.test/dir/f.bin"));
+    assert_eq!(hit.image.as_deref(), Some("http://h.test/i.png"));
+
+    // Zone vide du document — aucune cible sauvegardable.
+    let miss = s.hit_targets_at(id, 500.0, 700.0).unwrap();
+    assert!(miss.link.is_none() && miss.image.is_none());
+
+    assert!(matches!(
+        s.hit_targets_at(99, 1.0, 1.0),
+        Err(CoreError::UnknownTab(99))
+    ));
+}
+
+/// `download_event_json` — les 5 variantes portent leur nom
+/// SSE et leur charge ; les autres variants → `None`.
+#[test]
+fn download_event_json_covers_download_variants() {
+    use explorer_core::download_event_json as j;
+    let (name, data) = j(&CoreEvent::DownloadStarted {
+        tab: 1,
+        id: 7,
+        url: "http://h.test/f".to_string(),
+        filename: "f".to_string(),
+        total: Some(10),
+    })
+    .unwrap();
+    assert_eq!(name, "download_started");
+    assert!(data.contains("\"id\":7") && data.contains("\"total\":10"));
+    let (name, _) = j(&CoreEvent::DownloadFailed {
+        tab: 1,
+        id: 7,
+        error: "x".to_string(),
+    })
+    .unwrap();
+    assert_eq!(name, "download_failed");
+    assert!(j(&CoreEvent::TabOpened { tab: 1 }).is_none());
+}
+
 #[tokio::test]
 async fn unknown_tab_is_typed_error() {
     let (mut s, _t) = test_session();

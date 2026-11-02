@@ -89,6 +89,15 @@ class AppLocalizationsRu extends AppLocalizations {
   String get save => 'Сохранить';
 
   @override
+  String get saveLinkAs => 'Сохранить ссылку как…';
+
+  @override
+  String get saveImageAs => 'Сохранить изображение как…';
+
+  @override
+  String get downloadStarted => 'Загрузка начата';
+
+  @override
   String get cancel => 'Отмена';
 
   @override
@@ -102,6 +111,9 @@ class AppLocalizationsRu extends AppLocalizations {
 
   @override
   String get emptyHistory => 'Нет посещённых страниц';
+
+  @override
+  String get emptyDownloads => 'Нет загрузок';
 
   @override
   String get activeFieldTooltip => 'Активное поле — ввод отправляется движку';

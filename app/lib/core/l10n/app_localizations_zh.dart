@@ -88,6 +88,15 @@ class AppLocalizationsZh extends AppLocalizations {
   String get save => '保存';
 
   @override
+  String get saveLinkAs => '链接另存为…';
+
+  @override
+  String get saveImageAs => '图片另存为…';
+
+  @override
+  String get downloadStarted => '下载已开始';
+
+  @override
   String get cancel => '取消';
 
   @override
@@ -101,6 +110,9 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get emptyHistory => '尚未访问任何页面';
+
+  @override
+  String get emptyDownloads => '暂无下载';
 
   @override
   String get activeFieldTooltip => '活动字段 — 输入内容发送给引擎';

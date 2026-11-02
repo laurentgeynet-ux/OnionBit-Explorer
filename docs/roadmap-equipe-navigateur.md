@@ -5716,7 +5716,7 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   download_dir, dédup concurrent,
   purge au drop — 14 core + 5 api.
 
-- [ ] **Étape 175. Surfaces
+- [x] **Étape 176. Surfaces
   téléchargement** (`explorer-ffi`,
   `explorer-cli`, `app/` — suite
   Étape 174) : `explorer_download_
