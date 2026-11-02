@@ -46,6 +46,18 @@ enum Track {
 /// Nom de ligne → indice de ligne (bord de piste, 0-based).
 type LineNames = Vec<(String, usize)>;
 
+/// §B-59 — borne des numéros de ligne et spans `grid-*` :
+/// les moteurs réels clampent à ~10 000 (Blink/Firefox) ;
+/// sans elle, `grid-column: 1 / 999999999` faisait croître
+/// `col_tracks` une piste à la fois jusqu'à ~10⁹ entrées
+/// (`memory allocation of 34359738368 bytes` — vol 536).
+const MAX_GRID_TRACKS: usize = 10_000;
+
+/// Borne des lignes **matérialisées** d'occupancy — au-delà,
+/// `free_at`/`get` traitent la cellule comme libre (dégradé,
+/// jamais d'alloc proportionnelle à un span hostile).
+const MAX_OCC_ROWS: usize = 10_000;
+
 /// Tokens de piste séparés par espaces de niveau 0
 /// (parenthèses de `repeat(`/`minmax(` et crochets de
 /// noms de lignes respectés — `[a b]` reste un jeton).
@@ -206,19 +218,29 @@ fn placement(
                 let end_key = format!("{}-end", parts[0].trim());
                 if let Some(end) = names.iter().find(|(n, _)| *n == end_key) {
                     if end.1 > start {
-                        return (Some(start), end.1 - start);
+                        return (
+                            Some(start.min(MAX_GRID_TRACKS)),
+                            (end.1 - start).min(MAX_GRID_TRACKS),
+                        );
                     }
                 }
             }
         }
-        return (a0, s0.unwrap_or(1));
+        return (
+            a0.map(|s| s.min(MAX_GRID_TRACKS)),
+            s0.unwrap_or(1).min(MAX_GRID_TRACKS),
+        );
     }
     let (b0, s1) = one(parts[1], "-end");
     let span = s1.or(s0).unwrap_or_else(|| match (a0, b0) {
         (Some(a), Some(b)) if b > a => b - a,
         _ => 1,
     });
-    (a0.or(b0.map(|b| b.saturating_sub(span))), span.max(1))
+    (
+        a0.or(b0.map(|b| b.saturating_sub(span)))
+            .map(|s| s.min(MAX_GRID_TRACKS)),
+        span.clamp(1, MAX_GRID_TRACKS),
+    )
 }
 
 /// `grid-template-areas` → carte nom → `(col, row, span_c,
@@ -519,10 +541,12 @@ pub(crate) fn flow_grid_children(
             start_r = Some(r0);
             span_r = sr;
         }
-        while span_c > ncols {
+        while span_c > ncols && ncols < MAX_GRID_TRACKS {
             grow_cols(&mut occupancy, &mut ncols, &mut col_tracks);
         }
-        let span_c = span_c.max(1);
+        // `span_c ≤ ncols` garanti : `ncols - span_c` ci-dessous
+        // ne sous-déborde plus (release = wrap silencieux).
+        let span_c = span_c.max(1).min(ncols);
         let (mut col, mut row);
         if let Some(c0) = start_c {
             col = c0.min(ncols - span_c);
@@ -539,15 +563,25 @@ pub(crate) fn flow_grid_children(
             col = auto_col;
             row = start_r.unwrap_or(auto_row);
             loop {
-                while col + span_c > ncols {
+                // §B-59 : la borne hostile **avant** la croissance —
+                // sinon un `col` hors limite forçait quand même
+                // `ncols` à le suivre (≈4096 pistes/item × N
+                // enfants = l'abort 2³⁵ de terrain).
+                if col > 4096 {
+                    break;
+                }
+                while col + span_c > ncols && ncols < MAX_GRID_TRACKS {
                     grow_cols(&mut occupancy, &mut ncols, &mut col_tracks);
+                }
+                if col + span_c > ncols {
+                    break; // plus de piste allouable — dégradé
                 }
                 if row + span_r.max(1) > rows_lim {
                     row = 0;
                     col += 1;
                     continue;
                 }
-                if col > 4096 || free_at(&occupancy, row, col, span_c, span_r, ncols) {
+                if free_at(&occupancy, row, col, span_c, span_r, ncols) {
                     break;
                 }
                 row += 1;
@@ -568,14 +602,27 @@ pub(crate) fn flow_grid_children(
                 col += 1;
             }
         }
-        while occupancy.len() <= row + span_r {
+        // Croissance bornée : au-delà de `MAX_OCC_ROWS` les
+        // cellules restent inexistantes — `free_at`/`get` les
+        // lisent comme libres (dégradé, jamais d'alloc
+        // proportionnelle à `grid-row: 1 / span 999999999`).
+        while occupancy.len() <= (row + span_r).min(MAX_OCC_ROWS) {
             occupancy.push(vec![false; ncols]);
         }
         for dr in 0..span_r.max(1) {
             for dc in 0..span_c {
-                occupancy[row + dr][col + dc] = true;
+                if let Some(cell) = occupancy
+                    .get_mut(row + dr)
+                    .and_then(|r| r.get_mut(col + dc))
+                {
+                    *cell = true;
+                }
             }
         }
+        // `col` peut sortir d'un `break` borne au-delà de la
+        // grille allouée (`ncols`) — le slot est replié dans
+        // les pistes existantes (dégradé, jamais `x_off` OOB).
+        let col = col.min(ncols.saturating_sub(span_c));
         slots.push((col, span_c, row, span_r));
         if flow_col {
             auto_row = row + span_r.max(1);
@@ -651,7 +698,9 @@ pub(crate) fn flow_grid_children(
     let mut heights: Vec<f32> = Vec::with_capacity(slots.len());
     for (k, &i) in order_idx.iter().enumerate() {
         let (c, span, _, _) = slots[k];
-        let cell_w = widths[c..(c + span).min(widths.len())].iter().sum::<f32>()
+        let cell_w = widths[c.min(widths.len())..(c + span).min(widths.len())]
+            .iter()
+            .sum::<f32>()
             + gap_c * (span.saturating_sub(1)) as f32;
         let (mt, mb, _, _) = item_margins[k];
         layout_item(
@@ -749,11 +798,11 @@ pub(crate) fn flow_grid_children(
     let ai = st.get_or("align-items", "stretch").to_string();
     for (k, &i) in order_idx.iter().enumerate() {
         let (c, span_cols, r, span_rows) = slots[k];
-        let cell_w = widths[c..(c + span_cols).min(widths.len())]
+        let cell_w = widths[c.min(widths.len())..(c + span_cols).min(widths.len())]
             .iter()
             .sum::<f32>()
             + gap_c * (span_cols.saturating_sub(1)) as f32;
-        let cell_h = row_h[r..(r + span_rows).min(row_h.len())]
+        let cell_h = row_h[r.min(row_h.len())..(r + span_rows).min(row_h.len())]
             .iter()
             .sum::<f32>()
             + gap_r * (span_rows.saturating_sub(1)) as f32;

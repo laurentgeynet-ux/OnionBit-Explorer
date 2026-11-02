@@ -159,6 +159,33 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   scripts suivants tournent.
   Verrou : `deadline_flag_does_
   not_leak_to_next_eval`.
+- **R-139 — §B-59/§B-62 : placement
+  grille borné** (`explorer-layout`,
+  kill mémoire 32 Gio actugaming/
+  clubmed) — `placement()` acceptait
+  des numéros de ligne et spans
+  `grid-column`/`grid-row`/`grid-area`
+  illimités : `grid-column: 1 / N`
+  géant ou `auto-flow: column` ×
+  `span_r > rows_lim` faisaient croître
+  `col_tracks`/`occupancy` une piste à
+  la fois jusqu'à ~10⁸-10⁹ entrées —
+  `RawVec::grow_one` → alloc unique
+  2³⁵ octets, commit saturé avant tout
+  watchdog (reboot station, vol 536).
+  Site nommé par Job Object + backtrace
+  (`scripts/vol_joblimit.ps1`, plafond
+  de commit OS synchrone — outil de
+  vol). Bornes façon Blink/Firefox :
+  lignes/spans clampés à 10 000,
+  occupancy matérialisé ≤ 10 000
+  lignes, croissance de colonnes
+  plafonnée, borne hostile `col` avant
+  croissance, slots repliés dans la
+  grille allouée, tranches `widths`/
+  `row_h` sûres. Vol 540 : actugaming
+  navigue http=200, daemon stable
+  ~700 Mio, 14 apply sans abort.
 - **Étape CMP-4 — Réarmement des
   balises « bloquées par CMP »**
   (`explorer-core`, §B-4 bras CMP
