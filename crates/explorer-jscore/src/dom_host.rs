@@ -6382,15 +6382,30 @@ impl Host for NodeHost {
         // et `elementProperties` manque → `ce.failed` — verrou
         // Shoelace mesuré, JS-C102).
         if key == "constructor" {
-            let upgraded = self
-                .dom
-                .borrow()
-                .ce
-                .upgraded
-                .get(&node)
-                .and_then(|n| self.dom.borrow().ce.defs.get(n).map(|d| d.ctor));
-            if let Some(ctor) = upgraded {
-                return Ok(Some(ctor));
+            let upgraded = self.dom.borrow().ce.upgraded.get(&node).cloned();
+            if let Some(name) = upgraded {
+                // Spec : `el.constructor` = lookup ordinaire —
+                // `el.__proto__.constructor`. Le proto installé
+                // peut différer de `Ctor.prototype` quand le
+                // `define` a reçu un *wrapper* (shim/polyfill :
+                // `class extends HTMLElement { super();
+                // setPrototypeOf(this, RealCtor.prototype) }`) —
+                // `defs.ctor` figé rendrait le wrapper (sans les
+                // statiques héritées de `RealCtor` : Polymer lit
+                // `this.constructor._parseTemplate` — absent du
+                // wrapper → `TypeError`, boot `ytd-app` mort,
+                // JS-C294). Repli : `defs.ctor` si le proto ne
+                // rend pas de fonction.
+                if let Value::Obj(eid) = this {
+                    if let Some(Value::Obj(pid)) = e.heap.obj(eid).map(|o| o.proto) {
+                        if let Some(v @ Value::Obj(_)) = e.get_prop(pid, "constructor") {
+                            return Ok(Some(v));
+                        }
+                    }
+                }
+                if let Some(def) = self.dom.borrow().ce.defs.get(&name) {
+                    return Ok(Some(def.ctor));
+                }
             }
             // `div.constructor === HTMLDivElement` — spec :
             // le ctor tag-spécifique global (JS-C192, vol 121

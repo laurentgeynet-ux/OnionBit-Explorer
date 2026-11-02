@@ -5938,6 +5938,27 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   Verrou
   `c293_journal_vide_empreinte_arbitre`.
 
+- [x] **JS-C294. `el.constructor`
+  suit `el.__proto__.constructor`**
+  (`explorer-jscore`, mur
+  youtube.com — suite JS-C293) —
+  le getter servait `defs.ctor`
+  figé : un shim/polyfill qui
+  `define` un **wrapper**
+  re-protoisant l'instance
+  (`class extends HTMLElement {
+  super(); setPrototypeOf(this,
+  Real.prototype) }`) rendait le
+  wrapper sans statiques →
+  `this.constructor._parseTemplate`
+  = `undefined` → `TypeError` au
+  `ready` → `ytd-app` jamais
+  `__dataReady`, feed squelette.
+  Le getter résout le proto
+  installé (spec), repli
+  `defs.ctor`. Verrou
+  `c294_el_constructor_suit_le_proto`.
+
 - [x] **Étape CMP-4. Réarmement
   des balises « bloquées par CMP »**
   (`explorer-core`, §B-4 bras CMP

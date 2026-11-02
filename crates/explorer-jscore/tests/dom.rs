@@ -3701,6 +3701,32 @@ fn c68_failed_ctor_marks_failed() {
     );
 }
 
+#[test]
+fn c294_el_constructor_suit_le_proto() {
+    // Polymer/polyfill : `define` reçoit un *wrapper* dont le
+    // ctor re-protoise `this` vers `Real.prototype` — spec :
+    // `el.constructor` = `el.__proto__.constructor` (le ctor
+    // réel, porteur des statiques `_parseTemplate`), pas le
+    // ctor figé du registre. Sans ça `this.constructor.m()`
+    // dans un callback CE rend le wrapper (chaîne statique
+    // coupée → `TypeError`, boot `ytd-app` mort).
+    assert_eq!(
+        ev_in(
+            PAGE_CE,
+            "class Real extends HTMLElement {\
+               static _parseTemplate(t){ return 'T:'+t; }\
+             }\
+             class Wrap extends HTMLElement {\
+               constructor(){ super(); Object.setPrototypeOf(this, Real.prototype); }\
+             }\
+             customElements.define('x-w', Wrap);\
+             var el=document.createElement('x-w');\
+             (el.constructor===Real)+'|'+(el.constructor===Wrap)+'|'+el.constructor._parseTemplate('x')+'|'+(el instanceof Real)"
+        ),
+        "true|false|T:x|true"
+    );
+}
+
 /// Eval via `describe` — multi-appels sur le même moteur.
 fn describe_ev(e: &mut Engine, src: &str) -> String {
     match e.eval(src) {
