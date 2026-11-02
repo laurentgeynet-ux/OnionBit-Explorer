@@ -5580,6 +5580,26 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   `promise_species` ; test262
   1046/1046 (31 skips).
 
+- [x] **JS-C279. `SourceBuffer.
+  buffered` estimé**
+  (`explorer-jscore`, chantier
+  « vidéo réelle » b3 — ADR-0029)
+  — `buffered` rendait vide :
+  les players réels bouclent sur
+  `buffered.end()` pour ordonner
+  leurs appends. Chaque
+  `appendBuffer` produit une
+  plage `[t, t+est_span]` clippée
+  à l'append window ; `est_span`
+  = dernier delta inter-offset
+  observé (nominal 6 s — l'offset
+  croissant corrige la plage
+  précédente rétroactivement).
+  `remove` soustrait l'intervalle,
+  `abort` vide. Verrous
+  `js_c278_buffered_*` ; c193
+  passé de `length=0` à `=1`.
+
 - [x] **JS-C277. Octets réponse
   fidèles XHR/fetch**
   (`explorer-jscore`, chantier

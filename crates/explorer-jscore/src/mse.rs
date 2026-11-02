@@ -50,6 +50,12 @@ use crate::Engine;
 /// jette `QuotaExceededError` (budget hostile).
 const SB_BYTE_CAP: usize = 64 * 1024 * 1024;
 
+/// Span nominal d'un segment `appendBuffer` quand aucun
+/// delta `timestampOffset` n'a encore été observé (JS-C278 —
+/// 6 s ≈ segment HLS web courant ; corrigé rétroactivement
+/// dès qu'un second offset arrive — voir `sb_append_buffer`).
+const EST_SEGMENT_SPAN: f64 = 6.0;
+
 /// `SourceBuffer` vivants par `MediaSource` (un site hostile qui
 /// alloue des buffers en boucle reste borné).
 const MS_BUFFER_CAP: usize = 8;
@@ -137,6 +143,16 @@ struct SbData {
     segments: std::collections::VecDeque<Vec<u8>>,
     bytes: usize,
     pulled: u64,
+    /// `buffered` estimé (JS-C278/b3, ADR-0029) — plages
+    /// déduites des `timestampOffset` d'append successifs,
+    /// clippées à l'append window ; approximation documentée
+    /// (pas de timestamps réels sans démuxage). `est_span` =
+    /// dernier delta inter-offset observé, sinon nominal ;
+    /// `last_append_t` = offset du dernier append — un offset
+    /// croissant ferme la plage précédente à sa vraie durée.
+    est_ranges: Vec<(f64, f64)>,
+    est_span: f64,
+    last_append_t: Option<f64>,
 }
 
 struct MsHost {
@@ -500,6 +516,9 @@ fn ms_add_source_buffer(e: &mut Engine, this: Value, args: &[Value]) -> JsResult
         ms: this,
         mime,
         updating: false,
+        est_ranges: Vec::new(),
+        est_span: EST_SEGMENT_SPAN,
+        last_append_t: None,
         mode: "segments".to_string(),
         timestamp_offset: 0.0,
         append_start: 0.0,
@@ -626,6 +645,30 @@ fn sb_append_buffer(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Val
         sd.segments.push_back(bytes);
         sd.bytes = next;
         sd.updating = true;
+        // JS-C278/b3 — `buffered` estimé : le segment couvre
+        // `[t, t+est_span]` clippé à l'append window ; un
+        // offset croissant affine le span du segment
+        // précédent (delta réel rétroactif).
+        let t = sd.timestamp_offset;
+        if let Some(p) = sd.last_append_t {
+            if t > p {
+                sd.est_span = t - p;
+                if let Some(last) = sd.est_ranges.last_mut() {
+                    if last.1 > p && last.1 < t {
+                        last.1 = t;
+                    }
+                }
+            }
+        }
+        sd.last_append_t = Some(t);
+        let s = t.max(sd.append_start);
+        let end = (t + sd.est_span).min(sd.append_end);
+        if end > s {
+            match sd.est_ranges.last_mut() {
+                Some(last) if s <= last.1 => last.1 = last.1.max(end),
+                _ => sd.est_ranges.push((s, end)),
+            }
+        }
     }
     let Value::Obj(sid) = this else {
         return Ok(Value::Undefined);
@@ -652,6 +695,10 @@ fn sb_abort(e: &mut Engine, this: Value, _args: &[Value]) -> JsResult<Value> {
         sd.updating = false;
         sd.segments.clear();
         sd.bytes = 0;
+        // JS-C278 — abort vide le buffer : l'estimation
+        // repart à zéro comme la file d'octets.
+        sd.est_ranges.clear();
+        sd.last_append_t = None;
     }
     let Value::Obj(sid) = this else {
         return Ok(Value::Undefined);
@@ -681,6 +728,26 @@ fn sb_remove(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
         sd.updating = true;
         sd.segments.clear();
         sd.bytes = 0;
+        // JS-C278 — l'estimation `buffered`, elle, connaît
+        // des plages : soustraction honnête de `[s, t)`.
+        sd.est_ranges = sd
+            .est_ranges
+            .iter()
+            .flat_map(|&(a, b)| {
+                if b <= s || a >= t {
+                    vec![(a, b)]
+                } else {
+                    let mut v = Vec::new();
+                    if a < s {
+                        v.push((a, s));
+                    }
+                    if b > t {
+                        v.push((t, b));
+                    }
+                    v
+                }
+            })
+            .collect();
     }
     let Value::Obj(sid) = this else {
         return Ok(Value::Undefined);
@@ -946,7 +1013,12 @@ impl Host for SbHost {
             "timestampOffset" => Some(Value::Num(self.d.borrow().timestamp_offset)),
             "appendWindowStart" => Some(Value::Num(self.d.borrow().append_start)),
             "appendWindowEnd" => Some(Value::Num(self.d.borrow().append_end)),
-            "buffered" => Some(time_ranges(e, Vec::new())),
+            "buffered" => {
+                // JS-C278 — estimé (ADR-0029), pas vide : les
+                // players bouclent sur `buffered.end()`.
+                let ranges = self.d.borrow().est_ranges.clone();
+                Some(time_ranges(e, ranges))
+            }
             "audioTracks" | "videoTracks" | "textTracks" => Some(e.new_array(Vec::new())),
             _ => None,
         })

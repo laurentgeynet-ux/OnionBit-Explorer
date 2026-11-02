@@ -123,7 +123,8 @@ fn c193_append_buffer_events_and_props() {
              sb.appendBuffer(new Uint8Array(4));\
              log.join('>')+'|'+inU+'|'+sb.updating+'|'+sb.buffered.length"
         ),
-        "s>u>e|true|false|0"
+        // JS-C278 — `buffered` estimé : 1 plage après append.
+        "s>u>e|true|false|1"
     );
     // Props IDL : mode / timestampOffset / appendWindow /
     // pistes vides.
@@ -146,6 +147,55 @@ fn c193_append_buffer_events_and_props() {
              sb.abort();alog.join('')+'|'+sb.updating"
         ),
         "a|false"
+    );
+}
+
+#[test]
+fn js_c278_buffered_estime_offsets_et_remove() {
+    let mut e = engine();
+    // Estimation ADR-0029 : appends à offsets croissants —
+    // le delta réel corrige la plage précédente, la plage
+    // courante porte le span observé ; `remove` soustrait.
+    assert_eq!(
+        ev(
+            &mut e,
+            "var ms=new MediaSource();\
+             var sb=ms.addSourceBuffer('video/mp4');\
+             sb.appendBuffer(new Uint8Array(8));\
+             var a1=sb.buffered.length+'/'+sb.buffered.start(0)+'/'+sb.buffered.end(0);\
+             sb.timestampOffset=6;\
+             sb.appendBuffer(new Uint8Array(8));\
+             var a2=sb.buffered.start(0)+'/'+sb.buffered.end(0);\
+             sb.timestampOffset=12;\
+             sb.appendBuffer(new Uint8Array(8));\
+             var a3=sb.buffered.end(0)+'/'+sb.buffered.length;\
+             sb.remove(3,9);\
+             a1+'|'+a2+'|'+a3+'|'+sb.buffered.length+'/'+sb.buffered.start(0)+'/'+sb.buffered.end(0)+'/'+sb.buffered.start(1)+'/'+sb.buffered.end(1)"
+        ),
+        // 1er append : [0,6) nominal ; offset 6 → delta 6
+        // confirmé [0,6)+[6,12) ; offset 12 → [12,18). Après
+        // remove(3,9) : [0,3) + [9,18).
+        "1/0/6|0/12|18/1|2/0/3/9/18"
+    );
+}
+
+#[test]
+fn js_c278_buffered_append_window_clip_et_abort_vide() {
+    let mut e = engine();
+    // Clip append window : `appendWindowEnd` borne la fin
+    // estimée ; `abort` vide l'estimation comme la file.
+    assert_eq!(
+        ev(
+            &mut e,
+            "var ms=new MediaSource();\
+             var sb=ms.addSourceBuffer('video/mp4');\
+             sb.appendWindowEnd=4;\
+             sb.appendBuffer(new Uint8Array(8));\
+             var w=sb.buffered.end(0);\
+             sb.abort();\
+             w+'/'+sb.buffered.length"
+        ),
+        "4/0"
     );
 }
 

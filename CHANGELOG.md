@@ -230,6 +230,42 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   `download_started`/`failed`.
   Compat `&mut self` par oneshot.
   14 tests core + 5 tests api.
+- **JS-C279 — `SourceBuffer.buffered`
+  estimé** (`explorer-jscore`,
+  chantier « vidéo réelle » b3,
+  ADR-0029) — `buffered` rendait
+  un `TimeRanges` vide : les
+  players réels bouclent sur
+  `buffered.end()` pour décider
+  des appends suivants (hls.js
+  chargeait sans horizon). Chaque
+  `appendBuffer` produit désormais
+  une plage `[t, t+est_span]`
+  clippée à l'append window
+  (`timestampOffset` courant +
+  `appendWindowStart/End`) ;
+  `est_span` est le dernier delta
+  inter-offset observé (nominal
+  6 s avant mesure — l'offset
+  croissant corrige rétroactivement
+  la plage précédente à sa vraie
+  durée). Plages contiguës
+  fusionnées ; `remove(s,t)`
+  soustrait honnêtement
+  l'intervalle aux plages estimées ;
+  `abort()` vide l'estimation
+  comme la file. Approximation
+  documentée ADR-0029 — pas de
+  timestamps réels sans démuxage.
+  Verrous :
+  `js_c278_buffered_estime_offsets_
+  et_remove` (deltas adaptatifs +
+  soustraction) et
+  `js_c278_buffered_append_window_
+  clip_et_abort_vide` ; le verrou
+  c193 passe de `buffered.length=0`
+  à `=1` (contrat b3 assumé).
+
 - **Étape 177 — loopback média
   REST embarqué FFI**
   (`explorer-ffi` + `explorer-api`,
