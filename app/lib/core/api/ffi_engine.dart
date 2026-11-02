@@ -71,7 +71,12 @@ class FfiInvalidation {
 ///   (`Isolate.kill` diffère à la sortie du code natif) —
 ///   le contrat de l'étape reste : l'UI continue de répondre.
 class FfiEngine implements BrowserRepository {
-  FfiEngine._(this._worker, this.libPath);
+  FfiEngine._(this._worker, this.libPath) {
+    // Prélecture du port loopback média (étape 177/b2) —
+    // async car le worker isolate répond en RPC ; le claim
+    // MSE survient toujours après, la course est gagnée.
+    unawaited(_prefetchApiPort());
+  }
 
   /// Chemin de la bibliothèque chargée — affiché dans la barre
   /// de statut (étape 119 : le piège `engineMode=auto` était
@@ -81,11 +86,24 @@ class FfiEngine implements BrowserRepository {
   @override
   String get engineLabel => 'FFI $libPath';
 
-  /// Aucune base REST en mode in-process — `…/segments`
-  /// n'existe que via le daemon (ADR-0003) : `''` honnête,
-  /// un claim MSE échoue proprement plutôt que de pull à vide.
+  /// Loopback média embarqué (étape 177/b2, ADR-0029) —
+  /// `http://127.0.0.1:<port>` sert `GET /api/…/media/*`
+  /// comme le daemon ; `''` si le bind a échoué ou si la
+  /// prélecture n'a pas encore répondu (honnête, jamais
+  /// d'URL inventée).
   @override
-  String get apiBase => '';
+  String get apiBase => _apiPort == 0 ? '' : 'http://127.0.0.1:$_apiPort';
+
+  int _apiPort = 0;
+
+  Future<void> _prefetchApiPort() async {
+    try {
+      final r = await _worker.call(opApiPort);
+      _apiPort = (r?['port'] as num?)?.toInt() ?? 0;
+    } on Object {
+      // Export absent / worker pas prêt — `apiBase` reste ''.
+    }
+  }
 
   /// Tente de charger la bibliothèque dynamique — `null` si
   /// absente (mode dégradé → REST, jamais d'exception hors

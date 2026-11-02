@@ -908,6 +908,8 @@ name = "explorer-ffi"
 version = "0.2.0"
 dependencies = [
  "async-trait",
+ "axum",
+ "explorer-api",
  "explorer-core",
  "explorer-js",
  "explorer-layout",

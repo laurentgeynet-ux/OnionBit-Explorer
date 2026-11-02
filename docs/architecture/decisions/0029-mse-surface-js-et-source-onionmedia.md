@@ -65,14 +65,26 @@ existant.**
      (`NeedMoreData` → `Eof`, leur modèle) ;
    - `size() → None`, `seek() → Unsupported` — source
      **live**, honnête, pas un fichier.
-2. **Transport = REST pull sur le daemon** (ADR-0003 —
-   l'app ne consomme que l'API, aucun canal nouveau) :
+2. **Transport = REST pull sur l'API** (ADR-0003 — l'app
+   ne consomme que l'API, aucun canal nouveau) :
    `GET /api/tabs/{tab}/media/{media}/segments?cursor=N`
    rend le paquet de segments disponibles (bulk —
    amortir les allers-retours `read()`), plus un flag
    `eos` alimenté par `MediaSource.endOfStream()`. Le
    `ByteSource` côté app traduit `read()` → requêtes
    loopback.
+   **Amendement (étape 177/b2)** — en mode FFI
+   in-process, **le même contrat REST** est servi par un
+   loopback embarqué : `explorer-ffi` monte un serveur
+   axum sur `127.0.0.1:0` dans son runtime tokio privé,
+   borné au seul groupe `/api/…/media*` (mêmes handlers
+   que le daemon — `explorer_api::media_router`, pas de
+   duplication). Le port OS-élu est exposé par
+   `explorer_api_port()` ; `FfiEngine.apiBase` vaut alors
+   `http://127.0.0.1:<port>` (`''` si le bind échoue —
+   dégradé honnête). L'esprit ADR-0003 est préservé :
+   l'app consomme l'API, seul le transport devient
+   in-process ; aucun canal hors-API n'est créé.
 3. **Back-pressure sur les deux rails** : cap par
    `SourceBuffer` dans le moteur (64 Mio,
    `QuotaExceededError` — JS-C193) ; consommation au

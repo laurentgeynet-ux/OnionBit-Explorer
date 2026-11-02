@@ -37,6 +37,8 @@ typedef _DestroyN = ffi.Void Function(_NativeHandle);
 typedef _DestroyD = void Function(_NativeHandle);
 typedef _OpenTabN = ffi.Uint64 Function(_NativeHandle);
 typedef _OpenTabD = int Function(_NativeHandle);
+typedef _ApiPortN = ffi.Uint16 Function(_NativeHandle);
+typedef _ApiPortD = int Function(_NativeHandle);
 typedef _TabCodeN = ffi.Int32 Function(_NativeHandle, ffi.Uint64);
 typedef _TabCodeD = int Function(_NativeHandle, int);
 typedef _NavigateN = ffi.Int32 Function(
@@ -271,6 +273,7 @@ const opDownloadDecline = 25;
 const opFind = 26;
 const opDownloadStart = 27;
 const opDownloadCancel = 28;
+const opApiPort = 29;
 
 /// Point d'entrée de l'isolate — `args` = `{'reply': SendPort,
 /// 'path': String}`. Envoie `{'port': SendPort}` puis
@@ -374,6 +377,7 @@ class _WorkerImpl {
   static _DlStartD? _downloadStart;
   static _DlDeclD? _downloadCancel;
   static _FindD? _find;
+  static _ApiPortD? _apiPort;
   final _MediaEventsD? _mediaEvents;
   final _TabUrlD? _mediaList;
   final _MediaClaimD? _mediaClaim;
@@ -536,6 +540,15 @@ class _WorkerImpl {
       } on Object {
         /* export absent */
       }
+      // Loopback média embarqué (étape 177/b2) — export
+      // additif ; dll antérieure → `null` → port `0`.
+      try {
+        _apiPort = lib.lookupFunction<_ApiPortN, _ApiPortD>(
+          'explorer_api_port',
+        );
+      } on Object {
+        /* export absent */
+      }
       _MediaClaimD? mediaState;
       try {
         mediaState = lib.lookupFunction<_MediaClaimN, _MediaClaimD>(
@@ -660,6 +673,10 @@ class _WorkerImpl {
         };
       case opMediaState:
         return {'code': _mediaCall(m, _mediaState)};
+      case opApiPort:
+        // Loopback média embarqué (étape 177/b2) — `0` sur
+        // dll antérieure ou bind échoué → `apiBase` `''`.
+        return {'port': _apiPort?.call(_handle) ?? 0};
       case opBookmarks:
         return {'bookmarks': _readBookmarks()};
       case opBookmarkAdd:

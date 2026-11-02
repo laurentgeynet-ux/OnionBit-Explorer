@@ -5815,6 +5815,29 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   liste téléchargements + progress
   SSE dans l'app.
 
+- [x] **Étape 177. Loopback média
+  REST embarqué FFI**
+  (`explorer-ffi` + `explorer-api`,
+  chantier « vidéo réelle » b2 —
+  ADR-0029 amendé) — `…/segments`
+  n'existait que via le daemon ;
+  en mode in-process `apiBase`
+  valait `''` et `MseSource` ne
+  pouvait jamais pull. Le groupe
+  `/api/…/media*` est extrait en
+  `media_routes()`/`media_router()`
+  (handlers uniques) et servi par
+  un axum `127.0.0.1:0` dans le
+  runtime tokio privé du handle ;
+  `explorer_api_port()` expose le
+  port OS-élu, `FfiEngine.apiBase`
+  le prélit (`''` si bind échoué).
+  L'API reste le contrat — seul
+  le transport devient in-process.
+  Verrou `api_port_loopback_
+  serves_media` (`GET /media` brut
+  → `200` JSON).
+
 - [x] **Étape 175. `<source>` élu
   par type jouable** (`explorer-core`,
   chantier « vidéo réelle » a1 —

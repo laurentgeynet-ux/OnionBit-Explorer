@@ -230,6 +230,40 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   `download_started`/`failed`.
   Compat `&mut self` par oneshot.
   14 tests core + 5 tests api.
+- **Étape 177 — loopback média
+  REST embarqué FFI**
+  (`explorer-ffi` + `explorer-api`,
+  chantier « vidéo réelle » b2,
+  ADR-0029 amendé) — en mode
+  in-process `FfiEngine.apiBase`
+  valait `''` : aucun `…/segments`
+  n'existait, `MseSource` OnionMedia
+  ne pouvait jamais pull. La
+  dll embarque désormais le
+  **même** contrat REST : les
+  routes `/api/…/media*` du
+  daemon sont extraites en
+  `media_routes()` (groupe
+  unique — daemon et FFI
+  partagent les handlers, zéro
+  duplication) et servies par un
+  axum `127.0.0.1:0` dans le
+  runtime tokio privé du handle.
+  Nouvel export
+  `explorer_api_port()` → port
+  OS-élu ; `apiBase` Dart =
+  `http://127.0.0.1:<port>`,
+  prélecture async au démarrage
+  (`''` si bind échoué ou dll
+  antérieure — dégradé honnête).
+  ADR-0029 amendé : l'API reste
+  le contrat, seul le transport
+  devient in-process. Verrou :
+  `api_port_loopback_serves_media`
+  — `GET /api/tabs/1/media` brut
+  sur socket répond `200`
+  `{"media":[]}`.
+
 - **Étape 175 — `<source>` élu
   par type jouable** (`explorer-core`,
   chantier « vidéo réelle » a1 —

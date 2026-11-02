@@ -181,6 +181,31 @@ pub fn router(session: Arc<tokio::sync::Mutex<Session>>) -> Router {
     router_with_key(session, None)
 }
 
+/// Groupe `/api/tabs/{id}/media*` extrait (étape 177,
+/// chantier b2) — servi tel quel par le daemon et par le
+/// loopback embarqué FFI : un seul contrat, deux transports.
+fn media_routes() -> Router<ApiState> {
+    Router::new()
+        .route("/api/tabs/{id}/media", get(list_media))
+        .route("/api/tabs/{id}/media/{mid}", get(get_media))
+        .route("/api/tabs/{id}/media/{mid}/claim", post(media_claim))
+        .route("/api/tabs/{id}/media/{mid}/segments", get(media_segments))
+        .route("/api/tabs/{id}/media/{mid}/release", post(media_release))
+        .route("/api/tabs/{id}/media/{mid}/state", post(media_state))
+}
+
+/// Routeur média autonome pour le loopback embarqué (FFI,
+/// ADR-0029 — l'API reste le contrat, seul le transport
+/// devient in-process). `ApiState` minimale : `egress` et
+/// `console` ne servent aucune route du groupe.
+pub fn media_router(session: Arc<tokio::sync::Mutex<Session>>) -> Router {
+    media_routes().with_state(ApiState {
+        session,
+        egress: "embedded".to_string(),
+        console: ConsoleRing::default(),
+    })
+}
+
 /// Routeur avec clé d'API optionnelle (ADR-0003) : si `key`
 /// est `Some`, chaque requête doit présenter `x-api-key: key`
 /// **ou** `?key=key` (SSE `EventSource` ne pose pas d'en-têtes
@@ -218,12 +243,7 @@ pub fn router_with_egress(
         .route("/api/tabs/{id}/eval", post(eval_js))
         .route("/api/tabs/{id}/hit", get(hit_targets))
         .route("/api/tabs/{id}/find", post(find))
-        .route("/api/tabs/{id}/media", get(list_media))
-        .route("/api/tabs/{id}/media/{mid}", get(get_media))
-        .route("/api/tabs/{id}/media/{mid}/claim", post(media_claim))
-        .route("/api/tabs/{id}/media/{mid}/segments", get(media_segments))
-        .route("/api/tabs/{id}/media/{mid}/release", post(media_release))
-        .route("/api/tabs/{id}/media/{mid}/state", post(media_state))
+        .merge(media_routes())
         .route(
             "/api/tabs/{id}/downloads",
             get(list_downloads).post(download_url),

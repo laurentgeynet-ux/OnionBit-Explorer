@@ -94,6 +94,11 @@ pub struct ExplorerHandle {
     /// faute de place dans le buffer appelant — réémises à
     /// l'appel suivant (jamais tronquées à mi-ligne).
     media_pending: String,
+    /// Port du loopback média embarqué (étape 177/b2,
+    /// ADR-0029) — routes `/api/…/media*` servies par axum
+    /// sur `127.0.0.1` depuis le runtime privé ; `0` si le
+    /// bind a échoué (`apiBase` Dart reste `''`, honnête).
+    api_port: u16,
     /// Verrou d'instance unique du profil (`explorer.lock`) —
     /// gardé jusqu'à la destruction du handle ; le lock OS est
     /// relâché à la mort du processus, pas de résidu après crash.
@@ -276,6 +281,7 @@ fn create_inner(profile_dir: Option<PathBuf>) -> *mut ExplorerHandle {
     session.set_store(Arc::new(explorer_core::JsonFileStore::open(&dir)));
     let events = session.subscribe();
     let session = std::sync::Arc::new(tokio::sync::Mutex::new(session));
+    let api_port = spawn_media_loopback(&rt, &session);
     let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     spawn_pump(&rt, &session, &stop);
     Box::into_raw(Box::new(ExplorerHandle {
@@ -283,9 +289,43 @@ fn create_inner(profile_dir: Option<PathBuf>) -> *mut ExplorerHandle {
         session,
         events,
         media_pending: String::new(),
+        api_port,
         _profile_lock: profile_lock,
         stop,
     }))
+}
+
+/// Loopback média embarqué (étape 177/b2, ADR-0029) — les
+/// routes `/api/…/media*` du daemon servies par axum sur
+/// `127.0.0.1:0` dans le runtime privé ; `MseSource`
+/// `OnionMedia` pull via HTTP comme en mode REST, l'API reste
+/// le contrat (seul le transport est in-process). Bind
+/// synchrone — le port OS-élu est connu avant le retour ;
+/// échec → `0` (`apiBase` `''`, dégradé honnête).
+fn spawn_media_loopback(
+    rt: &std::sync::Arc<tokio::runtime::Runtime>,
+    session: &std::sync::Arc<tokio::sync::Mutex<Session>>,
+) -> u16 {
+    let Ok(l) = std::net::TcpListener::bind("127.0.0.1:0") else {
+        return 0;
+    };
+    let Ok(port) = l.local_addr().map(|a| a.port()) else {
+        return 0;
+    };
+    if l.set_nonblocking(true).is_err() {
+        return 0;
+    }
+    // `from_std` enregistre la socket sur le réacteur —
+    // contexte runtime requis hors `block_on`/`spawn`.
+    let _guard = rt.enter();
+    let Ok(tl) = tokio::net::TcpListener::from_std(l) else {
+        return 0;
+    };
+    let router = explorer_api::media_router(std::sync::Arc::clone(session));
+    rt.spawn(async move {
+        let _ = axum::serve(tl, router).await;
+    });
+    port
 }
 
 /// Journal fichier `<profil>/logs/engine.log` — une fois par
@@ -378,6 +418,22 @@ pub unsafe extern "C" fn explorer_create_with_profile(
         return std::ptr::null_mut();
     };
     create_inner(Some(PathBuf::from(profile)))
+}
+
+/// Port du loopback média embarqué (étape 177/b2, ADR-0029)
+/// — `http://127.0.0.1:<port>` sert `GET /api/…/media/*`
+/// comme le daemon ; `0` si le bind a échoué (`apiBase`
+/// `''`, lecture MSE honnêtement absente).
+///
+/// # Safety
+///
+/// `h` doit provenir de [`explorer_create`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn explorer_api_port(h: *mut ExplorerHandle) -> u16 {
+    match unsafe { handle(h) } {
+        Some(h) => h.api_port,
+        None => 0,
+    }
 }
 
 /// Libère le handle et sa session.
@@ -1577,9 +1633,40 @@ mod tests {
             session: std::sync::Arc::new(tokio::sync::Mutex::new(session)),
             events,
             media_pending: String::new(),
+            api_port: 0,
             _profile_lock: None,
             stop: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
         }))
+    }
+
+    /// Étape 177/b2 — le loopback embarqué sert les routes
+    /// `/api/…/media*` : bind `127.0.0.1:0`, un `GET` brut
+    /// sur `/media` reçoit du HTTP, `explorer_api_port`
+    /// rend le port OS-élu.
+    #[test]
+    fn api_port_loopback_serves_media() {
+        use std::io::{Read, Write};
+        let rt = std::sync::Arc::new(
+            tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()
+                .unwrap(),
+        );
+        let session = std::sync::Arc::new(tokio::sync::Mutex::new(Session::new(
+            Arc::new(FakeTransport::new()),
+            Arc::new(FixtureFont),
+        )));
+        let port = spawn_media_loopback(&rt, &session);
+        assert_ne!(port, 0, "le bind loopback doit élire un port");
+        let mut s = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+        s.write_all(b"GET /api/tabs/1/media HTTP/1.0\r\nHost: loopback\r\n\r\n")
+            .unwrap();
+        let mut buf = String::new();
+        s.read_to_string(&mut buf).unwrap();
+        assert!(
+            buf.starts_with("HTTP/1.0 200") || buf.starts_with("HTTP/1.1 200"),
+            "la route media répond en HTTP : {buf}"
+        );
     }
 
     #[test]
