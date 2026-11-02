@@ -7,6 +7,32 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **JS-C269 — backrefs `\N` +
+  groupes nommés** (`explorer-jscore`,
+  J13 §E-bis, claude.ai) —
+  `fancy_regex` refuse `\N` dès
+  qu'un `(?<x>)` existe
+  (« Numbered backref not
+  allowed ») : restriction du
+  backend, pas du JS. Quand les
+  deux cohabitent, les groupes
+  anonymes sont renommés
+  `(?P<__eN>` à la traduction et
+  `\N` réémis `\k<émis>` — le nom
+  émis (déclaré ou `__eN`) est
+  indexé par groupe. Les noms
+  synthétiques sont filtrés de
+  `exec` pour ne pas fuiter dans
+  `match.groups`/`indices.groups`.
+  Bonus adjacent : `named` porte
+  désormais les groupes déclarés
+  non-participants (`None`) →
+  `groups` rend `{a: undefined}`
+  spec au lieu de `undefined`
+  entier (patron `m.groups.x`
+  `of Undefined` évité). Verrou
+  `c269_backrefs` (5 cas).
+
 - **JS-C274 — `el.sheet` sur
   `<style>`/`<link rel=stylesheet>`**
   (`explorer-jscore`, §B-14

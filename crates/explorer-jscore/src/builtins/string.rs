@@ -442,7 +442,7 @@ pub(crate) fn expand_rep(
     e: &mut Engine,
     rep: Value,
     groups: &[Option<String>],
-    named: &[(String, String)],
+    named: &[(String, Option<String>)],
     before: &str,
     after: &str,
     matched: &str,
@@ -478,8 +478,8 @@ pub(crate) fn expand_rep(
                 '<' => {
                     if let Some(end) = rc[i + 2..].iter().position(|&c| c == '>') {
                         let name: String = rc[i + 2..i + 2 + end].iter().collect();
-                        if let Some((_, v)) = named.iter().find(|(k, _)| *k == name) {
-                            out.push_str(v);
+                        if let Some((_, Some(t))) = named.iter().find(|(k, _)| *k == name) {
+                            out.push_str(t);
                         }
                         i += end + 3;
                         continue;
@@ -562,7 +562,10 @@ pub(crate) fn splice_matches(
             if !m.named.is_empty() {
                 let gobj = e.new_object();
                 for (k, v) in &m.named {
-                    let vv = e.str_val(v.clone());
+                    let vv = match v {
+                        Some(t) => e.str_val(t.clone()),
+                        None => Value::Undefined,
+                    };
                     e.set_own(gobj, k, vv, true);
                 }
                 call_args.push(Value::Obj(gobj));
@@ -612,7 +615,10 @@ pub(crate) fn match_result(
     } else {
         let gobj = e.new_object();
         for (k, v) in &m.named {
-            let vv = e.str_val(v.clone());
+            let vv = match v {
+                Some(t) => e.str_val(t.clone()),
+                None => Value::Undefined,
+            };
             e.set_own(gobj, k, vv, true);
         }
         Value::Obj(gobj)

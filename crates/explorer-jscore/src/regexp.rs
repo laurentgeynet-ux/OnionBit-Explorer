@@ -36,6 +36,11 @@ pub struct JsRegExp {
     pub unicode: bool,
     /// `d` — `exec` results carry `indices` (start/end per group).
     pub has_indices: bool,
+    /// Noms de groupes **synthétiques** `__eN` émis pour le
+    /// backend (anonymes renommés quand `\N` cohabite avec des
+    /// nommés — JS-C269). Filtrés des résultats `exec` pour ne
+    /// pas fuiter dans `match.groups`/`indices.groups`.
+    synth: std::collections::BTreeSet<String>,
 }
 
 /// One `exec` result, in *char* units (the engine's strings are
@@ -53,8 +58,10 @@ pub struct ExecMatch {
     pub text: String,
     /// `groups[0]` == `text`; `groups[i]` is capture `i`.
     pub groups: Vec<Option<String>>,
-    /// `(?<name>…)` captures.
-    pub named: Vec<(String, String)>,
+    /// `(?<name>…)` captures — `None` quand le groupe déclaré
+    /// n'a pas participé au match (spec : `groups` l'expose
+    /// alors avec la valeur `undefined`).
+    pub named: Vec<(String, Option<String>)>,
     /// Char-unit `[start, end)` per group (for `d`-flag `indices`).
     pub group_indices: Vec<Option<(usize, usize)>>,
     /// Char-unit `(start, end)` per named capture — `None` when
@@ -100,11 +107,8 @@ impl JsRegExp {
         if dot_all {
             pat.push_str("(?s)");
         }
-        pat.push_str(&translate_pattern(
-            source,
-            unicode,
-            ignore_case && !unicode,
-        )?);
+        let (translated, synth) = translate_pattern(source, unicode, ignore_case && !unicode)?;
+        pat.push_str(&translated);
         let re = fancy_regex::RegexBuilder::new(&pat)
             .backtrack_limit(BACKTRACK_LIMIT)
             .delegate_size_limit(DELEGATE_SIZE_LIMIT)
@@ -120,6 +124,7 @@ impl JsRegExp {
             sticky,
             unicode,
             has_indices,
+            synth,
         })
     }
 
@@ -243,16 +248,21 @@ impl JsRegExp {
         }
         let mut named = Vec::new();
         let mut named_indices = Vec::new();
-        for name in self.re.capture_names().flatten() {
-            if let Some(g) = caps.name(name) {
-                named.push((name.to_string(), g.as_str().to_string()));
-                named_indices.push((
-                    name.to_string(),
-                    Some((byte_to_char(hay, g.start()), byte_to_char(hay, g.end()))),
-                ));
-            } else {
-                named_indices.push((name.to_string(), None));
-            }
+        for name in self
+            .re
+            .capture_names()
+            .flatten()
+            .filter(|n| !self.synth.contains(*n))
+        {
+            named.push((
+                name.to_string(),
+                caps.name(name).map(|g| g.as_str().to_string()),
+            ));
+            named_indices.push((
+                name.to_string(),
+                caps.name(name)
+                    .map(|g| (byte_to_char(hay, g.start()), byte_to_char(hay, g.end()))),
+            ));
         }
         let mut group_indices = Vec::with_capacity(caps.len());
         for i in 0..caps.len() {
@@ -304,15 +314,29 @@ impl JsRegExp {
 ///   (canonicalisation guard: `upper(v) == upper(c)`), because the
 ///   backend's `i` is full Unicode folding — `/\u{212a}/i` must
 ///   not match 'k' (KELVIN has no JS-canonical case partner).
-fn translate_pattern(src: &str, unicode: bool, fold: bool) -> Result<String, String> {
+fn translate_pattern(
+    src: &str,
+    unicode: bool,
+    fold: bool,
+) -> Result<(String, std::collections::BTreeSet<String>), String> {
     let cs: Vec<char> = src.chars().collect();
-    let (all_names, n_groups) = prescan(&cs);
+    let (all_names, n_groups, has_decimal) = prescan(&cs);
+    // JS-C269 : `fancy_regex` refuse `\N` dès qu'un groupe nommé
+    // existe (« Numbered backref not allowed ») — restriction du
+    // backend, pas du JS. Quand les deux cohabitent, les groupes
+    // anonymes sont renommés `(?P<__eN>` et `\N` réémis `\k<…>` ;
+    // les noms synthétiques sont filtrés à l'exec pour ne pas
+    // polluer `match.groups`/`indices.groups`.
+    let need_synth = !all_names.is_empty() && has_decimal;
     let mut t = Trans {
         unicode,
         fold,
         n_groups,
         names: std::collections::BTreeSet::new(),
         all_names,
+        emitted: Vec::new(),
+        need_synth,
+        synth: std::collections::BTreeSet::new(),
         groups_open: 0,
         open_stack: Vec::new(),
         look_pos: Vec::new(),
@@ -670,7 +694,18 @@ fn translate_pattern(src: &str, unicode: bool, fold: bool) -> Result<String, Str
                 t.open_stack.push(Some(t.groups_open));
                 t.look_pos.push(None);
                 last_atom = false;
-                out.push('(');
+                if t.need_synth {
+                    // JS-C269 : nommer l'anonyme pour que `\N`
+                    // puisse être réémis `\k<__eN>` (le backend
+                    // refuse `\N` dès qu'un nommé existe).
+                    let nm = t.synth_name(t.groups_open);
+                    out.push_str("(?P<");
+                    out.push_str(&nm);
+                    out.push('>');
+                } else {
+                    t.emitted.push(String::new());
+                    out.push('(');
+                }
             }
             ')' if !in_class => {
                 if let Some(Some(n)) = t.open_stack.pop() {
@@ -804,7 +839,7 @@ fn translate_pattern(src: &str, unicode: bool, fold: bool) -> Result<String, Str
     if in_class {
         return Err(format!("unterminated class in /{src}/"));
     }
-    Ok(out)
+    Ok((out, t.synth))
 }
 
 /// État partagé du traducteur : flags, tables de groupes.
@@ -819,6 +854,17 @@ struct Trans {
     names: std::collections::BTreeSet<String>,
     /// Tous les noms du pattern (backref avant déclaration).
     all_names: std::collections::BTreeSet<String>,
+    /// Nom **émis** par numéro de groupe (0-indexé) — le nom
+    /// déclaré pour `(?<x>`, `__eN` synthétique pour les anonymes
+    /// quand `need_synth`. Alimente la réécriture `\N`→`\k<émis>`.
+    emitted: Vec<String>,
+    /// Vrai quand nommés + `\N` cohabitent : les anonymes sont
+    /// renommés `(?P<__eN>` pour que le backend accepte les
+    /// backrefs réécrites `\k<…>` (JS-C269).
+    need_synth: bool,
+    /// Noms synthétiques `__eN` émis — filtrés de `groups`/`named`
+    /// à l'exec.
+    synth: std::collections::BTreeSet<String>,
     /// Groupes capturants ouverts jusqu'ici (numérotation des `(`).
     groups_open: usize,
     /// Pile des groupes ouverts — `Some(n)` capturant, `None`
@@ -837,17 +883,40 @@ struct Trans {
     closed: std::collections::BTreeSet<usize>,
 }
 
+impl Trans {
+    /// Nom synthétique `__eN` pour le groupe anonyme `n` —
+    /// garanti unique vis-à-vis des noms déclarés (`__eN` déjà
+    /// pris → `__eN_`, etc.). Enregistré dans `emitted` et `synth`.
+    fn synth_name(&mut self, n: usize) -> String {
+        let mut nm = format!("__e{n}");
+        while self.all_names.contains(&nm) || self.synth.contains(&nm) {
+            nm.push('_');
+        }
+        self.synth.insert(nm.clone());
+        self.emitted.push(nm.clone());
+        nm
+    }
+}
+
 /// Premier passage : tous les noms de groupes capturants + leur
 /// nombre (les `\k<name>`/`\N` sont validés contre cette table —
-/// une backref nommée peut précéder sa déclaration en JS).
-fn prescan(cs: &[char]) -> (std::collections::BTreeSet<String>, usize) {
+/// une backref nommée peut précéder sa déclaration en JS) + la
+/// présence d'un échappement `\`+chiffre hors classe (backref
+/// décimale plausible — sur-approximation bénigne, JS-C269).
+fn prescan(cs: &[char]) -> (std::collections::BTreeSet<String>, usize, bool) {
     let mut all = std::collections::BTreeSet::new();
     let mut n = 0usize;
+    let mut has_decimal = false;
     let mut in_class = false;
     let mut i = 0;
     while i < cs.len() {
         match cs[i] {
-            '\\' => i += 1,
+            '\\' => {
+                if !in_class && cs.get(i + 1).is_some_and(char::is_ascii_digit) {
+                    has_decimal = true;
+                }
+                i += 1;
+            }
             '[' if !in_class => in_class = true,
             ']' if in_class => in_class = false,
             '(' if !in_class => {
@@ -875,7 +944,7 @@ fn prescan(cs: &[char]) -> (std::collections::BTreeSet<String>, usize) {
         }
         i += 1;
     }
-    (all, n)
+    (all, n, has_decimal)
 }
 
 /// Fragment d'échappement hors classe en mode fold : littéral →
@@ -1293,6 +1362,7 @@ fn translate_group(
             t.groups_open += 1;
             t.open_stack.push(Some(t.groups_open));
             t.look_pos.push(None);
+            t.emitted.push(name.clone());
             out.push_str("(?P<");
             out.push_str(&name);
             out.push('>');
@@ -1557,6 +1627,13 @@ impl Trans {
         }
         if n >= 1 && n <= self.n_groups {
             if self.closed.contains(&n) {
+                if self.need_synth {
+                    // Le backend refuse `\N` en présence de
+                    // groupes nommés — réémet `\k<émis>` (JS-C269).
+                    if let Some(nm) = self.emitted.get(n - 1).filter(|s| !s.is_empty()) {
+                        return Ok((format!("\\k<{nm}>"), j));
+                    }
+                }
                 return Ok((format!("\\{n}"), j));
             }
             // Backref « vers l'avant » : le groupe n'a pas encore
@@ -1668,7 +1745,7 @@ mod tests {
     use super::translate_pattern;
 
     fn tr(src: &str) -> String {
-        translate_pattern(src, false, false).unwrap()
+        translate_pattern(src, false, false).unwrap().0
     }
 
     /// `-` littéral en classe (tête/queue) : émis `\x{2d}` et
@@ -1801,14 +1878,16 @@ mod dbg_vol10 {
             "/tests/data/vol10_yt_regex.txt"
         ))
         .unwrap();
-        let t = super::translate_pattern(&pat, false, false).unwrap();
+        let t = super::translate_pattern(&pat, false, false).unwrap().0;
         eprintln!("TAIL>>{}", &t[1850.min(t.len())..]);
         assert!(!t.contains("(?!)"), "dead branch left: {t}");
         assert!(fancy_regex::Regex::new(&t).is_ok());
         // Plage astrale `\uD800\uDD00-\uDD02` = U+10300–U+10302 :
         // la classe multi-items doit la couvrir.
         // `\uD800\uDD00` = U+10100, `\uD800\uDF9F` = U+1039F.
-        let mini = super::translate_pattern("\\uD800[\\uDD00-\\uDD02]", false, false).unwrap();
+        let mini = super::translate_pattern("\\uD800[\\uDD00-\\uDD02]", false, false)
+            .unwrap()
+            .0;
         assert_eq!(mini, "[\\x{10100}-\\x{10102}]");
         let re = super::JsRegExp::compile(&pat, "").unwrap();
         assert!(re.exec("\u{10101}", 0).is_some());

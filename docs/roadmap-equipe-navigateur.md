@@ -5442,6 +5442,32 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   Reste terrain : re-vols qwant/
   soundcloud sur binaire frais.
 
+- [x] **JS-C269. Backrefs `\N`
+  cohabitant avec des groupes
+  nommés** (`explorer-jscore`,
+  J13 §E-bis — claude.ai) —
+  `fancy_regex` rejette `\N` dès
+  qu'un `(?<x>)` existe
+  (« Numbered backref not
+  allowed ») : restriction du
+  backend, pas du JS. Les groupes
+  anonymes sont renommés
+  `(?P<__eN>` à la traduction
+  (quand les deux cohabitent) et
+  `\N` réémis `\k<émis>` via une
+  table nom-émis par groupe ;
+  les `__eN` sont filtrés des
+  résultats `exec` pour ne pas
+  fuiter dans `groups`/`indices.
+  groups`. Adjacent : `named`
+  porte les nommés non-partici-
+  pants (`None`) → `groups`
+  rend `{a: undefined}` spec au
+  lieu de `undefined` — le
+  patron `m.groups.x` `of
+  Undefined` disparaît. Verrou :
+  `c269_backrefs` (5 tests).
+
 - [x] **Étape CMP-4. Réarmement
   des balises « bloquées par CMP »**
   (`explorer-core`, §B-4 bras CMP
