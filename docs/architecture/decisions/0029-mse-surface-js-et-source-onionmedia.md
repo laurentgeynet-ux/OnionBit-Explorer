@@ -30,9 +30,9 @@ Deux constats structurent le choix :
    fallbacks `<video src>` déjà servis par `MediaSurface`.
 2. **La stack hôte a changé de nature.** L'app n'embarque
    plus ffmpeg/`fvp`/mdk mais **OnionMedia FFI** — le
-   lecteur QtAV porté Rust (`D:\Projet\OnionMedia`)
-   adossé à **OnionCodec** (`D:\Projet\OnionCodec`),
-   réécriture FFmpeg pur Rust : démuxeurs MP4/**fMP4**,
+   lecteur QtAV porté Rust, adossé à **OnionCodec**,
+   réécriture FFmpeg pur Rust (workspace fusionné
+   `C:\Onion-explorer-media`) : démuxeurs MP4/**fMP4**,
    Matroska/WebM, MPEG-TS, Ogg, WAV ; codecs
    H.264/HEVC/VP9/AV1/VP8 et AAC/MP3/Opus/Vorbis/FLAC/PCM.
    OnionCodec exclut explicitement « la plomberie

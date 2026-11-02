@@ -82,9 +82,8 @@ if (-not $SkipApp -and (Test-Path 'app/pubspec.yaml')) {
     Copy-Item (Join-Path $release 'explorer_ffi.dll') -Destination $appOut -Force
 }
 
-# onionmedia_ffi.dll — source officielle = le package
-# C:\Onion-explorer-media (OnionMedia sur-mesure ; l'ancien
-# repo D:\Projet\OnionMedia est obsolete pour Explorer).
+# onionmedia_ffi.dll — source officielle = le workspace
+# canonique C:\Onion-explorer-media (OnionMedia sur-mesure).
 # Re-deployee a chaque terrain : une DLL stale dans runner/
 # apres un `flutter clean` resterait sinon en place, et le
 # daemon de vol la resout adjacente a explorer-daemon.exe.
