@@ -5732,6 +5732,28 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   `js_c285_buffered_timestamps_
   fmp4_en_bande`.
 
+- [x] **JS-C286. Déclarateurs
+  `await` ordonnés dans une même
+  déclaration** (`explorer-jscore`,
+  §B-14 dailymotion vol 581) —
+  `lift` hissait `const e=X,
+  t=await f(e)` en `var __gN=
+  await f(e)` placé AVANT `const e`
+  : `e` lu hors portée → capture
+  du `e` englobant (le `module`
+  webpack `{id,loaded,exports}` →
+  `fetch(module)` → `"[object
+  Object]"` → 404 → `.json()` →
+  `unhandledrejection SyntaxError`
+  — signature JSON vol 579 nommée
+  de bout en bout). `lower_decls_
+  ordered` : chaque groupe de
+  déclarateurs propres émis avant
+  les lifts du suivant (`var`/
+  `let`/`const`/`using`, for-init
+  migré avant boucle, `export`
+  préservé). Verrous `c286_*` (4/4).
+
 - [x] **Étape CMP-4. Réarmement
   des balises « bloquées par CMP »**
   (`explorer-core`, §B-4 bras CMP

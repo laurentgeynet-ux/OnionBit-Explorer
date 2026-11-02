@@ -343,6 +343,38 @@ fn lift_decls(ds: &mut [VarDecl], pre: &mut Vec<Stmt>, cx: &mut LowerCx) {
     }
 }
 
+/// Réécrit une liste de déclarateurs en séquence **ordonnée** :
+/// un déclarateur dont le pattern ou l'init contient un suspend
+/// voit ses lifts `let __gN` émis APRÈS les déclarateurs précédents
+/// — sinon `const e = X, t = await f(e)` lirait `e` hors de sa
+/// portée (init hissée avant `e` → capture silencieuse du `e`
+/// externe ; observé terrain : `fetch(module)` sur dailymotion —
+/// sans TDZ, la résolution retombe sur le scope englobant).
+fn lower_decls_ordered(
+    decls: Vec<VarDecl>,
+    mk: &dyn Fn(Vec<VarDecl>) -> Stmt,
+    cx: &mut LowerCx,
+) -> Vec<Stmt> {
+    let mut out = Vec::new();
+    let mut pending: Vec<VarDecl> = Vec::new();
+    for mut d in decls {
+        if (d.init.as_ref().is_some_and(has_suspend) || has_suspend_pat(&d.pat))
+            && !pending.is_empty()
+        {
+            out.push(mk(std::mem::take(&mut pending)));
+        }
+        lift_pat(&mut d.pat, &mut out, cx);
+        if let Some(i) = &mut d.init {
+            lift(i, &mut out, cx);
+        }
+        pending.push(d);
+    }
+    if !pending.is_empty() {
+        out.push(mk(pending));
+    }
+    out
+}
+
 /// Réécrit un statement : suspendables hissés en déclarations
 /// `let __gN = …` posées AVANT ; le statement utilise `__gN`.
 fn lower_stmt(s: &Stmt, cx: &mut LowerCx) -> Vec<Stmt> {
@@ -350,8 +382,33 @@ fn lower_stmt(s: &Stmt, cx: &mut LowerCx) -> Vec<Stmt> {
     let mut s2 = s.clone();
     match &mut s2 {
         Stmt::Expr(e) | Stmt::Return(Some(e)) | Stmt::Throw(e) => lift(e, &mut pre, cx),
-        Stmt::Var(decls) | Stmt::Lexical { decls, .. } | Stmt::Using { decls, .. } => {
-            lift_decls(decls, &mut pre, cx);
+        Stmt::Var(ds) => {
+            let ds = std::mem::take(ds);
+            return lower_decls_ordered(ds, &Stmt::Var, cx);
+        }
+        Stmt::Lexical { decls, constant } => {
+            let ds = std::mem::take(decls);
+            let c = *constant;
+            return lower_decls_ordered(
+                ds,
+                &move |seg| Stmt::Lexical {
+                    decls: seg,
+                    constant: c,
+                },
+                cx,
+            );
+        }
+        Stmt::Using { decls, is_await } => {
+            let ds = std::mem::take(decls);
+            let a = *is_await;
+            return lower_decls_ordered(
+                ds,
+                &move |seg| Stmt::Using {
+                    decls: seg,
+                    is_await: a,
+                },
+                cx,
+            );
         }
 
         Stmt::If { cond, .. } | Stmt::While { cond, .. } | Stmt::DoWhile { cond, .. } => {
@@ -361,10 +418,43 @@ fn lower_stmt(s: &Stmt, cx: &mut LowerCx) -> Vec<Stmt> {
             init, test, update, ..
         } => {
             if let Some(i) = init {
+                // Ordre : un suspend dans les déclarateurs impose le
+                // découpage ordonné — la clause init du `for` ne
+                // pouvant se scinder, les déclarations migrent avant
+                // la boucle (déviation : la portée for-init s'élargit
+                // au bloc englobant).
+                let susp = |ds: &[VarDecl]| {
+                    ds.iter().any(|d| {
+                        d.init.as_ref().is_some_and(has_suspend) || has_suspend_pat(&d.pat)
+                    })
+                };
                 match i {
                     ForInit::Expr(e) => lift(e, &mut pre, cx),
-                    ForInit::Var(ds) | ForInit::Lexical { decls: ds, .. } => {
-                        lift_decls(ds, &mut pre, cx);
+                    ForInit::Var(ds) => {
+                        if susp(ds) {
+                            let ds = std::mem::take(ds);
+                            pre.extend(lower_decls_ordered(ds, &Stmt::Var, cx));
+                            *init = None;
+                        } else {
+                            lift_decls(ds, &mut pre, cx);
+                        }
+                    }
+                    ForInit::Lexical { decls, constant } => {
+                        if susp(decls) {
+                            let ds = std::mem::take(decls);
+                            let c = *constant;
+                            pre.extend(lower_decls_ordered(
+                                ds,
+                                &move |seg| Stmt::Lexical {
+                                    decls: seg,
+                                    constant: c,
+                                },
+                                cx,
+                            ));
+                            *init = None;
+                        } else {
+                            lift_decls(decls, &mut pre, cx);
+                        }
                     }
                 }
             }
@@ -413,8 +503,34 @@ fn lower_stmt(s: &Stmt, cx: &mut LowerCx) -> Vec<Stmt> {
         Stmt::Export(d) => match d {
             ExportDecl::Default(e) => lift(e, &mut pre, cx),
             ExportDecl::Decl(inner) => match &mut **inner {
-                Stmt::Var(ds) | Stmt::Lexical { decls: ds, .. } | Stmt::Using { decls: ds, .. } => {
-                    lift_decls(ds, &mut pre, cx);
+                // Chaque segment reste un `export` — les lifts
+                // `__gN` intercalés ne le sont pas.
+                Stmt::Var(ds) => {
+                    let ds = std::mem::take(ds);
+                    let ex = |seg| Stmt::Export(ExportDecl::Decl(Box::new(Stmt::Var(seg))));
+                    return lower_decls_ordered(ds, &ex, cx);
+                }
+                Stmt::Lexical { decls, constant } => {
+                    let ds = std::mem::take(decls);
+                    let c = *constant;
+                    let ex = move |seg| {
+                        Stmt::Export(ExportDecl::Decl(Box::new(Stmt::Lexical {
+                            decls: seg,
+                            constant: c,
+                        })))
+                    };
+                    return lower_decls_ordered(ds, &ex, cx);
+                }
+                Stmt::Using { decls, is_await } => {
+                    let ds = std::mem::take(decls);
+                    let a = *is_await;
+                    let ex = move |seg| {
+                        Stmt::Export(ExportDecl::Decl(Box::new(Stmt::Using {
+                            decls: seg,
+                            is_await: a,
+                        })))
+                    };
+                    return lower_decls_ordered(ds, &ex, cx);
                 }
                 Stmt::ClassDecl(cl) => lift_classlit(std::rc::Rc::make_mut(cl), &mut pre, cx),
                 _ => {}

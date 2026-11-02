@@ -182,3 +182,94 @@ fn c278_eager_foreign_thenable_named_error() {
         "out={out}"
     );
 }
+
+// ------------------------------------------------------------------
+// JS-C286 — `const e=X, t=await f(e)` : le déclarateur suspendable
+// voit les bindings déclarés plus tôt dans la MÊME déclaration.
+// Régression terrain (dailymotion) : le lift plaçait
+// `var __gN = await f(e)` AVANT `const e` → `e` résolvait hors
+// portée sur le `e` englobant (le `module` webpack →
+// `{id,loaded,exports}` → `fetch(module)` → URL "[object Object]").
+// ------------------------------------------------------------------
+
+/// Le cas verbatim dailymotion : `const e=url, t=await fetch(e)`
+/// dans une async fn nichée dans un wrapper `function(e)`.
+#[test]
+fn c286_await_operand_reads_same_decl_binding() {
+    let mut e = Engine::new();
+    e.eval(
+        "var out='?';\
+         (function(e){\
+           (async function(){\
+             const e='INNER', t=await Promise.resolve(e);\
+             out=t;\
+           })();\
+         })({id:'module'});",
+    )
+    .expect("setup");
+    e.run_microtasks().expect("microtasks");
+    let out = e.eval("out").map(|v| e.describe(v)).unwrap();
+    assert_eq!(out, "INNER");
+}
+
+/// Plusieurs déclarateurs suspendables : chaque lift voit les
+/// bindings précédents initialisés (`a` puis `b` visibles).
+#[test]
+fn c286_multiple_suspend_declarators_ordered() {
+    let mut e = Engine::new();
+    e.eval(
+        "var out='?';\
+         (function(e){\
+           (async function(){\
+             const a=1, b=await Promise.resolve(a+10), c=await Promise.resolve(b+100);\
+             out=''+a+','+b+','+c;\
+           })();\
+         })({id:'outer'});",
+    )
+    .expect("setup");
+    e.run_microtasks().expect("microtasks");
+    let out = e.eval("out").map(|v| e.describe(v)).unwrap();
+    assert_eq!(out, "1,11,111");
+}
+
+/// `let`/`var` suivent la même règle d'ordre ; le binding
+/// sans init (`let t;`) n'est pas consommé par le lift.
+#[test]
+fn c286_let_var_same_decl_order() {
+    let mut e = Engine::new();
+    e.eval(
+        "var out='?';\
+         (function(e){\
+           (async function(){\
+             let e='L', t=await Promise.resolve(e+'2');\
+             var e2='V', t2=await Promise.resolve(e2+'3');\
+             out=t+'|'+t2;\
+           })();\
+         })({id:'m'});",
+    )
+    .expect("setup");
+    e.run_microtasks().expect("microtasks");
+    let out = e.eval("out").map(|v| e.describe(v)).unwrap();
+    assert_eq!(out, "L2|V3");
+}
+
+/// `for (const e=X, t=await f(e);…)` — les déclarateurs migrent
+/// avant la boucle en ordre ; le corps voit `e` initialisé.
+#[test]
+fn c286_for_init_suspend_declarator() {
+    let mut e = Engine::new();
+    e.eval(
+        "var out='?';\
+         (function(e){\
+           (async function(){\
+             let acc='';\
+             for (const e='F', t=await Promise.resolve(e+'!'); acc.length<5;) { acc+=t; }\
+             out=acc;\
+           })();\
+         })({id:'m'});",
+    )
+    .expect("setup");
+    e.run_microtasks().expect("microtasks");
+    let out = e.eval("out").map(|v| e.describe(v)).unwrap();
+    assert_eq!(out, "F!F!F!");
+}
