@@ -518,7 +518,13 @@ async fn amain() {
     // `error` ; le daemon est un hôte de diagnostic, les
     // refus d'embarquement/sous-ressources doivent sortir).
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
-    tracing_subscriber::fmt().with_env_filter(filter).init();
+    // stderr non bufferisé (comme explorer-cli) : stdout sous
+    // redirection Windows est block-bufferisé — les journaux de
+    // vol restaient à 0 octet jusqu'à la mort du daemon.
+    tracing_subscriber::fmt()
+        .with_env_filter(filter)
+        .with_writer(std::io::stderr)
+        .init();
     let mut cfg = DaemonConfig::from_env();
     let cli = parse_args();
     if let Some(p) = cli.port {

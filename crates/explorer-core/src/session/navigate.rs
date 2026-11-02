@@ -1357,6 +1357,14 @@ impl Session {
     /// lentes cumulent vers la borne.
     pub(crate) fn charge_auto_nav_ms(&mut self, tab: TabId, ms: u64) {
         if let Some(e) = self.tabs.get_mut(&tab) {
+            // Fenêtre posée à la première charge : sinon le
+            // temps déjà dépensé dans la nav initiale
+            // (navigate → drains internes) serait effacé au
+            // premier check budget — c'est précisément là
+            // que la boucle fifa se loge.
+            if e.auto_nav_since.is_none() {
+                e.auto_nav_since = Some(std::time::Instant::now());
+            }
             e.auto_nav_busy_ms = e.auto_nav_busy_ms.saturating_add(ms);
         }
     }
