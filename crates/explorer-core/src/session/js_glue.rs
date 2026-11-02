@@ -576,6 +576,19 @@ impl Session {
             (jobs, mutated)
         };
         let (jobs, mutated) = phase;
+        // JS-C293 : « productive » = vrai travail DOM —
+        // les intervalles légitimes (YouTube arme deux
+        // `setInterval` 25 ms) produisent des jobs à
+        // chaque pompe sans mutation ; les compter
+        // armait le disjoncteur sur une page saine.
+        // Synchro masquée par `sync_floor` → comptée
+        // (conservateur : le streak ne peut qu'être
+        // raccourci par un drain prouvé propre).
+        let productive = jobs > 0
+            && match &mutated {
+                Some(apply::ApplySync::Journal(j)) => !j.ops.is_empty(),
+                Some(apply::ApplySync::Keyed(_)) | None => true,
+            };
         let mut t = sync_phase(tab, "commit.deliver", t0);
         if let Some(s) = mutated {
             let ta = Instant::now();
@@ -620,7 +633,7 @@ impl Session {
         // pompes productives bornée : au-delà de 64,
         // disjoncteur armé + warn — la page tombe en
         // « moteur figé » nommé plutôt que starvation.
-        if jobs > 0 {
+        if productive {
             let streak = self.pump_streaks.entry(tab).or_insert(0);
             *streak += 1;
             if *streak == 64 {

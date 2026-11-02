@@ -5915,6 +5915,29 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   Verrou
   `c292_remove_cle_orpheline_tolerada`.
 
+- [x] **JS-C293. Drain propre du
+  journal = journal vide, pas
+  `None`** (`explorer-js` +
+  `explorer-core`, mur youtube.com
+  — suite JS-C292) — `None`
+  confondait « rien de neuf » et
+  « non rejouable » →
+  `sync_dom_keyed(force)` =
+  sérialisation complète du miroir
+  (~100 ms) **par pompe** : les 2
+  `setInterval` 25 ms de YouTube
+  la faisaient tourner en continu
+  → API affamée + streak B-41 sur
+  page saine. `Cmd::DomJournal`
+  rend `Some{ops:[], fingerprint}`
+  sur drain propre ;
+  `apply_journal` saute le
+  relayout à `ops` vide (empreinte
+  toujours arbitre) ; le streak ne
+  compte que les vraies ops DOM.
+  Verrou
+  `c293_journal_vide_empreinte_arbitre`.
+
 - [x] **Étape CMP-4. Réarmement
   des balises « bloquées par CMP »**
   (`explorer-core`, §B-4 bras CMP

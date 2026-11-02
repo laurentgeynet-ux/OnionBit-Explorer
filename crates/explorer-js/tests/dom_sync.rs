@@ -114,8 +114,12 @@ fn journal_drains_without_observer() {
         "SetText attendu : {:?}",
         j.ops
     );
-    // Journal drainé → le drain suivant est vide → voie keyed.
-    assert!(eng.drain_dom_mutations().is_none());
+    // Journal drainé → le drain suivant est propre → journal
+    // vide (JS-C293 : `None` = repli keyed, pas « rien de neuf »).
+    let j = eng
+        .drain_dom_mutations()
+        .expect("drain propre → journal vide");
+    assert!(j.ops.is_empty(), "aucune op : {:?}", j.ops);
 }
 
 /// Forme des ops : `appendChild` → `Insert` portant le sous-arbre
@@ -204,8 +208,11 @@ fn keyed_baseline_supersedes_journal() {
     let k = eng.sync_dom_keyed().expect("keyed");
     assert!(!k.ids.is_empty(), "ids pré-ordre livrés");
     assert!(k.html.contains(">b<"), "html à jour : {}", k.html);
-    // Le journal antérieur est subsumé — drain suivant vide.
-    assert!(eng.drain_dom_mutations().is_none());
+    // Le journal antérieur est subsumé — drain suivant propre.
+    let j = eng
+        .drain_dom_mutations()
+        .expect("drain propre → journal vide");
+    assert!(j.ops.is_empty(), "aucune op : {:?}", j.ops);
 }
 
 /// Hors pilote : insertion sous `<table>` (foster parenting)

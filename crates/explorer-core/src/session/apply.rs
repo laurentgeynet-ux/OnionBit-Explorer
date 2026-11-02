@@ -1614,7 +1614,10 @@ fn apply_journal(
     if old_title != new_title.as_deref() {
         out.title = Some(new_title);
     }
-    if job.relayout {
+    // JS-C293 — journal vide (drain propre) : l'empreinte
+    // ci-dessus reste l'arbitre, mais rien n'a bougé → pas de
+    // relayout (un relayout complet par pompe sinon).
+    if job.relayout && !journal.ops.is_empty() {
         journal_relayout(p, ctx, job, &touched, &mut out)?;
     } else {
         // §B-17 — même trou que la voie re-parse : les
@@ -3391,5 +3394,73 @@ mod reloc_tests {
         let op = explorer_js::DomMutation::Remove { key: 1 };
         assert!(apply_journal_op(&mut p, &ctx, &op, &mut touched).is_ok());
         assert!(p.keymap.is_empty());
+    }
+
+    fn c293_ctx() -> super::ApplyCtx {
+        use super::{ApplyCtx, SharedFonts};
+        use explorer_layout::font::{FontRequest, FontSource};
+        use std::sync::{Arc, Mutex};
+        struct NoFont;
+        impl FontSource for NoFont {
+            fn font_data(&self, _req: &FontRequest) -> Option<Vec<u8>> {
+                None
+            }
+        }
+        ApplyCtx {
+            fonts: SharedFonts(Arc::new(Mutex::new(explorer_render::WebFontSource::new(
+                Arc::new(NoFont),
+                4,
+            )))),
+            viewport: (800.0, 600.0),
+            scale: 1.0,
+            image_max_px: 0,
+            image_max_bytes: 0,
+            color_scheme: explorer_css::ColorScheme::Light,
+            dom_journal_max_ops: 1000,
+            scripting: false,
+        }
+    }
+
+    /// JS-C293 — journal vide (drain propre) : l'empreinte reste
+    /// l'arbitre — match → apply réussit sans relayout ; mismatch
+    /// → `Fingerprint` (repli re-parse).
+    #[test]
+    fn c293_journal_vide_empreinte_arbitre() {
+        use crate::session::apply::PaintPayload;
+        let dom = TreeBuilder::parse_scripting("<html><body><p>x</p></body></html>", false);
+        let mut p = PaintPayload {
+            dom: Some(dom),
+            ..PaintPayload::default()
+        };
+        let e = super::engine_preorder(p.dom.as_ref().unwrap());
+        for (i, id) in e.iter().enumerate() {
+            p.keymap.insert(i as u64 + 1, *id);
+        }
+        let ctx = c293_ctx();
+        let job = super::PendingApply {
+            tab: 0,
+            epoch: 0,
+            html: String::new(),
+            dirty: None,
+            canvas_ops: super::CanvasOpsTable::new(),
+            relayout: true,
+            journal: None,
+            ids: Vec::new(),
+            tags: Vec::new(),
+        };
+        let fp = super::engine_fingerprint(p.dom.as_ref().unwrap(), &p.keymap);
+        let j = explorer_js::DomJournal {
+            ops: Vec::new(),
+            fingerprint: fp,
+        };
+        assert!(super::apply_journal(&mut p, &ctx, &job, &j, None, 100).is_ok());
+        let j = explorer_js::DomJournal {
+            ops: Vec::new(),
+            fingerprint: fp ^ 1,
+        };
+        assert!(matches!(
+            super::apply_journal(&mut p, &ctx, &job, &j, None, 100),
+            Err(super::JournalReject::Fingerprint)
+        ));
     }
 }

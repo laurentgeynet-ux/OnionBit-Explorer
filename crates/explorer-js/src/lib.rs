@@ -1086,12 +1086,13 @@ pub trait JsEngine: Send {
     /// Draine le **journal de mutations** depuis la dernière
     /// baseline (ADR-0025, étape 111) : `Some(journal)` = ops
     /// rejouables directement sur `explorer-dom` (`NodeId`
-    /// stables — plus de re-parse), `None` = « synchro par
-    /// sérialisation » (rien de neuf **ou** journal non
+    /// stables — plus de re-parse ; journal **vide** = drain
+    /// propre, l'empreinte embarquée sert d'arbitre),
+    /// `None` = « synchro par sérialisation » (journal non
     /// rejouable : mutations hors pilote, seuil dépassé… —
-    /// l'appelant enchaîne alors [`Self::sync_dom_keyed`]
-    /// sans distinction). Consomme le bit sale comme
-    /// `sync_dom_path`. Défaut : `None` (moteur sans journal).
+    /// l'appelant enchaîne alors [`Self::sync_dom_keyed`]).
+    /// Consomme le bit sale comme `sync_dom_path`. Défaut :
+    /// `None` (moteur sans journal).
     fn drain_dom_mutations(&mut self) -> Option<DomJournal> {
         None
     }
@@ -2311,11 +2312,12 @@ impl JscoreEngine {
                         let _ = tx.send(out);
                     }
                     // ADR-0025 : drain du journal — `None` = « voie
-                    // sérialisation » (journal vide **ou** classé
-                    // non rejouable ; `dirty` n'est alors PAS
+                    // sérialisation » (journal classé non
+                    // rejouable ; `dirty` n'est alors PAS
                     // consommé → l'appelant enchaîne
                     // `DomSyncKeyed`, la sérialisation complète
-                    // subsume toutes les mutations).
+                    // subsume toutes les mutations). Un drain
+                    // propre rend `Some` à `ops` vides.
                     Cmd::DomJournal { tx } => {
                         let out = jsd.as_ref().and_then(|d| {
                             let mut d = d.borrow_mut();
@@ -2327,7 +2329,21 @@ impl JscoreEngine {
                                 // (l'attachement journalisera).
                                 d.take_dirty();
                                 d.take_dirty_path();
-                                return None;
+                                // JS-C293 — drain propre : un
+                                // journal **vide** embarquant
+                                // l'empreinte au lieu de `None`.
+                                // `None` déclenchait le repli
+                                // `sync_dom_keyed` (sérialisation
+                                // complète du miroir, ~100 ms sur
+                                // youtube.com) à chaque pompe sans
+                                // mutation — les intervalles 25 ms
+                                // de la page faisaient tourner la
+                                // sérialisation en continu (API
+                                // affamée, faux streak B-41).
+                                return Some(DomJournal {
+                                    ops: Vec::new(),
+                                    fingerprint: d.structural_fingerprint(),
+                                });
                             }
                             let n = ops.len() as u64;
                             match journal_ops_to_seam(&d, ops) {
