@@ -199,6 +199,17 @@ absolu — une copie se diverge, le canon non. L'ancien
 `df8888eb` ; la migration préserve l'historique dans le git
 local du corpus).
 
+**Règle artefacts — le repo reste propre** : aucun artefact de
+vol n'atterrit dans l'arbre du projet — dumps `_nav_*.json`,
+scripts `_probe*.py`, logs `vol*-watch.log`/`watch-*.log`,
+fixtures téléchargées (`*.js` de site réel), profils froids,
+captures : tout part dans `C:\OnionBit-vol\` (ou `%TEMP%` pour
+le jetable). `git status` du repo ne doit montrer que du WIP
+code — un `??` non-code = artefact mal garé. Dans le corpus,
+les caches de profils froids (`prof*/cache/`) sont exclus du
+versionning (régénérables, pas de la preuve) — le reste se
+commit régulièrement pour garder l'historique.
+
 - Chaque constat du rapport porte `crate` + l'**ID §B** s'il
   correspond à une anomalie catalogue (`→ §B-5`) ; un trou
   nouveau = proposition d'entrée §B au numéro suivant.
