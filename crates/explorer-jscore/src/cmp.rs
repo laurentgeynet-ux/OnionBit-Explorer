@@ -174,6 +174,10 @@ fn install_cmp_siblings(e: &mut Engine, g: ObjId) {
     e.add_method(notice, "show", cmp_noop);
     e.add_method(notice, "hide", cmp_noop);
     e.add_method(notice, "toggle", cmp_noop);
+    // `isVisible` lu par les gates (wamiz vol 504 —
+    // `isVisible is not a function` tuait un bundle) :
+    // consentement décidé → notice jamais affichée → false.
+    e.add_method(notice, "isVisible", didomi_not_required);
     e.set_own(d, "notice", Value::Obj(notice), true);
     absorb_prop(e, g, "Didomi", Value::Obj(d));
     // `didomiState` — présence lue par certains gates.

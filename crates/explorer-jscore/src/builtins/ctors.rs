@@ -15,7 +15,14 @@ use super::*;
 pub(crate) fn object_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     match arg(args, 0) {
         v @ Value::Obj(_) => Ok(v),
-        _ => Ok(Value::Obj(e.new_object())),
+        // `Object()`/`Object(undefined)`/`Object(null)` → objet
+        // ordinaire vide (spec `Object` function, §19.1.1.1).
+        Value::Undefined | Value::Null => Ok(Value::Obj(e.new_object())),
+        // §B-72 bras 2 (fifa davinci vol 504) : `Object(t)` sur
+        // primitive = `ToObject` → wrapper du bon proto —
+        // `Object('NA').constructor === String`, attendu par les
+        // `assert`s proto2 des bundles Closure/libphonenumber.
+        v => Ok(e.box_primitive(v)),
     }
 }
 

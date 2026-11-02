@@ -233,6 +233,16 @@ fn didomi_onready_absorbs_and_drains() {
     assert_eq!(ev(&mut e, "hit"), "4");
 }
 
+/// `Didomi.notice.isVisible` — surface lue par les bundles
+/// (wamiz vol 504 : `isVisible is not a function` tuait un
+/// script site) ; consentement décidé → `false`.
+#[test]
+fn didomi_notice_is_visible_bounded() {
+    let mut e = engine_policy(CmpPolicy::RejectAll);
+    assert_eq!(ev(&mut e, "Didomi.notice.isVisible()"), "false");
+    assert_eq!(ev(&mut e, "typeof Didomi.notice.isVisible"), "function");
+}
+
 /// `OptanonWrapper` — le setter appelle le callback ET le
 /// mémorise : le getter le rend ensuite au SDK.
 #[test]

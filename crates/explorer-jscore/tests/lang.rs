@@ -8695,3 +8695,22 @@ fn regex_literal_after_of_in_for_of() {
         "7"
     );
 }
+
+/// §B-72 fifa davinci vol 504 — `Object(primitive)` applique
+/// `ToObject` : le wrapper porte le proto de la primitive, donc
+/// `.constructor` est le natif attendu par les `assert`s proto2
+/// de Closure (`Object(t).constructor == e.getNativeType()`).
+/// Avant : objet ordinaire → `AssertionError` tuait le boot.
+#[test]
+fn object_call_boxes_primitive() {
+    assert_eq!(ev_str("Object('NA').constructor === String"), "true");
+    assert_eq!(ev_str("Object(5).constructor === Number"), "true");
+    assert_eq!(ev_str("Object(true).constructor === Boolean"), "true");
+    assert_eq!(ev_str("typeof Object('x')"), "object");
+    // `Object()` / `Object(null|undefined)` → objet ordinaire.
+    assert_eq!(ev_str("Object().constructor === Object"), "true");
+    assert_eq!(ev_str("Object(null).constructor === Object"), "true");
+    assert_eq!(ev_str("Object(undefined).constructor === Object"), "true");
+    // `Object(obj)` rend l'objet tel quel (identité).
+    assert_eq!(ev_str("var o={};Object(o)===o"), "true");
+}

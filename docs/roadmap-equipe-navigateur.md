@@ -5355,6 +5355,39 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   (§B-70) et fifa (§B-71) sur
   binaire frais.
 
+- [x] **JS-C262 + JS-C263.
+  `Didomi.notice.isVisible` +
+  `Object(primitive)` = `ToObject`**
+  (`explorer-jscore`, §B-70
+  résiduel + §B-72 bras 1 —
+  vol 504) — wamiz : le vrai SDK
+  Didomi vivant lisait
+  `notice.isVisible()` absent →
+  `isVisible is not a function` ;
+  méthode bornée → `false`. fifa :
+  `Object('NA').constructor`
+  rendait `Object` (objet
+  ordinaire) au lieu de `String` —
+  `checkFieldType_` proto2
+  (Closure/libphonenumber)
+  assertait → `AssertionError` →
+  boot PingOne mort → reload en
+  boucle. `object_ctor` délègue à
+  `box_primitive` : le bundle
+  davinci brut 5,96 Mo évalue à
+  terme in-process (verrou
+  b72_probe, ~41 s). Diag :
+  `` `x` is not a function ``
+  nomme `[got …]` + les propres
+  valeurs du receveur (`fn@pos`).
+  Reste : §B-72 bras 2 (Akamai —
+  receveur `W` = table VM locale,
+  clé calculée non littérale) +
+  bras 3 (driver du reload —
+  absent des bundles standalone,
+  vivrait dans OtAutoBlock/
+  otSDKStub).
+
 - [x] **Étape CMP-4. Réarmement
   des balises « bloquées par CMP »**
   (`explorer-core`, §B-4 bras CMP

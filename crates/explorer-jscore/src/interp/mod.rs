@@ -2935,6 +2935,24 @@ impl Engine {
             .unwrap_or_else(|_| "<exception>".into())
     }
 
+    /// Rendu diag d'une valeur pour les messages d'erreur :
+    /// les fonctions script nomment leur position
+    /// (`fn@ligne:col` — §B-72 : identifier les handlers des
+    /// tables VM obfusquées sans patcher la source), le reste
+    /// délègue à `describe`.
+    pub(crate) fn describe_diag(&mut self, v: Value) -> String {
+        if let Value::Obj(id) = v {
+            if let Some(Object {
+                kind: ObjKind::Fun(Fun::Script { lit, .. }),
+                ..
+            }) = self.heap.obj(id)
+            {
+                return format!("fn@{}:{}", lit.pos.0, lit.pos.1);
+            }
+        }
+        self.describe(v)
+    }
+
     pub(crate) fn heap_string_of(&self, v: Value) -> Option<String> {
         match v {
             Value::Str(id) => self.heap.string(id),

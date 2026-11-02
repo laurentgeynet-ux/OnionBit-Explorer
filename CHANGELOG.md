@@ -7,6 +7,61 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **JS-C262 — `Didomi.notice.
+  isVisible`** (`explorer-jscore`,
+  §B-70 résiduel — wamiz vol 504)
+  — le vrai SDK Didomi vivant,
+  un bundle site lisait
+  `notice.isVisible()` que notre
+  stub ne portait pas
+  (`isVisible is not a function`
+  tuait l'éval). Méthode bornée
+  ajoutée → `false` (consentement
+  décidé → notice jamais
+  affichée). Verrou :
+  `didomi_notice_is_visible_
+  bounded` (c259).
+- **JS-C263 — `Object(primitive)`
+  applique `ToObject`**
+  (`explorer-jscore`, §B-72
+  bras 1 — fifa davinci vol 504)
+  — `Object(t)` sur primitive
+  rendait un objet ordinaire
+  vide : `Object('NA').
+  constructor === Object` au
+  lieu de `String`. Les
+  `assert`s proto2 des bundles
+  Closure/libphonenumber
+  (`checkFieldType_` compare
+  `Object(t).constructor` au
+  type natif du champ) jetaient
+  `AssertionError` — le boot
+  PingOne mourait et fifa se
+  rechargait en boucle.
+  `object_ctor` délègue
+  désormais à `box_primitive`
+  (`Object()`/`null`/`undefined`
+  → objet ordinaire inchangé) :
+  le bundle davinci brut
+  (5,96 Mo) évalue à terme
+  in-process. Diag jointe :
+  `` `x` is not a function ``
+  nomme la valeur lue
+  (`[got undefined]`) et les
+  propres valeurs du receveur
+  (`fn@ligne:col` pour les
+  fonctions script) — la
+  bissection Akamai nomme ses
+  receveurs sans patcher la
+  source. Verrous :
+  `object_call_boxes_primitive`
+  (lang) +
+  `davinci_bundle_raw_evals_
+  clean` (b72_probe, fixture
+  hors repo ~41 s) ;
+  établis de bissection bras 2
+  (Akamai `W`) et 3 (driver du
+  reload) conservés `#[ignore]`.
 - **JS-C260 — surfaces CMP en
   accesseurs absorbants**
   (`explorer-jscore`, §B-70 —

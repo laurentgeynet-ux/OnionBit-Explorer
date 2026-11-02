@@ -551,7 +551,22 @@ impl Engine {
                                                 if shown.is_empty() {
                                                     desc
                                                 } else {
-                                                    format!("Object{{{}}}", shown.join(","))
+                                                    let vals: Vec<String> = keys
+                                                        .iter()
+                                                        .take(6)
+                                                        .map(|k| {
+                                                            self.get_prop_value(recv, k)
+                                                                .map_or_else(
+                                                                    |_| "?".into(),
+                                                                    |v| self.describe_diag(v),
+                                                                )
+                                                        })
+                                                        .collect();
+                                                    format!(
+                                                        "Object{{{}}}=[{}]",
+                                                        shown.join(","),
+                                                        vals.join(",")
+                                                    )
                                                 }
                                             }
                                         } else {
@@ -562,8 +577,9 @@ impl Engine {
                                 },
                                 _ => format!("{recv:?}"),
                             };
+                            let fdesc = self.describe(f);
                             return Err(self.type_error(format!(
-                                "`{name}` is not a function (on {recv_desc})"
+                                "`{name}` is not a function (on {recv_desc}) [got {fdesc}]"
                             )));
                         }
                         self.call_value(f, recv, &args)
