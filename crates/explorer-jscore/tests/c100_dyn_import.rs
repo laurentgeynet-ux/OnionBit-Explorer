@@ -127,6 +127,34 @@ fn c101_delivered_module_deps_seeded() {
     assert_eq!(e.describe(r), "ns:42");
 }
 
+/// §B-5 rolldown/vite (mastodon/chess/archive/devdocs/
+/// huggingface ×5+) — un chunk seedé sous URL absolue gardait
+/// son spécificateur relatif comme identité : le `./dep.js`
+/// imbriqué échouait `url_parse_absolute` → `spécificateur
+/// irrésolvable`. L'identité devient la clé seedée absolue.
+#[test]
+fn nested_chunk_relative_import_resolves_absolute() {
+    let mut e = Engine::new();
+    // Graphe seedé session : chaque chunk sous son URL absolue.
+    e.seed_module_source(
+        "https://cdn.example/chunk-A.js".to_string(),
+        "import {v} from './dep-B.js'; export {v};".to_string(),
+    );
+    e.seed_module_source(
+        "https://cdn.example/dep-B.js".to_string(),
+        "export const v = 7;".to_string(),
+    );
+    // `./chunk-A.js` se résout en absolu contre le referrer
+    // puis le `./dep-B.js` imbriqué suit l'identité absolue.
+    e.eval_module(
+        "import {v} from './chunk-A.js'; globalThis.__r = 'ok:' + v;",
+        "https://cdn.example/main.js",
+    )
+    .expect("module eval");
+    let r = e.eval("globalThis.__r").expect("__r");
+    assert_eq!(e.describe(r), "ok:7");
+}
+
 /// Verrou google SERP : `import("data:…")` se résout inline,
 /// SANS réseau ni loader (le lazy-loader Closure avalait le
 /// rejet « fetch échoué » — bootstrap muet, page vide).

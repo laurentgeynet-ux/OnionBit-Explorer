@@ -7,6 +7,25 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **JS-C273 — identité module =
+  clé seedée absolue** (`explorer-
+  jscore`, §B-5 rolldown/vite
+  ×5+ porteurs — mastodon/chess/
+  archive/devdocs/huggingface,
+  `spécificateur irrésolvable`) —
+  un chunk seedé sous URL absolue
+  gardait son spécificateur
+  relatif comme identité : son
+  `./dep.js` imbriqué échouait
+  `url_parse_absolute(referrer)`
+  → dep irrésolvable. `load_source`
+  rend désormais la clé seedée
+  (absolue quand elle l'est) →
+  `referrer` aval absolu, deps
+  imbriquées résolues. Verrou
+  `nested_chunk_relative_import_
+  resolves_absolute`.
+
 - **JS-C272 — payload de rejet
   nommé dans `unhandledrejection`**
   (`explorer-jscore`, §B-14 vol

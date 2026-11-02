@@ -228,20 +228,27 @@ impl Engine {
         // absent il faut la faire ici via le parseur URL
         // interne ; `referrer` = spec résolu du module
         // important).
-        let seeded = self
-            .module_sources
-            .get(&resolved)
-            .or_else(|| self.module_sources.get(spec))
-            .cloned()
-            .or_else(|| {
-                let base = crate::builtins::url::url_parse_absolute(referrer)?;
-                let abs = crate::builtins::url::url_parse(&resolved, Some(&base))?;
-                self.module_sources
-                    .get(&crate::builtins::url::url_href(&abs))
-                    .cloned()
-            });
-        if let Some(src) = seeded {
-            return Ok((resolved.clone(), src));
+        // Identité = la **clé seedée** : quand le match se fait
+        // sur l'URL absolue, l'identité du module devient cette
+        // URL — sinon `referrer` restait un spécificateur
+        // relatif et les deps `./chunk.js` des chunks imbriqués
+        // (rolldown/vite — §B-5 mastodon/chess/archive/devdocs/
+        // huggingface ×5+) tombaient sur `url_parse_absolute`
+        // qui échoue → `spécificateur irrésolvable`.
+        let seeded_key = if self.module_sources.contains_key(&resolved) {
+            Some(resolved.clone())
+        } else if self.module_sources.contains_key(spec) {
+            Some(spec.to_string())
+        } else {
+            crate::builtins::url::url_parse_absolute(referrer)
+                .and_then(|base| crate::builtins::url::url_parse(&resolved, Some(&base)))
+                .map(|abs| crate::builtins::url::url_href(&abs))
+                .filter(|href| self.module_sources.contains_key(href))
+        };
+        if let Some(key) = seeded_key {
+            if let Some(src) = self.module_sources.get(&key) {
+                return Ok((key, src.clone()));
+            }
         }
         let Some(loader) = self.module_loader.clone() else {
             return Err(self.type_error(format!("no module loader for `{spec}`")));
