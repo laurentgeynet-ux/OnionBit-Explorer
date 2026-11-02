@@ -232,6 +232,36 @@ fn js_c284_media_buffered_union_et_sequentiel() {
     );
 }
 
+/// JS-C288 — sous MSE, `video.duration` = `MediaSource
+/// .duration` fixée par le site (spec attachement ; hls.js
+/// la pose pour la détection VOD) et `video.seekable` =
+/// `liveSeekableRange` quand fixée, sinon union `buffered`.
+#[test]
+fn js_c288_media_duration_et_seekable_sous_mse() {
+    let mut e = engine();
+    assert_eq!(
+        ev(
+            &mut e,
+            "var ms=new MediaSource();\
+             var sb=ms.addSourceBuffer('video/mp4');\
+             var v=document.getElementById('v');\
+             v.src=URL.createObjectURL(ms);\
+             var d0=v.duration;\
+             ms.duration=42.5;\
+             sb.timestampOffset=3;\
+             sb.appendBuffer(new Uint8Array(8));\
+             var s0=v.seekable.start(0)+'/'+v.seekable.end(0);\
+             ms.setLiveSeekableRange(10,99);\
+             d0+'|'+v.duration+'|'+ms.duration+'|'+s0+'|'+v.seekable.start(0)+'/'+v.seekable.end(0)"
+        ),
+        // duration : NaN avant réglage, 42.5 après —
+        // reflet exact côté ms. seekable : plage estimée
+        // [3,9) (offset 3, append nominal) tant que live
+        // range absente, [10,99) après setLiveSeekableRange.
+        "NaN|42.5|42.5|3/9|10/99"
+    );
+}
+
 /// JS-C285 — `buffered` lu dans les timestamps fMP4 en
 /// bande : `mdhd` timescale=1000 dans le `moov` de l'init ;
 /// `tfdt`+`trun` des `moof` donnent la vraie plage de

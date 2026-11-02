@@ -5770,6 +5770,22 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   Verrou `mse3_remove_evicts_only_
   covered_chunks`.
 
+- [x] **JS-C288. `video.duration`/
+  `seekable` sous MSE**
+  (`explorer-jscore`, même
+  chantier) — `duration` restait
+  `NaN`, `seekable` vide : le site
+  pose `mediaSource.duration` pour
+  la fin VOD (hls.js) et lit
+  `seekable` pour le seek.
+  `media_prop` lit la durée
+  `MediaSource` (repli du rapport
+  hôte) ; `seekable` =
+  `liveSeekableRange` sinon union
+  `buffered`. Verrou
+  `js_c288_media_duration_et_
+  seekable_sous_mse`.
+
 - [x] **Étape CMP-4. Réarmement
   des balises « bloquées par CMP »**
   (`explorer-core`, §B-4 bras CMP

@@ -5820,7 +5820,13 @@ fn media_prop(e: &mut Engine, dom: &DomRef, node: NodeId, key: &str) -> Value {
             "ended" | "seeking" | "disableRemotePlayback" => Value::Bool(false),
             "volume" | "playbackRate" | "defaultPlaybackRate" => Value::Num(1.0),
             "currentTime" | "videoWidth" | "videoHeight" | "readyState" => Value::Num(0.0),
-            "duration" => Value::Num(f64::NAN),
+            // JS-C288 — sous MSE, `duration` = la durée
+            // `MediaSource` fixée par le site (hls.js la
+            // pose pour la détection VOD). `NaN` sinon.
+            "duration" => d
+                .attr(node, "src")
+                .and_then(|u| e.mse_source_duration(u))
+                .map_or(Value::Num(f64::NAN), Value::Num),
             // `src` présent mais indécodable → NO_SOURCE ;
             // sinon EMPTY.
             "networkState" => Value::Num(if d.has_attr(node, "src") { 3.0 } else { 0.0 }),
@@ -5834,7 +5840,13 @@ fn media_prop(e: &mut Engine, dom: &DomRef, node: NodeId, key: &str) -> Value {
                 Some(r) => time_ranges(e, r),
                 None => time_ranges_empty(e),
             },
-            "played" | "seekable" => time_ranges_empty(e),
+            // JS-C288 — `seekable` sous MSE :
+            // `liveSeekableRange` ou union `buffered`.
+            "seekable" => match d.attr(node, "src").and_then(|u| e.mse_seekable(u)) {
+                Some(r) => time_ranges(e, r),
+                None => time_ranges_empty(e),
+            },
+            "played" => time_ranges_empty(e),
             // `error`, `mediaGroup`, `controller`.
             _ => Value::Null,
         };
@@ -5850,9 +5862,14 @@ fn media_prop(e: &mut Engine, dom: &DomRef, node: NodeId, key: &str) -> Value {
         "volume" => Value::Num(st.volume),
         "playbackRate" | "defaultPlaybackRate" => Value::Num(st.rate),
         "currentTime" => Value::Num(rep.map_or(0.0, |r| r.position_ms as f64 / 1000.0)),
+        // JS-C288 — le rapport hôte prime ; sous MSE
+        // (`MseSource` sans durée propre) la durée
+        // `MediaSource` fixée par le site fait foi.
         "duration" => Value::Num(
             rep.and_then(|r| r.duration_ms)
-                .map_or(f64::NAN, |d| d as f64 / 1000.0),
+                .map(|ms| ms as f64 / 1000.0)
+                .or_else(|| d.attr(node, "src").and_then(|u| e.mse_source_duration(u)))
+                .unwrap_or(f64::NAN),
         ),
         // Rapport présent = métadonnées + données reçues →
         // HAVE_ENOUGH_DATA (4) ; claimé sans rapport → rien (0).
@@ -5869,11 +5886,18 @@ fn media_prop(e: &mut Engine, dom: &DomRef, node: NodeId, key: &str) -> Value {
             e,
             rep.map_or_else(Vec::new, |r| vec![(0.0, r.position_ms as f64 / 1000.0)]),
         ),
-        "seekable" => time_ranges(
-            e,
-            rep.and_then(|r| r.duration_ms)
-                .map_or_else(Vec::new, |d| vec![(0.0, d as f64 / 1000.0)]),
-        ),
+        // JS-C288 — `seekable` : rapport hôte prioritaire,
+        // repli MSE (`liveSeekableRange` ou union `buffered`).
+        "seekable" => {
+            let spans = match rep.and_then(|r| r.duration_ms) {
+                Some(ms) => vec![(0.0, ms as f64 / 1000.0)],
+                None => d
+                    .attr(node, "src")
+                    .and_then(|u| e.mse_seekable(u))
+                    .unwrap_or_default(),
+            };
+            time_ranges(e, spans)
+        }
         "error" => match rep.filter(|r| r.state == MediaState::Error) {
             Some(r) => {
                 let msg = e.str_val(r.error.as_deref().unwrap_or("MediaError"));

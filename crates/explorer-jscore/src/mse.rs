@@ -1309,6 +1309,32 @@ impl Engine {
         }
         Some(out)
     }
+
+    /// `MediaSource.duration` sous l'object-URL `url`
+    /// (JS-C288 — `video.duration` reflète la durée
+    /// `MediaSource` fixée par le site, spec « media element
+    /// attachement »). `None` hors registre ou durée jamais
+    /// fixée (`NaN`).
+    pub(crate) fn mse_source_duration(&self, url: &str) -> Option<f64> {
+        let mid = self.mse.object_urls.get(url).copied()?;
+        let ms = ms_data(self, Value::Obj(mid))?;
+        let d = ms.borrow().duration;
+        d.is_finite().then_some(d)
+    }
+
+    /// `seekable` sous MSE (JS-C288) : `liveSeekableRange`
+    /// quand le site l'a fixée, sinon l'union `buffered`
+    /// (VOD — les plages seekables = les plages présentes).
+    /// `None` hors registre MSE.
+    pub(crate) fn mse_seekable(&mut self, url: &str) -> Option<Vec<(f64, f64)>> {
+        let mid = self.mse.object_urls.get(url).copied()?;
+        let ms = ms_data(self, Value::Obj(mid))?;
+        if let Some(r) = ms.borrow().live_range {
+            return Some(vec![r]);
+        }
+        drop(ms);
+        self.mse_buffered_union(url)
+    }
 }
 
 // ------------------------------------------------------------------
