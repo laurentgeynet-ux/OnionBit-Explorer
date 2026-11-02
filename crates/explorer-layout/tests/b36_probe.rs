@@ -203,11 +203,6 @@ fn find_td<'a>(b: &'a LayoutBox, dom: &'a Dom) -> &'a LayoutBox {
 /// posés côte à côte, jamais chevauchés.
 #[test]
 fn flex_nav_liens_texte_ne_se_chevauchent_pas() {
-    let (dom, bx) = laid(
-        "<header><nav><a>Use cases</a><a>Contact sales</a></nav></header>",
-        "nav{display:flex;gap:24px}a{padding:4px 8px}",
-    );
-    let mut xs = Vec::new();
     fn walk(b: &LayoutBox, dom: &Dom, out: &mut Vec<(f32, f32)>) {
         if b.node
             .is_some_and(|n| dom.tag_name(n).is_ok_and(|t| t == "a"))
@@ -218,6 +213,11 @@ fn flex_nav_liens_texte_ne_se_chevauchent_pas() {
             walk(c, dom, out);
         }
     }
+    let (dom, bx) = laid(
+        "<header><nav><a>Use cases</a><a>Contact sales</a></nav></header>",
+        "nav{display:flex;gap:24px}a{padding:4px 8px}",
+    );
+    let mut xs = Vec::new();
     walk(&bx, &dom, &mut xs);
     assert_eq!(xs.len(), 2, "2 liens attendus : {xs:?}");
     let (x1, w1) = xs[0];
