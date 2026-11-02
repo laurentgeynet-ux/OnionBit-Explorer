@@ -2944,6 +2944,14 @@ impl Engine {
             }
             return Err(Error::Uncaught(self.describe(v)));
         }
+        // §B-59 bras 4 : frontière de job — le loquet posé ici
+        // borne la rafale d'évals suivantes (vol 572 : l'éval
+        // fautive s'est terminée dans son propre burst, aucun
+        // tick n'a revu le seuil — la pompe a hérité du
+        // réservoir ~3,8 Go). L'éval courante rend son
+        // résultat honnête ; la suivante meurt au premier
+        // tick si le seuil est franchi.
+        self.rss_over_kill();
         r
     }
 
@@ -4011,6 +4019,31 @@ impl Engine {
             self.prof_counts.len(),
             self.missing_api_counts.len(),
         )
+    }
+
+    /// Filet RSS aux frontières hors ticks (§B-59 bras 4 —
+    /// vol 572 : la rafale `call`/`apply` d'un décodeur
+    /// obfusqué accumulait ~4,4 Go de temporaires `Vec<Value>`
+    /// natifs hors de tout compteur ; la fenêtre fatale passait
+    /// entre deux échantillons 1/256 ops — l'abort est venu en
+    /// `pump.offlock`, après la fin de l'éval fautive). Sous
+    /// `EXPLORER_JS_RSS_KILL_MB` : un `memory_stats()` par
+    /// frontière (entrée de natif, sortie de `run_program`) —
+    /// négligeable armé, zéro coût désarmé. Rend `true` et pose
+    /// le loquet quand le seuil est franchi : l'éval en cours
+    /// retourne une `RangeError` honnête ou termine, les
+    /// suivantes meurent au premier tick — la rafale cesse
+    /// avant que le réservoir ne tue la pompe.
+    fn rss_over_kill(&mut self) -> bool {
+        if self.rss_kill_mb == 0 || self.rss_kill_latched {
+            return self.rss_kill_latched;
+        }
+        if let Some(m) = memory_stats::memory_stats() {
+            if m.physical_mem / 1_048_576 > self.rss_kill_mb {
+                self.rss_kill_latched = true;
+            }
+        }
+        self.rss_kill_latched
     }
 
     /// Refuse (`RangeError`) une matérialisation de `bytes` octets
@@ -6995,6 +7028,17 @@ impl Engine {
         if self.call_depth > self.call_depth_limit {
             self.call_depth -= 1;
             return Err(self.range_error("maximum call stack exceeded"));
+        }
+        // §B-59 bras 4 : le filet couvre les rafales de natifs —
+        // la fenêtre entre deux ticks 1/256 laissait un `call`
+        // de décodeur accumuler 2 152 Mio puis tuer la pompe
+        // (vol 572, `[native-burst] call` ×13 = 3 013 MiB).
+        if self.rss_over_kill() {
+            self.call_depth -= 1;
+            return Err(self.range_error(format!(
+                "process RSS limit exceeded (> {} MiB — native reservoir bound, at native \"{name}\")",
+                self.rss_kill_mb
+            )));
         }
         // Sonde §B-59 bras 4 : sous `EXPLORER_JS_RSS_WATCH`,
         // mesure le RSS avant/après chaque natif — un span

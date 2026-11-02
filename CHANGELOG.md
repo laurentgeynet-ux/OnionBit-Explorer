@@ -47,6 +47,19 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   son `RangeError` (nomme le
   coupable survivant).
 
+- **JS-C276 — filet RSS aux
+  frontières hors ticks**
+  (`explorer-jscore`, J14 §B-59
+  bras 4 — vol 572) : rafale
+  `call`/`apply` de décodeur =
+  ~4,4 Go de temporaires natifs
+  hors compteurs ; `rss_over_kill`
+  à l'entrée `call_native` +
+  sortie `run_program` (loquet →
+  rafale bornée en `RangeError`,
+  jamais abort pompe) — désarmé =
+  zéro coût.
+
 - **JS-C274 — `el.sheet` sur
   `<style>`/`<link rel=stylesheet>`**
   (`explorer-jscore`, §B-14

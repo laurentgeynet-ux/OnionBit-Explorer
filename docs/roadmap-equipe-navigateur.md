@@ -5491,6 +5491,33 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   kill commit — le message qui
   survit nomme le coupable.
 
+- [x] **JS-C276. Filet RSS aux
+  frontières hors ticks**
+  (`explorer-jscore`, J14
+  §B-59 bras 4 — vol 572) —
+  racine nommée par
+  `[native-burst]` : la rafale
+  `call`/`apply` d'un décodeur
+  obfusqué accumulait ~4,4 Go de
+  temporaires `Vec<Value>` natifs
+  hors de tout compteur — la
+  fenêtre entre deux échantillons
+  1/256 ops laissait l'éval se
+  terminer dans le burst et la
+  pompe héritait du réservoir
+  ~3,8 Go (abort 64 Mo
+  `pump.offlock`). `rss_over_kill`
+  check à l'entrée de
+  `call_native` et en sortie de
+  `run_program` — un syscall par
+  frontière, désarmé = zéro coût ;
+  loquet posé → évals suivantes
+  mortes au premier tick, la
+  rafale cesse avant de tuer la
+  pompe. Verrou :
+  `rss_kill_latch_kills_
+  following_evals` (b59b_probe).
+
 - [x] **Étape CMP-4. Réarmement
   des balises « bloquées par CMP »**
   (`explorer-core`, §B-4 bras CMP

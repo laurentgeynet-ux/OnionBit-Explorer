@@ -177,6 +177,33 @@ fn rss_kill_soft_kills_eval() {
     assert_eq!(e.eval("1+1").ok().map(|v| e.describe(v)), Some("2".into()));
 }
 
+/// Verrou §B-59 bras 4 vol 572 — le loquet : après un premier
+/// kill RSS, toute éval suivante meurt immédiatement même si
+/// le seuil reste armé (la rafale hostile ne re-ratchette pas
+/// jusqu'au garde externe). Et le filet couvre les frontières
+/// hors ticks : `run_program` pose le loquet en sortie,
+/// `call_native` le teste à l'entrée de chaque natif.
+#[test]
+fn rss_kill_latch_kills_following_evals() {
+    let mut e = Engine::new();
+    e.set_rss_kill_mb(1);
+    // Premier kill — le loquet s'arme.
+    assert!(e.eval("var i=0;while(i<1e6){i++}i;").is_err());
+    // Éval triviale suivante : morte au premier tick — la
+    // rafale cesse au lieu de retenter à l'infini.
+    match e.eval("1+1") {
+        Err(err) => {
+            let msg = format!("{err}");
+            assert!(
+                msg.contains("RSS limit exceeded") || msg.contains("latched"),
+                "kill latché attendu, obtenu : {msg}"
+            );
+        }
+        Ok(_) => panic!("l'éval suivante aurait dû être tuée par le loquet"),
+    }
+    e.set_rss_kill_mb(0);
+}
+
 /// Verrou §B-59 bras 4 nommé — `f.apply(null, énormeTableau)` :
 /// le clone `Vec<Value>` des args est natif hors compteur
 /// (terrain : `[native-burst] apply` ×26, 36-133 Mio/burst,
