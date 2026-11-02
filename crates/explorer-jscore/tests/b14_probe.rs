@@ -2082,6 +2082,41 @@ fn dyn_iframe_content_window_lazy_blank_ctx() {
     );
 }
 
+/// §B-14 letterboxd (vol 566) — `el.sheet` : `<style>`/
+/// `<link rel=stylesheet>` exposent leur `CSSStyleSheet`
+/// (`ownerNode`, `cssRules`, `href`) — le patron
+/// `link.sheet.cssRules` des frameworks tombait `of
+/// Undefined`.
+#[test]
+fn element_sheet_exposes_stylesheet() {
+    let mut e = engine();
+    assert_eq!(
+        ev(
+            &mut e,
+            "var s=document.createElement('style');document.body.appendChild(s);\
+             (s.sheet!==undefined)+'|'+(s.sheet.ownerNode===s)+'|'\
+             +(s.sheet.cssRules.length)+'|'+(typeof s.sheet.cssRules==='object')"
+        ),
+        "true|true|0|true"
+    );
+    // `<link>` : `rel=stylesheet` requis ; `href` propagé.
+    assert_eq!(
+        ev(
+            &mut e,
+            "var l=document.createElement('link');l.rel='stylesheet';l.href='x.css';\
+             (l.sheet!==undefined)+'|'+(l.sheet.ownerNode===l)+'|'+(l.sheet.href)"
+        ),
+        "true|true|x.css"
+    );
+    assert_eq!(
+        ev(
+            &mut e,
+            "var l2=document.createElement('link');l2.sheet===undefined"
+        ),
+        "true"
+    );
+}
+
 /// §B-14 bras bbva (vol 429) — `parseHTMLUnsafe` feature-détecté
 /// par les frameworks modernes (static `Document` + méthode
 /// `Element`) : fragment retourné, rien d'inséré, scripts

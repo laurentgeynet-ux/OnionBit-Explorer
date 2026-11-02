@@ -6155,6 +6155,36 @@ impl Host for NodeHost {
                 return Ok(None);
             }
         }
+        // `<style>`/`<link rel=stylesheet>` — `el.sheet` :
+        // la `CSSStyleSheet` de l'élément (spec — le patron
+        // `link.sheet.cssRules` des frameworks, §B-14 letterboxd
+        // vol 566). Même rail que `document.styleSheets` :
+        // `css_sheet_ctor` + `ownerNode` + `href` si présent.
+        if key == "sheet" {
+            let (tag, rel_ok, href) = {
+                let d = self.dom.borrow();
+                (
+                    d.nodes[node as usize].tag.clone(),
+                    d.attr(node, "rel").is_some_and(|r| {
+                        r.split_whitespace()
+                            .any(|x| x.eq_ignore_ascii_case("stylesheet"))
+                    }),
+                    d.attr(node, "href").map(str::to_owned),
+                )
+            };
+            if tag == "style" || (tag == "link" && rel_ok) {
+                let v = crate::misc_apis::css_sheet_ctor(e, Value::Undefined, &[])?;
+                if let Value::Obj(o) = v {
+                    let own = node_value(e, &self.dom, &self.cache, node);
+                    e.set_own(o, "ownerNode", own, true);
+                    if let Some(h) = href {
+                        let hv = e.str_val(h);
+                        e.set_own(o, "href", hv, true);
+                    }
+                }
+                return Ok(Some(v));
+            }
+        }
         // `<a>`/`<area>` : décomposition d'URL sur l'attribut
         // `href` (JS-C87) — le patron « parse via ancre » de
         // toutes les libs (`c.href=u; c.pathname` — gtag en meurt

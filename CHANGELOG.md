@@ -7,6 +7,23 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **JS-C274 — `el.sheet` sur
+  `<style>`/`<link rel=stylesheet>`**
+  (`explorer-jscore`, §B-14
+  letterboxd vol 566 — `cssRules
+  of Undefined`) — la
+  `CSSStyleSheet` de l'élément
+  n'existait pas : le patron
+  `link.sheet.cssRules` tombait
+  `of Undefined`. Même rail que
+  `document.styleSheets` :
+  `css_sheet_ctor` + `ownerNode`
+  + `href` propagé ; `<link>`
+  exige `rel=stylesheet`, sinon
+  `undefined` spec. Verrou
+  `element_sheet_exposes_
+  stylesheet`.
+
 - **JS-C273 — identité module =
   clé seedée absolue** (`explorer-
   jscore`, §B-5 rolldown/vite
