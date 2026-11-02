@@ -654,6 +654,7 @@ async fn amain() {
         let s = session.clone();
         tokio::spawn(async move {
             loop {
+                let cycle_start = std::time::Instant::now();
                 let (wait, tabs) = {
                     let mut sess = s.lock().await;
                     tokio::task::yield_now().await;
@@ -688,7 +689,18 @@ async fn amain() {
                 for tab in tabs {
                     Box::pin(explorer_core::drain_navs_shared(&s, tab)).await;
                 }
-                tokio::time::sleep(wait).await;
+                // Plancher de sieste proportionnel au cycle
+                // écoulé (JS-C293, mur YouTube) : deux
+                // `setInterval` 25 ms dont chaque callback
+                // coûte ~50 ms d'interpréteur sont échus en
+                // continu → boucle chaude, moteur ~100 %
+                // occupé, évals et livrées affamées. Un
+                // cycle lourd impose un repos équivalent
+                // (duty ≤ ~50 % — les navigateurs sautent
+                // aussi les ticks en retard) ; un cycle
+                // léger garde la cadence `deadline`-driven.
+                let elapsed = cycle_start.elapsed();
+                tokio::time::sleep(wait.max(elapsed.min(NET_PUMP_MS * 4))).await;
             }
         });
     }
