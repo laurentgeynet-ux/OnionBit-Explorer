@@ -2047,6 +2047,41 @@ fn xml_serializer_accepts_foreign_document_nodes() {
     );
 }
 
+/// §B-14 famille `console of Null`/`document of Null`
+/// (vnexpress & récurrent ×22) — un `<iframe>` inséré par
+/// script expose `contentWindow`/`contentDocument` **dès le
+/// tick d'insertion** (spec : le `Window` existe à
+/// l'insertion) — realm `about:blank` paresseux ; la session
+/// l'adopte à son prochain `context_new` (dedup
+/// `frame_node`).
+#[test]
+fn dyn_iframe_content_window_lazy_blank_ctx() {
+    let mut e = engine();
+    // Origine réelle du parent — le realm `about:blank` de
+    // l'enfant l'hérite → `contentWindow` same-origin (spec).
+    e.set_page_url("https://exemple.fr/");
+    assert_eq!(
+        ev(
+            &mut e,
+            "var f=document.createElement('iframe');document.body.appendChild(f);\
+             (f.contentWindow!==null)+'|'+(f.contentDocument!==null)+'|'\
+             +(typeof f.contentWindow.console)+'|'+(f.contentWindow.top===window)\
+             +'|'+(f.contentWindow.parent===window)"
+        ),
+        "true|true|object|true|true"
+    );
+    // `frames[0]` indexé résout le même realm paresseux.
+    assert_eq!(ev(&mut e, "window[0]===f.contentWindow"), "true");
+    // Cadre détaché → `null` spec préservé.
+    assert_eq!(
+        ev(
+            &mut e,
+            "var g=document.createElement('iframe');g.contentWindow===null"
+        ),
+        "true"
+    );
+}
+
 /// §B-14 bras bbva (vol 429) — `parseHTMLUnsafe` feature-détecté
 /// par les frameworks modernes (static `Document` + méthode
 /// `Element`) : fragment retourné, rien d'inséré, scripts

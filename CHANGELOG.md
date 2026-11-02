@@ -7,6 +7,36 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **JS-C270 — `contentWindow`
+  lazy sur iframe dynamique**
+  (`explorer-jscore`, §B-14
+  famille `console of Null`/
+  `document of Null` — vnexpress
+  ×2 vols + récurrent ×22) — un
+  `<iframe>` inséré par script
+  n'avait de contexte qu'après
+  la passe session `dyn_frame` :
+  `f.contentWindow.console` dans
+  le même tick → `of Null`
+  (Chrome : le `Window` existe
+  **à l'insertion**). Realm
+  `about:blank` paresseux créé au
+  premier accès `contentWindow`/
+  `contentDocument`/`.document`
+  (cadre attaché du miroir
+  courant ; origine héritée du
+  parent — `about:`) ; `context_
+  new` **réutilise** un realm
+  existant pour le même
+  `frame_node` → la session
+  adopte le realm paresseux et
+  y installe le vrai sous-
+  document (pas de split-brain).
+  Cadre détaché → `null` spec
+  inchangé. Verrou
+  `dyn_iframe_content_window_
+  lazy_blank_ctx`.
+
 - **R-138 — pseudo-éléments web tolérés** (`explorer-css`,
   §B-75) — `::placeholder`, `::backdrop`,
   `::-webkit-scrollbar*`, `::file-selector-button`,

@@ -1268,6 +1268,16 @@ impl Engine {
         url: &str,
         frame_node: Option<(usize, crate::dom::NodeId)>,
     ) -> u32 {
+        // Realm `about:blank` paresseux déjà posé par un accès
+        // `contentWindow` synchrone (JS-C269) — la session
+        // l'**adopte** : `install_dom_ctx` y chargera le vrai
+        // sous-document ; un second realm pour le même cadre =
+        // split-brain (`contentWindow` vs scripts réels).
+        if let Some((dp, n)) = frame_node {
+            if let Some(existing) = self.ctx_of_frame(dp, n) {
+                return existing;
+            }
+        }
         let parent = self.cur_ctx;
         let id = self.ctxs.len() as u32;
         self.ctxs.push(crate::context::CtxMeta {

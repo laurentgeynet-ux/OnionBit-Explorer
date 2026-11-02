@@ -6231,7 +6231,7 @@ impl Host for NodeHost {
         // l'élément, pas `contentDocument`).
         if key == "document" && self.dom.borrow().nodes[node as usize].tag == "iframe" {
             let dom_ptr = std::rc::Rc::as_ptr(&self.dom) as usize;
-            let Some(child) = e.ctx_of_frame(dom_ptr, node) else {
+            let Some(child) = lazy_frame_ctx(e, &self.dom, dom_ptr, node) else {
                 return Ok(Some(Value::Null));
             };
             if !e.ctx_same_origin(e.cur_ctx, child) {
@@ -6255,7 +6255,7 @@ impl Host for NodeHost {
         {
             let viewer = e.cur_ctx;
             let dom_ptr = std::rc::Rc::as_ptr(&self.dom) as usize;
-            let Some(child) = e.ctx_of_frame(dom_ptr, node) else {
+            let Some(child) = lazy_frame_ctx(e, &self.dom, dom_ptr, node) else {
                 return Ok(Some(Value::Null));
             };
             if key == "contentWindow" {
@@ -12068,6 +12068,41 @@ fn dom_exception(e: &mut Engine, name: &str, msg: &str) -> crate::heap::Thrown {
         })
         .unwrap_or(e.protos.object);
     crate::heap::Thrown(e.error_value(proto, name, msg))
+}
+
+/// Realm `about:blank` paresseux pour un `<iframe>` **attaché**
+/// du miroir courant encore sans contexte — un cadre inséré par
+/// script n'est câblé `dyn_frame` par la session qu'à la passe
+/// suivante, mais spec : son `Window` existe **à l'insertion**
+/// (§B-14 famille `console of Null`/`document of Null` —
+/// `f.contentWindow.console` d'un tracker inline vnexpress).
+/// `context_new` réutilise ce realm quand la session revient
+/// pour le même `frame_node` (dedup — pas de split-brain).
+/// `None` si le cadre est détaché ou hors du miroir courant.
+fn lazy_frame_ctx(
+    e: &mut Engine,
+    host_dom: &DomRef,
+    dom_ptr: usize,
+    node: NodeId,
+) -> Option<crate::context::CtxId> {
+    if let Some(child) = e.ctx_of_frame(dom_ptr, node) {
+        return Some(child);
+    }
+    let attached = e
+        .dom_ctx
+        .as_ref()
+        .is_some_and(|(d, _)| std::rc::Rc::ptr_eq(d, host_dom) && d.borrow().is_attached(node));
+    if !attached {
+        return None;
+    }
+    let prev = e.cur_ctx;
+    let child = e.context_new("about:blank", Some((dom_ptr, node)));
+    let blank = Rc::new(RefCell::new(Dom::from_html(
+        "<!doctype html><html><head></head><body></body></html>",
+    )));
+    e.install_dom(&blank);
+    e.switch_to(prev);
+    Some(child)
 }
 
 /// Pose le proto spec d'un événement **minté en natif** pour les
