@@ -3739,6 +3739,16 @@ impl Dom {
         if let Some(n) = self.nodes.get(parent as usize) {
             *open_tags.entry(n.tag.clone()).or_default() += 1;
         }
+        // Contexte du parse : le document (`parent` = racine
+        // `#document`) admet un premier `<html>`/`<head>`/`<body>`
+        // légitime ; tout autre parent = fragment innerHTML, analysé
+        // en mode « in body » (spec) où les tags de structure sont
+        // ignorés — sinon `el.innerHTML = "<body>…"` niche un body
+        // orphelin dans l'arbre (mur youtube.com — JS-C290).
+        let frag_ctx = self
+            .nodes
+            .get(parent as usize)
+            .is_none_or(|n| n.tag != "#document");
         macro_rules! unpush {
             ($slice:expr) => {
                 for &n in $slice {
@@ -3809,6 +3819,16 @@ impl Dom {
                 }
                 i += 1;
                 if name.is_empty() {
+                    continue;
+                }
+                // `</body>`/`</html>`/`</frameset>` : marqueurs de
+                // fin de document — le contenu qui suit se replie
+                // dans le body (mode « after body » → « in body »,
+                // spec). Ignorés : un `</body>` pair d'un `<body>`
+                // stray ignoré fermait le vrai body prématurément,
+                // et tout le contenu suivant se nichait sous
+                // `html` — divergence keymap (JS-C290).
+                if matches!(name.as_str(), "body" | "html" | "frameset") {
                     continue;
                 }
                 // Pas de correspondant ouvert → le rposition
@@ -3964,6 +3984,20 @@ impl Dom {
                         stack.push(b);
                     }
                 }
+            }
+            // HTML5 « in body » : un start-tag de structure
+            // (`html`/`head`/`body`/`frameset`) rencontré sous un
+            // body déjà ouvert — ou en parse fragment (mode
+            // « in body » par construction) — est ignoré par le
+            // tree-builder réel (attributs fusionnés, jamais
+            // d'élément niché). Le miroir le gardait en élément →
+            // `<body>` orphelin → clé miroir sans nœud moteur →
+            // `UnmappedKey`/`Fingerprint` → re-parse (`body#76`
+            // non mappé, mur youtube.com — JS-C290).
+            if matches!(tag.as_str(), "html" | "head" | "body" | "frameset")
+                && (frag_ctx || open_tags.get("body").copied().unwrap_or(0) > 0)
+            {
+                continue;
             }
             let id = self.alloc(NodeKind::Element, &tag);
             self.nodes[id as usize].attrs = attrs;

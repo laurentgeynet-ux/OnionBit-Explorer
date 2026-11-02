@@ -1080,6 +1080,7 @@ fn align_keyed(
     tags: &[String],
 ) {
     let mut j = 0usize;
+    let mut unmapped: Vec<String> = Vec::new();
     'outer: for (i, &m) in ids.iter().enumerate() {
         if let Some(hex) = tags[i].strip_prefix("#text\x00") {
             // Texte : concordance exacte du contenu à
@@ -1093,18 +1094,45 @@ fn align_keyed(
                     keymap.insert(m, *e);
                     j += 1;
                 }
+            } else {
+                unmapped.push(format!("#{i}:#text@{e:?}"));
             }
             continue;
         }
+        let mut hit = false;
         while j < engine.len() {
             let e = engine[j];
             j += 1;
             if engine_tag_matches(dom, e, &tags[i]) {
                 keymap.insert(m, e);
-                continue 'outer;
+                hit = true;
+                break;
             }
         }
+        if hit {
+            continue 'outer;
+        }
+        unmapped.push(format!("#{i}:{}(key={m})", tags[i]));
+        // Fenêtre miroir autour du premier non-mappé —
+        // localise le sous-arbre divergent (diagnostic JS-C289).
+        let lo = i.saturating_sub(6);
+        let hi = (i + 4).min(tags.len());
+        tracing::warn!(
+            window = %tags[lo..hi].join(","),
+            "fenêtre miroir autour de la clé non mappée"
+        );
         break; // plus de moteur : le reste reste non mappé
+    }
+    // Diagnostic JS-C289 — les clés miroir restées sans
+    // correspondant (curseur épuisé ou tag introuvable)
+    // deviennent `UnmappedKey` au rejeu : les nommer évite
+    // de deviner la divergence (borne : 8 premières).
+    if !unmapped.is_empty() {
+        tracing::warn!(
+            unmapped = %unmapped.iter().take(8).cloned().collect::<Vec<_>>().join(","),
+            engine_n = engine.len(),
+            "keymap : clés miroir sans correspondant"
+        );
     }
 }
 
@@ -1186,6 +1214,121 @@ fn key_node(p: &PaintPayload, key: u64) -> Result<explorer_dom::NodeId, JournalR
         .get(&key)
         .copied()
         .ok_or(JournalReject::UnmappedKey)
+}
+
+/// Résumé borné d'une op de journal — le `html` d'un
+/// `Insert` peut peser des Ko : on logue nature + clés +
+/// tailles, jamais le contenu (diagnostic JS-C289).
+fn journal_op_desc(op: &explorer_js::DomMutation) -> String {
+    use explorer_js::DomMutation::{AttachShadow, Insert, Remove, SetAttr, SetText};
+    match op {
+        Remove { key } => format!("Remove(key={key})"),
+        SetAttr { key, name, value } => {
+            format!(
+                "SetAttr(key={key},{name}={:?})",
+                value.as_deref().unwrap_or("<none>")
+            )
+        }
+        SetText { key, text } => {
+            format!(
+                "SetText(key={key},len={},«{}»)",
+                text.len(),
+                &text[..text.len().min(24)]
+            )
+        }
+        AttachShadow { host, root, open } => {
+            format!("AttachShadow(host={host},root={root},open={open})")
+        }
+        Insert {
+            parent,
+            index,
+            html,
+            ids,
+            tags,
+        } => format!(
+            "Insert(parent={parent},index={index},html={}o,ids={},tags={},head=«{}»)",
+            html.len(),
+            ids.len(),
+            tags.len(),
+            &html[..html.len().min(64)]
+        ),
+    }
+}
+
+/// Rejoue **une** op de journal sur le DOM commis — extrait
+/// de la boucle pour nommer l'op fautive au rejet
+/// (diagnostic JS-C289). Alimente `touched` des cibles
+/// réelles (relayout incrémental, Étape 137a).
+fn apply_journal_op(
+    p: &mut PaintPayload,
+    ctx: &ApplyCtx,
+    op: &explorer_js::DomMutation,
+    touched: &mut Vec<explorer_dom::NodeId>,
+) -> Result<(), JournalReject> {
+    match op {
+        explorer_js::DomMutation::Remove { key } => {
+            let id = key_node(p, *key)?;
+            // Purger les descendants de la table — les
+            // clés miroir meurent avec leur sous-arbre.
+            let mut gone = std::collections::HashSet::new();
+            let mut stack = vec![id];
+            let dom = p.dom.as_mut().ok_or(JournalReject::NoDom)?;
+            while let Some(n) = stack.pop() {
+                gone.insert(n);
+                stack.extend(dom.children(n).unwrap_or_default());
+                if let Ok(Some(f)) = dom.template_contents(n) {
+                    stack.extend(dom.children(f).unwrap_or_default());
+                }
+                if let Some(r) = dom.shadow_root(n, true) {
+                    stack.extend(dom.children(r).unwrap_or_default());
+                    gone.insert(r);
+                }
+            }
+            touched.push(dom.parent(id).ok().flatten().unwrap_or(id));
+            dom.remove(id).map_err(|_| JournalReject::Dom)?;
+            p.keymap.retain(|_, v| !gone.contains(v));
+        }
+        explorer_js::DomMutation::SetAttr { key, name, value } => {
+            let id = key_node(p, *key)?;
+            let dom = p.dom.as_mut().ok_or(JournalReject::NoDom)?;
+            match value {
+                Some(v) => dom.set_attribute(id, name, v),
+                None => dom.remove_attribute(id, name).map(|_| ()),
+            }
+            .map_err(|_| JournalReject::Dom)?;
+            // §B-17 — le **parent** : `+`/`~`/`:nth-*` des
+            // frères dépendent aussi de l'attribut muté
+            // (même règle que `SetText`/`Remove` ; un
+            // `[inert]` posé ici doit exclure le
+            // sous-arbre, pas seulement la boîte cible).
+            touched.push(dom.parent(id).ok().flatten().unwrap_or(id));
+        }
+        explorer_js::DomMutation::SetText { key, text } => {
+            let id = key_node(p, *key)?;
+            let dom = p.dom.as_mut().ok_or(JournalReject::NoDom)?;
+            touched.push(dom.parent(id).ok().flatten().unwrap_or(id));
+            dom.set_text(id, text).map_err(|_| JournalReject::Dom)?;
+        }
+        // Étape 137b — `attachShadow` programmatique : le
+        // fragment est créé côté `explorer-dom` et attaché à
+        // l'hôte mappé ; la clé miroir de la racine entre en
+        // `keymap` pour que les `Insert` suivants dans
+        // l'ombre résolvent (API `Dom::attach_shadow_root`
+        // PIPE livrée R-96 — consommation pure).
+        explorer_js::DomMutation::AttachShadow { host, root, open } => {
+            touched.push(journal_attach_shadow(p, *host, *root, *open)?);
+        }
+        explorer_js::DomMutation::Insert {
+            parent,
+            index,
+            html,
+            ids,
+            tags,
+        } => {
+            touched.push(journal_insert(p, ctx, *parent, *index, html, ids, tags)?);
+        }
+    }
+    Ok(())
 }
 
 /// Étape 137b — replay `attachShadow` programmatique : le
@@ -1290,69 +1433,17 @@ fn apply_journal(
     // Étape 137a — cibles réelles des ops pour le relayout
     // incrémental ciblé (le journal remplace `job.dirty`).
     let mut touched = Vec::new();
-    for op in &journal.ops {
-        match op {
-            explorer_js::DomMutation::Remove { key } => {
-                let id = key_node(p, *key)?;
-                // Purger les descendants de la table — les
-                // clés miroir meurent avec leur sous-arbre.
-                let mut gone = std::collections::HashSet::new();
-                let mut stack = vec![id];
-                let dom = p.dom.as_mut().ok_or(JournalReject::NoDom)?;
-                while let Some(n) = stack.pop() {
-                    gone.insert(n);
-                    stack.extend(dom.children(n).unwrap_or_default());
-                    if let Ok(Some(f)) = dom.template_contents(n) {
-                        stack.extend(dom.children(f).unwrap_or_default());
-                    }
-                    if let Some(r) = dom.shadow_root(n, true) {
-                        stack.extend(dom.children(r).unwrap_or_default());
-                        gone.insert(r);
-                    }
-                }
-                touched.push(dom.parent(id).ok().flatten().unwrap_or(id));
-                dom.remove(id).map_err(|_| JournalReject::Dom)?;
-                p.keymap.retain(|_, v| !gone.contains(v));
-            }
-            explorer_js::DomMutation::SetAttr { key, name, value } => {
-                let id = key_node(p, *key)?;
-                let dom = p.dom.as_mut().ok_or(JournalReject::NoDom)?;
-                match value {
-                    Some(v) => dom.set_attribute(id, name, v),
-                    None => dom.remove_attribute(id, name).map(|_| ()),
-                }
-                .map_err(|_| JournalReject::Dom)?;
-                // §B-17 — le **parent** : `+`/`~`/`:nth-*` des
-                // frères dépendent aussi de l'attribut muté
-                // (même règle que `SetText`/`Remove` ; un
-                // `[inert]` posé ici doit exclure le
-                // sous-arbre, pas seulement la boîte cible).
-                touched.push(dom.parent(id).ok().flatten().unwrap_or(id));
-            }
-            explorer_js::DomMutation::SetText { key, text } => {
-                let id = key_node(p, *key)?;
-                let dom = p.dom.as_mut().ok_or(JournalReject::NoDom)?;
-                touched.push(dom.parent(id).ok().flatten().unwrap_or(id));
-                dom.set_text(id, text).map_err(|_| JournalReject::Dom)?;
-            }
-            // Étape 137b — `attachShadow` programmatique : le
-            // fragment est créé côté `explorer-dom` et attaché à
-            // l'hôte mappé ; la clé miroir de la racine entre en
-            // `keymap` pour que les `Insert` suivants dans
-            // l'ombre résolvent (API `Dom::attach_shadow_root`
-            // PIPE livrée R-96 — consommation pure).
-            explorer_js::DomMutation::AttachShadow { host, root, open } => {
-                touched.push(journal_attach_shadow(p, *host, *root, *open)?);
-            }
-            explorer_js::DomMutation::Insert {
-                parent,
-                index,
-                html,
-                ids,
-                tags,
-            } => {
-                touched.push(journal_insert(p, ctx, *parent, *index, html, ids, tags)?);
-            }
+    for (op_i, op) in journal.ops.iter().enumerate() {
+        if let Err(e) = apply_journal_op(p, ctx, op, &mut touched) {
+            // Diagnostic JS-C289 — nomme l'op et la clé
+            // fautive (le `html` d'un Insert peut peser des
+            // Ko : résumé borné).
+            tracing::warn!(
+                op_i,
+                op = %journal_op_desc(op),
+                "journal DOM : op rejetée ({e:?})"
+            );
+            return Err(e);
         }
     }
     // Garde de cohérence ADR-0025 : l'empreinte structurelle

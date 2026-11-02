@@ -5816,6 +5816,33 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   `js_c288_media_duration_et_
   seekable_sous_mse`.
 
+- [x] **JS-C290. Tags de structure
+  ignorés en contexte « in body »**
+  (`explorer-jscore`, mur
+  youtube.com — suite JS-C289) —
+  le mini-parseur miroir créait un
+  élément pour tout `<body>`/
+  `html`/`head`/`frameset` rencontré
+  dans le contenu : un `<body>`
+  stray (template/innerHTML
+  Polymer) produisait un miroir
+  avec un `body` de trop (`body#76`,
+  index #1050) sans nœud moteur →
+  `UnmappedKey` sur l'`Insert` du
+  feed → re-parse en boucle,
+  `youtubei/v1/browse` jamais émis.
+  Start-tags de structure ignorés
+  dès qu'un body est ouvert ou en
+  parse fragment (`frag_ctx`) ;
+  `</body>`/`</html>`/`</frameset>`
+  ignorés aussi (repli « after
+  body » — sinon le stray fermait
+  le vrai body). Diagnostics
+  `apply.rs` conservés :
+  `journal_op_desc`, `unmapped`
+  + fenêtre de tags. Verrous
+  `c290_stray_body_*` (3/3).
+
 - [x] **Étape CMP-4. Réarmement
   des balises « bloquées par CMP »**
   (`explorer-core`, §B-4 bras CMP

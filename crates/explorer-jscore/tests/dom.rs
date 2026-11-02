@@ -6123,6 +6123,64 @@ fn r96_fingerprint_compte_le_template_shadow() {
 // keymap moteur (UnmappedKey/Fingerprint en boucle — mur
 // youtube.com).
 
+// ===== JS-C290 — tags de structure en mode « in body » :
+// un `<body>`/`html`/`head`/`frameset` rencontré sous un body déjà
+// ouvert — ou en parse fragment (innerHTML) — est ignoré par le
+// tree-builder réel (attributs fusionnés, jamais d'élément niché).
+// Le miroir le gardait → `body` orphelin → clé miroir sans nœud
+// moteur → `UnmappedKey`/`Fingerprint` → re-parse en boucle
+// (`body#76` non mappé à l'index #1050, mur youtube.com — JS-C290).
+
+#[test]
+fn c290_stray_body_dans_contenu_ignore() {
+    for html in [
+        "<!doctype html><html><body><div><body id=x>inner</body></div></body></html>",
+        "<!doctype html><html><body><template><body id=y>inner</body></template></body></html>",
+        "<!doctype html><html><body><div><template><body id=z>inner</body></template></div></body></html>",
+    ] {
+        let d = Dom::from_html(html);
+        let (_, _, tags) = d.serialize_keyed();
+        let bodies = tags.iter().filter(|t| *t == "body").count();
+        assert_eq!(bodies, 1, "deuxième body attendu ignoré : {html} → {tags:?}");
+    }
+}
+
+#[test]
+fn c290_stray_body_close_ne_ferme_pas_le_vrai() {
+    // Le `</body>` pair d'un `<body>` stray ignoré ne doit pas
+    // fermer le vrai body — le contenu qui suit reste dans body.
+    let d = Dom::from_html(
+        "<!doctype html><html><body><div><body>inner</body></div><p id=after>tail</p></body></html>",
+    );
+    let bodies = d.by_tag(d.root, "body");
+    assert_eq!(bodies.len(), 1);
+    let body = bodies[0];
+    let p = d.by_tag(d.root, "p");
+    assert_eq!(p.len(), 1);
+    assert_eq!(
+        d.nodes[p[0] as usize].parent,
+        Some(body),
+        "<p> après </body> stray doit rester dans le vrai body"
+    );
+}
+
+#[test]
+fn c290_stray_body_dans_fragment_innerhtml() {
+    // Fragment innerHTML = contexte « in body » : tout `<body>`
+    // est ignoré, son contenu se replie dans le parent.
+    let mut d = Dom::from_html("<!doctype html><html><body><div id=t></div></body></html>");
+    let target = d.by_tag(d.root, "div")[0];
+    d.parse_fragment_into(target, "<body><span id=f>frag</span></body>");
+    assert_eq!(d.by_tag(d.root, "body").len(), 1);
+    let spans = d.by_tag(d.root, "span");
+    assert_eq!(spans.len(), 1);
+    assert_eq!(
+        d.nodes[spans[0] as usize].parent,
+        Some(target),
+        "le contenu du body stray se replie dans la cible"
+    );
+}
+
 #[test]
 fn c289_repere_dsd_ni_cle_ni_descente() {
     let dom = Dom::from_html(
