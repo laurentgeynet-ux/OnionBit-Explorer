@@ -7,6 +7,19 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **JS-C267 — `FinalizationRegistry.
+  register` spec `SameValue`** —
+  le TypeError comparaît le jeton
+  à la **valeur tenue** au lieu
+  de la **cible** : `register(t,
+  t, tok)` (légal — webpack/zone)
+  jetait `unregister token must
+  not equal held value`
+  (§B-14 kickstarter vol 527).
+  Verrou
+  `finreg_unregister_token_checked_
+  against_target`.
+
 - **JS-C266 — `xhr.responseType` +
   `currentTarget`/`srcElement` sur
   les événements XHR** (`explorer-

@@ -394,7 +394,7 @@ pub(crate) fn finreg_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult
 }
 
 /// `fr.register(target, held, unregisterToken?)` — `target` objet
-/// requis, `token !== held` (spec).
+/// requis, `token !== target` (spec `SameValue`).
 pub(crate) fn finreg_register(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let Value::Obj(id) = this else {
         return Err(e.type_error("FinalizationRegistry.register on non-registry"));
@@ -404,8 +404,14 @@ pub(crate) fn finreg_register(e: &mut Engine, this: Value, args: &[Value]) -> Js
     };
     let held = arg(args, 1);
     let token = arg(args, 2);
-    if e.strict_eq(token, held) {
-        return Err(e.type_error("unregister token must not equal held value"));
+    // Spec : TypeError quand `SameValue(target, unregisterToken)`
+    // — le jeton ne peut pas être la **cible** ; la valeur
+    // tenue peut l'être (`fr.register(t, t, other)` est légal —
+    // webpack/zone le font, §B-14 kickstarter vol 527).
+    if e.strict_eq(token, Value::Obj(tid)) {
+        return Err(
+            e.type_error("FinalizationRegistry unregisterToken must not be the same as target")
+        );
     }
     match e.heap.obj_mut(id).map(|o| &mut o.kind) {
         Some(ObjKind::FinReg { entries, .. }) => {

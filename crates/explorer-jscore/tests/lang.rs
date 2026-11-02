@@ -5434,6 +5434,21 @@ fn weakref_finreg() {
     );
 }
 
+// JS-C266 — `SameValue(target, unregisterToken)` seul jette ;
+// la valeur tenue peut être la cible (`register(t, t, tok)`
+// légal — webpack/zone, §B-14 kickstarter vol 527).
+#[test]
+fn finreg_unregister_token_checked_against_target() {
+    assert_eq!(
+        ev_str("var fr=new FinalizationRegistry(function(){});var t={};fr.register(t,t,'k');'ok'"),
+        "ok"
+    );
+    assert_eq!(
+        ev_str("var fr=new FinalizationRegistry(function(){});var t={};try{fr.register(t,'h',t);'no'}catch(e){e.name}"),
+        "TypeError"
+    );
+}
+
 // ------------------------------------------------------------------
 // JS-C14 — @@toStringTag, chaîne GeneratorFunction, JSON reviver,
 //           Error.stack, String.prototype.normalize
@@ -7791,10 +7806,7 @@ fn c24_function_to_string() {
         "function foo(a,b){return a}"
     );
     assert_eq!(ev_str("let f=(x)=>x*2;f.toString()"), "(x)=>x*2");
-    assert_eq!(
-        ev_str("function* g(a){};g.toString()"),
-        "function* g(a){}"
-    );
+    assert_eq!(ev_str("function* g(a){};g.toString()"), "function* g(a){}");
     assert_eq!(
         ev_str("async function h(){};h.toString()"),
         "async function h(){}"
