@@ -37,7 +37,7 @@ fn seq(setup: &str, check: &str) -> String {
 }
 
 /// Pilote une `async function f` : résultat/rejet capturés dans
-/// `out` après drain microtasks (même helper qu'await_thenable).
+/// `out` après drain microtasks (même helper qu'`await_thenable`).
 fn drv(src: &str) -> String {
     let mut e = Engine::new();
     let setup = format!(
@@ -189,7 +189,7 @@ fn foreign_capability_passthrough() {
 
 // ---------- erreurs spec ----------
 
-/// `constructor` non-objet → TypeError.
+/// `constructor` non-objet → `TypeError`.
 #[test]
 fn species_ctor_non_object() {
     assert_eq!(
@@ -199,7 +199,7 @@ fn species_ctor_non_object() {
     );
 }
 
-/// `@@species` non-callable → TypeError.
+/// `@@species` non-callable → `TypeError`.
 #[test]
 fn species_non_callable() {
     assert_eq!(
@@ -210,7 +210,7 @@ fn species_non_callable() {
     );
 }
 
-/// Exécuteur qui ne capture pas les fns → TypeError
+/// Exécuteur qui ne capture pas les fns → `TypeError`
 /// (`PromiseCapability` incomplète — `new C()` sans appel exec).
 #[test]
 fn capability_not_captured() {
