@@ -102,6 +102,13 @@ void main() {
     );
     await tester.pump();
     await tester.pump();
+    // `_bootstrap` lit `session.json` (vrai dart:io — non pompé
+    // par `pump()`) : céder à l'event loop réel pour que l'onglet
+    // existe avant l'événement `navigated`, sinon `_patch` no-op.
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 10)),
+    );
+    await tester.pump();
     // Navigation interne : l'événement `navigated` met à jour
     // `active.url` sans toucher `activeId`.
     events.ctrl.add(
@@ -115,6 +122,9 @@ void main() {
     await tester.pump();
     final field = tester.widget<TextField>(find.byType(TextField));
     expect(field.controller?.text, 'https://fr.wikipedia.org/wiki/Accueil');
+    // `navigated` arme le debounce de persistance (500 ms) —
+    // l'horloge fake doit le dépasser avant la fin du test.
+    await tester.pump(const Duration(milliseconds: 600));
   });
 
   testWidgets('barre de statut affiche le moteur actif', (

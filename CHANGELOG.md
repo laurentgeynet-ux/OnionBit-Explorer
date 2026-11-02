@@ -7,6 +7,37 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **Fix tests Flutter + guards
+  ref-after-dispose** (`app`) —
+  la suite `flutter test`
+  fuyait hors de sa cage :
+  `sessionStoreProvider` non
+  overridé lisait le vrai
+  `session.json` du profil et
+  reroutait `_bootstrap` en
+  chemin « restauration » (race
+  disque vs microtâches) ;
+  `SessionStore` sur dossier
+  temporaire unique par
+  container. Deux races réelles
+  réparées au passage :
+  `_persistSession` débouchait
+  `ref.read` sur provider
+  disposé (debounce 500 ms
+  survivant au `onDispose` —
+  timer désormais annulé +
+  garde `ref.mounted`), et
+  `ZoomController._load` relisait
+  `browserProvider` après un
+  `await` sans `ref.mounted`.
+  Widget test : l'event
+  `navigated` arrivait avant la
+  fin du bootstrap (I/O réel
+  hors `pump()`) → `_patch`
+  no-op ; `runAsync` + dépassement
+  du debounce 500 ms. 53/53
+  verts, `flutter analyze`
+  propre.
 - **JS-C278 — `await` adopte les
   thenables étrangers**
   (`explorer-jscore`, §B-14

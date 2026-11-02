@@ -411,6 +411,7 @@ class ZoomController extends Notifier<double> {
     if (_loaded) return;
     _loaded = true;
     _map = await ref.read(zoomStoreProvider).read();
+    if (!ref.mounted) return;
     final z = _map[_zoomOrigin(ref.read(browserProvider).active?.url)];
     if (z != null && z != state) state = z;
   }
@@ -713,6 +714,7 @@ class BrowserController extends Notifier<BrowserState> {
     _allow = DrmAllowlist(_cfg.drmDelegateHosts);
     _playerFactory = ref.read(mediaPlayerFactoryProvider);
     ref.onDispose(() => _daemonRetry?.cancel());
+    ref.onDispose(() => _sessionDebounce?.cancel());
     ref.onDispose(_releaseAllPlayers);
     // Étape 97 — `AppSettings.theme` propagé au moteur :
     // `dark`/`light` directs, `system` suit la brightness OS
@@ -891,7 +893,10 @@ class BrowserController extends Notifier<BrowserState> {
   final Map<String, double> _pendingScroll = {};
 
   /// Persiste `state.tabs`/`activeId`/`scrollY` — fire-and-forget.
+  /// Le debounce peut survivre au provider (timer 500 ms) :
+  /// `ref` est alors invalide → abandon silencieux.
   void _persistSession() {
+    if (!ref.mounted) return;
     unawaited(
       ref
           .read(sessionStoreProvider)

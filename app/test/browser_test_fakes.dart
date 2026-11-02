@@ -9,6 +9,7 @@
 library;
 
 import 'dart:async';
+import 'dart:io';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
@@ -419,6 +420,21 @@ ProviderContainer makeContainer(
       eventsClientProvider.overrideWithValue(events),
       mediaPlayerFactoryProvider.overrideWithValue(
         playerFactory ?? fakeMediaPlayerFactory,
+      ),
+      // Isolation du `session.json` réel de la machine : le
+      // store par défaut lit le profil utilisateur — un
+      // fichier présent reroutait le bootstrap en chemin
+      // « restauration » et cassait les tests par race
+      // disque (`settle` n'attend que des microtâches).
+      // Dossier unique par container → `read()` = absent,
+      // `write()` toléré sans polluer l'arbre.
+      sessionStoreProvider.overrideWithValue(
+        SessionStore(
+          File(
+            '${Directory.systemTemp.createTempSync('explorer_test_').path}'
+            '${Platform.pathSeparator}session.json',
+          ),
+        ),
       ),
     ],
   );
