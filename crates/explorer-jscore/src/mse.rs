@@ -263,6 +263,25 @@ fn fire_mse(e: &mut Engine, target: ObjId, ty: &str) -> JsResult<()> {
     Ok(())
 }
 
+/// Tire `fire_mse` en capturant la première erreur (JS-C283) :
+/// un listener qui jette ne doit **jamais** corrompre la machine
+/// à états — `updating` figé `true` gèle `blockBuffers` des
+/// players (hls.js n'appelle plus `endOfStream`, file MSE morte
+/// — vol hls b-e2e). `updateend` est toujours tiré ensuite ; la
+/// première erreur est propagée à l'appelant après nettoyage.
+fn fire_mse_guarded(
+    e: &mut Engine,
+    target: ObjId,
+    ty: &str,
+    first: &mut Option<crate::heap::Thrown>,
+) {
+    if let Err(err) = fire_mse(e, target, ty) {
+        if first.is_none() {
+            *first = Some(err);
+        }
+    }
+}
+
 // ------------------------------------------------------------------
 // Protos paresseux
 // ------------------------------------------------------------------
@@ -660,9 +679,24 @@ fn sb_append_buffer(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Val
                 }
             }
         }
+        // JS-C284 — `timestampOffset` **inchangé** entre deux
+        // appends : les timestamps vivent en bande (tfdt
+        // fMP4) — les players réels (hls.js) enchaînent les
+        // segments, la plage estimée doit donc **s'étendre**
+        // d'un segment nominal par append, sinon
+        // `media.buffered.end` plafonne et le loader d'un
+        // player re-cible un fragment déjà livré (stall
+        // observé à ~6 s). Un offset *changeant* repasse en
+        // sémantique spec (plage pilotée par `t`).
+        let sequential = sd.last_append_t == Some(t);
         sd.last_append_t = Some(t);
         let s = t.max(sd.append_start);
-        let end = (t + sd.est_span).min(sd.append_end);
+        let base = if sequential {
+            sd.est_ranges.last().map_or(s, |&(_, e)| e)
+        } else {
+            s
+        };
+        let end = (base.max(s) + sd.est_span).min(sd.append_end);
         if end > s {
             match sd.est_ranges.last_mut() {
                 Some(last) if s <= last.1 => last.1 = last.1.max(end),
@@ -675,12 +709,19 @@ fn sb_append_buffer(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Val
     };
     // Approximation documentée : les trois événements partent en
     // séquence synchrone (spec : « queue a task ») — l'ordre vu
-    // par les listeners est correct.
-    fire_mse(e, sid, "updatestart")?;
-    fire_mse(e, sid, "update")?;
+    // par les listeners est correct. JS-C282 : un listener qui
+    // jette n'interrompt plus la séquence — `updating` retombe
+    // et `updateend` part quand même, sinon `blockBuffers` d'un
+    // player réel gèle (hls.js → `endOfStream` jamais appelé).
+    let mut first_err = None;
+    fire_mse_guarded(e, sid, "updatestart", &mut first_err);
+    fire_mse_guarded(e, sid, "update", &mut first_err);
     d.borrow_mut().updating = false;
-    fire_mse(e, sid, "updateend")?;
-    Ok(Value::Undefined)
+    fire_mse_guarded(e, sid, "updateend", &mut first_err);
+    match first_err {
+        Some(err) => Err(err),
+        None => Ok(Value::Undefined),
+    }
 }
 
 /// `sb.abort()` — `updating` retombé + `abort`/`updateend`.
@@ -703,9 +744,13 @@ fn sb_abort(e: &mut Engine, this: Value, _args: &[Value]) -> JsResult<Value> {
     let Value::Obj(sid) = this else {
         return Ok(Value::Undefined);
     };
-    fire_mse(e, sid, "abort")?;
-    fire_mse(e, sid, "updateend")?;
-    Ok(Value::Undefined)
+    let mut first_err = None;
+    fire_mse_guarded(e, sid, "abort", &mut first_err);
+    fire_mse_guarded(e, sid, "updateend", &mut first_err);
+    match first_err {
+        Some(err) => Err(err),
+        None => Ok(Value::Undefined),
+    }
 }
 
 /// `sb.remove(start, end)` — accepté : `buffered` est vide, il
@@ -752,11 +797,15 @@ fn sb_remove(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let Value::Obj(sid) = this else {
         return Ok(Value::Undefined);
     };
-    fire_mse(e, sid, "updatestart")?;
-    fire_mse(e, sid, "update")?;
+    let mut first_err = None;
+    fire_mse_guarded(e, sid, "updatestart", &mut first_err);
+    fire_mse_guarded(e, sid, "update", &mut first_err);
     d.borrow_mut().updating = false;
-    fire_mse(e, sid, "updateend")?;
-    Ok(Value::Undefined)
+    fire_mse_guarded(e, sid, "updateend", &mut first_err);
+    match first_err {
+        Some(err) => Err(err),
+        None => Ok(Value::Undefined),
+    }
 }
 
 /// `sb.changeType(mime)` — mime retenu (spec : re-parse du
@@ -943,6 +992,35 @@ impl Engine {
             .filter_map(|v| sb_data(self, v))
             .map(|d| d.borrow().timestamp_offset)
             .collect()
+    }
+
+    /// Union des plages `buffered` estimées de tous les
+    /// `SourceBuffer` de la `MediaSource` sous `url` (JS-C284)
+    /// — spec : `HTMLMediaElement.buffered` = union des
+    /// buffers **actifs** attachés. Sans ça `media.buffered`
+    /// reste vide sous MSE et `bufferInfo.end` d'un player
+    /// (hls.js) gèle à 0 → re-ciblage d'un fragment déjà
+    /// livré, chargement dead-locked. `None` si `url` n'est
+    /// pas un object-URL MSE.
+    pub(crate) fn mse_buffered_union(&mut self, url: &str) -> Option<Vec<(f64, f64)>> {
+        let mid = self.mse.object_urls.get(url).copied()?;
+        let ms = ms_data(self, Value::Obj(mid))?;
+        let buffers = ms.borrow().buffers.clone();
+        let mut ranges: Vec<(f64, f64)> = Vec::new();
+        for v in buffers {
+            if let Some(d) = sb_data(self, v) {
+                ranges.extend_from_slice(&d.borrow().est_ranges);
+            }
+        }
+        ranges.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+        let mut out: Vec<(f64, f64)> = Vec::new();
+        for (s, t) in ranges {
+            match out.last_mut() {
+                Some(last) if s <= last.1 => last.1 = last.1.max(t),
+                _ => out.push((s, t)),
+            }
+        }
+        Some(out)
     }
 }
 

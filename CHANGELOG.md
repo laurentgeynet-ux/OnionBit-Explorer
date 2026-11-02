@@ -7,6 +7,12 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **JS-C282 — `Response.url`/`xhr.responseURL` absolus** (`explorer-jscore`, chantier « vidéo réelle » b-e2e — hls.js réel) — fetch et XHR répétaient la chaîne de requête brute : hls.js résout les URIs de playlists **relatives contre `Response.url`** → `out_0.m3u8` sur la base `"master.m3u8"` produisait `/master.m3u8/out_0.m3u8` → 404 en boucle, variant/audio jamais chargés. La résolution contre l'URL du contexte émetteur (`resolve_ctx_url`, repli `page_url`) s'applique à l'envoi ; `responseURL` ajouté à XHR. Verrou `response_urls_are_absolute`.
+
+- **JS-C283 — listeners MSE tolérants : machine à états complétée** (`explorer-jscore`, même chantier) — `fire_mse` propageait l'exception d'un listener via `?` : `appendBuffer`/`abort`/`remove` sortaient `updating` encore `true`, `updateend` jamais tiré → `BufferOperationQueue` hls.js verrouillée à vie, `endOfStream()` jamais appelé (`x-mse-eos:0`, ~6 s de segments puis stall). `fire_mse_guarded` capture la première erreur, garantit `updating=false` + `updateend`, puis propage. Verrou `c193_append_listener_throw_keeps_machine`.
+
+- **JS-C284 — `media.buffered` = union des `SourceBuffer`** (`explorer-jscore`, même chantier) — spec : sous MSE, `HTMLMediaElement.buffered` = union des plages des buffers actifs (`mse_buffered_union`). Sans ça `BufferHelper.isBuffered` d'hls.js lisait vide à vie → `bufferInfo.end` gelé à 0 → re-ciblage d'un fragment déjà livré, stall ~6 s. Estimation b3 affinée : `timestampOffset` **inchangé** (timestamps en bande tfdt/fMP4 — les players enchaînent) → plage étendue séquentiellement par append ; offset changeant → sémantique pilotée par `t` conservée. Verrou `js_c284_media_buffered_union_et_sequentiel`.
+
 - **JS-C280 — `then` honore
   `@@species`**
   (`explorer-jscore`, §B-14

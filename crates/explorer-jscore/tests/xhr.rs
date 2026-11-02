@@ -2082,3 +2082,44 @@ fn fetch_undefined_stringifies_not_required() {
     assert_eq!(describe(&mut e, "new Request(undefined).url"), "undefined");
     assert_eq!(describe(&mut e, "new Request(null).url"), "null");
 }
+
+/// JS-C282 — `Response.url` / `xhr.responseURL` = URL **absolue**
+/// résolue contre le document émetteur : les players s'en servent
+/// comme base pour les URI enfants — hls.js résolvait
+/// `master.m3u8/out_0.m3u8` (404) quand `url` répétait la chaîne
+/// de requête brute.
+#[test]
+fn response_urls_are_absolute() {
+    let (mut e, t) = engine();
+    e.set_page_url("http://127.0.0.1:9377/hls.html");
+    // XHR : `responseURL` résolu contre le document émetteur.
+    describe(
+        &mut e,
+        "var x = new XMLHttpRequest();\
+         var pre = x.responseURL;\
+         var ru = '';\
+         x.onload = function () { ru = x.responseURL; };\
+         x.open('GET', 'master.m3u8');\
+         x.send();",
+    );
+    // `""` avant `send` (spec — pas d'URL encore connue).
+    assert_eq!(describe(&mut e, "pre"), "");
+    // Avant livraison : résolu dès `send` (spec : sérialisé à
+    // la requête tant que la réponse n'a pas d'URL finale).
+    assert_eq!(
+        describe(&mut e, "x.responseURL"),
+        "http://127.0.0.1:9377/master.m3u8"
+    );
+    let h = t.requests.borrow()[0].0;
+    respond(&mut e, h, 200, "#EXTM3U");
+    assert_eq!(describe(&mut e, "ru"), "http://127.0.0.1:9377/master.m3u8");
+    // fetch : `Response.url` identique sur chemin relatif.
+    describe(
+        &mut e,
+        "var fu = '';\
+         fetch('out_0.m3u8').then(function (r) { fu = r.url; });",
+    );
+    let h2 = t.requests.borrow()[1].0;
+    respond(&mut e, h2, 200, "#EXTM3U");
+    assert_eq!(describe(&mut e, "fu"), "http://127.0.0.1:9377/out_0.m3u8");
+}

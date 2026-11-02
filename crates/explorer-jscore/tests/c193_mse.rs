@@ -199,6 +199,39 @@ fn js_c278_buffered_append_window_clip_et_abort_vide() {
     );
 }
 
+/// JS-C284 — `media.buffered` = union des `SourceBuffer`
+/// actifs quand `src` pointe un object-URL `MediaSource`
+/// (spec) ; appends à `timestampOffset` constant (timestamps
+/// en bande, tfdt fMP4) **étendent** la plage — sinon
+/// `media.buffered.end` gèle et un player réel (hls.js
+/// `bufferInfo.end`) re-cible un fragment déjà livré.
+#[test]
+fn js_c284_media_buffered_union_et_sequentiel() {
+    let mut e = engine();
+    assert_eq!(
+        ev(
+            &mut e,
+            "var ms=new MediaSource();\
+             var sb=ms.addSourceBuffer('video/mp4');\
+             var sa=ms.addSourceBuffer('audio/mp4');\
+             var v=document.getElementById('v');\
+             v.src=URL.createObjectURL(ms);\
+             var b0=v.buffered.length;\
+             sb.appendBuffer(new Uint8Array(8));\
+             var b1=v.buffered.length+'/'+v.buffered.end(0);\
+             sb.appendBuffer(new Uint8Array(8));\
+             var b2=v.buffered.end(0);\
+             sa.timestampOffset=20;\
+             sa.appendBuffer(new Uint8Array(8));\
+             b0+'|'+b1+'|'+b2+'|'+v.buffered.length+'/'+v.buffered.end(0)+'/'+v.buffered.start(1)+'/'+v.buffered.end(1)"
+        ),
+        // src MSE sans append → 0 ; rail vidéo : [0,6) puis
+        // séquentiel [0,12) (offset constant) ; rail audio
+        // à offset 20 → [20,26) disjoint ; union = 2 plages.
+        "0|1/6|12|2/12/20/26"
+    );
+}
+
 #[test]
 fn c193_create_object_url_registers_media_source() {
     let mut e = engine();
@@ -255,5 +288,29 @@ fn c193_end_of_stream_and_duration() {
              r.length+'|'+r.start(0)+'|'+r.end(0)"
         ),
         "1|5|30"
+    );
+}
+
+/// JS-C282 — un listener d'append qui jette ne fige plus le
+/// `SourceBuffer` : `updating` retombe, `updateend` part quand
+/// même, l'erreur est propagée à l'appelant. Sans ça
+/// `blockBuffers` d'hls.js attend `sb.updating===false` à
+/// jamais → `endOfStream` jamais appelé (vol hls b-e2e).
+#[test]
+fn c193_append_listener_throw_keeps_machine() {
+    let mut e = engine();
+    assert_eq!(
+        ev(
+            &mut e,
+            "var ms=new MediaSource();\
+             var sb=ms.addSourceBuffer('video/mp4');\
+             var seq='';\
+             sb.addEventListener('update',function(){throw new Error('boom')});\
+             sb.addEventListener('updateend',function(){seq+='|end;u='+sb.updating});\
+             try { sb.appendBuffer(new ArrayBuffer(4)); seq+='|ok'; }\
+             catch (err) { seq+='|threw:'+err.message; }\
+             seq",
+        ),
+        "|end;u=false|threw:boom"
     );
 }

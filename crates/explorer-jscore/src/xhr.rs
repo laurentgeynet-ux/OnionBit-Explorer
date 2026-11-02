@@ -161,6 +161,13 @@ pub(crate) struct XhrData {
     response_headers: Vec<(String, String)>,
     method: String,
     url: String,
+    /// URL de requête **résolue** contre le document émetteur
+    /// (JS-C282) — servie par `xhr.responseURL` (spec : URL
+    /// finale absolue ; `""` avant `send`). Le transport peut
+    /// toujours signaler une redirection : à défaut, final =
+    /// requête résolue (déviation documentée, pas de
+    /// `response.url` de retour dans `XhrResponse`).
+    response_url: String,
     request_headers: Vec<(String, String)>,
     handle: Option<u64>,
     /// `xhr.withCredentials` (JS-C77) — `send` émet
@@ -448,6 +455,9 @@ impl Host for XhrHost {
             "readyState" => Value::Num(f64::from(d.ready_state)),
             "status" => Value::Num(f64::from(d.status)),
             "statusText" => e.str_val(d.status_text.clone()),
+            // Spec : URL finale absolue (`""` avant `send`) —
+            // les players y résolvent les URI enfants (JS-C282).
+            "responseURL" => e.str_val(d.response_url.clone()),
             // Spec : `responseText` jette `InvalidStateError` si
             // `responseType` ∉ {"" ,"text"} — il ne sert jamais
             // de source binaire.
@@ -744,6 +754,11 @@ impl Host for XhrHost {
                 let req = {
                     let mut d = self.data.borrow_mut();
                     d.ready_state = 2; // headers "sent" — embedder reports the rest
+                                       // `responseURL` = URL absolue résolue contre le
+                                       // document émetteur (JS-C282) — hls.js & cie la
+                                       // reconsomment comme base des URI suivantes.
+                    d.response_url =
+                        resolve_ctx_url(e, e.cur_ctx, &d.url).unwrap_or_else(|| d.url.clone());
                     XhrRequest {
                         method: d.method.clone(),
                         url: d.url.clone(),
@@ -1586,6 +1601,28 @@ pub(crate) fn resolve_url(e: &Engine, raw: &str) -> Option<String> {
         .map(|p| crate::builtins::url::url_href(&p))
 }
 
+/// [`resolve_url`] contre l'URL du **contexte émetteur** (`ctx`) —
+/// base d'un `<iframe>` quand la requête part d'un cadre ; repli
+/// `hooks.page_url` puis chaîne brute. Sert `Response.url` /
+/// `xhr.responseURL` (JS-C282) : ces propriétés doivent être
+/// **absolues** — un player les réutilise comme base de
+/// résolution des URI suivantes (hls.js → `master.m3u8/out.m3u8`
+/// fantôme sinon).
+pub(crate) fn resolve_ctx_url(e: &Engine, ctx: crate::context::CtxId, raw: &str) -> Option<String> {
+    let base = e
+        .ctxs
+        .get(ctx as usize)
+        .map(|m| m.url.clone())
+        .filter(|u| !u.is_empty())
+        .unwrap_or_else(|| e.hooks.page_url.clone());
+    if base.is_empty() {
+        return Some(raw.to_string());
+    }
+    crate::builtins::url::url_parse_absolute(&base)
+        .and_then(|b| crate::builtins::url::url_parse(raw, Some(&b)))
+        .map(|p| crate::builtins::url::url_href(&p))
+}
+
 /// `init.mode`/`Request.mode` → [`FetchMode`] — `Err` = libellé
 /// `TypeError` (`navigate`/`websocket`/valeur inconnue, spec).
 fn fetch_mode_parse(s: &str) -> Result<FetchMode, String> {
@@ -2246,7 +2283,11 @@ pub(crate) fn fetch_fn(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Va
     }
     if let Some(t) = &e.xhr.transport {
         let h = t.send(&req);
-        e.xhr.fetches.push((h, pid, req.url.clone(), res_ty));
+        // `Response.url` = URL absolue résolue contre le document
+        // émetteur (JS-C282) — les players s'en servent comme base
+        // de résolution (hls.js → playlist enfants).
+        let resolved = resolve_ctx_url(e, req.ctx, &req.url).unwrap_or_else(|| req.url.clone());
+        e.xhr.fetches.push((h, pid, resolved, res_ty));
     } else {
         // No connector — reject like a network failure.
         let msg = e.str_val("fetch: no transport");

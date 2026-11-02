@@ -5825,7 +5825,16 @@ fn media_prop(e: &mut Engine, dom: &DomRef, node: NodeId, key: &str) -> Value {
             // sinon EMPTY.
             "networkState" => Value::Num(if d.has_attr(node, "src") { 3.0 } else { 0.0 }),
             "currentSrc" => e.str_val(""),
-            "buffered" | "played" | "seekable" => time_ranges_empty(e),
+            // JS-C284 — `src` = object-URL `MediaSource` :
+            // `buffered` = union des `SourceBuffer` actifs
+            // (spec) — les players la lisent pour ordonner
+            // les appends (`bufferInfo.end` hls.js), pas le
+            // rapport hôte. Repli `[]` hors MSE.
+            "buffered" => match d.attr(node, "src").and_then(|u| e.mse_buffered_union(u)) {
+                Some(r) => time_ranges(e, r),
+                None => time_ranges_empty(e),
+            },
+            "played" | "seekable" => time_ranges_empty(e),
             // `error`, `mediaGroup`, `controller`.
             _ => Value::Null,
         };

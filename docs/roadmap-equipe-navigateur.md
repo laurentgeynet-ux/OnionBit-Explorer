@@ -5664,6 +5664,59 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   partagé, `fetch().arrayBuffer()`
   octets.
 
+- [x] **JS-C282. `Response.url`/
+  `responseURL` absolus**
+  (`explorer-jscore`, chantier
+  « vidéo réelle » b-e2e — hls.js
+  réel) — fetch/XHR répétaient la
+  requête brute : hls.js résout
+  les URIs de playlists contre
+  `Response.url` → `out_0.m3u8`
+  sur base `"master.m3u8"` →
+  `/master.m3u8/out_0.m3u8` → 404
+  en boucle. Résolution contre
+  l'URL du ctx émetteur
+  (`resolve_ctx_url`) à l'envoi +
+  `responseURL` XHR. Verrou
+  `response_urls_are_absolute`.
+
+- [x] **JS-C283. MSE : listeners
+  tolérants, machine complétée**
+  (`explorer-jscore`, même
+  chantier) — `fire_mse`
+  propageait l'exception listener
+  : `updating` restait `true`,
+  `updateend` jamais tiré →
+  `BufferOperationQueue` hls.js
+  verrouillée, `endOfStream`
+  muet (`x-mse-eos:0` + stall
+  ~6 s). `fire_mse_guarded` sur
+  append/abort/remove : erreur
+  capturée, cleanup garanti,
+  puis propagation. Verrou
+  `c193_append_listener_throw_
+  keeps_machine`.
+
+- [x] **JS-C284. `media.buffered`
+  = union des `SourceBuffer`**
+  (`explorer-jscore`, même
+  chantier) — sous MSE,
+  `HTMLMediaElement.buffered`
+  restait `[]` à vie →
+  `bufferInfo.end` hls.js gelé
+  à 0, loader re-ciblant un
+  fragment déjà livré (stall).
+  `mse_buffered_union` (spec :
+  union des buffers actifs) +
+  estimation b3 affinée :
+  `timestampOffset` inchangé →
+  extension séquentielle
+  (timestamps en bande fMP4) ;
+  offset changeant → sémantique
+  `t` conservée. Verrou
+  `js_c284_media_buffered_union_
+  et_sequentiel`.
+
 - [x] **Étape CMP-4. Réarmement
   des balises « bloquées par CMP »**
   (`explorer-core`, §B-4 bras CMP
