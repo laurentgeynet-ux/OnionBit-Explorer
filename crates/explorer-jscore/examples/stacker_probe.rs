@@ -3,7 +3,9 @@ fn rss() -> (usize, usize) {
     (m.physical_mem / (1 << 20), m.virtual_mem / (1 << 20))
 }
 fn churn(n: usize) -> usize {
-    if n == 0 { return 0; }
+    if n == 0 {
+        return 0;
+    }
     // red_zone 4 Mo > stack réelle ⇒ fibre à CHAQUE appel
     stacker::maybe_grow(4 * 1024 * 1024, 2 * 1024 * 1024, || churn(n - 1) + 1)
 }

@@ -1021,6 +1021,11 @@ impl SubJob {
         let parent_scripting = eng.is_some();
         let mut async_mods = Vec::new();
         let mut frames = Vec::new();
+        // §B-59 : octets de corps reçus en vol — la montée RSS
+        // pendant la vague dépassait x100 les magasins finaux ;
+        // le compteur tranche « 4 Go téléchargés » vs « alloués
+        // ailleurs ».
+        let mut resp_b = 0usize;
         fetch_wave(&self.transport, self.max_inflight, jobs, |tag, res| {
             // CAP-185 : `load`/`error` de fin de feuille —
             // enregistré sur toutes les issues (fetch refusé,
@@ -1072,6 +1077,7 @@ impl SubJob {
                     return;
                 }
             };
+            resp_b += resp.body.len();
             if !(200..300).contains(&resp.status) {
                 report_sub_failure(
                     &events,
@@ -1207,11 +1213,32 @@ impl SubJob {
                 frame_scripting(parent_scripting, *sandbox),
             ));
         }
+        // §B-59 : recensement des octets retenus par magasin —
+        // la montée RSS pendant la vague vivait hors de tout
+        // compteur ; la ligne nomme le réservoir réel.
+        let img_b: usize = self.img_bodies.values().map(Vec::len).sum();
+        let bg_b: usize = self.bg_bodies.values().map(Vec::len).sum();
+        let css_b: usize = self.css_slots.iter().flatten().map(String::len).sum();
+        let js_b: usize = self.script_srcs.iter().flatten().map(String::len).sum();
+        let mods_b: usize = async_mods.iter().map(|(_, t)| t.len()).sum();
+        let frames_b: usize = frames
+            .iter()
+            .map(|f| f.html.len() + f.srcdoc.as_deref().map_or(0, str::len))
+            .sum();
+        let fonts_b: usize = self.fonts.iter().map(|f| f.3.len()).sum();
         tracing::info!(
             tab,
             ms = ms_u64(t_wave),
             jobs = jobs_n,
+            resp_b,
             imgs = self.img_bodies.len(),
+            img_b,
+            bg_b,
+            css_b,
+            js_b,
+            mods_b,
+            frames_b,
+            fonts_b,
             "sub: vague reçue → @import"
         );
         self.eng = eng;

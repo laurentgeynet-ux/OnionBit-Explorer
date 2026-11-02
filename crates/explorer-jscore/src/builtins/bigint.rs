@@ -1054,8 +1054,19 @@ pub(crate) fn string_starts_with(e: &mut Engine, this: Value, args: &[Value]) ->
         v => (e.to_number(v)? as usize).min(u16_len(&s)),
     };
     // Préfixe sur la tranche **octets** du `start`-ième unit —
-    // zéro matérialisation (§B-59) ; un `start` astral tronque au
-    // char entier (déviation documentée).
+    // zéro matérialisation (§B-59). Position **interne à une
+    // paire surrogate** (l'unité à `start` est une moitié basse
+    // DC00-DFFF) : l'unité à cet index n'égale jamais le premier
+    // char d'une needle UTF-8 valide → `false`, pas de snap au
+    // char entier (verrou `c23_utf16_positions_and_slices`,
+    // régression JS-C263).
+    if !needle.is_empty()
+        && s.encode_utf16()
+            .nth(start)
+            .is_some_and(|w| (0xDC00..=0xDFFF).contains(&w))
+    {
+        return Ok(Value::Bool(false));
+    }
     let hay = &s[Heap::u16_pos_to_byte(&s, start)..];
     Ok(Value::Bool(hay.starts_with(&needle)))
 }
@@ -1068,7 +1079,19 @@ pub(crate) fn string_ends_with(e: &mut Engine, this: Value, args: &[Value]) -> J
         v => (e.to_number(v)? as usize).min(u16_len(&s)),
     };
     // Suffixe sur la tranche **octets** du `end`-ième unit —
-    // zéro matérialisation (§B-59).
+    // zéro matérialisation (§B-59). Limite **interne à une
+    // paire surrogate** (l'unité `end-1` est la moitié haute
+    // D800-DBFF) : le préfixe units se termine par un surrogate
+    // isolé qu'aucune needle UTF-8 valide ne peut suffixer →
+    // `false` (même classe que `startsWith`).
+    if !needle.is_empty()
+        && end > 0
+        && s.encode_utf16()
+            .nth(end - 1)
+            .is_some_and(|w| (0xD800..=0xDBFF).contains(&w))
+    {
+        return Ok(Value::Bool(false));
+    }
     let hay = &s[..Heap::u16_pos_to_byte(&s, end)];
     Ok(Value::Bool(hay.ends_with(&needle)))
 }

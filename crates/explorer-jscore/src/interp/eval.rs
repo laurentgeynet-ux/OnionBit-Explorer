@@ -511,6 +511,7 @@ impl Engine {
                             if let Some(h) = self.host_of(bid) {
                                 let shadowed = self.host_method_shadowed(bid, &name);
                                 if !shadowed {
+                                    crate::host_mark(h.class_name(), &name);
                                     if let Some(v) = h.invoke(self, recv, &name, &args)? {
                                         // Réactions CE synchrones
                                         // (JS-C68) — la méthode host a
@@ -1191,6 +1192,7 @@ impl Engine {
                     if let (Some(key), Value::Obj(bid)) = (&recv_key, recv) {
                         if let Some(h) = self.host_of(bid) {
                             if !self.host_method_shadowed(bid, key) {
+                                crate::host_mark(h.class_name(), key);
                                 if let Some(v) = h.invoke(self, recv, key, &args)? {
                                     cur = v;
                                     done = true;

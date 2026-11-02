@@ -452,23 +452,20 @@ fn main() {
             let m = memory_stats::memory_stats();
             let rss = m.map_or(0, |s| s.physical_mem) / (1024 * 1024);
             let virt = m.map_or(0, |s| s.virtual_mem) / (1024 * 1024);
-            let hit = rss_mb.filter(|mb| rss > *mb).map(|mb| ("rss", mb, rss)).or_else(|| {
-                commit_mb
-                    .filter(|mb| virt > *mb)
-                    .map(|mb| ("commit", mb, virt))
-            });
+            let hit = rss_mb
+                .filter(|mb| rss > *mb)
+                .map(|mb| ("rss", mb, rss))
+                .or_else(|| {
+                    commit_mb
+                        .filter(|mb| virt > *mb)
+                        .map(|mb| ("commit", mb, virt))
+                });
             if let Some((kind, mb, cur)) = hit {
-                let nat = explorer_jscore::LAST_NAT
-                    .lock()
-                    .map_or("?", |g| *g);
-                let expr = explorer_jscore::LAST_EXPR
-                    .lock()
-                    .map_or("?", |g| *g);
-                let stmt = explorer_jscore::LAST_STMT
-                    .lock()
-                    .map_or("?", |g| *g);
-                let areq = explorer_jscore::LAST_ALLOC_REQ
-                    .load(std::sync::atomic::Ordering::Relaxed);
+                let nat = explorer_jscore::LAST_NAT.lock().map_or("?", |g| *g);
+                let expr = explorer_jscore::LAST_EXPR.lock().map_or("?", |g| *g);
+                let stmt = explorer_jscore::LAST_STMT.lock().map_or("?", |g| *g);
+                let areq =
+                    explorer_jscore::LAST_ALLOC_REQ.load(std::sync::atomic::Ordering::Relaxed);
                 let stats = explorer_jscore::LAST_STATS
                     .lock()
                     .map_or_else(|_| String::new(), |g| g.clone());
@@ -480,12 +477,8 @@ fn main() {
                 // drain hôte (`poll_net`/`timers`/`commit`…) —
                 // « préambule JS vs drain core vs hors-fil »
                 // tranché en un seul abort.
-                let phase = explorer_jscore::LAST_PHASE
-                    .lock()
-                    .map_or("?", |g| *g);
-                let drain = explorer_core::LAST_DRAIN
-                    .lock()
-                    .map_or("?", |g| *g);
+                let phase = explorer_jscore::LAST_PHASE.lock().map_or("?", |g| *g);
+                let drain = explorer_core::LAST_DRAIN.lock().map_or("?", |g| *g);
                 let _ = std::fs::write(
                     &p,
                     format!("rss_guard[{kind}]: {cur} Mo > {mb} Mo | last_nat={nat} | last_stmt={stmt} | last_expr={expr} | last_areq={areq} | last_frame={frame} | last_phase={phase} | last_drain={drain} | last_stats={stats}\n"),

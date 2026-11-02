@@ -96,10 +96,15 @@ pub(crate) fn clone_deep(
     };
     match shape {
         CloneShape::Err(w) => Err(e.type_error(format!("structuredClone: cannot clone {w}"))),
-        CloneShape::Hst(h) => match h.serializable_clone(e)? {
-            Some(v) => clone_deep(e, v, seen, depth + 1),
-            None => Err(e.type_error(format!("structuredClone: cannot clone {}", h.class_name()))),
-        },
+        CloneShape::Hst(h) => {
+            crate::host_mark(h.class_name(), "serializable_clone");
+            match h.serializable_clone(e)? {
+                Some(v) => clone_deep(e, v, seen, depth + 1),
+                None => {
+                    Err(e.type_error(format!("structuredClone: cannot clone {}", h.class_name())))
+                }
+            }
+        }
         CloneShape::Buf(b) => Ok(Value::Obj(e.heap.alloc_obj(Object {
             proto: Value::Obj(e.protos.array_buffer),
             props: Vec::new(),

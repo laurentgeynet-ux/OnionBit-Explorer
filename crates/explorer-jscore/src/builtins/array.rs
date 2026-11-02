@@ -63,9 +63,7 @@ pub(crate) fn array_push(e: &mut Engine, this: Value, args: &[Value]) -> JsResul
         Some(ObjKind::Array(v)) => v.len(),
         _ => 0,
     };
-    e.alloc_guard(
-        (cur_len + args.len()).saturating_mul(std::mem::size_of::<Value>()),
-    )?;
+    e.alloc_guard((cur_len + args.len()).saturating_mul(std::mem::size_of::<Value>()))?;
     let n = if let Some(o) = e.heap.obj_mut(id) {
         if let ObjKind::Array(v) = &mut o.kind {
             v.extend_from_slice(args);

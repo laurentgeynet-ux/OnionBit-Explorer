@@ -5531,6 +5531,7 @@ fn host_method_trampoline(e: &mut Engine, _this: Value, args: &[Value]) -> JsRes
     let Some(h) = e.host_of(id) else {
         return Ok(Value::Undefined);
     };
+    crate::host_mark(h.class_name(), &name);
     Ok(h.invoke(e, Value::Obj(id), &name, &rest[1..])?
         .unwrap_or(Value::Undefined))
 }
@@ -7886,6 +7887,13 @@ impl Host for NodeHost {
             // nodes or strings (strings → text nodes).
             "prepend" => {
                 let kids = self.norm_children(e, args)?;
+                // Spec `HierarchyRequestError` — un ancêtre/soi
+                // inséré créerait une chaîne parent cyclique.
+                for &k in &kids {
+                    if self.dom.borrow().is_ancestor_or_self(node, k) {
+                        return Err(e.type_error("HierarchyRequestError: ancestor"));
+                    }
+                }
                 // Ancre glissante (comme `after`) : chaque inséré
                 // se place après le précédent — l'ordre des args
                 // est préservé, et un `first` déplacé par
@@ -7906,6 +7914,11 @@ impl Host for NodeHost {
                 // `before`: insert each kid just before `node`.
                 // `after`: anchor slides so kids keep arg order.
                 if let Some(p) = dom_parent(&self.dom, node) {
+                    for &k in &kids {
+                        if self.dom.borrow().is_ancestor_or_self(p, k) {
+                            return Err(e.type_error("HierarchyRequestError: ancestor"));
+                        }
+                    }
                     let mut anchor = node;
                     for k in kids {
                         let ref_n = if name == "after" {
@@ -7922,6 +7935,11 @@ impl Host for NodeHost {
             "replaceWith" => {
                 let kids = self.norm_children(e, args)?;
                 if let Some(p) = dom_parent(&self.dom, node) {
+                    for &k in &kids {
+                        if self.dom.borrow().is_ancestor_or_self(p, k) {
+                            return Err(e.type_error("HierarchyRequestError: ancestor"));
+                        }
+                    }
                     for k in kids {
                         self.dom.borrow_mut().insert_before(p, k, Some(node));
                     }
@@ -8623,8 +8641,14 @@ fn geom_positioned(dom: &DomRef, node: NodeId) -> bool {
 /// `fixed` est tranché par l'appelant via `ElementGeom.fixed`).
 fn offset_parent_node(dom: &DomRef, node: NodeId) -> Option<NodeId> {
     let mut cur = node;
+    let limit = dom.borrow().nodes.len() + 1;
+    let mut hops = 0usize;
     loop {
         let p = dom_parent(dom, cur)?;
+        hops += 1;
+        if hops > limit {
+            return None; // chaîne parent cyclique (§B-59)
+        }
         let (tag, is_el, is_root) = {
             let d = dom.borrow();
             (
@@ -12622,12 +12646,17 @@ fn radio_group_checked(d: &Dom, node: NodeId) -> bool {
         return d.has_attr(node, "checked");
     };
     let mut scope = node;
+    let mut hops = 0usize;
     while let Some(p) = d.parent(scope) {
         if d.nodes[p as usize].tag == "form" {
             scope = p;
             break;
         }
         scope = p;
+        hops += 1;
+        if hops > d.nodes.len() {
+            break; // chaîne parent cyclique (§B-59)
+        }
     }
     d.by_tag(scope, "input").iter().any(|&r| {
         d.attr(r, "type")

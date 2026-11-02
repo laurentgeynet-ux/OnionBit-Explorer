@@ -204,6 +204,7 @@ pub(crate) fn expr_to_pat(e: &Expr) -> Option<Pat> {
 pub(crate) fn host_sym_iterator(e: &mut Engine, t: Value, _args: &[Value]) -> JsResult<Value> {
     if let Value::Obj(id) = t {
         if let Some(h) = e.host_of(id) {
+            crate::host_mark(h.class_name(), "iter_items");
             if let Some(items) = h.iter_items(e)? {
                 let proto = e.protos.array_iter;
                 return Ok(crate::collections::iter_obj(e, items, proto));

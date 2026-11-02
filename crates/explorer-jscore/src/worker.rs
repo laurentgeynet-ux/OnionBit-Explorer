@@ -600,11 +600,16 @@ impl Engine {
                     // sérialisable (slots en objet ordinaire) —
                     // elle emprunte `self` → le host est passé
                     // par `Rc` hors du match d'extraction.
-                    Shape::Hst(h) => match h.serializable_clone(self)? {
-                        Some(v) => self.wire_enc(v, seen),
-                        None => Err(self
-                            .type_error(format!("postMessage: cannot clone {}", h.class_name()))),
-                    },
+                    Shape::Hst(h) => {
+                        crate::host_mark(h.class_name(), "serializable_clone");
+                        match h.serializable_clone(self)? {
+                            Some(v) => self.wire_enc(v, seen),
+                            None => Err(self.type_error(format!(
+                                "postMessage: cannot clone {}",
+                                h.class_name()
+                            ))),
+                        }
+                    }
                     Shape::Blb(data, ty, props) => {
                         let mut wprops = Vec::with_capacity(props.len());
                         for (k, v) in props {

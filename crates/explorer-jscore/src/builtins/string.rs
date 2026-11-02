@@ -60,7 +60,7 @@ pub(crate) fn string_char_code_at(e: &mut Engine, this: Value, args: &[Value]) -
             } else {
                 None
             }
-            .map_or(f64::NAN, |w| f64::from(w)),
+            .map_or(f64::NAN, f64::from),
         ));
     }
     let s = this_str(e, this)?;
@@ -96,7 +96,7 @@ pub(crate) fn str_index_of(
     // Confiant `indexOf` × N = ratchet de commit géant).
     if let Value::Str(id) = this {
         return Ok(Value::Num(
-            e.heap.str_index_of(id, &needle, from, last) as f64,
+            e.heap.str_index_of(id, &needle, from, last) as f64
         ));
     }
     let s = this_str(e, this)?;

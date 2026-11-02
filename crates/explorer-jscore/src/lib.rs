@@ -117,13 +117,33 @@ pub static LAST_STMT: std::sync::Mutex<&'static str> = std::sync::Mutex::new("")
 /// Taille (octets) de la dernière requête `alloc_guard` (armé
 /// `EXPLORER_JS_RSS_WATCH`) — si le span fatal passe par une
 /// garde, sa demande est nommée à l'abort.
-pub static LAST_ALLOC_REQ: std::sync::atomic::AtomicUsize =
-    std::sync::atomic::AtomicUsize::new(0);
+pub static LAST_ALLOC_REQ: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 /// Recensement heap au dernier tick « chaud » (RSS > watch) :
 /// compteurs + `ObjKind` du plus gros objet vivant — nomme le
 /// réservoir si le burst est une structure comptée, prouve
 /// « hors compteurs » sinon (§B-59).
 pub static LAST_STATS: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
+
+/// §B-59 — compteur total des entrées dans `call_value_impl`
+/// (atomique, inconditionnel) : figé pendant la montée = span
+/// unique non-tické ; qui monte = boucle d'appels chaude.
+pub static CALL_N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// §B-59 — dernière méthode/prop `Host` dispatchée
+/// (`class:name`) : les `h.invoke`/`h.get`/`iter_items`…
+/// passent **hors** `call_value_impl` — `calls`/`nat` muets,
+/// le span natif hôte est nommé ici.
+pub static LAST_HOST: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
+
+/// Écrit `class:name` dans [`LAST_HOST`] (diagnostic §B-59).
+pub fn host_mark(class: &str, name: &str) {
+    if let Ok(mut g) = LAST_HOST.lock() {
+        g.clear();
+        g.push_str(class);
+        g.push(':');
+        g.push_str(name);
+    }
+}
 
 /// §B-59 — dernier frame JS du tick (écrit sous
 /// `EXPLORER_JS_RSS_WATCH` uniquement — `format!` par tick est
@@ -136,6 +156,77 @@ pub static LAST_FRAME: std::sync::Mutex<String> = std::sync::Mutex::new(String::
 /// (couvert par `LAST_STMT`) ou hors fil JS ; `"call"`/`"body"`
 /// = mort dans le préambule d'appel (liage, hoist, suspend).
 pub static LAST_PHASE: std::sync::Mutex<&'static str> = std::sync::Mutex::new("");
+/// §B-59 — fonction `Fun::Script` en cours d'entrée (écrit au
+/// début de `call_value_impl`, **avant** tout préambule) :
+/// `last_phase=call` figé + `last_fun` nommé = la mort vit
+/// dans le préambule d'appel de CETTE fonction (liage, hoist,
+/// `arguments`, switch de realm) — zones que `last_stmt`/
+/// `last_nat` ne couvrent pas.
+pub static LAST_FUN: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
+
+/// §B-59 — journal de fil d'Ariane **externe au fil JS** : un
+/// thread vidange les statiques `LAST_*` + commit/RSS vers un
+/// fichier toutes les ~400 ms (env `EXPLORER_JS_BREADCRUMB`).
+/// Les breadcrumbs écrits par tick sont muets quand le span
+/// fatal n'est pas tické (une expression géante n'offre aucun
+/// tick) — le journal tourne sur son propre fil et survit à
+/// l'abort alloc : sa dernière ligne nomme le span vivant.
+pub fn start_breadcrumb_journal() {
+    use std::sync::Once;
+    static ONCE: Once = Once::new();
+    ONCE.call_once(|| {
+        let Some(path) = std::env::var_os("EXPLORER_JS_BREADCRUMB") else {
+            return;
+        };
+        std::thread::spawn(move || {
+            let t0 = std::time::Instant::now();
+            loop {
+                let (mut rss, mut com) = (0usize, 0usize);
+                if let Some(m) = memory_stats::memory_stats() {
+                    rss = m.physical_mem / (1024 * 1024);
+                    com = m.virtual_mem / (1024 * 1024);
+                }
+                let get = |m: &std::sync::Mutex<&'static str>| {
+                    m.lock().map_or("", |g| *g)
+                };
+                let gets = |m: &std::sync::Mutex<String>| {
+                    m.lock().map(|g| g.clone()).unwrap_or_default()
+                };
+                let areq = LAST_ALLOC_REQ.load(std::sync::atomic::Ordering::Relaxed);
+                let calls = CALL_N.load(std::sync::atomic::Ordering::Relaxed);
+                let line = format!(
+                    "t={}ms rss={}MiB commit={}MiB | calls={} | frame={} | fun={} | stmt={} | expr={} | nat={} | host={} | phase={} | areq={} | stats={}\n",
+                    t0.elapsed().as_millis(),
+                    rss,
+                    com,
+                    calls,
+                    gets(&LAST_FRAME),
+                    gets(&LAST_FUN),
+                    get(&LAST_STMT),
+                    get(&LAST_EXPR),
+                    get(&LAST_NAT),
+                    gets(&LAST_HOST),
+                    get(&LAST_PHASE),
+                    areq,
+                    gets(&LAST_STATS),
+                );
+                // Append : l'historique discrimine « breadcrumbs
+                // figés pendant la montée » (span unique non
+                // tické) vs « breadcrumbs vivants » (chemins
+                // tickés qui passent sous toutes les gardes).
+                if let Ok(mut f) = std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(&path)
+                {
+                    use std::io::Write as _;
+                    let _ = f.write_all(line.as_bytes());
+                }
+                std::thread::sleep(std::time::Duration::from_millis(400));
+            }
+        });
+    });
+}
 pub use mediaq::MediaEnv;
 pub use module::{
     is_bare_specifier, module_specifiers, rewrite_bare_specifier, DynImportReq, ModuleLoader,

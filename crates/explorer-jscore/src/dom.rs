@@ -1789,13 +1789,20 @@ impl Dom {
     pub fn slot_assigned(&self, slot: NodeId, elements_only: bool) -> Vec<NodeId> {
         // Hôte = parent de la racine shadow contenant `slot`.
         let mut cur = slot;
+        let mut hops = 0usize;
         let host = loop {
             match self.nodes.get(cur as usize).and_then(|n| n.parent) {
                 Some(p) if self.is_shadow_root(p) => match self.shadow_host(p) {
                     Some(h) => break h,
                     None => return Vec::new(),
                 },
-                Some(p) => cur = p,
+                Some(p) => {
+                    cur = p;
+                    hops += 1;
+                    if hops > self.nodes.len() {
+                        return Vec::new(); // chaîne parent cyclique (§B-59)
+                    }
+                }
                 None => return Vec::new(),
             }
         };
@@ -1972,14 +1979,22 @@ impl Dom {
         if !self.node_valid(n) {
             return None;
         }
+        let mut hops = 0usize;
         while self.nodes[n as usize].kind != NodeKind::Element
             || self.nodes[n as usize].tag == "#document"
         {
             n = self.parent(n)?;
+            hops += 1;
+            if hops > self.nodes.len() {
+                return None; // chaîne parent cyclique — repli (§B-59)
+            }
         }
         let mut path = Vec::new();
         let mut cur = n;
         while let Some(p) = self.parent(cur) {
+            if path.len() >= self.nodes.len() {
+                break; // même borne anti-cycle qu'`ancestors` (§B-59)
+            }
             let tag = self.nodes[cur as usize].tag.clone();
             let k = self.nodes[p as usize]
                 .children
@@ -2142,6 +2157,20 @@ impl Dom {
     /// `MAX_PROTO_DEPTH` — chaîne hostile non cyclique).
     #[must_use]
     pub fn is_ancestor_or_self(&self, node: NodeId, anc: NodeId) -> bool {
+        if node == anc {
+            return true;
+        }
+        // Fast-path : `anc` feuille (sans enfants) ne peut
+        // englober `node` — sinon chaque `append` d'un nœud
+        // frais marcherait la chaîne parent entière (O(n²)
+        // mesuré sur `'<div>'.repeat(2e5)` hostile).
+        if self
+            .nodes
+            .get(anc as usize)
+            .map_or(true, |a| a.children.is_empty())
+        {
+            return false;
+        }
         let mut cur = Some(node);
         let mut d = 0;
         while let Some(n) = cur {
@@ -2150,7 +2179,10 @@ impl Dom {
             }
             cur = self.nodes.get(n as usize).and_then(|nd| nd.parent);
             d += 1;
-            if d > 512 {
+            // §B-59 : borne `nodes.len()` (pas 512 — les chaînes
+            // réelles dépassent 512 niveaux : un ancêtre profond
+            // aurait été raté → cycle créé → `ancestors` sans fin).
+            if d > self.nodes.len() {
                 return false;
             }
         }
@@ -2171,6 +2203,15 @@ impl Dom {
         // B-44 : plafond DOM — insertions refusées au-delà,
         // déplacements d'attachés restants légaux.
         if !self.nodes[child as usize].attached && self.nodes.len() >= MAX_DOM_NODES {
+            return;
+        }
+        // §B-59 : rejet défensif au niveau mutateur — `child`
+        // ancêtre-ou-soi de `parent` créerait une chaîne parent
+        // cyclique (les marches `ancestors`/`closest`/…
+        // boucleraient). Les chemins JS gardés jettent déjà
+        // `HierarchyRequestError` ; les chemins internes et les
+        // futures coutures mutent en no-op plutôt qu'en cycle.
+        if self.is_ancestor_or_self(parent, child) {
             return;
         }
         self.detach(child);
@@ -2238,22 +2279,30 @@ impl Dom {
             self.nodes[*c as usize].parent = None;
             self.set_attached(*c, false);
         }
+        // §B-59 : un kid ancêtre-ou-soi de `node` créerait une
+        // chaîne parent cyclique — filtré des deux côtés
+        // (`children` et `parent`), même défense qu'`append`.
+        let kept: Vec<NodeId> = kids
+            .iter()
+            .copied()
+            .filter(|&k| !self.is_ancestor_or_self(node, k))
+            .collect();
         let a = self.nodes[node as usize].attached;
-        for &k in kids {
+        for &k in &kept {
             self.detach(k);
             self.nodes[k as usize].parent = Some(node);
             self.set_attached(k, a);
         }
-        self.nodes[node as usize].children = kids.to_vec();
+        self.nodes[node as usize].children.clone_from(&kept);
         self.mark_dirty_at(node);
         self.queue_mutation(&MutationRecord::child_list(
             node,
-            kids.to_vec(),
+            kept.clone(),
             old,
             None,
             None,
         ));
-        for &k in kids {
+        for &k in &kept {
             self.note_attached_scripts(k);
         }
     }
@@ -2366,6 +2415,12 @@ impl Dom {
         if !self.nodes[child as usize].attached && self.nodes.len() >= MAX_DOM_NODES {
             return;
         }
+        // §B-59 : même rejet défensif qu'`append` — chaîne
+        // parent cyclique sinon (`el.before(ancêtre)` passait
+        // sans check JS-level).
+        if self.is_ancestor_or_self(parent, child) {
+            return;
+        }
         self.detach(child);
         let idx = ref_node.and_then(|r| {
             self.nodes[parent as usize]
@@ -2415,6 +2470,12 @@ impl Dom {
         for &k in &kids {
             self.nodes[k as usize].parent = None;
         }
+        // §B-59 : un kid ancêtre-ou-soi de `parent` créerait une
+        // chaîne parent cyclique — filtré (même défense).
+        let kids: Vec<NodeId> = kids
+            .into_iter()
+            .filter(|&k| !self.is_ancestor_or_self(parent, k))
+            .collect();
         if kids.is_empty() {
             return;
         }
@@ -2461,6 +2522,11 @@ impl Dom {
     /// its slot. Returns `old` (spec) — caller wraps it.
     pub fn replace_child(&mut self, parent: NodeId, new: NodeId, old: NodeId) {
         if !self.node_valid(parent) || !self.node_valid(new) || !self.node_valid(old) {
+            return;
+        }
+        // §B-59 : `new` ancêtre-ou-soi de `parent` → chaîne
+        // parent cyclique — même rejet défensif.
+        if self.is_ancestor_or_self(parent, new) {
             return;
         }
         let idx = self.nodes[parent as usize]
@@ -2773,11 +2839,16 @@ impl Dom {
     pub fn closest(&self, node: NodeId, sel: &str) -> Option<NodeId> {
         let list = split_selector_list(sel)?;
         let mut cur = Some(node);
+        let mut hops = 0usize;
         while let Some(n) = cur {
             if list.iter().any(|item| self.matches_single(n, item, node)) {
                 return Some(n);
             }
             cur = self.parent(n);
+            hops += 1;
+            if hops > self.nodes.len() {
+                return None; // chaîne parent cyclique (§B-59)
+            }
         }
         None
     }
@@ -2997,6 +3068,14 @@ impl Dom {
         let mut cur = self.nodes.get(node as usize).and_then(|n| n.parent);
         while let Some(p) = cur {
             out.push(p);
+            // §B-59 : une chaîne `parent` valide visite au plus
+            // `nodes.len()` nœuds distincts — au-delà, parenté
+            // cyclique (miroir/mutation) → tronque plutôt que de
+            // pousser `out` à l'infini (4 Go mesurés au vol sur
+            // le dispatch d'un event sous Didomi/franceinter).
+            if out.len() >= self.nodes.len() {
+                break;
+            }
             cur = self.nodes.get(p as usize).and_then(|n| n.parent);
         }
         out
@@ -3346,11 +3425,16 @@ impl Dom {
             Pseudo::Focus => self.focused.get() == Some(node),
             Pseudo::FocusWithin => {
                 let mut cur = self.focused.get();
+                let mut hops = 0usize;
                 while let Some(f) = cur {
                     if f == node {
                         return true;
                     }
                     cur = self.parent(f);
+                    hops += 1;
+                    if hops > self.nodes.len() {
+                        break; // chaîne parent cyclique (§B-59)
+                    }
                 }
                 false
             }
@@ -3432,11 +3516,16 @@ impl Dom {
     /// remontant (soi inclus).
     fn inherited_attr(&self, node: NodeId, name: &str) -> Option<String> {
         let mut cur = Some(node);
+        let mut hops = 0usize;
         while let Some(n) = cur {
             if let Some(v) = Self::attr_val(&self.nodes[n as usize], name) {
                 return Some(v.to_string());
             }
             cur = self.parent(n);
+            hops += 1;
+            if hops > self.nodes.len() {
+                return None; // chaîne parent cyclique (§B-59)
+            }
         }
         None
     }

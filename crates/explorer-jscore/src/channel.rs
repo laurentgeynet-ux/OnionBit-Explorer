@@ -64,6 +64,7 @@ fn port_method_trampoline(e: &mut Engine, _this: Value, args: &[Value]) -> JsRes
     let Some(h) = e.host_of(id) else {
         return Ok(Value::Undefined);
     };
+    crate::host_mark(h.class_name(), &name);
     Ok(h.invoke(e, Value::Obj(id), &name, &rest[1..])?
         .unwrap_or(Value::Undefined))
 }

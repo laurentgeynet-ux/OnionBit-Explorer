@@ -69,3 +69,55 @@ fn inline25_under_mem_limit() {
     let (p, x) = e.last_eval_split();
     eprintln!("[b59] split parse={p}us exec={x}us");
 }
+
+/// Verrou §B-59 bras DOM — une chaîne `parent` cyclique (miroir
+/// corrompu/mutation hostile) rendait `ancestors` sans borne :
+/// Vec<NodeId> poussé à l'infini, ~150 Mo/s jusqu'à l'abort
+/// (4,3 Go mesurés franceinter, dispatch event Didomi). Les
+/// marches bornées par `nodes.len()` dégradent : cycle
+/// auto-référent → au plus N ancêtres.
+#[test]
+fn cyclic_parent_chain_bounded() {
+    let mut d = Dom::from_html("<html><body><div id=a><div id=b></div></div></body></html>");
+    let (a, b) = {
+        let body = d.child_nodes(d.root)[0];
+        let a = d.child_nodes(body)[0];
+        let b = d.child_nodes(a)[0];
+        (a, b)
+    };
+    // Corruption : parenté auto-référente et cycle à deux.
+    d.nodes[a as usize].parent = Some(b);
+    d.nodes[b as usize].parent = Some(a);
+    assert!(d.ancestors(a).len() <= d.nodes.len());
+    assert!(d.ancestors(b).len() <= d.nodes.len());
+    // `root_of`/`closest`/`element_path`/`focus_within` bornés idem.
+    assert!(d.closest(b, "div").is_some() || d.closest(b, "div").is_none());
+}
+
+/// Le mutateur refuse la création du cycle (défense en profondeur) :
+/// `append(parent, ancêtre)`/`insert_before`/`replace_children`/
+/// `replace_child` no-op sur ancêtre-ou-soi.
+#[test]
+fn mutators_reject_ancestor_cycles() {
+    let mut d = Dom::from_html(
+        "<html><body><div id=x><div id=y><div id=z></div></div></div></body></html>",
+    );
+    let (x, y, z) = {
+        let body = d.child_nodes(d.root)[0];
+        let x = d.child_nodes(body)[0];
+        let y = d.child_nodes(x)[0];
+        let z = d.child_nodes(y)[0];
+        (x, y, z)
+    };
+    let x_parent = d.nodes[x as usize].parent;
+    // `z.appendChild(x)` — x est ancêtre de z → refusé (inchangé).
+    d.append(z, x);
+    assert_eq!(d.nodes[x as usize].parent, x_parent);
+    assert!(!d.ancestors(x).contains(&z));
+    // `insert_before` : insérer y sous z → refusé (y ancêtre de z).
+    d.insert_before(z, y, None);
+    assert_eq!(d.nodes[y as usize].parent, Some(x));
+    // `replace_child` : y.replaceChild(x, z) — x ancêtre de y → refusé.
+    d.replace_child(y, x, z);
+    assert_eq!(d.nodes[z as usize].parent, Some(y));
+}

@@ -1041,6 +1041,7 @@ impl Engine {
                 .and_then(|v| v.parse::<usize>().ok())
                 .unwrap_or(0),
         };
+        crate::start_breadcrumb_journal();
         crate::builtins::install(&mut e);
         crate::collections::install(&mut e);
         crate::intl::install(&mut e);
@@ -3147,6 +3148,7 @@ impl Engine {
         let Some(h) = self.host_of(id) else {
             return Ok(Value::Undefined);
         };
+        crate::host_mark(h.class_name(), &name);
         Ok(h.invoke(self, this, &name, &args[1..])?
             .unwrap_or(Value::Undefined))
     }
@@ -3674,8 +3676,20 @@ impl Engine {
                 // (actugaming, `rss_guard[commit]` 12,8 Go).
                 if self.commit_kill_mb > 0 && virt > self.commit_kill_mb {
                     self.rss_kill_latched = true;
+                    // §B-59 : le RangeError est la seule ligne
+                    // qui survive — y inclure le frame courant
+                    // et le recensement heap nomme le coupable
+                    // dans le log d'eval, sans abort process.
+                    let frame = crate::LAST_FRAME
+                        .lock()
+                        .map(|g| g.clone())
+                        .unwrap_or_default();
+                    let stats = crate::LAST_STATS
+                        .lock()
+                        .map(|g| g.clone())
+                        .unwrap_or_default();
                     return Err(self.range_error(format!(
-                        "process commit limit exceeded ({virt} MiB > {} MiB — native reservoir bound)",
+                        "process commit limit exceeded ({virt} MiB > {} MiB — native reservoir bound) at {frame} | {stats}",
                         self.commit_kill_mb
                     )));
                 }
@@ -3885,13 +3899,14 @@ impl Engine {
     /// Si tout est plat pendant que le commit saute, le burst
     /// vit hors de toute structure comptée (allocateur pur).
     fn census_line(&self, rss: usize, virt: usize) -> String {
+        use std::fmt::Write;
         let s = self.heap.stats();
         let mut hist = self.heap.kind_histogram();
         hist.truncate(6);
-        let top: String = hist
-            .iter()
-            .map(|(k, n, b)| format!(" {k}:{n}/{}MiB", b / 1_048_576))
-            .collect();
+        let mut top = String::new();
+        for (k, n, b) in &hist {
+            let _ = write!(top, " {k}:{n}/{}MiB", b / 1_048_576);
+        }
         format!(
             "cells={} heap={}MiB envs? rss={rss} virt={virt} |{top} | {}",
             s.live_cells,
@@ -3912,8 +3927,7 @@ impl Engine {
                     let dnodes = c
                         .dom_ctx
                         .as_ref()
-                        .map(|(r, _)| r.borrow().b59_counts().0)
-                        .unwrap_or(0);
+                        .map_or(0, |(r, _)| r.borrow().b59_counts().0);
                     (f + c.finregs.len(), m + c.modules.len(), d + dnodes)
                 });
         format!(
@@ -3999,8 +4013,20 @@ impl Engine {
                 // (actugaming, `rss_guard[commit]` 12,8 Go).
                 if self.commit_kill_mb > 0 && virt > self.commit_kill_mb {
                     self.rss_kill_latched = true;
+                    // §B-59 : le RangeError est la seule ligne
+                    // qui survive — y inclure le frame courant
+                    // et le recensement heap nomme le coupable
+                    // dans le log d'eval, sans abort process.
+                    let frame = crate::LAST_FRAME
+                        .lock()
+                        .map(|g| g.clone())
+                        .unwrap_or_default();
+                    let stats = crate::LAST_STATS
+                        .lock()
+                        .map(|g| g.clone())
+                        .unwrap_or_default();
                     return Err(self.range_error(format!(
-                        "process commit limit exceeded ({virt} MiB > {} MiB — native reservoir bound)",
+                        "process commit limit exceeded ({virt} MiB > {} MiB — native reservoir bound) at {frame} | {stats}",
                         self.commit_kill_mb
                     )));
                 }
@@ -4096,6 +4122,7 @@ impl Engine {
                     // `ReferenceError` en chaîne). Erreur de
                     // trap → non lié, même tolérance que `has`.
                     if let Some(h) = self.host_of(oid) {
+                        crate::host_mark(h.class_name(), name);
                         if let Ok(Some(v)) = h.get(self, Value::Obj(oid), name) {
                             return Some(v);
                         }
@@ -4730,8 +4757,7 @@ impl Engine {
                             // (§B-59) — borne le Vec lui-même.
                             if out.len() % 4096 == 0 {
                                 self.alloc_guard(
-                                    (out.len() + 4096)
-                                        .saturating_mul(std::mem::size_of::<Value>()),
+                                    (out.len() + 4096).saturating_mul(std::mem::size_of::<Value>()),
                                 )?;
                             }
                             out.push(self.get_prop(rid, "value").unwrap_or(Value::Undefined));
@@ -4835,8 +4861,7 @@ impl Engine {
                         }
                         if out.len() % 4096 == 0 {
                             self.alloc_guard(
-                                (out.len() + 4096)
-                                    .saturating_mul(std::mem::size_of::<Value>()),
+                                (out.len() + 4096).saturating_mul(std::mem::size_of::<Value>()),
                             )?;
                         }
                         out.push(self.get_prop(rid, "value").unwrap_or(Value::Undefined));
@@ -4871,8 +4896,7 @@ impl Engine {
                     // ~6 Go de reserve en une expression de
                     // call) — borne le total comme `iter_values`.
                     self.alloc_guard(
-                        (out.len() + items.len())
-                            .saturating_mul(std::mem::size_of::<Value>()),
+                        (out.len() + items.len()).saturating_mul(std::mem::size_of::<Value>()),
                     )?;
                     out.extend(items);
                 }
@@ -5752,6 +5776,7 @@ impl Engine {
             Value::Obj(id) => {
                 let h = self.host_of(id);
                 if let Some(h) = &h {
+                    crate::host_mark(h.class_name(), key);
                     if let Some(v) = h.get(self, base, key)? {
                         return Ok(v);
                     }
@@ -5834,6 +5859,7 @@ impl Engine {
             }
             Value::Obj(id) => {
                 if let Some(h) = self.host_of(id) {
+                    crate::host_mark(h.class_name(), key);
                     if h.set(self, base, key, v)? {
                         // Réactions CE synchrones (JS-C68) — un
                         // setter host a pu muter le miroir
@@ -6015,15 +6041,14 @@ impl Engine {
             let prop_bytes = self
                 .heap
                 .obj(id)
-                .map(|o| {
+                .map_or(0, |o| {
                     if o.props.iter().any(|(k, _)| k == key) {
                         0
                     } else {
                         (o.props.len() + 1)
                             .saturating_mul(std::mem::size_of::<(String, crate::heap::Prop)>())
                     }
-                })
-                .unwrap_or(0);
+                });
             if prop_bytes > 0 {
                 self.alloc_guard(prop_bytes)?;
             }
@@ -6125,6 +6150,7 @@ impl Engine {
             self.deleg_hop(&mut depth)?;
         }
         if let Some(h) = self.host_of(id) {
+            crate::host_mark(h.class_name(), key);
             if h.get(self, Value::Obj(id), key)?.is_some() {
                 return Ok(true);
             }
@@ -6150,6 +6176,7 @@ impl Engine {
             _ => None,
         };
         if let Some(h) = host {
+            crate::host_mark(h.class_name(), key);
             if let Ok(Some(ok)) = h.del(self, Value::Obj(id), key) {
                 return ok;
             }
@@ -6492,6 +6519,7 @@ impl Engine {
         let mut out = Vec::new();
         let mut seen = HashSet::new();
         if let Some(h) = self.host_of(id) {
+            crate::host_mark(h.class_name(), "keys");
             for k in h.keys(self, Value::Obj(id)) {
                 if seen.insert(k.clone()) {
                     out.push(k);
@@ -6505,10 +6533,7 @@ impl Engine {
             // — un tableau de ~16 M éléments y empilait ~500 Mo
             // de chaînes d'indices entre deux ticks (§B-59).
             self.tick()?;
-            self.alloc_guard(
-                out.len()
-                    .saturating_mul(std::mem::size_of::<String>() + 16),
-            )?;
+            self.alloc_guard(out.len().saturating_mul(std::mem::size_of::<String>() + 16))?;
             if matches!(
                 self.heap.obj(cid).map(|o| &o.kind),
                 Some(ObjKind::Proxy { .. })
@@ -6807,7 +6832,7 @@ impl Engine {
     /// Lecture de chaîne **gardée** — §B-59 : `heap.string`
     /// clone l'intégralité hors census ; tout appelant
     /// `&mut self` passe par ici (`alloc_guard(len)` avant
-    /// le clone → RangeError nommé, pas ratchet de commit).
+    /// le clone → `RangeError` nommé, pas ratchet de commit).
     pub(crate) fn read_str(&mut self, id: ObjId) -> JsResult<Option<String>> {
         let n = self.heap.str_len(id).unwrap_or(0);
         self.alloc_guard(n)?;
@@ -7015,6 +7040,7 @@ impl Engine {
         if let Ok(mut g) = crate::LAST_PHASE.lock() {
             *g = "call";
         }
+        crate::CALL_N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let mut cur = f;
         let mut args_owned: Option<Vec<Value>> = None;
         let mut this = this;
@@ -7086,6 +7112,18 @@ impl Engine {
                 Err(self.type_error("bound function dispatch failed"))
             }
             Fun::Script { lit, env, lex_this } => {
+                // §B-59 : nomme la fonction avant son préambule —
+                // `last_phase=call` figé + `last_fun` nommé =
+                // mort dans le liage/hoist/`arguments` de celle-ci.
+                if self.rss_watch_mb > 0 {
+                    if let Ok(mut g) = crate::LAST_FUN.lock() {
+                        let n = lit.name.as_deref().unwrap_or("<anon>");
+                        *g = match &lit.src {
+                            Some(s) => format!("{n}({s}:{}:{})", lit.pos.0, lit.pos.1),
+                            None => format!("{n}(:{}:{})", lit.pos.0, lit.pos.1),
+                        };
+                    }
+                }
                 // JS-C78 : l'appel s'exécute dans le realm de la
                 // FONCTION — son env capturée racine sur le
                 // `global_env` de son contexte (« job callback
@@ -7094,8 +7132,17 @@ impl Engine {
                 // emportent leurs `Rc` (DomRef/NodeCache), les
                 // objets same-origin restent donc valides.
                 let prev = self.cur_ctx;
+                if let Ok(mut g) = crate::LAST_PHASE.lock() {
+                    *g = "ctx";
+                }
                 if let Some(t) = self.ctx_of_env(&env) {
+                    if let Ok(mut g) = crate::LAST_PHASE.lock() {
+                        *g = "sw";
+                    }
                     self.switch_to(t);
+                }
+                if let Ok(mut g) = crate::LAST_PHASE.lock() {
+                    *g = "csb";
                 }
                 let r = self.call_script_body(cur, &lit, env, lex_this, this, args_ref, nt);
                 if self.cur_ctx != prev {
@@ -7198,6 +7245,12 @@ impl Engine {
         // référence (`fn.length`, `args_map`).
         let lowered_fn =
             (lit.is_gen || lit.is_async).then(|| crate::interp::lazy::lower_suspend_fn(lit));
+        // §B-59 : sous-phase « bind » — `last_phase` figé à
+        // « bind » = mort dans le liage de paramètres
+        // (`bind_pat` × N params, `...rest`, défauts).
+        if let Ok(mut g) = crate::LAST_PHASE.lock() {
+            *g = "bind";
+        }
         // Param binding: patterns + `= default` + `...rest`.
         for (i, p) in lowered_fn
             .as_ref()
@@ -7223,6 +7276,9 @@ impl Engine {
         // Annex B sloppy : `arguments.callee` → la fonction
         // (strict : absent — déviation vs le poisoned
         // accessor de la spec, la lecture rend `undefined`).
+        if let Ok(mut g) = crate::LAST_PHASE.lock() {
+            *g = "argv";
+        }
         let argv = (!lit.is_arrow).then(|| {
             let a = self.new_array(args.to_vec());
             if let Value::Obj(aid) = a {
@@ -7274,6 +7330,9 @@ impl Engine {
         // contexte d'exécution englobant, pas de l'arrow).
         if !lit.is_arrow {
             Self::env_put(&local, NEW_TARGET, nt, false);
+        }
+        if let Ok(mut g) = crate::LAST_PHASE.lock() {
+            *g = "hoist";
         }
         let lowered_body = lowered_fn.as_ref().map(|(_, b)| b.clone());
         self.hoist(

@@ -159,6 +159,73 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   scripts suivants tournent.
   Verrou : `deadline_flag_does_
   not_leak_to_next_eval`.
+- **JS-C264 — §B-59 2ᵉ racine :
+  chaîne parent cyclique →
+  `ancestors` non borné**
+  (`explorer-jscore`) — diagnostic
+  vols 546-551 (journal
+  `EXPLORER_JS_BREADCRUMB` en
+  thread externe + `LAST_FUN`/
+  `LAST_HOST`/`calls=`/sous-phases
+  + kill `EXPLORER_JS_COMMIT_KILL_MB`)
+  : `host=Event:relatedTarget`
+  figé avec heap plat → le
+  dispatch `mouseover/out→enter/
+  leave` appelle `Dom::ancestors`
+  qui marchait la chaîne `parent`
+  **sans borne de cycle** — un
+  parent cyclique poussait un
+  `Vec<NodeId>` à l'infini
+  (~150 Mio/s hors tout compteur,
+  4,3 Gio mesurés franceinter).
+  Le cycle était créé par les
+  mutateurs bas niveau sans check
+  ancêtre. Fix triple défense :
+  (a) toutes les marches `parent`
+  bornées par `nodes.len()`
+  (motif `root_of`) —
+  `ancestors`, `element_path`,
+  `closest`, `slot_assigned`,
+  `focus_within`, `inherited_attr`,
+  `offset_parent_node`,
+  `radio_group_checked`,
+  `is_ancestor_or_self` (relevé
+  512→arène, avec fast-path
+  feuille O(1) pour ne pas payer
+  O(prof²) au parse `innerHTML`) ;
+  (b) les mutateurs `append`/
+  `insert_before`/`replace_children`
+  (filtrage **avant** réécriture
+  `children`, miroir cohérent)/
+  `splice_fragment`/`replace_child`
+  rejettent silencieusement un
+  fils ancêtre-ou-soi — couvre
+  tous les appelants internes,
+  miroir inclus ; (c) spec JS :
+  `prepend`/`before`/`after`/
+  `replaceWith` jettent
+  `HierarchyRequestError`.
+  Verrous `b59_probe.rs`
+  (`cyclic_parent_chain_bounded`,
+  `mutators_reject_ancestor_cycles`).
+  Vol 552 : franceinter http=200,
+  titre réel, `doc_h` 29 491,
+  plateau WorkingSet 3 465 392 Ko
+  figé vs mort au cap 5 Gio ×7
+  vols — bras RÉSOLU. Réparé au
+  passage une régression JS-C263
+  (lectures en place) :
+  `str_slice_u16` snappait les
+  bornes aux frontières de char
+  (coupe dans une paire → astral
+  entier au lieu du surrogate
+  isolé → U+FFFD) et
+  `startsWith`/`endsWith` avec
+  position interne à une paire
+  matchaient au char voisin —
+  sémantique code-units restaurée
+  (verrou `c23_utf16_positions_
+  and_slices` à nouveau vert).
 - **JS-C263 — §B-59 classe chaîne :
   matérialisations/clones bornés**
   (`explorer-jscore`) — lectures de

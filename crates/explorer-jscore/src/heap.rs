@@ -182,10 +182,7 @@ impl Heap {
     /// giant` = 2 clones commit sans comptage, §B-59) ; la
     /// comparaison en place est gratuite.
     pub fn str_eq(&self, a: ObjId, b: ObjId) -> bool {
-        match (
-            self.cells.get(a as usize),
-            self.cells.get(b as usize),
-        ) {
+        match (self.cells.get(a as usize), self.cells.get(b as usize)) {
             (
                 Some(Some(Cell {
                     data: CellData::Str(x),
@@ -261,8 +258,15 @@ impl Heap {
         else {
             return None;
         };
-        let (ba, bb) = (Self::u16_pos_to_byte(s, a), Self::u16_pos_to_byte(s, b));
-        Some(s[ba..bb].to_string())
+        // Tranche en code units (spec) — pas en octets :
+        // `u16_pos_to_byte` snappait à la frontière de char et
+        // avalait l'astral entier quand la coupe tombait dans
+        // une paire surrogate. On décode les units `[a,b)` à la
+        // volée ; surrogate isolé → U+FFFD (déviation documentée,
+        // `split('')`/`u16_to_string` idem) — régression JS-C263,
+        // verrou `c23_utf16_positions_and_slices`.
+        let units: Vec<u16> = s.encode_utf16().skip(a).take(b.saturating_sub(a)).collect();
+        Some(String::from_utf16_lossy(&units))
     }
 
     /// Borrow a string's contents (cloned — strings are short here).

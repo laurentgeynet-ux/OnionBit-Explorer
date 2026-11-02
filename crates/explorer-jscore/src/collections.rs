@@ -163,10 +163,7 @@ pub(crate) fn map_set_entry(e: &mut Engine, id: ObjId, k: Value, v: Value) -> Js
     // Two-phase: find the slot immutably, then mutate — `svz` needs
     // the heap for string comparison.
     let (pos, len) = e.heap.obj(id).map_or((None, 0), |o| match &o.kind {
-        ObjKind::Map(m) => (
-            m.iter().position(|(ek, _)| svz(&e.heap, *ek, k)),
-            m.len(),
-        ),
+        ObjKind::Map(m) => (m.iter().position(|(ek, _)| svz(&e.heap, *ek, k)), m.len()),
         _ => (None, 0),
     });
     if pos.is_none() {
@@ -174,9 +171,7 @@ pub(crate) fn map_set_entry(e: &mut Engine, id: ObjId, k: Value, v: Value) -> Js
         // insert — un drain `m.set(k,v)` hostile commet ~6 Go de
         // reserve entre deux ticks (§B-59, même classe que les
         // `props`/`elems` bornés).
-        e.alloc_guard(
-            (len + 1).saturating_mul(std::mem::size_of::<(Value, Value)>()),
-        )?;
+        e.alloc_guard((len + 1).saturating_mul(std::mem::size_of::<(Value, Value)>()))?;
     }
     let Some(o) = e.heap.obj_mut(id) else {
         return Ok(());
@@ -199,9 +194,7 @@ pub(crate) fn set_add(e: &mut Engine, id: ObjId, v: Value) -> JsResult<()> {
     if has {
         return Ok(());
     }
-    e.alloc_guard(
-        (len + 1).saturating_mul(std::mem::size_of::<Value>()),
-    )?;
+    e.alloc_guard((len + 1).saturating_mul(std::mem::size_of::<Value>()))?;
     if let Some(o) = e.heap.obj_mut(id) {
         if let ObjKind::Set(s) = &mut o.kind {
             s.push(v);
@@ -244,12 +237,12 @@ fn map_get(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
 
 fn map_has(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let k = arg(args, 0);
-    Ok(Value::Bool(e.heap.obj(c_id(this)).is_some_and(|o| {
-        match &o.kind {
+    Ok(Value::Bool(e.heap.obj(c_id(this)).is_some_and(
+        |o| match &o.kind {
             ObjKind::Map(m) => m.iter().any(|(ek, _)| svz(&e.heap, *ek, k)),
             _ => false,
-        }
-    })))
+        },
+    )))
 }
 
 fn map_delete(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
@@ -407,12 +400,12 @@ fn set_add_m(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
 
 fn set_has(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let v = arg(args, 0);
-    Ok(Value::Bool(e.heap.obj(c_id(this)).is_some_and(|o| {
-        match &o.kind {
+    Ok(Value::Bool(e.heap.obj(c_id(this)).is_some_and(
+        |o| match &o.kind {
             ObjKind::Set(s) => s.iter().any(|&ev| svz(&e.heap, ev, v)),
             _ => false,
-        }
-    })))
+        },
+    )))
 }
 
 fn set_delete(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
