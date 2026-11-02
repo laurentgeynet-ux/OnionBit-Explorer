@@ -64,6 +64,7 @@ pub(crate) fn parse_in(
         priv_seq: 0,
         priv_scopes: Vec::new(),
         src_name,
+        src_text: Some(Rc::from(src)),
         close_of,
     };
     p.scan_directives();
@@ -106,6 +107,7 @@ pub(crate) fn parse_module_in(
         priv_seq: 0,
         priv_scopes: Vec::new(),
         src_name,
+        src_text: Some(Rc::from(src)),
         close_of,
     };
     p.scan_directives();
@@ -175,6 +177,11 @@ struct Parser {
     /// Nom de la source en cours de parse — copié dans chaque
     /// `FnLit.src` pour les frames `error.stack` (JS-C56).
     src_name: Option<Rc<str>>,
+    /// Texte source verbatim — copié dans chaque `FnLit.src_text` ;
+    /// `span` (offsets caractères) le tranche pour `toString()`
+    /// spec (JS-C264). `None` dans les sous-parseurs de template
+    /// (`${…}` : offsets relatifs au segment, non tranchables).
+    src_text: Option<Rc<str>>,
     /// `close_of[i]` = index du jeton qui ferme le délimiteur
     /// ouvrant à l'index `i` (`(`/`[`/`{`) — `usize::MAX` sinon.
     /// Calculée en une passe O(n) : la spéculation `(params) =>`
@@ -200,6 +207,19 @@ impl Parser {
     /// d'un `FnLit` (JS-C47, rendue dans `error.stack`).
     fn pos_here(&self) -> (usize, usize) {
         (self.cur().line, self.cur().col)
+    }
+
+    /// Offset caractère du premier caractère du jeton courant —
+    /// borne gauche de `FnLit::span` (toString verbatim, JS-C264).
+    fn off_here(&self) -> usize {
+        self.cur().off
+    }
+
+    /// Offset caractère juste après le dernier caractère du jeton
+    /// **précédemment consommé** — borne droite de `FnLit::span`
+    /// (le `}` final d'un corps, la fin d'une expression-flèche…).
+    fn off_prev_end(&self) -> usize {
+        self.toks[self.pos.saturating_sub(1)].end
     }
 
     fn next(&mut self) -> &Token {
@@ -1470,9 +1490,11 @@ impl Parser {
                 .is_some_and(|t| t.tok == Tok::P(P::Arrow))
             {
                 let pos = self.pos_here();
+                let soff = self.off_here();
                 self.next();
                 self.next();
                 let (body, strict) = self.arrow_body(no_in)?;
+                let eoff = self.off_prev_end();
                 return Ok(Some(Expr::Function(Rc::new(FnLit {
                     name: None,
                     params: vec![Param {
@@ -1486,6 +1508,8 @@ impl Parser {
                     strict,
                     pos,
                     src: self.src_name.clone(),
+                    src_text: self.src_text.clone(),
+                    span: (soff, eoff),
                 }))));
             }
         }
@@ -1504,10 +1528,12 @@ impl Parser {
         {
             let save = self.pos;
             let pos = self.pos_here();
+            let soff = self.off_here();
             if let Some(params) = self.scan_arrow_params() {
                 // cursor is on `=>`
                 self.next();
                 let (body, strict) = self.arrow_body(no_in)?;
+                let eoff = self.off_prev_end();
                 return Ok(Some(Expr::Function(Rc::new(FnLit {
                     name: None,
                     params,
@@ -1518,6 +1544,8 @@ impl Parser {
                     strict,
                     pos,
                     src: self.src_name.clone(),
+                    src_text: self.src_text.clone(),
+                    span: (soff, eoff),
                 }))));
             }
             self.pos = save;
@@ -1530,6 +1558,7 @@ impl Parser {
     fn try_async_arrow(&mut self, no_in: bool) -> Result<Option<Expr>> {
         let save = self.pos;
         let pos = self.pos_here();
+        let soff = self.off_here();
         self.next(); // `async`
                      // `async x => e`
         if let Tok::Ident(name) = self.peek().clone() {
@@ -1541,6 +1570,7 @@ impl Parser {
                 self.next();
                 self.next();
                 let (body, strict) = self.arrow_body(no_in)?;
+                let eoff = self.off_prev_end();
                 return Ok(Some(Expr::Function(Rc::new(FnLit {
                     name: None,
                     params: vec![Param {
@@ -1554,6 +1584,8 @@ impl Parser {
                     strict,
                     pos,
                     src: self.src_name.clone(),
+                    src_text: self.src_text.clone(),
+                    span: (soff, eoff),
                 }))));
             }
             self.pos = save;
@@ -1572,6 +1604,7 @@ impl Parser {
                 if self.check_p(P::Arrow) {
                     self.next();
                     let (body, strict) = self.arrow_body(no_in)?;
+                    let eoff = self.off_prev_end();
                     return Ok(Some(Expr::Function(Rc::new(FnLit {
                         name: None,
                         params,
@@ -1582,6 +1615,8 @@ impl Parser {
                         strict,
                         pos,
                         src: self.src_name.clone(),
+                        src_text: self.src_text.clone(),
+                        span: (soff, eoff),
                     }))));
                 }
             }
@@ -2119,6 +2154,9 @@ impl Parser {
                 props.push(ObjProp::Spread(self.assign(no_in)?));
             } else {
                 let kpos = self.pos_here();
+                // V8 : le source de la méthode part du premier
+                // jeton du membre — `get`/`set`/`async`/`*`/clé.
+                let koff = self.off_here();
                 // `*m(){}` generator method / `async *m(){}`.
                 let mut gen = self.eat_p(P::Star);
                 // `async m(){}` method.
@@ -2178,6 +2216,8 @@ impl Parser {
                             strict: body.1,
                             pos: kpos,
                             src: self.src_name.clone(),
+                            src_text: self.src_text.clone(),
+                            span: (koff, self.off_prev_end()),
                         });
                         props.push(if kind == ClassMemberKind::Getter {
                             ObjProp::Getter(key, fun)
@@ -2206,6 +2246,8 @@ impl Parser {
                                 strict: body.1,
                                 pos: kpos,
                                 src: self.src_name.clone(),
+                                src_text: self.src_text.clone(),
+                                span: (koff, self.off_prev_end()),
                             })),
                         ));
                     }
@@ -2301,6 +2343,10 @@ impl Parser {
                         priv_seq: self.priv_seq,
                         priv_scopes: self.priv_scopes.clone(),
                         src_name: self.src_name.clone(),
+                        // Tokens relatifs au segment `${…}` —
+                        // offsets non tranchables dans la source
+                        // complète → toString repli `[code]`.
+                        src_text: None,
                         close_of,
                     };
                     let e = sub.expr(no_in)?;
@@ -2323,6 +2369,14 @@ impl Parser {
     /// resolved promise — see ast.rs).
     fn function(&mut self, decl: bool, async_: bool) -> Result<Rc<FnLit>> {
         let pos = self.pos_here();
+        // `async function` : l'appelant a déjà consommé `async` —
+        // V8 l'inclut dans le source rendu (`async function f(){}`)
+        // → le span part du jeton précédent.
+        let soff = if async_ {
+            self.toks[self.pos.saturating_sub(1)].off
+        } else {
+            self.off_here()
+        };
         self.expect_kw(Kw::Function, "`function`")?;
         // `function*` / `async function*`.
         let gen = self.eat_p(P::Star);
@@ -2353,6 +2407,7 @@ impl Parser {
         // du corps englobant (parse `expected ';'` — spotify
         // `vendor~mobile-web-player`, `__awaiter(this,…,function*(){…})`).
         self.in_gen = outer_gen;
+        let eoff = self.off_prev_end();
         Ok(Rc::new(FnLit {
             name,
             params,
@@ -2363,6 +2418,8 @@ impl Parser {
             strict,
             pos,
             src: self.src_name.clone(),
+            src_text: self.src_text.clone(),
+            span: (soff, eoff),
         }))
     }
 
@@ -2420,6 +2477,9 @@ impl Parser {
     }
 
     fn class_lit_inner(&mut self) -> Result<Rc<ClassLit>> {
+        // `class_off` — borne gauche du span `class …` entier
+        // (V8 : `C.toString()` = le texte `class` complet).
+        let class_off = self.off_here();
         self.expect_kw(Kw::Class, "`class`")?;
         let name = match self.peek().clone() {
             Tok::Ident(s) => {
@@ -2463,6 +2523,10 @@ impl Parser {
                 self.next();
                 static_ = true;
             }
+            // V8 : `static` n'entre pas dans le source de la
+            // méthode (`static m(){}` → `m(){}`) — le span part
+            // du jeton suivant (`async`/`*`/`get`/`set`/clé/`{`).
+            let fn_off = self.off_here();
             // `static { … }` — bloc d'initialisation statique.
             if static_ && self.check_p(P::LBrace) {
                 self.next();
@@ -2484,6 +2548,8 @@ impl Parser {
                         strict: true,
                         pos: mpos,
                         src: self.src_name.clone(),
+                        src_text: self.src_text.clone(),
+                        span: (fn_off, self.off_prev_end()),
                     }),
                 });
                 continue;
@@ -2560,6 +2626,8 @@ impl Parser {
                         strict: true,
                         pos: mpos,
                         src: self.src_name.clone(),
+                        src_text: self.src_text.clone(),
+                        span: (fn_off, self.off_prev_end()),
                     }),
                 });
                 continue;
@@ -2592,6 +2660,8 @@ impl Parser {
                     strict: true,
                     pos: mpos,
                     src: self.src_name.clone(),
+                    src_text: self.src_text.clone(),
+                    span: (fn_off, self.off_prev_end()),
                 }),
             });
         }
@@ -2601,6 +2671,8 @@ impl Parser {
             name,
             super_,
             members,
+            src_text: self.src_text.clone(),
+            span: (class_off, self.off_prev_end()),
         }))
     }
 }

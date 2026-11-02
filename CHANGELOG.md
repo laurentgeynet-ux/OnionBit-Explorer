@@ -7,6 +7,39 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **JS-C264 — `Function.prototype.
+  toString` verbatim** (`explorer-
+  jscore`, §B-72 bras 2 — fifa
+  `_abck` vol 504) — la spec rend
+  le texte source (V8 verbatim) ;
+  notre stub `function f(…) {
+  [code] }` trahissait toute
+  intégrité-décodage. La VM
+  Akamai décode ses clés de
+  dispatch depuis `toString()` de
+  ses propres fonctions (le source
+  est son codebook — prouvé par
+  bissection Node : un patch dans
+  le texte appelant déplace les
+  clés produites) → le slot `W`
+  des tables de handlers n'était
+  jamais peuplé → `` `W` is not a
+  function ``. `Token` porte
+  désormais `off`/`end` (offsets
+  caractères), `FnLit`/`ClassLit`
+  un `src_text` + `span` : fns,
+  `async`/`function*`, flèches,
+  méthodes objet/classe (`get`/
+  `set`/`async`/`*` inclus,
+  `static` exclu) et `class …`
+  entier rendent leur texte exact ;
+  sous-parseurs de `` `${…}` `` en
+  repli. Verrous :
+  `function_tostring_verbatim_
+  source` (lang) +
+  `akamai_bundle_evals_clean`
+  (b72_probe — le bundle brut
+  609 Ko évalue à terme).
 - **JS-C262 — `Didomi.notice.
   isVisible`** (`explorer-jscore`,
   §B-70 résiduel — wamiz vol 504)

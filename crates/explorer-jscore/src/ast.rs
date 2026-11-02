@@ -339,6 +339,18 @@ pub struct FnLit {
     /// (triage de site réel — JS-C50/C56). `None` = source sans
     /// nom ou fonction synthétique.
     pub src: Option<Rc<str>>,
+    /// Texte source verbatim de l'unité qui a produit ce littéral
+    /// (JS-C264) — `Function.prototype.toString` le tranche avec
+    /// `span` pour rendre le code tel qu'écrit (spec : « source
+    /// text », V8 verbatim). `None` = fonction synthétisée par le
+    /// moteur ou fonction issue d'une substitution de template
+    /// (offsets relatifs au segment, non tranchables) → repli
+    /// `function name(…) { [code] }`.
+    pub src_text: Option<Rc<str>>,
+    /// `(début, fin)` en **caractères** du littéral dans `src_text`
+    /// — mot-clé `function`/`async`/`class`… inclus, `}` final
+    /// inclus. `(0, 0)` sans `src_text`.
+    pub span: (usize, usize),
 }
 
 /// One formal parameter.
@@ -359,6 +371,15 @@ pub struct ClassLit {
     pub super_: Option<Expr>,
     /// Members in source order.
     pub members: Vec<ClassMember>,
+    /// Texte source verbatim + span du littéral `class …` entier
+    /// (JS-C264) — `C.toString()` rend `class C {…}` tel qu'écrit
+    /// (V8 : le constructeur expose le source de la classe, pas le
+    /// seul corps du ctor). Recopié sur le `FnLit` du ctor dans
+    /// `eval_class`. `None`/`(0,0)` hors source directe.
+    pub src_text: Option<Rc<str>>,
+    /// `(début, fin)` en caractères — du mot-clé `class` au `}`
+    /// final inclus.
+    pub span: (usize, usize),
 }
 
 /// One class member.

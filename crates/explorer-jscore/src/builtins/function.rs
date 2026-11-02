@@ -64,6 +64,18 @@ pub(crate) fn function_to_string(e: &mut Engine, this: Value, _a: &[Value]) -> J
     let out = match this {
         Value::Obj(id) => match e.heap.obj(id).map(|o| &o.kind) {
             Some(ObjKind::Fun(crate::heap::Fun::Script { lit, .. })) => {
+                // Spec `Function.prototype.toString` : le texte
+                // source verbatim (V8). Les bundles anti-bot
+                // (Akamai `_abck`, §B-72) décodent leurs clés VM
+                // depuis leur propre source — un stub `{ [code] }`
+                // diverge → clés fausses → dispatch mort.
+                if let Some(t) = &lit.src_text {
+                    let (soff, eoff) = lit.span;
+                    if eoff > soff {
+                        let txt: String = t.chars().skip(soff).take(eoff - soff).collect();
+                        return Ok(e.str_val(txt));
+                    }
+                }
                 let name = lit.name.clone().unwrap_or_default();
                 // Paramètres reconstruits depuis les patterns
                 // (approximation — la spec rend le texte source ;

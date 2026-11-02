@@ -5380,6 +5380,37 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   `` `x` is not a function ``
   nomme `[got …]` + les propres
   valeurs du receveur (`fn@pos`).
+
+- [x] **JS-C264.
+  `Function.prototype.toString`
+  verbatim** (`explorer-jscore`,
+  §B-72 bras 2 — fifa `_abck`
+  vol 504) — la VM Akamai lit le
+  source de ses propres fonctions
+  comme codebook de décodage
+  (bissection Node : patcher le
+  texte appelant déplace les clés
+  produites — anti-tamper) ; le
+  stub `{ [code] }` rendait des
+  clés divergentes → `` `W` is
+  not a function `` sur tables de
+  handlers. `Token.off`/`end` +
+  `FnLit`/`ClassLit.src_text`/
+  `span` : le parseur consigne
+  les offsets caractères du
+  littéral et toString tranche
+  verbatim (fns, `async`/`gen`,
+  flèches, méthodes objet/classe,
+  `class …` entier via rewrap du
+  ctor dans `eval_class`) ; le
+  bundle brut 609 Ko évalue à
+  terme. Verrous : lang +
+  b72_probe actif. Bras 3
+  (reload-driver → locale gate
+  `/`→`/en`, compris : shell
+  reservi sans locale = reboucle
+  corpus, pas un driver interne)
+  reste un établi `#[ignore]`.
   Reste : §B-72 bras 2 (Akamai —
   receveur `W` = table VM locale,
   clé calculée non littérale) +

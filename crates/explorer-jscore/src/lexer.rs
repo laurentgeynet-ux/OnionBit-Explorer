@@ -263,6 +263,13 @@ pub struct Token {
     pub col: usize,
     /// Whether at least one line break occurred before this token.
     pub newline_before: bool,
+    /// Index (en caractères) du premier caractère du jeton dans la
+    /// source lexée — borne gauche du span pour
+    /// `Function.prototype.toString` verbatim (JS-C264).
+    pub off: usize,
+    /// Index (en caractères) juste après le dernier caractère du
+    /// jeton — borne droite du span (`end == off` pour `Eof`).
+    pub end: usize,
     /// Literal carries a legacy octal form (`010`, `08`, `\1`) —
     /// tolerated in sloppy mode, `SyntaxError` in strict mode
     /// (checked by the parser, which owns the directive prologue).
@@ -369,6 +376,7 @@ impl Lexer {
         loop {
             let newline_before = self.skip_trivia()?;
             let (line, col) = (self.line, self.col);
+            let off = self.pos;
             self.legacy_octal = false;
             let tok = match self.peek() {
                 None => Tok::Eof,
@@ -421,6 +429,8 @@ impl Lexer {
                 line,
                 col,
                 newline_before,
+                off,
+                end: self.pos,
                 legacy_octal: self.legacy_octal,
             });
             if is_eof {

@@ -4747,10 +4747,26 @@ impl Engine {
                         strict: true, // corps de classe
                         pos: (0, 0),  // synthétisée — pas de site source
                         src: None,    // synthétisée — pas de source
+                        src_text: None,
+                        span: (0, 0),
                     })
                 },
                 |m| m.fun.clone(),
             );
+        // `C.toString()` rend le texte `class …` **entier** (spec
+        // `Function.prototype.toString`, source de la classe — V8
+        // verbatim), pas le seul corps du ctor : le `FnLit` du ctor
+        // (explicite ou synthétisé) reçoit le span `class`.
+        let ctor_lit = if let Some(t) = &cl.src_text {
+            // `FnLit` implémente `Drop` (AST profond) — pas de
+            // struct-update syntax : clone puis pose des champs.
+            let mut l = (*ctor_lit).clone();
+            l.src_text = Some(t.clone());
+            l.span = cl.span;
+            Rc::new(l)
+        } else {
+            ctor_lit
+        };
         let ctor = self.make_function(&ctor_lit, &cenv, this);
         let Value::Obj(ctor_id) = ctor else {
             return Err(self.type_error("internal class error"));

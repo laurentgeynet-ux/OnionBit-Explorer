@@ -7783,19 +7783,21 @@ fn c24_weak_collection_protos() {
 
 #[test]
 fn c24_function_to_string() {
-    // Paramètres reconstruits (approximation spec du texte source).
+    // Texte source verbatim (spec `toString`, JS-C264) — le stub
+    // reconstruit `{ [code] }` trahissait l'intégrité-décodage
+    // des bundles anti-bot (§B-72 akamai `_abck`).
     assert_eq!(
         ev_str("function foo(a,b){return a};foo.toString()"),
-        "function foo(a, b) { [code] }"
+        "function foo(a,b){return a}"
     );
-    assert_eq!(ev_str("let f=(x)=>x*2;f.toString()"), "(x) => { [code] }");
+    assert_eq!(ev_str("let f=(x)=>x*2;f.toString()"), "(x)=>x*2");
     assert_eq!(
-        ev_str("function* g(a){};g.toString().slice(0,10)"),
-        "function* "
+        ev_str("function* g(a){};g.toString()"),
+        "function* g(a){}"
     );
     assert_eq!(
-        ev_str("async function h(){};h.toString().slice(0,15)"),
-        "async function "
+        ev_str("async function h(){};h.toString()"),
+        "async function h(){}"
     );
     assert_eq!(
         ev_str("Math.max.toString()"),
@@ -7805,10 +7807,10 @@ fn c24_function_to_string() {
         ev_str("let f=function(){};f.bind(null).toString()"),
         "function () { [native code] }"
     );
-    // Rest/destructuring → forme reconstruite approximative.
+    // Rest/destructuring → texte exact des paramètres.
     assert_eq!(
         ev_str("function r(...a){};r.toString()"),
-        "function r(...a) { [code] }"
+        "function r(...a){}"
     );
 }
 
@@ -8713,4 +8715,61 @@ fn object_call_boxes_primitive() {
     assert_eq!(ev_str("Object(undefined).constructor === Object"), "true");
     // `Object(obj)` rend l'objet tel quel (identité).
     assert_eq!(ev_str("var o={};Object(o)===o"), "true");
+}
+
+/// §B-72 fifa akamai vol 504 — `Function.prototype.toString`
+/// rend le texte source **verbatim** (spec `toString`, V8) : la
+/// VM `_abck` décode ses clés depuis son propre source — un stub
+/// `{ [code] }` divergeait → clés calculées fausses →
+/// `` `W` is not a function `` sur la table de handlers.
+/// Couverture : décl, expr, async/gen, flèches, méthodes
+/// objet/classe, get/set, `static` exclu, classe entière.
+#[test]
+fn function_tostring_verbatim_source() {
+    // Déclaration + expression — texte exact, commentaires inclus.
+    assert_eq!(
+        ev_str("function decl(a,b=2,...r){/*c*/return a};decl.toString()"),
+        "function decl(a,b=2,...r){/*c*/return a}"
+    );
+    assert_eq!(
+        ev_str("var e=function(){return 1};e.toString()"),
+        "function(){return 1}"
+    );
+    // `async`/`function*` inclus dans le texte.
+    assert_eq!(
+        ev_str("async function af(){};af.toString()"),
+        "async function af(){}"
+    );
+    assert_eq!(ev_str("function* gf(){};gf.toString()"), "function* gf(){}");
+    // Flèches — forme exacte de la tête.
+    assert_eq!(ev_str("var a=x=>x+1;a.toString()"), "x=>x+1");
+    assert_eq!(ev_str("var a2=async x=>x;a2.toString()"), "async x=>x");
+    assert_eq!(ev_str("var a3=(x,y)=>x*y;a3.toString()"), "(x,y)=>x*y");
+    // Méthodes objet : clé/`get`/`set`/`async`/`*` inclus.
+    assert_eq!(
+        ev_str("var o={m(){return 7},get x(){return 1},set x(v){},*g(){},async am(){}};o.m.toString()+'|'+Object.getOwnPropertyDescriptor(o,'x').get.toString()+'|'+Object.getOwnPropertyDescriptor(o,'x').set.toString()+'|'+o.g.toString()+'|'+o.am.toString()"),
+        "m(){return 7}|get x(){return 1}|set x(v){}|*g(){}|async am(){}"
+    );
+    // `static` exclu du source de la méthode ; classe = texte entier.
+    assert_eq!(
+        ev_str("var C=class{static sm(){} m2(){}};C.sm.toString()"),
+        "sm(){}"
+    );
+    assert_eq!(
+        ev_str("var C2=class Named{constructor(){this.a=1}};C2.toString()"),
+        "class Named{constructor(){this.a=1}}"
+    );
+    assert_eq!(
+        ev_str("var C3=class{constructor(){}};C3.toString()"),
+        "class{constructor(){}}"
+    );
+    // Natifs/bindings : repli `[native code]` (inchangé).
+    assert_eq!(
+        ev_str("Math.max.toString()"),
+        "function max() { [native code] }"
+    );
+    assert_eq!(
+        ev_str("var b=Math.max.bind(null);b.toString()"),
+        "function () { [native code] }"
+    );
 }
