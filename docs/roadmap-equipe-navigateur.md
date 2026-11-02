@@ -5518,6 +5518,38 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   `rss_kill_latch_kills_
   following_evals` (b59b_probe).
 
+- [x] **JS-C278. `await` adopte
+  les thenables étrangers**
+  (`explorer-jscore`, §B-14
+  dailymotion vol 561 + §B-14
+  mastodon vol 116) —
+  `arm_await`/`await_value` ne
+  déroulaient que
+  `ObjKind::Promise` : thenable
+  étranger (polyfill `Promise`
+  des bundles, jQuery Deferred,
+  pont `IDBRequest`) lié brut →
+  `object is not iterable` sur
+  `[s] = await Promise.all(…)`
+  (stack dailymotion), `finally`/
+  `on` not-a-function sur
+  promesses étrangères.
+  `adopt_thenable` factorisé —
+  `then` lu via `get_prop_value`
+  **une fois** (accesseurs +
+  proxies couverts, `get_prop`
+  ignorant les getters) ;
+  recâblé dans `resolve_promise`
+  + `arm_await` (getter-throw →
+  `throw_into`/`Susp`) +
+  `await_value` eager (pending →
+  erreur nommée). Hérités : TLA,
+  `for await`, `fromAsync`,
+  `await req` IDB. Borne :
+  proxy milieu de chaîne proto.
+  11 tests `await_thenable` ;
+  test262 1046/1046 (31 skips).
+
 - [x] **Étape CMP-4. Réarmement
   des balises « bloquées par CMP »**
   (`explorer-core`, §B-4 bras CMP

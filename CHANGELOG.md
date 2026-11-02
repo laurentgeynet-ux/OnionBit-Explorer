@@ -7,6 +7,56 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **JS-C278 — `await` adopte les
+  thenables étrangers**
+  (`explorer-jscore`, §B-14
+  dailymotion vol 561 + §B-14
+  mastodon vol 116) —
+  `arm_await`/`await_value` ne
+  déroulaient que
+  `ObjKind::Promise` : un
+  thenable JS (polyfill
+  `Promise` des bundles, jQuery
+  Deferred, pont `IDBRequest`)
+  liait l'objet brut → `[s] =
+  await Promise.all(…)` →
+  `object is not iterable`,
+  `.finally`/`.on`
+  « not a function » sur
+  promesses étrangères (mur
+  async : apps bootées mortes
+  en comportement).
+  `adopt_thenable` factorisé —
+  `then` lu via
+  `get_prop_value` **une fois**
+  (accesseurs + proxies
+  couverts ; `get_prop` ne
+  déclenchait pas les getters),
+  getter abrupt → reject
+  immédiat, callable →
+  `Job::Thenable` — recâblé
+  dans `resolve_promise` (répare
+  `Promise.resolve`/`all`/`race`
+  sur `then` accesseur),
+  `arm_await` (wrapper →
+  suspension normale ;
+  getter-throw → `throw_into`/
+  `Susp`, jeté au site) et
+  `await_value` eager (thenable
+  pending → erreur nommée —
+  sync-then = réentrance JS
+  arbitraire dans une
+  expression). Hérités : TLA
+  module, `for await` `next()`,
+  `Array.fromAsync`, `await
+  req` IDB. Borne : `then`
+  atteignable via proxy milieu
+  de chaîne proto reste manqué
+  (trou `read_prop` global,
+  pré-existant). 11 tests
+  `await_thenable` ; test262
+  1046/1046 (31 skips) inchangé.
+
 - **Étape 174 — `download_url` :
   contexte requête, job hors-verrou,
   streaming disque** (`explorer-core`,

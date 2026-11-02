@@ -1265,7 +1265,23 @@ impl GExec {
         env: &EnvRef,
         into: Option<String>,
     ) -> JsResult<GFlow> {
-        if let Value::Obj(pid) = v {
+        let mut awaited = v;
+        if matches!(v, Value::Obj(_)) && !e.is_promise(v) {
+            // Thenable étranger (polyfill `Promise` des bundles,
+            // jQuery Deferred, `IDBRequest` pont-thenable —
+            // JS-C278, mur §B-14) : spec `await v` =
+            // `PromiseResolve(%Promise%, v)` — adoption par
+            // `then` callable, appel différé en job. Le wrapper
+            // est Pending (adoption en file) ou Rejected
+            // (getter `then` abrupt → jeté au site ci-dessous) ;
+            // non-thenable → fulfill direct avec `v`.
+            let wrapper = e.new_promise();
+            if !e.adopt_thenable(wrapper, v) {
+                e.settle_promise(wrapper, crate::promise::PromiseState::Fulfilled, v);
+            }
+            awaited = Value::Obj(wrapper);
+        }
+        if let Value::Obj(pid) = awaited {
             let st = e.heap.obj(pid).and_then(|o| match &o.kind {
                 ObjKind::Promise(p) => Some((p.state, p.result)),
                 _ => None,

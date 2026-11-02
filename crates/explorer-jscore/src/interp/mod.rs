@@ -4882,13 +4882,16 @@ impl Engine {
         }
     }
 
-    /// `await v` — unwraps a *settled* promise; a pending one
-    /// throws (tree-walk interpreter cannot suspend — documented
-    /// deviation). Non-promises pass through (spec wraps, same
-    /// observable result).
+    /// `await v` — unwraps a *settled* promise. Foreign
+    /// thenables are adopted like `arm_await` (JS-C278), but
+    /// this eager path cannot suspend: a pending wrapper is
+    /// reported with a named error so flight reports classify
+    /// the wall instantly. Non-thenables pass through (spec
+    /// wraps, same observable result).
     ///
     /// # Errors
-    /// `Rejected` promise → throws its reason; `Pending` → `TypeError`.
+    /// `Rejected` promise → throws its reason; `Pending` or
+    /// foreign thenable → `TypeError`.
     pub(crate) fn await_value(&mut self, v: Value) -> JsResult<Value> {
         if let Value::Obj(id) = v {
             if let Some(ObjKind::Promise(p)) = self.heap.obj(id).map(|o| &o.kind) {
@@ -4902,6 +4905,21 @@ impl Engine {
                         Err(self.type_error("await on a pending promise is unsupported"))
                     }
                 };
+            }
+            // Thenable étranger : le `[[Get]]` canonique lit
+            // `then` une fois (accesseurs, proxies, host `get`).
+            // Callable → l'adoption exige un job que ce chemin ne
+            // peut pas suspendre — erreur nommée plutôt que bind
+            // brut silencieux. Getter abrupt → la raison jette
+            // au site (spec `await` : rejet du wrapper).
+            match self.get_prop_value(v, "then") {
+                Err(Thrown(t)) => return Err(Thrown(t)),
+                Ok(f) if self.is_callable(f) => {
+                    return Err(
+                        self.type_error("await on a foreign thenable is unsupported at this site")
+                    );
+                }
+                Ok(_) => {}
             }
         }
         Ok(v)

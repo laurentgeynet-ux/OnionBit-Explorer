@@ -11,9 +11,11 @@
 //! each event dispatch, after each XHR delivery — matching the spec's
 //! "clean up after running script"/per-task microtask checkpoint.
 //!
-//! `async`/`await` is deferred: our tree-walker cannot suspend a
-//! function mid-body without a CPS transform (needs generators or
-//! bytecode). `Promise` + `then` chains cover the pre-2017 idiom.
+//! `async`/`await` runs on the suspendable `GExec` (JS-C34) —
+//! pending `await` suspends via `then` reactions bound to the
+//! `GenLive`. Foreign thenables (library `Promise` polyfills,
+//! jQuery Deferred, `IDBRequest`…) are adopted on `await` the
+//! same way `resolve` adopts them (JS-C278).
 
 use crate::heap::{JsResult, ObjKind, Thrown};
 use crate::value::{ObjId, Value};
@@ -257,31 +259,58 @@ impl Engine {
             return;
         }
         // Thenable adoption: `obj.then` callable → deferred call.
-        if let Value::Obj(oid) = v {
-            if let Some(then_fn) = self.get_prop(oid, "then") {
-                if std::env::var("EXPLORER_PROM_TRACE").is_ok() {
-                    eprintln!("[res-thenable] callable={}", self.is_callable(then_fn));
-                }
-                if self.is_callable(then_fn) {
-                    let (resolve, reject) = {
-                        let Some(o) = self.heap.obj(id) else { return };
-                        let ObjKind::Promise(p) = &o.kind else { return };
-                        (p.resolve_fn, p.reject_fn)
-                    };
-                    self.microtasks.push_back((
-                        self.cur_ctx,
-                        Job::Thenable {
-                            then_fn,
-                            this: v,
-                            resolve,
-                            reject,
-                        },
-                    ));
-                    return;
-                }
-            }
+        if self.adopt_thenable(id, v) {
+            return;
         }
         self.settle_promise(id, PromiseState::Fulfilled, v);
+    }
+
+    /// Thenable adoption — spec `[[Resolve]](thenable)` : `then`
+    /// est lu **une fois** par le `[[Get]]` canonique
+    /// (`get_prop_value` — accesseurs invoqués, proxies délégants,
+    /// `get` host). Callable → `Job::Thenable` enfilé (appel
+    /// différé en job) ; getter abrupt → rejet immédiat.
+    /// Retourne `true` quand `v` était un thenable (adopté ou
+    /// rejeté) — `false` = non-thenable, l'appelant fulfill `id`
+    /// avec `v` tel quel. Partagé par `resolve` et `await`
+    /// (JS-C278) : un getter `then` à effet de bord ne court
+    /// jamais deux fois.
+    pub(crate) fn adopt_thenable(&mut self, id: ObjId, v: Value) -> bool {
+        if !matches!(v, Value::Obj(_)) {
+            return false;
+        }
+        let then_fn = match self.get_prop_value(v, "then") {
+            Ok(f) => f,
+            Err(Thrown(t)) => {
+                self.reject_promise(id, t);
+                return true;
+            }
+        };
+        if std::env::var("EXPLORER_PROM_TRACE").is_ok() {
+            eprintln!("[res-thenable] callable={}", self.is_callable(then_fn));
+        }
+        if !self.is_callable(then_fn) {
+            return false;
+        }
+        let (resolve, reject) = {
+            let Some(o) = self.heap.obj(id) else {
+                return true;
+            };
+            let ObjKind::Promise(p) = &o.kind else {
+                return true;
+            };
+            (p.resolve_fn, p.reject_fn)
+        };
+        self.microtasks.push_back((
+            self.cur_ctx,
+            Job::Thenable {
+                then_fn,
+                this: v,
+                resolve,
+                reject,
+            },
+        ));
+        true
     }
 
     /// Reject path — plain settle.
