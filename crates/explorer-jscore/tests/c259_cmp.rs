@@ -297,17 +297,29 @@ fn uspapi_reflects_policy() {
     assert_eq!(ev(&mut e, "r.join(',')"), "1YNN");
 }
 
-/// `__gpp` — `ping` → descripteur chargé ; autre commande →
-/// `(null,false)` borné.
+/// `__gpp` — `ping` → descripteur chargé CMP-less
+/// (`supportedAPIs` vide — déclarer des sections inservables
+/// provoquait `GPP section uspv1 is not supported` côté site,
+/// §B-14 webtoons vol 529) ; commandes spec répondues
+/// honnêtement `(donnée vide, true)`.
 #[test]
 fn gpp_ping_loaded() {
     let mut e = engine_policy(CmpPolicy::RejectAll);
-    e.eval("var r;__gpp('ping',function(d,ok){r=[ok,d.cmpStatus,d.gppVersion,d.signalStatus]})")
+    e.eval("var r;__gpp('ping',function(d,ok){r=[ok,d.cmpStatus,d.gppVersion,d.signalStatus,d.supportedAPIs.length]})")
         .unwrap();
-    assert_eq!(ev(&mut e, "r.join(',')"), "true,loaded,1.1,ready");
-    e.eval("var s;__gpp('getSection',function(d,ok){s=[d===null,ok]})")
+    assert_eq!(ev(&mut e, "r.join(',')"), "true,loaded,1.1,ready,0");
+    e.eval("var s;__gpp('getSection',function(d,ok){s=[d.length,ok]})")
         .unwrap();
-    assert_eq!(ev(&mut e, "s.join(',')"), "true,false");
+    assert_eq!(ev(&mut e, "s.join(',')"), "0,true");
+    e.eval("var h;__gpp('hasSection',function(d,ok){h=[d,ok]})")
+        .unwrap();
+    assert_eq!(ev(&mut e, "h.join(',')"), "false,true");
+    e.eval("var f;__gpp('getField',function(d,ok){f=[d===null,ok]})")
+        .unwrap();
+    assert_eq!(ev(&mut e, "f.join(',')"), "true,true");
+    e.eval("var u;__gpp('unknown',function(d,ok){u=[d===null,ok]})")
+        .unwrap();
+    assert_eq!(ev(&mut e, "u.join(',')"), "true,false");
 }
 
 /// `OneTrust` — `OnetrustActiveGroups` de la politique ;

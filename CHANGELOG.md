@@ -7,6 +7,28 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **JS-C271 — `__gpp` CMP-less
+  cohérent** (`explorer-jscore`,
+  §B-14 webtoons vol 529 —
+  `GPP section uspv1 is not
+  supported`) — le stub
+  déclarait `usp1`/`usnat`/`usca`
+  dans `supportedAPIs` sans
+  servir les commandes de
+  section : les sites lisaient
+  `uspv1` supporté, appelaient
+  `getSection`, recevaient
+  `(null,false)` et jetaient.
+  `supportedAPIs` → `[]`
+  (honnête : pas de CMP =
+  aucune section) ; `hasSection`
+  → `(false,true)`, `getSection`
+  → `([],true)`, `getField` →
+  `(null,true)` — réponses spec
+  vides au lieu du rejet
+  générique. Verrou
+  `gpp_ping_loaded` étendu.
+
 - **JS-C270 — `contentWindow`
   lazy sur iframe dynamique**
   (`explorer-jscore`, §B-14

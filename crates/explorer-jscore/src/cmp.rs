@@ -593,11 +593,12 @@ fn gpp(e: &mut Engine, _t: Value, a: &[Value]) -> JsResult<Value> {
             let sv = e.str_val(s);
             e.set_own(o, k, sv, true);
         }
-        let apis: Vec<Value> = ["5:usp1", "7:usnat", "8:usca"]
-            .iter()
-            .map(|s| e.str_val(*s))
-            .collect();
-        let apis = e.new_array(apis);
+        // CMP-less honnête : `supportedAPIs` vide — déclarer
+        // `usp1`/`usnat`/`usca` sans savoir servir les sections
+        // poussait les sites à `getSection('uspv1')` → rejet
+        // `(null,false)` → leur propre `GPP section uspv1 is
+        // not supported` (§B-14 webtoons vol 529).
+        let apis = e.new_array(Vec::new());
         e.set_own(o, "supportedAPIs", apis, true);
         let gs = e.str_val("");
         e.set_own(o, "gppString", gs, true);
@@ -607,7 +608,29 @@ fn gpp(e: &mut Engine, _t: Value, a: &[Value]) -> JsResult<Value> {
         e.set_own(o, "applicableSections", neg, true);
         e.call_value(cb, Value::Undefined, &[Value::Obj(o), Value::Bool(true)])?;
     } else {
-        e.call_value(cb, Value::Undefined, &[Value::Null, Value::Bool(false)])?;
+        // Commandes spec répondues honnêtement (`success=true`,
+        // donnée vide) plutôt que le rejet générique — les
+        // sondeurs de section vivent (pas de CMP = aucune
+        // section, pas une erreur).
+        match cmd.as_str() {
+            "hasSection" => {
+                e.call_value(
+                    cb,
+                    Value::Undefined,
+                    &[Value::Bool(false), Value::Bool(true)],
+                )?;
+            }
+            "getSection" => {
+                let empty = e.new_array(Vec::new());
+                e.call_value(cb, Value::Undefined, &[empty, Value::Bool(true)])?;
+            }
+            "getField" => {
+                e.call_value(cb, Value::Undefined, &[Value::Null, Value::Bool(true)])?;
+            }
+            _ => {
+                e.call_value(cb, Value::Undefined, &[Value::Null, Value::Bool(false)])?;
+            }
+        }
     }
     Ok(Value::Undefined)
 }
