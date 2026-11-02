@@ -7,7 +7,9 @@
 //! draine au plus `max` octets en vrac (`(octets, curseur,
 //! eos)`) pour le `MseSource` `ByteSource` hôte ; `eos`
 //! quand `endOfStream` est appelé **et** la file vide ;
-//! `abort`/`remove` abandonnent la file ; `?buffer=N`
+//! `abort` vide la file ; `remove` n'évince que les chunks
+//! dont la plage est entièrement couverte (JS-C287) ;
+//! `?buffer=N`
 //! indexe le `addSourceBuffer`.
 
 use explorer_jscore::{Dom, Engine};
@@ -27,6 +29,14 @@ fn ev(e: &mut Engine, src: &str) -> String {
         Ok(v) => e.describe(v),
         Err(err) => panic!("{src} -> {err}"),
     }
+}
+
+/// Hexa concaténé (fixtures fMP4 littérales multi-lignes).
+fn hex(s: &str) -> Vec<u8> {
+    let s: String = s.chars().filter(|c| !c.is_whitespace()).collect();
+    (0..s.len() / 2)
+        .map(|i| u8::from_str_radix(&s[i * 2..i * 2 + 2], 16).expect("hex"))
+        .collect()
 }
 
 /// Crée une `MediaSource`, attache-la au `<video>` et rend
@@ -97,8 +107,11 @@ fn mse3_abort_and_remove_drop_queued_bytes() {
          sb.appendBuffer(new Uint8Array([1,1]));\
          sb.remove(0,1);",
     );
+    // JS-C287 — le chunk estimé couvre `[0,6)` : `[0,1)` ne
+    // le couvre pas entièrement → conservé (on ne découpe
+    // pas l'intérieur d'un fragment sans démuxage).
     let (data, _, _) = e.mse_pull_segments(&u, 0, 16).expect("pull");
-    assert_eq!(data, Vec::<u8>::new(), "remove aurait dû vider la file");
+    assert_eq!(data, vec![1, 1], "remove partiel conserve le chunk");
     ev(
         &mut e,
         "sb.appendBuffer(new Uint8Array([2,2]));\
@@ -106,6 +119,55 @@ fn mse3_abort_and_remove_drop_queued_bytes() {
     );
     let (data, _, _) = e.mse_pull_segments(&u, 0, 16).expect("pull2");
     assert_eq!(data, Vec::<u8>::new(), "abort aurait dû vider la file");
+}
+
+/// JS-C287 — `remove` n'évince que les chunks entièrement
+/// couverts : init (sans plage) + seg1 `[1,2)` conservés,
+/// seg0 `[0,1)` jeté. Les octets pullés reflètent l'éviction.
+#[test]
+fn mse3_remove_evicts_only_covered_chunks() {
+    // moov[trak[mdia[mdhd v0 ts=1000]]] + deux moof tfdt
+    // 0/1000 durée 1 s (fixtures JS-C285).
+    const INIT: &str = "000000386d6f6f76\
+                        000000307472616b\
+                        000000286d646961\
+                        000000206d646864\
+                        000000000000000000000000000003e80000000000000000";
+    const SEG0: &str = "000000506d6f6f66\
+                        0000004874726166\
+                        00000014746668640000000800000001000001f4\
+                        0000001474666474010000000000000000000000\
+                        000000187472756e0000010000000002000001f4000001f4\
+                        0000000c6d646174deadbeef";
+    const SEG1: &str = "000000506d6f6f66\
+                        0000004874726166\
+                        00000014746668640000000800000001000001f4\
+                        00000014746664740100000000000000000003e8\
+                        000000187472756e0000010000000002000001f4000001f4\
+                        0000000c6d646174deadbeef";
+    let mut e = engine();
+    let u = attached_url(&mut e);
+    e.eval(&format!(
+        "function H(s){{var a=new Uint8Array(s.length/2);\
+         for(var i=0;i<a.length;i++)a[i]=parseInt(s.substr(i*2,2),16);\
+         return a}}\
+         var sb=__ms.addSourceBuffer('video/mp4');\
+         sb.appendBuffer(H('{INIT}').buffer);\
+         sb.appendBuffer(H('{SEG0}').buffer);\
+         sb.appendBuffer(H('{SEG1}').buffer);\
+         sb.remove(0,1);"
+    ))
+    .expect("appends+remove");
+    let (data, _, _) = e.mse_pull_segments(&u, 0, 4096).expect("pull");
+    let init = hex(INIT);
+    let seg0 = hex(SEG0);
+    let seg1 = hex(SEG1);
+    // Init + seg1 survivent, seg0 est évincé — ordre FIFO
+    // préservé.
+    let mut want = init.clone();
+    want.extend_from_slice(&seg1);
+    assert_eq!(data, want, "remove(0,1) doit jeter seg0 seul");
+    assert!(!data.windows(seg0.len()).any(|w| w == &seg0[..]));
 }
 
 #[test]

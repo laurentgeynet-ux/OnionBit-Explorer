@@ -5754,6 +5754,22 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   migré avant boucle, `export`
   préservé). Verrous `c286_*` (4/4).
 
+- [x] **JS-C287. `SourceBuffer.remove`
+  évince par plage** (`explorer-jscore`,
+  même chantier — prépare l'éviction
+  fenêtre glissante des players réels,
+  YouTube/hls.js) — `remove(s,t)` vidait
+  **toute** la file : un player évincant
+  son arrière perdait ses segments
+  futurs. `seg_ranges` parallèle aux
+  chunks file (union `tfdt` fMP4 /
+  estimateur / `None` init) ; seuls les
+  chunks entièrement couverts (ε=1 ms)
+  sont jetés — partiel conservé,
+  `buffered` soustrait honnêtement.
+  Verrou `mse3_remove_evicts_only_
+  covered_chunks`.
+
 - [x] **Étape CMP-4. Réarmement
   des balises « bloquées par CMP »**
   (`explorer-core`, §B-4 bras CMP

@@ -60,6 +60,10 @@ const EST_SEGMENT_SPAN: f64 = 6.0;
 /// alloue des buffers en boucle reste borné).
 const MS_BUFFER_CAP: usize = 8;
 
+/// Epsilon de couverture `remove` (JS-C287) — 1 ms contre
+/// les bords flottants `tfdt`/timescale.
+const REMOVE_EPS: f64 = 1e-3;
+
 /// État moteur MSE — protos paresseux + registre des URL objets
 /// pointant un `MediaSource`. Document-local : swappé avec le
 /// `BrowsingContext` comme `files`/`idb`.
@@ -143,6 +147,12 @@ struct SbData {
     segments: std::collections::VecDeque<Vec<u8>>,
     bytes: usize,
     pulled: u64,
+    /// Plage média revendiquée par chaque chunk en file
+    /// (JS-C287, parallèle à `segments`) — `None` = chunk
+    /// sans média (init fMP4) ou plage inconnue. Sert à
+    /// l'éviction par plage de `remove` : un chunk n'est
+    /// jeté que si sa plage est **entièrement** couverte.
+    seg_ranges: std::collections::VecDeque<Option<(f64, f64)>>,
     /// `buffered` estimé (JS-C278/b3, ADR-0029) — plages
     /// déduites des `timestampOffset` d'append successifs,
     /// clippées à l'append window ; approximation documentée
@@ -551,6 +561,7 @@ fn ms_add_source_buffer(e: &mut Engine, this: Value, args: &[Value]) -> JsResult
         segments: std::collections::VecDeque::new(),
         bytes: 0,
         pulled: 0,
+        seg_ranges: std::collections::VecDeque::new(),
     }));
     let v = e.new_host_object(Rc::new(SbHost { d: sb }));
     if let Value::Obj(id) = v {
@@ -837,7 +848,10 @@ fn fmp4_scan(bytes: &[u8]) -> Fmp4Scan {
 /// Repli estimateur de plage `buffered` (JS-C278/b3 +
 /// JS-C284) — utilisé quand le chunk ne porte pas de
 /// timestamps exploitables (init seul, MPEG-TS, `WebM`…).
-fn est_append_range(sd: &mut SbData) {
+/// Retourne la plage que cet append revendique (JS-C287 —
+/// attribution par chunk pour l'éviction `remove`), `None`
+/// si rien n'est ajouté (append window saturée).
+fn est_append_range(sd: &mut SbData) -> Option<(f64, f64)> {
     // JS-C278/b3 — `buffered` estimé : le segment couvre
     // `[t, t+est_span]` clippé à l'append window ; un
     // offset croissant affine le span du segment
@@ -876,6 +890,12 @@ fn est_append_range(sd: &mut SbData) {
             Some(last) if s <= last.1 => last.1 = last.1.max(end),
             _ => sd.est_ranges.push((s, end)),
         }
+        // Couverture nouvelle du chunk : `[base, end)` en
+        // append séquentiel (le début `s` est déjà couvert
+        // par le chunk précédent), `[s, end)` sinon.
+        Some((if sequential { base.max(s) } else { s }, end))
+    } else {
+        None
     }
 }
 
@@ -917,13 +937,18 @@ fn sb_append_buffer(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Val
         if let Some(ts) = scan.timescale {
             sd.timescale = Some(ts);
         }
-        match (sd.timescale, scan.moofs.is_empty()) {
+        // JS-C287 — plage revendiquée par ce chunk (éviction
+        // `remove` par plage) : union des plages fMP4,
+        // plage de l'estimateur, `None` pour les chunks sans
+        // média (init…).
+        let span = match (sd.timescale, scan.moofs.is_empty()) {
             // Media segment fMP4 : les plages réelles
             // `tfdt`→`tfdt+dur` (+`timestampOffset`, fenêtre
             // clippée) — pas d'estimation.
             (Some(ts), false) => {
                 sd.last_append_t = Some(sd.timestamp_offset);
                 let ts = f64::from(ts);
+                let mut span: Option<(f64, f64)> = None;
                 for (start, dur) in scan.moofs {
                     let s = (sd.timestamp_offset + start as f64 / ts).max(sd.append_start);
                     let en = (sd.timestamp_offset + (start + dur) as f64 / ts).min(sd.append_end);
@@ -932,15 +957,21 @@ fn sb_append_buffer(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Val
                             Some(last) if s <= last.1 => last.1 = last.1.max(en),
                             _ => sd.est_ranges.push((s, en)),
                         }
+                        span = Some(match span {
+                            Some((a, b)) => (a.min(s), b.max(en)),
+                            None => (s, en),
+                        });
                     }
                 }
+                span
             }
             // fMP4 reconnu sans moof (init `moov`+`mdhd`,
             // `ftyp`/`sidx` seuls…) : pas de média → aucune
             // plage — l'init n'est **pas** 6 s de contenu.
-            _ if scan.recognized => {}
+            _ if scan.recognized => None,
             _ => est_append_range(&mut sd),
-        }
+        };
+        sd.seg_ranges.push_back(span);
     }
     let Value::Obj(sid) = this else {
         return Ok(Value::Undefined);
@@ -973,6 +1004,7 @@ fn sb_abort(e: &mut Engine, this: Value, _args: &[Value]) -> JsResult<Value> {
         let mut sd = d.borrow_mut();
         sd.updating = false;
         sd.segments.clear();
+        sd.seg_ranges.clear();
         sd.bytes = 0;
         // JS-C278 — abort vide le buffer : l'estimation
         // repart à zéro comme la file d'octets.
@@ -1002,15 +1034,29 @@ fn sb_remove(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     if !(s.is_finite() && s >= 0.0) || t <= s {
         return Err(e.type_error("SourceBuffer.remove: bad range"));
     }
-    // MSE-3 : `remove` abandonne la file d'octets non
-    // consommés — approximation bornée (sans timestamps par
-    // segment, l'éviction par plage n'existe pas ; la file
-    // entière est traitée comme la queue du buffer).
     {
         let mut sd = d.borrow_mut();
         sd.updating = true;
-        sd.segments.clear();
-        sd.bytes = 0;
+        // JS-C287 — éviction par plage : chaque chunk file
+        // porte la plage qu'il a contribuée ; seuls les
+        // chunks **entièrement** couverts par `[s, t)` sont
+        // jetés (epsilon 1 ms contre les bords flottants
+        // `tfdt`/timescale). Un chunk partiellement couvert
+        // ou sans plage attribuée (init) est conservé —
+        // découper l'intérieur d'un fragment exige un
+        // démuxage ; approximation conservatrice documentée.
+        let segs = std::mem::take(&mut sd.segments);
+        let spans = std::mem::take(&mut sd.seg_ranges);
+        let mut bytes = 0usize;
+        for (chunk, span) in segs.into_iter().zip(spans) {
+            if span.is_some_and(|(a, b)| a >= s - REMOVE_EPS && b <= t + REMOVE_EPS) {
+                continue;
+            }
+            bytes += chunk.len();
+            sd.segments.push_back(chunk);
+            sd.seg_ranges.push_back(span);
+        }
+        sd.bytes = bytes;
         // JS-C278 — l'estimation `buffered`, elle, connaît
         // des plages : soustraction honnête de `[s, t)`.
         sd.est_ranges = sd
@@ -1176,12 +1222,15 @@ impl Engine {
             let Some(seg) = sd.segments.pop_front() else {
                 break;
             };
+            let span = sd.seg_ranges.pop_front().flatten();
             let take = (max - out.len()).min(seg.len());
             out.extend_from_slice(&seg[..take]);
             if take < seg.len() {
                 // Fin de paquet atteinte — le reste du
-                // segment repasse en tête de file.
+                // segment repasse en tête de file avec sa
+                // plage (le chunk reste entier côté temps).
                 sd.segments.push_front(seg[take..].to_vec());
+                sd.seg_ranges.push_front(span);
             }
         }
         sd.bytes = sd.bytes.saturating_sub(out.len());
