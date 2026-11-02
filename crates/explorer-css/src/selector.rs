@@ -140,6 +140,16 @@ pub enum PseudoElement {
     Before,
     /// `::after` — contenu généré après les enfants.
     After,
+    /// Pseudo-élément réel du web **toléré au parse mais
+    /// dormant** (`::placeholder`, `::backdrop`,
+    /// `::-webkit-scrollbar*`…) — §B-75 : un nom inconnu
+    /// invalide la liste de sélecteurs entière (spec) et
+    /// faisait sauter la règle reset universelle des
+    /// feuilles atomiques ; les navigateurs qui connaissent
+    /// le nom gardent la règle. Aucune boîte générée —
+    /// ses déclarations sont routées vers un style pseudo
+    /// jamais consommé.
+    Other,
 }
 
 impl SimpleSelector {
@@ -703,6 +713,55 @@ impl<'t> SelectorParser<'t> {
             Some(Token::Ident(name)) => match name.as_str() {
                 "before" => Some(SimpleSelector::PseudoElement(PseudoElement::Before)),
                 "after" => Some(SimpleSelector::PseudoElement(PseudoElement::After)),
+                // §B-75 — noms réels du web tolérés (aucune
+                // boîte générée) : sinon la liste entière
+                // est invalidée et la règle meurt (reset
+                // `*,:after,:before,::backdrop,…` des CSS
+                // atomiques). Un nom inconnu reste invalide.
+                "first-line"
+                | "first-letter"
+                | "selection"
+                | "marker"
+                | "placeholder"
+                | "backdrop"
+                | "file-selector-button"
+                | "details-content"
+                | "cue"
+                | "cue-region"
+                | "grammar-error"
+                | "spelling-error"
+                | "highlight"
+                | "target-text"
+                | "search-text"
+                | "-webkit-scrollbar"
+                | "-webkit-scrollbar-thumb"
+                | "-webkit-scrollbar-track"
+                | "-webkit-scrollbar-corner"
+                | "-webkit-scrollbar-button"
+                | "-webkit-resizer"
+                | "-webkit-file-upload-button"
+                | "-webkit-slider-thumb"
+                | "-webkit-slider-runnable-track"
+                | "-webkit-inner-spin-button"
+                | "-webkit-outer-spin-button"
+                | "-webkit-search-cancel-button"
+                | "-webkit-search-results-button"
+                | "-webkit-calendar-picker-indicator"
+                | "-webkit-color-swatch"
+                | "-webkit-color-swatch-wrapper"
+                | "-webkit-meter-bar"
+                | "-webkit-meter-inner-element"
+                | "-webkit-progress-bar"
+                | "-webkit-progress-inner-element"
+                | "-webkit-progress-value"
+                | "-webkit-datetime-edit"
+                | "view-transition"
+                | "view-transition-group"
+                | "view-transition-old"
+                | "view-transition-new"
+                | "view-transition-image-pair" => {
+                    Some(SimpleSelector::PseudoElement(PseudoElement::Other))
+                }
                 _ => None,
             },
             Some(Token::Function(name)) if name.as_str() == "part" => {

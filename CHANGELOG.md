@@ -7,6 +7,19 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **R-138 — pseudo-éléments web tolérés** (`explorer-css`,
+  §B-75) — `::placeholder`, `::backdrop`,
+  `::-webkit-scrollbar*`, `::file-selector-button`,
+  `::details-content`, `::first-line`/`selection`/`marker`…
+  parsés comme `PseudoElement::Other` dormant : un nom
+  inconnu invalide la liste de sélecteurs entière (spec) —
+  la règle reset `*,:after,:before,::backdrop,…` des CSS
+  atomiques mourait en bloc (feuilles stylex/Tailwind).
+  Aucune boîte générée ; un nom vraiment inconnu reste
+  invalide. Verrou `b75_feuille_atomique_reelle…` (fixture
+  réelle 32 Ko, 675 règles, 0 drop).
+
+
 - **JS-C268 — prototypes
   `Event` sur les événements
   mintés en natif** (`explorer-

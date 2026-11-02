@@ -329,7 +329,7 @@ impl SelectorIndex {
                 match entry.pseudo {
                     Some(crate::PseudoElement::Before) => idx.has_before = true,
                     Some(crate::PseudoElement::After) => idx.has_after = true,
-                    None => {}
+                    Some(crate::PseudoElement::Other) | None => {}
                 }
                 match rightmost_key(sel) {
                     BucketKey::Id(k) => idx.by_id.entry(k).or_default().push(entry),
@@ -647,6 +647,7 @@ impl StyleMap {
         match which {
             crate::PseudoElement::Before => p.before.as_ref(),
             crate::PseudoElement::After => p.after.as_ref(),
+            crate::PseudoElement::Other => None,
         }
     }
 
@@ -1665,6 +1666,7 @@ impl StyleEngine {
         let (a, q) = match pe {
             crate::PseudoElement::Before => (self.index.has_before, self.quirks_index.has_before),
             crate::PseudoElement::After => (self.index.has_after, self.quirks_index.has_after),
+            crate::PseudoElement::Other => (false, false),
         };
         a || (dom.document_mode() == explorer_dom::DocumentMode::Quirks && q)
     }

@@ -2567,3 +2567,65 @@ fn container_type_traverse_la_cascade() {
     assert_eq!(st.get("container-type"), Some("inline-size"));
     assert_eq!(st.get("container-name"), Some("card"));
 }
+
+/// §B-75 sonde — feuille atomique réelle (stylexjs.com,
+/// Tailwind+stylex `@layer base`) : chaque règle qualifiée
+/// doit survivre au parse — un sélecteur non couvert
+/// invalide la liste entière (spec) et la règle meurt.
+#[test]
+fn b75_feuille_atomique_reelle_ne_perd_pas_ses_regles() {
+    fn count_q(rules: &[explorer_css::Rule], acc: &mut (usize, usize)) {
+        for r in rules {
+            match r {
+                explorer_css::Rule::Qualified(q) => {
+                    if explorer_css::parse_selector_list(&q.prelude).is_some() {
+                        acc.0 += 1;
+                    } else {
+                        acc.1 += 1;
+                    }
+                }
+                explorer_css::Rule::At(a) => match &a.kind {
+                    explorer_css::AtKind::Layer { rules, .. }
+                    | explorer_css::AtKind::Media { rules, .. } => count_q(rules, acc),
+                    _ => {}
+                },
+            }
+        }
+    }
+    let css = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/data/b75_stylex.css"
+    ))
+    .expect("fixture stylex");
+    let sheet = explorer_css::parse_stylesheet(&css);
+    let mut acc = (0usize, 0usize);
+    count_q(&sheet.rules, &mut acc);
+    assert!(acc.0 > 50, "feuille atomique attendue >50 règles : {acc:?}");
+    assert_eq!(acc.1, 0, "sélecteurs droppés sur feuille réelle : {acc:?}");
+}
+
+/// §B-75 pipeline — N feuilles liées parsées isolément
+/// (chemin `linked_sheets` : `add_css` ×N) : les règles
+/// atomiques doivent atteindre l'élément cible.
+#[test]
+fn b75_multi_feuilles_atomiques_s_appliquent() {
+    use explorer_css::{Origin, StyleEngine, StyleEnv};
+    let mut dom = explorer_dom::Dom::new();
+    let doc = dom.document();
+    let div = dom.create_element("div").unwrap();
+    dom.set_attribute(div, "class", "x108lcm5 x1ypdohk")
+        .unwrap();
+    dom.append_child(doc, div).unwrap();
+    let mut eng = StyleEngine::new();
+    // 3 « feuilles » liées — parse isolé comme apply.
+    eng.add_css("@layer base{.x108lcm5{display:flex}}", Origin::Author);
+    eng.add_css("@media screen{.x1ypdohk{color:rgb(1,2,3)}}", Origin::Author);
+    eng.add_css("@layer a,b;.x108lcm5{font-size:17px}", Origin::Author);
+    let styles = eng.compute_tree(&dom, doc, &StyleEnv::default());
+    let s = styles.get(div).expect("style calculé pour div");
+    let dbg = format!("{s:?}");
+    assert!(
+        dbg.contains("Flex") || dbg.contains("flex"),
+        "display:flex attendu : {dbg}"
+    );
+}
