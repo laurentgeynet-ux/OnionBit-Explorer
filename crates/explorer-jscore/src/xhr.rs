@@ -19,10 +19,10 @@
 //!    `readystatechange`/`load` (or `error`) handlers.
 //!
 //! Deliberate subset: everything is async (`open(m, u, false)` sync
-//! send can't block our model), `response`/`responseType`/`upload`/
-//! progress events are out — `responseText`, `responseXML` (parsed
-//! into the mini-DOM), headers and the classic callback props cover
-//! the old-school scripts we target.
+//! send can't block our model), upload progress events are out —
+//! `responseText`, `responseXML` (parsed into the mini-DOM),
+//! `response`/`responseType`/`upload`, headers and the classic
+//! callback props cover the old-school scripts we target.
 
 use crate::heap::{Host, JsResult, ObjKind};
 use crate::value::{ObjId, Value};
@@ -160,6 +160,11 @@ pub(crate) struct XhrData {
     /// `xhr.upload` paresseux — objet `XMLHttpRequestUpload`
     /// stable (spec : même instance à chaque lecture).
     upload: Option<ObjId>,
+    /// `xhr.responseType` (JS-C266) — `""` par défaut ; les tags
+    /// anti-bot/fingerprint (Datadome sur qwant/soundcloud, vol
+    /// 568) lisent `ev.currentTarget.responseType` dans leurs
+    /// hooks XHR et interceptent `xhr.responseType = 'json'`.
+    response_type: String,
 }
 
 impl XhrData {
@@ -355,6 +360,12 @@ impl Engine {
             let t = self.str_val(ty);
             self.set_own(o, "type", t, true);
             self.set_own(o, "target", this, true);
+            // `currentTarget`/`srcElement` (JS-C266) — sans eux,
+            // `e.currentTarget.responseType` dans un hook
+            // `load`/`readystatechange` lève `cannot read … of
+            // Undefined` (Datadome qwant/soundcloud, vol 568).
+            self.set_own(o, "currentTarget", this, true);
+            self.set_own(o, "srcElement", this, true);
             Value::Obj(o)
         };
         let key = format!("on{ty}");
@@ -459,6 +470,14 @@ impl Host for XhrHost {
                 }
             }
             "withCredentials" => Value::Bool(d.with_credentials),
+            // `responseType` (JS-C266) — `""`/`text` par défaut.
+            "responseType" => {
+                if d.response_type.is_empty() {
+                    e.str_val(String::new())
+                } else {
+                    e.str_val(d.response_type.clone())
+                }
+            }
             "UNSENT" | "OPENED" | "HEADERS_RECEIVED" | "LOADING" | "DONE" => {
                 // Constants per spec (also exposed on the constructor
                 // — old scripts use `xhr.DONE` on the instance).
@@ -475,6 +494,30 @@ impl Host for XhrHost {
     }
 
     fn set(&self, e: &mut Engine, _t: Value, key: &str, v: Value) -> JsResult<bool> {
+        if key == "responseType" {
+            let mut d = self.data.borrow_mut();
+            // Spec : `InvalidStateError` hors `unsent`/`opened`.
+            if d.ready_state > 1 || d.handle.is_some() {
+                drop(d);
+                let v = e.error_value(
+                    e.protos.error,
+                    "InvalidStateError",
+                    "responseType: state is not unsent or opened, or send() flag is set",
+                );
+                return Err(crate::heap::Thrown(v));
+            }
+            let s = e.to_js_string(v)?;
+            // Spec : valeurs admises `""`, `arraybuffer`, `blob`,
+            // `document`, `json`, `text` — une autre valeur est
+            // ignorée en silence (pas d'exception).
+            if matches!(
+                s.as_str(),
+                "" | "arraybuffer" | "blob" | "document" | "json" | "text"
+            ) {
+                d.response_type = s;
+            }
+            return Ok(true);
+        }
         if key != "withCredentials" {
             return Ok(false);
         }

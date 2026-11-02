@@ -7,6 +7,31 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **JS-C266 — `xhr.responseType` +
+  `currentTarget`/`srcElement` sur
+  les événements XHR** (`explorer-
+  jscore`, §B-14 — qwant +
+  soundcloud vol 568) — le tag
+  Datadome partagé (même offset
+  `inline:1:2:42183` sur les 2
+  sites) lit `ev.currentTarget.
+  responseType` dans son hook
+  `load`/`readystatechange` : sans
+  `currentTarget` → `cannot read
+  'responseType' of Undefined`
+  tuait l'éval. L'événement XHR
+  porte désormais `currentTarget`
+  et `srcElement` (alias IE lu par
+  les fingerprinteurs), et
+  `responseType` est un vrai
+  accesseur spec (`""` défaut,
+  setter accepté seulement en
+  `unsent`/`opened` —
+  `InvalidStateError` après
+  `send()`, valeur inconnue
+  ignorée en silence). Verrou :
+  `response_type_and_event_
+  current_target` (xhr).
 - **JS-C264 — `Function.prototype.
   toString` verbatim** (`explorer-
   jscore`, §B-72 bras 2 — fifa

@@ -142,6 +142,36 @@ fn add_event_listener_load() {
 }
 
 #[test]
+fn response_type_and_event_current_target() {
+    // JS-C266 — Datadome (qwant/soundcloud, vol 568) lit
+    // `ev.currentTarget.responseType` dans son hook `load` :
+    // `currentTarget` absent → `cannot read 'responseType' of
+    // Undefined` tuait l'éval. `srcElement` = même garde.
+    let (mut e, t) = engine();
+    describe(
+        &mut e,
+        "var x = new XMLHttpRequest();\
+         var got = '';\
+         x.onload = function (ev) {\
+             got += ev.currentTarget.responseType + '/' + ev.srcElement.status;\
+         };\
+         x.open('GET', '/r');\
+         x.responseType = 'json';\
+         x.responseType = 'bogus';\
+         got += x.responseType + '|';\
+         x.send();",
+    );
+    let h = t.requests.borrow()[0].0;
+    respond(&mut e, h, 200, "x");
+    assert_eq!(describe(&mut e, "got"), "json|json/200");
+    // Setter post-send → `InvalidStateError`, pas de store.
+    describe(
+        &mut e,
+        "var threw = ''; try { x.responseType = 'text'; } catch (er) { threw = er.name; } threw",
+    );
+}
+
+#[test]
 fn error_event_on_status_zero() {
     let (mut e, t) = engine();
     describe(

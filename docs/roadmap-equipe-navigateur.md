@@ -5419,6 +5419,29 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   vivrait dans OtAutoBlock/
   otSDKStub).
 
+- [x] **JS-C266. `xhr.responseType`
+  + `currentTarget`/`srcElement`
+  sur events XHR** (`explorer-
+  jscore`, §B-14 — vol 568) —
+  le tag Datadome partagé (qwant,
+  soundcloud — même offset
+  `inline:1:2:42183`) lit
+  `ev.currentTarget.responseType`
+  dans son hook `load` : l'event
+  XHR ne portait que `type`/`target`
+  → `cannot read 'responseType' of
+  Undefined` tuait l'éval. Event
+  enrichi (`currentTarget` +
+  `srcElement` alias IE) et
+  `responseType` devient un vrai
+  accesseur spec (`""` défaut,
+  `InvalidStateError` post-send,
+  valeur inconnue ignorée).
+  Verrou : `response_type_and_
+  event_current_target` (xhr).
+  Reste terrain : re-vols qwant/
+  soundcloud sur binaire frais.
+
 - [x] **Étape CMP-4. Réarmement
   des balises « bloquées par CMP »**
   (`explorer-core`, §B-4 bras CMP
