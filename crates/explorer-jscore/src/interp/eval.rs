@@ -10,6 +10,13 @@ use crate::value::{to_int32, to_uint32, Value};
 
 impl Engine {
     pub(crate) fn eval_expr(&mut self, env: &EnvRef, this: Value, e: &Expr) -> JsResult<Value> {
+        // Breadcrumb §B-59 : le `Expr` en cours nommé à l'abort
+        // (`rss_guard`), discriminant eval-side vs natif.
+        if self.rss_watch_mb > 0 {
+            if let Ok(mut g) = crate::LAST_EXPR.lock() {
+                *g = expr_tag(e);
+            }
+        }
         self.expr_depth += 1;
         if self.expr_depth > self.nest_limit {
             self.expr_depth -= 1;
@@ -128,7 +135,16 @@ impl Engine {
                         // `[...a]` — iterate the source.
                         Some(Expr::Spread(e)) => {
                             let sv = self.eval_expr(env, this, e)?;
-                            v.extend(self.iter_values(sv)?);
+                            let items = self.iter_values(sv)?;
+                            // `[...a1,...a2,…]` — les spreads
+                            // s'accumulent dans UN seul Vec sans
+                            // tick (§B-59 : ~6 Go de reserve en
+                            // une expression) — borne le total.
+                            self.alloc_guard(
+                                (v.len() + items.len())
+                                    .saturating_mul(std::mem::size_of::<Value>()),
+                            )?;
+                            v.extend(items);
                         }
                         Some(e) => v.push(self.eval_expr(env, this, e)?),
                         None => v.push(Value::Hole),
@@ -282,6 +298,13 @@ impl Engine {
                     };
                     let v = self.eval_expr(env, this, ae)?;
                     let items = self.iter_values_await(v)?;
+                    // Le collecteur eager double par reserve dans
+                    // l'`extend` — borne avant matérialisation
+                    // (§B-59, même classe que `iter_values`).
+                    let cur = self.gen_collect.last().map_or(0, Vec::len);
+                    self.alloc_guard(
+                        (cur + items.len()).saturating_mul(std::mem::size_of::<Value>()),
+                    )?;
                     if let Some(c) = self.gen_collect.last_mut() {
                         c.extend(items);
                     }
@@ -290,6 +313,12 @@ impl Engine {
                         Some(e) => self.eval_expr(env, this, e)?,
                         None => Value::Undefined,
                     };
+                    let cur = self.gen_collect.last().map_or(0, Vec::len);
+                    if cur % 4096 == 0 {
+                        self.alloc_guard(
+                            (cur + 4096).saturating_mul(std::mem::size_of::<Value>()),
+                        )?;
+                    }
                     if let Some(c) = self.gen_collect.last_mut() {
                         c.push(v);
                     }
@@ -1058,8 +1087,10 @@ impl Engine {
                 let ord = if matches!(lp, Value::Big(_)) || matches!(rp, Value::Big(_)) {
                     self.big_rel(lp, rp)?
                 } else if let (Value::Str(a), Value::Str(b)) = (lp, rp) {
-                    let a = self.heap.string(a).unwrap_or_default();
-                    let b = self.heap.string(b).unwrap_or_default();
+                    // §B-59 : les deux opérandes clonent entiers —
+                    // `'a' < géante` = clone commit sans garde.
+                    let a = self.read_str(a)?.unwrap_or_default();
+                    let b = self.read_str(b)?.unwrap_or_default();
                     Some(a.cmp(&b))
                 } else {
                     let a = self.to_number(lp)?;
@@ -1355,5 +1386,45 @@ impl Engine {
             }
             _ => Ok(None),
         }
+    }
+}
+
+/// Nom du variant `Expr` — breadcrumb §B-59 (`LAST_EXPR`),
+/// zéro alloc, armé seulement sous `EXPLORER_JS_RSS_WATCH`.
+fn expr_tag(e: &Expr) -> &'static str {
+    match e {
+        Expr::Num(_) => "Num",
+        Expr::BigInt(_) => "BigInt",
+        Expr::Str(_) => "Str",
+        Expr::Bool(_) => "Bool",
+        Expr::Null => "Null",
+        Expr::Ident(_) => "Ident",
+        Expr::This => "This",
+        Expr::Array(_) => "Array",
+        Expr::Object(_) => "Object",
+        Expr::Function(_) => "Function",
+        Expr::Class(_) => "Class",
+        Expr::Unary(..) => "Unary",
+        Expr::Binary(..) => "Binary",
+        Expr::Assign(..) => "Assign",
+        Expr::Cond(..) => "Cond",
+        Expr::Member(..) => "Member",
+        Expr::Index(..) => "Index",
+        Expr::Call(..) => "Call",
+        Expr::New(..) => "New",
+        Expr::Seq(_) => "Seq",
+        Expr::Template { .. } => "Template",
+        Expr::TaggedTemplate { .. } => "TaggedTemplate",
+        Expr::Regex { .. } => "Regex",
+        Expr::Chain { .. } => "Chain",
+        Expr::Spread(_) => "Spread",
+        Expr::SuperCall(_) => "SuperCall",
+        Expr::SuperMember(_) => "SuperMember",
+        Expr::SuperIndex(_) => "SuperIndex",
+        Expr::Await(_) => "Await",
+        Expr::Yield { .. } => "Yield",
+        Expr::ImportCall(_) => "ImportCall",
+        Expr::ImportMeta => "ImportMeta",
+        Expr::NewTarget => "NewTarget",
     }
 }

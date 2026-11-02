@@ -106,7 +106,10 @@ pub(crate) fn is_finite(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<V
 pub(crate) fn escape(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     let s = e.to_js_string(arg(args, 0))?;
     let mut out = String::new();
-    for c in s.chars() {
+    for (i, c) in s.chars().enumerate() {
+        if i % 65536 == 0 {
+            e.tick()?;
+        }
         if c.is_ascii_alphanumeric() || "@*_+-./".contains(c) {
             out.push(c);
         } else if (c as u32) < 256 {
@@ -120,10 +123,14 @@ pub(crate) fn escape(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Valu
 
 pub(crate) fn unescape(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     let s = e.to_js_string(arg(args, 0))?;
+    e.alloc_guard(s.len().saturating_mul(4))?; // §B-59 Vec<char>
     let cs = chars_of(&s);
     let mut out = String::new();
     let mut i = 0;
     while i < cs.len() {
+        if i % 65536 == 0 {
+            e.tick()?;
+        }
         if cs[i] == '%' {
             if cs.get(i + 1) == Some(&'u') && i + 6 <= cs.len() {
                 if let Some(v) = hex_val(&cs[i + 2..i + 6]) {
@@ -166,7 +173,10 @@ const URI_SAFE: &str = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123
 pub(crate) fn encode_uri_component(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     let s = e.to_js_string(arg(args, 0))?;
     let mut out = String::new();
-    for b in s.bytes() {
+    for (i, b) in s.bytes().enumerate() {
+        if i % 65536 == 0 {
+            e.tick()?;
+        }
         let c = b as char;
         if c.is_ascii() && URI_SAFE.contains(c) {
             out.push(c);
@@ -180,9 +190,18 @@ pub(crate) fn encode_uri_component(e: &mut Engine, _t: Value, args: &[Value]) ->
 pub(crate) fn decode_uri_component(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     let s = e.to_js_string(arg(args, 0))?;
     let bytes = s.as_bytes();
+    // Garde : `decodeURIComponent(géant)` — le Vec de sortie
+    // matérialise `len` d'un coup (§B-59, nommé `last_nat`).
+    e.alloc_guard(bytes.len())?;
     let mut out: Vec<u8> = Vec::with_capacity(bytes.len());
     let mut i = 0;
     while i < bytes.len() {
+        // Tické : sinon le décodage d'un input de ~200 Mio sous
+        // le cap tourne des centaines de M itérations sourd au
+        // deadline/kill (même remède que `string_from_char_code`).
+        if i % 65536 == 0 {
+            e.tick()?;
+        }
         if bytes[i] == b'%' && i + 2 < bytes.len() {
             let h = (bytes[i + 1] as char).to_digit(16);
             let l = (bytes[i + 2] as char).to_digit(16);
@@ -213,7 +232,10 @@ pub(crate) fn btoa(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value>
     let b: Vec<u8> = s.chars().map(|c| c as u8).collect();
     let b = b.as_slice();
     let mut out = String::new();
-    for chunk in b.chunks(3) {
+    for (i, chunk) in b.chunks(3).enumerate() {
+        if i % 65536 == 0 {
+            e.tick()?;
+        }
         let n = chunk.iter().fold(0u32, |a, &c| (a << 8) | u32::from(c));
         let n = n << (8 * (3 - chunk.len()));
         out.push(B64[(n >> 18 & 63) as usize] as char);
@@ -237,7 +259,10 @@ pub(crate) fn atob(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value>
     let mut bits = 0u32;
     let mut nbits = 0u32;
     let mut out = Vec::new();
-    for c in s.chars() {
+    for (i, c) in s.chars().enumerate() {
+        if i % 65536 == 0 {
+            e.tick()?;
+        }
         if c == '=' {
             break;
         }

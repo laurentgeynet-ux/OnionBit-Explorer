@@ -18,6 +18,14 @@ pub mod paths;
 pub mod profile_store;
 pub mod session;
 
+/// §B-59 — dernier drain hôte entré (`&'static str`,
+/// inconditionnel ~20 ns) : `poll_net`/`net_done`/`timers`/
+/// `applies`/`eval`/`commit`. Vide à l'abort = la mort est sur
+/// le fil JS (couvert par `last_phase`) ; nommé = la mort est
+/// dans un drain core entre deux évals — casse « hors-fil » vs
+/// « préambule JS » en un vol.
+pub static LAST_DRAIN: std::sync::Mutex<&'static str> = std::sync::Mutex::new("");
+
 pub use explorer_css::ColorScheme;
 pub use profile_store::{acquire_profile_lock, JsonDnsStore, JsonFileStore, JsonHstsStore};
 pub use session::{

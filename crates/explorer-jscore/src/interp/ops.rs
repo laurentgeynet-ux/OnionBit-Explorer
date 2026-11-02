@@ -56,7 +56,7 @@ pub(crate) fn strict_eq(l: Value, r: Value, heap: &Heap) -> bool {
             if a == b {
                 true
             } else {
-                heap.string(a) == heap.string(b)
+                heap.str_eq(a, b)
             }
         }
         (Value::Big(a), Value::Big(b)) => {

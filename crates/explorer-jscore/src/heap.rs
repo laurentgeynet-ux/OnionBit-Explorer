@@ -153,6 +153,118 @@ impl Heap {
         self.alloc(CellData::Obj(o))
     }
 
+    /// Longueur en octets sans cloner — la garde d'alloc en a
+    /// besoin avant toute matérialisation (§B-59 : `s += …`
+    /// clone l'opérande géante avant `alloc_guard` sinon).
+    pub fn str_len(&self, id: ObjId) -> Option<usize> {
+        match self.cells.get(id as usize) {
+            Some(Some(Cell {
+                data: CellData::Str(s),
+            })) => Some(s.len()),
+            _ => None,
+        }
+    }
+
+    /// Longueur en **code units UTF-16** sans cloner — le
+    /// `length` spec d'une Str (astral = 2) sans la copie que
+    /// `string()` imposerait (§B-59).
+    pub fn str_u16_len(&self, id: ObjId) -> Option<usize> {
+        match self.cells.get(id as usize) {
+            Some(Some(Cell {
+                data: CellData::Str(s),
+            })) => Some(s.encode_utf16().count()),
+            _ => None,
+        }
+    }
+
+    /// Égalité de contenu Str **sans clone** — `===`/`==` sur
+    /// chaînes clonait les deux opérandes entiers (`giant ===
+    /// giant` = 2 clones commit sans comptage, §B-59) ; la
+    /// comparaison en place est gratuite.
+    pub fn str_eq(&self, a: ObjId, b: ObjId) -> bool {
+        match (
+            self.cells.get(a as usize),
+            self.cells.get(b as usize),
+        ) {
+            (
+                Some(Some(Cell {
+                    data: CellData::Str(x),
+                })),
+                Some(Some(Cell {
+                    data: CellData::Str(y),
+                })),
+            ) => x == y,
+            _ => false,
+        }
+    }
+
+    /// Code unit UTF-16 à l'indice `i`, lu **en place** — les
+    /// `charCodeAt`/`at` en boucle clonaient la chaîne entière
+    /// par appel (churn commit sans comptage, §B-59 décodeur
+    /// Confiant `charAt` × N sur géante chaîne).
+    pub fn str_u16_at(&self, id: ObjId, i: usize) -> Option<u16> {
+        match self.cells.get(id as usize) {
+            Some(Some(Cell {
+                data: CellData::Str(s),
+            })) => s.encode_utf16().nth(i),
+            _ => None,
+        }
+    }
+
+    /// Offset octet du `u16_i`-ème code unit UTF-16 (frontière
+    /// de char, ou `s.len()` au-delà) — conversion units→bytes
+    /// sans matérialiser la vue (§B-59).
+    pub(crate) fn u16_pos_to_byte(s: &str, u16_i: usize) -> usize {
+        let mut u = 0usize;
+        for (b, c) in s.char_indices() {
+            if u >= u16_i {
+                return b;
+            }
+            u += c.len_utf16();
+        }
+        s.len()
+    }
+
+    /// `indexOf`/`lastIndexOf` en place — offset octet du
+    /// `from_u16`-ième unit, recherche `find`/`match_indices`
+    /// sur la tranche interne, reconversion units (§B-59).
+    pub fn str_index_of(&self, id: ObjId, needle: &str, from_u16: usize, last: bool) -> i64 {
+        let Some(Some(Cell {
+            data: CellData::Str(s),
+        })) = self.cells.get(id as usize)
+        else {
+            return -1;
+        };
+        let byte_from = Self::u16_pos_to_byte(s, from_u16);
+        let pos = if needle.len() > s.len() {
+            None
+        } else if last {
+            let limit = byte_from.min(s.len() - needle.len());
+            s.match_indices(needle)
+                .take_while(|(p, _)| *p <= limit)
+                .last()
+                .map(|(p, _)| p)
+        } else if byte_from > s.len() - needle.len() {
+            None
+        } else {
+            s[byte_from..].find(needle).map(|p| p + byte_from)
+        };
+        pos.map_or(-1, |b| s[..b].encode_utf16().count() as i64)
+    }
+
+    /// Tranche `[a, b)` en units → `String`, lue en place (§B-59
+    /// — `slice`/`substring`/`substr` en boucle sans clone plein).
+    pub fn str_slice_u16(&self, id: ObjId, a: usize, b: usize) -> Option<String> {
+        let Some(Some(Cell {
+            data: CellData::Str(s),
+        })) = self.cells.get(id as usize)
+        else {
+            return None;
+        };
+        let (ba, bb) = (Self::u16_pos_to_byte(s, a), Self::u16_pos_to_byte(s, b));
+        Some(s[ba..bb].to_string())
+    }
+
     /// Borrow a string's contents (cloned — strings are short here).
     pub fn string(&self, id: ObjId) -> Option<String> {
         match self.cells.get(id as usize) {

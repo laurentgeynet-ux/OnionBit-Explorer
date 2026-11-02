@@ -1074,6 +1074,19 @@ fn take_elems(e: &mut Engine, id: ObjId) -> JsResult<Vec<Value>> {
             return Ok(v);
         }
     }
+    // Garde **avant** extraction (un rejet ne doit pas vider le
+    // tableau) : tout consommateur clone/slice le Vec (`elems.
+    // clone()`, `[a..b].to_vec()`) — un backing de ~800 M
+    // cellules commet ~6 Go d'un coup, signature mesurée du
+    // burst §B-59 (dispatcher `ib` GTM : `b.slice(1)`).
+    let len = match e.heap.obj(id) {
+        Some(o) => match &o.kind {
+            ObjKind::Array(v) => v.len(),
+            _ => 0,
+        },
+        None => 0,
+    };
+    e.alloc_guard(len * std::mem::size_of::<Value>())?;
     Ok(match e.heap.obj_mut(id) {
         Some(o) => match &mut o.kind {
             ObjKind::Array(v) => std::mem::take(v),
@@ -1143,8 +1156,12 @@ fn u16_len(s: &str) -> usize {
 }
 
 /// Vue code units UTF-16 de `s` (allouée à la demande).
-fn u16_view(s: &str) -> Vec<u16> {
-    s.encode_utf16().collect()
+/// Vue code-units UTF-16 — **matérialise 2 o/char** ; gardée §B-59
+/// (`u16_view` sur géante chaîne en boucle `indexOf`/`split('')` =
+/// réserve pure-commit répétée, signature `rss_guard[commit]`).
+fn u16_view(e: &mut Engine, s: &str) -> JsResult<Vec<u16>> {
+    e.alloc_guard(s.len().saturating_mul(2))?;
+    Ok(s.encode_utf16().collect())
 }
 
 /// `u16s` → `String` : les surrogates orphelins (tranche qui coupe
@@ -1164,6 +1181,10 @@ fn u16_at(s: &str, i: usize) -> Option<String> {
 fn chars_of(s: &str) -> Vec<char> {
     s.chars().collect()
 }
+
+/// Offset **octet** du `u16_i`-ème code unit UTF-16 — import
+/// de l'implémentation canonique du heap (§B-59).
+use crate::heap::Heap;
 
 fn now_millis() -> f64 {
     SystemTime::now()

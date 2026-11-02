@@ -432,17 +432,67 @@ fn main() {
     // absent = désarmé, aucun coût en production). Au seuil :
     // marqueur `rss_guard:` au death_log puis abort — la mort
     // est nommée et reste distincte des kills externes.
-    if let Some(mb) = std::env::var("EXPLORER_RSS_LIMIT_MB")
+    let rss_mb = std::env::var("EXPLORER_RSS_LIMIT_MB")
         .ok()
         .and_then(|v| v.parse::<usize>().ok())
-        .filter(|m| *m > 0)
-    {
+        .filter(|m| *m > 0);
+    // Garde complémentaire sur la **charge commit**
+    // (`virtual_mem` = PagefileUsage) : le burst §B-59 monte
+    // `virt` à ~13 Go pendant que `rss` reste ~5 Go — une
+    // réserve/commit seule épuise le pagefile et couche la
+    // station **avant** que le seuil RSS ne soit atteint.
+    // Armé par `EXPLORER_COMMIT_LIMIT_MB` (vols §B-59).
+    let commit_mb = std::env::var("EXPLORER_COMMIT_LIMIT_MB")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        .filter(|m| *m > 0);
+    if rss_mb.is_some() || commit_mb.is_some() {
         let p = death_log.clone();
         std::thread::spawn(move || loop {
-            let cur = memory_stats::memory_stats().map_or(0, |m| m.physical_mem) / (1024 * 1024);
-            if cur > mb {
-                let _ = std::fs::write(&p, format!("rss_guard: {cur} Mo > {mb} Mo\n"));
-                eprintln!("explorer-daemon : rss_guard {cur} Mo > {mb} Mo — abort");
+            let m = memory_stats::memory_stats();
+            let rss = m.map_or(0, |s| s.physical_mem) / (1024 * 1024);
+            let virt = m.map_or(0, |s| s.virtual_mem) / (1024 * 1024);
+            let hit = rss_mb.filter(|mb| rss > *mb).map(|mb| ("rss", mb, rss)).or_else(|| {
+                commit_mb
+                    .filter(|mb| virt > *mb)
+                    .map(|mb| ("commit", mb, virt))
+            });
+            if let Some((kind, mb, cur)) = hit {
+                let nat = explorer_jscore::LAST_NAT
+                    .lock()
+                    .map_or("?", |g| *g);
+                let expr = explorer_jscore::LAST_EXPR
+                    .lock()
+                    .map_or("?", |g| *g);
+                let stmt = explorer_jscore::LAST_STMT
+                    .lock()
+                    .map_or("?", |g| *g);
+                let areq = explorer_jscore::LAST_ALLOC_REQ
+                    .load(std::sync::atomic::Ordering::Relaxed);
+                let stats = explorer_jscore::LAST_STATS
+                    .lock()
+                    .map_or_else(|_| String::new(), |g| g.clone());
+                let frame = explorer_jscore::LAST_FRAME
+                    .lock()
+                    .map_or_else(|_| String::new(), |g| g.clone());
+                // §B-59 — marqueurs de zone de mort : phase du
+                // fil JS (`call`/`body`, inconditionnel) et
+                // drain hôte (`poll_net`/`timers`/`commit`…) —
+                // « préambule JS vs drain core vs hors-fil »
+                // tranché en un seul abort.
+                let phase = explorer_jscore::LAST_PHASE
+                    .lock()
+                    .map_or("?", |g| *g);
+                let drain = explorer_core::LAST_DRAIN
+                    .lock()
+                    .map_or("?", |g| *g);
+                let _ = std::fs::write(
+                    &p,
+                    format!("rss_guard[{kind}]: {cur} Mo > {mb} Mo | last_nat={nat} | last_stmt={stmt} | last_expr={expr} | last_areq={areq} | last_frame={frame} | last_phase={phase} | last_drain={drain} | last_stats={stats}\n"),
+                );
+                eprintln!(
+                    "explorer-daemon : rss_guard[{kind}] {cur} Mo > {mb} Mo — abort | last_nat={nat} | last_stmt={stmt} | last_expr={expr} | last_areq={areq} | last_frame={frame} | last_phase={phase} | last_drain={drain} | last_stats={stats}"
+                );
                 std::process::abort();
             }
             std::thread::sleep(std::time::Duration::from_millis(50));

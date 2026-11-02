@@ -608,6 +608,12 @@ pub struct Engine {
     pub(crate) rss_watch_mb: usize,
     /// Dernier palier RSS logué (grains de 64 Mio).
     pub(crate) rss_watch_last: usize,
+    /// Pile des natifs en vol — poussée à l'entrée de
+    /// `call_native`, dépilée à la sortie. `tick_rss` la
+    /// nomme : le natif qui contient le span de mort (entrée
+    /// sous le seuil, jamais ressorti) apparaît en sommet au
+    /// dernier tick avant le trou RSS (§B-59 bras 4).
+    pub(crate) nat_stack: Vec<&'static str>,
     /// Seuil `bytes` du prochain re-marquage sous `gc_due`
     /// (voir ci-dessus). `0` = inactif.
     pub(crate) gc_cap: usize,
@@ -627,6 +633,19 @@ pub struct Engine {
     /// l'éval en `RangeError` (moteur vivant) au lieu de
     /// l'abort process du garde externe.
     pub(crate) rss_kill_mb: usize,
+    /// Seuil de kill doux sur la charge **commit**
+    /// (`PagefileUsage`) — complément de `rss_kill_mb` pour les
+    /// réservations pures (`reserve`/`with_capacity`) qui ne
+    // touchent pas les pages. `0` = désarmé.
+    pub(crate) commit_kill_mb: usize,
+    /// Loquet kill RSS (§B-59 bras 4) — le kill jette une
+    /// `RangeError` rattrapable : un script hostile qui attrape
+    /// et retente en boucle ré-alloue à chaque tentative →
+    /// ratchet jusqu'au garde externe malgré le kill. Après le
+    /// premier kill, le loquet arme : toute éval suivante meurt
+    /// immédiatement — la page cesse de réessayer, le daemon
+    /// survit à ~seuil au lieu d'aborter au double.
+    pub(crate) rss_kill_latched: bool,
 }
 
 /// Dernier match `RegExp` — `RegExp.$1…$9`/`input`/`lastMatch`/…
@@ -1005,13 +1024,19 @@ impl Engine {
                 .and_then(|v| v.parse::<usize>().ok())
                 .unwrap_or(0),
             rss_watch_last: 0,
+            nat_stack: Vec::new(),
             gc_cap: 0,
             eval_src_bytes: 0,
             eval_src_cap: std::env::var("EXPLORER_JS_EVAL_SRC_CAP")
                 .ok()
                 .and_then(|v| v.parse::<usize>().ok())
                 .unwrap_or(DEFAULT_EVAL_SRC_CAP),
+            rss_kill_latched: false,
             rss_kill_mb: std::env::var("EXPLORER_JS_RSS_KILL_MB")
+                .ok()
+                .and_then(|v| v.parse::<usize>().ok())
+                .unwrap_or(0),
+            commit_kill_mb: std::env::var("EXPLORER_JS_COMMIT_KILL_MB")
                 .ok()
                 .and_then(|v| v.parse::<usize>().ok())
                 .unwrap_or(0),
@@ -3050,7 +3075,7 @@ impl Engine {
             Value::Big(_) => Ok(self.bigint_of(v).unwrap_or_default()),
             Value::Bool(b) => Ok(num_bigint::BigInt::from(u8::from(b))),
             Value::Str(id) => {
-                let s = self.heap.string(id).unwrap_or_default();
+                let s = self.read_str(id)?.unwrap_or_default();
                 let t = s.trim();
                 if t.is_empty() {
                     return Ok(num_bigint::BigInt::zero());
@@ -3113,7 +3138,7 @@ impl Engine {
     /// et appel).
     pub(crate) fn host_method(&mut self, this: Value, args: &[Value]) -> JsResult<Value> {
         let name = match args.first() {
-            Some(Value::Str(s)) => self.heap.string(*s).unwrap_or_default(),
+            Some(Value::Str(s)) => self.read_str(*s)?.unwrap_or_default(),
             _ => return Ok(Value::Undefined),
         };
         let Value::Obj(id) = this else {
@@ -3591,18 +3616,67 @@ impl Engine {
         }
         self.ops_left -= 1;
         self.ops_total += 1;
+        // Loquet kill — après un premier dépassement, mort
+        // immédiate à chaque tick : casse le retry-infini des
+        // scripts hostiles (chaque retry ré-alloue, ratchet
+        // jusqu'au garde externe — actugaming §B-59 bras 4).
+        if self.rss_kill_mb > 0 && self.rss_kill_latched {
+            return Err(self.range_error("process RSS limit exceeded (latched kill)"));
+        }
+        // Breadcrumb §B-59 : dernier frame JS visible du
+        // `rss_guard` à l'abort (armé, `format!` par tick).
+        if self.rss_watch_mb > 0 {
+            if let Ok(mut g) = crate::LAST_FRAME.lock() {
+                *g = self
+                    .call_stack
+                    .last()
+                    .map(|lit| {
+                        let n = lit.name.as_deref().unwrap_or("<anon>");
+                        match &lit.src {
+                            Some(s) => {
+                                format!("{n}({s}:{}:{})", lit.pos.0, lit.pos.1)
+                            }
+                            None => format!("{n}(:{}:{})", lit.pos.0, lit.pos.1),
+                        }
+                    })
+                    .unwrap_or_default();
+            }
+        }
         // Kill doux RSS — hors du gate 256 ops : à ~7 Mo/op
         // mesurés en burst, une fenêtre de 256 ops = ~1,7 Go
         // non bornés (actugaming 4 975 → 6 736 Mo entre deux
         // dumps). Armé via `EXPLORER_JS_RSS_KILL_MB` : check à
         // chaque tick (~µs `memory_stats`), absent = zéro coût.
-        if self.rss_kill_mb > 0 {
+        if self.rss_kill_mb > 0 || self.rss_watch_mb > 0 {
             if let Some(m) = memory_stats::memory_stats() {
                 let rss = m.physical_mem / (1024 * 1024);
-                if rss > self.rss_kill_mb {
+                let virt = m.virtual_mem / (1024 * 1024);
+                // Recensement §B-59 : compteurs heap + plus gros
+                // objet — lu par `rss_guard` à l'abort. Seulement
+                // en zone chaude (scan O(cells)).
+                if self.rss_watch_mb > 0 && rss > self.rss_watch_mb {
+                    if let Ok(mut g) = crate::LAST_STATS.lock() {
+                        *g = self.census_line(rss, virt);
+                    }
+                }
+                if self.rss_kill_mb > 0 && rss > self.rss_kill_mb {
+                    self.rss_kill_latched = true;
                     return Err(self.range_error(format!(
                         "process RSS limit exceeded ({rss} MiB > {} MiB — native reservoir bound)",
                         self.rss_kill_mb
+                    )));
+                }
+                // Kill doux **commit** : une réservation unique
+                // (`Vec::reserve`/`HashMap` growth entre deux
+                // ticks) gonfle `PagefileUsage` de ~6 Go sans
+                // toucher les pages — `rss` reste sous le seuil
+                // mais le pagefile se vide et couche la station
+                // (actugaming, `rss_guard[commit]` 12,8 Go).
+                if self.commit_kill_mb > 0 && virt > self.commit_kill_mb {
+                    self.rss_kill_latched = true;
+                    return Err(self.range_error(format!(
+                        "process commit limit exceeded ({virt} MiB > {} MiB — native reservoir bound)",
+                        self.commit_kill_mb
                     )));
                 }
             }
@@ -3671,6 +3745,7 @@ impl Engine {
                             .map(|(k, n, b)| format!("{k}:{n}/{b}"))
                             .collect::<Vec<_>>()
                             .join(" ");
+                        let res = self.reservoir_report();
                         tracing::warn!(
                             target: "js_alloc",
                             rss_mb = rss,
@@ -3688,7 +3763,9 @@ impl Engine {
                             timers = self.timers.pending_len(),
                             utasks = self.microtasks.len(),
                             envs = crate::heap::envs_live(),
+                            nat = self.nat_stack.last().copied().unwrap_or(""),
                             kinds,
+                            res,
                             top,
                             "tick_rss"
                         );
@@ -3799,11 +3876,94 @@ impl Engine {
     /// la seule récupération sûre.
     pub(crate) const GC_DEAD_FLOOR: usize = 256 * 1024 * 1024;
 
+    /// Recensement §B-59 des réservoirs natifs non comptés par
+    /// `heap.bytes` : files, maps, Vecs et contextes garés —
+    /// le compteur qui suit la RSS nomme le fuyard.
+    /// Ligne de recensement §B-59 — écrite dans `LAST_STATS` aux
+    /// ticks chauds, relue par `rss_guard` à l'abort : compteurs
+    /// heap, histogramme `ObjKind` (top 6) et réservoirs engine.
+    /// Si tout est plat pendant que le commit saute, le burst
+    /// vit hors de toute structure comptée (allocateur pur).
+    fn census_line(&self, rss: usize, virt: usize) -> String {
+        let s = self.heap.stats();
+        let mut hist = self.heap.kind_histogram();
+        hist.truncate(6);
+        let top: String = hist
+            .iter()
+            .map(|(k, n, b)| format!(" {k}:{n}/{}MiB", b / 1_048_576))
+            .collect();
+        format!(
+            "cells={} heap={}MiB envs? rss={rss} virt={virt} |{top} | {}",
+            s.live_cells,
+            s.estimated_bytes / 1_048_576,
+            self.reservoir_report()
+        )
+    }
+
+    pub(crate) fn reservoir_report(&self) -> String {
+        let gen_items: usize = self.gen_collect.iter().map(Vec::len).sum();
+        let us_items: usize = self.using_stack.iter().map(Vec::len).sum();
+        let mod_src_b: usize = self.module_sources.values().map(String::len).sum();
+        let unh_b: usize = self.unhandled_reports.iter().map(String::len).sum();
+        let (pk_fin, pk_mod, pk_dom) =
+            self.parked
+                .values()
+                .fold((0usize, 0usize, 0usize), |(f, m, d), c| {
+                    let dnodes = c
+                        .dom_ctx
+                        .as_ref()
+                        .map(|(r, _)| r.borrow().b59_counts().0)
+                        .unwrap_or(0);
+                    (f + c.finregs.len(), m + c.modules.len(), d + dnodes)
+                });
+        format!(
+            "cs:{} lbl:{} ns:{} nc:{} gen:{} us:{} pm:{} pmq:{} fin:{} \
+             unh:{}/{} uh:{} mod:{}/{}/{} pi:{} di:{} wk:{} ctx:{}/{} \
+             pfin:{} pmod:{} pdom:{} sym:{}/{} dc:{} im:{} nt:{} pf:{} ma:{}",
+            self.call_stack.len(),
+            self.pending_labels.len(),
+            self.nat_stack.len(),
+            self.native_caller.len(),
+            gen_items,
+            us_items,
+            self.pending_msgs.len(),
+            self.port_msgs.len(),
+            self.finregs.len(),
+            self.pending_unhandled.len(),
+            unh_b,
+            self.unhandled_seen.len(),
+            self.modules.len(),
+            self.module_envs.len(),
+            mod_src_b,
+            self.pending_imports.len(),
+            self.dyn_import_reqs.len(),
+            self.workers.len(),
+            self.ctxs.len(),
+            self.parked.len(),
+            pk_fin,
+            pk_mod,
+            pk_dom,
+            self.symbol_reg.len(),
+            self.sym_index.len(),
+            self.dom_ctors.len(),
+            self.import_map.len(),
+            self.nat_trace_counts.len(),
+            self.prof_counts.len(),
+            self.missing_api_counts.len(),
+        )
+    }
+
     /// Refuse (`RangeError`) une matérialisation de `bytes` octets
     /// dépassant `min(mem_limit, MAX_SINGLE_ALLOC)` — à appeler
     /// avant tout `vec![…; n]`/`resize`/`repeat` sur un `n` tiré
     /// du script. La multiplication est saturante en amont.
     pub(crate) fn alloc_guard(&mut self, bytes: usize) -> JsResult<()> {
+        // Breadcrumb §B-59 : la taille demandée par la dernière
+        // garde avant l'abort — distingue « burst gardé qui
+        // ratchette » de « span hors de toute garde ».
+        if self.rss_watch_mb > 0 {
+            crate::LAST_ALLOC_REQ.store(bytes, std::sync::atomic::Ordering::Relaxed);
+        }
         let lim = match self.heap.mem_limit() {
             0 => Self::MAX_SINGLE_ALLOC,
             m => m.min(Self::MAX_SINGLE_ALLOC),
@@ -3817,13 +3977,31 @@ impl Engine {
         // (actugaming : 5 496 → 6 660 Mo en <256 ops). Toutes
         // les grosses allocs natives passent ici — check RSS à
         // la demande, la géante meurt avant l'alloc.
+        if self.rss_kill_mb > 0 && self.rss_kill_latched {
+            return Err(self.range_error("process RSS limit exceeded (latched kill)"));
+        }
         if self.rss_kill_mb > 0 {
             if let Some(m) = memory_stats::memory_stats() {
                 let rss = m.physical_mem / (1024 * 1024);
+                let virt = m.virtual_mem / (1024 * 1024);
                 if rss > self.rss_kill_mb {
+                    self.rss_kill_latched = true;
                     return Err(self.range_error(format!(
                         "process RSS limit exceeded ({rss} MiB > {} MiB — native reservoir bound)",
                         self.rss_kill_mb
+                    )));
+                }
+                // Kill doux **commit** : une réservation unique
+                // (`Vec::reserve`/`HashMap` growth entre deux
+                // ticks) gonfle `PagefileUsage` de ~6 Go sans
+                // toucher les pages — `rss` reste sous le seuil
+                // mais le pagefile se vide et couche la station
+                // (actugaming, `rss_guard[commit]` 12,8 Go).
+                if self.commit_kill_mb > 0 && virt > self.commit_kill_mb {
+                    self.rss_kill_latched = true;
+                    return Err(self.range_error(format!(
+                        "process commit limit exceeded ({virt} MiB > {} MiB — native reservoir bound)",
+                        self.commit_kill_mb
                     )));
                 }
             }
@@ -3991,18 +4169,23 @@ impl Engine {
     /// primitive est enrobée dans un objet-wrapper jetable (les
     /// écritures `with` vont au wrapper, spec `ToObject`).
     /// `null`/`undefined` → `TypeError`.
-    pub(crate) fn with_object_of(&mut self, v: Value) -> Option<ObjId> {
+    pub(crate) fn with_object_of(&mut self, v: Value) -> JsResult<Option<ObjId>> {
         let (proto, own_len, chars): (ObjId, Option<usize>, Option<Vec<String>>) = match v {
-            Value::Obj(id) => return Some(id),
+            Value::Obj(id) => return Ok(Some(id)),
             Value::Str(sid) => {
-                let s = self.heap.string(sid).unwrap_or_default();
+                let s = self.read_str(sid)?.unwrap_or_default();
+                // Garde §B-59 : `with(str)` matérialisait par
+                // caractère une `String` (24 o) + une cellule
+                // `str_val` + une prop `set_own` (~200 o) —
+                // mesuré : 20 M chars → wedge O(n²) + ~1 Go.
+                self.alloc_guard(s.len().saturating_mul(200))?;
                 let cs: Vec<String> = s.chars().map(|c| c.to_string()).collect();
                 (self.protos.string, Some(cs.len()), Some(cs))
             }
             Value::Num(_) => (self.protos.number, None, None),
             Value::Bool(_) => (self.protos.boolean, None, None),
             Value::Big(_) => (self.protos.bigint, None, None),
-            Value::Undefined | Value::Null | Value::Hole => return None,
+            Value::Undefined | Value::Null | Value::Hole => return Ok(None),
         };
         // Wrapper éphémère — jamais observable par le script hors
         // du bloc `with` (aucune référence ne s'en échappe sauf si
@@ -4020,7 +4203,7 @@ impl Engine {
                 self.set_own(w, &i.to_string(), cv, true);
             }
         }
-        Some(w)
+        Ok(Some(w))
     }
 
     /// `with (o)` — `o` lierait-il `name` ? Spec
@@ -4541,6 +4724,16 @@ impl Engine {
                             {
                                 break;
                             }
+                            // Le tick seul perd la course : le
+                            // `push` au doublement de capacité
+                            // réserve ~2×len dans UNE itération
+                            // (§B-59) — borne le Vec lui-même.
+                            if out.len() % 4096 == 0 {
+                                self.alloc_guard(
+                                    (out.len() + 4096)
+                                        .saturating_mul(std::mem::size_of::<Value>()),
+                                )?;
+                            }
                             out.push(self.get_prop(rid, "value").unwrap_or(Value::Undefined));
                         }
                         return Ok(out);
@@ -4572,6 +4765,11 @@ impl Engine {
                 Err(self.type_error("object is not iterable"))
             }
             Value::Str(id) => {
+                // Garde : `f(...str)`/`[...str]` matérialisent
+                // ~1 cellule + ~160 o par caractère (String +
+                // cellule + internement), sans tick dans le
+                // `collect` (§B-59 — spread de chaîne géante).
+                self.alloc_guard(self.heap.str_len(id).unwrap_or(0).saturating_mul(160))?;
                 let s = self.heap.string(id).unwrap_or_default();
                 Ok(s.chars().map(|c| self.str_val(c.to_string())).collect())
             }
@@ -4635,6 +4833,12 @@ impl Engine {
                         {
                             break;
                         }
+                        if out.len() % 4096 == 0 {
+                            self.alloc_guard(
+                                (out.len() + 4096)
+                                    .saturating_mul(std::mem::size_of::<Value>()),
+                            )?;
+                        }
                         out.push(self.get_prop(rid, "value").unwrap_or(Value::Undefined));
                     }
                     return Ok(out);
@@ -4661,7 +4865,16 @@ impl Engine {
             match a {
                 Expr::Spread(e) => {
                     let v = self.eval_expr(env, this, e)?;
-                    out.extend(self.iter_values(v)?);
+                    let items = self.iter_values(v)?;
+                    // `f(...a1,...a2,…)` — les spreads
+                    // s'accumulent dans `out` sans tick (§B-59 :
+                    // ~6 Go de reserve en une expression de
+                    // call) — borne le total comme `iter_values`.
+                    self.alloc_guard(
+                        (out.len() + items.len())
+                            .saturating_mul(std::mem::size_of::<Value>()),
+                    )?;
+                    out.extend(items);
                 }
                 _ => out.push(self.eval_expr(env, this, a)?),
             }
@@ -5573,8 +5786,9 @@ impl Engine {
             }
             Value::Str(id) => {
                 if key == "length" {
-                    // Code units UTF-16 (spec) — astraux = 2.
-                    let n = self.heap.string(id).map_or(0, |s| s.encode_utf16().count());
+                    // Code units UTF-16 (spec) — astraux = 2,
+                    // sans clone (§B-59).
+                    let n = self.heap.str_u16_len(id).unwrap_or(0);
                     return Ok(Value::Num(n as f64));
                 }
                 if let Some(i) = array_index(key) {
@@ -5780,12 +5994,39 @@ impl Engine {
                 } else {
                     array_index(key).map(|i| i + 1)
                 };
-                need.and_then(|n| n.checked_sub(elems.len()))
+                need.filter(|n| *n > elems.len())
             }
             _ => None,
         };
-        if let Some(d) = grow.filter(|d| *d > 0) {
-            self.alloc_guard(d.saturating_mul(std::mem::size_of::<Value>()))?;
+        if let Some(n) = grow {
+            // Sur le **total** résultant, pas le delta : un
+            // `arr[i]=v` séquentiel (d=1) laisse le Vec doubler
+            // en interne — reserve de ~4 Go dans UNE écriture
+            // (§B-59, drain GTM `b[k]=v`). Le backing est borné
+            // au même plafond que `array_ctor` (256 Mio).
+            self.alloc_guard(n.saturating_mul(std::mem::size_of::<Value>()))?;
+        }
+        // Garde `props` (même fenêtre pré-emprunt) : une clé
+        // nommée nouvelle fait `props.push` — le Vec double par
+        // reserve+memcpy dans UNE écriture (`b[k]=v` drainée
+        // par un itérateur GTM, §B-59 — ~200 M props ≈ 6 Go de
+        // commit instantané entre deux ticks).
+        if array_index(key).is_none() && key != "length" {
+            let prop_bytes = self
+                .heap
+                .obj(id)
+                .map(|o| {
+                    if o.props.iter().any(|(k, _)| k == key) {
+                        0
+                    } else {
+                        (o.props.len() + 1)
+                            .saturating_mul(std::mem::size_of::<(String, crate::heap::Prop)>())
+                    }
+                })
+                .unwrap_or(0);
+            if prop_bytes > 0 {
+                self.alloc_guard(prop_bytes)?;
+            }
         }
         let Some(o) = self.heap.obj_mut(id) else {
             return Ok(false);
@@ -6260,6 +6501,14 @@ impl Engine {
         let mut cur = Some(id);
         let mut depth = 0;
         while let Some(cid) = cur {
+            // Tick + borne : la collecte est un span natif unique
+            // — un tableau de ~16 M éléments y empilait ~500 Mo
+            // de chaînes d'indices entre deux ticks (§B-59).
+            self.tick()?;
+            self.alloc_guard(
+                out.len()
+                    .saturating_mul(std::mem::size_of::<String>() + 16),
+            )?;
             if matches!(
                 self.heap.obj(cid).map(|o| &o.kind),
                 Some(ObjKind::Proxy { .. })
@@ -6329,7 +6578,8 @@ impl Engine {
             Value::Big(_) => self
                 .bigint_of(v)
                 .is_some_and(|b| !num_traits::Zero::is_zero(&b)),
-            Value::Str(id) => self.heap.string(id).is_some_and(|s| !s.is_empty()),
+            // Truthiness sans clone (§B-59).
+            Value::Str(id) => self.heap.str_len(id).is_some_and(|n| n > 0),
             Value::Obj(_) => true,
         }
     }
@@ -6535,7 +6785,7 @@ impl Engine {
             Value::Null => 0.0,
             Value::Bool(b) => f64::from(u8::from(b)),
             Value::Num(n) => n,
-            Value::Str(id) => parse_js_number(&self.heap.string(id).unwrap_or_default()),
+            Value::Str(id) => parse_js_number(&self.read_str(id)?.unwrap_or_default()),
             // `ToNumber(bigint)` → TypeError (spec) — `Number(1n)`
             // passe par `to_numeric` côté builtin, pas ici.
             Value::Big(_) => return Err(self.type_error("cannot convert a BigInt to number")),
@@ -6554,13 +6804,31 @@ impl Engine {
     }
 
     /// `ToString`.
+    /// Lecture de chaîne **gardée** — §B-59 : `heap.string`
+    /// clone l'intégralité hors census ; tout appelant
+    /// `&mut self` passe par ici (`alloc_guard(len)` avant
+    /// le clone → RangeError nommé, pas ratchet de commit).
+    pub(crate) fn read_str(&mut self, id: ObjId) -> JsResult<Option<String>> {
+        let n = self.heap.str_len(id).unwrap_or(0);
+        self.alloc_guard(n)?;
+        Ok(self.heap.string(id))
+    }
+
     pub(crate) fn to_js_string(&mut self, v: Value) -> JsResult<String> {
         Ok(match v {
             Value::Undefined | Value::Hole => "undefined".into(),
             Value::Null => "null".into(),
             Value::Bool(b) => if b { "true" } else { "false" }.into(),
             Value::Num(n) => num_to_js_string(n),
-            Value::Str(id) => self.heap.string(id).unwrap_or_default(),
+            Value::Str(id) => {
+                // Garde AVANT le clone : `heap.string` duplique
+                // l'intégralité — un `s += x` sur une Str de S
+                // octets clone S avant l'`alloc_guard` du `+`
+                // (§B-59 : ratchet de clones géants rattrapés).
+                let n = self.heap.str_len(id).unwrap_or(0);
+                self.alloc_guard(n)?;
+                self.heap.string(id).unwrap_or_default()
+            }
             Value::Big(_) => self.bigint_of(v).map(|b| b.to_string()).unwrap_or_default(),
             Value::Obj(id) => {
                 // `ToString(symbol)` → TypeError (spec `ToString`).
@@ -6664,17 +6932,45 @@ impl Engine {
         // mesure le RSS avant/après chaque natif — un span
         // natif non-tické (concat géant, materialisation Vec)
         // grandit hors portée des ticks ; le delta nomme la
-        // native fautive au lieu de son callsite JS.
+        // native fautive au lieu de son callsite JS. La mesure
+        // est au retour : un natif qui meurt dans l'alloc ne
+        // logue rien — d'où la breadcrumb `[nat-enter]` quand
+        // le RSS dépasse déjà le seuil watch (le dernier
+        // enter avant l'abort nomme le tueur).
         let rss_before = if self.rss_watch_mb > 0 {
             memory_stats::memory_stats().map(|m| m.physical_mem)
         } else {
             None
         };
+        if let Some(b) = rss_before {
+            // Breadcrumb de zone de mort : logue chaque entrée
+            // de natif quand le RSS approche le kill (512 Mio
+            // de marge) — sinon au-dessus de watch + 2 Gio.
+            let near = if self.rss_kill_mb > 0 {
+                self.rss_kill_mb.saturating_sub(512)
+            } else {
+                self.rss_watch_mb.saturating_add(2048)
+            };
+            if b / 1_048_576 > near {
+                eprintln!("[nat-enter] {name} rss={}", b / 1_048_576);
+            }
+        }
+        self.nat_stack.push(name);
+        if let Ok(mut g) = crate::LAST_NAT.lock() {
+            *g = name;
+        }
         let r = stacker::maybe_grow(
             crate::parser::STACK_RED_ZONE,
             crate::parser::STACK_GROW,
             || f(self, this, args),
         );
+        self.nat_stack.pop();
+        // Restaure le natif appelant comme « en vol » : vide
+        // à l'abort = span eval-side, nommé = le natif tueur.
+        let outer = self.nat_stack.last().copied().unwrap_or("");
+        if let Ok(mut g) = crate::LAST_NAT.lock() {
+            *g = outer;
+        }
         if let Some(before) = rss_before {
             if let Some(m) = memory_stats::memory_stats() {
                 let delta = m.physical_mem.saturating_sub(before);
@@ -6712,6 +7008,13 @@ impl Engine {
         // (spec `BoundFunctionExoticObject.[[Call]]`). Avant :
         // `Proxy(proxy(f))`/`f.bind…` ×N récurait ici hors
         // `call_depth` → overflow natif (J2/B-3).
+        // §B-59 : phase « call » — mort dans le préambule
+        // (boucle Bound/Proxy, clone `Fun`, switch de realm,
+        // liage des args) sans tick → `last_phase=call` nomme
+        // la zone que `last_stmt` ne couvre pas.
+        if let Ok(mut g) = crate::LAST_PHASE.lock() {
+            *g = "call";
+        }
         let mut cur = f;
         let mut args_owned: Option<Vec<Value>> = None;
         let mut this = this;

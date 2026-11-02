@@ -371,10 +371,25 @@ pub(crate) fn array_to_sorted(e: &mut Engine, this: Value, args: &[Value]) -> Js
 // -- String extras ----------------------------------------------------
 
 pub(crate) fn string_at(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    // §B-59 : lecture en place — `this_str` clonait la chaîne
+    // entière par appel (`at`/`charAt` en boucle de décodeur).
+    if let Value::Str(id) = this {
+        let len = e.heap.str_u16_len(id).unwrap_or(0);
+        return Ok(match rel_index(e, arg(args, 0), len)? {
+            Some(i) => match e.heap.str_u16_at(id, i) {
+                Some(w) => e.str_val(u16_to_string(&[w])),
+                None => Value::Undefined,
+            },
+            None => Value::Undefined,
+        });
+    }
     let s = this_str(e, this)?;
-    let u = u16_view(&s);
-    match rel_index(e, arg(args, 0), u.len())? {
-        Some(i) => Ok(e.str_val(u16_to_string(&u[i..=i]))),
+    match rel_index(e, arg(args, 0), u16_len(&s))? {
+        // `u16_at` : O(n) sans matérialiser la vue (§B-59).
+        Some(i) => Ok(match u16_at(&s, i) {
+            Some(t) => e.str_val(t),
+            None => Value::Undefined,
+        }),
         None => Ok(Value::Undefined),
     }
 }
@@ -384,14 +399,15 @@ pub(crate) fn string_at(e: &mut Engine, this: Value, args: &[Value]) -> JsResult
 /// sinon le code unit lui-même.
 pub(crate) fn string_code_point_at(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let s = this_str(e, this)?;
-    let i = e.to_number(arg(args, 0))?;
-    let u = u16_view(&s);
-    let Some(&w) = u.get(i.max(0.0) as usize) else {
+    let i = e.to_number(arg(args, 0))?.max(0.0) as usize;
+    // `encode_utf16().skip(i)` : O(i) sans matérialiser (§B-59).
+    let mut it = s.encode_utf16().skip(i);
+    let Some(w) = it.next() else {
         return Ok(Value::Undefined);
     };
     let cp = if (0xD800..0xDC00).contains(&w) {
-        match u.get(i.max(0.0) as usize + 1) {
-            Some(&t) if (0xDC00..0xE000).contains(&t) => {
+        match it.next() {
+            Some(t) if (0xDC00..0xE000).contains(&t) => {
                 0x10000 + ((u32::from(w) - 0xD800) << 10) + (u32::from(t) - 0xDC00)
             }
             _ => u32::from(w),
@@ -409,6 +425,11 @@ pub(crate) fn string_code_point_at(e: &mut Engine, this: Value, args: &[Value]) 
 /// explicite sur la primitive.
 pub(crate) fn string_iterator(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
     let s = this_str(e, this)?;
+    // Garde §B-59 : `chars().collect()` matérialise par
+    // caractère une `String` + une cellule `str_val` + une
+    // entrée d'internement (~160 o) — mesuré en vol :
+    // 20 M chars → 20 M cellules / 3,5 Go live, wedge.
+    e.alloc_guard(s.len().saturating_mul(160))?;
     let items: Vec<Value> = s.chars().map(|c| e.str_val(c.to_string())).collect();
     Ok(crate::collections::iter_obj(e, items, e.protos.string_iter))
 }

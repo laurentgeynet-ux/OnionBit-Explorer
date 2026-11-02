@@ -169,7 +169,7 @@ pub(crate) fn clone_deep(
             for (k, v) in pairs {
                 let kc = clone_deep(e, k, seen, depth + 1)?;
                 let vc = clone_deep(e, v, seen, depth + 1)?;
-                crate::collections::map_set_entry(e, cid, kc, vc);
+                crate::collections::map_set_entry(e, cid, kc, vc)?;
             }
             Ok(Value::Obj(cid))
         }
@@ -189,7 +189,7 @@ pub(crate) fn clone_deep(
             };
             for v in items {
                 let vc = clone_deep(e, v, seen, depth + 1)?;
-                crate::collections::set_add(e, cid, vc);
+                crate::collections::set_add(e, cid, vc)?;
             }
             Ok(Value::Obj(cid))
         }

@@ -22,9 +22,14 @@ impl Engine {
         self.eval_src_cap = cap;
     }
 
-    /// Kill doux RSS — tests et harnais bornés.
+    /// Kill doux RSS — tests et harnais bornés. `0` désarme et
+    /// relâche le loquet (le moteur redevient utilisable — sinon
+    /// un kill déjà tiré laisserait un moteur mort).
     pub fn set_rss_kill_mb(&mut self, mb: usize) {
         self.rss_kill_mb = mb;
+        if mb == 0 {
+            self.rss_kill_latched = false;
+        }
     }
 
     /// Borne §B-59 bras 3 — chaque `eval`/`Function` retient un
@@ -178,6 +183,12 @@ impl Engine {
         // `using` (ES2026) : chaque décl pousse un disposeur sur la
         // frame courante, dépilée LIFO à TOUTE sortie du corps —
         // normal, break, return et throw (spec `DisposeResources`).
+        // §B-59 : le corps est atteint — le span fatal d'ici
+        // est couvert par `last_stmt` ; `last_phase` resterait
+        // « call » seulement si la mort précédait ce point.
+        if let Ok(mut g) = crate::LAST_PHASE.lock() {
+            *g = "body";
+        }
         let has_using = body.iter().any(|s| matches!(s, Stmt::Using { .. }));
         if has_using {
             self.using_stack.push(Vec::new());
@@ -285,6 +296,13 @@ impl Engine {
     }
 
     pub(crate) fn exec_stmt(&mut self, env: &EnvRef, this: Value, s: &Stmt) -> JsResult<Flow> {
+        // Breadcrumb §B-59 : nomme le statement encadrant le span
+        // fatal (lu par `rss_guard` avec `last_expr`/`last_nat`).
+        if self.rss_watch_mb > 0 {
+            if let Ok(mut g) = crate::LAST_STMT.lock() {
+                *g = stmt_tag(s);
+            }
+        }
         self.tick()?;
         // JS-C41 : `if`/`try`/`for` s'exécutent en récursion
         // native — segment tas de secours avant débordement.
@@ -435,7 +453,7 @@ impl Engine {
             // englobant. Sloppy uniquement (early-error du parseur).
             Stmt::With { obj, body } => {
                 let v = self.eval_expr(env, this, obj)?;
-                let Some(oid) = self.with_object_of(v) else {
+                let Some(oid) = self.with_object_of(v)? else {
                     return Err(self.type_error("cannot use `with` on `null` or `undefined`"));
                 };
                 let with_env = Env::with(env.clone(), oid);
@@ -820,5 +838,36 @@ impl Engine {
             let n = self.str_val(name.clone());
             self.set_own(id, "name", n, false);
         }
+    }
+}
+
+/// Nom du variant `Stmt` — breadcrumb §B-59 (`LAST_STMT`),
+/// zéro alloc, armé seulement sous `EXPLORER_JS_RSS_WATCH`.
+fn stmt_tag(s: &Stmt) -> &'static str {
+    match s {
+        Stmt::Empty => "Empty",
+        Stmt::Expr(_) => "Expr",
+        Stmt::Var(_) => "Var",
+        Stmt::Lexical { .. } => "Lexical",
+        Stmt::FunctionDecl(_) => "FunctionDecl",
+        Stmt::ClassDecl(_) => "ClassDecl",
+        Stmt::Block(_) => "Block",
+        Stmt::If { .. } => "If",
+        Stmt::While { .. } => "While",
+        Stmt::DoWhile { .. } => "DoWhile",
+        Stmt::For { .. } => "For",
+        Stmt::ForIn { .. } => "ForIn",
+        Stmt::ForOf { .. } => "ForOf",
+        Stmt::Using { .. } => "Using",
+        Stmt::With { .. } => "With",
+        Stmt::Labeled { .. } => "Labeled",
+        Stmt::Break(_) => "Break",
+        Stmt::Continue(_) => "Continue",
+        Stmt::Return(_) => "Return",
+        Stmt::Throw(_) => "Throw",
+        Stmt::Try { .. } => "Try",
+        Stmt::Switch { .. } => "Switch",
+        Stmt::Import { .. } => "Import",
+        Stmt::Export(_) => "Export",
     }
 }

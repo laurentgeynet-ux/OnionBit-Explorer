@@ -159,6 +159,41 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   scripts suivants tournent.
   Verrou : `deadline_flag_does_
   not_leak_to_next_eval`.
+- **JS-C263 — §B-59 classe chaîne :
+  matérialisations/clones bornés**
+  (`explorer-jscore`) — lectures de
+  chaînes passées en place ou gardées
+  : `str_index_of`/`lastIndexOf`/
+  `slice`/`substring`/`substr`/`at`/
+  `charAt`/`charCodeAt`/`includes`/
+  `startsWith`/`endsWith`/`codePointAt`
+  lisent en UTF-8/`u16` direct sur la
+  cellule heap (plus de `this_str` =
+  clone de la chaîne entière **par
+  appel**, plus de `u16_view` =
+  `Vec<u16>` de 2×len par `indexOf`) ;
+  `strict_eq` compare en place
+  (`Heap::str_eq`, zéro clone) ;
+  matérialiseurs par caractère gardés
+  au coût réel (~160 o/char) :
+  `str[Symbol.iterator]`, spreads,
+  `Set`/`Array.from`, `split("")`,
+  `with(str)`, itérateurs, regexp
+  global `match`/`matchAll`/`replaceAll`,
+  `chars().collect()`, `decodeURIComponent`,
+  `Map`/`Set` (`entries`/`items`/`get`/
+  `has`/`size` sans clone du backing) —
+  `RangeError: allocation exceeds
+  engine limits` au lieu de +6 Gio de
+  commit. Instrumentation conservée :
+  `last_stmt`/`last_expr`/`last_phase`/
+  `last_drain`/`last_areq`/`last_stats`
+  sous `EXPLORER_JS_RSS_WATCH` +
+  kills `EXPLORER_JS_RSS_KILL_MB`/
+  `EXPLORER_JS_COMMIT_KILL_MB`. Sondes
+  20-40 M chars : `RangeError` immédiat
+  ou instantané (indexOf ×50 sur 40 M
+  : 4 Gio de churn → 0).
 - **R-139 — §B-59/§B-62 : placement
   grille borné** (`explorer-layout`,
   kill mémoire 32 Gio actugaming/

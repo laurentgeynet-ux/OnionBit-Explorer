@@ -15,6 +15,7 @@ memory-stats.workspace = true
 explorer-api.workspace = true
 explorer-core.workspace = true
 explorer-js.workspace = true
+explorer-jscore.workspace = true
 explorer-net.workspace = true
 explorer-render.workspace = true
 serde.workspace = true

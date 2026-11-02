@@ -100,6 +100,42 @@ pub use geom::{ElementGeom, GeoRect, GeomPosition, GeometryMap, GeometrySlot};
 pub use heap::{HeapStats, Host};
 pub use idb::{CacheEntry, CacheRegistry, IdbDb, IdbIndexDef, IdbRegistry, IdbStore};
 pub use interp::Engine;
+
+/// §B-59 — dernier natif entré dans `call_native`, écrit
+/// inconditionnellement (~20 ns, `&'static str`, zéro alloc).
+/// Le `rss_guard` du daemon le lit à l'abort : une mort dans
+/// un span natif non-tické nomme son natif même sans retour.
+pub static LAST_NAT: std::sync::Mutex<&'static str> = std::sync::Mutex::new("");
+/// Dernier variant `Expr` évalué (armé `EXPLORER_JS_RSS_WATCH`) —
+/// discrimine le span fatal : natif (`last_nat`) vs éval-side
+/// (le `Expr` courant nomme la famille : `Call`, `Assign`…).
+pub static LAST_EXPR: std::sync::Mutex<&'static str> = std::sync::Mutex::new("");
+/// Dernier `Stmt` entré dans `exec_stmt` (armé
+/// `EXPLORER_JS_RSS_WATCH`) — nomme la forme de statement qui
+/// encadre le span fatal (`For`/`Var`/`Expr`/`Try`…).
+pub static LAST_STMT: std::sync::Mutex<&'static str> = std::sync::Mutex::new("");
+/// Taille (octets) de la dernière requête `alloc_guard` (armé
+/// `EXPLORER_JS_RSS_WATCH`) — si le span fatal passe par une
+/// garde, sa demande est nommée à l'abort.
+pub static LAST_ALLOC_REQ: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(0);
+/// Recensement heap au dernier tick « chaud » (RSS > watch) :
+/// compteurs + `ObjKind` du plus gros objet vivant — nomme le
+/// réservoir si le burst est une structure comptée, prouve
+/// « hors compteurs » sinon (§B-59).
+pub static LAST_STATS: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
+
+/// §B-59 — dernier frame JS du tick (écrit sous
+/// `EXPLORER_JS_RSS_WATCH` uniquement — `format!` par tick est
+/// trop cher hors diagnostic).
+pub static LAST_FRAME: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
+/// Phase de l'appelant JS — **inconditionnelle** (`&'static
+/// str`, ~20 ns) : écrite à l'entrée de `call_value_impl` et
+/// `exec_body`, là où aucun tick n'a encore couru. Vide à
+/// l'abort = le span fatal est dans une statement/éval tickée
+/// (couvert par `LAST_STMT`) ou hors fil JS ; `"call"`/`"body"`
+/// = mort dans le préambule d'appel (liage, hoist, suspend).
+pub static LAST_PHASE: std::sync::Mutex<&'static str> = std::sync::Mutex::new("");
 pub use mediaq::MediaEnv;
 pub use module::{
     is_bare_specifier, module_specifiers, rewrite_bare_specifier, DynImportReq, ModuleLoader,

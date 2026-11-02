@@ -100,6 +100,9 @@ impl Session {
     /// `DrainAct::Req` — sans moteur JS, au même drain que
     /// les intentions script.
     pub fn pump_timers(&mut self, tab: TabId) -> usize {
+        if let Ok(mut g) = crate::LAST_DRAIN.lock() {
+            *g = "timers";
+        }
         self.pump_refresh(tab);
         let max = self.max_timer_jobs;
         let t0 = Instant::now();
@@ -385,6 +388,9 @@ impl Session {
         out: Option<(usize, Option<apply::ApplySync>, Box<dyn JsEngine>)>,
         sync_ok: bool,
     ) -> usize {
+        if let Ok(mut g) = crate::LAST_DRAIN.lock() {
+            *g = "commit";
+        }
         let t0 = Instant::now();
         let phase = {
             let Some(entry) = self.tabs.get_mut(&tab) else {

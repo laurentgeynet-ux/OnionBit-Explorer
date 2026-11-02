@@ -884,6 +884,7 @@ dependencies = [
  "explorer-api",
  "explorer-core",
  "explorer-js",
+ "explorer-jscore",
  "explorer-net",
  "explorer-render",
  "memory-stats",

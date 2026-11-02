@@ -585,6 +585,9 @@ pub enum EvalReply {
 /// elle-même reste soumise au budget ops du moteur — une
 /// expression hostile est traitée comme un script hostile.
 pub async fn eval_shared(sess: &tokio::sync::Mutex<Session>, tab: TabId, src: String) -> EvalReply {
+    if let Ok(mut g) = crate::LAST_DRAIN.lock() {
+        *g = "eval";
+    }
     let taken = {
         let mut s = sess.lock().await;
         s.take_js_engine(tab)
@@ -639,6 +642,9 @@ pub async fn eval_shared(sess: &tokio::sync::Mutex<Session>, tab: TabId, src: St
 /// `handle_input_now`, avant `drain_navs_shared`).
 /// Retourne le nombre d'applies commis.
 pub async fn drain_applies_shared(sess: &tokio::sync::Mutex<Session>, _tab: TabId) -> usize {
+    if let Ok(mut g) = crate::LAST_DRAIN.lock() {
+        *g = "applies";
+    }
     let mut applied = 0;
     loop {
         let job = {

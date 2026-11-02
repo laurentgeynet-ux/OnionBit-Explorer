@@ -25,18 +25,32 @@ fn svz(h: &crate::heap::Heap, a: Value, b: Value) -> bool {
         || matches!((a, b), (Value::Num(x), Value::Num(y)) if x.is_nan() && y.is_nan())
 }
 
-fn map_entries(e: &Engine, id: ObjId) -> Vec<(Value, Value)> {
-    match e.heap.obj(id).map(|o| &o.kind) {
+/// Snapshot des entrées d'une `Map` — clone du Vec backing
+/// (sémantique d'itérateur gelé, déviation documentée). Gardé
+/// sur la taille totale : le clone commet `len×16` en UNE alloc
+/// (§B-59 — un `keys()`/`entries()`/`forEach` sur Map géante).
+fn map_entries(e: &mut Engine, id: ObjId) -> JsResult<Vec<(Value, Value)>> {
+    let len = e.heap.obj(id).map_or(0, |o| match &o.kind {
+        ObjKind::Map(m) => m.len(),
+        _ => 0,
+    });
+    e.alloc_guard(len.saturating_mul(std::mem::size_of::<(Value, Value)>()))?;
+    Ok(match e.heap.obj(id).map(|o| &o.kind) {
         Some(ObjKind::Map(m)) => m.clone(),
         _ => Vec::new(),
-    }
+    })
 }
 
-fn set_items(e: &Engine, id: ObjId) -> Vec<Value> {
-    match e.heap.obj(id).map(|o| &o.kind) {
+fn set_items(e: &mut Engine, id: ObjId) -> JsResult<Vec<Value>> {
+    let len = e.heap.obj(id).map_or(0, |o| match &o.kind {
+        ObjKind::Set(s) => s.len(),
+        _ => 0,
+    });
+    e.alloc_guard(len.saturating_mul(std::mem::size_of::<Value>()))?;
+    Ok(match e.heap.obj(id).map(|o| &o.kind) {
         Some(ObjKind::Set(s)) => s.clone(),
         _ => Vec::new(),
-    }
+    })
 }
 
 /// `{value, done}` iterator result.
@@ -100,10 +114,15 @@ fn map_new(e: &mut Engine, args: &[Value], proto_id: crate::value::ObjId) -> JsR
     // `new Map([[k, v], …])` — iterate the source, each entry must
     // be a 2-element pair.
     if !matches!(arg(args, 0), Value::Undefined | Value::Null) {
-        for pair in e.iter_values(arg(args, 0))? {
+        for (i, pair) in e.iter_values(arg(args, 0))?.into_iter().enumerate() {
+            // Tické : `new Map(géant)` boucle sans borne sinon —
+            // kill RSS/deadline/ops morts dans le span (§B-59).
+            if i % 4096 == 0 {
+                e.tick()?;
+            }
             let k = e.get_prop_value(pair, "0")?;
             let v = e.get_prop_value(pair, "1")?;
-            map_set_entry(e, id, k, v);
+            map_set_entry(e, id, k, v)?;
         }
     }
     Ok(m)
@@ -130,41 +149,65 @@ fn set_new(e: &mut Engine, args: &[Value], proto_id: crate::value::ObjId) -> JsR
     });
     let s = Value::Obj(id);
     if !matches!(arg(args, 0), Value::Undefined | Value::Null) {
-        for v in e.iter_values(arg(args, 0))? {
-            set_add(e, id, v);
+        for (i, v) in e.iter_values(arg(args, 0))?.into_iter().enumerate() {
+            if i % 4096 == 0 {
+                e.tick()?;
+            }
+            set_add(e, id, v)?;
         }
     }
     Ok(s)
 }
 
-pub(crate) fn map_set_entry(e: &mut Engine, id: ObjId, k: Value, v: Value) {
+pub(crate) fn map_set_entry(e: &mut Engine, id: ObjId, k: Value, v: Value) -> JsResult<()> {
     // Two-phase: find the slot immutably, then mutate — `svz` needs
     // the heap for string comparison.
-    let pos = e.heap.obj(id).and_then(|o| match &o.kind {
-        ObjKind::Map(m) => m.iter().position(|(ek, _)| svz(&e.heap, *ek, k)),
-        _ => None,
+    let (pos, len) = e.heap.obj(id).map_or((None, 0), |o| match &o.kind {
+        ObjKind::Map(m) => (
+            m.iter().position(|(ek, _)| svz(&e.heap, *ek, k)),
+            m.len(),
+        ),
+        _ => (None, 0),
     });
-    let Some(o) = e.heap.obj_mut(id) else { return };
-    let ObjKind::Map(m) = &mut o.kind else { return };
+    if pos.is_none() {
+        // Garde : `m.push` fait doubler le Vec backing dans UN
+        // insert — un drain `m.set(k,v)` hostile commet ~6 Go de
+        // reserve entre deux ticks (§B-59, même classe que les
+        // `props`/`elems` bornés).
+        e.alloc_guard(
+            (len + 1).saturating_mul(std::mem::size_of::<(Value, Value)>()),
+        )?;
+    }
+    let Some(o) = e.heap.obj_mut(id) else {
+        return Ok(());
+    };
+    let ObjKind::Map(m) = &mut o.kind else {
+        return Ok(());
+    };
     match pos {
         Some(i) => m[i].1 = v,
         None => m.push((k, v)),
     }
+    Ok(())
 }
 
-pub(crate) fn set_add(e: &mut Engine, id: ObjId, v: Value) {
-    let has = e.heap.obj(id).is_some_and(|o| match &o.kind {
-        ObjKind::Set(s) => s.iter().any(|&ev| svz(&e.heap, ev, v)),
-        _ => true,
+pub(crate) fn set_add(e: &mut Engine, id: ObjId, v: Value) -> JsResult<()> {
+    let (has, len) = e.heap.obj(id).map_or((true, 0), |o| match &o.kind {
+        ObjKind::Set(s) => (s.iter().any(|&ev| svz(&e.heap, ev, v)), s.len()),
+        _ => (true, 0),
     });
     if has {
-        return;
+        return Ok(());
     }
+    e.alloc_guard(
+        (len + 1).saturating_mul(std::mem::size_of::<Value>()),
+    )?;
     if let Some(o) = e.heap.obj_mut(id) {
         if let ObjKind::Set(s) = &mut o.kind {
             s.push(v);
         }
     }
+    Ok(())
 }
 
 // ------------------------------------------------------------------
@@ -175,26 +218,38 @@ fn map_set(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let Value::Obj(id) = this else {
         return Err(e.type_error("Map.set on non-Map"));
     };
-    map_set_entry(e, id, arg(args, 0), arg(args, 1));
+    map_set_entry(e, id, arg(args, 0), arg(args, 1))?;
     Ok(this) // chaining
 }
 
 fn map_get(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let k = arg(args, 0);
-    let v = map_entries(e, c_id(this))
-        .into_iter()
-        .find(|(ek, _)| svz(&e.heap, *ek, k))
-        .map_or(Value::Undefined, |(_, v)| v);
+    // Lookup sans clone : `svz` n'a besoin que de `&e.heap` —
+    // `map_entries` clonait TOUT le Vec par `get` (O(n) mémoire
+    // par lookup — bras §B-59, deep-clone gtag `f` : `d.get(g)`
+    // par nœud sur une mémo à millions d'entrées).
+    let v = e
+        .heap
+        .obj(c_id(this))
+        .and_then(|o| match &o.kind {
+            ObjKind::Map(m) => m
+                .iter()
+                .find(|(ek, _)| svz(&e.heap, *ek, k))
+                .map(|(_, v)| *v),
+            _ => None,
+        })
+        .unwrap_or(Value::Undefined);
     Ok(v)
 }
 
 fn map_has(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let k = arg(args, 0);
-    Ok(Value::Bool(
-        map_entries(e, c_id(this))
-            .iter()
-            .any(|(ek, _)| svz(&e.heap, *ek, k)),
-    ))
+    Ok(Value::Bool(e.heap.obj(c_id(this)).is_some_and(|o| {
+        match &o.kind {
+            ObjKind::Map(m) => m.iter().any(|(ek, _)| svz(&e.heap, *ek, k)),
+            _ => false,
+        }
+    })))
 }
 
 fn map_delete(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
@@ -224,13 +279,16 @@ fn map_get_or_insert(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Va
         return Err(e.type_error("Map.getOrInsert on non-Map"));
     };
     let (k, v) = (arg(args, 0), arg(args, 1));
-    if let Some((_, ev)) = map_entries(e, id)
-        .into_iter()
-        .find(|(ek, _)| svz(&e.heap, *ek, k))
-    {
+    if let Some(ev) = e.heap.obj(id).and_then(|o| match &o.kind {
+        ObjKind::Map(m) => m
+            .iter()
+            .find(|(ek, _)| svz(&e.heap, *ek, k))
+            .map(|(_, ev)| *ev),
+        _ => None,
+    }) {
         return Ok(ev);
     }
-    map_set_entry(e, id, k, v);
+    map_set_entry(e, id, k, v)?;
     Ok(v)
 }
 
@@ -244,14 +302,17 @@ fn map_get_or_insert_computed(e: &mut Engine, this: Value, args: &[Value]) -> Js
     if !e.is_callable(cb) {
         return Err(e.type_error("Map.getOrInsertComputed: callback is not callable"));
     }
-    if let Some((_, ev)) = map_entries(e, id)
-        .into_iter()
-        .find(|(ek, _)| svz(&e.heap, *ek, k))
-    {
+    if let Some(ev) = e.heap.obj(id).and_then(|o| match &o.kind {
+        ObjKind::Map(m) => m
+            .iter()
+            .find(|(ek, _)| svz(&e.heap, *ek, k))
+            .map(|(_, ev)| *ev),
+        _ => None,
+    }) {
         return Ok(ev);
     }
     let v = e.call_value(cb, Value::Undefined, &[k])?;
-    map_set_entry(e, id, k, v);
+    map_set_entry(e, id, k, v)?;
     Ok(v)
 }
 
@@ -268,7 +329,11 @@ fn map_clear(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
 
 /// `map.size` — accessor on the prototype.
 fn map_size(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
-    Ok(Value::Num(map_entries(e, c_id(this)).len() as f64))
+    let n = e.heap.obj(c_id(this)).map_or(0, |o| match &o.kind {
+        ObjKind::Map(m) => m.len(),
+        _ => 0,
+    });
+    Ok(Value::Num(n as f64))
 }
 
 /// Shared `forEach(cb)` for Map (`(v, k, map)`) and Set
@@ -282,6 +347,15 @@ fn coll_for_each(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value>
     let Value::Obj(id) = this else {
         return Err(e.type_error("forEach on non-collection"));
     };
+    // Garde sur le snapshot : `forEach` sur collection géante
+    // commet `len×16` d'un coup (§B-59 — même classe que
+    // `map_entries`).
+    let n = e.heap.obj(id).map_or(0, |o| match &o.kind {
+        ObjKind::Map(m) => m.len(),
+        ObjKind::Set(s) => s.len(),
+        _ => 0,
+    });
+    e.alloc_guard(n.saturating_mul(std::mem::size_of::<(Value, Value)>()))?;
     let pairs: Vec<(Value, Value)> = match e.heap.obj(id).map(|o| &o.kind) {
         Some(ObjKind::Map(m)) => m.clone(),
         Some(ObjKind::Set(s)) => s.iter().map(|&v| (v, v)).collect(),
@@ -294,7 +368,7 @@ fn coll_for_each(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value>
 }
 
 fn map_keys(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
-    let items: Vec<Value> = map_entries(e, c_id(this))
+    let items: Vec<Value> = map_entries(e, c_id(this))?
         .into_iter()
         .map(|(k, _)| k)
         .collect();
@@ -302,7 +376,7 @@ fn map_keys(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
 }
 
 fn map_values(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
-    let items: Vec<Value> = map_entries(e, c_id(this))
+    let items: Vec<Value> = map_entries(e, c_id(this))?
         .into_iter()
         .map(|(_, v)| v)
         .collect();
@@ -311,7 +385,7 @@ fn map_values(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
 
 /// `map.entries()` — iterator of `[k, v]` arrays.
 fn map_iter_entries(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
-    let pairs = map_entries(e, c_id(this));
+    let pairs = map_entries(e, c_id(this))?;
     let mut items = Vec::with_capacity(pairs.len());
     for (k, v) in pairs {
         items.push(e.new_array(vec![k, v]));
@@ -327,17 +401,18 @@ fn set_add_m(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let Value::Obj(id) = this else {
         return Err(e.type_error("Set.add on non-Set"));
     };
-    set_add(e, id, arg(args, 0));
+    set_add(e, id, arg(args, 0))?;
     Ok(this)
 }
 
 fn set_has(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let v = arg(args, 0);
-    Ok(Value::Bool(
-        set_items(e, c_id(this))
-            .iter()
-            .any(|&ev| svz(&e.heap, ev, v)),
-    ))
+    Ok(Value::Bool(e.heap.obj(c_id(this)).is_some_and(|o| {
+        match &o.kind {
+            ObjKind::Set(s) => s.iter().any(|&ev| svz(&e.heap, ev, v)),
+            _ => false,
+        }
+    })))
 }
 
 fn set_delete(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
@@ -372,16 +447,21 @@ fn set_clear(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
 }
 
 fn set_size(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
-    Ok(Value::Num(set_items(e, c_id(this)).len() as f64))
+    let n = e.heap.obj(c_id(this)).map_or(0, |o| match &o.kind {
+        ObjKind::Set(s) => s.len(),
+        _ => 0,
+    });
+    Ok(Value::Num(n as f64))
 }
 
 /// `set.values()`/`keys()`/`entries()` + `[Symbol.iterator]`.
 fn set_values_iter(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
-    Ok(iter_obj(e, set_items(e, c_id(this)), e.protos.set_iter))
+    let items = set_items(e, c_id(this))?;
+    Ok(iter_obj(e, items, e.protos.set_iter))
 }
 
 fn set_entries_iter(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
-    let items = set_items(e, c_id(this));
+    let items = set_items(e, c_id(this))?;
     let mut out = Vec::with_capacity(items.len());
     for v in items {
         out.push(e.new_array(vec![v, v]));
@@ -393,7 +473,7 @@ fn set_entries_iter(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value
 
 /// Alloue un `Set` pré-rempli (dédup via `set_add`, ordre
 /// d'insertion préservé).
-fn new_set_from(e: &mut Engine, items: Vec<Value>) -> Value {
+fn new_set_from(e: &mut Engine, items: Vec<Value>) -> JsResult<Value> {
     let proto = Value::Obj(e.protos.set);
     let id = e.heap.alloc_obj(Object {
         proto,
@@ -404,18 +484,18 @@ fn new_set_from(e: &mut Engine, items: Vec<Value>) -> Value {
         args_map: None,
     });
     for v in items {
-        set_add(e, id, v);
+        set_add(e, id, v)?;
     }
-    Value::Obj(id)
+    Ok(Value::Obj(id))
 }
 
 /// `this` et l'argument doivent être des `Set` — retourne les
 /// deux listes d'éléments (ordre d'insertion).
 fn two_sets(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<(Vec<Value>, Vec<Value>)> {
-    let mine = set_items(e, c_id(this));
+    let mine = set_items(e, c_id(this))?;
     let other = match arg(args, 0) {
         Value::Obj(oid) if matches!(e.heap.obj(oid).map(|o| &o.kind), Some(ObjKind::Set(_))) => {
-            set_items(e, oid)
+            set_items(e, oid)?
         }
         _ => return Err(e.type_error("expected a Set argument")),
     };
@@ -429,26 +509,26 @@ fn contains(e: &Engine, hay: &[Value], v: Value) -> bool {
 fn set_union(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let (mut a, b) = two_sets(e, this, args)?;
     a.extend(b);
-    Ok(new_set_from(e, a))
+    new_set_from(e, a)
 }
 
 fn set_intersection(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let (a, b) = two_sets(e, this, args)?;
     let keep: Vec<Value> = a.iter().copied().filter(|&v| contains(e, &b, v)).collect();
-    Ok(new_set_from(e, keep))
+    new_set_from(e, keep)
 }
 
 fn set_difference(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let (a, b) = two_sets(e, this, args)?;
     let keep: Vec<Value> = a.iter().copied().filter(|&v| !contains(e, &b, v)).collect();
-    Ok(new_set_from(e, keep))
+    new_set_from(e, keep)
 }
 
 fn set_sym_diff(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let (a, b) = two_sets(e, this, args)?;
     let mut out: Vec<Value> = a.iter().copied().filter(|&v| !contains(e, &b, v)).collect();
     out.extend(b.iter().copied().filter(|&v| !contains(e, &a, v)));
-    Ok(new_set_from(e, out))
+    new_set_from(e, out)
 }
 
 fn set_is_subset(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
@@ -714,7 +794,7 @@ fn map_group_by(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
         } else {
             let a = e.new_array(Vec::new());
             let Value::Obj(aid) = a else { continue };
-            map_set_entry(e, out, k, a);
+            map_set_entry(e, out, k, a)?;
             aid
         };
         if let Some(o) = e.heap.obj_mut(aid) {

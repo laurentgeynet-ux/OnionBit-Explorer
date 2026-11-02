@@ -17,11 +17,24 @@ pub(crate) fn string_to_string(e: &mut Engine, this: Value, _a: &[Value]) -> JsR
 }
 
 pub(crate) fn string_char_at(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
-    let s = this_str(e, this)?;
     let i = match arg(args, 0) {
         Value::Undefined => 0.0,
         v => e.to_number(v)?,
     };
+    // §B-59 : lecture en place — `charAt` en boucle clonait la
+    // chaîne entière par appel via `this_str` (churn commit).
+    if let Value::Str(id) = this {
+        let w = if i >= 0.0 {
+            e.heap.str_u16_at(id, i as usize)
+        } else {
+            None
+        };
+        return Ok(match w {
+            Some(w) => e.str_val(u16_to_string(&[w])),
+            None => e.str_val(""),
+        });
+    }
+    let s = this_str(e, this)?;
     Ok(
         match if i >= 0.0 {
             u16_at(&s, i as usize)
@@ -35,11 +48,22 @@ pub(crate) fn string_char_at(e: &mut Engine, this: Value, args: &[Value]) -> JsR
 }
 
 pub(crate) fn string_char_code_at(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
-    let s = this_str(e, this)?;
     let i = match arg(args, 0) {
         Value::Undefined => 0.0,
         v => e.to_number(v)?,
     };
+    // §B-59 : lecture en place (voir `string_char_at`).
+    if let Value::Str(id) = this {
+        return Ok(Value::Num(
+            if i >= 0.0 {
+                e.heap.str_u16_at(id, i as usize).map(u32::from)
+            } else {
+                None
+            }
+            .map_or(f64::NAN, |w| f64::from(w)),
+        ));
+    }
+    let s = this_str(e, this)?;
     Ok(Value::Num(
         if i >= 0.0 {
             s.encode_utf16().nth(i as usize).map(f64::from)
@@ -56,29 +80,43 @@ pub(crate) fn str_index_of(
     args: &[Value],
     last: bool,
 ) -> JsResult<Value> {
-    let s = this_str(e, this)?;
+    // `CheckObjectCoercible(this)` avant toute conversion (spec).
+    if matches!(this, Value::Undefined | Value::Null) {
+        return Err(e.type_error("String method called on null/undefined"));
+    }
     let needle = e.to_js_string(arg(args, 0))?;
-    // Recherche sur la vue code units (spec — `from` et le
-    // résultat sont en units).
-    let (h, n) = (u16_view(&s), u16_view(&needle));
     let from = match arg(args, 1) {
         // `lastIndexOf` sans position → depuis la fin (spec).
         Value::Undefined if last => usize::MAX,
         Value::Undefined => 0usize,
         v => (e.to_number(v)?.max(0.0)) as usize,
     };
-    let pos = if n.len() > h.len() {
+    // §B-59 : recherche **en place** sur la cellule — le chemin
+    // `this_str` clonait toute la chaîne par appel (décodeur
+    // Confiant `indexOf` × N = ratchet de commit géant).
+    if let Value::Str(id) = this {
+        return Ok(Value::Num(
+            e.heap.str_index_of(id, &needle, from, last) as f64,
+        ));
+    }
+    let s = this_str(e, this)?;
+    let byte_from = Heap::u16_pos_to_byte(&s, from);
+    let pos = if needle.len() > s.len() {
         None
     } else if last {
-        // `lastIndexOf` : dernière occurrence dont le début est ≤
-        // `from` (spec `StringIndexOf` arrière).
-        let hi = h.len() - n.len();
-        let from = from.min(hi);
-        (0..=from).rev().find(|&i| h[i..i + n.len()] == n[..])
+        let limit = byte_from.min(s.len() - needle.len());
+        s.match_indices(&needle)
+            .take_while(|(p, _)| *p <= limit)
+            .last()
+            .map(|(p, _)| p)
+    } else if byte_from > s.len() - needle.len() {
+        None
     } else {
-        (from.min(h.len())..=h.len() - n.len()).find(|&i| h[i..i + n.len()] == n[..])
+        s[byte_from..].find(&needle).map(|p| p + byte_from)
     };
-    Ok(Value::Num(pos.map_or(-1.0, |p| p as f64)))
+    Ok(Value::Num(
+        pos.map_or(-1.0, |b| s[..b].encode_utf16().count() as f64),
+    ))
 }
 
 pub(crate) fn string_index_of(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
@@ -90,18 +128,20 @@ pub(crate) fn string_last_index_of(e: &mut Engine, this: Value, args: &[Value]) 
 }
 
 pub(crate) fn str_slice(e: &mut Engine, s: &str, start: i64, end: Option<i64>) -> Value {
-    let u = u16_view(s);
-    let len = u.len() as i64;
+    // Tranche en units → offsets octets : zéro matérialisation de
+    // la vue u16 (§B-59) — borne astrale → char entier (déviation
+    // documentée `u16_to_string`).
+    let len = u16_len(s) as i64;
     let a = norm_idx(start, len);
-    let b = end.map_or(u.len(), |e2| norm_idx(e2, len));
+    let b = end.map_or(len as usize, |e2| norm_idx(e2, len));
     if a >= b {
         return e.str_val("");
     }
-    e.str_val(u16_to_string(&u[a..b]))
+    let (ba, bb) = (Heap::u16_pos_to_byte(s, a), Heap::u16_pos_to_byte(s, b));
+    e.str_val(s[ba..bb].to_string())
 }
 
 pub(crate) fn string_slice(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
-    let s = this_str(e, this)?;
     let start = match arg(args, 0) {
         Value::Undefined => 0,
         v => e.to_number(v)? as i64,
@@ -110,13 +150,42 @@ pub(crate) fn string_slice(e: &mut Engine, this: Value, args: &[Value]) -> JsRes
         Value::Undefined => None,
         v => Some(e.to_number(v)? as i64),
     };
+    // §B-59 : tranche lue en place — `this_str` clonait la
+    // chaîne entière avant de n'en garder qu'un segment.
+    if let Value::Str(id) = this {
+        let len = e.heap.str_u16_len(id).unwrap_or(0) as i64;
+        let a = norm_idx(start, len);
+        let b = end.map_or(len as usize, |e2| norm_idx(e2, len));
+        if a >= b {
+            return Ok(e.str_val(""));
+        }
+        return Ok(e.str_val(e.heap.str_slice_u16(id, a, b).unwrap_or_default()));
+    }
+    let s = this_str(e, this)?;
     Ok(str_slice(e, &s, start, end))
 }
 
 pub(crate) fn string_substring(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    // §B-59 : tranche lue en place (voir `string_slice`).
+    if let Value::Str(id) = this {
+        let len = e.heap.str_u16_len(id).unwrap_or(0) as i64;
+        let a = match arg(args, 0) {
+            Value::Undefined => 0,
+            v => (e.to_number(v)? as i64).clamp(0, len),
+        };
+        let b = match arg(args, 1) {
+            Value::Undefined => len,
+            v => (e.to_number(v)? as i64).clamp(0, len),
+        };
+        let (lo, hi) = if a <= b { (a, b) } else { (b, a) };
+        return Ok(e.str_val(
+            e.heap
+                .str_slice_u16(id, lo as usize, hi as usize)
+                .unwrap_or_default(),
+        ));
+    }
     let s = this_str(e, this)?;
-    let u = u16_view(&s);
-    let len = u.len() as i64;
+    let len = u16_len(&s) as i64;
     let a = match arg(args, 0) {
         Value::Undefined => 0,
         v => (e.to_number(v)? as i64).clamp(0, len),
@@ -126,13 +195,40 @@ pub(crate) fn string_substring(e: &mut Engine, this: Value, args: &[Value]) -> J
         v => (e.to_number(v)? as i64).clamp(0, len),
     };
     let (lo, hi) = if a <= b { (a, b) } else { (b, a) };
-    Ok(e.str_val(u16_to_string(&u[lo as usize..hi as usize])))
+    let (ba, bb) = (
+        Heap::u16_pos_to_byte(&s, lo as usize),
+        Heap::u16_pos_to_byte(&s, hi as usize),
+    );
+    Ok(e.str_val(s[ba..bb].to_string()))
 }
 
 pub(crate) fn string_substr(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    // §B-59 : tranche lue en place (voir `string_slice`).
+    if let Value::Str(id) = this {
+        let len = e.heap.str_u16_len(id).unwrap_or(0) as i64;
+        let mut start = match arg(args, 0) {
+            Value::Undefined => 0,
+            v => e.to_number(v)? as i64,
+        };
+        if start < 0 {
+            start = (len + start).max(0);
+        }
+        let count = match arg(args, 1) {
+            Value::Undefined => len - start,
+            v => (e.to_number(v)? as i64).max(0),
+        };
+        let end = (start + count).min(len);
+        if start >= end {
+            return Ok(e.str_val(""));
+        }
+        return Ok(e.str_val(
+            e.heap
+                .str_slice_u16(id, start as usize, end as usize)
+                .unwrap_or_default(),
+        ));
+    }
     let s = this_str(e, this)?;
-    let u = u16_view(&s);
-    let len = u.len() as i64;
+    let len = u16_len(&s) as i64;
     let mut start = match arg(args, 0) {
         Value::Undefined => 0,
         v => e.to_number(v)? as i64,
@@ -148,7 +244,11 @@ pub(crate) fn string_substr(e: &mut Engine, this: Value, args: &[Value]) -> JsRe
     if start >= end {
         return Ok(e.str_val(""));
     }
-    Ok(e.str_val(u16_to_string(&u[start as usize..end as usize])))
+    let (ba, bb) = (
+        Heap::u16_pos_to_byte(&s, start as usize),
+        Heap::u16_pos_to_byte(&s, end as usize),
+    );
+    Ok(e.str_val(s[ba..bb].to_string()))
 }
 
 pub(crate) fn string_to_lower(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
@@ -196,12 +296,22 @@ pub(crate) fn string_split(e: &mut Engine, this: Value, args: &[Value]) -> JsRes
                     .collect()
             } else {
                 let sep = e.to_js_string(v)?;
+                // Garde §B-59 : `split` matérialise ~160 o par
+                // partie (String + cellule `str_val` + intern)
+                // — `''` sur 20 M unités ≈ 3 Go de cellules
+                // sans tick (signature `rss_guard[commit]`).
+                let worst = s.len().min(limit);
+                e.alloc_guard(worst.saturating_mul(160))?;
                 if sep.is_empty() {
                     // `split('')` → code units (spec) ; surrogate
                     // isolé → U+FFFD (déviation documentée).
-                    u16_view(&s).iter().map(|&w| u16_to_string(&[w])).collect()
+                    u16_view(e, &s)?
+                        .iter()
+                        .take(limit)
+                        .map(|&w| u16_to_string(&[w]))
+                        .collect()
                 } else {
-                    s.split(&sep).map(str::to_string).collect()
+                    s.split(&sep).take(limit).map(str::to_string).collect()
                 }
             }
         }
@@ -338,6 +448,7 @@ pub(crate) fn expand_rep(
     matched: &str,
 ) -> JsResult<String> {
     let rep = e.to_js_string(rep)?;
+    e.alloc_guard(rep.len().saturating_mul(4))?; // §B-59 Vec<char>
     let rc = chars_of(&rep);
     let mut out = String::with_capacity(rep.len());
     let mut i = 0;

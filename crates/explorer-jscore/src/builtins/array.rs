@@ -55,6 +55,17 @@ pub(crate) fn array_push(e: &mut Engine, this: Value, args: &[Value]) -> JsResul
     if !args.is_empty() && e.heap.obj(id).is_some_and(|o| o.elem_integrity & 3 != 0) {
         return Err(e.type_error("cannot push onto a sealed array"));
     }
+    // Garde sur le total résultant (même borne que `array_ctor`)
+    // : `extend_from_slice` fait doubler le Vec en interne —
+    // une boucle `a.push(x)` commet ~4 Go de reserve dans une
+    // seule op native (même classe que §B-59 `b[k]=v`).
+    let cur_len = match e.heap.obj(id).map(|o| &o.kind) {
+        Some(ObjKind::Array(v)) => v.len(),
+        _ => 0,
+    };
+    e.alloc_guard(
+        (cur_len + args.len()).saturating_mul(std::mem::size_of::<Value>()),
+    )?;
     let n = if let Some(o) = e.heap.obj_mut(id) {
         if let ObjKind::Array(v) = &mut o.kind {
             v.extend_from_slice(args);

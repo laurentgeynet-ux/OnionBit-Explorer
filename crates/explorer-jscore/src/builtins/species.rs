@@ -73,6 +73,10 @@ pub(crate) fn re_match_exec(
     s: &str,
 ) -> JsResult<Value> {
     if re.global {
+        // Garde §B-59 : `exec_all` matérialise TOUS les matches
+        // en eager — un match par char sur géante chaîne →
+        // `len` Vec<Match> + cellules sans tick.
+        e.alloc_guard(s.len().saturating_mul(160))?;
         let matches = re.exec_all(s, 0);
         e.note_re(s, matches.last());
         let texts: Vec<Value> = matches.into_iter().map(|m| e.str_val(m.text)).collect();
@@ -99,6 +103,7 @@ pub(crate) fn re_match_all_impl(
     if !re.global {
         return Err(e.type_error("matchAll needs a global regex"));
     }
+    e.alloc_guard(s.len().saturating_mul(160))?;
     let items: Vec<Value> = re
         .exec_all(s, 0)
         .iter()
@@ -124,6 +129,7 @@ pub(crate) fn re_replace_impl(
         );
     }
     let matches = if re.global {
+        e.alloc_guard(s.len().saturating_mul(160))?;
         re.exec_all(s, 0)
     } else {
         re.exec(s, 0).into_iter().collect()

@@ -2973,6 +2973,9 @@ impl Session {
     /// sous `&mut self`.
     #[allow(clippy::too_many_lines)] // dispatch séquentiel des NetDone — chaque variante documentée in situ
     pub fn poll_net(&mut self) -> usize {
+        if let Ok(mut g) = crate::LAST_DRAIN.lock() {
+            *g = "poll_net";
+        }
         // Le budget est mesuré d'ici (Étape 151 / §B-54) : les
         // drains crypto/ES/WS précédant `drain_net_done`
         // comptent dans la même passe.
@@ -3135,6 +3138,9 @@ impl Session {
     /// la passe suivante) au lieu de tenir le verrou session
     /// sur une rafale de livraisons multi-secondes.
     pub(crate) fn drain_net_done(&mut self, done: Vec<NetDone>, start: std::time::Instant) {
+        if let Ok(mut g) = crate::LAST_DRAIN.lock() {
+            *g = "net_done";
+        }
         let mut it = done.into_iter();
         while let Some(mut d) = it.next() {
             if !self.poll_net_budget.is_zero() && start.elapsed() > self.poll_net_budget {

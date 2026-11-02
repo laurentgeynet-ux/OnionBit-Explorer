@@ -845,9 +845,16 @@ pub(crate) fn uri_escape(s: &str, safe: &str) -> String {
 
 pub(crate) fn uri_unescape(e: &mut Engine, s: &str) -> JsResult<String> {
     let b = s.as_bytes();
+    // Garde : `with_capacity` matérialise `len` d'un coup —
+    // `decodeURI(géant)` doit refuser, pas saturer (§B-59).
+    e.alloc_guard(b.len())?;
     let mut out = Vec::with_capacity(b.len());
     let mut i = 0;
     while i < b.len() {
+        // Tické : boucle native longue sans borne sinon (§B-59).
+        if i % 65536 == 0 {
+            e.tick()?;
+        }
         if b[i] == b'%' {
             if i + 2 >= b.len() {
                 return Err(e.uri_error("malformed URI escape"));
@@ -1033,8 +1040,9 @@ pub(crate) fn string_includes(e: &mut Engine, this: Value, args: &[Value]) -> Js
         Value::Undefined => 0usize,
         v => (e.to_number(v)?.max(0.0)) as usize,
     };
-    let u = u16_view(&s);
-    let hay = u16_to_string(u.get(from.min(u.len())..).unwrap_or(&[]));
+    // `contains` sur la tranche **octets** du `from`-ième unit —
+    // zéro matérialisation de la vue u16 (§B-59).
+    let hay = &s[Heap::u16_pos_to_byte(&s, from)..];
     Ok(Value::Bool(hay.contains(&needle)))
 }
 
@@ -1045,12 +1053,11 @@ pub(crate) fn string_starts_with(e: &mut Engine, this: Value, args: &[Value]) ->
         Value::Undefined => 0usize,
         v => (e.to_number(v)? as usize).min(u16_len(&s)),
     };
-    // Recherche directe sur la vue units — plus de tranche `&str`
-    // (un index dans un astral ne panique plus).
-    let (u, n) = (u16_view(&s), u16_view(&needle));
-    Ok(Value::Bool(
-        start + n.len() <= u.len() && u[start..start + n.len()] == n[..],
-    ))
+    // Préfixe sur la tranche **octets** du `start`-ième unit —
+    // zéro matérialisation (§B-59) ; un `start` astral tronque au
+    // char entier (déviation documentée).
+    let hay = &s[Heap::u16_pos_to_byte(&s, start)..];
+    Ok(Value::Bool(hay.starts_with(&needle)))
 }
 
 pub(crate) fn string_ends_with(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
@@ -1060,10 +1067,10 @@ pub(crate) fn string_ends_with(e: &mut Engine, this: Value, args: &[Value]) -> J
         Value::Undefined => u16_len(&s),
         v => (e.to_number(v)? as usize).min(u16_len(&s)),
     };
-    let (u, n) = (u16_view(&s), u16_view(&needle));
-    Ok(Value::Bool(
-        n.len() <= end && u[end - n.len()..end] == n[..],
-    ))
+    // Suffixe sur la tranche **octets** du `end`-ième unit —
+    // zéro matérialisation (§B-59).
+    let hay = &s[..Heap::u16_pos_to_byte(&s, end)];
+    Ok(Value::Bool(hay.ends_with(&needle)))
 }
 
 pub(crate) fn string_repeat(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
@@ -1090,7 +1097,7 @@ pub(crate) fn pad(e: &mut Engine, s: &str, args: &[Value], right: bool) -> JsRes
         return Ok(s.to_string());
     }
     let need = target - cur;
-    let fill_u = u16_view(&fill);
+    let fill_u = u16_view(e, &fill)?;
     // Garde d'alloc : `padStart(2**31)` doit refuser proprement
     // (JS-C55) — `need` units u16 = 2 octets pièce.
     e.alloc_guard(need.saturating_mul(2))?;
