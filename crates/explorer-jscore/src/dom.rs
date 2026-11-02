@@ -2167,7 +2167,7 @@ impl Dom {
         if self
             .nodes
             .get(anc as usize)
-            .map_or(true, |a| a.children.is_empty())
+            .is_none_or(|a| a.children.is_empty())
         {
             return false;
         }

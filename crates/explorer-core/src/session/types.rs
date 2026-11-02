@@ -970,6 +970,18 @@ pub struct SessionConfig {
     /// auto en boucle = process à tuer ; le web légitime en
     /// fait une poignée. `0` = aucune nav auto.
     pub max_auto_navs: u32,
+    /// Millisecondes de **temps de pompe** consommées par des
+    /// navigations drainées par **fenêtre de 300 s** — borne-
+    /// temps complémentaire de `max_auto_navs` (qui borne le
+    /// cumul). La métrique réelle de starvation : sans elle,
+    /// une page lourde en boucle `location.reload` transforme
+    /// 64 navs de ~15 s chacune en wedge de ~16 minutes où la
+    /// pompe n'intercale plus l'API (fifa vol 554 : spin ~1
+    /// cœur, RAM plate, REST mort). Une boucle de navs
+    /// instantanées n'est jamais throttlée — l'API respire
+    /// déjà entre les hops ; seules les navs **lentes**
+    /// cumulent. `0` = borne-temps désactivée.
+    pub max_auto_nav_busy_ms: u64,
     /// Octets de corps reçus entre deux peintures progressives
     /// (étape 53 — cadence « N octets » du relayout pendant le
     /// téléchargement ; `0` = peinture à chaque morceau reçu).
@@ -1078,6 +1090,7 @@ impl Default for SessionConfig {
             max_script_net: 16,
             max_timer_jobs: 128,
             max_auto_navs: 64,
+            max_auto_nav_busy_ms: 60_000,
             paint_chunk_bytes: 32 * 1024,
             paint_interval_ms: 100,
             resync_gap_max_ms: 4_000,

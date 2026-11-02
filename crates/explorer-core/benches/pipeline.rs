@@ -114,6 +114,7 @@ fn bench_session() -> (Session, Arc<FakeTransport>) {
             max_script_net: 16,
             max_timer_jobs: 64,
             max_auto_navs: 64,
+            max_auto_nav_busy_ms: 60_000,
             paint_chunk_bytes: 32 * 1024,
             paint_interval_ms: 100,
             resync_gap_max_ms: 4_000,

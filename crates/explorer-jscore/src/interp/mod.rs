@@ -6038,17 +6038,14 @@ impl Engine {
         // par un itérateur GTM, §B-59 — ~200 M props ≈ 6 Go de
         // commit instantané entre deux ticks).
         if array_index(key).is_none() && key != "length" {
-            let prop_bytes = self
-                .heap
-                .obj(id)
-                .map_or(0, |o| {
-                    if o.props.iter().any(|(k, _)| k == key) {
-                        0
-                    } else {
-                        (o.props.len() + 1)
-                            .saturating_mul(std::mem::size_of::<(String, crate::heap::Prop)>())
-                    }
-                });
+            let prop_bytes = self.heap.obj(id).map_or(0, |o| {
+                if o.props.iter().any(|(k, _)| k == key) {
+                    0
+                } else {
+                    (o.props.len() + 1)
+                        .saturating_mul(std::mem::size_of::<(String, crate::heap::Prop)>())
+                }
+            });
             if prop_bytes > 0 {
                 self.alloc_guard(prop_bytes)?;
             }

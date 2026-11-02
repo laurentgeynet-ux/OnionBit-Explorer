@@ -216,6 +216,20 @@ pub(crate) struct Tab {
     /// cumulatif borné par `Session::max_auto_navs` ; les
     /// clics utilisateur ne le débitent pas.
     auto_navs: u32,
+    /// Millisecondes de pompe consommées par des navs
+    /// drainées dans la fenêtre courante (borne-temps
+    /// `max_auto_nav_busy_ms`) — remis à 0 quand
+    /// `auto_nav_since` a > 300 s. La métrique réelle de
+    /// starvation (§B-72) : une boucle de navs **lentes**
+    /// monopolise la pompe, pas une boucle de navs
+    /// instantanées.
+    auto_nav_busy_ms: u64,
+    /// Début de la fenêtre de temps-occupé nav-auto —
+    /// `None` tant qu'aucune nav auto n'a été enfilée.
+    auto_nav_since: Option<std::time::Instant>,
+    /// WARN « fenêtre temps nav-auto » déjà émise pour la
+    /// fenêtre courante — une seule fois par fenêtre.
+    auto_nav_busy_warned: bool,
     /// Politiques CSP du document commis (CAP-145) —
     /// évaluées aux fetchs tardifs (`@import`, fonds/
     /// masques, fonts, modules), aux intentions de
@@ -887,6 +901,12 @@ pub struct Session {
     /// script ; boucle cdiscount mesurée : 3 812 navs,
     /// process tué à la main).
     max_auto_navs: u32,
+    /// Temps de pompe consommé par des navs automatiques
+    /// par fenêtre glissante de 300 s (`max_auto_nav_busy_ms`
+    /// de config) — borne-temps anti-starvation : une page
+    /// lourde en boucle reload ne transforme pas le
+    /// budget-cumul en wedge long (§B-72, fifa vol 554).
+    max_auto_nav_busy_ms: u64,
     /// Octets reçus entre peintures progressives
     /// (`paint_chunk_bytes` de config, étape 53).
     paint_chunk_bytes: usize,
@@ -1011,6 +1031,7 @@ impl Session {
 
     /// Session avec seuils explicites.
     #[must_use]
+    #[allow(clippy::too_many_lines)] // initialisation séquentielle — chaque champ documenté in situ
     pub fn with_config(
         transport: Arc<dyn HttpTransport>,
         fonts: Arc<dyn FontSource + Send + Sync>,
@@ -1090,6 +1111,7 @@ impl Session {
             max_script_net: cfg.max_script_net,
             max_timer_jobs: cfg.max_timer_jobs,
             max_auto_navs: cfg.max_auto_navs,
+            max_auto_nav_busy_ms: cfg.max_auto_nav_busy_ms,
             paint_chunk_bytes: cfg.paint_chunk_bytes,
             paint_interval: std::time::Duration::from_millis(cfg.paint_interval_ms),
             resync_gap_max: std::time::Duration::from_millis(cfg.resync_gap_max_ms),
@@ -1389,6 +1411,9 @@ impl Session {
                 win_name: None,
                 refresh_at: None,
                 auto_navs: 0,
+                auto_nav_busy_ms: 0,
+                auto_nav_since: None,
+                auto_nav_busy_warned: false,
                 csp: Vec::new(),
                 hist_idx: 0,
                 hist_pending: false,

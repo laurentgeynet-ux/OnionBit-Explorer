@@ -1295,15 +1295,33 @@ impl Session {
 
     /// Débite le budget de navigations **automatiques** de
     /// l'onglet (meta refresh + intents script — `false`
-    /// quand `max_auto_navs` est épuisé). WARN une seule
-    /// fois au franchissement : une page en boucle
+    /// quand `max_auto_navs` est épuisé **ou** que la
+    /// fenêtre de 300 s détient déjà `max_auto_nav_busy_ms`
+    /// de temps de nav). WARN une seule fois au
+    /// franchissement : une page en boucle
     /// auto-refresh/`location.*` se dénonce sans spammer.
     /// Cdiscount : 3 812 navs en 16 min, process tué à la
     /// main — la borne transforme la boucle en page figée.
+    /// La borne-temps couvre le cas symétrique (fifa vol
+    /// 554, §B-72) : une boucle de navs **lourdes** où le
+    /// seul cumul ne s'épuise qu'après des dizaines de
+    /// minutes de pompe monopolisée — le temps occupé mesure
+    /// la starvation réelle (une nav instantanée ne lèse
+    /// pas l'API ; seul le temps passé **dans** des navs
+    /// drainées décompte).
     pub(crate) fn auto_nav_budget(&mut self, tab: TabId) -> bool {
+        const AUTO_NAV_BUSY_WINDOW: std::time::Duration = std::time::Duration::from_secs(300);
         let Some(e) = self.tabs.get_mut(&tab) else {
             return false;
         };
+        let now = std::time::Instant::now();
+        if e.auto_nav_since
+            .is_none_or(|t| now.duration_since(t) >= AUTO_NAV_BUSY_WINDOW)
+        {
+            e.auto_nav_since = Some(now);
+            e.auto_nav_busy_ms = 0;
+            e.auto_nav_busy_warned = false;
+        }
         if e.auto_navs >= self.max_auto_navs {
             if e.auto_navs == self.max_auto_navs {
                 e.auto_navs += 1;
@@ -1315,8 +1333,32 @@ impl Session {
             }
             return false;
         }
+        if e.auto_nav_busy_ms >= self.max_auto_nav_busy_ms {
+            if !e.auto_nav_busy_warned {
+                e.auto_nav_busy_warned = true;
+                tracing::warn!(
+                    tab = tab,
+                    busy_ms = e.auto_nav_busy_ms,
+                    "temps nav-auto épuisé — boucle lente, intents jetés jusqu'à la fenêtre suivante"
+                );
+            }
+            return false;
+        }
         e.auto_navs += 1;
         true
+    }
+
+    /// Impute le temps écoulé d'une navigation drainée
+    /// (`pending_nav` → commit) sur le compteur temps de
+    /// l'onglet (étape 172 — borne §B-72). Appelée par les
+    /// deux drains (`drain_script_nav`,
+    /// `drain_navs_shared`) autour de chaque hop ; les navs
+    /// instantanées n'y laissent ~0 ms — seules les navs
+    /// lentes cumulent vers la borne.
+    pub(crate) fn charge_auto_nav_ms(&mut self, tab: TabId, ms: u64) {
+        if let Some(e) = self.tabs.get_mut(&tab) {
+            e.auto_nav_busy_ms = e.auto_nav_busy_ms.saturating_add(ms);
+        }
     }
 
     /// Enfile une intention — `false` si la file est pleine
@@ -1574,6 +1616,7 @@ impl Session {
             let Some(act) = self.pop_pending_nav(tab) else {
                 break;
             };
+            let t0 = std::time::Instant::now();
             let ok = match act {
                 DrainAct::Req(req, push) => {
                     // `javascript:` (CAP-154) — évalué dans
@@ -1657,6 +1700,10 @@ impl Session {
                     ok
                 }
             };
+            self.charge_auto_nav_ms(
+                tab,
+                u64::try_from(t0.elapsed().as_millis()).unwrap_or(u64::MAX),
+            );
             committed += usize::from(ok);
         }
         committed

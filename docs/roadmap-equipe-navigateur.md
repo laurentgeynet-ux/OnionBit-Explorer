@@ -5524,6 +5524,28 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   (livré, CMP-4), substitution
   SDKs bornée.
 
+- [x] **Étape 172. Borne-temps
+  nav-auto** (`explorer-core`,
+  §B-72 bras starvation, fifa vol
+  554) — la boucle
+  `location.reload` sur SDK morts
+  transformait `max_auto_navs=64`
+  (borne cumul, étape 144) en
+  wedge long : chaque cycle = nav
+  complète lourde → pompe
+  monopolisée des dizaines de
+  minutes, REST mort, spin ~1
+  cœur, RAM plate. Nouveau
+  `SessionConfig::max_auto_nav_
+  busy_ms=60 000` — temps de pompe
+  imputé aux navs drainées par
+  fenêtre de 300 s ; intents jetés
+  au-delà (WARN unique), boucles
+  de navs instantanées jamais
+  throttlées. Verrou
+  `auto_nav_budget_throttles_slow_
+  loops`.
+
 - [ ] **Écarts terrain — vol humain
   22/10 (release `39ab821`, FFI)** :
   second run humain — trois constats

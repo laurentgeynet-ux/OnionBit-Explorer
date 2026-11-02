@@ -159,6 +159,36 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   scripts suivants tournent.
   Verrou : `deadline_flag_does_
   not_leak_to_next_eval`.
+- **Étape 172 — borne-temps
+  nav-auto** (`explorer-core`) —
+  §B-72 bras starvation (fifa vol
+  554) : la boucle `location.reload`
+  sur SDK morts monopolisait la
+  pompe — `max_auto_navs=64` borne
+  le cumul mais chaque cycle = nav
+  complète lourde → wedge mesuré
+  de dizaines de minutes (spin ~1
+  cœur, RAM plate 243 Mio, REST
+  mort ≥10 min). Nouveau
+  `max_auto_nav_busy_ms=60 000`
+  (config) : **temps de pompe**
+  imputé par les navs drainées
+  (`pending_nav` → commit, les deux
+  drains exclusif et partagé) dans
+  une fenêtre glissante de 300 s —
+  au-delà, les intents auto sont
+  jetés jusqu'à la fenêtre
+  suivante (WARN unique). Une
+  boucle de navs instantanées
+  n'est jamais throttlée (l'API
+  respire entre hops) ; seules les
+  navs lentes cumulent. Borne
+  cumul conservée ; les clics ne
+  débitent rien. Verrou
+  `auto_nav_budget_throttles_slow_
+  loops` ; `location_reload_
+  replays_request` et le verrou
+  cumul restent verts.
 - **JS-C264 — §B-59 2ᵉ racine :
   chaîne parent cyclique →
   `ancestors` non borné**

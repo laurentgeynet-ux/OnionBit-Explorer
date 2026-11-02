@@ -2590,6 +2590,47 @@ fn auto_nav_budget_caps_script_and_refresh() {
     assert_eq!(s.tabs.get(&tab).unwrap().pending_nav.len(), 5);
 }
 
+/// Boucle de navs **lourdes** (fifa §B-72 vol 554 : chaque
+/// cycle `location.reload` dure des dizaines de secondes —
+/// le seul plafond cumulatif laisse la pompe monopolisée un
+/// temps indéfini) — `max_auto_nav_busy_ms` borne le temps
+/// de pompe consommé par les navs drainées ; une boucle de
+/// navs instantanées n'est jamais throttlée.
+#[test]
+fn auto_nav_budget_throttles_slow_loops() {
+    let mut s = Session::new(Arc::new(FailTransport), Arc::new(TestFont));
+    let tab = s.open_tab();
+    s.max_auto_navs = 64;
+    s.max_auto_nav_busy_ms = 1_000;
+    let act = || {
+        DrainAct::Req(
+            Box::new(Request::get(Url::parse("http://x.test/").unwrap())),
+            true,
+        )
+    };
+    // Des navs instantanées (0 ms imputé) passent tant que
+    // le cumul tient — la boucle rapide inoffensive n'est
+    // pas pénalisée.
+    for _ in 0..6 {
+        assert!(s.enqueue_nav_act(tab, act(), true));
+    }
+    assert_eq!(s.tabs.get(&tab).unwrap().pending_nav.len(), 6);
+    // Deux hops lents imputés → borne-temps atteinte, les
+    // intents suivants sont jetés alors que le cumul (64)
+    // est loin d'être épuisé.
+    s.charge_auto_nav_ms(tab, 700);
+    s.charge_auto_nav_ms(tab, 400);
+    for _ in 0..6 {
+        assert!(s.enqueue_nav_act(tab, act(), true));
+    }
+    assert_eq!(s.tabs.get(&tab).unwrap().pending_nav.len(), 6);
+    // Fenêtre de 300 s expirée → le budget-temps se rouvre.
+    s.tabs.get_mut(&tab).unwrap().auto_nav_since =
+        Instant::now().checked_sub(std::time::Duration::from_secs(301));
+    assert!(s.enqueue_nav_act(tab, act(), true));
+    assert_eq!(s.tabs.get(&tab).unwrap().pending_nav.len(), 7);
+}
+
 /// Vol rakuten/soundcloud — un `window.open`/`<a
 /// target=_blank>` dont la réponse est un téléchargement
 /// (ex. `.js` servi `text/javascript`) laissait un onglet

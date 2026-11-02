@@ -387,6 +387,7 @@ pub async fn drain_navs_shared(sess: &tokio::sync::Mutex<Session>, tab: TabId) -
             s.collect_script_navs(tab);
             s.pop_pending_nav(tab)
         };
+        let t0 = std::time::Instant::now();
         let ok = match act {
             None => break,
             Some(DrainAct::Req(req, push)) => {
@@ -486,6 +487,16 @@ pub async fn drain_navs_shared(sess: &tokio::sync::Mutex<Session>, tab: TabId) -
                 ok
             }
         };
+        // Temps passé dans le hop imputé à la borne-temps
+        // nav-auto (étape 172, §B-72) — les navs instantanées
+        // n'y laissent ~0 ms, seules les navs lentes cumulent.
+        {
+            let mut s = sess.lock().await;
+            s.charge_auto_nav_ms(
+                tab,
+                u64::try_from(t0.elapsed().as_millis()).unwrap_or(u64::MAX),
+            );
+        }
         committed += usize::from(ok);
     }
     committed
