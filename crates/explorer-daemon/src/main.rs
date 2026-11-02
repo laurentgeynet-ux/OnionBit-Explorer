@@ -396,6 +396,25 @@ fn build_session(
         download_dir.unwrap_or_else(|| profile_dir.join("downloads")),
     ));
     session.set_js_factory(explorer_js::JscoreEngine::factory());
+    // Capacités média de l'hôte déclarées au spawn (étape
+    // 178 — b-e2e) : `EXPLORER_MEDIA_CODECS` liste
+    // séparée par `;` (MIME `codecs="a,b"` ou codecs nus —
+    // la liste `mediaCodecs` de l'app ; la `,` interne à
+    // `codecs=` reste dans l'item, `note_codec_prefixes`
+    // l'éclate). Sans elle, `MediaSource.isTypeSupported`
+    // répond `""` sur toute page fraîche et aucun player
+    // MSE réel ne démarre.
+    if let Ok(v) = std::env::var("EXPLORER_MEDIA_CODECS") {
+        let codecs: Vec<String> = v
+            .split(';')
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+            .collect();
+        if !codecs.is_empty() {
+            session.declare_media_codecs(&codecs);
+        }
+    }
     session
 }
 

@@ -5835,6 +5835,30 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   liste téléchargements + progress
   SSE dans l'app.
 
+- [x] **Étape 178. Capacités média
+  déclarées au spawn**
+  (`explorer-core` + `explorer-js` +
+  `explorer-ffi` + `explorer-daemon` +
+  app, chantier « vidéo réelle »
+  b-e2e — ADR-0029) — `isTypeSupported`
+  et le filtre `<source>` (a1) ne
+  s'apprenaient qu'au claim : cercle
+  vicieux, un player MSE réel
+  n'instancie jamais la `MediaSource`
+  dont le claim apprendrait les
+  codecs. `declare_media_codecs`
+  pousse la liste `mediaCodecs` dans
+  `declared_media_codecs` (filtre dès
+  le 1er scan) et `host_media_codecs`
+  → `JsEngine::note_media_codecs` au
+  `spawn_engine` (avant `install_dom`).
+  Sources : `EXPLORER_MEDIA_CODECS`
+  (daemon), `explorer_media_codecs` +
+  `opMediaCodecs` (FFI — l'app pousse
+  `config.mediaCodecs` à `tryLoad`).
+  Verrou `declared_media_codecs_
+  reach_scan_and_engine`.
+
 - [x] **Étape 177. Loopback média
   REST embarqué FFI**
   (`explorer-ffi` + `explorer-api`,

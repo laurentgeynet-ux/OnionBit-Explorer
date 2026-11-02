@@ -1384,6 +1384,18 @@ pub trait JsEngine: Send {
     ) {
     }
 
+    /// Déclare les capacités média de l'hôte au contexte
+    /// (étape 178 — b-e2e) : `isTypeSupported` et les
+    /// `SourceBuffer` n'acceptent un type que si la famille
+    /// codec est déclarée. Sans déclaration au spawn, le
+    /// premier `isTypeSupported` d'une page répond `""` —
+    /// un player MSE réel n'instancie alors jamais
+    /// `MediaSource` et le claim qui aurait appris la
+    /// capacité n'arrive jamais (cercle vicieux). Appelée
+    /// par la session juste après la création du contexte,
+    /// avant `install_dom`. Défaut : rien.
+    fn note_media_codecs(&mut self, _codecs: &[String]) {}
+
     /// Relaie le rapport `state` de l'hôte claimé vers
     /// l'élément `path` (étape 71c) — props refletées,
     /// promesses `play()` tranchées, events DOM tirés.
@@ -1765,6 +1777,9 @@ enum Cmd {
         path: Vec<(String, u32)>,
         media: u64,
         report: JsMediaReport,
+    },
+    NoteMediaCodecs {
+        codecs: Vec<String>,
     },
     DrainMediaCommands {
         tx: Sender<Vec<JsMediaCommand>>,
@@ -3455,6 +3470,12 @@ impl JsEngine for JscoreEngine {
         });
     }
 
+    fn note_media_codecs(&mut self, codecs: &[String]) {
+        let _ = self.tx.send(Cmd::NoteMediaCodecs {
+            codecs: codecs.to_vec(),
+        });
+    }
+
     fn drain_media_commands(&mut self) -> Vec<JsMediaCommand> {
         let (tx, rx) = channel();
         if self.tx.send(Cmd::DrainMediaCommands { tx }).is_err() {
@@ -3666,6 +3687,10 @@ fn serve_side(
             report,
         } => {
             deliver_media_state(eng, jsd, media_nodes, &path, media, report);
+            true
+        }
+        Cmd::NoteMediaCodecs { codecs } => {
+            eng.note_media_codecs(&codecs);
             true
         }
         Cmd::DrainMediaCommands { tx } => {

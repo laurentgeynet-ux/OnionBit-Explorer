@@ -895,6 +895,16 @@ impl Session {
             // miroir. L'état est engine-global → les contextes
             // enfants (`install_dom_ctx`) héritent la décision.
             e.set_cmp_consent(self.cmp_consent(&page_url));
+            // Capacités média déclarées par l'hôte (étape
+            // 178 — b-e2e) : poussées **avant** `install_dom`
+            // pour que `MediaSource.isTypeSupported` réponde
+            // honnêtement dès le premier script de la page —
+            // sinon un player MSE réel n'instancie jamais la
+            // `MediaSource` dont le claim apprendrait les
+            // codecs (cercle vicieux). Liste vide = no-op.
+            if !self.host_media_codecs.is_empty() {
+                e.note_media_codecs(&self.host_media_codecs);
+            }
             e.install_dom(html, &page_url, hist_len);
             // « loading » jusqu'au DCL de commit (net.rs) —
             // retient les `postMessage` entrants tant que les

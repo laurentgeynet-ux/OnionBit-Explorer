@@ -39,6 +39,16 @@ typedef _OpenTabN = ffi.Uint64 Function(_NativeHandle);
 typedef _OpenTabD = int Function(_NativeHandle);
 typedef _ApiPortN = ffi.Uint16 Function(_NativeHandle);
 typedef _ApiPortD = int Function(_NativeHandle);
+typedef _MediaCodecsN = ffi.Int32 Function(
+  _NativeHandle,
+  ffi.Pointer<ffi.Uint8>,
+  ffi.UintPtr,
+);
+typedef _MediaCodecsD = int Function(
+  _NativeHandle,
+  ffi.Pointer<ffi.Uint8>,
+  int,
+);
 typedef _TabCodeN = ffi.Int32 Function(_NativeHandle, ffi.Uint64);
 typedef _TabCodeD = int Function(_NativeHandle, int);
 typedef _NavigateN = ffi.Int32 Function(
@@ -274,6 +284,7 @@ const opFind = 26;
 const opDownloadStart = 27;
 const opDownloadCancel = 28;
 const opApiPort = 29;
+const opMediaCodecs = 30;
 
 /// Point d'entrée de l'isolate — `args` = `{'reply': SendPort,
 /// 'path': String}`. Envoie `{'port': SendPort}` puis
@@ -378,6 +389,7 @@ class _WorkerImpl {
   static _DlDeclD? _downloadCancel;
   static _FindD? _find;
   static _ApiPortD? _apiPort;
+  static _MediaCodecsD? _mediaCodecs;
   final _MediaEventsD? _mediaEvents;
   final _TabUrlD? _mediaList;
   final _MediaClaimD? _mediaClaim;
@@ -549,6 +561,15 @@ class _WorkerImpl {
       } on Object {
         /* export absent */
       }
+      // Capacités média au spawn (étape 178) — export
+      // additif ; dll antérieure → `null` → declare sauté.
+      try {
+        _mediaCodecs = lib.lookupFunction<_MediaCodecsN, _MediaCodecsD>(
+          'explorer_media_codecs',
+        );
+      } on Object {
+        /* export absent */
+      }
       _MediaClaimD? mediaState;
       try {
         mediaState = lib.lookupFunction<_MediaClaimN, _MediaClaimD>(
@@ -677,6 +698,20 @@ class _WorkerImpl {
         // Loopback média embarqué (étape 177/b2) — `0` sur
         // dll antérieure ou bind échoué → `apiBase` `''`.
         return {'port': _apiPort?.call(_handle) ?? 0};
+      case opMediaCodecs:
+        // Capacités média déclarées au spawn (étape 178) —
+        // corps `{codecs:[…]}` identique au claim REST ;
+        // export absent → `-1`, le declare est sauté et le
+        // claim garde le comportement historique.
+        final f = _mediaCodecs;
+        if (f == null) return const {'code': -1};
+        final j = jsonEncode({'codecs': m['codecs'] ?? const []});
+        final bytes = j.toNativeUtf8();
+        try {
+          return {'code': f(_handle, bytes.cast<ffi.Uint8>(), bytes.length)};
+        } finally {
+          calloc.free(bytes);
+        }
       case opBookmarks:
         return {'bookmarks': _readBookmarks()};
       case opBookmarkAdd:

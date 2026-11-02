@@ -266,6 +266,47 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   c193 passe de `buffered.length=0`
   à `=1` (contrat b3 assumé).
 
+- **Étape 178 — capacités média
+  déclarées au spawn**
+  (`explorer-core` + `explorer-js`
+  + `explorer-ffi` + `explorer-daemon`
+  + app, chantier « vidéo réelle »
+  b-e2e, ADR-0029) — la table
+  `isTypeSupported` et le filtre
+  `<source>` (a1) ne se remplissaient
+  qu'au **claim** : sur toute page
+  fraîche, `MediaSource.
+  isTypeSupported(tout)` rendait `""`
+  → un player MSE réel (hls.js)
+  n'instancie jamais la `MediaSource`
+  dont le claim apprendrait les
+  codecs — cercle vicieux
+  d'amorçage. Nouvelle méthode
+  `Session::declare_media_codecs` :
+  la liste `mediaCodecs` hôte (MIME
+  `codecs=` ou codecs nus) alimente
+  le set `declared_media_codecs`
+  (filtre `<source>` dès le premier
+  scan) et la liste brute
+  `host_media_codecs` poussée dans
+  chaque contexte JS au spawn
+  (`spawn_engine`, avant
+  `install_dom`) via le nouveau port
+  `JsEngine::note_media_codecs`
+  (noop par défaut). Alimentation :
+  `EXPLORER_MEDIA_CODECS` côté daemon
+  (`;`-séparée), export additif
+  `explorer_media_codecs` + op
+  `opMediaCodecs` côté FFI (l'app
+  pousse `config.mediaCodecs` à
+  `tryLoad` — dll antérieure →
+  declare sauté, comportement
+  historique). Verrou
+  `declared_media_codecs_reach_scan_
+  and_engine` (filtre sans claim +
+  `isTypeSupported` au premier
+  script).
+
 - **Étape 177 — loopback média
   REST embarqué FFI**
   (`explorer-ffi` + `explorer-api`,

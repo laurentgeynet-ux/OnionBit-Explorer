@@ -436,6 +436,40 @@ pub unsafe extern "C" fn explorer_api_port(h: *mut ExplorerHandle) -> u16 {
     }
 }
 
+/// Déclare les capacités média de l'hôte (étape 178 —
+/// b-e2e) : corps JSON `{codecs: […]}` identique au
+/// `claim` REST (`mediaCodecs` de l'app). À appeler juste
+/// après `explorer_create` — les contextes JS spawnés
+/// ensuite répondent honnêtement à
+/// `MediaSource.isTypeSupported` ; sans déclaration, un
+/// player MSE réel n'instancie jamais la `MediaSource`
+/// dont le claim apprendrait les codecs (cercle vicieux
+/// d'amorçage). `0` succès.
+///
+/// # Safety
+///
+/// `h` issu de [`explorer_create`] ; `json..json+len`
+/// lisible UTF-8 (≤ 64 Kio).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn explorer_media_codecs(
+    h: *mut ExplorerHandle,
+    json: *const u8,
+    len: usize,
+) -> i32 {
+    let Some(h) = (unsafe { handle(h) }) else {
+        return -1;
+    };
+    let Some(s) = (unsafe { read_str(json, len, 64 * 1024) }) else {
+        return -1;
+    };
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(s) else {
+        return -1;
+    };
+    let codecs = explorer_core::media_codecs_from_json(&v);
+    sess(h).declare_media_codecs(&codecs);
+    0
+}
+
 /// Libère le handle et sa session.
 ///
 /// # Safety

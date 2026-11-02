@@ -202,6 +202,32 @@ fn codec_prefix(c: &str) -> Option<String> {
     }
 }
 
+/// Réduit une liste `mediaCodecs` hôte en préfixes dans
+/// `set` — même boucle que `note_declared_codecs` côté
+/// moteur : la valeur `codecs=` d'un MIME complet prime ;
+/// sans elle, la valeur est prise pour un codec nu ; les
+/// conteneurs (`video/mp4` seul) sont exclus. Partagée
+/// entre `media_claim` (a1) et `declare_media_codecs`
+/// (étape 178).
+fn note_codec_prefixes(set: &mut std::collections::HashSet<String>, codecs: &[String]) {
+    for c in codecs {
+        let c = c.trim();
+        let raw = match c.find("codecs=") {
+            Some(pos) => &c[pos + 7..],
+            None => c,
+        };
+        for part in raw.trim_matches(|ch| ch == '"' || ch == '\'').split(',') {
+            let part = part.trim().trim_matches(|ch| ch == '"' || ch == '\'');
+            if part.contains('/') {
+                continue;
+            }
+            if let Some(p) = codec_prefix(part) {
+                set.insert(p);
+            }
+        }
+    }
+}
+
 /// Un `<source type="…">` est retenu quand son conteneur est
 /// connu et que **tous** ses codecs déclarés sont dans
 /// `declared` (préfixes d'hôte — `mediaCodecs` du claim).
@@ -737,22 +763,7 @@ impl Session {
         // normalisation que `note_declared_codecs` côté
         // moteur : préfixes codec, conteneurs exclus. Le set
         // sert au choix du `<source>` aux scans suivants.
-        for c in &codecs {
-            let c = c.trim();
-            let raw = match c.find("codecs=") {
-                Some(pos) => &c[pos + 7..],
-                None => c,
-            };
-            for part in raw.trim_matches(|ch| ch == '"' || ch == '\'').split(',') {
-                let part = part.trim().trim_matches(|ch| ch == '"' || ch == '\'');
-                if part.contains('/') {
-                    continue;
-                }
-                if let Some(p) = codec_prefix(part) {
-                    self.declared_media_codecs.insert(p);
-                }
-            }
-        }
+        note_codec_prefixes(&mut self.declared_media_codecs, &codecs);
         // Claim sur une `blob:` scannée aveugle : moteur
         // présent → l'offre se corrige au contact (les
         // pulls/list suivants verront `mse:true`).
@@ -763,6 +774,33 @@ impl Session {
         m.claim_pending = true;
         sync_claim_to_engine(m, &mut entry.js);
         Ok(())
+    }
+
+    /// Déclare les capacités média de l'hôte **avant tout
+    /// claim** (étape 178 — b-e2e) : la liste `mediaCodecs`
+    /// de l'app (MIME `codecs=` ou codecs nus) alimente le
+    /// set `declared_media_codecs` (choix `<source>` dès le
+    /// premier scan) et la liste brute `host_media_codecs`
+    /// poussée dans chaque contexte JS au spawn — sans elle,
+    /// `MediaSource.isTypeSupported` répond `""` sur toute
+    /// page fraîche et un player MSE réel n'instancie jamais
+    /// la `MediaSource` dont le claim apprendrait les
+    /// codecs (cercle vicieux d'amorçage). Déclaration
+    /// additive et idempotente ; les contextes déjà vivants
+    /// reçoivent la table immédiatement.
+    pub fn declare_media_codecs(&mut self, codecs: &[String]) {
+        note_codec_prefixes(&mut self.declared_media_codecs, codecs);
+        for c in codecs {
+            let c = c.trim();
+            if !c.is_empty() && !self.host_media_codecs.iter().any(|x| x == c) {
+                self.host_media_codecs.push(c.to_string());
+            }
+        }
+        for entry in self.tabs.values_mut() {
+            if let Some(e) = entry.js.as_mut() {
+                e.note_media_codecs(codecs);
+            }
+        }
     }
 
     /// L'hôte se détache — la surface retombe sur les stubs

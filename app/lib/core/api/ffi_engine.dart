@@ -71,11 +71,17 @@ class FfiInvalidation {
 ///   (`Isolate.kill` diffère à la sortie du code natif) —
 ///   le contrat de l'étape reste : l'UI continue de répondre.
 class FfiEngine implements BrowserRepository {
-  FfiEngine._(this._worker, this.libPath) {
+  FfiEngine._(this._worker, this.libPath, List<String> mediaCodecs) {
     // Prélecture du port loopback média (étape 177/b2) —
     // async car le worker isolate répond en RPC ; le claim
     // MSE survient toujours après, la course est gagnée.
     unawaited(_prefetchApiPort());
+    // Capacités média déclarées au spawn (étape 178) —
+    // `isTypeSupported` consulte la table dès le premier
+    // script de chaque page ; sans elle, un player MSE
+    // réel n'instancie jamais la `MediaSource` dont le
+    // claim apprendrait les codecs (cercle vicieux).
+    unawaited(_declareMediaCodecs(mediaCodecs));
   }
 
   /// Chemin de la bibliothèque chargée — affiché dans la barre
@@ -105,6 +111,19 @@ class FfiEngine implements BrowserRepository {
     }
   }
 
+  /// Déclare les capacités média de l'hôte au moteur
+  /// (étape 178 — b-e2e) : corps `{codecs:[…]}` identique
+  /// au claim REST — `mediaCodecs` de l'app.
+  Future<void> _declareMediaCodecs(List<String> codecs) async {
+    if (codecs.isEmpty) return;
+    try {
+      await _worker.call(opMediaCodecs, {'codecs': codecs});
+    } on Object {
+      // Export absent / worker pas prêt — le claim garde
+      // le comportement historique.
+    }
+  }
+
   /// Tente de charger la bibliothèque dynamique — `null` si
   /// absente (mode dégradé → REST, jamais d'exception hors
   /// du `tryLoad`). La sonde (`open` + lookup
@@ -120,7 +139,11 @@ class FfiEngine implements BrowserRepository {
         // Vérif ABI minimale : le symbole existe → le worker
         // partira sur ce chemin (sa propre `open`+`create`).
         lib.lookup('explorer_create');
-        return FfiEngine._(_FfiWorker.start(candidate), candidate);
+        return FfiEngine._(
+          _FfiWorker.start(candidate),
+          candidate,
+          config.mediaCodecs,
+        );
       } on Object {
         // Candidat absent ou ABI incompatible → suivant.
       }

@@ -798,11 +798,23 @@ pub struct Session {
     /// et les navigations voient le même état (étape 51).
     cookies: Arc<CookieJar>,
     /// Capacités média déclarées par l'hôte — union des
-    /// `codecs` des claims (`media_claim`, a1), préfixes
+    /// `codecs` des claims (`media_claim`, a1) et de
+    /// `declare_media_codecs` (étape 178), préfixes
     /// RFC 6381 minuscules (`avc1`, `vp09`, `mp4a`…).
-    /// Vide avant le premier claim : `media_source` retient
-    /// alors le premier `<source>` (comportement historique).
+    /// Vide avant la première déclaration : `media_source`
+    /// retient alors le premier `<source>` (comportement
+    /// historique).
     declared_media_codecs: std::collections::HashSet<String>,
+    /// Capacités média brutes déclarées par l'hôte
+    /// (`declare_media_codecs`, étape 178 — liste
+    /// `mediaCodecs` de l'app : MIME `codecs=` ou codecs
+    /// nus). Poussée dans chaque contexte JS au spawn
+    /// (`spawn_engine`) pour que `MediaSource.
+    /// isTypeSupported` réponde `"maybe"` dès la première
+    /// page — sinon un player MSE réel n'instancie jamais
+    /// la `MediaSource` dont le claim apprendrait les
+    /// codecs (cercle vicieux d'amorçage).
+    host_media_codecs: Vec<String>,
     /// `localStorage` par origine sérialisée — snapshot
     /// installé au spawn du contexte, map drainée aux points
     /// de synchro, persistée via le profil.
@@ -1089,6 +1101,7 @@ impl Session {
             ))),
             tabs: HashMap::new(),
             declared_media_codecs: std::collections::HashSet::new(),
+            host_media_codecs: Vec::new(),
             events,
             next_tab: 1,
             viewport: cfg.viewport,

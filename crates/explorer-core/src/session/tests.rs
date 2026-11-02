@@ -1276,6 +1276,56 @@ fn media_source_untyped_stays_candidate() {
     assert_eq!(offered[0].as_str(), "http://h.test/v.mp4");
 }
 
+/// Étape 178 — `declare_media_codecs` **avant tout claim** :
+/// les capacités hôte nourrissent le filtre `<source>` au
+/// premier scan (sans claim préalable) et la table
+/// `isTypeSupported` du contexte JS spawné ensuite — le
+/// cercle vicieux d'amorçage MSE est rompu.
+#[test]
+fn declared_media_codecs_reach_scan_and_engine() {
+    // Filtre `<source>` engagé dès le premier scan — sans
+    // claim : le webm est écarté, le mp4 offert.
+    let (mut s, tab, mut rx) = media_page(
+        "<video>\
+           <source src=\"w.webm\" type='video/webm;codecs=\"vp09\"'>\
+           <source src=\"v.mp4\" type='video/mp4;codecs=\"avc1.42E01E\"'>\
+         </video>",
+    );
+    s.declare_media_codecs(&["video/mp4;codecs=\"avc1.42E01E,mp4a.40.2\"".into()]);
+    s.refresh_media(tab);
+    let evs = media_events(&mut rx);
+    let offered: Vec<_> = evs
+        .iter()
+        .filter_map(|e| match e {
+            CoreEvent::MediaOffered { url, .. } => Some(url.clone()),
+            _ => None,
+        })
+        .collect();
+    // La déclaration post-scan fait disparaître l'offre
+    // initiale (webm) et ré-offre le mp4 jouable.
+    let last = offered.last().expect("une offre mp4");
+    assert_eq!(last.as_str(), "http://h.test/v.mp4");
+
+    // Table `isTypeSupported` poussée au spawn — le moteur
+    // voit `avc1`/`mp4a` sans qu'aucun claim n'ait couru.
+    let mut s2 = Session::new(Arc::new(FailTransport), Arc::new(TestFont));
+    s2.set_js_factory(explorer_js::JscoreEngine::factory());
+    s2.declare_media_codecs(&[
+        "video/mp4;codecs=\"avc1.42E01E,mp4a.40.2\"".into(),
+        "video/webm;codecs=\"vp9,opus\"".into(),
+    ]);
+    let tab2 = s2.open_tab();
+    let eng = s2.spawn_engine(tab2, "<!doctype html><html><body></body></html>", true, "");
+    let mut eng = eng.expect("moteur spawné");
+    let yes = eng
+        .eval("MediaSource.isTypeSupported('video/mp4;codecs=\"avc1.42E01E,mp4a.40.2\"')==='maybe'?'yes':'no'")
+        .unwrap();
+    let no = eng
+        .eval("MediaSource.isTypeSupported('video/mp4;codecs=\"avc1.42E01E,vp8\"')==='maybe'?'yes':'no'")
+        .unwrap();
+    assert_eq!((yes.as_str(), no.as_str()), ("yes", "no"));
+}
+
 #[test]
 fn media_gone_on_close_and_navigation() {
     let (mut s, tab, mut rx) = media_page("<video src=\"v.mp4\"></video>");
