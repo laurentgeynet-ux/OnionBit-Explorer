@@ -821,6 +821,34 @@ fn serializable_kind(dom: &Dom, id: explorer_dom::NodeId) -> bool {
     matches!(dom.data(id), Ok(NodeData::Element(_) | NodeData::Text(_)))
 }
 
+/// `id` a-t-il un `<template>` repère dont le fragment
+/// `content` **est** la racine shadow `root` (DSD) ? La
+/// descente canonique `template_contents` couvre alors déjà
+/// l'ombre — ne pas la réémettre une seconde fois.
+fn shadow_has_repere(dom: &Dom, root: explorer_dom::NodeId, kids: &[explorer_dom::NodeId]) -> bool {
+    kids.iter()
+        .any(|&c| dom.template_contents(c).ok().flatten() == Some(root))
+}
+
+/// Empile l'ombre **programmatique** de `id` (journal
+/// `AttachShadow` — le fragment n'a pas de `<template>`
+/// repère en light DOM). Le miroir l'émet en
+/// `<template shadowrootmode>` EN TÊTE des enfants : poussée
+/// ici après les enfants light, la racine poppe avant eux —
+/// ordre sérialisé `[shadow][light]` préservé.
+fn push_orphan_shadow(
+    dom: &Dom,
+    id: explorer_dom::NodeId,
+    kids: &[explorer_dom::NodeId],
+    stack: &mut Vec<explorer_dom::NodeId>,
+) {
+    if let Some(root) = dom.shadow_root(id, true) {
+        if !shadow_has_repere(dom, root, kids) {
+            stack.push(root);
+        }
+    }
+}
+
 fn engine_preorder(dom: &Dom) -> Vec<explorer_dom::NodeId> {
     let mut out = Vec::new();
     let Ok(mut stack) = dom
@@ -830,7 +858,7 @@ fn engine_preorder(dom: &Dom) -> Vec<explorer_dom::NodeId> {
         return out;
     };
     while let Some(id) = stack.pop() {
-        if !serializable_kind(dom, id) {
+        if !(serializable_kind(dom, id) || dom.is_shadow_root(id)) {
             continue;
         }
         out.push(id);
@@ -843,6 +871,7 @@ fn engine_preorder(dom: &Dom) -> Vec<explorer_dom::NodeId> {
         for &c in kids.iter().rev() {
             stack.push(c);
         }
+        push_orphan_shadow(dom, id, &kids, &mut stack);
     }
     out
 }
@@ -856,7 +885,7 @@ fn engine_preorder_subtree(
 ) {
     let mut stack = vec![root];
     while let Some(id) = stack.pop() {
-        if !serializable_kind(dom, id) {
+        if !(serializable_kind(dom, id) || dom.is_shadow_root(id)) {
             continue;
         }
         out.push(id);
@@ -867,7 +896,22 @@ fn engine_preorder_subtree(
         for &c in kids.iter().rev() {
             stack.push(c);
         }
+        push_orphan_shadow(dom, id, &kids, &mut stack);
     }
+}
+
+/// Tag d'appariement d'une position moteur — une racine
+/// shadow **programmatique** s'apparie au `template`
+/// synthétique que le miroir émet pour elle (`<template
+/// shadowrootmode>` : le fragment n'a pas de balise propre).
+/// Le cas DSD reste couvert par le `<template>` repère
+/// ordinaire (son fragment `content` est la racine — pas
+/// `is_shadow_root` sur l'élément).
+fn engine_tag_matches(dom: &Dom, id: explorer_dom::NodeId, tag: &str) -> bool {
+    if dom.is_shadow_root(id) {
+        return tag.eq_ignore_ascii_case("template");
+    }
+    dom.tag_name(id).is_ok_and(|t| t.eq_ignore_ascii_case(tag))
 }
 
 /// Empreinte structurelle du DOM commis — mêmes règles que
@@ -888,14 +932,20 @@ fn engine_fingerprint(dom: &Dom, keymap: &HashMap<u64, explorer_dom::NodeId>) ->
         if !mapped.contains(&id) {
             continue;
         }
-        if let Ok(tag) = dom.tag_name(id) {
-            for b in tag.bytes().map(|b| b.to_ascii_lowercase()) {
-                h ^= u64::from(b);
-                h = h.wrapping_mul(0x0000_0100_0000_01b3);
-            }
-            h ^= 0xff;
+        // Fragment racine shadow (programmatique) : le miroir
+        // compte le `template` synthétique émis à sa place.
+        let tag = if dom.is_shadow_root(id) {
+            Some("template")
+        } else {
+            dom.tag_name(id).ok()
+        };
+        let Some(tag) = tag else { continue };
+        for b in tag.bytes().map(|b| b.to_ascii_lowercase()) {
+            h ^= u64::from(b);
             h = h.wrapping_mul(0x0000_0100_0000_01b3);
         }
+        h ^= 0xff;
+        h = h.wrapping_mul(0x0000_0100_0000_01b3);
     }
     h
 }
@@ -1049,10 +1099,7 @@ fn align_keyed(
         while j < engine.len() {
             let e = engine[j];
             j += 1;
-            if dom
-                .tag_name(e)
-                .is_ok_and(|t| t.eq_ignore_ascii_case(&tags[i]))
-            {
+            if engine_tag_matches(dom, e, &tags[i]) {
                 keymap.insert(m, e);
                 continue 'outer;
             }
@@ -1257,6 +1304,10 @@ fn apply_journal(
                     stack.extend(dom.children(n).unwrap_or_default());
                     if let Ok(Some(f)) = dom.template_contents(n) {
                         stack.extend(dom.children(f).unwrap_or_default());
+                    }
+                    if let Some(r) = dom.shadow_root(n, true) {
+                        stack.extend(dom.children(r).unwrap_or_default());
+                        gone.insert(r);
                     }
                 }
                 touched.push(dom.parent(id).ok().flatten().unwrap_or(id));
@@ -2865,5 +2916,93 @@ mod tests {
         align_keyed(&mut map, &dom, &engine, &ids, &tags);
         assert!(map.contains_key(&20));
         assert!(!map.contains_key(&21), "texte divergent non mappé");
+    }
+
+    /// JS-C289 — `attachShadow` programmatique : la racine
+    /// fragment (aucun `<template>` repère en light DOM) et
+    /// son ombre entrent dans le pré-ordre moteur sous le tag
+    /// `template` synthétique, AVANT les enfants light —
+    /// ordre sérialisation miroir (R-96). Avant : clés shadow
+    /// non mappées → `UnmappedKey`/`Fingerprint` → re-parse
+    /// en boucle (mur journal mesuré sur youtube.com : le
+    /// bundle 10,8 Mo se ré-évaluait à chaque rejet).
+    #[test]
+    fn programmatic_shadow_aligns_and_fingerprints() {
+        let mut dom = TreeBuilder::parse_scripting(
+            "<html><body><my-el><p>light</p></my-el></body></html>",
+            false,
+        );
+        let host = engine_preorder(&dom)
+            .into_iter()
+            .find(|&n| dom.tag_name(n).ok() == Some("my-el"))
+            .unwrap();
+        // attachShadow programmatique — fragment nu, pas de
+        // repère `<template shadowrootmode>` en light DOM.
+        let root = dom.create_fragment().unwrap();
+        dom.attach_shadow_root(host, root, true);
+        let span = dom.create_element("span").unwrap();
+        dom.insert_before(root, span, None).unwrap();
+        // Miroir : my-el, template(racine), span, p — ordre
+        // [shadow][light].
+        let engine = engine_preorder(&dom);
+        let tags = [
+            "my-el".to_string(),
+            "template".to_string(),
+            "span".to_string(),
+            "p".to_string(),
+        ];
+        let ids = [30u64, 31, 32, 33];
+        let mut map = HashMap::new();
+        align_keyed(&mut map, &dom, &engine, &ids, &tags);
+        assert_eq!(map.len(), 4, "toutes les clés mappées : {map:?}");
+        assert_eq!(map[&31], root, "la clé racine lie le fragment");
+        assert_eq!(map[&32], span);
+        // L'ombre est bien émise avant le light dans le
+        // pré-ordre (span index < p index).
+        let pos = |n| engine.iter().position(|&e| e == n).unwrap();
+        assert!(pos(root) < pos(span) && pos(span) < pos(map[&33]));
+        // Empreinte miroir : tags éléments, même ordre —
+        // le fragment racine compte `template`.
+        let mut want = 0xcbf2_9ce4_8422_2325u64;
+        for t in ["my-el", "template", "span", "p"] {
+            for b in t.bytes() {
+                want ^= u64::from(b);
+                want = want.wrapping_mul(0x0000_0100_0000_01b3);
+            }
+            want ^= 0xff;
+            want = want.wrapping_mul(0x0000_0100_0000_01b3);
+        }
+        assert_eq!(engine_fingerprint(&dom, &map), want);
+    }
+
+    /// JS-C289 bis — DSD : le `<template shadowrootmode>`
+    /// consommé reste repère (son `template_contents` EST la
+    /// racine) — le pré-ordre ne doit PAS réémettre l'ombre
+    /// une seconde fois (ordre déjà couvert par la descente
+    /// template canonique).
+    #[test]
+    fn dsd_shadow_not_duplicated() {
+        let dom = TreeBuilder::parse_scripting(
+            "<html><body><my-el><template shadowrootmode=\"open\"><b>s</b></template><p>light</p></my-el></body></html>",
+            false,
+        );
+        let engine = engine_preorder(&dom);
+        // my-el, template(repère), b (ombre via
+        // template_contents), p — un seul passage.
+        let names: Vec<String> = engine
+            .iter()
+            .map(|&id| {
+                if dom.is_shadow_root(id) {
+                    "root".to_string()
+                } else {
+                    dom.tag_name(id).unwrap_or("#").to_string()
+                }
+            })
+            .collect();
+        assert_eq!(
+            names,
+            ["html", "head", "body", "my-el", "template", "b", "#", "p", "#"],
+            "DSD sans doublon (textes « s »/« light ») : {names:?}"
+        );
     }
 }

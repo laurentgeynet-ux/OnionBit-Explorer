@@ -6115,6 +6115,65 @@ fn r96_fingerprint_compte_le_template_shadow() {
     assert_ne!(fp_before, fp_after);
 }
 
+// ===== JS-C289 — repère DSD exclu de la série cléée : le
+// `<template shadowrootmode>` consommé (son fragment content
+// EST la racine) ne doit être ni cléé ni redescendu — l'ombre
+// voyage déjà sous la clé racine du template synthétique ;
+// l'émettre doublait les clés shadow et désalignait le
+// keymap moteur (UnmappedKey/Fingerprint en boucle — mur
+// youtube.com).
+
+#[test]
+fn c289_repere_dsd_ni_cle_ni_descente() {
+    let dom = Dom::from_html(
+        "<!doctype html><html><body><div id=h><template shadowrootmode=open><b>s</b></template><i>L</i></div></body></html>",
+    );
+    let (html, ids, tags) = dom.serialize_keyed();
+    // Éléments attendus : html, body, div, template(racine),
+    // b, i — le repère consommé n'entre pas dans les clés et
+    // l'ombre n'y figure qu'une fois (les textes sont cléés
+    // en `#text`).
+    let elems: Vec<&str> = tags
+        .iter()
+        .filter(|t| !t.starts_with("#text"))
+        .map(String::as_str)
+        .collect();
+    assert_eq!(
+        elems,
+        ["html", "body", "div", "template", "b", "i"],
+        "tags = {tags:?}"
+    );
+    assert_eq!(ids.len(), tags.len());
+    assert_eq!(elems.iter().filter(|t| **t == "template").count(), 1);
+    // Le markup transporte l'ombre sous le template
+    // synthétique — le repère n'y apparaît pas en double.
+    assert_eq!(html.matches("shadowrootmode").count(), 1);
+    assert_eq!(html.matches("<b>s</b>").count(), 1);
+}
+
+#[test]
+fn c289_repere_dsd_empreinte_simple() {
+    let dsd = Dom::from_html(
+        "<!doctype html><html><body><div><template shadowrootmode=open><b>s</b></template></div></body></html>",
+    );
+    // Équivalent programmatique : host div + racine + b —
+    // l'empreinte DSD doit égaler celle du DOM attaché à la
+    // main (même série de tags : div, template, b).
+    let prog = Dom::from_html("<!doctype html><html><body><div></div></body></html>");
+    let prog = Rc::new(RefCell::new(prog));
+    let mut e = Engine::new();
+    e.install_dom(&prog);
+    evf(
+        &mut e,
+        "var r=document.querySelector('div').attachShadow({mode:'open'});\
+         r.appendChild(document.createElement('b'));r.firstChild.textContent='s';'ok'",
+    );
+    assert_eq!(
+        dsd.structural_fingerprint(),
+        prog.borrow().structural_fingerprint()
+    );
+}
+
 // ===== CAP-198 — Shadow DOM tranche 4 : event retargeting —
 // `target`/`relatedTarget` ré-étiquetés à la frontière shadow
 // (racine du `currentTarget`), `composed` traverse (racine →

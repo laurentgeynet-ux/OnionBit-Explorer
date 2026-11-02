@@ -5732,6 +5732,36 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   `js_c285_buffered_timestamps_
   fmp4_en_bande`.
 
+- [x] **JS-C289. Journal DOM :
+  racines shadow programmatiques**
+  (`explorer-core`, ADR-0025 — mur
+  youtube.com) — le miroir émet
+  toute racine shadow en
+  `<template shadowrootmode>` cléé
+  + enfants shadow AVANT les light,
+  mais `engine_preorder` ignorait
+  les `shadow_roots` programmatiques
+  (pas de `<template>` repère — le
+  DSD réutilisait `template_contents`
+  ) → `UnmappedKey`/`Fingerprint` →
+  re-parse → ré-éval du bundle
+  10,8 Mo → boucle (B-41 armé,
+  feed jamais hydraté). `push_orphan_
+  shadow` + tag `template` dans
+  `engine_tag_matches`/`engine_
+  fingerprint` + purge au `Remove`.
+  Verrous
+  `programmatic_shadow_*`,
+  `dsd_shadow_not_duplicated`,
+  `c289_repere_dsd_*` — la
+  moitié miroir (repère DSD
+  exclu des clés/descente/
+  empreinte via `is_dsd_repere`)
+  boucle la boucle : sans ça
+  l'ombre s'émettait deux fois
+  et la clé repère volait le
+  nœud suivant dans `align_keyed`.
+
 - [x] **JS-C286. Déclarateurs
   `await` ordonnés dans une même
   déclaration** (`explorer-jscore`,

@@ -1094,6 +1094,26 @@ impl Dom {
         self.journal_poisoned = true;
     }
 
+    /// `<template shadowrootmode>` consommé = **repère DSD** :
+    /// son fragment `content` EST la racine shadow attachée à
+    /// son parent — la sérialisation l'émet déjà en
+    /// `<template shadowrootmode>` synthétique sous la clé de
+    /// la racine. Le repère ne doit être ni cléé ni redescendu :
+    /// sinon ses enfants (= l'ombre) sont émis une seconde fois
+    /// et sa clé propre vole le nœud suivant de même tag dans
+    /// `align_keyed` → keymap/empreinte divergents
+    /// (`UnmappedKey`/`Fingerprint` en boucle — mur youtube.com,
+    /// JS-C289).
+    fn is_dsd_repere(&self, id: NodeId) -> bool {
+        let n = &self.nodes[id as usize];
+        n.kind == NodeKind::Element
+            && n.tag == "template"
+            && self
+                .template_contents
+                .get(&id)
+                .is_some_and(|f| self.shadow_hosts.contains_key(f))
+    }
+
     /// Empreinte structurelle du document : fold pré-ordre des
     /// **tags d'éléments** (texte exclu — ADR-0025 : « tag/ordre,
     /// pas de texte »). Suit `serial_children` — le contenu d'un
@@ -1110,6 +1130,9 @@ impl Dom {
         let mut stack = self.serial_children(self.root).to_vec();
         stack.reverse();
         while let Some(id) = stack.pop() {
+            if self.is_dsd_repere(id) {
+                continue;
+            }
             let n = &self.nodes[id as usize];
             if n.kind == NodeKind::Element {
                 for b in n.tag.bytes().map(|b| b.to_ascii_lowercase()) {
@@ -1245,6 +1268,15 @@ impl Dom {
                         for &c in n.children.iter().rev() {
                             stack.push(Ser::Enter(c));
                         }
+                        continue;
+                    }
+                    // JS-C289 — repère DSD : ni clé ni descente
+                    // ni markup — l'ombre est déjà transportée
+                    // par le `<template shadowrootmode>`
+                    // synthétique (clé racine) ; émettre le
+                    // repère doublerait les clés shadow et
+                    // désalignerait `align_keyed` moteur.
+                    if self.is_dsd_repere(id) {
                         continue;
                     }
                     ids.push(u64::from(id));
