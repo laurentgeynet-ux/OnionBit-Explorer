@@ -490,6 +490,7 @@ impl Engine {
         let this = Value::Obj(wrapper);
         let ev = {
             let o = self.new_object();
+            crate::dom_host::event_proto(self, o, "ProgressEvent");
             let t = self.str_val(ty);
             self.set_own(o, "type", t, true);
             self.set_own(o, "target", this, true);

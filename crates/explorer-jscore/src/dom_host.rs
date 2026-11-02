@@ -12070,6 +12070,33 @@ fn dom_exception(e: &mut Engine, name: &str, msg: &str) -> crate::heap::Thrown {
     crate::heap::Thrown(e.error_value(proto, name, msg))
 }
 
+/// Pose le proto spec d'un événement **minté en natif** pour les
+/// `fire_*` internes (`MessageEvent`/`ProgressEvent`/`ErrorEvent`,
+/// repli `Event.prototype` puis `Object`). Les objets nus
+/// rendaient `ev.stopPropagation`/`preventDefault` `undefined`
+/// et tuaient les handlers — §B-14 criteo `ld.js` postMessage
+/// (vol 527 nature), famille `fire_ws`/`fire_bc`/port/IDB/
+/// FileReader/window-error.
+pub(crate) fn event_proto(e: &mut Engine, o: ObjId, ctor: &str) {
+    let g = Value::Obj(e.global);
+    let proto = e
+        .get_prop_value(g, ctor)
+        .ok()
+        .and_then(|c| e.get_prop_value(c, "prototype").ok())
+        .or_else(|| {
+            e.get_prop_value(g, "Event")
+                .ok()
+                .and_then(|c| e.get_prop_value(c, "prototype").ok())
+        });
+    let p = match proto {
+        Some(v @ Value::Obj(_)) => v,
+        _ => Value::Obj(e.protos.object),
+    };
+    if let Some(ob) = e.heap.obj_mut(o) {
+        ob.proto = p;
+    }
+}
+
 /// `signal.removeEventListener('abort', cb)` — retire de `__ls`.
 fn signal_remove_listener(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let Value::Obj(sid) = this else {

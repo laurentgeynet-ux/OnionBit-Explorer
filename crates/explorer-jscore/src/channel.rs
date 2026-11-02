@@ -358,6 +358,7 @@ impl Engine {
             };
             let data = self.wire_decode(&m.data)?;
             let ev = self.new_object();
+            crate::dom_host::event_proto(self, ev, "MessageEvent");
             let ty = self.str_val("message");
             self.set_own(ev, "type", ty, true);
             self.set_own(ev, "data", data, true);

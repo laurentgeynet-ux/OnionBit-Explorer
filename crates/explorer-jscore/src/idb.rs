@@ -614,6 +614,7 @@ fn idb_err(e: &mut Engine, name: &str, msg: &str) -> Value {
 /// Event IDB minimal `{type, target, oldVersion?, newVersion?}`.
 fn idb_event(e: &mut Engine, ty: &str, target: Value, vers: Option<(u64, u64)>) -> Value {
     let o = e.new_object();
+    crate::dom_host::event_proto(e, o, "Event");
     let t = e.str_val(ty);
     e.set_own(o, "type", t, true);
     e.set_own(o, "target", target, true);

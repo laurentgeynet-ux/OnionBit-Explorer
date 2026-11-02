@@ -2390,6 +2390,9 @@ impl Engine {
             let data = self.wire_decode(&msg.data)?;
             let source = self.ctx_window_value(msg.source);
             let ev = self.new_object();
+            // §B-14 vol 527 — proto `MessageEvent` : les
+            // listeners criteo appellent `ev.stopPropagation`.
+            crate::dom_host::event_proto(self, ev, "MessageEvent");
             let ty = self.str_val("message");
             self.set_own(ev, "type", ty, true);
             self.set_own(ev, "data", data, true);

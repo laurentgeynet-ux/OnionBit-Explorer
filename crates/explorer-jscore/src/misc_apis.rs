@@ -203,6 +203,7 @@ fn fire_bc_message(e: &mut Engine, data: &Rc<RefCell<BcData>>, payload: Value) -
     let this = Value::Obj(wid);
     let ev = {
         let o = e.new_object();
+        crate::dom_host::event_proto(e, o, "MessageEvent");
         let t = e.str_val("message");
         e.set_own(o, "type", t, true);
         e.set_own(o, "target", this, true);
@@ -892,6 +893,7 @@ fn report_error(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     if let Some((dom, cache)) = e.dom_ctx.clone() {
         let root = dom.borrow().root;
         let o = e.new_object();
+        crate::dom_host::event_proto(e, o, "ErrorEvent");
         let t = e.str_val("error");
         e.set_own(o, "type", t, true);
         let m = e.str_val(message.clone());

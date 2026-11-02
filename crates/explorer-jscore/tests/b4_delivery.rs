@@ -50,6 +50,23 @@ fn b4_message_channel_delivers() {
     assert_eq!(ev(&mut e, "__hit"), "1");
 }
 
+/// §B-14 vol 527 (criteo `ld.js` postMessage, nature) —
+/// l'événement livré par un port porte `MessageEvent.prototype` :
+/// `stopPropagation` est une méthode (le mint natif rendait
+/// un objet nu → `stopPropagation is not a function`).
+#[test]
+fn b4_port_message_event_carries_message_proto() {
+    let mut e = engine();
+    ev(
+        &mut e,
+        "var c=new MessageChannel();window.__p='';\
+         c.port1.onmessage=function(ev){__p=typeof ev.stopPropagation+'|'+(ev instanceof MessageEvent)};\
+         c.port2.postMessage('x');",
+    );
+    e.run_microtasks().expect("pump");
+    assert_eq!(ev(&mut e, "__p"), "function|true");
+}
+
 /// (b) `queueMicrotask` — les suites React 18 : callback
 /// drainé à la pompe.
 #[test]

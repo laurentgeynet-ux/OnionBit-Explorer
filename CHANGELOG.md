@@ -7,6 +7,29 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **JS-C268 — prototypes
+  `Event` sur les événements
+  mintés en natif** (`explorer-
+  jscore`, §B-14 vol 527 nature —
+  `stopPropagation is not a
+  function` sur `MessageEvent`,
+  criteo `ld.js` postMessage) —
+  tous les `fire_*` internes
+  construisaient des objets nus :
+  `ev.stopPropagation`/`preventDefault`
+  `undefined` → handlers tués.
+  `event_proto` pose
+  `MessageEvent`/`ProgressEvent`/
+  `ErrorEvent`/`Event.prototype`
+  (repli `Object`) sur les mints :
+  `postMessage` window,
+  `MessagePort`, `WebSocket`,
+  `BroadcastChannel`,
+  `EventSource`, `FileReader`,
+  IDB, window `error`. Verrou
+  `b4_port_message_event_carries_
+  message_proto`.
+
 - **JS-C267 — `FinalizationRegistry.
   register` spec `SameValue`** —
   le TypeError comparaît le jeton
