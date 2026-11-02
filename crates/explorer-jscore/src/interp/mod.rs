@@ -7077,6 +7077,13 @@ impl Engine {
             || f(self, this, args),
         );
         self.nat_stack.pop();
+        // §B-59 bras 4 : le natif a pu burst au-delà du seuil
+        // pendant son exécution (vol 573 : `call` 853→3 007 en
+        // un appel) — le check de sortie pose le loquet avant
+        // que la main ne reparte sans qu'aucun tick n'ait revu
+        // le seuil ; l'éval meurt alors au prochain tick au
+        // lieu de rendre le réservoir à la pompe.
+        let _ = self.rss_over_kill();
         // Restaure le natif appelant comme « en vol » : vide
         // à l'abort = span eval-side, nommé = le natif tueur.
         let outer = self.nat_stack.last().copied().unwrap_or("");

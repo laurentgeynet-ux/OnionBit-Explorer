@@ -54,7 +54,7 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   `call`/`apply` de décodeur =
   ~4,4 Go de temporaires natifs
   hors compteurs ; `rss_over_kill`
-  à l'entrée `call_native` +
+  entrée+sortie `call_native` +
   sortie `run_program` (loquet →
   rafale bornée en `RangeError`,
   jamais abort pompe) — désarmé =

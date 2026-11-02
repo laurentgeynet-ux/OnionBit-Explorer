@@ -5507,8 +5507,8 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   pompe héritait du réservoir
   ~3,8 Go (abort 64 Mo
   `pump.offlock`). `rss_over_kill`
-  check à l'entrée de
-  `call_native` et en sortie de
+  check à l'entrée **et à la sortie**
+  de `call_native` et en sortie de
   `run_program` — un syscall par
   frontière, désarmé = zéro coût ;
   loquet posé → évals suivantes
