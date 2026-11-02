@@ -3659,76 +3659,6 @@ impl Engine {
         if self.rss_kill_mb > 0 && self.rss_kill_latched {
             return Err(self.range_error("process RSS limit exceeded (latched kill)"));
         }
-        // Breadcrumb §B-59 : dernier frame JS visible du
-        // `rss_guard` à l'abort (armé, `format!` par tick).
-        if self.rss_watch_mb > 0 {
-            if let Ok(mut g) = crate::LAST_FRAME.lock() {
-                *g = self
-                    .call_stack
-                    .last()
-                    .map(|lit| {
-                        let n = lit.name.as_deref().unwrap_or("<anon>");
-                        match &lit.src {
-                            Some(s) => {
-                                format!("{n}({s}:{}:{})", lit.pos.0, lit.pos.1)
-                            }
-                            None => format!("{n}(:{}:{})", lit.pos.0, lit.pos.1),
-                        }
-                    })
-                    .unwrap_or_default();
-            }
-        }
-        // Kill doux RSS — hors du gate 256 ops : à ~7 Mo/op
-        // mesurés en burst, une fenêtre de 256 ops = ~1,7 Go
-        // non bornés (actugaming 4 975 → 6 736 Mo entre deux
-        // dumps). Armé via `EXPLORER_JS_RSS_KILL_MB` : check à
-        // chaque tick (~µs `memory_stats`), absent = zéro coût.
-        if self.rss_kill_mb > 0 || self.rss_watch_mb > 0 {
-            if let Some(m) = memory_stats::memory_stats() {
-                let rss = m.physical_mem / (1024 * 1024);
-                let virt = m.virtual_mem / (1024 * 1024);
-                // Recensement §B-59 : compteurs heap + plus gros
-                // objet — lu par `rss_guard` à l'abort. Seulement
-                // en zone chaude (scan O(cells)).
-                if self.rss_watch_mb > 0 && rss > self.rss_watch_mb {
-                    if let Ok(mut g) = crate::LAST_STATS.lock() {
-                        *g = self.census_line(rss, virt);
-                    }
-                }
-                if self.rss_kill_mb > 0 && rss > self.rss_kill_mb {
-                    self.rss_kill_latched = true;
-                    return Err(self.range_error(format!(
-                        "process RSS limit exceeded ({rss} MiB > {} MiB — native reservoir bound)",
-                        self.rss_kill_mb
-                    )));
-                }
-                // Kill doux **commit** : une réservation unique
-                // (`Vec::reserve`/`HashMap` growth entre deux
-                // ticks) gonfle `PagefileUsage` de ~6 Go sans
-                // toucher les pages — `rss` reste sous le seuil
-                // mais le pagefile se vide et couche la station
-                // (actugaming, `rss_guard[commit]` 12,8 Go).
-                if self.commit_kill_mb > 0 && virt > self.commit_kill_mb {
-                    self.rss_kill_latched = true;
-                    // §B-59 : le RangeError est la seule ligne
-                    // qui survive — y inclure le frame courant
-                    // et le recensement heap nomme le coupable
-                    // dans le log d'eval, sans abort process.
-                    let frame = crate::LAST_FRAME
-                        .lock()
-                        .map(|g| g.clone())
-                        .unwrap_or_default();
-                    let stats = crate::LAST_STATS
-                        .lock()
-                        .map(|g| g.clone())
-                        .unwrap_or_default();
-                    return Err(self.range_error(format!(
-                        "process commit limit exceeded ({virt} MiB > {} MiB — native reservoir bound) at {frame} | {stats}",
-                        self.commit_kill_mb
-                    )));
-                }
-            }
-        }
         // Deadline relue périodiquement (bras débit youtube/
         // ytembed — `Instant::now()` est un syscall de ~20-40 ns
         // : ×10⁷ ticks ≈ des secondes d'horloge pure sur un gros
@@ -3741,6 +3671,88 @@ impl Engine {
                 if Instant::now() >= d {
                     self.deadline_hit = true;
                     return Err(self.range_error("eval deadline exceeded"));
+                }
+            }
+            // Breadcrumb + sondes RSS — échantillonnés 1/256 ops
+            // dans ce gate : `format!` du breadcrumb et
+            // `memory_stats()` à chaque tick coûtaient ~500× sur
+            // exec chaude mesuré au vol 571 (inline:9 48 ms →
+            // 90,6 s). Une fenêtre de 256 ops ≈ ~1,7 Go de burst
+            // mesuré (actugaming 4 975 → 6 736 Mo entre deux
+            // dumps) : le kill doux conserve sa borne et les
+            // paliers 64 Mio de la sonde restent servis —
+            // `EXPLORER_JS_RSS_WATCH`/`EXPLORER_JS_RSS_KILL_MB`/
+            // `EXPLORER_JS_COMMIT_KILL_MB` désarmés = zéro coût.
+            if self.rss_watch_mb > 0 {
+                // Breadcrumb §B-59 : dernier frame JS visible du
+                // `rss_guard` à l'abort.
+                if let Ok(mut g) = crate::LAST_FRAME.lock() {
+                    *g = self
+                        .call_stack
+                        .last()
+                        .map(|lit| {
+                            let n = lit.name.as_deref().unwrap_or("<anon>");
+                            match &lit.src {
+                                Some(s) => {
+                                    format!("{n}({s}:{}:{})", lit.pos.0, lit.pos.1)
+                                }
+                                None => format!("{n}(:{}:{})", lit.pos.0, lit.pos.1),
+                            }
+                        })
+                        .unwrap_or_default();
+                }
+            }
+            if self.rss_kill_mb > 0 || self.rss_watch_mb > 0 {
+                if let Some(m) = memory_stats::memory_stats() {
+                    let rss = m.physical_mem / (1024 * 1024);
+                    let virt = m.virtual_mem / (1024 * 1024);
+                    // Recensement §B-59 : compteurs heap + plus
+                    // gros objet — lu par `rss_guard` à l'abort.
+                    if self.rss_watch_mb > 0 && rss > self.rss_watch_mb {
+                        if let Ok(mut g) = crate::LAST_STATS.lock() {
+                            *g = self.census_line(rss, virt);
+                        }
+                    }
+                    if self.rss_kill_mb > 0 && rss > self.rss_kill_mb {
+                        self.rss_kill_latched = true;
+                        // §B-59 : le RangeError est la seule ligne
+                        // qui survive — y inclure le frame courant
+                        // et le recensement heap nomme le coupable
+                        // dans le log d'eval, sans abort process.
+                        let frame = crate::LAST_FRAME
+                            .lock()
+                            .map(|g| g.clone())
+                            .unwrap_or_default();
+                        let stats = crate::LAST_STATS
+                            .lock()
+                            .map(|g| g.clone())
+                            .unwrap_or_default();
+                        return Err(self.range_error(format!(
+                            "process RSS limit exceeded ({rss} MiB > {} MiB — native reservoir bound) at {frame} | {stats}",
+                            self.rss_kill_mb
+                        )));
+                    }
+                    // Kill doux **commit** : une réservation unique
+                    // (`Vec::reserve`/`HashMap` growth entre deux
+                    // ticks) gonfle `PagefileUsage` de ~6 Go sans
+                    // toucher les pages — `rss` reste sous le seuil
+                    // mais le pagefile se vide et couche la station
+                    // (actugaming, `rss_guard[commit]` 12,8 Go).
+                    if self.commit_kill_mb > 0 && virt > self.commit_kill_mb {
+                        self.rss_kill_latched = true;
+                        let frame = crate::LAST_FRAME
+                            .lock()
+                            .map(|g| g.clone())
+                            .unwrap_or_default();
+                        let stats = crate::LAST_STATS
+                            .lock()
+                            .map(|g| g.clone())
+                            .unwrap_or_default();
+                        return Err(self.range_error(format!(
+                            "process commit limit exceeded ({virt} MiB > {} MiB — native reservoir bound) at {frame} | {stats}",
+                            self.commit_kill_mb
+                        )));
+                    }
                 }
             }
             // Recalcul périodique de l'estimé heap — §B-59

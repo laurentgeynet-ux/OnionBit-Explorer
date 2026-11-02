@@ -33,6 +33,20 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   `of Undefined` évité). Verrou
   `c269_backrefs` (5 cas).
 
+- **JS-C275 — sondes RSS
+  échantillonnées 1/256 ops**
+  (`explorer-jscore`, J14 §B-59
+  bras 4 — vol 571) : `format!` +
+  `memory_stats()` à chaque tick
+  ~500× sur exec chaude ; watch,
+  kill RSS et kill commit passent
+  au gate 1/256 ops de la deadline
+  (fenêtre ~1,7 Go de burst),
+  désarmé = zéro coût ; le kill
+  RSS inclut `frame|stats` dans
+  son `RangeError` (nomme le
+  coupable survivant).
+
 - **JS-C274 — `el.sheet` sur
   `<style>`/`<link rel=stylesheet>`**
   (`explorer-jscore`, §B-14

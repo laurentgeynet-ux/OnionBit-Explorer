@@ -5468,6 +5468,29 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   Undefined` disparaît. Verrou :
   `c269_backrefs` (5 tests).
 
+- [x] **JS-C275. Sondes RSS
+  échantillonnées 1/256 ops**
+  (`explorer-jscore`, J14
+  §B-59 bras 4 — vol 571) —
+  `EXPLORER_JS_RSS_WATCH` armé
+  rendait le terrain inutilisable :
+  `format!` du breadcrumb
+  `LAST_FRAME` + `memory_stats()`
+  à chaque tick ~500× sur exec
+  chaude (inline:9 48 ms → 90,6 s
+  mesurés). Les deux sondes et le
+  kill doux rejoignent le gate
+  `trailing_zeros() >= 8` de la
+  deadline : 1/256 ops ≈ fenêtre
+  ~1,7 Go de burst mesuré
+  (actugaming), paliers 64 Mio
+  `tick_rss` inchangés, désarmé =
+  zéro coût. Bonus : le kill RSS
+  embarque désormais `frame|stats`
+  dans le `RangeError` comme le
+  kill commit — le message qui
+  survit nomme le coupable.
+
 - [x] **Étape CMP-4. Réarmement
   des balises « bloquées par CMP »**
   (`explorer-core`, §B-4 bras CMP
