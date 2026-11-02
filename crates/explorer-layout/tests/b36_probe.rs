@@ -196,3 +196,31 @@ fn find_td<'a>(b: &'a LayoutBox, dom: &'a Dom) -> &'a LayoutBox {
     last_td(b, dom, &mut v);
     v.last().copied().expect("td")
 }
+
+/// §B-18 motif dominant — runs de nav flex superposés
+/// (vimeo/ubereats/sofascore/hltb/myanimelist ×5+ porteurs) :
+/// deux `<a>` texte dans un `display:flex` doivent être
+/// posés côte à côte, jamais chevauchés.
+#[test]
+fn flex_nav_liens_texte_ne_se_chevauchent_pas() {
+    let (dom, bx) = laid(
+        "<header><nav><a>Use cases</a><a>Contact sales</a></nav></header>",
+        "nav{display:flex;gap:24px}a{padding:4px 8px}",
+    );
+    let mut xs = Vec::new();
+    fn walk(b: &LayoutBox, dom: &Dom, out: &mut Vec<(f32, f32)>) {
+        if b.node
+            .is_some_and(|n| dom.tag_name(n).is_ok_and(|t| t == "a"))
+        {
+            out.push((b.rect.x, b.rect.width));
+        }
+        for c in &b.children {
+            walk(c, dom, out);
+        }
+    }
+    walk(&bx, &dom, &mut xs);
+    assert_eq!(xs.len(), 2, "2 liens attendus : {xs:?}");
+    let (x1, w1) = xs[0];
+    let (x2, _w2) = xs[1];
+    assert!(x2 >= x1 + w1 - 0.5, "liens chevauchés : {xs:?}");
+}
