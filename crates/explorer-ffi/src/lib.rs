@@ -1184,7 +1184,7 @@ pub unsafe extern "C" fn explorer_download_url(
     let Some(u) = (unsafe { read_str(url, len, MAX_URL) }) else {
         return -1;
     };
-    match h.rt.block_on(sess(h).download_url(tab, u)) {
+    match h.rt.block_on(sess(h).download_url(tab, u, None, None)) {
         Ok(_) => 0,
         Err(e) => {
             set_err(e);

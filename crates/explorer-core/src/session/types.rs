@@ -109,6 +109,25 @@ pub enum CoreEvent {
         /// Taille annoncée (`Content-Length`) si connue.
         size: Option<u64>,
     },
+    /// Téléchargement **direct** démarré (étape 174 —
+    /// `start_download`/`download_url` hors verrou) : émis
+    /// après réception des en-têtes, quand le nom final est
+    /// réservé et la taille annoncée connue. Distinct de
+    /// [`DownloadOffered`](Self::DownloadOffered) : ici il
+    /// n'y a **rien à décider** — l'écriture court déjà, le
+    /// dialogue accept/decline ne doit pas s'ouvrir.
+    DownloadStarted {
+        /// Onglet émetteur.
+        tab: TabId,
+        /// Identifiant du téléchargement.
+        id: u64,
+        /// URL servie (post-redirection).
+        url: String,
+        /// Nom de fichier retenu (sanitisé, réservé).
+        filename: String,
+        /// `Content-Length` annoncé si connu.
+        total: Option<u64>,
+    },
     /// Progression de la réception d'un téléchargement —
     /// émis par morceau reçu pendant le buffer.
     DownloadProgress {
@@ -129,6 +148,19 @@ pub enum CoreEvent {
         id: u64,
         /// Chemin du fichier écrit.
         path: String,
+    },
+    /// Téléchargement direct avorté (étape 174) : fetch en
+    /// échec, borne `max_download_bytes` dépassée en vol,
+    /// écriture refusée ou annulation explicite — le
+    /// `.part` est purgé. Distinct de `PipelineError` :
+    /// l'`id` permet de corréler l'entrée UI.
+    DownloadFailed {
+        /// Onglet émetteur.
+        tab: TabId,
+        /// Identifiant du téléchargement.
+        id: u64,
+        /// Cause lisible.
+        error: String,
     },
     /// Un élément `<video>`/`<audio>` lisible est présent
     /// sur la page (étape 71b, ADR-0024) — l'hôte peut
@@ -361,9 +393,23 @@ pub enum MediaError {
     NotClaimed,
 }
 
-/// Fiche publique d'un téléchargement en attente (étape 70)
-/// — exposée par `Session::pending_downloads` et l'API ;
-/// le corps reste interne (`PendingDownload`).
+/// État d'une fiche de téléchargement (étape 174) —
+/// distingué dans `pending_downloads` et sérialisé
+/// `pending`/`active` côté API.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DownloadState {
+    /// Corps bufferisé en session, décision
+    /// accept/decline en attente (étape 70).
+    Pending,
+    /// Écriture en cours — job détaché `download_url`
+    /// (étape 174), annulable via `cancel_download`.
+    Active,
+}
+
+/// Fiche publique d'un téléchargement en attente **ou en
+/// cours** (étapes 70/174) — exposée par
+/// `Session::pending_downloads` et l'API ; le corps reste
+/// interne (`PendingDownload`, fichier `.part`).
 #[derive(Debug, Clone)]
 pub struct DownloadInfo {
     /// Identifiant du téléchargement.
@@ -372,12 +418,19 @@ pub struct DownloadInfo {
     pub tab: TabId,
     /// URL servie (post-redirection).
     pub url: String,
-    /// Nom de fichier suggéré (sanitisé).
+    /// Nom de fichier suggéré ou réservé (sanitisé).
     pub filename: String,
-    /// Type MIME déclaré.
+    /// Type MIME déclaré (`""` tant que les en-têtes
+    /// d'un `Active` ne sont pas reçus).
     pub mime: String,
-    /// Octets reçus.
+    /// Octets reçus à date (`Pending` = corps complet
+    /// bufferisé ; `Active` = compteur vivant).
     pub size: usize,
+    /// État de la fiche (étape 174).
+    pub state: DownloadState,
+    /// Taille annoncée `Content-Length` si connue
+    /// (étape 174).
+    pub total: Option<u64>,
 }
 
 /// Région invalide d'une frame (étape 55) — **pixels

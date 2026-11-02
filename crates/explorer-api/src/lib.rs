@@ -227,6 +227,7 @@ pub fn router_with_egress(
             "/api/tabs/{id}/downloads",
             get(list_downloads).post(download_url),
         )
+        .route("/api/tabs/{id}/downloads/{dl}", delete(cancel_download))
         .route(
             "/api/tabs/{id}/downloads/{dl}/accept",
             post(accept_download),
@@ -240,6 +241,7 @@ pub fn router_with_egress(
             get(list_bookmarks).post(add_bookmark).delete(del_bookmark),
         )
         .route("/api/history", get(history))
+        .route("/api/downloads", get(download_journal))
         .route("/api/events", get(events))
         .route("/api/tabs/{id}/console", get(console_log))
         .with_state(ApiState {
@@ -864,8 +866,10 @@ async fn eval_js(
     }
 }
 
-/// `GET /api/tabs/{id}/downloads` → téléchargements en
-/// attente de l'onglet (étape 70).
+/// `GET /api/tabs/{id}/downloads` → téléchargements de
+/// l'onglet : en attente de décision (`"state":"pending"`,
+/// étape 70) et en cours (`"state":"active"`, étape 174 —
+/// `received`/`total` vivants).
 async fn list_downloads(State(st): State<ApiState>, Path(id): Path<TabId>) -> impl IntoResponse {
     let session = st.session.lock().await;
     let v: Vec<_> = session
@@ -874,17 +878,45 @@ async fn list_downloads(State(st): State<ApiState>, Path(id): Path<TabId>) -> im
         .map(|d| {
             serde_json::json!({
                 "id": d.id, "tab": d.tab, "url": d.url,
-                "filename": d.filename, "mime": d.mime, "size": d.size,
+                "filename": d.filename, "mime": d.mime,
+                "size": d.size, "total": d.total,
+                "state": match d.state {
+                    explorer_core::DownloadState::Pending => "pending",
+                    explorer_core::DownloadState::Active => "active",
+                },
+                "received": d.size,
             })
         })
         .collect();
     Json(serde_json::json!({ "downloads": v }))
 }
 
-/// `POST /api/tabs/{id}/downloads` — `{ "url": "…" }` :
-/// télécharge la ressource directement sous le répertoire
-/// de téléchargements (bouton « enregistrer la source »
-/// média — pile transport complète, journal + `DownloadDone`).
+/// `GET /api/downloads` → journal profil des
+/// téléchargements terminés (PR-1) — `[]` sans profil
+/// configuré (mémoire pure).
+async fn download_journal(State(st): State<ApiState>) -> impl IntoResponse {
+    let session = st.session.lock().await;
+    let v: Vec<_> = session
+        .download_journal()
+        .iter()
+        .map(|d| {
+            serde_json::json!({
+                "url": d.url, "filename": d.filename, "path": d.path,
+                "size": d.size, "finished_unix": d.finished_unix,
+            })
+        })
+        .collect();
+    Json(serde_json::json!({ "downloads": v }))
+}
+
+/// `POST /api/tabs/{id}/downloads` — `{ "url": "…",
+/// "path"?, "filename"? }` : démarre un téléchargement
+/// direct détaché (étape 174 — pile transport complète,
+/// écriture `.part` streamée sous `download_dir` ou au
+/// `path` explicite) et rend `{ "id": n }` immédiatement ;
+/// la suite arrive en SSE : `download_started` →
+/// `download_progress` → `download_done` /
+/// `download_failed`.
 async fn download_url(
     State(st): State<ApiState>,
     Path(id): Path<TabId>,
@@ -894,12 +926,32 @@ async fn download_url(
         return err(StatusCode::BAD_REQUEST, &"champ url requis");
     };
     let url = url.to_string();
+    let path = v
+        .get("path")
+        .and_then(|p| p.as_str())
+        .map(std::path::PathBuf::from);
+    let filename = v
+        .get("filename")
+        .and_then(|f| f.as_str())
+        .map(str::to_string);
     let mut session = st.session.lock().await;
-    match session.download_url(id, &url).await {
-        Ok(target) => Json(serde_json::json!({
-            "path": target.display().to_string()
-        }))
-        .into_response(),
+    match session.start_download(id, &url, path, filename) {
+        Ok(dl) => Json(serde_json::json!({ "id": dl })).into_response(),
+        Err(e) => err(StatusCode::BAD_REQUEST, &e),
+    }
+}
+
+/// `DELETE /api/tabs/{id}/downloads/{dl}` — annule un
+/// téléchargement direct en cours (étape 174) : la tâche
+/// purge le `.part` et émet `download_failed` ; les offres
+/// `pending` se rejettent par `…/decline`.
+async fn cancel_download(
+    State(st): State<ApiState>,
+    Path((id, dl)): Path<(TabId, u64)>,
+) -> Response {
+    let mut session = st.session.lock().await;
+    match session.cancel_download(id, dl) {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
         Err(e) => err(StatusCode::BAD_REQUEST, &e),
     }
 }
@@ -1278,9 +1330,27 @@ fn event_json(ev: &CoreEvent) -> (&'static str, String) {
             })
             .to_string(),
         ),
+        CoreEvent::DownloadStarted {
+            tab,
+            id,
+            url,
+            filename,
+            total,
+        } => (
+            "download_started",
+            serde_json::json!({
+                "tab": tab, "id": id, "url": url,
+                "filename": filename, "total": total,
+            })
+            .to_string(),
+        ),
         CoreEvent::DownloadDone { tab, id, path } => (
             "download_done",
             serde_json::json!({ "tab": tab, "id": id, "path": path }).to_string(),
+        ),
+        CoreEvent::DownloadFailed { tab, id, error } => (
+            "download_failed",
+            serde_json::json!({ "tab": tab, "id": id, "error": error }).to_string(),
         ),
         CoreEvent::MediaOffered { .. }
         | CoreEvent::MediaMoved { .. }

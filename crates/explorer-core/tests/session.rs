@@ -657,6 +657,322 @@ async fn document_types_never_download() {
     );
 }
 
+// --- Étape 174 : téléchargements directs (`download_url`) --------
+
+/// Étape 174 — le corps est streamé vers `<cible>.part`
+/// puis renommé : le cycle `DownloadStarted` →
+/// `DownloadProgress` ×N → `DownloadDone` est émis, la
+/// session n'est jamais tenue pendant le transfert (le
+/// `download_url` compat n'attend que les événements).
+#[tokio::test]
+async fn download_url_streams_and_completes() {
+    let (mut s, t) = test_session();
+    let dir = std::env::temp_dir().join("explorer-dl-174-stream");
+    let _ = std::fs::remove_dir_all(&dir);
+    s.set_download_dir(Some(dir.clone()));
+    t.route("/", 200, PAGE);
+    t.route_headers(
+        "/big.bin",
+        200,
+        "",
+        &[
+            ("Content-Type", "application/octet-stream"),
+            ("Content-Length", "9"),
+        ],
+    );
+    t.route_chunks(
+        "/big.bin",
+        200,
+        vec![b"aaa".to_vec(), b"bbb".to_vec(), b"ccc".to_vec()],
+    );
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    let mut rx = s.subscribe();
+    let target = s
+        .download_url(id, "http://h.test/big.bin", None, None)
+        .await
+        .unwrap();
+    assert_eq!(std::fs::read(&target).unwrap(), b"aaabbbccc");
+    assert_eq!(target.file_name().unwrap(), "big.bin");
+    assert!(
+        !target.with_file_name("big.bin.part").exists(),
+        "le .part est renommé"
+    );
+    let mut seq: Vec<&str> = Vec::new();
+    let mut progress = 0u32;
+    while let Ok(ev) = rx.try_recv() {
+        match ev {
+            CoreEvent::DownloadStarted {
+                filename, total, ..
+            } => {
+                seq.push("started");
+                assert_eq!(filename, "big.bin");
+                assert_eq!(total, Some(9));
+            }
+            CoreEvent::DownloadProgress { .. } => {
+                seq.push("progress");
+                progress += 1;
+            }
+            CoreEvent::DownloadDone { path, .. } => {
+                seq.push("done");
+                assert_eq!(path, target.display().to_string());
+            }
+            _ => {}
+        }
+    }
+    assert_eq!(seq.first(), Some(&"started"));
+    assert_eq!(seq.last(), Some(&"done"));
+    assert_eq!(progress, 3, "un progress par morceau");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Étape 174 — contexte navigateur : `initiator`
+/// `NavFrom(page)` → `Referer` de la page courante +
+/// `sec-fetch-dest: document` + `sec-fetch-user: ?1`
+/// (geste « enregistrer sous » explicite).
+#[tokio::test]
+async fn download_url_sends_nav_context() {
+    let (mut s, t) = test_session();
+    let dir = std::env::temp_dir().join("explorer-dl-174-ctx");
+    let _ = std::fs::remove_dir_all(&dir);
+    s.set_download_dir(Some(dir.clone()));
+    t.route("/", 200, PAGE);
+    t.route("/file.zip", 200, "zip");
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    s.download_url(id, "http://h.test/file.zip", None, None)
+        .await
+        .unwrap();
+    assert_eq!(
+        t.req_header("/file.zip", "referer").as_deref(),
+        Some("http://h.test/"),
+        "Referer = page initiatrice (NavFrom)"
+    );
+    assert_eq!(
+        t.req_header("/file.zip", "sec-fetch-user").as_deref(),
+        Some("?1"),
+        "geste utilisateur"
+    );
+    assert_eq!(
+        t.req_header("/file.zip", "sec-fetch-dest").as_deref(),
+        Some("document")
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Étape 174 — la borne `max_download_bytes` est
+/// contrôlée au fil de l'eau : dépassement en vol →
+/// `DownloadFailed` et `.part` purgé (plus de corps entier
+/// bufferisé avant écriture).
+#[tokio::test]
+async fn download_url_bound_fails_mid_stream() {
+    let (mut s, t) = test_session_with(SessionConfig {
+        event_capacity: 16,
+        viewport: (800.0, 600.0),
+        scale: 1.0,
+        js_ops: 5_000_000,
+        max_images: 32,
+        image_max_px: 16_000_000,
+        image_max_bytes: 512 * 1024 * 1024,
+        max_sheets: 8,
+        max_imports: 8,
+        max_fonts: 16,
+        max_scripts: 32,
+        max_frames: 8,
+        max_modules: 64,
+        max_inflight: 6,
+        max_script_net: 16,
+        max_auto_navs: 64,
+        max_auto_nav_busy_ms: 60_000,
+        max_timer_jobs: 64,
+        paint_chunk_bytes: 32 * 1024,
+        paint_interval_ms: 100,
+        resync_gap_max_ms: 4_000,
+        max_download_bytes: 4,
+        bfcache_pages: 4,
+        dom_journal_max_ops: 512,
+        js_mem_limit_mib: 512,
+        color_scheme: explorer_css::ColorScheme::default(),
+        consent_policy: explorer_net::consent::ConsentPolicy::default(),
+        js_stall_cooldown: std::time::Duration::ZERO,
+        poll_net_budget: std::time::Duration::from_secs(2),
+        event_tail_budget: std::time::Duration::from_secs(15),
+    });
+    let dir = std::env::temp_dir().join("explorer-dl-174-bound");
+    let _ = std::fs::remove_dir_all(&dir);
+    s.set_download_dir(Some(dir.clone()));
+    t.route_chunks("/huge.bin", 200, vec![b"aaaa".to_vec(), b"bbbb".to_vec()]);
+    let id = s.open_tab();
+    let mut rx = s.subscribe();
+    let err = s
+        .download_url(id, "http://h.test/huge.bin", None, None)
+        .await;
+    assert!(matches!(err, Err(CoreError::Download(_))));
+    let mut failed = false;
+    while let Ok(ev) = rx.try_recv() {
+        if matches!(ev, CoreEvent::DownloadFailed { .. }) {
+            failed = true;
+        }
+    }
+    assert!(failed, "DownloadFailed attendu");
+    assert!(
+        !dir.join("huge.bin.part").exists() && !dir.join("huge.bin").exists(),
+        ".part purgé, pas de cible"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Transport dont `fetch_stream` rend des en-têtes puis un
+/// canal muet — le téléchargement reste en vol, mesurable
+/// et annulable (étape 174).
+struct StallTransport;
+
+#[async_trait]
+impl HttpTransport for StallTransport {
+    async fn fetch(&self, _req: &Request) -> NetResult<Response> {
+        unreachable!("le test n'émet que fetch_stream")
+    }
+    async fn fetch_stream(
+        &self,
+        _req: &Request,
+    ) -> NetResult<explorer_net::http::StreamedResponse> {
+        let (tx, rx) = tokio::sync::mpsc::channel(1);
+        // L'émetteur est gardé vivant sans jamais envoyer :
+        // `recv` reste en attente — fuite bornée de test.
+        std::mem::forget(tx);
+        Ok(explorer_net::http::StreamedResponse {
+            status: 200,
+            reason: "stall".to_string(),
+            headers: vec![("content-length".to_string(), "100".to_string())],
+            reused_connection: false,
+            resolved_url: None,
+            body: rx,
+        })
+    }
+}
+
+/// Attend l'événement `pred` du bus (borne 5 s — un test
+/// ne doit jamais pouvoir pendre).
+async fn wait_event<F>(rx: &mut tokio::sync::broadcast::Receiver<CoreEvent>, pred: F) -> bool
+where
+    F: Fn(&CoreEvent) -> bool,
+{
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            match rx.recv().await {
+                Ok(ev) if pred(&ev) => break true,
+                Ok(_) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => break false,
+            }
+        }
+    })
+    .await
+    .unwrap_or(false)
+}
+
+/// Étape 174 — `cancel_download` réveille la tâche
+/// détachée : `.part` purgé, `DownloadFailed` émis,
+/// entrée retirée du registre (état `Active` visible
+/// avant l'annulation).
+#[tokio::test]
+async fn cancel_download_aborts_streaming_job() {
+    let mut s = Session::new(Arc::new(StallTransport), Arc::new(FixtureFont));
+    let dir = std::env::temp_dir().join("explorer-dl-174-cancel");
+    let _ = std::fs::remove_dir_all(&dir);
+    s.set_download_dir(Some(dir.clone()));
+    let id = s.open_tab();
+    let mut rx = s.subscribe();
+    let dl = s
+        .start_download(id, "http://h.test/hang", None, None)
+        .unwrap();
+    // `DownloadStarted` arrive dès les en-têtes.
+    assert!(
+        wait_event(&mut rx, |e| matches!(
+            e,
+            CoreEvent::DownloadStarted { id: d, .. } if *d == dl
+        ))
+        .await,
+        "DownloadStarted attendu"
+    );
+    let actives = s.pending_downloads(id);
+    assert!(actives.iter().any(|d| {
+        d.id == dl && d.state == explorer_core::DownloadState::Active && d.total == Some(100)
+    }));
+    s.cancel_download(id, dl).unwrap();
+    assert!(
+        wait_event(&mut rx, |e| matches!(
+            e,
+            CoreEvent::DownloadFailed { id: d, .. } if *d == dl
+        ))
+        .await,
+        "DownloadFailed attendu"
+    );
+    assert!(!dir.join("hang.part").exists(), ".part purgé");
+    assert!(s.pending_downloads(id).iter().all(|d| d.id != dl));
+    // Second cancel → identifiant inconnu (idempotent net).
+    assert!(matches!(
+        s.cancel_download(id, dl),
+        Err(CoreError::Download(_))
+    ));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Étape 174 — deux téléchargements du même nom : le
+/// second est dédoublonné `-2` (réservation atomique dans
+/// le registre partagé, plus `exists()` disque).
+#[tokio::test]
+async fn download_url_same_name_dedup() {
+    let (mut s, t) = test_session();
+    let dir = std::env::temp_dir().join("explorer-dl-174-dedup");
+    let _ = std::fs::remove_dir_all(&dir);
+    s.set_download_dir(Some(dir.clone()));
+    t.route("/a.bin", 200, "AAA");
+    let id = s.open_tab();
+    let p1 = s
+        .download_url(id, "http://h.test/a.bin", None, None)
+        .await
+        .unwrap();
+    let p2 = s
+        .download_url(id, "http://h.test/a.bin", None, None)
+        .await
+        .unwrap();
+    assert_eq!(p1.file_name().unwrap(), "a.bin");
+    assert_eq!(p2.file_name().unwrap(), "a-2.bin");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Étape 174 — `path` explicite : écrit verbatim, aucun
+/// `download_dir` requis (voie CLI/« enregistrer sous »).
+#[tokio::test]
+async fn download_url_explicit_path_no_dir() {
+    let (mut s, t) = test_session();
+    t.route("/b.bin", 200, "BBBB");
+    let id = s.open_tab();
+    let out = std::env::temp_dir()
+        .join("explorer-dl-174-explicit")
+        .join("got.bin");
+    let p = s
+        .download_url(id, "http://h.test/b.bin", Some(out.clone()), None)
+        .await
+        .unwrap();
+    assert_eq!(p, out);
+    assert_eq!(std::fs::read(&p).unwrap(), b"BBBB");
+    let _ = std::fs::remove_dir_all(out.parent().unwrap());
+}
+
+/// Étape 174 — ni `path` ni `download_dir` : refus franc,
+/// aucun fetch n'est émis.
+#[tokio::test]
+async fn download_url_without_dir_fails() {
+    let (mut s, t) = test_session();
+    let id = s.open_tab();
+    assert!(matches!(
+        s.start_download(id, "http://h.test/x", None, None),
+        Err(CoreError::Download(_))
+    ));
+    assert_eq!(t.calls(), 0);
+}
+
 #[tokio::test]
 async fn unknown_tab_is_typed_error() {
     let (mut s, _t) = test_session();

@@ -69,6 +69,35 @@ impl HttpTransport for FakeTransport {
     }
 }
 
+/// Transport dont `fetch_stream` rend des en-têtes puis un
+/// canal muet — le téléchargement reste en vol (étape 174,
+/// test `DELETE …/downloads/{dl}`).
+struct StallTransport;
+
+#[async_trait]
+impl HttpTransport for StallTransport {
+    async fn fetch(&self, _req: &Request) -> NetResult<Response> {
+        unreachable!("le test n'émet que fetch_stream")
+    }
+    async fn fetch_stream(
+        &self,
+        _req: &Request,
+    ) -> NetResult<explorer_net::http::StreamedResponse> {
+        let (tx, rx) = tokio::sync::mpsc::channel(1);
+        // Jamais envoyé, gardé vivant : `recv` reste en
+        // attente — fuite bornée de test.
+        std::mem::forget(tx);
+        Ok(explorer_net::http::StreamedResponse {
+            status: 200,
+            reason: "stall".to_string(),
+            headers: vec![("content-length".to_string(), "100".to_string())],
+            reused_connection: false,
+            resolved_url: None,
+            body: rx,
+        })
+    }
+}
+
 /// Routeur câblé sur une session de test.
 fn test_app() -> axum::Router {
     let t: Arc<dyn HttpTransport> = Arc::new(FakeTransport {
@@ -909,6 +938,193 @@ async fn download_accept_writes_body() {
     let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
     assert_eq!(v["downloads"], serde_json::json!([]));
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Étape 174 — POST `/api/tabs` → `id` de l'onglet.
+async fn new_tab(app: &axum::Router) -> u64 {
+    let r = app
+        .clone()
+        .oneshot(json_post("/api/tabs", "{}"))
+        .await
+        .unwrap();
+    serde_json::from_slice::<serde_json::Value>(
+        &axum::body::to_bytes(r.into_body(), 1024).await.unwrap(),
+    )
+    .unwrap()["id"]
+        .as_u64()
+        .unwrap()
+}
+
+/// Étape 174 — `GET /api/tabs/{id}/downloads` → tableau
+/// JSON des entrées (offres `pending` + actifs).
+async fn dl_listing(app: &axum::Router, tab: u64) -> Vec<serde_json::Value> {
+    let r = app
+        .clone()
+        .oneshot(
+            HttpRequest::builder()
+                .uri(format!("/api/tabs/{tab}/downloads"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let v: serde_json::Value =
+        serde_json::from_slice(&axum::body::to_bytes(r.into_body(), 4096).await.unwrap()).unwrap();
+    v["downloads"].as_array().cloned().unwrap_or_default()
+}
+
+/// Étape 174 — POST `/downloads {url}` → `id` alloué.
+async fn dl_start(app: &axum::Router, tab: u64, url: &str) -> u64 {
+    let r = app
+        .clone()
+        .oneshot(json_post(
+            &format!("/api/tabs/{tab}/downloads"),
+            &format!(r#"{{"url":"{url}"}}"#),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::OK);
+    serde_json::from_slice::<serde_json::Value>(
+        &axum::body::to_bytes(r.into_body(), 4096).await.unwrap(),
+    )
+    .unwrap()["id"]
+        .as_u64()
+        .unwrap()
+}
+
+/// Étape 174 — `POST /api/tabs/{id}/downloads {url}` rend
+/// `{ "id": n }` immédiatement (job détaché, session
+/// jamais tenue pendant le fetch) ; le `.part` est renommé
+/// à la fin et l'entrée disparaît du listing — la suite
+/// arrive en SSE `download_started`/`download_done`.
+#[tokio::test]
+async fn download_post_returns_id_and_completes() {
+    let dir = std::env::temp_dir().join("explorer-api-dl-174");
+    let _ = std::fs::remove_dir_all(&dir);
+    let session = Arc::new(tokio::sync::Mutex::new(Session::new(
+        Arc::new(DlTransport),
+        Arc::new(FixtureFont),
+    )));
+    session.lock().await.set_download_dir(Some(dir.clone()));
+    let app = explorer_api::router(session);
+    let id = new_tab(&app).await;
+    let dl = dl_start(&app, id, "http://h.test/r.bin").await;
+    assert!(dl > 0);
+    // Le job détaché finit : le listing repasse à vide et
+    // le fichier est renommé sous download_dir (nom CD).
+    let mut ok = false;
+    for _ in 0..100 {
+        if dl_listing(&app, id).await.is_empty() && dir.join("r.bin").exists() {
+            ok = true;
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    assert!(ok, "fichier écrit et listing purgé");
+    assert_eq!(
+        std::fs::read(dir.join("r.bin")).unwrap(),
+        b"\x01\x02\x03blob"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Étape 174 — `DELETE /api/tabs/{id}/downloads/{dl}`
+/// annule le job en vol : `.part` purgé, entrée retirée,
+/// `download_failed` suivi en SSE ; id inconnu → 400.
+#[tokio::test]
+async fn delete_download_cancels_active() {
+    let dir = std::env::temp_dir().join("explorer-api-dl-174c");
+    let _ = std::fs::remove_dir_all(&dir);
+    let session = Arc::new(tokio::sync::Mutex::new(Session::new(
+        Arc::new(StallTransport),
+        Arc::new(FixtureFont),
+    )));
+    session.lock().await.set_download_dir(Some(dir.clone()));
+    let app = explorer_api::router(session);
+    let id = new_tab(&app).await;
+    let dl = dl_start(&app, id, "http://h.test/hang").await;
+    // Le job est en vol : `state "active"` puis `total`
+    // peuplé dès que les en-têtes arrivent (race courte,
+    // sondage borné).
+    let mut row = serde_json::Value::Null;
+    for _ in 0..100 {
+        if let Some(f) = dl_listing(&app, id).await.iter().find(|d| d["id"] == dl) {
+            row = f.clone();
+            if f["state"] == "active" && f["total"] == 100 {
+                break;
+            }
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    assert_eq!(row["state"], "active", "listing {row}");
+    assert_eq!(row["total"], 100);
+    // Annulation → 204, l'entrée part avec le .part.
+    let r = app
+        .clone()
+        .oneshot(
+            HttpRequest::builder()
+                .method("DELETE")
+                .uri(format!("/api/tabs/{id}/downloads/{dl}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::NO_CONTENT);
+    let mut gone = false;
+    for _ in 0..100 {
+        if dl_listing(&app, id).await.is_empty() {
+            gone = true;
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    assert!(gone, "entrée retirée après annulation");
+    assert!(!dir.join("hang.part").exists(), ".part purgé");
+    // Id inconnu → 400 au format contrat.
+    let r = app
+        .oneshot(
+            HttpRequest::builder()
+                .method("DELETE")
+                .uri(format!("/api/tabs/{id}/downloads/9999"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::BAD_REQUEST);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Étape 174 — `GET /api/downloads` : journal profil des
+/// terminés — `[]` sans store (mémoire pure).
+#[tokio::test]
+async fn download_journal_empty_without_store() {
+    let app = test_app();
+    let r = app
+        .oneshot(
+            HttpRequest::builder()
+                .uri("/api/downloads")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::OK);
+    let v: serde_json::Value =
+        serde_json::from_slice(&axum::body::to_bytes(r.into_body(), 4096).await.unwrap()).unwrap();
+    assert_eq!(v["downloads"], serde_json::json!([]));
+}
+
+/// Étape 174 — `POST /downloads` sans `url` → 400 contrat.
+#[tokio::test]
+async fn download_post_requires_url() {
+    let app = test_app();
+    let r = app
+        .oneshot(json_post("/api/tabs/1/downloads", "{}"))
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::BAD_REQUEST);
 }
 
 /// Onglet ouvert + page `/media` commise (video controls +

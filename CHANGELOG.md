@@ -7,6 +7,42 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **Étape 174 — `download_url` :
+  contexte requête, job hors-verrou,
+  streaming disque** (`explorer-core`,
+  `explorer-api`, §E-bis « trou
+  produit vol ») : l'ancien chemin
+  tenait `Mutex<Session>` pendant
+  tout le fetch bufferisé + l'écriture
+  — un fichier lent gelait onglets
+  et API. `download_shared` + job
+  détaché (patron `NavJob`) :
+  `fetch_stream` → `.part` écrit par
+  chunks `tokio::fs` (feature tokio
+  `fs`) → rename ; borne
+  `max_download_bytes` au fil de
+  l'eau, purge `.part` sur échec/
+  annulation/drop, survie à
+  `close_tab`. Requête `NavFrom(page)`
+  + `fetch_user` (`Referer`, Lax,
+  `sec-fetch-user`). **Événements
+  additifs** `DownloadStarted` +
+  `DownloadFailed` (offre accept/
+  decline inchangée) ; `DownloadDone`
+  porte le vrai `id`. Nom : `path` >
+  hint > `Content-Disposition` >
+  segment > `download`, dédup `-2`.
+  REST : `POST /tabs/{id}/downloads`
+  → `{id}` immédiat (cassure de
+  réponse — avant `{path}`),
+  `DELETE …/{dl}` annule, `GET`
+  états `pending`/`active`,
+  `GET /api/downloads` journal
+  (`[]` sans profil) ; SSE
+  `download_started`/`failed`.
+  Compat `&mut self` par oneshot.
+  14 tests core + 5 tests api.
+
 - **JS-C269 — backrefs `\N` +
   groupes nommés** (`explorer-jscore`,
   J13 §E-bis, claude.ai) —

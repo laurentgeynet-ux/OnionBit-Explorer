@@ -921,7 +921,7 @@ impl Session {
     /// réel du site (ou un état consenti antérieur,
     /// persistant via le profil) reste prioritaire sur la
     /// décision de politique.
-    fn seed_consent_cookies(&mut self, req: &Request) {
+    pub(crate) fn seed_consent_cookies(&mut self, req: &Request) {
         // Les graines sont des cookies : http(s) seulement —
         // `data:`/`about:`/`file:` n'ont pas de domaine
         // porteur (partition_key les exclut déjà côté envoi).

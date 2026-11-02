@@ -865,6 +865,14 @@ pub struct Session {
     /// Téléchargements bufferisés en attente de décision
     /// (étape 70), `id → corps + méta`.
     downloads: HashMap<u64, PendingDownload>,
+    /// Téléchargements directs en vol (étape 174 —
+    /// `start_download`), `id → état`. Map **partagée**
+    /// avec la tâche détachée (même discipline `Arc` que
+    /// `transport`/`events`/`store` pour `NavJob`) : elle y
+    /// réserve le nom cible, publie `received`, se
+    /// désinscrit à la fin — **jamais** de re-verrou
+    /// `Session` depuis le job.
+    active_downloads: std::sync::Arc<std::sync::Mutex<HashMap<u64, ActiveDownload>>>,
     /// Identifiants de téléchargement — un id est réservé
     /// par navigation (`nav_begin`) pour que la progression
     /// hors verrou porte déjà l'id final ; les ids non
@@ -1140,6 +1148,7 @@ impl Session {
             )),
             accept_language,
             downloads: HashMap::new(),
+            active_downloads: std::sync::Arc::new(std::sync::Mutex::new(HashMap::new())),
             next_download_id: 1,
             next_media_id: 1,
             download_dir: None,

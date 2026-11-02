@@ -5623,6 +5623,86 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   (livré, CMP-4), substitution
   SDKs bornée.
 
+- [x] **Étape 174. `download_url` :
+  contexte, job hors-verrou,
+  streaming** (`explorer-core` +
+  `explorer-api`, §E-bis « trou
+  produit vol » — revue opérateur) :
+  l'ancien `Session::download_url`
+  tenait `Mutex<Session>` pendant
+  tout le fetch bufferisé + `fs::write`
+  → un fichier lent/lourd gelait
+  onglets et API (variante M-H1).
+  **`download_shared` + job détaché
+  calqué `NavJob`** : lock court
+  (tab, `id`, `ActiveDownload` dans
+  un registre `Arc<Mutex>` autonome),
+  puis `fetch_stream` → `.part`
+  écrit par chunks `tokio::fs`
+  (feature `fs` ajoutée à tokio,
+  règle 8) → rename final. Borne
+  `max_download_bytes` contrôlée
+  **au fil de l'eau** (abort + purge,
+  plus de falaise 64 Mio), survie à
+  `close_tab`, purge `.part` sur
+  échec/annulation/drop session.
+  **Contexte requête réel** :
+  `Initiator::NavFrom(page)` +
+  `fetch_user` (sémantique «
+  Enregistrer sous » : `sec-fetch-
+  user`, cookies `SameSite=Lax`
+  admis cross-site sur GET top-level,
+  `Referer` selon politique du
+  document). **Événements additifs**
+  `DownloadStarted {tab,id,url,
+  filename,total}` et
+  `DownloadFailed {tab,id,error}` —
+  `DownloadOffered` reste réservé
+  aux offres bufferisées accept/
+  decline ; `DownloadDone` porte le
+  vrai `id` (non-nul, non-consécutif
+  possible). Nom : `path` > `hint` >
+  `Content-Disposition` > segment
+  URL > `download`, dédup `-2` par
+  réservation dans le registre.
+  REST : `POST /tabs/{id}/downloads
+  {url,path?,filename?}` → `{id}`
+  immédiat, `DELETE …/{dl}` annule,
+  `GET` liste `pending`+`active`
+  (`received`,`total`), `GET
+  /api/downloads` journal profil
+  (`[]` sans store) ; SSE
+  `download_started`/`failed`. Compat
+  `&mut self` : oneshot sur le job
+  (un seul chemin réseau, `&mut`
+  tenu pendant le DL — FFI/CLI/tests
+  seuls concernés, migration app =
+  étape 175). Verrous : stream
+  multi-chunks, borne mid-stream,
+  annulation, `Referer`/`NavFrom`
+  capturés, chemin explicite sans
+  download_dir, dédup concurrent,
+  purge au drop — 14 core + 5 api.
+
+- [ ] **Étape 175. Surfaces
+  téléchargement** (`explorer-ffi`,
+  `explorer-cli`, `app/` — suite
+  Étape 174) : `explorer_download_
+  start` non-bloquant `{id}` (le
+  `block_on` actuel tient le worker
+  FFI toute la durée du DL) — app
+  migrée dans le même commit,
+  ancien export conservé déprécié ;
+  `explorer-cli download <url>
+  <out>` (path explicite) ;
+  « Enregistrer le lien sous… » /
+  « Enregistrer l'image » : hit-test
+  `link_node_at` est privé et
+  ancre-only → wrapper public +
+  détection `<img>` nouvelle ;
+  liste téléchargements + progress
+  SSE dans l'app.
+
 - [x] **Étape 173. Budget octets
   images décodées** (`explorer-core`,
   §B-59 3ᵉ racine — franceinter,
