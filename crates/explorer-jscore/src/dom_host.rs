@@ -5694,6 +5694,32 @@ fn is_media(dom: &DomRef, node: NodeId) -> bool {
     )
 }
 
+/// `TextTrackList` vide (JS-C281 — hls.js b-e2e) : objet
+/// réel `length:0` + `item` + rail `__et` partagé — les
+/// `addEventListener` posés dessus survivent entre accès
+/// (`onTextTracksChanged` de hls.js boucle sur
+/// `media.textTracks`, crash `length of Undefined` sans
+/// cette prop). Une `<track>` effective = tranche ultérieure.
+fn text_track_list(e: &mut Engine) -> ObjId {
+    let o = e.new_object();
+    let tag = e.str_val("TextTrackList");
+    e.set_own(o, crate::interp::SYM_TO_STRING_TAG, tag, false);
+    e.add_method(o, "addEventListener", et_add_listener);
+    e.add_method(o, "removeEventListener", et_remove_listener);
+    e.add_method(o, "dispatchEvent", et_dispatch_event);
+    e.add_method(o, "item", text_track_item);
+    e.set_own(o, "length", Value::Num(0.0), true);
+    for k in ["onchange", "onaddtrack", "onremovetrack"] {
+        e.set_own(o, k, Value::Null, true);
+    }
+    o
+}
+
+/// `list.item(i)` → `null` (liste vide — spec).
+fn text_track_item(_e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
+    Ok(Value::Null)
+}
+
 /// `true` si `node` est `<dialog>` — gate des méthodes/props
 /// `HTMLDialogElement` (CAP-176).
 fn is_dialog(dom: &DomRef, node: NodeId) -> bool {
@@ -6797,6 +6823,26 @@ impl Host for NodeHost {
                     e.set_own(obj, k, Value::Bool(v), true);
                 }
                 return Ok(Some(Value::Obj(obj)));
+            }
+            // `textTracks` (JS-C281 — hls.js b-e2e) : prop
+            // structurelle, indépendante du claim — une
+            // `TextTrackList` vide mais réelle (`.length`,
+            // `item`, rail `__et`) **mise en cache sur
+            // l'élément** : hls.js pose `addEventListener`
+            // dessus et relit `media.textTracks` — un objet
+            // neuf par accès perdrait les listeners. `null`
+            // hors élément média (spec : la prop n'existe que
+            // sur `HTMLMediaElement`).
+            "textTracks" if is_media(&self.dom, node) => {
+                let Value::Obj(this_id) = this else {
+                    return Ok(Some(Value::Null));
+                };
+                if let Some(v @ Value::Obj(_)) = e.get_prop(this_id, "__tt") {
+                    return Ok(Some(v));
+                }
+                let list = text_track_list(e);
+                e.set_own(this_id, "__tt", Value::Obj(list), false);
+                return Ok(Some(Value::Obj(list)));
             }
             // -- `HTMLMediaElement` (étape 58/71c) ------------------
             // Non claimé : stubs honnêtes ADR-0023. Claimé :

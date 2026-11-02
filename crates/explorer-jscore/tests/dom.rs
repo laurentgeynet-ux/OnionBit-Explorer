@@ -3130,6 +3130,52 @@ fn media_props_are_honest_stubs() {
     );
 }
 
+/// JS-C281 — `video.textTracks` (hls.js b-e2e) : une
+/// `TextTrackList` vide mais réelle, **identité stable entre
+/// accès** (les listeners posés survivent — un objet neuf par
+/// lecture les perdrait et `list.length` jetterait).
+#[test]
+fn media_text_tracks_liste_stable() {
+    assert_eq!(
+        ev_in(PAGE_MEDIA, "document.getElementById('v').textTracks.length"),
+        "0"
+    );
+    assert_eq!(
+        ev_in(
+            PAGE_MEDIA,
+            "var v=document.getElementById('v'); v.textTracks===v.textTracks"
+        ),
+        "true"
+    );
+    // `item`/`addEventListener`/`removeEventListener` → surface
+    // EventTarget exploitable (`onTextTracksChanged` hls.js
+    // boucle dessus).
+    assert_eq!(
+        ev_in(
+            PAGE_MEDIA,
+            "var v=document.getElementById('v');var l=v.textTracks;\
+             l.addEventListener('change',function(){});\
+             l.item(0)===null"
+        ),
+        "true"
+    );
+    // `dispatchEvent` sur le rail `__et` partagé.
+    assert_eq!(
+        ev_in(
+            PAGE_MEDIA,
+            "var v=document.getElementById('v');var l=v.textTracks;\
+             var seen=false;l.addEventListener('change',function(){seen=true});\
+             l.dispatchEvent({type:'change'});seen"
+        ),
+        "true"
+    );
+    // Non-média : la prop ne fuit pas sur les autres éléments.
+    assert_eq!(
+        ev_in(PAGE_MEDIA, "document.body.textTracks === undefined"),
+        "true"
+    );
+}
+
 #[test]
 fn media_play_rejects_like_no_source() {
     let mut e = engine_with(PAGE_MEDIA);

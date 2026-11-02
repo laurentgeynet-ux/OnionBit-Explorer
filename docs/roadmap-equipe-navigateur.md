@@ -5580,6 +5580,20 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   `promise_species` ; test262
   1046/1046 (31 skips).
 
+- [x] **JS-C281. `HTMLMediaElement.
+  textTracks`** (`explorer-jscore`,
+  chantier « vidéo réelle » b-e2e —
+  hls.js réel) — prop absente →
+  crash `length of Undefined` dans
+  `onTextTracksChanged` hls.js. La
+  prop rend une `TextTrackList`
+  vide réelle (`length:0`, `item`,
+  rail `__et` complet) cachée en
+  own-prop `__tt` de l'élément —
+  identité stable, listeners
+  persistants. Verrou
+  `media_text_tracks_liste_stable`.
+
 - [x] **JS-C279. `SourceBuffer.
   buffered` estimé**
   (`explorer-jscore`, chantier

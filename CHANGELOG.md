@@ -230,6 +230,31 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   `download_started`/`failed`.
   Compat `&mut self` par oneshot.
   14 tests core + 5 tests api.
+- **JS-C281 — `HTMLMediaElement.
+  textTracks`** (`explorer-jscore`,
+  chantier « vidéo réelle » b-e2e,
+  hls.js réel) — la prop n'existait
+  pas : hls.js lit
+  `media.textTracks` dans sa boucle
+  `onTextTracksChanged` → `length`
+  d'`undefined`, le player bootait
+  (`MediaSource` attachée) puis
+  crashait en rafale sans jamais
+  créer de `SourceBuffer`. La prop
+  rend désormais une `TextTrackList`
+  vide mais réelle — `length:0`,
+  `item()→null`, rail `__et`
+  complet (`add`/`remove`/
+  `dispatchEvent`) — **mise en
+  cache sur l'objet élément**
+  (own-prop `__tt`) : identité
+  `===` stable et listeners qui
+  survivent entre accès (un objet
+  neuf par lecture les perdrait).
+  `<track>` effectif = tranche
+  ultérieure. Verrou
+  `media_text_tracks_liste_stable`.
+
 - **JS-C279 — `SourceBuffer.buffered`
   estimé** (`explorer-jscore`,
   chantier « vidéo réelle » b3,
