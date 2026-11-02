@@ -1399,7 +1399,21 @@ fn apply_journal_op(
 ) -> Result<(), JournalReject> {
     match op {
         explorer_js::DomMutation::Remove { key } => {
-            let id = key_node(p, *key)?;
+            // JS-C292 — un nœud créé puis retiré **entre deux
+            // drains** n'entre dans aucune sérialisation (le
+            // `html`/`ids` d'un `Insert` sont capturés au drain,
+            // état courant) : son `Remove` frappe une clé
+            // inconnue — no-op sémantique, le moteur ne l'a
+            // jamais eu. L'empreinte finale reste l'arbitre
+            // d'un vrai désalignement (mur youtube.com :
+            // `Remove(key=1687)` orphelin après JS-C291).
+            let Ok(id) = key_node(p, *key) else {
+                tracing::debug!(
+                    key,
+                    "journal DOM : Remove de clé inconnue toléré (nœud créé+retiré dans la fenêtre)"
+                );
+                return Ok(());
+            };
             // Purger les descendants de la table — les
             // clés miroir meurent avec leur sous-arbre.
             let mut gone = std::collections::HashSet::new();
@@ -3332,5 +3346,50 @@ mod reloc_tests {
         relocate_obreloc(&mut dom);
         let root = dom.document_element().unwrap();
         assert_eq!(kids_tags(&dom, root), ["head", "body", "div"]);
+    }
+
+    /// JS-C292 — un `Remove` de clé inconnue es un no-op : el
+    /// nodo se creó y retiró entre dos drains, nunca entró a
+    /// una serialización. La empreinte final sigue arbitrando
+    /// un desajuste real.
+    #[test]
+    fn c292_remove_cle_orpheline_tolerada() {
+        use super::{apply_journal_op, ApplyCtx, PaintPayload, SharedFonts};
+        use explorer_layout::font::{FontRequest, FontSource};
+        use std::sync::{Arc, Mutex};
+
+        struct NoFont;
+        impl FontSource for NoFont {
+            fn font_data(&self, _req: &FontRequest) -> Option<Vec<u8>> {
+                None
+            }
+        }
+        let ctx = ApplyCtx {
+            fonts: SharedFonts(Arc::new(Mutex::new(explorer_render::WebFontSource::new(
+                Arc::new(NoFont),
+                4,
+            )))),
+            viewport: (800.0, 600.0),
+            scale: 1.0,
+            image_max_px: 0,
+            image_max_bytes: 0,
+            color_scheme: explorer_css::ColorScheme::Light,
+            dom_journal_max_ops: 1000,
+            scripting: false,
+        };
+        let dom = TreeBuilder::parse_scripting("<html><body><p>x</p></body></html>", false);
+        let mut p = PaintPayload {
+            dom: Some(dom),
+            ..PaintPayload::default()
+        };
+        let e = super::engine_preorder(p.dom.as_ref().unwrap());
+        p.keymap.insert(1, e[0]);
+        let mut touched = Vec::new();
+        let op = explorer_js::DomMutation::Remove { key: 9999 };
+        assert!(apply_journal_op(&mut p, &ctx, &op, &mut touched).is_ok());
+        // Con clave conocida el Remove sigue funcionando.
+        let op = explorer_js::DomMutation::Remove { key: 1 };
+        assert!(apply_journal_op(&mut p, &ctx, &op, &mut touched).is_ok());
+        assert!(p.keymap.is_empty());
     }
 }

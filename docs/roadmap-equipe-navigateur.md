@@ -5891,6 +5891,30 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   select). Verrous `c291_*`
   (5 jscore + 5 core).
 
+- [x] **JS-C292. `Remove` de clé
+  inconnue = no-op au rejeu**
+  (`explorer-core`, mur
+  youtube.com — suite JS-C291) —
+  l'`Insert` est sérialisé au
+  drain ; un nœud créé puis
+  retiré entre enregistrement et
+  drain n'entre dans aucune
+  sérialisation — son `Remove`
+  frappait une clé sans
+  contrepartie moteur →
+  `UnmappedKey` → re-parse pour
+  un no-op (`Remove(key=1687)`,
+  dernier rejet du boot). La clé
+  absente est désormais tolérée
+  (diagnostic borné) ; l'empreinte
+  finale reste l'arbitre
+  inconditionnel — un Remove
+  toléré à tort = `Fingerprint` →
+  repli plein-format inchangé.
+  Tolérance limitée à `Remove`.
+  Verrou
+  `c292_remove_cle_orpheline_tolerada`.
+
 - [x] **Étape CMP-4. Réarmement
   des balises « bloquées par CMP »**
   (`explorer-core`, §B-4 bras CMP
