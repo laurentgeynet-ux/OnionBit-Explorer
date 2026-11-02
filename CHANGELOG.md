@@ -230,6 +230,45 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   `download_started`/`failed`.
   Compat `&mut self` par oneshot.
   14 tests core + 5 tests api.
+- **Étape 175 — `<source>` élu
+  par type jouable** (`explorer-core`,
+  chantier « vidéo réelle » a1 —
+  fallback h264, ADR-0029) —
+  `media_source` retenait le
+  **premier** `<source src>` sans
+  regarder `type` : un `webm` en
+  tête tuait le `mp4` que l'hôte
+  sait décoder. Désormais chaque
+  `<source type>` est confronté
+  aux capacités déclarées de
+  l'hôte : conteneur connu +
+  tous les codecs du param
+  `codecs=` présents dans le set
+  de session (préfixes RFC 6381,
+  même réduction que
+  `isTypeSupported` côté moteur).
+  `<source>` sans `type` reste
+  candidat (spec : l'agent teste
+  la ressource) ; `type`
+  inconnu/non déclaré → source
+  écartée, la suivante est
+  essayée. Le set se remplit au
+  claim — `media_claim` unionne
+  les `codecs` déclarés dans
+  `Session::declared_media_codecs`
+  (conteneurs exclus, comme
+  `note_declared_codecs`) ; avant
+  le premier claim le set est
+  vide → comportement historique
+  conservé (premier `<source>`,
+  jamais de promesse retirée).
+  Verrous :
+  `media_source_picks_first_
+  playable_type` (webm écarté →
+  mp4 offert après claim) +
+  `media_source_untyped_stays_
+  candidate`.
+
 - **JS-C277 — octets réponse
   fidèles XHR/fetch**
   (`explorer-jscore`, chantier

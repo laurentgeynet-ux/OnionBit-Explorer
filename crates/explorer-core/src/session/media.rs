@@ -190,11 +190,73 @@ fn has_bool_attr(dom: &Dom, n: NodeId, name: &str) -> bool {
     dom.attribute(n, name).ok().flatten().is_some()
 }
 
+/// Préfixe de codec RFC 6381 (`avc1.42E01E` → `avc1`) —
+/// même réduction que `note_declared_codecs` côté moteur :
+/// un hôte qui déclare `avc1` joue toute la famille.
+fn codec_prefix(c: &str) -> Option<String> {
+    let p = c.trim().split('.').next()?.trim();
+    if p.is_empty() {
+        None
+    } else {
+        Some(p.to_ascii_lowercase())
+    }
+}
+
+/// Un `<source type="…">` est retenu quand son conteneur est
+/// connu et que **tous** ses codecs déclarés sont dans
+/// `declared` (préfixes d'hôte — `mediaCodecs` du claim).
+/// `declared` vide → tout passe (capacités encore inconnues :
+/// comportement historique, jamais de promesse retirée).
+/// Type absent → candidat (spéc : l'agent teste la ressource).
+fn source_type_playable(ty: &str, declared: &std::collections::HashSet<String>) -> bool {
+    if declared.is_empty() {
+        return true;
+    }
+    let t = ty.to_ascii_lowercase();
+    let container = t.split(';').next().unwrap_or("").trim();
+    let known = matches!(
+        container,
+        "video/mp4"
+            | "audio/mp4"
+            | "video/webm"
+            | "audio/webm"
+            | "video/x-matroska"
+            | "audio/x-matroska"
+            | "video/mp2t"
+            | "video/ogg"
+            | "audio/ogg"
+            | "audio/mpeg"
+            | "audio/wav"
+            | "audio/x-wav"
+            | "video/x-msvideo"
+            | "application/vnd.apple.mpegurl"
+            | "application/dash+xml"
+    );
+    if !known {
+        return false;
+    }
+    match t.split("codecs=").nth(1) {
+        Some(cstr) => {
+            let cstr = cstr.trim_matches(|c| c == '"' || c == '\'');
+            cstr.split(',')
+                .filter_map(codec_prefix)
+                .all(|p| declared.contains(&p))
+        }
+        None => true,
+    }
+}
+
 /// Source lisible d'un élément média : attribut `src`
 /// prioritaire, sinon premier `<source src>` enfant direct
-/// (spéc HTML — `src` et `<source>` ne se cumulent pas).
+/// **au `type` jouable** — la spec écarte les `<source>` à
+/// type non supporté avant d'élire (a1 : un `webm` en tête
+/// ne bloque plus un `mp4` décodable par l'hôte).
 /// Renvoie `(src_brut, type_déclaré)`.
-fn media_source(dom: &Dom, n: NodeId) -> Option<(String, Option<String>)> {
+fn media_source(
+    dom: &Dom,
+    n: NodeId,
+    declared: &std::collections::HashSet<String>,
+) -> Option<(String, Option<String>)> {
     let attr = |name: &str| dom.attribute(n, name).ok().flatten();
     if let Some(src) = attr("src").filter(|s| !s.is_empty()) {
         return Some((src, attr("type")));
@@ -203,12 +265,20 @@ fn media_source(dom: &Dom, n: NodeId) -> Option<(String, Option<String>)> {
         if !dom.tag_name(c).is_ok_and(|t| t == "source") {
             continue;
         }
-        if let Ok(Some(src)) = dom.attribute(c, "src") {
-            if !src.is_empty() {
-                let ty = dom.attribute(c, "type").ok().flatten();
-                return Some((src, ty));
-            }
+        let Ok(Some(src)) = dom.attribute(c, "src") else {
+            continue;
+        };
+        if src.is_empty() {
+            continue;
         }
+        let ty = dom.attribute(c, "type").ok().flatten();
+        if ty
+            .as_deref()
+            .is_some_and(|t| !source_type_playable(t, declared))
+        {
+            continue;
+        }
+        return Some((src, ty));
     }
     None
 }
@@ -221,7 +291,12 @@ fn media_source(dom: &Dom, n: NodeId) -> Option<(String, Option<String>)> {
 /// élément média sans boîte (display:none explicite) reste
 /// offert à 0×0 : l'hôte n'attache que le pipeline. Pas de
 /// source → pas d'offre (honnêteté ADR-0023 conservée).
-fn scan_media(tree: &LayoutBox, dom: &Dom, base: &Url) -> Vec<ScannedMedia> {
+fn scan_media(
+    tree: &LayoutBox,
+    dom: &Dom,
+    base: &Url,
+    declared: &std::collections::HashSet<String>,
+) -> Vec<ScannedMedia> {
     // Rects par nœud source — une passe itérative sur
     // l'arbre posé (un élément = au plus une boîte ici).
     let mut rects: HashMap<NodeId, MediaRect> = HashMap::new();
@@ -252,7 +327,7 @@ fn scan_media(tree: &LayoutBox, dom: &Dom, base: &Url) -> Vec<ScannedMedia> {
             _ => None,
         };
         if let Some(kind) = kind {
-            if let Some((src, ty)) = media_source(dom, n) {
+            if let Some((src, ty)) = media_source(dom, n, declared) {
                 // `blob:` object URL — le resolveur peut ne
                 // pas connaître le schéma opaque ; la chaîne
                 // brute suffit (registre moteur, MSE-2).
@@ -368,7 +443,7 @@ impl Session {
             else {
                 return;
             };
-            let mut scanned = scan_media(tree, dom, base);
+            let mut scanned = scan_media(tree, dom, base, &self.declared_media_codecs);
             // Marquage MSE (MSE-2, ADR-0029) — le registre
             // vit dans le moteur : `blob:` + `is_media_source`
             // → l'offre route vers `GET …/segments`.
@@ -657,6 +732,26 @@ impl Session {
         };
         if m.claim.is_some() {
             return Err(MediaError::Taken);
+        }
+        // Capacités hôte apprises au claim (a1) — même
+        // normalisation que `note_declared_codecs` côté
+        // moteur : préfixes codec, conteneurs exclus. Le set
+        // sert au choix du `<source>` aux scans suivants.
+        for c in &codecs {
+            let c = c.trim();
+            let raw = match c.find("codecs=") {
+                Some(pos) => &c[pos + 7..],
+                None => c,
+            };
+            for part in raw.trim_matches(|ch| ch == '"' || ch == '\'').split(',') {
+                let part = part.trim().trim_matches(|ch| ch == '"' || ch == '\'');
+                if part.contains('/') {
+                    continue;
+                }
+                if let Some(p) = codec_prefix(part) {
+                    self.declared_media_codecs.insert(p);
+                }
+            }
         }
         // Claim sur une `blob:` scannée aveugle : moteur
         // présent → l'offre se corrige au contact (les

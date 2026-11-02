@@ -1199,6 +1199,83 @@ fn media_offered_scan_kinds_and_rects() {
     assert!(list.iter().all(|m| m.claim.is_none()));
 }
 
+/// a1 — `<source>` filtrés par `type` jouable : un `webm`
+/// en tête ne bloque plus le `mp4` que l'hôte sait décoder.
+/// Les capacités arrivent au claim (`mediaCodecs` hôte) —
+/// le scan suivant élit le premier `<source>` supporté.
+#[test]
+fn media_source_picks_first_playable_type() {
+    let (mut s, tab, mut rx) = media_page(
+        "<video controls>\
+           <source src=\"w.webm\" type='video/webm;codecs=\"vp09,opus\"'>\
+           <source src=\"v.mp4\" type='video/mp4;codecs=\"avc1.42E01E,mp4a.40.2\"'>\
+         </video>",
+    );
+    // Sans capacités déclarées : le premier <source> passe
+    // (comportement historique — rien n'exclut le webm).
+    let evs = media_events(&mut rx);
+    assert_eq!(evs.len(), 1);
+    let CoreEvent::MediaOffered { url, .. } = &evs[0] else {
+        panic!("MediaOffered attendu : {evs:?}")
+    };
+    assert_eq!(url, "http://h.test/w.webm");
+
+    // Claim avec capacités mp4/aac (pas de vp09) — le codec
+    // set session apprend `avc1`/`mp4a` (conteneurs exclus).
+    s.media_claim(
+        tab,
+        1,
+        vec!["video/mp4".into(), "avc1.42E01E".into(), "mp4a.40.2".into()],
+    )
+    .unwrap();
+    s.refresh_media(tab);
+    let evs = media_events(&mut rx);
+    assert!(
+        evs.iter().any(|e| matches!(e, CoreEvent::MediaGone { .. })),
+        "webm disparaît : {evs:?}"
+    );
+    let offered: Vec<_> = evs
+        .iter()
+        .filter_map(|e| match e {
+            CoreEvent::MediaOffered { url, mime, .. } => Some((url.clone(), mime.clone())),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(offered.len(), 1, "une nouvelle offre : {evs:?}");
+    assert_eq!(offered[0].0, "http://h.test/v.mp4");
+    // Le `type` déclaré traverse verbatim (codecs compris).
+    assert_eq!(
+        offered[0].1.as_deref(),
+        Some("video/mp4;codecs=\"avc1.42E01E,mp4a.40.2\"")
+    );
+}
+
+/// a1 — `<source>` sans `type` reste candidat même avec des
+/// capacités déclarées (spec : l'agent teste la ressource) ;
+/// un `type` non supporté est écarté.
+#[test]
+fn media_source_untyped_stays_candidate() {
+    let (mut s, tab, mut rx) = media_page(
+        "<video>\
+           <source src=\"w.webm\" type='video/webm;codecs=\"vp09\"'>\
+           <source src=\"v.mp4\">\
+         </video>",
+    );
+    let _ = media_events(&mut rx); // purge de l'offre initiale
+    s.media_claim(tab, 1, vec!["avc1".into()]).unwrap();
+    s.refresh_media(tab);
+    let evs = media_events(&mut rx);
+    let offered: Vec<_> = evs
+        .iter()
+        .filter_map(|e| match e {
+            CoreEvent::MediaOffered { url, .. } => Some(url.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(offered.len(), 1);
+    assert_eq!(offered[0].as_str(), "http://h.test/v.mp4");
+}
+
 #[test]
 fn media_gone_on_close_and_navigation() {
     let (mut s, tab, mut rx) = media_page("<video src=\"v.mp4\"></video>");

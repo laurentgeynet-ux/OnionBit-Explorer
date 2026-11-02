@@ -797,6 +797,12 @@ pub struct Session {
     /// sur le `CookieTransport` pour que `document.cookie`
     /// et les navigations voient le même état (étape 51).
     cookies: Arc<CookieJar>,
+    /// Capacités média déclarées par l'hôte — union des
+    /// `codecs` des claims (`media_claim`, a1), préfixes
+    /// RFC 6381 minuscules (`avc1`, `vp09`, `mp4a`…).
+    /// Vide avant le premier claim : `media_source` retient
+    /// alors le premier `<source>` (comportement historique).
+    declared_media_codecs: std::collections::HashSet<String>,
     /// `localStorage` par origine sérialisée — snapshot
     /// installé au spawn du contexte, map drainée aux points
     /// de synchro, persistée via le profil.
@@ -1082,6 +1088,7 @@ impl Session {
                 cfg.max_fonts,
             ))),
             tabs: HashMap::new(),
+            declared_media_codecs: std::collections::HashSet::new(),
             events,
             next_tab: 1,
             viewport: cfg.viewport,

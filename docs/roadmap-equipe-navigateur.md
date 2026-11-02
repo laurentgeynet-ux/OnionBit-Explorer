@@ -5815,6 +5815,36 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   liste téléchargements + progress
   SSE dans l'app.
 
+- [x] **Étape 175. `<source>` élu
+  par type jouable** (`explorer-core`,
+  chantier « vidéo réelle » a1 —
+  fallback h264, ADR-0029) —
+  `media_source` retenait le
+  premier `<source src>` sans
+  regarder `type` : un `webm` en
+  tête tuait le `mp4` décodable.
+  Chaque `<source type>` est
+  désormais confronté aux
+  capacités hôte : conteneur
+  connu + tous les codecs du
+  param `codecs=` dans
+  `Session::declared_media_codecs`
+  (préfixes RFC 6381 — même
+  réduction qu'`isTypeSupported`).
+  Sans `type` → candidat ; type
+  non déclaré → source écartée,
+  la suivante essayée (spec
+  resource selection). Le set
+  s'alimente au `media_claim`
+  (même normalisation que
+  `note_declared_codecs`) ; vide
+  → comportement historique.
+  Verrous :
+  `media_source_picks_first_
+  playable_type`,
+  `media_source_untyped_stays_
+  candidate`.
+
 - [x] **Étape 173. Budget octets
   images décodées** (`explorer-core`,
   §B-59 3ᵉ racine — franceinter,
