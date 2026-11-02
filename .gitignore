@@ -56,3 +56,18 @@ dist/
 # RAPPORT_VOL_* + captures + logs restent sur disque)
 docs/Rapport vol/
 .devin/skills/vol/SKILL.md
+
+# Artefacts de vol égarés dans l'arbre — filet de sécurité :
+# ils n'ont rien à faire ici (règle §8 vol-agent.md — corpus
+# C:\OnionBit-vol\), l'ignore évite qu'un `git add -A` les
+# balaie par erreur.
+_vol*.log
+vol*-watch.log
+watch-*.log
+daemon-*.log
+_nav_*.json
+_view_*.png
+_probe*/
+_probe*.py
+_patch_scan.py
+_pmem.ps1

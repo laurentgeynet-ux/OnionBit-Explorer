@@ -18,6 +18,42 @@ l'API REST d'input, la télémétrie = `dom`/`layout`/`mem`/SSE.
 > WIP, builder depuis un worktree éphémère à HEAD :
 > `git worktree add <dir> HEAD`.
 
+## 0. Checklist de lancement — séquence canonique
+
+Chaque vol ouvre sur cette séquence, dans l'ordre, sans
+exception. Les chemins corpus = `C:\OnionBit-vol\` (structure
+canonique : `README.md` du corpus).
+
+```powershell
+# 0.1 arbre propre + HEAD connu
+git rev-parse HEAD                    # le tag du vol
+git status --short                    # WIP ? → worktree
+                                    # éphémère à HEAD sinon
+
+# 0.2 binaire frais (jamais un .exe qui traîne)
+cargo build --release -p explorer-daemon   # attendre « Finished »
+
+# 0.3 daemon dédié — port 9385+, profil déclaré
+$env:EXPLORER_VIEWPORT='1366x900'
+$env:EXPLORER_PROFILE='C:\OnionBit-vol\prof<N>'   # froid = défaut
+.\target\release\explorer-daemon.exe --port 9385
+
+# 0.4 watchdog OBLIGATOIRE — les deux lignes, dès le lancement
+pwsh -File scripts/vol_joblimit.ps1 -TargetPid <pid> -LimitMB 5120
+pwsh -File scripts/vol_memwatch.ps1 -DaemonPid <pid> -MaxMB 5120 `
+  -Log "C:\OnionBit-vol\logs\_vol<N>_watch.log" &
+
+# 0.5 artefacts au corpus, jamais dans le repo
+#   logs    → C:\OnionBit-vol\logs\_vol<N>_*.log
+#   PNG     → C:\OnionBit-vol\captures\vol<N>_<cible>.png
+#   rapport → C:\OnionBit-vol\RAPPORT_VOL_<date>_AGENT<n>_<TAG>.md
+```
+
+En clôture de vol : daemon tué par **PID** (jamais `taskkill
+/IM` — les voisins appartiennent aux autres équipes), logs
+archivés au corpus, `git add -A && git commit` dans
+`C:\OnionBit-vol`, entrée journal + statuts §B synchronisés.
+
 ## 1. Lancer le daemon dédié
 
 ```powershell
