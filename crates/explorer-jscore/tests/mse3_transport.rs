@@ -65,17 +65,17 @@ fn mse3_pull_returns_appended_bytes_fifo() {
     );
     // Le pull draine la file dans l'ordre d'append, borné
     // par `max`.
-    let (data, cursor, eos) = e.mse_pull_segments(&u, 0, 4).expect("pull");
+    let (data, cursor, eos, _sec) = e.mse_pull_segments(&u, 0, 4).expect("pull");
     assert_eq!(data, vec![1, 2, 3, 4]);
     assert_eq!(cursor, 4);
     assert!(!eos);
-    let (data, cursor, eos) = e.mse_pull_segments(&u, 0, 16).expect("pull2");
+    let (data, cursor, eos, _sec) = e.mse_pull_segments(&u, 0, 16).expect("pull2");
     assert_eq!(data, vec![5]);
     assert_eq!(cursor, 5);
     assert!(!eos);
     // File vide, readyState "open" → pas d'eos (le site peut
     // encore appender — le ByteSource attend).
-    let (data, _, eos) = e.mse_pull_segments(&u, 0, 16).expect("pull3");
+    let (data, _, eos, _s) = e.mse_pull_segments(&u, 0, 16).expect("pull3");
     assert_eq!(data, Vec::<u8>::new());
     assert!(!eos);
 }
@@ -92,7 +92,7 @@ fn mse3_end_of_stream_sets_eos_when_drained() {
     );
     // `ended` mais file non vide → octets d'abord, eos au
     // vidage seulement.
-    let (data, _, eos) = e.mse_pull_segments(&u, 0, 16).expect("pull");
+    let (data, _, eos, _s) = e.mse_pull_segments(&u, 0, 16).expect("pull");
     assert_eq!(data, vec![9, 9]);
     assert!(eos);
 }
@@ -110,14 +110,14 @@ fn mse3_abort_and_remove_drop_queued_bytes() {
     // JS-C287 — le chunk estimé couvre `[0,6)` : `[0,1)` ne
     // le couvre pas entièrement → conservé (on ne découpe
     // pas l'intérieur d'un fragment sans démuxage).
-    let (data, _, _) = e.mse_pull_segments(&u, 0, 16).expect("pull");
+    let (data, _, _, _s) = e.mse_pull_segments(&u, 0, 16).expect("pull");
     assert_eq!(data, vec![1, 1], "remove partiel conserve le chunk");
     ev(
         &mut e,
         "sb.appendBuffer(new Uint8Array([2,2]));\
          sb.abort();",
     );
-    let (data, _, _) = e.mse_pull_segments(&u, 0, 16).expect("pull2");
+    let (data, _, _, _s) = e.mse_pull_segments(&u, 0, 16).expect("pull2");
     assert_eq!(data, Vec::<u8>::new(), "abort aurait dû vider la file");
 }
 
@@ -158,7 +158,7 @@ fn mse3_remove_evicts_only_covered_chunks() {
          sb.remove(0,1);"
     ))
     .expect("appends+remove");
-    let (data, _, _) = e.mse_pull_segments(&u, 0, 4096).expect("pull");
+    let (data, _, _, _s) = e.mse_pull_segments(&u, 0, 4096).expect("pull");
     let init = hex(INIT);
     let seg0 = hex(SEG0);
     let seg1 = hex(SEG1);
@@ -168,6 +168,59 @@ fn mse3_remove_evicts_only_covered_chunks() {
     want.extend_from_slice(&seg1);
     assert_eq!(data, want, "remove(0,1) doit jeter seg0 seul");
     assert!(!data.windows(seg0.len()).any(|w| w == &seg0[..]));
+}
+
+/// JS-C295 — pont C : un `moov` re-servi émet
+/// `X-Mse-Section` à l'offset exact du nouvel init dans le
+/// corps ; le premier init ne marque rien (pas de frontière
+/// en tête de flux) ; deux re-inits dans un bulk = deux
+/// offsets ordonnés.
+#[test]
+fn mse3_section_offsets_mark_reinit() {
+    const INIT: &str = "000000386d6f6f76\
+                        000000307472616b\
+                        000000286d646961\
+                        000000206d646864\
+                        000000000000000000000000000003e80000000000000000";
+    const SEG: &str = "000000506d6f6f66\
+                        0000004874726166\
+                        00000014746668640000000800000001000001f4\
+                        0000001474666474010000000000000000000000\
+                        000000187472756e0000010000000002000001f4000001f4\
+                        0000000c6d646174deadbeef";
+    let mut e = engine();
+    let u = attached_url(&mut e);
+    e.eval(&format!(
+        "function H(s){{var a=new Uint8Array(s.length/2);\
+         for(var i=0;i<a.length;i++)a[i]=parseInt(s.substr(i*2,2),16);\
+         return a}}\
+         var sb=__ms.addSourceBuffer('video/mp4');\
+         sb.appendBuffer(H('{INIT}').buffer);\
+         sb.appendBuffer(H('{SEG}').buffer);\
+         sb.appendBuffer(H('{INIT}').buffer);\
+         sb.appendBuffer(H('{SEG}').buffer);\
+         sb.appendBuffer(H('{INIT}').buffer);"
+    ))
+    .expect("appends");
+    let il = hex(INIT).len() as u64;
+    let sl = hex(SEG).len() as u64;
+    // Bulk unique : sections aux positions des deux re-inits.
+    let (data, _, _, sections) = e.mse_pull_segments(&u, 0, 65536).expect("pull");
+    assert_eq!(sections, vec![il + sl, 2 * (il + sl)]);
+    assert_eq!(data.len() as u64, 3 * il + 2 * sl);
+    // `abort` vide la file avant tout pull : l'init jeté
+    // n'a jamais été servi → le re-init suivant est le
+    // PREMIER vu de l'hôte → aucune frontière.
+    ev(&mut e, "var sb2=__ms.addSourceBuffer('audio/mp4');");
+    e.eval(&format!(
+        "sb2.appendBuffer(H('{INIT}').buffer);\
+         sb2.appendBuffer(H('{INIT}').buffer);\
+         sb2.abort();\
+         sb2.appendBuffer(H('{INIT}').buffer);"
+    ))
+    .expect("rail2");
+    let (_, _, _, sections2) = e.mse_pull_segments(&u, 1, 65536).expect("pull2");
+    assert_eq!(sections2, Vec::<u64>::new());
 }
 
 #[test]
@@ -183,8 +236,8 @@ fn mse3_buffer_index_selects_source_buffer() {
          v.appendBuffer(new Uint8Array([1]));\
          a.appendBuffer(new Uint8Array([2]));",
     );
-    let (dv, _, _) = e.mse_pull_segments(&u, 0, 16).expect("video");
-    let (da, _, _) = e.mse_pull_segments(&u, 1, 16).expect("audio");
+    let (dv, _, _, _sv) = e.mse_pull_segments(&u, 0, 16).expect("video");
+    let (da, _, _, _sa) = e.mse_pull_segments(&u, 1, 16).expect("audio");
     assert_eq!(dv, vec![1]);
     assert_eq!(da, vec![2]);
     // Index hors rang → None honnête.

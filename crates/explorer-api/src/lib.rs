@@ -1095,13 +1095,29 @@ async fn media_segments(
         .unwrap_or(crate::MSE_PULL_BULK_MAX);
     let mut session = st.session.lock().await;
     match session.media_segments_pull(id, mid, buffer, max) {
-        explorer_core::MsePull::Ready(data, cursor, eos) => axum::http::Response::builder()
-            .status(axum::http::StatusCode::OK)
-            .header(axum::http::header::CONTENT_TYPE, "application/octet-stream")
-            .header("X-Mse-Cursor", cursor.to_string())
-            .header("X-Mse-Eos", if eos { "1" } else { "0" })
-            .body(axum::body::Body::from(data))
-            .unwrap_or_else(|_| axum::http::Response::new(axum::body::Body::empty())),
+        explorer_core::MsePull::Ready(data, cursor, eos, sections) => {
+            let mut b = axum::http::Response::builder()
+                .status(axum::http::StatusCode::OK)
+                .header(axum::http::header::CONTENT_TYPE, "application/octet-stream")
+                .header("X-Mse-Cursor", cursor.to_string())
+                .header("X-Mse-Eos", if eos { "1" } else { "0" });
+            if !sections.is_empty() {
+                // Pont C (JS-C295) : offsets corps des
+                // frontières — le `MseSource` hôte émet
+                // `on_discontinuity_boundary` à ces
+                // positions (resync démuxeur, ABR).
+                b = b.header(
+                    "X-Mse-Section",
+                    sections
+                        .iter()
+                        .map(u64::to_string)
+                        .collect::<Vec<_>>()
+                        .join(","),
+                );
+            }
+            b.body(axum::body::Body::from(data))
+                .unwrap_or_else(|_| axum::http::Response::new(axum::body::Body::empty()))
+        }
         // §B-63 : surface MSE vivante, moteur momentanément
         // absent sous pompe — corps vide + `X-Mse-Pending`
         // invitant le `MseSource` à re-sonder ; `410`

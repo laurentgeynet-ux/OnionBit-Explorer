@@ -630,14 +630,11 @@ pub trait JsEngine: Send {
     /// enregistrée sous `url` — transport MSE-3 (ADR-0029) :
     /// au plus `max` octets, retour `(octets, curseur, eos)`.
     /// `eos` vrai quand `endOfStream` est appelé **et** la
-    /// file est vide. `None` : pas de source sous `url` ou
-    /// index hors rang. Défaut : `None`.
-    fn mse_pull(
-        &mut self,
-        _url: &str,
-        _buffer: usize,
-        _max: usize,
-    ) -> Option<(Vec<u8>, u64, bool)> {
+    /// file est vide ; `sections` = offsets corps des
+    /// frontières de section (pont C, JS-C295). `None` : pas
+    /// de source sous `url` ou index hors rang. Défaut :
+    /// `None`.
+    fn mse_pull(&mut self, _url: &str, _buffer: usize, _max: usize) -> MsePullReply {
         None
     }
 
@@ -1598,6 +1595,11 @@ fn journal_ops_to_seam(
     Some(out)
 }
 
+/// Réponse `Cmd::MsePull` / [`JsEngine::mse_pull`] (pont C,
+/// JS-C295) : `(octets, curseur, eos, sections)` —
+/// `sections` = offsets corps des frontières `X-Mse-Section`.
+type MsePullReply = Option<(Vec<u8>, u64, bool, Vec<u64>)>;
+
 enum Cmd {
     Eval {
         src: String,
@@ -1624,12 +1626,15 @@ enum Cmd {
         tx: Sender<bool>,
     },
     /// Pull segments du `SourceBuffer` `buffer` (MSE-3
-    /// transport, ADR-0029) — `(octets, curseur, eos)`.
+    /// transport, ADR-0029) — [`MsePullReply`] : `(octets,
+    /// curseur, eos, sections)` ; `sections` = offsets
+    /// corps des frontières `X-Mse-Section` (pont C,
+    /// JS-C295).
     MsePull {
         url: String,
         buffer: usize,
         max: usize,
-        tx: Sender<Option<(Vec<u8>, u64, bool)>>,
+        tx: Sender<MsePullReply>,
     },
     /// MIME des `SourceBuffer` sous `url` (`?buffer=N` indexe
     /// ce tableau — offre `mseBuffers`, P-53 multi-source).
@@ -2782,7 +2787,7 @@ impl JsEngine for JscoreEngine {
         rx.recv_timeout(Self::EVAL_CMD_TIMEOUT).unwrap_or(false)
     }
 
-    fn mse_pull(&mut self, url: &str, buffer: usize, max: usize) -> Option<(Vec<u8>, u64, bool)> {
+    fn mse_pull(&mut self, url: &str, buffer: usize, max: usize) -> MsePullReply {
         let (tx, rx) = channel();
         if self
             .tx

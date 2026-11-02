@@ -85,8 +85,10 @@ pub(crate) struct MediaSurface {
 /// distingue l'absence transitoire de moteur de la mort de
 /// surface : `410` doit rester terminal.
 pub enum MsePull {
-    /// Segments drainés : octets, curseur absolu, fin de flux.
-    Ready(Vec<u8>, u64, bool),
+    /// Segments drainés : octets, curseur absolu, fin de
+    /// flux, offsets corps des frontières de section
+    /// (`X-Mse-Section`, pont C — JS-C295).
+    Ready(Vec<u8>, u64, bool, Vec<u64>),
     /// Moteur momentanément absent (fenêtre pompe) — re-sonder.
     Pending,
     /// Surface morte / non-MSE / index de buffer hors rang.
@@ -729,7 +731,7 @@ impl Session {
             return MsePull::Pending;
         };
         match eng.mse_pull(&m.url.clone(), buffer, max) {
-            Some((data, cursor, eos)) => MsePull::Ready(data, cursor, eos),
+            Some((data, cursor, eos, sections)) => MsePull::Ready(data, cursor, eos, sections),
             None => MsePull::Dead,
         }
     }

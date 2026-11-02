@@ -153,6 +153,15 @@ struct SbData {
     /// l'éviction par plage de `remove` : un chunk n'est
     /// jeté que si sa plage est **entièrement** couverte.
     seg_ranges: std::collections::VecDeque<Option<(f64, f64)>>,
+    /// `true` par chunk porteur d'un `moov` (JS-C295, pont
+    /// C — parallèle à `segments`). Le pull émet
+    /// `X-Mse-Section` à l'offset d'un tel chunk **si** un
+    /// init a déjà été servi (`pulled_saw_init`) : un init
+    /// queued puis évincé par `remove`/`abort` ne marque
+    /// rien, un re-init servi = frontière de section.
+    seg_boundary: std::collections::VecDeque<bool>,
+    /// Un init `moov` a déjà été servi à l'hôte via le pull.
+    pulled_saw_init: bool,
     /// `buffered` estimé (JS-C278/b3, ADR-0029) — plages
     /// déduites des `timestampOffset` d'append successifs,
     /// clippées à l'append window ; approximation documentée
@@ -562,6 +571,8 @@ fn ms_add_source_buffer(e: &mut Engine, this: Value, args: &[Value]) -> JsResult
         bytes: 0,
         pulled: 0,
         seg_ranges: std::collections::VecDeque::new(),
+        seg_boundary: std::collections::VecDeque::new(),
+        pulled_saw_init: false,
     }));
     let v = e.new_host_object(Rc::new(SbHost { d: sb }));
     if let Value::Obj(id) = v {
@@ -804,6 +815,12 @@ struct Fmp4Scan {
     /// porte pas de média (init) → **pas** de repli
     /// estimateur (un init ne couvre aucune plage).
     recognized: bool,
+    /// `moov` présent — candidat init. Un init **re**-servi
+    /// (switch ABR hls.js : nouvel init appendé sur le même
+    /// `SourceBuffer`) marque une frontière de section pour
+    /// le pont C (`X-Mse-Section` — l'hôte resynchronise
+    /// le démuxeur pile à cet offset, `BoundaryGate`).
+    has_moov: bool,
 }
 
 fn fmp4_scan(bytes: &[u8]) -> Fmp4Scan {
@@ -811,10 +828,12 @@ fn fmp4_scan(bytes: &[u8]) -> Fmp4Scan {
         timescale: None,
         moofs: Vec::new(),
         recognized: false,
+        has_moov: false,
     };
     walk_boxes(bytes, |fourcc, payload| match fourcc {
         b"moov" => {
             out.recognized = true;
+            out.has_moov = true;
             walk_boxes(payload, |f2, p2| {
                 if f2 == b"trak" {
                     walk_boxes(p2, |f3, p3| {
@@ -972,6 +991,9 @@ fn sb_append_buffer(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Val
             _ => est_append_range(&mut sd),
         };
         sd.seg_ranges.push_back(span);
+        // JS-C295 — pont C : un `moov` re-servi plus tard au
+        // pull = frontière `X-Mse-Section` (switch ABR).
+        sd.seg_boundary.push_back(scan.has_moov);
     }
     let Value::Obj(sid) = this else {
         return Ok(Value::Undefined);
@@ -1005,6 +1027,7 @@ fn sb_abort(e: &mut Engine, this: Value, _args: &[Value]) -> JsResult<Value> {
         sd.updating = false;
         sd.segments.clear();
         sd.seg_ranges.clear();
+        sd.seg_boundary.clear();
         sd.bytes = 0;
         // JS-C278 — abort vide le buffer : l'estimation
         // repart à zéro comme la file d'octets.
@@ -1047,14 +1070,16 @@ fn sb_remove(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
         // démuxage ; approximation conservatrice documentée.
         let segs = std::mem::take(&mut sd.segments);
         let spans = std::mem::take(&mut sd.seg_ranges);
+        let bounds = std::mem::take(&mut sd.seg_boundary);
         let mut bytes = 0usize;
-        for (chunk, span) in segs.into_iter().zip(spans) {
+        for ((chunk, span), bound) in segs.into_iter().zip(spans).zip(bounds) {
             if span.is_some_and(|(a, b)| a >= s - REMOVE_EPS && b <= t + REMOVE_EPS) {
                 continue;
             }
             bytes += chunk.len();
             sd.segments.push_back(chunk);
             sd.seg_ranges.push_back(span);
+            sd.seg_boundary.push_back(bound);
         }
         sd.bytes = bytes;
         // JS-C278 — l'estimation `buffered`, elle, connaît
@@ -1206,31 +1231,47 @@ impl Engine {
     /// file est vide (la lecture bloque autrement — le
     /// site peut encore appender).
     /// `None` : `url` inconnue ou index de buffer hors rang.
+    /// `sections` = offsets **dans le corps** où commence
+    /// une nouvelle section (JS-C295, pont C — `X-Mse-Section`
+    /// du contrat filaire : un `moov` re-servi = l'hôte
+    /// resynchronise le démuxeur à cet offset exact).
     pub fn mse_pull_segments(
         &mut self,
         url: &str,
         buffer: usize,
         max: usize,
-    ) -> Option<(Vec<u8>, u64, bool)> {
+    ) -> Option<(Vec<u8>, u64, bool, Vec<u64>)> {
         let mid = self.mse.object_urls.get(url).copied()?;
         let ms = ms_data(self, Value::Obj(mid))?;
         let sbv = ms.borrow().buffers.get(buffer).copied()?;
         let sd = sb_data(self, sbv)?;
         let mut sd = sd.borrow_mut();
         let mut out = Vec::new();
+        let mut sections = Vec::new();
         while out.len() < max {
             let Some(seg) = sd.segments.pop_front() else {
                 break;
             };
             let span = sd.seg_ranges.pop_front().flatten();
+            let bound = sd.seg_boundary.pop_front().unwrap_or_default();
+            if bound {
+                if sd.pulled_saw_init {
+                    // Re-init servi = frontière de section
+                    // pile avant le premier octet du chunk.
+                    sections.push(out.len() as u64);
+                }
+                sd.pulled_saw_init = true;
+            }
             let take = (max - out.len()).min(seg.len());
             out.extend_from_slice(&seg[..take]);
             if take < seg.len() {
                 // Fin de paquet atteinte — le reste du
                 // segment repasse en tête de file avec sa
-                // plage (le chunk reste entier côté temps).
+                // plage (le chunk reste entier côté temps) ;
+                // sa frontière, elle, est déjà servie.
                 sd.segments.push_front(seg[take..].to_vec());
                 sd.seg_ranges.push_front(span);
+                sd.seg_boundary.push_front(false);
             }
         }
         sd.bytes = sd.bytes.saturating_sub(out.len());
@@ -1239,7 +1280,7 @@ impl Engine {
         let empty = sd.segments.is_empty();
         drop(sd);
         let eos = empty && ms.borrow().ready_state == "ended";
-        Some((out, cursor, eos))
+        Some((out, cursor, eos, sections))
     }
 
     /// MIME des `SourceBuffer` de la `MediaSource` sous `url`

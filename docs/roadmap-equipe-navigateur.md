@@ -5959,6 +5959,29 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   `defs.ctor`. Verrou
   `c294_el_constructor_suit_le_proto`.
 
+- [x] **JS-C295. `X-Mse-Section` —
+  frontières de section au pull
+  MSE** (`explorer-jscore`/`js`/
+  `core`/`api`, pont C média —
+  ABR hls.js/MSE) — le contrat
+  filaire (offsets corps de la
+  section) est alimenté :
+  `has_moov` dans `fmp4_scan`,
+  `seg_boundary` par chunk file,
+  offset émis au `moov` re-servi
+  (`pulled_saw_init` — init vidé
+  par `abort` sans pull = pas de
+  fausse frontière). Hôte :
+  `on_discontinuity_boundary` →
+  `BoundaryGate` → `resync_section`
+  (re-probe init, `section_epoch`++,
+  `Section` marker, décodeurs
+  recréés) — **ABR MSE bout-en-
+  bout**. `MsePullReply` (4e champ
+  `sections`). Verrou
+  `mse3_section_offsets_mark_
+  reinit` (9/9).
+
 - [x] **Étape CMP-4. Réarmement
   des balises « bloquées par CMP »**
   (`explorer-core`, §B-4 bras CMP
