@@ -7,6 +7,24 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **JS-C272 — payload de rejet
+  nommé dans `unhandledrejection`**
+  (`explorer-jscore`, §B-14 vol
+  529 hltb — `unhandledrejection:
+  [object Object]` ×4) — un objet
+  nu rejeté n'apprenait rien au
+  rapport/console : quand
+  `describe` rend le générique
+  `[object Object]`,
+  `describe_rejection` applique
+  le descripteur JS-C228
+  `Object{clés}` (6 propres clés)
+  — `[object MyTag]` et les
+  `name:message` restent inchangés.
+  Verrou
+  `promise_rejection_names_object_
+  payload`.
+
 - **JS-C271 — `__gpp` CMP-less
   cohérent** (`explorer-jscore`,
   §B-14 webtoons vol 529 —

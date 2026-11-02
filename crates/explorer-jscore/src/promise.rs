@@ -659,7 +659,10 @@ impl Engine {
             if !still {
                 continue;
             }
-            let desc = self.describe(reason);
+            // JS-C272 — `[object Object]` remplacé par le
+            // descripteur `Object@@tag`/`Object{clés}` (§B-14
+            // vol 529 hltb — payload opaque ×4).
+            let desc = self.describe_rejection(reason);
             if desc == last_desc {
                 same_desc += 1;
                 continue;

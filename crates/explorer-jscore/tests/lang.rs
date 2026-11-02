@@ -1485,6 +1485,29 @@ fn promise_unhandled_rejection() {
     assert_eq!(e3.describe(m), "0");
 }
 
+// JS-C272 — un rejet objet nu est nommé `Object{clés}` /
+// `Object@@tag` dans le rapport, pas `[object Object]`
+// (§B-14 vol 529 hltb — payload opaque ×4).
+#[test]
+fn promise_rejection_names_object_payload() {
+    let mut e = Engine::new();
+    e.eval("Promise.reject({code:1, msg:'x', extra:2});")
+        .expect("eval");
+    let rep = e.drain_unhandled_rejections();
+    assert!(
+        rep[0].contains("Object{code,msg,extra}"),
+        "rapport opaque : {rep:?}"
+    );
+    // `@@toStringTag` est déjà nommé par `toString`
+    // (`[object MyTag]` — informatif, conservé) : seul le
+    // générique `[object Object]` prend le repli `{clés}`.
+    let mut e2 = Engine::new();
+    e2.eval("var o={};o[Symbol.toStringTag]='MyTag';Promise.reject(o);")
+        .expect("eval2");
+    let rep2 = e2.drain_unhandled_rejections();
+    assert!(rep2[0].contains("[object MyTag]"), "{rep2:?}");
+}
+
 #[test]
 fn promise_adoption() {
     // Resolving with a promise adopts its state.

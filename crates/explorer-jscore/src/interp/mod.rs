@@ -2999,6 +2999,27 @@ impl Engine {
         }
     }
 
+    /// `describe` pour les rejets de promesse remontés au
+    /// rapport `unhandledrejection` — un objet nu sans
+    /// stack/`name`/`message` rend `Object@@tag` ou
+    /// `Object{clés}` au lieu de `[object Object]` (rail de
+    /// nommage JS-C228 — §B-14 vol 529 hltb, payload opaque
+    /// ×4). Zéro appel utilisateur dans le repli.
+    pub(crate) fn describe_rejection(&mut self, v: Value) -> String {
+        let d = self.describe(v);
+        if d != "[object Object]" {
+            return d;
+        }
+        let Value::Obj(id) = v else { return d };
+        let keys = self.own_keys(id);
+        let shown: Vec<&str> = keys.iter().take(6).map(String::as_str).collect();
+        if shown.is_empty() {
+            d
+        } else {
+            format!("Object{{{}}}", shown.join(","))
+        }
+    }
+
     /// Nommage **non-réentrant** de `v` pour les chemins d'erreur
     /// qui ne peuvent pas rappeler `describe` : `to_primitive`
     /// échouant appellait `describe` → `to_js_string` →
