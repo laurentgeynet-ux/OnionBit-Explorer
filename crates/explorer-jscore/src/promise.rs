@@ -429,19 +429,19 @@ impl Engine {
         self.microtasks.push_back((self.cur_ctx, Job::Plain(f)));
     }
 
-    /// [`run_microtasks`] dans une frontière **boot** —
-    /// `run_program`/`eval_module` : le drain partage la
-    /// deadline boot (B-22/§B-23) au lieu de ré-armer la borne
+    /// [`run_microtasks`](Self::run_microtasks) dans une frontière
+    /// **boot** — `run_program`/`eval_module` : le drain partage
+    /// la deadline boot (B-22/§B-23) au lieu de ré-armer la borne
     /// standard de `eval_timeout_ms`. Une chaîne de microtasks
     /// légitime produite par un corps de boot (requirejs/less
     /// de cryptpad — `unhandledrejection: eval deadline
     /// exceeded` au splash) a le même wall-clock que ce corps.
     /// Les pompes et livraisons d'événements gardent la borne
-    /// standard via [`run_microtasks`].
+    /// standard via [`run_microtasks`](Self::run_microtasks).
     ///
     /// # Errors
-    /// Mêmes erreurs que [`run_microtasks`] — deadline,
-    /// budget d'ops ou tas épuisé pendant le drain.
+    /// Mêmes erreurs que [`run_microtasks`](Self::run_microtasks)
+    /// — deadline, budget d'ops ou tas épuisé pendant le drain.
     pub fn run_microtasks_in_boot(&mut self) -> JsResult<usize> {
         self.run_microtasks_impl(true)
     }

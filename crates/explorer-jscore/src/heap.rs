@@ -1080,8 +1080,10 @@ pub enum ObjKind {
     /// `method`/`url`/`bodyUsed` are ordinary own props (headers
     /// lives in a `Headers`-shaped object, source of truth).
     FetchBody {
-        /// Body text (lossy-decoded for network responses).
-        body: String,
+        /// Body bytes — verbatim for network responses (JS-C277:
+        /// `text()`/`json()` decode at read time, `arrayBuffer()`/
+        /// `blob()` hand the octets back untouched).
+        body: Vec<u8>,
     },
     /// `ArrayBuffer` — fixed byte store shared by views (element
     /// writes through one view are visible through the others).

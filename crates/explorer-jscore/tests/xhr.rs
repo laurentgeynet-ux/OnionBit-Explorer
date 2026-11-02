@@ -171,6 +171,133 @@ fn response_type_and_event_current_target() {
     );
 }
 
+/// Corps réponse en octets bruts — le test joue le réseau.
+fn respond_bytes(e: &mut Engine, handle: u64, status: u16, body: &[u8]) {
+    e.deliver_xhr_response(XhrResponse {
+        handle,
+        status,
+        status_text: "OK".into(),
+        headers: vec![("Content-Type".into(), "application/octet-stream".into())],
+        body: body.to_vec(),
+    })
+    .expect("deliver");
+}
+
+#[test]
+fn response_arraybuffer_preserves_bytes() {
+    // JS-C277 — le binaire MSE (`xhr.responseType='arraybuffer'`)
+    // doit atteindre le script intact : des octets non-UTF-8 ne
+    // sont jamais transcodés par le décodage lossy du texte.
+    let (mut e, t) = engine();
+    describe(
+        &mut e,
+        "var x = new XMLHttpRequest();\
+         x.open('GET', '/seg.m4s');\
+         x.responseType = 'arraybuffer';\
+         x.send();",
+    );
+    let h = t.requests.borrow()[0].0;
+    // Octets volontairement non-UTF-8 (0x89, 0xFF, 0x00) — un
+    // décodage lossy les aurait remplacés par U+FFFD (3 octets).
+    respond_bytes(&mut e, h, 200, &[0x89, 0x50, 0xFF, 0x00, 0x00, 0x01]);
+    assert_eq!(
+        describe(
+            &mut e,
+            "(x.response instanceof ArrayBuffer) + '|' + x.response.byteLength + '|' + \
+             new Uint8Array(x.response)[0] + '|' + new Uint8Array(x.response)[2] + '|' + \
+             (x.response === x.response)"
+        ),
+        "true|6|137|255|true"
+    );
+    // `responseText` sur type binaire → `InvalidStateError` (spec).
+    describe(
+        &mut e,
+        "var threw = ''; try { x.responseText; } catch (er) { threw = er.name; } threw",
+    );
+    assert_eq!(describe(&mut e, "threw"), "InvalidStateError");
+}
+
+#[test]
+fn response_json_parses_and_nulls_on_failure() {
+    let (mut e, t) = engine();
+    describe(
+        &mut e,
+        "var x = new XMLHttpRequest();\
+         x.open('GET', '/api'); x.responseType = 'json'; x.send();",
+    );
+    let h = t.requests.borrow()[0].0;
+    respond(&mut e, h, 200, r#"{"a": 41}"#);
+    assert_eq!(
+        describe(
+            &mut e,
+            "x.response.a + 1 + '|' + (x.response === x.response)"
+        ),
+        "42|true"
+    );
+    // Corps non-JSON → `null` (spec), pas d'exception.
+    describe(
+        &mut e,
+        "var y = new XMLHttpRequest();\
+         y.open('GET', '/bad'); y.responseType = 'json'; y.send();",
+    );
+    let h2 = t.requests.borrow()[1].0;
+    respond(&mut e, h2, 200, "not json");
+    assert_eq!(describe(&mut e, "y.response"), "null");
+}
+
+#[test]
+fn response_blob_and_document() {
+    let (mut e, t) = engine();
+    describe(
+        &mut e,
+        "var x = new XMLHttpRequest();\
+         x.open('GET', '/blob'); x.responseType = 'blob'; x.send();",
+    );
+    let h = t.requests.borrow()[0].0;
+    respond_bytes(&mut e, h, 200, &[1, 2, 3, 4]);
+    assert_eq!(
+        describe(
+            &mut e,
+            "(x.response instanceof Blob) + '/' + x.response.size"
+        ),
+        "true/4"
+    );
+    // `document` : `response` et `responseXML` = même Document.
+    describe(
+        &mut e,
+        "var y = new XMLHttpRequest();\
+         y.open('GET', '/doc'); y.responseType = 'document'; y.send();",
+    );
+    let h2 = t.requests.borrow()[1].0;
+    respond(&mut e, h2, 200, "<p id='a'>hi</p>");
+    assert_eq!(
+        describe(
+            &mut e,
+            "y.response.getElementById('a').textContent + '|' + (y.response === y.responseXML)"
+        ),
+        "hi|true"
+    );
+}
+
+#[test]
+fn fetch_arraybuffer_preserves_bytes() {
+    // Le canal des players MSE : `fetch().then(r => r.arrayBuffer())`
+    // — les octets livrés doivent ressortir identiques.
+    let (mut e, t) = engine();
+    describe(
+        &mut e,
+        "var out = '';\
+         fetch('/seg').then(function (r) { return r.arrayBuffer(); })\
+                       .then(function (ab) {\
+                           var u = new Uint8Array(ab);\
+                           out += ab.byteLength + '|' + u[0] + '|' + u[1] + '|' + u[2];\
+                       });",
+    );
+    let h = t.requests.borrow()[0].0;
+    respond_bytes(&mut e, h, 200, &[0x00, 0x89, 0xFE, 0x0A]);
+    assert_eq!(describe(&mut e, "out"), "4|0|137|254");
+}
+
 #[test]
 fn error_event_on_status_zero() {
     let (mut e, t) = engine();

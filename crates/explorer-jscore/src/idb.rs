@@ -141,8 +141,8 @@ pub type CacheRegistry = Rc<RefCell<HashMap<String, BTreeMap<String, CacheEntry>
 pub struct CacheEntry {
     /// `response.url`.
     pub url: String,
-    /// Corps snapshot (octets).
-    pub body: String,
+    /// Corps snapshot (octets bruts).
+    pub body: Vec<u8>,
     /// `status`/`statusText`.
     pub status: u16,
     /// Headers `(nom, valeur)` jointes.
@@ -2960,7 +2960,7 @@ fn cached_response(e: &mut Engine, en: &CacheEntry) -> Value {
             status: en.status,
             status_text: "OK".into(),
             headers: en.headers.clone(),
-            body: en.body.clone().into_bytes(),
+            body: en.body.clone(),
         },
         en.url.clone(),
         "basic",

@@ -146,7 +146,18 @@ pub(crate) struct XhrData {
     ready_state: u8,
     status: u16,
     status_text: String,
-    response_text: String,
+    /// Corps réponse **brut** (JS-C277) — source unique :
+    /// `responseText`/`response` texte/`json` décodent à la
+    /// lecture, `arraybuffer`/`blob` rendent les octets tels
+    /// quels (un segment MSE binaire n'est jamais corrompu
+    /// par un décodage UTF-8 intermédiaire).
+    response_bytes: Vec<u8>,
+    /// `xhr.response` calculé une fois (`arraybuffer`/`blob`/
+    /// `document`/`json`) — spec : l'attribut est figé à la
+    /// complétion ; re-rendu identique à chaque lecture
+    /// (`x.response === x.response`). Racine GC via
+    /// [`XhrData::listener_values`].
+    cached_response: Option<Value>,
     response_headers: Vec<(String, String)>,
     method: String,
     url: String,
@@ -169,14 +180,17 @@ pub(crate) struct XhrData {
 
 impl XhrData {
     /// `Value` retenues par les listeners — racines GC : un XHR
-    /// vivant garde ses callbacks `readystatechange`/`load`/…
-    /// et son `upload` en vie.
+    /// vivant garde ses callbacks `readystatechange`/`load`/…,
+    /// son `upload` et son `response` calculé en vie.
     pub(crate) fn listener_values(&self, out: &mut Vec<Value>) {
         for (_, cb, _) in &self.listeners {
             out.push(*cb);
         }
         if let Some(u) = self.upload {
             out.push(Value::Obj(u));
+        }
+        if let Some(v) = self.cached_response {
+            out.push(v);
         }
     }
 }
@@ -308,7 +322,7 @@ impl Engine {
                     status: 0,
                     status_text: String::new(),
                     headers: Vec::new(),
-                    body: String::new(),
+                    body: Vec::new(),
                     ty: "opaque",
                     url: String::new(),
                     redirected: false,
@@ -330,7 +344,7 @@ impl Engine {
             d.status = resp.status;
             d.status_text = resp.status_text;
             d.response_headers = resp.headers;
-            d.response_text = String::from_utf8_lossy(&resp.body).into_owned();
+            d.response_bytes = resp.body;
             d.ready_state = 4;
             d.handle = None;
         }
@@ -411,6 +425,14 @@ fn arg(args: &[Value], i: usize) -> Value {
     args.get(i).copied().unwrap_or(Value::Undefined)
 }
 
+/// `bytes` décodés UTF-8 puis parsés en `Document` — partagé
+/// `xhr.response`/`responseXML` (`responseType` `""`/`document`).
+fn document_response(e: &mut Engine, bytes: &[u8]) -> Value {
+    let body = String::from_utf8_lossy(bytes).into_owned();
+    let domref: crate::dom_host::DomRef = Rc::new(RefCell::new(crate::dom::Dom::from_html(&body)));
+    crate::dom_host::document_value(e, &domref)
+}
+
 impl Host for XhrHost {
     fn class_name(&self) -> &'static str {
         "XMLHttpRequest"
@@ -426,16 +448,124 @@ impl Host for XhrHost {
             "readyState" => Value::Num(f64::from(d.ready_state)),
             "status" => Value::Num(f64::from(d.status)),
             "statusText" => e.str_val(d.status_text.clone()),
-            "responseText" | "response" => e.str_val(d.response_text.clone()),
+            // Spec : `responseText` jette `InvalidStateError` si
+            // `responseType` ∉ {"" ,"text"} — il ne sert jamais
+            // de source binaire.
+            "responseText" => {
+                if !matches!(d.response_type.as_str(), "" | "text") {
+                    drop(d);
+                    let v = e.error_value(
+                        e.protos.error,
+                        "InvalidStateError",
+                        "responseText: responseType is not '' or 'text'",
+                    );
+                    return Err(crate::heap::Thrown(v));
+                }
+                e.str_val(String::from_utf8_lossy(&d.response_bytes).into_owned())
+            }
+            // Spec : `response` honorant `responseType` — texte
+            // décodé à la lecture, octets bruts pour
+            // `arraybuffer`/`blob` (un segment MSE n'est jamais
+            // corrompu), `json`/`document` calculés une fois.
+            // Avant DONE / erreur réseau : `""` texte, `null`
+            // sinon. Valeur figée (`===` entre lectures) via
+            // `cached_response` — les octets sont consommés
+            // pour les types que rien d'autre ne relit.
+            "response" => {
+                let ty = d.response_type.as_str();
+                if matches!(ty, "" | "text") {
+                    return Ok(Some(
+                        e.str_val(String::from_utf8_lossy(&d.response_bytes).into_owned()),
+                    ));
+                }
+                if d.ready_state < 4 || d.status == 0 {
+                    return Ok(Some(Value::Null));
+                }
+                if let Some(v) = d.cached_response {
+                    return Ok(Some(v));
+                }
+                let ct = d
+                    .response_headers
+                    .iter()
+                    .find(|(k, _)| k.eq_ignore_ascii_case("content-type"))
+                    .map(|(_, v)| v.clone())
+                    .unwrap_or_default();
+                drop(d);
+                // `document` garde ses octets (`responseXML` est
+                // un lecteur frère) ; `arraybuffer`/`blob`/`json`
+                // les consomment — pas de double stockage d'un
+                // segment volumineux.
+                let (ty_s, bytes) = {
+                    let mut dm = self.data.borrow_mut();
+                    let take = !matches!(dm.response_type.as_str(), "document");
+                    let b = if take {
+                        std::mem::take(&mut dm.response_bytes)
+                    } else {
+                        dm.response_bytes.clone()
+                    };
+                    (dm.response_type.clone(), b)
+                };
+                let v = match ty_s.as_str() {
+                    "arraybuffer" => {
+                        let id = e.heap.alloc_obj(crate::heap::Object {
+                            proto: Value::Obj(e.protos.array_buffer),
+                            props: Vec::new(),
+                            kind: ObjKind::ByteBuf(bytes),
+                            extensible: true,
+                            elem_integrity: 0,
+                            args_map: None,
+                        });
+                        Value::Obj(id)
+                    }
+                    "blob" => crate::files::blob_value(e, bytes, ct),
+                    "document" => document_response(e, &bytes),
+                    "json" => {
+                        let body = String::from_utf8_lossy(&bytes).into_owned();
+                        if body.trim().is_empty() {
+                            Value::Null
+                        } else {
+                            let txt = e.str_val(body);
+                            match crate::json::parse(e, txt) {
+                                Ok(v) => v,
+                                // Spec : échec de parse → `null`.
+                                Err(_) => Value::Null,
+                            }
+                        }
+                    }
+                    _ => Value::Null,
+                };
+                self.data.borrow_mut().cached_response = Some(v);
+                return Ok(Some(v));
+            }
+            // Spec : `responseXML` jette `InvalidStateError` si
+            // `responseType` ∉ {"" ,"document"} ; pour `document`
+            // c'est **le même** Document que `response`.
             "responseXML" => {
+                if !matches!(d.response_type.as_str(), "" | "document") {
+                    drop(d);
+                    let v = e.error_value(
+                        e.protos.error,
+                        "InvalidStateError",
+                        "responseXML: responseType is not '' or 'document'",
+                    );
+                    return Err(crate::heap::Thrown(v));
+                }
                 if d.ready_state < 4 || d.status == 0 {
                     Value::Null
+                } else if d.response_type == "document" {
+                    if let Some(v) = d.cached_response {
+                        v
+                    } else {
+                        let bytes = d.response_bytes.clone();
+                        drop(d);
+                        let v = document_response(e, &bytes);
+                        self.data.borrow_mut().cached_response = Some(v);
+                        v
+                    }
                 } else {
-                    let body = d.response_text.clone();
+                    let bytes = d.response_bytes.clone();
                     drop(d);
-                    let domref: crate::dom_host::DomRef =
-                        Rc::new(RefCell::new(crate::dom::Dom::from_html(&body)));
-                    crate::dom_host::document_value(e, &domref)
+                    document_response(e, &bytes)
                 }
             }
             // `xhr.upload` (JS-C91) — htmx enchaîne
@@ -832,7 +962,7 @@ impl Engine {
             status: resp.status,
             status_text: resp.status_text,
             headers: resp.headers,
-            body: String::from_utf8_lossy(&resp.body).into_owned(),
+            body: resp.body,
             ty,
             url,
             redirected: false,
@@ -868,10 +998,10 @@ impl Engine {
         self.set_own(id, "headers", hdrs, true);
         self.set_own(id, "bodyUsed", Value::Bool(false), true);
         // `res.body` = `ReadableStream` JS-C71 — un chunk
-        // `Uint8Array` du corps (transport `String`, livré
-        // d'un bloc — approximation documentée ; `text()`/…
-        // restent la voie canonique).
-        let bs = crate::streams::body_stream(self, s.body.as_bytes());
+        // `Uint8Array` du corps (livré d'un bloc —
+        // approximation documentée ; `text()`/… restent la
+        // voie canonique).
+        let bs = crate::streams::body_stream(self, &s.body);
         self.set_own(id, "body", bs, true);
         Value::Obj(id)
     }
@@ -927,7 +1057,10 @@ struct RespSpec {
     status: u16,
     status_text: String,
     headers: Vec<(String, String)>,
-    body: String,
+    /// Octets bruts du corps — les `Body` mixins décodent à
+    /// la lecture (`text()`/`json()`), `arrayBuffer()`/`blob()`
+    /// les rendent intacts.
+    body: Vec<u8>,
     ty: &'static str,
     url: String,
     redirected: bool,
@@ -1189,8 +1322,8 @@ fn h_values(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
 
 // ---- mixin Body + détection --------------------------------------
 
-/// `ObjKind::FetchBody` de `this` → `(ObjId, corps)`.
-fn fetch_body_of(e: &Engine, this: Value) -> Option<(crate::value::ObjId, String)> {
+/// `ObjKind::FetchBody` de `this` → `(ObjId, octets du corps)`.
+fn fetch_body_of(e: &Engine, this: Value) -> Option<(crate::value::ObjId, Vec<u8>)> {
     let Value::Obj(id) = this else { return None };
     match e.heap.obj(id).map(|o| &o.kind) {
         Some(ObjKind::FetchBody { body }) => Some((id, body.clone())),
@@ -1201,7 +1334,7 @@ fn fetch_body_of(e: &Engine, this: Value) -> Option<(crate::value::ObjId, String
 /// Consommation unique du corps (spec `Body`) : `bodyUsed` armé à
 /// la première lecture, second appel → `Err(valeur TypeError)` à
 /// rejeter en promesse (pas de throw synchrone).
-fn body_take(e: &mut Engine, this: Value) -> JsResult<Result<String, Value>> {
+fn body_take(e: &mut Engine, this: Value) -> JsResult<Result<Vec<u8>, Value>> {
     let Some((id, body)) = fetch_body_of(e, this) else {
         let v = e.error_value(
             e.protos.type_error,
@@ -1222,12 +1355,13 @@ fn body_take(e: &mut Engine, this: Value) -> JsResult<Result<String, Value>> {
     Ok(Ok(body))
 }
 
-/// `body.text()` → promesse du corps texte.
+/// `body.text()` → promesse du corps texte (décodage UTF-8 à
+/// la lecture — les octets stockés restent intègres).
 fn body_text(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
     let pid = e.new_promise();
     match body_take(e, this)? {
         Ok(b) => {
-            let v = e.str_val(b);
+            let v = e.str_val(String::from_utf8_lossy(&b).into_owned());
             e.resolve_promise(pid, v);
         }
         Err(err) => e.reject_promise(pid, err),
@@ -1235,12 +1369,13 @@ fn body_text(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
     Ok(Value::Obj(pid))
 }
 
-/// `body.json()` → `JSON.parse` du corps (rejet `SyntaxError`).
+/// `body.json()` → `JSON.parse` du corps décodé UTF-8 (rejet
+/// `SyntaxError`).
 fn body_json(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
     let pid = e.new_promise();
     match body_take(e, this)? {
         Ok(b) => {
-            let txt = e.str_val(b);
+            let txt = e.str_val(String::from_utf8_lossy(&b).into_owned());
             match crate::json::parse(e, txt) {
                 Ok(v) => e.resolve_promise(pid, v),
                 Err(crate::heap::Thrown(t)) => e.reject_promise(pid, t),
@@ -1251,7 +1386,9 @@ fn body_json(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
     Ok(Value::Obj(pid))
 }
 
-/// `body.arrayBuffer()` → `ArrayBuffer` des octets du corps.
+/// `body.arrayBuffer()` → `ArrayBuffer` des octets du corps —
+/// verbatim, sans transcodage (JS-C277 : le canal binaire des
+/// players MSE `fetch(...).then(r => r.arrayBuffer())`).
 fn body_arraybuf(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
     let pid = e.new_promise();
     match body_take(e, this)? {
@@ -1259,7 +1396,7 @@ fn body_arraybuf(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
             let id = e.heap.alloc_obj(crate::heap::Object {
                 proto: Value::Obj(e.protos.array_buffer),
                 props: Vec::new(),
-                kind: ObjKind::ByteBuf(b.into_bytes()),
+                kind: ObjKind::ByteBuf(b),
                 extensible: true,
                 elem_integrity: 0,
                 args_map: None,
@@ -1277,6 +1414,7 @@ fn body_formdata(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
     let pid = e.new_promise();
     match body_take(e, this)? {
         Ok(b) => {
+            let b = String::from_utf8_lossy(&b).into_owned();
             let pairs: Vec<(String, Value)> = crate::builtins::url::url_decode_pairs(&b)
                 .into_iter()
                 .map(|(k, v)| (k, e.str_val(v)))
@@ -1295,7 +1433,7 @@ fn body_blob(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
     let pid = e.new_promise();
     match body_take(e, this)? {
         Ok(b) => {
-            let bl = blob_value(e, &b, this);
+            let bl = blob_value(e, b, this);
             e.resolve_promise(pid, bl);
         }
         Err(err) => e.reject_promise(pid, err),
@@ -1318,14 +1456,14 @@ fn fetch_clone(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
             o.proto,
             match &o.kind {
                 ObjKind::FetchBody { body } => body.clone(),
-                _ => String::new(),
+                _ => Vec::new(),
             },
             o.props.clone(),
         ),
         None => return Err(e.type_error("clone: bad receiver")),
     };
     // `body` cloné — stream mémoire des mêmes octets (JS-C71).
-    let bs = crate::streams::body_stream(e, body.as_bytes());
+    let bs = crate::streams::body_stream(e, &body);
     let nid = e.heap.alloc_obj(crate::heap::Object {
         proto,
         props: Vec::new(),
@@ -1394,8 +1532,9 @@ pub(crate) fn request_of(e: &mut Engine, url: Value) -> JsResult<Value> {
 }
 
 /// Tuple `(url, status, status_text, headers, body, type)`
-/// d'un snapshot `Response` pour `Cache.put` (JS-C72).
-pub(crate) type CacheSnapshot = (String, u16, String, Vec<(String, String)>, String, String);
+/// d'un snapshot `Response` pour `Cache.put` (JS-C72) — `body`
+/// en octets bruts (le cache préserve le binaire).
+pub(crate) type CacheSnapshot = (String, u16, String, Vec<(String, String)>, Vec<u8>, String);
 
 /// Snapshot d'une `Response` pour `Cache.put` (JS-C72) —
 /// `(url, status, status_text, headers, body, type)` copiés.
@@ -1520,7 +1659,7 @@ fn request_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
         return Err(e.type_error("Request: url required"));
     }
     let url: String;
-    let (mut method, mut headers, mut body) = ("GET".to_string(), Vec::new(), String::new());
+    let (mut method, mut headers, mut body) = ("GET".to_string(), Vec::new(), Vec::new());
     let mut input_signal = Value::Undefined;
     // `mode`/`credentials` : hérités du `Request` input,
     // surchargés par `init`, défauts spec (JS-C77).
@@ -1581,7 +1720,7 @@ fn request_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
         if let Some(b) = e.get_prop(oid, "body") {
             if !matches!(b, Value::Undefined | Value::Null) {
                 let (text, ct) = body_init_text(e, b)?;
-                body = text;
+                body = text.into_bytes();
                 if let Some(ct) = ct {
                     if !headers
                         .iter()
@@ -1626,7 +1765,7 @@ fn request_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     let bs = if body.is_empty() {
         Value::Null
     } else {
-        crate::streams::body_stream(e, body.as_bytes())
+        crate::streams::body_stream(e, &body)
     };
     let id = e.heap.alloc_obj(crate::heap::Object {
         proto: Value::Obj(proto),
@@ -1703,8 +1842,11 @@ fn request_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
 /// (`RangeError` sinon, spec), `init.headers` = `HeadersInit`.
 fn response_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     let (body, body_ct) = match arg(args, 0) {
-        Value::Undefined | Value::Null => (String::new(), None),
-        v => body_init_text(e, v)?,
+        Value::Undefined | Value::Null => (Vec::new(), None),
+        v => {
+            let (t, ct) = body_init_text(e, v)?;
+            (t.into_bytes(), ct)
+        }
     };
     let init = arg(args, 1);
     let (status, status_text, mut headers) = response_init(e, init, 200)?;
@@ -1764,7 +1906,7 @@ fn response_error(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
         status: 0,
         status_text: String::new(),
         headers: Vec::new(),
-        body: String::new(),
+        body: Vec::new(),
         ty: "error",
         url: String::new(),
         redirected: false,
@@ -1789,7 +1931,7 @@ fn response_redirect(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Valu
         status,
         status_text: String::new(),
         headers: vec![("location".into(), resolved)],
-        body: String::new(),
+        body: Vec::new(),
         ty: "default",
         url: String::new(),
         redirected: false,
@@ -1817,7 +1959,7 @@ fn response_json(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
         status,
         status_text,
         headers,
-        body,
+        body: body.into_bytes(),
         ty: "default",
         url: String::new(),
         redirected: false,
@@ -1830,7 +1972,7 @@ fn response_json(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
 /// `res.blob()` → vrai `Blob` JS-C70 (proto réel, `slice`,
 /// `FileReader`-compatible) ; `type` = `Content-Type` de la
 /// réponse ; corps = texte UTF-8 décodé (transport `String`).
-fn blob_value(e: &mut Engine, body: &str, this: Value) -> Value {
+fn blob_value(e: &mut Engine, body: Vec<u8>, this: Value) -> Value {
     let ty = match this {
         Value::Obj(id) => match e.get_prop(id, "headers") {
             Some(h) => e
@@ -1842,7 +1984,7 @@ fn blob_value(e: &mut Engine, body: &str, this: Value) -> Value {
         },
         _ => String::new(),
     };
-    crate::files::blob_value(e, body.as_bytes().to_vec(), ty)
+    crate::files::blob_value(e, body, ty)
 }
 
 /// `BodyInit` → `(texte, Content-Type suggéré)` — `FormData` et
@@ -1944,7 +2086,10 @@ pub(crate) fn fetch_fn(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Va
         }
         if let Some((_, b)) = fetch_body_of(e, input) {
             if !b.is_empty() {
-                req.body = Some(b);
+                // Corps `Request` → fil transport `String`
+                // (déviation documentée : seuls les corps
+                // réponse sont garantis octet-fidèles).
+                req.body = Some(String::from_utf8_lossy(&b).into_owned());
             }
         }
         signal = e.get_prop(rid, "signal").unwrap_or(Value::Undefined);

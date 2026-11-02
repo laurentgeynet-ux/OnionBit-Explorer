@@ -5580,6 +5580,56 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   `promise_species` ; test262
   1046/1046 (31 skips).
 
+- [x] **JS-C277. Octets réponse
+  fidèles XHR/fetch**
+  (`explorer-jscore`, chantier
+  « vidéo réelle » b1 — prérequis
+  MSE réel, ADR-0029) —
+  `XhrResponse.body` arrivait en
+  `Vec<u8>` intègre puis mourrait
+  dans `from_utf8_lossy` :
+  `response` rendait une chaîne
+  quel que soit `responseType`
+  et `arrayBuffer()` ré-encodait
+  du texte corrompu — aucun octet
+  binaire n'atteignait
+  `SourceBuffer.appendBuffer`,
+  quel que soit le décodeur
+  amont. `XhrData` porte
+  `response_bytes: Vec<u8>`
+  (source unique) ; `response`
+  honore `responseType` —
+  `arraybuffer`/`blob` rendent
+  les octets bruts (consommés à
+  la première lecture : pas de
+  double stockage d'un segment),
+  `json` parsé (`null` en échec,
+  spec), `document` = **le même**
+  Document que `responseXML` ;
+  `responseText`/`responseXML`
+  jettent `InvalidStateError`
+  hors de leur type admis (spec).
+  `response` figé via
+  `cached_response` (racine GC,
+  `===` entre lectures).
+  `ObjKind::FetchBody` porte
+  `Vec<u8>` : `text()`/`json()`/
+  `formData()` décodent à la
+  lecture, `arrayBuffer()`/
+  `blob()`/`body` stream rendent
+  les octets intacts ;
+  `Cache.put` snapshot les bytes
+  (`CacheEntry.body` en octets).
+  Corps `Request` inchangé —
+  `String` sur le fil transport
+  (déviation documentée, upload
+  seul). Verrous : 4 tests
+  `tests/xhr.rs` — arraybuffer
+  fidèle non-UTF-8 + identité,
+  json/null, blob + document
+  partagé, `fetch().arrayBuffer()`
+  octets.
+
 - [x] **Étape CMP-4. Réarmement
   des balises « bloquées par CMP »**
   (`explorer-core`, §B-4 bras CMP

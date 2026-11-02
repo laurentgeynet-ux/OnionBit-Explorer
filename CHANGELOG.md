@@ -230,6 +230,48 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   `download_started`/`failed`.
   Compat `&mut self` par oneshot.
   14 tests core + 5 tests api.
+- **JS-C277 — octets réponse
+  fidèles XHR/fetch**
+  (`explorer-jscore`, chantier
+  « vidéo réelle » b1 — prérequis
+  MSE réel) — `XhrResponse.body`
+  arrivait en `Vec<u8>` intègre
+  puis mourrait dans
+  `from_utf8_lossy` : aucun octet
+  binaire n'atteignait jamais
+  `appendBuffer`, quel que soit
+  le décodeur amont. `XhrData`
+  conserve désormais
+  `response_bytes: Vec<u8>`
+  (source unique) ; `response`
+  honore `responseType` —
+  `arraybuffer`/`blob` rendent les
+  octets bruts (consommés une
+  fois — pas de double stockage),
+  `json` est parsé (`null` en
+  échec, spec), `document` rend
+  **le même** Document que
+  `responseXML` ; `responseText`/
+  `responseXML` jettent
+  `InvalidStateError` hors de
+  leur type admis. `response`
+  est figé (`===` entre lectures)
+  via `cached_response` — racine
+  GC. `ObjKind::FetchBody` porte
+  `Vec<u8>` : `text()`/`json()`
+  décodent à la lecture,
+  `arrayBuffer()`/`blob()` rendent
+  les octets intacts ; `Cache.put`
+  snapshot les bytes. Corps
+  `Request` inchangé (`String`
+  sur le fil transport —
+  déviation documentée, upload
+  seul). Verrous : 4 tests
+  `tests/xhr.rs` — arraybuffer
+  fidèle non-UTF-8 + identité,
+  json/null, blob + document
+  partagé, `fetch().arrayBuffer()`
+  octets.
 
 - **JS-C269 — backrefs `\N` +
   groupes nommés** (`explorer-jscore`,
