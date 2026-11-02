@@ -49,6 +49,14 @@ pwsh -File scripts/vol_memwatch.ps1 -DaemonPid <pid> -MaxMB 5120 `
 #   rapport → C:\OnionBit-vol\RAPPORT_VOL_<date>_AGENT<n>_<TAG>.md
 ```
 
+**Coordination multi-équipes — `CLAIMS.md`** : plusieurs
+équipes volent en parallèle. Avant le premier `navigate`,
+ajouter sa ligne dans `C:\OnionBit-vol\CLAIMS.md` (vol N,
+agent N, tag, cibles) — une cible sur une ligne récente
+(< 2 h, sans rapport) est occupée. Le rapport déposé libère
+les cibles ; un claim > 2 h sans rapport = vol mort, cibles
+libres.
+
 En clôture de vol : daemon tué par **PID** (jamais `taskkill
 /IM` — les voisins appartiennent aux autres équipes), logs
 archivés au corpus, `git add -A && git commit` dans
