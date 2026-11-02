@@ -225,9 +225,14 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
   loops` ; `location_reload_
   replays_request` et le verrou
   cumul restent verts.
-- **JS-C264 — §B-59 2ᵉ racine :
+- **JS-C265 — §B-59 2ᵉ racine :
   chaîne parent cyclique →
   `ancestors` non borné**
+  *(commit `bb2f9669` titré
+  « JS-C264 » par collision de
+  numérotation avec `7780697a` —
+  la référence canonique est
+  JS-C265)*
   (`explorer-jscore`) — diagnostic
   vols 546-551 (journal
   `EXPLORER_JS_BREADCRUMB` en
