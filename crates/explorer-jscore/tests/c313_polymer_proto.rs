@@ -129,4 +129,11 @@ fn c313_polymer_element_proto_methods() {
     println!("x-yt.connectedCallback() → {r9}");
     let r10 = ev(&mut e, "(function(){var el=document.querySelector('x-yt');try{el.ready();return'ready-ok|dR='+el.__dataReady}catch(x){return'THREW:'+String(x.stack||x.message||x).slice(0,320)}})()");
     println!("x-yt.ready() → {r10}");
+    // Le set exact des méthodes own sur `Polymer.Element.prototype`
+    // — element-mixin en définit ~20 ; la perte sélective doit se
+    // lire ici (boundary du drop).
+    let r11 = ev(&mut e, "(function(){var p=Polymer.Element.prototype,n=Object.getOwnPropertyNames(p);return 'own='+n.length+':'+n.sort().join(',')})()");
+    println!("PE.prototype own props → {r11}");
+    let r12 = ev(&mut e, "(function(){var p=Object.getPrototypeOf(Polymer.Element.prototype);return 'parent='+(p&&p.constructor&&p.constructor.name)+'|own='+(p?Object.getOwnPropertyNames(p).length:-1)+'|tA='+(p&&typeof p._takeAttributes)+'|eA='+(p&&typeof p._ensureAttributes)})()");
+    println!("PE.prototype parent → {r12}");
 }
