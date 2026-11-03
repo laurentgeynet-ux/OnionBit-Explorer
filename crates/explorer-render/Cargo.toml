@@ -22,6 +22,7 @@ resvg.workspace = true
 tiny-skia.workspace = true
 ttf-parser.workspace = true
 owned_ttf_parser.workspace = true
+tracing.workspace = true
 
 [dev-dependencies]
 explorer-dom.workspace = true

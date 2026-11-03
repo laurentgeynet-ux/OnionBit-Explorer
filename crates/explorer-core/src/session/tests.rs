@@ -416,9 +416,11 @@ fn profile_resync_phases() {
         let rects = list.changed_rects(&prev);
         eprintln!("  changed_rects: {:?} ({} rects)", t.elapsed(), rects.len());
     }
-    // Même cap que `repaint` puis cull — fenêtre raster.
-    if list.height > MAX_FRAME_DIM {
-        list.height = MAX_FRAME_DIM;
+    // Même cap que `repaint` (Étape 180 — `vh.max(1024)`
+    // px CSS) puis cull — fenêtre raster.
+    let cap = vh.max(MIN_FULL_DOC_CSS);
+    if list.height > cap {
+        list.height = cap;
     }
     cull_display_list(&mut list);
     eprintln!("  après cull   : {} items", list.items.len());

@@ -3642,9 +3642,10 @@ async fn document_charset_honors_transport_header() {
 }
 
 /// Étape 65 — `tab_info.doc_h` rapporte la hauteur
-/// **mesurée** (pas le plafond raster 2¹⁴) et
+/// **mesurée** (pas le plafond raster) et
 /// `doc_h_clamped` signale que la frame ne couvre pas le
-/// document entier.
+/// document entier. Étape 180 (P4) : le cap fenêtré est
+/// dynamique — `vh.max(1024)` px CSS, plus `MAX_FRAME_DIM`.
 #[tokio::test]
 async fn doc_h_reports_measured_height_not_frame_cap() {
     let (mut s, t) = test_session();
@@ -3653,15 +3654,90 @@ async fn doc_h_reports_measured_height_not_frame_cap() {
         200,
         "<html><body><div style=\"height:20000px\">deep</div></body></html>",
     );
+    // Document « moyen » : plein-doc sous l'ancien cap
+    // 16 384, fenêtré sous le cap dynamique (viewport test
+    // 800×600 → cap 1 024).
+    t.route(
+        "/mid",
+        200,
+        "<html><body><div style=\"height:5000px\">deep</div></body></html>",
+    );
     t.route("/short", 200, "<html><body><p>x</p></body></html>");
     let id = s.open_tab();
     s.navigate(id, "http://h.test/tall").await.unwrap();
     let info = s.tab_info(id).unwrap();
     assert!(info.doc_h > 16_384.0, "doc_h={}", info.doc_h);
     assert!(info.doc_h_clamped);
+    s.navigate(id, "http://h.test/mid").await.unwrap();
+    let info = s.tab_info(id).unwrap();
+    assert!(info.doc_h_clamped, "doc_h={}", info.doc_h);
     s.navigate(id, "http://h.test/short").await.unwrap();
     let info = s.tab_info(id).unwrap();
     assert!(!info.doc_h_clamped, "doc_h={}", info.doc_h);
+}
+
+/// Étape 180 (P4) — mode fenêtré permanent : document plus
+/// haut que `vh.max(1024)` → frame `vw×vh` (bornée O(viewport),
+/// pas O(doc)), `doc_h` réel conservé pour le scroll, et
+/// `frame_png_full` (`?full=1`) re-rasterise le document
+/// entier à la demande — le haut **et** le bas y sont peints
+/// (items ancrés `-scroll_y`, bande `[-scroll_y, doc_h]`, R-140).
+#[tokio::test]
+async fn windowed_frame_is_viewport_and_full_doc_served_on_demand() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/",
+        200,
+        "<!doctype html><html><head><style>\
+         body{margin:0} #a{height:1700px;background:#00ff00}\
+         #b{height:1300px;background:#ff0000}\
+         </style></head><body><div id=a></div><div id=b></div></body></html>",
+    );
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    // Fenêtré : doc ~3 000 px > cap 1 024 → frame = viewport.
+    let (fw, fh, px) = s.frame_pixels(id).unwrap();
+    assert_eq!((fw, fh), (800, 600), "frame bornée au viewport");
+    let info = s.tab_info(id).unwrap();
+    assert!(info.doc_h_clamped, "doc_h={}", info.doc_h);
+    assert!(info.doc_h > 2_500.0, "doc_h={}", info.doc_h);
+    // Le vert du haut est peint ; le rouge (y≥1700) est hors
+    // fenêtre — il ne doit PAS figurer dans la tranche.
+    assert_eq!(
+        count_color(fw as usize, fh as usize, px, [255, 0, 0]),
+        0,
+        "le bas du document ne doit pas fuiter dans la tranche"
+    );
+
+    // `full=1` : raster on-demand du document entier — bande
+    // `[-scroll_y, list.height]` → haut (vert) ET bas (rouge).
+    let png = s.frame_png_full(id).unwrap();
+    assert_eq!(&png[..8], b"\x89PNG\r\n\x1a\n");
+    // Hauteur IHDR (big-endian, octets 20..24) ≈ doc_h.
+    let h_full = u32::from_be_bytes(png[20..24].try_into().unwrap());
+    assert!(h_full > 2_000, "PNG plein-doc h={h_full}");
+
+    // Le scroll reste borné au viewport — le vert du haut a
+    // disparu, le rouge du bas remplit la fenêtre.
+    s.handle_input(id, InputEvent::Scroll { dy: 2_400.0 })
+        .await
+        .unwrap();
+    let (fw, fh, px) = s.frame_pixels(id).unwrap();
+    assert_eq!((fw, fh), (800, 600), "fenêtre au scroll");
+    assert!(
+        count_color(fw as usize, fh as usize, px, [255, 0, 0]) > 0,
+        "scroll : le bas du document est peint dans la fenêtre"
+    );
+
+    // Document sous le cap : `frame_png_full` = frame stockée.
+    t.route("/s", 200, "<html><body><p>court</p></body></html>");
+    s.navigate(id, "http://h.test/s").await.unwrap();
+    let info = s.tab_info(id).unwrap();
+    assert!(!info.doc_h_clamped);
+    let png = s.frame_png_full(id).unwrap();
+    assert_eq!(&png[..8], b"\x89PNG\r\n\x1a\n");
+    let h_small = u32::from_be_bytes(png[20..24].try_into().unwrap());
+    assert!(h_small <= 1_024, "petit doc non fenêtré h={h_small}");
 }
 
 /// R-87 — `html,body{height:100%}` (vector-2022) : le contenu

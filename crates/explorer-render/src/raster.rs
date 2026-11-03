@@ -76,10 +76,20 @@ impl Frame {
         enc.set_compression(png::Compression::Fast);
         enc.set_filter(png::Filter::NoFilter);
         let Ok(mut writer) = enc.write_header() else {
+            tracing::warn!(
+                w = self.width,
+                h = self.height,
+                "encode_png_to : write_header échoué"
+            );
             return false;
         };
-        let ok = (|| {
-            let mut stream = writer.stream_writer_with_size(PNG_IDAT_TARGET).ok()?;
+        // Chaque étape est nommée — un `false` muet ne
+        // diagnostique rien (`png_b=0` >55 Mo, vols 592/598,
+        // Étape 180).
+        let ok: Result<(), &'static str> = (|| {
+            let mut stream = writer
+                .stream_writer_with_size(PNG_IDAT_TARGET)
+                .map_err(|_| "stream_writer")?;
             let row_len = self.width as usize * 4;
             let h = self.height as usize;
             let mut band = Vec::with_capacity(row_len * PNG_BAND_ROWS);
@@ -97,12 +107,29 @@ impl Frame {
                         }
                     }
                 }
-                stream.write_all(&band).ok()?;
+                stream.write_all(&band).map_err(|_| "write_all")?;
             }
-            stream.finish().ok()?;
-            Some(())
+            stream.finish().map_err(|_| "stream_finish")?;
+            Ok(())
         })();
-        ok.is_some() && writer.finish().is_ok()
+        if let Err(step) = ok {
+            tracing::warn!(
+                w = self.width,
+                h = self.height,
+                step,
+                "encode_png_to : échec IDAT"
+            );
+            return false;
+        }
+        let done = writer.finish().is_ok();
+        if !done {
+            tracing::warn!(
+                w = self.width,
+                h = self.height,
+                "encode_png_to : writer.finish échoué"
+            );
+        }
+        done
     }
 }
 

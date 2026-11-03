@@ -1028,6 +1028,7 @@ dependencies = [
  "png 0.18.1",
  "resvg",
  "tiny-skia",
+ "tracing",
  "ttf-parser",
 ]
 

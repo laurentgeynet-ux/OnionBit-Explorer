@@ -22,10 +22,63 @@ impl Session {
             // Un encodage vide n'est jamais un PNG serviable
             // — rejeté plutôt que caché : la prochaine
             // demande retentera l'encodage (cohérence avec
-            // le `204` + `Retry-After` de l'API).
+            // le `204` + `Retry-After` de l'API). L'échec
+            // d'encodage est `WARN`-nommé côté
+            // `encode_png_to` (Étape 180 — `png_b=0` >55 Mo).
             entry.png = entry.frame.as_ref()?.encode_png().filter(|p| !p.is_empty());
         }
         entry.png.clone()
+    }
+
+    /// PNG du **document entier** (`?full=1`, Étape 180 —
+    /// P4). En mode plein-doc la frame stockée couvre déjà
+    /// tout ; en mode fenêtré le document est re-rasterisé
+    /// à la demande depuis la display list — bande
+    /// `[-scroll_y, list.height]` (items ancrés `-scroll_y`
+    /// au build, clamp négatif relâché R-140), bornée à
+    /// `MAX_FRAME_DIM / scale` px CSS : au-delà, `WARN` +
+    /// repli sur la tranche stockée (contrat `full=1`
+    /// historique). Le PNG plein-doc est **transitoire** —
+    /// jamais rangé dans `entry.png` qui reste le miroir
+    /// strict de `entry.frame`.
+    pub fn frame_png_full(&mut self, tab: TabId) -> Option<Vec<u8>> {
+        self.ensure_painted(tab);
+        if !self.tabs.get(&tab).is_some_and(|t| t.windowed) {
+            return self.frame_png(tab);
+        }
+        let fonts = self.apply_ctx().fonts;
+        let scale = self.scale.max(f32::EPSILON);
+        let entry = self.tabs.get_mut(&tab)?;
+        let list = entry.list.as_ref()?;
+        if list.height > MAX_FRAME_DIM / scale {
+            let (list_h, doc_h) = (list.height, entry.doc_h);
+            tracing::warn!(
+                tab,
+                doc_h,
+                list_h,
+                "frame_png_full : document au-delà de la borne — tranche viewport servie"
+            );
+            return self.frame_png(tab);
+        }
+        let frame = explorer_render::rasterize_window_cached(
+            list,
+            &fonts as &dyn explorer_layout::font::FontSource,
+            scale,
+            -entry.scroll_y,
+            list.height,
+            &mut entry.font_cache,
+        )?;
+        let png = frame.encode_png();
+        if png.as_ref().is_none_or(Vec::is_empty) {
+            tracing::warn!(
+                tab,
+                w = frame.width,
+                h = frame.height,
+                "frame_png_full : encodage vide ou échoué"
+            );
+            return None;
+        }
+        png
     }
 
     /// Auto-réparation (étape 56b rouvert, terrain mission

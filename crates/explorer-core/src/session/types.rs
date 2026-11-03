@@ -601,13 +601,16 @@ pub struct TabInfo {
     pub scroll_y: f32,
     /// Hauteur **mesurée** du document posé (px CSS) —
     /// étape 65 : la frame raster est plafonnée
-    /// (`MAX_FRAME_DIM`), le document peut dépasser ce qui
-    /// est peint ; `doc_h` rapporte la hauteur réelle.
+    /// (fenêtrée depuis l'étape 180), le document peut
+    /// dépasser ce qui est peint ; `doc_h` rapporte la
+    /// hauteur réelle.
     pub doc_h: f32,
     /// `true` si la frame ne couvre pas `doc_h` en entier —
-    /// le bas du document est hors raster (plafond
-    /// `MAX_FRAME_DIM / scale` atteint). Sonder `doc_h`
-    /// pour la hauteur réelle, jamais `frame.height`.
+    /// mode **fenêtré** (Étape 180 — P4 : la frame ne peint
+    /// que la tranche viewport `vh.max(1024)` px CSS, le
+    /// document plus haut reste scrollable et `?full=1` le
+    /// re-rasterise à la demande). Sonder `doc_h` pour la
+    /// hauteur réelle, jamais `frame.height`.
     pub doc_h_clamped: bool,
 }
 

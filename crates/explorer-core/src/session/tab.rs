@@ -158,9 +158,13 @@ impl Tab {
         self.dirty = snap.dirty;
         self.emitted = snap.emitted;
         self.spec_paint = false; // snapshot auto-cohérent (56c)
-                                 // Le moteur détaché de l'ancien contexte est mort —
-                                 // son drapeau et les tampons qui lui appartenaient
-                                 // (53f) ne doivent pas survivre à la restauration.
+                                 // La frame n'est pas gelée (budget bfcache) — le
+                                 // mode raster sera reposé par le premier repaint de
+                                 // la page restaurée ; le flag figé mentirait avant.
+        self.windowed = false;
+        // Le moteur détaché de l'ancien contexte est mort —
+        // son drapeau et les tampons qui lui appartenaient
+        // (53f) ne doivent pas survivre à la restauration.
         self.js_detached = None;
         // Moteur neuf restauré — le disjoncteur de l'ancien
         // contexte ne survit pas (vol 25).

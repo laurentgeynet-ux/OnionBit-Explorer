@@ -493,6 +493,11 @@ pub(crate) struct Tab {
     /// (frame neuve + DOM/URL anciens) persiste ou est
     /// capturé dans un snapshot bfcache.
     spec_paint: bool,
+    /// `frame` est une tranche viewport (raster fenêtré
+    /// Étape 180, P4) — posée par `repaint_payload` via
+    /// `put_paint`, relue par `tab_info`/`frame_png_full`.
+    /// `false` quand la frame est plein-doc ou absente.
+    windowed: bool,
     /// Epoch de navigation à laquelle le moteur JS détaché
     /// appartient (étape 53f) — `Some` = `js` est sorti pour
     /// un `run_pending`/`sync_dom` **hors verrou**. À la
@@ -1495,6 +1500,7 @@ impl Session {
                 emitted: 0,
                 bfcache: VecDeque::new(),
                 spec_paint: false,
+                windowed: false,
                 js_detached: None,
                 js_stall_until: None,
                 slow_eval_streak: 0,
@@ -1652,9 +1658,11 @@ impl Session {
                 can_forward: pos + 1 < t.hist.len(),
                 scroll_y: t.scroll_y,
                 doc_h: t.doc_h,
-                // Plafond raster en px CSS (étape 65) — la frame
-                // ne peint rien au-delà, `doc_h` reste réel.
-                doc_h_clamped: t.doc_h > MAX_FRAME_DIM / self.scale.max(f32::EPSILON),
+                // Mode fenêtré (Étape 180, P4) — la frame ne
+                // couvre que la tranche viewport, `doc_h`
+                // reste réel. Flag posé par `repaint_payload`,
+                // plus dérivé d'une constante (borne dynamique).
+                doc_h_clamped: t.windowed,
             }
         })
     }

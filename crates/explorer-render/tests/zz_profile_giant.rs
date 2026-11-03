@@ -148,7 +148,11 @@ fn profile_giant() {
     let t = Instant::now();
     let mut list = build_display_list_full(&bx, icb_w, 768.0, 0.0, &images);
     if list.height > 16_384.0 {
-        list.height = 16_384.0; // même cap que la session (MAX_FRAME_DIM)
+        // Borne raster `MAX_FRAME_DIM` — le cap fenêtre de
+        // la session est `vh.max(1024)` px CSS depuis
+        // l'étape 180 ; ce profil simule le raster plein-doc
+        // à la demande de `?full=1` (même borne render).
+        list.height = 16_384.0;
     }
     eprintln!(
         "display list   : {:?} ({} items, h={})",

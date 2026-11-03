@@ -428,9 +428,10 @@ async fn close_tab(State(st): State<ApiState>, Path(id): Path<TabId>) -> Respons
 
 /// Paramètres de `GET /frame` (étape 55) — région en
 /// pixels physiques, comme les `rects` de
-/// `frame_invalidated`. `full=1` = document entier (borne
-/// `MAX_FRAME_DIM` : un document plus haut n'a jamais de
-/// frame pleine — la tranche viewport est servie).
+/// `frame_invalidated`. `full=1` = document entier : en
+/// mode fenêtré (Étape 180) re-rasterisé à la demande,
+/// borné `MAX_FRAME_DIM/scale` px CSS — au-delà, tranche
+/// viewport servie (contrat historique).
 #[derive(serde::Deserialize)]
 struct FrameRegionQuery {
     x: Option<u32>,
@@ -447,8 +448,9 @@ struct FrameRegionQuery {
 /// (contrat vols 13/17 : la taille servie ne dépend plus
 /// de `doc_h` — un document non clampé ne renvoie plus un
 /// PNG de 50 Mio) ; `?x=&y=&w=&h=` (px physiques, étape
-/// 55) sert la région demandée ; `?full=1` sert toute la
-/// frame stockée (comportement historique, borné).
+/// 55) sert la région demandée ; `?full=1` sert le
+/// document entier — plein-doc stocké ou re-rasterisé à
+/// la demande en mode fenêtré (Étape 180, borné).
 async fn frame(
     State(st): State<ApiState>,
     Path(id): Path<TabId>,
@@ -458,7 +460,7 @@ async fn frame(
     let _ = session.tick_animations(id);
     let png = match (q.x, q.y, q.w, q.h, q.full) {
         (Some(rx), Some(ry), Some(rw), Some(rh), _) => session.frame_png_region(id, rx, ry, rw, rh),
-        (.., Some(1)) => session.frame_png(id),
+        (.., Some(1)) => session.frame_png_full(id),
         // Défaut = la tranche viewport en px physiques ; la
         // région est clippée par `frame_region` — une frame
         // plus petite (doc court, fenêtre raster) revient

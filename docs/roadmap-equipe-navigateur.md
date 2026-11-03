@@ -6339,6 +6339,44 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   `auto_nav_budget_throttles_slow_
   loops`.
 
+- [x] **Étape 180. Raster fenêtré
+  permanent** (`explorer-core` +
+  `explorer-api`, chantier P4 —
+  consommation R-62/R-140, spec
+  PIPE→NAV journalisée) : le cap
+  d'armement passe de
+  `MAX_FRAME_DIM/scale` (16 384 px
+  physiques) à `list.height >
+  vh.max(MIN_FULL_DOC_CSS=1024)`
+  px CSS — tout doc plus haut que
+  le viewport produit une frame
+  `vw×vh` constante (~5 Mio au
+  lieu de 50-67 Mio sur pages
+  hautes : repaint 16 s guardian,
+  PNG >55 Mo inencodable vols
+  592/598) ; diff dirty inchangé
+  sous le cap. `Tab.windowed`
+  stocké (borne dynamique, plus
+  dérivée) → `doc_h_clamped` ;
+  `doc_h` réel pour le scroll.
+  `?full=1` → `frame_png_full` :
+  raster on-demand de la bande
+  `[-scroll_y, doc_h]` (clamp
+  négatif R-140), borné, WARN +
+  repli tranche au-delà — les
+  captures `/vol` gardent leur
+  plein-doc. Diagnostic encoder :
+  les 3 sorties `false` de
+  `encode_png_to` nommées en WARN
+  (retouche PIPE signalée).
+  `frame_pixels` `vw×vh` constant
+  → textures FFI bornées. Verrous
+  `windowed_frame_is_viewport_
+  and_full_doc_served_on_demand`
+  + `doc_h_reports_…` étendu.
+  Phase 2 optionnelle :
+  dirty-windowed.
+
 - [ ] **Écarts terrain — vol humain
   22/10 (release `39ab821`, FFI)** :
   second run humain — trois constats

@@ -307,6 +307,12 @@ pub(crate) struct PaintPayload {
     pub scroll_y: f32,
     /// Drapeau peinture spéculative (56c).
     pub spec_paint: bool,
+    /// `frame` est une **tranche viewport** (raster fenêtré
+    /// Étape 180, P4 — `raster_window` l'a posé) : les
+    /// consommateurs de « frame = document » (`frame_png_full`,
+    /// `doc_h_clamped`) lisent ce flag — jamais dérivé d'une
+    /// constante, la borne qui arme le mode est dynamique.
+    pub windowed: bool,
     /// Régions invalides accumulées (diff dirty).
     pub dirty: Vec<Rect>,
     /// Watermark des régions déjà rapportées.
@@ -486,6 +492,7 @@ impl Tab {
             doc_h: self.doc_h,
             scroll_y: self.scroll_y,
             spec_paint: std::mem::take(&mut self.spec_paint),
+            windowed: self.windowed,
             dirty: std::mem::take(&mut self.dirty),
             emitted: self.emitted,
             bg_aliases: std::mem::take(&mut self.bg_aliases),
@@ -539,6 +546,7 @@ impl Tab {
         }
         self.doc_h = p.doc_h;
         self.spec_paint = p.spec_paint;
+        self.windowed = p.windowed;
         self.dirty = p.dirty;
         self.emitted = p.emitted;
         // Tampon étape 98 non consommé (relayout sauté) :
@@ -2095,8 +2103,15 @@ pub(crate) fn repaint_payload(
     if let Some((rect, color)) = caret::caret_rect(p, ctx, cdom) {
         list.items.push(DisplayItem::FillRect { rect, color });
     }
-    let frame_cap = MAX_FRAME_DIM / ctx.scale.max(f32::EPSILON);
-    if list.height > frame_cap {
+    // Étape 180 (P4) — le framebuffer ne couvre plus que la
+    // tranche viewport : tout document plus haut que
+    // `vh.max(MIN_FULL_DOC_CSS)` (px CSS) passe en raster
+    // fenêtré — coût de repaint borné O(vh) au lieu de
+    // O(doc_h), frame ~5 Mio constante au lieu de ~50+ Mio
+    // sur pages hautes (repaint 16 s guardian, PNG >55 Mo
+    // inencodable). Sous le cap le chemin plein-doc + diff
+    // dirty reste (petites pages, mutations localisées).
+    if list.height > vh.max(MIN_FULL_DOC_CSS) {
         return raster_window(p, ctx, list, vw, vh);
     }
     // Le diff se calcule sur les listes **non cullées** :
@@ -2185,6 +2200,7 @@ pub(crate) fn repaint_payload(
     p.frame = Some(frame);
     p.png = None;
     p.spec_paint = false;
+    p.windowed = false;
     Ok(())
 }
 
@@ -2226,6 +2242,7 @@ fn raster_window(
     p.frame = Some(frame);
     p.png = None;
     p.spec_paint = false;
+    p.windowed = true;
     Ok(())
 }
 

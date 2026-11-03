@@ -33,6 +33,15 @@ pub(crate) const MAX_DIRTY_RECTS: usize = 32;
 /// stratégie fenêtre/tuiles consignée `interface-equipes.md`).
 pub(crate) const MAX_FRAME_DIM: f32 = 16_384.0;
 
+/// Plancher du cap plein-doc (px CSS, Étape 180 — P4) : un
+/// document plus haut que `vh.max(MIN_FULL_DOC_CSS)` passe
+/// en raster fenêtré — le framebuffer ne couvre plus que la
+/// tranche viewport ; en dessous le chemin plein-doc + diff
+/// dirty reste actif. `MAX_FRAME_DIM` (px **physiques**)
+/// reste la borne du pixmap servi, y compris du raster
+/// plein-doc à la demande de `frame_png_full`.
+pub(crate) const MIN_FULL_DOC_CSS: f32 = 1_024.0;
+
 /// Seuil du diff de dirty-rects (étape 55g) : au-delà, la
 /// fusion O(k²) des régions dans `changed_rects` coûte plus
 /// cher que la pleine frame — on la produit directement.
