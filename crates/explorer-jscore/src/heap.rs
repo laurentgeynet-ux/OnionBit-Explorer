@@ -760,6 +760,12 @@ fn cell_bytes(data: &CellData) -> usize {
             base + std::mem::size_of::<Object>()
                 + o.props.capacity() * std::mem::size_of::<(String, Prop)>()
                 + o.props.iter().map(|(k, _)| k.len()).sum::<usize>()
+                // Index `nom→position` J15 : capacité de la map +
+                // clés **clonées** (mémoire réelle, borne §B-59).
+                + o.idx.borrow().as_ref().map_or(0, |m| {
+                    m.capacity() * std::mem::size_of::<(String, u32)>()
+                        + m.keys().map(String::len).sum::<usize>()
+                })
                 // Charges utiles octets (borne mémoire JS-C65 —
                 // un upload géant ne doit pas passer sous le
                 // compteur : `ByteBuf`/`Blob` comptent leur
@@ -923,7 +929,24 @@ pub struct Object {
     /// Prototype link (`Value::Null` or `Value::Obj`).
     pub proto: Value,
     /// Own properties, insertion-ordered.
+    ///
+    /// Mutations positionnelles uniquement par
+    /// [`Object::push_prop`]/[`Object::remove_own`] : tout `push`/
+    /// `remove` direct désynchronise `idx` (J15).
     pub props: Vec<(String, Prop)>,
+    /// Index `nom → position` dans `props`, paresseux (J15) :
+    /// `None` tant que l'objet reste sous le seuil
+    /// [`PROPS_IDX_MIN`] ou n'est jamais lu par clé ; construit au
+    /// premier lookup au-delà ; invalidé (`None`) par toute
+    /// mutation qui décale les positions (`remove`). Un `Some`
+    /// couvre **toutes** les clés — jamais d'entrées partielles.
+    /// `RefCell` : `find(&self)` doit pouvoir le construire —
+    /// l'emprunt ne traverse jamais un callback JS. Ne porte
+    /// aucun `Value` → non tracé par le GC ; sa mémoire est
+    /// comptée dans `cell_bytes`. `pub(crate)` : les littéraux
+    /// `Object { … }` hors module le posent `None` — jamais autre
+    /// chose (invariant ci-dessus).
+    pub(crate) idx: std::cell::RefCell<Option<std::collections::HashMap<String, u32>>>,
     /// Kind-specific payload.
     pub kind: ObjKind,
     /// `[[Extensible]]` — `Object.preventExtensions`/`seal`/`freeze`
@@ -1404,47 +1427,81 @@ pub(crate) fn f64_to_f16(v: f64) -> u16 {
     sign | ((exp + 15) as u16) << 10 | (man as u16)
 }
 
+/// Seuil de construction de l'index `props` (J15) : sous cette
+/// taille le scan linéaire coûte moins qu'une `HashMap`.
+const PROPS_IDX_MIN: usize = 24;
+
 impl Object {
-    /// New ordinary object with the given prototype.
-    pub fn ordinary(proto: Value) -> Self {
+    /// New object with the given prototype and kind — propriétés
+    /// vides, extensible, intégrité par défaut. Remplace les
+    /// littéraux `Object { … }` : `idx` est privé et naît `None`.
+    pub fn blank(proto: Value, kind: ObjKind) -> Self {
         Object {
             proto,
             props: Vec::new(),
-            kind: ObjKind::Ordinary,
+            idx: std::cell::RefCell::new(None),
+            kind,
             extensible: true,
             elem_integrity: 0,
             args_map: None,
         }
+    }
+
+    /// New ordinary object with the given prototype.
+    pub fn ordinary(proto: Value) -> Self {
+        Object::blank(proto, ObjKind::Ordinary)
     }
 
     /// New array.
     pub fn array(elems: Vec<Value>, proto: Value) -> Self {
-        Object {
-            proto,
-            props: Vec::new(),
-            kind: ObjKind::Array(elems),
-            extensible: true,
-            elem_integrity: 0,
-            args_map: None,
-        }
+        Object::blank(proto, ObjKind::Array(elems))
     }
 
     /// New callable.
     pub fn fun(f: Fun, proto: Value) -> Self {
-        Object {
-            proto,
-            props: Vec::new(),
-            kind: ObjKind::Fun(f),
-            extensible: true,
-            elem_integrity: 0,
-            args_map: None,
+        Object::blank(proto, ObjKind::Fun(f))
+    }
+
+    /// Position de `key` dans `props` — scan linéaire sous le seuil
+    /// [`PROPS_IDX_MIN`], index `nom → position` au-delà (construit
+    /// au premier lookup, reconstruit après invalidation). Au-delà
+    /// de `u32::MAX` props l'index est inutilisable → repli linéaire
+    /// (univers inaccessible : ~200 Go de props — dégradation, pas
+    /// de panic).
+    pub(crate) fn prop_pos(&self, key: &str) -> Option<usize> {
+        if self.props.len() < PROPS_IDX_MIN || self.props.len() >= u32::MAX as usize {
+            return self.props.iter().position(|(k, _)| k == key);
         }
+        let mut guard = self.idx.borrow_mut();
+        let m = guard.get_or_insert_with(|| {
+            let mut m = std::collections::HashMap::with_capacity(self.props.len());
+            for (i, (k, _)) in self.props.iter().enumerate() {
+                if let Ok(pos) = u32::try_from(i) {
+                    m.insert(k.clone(), pos);
+                }
+            }
+            m
+        });
+        m.get(key)
+            .map(|i| usize::try_from(*i).unwrap_or(usize::MAX))
+    }
+
+    /// Insertion en fin d'ordre — met l'index à jour s'il existe.
+    /// **Le seul `props.push` autorisé** (invariant J15).
+    pub(crate) fn push_prop(&mut self, key: String, prop: Prop) {
+        if let Some(m) = self.idx.get_mut().as_mut() {
+            if let Ok(pos) = u32::try_from(self.props.len()) {
+                m.insert(key.clone(), pos);
+            }
+        }
+        self.props.push((key, prop));
     }
 
     /// Raw own property lookup (no prototype walk, no array-index
     /// magic) — accessors come back as `Prop::Acc`.
     pub fn find(&self, key: &str) -> Option<Prop> {
-        self.props.iter().find(|(k, _)| k == key).map(|(_, p)| *p)
+        self.prop_pos(key)
+            .and_then(|i| self.props.get(i).map(|(_, p)| *p))
     }
 
     /// Own property lookup — data value only (`None` for accessors).
@@ -1458,7 +1515,10 @@ impl Object {
     /// honoured iff still `writable` — same-value case included).
     /// Returns `false` on rejection.
     pub fn define_data(&mut self, key: &str, value: Value, attrs: PropAttrs) -> bool {
-        if let Some((_, p)) = self.props.iter_mut().find(|(k, _)| k == key) {
+        if let Some(i) = self.prop_pos(key) {
+            let Some((_, p)) = self.props.get_mut(i) else {
+                return false;
+            };
             match p {
                 Prop::Data { value: v, attrs: a } => {
                     if a.configurable {
@@ -1491,8 +1551,7 @@ impl Object {
                 }
             }
         } else if self.extensible {
-            self.props
-                .push((key.to_string(), Prop::Data { value, attrs }));
+            self.push_prop(key.to_string(), Prop::Data { value, attrs });
             true
         } else {
             false
@@ -1502,7 +1561,10 @@ impl Object {
     /// `[[DefineOwnProperty]]` for an accessor — same rules. `get`
     /// or `set` may be `Undefined` (absent side).
     pub fn define_accessor(&mut self, key: &str, get: Value, set: Value, attrs: PropAttrs) -> bool {
-        if let Some((_, p)) = self.props.iter_mut().find(|(k, _)| k == key) {
+        if let Some(i) = self.prop_pos(key) {
+            let Some((_, p)) = self.props.get_mut(i) else {
+                return false;
+            };
             match p {
                 Prop::Acc {
                     get: g,
@@ -1539,8 +1601,7 @@ impl Object {
                 }
             }
         } else if self.extensible {
-            self.props
-                .push((key.to_string(), Prop::Acc { get, set, attrs }));
+            self.push_prop(key.to_string(), Prop::Acc { get, set, attrs });
             true
         } else {
             false
@@ -1559,12 +1620,13 @@ impl Object {
         };
         // Force-install : utilisé par les builtins avant toute
         // protection — on outrepasse configurable.
-        if let Some((_, p)) = self.props.iter_mut().find(|(k, _)| k == key) {
-            *p = Prop::Data { value, attrs };
+        if let Some(i) = self.prop_pos(key) {
+            if let Some((_, p)) = self.props.get_mut(i) {
+                *p = Prop::Data { value, attrs };
+            }
             return;
         }
-        self.props
-            .push((key.to_string(), Prop::Data { value, attrs }));
+        self.push_prop(key.to_string(), Prop::Data { value, attrs });
     }
 
     /// Merge a getter/setter side into an own property (existing
@@ -1576,7 +1638,10 @@ impl Object {
             enumerable,
             configurable: true,
         };
-        if let Some((_, p)) = self.props.iter_mut().find(|(k, _)| k == key) {
+        if let Some(i) = self.prop_pos(key) {
+            let Some((_, p)) = self.props.get_mut(i) else {
+                return;
+            };
             match p {
                 Prop::Acc { get: g, set: s, .. } => {
                     if !matches!(get, Value::Undefined) {
@@ -1593,18 +1658,20 @@ impl Object {
                 }
             }
         }
-        self.props
-            .push((key.to_string(), Prop::Acc { get, set, attrs }));
+        self.push_prop(key.to_string(), Prop::Acc { get, set, attrs });
     }
 
     /// Remove an own property if `[[Configurable]]`. Returns `false`
     /// when the prop exists and is locked (the caller decides
     /// sloppy-silent vs strict-`TypeError`).
     pub fn remove_own(&mut self, key: &str) -> bool {
-        match self.props.iter().position(|(k, _)| k == key) {
-            Some(i) if !self.props[i].1.configurable() => false,
+        match self.prop_pos(key) {
+            Some(i) if self.props.get(i).is_some_and(|(_, p)| !p.configurable()) => false,
             Some(i) => {
                 self.props.remove(i);
+                // `remove` décale toutes les positions > i :
+                // index invalidé, reconstruit au prochain lookup.
+                *self.idx.get_mut() = None;
                 true
             }
             None => true,

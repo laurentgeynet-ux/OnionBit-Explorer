@@ -156,8 +156,8 @@ impl Engine {
         let Some(imports) = self
             .heap
             .obj(root)
-            .and_then(|o| o.props.iter().find(|(k, _)| k == "imports"))
-            .and_then(|(_, p)| p.data_value())
+            .and_then(|o| o.find("imports"))
+            .and_then(|p| p.data_value())
         else {
             return;
         };

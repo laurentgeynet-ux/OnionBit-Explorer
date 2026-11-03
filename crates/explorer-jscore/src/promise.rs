@@ -142,6 +142,7 @@ impl Engine {
         let id = self.heap.alloc_obj(crate::heap::Object {
             proto: Value::Obj(self.protos.promise),
             props: Vec::new(),
+            idx: std::cell::RefCell::new(None),
             // Placeholder: resolved below once the bound fns exist.
             kind: ObjKind::Promise(JsPromise {
                 state: PromiseState::Pending,

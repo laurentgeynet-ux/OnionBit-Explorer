@@ -3107,6 +3107,7 @@ impl Engine {
         Value::Big(self.heap.alloc_obj(Object {
             proto,
             props: Vec::new(),
+            idx: std::cell::RefCell::new(None),
             kind: ObjKind::BigInt(b),
             extensible: true,
             elem_integrity: 0,
@@ -3441,6 +3442,7 @@ impl Engine {
         let id = self.heap.alloc_obj(Object {
             proto: Value::Obj(self.protos.regexp),
             props: Vec::new(),
+            idx: std::cell::RefCell::new(None),
             kind: ObjKind::RegExp(Rc::new(re)),
             extensible: true,
             elem_integrity: 0,
@@ -5857,6 +5859,7 @@ impl Engine {
         Value::Obj(self.heap.alloc_obj(Object {
             proto,
             props: Vec::new(),
+            idx: std::cell::RefCell::new(None),
             kind: ObjKind::Host(host),
             extensible: true,
             elem_integrity: 0,
@@ -6151,7 +6154,7 @@ impl Engine {
         // commit instantané entre deux ticks).
         if array_index(key).is_none() && key != "length" {
             let prop_bytes = self.heap.obj(id).map_or(0, |o| {
-                if o.props.iter().any(|(k, _)| k == key) {
+                if o.find(key).is_some() {
                     0
                 } else {
                     (o.props.len() + 1)
@@ -6201,7 +6204,10 @@ impl Engine {
                 return Ok(true);
             }
         }
-        if let Some((_, p)) = o.props.iter_mut().find(|(k, _)| k == key) {
+        if let Some(i) = o.prop_pos(key) {
+            let Some((_, p)) = o.props.get_mut(i) else {
+                return Ok(false);
+            };
             match p {
                 crate::heap::Prop::Data { value, attrs } => {
                     if !attrs.writable {
@@ -6214,13 +6220,13 @@ impl Engine {
                 crate::heap::Prop::Acc { set, .. } => Ok(matches!(*set, Value::Obj(_))),
             }
         } else if o.extensible {
-            o.props.push((
+            o.push_prop(
                 key.to_string(),
                 crate::heap::Prop::Data {
                     value: v,
                     attrs: crate::heap::PropAttrs::FULL,
                 },
-            ));
+            );
             Ok(true)
         } else {
             Ok(false)
@@ -7006,6 +7012,7 @@ impl Engine {
         let id = self.heap.alloc_obj(crate::heap::Object {
             proto,
             props: Vec::new(),
+            idx: std::cell::RefCell::new(None),
             kind: ObjKind::Symbol {
                 desc,
                 key: key.clone(),

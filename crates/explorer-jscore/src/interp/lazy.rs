@@ -1919,6 +1919,7 @@ pub(crate) fn gen_lazy_obj(e: &mut Engine, env: EnvRef, this: Value, body: Rc<Ve
     let id = e.heap.alloc_obj(Object {
         proto: Value::Obj(e.protos.iterator),
         props: Vec::new(),
+        idx: std::cell::RefCell::new(None),
         kind: ObjKind::GenLive { exec },
         extensible: true,
         elem_integrity: 0,
@@ -1945,6 +1946,7 @@ fn bound_resume(e: &mut Engine, gen: Value, outer: Option<ObjId>, ok: bool) -> V
     let id = e.heap.alloc_obj(Object {
         proto: Value::Obj(e.protos.function),
         props: Vec::new(),
+        idx: std::cell::RefCell::new(None),
         kind: ObjKind::Fun(Fun::BoundNative {
             name: "async_resume",
             f,
