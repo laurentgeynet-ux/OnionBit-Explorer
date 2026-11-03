@@ -123,15 +123,15 @@ pub enum Stmt {
     /// `continue lbl`).
     Labeled {
         /// Label name.
-        name: String,
+        name: Rc<str>,
         /// Labelled statement.
         body: Box<Stmt>,
     },
     /// `break [label]`
-    Break(Option<String>),
+    Break(Option<Rc<str>>),
     /// `continue [label]` — `Some` restreint aux labels de boucle
     /// (early error du parseur).
-    Continue(Option<String>),
+    Continue(Option<Rc<str>>),
     /// `return [e]`
     Return(Option<Expr>),
     /// `throw e`
@@ -169,11 +169,11 @@ pub enum Stmt {
 #[derive(Debug, Clone)]
 pub enum ImportBind {
     /// `import def from 'm'` — liaise le `default` du module.
-    Default(String),
+    Default(Rc<str>),
     /// `import {a as b}` — `(exported name, local name)`.
-    Named(String, String),
+    Named(Rc<str>, Rc<str>),
     /// `import * as ns from 'm'` — whole module namespace object.
-    Namespace(String),
+    Namespace(Rc<str>),
 }
 
 /// `export` forms.
@@ -183,7 +183,7 @@ pub enum ExportDecl {
     /// for `export {a} from 'm'` (re-export: no local binding).
     Named {
         /// `(local name, exported name)` pairs.
-        list: Vec<(String, String)>,
+        list: Vec<(Rc<str>, Rc<str>)>,
         /// Re-export source specifier, if any.
         from: Option<String>,
     },
@@ -197,7 +197,7 @@ pub enum ExportDecl {
     /// of the dependency (except `default`).
     Star {
         /// `export * as ns` — the whole namespace re-exported as one name.
-        ns: Option<String>,
+        ns: Option<Rc<str>>,
         /// Module specifier.
         from: String,
     },
@@ -219,7 +219,7 @@ pub struct VarDecl {
 pub enum Pat {
     /// `name` — binds in scope (`var`/`let`/`const`/param) or assigns
     /// (`[x] = …` destructuring without a declarator).
-    Ident(String),
+    Ident(Rc<str>),
     /// Existing property target `o.p` / `a[i]` — only produced by
     /// destructuring *assignments*, never legal in declarations.
     Lvalue(Expr),
@@ -301,7 +301,7 @@ pub struct SwitchCase {
 #[derive(Debug, Clone)]
 pub struct FnLit {
     /// Name (declarations always have one; expressions may not).
-    pub name: Option<String>,
+    pub name: Option<Rc<str>>,
     /// Parameters (patterns + defaults + rest).
     pub params: Vec<Param>,
     /// Body statements.
@@ -366,7 +366,7 @@ pub struct Param {
 #[derive(Debug, Clone)]
 pub struct ClassLit {
     /// `class C` — `None` for anonymous class expressions.
-    pub name: Option<String>,
+    pub name: Option<Rc<str>>,
     /// `extends e` clause.
     pub super_: Option<Expr>,
     /// Members in source order.
@@ -547,7 +547,7 @@ pub enum Expr {
     /// `null`.
     Null,
     /// Identifier reference.
-    Ident(String),
+    Ident(Rc<str>),
     /// `this`.
     This,
     /// `[a, , b]` — `None` elements are holes (read as `undefined`).
@@ -831,7 +831,7 @@ impl Pat {
     fn take_children(&mut self, out: &mut Vec<Pat>) {
         match self {
             Pat::Rest(p) | Pat::Default(p, _) => {
-                out.push(std::mem::replace(&mut **p, Pat::Ident(String::new())));
+                out.push(std::mem::replace(&mut **p, Pat::Ident(Rc::from(""))));
             }
             Pat::Array(elems) => {
                 for e in elems.drain(..).flatten() {

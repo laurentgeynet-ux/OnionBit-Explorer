@@ -163,7 +163,7 @@ struct Parser {
     /// Pile des labels actifs `(nom, est_boucle)` — vidée à
     /// l'entrée de chaque fonction (les labels ne traversent pas
     /// les fonctions, spec `LabelledItem` scoping).
-    labels: Vec<(String, bool)>,
+    labels: Vec<(Rc<str>, bool)>,
     /// Séquence d'identité des classes — chaque corps de classe
     /// reçoit un numéro ; ses noms privés sont résolus au parse
     /// vers des clés sentinelle `\u{f131}privN.name` (invisibles à
@@ -305,7 +305,7 @@ impl Parser {
         match self.peek().clone() {
             Tok::Ident(s) => {
                 self.next();
-                Ok(s)
+                Ok(s.to_string())
             }
             Tok::Kw(kw) => {
                 self.next();
@@ -387,7 +387,7 @@ impl Parser {
 
     /// Label optionnel après `break`/`continue` — ASI : le nom doit
     /// être sur la même ligne.
-    fn label_arg(&mut self) -> Result<Option<String>> {
+    fn label_arg(&mut self) -> Result<Option<Rc<str>>> {
         if self.cur().newline_before {
             return Ok(None);
         }
@@ -492,7 +492,7 @@ impl Parser {
             // `async function f(){}` — ASI guard: a newline between
             // `async` and `function` keeps `async` an identifier.
             Tok::Ident(s)
-                if s == "async"
+                if &*s == "async"
                     && matches!(
                         self.toks.get(self.pos + 1),
                         Some(t) if t.tok == Tok::Kw(Kw::Function) && !t.newline_before
@@ -506,7 +506,7 @@ impl Parser {
             // `using x = e` (ES2026) — contextuel comme `let` : une
             // décl seulement devant ident/`[`/`{`.
             Tok::Ident(s)
-                if s == "using"
+                if &*s == "using"
                     && matches!(
                         self.toks.get(self.pos + 1).map(|t| &t.tok),
                         Some(Tok::Ident(_) | Tok::P(P::LBracket | P::LBrace))
@@ -522,10 +522,10 @@ impl Parser {
             }
             // `await using x = e` — `@@asyncDispose`.
             Tok::Ident(s)
-                if s == "await"
+                if &*s == "await"
                     && matches!(
                         self.toks.get(self.pos + 1).map(|t| &t.tok),
-                        Some(Tok::Ident(u)) if u == "using"
+                        Some(Tok::Ident(u)) if &**u == "using"
                     )
                     && matches!(
                         self.toks.get(self.pos + 2).map(|t| &t.tok),
@@ -766,7 +766,7 @@ impl Parser {
                     Tok::Kw(Kw::Function) => Expr::Function(self.function(false, false)?),
                     // `export default async function`
                     Tok::Ident(s)
-                        if s == "async"
+                        if &*s == "async"
                             && matches!(
                                 self.toks.get(self.pos + 1),
                                 Some(t) if t.tok == Tok::Kw(Kw::Function) && !t.newline_before
@@ -812,7 +812,7 @@ impl Parser {
                 ))))
             }
             Tok::Ident(s)
-                if s == "async"
+                if &*s == "async"
                     && matches!(
                         self.toks.get(self.pos + 1),
                         Some(t) if t.tok == Tok::Kw(Kw::Function) && !t.newline_before
@@ -834,7 +834,7 @@ impl Parser {
 
     /// `{a as b, c}` — `export` specifier list, returns
     /// `(local, exported)` pairs.
-    fn export_specifiers(&mut self) -> Result<Vec<(String, String)>> {
+    fn export_specifiers(&mut self) -> Result<Vec<(Rc<str>, Rc<str>)>> {
         self.expect_p(P::LBrace, "`{`")?;
         let mut list = Vec::new();
         loop {
@@ -859,15 +859,19 @@ impl Parser {
     /// `IdentifierName` or string literal — the names allowed on
     /// each side of `as` (`import {a}`, `export {a as b}`, string
     /// export names ES2022).
-    fn module_export_name(&mut self) -> Result<String> {
+    fn module_export_name(&mut self) -> Result<Rc<str>> {
         match self.peek().clone() {
-            Tok::Ident(s) | Tok::Str(s) => {
+            Tok::Ident(s) => {
                 self.next();
                 Ok(s)
             }
+            Tok::Str(s) => {
+                self.next();
+                Ok(crate::intern(&s))
+            }
             Tok::Kw(kw) => {
                 self.next();
-                Ok(kw_str(kw).to_string())
+                Ok(crate::intern(kw_str(kw)))
             }
             _ => Err(self.err("expected export name")),
         }
@@ -885,7 +889,7 @@ impl Parser {
     }
 
     fn eat_ident(&mut self, word: &str) -> bool {
-        if matches!(self.peek(), Tok::Ident(s) if s == word) {
+        if matches!(self.peek(), Tok::Ident(s) if &**s == word) {
             self.next();
             true
         } else {
@@ -1059,7 +1063,7 @@ impl Parser {
                         self.pattern()?
                     } else {
                         let name = match &key {
-                            PropKey::Name(n) => n.clone(),
+                            PropKey::Name(n) => crate::intern(n),
                             PropKey::Computed(_) => {
                                 return Err(self.err("computed key needs `:` in pattern"))
                             }
@@ -1111,7 +1115,11 @@ impl Parser {
             return Ok(PropKey::Computed(e));
         }
         let name = match self.peek().clone() {
-            Tok::Ident(s) | Tok::Str(s) => {
+            Tok::Ident(s) => {
+                self.next();
+                s.to_string()
+            }
+            Tok::Str(s) => {
                 self.next();
                 s
             }
@@ -1134,7 +1142,7 @@ impl Parser {
 
     /// `of` — contextual keyword, stays an identifier elsewhere.
     fn eat_of(&mut self) -> bool {
-        if matches!(self.peek(), Tok::Ident(s) if s == "of") {
+        if matches!(self.peek(), Tok::Ident(s) if &**s == "of") {
             self.next();
             true
         } else {
@@ -1186,7 +1194,7 @@ impl Parser {
         }
         self.expect_kw(Kw::For, "`for`")?;
         // `for await (…)` — `await` is contextual; the paren follows.
-        let is_await = matches!(self.peek(), Tok::Ident(s) if s == "await")
+        let is_await = matches!(self.peek(), Tok::Ident(s) if &**s == "await")
             && matches!(
                 self.toks.get(self.pos + 1).map(|t| &t.tok),
                 Some(Tok::P(P::LParen))
@@ -1216,7 +1224,7 @@ impl Parser {
             } else {
                 None
             };
-            let is_of = matches!(self.peek(), Tok::Ident(s) if s == "of");
+            let is_of = matches!(self.peek(), Tok::Ident(s) if &**s == "of");
             let is_in = self.peek() == &Tok::Kw(Kw::In);
             if is_of || is_in {
                 if var_init.is_some() && is_of {
@@ -1256,22 +1264,22 @@ impl Parser {
         }
         // `for (using x of y)` (ES2026) — `using` est décl seulement
         // si suivi d'un binding ≠ `of` (`for (using of y)` = ident).
-        let is_using = matches!(self.peek(), Tok::Ident(s) if s == "using")
+        let is_using = matches!(self.peek(), Tok::Ident(s) if &**s == "using")
             && match self.toks.get(self.pos + 1).map(|t| &t.tok) {
                 Some(Tok::P(P::LBracket | P::LBrace)) => true,
-                Some(Tok::Ident(u)) => u != "of",
+                Some(Tok::Ident(u)) => &**u != "of",
                 _ => false,
             };
         if is_using {
             self.next(); // `using`
             let pat = self.pattern_decl()?;
-            if !matches!(self.peek(), Tok::Ident(s) if s == "of") {
+            if !matches!(self.peek(), Tok::Ident(s) if &**s == "of") {
                 return Err(self.err("`using` declarations require a `for-of` loop"));
             }
             return self.for_in_of(ForTarget::Using { pat, is_await }, None, is_await);
         }
         let init = self.expr(true)?;
-        if matches!(self.peek(), Tok::Ident(s) if s == "of") || self.peek() == &Tok::Kw(Kw::In) {
+        if matches!(self.peek(), Tok::Ident(s) if &**s == "of") || self.peek() == &Tok::Kw(Kw::In) {
             if !is_lvalue(&init) && !matches!(init, Expr::Array(_) | Expr::Object(_)) {
                 return Err(self.err("invalid for-in/of target"));
             }
@@ -1315,7 +1323,7 @@ impl Parser {
             // `try {} catch {}` (optional binding) or `catch (pat)`.
             if self.check_p(P::LBrace) {
                 self.expect_p(P::LBrace, "`{`")?;
-                Some((Pat::Ident(String::new()), self.stmt_list()?))
+                Some((Pat::Ident(Rc::from("")), self.stmt_list()?))
             } else {
                 self.expect_p(P::LParen, "`(`")?;
                 let pat = self.pattern()?;
@@ -1411,7 +1419,7 @@ impl Parser {
         // ailleurs `yield` reste un identifiant (réservé en strict
         // via `check_strict_binding`). Pas de saut de ligne avant
         // l'opérande (spec `YieldExpression`).
-        if self.in_gen && matches!(self.peek(), Tok::Ident(s) if s == "yield") {
+        if self.in_gen && matches!(self.peek(), Tok::Ident(s) if &**s == "yield") {
             self.next();
             let delegate = self.eat_p(P::Star);
             let no_arg = matches!(
@@ -1475,7 +1483,7 @@ impl Parser {
     fn try_arrow(&mut self, no_in: bool) -> Result<Option<Expr>> {
         // `async` arrow forms — `async x =>`, `async (…) =>`. Only
         // when `=>` actually follows (speculative like `(`).
-        if matches!(self.peek(), Tok::Ident(s) if s == "async")
+        if matches!(self.peek(), Tok::Ident(s) if &**s == "async")
             && !self.toks[self.pos + 1].newline_before
         {
             if let Some(e) = self.try_async_arrow(no_in)? {
@@ -1728,7 +1736,7 @@ impl Parser {
         // operand follows (`var await = 1`, `o.await`, `await(x)`…).
         // We treat `await` as unary whenever the next token can start
         // an expression — `await = x` keeps the identifier meaning.
-        if matches!(self.peek(), Tok::Ident(s) if s == "await")
+        if matches!(self.peek(), Tok::Ident(s) if &**s == "await")
             && !matches!(
                 self.toks.get(self.pos + 1).map(|t| &t.tok),
                 None | Some(
@@ -2013,7 +2021,7 @@ impl Parser {
             }
             Tok::Ident(s) => {
                 // `async function [f](){}` — expression form.
-                if s == "async"
+                if &*s == "async"
                     && matches!(
                         self.toks.get(self.pos + 1),
                         Some(t) if t.tok == Tok::Kw(Kw::Function) && !t.newline_before
@@ -2160,7 +2168,7 @@ impl Parser {
                 // `*m(){}` generator method / `async *m(){}`.
                 let mut gen = self.eat_p(P::Star);
                 // `async m(){}` method.
-                let async_ = matches!(self.peek(), Tok::Ident(s) if s == "async")
+                let async_ = matches!(self.peek(), Tok::Ident(s) if &**s == "async")
                     && !matches!(
                         self.toks.get(self.pos + 1).map(|t| &t.tok),
                         Some(Tok::P(
@@ -2180,7 +2188,7 @@ impl Parser {
                 gen |= self.eat_p(P::Star); // `async *m(){}`
                                             // `get k(){}`/`set k(v){}` vs a `get:`/`set:` prop.
                 let mut accessor: Option<ClassMemberKind> = None;
-                if matches!(self.peek(), Tok::Ident(s) if s == "get" || s == "set")
+                if matches!(self.peek(), Tok::Ident(s) if &**s == "get" || &**s == "set")
                     && !matches!(
                         self.toks.get(self.pos + 1).map(|t| &t.tok),
                         Some(Tok::P(
@@ -2188,7 +2196,7 @@ impl Parser {
                         ))
                     )
                 {
-                    accessor = Some(if matches!(self.peek(), Tok::Ident(s) if s == "get") {
+                    accessor = Some(if matches!(self.peek(), Tok::Ident(s) if &**s == "get") {
                         self.next();
                         ClassMemberKind::Getter
                     } else {
@@ -2259,7 +2267,7 @@ impl Parser {
                             // as a plain literal it just assigns then
                             // stores the value (harmless tolerance).
                             let name = match &key {
-                                PropKey::Name(n) => n.clone(),
+                                PropKey::Name(n) => crate::intern(n),
                                 PropKey::Computed(_) => {
                                     return Err(self.err("bad `{…=…}` shorthand"))
                                 }
@@ -2277,7 +2285,7 @@ impl Parser {
                             // Shorthand `{x}` → `x: x` (computed keys
                             // cannot be shorthand).
                             let name = match &key {
-                                PropKey::Name(n) => n.clone(),
+                                PropKey::Name(n) => crate::intern(n),
                                 PropKey::Computed(_) => {
                                     return Err(self.err("computed key cannot be shorthand"))
                                 }
@@ -2512,7 +2520,7 @@ impl Parser {
             let mpos = self.pos_here();
             let mut static_ = false;
             // `static m()` vs a method literally named `static`.
-            if matches!(self.peek(), Tok::Ident(s) if s == "static")
+            if matches!(self.peek(), Tok::Ident(s) if &**s == "static")
                 && !matches!(
                     self.toks.get(self.pos + 1).map(|t| &t.tok),
                     Some(Tok::P(
@@ -2555,7 +2563,7 @@ impl Parser {
                 continue;
             }
             // `async m()` — same lookahead rule.
-            let async_ = matches!(self.peek(), Tok::Ident(s) if s == "async")
+            let async_ = matches!(self.peek(), Tok::Ident(s) if &**s == "async")
                 && !matches!(
                     self.toks.get(self.pos + 1).map(|t| &t.tok),
                     Some(Tok::P(
@@ -2575,7 +2583,7 @@ impl Parser {
             let gen = self.eat_p(P::Star); // `*m(){}` / `async *m(){}`
                                            // `get k()`/`set k(v)` vs a plain `get`/`set` member.
             let mut kind = ClassMemberKind::Method;
-            if matches!(self.peek(), Tok::Ident(s) if s == "get" || s == "set")
+            if matches!(self.peek(), Tok::Ident(s) if &**s == "get" || &**s == "set")
                 && !matches!(
                     self.toks.get(self.pos + 1).map(|t| &t.tok),
                     Some(Tok::P(
@@ -2583,7 +2591,7 @@ impl Parser {
                     ))
                 )
             {
-                kind = if matches!(self.peek(), Tok::Ident(s) if s == "get") {
+                kind = if matches!(self.peek(), Tok::Ident(s) if &**s == "get") {
                     self.next();
                     ClassMemberKind::Getter
                 } else {

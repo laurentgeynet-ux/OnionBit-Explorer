@@ -203,7 +203,7 @@ impl Engine {
                 let txt = format!("{s:?}");
                 let short: String = txt.chars().take(200).collect();
                 eprintln!("[stmt] {short}");
-                let frames: Vec<String> = self
+                let frames: Vec<Rc<str>> = self
                     .call_stack
                     .iter()
                     .rev()
@@ -502,7 +502,7 @@ impl Engine {
                 // cellule du tour suivant, la closure capturée au
                 // tour k garde `i = k`). `ienv` = env du tour
                 // courant ; `names` = liaisons à recopier.
-                let mut names: Vec<(String, bool)> = Vec::new();
+                let mut names: Vec<(Rc<str>, bool)> = Vec::new();
                 let mut ienv = env.clone();
                 if let Some(init) = init {
                     match init {
@@ -766,7 +766,7 @@ impl Engine {
     /// en propageant `f`. `labels` = labels de boucle captés via
     /// `pending_labels` (`continue lbl` ne les avale que si `lbl`
     /// y figure ; `break lbl` n'est jamais avalé par une boucle).
-    pub(crate) fn loop_flow(f: Flow, labels: &[String]) -> Option<Flow> {
+    pub(crate) fn loop_flow(f: Flow, labels: &[Rc<str>]) -> Option<Flow> {
         match f {
             Flow::Normal | Flow::Continue(None) => None,
             Flow::Continue(Some(l)) => {
@@ -835,7 +835,7 @@ impl Engine {
             .and_then(|n| self.heap_string_of(n))
             .unwrap_or_default();
         if cur.is_empty() && !name.is_empty() {
-            let n = self.str_val(name.clone());
+            let n = self.str_val(&**name);
             self.set_own(id, "name", n, false);
         }
     }

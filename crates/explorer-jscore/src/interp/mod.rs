@@ -207,7 +207,7 @@ pub(crate) enum BindMode {
 /// seule fois).
 pub(crate) enum LValueRef {
     /// Liaison de variable — l'`EnvRef` vit côté appelant.
-    Ident(String),
+    Ident(Rc<str>),
     /// Propriété `base[key]` — `base` déjà évaluée.
     Prop(Value, String),
 }
@@ -532,7 +532,7 @@ pub struct Engine {
     /// Labels de boucle en attente — posés par `Stmt::Labeled`
     /// juste avant l'exécution d'une boucle, consommés par cette
     /// boucle (`a: b: for` empile les deux labels).
-    pending_labels: Vec<String>,
+    pending_labels: Vec<Rc<str>>,
     /// `using` disposal frames — une par corps contenant
     /// une décl `using` (ES2026) : `(dispose_fn, resource, is_async)`.
     pub(crate) using_stack: Vec<Vec<(Value, Value, bool)>>,
@@ -801,10 +801,10 @@ pub(crate) enum Flow {
     Normal,
     /// `break [label]` — `Some` n'est avalé que par le statement
     /// étiqueté correspondant, jamais par une boucle interne.
-    Break(Option<String>),
+    Break(Option<Rc<str>>),
     /// `continue [label]` — `Some` n'est avalé que par la boucle
     /// portant ce label (capturé dans `my_labels`).
-    Continue(Option<String>),
+    Continue(Option<Rc<str>>),
     Return(Value),
 }
 
@@ -4217,7 +4217,7 @@ impl Engine {
                 .params
                 .iter()
                 .all(|p| !p.rest && matches!(p.pat, crate::ast::Pat::Ident(_)));
-            let map: Vec<Option<String>> = if !la.lit.strict && simple {
+            let map: Vec<Option<Rc<str>>> = if !la.lit.strict && simple {
                 (0..argc.min(la.lit.params.len()))
                     .map(|i| match &la.lit.params[i].pat {
                         crate::ast::Pat::Ident(n) => Some(n.clone()),
@@ -4737,7 +4737,7 @@ impl Engine {
     /// Collecte les `(nom, mutable)` d'un pattern `let`/`const` —
     /// utilisé par `for (let …)` pour recréer les liaisons à chaque
     /// itération (spec `CreatePerIterationEnvironment`).
-    pub(crate) fn lex_pat_names(pat: &Pat, mutable: bool, out: &mut Vec<(String, bool)>) {
+    pub(crate) fn lex_pat_names(pat: &Pat, mutable: bool, out: &mut Vec<(Rc<str>, bool)>) {
         match pat {
             Pat::Ident(n) => out.push((n.clone(), mutable)),
             Pat::Lvalue(_) => {}
@@ -5435,7 +5435,7 @@ impl Engine {
                 (Some(lit.name.clone().unwrap_or_default()), None)
             }
             ObjKind::Fun(Fun::Native { name, .. } | Fun::BoundNative { name, .. }) => {
-                (Some((*name).to_string()), None)
+                (Some(crate::intern(name)), None)
             }
             ObjKind::Fun(Fun::Bound { target, .. }) => (None, Some(*target)),
             _ => (None, None),
@@ -5530,12 +5530,12 @@ impl Engine {
                         .ok()
                         .and_then(|v| self.to_js_string(v).ok())
                         .unwrap_or_default();
-                    Some(format!("bound {tn}"))
+                    Some(crate::intern(&format!("bound {tn}")))
                 }
                 _ => None,
             };
             return n.map(|n| Prop::Data {
-                value: self.str_val(n),
+                value: self.str_val(&*n),
                 attrs: crate::heap::PropAttrs {
                     writable: false,
                     enumerable: false,

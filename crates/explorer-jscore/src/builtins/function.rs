@@ -85,7 +85,7 @@ pub(crate) fn function_to_string(e: &mut Engine, this: Value, _a: &[Value]) -> J
                     .iter()
                     .map(|p| match &p.pat {
                         crate::ast::Pat::Ident(n) if p.rest => format!("...{n}"),
-                        crate::ast::Pat::Ident(n) => n.clone(),
+                        crate::ast::Pat::Ident(n) => n.to_string(),
                         crate::ast::Pat::Default(b, _) if !p.rest => match b.as_ref() {
                             crate::ast::Pat::Ident(n) => format!("{n}=…"),
                             _ => "…".to_string(),

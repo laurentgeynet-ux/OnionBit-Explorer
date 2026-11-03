@@ -163,7 +163,7 @@ pub(crate) struct BrowsingContext {
     pub ce_upgrade_slot: Option<Value>,
     pub strict: bool,
     pub completion: Value,
-    pub pending_labels: Vec<String>,
+    pub pending_labels: Vec<std::rc::Rc<str>>,
     pub modules: Vec<crate::module::Module>,
     pub module_specs: std::collections::HashMap<String, usize>,
     /// Identité canonique `url résolue → module index` (cf.

@@ -107,9 +107,9 @@ struct LowerCx {
 }
 
 impl LowerCx {
-    fn fresh(&mut self) -> String {
+    fn fresh(&mut self) -> std::rc::Rc<str> {
         self.n += 1;
-        format!("__g{}", self.n)
+        crate::intern(&format!("__g{}", self.n))
     }
 }
 
@@ -703,7 +703,7 @@ pub(crate) fn lower_suspend_fn(lit: &FnLit) -> (Vec<Param>, Rc<Vec<Stmt>>) {
             let (name, need_bind) = if let Pat::Ident(n) = &**inner {
                 (n.clone(), false)
             } else {
-                (format!("__param{i}"), true)
+                (crate::intern(&format!("__param{i}")), true)
             };
             let def = std::mem::replace(&mut **e, Expr::Null);
             prelude.push(Stmt::If {
@@ -727,7 +727,7 @@ pub(crate) fn lower_suspend_fn(lit: &FnLit) -> (Vec<Param>, Rc<Vec<Stmt>>) {
             }
             p.pat = Pat::Ident(name);
         } else {
-            let name = format!("__param{i}");
+            let name: Rc<str> = crate::intern(&format!("__param{i}"));
             let orig = std::mem::replace(&mut p.pat, Pat::Ident(name.clone()));
             prelude.push(Stmt::Var(vec![VarDecl {
                 pat: orig,
@@ -758,16 +758,16 @@ pub(crate) fn lower_suspend_body(body: &[Stmt]) -> Rc<Vec<Stmt>> {
 /// Ce que le frame attend pour reprendre.
 enum Pending {
     /// `yield` émis — `next(v)` lie `v` au binding `into`.
-    Yield { into: Option<String> },
+    Yield { into: Option<Rc<str>> },
     /// `yield*` — file d'items en vidange.
     Drain {
         items: Vec<Value>,
         idx: usize,
-        into: Option<String>,
+        into: Option<Rc<str>>,
     },
     /// `await` pendante — la réaction `then` boundée reprend
     /// le frame (fulfill lie `into`, reject jette au site).
-    Await { into: Option<String>, prom: ObjId },
+    Await { into: Option<Rc<str>>, prom: ObjId },
 }
 
 /// Kind de frame — statements composés porteurs de
@@ -814,7 +814,7 @@ struct GFrame {
     list: Rc<Vec<Stmt>>,
     pc: usize,
     env: EnvRef,
-    labels: Vec<String>,
+    labels: Vec<Rc<str>>,
     kind: FKind,
 }
 
@@ -828,9 +828,9 @@ enum GFlow {
     /// `return v` — le corps termine.
     Ret(Value),
     /// `break [l]` / `continue [l]`.
-    Brk(Option<String>),
+    Brk(Option<Rc<str>>),
     /// `continue [l]`.
-    Cont(Option<String>),
+    Cont(Option<Rc<str>>),
 }
 
 /// Exécuteur suspendable — aucune récursion native entre
@@ -1075,7 +1075,7 @@ impl GExec {
     }
 
     /// `break` — pop jusqu'à la boucle/le label porteur.
-    fn do_break(&mut self, e: &mut Engine, label: Option<&String>) -> JsResult<()> {
+    fn do_break(&mut self, e: &mut Engine, label: Option<&Rc<str>>) -> JsResult<()> {
         loop {
             let Some(f) = self.stack.last() else {
                 return Ok(());
@@ -1103,7 +1103,7 @@ impl GExec {
     }
 
     /// `continue` — pop jusqu'à la boucle, puis re-test.
-    fn do_cont(&mut self, e: &mut Engine, label: Option<&String>) -> JsResult<()> {
+    fn do_cont(&mut self, e: &mut Engine, label: Option<&Rc<str>>) -> JsResult<()> {
         loop {
             let Some(f) = self.stack.last() else {
                 return Ok(());
@@ -1379,7 +1379,7 @@ impl GExec {
         e: &mut Engine,
         v: Value,
         env: &EnvRef,
-        into: Option<String>,
+        into: Option<Rc<str>>,
     ) -> JsResult<GFlow> {
         let mut awaited = v;
         if matches!(v, Value::Obj(_)) && !e.is_promise(v) {
@@ -1452,7 +1452,7 @@ impl GExec {
         e: &mut Engine,
         a: &Expr,
         env: &EnvRef,
-        into: Option<String>,
+        into: Option<Rc<str>>,
     ) -> JsResult<GFlow> {
         let v = e.eval_expr(env, self.this, a)?;
         self.arm_await(e, v, env, into)

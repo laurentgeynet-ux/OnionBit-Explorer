@@ -463,7 +463,7 @@ impl Engine {
                 // `eval(…)` écrit tel quel → appel direct (spec
                 // `PerformEval`) : la callee résolue doit être *le*
                 // builtin `eval` global, pas un homonyme local.
-                let direct_eval = matches!(&**callee, Expr::Ident(n) if n == "eval");
+                let direct_eval = matches!(&**callee, Expr::Ident(n) if &**n == "eval");
                 let callee = match &**callee {
                     Expr::Member(base, name) => {
                         let b = self.eval_expr(env, this, base)?;
@@ -638,7 +638,8 @@ impl Engine {
                 // hôte manquante du premier coup.
                 if !self.is_callable(f) {
                     let who = match callee.as_ref() {
-                        Expr::Ident(n) | Expr::Member(_, n) => n.as_str(),
+                        Expr::Ident(n) => &**n,
+                        Expr::Member(_, n) => n.as_str(),
                         _ => "?",
                     };
                     let d = self.describe(f);

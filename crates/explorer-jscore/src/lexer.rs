@@ -213,8 +213,10 @@ pub enum P {
 pub enum Tok {
     /// End of input.
     Eof,
-    /// Identifier (or unreserved word).
-    Ident(String),
+    /// Identifier (or unreserved word) — interned via
+    /// [`crate::intern`] (C311) : « id » × N occurrences = une
+    /// seule alloc session, les clones sont des bumps `Rc`.
+    Ident(std::rc::Rc<str>),
     /// Reserved word.
     Kw(Kw),
     /// Numeric literal (already converted to `f64`).
@@ -286,8 +288,10 @@ pub fn lex(src: &str) -> Result<Vec<Token>> {
 /// contenu : la profondeur se cumule à travers les re-entrées.
 fn lex_in(src: &str, tpl_nest: u32) -> Result<Vec<Token>> {
     Lexer {
+        src,
         chars: src.chars().collect(),
         pos: 0,
+        byte_pos: 0,
         line: 1,
         col: 1,
         legacy_octal: false,
@@ -302,9 +306,16 @@ fn lex_in(src: &str, tpl_nest: u32) -> Result<Vec<Token>> {
 /// que l'hostile (JS-C41).
 const MAX_TPL_NEST: u32 = 512;
 
-struct Lexer {
+struct Lexer<'a> {
+    /// Source — sert aux tranches identifiant du fast-path C311
+    /// (slice `&str` internée sans `String` transitoire).
+    src: &'a str,
     chars: Vec<char>,
+    /// Position en *chars* (`chars[pos]` = `peek()`).
     pos: usize,
+    /// Position en *octets* dans `src` — avancée avec `bump()`
+    /// (`c.len_utf8()` ; CRLF = 2).
+    byte_pos: usize,
     line: usize,
     col: usize,
     /// Set while producing the current token (see `Token::legacy_octal`).
@@ -313,7 +324,7 @@ struct Lexer {
     tpl_nest: u32,
 }
 
-impl Lexer {
+impl Lexer<'_> {
     fn peek(&self) -> Option<char> {
         self.chars.get(self.pos).copied()
     }
@@ -329,10 +340,12 @@ impl Lexer {
             // CRLF = un seul terminateur : le `\n` est consommé par
             // l'appelant sans doubler le compte.
             self.pos += 1;
+            self.byte_pos += 2;
             self.line += 1;
             self.col = 1;
             return Some('\n');
         }
+        self.byte_pos += c.len_utf8();
         if is_line_term(c) {
             self.line += 1;
             self.col = 1;
@@ -400,7 +413,7 @@ impl Lexer {
             // Après `of` un opérande est toujours attendu ;
             // la division `of / n` (ident `of` en valeur)
             // reste légale mais quasi inexistante en pratique.
-            if matches!(&tok, Tok::Ident(s) if s == "of") {
+            if matches!(&tok, Tok::Ident(s) if &**s == "of") {
                 expect_operand = true;
             }
             if tok == Tok::P(P::LParen) {
@@ -584,6 +597,32 @@ impl Lexer {
     /// erreur de syntaxe (spec : les réservés ne s'écrivent pas
     /// en échappés).
     fn ident(&mut self) -> Result<Tok> {
+        // Chemin commun (C311) : pas d'échappe — on scanne `chars`
+        // puis on tranche `src` en octets **sans `String`** ; le nom
+        // passe par l'interneur (hit = bump `Rc` seul, zéro alloc).
+        let (p0, b0, l0, c0) = (self.pos, self.byte_pos, self.line, self.col);
+        if let Some(c) = self.peek() {
+            if c != '\\' && is_ident_start(c) {
+                self.bump();
+                while matches!(self.peek(), Some(c) if c != '\\' && is_ident_part(c)) {
+                    self.bump();
+                }
+                if self.peek() != Some('\\') {
+                    let s = &self.src[b0..self.byte_pos];
+                    return if let Some(kw) = keyword(s) {
+                        Ok(Tok::Kw(kw))
+                    } else {
+                        crate::J17_TOK_IDENT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        Ok(Tok::Ident(crate::intern(s)))
+                    };
+                }
+            }
+        }
+        // Chemin rare — échappes : re-scan avec construction.
+        self.pos = p0;
+        self.byte_pos = b0;
+        self.line = l0;
+        self.col = c0;
         let mut s = String::new();
         let mut escaped = false;
         loop {
@@ -620,7 +659,7 @@ impl Lexer {
             Some(kw) => Ok(Tok::Kw(kw)),
             None => {
                 crate::J17_TOK_IDENT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                Ok(Tok::Ident(s))
+                Ok(Tok::Ident(crate::intern(&s)))
             }
         }
     }
@@ -836,6 +875,7 @@ impl Lexer {
         }
         if matches!(self.peek(), Some('e' | 'E')) {
             let save = self.pos;
+            let save_b = self.byte_pos;
             self.bump();
             if matches!(self.peek(), Some('+' | '-')) {
                 self.bump();
@@ -846,6 +886,7 @@ impl Lexer {
                 }
             } else {
                 self.pos = save; // lone 'e' — not part of the literal
+                self.byte_pos = save_b;
             }
         }
         // NumericLiteral ne peut pas être suivi d'un identifiant
@@ -1183,6 +1224,7 @@ impl Lexer {
             && self.peek_at(1) == Some('u')
         {
             let save = self.pos;
+            let save_b = self.byte_pos;
             self.bump();
             self.bump();
             let lo = self.hex_digits(4).unwrap_or(u32::MAX);
@@ -1191,6 +1233,7 @@ impl Lexer {
                 return Ok(char::from_u32(cp).unwrap_or('\u{fffd}'));
             }
             self.pos = save;
+            self.byte_pos = save_b;
             return Ok('\u{fffd}');
         }
         Ok(char::from_u32(v).unwrap_or('\u{fffd}'))

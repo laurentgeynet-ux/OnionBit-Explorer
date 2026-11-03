@@ -69,7 +69,7 @@ pub(crate) struct Module {
     /// dependency's for `export {x} from 'm'`/`export * from 'm'`.
     /// Local entries exist as soon as the module is registered —
     /// cyclic imports can link against them before the body runs.
-    pub exports: Vec<(String, EnvRef, String)>,
+    pub exports: Vec<(std::rc::Rc<str>, EnvRef, std::rc::Rc<str>)>,
     /// DFS status.
     pub state: ModState,
     /// Instantiated dependency indices, in source order.
@@ -91,14 +91,14 @@ pub(crate) enum PendingExport {
     /// `export {a as b} from 'm'` — `(local, exported)`.
     Named {
         /// `(local, exported)` pairs.
-        list: Vec<(String, String)>,
+        list: Vec<(std::rc::Rc<str>, std::rc::Rc<str>)>,
         /// Specifier.
         from: String,
     },
     /// `export * [as ns] from 'm'`.
     Star {
         /// `export * as ns` target name.
-        ns: Option<String>,
+        ns: Option<std::rc::Rc<str>>,
         /// Specifier.
         from: String,
     },
@@ -554,9 +554,9 @@ impl Engine {
                     }
                 }
                 ExportDecl::Default(_) => self.modules[idx].exports.push((
-                    "default".into(),
+                    crate::intern("default"),
                     env.clone(),
-                    "default".into(),
+                    crate::intern("default"),
                 )),
                 ExportDecl::Star { ns, from } => {
                     self.modules[idx].pending.push(PendingExport::Star {
@@ -664,14 +664,14 @@ impl Engine {
                         // `export * from 'm'` — copy every named
                         // export of the dep (not `default`, not
                         // names already exported explicitly).
-                        let have: HashSet<String> = self.modules[idx]
+                        let have: HashSet<std::rc::Rc<str>> = self.modules[idx]
                             .exports
                             .iter()
                             .map(|(n, _, _)| n.clone())
                             .collect();
                         let star_entries = self.modules[dep_idx].exports.clone();
                         for (name, denv, bnd) in star_entries {
-                            if name == "default" || have.contains(&name) {
+                            if &*name == "default" || have.contains(&name) {
                                 continue;
                             }
                             self.modules[idx].exports.push((name, denv, bnd));
@@ -686,11 +686,16 @@ impl Engine {
     /// `ResolveExport` — find `(defining env, binding name)` for
     /// `name` among `dep`'s exports; missing → `SyntaxError` (early
     /// link error, before any body runs).
-    fn resolve_export(&mut self, dep: usize, name: &str, spec: &str) -> JsResult<(EnvRef, String)> {
+    fn resolve_export(
+        &mut self,
+        dep: usize,
+        name: &str,
+        spec: &str,
+    ) -> JsResult<(EnvRef, std::rc::Rc<str>)> {
         let hit = self.modules[dep]
             .exports
             .iter()
-            .find(|(n, _, _)| n == name)
+            .find(|(n, _, _)| &**n == name)
             .map(|(_, e, b)| (e.clone(), b.clone()));
         hit.ok_or_else(|| {
             let t = self.error_value(
@@ -797,7 +802,7 @@ impl Engine {
         let exports = self.modules[idx].exports.clone();
         for (exported, denv, bnd) in exports {
             let eidx = self.env_index(&denv);
-            let bname = self.str_val(bnd);
+            let bname = self.str_val(&*bnd);
             let get = self.bound_native("nsget", ns_get, vec![Value::Num(eidx as f64), bname]);
             if let Some(o) = self.heap.obj_mut(obj) {
                 o.define_accessor(
@@ -984,7 +989,7 @@ fn ns_get(e: &mut Engine, _this: Value, args: &[Value]) -> JsResult<Value> {
 /// Names declared by a top-level statement for lexical
 /// instantiation — `let`/`const`/`class`, plus the inner decl of
 /// `export <decl>` — `(name, mutable)`.
-fn lex_names(s: &Stmt) -> Vec<(String, bool)> {
+fn lex_names(s: &Stmt) -> Vec<(std::rc::Rc<str>, bool)> {
     match s {
         Stmt::Lexical { decls, constant } => {
             let mut names = Vec::new();
@@ -1002,7 +1007,7 @@ fn lex_names(s: &Stmt) -> Vec<(String, bool)> {
 
 /// Bound names of a declaration for the export table — `var`/`let`/
 /// `const` pats, `function`/`class` names.
-fn decl_names(s: &Stmt) -> Vec<String> {
+fn decl_names(s: &Stmt) -> Vec<std::rc::Rc<str>> {
     let mut out = Vec::new();
     match s {
         Stmt::Var(decls) | Stmt::Lexical { decls, .. } => {
@@ -1026,7 +1031,7 @@ fn decl_names(s: &Stmt) -> Vec<String> {
 }
 
 /// Collect `Ident` names inside a pattern (destructuring binds all).
-fn pat_names(p: &Pat, out: &mut Vec<String>) {
+fn pat_names(p: &Pat, out: &mut Vec<std::rc::Rc<str>>) {
     match p {
         Pat::Ident(n) => out.push(n.clone()),
         Pat::Rest(p) | Pat::Default(p, _) => pat_names(p, out),

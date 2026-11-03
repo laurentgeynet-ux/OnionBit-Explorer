@@ -988,8 +988,12 @@ pub struct Object {
     /// (strict ou params non simples) — sa présence distingue
     /// l'objet `arguments` d'un tableau ordinaire
     /// (`length.configurable`). `None` hors `arguments`.
-    pub args_map: Option<(EnvRef, std::rc::Rc<Vec<Option<String>>>)>,
+    pub args_map: Option<(EnvRef, ArgsMap)>,
 }
+
+/// Table sloppy `arguments[i] → nom du paramètre` — [`None`] hors
+/// positions mappées (spec `CreateMappedArgumentsObject`).
+pub type ArgsMap = std::rc::Rc<Vec<Option<std::rc::Rc<str>>>>;
 
 /// What kind of object this is.
 /// Entrée `register(target, held, token)` d'une
