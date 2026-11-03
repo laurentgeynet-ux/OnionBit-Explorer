@@ -98,6 +98,10 @@ impl Engine {
                 Spine::Member(name) => self.get_prop_value(acc, name)?,
                 Spine::Index(k) => {
                     let kv = self.eval_expr(env, this, k)?;
+                    if let Some(v) = self.arr_index_get(acc, kv) {
+                        acc = v;
+                        continue;
+                    }
                     let key = self.prop_key(kv)?;
                     self.get_prop_value(acc, &key)?
                 }
@@ -440,6 +444,9 @@ impl Engine {
             Expr::Index(base, key) => {
                 let b = self.eval_expr(env, this, base)?;
                 let k = self.eval_expr(env, this, key)?;
+                if let Some(v) = self.arr_index_get(b, k) {
+                    return Ok(v);
+                }
                 let k = self.prop_key(k)?;
                 self.get_prop_value(b, &k)
             }

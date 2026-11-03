@@ -163,6 +163,13 @@ pub static J17_ITER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64
 pub static J17_REGEX: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 /// `Tok::Ident` produit par le lexer — 1 `String` par ident.
 pub static J17_TOK_IDENT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// `prop_key(v)` appelé — chaque `o[k]`/`arr[i]` matérialise une
+/// `String` de clé (nombre → `num_to_js_string` relu ensuite en
+/// indice par la chaîne tableau).
+pub static J17_PROP_KEY: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// J17 — lectures `arr[i]` servies par le fast-path éléments
+/// sans `String` de clé (`arr_index_get`).
+pub static J17_ARR_IDX: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 /// §B-59 — dernière méthode/prop `Host` dispatchée
 /// (`class:name`) : les `h.invoke`/`h.get`/`iter_items`…

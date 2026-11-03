@@ -7097,6 +7097,7 @@ impl Engine {
     /// (deux `Symbol('x')` distincts indexent deux clés
     /// différentes, spec identité).
     pub(crate) fn prop_key(&mut self, v: Value) -> JsResult<String> {
+        crate::J17_PROP_KEY.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         match v {
             Value::Num(n) => Ok(num_to_js_string(n)),
             Value::Obj(id) => match self.heap.obj(id).map(|o| &o.kind) {
@@ -7105,6 +7106,34 @@ impl Engine {
             },
             _ => self.to_js_string(v),
         }
+    }
+
+    /// Lecture `arr[i]` sans `String` de clé (J17) : `kv` est un
+    /// `Num` entier ≥ 0 converti en index canonique **et** `base`
+    /// un `ObjKind::Array` ordinaire → `elems[i]` direct.
+    /// `None` = chemin normal requis : arguments mappé
+    /// (`args_map` prime dans `find_own`), hors bornes / trou
+    /// (→ scan props + chaîne proto), host/proxy/non-tableau.
+    /// Le `-0` lit `elems[0]` comme `prop_key`→`"0"` le ferait.
+    pub(crate) fn arr_index_get(&mut self, base: Value, kv: Value) -> Option<Value> {
+        let (Value::Obj(id), Value::Num(n)) = (base, kv) else {
+            return None;
+        };
+        if !(n >= 0.0 && n.fract() == 0.0 && n <= usize::MAX as f64) {
+            return None;
+        }
+        let o = self.heap.obj(id)?;
+        if o.args_map.is_some() {
+            return None;
+        }
+        let ObjKind::Array(elems) = &o.kind else {
+            return None;
+        };
+        let v = elems.get(n as usize).copied().filter(|v| !v.is_hole());
+        if v.is_some() {
+            crate::J17_ARR_IDX.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        }
+        v
     }
 
     /// `Symbol(desc)` anonyme — clé `\u{f130}sym{N}` unique.

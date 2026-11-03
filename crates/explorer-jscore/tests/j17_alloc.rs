@@ -63,6 +63,8 @@ fn j17_bench_real_script() {
             ("iter", explorer_jscore::J17_ITER.load(R)),
             ("regex", explorer_jscore::J17_REGEX.load(R)),
             ("tok_ident", explorer_jscore::J17_TOK_IDENT.load(R)),
+            ("prop_key", explorer_jscore::J17_PROP_KEY.load(R)),
+            ("arr_idx", explorer_jscore::J17_ARR_IDX.load(R)),
         ]
     };
     let before = snap();
