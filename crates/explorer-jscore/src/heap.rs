@@ -819,6 +819,15 @@ pub(crate) fn trace_env(env: &EnvRef, out: &mut Vec<ObjId>, visited: &mut HashSe
                     for c in m.values() {
                         match c {
                             EnvCell::Bind(b) => push_value(out, b.value),
+                            // `arguments` paresseux : les valeurs
+                            // captées à l'appel restent racines tant
+                            // que la cellule n'est pas matérialisée.
+                            EnvCell::LazyArgs(la) => {
+                                for v in la.args.borrow().iter() {
+                                    push_value(out, *v);
+                                }
+                                push_value(out, la.f);
+                            }
                             // Alias d'import : l'env du module exporteur est
                             // aussi une racine — ses liaisons restent
                             // vivantes tant qu'un importeur les référence.
@@ -2003,6 +2012,30 @@ pub enum EnvCell {
     /// `import {x as y}` — forwards every read/write attempt to
     /// `name` in `env` (the exporter's module scope).
     Alias(EnvRef, String),
+    /// Liaison `arguments` **paresseuse** (JS-C308) : l'objet n'est
+    /// matérialisé qu'à la première lecture (`env_get`) — un appel
+    /// non-arrow coûte 2 allocs (copie args + `Rc`) au lieu de ~5
+    /// (tableau + `to_vec` + map + `callee` + nom de liaison), la
+    /// majorité des fonctions ne lisant jamais `arguments`.
+    /// L'écriture `arguments = v` remplace la cellule sans
+    /// matérialiser (l'objet n'ayant jamais été lu, son identité
+    /// n'est pas observable). Une fois lu, la cellule est remplacée
+    /// par un `Bind` ordinaire — identité stable et chemin chaud.
+    LazyArgs(std::rc::Rc<LazyArgs>),
+}
+
+/// Payload d'[`EnvCell::LazyArgs`] — le nécessaire à la
+/// construction spec de `arguments`, capté à l'entrée de l'appel.
+pub struct LazyArgs {
+    /// Littéral de la fonction appelée — params/strict pour la map
+    /// `args_map` sloppy et la prop `callee` à la matérialisation.
+    pub lit: std::rc::Rc<crate::ast::FnLit>,
+    /// Valeur fonction (`arguments.callee` sloppy).
+    pub f: Value,
+    /// Valeurs d'arguments — `mem::take` à la matérialisation : les
+    /// éléments du tableau sont ces mêmes valeurs, **sans copie**
+    /// (d'où `RefCell` — jamais emprunté à travers un appel JS).
+    pub args: std::cell::RefCell<Vec<Value>>,
 }
 
 /// A local-scope binding. `var`/`let` are mutable; `const` writes

@@ -4215,6 +4215,40 @@ impl Engine {
         self.env_get_seen(env, name, &mut HashSet::new())
     }
 
+    /// Matérialise une liaison `arguments` paresseuse (JS-C308) —
+    /// construction identique à l'ancien chemin eager : tableau
+    /// des args (`mem::take`, sans copie), `args_map` sloppy à
+    /// paramètres simples, `arguments.callee` sloppy.
+    fn materialize_arguments(&mut self, env: &EnvRef, la: &crate::heap::LazyArgs) -> Value {
+        let elems = std::mem::take(&mut *la.args.borrow_mut());
+        let argc = elems.len();
+        let a = self.new_array(elems);
+        if let Value::Obj(aid) = a {
+            let simple = la
+                .lit
+                .params
+                .iter()
+                .all(|p| !p.rest && matches!(p.pat, crate::ast::Pat::Ident(_)));
+            let map: Vec<Option<String>> = if !la.lit.strict && simple {
+                (0..argc.min(la.lit.params.len()))
+                    .map(|i| match &la.lit.params[i].pat {
+                        crate::ast::Pat::Ident(n) => Some(n.clone()),
+                        _ => None,
+                    })
+                    .collect()
+            } else {
+                Vec::new()
+            };
+            if let Some(o) = self.heap.obj_mut(aid) {
+                o.args_map = Some((env.clone(), std::rc::Rc::new(map)));
+            }
+            if !la.lit.strict {
+                self.set_own(aid, "callee", la.f, false);
+            }
+        }
+        a
+    }
+
     pub(crate) fn env_get_seen(
         &mut self,
         env: &EnvRef,
@@ -4226,6 +4260,9 @@ impl Engine {
             enum Next {
                 Up(Option<EnvRef>),
                 Alias(EnvRef, String),
+                /// `arguments` paresseux trouvé dans `e` — la
+                /// matérialisation se fait hors emprunt.
+                Lazy(std::rc::Rc<crate::heap::LazyArgs>),
             }
             // `with (o)` — la résolution passe par les props de
             // l'objet (hors `@@unscopables`) puis remonte.
@@ -4271,11 +4308,13 @@ impl Engine {
                     EnvKind::Local(m) | EnvKind::Block(m) => match m.get(name) {
                         Some(EnvCell::Bind(v)) => return Some(v.value),
                         Some(EnvCell::Alias(t, n)) => Next::Alias(t.clone(), n.clone()),
+                        Some(EnvCell::LazyArgs(la)) => Next::Lazy(la.clone()),
                         None => Next::Up(b.parent.clone()),
                     },
                     EnvKind::Global(m) => match m.get(name) {
                         Some(EnvCell::Bind(v)) => return Some(v.value),
                         Some(EnvCell::Alias(t, n)) => Next::Alias(t.clone(), n.clone()),
+                        Some(EnvCell::LazyArgs(la)) => Next::Lazy(la.clone()),
                         None => {
                             // Declarative record first, then `window`
                             // props — data ET accessors (JS-C78 :
@@ -4317,6 +4356,25 @@ impl Engine {
                         return None;
                     }
                     return self.env_get_seen(&t, &n, visited);
+                }
+                Next::Lazy(la) => {
+                    let v = self.materialize_arguments(&e, &la);
+                    // La cellule devient un `Bind` ordinaire :
+                    // `arguments === arguments` (identité stable)
+                    // et les lectures suivantes prennent le chemin
+                    // chaud sans rematérialiser.
+                    let mut b = e.borrow_mut();
+                    if let EnvKind::Local(m) | EnvKind::Global(m) | EnvKind::Block(m) = &mut b.kind
+                    {
+                        if let Some(cell) = m.get_mut(name) {
+                            *cell = EnvCell::Bind(Binding {
+                                value: v,
+                                mutable: true,
+                                sloppy_silent: false,
+                            });
+                        }
+                    }
+                    return Some(v);
                 }
             }
         }
@@ -4472,6 +4530,17 @@ impl Engine {
                                 return Err(
                                     self.type_error(format!("cannot assign to import `{name}`"))
                                 );
+                            }
+                            EnvCell::LazyArgs(..) => {
+                                // `arguments = v` : l'objet n'a
+                                // jamais été lu — son identité est
+                                // inobservable, la cellule est
+                                // remplacée sans matérialiser.
+                                *cell = EnvCell::Bind(Binding {
+                                    value: v,
+                                    mutable: true,
+                                    sloppy_silent: false,
+                                });
                             }
                             EnvCell::Bind(bnd) => {
                                 if !bnd.mutable {
@@ -7453,49 +7522,23 @@ impl Engine {
         if let Ok(mut g) = crate::LAST_PHASE.lock() {
             *g = "argv";
         }
-        let argv = (!lit.is_arrow).then(|| {
-            let a = self.new_array(args.to_vec());
-            if let Value::Obj(aid) = a {
-                // `arguments` mappé (spec
-                // `CreateMappedArgumentsObject`) : fonction
-                // sloppy à liste de paramètres simple —
-                // `map[i]` nomme le slot env de l'indice `i`.
-                // Map vide sinon (objet `arguments` non
-                // mappé, `length.configurable` quand même).
-                let simple = lit
-                    .params
-                    .iter()
-                    .all(|p| !p.rest && matches!(p.pat, crate::ast::Pat::Ident(_)));
-                let map: Vec<Option<String>> = if !lit.strict && simple {
-                    (0..args.len().min(lit.params.len()))
-                        .map(|i| match &lit.params[i].pat {
-                            crate::ast::Pat::Ident(n) => Some(n.clone()),
-                            _ => None,
-                        })
-                        .collect()
-                } else {
-                    Vec::new()
-                };
-                if let Some(o) = self.heap.obj_mut(aid) {
-                    o.args_map = Some((local.clone(), std::rc::Rc::new(map)));
-                }
-                if !lit.strict {
-                    self.set_own(aid, "callee", f, false);
-                }
-            }
-            a
-        });
-        {
+        // `arguments` paresseux (JS-C308) : la construction de
+        // l'objet (tableau + map sloppy + `callee` + nom de
+        // liaison) est différée à la première lecture — 2 allocs
+        // à l'entrée (copie args + `Rc`) au lieu de ~5, la
+        // majorité des fonctions ne lisant jamais `arguments`.
+        // Le code de construction a migré dans
+        // `materialize_arguments` — sémantique identique au
+        // premier accès.
+        if !lit.is_arrow {
+            let la = std::rc::Rc::new(crate::heap::LazyArgs {
+                lit: lit.clone(),
+                f,
+                args: std::cell::RefCell::new(args.to_vec()),
+            });
             let mut b = local.borrow_mut();
-            if let (EnvKind::Local(m), Some(argv)) = (&mut b.kind, argv) {
-                m.insert(
-                    "arguments",
-                    EnvCell::Bind(Binding {
-                        value: argv,
-                        mutable: true,
-                        sloppy_silent: false,
-                    }),
-                );
+            if let EnvKind::Local(m) = &mut b.kind {
+                m.insert(Self::intern("arguments"), EnvCell::LazyArgs(la));
             }
         }
         // Les flèches n'ont pas de `new.target` propre —
