@@ -762,7 +762,7 @@ fn cell_bytes(data: &CellData) -> usize {
                 + o.props.iter().map(|(k, _)| k.len()).sum::<usize>()
                 // Index `nom→position` J15 : capacité de la map +
                 // clés **clonées** (mémoire réelle, borne §B-59).
-                + o.idx.borrow().as_ref().map_or(0, |m| {
+                + o.idx.get().map_or(0, |m| {
                     m.capacity() * std::mem::size_of::<(String, u32)>()
                         + m.keys().map(String::len).sum::<usize>()
                 })
@@ -943,10 +943,20 @@ pub struct Object {
     /// `RefCell` : `find(&self)` doit pouvoir le construire —
     /// l'emprunt ne traverse jamais un callback JS. Ne porte
     /// aucun `Value` → non tracé par le GC ; sa mémoire est
-    /// comptée dans `cell_bytes`. `pub(crate)` : les littéraux
-    /// `Object { … }` hors module le posent `None` — jamais autre
-    /// chose (invariant ci-dessus).
-    pub(crate) idx: std::cell::RefCell<Option<std::collections::HashMap<String, u32>>>,
+    /// comptée dans `cell_bytes`. `OnceCell<Box>` : **8 o par
+    /// objet** (niche du pointeur) — l'index est rare (≥24 props),
+    /// les petits objets ne doivent pas payer sa place inline :
+    /// le heap de démarrage est à ~1 047 941 o, 635 o sous la
+    /// borne 1 Mio des tests mémoire — un champ inline plus large
+    /// armerait `over_mem` dès la première alloc post-init
+    /// (`js_heap_limit_reaches_context`). `pub(crate)` : les
+    /// littéraux `Object { … }` hors module le posent
+    /// `OnceCell::new()` — jamais autre chose (invariant
+    /// ci-dessus). `allow` : `Box` n'est pas redondant ici — il
+    /// sert à la niche `Option<Box>` (8 o) vs `Option<HashMap>`
+    /// inline (~56 o) sur **chaque** objet.
+    #[allow(clippy::box_collection)]
+    pub(crate) idx: std::cell::OnceCell<Box<std::collections::HashMap<String, u32>>>,
     /// Kind-specific payload.
     pub kind: ObjKind,
     /// `[[Extensible]]` — `Object.preventExtensions`/`seal`/`freeze`
@@ -1439,7 +1449,7 @@ impl Object {
         Object {
             proto,
             props: Vec::new(),
-            idx: std::cell::RefCell::new(None),
+            idx: std::cell::OnceCell::new(),
             kind,
             extensible: true,
             elem_integrity: 0,
@@ -1472,15 +1482,14 @@ impl Object {
         if self.props.len() < PROPS_IDX_MIN || self.props.len() >= u32::MAX as usize {
             return self.props.iter().position(|(k, _)| k == key);
         }
-        let mut guard = self.idx.borrow_mut();
-        let m = guard.get_or_insert_with(|| {
+        let m = self.idx.get_or_init(|| {
             let mut m = std::collections::HashMap::with_capacity(self.props.len());
             for (i, (k, _)) in self.props.iter().enumerate() {
                 if let Ok(pos) = u32::try_from(i) {
                     m.insert(k.clone(), pos);
                 }
             }
-            m
+            Box::new(m)
         });
         m.get(key)
             .map(|i| usize::try_from(*i).unwrap_or(usize::MAX))
@@ -1489,7 +1498,7 @@ impl Object {
     /// Insertion en fin d'ordre — met l'index à jour s'il existe.
     /// **Le seul `props.push` autorisé** (invariant J15).
     pub(crate) fn push_prop(&mut self, key: String, prop: Prop) {
-        if let Some(m) = self.idx.get_mut().as_mut() {
+        if let Some(m) = self.idx.get_mut() {
             if let Ok(pos) = u32::try_from(self.props.len()) {
                 m.insert(key.clone(), pos);
             }
@@ -1671,7 +1680,7 @@ impl Object {
                 self.props.remove(i);
                 // `remove` décale toutes les positions > i :
                 // index invalidé, reconstruit au prochain lookup.
-                *self.idx.get_mut() = None;
+                self.idx.take();
                 true
             }
             None => true,

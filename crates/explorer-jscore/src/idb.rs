@@ -1071,7 +1071,7 @@ fn idb_val_decode(e: &mut Engine, v: Value, depth: u32) -> Value {
             let o = e.heap.alloc_obj(Object {
                 proto: Value::Obj(e.protos.date),
                 props: Vec::new(),
-                idx: std::cell::RefCell::new(None),
+                idx: std::cell::OnceCell::new(),
                 kind: ObjKind::Ordinary,
                 extensible: true,
                 elem_integrity: 0,
@@ -1102,7 +1102,7 @@ fn idb_val_decode(e: &mut Engine, v: Value, depth: u32) -> Value {
             let o = e.heap.alloc_obj(Object {
                 proto: Value::Obj(e.protos.map),
                 props: Vec::new(),
-                idx: std::cell::RefCell::new(None),
+                idx: std::cell::OnceCell::new(),
                 kind: ObjKind::Map(pairs),
                 extensible: true,
                 elem_integrity: 0,

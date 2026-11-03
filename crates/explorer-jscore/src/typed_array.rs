@@ -84,7 +84,7 @@ fn new_buffer(e: &mut Engine, n: usize) -> JsResult<ObjId> {
     let id = e.heap.alloc_obj(Object {
         proto,
         props: Vec::new(),
-        idx: std::cell::RefCell::new(None),
+        idx: std::cell::OnceCell::new(),
         kind: ObjKind::ByteBuf(vec![0; n]),
         extensible: true,
         elem_integrity: 0,
@@ -132,7 +132,7 @@ pub(crate) fn new_ta(e: &mut Engine, ta: TaKind, bid: ObjId, offset: usize, len:
     Value::Obj(e.heap.alloc_obj(Object {
         proto,
         props: Vec::new(),
-        idx: std::cell::RefCell::new(None),
+        idx: std::cell::OnceCell::new(),
         kind: ObjKind::TypedArray {
             ta,
             buffer: Value::Obj(bid),
@@ -153,7 +153,7 @@ pub(crate) fn new_array_buffer(e: &mut Engine, bytes: Vec<u8>) -> Value {
     let bid = e.heap.alloc_obj(Object {
         proto: Value::Obj(e.protos.array_buffer),
         props: Vec::new(),
-        idx: std::cell::RefCell::new(None),
+        idx: std::cell::OnceCell::new(),
         kind: ObjKind::ByteBuf(bytes),
         extensible: true,
         elem_integrity: 0,
@@ -170,7 +170,7 @@ pub(crate) fn new_u8_array(e: &mut Engine, bytes: Vec<u8>) -> Value {
     let bid = e.heap.alloc_obj(Object {
         proto: Value::Obj(e.protos.array_buffer),
         props: Vec::new(),
-        idx: std::cell::RefCell::new(None),
+        idx: std::cell::OnceCell::new(),
         kind: ObjKind::ByteBuf(bytes),
         extensible: true,
         elem_integrity: 0,
@@ -701,7 +701,7 @@ fn dv_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     Ok(Value::Obj(e.heap.alloc_obj(Object {
         proto,
         props: Vec::new(),
-        idx: std::cell::RefCell::new(None),
+        idx: std::cell::OnceCell::new(),
         kind: ObjKind::DataView {
             buffer: Value::Obj(bid),
             offset: off,
@@ -1079,7 +1079,7 @@ fn ta_subarray(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     Ok(Value::Obj(e.heap.alloc_obj(Object {
         proto,
         props: Vec::new(),
-        idx: std::cell::RefCell::new(None),
+        idx: std::cell::OnceCell::new(),
         kind: ObjKind::TypedArray {
             ta,
             buffer: Value::Obj(bid),
@@ -1682,7 +1682,7 @@ fn sab_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     let id = e.heap.alloc_obj(Object {
         proto,
         props: Vec::new(),
-        idx: std::cell::RefCell::new(None),
+        idx: std::cell::OnceCell::new(),
         kind: ObjKind::ByteBuf(vec![0; n]),
         extensible: true,
         elem_integrity: 0,

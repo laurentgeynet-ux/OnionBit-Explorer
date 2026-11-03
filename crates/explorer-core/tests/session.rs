@@ -2477,7 +2477,14 @@ const PAGE_HEAP_PROBE: &str = "<!doctype html><html><body>\
 #[tokio::test]
 async fn js_heap_limit_reaches_context() {
     let (mut s, t) = test_session_with(SessionConfig {
-        js_mem_limit_mib: 1,
+        // 2 Mio, pas 1 : le heap de démarrage jscore est passé à
+        // ~1 047 941 o post-J15 (champ `idx` OnceCell, mémoire
+        // honnête comptée) — à 1 Mio `over_mem` s'armait avant le
+        // `repeat` et le kill dur incapturable précédait le
+        // RangeError rattrapable du probe. À 2 Mio la plomberie
+        // `set_mem_limit` est vérifiée à l'identique (4 Mio > 2
+        // Mio → refus catchable, vivant ~1,6 Mio < borne).
+        js_mem_limit_mib: 2,
         ..SessionConfig::default()
     });
     t.route("/", 200, PAGE_HEAP_PROBE);

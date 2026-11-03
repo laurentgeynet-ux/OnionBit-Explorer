@@ -155,7 +155,7 @@ fn mk(e: &mut Engine, name: &str, data: TempData) -> JsResult<Value> {
     let id = e.heap.alloc_obj(crate::heap::Object {
         proto,
         props: Vec::new(),
-        idx: std::cell::RefCell::new(None),
+        idx: std::cell::OnceCell::new(),
         kind: crate::heap::ObjKind::Temp(data),
         extensible: true,
         elem_integrity: 0,

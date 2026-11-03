@@ -108,7 +108,7 @@ pub(crate) fn clone_deep(
         CloneShape::Buf(b) => Ok(Value::Obj(e.heap.alloc_obj(Object {
             proto: Value::Obj(e.protos.array_buffer),
             props: Vec::new(),
-            idx: std::cell::RefCell::new(None),
+            idx: std::cell::OnceCell::new(),
             kind: ObjKind::ByteBuf(b),
             extensible: true,
             elem_integrity: 0,
@@ -119,7 +119,7 @@ pub(crate) fn clone_deep(
             Ok(Value::Obj(e.heap.alloc_obj(Object {
                 proto: Value::Obj(e.protos.data_view),
                 props: Vec::new(),
-                idx: std::cell::RefCell::new(None),
+                idx: std::cell::OnceCell::new(),
                 kind: ObjKind::DataView {
                     buffer: nb,
                     offset,
@@ -163,7 +163,7 @@ pub(crate) fn clone_deep(
             let cid = e.heap.alloc_obj(Object {
                 proto: Value::Obj(e.protos.map),
                 props: Vec::new(),
-                idx: std::cell::RefCell::new(None),
+                idx: std::cell::OnceCell::new(),
                 kind: ObjKind::Map(Vec::new()),
                 extensible: true,
                 elem_integrity: 0,
@@ -185,7 +185,7 @@ pub(crate) fn clone_deep(
             let cid = e.heap.alloc_obj(Object {
                 proto: Value::Obj(e.protos.set),
                 props: Vec::new(),
-                idx: std::cell::RefCell::new(None),
+                idx: std::cell::OnceCell::new(),
                 kind: ObjKind::Set(Vec::new()),
                 extensible: true,
                 elem_integrity: 0,
@@ -209,7 +209,7 @@ pub(crate) fn clone_deep(
             let cid = e.heap.alloc_obj(Object {
                 proto,
                 props: Vec::new(),
-                idx: std::cell::RefCell::new(None),
+                idx: std::cell::OnceCell::new(),
                 kind: ObjKind::Blob { data, ty },
                 extensible: true,
                 elem_integrity: 0,
@@ -348,7 +348,7 @@ pub(crate) fn weakref_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResul
     Ok(Value::Obj(e.heap.alloc_obj(Object {
         proto,
         props: Vec::new(),
-        idx: std::cell::RefCell::new(None),
+        idx: std::cell::OnceCell::new(),
         kind: ObjKind::WeakRef(tid),
         extensible: true,
         elem_integrity: 0,
@@ -387,7 +387,7 @@ pub(crate) fn finreg_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult
     let id = e.heap.alloc_obj(Object {
         proto,
         props: Vec::new(),
-        idx: std::cell::RefCell::new(None),
+        idx: std::cell::OnceCell::new(),
         kind: ObjKind::FinReg {
             cb,
             entries: Vec::new(),

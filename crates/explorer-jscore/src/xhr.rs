@@ -520,7 +520,7 @@ impl Host for XhrHost {
                         let id = e.heap.alloc_obj(crate::heap::Object {
                             proto: Value::Obj(e.protos.array_buffer),
                             props: Vec::new(),
-                            idx: std::cell::RefCell::new(None),
+                            idx: std::cell::OnceCell::new(),
                             kind: ObjKind::ByteBuf(bytes),
                             extensible: true,
                             elem_integrity: 0,
@@ -994,7 +994,7 @@ impl Engine {
         let id = self.heap.alloc_obj(crate::heap::Object {
             proto: Value::Obj(proto),
             props: Vec::new(),
-            idx: std::cell::RefCell::new(None),
+            idx: std::cell::OnceCell::new(),
             kind: ObjKind::FetchBody {
                 body: s.body.clone(),
             },
@@ -1413,7 +1413,7 @@ fn body_arraybuf(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
             let id = e.heap.alloc_obj(crate::heap::Object {
                 proto: Value::Obj(e.protos.array_buffer),
                 props: Vec::new(),
-                idx: std::cell::RefCell::new(None),
+                idx: std::cell::OnceCell::new(),
                 kind: ObjKind::ByteBuf(b),
                 extensible: true,
                 elem_integrity: 0,
@@ -1485,7 +1485,7 @@ fn fetch_clone(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
     let nid = e.heap.alloc_obj(crate::heap::Object {
         proto,
         props: Vec::new(),
-        idx: std::cell::RefCell::new(None),
+        idx: std::cell::OnceCell::new(),
         kind: ObjKind::FetchBody { body },
         extensible: true,
         elem_integrity: 0,
@@ -1811,7 +1811,7 @@ fn request_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     let id = e.heap.alloc_obj(crate::heap::Object {
         proto: Value::Obj(proto),
         props: Vec::new(),
-        idx: std::cell::RefCell::new(None),
+        idx: std::cell::OnceCell::new(),
         kind: ObjKind::FetchBody { body },
         extensible: true,
         elem_integrity: 0,

@@ -3107,7 +3107,7 @@ impl Engine {
         Value::Big(self.heap.alloc_obj(Object {
             proto,
             props: Vec::new(),
-            idx: std::cell::RefCell::new(None),
+            idx: std::cell::OnceCell::new(),
             kind: ObjKind::BigInt(b),
             extensible: true,
             elem_integrity: 0,
@@ -3442,7 +3442,7 @@ impl Engine {
         let id = self.heap.alloc_obj(Object {
             proto: Value::Obj(self.protos.regexp),
             props: Vec::new(),
-            idx: std::cell::RefCell::new(None),
+            idx: std::cell::OnceCell::new(),
             kind: ObjKind::RegExp(Rc::new(re)),
             extensible: true,
             elem_integrity: 0,
@@ -5859,7 +5859,7 @@ impl Engine {
         Value::Obj(self.heap.alloc_obj(Object {
             proto,
             props: Vec::new(),
-            idx: std::cell::RefCell::new(None),
+            idx: std::cell::OnceCell::new(),
             kind: ObjKind::Host(host),
             extensible: true,
             elem_integrity: 0,
@@ -7012,7 +7012,7 @@ impl Engine {
         let id = self.heap.alloc_obj(crate::heap::Object {
             proto,
             props: Vec::new(),
-            idx: std::cell::RefCell::new(None),
+            idx: std::cell::OnceCell::new(),
             kind: ObjKind::Symbol {
                 desc,
                 key: key.clone(),

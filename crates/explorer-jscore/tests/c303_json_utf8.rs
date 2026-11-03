@@ -5,7 +5,7 @@
 //! Verrous JS-C303 — `json_string` décode chaque caractère dans une
 //! fenêtre bornée par l'octet de tête (1-4 o) au lieu de re-valider
 //! `from_utf8` sur tout le reste du buffer : O(n²) → O(n), le mur
-//! `JSON.parse` OtAutoBlock (60 s → 0,56 s sur 7,9 Mo). La
+//! `JSON.parse` `OtAutoBlock` (60 s → 0,56 s sur 7,9 Mo). La
 //! sémantique est figée ici : round-trip exact des séquences
 //! multi-octets (clés et valeurs), échappées `\uXXXX` et paires de
 //! surrogates, troncation et octet de tête fautif rejetés.
@@ -54,12 +54,13 @@ fn utf8_mixed_with_escapes_in_one_string() {
 fn giant_multibyte_json_parses_and_stringifies() {
     // Charge réaliste : 200 objets à clés/valeurs multi-octets —
     // le fenêtrage ne doit ni dériver ni tronquer.
+    use std::fmt::Write as _;
     let mut items = String::from("[");
     for i in 0..200 {
         if i > 0 {
             items.push(',');
         }
-        items.push_str(&format!("{{\"clé{i}\":\"vé€{i}😀\"}}"));
+        let _ = write!(items, "{{\"clé{i}\":\"vé€{i}😀\"}}");
     }
     items.push(']');
     let src = format!(

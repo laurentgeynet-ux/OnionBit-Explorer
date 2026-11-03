@@ -139,7 +139,7 @@ fn blob_value_rc(e: &mut Engine, data: &Rc<Vec<u8>>, ty: String, proto: Value) -
     let id = e.heap.alloc_obj(crate::heap::Object {
         proto,
         props: Vec::new(),
-        idx: std::cell::RefCell::new(None),
+        idx: std::cell::OnceCell::new(),
         kind: ObjKind::Blob {
             data: data.clone(),
             ty: ty.clone(),
@@ -274,7 +274,7 @@ fn blob_array_buffer(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Valu
     let id = e.heap.alloc_obj(crate::heap::Object {
         proto: Value::Obj(e.protos.array_buffer),
         props: Vec::new(),
-        idx: std::cell::RefCell::new(None),
+        idx: std::cell::OnceCell::new(),
         kind: ObjKind::ByteBuf((*data).clone()),
         extensible: true,
         elem_integrity: 0,
@@ -455,7 +455,7 @@ impl Engine {
                     let id = self.heap.alloc_obj(crate::heap::Object {
                         proto: Value::Obj(self.protos.array_buffer),
                         props: Vec::new(),
-                        idx: std::cell::RefCell::new(None),
+                        idx: std::cell::OnceCell::new(),
                         kind: ObjKind::ByteBuf((*bytes).clone()),
                         extensible: true,
                         elem_integrity: 0,

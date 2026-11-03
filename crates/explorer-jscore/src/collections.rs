@@ -74,7 +74,7 @@ pub(crate) fn iter_obj(e: &mut Engine, items: Vec<Value>, proto: ObjId) -> Value
     Value::Obj(e.heap.alloc_obj(Object {
         proto,
         props: Vec::new(),
-        idx: std::cell::RefCell::new(None),
+        idx: std::cell::OnceCell::new(),
         kind: ObjKind::Iter {
             items,
             idx: 0,
@@ -106,7 +106,7 @@ fn map_new(e: &mut Engine, args: &[Value], proto_id: crate::value::ObjId) -> JsR
     let id = e.heap.alloc_obj(Object {
         proto,
         props: Vec::new(),
-        idx: std::cell::RefCell::new(None),
+        idx: std::cell::OnceCell::new(),
         kind: ObjKind::Map(Vec::new()),
         extensible: true,
         elem_integrity: 0,
@@ -144,7 +144,7 @@ fn set_new(e: &mut Engine, args: &[Value], proto_id: crate::value::ObjId) -> JsR
     let id = e.heap.alloc_obj(Object {
         proto,
         props: Vec::new(),
-        idx: std::cell::RefCell::new(None),
+        idx: std::cell::OnceCell::new(),
         kind: ObjKind::Set(Vec::new()),
         extensible: true,
         elem_integrity: 0,
@@ -474,7 +474,7 @@ fn new_set_from(e: &mut Engine, items: Vec<Value>) -> JsResult<Value> {
     let id = e.heap.alloc_obj(Object {
         proto,
         props: Vec::new(),
-        idx: std::cell::RefCell::new(None),
+        idx: std::cell::OnceCell::new(),
         kind: ObjKind::Set(Vec::new()),
         extensible: true,
         elem_integrity: 0,
@@ -766,7 +766,7 @@ fn map_group_by(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     let out = e.heap.alloc_obj(Object {
         proto: Value::Obj(e.protos.map),
         props: Vec::new(),
-        idx: std::cell::RefCell::new(None),
+        idx: std::cell::OnceCell::new(),
         kind: ObjKind::Map(Vec::new()),
         extensible: true,
         elem_integrity: 0,

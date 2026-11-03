@@ -675,7 +675,7 @@ impl Engine {
                 Value::Obj(self.heap.alloc_obj(crate::heap::Object {
                     proto,
                     props: Vec::new(),
-                    idx: std::cell::RefCell::new(None),
+                    idx: std::cell::OnceCell::new(),
                     kind: ObjKind::ByteBuf(b.clone()),
                     extensible: true,
                     elem_integrity: 0,
@@ -694,7 +694,7 @@ impl Engine {
                 let m = Value::Obj(self.heap.alloc_obj(crate::heap::Object {
                     proto,
                     props: Vec::new(),
-                    idx: std::cell::RefCell::new(None),
+                    idx: std::cell::OnceCell::new(),
                     kind: ObjKind::Map(Vec::new()),
                     extensible: true,
                     elem_integrity: 0,
@@ -718,7 +718,7 @@ impl Engine {
                 let s = Value::Obj(self.heap.alloc_obj(crate::heap::Object {
                     proto,
                     props: Vec::new(),
-                    idx: std::cell::RefCell::new(None),
+                    idx: std::cell::OnceCell::new(),
                     kind: ObjKind::Set(Vec::new()),
                     extensible: true,
                     elem_integrity: 0,
