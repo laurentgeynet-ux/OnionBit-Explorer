@@ -122,6 +122,40 @@ fn c313_polymer_element_proto_methods() {
             "(function(){var C=customElements.get('ytd-app');if(typeof C!=='function')return'no-ytd';var p=C.prototype;var dp=Object.keys(p.__dataProto||{}),da=Object.keys(p.__dataHasAccessor||{});return'dP.n='+dp.length+'|dP.aFG='+dp.indexOf('applyFrostedGlassToChipBar')+'|dP.iS='+dp.indexOf('isSearchPage')+'|dHA.n='+da.length+'|dHA.aFG='+da.indexOf('applyFrostedGlassToChipBar')+'|dHA.iS='+da.indexOf('isSearchPage')+'|fin='+C.hasOwnProperty('__finalized')})()",
         )
     );
+    // Séquence complète `__dataHasAccessor` = ordre d'install des
+    // ACC sur le proto `q` : iS@21 vs aFG@34 — les voisins de iS
+    // indiquent si elle vient du même pass `createProperties` que
+    // aFG (props adjacentes) ou d'un mécanisme séparé.
+    println!(
+        "dHA order → {}",
+        ev(
+            &mut e,
+            "(function(){var C=customElements.get('ytd-app');if(typeof C!=='function')return'no-ytd';var da=Object.keys(C.prototype.__dataHasAccessor||{});var i=da.indexOf('isSearchPage'),a=da.indexOf('applyFrostedGlassToChipBar');var lo=Math.max(0,i-2),hi=Math.min(da.length,i+3);var w=a-3<0?0:a-3,x=Math.min(da.length,a+2);return'iS ctx['+i+']='+da.slice(lo,hi).join(',')+' || aFG ctx['+a+']='+da.slice(w,x).join(',')+' || head='+da.slice(0,5).join(',')})()",
+        )
+    );
+    // Les maps candidates qui alimentent `createProperties` :
+    // `C._properties`/`C.properties`/`qd` decorator-metadata —
+    // positions iS vs aFG dans l'ordre d'itération effectif.
+    println!(
+        "props maps → {}",
+        ev(
+            &mut e,
+            "(function(){var C=customElements.get('ytd-app');if(typeof C!=='function')return'no-ytd';var s=[];['properties','_properties','__properties','__ownProperties'].forEach(function(k){var m=C[k]||C.prototype[k];if(m&&typeof m==='object'){var ks=Object.keys(m);s.push(k+'['+ks.length+']:iS@'+ks.indexOf('isSearchPage')+'/aFG@'+ks.indexOf('applyFrostedGlassToChipBar'))}else s.push(k+':-')});var c=C.prototype.constructor;s.push('ctor.prop='+(c&&c!==C?Object.keys(c._properties||{}).length:'same'));return s.join(' | ')})()",
+        )
+    );
+    // La clé : `aRc` (le décorateur `_.YG`) fait `P.get=void 0` puis
+    // `_.V` re-définit la prop — spec : `get` PRÉSENT à `undefined`
+    // = accessor sans getter (`proto[h]` → undefined, capture
+    // skipped, aucun throw). Si `get:undefined` est traité comme
+    // champ absent chez nous → vieux getter conservé → FIRE →
+    // c'est le drop §B-4(c).
+    println!(
+        "get:undefined → {}",
+        ev(
+            &mut e,
+            "(function(){var o={};Object.defineProperty(o,'x',{get:function(){return 7},configurable:!0,enumerable:!0});var d=Object.getOwnPropertyDescriptor(o,'x');d.get=void 0;Object.defineProperty(o,'x',d);var d2=Object.getOwnPropertyDescriptor(o,'x');return'o.x='+o.x+'|hasGet='+d2.hasOwnProperty('get')+'|get='+(typeof d2.get)})()",
+        )
+    );
     // Descripteurs `isSearchPage`/`applyFrostedGlassToChipBar` par
     // couche de la chaîne `ytd-app` : en Chrome `proto.isSearchPage`
     // doit être une VALEUR (pas l'accessor `__data`) au moment où

@@ -649,9 +649,20 @@ fn define_one_prop_impl(e: &mut Engine, id: ObjId, key: &str, desc_id: ObjId) ->
             return Ok(());
         }
     }
+    // Descripteur générique (ni `value`/`writable` ni `get`/`set`)
+    // sur un accessor existant : la spec ne change que les flags
+    // présents — le type accesseur est préservé, pas converti en
+    // data `Undefined`.
+    let want_acc = has_acc || (!has_data && matches!(cur, Some(crate::heap::Prop::Acc { .. })));
     let ok = e.heap.obj_mut(id).is_some_and(|o| {
-        if has_acc {
-            o.define_accessor(key, g, s, attrs)
+        if want_acc {
+            // `g`/`s` sont les valeurs FINALES (le merge côté-absent
+            // est fait plus haut) — `Undefined` vide ce côté (spec
+            // `[[DefineOwnProperty]]`), pas « garder » : route
+            // stricte, sinon un `P.get = void 0` suivi de
+            // `defineProperty` laisserait survivre le vieux getter
+            // (décorateur `@computed` Polymer — JS-C313, §B-4(c)).
+            o.define_accessor_strict(key, g, s, attrs)
         } else {
             o.define_data(key, v, attrs)
         }

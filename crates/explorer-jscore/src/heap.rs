@@ -1638,6 +1638,66 @@ impl Object {
         }
     }
 
+    /// Sémantique `[[DefineOwnProperty]]` stricte : `get`/`set` sont
+    /// les valeurs FINALES du descripteur (le merge côté-absent a
+    /// déjà été fait par l'appelant) — `Undefined` **vide** ce côté,
+    /// il ne « conserve » rien. Diffère de `define_accessor` (merge
+    /// d'install : `Undefined` = ne pas toucher, pour les chemins
+    /// `__defineGetter__`/builtins). Cas réel : `P.get = void 0`
+    /// puis `Object.defineProperty` (décorateur `@computed` Polymer
+    /// `aRc`) doit supprimer le getter — sinon il re-fire à la
+    /// capture et jette (JS-C313, §B-4(c)).
+    pub fn define_accessor_strict(
+        &mut self,
+        key: &str,
+        get: Value,
+        set: Value,
+        attrs: PropAttrs,
+    ) -> bool {
+        if let Some(i) = self.prop_pos(key) {
+            let Some((_, p)) = self.props.get_mut(i) else {
+                return false;
+            };
+            match p {
+                Prop::Acc {
+                    get: g,
+                    set: s,
+                    attrs: a,
+                } => {
+                    if !a.configurable {
+                        // Non-config : enumerable figé, configurable
+                        // ne peut être reposé à true, get/set ne
+                        // peuvent changer (SameValue requis).
+                        if attrs.enumerable != a.enumerable
+                            || attrs.configurable
+                            || *g != get
+                            || *s != set
+                        {
+                            return false;
+                        }
+                    }
+                    *g = get;
+                    *s = set;
+                    a.enumerable = attrs.enumerable;
+                    a.configurable = attrs.configurable;
+                    true
+                }
+                Prop::Data { attrs: a, .. } => {
+                    if !a.configurable {
+                        return false;
+                    }
+                    *p = Prop::Acc { get, set, attrs };
+                    true
+                }
+            }
+        } else if self.extensible {
+            self.push_prop(key, Prop::Acc { get, set, attrs });
+            true
+        } else {
+            false
+        }
+    }
+
     /// Insert or overwrite an own data property (keeps insertion
     /// order). A data write over an existing accessor replaces it.
     /// Convenience for install paths : writable+configurable,
