@@ -1148,7 +1148,7 @@ fn headers_pairs(e: &mut Engine, v: Value) -> JsResult<Vec<(String, String)>> {
             .props
             .iter()
             .filter(|(k, _)| !k.starts_with('\u{f130}'))
-            .map(|(k, _)| k.clone())
+            .map(|(k, _)| k.to_string())
             .collect(),
         None => Vec::new(),
     };
@@ -1248,7 +1248,7 @@ fn set_cookie_list(e: &Engine, id: crate::value::ObjId) -> Vec<String> {
             Some(o) => o
                 .props
                 .iter()
-                .find(|(k, _)| k == SET_COOKIE_KEY)
+                .find(|(k, _)| &**k == SET_COOKIE_KEY)
                 .and_then(|(_, p)| p.data_value()),
             None => None,
         }
@@ -1492,7 +1492,7 @@ fn fetch_clone(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
         args_map: None,
     });
     for (k, p) in &props {
-        if matches!(k.as_str(), "headers" | "bodyUsed" | "body") || k.starts_with('\u{f130}') {
+        if matches!(&**k, "headers" | "bodyUsed" | "body") || k.starts_with('\u{f130}') {
             continue;
         }
         if let crate::heap::Prop::Data { value, attrs } = p {

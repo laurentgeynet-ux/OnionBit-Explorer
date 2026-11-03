@@ -109,7 +109,7 @@ fn is_detached(e: &Engine, id: ObjId) -> bool {
         e.heap.obj(id).and_then(|o| {
             o.props
                 .iter()
-                .find(|(k, _)| k == "detached")
+                .find(|(k, _)| &**k == "detached")
                 .map(|(_, p)| p)
         }),
         Some(Prop::Data {

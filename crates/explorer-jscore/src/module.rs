@@ -170,7 +170,7 @@ impl Engine {
             .map(|o| {
                 o.props
                     .iter()
-                    .filter_map(|(k, p)| p.data_value().map(|val| (k.clone(), val)))
+                    .filter_map(|(k, p)| p.data_value().map(|val| (k.to_string(), val)))
                     .collect()
             })
             .unwrap_or_default();

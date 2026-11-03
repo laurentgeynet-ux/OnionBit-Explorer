@@ -101,6 +101,29 @@ pub use heap::{HeapStats, Host};
 pub use idb::{CacheEntry, CacheRegistry, IdbDb, IdbIndexDef, IdbRegistry, IdbStore};
 pub use interp::Engine;
 
+/// Interneur de noms partagé (JS-C307+ / chantier `Rc<str>`) :
+/// hit → `Rc` cloné (zéro alloc), miss → une alloc pour toute
+/// la session. `thread_local` : le moteur est mono-thread par
+/// design (`Rc` partout) et la dédup est **partagée entre
+/// contextes d'une même page** — noms AST, clés de props et
+/// noms de scope tombent dans la même table.
+pub(crate) fn intern(name: &str) -> std::rc::Rc<str> {
+    thread_local! {
+        static INTERNED: std::cell::RefCell<
+            std::collections::HashSet<std::rc::Rc<str>>,
+        > = std::cell::RefCell::new(std::collections::HashSet::new());
+    }
+    INTERNED.with(|set| {
+        let mut set = set.borrow_mut();
+        if let Some(s) = set.get(name) {
+            return s.clone();
+        }
+        let s: std::rc::Rc<str> = std::rc::Rc::from(name);
+        set.insert(s.clone());
+        s
+    })
+}
+
 /// §B-59 — dernier natif entré dans `call_native`, écrit
 /// inconditionnellement (~20 ns, `&'static str`, zéro alloc).
 /// Le `rss_guard` du daemon le lit à l'abort : une mort dans

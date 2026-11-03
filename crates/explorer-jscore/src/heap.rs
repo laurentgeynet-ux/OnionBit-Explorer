@@ -751,22 +751,22 @@ pub struct HeapStats {
 
 /// Coût estimé d'une cellule — approximation documentée : le
 /// `String` compte sa longueur, l'`Object` son empreinte fixe plus
-/// la capacité de sa table de props et la taille de ses clés (les
-/// payloads `ObjKind` internes — `Vec` d'éléments, etc. — restent
-/// hors compte : borne grossière, pas mesure exacte).
+/// la capacité de sa table de props (les clés `Rc<str>` sont
+/// mutualisées par l'interneur — le texte n'est compté nulle
+/// part ailleurs : borne grossière, pas mesure exacte).
 fn cell_bytes(data: &CellData) -> usize {
     let base = std::mem::size_of::<Cell>();
     match data {
         CellData::Str(s) => base + s.len(),
         CellData::Obj(o) => {
             base + std::mem::size_of::<Object>()
-                + o.props.capacity() * std::mem::size_of::<(String, Prop)>()
-                + o.props.iter().map(|(k, _)| k.len()).sum::<usize>()
-                // Index `nom→position` J15 : capacité de la map +
-                // clés **clonées** (mémoire réelle, borne §B-59).
+                + o.props.capacity() * std::mem::size_of::<(Rc<str>, Prop)>()
+                // Index `nom→position` J15 : capacité de la map
+                // (le texte des clés `Rc<str>` est mutualisé par
+                // l'interneur — seul le handle est propre à
+                // l'objet, borne §B-59).
                 + o.idx.get().map_or(0, |m| {
-                    m.capacity() * std::mem::size_of::<(String, u32)>()
-                        + m.keys().map(String::len).sum::<usize>()
+                    m.capacity() * std::mem::size_of::<(Rc<str>, u32)>()
                 })
                 // Charges utiles octets (borne mémoire JS-C65 —
                 // un upload géant ne doit pas passer sous le
@@ -943,8 +943,10 @@ pub struct Object {
     ///
     /// Mutations positionnelles uniquement par
     /// [`Object::push_prop`]/[`Object::remove_own`] : tout `push`/
-    /// `remove` direct désynchronise `idx` (J15).
-    pub props: Vec<(String, Prop)>,
+    /// `remove` direct désynchronise `idx` (J15). Clés en
+    /// `Rc<str>` internées ([`crate::intern`]) — le nom « id »
+    /// d'un million de props = une seule alloc session (C310).
+    pub props: Vec<(std::rc::Rc<str>, Prop)>,
     /// Index `nom → position` dans `props`, paresseux (J15) :
     /// `None` tant que l'objet reste sous le seuil
     /// [`PROPS_IDX_MIN`] ou n'est jamais lu par clé ; construit au
@@ -967,7 +969,7 @@ pub struct Object {
     /// sert à la niche `Option<Box>` (8 o) vs `Option<HashMap>`
     /// inline (~56 o) sur **chaque** objet.
     #[allow(clippy::box_collection)]
-    pub(crate) idx: std::cell::OnceCell<Box<std::collections::HashMap<String, u32>>>,
+    pub(crate) idx: std::cell::OnceCell<Box<std::collections::HashMap<std::rc::Rc<str>, u32>>>,
     /// Kind-specific payload.
     pub kind: ObjKind,
     /// `[[Extensible]]` — `Object.preventExtensions`/`seal`/`freeze`
@@ -1491,7 +1493,7 @@ impl Object {
     /// de panic).
     pub(crate) fn prop_pos(&self, key: &str) -> Option<usize> {
         if self.props.len() < PROPS_IDX_MIN || self.props.len() >= u32::MAX as usize {
-            return self.props.iter().position(|(k, _)| k == key);
+            return self.props.iter().position(|(k, _)| &**k == key);
         }
         let m = self.idx.get_or_init(|| {
             let mut m = std::collections::HashMap::with_capacity(self.props.len());
@@ -1507,9 +1509,12 @@ impl Object {
     }
 
     /// Insertion en fin d'ordre — met l'index à jour s'il existe.
-    /// **Le seul `props.push` autorisé** (invariant J15).
-    pub(crate) fn push_prop(&mut self, key: String, prop: Prop) {
+    /// **Le seul `props.push` autorisé** (invariant J15). La clé
+    /// est internée ([`crate::intern`]) — `Rc` partagé session,
+    /// une alloc par nom distinct (C310).
+    pub(crate) fn push_prop(&mut self, key: &str, prop: Prop) {
         crate::J17_PROP_NEW.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let key = crate::intern(key);
         if let Some(m) = self.idx.get_mut() {
             if let Ok(pos) = u32::try_from(self.props.len()) {
                 m.insert(key.clone(), pos);
@@ -1572,7 +1577,7 @@ impl Object {
                 }
             }
         } else if self.extensible {
-            self.push_prop(key.to_string(), Prop::Data { value, attrs });
+            self.push_prop(key, Prop::Data { value, attrs });
             true
         } else {
             false
@@ -1622,7 +1627,7 @@ impl Object {
                 }
             }
         } else if self.extensible {
-            self.push_prop(key.to_string(), Prop::Acc { get, set, attrs });
+            self.push_prop(key, Prop::Acc { get, set, attrs });
             true
         } else {
             false
@@ -1647,7 +1652,7 @@ impl Object {
             }
             return;
         }
-        self.push_prop(key.to_string(), Prop::Data { value, attrs });
+        self.push_prop(key, Prop::Data { value, attrs });
     }
 
     /// Merge a getter/setter side into an own property (existing
@@ -1679,7 +1684,7 @@ impl Object {
                 }
             }
         }
-        self.push_prop(key.to_string(), Prop::Acc { get, set, attrs });
+        self.push_prop(key, Prop::Acc { get, set, attrs });
     }
 
     /// Remove an own property if `[[Configurable]]`. Returns `false`

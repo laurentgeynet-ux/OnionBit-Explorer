@@ -3521,19 +3521,7 @@ impl Engine {
     /// mono-thread par design (`Rc` partout), la dédup est
     /// partagée entre contextes d'une même page.
     pub(crate) fn intern(name: &str) -> Rc<str> {
-        thread_local! {
-            static INTERNED: std::cell::RefCell<std::collections::HashSet<Rc<str>>> =
-                std::cell::RefCell::new(std::collections::HashSet::new());
-        }
-        INTERNED.with(|set| {
-            let mut set = set.borrow_mut();
-            if let Some(s) = set.get(name) {
-                return s.clone();
-            }
-            let s: Rc<str> = Rc::from(name);
-            set.insert(s.clone());
-            s
-        })
+        crate::intern(name)
     }
 
     /// Échantillonneur de pile (§B-59/J11) — sous
@@ -6330,7 +6318,7 @@ impl Engine {
             }
         } else if o.extensible {
             o.push_prop(
-                key.to_string(),
+                key,
                 crate::heap::Prop::Data {
                     value: v,
                     attrs: crate::heap::PropAttrs::FULL,
@@ -6502,7 +6490,7 @@ impl Engine {
                 _ => {}
             }
             for (k, _) in &o.props {
-                rest.push(k.clone());
+                rest.push(k.to_string());
             }
         }
         out.extend(spec_key_order(rest));
@@ -6535,7 +6523,7 @@ impl Engine {
                 // préfixe seul `Symbol.` laissait fuir les
                 // anonymes `sym{N}` (§B-57).
                 if p.enumerable() && !crate::builtins::bigint::is_sentinel_key(k) {
-                    rest.push(k.clone());
+                    rest.push(k.to_string());
                 }
             }
             out.extend(spec_key_order(rest));
@@ -6793,7 +6781,7 @@ impl Engine {
                     .props
                     .iter()
                     .filter(|(k, p)| p.enumerable() && !crate::builtins::bigint::is_sentinel_key(k))
-                    .map(|(k, _)| k.clone())
+                    .map(|(k, _)| k.to_string())
                     .collect();
                 for k in spec_key_order(pkeys) {
                     if seen.insert(k.clone()) {

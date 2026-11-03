@@ -643,7 +643,7 @@ pub(crate) fn object_get_own_property_descriptors(
         } else {
             match e.heap.obj(id) {
                 Some(o) => {
-                    let mut ks: Vec<String> = o.props.iter().map(|(k, _)| k.clone()).collect();
+                    let mut ks: Vec<String> = o.props.iter().map(|(k, _)| k.to_string()).collect();
                     if let ObjKind::Array(elems) = &o.kind {
                         ks.splice(0..0, (0..elems.len()).map(|i| i.to_string()));
                         ks.insert(elems.len(), "length".into());

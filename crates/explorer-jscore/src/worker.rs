@@ -568,7 +568,7 @@ impl Engine {
                             .map(|o| {
                                 o.props
                                     .iter()
-                                    .filter_map(|(k, p)| p.data_value().map(|d| (k.clone(), d)))
+                                    .filter_map(|(k, p)| p.data_value().map(|d| (k.to_string(), d)))
                                     .collect()
                             })
                             .unwrap_or_default();
@@ -587,7 +587,7 @@ impl Engine {
                             .map(|o| {
                                 o.props
                                     .iter()
-                                    .filter_map(|(k, p)| p.data_value().map(|d| (k.clone(), d)))
+                                    .filter_map(|(k, p)| p.data_value().map(|d| (k.to_string(), d)))
                                     .collect()
                             })
                             .unwrap_or_default();

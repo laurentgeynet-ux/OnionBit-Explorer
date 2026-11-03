@@ -584,13 +584,13 @@ fn perf_entry_to_json(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Val
     let Value::Obj(sid) = this else {
         return Ok(Value::Obj(out));
     };
-    let props: Vec<(String, crate::heap::Prop)> =
+    let props: Vec<(std::rc::Rc<str>, crate::heap::Prop)> =
         e.heap.obj(sid).map_or_else(Vec::new, |o| o.props.clone());
     for (k, p) in props {
         let crate::heap::Prop::Data { value, attrs } = p else {
             continue;
         };
-        if !attrs.enumerable || k == "toJSON" {
+        if !attrs.enumerable || &*k == "toJSON" {
             continue;
         }
         e.set_own(out, &k, value, true);
