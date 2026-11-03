@@ -2215,6 +2215,19 @@ impl Engine {
         let node_f = self.native_fn("Node", node_ctor);
         if let Value::Obj(nid) = node_f {
             let p = self.new_object();
+            // §B-4(c) bras `ubC` — les shims (webcomponents-sd)
+            // capturent `W.prototype.removeChild` pour wraper :
+            // sans vraie prop la capture rend `undefined` →
+            // `z.nativeRemoveChild.call` jette au premier
+            // `el.removeChild()`. `NODE_METHODS` posées en props
+            // non-énumérables (spec WebIDL) — le trampoline
+            // redispatche sur le `this` de l'appel (un prototype
+            // n'est pas un élément hôte : `Undefined` tolérant).
+            for m in NODE_METHODS {
+                let nv = self.str_val(*m);
+                let f = self.bound_native("node.method", node_proto_method_trampoline, vec![nv]);
+                self.set_own(p, m, f, false);
+            }
             self.set_own(nid, "prototype", Value::Obj(p), false);
             for (k, v) in [
                 ("ELEMENT_NODE", 1),
@@ -5533,6 +5546,29 @@ fn host_method_trampoline(e: &mut Engine, _this: Value, args: &[Value]) -> JsRes
     };
     crate::host_mark(h.class_name(), &name);
     Ok(h.invoke(e, Value::Obj(id), &name, &rest[1..])?
+        .unwrap_or(Value::Undefined))
+}
+
+/// Variante « méthode de `Node.prototype` » : le receveur est
+/// le `this` de l'appel (non lié à la création) — les shims
+/// `W.prototype.m.call(el, …)` / `el.m(…)` redispatchent sur
+/// l'élément receveur ; un receveur non-hôte rend `Undefined`
+/// (tolérant, même repli que le trampoline lié).
+fn node_proto_method_trampoline(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let Some((Value::Str(m), call_args)) = args.split_first() else {
+        return Ok(Value::Undefined);
+    };
+    let Some(name) = e.heap.string(*m) else {
+        return Ok(Value::Undefined);
+    };
+    let Value::Obj(id) = this else {
+        return Ok(Value::Undefined);
+    };
+    let Some(h) = e.host_of(id) else {
+        return Ok(Value::Undefined);
+    };
+    crate::host_mark(h.class_name(), &name);
+    Ok(h.invoke(e, Value::Obj(id), &name, call_args)?
         .unwrap_or(Value::Undefined))
 }
 

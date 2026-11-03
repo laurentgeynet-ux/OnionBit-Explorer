@@ -7156,3 +7156,61 @@ fn c291_pas_de_marqueur_quand_conforme() {
     let (h, _ids, _t) = d.serialize_keyed();
     assert!(!h.contains("data-obreloc"), "{h}");
 }
+
+// -- Node.prototype méthodes réelles (§B-4c bras ubC) -------------------
+// Les shims (webcomponents-sd) capturent `W.prototype.removeChild`
+// pour wraper : sans vraie prop, la capture rendait `undefined` →
+// `z.nativeRemoveChild.call(this)` jetait au premier appel.
+#[test]
+fn node_proto_methods_are_real_props() {
+    for m in [
+        "appendChild",
+        "insertBefore",
+        "removeChild",
+        "replaceChild",
+        "cloneNode",
+        "contains",
+        "addEventListener",
+        "querySelector",
+    ] {
+        assert_eq!(
+            ev(&format!("typeof Node.prototype.{m}")),
+            "function",
+            "Node.prototype.{m}"
+        );
+    }
+    // WebIDL : méthodes de prototype non énumérables.
+    assert_eq!(
+        ev("Object.getOwnPropertyDescriptor(Node.prototype,'removeChild').enumerable"),
+        "false"
+    );
+}
+
+/// Idiome `ubC` verbatim : capturer `Node.prototype.removeChild`,
+/// poser un wrapper, appeler `z.native.call(this,J)` — le `this`
+/// de l'appel doit redispatcher sur l'élément receveur.
+#[test]
+fn node_proto_wrapped_removechild_dispatches_on_receiver() {
+    assert_eq!(
+        ev("\
+var q = { nativeRemoveChild: Node.prototype.removeChild };\
+Node.prototype.removeChild = function(z) {\
+  return function(J) { return z.nativeRemoveChild.call(this, J); };\
+}(q);\
+var d = document.getElementById('list');\
+var li = d.children[0];\
+d.removeChild(li);\
+d.children.length"),
+        "1"
+    );
+    // `.call(explicite)` sur la prop proto — receveur arbitraire
+    // (page fraîche : 2 <li> → 1 après retrait).
+    assert_eq!(
+        ev("\
+var list = document.getElementById('list');\
+var li2 = list.children[0];\
+Node.prototype.removeChild.call(list, li2);\
+list.children.length"),
+        "1"
+    );
+}
