@@ -511,7 +511,13 @@ pub fn rasterize_window_cached(
     height_css: f32,
     gc: &mut GlyphCache,
 ) -> Option<Frame> {
-    let y_css = y_css.max(0.0);
+    // `y_css` négatif accepté : les items sont ancrés
+    // `-scroll_y` au build — peindre le document entier
+    // dans un pixmap `doc_h`-haut demande la bande
+    // `[-scroll_y, doc_h - scroll_y]` (R-N `full=1` à la
+    // demande). Le translate `-y_css·scale` fonctionne
+    // identiquement en négatif ; `h_px` reste borné à
+    // 16 384 ci-dessous.
     let w_px = (list.width * scale).round().max(1.0);
     let h_px = (height_css * scale).round().max(1.0);
     if !(w_px.is_finite() && h_px.is_finite() && y_css.is_finite())

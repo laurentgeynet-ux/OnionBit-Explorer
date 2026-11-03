@@ -692,6 +692,38 @@ fn fenetre_raster_rasterise_sous_le_cap_document() {
     assert_eq!(px(&off, 10, 10), [255, 255, 255, 255], "blanc");
 }
 
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+#[test]
+fn fenetre_raster_y_negatif_peint_le_haut_document() {
+    // Fenêtrage permanent (P4 `full=1`) : items ancrés
+    // `-scroll_y` → le document entier se demande en bande
+    // `[-scroll_y, doc_h - scroll_y]` — `y_css` négatif.
+    let html = "<div id=a></div><div id=b></div>";
+    let css = "#a{background:#ff0000;width:200px;height:100px}\
+               #b{background:#0000ff;width:200px;height:100px}";
+    let dom: Dom = TreeBuilder::parse(html);
+    let mut eng = StyleEngine::new();
+    eng.add_css("body { margin: 0 }", Origin::Author);
+    eng.add_css(css, Origin::Author);
+    let styles = eng.compute_tree(&dom, dom.document(), &StyleEnv::default());
+    let root_el = dom
+        .children(dom.document())
+        .into_iter()
+        .flatten()
+        .find(|&c| dom.element(c).is_ok())
+        .expect("élément racine");
+    let mut bx = build_box_tree(&dom, root_el, &styles).expect("arbre");
+    layout_tree(&mut bx, VIEW, &ctx());
+    // scroll_y=100 : #a est remonté à y=-100 (hors viewport),
+    // #b occupe [0,100) dans le repère ancré.
+    let list = build_display_list(&bx, VIEW, 200.0, 100.0);
+    let win = explorer_render::rasterize_window(&list, font_src(), 1.0, -100.0, 200.0)
+        .expect("fenêtre négative");
+    assert_eq!((win.width, win.height), (list.width as u32, 200));
+    assert_eq!(px(&win, 10, 50), [255, 0, 0, 255], "haut doc (#a)");
+    assert_eq!(px(&win, 10, 150), [0, 0, 255, 255], "bas doc (#b)");
+}
+
 // ── R-69 : repli par glyphe jusqu'aux pixels ────────────────
 
 #[test]
