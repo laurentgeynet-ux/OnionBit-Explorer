@@ -134,15 +134,30 @@ fn json_string(r: &mut Reader) -> Result<String, &'static str> {
                 r.i += 1;
             }
             Some(_) => {
-                // UTF-8 passthrough — decode one char.
-                let rest = &r.s[r.i..];
-                let s = std::str::from_utf8(rest).unwrap_or("");
-                match s.chars().next() {
-                    Some(c) => {
-                        out.push(c);
-                        r.i += c.len_utf8();
+                // UTF-8 passthrough — decode one char. Fenêtre
+                // bornée à sa longueur (1-4 o par l'octet de tête) :
+                // `from_utf8` sur le reste re-validait tout le
+                // buffer à chaque caractère — O(n²), le mur
+                // OtAutoBlock 60 s (J16).
+                let b0 = r.s[r.i];
+                let n = if b0 < 0x80 {
+                    1
+                } else if b0 < 0xE0 {
+                    2
+                } else if b0 < 0xF0 {
+                    3
+                } else {
+                    4
+                };
+                let Some(win) = r.s.get(r.i..r.i + n) else {
+                    return Err("invalid utf-8");
+                };
+                match std::str::from_utf8(win) {
+                    Ok(s) => {
+                        out.push_str(s);
+                        r.i += n;
                     }
-                    None => return Err("invalid utf-8"),
+                    Err(_) => return Err("invalid utf-8"),
                 }
             }
         }
