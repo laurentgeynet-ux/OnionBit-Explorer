@@ -2406,6 +2406,17 @@ impl Dom {
             self.splice_fragment(parent, child, None);
             return;
         }
+        // §B-59 : rejet défensif au niveau mutateur — `child`
+        // ancêtre-ou-soi de `parent` créerait une chaîne parent
+        // cyclique (les marches `ancestors`/`closest`/…
+        // boucleraient). **Avant** le fold de structure : un
+        // tag de structure ancêtre (`body` inséré sous son
+        // propre descendant) replierait son contenu dans le
+        // descendant — mutation à la place du rejet
+        // (`mutators_reject_ancestor_cycles`).
+        if self.is_ancestor_or_self(parent, child) {
+            return;
+        }
         // Structure tag hors position canonique → repli du
         // contenu, parité parseur/moteur (JS-C290).
         if self.structure_illegal(parent, child) {
@@ -2418,15 +2429,6 @@ impl Dom {
         // B-44 : plafond DOM — insertions refusées au-delà,
         // déplacements d'attachés restants légaux.
         if !self.nodes[child as usize].attached && self.nodes.len() >= MAX_DOM_NODES {
-            return;
-        }
-        // §B-59 : rejet défensif au niveau mutateur — `child`
-        // ancêtre-ou-soi de `parent` créerait une chaîne parent
-        // cyclique (les marches `ancestors`/`closest`/…
-        // boucleraient). Les chemins JS gardés jettent déjà
-        // `HierarchyRequestError` ; les chemins internes et les
-        // futures coutures mutent en no-op plutôt qu'en cycle.
-        if self.is_ancestor_or_self(parent, child) {
             return;
         }
         self.detach(child);
@@ -2627,6 +2629,14 @@ impl Dom {
         } else {
             ref_node
         };
+        // §B-59 : même rejet défensif qu'`append` — chaîne
+        // parent cyclique sinon (`el.before(ancêtre)` passait
+        // sans check JS-level). **Avant** le fold de structure
+        // — voir `append` (un tag structure ancêtre replierait
+        // son contenu avant le rejet).
+        if self.is_ancestor_or_self(parent, child) {
+            return;
+        }
         // Structure tag hors position canonique → repli du
         // contenu en place, parité parseur/moteur (JS-C290).
         if self.structure_illegal(parent, child) {
@@ -2638,12 +2648,6 @@ impl Dom {
         }
         // B-44 : même plafond DOM que `append`.
         if !self.nodes[child as usize].attached && self.nodes.len() >= MAX_DOM_NODES {
-            return;
-        }
-        // §B-59 : même rejet défensif qu'`append` — chaîne
-        // parent cyclique sinon (`el.before(ancêtre)` passait
-        // sans check JS-level).
-        if self.is_ancestor_or_self(parent, child) {
             return;
         }
         self.detach(child);
