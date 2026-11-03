@@ -2844,7 +2844,11 @@ impl Session {
         // tirera la baseline cléée la plus fraîche).
         match run_apply_job(&mut p, &ctx, job, old_title.as_deref()) {
             Ok(out) => {
-                if job.journal.is_some() {
+                // JS-C316 — `journal_applies` = rejouées
+                // **réelles** : les journaux vides (drain
+                // propre C293) ne comptent pas — sinon la
+                // métrique inonde à ~1/pompe sur page saine.
+                if job.journal.as_ref().is_some_and(|j| !j.ops.is_empty()) {
                     self.journal_applies += 1;
                 }
                 if let Some(entry) = self.tabs.get_mut(&tab) {

@@ -683,7 +683,15 @@ pub async fn drain_applies_shared(sess: &tokio::sync::Mutex<Session>, _tab: TabI
         match out {
             Ok((g, Ok(o), job)) => {
                 if job.journal.is_some() {
-                    s.journal_applies += 1;
+                    // JS-C316 — `journal_applies` = rejouées
+                    // **réelles** : les journaux vides (drain
+                    // propre C293) ne comptent pas — sinon la
+                    // métrique inonde à ~1/pompe sur page
+                    // saine. Le streak `UnmappedKey`, lui,
+                    // retombe sur tout apply abouti.
+                    if job.journal.as_ref().is_some_and(|j| !j.ops.is_empty()) {
+                        s.journal_applies += 1;
+                    }
                     s.unmapped_streaks.insert(tab, 0);
                 }
                 s.commit_apply_detached(tab, epoch, g.into_payload(), &o);
