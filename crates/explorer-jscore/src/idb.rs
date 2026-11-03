@@ -1631,7 +1631,14 @@ fn txn_object_store(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Val
         return Err(e.type_error("objectStore on incompatible receiver"));
     };
     let name = e.to_js_string(arg(args, 0))?;
-    if !t.stores.iter().any(|s| s == &name) {
+    // Spec : la txn `versionchange` a pour scope **toute la
+    // base** (stores existants + ceux créés pendant
+    // `upgradeneeded`) — sa liste `stores` est vide au mint ;
+    // le check de scope ne s'applique qu'aux txn readonly/
+    // readwrite (mastodon vol 586 : `objectStore: "custom" not
+    // in transaction scope` sur store créé dans l'upgrade).
+    let versionchange = t.d.borrow().mode == "versionchange";
+    if !versionchange && !t.stores.iter().any(|s| s == &name) {
         return Err(e.type_error(format!("objectStore: {name:?} not in transaction scope")));
     }
     Ok(store_value(

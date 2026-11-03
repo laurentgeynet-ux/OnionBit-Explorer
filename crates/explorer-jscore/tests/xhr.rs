@@ -1462,6 +1462,31 @@ fn c300_idb_names_are_dom_string_list() {
     );
 }
 
+/// `tx.objectStore` dans `upgradeneeded` : la txn
+/// `versionchange` voit les stores créés pendant l'upgrade
+/// (mastodon vol 586 — `objectStore: "custom" not in
+/// transaction scope` sur store créé dans le handler).
+#[test]
+fn c301_versionchange_object_store_in_scope() {
+    let (mut e, _t) = engine();
+    describe(
+        &mut e,
+        "var log = ''; var rq = indexedDB.open('scdb', 1);\
+         rq.onupgradeneeded = function (ev) {\
+           var db = ev.target.result;\
+           var tx = ev.target.transaction;\
+           db.createObjectStore('custom');\
+           try { var st = tx.objectStore('custom');\
+                 log += 'scope-ok:' + st.name; }\
+           catch (err) { log += 'ERR:' + err.message; }\
+           try { st.put('v','k'); log += '|put-ok'; }\
+           catch (err) { log += '|ERR2:' + err.message; }\
+         };\
+         rq.onsuccess = function () { log += '|done'; };",
+    );
+    assert_eq!(describe(&mut e, "log"), "scope-ok:custom|put-ok|done");
+}
+
 #[test]
 fn c187_idb_request_is_event_target() {
     let (mut e, _t) = engine();
