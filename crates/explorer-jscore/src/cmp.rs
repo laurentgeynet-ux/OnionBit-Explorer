@@ -575,9 +575,10 @@ fn uspapi(e: &mut Engine, _t: Value, a: &[Value]) -> JsResult<Value> {
     Ok(Value::Undefined)
 }
 
-/// `__gpp(command, callback, parameter)` — GPP minimal :
-/// `ping` rend le descripteur, `getSection`/`getField` →
-/// `null` honnête (sections encodées non implémentées).
+/// `__gpp(command, callback, parameter)` — GPP CMP-less :
+/// `ping` rend le descripteur, `uspv1` déclaré + servi
+/// (`1---` = section entièrement non renseignée), les
+/// autres sections → `(null,false)` honnête.
 fn gpp(e: &mut Engine, _t: Value, a: &[Value]) -> JsResult<Value> {
     let cmd = match a.first() {
         Some(v) => e.to_js_string(*v)?,
@@ -599,39 +600,54 @@ fn gpp(e: &mut Engine, _t: Value, a: &[Value]) -> JsResult<Value> {
             let sv = e.str_val(s);
             e.set_own(o, k, sv, true);
         }
-        // CMP-less honnête : `supportedAPIs` vide — déclarer
-        // `usp1`/`usnat`/`usca` sans savoir servir les sections
-        // poussait les sites à `getSection('uspv1')` → rejet
-        // `(null,false)` → leur propre `GPP section uspv1 is
-        // not supported` (§B-14 webtoons vol 529).
-        let apis = e.new_array(Vec::new());
+        // CMP-less avec section honnête : `uspv1` est déclaré
+        // **et servi** (`1---` = tous champs non renseignés —
+        // « aucun consentement enregistré », la réponse
+        // canonique des stubs réels). Vide `supportedAPIs` ou
+        // `(null,false)` faisaient jeter les sites de leur
+        // propre rejet `GPP section uspv1 is not supported`
+        // (§B-14 webtoons vols 529/584).
+        let uspv1 = e.str_val("uspv1");
+        let apis = e.new_array(vec![uspv1]);
         e.set_own(o, "supportedAPIs", apis, true);
-        let gs = e.str_val("");
+        let gs = e.str_val("DBABLA~1---");
         e.set_own(o, "gppString", gs, true);
-        let empty = e.new_array(Vec::new());
-        e.set_own(o, "sectionList", empty, true);
+        let uspv1b = e.str_val("uspv1");
+        let sections = e.new_array(vec![uspv1b]);
+        e.set_own(o, "sectionList", sections, true);
         let neg = e.new_array(vec![Value::Num(-1.0)]);
         e.set_own(o, "applicableSections", neg, true);
         e.call_value(cb, Value::Undefined, &[Value::Obj(o), Value::Bool(true)])?;
     } else {
-        // Commandes spec répondues honnêtement (`success=true`,
-        // donnée vide) plutôt que le rejet générique — les
-        // sondeurs de section vivent (pas de CMP = aucune
-        // section, pas une erreur).
+        // Sections non déclarées → `(null,false)` honnête ;
+        // `uspv1` est servi (`1---` — voir `ping`).
+        let param = match a.get(2) {
+            Some(v) => e.to_js_string(*v)?,
+            None => String::new(),
+        };
         match cmd.as_str() {
             "hasSection" => {
-                e.call_value(
-                    cb,
-                    Value::Undefined,
-                    &[Value::Bool(false), Value::Bool(true)],
-                )?;
+                let has = Value::Bool(param == "uspv1");
+                e.call_value(cb, Value::Undefined, &[has, Value::Bool(true)])?;
             }
             "getSection" => {
-                let empty = e.new_array(Vec::new());
-                e.call_value(cb, Value::Undefined, &[empty, Value::Bool(true)])?;
+                let (v, ok) = if param == "uspv1" {
+                    (e.str_val("1---"), Value::Bool(true))
+                } else {
+                    (Value::Null, Value::Bool(false))
+                };
+                e.call_value(cb, Value::Undefined, &[v, ok])?;
             }
             "getField" => {
-                e.call_value(cb, Value::Undefined, &[Value::Null, Value::Bool(true)])?;
+                // `uspv1.<champ>` → `'-'` (non renseigné —
+                // valeur exacte dans `1---`) ; champ hors
+                // section déclarée → `null` honnête.
+                let (v, ok) = if param.starts_with("uspv1.") {
+                    (e.str_val("-"), Value::Bool(true))
+                } else {
+                    (Value::Null, Value::Bool(true))
+                };
+                e.call_value(cb, Value::Undefined, &[v, ok])?;
             }
             _ => {
                 e.call_value(cb, Value::Undefined, &[Value::Null, Value::Bool(false)])?;

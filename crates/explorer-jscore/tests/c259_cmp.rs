@@ -332,18 +332,33 @@ fn uspapi_reflects_policy() {
 #[test]
 fn gpp_ping_loaded() {
     let mut e = engine_policy(CmpPolicy::RejectAll);
-    e.eval("var r;__gpp('ping',function(d,ok){r=[ok,d.cmpStatus,d.gppVersion,d.signalStatus,d.supportedAPIs.length]})")
+    e.eval("var r;__gpp('ping',function(d,ok){r=[ok,d.cmpStatus,d.gppVersion,d.signalStatus,d.supportedAPIs.length,d.gppString]})")
         .unwrap();
-    assert_eq!(ev(&mut e, "r.join(',')"), "true,loaded,1.1,ready,0");
-    e.eval("var s;__gpp('getSection',function(d,ok){s=[d.length,ok]})")
+    assert_eq!(
+        ev(&mut e, "r.join(',')"),
+        "true,loaded,1.1,ready,1,DBABLA~1---"
+    );
+    // `uspv1` déclaré + servi honnêtement (`1---` non renseigné)
+    // — webtoons vol 584 : `(null,false)`/`[]` faisait jeter
+    // `GPP section uspv1 is not supported` côté site.
+    e.eval("var s;__gpp('getSection',function(d,ok){s=[d,ok]},'uspv1')")
         .unwrap();
-    assert_eq!(ev(&mut e, "s.join(',')"), "0,true");
-    e.eval("var h;__gpp('hasSection',function(d,ok){h=[d,ok]})")
+    assert_eq!(ev(&mut e, "s.join(',')"), "1---,true");
+    e.eval("var s2;__gpp('getSection',function(d,ok){s2=[d===null,ok]},'usp1')")
         .unwrap();
-    assert_eq!(ev(&mut e, "h.join(',')"), "false,true");
+    assert_eq!(ev(&mut e, "s2.join(',')"), "true,false");
+    e.eval("var h;__gpp('hasSection',function(d,ok){h=[d,ok]},'uspv1')")
+        .unwrap();
+    assert_eq!(ev(&mut e, "h.join(',')"), "true,true");
+    e.eval("var h2;__gpp('hasSection',function(d,ok){h2=[d,ok]},'uscav1')")
+        .unwrap();
+    assert_eq!(ev(&mut e, "h2.join(',')"), "false,true");
     e.eval("var f;__gpp('getField',function(d,ok){f=[d===null,ok]})")
         .unwrap();
     assert_eq!(ev(&mut e, "f.join(',')"), "true,true");
+    e.eval("var f2;__gpp('getField',function(d,ok){f2=[d,ok]},'uspv1.SaleOptOut')")
+        .unwrap();
+    assert_eq!(ev(&mut e, "f2.join(',')"), "-,true");
     e.eval("var u;__gpp('unknown',function(d,ok){u=[d===null,ok]})")
         .unwrap();
     assert_eq!(ev(&mut e, "u.join(',')"), "true,false");
