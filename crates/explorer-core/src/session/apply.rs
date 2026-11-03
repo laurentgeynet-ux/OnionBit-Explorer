@@ -940,6 +940,24 @@ fn engine_tag_matches(dom: &Dom, id: explorer_dom::NodeId, tag: &str) -> bool {
 /// par le parse moteur (`<tbody>` sous un `<table>`…) n'ont
 /// pas de correspondant miroir et ne doivent pas diverger
 /// l'empreinte.
+/// Hash par nœud de l'empreinte structurelle (JS-C315) —
+/// FNV-1a sur les octets de tag + terminateur `0xff`,
+/// graine identique au miroir (`dom.rs`). Combiné en
+/// **somme** par `engine_fingerprint`/`structural_fingerprint`
+/// → multiset : l'ordre pré-ordre n'influence plus la
+/// valeur (la resplice `data-obreloc*` est invisible) mais
+/// le compte et les tags comptent toujours (nœud
+/// manquant/en trop/tag différent détectés).
+fn fp_tag(tag: &str) -> u64 {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for b in tag.bytes().map(|b| b.to_ascii_lowercase()) {
+        h ^= u64::from(b);
+        h = h.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    h ^= 0xff;
+    h.wrapping_mul(0x0000_0100_0000_01b3)
+}
+
 fn engine_fingerprint(dom: &Dom, keymap: &HashMap<u64, explorer_dom::NodeId>) -> u64 {
     let mapped: std::collections::HashSet<explorer_dom::NodeId> =
         keymap.values().copied().collect();
@@ -956,12 +974,7 @@ fn engine_fingerprint(dom: &Dom, keymap: &HashMap<u64, explorer_dom::NodeId>) ->
             dom.tag_name(id).ok()
         };
         let Some(tag) = tag else { continue };
-        for b in tag.bytes().map(|b| b.to_ascii_lowercase()) {
-            h ^= u64::from(b);
-            h = h.wrapping_mul(0x0000_0100_0000_01b3);
-        }
-        h ^= 0xff;
-        h = h.wrapping_mul(0x0000_0100_0000_01b3);
+        h = h.wrapping_add(fp_tag(tag));
     }
     h
 }
@@ -1608,17 +1621,17 @@ fn apply_journal(
         }
     }
     // Garde de cohérence ADR-0025 : l'empreinte structurelle
-    // du DOM rejoué doit égaler celle du miroir post-journal —
-    // mais uniquement quand des ops ont été rejouées. Sur
-    // journal vide (drain propre JS-C293) rien n'a changé →
-    // rien à arbitrer ; l'empreinte session peut diverger
-    // durablement du miroir (templates resplicées
-    // `data-obreloc*` JS-C291, déplacement structurel hors
-    // comptage du check) → `Fingerprint` → re-parse à chaque
-    // pompe sinon, DOM remplacé sous les listeners (bissect
-    // nav, vol 606 — régression JS-C293, fix JS-C314).
+    // du DOM rejoué doit égaler celle du miroir post-journal.
+    // JS-C315 — l'empreinte est **insensible à l'ordre**
+    // (multiset additif) : la resplice `data-obreloc*`
+    // (JS-C291) déplace les templates sans ajouter ni
+    // retirer de nœud — invisible désormais, alors qu'elle
+    // armait `Fingerprint` → re-parse à chaque pompe
+    // (bissect nav, vol 606). Les vraies divergences
+    // (nœud manquant/en trop/tag différent) rejettent
+    // toujours.
     let dom = p.dom.as_ref().ok_or(JournalReject::NoDom)?;
-    if !journal.ops.is_empty() && engine_fingerprint(dom, &p.keymap) != journal.fingerprint {
+    if engine_fingerprint(dom, &p.keymap) != journal.fingerprint {
         return Err(JournalReject::Fingerprint);
     }
     // Les op-lists `<canvas>` sont chemins→NodeId : rejouées
@@ -3233,16 +3246,12 @@ mod tests {
         // pré-ordre (span index < p index).
         let pos = |n| engine.iter().position(|&e| e == n).unwrap();
         assert!(pos(root) < pos(span) && pos(span) < pos(map[&33]));
-        // Empreinte miroir : tags éléments, même ordre —
-        // le fragment racine compte `template`.
+        // Empreinte miroir (JS-C315) : somme des hash de tag —
+        // le fragment racine compte `template`, l'ordre
+        // n'influence plus la valeur.
         let mut want = 0xcbf2_9ce4_8422_2325u64;
         for t in ["my-el", "template", "span", "p"] {
-            for b in t.bytes() {
-                want ^= u64::from(b);
-                want = want.wrapping_mul(0x0000_0100_0000_01b3);
-            }
-            want ^= 0xff;
-            want = want.wrapping_mul(0x0000_0100_0000_01b3);
+            want = want.wrapping_add(super::fp_tag(t));
         }
         assert_eq!(engine_fingerprint(&dom, &map), want);
     }
@@ -3446,13 +3455,12 @@ mod reloc_tests {
         }
     }
 
-    /// JS-C293+JS-C314 — journal vide (drain propre) : pas
-    /// d'arbitrage — match OU mismatch → apply réussit sans
-    /// relayout (rien n'a été rejoué, rien à vérifier ;
-    /// l'empreinte session diverge durablement du miroir sur
-    /// pages `data-obreloc`, un check y re-parse à chaque
-    /// pompe). L'arbitre reste plein dès qu'une op est
-    /// rejouée.
+    /// JS-C293+JS-C315 — journal vide (drain propre) :
+    /// l'empreinte reste l'arbitre — mais en **multiset**
+    /// (JS-C315) : la resplice `data-obreloc*` (mêmes nœuds,
+    /// ordre différent) ne diverge plus ; une vraie
+    /// divergence (compte/tags) rejette `Fingerprint`,
+    /// vide ou non.
     #[test]
     fn c293_journal_vide_empreinte_arbitre() {
         use crate::session::apply::PaintPayload;
@@ -3483,13 +3491,17 @@ mod reloc_tests {
             fingerprint: fp,
         };
         assert!(super::apply_journal(&mut p, &ctx, &job, &j, None, 100).is_ok());
-        // JS-C314 — empreinte fautive tolérée à ops vide : le
-        // drain propre ne déclenche plus le re-parse.
+        // JS-C315 — l'arbitre reste intégral (vide ou non) :
+        // une empreinte qui diverge en compte/tags rejette
+        // toujours — l'insensibilité vise l'ORDRE seul.
         let j = explorer_js::DomJournal {
             ops: Vec::new(),
             fingerprint: fp ^ 1,
         };
-        assert!(super::apply_journal(&mut p, &ctx, &job, &j, None, 100).is_ok());
+        assert!(matches!(
+            super::apply_journal(&mut p, &ctx, &job, &j, None, 100),
+            Err(super::JournalReject::Fingerprint)
+        ));
         // L'arbitre reste entier sur de vraies ops : `SetAttr`
         // rejoué + empreinte divergente = repli `Fingerprint`.
         let j = explorer_js::DomJournal {

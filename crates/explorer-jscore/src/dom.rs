@@ -1122,10 +1122,32 @@ impl Dom {
     /// Casse normalisée : le DOM moteur garde la casse SVG
     /// (`clipPath`) là où le miroir stocke `clippath` —
     /// l'empreinte mesure la structure, pas la représentation.
+    /// Hash d'un nœud d'empreinte (JS-C315) — FNV-1a des
+    /// octets de tag + terminateur `0xff`, même schéma que
+    /// `fp_tag` côté session (`apply.rs`) : graine, pliage
+    /// octets, terminateur. Combiné en **somme** — le tag
+    /// compte, pas la position (resplice `data-obreloc*`
+    /// invisible, divergence réelle toujours détectée).
+    fn fp_tag(tag: &str) -> u64 {
+        let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+        for b in tag.bytes().map(|b| b.to_ascii_lowercase()) {
+            h ^= u64::from(b);
+            h = h.wrapping_mul(0x0000_0100_0000_01b3);
+        }
+        h ^= 0xff;
+        h.wrapping_mul(0x0000_0100_0000_01b3)
+    }
+
     #[must_use]
     pub fn structural_fingerprint(&self) -> u64 {
-        // FNV-1a sur les octets de tag + un séparateur par nœud —
-        // l'ordre structure la valeur (insertion/rotation distinctes).
+        // JS-C315 — empreinte **multiset** (somme des hash de
+        // tag par nœud) : l'ordre pré-ordre n'influence plus la
+        // valeur — une resplice `data-obreloc*` côté session
+        // (template déplacé, même nœuds) ne diverge plus, alors
+        // qu'une vraie différence (nœud manquant/en trop/tag
+        // différent) change toujours la somme. Schéma par nœud
+        // identique à `fp_tag` (apply.rs) — graine, octets,
+        // terminateur `0xff`.
         let mut h: u64 = 0xcbf2_9ce4_8422_2325;
         let mut stack = self.serial_children(self.root).to_vec();
         stack.reverse();
@@ -1135,27 +1157,16 @@ impl Dom {
             }
             let n = &self.nodes[id as usize];
             if n.kind == NodeKind::Element {
-                for b in n.tag.bytes().map(|b| b.to_ascii_lowercase()) {
-                    h ^= u64::from(b);
-                    h = h.wrapping_mul(0x0000_0100_0000_01b3);
-                }
-                h ^= 0xff;
-                h = h.wrapping_mul(0x0000_0100_0000_01b3);
+                h = h.wrapping_add(Self::fp_tag(&n.tag));
             }
             for &c in self.serial_children(id).iter().rev() {
                 stack.push(c);
             }
             // R-96 — le fragment shadow compte comme le
-            // `<template>` émis par `serialize_keyed` (même
-            // ordre : enfants shadow avant light).
+            // `<template>` émis par `serialize_keyed`.
             if n.kind == NodeKind::Element {
                 if let Some(&(root, _)) = self.shadow_roots.get(&id) {
-                    for b in b"template" {
-                        h ^= u64::from(*b);
-                        h = h.wrapping_mul(0x0000_0100_0000_01b3);
-                    }
-                    h ^= 0xff;
-                    h = h.wrapping_mul(0x0000_0100_0000_01b3);
+                    h = h.wrapping_add(Self::fp_tag("template"));
                     for &c in self.nodes[root as usize].children.iter().rev() {
                         stack.push(c);
                     }
