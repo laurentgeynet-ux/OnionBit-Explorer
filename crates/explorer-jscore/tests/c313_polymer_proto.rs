@@ -272,3 +272,103 @@ fn c313_polymer_element_proto_methods() {
     let r13 = ev(&mut e, "(function(){var s=[],p=Polymer.Element.prototype,d=0;for(;p&&d<14;d++){var n=(p.constructor&&p.constructor.name)||'?';s.push(n+'('+Object.getOwnPropertyNames(p).length+'):'+Object.getOwnPropertyNames(p).sort().join(','));p=Object.getPrototypeOf(p)}return s.join(' || ')})()");
     println!("PE chain full → {r13}");
 }
+
+const WCSD: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../_scratch/webcomponents_sd.js"
+);
+
+/// Sonde §B-4(c) résiduel — le vrai `webcomponents-sd.js` (78 Ko,
+/// cache daemon) : `k.removeChild=fn` pose les méthodes sur
+/// `P.prototype` (`Wrapper`), puis `ubC` (kevlar) capture
+/// `Cc.Wrapper.prototype.removeChild` — undefined chez nous →
+/// `z.nativeRemoveChild.call` jette. On rejoue puis on inspecte :
+/// la prop existe-t-elle ? extensible ? accessor vs data ?
+#[test]
+#[ignore = "sonde — fixture polyfill réel non versionnée"]
+fn c315_webcomponents_sd_wrapper_removechild() {
+    let Ok(src) = std::fs::read_to_string(WCSD) else {
+        eprintln!("SKIP {WCSD} absent");
+        return;
+    };
+    let mut e = Engine::new();
+    e.install_dom(&Rc::new(RefCell::new(Dom::from_html(
+        "<html><body><div id=x></div></body></html>",
+    ))));
+    let r = e.eval(&src);
+    if let Err(t) = r {
+        println!("wcsd eval THREW: {t}");
+    }
+    println!(
+        "ShadyDOM/Wrapper → {}",
+        ev(
+            &mut e,
+            "(function(){var SD=window.ShadyDOM;if(!SD)return'no-ShadyDOM';var W=SD.Wrapper,o=[];o.push('W='+typeof W);if(W){var d=Object.getOwnPropertyDescriptor(W.prototype,'removeChild');o.push('rmD='+(d?(typeof d.value)+'/'+d.enumerable+'/'+d.writable+'/'+d.configurable:'absent'));o.push('ext='+Object.isExtensible(W.prototype));o.push('frozen='+Object.isFrozen(W.prototype));o.push('own='+Object.getOwnPropertyNames(W.prototype).length);var d2=Object.getOwnPropertyDescriptor(W.prototype,'appendChild');o.push('acD='+(d2?(typeof d2.value):'absent'));}o.push('Nrm='+typeof Node.prototype.removeChild);return o.join('|')})()",
+        )
+    );
+    // Rejoue la capture `ubC` : `q.nativeRemoveChild = W.prototype.removeChild`
+    // — si undefined ici, le wrapper installé jetterait à l'appel.
+    println!(
+        "ubC capture → {}",
+        ev(
+            &mut e,
+            "(function(){var SD=window.ShadyDOM;if(!SD||!SD.Wrapper)return'no';var W=SD.Wrapper;var q={nativeRemoveChild:W.prototype.removeChild};return'capture='+(typeof q.nativeRemoveChild)})()",
+        )
+    );
+    let nlog = e.nullread_log_drain();
+    println!("nullread_log : {} lectures nulles", nlog.len());
+    for l in &nlog {
+        println!("  {l}");
+    }
+}
+
+/// Repro ordre réel : `webcomponents-sd.js` PUIS kevlar dans le
+/// même engine — `ubC` (kevlar:3721) pousse `Cc.Wrapper` =
+/// `ShadyDOM.Wrapper` et capture `W.prototype.removeChild` à
+/// l'install ; la fonction wrappée jette `z.nativeRemoveChild.call`
+/// si la capture était undefined. Live : elle l'était.
+#[test]
+#[ignore = "sonde — fixtures réelles non versionnées"]
+fn c315_wcsd_then_kevlar_ubc_capture() {
+    let (Ok(sd), Ok(kv)) = (
+        std::fs::read_to_string(WCSD),
+        std::fs::read_to_string(KEVLAR),
+    ) else {
+        eprintln!("SKIP fixtures absentes");
+        return;
+    };
+    let mut e = Engine::new();
+    e.install_timers();
+    e.install_xhr(Rc::new(NullXhr { next: Cell::new(0) }));
+    e.install_fetch();
+    e.install_dom(&Rc::new(RefCell::new(Dom::from_html(
+        "<html><body><ytd-app></ytd-app><x-up></x-up><x-yt></x-yt><div id=x></div></body></html>",
+    ))));
+    if let Err(t) = e.eval(&sd) {
+        println!("wcsd THREW: {t}");
+    }
+    // État juste après wcsd — avant kevlar.
+    println!(
+        "post-wcsd → {}",
+        ev(
+            &mut e,
+            "(function(){var SD=window.ShadyDOM;if(!SD)return'noSD';var W=SD.Wrapper;return'W='+typeof W+'|rm='+(W?typeof W.prototype.removeChild:'?')+'|inUse='+SD.inUse})()",
+        )
+    );
+    if let Err(t) = e.eval(&kv) {
+        println!("kevlar THREW: {t}");
+    }
+    // La capture faite par ubC : relire le même chemin.
+    println!(
+        "post-kevlar → {}",
+        ev(
+            &mut e,
+            "(function(){var SD=window.ShadyDOM;var W=SD&&SD.Wrapper;if(!W)return'noW';var d=Object.getOwnPropertyDescriptor(W.prototype,'removeChild');return'rmD='+(d?(d.get?'ACC':typeof d.value):'ABSENT')+'|own='+Object.getOwnPropertyNames(W.prototype).length})()",
+        )
+    );
+    let nlog = e.nullread_log_drain();
+    println!("nullread_log : {}", nlog.len());
+    for l in &nlog {
+        println!("  {l}");
+    }
+}
