@@ -36,10 +36,11 @@ codecs) — the full, declared list is in `Cargo.toml` and ADR-0001:
 | **CSS** | `explorer-css` | Tokenizer, selectors, cascade — `@layer`, custom properties, pseudo-elements, media queries |
 | **Layout** | `explorer-layout` | Block/inline, **Flexbox, Grid**, floats, positioned elements, fragmentation, incremental relayout |
 | **Rendering** | `explorer-render` | Display list → RGBA framebuffer → PNG — our own display model and paint, over `tiny-skia` (raster), `rustybuzz`/`ttf-parser` (text), `resvg` (SVG), `image` (codecs) |
-| **JavaScript** | `explorer-jscore` | An interpreter written here — ES5+ core, classes, lazy generators, **real `await` suspension** (explicit control stack, no native stack), promises/microtasks (bounded drains), ES modules (static graph + dynamic `import()`), typed arrays, streams, **WebSocket**, fetch/XHR, `customElements` + **Shadow DOM** (attach, DSD, scoped styles), IndexedDB, Cache API, observers, `crypto.subtle`, `Intl.Segmenter`… tracked against **test262** |
-| **Session** | `explorer-core` | Tabs, navigation, event loop, timers, bfcache, sub-resource scheduler, **iframes with per-frame JS realms** (incl. `srcdoc`, `sandbox`, dynamic insertion), History API, `window.open`/named targets, meta/`Refresh:`, **DOM mutation journal** (differential apply — incremental relayout instead of full reflow), image-document policy |
-| **Interface** | `explorer-api` / `-daemon` / `-ffi` / `-cli` | Local **REST + SSE** control API, in-process FFI mode, dev CLI |
+| **JavaScript** | `explorer-jscore` | An interpreter written here — ES5+ core, classes, lazy generators, **real `await` suspension** (explicit control stack, no native stack), promises/microtasks (bounded drains), ES modules (static graph + dynamic `import()`), typed arrays, streams, **WebSocket**, fetch/XHR, `customElements` + **Shadow DOM** (attach, DSD, scoped styles), IndexedDB (incl. `DOMStringList`, versionchange txns), Cache API, observers, `crypto.subtle`, `Intl.Segmenter`, **Media Source Extensions** multi-rail, CMP consent APIs (`__tcfapi`, `__gpp`, Didomi/OneTrust surfaces, `Function.prototype.toString` verbatim)… tracked against **test262** |
+| **Session** | `explorer-core` | Tabs, navigation, event loop, timers, bfcache, sub-resource scheduler, **iframes with per-frame JS realms** (incl. `srcdoc`, `sandbox`, dynamic insertion), History API, `window.open`/named targets, meta/`Refresh:`, **DOM mutation journal** (differential apply — incremental relayout instead of full reflow), image-document policy, **consent-policy machinery** (IAB v2 TC-string codec, CMP cookie seeding, blocked-tag re-arming) |
+| **Interface** | `explorer-api` / `-daemon` / `-ffi` / `-cli` | Local **REST + SSE** control API incl. media surface (offer/claim/segment pull), in-process FFI mode, dev CLI, `download_url` (URL→file through the full transport stack) |
 | **Client** | `app/` | **Flutter** desktop app — talks to the engine over the API, never touches core directly |
+| **Media** | `OnionCodec`/`OnionMedia` *(sister workspace)* | Pure-Rust decoders — **byte-exact vs FFmpeg/dav1d**: H.264, HEVC, AV1, VP9, VP8 (+ D3D11VA paths) ; demux mp4/mkv/ts/ogg ; audio AAC/MP3/Opus/Vorbis/PCM/FLAC/AC-3 ; HLS complete incl. ABR + **MPEG-DASH** ; `MediaSource`/MSE multi-rail end-to-end |
 
 ## Why it's interesting
 
@@ -72,6 +73,12 @@ codecs) — the full, declared list is in `Cargo.toml` and ADR-0001:
   **NAVIGATEUR** (I/O, orchestration, all of JS), coordinated only
   through a public seam journal. Built to be driven by parallel
   work streams — human or agentic.
+- **Its own media stack, byte-exact** — the sister
+  OnionCodec/OnionMedia workspace carries a pure-Rust
+  codec/demux/playback stack validated frame-by-frame against
+  FFmpeg and dav1d oracle ledgers (H.264, HEVC, AV1, VP9, VP8 —
+  software and D3D11VA paths). Video reaches the browser through
+  the same rule: no C, no imported player, conformance measured.
 
 ## Quick start
 
@@ -108,10 +115,25 @@ too: **github.com** paints faithfully with a clean console,
 real shadow roots, **reddit.com** serves its Lit-based feed
 end-to-end, **x.com** renders its logged-out landing and
 survives `await fetch()` over real I/O (suspension/resume of
-the interpreter, not a shim). Walls are measured and named,
-not hidden — e.g. JIT-class proof-of-work challenges are marked
-*bounded by design* rather than "fixed", and each terrain run
-records its evidence in `docs/interface-equipes.md`.
+the interpreter, not a shim). **youtube.com** boots its real
+10.8 MB kevlar bundle (evaluated `ok` by our own interpreter)
+and paints its SSR shell — hydration is the named open arm.
+**Video plays end-to-end**: progressive MP4 → decoded frames +
+audio 1:1 to EOS, and a real **hls.js** player over MSE multi-rail
+(11 fragments, section boundaries, ABR) — powered by the sister
+OnionCodec/OnionMedia stack, byte-exact against FFmpeg/dav1d on
+H.264, HEVC, AV1, VP9 and VP8. Consent machinery resolves the
+CMP walls that kill most sites (Didomi/OneTrust/`__tcfapi`/`__gpp`
+chain: seeds → resolver → `text/plain` re-arming → absorbing
+accessors). A memory-reservoir crash class (unbounded JS
+allocations, bitmap caches, serialization bursts) was diagnosed
+root-cause-by-root-cause and bounded — verdicts now require a
+fresh binary + re-flight before anything is marked resolved.
+Walls are measured and named, not hidden — e.g. JIT-class
+proof-of-work challenges and silent feature-detection rejections
+are catalogued rather than claimed fixed, **DRM/EME is out of
+scope by design**, and each terrain run records its evidence
+in `docs/interface-equipes.md`.
 
 > **⚠ Security notice — no sandbox.** The JS engine and renderer run
 > *in the engine process*, with budgets (time, memory, depth) but
@@ -131,7 +153,7 @@ records its evidence in `docs/interface-equipes.md`.
 |---|---|
 | [`AGENTS.md`](AGENTS.md) | The working contract — rules, conventions, gates |
 | [`docs/architecture.md`](docs/architecture.md) | Layer and crate map |
-| [`docs/architecture/decisions/`](docs/architecture/decisions/) | Numbered ADRs (ADR-0001…0027) |
+| [`docs/architecture/decisions/`](docs/architecture/decisions/) | Numbered ADRs (ADR-0001…0031) |
 | [`docs/interface-equipes.md`](docs/interface-equipes.md) | The inter-team seam journal — how parallel tracks synchronize |
 | [`CHANGELOG.md`](CHANGELOG.md) | Keep-a-Changelog, every step numbered |
 
@@ -146,7 +168,10 @@ les briques d'infrastructure (TLS, framing HTTP/2, raster, shaping,
 codecs image/SVG) sont des crates amont déclarées.
 Compatibilité web moderne visée en **direction asymptotique** (ADR-0001),
 mesurée par paliers sur corpus publics et terrain réel — les écarts et
-limites sont documentés honnêtement, jamais maquillés.
+limites sont documentés honnêtement, jamais maquillés. La **vidéo joue**
+en bout-en-bout (MSE multi-rail, hls.js réel) via la pile sœur
+OnionCodec/OnionMedia — codecs **pur Rust byte-exact** vs FFmpeg/dav1d
+(H.264, HEVC, AV1, VP9, VP8). DRM/EME hors périmètre assumé.
 
 ## License
 
