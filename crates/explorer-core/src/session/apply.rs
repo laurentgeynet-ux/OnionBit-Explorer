@@ -1608,9 +1608,17 @@ fn apply_journal(
         }
     }
     // Garde de cohérence ADR-0025 : l'empreinte structurelle
-    // du DOM rejoué doit égaler celle du miroir post-journal.
+    // du DOM rejoué doit égaler celle du miroir post-journal —
+    // mais uniquement quand des ops ont été rejouées. Sur
+    // journal vide (drain propre JS-C293) rien n'a changé →
+    // rien à arbitrer ; l'empreinte session peut diverger
+    // durablement du miroir (templates resplicées
+    // `data-obreloc*` JS-C291, déplacement structurel hors
+    // comptage du check) → `Fingerprint` → re-parse à chaque
+    // pompe sinon, DOM remplacé sous les listeners (bissect
+    // nav, vol 606 — régression JS-C293, fix JS-C314).
     let dom = p.dom.as_ref().ok_or(JournalReject::NoDom)?;
-    if engine_fingerprint(dom, &p.keymap) != journal.fingerprint {
+    if !journal.ops.is_empty() && engine_fingerprint(dom, &p.keymap) != journal.fingerprint {
         return Err(JournalReject::Fingerprint);
     }
     // Les op-lists `<canvas>` sont chemins→NodeId : rejouées
@@ -3438,9 +3446,13 @@ mod reloc_tests {
         }
     }
 
-    /// JS-C293 — journal vide (drain propre) : l'empreinte reste
-    /// l'arbitre — match → apply réussit sans relayout ; mismatch
-    /// → `Fingerprint` (repli re-parse).
+    /// JS-C293+JS-C314 — journal vide (drain propre) : pas
+    /// d'arbitrage — match OU mismatch → apply réussit sans
+    /// relayout (rien n'a été rejoué, rien à vérifier ;
+    /// l'empreinte session diverge durablement du miroir sur
+    /// pages `data-obreloc`, un check y re-parse à chaque
+    /// pompe). L'arbitre reste plein dès qu'une op est
+    /// rejouée.
     #[test]
     fn c293_journal_vide_empreinte_arbitre() {
         use crate::session::apply::PaintPayload;
@@ -3471,8 +3483,21 @@ mod reloc_tests {
             fingerprint: fp,
         };
         assert!(super::apply_journal(&mut p, &ctx, &job, &j, None, 100).is_ok());
+        // JS-C314 — empreinte fautive tolérée à ops vide : le
+        // drain propre ne déclenche plus le re-parse.
         let j = explorer_js::DomJournal {
             ops: Vec::new(),
+            fingerprint: fp ^ 1,
+        };
+        assert!(super::apply_journal(&mut p, &ctx, &job, &j, None, 100).is_ok());
+        // L'arbitre reste entier sur de vraies ops : `SetAttr`
+        // rejoué + empreinte divergente = repli `Fingerprint`.
+        let j = explorer_js::DomJournal {
+            ops: vec![explorer_js::DomMutation::SetAttr {
+                key: 1,
+                name: "data-x".to_string(),
+                value: Some("y".to_string()),
+            }],
             fingerprint: fp ^ 1,
         };
         assert!(matches!(
