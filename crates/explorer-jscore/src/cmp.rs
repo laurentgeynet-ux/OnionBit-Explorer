@@ -173,6 +173,10 @@ fn install_cmp_siblings(e: &mut Engine, g: ObjId) {
     // — même famille que `notice.isVisible` JS-C262).
     e.add_method(d, "isRegulationApplied", didomi_applied);
     e.add_method(d, "getCurrentUserStatus", didomi_current_status);
+    // `getUserStatus` — API sœur v1 de `getCurrentUserStatus`
+    // (vol 585 : bfmtv rejette l'appel suivant sur le même
+    // receveur une fois `isRegulationApplied` servi).
+    e.add_method(d, "getUserStatus", didomi_current_status);
     e.add_method(d, "setUserConsentStatus", cmp_noop);
     e.add_method(d, "getRequiredPurposeIds", empty_array);
     e.add_method(d, "getRequiredVendorIds", empty_array);

@@ -256,6 +256,16 @@ fn didomi_deep_methods_bounded() {
     assert_eq!(ev(&mut e, "typeof Didomi.isRegulationApplied"), "function");
     assert_eq!(ev(&mut e, "Didomi.isRegulationApplied()"), "true");
     assert_eq!(ev(&mut e, "typeof Didomi.getCurrentUserStatus"), "function");
+    // `getUserStatus` — API sœur v1, même structure
+    // (bfmtv vol 585 : chaîne aval après `isRegulationApplied`).
+    assert_eq!(ev(&mut e, "typeof Didomi.getUserStatus"), "function");
+    assert_eq!(
+        ev(
+            &mut e,
+            "Array.isArray(Didomi.getUserStatus().vendors.consent.enabled)"
+        ),
+        "true"
+    );
     assert_eq!(
         ev(
             &mut e,
