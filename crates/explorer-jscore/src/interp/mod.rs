@@ -4536,7 +4536,7 @@ impl Engine {
                 EnvKind::Local(m) => {
                     if !m.contains_key(name) {
                         m.insert(
-                            name.to_string(),
+                            Self::intern(name),
                             EnvCell::Bind(Binding {
                                 value: Value::Undefined,
                                 mutable: true,
