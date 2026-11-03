@@ -167,6 +167,12 @@ fn install_cmp_siblings(e: &mut Engine, g: ObjId) {
     e.add_method(d, "getUserConsentStatusForVendorOrAll", didomi_status);
     e.add_method(d, "isConsentRequired", didomi_not_required);
     e.add_method(d, "isUserConsentStatusPartial", didomi_not_required);
+    // Méthodes SDK profondes (vol 584 — bfmtv
+    // `isRegulationApplied`, wamiz `getCurrentUserStatus` :
+    // `is not a function` sur l'objet `getUserConsentStatusFor*`
+    // — même famille que `notice.isVisible` JS-C262).
+    e.add_method(d, "isRegulationApplied", didomi_applied);
+    e.add_method(d, "getCurrentUserStatus", didomi_current_status);
     e.add_method(d, "setUserConsentStatus", cmp_noop);
     e.add_method(d, "getRequiredPurposeIds", empty_array);
     e.add_method(d, "getRequiredVendorIds", empty_array);
@@ -733,6 +739,55 @@ fn didomi_status(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
 /// quand `notice_behavior` est `expressed`).
 fn didomi_not_required(_e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
     Ok(Value::Bool(false))
+}
+
+/// `isRegulationApplied` (bfmtv vol 584) → `true` : la
+/// surface modélise un SDK actif **sous régulation** — un
+/// consentement « déjà décidé » n'a de sens que si une
+/// régulation s'applique. `false` ferait brancher les
+/// bundles sur le chemin « utilisateur non régulé » que
+/// notre persona ne représente pas.
+fn didomi_applied(_e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
+    Ok(Value::Bool(true))
+}
+
+/// `getCurrentUserStatus` (wamiz vol 584) — structure spec
+/// du `UserStatus` Didomi : `purposes`/`vendors` sous
+/// `consent`/`legitimate_interest` avec `enabled`/`disabled`/
+/// `all` en listes de purpose/vendor ids. Notre modèle ne
+/// connaît aucun id requis (`getRequired*Ids` → `[]`) →
+/// listes honnêtement vides ; `user_id` vide (aucun
+/// identifiant synthétique — un UUID forgé induirait un
+/// tracking fictif). La forme est stable : les lecteurs
+/// `.purposes.consent.enabled` trouvent leur chemin.
+fn didomi_current_status(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
+    fn tri(e: &mut Engine) -> Value {
+        let o = e.new_object();
+        for k in ["enabled", "disabled", "all"] {
+            let arr = e.new_array(Vec::new());
+            e.set_own(o, k, arr, true);
+        }
+        Value::Obj(o)
+    }
+    fn scopes(e: &mut Engine) -> Value {
+        let o = e.new_object();
+        for k in ["consent", "legitimate_interest"] {
+            let t = tri(e);
+            e.set_own(o, k, t, true);
+        }
+        Value::Obj(o)
+    }
+    let o = e.new_object();
+    for k in ["purposes", "vendors"] {
+        let s = scopes(e);
+        e.set_own(o, k, s, true);
+    }
+    let uid = e.str_val("");
+    e.set_own(o, "user_id", uid, true);
+    e.set_own(o, "created", Value::Num(0.0), true);
+    e.set_own(o, "updated", Value::Num(0.0), true);
+    e.set_own(o, "version", Value::Num(2.0), true);
+    Ok(Value::Obj(o))
 }
 
 /// `didomiOnReady.push(fn…)` — appelle chaque fonction

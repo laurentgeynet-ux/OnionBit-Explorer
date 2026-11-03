@@ -243,6 +243,33 @@ fn didomi_notice_is_visible_bounded() {
     assert_eq!(ev(&mut e, "typeof Didomi.notice.isVisible"), "function");
 }
 
+/// `isRegulationApplied`/`getCurrentUserStatus` — méthodes SDK
+/// profondes lues par les bundles (vol 584 : bfmtv
+/// `isRegulationApplied`, wamiz `getCurrentUserStatus` —
+/// `is not a function` sur l'objet `getUserConsentStatusFor*`).
+/// Le statut rend la structure spec Didomi : `purposes`/`vendors`
+/// sous `consent`/`legitimate_interest` avec `enabled`/`disabled`/
+/// `all` en arrays honnêtement vides (aucun id requis connu).
+#[test]
+fn didomi_deep_methods_bounded() {
+    let mut e = engine_policy(CmpPolicy::RejectAll);
+    assert_eq!(ev(&mut e, "typeof Didomi.isRegulationApplied"), "function");
+    assert_eq!(ev(&mut e, "Didomi.isRegulationApplied()"), "true");
+    assert_eq!(ev(&mut e, "typeof Didomi.getCurrentUserStatus"), "function");
+    assert_eq!(
+        ev(
+            &mut e,
+            "var s=Didomi.getCurrentUserStatus();\
+             [Array.isArray(s.purposes.consent.enabled),\
+              Array.isArray(s.vendors.legitimate_interest.disabled),\
+              Array.isArray(s.purposes.consent.all),\
+              s.purposes.consent.enabled.length,\
+              typeof s.user_id, s.version].join('|')"
+        ),
+        "true|true|true|0|string|2"
+    );
+}
+
 /// `OptanonWrapper` — le setter appelle le callback ET le
 /// mémorise : le getter le rend ensuite au SDK.
 #[test]
