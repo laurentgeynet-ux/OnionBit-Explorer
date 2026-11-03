@@ -1991,6 +1991,71 @@ fn nav_paint_commit_on_cleared_flag_is_parked() {
     assert!(s.dom_dump(tab).unwrap().contains("page vivante"));
 }
 
+/// §B-4a — un journal en file du même onglet n'évince pas le
+/// précédent : les ops sont une **séquence ordonnée de deltas**
+/// (le `dirty` miroir est déjà consommé au drain — les évincer
+/// perdait des mutations à jamais : rAF livré au miroir, jamais
+/// au DOM commis — divergence permanente « avantTI » vs
+/// « avantTIR »). L'enfile prolonge le job journal en queue.
+#[test]
+fn queue_apply_journal_prolonge_au_lieu_d_evincer() {
+    let mut s = Session::new(Arc::new(FailTransport), Arc::new(TestFont));
+    let tab = s.open_tab();
+    let j = |ops: Vec<explorer_js::DomMutation>, fingerprint: u64| explorer_js::DomJournal {
+        ops,
+        fingerprint,
+    };
+    s.queue_apply_journal(
+        tab,
+        j(vec![explorer_js::DomMutation::Remove { key: 11 }], 0xaaaa),
+    );
+    s.queue_apply_journal(
+        tab,
+        j(vec![explorer_js::DomMutation::Remove { key: 12 }], 0xbbbb),
+    );
+    // Fusion en un job : séquence complète, empreinte récente.
+    assert_eq!(s.pending_applies.len(), 1);
+    let Some(jj) = s.pending_applies.front().and_then(|p| p.journal.as_ref()) else {
+        panic!("journal attendu");
+    };
+    assert_eq!(jj.ops.len(), 2);
+    assert_eq!(jj.fingerprint, 0xbbbb);
+    let keys: Vec<u64> = jj
+        .ops
+        .iter()
+        .map(|o| match o {
+            explorer_js::DomMutation::Remove { key } => *key,
+            _ => 0,
+        })
+        .collect();
+    assert_eq!(keys, [11, 12], "l'ordre des deltas est préservé");
+    // Un keyed en file n'est pas évincé par un journal : le
+    // journal s'ajoute après (les ops postdatent sa
+    // sérialisation — ordre de rejeu respecté).
+    s.pending_applies.clear();
+    s.pending_applies.push_back(apply::PendingApply {
+        tab,
+        epoch: 0,
+        html: "<p>baseline</p>".into(),
+        dirty: None,
+        canvas_ops: explorer_js::CanvasOpsTable::new(),
+        relayout: true,
+        journal: None,
+        ids: Vec::new(),
+        tags: Vec::new(),
+    });
+    s.queue_apply_journal(tab, j(vec![explorer_js::DomMutation::Remove { key: 9 }], 7));
+    assert_eq!(s.pending_applies.len(), 2);
+    assert!(s
+        .pending_applies
+        .front()
+        .is_some_and(|p| p.journal.is_none()));
+    assert!(s
+        .pending_applies
+        .back()
+        .is_some_and(|p| p.journal.is_some()));
+}
+
 /// §B-17 — trou de cohérence DOM↔styles de boîte : un
 /// `setAttribute` livré par une synchro **`relayout=false`**
 /// (sous-ressources en vol) atteint le DOM commis sans

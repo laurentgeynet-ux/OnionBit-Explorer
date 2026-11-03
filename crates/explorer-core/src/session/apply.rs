@@ -1629,9 +1629,15 @@ fn apply_journal(
     // armait `Fingerprint` → re-parse à chaque pompe
     // (bissect nav, vol 606). Les vraies divergences
     // (nœud manquant/en trop/tag différent) rejettent
-    // toujours.
+    // toujours. JS-C314 — mais uniquement quand des ops
+    // ont été rejouées : sur journal vide (drain propre
+    // JS-C293) rien n'a changé → rien à arbitrer ;
+    // rejeter `Fingerprint` armerait la baseline keyed
+    // prématurément puis re-parserait à chaque pompe
+    // (la garde a été perdue dans la réécriture C315 —
+    // restaurée).
     let dom = p.dom.as_ref().ok_or(JournalReject::NoDom)?;
-    if engine_fingerprint(dom, &p.keymap) != journal.fingerprint {
+    if !journal.ops.is_empty() && engine_fingerprint(dom, &p.keymap) != journal.fingerprint {
         return Err(JournalReject::Fingerprint);
     }
     // Les op-lists `<canvas>` sont chemins→NodeId : rejouées
@@ -2396,17 +2402,27 @@ impl Session {
             .as_deref_mut()
             .map_or_else(CanvasOpsTable::new, explorer_js::JsEngine::canvas_ops);
         let epoch = entry.nav_epoch;
-        // §B-17 — même sauvegarde que `queue_apply_keyed` :
-        // le `dirty` de l'apply évincé part en dette.
-        self.pending_applies.retain(|p| {
-            if p.tab != tab {
-                return true;
+        // §B-4a : un journal est une **séquence ordonnée de
+        // deltas**, pas un snapshot — évincer un job journal en
+        // file (comme le `retain` de `queue_apply_keyed`) perd
+        // ses ops à jamais : le `dirty` miroir est déjà consommé
+        // au drain, rien ne resynchronise → divergence
+        // permanente miroir/DOM (rAF livré au miroir, jamais au
+        // DOM commis — « avantTI » vs « avantTIR »). Le job en
+        // queue, s'il est du même onglet et déjà journal, est
+        // prolongé (les ops rejouent dans l'ordre ; l'empreinte
+        // la plus récente fait foi — même règle que
+        // `freshen_apply`). Un keyed en file avant subsume le
+        // passé : le journal s'ajoute après, ordre respecté.
+        if let Some(back) = self.pending_applies.back_mut() {
+            if back.tab == tab {
+                if let Some(j) = &mut back.journal {
+                    j.ops.extend(journal.ops);
+                    j.fingerprint = journal.fingerprint;
+                    return;
+                }
             }
-            if let Some(d) = &p.dirty {
-                entry.style_dirty.push(d.clone());
-            }
-            false
-        });
+        }
         self.pending_applies.push_back(PendingApply {
             tab,
             epoch,
@@ -3495,17 +3511,17 @@ mod reloc_tests {
             fingerprint: fp,
         };
         assert!(super::apply_journal(&mut p, &ctx, &job, &j, None, 100).is_ok());
-        // JS-C315 — l'arbitre reste intégral (vide ou non) :
-        // une empreinte qui diverge en compte/tags rejette
-        // toujours — l'insensibilité vise l'ORDRE seul.
+        // JS-C314 (restauré — la garde avait sauté dans la
+        // réécriture C315) : journal **vide** — pas d'arbitrage,
+        // match OU mismatch → Ok sans relayout. Rien n'a été
+        // rejoué → rien à vérifier ; l'empreinte session diverge
+        // durablement du miroir sur pages `data-obreloc`, un
+        // check y re-parse à chaque pompe.
         let j = explorer_js::DomJournal {
             ops: Vec::new(),
             fingerprint: fp ^ 1,
         };
-        assert!(matches!(
-            super::apply_journal(&mut p, &ctx, &job, &j, None, 100),
-            Err(super::JournalReject::Fingerprint)
-        ));
+        assert!(super::apply_journal(&mut p, &ctx, &job, &j, None, 100).is_ok());
         // L'arbitre reste entier sur de vraies ops : `SetAttr`
         // rejoué + empreinte divergente = repli `Fingerprint`.
         let j = explorer_js::DomJournal {
