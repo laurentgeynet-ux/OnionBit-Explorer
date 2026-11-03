@@ -1512,7 +1512,7 @@ fn db_value(e: &mut Engine, reg: &IdbRegistry, name: &str, version: u64) -> Valu
                 .unwrap_or_default()
         };
         let vals: Vec<Value> = names.into_iter().map(|s| e.str_val(s)).collect();
-        let arr = e.new_array(vals);
+        let arr = dom_string_list(e, vals);
         e.set_own(id, "objectStoreNames", arr, true);
     }
     v
@@ -1552,7 +1552,7 @@ fn txn_value(
         e.set_own(id, "db", db_wrapper, true);
         e.set_own(id, "error", Value::Null, true);
         let names: Vec<Value> = stores.into_iter().map(|s| e.str_val(s)).collect();
-        let arr = e.new_array(names);
+        let arr = dom_string_list(e, names);
         e.set_own(id, "objectStoreNames", arr, true);
     }
     v
@@ -1606,7 +1606,7 @@ fn store_value(e: &mut Engine, ctx: &StoreCtx, index: Option<&str>) -> Value {
                 let mut v: Vec<String> = st.indexes.keys().cloned().collect();
                 v.sort();
                 let vals: Vec<Value> = v.into_iter().map(|s| e.str_val(s)).collect();
-                let arr = e.new_array(vals);
+                let arr = dom_string_list(e, vals);
                 e.set_own(id, "indexNames", arr, true);
                 // `objectStore` rétro-lien sur un index =
                 // le store lui-même (renseigné à la lecture
@@ -1925,7 +1925,18 @@ fn store_create_index(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<V
             multi,
         },
     );
+    let mut v: Vec<String> = st.indexes.keys().cloned().collect();
+    v.sort();
     drop(regb);
+    // `indexNames` est une `DOMStringList` vivante (spec) —
+    // le prop posé au mint du store est rafraîchi ici : un
+    // `indexNames` lu après `createIndex` voit le nouvel index
+    // (mastodon vol 584 — `st.indexNames.contains`).
+    if let Value::Obj(sid) = this {
+        let vals: Vec<Value> = v.into_iter().map(|s| e.str_val(s)).collect();
+        let arr = dom_string_list(e, vals);
+        e.set_own(sid, "indexNames", arr, true);
+    }
     Ok(store_value(e, &ctx, Some(&name)))
 }
 
@@ -1947,6 +1958,14 @@ fn store_delete_index(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<V
     };
     if st.indexes.remove(&name).is_none() {
         return Err(e.type_error("deleteIndex: no such index"));
+    }
+    let mut v: Vec<String> = st.indexes.keys().cloned().collect();
+    v.sort();
+    drop(regb);
+    if let Value::Obj(sid) = this {
+        let vals: Vec<Value> = v.into_iter().map(|s| e.str_val(s)).collect();
+        let arr = dom_string_list(e, vals);
+        e.set_own(sid, "indexNames", arr, true);
     }
     Ok(Value::Undefined)
 }
@@ -2704,7 +2723,7 @@ impl Host for IdbDbHost {
                     .unwrap_or_default();
                 names.sort();
                 let vals: Vec<Value> = names.into_iter().map(|s| e.str_val(s)).collect();
-                return Ok(Some(e.new_array(vals)));
+                return Ok(Some(dom_string_list(e, vals)));
             }
             _ => {}
         }
@@ -3581,4 +3600,56 @@ impl Engine {
             .clone();
         self.idb_restore_into(&reg, dbs);
     }
+}
+
+/// `DOMStringList` spec minimale (IDB `objectStoreNames`/
+/// `indexNames` — mastodon vol 584 : `e.objectStoreNames.
+/// contains('custom')` dans l'upgrade DB tombait `contains
+/// is not a function (on Array)` → boot React mort). Le
+/// tableau porte `length`/index gratuit ; `contains`/`item`
+/// sont les méthodes spec de la liste (distinctes de
+/// `includes`/`at` d'Array).
+fn dom_string_list(e: &mut Engine, vals: Vec<Value>) -> Value {
+    let arr = e.new_array(vals);
+    if let Value::Obj(aid) = arr {
+        let contains = e.native_fn("DOMStringList.contains", dsl_contains);
+        e.set_own(aid, "contains", contains, true);
+        let item = e.native_fn("DOMStringList.item", dsl_item);
+        e.set_own(aid, "item", item, true);
+    }
+    arr
+}
+
+/// `list.contains(s)` — `true` si un élément est `SameValue`.
+fn dsl_contains(e: &mut Engine, this: Value, a: &[Value]) -> JsResult<Value> {
+    let want = match a.first() {
+        Some(v) => *v,
+        None => return Ok(Value::Bool(false)),
+    };
+    if let Value::Obj(id) = this {
+        if let Some(Value::Num(n)) = e.get_prop(id, "length") {
+            for i in 0..n as u64 {
+                let el = e.get_prop(id, &i.to_string()).unwrap_or(Value::Undefined);
+                if e.strict_eq(el, want) {
+                    return Ok(Value::Bool(true));
+                }
+            }
+        }
+    }
+    Ok(Value::Bool(false))
+}
+
+/// `list.item(i)` — élément ou `null` hors bornes.
+fn dsl_item(e: &mut Engine, this: Value, a: &[Value]) -> JsResult<Value> {
+    let i = match a.first() {
+        Some(Value::Num(n)) if *n >= 0.0 => *n as u64,
+        _ => return Ok(Value::Null),
+    };
+    if let Value::Obj(id) = this {
+        let v = e.get_prop(id, &i.to_string());
+        if let Some(v) = v.filter(|v| !matches!(v, Value::Undefined)) {
+            return Ok(v);
+        }
+    }
+    Ok(Value::Null)
 }

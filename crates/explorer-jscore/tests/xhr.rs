@@ -1431,6 +1431,37 @@ fn c72_idb_open_upgrade_create_store() {
     assert_eq!(describe(&mut e, "log"), "up0>1|ok:appdb@1/kv");
 }
 
+/// `objectStoreNames`/`indexNames` = `DOMStringList` spec —
+/// `contains`/`item` (mastodon vol 584 : `e.objectStoreNames.
+/// contains('custom')` dans l'upgrade DB tombait `contains is
+/// not a function (on Array)` → boot React mort).
+#[test]
+fn c300_idb_names_are_dom_string_list() {
+    let (mut e, _t) = engine();
+    describe(
+        &mut e,
+        "var log = ''; var rq = indexedDB.open('dsldb', 1);\
+         rq.onupgradeneeded = function (ev) {\
+           var db = ev.target.result;\
+           log += db.objectStoreNames.contains('custom') + ':';\
+           var st = db.createObjectStore('custom', {keyPath:'shortcode'});\
+           var ix = st.createIndex('category', 'cat', {multiEntry:true});\
+           log += db.objectStoreNames.contains('custom') + ':';\
+           log += db.objectStoreNames.item(0) + ':';\
+           log += db.objectStoreNames.length + ':';\
+           log += typeof db.objectStoreNames.contains + ':';\
+           log += st.indexNames.contains('category') + ':';\
+           log += st.indexNames.item(0) + ':';\
+           log += st.indexNames.item(9);\
+         };\
+         rq.onsuccess = function () { log += '|done'; };",
+    );
+    assert_eq!(
+        describe(&mut e, "log"),
+        "false:true:custom:1:function:true:category:null|done"
+    );
+}
+
 #[test]
 fn c187_idb_request_is_event_target() {
     let (mut e, _t) = engine();
