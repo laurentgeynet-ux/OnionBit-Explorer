@@ -301,21 +301,21 @@ impl Parser {
 
     /// Property name after `.` — keywords are legal member names in
     /// real engines (`el.class`, `o.function`, `a.return`…).
-    fn expect_prop_name(&mut self) -> Result<String> {
+    fn expect_prop_name(&mut self) -> Result<Rc<str>> {
         match self.peek().clone() {
             Tok::Ident(s) => {
                 self.next();
-                Ok(s.to_string())
+                Ok(s)
             }
             Tok::Kw(kw) => {
                 self.next();
-                Ok(kw_str(kw).to_string())
+                Ok(crate::intern(kw_str(kw)))
             }
             // `o.#x` — accès membre privé, résolu à la portée
             // de classe englobante.
             Tok::Private(n) => {
                 self.next();
-                self.resolve_priv(&n)
+                self.resolve_priv(&n).map(|m| crate::intern(&m))
             }
             _ => Err(self.err("expected property name")),
         }
@@ -1117,23 +1117,23 @@ impl Parser {
         let name = match self.peek().clone() {
             Tok::Ident(s) => {
                 self.next();
-                s.to_string()
+                s
             }
             Tok::Str(s) => {
                 self.next();
-                s
+                crate::intern(&s)
             }
             Tok::Num(n) => {
                 self.next();
-                crate::value::num_to_js_string(n)
+                crate::intern(&crate::value::num_to_js_string(n))
             }
             Tok::Kw(kw) => {
                 self.next();
-                kw_str(kw).to_string()
+                crate::intern(kw_str(kw))
             }
             Tok::Private(n) => {
                 self.next();
-                self.resolve_priv(&n)?
+                crate::intern(&self.resolve_priv(&n)?)
             }
             _ => return Err(self.err("expected property name")),
         };
@@ -1837,7 +1837,7 @@ impl Parser {
                 // `new.target` — meta-property : la seule paire
                 // `new . nom` valide de la grammaire.
                 let n = self.expect_prop_name()?;
-                if n != "target" {
+                if &*n != "target" {
                     return Err(self.err("expected `new.target`"));
                 }
                 Expr::NewTarget
@@ -2543,7 +2543,7 @@ impl Parser {
                 let body = self.stmt_list()?;
                 self.strict = outer_strict;
                 members.push(ClassMember {
-                    key: PropKey::Name(String::new()),
+                    key: PropKey::Name(Rc::from("")),
                     kind: ClassMemberKind::StaticBlock,
                     static_: true,
                     fun: Rc::new(FnLit {
@@ -2602,7 +2602,7 @@ impl Parser {
             let key = self.prop_key()?;
             if !static_ && kind == ClassMemberKind::Method {
                 if let PropKey::Name(n) = &key {
-                    if n == "constructor" {
+                    if &**n == "constructor" {
                         kind = ClassMemberKind::Ctor;
                     }
                 }

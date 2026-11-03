@@ -209,7 +209,7 @@ pub(crate) enum LValueRef {
     /// Liaison de variable — l'`EnvRef` vit côté appelant.
     Ident(Rc<str>),
     /// Propriété `base[key]` — `base` déjà évaluée.
-    Prop(Value, String),
+    Prop(Value, Rc<str>),
 }
 
 /// Hook d'observabilité des sources évaluées dynamiquement
@@ -4880,7 +4880,7 @@ impl Engine {
                     let rest_obj = self.new_object();
                     if let Value::Obj(id) = v {
                         for k in self.own_enum_keys_trapped(id)? {
-                            if !consumed.contains(&k) {
+                            if !consumed.iter().any(|c| **c == *k) {
                                 let sv = self.get_prop_value(v, &k)?;
                                 self.set_own(rest_obj, &k, sv, true);
                             }
@@ -4899,12 +4899,12 @@ impl Engine {
         env: &EnvRef,
         this: Value,
         k: &PropKey,
-    ) -> JsResult<String> {
+    ) -> JsResult<Rc<str>> {
         match k {
             PropKey::Name(n) => Ok(n.clone()),
             PropKey::Computed(e) => {
                 let v = self.eval_expr(env, this, e)?;
-                self.prop_key(v)
+                self.prop_key(v).map(Rc::from)
             }
         }
     }

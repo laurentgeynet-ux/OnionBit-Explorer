@@ -243,7 +243,7 @@ pub enum Pat {
 #[derive(Debug, Clone)]
 pub enum PropKey {
     /// `name`, `"name"` or `42` (already stringified).
-    Name(String),
+    Name(Rc<str>),
     /// `[expr]` — evaluated at definition time.
     Computed(Expr),
 }
@@ -567,7 +567,7 @@ pub enum Expr {
     /// `c ? t : e`.
     Cond(Box<Expr>, Box<Expr>, Box<Expr>),
     /// `o.prop`.
-    Member(Box<Expr>, String),
+    Member(Box<Expr>, Rc<str>),
     /// `o[key]`.
     Index(Box<Expr>, Box<Expr>),
     /// `f(a, b)` — `this` is the base object for `o.m(…)` calls.
@@ -616,7 +616,7 @@ pub enum Expr {
     /// `super(args)` — only inside a derived-class constructor.
     SuperCall(Vec<Expr>),
     /// `super.name` — resolved against the home object's prototype.
-    SuperMember(String),
+    SuperMember(Rc<str>),
     /// `super[e]` — computed home-object lookup.
     SuperIndex(Box<Expr>),
     /// `await e` — unwraps an already-settled promise
@@ -736,13 +736,13 @@ pub enum ObjProp {
 #[derive(Debug, Clone)]
 pub enum ChainStep {
     /// `.name`
-    Member(String),
+    Member(Rc<str>),
     /// `[k]`
     Index(Expr),
     /// `(args)`
     Call(Vec<Expr>),
     /// `?.name`
-    OptMember(String),
+    OptMember(Rc<str>),
     /// `?.[k]`
     OptIndex(Expr),
     /// `?.(args)`

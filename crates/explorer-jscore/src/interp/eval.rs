@@ -61,7 +61,7 @@ impl Engine {
                     l
                 }
                 Expr::Member(b, name) => {
-                    spine.push(Spine::Member(name.as_str()));
+                    spine.push(Spine::Member(name));
                     b
                 }
                 Expr::Index(b, k) => {
@@ -455,10 +455,10 @@ impl Engine {
                     /// `expr(…)` — f pre-evaluated, global receiver.
                     Bare(Value),
                     /// `o.m(…)`/`o[k](…)` — receiver is the base.
-                    Member(Value, String),
+                    Member(Value, Rc<str>),
                     /// `super.m(…)`/`super[k](…)` — home-object proto
                     /// lookup, receiver stays `this`.
-                    Super(String),
+                    Super(Rc<str>),
                 }
                 // `eval(…)` écrit tel quel → appel direct (spec
                 // `PerformEval`) : la callee résolue doit être *le*
@@ -474,12 +474,12 @@ impl Engine {
                         let b = self.eval_expr(env, this, base)?;
                         let k = self.eval_expr(env, this, key)?;
                         crate::J17_MEMBER_KEY.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                        Callee::Member(b, self.prop_key(k)?)
+                        Callee::Member(b, Rc::from(self.prop_key(k)?))
                     }
                     Expr::SuperMember(name) => Callee::Super(name.clone()),
                     Expr::SuperIndex(key) => {
                         let k = self.eval_expr(env, this, key)?;
-                        Callee::Super(self.prop_key(k)?)
+                        Callee::Super(Rc::from(self.prop_key(k)?))
                     }
                     _ => Callee::Bare(self.eval_expr(env, this, callee)?),
                 };
@@ -638,8 +638,7 @@ impl Engine {
                 // hôte manquante du premier coup.
                 if !self.is_callable(f) {
                     let who = match callee.as_ref() {
-                        Expr::Ident(n) => &**n,
-                        Expr::Member(_, n) => n.as_str(),
+                        Expr::Ident(n) | Expr::Member(_, n) => &**n,
                         _ => "?",
                     };
                     let d = self.describe(f);
@@ -882,7 +881,7 @@ impl Engine {
             Expr::Index(base, key) => {
                 let b = self.eval_expr(env, this, base)?;
                 let k = self.eval_expr(env, this, key)?;
-                Some(LValueRef::Prop(b, self.prop_key(k)?))
+                Some(LValueRef::Prop(b, Rc::from(self.prop_key(k)?)))
             }
             _ => None,
         })
@@ -1151,7 +1150,7 @@ impl Engine {
         // `localStorage?.getItem(...)` levait `value is not a
         // function`, la lecture de prop ne voyant pas `invoke`).
         let mut recv = Value::Obj(self.global);
-        let mut recv_key: Option<String> = None;
+        let mut recv_key: Option<Rc<str>> = None;
         for step in steps {
             match step {
                 ChainStep::Member(name) => {
@@ -1163,7 +1162,7 @@ impl Engine {
                     let kv = self.eval_expr(env, this, k)?;
                     let key = self.prop_key(kv)?;
                     recv = cur;
-                    recv_key = Some(key.clone());
+                    recv_key = Some(Rc::from(&*key));
                     cur = self.get_prop_value(cur, &key)?;
                 }
                 ChainStep::OptMember(name) => {
@@ -1181,7 +1180,7 @@ impl Engine {
                     let kv = self.eval_expr(env, this, k)?;
                     let key = self.prop_key(kv)?;
                     recv = cur;
-                    recv_key = Some(key.clone());
+                    recv_key = Some(Rc::from(&*key));
                     cur = self.get_prop_value(cur, &key)?;
                 }
                 ChainStep::Call(arg_exprs) | ChainStep::OptCall(arg_exprs) => {
