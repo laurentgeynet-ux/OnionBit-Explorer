@@ -20,6 +20,7 @@ workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 memory-stats.workspace = true
+stats_alloc.workspace = true
 regex.workspace = true
 fancy-regex.workspace = true
 unicode-ident.workspace = true

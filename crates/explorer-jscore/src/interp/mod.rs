@@ -328,6 +328,16 @@ pub struct Engine {
     /// sur ce chiffre, pas à l'aveugle).
     last_parse_us: u64,
     last_exec_us: u64,
+    /// Split **alloc natif** de la dernière entrée publique
+    /// (§B-59, J17) : `(octets demandés, nb allocs)` cumulés en
+    /// phase parse et en phase exec. `eval_alloc_mark` = snapshot
+    /// du compteur global `stats_alloc` à la frontière courante ;
+    /// zéros quand le binaire n'installe pas l'allocateur
+    /// instrumenté (le compteur vit dans `stats_alloc`, lecture
+    /// ~2 loads atomiques par frontière — coût nul).
+    last_parse_alloc: (u64, u64),
+    last_exec_alloc: (u64, u64),
+    eval_alloc_mark: (u64, u64),
     /// Deadline wall-clock du batch courant (éval / drain timers
     /// / microtasks) — armée par `arm_eval_deadline` aux bornes
     /// publiques, vérifiée dans `tick` (J1 : une rafale post-apply
@@ -956,6 +966,9 @@ impl Engine {
             ops_total: 0,
             last_parse_us: 0,
             last_exec_us: 0,
+            last_parse_alloc: (0, 0),
+            last_exec_alloc: (0, 0),
+            eval_alloc_mark: (0, 0),
             timers: crate::timers::TimerQueue::default(),
             xhr: crate::xhr::XhrEngineState::default(),
             dom_ctx: None,
@@ -2898,22 +2911,43 @@ impl Engine {
         self.heap.slab_overhead_bytes()
     }
 
+    /// Split **alloc natif** de la dernière éval (§B-59, J17) :
+    /// `(parse, exec)` chacun `(octets demandés, nb allocs)` —
+    /// la phase exec couvre `exec_program` seul (le drain
+    /// microtasks post-`note_exec` n'y est pas compté : le
+    /// résidu total−(parse+exec) visible dans le record
+    /// `js_alloc` le nomme). Zéros sans allocateur instrumenté.
+    #[must_use]
+    pub fn last_eval_alloc_split(&self) -> ((u64, u64), (u64, u64)) {
+        (self.last_parse_alloc, self.last_exec_alloc)
+    }
+
     /// Frontière d'entrée publique — le split repart à zéro.
     pub(crate) fn reset_eval_split(&mut self) {
         self.last_parse_us = 0;
         self.last_exec_us = 0;
+        self.last_parse_alloc = (0, 0);
+        self.last_exec_alloc = (0, 0);
+        self.eval_alloc_mark = alloc_snap();
     }
 
     pub(crate) fn note_parse(&mut self, start: Instant) {
         self.last_parse_us = self
             .last_parse_us
             .saturating_add(u64::try_from(start.elapsed().as_micros()).unwrap_or(u64::MAX));
+        let cur = alloc_snap();
+        self.last_parse_alloc = alloc_sub(cur, self.eval_alloc_mark);
+        self.eval_alloc_mark = cur;
     }
 
     pub(crate) fn note_exec(&mut self, start: Instant) {
         self.last_exec_us = self
             .last_exec_us
             .saturating_add(u64::try_from(start.elapsed().as_micros()).unwrap_or(u64::MAX));
+        let cur = alloc_snap();
+        self.last_exec_alloc =
+            alloc_add(self.last_exec_alloc, alloc_sub(cur, self.eval_alloc_mark));
+        self.eval_alloc_mark = cur;
     }
 
     /// Checkpoint milieu d'éval (§B-59 burst in-eval) : la
@@ -3261,6 +3295,7 @@ impl Engine {
 
     /// New array value.
     pub(crate) fn new_array(&mut self, elems: Vec<Value>) -> Value {
+        crate::J17_ARRAY.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let proto = Value::Obj(self.protos.array);
         Value::Obj(self.heap.alloc_obj(Object::array(elems, proto)))
     }
@@ -4824,6 +4859,7 @@ impl Engine {
     /// `TypeError` when `v` is not iterable; propagates iterator
     /// callback exceptions. Op-bounded via `tick`.
     pub(crate) fn iter_values(&mut self, v: Value) -> JsResult<Vec<Value>> {
+        crate::J17_ITER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         match v {
             Value::Obj(id) => {
                 if let Some(m) = self.get_prop(id, SYM_ITERATOR) {
@@ -4950,6 +4986,7 @@ impl Engine {
     /// # Errors
     /// Same as `iter_values` + `await_value` (pending → `TypeError`).
     pub(crate) fn iter_values_await(&mut self, v: Value) -> JsResult<Vec<Value>> {
+        crate::J17_ITER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         if let Value::Obj(id) = v {
             if let Some(m) = self.get_prop(id, SYM_ASYNC_ITERATOR) {
                 if self.is_callable(m) {
@@ -4999,6 +5036,9 @@ impl Engine {
         this: Value,
         arg_exprs: &[Expr],
     ) -> JsResult<Vec<Value>> {
+        if !arg_exprs.is_empty() {
+            crate::J17_ARGS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        }
         let mut out = Vec::with_capacity(arg_exprs.len());
         for a in arg_exprs {
             match a {
@@ -7834,6 +7874,29 @@ impl Drop for Engine {
             },
         );
     }
+}
+
+/// Snapshot des compteurs natifs `stats_alloc` (`octets
+/// demandés, nb allocs`) — zéros si le binaire n'a pas installé
+/// l'allocateur instrumenté (§B-59, J17 : sonde toujours armée,
+/// ~2 loads atomiques).
+fn alloc_snap() -> (u64, u64) {
+    let s = stats_alloc::INSTRUMENTED_SYSTEM.stats();
+    (
+        u64::try_from(s.bytes_allocated).unwrap_or(u64::MAX),
+        u64::try_from(s.allocations).unwrap_or(u64::MAX),
+    )
+}
+
+/// `a - b` saturant par composante (compteurs monotones — la
+/// soustraction ne déborde qu'en cas de reset externe).
+fn alloc_sub(a: (u64, u64), b: (u64, u64)) -> (u64, u64) {
+    (a.0.saturating_sub(b.0), a.1.saturating_sub(b.1))
+}
+
+/// `a + b` saturant par composante.
+fn alloc_add(a: (u64, u64), b: (u64, u64)) -> (u64, u64) {
+    (a.0.saturating_add(b.0), a.1.saturating_add(b.1))
 }
 
 // ------------------------------------------------------------------

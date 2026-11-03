@@ -618,7 +618,10 @@ impl Lexer {
         match keyword(&s) {
             Some(_) if escaped => Err(self.err("reserved word cannot be escaped")),
             Some(kw) => Ok(Tok::Kw(kw)),
-            None => Ok(Tok::Ident(s)),
+            None => {
+                crate::J17_TOK_IDENT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                Ok(Tok::Ident(s))
+            }
         }
     }
 

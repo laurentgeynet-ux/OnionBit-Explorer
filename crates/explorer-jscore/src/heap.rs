@@ -144,11 +144,13 @@ impl Heap {
 
     /// Allocate a string, returning its id.
     pub fn alloc_str(&mut self, s: impl Into<String>) -> ObjId {
+        crate::J17_STR_CELL.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         self.alloc(CellData::Str(s.into()))
     }
 
     /// Allocate an object.
     pub fn alloc_obj(&mut self, o: Object) -> ObjId {
+        crate::J17_OBJ_CELL.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         self.allocated += 1;
         self.alloc(CellData::Obj(o))
     }
@@ -1498,6 +1500,7 @@ impl Object {
     /// Insertion en fin d'ordre — met l'index à jour s'il existe.
     /// **Le seul `props.push` autorisé** (invariant J15).
     pub(crate) fn push_prop(&mut self, key: String, prop: Prop) {
+        crate::J17_PROP_NEW.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         if let Some(m) = self.idx.get_mut() {
             if let Ok(pos) = u32::try_from(self.props.len()) {
                 m.insert(key.clone(), pos);
@@ -1944,6 +1947,7 @@ impl BindingMap {
                     slot.1 = cell;
                     return;
                 }
+                crate::J17_BIND.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 if v.len() >= BINDING_MAP_SMALL {
                     let mut m: HashMap<Rc<str>, EnvCell> = HashMap::with_capacity(v.len() + 8);
                     m.extend(v.drain(..));
@@ -1954,6 +1958,7 @@ impl BindingMap {
                 v.push((name, cell));
             }
             BindingMap::Map(m) => {
+                crate::J17_BIND.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 m.insert(name, cell);
             }
         }
@@ -2040,6 +2045,7 @@ impl Drop for Env {
 impl Env {
     /// New local scope chained to `parent`.
     pub fn local(parent: EnvRef) -> EnvRef {
+        crate::J17_ENV.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         ENVS_LIVE.with(|c| c.set(c.get() + 1));
         Rc::new(RefCell::new(Env {
             kind: EnvKind::Local(BindingMap::new()),
@@ -2049,6 +2055,7 @@ impl Env {
 
     /// The global scope.
     pub fn global() -> EnvRef {
+        crate::J17_ENV.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         ENVS_LIVE.with(|c| c.set(c.get() + 1));
         Rc::new(RefCell::new(Env {
             kind: EnvKind::Global(BindingMap::new()),
@@ -2059,6 +2066,7 @@ impl Env {
     /// New block scope chained to `parent` — `let`/`const` y vivent,
     /// `var` la traverse (voir [`EnvKind::Block`]).
     pub fn block(parent: EnvRef) -> EnvRef {
+        crate::J17_ENV.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         ENVS_LIVE.with(|c| c.set(c.get() + 1));
         Rc::new(RefCell::new(Env {
             kind: EnvKind::Block(BindingMap::new()),
@@ -2068,6 +2076,7 @@ impl Env {
 
     /// `with (obj)` — object-as-scope chained to `parent`.
     pub fn with(parent: EnvRef, obj: ObjId) -> EnvRef {
+        crate::J17_ENV.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         ENVS_LIVE.with(|c| c.set(c.get() + 1));
         Rc::new(RefCell::new(Env {
             kind: EnvKind::With(obj),

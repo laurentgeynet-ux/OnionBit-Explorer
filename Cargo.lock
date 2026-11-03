@@ -953,6 +953,7 @@ dependencies = [
  "num-traits",
  "regex",
  "stacker",
+ "stats_alloc",
  "thiserror",
  "tracing",
  "unicode-ident",

@@ -3592,6 +3592,8 @@ fn note_eval(
 ) {
     let (parse_us, exec_us) = eng.last_eval_split();
     let (alloc_b, alloc_n) = explorer_common::alloc_delta().unwrap_or((0, 0));
+    let ((alloc_parse_b, alloc_parse_n), (alloc_exec_b, alloc_exec_n)) =
+        eng.last_eval_alloc_split();
     tracing::info!(
         target: "js_alloc",
         kind,
@@ -3602,6 +3604,10 @@ fn note_eval(
         exec_us,
         alloc_b,
         alloc_n,
+        alloc_parse_b,
+        alloc_parse_n,
+        alloc_exec_b,
+        alloc_exec_n,
         ok,
         "eval split"
     );

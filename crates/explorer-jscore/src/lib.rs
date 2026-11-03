@@ -129,6 +129,41 @@ pub static LAST_STATS: std::sync::Mutex<String> = std::sync::Mutex::new(String::
 /// unique non-tické ; qui monte = boucle d'appels chaude.
 pub static CALL_N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
+// ----------------------------------------------------------------
+// J17 — compteurs d'attribution d'alloc par site (§B-59) :
+// `stats_alloc` donne le total par phase ; ces atomiques comptent
+// les ÉVÉNEMENTS par site chaud pour nommer la famille dominante
+// (octets ≈ événement × taille type du site). Monotones — le banc
+// lit le delta avant/après. `Relaxed`, ~1-2 ns par bump.
+// ----------------------------------------------------------------
+/// Cellules `Str` créées (`Heap::alloc_str`) — 1 alloc buffer.
+pub static J17_STR_CELL: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// Cellules objet créées (`Heap::alloc_obj`) — +1 alloc `props`
+/// Vec par objet non vide, +1 `String` par clé (`J17_PROP_NEW`).
+pub static J17_OBJ_CELL: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// Nouvelle propre prop (`push_prop`) — 1 `String` de clé.
+pub static J17_PROP_NEW: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// Liaison insérée en scope (`BindingMap::insert`) — la croissance
+/// du `Vec`/`HashMap` de portée suit ce compteur.
+pub static J17_BIND: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// `Env` créé (`local`/`block`/`with`/`global`) — 1 alloc `Rc`.
+pub static J17_ENV: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// `Vec<Value>` d'args matérialisé (`eval_args`, non vide) —
+/// 1 alloc par appel avec args.
+pub static J17_ARGS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// Clone `String` du nom de membre au site d'appel
+/// (`o.m(…)`/`o[k](…)` dans `Expr::Call`).
+pub static J17_MEMBER_KEY: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// Tableau matérialisé (`new_array`) — 1 alloc `Vec<Value>`.
+pub static J17_ARRAY: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// Itérateur drainé en `Vec` (`iter_values`/`_await`).
+pub static J17_ITER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// `RegExp.exec`/match natif entré (`Re::exec`/`exec_from`/
+/// `exec_all`) — fancy-regex alloue en interne par exécution.
+pub static J17_REGEX: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// `Tok::Ident` produit par le lexer — 1 `String` par ident.
+pub static J17_TOK_IDENT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
 /// §B-59 — dernière méthode/prop `Host` dispatchée
 /// (`class:name`) : les `h.invoke`/`h.get`/`iter_items`…
 /// passent **hors** `call_value_impl` — `calls`/`nat` muets,

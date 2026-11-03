@@ -159,6 +159,7 @@ impl JsRegExp {
     /// First match at or after `start` (char units). With `sticky`,
     /// the match must begin exactly at `start`.
     pub fn exec(&self, hay: &str, start: usize) -> Option<ExecMatch> {
+        crate::J17_REGEX.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let byte_start = char_to_byte(hay, start);
         let caps = self.re.captures_from_pos(hay, byte_start).ok()??;
         let m = caps.get(0)?;
