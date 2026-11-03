@@ -20,7 +20,6 @@ class AppConfig {
       'video/mp4',
       'video/webm',
       'video/x-matroska',
-      'video/avi',
       'video/mp2t',
       'audio/mpeg',
       'audio/mp4',
@@ -38,7 +37,6 @@ class AppConfig {
       'hvc1',
       'hev1',
       'vp09',
-      'vp08',
       'av01',
       'mp4a',
       'mp3',
@@ -46,8 +44,6 @@ class AppConfig {
       'vorbis',
       'flac',
       'ac-3',
-      'ec-3',
-      'alac',
     ],
     this.drmDelegateHosts = const [
       // Chaque entrée = un arbitrage (ADR-0027 §2 : périmètre

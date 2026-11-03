@@ -6222,6 +6222,21 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   Verrou `declared_media_codecs_
   reach_scan_and_engine`.
 
+- [x] **Étape 179. `mediaCodecs`
+  honnêtes** (`app/`, suite 178 —
+  ADR-0029) — quatre claims
+  déclaraient l'injouable :
+  `vp08` (VP8 hors périmètre),
+  `ec-3` (démux → `CodecId::Ac3`,
+  décodeur `bsid>10` → `Unsupported`),
+  `alac` (pas de décodeur),
+  `video/avi` (pas de démuxeur).
+  `isTypeSupported` rendait `"maybe"`
+  → un player ABR pouvait élire
+  une piste vouée à l'échec. Liste
+  `AppConfig.mediaCodecs` alignée
+  sur le registre OnionCodec réel.
+
 - [x] **Étape 177. Loopback média
   REST embarqué FFI**
   (`explorer-ffi` + `explorer-api`,
