@@ -631,10 +631,19 @@ pub trait JsEngine: Send {
     /// au plus `max` octets, retour `(octets, curseur, eos)`.
     /// `eos` vrai quand `endOfStream` est appelé **et** la
     /// file est vide ; `sections` = offsets corps des
-    /// frontières de section (pont C, JS-C295). `None` : pas
-    /// de source sous `url` ou index hors rang. Défaut :
-    /// `None`.
-    fn mse_pull(&mut self, _url: &str, _buffer: usize, _max: usize) -> MsePullReply {
+    /// frontières de section (pont C, JS-C295). `from`
+    /// (JS-C296, chantier D) : repositionne le curseur de
+    /// service à une position absolue (`MseSource::seek` →
+    /// `?from=`) — `Err` = cible hors fenêtre adressable
+    /// (→ 416 filaire). `None` : pas de source sous `url`
+    /// ou index hors rang. Défaut : `None`.
+    fn mse_pull(
+        &mut self,
+        _url: &str,
+        _buffer: usize,
+        _max: usize,
+        _from: Option<u64>,
+    ) -> MsePullReply {
         None
     }
 
@@ -1598,7 +1607,8 @@ fn journal_ops_to_seam(
 /// Réponse `Cmd::MsePull` / [`JsEngine::mse_pull`] (pont C,
 /// JS-C295) : `(octets, curseur, eos, sections)` —
 /// `sections` = offsets corps des frontières `X-Mse-Section`.
-type MsePullReply = Option<(Vec<u8>, u64, bool, Vec<u64>)>;
+/// `Err` (JS-C296) = `?from=` hors fenêtre adressable → 416.
+type MsePullReply = Option<Result<(Vec<u8>, u64, bool, Vec<u64>), ()>>;
 
 enum Cmd {
     Eval {
@@ -1629,11 +1639,13 @@ enum Cmd {
     /// transport, ADR-0029) — [`MsePullReply`] : `(octets,
     /// curseur, eos, sections)` ; `sections` = offsets
     /// corps des frontières `X-Mse-Section` (pont C,
-    /// JS-C295).
+    /// JS-C295) ; `from` = repositionnement absolu `?from=`
+    /// (chantier D, JS-C296).
     MsePull {
         url: String,
         buffer: usize,
         max: usize,
+        from: Option<u64>,
         tx: Sender<MsePullReply>,
     },
     /// MIME des `SourceBuffer` sous `url` (`?buffer=N` indexe
@@ -2196,9 +2208,10 @@ impl JscoreEngine {
                         url,
                         buffer,
                         max,
+                        from,
                         tx,
                     } => {
-                        let _ = tx.send(eng.mse_pull_segments(&url, buffer, max));
+                        let _ = tx.send(eng.mse_pull_segments(&url, buffer, max, from));
                     }
                     Cmd::MseBuffers { url, tx } => {
                         let _ = tx.send(eng.mse_source_buffers(&url));
@@ -2787,7 +2800,13 @@ impl JsEngine for JscoreEngine {
         rx.recv_timeout(Self::EVAL_CMD_TIMEOUT).unwrap_or(false)
     }
 
-    fn mse_pull(&mut self, url: &str, buffer: usize, max: usize) -> MsePullReply {
+    fn mse_pull(
+        &mut self,
+        url: &str,
+        buffer: usize,
+        max: usize,
+        from: Option<u64>,
+    ) -> MsePullReply {
         let (tx, rx) = channel();
         if self
             .tx
@@ -2795,6 +2814,7 @@ impl JsEngine for JscoreEngine {
                 url: url.to_string(),
                 buffer,
                 max,
+                from,
                 tx,
             })
             .is_err()

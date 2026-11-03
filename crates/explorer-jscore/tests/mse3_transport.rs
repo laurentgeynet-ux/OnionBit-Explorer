@@ -65,17 +65,26 @@ fn mse3_pull_returns_appended_bytes_fifo() {
     );
     // Le pull draine la file dans l'ordre d'append, borné
     // par `max`.
-    let (data, cursor, eos, _sec) = e.mse_pull_segments(&u, 0, 4).expect("pull");
+    let (data, cursor, eos, _sec) = e
+        .mse_pull_segments(&u, 0, 4, None)
+        .expect("pull")
+        .expect("servable");
     assert_eq!(data, vec![1, 2, 3, 4]);
     assert_eq!(cursor, 4);
     assert!(!eos);
-    let (data, cursor, eos, _sec) = e.mse_pull_segments(&u, 0, 16).expect("pull2");
+    let (data, cursor, eos, _sec) = e
+        .mse_pull_segments(&u, 0, 16, None)
+        .expect("pull2")
+        .expect("servable");
     assert_eq!(data, vec![5]);
     assert_eq!(cursor, 5);
     assert!(!eos);
     // File vide, readyState "open" → pas d'eos (le site peut
     // encore appender — le ByteSource attend).
-    let (data, _, eos, _s) = e.mse_pull_segments(&u, 0, 16).expect("pull3");
+    let (data, _, eos, _s) = e
+        .mse_pull_segments(&u, 0, 16, None)
+        .expect("pull3")
+        .expect("servable");
     assert_eq!(data, Vec::<u8>::new());
     assert!(!eos);
 }
@@ -92,7 +101,10 @@ fn mse3_end_of_stream_sets_eos_when_drained() {
     );
     // `ended` mais file non vide → octets d'abord, eos au
     // vidage seulement.
-    let (data, _, eos, _s) = e.mse_pull_segments(&u, 0, 16).expect("pull");
+    let (data, _, eos, _s) = e
+        .mse_pull_segments(&u, 0, 16, None)
+        .expect("pull")
+        .expect("servable");
     assert_eq!(data, vec![9, 9]);
     assert!(eos);
 }
@@ -110,14 +122,20 @@ fn mse3_abort_and_remove_drop_queued_bytes() {
     // JS-C287 — le chunk estimé couvre `[0,6)` : `[0,1)` ne
     // le couvre pas entièrement → conservé (on ne découpe
     // pas l'intérieur d'un fragment sans démuxage).
-    let (data, _, _, _s) = e.mse_pull_segments(&u, 0, 16).expect("pull");
+    let (data, _, _, _s) = e
+        .mse_pull_segments(&u, 0, 16, None)
+        .expect("pull")
+        .expect("servable");
     assert_eq!(data, vec![1, 1], "remove partiel conserve le chunk");
     ev(
         &mut e,
         "sb.appendBuffer(new Uint8Array([2,2]));\
          sb.abort();",
     );
-    let (data, _, _, _s) = e.mse_pull_segments(&u, 0, 16).expect("pull2");
+    let (data, _, _, _s) = e
+        .mse_pull_segments(&u, 0, 16, None)
+        .expect("pull2")
+        .expect("servable");
     assert_eq!(data, Vec::<u8>::new(), "abort aurait dû vider la file");
 }
 
@@ -158,7 +176,10 @@ fn mse3_remove_evicts_only_covered_chunks() {
          sb.remove(0,1);"
     ))
     .expect("appends+remove");
-    let (data, _, _, _s) = e.mse_pull_segments(&u, 0, 4096).expect("pull");
+    let (data, _, _, _s) = e
+        .mse_pull_segments(&u, 0, 4096, None)
+        .expect("pull")
+        .expect("servable");
     let init = hex(INIT);
     let seg0 = hex(SEG0);
     let seg1 = hex(SEG1);
@@ -205,7 +226,10 @@ fn mse3_section_offsets_mark_reinit() {
     let il = hex(INIT).len() as u64;
     let sl = hex(SEG).len() as u64;
     // Bulk unique : sections aux positions des deux re-inits.
-    let (data, _, _, sections) = e.mse_pull_segments(&u, 0, 65536).expect("pull");
+    let (data, _, _, sections) = e
+        .mse_pull_segments(&u, 0, 65536, None)
+        .expect("pull")
+        .expect("servable");
     assert_eq!(sections, vec![il + sl, 2 * (il + sl)]);
     assert_eq!(data.len() as u64, 3 * il + 2 * sl);
     // `abort` vide la file avant tout pull : l'init jeté
@@ -219,7 +243,10 @@ fn mse3_section_offsets_mark_reinit() {
          sb2.appendBuffer(H('{INIT}').buffer);"
     ))
     .expect("rail2");
-    let (_, _, _, sections2) = e.mse_pull_segments(&u, 1, 65536).expect("pull2");
+    let (_, _, _, sections2) = e
+        .mse_pull_segments(&u, 1, 65536, None)
+        .expect("pull2")
+        .expect("servable");
     assert_eq!(sections2, Vec::<u64>::new());
 }
 
@@ -236,25 +263,185 @@ fn mse3_buffer_index_selects_source_buffer() {
          v.appendBuffer(new Uint8Array([1]));\
          a.appendBuffer(new Uint8Array([2]));",
     );
-    let (dv, _, _, _sv) = e.mse_pull_segments(&u, 0, 16).expect("video");
-    let (da, _, _, _sa) = e.mse_pull_segments(&u, 1, 16).expect("audio");
+    let (dv, _, _, _sv) = e
+        .mse_pull_segments(&u, 0, 16, None)
+        .expect("video")
+        .expect("servable");
+    let (da, _, _, _sa) = e
+        .mse_pull_segments(&u, 1, 16, None)
+        .expect("audio")
+        .expect("servable");
     assert_eq!(dv, vec![1]);
     assert_eq!(da, vec![2]);
     // Index hors rang → None honnête.
-    assert!(e.mse_pull_segments(&u, 2, 16).is_none());
+    assert!(e.mse_pull_segments(&u, 2, 16, None).is_none());
 }
 
 #[test]
 fn mse3_unknown_url_pulls_none() {
     let mut e = engine();
     // URL non enregistrée → `None` (le handler rendra 410).
-    assert!(e.mse_pull_segments("blob:null/999", 0, 16).is_none());
+    assert!(e.mse_pull_segments("blob:null/999", 0, 16, None).is_none());
     // `blob:` d'un Blob ordinaire → None (pas une MediaSource).
     let u = e
         .eval("URL.createObjectURL(new Blob(['x']))")
         .map(|v| e.describe(v))
         .expect("blob url");
-    assert!(e.mse_pull_segments(&u, 0, 16).is_none());
+    assert!(e.mse_pull_segments(&u, 0, 16, None).is_none());
+}
+
+/// JS-C296 — chantier D : `?from=` repositionne le curseur
+/// de service dans l'historique servi. Replay arrière
+/// byte-fidèle + frontière ré-émise ; avance `?from=` dans
+/// la file (octets sautés conservés, re-servissables) ;
+/// trou `remove` → `Err` (416 filaire) ; `moov` en milieu
+/// de chunk = frontière à l'offset exact, pas au début.
+#[test]
+fn mse3_from_repositions_serve_cursor() {
+    const INIT: &str = "000000386d6f6f76\
+                        000000307472616b\
+                        000000286d646961\
+                        000000206d646864\
+                        000000000000000000000000000003e80000000000000000";
+    const SEG: &str = "000000506d6f6f66\
+                       0000004874726166\
+                       00000014746668640000000800000001000001f4\
+                       0000001474666474010000000000000000000000\
+                       000000187472756e0000010000000002000001f4000001f4\
+                       0000000c6d646174deadbeef";
+    const SEG1: &str = "000000506d6f6f66\
+                        0000004874726166\
+                        00000014746668640000000800000001000001f4\
+                        00000014746664740100000000000000000003e8\
+                        000000187472756e0000010000000002000001f4000001f4\
+                        0000000c6d646174deadbeef";
+    let init = hex(INIT);
+    let seg = hex(SEG);
+    let seg1 = hex(SEG1);
+    let il = init.len() as u64;
+    let sl = seg.len() as u64;
+    let mut e = engine();
+    let u = attached_url(&mut e);
+    e.eval(&format!(
+        "function H(s){{var a=new Uint8Array(s.length/2);\
+         for(var i=0;i<a.length;i++)a[i]=parseInt(s.substr(i*2,2),16);\
+         return a}}\
+         var sb=__ms.addSourceBuffer('video/mp4');\
+         sb.appendBuffer(H('{INIT}').buffer);\
+         sb.appendBuffer(H('{SEG}').buffer);\
+         sb.appendBuffer(H('{INIT}').buffer);\
+         sb.appendBuffer(H('{SEG1}').buffer);"
+    ))
+    .expect("appends");
+    // Pull complet : deux sections servies, curseur à la fin.
+    let (d1, c1, _, s1) = e
+        .mse_pull_segments(&u, 0, 65536, None)
+        .expect("pull")
+        .expect("servable");
+    assert_eq!(s1, vec![il + sl]);
+    let total = 2 * il + 2 * sl;
+    assert_eq!(c1, total);
+    assert_eq!(d1.len() as u64, total);
+    // Replay arrière depuis le 2e init : mêmes octets,
+    // frontière ré-émise à l'offset 0 du corps, curseur
+    // serveur = from + len (contrat `?from=` vérifié par
+    // le `MseSource` média).
+    let (d2, c2, _, s2) = e
+        .mse_pull_segments(&u, 0, 65536, Some(il + sl))
+        .expect("replay")
+        .expect("servable");
+    assert_eq!(s2, vec![0]);
+    assert_eq!(c2, total);
+    let mut want = init.clone();
+    want.extend_from_slice(&seg1);
+    assert_eq!(d2, want, "le replay doit re-servir init+seg1 fidèlement");
+    // `from` pile au début : tout le flux re-servi.
+    let (d3, c3, _, _) = e
+        .mse_pull_segments(&u, 0, 65536, Some(0))
+        .expect("replay0")
+        .expect("servable");
+    assert_eq!(c3, total);
+    assert_eq!(d3, d1, "from=0 rejoue l'intégralité du flux");
+    // Avance `from` dans la file : appends après le pull —
+    // les octets entre pulled et from basculent servis et
+    // restent re-servissables.
+    e.eval(&format!(
+        "sb.appendBuffer(H('{SEG}').buffer);\
+         sb.appendBuffer(H('{SEG1}').buffer);"
+    ))
+    .expect("appends2");
+    let skipped_from = total + 4; // 4 octets dans SEG
+    let (d4, c4, _, _) = e
+        .mse_pull_segments(&u, 0, 65536, Some(skipped_from))
+        .expect("fwd")
+        .expect("servable");
+    let mut want4 = seg[4..].to_vec();
+    want4.extend_from_slice(&seg1);
+    assert_eq!(d4, want4, "from avant sert depuis la position exacte");
+    assert_eq!(c4, skipped_from + d4.len() as u64);
+    // …et les octets sautés restent re-servissables :
+    // `from` en tête du chunk sauté re-sert le chunk entier
+    // (dont les 4 octets sautés par le seek avant).
+    let (d5, _, _, _) = e
+        .mse_pull_segments(&u, 0, 65536, Some(total))
+        .expect("replay-skip")
+        .expect("servable");
+    let mut want5 = seg.clone();
+    want5.extend_from_slice(&seg1);
+    assert_eq!(d5, want5, "les octets sautés sont conservés");
+    // `remove` du segment [0,1) (SEG à tfdt=0) : trou
+    // adressable dans l'historique → 416.
+    e.eval("sb.remove(0,1)").expect("remove");
+    assert!(
+        e.mse_pull_segments(&u, 0, 64, Some(il))
+            .expect("pull6")
+            .is_err(),
+        "from dans un trou remove → Unservable"
+    );
+    // Position jamais servie (> pulled) → 416 aussi.
+    assert!(e
+        .mse_pull_segments(&u, 0, 64, Some(9_999_999))
+        .expect("pull7")
+        .is_err());
+}
+
+/// JS-C296 — un append mixte `[moof+mdat][moov]` débute sa
+/// section à l'offset du `moov`, pas au début du chunk.
+#[test]
+fn mse3_section_offset_mid_chunk() {
+    const INIT: &str = "000000386d6f6f76\
+                        000000307472616b\
+                        000000286d646961\
+                        000000206d646864\
+                        000000000000000000000000000003e80000000000000000";
+    const SEG: &str = "000000506d6f6f66\
+                       0000004874726166\
+                       00000014746668640000000800000001000001f4\
+                       0000001474666474010000000000000000000000\
+                       000000187472756e0000010000000002000001f4000001f4\
+                       0000000c6d646174deadbeef";
+    let il = hex(INIT).len() as u64;
+    let sl = hex(SEG).len() as u64;
+    let mut e = engine();
+    let u = attached_url(&mut e);
+    e.eval(&format!(
+        "function H(s){{var a=new Uint8Array(s.length/2);\
+         for(var i=0;i<a.length;i++)a[i]=parseInt(s.substr(i*2,2),16);\
+         return a}}\
+         var sb=__ms.addSourceBuffer('video/mp4');\
+         sb.appendBuffer(H('{INIT}').buffer);\
+         var mix=new Uint8Array({sl}+{il});\
+         mix.set(H('{SEG}'),0); mix.set(H('{INIT}'),{sl});\
+         sb.appendBuffer(mix.buffer);"
+    ))
+    .expect("appends");
+    let (_, _, _, sections) = e
+        .mse_pull_segments(&u, 0, 65536, None)
+        .expect("pull")
+        .expect("servable");
+    // La frontière est à l'offset du moov dans le chunk
+    // mixte = il + sl (après le init initial + le moof).
+    assert_eq!(sections, vec![il + sl]);
 }
 
 #[test]

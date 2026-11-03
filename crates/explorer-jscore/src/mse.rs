@@ -64,6 +64,83 @@ const MS_BUFFER_CAP: usize = 8;
 /// les bords flottants `tfdt`/timescale.
 const REMOVE_EPS: f64 = 1e-3;
 
+/// Cap de l'historique servi (JS-C296, chantier D) — la
+/// fenêtre adressable que `?from=` peut re-servir. Au-delà,
+/// les chunks les plus vieux sont évincés (un `from` dedans
+/// retourne 416, honnêt).
+const SB_HISTORY_CAP: usize = 64 * 1024 * 1024;
+
+/// Lot servi par `mse_pull_segments` (JS-C295/296) :
+/// `(octets, curseur, eos, sections)` — `Err` = `?from=`
+/// hors fenêtre adressable (416 filaire).
+pub(crate) type MsePullOut = Result<(Vec<u8>, u64, bool, Vec<u64>), ()>;
+
+/// Chunk déjà livré à l'hôte, conservé pour `?from=` —
+/// position absolue propre pour survivre aux trous
+/// `remove`/éviction (JS-C296).
+struct ServedChunk {
+    /// Position absolue de `bytes[0]` dans le flux servi.
+    start: u64,
+    bytes: Vec<u8>,
+    /// Plage temps revendiquée — sert à l'éviction `remove`.
+    range: Option<(f64, f64)>,
+    /// Offset intra-chunk d'une frontière de section
+    /// (`moov` re-servi) — ré-émis en `X-Mse-Section`
+    /// quand le replay inclut cette position.
+    boundary: Option<u64>,
+}
+
+/// `pos` tombe dans un chunk servi conservé (JS-C296) —
+/// `false` = trou `remove`/éviction cap/jamais servi.
+fn served_covers(served: &std::collections::VecDeque<ServedChunk>, pos: u64) -> bool {
+    served
+        .iter()
+        .any(|c| c.start <= pos && pos < c.start + c.bytes.len() as u64)
+}
+
+/// Bascule le prochain chunk de la file → historique
+/// `served` en avançant `pulled` (JS-C296 — l'historique
+/// devient la source de tout octet servi : le drain ne
+/// fait plus que copier entre `cursor` et `pulled`).
+/// Frontière `X-Mse-Section` : figée sur le chunk servi
+/// si un `moov` est **re**-servi (`pulled_saw_init` — le
+/// premier init n'est jamais une frontière) ; le drain
+/// l'émet à la position livrée, à la première passe
+/// comme au replay `?from=` — les octets sautés par un
+/// seek avant gardent la leur pour un replay ultérieur.
+/// `false` = file vide. Éviction `SB_HISTORY_CAP` en tête.
+fn serve_next_chunk(sd: &mut SbData) -> bool {
+    let Some(seg) = sd.segments.pop_front() else {
+        return false;
+    };
+    let span = sd.seg_ranges.pop_front().flatten();
+    let bound = sd.seg_boundary.pop_front().flatten();
+    let start = sd.pulled;
+    sd.bytes = sd.bytes.saturating_sub(seg.len());
+    sd.pulled += seg.len() as u64;
+    // `Some(off)` uniquement sur un re-init servi — le
+    // drapeau est figé à la bascule pour rester vrai au
+    // replay même si d'autres inits ont suivi.
+    let boundary = bound.filter(|_| sd.pulled_saw_init);
+    if bound.is_some() {
+        sd.pulled_saw_init = true;
+    }
+    sd.served_bytes += seg.len();
+    sd.served.push_back(ServedChunk {
+        start,
+        bytes: seg,
+        range: span,
+        boundary,
+    });
+    while sd.served_bytes > SB_HISTORY_CAP {
+        let Some(old) = sd.served.pop_front() else {
+            break;
+        };
+        sd.served_bytes = sd.served_bytes.saturating_sub(old.bytes.len());
+    }
+    true
+}
+
 /// État moteur MSE — protos paresseux + registre des URL objets
 /// pointant un `MediaSource`. Document-local : swappé avec le
 /// `BrowsingContext` comme `files`/`idb`.
@@ -153,13 +230,30 @@ struct SbData {
     /// l'éviction par plage de `remove` : un chunk n'est
     /// jeté que si sa plage est **entièrement** couverte.
     seg_ranges: std::collections::VecDeque<Option<(f64, f64)>>,
-    /// `true` par chunk porteur d'un `moov` (JS-C295, pont
-    /// C — parallèle à `segments`). Le pull émet
-    /// `X-Mse-Section` à l'offset d'un tel chunk **si** un
+    /// `Some(off)` par chunk porteur d'un `moov` (JS-C295,
+    /// pont C — parallèle à `segments`) : `off` = position
+    /// intra-chunk du `moov` racine (JS-C296 — un append
+    /// mixte débute sa section au `moov`, pas au début).
+    /// Le pull émet `X-Mse-Section` à cet offset **si** un
     /// init a déjà été servi (`pulled_saw_init`) : un init
     /// queued puis évincé par `remove`/`abort` ne marque
     /// rien, un re-init servi = frontière de section.
-    seg_boundary: std::collections::VecDeque<bool>,
+    seg_boundary: std::collections::VecDeque<Option<u64>>,
+    /// Chunks déjà servis à l'hôte, conservés pour le
+    /// repositionnement `?from=` (JS-C296, chantier D —
+    /// `MseSource::seek` re-sert l'historique des appends).
+    /// Chaque chunk porte sa position absolue : les trous
+    /// créés par `remove`/éviction cap restent adressables
+    /// de part et d'autre, `from` dans un trou → 416.
+    served: std::collections::VecDeque<ServedChunk>,
+    /// Total des octets en `served` — borné par
+    /// `SB_HISTORY_CAP` (les plus vieux sont évincés).
+    served_bytes: usize,
+    /// Curseur de service absolu : `== pulled` en lecture
+    /// FIFO normale, `< pulled` pendant un replay `?from=`
+    /// (ne ré-alloue pas — les positions servies sont déjà
+    /// consommées). `pulled` reste le filigrane d'allocation.
+    cursor: u64,
     /// Un init `moov` a déjà été servi à l'hôte via le pull.
     pulled_saw_init: bool,
     /// `buffered` estimé (JS-C278/b3, ADR-0029) — plages
@@ -572,6 +666,9 @@ fn ms_add_source_buffer(e: &mut Engine, this: Value, args: &[Value]) -> JsResult
         pulled: 0,
         seg_ranges: std::collections::VecDeque::new(),
         seg_boundary: std::collections::VecDeque::new(),
+        served: std::collections::VecDeque::new(),
+        served_bytes: 0,
+        cursor: 0,
         pulled_saw_init: false,
     }));
     let v = e.new_host_object(Rc::new(SbHost { d: sb }));
@@ -687,6 +784,22 @@ fn box_header(b: &[u8]) -> Option<(usize, [u8; 4], usize)> {
 /// Itère les boxes enfants de `b` (région payload d'un
 /// conteneur) en passant `(fourcc, payload)` à `f` — stop
 /// net sur box tronqué (contenu hostile : borne, jamais panic).
+/// Offset du premier `moov` **de niveau racine** de `b` —
+/// position exacte de la frontière de section `X-Mse-Section`
+/// (JS-C296/D : un append mixte `[moof][mdat][moov]` voit sa
+/// section débuter au `moov`, pas au début du chunk).
+fn moov_offset(b: &[u8]) -> Option<u64> {
+    let mut pos = 0usize;
+    while let Some((size, fourcc, _hdr)) = box_header(&b[pos..]) {
+        let end = pos.checked_add(size).filter(|&e| e <= b.len())?;
+        if &fourcc == b"moov" {
+            return Some(pos as u64);
+        }
+        pos = end;
+    }
+    None
+}
+
 fn walk_boxes(b: &[u8], mut f: impl FnMut(&[u8; 4], &[u8])) {
     let mut pos = 0usize;
     while let Some((size, fourcc, hdr)) = box_header(&b[pos..]) {
@@ -821,6 +934,10 @@ struct Fmp4Scan {
     /// le pont C (`X-Mse-Section` — l'hôte resynchronise
     /// le démuxeur pile à cet offset, `BoundaryGate`).
     has_moov: bool,
+    /// Offset du premier `moov` racine dans le chunk
+    /// (JS-C296 — frontière intra-chunk : un append mixte
+    /// `[média][moov]` débute sa section au `moov`).
+    moov_off: Option<u64>,
 }
 
 fn fmp4_scan(bytes: &[u8]) -> Fmp4Scan {
@@ -829,6 +946,7 @@ fn fmp4_scan(bytes: &[u8]) -> Fmp4Scan {
         moofs: Vec::new(),
         recognized: false,
         has_moov: false,
+        moov_off: moov_offset(bytes),
     };
     walk_boxes(bytes, |fourcc, payload| match fourcc {
         b"moov" => {
@@ -992,8 +1110,10 @@ fn sb_append_buffer(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Val
         };
         sd.seg_ranges.push_back(span);
         // JS-C295 — pont C : un `moov` re-servi plus tard au
-        // pull = frontière `X-Mse-Section` (switch ABR).
-        sd.seg_boundary.push_back(scan.has_moov);
+        // pull = frontière `X-Mse-Section` (switch ABR) ;
+        // JS-C296 — offset intra-chunk exact (`moov` peut
+        // suivre du média dans le même append).
+        sd.seg_boundary.push_back(scan.moov_off);
     }
     let Value::Obj(sid) = this else {
         return Ok(Value::Undefined);
@@ -1082,6 +1202,20 @@ fn sb_remove(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
             sd.seg_boundary.push_back(bound);
         }
         sd.bytes = bytes;
+        // JS-C296 — même règle sur l'historique servi : un
+        // chunk entièrement couvert laisse un trou adressable
+        // (`?from=` dedans → 416) ; le média retiré ne doit
+        // plus être re-servissable (mémoire + fidélité).
+        let served = std::mem::take(&mut sd.served);
+        for c in served {
+            if c.range
+                .is_some_and(|(a, b)| a >= s - REMOVE_EPS && b <= t + REMOVE_EPS)
+            {
+                sd.served_bytes = sd.served_bytes.saturating_sub(c.bytes.len());
+                continue;
+            }
+            sd.served.push_back(c);
+        }
         // JS-C278 — l'estimation `buffered`, elle, connaît
         // des plages : soustraction honnête de `[s, t)`.
         sd.est_ranges = sd
@@ -1235,52 +1369,76 @@ impl Engine {
     /// une nouvelle section (JS-C295, pont C — `X-Mse-Section`
     /// du contrat filaire : un `moov` re-servi = l'hôte
     /// resynchronise le démuxeur à cet offset exact).
+    /// `from` (JS-C296, chantier D — `MseSource::seek`) :
+    /// repositionne le curseur de service à une position
+    /// absolue déjà vue. **Arrière** : re-sert l'historique
+    /// conservé (`served`) ; **avant** : bascule les chunks
+    /// file→served jusqu'à couvrir la cible (les octets
+    /// sautés restent re-servissables, un seek ne retire
+    /// pas de média). `Err` = cible hors fenêtre
+    /// adressable (trou `remove`/éviction cap/jamais servi)
+    /// → `416` filaire.
     pub fn mse_pull_segments(
         &mut self,
         url: &str,
         buffer: usize,
         max: usize,
-    ) -> Option<(Vec<u8>, u64, bool, Vec<u64>)> {
+        from: Option<u64>,
+    ) -> Option<MsePullOut> {
         let mid = self.mse.object_urls.get(url).copied()?;
         let ms = ms_data(self, Value::Obj(mid))?;
         let sbv = ms.borrow().buffers.get(buffer).copied()?;
         let sd = sb_data(self, sbv)?;
         let mut sd = sd.borrow_mut();
+        if let Some(f) = from {
+            while sd.pulled < f {
+                // Avance : les chunks file basculent servis —
+                // les positions restent re-servissables.
+                if !serve_next_chunk(&mut sd) {
+                    break;
+                }
+            }
+            if (f < sd.pulled && !served_covers(&sd.served, f)) || f > sd.pulled {
+                // Trou (remove/éviction) ou jamais servi.
+                return Some(Err(()));
+            }
+            sd.cursor = f;
+        }
         let mut out = Vec::new();
         let mut sections = Vec::new();
+        let body_start = sd.cursor;
         while out.len() < max {
-            let Some(seg) = sd.segments.pop_front() else {
-                break;
-            };
-            let span = sd.seg_ranges.pop_front().flatten();
-            let bound = sd.seg_boundary.pop_front().unwrap_or_default();
-            if bound {
-                if sd.pulled_saw_init {
-                    // Re-init servi = frontière de section
-                    // pile avant le premier octet du chunk.
-                    sections.push(out.len() as u64);
+            if sd.cursor < sd.pulled {
+                // Replay : copie depuis le chunk d'historique
+                // contenant le curseur ; un trou (média
+                // `remove`d) termine le corps ici.
+                let Some(pos) = sd.served.iter().position(|c| {
+                    c.start <= sd.cursor && sd.cursor < c.start + c.bytes.len() as u64
+                }) else {
+                    break;
+                };
+                let c = &sd.served[pos];
+                let off = (sd.cursor - c.start) as usize;
+                let take = (c.bytes.len() - off).min(max - out.len());
+                if let Some(boff) = c.boundary {
+                    let abs = c.start + boff;
+                    if abs >= sd.cursor && abs < sd.cursor + take as u64 {
+                        sections.push(abs - body_start);
+                    }
                 }
-                sd.pulled_saw_init = true;
+                out.extend_from_slice(&c.bytes[off..off + take]);
+                sd.cursor += take as u64;
+                continue;
             }
-            let take = (max - out.len()).min(seg.len());
-            out.extend_from_slice(&seg[..take]);
-            if take < seg.len() {
-                // Fin de paquet atteinte — le reste du
-                // segment repasse en tête de file avec sa
-                // plage (le chunk reste entier côté temps) ;
-                // sa frontière, elle, est déjà servie.
-                sd.segments.push_front(seg[take..].to_vec());
-                sd.seg_ranges.push_front(span);
-                sd.seg_boundary.push_front(false);
+            if !serve_next_chunk(&mut sd) {
+                break;
             }
         }
-        sd.bytes = sd.bytes.saturating_sub(out.len());
-        sd.pulled = sd.pulled.saturating_add(out.len() as u64);
-        let cursor = sd.pulled;
-        let empty = sd.segments.is_empty();
+        let cursor = sd.cursor;
+        let ended = sd.cursor == sd.pulled && sd.segments.is_empty();
         drop(sd);
-        let eos = empty && ms.borrow().ready_state == "ended";
-        Some((out, cursor, eos, sections))
+        let eos = ended && ms.borrow().ready_state == "ended";
+        Some(Ok((out, cursor, eos, sections)))
     }
 
     /// MIME des `SourceBuffer` de la `MediaSource` sous `url`

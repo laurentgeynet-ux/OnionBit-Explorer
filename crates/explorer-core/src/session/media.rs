@@ -91,6 +91,10 @@ pub enum MsePull {
     Ready(Vec<u8>, u64, bool, Vec<u64>),
     /// Moteur momentanément absent (fenêtre pompe) — re-sonder.
     Pending,
+    /// `?from=` hors fenêtre adressable (JS-C296, chantier
+    /// D — trou `remove`/éviction/position jamais servie)
+    /// → `416` filaire, terminal.
+    Unservable,
     /// Surface morte / non-MSE / index de buffer hors rang.
     Dead,
 }
@@ -699,13 +703,17 @@ impl Session {
     /// moteur momentanément absent (fenêtre pompe — §B-63 :
     /// un `410` terminal tuait le `MseSource` sur un état
     /// transitoire, l'hôte doit re-sonder) ; `Dead` = surface
-    /// morte, non-MSE ou buffer hors rang → 410.
+    /// morte, non-MSE ou buffer hors rang → 410. `from`
+    /// (JS-C296, chantier D — `MseSource::seek` → `?from=`) :
+    /// repositionnement absolu du curseur de service ;
+    /// `Unservable` si la cible est hors fenêtre adressable.
     pub fn media_segments_pull(
         &mut self,
         tab: TabId,
         mid: u64,
         buffer: usize,
         max: usize,
+        from: Option<u64>,
     ) -> MsePull {
         let Some(entry) = self.tabs.get_mut(&tab) else {
             return MsePull::Dead;
@@ -730,8 +738,9 @@ impl Session {
         let Some(eng) = entry.js.as_mut() else {
             return MsePull::Pending;
         };
-        match eng.mse_pull(&m.url.clone(), buffer, max) {
-            Some((data, cursor, eos, sections)) => MsePull::Ready(data, cursor, eos, sections),
+        match eng.mse_pull(&m.url.clone(), buffer, max, from) {
+            Some(Ok((data, cursor, eos, sections))) => MsePull::Ready(data, cursor, eos, sections),
+            Some(Err(())) => MsePull::Unservable,
             None => MsePull::Dead,
         }
     }

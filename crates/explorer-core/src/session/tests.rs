@@ -1400,7 +1400,7 @@ fn blob_unmarked_pull_is_pending_not_dead_when_engine_absent() {
         e.media[0].mse = false;
         e.js = None;
     }
-    match s.media_segments_pull(tab, 1, 0, 64) {
+    match s.media_segments_pull(tab, 1, 0, 64, None) {
         crate::session::MsePull::Pending => {}
         _ => panic!("blob: aveugle + moteur absent doit rendre Pending"),
     }

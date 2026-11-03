@@ -5982,6 +5982,37 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   `mse3_section_offsets_mark_
   reinit` (9/9).
 
+- [x] **JS-C296. `?from=` — fenêtre
+  adressable pour le seek MSE**
+  (`explorer-jscore` + `explorer-js`
+  + `explorer-core` + `explorer-api`,
+  chantier D média —
+  `video.currentTime=` sur
+  MediaSource) — le pull accepte
+  `from=<pos>` : chunks servis
+  conservés (`ServedChunk` octets +
+  plage + frontière, cap
+  `SB_HISTORY_CAP` 64 Mio) et
+  re-servis byte-fidèles —
+  `X-Mse-Cursor = from + len`
+  exact (vérifié par `MseSource`,
+  cb5ddd9). Arrière = replay depuis
+  le chunk couvrant ; avant dans la
+  file = bascule file→served (sautés
+  re-servissables) ; trou
+  `remove`/éviction/jamais servi →
+  `Err` → `416` terminal. Correctif
+  associé : frontière `X-Mse-Section`
+  à l'offset exact du `moov` racine
+  (`moov_offset` — un append mixte
+  `[média][moov]` débute au `moov`),
+  figée à la bascule et ré-émise au
+  replay. Tri-état `MsePull` +
+  `Unservable`. Verrous
+  `mse3_from_repositions_serve_
+  cursor` + `mse3_section_offset_
+  mid_chunk` (11/11).
+
 - [x] **Étape CMP-4. Réarmement
   des balises « bloquées par CMP »**
   (`explorer-core`, §B-4 bras CMP

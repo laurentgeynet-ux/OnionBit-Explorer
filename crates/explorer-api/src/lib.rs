@@ -1081,7 +1081,10 @@ async fn get_media(State(st): State<ApiState>, Path((id, mid)): Path<(TabId, u64
 /// `?max=N` borne la paquet, cap config) ; en-têtes
 /// `X-Mse-Cursor` (position absolue consommée) et
 /// `X-Mse-Eos` (`1` quand `endOfStream` est appelé et la
-/// file vide — le `read()` suivant rend `0`). Surface
+/// file vide — le `read()` suivant rend `0`). `?from=N`
+/// (JS-C296, chantier D — `MseSource::seek`) : re-sert à
+/// partir de la position absolue N dans l'historique des
+/// appends ; hors fenêtre → `416`. Surface
 /// non-MSE → JSON `{mse:false}` honnête ; `410` id mort.
 async fn media_segments(
     State(st): State<ApiState>,
@@ -1093,8 +1096,9 @@ async fn media_segments(
         .get("max")
         .and_then(|s| s.parse().ok())
         .unwrap_or(crate::MSE_PULL_BULK_MAX);
+    let from = q.get("from").and_then(|s| s.parse().ok());
     let mut session = st.session.lock().await;
-    match session.media_segments_pull(id, mid, buffer, max) {
+    match session.media_segments_pull(id, mid, buffer, max, from) {
         explorer_core::MsePull::Ready(data, cursor, eos, sections) => {
             let mut b = axum::http::Response::builder()
                 .status(axum::http::StatusCode::OK)
@@ -1126,6 +1130,14 @@ async fn media_segments(
             .status(axum::http::StatusCode::OK)
             .header(axum::http::header::CONTENT_TYPE, "application/octet-stream")
             .header("X-Mse-Pending", "1")
+            .body(axum::body::Body::empty())
+            .unwrap_or_else(|_| axum::http::Response::new(axum::body::Body::empty())),
+        // JS-C296 — `?from=` hors fenêtre adressable :
+        // `416` terminal (la cible ne sera jamais servable
+        // — trou `remove`/éviction/position jamais servie).
+        explorer_core::MsePull::Unservable => axum::http::Response::builder()
+            .status(axum::http::StatusCode::RANGE_NOT_SATISFIABLE)
+            .header(axum::http::header::CONTENT_TYPE, "application/octet-stream")
             .body(axum::body::Body::empty())
             .unwrap_or_else(|_| axum::http::Response::new(axum::body::Body::empty())),
         explorer_core::MsePull::Dead => {
