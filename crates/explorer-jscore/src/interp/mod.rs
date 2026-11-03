@@ -1070,6 +1070,14 @@ impl Engine {
         crate::temporal::install(&mut e);
         crate::json::install(&mut e);
         crate::typed_array::install(&mut e);
+        // Sondes JS-C313 (§B-4(c)) — `__sonde_defprop()`/
+        // `__sonde_nullread()` drainent les journaux bornés en
+        // texte : sondables via `/eval` sur le daemon live
+        // (non-énumérables, coût nul hors lecture).
+        let f = e.native_fn("__sonde_defprop", sonde_defprop);
+        e.set_own(global, "__sonde_defprop", f, false);
+        let f = e.native_fn("__sonde_nullread", sonde_nullread);
+        e.set_own(global, "__sonde_nullread", f, false);
         e.ctxs[0].global = Some(e.global);
         e
     }
@@ -1804,6 +1812,22 @@ impl Engine {
     /// `(dom_ptr, node)` pour `contentWindow`/`frameElement`.
     /// Un cadre détaché entre mutation et drain n'est pas
     /// émis (insertion-détachée = annulation, spec).
+    /// Sonde JS-C313 (§B-4(c)) — vide le journal borné des rejets
+    /// `[[DefineOwnProperty]]`/`Object.assign` : chaque entrée nomme
+    /// cible, clé, descripteur courant et raison du throw — borne le
+    /// drop exact de l'installation mixin tronquée (`own=4/10`).
+    pub fn defprop_log_drain(&mut self) -> Vec<String> {
+        crate::defprop_log_drain()
+    }
+
+    /// Sonde JS-C313 (§B-4(c)) — vide le journal borné des lectures
+    /// `undefined`/`null` : chaque entrée nomme la clé lue et la
+    /// fonction JS appelante (`fn(bundle:l:c)`) — le `X.call` sur
+    /// `X` undefined est identifié à la fonction près.
+    pub fn nullread_log_drain(&mut self) -> Vec<String> {
+        crate::nullread_log_drain()
+    }
+
     pub fn drain_dyn_frames(&mut self) -> Vec<crate::dom_host::DynFrameReq> {
         let mut doms: Vec<(crate::context::CtxId, crate::dom_host::DomRef)> = Vec::new();
         if let Some((d, _)) = &self.dom_ctx {
@@ -3526,6 +3550,26 @@ impl Engine {
 
     /// Échantillonneur de pile (§B-59/J11) — sous
     /// `EXPLORER_JS_PROFILE`, chaque dispatch natif échantillonne
+    /// Label court « fn(bundle:l:c) » du sommet `call_stack` —
+    /// la fonction JS appelante (sondes §B-4(c)/JS-C313 + profil).
+    fn cur_fn_label(&self) -> String {
+        self.call_stack
+            .last()
+            .map_or_else(|| "<top>".to_string(), Self::fn_label_of)
+    }
+
+    /// Label « fn(bundle:l:c) » d'une frame `call_stack`
+    /// quelconque — `cur_fn_label` pour le sommet, frame-2 pour
+    /// l'appelant d'un getter natif (sonde `nullread`).
+    fn fn_label_of(lit: &Rc<FnLit>) -> String {
+        let n = lit.name.as_deref().unwrap_or("<anon>");
+        match &lit.src {
+            Some(s) if lit.pos.0 > 0 => format!("{n}({s}:{}:{})", lit.pos.0, lit.pos.1),
+            _ if lit.pos.0 > 0 => format!("{n}(:{}:{})", lit.pos.0, lit.pos.1),
+            _ => n.to_string(),
+        }
+    }
+
     /// le sommet `call_stack` (la fonction JS appelante) : le top
     /// périodique nomme la fonction en boucle, avec son bundle
     /// et sa position — complément call-site de `nat-trace`.
@@ -3533,17 +3577,7 @@ impl Engine {
         if std::env::var_os("EXPLORER_JS_PROFILE").is_none() {
             return;
         }
-        let label = self.call_stack.last().map_or_else(
-            || "<top>".to_string(),
-            |lit| {
-                let n = lit.name.as_deref().unwrap_or("<anon>");
-                match &lit.src {
-                    Some(s) if lit.pos.0 > 0 => format!("{n}({s}:{}:{})", lit.pos.0, lit.pos.1),
-                    _ if lit.pos.0 > 0 => format!("{n}(:{}:{})", lit.pos.0, lit.pos.1),
-                    _ => n.to_string(),
-                }
-            },
-        );
+        let label = self.cur_fn_label();
         *self.prof_counts.entry(label).or_insert(0) += 1;
         self.prof_total += 1;
         if self.prof_total % 8192 == 0 {
@@ -5983,6 +6017,19 @@ impl Engine {
     pub(crate) fn get_prop_value(&mut self, base: Value, key: &str) -> JsResult<Value> {
         match base {
             Value::Undefined | Value::Null | Value::Hole => {
+                // Sonde JS-C313 — journalise la lecture nulle avec
+                // les 6 frames du sommet : throw dans un getter
+                // `_definePropertyAccessor` → frames 2+ = chaîne
+                // de déclencheurs (getter app → `this[h]` →
+                // `_createPropertyAccessor` → `createProperties`…).
+                let mut frames = String::new();
+                for (i, lit) in self.call_stack.iter().rev().take(6).enumerate() {
+                    if i > 0 {
+                        frames.push_str(" <- ");
+                    }
+                    frames.push_str(&Self::fn_label_of(lit));
+                }
+                crate::nullread_note(format!("read `{key}` of {base:?} @ {frames}"));
                 Err(self.type_error(format!("cannot read `{key}` of {base:?}")))
             }
             Value::Obj(id) => {
@@ -7957,6 +8004,21 @@ fn alloc_sub(a: (u64, u64), b: (u64, u64)) -> (u64, u64) {
 /// `a + b` saturant par composante.
 fn alloc_add(a: (u64, u64), b: (u64, u64)) -> (u64, u64) {
     (a.0.saturating_add(b.0), a.1.saturating_add(b.1))
+}
+
+/// JS-C313 — `__sonde_defprop()` : vide le journal borné des
+/// rejets `[[DefineOwnProperty]]`/`assign` et le rend en texte.
+fn sonde_defprop(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
+    let s = crate::defprop_log_drain().join("\n");
+    Ok(e.str_val(s))
+}
+
+/// JS-C313 — `__sonde_nullread()` : vide le journal borné des
+/// lectures `undefined`/`null` (clé + `fn(bundle:l:c)` de
+/// l'appelant) et le rend en texte.
+fn sonde_nullread(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
+    let s = crate::nullread_log_drain().join("\n");
+    Ok(e.str_val(s))
 }
 
 // ------------------------------------------------------------------

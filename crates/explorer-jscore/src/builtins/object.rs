@@ -273,8 +273,23 @@ pub(crate) fn object_assign(e: &mut Engine, _t: Value, args: &[Value]) -> JsResu
                 e.diag("Object.assign dropped proto getters");
             }
             for k in e.own_enum_keys_trapped(*sid)? {
-                let v = e.get_prop_value(*src, &k)?;
-                e.set_prop_value(target, &k, v)?;
+                let v = match e.get_prop_value(*src, &k) {
+                    Ok(v) => v,
+                    Err(t) => {
+                        crate::defprop_note(format!(
+                            "assign #{sid} read `{k}` → {}",
+                            defprop_err_summary(e, t.0)
+                        ));
+                        return Err(t);
+                    }
+                };
+                if let Err(t) = e.set_prop_value(target, &k, v) {
+                    crate::defprop_note(format!(
+                        "assign tgt={target:?} set `{k}` → {}",
+                        defprop_err_summary(e, t.0)
+                    ));
+                    return Err(t);
+                }
             }
         }
     }
@@ -315,12 +330,131 @@ pub(crate) fn object_define_property(e: &mut Engine, _t: Value, args: &[Value]) 
 /// Corps de `[[DefineOwnProperty]]` piloté par un objet descripteur —
 /// partagé par `defineProperty`/`defineProperties`/`Object.create`.
 /// Sur un proxy : trap `defineProperty` ou délégation à la cible.
+/// Enveloppe sonde JS-C313 : tout rejet est journalisé (cible, clé,
+/// prop courante, raison) dans le log borné `defprop_log`.
 pub(crate) fn define_one_prop(
     e: &mut Engine,
     id: ObjId,
     key: &str,
     desc_id: ObjId,
 ) -> JsResult<()> {
+    let r = define_one_prop_impl(e, id, key, desc_id);
+    if let Err(t) = &r {
+        crate::defprop_note(defprop_err_desc(e, id, key, t));
+    }
+    r
+}
+
+/// Résumé « type de prop » pour le log sonde (`u`=absent,
+/// `f`=callable/obj, `v`=valeur).
+fn vtag(v: Value) -> char {
+    match v {
+        Value::Undefined => 'u',
+        Value::Obj(_) => 'f',
+        _ => 'v',
+    }
+}
+
+/// Drapeaux compacts d'une prop existante (`D(w,e,c)` / `A(g,s,e,c)`).
+fn prop_flags(p: crate::heap::Prop) -> String {
+    match p {
+        crate::heap::Prop::Data { attrs, .. } => format!(
+            "D(w{}e{}c{})",
+            attrs.writable as u8, attrs.enumerable as u8, attrs.configurable as u8
+        ),
+        crate::heap::Prop::Acc { get, set, attrs } => format!(
+            "A(g{}s{}e{}c{})",
+            vtag(get),
+            vtag(set),
+            attrs.enumerable as u8,
+            attrs.configurable as u8
+        ),
+    }
+}
+
+/// Nom du `constructor` own-prop du proto ciblé — identifie QUEL
+/// proto de la chaîne (y1/Y/P/…) reçoit le `defineProperty`.
+fn proto_ctor_name(e: &Engine, pid: ObjId) -> Option<String> {
+    let p = e.heap.obj(pid)?;
+    let cv = p.find("constructor").and_then(|pr| pr.data_value())?;
+    let Value::Obj(cid) = cv else {
+        return None;
+    };
+    let c = e.heap.obj(cid)?;
+    let nv = c.find("name").and_then(|pr| pr.data_value())?;
+    e.heap_string_of(nv)
+}
+
+/// Résumé d'un `Thrown` — `stack`/`name`/`message` propres (lectures
+/// heap seulement : jamais d'éval utilisateur, borne à 200 chars).
+fn defprop_err_summary(e: &Engine, v: Value) -> String {
+    let Value::Obj(id) = v else {
+        return match v {
+            Value::Str(sid) => e.heap.string(sid).unwrap_or_default(),
+            _ => format!("{v:?}"),
+        };
+    };
+    let Some(o) = e.heap.obj(id) else {
+        return "<err?>".into();
+    };
+    let own = |k: &str| {
+        o.find(k)
+            .and_then(|p| p.data_value())
+            .and_then(|v| e.heap_string_of(v))
+    };
+    let mut out = own("stack")
+        .filter(|s| !s.is_empty())
+        .or_else(|| match (own("name"), own("message")) {
+            (Some(n), Some(m)) => Some(format!("{n}: {m}")),
+            (_, m @ Some(_)) => m,
+            (n @ Some(_), None) => n,
+            _ => None,
+        })
+        .unwrap_or_else(|| "<thrown>".into());
+    out.truncate(200);
+    out
+}
+
+/// Sonde JS-C313 — « cible | clé | prop courante | raison » d'un
+/// rejet `defineProperty` : le receveur nommé (kind, own, proto
+/// ctor) + `cur` (non-configurable ? accesseur ? absent) + le
+/// message/stack de l'erreur identifient le site exact du drop.
+fn defprop_err_desc(e: &Engine, id: ObjId, key: &str, t: &crate::heap::Thrown) -> String {
+    let (target, cur) = e.heap.obj(id).map_or_else(
+        || (format!("?#{id}"), "-".into()),
+        |o| {
+            let kind = match &o.kind {
+                ObjKind::Ordinary => "Ord",
+                ObjKind::Array(_) => "Arr",
+                ObjKind::Fun(_) => "Fun",
+                ObjKind::Host(_) => "Host",
+                ObjKind::Map(_) => "Map",
+                ObjKind::Set(_) => "Set",
+                _ => "other",
+            };
+            let proto = match o.proto {
+                Value::Obj(pid) => proto_ctor_name(e, pid)
+                    .map_or_else(|| format!("{pid}"), |n| format!("{n}#{pid}")),
+                _ => "null".into(),
+            };
+            let cur = o.find(key).map_or_else(|| "-".into(), prop_flags);
+            (
+                format!(
+                    "{kind}#{id}(own={},ext={},proto={proto})",
+                    o.props.len(),
+                    o.extensible as u8
+                ),
+                cur,
+            )
+        },
+    );
+    format!(
+        "defprop {target} `{key}` cur={cur} → {}",
+        defprop_err_summary(e, t.0)
+    )
+}
+
+fn define_one_prop_impl(e: &mut Engine, id: ObjId, key: &str, desc_id: ObjId) -> JsResult<()> {
     // Délégation bornée — même motif que `object_set_proto` (J2).
     let mut id = id;
     let mut depth = 0;
@@ -543,13 +677,25 @@ pub(crate) fn object_define_properties(
 }
 
 /// Map de descripteurs → définitions (ordre d'insertion conservé).
+/// Chaque phase qui jette est journalisée (sonde JS-C313) — la
+/// composition de mixin se coupe ici à mi-itération.
 pub(crate) fn define_props_from_map(e: &mut Engine, id: ObjId, map: Value) -> JsResult<()> {
     let Value::Obj(mid) = map else {
         return Err(e.type_error("property map must be an object"));
     };
     for k in e.own_enum_keys_trapped(mid)? {
-        let dv = e.get_prop_value(map, &k)?;
+        let dv = match e.get_prop_value(map, &k) {
+            Ok(dv) => dv,
+            Err(t) => {
+                crate::defprop_note(format!(
+                    "defprops #{id} `{k}` read-desc → {}",
+                    defprop_err_summary(e, t.0)
+                ));
+                return Err(t);
+            }
+        };
         let Value::Obj(did) = dv else {
+            crate::defprop_note(format!("defprops #{id} `{k}` desc non-object"));
             return Err(e.type_error(format!("descriptor for `{k}` must be an object")));
         };
         define_one_prop(e, id, &k, did)?;

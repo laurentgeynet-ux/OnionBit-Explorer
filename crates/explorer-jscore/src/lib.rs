@@ -129,6 +129,58 @@ pub(crate) fn intern(name: &str) -> std::rc::Rc<str> {
 /// Le `rss_guard` du daemon le lit à l'abort : une mort dans
 /// un span natif non-tické nomme son natif même sans retour.
 pub static LAST_NAT: std::sync::Mutex<&'static str> = std::sync::Mutex::new("");
+
+// ----------------------------------------------------------------
+// JS-C313 — sonde §B-4(c) : journal borné des rejets
+// `[[DefineOwnProperty]]`/`Object.assign`. Le mur YouTube =
+// installation de méthodes tronquée à mi-composition de mixin
+// (protos `own=4/10` vs ~20-30 attendus) — chaque rejet nomme
+// cible, clé, descripteur courant et raison pour borner le drop
+// exact. Cap 128 entrées (borné, ~20 ko), drainable par test.
+// ----------------------------------------------------------------
+thread_local! {
+    static DEFPROP_LOG: std::cell::RefCell<Vec<String>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// Note un rejet `defineProperty`/`defineProperties`/`assign` —
+/// borné à 128 entrées (une composition fautive suffit).
+pub(crate) fn defprop_note(msg: String) {
+    DEFPROP_LOG.with(|l| {
+        let mut l = l.borrow_mut();
+        if l.len() < 128 {
+            l.push(msg);
+        }
+    });
+}
+
+/// Vide et rend le journal des rejets (lecture test — JS-C313).
+pub(crate) fn defprop_log_drain() -> Vec<String> {
+    DEFPROP_LOG.with(|l| std::mem::take(&mut *l.borrow_mut()))
+}
+
+thread_local! {
+    static NULLREAD_LOG: std::cell::RefCell<Vec<String>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// Note une lecture `undefined`/`null` — chaque entrée nomme la
+/// clé lue et la fonction JS appelante (`fn(bundle:l:c)`) : le
+/// throw `cannot read 'call' of Undefined` (signature §B-4(c))
+/// identifie le `X.call` où `X` était undefined. Cap 512.
+pub(crate) fn nullread_note(msg: String) {
+    NULLREAD_LOG.with(|l| {
+        let mut l = l.borrow_mut();
+        if l.len() < 512 {
+            l.push(msg);
+        }
+    });
+}
+
+/// Vide et rend le journal des lectures nulles (lecture test).
+pub(crate) fn nullread_log_drain() -> Vec<String> {
+    NULLREAD_LOG.with(|l| std::mem::take(&mut *l.borrow_mut()))
+}
 /// Dernier variant `Expr` évalué (armé `EXPLORER_JS_RSS_WATCH`) —
 /// discrimine le span fatal : natif (`last_nat`) vs éval-side
 /// (le `Expr` courant nomme la famille : `Call`, `Assign`…).
