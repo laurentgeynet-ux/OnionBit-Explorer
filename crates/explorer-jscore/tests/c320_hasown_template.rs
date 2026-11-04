@@ -174,3 +174,23 @@ fn var_on_global_keeps_existing_accessor() {
     let v = e.eval("var __vy;__vy").expect("var redecl config");
     assert_eq!(e.describe(v), "undefined");
 }
+
+/// (c) Gate `ShadyDOM` — `w.Sb` = `Element.prototype.attachShadow`
+/// && `Node.prototype.getRootNode` : si l'une manque à l'éval du
+/// polyfill, `ShadyDOM.inUse=true` → `disconnectedCallback`
+/// piloté par le polyfill → mur `playlistHandlerActionMap`.
+/// `WebIDL` : `Element.prototype` hérite `Node.prototype`,
+/// `HTMLElement.prototype` hérite `Element.prototype`.
+#[test]
+fn element_proto_chains_to_node() {
+    assert_eq!(
+        eval_dom(
+            "[typeof Element.prototype.attachShadow,\
+             typeof Node.prototype.getRootNode,\
+             typeof HTMLElement.prototype.attachShadow,\
+             Object.getPrototypeOf(Element.prototype)===Node.prototype,\
+             Object.getPrototypeOf(HTMLElement.prototype)===Element.prototype].join('|')"
+        ),
+        "function|function|function|true|true"
+    );
+}

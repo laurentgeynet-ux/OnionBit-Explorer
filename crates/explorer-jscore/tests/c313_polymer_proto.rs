@@ -303,7 +303,7 @@ fn c315_webcomponents_sd_wrapper_removechild() {
         "ShadyDOM/Wrapper → {}",
         ev(
             &mut e,
-            "(function(){var SD=window.ShadyDOM;if(!SD)return'no-ShadyDOM';var W=SD.Wrapper,o=[];o.push('W='+typeof W);if(W){var d=Object.getOwnPropertyDescriptor(W.prototype,'removeChild');o.push('rmD='+(d?(typeof d.value)+'/'+d.enumerable+'/'+d.writable+'/'+d.configurable:'absent'));o.push('ext='+Object.isExtensible(W.prototype));o.push('frozen='+Object.isFrozen(W.prototype));o.push('own='+Object.getOwnPropertyNames(W.prototype).length);var d2=Object.getOwnPropertyDescriptor(W.prototype,'appendChild');o.push('acD='+(d2?(typeof d2.value):'absent'));}o.push('Nrm='+typeof Node.prototype.removeChild);return o.join('|')})()",
+            "(function(){var SD=window.ShadyDOM;if(!SD)return'no-ShadyDOM';var W=SD.Wrapper,o=[];o.push('inUse='+SD.inUse);o.push('aS='+(typeof Element.prototype.attachShadow));o.push('gRN='+(typeof Node.prototype.getRootNode));o.push('W='+typeof W);if(W){var d=Object.getOwnPropertyDescriptor(W.prototype,'removeChild');o.push('rmD='+(d?(typeof d.value)+'/'+d.enumerable+'/'+d.writable+'/'+d.configurable:'absent'));o.push('ext='+Object.isExtensible(W.prototype));o.push('frozen='+Object.isFrozen(W.prototype));o.push('own='+Object.getOwnPropertyNames(W.prototype).length);var d2=Object.getOwnPropertyDescriptor(W.prototype,'appendChild');o.push('acD='+(d2?(typeof d2.value):'absent'));}o.push('Nrm='+typeof Node.prototype.removeChild);return o.join('|')})()",
         )
     );
     // Rejoue la capture `ubC` : `q.nativeRemoveChild = W.prototype.removeChild`
@@ -548,6 +548,33 @@ fn c315_wcsd_then_kevlar_ubc_capture() {
         ev(
             &mut e,
             "(function(){var el=document.querySelector('ytd-app');if(!el)return'no-el';var p=el.parentNode;if(!p)return'no-parent';try{p.removeChild(el);return'det=ok'}catch(x){return'det=THREW:'+String(x&&x.message||x).slice(0,120)}})()",
+        )
+    );
+    // Le mur persiste en vol 620 — le detached réel tire via
+    // `disconnectedCallback` alors que `Xcs` n'est jamais posé :
+    // `attached` automatique a dû jeter en chemin (avalé par le
+    // polyfill wcsd). Reproduire le chemin RÉEL : createElement
+    // + appendChild → `connectedCallback` dispatcher — capturer
+    // l'erreur racine + drain nullread/defprop juste après.
+    println!(
+        "auto-path → {}",
+        ev(
+            &mut e,
+            "window.__ap='START';(function(){var el2=document.createElement('ytd-app');var o=[];try{document.body.appendChild(el2);o.push('append=ok')}catch(x){o.push('append=THREW:'+String(x&&x.message||x).slice(0,140))}o.push('root2='+(el2.root===el2?'self':typeof el2.root));o.push('content2='+(el2._template&&el2._template.content?el2._template.content.childNodes.length:'-'));o.push('gic2='+(typeof el2.guideInnerContent));o.push('isAtt2='+el2.isAttached);window.__ap=o.join('|')})();window.__ap",
+        )
+    );
+    println!(
+        "auto-nullread → {}",
+        ev(
+            &mut e,
+            "JSON.stringify(__sonde_nullread ? __sonde_nullread() : [])"
+        )
+    );
+    println!(
+        "auto-defprop → {}",
+        ev(
+            &mut e,
+            "JSON.stringify(__sonde_defprop ? __sonde_defprop() : [])"
         )
     );
 }

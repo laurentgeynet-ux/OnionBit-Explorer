@@ -2281,6 +2281,10 @@ impl Engine {
                 self.set_own(p, k, m, true);
             }
             self.set_own(fid, "prototype", Value::Obj(p), false);
+            // Chaînage WebIDL `HTMLElement.prototype →
+            // Element.prototype` différé juste après la boucle
+            // d'install ci-dessous (`Element` n'existe pas
+            // encore ici).
         }
         self.set_own(g, "HTMLElement", he, false);
         for name in [
@@ -2449,6 +2453,15 @@ impl Engine {
                         Some("Node")
                     }
                     "HTMLDocument" => Some("Document"),
+                    // WebIDL : `Element.prototype` hérite
+                    // `Node.prototype` — le polyfill
+                    // webcomponents-sd gate `inUse` sur
+                    // `Element.prototype.attachShadow` : sans la
+                    // chaîne, le stub est vide → ShadyDOM actif →
+                    // `disconnectedCallback` piloté par le
+                    // polyfill → mur `playlistHandlerActionMap`
+                    // (ytd-app, JS-C321).
+                    "Element" => Some("Node"),
                     "SVGElement" => Some("Element"),
                     // Hiérarchie WebIDL SVG (JS-C233) :
                     // graphics/geometry/text < SVGElement,
@@ -2519,6 +2532,22 @@ impl Engine {
                 self.set_own(p, "constructor", f, false);
             }
             self.set_own(g, name, f, false);
+        }
+        // `HTMLElement.prototype` est posé AVANT `Element`
+        // (install manuelle ci-dessus) — chaînage WebIDL
+        // `HTMLElement.prototype → Element.prototype` ici, une
+        // fois les deux présents. Tolérant : l'un absent → rien.
+        if let (Some(Value::Obj(he_c)), Some(Value::Obj(el_c))) =
+            (self.get_prop(g, "HTMLElement"), self.get_prop(g, "Element"))
+        {
+            if let (Some(Value::Obj(he_p)), Some(pp @ Value::Obj(_))) = (
+                self.get_prop(he_c, "prototype"),
+                self.get_prop(el_c, "prototype"),
+            ) {
+                if let Some(o) = self.heap.obj_mut(he_p) {
+                    o.proto = pp;
+                }
+            }
         }
         // `AudioContext` — constructible-stub (§B-66 : probe
         // audio du loader Meta — `illegal constructor` non rattrapé
