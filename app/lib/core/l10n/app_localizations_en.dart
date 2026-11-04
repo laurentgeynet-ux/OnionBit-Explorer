@@ -223,4 +223,10 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get mediaError => 'Playback error';
+
+  @override
+  String get mediaTabMute => 'Mute tab';
+
+  @override
+  String get mediaTabUnmute => 'Unmute tab';
 }

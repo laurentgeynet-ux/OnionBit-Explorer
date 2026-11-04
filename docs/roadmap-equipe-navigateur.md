@@ -6520,6 +6520,36 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   le réglage, seek borné/dé-mute/
   replay/persist) — 62/62 verts.
 
+- [x] **Étape 184. Indicateur
+  sonore d'onglet + mute global**
+  (`app/`, chantier M0b — suite
+  183) : un `<audio>`/`video`
+  `autoplay` sous `display:none`
+  ou hors viewport jouait
+  *invisible et inmutable* —
+  l'offre vit à 0×0 mais le son
+  sort. `BrowserState.mediaAudio`
+  `tabId → bool` recalculé à
+  chaque notification lecteur :
+  présent = ≥1 surface `playing`,
+  `true` = audible (non mutée,
+  volume > 0 → icône 🔊 accent
+  sur le chip), `false` = muet
+  (icône 🔇). Le clic bascule
+  `mediaTabMute` : mute/dé-mute
+  de **toutes** les surfaces de
+  l'onglet (niveau session, non
+  persisté — sémantique Chrome ;
+  le réglage `AppSettings` du
+  volume reste celui de
+  l'utilisateur). Retiré sur
+  `media_gone`, `tab_closed` et
+  pause. Verrou : test contrôleur
+  (autoplay 0×0 → 🔊, clic → 🔇,
+  re-clic → 🔊, pause/gone →
+  indicateur retiré) — 63/63
+  verts.
+
 - [ ] **Écarts terrain — vol humain
   22/10 (release `39ab821`, FFI)** :
   second run humain — trois constats

@@ -97,5 +97,7 @@
   "mediaMute": "म्यूट करें",
   "mediaUnmute": "आवाज़ चालू करें",
   "mediaLive": "लाइव",
-  "mediaError": "प्लेबैक त्रुटि"
+  "mediaError": "प्लेबैक त्रुटि",
+  "mediaTabMute": "टैब म्यूट करें",
+  "mediaTabUnmute": "टैब की आवाज़ चालू करें"
 }

@@ -222,4 +222,10 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get mediaError => '播放错误';
+
+  @override
+  String get mediaTabMute => '标签页静音';
+
+  @override
+  String get mediaTabUnmute => '取消标签页静音';
 }

@@ -46,6 +46,7 @@ class BrowserState {
     this.downloadOffer,
     this.downloads = const {},
     this.media = const {},
+    this.mediaAudio = const {},
     this.scrollY = const {},
     this.resubmit,
   });
@@ -100,6 +101,14 @@ class BrowserState {
   /// bootstrap. `rect` en px CSS document.
   final Map<String, Map<int, MediaOffer>> media;
 
+  /// Indicateur sonore par onglet (étape 184) : `tabId` présent
+  /// = au moins une surface `playing` ; `true` = audible
+  /// (non mutée, volume > 0 → icône 🔊), `false` = muet
+  /// (icône 🔇, cliquable pour dé-muter). Recalculé à chaque
+  /// notification lecteur — un `autoplay` sous
+  /// `display:none` joue *invisible* mais pas indicible.
+  final Map<String, bool> mediaAudio;
+
   /// Scroll vertical courant par onglet, porté par
   /// `frame_invalidated.scroll_y` (champ additif 71d) —
   /// l'overlay média positionne à `rect.y − scroll_y`.
@@ -133,6 +142,7 @@ class BrowserState {
     DownloadOffer? Function()? downloadOffer,
     Map<int, ActiveDownload>? downloads,
     Map<String, Map<int, MediaOffer>>? media,
+    Map<String, bool>? mediaAudio,
     Map<String, double>? scrollY,
     ({String tabId, String method, String url})? Function()? resubmit,
   }) => BrowserState(
@@ -148,6 +158,7 @@ class BrowserState {
     downloadOffer: downloadOffer != null ? downloadOffer() : this.downloadOffer,
     downloads: downloads ?? this.downloads,
     media: media ?? this.media,
+    mediaAudio: mediaAudio ?? this.mediaAudio,
     scrollY: scrollY ?? this.scrollY,
     resubmit: resubmit != null ? resubmit() : this.resubmit,
   );
@@ -1084,6 +1095,7 @@ class BrowserController extends Notifier<BrowserState> {
               : state.activeId,
           scrollY: {...state.scrollY}..remove(tabId),
           media: {...state.media}..remove(tabId),
+          mediaAudio: {...state.mediaAudio}..remove(tabId),
         );
         // Raster de l'onglet mort — `dispose()` décrémente la
         // référence ; le rasteriseur libère les pixels quand sa
@@ -1218,6 +1230,48 @@ class BrowserController extends Notifier<BrowserState> {
     unawaited(p.seekTo(Duration.zero).then((_) => p.play()));
   }
 
+  /// Recompute l'indicateur 🔊/🔇 de l'onglet (étape 184) :
+  /// `true` = ≥1 surface `playing` ET audible, `false` = en
+  /// lecture mais mutée/volume 0, absent = rien ne joue.
+  /// Recalculé à chaque notification lecteur — y compris
+  /// les surfaces 0×0 (`display:none` autoplay sonore).
+  void _refreshMediaAudio(String tabId) {
+    final players = _players[tabId];
+    bool? audible;
+    if (players != null) {
+      for (final p in players.values) {
+        if (p.snapshot.state == 'playing') {
+          if (!p.muted && p.volume > 0) {
+            audible = true;
+            break;
+          }
+          audible = false;
+        }
+      }
+    }
+    if (state.mediaAudio[tabId] == audible) return;
+    final next = {...state.mediaAudio};
+    if (audible == null) {
+      next.remove(tabId);
+    } else {
+      next[tabId] = audible;
+    }
+    state = state.copyWith(mediaAudio: next);
+  }
+
+  /// Mute/unmute de toutes les surfaces de l'onglet — geste
+  /// du chip 🔊 (étape 184) : audible → tout mute ; déjà
+  /// muet → tout dé-mute. Niveau session (non persisté —
+  /// sémantique Chrome d'un mute d'onglet).
+  void mediaTabMute(String tabId) {
+    final players = _players[tabId];
+    if (players == null || players.isEmpty) return;
+    final mute = state.mediaAudio[tabId] == true;
+    for (final p in players.values) {
+      unawaited(p.setMuted(mute));
+    }
+  }
+
   /// « Enregistrer la source » / « Enregistrer sous » —
   /// démarre un téléchargement direct non bloquant (étape
   /// 176) : rend l'`id` moteur (> 0, suivi via les events
@@ -1313,7 +1367,11 @@ class BrowserController extends Notifier<BrowserState> {
         return;
       }
       final key = _mkey(tabId, offer.id);
-      void listener() => _reportMedia(tabId, offer.id);
+      void listener() {
+        _refreshMediaAudio(tabId);
+        _reportMedia(tabId, offer.id);
+      }
+
       _playerListeners[key] = listener;
       player.addListener(listener);
       (_players[tabId] ??= {})[offer.id] = player;
@@ -1422,6 +1480,9 @@ class BrowserController extends Notifier<BrowserState> {
       final next = {...perTab}..remove(mediaId);
       state = state.copyWith(media: {...state.media, tabId: next});
     }
+    // Indicateur 🔊 (étape 184) : la surface retirée peut
+    // être la dernière qui jouait.
+    _refreshMediaAudio(tabId);
   }
 
   void _dropAllMedia(String tabId) {

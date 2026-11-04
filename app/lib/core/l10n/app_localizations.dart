@@ -515,6 +515,18 @@ abstract class AppLocalizations {
   /// In fr, this message translates to:
   /// **'Erreur de lecture'**
   String get mediaError;
+
+  /// No description provided for @mediaTabMute.
+  ///
+  /// In fr, this message translates to:
+  /// **'Couper le son de l\'onglet'**
+  String get mediaTabMute;
+
+  /// No description provided for @mediaTabUnmute.
+  ///
+  /// In fr, this message translates to:
+  /// **'Rétablir le son de l\'onglet'**
+  String get mediaTabUnmute;
 }
 
 class _AppLocalizationsDelegate

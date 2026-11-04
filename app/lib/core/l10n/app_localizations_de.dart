@@ -227,4 +227,10 @@ class AppLocalizationsDe extends AppLocalizations {
 
   @override
   String get mediaError => 'Wiedergabefehler';
+
+  @override
+  String get mediaTabMute => 'Tab stummschalten';
+
+  @override
+  String get mediaTabUnmute => 'Tab-Ton einschalten';
 }

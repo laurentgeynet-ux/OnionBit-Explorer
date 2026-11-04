@@ -223,4 +223,10 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get mediaError => 'Erreur de lecture';
+
+  @override
+  String get mediaTabMute => 'Couper le son de l\'onglet';
+
+  @override
+  String get mediaTabUnmute => 'Rétablir le son de l\'onglet';
 }

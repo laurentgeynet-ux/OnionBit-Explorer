@@ -97,5 +97,7 @@
   "mediaMute": "Без звука",
   "mediaUnmute": "Включить звук",
   "mediaLive": "ЭФИР",
-  "mediaError": "Ошибка воспроизведения"
+  "mediaError": "Ошибка воспроизведения",
+  "mediaTabMute": "Отключить звук вкладки",
+  "mediaTabUnmute": "Включить звук вкладки"
 }

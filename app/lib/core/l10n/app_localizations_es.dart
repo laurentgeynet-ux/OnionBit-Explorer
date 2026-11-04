@@ -226,4 +226,10 @@ class AppLocalizationsEs extends AppLocalizations {
 
   @override
   String get mediaError => 'Error de reproducción';
+
+  @override
+  String get mediaTabMute => 'Silenciar pestaña';
+
+  @override
+  String get mediaTabUnmute => 'Activar sonido de pestaña';
 }

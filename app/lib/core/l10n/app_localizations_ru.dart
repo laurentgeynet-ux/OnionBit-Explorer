@@ -224,4 +224,10 @@ class AppLocalizationsRu extends AppLocalizations {
 
   @override
   String get mediaError => 'Ошибка воспроизведения';
+
+  @override
+  String get mediaTabMute => 'Отключить звук вкладки';
+
+  @override
+  String get mediaTabUnmute => 'Включить звук вкладки';
 }

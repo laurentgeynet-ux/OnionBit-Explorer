@@ -97,5 +97,7 @@
   "mediaMute": "Bisukan",
   "mediaUnmute": "Suarakan",
   "mediaLive": "LANGSUNG",
-  "mediaError": "Kesalahan pemutaran"
+  "mediaError": "Kesalahan pemutaran",
+  "mediaTabMute": "Bisukan tab",
+  "mediaTabUnmute": "Suarakan tab"
 }

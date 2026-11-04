@@ -97,5 +97,7 @@
   "mediaMute": "ミュート",
   "mediaUnmute": "ミュート解除",
   "mediaLive": "ライブ",
-  "mediaError": "再生エラー"
+  "mediaError": "再生エラー",
+  "mediaTabMute": "タブをミュート",
+  "mediaTabUnmute": "タブのミュート解除"
 }

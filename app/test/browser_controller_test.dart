@@ -1054,6 +1054,63 @@ void main() {
     expect(p.seeked, Duration.zero);
     expect(p.plays, greaterThan(0));
   });
+
+  /// Étape 184 — indicateur 🔊/🔇 d'onglet : recalculé à
+  /// chaque notification lecteur (y compris surfaces 0×0
+  /// `display:none` autoplay) ; le clic bascule le mute
+  /// global de l'onglet.
+  test('184 — indicateur sonore onglet + mute/unmute global', () async {
+    final repo = FakeRepo();
+    final events = FakeEvents();
+    FakePlayer.instances.clear();
+    final c = makeContainer(repo, events);
+    addTearDown(c.dispose);
+    await settle(c);
+    final ctrl = c.read(browserProvider.notifier);
+
+    events.ctrl.add(
+      ServerEvent('media_offered', {
+        'tab': 1,
+        'media': 7,
+        'kind': 'audio',
+        'rect': {'x': 0, 'y': 0, 'w': 0, 'h': 0},
+        'url': 'http://h/a.mp3',
+        'autoplay': true,
+      }),
+    );
+    for (var i = 0; i < 8; i++) {
+      await Future<void>.delayed(Duration.zero);
+    }
+    final p = FakePlayer.instances.single;
+    // Autoplay → la surface joue déjà : 🔊 visible même à 0×0.
+    expect(p.plays, 1);
+    expect(c.read(browserProvider).mediaAudio['1'], isTrue);
+
+    // Clic 🔊 → mute global de l'onglet → 🔇.
+    ctrl.mediaTabMute('1');
+    await Future<void>.delayed(Duration.zero);
+    expect(p.muted, isTrue);
+    expect(c.read(browserProvider).mediaAudio['1'], isFalse);
+
+    // Re-clic 🔇 → dé-mute → 🔊.
+    ctrl.mediaTabMute('1');
+    await Future<void>.delayed(Duration.zero);
+    expect(p.muted, isFalse);
+    expect(c.read(browserProvider).mediaAudio['1'], isTrue);
+
+    // Pause → plus rien ne joue → indicateur retiré.
+    await p.pause();
+    await Future<void>.delayed(Duration.zero);
+    expect(c.read(browserProvider).mediaAudio.containsKey('1'), isFalse);
+
+    // media_gone sur surface en lecture → indicateur retiré.
+    await p.play();
+    await Future<void>.delayed(Duration.zero);
+    expect(c.read(browserProvider).mediaAudio['1'], isTrue);
+    events.ctrl.add(ServerEvent('media_gone', {'tab': 1, 'media': 7}));
+    await Future<void>.delayed(Duration.zero);
+    expect(c.read(browserProvider).mediaAudio.containsKey('1'), isFalse);
+  });
 }
 
 /// Contrôleur minimal sans onglet — `activeId` reste null.

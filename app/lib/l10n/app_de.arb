@@ -97,5 +97,7 @@
   "mediaMute": "Stummschalten",
   "mediaUnmute": "Ton einschalten",
   "mediaLive": "LIVE",
-  "mediaError": "Wiedergabefehler"
+  "mediaError": "Wiedergabefehler",
+  "mediaTabMute": "Tab stummschalten",
+  "mediaTabUnmute": "Tab-Ton einschalten"
 }

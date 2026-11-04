@@ -222,4 +222,10 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get mediaError => '再生エラー';
+
+  @override
+  String get mediaTabMute => 'タブをミュート';
+
+  @override
+  String get mediaTabUnmute => 'タブのミュート解除';
 }

@@ -97,5 +97,7 @@
   "mediaMute": "Silenciar",
   "mediaUnmute": "Activar sonido",
   "mediaLive": "EN DIRECTO",
-  "mediaError": "Error de reproducción"
+  "mediaError": "Error de reproducción",
+  "mediaTabMute": "Silenciar pestaña",
+  "mediaTabUnmute": "Activar sonido de pestaña"
 }

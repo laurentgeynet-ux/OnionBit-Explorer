@@ -97,5 +97,7 @@
   "mediaMute": "静音",
   "mediaUnmute": "取消静音",
   "mediaLive": "直播",
-  "mediaError": "播放错误"
+  "mediaError": "播放错误",
+  "mediaTabMute": "标签页静音",
+  "mediaTabUnmute": "取消标签页静音"
 }

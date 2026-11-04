@@ -224,4 +224,10 @@ class AppLocalizationsHi extends AppLocalizations {
 
   @override
   String get mediaError => 'प्लेबैक त्रुटि';
+
+  @override
+  String get mediaTabMute => 'टैब म्यूट करें';
+
+  @override
+  String get mediaTabUnmute => 'टैब की आवाज़ चालू करें';
 }

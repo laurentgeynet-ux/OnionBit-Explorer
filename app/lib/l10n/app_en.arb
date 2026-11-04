@@ -97,5 +97,7 @@
   "mediaMute": "Mute",
   "mediaUnmute": "Unmute",
   "mediaLive": "LIVE",
-  "mediaError": "Playback error"
+  "mediaError": "Playback error",
+  "mediaTabMute": "Mute tab",
+  "mediaTabUnmute": "Unmute tab"
 }

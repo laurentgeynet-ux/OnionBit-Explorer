@@ -559,8 +559,10 @@ class _TabStrip extends StatelessWidget {
               tokens: tokens,
               tab: tab,
               active: tab.id == state.activeId,
+              audio: state.mediaAudio[tab.id],
               onSelect: () => ctrl.selectTab(tab.id),
               onClose: () => ctrl.closeTab(tab.id),
+              onToggleMute: () => ctrl.mediaTabMute(tab.id),
             ),
           IconButton(
             icon: const Icon(Icons.add),
@@ -579,15 +581,24 @@ class _TabChip extends StatelessWidget {
     required this.tokens,
     required this.tab,
     required this.active,
+    required this.audio,
     required this.onSelect,
     required this.onClose,
+    required this.onToggleMute,
   });
 
   final DesignTokens tokens;
   final dynamic tab;
   final bool active;
+
+  /// Indicateur sonore (étape 184) : `null` = rien ne joue
+  /// (pas d'icône), `true` = 🔊 audible, `false` = 🔇
+  /// l'onglet joue muté — le clic bascule le mute global
+  /// de l'onglet (autoplay `display:none` inclus).
+  final bool? audio;
   final VoidCallback onSelect;
   final VoidCallback onClose;
+  final VoidCallback onToggleMute;
 
   @override
   Widget build(BuildContext context) {
@@ -651,6 +662,20 @@ class _TabChip extends StatelessWidget {
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
+              if (audio != null)
+                Tooltip(
+                  message: audio!
+                      ? AppLocalizations.of(context).mediaTabMute
+                      : AppLocalizations.of(context).mediaTabUnmute,
+                  child: InkWell(
+                    onTap: onToggleMute,
+                    child: Icon(
+                      audio! ? Icons.volume_up : Icons.volume_off,
+                      size: tokens.dim('metrics', 'iconSm', fallback: 14),
+                      color: tokens.color('accent', 'base'),
+                    ),
+                  ),
+                ),
               InkWell(
                 onTap: onClose,
                 child: Icon(

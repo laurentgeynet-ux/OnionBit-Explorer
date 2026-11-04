@@ -97,5 +97,7 @@
   "mediaMute": "Sem som",
   "mediaUnmute": "Repor som",
   "mediaLive": "AO VIVO",
-  "mediaError": "Erro de reprodução"
+  "mediaError": "Erro de reprodução",
+  "mediaTabMute": "Silenciar separador",
+  "mediaTabUnmute": "Repor som do separador"
 }

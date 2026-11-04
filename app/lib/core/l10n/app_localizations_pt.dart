@@ -224,4 +224,10 @@ class AppLocalizationsPt extends AppLocalizations {
 
   @override
   String get mediaError => 'Erro de reprodução';
+
+  @override
+  String get mediaTabMute => 'Silenciar separador';
+
+  @override
+  String get mediaTabUnmute => 'Repor som do separador';
 }

@@ -226,4 +226,10 @@ class AppLocalizationsId extends AppLocalizations {
 
   @override
   String get mediaError => 'Kesalahan pemutaran';
+
+  @override
+  String get mediaTabMute => 'Bisukan tab';
+
+  @override
+  String get mediaTabUnmute => 'Suarakan tab';
 }
