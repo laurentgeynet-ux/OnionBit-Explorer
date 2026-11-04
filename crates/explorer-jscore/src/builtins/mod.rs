@@ -1128,6 +1128,24 @@ fn put_elems(e: &mut Engine, id: ObjId, elems: Vec<Value>) -> JsResult<()> {
     Ok(())
 }
 
+/// Exécute `f` sur les éléments extraits puis les repose —
+/// **quelle que soit l'issue**. `take_elems` vide le backing
+/// vivant (`mem::take`) : un `?` entre take et put laissait
+/// autrement le tableau JS définitivement `[]`, erreur souvent
+/// avalée par un `try/catch` applicatif (§B-4(c)/JS-C319 —
+/// `YouTube` `behaviors.flat(Infinity)`, `sort(cmp qui jette)`,
+/// `join` sur élément au `toString` hostile…).
+pub(crate) fn with_elems<R>(
+    e: &mut Engine,
+    id: ObjId,
+    f: impl FnOnce(&mut Engine, &mut Vec<Value>) -> JsResult<R>,
+) -> JsResult<R> {
+    let mut elems = take_elems(e, id)?;
+    let r = f(e, &mut elems);
+    put_elems(e, id, elems)?;
+    r
+}
+
 /// Variante de [`put_elems`] pour les *mutators* (`pop`, `sort`,
 /// `splice`, `fill`…) : la spec les fait passer par `Set`/`Delete`
 /// en mode *throw* — toute violation d'intégrité lève `TypeError`
@@ -1138,6 +1156,10 @@ fn put_elems(e: &mut Engine, id: ObjId, elems: Vec<Value>) -> JsResult<()> {
 fn put_elems_guarded(e: &mut Engine, id: ObjId, elems: Vec<Value>, orig: &[Value]) -> JsResult<()> {
     let integ = e.heap.obj(id).map_or(0, |o| o.elem_integrity);
     if integ & 3 != 0 && orig.len() != elems.len() {
+        // Sur refus le tableau doit rester INTACT (spec — les
+        // éléments pris par `take_elems` n'ont pas d'autre
+        // propriétaire : sans restauration il finissait vidé).
+        put_elems(e, id, orig.to_vec())?;
         return Err(e.type_error("cannot change length of a sealed array"));
     }
     put_elems(e, id, elems)?;

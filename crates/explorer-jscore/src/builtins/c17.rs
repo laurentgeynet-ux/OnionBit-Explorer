@@ -16,27 +16,25 @@ use super::*;
 /// interne relative (indices négatifs = depuis la fin, spec).
 pub(crate) fn array_copy_within(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let id = this_array(e, this)?;
+    let rel = |v: Value, e: &mut Engine| -> JsResult<i64> { Ok(e.to_number(v)? as i64) };
+    // Coercition d'args AVANT `take_elems` : un `valueOf` hostile
+    // ne doit pas laisser le backing vidé (JS-C319). La
+    // normalisation reste après take (borne = longueur réelle).
+    let target_i = rel(arg(args, 0), e)?;
+    let start_i = match arg(args, 1) {
+        Value::Undefined => None,
+        v => Some(rel(v, e)?),
+    };
+    let end_i = match arg(args, 2) {
+        Value::Undefined => None,
+        v => Some(rel(v, e)?),
+    };
     let mut elems = take_elems(e, id)?;
     let len = elems.len() as i64;
-    let rel = |v: Value, e: &mut Engine| -> JsResult<i64> { Ok(e.to_number(v)? as i64) };
-    let target = match rel(arg(args, 0), e)? {
-        i if i < 0 => (len + i).max(0),
-        i => i.min(len),
-    };
-    let start = match arg(args, 1) {
-        Value::Undefined => 0,
-        v => match rel(v, e)? {
-            i if i < 0 => (len + i).max(0),
-            i => i.min(len),
-        },
-    };
-    let end = match arg(args, 2) {
-        Value::Undefined => len,
-        v => match rel(v, e)? {
-            i if i < 0 => (len + i).max(0),
-            i => i.min(len),
-        },
-    };
+    let norm = |i: i64| if i < 0 { (len + i).max(0) } else { i.min(len) };
+    let target = norm(target_i);
+    let start = start_i.map_or(0, norm);
+    let end = end_i.map_or(len, norm);
     // Snapshot de la plage source — `copyWithin` a une sémantique
     // memmove : les chevauchements copient les valeurs d'origine,
     // pas les valeurs déjà réécrites (spec `Array.prototype.

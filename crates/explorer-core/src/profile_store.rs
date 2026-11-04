@@ -273,7 +273,7 @@ impl ProfileStore for JsonFileStore {
 
     /// Autofill (PR-6) : `autofill.json` =
     /// `{nom → [valeurs]}` — plus récente en tête, bornée à
-    /// [`AUTOFILL_VALUES_CAP`] par nom et [`AUTOFILL_NAMES_CAP`]
+    /// `AUTOFILL_VALUES_CAP` par nom et `AUTOFILL_NAMES_CAP`
     /// noms (éviction arbitraire quand la map déborde — dev
     /// store, ADR-0030). **En clair** : à sceller par
     /// `ProfileVault` avant release prod.

@@ -982,16 +982,28 @@ pub(crate) fn array_iter_find(
         return Err(e.type_error("callback is not a function"));
     }
     let elems = take_elems(e, id)?;
-    let mut hits = Vec::with_capacity(elems.len());
-    for (i, &v) in elems.iter().enumerate() {
-        if v.is_hole() {
-            hits.push(None); // trou → cb non appelée (spec `HasProperty`).
-            continue;
+    // Boucle collectée en sous-résultat : une cb qui jette repose
+    // `elems` avant de propager — sinon `this` restait vidé
+    // (JS-C319, même classe que `flat`/`sort`/`join`).
+    let r = (|e: &mut Engine| -> JsResult<Vec<Option<bool>>> {
+        let mut hits = Vec::with_capacity(elems.len());
+        for (i, &v) in elems.iter().enumerate() {
+            if v.is_hole() {
+                hits.push(None); // trou → cb non appelée (spec `HasProperty`).
+                continue;
+            }
+            let r = e.call_value(cb, arg(args, 1), &[v, Value::Num(i as f64), this])?;
+            hits.push(Some(e.to_boolean(r)));
         }
-        let r = e.call_value(cb, arg(args, 1), &[v, Value::Num(i as f64), this])?;
-        hits.push(Some(e.to_boolean(r)));
+        Ok(hits)
+    })(e);
+    match r {
+        Ok(hits) => Ok((elems, hits, id)),
+        Err(er) => {
+            put_elems(e, id, elems)?;
+            Err(er)
+        }
     }
-    Ok((elems, hits, id))
 }
 
 pub(crate) fn array_find(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {

@@ -147,36 +147,42 @@ pub(crate) fn array_join(e: &mut Engine, this: Value, args: &[Value]) -> JsResul
         Value::Undefined => ",".to_string(),
         v => e.to_js_string(v)?,
     };
-    let elems = take_elems(e, id)?;
-    let mut parts = Vec::with_capacity(elems.len());
-    // `parts` et la sortie `join` sont des String natifs hors
-    // compteur du heap — la taille cumulée est gardée en cours
-    // de route (JS-C55 : `Array(1e6).fill('x'.repeat(100)).join()`
-    // materialiserait ~200 Mio d'un coup).
-    let mut total = sep.len().saturating_mul(elems.len().saturating_sub(1));
-    for (i, v) in elems.iter().enumerate() {
-        parts.push(match v {
-            Value::Undefined | Value::Null | Value::Hole => String::new(),
-            _ => e.to_js_string(*v)?,
-        });
-        total = total.saturating_add(parts.last().map_or(0, String::len));
-        if i % 4096 == 0 {
-            e.alloc_guard(total)?;
+    // `with_elems` repose le backing même si un `toString`
+    // d'élément jette (take/put à l'épreuve des `?`, JS-C319).
+    let joined = with_elems(e, id, |e, elems| {
+        let mut parts = Vec::with_capacity(elems.len());
+        // `parts` et la sortie `join` sont des String natifs hors
+        // compteur du heap — la taille cumulée est gardée en cours
+        // de route (JS-C55 : `Array(1e6).fill('x'.repeat(100)).join()`
+        // materialiserait ~200 Mio d'un coup).
+        let mut total = sep.len().saturating_mul(elems.len().saturating_sub(1));
+        for (i, v) in elems.iter().enumerate() {
+            parts.push(match v {
+                Value::Undefined | Value::Null | Value::Hole => String::new(),
+                _ => e.to_js_string(*v)?,
+            });
+            total = total.saturating_add(parts.last().map_or(0, String::len));
+            if i % 4096 == 0 {
+                e.alloc_guard(total)?;
+            }
         }
-    }
-    e.alloc_guard(total)?;
-    put_elems(e, id, elems)?;
-    Ok(e.str_val(parts.join(&sep)))
+        e.alloc_guard(total)?;
+        Ok(parts.join(&sep))
+    })?;
+    Ok(e.str_val(joined))
 }
 
 pub(crate) fn array_index_of(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let id = this_array(e, this)?;
     let needle = arg(args, 0);
-    let elems = take_elems(e, id)?;
+    // Coercition d'args AVANT `take_elems` — un `fromIndex`
+    // hostile (`valueOf` qui jette) ne doit pas laisser le
+    // backing vidé (JS-C319).
     let mut start = match arg(args, 1) {
         Value::Undefined => 0i64,
         v => e.to_number(v)? as i64,
     };
+    let elems = take_elems(e, id)?;
     if start < 0 {
         start = (elems.len() as i64 + start).max(0);
     }
@@ -328,65 +334,71 @@ pub(crate) fn array_sort(e: &mut Engine, this: Value, args: &[Value]) -> JsResul
     let id = this_array(e, this)?;
     let cmp = arg(args, 0);
     let use_cmp = e.is_callable(cmp);
-    let mut elems = take_elems(e, id)?;
     // `sort` écrit chaque élément via `Set(throw)` → tableau gelé
     // non vide → `TypeError` même si l'ordre ne change pas (spec).
-    if e.heap.obj(id).is_some_and(|o| o.elem_integrity & 2 != 0) && !elems.is_empty() {
-        put_elems(e, id, elems)?;
+    if e.heap.obj(id).is_some_and(|o| {
+        o.elem_integrity & 2 != 0 && matches!(&o.kind, ObjKind::Array(v) if !v.is_empty())
+    }) {
         return Err(e.type_error("cannot sort a frozen array"));
     }
-    if use_cmp {
-        // Merge sort itératif, stable — comparateur script faillible.
-        // L'insertion sort O(n²) gelait le moteur dès ~10^5 éléments
-        // hostiles (JS-C55).
-        let n = elems.len();
-        let mut buf = elems.clone();
-        let mut width = 1;
-        while width < n {
-            let mut i = 0;
-            while i < n {
-                let m = (i + width).min(n);
-                let r = (i + 2 * width).min(n);
-                let (mut a, mut b, mut k) = (i, m, i);
-                while a < m && b < r {
-                    let cr = e.call_value(cmp, Value::Undefined, &[elems[a], elems[b]])?;
-                    let take_right = e.to_number(cr)? > 0.0;
-                    if take_right {
-                        buf[k] = elems[b];
-                        b += 1;
-                    } else {
+    // `with_elems` repose le backing quand le comparateur (ou le
+    // `toString` du tri lexicographique) jette — sans elle le
+    // tableau restait vidé (JS-C319).
+    with_elems(e, id, |e, elems| {
+        if use_cmp {
+            // Merge sort itératif, stable — comparateur script
+            // faillible. L'insertion sort O(n²) gelait le moteur
+            // dès ~10^5 éléments hostiles (JS-C55).
+            let n = elems.len();
+            let mut buf = elems.clone();
+            let mut width = 1;
+            while width < n {
+                let mut i = 0;
+                while i < n {
+                    let m = (i + width).min(n);
+                    let r = (i + 2 * width).min(n);
+                    let (mut a, mut b, mut k) = (i, m, i);
+                    while a < m && b < r {
+                        let cr = e.call_value(cmp, Value::Undefined, &[elems[a], elems[b]])?;
+                        let take_right = e.to_number(cr)? > 0.0;
+                        if take_right {
+                            buf[k] = elems[b];
+                            b += 1;
+                        } else {
+                            buf[k] = elems[a];
+                            a += 1;
+                        }
+                        k += 1;
+                    }
+                    while a < m {
                         buf[k] = elems[a];
                         a += 1;
+                        k += 1;
                     }
-                    k += 1;
+                    while b < r {
+                        buf[k] = elems[b];
+                        b += 1;
+                        k += 1;
+                    }
+                    i += 2 * width;
                 }
-                while a < m {
-                    buf[k] = elems[a];
-                    a += 1;
-                    k += 1;
-                }
-                while b < r {
-                    buf[k] = elems[b];
-                    b += 1;
-                    k += 1;
-                }
-                i += 2 * width;
+                std::mem::swap(elems, &mut buf);
+                width *= 2;
             }
-            std::mem::swap(&mut elems, &mut buf);
-            width *= 2;
+        } else {
+            // Clés string matérialisées une fois par élément (spec
+            // ToString-une-fois) puis tri Rust O(n log n) —
+            // l'insertion sort O(n²) appelait `to_js_string` par
+            // comparaison (JS-C55).
+            let mut keyed: Vec<(String, Value)> = Vec::with_capacity(elems.len());
+            for &v in elems.iter() {
+                keyed.push((e.to_js_string(v)?, v));
+            }
+            keyed.sort_by(|a, b| a.0.cmp(&b.0));
+            *elems = keyed.into_iter().map(|(_, v)| v).collect();
         }
-    } else {
-        // Clés string matérialisées une fois par élément (spec
-        // ToString-une-fois) puis tri Rust O(n log n) — l'insertion
-        // sort O(n²) appelait `to_js_string` par comparaison (JS-C55).
-        let mut keyed: Vec<(String, Value)> = Vec::with_capacity(elems.len());
-        for &v in &elems {
-            keyed.push((e.to_js_string(v)?, v));
-        }
-        keyed.sort_by(|a, b| a.0.cmp(&b.0));
-        elems = keyed.into_iter().map(|(_, v)| v).collect();
-    }
-    put_elems(e, id, elems)?;
+        Ok(())
+    })?;
     Ok(this)
 }
 
@@ -397,18 +409,20 @@ pub(crate) fn array_for_each(e: &mut Engine, this: Value, args: &[Value]) -> JsR
         return Err(e.type_error("forEach needs a function"));
     }
     let this_arg = arg(args, 1);
-    let elems = take_elems(e, id)?;
-    for (i, v) in elems.iter().enumerate() {
-        if v.is_hole() {
-            continue; // `forEach` saute les trous (spec).
+    // `with_elems` : une cb qui jette ne doit pas vider `this`
+    // (JS-C319 — erreur souvent avalée par un try/catch du site).
+    with_elems(e, id, |e, elems| {
+        for (i, v) in elems.iter().enumerate() {
+            if v.is_hole() {
+                continue; // `forEach` saute les trous (spec).
+            }
+            e.call_value(cb, this_arg, &[*v, Value::Num(i as f64), this])?;
+            if i % 8192 == 0 {
+                e.tick()?; // cb native : ops-limit relu ici (JS-C55)
+            }
         }
-        e.call_value(cb, this_arg, &[*v, Value::Num(i as f64), this])?;
-        if i % 8192 == 0 {
-            e.tick()?; // cb native : ops-limit relu ici (JS-C55)
-        }
-    }
-    put_elems(e, id, elems)?;
-    Ok(Value::Undefined)
+        Ok(Value::Undefined)
+    })
 }
 
 pub(crate) fn array_map(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
@@ -418,21 +432,22 @@ pub(crate) fn array_map(e: &mut Engine, this: Value, args: &[Value]) -> JsResult
         return Err(e.type_error("map needs a function"));
     }
     let this_arg = arg(args, 1);
-    let elems = take_elems(e, id)?;
-    let mut out = Vec::with_capacity(elems.len());
-    for (i, v) in elems.iter().enumerate() {
-        // `map` préserve les trous (spec — `Array(3).map(f)` reste
-        // épars, la cb n'est pas appelée).
-        out.push(if v.is_hole() {
-            Value::Hole
-        } else {
-            e.call_value(cb, this_arg, &[*v, Value::Num(i as f64), this])?
-        });
-        if i % 8192 == 0 {
-            e.tick()?;
+    let out = with_elems(e, id, |e, elems| {
+        let mut out = Vec::with_capacity(elems.len());
+        for (i, v) in elems.iter().enumerate() {
+            // `map` préserve les trous (spec — `Array(3).map(f)`
+            // reste épars, la cb n'est pas appelée).
+            out.push(if v.is_hole() {
+                Value::Hole
+            } else {
+                e.call_value(cb, this_arg, &[*v, Value::Num(i as f64), this])?
+            });
+            if i % 8192 == 0 {
+                e.tick()?;
+            }
         }
-    }
-    put_elems(e, id, elems)?;
+        Ok(out)
+    })?;
     let a_v = species_array(e, this, out.len())?;
     for (i, v) in out.iter().enumerate() {
         e.set_prop_value(a_v, &i.to_string(), *v)?;
@@ -447,21 +462,22 @@ pub(crate) fn array_filter(e: &mut Engine, this: Value, args: &[Value]) -> JsRes
         return Err(e.type_error("filter needs a function"));
     }
     let this_arg = arg(args, 1);
-    let elems = take_elems(e, id)?;
-    let mut out = Vec::new();
-    for (i, v) in elems.iter().enumerate() {
-        if v.is_hole() {
-            continue;
+    let out = with_elems(e, id, |e, elems| {
+        let mut out = Vec::new();
+        for (i, v) in elems.iter().enumerate() {
+            if v.is_hole() {
+                continue;
+            }
+            let keep = e.call_value(cb, this_arg, &[*v, Value::Num(i as f64), this])?;
+            if e.to_boolean(keep) {
+                out.push(*v);
+            }
+            if i % 8192 == 0 {
+                e.tick()?;
+            }
         }
-        let keep = e.call_value(cb, this_arg, &[*v, Value::Num(i as f64), this])?;
-        if e.to_boolean(keep) {
-            out.push(*v);
-        }
-        if i % 8192 == 0 {
-            e.tick()?;
-        }
-    }
-    put_elems(e, id, elems)?;
+        Ok(out)
+    })?;
     let a_v = species_array(e, this, out.len())?;
     for (i, v) in out.iter().enumerate() {
         e.set_prop_value(a_v, &i.to_string(), *v)?;
@@ -475,29 +491,30 @@ pub(crate) fn array_reduce(e: &mut Engine, this: Value, args: &[Value]) -> JsRes
     if !e.is_callable(cb) {
         return Err(e.type_error("reduce needs a function"));
     }
-    let elems = take_elems(e, id)?;
-    let (mut acc, start) = match args.get(1) {
-        Some(v) => (*v, 0),
-        // Sans init, l'acc est le premier élément *présent* —
-        // tout-trous ou vide → TypeError (spec).
-        None => {
-            if let Some(i) = elems.iter().position(|v| !v.is_hole()) {
-                (elems[i], i + 1)
-            } else {
-                put_elems(e, id, elems)?;
-                return Err(e.type_error("reduce of empty array"));
+    // Tout dans `with_elems` : l'erreur « reduce of empty array »
+    // comme une cb qui jette reposent le backing (JS-C319).
+    with_elems(e, id, |e, elems| {
+        let (mut acc, start) = match args.get(1) {
+            Some(v) => (*v, 0),
+            // Sans init, l'acc est le premier élément *présent* —
+            // tout-trous ou vide → TypeError (spec).
+            None => {
+                if let Some(i) = elems.iter().position(|v| !v.is_hole()) {
+                    (elems[i], i + 1)
+                } else {
+                    return Err(e.type_error("reduce of empty array"));
+                }
+            }
+        };
+        for (i, v) in elems.iter().enumerate().skip(start) {
+            if v.is_hole() {
+                continue;
+            }
+            acc = e.call_value(cb, Value::Undefined, &[acc, *v, Value::Num(i as f64), this])?;
+            if i % 8192 == 0 {
+                e.tick()?;
             }
         }
-    };
-    for (i, v) in elems.iter().enumerate().skip(start) {
-        if v.is_hole() {
-            continue;
-        }
-        acc = e.call_value(cb, Value::Undefined, &[acc, *v, Value::Num(i as f64), this])?;
-        if i % 8192 == 0 {
-            e.tick()?;
-        }
-    }
-    put_elems(e, id, elems)?;
-    Ok(acc)
+        Ok(acc)
+    })
 }

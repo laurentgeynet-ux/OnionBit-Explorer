@@ -99,34 +99,36 @@ pub(crate) fn rel_index(e: &mut Engine, v: Value, len: usize) -> JsResult<Option
 
 pub(crate) fn array_at(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let id = this_array(e, this)?;
-    let elems = take_elems(e, id)?;
-    let i = rel_index(e, arg(args, 0), elems.len())?;
-    let v = i.map_or(Value::Undefined, |i| elems[i]).unhole();
-    put_elems(e, id, elems)?;
-    Ok(v)
+    // `with_elems` — un `rel_index` qui jette (valueOf hostile)
+    // ne laisse pas le backing vidé (JS-C319).
+    with_elems(e, id, |e, elems| {
+        let i = rel_index(e, arg(args, 0), elems.len())?;
+        Ok(i.map_or(Value::Undefined, |i| elems[i]).unhole())
+    })
 }
 
 pub(crate) fn array_fill(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let id = this_array(e, this)?;
-    let mut elems = take_elems(e, id)?;
-    let len = elems.len();
-    let v = arg(args, 0);
-    let start = rel_index(e, arg(args, 1), len)?.unwrap_or(0);
-    let end = match arg(args, 2) {
-        Value::Undefined => len,
-        v => rel_index(e, v, len)?.unwrap_or(len),
-    };
-    // `fill` n'écrit que sur une plage non vide — tableau gelé
-    // avec plage vide → no-op admis (spec `Set(throw)` par slot).
-    if end.min(len) > start && e.heap.obj(id).is_some_and(|o| o.elem_integrity & 2 != 0) {
-        put_elems(e, id, elems)?;
-        return Err(e.type_error("cannot fill a frozen array"));
-    }
-    for slot in &mut elems[start..end.min(len)] {
-        *slot = v;
-    }
-    put_elems(e, id, elems)?;
-    Ok(this)
+    // `with_elems` — `rel_index` faillible + refus `frozen` :
+    // le tableau reste intact quoi qu'il arrive (JS-C319).
+    with_elems(e, id, |e, elems| {
+        let len = elems.len();
+        let v = arg(args, 0);
+        let start = rel_index(e, arg(args, 1), len)?.unwrap_or(0);
+        let end = match arg(args, 2) {
+            Value::Undefined => len,
+            v => rel_index(e, v, len)?.unwrap_or(len),
+        };
+        // `fill` n'écrit que sur une plage non vide — tableau gelé
+        // avec plage vide → no-op admis (spec `Set(throw)` par slot).
+        if end.min(len) > start && e.heap.obj(id).is_some_and(|o| o.elem_integrity & 2 != 0) {
+            return Err(e.type_error("cannot fill a frozen array"));
+        }
+        for slot in &mut elems[start..end.min(len)] {
+            *slot = v;
+        }
+        Ok(this)
+    })
 }
 
 /// Recursive `flat` — spec depth param, default 1.
@@ -149,7 +151,19 @@ pub(crate) fn flat_into(
         if depth > 0 {
             if let Value::Obj(id) = v {
                 if matches!(e.heap.obj(id).map(|o| &o.kind), Some(ObjKind::Array(_))) {
-                    let kids = take_elems(e, id)?;
+                    // Les enfants sont *lus* (copiés), jamais
+                    // `take`n — le Vec vit dans le sous-tableau
+                    // JS : le consommer le vidait à jamais
+                    // (§B-4(c) : YouTube `behaviors.flat(Infinity)`
+                    // vidait `_.ev.YtActionHandlerBehavior` →
+                    // proto sans `unregisterActionMap`).
+                    let kids = match e.heap.obj(id) {
+                        Some(o) => match &o.kind {
+                            ObjKind::Array(v) => v.clone(),
+                            _ => Vec::new(),
+                        },
+                        None => Vec::new(),
+                    };
                     e.alloc_guard(kids.len().saturating_mul(std::mem::size_of::<Value>()))?;
                     for el in kids.into_iter().rev() {
                         stack.push((el, depth - 1));
@@ -169,12 +183,13 @@ pub(crate) fn array_flat(e: &mut Engine, this: Value, args: &[Value]) -> JsResul
         Value::Undefined => 1,
         v => e.to_number(v)? as u32,
     };
-    let elems = take_elems(e, id)?;
-    let mut out = Vec::new();
-    for v in elems.iter().copied() {
-        flat_into(e, v, depth, &mut out)?;
-    }
-    put_elems(e, id, elems)?;
+    let out = with_elems(e, id, |e, elems| {
+        let mut out = Vec::new();
+        for v in elems.iter().copied() {
+            flat_into(e, v, depth, &mut out)?;
+        }
+        Ok(out)
+    })?;
     Ok(e.new_array(out))
 }
 
@@ -184,16 +199,17 @@ pub(crate) fn array_flat_map(e: &mut Engine, this: Value, args: &[Value]) -> JsR
     if !e.is_callable(cb) {
         return Err(e.type_error("flatMap needs a function"));
     }
-    let elems = take_elems(e, id)?;
-    let mut out = Vec::new();
-    for (i, &v) in elems.iter().enumerate() {
-        if v.is_hole() {
-            continue;
+    let out = with_elems(e, id, |e, elems| {
+        let mut out = Vec::new();
+        for (i, &v) in elems.iter().enumerate() {
+            if v.is_hole() {
+                continue;
+            }
+            let r = e.call_value(cb, arg(args, 1), &[v, Value::Num(i as f64), this])?;
+            flat_into(e, r, 1, &mut out)?;
         }
-        let r = e.call_value(cb, arg(args, 1), &[v, Value::Num(i as f64), this])?;
-        flat_into(e, r, 1, &mut out)?;
-    }
-    put_elems(e, id, elems)?;
+        Ok(out)
+    })?;
     Ok(e.new_array(out))
 }
 
@@ -236,7 +252,17 @@ pub(crate) fn array_values(e: &mut Engine, this: Value, _a: &[Value]) -> JsResul
 
 pub(crate) fn array_keys(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
     let id = this_array(e, this)?;
-    let n = take_elems(e, id)?.len();
+    // Lecture directe de la longueur — un `take` seul (sans
+    // `put`) vidait le backing des vrais tableaux, et `put`
+    // écrirait des indices fantômes sur les array-likes
+    // (JS-C319). La borne `length` suit `take_elems` (4 M).
+    let n = match e.heap.obj(id).map(|o| &o.kind) {
+        Some(ObjKind::Array(v)) => v.len(),
+        _ => match e.get_prop(id, "length") {
+            Some(v) => (e.to_number(v).unwrap_or(0.0).max(0.0) as usize).min(4_000_000),
+            None => 0,
+        },
+    };
     Ok(crate::collections::iter_obj(
         e,
         (0..n).map(|i| Value::Num(i as f64)).collect(),
@@ -258,19 +284,24 @@ pub(crate) fn array_entries(e: &mut Engine, this: Value, _a: &[Value]) -> JsResu
 // ES2023 non-mutating variants.
 pub(crate) fn array_with(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let id = this_array(e, this)?;
-    let elems = take_elems(e, id)?;
-    let len = elems.len();
-    if let Some(i) = rel_index(e, arg(args, 0), len)? {
-        // `with` produit un résultat dense (spec `Get` → trou
-        // relu `undefined`).
-        let mut out_v: Vec<Value> = elems.iter().map(|v| v.unhole()).collect();
-        out_v[i] = arg(args, 1);
-        let out = e.new_array(out_v);
-        put_elems(e, id, elems)?;
-        Ok(out)
-    } else {
-        put_elems(e, id, elems)?;
-        Err(e.range_error("with: index out of range"))
+    // `with_elems` — `rel_index` faillible ; hors-bornes rend un
+    // `None` distinct de l'erreur pour garder le `RangeError`.
+    let res = with_elems(e, id, |e, elems| {
+        let len = elems.len();
+        match rel_index(e, arg(args, 0), len)? {
+            Some(i) => {
+                // `with` produit un résultat dense (spec `Get` →
+                // trou relu `undefined`).
+                let mut out_v: Vec<Value> = elems.iter().map(|v| v.unhole()).collect();
+                out_v[i] = arg(args, 1);
+                Ok(Some(e.new_array(out_v)))
+            }
+            None => Ok(None),
+        }
+    })?;
+    match res {
+        Some(out) => Ok(out),
+        None => Err(e.range_error("with: index out of range")),
     }
 }
 
@@ -291,68 +322,74 @@ pub(crate) fn array_to_reversed(e: &mut Engine, this: Value, args: &[Value]) -> 
 /// conversion des args laisse l'array intact.
 pub(crate) fn array_splice(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let id = this_array(e, this)?;
-    let elems = take_elems(e, id)?;
-    let len = elems.len();
-    let start = match arg(args, 0) {
-        Value::Undefined => 0,
-        v => {
-            // Clampe dans [0, len] comme la spec (`rel_index`
-            // renvoie None hors bornes — les deux côtés doivent
-            // clamper différemment, on calcule à la main).
-            let i = e.to_number(v)? as isize;
-            if i < 0 {
-                (len as isize + i).max(0) as usize
-            } else {
-                (i as usize).min(len)
+    // `with_elems` — `to_number` des args peut jeter : le tableau
+    // reste intact (JS-C319). Le refus `sealed` repose aussi le
+    // backing inchangé (`elems` n'est réécrit qu'en fin de corps).
+    with_elems(e, id, |e, elems| {
+        let len = elems.len();
+        let start = match arg(args, 0) {
+            Value::Undefined => 0,
+            v => {
+                // Clampe dans [0, len] comme la spec (`rel_index`
+                // renvoie None hors bornes — les deux côtés doivent
+                // clamper différemment, on calcule à la main).
+                let i = e.to_number(v)? as isize;
+                if i < 0 {
+                    (len as isize + i).max(0) as usize
+                } else {
+                    (i as usize).min(len)
+                }
             }
+        };
+        let del = if args.is_empty() {
+            0
+        } else if args.len() == 1 {
+            // Un seul arg → supprime jusqu'à la fin (spec).
+            len - start
+        } else {
+            (e.to_number(arg(args, 1))?.max(0.0) as usize).min(len - start)
+        };
+        let ins: &[Value] = args.get(2..).unwrap_or(&[]);
+        let mut out_v = Vec::with_capacity(len - del + ins.len());
+        out_v.extend_from_slice(&elems[..start]);
+        let deleted: Vec<Value> = elems[start..start + del].to_vec();
+        out_v.extend_from_slice(ins);
+        out_v.extend_from_slice(&elems[start + del..]);
+        // Sous `seal`/`freeze` toute suppression (`DeleteOrThrow`)
+        // ou insertion (ajout interdit) lève `TypeError` — y
+        // compris quand la longueur finale ne changerait pas.
+        if e.heap.obj(id).is_some_and(|o| o.elem_integrity & 3 != 0) && (del > 0 || !ins.is_empty())
+        {
+            return Err(e.type_error("cannot splice a sealed array"));
         }
-    };
-    let del = if args.is_empty() {
-        0
-    } else if args.len() == 1 {
-        // Un seul arg → supprime jusqu'à la fin (spec).
-        len - start
-    } else {
-        (e.to_number(arg(args, 1))?.max(0.0) as usize).min(len - start)
-    };
-    let ins: &[Value] = args.get(2..).unwrap_or(&[]);
-    let mut out_v = Vec::with_capacity(len - del + ins.len());
-    out_v.extend_from_slice(&elems[..start]);
-    let deleted: Vec<Value> = elems[start..start + del].to_vec();
-    out_v.extend_from_slice(ins);
-    out_v.extend_from_slice(&elems[start + del..]);
-    // Sous `seal`/`freeze` toute suppression (`DeleteOrThrow`) ou
-    // insertion (ajout interdit) lève `TypeError` — y compris quand
-    // la longueur finale ne changerait pas (spec).
-    if e.heap.obj(id).is_some_and(|o| o.elem_integrity & 3 != 0) && (del > 0 || !ins.is_empty()) {
-        put_elems(e, id, elems)?;
-        return Err(e.type_error("cannot splice a sealed array"));
-    }
-    let darr = e.new_array(deleted);
-    put_elems(e, id, out_v)?;
-    Ok(darr)
+        let darr = e.new_array(deleted);
+        *elems = out_v;
+        Ok(darr)
+    })
 }
 
 pub(crate) fn array_to_spliced(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let id = this_array(e, this)?;
-    let elems = take_elems(e, id)?;
-    let len = elems.len();
-    let start = match arg(args, 0) {
-        Value::Undefined => 0,
-        v => rel_index(e, v, len)?.unwrap_or(len),
-    };
-    let del = match arg(args, 1) {
-        Value::Undefined => len - start,
-        v => (e.to_number(v)?.max(0.0) as usize).min(len - start),
-    };
-    let ins: Vec<Value> = args.get(2..).unwrap_or(&[]).to_vec();
-    let mut out_v = Vec::with_capacity(len - del + ins.len());
-    // Résultat dense — `toSpliced` fait `Get` par slot (spec).
-    out_v.extend(elems[..start].iter().map(|v| v.unhole()));
-    out_v.extend(ins);
-    out_v.extend(elems[start + del..].iter().map(|v| v.unhole()));
-    let out = e.new_array(out_v);
-    put_elems(e, id, elems)?;
+    // `with_elems` — `rel_index`/`to_number` faillibles avant le
+    // put (JS-C319) ; `this` n'est jamais modifié (non-mutant).
+    let out = with_elems(e, id, |e, elems| {
+        let len = elems.len();
+        let start = match arg(args, 0) {
+            Value::Undefined => 0,
+            v => rel_index(e, v, len)?.unwrap_or(len),
+        };
+        let del = match arg(args, 1) {
+            Value::Undefined => len - start,
+            v => (e.to_number(v)?.max(0.0) as usize).min(len - start),
+        };
+        let ins: &[Value] = args.get(2..).unwrap_or(&[]);
+        let mut out_v = Vec::with_capacity(len - del + ins.len());
+        // Résultat dense — `toSpliced` fait `Get` par slot (spec).
+        out_v.extend(elems[..start].iter().map(|v| v.unhole()));
+        out_v.extend_from_slice(ins);
+        out_v.extend(elems[start + del..].iter().map(|v| v.unhole()));
+        Ok(e.new_array(out_v))
+    })?;
     Ok(out)
 }
 

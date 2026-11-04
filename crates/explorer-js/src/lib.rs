@@ -1320,7 +1320,8 @@ pub trait JsEngine: Send {
     }
 
     /// Restaure un snapshot `IndexedDB` (JSON —
-    /// [`Engine::idb_restore`], PR-10a). Défaut : noop.
+    /// `Engine::idb_restore` côté jscore, PR-10a).
+    /// Défaut : noop.
     fn install_idb(&mut self, _json: &str) {}
 
     /// Snapshot JSON du registre `IndexedDB` courant — la

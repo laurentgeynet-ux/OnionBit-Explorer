@@ -327,6 +327,7 @@ fn c315_webcomponents_sd_wrapper_removechild() {
 /// `ShadyDOM.Wrapper` et capture `W.prototype.removeChild` à
 /// l'install ; la fonction wrappée jette `z.nativeRemoveChild.call`
 /// si la capture était undefined. Live : elle l'était.
+#[allow(clippy::too_many_lines)]
 #[test]
 #[ignore = "sonde — fixtures réelles non versionnées"]
 fn c315_wcsd_then_kevlar_ubc_capture() {
@@ -355,15 +356,228 @@ fn c315_wcsd_then_kevlar_ubc_capture() {
             "(function(){var SD=window.ShadyDOM;if(!SD)return'noSD';var W=SD.Wrapper;return'W='+typeof W+'|rm='+(W?typeof W.prototype.removeChild:'?')+'|inUse='+SD.inUse})()",
         )
     );
+    // Espion JS-C318 : l'instrumentation mutationnelle (patch
+    // `push`/`defineProperty`/setters) a identifié puis été
+    // retirée — le coupable était `flat_into`/`array_keys` qui
+    // vidaient `elems` par `take` sans `put` (JS-C319, verrou
+    // `c319_elems_restore`). Ne restent que les sondes en
+    // lecture seule ci-dessous.
     if let Err(t) = e.eval(&kv) {
         println!("kevlar THREW: {t}");
     }
+    println!(
+        "yab → {}",
+        ev(
+            &mut e,
+            "(function(){var dk=window.default_kevlar_base;var yab=dk&&dk.ev&&dk.ev.YtActionHandlerBehavior;return'yab='+(Array.isArray(yab)?'arr'+yab.length:typeof yab)+'|e0unreg='+((yab&&yab[0]&&typeof yab[0].unregisterActionMap)||'-')})()",
+        )
+    );
     // La capture faite par ubC : relire le même chemin.
     println!(
         "post-kevlar → {}",
         ev(
             &mut e,
             "(function(){var SD=window.ShadyDOM;var W=SD&&SD.Wrapper;if(!W)return'noW';var d=Object.getOwnPropertyDescriptor(W.prototype,'removeChild');return'rmD='+(d?(d.get?'ACC':typeof d.value):'ABSENT')+'|own='+Object.getOwnPropertyNames(W.prototype).length})()",
+        )
+    );
+    let nlog = e.nullread_log_drain();
+    println!("nullread_log : {}", nlog.len());
+    for l in &nlog {
+        println!("  {l}");
+    }
+    // 5) Le ctor `an` a-t-il atteint `T3Q(this)` ? — didRegister,
+    //    hostElement, legacyOptimizations, et invocation manuelle.
+    println!(
+        "an-ctor state → {}",
+        ev(
+            &mut e,
+            "(function(){var el=document.querySelector('ytd-app');if(!el)return'no-el';var o=[];o.push('didReg='+(el.polySiContext&&el.polySiContext.didRegister));o.push('lo='+(el.polySiParams&&el.polySiParams.legacyOptimizations));o.push('host='+(typeof el.hostElement));o.push('cPP='+(el.polySiContext&&typeof el.polySiContext.copyPropertiesToProto));try{el.registered();o.push('reg-call=ok')}catch(x){o.push('reg-call=THREW:'+String(x&&x.message||x).slice(0,80))}o.push('unreg2='+(typeof el.unregisterActionMap));return o.join('|')})()",
+        )
+    );
+    // 6) Own props de l'instance + identité de classe — le ctor
+    //    `r`/`an` a-t-il tourné du tout (champs posés AVANT tout
+    //    throw) ?
+    println!(
+        "inst own → {}",
+        ev(
+            &mut e,
+            "(function(){var el=document.querySelector('ytd-app');if(!el)return'no-el';var C=customElements.get('ytd-app');var ks=Object.getOwnPropertyNames(el);return'instof='+(el instanceof C)+'|ctorSame='+(el.constructor===C)+'|own.n='+ks.length+'|own='+ks.slice(0,25).join(',')+'|iOHE='+(el instanceof HTMLElement)})()",
+        )
+    );
+    // 7) Le mixin Z — `lo` (legacyOptimizations) ?
+    //    `_registered` a-t-il fini (__hasRegisterFinished) ?
+    //    `unregisterActionMap` sur le proto de la CLASSE ?
+    println!(
+        "mixin Z state → {}",
+        ev(
+            &mut e,
+            "(function(){var C=customElements.get('ytd-app');var el=document.querySelector('ytd-app');var o=[];o.push('lo='+(window.Polymer&&window.Polymer.legacyOptimizations));o.push('regFin='+(C&&C.prototype&&C.prototype.__hasRegisterFinished));o.push('_reg='+(el&&typeof el._registered));o.push('unregC='+(C&&typeof C.prototype.unregisterActionMap));o.push('behavC='+(C&&C.prototype.behaviors&&C.prototype.behaviors.length));try{el._registered&&el._registered();o.push('reg-call2=ok|unreg3='+(typeof el.unregisterActionMap))}catch(x){o.push('reg2=THREW:'+String(x&&x.message||x).slice(0,90))}return o.join('|')})()",
+        )
+    );
+    // 8) Identité des arrays behaviors : `q.prototype.behaviors`
+    //    own ? == base ? `Z53(n)` a-t-il copié les méthodes de la
+    //    classe (`setPageOffset` & co) ?
+    // 9) Le contenu des 16 behaviors : `unregisterActionMap` y
+    //    figure-t-il ? `getOwnPropertyNames` les voit-il ?
+    println!(
+        "behav content → {}",
+        ev(
+            &mut e,
+            "(function(){var C=customElements.get('ytd-app');if(!C)return'noC';var B=C.prototype.behaviors||[],o=[];for(var i=0;i<B.length;i++){var ks=Object.getOwnPropertyNames(B[i]);o.push('B'+i+'['+ks.length+']:'+(ks.indexOf('unregisterActionMap')>=0?'UNREG!':'')+ks.slice(0,5).join(','))}return o.join(' || ')})()",
+        )
+    );
+    // 10) `q.generatedFrom` = le proto `n` passé à JZA — son
+    //     propre `behaviors` contient-il YtActionHandlerBehavior ?
+    //     Comparaison avec `q.prototype.behaviors`.
+    println!(
+        "generatedFrom → {}",
+        ev(
+            &mut e,
+            "(function(){var C=customElements.get('ytd-app');if(!C)return'noC';var g=C.generatedFrom,o=[];o.push('g='+(typeof g));if(g){var gb=g.behaviors||[],hasU=gb.some(function(b){return b&&Object.getOwnPropertyNames(b).indexOf('unregisterActionMap')>=0});o.push('g.behav.n='+gb.length+'|g.hasU='+hasU);var qb=C.prototype.behaviors||[],qU=qb.some(function(b){return b&&Object.getOwnPropertyNames(b).indexOf('unregisterActionMap')>=0});o.push('q.hasU='+qU);o.push('g===qp:'+(g===C.prototype));o.push('g unreg='+(typeof g.unregisterActionMap))}return o.join('|')})()",
+        )
+    );
+    // 11) `g` = generatedFrom : son ctor et son `.prototype` —
+    //     l'objet proto a-t-il été remplacé après décoration ?
+    //     Et quels `_.e`-behaviors sont dans `g.behaviors` ?
+    println!(
+        "g ctor/proto → {}",
+        ev(
+            &mut e,
+            "(function(){var C=customElements.get('ytd-app');var g=C&&C.generatedFrom;if(!g)return'no';var o=[];var ct=g.constructor;o.push('ctor='+(ct&&ct.name));o.push('ctor.proto===g:'+(ct&&ct.prototype===g));o.push('g ownB='+g.hasOwnProperty('behaviors'));var gb=g.behaviors||[];o.push('gB.tags='+gb.map(function(b){if(!b)return'?';var ks=Object.getOwnPropertyNames(b);return ks.slice(0,2).join('~')}).join('|'));var p=Object.getPrototypeOf(g);o.push('gParent='+(p&&p.constructor&&p.constructor.name)+'|pB='+(p&&p.behaviors&&p.behaviors.length));return o.join(' | ')})()",
+        )
+    );
+    // 12) Recherche profonde de `unregisterActionMap` dans
+    //     `g.behaviors` (y compris dans les sous-arrays poussés
+    //     en bloc par `_.e` sans spread).
+    println!(
+        "deep search → {}",
+        ev(
+            &mut e,
+            "(function(){var C=customElements.get('ytd-app');var g=C&&C.generatedFrom;if(!g)return'no';var hits=[];var scan=function(arr,path){for(var i=0;i<arr.length;i++){var b=arr[i];if(!b)continue;var ks=Object.getOwnPropertyNames(b);if(ks.indexOf('unregisterActionMap')>=0)hits.push(path+'['+i+']');if(Array.isArray(b))scan(b,path+'['+i+']')}};scan(g.behaviors||[],'g.b');scan(C.prototype.behaviors||[],'q.b');return'hits='+(hits.join(',')||'NONE')})()",
+        )
+    );
+    // 13) `_.V` route via `Reflect.decorate` quand présent —
+    //     existe-t-il chez nous ? et le `_.e` poussé existe-t-il
+    //     dans le registre `_.ev` ?
+    println!(
+        "V/reflect → {}",
+        ev(
+            &mut e,
+            "(function(){var o=[];o.push('Rdec='+(typeof Reflect.decorate));o.push('Rmeta='+(typeof Reflect.getMetadata));o.push('Rdm='+(typeof Reflect.defineMetadata));try{var B=_.ev&&_.ev.YtActionHandlerBehavior;o.push('evB='+(typeof B)+'|arr='+Array.isArray(B)+'|n='+(B&&B.length));o.push('evB.unreg='+(B&&B[0]&&typeof B[0].unregisterActionMap))}catch(x){o.push('ev=THREW')}return o.join('|')})()",
+        )
+    );
+    // 14) `_.ev` — l'alias module partagé : contient-il encore
+    //     `YtActionHandlerBehavior` ? (réassigné entre modules →
+    //     le décorateur a pu pousser `undefined`/autre objet).
+    println!(
+        "_ev state → {}",
+        ev(
+            &mut e,
+            "(function(){var o=[];var E=window._&&window._.ev;o.push('_.='+typeof window._);o.push('ev='+typeof E);if(E&&typeof E==='object'){o.push('evKeys='+Object.keys(E).slice(0,10).join(','));o.push('evB='+typeof E.YtActionHandlerBehavior)}return o.join('|')})()",
+        )
+    );
+    // 15) `behaviors` est-il un ACCESSOR dans la chaîne de `g`/
+    //     `q` ? Un getter sans setter ferait perdre le push de
+    //     `m_C` (écriture avalée ailleurs / silencieusement).
+    println!(
+        "behaviors desc → {}",
+        ev(
+            &mut e,
+            "(function(){var C=customElements.get('ytd-app');if(!C)return'no';var out=[],p=C.prototype,d=0;for(;p&&d<8;d++){var x=Object.getOwnPropertyDescriptor(p,'behaviors');if(x){out.push((p.constructor&&p.constructor.name)+':'+(x.get?'ACC':'VAL')+(x.enumerable?'e':'-'))}p=Object.getPrototypeOf(p)}var g=C.generatedFrom||{},gg=Object.getPrototypeOf(g);out.push('g:'+(g.hasOwnProperty('behaviors')?(Object.getOwnPropertyDescriptor(g,'behaviors').get?'ACC':'VAL'):'inh'));var gd=gg&&Object.getOwnPropertyDescriptor(gg,'behaviors');out.push('gp:'+(gd?(gd.get?'ACC':'VAL'):'-'));return out.join('|')})()",
+        )
+    );
+    // 16) Chaîne des CTORs — trouver la classe décorée `Ng`
+    //     réelle et sa `prototype.behaviors` (celle qui a reçu
+    //     le push `_.e`).
+    println!(
+        "ctor chain → {}",
+        ev(
+            &mut e,
+            "(function(){var C=customElements.get('ytd-app');if(!C)return'no';var g=C.generatedFrom,qd=g&&g.constructor,o=[],f=qd,d=0;for(;f&&d<8;d++){var p=f.prototype,b=p&&p.behaviors,hasU=b&&b.some(function(x){return x&&Object.getOwnPropertyNames(x).indexOf('unregisterActionMap')>=0||(Array.isArray(x)&&x.some(function(y){return y&&Object.getOwnPropertyNames(y).indexOf('unregisterActionMap')>=0}))});o.push((f.name||'?')+':pB='+(b?b.length:'-')+(hasU?'*U*':''));f=Object.getPrototypeOf(f)}return o.join('|')})()",
+        )
+    );
+    // 17) Identité des entrées : `Object.prototype`/`Function.
+    //     prototype` figurent-ils dans `g.behaviors` ? (preuve
+    //     du fallback `Reflect.getMetadata` → `n` était falsy).
+    println!(
+        "identity → {}",
+        ev(
+            &mut e,
+            "(function(){var C=customElements.get('ytd-app');var g=C&&C.generatedFrom;if(!g)return'no';var o=[];var gb=g.behaviors||[];for(var i=0;i<gb.length;i++){var b=gb[i];var tag=b===Object.prototype?'OBJPROTO':b===Function.prototype?'FNPROTO':b===Array.prototype?'ARRPROTO':(b&&b.constructor&&b.constructor.name)||typeof b;o.push(i+':'+tag+(Array.isArray(b)?'/arr'+b.length:''))}return o.join('|')})()",
+        )
+    );
+    println!(
+        "behav identity → {}",
+        ev(
+            &mut e,
+            "(function(){var C=customElements.get('ytd-app');if(!C)return'noC';var q=C.prototype,base=Object.getPrototypeOf(q),o=[];o.push('ownB='+q.hasOwnProperty('behaviors'));o.push('bB='+(base&&base.behaviors&&base.behaviors.length));o.push('same='+(q.behaviors===(base&&base.behaviors)));o.push('spo='+(typeof q.setPageOffset));o.push('oNYS='+(typeof q.onYtNavigateStart));o.push('unregB='+(base&&typeof base.unregisterActionMap));o.push('behavKeys='+Object.getOwnPropertyNames(q).filter(function(k){return/ction|avig|etach|egist/.test(k)}).join(','));return o.join('|')})()",
+        )
+    );
+}
+
+/// Sonde JS-C319 — mur levé sur youtube live :
+/// « unregisterActionMap is not a function (on `HTMLElement`) »
+/// à `kevlar_base:32312:14` (`_.p.detached` de la classe
+/// `ytd-app`) — cause racine : `flat_into` vidait les
+/// sous-tableaux de `behaviors` (voir `c319_elems_restore`).
+/// Mécanisme réel du bundle (2114) : le décorateur `_.e(B)` fait
+/// `Y.behaviors.push(B)` + `defineProperty(Y,h,{get(){return
+/// this}})` — `this.ytActionHandlerBehavior` === `this`, donc
+/// l'appel exige `unregisterActionMap` MIXÉ dans le proto de
+/// l'élément par `copyPropertiesToProto`→`qSV` (3639/3550).
+/// On rejoue le vrai bundle puis on mesure où la chaîne casse :
+/// `proto.behaviors` rempli ? `qSV` copié ? proto de l'instance ?
+#[test]
+#[ignore = "sonde — fixture bundle réel non versionnée"]
+fn c318_ytd_app_unregister_actionmap() {
+    let Ok(src) = std::fs::read_to_string(KEVLAR) else {
+        eprintln!("SKIP {KEVLAR} absent");
+        return;
+    };
+    let mut e = Engine::new();
+    e.install_timers();
+    e.install_xhr(Rc::new(NullXhr { next: Cell::new(0) }));
+    e.install_fetch();
+    e.install_dom(&Rc::new(RefCell::new(Dom::from_html(
+        "<html><body><ytd-app></ytd-app><x-up></x-up><x-yt></x-yt><div id=x></div></body></html>",
+    ))));
+    if let Err(t) = e.eval(&src) {
+        println!("bundle eval THREW: {t}");
+    }
+    // 1) La classe enregistrée : `behaviors` peuplé ? méthodes
+    //    mixées sur `r.prototype` ?
+    println!(
+        "ytd-app class → {}",
+        ev(
+            &mut e,
+            "(function(){var C=customElements.get&&customElements.get('ytd-app');if(typeof C!=='function')return'no-ytd-class';var p=C.prototype;var b=p.behaviors||[];return'reg=function|behav.n='+b.length+'|behav.types='+b.map(function(x){return Array.isArray(x)?'arr'+x.length:typeof x}).join(',')+'|unreg='+(typeof p.unregisterActionMap)+'|reg='+(typeof p.registerActionMap)+'|detached='+(typeof p.detached)+'|ytAHB='+(typeof p.ytActionHandlerBehavior)})()",
+        )
+    );
+    // 2) L'instance upgradée : `ytActionHandlerBehavior===this` ?
+    //    `unregisterActionMap` visible ?
+    println!(
+        "ytd-app inst → {}",
+        ev(
+            &mut e,
+            "(function(){var el=document.querySelector('ytd-app');if(!el)return'no-el';return'unreg='+(typeof el.unregisterActionMap)+'|reg='+(typeof el.registerActionMap)+'|ahb===el:'+(el.ytActionHandlerBehavior===el)+'|ahbT='+(typeof el.ytActionHandlerBehavior)+'|detached='+(typeof el.detached)+'|ctor='+(el.constructor&&el.constructor.name)})()",
+        )
+    );
+    // 3) La chaîne proto de l'instance — à quel niveau la méthode
+    //    devrait être (et est-elle) ?
+    println!(
+        "proto chain → {}",
+        ev(
+            &mut e,
+            "(function(){var el=document.querySelector('ytd-app');if(!el)return'no-el';var p=el,s=[];for(var d=0;p&&d<10;d++){var n=(p.constructor&&p.constructor.name)||'?';s.push(n+':'+(Object.getOwnPropertyNames(p).indexOf('unregisterActionMap')>=0?'HAS':'-'));p=Object.getPrototypeOf(p)}return s.join('|')})()",
+        )
+    );
+    // 4) Le décorateur `_.e` a-t-il posé `get(){return this}` sur
+    //    le proto de la classe décorée ?
+    println!(
+        "decorator desc → {}",
+        ev(
+            &mut e,
+            "(function(){var C=customElements.get&&customElements.get('ytd-app');if(typeof C!=='function')return'no';var p=C.prototype,d=0,out=[];for(;p&&d<10;d++){var x=Object.getOwnPropertyDescriptor(p,'ytActionHandlerBehavior');if(x){out.push((p.constructor&&p.constructor.name)+':'+(x.get?'GET':'VAL')+'/'+(x.enumerable?'e':'-'))}p=Object.getPrototypeOf(p)}return out.length?out.join('|'):'no-desc'})()",
         )
     );
     let nlog = e.nullread_log_drain();
