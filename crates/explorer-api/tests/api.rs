@@ -166,6 +166,77 @@ async fn open_tab_then_frame_is_png() {
     assert_eq!(&png[..8], b"\x89PNG\r\n\x1a\n");
 }
 
+/// Étape 185 (M1) — `GET …/frame` porte `x-explorer-
+/// scroll-y` (scroll peint) et `x-explorer-media` (surfaces
+/// géométriques `i`/`r`/`v`/`f`/`t`/`c`/`n`/`s`/`o`) **dans
+/// la même réponse** que le PNG : atomicité transport de la
+/// géométrie média (course rect/frame tuée par construction).
+#[tokio::test]
+async fn frame_serves_atomic_scroll_and_media_headers() {
+    let app = test_app();
+    let resp = app
+        .clone()
+        .oneshot(json_post("/api/tabs", "{}"))
+        .await
+        .unwrap();
+    let v: serde_json::Value =
+        serde_json::from_slice(&axum::body::to_bytes(resp.into_body(), 1024).await.unwrap())
+            .unwrap();
+    let id = v["id"].as_u64().unwrap();
+    // `/media` sert <video controls> + <audio> — une
+    // surface avec boîte peinte attendue.
+    let nav = app
+        .clone()
+        .oneshot(json_post(
+            &format!("/api/tabs/{id}/navigate"),
+            r#"{"url":"http://h.test/media"}"#,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(nav.status(), StatusCode::OK);
+
+    let frame = app
+        .oneshot(
+            HttpRequest::builder()
+                .uri(format!("/api/tabs/{id}/frame"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(frame.status(), StatusCode::OK);
+    // Scroll peint servi dans le même corps que le PNG.
+    let sy = frame
+        .headers()
+        .get("x-explorer-scroll-y")
+        .expect("header scroll peint")
+        .to_str()
+        .unwrap()
+        .parse::<f32>()
+        .unwrap();
+    assert_eq!(sy, 0.0, "page fraîche : scroll peint 0");
+    // Surfaces géométriques — tableau JSON compact.
+    let media_json = frame
+        .headers()
+        .get("x-explorer-media")
+        .expect("header media")
+        .to_str()
+        .unwrap();
+    let media: serde_json::Value = serde_json::from_str(media_json).unwrap();
+    let arr = media.as_array().expect("tableau de surfaces");
+    assert_eq!(arr.len(), 2, "video + audio scannées : {arr:?}");
+    let v0 = &arr[0];
+    assert_eq!(v0["i"], 1);
+    assert!(v0["r"]["w"].as_f64().unwrap() > 0.0, "rect doc : {v0}");
+    assert_eq!(v0["v"], v0["r"], "scroll 0 → view = rect");
+    assert_eq!(v0["f"], false);
+    assert_eq!(v0["t"], false);
+    assert_eq!(v0["s"], true);
+    assert_eq!(v0["o"], 0);
+    // L'audio sans controls est offert 0×0.
+    assert_eq!(arr[1]["r"]["w"], 0.0);
+}
+
 /// Étape 120 — `GET …/dom` et `GET …/layout` : dumps
 /// diagnostiques du document vivant (triage « clic ignoré »
 /// — consent google : hit-test `form` vs `<input>` peint).

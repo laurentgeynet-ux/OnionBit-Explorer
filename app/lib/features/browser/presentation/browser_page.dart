@@ -1441,20 +1441,93 @@ class _FrameViewState extends ConsumerState<_FrameView> {
   /// en px CSS × `zoom` px logiques (même facteur que
   /// l'entrée, fix étape 82). Audio 0×0 : joue sans overlay ;
   /// `<audio controls>` reçoit la barre hôte seule (183).
+  ///
+  /// Étape 185 : quand `paint` est présent (canal méta de
+  /// la frame — `x-explorer-media`/`explorer_frame_pull`),
+  /// la géométrie vient du **viewport peint** `v` (`fixed ?
+  /// r : r − scroll_peint` résolu moteur) auquel seul le
+  /// shift optimiste s'ajoute — l'overlay épouse la bitmap
+  /// même pendant la traduction. `s=false`/`t=true` →
+  /// masqué (clip invisible / transform non modélisé) ;
+  /// `c` → `ClipRect` sur l'intersection vue∩clip.
   List<Widget> _mediaOverlays(BrowserState st, String tabId, double zoom) {
-    final offers = st.media[tabId]?.values;
+    final offers = st.media[tabId]?.values.toList();
     if (offers == null || offers.isEmpty) return const [];
     final scrollY = st.scrollY[tabId] ?? 0;
+    final shift = widget.ctrl.frameShiftCss(tabId);
+    final painted = widget.ctrl.paintedScrollY(tabId) ?? scrollY;
+    // Ordre de peinture de la méta — les surfaces sans méta
+    // gardent l'ordre d'insertion (≈ document, même approx).
+    final sorted = [
+      for (var i = 0; i < offers.length; i++)
+        (offers[i].paint?.order ?? i, offers[i]),
+    ]..sort((a, b) => a.$1.compareTo(b.$1));
     return [
-      for (final m in offers)
-        if (m.hasOverlay || m.hasAudioBar)
-          Positioned(
-            left: m.rect.left * zoom,
-            top: (m.rect.top - scrollY) * zoom,
-            width: m.rect.width * zoom,
-            height: m.rect.height * zoom,
-            child: _mediaSurface(st, tabId, m, zoom, scrollY),
+      for (final (_, m) in sorted)
+        if (m.hasOverlay || m.hasAudioBar) ..._mediaPlaced(st, tabId, m, zoom, shift, painted, scrollY),
+    ];
+  }
+
+  /// Une surface positionnée — géométrie `paint` si
+  /// présente, `rect − painted` sinon (repli pré-185).
+  List<Widget> _mediaPlaced(
+    BrowserState st,
+    String tabId,
+    MediaOffer m,
+    double zoom,
+    double shift,
+    double painted,
+    double scrollY,
+  ) {
+    final p = m.paint;
+    if (p != null && (!p.visible || p.transformed)) return const [];
+    // `view` = espace de la frame peinte (viewport) ; la
+    // frame est translatée de `-shift` pendant le scroll
+    // optimiste → l'overlay suit la bitmap (`view − shift`,
+    // même pour `fixed` : l'élément ancré doit coller aux
+    // pixels en vol, pas à l'écran — le repaint livre un `v`
+    // frais et `shift` retombe à 0).
+    final view = p?.view ?? m.rect.translate(0, -painted);
+    final clip = p?.clip;
+    final vis = clip == null ? view : view.intersect(clip);
+    if (clip != null && (vis.width <= 0 || vis.height <= 0)) {
+      return const [];
+    }
+    final surface = _mediaSurface(st, tabId, m, zoom, scrollY);
+    if (clip == null) {
+      return [
+        Positioned(
+          left: view.left * zoom,
+          top: (view.top - shift) * zoom,
+          width: view.width * zoom,
+          height: view.height * zoom,
+          child: surface,
+        ),
+      ];
+    }
+    // Clip moteur (overflow/clip-path ancêtres — espace
+    // viewport peint, même −shift) : la surface entière est
+    // dessinée à `view` puis rognée au visible.
+    return [
+      Positioned(
+        left: vis.left * zoom,
+        top: (vis.top - shift) * zoom,
+        width: vis.width * zoom,
+        height: vis.height * zoom,
+        child: ClipRect(
+          child: Transform.translate(
+            offset: Offset(
+              (view.left - vis.left) * zoom,
+              (view.top - vis.top) * zoom,
+            ),
+            child: SizedBox(
+              width: view.width * zoom,
+              height: view.height * zoom,
+              child: surface,
+            ),
           ),
+        ),
+      ),
     ];
   }
 

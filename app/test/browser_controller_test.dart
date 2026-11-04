@@ -3,12 +3,14 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 import 'dart:async';
+import 'dart:ui' show Rect;
 
 import 'package:explorer_app/core/api/events_client.dart';
 import 'package:explorer_app/core/config/app_config.dart';
 import 'package:explorer_app/core/settings/app_settings.dart';
 import 'package:explorer_app/features/browser/domain/bookmark.dart';
 import 'package:explorer_app/features/browser/domain/browser_tab.dart';
+import 'package:explorer_app/features/browser/domain/media_offer.dart';
 import 'package:explorer_app/features/browser/domain/reload_result.dart';
 import 'package:explorer_app/features/browser/presentation/browser_controller.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -1110,6 +1112,116 @@ void main() {
     events.ctrl.add(ServerEvent('media_gone', {'tab': 1, 'media': 7}));
     await Future<void>.delayed(Duration.zero);
     expect(c.read(browserProvider).mediaAudio.containsKey('1'), isFalse);
+  });
+
+  /// Étape 185 — la méta du pull est autoritaire : `scroll_y`
+  /// **servi** (plus supposé depuis `state.scrollY`) et la
+  /// géométrie peinte jointe remplace le `rect` brut de
+  /// l'offre. Une liste `media` livrée est l'ensemble
+  /// complet : l'offre absente perd sa méta ; un transport
+  /// sans contrat (`media == null`) la préserve.
+  test('185 — pull méta : scroll peint servi, paint joint et autoritaire',
+      () async {
+    final repo = FakeRepo()
+      ..realPng = true
+      ..nextFrameScrollY = 42;
+    final events = FakeEvents();
+    FakePlayer.instances.clear();
+    final c = makeContainer(repo, events);
+    addTearDown(c.dispose);
+    await settle(c);
+    final ctrl = c.read(browserProvider.notifier);
+
+    // Le pull bootstrap sert déjà 42 — posé sans supposition.
+    await waitFor(() => ctrl.frameImage('1') != null);
+    expect(ctrl.paintedScrollY('1'), 42);
+
+    // Offre vidéo présente ; la méta jointe au prochain pull
+    // donne sa géométrie peinte (vue à 58 = doc 100 − scroll 42).
+    events.ctrl.add(
+      ServerEvent('media_offered', {
+        'tab': 1,
+        'media': 5,
+        'kind': 'video',
+        'rect': {'x': 0, 'y': 100, 'w': 320, 'h': 180},
+        'url': 'http://h/v.mp4',
+        'controls': true,
+      }),
+    );
+    for (var i = 0; i < 8; i++) {
+      await Future<void>.delayed(Duration.zero);
+    }
+    expect(c.read(browserProvider).media['1']![5]!.paint, isNull);
+
+    const meta = MediaPaintMeta(
+      id: 5,
+      doc: Rect.fromLTWH(0, 100, 320, 180),
+      view: Rect.fromLTWH(0, 58, 320, 180),
+      fixed: false,
+      transformed: false,
+      visible: true,
+      order: 3,
+    );
+    repo.nextFrameMedia = [meta];
+    final tick = c.read(browserProvider).frameTick;
+    events.ctrl.add(ServerEvent('frame_invalidated', {'tab': 1}));
+    await waitFor(() => c.read(browserProvider).frameTick > tick);
+
+    var paint = c.read(browserProvider).media['1']![5]!.paint;
+    expect(paint, isNotNull);
+    expect(paint!.view.top, 58);
+    expect(paint.order, 3);
+
+    // Liste livrée = ensemble autoritaire : la surface absente
+    // du payload perd sa méta (repli rect − scrollY).
+    repo.nextFrameMedia = [];
+    final tick2 = c.read(browserProvider).frameTick;
+    events.ctrl.add(ServerEvent('frame_invalidated', {'tab': 1}));
+    await waitFor(() => c.read(browserProvider).frameTick > tick2);
+    expect(c.read(browserProvider).media['1']![5]!.paint, isNull);
+
+    // Transport sans contrat (`media` absent) → méta préservée.
+    repo.nextFrameMedia = [meta];
+    final tick3 = c.read(browserProvider).frameTick;
+    events.ctrl.add(ServerEvent('frame_invalidated', {'tab': 1}));
+    await waitFor(() => c.read(browserProvider).frameTick > tick3);
+    repo.nextFrameMedia = null;
+    final tick4 = c.read(browserProvider).frameTick;
+    events.ctrl.add(ServerEvent('frame_invalidated', {'tab': 1}));
+    await waitFor(() => c.read(browserProvider).frameTick > tick4);
+    paint = c.read(browserProvider).media['1']![5]!.paint;
+    expect(paint, isNotNull);
+    expect(paint!.view.top, 58);
+  });
+
+  /// `MediaPaintMeta.fromJson` tolère l'absence de champs
+  /// (transport minimal) et lit le jeu complet étape 185.
+  test('185 — MediaPaintMeta.fromJson : champs optionnels et complets',
+      () {
+    final bare = MediaPaintMeta.fromJson({'i': 2});
+    expect(bare.id, 2);
+    expect(bare.doc, Rect.zero);
+    expect(bare.visible, isTrue);
+    expect(bare.clip, isNull);
+
+    final full = MediaPaintMeta.fromJson({
+      'i': 9,
+      'r': {'x': 1, 'y': 2, 'w': 3, 'h': 4},
+      'v': {'x': 1, 'y': 7, 'w': 3, 'h': 4},
+      'c': {'x': 0, 'y': 0, 'w': 8, 'h': 8},
+      'n': true,
+      'f': true,
+      't': true,
+      's': false,
+      'o': 5,
+    });
+    expect(full.view.top, 7);
+    expect(full.clip, const Rect.fromLTWH(0, 0, 8, 8));
+    expect(full.clipPath, isTrue);
+    expect(full.fixed, isTrue);
+    expect(full.transformed, isTrue);
+    expect(full.visible, isFalse);
+    expect(full.order, 5);
   });
 }
 

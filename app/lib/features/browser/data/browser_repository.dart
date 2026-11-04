@@ -2,6 +2,8 @@
 // Copyright (C) 2026 Laurent Geynet
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
+import 'dart:convert';
+import 'dart:io';
 import 'dart:typed_data';
 
 import '../../../core/api/api_client.dart';
@@ -11,6 +13,33 @@ import '../domain/find_result.dart';
 import '../domain/history_entry.dart';
 import '../domain/media_offer.dart';
 import '../domain/reload_result.dart';
+
+/// Pull de frame **atomique** (étape 185, M1) — le PNG et
+/// sa métadonnée proviennent de la même réponse :
+/// `paintedScrollY` = scroll réellement peint dans la frame
+/// (`null` sur daemon antérieur → repli `state.scrollY`),
+/// `media` = géométrie des surfaces à l'instant de la
+/// peinture (vide hors contrat 185).
+class FramePull {
+  const FramePull({
+    required this.bytes,
+    this.paintedScrollY,
+    this.media,
+  });
+
+  /// PNG de la frame.
+  final Uint8List bytes;
+
+  /// `x-explorer-scroll-y` — scroll peint, px CSS.
+  final double? paintedScrollY;
+
+  /// `x-explorer-media` — ensemble **autoritaire** des
+  /// surfaces de la frame : `null` = contrat absent
+  /// (daemon antérieur, header manquant — l'appelant ne
+  /// touche pas aux méta retenues), liste (vide possible) =
+  /// à appliquer telle quelle.
+  final List<MediaPaintMeta>? media;
+}
 
 /// Accès aux onglets via le contrat REST du daemon (ADR-0003) :
 /// `GET/POST /api/tabs`, `…/navigate`, `…/reload`, `…/back`,
@@ -94,11 +123,20 @@ class BrowserRepository {
   Future<void> closeTab(String tabId) => _api.deleteJson('/api/tabs/$tabId');
 
   /// Frame PNG courante de l'onglet (`GET …/frame`) — `null`
-  /// si l'onglet n'a jamais rendu (204).
-  Future<Uint8List?> fetchFrame(String tabId) async {
+  /// si l'onglet n'a jamais rendu (204). La réponse porte
+  /// depuis l'étape 185 `x-explorer-scroll-y` (scroll **peint**
+  /// dans ce PNG) et `x-explorer-media` (surfaces géométriques
+  /// de la même frame) — daemon antérieur → `null`/vide,
+  /// l'appelant retombe sur ses suppositions pré-185.
+  Future<FramePull?> fetchFrame(String tabId) async {
     try {
-      final bytes = await _api.getBytes('/api/tabs/$tabId/frame');
-      return bytes.isEmpty ? null : bytes;
+      final r = await _api.getBytesMeta('/api/tabs/$tabId/frame');
+      if (r.bytes.isEmpty) return null;
+      return FramePull(
+        bytes: r.bytes,
+        paintedScrollY: _scrollHeader(r.headers),
+        media: _mediaHeader(r.headers),
+      );
     } on ApiException {
       return null;
     }
@@ -109,8 +147,10 @@ class BrowserRepository {
   /// de `frame_invalidated`). `null` si région vide/hors
   /// frame (204) ou daemon antérieur sans la route (il sert
   /// alors la frame entière — l'appelant détecte à la taille
-  /// décodée et retombe en pull plein).
-  Future<Uint8List?> fetchFrameRegion(
+  /// décodée et retombe en pull plein). Les headers méta de
+  /// l'étape 185 accompagnent aussi les régions (même frame
+  /// stockée — le contrôleur les applique au compose).
+  Future<FramePull?> fetchFrameRegion(
     String tabId,
     int x,
     int y,
@@ -118,12 +158,43 @@ class BrowserRepository {
     int h,
   ) async {
     try {
-      final bytes = await _api.getBytes(
+      final r = await _api.getBytesMeta(
         '/api/tabs/$tabId/frame',
         query: {'x': '$x', 'y': '$y', 'w': '$w', 'h': '$h'},
       );
-      return bytes.isEmpty ? null : bytes;
+      if (r.bytes.isEmpty) return null;
+      return FramePull(
+        bytes: r.bytes,
+        paintedScrollY: _scrollHeader(r.headers),
+        media: _mediaHeader(r.headers),
+      );
     } on ApiException {
+      return null;
+    }
+  }
+
+  /// `x-explorer-scroll-y: <f32>` — scroll peint dans la
+  /// frame servie ; absent → `null` (repli `state.scrollY`).
+  static double? _scrollHeader(HttpHeaders h) {
+    final v = h.value('x-explorer-scroll-y');
+    return v == null ? null : double.tryParse(v);
+  }
+
+  /// `x-explorer-media: <json array>` — géométrie des
+  /// surfaces au moment de la peinture ; absent ou malformé
+  /// → `null` (contrat indisponible — ne pas effacer les
+  /// méta retenues ; jamais d'exception sur header fautif).
+  static List<MediaPaintMeta>? _mediaHeader(HttpHeaders h) {
+    final v = h.value('x-explorer-media');
+    if (v == null) return null;
+    try {
+      final j = jsonDecode(v);
+      return [
+        if (j is List)
+          for (final e in j)
+            if (e is Map) MediaPaintMeta.fromJson(Map<String, Object?>.from(e)),
+      ];
+    } on Object {
       return null;
     }
   }

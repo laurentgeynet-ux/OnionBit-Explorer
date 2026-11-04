@@ -87,6 +87,59 @@ pub(crate) struct MediaSurface {
     /// `timestampOffset` des `SourceBuffer` — même ordre
     /// que `mse_buffers` (P-54 `pts_offset_secs`).
     pub(crate) mse_offsets: Vec<f64>,
+    /// Métadonnées de peinture de la boîte (étape 185, M1) —
+    /// capturées sur le même arbre que la frame stockée :
+    /// `refresh_media` tourne après `put_paint` dans le même
+    /// appel `Session`, `meta` × `scroll_y` × `frame` sont
+    /// donc atomiques par construction (contrat `x-explorer-
+    /// media` — les drapeaux décrivent ce que le raster a
+    /// réellement fait de la boîte, rien de plus).
+    pub(crate) meta: MediaMeta,
+}
+
+/// Contexte de peinture d'une boîte média (étape 185) —
+/// l'accumulation imite `paint_box` : ce que le peintre
+/// applique réellement à la boîte ou à son sous-arbre.
+/// Les deux seaux de clip reflètent le `fixed_defer` du
+/// peintre : un `fixed` échappe aux clips d'ancêtres
+/// (drainé hors de tout `PushClip` en file racine) — les
+/// clips collectés avant la frontière `fixed` sont en px
+/// CSS **document**, ceux d'après en px CSS **viewport**.
+#[allow(clippy::struct_excessive_bools)] // drapeaux de peinture orthogonaux.
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct MediaMeta {
+    /// Boîte ancrée au viewport — `position:fixed` sur
+    /// l'élément ou un ancêtre : son rect stocké **est**
+    /// déjà la position viewport (pas de `− scroll_y`).
+    pub(crate) fixed: bool,
+    /// Transforme dépendante de la peinture sur la chaîne —
+    /// `transform ≠ none` ou `position:sticky` (décalage
+    /// sticky = `PushTransform` fonction du scroll). L'hôte
+    /// masque l'overlay : positionner un plan non transformé
+    /// sur du contenu transformé serait un mensonge.
+    pub(crate) transformed: bool,
+    /// Intersection des clips d'ancêtres **espace document**
+    /// (avant toute frontière `fixed`) — `overflow ≠
+    /// visible` → border box du porteur (le rect exact que
+    /// `paint_box` pousse en `PushClip`), `clip-path`/`clip`
+    /// → même approximation bornée.
+    pub(crate) clip_doc: Option<MediaRect>,
+    /// Intersection des clips **espace viewport** — les
+    /// ancêtres dans le sous-arbre `fixed` (incluse).
+    pub(crate) clip_fixed: Option<MediaRect>,
+    /// Un `clip-path`/`clip` géométrique est présent sur la
+    /// chaîne — modélisé à la border box de son porteur
+    /// (plus lâche que le clip réel de l'inset ; jamais de
+    /// clip plus serré que le raster n'en applique).
+    pub(crate) clip_path: bool,
+    /// Peinte dans la frame : `visibility` calculée ≠
+    /// `hidden|collapse` (réactivable par un descendant —
+    /// le style calculé porte déjà l'héritage, lecture
+    /// locale comme `paint_box`) **et** aucun `opacity ≤ 0`
+    /// sur la chaîne (verrou irréversible du peintre). Un
+    /// élément sans boîte (`display:none`) est `false` —
+    /// rien n'est peint, quoi que joue la source.
+    pub(crate) visible: bool,
 }
 
 /// Résultat d'un pull de segments MSE (§B-63) — `Pending`
@@ -148,6 +201,9 @@ struct ScannedMedia {
     looping: bool,
     /// Chemin `(tag, index)` de l'élément (71c — miroir JS).
     path: Vec<(String, u32)>,
+    /// Contexte peint de la boîte (étape 185) — voir
+    /// [`MediaMeta`]. Défaut pour un élément sans boîte.
+    meta: MediaMeta,
     /// `url` = object URL `MediaSource` enregistré côté
     /// moteur (MSE-2, ADR-0029) — remplie au refresh via
     /// `JsEngine::is_media_source`.
@@ -351,6 +407,115 @@ fn media_source(
     None
 }
 
+/// État hérité de la descente du boxtree (étape 185) —
+/// accumulateur de [`MediaMeta`], mêmes règles que
+/// `paint_box` dans `explorer-render` :
+/// `fixed`/`sticky`/`transform`/`opacity`/`overflow`/
+/// `clip-path` lus au style **calculé** de chaque boîte.
+#[allow(clippy::struct_excessive_bools)] // drapeaux de peinture orthogonaux.
+#[derive(Clone, Copy, Default)]
+struct MediaCtx {
+    /// Frontière `fixed` déjà croisée — les ancêtres d'un
+    /// `fixed` ne le clippent pas (`fixed_defer` drainé hors
+    /// clips en file racine) : les seaux basculent.
+    fixed: bool,
+    /// Transforme peinte sur la chaîne (latch).
+    transformed: bool,
+    /// Clips collectés avant la frontière `fixed` — espace
+    /// document (le peintre soustrait `scroll_y`).
+    clip_doc: Option<MediaRect>,
+    /// Clips collectés dans le sous-arbre `fixed` — espace
+    /// viewport (les rects stockés y vivent déjà).
+    clip_fixed: Option<MediaRect>,
+    /// `clip-path`/`clip` géométrique vu sur la chaîne.
+    clip_path: bool,
+    /// `opacity ≤ 0` rencontré — verrou irréversible du
+    /// peintre (0 ne se relève jamais, contrairement à
+    /// `visibility:hidden` qui se réactive).
+    opacity_dead: bool,
+}
+
+impl MediaCtx {
+    /// Applique les contributions propres de `bx` — dans le
+    /// même ordre que `paint_box` les émet : `fixed` d'abord
+    /// (le statut de la boîte décide le seau de ses propres
+    /// clips), puis transform, opacity, clips.
+    fn accumulate(&mut self, bx: &LayoutBox) {
+        if bx.position == explorer_layout::Position::Fixed {
+            self.fixed = true;
+        }
+        if bx.position == explorer_layout::Position::Sticky
+            || bx
+                .style
+                .get("transform")
+                .is_some_and(|v| v.trim() != "none")
+        {
+            self.transformed = true;
+        }
+        if bx
+            .style
+            .get("opacity")
+            .is_some_and(|v| v.trim().parse::<f32>().is_ok_and(|o| o <= 0.0))
+        {
+            self.opacity_dead = true;
+        }
+        // `overflow` ≠ visible → `PushClip(border box)` en
+        // peinture (même rect, documenté R-55/R-120).
+        if bx.overflow != explorer_layout::Overflow::Visible
+            || bx.overflow_x != explorer_layout::Overflow::Visible
+        {
+            self.push_clip(MediaRect {
+                x: bx.rect.x,
+                y: bx.rect.y,
+                w: bx.rect.width,
+                h: bx.rect.height,
+            });
+        }
+        // `clip-path`/`clip` : le moteur n'émet que les
+        // formes rectangulaires (`inset()`, `clip:rect()`) —
+        // la border box du porteur est la borne honnête
+        // (jamais plus serrée que son clip réel), le reste
+        // n'est pas émis du tout → flag, pas de clip.
+        if bx
+            .style
+            .get("clip-path")
+            .is_some_and(|v| v.trim() != "none")
+            || bx.style.get("clip").is_some_and(|v| v.trim() != "auto")
+        {
+            self.clip_path = true;
+            self.push_clip(MediaRect {
+                x: bx.rect.x,
+                y: bx.rect.y,
+                w: bx.rect.width,
+                h: bx.rect.height,
+            });
+        }
+    }
+
+    /// Intersecte `r` dans le seau courant — `fixed` pose la
+    /// frontière : avant → espace document, après → espace
+    /// viewport (les deux sont convertis à la lecture).
+    fn push_clip(&mut self, r: MediaRect) {
+        let slot = if self.fixed {
+            &mut self.clip_fixed
+        } else {
+            &mut self.clip_doc
+        };
+        *slot = Some(match *slot {
+            None => r,
+            Some(c) => {
+                let (x, y) = (c.x.max(r.x), c.y.max(r.y));
+                MediaRect {
+                    x,
+                    y,
+                    w: ((c.x + c.w).min(r.x + r.w) - x).max(0.0),
+                    h: ((c.y + c.h).min(r.y + r.h) - y).max(0.0),
+                }
+            }
+        });
+    }
+}
+
 /// Éléments média **lisibles** du document posé — parcours
 /// du **DOM** (ordre du document ; un `audio` sans
 /// `controls` est `display:none` au style UA et n'a pas de
@@ -365,20 +530,37 @@ fn scan_media(
     base: &Url,
     declared: &std::collections::HashSet<String>,
 ) -> Vec<ScannedMedia> {
-    // Rects par nœud source — une passe itérative sur
-    // l'arbre posé (un élément = au plus une boîte ici).
-    let mut rects: HashMap<NodeId, MediaRect> = HashMap::new();
-    let mut stack = vec![tree];
-    while let Some(bx) = stack.pop() {
+    // Rects + contexte peint par nœud source — une passe
+    // itérative sur l'arbre posé (un élément = au plus une
+    // boîte ici). `MediaCtx` descend avec la récursion :
+    // chaque boîte applique SES contributions (position,
+    // transform, opacity, clips) avant d'être enregistrée —
+    // mêmes règles que `paint_box`, même ordre de lecture.
+    let mut rects: HashMap<NodeId, (MediaRect, MediaMeta)> = HashMap::new();
+    let mut stack = vec![(tree, MediaCtx::default())];
+    while let Some((bx, mut ctx)) = stack.pop() {
+        ctx.accumulate(bx);
         if let Some(n) = bx.node {
-            rects.entry(n).or_insert(MediaRect {
-                x: bx.rect.x,
-                y: bx.rect.y,
-                w: bx.rect.width,
-                h: bx.rect.height,
-            });
+            let meta = MediaMeta {
+                fixed: ctx.fixed,
+                transformed: ctx.transformed,
+                clip_doc: ctx.clip_doc,
+                clip_fixed: ctx.clip_fixed,
+                clip_path: ctx.clip_path,
+                visible: !matches!(bx.style.get("visibility"), Some("hidden" | "collapse"))
+                    && !ctx.opacity_dead,
+            };
+            rects.entry(n).or_insert((
+                MediaRect {
+                    x: bx.rect.x,
+                    y: bx.rect.y,
+                    w: bx.rect.width,
+                    h: bx.rect.height,
+                },
+                meta,
+            ));
         }
-        stack.extend(bx.children.iter().rev());
+        stack.extend(bx.children.iter().rev().map(|c| (c, ctx)));
     }
     let zero = MediaRect {
         x: 0.0,
@@ -408,14 +590,18 @@ fn scan_media(
                     let controls = has_bool_attr(dom, n, "controls");
                     // `audio` sans UI : offre 0×0 quelle que
                     // soit la boîte — rien à positionner.
-                    let rect = if kind == MediaKind::Audio && !controls {
-                        zero
+                    let (rect, meta) = if kind == MediaKind::Audio && !controls {
+                        (zero, MediaMeta::default())
                     } else {
-                        rects.get(&n).copied().unwrap_or(zero)
+                        rects
+                            .get(&n)
+                            .copied()
+                            .unwrap_or((zero, MediaMeta::default()))
                     };
                     out.push(ScannedMedia {
                         kind,
                         rect,
+                        meta,
                         mime: ty.or_else(|| parsed.as_ref().and_then(media_mime_from_url)),
                         url: url_s,
                         controls,
@@ -586,6 +772,13 @@ impl Session {
                         o.rect = s.rect;
                         moved.push((o.id, s.rect));
                     }
+                    // Métadonnées peintes (étape 185) —
+                    // rafraîchies silencieusement : un flag
+                    // peut changer à rect identique (un
+                    // ancêtre gagne `overflow:hidden`) ; le
+                    // canal géométrie est la réponse `/frame`,
+                    // jamais un event à part.
+                    o.meta = s.meta;
                     o.mime.clone_from(&s.mime);
                     o.controls = s.controls;
                     o.autoplay = s.autoplay;
@@ -636,6 +829,7 @@ impl Session {
                         mse: s.mse,
                         mse_buffers: s.mse_buffers,
                         mse_offsets: s.mse_offsets,
+                        meta: s.meta,
                     };
                     offered.push(MediaSurface {
                         id,
@@ -654,6 +848,7 @@ impl Session {
                         path: surf.path.clone(),
                         mse: surf.mse,
                         mse_offsets: surf.mse_offsets.clone(),
+                        meta: surf.meta,
                     });
                     media.push(surf);
                 }

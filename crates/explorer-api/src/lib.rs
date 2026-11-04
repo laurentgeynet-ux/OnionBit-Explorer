@@ -30,7 +30,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use axum::extract::{Path, Query, State};
-use axum::http::{header, HeaderValue, StatusCode};
+use axum::http::{header, HeaderMap, HeaderName, HeaderValue, StatusCode};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, post};
@@ -485,11 +485,29 @@ async fn frame(
         // (vol : `/frame` 200 à 0 octet en transitoire de
         // rasterisation). `Retry-After` signale aux clients
         // que la frame arrive — retenter, pas abandonner.
-        Some(bytes) if !bytes.is_empty() => (
-            [(header::CONTENT_TYPE, HeaderValue::from_static("image/png"))],
-            bytes,
-        )
-            .into_response(),
+        Some(bytes) if !bytes.is_empty() => {
+            // Étape 185 (M1) — métadonnées **atomiques** avec
+            // le corps : `x-explorer-scroll-y` = scroll peint
+            // dans CE PNG (l'hôte ne devine plus son
+            // `paintedScrollY`), `x-explorer-media` = surfaces
+            // géométriques de la même frame (rect document +
+            // viewport, fixed/transformed/clip/visible,
+            // ordre). Lu sous le même verrou `Session` que le
+            // PNG — jamais désynchronisé de lui.
+            let mut headers = HeaderMap::new();
+            headers.insert(header::CONTENT_TYPE, HeaderValue::from_static("image/png"));
+            if let Some(meta) = session.frame_meta(id) {
+                if let Ok(v) = HeaderValue::from_str(&format!("{:.3}", meta.scroll_y)) {
+                    headers.insert(HeaderName::from_static("x-explorer-scroll-y"), v);
+                }
+                if let Ok(json) = serde_json::to_string(&meta.media) {
+                    if let Ok(v) = HeaderValue::from_str(&json) {
+                        headers.insert(HeaderName::from_static("x-explorer-media"), v);
+                    }
+                }
+            }
+            (headers, bytes).into_response()
+        }
         _ => (
             StatusCode::NO_CONTENT,
             [(header::RETRY_AFTER, HeaderValue::from_static("1"))],

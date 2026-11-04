@@ -6,7 +6,6 @@ import 'dart:async';
 import 'dart:ffi' as ffi;
 import 'dart:io';
 import 'dart:isolate';
-import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import '../../features/browser/data/browser_repository.dart';
@@ -50,6 +49,30 @@ class FfiInvalidation {
   /// 71e) — `{'event': <nom_sse>, 'data': <charge>}` ;
   /// le dispatch UI est identique au SSE.
   final List<Map<String, Object?>> mediaEvents;
+}
+
+/// Pull de frame FFI **atomique** (étape 185, M1) — même
+/// sémantique que `FramePull` REST, la charge étant une
+/// `ui.Image` au lieu d'octets PNG (aucun codec sur le
+/// chemin). `paintedScrollY`/`media` viennent du JSON
+/// `explorer_frame_pull` — `null`/vide sur dll antérieure.
+class FfiFramePull {
+  const FfiFramePull({
+    required this.image,
+    this.paintedScrollY,
+    this.media,
+  });
+
+  /// Frame RGBA décodée.
+  final ui.Image image;
+
+  /// Scroll réellement peint dans la frame (px CSS).
+  final double? paintedScrollY;
+
+  /// Surfaces géométriques à l'instant de la peinture —
+  /// `null` hors contrat 185 (même sémantique que
+  /// `FramePull.media` : ensemble autoritaire quand présent).
+  final List<MediaPaintMeta>? media;
 }
 
 /// Backend moteur **in-process** : charge `explorer_ffi.dll`
@@ -260,22 +283,31 @@ class FfiEngine implements BrowserRepository {
   }
 
   @override
-  Future<Uint8List?> fetchFrame(String tabId) async {
-    final img = await fetchFrameImage(tabId);
-    if (img == null) return null;
+  Future<FramePull?> fetchFrame(String tabId) async {
+    final pull = await fetchFramePull(tabId);
+    if (pull == null) return null;
     try {
-      final data = await img.toByteData(format: ui.ImageByteFormat.png);
-      return data?.buffer.asUint8List();
+      final data = await pull.image.toByteData(format: ui.ImageByteFormat.png);
+      final bytes = data?.buffer.asUint8List();
+      if (bytes == null) return null;
+      return FramePull(
+        bytes: bytes,
+        paintedScrollY: pull.paintedScrollY,
+        media: pull.media,
+      );
     } finally {
-      img.dispose();
+      pull.image.dispose();
     }
   }
 
   /// Forme PNG du pull partiel (compat interface REST —
   /// ré-encode l'`ui.Image` de région). Le chemin rapide est
   /// [fetchFrameRegionImage], utilisé par le contrôleur.
+  /// La méta de l'étape 185 ne voyage pas par les régions
+  /// FFI (export dédié absent — l'app la tire des pulls
+  /// pleins ; comportement documenté contrat).
   @override
-  Future<Uint8List?> fetchFrameRegion(
+  Future<FramePull?> fetchFrameRegion(
     String tabId,
     int x,
     int y,
@@ -286,7 +318,8 @@ class FfiEngine implements BrowserRepository {
     if (img == null) return null;
     try {
       final data = await img.toByteData(format: ui.ImageByteFormat.png);
-      return data?.buffer.asUint8List();
+      final bytes = data?.buffer.asUint8List();
+      return bytes == null ? null : FramePull(bytes: bytes);
     } finally {
       img.dispose();
     }
@@ -298,7 +331,17 @@ class FfiEngine implements BrowserRepository {
   /// copie de port) ; `decodeImageFromPixels` reste sur
   /// l'isolate UI (seul endroit où `ui.*` vit).
   /// `null` si l'onglet n'a jamais rendu.
-  Future<ui.Image?> fetchFrameImage(String tabId) async {
+  Future<ui.Image?> fetchFrameImage(String tabId) async =>
+      (await fetchFramePull(tabId))?.image;
+
+  /// Pull atomique `explorer_frame_pull` (étape 185, M1) —
+  /// pixels RGBA + `{scroll_y, media}` **de la même frame**
+  /// (même contrat que `x-explorer-scroll-y`/`x-explorer-
+  /// media` REST) : `paintedScrollY` remplace le `scroll_y`
+  /// supposé du tick, `media` porte rect viewport/fixed/
+  /// clip/visible/order. Dll antérieure → champs `null`/
+  /// vide → repli pré-185.
+  Future<FfiFramePull?> fetchFramePull(String tabId) async {
     final r = await _worker.call(opFrame, {'tab': _idOf(tabId)});
     if (r == null || r['none'] == true) return null;
     final w = (r['w'] as num).toInt();
@@ -306,7 +349,19 @@ class FfiEngine implements BrowserRepository {
     final px = (r['px']! as TransferableTypedData).materialize().asUint8List();
     final done = Completer<ui.Image>();
     ui.decodeImageFromPixels(px, w, h, ui.PixelFormat.rgba8888, done.complete);
-    return done.future;
+    final img = await done.future;
+    final rawMedia = r['media'] as List?;
+    return FfiFramePull(
+      image: img,
+      paintedScrollY: (r['scroll_y'] as num?)?.toDouble(),
+      media: rawMedia == null
+          ? null
+          : [
+              for (final e in rawMedia)
+                if (e is Map)
+                  MediaPaintMeta.fromJson(Map<String, Object?>.from(e)),
+            ],
+    );
   }
 
   /// Région de frame `(x,y,w,h)` en px physiques → `ui.Image`

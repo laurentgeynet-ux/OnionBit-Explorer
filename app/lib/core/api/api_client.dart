@@ -71,6 +71,16 @@ class ApiClient {
   Future<Uint8List> getBytes(
     String path, {
     Map<String, String>? query,
+  }) async => (await getBytesMeta(path, query: query)).bytes;
+
+  /// `GET` → octets bruts **+ headers de réponse** (étape
+  /// 185 : `/frame` porte `x-explorer-scroll-y` +
+  /// `x-explorer-media` — le corps binaire et sa
+  /// métadonnée arrivent de la même réponse, jamais
+  /// désynchronisés).
+  Future<({Uint8List bytes, HttpHeaders headers})> getBytesMeta(
+    String path, {
+    Map<String, String>? query,
   }) async {
     try {
       final req = await _http
@@ -84,7 +94,7 @@ class ApiClient {
       if (res.statusCode >= 400) {
         throw ApiException(_extractError(bytes), statusCode: res.statusCode);
       }
-      return bytes;
+      return (bytes: bytes, headers: res.headers);
     } on ApiException {
       rethrow;
     } on Object catch (e) {

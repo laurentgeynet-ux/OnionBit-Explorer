@@ -122,6 +122,27 @@ typedef _FrameCopyD = int Function(
   ffi.Pointer<ffi.Uint8>,
   int,
 );
+// Pull atomique frame+méta (étape 185, M1) — export
+// additif : dll antérieure → `null` → `frame_size` +
+// `frame_copy` en repli (comportement pré-185).
+typedef _FramePullN = ffi.IntPtr Function(
+  _NativeHandle,
+  ffi.Uint64,
+  ffi.Pointer<ffi.Uint8>,
+  ffi.UintPtr,
+  ffi.Pointer<ffi.Uint8>,
+  ffi.UintPtr,
+  ffi.Pointer<ffi.Uint32>,
+);
+typedef _FramePullD = int Function(
+  _NativeHandle,
+  int,
+  ffi.Pointer<ffi.Uint8>,
+  int,
+  ffi.Pointer<ffi.Uint8>,
+  int,
+  ffi.Pointer<ffi.Uint32>,
+);
 typedef _BufReadN = ffi.IntPtr Function(ffi.Pointer<ffi.Uint8>, ffi.UintPtr);
 typedef _BufReadD = int Function(ffi.Pointer<ffi.Uint8>, int);
 typedef _TabUrlN = ffi.IntPtr Function(
@@ -339,6 +360,7 @@ class _WorkerImpl {
     this._tick,
     this._frameSize,
     this._frameCopy,
+    this._framePull,
     this._frameCopyRegion,
     this._dirtyRects,
     this._tabUrl,
@@ -368,6 +390,7 @@ class _WorkerImpl {
   final _TabCodeD _tick;
   final _FrameSizeD _frameSize;
   final _FrameCopyD _frameCopy;
+  final _FramePullD? _framePull;
   final _FrameCopyRegionD? _frameCopyRegion;
   final _DirtyRectsD? _dirtyRects;
   final _TabUrlD _tabUrl;
@@ -442,6 +465,16 @@ class _WorkerImpl {
       try {
         dirtyRects = lib.lookupFunction<_DirtyRectsN, _DirtyRectsD>(
           'explorer_dirty_rects',
+        );
+      } on Object {
+        /* export absent */
+      }
+      // Pull atomique frame+méta (étape 185) — dll
+      // antérieure → `null` → `frame_size`+`frame_copy`.
+      _FramePullD? framePull;
+      try {
+        framePull = lib.lookupFunction<_FramePullN, _FramePullD>(
+          'explorer_frame_pull',
         );
       } on Object {
         /* export absent */
@@ -607,6 +640,7 @@ class _WorkerImpl {
         lib.lookupFunction<_TabCodeN, _TabCodeD>('explorer_tick'),
         lib.lookupFunction<_FrameSizeN, _FrameSizeD>('explorer_frame_size'),
         lib.lookupFunction<_FrameCopyN, _FrameCopyD>('explorer_frame_copy'),
+        framePull,
         frameCopyRegion,
         dirtyRects,
         lib.lookupFunction<_TabUrlN, _TabUrlD>('explorer_tab_url'),
@@ -967,11 +1001,17 @@ class _WorkerImpl {
     }
   }
 
-  /// `frame_size` + `frame_copy` → RGBA brut transférable
-  /// (zéro-copie de port — `decodeImageFromPixels` reste
-  /// côté UI, seul le transport déménage).
+  /// `frame_pull` (étape 185 : pixels + `{scroll_y, media}`
+  /// en **un** appel natif — atomiques par construction) ou
+  /// `frame_size` + `frame_copy` en repli dll antérieure →
+  /// RGBA brut transférable (zéro-copie de port —
+  /// `decodeImageFromPixels` reste côté UI).
   Map<String, Object?> _frameOp(Map m) {
     final tab = _tab(m);
+    final pull = _framePull;
+    if (pull != null) {
+      return _framePullOp(tab, pull);
+    }
     final w = calloc<ffi.Uint32>(1);
     final h = calloc<ffi.Uint32>(1);
     try {
@@ -997,6 +1037,73 @@ class _WorkerImpl {
       calloc
         ..free(w)
         ..free(h);
+    }
+  }
+
+  /// Tampon méta du pull atomique — 64 Kio couvre ~300
+  /// surfaces (`~200 o` JSON chacune) ; au-delà `meta_len`
+  /// reste 0 → repli pré-185 honnête (scroll supposé).
+  static const _metaCap = 64 * 1024;
+
+  /// `explorer_frame_pull` — la taille de frame est
+  /// d'abord lue (`frame_size` dimensionne `px`), puis
+  /// pixels + JSON méta arrivent du même appel : `meta` =
+  /// `{"scroll_y":…,"media":[…]}` de la **même** frame.
+  Map<String, Object?> _framePullOp(int tab, _FramePullD pull) {
+    final w = calloc<ffi.Uint32>(1);
+    final h = calloc<ffi.Uint32>(1);
+    final metaLen = calloc<ffi.Uint32>(1);
+    try {
+      if (_frameSize(_handle, tab, w, h) != 0) {
+        return const {'none': true};
+      }
+      final len = w.value * h.value * 4;
+      if (len <= 0) return const {'none': true};
+      final px = calloc<ffi.Uint8>(len);
+      final meta = calloc<ffi.Uint8>(_metaCap);
+      try {
+        final n = pull(_handle, tab, px, len, meta, _metaCap, metaLen);
+        // `n != len` → la frame a re-peint entre `frame_size`
+        // et le pull (fenêtre inter-appels) — pixels+méta sont
+        // de la **même** frame mais pas celle dimensionnée :
+        // `none` → le tick suivant retente (auto-correctif).
+        if (n != len) return const {'none': true};
+        final list = Uint8List(n)..setAll(0, px.asTypedList(n));
+        // Le JSON est décodé ICI (isolate worker) — le port
+        // ne transporte que des structures nues.
+        Object? metaObj;
+        final ml = metaLen.value;
+        if (ml > 0 && ml <= _metaCap) {
+          try {
+            metaObj = jsonDecode(utf8.decode(meta.asTypedList(ml)));
+          } on Object {
+            metaObj = null;
+          }
+        }
+        final metaMap = metaObj is Map ? metaObj : const {};
+        // Méta incohérente avec la taille lue → les deux
+        // lectures n'ont pas vu la même frame : méta
+        // ignorée (pixels valides servis quand même).
+        final metaOk =
+            (metaMap['w'] as num?)?.toInt() == w.value &&
+            (metaMap['h'] as num?)?.toInt() == h.value;
+        return {
+          'w': w.value,
+          'h': h.value,
+          'px': TransferableTypedData.fromList([list]),
+          if (metaOk) 'scroll_y': (metaMap['scroll_y'] as num?)?.toDouble(),
+          if (metaOk) 'media': metaMap['media'],
+        };
+      } finally {
+        calloc
+          ..free(px)
+          ..free(meta);
+      }
+    } finally {
+      calloc
+        ..free(w)
+        ..free(h)
+        ..free(metaLen);
     }
   }
 

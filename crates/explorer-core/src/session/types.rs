@@ -253,7 +253,9 @@ pub enum MediaKind {
 /// Rectangle d'une offre média — **px CSS de document**
 /// (l'hôte soustrait `scroll_y` pour son overlay ; contrat
 /// `docs/interface-equipes.md` § `MediaSurface`).
-#[derive(Debug, Clone, Copy, PartialEq)]
+/// `Serialize` : la même forme sert dans `x-explorer-media`
+/// (étape 185 — `r` document, `v`/`c` viewport).
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize)]
 pub struct MediaRect {
     /// Abscisse (px).
     pub x: f32,

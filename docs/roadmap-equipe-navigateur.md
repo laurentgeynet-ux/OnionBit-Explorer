@@ -6550,6 +6550,64 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   indicateur retiré) — 63/63
   verts.
 
+- [x] **Étape 185. Métadonnées
+  média atomiques avec la frame
+  (M1 UX-vidéo)** (`explorer-core`,
+  `explorer-api`, `explorer-ffi`,
+  `app/` — contrat journalisé
+  `interface-equipes.md`) : la
+  réponse frame porte désormais
+  **avec** les pixels le
+  `scroll_y` **peint** et la
+  géométrie des surfaces média —
+  fin des deux races transport
+  (rect/frame SSE et
+  `paintedScrollY` supposé).
+  *Core* : `scan_media` marche le
+  contexte ancêtre — deux seaux de
+  clip (`clip_doc` avant la
+  frontière `fixed`, `clip_fixed`
+  après — le moteur échappe les
+  clips d'ancêtres des `fixed`),
+  `transform`/`sticky` chaîne,
+  `visibility`/`opacity ≤ 0`,
+  ordre document — `MediaMeta`
+  retenu sur `MediaSurface` à
+  chaque `refresh_media` (cohérent
+  `put_paint` → `refresh` même
+  appel). `FrameMeta`/`FrameMedia`
+  (`scroll_y`, `w`, `h`,
+  `media[]` : `i/r/v/f/t/c/n/s/o`)
+  + `frame_meta`/`frame_pull`.
+  *REST* : `GET /frame` ajoute
+  `x-explorer-scroll-y` +
+  `x-explorer-media` (JSON
+  compact) — corps PNG inchangé,
+  additif pur. *FFI* :
+  `explorer_frame_pull` (pixels +
+  JSON méta en un appel) avec
+  repli gracieux `size`+`copy`
+  sur dll antérieure. *App* :
+  `FramePull`/`MediaPaintMeta`
+  (`i/r/v/f/t/c/n/s/o` tolérant),
+  `paintedScrollY` = valeur servie
+  (repli supposition sur transport
+  ancien), `media[]` autoritaire
+  (absent → méta effacée, `null`
+  transport → préservée) ;
+  overlays positionnés en espace
+  **viewport** (`v`), triés par
+  `o`, masqués si `!visible`/
+  `transformed`, clippés `ClipRect`
+  sur `v ∩ c`. Verrou : 2 tests
+  core (méta avant/avec peinture,
+  clip two-seau fixed) + 1 API
+  (headers joints au PNG) + 1 FFI
+  (`frame_pull` pixels+méta,
+  dégradé buffer) + 2 app (méta
+  appliquée/autoritaire, fromJson
+  tolérant) — 65/65 verts.
+
 - [ ] **Écarts terrain — vol humain
   22/10 (release `39ab821`, FFI)** :
   second run humain — trois constats

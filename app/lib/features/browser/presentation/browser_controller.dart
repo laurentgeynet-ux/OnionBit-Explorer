@@ -5,6 +5,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flutter/widgets.dart';
@@ -1739,30 +1740,38 @@ class BrowserController extends Notifier<BrowserState> {
   /// REST/FFI (FFI livre les pixels bruts, ADR-0018). L'image
   /// vit hors `BrowserState` : les états obsolètes épinglés
   /// par l'arbre de widgets ne retiennent plus de raster
-  /// (fuite ~300 Mo/frame mesurée 22/10).
+  /// (fuite ~300 Mo/frame mesurée 22/10). La méta de l'étape
+  /// 185 (scroll peint + géométrie média) voyage **avec** le
+  /// corps — les deux transports l'appliquent ici.
   Future<void> _pullFullFrame(String tabId) async {
     try {
       final ui.Image img;
+      double? paintedScrollY;
+      List<MediaPaintMeta>? mediaMeta;
       final engine = _repo;
       if (engine is FfiEngine) {
-        final i = await engine.fetchFrameImage(tabId);
-        if (i == null) return;
-        img = i;
+        final pull = await engine.fetchFramePull(tabId);
+        if (pull == null) return;
+        img = pull.image;
+        paintedScrollY = pull.paintedScrollY;
+        mediaMeta = pull.media;
       } else {
-        final bytes = await _repo.fetchFrame(tabId);
-        if (bytes == null || bytes.isEmpty) return;
-        final codec = await ui.instantiateImageCodec(bytes);
-        try {
-          img = (await codec.getNextFrame()).image;
-        } finally {
-          codec.dispose();
-        }
+        final pull = await _repo.fetchFrame(tabId);
+        if (pull == null || pull.bytes.isEmpty) return;
+        img = await _decodePng(pull.bytes);
+        paintedScrollY = pull.paintedScrollY;
+        mediaMeta = pull.media;
       }
       if (!ref.mounted) {
         img.dispose();
         return;
       }
-      _installFrame(tabId, img);
+      _installFrame(
+        tabId,
+        img,
+        paintedScrollY: paintedScrollY,
+        mediaMeta: mediaMeta,
+      );
     } on Object {
       // Moteur/daemon indisponible ou PNG indécodable → le
       // prochain tick retentera.
@@ -1781,6 +1790,8 @@ class BrowserController extends Notifier<BrowserState> {
     if (base == null) return false;
     final engine = _repo;
     final patches = <(ui.Rect, ui.Image)>[];
+    double? paintedScrollY;
+    List<MediaPaintMeta>? mediaMeta;
     try {
       for (final r in rects) {
         final x = r.left.round();
@@ -1788,9 +1799,18 @@ class BrowserController extends Notifier<BrowserState> {
         final w = r.width.round();
         final h = r.height.round();
         if (w <= 0 || h <= 0) continue;
-        final ui.Image? patch = engine is FfiEngine
-            ? await engine.fetchFrameRegionImage(tabId, x, y, w, h)
-            : await _pullRegionPng(tabId, x, y, w, h);
+        final ui.Image? patch;
+        if (engine is FfiEngine) {
+          patch = await engine.fetchFrameRegionImage(tabId, x, y, w, h);
+        } else {
+          final pull = await _repo.fetchFrameRegion(tabId, x, y, w, h);
+          if (pull == null || pull.bytes.isEmpty) return false;
+          // Le header méta accompagne aussi les régions
+          // (même frame stockée) — la dernière vue gagne.
+          paintedScrollY = pull.paintedScrollY ?? paintedScrollY;
+          mediaMeta = pull.media ?? mediaMeta;
+          patch = await _decodePng(pull.bytes);
+        }
         if (patch == null) return false;
         // Daemon sans la route région (pré-étape 55) : il
         // répond la frame entière — la taille décodée déborde
@@ -1816,7 +1836,12 @@ class BrowserController extends Notifier<BrowserState> {
         img.dispose();
         return false;
       }
-      _installFrame(tabId, img);
+      _installFrame(
+        tabId,
+        img,
+        paintedScrollY: paintedScrollY,
+        mediaMeta: mediaMeta,
+      );
       return true;
     } on Object {
       return false;
@@ -1827,16 +1852,8 @@ class BrowserController extends Notifier<BrowserState> {
     }
   }
 
-  /// PNG d'une région → `ui.Image` décodée (REST étape 55).
-  Future<ui.Image?> _pullRegionPng(
-    String tabId,
-    int x,
-    int y,
-    int w,
-    int h,
-  ) async {
-    final bytes = await _repo.fetchFrameRegion(tabId, x, y, w, h);
-    if (bytes == null || bytes.isEmpty) return null;
+  /// PNG → `ui.Image` décodée (codec disposé au retour).
+  Future<ui.Image> _decodePng(Uint8List bytes) async {
     final codec = await ui.instantiateImageCodec(bytes);
     try {
       return (await codec.getNextFrame()).image;
@@ -1849,12 +1866,51 @@ class BrowserController extends Notifier<BrowserState> {
   /// (dispose), mémorise son `scroll_y` de peinture — la
   /// traduction locale retombe à zéro jusqu'au prochain
   /// scroll (étape 109) — et réveille l'affichage.
-  void _installFrame(String tabId, ui.Image img) {
+  ///
+  /// Étape 185 : `paintedScrollY` est désormais le scroll
+  /// **servi par le pull** (`x-explorer-scroll-y` /
+  /// `explorer_frame_pull`) — plus supposé depuis
+  /// `state.scrollY` (la supposition perdait sous scroll
+  /// rapide : frame peinte à S étiquetée au demandé R).
+  /// `mediaMeta` `null` = transport sans contrat → les
+  /// méta retenues sont préservées ; une liste (même vide)
+  /// est **autoritaire** : les offres sans entrée dans le
+  /// payload perdent leur méta (repli `rect − scrollY`).
+  void _installFrame(
+    String tabId,
+    ui.Image img, {
+    double? paintedScrollY,
+    List<MediaPaintMeta>? mediaMeta,
+  }) {
     _frameImages[tabId]?.dispose();
     _frameImages[tabId] = img;
-    _paintedScrollY[tabId] = state.scrollY[tabId] ?? 0.0;
+    _paintedScrollY[tabId] =
+        paintedScrollY ?? state.scrollY[tabId] ?? 0.0;
+    if (mediaMeta != null) {
+      final byId = {for (final m in mediaMeta) m.id: m};
+      final perTab = state.media[tabId];
+      if (perTab != null) {
+        state = state.copyWith(
+          media: {
+            ...state.media,
+            tabId: {
+              for (final e in perTab.entries)
+                e.key: e.value.copyWith(
+                  paint: byId[e.key],
+                  clearPaint: !byId.containsKey(e.key),
+                ),
+            },
+          },
+        );
+      }
+    }
     state = state.copyWith(frameTick: state.frameTick + 1);
   }
+
+  /// `scroll_y` **peint** dans la frame installée (étape
+  /// 185 — réel depuis le pull, supposé seulement sur
+  /// transport antérieur). `null` = jamais peint.
+  double? paintedScrollY(String tabId) => _paintedScrollY[tabId];
 
   /// Scroll molette → `POST …/input {scroll,dy}` — le moteur
   /// borne et repeint, `frame_invalidated` suit. La réponse

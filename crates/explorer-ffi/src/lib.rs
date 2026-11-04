@@ -887,6 +887,67 @@ pub unsafe extern "C" fn explorer_frame_copy(
     }
 }
 
+/// Pull **atomique** de la frame (étape 185, M1) : pixels
+/// RGBA dans `out` + métadonnées JSON dans `meta` — un seul
+/// verrou `Session` : `frame_size`/`frame_copy` puis une
+/// lecture de méta laisseraient deux fenêtres de course.
+/// Le JSON est `{"scroll_y":…,"media":[{i,r,v,f,t,c,n,s,o}]}`
+/// (contrat `x-explorer-media` REST — `r` document, `v`/`c`
+/// viewport). Retourne les octets pixels écrits
+/// (`w*h*4`), `0` si pas de frame, `-1` erreur.
+/// `*meta_len` reçoit les octets JSON écrits — `0` si
+/// `meta` nul, `meta_cap` insuffisante ou `meta_len` nul
+/// (les pixels restent servis ; l'hôte retombe alors sur
+/// son comportement pré-185).
+///
+/// # Safety
+///
+/// `h` issu de [`explorer_create`] ; `out..out+cap` et
+/// `meta..meta+meta_cap` inscriptibles ; `meta_len`
+/// inscriptible si non nul.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn explorer_frame_pull(
+    h: *mut ExplorerHandle,
+    tab: u64,
+    out: *mut u8,
+    cap: usize,
+    meta: *mut u8,
+    meta_cap: usize,
+    meta_len: *mut u32,
+) -> isize {
+    let Some(h) = (unsafe { handle(h) }) else {
+        return -1;
+    };
+    match sess(h).frame_pull(tab) {
+        Some((_, _, px, fm)) => {
+            if px.len() > cap || out.is_null() {
+                set_err("buffer pixels trop petit ou nul");
+                return -1;
+            }
+            // SAFETY : `out..out+px.len()` ⊂ `out..out+cap`
+            // inscriptible par contrat FFI.
+            unsafe { std::ptr::copy_nonoverlapping(px.as_ptr(), out, px.len()) };
+            if !meta_len.is_null() {
+                // SAFETY : pointeur de sortie non nul vérifié.
+                unsafe { *meta_len = 0 };
+            }
+            if !meta.is_null() && !meta_len.is_null() {
+                if let Ok(json) = serde_json::to_vec(&fm) {
+                    if json.len() <= meta_cap {
+                        // SAFETY : `meta..meta+json.len()` ⊂
+                        // `meta..meta+meta_cap` inscriptible.
+                        unsafe { std::ptr::copy_nonoverlapping(json.as_ptr(), meta, json.len()) };
+                        // SAFETY : vérifié non nul ci-dessus.
+                        unsafe { *meta_len = u32::try_from(json.len()).unwrap_or(u32::MAX) };
+                    }
+                }
+            }
+            isize::try_from(px.len()).unwrap_or(isize::MAX)
+        }
+        None => 0,
+    }
+}
+
 /// Copie la région `(x, y, w, h)` — pixels physiques — de
 /// la frame dans `out` (étape 55 : pull partiel piloté par
 /// les dirty-rects de [`explorer_dirty_rects`]). La région
@@ -1768,6 +1829,77 @@ mod tests {
             assert_eq!(&urlbuf[..n], b"http://test/a".as_slice());
 
             assert_eq!(explorer_close_tab(h, tab), 0);
+            explorer_destroy(h);
+        }
+    }
+
+    /// Étape 185 — `explorer_frame_pull` : pixels + JSON
+    /// `{scroll_y, w, h, media[]}` de la **même** frame en un
+    /// seul appel — parité du contrat REST `x-explorer-*`.
+    #[test]
+    fn frame_pull_atomic_pixels_and_meta() {
+        let h = test_handle();
+        // SAFETY : handle frais, appels sérialisés.
+        unsafe {
+            let tab = explorer_open_tab(h);
+            let url = b"http://test/v";
+            assert_eq!(explorer_navigate(h, tab, url.as_ptr(), url.len()), 0);
+
+            let (mut w, mut hgt) = (0u32, 0u32);
+            assert_eq!(
+                explorer_frame_size(
+                    h,
+                    tab,
+                    std::ptr::addr_of_mut!(w),
+                    std::ptr::addr_of_mut!(hgt)
+                ),
+                0
+            );
+            let cap = (w * hgt * 4) as usize;
+            let mut px = vec![0u8; cap];
+            let mut meta = vec![0u8; 64 * 1024];
+            let mut meta_len = 0u32;
+            let n = explorer_frame_pull(
+                h,
+                tab,
+                px.as_mut_ptr(),
+                cap,
+                meta.as_mut_ptr(),
+                meta.len(),
+                std::ptr::addr_of_mut!(meta_len),
+            );
+            assert_eq!(n, isize::try_from(cap).unwrap_or(isize::MAX));
+            assert!(meta_len > 0, "méta JSON servie avec les pixels");
+            let json: serde_json::Value =
+                serde_json::from_slice(&meta[..usize::try_from(meta_len).unwrap_or(0)])
+                    .expect("JSON méta valide");
+            assert_eq!(json["scroll_y"], 0.0);
+            assert_eq!(json["w"], w);
+            assert_eq!(json["h"], hgt);
+            let arr = json["media"].as_array().expect("media[] tableau");
+            assert_eq!(arr.len(), 1, "une surface vidéo : {arr:?}");
+            assert_eq!(arr[0]["i"], 1);
+            assert!(arr[0]["r"]["w"].as_f64().unwrap() > 0.0);
+            assert_eq!(arr[0]["v"], arr[0]["r"], "scroll 0 → view = rect");
+            assert_eq!(arr[0]["s"], true);
+
+            // `meta` nul / `meta_cap` insuffisant → pixels
+            // servis quand même, `meta_len` reste 0 (repli
+            // pré-185 honnête, jamais de JSON tronqué).
+            let mut small = [0u8; 8];
+            let n2 = explorer_frame_pull(
+                h,
+                tab,
+                px.as_mut_ptr(),
+                cap,
+                small.as_mut_ptr(),
+                small.len(),
+                std::ptr::addr_of_mut!(meta_len),
+            );
+            assert!(n2 > 0);
+            assert_eq!(meta_len, 0, "cap insuffisant → meta_len 0");
+
+            explorer_close_tab(h, tab);
             explorer_destroy(h);
         }
     }

@@ -8,7 +8,135 @@ use super::*;
 
 use explorer_render::Frame;
 
+/// Enveloppe métadonnées de la frame stockée (étape 185,
+/// M1 — contrat `x-explorer-scroll-y`/`x-explorer-media`,
+/// parité FFI `explorer_frame_pull`) : le `scroll_y`
+/// **peint** + la géométrie des surfaces au moment de la
+/// peinture, servis **dans le même corps** que les pixels —
+/// la course « frame d'un instant, métadonnées d'un autre »
+/// disparaît par construction (même verrou `Session` que
+/// `frame_png`/`frame_pixels`).
+#[derive(serde::Serialize)]
+pub struct FrameMeta {
+    /// Scroll ancré dans la frame (px CSS) — l'hôte en
+    /// déduit son `paintedScrollY` au lieu de le deviner.
+    pub scroll_y: f32,
+    /// Dimensions de la frame décrite (px physiques) — le
+    /// JSON se porte seul (canal FFI : le consommateur
+    /// vérifie l'appairage avec les pixels copiés).
+    pub w: u32,
+    /// Hauteur de la frame décrite (px physiques).
+    pub h: u32,
+    /// Surfaces de la frame, ordre du document (ordre de
+    /// peinture approximé — les contextes d'empilement
+    /// réels ne sont pas ordonnancés en M1, documenté).
+    pub media: Vec<FrameMedia>,
+}
+
+/// Géométrie peinte d'une surface — le filaire porte des
+/// clés courtes (`i`/`r`/`v`/`f`/`t`/`c`/`n`/`s`/`o`) pour
+/// borner `x-explorer-media` dans un header. `r` est en
+/// px CSS **document**, `v` et `c` en px CSS **viewport** —
+/// la conversion `scroll_y` est faite ici, jamais à l'hôte
+/// (la règle `fixed`/`sticky` n'aurait pas à être recopiée).
+#[allow(clippy::struct_excessive_bools)] // drapeaux de peinture orthogonaux.
+#[derive(serde::Serialize)]
+pub struct FrameMedia {
+    /// Identité de l'offre (`media` des events SSE).
+    #[serde(rename = "i")]
+    pub id: u64,
+    /// Rect px CSS document.
+    #[serde(rename = "r")]
+    pub rect: MediaRect,
+    /// Rect px CSS viewport — `fixed ? r : r − scroll_y`.
+    #[serde(rename = "v")]
+    pub view: MediaRect,
+    /// Ancrée au viewport (`position:fixed` sur la chaîne).
+    #[serde(rename = "f")]
+    pub fixed: bool,
+    /// Transformée (`transform ≠ none`/`sticky`) — l'hôte
+    /// masque : un plan non transformé serait un mensonge.
+    #[serde(rename = "t")]
+    pub transformed: bool,
+    /// Clip **espace viewport** (`None` = aucun clip émis
+    /// par le peintre — le seau document est traduit
+    /// `−scroll_y`, le seau viewport vit déjà à l'échelle).
+    #[serde(rename = "c")]
+    pub clip: Option<MediaRect>,
+    /// `clip-path`/`clip` géométrique présent — modélisé
+    /// border-box (honnêteté : plus lâche que l'inset réel).
+    #[serde(rename = "n")]
+    pub clip_path: bool,
+    /// Effectivement peinte (`false` → l'hôte masque :
+    /// `visibility:hidden`, `opacity ≤ 0`, ou pas de boîte).
+    #[serde(rename = "s")]
+    pub visible: bool,
+    /// Index de peinture (ordre document — approx M1).
+    #[serde(rename = "o")]
+    pub order: u32,
+}
+
 impl Session {
+    /// Métadonnées atomiques de la frame stockée (`None`
+    /// si jamais peint — comme `frame_pixels`). Servie
+    /// header REST (`x-explorer-media`) et JSON FFI
+    /// (`explorer_frame_pull`) — sérialisée à la demande,
+    /// jamais stockée (l'état vit déjà dans `entry.media`).
+    #[must_use]
+    pub fn frame_meta(&self, tab: TabId) -> Option<FrameMeta> {
+        let entry = self.tabs.get(&tab)?;
+        let frame = entry.frame.as_ref()?;
+        let sy = entry.scroll_y;
+        let shift = |r: MediaRect| MediaRect { y: r.y - sy, ..r };
+        let media = entry
+            .media
+            .iter()
+            .enumerate()
+            .map(|(o, m)| {
+                let meta = &m.meta;
+                FrameMedia {
+                    id: m.id,
+                    rect: m.rect,
+                    view: if meta.fixed { m.rect } else { shift(m.rect) },
+                    fixed: meta.fixed,
+                    transformed: meta.transformed,
+                    // `fixed` échappe les clips ancêtres
+                    // (`fixed_defer` hors clips) : seule la
+                    // branche viewport compte pour lui.
+                    clip: if meta.fixed {
+                        meta.clip_fixed
+                    } else {
+                        meta.clip_doc.map(shift)
+                    },
+                    clip_path: meta.clip_path,
+                    visible: meta.visible,
+                    #[allow(clippy::cast_possible_truncation)]
+                    // surfaces < 2^32 par document.
+                    order: o as u32,
+                }
+            })
+            .collect();
+        Some(FrameMeta {
+            scroll_y: sy,
+            w: frame.width,
+            h: frame.height,
+            media,
+        })
+    }
+
+    /// Pixels RGBA + métadonnées de la frame stockée en
+    /// **un seul emprunt** (étape 185 — canal FFI du pull
+    /// atomique : `frame_size` + `frame_copy` + `frame_meta`
+    /// laisseraient deux fenêtres de course entre trois
+    /// lectures ; ici l'octet et le JSON décrivent la même
+    /// frame par construction).
+    #[must_use]
+    pub fn frame_pull(&self, tab: TabId) -> Option<(u32, u32, &[u8], FrameMeta)> {
+        let (w, h, px) = self.frame_pixels(tab)?;
+        let meta = self.frame_meta(tab)?;
+        Some((w, h, px, meta))
+    }
+
     /// PNG courant de l'onglet (`None` si jamais navigué) —
     /// encodé paresseusement depuis la frame raster puis
     /// caché jusqu'au prochain repaint (étape 55g : un

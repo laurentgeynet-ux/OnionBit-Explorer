@@ -1547,6 +1547,65 @@ fn media_moved_on_relayout_only_when_rect_changes() {
     }
 }
 
+/// Étape 185 — `frame_meta` : `scroll_y` **peint** +
+/// géométrie atomique des surfaces (`fixed`/`transformed`/
+/// `clip`/`visible`) — mêmes règles que `paint_box`.
+#[test]
+fn frame_meta_atomic_scroll_and_flags() {
+    let (mut s, tab, _rx) = media_page(
+        "<div style=\"overflow:hidden;width:100px;height:50px\">\
+           <video src=\"v.mp4\" controls style=\"width:200px;height:100px\"></video></div>\
+         <video src=\"f.mp4\" controls style=\"position:fixed;left:0;top:0;width:80px;height:40px\"></video>\
+         <video src=\"t.mp4\" controls style=\"transform:translate(10px,0)\"></video>\
+         <div style=\"visibility:hidden\"><video src=\"h.mp4\" controls></video></div>",
+    );
+    // Scroll demandé → repaint : `scroll_y` peint = 30.
+    s.tabs.get_mut(&tab).unwrap().set_scroll(30.0);
+    s.repaint(tab).unwrap();
+    s.refresh_media(tab);
+    let meta = s.frame_meta(tab).expect("frame peinte");
+    assert_eq!(meta.scroll_y, 30.0, "le scroll servi est le peint");
+    assert_eq!(meta.media.len(), 4, "quatre surfaces scannées");
+    let (clip, fixed, tr, hid) = (
+        &meta.media[0],
+        &meta.media[1],
+        &meta.media[2],
+        &meta.media[3],
+    );
+    // `overflow:hidden` ancêtre → clip viewport (`−scroll_y`).
+    let c = clip.clip.expect("clip ancêtre servi");
+    assert!(
+        c.w <= 100.0 && c.h <= 50.0,
+        "clip ≤ border box de l'ancêtre overflow : {c:?}"
+    );
+    assert!(!clip.fixed && !clip.transformed && clip.visible);
+    assert!(
+        (clip.view.y - (clip.rect.y - 30.0)).abs() < 0.01,
+        "view = rect − scroll peint : {:?}",
+        clip.view
+    );
+    // `position:fixed` → `view = rect` (ancré viewport).
+    assert!(fixed.fixed, "fixed détecté");
+    assert_eq!(fixed.view, fixed.rect, "fixed : view = rect viewport");
+    // `transform` → drapeau dégradé.
+    assert!(tr.transformed, "transform détecté");
+    // `visibility:hidden` ancêtre → non peinte.
+    assert!(!hid.visible, "descendant de hidden → invisible");
+}
+
+/// `frame_meta` vide tant que rien n'est peint — cohérent
+/// avec `frame_pixels`/`frame_png` (204 du contrat).
+#[test]
+fn frame_meta_none_before_paint() {
+    let (s, tab, _rx) = {
+        let mut s = Session::new(Arc::new(FailTransport), Arc::new(TestFont));
+        let tab = s.open_tab();
+        let rx = s.subscribe();
+        (s, tab, rx)
+    };
+    assert!(s.frame_meta(tab).is_none());
+}
+
 /// Page `body` commise + moteur jscore installé +
 /// `refresh_media` — harnais de délégation JS média (71c).
 fn media_js_page(body: &str) -> (Session, TabId, broadcast::Receiver<CoreEvent>) {

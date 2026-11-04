@@ -106,12 +106,22 @@ class FakeRepo implements BrowserRepository {
   Future<Uint8List> _framePng() async =>
       _png ??= await encodeTestPng(8, 8, 255, 0, 0);
 
+  /// Méta de frame scriptée (étape 185) — `FramePull`
+  /// servi par `fetchFrame`/`fetchFrameRegion` ; `null`
+  /// (défaut) = transport antérieur sans contrat.
+  List<MediaPaintMeta>? nextFrameMedia;
+  double? nextFrameScrollY;
+
   @override
-  Future<Uint8List?> fetchFrame(String tabId) async {
+  Future<FramePull?> fetchFrame(String tabId) async {
     frameFetches++;
     final gate = frameGate;
     if (gate != null) await gate.future;
-    return realPng ? _framePng() : Uint8List.fromList([1, 2, 3]);
+    return FramePull(
+      bytes: realPng ? await _framePng() : Uint8List.fromList([1, 2, 3]),
+      paintedScrollY: nextFrameScrollY,
+      media: nextFrameMedia,
+    );
   }
 
   /// Régions demandées par le pull partiel (étape 109) —
@@ -119,7 +129,7 @@ class FakeRepo implements BrowserRepository {
   final List<String> regionFetches = [];
 
   @override
-  Future<Uint8List?> fetchFrameRegion(
+  Future<FramePull?> fetchFrameRegion(
     String tabId,
     int x,
     int y,
@@ -127,9 +137,13 @@ class FakeRepo implements BrowserRepository {
     int h,
   ) async {
     regionFetches.add('$x,$y,${w}x$h');
-    return realPng
-        ? encodeTestPng(w.clamp(1, 4096), h.clamp(1, 4096), 0, 255, 0)
-        : Uint8List.fromList([1, 2, 3]);
+    return FramePull(
+      bytes: realPng
+          ? await encodeTestPng(w.clamp(1, 4096), h.clamp(1, 4096), 0, 255, 0)
+          : Uint8List.fromList([1, 2, 3]),
+      paintedScrollY: nextFrameScrollY,
+      media: nextFrameMedia,
+    );
   }
 
   /// Résultat scripté pour les événements `key` (étape 86 —
