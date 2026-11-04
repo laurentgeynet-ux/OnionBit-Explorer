@@ -9144,6 +9144,29 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   `textTracks` — JS-C326 pris par
   le fix microtasks-vs-timers).
 
+- [x] **JS-C327. MSE — track lists
+  réelles depuis `trak` fMP4**
+  (§B-83-branche-B, suite de C325) —
+  `fmp4_scan` extrait `tkhd.track_ID`
+  + `hdlr.handler_type` (`vide`/`soun`/
+  `text`|`subt`|`sbtl`) +
+  `mdhd.language` ; `audioTracks`/
+  `videoTracks`/`textTracks` peuplées
+  à l'init `moov`, réconciliées par
+  `(liste,id)` aux ré-inits (états
+  `enabled`/`selected`/`mode`
+  conservés) ; events `addtrack`/
+  `removetrack`/`change` filés en
+  tâche (couture JS-C324, porteurs
+  `.track`) ; `selected` exclusif par
+  buffer, `mode` disabled/hidden/
+  showing, `getTrackById`/
+  `selectedIndex` ; constructeurs
+  verrouillés. Verrous `mse5_tracks`
+  ×5 ; canaris mse3 12/12, mse4 8/8,
+  c193 12/12, mse2 8/8, media_events
+  10/10.
+
 ## Tâches continues
 
 - **Spécialiste JS** : divergence miroir ↔ `explorer-dom` quand

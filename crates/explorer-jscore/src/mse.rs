@@ -251,6 +251,18 @@ pub(crate) struct MseState {
     /// (`node_valid` §B-37) — pas de purge nécessaire, la
     /// table meurt avec le document.
     attached_to: HashMap<ObjId, NodeId>,
+    /// Protos piste JS-C327 — `[audio, video, text]` pour
+    /// `AudioTrack`/`VideoTrack`/`TextTrack` et leurs listes
+    /// (paresseux, racinés GC comme les autres protos).
+    track_protos: [Option<ObjId>; 3],
+    track_list_protos: [Option<ObjId>; 3],
+    /// `TrackEvent`s filés en **tâche** (JS-C327 — même
+    /// couture que `pending_events`/JS-C324) : `(liste_cible,
+    /// type, piste)`. `addtrack`/`removetrack` tirés à la
+    /// frontière de job — un listener enregistré juste après
+    /// l'`appendBuffer` d'init doit les voir (pattern
+    /// canonique player : append puis `addEventListener`).
+    pending_track_events: std::collections::VecDeque<(ObjId, &'static str, Value)>,
 }
 
 impl MseState {
@@ -277,6 +289,18 @@ impl MseState {
         // vit (spec : l'attache le maintient référencé —
         // l'attribut `src` n'est pas une racine GC).
         ids.extend(self.attached_to.keys().copied());
+        for p in self
+            .track_protos
+            .iter()
+            .chain(self.track_list_protos.iter())
+            .flatten()
+        {
+            ids.push(*p);
+        }
+        for (t, _, tr) in &self.pending_track_events {
+            ids.push(*t);
+            crate::heap::push_value(ids, *tr);
+        }
     }
 }
 
@@ -375,6 +399,39 @@ struct SbData {
     /// `trun` des `moof` en secondes. `None` tant qu'aucun
     /// init fMP4 n'a été appendé (repli estimateur).
     timescale: Option<u32>,
+    /// Pistes déclarées par le dernier init `moov` (JS-C327)
+    /// — ordre `trak` (spec). État mutable spec par piste
+    /// (`enabled`/`selected`/`mode`) + wrapper JS caché
+    /// (identité stable entre lectures).
+    tracks: Vec<SbTrack>,
+    /// Wrappers `AudioTrackList`/`VideoTrackList`/
+    /// `TextTrackList` cachés — `[audio, video, text]`
+    /// (`sb.audioTracks === sb.audioTracks` spec).
+    track_lists: [Option<Value>; 3],
+}
+
+/// Piste exposée aux listes `*Tracks` (JS-C327) — clone
+/// borné (snapshot pour les events `removetrack` : la piste
+/// disparue garde un wrapper valide pour l'événement).
+#[derive(Clone)]
+struct SbTrack {
+    /// `tkhd.track_ID` — rendu en `DOMString` (spec).
+    id: u32,
+    /// `"audio"|"video"|"text"` — quelle liste la porte.
+    list: &'static str,
+    /// `kind` `TextTrack` ; `""` audio/vidéo.
+    kind: &'static str,
+    /// `mdhd.language` dépackée, `""` si `und`.
+    lang: String,
+    /// `AudioTrack.enabled` (défaut spec `true`).
+    enabled: bool,
+    /// `VideoTrack.selected` (défaut `false`).
+    selected: bool,
+    /// `TextTrack.mode` : `"disabled"` initial (spec MSE —
+    /// les pistes in-band démarrent masquées).
+    mode: &'static str,
+    /// Wrapper JS caché (identité stable).
+    obj: Option<Value>,
 }
 
 struct MsHost {
@@ -388,6 +445,106 @@ struct SbHost {
 /// `SourceBufferList` — vue vivante sur `MsData.buffers`.
 struct SbListHost {
     d: Rc<RefCell<MsData>>,
+}
+
+/// Index de liste `audio|video|text` → slot `[0,1,2]`.
+fn list_idx(list: &str) -> usize {
+    match list {
+        "audio" => 0,
+        "video" => 1,
+        _ => 2,
+    }
+}
+
+/// `AudioTrack` | `VideoTrack` | `TextTrack` (JS-C327) —
+/// champs immuables pris en snapshot à la création (un
+/// wrapper porté par un `removetrack` reste lisible après
+/// la sortie de piste) ; l'état mutable spec vit dans
+/// `SbData.tracks[idx]` quand la piste est présente.
+struct TrackHost {
+    d: Rc<RefCell<SbData>>,
+    /// Index dans `SbData.tracks` — `usize::MAX` = piste
+    /// retirée (wrapper détaché : lectures sur `snap`,
+    /// sets = no-op documentés).
+    idx: usize,
+    /// Wrapper `SourceBuffer` parent (`track.sourceBuffer`).
+    sb: Value,
+    snap: SbTrack,
+}
+
+/// `AudioTrackList` | `VideoTrackList` | `TextTrackList` —
+/// vue vivante filtrée de `SbData.tracks` (ordre `trak`).
+struct TrackListHost {
+    d: Rc<RefCell<SbData>>,
+    list: &'static str,
+}
+
+/// Wrapper piste (créé à la demande, caché dans
+/// `SbTrack.obj` tant que la piste est présente — identité
+/// stable `list[0] === list[0]`).
+fn track_obj(e: &mut Engine, d: &Rc<RefCell<SbData>>, idx: usize, sb: Value) -> Option<Value> {
+    {
+        let sd = d.borrow();
+        if let Some(o) = sd.tracks.get(idx).and_then(|t| t.obj) {
+            return Some(o);
+        }
+    }
+    let (snap, proto) = {
+        let sd = d.borrow();
+        let t = sd.tracks.get(idx)?;
+        (t.clone(), track_proto(e, t.list))
+    };
+    let v = e.new_host_object(Rc::new(TrackHost {
+        d: d.clone(),
+        idx,
+        sb,
+        snap,
+    }));
+    if let Value::Obj(id) = v {
+        if let Some(o) = e.heap.obj_mut(id) {
+            o.proto = Value::Obj(proto);
+        }
+        d.borrow_mut().tracks[idx].obj = Some(v);
+    }
+    Some(v)
+}
+
+/// Wrapper piste **détachée** pour un `removetrack` — la
+/// piste n'est plus dans `SbData.tracks` : snapshot pur.
+fn detached_track_obj(e: &mut Engine, d: &Rc<RefCell<SbData>>, sb: Value, snap: SbTrack) -> Value {
+    let proto = track_proto(e, snap.list);
+    let v = e.new_host_object(Rc::new(TrackHost {
+        d: d.clone(),
+        idx: usize::MAX,
+        sb,
+        snap,
+    }));
+    if let Value::Obj(id) = v {
+        if let Some(o) = e.heap.obj_mut(id) {
+            o.proto = Value::Obj(proto);
+        }
+    }
+    v
+}
+
+/// `sb.<kind>Tracks` — liste cachée, matérialisée à la
+/// demande (nécessaire aussi pour porter les `TrackEvents`
+/// même si la page ne l'a jamais lue, comme
+/// `addsourcebuffer` sur `sourceBuffers`).
+fn track_list(e: &mut Engine, d: &Rc<RefCell<SbData>>, list: &'static str) -> Value {
+    let i = list_idx(list);
+    if let Some(l) = d.borrow().track_lists[i] {
+        return l;
+    }
+    let lp = track_list_proto(e, list);
+    let v = e.new_host_object(Rc::new(TrackListHost { d: d.clone(), list }));
+    if let Value::Obj(id) = v {
+        if let Some(o) = e.heap.obj_mut(id) {
+            o.proto = Value::Obj(lp);
+        }
+        d.borrow_mut().track_lists[i] = Some(v);
+    }
+    v
 }
 
 /// `TimeRanges` — snapshot figé de plages `(start, end)`.
@@ -504,6 +661,22 @@ fn mse_event(e: &mut Engine, ty: &str, target: Value) -> Value {
 /// partagé — même helper que `fire_idb`).
 fn fire_mse(e: &mut Engine, target: ObjId, ty: &str) -> JsResult<()> {
     let ev = mse_event(e, ty, Value::Obj(target));
+    dispatch_mse_event(e, target, ty, ev)
+}
+
+/// `TrackEvent` `{type, target, track}` sur une `*TrackList`
+/// (JS-C327) — même rail `on<ty>` + `__et` que `fire_mse`.
+fn fire_track_event(e: &mut Engine, list: ObjId, ty: &'static str, track: Value) -> JsResult<()> {
+    let ev = mse_event(e, ty, Value::Obj(list));
+    if let Value::Obj(eo) = ev {
+        e.set_own(eo, "track", track, true);
+    }
+    dispatch_mse_event(e, list, ty, ev)
+}
+
+/// Corps de dispatch partagé : `on<ty>` own-prop puis
+/// listeners `addEventListener` (rail `__et`).
+fn dispatch_mse_event(e: &mut Engine, target: ObjId, ty: &str, ev: Value) -> JsResult<()> {
     let key = format!("on{ty}");
     if let Some(f) = e.get_prop(target, &key) {
         if e.is_callable(f) {
@@ -616,6 +789,48 @@ fn tr_proto(e: &mut Engine) -> ObjId {
     e.add_method(p, "start", tr_start);
     e.add_method(p, "end", tr_end);
     e.mse.time_ranges_proto = Some(p);
+    p
+}
+
+/// Proto piste JS-C327 — `AudioTrack`/`VideoTrack`/
+/// `TextTrack`, paresseux par kind (`[0,1,2]`).
+fn track_proto(e: &mut Engine, list: &'static str) -> ObjId {
+    let i = list_idx(list);
+    if let Some(p) = e.mse.track_protos[i] {
+        return p;
+    }
+    let tag = match list {
+        "audio" => "AudioTrack",
+        "video" => "VideoTrack",
+        _ => "TextTrack",
+    };
+    let p = tagged_proto(e, tag);
+    if list == "text" {
+        // `TextTrack` est un EventTarget (spec) — cuechange
+        // vit sur la piste, pas la liste.
+        install_et_methods(e, p);
+    }
+    e.mse.track_protos[i] = Some(p);
+    p
+}
+
+/// Proto liste JS-C327 — `AudioTrackList`/`VideoTrackList`/
+/// `TextTrackList` : `EventTarget` (`addtrack`/`removetrack`/
+/// `change`) + `getTrackById`.
+fn track_list_proto(e: &mut Engine, list: &'static str) -> ObjId {
+    let i = list_idx(list);
+    if let Some(p) = e.mse.track_list_protos[i] {
+        return p;
+    }
+    let tag = match list {
+        "audio" => "AudioTrackList",
+        "video" => "VideoTrackList",
+        _ => "TextTrackList",
+    };
+    let p = tagged_proto(e, tag);
+    install_et_methods(e, p);
+    e.add_method(p, "getTrackById", tl_get_track_by_id);
+    e.mse.track_list_protos[i] = Some(p);
     p
 }
 
@@ -738,6 +953,61 @@ fn sbl_illegal_ctor(e: &mut Engine, _t: Value, _args: &[Value]) -> JsResult<Valu
 
 fn tr_illegal_ctor(e: &mut Engine, _t: Value, _args: &[Value]) -> JsResult<Value> {
     Err(e.type_error("TimeRanges: Illegal constructor"))
+}
+
+/// Interfaces piste JS-C327 non constructibles (spec :
+/// `Illegal constructor` — les tracks naissent du `moov`,
+/// pas de `new`).
+fn track_illegal_ctor(e: &mut Engine, _t: Value, _args: &[Value]) -> JsResult<Value> {
+    Err(e.type_error("Illegal constructor"))
+}
+
+/// Réconciliation « initialization segment received »
+/// (JS-C327, spec MSE) : le nouvel init **remplace** la
+/// déclaration de pistes. Conservation par `(list, id)` —
+/// un re-init ABR hls.js (mêmes `track_ID`) préserve wrapper
+/// et état (`enabled`/`selected`/`mode`) ; disparues →
+/// `removetrack`, nouvelles → `addtrack` (valeurs par défaut
+/// spec : `enabled`, `!selected`, `mode:"disabled"`).
+/// Retourne les ops à filer en tâche `(snapshot, type,
+/// index)` dans l'ordre spec : retraits d'abord, puis
+/// ajouts. `index` = position finale dans `sd.tracks`
+/// (`Some` pour les ajouts — la piste y vit ; `None` pour
+/// les retraits — wrapper détaché à créer).
+fn reconcile_tracks(
+    sd: &mut SbData,
+    new: Vec<Fmp4Track>,
+) -> Vec<(SbTrack, &'static str, Option<usize>)> {
+    let mut ops = Vec::new();
+    let mut kept: Vec<SbTrack> = Vec::with_capacity(new.len());
+    for old in sd.tracks.drain(..) {
+        if new.iter().any(|n| n.id == old.id && n.list == old.list) {
+            kept.push(old);
+        } else {
+            ops.push((old, "removetrack", None));
+        }
+    }
+    let mut out = Vec::with_capacity(new.len());
+    for n in new {
+        if let Some(i) = kept.iter().position(|k| k.id == n.id && k.list == n.list) {
+            out.push(kept.remove(i));
+        } else {
+            let t = SbTrack {
+                id: n.id,
+                list: n.list,
+                kind: n.kind,
+                lang: n.lang,
+                enabled: true,
+                selected: false,
+                mode: "disabled",
+                obj: None,
+            };
+            ops.push((t.clone(), "addtrack", Some(out.len())));
+            out.push(t);
+        }
+    }
+    sd.tracks = out;
+    ops
 }
 
 /// Codecs déclarés par l'hôte (claim média) — normalisés en
@@ -945,6 +1215,8 @@ fn ms_add_source_buffer(e: &mut Engine, this: Value, args: &[Value]) -> JsResult
         served_bytes: 0,
         cursor: 0,
         pulled_saw_init: false,
+        tracks: Vec::new(),
+        track_lists: [None, None, None],
     }));
     let v = e.new_host_object(Rc::new(SbHost { d: sb }));
     if let Value::Obj(id) = v {
@@ -1189,6 +1461,51 @@ fn mdhd_timescale(b: &[u8]) -> Option<u32> {
         .map(|s| u32::from_be_bytes(s.try_into().unwrap_or([0; 4])))
 }
 
+/// `tkhd` → `track_ID` — v0 : offset 12, v1 : offset 20.
+fn tkhd_id(b: &[u8]) -> Option<u32> {
+    let off = match *b.first()? {
+        0 => 12,
+        1 => 20,
+        _ => return None,
+    };
+    b.get(off..off + 4)
+        .map(|s| u32::from_be_bytes(s.try_into().unwrap_or([0; 4])))
+}
+
+/// `mdhd` → `language` ISO 639-2/T (u16 packé 3×5 bits +
+/// `0x60`) — v0 : offset 20, v1 : offset 32. `und`/`0` →
+/// `""` (spec : langue indéterminée honnête).
+fn mdhd_language(b: &[u8]) -> Option<String> {
+    let off = match *b.first()? {
+        0 => 20,
+        1 => 32,
+        _ => return None,
+    };
+    let w = u16::from_be_bytes(b.get(off..off + 2)?.try_into().ok()?);
+    if w == 0 || w == 0x55c4 {
+        return Some(String::new());
+    }
+    let c = |s: u16| char::from_u32(u32::from((w >> s) & 0x1f) + 0x60);
+    Some([c(10)?, c(5)?, c(0)?].into_iter().collect())
+}
+
+/// `hdlr` → `(liste, kind)` depuis `handler_type` (offset 8
+/// du payload : version+flags, `pre_defined`, puis le
+/// fourcc). `vide`→video, `soun`→audio, `text`/`subt`/
+/// `sbtl`→texte `"subtitles"`, `clcp`→`"captions"`,
+/// `meta`→`"metadata"` ; autres (`hint`…) → ignorés — pas
+/// de fausse piste exposée.
+fn hdlr_track_kind(b: &[u8]) -> (Option<&'static str>, &'static str) {
+    match b.get(8..12) {
+        Some(b"vide") => (Some("video"), ""),
+        Some(b"soun") => (Some("audio"), ""),
+        Some(b"text" | b"subt" | b"sbtl") => (Some("text"), "subtitles"),
+        Some(b"clcp") => (Some("text"), "captions"),
+        Some(b"meta") => (Some("text"), "metadata"),
+        _ => (None, ""),
+    }
+}
+
 /// `tfdt` → `baseMediaDecodeTime` — v0 `u32`, v1 `u64`.
 fn tfdt_base(b: &[u8]) -> Option<u64> {
     match *b.first()? {
@@ -1283,9 +1600,31 @@ fn traf_range(b: &[u8]) -> Option<(u64, u64)> {
 /// qu'un navigateur lit en démuxant — sans eux
 /// `media.buffered` surestime chaque append et un player
 /// (hls.js) saute des fragments entiers.
+/// Une piste déclarée par un `trak` d'init (JS-C327) —
+/// alimente `audioTracks`/`videoTracks`/`textTracks` du
+/// `SourceBuffer` : c'est la donnée qu'un navigateur lit en
+/// parsant le `moov`, sans démuxage des samples.
+struct Fmp4Track {
+    /// `tkhd.track_ID`.
+    id: u32,
+    /// Liste de rattachement : `"audio"` (`soun`) |
+    /// `"video"` (`vide`) | `"text"` (`text`/`subt`/`sbtl`/
+    /// `clcp`/`meta`). `hdlr` inconnu → piste ignorée.
+    list: &'static str,
+    /// `kind` `TextTrack` (`"subtitles"`/`"captions"`/
+    /// `"metadata"`) ; `""` pour audio/vidéo (spec : kind
+    /// indéterminable depuis `hdlr` seul).
+    kind: &'static str,
+    /// `mdhd.language` dépackée (ISO 639-2/T 3 lettres) ;
+    /// `""` quand `und`/absente (spec : chaîne vide honnête).
+    lang: String,
+}
+
 struct Fmp4Scan {
     timescale: Option<u32>,
     moofs: Vec<(u64, u64)>,
+    /// Pistes des `trak` du `moov` (JS-C327) — vide hors init.
+    tracks: Vec<Fmp4Track>,
     /// Un box fMP4 top-niveau reconnu (`moov`/`moof`/`ftyp`/
     /// `styp`/`sidx`) — chunk bien formé : sans `moof` il ne
     /// porte pas de média (init) → **pas** de repli
@@ -1307,6 +1646,7 @@ fn fmp4_scan(bytes: &[u8]) -> Fmp4Scan {
     let mut out = Fmp4Scan {
         timescale: None,
         moofs: Vec::new(),
+        tracks: Vec::new(),
         recognized: false,
         has_moov: false,
         moov_off: moov_offset(bytes),
@@ -1317,15 +1657,45 @@ fn fmp4_scan(bytes: &[u8]) -> Fmp4Scan {
             out.has_moov = true;
             walk_boxes(payload, |f2, p2| {
                 if f2 == b"trak" {
+                    // JS-C327 — chaque `trak` = une piste :
+                    // `tkhd.track_ID`, `mdia.hdlr` (kind),
+                    // `mdia.mdhd` (langue + timescale — le
+                    // premier `mdhd` vu garde le timescale,
+                    // invariant JS-C285).
+                    let mut tid = None;
+                    let mut list = None;
+                    let mut kind = "";
+                    let mut lang = String::new();
                     walk_boxes(p2, |f3, p3| {
+                        if f3 == b"tkhd" {
+                            tid = tkhd_id(p3);
+                        }
                         if f3 == b"mdia" {
                             walk_boxes(p3, |f4, p4| {
-                                if f4 == b"mdhd" && out.timescale.is_none() {
-                                    out.timescale = mdhd_timescale(p4);
+                                if f4 == b"mdhd" {
+                                    if out.timescale.is_none() {
+                                        out.timescale = mdhd_timescale(p4);
+                                    }
+                                    if let Some(l) = mdhd_language(p4) {
+                                        lang = l;
+                                    }
+                                }
+                                if f4 == b"hdlr" {
+                                    let h = hdlr_track_kind(p4);
+                                    list = h.0;
+                                    kind = h.1;
                                 }
                             });
                         }
                     });
+                    if let (Some(id), Some(list)) = (tid, list) {
+                        out.tracks.push(Fmp4Track {
+                            id,
+                            list,
+                            kind,
+                            lang,
+                        });
+                    }
                 }
             });
         }
@@ -1413,6 +1783,7 @@ fn sb_append_buffer(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Val
             e.type_error("SourceBuffer.appendBuffer: argument is not an ArrayBuffer or view")
         );
     };
+    let mut track_ops: Vec<(SbTrack, &'static str, Option<usize>)> = Vec::new();
     {
         let mut sd = d.borrow_mut();
         // JS-C325 — gardes spec : appel re-entrant pendant
@@ -1455,7 +1826,14 @@ fn sb_append_buffer(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Val
         // l'entrée en file (la donnée réelle — `mdhd` de
         // l'init, `tfdt`+durées `trun` des `moof` — est ce
         // qu'un navigateur obtient en démuxant).
-        let scan = fmp4_scan(&bytes);
+        let mut scan = fmp4_scan(&bytes);
+        // JS-C327 — init `moov` : réconciliation des pistes
+        // déclarées (spec « initialization segment
+        // received ») — TrackEvents collectés pour la file
+        // de tâches (tirés après la rafale `update*`).
+        if scan.has_moov {
+            track_ops = reconcile_tracks(&mut sd, std::mem::take(&mut scan.tracks));
+        }
         // MSE-3 transport : le segment est stocké en file
         // FIFO (ordre d'append — le flux `ByteSource` exact
         // qu'OnionCodec consomme côté hôte, ADR-0029).
@@ -1517,6 +1895,19 @@ fn sb_append_buffer(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Val
             sd.timestamp_offset = raw_offset;
         }
         sd.offset_dirty = false;
+    }
+    // JS-C327 — `TrackEvent`s filés en **tâche** (spec
+    // « queue a task » — même couture JS-C324 que
+    // `sourceopen` : un listener posé juste après
+    // l'`appendBuffer` d'init doit voir `addtrack`).
+    for (snap, ty, idx) in track_ops {
+        let track_v = match idx {
+            Some(i) => track_obj(e, &d, i, this).unwrap_or(Value::Null),
+            None => detached_track_obj(e, &d, this, snap.clone()),
+        };
+        if let Value::Obj(lid) = track_list(e, &d, snap.list) {
+            e.mse.pending_track_events.push_back((lid, ty, track_v));
+        }
     }
     let Value::Obj(sid) = this else {
         return Ok(Value::Undefined);
@@ -1809,6 +2200,14 @@ pub(crate) fn deliver_mse_events(e: &mut Engine) -> JsResult<bool> {
             _ => fire_mse(e, target, ty),
         };
         if let Err(err) = r {
+            if first.is_none() {
+                first = Some(err);
+            }
+        }
+    }
+    while let Some((list, ty, track)) = e.mse.pending_track_events.pop_front() {
+        fired = true;
+        if let Err(err) = fire_track_event(e, list, ty, track) {
             if first.is_none() {
                 first = Some(err);
             }
@@ -2133,7 +2532,17 @@ impl Host for SbHost {
                 let ranges = self.d.borrow().est_ranges.clone();
                 Some(time_ranges(e, ranges))
             }
-            "audioTracks" | "videoTracks" | "textTracks" => Some(e.new_array(Vec::new())),
+            // JS-C327 — vraies `*TrackList` (vues vivantes
+            // sur `SbData.tracks`, peuplées par l'init
+            // `moov` — liste vide honnête avant tout init).
+            "audioTracks" | "videoTracks" | "textTracks" => {
+                let list = match k {
+                    "audioTracks" => "audio",
+                    "videoTracks" => "video",
+                    _ => "text",
+                };
+                Some(track_list(e, &self.d, list))
+            }
             _ => None,
         })
     }
@@ -2198,6 +2607,16 @@ impl Host for SbHost {
     fn trace(&self, out: &mut Vec<ObjId>) {
         let d = self.d.borrow();
         crate::heap::push_value(out, d.ms);
+        // JS-C327 — wrappers piste/liste cachés : racinés
+        // tant que le buffer vit (identité stable garantie).
+        for t in &d.tracks {
+            if let Some(o) = t.obj {
+                crate::heap::push_value(out, o);
+            }
+        }
+        for l in d.track_lists.iter().flatten() {
+            crate::heap::push_value(out, *l);
+        }
     }
 
     fn class_name(&self) -> &'static str {
@@ -2254,6 +2673,245 @@ impl Host for TrHost {
     }
 }
 
+/// État mutable courant de la piste (live si présente,
+/// snapshot sinon).
+fn track_state(
+    d: &Rc<RefCell<SbData>>,
+    idx: usize,
+    snap: &SbTrack,
+    f: impl Fn(&SbTrack) -> Value,
+) -> Value {
+    match d.borrow().tracks.get(idx) {
+        Some(t) => f(t),
+        None => f(snap),
+    }
+}
+
+/// Tire `change` sur la liste `*TrackList` du parent (spec —
+/// après mutation `enabled`/`selected`/`mode`). La liste est
+/// matérialisée pour porter l'événement même jamais lue.
+fn fire_track_list_change(e: &mut Engine, d: &Rc<RefCell<SbData>>, list: &'static str) {
+    if let Value::Obj(lid) = track_list(e, d, list) {
+        let _ = fire_mse(e, lid, "change");
+    }
+}
+
+impl Host for TrackHost {
+    fn get(&self, e: &mut Engine, _t: Value, k: &str) -> JsResult<Option<Value>> {
+        let d = &self.d;
+        let idx = self.idx;
+        let snap = &self.snap;
+        Ok(match k {
+            // Spec : `id` est DOMString — `tkhd.track_ID`
+            // numérique sérialisé (players : `track.id`).
+            "id" => Some(e.str_val(snap.id.to_string())),
+            "kind" => Some(e.str_val(snap.kind)),
+            "label" => Some(e.str_val("")),
+            "language" => Some(e.str_val(snap.lang.clone())),
+            "enabled" if snap.list == "audio" => {
+                Some(track_state(d, idx, snap, |t| Value::Bool(t.enabled)))
+            }
+            "selected" if snap.list == "video" => {
+                Some(track_state(d, idx, snap, |t| Value::Bool(t.selected)))
+            }
+            "mode" if snap.list == "text" => {
+                let m = d.borrow().tracks.get(idx).map_or(snap.mode, |t| t.mode);
+                Some(e.str_val(m))
+            }
+            // Honnêteté : pas de cues sans démuxage des
+            // samples texte — `null` spec, pas une liste vide
+            // mensongère (un parser qui itère `cues.length`
+            // sur un stub voit 0 cues = même verdict honnête).
+            "cues" | "activeCues" if snap.list == "text" => Some(Value::Null),
+            "inBandMetadataTrackDispatchType" if snap.list == "text" => Some(e.str_val("")),
+            // MSE spec — `track.sourceBuffer` = le buffer
+            // d'origine (`null` hors MSE ; ici toujours posé).
+            "sourceBuffer" => Some(self.sb),
+            _ => None,
+        })
+    }
+
+    fn set(&self, e: &mut Engine, _t: Value, k: &str, v: Value) -> JsResult<bool> {
+        // Piste détachée : sets no-op (approximation
+        // documentée — la piste n'existe plus côté média).
+        if self.idx == usize::MAX {
+            return Ok(true);
+        }
+        match (self.snap.list, k) {
+            ("audio", "enabled") => {
+                let on = e.to_boolean(v);
+                self.d.borrow_mut().tracks[self.idx].enabled = on;
+                fire_track_list_change(e, &self.d, "audio");
+                Ok(true)
+            }
+            ("video", "selected") => {
+                let on = e.to_boolean(v);
+                {
+                    let mut d = self.d.borrow_mut();
+                    // Spec : `selected` exclusif par élément —
+                    // approximation bornée documentée :
+                    // exclusif **dans la videoTracks du
+                    // buffer** (l'union élément est hors
+                    // scope JS-C327).
+                    for t in d.tracks.iter_mut().filter(|t| t.list == "video") {
+                        t.selected = false;
+                    }
+                    if let Some(t) = d.tracks.get_mut(self.idx) {
+                        t.selected = on;
+                    }
+                }
+                fire_track_list_change(e, &self.d, "video");
+                Ok(true)
+            }
+            ("text", "mode") => {
+                let m = e.to_js_string(v)?;
+                if m != "disabled" && m != "hidden" && m != "showing" {
+                    return Err(e.type_error("TextTrack.mode: bad value"));
+                }
+                self.d.borrow_mut().tracks[self.idx].mode = match m.as_str() {
+                    "hidden" => "hidden",
+                    "showing" => "showing",
+                    _ => "disabled",
+                };
+                fire_track_list_change(e, &self.d, "text");
+                Ok(true)
+            }
+            _ => Ok(false),
+        }
+    }
+
+    fn trace(&self, out: &mut Vec<ObjId>) {
+        crate::heap::push_value(out, self.sb);
+        if let Some(o) = self.snap.obj {
+            crate::heap::push_value(out, o);
+        }
+    }
+
+    fn class_name(&self) -> &'static str {
+        match self.snap.list {
+            "audio" => "AudioTrack",
+            "video" => "VideoTrack",
+            _ => "TextTrack",
+        }
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+}
+
+impl Host for TrackListHost {
+    fn get(&self, e: &mut Engine, _t: Value, k: &str) -> JsResult<Option<Value>> {
+        if k == "length" {
+            let n = self
+                .d
+                .borrow()
+                .tracks
+                .iter()
+                .filter(|t| t.list == self.list)
+                .count();
+            return Ok(Some(Value::Num(n as f64)));
+        }
+        // `selectedIndex` (spec VideoTrackList) — rang du
+        // `selected` parmi les pistes de la liste, `-1`.
+        if k == "selectedIndex" && self.list == "video" {
+            let d = self.d.borrow();
+            let sel = d
+                .tracks
+                .iter()
+                .filter(|t| t.list == "video")
+                .position(|t| t.selected)
+                .map_or(-1.0, |i| i as f64);
+            return Ok(Some(Value::Num(sel)));
+        }
+        if let Ok(i) = k.parse::<usize>() {
+            let idx = {
+                let d = self.d.borrow();
+                d.tracks
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, t)| t.list == self.list)
+                    .nth(i)
+                    .map(|(i, _)| i)
+            };
+            return Ok(idx.and_then(|i| track_obj(e, &self.d, i, sb_value(e, &self.d))));
+        }
+        Ok(None)
+    }
+
+    fn trace(&self, out: &mut Vec<ObjId>) {
+        let d = self.d.borrow();
+        crate::heap::push_value(out, d.ms);
+        for t in &d.tracks {
+            if let Some(o) = t.obj {
+                crate::heap::push_value(out, o);
+            }
+        }
+    }
+
+    fn class_name(&self) -> &'static str {
+        match self.list {
+            "audio" => "AudioTrackList",
+            "video" => "VideoTrackList",
+            _ => "TextTrackList",
+        }
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+}
+
+/// Valeur wrapper du `SourceBuffer` — back-ref pour
+/// `track.sourceBuffer` (`TrackHost.sb`). `SbData` ne la
+/// stocke pas (le wrapper se trouve dans `MsData.buffers`) :
+/// on la résout via le parent.
+fn sb_value(e: &Engine, d: &Rc<RefCell<SbData>>) -> Value {
+    let ms = d.borrow().ms;
+    ms_data(e, ms).map_or(Value::Undefined, |m| {
+        m.borrow()
+            .buffers
+            .iter()
+            .copied()
+            .find(|&b| sb_data(e, b).is_some_and(|s| std::rc::Rc::ptr_eq(&s, d)))
+            .unwrap_or(Value::Undefined)
+    })
+}
+
+/// `list.getTrackById(id)` — spec : premier match `id`
+/// stringifié, `null` sinon.
+fn tl_get_track_by_id(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let Value::Obj(id) = this else {
+        return Err(e.type_error("TrackList.getTrackById: Illegal invocation"));
+    };
+    let Some(d) = (match e.heap.obj(id).map(|o| &o.kind) {
+        Some(ObjKind::Host(h)) => h
+            .clone()
+            .as_any()
+            .downcast_ref::<TrackListHost>()
+            .map(|r| (r.d.clone(), r.list)),
+        _ => None,
+    }) else {
+        return Err(e.type_error("TrackList.getTrackById: Illegal invocation"));
+    };
+    let want = match args.first() {
+        Some(v) => e.to_js_string(*v)?,
+        None => return Ok(Value::Null),
+    };
+    let idx = {
+        let sd = d.0.borrow();
+        sd.tracks
+            .iter()
+            .enumerate()
+            .filter(|(_, t)| t.list == d.1)
+            .find(|(_, t)| t.id.to_string() == want)
+            .map(|(i, _)| i)
+    };
+    Ok(idx
+        .and_then(|i| track_obj(e, &d.0, i, sb_value(e, &d.0)))
+        .unwrap_or(Value::Null))
+}
+
 // ------------------------------------------------------------------
 // Installation
 // ------------------------------------------------------------------
@@ -2288,6 +2946,24 @@ pub(crate) fn install_mse(e: &mut Engine) {
         ("SourceBufferList", sbl_illegal_ctor, sbl_proto(e)),
         ("TimeRanges", tr_illegal_ctor, tr_proto(e)),
         ("MediaError", me_illegal_ctor, me_proto(e)),
+        ("AudioTrack", track_illegal_ctor, track_proto(e, "audio")),
+        ("VideoTrack", track_illegal_ctor, track_proto(e, "video")),
+        ("TextTrack", track_illegal_ctor, track_proto(e, "text")),
+        (
+            "AudioTrackList",
+            track_illegal_ctor,
+            track_list_proto(e, "audio"),
+        ),
+        (
+            "VideoTrackList",
+            track_illegal_ctor,
+            track_list_proto(e, "video"),
+        ),
+        (
+            "TextTrackList",
+            track_illegal_ctor,
+            track_list_proto(e, "text"),
+        ),
     ] {
         let fv = e.native_fn(name, ctor);
         if let Value::Obj(fid) = fv {
