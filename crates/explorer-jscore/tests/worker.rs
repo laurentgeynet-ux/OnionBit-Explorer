@@ -190,3 +190,67 @@ fn worker_no_loader_honest_error() {
     let err = e.eval("new Worker('x.js')").unwrap_err();
     assert!(err.to_string().contains("no loader"), "{err}");
 }
+
+#[test]
+fn worker_from_blob_url_loads() {
+    // §B-84 — mur terrain : `new Worker(URL.createObjectURL(b))`
+    // mourait silencieusement (`onerror` ErrorEvent vide) alors
+    // que `fetch(blob:)` résout — le chargeur partait en requête
+    // réseau sans le registre d'URL objets. Transmuxer hls.js/
+    // dash.js/shaka = worker-from-blob bundlé. Loader VIDE :
+    // si la source passe par le réseau, le test échoue.
+    let mut e = engine_with_workers(&[]);
+    e.eval(
+        "var b = new Blob(['self.onmessage=function(ev){postMessage(ev.data*2)}'],\
+            {type:'text/javascript'});\
+         var w = new Worker(URL.createObjectURL(b));\
+         w.onmessage = function(ev){ globalThis.__r = ev.data; };\
+         w.postMessage(21)",
+    )
+    .unwrap();
+    assert_eq!(pump_until(&mut e, "globalThis.__r === 42"), "true");
+}
+
+#[test]
+fn worker_import_scripts_blob_url_resolves() {
+    // Le registre `blob:` du parent est seedé dans l'engine du
+    // worker au spawn — `importScripts(blob:)` résout un object
+    // URL créé côté page (loader vide : le réseau ne sert rien).
+    let mut e = engine_with_workers(&[(
+        "w.js",
+        "self.onmessage = function(ev){ importScripts(ev.data); postMessage(depTag()); }",
+    )]);
+    e.eval(
+        "var dep = new Blob(['function depTag(){return \"dep-loaded\"}'],\
+            {type:'text/javascript'});\
+         var u = URL.createObjectURL(dep);\
+         var w = new Worker('w.js');\
+         w.onmessage = function(ev){ globalThis.__r = ev.data; };\
+         w.postMessage(u)",
+    )
+    .unwrap();
+    assert_eq!(
+        pump_until(&mut e, "globalThis.__r === 'dep-loaded'"),
+        "true"
+    );
+}
+
+#[test]
+fn worker_blob_url_unknown_fires_error_with_message() {
+    // `blob:` inconnue/révoquée → event `error` spec avec
+    // `message` peuplé (avant : ErrorEvent vide — les players
+    // diagnostiquaient à l'aveugle).
+    let mut e = engine_with_workers(&[]);
+    e.eval(
+        "var w = new Worker('blob:never-registered/9');\
+         w.onerror = function(ev){ globalThis.__r = ev.message; }",
+    )
+    .unwrap();
+    assert_eq!(
+        pump_until(
+            &mut e,
+            "typeof globalThis.__r === 'string' && globalThis.__r.length > 0"
+        ),
+        "true"
+    );
+}

@@ -689,6 +689,32 @@ pub(crate) fn blob_url_lookup(e: &Engine, url: &str) -> Option<(Rc<Vec<u8>>, Str
     e.files.blob_urls.get(url).cloned()
 }
 
+/// Snapshot du registre `blob:` — partagé avec les engines
+/// worker au spawn (§B-84) : `importScripts`/`fetch`/`XHR`
+/// sur un object URL créé dans le realm parent résolvent
+/// comme dans ce realm. Octets **copiés** — le snapshot
+/// traverse un thread (`Rc` n'est pas `Send`) ; les
+/// `revokeObjectURL` ultérieurs ne se propagent pas
+/// (approximation documentée — spec : le registre vit dans
+/// le cluster d'agents, la révocation devrait se voir).
+pub(crate) fn blob_urls_snapshot(e: &Engine) -> HashMap<String, (Vec<u8>, String)> {
+    e.files
+        .blob_urls
+        .iter()
+        .map(|(u, (b, t))| (u.clone(), (b.as_ref().clone(), t.clone())))
+        .collect()
+}
+
+/// Seed du registre `blob:` dans un engine worker — les URL
+/// objets du parent deviennent résolvables (`importScripts`,
+/// `fetch`, `XHR`) ; n'écrase pas les URL que le worker
+/// aurait créées lui-même après le seed (clés distinctes).
+pub(crate) fn blob_urls_seed(e: &mut Engine, map: HashMap<String, (Vec<u8>, String)>) {
+    e.files
+        .blob_urls
+        .extend(map.into_iter().map(|(u, (b, t))| (u, (Rc::new(b), t))));
+}
+
 /// `FormData.append(name, blob, filename)` — spec : le blob
 /// est emballé en `File` portant `filename` (lastModified =
 /// maintenant) ; `None` si `v` n'est pas un `Blob`.

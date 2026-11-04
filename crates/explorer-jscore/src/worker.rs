@@ -23,6 +23,7 @@
 use crate::heap::{JsResult, ObjKind, Thrown};
 use crate::value::{ObjId, Value};
 use crate::Engine;
+use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{sync_channel, Receiver, RecvTimeoutError, SyncSender};
@@ -167,6 +168,13 @@ pub(crate) struct WorkerPending {
     pub in_rx: Receiver<WireValue>,
     /// Émetteur worker→main — cloné dans le thread au spawn.
     pub out_tx: SyncSender<WorkerEvent>,
+    /// Registre `blob:` du parent au moment du ctor (§B-84) —
+    /// seedé dans l'engine du worker au spawn : `importScripts`/
+    /// `fetch`/`XHR` sur un object URL parent résolvent.
+    /// Octets **owned** (`Vec<u8>`, pas `Rc` — la struct part
+    /// dans `thread::spawn`, `Rc` n'est pas `Send`) : une copie
+    /// par `new Worker`, contenu script ~Ko.
+    pub blob_urls: HashMap<String, (Vec<u8>, String)>,
 }
 
 /// Objet hôte du wrapper `Worker` — porte le canal sortant et le
@@ -418,9 +426,12 @@ impl Engine {
                                     loader,
                                     in_rx,
                                     out_tx,
+                                    blob_urls,
                                     ..
                                 } = p;
-                                worker_main(&spec, &src, loader, &out_tx, &in_rx, op, alive_w);
+                                worker_main(
+                                    &spec, &src, loader, &out_tx, &in_rx, op, alive_w, blob_urls,
+                                );
                             });
                             self.workers[i].join = Some(join);
                         }
@@ -507,6 +518,19 @@ impl Engine {
         self.set_own(id, "type", t, true);
         self.set_own(id, "data", data, true);
         self.set_own(id, "target", target, true);
+        // `ErrorEvent` spec (§B-84) : `onerror` sur un fetch de
+        // source tombé doit porter `message`/`filename`/`lineno`/
+        // `colno` — sinon les handlers d'erreur des players
+        // (hls.js logue `ev.message` sur worker mort) lisent
+        // `undefined` et diagnostiquent à l'aveugle.
+        if ty == "error" {
+            self.set_own(id, "message", data, true);
+            self.set_own(id, "error", data, true);
+            let empty = self.str_val("");
+            self.set_own(id, "filename", empty, true);
+            self.set_own(id, "lineno", Value::Num(0.0), true);
+            self.set_own(id, "colno", Value::Num(0.0), true);
+        }
         Value::Obj(id)
     }
 
@@ -795,7 +819,23 @@ pub(crate) fn worker_ctor_pub(e: &mut Engine, _this: Value, args: &[Value]) -> J
     }
     let mut loader = factory();
     let referrer = e.hooks.page_url.clone();
-    let src_rx = loader.request(&spec, &referrer);
+    // §B-84 — `blob:` se résout **dans le moteur** : le registre
+    // d'URL objets vit ici (même couture que `fetch(blob:)`/`xhr`),
+    // pas derrière le loader réseau qui le verrait partir en HTTP
+    // → fetch impossible → `onerror` vide. La source est enfilée
+    // tout de suite : le spawn reste différé à la pompe (spec —
+    // `new Worker` rend le wrapper avant le démarrage).
+    let src_rx = if spec.starts_with("blob:") {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let out = crate::files::blob_url_lookup(e, &spec)
+            .map(|(bytes, _ty)| String::from_utf8_lossy(&bytes).into_owned())
+            .ok_or_else(|| "URL objet inconnue ou révoquée".to_string());
+        let _ = tx.send(out);
+        rx
+    } else {
+        loader.request(&spec, &referrer)
+    };
+    let blob_urls = crate::files::blob_urls_snapshot(e);
     let (in_tx, in_rx) = sync_channel::<WireValue>(e.worker_cfg.queue_len);
     let (out_tx, out_rx) = sync_channel::<WorkerEvent>(e.worker_cfg.queue_len);
     let alive = Arc::new(AtomicBool::new(true));
@@ -824,6 +864,7 @@ pub(crate) fn worker_ctor_pub(e: &mut Engine, _this: Value, args: &[Value]) -> J
             spec,
             in_rx,
             out_tx,
+            blob_urls,
         }),
         alive,
         join: None,
@@ -836,7 +877,7 @@ pub(crate) fn worker_ctor_pub(e: &mut Engine, _this: Value, args: &[Value]) -> J
 /// Corps du thread worker : scope dédié (`self`/`postMessage`/
 /// `importScripts`/`close`), eval de la source, puis pompe
 /// `recv` ↔ timers jusqu'à déconnexion ou `close()`.
-#[allow(clippy::too_many_lines)]
+#[allow(clippy::too_many_lines, clippy::too_many_arguments)]
 fn worker_main(
     spec: &str,
     src: &str,
@@ -845,6 +886,7 @@ fn worker_main(
     rx: &Receiver<WireValue>,
     op_limit: u64,
     alive: Arc<AtomicBool>,
+    blob_urls: HashMap<String, (Vec<u8>, String)>,
 ) {
     let fail = |e: &mut Engine, t: Thrown| {
         let s = e.describe(t.0);
@@ -857,6 +899,9 @@ fn worker_main(
     e.worker_loader = Some(loader);
     e.worker_out = Some(out.clone());
     e.worker_alive = alive;
+    // §B-84 — registre `blob:` du parent seedé : `importScripts`/
+    // `fetch`/`XHR` sur un object URL du realm créateur résolvent.
+    crate::files::blob_urls_seed(&mut e, blob_urls);
     // Scope WorkerGlobalScope minimal.
     let g = e.global;
     let gv = Value::Obj(g);
@@ -978,6 +1023,19 @@ fn wscope_import_scripts(e: &mut Engine, _this: Value, args: &[Value]) -> JsResu
     let mut srcs = Vec::new();
     for a in args {
         let spec = e.to_js_string(*a)?;
+        // §B-84 — `blob:` se résout dans l'engine (registre
+        // seedé du parent au spawn) avant tout aller réseau —
+        // le loader n'a pas le registre d'URL objets.
+        if spec.starts_with("blob:") {
+            if let Some((bytes, _ty)) = crate::files::blob_url_lookup(e, &spec) {
+                srcs.push(String::from_utf8_lossy(&bytes).into_owned());
+                continue;
+            }
+            e.worker_loader = Some(loader);
+            return Err(e.type_error(format!(
+                "importScripts: cannot load `{spec}`: URL objet inconnue"
+            )));
+        }
         let referrer = e.hooks.page_url.clone();
         match loader.load(&spec, &referrer) {
             Ok(s) => srcs.push(s),

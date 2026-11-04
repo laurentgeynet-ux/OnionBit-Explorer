@@ -411,6 +411,22 @@ throws avalés dans les promesses. À re-mesurer :
 `mseBuffers` peuplé par le player, multi-buffer
 (`open_mse_multi`), `--seek-ms` surface vivante.
 
+**§B-84** (worker-from-blob — mur commun
+hls.js/dash.js/shaka, transmuxer bundlé) :
+vol 631 — player **démarré** (`isPaused()→false`,
+manifeste `.m3u8` parsé in-page = continuations
+`fetch().then` vivantes, effet JS-C326) mais
+`new Worker(blob:)` mourait (`onerror` vide) —
+la source partait au loader réseau sans le
+registre `blob:` du moteur. **JS-C329** : ctor
++ `importScripts` résolvent `blob:` en-engine
+(registre parent seedé au spawn), `ErrorEvent`
+peuplé (`message`/`filename`/`lineno`/`colno`).
+Verrous `worker.rs` ×3. Recette vol suivant :
+bitmovin nu → `mseBuffers` peuplé **par le
+player** → `open_mse` → premier décodage
+piloté par un player réel.
+
 Claims codecs : l'oracle = `onionmedia_can_play_type`
 (`""`/`maybe`/`probable`), table déclarée alignée
 Étape 181. Rejets propres attendus — pas des bugs :
