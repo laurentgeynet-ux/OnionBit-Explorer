@@ -139,11 +139,111 @@ Invoke-RestMethod "$BASE/api/tabs/$tab/layout"   # arbre de boîtes
 | `POST /api/tabs/{id}/viewport` `{w,h}` | fenêtre de vol |
 | `GET  /api/tabs/{id}/dom` `/layout` `/mem` | télémétrie — **404 transitoire possible sur page à JS continu** (DOM détaché pendant les apply jobs : alternance 200/404 mesurée sur github) — retenter, ne pas diagnostiquer un « DOM absent » |
 | `POST /api/tabs/{id}/back` `/forward` `/reload` | historique |
-| `GET  /api/events` | SSE — `navigated`, `frame_invalidated`… |
+| `GET  /api/tabs/{id}/media` | offres média vivantes (`<video>`/`<audio>`/MSE) |
+| `GET  /api/tabs/{id}/media/{mid}` | fiche d'une surface (diagnostics, `410` id mort) |
+| `POST …/media/{mid}/claim` `{codecs:[…]}` | premier arrivé gagne : `200` / `409` / `410` |
+| `GET  …/media/{mid}/segments?buffer=&max=&from=` | pull MSE — `octet-stream` + `X-Mse-Cursor`/`Eos`/`Section`/`Pending` ; `from` hors fenêtre → `416` ; non-MSE → `{mse:false}` |
+| `POST …/media/{mid}/release` | détachement hôte |
+| `POST …/media/{mid}/state` | rapport hôte ≤ 4 Hz — `{position_ms,duration_ms,buffered_ms,state,error?}`, `state ∈ playing\|paused\|ended\|error` |
+| `GET  /api/events` | SSE — `navigated`, `frame_invalidated`, `media_offered`/`moved`/`gone`/`command`… |
 
 Format `input` : `{"type":"click","x":N,"y":N}` (px viewport),
 `{"type":"scroll","dy":N}` (px CSS, + = vers le bas),
 `{"type":"key","key":"Enter","mods":["ctrl"]}`.
+
+## 3b. Média — vol e2e (offre/claim/segments/state, ADR-0029)
+
+Deux faits d'abord — ils orientent tout le vol :
+
+- **Le moteur ne décode pas.** Le daemon n'ouvre jamais
+  `onionmedia_ffi.dll` : il *offre* les surfaces
+  `<video>`/`<audio>`/MSE, l'hôte (app Flutter) *joue*.
+  Un vol API pur éprouve le contrat — offre, claim,
+  segments, state — jamais les pixels.
+- **L'hôte résout le DLL adjacente** —
+  `onionmedia_ffi.dll` à côté de `explorer_app.exe`
+  (`ONIONMEDIA_FFI_LIB` sinon). Vérifier le md5 du
+  manifest terrain (`Étape 181`, ABI 4) — un DLL
+  périmé = constat invalide (règle binaire frais §0).
+
+### a) Sonde contractuelle — daemon seul, aucune DLL
+
+```powershell
+# sonde tout-en-un : nav + pompe + offres + claim d'essai
+.\target\release\explorer-cli.exe jprobe <url-page-video>
+# → "[media : N offres]" + "- #id kind WxH url (mime)"
+#   + "claim #id → true" puis release
+```
+
+REST manuel équivalent :
+
+```powershell
+Invoke-RestMethod "$BASE/api/tabs/$tab/media"            # offres
+Invoke-RestMethod "$BASE/api/tabs/$tab/media/$mid/claim" `
+  -Method Post -ContentType 'application/json' `
+  -Body '{"codecs":["video/mp4"]}'
+Invoke-RestMethod "$BASE/api/tabs/$tab/media/$mid/state" `
+  -Method Post -ContentType 'application/json' `
+  -Body '{"state":"playing","position_ms":1000,"duration_ms":0,"buffered_ms":0}'
+Invoke-RestMethod "$BASE/api/tabs/$tab/media/$mid/release" -Method Post
+```
+
+Surface MSE (`"mse":true`, `mseBuffers`) — pull de segments :
+
+```powershell
+Invoke-WebRequest "$BASE/api/tabs/$tab/media/$mid/segments?buffer=0&max=1048576" `
+  -OutFile seg.bin   # octet-stream ; en-têtes X-Mse-Cursor
+                     # (position absolue), X-Mse-Eos:1 (fin),
+                     # X-Mse-Pending:1 (re-sonder — pas un bug)
+# `?from=N` = seek à la position absolue N ; hors fenêtre → 416
+```
+
+Commands JS → hôte : `media_command` en SSE (`play`/`pause`/
+`seek`/`volume`/`muted`/`rate`) — tiré quand la page appelle
+`.play()` etc. Rapport hôte → `POST …/state` borné ≤ 4 Hz.
+
+### b) Lecture réelle — pixels = app hôte
+
+```powershell
+# mode in-process (FFI) :
+terrain-bin\app\explorer_app.exe
+#   explorer_ffi.dll + onionmedia_ffi.dll adjacents
+# mode REST : explorer-daemon.exe --port 9377, puis l'app
+```
+
+L'app auto-claim avec `AppConfig.mediaCodecs` (les
+capacités moteur : `EXPLORER_MEDIA_CODECS` côté daemon —
+liste `;`-séparée — / `explorer_media_codecs` côté FFI ;
+`MediaSource.isTypeSupported` JS en dépend) puis joue via
+`OnionMediaPlayer` : `onionmedia_open_path` (fichier local),
+`open_url` (http, HLS `.m3u8`, DASH `.mpd`),
+`open_mse`/`open_mse_multi` (surfaces MSE — pull loopback
+FFI ou `GET …/segments`).
+
+Actifs de test : `C:\Onion-explorer-media\target\bench-media\`
+(`onion_bench_*.mp4`/`*.webm` + vecteurs `ac3-`/`wav-`/
+`av1-vectors/`) — régénérables via `codec_bench_cli` ;
+page minimale `<video src controls autoplay>` servie par
+`python -m http.server 8001`, ou URL `file:///` directe.
+
+### Verdicts à rapporter (§B)
+
+`GET /api/tabs/1/media` : `claimed:true`,
+`state:"playing"`, `position_ms` qui avance entre deux
+lectures, `buffered_ms`. SSE `media_offered` porte
+`mime`, `mse`, `mseBuffers`.
+
+Pixels : **la frame moteur ne montre pas la vidéo** —
+l'image décodée est un overlay hôte (§4). Verdict visuel
+= `scripts/capture_window.ps1` (fenêtre réelle), pas
+`GET …/frame`.
+
+Claims codecs : l'oracle = `onionmedia_can_play_type`
+(`""`/`maybe`/`probable`), table déclarée alignée
+Étape 181. Rejets propres attendus — pas des bugs :
+h264-high10 / av1-10b (décodeurs 8-bit), eac3 `bsid>10`,
+mp2 (Layer II), `video/x-msvideo` (pas de démuxeur AVI),
+`video/ogg` (ogv = theora indécodable).
 
 ## 4. Ce que l'agent voit — et ne voit pas
 
