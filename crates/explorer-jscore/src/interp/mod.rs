@@ -3322,7 +3322,7 @@ impl Engine {
 
     /// New array value.
     pub(crate) fn new_array(&mut self, elems: Vec<Value>) -> Value {
-        crate::J17_ARRAY.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        crate::j17_tick(&crate::J17_ARRAY);
         let proto = Value::Obj(self.protos.array);
         Value::Obj(self.heap.alloc_obj(Object::array(elems, proto)))
     }
@@ -4962,7 +4962,7 @@ impl Engine {
     /// `TypeError` when `v` is not iterable; propagates iterator
     /// callback exceptions. Op-bounded via `tick`.
     pub(crate) fn iter_values(&mut self, v: Value) -> JsResult<Vec<Value>> {
-        crate::J17_ITER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        crate::j17_tick(&crate::J17_ITER);
         match v {
             Value::Obj(id) => {
                 if let Some(m) = self.get_prop(id, SYM_ITERATOR) {
@@ -5089,7 +5089,7 @@ impl Engine {
     /// # Errors
     /// Same as `iter_values` + `await_value` (pending → `TypeError`).
     pub(crate) fn iter_values_await(&mut self, v: Value) -> JsResult<Vec<Value>> {
-        crate::J17_ITER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        crate::j17_tick(&crate::J17_ITER);
         if let Value::Obj(id) = v {
             if let Some(m) = self.get_prop(id, SYM_ASYNC_ITERATOR) {
                 if self.is_callable(m) {
@@ -5140,7 +5140,7 @@ impl Engine {
         arg_exprs: &[Expr],
     ) -> JsResult<Vec<Value>> {
         if !arg_exprs.is_empty() {
-            crate::J17_ARGS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            crate::j17_tick(&crate::J17_ARGS);
         }
         let mut out = Vec::with_capacity(arg_exprs.len());
         for a in arg_exprs {
@@ -7144,7 +7144,7 @@ impl Engine {
     /// (deux `Symbol('x')` distincts indexent deux clés
     /// différentes, spec identité).
     pub(crate) fn prop_key(&mut self, v: Value) -> JsResult<String> {
-        crate::J17_PROP_KEY.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        crate::j17_tick(&crate::J17_PROP_KEY);
         match v {
             Value::Num(n) => Ok(num_to_js_string(n)),
             Value::Obj(id) => match self.heap.obj(id).map(|o| &o.kind) {
@@ -7178,7 +7178,7 @@ impl Engine {
         };
         let v = elems.get(n as usize).copied().filter(|v| !v.is_hole());
         if v.is_some() {
-            crate::J17_ARR_IDX.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            crate::j17_tick(&crate::J17_ARR_IDX);
         }
         v
     }

@@ -79,6 +79,20 @@ cd app; flutter analyze; flutter test
 
 Ou tout d'un coup : `pwsh -File scripts/verify_all.ps1`.
 
+**Suites lourdes** : `cargo test` en profil debug fait tourner
+l'interpréteur non optimisé (~10-20× plus lent — la suite
+`hostile` jscore passe de ~10 min à ~30 s en `--release`).
+Pour le diagnostic itératif : `cargo test -p explorer-jscore
+--test <suite> --release` (le gate verify_all garde le profil
+debug — il vérifie les tests, pas la perf). Per-test timings :
+`cargo nextest run`. **Instrumentation** : les compteurs J17_*
+(allocs par site, JS-C306+) sont **désarmés par défaut** —
+les armer coûte un `fetch_add` atomique par événement chaud ;
+profils : `EXPLORER_J17_PROF=1` (daemon/binaires) ou
+`j17_enable()` (bancs). L'allocateur `stats_alloc` est global
+dès `explorer-common` — `EXPLORER_ALLOC_TRACE=1` pour
+l'attribution par phase.
+
 ## 4. Règles dures
 
 1. **`#![forbid(unsafe_code)]`** dans tous les crates `explorer-*`.

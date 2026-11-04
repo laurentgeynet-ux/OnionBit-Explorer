@@ -612,7 +612,7 @@ impl Lexer<'_> {
                     return if let Some(kw) = keyword(s) {
                         Ok(Tok::Kw(kw))
                     } else {
-                        crate::J17_TOK_IDENT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        crate::j17_tick(&crate::J17_TOK_IDENT);
                         Ok(Tok::Ident(crate::intern(s)))
                     };
                 }
@@ -658,7 +658,7 @@ impl Lexer<'_> {
             Some(_) if escaped => Err(self.err("reserved word cannot be escaped")),
             Some(kw) => Ok(Tok::Kw(kw)),
             None => {
-                crate::J17_TOK_IDENT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                crate::j17_tick(&crate::J17_TOK_IDENT);
                 Ok(Tok::Ident(crate::intern(&s)))
             }
         }

@@ -246,6 +246,37 @@ pub static J17_PROP_KEY: std::sync::atomic::AtomicU64 = std::sync::atomic::Atomi
 /// sans `String` de clé (`arr_index_get`).
 pub static J17_ARR_IDX: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
+/// Gate J17 : les compteurs ci-dessus ne s'incrémentent que si
+/// `EXPLORER_J17_PROF` est posé (non vide/non "0") au premier
+/// appel, ou si [`j17_enable`] a été appelé (tests/benchs). Un
+/// `fetch_add` coûte ~10-20 ns chacun — des millions par éval
+/// lourde taxaient toute la suite ; un `load`+branche ~1 ns.
+static J17_ENABLED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static J17_ENV_ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+
+/// `true` si les compteurs J17 sont armés (env ou enable).
+#[inline]
+pub(crate) fn j17_on() -> bool {
+    J17_ENABLED.load(std::sync::atomic::Ordering::Relaxed)
+        || *J17_ENV_ON.get_or_init(|| {
+            std::env::var("EXPLORER_J17_PROF").is_ok_and(|v| !v.is_empty() && v != "0")
+        })
+}
+
+/// Arme les compteurs J17 sans variable d'environnement
+/// (bancs de test J17 — sinon les relevés restent à zéro).
+pub fn j17_enable() {
+    J17_ENABLED.store(true, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Incrément borné d'un compteur J17 — no-op hors mode profil.
+#[inline]
+pub(crate) fn j17_tick(c: &'static std::sync::atomic::AtomicU64) {
+    if j17_on() {
+        c.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
 /// §B-59 — dernière méthode/prop `Host` dispatchée
 /// (`class:name`) : les `h.invoke`/`h.get`/`iter_items`…
 /// passent **hors** `call_value_impl` — `calls`/`nat` muets,

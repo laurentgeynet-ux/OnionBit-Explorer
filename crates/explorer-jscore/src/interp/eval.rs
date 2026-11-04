@@ -467,13 +467,13 @@ impl Engine {
                 let callee = match &**callee {
                     Expr::Member(base, name) => {
                         let b = self.eval_expr(env, this, base)?;
-                        crate::J17_MEMBER_KEY.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        crate::j17_tick(&crate::J17_MEMBER_KEY);
                         Callee::Member(b, name.clone())
                     }
                     Expr::Index(base, key) => {
                         let b = self.eval_expr(env, this, base)?;
                         let k = self.eval_expr(env, this, key)?;
-                        crate::J17_MEMBER_KEY.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        crate::j17_tick(&crate::J17_MEMBER_KEY);
                         Callee::Member(b, Rc::from(self.prop_key(k)?))
                     }
                     Expr::SuperMember(name) => Callee::Super(name.clone()),

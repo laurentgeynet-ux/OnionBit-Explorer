@@ -19,6 +19,7 @@ static ALLOC: &stats_alloc::StatsAlloc<std::alloc::System> = &stats_alloc::INSTR
 /// (concaténation en boucle) doit être strictement positive.
 #[test]
 fn alloc_split_surfaces() {
+    explorer_jscore::j17_enable();
     let mut e = Engine::new();
     let r = e.eval("var s=''; for(var i=0;i<2000;i++) s+='abcdef'; s.length");
     match r {
@@ -42,6 +43,7 @@ fn j17_bench_real_script() {
         return;
     };
     let src = std::fs::read_to_string(&path).expect("fixture lisible");
+    explorer_jscore::j17_enable();
     let mut e = Engine::new();
     e.install_dom(&std::rc::Rc::new(std::cell::RefCell::new(
         explorer_jscore::Dom::from_html("<html><body><div id=x></div></body></html>"),
