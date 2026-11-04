@@ -45,8 +45,9 @@ $env:EXPLORER_VIEWPORT='1366x900'
 $env:EXPLORER_PROFILE='C:\OnionBit-vol\prof<N>'   # froid = défaut
 pwsh -File scripts/spawn_daemon.ps1 -Port 9385 `
   -LogDir "C:\OnionBit-vol\logs"
-# (env hérité par le process WMI — EXPLORER_PROFILE n'a pas
-# besoin d'être relayé ; -Profile <dir> le surchargerait)
+# (WMI n'hérite PAS l'env de l'appelant — le script cuit les
+# EXPLORER_* en `set` dans la ligne cmd ; -Profile <dir>
+# surchargerait EXPLORER_PROFILE)
 
 # 0.4 watchdog OBLIGATOIRE — les deux lignes, dès le lancement
 # <pid> = la ligne « daemon PID <n> » de spawn_daemon.ps1

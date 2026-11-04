@@ -35,10 +35,10 @@
 
 param(
   [int]$Port = 9377,
-  # --profile DIR du daemon. '' = non passé : l'env
-  # EXPLORER_PROFILE de l'appelant gouverne (WMI hérite
-  # l'environnement) — la checklist §0.3 pose l'env ; un
-  # -Profile explicite la surcharge (même règle que le binaire).
+  # --profile DIR du daemon. '' = non passé : EXPLORER_PROFILE
+  # est propagé via les `set` cuits (voir plus bas — WMI
+  # n'hérite PAS l'env de l'appelant) ; un -Profile explicite
+  # l'emporte (même règle que le binaire : --profile > env).
   [string]$Profile = '',
   [string]$Exe = '',
   [string]$LogDir = ''
@@ -85,7 +85,19 @@ $exitlog = Join-Path $LogDir "daemon-$Port.exit.log"
 # signature). `!ERRORLEVEL!`/`!DATE!`/`!TIME!` sont retardés
 # par /v:on pour être lus au moment de la mort.
 $profArg = if ($Profile -ne '') { " --profile `"$Profile`"" } else { '' }
-$inner = "`"$Exe`" --port $Port$profArg " +
+
+# Win32_Process.Create tourne sous l'environnement du
+# provider WMI — l'env de l'appelant ne traverse PAS
+# (mesuré au vol 636 : EXPLORER_PROFILE/EXPLORER_MEDIA_CODECS
+# ignorés → profil `default` chargé). On cuit donc les
+# EXPLORER_* de l'appelant dans la ligne cmd (`set "K=V" &`
+# séquentiels) — propagation garantie quel que soit
+# l'appelant. `"` est évacué des valeurs (un guillemet
+# casserait la ligne ; les valeurs Explorer n'en portent pas).
+$sets = ((Get-ChildItem env: |
+  Where-Object { $_.Name -like 'EXPLORER_*' } |
+  ForEach-Object { 'set "{0}={1}" & ' -f $_.Name, ($_.Value -replace '"', '') }) -join '')
+$inner = $sets + "`"$Exe`" --port $Port$profArg " +
   "> `"$stdout`" 2> `"$stderr`" " +
   "& <nul set /p _=EXIT:!ERRORLEVEL! > `"$exitlog`" " +
   "& echo !DATE! !TIME! >> `"$exitlog`""
