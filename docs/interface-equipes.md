@@ -145,26 +145,80 @@ déclaré. DRM (Widevine/FairPlay) et MSE hors scope v1.
   retombe sur les stubs ADR-0023.
 - `POST …/state`
   `{position_ms, duration_ms, buffered_ms, state, error?}`
-  avec `state` ∈ `"playing"|"paused"|"ended"|"error"` —
-  rapport après chaque transition + battement
-  `timeupdate` borné (≤ 4 Hz) ; le moteur le reflète
-  dans les props JS et tire les events DOM.
+  avec `state` ∈ `"playing"|"paused"|"ended"|"error"|
+  "buffering"` — rapport après chaque transition +
+  battement `timeupdate` borné (≤ 4 Hz) ; le moteur le
+  reflète dans les props JS et tire les events DOM.
+  `"buffering"` (ajout 182) = underrun décodeur : tirés
+  `waiting`+`stalled`, `readyState` rétrogradé ≤ 2.
 - `GET /api/tabs/{id}/media` — liste des offres vivantes
   (debug, parité FFI).
 
 ### Vocabulaire JS (éléments média)
 
 - **Claimé** : `play()` résout à la première frame hôte
-  (premier `state:"playing"` rapporté), `pause()`
-  résout au `paused` rapporté ; `currentTime` =
-  `position_ms/1000`, `duration`, `buffered`
-  (`TimeRanges` `[0, buffered]`), `paused`, `ended`,
-  `volume`, `muted`, `playbackRate`, `readyState = 4`
-  dès métadonnées connues ; `canPlayType` reflète les
-  `codecs` du claim. Events DOM tirés : `play`,
-  `playing`, `pause`, `seeking`, `seeked`,
-  `timeupdate`, `durationchange`, `loadedmetadata`,
-  `volumechange`, `ended`, `error`.
+  (premier `state:"playing"` rapporté — déjà `playing`
+  → résolution immédiate, spec), `pause()` résout au
+  `paused` rapporté ; `currentTime` =
+  `position_ms/1000` (`ended` impose `position =
+  duration`), `duration`, `paused`, `ended`,
+  `volume`, `muted`, `playbackRate` ; `canPlayType`
+  reflète les `codecs` du claim ; `el.error` =
+  `MediaError` réel (`code` 1-4 **classifié** depuis
+  la chaîne hôte, constantes `MEDIA_ERR_*` sur le
+  constructeur et le proto).
+- **`buffered` = `TimeRanges`** — progressif :
+  `[0, buffered_ms]` du rapport ; MSE : **union des
+  `SourceBuffer` actifs** (données réellement
+  appendées — le `buffered_ms` hôte n'est pas
+  significatif sous MSE).
+- **`readyState` = échelle spec `HAVE_*`** (étape 182,
+  plus le binaire `0→4` historique), dérivée par
+  rapport de `buffered_end` *per-source* (même source
+  que `el.buffered` : `buffered_ms` progressif, union
+  MSE) :
+
+  | Condition | `readyState` | Event au passage |
+  |---|---|---|
+  | rapport livré | ≥ 1 `HAVE_METADATA` | `loadedmetadata` |
+  | `buffered_end>0` ou `position>0` | ≥ 2 | `loadeddata` |
+  | `buffered_end>position` ou `ended` | ≥ 3 | `canplay` |
+  | `buffered_end≥duration` (finie) ou marge `≥2 s` en `playing` | 4 | `canplaythrough` |
+  | `state:"buffering"` | rétrogradé ≤ 2 | `waiting`+`stalled` |
+
+  Edge-triggered par niveau, **re-tirable** après
+  récupération d'underrun (re-climb spec post-
+  rebuffer) ; chaque event drain ses microtasks (un
+  handler `loadedmetadata` qui appelle `play()` n'attend
+  pas `canplay`). Pas d'estimateur de bande passante —
+  la marge `canplaythrough` de 2 s est une
+  approximation documentée, pas une prédiction.
+- **Events DOM tirés** (non-bubblants) : `loadstart`
+  (au claim = début de fetch hôte, approximation
+  documentée), `loadedmetadata`, `loadeddata`,
+  `canplay`, `canplaythrough`, `durationchange`,
+  `progress` (croissance de `buffered_end` ; sous MSE
+  filé à l'`updateend` vers l'élément attaché —
+  la croissance y vit dans `appendBuffer`),
+  `play`/`playing`/`pause`/`ended`/`error`,
+  `waiting`+`stalled` (underrun — `stalled` lie le
+  fetch réseau dans la spec stricte ; notre
+  `buffering` est un underrun décodeur :
+  approximation assumée, les spinners players le
+  lisent), `seeking`/`seeked` (clôturé dès que la
+  tête rejoint la cible à ±250 ms ou qu'elle bouge —
+  un seek vers la position courante n'orpheline plus
+  `seeking`), `timeupdate` (au mouvement de tête,
+  borné par le ≤ 4 Hz hôte), `volumechange`,
+  `ratechange`. **Hors scope v1** : `emptied`,
+  `abort`, `suspend` — aucun signal de cycle fetch
+  côté hôte.
+- **Fenêtre moteur-absent** (pompe détachée,
+  étape 182) : claims et dernier rapport retenus par
+  surface (`claim_pending`/`report_pending`),
+  relivrés à la réinsertion dans l'ordre
+  claim→state — synchro d'état (le dernier rapport
+  suffit), jamais de file d'événements.
 - **Non claimé** : stubs ADR-0023 **inchangés** —
   `play()`/`setSinkId` → `NotSupportedError`,
   `canPlayType` → `""`, props figées. **Clause
@@ -890,3 +944,4 @@ journal « livré ».
 
 | 2026-11-03 | **Demande PIPE→NAV — fenêtrage raster permanent (P4/R-N)** : `rasterize_window_cached` accepte désormais `y_css` négatif (clamp relâché, borne `h_px≤16 384` inchangée — `raster.rs`). **Spec mécanique côté core** : (1) cap `apply.rs:2098` → `list.height > vh.max(1024)` en CSS px (fini `MAX_FRAME_DIM/scale`) ; (2) `doc_h_clamped` **stocké** par `repaint_payload` (`windowed`), pas re-dérivé `mod.rs:1657` ; (3) `?full=1` (`frame.rs`/`api`) → raster on-demand `rasterize_window_cached(&list, fonts, scale, -scroll_y, doc_h_css, gc)` borné 16 k ; (4) `WARN encode_failed bytes=N` aux deux `false` de `encode_png_to` (le `png_b=0` >55 Mo est muet — instrumenter, pas contourner). Phase 2 optionnelle : dirty-windowed (regions−scroll_y ∩ [0,vh]). |
 | 2026-11-10 | `explorer-core`/`explorer-api` (+`explorer-render` diag — périmètre PIPE touché par NAV) — **Étape 180 : fenêtrage raster permanent (P4 — spec du 2026-11-03 exécutée)** | Cap `list.height > vh.max(MIN_FULL_DOC_CSS=1024)` px CSS en `apply.rs` (fini `MAX_FRAME_DIM/scale`) — tout doc plus haut que le viewport (plancher 1 024) produit une frame `vw×vh` constante ; diff dirty plein-doc inchangé sous le cap. `Tab.windowed` **stocké** par `raster_window`/`put_paint`, `tab_info.doc_h_clamped` le lit (plus dérivé — borne dynamique) ; `doc_h` reste réel pour le scroll. `?full=1` → nouveau `Session::frame_png_full` : re-rasterise la bande `[-scroll_y, list.height]` via `rasterize_window_cached` (consomme le clamp négatif R-140), borné `MAX_FRAME_DIM/scale` px CSS — au-delà `WARN` + repli tranche ; PNG transitoire, jamais caché dans `entry.png` (miroir strict de `entry.frame`, `/frame` sans `full` inchangé — sert aussi le pull viewport FFI). **Retouche PIPE bornée, signalée** : `encode_png_to` nomme ses trois sorties `false` (`WARN` w×h×étape — le `png_b=0` >55 Mo muet des vols 592/598 devient un signal nommé), `tracing` ajouté aux deps render, commentaire `zz_profile_giant.rs` réaligné. Effet bord : `frame_pixels` = `vw×vh` constant → textures FFI bornées pour l'hôte. Verrous `windowed_frame_is_viewport_and_full_doc_served_on_demand` (frame 800×600 / PNG plein-doc haut+bas / tranche scrollée / petit doc inchangé) + `doc_h_reports_measured_height_not_frame_cap` étendu au cap dynamique. Phase 2 optionnelle dirty-windowed inchangée. | NAV (core+api, retouche PIPE diag) | livré |
+| 2026-11-10 | seam `MediaSurface` — **Étape 182 : boucle `state → sémantique DOM` (complément ADR-0029)** | **`"buffering"` ajouté à l'énum `state` du contrat** (`"playing"\|"paused"\|"ended"\|"error"\|"buffering"` — le filaire l'acceptait déjà, aplati en `playing` à la frontière ; désormais `waiting`+`stalled`, `readyState` ≤ 2). **Vocabulaire JS réécrit** (section dédiée) : échelle `readyState` `HAVE_*` dérivée par rapport depuis `buffered_end` per-source (`buffered_ms` progressif / union `SourceBuffer` MSE — même source que `el.buffered`) ; events : `loadstart` (au claim), `loadedmetadata`, `loadeddata`, `canplay`, `canplaythrough` (marge 2 s ou source tamponnée), `durationchange`, `progress` (croissance `buffered_end` ; sous MSE à l'`updateend` vers l'élément attaché), `waiting`+`stalled`, `play`/`playing`/`pause`/`ended`/`error`, `seeking`/`seeked` (cible ±250 ms — un seek vers la position courante n'orpheline plus `seeking`), `timeupdate` (mouvement de tête, ≤ 4 Hz hôte), `volumechange`, `ratechange` ; `el.error` = `MediaError` réel (code 1-4 classifié + constantes `MEDIA_ERR_*`) ; `paused` faux en underrun ; `networkState` LOADING tant que la source n'est pas entièrement tamponnée ; microtasks drainées entre chaque event. **Fenêtre moteur-absent colmatée** : `report_pending` par surface — le dernier `state` tombé pendant un détachement est relivré au `commit_js_pump`, claim avant state (un `state` sur miroir non-claimé était un no-op à vie — gel post-claim confirmé au code, non prouvé en vol ; §B-83 restait pré-claim, couvert par JS-C324). **Approximations nommées** : `stalled` sur underrun décodeur (spec : fetch réseau), `loadstart` = claim, `canplaythrough` = marge fixe (pas d'estimateur), `loadedmetadata` = 1er rapport sous MSE, `emptied`/`abort`/`suspend` hors scope. Consommateurs NAV uniquement (`explorer-jscore`/`explorer-js`/`explorer-core`) — aucune API PIPELINE. | NAV (étape 182) | livré |

@@ -417,6 +417,46 @@ pub enum MediaState {
     Ended,
     /// Erreur hôte — `MediaReport::error` porte la cause.
     Error,
+    /// Lecture demandée mais affamée — tampon vide
+    /// (`waiting`/`stalled` HTML5 ; étape 182 — le
+    /// `buffering` du contrat filaire atteint désormais le
+    /// miroir au lieu d'être aplati en `playing`).
+    Buffering,
+}
+
+/// Code `MediaError` spec (étape 182) — la couture hôte ne
+/// transporte qu'une chaîne `error` libre : le code est
+/// classifié depuis son contenu (défaut
+/// `SrcNotSupported`, le repli historique en dur).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MediaErrorCode {
+    /// `MEDIA_ERR_ABORTED` — fetch interrompu par la page.
+    Aborted = 1,
+    /// `MEDIA_ERR_NETWORK` — faute réseau pendant le fetch.
+    Network = 2,
+    /// `MEDIA_ERR_DECODE` — décodage/démuxage impossible.
+    Decode = 3,
+    /// `MEDIA_ERR_SRC_NOT_SUPPORTED` — ressource illisible.
+    SrcNotSupported = 4,
+}
+
+impl MediaErrorCode {
+    /// Classification honnête depuis la chaîne `error` du
+    /// rapport — sous-chaînes minuscules, le premier motif
+    /// qui mord gagne ; inconnu → `SrcNotSupported`.
+    #[must_use]
+    pub fn of(msg: &str) -> Self {
+        let m = msg.to_ascii_lowercase();
+        if m.contains("abort") {
+            Self::Aborted
+        } else if m.contains("network") || m.contains("fetch") || m.contains("http") {
+            Self::Network
+        } else if m.contains("decode") || m.contains("codec") || m.contains("demux") {
+            Self::Decode
+        } else {
+            Self::SrcNotSupported
+        }
+    }
 }
 
 /// Rapport `state` hôte → moteur (étape 71c) — positions en
@@ -483,10 +523,18 @@ pub struct MediaElState {
     /// `playbackRate` géré localement (défaut 1.0).
     pub rate: f64,
     /// Seek en vol — le prochain rapport qui bouge la tête
-    /// clôt par l'event `seeked`.
+    /// (ou atteint `seek_target_ms`) clôt par `seeked`.
     pub seek_pending: bool,
-    /// `loadedmetadata` déjà dispatché.
-    pub metadata_fired: bool,
+    /// Cible du seek en vol (ms) — un seek vers la position
+    /// courante ne déplace pas la tête : sans elle `seeking`
+    /// resterait vrai à vie (étape 182).
+    pub seek_target_ms: Option<u64>,
+    /// `readyState` courant (échelle spec 0-4 — étape 182 ;
+    /// n'est plus le binaire « rapport présent »).
+    pub ready_state: u8,
+    /// Dernière fin de zone tampon mesurée sur la même
+    /// source que `el.buffered` (ms) — base de `progress`.
+    pub last_buffered_end_ms: Option<u64>,
     /// Dernière durée rapportée (`durationchange` sur
     /// variation).
     pub last_duration: Option<u64>,
@@ -506,7 +554,9 @@ impl MediaElState {
             volume: 1.0,
             rate: 1.0,
             seek_pending: false,
-            metadata_fired: false,
+            seek_target_ms: None,
+            ready_state: 0,
+            last_buffered_end_ms: None,
             last_duration: None,
             pending_play: Vec::new(),
         }

@@ -12,7 +12,7 @@
 use crate::dom::{
     CanvasOpRecord, Dom, MediaCmd, MediaElState, MediaReport, MediaState, NodeId, NodeKind,
 };
-use crate::heap::{Host, JsResult, ObjKind};
+use crate::heap::{Host, JsResult, ObjKind, Thrown};
 use crate::value::{ObjId, Value};
 use crate::xhr::XhrRequest;
 use crate::Engine;
@@ -3681,10 +3681,10 @@ impl Engine {
     /// (ré-offre = id neuf, promesses conservées : l'élément
     /// persiste).
     pub fn set_media_claim(&mut self, node: NodeId, media: u64, codecs: Option<Vec<String>>) {
-        let Some((dom, _)) = self.dom_ctx.clone() else {
+        let Some((dom, cache)) = self.dom_ctx.clone() else {
             return;
         };
-        let pending = {
+        let (pending, first_claim) = {
             let mut d = dom.borrow_mut();
             match codecs {
                 Some(c) => {
@@ -3692,20 +3692,24 @@ impl Engine {
                     // au claim alimentent la table consultée
                     // par `MediaSource.isTypeSupported`.
                     crate::mse::note_declared_codecs(self, &c);
-                    match d.media.get_mut(&node) {
-                        Some(st) => {
-                            st.media = media;
-                            st.codecs = c;
-                        }
-                        None => {
-                            d.media.insert(node, MediaElState::new(media, c));
-                        }
+                    if let Some(st) = d.media.get_mut(&node) {
+                        st.media = media;
+                        st.codecs = c;
+                        (None, false)
+                    } else {
+                        d.media.insert(node, MediaElState::new(media, c));
+                        (None, true)
                     }
-                    return;
                 }
-                None => d.media.remove(&node).map(|st| st.pending_play),
+                None => (d.media.remove(&node).map(|st| st.pending_play), false),
             }
         };
+        // `loadstart` (étape 182) : le claim = l'hôte commence
+        // à fetcher la ressource — approximation documentée
+        // (le vrai algo de sélection vit côté hôte).
+        if first_claim {
+            let _ = self.dispatch_media(&dom, &cache, node, "loadstart");
+        }
         if let Some(pids) = pending {
             let msg = self.str_val("NotSupportedError: no supported media");
             for p in pids {
@@ -3723,22 +3727,54 @@ impl Engine {
         crate::mse::note_declared_codecs(self, codecs);
     }
 
-    /// `deliver_media_state` (étape 71c) : l'embedder relaie le
-    /// rapport `state` de l'hôte claimé. Les props reflètent le
-    /// rapport, les promesses `play()` tranchent (`playing` →
-    /// résolution, `error` → rejet) et les events DOM
-    /// **non-bubblants** suivent les transitions :
-    /// `loadedmetadata` (premier rapport), `durationchange`,
-    /// `seeked` (seek en vol + tête déplacée), `play`+`playing`,
-    /// `pause`, `ended`, `error`, `timeupdate` (tête déplacée).
-    /// Rapport sur élément non claimé → ignoré (l'offre morte
-    /// ne réveille pas de surface).
+    /// `deliver_media_state` (étape 71c + échelle readiness
+    /// étape 182) : l'embedder relaie le rapport `state` de
+    /// l'hôte claimé. Les props reflètent le rapport, les
+    /// promesses `play()` tranchent (`playing` → résolution,
+    /// `error` → rejet) et les events DOM **non-bubblants**
+    /// suivent les transitions, dans l'ordre spec :
+    /// `durationchange`, échelle `readyState`
+    /// (`loadedmetadata`/`loadeddata`/`canplay`/
+    /// `canplaythrough` au franchissement de chaque niveau),
+    /// `progress` (tampon en croissance), `play`+`playing`,
+    /// `pause`, `stalled`+`waiting` (entrée en `Buffering`),
+    /// `ended`, `error`, `seeked`, `timeupdate`.
+    ///
+    /// La fin de zone tampon est mesurée **sur la même source
+    /// que `el.buffered`** : `buffered_ms` du rapport en
+    /// progressif, union `SourceBuffer` sous MSE — `readyState`
+    /// ne peut pas contredire `buffered` (étape 182).
+    /// Rapport sur élément non claimé → ignoré.
     ///
     /// # Errors
     /// Propage la première exception de listener DOM.
     pub fn deliver_media_state(&mut self, node: NodeId, rep: &MediaReport) -> JsResult<()> {
         let Some((dom, cache)) = self.dom_ctx.clone() else {
             return Ok(());
+        };
+        // `ended` impose position = durée (spec : la tête a
+        // rejoint la fin) — l'hôte peut rapporter une tête
+        // incohérente, le DOM dit la vérité spec.
+        let rep = if rep.state == MediaState::Ended && rep.duration_ms.is_some() {
+            let mut r = rep.clone();
+            r.position_ms = rep.duration_ms.unwrap_or(r.position_ms);
+            r
+        } else {
+            rep.clone()
+        };
+        let rep = &rep;
+        // Fin de tampon per-source (étape 182) : l'union MSE
+        // vit sur `self`, pas sur `dom` — lecture avant
+        // l'emprunt mutable du miroir, sans conflit.
+        let src_url = { dom.borrow().attr(node, "src").map(String::from) };
+        let buffered_end_ms = match src_url
+            .as_deref()
+            .filter(|u| u.starts_with("blob:"))
+            .and_then(|u| self.mse_buffered_union(u))
+            .and_then(|spans| spans.iter().map(|s| s.1).reduce(f64::max))
+        {
+            Some(end) => (end * 1000.0).max(0.0) as u64,
+            None => rep.buffered_ms,
         };
         let mut events: Vec<&'static str> = Vec::new();
         let mut pids = Vec::new();
@@ -3751,26 +3787,75 @@ impl Engine {
             let prev = st.report.replace(rep.clone());
             let prev_state = prev.as_ref().map(|r| r.state);
             let prev_pos = prev.map(|r| r.position_ms);
-            if !st.metadata_fired {
-                st.metadata_fired = true;
-                events.push("loadedmetadata");
+            // Échelle spec HAVE_* : un rapport livré =
+            // métadonnées connues ; données courantes dès
+            // qu'une donnée existe ; données futures dès que
+            // le tampon dépasse la tête ; « enough » sur marge
+            // honnête `CANPLAYTHROUGH_AHEAD_MS` ou source
+            // entièrement tamponnée — pas d'estimateur de
+            // bande passante (approximation documentée,
+            // seam MediaSurface).
+            let mut rs = 1u8;
+            if buffered_end_ms > 0 || rep.position_ms > 0 {
+                rs = 2;
+            }
+            if buffered_end_ms > rep.position_ms || rep.state == MediaState::Ended {
+                rs = 3;
+            }
+            if rep.duration_ms.is_some_and(|dur| buffered_end_ms >= dur)
+                || (rep.state == MediaState::Playing
+                    && buffered_end_ms.saturating_sub(rep.position_ms) >= CANPLAYTHROUGH_AHEAD_MS)
+            {
+                rs = 4;
+            }
+            if rep.state == MediaState::Buffering {
+                // `waiting` = sous-données — la spec retombe
+                // sous HAVE_FUTURE_DATA ; la remontée
+                // re-tirera `canplay`/`canplaythrough` (fidèle
+                // navigateur : ils se re-tirent après rebuffer).
+                rs = rs.min(2);
             }
             if st.last_duration != rep.duration_ms {
                 st.last_duration = rep.duration_ms;
                 events.push("durationchange");
             }
-            if st.seek_pending && prev_pos != Some(rep.position_ms) {
-                st.seek_pending = false;
-                events.push("seeked");
+            for lvl in (st.ready_state + 1)..=rs {
+                events.push(match lvl {
+                    1 => "loadedmetadata",
+                    2 => "loadeddata",
+                    3 => "canplay",
+                    _ => "canplaythrough",
+                });
             }
+            st.ready_state = rs;
+            // `progress` = croissance de la zone tampon (les
+            // données arrivent) — borné naturellement par le
+            // battement hôte ≤ 4 Hz.
+            if buffered_end_ms > st.last_buffered_end_ms.unwrap_or(0) {
+                events.push("progress");
+            }
+            st.last_buffered_end_ms = Some(buffered_end_ms);
             match rep.state {
                 MediaState::Playing if prev_state != Some(MediaState::Playing) => {
-                    events.push("play");
-                    events.push("playing");
+                    if prev_state == Some(MediaState::Buffering) {
+                        // Reprise d'affamement — pas de `play`
+                        // (l'élément n'a jamais été mis en pause).
+                        events.push("playing");
+                    } else {
+                        events.push("play");
+                        events.push("playing");
+                    }
                     pids = std::mem::take(&mut st.pending_play);
                 }
                 MediaState::Paused if prev_state != Some(MediaState::Paused) => {
                     events.push("pause");
+                }
+                MediaState::Buffering if prev_state != Some(MediaState::Buffering) => {
+                    // `buffering` hôte = underrun décodeur ;
+                    // `stalled` (famine fetch) est l'approximation
+                    // documentée du même signal (seam, étape 182).
+                    events.push("stalled");
+                    events.push("waiting");
                 }
                 MediaState::Ended if prev_state != Some(MediaState::Ended) => {
                     events.push("ended");
@@ -3784,6 +3869,20 @@ impl Engine {
                     pids = std::mem::take(&mut st.pending_play);
                 }
                 _ => {}
+            }
+            // `seeked` : tête déplacée (cas nominal) **ou**
+            // cible atteinte à epsilon près — un seek vers la
+            // position courante doit clôturer `seeking` pareil
+            // (étape 182).
+            if st.seek_pending
+                && (prev_pos != Some(rep.position_ms)
+                    || st
+                        .seek_target_ms
+                        .is_some_and(|t| rep.position_ms.abs_diff(t) <= SEEKED_EPSILON_MS))
+            {
+                st.seek_pending = false;
+                st.seek_target_ms = None;
+                events.push("seeked");
             }
             if prev_pos != Some(rep.position_ms) {
                 events.push("timeupdate");
@@ -3799,11 +3898,28 @@ impl Engine {
                 self.resolve_promise(p, Value::Undefined);
             }
         }
+        // Chaque event est sa propre tâche spec : microtasks
+        // drainées entre les tirs (un handler `loadedmetadata`
+        // qui appelle `play()` ne doit pas attendre `canplay`) ;
+        // un listener qui jette ne doit pas avaler les events
+        // restants (même règle que `fire_mse_guarded`).
+        let mut first_err: Option<Thrown> = None;
         for ty in events {
-            self.dispatch_media(&dom, &cache, node, ty)?;
+            if let Err(err) = self.dispatch_media(&dom, &cache, node, ty) {
+                if first_err.is_none() {
+                    first_err = Some(err);
+                }
+            }
+            if let Err(err) = self.run_microtasks() {
+                if first_err.is_none() {
+                    first_err = Some(err);
+                }
+            }
         }
-        self.run_microtasks()?;
-        Ok(())
+        match first_err {
+            Some(t) => Err(t),
+            None => Ok(()),
+        }
     }
 
     /// Event média **non-bubblant** (spec `HTMLMediaElement` :
@@ -5941,6 +6057,18 @@ impl Host for TimeRangesHost {
     }
 }
 
+/// Marge de tampon « à venir » (ms de timeline média) au-delà
+/// de la tête pour `HAVE_ENOUGH_DATA` → `canplaythrough`
+/// (étape 182). Arbitrage honnête : ~8 battements hôte à
+/// 4 Hz — pas un estimateur de bande passante (approximation
+/// documentée au seam `MediaSurface`).
+const CANPLAYTHROUGH_AHEAD_MS: u64 = 2_000;
+
+/// Epsilon de clôture `seeked` (ms) — un battement hôte
+/// couvre l'erreur d'arrondi entre `currentTime` demandé et
+/// `position_ms` rapporté (étape 182).
+const SEEKED_EPSILON_MS: u64 = 250;
+
 /// `TimeRanges` de `spans` (secondes) — vide → objet léger,
 /// non vide → host object `TimeRanges`.
 fn time_ranges(e: &mut Engine, spans: Vec<(f64, f64)>) -> Value {
@@ -5995,7 +6123,13 @@ fn media_prop(e: &mut Engine, dom: &DomRef, node: NodeId, key: &str) -> Value {
     let rep = st.report.as_ref();
     let state = rep.map(|r| r.state);
     match key {
-        "paused" => Value::Bool(state != Some(MediaState::Playing)),
+        // `paused` reste faux pendant un underrun : la lecture
+        // veut continuer — `waiting` n'est pas `paused`
+        // (étape 182, `Buffering` désormais distinct).
+        "paused" => Value::Bool(!matches!(
+            state,
+            Some(MediaState::Playing | MediaState::Buffering)
+        )),
         "ended" => Value::Bool(state == Some(MediaState::Ended)),
         "seeking" => Value::Bool(st.seek_pending),
         "preservesPitch" => Value::Bool(true),
@@ -6012,17 +6146,31 @@ fn media_prop(e: &mut Engine, dom: &DomRef, node: NodeId, key: &str) -> Value {
                 .or_else(|| d.attr(node, "src").and_then(|u| e.mse_source_duration(u)))
                 .unwrap_or(f64::NAN),
         ),
-        // Rapport présent = métadonnées + données reçues →
-        // HAVE_ENOUGH_DATA (4) ; claimé sans rapport → rien (0).
-        "readyState" => Value::Num(if rep.is_some() { 4.0 } else { 0.0 }),
-        // Claimé en attente du premier `state` → LOADING (2) ;
-        // rapport présent → IDLE (1). Claimé ≠ NO_SOURCE.
-        "networkState" => Value::Num(if rep.is_some() { 1.0 } else { 2.0 }),
+        // Échelle spec maintenue par `deliver_media_state`
+        // (étape 182) — plus un binaire « rapport présent ».
+        "readyState" => Value::Num(f64::from(st.ready_state)),
+        // Claimé sans `state` ou en underrun → LOADING (2) ;
+        // source entièrement tamponnée → IDLE (1) ; lecture
+        // avec fetch en cours → LOADING. Claimé ≠ NO_SOURCE.
+        "networkState" => Value::Num(match state {
+            None | Some(MediaState::Buffering) => 2.0,
+            Some(_) => match (rep.and_then(|r| r.duration_ms), st.last_buffered_end_ms) {
+                (Some(dur), Some(end)) if end >= dur => 1.0,
+                _ => 2.0,
+            },
+        }),
         "currentSrc" => e.str_val(d.attr(node, "src").unwrap_or("")),
-        "buffered" => time_ranges(
-            e,
-            rep.map_or_else(Vec::new, |r| vec![(0.0, r.buffered_ms as f64 / 1000.0)]),
-        ),
+        "buffered" => {
+            // Sous MSE l'union `SourceBuffer` fait foi — les
+            // données réellement appendées, pas le
+            // `buffered_ms` du rapport (progressif) — même
+            // source que l'échelle `readyState` (étape 182).
+            let spans = match d.attr(node, "src").and_then(|u| e.mse_buffered_union(u)) {
+                Some(spans) => spans,
+                None => rep.map_or_else(Vec::new, |r| vec![(0.0, r.buffered_ms as f64 / 1000.0)]),
+            };
+            time_ranges(e, spans)
+        }
         "played" => time_ranges(
             e,
             rep.map_or_else(Vec::new, |r| vec![(0.0, r.position_ms as f64 / 1000.0)]),
@@ -6040,13 +6188,10 @@ fn media_prop(e: &mut Engine, dom: &DomRef, node: NodeId, key: &str) -> Value {
             time_ranges(e, spans)
         }
         "error" => match rep.filter(|r| r.state == MediaState::Error) {
-            Some(r) => {
-                let msg = e.str_val(r.error.as_deref().unwrap_or("MediaError"));
-                let o = e.new_object();
-                e.set_own(o, "code", Value::Num(4.0), true);
-                e.set_own(o, "message", msg, true);
-                Value::Obj(o)
-            }
+            // `MediaError` réel (étape 182) — `code`
+            // classifié depuis la chaîne hôte (`of`),
+            // constantes `MEDIA_ERR_*` sur le constructeur.
+            Some(r) => crate::mse::media_error_obj(e, r.error.as_deref().unwrap_or("MediaError")),
             None => Value::Null,
         },
         // `videoWidth`/`videoHeight` non rapportés par l'hôte v1
@@ -6090,6 +6235,7 @@ fn media_set_claimed(
             let mut d = dom.borrow_mut();
             if let Some(st) = d.media.get_mut(&node) {
                 st.seek_pending = true;
+                st.seek_target_ms = Some(ms);
                 let m = st.media;
                 d.media_cmds.push((m, MediaCmd::Seek { ms }));
             }
@@ -6210,6 +6356,7 @@ fn media_call_claimed(
                 let mut d = dom.borrow_mut();
                 if let Some(st) = d.media.get_mut(&node) {
                     st.seek_pending = true;
+                    st.seek_target_ms = Some(ms);
                     let m = st.media;
                     d.media_cmds.push((m, MediaCmd::Seek { ms }));
                 }
@@ -7368,7 +7515,7 @@ impl Host for NodeHost {
             "src" if is_media(&self.dom, node) => {
                 let s = e.to_js_string(v)?;
                 self.dom.borrow_mut().set_attr(node, "src", &s);
-                crate::mse::maybe_attach(e, &s);
+                crate::mse::maybe_attach(e, &s, node);
                 Ok(true)
             }
             // `HTMLMediaElement` (étape 58/71c) — non claimé :
@@ -7607,7 +7754,7 @@ impl Host for NodeHost {
                 let attach = k == "src" && is_media(&self.dom, node);
                 self.dom.borrow_mut().set_attr(node, &k, &v);
                 if attach {
-                    crate::mse::maybe_attach(e, &v);
+                    crate::mse::maybe_attach(e, &v, node);
                 }
                 Ok(Some(Value::Undefined))
             }

@@ -1742,6 +1742,146 @@ fn media_js_report_resolves_play_and_reflects_props() {
     assert_eq!(media_js_eval(&mut s, tab, "window.__r2"), "ko");
 }
 
+/// Étape 182 — fenêtre de livraison : un rapport `state`
+/// posté pendant que la pompe détient le moteur est retenu
+/// (`report_pending`) puis relivré à la réinsertion —
+/// synchro d'état : le dernier suffit, jamais de file.
+#[test]
+fn media_js_report_during_detached_pump_redelivered_at_commit() {
+    let (mut s, tab, _rx) = media_js_page("<video id=\"v\" src=\"v.mp4\"></video>");
+    s.media_claim(tab, 1, vec!["video/mp4".into()]).unwrap();
+    media_js_eval(
+        &mut s,
+        tab,
+        "var v=document.querySelector('video');window.__log=[];\
+         v.play().then(()=>window.__p='ok',()=>window.__p='ko');\
+         ['loadedmetadata','canplay','playing','ended'].forEach(\
+         t=>v.addEventListener(t,()=>window.__log.push(t)));'armed'",
+    );
+
+    // Pompe détachée : le moteur n'est plus dans la session.
+    let (eng, _budget, epoch, sync_ok) = s.take_js_engine(tab).unwrap();
+    assert!(s.tabs.get(&tab).unwrap().js.is_none());
+
+    // Le rapport tombe dans la fenêtre → retenu, pas perdu
+    // (le `playing` final d'une séquence mourrait ici sinon :
+    // promesse `play()` pendante à vie, event jamais tiré).
+    s.media_report(
+        tab,
+        1,
+        MediaReport {
+            position_ms: 4_000,
+            duration_ms: Some(60_000),
+            buffered_ms: 12_000,
+            state: MediaHostState::Playing,
+            error: None,
+        },
+    )
+    .unwrap();
+    assert!(s.tabs.get(&tab).unwrap().media[0].report_pending);
+
+    // Réinsertion → le dernier rapport est relivré : events
+    // tirés, promesse résolue, props reflétées.
+    s.commit_js_pump(tab, epoch, Some((0, None, eng)), sync_ok);
+    assert!(!s.tabs.get(&tab).unwrap().media[0].report_pending);
+    assert_eq!(media_js_eval(&mut s, tab, "window.__p"), "ok");
+    assert_eq!(media_js_eval(&mut s, tab, "v.currentTime===4"), "true");
+    assert_eq!(media_js_eval(&mut s, tab, "v.readyState>=3"), "true");
+    let log = media_js_eval(&mut s, tab, "window.__log.join(',')");
+    for want in ["loadedmetadata", "canplay", "playing"] {
+        assert!(log.contains(want), "event {want} attendu dans {log}");
+    }
+}
+
+/// Étape 182 — claim posé pendant la fenêtre pompe : le
+/// `sync_claim_to_engine` de `media_report`/`sync_media_pending`
+/// rétablit l'ordre claim→state (un rapport livré sur un
+/// miroir jamais claimé était un no-op silencieux à vie).
+#[test]
+fn media_js_claim_during_pump_then_report_delivers() {
+    let (mut s, tab, _rx) = media_js_page("<video id=\"v\" src=\"v.mp4\"></video>");
+    media_js_eval(
+        &mut s,
+        tab,
+        "var v=document.querySelector('video');window.__log=[];\
+         ['loadstart','loadedmetadata','canplay','playing'].forEach(\
+         t=>v.addEventListener(t,()=>window.__log.push(t)));'armed'",
+    );
+
+    let (eng, _budget, epoch, sync_ok) = s.take_js_engine(tab).unwrap();
+    s.media_claim(tab, 1, vec!["video/mp4".into()]).unwrap();
+    assert!(s.tabs.get(&tab).unwrap().media[0].claim_pending);
+    // Le rapport pendant la même fenêtre est retenu aussi —
+    // le sync rétablira claim puis state, dans l'ordre.
+    s.media_report(
+        tab,
+        1,
+        MediaReport {
+            position_ms: 0,
+            duration_ms: Some(60_000),
+            buffered_ms: 60_000,
+            state: MediaHostState::Playing,
+            error: None,
+        },
+    )
+    .unwrap();
+    assert!(s.tabs.get(&tab).unwrap().media[0].report_pending);
+
+    s.commit_js_pump(tab, epoch, Some((0, None, eng)), sync_ok);
+    let e = &s.tabs.get(&tab).unwrap().media[0];
+    assert!(!e.claim_pending && !e.report_pending);
+    assert_eq!(media_js_eval(&mut s, tab, "v.paused"), "false");
+    assert_eq!(media_js_eval(&mut s, tab, "v.readyState===4"), "true");
+    let log = media_js_eval(&mut s, tab, "window.__log.join(',')");
+    for want in ["loadstart", "loadedmetadata", "canplay", "playing"] {
+        assert!(log.contains(want), "event {want} attendu dans {log}");
+    }
+}
+
+/// Étape 182 — `state:"buffering"` atteint le miroir en
+/// `Buffering` (plus aplati en `playing`) : `waiting`/`stalled`
+/// tirés, `readyState` rétrogradé, puis `canplay` re-tiré à
+/// la reprise (re-climb spec post-rebuffer).
+#[test]
+fn media_js_buffering_waiting_stalled_then_recovers() {
+    let (mut s, tab, _rx) = media_js_page("<video id=\"v\" src=\"v.mp4\"></video>");
+    s.media_claim(tab, 1, vec!["video/mp4".into()]).unwrap();
+    media_js_eval(
+        &mut s,
+        tab,
+        "var v=document.querySelector('video');window.__log=[];\
+         ['canplay','canplaythrough','waiting','stalled','playing'].forEach(\
+         t=>v.addEventListener(t,()=>window.__log.push(t)));'armed'",
+    );
+    let report = |state, pos, buf| MediaReport {
+        position_ms: pos,
+        duration_ms: Some(60_000),
+        buffered_ms: buf,
+        state,
+        error: None,
+    };
+    s.media_report(tab, 1, report(MediaHostState::Playing, 0, 60_000))
+        .unwrap();
+    assert_eq!(media_js_eval(&mut s, tab, "v.readyState===4"), "true");
+    // Affamé → waiting+stalled, readyState retombe à 2,
+    // `paused` reste faux (la lecture veut continuer).
+    s.media_report(tab, 1, report(MediaHostState::Buffering, 5_000, 55_000))
+        .unwrap();
+    assert_eq!(media_js_eval(&mut s, tab, "v.readyState"), "2");
+    assert_eq!(media_js_eval(&mut s, tab, "v.paused"), "false");
+    let log = media_js_eval(&mut s, tab, "window.__log.join(',')");
+    assert!(log.contains("waiting"), "waiting attendu : {log}");
+    assert!(log.contains("stalled"), "stalled attendu : {log}");
+    // Reprise → canplay re-tiré + playing (sans play — jamais
+    // mis en pause), readyState remonte.
+    s.media_report(tab, 1, report(MediaHostState::Playing, 6_000, 60_000))
+        .unwrap();
+    assert_eq!(media_js_eval(&mut s, tab, "v.readyState===4"), "true");
+    let log = media_js_eval(&mut s, tab, "window.__log.join(',')");
+    let tail = &log[log.rfind("waiting").unwrap_or(0)..];
+    assert!(tail.contains("canplay"), "canplay re-tiré : {log}");
+}
+
 /// Étape 92 — le focus survit au déplacement : une mutation
 /// (suggest google…) insère des siblings de même tag avant
 /// le champ — le chemin `(tag, index)` meurt ou résoudrait

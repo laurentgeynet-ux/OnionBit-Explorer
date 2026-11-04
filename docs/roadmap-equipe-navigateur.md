@@ -6237,6 +6237,42 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   `AppConfig.mediaCodecs` alignée
   sur le registre OnionCodec réel.
 
+- [x] **Étape 182. Boucle `state →
+  sémantique DOM`** (`explorer-jscore`
+  + `explorer-js` + `explorer-core`,
+  complément ADR-0029) —
+  `deliver_media_state` émet
+  désormais la sémantique que les
+  players gâtent : échelle
+  `readyState` `HAVE_*` dérivée du
+  `buffered_end` per-source
+  (`buffered_ms` progressif /
+  union `SourceBuffer` sous MSE —
+  même source que `el.buffered`),
+  events `loadstart`/`loadedmetadata`/
+  `loadeddata`/`canplay`/
+  `canplaythrough`/`durationchange`/
+  `progress`/`waiting`/`stalled`/
+  `seeked`-sur-cible/`timeupdate`,
+  `MediaError` réel (code 1-4
+  classifié + `MEDIA_ERR_*`),
+  microtasks entre chaque event.
+  `state:"buffering"` passe au
+  miroir (plus aplati en `playing`)
+  → `waiting`+`stalled`, re-climb
+  `canplay`/`playing` à la reprise.
+  Fenêtre moteur-absent colmatée :
+  `report_pending` relivre le
+  dernier `state` au
+  `commit_js_pump`, ordre
+  claim→state tenu (un `state` sur
+  miroir non-claimé = no-op à
+  vie — gel post-claim). Verrous :
+  `media_events` jscore 9/9 +
+  3 `media_js_*` session (pompe
+  détachée, claim-en-fenêtre,
+  buffering→reprise).
+
 - [x] **Étape 181. `mediaCodecs`
   enrichis : VP8 de retour +
   conteneurs alignés** (`app/` +

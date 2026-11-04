@@ -501,6 +501,11 @@ pub enum JsMediaHostState {
     Ended,
     /// Erreur hôte — `JsMediaReport::error` porte la cause.
     Error,
+    /// Lecture demandée mais affamée — tampon vide
+    /// (`waiting`/`stalled` HTML5 ; étape 182 — le
+    /// `buffering` filaire passe enfin au miroir au lieu
+    /// d'être aplati en `playing`).
+    Buffering,
 }
 
 /// Rapport `state` hôte relu pour le moteur (étape 71c) —
@@ -4027,6 +4032,7 @@ fn media_report_of(r: JsMediaReport) -> explorer_jscore::MediaReport {
             JsMediaHostState::Paused => explorer_jscore::MediaState::Paused,
             JsMediaHostState::Ended => explorer_jscore::MediaState::Ended,
             JsMediaHostState::Error => explorer_jscore::MediaState::Error,
+            JsMediaHostState::Buffering => explorer_jscore::MediaState::Buffering,
         },
         error: r.error,
     }

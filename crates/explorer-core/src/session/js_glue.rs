@@ -624,6 +624,11 @@ impl Session {
         if !drain_expired {
             self.drain_script_net(tab);
             self.drain_anim_births(tab);
+            // Claim/rapports retenus pendant le détachement —
+            // relivrés avant le drain des commandes : les
+            // events qu'ils tirent peuvent produire des
+            // ordres (étape 182 — fenêtre moteur-absent).
+            self.sync_media_pending(tab);
             self.drain_media_commands(tab);
         }
         // B-41 (flixbus) : une rafale `UnmappedKey` →

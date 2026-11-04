@@ -65,6 +65,14 @@ pub(crate) struct MediaSurface {
     pub(crate) claim_pending: bool,
     /// Dernier `state` rapporté par l'hôte.
     pub(crate) report: Option<MediaReport>,
+    /// Dernier rapport stocké mais pas encore livré au
+    /// moteur (étape 182) — armé quand `entry.js` est détenu
+    /// (fenêtre pompe) ; relivré à la réinsertion —
+    /// synchro d'état : le dernier rapport suffit, jamais
+    /// de file. Sans ce drapeau le `ended`/`playing` final
+    /// d'une séquence tombée dans la fenêtre était perdu
+    /// (promesse `play()` pendante, event jamais tiré).
+    pub(crate) report_pending: bool,
     /// Chemin `(tag, index)` DOM de l'élément — résolution
     /// unique du nœud miroir à claim/release/report (étape
     /// 71c). Maintenu à jour au refresh (l'élément peut avoir
@@ -470,6 +478,25 @@ fn lazy_mark_mse(m: &mut MediaSurface, js: &mut Option<Box<dyn JsEngine>>) {
     }
 }
 
+/// Traduction rapport session → payload moteur (étape
+/// 71c/182) — `buffering` passe désormais en état distinct
+/// (`waiting`/`stalled` HTML5), plus aplati en `playing`.
+fn js_report_of(report: &MediaReport) -> explorer_js::JsMediaReport {
+    explorer_js::JsMediaReport {
+        position_ms: report.position_ms,
+        duration_ms: report.duration_ms,
+        buffered_ms: report.buffered_ms,
+        state: match report.state {
+            MediaHostState::Playing => explorer_js::JsMediaHostState::Playing,
+            MediaHostState::Paused => explorer_js::JsMediaHostState::Paused,
+            MediaHostState::Ended => explorer_js::JsMediaHostState::Ended,
+            MediaHostState::Error => explorer_js::JsMediaHostState::Error,
+            MediaHostState::Buffering => explorer_js::JsMediaHostState::Buffering,
+        },
+        error: report.error.clone(),
+    }
+}
+
 /// Livre au moteur le claim en attente (claim/release posé
 /// pendant une fenêtre moteur-absent) — idempotent : le
 /// drapeau tombe à la première livraison réussie.
@@ -482,6 +509,26 @@ fn sync_claim_to_engine(m: &mut MediaSurface, js: &mut Option<Box<dyn JsEngine>>
     }
 }
 
+/// Livre au moteur le dernier rapport `state` retenu pendant
+/// une fenêtre moteur-absent (étape 182) — synchro d'état :
+/// le dernier rapport suffit, jamais de file d'événements.
+fn sync_report_to_engine(m: &mut MediaSurface, js: &mut Option<Box<dyn JsEngine>>) {
+    if m.report_pending {
+        if let (Some(e), Some(rep)) = (js.as_mut(), m.report.as_ref()) {
+            e.deliver_media_state(&m.path, m.id, js_report_of(rep));
+            m.report_pending = false;
+        }
+    }
+}
+
+/// Claim puis dernier rapport — ordre obligé : un `state`
+/// livré sur un miroir jamais claimé est un no-op moteur
+/// (`d.media` vide → gel silencieux, étape 182).
+fn sync_pending_to_engine(m: &mut MediaSurface, js: &mut Option<Box<dyn JsEngine>>) {
+    sync_claim_to_engine(m, js);
+    sync_report_to_engine(m, js);
+}
+
 impl Session {
     /// Recalcule les surfaces média de l'onglet au point de
     /// cohérence courant (post-commit, post-apply repeint) :
@@ -490,6 +537,7 @@ impl Session {
     /// rect changés, `MediaOffered` pour les nouvelles. No-op
     /// si l'arbre/DOM ne sont pas un couple cohérent (`tree`
     /// absent pendant la fenêtre nav → relayout).
+    #[allow(clippy::too_many_lines)] // offre/rétention par surface — grandir ne factorise rien
     pub(crate) fn refresh_media(&mut self, tab: TabId) {
         let mut gone: Vec<GoneSurface> = Vec::new();
         let mut moved: Vec<(u64, MediaRect)> = Vec::new();
@@ -583,6 +631,7 @@ impl Session {
                         claim: None,
                         claim_pending: false,
                         report: None,
+                        report_pending: false,
                         path: s.path,
                         mse: s.mse,
                         mse_buffers: s.mse_buffers,
@@ -601,6 +650,7 @@ impl Session {
                         claim: None,
                         claim_pending: false,
                         report: None,
+                        report_pending: false,
                         path: surf.path.clone(),
                         mse: surf.mse,
                         mse_offsets: surf.mse_offsets.clone(),
@@ -699,7 +749,7 @@ impl Session {
             .map(|e| {
                 for m in &mut e.media {
                     lazy_mark_mse(m, &mut e.js);
-                    sync_claim_to_engine(m, &mut e.js);
+                    sync_pending_to_engine(m, &mut e.js);
                 }
                 e.media
                     .iter()
@@ -885,31 +935,38 @@ impl Session {
         if m.claim.is_none() {
             return Err(MediaError::NotClaimed);
         }
+        // Un claim posé pendant une fenêtre pompe doit
+        // atteindre le moteur **avant** ce rapport — sinon le
+        // miroir n'a pas d'état média et la livraison est un
+        // no-op silencieux à vie (gel post-claim, étape 182).
+        sync_claim_to_engine(m, &mut entry.js);
         if let Some(eng) = entry.js.as_mut() {
-            eng.deliver_media_state(
-                &m.path,
-                m.id,
-                explorer_js::JsMediaReport {
-                    position_ms: report.position_ms,
-                    duration_ms: report.duration_ms,
-                    buffered_ms: report.buffered_ms,
-                    state: match report.state {
-                        MediaHostState::Paused => explorer_js::JsMediaHostState::Paused,
-                        MediaHostState::Ended => explorer_js::JsMediaHostState::Ended,
-                        MediaHostState::Error => explorer_js::JsMediaHostState::Error,
-                        // `waiting` reste « playing » côté JS —
-                        // le DOM n'a pas d'état buffering dans
-                        // la couture `MediaState`.
-                        MediaHostState::Playing | MediaHostState::Buffering => {
-                            explorer_js::JsMediaHostState::Playing
-                        }
-                    },
-                    error: report.error.clone(),
-                },
-            );
+            eng.deliver_media_state(&m.path, m.id, js_report_of(&report));
+            m.report_pending = false;
+        } else {
+            // Fenêtre pompe : le dernier rapport est retenu
+            // puis relivré à la réinsertion du moteur
+            // (`sync_media_pending` au commit — étape 182).
+            m.report_pending = true;
         }
         m.report = Some(report);
         Ok(())
+    }
+
+    /// Relivre au moteur les claim et derniers rapports retenus
+    /// pendant son absence (étape 182 — fenêtre de pompe
+    /// détachée). Appelée au `commit_js_pump` (réinsertion) et
+    /// aux contacts REST ; l'ordre claim→state est tenu par
+    /// surface (`sync_pending_to_engine`). Livraisons
+    /// fire-and-forget : sûres même sous disjoncteur — les
+    /// drapeaux retombent seulement si le moteur est présent.
+    pub(crate) fn sync_media_pending(&mut self, tab: TabId) {
+        let Some(entry) = self.tabs.get_mut(&tab) else {
+            return;
+        };
+        for m in &mut entry.media {
+            sync_pending_to_engine(m, &mut entry.js);
+        }
     }
 
     /// Draine les ordres média émis par la page sur éléments

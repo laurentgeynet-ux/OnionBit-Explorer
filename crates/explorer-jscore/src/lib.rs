@@ -88,8 +88,8 @@ pub use crypto::{
     CryptoOp, CryptoRequest, CryptoResponse, CryptoTransport, DigestAlgo, ImportFormat, KeyAlgo,
 };
 pub use dom::{
-    CanvasOpRecord, CanvasState, Dom, JournalOp, MediaCmd, MediaElState, MediaReport, MediaState,
-    NodeId, SerializeStats,
+    CanvasOpRecord, CanvasState, Dom, JournalOp, MediaCmd, MediaElState, MediaErrorCode,
+    MediaReport, MediaState, NodeId, SerializeStats,
 };
 pub use dom_host::{
     CookieJar, DomRef, DynFrameReq, DynImgReq, DynLinkReq, DynScriptReq, EventProp, FormSubmit,

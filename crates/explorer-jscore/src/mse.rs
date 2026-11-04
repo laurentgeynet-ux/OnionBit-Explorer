@@ -42,6 +42,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
+use crate::dom::NodeId;
 use crate::heap::{Host, JsResult, ObjKind, Thrown};
 use crate::value::{ObjId, Value};
 use crate::Engine;
@@ -150,6 +151,7 @@ pub(crate) struct MseState {
     source_buffer_proto: Option<ObjId>,
     buffer_list_proto: Option<ObjId>,
     time_ranges_proto: Option<ObjId>,
+    media_error_proto: Option<ObjId>,
     /// `blob:<origin>/<n>` → wrapper `MediaSource`. L'entrée
     /// garde la source en vie (racine GC) jusqu'à
     /// `revokeObjectURL` ou la mort du document — consommée par
@@ -168,8 +170,20 @@ pub(crate) struct MseState {
     /// suivante) ne voit l'événement que si le tir attend la fin
     /// du script courant ; un tir synchrone était perdu à
     /// jamais (dash.js inerte — terrain §B-83). Drainée à la
-    /// frontière de job par [`deliver_mse_events`].
+    /// frontière de job par [`deliver_mse_events`]. Les types
+    /// ciblant l'élément attaché (`progress`, étape 182) y
+    /// transitent aussi — cible résolue via `attached_to`.
     pending_events: std::collections::VecDeque<(ObjId, &'static str)>,
+    /// Élément `<video>`/`<audio>` attaché à chaque
+    /// `MediaSource` (étape 182) — posé au `src = blob:`/
+    /// `setAttribute("src", …)`, dernier posé gagne (une
+    /// object-URL n'a qu'un attaché effectif, spec). Sert à
+    /// router les events **élément** (`progress` tiré à
+    /// l'`updateend` d'append) vers le nœud miroir. Entrées
+    /// mortes (nœud détaché) : le dispatch est un no-op sûr
+    /// (`node_valid` §B-37) — pas de purge nécessaire, la
+    /// table meurt avec le document.
+    attached_to: HashMap<ObjId, NodeId>,
 }
 
 impl MseState {
@@ -183,6 +197,7 @@ impl MseState {
             self.source_buffer_proto,
             self.buffer_list_proto,
             self.time_ranges_proto,
+            self.media_error_proto,
         ]
         .into_iter()
         .flatten()
@@ -191,6 +206,10 @@ impl MseState {
         }
         ids.extend(self.object_urls.values().copied());
         ids.extend(self.pending_events.iter().map(|(t, _)| *t));
+        // Un `MediaSource` attaché survit tant que l'élément
+        // vit (spec : l'attache le maintient référencé —
+        // l'attribut `src` n'est pas une racine GC).
+        ids.extend(self.attached_to.keys().copied());
     }
 }
 
@@ -483,6 +502,59 @@ fn tr_proto(e: &mut Engine) -> ObjId {
     e.add_method(p, "end", tr_end);
     e.mse.time_ranges_proto = Some(p);
     p
+}
+
+/// Proto `MediaError` (étape 182) — paresseux comme les
+/// autres interfaces média ; `code`/`message` vivent sur
+/// l'instance (props own, spec), les constantes
+/// `MEDIA_ERR_*` sur le constructeur ET le proto.
+fn me_proto(e: &mut Engine) -> ObjId {
+    if let Some(p) = e.mse.media_error_proto {
+        return p;
+    }
+    let p = tagged_proto(e, "MediaError");
+    for (name, code) in MEDIA_ERR_CONSTANTS {
+        e.set_own(p, name, Value::Num(code), false);
+    }
+    e.mse.media_error_proto = Some(p);
+    p
+}
+
+/// `MediaError` — interface non constructible (spec :
+/// `Illegal constructor`).
+fn me_illegal_ctor(e: &mut Engine, _t: Value, _args: &[Value]) -> JsResult<Value> {
+    Err(e.type_error("MediaError: Illegal constructor"))
+}
+
+/// Constantes `MediaError` spec — posées sur le
+/// constructeur et le prototype (lecture des deux côtés).
+const MEDIA_ERR_CONSTANTS: [(&str, f64); 4] = [
+    ("MEDIA_ERR_ABORTED", 1.0),
+    ("MEDIA_ERR_NETWORK", 2.0),
+    ("MEDIA_ERR_DECODE", 3.0),
+    ("MEDIA_ERR_SRC_NOT_SUPPORTED", 4.0),
+];
+
+/// Objet `MediaError` pour `el.error` (étape 182) —
+/// `code` classifié depuis la chaîne hôte
+/// (`MediaErrorCode::of`, 1-4) au lieu du `4` en dur
+/// historique ; instance du proto `MediaError`
+/// (`instanceof` + `MEDIA_ERR_*` hérités).
+pub(crate) fn media_error_obj(e: &mut Engine, msg: &str) -> Value {
+    let p = me_proto(e);
+    let o = e.new_object();
+    if let Some(ob) = e.heap.obj_mut(o) {
+        ob.proto = Value::Obj(p);
+    }
+    e.set_own(
+        o,
+        "code",
+        Value::Num(crate::dom::MediaErrorCode::of(msg) as u32 as f64),
+        true,
+    );
+    let m = e.str_val(msg);
+    e.set_own(o, "message", m, true);
+    Value::Obj(o)
 }
 
 /// Wrapper `TimeRanges` figé sur un snapshot de plages.
@@ -1198,6 +1270,13 @@ fn sb_append_buffer(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Val
     fire_mse_guarded(e, sid, "updatestart", &mut first_err);
     fire_mse_guarded(e, sid, "update", &mut first_err);
     d.borrow_mut().updating = false;
+    // `progress` élément (étape 182) : la croissance du
+    // buffer MSE vit dans `appendBuffer`, pas dans le
+    // `buffered_ms` du rapport hôte — filé en tâche
+    // (discipline JS-C324), cible = `attached_to[mid]`.
+    if let Value::Obj(mid) = d.borrow().ms {
+        e.mse.pending_events.push_back((mid, "progress"));
+    }
     fire_mse_guarded(e, sid, "updateend", &mut first_err);
     match first_err {
         Some(err) => Err(err),
@@ -1402,11 +1481,16 @@ pub(crate) fn object_url_media(e: &Engine, url: &str) -> Option<ObjId> {
 /// en tâche** (JS-C324 — spec : le tir est une tâche de l'algo
 /// d'attachement, jamais synchrone ; les players enregistrent
 /// leur listener *après* le `src=`). Idempotent : une source
-/// déjà `open`/`ended` n'est pas re-tirée.
-pub(crate) fn maybe_attach(e: &mut Engine, url: &str) {
+/// déjà `open`/`ended` n'est pas re-tirée. `node` enregistre le
+/// binding attache → élément (`attached_to`, étape 182 — les
+/// events élément comme `progress` le visent).
+pub(crate) fn maybe_attach(e: &mut Engine, url: &str, node: NodeId) {
     let Some(mid) = object_url_media(e, url) else {
         return;
     };
+    // Dernier posé gagne : rebinding `src=` ou deux éléments
+    // sur le même `blob:` — `progress` va à l'attaché effectif.
+    e.mse.attached_to.insert(mid, node);
     let Some(d) = ms_data(e, Value::Obj(mid)) else {
         return;
     };
@@ -1428,7 +1512,17 @@ pub(crate) fn deliver_mse_events(e: &mut Engine) -> JsResult<bool> {
     let mut first: Option<Thrown> = None;
     while let Some((target, ty)) = e.mse.pending_events.pop_front() {
         fired = true;
-        if let Err(err) = fire_mse(e, target, ty) {
+        // `progress` (étape 182) cible l'élément attaché —
+        // dispatch média sur le nœud miroir, pas `fire_mse`
+        // sur le wrapper ; attache morte → tir sauté.
+        let r = match ty {
+            "progress" => match (e.mse.attached_to.get(&target).copied(), e.dom_ctx.clone()) {
+                (Some(node), Some((dom, cache))) => e.dispatch_media(&dom, &cache, node, ty),
+                _ => Ok(()),
+            },
+            _ => fire_mse(e, target, ty),
+        };
+        if let Err(err) = r {
             if first.is_none() {
                 first = Some(err);
             }
@@ -1838,10 +1932,18 @@ pub(crate) fn install_mse(e: &mut Engine) {
         ),
         ("SourceBufferList", sbl_illegal_ctor, sbl_proto(e)),
         ("TimeRanges", tr_illegal_ctor, tr_proto(e)),
+        ("MediaError", me_illegal_ctor, me_proto(e)),
     ] {
         let fv = e.native_fn(name, ctor);
         if let Value::Obj(fid) = fv {
             e.set_own(fid, "prototype", Value::Obj(proto), false);
+            // `MediaError` porte ses constantes spec sur le
+            // constructeur (`MediaError.MEDIA_ERR_DECODE`).
+            if name == "MediaError" {
+                for (cname, code) in MEDIA_ERR_CONSTANTS {
+                    e.set_own(fid, cname, Value::Num(code), false);
+                }
+            }
         }
         e.set_own(g, name, fv, false);
     }
