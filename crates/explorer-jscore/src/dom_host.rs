@@ -5648,6 +5648,7 @@ const MEDIA_METHODS: &[&str] = &[
     "load",
     "fastSeek",
     "canPlayType",
+    "getVideoPlaybackQuality",
     "setSinkId",
     "addTextTrack",
     "captureStream",
@@ -6139,7 +6140,16 @@ fn media_prop(e: &mut Engine, dom: &DomRef, node: NodeId, key: &str) -> Value {
             // source que l'échelle `readyState` (étape 182).
             let spans = match d.attr(node, "src").and_then(|u| e.mse_buffered_union(u)) {
                 Some(spans) => spans,
-                None => rep.map_or_else(Vec::new, |r| vec![(0.0, r.buffered_ms as f64 / 1000.0)]),
+                None => rep.map_or_else(Vec::new, |r| {
+                    if r.buffered_ranges.is_empty() {
+                        vec![(0.0, r.buffered_ms as f64 / 1000.0)]
+                    } else {
+                        r.buffered_ranges
+                            .iter()
+                            .map(|&(a, b)| (a as f64 / 1000.0, b as f64 / 1000.0))
+                            .collect()
+                    }
+                }),
             };
             time_ranges(e, spans)
         }
@@ -6330,12 +6340,45 @@ fn media_call_claimed(
                     st.seek_pending = true;
                     st.seek_target_ms = Some(ms);
                     let m = st.media;
-                    d.media_cmds.push((m, MediaCmd::Seek { ms }));
+                    d.media_cmds.push((m, MediaCmd::FastSeek { ms }));
                 }
             }
             e.dispatch_media(dom, cache, node, "seeking")?;
             e.run_microtasks()?;
             Ok(Some(Value::Undefined))
+        }
+        "getVideoPlaybackQuality" => {
+            // `VideoPlaybackQuality` spec — alimenté par
+            // `frame_stats` du rapport hôte (dépôt codec) ;
+            // absent = compteurs à zéro (la méthode existe
+            // toujours — feature-detect des players = typeof).
+            let st = dom.borrow();
+            let fs = st
+                .media
+                .get(&node)
+                .and_then(|s| s.report.as_ref())
+                .and_then(|r| r.frame_stats);
+            let o = e.new_object();
+            e.set_own(o, "creationTime", Value::Num(0.0), true);
+            e.set_own(
+                o,
+                "totalVideoFrames",
+                Value::Num(fs.map_or(0.0, |f| f.presented as f64)),
+                true,
+            );
+            e.set_own(
+                o,
+                "droppedVideoFrames",
+                Value::Num(fs.map_or(0.0, |f| f.dropped as f64)),
+                true,
+            );
+            e.set_own(
+                o,
+                "totalFrameDelay",
+                Value::Num(fs.map_or(0.0, |f| f.total_delay_ms / 1000.0)),
+                true,
+            );
+            Ok(Some(Value::Obj(o)))
         }
         "canPlayType" => {
             // §B-82 — table moteur `declared_codecs` (les
@@ -8583,8 +8626,16 @@ impl Host for NodeHost {
                     None => Value::Null,
                 }))
             }
-            "play" | "pause" | "load" | "fastSeek" | "canPlayType" | "setSinkId"
-            | "addTextTrack" | "captureStream" | "setMediaKeys"
+            "play"
+            | "pause"
+            | "load"
+            | "fastSeek"
+            | "canPlayType"
+            | "setSinkId"
+            | "addTextTrack"
+            | "captureStream"
+            | "setMediaKeys"
+            | "getVideoPlaybackQuality"
                 if is_media(&self.dom, node) =>
             {
                 if self.dom.borrow().media.contains_key(&node) {

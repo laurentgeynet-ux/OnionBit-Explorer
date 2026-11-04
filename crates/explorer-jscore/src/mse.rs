@@ -1583,6 +1583,10 @@ fn deliver_eos_error(e: &mut Engine, mid: ObjId, kind: &str) -> JsResult<()> {
                     buffered_ms: prev.as_ref().map_or(0, |r| r.buffered_ms),
                     state: MediaState::Error,
                     error: Some(msg.clone()),
+                    buffered_ranges: prev
+                        .as_ref()
+                        .map_or_else(Vec::new, |r| r.buffered_ranges.clone()),
+                    frame_stats: prev.as_ref().and_then(|r| r.frame_stats),
                 });
                 std::mem::take(&mut st.pending_play)
             }

@@ -542,6 +542,21 @@ pub enum JsMediaHostState {
     Buffering,
 }
 
+/// Compteurs de frames rapportés par l'hôte (dépôt codec
+/// `frame_stats`) — sert `getVideoPlaybackQuality()`.
+#[derive(Debug, Clone, Copy)]
+pub struct JsMediaFrameStats {
+    /// Frames présentées → `totalVideoFrames`.
+    pub presented: u64,
+    /// Frames sautées → `droppedVideoFrames`.
+    pub dropped: u64,
+    /// Frames décodées (diagnostic, non exposé au JS).
+    pub decoded: u64,
+    /// Retard cumulé de présentation (ms) → `totalFrameDelay`
+    /// (secondes côté JS).
+    pub total_delay_ms: f64,
+}
+
 /// Rapport `state` hôte relu pour le moteur (étape 71c) —
 /// positions en millisecondes, `None` duration = flux sans
 /// durée connue.
@@ -557,6 +572,13 @@ pub struct JsMediaReport {
     pub state: JsMediaHostState,
     /// Cause si `state == Error`.
     pub error: Option<String>,
+    /// Intervalles tampon réels (ms) — occupation du
+    /// `PacketBuffer` dépôt. Vide = hôte scalaire → repli
+    /// `[(0, buffered_ms)]` côté `buffered`.
+    pub buffered_ranges: Vec<(u64, u64)>,
+    /// Télémétrie frames — `None` tant que la surface n'émet
+    /// pas de `frame_stats`.
+    pub frame_stats: Option<JsMediaFrameStats>,
 }
 
 /// Ordre média page → hôte (étape 71c) — drainé par la
@@ -567,8 +589,14 @@ pub enum JsMediaCmd {
     Play,
     /// `pause()`.
     Pause,
-    /// `currentTime`/`fastSeek` (millisecondes).
+    /// `currentTime` (millisecondes).
     Seek {
+        /// Position cible.
+        ms: u64,
+    },
+    /// `fastSeek` — arrêt à la keyframe précédente, sans
+    /// décoder jusqu'à la cible (spec `HTMLMediaElement`).
+    FastSeek {
         /// Position cible.
         ms: u64,
     },
@@ -4088,6 +4116,13 @@ fn media_report_of(r: JsMediaReport) -> explorer_jscore::MediaReport {
             JsMediaHostState::Buffering => explorer_jscore::MediaState::Buffering,
         },
         error: r.error,
+        buffered_ranges: r.buffered_ranges,
+        frame_stats: r.frame_stats.map(|f| explorer_jscore::MediaFrameStats {
+            presented: f.presented,
+            dropped: f.dropped,
+            decoded: f.decoded,
+            total_delay_ms: f.total_delay_ms,
+        }),
     }
 }
 
@@ -4097,6 +4132,7 @@ fn js_media_cmd(c: explorer_jscore::MediaCmd) -> JsMediaCmd {
         explorer_jscore::MediaCmd::Play => JsMediaCmd::Play,
         explorer_jscore::MediaCmd::Pause => JsMediaCmd::Pause,
         explorer_jscore::MediaCmd::Seek { ms } => JsMediaCmd::Seek { ms },
+        explorer_jscore::MediaCmd::FastSeek { ms } => JsMediaCmd::FastSeek { ms },
         explorer_jscore::MediaCmd::Volume { v } => JsMediaCmd::Volume { v },
         explorer_jscore::MediaCmd::Muted { on } => JsMediaCmd::Muted { on },
         explorer_jscore::MediaCmd::Rate { r } => JsMediaCmd::Rate { r },

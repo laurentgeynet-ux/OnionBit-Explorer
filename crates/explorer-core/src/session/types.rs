@@ -280,6 +280,13 @@ pub enum MediaCmd {
         /// Position cible.
         ms: u64,
     },
+    /// `fastSeek(t)` — arrêt à la keyframe précédente, sans
+    /// décoder jusqu'à la cible (spec `HTMLMediaElement` —
+    /// flag `FAST` côté dépôt codec).
+    FastSeek {
+        /// Position cible.
+        ms: u64,
+    },
     /// `volume = …` (0.0–1.0).
     Volume {
         /// Volume demandé.
@@ -318,6 +325,22 @@ pub enum MediaHostState {
     Buffering,
 }
 
+/// Compteurs de frames rapportés par l'hôte (dépôt codec
+/// `frame_stats`) — sert `getVideoPlaybackQuality()` côté
+/// moteur. `None` = hôte sans télémétrie.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct MediaFrameStats {
+    /// Frames effectivement présentées → `totalVideoFrames`.
+    pub presented: u64,
+    /// Frames sautées → `droppedVideoFrames`.
+    pub dropped: u64,
+    /// Frames décodées (diagnostic — non exposé au JS).
+    pub decoded: u64,
+    /// Retard cumulé de présentation (ms) → `totalFrameDelay`
+    /// (secondes côté JS).
+    pub total_delay_ms: f64,
+}
+
 /// Rapport `state` hôte → moteur : positions en
 /// millisecondes, `None` duration = flux sans durée connue.
 /// Battement borné ≤ 4 Hz (contrat `MediaSurface`).
@@ -333,6 +356,13 @@ pub struct MediaReport {
     pub state: MediaHostState,
     /// Cause si `state == Error`.
     pub error: Option<String>,
+    /// Intervalles tampon réels (ms) — occupation temporelle
+    /// du `PacketBuffer` dépôt (seeks disjoints). Vide =
+    /// hôte scalaire → `buffered` replie `[(0, buffered_ms)]`.
+    pub buffered_ranges: Vec<(u64, u64)>,
+    /// Télémétrie frames (dépôt `frame_stats`) — `None` tant
+    /// que la surface n'émet pas.
+    pub frame_stats: Option<MediaFrameStats>,
 }
 
 /// Fiche publique d'une surface média vivante (étape 71b)

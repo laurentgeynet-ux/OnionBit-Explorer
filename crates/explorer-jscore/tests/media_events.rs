@@ -40,6 +40,8 @@ fn rep(pos: u64, dur: u64, buf: u64, state: MediaState) -> MediaReport {
         buffered_ms: buf,
         state,
         error: None,
+        buffered_ranges: Vec::new(),
+        frame_stats: None,
     }
 }
 
@@ -325,4 +327,83 @@ fn media_state_mse_element_stays_idle_networkstate() {
     e.deliver_media_state(node, &rep(1_000, 60_000, 1_000, MediaState::Buffering))
         .expect("report 2");
     assert_eq!(ev(&mut e, "v.networkState"), "1");
+}
+
+#[test]
+fn media_frame_stats_feeds_video_playback_quality() {
+    let (mut e, dom) = engine();
+    let node = claim_and_arm(&mut e, &dom);
+    // Sans `frame_stats` (hôte pré-land) → compteurs à zéro,
+    // la méthode existe quand même (feature-detect = typeof).
+    assert_eq!(ev(&mut e, "typeof v.getVideoPlaybackQuality"), "function");
+    assert_eq!(
+        ev(
+            &mut e,
+            "var q=v.getVideoPlaybackQuality();\
+             q.totalVideoFrames+'|'+q.droppedVideoFrames+'|'+q.totalFrameDelay"
+        ),
+        "0|0|0"
+    );
+    let mut r = rep(0, 60_000, 1_000, MediaState::Playing);
+    r.frame_stats = Some(explorer_jscore::MediaFrameStats {
+        presented: 120,
+        dropped: 3,
+        decoded: 123,
+        total_delay_ms: 850.0,
+    });
+    e.deliver_media_state(node, &r).expect("report");
+    assert_eq!(
+        ev(
+            &mut e,
+            "var q=v.getVideoPlaybackQuality();\
+             q.totalVideoFrames+'|'+q.droppedVideoFrames+'|'+q.totalFrameDelay"
+        ),
+        "120|3|0.85"
+    );
+}
+
+#[test]
+fn media_buffered_ranges_from_report_not_scalar() {
+    let (mut e, dom) = engine();
+    let node = claim_and_arm(&mut e, &dom);
+    // Scalaire seul (hôte pré-#5) → un intervalle [0, buffered].
+    e.deliver_media_state(node, &rep(0, 60_000, 8_000, MediaState::Playing))
+        .expect("report 1");
+    assert_eq!(ev(&mut e, "v.buffered.length+'|'+v.buffered.end(0)"), "1|8");
+    // Ranges réels (occupation PacketBuffer — seeks disjoints)
+    // → multi-intervalles servis tels quels.
+    let mut r = rep(9_000, 60_000, 8_000, MediaState::Playing);
+    r.buffered_ranges = vec![(0, 8_000), (12_000, 20_000)];
+    e.deliver_media_state(node, &r).expect("report 2");
+    assert_eq!(
+        ev(
+            &mut e,
+            "v.buffered.length+'|'+v.buffered.start(0)+'|'+v.buffered.end(0)+'|'+v.buffered.start(1)+'|'+v.buffered.end(1)"
+        ),
+        "2|0|8|12|20"
+    );
+}
+
+#[test]
+fn media_fastseek_emits_fastseek_cmd() {
+    let (mut e, dom) = engine();
+    let node = claim_and_arm(&mut e, &dom);
+    e.deliver_media_state(node, &rep(0, 60_000, 8_000, MediaState::Playing))
+        .expect("report");
+    ev(&mut e, "v.fastSeek(5);'sought'");
+    let cmds = dom.borrow().media_cmds.clone();
+    assert!(
+        cmds.iter()
+            .any(|&(_, c)| matches!(c, explorer_jscore::MediaCmd::FastSeek { ms } if ms == 5_000)),
+        "media_cmds = {cmds:?}"
+    );
+    // `currentTime` reste un seek précis — jamais de FastSeek.
+    ev(&mut e, "v.currentTime=3;'sought2'");
+    let cmds = dom.borrow().media_cmds.clone();
+    assert!(
+        cmds.iter()
+            .any(|&(_, c)| matches!(c, explorer_jscore::MediaCmd::Seek { ms } if ms == 3_000)),
+        "media_cmds = {cmds:?}"
+    );
+    assert_eq!(ev(&mut e, "L.indexOf('seeking')>=0"), "true");
 }

@@ -357,6 +357,8 @@ fn mse2_play_pends_until_claim_then_resolves() {
         buffered_ms: 1_000,
         state: MediaState::Playing,
         error: None,
+        buffered_ranges: Vec::new(),
+        frame_stats: None,
     };
     e.deliver_media_state(node, &rep).expect("playing");
     assert_eq!(ev(&mut e, "R"), "resolved");

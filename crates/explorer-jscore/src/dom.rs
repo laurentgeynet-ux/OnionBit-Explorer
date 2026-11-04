@@ -459,6 +459,22 @@ impl MediaErrorCode {
     }
 }
 
+/// Compteurs de frames rapportés par l'hôte (dépôt codec —
+/// `frame_stats`) — sert `getVideoPlaybackQuality()`.
+/// `None` = hôte sans télémétrie (surface pré-land).
+#[derive(Debug, Clone, Copy)]
+pub struct MediaFrameStats {
+    /// Frames effectivement présentées → `totalVideoFrames`.
+    pub presented: u64,
+    /// Frames sautées → `droppedVideoFrames`.
+    pub dropped: u64,
+    /// Frames décodées (diagnostic — non exposé au JS).
+    pub decoded: u64,
+    /// Retard cumulé de présentation (ms) → `totalFrameDelay`
+    /// (secondes côté JS).
+    pub total_delay_ms: f64,
+}
+
 /// Rapport `state` hôte → moteur (étape 71c) — positions en
 /// millisecondes, `None` duration = flux sans durée connue.
 #[derive(Debug, Clone)]
@@ -473,6 +489,14 @@ pub struct MediaReport {
     pub state: MediaState,
     /// Cause si `state == Error`.
     pub error: Option<String>,
+    /// Intervalles tampon réels (ms) — occupation temporelle
+    /// du `PacketBuffer` dépôt (seeks disjoints). Vide =
+    /// hôte scalaire → le getter `buffered` replie sur
+    /// `[(0, buffered_ms)]`.
+    pub buffered_ranges: Vec<(u64, u64)>,
+    /// Télémétrie frames (dépôt codec `frame_stats`) —
+    /// `None` tant que la surface n'émet pas.
+    pub frame_stats: Option<MediaFrameStats>,
 }
 
 /// Ordre média page → hôte, drainé par l'embedder qui le
@@ -483,8 +507,14 @@ pub enum MediaCmd {
     Play,
     /// `pause()`.
     Pause,
-    /// `currentTime`/`fastSeek` (millisecondes).
+    /// `currentTime` (millisecondes).
     Seek {
+        /// Position cible.
+        ms: u64,
+    },
+    /// `fastSeek` — arrêt à la keyframe précédente, sans
+    /// décoder jusqu'à la cible (spec `HTMLMediaElement`).
+    FastSeek {
         /// Position cible.
         ms: u64,
     },

@@ -703,6 +703,13 @@ fn js_report_of(report: &MediaReport) -> explorer_js::JsMediaReport {
             MediaHostState::Buffering => explorer_js::JsMediaHostState::Buffering,
         },
         error: report.error.clone(),
+        buffered_ranges: report.buffered_ranges.clone(),
+        frame_stats: report.frame_stats.map(|f| explorer_js::JsMediaFrameStats {
+            presented: f.presented,
+            dropped: f.dropped,
+            decoded: f.decoded,
+            total_delay_ms: f.total_delay_ms,
+        }),
     }
 }
 
@@ -1211,6 +1218,7 @@ impl Session {
                     explorer_js::JsMediaCmd::Play => MediaCmd::Play,
                     explorer_js::JsMediaCmd::Pause => MediaCmd::Pause,
                     explorer_js::JsMediaCmd::Seek { ms } => MediaCmd::Seek { ms },
+                    explorer_js::JsMediaCmd::FastSeek { ms } => MediaCmd::FastSeek { ms },
                     explorer_js::JsMediaCmd::Volume { v } => MediaCmd::Volume { v },
                     explorer_js::JsMediaCmd::Muted { on } => MediaCmd::Muted { on },
                     explorer_js::JsMediaCmd::Rate { r } => MediaCmd::Rate { r },
@@ -1324,6 +1332,9 @@ pub fn media_event_json(ev: &CoreEvent) -> Option<(&'static str, String)> {
                     MediaCmd::Seek { ms } => {
                         serde_json::json!({ "type": "seek", "ms": ms })
                     }
+                    MediaCmd::FastSeek { ms } => {
+                        serde_json::json!({ "type": "seek", "ms": ms, "fast": true })
+                    }
                     MediaCmd::Volume { v } => {
                         serde_json::json!({ "type": "volume", "v": v })
                     }
@@ -1372,6 +1383,29 @@ pub fn media_report_from_json(v: &serde_json::Value) -> Option<MediaReport> {
         Some("buffering") => MediaHostState::Buffering,
         _ => return None,
     };
+    // Extensions dépôt codec — `buffered_ranges` = occupation
+    // réelle du PacketBuffer ([[start,end],…] ms), `frame_stats`
+    // = télémétrie frames. Absentes = surface pré-land → vides.
+    let buffered_ranges = v
+        .get("buffered_ranges")
+        .and_then(serde_json::Value::as_array)
+        .map(|rs| {
+            rs.iter()
+                .filter_map(|r| {
+                    let p = r.as_array()?;
+                    Some((p.first()?.as_u64()?, p.get(1)?.as_u64()?))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    let frame_stats = v.get("frame_stats").and_then(|fs| {
+        Some(MediaFrameStats {
+            presented: fs.get("presented")?.as_u64().unwrap_or(0),
+            dropped: fs.get("dropped")?.as_u64().unwrap_or(0),
+            decoded: fs.get("decoded")?.as_u64().unwrap_or(0),
+            total_delay_ms: fs.get("total_delay_ms")?.as_f64().unwrap_or(0.0),
+        })
+    });
     Some(MediaReport {
         position_ms: u64f("position_ms").unwrap_or(0),
         duration_ms: u64f("duration_ms"),
@@ -1381,5 +1415,7 @@ pub fn media_report_from_json(v: &serde_json::Value) -> Option<MediaReport> {
             .get("error")
             .and_then(serde_json::Value::as_str)
             .map(String::from),
+        buffered_ranges,
+        frame_stats,
     })
 }

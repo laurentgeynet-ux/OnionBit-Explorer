@@ -1458,6 +1458,8 @@ fn media_claim_first_wins_and_state() {
         buffered_ms: 5_000,
         state: MediaHostState::Playing,
         error: None,
+        buffered_ranges: Vec::new(),
+        frame_stats: None,
     };
     s.media_report(tab, 1, report.clone()).unwrap();
     let m = &s.media_list(tab)[0];
@@ -1476,6 +1478,8 @@ fn media_claim_first_wins_and_state() {
                 buffered_ms: 0,
                 state: MediaHostState::Paused,
                 error: None,
+                buffered_ranges: Vec::new(),
+                frame_stats: None,
             },
         ),
         Err(MediaError::NotClaimed)
@@ -1763,6 +1767,8 @@ fn media_js_report_resolves_play_and_reflects_props() {
             buffered_ms: 10_000,
             state: MediaHostState::Playing,
             error: None,
+            buffered_ranges: Vec::new(),
+            frame_stats: None,
         },
     )
     .unwrap();
@@ -1834,6 +1840,8 @@ fn media_js_report_during_detached_pump_redelivered_at_commit() {
             buffered_ms: 12_000,
             state: MediaHostState::Playing,
             error: None,
+            buffered_ranges: Vec::new(),
+            frame_stats: None,
         },
     )
     .unwrap();
@@ -1881,6 +1889,8 @@ fn media_js_claim_during_pump_then_report_delivers() {
             buffered_ms: 60_000,
             state: MediaHostState::Playing,
             error: None,
+            buffered_ranges: Vec::new(),
+            frame_stats: None,
         },
     )
     .unwrap();
@@ -1918,6 +1928,8 @@ fn media_js_buffering_waiting_stalled_then_recovers() {
         buffered_ms: buf,
         state,
         error: None,
+        buffered_ranges: Vec::new(),
+        frame_stats: None,
     };
     s.media_report(tab, 1, report(MediaHostState::Playing, 0, 60_000))
         .unwrap();
