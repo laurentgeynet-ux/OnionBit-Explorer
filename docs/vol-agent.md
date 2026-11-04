@@ -450,6 +450,24 @@ jamais résolue après N appends (à repro,
 JS-C325 a touché cette machine). Reste : rejet
 `play()` `undefined` + `isReady()` jette.
 
+**§B-86** — `mediaCapabilities` **infirmé par
+injection** : jamais consulté par le player
+(gap réel non bloquant — le modèle injection
++ compteur d'appels bat la spéculation).
+
+**§B-87** — `self.navigator` `undefined` dans
+le worker : le bundle transmuxer UA-sniffe
+`userAgent`/`platform`/`hardwareConcurrency`
+à l'init → mort silencieuse avant toute
+émission (diagnostic : le player charge dans
+son worker — 0 fetch main-thread, `WorkerFetch`
+OK). **JS-C331** : `WorkerNavigator` spec posé
+au spawn (NavigatorID + `userAgentData` +
+`sendBeacon`, valeurs low-fingerprint de page).
+Verrou sonde scope, suite 16/16. Signal de vie
+attendu au re-vol : `qual>0` (premier appel du
+loader par le bundle).
+
 Claims codecs : l'oracle = `onionmedia_can_play_type`
 (`""`/`maybe`/`probable`), table déclarée alignée
 Étape 181. Rejets propres attendus — pas des bugs :

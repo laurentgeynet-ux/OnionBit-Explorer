@@ -1078,6 +1078,11 @@ fn worker_main(
         pending: RefCell::new(HashMap::new()),
     });
     e.install_xhr(net.clone());
+    // §B-87 — `WorkerNavigator` (après `install_xhr` :
+    // `sendBeacon` y trouve son transport) — le bundle
+    // transmuxer UA-sniffe `userAgent`/`platform`/
+    // `hardwareConcurrency` à l'init.
+    crate::dom_host::install_worker_navigator(&mut e);
     // Scope WorkerGlobalScope minimal.
     let g = e.global;
     let gv = Value::Obj(g);

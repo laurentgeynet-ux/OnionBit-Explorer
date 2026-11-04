@@ -1987,65 +1987,8 @@ impl Engine {
         // → mobile » : réponse desktop spec-honnête
         // (`mobile:false`) au lieu de `undefined`, low-
         // fingerprint (`brands` vide, `platform` figé).
-        let uad = self.new_object();
-        let empty = self.new_array(vec![]);
-        self.set_own(uad, "brands", empty, true);
-        self.set_own(uad, "mobile", Value::Bool(false), true);
-        let win = self.str_val("Windows");
-        self.set_own(uad, "platform", win, true);
-        let tag = self.str_val("NavigatorUAData");
-        self.set_own(uad, crate::interp::SYM_TO_STRING_TAG, tag, false);
-        // `getHighEntropyValues` (speedtest vol78) — spec :
-        // promesse résolue aux hints demandés, mêmes valeurs
-        // low-fingerprint que l'objet — jamais `undefined`.
-        let ghev = self.native_fn(
-            "getHighEntropyValues",
-            |e: &mut Engine, _t: Value, args: &[Value]| {
-                let hints: Vec<String> = match args.first() {
-                    Some(v @ Value::Obj(_)) => {
-                        let len = e
-                            .get_prop_value(*v, "length")
-                            .ok()
-                            .and_then(|l| match l {
-                                Value::Num(n) => Some(n as u32),
-                                _ => None,
-                            })
-                            .unwrap_or(0);
-                        (0..len)
-                            .filter_map(|i| {
-                                e.get_prop_value(*v, &i.to_string())
-                                    .ok()
-                                    .and_then(|x| e.to_js_string(x).ok())
-                            })
-                            .collect()
-                    }
-                    _ => Vec::new(),
-                };
-                let out = e.new_object();
-                let vals: Vec<(&str, Value)> = vec![
-                    ("brands", e.new_array(vec![])),
-                    ("mobile", Value::Bool(false)),
-                    ("platform", e.str_val("Windows")),
-                    ("platformVersion", e.str_val("15.0.0")),
-                    ("architecture", e.str_val("x86")),
-                    ("bitness", e.str_val("64")),
-                    ("model", e.str_val("")),
-                    ("uaFullVersion", e.str_val("0.1.0")),
-                    ("fullVersionList", e.new_array(vec![])),
-                    ("wow64", Value::Bool(false)),
-                ];
-                for (k, v) in vals {
-                    if hints.iter().any(|h| h == k) {
-                        e.set_own(out, k, v, true);
-                    }
-                }
-                let pid = e.new_promise();
-                e.resolve_promise(pid, Value::Obj(out));
-                Ok(Value::Obj(pid))
-            },
-        );
-        self.set_own(uad, "getHighEntropyValues", ghev, true);
-        self.set_own(nav, "userAgentData", Value::Obj(uad), true);
+        let uad = navigator_uad(self);
+        self.set_own(nav, "userAgentData", uad, true);
         self.set_own(nav, "webdriver", Value::Bool(false), true);
         self.set_own(nav, "globalPrivacyControl", Value::Bool(false), true);
         self.set_own(nav, "doNotTrack", Value::Null, true);
@@ -12764,6 +12707,114 @@ fn nav_send_beacon(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value>
 /// feature-detects de fingerprinting, maif vol 122).
 fn nav_java_enabled(_e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
     Ok(Value::Bool(false))
+}
+
+/// `navigator.userAgentData` — réponse desktop spec-honnête
+/// (`brands` vide, `mobile:false`, `platform` figé — low-
+/// fingerprint) ; partagée `Navigator`/`WorkerNavigator`
+/// (§B-87). `getHighEntropyValues` : promesse résolue aux
+/// hints demandés, mêmes valeurs — jamais `undefined`.
+fn navigator_uad(e: &mut Engine) -> Value {
+    let uad = e.new_object();
+    let empty = e.new_array(vec![]);
+    e.set_own(uad, "brands", empty, true);
+    e.set_own(uad, "mobile", Value::Bool(false), true);
+    let win = e.str_val("Windows");
+    e.set_own(uad, "platform", win, true);
+    let tag = e.str_val("NavigatorUAData");
+    e.set_own(uad, crate::interp::SYM_TO_STRING_TAG, tag, false);
+    let ghev = e.native_fn(
+        "getHighEntropyValues",
+        |e: &mut Engine, _t: Value, args: &[Value]| {
+            let hints: Vec<String> = match args.first() {
+                Some(v @ Value::Obj(_)) => {
+                    let len = e
+                        .get_prop_value(*v, "length")
+                        .ok()
+                        .and_then(|l| match l {
+                            Value::Num(n) => Some(n as u32),
+                            _ => None,
+                        })
+                        .unwrap_or(0);
+                    (0..len)
+                        .filter_map(|i| {
+                            e.get_prop_value(*v, &i.to_string())
+                                .ok()
+                                .and_then(|x| e.to_js_string(x).ok())
+                        })
+                        .collect()
+                }
+                _ => Vec::new(),
+            };
+            let out = e.new_object();
+            let vals: Vec<(&str, Value)> = vec![
+                ("brands", e.new_array(vec![])),
+                ("mobile", Value::Bool(false)),
+                ("platform", e.str_val("Windows")),
+                ("platformVersion", e.str_val("15.0.0")),
+                ("architecture", e.str_val("x86")),
+                ("bitness", e.str_val("64")),
+                ("model", e.str_val("")),
+                ("uaFullVersion", e.str_val("0.1.0")),
+                ("fullVersionList", e.new_array(vec![])),
+                ("wow64", Value::Bool(false)),
+            ];
+            for (k, v) in vals {
+                if hints.iter().any(|h| h == k) {
+                    e.set_own(out, k, v, true);
+                }
+            }
+            let pid = e.new_promise();
+            e.resolve_promise(pid, Value::Obj(out));
+            Ok(Value::Obj(pid))
+        },
+    );
+    e.set_own(uad, "getHighEntropyValues", ghev, true);
+    Value::Obj(uad)
+}
+
+/// `self.navigator` du scope worker (§B-87) — `WorkerNavigator`
+/// spec : sous-ensemble NavigatorID/NavigatorUA sans DOM (pas
+/// de `serviceWorker`/`plugins`/`clipboard`). Un transmuxer
+/// UA-sniffe `userAgent`/`platform`/`hardwareConcurrency` à
+/// l'init — `undefined` le tuait silencieusement. Mêmes valeurs
+/// low-fingerprint que le `navigator` de page.
+pub(crate) fn install_worker_navigator(e: &mut Engine) {
+    let nav = e.new_object();
+    for (k, v) in [
+        ("userAgent", "Explorer/0.1 (explorer-jscore)"),
+        ("appName", "Netscape"),
+        ("platform", "Win32"),
+        ("language", "en-US"),
+        ("appVersion", "5.0"),
+        ("vendor", ""),
+        ("appCodeName", "Mozilla"),
+        ("product", "Gecko"),
+        ("productSub", "20030107"),
+        ("vendorSub", ""),
+    ] {
+        let s = e.str_val(v);
+        e.set_own(nav, k, s, true);
+    }
+    let en = e.str_val("en-US");
+    let en2 = e.str_val("en");
+    let langs = e.new_array(vec![en, en2]);
+    let _ = crate::builtins::object_freeze(e, Value::Undefined, &[langs]);
+    e.set_own(nav, "languages", langs, true);
+    // `sendBeacon` existe aussi sur `WorkerNavigator` (mixin
+    // Navigator) — le beacon part par le transport worker.
+    e.add_method(nav, "sendBeacon", nav_send_beacon);
+    e.set_own(nav, "onLine", Value::Bool(true), true);
+    e.set_own(nav, "cookieEnabled", Value::Bool(true), true);
+    e.set_own(nav, "webdriver", Value::Bool(false), true);
+    e.set_own(nav, "globalPrivacyControl", Value::Bool(false), true);
+    e.set_own(nav, "doNotTrack", Value::Null, true);
+    e.set_own(nav, "maxTouchPoints", Value::Num(0.0), true);
+    e.set_own(nav, "hardwareConcurrency", Value::Num(4.0), true);
+    let uad = navigator_uad(e);
+    e.set_own(nav, "userAgentData", uad, true);
+    let g = e.global;
+    e.set_own(g, "navigator", Value::Obj(nav), false);
 }
 
 /// `credentials.create`/`get` (JS-C93) — stub honnête : pas
