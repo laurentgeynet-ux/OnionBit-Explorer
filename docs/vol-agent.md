@@ -33,12 +33,25 @@ git status --short                    # WIP ? → worktree
 # 0.2 binaire frais (jamais un .exe qui traîne)
 cargo build --release -p explorer-daemon   # attendre « Finished »
 
-# 0.3 daemon dédié — port 9385+, profil déclaré
+# 0.3 daemon dédié — port 9385+, profil déclaré, SPAWN CACHÉ
+# explorer-daemon.exe est sous-système console : lancé en
+# direct depuis un shell sans console (agent/IDE), Windows
+# lui alloue une fenêtre cmd VISIBLE qui possède sa vie —
+# fermée → daemon tué → vol bloqué ; un clic dedans
+# (QuickEdit) → daemon gelé. spawn_daemon.ps1 = watchdog WMI
+# SW_HIDE : jamais de fenêtre, survit à l'appelant, code de
+# sortie + stdout/stderr capturés (morts silencieuses passées).
 $env:EXPLORER_VIEWPORT='1366x900'
 $env:EXPLORER_PROFILE='C:\OnionBit-vol\prof<N>'   # froid = défaut
-.\target\release\explorer-daemon.exe --port 9385
+pwsh -File scripts/spawn_daemon.ps1 -Port 9385 `
+  -LogDir "C:\OnionBit-vol\logs"
+# (env hérité par le process WMI — EXPLORER_PROFILE n'a pas
+# besoin d'être relayé ; -Profile <dir> le surchargerait)
 
 # 0.4 watchdog OBLIGATOIRE — les deux lignes, dès le lancement
+# <pid> = la ligne « daemon PID <n> » de spawn_daemon.ps1
+# (JAMAIS le « cmd watchdog PID » — garder celui-là figerait
+# le watchdog, pas le moteur).
 pwsh -File scripts/vol_joblimit.ps1 -TargetPid <pid> -LimitMB 5120
 pwsh -File scripts/vol_memwatch.ps1 -DaemonPid <pid> -MaxMB 5120 `
   -Log "C:\OnionBit-vol\logs\_vol<N>_watch.log" &

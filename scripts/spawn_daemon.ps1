@@ -28,14 +28,51 @@
 #
 # Usage :
 #   pwsh -File scripts/spawn_daemon.ps1 [-Port 9377]
-#     [-Profile default] [-Exe <chemin>] [-LogDir <dossier>]
+#     [-Profile <dir>] [-Exe <chemin>] [-LogDir <dossier>]
+#   -Exe défaut : <target-dir>\release\explorer-daemon.exe
+#   (résolution cargo — repli debug) ; -Profile omis =
+#   EXPLORER_PROFILE de l'appelant (hérité via WMI).
 
 param(
   [int]$Port = 9377,
-  [string]$Profile = 'default',
-  [string]$Exe = 'D:\cargo-target\OnionBit-Explorer\debug\explorer-daemon.exe',
-  [string]$LogDir = 'D:\cargo-target\explorer-nav\daemon-logs'
+  # --profile DIR du daemon. '' = non passé : l'env
+  # EXPLORER_PROFILE de l'appelant gouverne (WMI hérite
+  # l'environnement) — la checklist §0.3 pose l'env ; un
+  # -Profile explicite la surcharge (même règle que le binaire).
+  [string]$Profile = '',
+  [string]$Exe = '',
+  [string]$LogDir = ''
 )
+
+# Résolution du binaire : -Exe explicite, sinon la canonique
+# cargo (CARGO_TARGET_DIR > .cargo/config.toml > .\target —
+# même règle que deploy_engine.ps1). release préféré à debug.
+if ($Exe -eq '') {
+  $repo = Split-Path -Parent $PSScriptRoot
+  $target = if ($env:CARGO_TARGET_DIR) {
+    $env:CARGO_TARGET_DIR
+  } else {
+    $cfg = Join-Path $repo '.cargo\config.toml'
+    if (Test-Path $cfg) {
+      $m = Select-String -Path $cfg -Pattern 'target-dir\s*=\s*"([^"]+)"'
+      if ($m) { $m.Matches[0].Groups[1].Value } else { 'target' }
+    } else { 'target' }
+  }
+  if (-not [System.IO.Path]::IsPathRooted($target)) {
+    $target = Join-Path $repo $target
+  }
+  foreach ($prof in 'release', 'debug') {
+    $cand = Join-Path $target "$prof\explorer-daemon.exe"
+    if (Test-Path $cand) { $Exe = $cand; break }
+  }
+}
+if (-not (Test-Path $Exe)) {
+  Write-Error "explorer-daemon.exe introuvable (cargo build ou -Exe)"
+  exit 1
+}
+if ($LogDir -eq '') {
+  $LogDir = Join-Path (Split-Path -Parent $PSScriptRoot) 'target\daemon-logs'
+}
 
 New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
 $stdout = Join-Path $LogDir "daemon-$Port.stdout.log"
@@ -47,7 +84,8 @@ $exitlog = Join-Path $LogDir "daemon-$Port.exit.log"
 # l'enfant — sauf kill de tout l'arbre, d'où l'absence =
 # signature). `!ERRORLEVEL!`/`!DATE!`/`!TIME!` sont retardés
 # par /v:on pour être lus au moment de la mort.
-$inner = "`"$Exe`" --port $Port --profile `"$Profile`" " +
+$profArg = if ($Profile -ne '') { " --profile `"$Profile`"" } else { '' }
+$inner = "`"$Exe`" --port $Port$profArg " +
   "> `"$stdout`" 2> `"$stderr`" " +
   "& <nul set /p _=EXIT:!ERRORLEVEL! > `"$exitlog`" " +
   "& echo !DATE! !TIME! >> `"$exitlog`""
@@ -74,8 +112,10 @@ if ($proc.ReturnValue -ne 0) {
 }
 Write-Output "cmd watchdog PID $($proc.ProcessId) (daemon enfant)"
 
-# Vérification : le port doit répondre dans les ~5 s.
-$deadline = (Get-Date).AddSeconds(5)
+# Vérification : le port doit répondre dans les ~20 s — le
+# premier boot scanne les fontes système (~7 s mesurés) et
+# charge le profil ; 5 s coupaient en « muet » un daemon sain.
+$deadline = (Get-Date).AddSeconds(20)
 $ok = $false
 while ((Get-Date) -lt $deadline -and -not $ok) {
   Start-Sleep -Milliseconds 400
@@ -88,6 +128,16 @@ while ((Get-Date) -lt $deadline -and -not $ok) {
     $ok = $false
   }
 }
+
+# Les chiens de garde du vol (vol_joblimit -TargetPid,
+# vol_memwatch -DaemonPid) veulent le PID du daemon, pas
+# celui du cmd watchdog — on résout l'enfant explorer-daemon.
+$dpid = (Get-CimInstance Win32_Process `
+  -Filter "ParentProcessId = $($proc.ProcessId)" `
+  | Where-Object { $_.Name -eq 'explorer-daemon.exe' } `
+  | Select-Object -First 1 -ExpandProperty ProcessId)
+if ($dpid) { Write-Output "daemon PID $dpid" }
+
 if ($ok) {
   Write-Output "daemon $Port en ligne"
 } else {
