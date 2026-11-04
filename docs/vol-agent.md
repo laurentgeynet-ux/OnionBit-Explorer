@@ -142,7 +142,7 @@ Invoke-RestMethod "$BASE/api/tabs/$tab/layout"   # arbre de boîtes
 | `GET  /api/tabs/{id}/media` | offres média vivantes (`<video>`/`<audio>`/MSE) |
 | `GET  /api/tabs/{id}/media/{mid}` | fiche d'une surface (diagnostics, `410` id mort) |
 | `POST …/media/{mid}/claim` `{codecs:[…]}` | premier arrivé gagne : `200` / `409` / `410` |
-| `GET  …/media/{mid}/segments?buffer=&max=&from=` | pull MSE — `octet-stream` + `X-Mse-Cursor`/`Eos`/`Section`/`Pending` ; `from` hors fenêtre → `416` ; non-MSE → `{mse:false}` |
+| `GET  …/media/{mid}/segments?buffer=&max=&from=&peek=` | pull MSE — `octet-stream` + `X-Mse-Cursor`/`Eos`/`Section`/`Pending` ; `from` = seek **commité** (curseur partagé !), `peek` = même fenêtre en **lecture seule** — diagnostics/vols : toujours `peek`, jamais `from` (vol 627 : un `from=0` de diag a laissé le curseur mid-flux → puller suivant sans init → `idle budget`) ; hors fenêtre → `416` ; non-MSE → `{mse:false}` |
 | `POST …/media/{mid}/release` | détachement hôte |
 | `POST …/media/{mid}/state` | rapport hôte ≤ 4 Hz — `{position_ms,duration_ms,buffered_ms,state,error?}`, `state ∈ playing\|paused\|ended\|error` |
 | `GET  /api/events` | SSE — `navigated`, `frame_invalidated`, `media_offered`/`moved`/`gone`/`command`… |

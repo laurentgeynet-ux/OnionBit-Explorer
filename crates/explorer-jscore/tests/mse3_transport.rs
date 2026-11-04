@@ -66,14 +66,14 @@ fn mse3_pull_returns_appended_bytes_fifo() {
     // Le pull draine la file dans l'ordre d'append, borné
     // par `max`.
     let (data, cursor, eos, _sec) = e
-        .mse_pull_segments(&u, 0, 4, None)
+        .mse_pull_segments(&u, 0, 4, None, false)
         .expect("pull")
         .expect("servable");
     assert_eq!(data, vec![1, 2, 3, 4]);
     assert_eq!(cursor, 4);
     assert!(!eos);
     let (data, cursor, eos, _sec) = e
-        .mse_pull_segments(&u, 0, 16, None)
+        .mse_pull_segments(&u, 0, 16, None, false)
         .expect("pull2")
         .expect("servable");
     assert_eq!(data, vec![5]);
@@ -82,7 +82,7 @@ fn mse3_pull_returns_appended_bytes_fifo() {
     // File vide, readyState "open" → pas d'eos (le site peut
     // encore appender — le ByteSource attend).
     let (data, _, eos, _s) = e
-        .mse_pull_segments(&u, 0, 16, None)
+        .mse_pull_segments(&u, 0, 16, None, false)
         .expect("pull3")
         .expect("servable");
     assert_eq!(data, Vec::<u8>::new());
@@ -102,7 +102,7 @@ fn mse3_end_of_stream_sets_eos_when_drained() {
     // `ended` mais file non vide → octets d'abord, eos au
     // vidage seulement.
     let (data, _, eos, _s) = e
-        .mse_pull_segments(&u, 0, 16, None)
+        .mse_pull_segments(&u, 0, 16, None, false)
         .expect("pull")
         .expect("servable");
     assert_eq!(data, vec![9, 9]);
@@ -123,7 +123,7 @@ fn mse3_abort_and_remove_drop_queued_bytes() {
     // le couvre pas entièrement → conservé (on ne découpe
     // pas l'intérieur d'un fragment sans démuxage).
     let (data, _, _, _s) = e
-        .mse_pull_segments(&u, 0, 16, None)
+        .mse_pull_segments(&u, 0, 16, None, false)
         .expect("pull")
         .expect("servable");
     assert_eq!(data, vec![1, 1], "remove partiel conserve le chunk");
@@ -133,7 +133,7 @@ fn mse3_abort_and_remove_drop_queued_bytes() {
          sb.abort();",
     );
     let (data, _, _, _s) = e
-        .mse_pull_segments(&u, 0, 16, None)
+        .mse_pull_segments(&u, 0, 16, None, false)
         .expect("pull2")
         .expect("servable");
     assert_eq!(data, Vec::<u8>::new(), "abort aurait dû vider la file");
@@ -177,7 +177,7 @@ fn mse3_remove_evicts_only_covered_chunks() {
     ))
     .expect("appends+remove");
     let (data, _, _, _s) = e
-        .mse_pull_segments(&u, 0, 4096, None)
+        .mse_pull_segments(&u, 0, 4096, None, false)
         .expect("pull")
         .expect("servable");
     let init = hex(INIT);
@@ -227,7 +227,7 @@ fn mse3_section_offsets_mark_reinit() {
     let sl = hex(SEG).len() as u64;
     // Bulk unique : sections aux positions des deux re-inits.
     let (data, _, _, sections) = e
-        .mse_pull_segments(&u, 0, 65536, None)
+        .mse_pull_segments(&u, 0, 65536, None, false)
         .expect("pull")
         .expect("servable");
     assert_eq!(sections, vec![il + sl, 2 * (il + sl)]);
@@ -244,7 +244,7 @@ fn mse3_section_offsets_mark_reinit() {
     ))
     .expect("rail2");
     let (_, _, _, sections2) = e
-        .mse_pull_segments(&u, 1, 65536, None)
+        .mse_pull_segments(&u, 1, 65536, None, false)
         .expect("pull2")
         .expect("servable");
     assert_eq!(sections2, Vec::<u64>::new());
@@ -264,30 +264,32 @@ fn mse3_buffer_index_selects_source_buffer() {
          a.appendBuffer(new Uint8Array([2]));",
     );
     let (dv, _, _, _sv) = e
-        .mse_pull_segments(&u, 0, 16, None)
+        .mse_pull_segments(&u, 0, 16, None, false)
         .expect("video")
         .expect("servable");
     let (da, _, _, _sa) = e
-        .mse_pull_segments(&u, 1, 16, None)
+        .mse_pull_segments(&u, 1, 16, None, false)
         .expect("audio")
         .expect("servable");
     assert_eq!(dv, vec![1]);
     assert_eq!(da, vec![2]);
     // Index hors rang → None honnête.
-    assert!(e.mse_pull_segments(&u, 2, 16, None).is_none());
+    assert!(e.mse_pull_segments(&u, 2, 16, None, false).is_none());
 }
 
 #[test]
 fn mse3_unknown_url_pulls_none() {
     let mut e = engine();
     // URL non enregistrée → `None` (le handler rendra 410).
-    assert!(e.mse_pull_segments("blob:null/999", 0, 16, None).is_none());
+    assert!(e
+        .mse_pull_segments("blob:null/999", 0, 16, None, false)
+        .is_none());
     // `blob:` d'un Blob ordinaire → None (pas une MediaSource).
     let u = e
         .eval("URL.createObjectURL(new Blob(['x']))")
         .map(|v| e.describe(v))
         .expect("blob url");
-    assert!(e.mse_pull_segments(&u, 0, 16, None).is_none());
+    assert!(e.mse_pull_segments(&u, 0, 16, None, false).is_none());
 }
 
 /// JS-C296 — chantier D : `?from=` repositionne le curseur
@@ -335,7 +337,7 @@ fn mse3_from_repositions_serve_cursor() {
     .expect("appends");
     // Pull complet : deux sections servies, curseur à la fin.
     let (d1, c1, _, s1) = e
-        .mse_pull_segments(&u, 0, 65536, None)
+        .mse_pull_segments(&u, 0, 65536, None, false)
         .expect("pull")
         .expect("servable");
     assert_eq!(s1, vec![il + sl]);
@@ -347,7 +349,7 @@ fn mse3_from_repositions_serve_cursor() {
     // serveur = from + len (contrat `?from=` vérifié par
     // le `MseSource` média).
     let (d2, c2, _, s2) = e
-        .mse_pull_segments(&u, 0, 65536, Some(il + sl))
+        .mse_pull_segments(&u, 0, 65536, Some(il + sl), false)
         .expect("replay")
         .expect("servable");
     assert_eq!(s2, vec![0]);
@@ -357,7 +359,7 @@ fn mse3_from_repositions_serve_cursor() {
     assert_eq!(d2, want, "le replay doit re-servir init+seg1 fidèlement");
     // `from` pile au début : tout le flux re-servi.
     let (d3, c3, _, _) = e
-        .mse_pull_segments(&u, 0, 65536, Some(0))
+        .mse_pull_segments(&u, 0, 65536, Some(0), false)
         .expect("replay0")
         .expect("servable");
     assert_eq!(c3, total);
@@ -372,7 +374,7 @@ fn mse3_from_repositions_serve_cursor() {
     .expect("appends2");
     let skipped_from = total + 4; // 4 octets dans SEG
     let (d4, c4, _, _) = e
-        .mse_pull_segments(&u, 0, 65536, Some(skipped_from))
+        .mse_pull_segments(&u, 0, 65536, Some(skipped_from), false)
         .expect("fwd")
         .expect("servable");
     let mut want4 = seg[4..].to_vec();
@@ -383,7 +385,7 @@ fn mse3_from_repositions_serve_cursor() {
     // `from` en tête du chunk sauté re-sert le chunk entier
     // (dont les 4 octets sautés par le seek avant).
     let (d5, _, _, _) = e
-        .mse_pull_segments(&u, 0, 65536, Some(total))
+        .mse_pull_segments(&u, 0, 65536, Some(total), false)
         .expect("replay-skip")
         .expect("servable");
     let mut want5 = seg.clone();
@@ -393,14 +395,14 @@ fn mse3_from_repositions_serve_cursor() {
     // adressable dans l'historique → 416.
     e.eval("sb.remove(0,1)").expect("remove");
     assert!(
-        e.mse_pull_segments(&u, 0, 64, Some(il))
+        e.mse_pull_segments(&u, 0, 64, Some(il), false)
             .expect("pull6")
             .is_err(),
         "from dans un trou remove → Unservable"
     );
     // Position jamais servie (> pulled) → 416 aussi.
     assert!(e
-        .mse_pull_segments(&u, 0, 64, Some(9_999_999))
+        .mse_pull_segments(&u, 0, 64, Some(9_999_999), false)
         .expect("pull7")
         .is_err());
 }
@@ -436,7 +438,7 @@ fn mse3_section_offset_mid_chunk() {
     ))
     .expect("appends");
     let (_, _, _, sections) = e
-        .mse_pull_segments(&u, 0, 65536, None)
+        .mse_pull_segments(&u, 0, 65536, None, false)
         .expect("pull")
         .expect("servable");
     // La frontière est à l'offset du moov dans le chunk
@@ -536,4 +538,65 @@ fn mse4_source_buffers_enumerated_for_offer() {
         vec!["video/mp4".to_string(), "audio/mp4".to_string()]
     );
     assert_eq!(e.mse_source_buffers("blob:null/x"), Vec::<String>::new());
+}
+
+/// Vol 627 — `?peek=` : fenêtre absolue en **lecture seule**.
+/// Le pull manuel `?from=0` de diagnostic commitait le
+/// curseur partagé → le puller réel rejoignait le flux
+/// sans init segment (« idle budget exhausted »). `peek`
+/// sert la même fenêtre sans toucher `cursor`/`pulled`.
+#[test]
+fn mse3_peek_reads_window_without_disturbing_fifo() {
+    let mut e = engine();
+    let u = attached_url(&mut e);
+    ev(
+        &mut e,
+        "var sb=__ms.addSourceBuffer('video/mp4');\
+         sb.appendBuffer(new Uint8Array([1,2,3,4,5,6,7,8]));",
+    );
+    // Peek total depuis la tête : tout est servi — et le
+    // curseur FIFO n'a PAS bougé.
+    let (data, cursor, _eos, _sec) = e
+        .mse_pull_segments(&u, 0, 65536, Some(0), true)
+        .expect("peek")
+        .expect("peek ok");
+    assert_eq!(data, vec![1, 2, 3, 4, 5, 6, 7, 8]);
+    assert_eq!(cursor, 8, "le curseur rendu = fin de fenêtre servie");
+    // Le pull FIFO réel reçoit quand même le flux COMPLET
+    // depuis 0 — l'init n'a pas été « consommé » par le peek.
+    let (fifo, cursor, _eos, _sec) = e
+        .mse_pull_segments(&u, 0, 65536, None, false)
+        .expect("pull")
+        .expect("pull ok");
+    assert_eq!(fifo, vec![1, 2, 3, 4, 5, 6, 7, 8]);
+    assert_eq!(cursor, 8);
+    // Peek au milieu du flux consommé (replay served).
+    let (mid, cursor, _eos, _sec) = e
+        .mse_pull_segments(&u, 0, 4, Some(3), true)
+        .expect("peek mid")
+        .expect("peek mid ok");
+    assert_eq!(mid, vec![4, 5, 6, 7]);
+    assert_eq!(cursor, 7);
+    // Le FIFO continue à sa position — vide désormais.
+    let (tail, _cursor, _eos, _sec) = e
+        .mse_pull_segments(&u, 0, 65536, None, false)
+        .expect("pull2")
+        .expect("pull2 ok");
+    assert!(tail.is_empty());
+    // Hors fenêtre : même `416` filaire que `?from=`.
+    assert!(e
+        .mse_pull_segments(&u, 0, 16, Some(9_999), true)
+        .expect("peek oob")
+        .is_err());
+    assert!(
+        e.mse_pull_segments(&u, 0, 16, Some(9), true)
+            .expect("peek beyond total")
+            .is_err(),
+        "f > total_end → hors fenêtre"
+    );
+    let (empty, cursor, _eos, _sec) = e
+        .mse_pull_segments(&u, 0, 16, Some(8), true)
+        .expect("peek at-end")
+        .expect("f == total_end ok");
+    assert!(empty.is_empty() && cursor == 8);
 }

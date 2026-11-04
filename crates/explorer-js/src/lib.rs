@@ -640,7 +640,9 @@ pub trait JsEngine: Send {
     /// (JS-C296, chantier D) : repositionne le curseur de
     /// service à une position absolue (`MseSource::seek` →
     /// `?from=`) — `Err` = cible hors fenêtre adressable
-    /// (→ 416 filaire). `None` : pas de source sous `url`
+    /// (→ 416 filaire). `peek = true` : fenêtre en lecture
+    /// seule `?peek=` (vol 627 — diagnostic sans perturbation
+    /// du FIFO partagé). `None` : pas de source sous `url`
     /// ou index hors rang. Défaut : `None`.
     fn mse_pull(
         &mut self,
@@ -648,6 +650,7 @@ pub trait JsEngine: Send {
         _buffer: usize,
         _max: usize,
         _from: Option<u64>,
+        _peek: bool,
     ) -> MsePullReply {
         None
     }
@@ -1646,12 +1649,14 @@ enum Cmd {
     /// curseur, eos, sections)` ; `sections` = offsets
     /// corps des frontières `X-Mse-Section` (pont C,
     /// JS-C295) ; `from` = repositionnement absolu `?from=`
-    /// (chantier D, JS-C296).
+    /// (chantier D, JS-C296) ; `peek` = lecture seule
+    /// `?peek=` — ne touche ni `cursor` ni `pulled` (vol 627).
     MsePull {
         url: String,
         buffer: usize,
         max: usize,
         from: Option<u64>,
+        peek: bool,
         tx: Sender<MsePullReply>,
     },
     /// MIME des `SourceBuffer` sous `url` (`?buffer=N` indexe
@@ -2215,9 +2220,10 @@ impl JscoreEngine {
                         buffer,
                         max,
                         from,
+                        peek,
                         tx,
                     } => {
-                        let _ = tx.send(eng.mse_pull_segments(&url, buffer, max, from));
+                        let _ = tx.send(eng.mse_pull_segments(&url, buffer, max, from, peek));
                     }
                     Cmd::MseBuffers { url, tx } => {
                         let _ = tx.send(eng.mse_source_buffers(&url));
@@ -2812,6 +2818,7 @@ impl JsEngine for JscoreEngine {
         buffer: usize,
         max: usize,
         from: Option<u64>,
+        peek: bool,
     ) -> MsePullReply {
         let (tx, rx) = channel();
         if self
@@ -2821,6 +2828,7 @@ impl JsEngine for JscoreEngine {
                 buffer,
                 max,
                 from,
+                peek,
                 tx,
             })
             .is_err()

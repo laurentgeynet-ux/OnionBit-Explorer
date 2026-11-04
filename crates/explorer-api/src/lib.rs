@@ -1086,8 +1086,14 @@ async fn get_media(State(st): State<ApiState>, Path((id, mid)): Path<(TabId, u64
 /// file vide — le `read()` suivant rend `0`). `?from=N`
 /// (JS-C296, chantier D — `MseSource::seek`) : re-sert à
 /// partir de la position absolue N dans l'historique des
-/// appends ; hors fenêtre → `416`. Surface
-/// non-MSE → JSON `{mse:false}` honnête ; `410` id mort.
+/// appends **en commitant le curseur partagé** ; hors
+/// fenêtre → `416`. `?peek=N` (vol 627) : même fenêtre en
+/// **lecture seule** — le curseur FIFO du consommateur
+/// réel n'est pas touché (un `?from=` de diagnostic
+/// laissait le curseur à `N+len` : le puller suivant
+/// rejoignait le flux sans init segment → « idle budget »).
+/// `peek` prime sur `from` quand les deux sont présents.
+/// Surface non-MSE → JSON `{mse:false}` honnête ; `410` id mort.
 async fn media_segments(
     State(st): State<ApiState>,
     Path((id, mid)): Path<(TabId, u64)>,
@@ -1098,9 +1104,10 @@ async fn media_segments(
         .get("max")
         .and_then(|s| s.parse().ok())
         .unwrap_or(crate::MSE_PULL_BULK_MAX);
+    let peek = q.get("peek").and_then(|s| s.parse().ok());
     let from = q.get("from").and_then(|s| s.parse().ok());
     let mut session = st.session.lock().await;
-    match session.media_segments_pull(id, mid, buffer, max, from) {
+    match session.media_segments_pull(id, mid, buffer, max, peek.or(from), peek.is_some()) {
         explorer_core::MsePull::Ready(data, cursor, eos, sections) => {
             let mut b = axum::http::Response::builder()
                 .status(axum::http::StatusCode::OK)

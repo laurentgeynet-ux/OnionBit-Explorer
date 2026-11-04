@@ -142,6 +142,73 @@ fn serve_next_chunk(sd: &mut SbData) -> bool {
     true
 }
 
+/// Fenêtre `?peek=` (vol 627 — diagnostic/consommateur
+/// externe) : sert `[f, f+max)` **en lecture seule** —
+/// `cursor`/`pulled`/`served` intacts, aucun chunk
+/// file→served : un peek ne perturbe jamais le FIFO du
+/// consommateur réel. Les chunks en file ont des positions
+/// virtuelles contigües à partir de `pulled` (ordre d'append).
+/// Sections `X-Mse-Section` émises comme au pull normal.
+/// `Err` = cible hors fenêtre adressable (trou `served`
+/// `remove`/éviction, ou au-delà du total appendé) — même
+/// contrat `416` que `?from=`. Corps vide possible : `f`
+/// au bout exact du flux.
+fn peek_window(sd: &SbData, f: u64, max: usize) -> Result<(Vec<u8>, u64, Vec<u64>), ()> {
+    let total_end = sd.pulled + sd.segments.iter().map(|s| s.len() as u64).sum::<u64>();
+    if f > total_end {
+        return Err(());
+    }
+    let mut out = Vec::new();
+    let mut sections = Vec::new();
+    let mut pos = f;
+    for c in &sd.served {
+        let end = c.start + c.bytes.len() as u64;
+        if pos >= end {
+            continue;
+        }
+        if pos < c.start {
+            return Err(()); // trou `remove`/éviction
+        }
+        let off = (pos - c.start) as usize;
+        let take = (c.bytes.len() - off).min(max - out.len());
+        if let Some(abs) = c.boundary.map(|b| c.start + b) {
+            if abs >= pos && abs < pos + take as u64 {
+                sections.push(abs - f);
+            }
+        }
+        out.extend_from_slice(&c.bytes[off..off + take]);
+        pos += take as u64;
+        if out.len() >= max {
+            return Ok((out, pos, sections));
+        }
+    }
+    let mut vpos = sd.pulled;
+    for (i, seg) in sd.segments.iter().enumerate() {
+        let end = vpos + seg.len() as u64;
+        if pos >= end {
+            vpos = end;
+            continue;
+        }
+        if pos < vpos {
+            return Err(()); // trou entre `served` et la file
+        }
+        let off = (pos - vpos) as usize;
+        let take = (seg.len() - off).min(max - out.len());
+        if let Some(abs) = sd.seg_boundary.get(i).copied().flatten().map(|b| vpos + b) {
+            if abs >= pos && abs < pos + take as u64 {
+                sections.push(abs - f);
+            }
+        }
+        out.extend_from_slice(&seg[off..off + take]);
+        pos += take as u64;
+        if out.len() >= max {
+            return Ok((out, pos, sections));
+        }
+        vpos = end;
+    }
+    Ok((out, pos, sections))
+}
+
 /// État moteur MSE — protos paresseux + registre des URL objets
 /// pointant un `MediaSource`. Document-local : swappé avec le
 /// `BrowsingContext` comme `files`/`idb`.
@@ -1566,12 +1633,19 @@ impl Engine {
     /// pas de média). `Err` = cible hors fenêtre
     /// adressable (trou `remove`/éviction cap/jamais servi)
     /// → `416` filaire.
+    ///
+    /// `peek = true` (vol 627 — diagnostic pull) : `from` est
+    /// alors une fenêtre **en lecture seule** — `sd.cursor` et
+    /// `sd.pulled` intacts, aucun chunk file→served. Un peek
+    /// ne perturbe jamais le FIFO du consommateur réel ; un
+    /// `?from=` nu (seek commité) le fait, par design.
     pub fn mse_pull_segments(
         &mut self,
         url: &str,
         buffer: usize,
         max: usize,
         from: Option<u64>,
+        peek: bool,
     ) -> Option<MsePullOut> {
         let mid = self.mse.object_urls.get(url).copied()?;
         let ms = ms_data(self, Value::Obj(mid))?;
@@ -1579,6 +1653,15 @@ impl Engine {
         let sd = sb_data(self, sbv)?;
         let mut sd = sd.borrow_mut();
         if let Some(f) = from {
+            if peek {
+                let Ok((out, end, sections)) = peek_window(&sd, f, max) else {
+                    // Hors fenêtre — même `416` filaire que `?from=`.
+                    return Some(Err(()));
+                };
+                let total_end = sd.pulled + sd.segments.iter().map(|s| s.len() as u64).sum::<u64>();
+                let eos = end == total_end && ms.borrow().ready_state == "ended";
+                return Some(Ok((out, end, eos, sections)));
+            }
             while sd.pulled < f {
                 // Avance : les chunks file basculent servis —
                 // les positions restent re-servissables.

@@ -792,6 +792,7 @@ impl Session {
         buffer: usize,
         max: usize,
         from: Option<u64>,
+        peek: bool,
     ) -> MsePull {
         let Some(entry) = self.tabs.get_mut(&tab) else {
             return MsePull::Dead;
@@ -816,7 +817,7 @@ impl Session {
         let Some(eng) = entry.js.as_mut() else {
             return MsePull::Pending;
         };
-        match eng.mse_pull(&m.url.clone(), buffer, max, from) {
+        match eng.mse_pull(&m.url.clone(), buffer, max, from, peek) {
             Some(Ok((data, cursor, eos, sections))) => MsePull::Ready(data, cursor, eos, sections),
             Some(Err(())) => MsePull::Unservable,
             None => MsePull::Dead,
