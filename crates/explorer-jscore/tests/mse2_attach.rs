@@ -10,16 +10,21 @@
 //! `blob:` non-MSE. La couture offre `mse` côté core est
 //! couverte par `media.rs` (marquage scan → `MediaOffered`).
 
-use explorer_jscore::{Dom, Engine};
+use explorer_jscore::{Dom, Engine, MediaReport, MediaState};
 use std::cell::RefCell;
 use std::rc::Rc;
 
 const PAGE: &str = r#"<html><body><video id="v"></video></body></html>"#;
 
 fn engine() -> Engine {
+    engine_dom().0
+}
+
+fn engine_dom() -> (Engine, Rc<RefCell<Dom>>) {
     let mut e = Engine::new();
-    e.install_dom(&Rc::new(RefCell::new(Dom::from_html(PAGE))));
-    e
+    let dom = Rc::new(RefCell::new(Dom::from_html(PAGE)));
+    e.install_dom(&dom);
+    (e, dom)
 }
 
 fn ev(e: &mut Engine, src: &str) -> String {
@@ -27,6 +32,24 @@ fn ev(e: &mut Engine, src: &str) -> String {
         Ok(v) => e.describe(v),
         Err(err) => panic!("{src} -> {err}"),
     }
+}
+
+/// Box fMP4 minimale (size + fourcc + payload).
+fn bx(tag: [u8; 4], payload: &[u8]) -> Vec<u8> {
+    let mut v = u32::try_from(payload.len() + 8)
+        .expect("box < 4Gio")
+        .to_be_bytes()
+        .to_vec();
+    v.extend_from_slice(&tag);
+    v.extend_from_slice(payload);
+    v
+}
+
+/// Init fMP4 minimal : `moov` porteur d'un enfant — le
+/// walker exige une payload non vide (`end > pos+hdr`).
+/// `has_moov` → métadonnées connues → `loadedmetadata`.
+fn moov() -> Vec<u8> {
+    bx(*b"moov", &bx(*b"free", &[]))
 }
 
 #[test]
@@ -196,4 +219,176 @@ fn mse2_end_of_stream_survives_attach() {
         ),
         "ended"
     );
+}
+
+#[test]
+fn mse2_attach_fires_loadstart_then_sourceopen() {
+    let mut e = engine();
+    // §B-88/JS-C332 — le mur vol 634 : listeners exhaustifs
+    // armés par le player puis `src=blob:` → **zéro** event
+    // élément mesuré (machine armée à jamais, `mseBuffers:[]`).
+    // Spec : la sélection de ressource file `loadstart` sur
+    // l'élément — avant `sourceopen` (ordre navigateur), en
+    // tâche comme le reste (JS-C324).
+    assert_eq!(
+        ev(
+            &mut e,
+            "var L=[];var ms=new MediaSource();var v=document.getElementById('v');\
+             v.addEventListener('loadstart',function(){L.push('loadstart')});\
+             ms.addEventListener('sourceopen',function(){L.push('sourceopen')});\
+             v.src=URL.createObjectURL(ms);L.length"
+        ),
+        "0"
+    );
+    assert_eq!(ev(&mut e, "L.join(',')"), "loadstart,sourceopen");
+    // Élément sain à l'attache : réseau IDLE (JS-C328),
+    // rien encore de bufferisé.
+    assert_eq!(ev(&mut e, "v.networkState+'|'+v.readyState"), "1|0");
+}
+
+#[test]
+fn mse2_ms_duration_fires_element_durationchange() {
+    let mut e = engine();
+    // §B-88 — `ms.duration` reflétée sur l'élément attaché :
+    // le set tire `durationchange` (spec — le player VOD le
+    // pose après le manifeste, bitmovin attend ce signal).
+    ev(
+        &mut e,
+        "var L=[];var ms=new MediaSource();var v=document.getElementById('v');\
+         v.src=URL.createObjectURL(ms);window.__ms=ms;\
+         v.addEventListener('durationchange',function(){L.push('dc:'+v.duration)});'armed'",
+    );
+    ev(&mut e, "__ms.duration=211.4;'set'");
+    assert_eq!(ev(&mut e, "L.join(',')+'|'+v.duration"), "dc:211.4|211.4");
+    // Set de même valeur → pas de re-tir ; nouveau set → tir.
+    ev(&mut e, "__ms.duration=211.4;__ms.duration=310;'set2'");
+    assert_eq!(ev(&mut e, "L.join(',')"), "dc:211.4,dc:310");
+}
+
+#[test]
+fn mse2_attach_with_preset_duration_fires_durationchange() {
+    let mut e = engine();
+    // §B-88 — durée connue AVANT l'attache : l'élément la
+    // reflète dès le `src=` → `durationchange` filé derrière
+    // `loadstart`/`sourceopen` (spec media element attach).
+    assert_eq!(
+        ev(
+            &mut e,
+            "var L=[];var ms=new MediaSource();var v=document.getElementById('v');\
+             v.addEventListener('loadstart',function(){L.push('loadstart')});\
+             v.addEventListener('durationchange',function(){L.push('durationchange')});\
+             ms.addEventListener('sourceopen',function(){L.push('sourceopen')});\
+             ms.duration=211.4;\
+             v.src=URL.createObjectURL(ms);L.length"
+        ),
+        "0"
+    );
+    assert_eq!(
+        ev(&mut e, "L.join(',')"),
+        "loadstart,sourceopen,durationchange"
+    );
+    assert_eq!(ev(&mut e, "v.duration"), "211.4");
+}
+
+#[test]
+fn mse2_appends_climb_element_readiness() {
+    let mut e = engine();
+    // §B-88 — l'échelle `readyState` de l'élément est montée
+    // par les appends eux-mêmes (spec MSE : métadonnées =
+    // init `moov`, données = plages bufferisées) — sans
+    // attendre un claim hôte. C'est le signal `qual>0` que le
+    // player attend pour avancer sa machine.
+    ev(
+        &mut e,
+        "var L=[];var ms=new MediaSource();var v=document.getElementById('v');\
+         v.src=URL.createObjectURL(ms);window.__sb=ms.addSourceBuffer('video/mp4');\
+         ['loadstart','loadedmetadata','loadeddata','canplay',\
+          'canplaythrough','progress'].forEach(\
+          function(t){v.addEventListener(t,function(){L.push(t)})});'armed'",
+    );
+    // Init `moov` appendé → `loadedmetadata` (HAVE_METADATA)
+    // + `progress` (event élément filé à l'updateend).
+    e.eval(&format!(
+        "__sb.appendBuffer(new Uint8Array({:?}).buffer);",
+        moov()
+    ))
+    .expect("append init");
+    assert_eq!(ev(&mut e, "v.readyState"), "1");
+    // Segment média (octets bruts → plage estimée ~[0,6 s],
+    // JS-C284) : la tête (pos 0) est couverte →
+    // `loadeddata`+`canplay` ; fin 6 s ≥ marge
+    // CANPLAYTHROUGH → `canplaythrough`.
+    e.eval("__sb.appendBuffer(new ArrayBuffer(64));")
+        .expect("append media");
+    assert_eq!(ev(&mut e, "v.readyState"), "4");
+    assert_eq!(
+        ev(&mut e, "L.join(',')"),
+        "loadstart,loadedmetadata,progress,loadeddata,canplay,canplaythrough,progress"
+    );
+    // Appends suivants : `progress` seul re-tire (échelle
+    // edge-triggered, jamais polluée — même règle que 182).
+    e.eval("__sb.appendBuffer(new ArrayBuffer(64));")
+        .expect("append media 2");
+    assert_eq!(ev(&mut e, "L.slice(-1)[0]"), "progress");
+}
+
+#[test]
+fn mse2_play_pends_until_claim_then_resolves() {
+    let (mut e, dom) = engine_dom();
+    // §B-88 — `play()` sous attache MSE pré-claim : la
+    // promesse **pend** (spec : tranche au premier `playing`)
+    // au lieu de rejeter `NotSupportedError` — le player lit
+    // `paused=false` dès l'intention (flag interne spec).
+    ev(
+        &mut e,
+        "var ms=new MediaSource();var v=document.getElementById('v');\
+         v.src=URL.createObjectURL(ms);var R='pending';\
+         v.play().then(function(){R='resolved'},function(){R='rejected'});'armed'",
+    );
+    assert_eq!(ev(&mut e, "R+'|'+v.paused"), "pending|false");
+    // Claim hôte → les promesses pendantes migrent et
+    // tranchent au premier rapport `playing` (handoff : pas
+    // de `loadstart` re-tiré — il a été servi à l'attache).
+    let node = dom.borrow().by_id("v").expect("v node");
+    e.set_media_claim(node, 7, Some(vec!["avc1".into()]));
+    let rep = MediaReport {
+        position_ms: 0,
+        duration_ms: Some(60_000),
+        buffered_ms: 1_000,
+        state: MediaState::Playing,
+        error: None,
+    };
+    e.deliver_media_state(node, &rep).expect("playing");
+    assert_eq!(ev(&mut e, "R"), "resolved");
+    // Canari : hors attache MSE le rejet honnête reste.
+    assert_eq!(
+        ev(
+            &mut e,
+            "var v2=document.createElement('video');var R2='pending';\
+             v2.play().then(function(){R2='resolved'},function(){R2='rejected'});R2"
+        ),
+        "pending"
+    );
+    assert_eq!(ev(&mut e, "R2"), "rejected");
+}
+
+#[test]
+fn mse2_load_and_pause_preclaim() {
+    let mut e = engine();
+    // §B-88 — `v.load()` rejoue la sélection de ressource :
+    // `loadstart` re-filé (le `unload().then(load+play)` de
+    // bitmovin repart sur un cycle de vie propre). `pause()`
+    // relâche l'intention `play` (+ event `pause` filé).
+    ev(
+        &mut e,
+        "var L=[];var ms=new MediaSource();var v=document.getElementById('v');\
+         ['loadstart','pause'].forEach(\
+          function(t){v.addEventListener(t,function(){L.push(t)})});\
+         v.src=URL.createObjectURL(ms);'attached'",
+    );
+    assert_eq!(ev(&mut e, "L.join(',')"), "loadstart");
+    ev(&mut e, "v.load();'loaded'");
+    assert_eq!(ev(&mut e, "L.join(',')"), "loadstart,loadstart");
+    ev(&mut e, "v.play();v.pause();v.paused;'paused'");
+    assert_eq!(ev(&mut e, "L.slice(-1)[0]+'|'+v.paused"), "pause|true");
 }

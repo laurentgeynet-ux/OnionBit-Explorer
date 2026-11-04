@@ -251,6 +251,27 @@ pub(crate) struct MseState {
     /// (`node_valid` §B-37) — pas de purge nécessaire, la
     /// table meurt avec le document.
     attached_to: HashMap<ObjId, NodeId>,
+    /// Échelle `readyState` montée **sur l'élément** attaché
+    /// (§B-88 — JS-C332) : les events de cycle de vie
+    /// (`loadstart` → `loadedmetadata` → `canplay`…) vivent
+    /// sur `HTMLMediaElement`, pas sur `MediaSource` — un
+    /// élément MSE non encore claimé par l'hôte devait voir
+    /// la rampe montée par les `appendBuffer` (bitmovin arme
+    /// des listeners exhaustifs puis charge : zéro event =
+    /// machine armée à jamais, `mseBuffers` vide). `NodeId →
+    /// niveau atteint` — monotone tant que l'élément n'est
+    /// pas claimé (l'underrun `waiting`/`stalled` reste
+    /// l'affaire de `deliver_media_state` post-claim ; au
+    /// claim le niveau est **seedé** dans `MediaElState` —
+    /// pas de double tir). L'entrée meurt avec le document.
+    el_ladder: HashMap<NodeId, u8>,
+    /// Intention `play()` enregistrée pré-claim (§B-88) :
+    /// `paused` reflète le flag interne spec (faux dès le
+    /// `play()` demandé) et les promesses pendent jusqu'au
+    /// premier rapport `playing` post-claim — le rejet
+    /// `NotSupportedError` immédiat n'a de sens que hors
+    /// attach MSE. `NodeId → (play demandé, promesses)`.
+    el_play: HashMap<NodeId, (bool, Vec<ObjId>)>,
     /// Protos piste JS-C327 — `[audio, video, text]` pour
     /// `AudioTrack`/`VideoTrack`/`TextTrack` et leurs listes
     /// (paresseux, racinés GC comme les autres protos).
@@ -301,6 +322,12 @@ impl MseState {
             ids.push(*t);
             crate::heap::push_value(ids, *tr);
         }
+        // Promesses `play()` pendantes pré-claim (§B-88) —
+        // le tir différé ne doit pas trouver un wrapper
+        // collecté (même règle que `pending_events`).
+        for (_, pids) in self.el_play.values() {
+            ids.extend(pids.iter().copied());
+        }
     }
 }
 
@@ -322,6 +349,11 @@ struct MsData {
     duration: f64,
     /// `setLiveSeekableRange` retenu (`None` = `clear`).
     live_range: Option<(f64, f64)>,
+    /// Un init `moov` a été appendé sur un des `SourceBuffer`
+    /// (§B-88) — les métadonnées de la présentation sont
+    /// connues côté élément → `loadedmetadata` (spec
+    /// « initialization segment received »).
+    init_seen: bool,
 }
 
 /// `SourceBuffer` interne.
@@ -930,6 +962,7 @@ fn ms_ctor(e: &mut Engine, _t: Value, _args: &[Value]) -> JsResult<Value> {
         list: None,
         duration: f64::NAN,
         live_range: None,
+        init_seen: false,
     }));
     let v = e.new_host_object(Rc::new(MsHost { d }));
     if let Value::Obj(id) = v {
@@ -1784,6 +1817,7 @@ fn sb_append_buffer(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Val
         );
     };
     let mut track_ops: Vec<(SbTrack, &'static str, Option<usize>)> = Vec::new();
+    let mut saw_moov = false;
     {
         let mut sd = d.borrow_mut();
         // JS-C325 — gardes spec : appel re-entrant pendant
@@ -1832,6 +1866,7 @@ fn sb_append_buffer(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Val
         // received ») — TrackEvents collectés pour la file
         // de tâches (tirés après la rafale `update*`).
         if scan.has_moov {
+            saw_moov = true;
             track_ops = reconcile_tracks(&mut sd, std::mem::take(&mut scan.tracks));
         }
         // MSE-3 transport : le segment est stocké en file
@@ -1922,11 +1957,78 @@ fn sb_append_buffer(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Val
     fire_mse_guarded(e, sid, "updatestart", &mut first_err);
     fire_mse_guarded(e, sid, "update", &mut first_err);
     d.borrow_mut().updating = false;
-    // `progress` élément (étape 182) : la croissance du
-    // buffer MSE vit dans `appendBuffer`, pas dans le
-    // `buffered_ms` du rapport hôte — filé en tâche
-    // (discipline JS-C324), cible = `attached_to[mid]`.
+    // §B-88 — l'échelle de cycle de vie de **l'élément** est
+    // montée par les appends (spec MSE : les métadonnées
+    // viennent de l'init `moov`, les données des plages
+    // bufferisées — l'élément n'a pas besoin de l'hôte pour
+    // savoir). Position 0 tant que non claimé : init reçu →
+    // `loadedmetadata` ; plage couvrant la tête →
+    // `loadeddata`+`canplay` ; fin ≥ durée connue ou marge
+    // `CANPLAYTHROUGH_AHEAD_MS` → `canplaythrough`. Filé en
+    // tâche (JS-C324), cible = `attached_to[mid]` — servi
+    // après `updateend`. **Claimé** : le bras hôte
+    // (`deliver_media_state`, étape 182) possède l'échelle —
+    // la poussée d'appends ne double pas les tirs.
     if let Value::Obj(mid) = d.borrow().ms {
+        if let Some(node) = e.mse.attached_to.get(&mid).copied() {
+            let claimed = e
+                .dom_ctx
+                .as_ref()
+                .is_some_and(|(dom, _)| dom.borrow().media.contains_key(&node));
+            if !claimed {
+                let mut end = 0.0f64;
+                let mut covers = false;
+                let (init, dur) = match ms_data(e, Value::Obj(mid)) {
+                    Some(ms) => {
+                        let mut m = ms.borrow_mut();
+                        if saw_moov {
+                            m.init_seen = true;
+                        }
+                        let (init, dur) = (m.init_seen, m.duration);
+                        for sbv in &m.buffers {
+                            if let Some(sd2) = sb_data(e, *sbv) {
+                                for &(a, b) in &sd2.borrow().est_ranges {
+                                    end = end.max(b);
+                                    if a <= 0.0 && b > 0.0 {
+                                        covers = true;
+                                    }
+                                }
+                            }
+                        }
+                        (init, dur)
+                    }
+                    None => (false, f64::NAN),
+                };
+                let cur = e.mse.el_ladder.get(&node).copied().unwrap_or(0);
+                let mut target = cur;
+                if init {
+                    target = target.max(1);
+                }
+                if covers {
+                    target = target.max(3);
+                }
+                if (dur.is_finite() && end >= dur)
+                    || end * 1000.0 >= crate::dom_host::CANPLAYTHROUGH_AHEAD_MS as f64
+                {
+                    target = target.max(4);
+                }
+                for lvl in (cur + 1)..=target {
+                    e.mse.pending_events.push_back((
+                        mid,
+                        match lvl {
+                            1 => "loadedmetadata",
+                            2 => "loadeddata",
+                            3 => "canplay",
+                            _ => "canplaythrough",
+                        },
+                    ));
+                }
+                e.mse.el_ladder.insert(node, target);
+            }
+        }
+        // `progress` élément (étape 182) : la croissance du
+        // buffer MSE vit dans `appendBuffer`, pas dans le
+        // `buffered_ms` du rapport hôte.
         e.mse.pending_events.push_back((mid, "progress"));
     }
     fire_mse_guarded(e, sid, "updateend", &mut first_err);
@@ -2168,14 +2270,28 @@ pub(crate) fn maybe_attach(e: &mut Engine, url: &str, node: NodeId) {
     // Dernier posé gagne : rebinding `src=` ou deux éléments
     // sur le même `blob:` — `progress` va à l'attaché effectif.
     e.mse.attached_to.insert(mid, node);
+    // §B-88 — cycle de vie élément : l'attache `src=blob:`
+    // est l'algo de sélection de ressource — `loadstart` est
+    // filé en tâche sur l'élément (avant `sourceopen`, ordre
+    // navigateur), l'échelle repart de `HAVE_NOTHING`. Sans
+    // ce tir le player arme ses listeners et attend le signal
+    // à jamais (vol 634 : zéro event élément, `mseBuffers:[]`).
+    e.mse.el_ladder.insert(node, 0);
+    e.mse.pending_events.push_back((mid, "loadstart"));
     let Some(d) = ms_data(e, Value::Obj(mid)) else {
         return;
     };
     if d.borrow().ready_state != "closed" {
         return;
     }
+    let dur = d.borrow().duration;
     d.borrow_mut().ready_state = "open";
     e.mse.pending_events.push_back((mid, "sourceopen"));
+    // Durée connue à l'attache (fixée pré-`src=`) : l'élément
+    // la reflète immédiatement → `durationchange` (spec).
+    if dur.is_finite() {
+        e.mse.pending_events.push_back((mid, "durationchange"));
+    }
 }
 
 /// Drain des événements `MediaSource` filés (JS-C324) — frontière
@@ -2189,14 +2305,21 @@ pub(crate) fn deliver_mse_events(e: &mut Engine) -> JsResult<bool> {
     let mut first: Option<Thrown> = None;
     while let Some((target, ty)) = e.mse.pending_events.pop_front() {
         fired = true;
-        // `progress` (étape 182) cible l'élément attaché —
+        // Les events de cycle de vie ciblent **l'élément**
+        // attaché (`progress` étape 182, `loadstart`/
+        // `durationchange`/échelle `loadedmetadata`… §B-88) —
         // dispatch média sur le nœud miroir, pas `fire_mse`
         // sur le wrapper ; attache morte → tir sauté.
         let r = match ty {
-            "progress" => match (e.mse.attached_to.get(&target).copied(), e.dom_ctx.clone()) {
-                (Some(node), Some((dom, cache))) => e.dispatch_media(&dom, &cache, node, ty),
-                _ => Ok(()),
-            },
+            "loadstart" | "loadedmetadata" | "loadeddata" | "canplay" | "canplaythrough"
+            | "durationchange" | "progress" | "emptied" | "play" | "playing" | "pause"
+            | "ended" | "seeking" | "seeked" | "timeupdate" | "volumechange" | "ratechange"
+            | "waiting" | "stalled" | "suspend" | "abort" | "error" => {
+                match (e.mse.attached_to.get(&target).copied(), e.dom_ctx.clone()) {
+                    (Some(node), Some((dom, cache))) => e.dispatch_media(&dom, &cache, node, ty),
+                    _ => Ok(()),
+                }
+            }
             _ => fire_mse(e, target, ty),
         };
         if let Err(err) = r {
@@ -2226,6 +2349,85 @@ impl Engine {
     #[must_use]
     pub fn is_media_source_url(&self, url: &str) -> bool {
         self.mse.object_urls.contains_key(url)
+    }
+
+    /// `readyState` de l'élément MSE-attaché **non claimé**
+    /// (§B-88) — niveau monté par les `appendBuffer`
+    /// (`el_ladder`) ; `0` hors attache. Claimé : le bras
+    /// `deliver_media_state` possède l'échelle (seedé de ce
+    /// niveau au claim — pas de re-tir).
+    pub(crate) fn mse_el_ready(&self, node: NodeId) -> u8 {
+        self.mse.el_ladder.get(&node).copied().unwrap_or(0)
+    }
+
+    /// `paused` sous attache MSE pré-claim (§B-88) — le flag
+    /// interne spec : `true` tant que `play()` n'a pas été
+    /// demandé, `false` dès que l'intention est posée.
+    pub(crate) fn mse_el_paused(&self, node: NodeId) -> bool {
+        !self.mse.el_play.get(&node).is_some_and(|ent| ent.0)
+    }
+
+    /// `play()` sur élément MSE-attaché pré-claim (§B-88) :
+    /// la promesse **pend** (spec — elle tranche au premier
+    /// `playing` post-claim, migre dans `pending_play` au
+    /// claim) ; le rejet `NotSupportedError` immédiat n'a de
+    /// sens que hors attach.
+    pub(crate) fn mse_el_pend_play(&mut self, node: NodeId, pid: ObjId) {
+        let ent = self.mse.el_play.entry(node).or_default();
+        ent.0 = true;
+        ent.1.push(pid);
+    }
+
+    /// `pause()` pré-claim (§B-88) — l'intention retombe ;
+    /// un `pause` est filé si un play était armé (spec).
+    pub(crate) fn mse_el_pause(&mut self, node: NodeId) {
+        if self.mse.el_play.get(&node).is_some_and(|ent| ent.0) {
+            self.mse.el_play.entry(node).or_default().0 = false;
+            if let Some(mid) = self
+                .mse
+                .attached_to
+                .iter()
+                .find_map(|(&mid, &n)| (n == node).then_some(mid))
+            {
+                self.mse.pending_events.push_back((mid, "pause"));
+            }
+        }
+    }
+
+    /// `load()` sur élément MSE-attaché (§B-88) — la
+    /// sélection de ressource re-joue → `loadstart` re-filé
+    /// (spec). L'échelle montée est conservée (approximation
+    /// documentée : pas de ré-arme `emptied`).
+    pub(crate) fn mse_el_refire_loadstart(&mut self, node: NodeId) {
+        if let Some(mid) = self
+            .mse
+            .attached_to
+            .iter()
+            .find_map(|(&mid, &n)| (n == node).then_some(mid))
+        {
+            self.mse.pending_events.push_back((mid, "loadstart"));
+        }
+    }
+
+    /// Handoff au claim (§B-88) : niveau `readyState` monté
+    /// pré-claim + promesses `play()` pendantes migrées vers
+    /// `MediaElState` (résolues au premier `playing` hôte).
+    pub(crate) fn mse_el_handoff(&mut self, node: NodeId) -> (u8, Vec<ObjId>) {
+        (
+            self.mse.el_ladder.get(&node).copied().unwrap_or(0),
+            self.mse
+                .el_play
+                .remove(&node)
+                .map_or_else(Vec::new, |(_, pids)| pids),
+        )
+    }
+
+    /// `true` si un attach MSE vit sur `node` (§B-88) —
+    /// l'échelle/pré-claim ne s'applique qu'à un élément
+    /// réellement attaché (`el_ladder` posé par
+    /// `maybe_attach`).
+    pub(crate) fn mse_el_is_attached(&self, node: NodeId) -> bool {
+        self.mse.el_ladder.contains_key(&node)
     }
 
     /// Pull de segments du `SourceBuffer` `buffer` (index
@@ -2494,6 +2696,24 @@ impl Host for MsHost {
                 }
             }
             self.d.borrow_mut().duration = n;
+            // §B-88 — la durée reflétée sur l'élément attaché
+            // a changé → `durationchange` filé en tâche (un
+            // set de même valeur ne tire rien). Cible
+            // retrouvée par identité du `MsData` —
+            // `attached_to` reste minuscule (1 attaché/URL).
+            if old.total_cmp(&n).is_ne() {
+                if let Some(mid) = e
+                    .mse
+                    .attached_to
+                    .iter()
+                    .find(|(mid, _)| {
+                        ms_data(e, Value::Obj(**mid)).is_some_and(|m| Rc::ptr_eq(&m, &self.d))
+                    })
+                    .map(|(&mid, _)| mid)
+                {
+                    e.mse.pending_events.push_back((mid, "durationchange"));
+                }
+            }
             return Ok(true);
         }
         Ok(false)

@@ -3611,7 +3611,26 @@ impl Engine {
                         st.codecs = c;
                         (None, false)
                     } else {
-                        d.media.insert(node, MediaElState::new(media, c));
+                        let mut st = MediaElState::new(media, c);
+                        // §B-88 handoff : l'échelle montée
+                        // pré-claim par les appends MSE passe
+                        // au bras claimé — `deliver_media_state`
+                        // continue sans re-tirer les events déjà
+                        // servis ; les promesses `play()`
+                        // pendantes migrent (résolues au premier
+                        // `playing` hôte) ; la durée `MediaSource`
+                        // déjà reflétée n'est pas re-annoncée.
+                        let (rs, pids) = self.mse_el_handoff(node);
+                        st.ready_state = rs;
+                        st.pending_play = pids;
+                        if let Some(sec) = d
+                            .attr(node, "src")
+                            .map(String::from)
+                            .and_then(|u| self.mse_source_duration(&u))
+                        {
+                            st.last_duration = Some((sec * 1000.0).max(0.0) as u64);
+                        }
+                        d.media.insert(node, st);
                         (None, true)
                     }
                 }
@@ -3620,8 +3639,10 @@ impl Engine {
         };
         // `loadstart` (étape 182) : le claim = l'hôte commence
         // à fetcher la ressource — approximation documentée
-        // (le vrai algo de sélection vit côté hôte).
-        if first_claim {
+        // (le vrai algo de sélection vit côté hôte). Sous
+        // attache MSE il a déjà été filé à l'attache `src=`
+        // (§B-88) — pas de second tir au claim.
+        if first_claim && !self.mse_el_is_attached(node) {
             let _ = self.dispatch_media(&dom, &cache, node, "loadstart");
         }
         if let Some(pids) = pending {
@@ -5976,7 +5997,11 @@ impl Host for TimeRangesHost {
 /// (étape 182). Arbitrage honnête : ~8 battements hôte à
 /// 4 Hz — pas un estimateur de bande passante (approximation
 /// documentée au seam `MediaSurface`).
-const CANPLAYTHROUGH_AHEAD_MS: u64 = 2_000;
+/// Marge « enough data » de l'échelle `readyState`
+/// (`deliver_media_state` claimé, `sb_append_buffer`
+/// pré-claim §B-88) — partagée pour que les deux bras
+/// montent `canplaythrough` au même seuil.
+pub(crate) const CANPLAYTHROUGH_AHEAD_MS: u64 = 2_000;
 
 /// Epsilon de clôture `seeked` (ms) — un battement hôte
 /// couvre l'erreur d'arrondi entre `currentTime` demandé et
@@ -5999,10 +6024,20 @@ fn media_prop(e: &mut Engine, dom: &DomRef, node: NodeId, key: &str) -> Value {
     let d = dom.borrow();
     let Some(st) = d.media.get(&node) else {
         return match key {
-            "paused" | "preservesPitch" => Value::Bool(true),
+            // §B-88 — sous attache MSE pré-claim, `paused`
+            // reflète l'intention (spec : `play()` le tombe à
+            // faux avant toute donnée) ; hors attache le stub
+            // honnête `true` est préservé.
+            "paused" => Value::Bool(e.mse_el_paused(node)),
+            "preservesPitch" => Value::Bool(true),
             "ended" | "seeking" | "disableRemotePlayback" => Value::Bool(false),
             "volume" | "playbackRate" | "defaultPlaybackRate" => Value::Num(1.0),
-            "currentTime" | "videoWidth" | "videoHeight" | "readyState" => Value::Num(0.0),
+            "currentTime" | "videoWidth" | "videoHeight" => Value::Num(0.0),
+            // §B-88 — l'échelle montée par les `appendBuffer`
+            // (`loadedmetadata` à l'init, `canplay` aux
+            // plages) est lisible — un player qui sonde
+            // `readyState` voit la progression, pas 0 figé.
+            "readyState" => Value::Num(f64::from(e.mse_el_ready(node))),
             // JS-C288 — sous MSE, `duration` = la durée
             // `MediaSource` fixée par le site (hls.js la
             // pose pour la détection VOD). `NaN` sinon.
@@ -8555,7 +8590,35 @@ impl Host for NodeHost {
                 if self.dom.borrow().media.contains_key(&node) {
                     return media_call_claimed(e, &self.dom, &self.cache, node, name, args);
                 }
+                // §B-88 — élément attaché `src=blob:MediaSource`
+                // mais non encore claimé par l'hôte : le cycle
+                // de vie spec s'applique (`play()` pend jusqu'au
+                // premier `playing`, `load()` rejoue la
+                // sélection → `loadstart`, `pause()` relâche
+                // l'intention) — le rejet immédiat
+                // `NotSupportedError` n'a de sens que hors
+                // attach (bitmovin arme `unload().then(load+play)`
+                // — un `play()` rejeté `{}` abandonnait le
+                // bootstrap mesuré au vol 634).
+                let mse_attached = self
+                    .dom
+                    .borrow()
+                    .attr(node, "src")
+                    .is_some_and(|u| e.is_media_source_url(u));
                 match name {
+                    "play" if mse_attached => {
+                        let pid = e.new_promise();
+                        e.mse_el_pend_play(node, pid);
+                        Ok(Some(Value::Obj(pid)))
+                    }
+                    "pause" if mse_attached => {
+                        e.mse_el_pause(node);
+                        Ok(Some(Value::Undefined))
+                    }
+                    "load" if mse_attached => {
+                        e.mse_el_refire_loadstart(node);
+                        Ok(Some(Value::Undefined))
+                    }
                     // Spec : sans ressource décodable la
                     // promesse rejette `NotSupportedError` —
                     // c'est le même chemin `.catch()` que le

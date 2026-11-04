@@ -468,6 +468,34 @@ Verrou sonde scope, suite 16/16. Signal de vie
 attendu au re-vol : `qual>0` (premier appel du
 loader par le bundle).
 
+**§B-88** — **LE mur structurel (vol 634)** :
+zéro événement de cycle de vie média sur
+l'élément — listeners exhaustifs armés puis
+`unload().then(load+play)` → `[]` mesuré. Sur
+un navigateur, `src=blob:` tire `loadstart`
+immédiatement ; la machine du player attend ce
+signal → armée à jamais. **JS-C332** :
+`loadstart` filé à l'attache (avant
+`sourceopen`) ; l'échelle `loadedmetadata`→
+`loadeddata`→`canplay`→`canplaythrough` montée
+par les `appendBuffer` eux-mêmes (init `moov` =
+métadonnées, plages = données — l'élément n'a
+pas besoin du claim hôte pour savoir) ;
+`durationchange` au set de `ms.duration` (et
+à l'attache si pré-fixée) ; `play()` **pend**
+pré-claim (migré dans `pending_play` au claim,
+`paused` tombe à faux dès l'intention) ;
+`pause()`/`load()` sémantiques ; claim seedé
+de l'échelle pré-claim (pas de double tir).
+`readyState`/`paused` lisent l'état réel.
+Verrous ×6, suite `mse2_attach` 14/14.
+Re-vol attendu : `loadstart` débloque la
+machine du player → `qual>0` → `mseBuffers`
+peuplé **par le player** → `open_mse` cursor
+vierge → décodage piloté. Reste : rejet
+`play()` sans `.name` hors attach, `isReady()`
+qui jette.
+
 Claims codecs : l'oracle = `onionmedia_can_play_type`
 (`""`/`maybe`/`probable`), table déclarée alignée
 Étape 181. Rejets propres attendus — pas des bugs :
