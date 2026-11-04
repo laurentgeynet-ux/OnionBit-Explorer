@@ -6237,6 +6237,48 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   `AppConfig.mediaCodecs` alignée
   sur le registre OnionCodec réel.
 
+- [x] **Étape 181. `mediaCodecs`
+  enrichis : VP8 de retour +
+  conteneurs alignés** (`app/` +
+  `explorer-core` + déploiement
+  DLL, suite 179 — ADR-0029) —
+  `onionmedia_ffi.dll` release
+  reconstruite depuis le workspace
+  `Onion-explorer-media` HEAD
+  (`4b9edec` : VP8 dans
+  `default_registry`, fix pts
+  B-frames FTE, `bit_depth` VP9,
+  frame-MT AV1) et copiée aux six
+  emplacements (runner Debug/
+  Release, `dist/` ×2,
+  `terrain-bin/app/` + racine —
+  copie daemon manquante). Stack
+  `fvp`/`mdk`/`ffmpeg`/`libass`
+  retirée de `terrain-bin/app/`
+  (remplacée par OnionMedia via
+  le lecteur Flutter). Claim :
+  `vp08`/`vp8` réintégrés (retrait
+  179 renversé), `ipcm` ajouté,
+  conteneurs vérifiés
+  `maybe`/`probable` contre
+  `onionmedia_can_play_type`
+  (alias mp4/mov/3gp, mkv-audio,
+  ogg/opus, mpegts, mp3/wav/
+  flac/aac/ac3, `x-mpegURL`,
+  `dash+xml`). Restent exclus :
+  `ec-3`/`eac3` (démux `maybe`,
+  trames `bsid>10` rejetées),
+  `video/ogg` (theora), avi/asf/
+  mpeg-ps/dts (pas de démuxeur).
+  `source_type_playable` aligné
+  (`video/x-msvideo`, `video/ogg`
+  retirés) ; `media_mime_from_url`
+  couvre `mp1`/`m1a`/`m2a`/`fla`.
+  ABI 4 inchangée. Verrous :
+  tests core media 20/20,
+  `flutter analyze` + `flutter
+  test` 53/53.
+
 - [x] **Étape 177. Loopback média
   REST embarqué FFI**
   (`explorer-ffi` + `explorer-api`,

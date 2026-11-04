@@ -154,7 +154,7 @@ class BrowserState {
 }
 
 /// Fabrique de lecteurs natifs pour la seam `MediaSurface` —
-/// `VideoMediaPlayer` (MDK/`fvp`) en prod, fake en test.
+/// `OnionMediaPlayer` (FFI `onionmedia_ffi`) en prod, fake en test.
 final mediaPlayerFactoryProvider = Provider<MediaPlayerFactory>(
   (ref) {
     final hw = ref.watch(settingsProvider).hwAccel;

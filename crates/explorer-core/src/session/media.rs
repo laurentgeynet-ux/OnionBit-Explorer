@@ -175,7 +175,7 @@ fn media_mime_from_url(url: &Url) -> Option<String> {
         "wmv" => "video/x-ms-wmv",
         "wma" => "audio/x-ms-wma",
         "mpg" | "mpeg" | "mpe" | "m2v" | "mpv" | "vob" => "video/mpeg",
-        "mpa" | "mp2" | "mp3" => "audio/mpeg",
+        "mpa" | "mp1" | "mp2" | "mp3" | "m1a" | "m2a" => "audio/mpeg",
         "m3u8" => "application/vnd.apple.mpegurl",
         "mpd" => "application/dash+xml",
         "aac" | "adts" => "audio/aac",
@@ -184,7 +184,7 @@ fn media_mime_from_url(url: &Url) -> Option<String> {
         "dts" => "audio/dts",
         "ogg" | "oga" | "opus" | "spx" => "audio/ogg",
         "wav" => "audio/wav",
-        "flac" => "audio/flac",
+        "flac" | "fla" => "audio/flac",
         _ => return None,
     };
     Some(mime.to_string())
@@ -246,22 +246,50 @@ fn source_type_playable(ty: &str, declared: &std::collections::HashSet<String>) 
     }
     let t = ty.to_ascii_lowercase();
     let container = t.split(';').next().unwrap_or("").trim();
+    // Conteneurs dont un démuxeur OnionCodec est enregistré
+    // (ou routés par extension : manifests m3u8/mpd). Absents
+    // à dessein : avi/asf/mpeg-ps (aucun démuxeur), `video/ogg`
+    // (ogv réel = theora indécodable), `audio/ec3`/`eac3`
+    // (démux OK mais `bsid>10` rejeté trame par trame).
     let known = matches!(
         container,
         "video/mp4"
             | "audio/mp4"
+            | "audio/x-m4a"
+            | "video/x-m4v"
+            | "video/quicktime"
+            | "video/3gpp"
+            | "video/3gpp2"
+            | "audio/3gpp"
+            | "audio/3gpp2"
             | "video/webm"
             | "audio/webm"
             | "video/x-matroska"
             | "audio/x-matroska"
             | "video/mp2t"
-            | "video/ogg"
+            | "video/mpegts"
             | "audio/ogg"
+            | "application/ogg"
+            | "audio/opus"
             | "audio/mpeg"
+            | "audio/mp3"
+            | "audio/mpeg3"
+            | "audio/x-mpeg"
+            | "audio/x-mp3"
+            | "audio/aac"
+            | "audio/x-aac"
+            | "audio/aacp"
+            | "audio/adts"
+            | "audio/ac3"
+            | "audio/ac-3"
             | "audio/wav"
             | "audio/x-wav"
-            | "video/x-msvideo"
+            | "audio/wave"
+            | "audio/vnd.wave"
+            | "audio/flac"
+            | "audio/x-flac"
             | "application/vnd.apple.mpegurl"
+            | "application/x-mpegURL"
             | "application/dash+xml"
     );
     if !known {

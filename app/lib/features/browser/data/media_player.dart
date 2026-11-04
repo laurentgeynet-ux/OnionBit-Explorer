@@ -37,8 +37,9 @@ class MediaSnapshot {
 }
 
 /// Lecteur natif derrière la seam — abstraction pour la
-/// testabilité : la vraie implémentation est `video_player`
-/// + `fvp` (MDK), les tests injectent un faux sans codec.
+/// testabilité : la vraie implémentation est `OnionMediaPlayer`
+/// (FFI `onionmedia_ffi`, codecs OnionCodec), les tests
+/// injectent un faux sans codec.
 /// Le contrat `state`/`MediaCommand` ne connaît que cette
 /// interface (ADR-0024 : hôte-composée).
 abstract class MediaPlayer {

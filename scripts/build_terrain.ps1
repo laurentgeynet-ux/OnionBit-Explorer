@@ -108,6 +108,9 @@ source   : $release
 contenu  : explorer-daemon.exe  (REST+SSE, --port pour instance dediee)
            explorer-cli.exe     (shot / dom / layout / mem)
            explorer_ffi.dll     (moteur in-process)
+           onionmedia_ffi.dll   (lecture media — adjacente
+                                racine ET app\, source
+                                C:\Onion-explorer-media release)
            app\                 UI Flutter release — explorer_app.exe
                                 avec explorer_ffi.dll adjacente
                                 (moteur in-process arme)
