@@ -97,6 +97,17 @@ if (Test-Path $mediaDll) {
     Write-Warning "onionmedia_ffi.dll package absente : $mediaDll (build le package avant terrain)"
 }
 
+# rest_host_probe.exe — hote media headless des vols REST
+# (vol-agent.md 3b) : dlopen le DLL ci-dessus et boucle le
+# cycle claim->play->state->release avec rapports reels.
+# Source = l'exemple onionmedia-ffi du workspace media.
+$restProbe = 'C:\Onion-explorer-media\target\release\examples\rest_host_probe.exe'
+if (Test-Path $restProbe) {
+    Copy-Item $restProbe -Destination $OutDir -Force
+} else {
+    Write-Warning "rest_host_probe.exe absent : $restProbe (cargo build -r -p onionmedia-ffi --example rest_host_probe)"
+}
+
 $etat = if ($dirty) { 'MODIFIE — verdict terrain a risque (WIP)' } else { 'propre' }
 $manifest = @"
 OnionBit Explorer — binaires terrain
@@ -111,6 +122,9 @@ contenu  : explorer-daemon.exe  (REST+SSE, --port pour instance dediee)
            onionmedia_ffi.dll   (lecture media — adjacente
                                 racine ET app\, source
                                 C:\Onion-explorer-media release)
+           rest_host_probe.exe  (hote media REST — dlopen
+                                onionmedia_ffi.dll, cycle
+                                claim->play->state->release)
            app\                 UI Flutter release — explorer_app.exe
                                 avec explorer_ffi.dll adjacente
                                 (moteur in-process arme)

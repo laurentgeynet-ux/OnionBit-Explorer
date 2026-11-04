@@ -180,11 +180,15 @@ Trois faits d'abord — ils orientent tout le vol :
   Avec elle : conteneur connu sans `codecs=` → `"maybe"`,
   `codecs=` dont tous les préfixes sont déclarés →
   `"maybe"`, sinon `""` — le player démarre.
-- **L'hôte résout le DLL adjacente** —
-  `onionmedia_ffi.dll` à côté de `explorer_app.exe`
-  (`ONIONMEDIA_FFI_LIB` sinon). Vérifier le md5 du
-  manifest terrain (`Étape 181`, ABI 4) — un DLL
-  périmé = constat invalide (règle binaire frais §0).
+- **Le vol vole en REST pur — jamais l'app.** Le
+  décodage réel passe par `rest_host_probe` (hôte
+  média headless, pont REST↔DLL — b) ci-dessous), qui
+  `dlopen` le DLL **déployé** : `terrain-bin/
+  onionmedia_ffi.dll` (adjacent à `rest_host_probe.exe`,
+  `ONIONMEDIA_FFI_LIB` ou `--dll` sinon). Vérifier le
+  md5 du manifest terrain (`Étape 181`, ABI 4) — un
+  DLL périmé = constat invalide (règle binaire frais
+  §0). L'app Flutter n'entre pas dans la boucle de vol.
 
 ### a) Sonde contractuelle — daemon seul, aucune DLL
 
@@ -240,29 +244,61 @@ pas des bugs :
   au claim » était un produit de la destruction moteur
   (§B-1), pas un défaut de la couche media — mesuré vol 618.
 
-### b) Lecture réelle — pixels = app hôte
+### b) Lecture réelle — `rest_host_probe` (REST pur, jamais l'app)
+
+`rest_host_probe` = l'hôte média headless : il boucle le
+**même** cycle REST (offer→claim→state→release) mais les
+rapports d'état sortent du vrai player — c'est la DLL
+déployée qui décode, mesurée par trames présentées et
+octets PCM (audio en mode pull, aucune carte son).
 
 ```powershell
-# mode in-process (FFI) :
-terrain-bin\app\explorer_app.exe
-#   explorer_ffi.dll + onionmedia_ffi.dll adjacents
-# mode REST : explorer-daemon.exe --port 9377, puis l'app
+# binaire : terrain-bin\rest_host_probe.exe (adjacent à
+#   onionmedia_ffi.dll — dlopen résout tout seul), ou
+#   cargo build -r -p onionmedia-ffi --example rest_host_probe
+#   (C:\Onion-explorer-media, sortie target\release\examples\)
+terrain-bin\rest_host_probe.exe <base> <tab> <mid> [secondes] `
+  [--dll <path>] [--codecs "a;b;c"] [--hw] [--seek-ms N]
 ```
 
-L'app auto-claim avec `AppConfig.mediaCodecs` (capacités
-moteur : `EXPLORER_MEDIA_CODECS` côté daemon —
-prérequis du §3b — / `explorer_media_codecs` côté FFI)
-puis joue via `OnionMediaPlayer` :
-`onionmedia_open_path` (fichier local),
-`open_url` (http, HLS `.m3u8`, DASH `.mpd`),
-`open_mse`/`open_mse_multi` (surfaces MSE — pull loopback
-FFI ou `GET …/segments`).
+Ce qu'il fait, à chaque étape vérifiable par `GET …/media` :
+
+1. `GET …/media/{mid}` → lit `url`/`mime`/`mse`/`mseBuffers`/
+   `mseOffsets` ;
+2. `POST …/claim {codecs:[mime de l'offre]}` (`--codecs`
+   pour autre chose) ;
+3. `dlopen` du DLL → `open_url` (http/https), `open_path`
+   (`file:`) ou `open_mse`/`open_mse_multi` (surface
+   `mse:true` — `MseSource` pull `GET …/segments` sur le
+   **même daemon**, `pts_offset_secs` par rail) ;
+4. `play` puis, à ~4 Hz : `POST …/state` avec
+   `position_ms`/`duration_ms`/`buffered_ms`/`state`
+   **réels** (`Loading`→`playing`, `Stopped`→`ended` ou
+   `error` si `player_error`) ;
+5. `free` + `POST …/release`. Exit 0 = trames ou PCM
+   décodés, 1 sinon.
+
+Sortie à citer au rapport (§B) — exemple mesuré
+(mp4 h264 progressif, première exécution du pont) :
+
+```
+[offer] #1 mse=false mime="video/mp4" url=…mp4
+[claim] → 200 ; [dll] ABI 4
+[state] playing pos=0ms
+[verdict] frames=60 640x360 pcm=0o pos=1966ms underrun=0
+          streams=1 kind=1 codec=H264
+[release] → 200
+```
+
+→ `GET …/media` montre ensuite `state:{playing,pos:1966}`
+**persisté par le moteur** — la preuve que le rapport vient
+du decode, pas d'une simulation.
 
 Actifs de test : `C:\Onion-explorer-media\target\bench-media\`
 (`onion_bench_*.mp4`/`*.webm` + vecteurs `ac3-`/`wav-`/
 `av1-vectors/`) — régénérables via `codec_bench_cli` ;
-page minimale `<video src controls autoplay>` servie par
-`python -m http.server 8001`, ou URL `file:///` directe.
+page minimale `<video src controls>` servie par
+`python -m http.server 8011`, ou URL `file:///` directe.
 
 ### Verdicts à rapporter (§B)
 
@@ -271,10 +307,17 @@ page minimale `<video src controls autoplay>` servie par
 lectures, `buffered_ms`. SSE `media_offered` porte
 `mime`, `mse`, `mseBuffers`.
 
-Pixels : **la frame moteur ne montre pas la vidéo** —
-l'image décodée est un overlay hôte (§4). Verdict visuel
-= `scripts/capture_window.ps1` (fenêtre réelle), pas
-`GET …/frame`.
+Décodage (niveau b) : la ligne `[verdict]` de
+`rest_host_probe` — `frames` (trames présentées),
+`WxH`, `pcm` octets, `pos`, `underrun`, `streams`+codecs.
+La distinction avec le niveau a) est entière : a) = rapports
+**simulés** (POST state à la main), b) = rapports **mesurés**
+sur ce que la DLL a réellement joué.
+
+Pixels : aucun overlay hôte en REST — la vidéo décodée
+reste dans le player headless (`frame_pull`/`frame_acquire`
+disponibles au besoin). La frame moteur `GET …/frame`
+montre la surface `<video>` côté document seulement.
 
 Références terrain : vol 618 (commons.wikimedia.org) —
 cycle progressif complet sur site réel (2 surfaces,
@@ -288,10 +331,12 @@ fetché/parsé — attache mort sur gap DOM démo `hls-demo.js`,
 pas hls.js core) ; vol 621 — **deux cycles complets sur
 sites vidéo réels** (media.ccc.de, coub ×7 surfaces) : la
 formule gagnante = `<video>` en markup **SSR** (claim à
-coup sûr, aucune race JS). Reste à mesurer : niveau b)
-sur site réel (décodage hôte — ces vols n'ont exercé que
-le contrat, jamais `onionmedia`), `mse:true` sur player
-réel sans armure UI (shaka/videojs-http-streaming).
+coup sûr, aucune race JS). Niveau b) validé en local
+(`rest_host_probe` + mp4 h264 : 60/60 trames, état réel
+persisté). Reste à mesurer : b) sur site réel (mp4
+progressif ccc/coub/commons), `mse:true` décodé (player
+sans armure UI — shaka/videojs-http-streaming), PCM
+audio `--pull`, `--seek-ms` sur surface vivante.
 
 Claims codecs : l'oracle = `onionmedia_can_play_type`
 (`""`/`maybe`/`probable`), table déclarée alignée
