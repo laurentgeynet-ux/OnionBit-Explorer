@@ -82,30 +82,22 @@ if (-not $SkipApp -and (Test-Path 'app/pubspec.yaml')) {
     Copy-Item (Join-Path $release 'explorer_ffi.dll') -Destination $appOut -Force
 }
 
-# onionmedia_ffi.dll — source officielle = le workspace
-# canonique C:\Onion-explorer-media (OnionMedia sur-mesure).
-# Re-deployee a chaque terrain : une DLL stale dans runner/
-# apres un `flutter clean` resterait sinon en place, et le
-# daemon de vol la resout adjacente a explorer-daemon.exe.
-$mediaDll = 'C:\Onion-explorer-media\target\release\onionmedia_ffi.dll'
-if (Test-Path $mediaDll) {
-    Copy-Item $mediaDll -Destination $OutDir -Force
-    if ($appOut -and (Test-Path $appOut)) {
-        Copy-Item $mediaDll -Destination $appOut -Force
+# onionmedia_ffi.dll + rest_host_probe.exe — distribution
+# deleguee au script canonique du workspace media
+# (deploy_media.ps1 : build -> copie -> manifest sidecar ->
+# audit re-hashe). Source de verite unique : plus de copie
+# ad-hoc, plus de DLL stale dans runner/ apres `flutter clean`,
+# et l'audit refuse un OutDir divergent de la canonique.
+$deploy = 'C:\Onion-explorer-media\scripts\deploy_media.ps1'
+if (Test-Path $deploy) {
+    $extra = @($OutDir)
+    if ($appOut -and (Test-Path $appOut)) { $extra += $appOut }
+    pwsh -NoProfile -File $deploy -NoBuild -ExtraDestinations $extra
+    if ($LASTEXITCODE -ne 0) {
+        throw "ECHEC : deploy_media.ps1 (copies media divergentes de la canonique)"
     }
 } else {
-    Write-Warning "onionmedia_ffi.dll package absente : $mediaDll (build le package avant terrain)"
-}
-
-# rest_host_probe.exe — hote media headless des vols REST
-# (vol-agent.md 3b) : dlopen le DLL ci-dessus et boucle le
-# cycle claim->play->state->release avec rapports reels.
-# Source = l'exemple onionmedia-ffi du workspace media.
-$restProbe = 'C:\Onion-explorer-media\target\release\examples\rest_host_probe.exe'
-if (Test-Path $restProbe) {
-    Copy-Item $restProbe -Destination $OutDir -Force
-} else {
-    Write-Warning "rest_host_probe.exe absent : $restProbe (cargo build -r -p onionmedia-ffi --example rest_host_probe)"
+    Write-Warning "deploy_media.ps1 absent : $deploy — DLL media non deployee"
 }
 
 $etat = if ($dirty) { 'MODIFIE — verdict terrain a risque (WIP)' } else { 'propre' }

@@ -185,10 +185,15 @@ Trois faits d'abord — ils orientent tout le vol :
   média headless, pont REST↔DLL — b) ci-dessous), qui
   `dlopen` le DLL **déployé** : `terrain-bin/
   onionmedia_ffi.dll` (adjacent à `rest_host_probe.exe`,
-  `ONIONMEDIA_FFI_LIB` ou `--dll` sinon). Vérifier le
-  md5 du manifest terrain (`Étape 181`, ABI 4) — un
-  DLL périmé = constat invalide (règle binaire frais
-  §0). L'app Flutter n'entre pas dans la boucle de vol.
+  `ONIONMEDIA_FFI_LIB` ou `--dll` sinon). Source de
+  vérité = `C:\Onion-explorer-media\target\release` ;
+  déploiement/audit uniques via
+  `Onion-explorer-media\scripts\deploy_media.ps1`
+  (`-VerifyOnly` audite que chaque copie == canonique —
+  sidecar `onionmedia_ffi.manifest.json` : sha256, ABI,
+  commit). Un DLL périmé = constat invalide (règle
+  binaire frais §0). L'app Flutter n'entre pas dans la
+  boucle de vol.
 
 ### a) Sonde contractuelle — daemon seul, aucune DLL
 
@@ -258,8 +263,18 @@ octets PCM (audio en mode pull, aucune carte son).
 #   cargo build -r -p onionmedia-ffi --example rest_host_probe
 #   (C:\Onion-explorer-media, sortie target\release\examples\)
 terrain-bin\rest_host_probe.exe <base> <tab> <mid> [secondes] `
-  [--dll <path>] [--codecs "a;b;c"] [--hw] [--seek-ms N]
+  [--dll <path>] [--codecs "a;b;c"] [--hw] [--seek-ms N] `
+  [--bandwidth <bps>] [--drop-threshold <s>] `
+  [--sync-threshold <s>] [--framedrop <0-4>]
 ```
+
+Réglages **ABI 5** (DLL ≥ `ec48ab0` — `deploy_media.ps1
+-VerifyOnly` audite les copies) : `--bandwidth` plafonne la
+sélection de représentation adaptative (DASH **et** HLS — un
+DASH illimité prend la rep max, ex. 4K `bbb_30fps.mpd`),
+`--drop-threshold`/`--sync-threshold` règlent la synchro A/V,
+`--framedrop` le skip-level décodeur (0 none → 4 all). Sur
+DLL ABI 4 ils sont ignorés (`[knobs] … ignoré` imprimé).
 
 Ce qu'il fait, à chaque étape vérifiable par `GET …/media` :
 
@@ -309,7 +324,13 @@ lectures, `buffered_ms`. SSE `media_offered` porte
 
 Décodage (niveau b) : la ligne `[verdict]` de
 `rest_host_probe` — `frames` (trames présentées),
-`WxH`, `pcm` octets, `pos`, `underrun`, `streams`+codecs.
+`dropped` (décodées puis abandonnées par la synchro A/V —
+ABI 5), `WxH`, `pcm` octets, `pos`, `underrun`,
+`streams`+codecs. **`frames=0` avec `dropped>0` = tout
+décodé puis droppé** (débit < temps réel — ex. DASH 4K
+logiciel : ~5 tr/s vs flux 30 tr/s, maître audio, seuil
+0,5 s) — comportement correct mesuré, PAS un bug codec ;
+rejouer avec `--bandwidth` avant toute escalade.
 La distinction avec le niveau a) est entière : a) = rapports
 **simulés** (POST state à la main), b) = rapports **mesurés**
 sur ce que la DLL a réellement joué.
