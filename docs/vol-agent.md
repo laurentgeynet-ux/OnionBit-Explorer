@@ -374,28 +374,15 @@ media.ccc.de, mp4 1080p réel) : `frames=32 1920x1080`
 `underrun=0`, état `playing` persisté par le moteur —
 le DLL déployé a décodé sur site réel en REST pur.
 Vol 624/625 — `frames=0` DASH **classé** : `dropped=`
-(ABI 5) montre tout décodé puis droppé par la synchro
-(~5 tr/s logiciel vs flux 30 tr/s — comportement
-correct, `--bandwidth` fixe la rep basse) ; §B-82
-**résolu et confirmé en vol** (`typeof=function`,
-`"probably"`, attach `blob:` débloqué) ; §B-81
-**contourné en routine** (bornes JS → premier vol
-long sans mort daemon). **Vol 626 — premier `mse:true`
-site majeur** (bitmovin.com/demos/stream-test) : le
-player commercial réel a créé + attaché `blob:` —
-mais `addSourceBuffer` jamais appelé, stall
-post-attach **identique à dash.js** (vol 625 : 0
-événement interne alors que toutes les primitives
-passent) → **§B-83 ouvert** : suspect events média
-élément (`loadedmetadata`/`canplay`) jamais émis +
-tir `sourceopen` synchrone perdu pour les listeners
-enregistrés après `src=` (JS-C324 en cours — events
-MSE filés en tâche à la frontière de job) +
-exceptions avalées dans les promesses / gets
-Undefined au boot ; instrumentation demandée =
-logger throws inside-promise et gets Undefined
-critiques. Reste à mesurer : `mse:true` **décodé**
-(le cran §B-83), `--seek-ms` sur surface vivante,
+(ABI 5) = décodé puis droppé A/V (débit logiciel <
+temps réel, comportement correct — `--bandwidth`
+fixe la rep basse) ; §B-82 **résolu en vol**
+(attach `blob:` débloqué) ; §B-81 contourné en
+routine. Vol 626 — **premier `mse:true` site
+majeur** (bitmovin) mais stall post-attach →
+**§B-83 ouvert** (intra-player, détail au corpus).
+Reste à mesurer : `mse:true` **décodé** (le cran
+§B-83), `--seek-ms` sur surface vivante,
 multi-buffer MSE (`open_mse_multi`).
 
 Claims codecs : l'oracle = `onionmedia_can_play_type`
