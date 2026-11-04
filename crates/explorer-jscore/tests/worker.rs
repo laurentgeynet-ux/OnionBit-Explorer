@@ -254,3 +254,86 @@ fn worker_blob_url_unknown_fires_error_with_message() {
         "true"
     );
 }
+
+#[test]
+fn worker_scope_has_location_blob_and_wasm_stub() {
+    // §B-85 — mur terrain : le transmuxer (hls.js/dash.js) vit
+    // dans le worker ; un scope nu le tue à l'init. Surface
+    // sondée réelle : `self.location` (résolution d'URLs),
+    // `Blob`/`URL.createObjectURL`, `WebAssembly` (stub honnête
+    // — `validate` → `false`, le repli JS du bundle s'applique).
+    let mut e = engine_with_workers(&[(
+        "w.js",
+        "postMessage('L:'+self.location.href+':'+self.location.origin+':'+typeof location.assign);\
+         postMessage('B:'+typeof Blob+'/'+typeof FileReader+'/'+typeof URL.createObjectURL);\
+         postMessage('W:'+typeof WebAssembly+'/'+WebAssembly.validate(new Uint8Array(4)))",
+    )]);
+    e.eval(
+        "var w = new Worker('w.js'); var n = 0; var acc = '';\
+         w.onmessage = function(ev){ acc += ev.data + '|'; n++; globalThis.__r = acc; globalThis.__n = n; }",
+    )
+    .unwrap();
+    assert_eq!(pump_until(&mut e, "globalThis.__n === 3"), "true");
+    let r = e.eval("globalThis.__r").map(|v| e.describe(v)).unwrap();
+    assert_eq!(
+        r,
+        "L:w.js:null:undefined|B:function/function/function|W:object/false|"
+    );
+}
+
+#[test]
+fn worker_fetch_and_xhr_via_loader() {
+    // `fetch`/`XHR` émis dans le worker passent par le transport
+    // `WorkerNet` adossé au loader — la promesse se résout et
+    // `onload` tire quand la pompe draine la réponse (avant :
+    // `fetch`/`XMLHttpRequest` absents du scope → transmuxer mort).
+    let mut e = engine_with_workers(&[
+        (
+            "w.js",
+            "fetch('https://w/seg').then(function(r){return r.text()})\
+                .then(function(t){postMessage('F:'+t)});\
+             var x = new XMLHttpRequest();\
+             x.open('GET', 'https://w/xhr');\
+             x.onload = function(){ postMessage('X:'+x.status+':'+x.responseText); };\
+             x.send()",
+        ),
+        ("https://w/seg", "SEGDATA"),
+        ("https://w/xhr", "XHRBODY"),
+    ]);
+    e.eval(
+        "var w = new Worker('w.js'); var n = 0; var acc = '';\
+         w.onmessage = function(ev){ acc += ev.data + '|'; n++; globalThis.__r = acc; globalThis.__n = n; }",
+    )
+    .unwrap();
+    assert_eq!(pump_until(&mut e, "globalThis.__n === 2"), "true");
+    let r = e.eval("globalThis.__r").map(|v| e.describe(v)).unwrap();
+    assert!(
+        r.contains("F:SEGDATA") && r.contains("X:200:XHRBODY"),
+        "reçu {r}"
+    );
+}
+
+#[test]
+fn worker_fetch_blob_url_resolves_seeded_registry() {
+    // `fetch(blob:)` dans le worker résout en local via le
+    // registre seedé (snapshot au ctor — l'URL doit exister
+    // AVANT `new Worker`, même ordre que `importScripts`).
+    let mut e = engine_with_workers(&[(
+        "w.js",
+        "self.onmessage = function(ev){\
+             fetch(ev.data).then(function(r){return r.text()})\
+                .then(function(t){ postMessage('B:'+t); }); }",
+    )]);
+    e.eval(
+        "var b = new Blob(['blob-bytes'], {type:'text/plain'});\
+         var u = URL.createObjectURL(b);\
+         var w = new Worker('w.js');\
+         w.onmessage = function(ev){ globalThis.__r = ev.data; };\
+         w.postMessage(u)",
+    )
+    .unwrap();
+    assert_eq!(
+        pump_until(&mut e, "globalThis.__r === 'B:blob-bytes'"),
+        "true"
+    );
+}

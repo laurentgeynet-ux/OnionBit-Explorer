@@ -422,10 +422,33 @@ registre `blob:` du moteur. **JS-C329** : ctor
 + `importScripts` résolvent `blob:` en-engine
 (registre parent seedé au spawn), `ErrorEvent`
 peuplé (`message`/`filename`/`lineno`/`colno`).
-Verrous `worker.rs` ×3. Recette vol suivant :
-bitmovin nu → `mseBuffers` peuplé **par le
-player** → `open_mse` → premier décodage
-piloté par un player réel.
+Verrous `worker.rs` ×3. **Validé vol suivant** :
+`new Worker(blob:)` + echo + transfert ArrayBuffer
+OK — le transmuxer peut naître.
+
+**§B-85** (environnement worker troué — stall
+relocalisé, même vol) : le worker spawn mais
+`fetch`/`XMLHttpRequest`/`WebAssembly`/`Blob`/
+`self.location` **absents** du scope — le
+transmuxer meurt à l'init (`self.location` =
+résolution d'URLs relatives, `Blob`, wasm
+démuxeur), `mseBuffers:[]` persiste, `tm` figé.
+**JS-C330** : scope complet — `WorkerLocation`
+lecture seule, `install_files`, stub
+`WebAssembly` honnête (`validate`→`false`),
+`fetch`/`XHR` via `WorkerLoader::request_net`
+→ `NetRequest::WorkerFetch` → session
+(`script_request` complet, réponse **binaire**
+— un segment fMP4 ne survit pas au `String`
+lossy), drainé par la pompe du worker.
+`fetch(blob:)`/`data:` en local moteur.
+Verrous ×4, suite 16/16. **Reclassement** :
+le « 3ᵉ fetch inerte » des vols 628/629 était
+**innocenté** (4 fetch `.m4v` séquentiels OK)
+— le suspect déplacé = promesse `updateend`
+jamais résolue après N appends (à repro,
+JS-C325 a touché cette machine). Reste : rejet
+`play()` `undefined` + `isReady()` jette.
 
 Claims codecs : l'oracle = `onionmedia_can_play_type`
 (`""`/`maybe`/`probable`), table déclarée alignée

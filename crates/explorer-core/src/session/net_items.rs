@@ -1829,6 +1829,25 @@ pub(crate) struct WorkerLoadArgs<'a> {
     pub reply: explorer_js::WorkerReply,
 }
 
+/// Paramètres d'une requête `fetch`/`XHR` de worker (§B-85) —
+/// packés pour `Session::spawn_worker_fetch` (même motif que
+/// [`WorkerLoadArgs`] : réponse directe au thread demandeur,
+/// jamais par `deliver_*` du thread moteur).
+pub(crate) struct WorkerFetchArgs<'a> {
+    /// Onglet émetteur.
+    pub tab: crate::TabId,
+    /// Page du document top-level.
+    pub page: &'a explorer_net::url::Url,
+    /// Base de résolution du document.
+    pub base: &'a explorer_net::url::Url,
+    /// Requête complète émise par le miroir worker.
+    pub req: &'a explorer_js::WorkerNetRequest,
+    /// Contexte émetteur (top-level — convention `WorkerLoad`).
+    pub ctx: explorer_js::JsCtxId,
+    /// Canal one-shot de réponse (binaire) au thread worker.
+    pub reply: explorer_js::WorkerFetchReply,
+}
+
 /// Paramètres d'ouverture d'un flux SSE (JS-C92) — packés
 /// pour `Session::spawn_es` (clippy `too_many_arguments`).
 pub(crate) struct EsSpawnArgs<'a> {

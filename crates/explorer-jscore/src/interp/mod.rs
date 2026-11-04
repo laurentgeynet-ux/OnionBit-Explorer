@@ -517,8 +517,10 @@ pub struct Engine {
     pub(crate) worker_cfg: crate::worker::WorkerConfig,
     /// Côté WORKER : canal de sortie vers le main (`postMessage`).
     pub(crate) worker_out: Option<SyncSender<crate::worker::WorkerEvent>>,
-    /// Côté WORKER : loader d'`importScripts`.
-    pub(crate) worker_loader: Option<Box<dyn crate::worker::WorkerLoader>>,
+    /// Côté WORKER : loader d'`importScripts` **et** transport
+    /// `fetch`/`XHR` (§B-85 — partagé : `WorkerNet` en garde un
+    /// clone du `Rc`, tout vit sur le thread du worker).
+    pub(crate) worker_loader: Option<Rc<std::cell::RefCell<Box<dyn crate::worker::WorkerLoader>>>>,
     /// Côté WORKER : `close()` appelé dans le script.
     pub(crate) worker_close: bool,
     /// Côté WORKER : flag partagé vivant (le `WorkerHost` du

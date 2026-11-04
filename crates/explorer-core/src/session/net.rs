@@ -806,6 +806,23 @@ impl Session {
                         reply,
                     });
                 }
+                // `fetch`/`XHR` du thread worker (§B-85) — même
+                // modèle one-shot que `WorkerLoad`, mais pile
+                // `script_request` complète : méthode/en-têtes/
+                // corps/CORS/CSP `connect-src` ; la réponse
+                // binaire repart par `reply` vers la pompe du
+                // worker (qui la livre au miroir, jamais
+                // ré-entrant).
+                NetRequest::WorkerFetch { req, ctx, reply } => {
+                    self.spawn_worker_fetch(&WorkerFetchArgs {
+                        tab,
+                        page,
+                        base,
+                        req: &req,
+                        ctx,
+                        reply,
+                    });
+                }
             }
         }
     }
@@ -868,6 +885,58 @@ impl Session {
                         Err(format!("HTTP {}", resp.status))
                     }
                 });
+            let _ = reply.0.send(out);
+        });
+    }
+
+    /// `NetRequest::WorkerFetch` (§B-85) — `fetch`/`XHR` émis
+    /// dans un thread worker : même chemin que les requêtes
+    /// script (`script_request` : méthode/en-têtes/corps,
+    /// `connect-src`, CORS, `data:` via `fetch_maybe_data`)
+    /// mais la réponse **complète** (statut, en-têtes, octets
+    /// bruts) repart sur le canal `reply` — le transmuxer vit
+    /// dans le worker, ses segments ne quittent jamais le
+    /// domaine binaire. `referrer` = URL du script worker
+    /// (base de résolution et `Referer`), contexte hérité de
+    /// la page créatrice.
+    fn spawn_worker_fetch(&mut self, a: &WorkerFetchArgs<'_>) {
+        let Some((req_page, req_base, policy, csp, opaque)) =
+            self.ctx_net_origin(a.tab, a.ctx, a.page, a.base)
+        else {
+            let _ = a.reply.0.send(Err("pas d'origine de contexte".to_string()));
+            return;
+        };
+        // La résolution relative part de l'URL du script worker
+        // (spec `fetch` dans `WorkerGlobalScope`), repli base doc.
+        let wbase = Url::parse(&a.req.referrer).ok().unwrap_or(req_base);
+        let Some((req, _cross)) = self.script_request(
+            &req_page,
+            &wbase,
+            &a.req.method,
+            &a.req.url,
+            &a.req.headers,
+            a.req.body.as_deref(),
+            policy,
+            &csp,
+            opaque,
+            a.req.mode,
+            a.req.credentials,
+        ) else {
+            let _ = a.reply.0.send(Err("résolution/CSP refusée".to_string()));
+            return;
+        };
+        let tr = self.transport.clone();
+        let reply = a.reply.clone();
+        tokio::spawn(async move {
+            let out = fetch_maybe_data(&tr, &req)
+                .await
+                .map(|r| explorer_js::WorkerNetResponse {
+                    status: r.status,
+                    status_text: r.reason,
+                    headers: r.headers,
+                    body: r.body,
+                })
+                .map_err(|e| e.to_string());
             let _ = reply.0.send(out);
         });
     }

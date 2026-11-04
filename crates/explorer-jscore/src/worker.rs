@@ -22,7 +22,9 @@
 
 use crate::heap::{JsResult, ObjKind, Thrown};
 use crate::value::{ObjId, Value};
+use crate::xhr::{XhrRequest, XhrResponse, XhrTransport};
 use crate::Engine;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -55,6 +57,159 @@ pub trait WorkerLoader: Send {
         let (tx, rx) = std::sync::mpsc::channel();
         let _ = tx.send(self.load(spec, referrer));
         rx
+    }
+
+    /// Requête `fetch`/`XHR` émise **dans** le worker (§B-85) —
+    /// complète (méthode/en-têtes/corps) et binaire, contrairement
+    /// à `load` (GET, source texte). La réponse revient par
+    /// receveur one-shot drainé par la pompe du thread : le
+    /// worker ne se bloque jamais sur le réseau. Défaut :
+    /// `load` inline en `200 OK` texte (loader mémoire des
+    /// tests — un vrai transport override pour la session).
+    fn request_net(
+        &mut self,
+        req: &WorkerNetRequest,
+    ) -> Receiver<std::result::Result<WorkerNetResponse, String>> {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let out = self
+            .load(&req.url, &req.referrer)
+            .map(|body| WorkerNetResponse {
+                status: 200,
+                status_text: "OK".to_string(),
+                headers: Vec::new(),
+                body: body.into_bytes(),
+            });
+        let _ = tx.send(out);
+        rx
+    }
+}
+
+/// Requête réseau complète émise par `fetch`/`XHR` dans un
+/// thread worker — la résolution (relative→absolue), la CSP et
+/// le transport relèvent de l'embeddeur, même séparation que
+/// [`crate::xhr::XhrRequest`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkerNetRequest {
+    /// Méthode HTTP telle qu'écrite.
+    pub method: String,
+    /// URL telle qu'écrite.
+    pub url: String,
+    /// En-têtes d'auteur, dans l'ordre.
+    pub headers: Vec<(String, String)>,
+    /// Corps `send`/`fetch({body})`, si présent.
+    pub body: Option<String>,
+    /// URL du script worker — référent et base de résolution.
+    pub referrer: String,
+    /// `Request.mode` de l'émission (miroir JS-C77).
+    pub mode: crate::xhr::FetchMode,
+    /// `Request.credentials` de l'émission (miroir JS-C77).
+    pub credentials: crate::xhr::FetchCredentials,
+}
+
+/// Réponse d'une [`WorkerNetRequest`] — octets **bruts** (un
+/// segment fMP4 ne survit pas à une conversion UTF-8 lossy).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkerNetResponse {
+    /// Statut HTTP (`0` = échec réseau → `error`/`reject`).
+    pub status: u16,
+    /// Raison (`statusText` côté XHR).
+    pub status_text: String,
+    /// En-têtes de réponse.
+    pub headers: Vec<(String, String)>,
+    /// Corps brut.
+    pub body: Vec<u8>,
+}
+
+/// Transport `fetch`/`XHR` du thread worker (§B-85) — adossé au
+/// même [`WorkerLoader`] que `importScripts` (partagé en
+/// `Rc<RefCell>` : l'un comme l'autre vivent sur ce seul thread).
+/// `send` émet la requête et rend un handle ; les réponses sont
+/// drainées par la pompe dans [`worker_main`] puis livrées via
+/// `Engine::deliver_xhr_response` — jamais de callback ré-entrant.
+struct WorkerNet {
+    /// Loader du worker (partagé avec `importScripts`).
+    loader: Rc<RefCell<Box<dyn WorkerLoader>>>,
+    /// `page_url` du worker — référent des requêtes.
+    referrer: String,
+    /// Prochain handle libre.
+    next: Cell<u64>,
+    /// Requêtes en vol : handle → receveur one-shot.
+    pending: RefCell<HashMap<u64, Receiver<std::result::Result<WorkerNetResponse, String>>>>,
+}
+
+/// Cadence de scrutation des réponses réseau quand le worker a
+/// des requêtes en vol — le canal `rx` des messages ne porte
+/// pas ces livraisons, il faut réveiller la pompe.
+const WORKER_NET_POLL: std::time::Duration = std::time::Duration::from_millis(20);
+
+impl WorkerNet {
+    /// Requêtes en vol en attente de réponse.
+    fn has_pending(&self) -> bool {
+        !self.pending.borrow().is_empty()
+    }
+
+    /// Dépile les réponses arrivées — `status=0` sur `Err`/canal
+    /// mort (échec réseau → `error`/`reject` côté miroir).
+    fn take_ready(&self) -> Vec<XhrResponse> {
+        let mut done = Vec::new();
+        self.pending
+            .borrow_mut()
+            .retain(|h, rx| match rx.try_recv() {
+                Ok(Ok(r)) => {
+                    done.push(XhrResponse {
+                        handle: *h,
+                        status: r.status,
+                        status_text: r.status_text,
+                        headers: r.headers,
+                        body: r.body,
+                    });
+                    false
+                }
+                Ok(Err(m)) => {
+                    done.push(XhrResponse {
+                        handle: *h,
+                        status: 0,
+                        status_text: m,
+                        headers: Vec::new(),
+                        body: Vec::new(),
+                    });
+                    false
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => true,
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    done.push(XhrResponse {
+                        handle: *h,
+                        status: 0,
+                        status_text: "canal réponse mort".to_string(),
+                        headers: Vec::new(),
+                        body: Vec::new(),
+                    });
+                    false
+                }
+            });
+        done
+    }
+}
+
+impl XhrTransport for WorkerNet {
+    fn send(&self, req: &XhrRequest) -> u64 {
+        let h = self.next.get();
+        self.next.set(h + 1);
+        let rx = self.loader.borrow_mut().request_net(&WorkerNetRequest {
+            method: req.method.clone(),
+            url: req.url.clone(),
+            headers: req.headers.clone(),
+            body: req.body.clone(),
+            referrer: self.referrer.clone(),
+            mode: req.mode,
+            credentials: req.credentials,
+        });
+        self.pending.borrow_mut().insert(h, rx);
+        h
+    }
+
+    fn abort(&self, handle: u64) {
+        self.pending.borrow_mut().remove(&handle);
     }
 }
 
@@ -896,12 +1051,33 @@ fn worker_main(
     e.set_op_limit(op_limit);
     e.install_timers();
     e.hooks.page_url = spec.to_string();
-    e.worker_loader = Some(loader);
+    let loader = Rc::new(RefCell::new(loader));
+    e.worker_loader = Some(loader.clone());
     e.worker_out = Some(out.clone());
     e.worker_alive = alive;
     // §B-84 — registre `blob:` du parent seedé : `importScripts`/
     // `fetch`/`XHR` sur un object URL du realm créateur résolvent.
     crate::files::blob_urls_seed(&mut e, blob_urls);
+    // §B-85 — l'environnement WorkerGlobalScope réel : un
+    // transmuxer (hls.js/dash.js/shaka) résout des URLs contre
+    // `self.location`, emballe des `Blob` et feature-detecte
+    // `WebAssembly` avant tout travail — un scope nu le tue
+    // silencieusement à l'init.
+    crate::dom_host::install_worker_location(&mut e);
+    crate::files::install_files(&mut e);
+    crate::dom_host::install_wasm_stub(&mut e);
+    // `fetch`/`XMLHttpRequest` dans le worker — transport adossé
+    // au loader (réponses drainées par la pompe ci-dessous).
+    // `install_xhr` installe aussi `fetch`/`Headers`/`Request`/
+    // `Response`/`Blob` (idempotent) ; `fetch(blob:)` résout en
+    // local via le registre seedé, sans transport.
+    let net = Rc::new(WorkerNet {
+        loader,
+        referrer: spec.to_string(),
+        next: Cell::new(1),
+        pending: RefCell::new(HashMap::new()),
+    });
+    e.install_xhr(net.clone());
     // Scope WorkerGlobalScope minimal.
     let g = e.global;
     let gv = Value::Obj(g);
@@ -938,15 +1114,27 @@ fn worker_main(
         }
         // Attente bornée : un timer armé fixe le délai, sinon
         // blocage pur sur la file (le worker dort — borné).
+        // Des requêtes `fetch`/`XHR` en vol plafonnent l'attente
+        // à `WORKER_NET_POLL` — leurs réponses n'arrivent pas
+        // sur `rx`, la pompe doit se réveiller pour les drainer.
+        let net_wait = net.has_pending();
         let wv = match e.next_timer_deadline() {
             Some(at) => {
-                let wait = at.saturating_duration_since(Instant::now());
+                let mut wait = at.saturating_duration_since(Instant::now());
+                if net_wait {
+                    wait = wait.min(WORKER_NET_POLL);
+                }
                 match rx.recv_timeout(wait) {
                     Ok(w) => Some(w),
                     Err(RecvTimeoutError::Timeout) => None,
                     Err(RecvTimeoutError::Disconnected) => break,
                 }
             }
+            None if net_wait => match rx.recv_timeout(WORKER_NET_POLL) {
+                Ok(w) => Some(w),
+                Err(RecvTimeoutError::Timeout) => None,
+                Err(RecvTimeoutError::Disconnected) => break,
+            },
             None => match rx.recv() {
                 Ok(w) => Some(w),
                 Err(_) => break,
@@ -975,6 +1163,14 @@ fn worker_main(
         }
         if let Err(t) = e.run_due_timers() {
             fail(&mut e, t);
+        }
+        // Réponses `fetch`/`XHR` arrivées — livrées au miroir
+        // (promesses résolues, handlers `onload`/`onerror` tirés)
+        // avant le checkpoint microtasks de fin d'itération.
+        for resp in net.take_ready() {
+            if let Err(t) = e.deliver_xhr_response(resp) {
+                fail(&mut e, t);
+            }
         }
         if let Err(t) = e.run_microtasks() {
             fail(&mut e, t);
@@ -1016,8 +1212,7 @@ fn wscope_post(e: &mut Engine, _this: Value, args: &[Value]) -> JsResult<Value> 
 /// dans l'ordre, scope global worker (spec : synchrone, le
 /// premier échec stoppe la séquence).
 fn wscope_import_scripts(e: &mut Engine, _this: Value, args: &[Value]) -> JsResult<Value> {
-    // Le loader sort de `e` le temps des `eval` (borrow mut).
-    let Some(mut loader) = e.worker_loader.take() else {
+    let Some(loader) = e.worker_loader.clone() else {
         return Err(e.type_error("importScripts: no loader"));
     };
     let mut srcs = Vec::new();
@@ -1031,21 +1226,21 @@ fn wscope_import_scripts(e: &mut Engine, _this: Value, args: &[Value]) -> JsResu
                 srcs.push(String::from_utf8_lossy(&bytes).into_owned());
                 continue;
             }
-            e.worker_loader = Some(loader);
             return Err(e.type_error(format!(
                 "importScripts: cannot load `{spec}`: URL objet inconnue"
             )));
         }
         let referrer = e.hooks.page_url.clone();
-        match loader.load(&spec, &referrer) {
+        match loader.borrow_mut().load(&spec, &referrer) {
             Ok(s) => srcs.push(s),
             Err(m) => {
-                e.worker_loader = Some(loader);
                 return Err(e.type_error(format!("importScripts: cannot load `{spec}`: {m}")));
             }
         }
     }
-    e.worker_loader = Some(loader);
+    // `loader` n'est plus emprunté ici — un script importé peut
+    // ré-importer ou fetcher (même `RefCell`, borrow libre).
+    drop(loader);
     for src in srcs {
         if let Err(err) = e.eval(&src) {
             return Err(e.type_error(format!("importScripts: {err}")));

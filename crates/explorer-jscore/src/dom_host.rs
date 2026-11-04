@@ -3467,36 +3467,7 @@ impl Engine {
         let tag = self.str_val("CookieStore");
         self.set_own(cs, crate::interp::SYM_TO_STRING_TAG, tag, false);
         self.set_own(g, "cookieStore", Value::Obj(cs), false);
-        // `WebAssembly` — namespace honnête : les binaires wasm
-        // sont hors périmètre moteur ; `validate` → `false` (un
-        // octet inconnu est « invalide ») et les compiles
-        // rejettent — les bundles gardent leur repli JS.
-        let wasm = self.new_object();
-        self.add_method(wasm, "validate", wasm_false);
-        self.add_method(wasm, "compile", wasm_reject);
-        self.add_method(wasm, "instantiate", wasm_reject);
-        self.add_method(wasm, "compileStreaming", wasm_reject);
-        self.add_method(wasm, "instantiateStreaming", wasm_reject);
-        for n in [
-            "Module",
-            "Instance",
-            "Memory",
-            "Table",
-            "Global",
-            "CompileError",
-            "LinkError",
-            "RuntimeError",
-            "Tag",
-            "Exception",
-        ] {
-            let f = self.illegal_ctor_bound(n);
-            if let Value::Obj(fid) = f {
-                let p = self.new_object();
-                self.set_own(fid, "prototype", Value::Obj(p), false);
-            }
-            self.set_own(wasm, n, f, false);
-        }
-        self.set_own(g, "WebAssembly", Value::Obj(wasm), false);
+        install_wasm_stub(self);
         // `trustedTypes` — politique « passthrough » honnête
         // (pas d'application TT moteur ; les bundles qui
         // enregistrent une `default` policy obtiennent l'API).
@@ -10786,6 +10757,45 @@ fn url_parts(u: &str) -> (String, String, String, String, String, String, String
     )
 }
 
+/// Lecture `Location`/`WorkerLocation` — même jeu de clés
+/// (`href`/`protocol`/…/`origin`/`toString`) résolu contre
+/// `hooks.page_url` (URL de page ou de script worker).
+fn location_key_get(e: &mut Engine, key: &str) -> JsResult<Option<Value>> {
+    let u = &e.hooks.page_url;
+    let (proto, host, hostname, port, path, search, hash) = url_parts(u);
+    let s = match key {
+        "href" => u.clone(),
+        "protocol" => proto,
+        "host" => host,
+        "hostname" => hostname,
+        "port" => port,
+        "pathname" => path,
+        "search" => search,
+        "hash" => hash,
+        "origin" => {
+            if proto.is_empty() {
+                "null".to_string()
+            } else {
+                format!("{proto}//{host}")
+            }
+        }
+        // `toString` doit être une fonction réelle (spec
+        // `Location.prototype.toString` → `href`) : sinon
+        // `ToPrimitive` tombe sur `Object.prototype.toString`
+        // → "[object Location]" — et `new URL(".", location)`
+        // échouait « Invalid base URL » (motif assets
+        // svelte/fastapi/mkdocs). `invoke` gère déjà l'appel
+        // méthode ; ici c'est la lecture-propriété.
+        "toString" => {
+            return Ok(Some(e.native_fn("toString", |e, _t, _a| {
+                Ok(e.str_val(e.hooks.page_url.clone()))
+            })));
+        }
+        _ => return Ok(None),
+    };
+    Ok(Some(e.str_val(s)))
+}
+
 impl Host for LocationHost {
     fn class_name(&self) -> &'static str {
         "Location"
@@ -10796,39 +10806,7 @@ impl Host for LocationHost {
     }
 
     fn get(&self, e: &mut Engine, _t: Value, key: &str) -> JsResult<Option<Value>> {
-        let u = &e.hooks.page_url;
-        let (proto, host, hostname, port, path, search, hash) = url_parts(u);
-        let s = match key {
-            "href" => u.clone(),
-            "protocol" => proto,
-            "host" => host,
-            "hostname" => hostname,
-            "port" => port,
-            "pathname" => path,
-            "search" => search,
-            "hash" => hash,
-            "origin" => {
-                if proto.is_empty() {
-                    "null".to_string()
-                } else {
-                    format!("{proto}//{host}")
-                }
-            }
-            // `toString` doit être une fonction réelle (spec
-            // `Location.prototype.toString` → `href`) : sinon
-            // `ToPrimitive` tombe sur `Object.prototype.toString`
-            // → "[object Location]" — et `new URL(".", location)`
-            // échouait « Invalid base URL » (motif assets
-            // svelte/fastapi/mkdocs). `invoke` gère déjà l'appel
-            // méthode ; ici c'est la lecture-propriété.
-            "toString" => {
-                return Ok(Some(e.native_fn("toString", |e, _t, _a| {
-                    Ok(e.str_val(e.hooks.page_url.clone()))
-                })));
-            }
-            _ => return Ok(None),
-        };
-        Ok(Some(e.str_val(s)))
+        location_key_get(e, key)
     }
 
     fn has_method(&self, name: &str) -> bool {
@@ -10974,6 +10952,42 @@ impl Host for LocationHost {
             _ => Ok(None),
         }
     }
+}
+
+/// `WorkerLocation` — `self.location` du scope worker (§B-85) :
+/// mêmes composants que `Location` mais **lecture seule** spec
+/// (pas de `assign`/`replace`/`reload`, pas de setters — un
+/// worker ne navigue pas). Un transmuxer en résout les URLs
+/// relatives et lit `origin` pour ses politiques.
+struct WorkerLocationHost;
+
+impl Host for WorkerLocationHost {
+    fn class_name(&self) -> &'static str {
+        "WorkerLocation"
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
+    fn get(&self, e: &mut Engine, _t: Value, key: &str) -> JsResult<Option<Value>> {
+        location_key_get(e, key)
+    }
+
+    fn set(&self, _e: &mut Engine, _t: Value, _key: &str, _v: Value) -> JsResult<bool> {
+        // Read-only spec — une écriture est absorbée, jamais
+        // honorée (tolérance : pas d'exception).
+        Ok(true)
+    }
+}
+
+/// `self.location` du scope worker (§B-85) — host objet sur
+/// `hooks.page_url` (= URL du script worker, posée par
+/// `worker_main`).
+pub(crate) fn install_worker_location(e: &mut Engine) {
+    let loc = e.new_host_object(Rc::new(WorkerLocationHost));
+    let g = e.global;
+    e.set_own(g, "location", loc, false);
 }
 
 /// `history` — `back`/`forward`/`go(n)` through `hooks.history_go`,
@@ -14854,6 +14868,44 @@ fn wasm_reject(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
     let msg = e.str_val("CompileError: WebAssembly unsupported");
     e.reject_promise(id, msg);
     Ok(Value::Obj(id))
+}
+
+/// `WebAssembly` — namespace honnête partagé `install_dom` et
+/// scope worker (§B-85) : les binaires wasm sont hors périmètre
+/// moteur ; `validate` → `false` (un octet inconnu est
+/// « invalide ») et les compiles rejettent — les bundles
+/// gardent leur repli JS. Idempotent.
+pub(crate) fn install_wasm_stub(e: &mut Engine) {
+    let g = e.global;
+    if e.get_prop(g, "WebAssembly").is_some() {
+        return;
+    }
+    let wasm = e.new_object();
+    e.add_method(wasm, "validate", wasm_false);
+    e.add_method(wasm, "compile", wasm_reject);
+    e.add_method(wasm, "instantiate", wasm_reject);
+    e.add_method(wasm, "compileStreaming", wasm_reject);
+    e.add_method(wasm, "instantiateStreaming", wasm_reject);
+    for n in [
+        "Module",
+        "Instance",
+        "Memory",
+        "Table",
+        "Global",
+        "CompileError",
+        "LinkError",
+        "RuntimeError",
+        "Tag",
+        "Exception",
+    ] {
+        let f = e.illegal_ctor_bound(n);
+        if let Value::Obj(fid) = f {
+            let p = e.new_object();
+            e.set_own(fid, "prototype", Value::Obj(p), false);
+        }
+        e.set_own(wasm, n, f, false);
+    }
+    e.set_own(g, "WebAssembly", Value::Obj(wasm), false);
 }
 
 /// `trustedTypes.createPolicy(name, rules)` — politique

@@ -267,6 +267,40 @@ pub enum NetRequest {
         /// par le thread moteur.
         reply: WorkerReply,
     },
+    /// `fetch`/`XHR` émis **dans** un thread worker (§B-85) —
+    /// même canal `Send` et même réponse one-shot que
+    /// `WorkerLoad`, mais requête complète (méthode/en-têtes/
+    /// corps) et réponse **binaire** : un segment fMP4 ne
+    /// survit pas à la conversion `String` de `WorkerLoad`.
+    WorkerFetch {
+        /// Requête telle qu'émise par le miroir worker.
+        req: explorer_jscore::WorkerNetRequest,
+        /// Contexte émetteur — top-level (convention
+        /// `WorkerLoad` : le worker hérite la page créatrice).
+        ctx: JsCtxId,
+        /// Canal de réponse direct vers le thread worker.
+        reply: WorkerFetchReply,
+    },
+}
+
+/// Canal one-shot d'un [`NetRequest::WorkerFetch`] — réponse
+/// réseau complète (statut, en-têtes, octets).
+#[derive(Clone)]
+pub struct WorkerFetchReply(
+    /// Réponse livrée par la tâche fetch de la session.
+    pub std::sync::mpsc::Sender<std::result::Result<explorer_jscore::WorkerNetResponse, String>>,
+);
+
+impl std::fmt::Debug for WorkerFetchReply {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("WorkerFetchReply(..)")
+    }
+}
+
+impl PartialEq for WorkerFetchReply {
+    fn eq(&self, _other: &Self) -> bool {
+        false
+    }
 }
 
 /// Canal one-shot d'un [`NetRequest::WorkerLoad`] — enrobage
@@ -1505,6 +1539,7 @@ pub const JS_CTX_TOP: JsCtxId = 0;
 pub use explorer_jscore::{CryptoOp, DigestAlgo, ImportFormat, KeyAlgo};
 // JS-C94 — requêtes/événements `WebSocket` transportés par
 // `NetRequest::WsOpen`/`WsSend`/`WsClose` (types uniques).
+pub use explorer_jscore::{WorkerNetRequest, WorkerNetResponse};
 pub use explorer_jscore::{WsEventKind, WsOut, WsRequest};
 
 /// Commandes vers le thread moteur — valeurs sérialisables, aucun
@@ -4309,6 +4344,29 @@ impl explorer_jscore::WorkerLoader for ChanWorker {
         self.request(spec, referrer)
             .recv_timeout(WORKER_LOAD_TIMEOUT)
             .unwrap_or_else(|_| Err("fetch worker : délai dépassé".to_string()))
+    }
+
+    /// `fetch`/`XHR` du worker (§B-85) — `NetRequest::WorkerFetch`
+    /// complet (méthode/en-têtes/corps, réponse binaire) ; la
+    /// pompe du thread draine le receveur sans se bloquer.
+    fn request_net(
+        &mut self,
+        req: &explorer_jscore::WorkerNetRequest,
+    ) -> std::sync::mpsc::Receiver<std::result::Result<explorer_jscore::WorkerNetResponse, String>>
+    {
+        let (rtx, rrx) = std::sync::mpsc::channel();
+        if self
+            .tx
+            .send(NetRequest::WorkerFetch {
+                req: req.clone(),
+                ctx: JS_CTX_TOP,
+                reply: WorkerFetchReply(rtx.clone()),
+            })
+            .is_err()
+        {
+            let _ = rtx.send(Err("file session fermée".to_string()));
+        }
+        rrx
     }
 }
 
