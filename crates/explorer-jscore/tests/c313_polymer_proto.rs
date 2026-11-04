@@ -577,6 +577,27 @@ fn c315_wcsd_then_kevlar_ubc_capture() {
             "JSON.stringify(__sonde_defprop ? __sonde_defprop() : [])"
         )
     );
+    // `connectedCallback` ne tire jamais (`isAttached` jamais
+    // posé) alors que `disconnectedCallback` tire au retrait —
+    // asymétrie = mur. Compteurs sur le proto AVANT appendChild
+    // pour nommer ce qui s'exécute réellement :
+    println!(
+        "ce-dispatch → {}",
+        ev(
+            &mut e,
+            "window.__cd='START';(function(){try{var el3=document.createElement('ytd-app');var P3=Object.getPrototypeOf(el3),cc=0,att=0,rd=0;['connectedCallback','attached','ready'].forEach(function(k){var of=P3[k];if(typeof of==='function'){try{P3[k]=function(){if(k==='connectedCallback')cc++;if(k==='attached')att++;if(k==='ready')rd++;return of.apply(this,arguments)}}catch(e2){window.__cd='patchfail:'+k}}});var o=[];try{document.body.appendChild(el3);o.push('app=ok')}catch(x){o.push('app=THREW:'+String(x&&x.message||x).slice(0,120))}o.push('cc='+cc+'|att='+att+'|rd='+rd);o.push('isAtt='+el3.isAttached);o.push('kids='+(el3.root===el3?el3.children.length:'frag'));window.__cd=o.join('|')}catch(x3){window.__cd='OUTER:'+String(x3&&x3.message||x3).slice(0,140)}})();window.__cd",
+        )
+    );
+    // `cc=0` → `ce.failed` probable : `ce_upgrade_node` exige
+    // `FLD_DONE` (super()→HTMLElement) qu'un ctor fonction plain
+    // ne pose jamais. Forme du ctor enregistré ?
+    println!(
+        "ctor-shape → {}",
+        ev(
+            &mut e,
+            "(function(){var C=customElements.get('ytd-app');if(!C)return'noC';var s=Function.prototype.toString.call(C);var o=[];o.push('head='+s.slice(0,40));o.push('isClass='+(s.indexOf('class')===0));try{new C();o.push('new=ok')}catch(x){o.push('new=THREW:'+String(x&&x.message||x).slice(0,80))}return o.join('|')})()",
+        )
+    );
 }
 
 /// Sonde JS-C319 — mur levé sur youtube live :

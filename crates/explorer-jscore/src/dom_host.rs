@@ -5574,8 +5574,11 @@ fn host_method_trampoline(e: &mut Engine, _this: Value, args: &[Value]) -> JsRes
         return Ok(Value::Undefined);
     };
     crate::host_mark(h.class_name(), &name);
-    Ok(h.invoke(e, Value::Obj(id), &name, &rest[1..])?
-        .unwrap_or(Value::Undefined))
+    let r = h.invoke(e, Value::Obj(id), &name, &rest[1..])?;
+    // Réactions CE synchrones (JS-C68) — la méthode a pu muter
+    // le miroir (appendChild/…). No-op file vide.
+    e.drain_ce_reactions()?;
+    Ok(r.unwrap_or(Value::Undefined))
 }
 
 /// Variante « méthode de `Node.prototype` » : le receveur est
@@ -5597,8 +5600,11 @@ fn node_proto_method_trampoline(e: &mut Engine, this: Value, args: &[Value]) -> 
         return Ok(Value::Undefined);
     };
     crate::host_mark(h.class_name(), &name);
-    Ok(h.invoke(e, Value::Obj(id), &name, call_args)?
-        .unwrap_or(Value::Undefined))
+    let r = h.invoke(e, Value::Obj(id), &name, call_args)?;
+    // Réactions CE synchrones (JS-C68) — appendChild/insertBefore/
+    // setAttribute via `Node.prototype.m(el,…)` alimentent la file.
+    e.drain_ce_reactions()?;
+    Ok(r.unwrap_or(Value::Undefined))
 }
 
 /// Lecture d'un handler `on*` : propre scriptée (`el.onclick =
@@ -10247,20 +10253,31 @@ fn ce_upgrade_node(e: &mut Engine, dom: &DomRef, cache: &NodeCache, node: NodeId
     // Constructeur : `call_value_ctor` avec `this` = l'élément —
     // le `super()` d'une classe `extends …HTMLElement` atteint la
     // native `HTMLElement` qui rend l'élément via `ce_upgrade_slot`
-    // (retour ignoré par `SuperCall`, `this` reste l'élément) ;
-    // `FLD_DONE` posé sur `this` après `super()` prouve la
-    // chaîne dérivée (une classe de base ou une `function` ne la
-    // pose jamais → « failed », comme la spec qui exige le
-    // résultat = l'élément). `new.target` = `ctor`.
+    // (retour ignoré par `SuperCall`, `this` reste l'élément).
+    // `new.target` = `ctor`.
     let prev = e.ce_upgrade_slot.replace(el);
     let r = e.call_value_ctor(ctor, el, &[], ctor);
     e.ce_upgrade_slot = prev;
+    // Une **classe** doit prouver sa chaîne dérivée : `FLD_DONE`
+    // n'est posé que par `super()` remontant à la native
+    // `HTMLElement` (une classe de base sans `extends` reste
+    // « failed » — `this` n'est pas l'élément, spec
+    // `Construct`/`customElements.define`). Une **function**
+    // suit la sémantique du polyfill `ctor.call(el)` —
+    // `Y.apply(this,…)` (enrobage ES5 Polymer/kevlar) initialise
+    // `this` : succès sauf jet ou retour d'objet étranger —
+    // sinon l'élément était marqué `failed`, ses callbacks
+    // désarmés (`connectedCallback` jamais tiré → `attached`/`Xcs`
+    // jamais posés → mur `playlistHandlerActionMap`, JS-C322).
+    let is_class =
+        matches!(ctor, Value::Obj(id) if e.find_own(id, crate::interp::CLASS_CTOR).is_some());
     let ok = match r {
         Ok(v) => {
-            let returned_other = v.is_object() && !e.strict_eq(v, el);
-            let derived =
-                matches!(el, Value::Obj(eid) if e.find_own(eid, crate::interp::FLD_DONE).is_some());
-            !returned_other && derived
+            let foreign = v.is_object() && !e.strict_eq(v, el);
+            !foreign
+                && (!is_class
+                    || matches!(el, Value::Obj(eid)
+                        if e.find_own(eid, crate::interp::FLD_DONE).is_some()))
         }
         Err(_) => false,
     };

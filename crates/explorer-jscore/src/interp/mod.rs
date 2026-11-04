@@ -115,7 +115,7 @@ const FLD_FIELDS_D: &str = "\u{f131}fields.derived";
 pub(crate) const FLD_DONE: &str = "\u{f131}fields.done";
 /// Marqueur « constructeur de classe » — `C()` sans `new` lève
 /// `TypeError` (spec `[[IsClassConstructor]]` implicite).
-const CLASS_CTOR: &str = "\u{f131}ctor";
+pub(crate) const CLASS_CTOR: &str = "\u{f131}ctor";
 
 /// `Symbol.iterator` property key — a private-use sentinel string
 /// (symbols are represented as opaque string keys; `typeof sym`
@@ -3265,8 +3265,11 @@ impl Engine {
             return Ok(Value::Undefined);
         };
         crate::host_mark(h.class_name(), &name);
-        Ok(h.invoke(self, this, &name, &args[1..])?
-            .unwrap_or(Value::Undefined))
+        let r = h.invoke(self, this, &name, &args[1..])?;
+        // Réactions CE synchrones (JS-C68) — rail BoundNative :
+        // `appendChild` & co alimentent la file CE.
+        self.drain_ce_reactions()?;
+        Ok(r.unwrap_or(Value::Undefined))
     }
 
     /// `true` si `bid.name` est masqué par du code script —
