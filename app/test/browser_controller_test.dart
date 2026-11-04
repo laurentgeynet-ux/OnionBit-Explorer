@@ -6,6 +6,7 @@ import 'dart:async';
 
 import 'package:explorer_app/core/api/events_client.dart';
 import 'package:explorer_app/core/config/app_config.dart';
+import 'package:explorer_app/core/settings/app_settings.dart';
 import 'package:explorer_app/features/browser/domain/bookmark.dart';
 import 'package:explorer_app/features/browser/domain/browser_tab.dart';
 import 'package:explorer_app/features/browser/domain/reload_result.dart';
@@ -954,6 +955,104 @@ void main() {
     await c.read(browserProvider.notifier).navigate('netflix.com');
     expect(repo.navigations, ['1:http://netflix.com']);
     expect(c.read(browserProvider).active!.kind, TabKind.engine);
+  });
+
+  /// Étape 183 — le réglage audio persisté s'applique à
+  /// chaque nouveau lecteur au claim (volume + mute).
+  test('183 — claim applique le réglage audio persisté', () async {
+    final repo = FakeRepo();
+    final events = FakeEvents();
+    FakePlayer.instances.clear();
+    final c = makeContainer(repo, events);
+    addTearDown(c.dispose);
+    await settle(c);
+
+    // Réglage posé avant l'offre — la surface naît mutée
+    // à 30 % (le claim lit `settingsProvider`).
+    await c.read(settingsProvider.notifier).setMediaAudio(0.3, true);
+
+    events.ctrl.add(
+      ServerEvent('media_offered', {
+        'tab': 1,
+        'media': 7,
+        'kind': 'video',
+        'rect': {'x': 0, 'y': 0, 'w': 100, 'h': 50},
+        'url': 'http://h/v.mp4',
+      }),
+    );
+    for (var i = 0; i < 6; i++) {
+      await Future<void>.delayed(Duration.zero);
+    }
+    final p = FakePlayer.instances.single;
+    expect(p.muted, isTrue);
+    expect(p.volume, 0.3);
+  });
+
+  /// Étape 183 — seek relatif borné `[0, duration]`, volume
+  /// qui dé-mute, replay ended→0+play, persistance fin de
+  /// geste (un write, pas un par cran).
+  test('183 — seek/volume/mute/replay routés + persistés', () async {
+    final repo = FakeRepo();
+    final events = FakeEvents();
+    FakePlayer.instances.clear();
+    final c = makeContainer(repo, events);
+    addTearDown(c.dispose);
+    await settle(c);
+
+    events.ctrl.add(
+      ServerEvent('media_offered', {
+        'tab': 1,
+        'media': 7,
+        'kind': 'video',
+        'rect': {'x': 0, 'y': 0, 'w': 100, 'h': 50},
+        'url': 'http://h/v.mp4',
+      }),
+    );
+    for (var i = 0; i < 6; i++) {
+      await Future<void>.delayed(Duration.zero);
+    }
+    final p = FakePlayer.instances.single;
+    final ctrl = c.read(browserProvider.notifier);
+    p.durationMs = 60000;
+    p.positionMs = 2000;
+
+    // Seek relatif : +5 s → 7000 ms ; −30 s → clamp 0 ;
+    // +99 s → clamp duration (60000).
+    ctrl.mediaSeekBy('1', 7, const Duration(seconds: 5));
+    expect(p.seeked, const Duration(milliseconds: 7000));
+    ctrl.mediaSeekBy('1', 7, const Duration(seconds: -30));
+    expect(p.seeked, Duration.zero);
+    ctrl.mediaSeekBy('1', 7, const Duration(seconds: 99));
+    expect(p.seeked, const Duration(milliseconds: 60000));
+
+    // Volume absolu : posé, non persisté à chaque cran —
+    // `mediaPersistAudio` est le geste de fin explicite.
+    ctrl.mediaSetVolume('1', 7, 0.4);
+    await Future<void>.delayed(Duration.zero);
+    expect(p.volume, 0.4);
+
+    // Mute → toggle + persistance (`.then` → 2 microtasks).
+    ctrl.mediaToggleMute('1', 7);
+    await Future<void>.delayed(Duration.zero);
+    await Future<void>.delayed(Duration.zero);
+    expect(p.muted, isTrue);
+    expect(c.read(settingsProvider).mediaMuted, isTrue);
+
+    // Volume > 0 sur surface mutée → dé-mute (convention).
+    ctrl.mediaSetVolume('1', 7, 0.6);
+    await Future<void>.delayed(Duration.zero);
+    expect(p.volume, 0.6);
+    expect(p.muted, isFalse);
+    ctrl.mediaPersistAudio('1', 7);
+    await Future<void>.delayed(Duration.zero);
+    expect(c.read(settingsProvider).mediaVolume, 0.6);
+
+    // `ended` → replay = seek 0 + play.
+    ctrl.mediaReplay('1', 7);
+    await Future<void>.delayed(Duration.zero);
+    await Future<void>.delayed(Duration.zero);
+    expect(p.seeked, Duration.zero);
+    expect(p.plays, greaterThan(0));
   });
 }
 

@@ -90,5 +90,12 @@
     "placeholders": {
       "error": {}
     }
-  }
+  },
+  "mediaPlay": "Воспроизвести",
+  "mediaPause": "Пауза",
+  "mediaReplay": "Повторить",
+  "mediaMute": "Без звука",
+  "mediaUnmute": "Включить звук",
+  "mediaLive": "ЭФИР",
+  "mediaError": "Ошибка воспроизведения"
 }

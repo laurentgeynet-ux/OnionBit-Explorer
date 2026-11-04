@@ -203,4 +203,25 @@ class AppLocalizationsHi extends AppLocalizations {
   String downloadError(Object error) {
     return 'डाउनलोड: $error';
   }
+
+  @override
+  String get mediaPlay => 'चलाएँ';
+
+  @override
+  String get mediaPause => 'रोकें';
+
+  @override
+  String get mediaReplay => 'फिर से चलाएँ';
+
+  @override
+  String get mediaMute => 'म्यूट करें';
+
+  @override
+  String get mediaUnmute => 'आवाज़ चालू करें';
+
+  @override
+  String get mediaLive => 'लाइव';
+
+  @override
+  String get mediaError => 'प्लेबैक त्रुटि';
 }

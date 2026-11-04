@@ -6455,6 +6455,71 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   Phase 2 optionnelle :
   dirty-windowed.
 
+- [x] **Étape 183. Barre de
+  contrôles média native** (`app/`,
+  chantier M0 UX-vidéo —
+  ADR-0024) : la surface `<video
+  controls>` n'avait qu'un
+  tap=play/pause volant l'arène au
+  `GestureDetector` parent (les
+  clics n'atteignaient plus le
+  moteur). `MediaSurfaceView` +
+  `MediaControlsBar` nouveaux :
+  play/pause, seek par drag
+  (affichage live, `seekTo` en
+  fin de geste), piste secondaire
+  = `buffered`, temps `mm:ss`/
+  `h:mm:ss`, badge DIRECT quand
+  `duration_ms` absent, volume +
+  mute, scrim dégradé —
+  auto-masquée pendant `playing`
+  (`AppConfig.mediaControlsHide
+  Delay/Fade`), ré-armée au
+  survol, curseur caché ; jamais
+  masquée en pause/buffering/
+  ended. `<audio controls>` →
+  barre pleine fixe dans le rect
+  (`MediaOffer.hasAudioBar`).
+  Poster-jusqu'à-frame : la
+  couche vidéo reste transparente
+  tant que `!ready` (plus de
+  flash noir — le poster peint
+  par le moteur sert d'affiche) ;
+  spinner init/`buffering`,
+  `ended` → bouton ↺ (seek 0 +
+  play), `error` → icône.
+  Hit-policy explicite : hors
+  `controls` → `IgnorePointer`
+  (la page possède ses gestes) ;
+  sur `controls` le tap vidéo
+  **forwarde les coords document
+  au moteur ET** bascule lecture
+  (double détente = sémantique
+  navigateur, hit fire-and-forget
+  documenté) ; la barre absorbe
+  dans sa zone. Raccourcis hôte
+  sur la dernière surface
+  interagie — espace/K toggle,
+  ←/→ ±`mediaSeekStep`,
+  ↑/↓ ±`mediaVolumeStep`, M mute
+  — cédant à `fieldFocused`.
+  `MediaPlayer.volume`/`muted`
+  tracés par la seam (pas de
+  getter backend), persistés en
+  `AppSettings.mediaVolume/
+  mediaMuted` en fin de geste
+  (`mediaPersistAudio` — jamais
+  par cran de drag) et ré-appliqués
+  au claim ; les commandes JS
+  `volume`/`muted` restent
+  par-surface. Bouton ↓ source
+  réservé aux progressifs
+  non-MSE `controls`. Verrous :
+  7 widget (`media_controls_test`)
+  + 2 contrôleur (claim applique
+  le réglage, seek borné/dé-mute/
+  replay/persist) — 62/62 verts.
+
 - [ ] **Écarts terrain — vol humain
   22/10 (release `39ab821`, FFI)** :
   second run humain — trois constats

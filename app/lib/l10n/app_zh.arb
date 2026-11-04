@@ -90,5 +90,12 @@
     "placeholders": {
       "error": {}
     }
-  }
+  },
+  "mediaPlay": "播放",
+  "mediaPause": "暂停",
+  "mediaReplay": "重播",
+  "mediaMute": "静音",
+  "mediaUnmute": "取消静音",
+  "mediaLive": "直播",
+  "mediaError": "播放错误"
 }

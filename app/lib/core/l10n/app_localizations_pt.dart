@@ -203,4 +203,25 @@ class AppLocalizationsPt extends AppLocalizations {
   String downloadError(Object error) {
     return 'Transferência: $error';
   }
+
+  @override
+  String get mediaPlay => 'Reproduzir';
+
+  @override
+  String get mediaPause => 'Pausar';
+
+  @override
+  String get mediaReplay => 'Repetir';
+
+  @override
+  String get mediaMute => 'Sem som';
+
+  @override
+  String get mediaUnmute => 'Repor som';
+
+  @override
+  String get mediaLive => 'AO VIVO';
+
+  @override
+  String get mediaError => 'Erro de reprodução';
 }

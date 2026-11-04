@@ -28,6 +28,8 @@ class AppSettings {
     this.language = '',
     this.uiLanguage = '',
     this.hwAccel = true,
+    this.mediaVolume = 1.0,
+    this.mediaMuted = false,
   });
 
   final String theme;
@@ -46,6 +48,15 @@ class AppSettings {
   /// Sans effet hors Windows / DLL sans le chemin HW.
   final bool hwAccel;
 
+  /// Dernier volume `[0..1]` posé par l'utilisateur sur une
+  /// surface média (étape 183) — appliqué à chaque nouveau
+  /// lecteur ; les commandes `volume`/`muted` JS ne
+  /// l'écrasent pas (réglage *utilisateur*, pas page).
+  final double mediaVolume;
+
+  /// Muet persisté — même sémantique que [mediaVolume].
+  final bool mediaMuted;
+
   AppSettings copyWith({
     String? theme,
     String? engine,
@@ -53,6 +64,8 @@ class AppSettings {
     String? language,
     String? uiLanguage,
     bool? hwAccel,
+    double? mediaVolume,
+    bool? mediaMuted,
   }) => AppSettings(
     theme: theme ?? this.theme,
     engine: engine ?? this.engine,
@@ -60,6 +73,8 @@ class AppSettings {
     language: language ?? this.language,
     uiLanguage: uiLanguage ?? this.uiLanguage,
     hwAccel: hwAccel ?? this.hwAccel,
+    mediaVolume: mediaVolume ?? this.mediaVolume,
+    mediaMuted: mediaMuted ?? this.mediaMuted,
   );
 
   Map<String, dynamic> toJson() => {
@@ -69,6 +84,8 @@ class AppSettings {
     'language': language,
     'uiLanguage': uiLanguage,
     'hwAccel': hwAccel,
+    'mediaVolume': mediaVolume,
+    'mediaMuted': mediaMuted,
   };
 
   /// Tolérant : entrée absente/invalide → valeur par défaut
@@ -95,6 +112,12 @@ class AppSettings {
       hwAccel: json['hwAccel'] is bool
           ? json['hwAccel'] as bool
           : const AppSettings().hwAccel,
+      mediaVolume: json['mediaVolume'] is num
+          ? (json['mediaVolume'] as num).toDouble().clamp(0.0, 1.0)
+          : 1.0,
+      mediaMuted: json['mediaMuted'] is bool
+          ? json['mediaMuted'] as bool
+          : false,
     );
   }
 }
@@ -229,6 +252,16 @@ class SettingsController extends Notifier<AppSettings> {
   /// Décodage matériel (D3D11VA) — posé au lecteur OnionMedia
   /// à la création de chaque surface vidéo.
   Future<void> setHwAccel(bool v) => _save(state.copyWith(hwAccel: v));
+
+  /// Volume/mute média persisté (étape 183) — un seul write :
+  /// les gestes audio se terminent souvent par paire
+  /// (slider lâché + mute désactivé par volume > 0).
+  Future<void> setMediaAudio(double volume, bool muted) => _save(
+    state.copyWith(
+      mediaVolume: volume.clamp(0.0, 1.0),
+      mediaMuted: muted,
+    ),
+  );
 }
 
 /// Provider des réglages — `main.dart` en dérive `themeMode`,

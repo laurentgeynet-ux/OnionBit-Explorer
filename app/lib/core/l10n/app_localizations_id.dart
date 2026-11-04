@@ -205,4 +205,25 @@ class AppLocalizationsId extends AppLocalizations {
   String downloadError(Object error) {
     return 'Unduhan: $error';
   }
+
+  @override
+  String get mediaPlay => 'Putar';
+
+  @override
+  String get mediaPause => 'Jeda';
+
+  @override
+  String get mediaReplay => 'Ulangi';
+
+  @override
+  String get mediaMute => 'Bisukan';
+
+  @override
+  String get mediaUnmute => 'Suarakan';
+
+  @override
+  String get mediaLive => 'LANGSUNG';
+
+  @override
+  String get mediaError => 'Kesalahan pemutaran';
 }

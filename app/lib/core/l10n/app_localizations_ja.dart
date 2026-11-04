@@ -201,4 +201,25 @@ class AppLocalizationsJa extends AppLocalizations {
   String downloadError(Object error) {
     return 'ダウンロード：$error';
   }
+
+  @override
+  String get mediaPlay => '再生';
+
+  @override
+  String get mediaPause => '一時停止';
+
+  @override
+  String get mediaReplay => 'もう一度再生';
+
+  @override
+  String get mediaMute => 'ミュート';
+
+  @override
+  String get mediaUnmute => 'ミュート解除';
+
+  @override
+  String get mediaLive => 'ライブ';
+
+  @override
+  String get mediaError => '再生エラー';
 }

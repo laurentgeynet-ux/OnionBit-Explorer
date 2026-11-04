@@ -85,6 +85,12 @@ class OnionMediaPlayer implements MediaPlayer {
   bool _disposed = false;
   bool _pulling = false;
 
+  /// État audio tracé localement (étape 183) — la DLL n'a pas
+  /// de getter volume/mute : les setters mémorisent et notifient
+  /// pour que la barre de contrôles se redessine.
+  double _volume = 1.0;
+  bool _muted = false;
+
   // -- liaisons natives -------------------------------------------------------
 
   late final _qtavFree =
@@ -792,10 +798,23 @@ class OnionMediaPlayer implements MediaPlayer {
   @override
   Future<void> seekTo(Duration pos) async => _qtavSeek(_h, pos.inMilliseconds);
   @override
-  Future<void> setVolume(double v) async =>
-      _qtavSetVol(_h, v.clamp(0.0, 1.0));
+  double get volume => _volume;
   @override
-  Future<void> setMuted(bool on) async => _qtavSetMute(_h, on ? 1 : 0);
+  bool get muted => _muted;
+
+  @override
+  Future<void> setVolume(double v) async {
+    _volume = v.clamp(0.0, 1.0);
+    _qtavSetVol(_h, _volume);
+    _notify();
+  }
+
+  @override
+  Future<void> setMuted(bool on) async {
+    _muted = on;
+    _qtavSetMute(_h, on ? 1 : 0);
+    _notify();
+  }
   @override
   Future<void> setRate(double r) async =>
       _qtavSetSpeed(_h, r.clamp(0.25, 4.0));

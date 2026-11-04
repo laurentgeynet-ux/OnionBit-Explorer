@@ -90,5 +90,12 @@
     "placeholders": {
       "error": {}
     }
-  }
+  },
+  "mediaPlay": "Abspielen",
+  "mediaPause": "Pause",
+  "mediaReplay": "Erneut abspielen",
+  "mediaMute": "Stummschalten",
+  "mediaUnmute": "Ton einschalten",
+  "mediaLive": "LIVE",
+  "mediaError": "Wiedergabefehler"
 }

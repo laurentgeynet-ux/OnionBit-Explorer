@@ -473,6 +473,48 @@ abstract class AppLocalizations {
   /// In fr, this message translates to:
   /// **'Téléchargement : {error}'**
   String downloadError(Object error);
+
+  /// No description provided for @mediaPlay.
+  ///
+  /// In fr, this message translates to:
+  /// **'Lire'**
+  String get mediaPlay;
+
+  /// No description provided for @mediaPause.
+  ///
+  /// In fr, this message translates to:
+  /// **'Pause'**
+  String get mediaPause;
+
+  /// No description provided for @mediaReplay.
+  ///
+  /// In fr, this message translates to:
+  /// **'Rejouer'**
+  String get mediaReplay;
+
+  /// No description provided for @mediaMute.
+  ///
+  /// In fr, this message translates to:
+  /// **'Couper le son'**
+  String get mediaMute;
+
+  /// No description provided for @mediaUnmute.
+  ///
+  /// In fr, this message translates to:
+  /// **'Rétablir le son'**
+  String get mediaUnmute;
+
+  /// No description provided for @mediaLive.
+  ///
+  /// In fr, this message translates to:
+  /// **'DIRECT'**
+  String get mediaLive;
+
+  /// No description provided for @mediaError.
+  ///
+  /// In fr, this message translates to:
+  /// **'Erreur de lecture'**
+  String get mediaError;
 }
 
 class _AppLocalizationsDelegate

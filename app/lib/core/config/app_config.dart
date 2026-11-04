@@ -13,6 +13,10 @@ class AppConfig {
     this.sseReconnectDelay = const Duration(seconds: 2),
     this.daemonRetryDelay = const Duration(seconds: 3),
     this.mediaReportInterval = const Duration(milliseconds: 250),
+    this.mediaControlsHideDelay = const Duration(seconds: 3),
+    this.mediaControlsFade = const Duration(milliseconds: 160),
+    this.mediaSeekStep = const Duration(seconds: 5),
+    this.mediaVolumeStep = 0.05,
     this.frameRegionMaxRects = 16,
     this.frameRegionMaxArea = 0.5,
     this.scrollSyncEpsilon = 0.5,
@@ -193,6 +197,14 @@ class AppConfig {
   /// Borne basse entre deux `POST …/media/{id}/state` par
   /// surface (contrat : battement ≤ 4 Hz, étape 71d).
   final Duration mediaReportInterval;
+
+  /// Contrôles média natifs (étape 183) — délai avant
+  /// auto-masquage de la barre pendant la lecture, durée du
+  /// fondu, pas du seek clavier ←/→ et du volume ↑/↓.
+  final Duration mediaControlsHideDelay;
+  final Duration mediaControlsFade;
+  final Duration mediaSeekStep;
+  final double mediaVolumeStep;
 
   /// Pull partiel (étape 109) : nombre maximal de `rects`
   /// cumulées avant de basculer en pull plein — au-delà,

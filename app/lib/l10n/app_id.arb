@@ -90,5 +90,12 @@
     "placeholders": {
       "error": {}
     }
-  }
+  },
+  "mediaPlay": "Putar",
+  "mediaPause": "Jeda",
+  "mediaReplay": "Ulangi",
+  "mediaMute": "Bisukan",
+  "mediaUnmute": "Suarakan",
+  "mediaLive": "LANGSUNG",
+  "mediaError": "Kesalahan pemutaran"
 }

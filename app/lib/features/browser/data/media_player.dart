@@ -53,6 +53,16 @@ abstract class MediaPlayer {
   /// Instantané courant pour `POST …/state`.
   MediaSnapshot get snapshot;
 
+  /// Volume courant `[0..1]` — dernier `setVolume` posé (1.0
+  /// au démarrage) : le backend n'expose pas de getter, la
+  /// seam trace la valeur pour la barre de contrôles (étape
+  /// 183).
+  double get volume;
+
+  /// Muet courant — dernier `setMuted` posé (`false` au
+  /// démarrage). Même remarque que [volume].
+  bool get muted;
+
   /// Abonnement aux changements (`ValueListenable` du contrôleur
   /// sous-jacent) — le rapporteur borne à ≤ 4 Hz.
   void addListener(void Function() l);

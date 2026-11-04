@@ -76,6 +76,12 @@ class MediaOffer {
   /// Une surface positionnable : vidéo avec boîte non vide.
   bool get hasOverlay => isVideo && rect.width > 0 && rect.height > 0;
 
+  /// `<audio controls>` : la boîte porte la barre hôte seule
+  /// (étape 183) — pas de couche vidéo, le lecteur n'a pas de
+  /// `view` pour l'audio.
+  bool get hasAudioBar =>
+      !isVideo && controls && rect.width > 0 && rect.height > 0;
+
   MediaOffer copyWith({Rect? rect, bool? claimed}) => MediaOffer(
     id: id,
     kind: kind,
@@ -88,6 +94,7 @@ class MediaOffer {
     mse: mse,
     mseBuffers: mseBuffers,
     mseOffsets: mseOffsets,
+    loops: loops,
   );
 
   factory MediaOffer.fromJson(Map<String, dynamic> j) {

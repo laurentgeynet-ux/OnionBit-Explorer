@@ -90,5 +90,12 @@
     "placeholders": {
       "error": {}
     }
-  }
+  },
+  "mediaPlay": "Play",
+  "mediaPause": "Pause",
+  "mediaReplay": "Replay",
+  "mediaMute": "Mute",
+  "mediaUnmute": "Unmute",
+  "mediaLive": "LIVE",
+  "mediaError": "Playback error"
 }

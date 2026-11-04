@@ -90,5 +90,12 @@
     "placeholders": {
       "error": {}
     }
-  }
+  },
+  "mediaPlay": "再生",
+  "mediaPause": "一時停止",
+  "mediaReplay": "もう一度再生",
+  "mediaMute": "ミュート",
+  "mediaUnmute": "ミュート解除",
+  "mediaLive": "ライブ",
+  "mediaError": "再生エラー"
 }

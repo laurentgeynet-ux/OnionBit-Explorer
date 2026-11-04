@@ -90,5 +90,12 @@
     "placeholders": {
       "error": {}
     }
-  }
+  },
+  "mediaPlay": "चलाएँ",
+  "mediaPause": "रोकें",
+  "mediaReplay": "फिर से चलाएँ",
+  "mediaMute": "म्यूट करें",
+  "mediaUnmute": "आवाज़ चालू करें",
+  "mediaLive": "लाइव",
+  "mediaError": "प्लेबैक त्रुटि"
 }

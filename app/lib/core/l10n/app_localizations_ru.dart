@@ -203,4 +203,25 @@ class AppLocalizationsRu extends AppLocalizations {
   String downloadError(Object error) {
     return 'Загрузка: $error';
   }
+
+  @override
+  String get mediaPlay => 'Воспроизвести';
+
+  @override
+  String get mediaPause => 'Пауза';
+
+  @override
+  String get mediaReplay => 'Повторить';
+
+  @override
+  String get mediaMute => 'Без звука';
+
+  @override
+  String get mediaUnmute => 'Включить звук';
+
+  @override
+  String get mediaLive => 'ЭФИР';
+
+  @override
+  String get mediaError => 'Ошибка воспроизведения';
 }

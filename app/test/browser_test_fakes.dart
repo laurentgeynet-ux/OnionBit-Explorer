@@ -17,6 +17,7 @@ import 'package:explorer_app/core/api/api_client.dart';
 import 'package:explorer_app/core/api/events_client.dart';
 import 'package:explorer_app/core/config/app_config.dart';
 import 'package:explorer_app/core/di/providers.dart';
+import 'package:explorer_app/core/settings/app_settings.dart';
 import 'package:explorer_app/features/browser/data/browser_repository.dart';
 import 'package:explorer_app/features/browser/domain/bookmark.dart';
 import 'package:explorer_app/features/browser/domain/browser_tab.dart';
@@ -300,10 +301,13 @@ class FakePlayer implements MediaPlayer {
 
   int plays = 0, pauses = 0, disposes = 0;
   Duration? seeked;
-  double? volume, rate;
-  bool? muted;
+  double? rate;
   String state = 'paused';
   int positionMs = 0;
+  int bufferedMs = 0;
+  int? durationMs = 1000;
+  double _volume = 1.0;
+  bool _muted = false;
   final List<void Function()> _listeners = [];
 
   void notify() {
@@ -319,10 +323,15 @@ class FakePlayer implements MediaPlayer {
   @override
   MediaSnapshot get snapshot => MediaSnapshot(
     positionMs: positionMs,
-    bufferedMs: 0,
-    durationMs: 1000,
+    bufferedMs: bufferedMs,
+    durationMs: durationMs,
     state: state,
   );
+
+  @override
+  double get volume => _volume;
+  @override
+  bool get muted => _muted;
   @override
   void addListener(void Function() l) => _listeners.add(l);
   @override
@@ -344,9 +353,16 @@ class FakePlayer implements MediaPlayer {
   @override
   Future<void> seekTo(Duration pos) async => seeked = pos;
   @override
-  Future<void> setVolume(double v) async => volume = v;
+  Future<void> setVolume(double v) async {
+    _volume = v.clamp(0.0, 1.0);
+    notify();
+  }
+
   @override
-  Future<void> setMuted(bool on) async => muted = on;
+  Future<void> setMuted(bool on) async {
+    _muted = on;
+    notify();
+  }
   @override
   Future<void> setRate(double r) async => rate = r;
   @override
@@ -433,6 +449,18 @@ ProviderContainer makeContainer(
           File(
             '${Directory.systemTemp.createTempSync('explorer_test_').path}'
             '${Platform.pathSeparator}session.json',
+          ),
+        ),
+      ),
+      // Même isolation pour `ui_settings.json` (étape 183) :
+      // `mediaPersistAudio` persiste le volume — sans
+      // override il écrirait dans le profil réel de la
+      // machine de test.
+      settingsStoreProvider.overrideWithValue(
+        SettingsStore(
+          File(
+            '${Directory.systemTemp.createTempSync('explorer_test_').path}'
+            '${Platform.pathSeparator}ui_settings.json',
           ),
         ),
       ),

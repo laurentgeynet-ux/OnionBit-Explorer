@@ -202,4 +202,25 @@ class AppLocalizationsFr extends AppLocalizations {
   String downloadError(Object error) {
     return 'Téléchargement : $error';
   }
+
+  @override
+  String get mediaPlay => 'Lire';
+
+  @override
+  String get mediaPause => 'Pause';
+
+  @override
+  String get mediaReplay => 'Rejouer';
+
+  @override
+  String get mediaMute => 'Couper le son';
+
+  @override
+  String get mediaUnmute => 'Rétablir le son';
+
+  @override
+  String get mediaLive => 'DIRECT';
+
+  @override
+  String get mediaError => 'Erreur de lecture';
 }

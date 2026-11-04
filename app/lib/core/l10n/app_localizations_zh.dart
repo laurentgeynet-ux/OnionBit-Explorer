@@ -201,4 +201,25 @@ class AppLocalizationsZh extends AppLocalizations {
   String downloadError(Object error) {
     return '下载：$error';
   }
+
+  @override
+  String get mediaPlay => '播放';
+
+  @override
+  String get mediaPause => '暂停';
+
+  @override
+  String get mediaReplay => '重播';
+
+  @override
+  String get mediaMute => '静音';
+
+  @override
+  String get mediaUnmute => '取消静音';
+
+  @override
+  String get mediaLive => '直播';
+
+  @override
+  String get mediaError => '播放错误';
 }

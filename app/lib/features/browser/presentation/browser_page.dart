@@ -20,6 +20,7 @@ import '../domain/media_offer.dart';
 import 'browser_controller.dart';
 import 'delegated_webview.dart';
 import 'library_panels.dart';
+import 'media_controls.dart';
 
 /// Coquille navigateur — étape 29 : barre d'onglets, boutons
 /// back/forward/reload, omnibox, états de chargement poussés
@@ -1106,6 +1107,11 @@ class _FrameViewState extends ConsumerState<_FrameView> {
   /// — assombrit la poignée pendant le geste.
   bool _scrollDrag = false;
 
+  /// Dernière surface média interagie `(tabId, mediaId)` —
+  /// cible des raccourcis média (étape 183) tant qu'aucun
+  /// champ moteur n'est focalisé.
+  (String, int)? _keyMedia;
+
   @override
   void dispose() {
     _resizeDebounce?.cancel();
@@ -1149,6 +1155,35 @@ class _FrameViewState extends ConsumerState<_FrameView> {
     return kb.isLogicalKeyPressed(LogicalKeyboardKey.controlLeft) ||
         kb.isLogicalKeyPressed(LogicalKeyboardKey.controlRight) ||
         kb.isLogicalKeyPressed(LogicalKeyboardKey.altLeft);
+  }
+
+  /// Raccourcis média (étape 183) — actifs seulement quand
+  /// aucun champ moteur n'est focalisé (garde amont
+  /// `fieldFocused`) : la cible est la dernière surface
+  /// interagie de l'onglet actif. espace/K = play/pause,
+  /// ←/→ = ±`mediaSeekStep`, ↑/↓ = ±`mediaVolumeStep`,
+  /// M = mute.
+  void _mediaKey(LogicalKeyboardKey k) {
+    final target = _keyMedia;
+    final activeId = widget.state.activeId;
+    if (target == null || activeId == null || target.$1 != activeId) {
+      return;
+    }
+    final c = widget.ctrl;
+    final mid = target.$2;
+    if (k == LogicalKeyboardKey.space || k == LogicalKeyboardKey.keyK) {
+      c.mediaToggle(activeId, mid);
+    } else if (k == LogicalKeyboardKey.arrowLeft) {
+      c.mediaSeekBy(activeId, mid, -c.cfg.mediaSeekStep);
+    } else if (k == LogicalKeyboardKey.arrowRight) {
+      c.mediaSeekBy(activeId, mid, c.cfg.mediaSeekStep);
+    } else if (k == LogicalKeyboardKey.arrowUp) {
+      c.mediaAdjustVolume(activeId, mid, c.cfg.mediaVolumeStep);
+    } else if (k == LogicalKeyboardKey.arrowDown) {
+      c.mediaAdjustVolume(activeId, mid, -c.cfg.mediaVolumeStep);
+    } else if (k == LogicalKeyboardKey.keyM) {
+      c.mediaToggleMute(activeId, mid);
+    }
   }
 
   @override
@@ -1274,7 +1309,12 @@ class _FrameViewState extends ConsumerState<_FrameView> {
                               ref.read(findProvider).visible) {
                             return;
                           }
-                          if (!st.fieldFocused) return;
+                          if (!st.fieldFocused) {
+                            // Raccourcis média (étape 183) —
+                            // cèdent au champ moteur focalisé.
+                            _mediaKey(e.logicalKey);
+                            return;
+                          }
                           // `character` = le caractère produit
                           // (accents par touches mortes, AltGr,
                           // shift — `keyLabel` ne voit que la
@@ -1374,21 +1414,21 @@ class _FrameViewState extends ConsumerState<_FrameView> {
   /// Surfaces média claimées positionnées en overlay —
   /// `rect` espace document → viewport : `(x, y − scroll_y)`
   /// en px CSS × `zoom` px logiques (même facteur que
-  /// l'entrée, fix étape 82). Audio 0×0 : joue sans overlay.
-  /// `controls` → tap = play/pause (UI hôte minimale v1).
+  /// l'entrée, fix étape 82). Audio 0×0 : joue sans overlay ;
+  /// `<audio controls>` reçoit la barre hôte seule (183).
   List<Widget> _mediaOverlays(BrowserState st, String tabId, double zoom) {
     final offers = st.media[tabId]?.values;
     if (offers == null || offers.isEmpty) return const [];
     final scrollY = st.scrollY[tabId] ?? 0;
     return [
       for (final m in offers)
-        if (m.hasOverlay)
+        if (m.hasOverlay || m.hasAudioBar)
           Positioned(
             left: m.rect.left * zoom,
             top: (m.rect.top - scrollY) * zoom,
             width: m.rect.width * zoom,
             height: m.rect.height * zoom,
-            child: _mediaSurface(st, tabId, m),
+            child: _mediaSurface(st, tabId, m, zoom, scrollY),
           ),
     ];
   }
@@ -1534,62 +1574,31 @@ class _FrameViewState extends ConsumerState<_FrameView> {
     }
   }
 
-  /// La vue native du lecteur, sur fond noir (letterbox) tant
-  /// qu'elle n'existe pas — la surface existe dès l'offre, la
-  /// texture arrive après `claim` + init asynchrone.
-  Widget _mediaSurface(BrowserState st, String tabId, MediaOffer m) {
-    final view = widget.ctrl.mediaView(tabId, m.id);
-    Widget child = Container(color: Colors.black, child: view);
-    if (m.controls) {
-      child = GestureDetector(
-        onTap: () => widget.ctrl.mediaToggle(tabId, m.id),
-        child: child,
-      );
-    }
-    // « Enregistrer la source » — la ressource progressive
-    // (media URL non-MSE) peut être sauvée directement sous
-    // `state/downloads/` via la pile transport (étape 70
-    // suite). Overlay discret en haut à droite ; `mse` ne
-    // l'est pas (segments multiples, hors scope).
-    if (m.url.isNotEmpty && !m.mse) {
-      child = Stack(
-        children: [
-          child,
-          Positioned(
-            top: 4,
-            right: 4,
-            child: IconButton(
-              visualDensity: VisualDensity.compact,
-              style: IconButton.styleFrom(
-                backgroundColor: Colors.black54,
-                foregroundColor: Colors.white,
-              ),
-              icon: const Icon(Icons.download, size: 18),
-              tooltip: AppLocalizations.of(context).save,
-              onPressed: () async {
-                final messenger = ScaffoldMessenger.of(context);
-                final l10n = AppLocalizations.of(context);
-                // Étape 176 : démarrage non bloquant — le
-                // chemin écrit arrive par `download_done`
-                // (snackbar `lastError` du contrôleur).
-                final id = await widget.ctrl.downloadStart(tabId, m.url);
-                if (!context.mounted) return;
-                messenger.showSnackBar(
-                  SnackBar(
-                    content: Text(
-                      id == null
-                          ? l10n.downloadError(m.url)
-                          : l10n.downloadStarted,
-                    ),
-                  ),
-                );
-              },
-            ),
-          ),
-        ],
-      );
-    }
-    return child;
+  /// Surface média (étape 183) : `MediaSurfaceView` porte la
+  /// couche vidéo, les indicateurs (init/buffering/fin) et la
+  /// barre native. Hors `controls` → `IgnorePointer` : la
+  /// surface n'a aucun recognizer mais le marquage est
+  /// explicite — les gestes de la page atteignent le moteur
+  /// (hit-test), aucun widget média ne les intercepte.
+  Widget _mediaSurface(
+    BrowserState st,
+    String tabId,
+    MediaOffer m,
+    double zoom,
+    double scrollY,
+  ) {
+    return IgnorePointer(
+      ignoring: !m.controls,
+      child: MediaSurfaceView(
+        ctrl: widget.ctrl,
+        tabId: tabId,
+        offer: m,
+        tokens: widget.tokens,
+        cssPerLogical: zoom,
+        scrollY: scrollY,
+        onActive: (id) => _keyMedia = (tabId, id),
+      ),
+    );
   }
 
   Widget _empty(DesignTokens t, BrowserTab? active, Color muted) => Center(

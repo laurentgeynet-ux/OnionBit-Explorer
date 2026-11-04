@@ -1130,13 +1130,94 @@ class BrowserController extends Notifier<BrowserState> {
   Widget? mediaView(String tabId, int mediaId) =>
       _players[tabId]?[mediaId]?.view;
 
+  /// Lecteur natif d'une surface (`null` avant la fin du claim
+  /// asynchrone) — la barre de contrôles lit son `snapshot`
+  /// et pilote seek/volume (étape 183).
+  MediaPlayer? mediaPlayer(String tabId, int mediaId) =>
+      _players[tabId]?[mediaId];
+
   /// `true` quand le lecteur a une première frame — l'overlay
   /// affiche un fond opaque en attendant (pas de « trou »).
   bool mediaReady(String tabId, int mediaId) =>
       _players[tabId]?[mediaId]?.ready == true;
 
-  /// Toggle play/pause pour les surfaces `controls` (UI hôte
-  /// minimale v1 : tap = play/pause).
+  /// Config exposée pour l'UI (délais auto-hide, pas clavier
+  /// média — étape 183).
+  AppConfig get cfg => _cfg;
+
+  /// Seek relatif depuis la position courante (raccourcis
+  /// ←/→ de la barre native) — borné `[0, duration]` quand
+  /// la durée est connue (live : non borné, le backend
+  /// ignore un seek hors plage).
+  void mediaSeekBy(String tabId, int mediaId, Duration delta) {
+    final p = _players[tabId]?[mediaId];
+    if (p == null) return;
+    final s = p.snapshot;
+    final max = s.durationMs ?? (1 << 62);
+    final ms = (s.positionMs + delta.inMilliseconds).clamp(0, max);
+    unawaited(p.seekTo(Duration(milliseconds: ms)));
+  }
+
+  /// Seek absolu (drag de la barre de progression).
+  void mediaSeekTo(String tabId, int mediaId, Duration pos) {
+    final p = _players[tabId]?[mediaId];
+    if (p == null) return;
+    unawaited(p.seekTo(pos));
+  }
+
+  /// Volume absolu `[0..1]` — dé-mute : monter le volume
+  /// d'une surface mutée réactive le son (convention des
+  /// barres natives).
+  void mediaSetVolume(String tabId, int mediaId, double v) {
+    final p = _players[tabId]?[mediaId];
+    if (p == null) return;
+    unawaited(p.setVolume(v.clamp(0.0, 1.0)));
+    if (v > 0 && p.muted) unawaited(p.setMuted(false));
+  }
+
+  /// Volume relatif (raccourcis ↑/↓) — borne `[0,1]` ;
+  /// geste discret → persisté immédiatement.
+  void mediaAdjustVolume(String tabId, int mediaId, double delta) {
+    final p = _players[tabId]?[mediaId];
+    if (p == null) return;
+    mediaSetVolume(tabId, mediaId, p.volume + delta);
+    mediaPersistAudio(tabId, mediaId);
+  }
+
+  /// Persiste le couple volume/mute de la surface dans les
+  /// réglages (`AppSettings.mediaVolume/mediaMuted`) — appelé
+  /// en **fin** de geste (slider `onChangeEnd`, raccourci,
+  /// bascule mute) : un write JSON par action, jamais à
+  /// chaque crans de drag.
+  void mediaPersistAudio(String tabId, int mediaId) {
+    final p = _players[tabId]?[mediaId];
+    if (p == null) return;
+    unawaited(
+      ref
+          .read(settingsProvider.notifier)
+          .setMediaAudio(p.volume, p.muted),
+    );
+  }
+
+  /// Mute/unmute bascule (bouton haut-parleur, touche M) —
+  /// geste discret → persisté.
+  void mediaToggleMute(String tabId, int mediaId) {
+    final p = _players[tabId]?[mediaId];
+    if (p == null) return;
+    unawaited(
+      p.setMuted(!p.muted).then(
+            (_) => mediaPersistAudio(tabId, mediaId),
+          ),
+    );
+  }
+
+  /// `ended` → retour à zéro + lecture (bouton ↺ de fin).
+  void mediaReplay(String tabId, int mediaId) {
+    final p = _players[tabId]?[mediaId];
+    if (p == null) return;
+    unawaited(p.seekTo(Duration.zero).then((_) => p.play()));
+  }
+
   /// « Enregistrer la source » / « Enregistrer sous » —
   /// démarre un téléchargement direct non bloquant (étape
   /// 176) : rend l'`id` moteur (> 0, suivi via les events
@@ -1195,6 +1276,8 @@ class BrowserController extends Notifier<BrowserState> {
     }
   }
 
+  /// Toggle play/pause — tap vidéo `controls`, bouton de la
+  /// barre native, raccourci espace/K (étape 183).
   void mediaToggle(String tabId, int mediaId) {
     final p = _players[tabId]?[mediaId];
     if (p == null) return;
@@ -1237,6 +1320,13 @@ class BrowserController extends Notifier<BrowserState> {
       // Premier rapport forcé : le moteur attend un état
       // initial pour refléter `paused`/`readyState`.
       unawaited(_reportMedia(tabId, offer.id, force: true));
+      // Réglage audio persisté (étape 183) : le volume de
+      // l'utilisateur s'applique à chaque nouveau lecteur —
+      // les commandes `volume`/`muted` JS restent par-surface
+      // et n'écrivent pas le réglage.
+      final s = ref.read(settingsProvider);
+      if (s.mediaMuted) unawaited(player.setMuted(true));
+      if (s.mediaVolume < 1.0) unawaited(player.setVolume(s.mediaVolume));
       if (offer.autoplay) unawaited(player.play());
     } on Object catch (e) {
       // Claim refusé ou lecteur en échec — non claimé honnête.
