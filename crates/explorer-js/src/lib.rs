@@ -2194,16 +2194,26 @@ impl JscoreEngine {
                         let _ = tx.send(out);
                     }
                     Cmd::RunPending { max_timers, tx } => {
-                        let r = eng
-                            .run_due_timers_bounded(max_timers)
-                            .and_then(|n| eng.run_microtasks().map(|m| n + m))
-                            .map_err(|e| {
-                                if eng.take_deadline_hit() {
-                                    JsError::Timeout
-                                } else {
-                                    JsError::Uncaught(eng.describe(e.0))
-                                }
-                            });
+                        // §B-83 — le checkpoint microtasks tourne
+                        // même si la rafale timers rend Err : une
+                        // tâche fatale récurrente (callback ré-armé
+                        // avant le coup fatal) affamerait sinon les
+                        // promesses en file à vie — spec : checkpoint
+                        // à la fin de chaque tâche. L'erreur timer
+                        // reste propagée (deadline → Timeout).
+                        let timers = eng.run_due_timers_bounded(max_timers);
+                        let jobs = eng.run_microtasks();
+                        let r = match (timers, jobs) {
+                            (Ok(n), Ok(m)) => Ok(n + m),
+                            (Err(e), _) | (Ok(_), Err(e)) => Err(e),
+                        }
+                        .map_err(|e| {
+                            if eng.take_deadline_hit() {
+                                JsError::Timeout
+                            } else {
+                                JsError::Uncaught(eng.describe(e.0))
+                            }
+                        });
                         let _ = tx.send(r);
                     }
                     Cmd::TimerDeadline { tx } => {

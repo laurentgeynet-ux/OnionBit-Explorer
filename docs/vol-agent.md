@@ -388,11 +388,17 @@ tir en file ; le pattern canonique enregistre le
 listener *après* `src=` → événement perdu →
 machine d'état gelée). **JS-C324** : file
 `MseState.pending_events` drainée à la frontière
-de job. Reste ouvert : `loadeddata`/`canplay`/
-`waiting`/`stalled`/`progress` jamais émis par
-`deliver_media_state` (audit — un player qui gate
-sur `canplay` reste gelé) + throws avalés dans
-les promesses. À re-mesurer en vol :
+de job. **JS-C326** : microtasks drainées même si
+la rafale timers rend `Err` (repro validé : timer
+ré-armé avant le coup fatal → file de promesses
+sautée à chaque pompe, croissance sans borne —
+verrou `timer_err_starves_microtasks`). Livré
+entre-temps : échelle `readyState`/`loadeddata`/
+`canplay`/`waiting`/`stalled`/`progress` (Étape
+182) + machine à états `SourceBuffer` spec
+(JS-C325 : `ended→open`, gardes `updating`,
+`endOfStream(err)`). Reste ouvert : throws avalés
+dans les promesses. À re-mesurer en vol :
 `addSourceBuffer` appelé, `mseBuffers` peuplé,
 `mse:true` **décodé**, `--seek-ms` sur surface
 vivante, multi-buffer MSE (`open_mse_multi`).
