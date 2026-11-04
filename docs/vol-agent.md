@@ -496,6 +496,36 @@ vierge → décodage piloté. Reste : rejet
 `play()` sans `.name` hors attach, `isReady()`
 qui jette.
 
+**§B-89** — **events filés avalés sous realm
+parasite (vol 635)** : bissection complète —
+rail `__et` rempli, handler `sourceopen` sain
+à la main, events eval-synchrones 6/6 livrés —
+mais la file `pending_events` servait le tir
+sous le `cur_ctx` du drain, pas celui de
+l'attache ; affiné au code : la file est
+document-locale (swappée), le vrai seam est
+le **push** — un host-trait sous `cur_ctx`
+parasite (pompe, realm de traitement)
+écrivait dans la file du parasite →
+`attached_to`/`dom_ctx`/`el_ladder` du
+mauvais document → drop silencieux.
+**JS-C333** : `MsData.ctx` = realm
+propriétaire ; `mse_push` route events
+élément → ctx de l'attache, events
+`MediaSource`/tracks → realm du `ms` ;
+accessors élément et bloc échelle/`eos_error`
+résolvent attache/dom/`el_ladder` dans le ctx
+propriétaire (scans `e.mse`+`parked`) — le
+drain per-ctx = filtre, plus un vol de file.
+Verrous unit ×4 rouges-avant/verts-après
+(duration=, accessors, `load` refire,
+`appendBuffer` sous realm nu). Classe restante
+ouverte : `pending_track_events` routés, mais
+`deliver_ws`/`drain_es`/`deliver_idb`/
+`deliver_bc`/`pump_stream_reads` gardent la
+même couture à auditer (même famille, champs
+swappés — à mesurer par repro avant patch).
+
 Claims codecs : l'oracle = `onionmedia_can_play_type`
 (`""`/`maybe`/`probable`), table déclarée alignée
 Étape 181. Rejets propres attendus — pas des bugs :

@@ -42,6 +42,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
+use crate::context::CtxId;
 use crate::dom::{MediaReport, MediaState, NodeId};
 use crate::heap::{Host, JsResult, ObjKind, Thrown};
 use crate::value::{ObjId, Value};
@@ -354,6 +355,15 @@ struct MsData {
     /// connues côté élément → `loadedmetadata` (spec
     /// « initialization segment received »).
     init_seen: bool,
+    /// Realm propriétaire (§B-89) — `cur_ctx` au
+    /// `new MediaSource()`. Les events filés vers ce `ms`
+    /// sont routés dans la file **de ce ctx** : les host-traits
+    /// (`MsHost::set`, `appendBuffer`…) tournent sous le
+    /// `cur_ctx` de l'appel, qui peut être un realm parasite
+    /// (livraison session, pompe worker, transition) — sans
+    /// ce tag l'event atterrissait dans la file du parasite et
+    /// mourait au drain (vol 635 : `sourceopen` perdu).
+    ctx: CtxId,
 }
 
 /// `SourceBuffer` interne.
@@ -608,6 +618,189 @@ fn sb_data(e: &Engine, v: Value) -> Option<Rc<RefCell<SbData>>> {
     }
 }
 
+// ------------------------------------------------------------------
+// Routage des états par ctx (§B-89)
+// ------------------------------------------------------------------
+//
+// `MseState` est **document-local** — swapé par
+// `Engine::switch_to`. Mais `MsData`/`SbData` vivent en
+// `Rc<RefCell>` sur les objets heap : un host-trait
+// (`MsHost::set`, `SbHost::set`, `appendBuffer`, getter
+// `readyState`/`paused`…) peut tourner sous un `cur_ctx`
+// parasite — realm de livraison session, pompe worker, realm
+// de transition `context_new`. Sans routage, un push sous ce
+// parasite atterrissait dans la file **du parasite** : drainé
+// sous lui, `attached_to`/`dom_ctx` du mauvais document →
+// drop silencieux (vol 635 : `loadstart`/`sourceopen`/
+// `durationchange` perdus, `mseBuffers` jamais peuplé). Le
+// drain per-ctx redevient un filtre, pas un vol de file :
+// chaque push est routé vers la file du ctx **propriétaire**.
+
+/// `MseState` mutable du ctx `id` — `e.mse` s'il est courant,
+/// le contexte garé sinon. `None` = ctx détruit.
+fn mse_state_at(e: &mut Engine, id: CtxId) -> Option<&mut MseState> {
+    if id == e.cur_ctx {
+        Some(&mut e.mse)
+    } else {
+        e.parked.get_mut(&id).map(|c| &mut c.mse)
+    }
+}
+
+/// `MseState` lu du ctx `id` — mêmes règles.
+fn mse_state_ref(e: &Engine, id: CtxId) -> Option<&MseState> {
+    if id == e.cur_ctx {
+        Some(&e.mse)
+    } else {
+        e.parked.get(&id).map(|c| &c.mse)
+    }
+}
+
+/// `dom_ctx` du ctx `id` — celui du document qui porte
+/// l'élément attaché (un dispatch sous un autre ctx verrait
+/// `NodeId` étranger → drop).
+fn mse_dom_at(
+    e: &Engine,
+    id: CtxId,
+) -> Option<(crate::dom_host::DomRef, crate::dom_host::NodeCache)> {
+    if id == e.cur_ctx {
+        e.dom_ctx.clone()
+    } else {
+        e.parked.get(&id).and_then(|c| c.dom_ctx.clone())
+    }
+}
+
+/// Realm propriétaire du `MediaSource` (`MsData.ctx`).
+fn ms_ctx(e: &Engine, mid: ObjId) -> Option<CtxId> {
+    ms_data(e, Value::Obj(mid)).map(|d| d.borrow().ctx)
+}
+
+/// `(ctx, node)` de l'attache `mid` — scan `e.mse` (courant)
+/// puis les contextes garés : l'attache vit dans le document
+/// de l'élément, qui peut différer du `cur_ctx` de l'appelant.
+fn attach_ctx(e: &Engine, mid: ObjId) -> Option<(CtxId, NodeId)> {
+    if let Some(&n) = e.mse.attached_to.get(&mid) {
+        return Some((e.cur_ctx, n));
+    }
+    e.parked
+        .iter()
+        .find_map(|(id, c)| c.mse.attached_to.get(&mid).map(|&n| (*id, n)))
+}
+
+/// `(ctx, mid)` de l'attache portant `node` — mêmes scans.
+fn el_attach(e: &Engine, node: NodeId) -> Option<(CtxId, ObjId)> {
+    if let Some(mid) = e
+        .mse
+        .attached_to
+        .iter()
+        .find_map(|(&m, &n)| (n == node).then_some(m))
+    {
+        return Some((e.cur_ctx, mid));
+    }
+    e.parked.iter().find_map(|(id, c)| {
+        c.mse
+            .attached_to
+            .iter()
+            .find_map(|(&m, &n)| (n == node).then_some(m))
+            .map(|m| (*id, m))
+    })
+}
+
+/// L'état `st` connaît-il `node` (ladder/play/attache) ?
+fn has_el(st: &MseState, node: NodeId) -> bool {
+    st.el_ladder.contains_key(&node)
+        || st.el_play.contains_key(&node)
+        || st.attached_to.values().any(|&n| n == node)
+}
+
+/// Ctx dont l'`MseState` connaît `node` — pour les accessors
+/// élément (`readyState`/`paused`/`play`/`load`…) appelés
+/// sous un realm parasite.
+fn el_ctx(e: &Engine, node: NodeId) -> Option<CtxId> {
+    if has_el(&e.mse, node) {
+        return Some(e.cur_ctx);
+    }
+    e.parked
+        .iter()
+        .find_map(|(id, c)| has_el(&c.mse, node).then_some(*id))
+}
+
+/// Miroir du match de `deliver_mse_events` : events adressés
+/// à l'**élément** attaché (routés vers le ctx de l'attache).
+fn is_el_event(ty: &str) -> bool {
+    matches!(
+        ty,
+        "loadstart"
+            | "loadedmetadata"
+            | "loadeddata"
+            | "canplay"
+            | "canplaythrough"
+            | "durationchange"
+            | "progress"
+            | "emptied"
+            | "play"
+            | "playing"
+            | "pause"
+            | "ended"
+            | "seeking"
+            | "seeked"
+            | "timeupdate"
+            | "volumechange"
+            | "ratechange"
+            | "waiting"
+            | "stalled"
+            | "suspend"
+            | "abort"
+            | "error"
+    )
+}
+
+/// Push routé (§B-89) : la file de destination est celle du
+/// ctx **propriétaire**, jamais celle du `cur_ctx` pousseur.
+/// Events élément → ctx de l'attache ; events `MediaSource`
+/// (`sourceopen`/`sourceended`) → realm du `ms`. Propriétaire
+/// inconnu ou mort → repli file courante (une livraison
+/// possible vaut mieux qu'un drop silencieux).
+fn mse_push(e: &mut Engine, mid: ObjId, ty: &'static str) {
+    let owner = if is_el_event(ty) {
+        attach_ctx(e, mid)
+            .map(|(c, _)| c)
+            .or_else(|| ms_ctx(e, mid))
+    } else {
+        ms_ctx(e, mid)
+    };
+    match owner.and_then(|o| mse_state_at(e, o)) {
+        Some(st) => st.pending_events.push_back((mid, ty)),
+        None => e.mse.pending_events.push_back((mid, ty)),
+    }
+}
+
+/// Push `TrackEvent` routé (§B-89) — les listeners vivent
+/// dans le realm du `MediaSource` parent de la liste.
+fn track_push(e: &mut Engine, lid: ObjId, ty: &'static str, track: Value) {
+    let owner = track_list_data(e, lid).and_then(|d| {
+        let ms = d.borrow().ms;
+        let Value::Obj(mid) = ms else { return None };
+        ms_ctx(e, mid)
+    });
+    match owner.and_then(|o| mse_state_at(e, o)) {
+        Some(st) => st.pending_track_events.push_back((lid, ty, track)),
+        None => e.mse.pending_track_events.push_back((lid, ty, track)),
+    }
+}
+
+/// `TrackListHost` interne — back-ref `SourceBuffer` pour le
+/// routage §B-89 (`lid` → `sd.ms` → realm du `ms`).
+fn track_list_data(e: &Engine, lid: ObjId) -> Option<Rc<RefCell<SbData>>> {
+    match e.heap.obj(lid).map(|o| &o.kind) {
+        Some(ObjKind::Host(h)) => h
+            .clone()
+            .as_any()
+            .downcast_ref::<TrackListHost>()
+            .map(|r| r.d.clone()),
+        _ => None,
+    }
+}
+
 fn tr_ranges(e: &Engine, v: Value) -> Option<Rc<Vec<(f64, f64)>>> {
     let Value::Obj(id) = v else { return None };
     match e.heap.obj(id).map(|o| &o.kind) {
@@ -664,7 +857,7 @@ fn reopen_if_ended(e: &mut Engine, sd: &SbData) {
     };
     ms.borrow_mut().ready_state = "open";
     if let Value::Obj(mid) = sd.ms {
-        e.mse.pending_events.push_back((mid, "sourceopen"));
+        mse_push(e, mid, "sourceopen");
     }
 }
 
@@ -963,6 +1156,7 @@ fn ms_ctor(e: &mut Engine, _t: Value, _args: &[Value]) -> JsResult<Value> {
         duration: f64::NAN,
         live_range: None,
         init_seen: false,
+        ctx: e.cur_ctx,
     }));
     let v = e.new_host_object(Rc::new(MsHost { d }));
     if let Value::Obj(id) = v {
@@ -1344,7 +1538,7 @@ fn ms_end_of_stream(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Val
     if d.borrow().ready_state != "ended" {
         d.borrow_mut().ready_state = "ended";
         if let Some(m) = mid {
-            e.mse.pending_events.push_back((m, "sourceended"));
+            mse_push(e, m, "sourceended");
         }
     }
     if let (Some(m), Some(k)) = (mid, kind) {
@@ -1365,10 +1559,13 @@ fn ms_end_of_stream(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Val
 /// n'a pas d'état de lecture à corrompre, déviation
 /// documentée). Attache morte → no-op sûr.
 fn deliver_eos_error(e: &mut Engine, mid: ObjId, kind: &str) -> JsResult<()> {
-    let Some(node) = e.mse.attached_to.get(&mid).copied() else {
+    // §B-89 — attache et dom résolus dans le ctx propriétaire,
+    // pas le `cur_ctx` de l'`endOfStream` (realm parasite →
+    // `attached_to`/`dom_ctx` du mauvais document → drop).
+    let Some((actx, node)) = attach_ctx(e, mid) else {
         return Ok(());
     };
-    let Some((dom, cache)) = e.dom_ctx.clone() else {
+    let Some((dom, cache)) = mse_dom_at(e, actx) else {
         return Ok(());
     };
     // Chaîne classifiable `MediaErrorCode::of` — "network"
@@ -1941,7 +2138,7 @@ fn sb_append_buffer(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Val
             None => detached_track_obj(e, &d, this, snap.clone()),
         };
         if let Value::Obj(lid) = track_list(e, &d, snap.list) {
-            e.mse.pending_track_events.push_back((lid, ty, track_v));
+            track_push(e, lid, ty, track_v);
         }
     }
     let Value::Obj(sid) = this else {
@@ -1970,11 +2167,13 @@ fn sb_append_buffer(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Val
     // (`deliver_media_state`, étape 182) possède l'échelle —
     // la poussée d'appends ne double pas les tirs.
     if let Value::Obj(mid) = d.borrow().ms {
-        if let Some(node) = e.mse.attached_to.get(&mid).copied() {
-            let claimed = e
-                .dom_ctx
-                .as_ref()
-                .is_some_and(|(dom, _)| dom.borrow().media.contains_key(&node));
+        // §B-89 — attache/dom/échelle résolus dans le ctx
+        // **propriétaire** : un `appendBuffer` invoqué sous
+        // un realm parasite (pompe, livraison) monte quand
+        // même l'échelle du vrai document.
+        if let Some((actx, node)) = attach_ctx(e, mid) {
+            let claimed =
+                mse_dom_at(e, actx).is_some_and(|(dom, _)| dom.borrow().media.contains_key(&node));
             if !claimed {
                 let mut end = 0.0f64;
                 let mut covers = false;
@@ -1999,7 +2198,9 @@ fn sb_append_buffer(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Val
                     }
                     None => (false, f64::NAN),
                 };
-                let cur = e.mse.el_ladder.get(&node).copied().unwrap_or(0);
+                let cur = mse_state_ref(e, actx)
+                    .and_then(|st| st.el_ladder.get(&node).copied())
+                    .unwrap_or(0);
                 let mut target = cur;
                 if init {
                     target = target.max(1);
@@ -2013,7 +2214,8 @@ fn sb_append_buffer(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Val
                     target = target.max(4);
                 }
                 for lvl in (cur + 1)..=target {
-                    e.mse.pending_events.push_back((
+                    mse_push(
+                        e,
                         mid,
                         match lvl {
                             1 => "loadedmetadata",
@@ -2021,15 +2223,17 @@ fn sb_append_buffer(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Val
                             3 => "canplay",
                             _ => "canplaythrough",
                         },
-                    ));
+                    );
                 }
-                e.mse.el_ladder.insert(node, target);
+                if let Some(st) = mse_state_at(e, actx) {
+                    st.el_ladder.insert(node, target);
+                }
             }
         }
         // `progress` élément (étape 182) : la croissance du
         // buffer MSE vit dans `appendBuffer`, pas dans le
         // `buffered_ms` du rapport hôte.
-        e.mse.pending_events.push_back((mid, "progress"));
+        mse_push(e, mid, "progress");
     }
     fire_mse_guarded(e, sid, "updateend", &mut first_err);
     match first_err {
@@ -2277,7 +2481,7 @@ pub(crate) fn maybe_attach(e: &mut Engine, url: &str, node: NodeId) {
     // ce tir le player arme ses listeners et attend le signal
     // à jamais (vol 634 : zéro event élément, `mseBuffers:[]`).
     e.mse.el_ladder.insert(node, 0);
-    e.mse.pending_events.push_back((mid, "loadstart"));
+    mse_push(e, mid, "loadstart");
     let Some(d) = ms_data(e, Value::Obj(mid)) else {
         return;
     };
@@ -2286,11 +2490,11 @@ pub(crate) fn maybe_attach(e: &mut Engine, url: &str, node: NodeId) {
     }
     let dur = d.borrow().duration;
     d.borrow_mut().ready_state = "open";
-    e.mse.pending_events.push_back((mid, "sourceopen"));
+    mse_push(e, mid, "sourceopen");
     // Durée connue à l'attache (fixée pré-`src=`) : l'élément
     // la reflète immédiatement → `durationchange` (spec).
     if dur.is_finite() {
-        e.mse.pending_events.push_back((mid, "durationchange"));
+        mse_push(e, mid, "durationchange");
     }
 }
 
@@ -2355,16 +2559,24 @@ impl Engine {
     /// (§B-88) — niveau monté par les `appendBuffer`
     /// (`el_ladder`) ; `0` hors attache. Claimé : le bras
     /// `deliver_media_state` possède l'échelle (seedé de ce
-    /// niveau au claim — pas de re-tir).
+    /// niveau au claim — pas de re-tir). §B-89 : l'état est
+    /// résolu dans le ctx de l'attache — un getter sous un
+    /// realm parasite lit quand même le vrai niveau.
     pub(crate) fn mse_el_ready(&self, node: NodeId) -> u8 {
-        self.mse.el_ladder.get(&node).copied().unwrap_or(0)
+        el_ctx(self, node)
+            .and_then(|id| mse_state_ref(self, id))
+            .and_then(|st| st.el_ladder.get(&node).copied())
+            .unwrap_or(0)
     }
 
     /// `paused` sous attache MSE pré-claim (§B-88) — le flag
     /// interne spec : `true` tant que `play()` n'a pas été
     /// demandé, `false` dès que l'intention est posée.
     pub(crate) fn mse_el_paused(&self, node: NodeId) -> bool {
-        !self.mse.el_play.get(&node).is_some_and(|ent| ent.0)
+        let armed = el_ctx(self, node)
+            .and_then(|id| mse_state_ref(self, id))
+            .is_some_and(|st| st.el_play.get(&node).is_some_and(|ent| ent.0));
+        !armed
     }
 
     /// `play()` sur élément MSE-attaché pré-claim (§B-88) :
@@ -2373,23 +2585,26 @@ impl Engine {
     /// claim) ; le rejet `NotSupportedError` immédiat n'a de
     /// sens que hors attach.
     pub(crate) fn mse_el_pend_play(&mut self, node: NodeId, pid: ObjId) {
-        let ent = self.mse.el_play.entry(node).or_default();
-        ent.0 = true;
-        ent.1.push(pid);
+        let Some(id) = el_ctx(self, node) else { return };
+        if let Some(st) = mse_state_at(self, id) {
+            let ent = st.el_play.entry(node).or_default();
+            ent.0 = true;
+            ent.1.push(pid);
+        }
     }
 
     /// `pause()` pré-claim (§B-88) — l'intention retombe ;
     /// un `pause` est filé si un play était armé (spec).
     pub(crate) fn mse_el_pause(&mut self, node: NodeId) {
-        if self.mse.el_play.get(&node).is_some_and(|ent| ent.0) {
-            self.mse.el_play.entry(node).or_default().0 = false;
-            if let Some(mid) = self
-                .mse
-                .attached_to
-                .iter()
-                .find_map(|(&mid, &n)| (n == node).then_some(mid))
-            {
-                self.mse.pending_events.push_back((mid, "pause"));
+        let Some(id) = el_ctx(self, node) else { return };
+        let armed = mse_state_ref(self, id)
+            .is_some_and(|st| st.el_play.get(&node).is_some_and(|ent| ent.0));
+        if armed {
+            if let Some(st) = mse_state_at(self, id) {
+                st.el_play.entry(node).or_default().0 = false;
+            }
+            if let Some((_, mid)) = el_attach(self, node) {
+                mse_push(self, mid, "pause");
             }
         }
     }
@@ -2399,24 +2614,26 @@ impl Engine {
     /// (spec). L'échelle montée est conservée (approximation
     /// documentée : pas de ré-arme `emptied`).
     pub(crate) fn mse_el_refire_loadstart(&mut self, node: NodeId) {
-        if let Some(mid) = self
-            .mse
-            .attached_to
-            .iter()
-            .find_map(|(&mid, &n)| (n == node).then_some(mid))
-        {
-            self.mse.pending_events.push_back((mid, "loadstart"));
+        if let Some((_, mid)) = el_attach(self, node) {
+            mse_push(self, mid, "loadstart");
         }
     }
 
     /// Handoff au claim (§B-88) : niveau `readyState` monté
     /// pré-claim + promesses `play()` pendantes migrées vers
     /// `MediaElState` (résolues au premier `playing` hôte).
+    /// §B-89 : l'état est lu dans le ctx de l'attache — un
+    /// claim relayé sous un realm parasite migre quand même.
     pub(crate) fn mse_el_handoff(&mut self, node: NodeId) -> (u8, Vec<ObjId>) {
+        let Some(id) = el_ctx(self, node) else {
+            return (0, Vec::new());
+        };
+        let Some(st) = mse_state_at(self, id) else {
+            return (0, Vec::new());
+        };
         (
-            self.mse.el_ladder.get(&node).copied().unwrap_or(0),
-            self.mse
-                .el_play
+            st.el_ladder.get(&node).copied().unwrap_or(0),
+            st.el_play
                 .remove(&node)
                 .map_or_else(Vec::new, |(_, pids)| pids),
         )
@@ -2425,9 +2642,9 @@ impl Engine {
     /// `true` si un attach MSE vit sur `node` (§B-88) —
     /// l'échelle/pré-claim ne s'applique qu'à un élément
     /// réellement attaché (`el_ladder` posé par
-    /// `maybe_attach`).
+    /// `maybe_attach`). §B-89 : résolu sur tous les ctx.
     pub(crate) fn mse_el_is_attached(&self, node: NodeId) -> bool {
-        self.mse.el_ladder.contains_key(&node)
+        el_ctx(self, node).is_some()
     }
 
     /// Pull de segments du `SourceBuffer` `buffer` (index
@@ -2701,17 +2918,22 @@ impl Host for MsHost {
             // set de même valeur ne tire rien). Cible
             // retrouvée par identité du `MsData` —
             // `attached_to` reste minuscule (1 attaché/URL).
+            // §B-89 : scanné dans **tous** les ctx — le set
+            // peut courir sous un realm parasite.
             if old.total_cmp(&n).is_ne() {
-                if let Some(mid) = e
-                    .mse
-                    .attached_to
-                    .iter()
-                    .find(|(mid, _)| {
-                        ms_data(e, Value::Obj(**mid)).is_some_and(|m| Rc::ptr_eq(&m, &self.d))
-                    })
-                    .map(|(&mid, _)| mid)
-                {
-                    e.mse.pending_events.push_back((mid, "durationchange"));
+                let mid = std::iter::once(&e.mse)
+                    .chain(e.parked.values().map(|c| &c.mse))
+                    .find_map(|st| {
+                        st.attached_to
+                            .iter()
+                            .find(|(mid, _)| {
+                                ms_data(e, Value::Obj(**mid))
+                                    .is_some_and(|m| Rc::ptr_eq(&m, &self.d))
+                            })
+                            .map(|(&mid, _)| mid)
+                    });
+                if let Some(mid) = mid {
+                    mse_push(e, mid, "durationchange");
                 }
             }
             return Ok(true);
@@ -3197,5 +3419,139 @@ pub(crate) fn install_mse(e: &mut Engine) {
             }
         }
         e.set_own(g, name, fv, false);
+    }
+}
+
+// ------------------------------------------------------------------
+// Tests §B-89 — routage des events/états par ctx propriétaire
+// ------------------------------------------------------------------
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::dom::Dom;
+
+    const PAGE: &str = r#"<html><body><video id="v"></video></body></html>"#;
+
+    fn engine_dom() -> (Engine, Rc<RefCell<Dom>>) {
+        let mut e = Engine::new();
+        let dom = Rc::new(RefCell::new(Dom::from_html(PAGE)));
+        e.install_dom(&dom);
+        (e, dom)
+    }
+
+    /// §B-89 — un host-trait (`MsHost::set`) tournant sous un
+    /// realm parasite ne doit pas orpheliner les events filés :
+    /// sans routage, `durationchange` atterrissait dans la file
+    /// du parasite → `attached_to`/`dom_ctx` du mauvais
+    /// document → drop silencieux (vol 635).
+    #[test]
+    fn duration_set_under_foreign_ctx_still_delivers() {
+        let (mut e, _dom) = engine_dom();
+        let msv = e
+            .eval(
+                "var ms=new MediaSource(),L=[];\
+                 var v=document.getElementById('v');\
+                 v.addEventListener('durationchange',function(){L.push('dc')});\
+                 v.src=URL.createObjectURL(ms);ms",
+            )
+            .expect("arm");
+        e.eval("0").expect("drain attach");
+        // Realm nu courant — une pompe session qui laisserait
+        // `cur_ctx` sur un realm de traitement produit le même
+        // poison. `MsHost::set` ne switche pas de ctx.
+        let _c1 = e.context_new("about:blank", None);
+        e.set_prop_value(msv, "duration", Value::Num(5.0))
+            .expect("set sous ctx parasite");
+        e.eval("0").expect("drain sous parasite");
+        e.context_switch(0);
+        let out = e.eval("L.join(',')").expect("read");
+        assert_eq!(e.describe(out), "dc");
+    }
+
+    /// §B-89 — les accessors élément (`paused`/`readyState`/
+    /// `is_attached`/`pause`) résolvent l'état dans le ctx de
+    /// l'attache même appelés sous un realm parasite.
+    #[test]
+    fn el_state_resolves_under_foreign_ctx() {
+        let (mut e, dom) = engine_dom();
+        e.eval(
+            "var ms=new MediaSource();var v=document.getElementById('v');\
+             v.src=URL.createObjectURL(ms);var R='pending';\
+             v.play().then(function(){R='resolved'},function(){R='rejected'});0",
+        )
+        .expect("arm+pend");
+        let node = dom.borrow().by_id("v").expect("v node");
+        let _c1 = e.context_new("about:blank", None);
+        // Sous le bug : `el_play`/`el_ladder` du parasite vides
+        // → `is_attached`=false, `paused`=true (intention
+        // perdue). Après fix : le vrai état de l'attache.
+        assert!(e.mse_el_is_attached(node));
+        assert!(!e.mse_el_paused(node));
+        assert_eq!(e.mse_el_ready(node), 0);
+        // `pause()` sous parasite : l'intention retombe dans le
+        // ctx de l'attache, `pause` routé vers sa file.
+        e.mse_el_pause(node);
+        assert!(e.mse_el_paused(node));
+        e.context_switch(0);
+    }
+
+    /// §B-89 — `load()` (`mse_el_refire_loadstart`) sous realm
+    /// parasite : `loadstart` est routé vers la file du ctx de
+    /// l'attache et servi à l'élément du vrai document.
+    #[test]
+    fn loadstart_refire_under_foreign_ctx_routes() {
+        let (mut e, dom) = engine_dom();
+        e.eval(
+            "var ms=new MediaSource(),L=[];var v=document.getElementById('v');\
+             v.addEventListener('loadstart',function(){L.push('ls')});\
+             v.src=URL.createObjectURL(ms);0",
+        )
+        .expect("arm");
+        e.eval("0").expect("drain");
+        let node = dom.borrow().by_id("v").expect("v");
+        let _c1 = e.context_new("about:blank", None);
+        e.mse_el_refire_loadstart(node);
+        e.eval("0").expect("drain sous parasite");
+        e.context_switch(0);
+        let out = e.eval("L.join(',')").expect("read");
+        assert_eq!(e.describe(out), "ls,ls");
+    }
+
+    /// §B-89 — `appendBuffer` invoqué sous un realm parasite :
+    /// `progress` et l'échelle (`loadedmetadata`) sont routés
+    /// vers le ctx de l'attache — le mur vol 635
+    /// (`sourceopen`/échelle avalés) se joue sur ce chemin.
+    #[test]
+    fn append_under_foreign_ctx_routes_element_events() {
+        let (mut e, _dom) = engine_dom();
+        let sbv = e
+            .eval(
+                "var ms=new MediaSource(),L=[];\
+                 var v=document.getElementById('v');\
+                 v.addEventListener('progress',function(){L.push('p')});\
+                 v.addEventListener('loadedmetadata',function(){L.push('lm')});\
+                 ms.addEventListener('sourceopen',function(){L.push('so')});\
+                 v.src=URL.createObjectURL(ms);\
+                 var sb=ms.addSourceBuffer('video/mp4');sb",
+            )
+            .expect("arm");
+        e.eval("0").expect("drain attach");
+        // `appendBuffer` bound — `call_native_ctx` ne trouve
+        // pas de ctx sur un `this` non-global → tourne sous
+        // `cur_ctx` : le parasite. L'init `moov` (payload non
+        // vide pour `walk_boxes`) monte `loadedmetadata`.
+        let append = e.get_prop_value(sbv, "appendBuffer").expect("method");
+        let bytes = b"\x00\x00\x00\x10moov\x00\x00\x00\x08free";
+        let arr = format!("new Uint8Array({bytes:?}).buffer");
+        let ab = e.eval(&arr).expect("buffer");
+        let _c1 = e.context_new("about:blank", None);
+        e.call_value(append, sbv, &[ab])
+            .expect("append sous parasite");
+        e.eval("0").expect("drain sous parasite");
+        e.context_switch(0);
+        let out = e.eval("L.join(',')").expect("read");
+        // Sous le bug : 'so' seul (progress/lm avalés dans la
+        // file parasite). Après fix : routés.
+        assert_eq!(e.describe(out), "so,lm,p");
     }
 }
