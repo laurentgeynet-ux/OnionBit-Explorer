@@ -12,8 +12,8 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use explorer_core::{
-    Bookmark, CoreError, CoreEvent, InputEvent, InputOutcome, KeyMods, Session, SessionConfig,
-    TabId,
+    Bookmark, CoreError, CoreEvent, InputEvent, InputOutcome, KeyMods, MediaKind, Session,
+    SessionConfig, TabId,
 };
 use explorer_layout::font::{FontRequest, FontSource};
 use explorer_net::error::NetResult;
@@ -1005,6 +1005,68 @@ async fn hit_targets_link_and_image() {
         s.hit_targets_at(99, 1.0, 1.0),
         Err(CoreError::UnknownTab(99))
     ));
+}
+
+// --- Étape 186 : arbitrage pointer média (`HitTargets.media`) ---
+
+/// `<video controls>` : le nœud topmost dans sa boîte rend
+/// `media` = id de la surface vivante (vidéo *nue* →
+/// l'hôte toggle) ; un point hors média → `None`.
+#[tokio::test]
+async fn hit_targets_media_surface() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/m",
+        200,
+        "<!doctype html><html><body>\
+         <video src=\"v.mp4\" controls></video>\
+         </body></html>",
+    );
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/m").await.unwrap();
+
+    let list = s.media_list(id);
+    let v = list
+        .iter()
+        .find(|m| m.kind == MediaKind::Video)
+        .expect("surface vidéo scannée");
+    let hit = s
+        .hit_targets_at(id, v.rect.x + v.rect.w / 2.0, v.rect.y + v.rect.h / 2.0)
+        .unwrap();
+    assert_eq!(hit.media, Some(v.id));
+
+    // Zone sans média → `media: None` (la clé est servie
+    // quand même — `mediaKnown` vrai côté hôte).
+    let miss = s.hit_targets_at(id, 790.0, 590.0).unwrap();
+    assert!(miss.media.is_none());
+}
+
+/// Un contrôle DOM du site peint **par-dessus** la vidéo
+/// garde le pointeur : le nœud topmost n'a pas d'ancêtre
+/// média → `media: None` (l'hôte forwarde sans toggler).
+#[tokio::test]
+async fn hit_targets_media_covered_by_dom() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/c",
+        200,
+        "<!doctype html><html><body>\
+         <video src=\"v.mp4\" controls></video>\
+         <div style=\"position:absolute;left:0;top:0;width:400px;height:200px\">\
+         couverture</div></body></html>",
+    );
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/c").await.unwrap();
+
+    let list = s.media_list(id);
+    let v = list
+        .iter()
+        .find(|m| m.kind == MediaKind::Video)
+        .expect("surface vidéo scannée");
+    let hit = s
+        .hit_targets_at(id, v.rect.x + v.rect.w / 2.0, v.rect.y + v.rect.h / 2.0)
+        .unwrap();
+    assert!(hit.media.is_none(), "DOM au-dessus → None : {hit:?}");
 }
 
 /// `download_event_json` — les 5 variantes portent leur nom

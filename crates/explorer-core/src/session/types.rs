@@ -445,6 +445,15 @@ pub struct HitTargets {
     pub link: Option<String>,
     /// `src` résolu de l'`<img>` sous le point.
     pub image: Option<String>,
+    /// Surface `MediaSurface` sous le point (étape 186) —
+    /// `Some(id)` quand le nœud topmost du hit-test est
+    /// l'élément `<video>`/`<audio>` lui-même ou un
+    /// descendant : le tap tombe sur la vidéo *nue*.
+    /// `None` = autre chose est peinte par-dessus (contrôle
+    /// DOM du site → l'hôte forwarde sans toggler) ou rien.
+    /// L'hôte distingue ainsi « vidéo nue » (toggle+forward)
+    /// de « site au-dessus » (forward seul).
+    pub media: Option<u64>,
 }
 
 /// Région invalide d'une frame (étape 55) — **pixels

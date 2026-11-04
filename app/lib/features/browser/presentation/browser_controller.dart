@@ -1307,9 +1307,13 @@ class BrowserController extends Notifier<BrowserState> {
     }
   }
 
-  /// Cibles « enregistrer sous » sous un point viewport —
-  /// `{link, image}` résolus (menu contextuel frame).
-  Future<({String? link, String? image})> hitTarget(
+  /// Cibles sous un point viewport — `{link, image, media}`
+  /// (menu contextuel frame + arbitrage pointer média,
+  /// étape 186). `null` = sonde en échec ; `mediaKnown`
+  /// faux = transport sans la clé (daemon/dll antérieurs —
+  /// l'appelant retombe sur la double détente M0).
+  Future<({String? link, String? image, int? media, bool mediaKnown})?>
+      hitTarget(
     String tabId,
     double x,
     double y,
@@ -1317,7 +1321,7 @@ class BrowserController extends Notifier<BrowserState> {
     try {
       return await _repo.hitTarget(tabId, x, y);
     } on Object {
-      return (link: null, image: null);
+      return null;
     }
   }
 

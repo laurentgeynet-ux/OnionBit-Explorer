@@ -130,22 +130,30 @@ class _MediaSurfaceViewState extends State<MediaSurfaceView> {
     }
   }
 
-  /// Tap sur la zone vidéo d'une surface `controls` :
-  /// forward des coords document au moteur (la page peut avoir
-  /// des handlers — comportement navigateur : le clic atteint
-  /// l'élément *et* l'UI native réagit) **plus** bascule hôte.
-  /// Le hit est fire-and-forget (`POST /input`) : pas de
-  /// retour — la double détente est la sémantique la plus
-  /// proche d'un navigateur sur `<video controls>`.
-  void _onVideoTap(TapUpDetails d) {
+  /// Tap sur la zone vidéo d'une surface `controls` : sonde
+  /// `/hit` d'abord (étape 186 — arbitrage pointer M2).
+  /// `media == o.id` = le nœud topmost vit dans l'élément
+  /// (vidéo nue) → forward + toggle, statu quo navigateur.
+  /// `media == null` sur sonde sûre = un contrôle DOM du
+  /// site est peint sous le point → forward **seul** : la
+  /// double détente déclencherait le geste du site *et* le
+  /// nôtre. Sonde en échec ou sans la clé (daemon/dll
+  /// antérieurs) → repli M0 forward+toggle. Le forward est
+  /// toujours émis (fire-and-forget `POST /input`) : le
+  /// handler JS du site reçoit son clic dans tous les cas.
+  Future<void> _onVideoTap(TapUpDetails d) async {
     final z = widget.cssPerLogical;
     final o = widget.offer;
     widget.onActive(o.id);
-    widget.ctrl.click(
-      o.rect.left + d.localPosition.dx / z,
-      o.rect.top - widget.scrollY + d.localPosition.dy / z,
-    );
-    widget.ctrl.mediaToggle(widget.tabId, o.id);
+    // Point **viewport** — servi à la sonde et au clic.
+    final vx = o.rect.left + d.localPosition.dx / z;
+    final vy = o.rect.top - widget.scrollY + d.localPosition.dy / z;
+    final h = await widget.ctrl.hitTarget(widget.tabId, vx, vy);
+    if (!mounted) return;
+    widget.ctrl.click(vx, vy);
+    if (h == null || !h.mediaKnown || h.media == o.id) {
+      widget.ctrl.mediaToggle(widget.tabId, o.id);
+    }
     _rearm();
   }
 
@@ -191,6 +199,10 @@ class _MediaSurfaceViewState extends State<MediaSurfaceView> {
           if (o.isVideo)
             Positioned.fill(
               child: GestureDetector(
+                // La vue du lecteur peut être une texture sans
+                // hit-test propre — le tap appartient à toute
+                // la surface `controls`, pas au widget interne.
+                behavior: HitTestBehavior.opaque,
                 onTapUp: o.controls ? _onVideoTap : null,
                 child: ready ? p!.view : const SizedBox.shrink(),
               ),

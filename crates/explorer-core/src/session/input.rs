@@ -1057,6 +1057,18 @@ impl Session {
                         }
                     }
                 }
+                // Étape 186 — arbitrage pointer média : le
+                // nœud **topmost** vit-il dans un élément
+                // `<video>`/`<audio>` ? `element_path` le
+                // relie à la surface vivante (même DOM
+                // commis que `tree`/`entry.media` — lecture
+                // cohérente sous le verrou). `None` = un
+                // autre élément est peint par-dessus.
+                if let Some(m) = ancestor_media(dom, node) {
+                    if let Some(p) = element_path(dom, m) {
+                        out.media = entry.media.iter().find(|s| s.path == p).map(|s| s.id);
+                    }
+                }
             }
         }
         Ok(out)

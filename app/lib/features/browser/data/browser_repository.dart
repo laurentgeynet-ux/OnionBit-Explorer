@@ -344,20 +344,27 @@ class BrowserRepository {
   Future<void> cancelDownload(String tabId, int dlId) =>
       _api.deleteJson('/api/tabs/$tabId/downloads/$dlId');
 
-  /// Cibles « enregistrer sous » sous un point viewport
-  /// (`GET …/hit?x=&y=` — `{link, image}` résolus base
-  /// document, `null` absents). Pilote le menu contextuel.
-  Future<({String? link, String? image})> hitTarget(
-      String tabId, double x, double y) async {
+  /// Cibles sous un point viewport (`GET …/hit?x=&y=` —
+  /// `{link, image}` résolus base document, `null` absents).
+  /// Pilote le menu contextuel ; depuis l'étape 186 la
+  /// réponse porte aussi `media` = id de la surface
+  /// `<video>`/`<audio>` topmost (`null` = autre chose
+  /// peinte par-dessus — arbitrage pointer M2).
+  /// `mediaKnown` distingue « la clé existe » d'un daemon
+  /// antérieur qui ne l'émet pas (`false` → repli M0).
+  Future<({String? link, String? image, int? media, bool mediaKnown})>
+      hitTarget(String tabId, double x, double y) async {
     final res =
         await _api.getJson('/api/tabs/$tabId/hit?x=$x&y=$y');
     if (res is Map<String, dynamic>) {
       return (
         link: res['link'] as String?,
         image: res['image'] as String?,
+        media: (res['media'] as num?)?.toInt(),
+        mediaKnown: res.containsKey('media'),
       );
     }
-    return (link: null, image: null);
+    return (link: null, image: null, media: null, mediaKnown: false);
   }
 
   /// Journal des téléchargements terminés du profil

@@ -1265,6 +1265,48 @@ async fn hit_targets_endpoint() {
     }
 }
 
+/// Étape 186 — `GET …/hit` sur la page `/media` : le nœud
+/// topmost dans `<video>` → `media` = id de la surface
+/// (vidéo nue → l'hôte toggle) ; hors média → la clé est
+/// servie à `null` (`mediaKnown` vrai, forward sans
+/// toggle — arbitrage pointer M2).
+#[tokio::test]
+async fn hit_targets_media_surface() {
+    let (app, id) = media_tab().await;
+    let v = media_get(&app, id, "").await;
+    let video = v["media"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|m| m["kind"] == "video")
+        .expect("surface vidéo");
+    let mid = video["id"].as_u64().unwrap();
+    let r = &video["rect"];
+    let cx = r["x"].as_f64().unwrap() + r["w"].as_f64().unwrap() / 2.0;
+    let cy = r["y"].as_f64().unwrap() + r["h"].as_f64().unwrap() / 2.0;
+
+    let get = |uri: String| {
+        let app = app.clone();
+        async move {
+            let r = app
+                .oneshot(HttpRequest::builder().uri(uri).body(Body::empty()).unwrap())
+                .await
+                .unwrap();
+            let b = axum::body::to_bytes(r.into_body(), 4096).await.unwrap();
+            serde_json::from_slice::<serde_json::Value>(&b).unwrap()
+        }
+    };
+
+    let hit = get(format!("/api/tabs/{id}/hit?x={cx}&y={cy}")).await;
+    assert_eq!(hit["media"], mid, "vidéo nue → id : {hit}");
+
+    let miss = get(format!("/api/tabs/{id}/hit?x=790&y=590")).await;
+    assert!(
+        miss.get("media").is_some_and(serde_json::Value::is_null),
+        "hors média → clé présente à null : {miss}"
+    );
+}
+
 /// Onglet ouvert + page `/media` commise (video controls +
 /// audio nu) — helper commun des tests `MediaSurface` 71b.
 async fn media_tab() -> (axum::Router, u64) {

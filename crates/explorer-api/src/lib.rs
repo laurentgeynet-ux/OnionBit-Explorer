@@ -908,9 +908,13 @@ async fn eval_js(
 }
 
 /// `GET /api/tabs/{id}/hit?x=&y=` → `{ "link": …|null,
-/// "image": …|null }` — cibles « enregistrer sous » sous
-/// le point viewport (étape 176 : menu contextuel hôte —
-/// un `<a><img>` rend les deux entrées).
+/// "image": …|null, "media": …|null }` — cibles
+/// « enregistrer sous » sous le point viewport (étape 176 :
+/// menu contextuel hôte — un `<a><img>` rend les deux
+/// entrées). Étape 186 : `media` = id de la surface
+/// `<video>`/`<audio>` quand le nœud topmost vit dans
+/// l'élément (vidéo nue → l'hôte toggle ; autre chose
+/// au-dessus → forward seul — arbitrage pointer M2).
 async fn hit_targets(
     State(st): State<ApiState>,
     Path(id): Path<TabId>,
@@ -924,7 +928,12 @@ async fn hit_targets(
     };
     let session = st.session.lock().await;
     match session.hit_targets_at(id, x, y) {
-        Ok(t) => Json(serde_json::json!({ "link": t.link, "image": t.image })).into_response(),
+        Ok(t) => Json(serde_json::json!({
+            "link": t.link,
+            "image": t.image,
+            "media": t.media,
+        }))
+        .into_response(),
         Err(e) => err(StatusCode::BAD_REQUEST, &e),
     }
 }

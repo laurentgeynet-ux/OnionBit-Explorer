@@ -159,6 +159,25 @@ typedef _TabUrlD = int Function(
 );
 typedef _TabScrollN = ffi.Double Function(_NativeHandle, ffi.Uint64);
 typedef _TabScrollD = double Function(_NativeHandle, int);
+// Sonde hit-test (étape 186, M2 arbitrage pointer) —
+// `{link,image,media}` JSON dans `buf` ; export additif,
+// dll antérieure → `null` → sonde indisponible.
+typedef _HitTargetsN = ffi.IntPtr Function(
+  _NativeHandle,
+  ffi.Uint64,
+  ffi.Float,
+  ffi.Float,
+  ffi.Pointer<ffi.Uint8>,
+  ffi.UintPtr,
+);
+typedef _HitTargetsD = int Function(
+  _NativeHandle,
+  int,
+  double,
+  double,
+  ffi.Pointer<ffi.Uint8>,
+  int,
+);
 typedef _FrameCopyRegionN = ffi.IntPtr Function(
   _NativeHandle,
   ffi.Uint64,
@@ -306,6 +325,7 @@ const opDownloadStart = 27;
 const opDownloadCancel = 28;
 const opApiPort = 29;
 const opMediaCodecs = 30;
+const opHit = 31;
 
 /// Point d'entrée de l'isolate — `args` = `{'reply': SendPort,
 /// 'path': String}`. Envoie `{'port': SendPort}` puis
@@ -374,6 +394,7 @@ class _WorkerImpl {
     this._mediaRelease,
     this._mediaState,
     this._setAcceptLanguage,
+    this._hitTargets,
   );
 
   final ffi.DynamicLibrary _lib;
@@ -420,6 +441,9 @@ class _WorkerImpl {
   final _MediaClaimD? _mediaState;
   // Export additif étape 118 — `null` sur dll antérieure.
   final _SetLangD? _setAcceptLanguage;
+  // Sonde hit-test (étape 186) — `null` sur dll antérieure
+  // → `_hitOp` rend `none` (sonde indisponible, repli M0).
+  final _HitTargetsD? _hitTargets;
 
   static _WorkerImpl open(String path) {
     final lib = ffi.DynamicLibrary.open(path);
@@ -475,6 +499,17 @@ class _WorkerImpl {
       try {
         framePull = lib.lookupFunction<_FramePullN, _FramePullD>(
           'explorer_frame_pull',
+        );
+      } on Object {
+        /* export absent */
+      }
+      // Sonde hit-test (étape 186) — dll antérieure →
+      // `null` → la sonde reste indisponible (repli M0 :
+      // double détente forward+toggle sur surface controls).
+      _HitTargetsD? hitTargets;
+      try {
+        hitTargets = lib.lookupFunction<_HitTargetsN, _HitTargetsD>(
+          'explorer_hit_targets',
         );
       } on Object {
         /* export absent */
@@ -654,6 +689,7 @@ class _WorkerImpl {
         mediaRelease,
         mediaState,
         setAcceptLanguage,
+        hitTargets,
       );
     } on Object {
       lib.close();
@@ -876,6 +912,8 @@ class _WorkerImpl {
         return _frameOp(m);
       case opFrameRegion:
         return _frameRegionOp(m);
+      case opHit:
+        return _hitOp(m);
       case opSetColorScheme:
         // Export additif étape 97 — dll antérieure : no-op.
         _setColorScheme?.call(_handle, m['dark'] == true ? 1 : 0);
@@ -1104,6 +1142,35 @@ class _WorkerImpl {
         ..free(w)
         ..free(h)
         ..free(metaLen);
+    }
+  }
+
+  /// `explorer_hit_targets` (étape 186) — sonde viewport
+  /// `{link,image,media}` JSON. `none` = export absent (dll
+  /// antérieure → sonde indisponible, l'appelant retombe
+  /// sur la double détente M0) ; JSON malformé → `none`
+  /// aussi (jamais de faux verdict).
+  Map<String, Object?> _hitOp(Map m) {
+    final f = _hitTargets;
+    if (f == null) return const {'none': true};
+    const cap = 8192;
+    final buf = calloc<ffi.Uint8>(cap);
+    try {
+      final n = f(
+        _handle,
+        _tab(m),
+        _num(m, 'x'),
+        _num(m, 'y'),
+        buf,
+        cap,
+      );
+      if (n <= 0) return const {'none': true};
+      final v = jsonDecode(utf8.decode(buf.asTypedList(n)));
+      return v is Map ? Map<String, Object?>.from(v) : const {'none': true};
+    } on Object {
+      return const {'none': true};
+    } finally {
+      calloc.free(buf);
     }
   }
 

@@ -1103,6 +1103,45 @@ pub unsafe extern "C" fn explorer_tab_scroll(h: *mut ExplorerHandle, tab: u64) -
         .map_or(-1.0, |t| f64::from(t.scroll_y))
 }
 
+/// Cibles sous `(x, y)` **viewport** — sérialise
+/// `{ "link": …|null, "image": …|null, "media": …|null }`
+/// UTF-8 dans `buf` (étape 186 : il n'existait aucun ABI
+/// hit-test — le menu contextuel et l'arbitrage pointer
+/// média étaient REST-seuls). Retourne la longueur écrite,
+/// `0` onglet inconnu, `-1` buffer invalide ou trop petit.
+///
+/// # Safety
+///
+/// `h` issu de [`explorer_create`] ; `buf..buf+cap`
+/// inscriptible.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn explorer_hit_targets(
+    h: *mut ExplorerHandle,
+    tab: u64,
+    x: f32,
+    y: f32,
+    buf: *mut u8,
+    cap: usize,
+) -> isize {
+    let Some(h) = (unsafe { handle(h) }) else {
+        return -1;
+    };
+    let Ok(hit) = sess(h).hit_targets_at(tab, x, y) else {
+        return 0;
+    };
+    let json = serde_json::json!({
+        "link": hit.link,
+        "image": hit.image,
+        "media": hit.media,
+    })
+    .to_string();
+    if json.len() > cap {
+        set_err("buffer trop petit");
+        return -1;
+    }
+    unsafe { write_str(&json, buf, cap) }
+}
+
 /// Taille maximale d'un corps JSON média (`claim`/`state`)
 /// passé à l'ABI (étape 71e).
 const MAX_MEDIA_JSON: usize = 64 * 1024;
@@ -1898,6 +1937,93 @@ mod tests {
             );
             assert!(n2 > 0);
             assert_eq!(meta_len, 0, "cap insuffisant → meta_len 0");
+
+            explorer_close_tab(h, tab);
+            explorer_destroy(h);
+        }
+    }
+
+    /// Étape 186 — `explorer_hit_targets` : premier ABI
+    /// hit-test — `{link, image, media}` JSON. Sur `/v`
+    /// (`<video controls>`), le centre du rect rend
+    /// `"media":1` ; un point hors surface → `"media":null`
+    /// (clé présente — `mediaKnown` vrai côté hôte).
+    #[test]
+    fn hit_targets_media_json() {
+        let h = test_handle();
+        // SAFETY : handle frais, appels sérialisés.
+        unsafe {
+            let tab = explorer_open_tab(h);
+            let url = b"http://test/v";
+            assert_eq!(explorer_navigate(h, tab, url.as_ptr(), url.len()), 0);
+
+            // Rect de la surface via la méta du pull.
+            let (mut w, mut hgt) = (0u32, 0u32);
+            assert_eq!(
+                explorer_frame_size(
+                    h,
+                    tab,
+                    std::ptr::addr_of_mut!(w),
+                    std::ptr::addr_of_mut!(hgt)
+                ),
+                0
+            );
+            let cap = (w * hgt * 4) as usize;
+            let mut px = vec![0u8; cap];
+            let mut meta = vec![0u8; 64 * 1024];
+            let mut meta_len = 0u32;
+            assert!(
+                explorer_frame_pull(
+                    h,
+                    tab,
+                    px.as_mut_ptr(),
+                    cap,
+                    meta.as_mut_ptr(),
+                    meta.len(),
+                    std::ptr::addr_of_mut!(meta_len),
+                ) > 0
+            );
+            let mj: serde_json::Value =
+                serde_json::from_slice(&meta[..usize::try_from(meta_len).unwrap_or(0)])
+                    .expect("méta JSON");
+            let r = &mj["media"][0]["r"];
+            #[allow(clippy::cast_possible_truncation)]
+            let (cx, cy) = (
+                (r["x"].as_f64().unwrap() + r["w"].as_f64().unwrap() / 2.0) as f32,
+                (r["y"].as_f64().unwrap() + r["h"].as_f64().unwrap() / 2.0) as f32,
+            );
+
+            let mut buf = [0u8; 1024];
+            let n = explorer_hit_targets(h, tab, cx, cy, buf.as_mut_ptr(), buf.len());
+            let n = usize::try_from(n).unwrap_or(0);
+            let hit: serde_json::Value = serde_json::from_slice(&buf[..n]).expect("JSON cibles");
+            assert_eq!(hit["media"], 1, "vidéo nue → id : {hit}");
+            assert!(hit["link"].is_null() && hit["image"].is_null());
+
+            let n = explorer_hit_targets(h, tab, 790.0, 590.0, buf.as_mut_ptr(), buf.len());
+            let n = usize::try_from(n).unwrap_or(0);
+            let miss: serde_json::Value = serde_json::from_slice(&buf[..n]).expect("JSON cibles");
+            assert!(
+                miss.get("media").is_some_and(serde_json::Value::is_null),
+                "hors média → clé présente à null : {miss}"
+            );
+
+            // Handle nul → -1, onglet inconnu → 0.
+            assert_eq!(
+                explorer_hit_targets(
+                    std::ptr::null_mut(),
+                    tab,
+                    0.0,
+                    0.0,
+                    buf.as_mut_ptr(),
+                    buf.len()
+                ),
+                -1
+            );
+            assert_eq!(
+                explorer_hit_targets(h, 999, 0.0, 0.0, buf.as_mut_ptr(), buf.len()),
+                0
+            );
 
             explorer_close_tab(h, tab);
             explorer_destroy(h);

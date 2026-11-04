@@ -527,12 +527,24 @@ class FfiEngine implements BrowserRepository {
         .call(opDownloadCancel, {'tab': _idOf(tabId), 'dl': dlId});
   }
 
-  /// Pas d'ABI hit-test FFI (le point n'a pas de résolution
-  /// DOM exportée) — dégradation honnête : cibles vides.
+  /// Sonde hit-test (étape 186 — `explorer_hit_targets`,
+  /// premier ABI hit FFI : le menu contextuel gagne
+  /// `link`/`image` sous FFI aussi). `mediaKnown` faux sur
+  /// dll antérieure (`none`) → l'arbitrage pointer retombe
+  /// sur la double détente M0.
   @override
-  Future<({String? link, String? image})> hitTarget(
-      String tabId, double x, double y) async =>
-      (link: null, image: null);
+  Future<({String? link, String? image, int? media, bool mediaKnown})>
+      hitTarget(String tabId, double x, double y) async {
+    final res = await _worker
+        .call(opHit, {'tab': _idOf(tabId), 'x': x, 'y': y});
+    final m = res ?? const <String, Object?>{};
+    return (
+      link: m['link'] as String?,
+      image: m['image'] as String?,
+      media: (m['media'] as num?)?.toInt(),
+      mediaKnown: m.containsKey('media'),
+    );
+  }
 
   /// Pas d'ABI de lecture du journal profil — `[]`.
   @override

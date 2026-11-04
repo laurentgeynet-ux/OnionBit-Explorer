@@ -1653,7 +1653,9 @@ class _FrameViewState extends ConsumerState<_FrameView> {
       d.localPosition.dx / cssPerLogical,
       d.localPosition.dy / cssPerLogical,
     );
-    if (!mounted || (t.link == null && t.image == null)) return;
+    if (!mounted || t == null || (t.link == null && t.image == null)) {
+      return;
+    }
     final l10n = AppLocalizations.of(context);
     final v = await showMenu<String>(
       context: context,

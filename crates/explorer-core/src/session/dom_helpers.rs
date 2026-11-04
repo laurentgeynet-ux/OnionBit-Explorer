@@ -235,6 +235,26 @@ pub(crate) fn ancestor_img(dom: &Dom, mut node: NodeId) -> Option<NodeId> {
     }
 }
 
+/// Plus proche ancêtre `<video>`/`<audio>` (le nœud
+/// lui-même compris) — `None` si le point tombe hors d'un
+/// élément média (étape 186, arbitrage pointer : le nœud
+/// topmost *est* média = vidéo nue ; un contrôle DOM du
+/// site peint par-dessus rend un nœud non-média).
+pub(crate) fn ancestor_media(dom: &Dom, mut node: NodeId) -> Option<NodeId> {
+    loop {
+        if dom
+            .tag_name(node)
+            .is_ok_and(|t| t == "video" || t == "audio")
+        {
+            return Some(node);
+        }
+        node = match dom.parent(node) {
+            Ok(Some(p)) => p,
+            _ => return None,
+        };
+    }
+}
+
 /// Un nom de cible (`target`/`formtarget`/`base target`)
 /// désigne-t-il un contexte neuf ? — `_self`/`_parent`/
 /// `_top` et vide = contexte courant ; `_blank` ou un nom

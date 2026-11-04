@@ -6608,6 +6608,51 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   appliquée/autoritaire, fromJson
   tolérant) — 65/65 verts.
 
+- [x] **Étape 186. Arbitrage
+  pointer média (volet NAV de M2
+  UX-vidéo)** (`explorer-core`,
+  `explorer-api`, `explorer-ffi`,
+  `app/` — contrat journalisé
+  `interface-equipes.md`, demande
+  PIPE top-slice posée) : le tap
+  vidéo `controls` appliquait la
+  **double détente** M0 (toggle +
+  forward) sans savoir si un
+  contrôle DOM du site était
+  peint par-dessus — le site
+  recevait son clic *et* l'hôte
+  basculait. `HitTargets.media` :
+  `ancestor_media` (ancêtre
+  `<video>`/`<audio>` du nœud
+  topmost) + `element_path` →
+  surface `entry.media` — sémantique
+  **topmost** conservée (couvert
+  → le site garde le pointeur).
+  REST `/hit` émet `media` (clé
+  toujours présente) ; FFI
+  `explorer_hit_targets` = premier
+  ABI hit-test (le menu contextuel
+  `link`/`image` gagne FFI au
+  passage) ; worker `opHit=31`
+  lookup optionnel. *App* :
+  `hitTarget` rend
+  `{link,image,media,mediaKnown}`
+  — `mediaKnown` distingue « la
+  clé existe » (nouveau daemon)
+  d'un transport antérieur →
+  repli M0 honnête ; `media ==
+  id` → toggle+forward, couvert/
+  autre → forward seul, sonde
+  échouée → repli. Fix connexe :
+  `GestureDetector` vidéo en
+  `HitTestBehavior.opaque` (la
+  texture lecteur peut ne pas
+  hit-tester). Verrous : 2 core
+  (vidéo nue, div absolu →
+  `None`) + API `media` + FFI
+  JSON + widget 4-branches —
+  66/66 verts.
+
 - [ ] **Écarts terrain — vol humain
   22/10 (release `39ab821`, FFI)** :
   second run humain — trois constats

@@ -250,4 +250,64 @@ void main() {
     expect(find.byIcon(Icons.play_arrow), findsNothing);
     expect(find.byType(AnimatedOpacity), findsNothing);
   });
+
+  /// Étape 186 — arbitrage pointer M2 : la sonde `/hit`
+  /// décide si le tap tombe sur la vidéo nue (`media` = id
+  /// de la surface → forward + toggle) ou sur un contrôle
+  /// DOM du site peint par-dessus (`media` null → forward
+  /// **seul**, pas de double détente). Sonde en échec ou
+  /// sans la clé → repli M0 (toggle conservé).
+  testWidgets(
+      '186 — tap vidéo : media→toggle, couvert→forward seul, échec→repli',
+      (tester) async {
+    final (:c, :p) = await pumpSurface(tester);
+    final repo = c.read(browserRepositoryProvider) as FakeRepo;
+    final actions = repo.actions;
+    final surface = find.byType(MediaSurfaceView);
+
+    // Vidéo nue — la sonde rend notre surface : toggle + clic
+    // (paused → play : `plays` monte).
+    repo.nextHit =
+        (link: null, image: null, media: 7, mediaKnown: true);
+    await tester.tap(surface);
+    await tester.pump();
+    await tester.pump();
+    expect(p.plays, 1);
+    expect(actions, contains('input:click'));
+
+    // Un contrôle DOM du site recouvre le point (nœud
+    // topmost hors de l'élément) → forward **seul** : le
+    // site reçoit son clic, aucun toggle hôte.
+    repo.nextHit =
+        (link: null, image: null, media: null, mediaKnown: true);
+    actions.clear();
+    await tester.tap(surface);
+    await tester.pump();
+    await tester.pump();
+    expect(p.plays, 1);
+    expect(p.pauses, 0);
+    expect(actions, contains('input:click'));
+
+    // Daemon antérieur : la clé `media` n'est pas émise →
+    // `mediaKnown` faux → repli double détente M0 (playing →
+    // pause : `pauses` monte).
+    repo.nextHit =
+        (link: null, image: null, media: null, mediaKnown: false);
+    actions.clear();
+    await tester.tap(surface);
+    await tester.pump();
+    await tester.pump();
+    expect(p.pauses, 1);
+    expect(actions, contains('input:click'));
+
+    // Sonde en échec (`null` → le repo lève) → repli M0
+    // (paused → play de nouveau).
+    repo.nextHit = null;
+    actions.clear();
+    await tester.tap(surface);
+    await tester.pump();
+    await tester.pump();
+    expect(p.plays, 2);
+    expect(actions, contains('input:click'));
+  });
 }
