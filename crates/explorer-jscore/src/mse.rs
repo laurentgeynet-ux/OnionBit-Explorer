@@ -625,6 +625,61 @@ fn ms_is_type_supported(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<V
     Ok(e.str_val(if ok { "maybe" } else { "" }))
 }
 
+/// `HTMLMediaElement.canPlayType(mime)` (§B-82) — même table
+/// honnête `declared_codecs` que `isTypeSupported` (l'hôte
+/// déclare ce que la stack OnionCodec joue — ADR-0029) :
+/// conteneur connu + tous les codecs du param `codecs`
+/// déclarés → `"probably"` ; conteneur connu sans `codecs`
+/// → `"maybe"` ; sinon `""`. Table vide → `""` partout
+/// (jamais de promesse sans transport déclaré, ADR-0023).
+///
+/// Appelable sur tout élément média — claimé ou non : les
+/// codecs d'un claim sont déjà repliés dans la table à
+/// `set_media_claim`, donc la lecture est unifiée (la gate
+/// d'attach des players — dash.js/shaka — interroge
+/// l'élément *avant* tout claim).
+pub(crate) fn media_can_play_type(e: &Engine, arg: &str) -> &'static str {
+    let mime = arg.trim().to_ascii_lowercase();
+    let container = mime.split(';').next().unwrap_or("").trim();
+    let known = matches!(
+        container,
+        "video/mp4"
+            | "audio/mp4"
+            | "video/webm"
+            | "audio/webm"
+            | "video/x-matroska"
+            | "audio/mpeg"
+            | "video/mp2t"
+            | "audio/ogg"
+            | "audio/wav"
+            | "audio/x-wav"
+    );
+    if !known {
+        return "";
+    }
+    match mime.split("codecs=").nth(1) {
+        Some(cstr) => {
+            let cstr = cstr.trim_matches(|c| c == '"' || c == '\'');
+            let all = cstr
+                .split(',')
+                .filter_map(codec_prefix)
+                .all(|p| e.mse.declared_codecs.contains(&p));
+            if all {
+                "probably"
+            } else {
+                ""
+            }
+        }
+        None => {
+            if e.mse.declared_codecs.is_empty() {
+                ""
+            } else {
+                "maybe"
+            }
+        }
+    }
+}
+
 // ------------------------------------------------------------------
 // Méthodes MediaSource
 // ------------------------------------------------------------------

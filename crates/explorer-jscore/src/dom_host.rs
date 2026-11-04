@@ -5554,6 +5554,24 @@ const NODE_METHODS: &[&str] = &[
     "click",
 ];
 
+/// Méthodes `HTMLMediaElement` lisibles (§B-82) — les players
+/// MSE feature-détectent `typeof v.canPlayType` avant tout
+/// attach : invoke seul rendait `undefined` → dash.js/shaka
+/// n'attachaient jamais (`video.src` restait vide, aucun
+/// `mse:true` offert). Mêmes noms que le dispatch invoke
+/// (claimé → `media_call_claimed`, sinon stubs honnêtes).
+const MEDIA_METHODS: &[&str] = &[
+    "play",
+    "pause",
+    "load",
+    "fastSeek",
+    "canPlayType",
+    "setSinkId",
+    "addTextTrack",
+    "captureStream",
+    "setMediaKeys",
+];
+
 /// Trampoline des méthodes lisibles : `bound ++ args` =
 /// `(nom, receveur, args…)` → [`Host::invoke`]. Le receveur est
 /// lié à la création — `f.call(autreEl)` ne redispatche pas
@@ -5600,6 +5618,27 @@ fn node_proto_method_trampoline(e: &mut Engine, this: Value, args: &[Value]) -> 
         return Ok(Value::Undefined);
     };
     crate::host_mark(h.class_name(), &name);
+    // Sonde §B-59 : `EXPLORER_DOM_KILL` — nommer les méthodes à
+    // effet `detach` (le vidage de page en vol passe par l'une
+    // d'elles ; l'appelant précède la ligne `[dom-kill]`).
+    if std::env::var_os("EXPLORER_DOM_KILL").is_some()
+        && matches!(
+            name.as_str(),
+            "remove"
+                | "removeChild"
+                | "replaceChild"
+                | "replaceChildren"
+                | "replaceWith"
+                | "insertBefore"
+                | "appendChild"
+                | "append"
+                | "prepend"
+                | "before"
+                | "after"
+        )
+    {
+        eprintln!("[dom-kill] call {name} this={}", e.describe(this));
+    }
     let r = h.invoke(e, Value::Obj(id), &name, call_args)?;
     // Réactions CE synchrones (JS-C68) — appendChild/insertBefore/
     // setAttribute via `Node.prototype.m(el,…)` alimentent la file.
@@ -6078,10 +6117,10 @@ fn media_set_claimed(
 /// `play()` enfile l'ordre `Play` et rend une promesse tenue
 /// au premier rapport `playing` (rejetée `error`/release) —
 /// déjà `playing` → résolue d'office. `canPlayType` reflète
-/// les codecs déclarés au claim (`"probably"` si un token
-/// codec matche, `"maybe"` si seul le MIME matche, `""`
-/// sinon). EME/sink/tracks restent non supportés même
-/// claimés — jamais de faux succès.
+/// la table moteur `declared_codecs` (`"probably"` si tous
+/// les codecs du param sont déclarés, `"maybe"` conteneur
+/// seul, `""` sinon — §B-82). EME/sink/tracks restent non
+/// supportés même claimés — jamais de faux succès.
 fn media_call_claimed(
     e: &mut Engine,
     dom: &DomRef,
@@ -6149,17 +6188,16 @@ fn media_call_claimed(
             Ok(Some(Value::Undefined))
         }
         "canPlayType" => {
+            // §B-82 — table moteur `declared_codecs` (les
+            // codecs du claim y sont déjà repliés à
+            // `set_media_claim`) : réponse identique claimé
+            // ou non — la gate d'attach des players se joue
+            // avant tout claim.
             let t = match args.first() {
-                Some(v) => e.to_js_string(*v)?.to_lowercase(),
+                Some(v) => e.to_js_string(*v)?,
                 None => String::new(),
             };
-            let codecs = dom
-                .borrow()
-                .media
-                .get(&node)
-                .map(|st| st.codecs.clone())
-                .unwrap_or_default();
-            Ok(Some(e.str_val(can_play(&t, &codecs))))
+            Ok(Some(e.str_val(crate::mse::media_can_play_type(e, &t))))
         }
         // Claimé ≠ EME ni sortie audio alternative — rejets
         // honnêtes maintenus (ADR-0023).
@@ -6171,36 +6209,6 @@ fn media_call_claimed(
         }
         "addTextTrack" | "captureStream" => Ok(Some(Value::Null)),
         _ => Ok(Some(Value::Undefined)),
-    }
-}
-
-/// `canPlayType` contre les codecs déclarés au claim
-/// (étape 71c) — token codec présent dans l'argument →
-/// `"probably"` ; seule la base MIME matche → `"maybe"` ;
-/// rien → `""`.
-fn can_play(arg: &str, declared: &[String]) -> &'static str {
-    let mime = arg.split(';').next().unwrap_or("").trim();
-    if mime.is_empty() {
-        return "";
-    }
-    let mut mime_hit = false;
-    for c in declared {
-        let c = c.to_lowercase();
-        let c = c.trim();
-        if c.is_empty() {
-            continue;
-        }
-        if arg.contains(c) {
-            return "probably";
-        }
-        if c.contains(mime) || c.starts_with(mime) {
-            mime_hit = true;
-        }
-    }
-    if mime_hit {
-        "maybe"
-    } else {
-        ""
     }
 }
 
@@ -6258,6 +6266,8 @@ impl Host for NodeHost {
             || name == "requestFullscreen"
             || (self.dom.borrow().has_attr(self.node, "popover")
                 && matches!(name, "showPopover" | "hidePopover" | "togglePopover"))
+            // §B-82 — `"canPlayType" in v` (hasown des sniffs).
+            || (is_media(&self.dom, self.node) && MEDIA_METHODS.contains(&name))
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
@@ -7182,6 +7192,18 @@ impl Host for NodeHost {
         // invoke-only ; les frameworks sniffent
         // `typeof el.m`/`"m" in el`.
         if NODE_METHODS.contains(&key) {
+            let nv = e.str_val(key);
+            return Ok(Some(e.bound_native(
+                "node.method",
+                host_method_trampoline,
+                vec![nv, this],
+            )));
+        }
+        // Méthodes `HTMLMediaElement` lisibles (§B-82) —
+        // même voie que `NODE_METHODS` ; le dispatch invoke
+        // garde la sémantique (claimé → `media_call_claimed`,
+        // non claimé → stubs honnêtes ADR-0023).
+        if is_media(&self.dom, node) && MEDIA_METHODS.contains(&key) {
             let nv = e.str_val(key);
             return Ok(Some(e.bound_native(
                 "node.method",
@@ -8399,8 +8421,18 @@ impl Host for NodeHost {
                         e.reject_promise(pid, msg);
                         Ok(Some(Value::Obj(pid)))
                     }
-                    // Aucun codec → `""` (« ne peut pas lire »).
-                    "canPlayType" => Ok(Some(e.str_val(""))),
+                    // §B-82 — même table moteur
+                    // `declared_codecs` que le bras claimé :
+                    // la gate d'attach interroge l'élément
+                    // avant tout claim — `""` seulement si
+                    // la capacité n'est pas déclarée.
+                    "canPlayType" => {
+                        let t = match args.first() {
+                            Some(v) => e.to_js_string(*v)?,
+                            None => String::new(),
+                        };
+                        Ok(Some(e.str_val(crate::mse::media_can_play_type(e, &t))))
+                    }
                     "addTextTrack" | "captureStream" => Ok(Some(Value::Null)),
                     _ => Ok(Some(Value::Undefined)),
                 }

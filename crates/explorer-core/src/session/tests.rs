@@ -1618,11 +1618,23 @@ fn media_js_commands_only_when_claimed() {
         ),
         "probably"
     );
+    // §B-82 — `canPlayType` lit la table moteur
+    // `declared_codecs` (les codecs du claim y sont repliés) :
+    // conteneur connu sans `codecs=` → "maybe" ; codec non
+    // déclaré → "".
     assert_eq!(
         media_js_eval(
             &mut s,
             tab,
             "document.querySelector('video').canPlayType('video/webm')"
+        ),
+        "maybe"
+    );
+    assert_eq!(
+        media_js_eval(
+            &mut s,
+            tab,
+            "document.querySelector('video').canPlayType('video/webm; codecs=\"vp09.00.10.08\"')"
         ),
         ""
     );
