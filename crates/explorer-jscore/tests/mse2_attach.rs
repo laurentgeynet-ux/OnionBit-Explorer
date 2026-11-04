@@ -50,6 +50,40 @@ fn mse2_src_prop_attaches_and_fires_sourceopen() {
 }
 
 #[test]
+fn mse2_attached_media_source_reports_idle_networkstate() {
+    let mut e = engine();
+    // §B-83/JS-C328 — gate player réel : `v.networkState` lit
+    // `NETWORK_IDLE` (1) sur un object URL `MediaSource` — la
+    // ressource est locale (appends, pas réseau — spec resource
+    // fetch). `3` (`NO_SOURCE`) sur un attach réussi gelait la
+    // machine d'état bitmovin au terrain (vol 629 : `net=3`
+    // avec `mse:true` posé, `mseBuffers` vide à jamais).
+    assert_eq!(
+        ev(
+            &mut e,
+            "var ms=new MediaSource();var v=document.getElementById('v');\
+             v.src=URL.createObjectURL(ms);v.networkState"
+        ),
+        "1"
+    );
+    // Canaris : `src` non-MSE reste `NO_SOURCE`, absent → `EMPTY`.
+    assert_eq!(
+        ev(
+            &mut e,
+            "var v2=document.createElement('video');v2.src='x.mp4';v2.networkState"
+        ),
+        "3"
+    );
+    assert_eq!(
+        ev(
+            &mut e,
+            "var v3=document.createElement('video');v3.networkState"
+        ),
+        "0"
+    );
+}
+
+#[test]
 fn mse2_set_attribute_src_attaches_too() {
     let mut e = engine();
     // Même rail par `setAttribute` — les deux voies de pose

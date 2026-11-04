@@ -299,3 +299,30 @@ fn media_mse_append_drives_progress_and_readiness() {
     );
     assert_eq!(ev(&mut e, "v.readyState>=3"), "true");
 }
+
+#[test]
+fn media_state_mse_element_stays_idle_networkstate() {
+    let (mut e, dom) = engine();
+    // §B-83/JS-C328 — sous MSE l'élément est `NETWORK_IDLE` (1)
+    // en toutes circonstances : la ressource est locale (les
+    // segments arrivent par `appendBuffer`/XHR, l'élément ne
+    // fetch jamais) ; l'underrun se signale par `waiting`/
+    // `stalled`, pas par `networkState`. Gate player réel :
+    // `net=3` (NO_SOURCE) sur un attach réussi gelait la
+    // machine d'état bitmovin (vol 629).
+    ev(
+        &mut e,
+        "var ms=new MediaSource();var v=document.getElementById('v');\
+         v.src=URL.createObjectURL(ms);'attached'",
+    );
+    let node = claim_and_arm(&mut e, &dom);
+    // Claimé + lecture partielle → toujours IDLE.
+    e.deliver_media_state(node, &rep(0, 60_000, 1_000, MediaState::Playing))
+        .expect("report 1");
+    assert_eq!(ev(&mut e, "v.networkState"), "1");
+    // Underrun → IDLE aussi ; `waiting`/`stalled` portent le
+    // signal (échelle étape 182).
+    e.deliver_media_state(node, &rep(1_000, 60_000, 1_000, MediaState::Buffering))
+        .expect("report 2");
+    assert_eq!(ev(&mut e, "v.networkState"), "1");
+}

@@ -397,11 +397,19 @@ entre-temps : échelle `readyState`/`loadeddata`/
 `canplay`/`waiting`/`stalled`/`progress` (Étape
 182) + machine à états `SourceBuffer` spec
 (JS-C325 : `ended→open`, gardes `updating`,
-`endOfStream(err)`). Reste ouvert : throws avalés
-dans les promesses. À re-mesurer en vol :
-`addSourceBuffer` appelé, `mseBuffers` peuplé,
-`mse:true` **décodé**, `--seek-ms` sur surface
-vivante, multi-buffer MSE (`open_mse_multi`).
+`endOfStream(err)`). **Vol 629 @ `e40ff2f4`** :
+120 trames / 3 966 ms (vs 110/3 633 — jitter) →
+C325+C326 non-régressifs, décodage intact ; MAIS
+branche B tenace — `mseBuffers:[]` après ~90 s.
+Suspects nommés au terrain : **`networkState`=3
+(`NETWORK_NO_SOURCE`) jamais mis à jour sur
+`src=blob:` MSE** (gate probable du player) ;
+**3ᵉ fetch chaîné inerte** ×2 vols (Q figé, pompe
+vivante — borne réseau/connexion ?) ; rejet
+`play()` sans `.name` (shape-gap). Reste ouvert :
+throws avalés dans les promesses. À re-mesurer :
+`mseBuffers` peuplé par le player, multi-buffer
+(`open_mse_multi`), `--seek-ms` surface vivante.
 
 Claims codecs : l'oracle = `onionmedia_can_play_type`
 (`""`/`maybe`/`probable`), table déclarée alignée

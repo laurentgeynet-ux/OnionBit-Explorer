@@ -6097,8 +6097,20 @@ fn media_prop(e: &mut Engine, dom: &DomRef, node: NodeId, key: &str) -> Value {
                 .and_then(|u| e.mse_source_duration(u))
                 .map_or(Value::Num(f64::NAN), Value::Num),
             // `src` présent mais indécodable → NO_SOURCE ;
-            // sinon EMPTY.
-            "networkState" => Value::Num(if d.has_attr(node, "src") { 3.0 } else { 0.0 }),
+            // sinon EMPTY. **Exception MSE (§B-83/JS-C328)** :
+            // `src` = object URL `MediaSource` enregistrée →
+            // `NETWORK_IDLE` (1) — la ressource est locale
+            // (les données arrivent par `appendBuffer`, pas par
+            // le réseau — spec resource fetch algorithm) ;
+            // `NO_SOURCE` sur un attach réussi est un gate
+            // fatal : les players lisent `net != 3` avant de
+            // démarrer leur machine d'état (bitmovin gelé au
+            // terrain, `net=3` avec `mse:true` posé).
+            "networkState" => Value::Num(match d.attr(node, "src") {
+                Some(u) if e.is_media_source_url(u) => 1.0,
+                Some(_) => 3.0,
+                None => 0.0,
+            }),
             "currentSrc" => e.str_val(""),
             // JS-C284 — `src` = object-URL `MediaSource` :
             // `buffered` = union des `SourceBuffer` actifs
@@ -6152,7 +6164,18 @@ fn media_prop(e: &mut Engine, dom: &DomRef, node: NodeId, key: &str) -> Value {
         // Claimé sans `state` ou en underrun → LOADING (2) ;
         // source entièrement tamponnée → IDLE (1) ; lecture
         // avec fetch en cours → LOADING. Claimé ≠ NO_SOURCE.
+        // **MSE (JS-C328)** : `src` = object URL `MediaSource`
+        // → `IDLE` en toutes circonstances — la ressource est
+        // locale, l'underrun se signale par `waiting`/`stalled`
+        // (étape 182), pas par `networkState` (l'élément ne
+        // fetch jamais : les segments sont des appends/XHR).
         "networkState" => Value::Num(match state {
+            _ if d
+                .attr(node, "src")
+                .is_some_and(|u| e.is_media_source_url(u)) =>
+            {
+                1.0
+            }
             None | Some(MediaState::Buffering) => 2.0,
             Some(_) => match (rep.and_then(|r| r.duration_ms), st.last_buffered_end_ms) {
                 (Some(dur), Some(end)) if end >= dur => 1.0,
