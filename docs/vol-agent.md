@@ -380,10 +380,22 @@ fixe la rep basse) ; §B-82 **résolu en vol**
 (attach `blob:` débloqué) ; §B-81 contourné en
 routine. Vol 626 — **premier `mse:true` site
 majeur** (bitmovin) mais stall post-attach →
-**§B-83 ouvert** (intra-player, détail au corpus).
-Reste à mesurer : `mse:true` **décodé** (le cran
-§B-83), `--seek-ms` sur surface vivante,
-multi-buffer MSE (`open_mse_multi`).
+**§B-83** (intra-player, détail au corpus) :
+premier suspect **livré** — `sourceopen`/
+`sourceended` tirés **synchrones** au lieu de
+filés en tâche (spec : l'attachement MSE met le
+tir en file ; le pattern canonique enregistre le
+listener *après* `src=` → événement perdu →
+machine d'état gelée). **JS-C324** : file
+`MseState.pending_events` drainée à la frontière
+de job. Reste ouvert : `loadeddata`/`canplay`/
+`waiting`/`stalled`/`progress` jamais émis par
+`deliver_media_state` (audit — un player qui gate
+sur `canplay` reste gelé) + throws avalés dans
+les promesses. À re-mesurer en vol :
+`addSourceBuffer` appelé, `mseBuffers` peuplé,
+`mse:true` **décodé**, `--seek-ms` sur surface
+vivante, multi-buffer MSE (`open_mse_multi`).
 
 Claims codecs : l'oracle = `onionmedia_can_play_type`
 (`""`/`maybe`/`probable`), table déclarée alignée

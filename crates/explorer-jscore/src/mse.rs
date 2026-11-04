@@ -160,11 +160,23 @@ pub(crate) struct MseState {
     /// ce qu'il joue réellement) ; vide = `isTypeSupported`
     /// rend `""` partout (comportement C173 préservé).
     declared_codecs: std::collections::HashSet<String>,
+    /// Événements `MediaSource` filés en **tâche** (JS-C324) —
+    /// `(wrapper, type)`. Spec : `sourceopen`/`sourceended`
+    /// sont mis en file, jamais tirés synchrones — le pattern
+    /// canonique des players (`v.src = createObjectURL(ms)` puis
+    /// `ms.addEventListener('sourceopen', …)` à la ligne
+    /// suivante) ne voit l'événement que si le tir attend la fin
+    /// du script courant ; un tir synchrone était perdu à
+    /// jamais (dash.js inerte — terrain §B-83). Drainée à la
+    /// frontière de job par [`deliver_mse_events`].
+    pending_events: std::collections::VecDeque<(ObjId, &'static str)>,
 }
 
 impl MseState {
     /// Racines GC : protos installés + `MediaSource` référencés
-    /// par une URL objet vivante.
+    /// par une URL objet vivante ou cible d'un événement en
+    /// file (le tir différé ne doit pas trouver un wrapper
+    /// collecté).
     pub(crate) fn root_ids(&self, ids: &mut Vec<ObjId>) {
         for p in [
             self.media_source_proto,
@@ -178,6 +190,7 @@ impl MseState {
             ids.push(p);
         }
         ids.extend(self.object_urls.values().copied());
+        ids.extend(self.pending_events.iter().map(|(t, _)| *t));
     }
 }
 
@@ -627,7 +640,7 @@ fn ms_is_type_supported(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<V
 
 /// `HTMLMediaElement.canPlayType(mime)` (§B-82) — même table
 /// honnête `declared_codecs` que `isTypeSupported` (l'hôte
-/// déclare ce que la stack OnionCodec joue — ADR-0029) :
+/// déclare ce que la stack `OnionCodec` joue — ADR-0029) :
 /// conteneur connu + tous les codecs du param `codecs`
 /// déclarés → `"probably"` ; conteneur connu sans `codecs`
 /// → `"maybe"` ; sinon `""`. Table vide → `""` partout
@@ -773,7 +786,9 @@ fn ms_remove_source_buffer(e: &mut Engine, this: Value, args: &[Value]) -> JsRes
 }
 
 /// `ms.endOfStream(err?)` — `readyState` → `"ended"` +
-/// `sourceended`. Permis hors `"open"` (déviation documentée).
+/// `sourceended` **filé en tâche** (JS-C324 — spec : mise en
+/// file, pas synchrone). Permis hors `"open"` (déviation
+/// documentée).
 fn ms_end_of_stream(e: &mut Engine, this: Value, _args: &[Value]) -> JsResult<Value> {
     let Some(d) = ms_data(e, this) else {
         return Err(e.type_error("MediaSource.endOfStream: Illegal invocation"));
@@ -782,7 +797,7 @@ fn ms_end_of_stream(e: &mut Engine, this: Value, _args: &[Value]) -> JsResult<Va
     let Value::Obj(mid) = this else {
         return Ok(Value::Undefined);
     };
-    fire_mse(e, mid, "sourceended")?;
+    e.mse.pending_events.push_back((mid, "sourceended"));
     Ok(Value::Undefined)
 }
 
@@ -1382,11 +1397,12 @@ pub(crate) fn object_url_media(e: &Engine, url: &str) -> Option<ObjId> {
 /// Attache tentative (MSE-2, ADR-0029) — appelée quand un
 /// `<video>`/`<audio>` reçoit `src = blob:…` (prop directe ou
 /// `setAttribute`) : `url` enregistrée `kind=mse` →
-/// `readyState` `"closed"` → `"open"` + `sourceopen`
-/// synchrone (spec : file d'événements — approximation
-/// documentée, cohérente avec les autres événements du module).
-/// Idempotent : une source déjà `open`/`ended` n'est pas
-/// re-tirée — la spec ignore le second attachement.
+/// `readyState` `"closed"` → `"open"` synchrone (approximation
+/// tolérante — un polleur voit l'état tôt) + `sourceopen` **filé
+/// en tâche** (JS-C324 — spec : le tir est une tâche de l'algo
+/// d'attachement, jamais synchrone ; les players enregistrent
+/// leur listener *après* le `src=`). Idempotent : une source
+/// déjà `open`/`ended` n'est pas re-tirée.
 pub(crate) fn maybe_attach(e: &mut Engine, url: &str) {
     let Some(mid) = object_url_media(e, url) else {
         return;
@@ -1398,7 +1414,30 @@ pub(crate) fn maybe_attach(e: &mut Engine, url: &str) {
         return;
     }
     d.borrow_mut().ready_state = "open";
-    let _ = fire_mse(e, mid, "sourceopen");
+    e.mse.pending_events.push_back((mid, "sourceopen"));
+}
+
+/// Drain des événements `MediaSource` filés (JS-C324) — frontière
+/// de job, même couture que `deliver_mutations`/`deliver_ws`
+/// dans `run_microtasks`. La file est vidée entièrement : un
+/// listener qui jette ne doit pas perdre les événements suivants
+/// (même règle que `fire_mse_guarded`) — la première erreur est
+/// propagée après vidange. `true` = au moins un tir tenté.
+pub(crate) fn deliver_mse_events(e: &mut Engine) -> JsResult<bool> {
+    let mut fired = false;
+    let mut first: Option<Thrown> = None;
+    while let Some((target, ty)) = e.mse.pending_events.pop_front() {
+        fired = true;
+        if let Err(err) = fire_mse(e, target, ty) {
+            if first.is_none() {
+                first = Some(err);
+            }
+        }
+    }
+    match first {
+        Some(t) => Err(t),
+        None => Ok(fired),
+    }
 }
 
 impl Engine {

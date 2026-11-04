@@ -353,10 +353,14 @@ fn c193_end_of_stream_and_duration() {
              ms.addEventListener('sourceended',function(ev){seen=ev.type});\
              ms.duration=42.5;\
              ms.endOfStream();\
-             ms.readyState+'|'+ms.duration+'|'+seen"
+             ms.readyState+'|'+ms.duration"
         ),
-        "ended|42.5|sourceended"
+        "ended|42.5"
     );
+    // JS-C324 — `sourceended` est filé en **tâche** (spec :
+    // `endOfStream` met le tir en file, jamais synchrone) ;
+    // le drain de fin d'eval l'a servi.
+    assert_eq!(ev(&mut e, "seen"), "sourceended");
     // `duration = NaN` → TypeError (spec).
     let r = e.eval("ms.duration=NaN");
     assert!(r.is_err(), "duration=NaN doit jeter");

@@ -33,7 +33,9 @@ fn ev(e: &mut Engine, src: &str) -> String {
 fn mse2_src_prop_attaches_and_fires_sourceopen() {
     let mut e = engine();
     // Le chemin player réel : `video.src = URL.createObjectURL(ms)`
-    // → `readyState open` + `sourceopen` vu par le listener.
+    // → `readyState open` + `sourceopen` **filé en tâche**
+    // (JS-C324) — `n` reste 0 dans l'expression synchrone puis
+    // le tir est servi à la frontière de job.
     assert_eq!(
         ev(
             &mut e,
@@ -42,8 +44,9 @@ fn mse2_src_prop_attaches_and_fires_sourceopen() {
              document.getElementById('v').src=URL.createObjectURL(ms);\
              ms.readyState+'|'+n"
         ),
-        "open|1"
+        "open|0"
     );
+    assert_eq!(ev(&mut e, "n"), "1");
 }
 
 #[test]
@@ -60,8 +63,9 @@ fn mse2_set_attribute_src_attaches_too() {
              v.setAttribute('src',URL.createObjectURL(ms));\
              ms.readyState+'|'+n"
         ),
-        "open|1"
+        "open|0"
     );
+    assert_eq!(ev(&mut e, "n"), "1");
 }
 
 #[test]
@@ -80,8 +84,50 @@ fn mse2_attach_is_idempotent() {
              v.setAttribute('src',URL.createObjectURL(ms));\
              ms.readyState+'|'+n"
         ),
-        "open|1"
+        "open|0"
     );
+    assert_eq!(ev(&mut e, "n"), "1");
+}
+
+#[test]
+fn mse2_sourceopen_reaches_late_listener() {
+    let mut e = engine();
+    // JS-C324 — pattern canonique MSE (MDN/web.dev/dash.js) :
+    // `src=` d'abord, `addEventListener('sourceopen')` ensuite —
+    // la spec file l'événement en tâche, il doit survivre à
+    // l'enregistrement tardif (un tir synchrone le perdait à
+    // jamais — dash.js inerte, terrain §B-83).
+    assert_eq!(
+        ev(
+            &mut e,
+            "var ms=new MediaSource();var n=0;\
+             document.getElementById('v').src=URL.createObjectURL(ms);\
+             ms.addEventListener('sourceopen',function(){n++});\
+             ms.readyState"
+        ),
+        "open"
+    );
+    // Le listener posé après `src=` a tout de même reçu le tir.
+    assert_eq!(ev(&mut e, "n"), "1");
+}
+
+#[test]
+fn mse2_sourceended_reaches_late_listener() {
+    let mut e = engine();
+    // JS-C324 — même mise en file pour `sourceended` : le
+    // listener posé après `endOfStream()` le reçoit quand même.
+    assert_eq!(
+        ev(
+            &mut e,
+            "var ms=new MediaSource();var n=0;\
+             document.getElementById('v').src=URL.createObjectURL(ms);\
+             ms.endOfStream();\
+             ms.onsourceended=function(){n++};\
+             ms.readyState"
+        ),
+        "ended"
+    );
+    assert_eq!(ev(&mut e, "n"), "1");
 }
 
 #[test]

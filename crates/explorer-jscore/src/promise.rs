@@ -715,6 +715,7 @@ impl Engine {
                     || self.deliver_ws()? > 0
                     || self.drain_es()? > 0
                     || self.deliver_bc()? > 0
+                    || crate::mse::deliver_mse_events(self)?
                 {
                     delivered = true;
                 }

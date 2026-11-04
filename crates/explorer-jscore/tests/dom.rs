@@ -5172,13 +5172,17 @@ fn cap178_surface_batch() {
     e.eval("var x=document.getElementById('x');")
         .expect("setup");
     // `new Audio(url)`/`new Video()` — alias createElement.
+    // §B-82 : les méthodes média sont **lisibles** (réelles
+    // sur le proto — la gate d'attach des players teste
+    // `typeof video.play/canPlayType`), stubs honnêtes sans
+    // claim même si appelées.
     assert_eq!(
         evf(
             &mut e,
             "var a=new Audio('/m.mp3'),v=new Video();\
             [a.tagName,v.tagName,a.getAttribute('src'),typeof a.play].join('|')"
         ),
-        "AUDIO|VIDEO|/m.mp3|undefined"
+        "AUDIO|VIDEO|/m.mp3|function"
     );
     // `getHTML`/`setHTMLUnsafe` — outerHTML/innerHTML.
     assert_eq!(
