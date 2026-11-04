@@ -14179,9 +14179,10 @@ async fn worker_loads_and_posts_back() {
     s.navigate(a, "http://h.test/p").await.unwrap();
     // Le worker est fetché+évalué en tâches — sous charge
     // parallèle de la suite, 8 pompes ne suffisent pas
-    // toujours ; on pompe jusqu'à l'arrivée (borne 32).
+    // toujours ; on pompe jusqu'à l'arrivée (borne 128 —
+    // 32 saturait encore en suite parallèle complète).
     let mut dump = String::new();
-    for _ in 0..32 {
+    for _ in 0..128 {
         s.pump_net().await;
         s.pump_timers(a);
         dump = s.dom_dump(a).unwrap_or_default();

@@ -513,6 +513,43 @@ fn c315_wcsd_then_kevlar_ubc_capture() {
             "(function(){var C=customElements.get('ytd-app');if(!C)return'noC';var q=C.prototype,base=Object.getPrototypeOf(q),o=[];o.push('ownB='+q.hasOwnProperty('behaviors'));o.push('bB='+(base&&base.behaviors&&base.behaviors.length));o.push('same='+(q.behaviors===(base&&base.behaviors)));o.push('spo='+(typeof q.setPageOffset));o.push('oNYS='+(typeof q.onYtNavigateStart));o.push('unregB='+(base&&typeof base.unregisterActionMap));o.push('behavKeys='+Object.getOwnPropertyNames(q).filter(function(k){return/ction|avig|etach|egist/.test(k)}).join(','));return o.join('|')})()",
         )
     );
+    // Mur suivant (vol 617) : `detached` kevlar:40765 lit
+    // `Xcs.playlistHandlerActionMap` — `Xcs` est posé dans
+    // `attached` (40763) uniquement `if(!standalone)` dans la
+    // branche else. Sonde : `standalone` de l'élément +
+    // `removeChild` → `detached` jette-t-il ?
+    println!(
+        "standalone/detached → {}",
+        ev(
+            &mut e,
+            "(function(){var el=document.querySelector('ytd-app');if(!el)return'no-el';var o=[];o.push('sa='+el.standalone);o.push('hasA='+el.hasAttribute('standalone'));o.push('isAtt='+el.isAttached);o.push('upgD='+(typeof el.__isUpgradeDisabled)+'/'+(!!el.__isUpgradeDisabled));o.push('connT='+(typeof el.connectedCallback));o.push('discT='+(typeof el.disconnectedCallback));o.push('attT='+(typeof el.attached));o.push('detT='+(typeof el.detached));return o.join('|')})()",
+        )
+    );
+    // Les props injectées (`nE`/`qE`) de ytd-app — `attached`
+    // (40757) échoue dès `this.guideService.guideElement=` si
+    // l'injection n'a pas livré → `Xcs` jamais posé → detached
+    // jette (vol 617).
+    println!(
+        "injected props → {}",
+        ev(
+            &mut e,
+            "(function(){var el=document.querySelector('ytd-app');if(!el)return'no-el';var o=[];['hostElement','guide','guideService','guideInnerContent','persistentPanelContainer','dynamicActionMap','boundOnTouchStart','standalone','ytActionHandlerBehavior','ytActionRouterBehavior'].forEach(function(k){o.push(k+'='+(typeof el[k]))});return o.join('|')})()",
+        )
+    );
+    println!(
+        "attached-call → {}",
+        ev(
+            &mut e,
+            "window.__att='START';(function(){var el=document.querySelector('ytd-app');if(!el){window.__att='no-el';return}var o=[];try{el.ready();o.push('ready=ok')}catch(x){o.push('ready=THREW:'+String(x&&x.message||x).slice(0,110))}o.push('content='+(el._template&&el._template.content?el._template.content.childNodes.length:'-'));o.push('dolKeys='+(el.$?Object.keys(el.$).length:'undef'));o.push('gic='+(el.guideInnerContent===null?'NULL':el.guideInnerContent===undefined?'undef':typeof el.guideInnerContent));try{el.attached();o.push('attached=ok')}catch(x){o.push('attached=THREW:'+String(x&&x.message||x).slice(0,110))}window.__att=o.join('|')})();window.__att",
+        )
+    );
+    println!(
+        "detached-call → {}",
+        ev(
+            &mut e,
+            "(function(){var el=document.querySelector('ytd-app');if(!el)return'no-el';var p=el.parentNode;if(!p)return'no-parent';try{p.removeChild(el);return'det=ok'}catch(x){return'det=THREW:'+String(x&&x.message||x).slice(0,120)}})()",
+        )
+    );
 }
 
 /// Sonde JS-C319 — mur levé sur youtube live :

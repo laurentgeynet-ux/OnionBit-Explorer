@@ -61,12 +61,12 @@ pub(crate) fn has_own_property(e: &mut Engine, this: Value, args: &[Value]) -> J
                     key == "length"
                         || crate::interp::array_index(&key)
                             .is_some_and(|i| elems.get(i).is_some_and(|v| !v.is_hole()))
-                        || o.get_own(&key).is_some()
+                        || o.find(&key).is_some()
                 }
                 ObjKind::Fun(crate::heap::Fun::Script { .. }) => {
-                    key == "length" || o.get_own(&key).is_some()
+                    key == "length" || o.find(&key).is_some()
                 }
-                _ => o.get_own(&key).is_some(),
+                _ => o.find(&key).is_some(),
             },
             None => false,
         },

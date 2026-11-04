@@ -4640,9 +4640,18 @@ impl Engine {
                 EnvKind::Global(_) => {
                     // `var` vit sur l'objet global — prop non
                     // configurable (`delete x` → `false`, spec).
+                    // Spec `CreateGlobalVarBinding` : prop propre
+                    // existante conservée si data (valeur gardée)
+                    // ou non-configurable (accesseur unforgeable)
+                    // — seule une prop absente ou un accesseur
+                    // configurable est (re)défini en data prop.
                     let g = self.global;
                     drop(b);
-                    if self.heap.obj(g).is_some_and(|o| o.get_own(name).is_none()) {
+                    let keep = self.heap.obj(g).is_some_and(|o| {
+                        o.find(name)
+                            .is_some_and(|p| p.data_value().is_some() || !p.configurable())
+                    });
+                    if !keep {
                         self.set_own_attrs(
                             g,
                             name,

@@ -2805,6 +2805,12 @@ impl Dom {
 
     /// `cloneNode(deep)` — fresh ids, listeners are *not* cloned
     /// (spec: `addEventListener` handlers don't survive cloning).
+    /// `<template>` : les enfants à cloner vivent dans le fragment
+    /// `content` (jamais dans `children`) — spec `clone a node`
+    /// les copie **toujours** (le flag `deep` ne gouverne que
+    /// leur propre descendance). Sans ça, `_prepareTemplate`
+    /// Polymer (`P.cloneNode(!0)`) produit un template vide —
+    /// mur terrain `ytd-app` (JS-C320).
     pub fn clone_node(&mut self, node: NodeId, deep: bool) -> NodeId {
         let (kind, tag, attrs, text, kids) = {
             let n = &self.nodes[node as usize];
@@ -2819,37 +2825,63 @@ impl Dom {
         let id = self.alloc(kind, &tag);
         self.nodes[id as usize].attrs = attrs;
         self.nodes[id as usize].text = text;
-        if deep {
-            // Itératif : la profondeur DOM est contrôlée par le
-            // script — une descente récursive déborderait la pile
-            // Rust (JS-C55).
-            let mut work: Vec<(NodeId, NodeId)> = kids.iter().rev().map(|&c| (c, id)).collect();
-            while let Some((src, dst_parent)) = work.pop() {
-                let (k2, t2, a2, x2, kids2) = {
-                    let n = &self.nodes[src as usize];
-                    (
-                        n.kind,
-                        n.tag.clone(),
-                        n.attrs.clone(),
-                        n.text.clone(),
-                        n.children.clone(),
-                    )
-                };
-                let cid = self.alloc(k2, &t2);
-                self.nodes[cid as usize].attrs = a2;
-                self.nodes[cid as usize].text = x2;
-                self.append(dst_parent, cid);
-                work.extend(kids2.iter().rev().map(|&g| (g, cid)));
+        // Graines `(src, dst_parent, descendre)` — itératif : la
+        // profondeur DOM est contrôlée par le script, une descente
+        // récursive déborderait la pile Rust (JS-C55).
+        let mut work: Vec<(NodeId, NodeId, bool)> = Vec::new();
+        if tag == "template" {
+            if let Some(&frag) = self.template_contents.get(&node) {
+                let cks = self.nodes[frag as usize].children.clone();
+                let dst_frag = self.create_fragment();
+                self.template_contents.insert(id, dst_frag);
+                work.extend(cks.iter().rev().map(|&c| (c, dst_frag, deep)));
+            } else {
+                // `content` paresseux : les enfants directs SONT
+                // le contenu (même traitement qu'en boucle).
+                work.extend(kids.iter().rev().map(|&c| (c, id, deep)));
+            }
+        } else if deep {
+            work.extend(kids.iter().rev().map(|&c| (c, id, true)));
+        }
+        while let Some((src, dst_parent, sub_deep)) = work.pop() {
+            let (k2, t2, a2, x2, kids2) = {
+                let n = &self.nodes[src as usize];
+                (
+                    n.kind,
+                    n.tag.clone(),
+                    n.attrs.clone(),
+                    n.text.clone(),
+                    n.children.clone(),
+                )
+            };
+            let cid = self.alloc(k2, &t2);
+            self.nodes[cid as usize].attrs = a2;
+            self.nodes[cid as usize].text = x2;
+            self.append(dst_parent, cid);
+            if t2 == "template" {
+                if let Some(&frag) = self.template_contents.get(&src) {
+                    let cks = self.nodes[frag as usize].children.clone();
+                    let dst_frag = self.create_fragment();
+                    self.template_contents.insert(cid, dst_frag);
+                    work.extend(cks.iter().rev().map(|&g| (g, dst_frag, sub_deep)));
+                } else {
+                    // `content` paresseux (jamais matérialisé) : les
+                    // enfants directs SONT le contenu — copiés dans
+                    // `children` du clone, déplacés vers `content`
+                    // à la première lecture `tpl.content`.
+                    work.extend(kids2.iter().rev().map(|&g| (g, cid, sub_deep)));
+                }
+            } else if sub_deep {
+                work.extend(kids2.iter().rev().map(|&g| (g, cid, sub_deep)));
             }
         }
         id
     }
 
     /// Clone **superficiel** cross-arène — nœud + attrs +
-    /// texte, jamais les enfants (spec `importNode(n, false)`
-    /// sur un nœud d'un autre document — §B-14 vol 304 :
-    /// `importNode` rejetait les nœuds étrangers, ×5 sites).
-    /// Miroir exact du bras shallow de [`Self::clone_node`].
+    /// texte, jamais les enfants — **sauf `<template>`** : spec
+    /// `clone a node`, ses enfants de `content` sont copiés
+    /// (chacun au niveau superficiel) même pour un clone shallow.
     pub fn clone_shallow_from(&mut self, src_dom: &Dom, src: NodeId) -> NodeId {
         let (kind, tag, attrs, text) = {
             let n = &src_dom.nodes[src as usize];
@@ -2858,6 +2890,22 @@ impl Dom {
         let id = self.alloc(kind, &tag);
         self.nodes[id as usize].attrs = attrs;
         self.nodes[id as usize].text = text;
+        if tag == "template" {
+            if let Some(&frag) = src_dom.template_contents.get(&src) {
+                let dst_frag = self.create_fragment();
+                self.template_contents.insert(id, dst_frag);
+                for &c in &src_dom.nodes[frag as usize].children {
+                    let ck = self.clone_shallow_from(src_dom, c);
+                    self.append(dst_frag, ck);
+                }
+            } else {
+                // `content` paresseux — enfants directs = contenu.
+                for &c in &src_dom.nodes[src as usize].children.clone() {
+                    let ck = self.clone_shallow_from(src_dom, c);
+                    self.append(id, ck);
+                }
+            }
+        }
         id
     }
 
@@ -2866,7 +2914,8 @@ impl Dom {
     /// `src` de `src_dom` dans `self`. Itératif — la profondeur
     /// DOM est contrôlée par le script (JS-C55). La détache de la
     /// source reste à la charge de l'appelant (les emprunts sont
-    /// disjoints).
+    /// disjoints). `<template>` : enfants de `content` copiés
+    /// (même règle spec que [`Self::clone_node`], JS-C320).
     pub fn adopt_from(&mut self, src_dom: &Dom, src: NodeId) -> NodeId {
         let (kind, tag, attrs, text, kids) = {
             let n = &src_dom.nodes[src as usize];
@@ -2881,7 +2930,20 @@ impl Dom {
         let id = self.alloc(kind, &tag);
         self.nodes[id as usize].attrs = attrs;
         self.nodes[id as usize].text = text;
-        let mut work: Vec<(NodeId, NodeId)> = kids.iter().rev().map(|&c| (c, id)).collect();
+        let mut work: Vec<(NodeId, NodeId)> = Vec::new();
+        if tag == "template" {
+            if let Some(&frag) = src_dom.template_contents.get(&src) {
+                let cks = src_dom.nodes[frag as usize].children.clone();
+                let dst_frag = self.create_fragment();
+                self.template_contents.insert(id, dst_frag);
+                work.extend(cks.iter().rev().map(|&c| (c, dst_frag)));
+            } else {
+                // `content` paresseux — enfants directs = contenu.
+                work.extend(kids.iter().rev().map(|&c| (c, id)));
+            }
+        } else {
+            work.extend(kids.iter().rev().map(|&c| (c, id)));
+        }
         while let Some((src_id, dst_parent)) = work.pop() {
             let (k2, t2, a2, x2, kids2) = {
                 let n = &src_dom.nodes[src_id as usize];
@@ -2897,7 +2959,18 @@ impl Dom {
             self.nodes[cid as usize].attrs = a2;
             self.nodes[cid as usize].text = x2;
             self.append(dst_parent, cid);
-            work.extend(kids2.iter().rev().map(|&g| (g, cid)));
+            if t2 == "template" {
+                if let Some(&frag) = src_dom.template_contents.get(&src_id) {
+                    let cks = src_dom.nodes[frag as usize].children.clone();
+                    let dst_frag = self.create_fragment();
+                    self.template_contents.insert(cid, dst_frag);
+                    work.extend(cks.iter().rev().map(|&g| (g, dst_frag)));
+                } else {
+                    work.extend(kids2.iter().rev().map(|&g| (g, cid)));
+                }
+            } else {
+                work.extend(kids2.iter().rev().map(|&g| (g, cid)));
+            }
         }
         id
     }
