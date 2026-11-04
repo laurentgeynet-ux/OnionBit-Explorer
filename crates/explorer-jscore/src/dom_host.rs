@@ -5169,6 +5169,15 @@ impl Host for DocumentHost {
                         Value::Null | Value::Undefined => None,
                         v => node_for_in(e, v, &self.dom),
                     };
+                    // Spec `pre-insert` : le repère doit être
+                    // enfant du document — `NotFoundError`.
+                    if ref_node.is_some_and(|r| self.dom.borrow().parent(r) != Some(root)) {
+                        return Err(crate::heap::Thrown(dom_ex_pub(
+                            e,
+                            "NotFoundError",
+                            "insertBefore: reference not a child",
+                        )));
+                    }
                     self.dom.borrow_mut().insert_before(root, child, ref_node);
                 } else {
                     self.dom.borrow_mut().append(root, child);
@@ -5193,6 +5202,16 @@ impl Host for DocumentHost {
                 if self.dom.borrow().is_ancestor_or_self(root, child) {
                     return Err(e.type_error("HierarchyRequestError: ancestor"));
                 }
+                // Spec `pre-remove`/`replace` : `old` enfant du
+                // document — sinon `NotFoundError` (le `detach`
+                // final arrachait un nœud non-enfant).
+                if self.dom.borrow().parent(old) != Some(root) {
+                    return Err(crate::heap::Thrown(dom_ex_pub(
+                        e,
+                        "NotFoundError",
+                        "replaceChild: node is not a child",
+                    )));
+                }
                 self.dom.borrow_mut().insert_before(root, child, Some(old));
                 self.dom.borrow_mut().detach(old);
                 Ok(Some(arg(args, 1)))
@@ -5200,6 +5219,18 @@ impl Host for DocumentHost {
             "removeChild" => {
                 let target = node_for_in(e, arg(args, 0), &self.dom);
                 if let Some(child) = target {
+                    // Spec `pre-remove` : `child` enfant du
+                    // document — sinon `NotFoundError` (un
+                    // `detach` aveugle arrachait `<html>` sur
+                    // un non-enfant — mur youtube.com).
+                    let root = self.dom.borrow().root;
+                    if self.dom.borrow().parent(child) != Some(root) {
+                        return Err(crate::heap::Thrown(dom_ex_pub(
+                            e,
+                            "NotFoundError",
+                            "removeChild: node is not a child",
+                        )));
+                    }
                     self.dom.borrow_mut().detach(child);
                     Ok(Some(arg(args, 0)))
                 } else {
@@ -7546,6 +7577,17 @@ impl Host for NodeHost {
             "removeChild" => {
                 let target = node_for_in(e, arg(args, 0), &self.dom);
                 if let Some(child) = target {
+                    // Spec `pre-remove` : `child` enfant de
+                    // `node` — `NotFoundError` sinon. Un
+                    // `detach` aveugle arrachait `<html>` à un
+                    // appel sur non-enfant (mur youtube.com).
+                    if self.dom.borrow().parent(child) != Some(node) {
+                        return Err(crate::heap::Thrown(dom_ex_pub(
+                            e,
+                            "NotFoundError",
+                            "removeChild: node is not a child",
+                        )));
+                    }
                     self.dom.borrow_mut().detach(child);
                     Ok(Some(arg(args, 0)))
                 } else {
@@ -7881,6 +7923,16 @@ impl Host for NodeHost {
                     if self.dom.borrow().is_ancestor_or_self(node, c) {
                         return Err(e.type_error("HierarchyRequestError: ancestor"));
                     }
+                    // Spec `pre-insert` : le repère, s'il est
+                    // donné, doit être enfant de `node` —
+                    // `NotFoundError` sinon (parité navigateur).
+                    if ref_n.is_some_and(|r| self.dom.borrow().parent(r) != Some(node)) {
+                        return Err(crate::heap::Thrown(dom_ex_pub(
+                            e,
+                            "NotFoundError",
+                            "insertBefore: reference not a child",
+                        )));
+                    }
                     self.dom.borrow_mut().insert_before(node, c, ref_n);
                     Ok(Some(arg(args, 0)))
                 } else {
@@ -7895,6 +7947,15 @@ impl Host for NodeHost {
                 if let (Some(n), Some(o)) = (new_n, old_n) {
                     if self.dom.borrow().is_ancestor_or_self(node, n) {
                         return Err(e.type_error("HierarchyRequestError: ancestor"));
+                    }
+                    // Spec `replace` : `old` enfant de `node` —
+                    // `NotFoundError` sinon.
+                    if self.dom.borrow().parent(o) != Some(node) {
+                        return Err(crate::heap::Thrown(dom_ex_pub(
+                            e,
+                            "NotFoundError",
+                            "replaceChild: node is not a child",
+                        )));
                     }
                     self.dom.borrow_mut().replace_child(node, n, o);
                     Ok(Some(arg(args, 1)))

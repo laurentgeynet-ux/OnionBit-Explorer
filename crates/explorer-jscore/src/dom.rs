@@ -2469,6 +2469,20 @@ impl Dom {
             return;
         }
         if let Some(p) = self.nodes[node as usize].parent {
+            // Sonde §B-59 : `EXPLORER_DOM_KILL` — tout retrait
+            // direct sous la racine/`html`/`body` s'identifie
+            // (le vidage de page en vol est un mur réel).
+            if std::env::var_os("EXPLORER_DOM_KILL").is_some()
+                && matches!(
+                    self.nodes[p as usize].tag.as_str(),
+                    "#document" | "html" | "body"
+                )
+            {
+                eprintln!(
+                    "[dom-kill] detach tag={} parent={}",
+                    self.nodes[node as usize].tag, self.nodes[p as usize].tag
+                );
+            }
             let (prev, next) = {
                 let kids = &self.nodes[p as usize].children;
                 kids.iter()
@@ -2501,6 +2515,16 @@ impl Dom {
     pub fn replace_children(&mut self, node: NodeId, kids: &[NodeId]) {
         if !self.node_valid(node) {
             return;
+        }
+        // Sonde §B-59 : `EXPLORER_DOM_KILL` — un « replace all »
+        // sous la racine/`html`/`body`, ou retirant une rafale
+        // d'enfants, s'identifie (effacement de page hostile).
+        if std::env::var_os("EXPLORER_DOM_KILL").is_some() {
+            let tag = &self.nodes[node as usize].tag;
+            let old_n = self.nodes[node as usize].children.len();
+            if matches!(tag.as_str(), "#document" | "html" | "body") || old_n > 8 {
+                eprintln!("[dom-kill] replace_children tag={tag} removed={old_n}");
+            }
         }
         let old = std::mem::take(&mut self.nodes[node as usize].children);
         for c in &old {
