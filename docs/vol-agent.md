@@ -165,7 +165,8 @@ Trois faits d'abord — ils orientent tout le vol :
   `MediaSource.isTypeSupported` rend `""` pour **tout**
   type à froid (table `declared_codecs` vide) → tout
   player MSE réel baille au feature-detect
-  (`Hls.isSupported()=false` mesuré, vol 619 — §B-80) →
+  (`Hls.isSupported()=false` vol 619 — §B-80 — puis
+  `=true` vol 620 dès la variable posée) →
   aucune `MediaSource` → pas de surface à claimer.
   Poulet-et-œuf : le claim apprend les codecs mais le
   feature-detect précède tout claim. Liste `;`-séparée
@@ -280,9 +281,17 @@ cycle progressif complet sur site réel (2 surfaces,
 claim/409/`{mse:false}`/state/release) ; vol 619
 (mdn.github.io) — cycle MSE complet avec octets réels
 (`appendBuffer` 64 o → `GET segments` rend les 64 o
-exacts, cursors/`?from=`/416/`X-Mse-Eos` justes). Reste
-à mesurer : niveau b) sur site réel (décodage hôte),
-`mse:true` hors démos.
+exacts, cursors/`?from=`/416/`X-Mse-Eos` justes) ;
+vol 620 — §B-80 levée par la variable ci-dessus
+(`Hls.isSupported()=true`, manifeste hls.js 5 niveaux
+fetché/parsé — attache mort sur gap DOM démo `hls-demo.js`,
+pas hls.js core) ; vol 621 — **deux cycles complets sur
+sites vidéo réels** (media.ccc.de, coub ×7 surfaces) : la
+formule gagnante = `<video>` en markup **SSR** (claim à
+coup sûr, aucune race JS). Reste à mesurer : niveau b)
+sur site réel (décodage hôte — ces vols n'ont exercé que
+le contrat, jamais `onionmedia`), `mse:true` sur player
+réel sans armure UI (shaka/videojs-http-streaming).
 
 Claims codecs : l'oracle = `onionmedia_can_play_type`
 (`""`/`maybe`/`probable`), table déclarée alignée
