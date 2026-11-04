@@ -331,12 +331,15 @@ fetché/parsé — attache mort sur gap DOM démo `hls-demo.js`,
 pas hls.js core) ; vol 621 — **deux cycles complets sur
 sites vidéo réels** (media.ccc.de, coub ×7 surfaces) : la
 formule gagnante = `<video>` en markup **SSR** (claim à
-coup sûr, aucune race JS). Niveau b) validé en local
-(`rest_host_probe` + mp4 h264 : 60/60 trames, état réel
-persisté). Reste à mesurer : b) sur site réel (mp4
-progressif ccc/coub/commons), `mse:true` décodé (player
-sans armure UI — shaka/videojs-http-streaming), PCM
-audio `--pull`, `--seek-ms` sur surface vivante.
+coup sûr, aucune race JS). **Vol 623 — premier décodage
+réel de la campagne** (`rest_host_probe` sur
+media.ccc.de, mp4 1080p réel) : `frames=32 1920x1080`
++ `pcm=1,19 Mo` AAC, `streams=2` (H264+Aac),
+`underrun=0`, état `playing` persisté par le moteur —
+le DLL déployé a décodé sur site réel en REST pur.
+Reste à mesurer : `mse:true` décodé (player sans armure
+UI — shaka/videojs-http-streaming), `--seek-ms` sur
+surface vivante, multi-buffer MSE (`open_mse_multi`).
 
 Claims codecs : l'oracle = `onionmedia_can_play_type`
 (`""`/`maybe`/`probable`), table déclarée alignée
