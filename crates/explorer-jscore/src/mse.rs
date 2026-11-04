@@ -42,7 +42,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use crate::dom::NodeId;
+use crate::dom::{MediaReport, MediaState, NodeId};
 use crate::heap::{Host, JsResult, ObjKind, Thrown};
 use crate::value::{ObjId, Value};
 use crate::Engine;
@@ -365,6 +365,11 @@ struct SbData {
     est_ranges: Vec<(f64, f64)>,
     est_span: f64,
     last_append_t: Option<f64>,
+    /// `timestampOffset` posé explicitement depuis le dernier
+    /// append (JS-C325) — en mode `sequence` le prochain
+    /// append part de cette valeur puis le chaînage reprend
+    /// (spec) ; consommé par chaque `appendBuffer`.
+    offset_dirty: bool,
     /// Timescale média lu dans le `mdhd` de l'init segment
     /// fMP4 (JS-C285) — sert à convertir `tfdt`/durées
     /// `trun` des `moof` en secondes. `None` tant qu'aucun
@@ -429,6 +434,49 @@ fn tr_ranges(e: &Engine, v: Value) -> Option<Rc<Vec<(f64, f64)>>> {
 /// `v` est un wrapper `MediaSource` (pour `createObjectURL`).
 pub(crate) fn is_media_source(e: &Engine, v: Value) -> bool {
     ms_data(e, v).is_some()
+}
+
+/// `readyState` du `MediaSource` parent (`sd.ms` = wrapper) —
+/// `None` = parent mort (orphelin, traité comme `closed`).
+fn parent_state(e: &Engine, sd: &SbData) -> Option<&'static str> {
+    ms_data(e, sd.ms).map(|ms| ms.borrow().ready_state)
+}
+
+/// Garde `updating` spec (JS-C325) : un appel re-entrant
+/// depuis un listener `updatestart`/`update` **synchrone**
+/// doit jeter `InvalidStateError`, pas corrompre la machine
+/// à états (nos events sont tirés en séquence — `updating`
+/// n'est observable `true` que pendant leur fenêtre).
+fn sb_updating_guard(e: &mut Engine, sd: &SbData, op: &'static str) -> JsResult<()> {
+    if sd.updating {
+        return Err(mse_err(
+            e,
+            "InvalidStateError",
+            &format!("SourceBuffer.{op}: updating"),
+        ));
+    }
+    Ok(())
+}
+
+/// Spec (JS-C325) — `appendBuffer`/`abort` sur un parent
+/// `readyState=="ended"` : `open` + `sourceopen` **filé en
+/// tâche** (file JS-C324). C'est le mécanisme live-edge des
+/// players réels — `endOfStream()` à la frontière puis les
+/// appends reprennent ; sans le flip `mse_pull_segments`
+/// rendait `eos` figé (file vide + `ended`) et l'hôte
+/// croyait le flux clos. `closed`/orphelin : déviation
+/// documentée conservée (le transport sert hors attache).
+fn reopen_if_ended(e: &mut Engine, sd: &SbData) {
+    if parent_state(e, sd) != Some("ended") {
+        return;
+    }
+    let Some(ms) = ms_data(e, sd.ms) else {
+        return;
+    };
+    ms.borrow_mut().ready_state = "open";
+    if let Value::Obj(mid) = sd.ms {
+        e.mse.pending_events.push_back((mid, "sourceopen"));
+    }
 }
 
 /// Erreur DOM nommée jetée — `{name, message}` (approximation
@@ -743,10 +791,14 @@ fn codec_prefix(s: &str) -> Option<String> {
 /// connu sans `codecs` → `"maybe"` ; sinon `""`. Table vide →
 /// `""` partout (état C173 préservé — jamais de promesse sans
 /// transport déclaré, ADR-0023).
-fn ms_is_type_supported(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
-    let mime = e
-        .to_js_string(args.first().copied().unwrap_or(Value::Undefined))?
-        .to_lowercase();
+/// Support type MSE partagé (JS-C325 — extrait pour
+/// `changeType`) : conteneur connu, et tous les codecs du
+/// param `codecs=` déclarés quand la liste est présente
+/// (le conteneur seul suffit sinon, table non vide requise).
+/// Table vide → `false` partout (état C173 — jamais de
+/// promesse sans transport déclaré, ADR-0023).
+fn mse_type_supported(e: &Engine, mime: &str) -> bool {
+    let mime = mime.to_lowercase();
     // Conteneur `type/subtype` — la borne `;` isole `codecs`.
     let container = mime.split(';').next().unwrap_or("").trim();
     let known = matches!(
@@ -762,7 +814,7 @@ fn ms_is_type_supported(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<V
             | "audio/wav"
             | "audio/x-wav"
     );
-    let ok = known
+    known
         && match mime.split("codecs=").nth(1) {
             Some(cstr) => {
                 let cstr = cstr.trim_matches(|c| c == '"' || c == '\'');
@@ -771,10 +823,18 @@ fn ms_is_type_supported(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<V
                     .all(|p| e.mse.declared_codecs.contains(&p))
             }
             // Pas de liste : le conteneur connu suffit —
-            // `"maybe"` honnête (le codec réel peut manquer).
+            // honnête (le codec réel peut manquer).
             None => !e.mse.declared_codecs.is_empty(),
-        };
-    Ok(e.str_val(if ok { "maybe" } else { "" }))
+        }
+}
+
+fn ms_is_type_supported(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
+    let mime = e.to_js_string(args.first().copied().unwrap_or(Value::Undefined))?;
+    Ok(e.str_val(if mse_type_supported(e, &mime) {
+        "maybe"
+    } else {
+        ""
+    }))
 }
 
 /// `HTMLMediaElement.canPlayType(mime)` (§B-82) — même table
@@ -848,6 +908,13 @@ fn ms_add_source_buffer(e: &mut Engine, this: Value, args: &[Value]) -> JsResult
         return Err(e.type_error("MediaSource.addSourceBuffer: 1 argument required"));
     };
     let mime = e.to_js_string(v)?;
+    // Spec (JS-C325) : chaîne vide → `TypeError`. La
+    // validation du type reste tolérante (déviation
+    // documentée — la table `declared_codecs` peut être
+    // vide avant tout claim ; cf. en-tête de module).
+    if mime.trim().is_empty() {
+        return Err(e.type_error("MediaSource.addSourceBuffer: empty type"));
+    }
     if d.borrow().buffers.len() >= MS_BUFFER_CAP {
         return Err(mse_err(
             e,
@@ -866,6 +933,7 @@ fn ms_add_source_buffer(e: &mut Engine, this: Value, args: &[Value]) -> JsResult
         timescale: None,
         mode: "segments".to_string(),
         timestamp_offset: 0.0,
+        offset_dirty: false,
         append_start: 0.0,
         append_end: f64::INFINITY,
         segments: std::collections::VecDeque::new(),
@@ -926,18 +994,104 @@ fn ms_remove_source_buffer(e: &mut Engine, this: Value, args: &[Value]) -> JsRes
 
 /// `ms.endOfStream(err?)` — `readyState` → `"ended"` +
 /// `sourceended` **filé en tâche** (JS-C324 — spec : mise en
-/// file, pas synchrone). Permis hors `"open"` (déviation
-/// documentée).
-fn ms_end_of_stream(e: &mut Engine, this: Value, _args: &[Value]) -> JsResult<Value> {
+/// file, pas synchrone). JS-C325 : garde spec `updating`
+/// (`InvalidStateError` si un buffer met à jour — un appel
+/// re-entrant pendant `updatestart` ne clôt pas le flux sous
+/// le dos du buffer) ; param `"network"`/`"decode"` →
+/// `MediaError` livré à l'élément attaché (infra étape 182),
+/// autre valeur → `TypeError`. Déviations documentées
+/// conservées : permis hors `"open"` (`closed` → `ended`
+/// directement — le transport sert hors attache) et un
+/// double appel est un no-op propre (`sourceended` non
+/// re-filé).
+fn ms_end_of_stream(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let Some(d) = ms_data(e, this) else {
         return Err(e.type_error("MediaSource.endOfStream: Illegal invocation"));
     };
-    d.borrow_mut().ready_state = "ended";
-    let Value::Obj(mid) = this else {
-        return Ok(Value::Undefined);
+    // Spec : un `SourceBuffer` `updating` → InvalidStateError.
+    for sbv in &d.borrow().buffers {
+        let Some(sd) = sb_data(e, *sbv) else {
+            continue;
+        };
+        if sd.borrow().updating {
+            return Err(mse_err(
+                e,
+                "InvalidStateError",
+                "MediaSource.endOfStream: buffer updating",
+            ));
+        }
+    }
+    let kind = match args.first() {
+        None | Some(Value::Undefined) => None,
+        Some(v) => {
+            let s = e.to_js_string(*v)?;
+            match s.as_str() {
+                "network" | "decode" => Some(s),
+                _ => return Err(e.type_error("MediaSource.endOfStream: bad error name")),
+            }
+        }
     };
-    e.mse.pending_events.push_back((mid, "sourceended"));
+    let mid = if let Value::Obj(id) = this {
+        Some(id)
+    } else {
+        None
+    };
+    if d.borrow().ready_state != "ended" {
+        d.borrow_mut().ready_state = "ended";
+        if let Some(m) = mid {
+            e.mse.pending_events.push_back((m, "sourceended"));
+        }
+    }
+    if let (Some(m), Some(k)) = (mid, kind) {
+        deliver_eos_error(e, m, &k)?;
+    }
     Ok(Value::Undefined)
+}
+
+/// `endOfStream("network"|"decode")` → `MediaError` sur
+/// l'élément attaché (JS-C325 — spec : la faute EOS est
+/// rapportée à l'élément média). `v.error` reflète
+/// `state:Error` quand la surface est **claimée** (position/
+/// durée préservées du rapport courant) + les promesses
+/// `play()` pendantes sont rejetées — même contrat que le
+/// chemin `state` hôte (étape 182). L'event `error` est
+/// tiré dans tous les cas : non-claimé = signal listener
+/// seul (`el.error` reste `null` — l'élément sans surface
+/// n'a pas d'état de lecture à corrompre, déviation
+/// documentée). Attache morte → no-op sûr.
+fn deliver_eos_error(e: &mut Engine, mid: ObjId, kind: &str) -> JsResult<()> {
+    let Some(node) = e.mse.attached_to.get(&mid).copied() else {
+        return Ok(());
+    };
+    let Some((dom, cache)) = e.dom_ctx.clone() else {
+        return Ok(());
+    };
+    // Chaîne classifiable `MediaErrorCode::of` — "network"
+    // → `MEDIA_ERR_NETWORK` (2), "decode" → `MEDIA_ERR_DECODE`
+    // (3) : le message porte le code, comme le rapport hôte.
+    let msg = format!("MediaSource endOfStream: {kind} error");
+    let pids = {
+        let mut d = dom.borrow_mut();
+        match d.media.get_mut(&node) {
+            Some(st) => {
+                let prev = st.report.take();
+                st.report = Some(MediaReport {
+                    position_ms: prev.as_ref().map_or(0, |r| r.position_ms),
+                    duration_ms: prev.as_ref().and_then(|r| r.duration_ms),
+                    buffered_ms: prev.as_ref().map_or(0, |r| r.buffered_ms),
+                    state: MediaState::Error,
+                    error: Some(msg.clone()),
+                });
+                std::mem::take(&mut st.pending_play)
+            }
+            None => Vec::new(),
+        }
+    };
+    let mv = e.str_val(&msg);
+    for p in pids {
+        e.reject_promise(p, mv);
+    }
+    e.dispatch_media(&dom, &cache, node, "error")
 }
 
 /// `ms.setLiveSeekableRange(start, end)` — plage live retenue,
@@ -1261,6 +1415,33 @@ fn sb_append_buffer(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Val
     };
     {
         let mut sd = d.borrow_mut();
+        // JS-C325 — gardes spec : appel re-entrant pendant
+        // `updatestart`/`update` → `InvalidStateError` ;
+        // parent `ended` → `open` + `sourceopen` filé
+        // (mécanisme live-edge — voir `reopen_if_ended`).
+        sb_updating_guard(e, &sd, "appendBuffer")?;
+        reopen_if_ended(e, &sd);
+        // JS-C325 — mode `sequence` : la base d'offset chaîne
+        // à la fin du dernier range bufferisé (spec — appends
+        // contigus sans `timestampOffset`) ; un set explicite
+        // (`offset_dirty`) s'applique une fois puis la chaîne
+        // reprend. `timestamp_offset` est swapé le temps du
+        // calcul pour réutiliser les deux chemins existants.
+        let eff_offset = if sd.mode == "sequence" && !sd.offset_dirty {
+            sd.est_ranges
+                .last()
+                .map_or(sd.timestamp_offset, |&(_, b)| b)
+        } else {
+            sd.timestamp_offset
+        };
+        if sd.mode == "sequence" && sd.offset_dirty {
+            // Set explicite en `sequence` = nouveau point de
+            // chaînage (spec), pas un delta observé : la
+            // correction rétroactive de span de l'estimateur
+            // ne doit pas « réparer » la plage précédente en
+            // l'étirant jusqu'au nouvel offset.
+            sd.last_append_t = None;
+        }
         let next = sd.bytes.saturating_add(bytes.len());
         if next > SB_BYTE_CAP {
             return Err(mse_err(
@@ -1269,6 +1450,7 @@ fn sb_append_buffer(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Val
                 "SourceBuffer: byte quota exceeded",
             ));
         }
+        let raw_offset = std::mem::replace(&mut sd.timestamp_offset, eff_offset);
         // JS-C285 — timestamps en bande : scan fMP4 AVANT
         // l'entrée en file (la donnée réelle — `mdhd` de
         // l'init, `tfdt`+durées `trun` des `moof` — est ce
@@ -1323,6 +1505,18 @@ fn sb_append_buffer(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Val
         // JS-C296 — offset intra-chunk exact (`moov` peut
         // suivre du média dans le même append).
         sd.seg_boundary.push_back(scan.moov_off);
+        // JS-C325 — post-append : en `sequence` l'offset
+        // avance à la nouvelle fin bufferisée (le prochain
+        // append chaîne là, spec) ; en `segments` la valeur
+        // de la page est restaurée inchangée. L'offset
+        // explicite (`offset_dirty`) est consommé dans tous
+        // les cas — un set vaut pour un seul append.
+        if sd.mode == "sequence" {
+            sd.timestamp_offset = sd.est_ranges.last().map_or(eff_offset, |&(_, b)| b);
+        } else {
+            sd.timestamp_offset = raw_offset;
+        }
+        sd.offset_dirty = false;
     }
     let Value::Obj(sid) = this else {
         return Ok(Value::Undefined);
@@ -1351,23 +1545,32 @@ fn sb_append_buffer(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Val
     }
 }
 
-/// `sb.abort()` — `updating` retombé + `abort`/`updateend`.
-/// Spec : abort vide le buffer — les octets en file non
-/// consommés sont abandonnés (MSE-3).
+/// `sb.abort()` — spec (JS-C325) : annule l'op en vol
+/// (`updating` → `abort`+`updateend`) et reset l'état
+/// **parseur** — sans toucher le média committé. La sémantique
+/// historique « abort vide tout » est retirée : elle vidait
+/// `segments`/`est_ranges` → `sb.buffered`/`media.buffered`
+/// tombaient à zéro après un abort que les players réels
+/// utilisent au switch/détachement (hls.js) — famine
+/// fantôme, `readyState` rétrogradé. `segments` (file de
+/// transport déjà commitée), `served`, `est_ranges`,
+/// `timescale` = média appendé, conservé ; seuls
+/// `updating` et le chaînage de l'estimateur sont reset
+/// (`last_append_t` — spec « reset parser state »).
+/// Parent `ended` → `open` + `sourceopen` filé
+/// (`reopen_if_ended`). `abort`+`updateend` tirés
+/// inconditionnellement (déviation documentée — spec : la
+/// paire n'existe qu'en abortant un append en vol ; notre
+/// modèle est atomique, les players bouclent sur
+/// `updateend` pour armer la suite).
 fn sb_abort(e: &mut Engine, this: Value, _args: &[Value]) -> JsResult<Value> {
     let Some(d) = sb_data(e, this) else {
         return Err(e.type_error("SourceBuffer.abort: Illegal invocation"));
     };
     {
         let mut sd = d.borrow_mut();
+        reopen_if_ended(e, &sd);
         sd.updating = false;
-        sd.segments.clear();
-        sd.seg_ranges.clear();
-        sd.seg_boundary.clear();
-        sd.bytes = 0;
-        // JS-C278 — abort vide le buffer : l'estimation
-        // repart à zéro comme la file d'octets.
-        sd.est_ranges.clear();
         sd.last_append_t = None;
     }
     let Value::Obj(sid) = this else {
@@ -1395,6 +1598,7 @@ fn sb_remove(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     }
     {
         let mut sd = d.borrow_mut();
+        sb_updating_guard(e, &sd, "remove")?;
         sd.updating = true;
         // JS-C287 — éviction par plage : chaque chunk file
         // porte la plage qu'il a contribuée ; seuls les
@@ -1467,15 +1671,30 @@ fn sb_remove(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     }
 }
 
-/// `sb.changeType(mime)` — mime retenu (spec : re-parse du
-/// type supporté — le support reste `""` en C173, on accepte
-/// et on retient pour le futur transport).
+/// `sb.changeType(mime)` — JS-C325 : garde `updating` +
+/// validation spec `NotSupportedError` **quand la table
+/// `declared_codecs` est renseignée** (vide = aucune vérité
+/// terrain avant claim → tolérance documentée, même économie
+/// qu'`addSourceBuffer`). Le nouveau mime met à jour
+/// `sd.mime` — le seam `mse_source_buffers` le publie
+/// gratuitement au prochain claim. Reset parseur spec :
+/// la chaîne d'offsets de l'estimateur recommence.
 fn sb_change_type(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let Some(d) = sb_data(e, this) else {
         return Err(e.type_error("SourceBuffer.changeType: Illegal invocation"));
     };
     let mime = e.to_js_string(args.first().copied().unwrap_or(Value::Undefined))?;
-    d.borrow_mut().mime = mime;
+    let mut sd = d.borrow_mut();
+    sb_updating_guard(e, &sd, "changeType")?;
+    if !e.mse.declared_codecs.is_empty() && !mse_type_supported(e, &mime) {
+        return Err(mse_err(
+            e,
+            "NotSupportedError",
+            "SourceBuffer.changeType: unsupported type",
+        ));
+    }
+    sd.mime = mime;
+    sd.last_append_t = None;
     Ok(Value::Undefined)
 }
 
@@ -1841,6 +2060,40 @@ impl Host for MsHost {
             if n.is_nan() || n < 0.0 {
                 return Err(e.type_error("MediaSource.duration: bad value"));
             }
+            // JS-C325 — spec : un `SourceBuffer` `updating` →
+            // `InvalidStateError` ; nouvelle durée < ancienne
+            // → suppression de plage (`est_ranges` tronquées,
+            // `buffered`/`seekable` MSE en héritent via
+            // `mse_buffered_union`).
+            let (buffers, old) = {
+                let md = self.d.borrow();
+                (md.buffers.clone(), md.duration)
+            };
+            for sbv in &buffers {
+                let Some(sd) = sb_data(e, *sbv) else {
+                    continue;
+                };
+                if sd.borrow().updating {
+                    return Err(mse_err(
+                        e,
+                        "InvalidStateError",
+                        "MediaSource.duration: buffer updating",
+                    ));
+                }
+            }
+            if old.is_finite() && n < old {
+                for sbv in &buffers {
+                    let Some(sd) = sb_data(e, *sbv) else {
+                        continue;
+                    };
+                    let mut s = sd.borrow_mut();
+                    s.est_ranges = s
+                        .est_ranges
+                        .iter()
+                        .filter_map(|&(a, b)| (a < n).then_some((a, b.min(n))))
+                        .collect();
+                }
+            }
             self.d.borrow_mut().duration = n;
             return Ok(true);
         }
@@ -1887,7 +2140,11 @@ impl Host for SbHost {
 
     fn set(&self, e: &mut Engine, _t: Value, k: &str, v: Value) -> JsResult<bool> {
         match k {
+            // JS-C325 — spec : set pendant `updating` →
+            // `InvalidStateError` (fenêtre re-entrante des
+            // events synchrones).
             "mode" => {
+                sb_updating_guard(e, &self.d.borrow(), "mode")?;
                 let m = e.to_js_string(v)?;
                 if m != "segments" && m != "sequence" {
                     return Err(e.type_error("SourceBuffer.mode: bad value"));
@@ -1896,25 +2153,40 @@ impl Host for SbHost {
                 Ok(true)
             }
             "timestampOffset" => {
+                sb_updating_guard(e, &self.d.borrow(), "timestampOffset")?;
                 let n = e.to_number(v)?;
                 if !n.is_finite() {
                     return Err(e.type_error("SourceBuffer.timestampOffset: bad value"));
                 }
-                self.d.borrow_mut().timestamp_offset = n;
+                let mut d = self.d.borrow_mut();
+                d.timestamp_offset = n;
+                // JS-C325 — offset explicite : en `sequence`
+                // le prochain append part d'ici (spec) puis
+                // le chaînage reprend — marqueur consommé par
+                // `appendBuffer`. `last_append_t` reste :
+                // la correction de span de l'estimateur vit
+                // des deltas d'offsets successifs.
+                d.offset_dirty = true;
                 Ok(true)
             }
             "appendWindowStart" | "appendWindowEnd" => {
+                sb_updating_guard(e, &self.d.borrow(), "appendWindow")?;
                 let n = e.to_number(v)?;
                 if n.is_nan() {
                     return Err(e.type_error("SourceBuffer.appendWindow: bad value"));
                 }
                 let mut d = self.d.borrow_mut();
                 if k == "appendWindowStart" {
-                    if n < 0.0 {
+                    // Spec : `start` ≥ 0 et < `appendWindowEnd`.
+                    if n < 0.0 || n >= d.append_end {
                         return Err(e.type_error("SourceBuffer.appendWindowStart: bad value"));
                     }
                     d.append_start = n;
                 } else {
+                    // Spec : `end` > `appendWindowStart`.
+                    if n <= d.append_start {
+                        return Err(e.type_error("SourceBuffer.appendWindowEnd: bad value"));
+                    }
                     d.append_end = n;
                 }
                 Ok(true)

@@ -180,10 +180,13 @@ fn js_c278_buffered_estime_offsets_et_remove() {
 }
 
 #[test]
-fn js_c278_buffered_append_window_clip_et_abort_vide() {
+fn js_c278_buffered_append_window_clip_et_abort_conserve() {
     let mut e = engine();
     // Clip append window : `appendWindowEnd` borne la fin
-    // estimée ; `abort` vide l'estimation comme la file.
+    // estimée. JS-C325 — `abort` est spec : il conserve le
+    // média committé (`buffered` survit) et ne reset que
+    // l'état parseur — l'ancienne sémantique « abort vide
+    // tout » vidait le miroir après un abort de player réel.
     assert_eq!(
         ev(
             &mut e,
@@ -193,9 +196,9 @@ fn js_c278_buffered_append_window_clip_et_abort_vide() {
              sb.appendBuffer(new Uint8Array(8));\
              var w=sb.buffered.end(0);\
              sb.abort();\
-             w+'/'+sb.buffered.length"
+             w+'/'+sb.buffered.length+'/'+sb.buffered.end(0)"
         ),
-        "4/0"
+        "4/1/4"
     );
 }
 

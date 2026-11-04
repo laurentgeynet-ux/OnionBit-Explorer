@@ -9106,6 +9106,44 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   `mseBuffers` (`?buffer=N` — rails
   P-53 `open_mse_multi`). Verrous ×2.
 
+- [x] **JS-C325. Complétude MSE côté
+  API — machine à états spec**
+  (§B-83-branche-B, le bras avant
+  tout re-vol MSE) — `appendBuffer`
+  sur `ended` rouvre `open` +
+  re-file `sourceopen` (déblocage
+  live hls.js : l'hôte ne voit plus
+  `eos` prématuré) ; gardes
+  `updating`→`InvalidStateError` sur
+  toutes les méthodes+setters ;
+  `abort()` non destructeur (média
+  committé conservé, parser-state
+  reset, `ended`→`open`) ;
+  `endOfStream("network"|"decode")`
+  → `MediaError` code 2/3 sur
+  l'élément attaché (`TypeError`
+  sinon, `InvalidStateError` si un
+  buffer update) ; `changeType`
+  validé quand la table codecs est
+  déclarée (`NotSupportedError`),
+  `mime` publié au transport ;
+  `duration` à la baisse tronque
+  `est_ranges` (`buffered`/`seekable`
+  héritent) ; `mode:"sequence"`
+  chaîne les appends à la fin du
+  dernier range (`timestampOffset`
+  explicite redémarre). Déviation
+  documentée : ops transport sur
+  `MediaSource` `closed` tolérées
+  (verrous c193/mse3). Verrous
+  `mse4_api.rs` ×8 + canaris mse3
+  12/12, c193 12/12, mse2 7/7,
+  media_events 9/9. Suite : JS-C327
+  track lists (`trak` fMP4 →
+  `audioTracks`/`videoTracks`/
+  `textTracks` — JS-C326 pris par
+  le fix microtasks-vs-timers).
+
 ## Tâches continues
 
 - **Spécialiste JS** : divergence miroir ↔ `explorer-dom` quand

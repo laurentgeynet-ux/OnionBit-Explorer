@@ -7,7 +7,9 @@
 //! draine au plus `max` octets en vrac (`(octets, curseur,
 //! eos)`) pour le `MseSource` `ByteSource` hôte ; `eos`
 //! quand `endOfStream` est appelé **et** la file vide ;
-//! `abort` vide la file ; `remove` n'évince que les chunks
+//! `abort` conserve le média committé (JS-C325 — spec : la
+//! file transporte des appends déjà `updateend`, pas un
+//! input parseur) ; `remove` n'évince que les chunks
 //! dont la plage est entièrement couverte (JS-C287) ;
 //! `?buffer=N`
 //! indexe le `addSourceBuffer`.
@@ -110,7 +112,7 @@ fn mse3_end_of_stream_sets_eos_when_drained() {
 }
 
 #[test]
-fn mse3_abort_and_remove_drop_queued_bytes() {
+fn mse3_abort_preserves_committed_bytes() {
     let mut e = engine();
     let u = attached_url(&mut e);
     ev(
@@ -132,11 +134,18 @@ fn mse3_abort_and_remove_drop_queued_bytes() {
         "sb.appendBuffer(new Uint8Array([2,2]));\
          sb.abort();",
     );
+    // JS-C325 — `abort` conserve le média committé (spec :
+    // il annule l'op en vol, pas les appends déjà livrés à
+    // `updateend`) — l'octet `[2,2]` atteint l'hôte.
     let (data, _, _, _s) = e
         .mse_pull_segments(&u, 0, 16, None, false)
         .expect("pull2")
         .expect("servable");
-    assert_eq!(data, Vec::<u8>::new(), "abort aurait dû vider la file");
+    assert_eq!(
+        data,
+        vec![2, 2],
+        "abort ne doit pas perdre un append committé"
+    );
 }
 
 /// JS-C287 — `remove` n'évince que les chunks entièrement
@@ -232,9 +241,9 @@ fn mse3_section_offsets_mark_reinit() {
         .expect("servable");
     assert_eq!(sections, vec![il + sl, 2 * (il + sl)]);
     assert_eq!(data.len() as u64, 3 * il + 2 * sl);
-    // `abort` vide la file avant tout pull : l'init jeté
-    // n'a jamais été servi → le re-init suivant est le
-    // PREMIER vu de l'hôte → aucune frontière.
+    // JS-C325 — `abort` conserve le média committé : les
+    // trois inits atteignent l'hôte, les re-servies marquent
+    // une frontière chacune (premier init = pas de frontière).
     ev(&mut e, "var sb2=__ms.addSourceBuffer('audio/mp4');");
     e.eval(&format!(
         "sb2.appendBuffer(H('{INIT}').buffer);\
@@ -247,7 +256,7 @@ fn mse3_section_offsets_mark_reinit() {
         .mse_pull_segments(&u, 1, 65536, None, false)
         .expect("pull2")
         .expect("servable");
-    assert_eq!(sections2, Vec::<u64>::new());
+    assert_eq!(sections2, vec![il, 2 * il]);
 }
 
 #[test]
@@ -582,7 +591,7 @@ fn mse3_peek_reads_window_without_disturbing_fifo() {
         .mse_pull_segments(&u, 0, 65536, None, false)
         .expect("pull2")
         .expect("pull2 ok");
-    assert!(tail.is_empty());
+    assert_eq!(tail, Vec::<u8>::new());
     // Hors fenêtre : même `416` filaire que `?from=`.
     assert!(e
         .mse_pull_segments(&u, 0, 16, Some(9_999), true)
