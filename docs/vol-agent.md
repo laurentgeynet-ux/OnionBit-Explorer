@@ -153,13 +153,32 @@ Format `input` : `{"type":"click","x":N,"y":N}` (px viewport),
 
 ## 3b. Média — vol e2e (offre/claim/segments/state, ADR-0029)
 
-Deux faits d'abord — ils orientent tout le vol :
+Trois faits d'abord — ils orientent tout le vol :
 
 - **Le moteur ne décode pas.** Le daemon n'ouvre jamais
   `onionmedia_ffi.dll` : il *offre* les surfaces
   `<video>`/`<audio>`/MSE, l'hôte (app Flutter) *joue*.
   Un vol API pur éprouve le contrat — offre, claim,
   segments, state — jamais les pixels.
+- **`EXPLORER_MEDIA_CODECS` au lancement du daemon** —
+  obligatoire pour un vol média. Sans elle,
+  `MediaSource.isTypeSupported` rend `""` pour **tout**
+  type à froid (table `declared_codecs` vide) → tout
+  player MSE réel baille au feature-detect
+  (`Hls.isSupported()=false` mesuré, vol 619 — §B-80) →
+  aucune `MediaSource` → pas de surface à claimer.
+  Poulet-et-œuf : le claim apprend les codecs mais le
+  feature-detect précède tout claim. Liste `;`-séparée
+  = `AppConfig.mediaCodecs` de l'app (préfixes nus ou
+  MIME `codecs="a,b"` — le `;` interne est toléré) :
+
+  ```powershell
+  $env:EXPLORER_MEDIA_CODECS='avc1;hev1;hvc1;vp09;av01;vp08;mp4a;mp3;opus;vorbis;flac;ac3;ipcm'
+  ```
+
+  Avec elle : conteneur connu sans `codecs=` → `"maybe"`,
+  `codecs=` dont tous les préfixes sont déclarés →
+  `"maybe"`, sinon `""` — le player démarre.
 - **L'hôte résout le DLL adjacente** —
   `onionmedia_ffi.dll` à côté de `explorer_app.exe`
   (`ONIONMEDIA_FFI_LIB` sinon). Vérifier le md5 du
@@ -202,6 +221,24 @@ Commands JS → hôte : `media_command` en SSE (`play`/`pause`/
 `seek`/`volume`/`muted`/`rate`) — tiré quand la page appelle
 `.play()` etc. Rapport hôte → `POST …/state` borné ≤ 4 Hz.
 
+**États du contrat mesurés en vol (618/619)** — attendus,
+pas des bugs :
+
+- `<video>` **sans `src`** n'est jamais offert — rien à
+  claimer (players masquant l'élément au feature-detect
+  → `media_surfaces=0`, contractuellement juste).
+- Réassigner `src` **tue la surface** : `410` sur l'ancien
+  `mid`, nouvelle offre sous un autre id.
+- `GET …/segments` sur surface progressive → `{mse:false}`
+  (réponse honnête, pas d'invention de segments).
+- 2ᵉ `claim` → `409` (first-wins) ; les codecs du claim
+  sont persistés dans l'offre **et** alimentent la table
+  `isTypeSupported` du document (un claim local débloque
+  `"maybe"` au niveau conteneur pour tout le doc).
+- Claim immédiat post-offre : le §B-79 « surfaces mortes
+  au claim » était un produit de la destruction moteur
+  (§B-1), pas un défaut de la couche media — mesuré vol 618.
+
 ### b) Lecture réelle — pixels = app hôte
 
 ```powershell
@@ -211,11 +248,11 @@ terrain-bin\app\explorer_app.exe
 # mode REST : explorer-daemon.exe --port 9377, puis l'app
 ```
 
-L'app auto-claim avec `AppConfig.mediaCodecs` (les
-capacités moteur : `EXPLORER_MEDIA_CODECS` côté daemon —
-liste `;`-séparée — / `explorer_media_codecs` côté FFI ;
-`MediaSource.isTypeSupported` JS en dépend) puis joue via
-`OnionMediaPlayer` : `onionmedia_open_path` (fichier local),
+L'app auto-claim avec `AppConfig.mediaCodecs` (capacités
+moteur : `EXPLORER_MEDIA_CODECS` côté daemon —
+prérequis du §3b — / `explorer_media_codecs` côté FFI)
+puis joue via `OnionMediaPlayer` :
+`onionmedia_open_path` (fichier local),
 `open_url` (http, HLS `.m3u8`, DASH `.mpd`),
 `open_mse`/`open_mse_multi` (surfaces MSE — pull loopback
 FFI ou `GET …/segments`).
@@ -237,6 +274,15 @@ Pixels : **la frame moteur ne montre pas la vidéo** —
 l'image décodée est un overlay hôte (§4). Verdict visuel
 = `scripts/capture_window.ps1` (fenêtre réelle), pas
 `GET …/frame`.
+
+Références terrain : vol 618 (commons.wikimedia.org) —
+cycle progressif complet sur site réel (2 surfaces,
+claim/409/`{mse:false}`/state/release) ; vol 619
+(mdn.github.io) — cycle MSE complet avec octets réels
+(`appendBuffer` 64 o → `GET segments` rend les 64 o
+exacts, cursors/`?from=`/416/`X-Mse-Eos` justes). Reste
+à mesurer : niveau b) sur site réel (décodage hôte),
+`mse:true` hors démos.
 
 Claims codecs : l'oracle = `onionmedia_can_play_type`
 (`""`/`maybe`/`probable`), table déclarée alignée
