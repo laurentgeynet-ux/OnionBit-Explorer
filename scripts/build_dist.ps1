@@ -99,11 +99,15 @@ try {
         "Ne pas supprimer - deplacable tel quel sur cle USB ou disque externe." |
         Set-Content $marker -Encoding ascii
 
-    # Payload : exe Flutter + DLLs + data\ ; la DLL moteur compilee
-    # ici est deposee a cote — jamais une dll perimee adjacente
-    # (etape 119 : en mode auto elle gagnait la sonde tryLoad).
+    # Payload : exe Flutter + DLLs + data\ ; la DLL moteur est
+    # deposee a cote par deploy_engine.ps1 — jamais une dll
+    # perimee adjacente (etape 119 : en mode auto elle gagnait
+    # la sonde tryLoad ; etape 187 : manifest sidecar
+    # sha256+abi+commit + audit re-hashe, une destination
+    # divergente fait echouer le build).
     Copy-Item (Join-Path $flutterOut "*") -Destination $osDir -Recurse -Force
-    Copy-Item (Join-Path $cargoOut "explorer_ffi.dll") -Destination $osDir -Force
+    pwsh -NoProfile -File (Join-Path $PSScriptRoot 'deploy_engine.ps1') -NoBuild -Profile $Profile -TargetDir $cargoTarget -ExtraDestinations $osDir
+    if ($LASTEXITCODE -ne 0) { throw "deploy_engine.ps1 a echoue ($LASTEXITCODE)" }
 
     # -- 4) Manifest ---------------------------------------------------
     $manifest = @{

@@ -58,7 +58,10 @@ foreach ($a in $artifacts) {
 }
 
 New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
-foreach ($a in $artifacts) {
+# explorer_ffi.dll : copie deleguee a deploy_engine.ps1 plus
+# bas (manifest sidecar + audit re-hashe — jamais de copie
+# ad-hoc, meme doctrine que deploy_media).
+foreach ($a in $artifacts | Where-Object { $_ -ne 'explorer_ffi.dll' }) {
     Copy-Item (Join-Path $release $a) -Destination $OutDir -Force
 }
 
@@ -79,7 +82,19 @@ if (-not $SkipApp -and (Test-Path 'app/pubspec.yaml')) {
     $appOut = Join-Path $OutDir 'app'
     New-Item -ItemType Directory -Force -Path $appOut | Out-Null
     Copy-Item "$runner\*" -Destination $appOut -Recurse -Force
-    Copy-Item (Join-Path $release 'explorer_ffi.dll') -Destination $appOut -Force
+}
+
+# explorer_ffi.dll — distribution deleguee a
+# deploy_engine.ps1 : build canonique -> copies -> manifest
+# sidecar (sha256+abi+commit) -> audit re-hashe. Source de
+# verite unique : plus de copie ad-hoc, plus de DLL stale
+# dans runner/ apres `flutter clean`, et l'audit refuse un
+# OutDir divergent de la canonique (etape 187).
+$extra = @($OutDir)
+if ($appOut -and (Test-Path $appOut)) { $extra += $appOut }
+pwsh -NoProfile -File (Join-Path $PSScriptRoot 'deploy_engine.ps1') -NoBuild -Profile release -TargetDir $target -ExtraDestinations $extra
+if ($LASTEXITCODE -ne 0) {
+    throw "ECHEC : deploy_engine.ps1 (copies moteur divergentes de la canonique)"
 }
 
 # onionmedia_ffi.dll + rest_host_probe.exe — distribution
@@ -90,8 +105,6 @@ if (-not $SkipApp -and (Test-Path 'app/pubspec.yaml')) {
 # et l'audit refuse un OutDir divergent de la canonique.
 $deploy = 'C:\Onion-explorer-media\scripts\deploy_media.ps1'
 if (Test-Path $deploy) {
-    $extra = @($OutDir)
-    if ($appOut -and (Test-Path $appOut)) { $extra += $appOut }
     pwsh -NoProfile -File $deploy -NoBuild -ExtraDestinations $extra
     if ($LASTEXITCODE -ne 0) {
         throw "ECHEC : deploy_media.ps1 (copies media divergentes de la canonique)"

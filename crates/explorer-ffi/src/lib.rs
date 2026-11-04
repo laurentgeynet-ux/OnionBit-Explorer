@@ -425,6 +425,26 @@ pub unsafe extern "C" fn explorer_create_with_profile(
 /// comme le daemon ; `0` si le bind a échoué (`apiBase`
 /// `''`, lecture MSE honnêtement absente).
 ///
+/// Niveau d'ABI de la bibliothèque (étape 187 —
+/// déploiement moteur) : la dll s'auto-identifie — une
+/// copie périmée se détecte sans la charger à l'aveugle.
+/// `0` côté hôte = symbole absent → dll pré-versionnement.
+///
+/// **Règle** : incrémenter à chaque changement d'ABI
+/// (export ajouté, signature modifiée) — `deploy_engine.ps1`
+/// relit cette valeur dans le manifest sidecar. ABI 1 =
+/// socle jusqu'à l'étape 186 incluse (`explorer_create*`,
+/// `open_tab`, `navigate`, `input`, `frame_size`/`copy`/
+/// `copy_region`/`pull`, `dirty_rects`, `tab_url`/`title`/
+/// `scroll`, `hit_targets`, `media_*`, `downloads_*`,
+/// `eval_js`, `api_port`, `media_codecs`,
+/// `set_accept_language`, `set_color_scheme`,
+/// `set_viewport`, `tick`, `last_error`, `destroy`).
+#[unsafe(no_mangle)]
+pub extern "C" fn explorer_abi_version() -> u32 {
+    1
+}
+
 /// # Safety
 ///
 /// `h` doit provenir de [`explorer_create`].
@@ -2191,5 +2211,14 @@ mod tests {
             assert!(nd.contains(&format!("\"media\":{mid}")));
             explorer_destroy(h);
         }
+    }
+
+    #[test]
+    fn abi_version_declared() {
+        // Étape 187 : la dll s'auto-identifie — le manifest
+        // de déploiement relit ce niveau dans le sidecar ;
+        // `0` côté hôte = dll pré-versionnement (absent).
+        // Toute évolution d'ABI incrémente le littéral.
+        assert_eq!(explorer_abi_version(), 1);
     }
 }

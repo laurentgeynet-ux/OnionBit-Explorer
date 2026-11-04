@@ -6653,6 +6653,44 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   JSON + widget 4-branches —
   66/66 verts.
 
+- [x] **Étape 187. Déploiement
+  moteur — source de vérité dll**
+  (`explorer-ffi`, `scripts/`,
+  `app/` — journalisé
+  `interface-equipes.md`) :
+  `explorer_ffi.dll` se copiait
+  ad-hoc dans les scripts —
+  aucune provenance, une copie
+  périmée adjacente gagnait la
+  sonde `tryLoad` (leçon 119).
+  `explorer_abi_version() ->
+  u32` : la dll s'auto-identifie
+  (`1` = socle ≤186, incrémenter
+  à chaque changement d'ABI) ;
+  `tryLoad` le sonde → `abi ?`
+  dans `engineLabel` sur copie
+  pré-versionnement (diagnostiqué,
+  jamais bloquant — replis
+  par-symbole conservés).
+  `deploy_engine.ps1` (doctrine
+  `deploy_media`) = unique chemin
+  de distribution : canonique
+  `<target>/<profile>` → copies
+  adjacentes → sidecar
+  `explorer_ffi.manifest.json`
+  (sha256+abi+commit+utc) → audit
+  re-hashé (divergence = échec) ;
+  `$auditOnly` signale les
+  reliques `D:\cargo-target` sans
+  les écrire. `build_terrain`/
+  `build_dist` routés — plus de
+  `Copy-Item` ad-hoc ; `target/
+  debug` reste le canal dev
+  auto-régénéré, hors registre.
+  Verrou : `abi_version_declared`
+  (ffi) ; déploiement réel +
+  audit exécutés.
+
 - [ ] **Écarts terrain — vol humain
   22/10 (release `39ab821`, FFI)** :
   second run humain — trois constats

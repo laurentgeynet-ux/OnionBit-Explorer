@@ -94,7 +94,12 @@ class FfiFramePull {
 ///   (`Isolate.kill` diffère à la sortie du code natif) —
 ///   le contrat de l'étape reste : l'UI continue de répondre.
 class FfiEngine implements BrowserRepository {
-  FfiEngine._(this._worker, this.libPath, List<String> mediaCodecs) {
+  FfiEngine._(
+    this._worker,
+    this.libPath,
+    List<String> mediaCodecs,
+    this.abiVersion,
+  ) {
     // Prélecture du port loopback média (étape 177/b2) —
     // async car le worker isolate répond en RPC ; le claim
     // MSE survient toujours après, la course est gagnée.
@@ -112,8 +117,16 @@ class FfiEngine implements BrowserRepository {
   /// de charger silencieusement une dll périmée adjacente).
   final String libPath;
 
+  /// Niveau d'ABI déclaré par la dll chargée (étape 187 —
+  /// `explorer_abi_version`) : `0` = copie pré-versionnement,
+  /// fonctionnelle via les replis par-symbole mais plus
+  /// ancienne que le contrat courant. Diagnostiqué dans la
+  /// barre de statut, jamais bloquant.
+  final int abiVersion;
+
   @override
-  String get engineLabel => 'FFI $libPath';
+  String get engineLabel =>
+      'FFI $libPath (abi ${abiVersion == 0 ? '?' : abiVersion})';
 
   /// Loopback média embarqué (étape 177/b2, ADR-0029) —
   /// `http://127.0.0.1:<port>` sert `GET /api/…/media/*`
@@ -166,12 +179,29 @@ class FfiEngine implements BrowserRepository {
           _FfiWorker.start(candidate),
           candidate,
           config.mediaCodecs,
+          _probeAbi(lib),
         );
       } on Object {
         // Candidat absent ou ABI incompatible → suivant.
       }
     }
     return null;
+  }
+
+  /// Sonde `explorer_abi_version` (étape 187) — la dll
+  /// s'auto-identifie : `0` = copie pré-versionnement (les
+  /// replis par-symbole restent la règle), `≥1` = niveau
+  /// déclaré par `deploy_engine.ps1` dans le manifest
+  /// sidecar de chaque destination.
+  static int _probeAbi(ffi.DynamicLibrary lib) {
+    try {
+      final fn = lib.lookupFunction<ffi.Uint32 Function(), int Function()>(
+        'explorer_abi_version',
+      );
+      return fn();
+    } on Object {
+      return 0;
+    }
   }
 
   static List<String> _candidates(AppConfig config) {
