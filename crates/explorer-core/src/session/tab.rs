@@ -143,6 +143,14 @@ impl Tab {
         self.tree_epoch = snap.tree_epoch;
         self.list = snap.list;
         self.frame = snap.frame;
+        // Génération frame (étape 188) : la restauration
+        // réinstalle le triplet (list, frame, media) gelé —
+        // bump pour qu'un pull top-slice post-restore ne
+        // s'appaire pas avec une base tirée avant le gel.
+        self.frame_epoch = self.frame_epoch.wrapping_add(1);
+        // La frame gelée fut peinte au scroll du snapshot
+        // — le « peint » redevient celui-là (étape 188).
+        self.painted_scroll_y = snap.scroll_y;
         self.png = snap.png;
         self.focused = snap.focused;
         self.focused_key = snap.focused_key;

@@ -5,6 +5,7 @@
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
+import 'dart:ui' show Rect;
 
 import '../../../core/api/api_client.dart';
 import '../domain/bookmark.dart';
@@ -25,6 +26,8 @@ class FramePull {
     required this.bytes,
     this.paintedScrollY,
     this.media,
+    this.epoch,
+    this.top,
   });
 
   /// PNG de la frame.
@@ -39,6 +42,15 @@ class FramePull {
   /// touche pas aux méta retenues), liste (vide possible) =
   /// à appliquer telle quelle.
   final List<MediaPaintMeta>? media;
+
+  /// `x-explorer-frame-epoch` (étape 188) — génération de la
+  /// frame tirée, à renvoyer à `?slice=top&epoch=` pour
+  /// appairer le plan supérieur ; `null` hors contrat 188.
+  final int? epoch;
+
+  /// `x-explorer-top` (étape 188) — rect **viewport** px CSS
+  /// du plan supérieur ; `null` = aucun slice à tirer.
+  final Rect? top;
 }
 
 /// Accès aux onglets via le contrat REST du daemon (ADR-0003) :
@@ -136,6 +148,8 @@ class BrowserRepository {
         bytes: r.bytes,
         paintedScrollY: _scrollHeader(r.headers),
         media: _mediaHeader(r.headers),
+        epoch: _epochHeader(r.headers),
+        top: _topHeader(r.headers),
       );
     } on ApiException {
       return null;
@@ -167,9 +181,32 @@ class BrowserRepository {
         bytes: r.bytes,
         paintedScrollY: _scrollHeader(r.headers),
         media: _mediaHeader(r.headers),
+        epoch: _epochHeader(r.headers),
+        top: _topHeader(r.headers),
       );
     } on ApiException {
       return null;
+    }
+  }
+
+  /// Pull du **top-slice** (étape 188 — M2 composition deux
+  /// plans) : `GET …/frame?slice=top&epoch=N` → PNG RGBA+α
+  /// borné au rect `top` du même pull. `stale` = `409`,
+  /// génération périmée (l'appelant efface le slice retenu) ;
+  /// `bytes` `null` = `204` (plus de slice pour la frame
+  /// courante) ou daemon antérieur sans la route.
+  Future<({Uint8List? bytes, bool stale})> fetchFrameTopSlice(
+    String tabId,
+    int epoch,
+  ) async {
+    try {
+      final r = await _api.getBytesMeta(
+        '/api/tabs/$tabId/frame',
+        query: {'slice': 'top', 'epoch': '$epoch'},
+      );
+      return (bytes: r.bytes.isEmpty ? null : r.bytes, stale: false);
+    } on ApiException catch (e) {
+      return (bytes: null, stale: e.statusCode == 409);
     }
   }
 
@@ -178,6 +215,27 @@ class BrowserRepository {
   static double? _scrollHeader(HttpHeaders h) {
     final v = h.value('x-explorer-scroll-y');
     return v == null ? null : double.tryParse(v);
+  }
+
+  /// `x-explorer-frame-epoch: <u64>` (étape 188) —
+  /// génération de la frame servie ; absent → `null`
+  /// (daemon pré-188, pas de plan supérieur possible).
+  static int? _epochHeader(HttpHeaders h) {
+    final v = h.value('x-explorer-frame-epoch');
+    return v == null ? null : int.tryParse(v);
+  }
+
+  /// `x-explorer-top: <json rect>` (étape 188) — rect
+  /// viewport du slice ; absent ou malformé → `null`
+  /// (aucun plan supérieur pour cette frame).
+  static Rect? _topHeader(HttpHeaders h) {
+    final v = h.value('x-explorer-top');
+    if (v == null) return null;
+    try {
+      return MediaPaintMeta.rectFromWire(jsonDecode(v));
+    } on Object {
+      return null;
+    }
   }
 
   /// `x-explorer-media: <json array>` — géométrie des

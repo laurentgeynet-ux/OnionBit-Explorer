@@ -1223,6 +1223,73 @@ void main() {
     expect(full.visible, isFalse);
     expect(full.order, 5);
   });
+
+  /// Étape 188 — composition deux plans : le pull porte
+  /// `epoch`/`top` → le slice est tiré à la même génération
+  /// et exposé ; même paire re-servie → cache (pas de
+  /// re-pull) ; `top` absent ou `stale` (409) → effacé.
+  /// `frameTick` est bumpé deux fois par invalidation (kick
+  /// + install) : on attend le bump d'install (`tick + 2`),
+  /// seul garant que `_syncTopSlice` a terminé.
+  test(
+    '188 — top-slice : tiré à l\'epoch servie, cache et effacements',
+    () async {
+      final repo = FakeRepo()
+        ..realPng = true
+        ..nextFrameEpoch = 7
+        ..nextFrameTop = const Rect.fromLTWH(4, 8, 320, 180);
+      final events = FakeEvents();
+      final c = makeContainer(repo, events);
+      addTearDown(c.dispose);
+      await settle(c);
+      final ctrl = c.read(browserProvider.notifier);
+      await waitFor(() => ctrl.frameImage('1') != null);
+
+      // Bootstrap : `e`+`top` servis, pas de slice encore →
+      // tentative enregistrée, rien retenu.
+      await waitFor(() => repo.topSliceFetches == 1);
+      expect(ctrl.topSlice('1'), isNull);
+
+      // Slice livré → exposé avec son rect à l'epoch servie.
+      repo.nextTopSlice = await encodeTestPng(16, 16, 0, 255, 0);
+      var tick = c.read(browserProvider).frameTick;
+      events.ctrl.add(ServerEvent('frame_invalidated', {'tab': 1}));
+      await waitFor(() => c.read(browserProvider).frameTick >= tick + 2);
+      final slice = ctrl.topSlice('1');
+      expect(repo.topSliceFetches, 2, reason: 'le sync re-tire');
+      expect(slice, isNotNull);
+      expect(slice!.rect, const Rect.fromLTWH(4, 8, 320, 180));
+      expect(slice.epoch, 7);
+
+      // Même paire epoch/rect → cache : aucun re-pull.
+      tick = c.read(browserProvider).frameTick;
+      events.ctrl.add(ServerEvent('frame_invalidated', {'tab': 1}));
+      await waitFor(() => c.read(browserProvider).frameTick >= tick + 2);
+      expect(repo.topSliceFetches, 2);
+      expect(ctrl.topSlice('1'), isNotNull);
+
+      // Nouvelle epoch, `top` absent → plus de surface
+      // composite : le slice retenu est effacé.
+      repo.nextFrameEpoch = 8;
+      repo.nextFrameTop = null;
+      tick = c.read(browserProvider).frameTick;
+      events.ctrl.add(ServerEvent('frame_invalidated', {'tab': 1}));
+      await waitFor(() => c.read(browserProvider).frameTick >= tick + 2);
+      expect(ctrl.topSlice('1'), isNull);
+      expect(repo.topSliceFetches, 2);
+
+      // Epoch servie mais slice `stale` (une peinture s'est
+      // interposée) → effacé, jamais d'appairage croisé.
+      repo.nextFrameEpoch = 9;
+      repo.nextFrameTop = const Rect.fromLTWH(4, 8, 320, 180);
+      repo.topStale = true;
+      tick = c.read(browserProvider).frameTick;
+      events.ctrl.add(ServerEvent('frame_invalidated', {'tab': 1}));
+      await waitFor(() => c.read(browserProvider).frameTick >= tick + 2);
+      expect(repo.topSliceFetches, 3);
+      expect(ctrl.topSlice('1'), isNull);
+    },
+  );
 }
 
 /// Contrôleur minimal sans onglet — `activeId` reste null.

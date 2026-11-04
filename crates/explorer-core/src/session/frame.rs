@@ -31,6 +31,103 @@ pub struct FrameMeta {
     /// peinture approximé — les contextes d'empilement
     /// réels ne sont pas ordonnancés en M1, documenté).
     pub media: Vec<FrameMedia>,
+    /// Génération de la frame (étape 188 — bumpée à chaque
+    /// `put_paint` ; l'hôte la renvoie au pull top-slice,
+    /// qui rejette toute génération périmée — base et slice
+    /// s'appairent par construction).
+    #[serde(rename = "e")]
+    pub epoch: u64,
+    /// Rect **viewport** px CSS de la zone top-slice —
+    /// ∪ des `v∩c` des surfaces éligibles (`visible`,
+    /// `!transformed`, aire > 0, boîte spannée) ; `None` =
+    /// aucun slice à tirer pour cette frame.
+    #[serde(rename = "top")]
+    pub top: Option<MediaRect>,
+}
+
+/// Résultat du pull top-slice (étape 188) — `Stale` =
+/// génération demandée ≠ génération stockée (une peinture
+/// s'est interposée : l'hôte re-tire la paire entière).
+pub enum FrameTop {
+    /// Aucun slice pour la frame courante (pas de surface
+    /// composite, pas de `list`, raster impossible).
+    None,
+    /// Epoch périmée — l'appairage base↔slice est cassé.
+    Stale,
+    /// Slice prêt : rect viewport px CSS + pixmap RGBA+α.
+    Slice(MediaRect, Frame),
+}
+
+/// Coupe top-slice de la frame stockée (étape 188) —
+/// `(indice de coupe dans `list.items`, rect viewport
+/// ∪(v∩c))` ou `None` si aucune surface n'exige de slice.
+/// Éligible : `visible` **et** `!transformed` (l'hôte
+/// masque les autres — aucun plan natif à recouvrir),
+/// aire `v∩c > 0`, et boîte **spannée** (sans span dans
+/// `list.spans`, la coupe est introuvable → la surface ne
+/// participe ni au cut ni à l'union).
+///
+/// Coupe unique au `max(span.end)` — approximation nommée
+/// dans la réponse PIPE : un élément peint **entre** deux
+/// surfaces composite reste sous les deux (les médias qui
+/// se recouvrent sont rares ; le décor de la boîte média
+/// émet *avant* son contenu ici — il reste donc en base,
+/// visibilité identique à l'avant-slice).
+fn media_top(entry: &Tab) -> Option<(usize, MediaRect)> {
+    let list = entry.list.as_ref()?;
+    // `painted_scroll_y` — le list/frame décrivent
+    // l'ancrage de leur passe ; le scroll demandé a pu
+    // avancer pendant une peinture détachée.
+    let sy = entry.painted_scroll_y;
+    let shift = |r: MediaRect| MediaRect { y: r.y - sy, ..r };
+    let mut cut = 0usize;
+    let mut union: Option<MediaRect> = None;
+    for s in &entry.media {
+        let m = &s.meta;
+        if !m.visible || m.transformed {
+            continue;
+        }
+        let Some(span) = s.box_path.as_deref().and_then(|p| list.spans.get(p)) else {
+            continue;
+        };
+        let view = if m.fixed { s.rect } else { shift(s.rect) };
+        let clip = if m.fixed {
+            m.clip_fixed
+        } else {
+            m.clip_doc.map(shift)
+        };
+        let area = clip.map_or(view, |c| rect_intersect(view, c));
+        if area.w <= 0.0 || area.h <= 0.0 {
+            continue;
+        }
+        cut = cut.max(usize::try_from(span.end).unwrap_or(usize::MAX));
+        union = Some(union.map_or(area, |u| rect_union(u, area)));
+    }
+    union.map(|u| (cut, u))
+}
+
+/// Intersection px CSS (w/h ≥ 0 après saturation).
+fn rect_intersect(a: MediaRect, b: MediaRect) -> MediaRect {
+    let x = a.x.max(b.x);
+    let y = a.y.max(b.y);
+    MediaRect {
+        x,
+        y,
+        w: ((a.x + a.w).min(b.x + b.w) - x).max(0.0),
+        h: ((a.y + a.h).min(b.y + b.h) - y).max(0.0),
+    }
+}
+
+/// Plus petit rectangle englobant — bornage du slice.
+fn rect_union(a: MediaRect, b: MediaRect) -> MediaRect {
+    let x = a.x.min(b.x);
+    let y = a.y.min(b.y);
+    MediaRect {
+        x,
+        y,
+        w: (a.x + a.w).max(b.x + b.w) - x,
+        h: (a.y + a.h).max(b.y + b.h) - y,
+    }
 }
 
 /// Géométrie peinte d'une surface — le filaire porte des
@@ -86,7 +183,7 @@ impl Session {
     pub fn frame_meta(&self, tab: TabId) -> Option<FrameMeta> {
         let entry = self.tabs.get(&tab)?;
         let frame = entry.frame.as_ref()?;
-        let sy = entry.scroll_y;
+        let sy = entry.painted_scroll_y;
         let shift = |r: MediaRect| MediaRect { y: r.y - sy, ..r };
         let media = entry
             .media
@@ -121,6 +218,8 @@ impl Session {
             w: frame.width,
             h: frame.height,
             media,
+            epoch: entry.frame_epoch,
+            top: media_top(entry).map(|(_, r)| r),
         })
     }
 
@@ -135,6 +234,60 @@ impl Session {
         let (w, h, px) = self.frame_pixels(tab)?;
         let meta = self.frame_meta(tab)?;
         Some((w, h, px, meta))
+    }
+
+    /// Slice « top » de la frame stockée (étape 188 — M2
+    /// UX-vidéo, demande NAV→PIPE `interface-equipes.md`) :
+    /// les items émis **après** la plus haute surface
+    /// composite re-rasterisés RGBA+α, bornés à `∪(v∩c)` —
+    /// l'hôte compose `base → surface(s) → slice`. La base
+    /// reste la frame complète : le slice n'est qu'un
+    /// re-raster de ce que le plan natif masque.
+    ///
+    /// `epoch = Some(e)` exige la génération `e` (celle de
+    /// `FrameMeta`/`x-explorer-frame-epoch`) : `Stale` si
+    /// une autre peinture s'est interposée — jamais
+    /// d'appairage base↔slice de deux frames. Raster
+    /// paresseux depuis `entry.list` (même mécanique que
+    /// `frame_png_full`, cache glyphes partagé).
+    pub fn frame_top(&mut self, tab: TabId, epoch: Option<u64>) -> FrameTop {
+        let fonts = self.apply_ctx().fonts;
+        let scale = self.scale.max(f32::EPSILON);
+        let Some(entry) = self.tabs.get_mut(&tab) else {
+            return FrameTop::None;
+        };
+        if epoch.is_some_and(|e| e != entry.frame_epoch) {
+            return FrameTop::Stale;
+        }
+        // Fenêtre nav/detachée : `list` peut survivre à
+        // `frame` — un slice sans base stockée n'est pas
+        // appairable → `None`, jamais un plan orphelin.
+        if entry.frame.is_none() {
+            return FrameTop::None;
+        }
+        let Some(list) = entry.list.as_ref() else {
+            return FrameTop::None;
+        };
+        let Some((cut, win)) = media_top(entry) else {
+            return FrameTop::None;
+        };
+        let win_css = explorer_layout::Rect {
+            x: win.x,
+            y: win.y,
+            width: win.w,
+            height: win.h,
+        };
+        let Some(frame) = explorer_render::rasterize_slice_cached(
+            list,
+            &fonts as &dyn explorer_layout::font::FontSource,
+            scale,
+            win_css,
+            cut,
+            &mut entry.font_cache,
+        ) else {
+            return FrameTop::None;
+        };
+        FrameTop::Slice(win, frame)
     }
 
     /// PNG courant de l'onglet (`None` si jamais navigué) —
@@ -192,7 +345,7 @@ impl Session {
             list,
             &fonts as &dyn explorer_layout::font::FontSource,
             scale,
-            -entry.scroll_y,
+            -entry.painted_scroll_y,
             list.height,
             &mut entry.font_cache,
         )?;

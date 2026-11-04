@@ -112,6 +112,17 @@ class FakeRepo implements BrowserRepository {
   List<MediaPaintMeta>? nextFrameMedia;
   double? nextFrameScrollY;
 
+  /// Méta top-slice scriptée (étape 188) — `epoch`/`top` du
+  /// `FramePull` ; `null` (défaut) = transport pré-188.
+  int? nextFrameEpoch;
+  Rect? nextFrameTop;
+
+  /// Slice servi par `fetchFrameTopSlice` — `null` (défaut)
+  /// = aucun plan supérieur ; `topStale = true` → `409`.
+  Uint8List? nextTopSlice;
+  bool topStale = false;
+  int topSliceFetches = 0;
+
   @override
   Future<FramePull?> fetchFrame(String tabId) async {
     frameFetches++;
@@ -121,6 +132,8 @@ class FakeRepo implements BrowserRepository {
       bytes: realPng ? await _framePng() : Uint8List.fromList([1, 2, 3]),
       paintedScrollY: nextFrameScrollY,
       media: nextFrameMedia,
+      epoch: nextFrameEpoch,
+      top: nextFrameTop,
     );
   }
 
@@ -143,7 +156,18 @@ class FakeRepo implements BrowserRepository {
           : Uint8List.fromList([1, 2, 3]),
       paintedScrollY: nextFrameScrollY,
       media: nextFrameMedia,
+      epoch: nextFrameEpoch,
+      top: nextFrameTop,
     );
+  }
+
+  @override
+  Future<({Uint8List? bytes, bool stale})> fetchFrameTopSlice(
+    String tabId,
+    int epoch,
+  ) async {
+    topSliceFetches++;
+    return (bytes: nextTopSlice, stale: topStale);
   }
 
   /// Résultat scripté pour les événements `key` (étape 86 —

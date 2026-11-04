@@ -178,6 +178,31 @@ typedef _HitTargetsD = int Function(
   ffi.Pointer<ffi.Uint8>,
   int,
 );
+// Pull top-slice (étape 188, M2 composition deux plans) —
+// RGBA+α des items peints après la plus haute surface
+// composite ; `epoch` appaire à la base (`u64::MAX` =
+// génération courante, chemin régions), `out_w`/`out_h`
+// rendent les dims réelles — `cap` dimensionné `ceil(css×
+// scale)` suffit toujours (`round ≤ ceil`). Export
+// additif : dll antérieure → `null` → pas de plan top.
+typedef _FrameTopN = ffi.IntPtr Function(
+  _NativeHandle,
+  ffi.Uint64,
+  ffi.Uint64,
+  ffi.Pointer<ffi.Uint8>,
+  ffi.UintPtr,
+  ffi.Pointer<ffi.Uint32>,
+  ffi.Pointer<ffi.Uint32>,
+);
+typedef _FrameTopD = int Function(
+  _NativeHandle,
+  int,
+  int,
+  ffi.Pointer<ffi.Uint8>,
+  int,
+  ffi.Pointer<ffi.Uint32>,
+  ffi.Pointer<ffi.Uint32>,
+);
 typedef _FrameCopyRegionN = ffi.IntPtr Function(
   _NativeHandle,
   ffi.Uint64,
@@ -326,6 +351,7 @@ const opDownloadCancel = 28;
 const opApiPort = 29;
 const opMediaCodecs = 30;
 const opHit = 31;
+const opFrameTop = 32;
 
 /// Point d'entrée de l'isolate — `args` = `{'reply': SendPort,
 /// 'path': String}`. Envoie `{'port': SendPort}` puis
@@ -395,6 +421,7 @@ class _WorkerImpl {
     this._mediaState,
     this._setAcceptLanguage,
     this._hitTargets,
+    this._frameTop,
   );
 
   final ffi.DynamicLibrary _lib;
@@ -444,6 +471,15 @@ class _WorkerImpl {
   // Sonde hit-test (étape 186) — `null` sur dll antérieure
   // → `_hitOp` rend `none` (sonde indisponible, repli M0).
   final _HitTargetsD? _hitTargets;
+  // Pull top-slice (étape 188) — `null` sur dll antérieure
+  // → `_frameTopOp` rend `none` (composition simple plan).
+  final _FrameTopD? _frameTop;
+
+  /// Dernier `scale` passé à `explorer_set_viewport`
+  /// (`zoom×dpr`) — dimensionne le buffer du slice :
+  /// `ceil(css×scale)` ≥ les dims `round` rendues par
+  /// l'export, quelle que soit la métrique de la boîte.
+  double _scale = 1.0;
 
   static _WorkerImpl open(String path) {
     final lib = ffi.DynamicLibrary.open(path);
@@ -510,6 +546,16 @@ class _WorkerImpl {
       try {
         hitTargets = lib.lookupFunction<_HitTargetsN, _HitTargetsD>(
           'explorer_hit_targets',
+        );
+      } on Object {
+        /* export absent */
+      }
+      // Pull top-slice (étape 188) — dll antérieure → `null`
+      // → `_frameTopOp` rend `none` (plan unique, repli M1).
+      _FrameTopD? frameTop;
+      try {
+        frameTop = lib.lookupFunction<_FrameTopN, _FrameTopD>(
+          'explorer_frame_top',
         );
       } on Object {
         /* export absent */
@@ -690,6 +736,7 @@ class _WorkerImpl {
         mediaState,
         setAcceptLanguage,
         hitTargets,
+        frameTop,
       );
     } on Object {
       lib.close();
@@ -730,9 +777,11 @@ class _WorkerImpl {
         _must(f(_handle, _tab(m)));
         return _refreshed(m);
       case opSetViewport:
-        _must(
-          _setViewport(_handle, _num(m, 'w'), _num(m, 'h'), _num(m, 'scale')),
-        );
+        final sc = _num(m, 'scale');
+        _must(_setViewport(_handle, _num(m, 'w'), _num(m, 'h'), sc));
+        // Retenu pour dimensionner le buffer du top-slice
+        // (étape 188 — dims physiques = `round(css×scale)`).
+        _scale = sc;
         return null;
       case opInput:
         return _inputOp(m);
@@ -914,6 +963,8 @@ class _WorkerImpl {
         return _frameRegionOp(m);
       case opHit:
         return _hitOp(m);
+      case opFrameTop:
+        return _frameTopOp(m);
       case opSetColorScheme:
         // Export additif étape 97 — dll antérieure : no-op.
         _setColorScheme?.call(_handle, m['dark'] == true ? 1 : 0);
@@ -1131,6 +1182,10 @@ class _WorkerImpl {
           'px': TransferableTypedData.fromList([list]),
           if (metaOk) 'scroll_y': (metaMap['scroll_y'] as num?)?.toDouble(),
           if (metaOk) 'media': metaMap['media'],
+          // Ét.188 — `e`/`top` : génération de la frame tirée
+          // + rect viewport du top-slice (absent = plan unique).
+          if (metaOk) 'epoch': (metaMap['e'] as num?)?.toInt(),
+          if (metaOk) 'top': metaMap['top'],
         };
       } finally {
         calloc
@@ -1142,6 +1197,71 @@ class _WorkerImpl {
         ..free(w)
         ..free(h)
         ..free(metaLen);
+    }
+  }
+
+  /// `explorer_frame_top` (étape 188) — RGBA+α du plan
+  /// supérieur, `{tab, epoch, w, h}` (w/h = dims CSS du rect
+  /// `top` du pull ; `epoch < 0` = génération courante,
+  /// chemin de rafraîchissement des régions). `stale` =
+  /// l'epoch demandée n'est plus la génération stockée —
+  /// l'appelant efface le slice retenu (le prochain pull
+  /// re-paire) ; `none` = pas de slice ou export absent.
+  Map<String, Object?> _frameTopOp(Map m) {
+    final f = _frameTop;
+    if (f == null) return const {'none': true};
+    final cw = _num(m, 'w');
+    final ch = _num(m, 'h');
+    // `cap = ceil(css×scale)²×4` ≥ `round(css×scale)²×4`
+    // octets réels — toujours suffisant (`round ≤ ceil`) ;
+    // `out_w`/`out_h` rendent les dims exactes. Sans dims
+    // CSS (chemin wildcard), borne supérieure = la frame
+    // entière — un média plus grand que le viewport échoue
+    // en `-1` → `none`, réappris au prochain pull méta.
+    final int cap;
+    if (cw > 0 && ch > 0) {
+      cap = (cw * _scale).ceil() * (ch * _scale).ceil() * 4;
+    } else {
+      final w = calloc<ffi.Uint32>(1);
+      final h = calloc<ffi.Uint32>(1);
+      try {
+        if (_frameSize(_handle, _tab(m), w, h) != 0) {
+          return const {'none': true};
+        }
+        cap = w.value * h.value * 4;
+      } finally {
+        calloc
+          ..free(w)
+          ..free(h);
+      }
+    }
+    if (cap <= 0) return const {'none': true};
+    final px = calloc<ffi.Uint8>(cap);
+    final ow = calloc<ffi.Uint32>(1);
+    final oh = calloc<ffi.Uint32>(1);
+    try {
+      final n = f(
+        _handle,
+        _tab(m),
+        (m['epoch'] as num?)?.toInt() ?? -1,
+        px,
+        cap,
+        ow,
+        oh,
+      );
+      if (n == -2) return const {'stale': true};
+      if (n <= 0) return const {'none': true};
+      final list = Uint8List(n)..setAll(0, px.asTypedList(n));
+      return {
+        'w': ow.value,
+        'h': oh.value,
+        'px': TransferableTypedData.fromList([list]),
+      };
+    } finally {
+      calloc
+        ..free(px)
+        ..free(ow)
+        ..free(oh);
     }
   }
 

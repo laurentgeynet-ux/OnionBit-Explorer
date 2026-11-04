@@ -968,6 +968,67 @@ pub unsafe extern "C" fn explorer_frame_pull(
     }
 }
 
+/// Pull du **top-slice** de la frame (étape 188 — M2
+/// UX-vidéo, réponse `interface-equipes.md`) : RGBA+α des
+/// items peints après la plus haute surface média, borné
+/// au rect `top` servi dans le JSON de
+/// [`explorer_frame_pull`] (`{"e":epoch,"top":{…}}`).
+/// `epoch` doit égaler `e` — `-2` si périmée (une autre
+/// peinture s'est interposée : l'hôte re-tire la paire),
+/// `0` si aucun slice n'existe, `-1` erreur. `u64::MAX` =
+/// génération courante acceptée (rafraîchissement du
+/// chemin régions, sans méta — l'appairage reste garanti
+/// sur les pulls pleins). Succès =
+/// `w*h*4` octets ; `out_w`/`out_h` (non nuls) reçoivent
+/// les dims **réelles** — `ceil(top.w×scale) ×
+/// ceil(top.h×scale) × 4` octets de `cap` suffisent
+/// toujours (`round ≤ ceil`).
+///
+/// # Safety
+///
+/// `h` issu de [`explorer_create`] ; `out..out+cap`
+/// inscriptible ; `out_w`/`out_h` inscriptibles si non
+/// nuls.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn explorer_frame_top(
+    h: *mut ExplorerHandle,
+    tab: u64,
+    epoch: u64,
+    out: *mut u8,
+    cap: usize,
+    out_w: *mut u32,
+    out_h: *mut u32,
+) -> isize {
+    let Some(h) = (unsafe { handle(h) }) else {
+        return -1;
+    };
+    let want = if epoch == u64::MAX { None } else { Some(epoch) };
+    match sess(h).frame_top(tab, want) {
+        explorer_core::FrameTop::Slice(_, frame) => {
+            if frame.pixels.len() > cap || out.is_null() {
+                set_err("buffer top-slice trop petit ou nul");
+                return -1;
+            }
+            // SAFETY : `out..out+px.len()` ⊂ `out..out+cap`
+            // inscriptible par contrat FFI.
+            unsafe {
+                std::ptr::copy_nonoverlapping(frame.pixels.as_ptr(), out, frame.pixels.len());
+            }
+            if !out_w.is_null() {
+                // SAFETY : pointeur de sortie non nul vérifié.
+                unsafe { *out_w = frame.width };
+            }
+            if !out_h.is_null() {
+                // SAFETY : pointeur de sortie non nul vérifié.
+                unsafe { *out_h = frame.height };
+            }
+            isize::try_from(frame.pixels.len()).unwrap_or(isize::MAX)
+        }
+        explorer_core::FrameTop::Stale => -2,
+        explorer_core::FrameTop::None => 0,
+    }
+}
+
 /// Copie la région `(x, y, w, h)` — pixels physiques — de
 /// la frame dans `out` (étape 55 : pull partiel piloté par
 /// les dirty-rects de [`explorer_dirty_rects`]). La région
@@ -2043,6 +2104,112 @@ mod tests {
             assert_eq!(
                 explorer_hit_targets(h, 999, 0.0, 0.0, buf.as_mut_ptr(), buf.len()),
                 0
+            );
+
+            explorer_close_tab(h, tab);
+            explorer_destroy(h);
+        }
+    }
+
+    /// Étape 188 — `explorer_frame_top` : le pull rend
+    /// `e`/`top` dans le JSON ; le slice de la bonne epoch
+    /// est servi (dims réelles via `out_w`/`out_h`), epoch
+    /// périmée → `-2`, `u64::MAX` → génération courante.
+    #[test]
+    fn frame_top_export() {
+        let h = test_handle();
+        // SAFETY : handle frais, appels sérialisés.
+        unsafe {
+            let tab = explorer_open_tab(h);
+            let url = b"http://test/v";
+            assert_eq!(explorer_navigate(h, tab, url.as_ptr(), url.len()), 0);
+
+            let (mut w, mut hgt) = (0u32, 0u32);
+            assert_eq!(
+                explorer_frame_size(
+                    h,
+                    tab,
+                    std::ptr::addr_of_mut!(w),
+                    std::ptr::addr_of_mut!(hgt)
+                ),
+                0
+            );
+            let cap = (w * hgt * 4) as usize;
+            let mut px = vec![0u8; cap];
+            let mut meta = vec![0u8; 64 * 1024];
+            let mut meta_len = 0u32;
+            assert!(
+                explorer_frame_pull(
+                    h,
+                    tab,
+                    px.as_mut_ptr(),
+                    cap,
+                    meta.as_mut_ptr(),
+                    meta.len(),
+                    std::ptr::addr_of_mut!(meta_len),
+                ) > 0
+            );
+            let mj: serde_json::Value =
+                serde_json::from_slice(&meta[..usize::try_from(meta_len).unwrap_or(0)])
+                    .expect("méta JSON");
+            let epoch = mj["e"].as_u64().expect("e = epoch de la frame");
+            assert!(epoch > 0);
+            let top = mj["top"].as_object().expect("top = rect du slice");
+            let tw = top["w"].as_f64().unwrap();
+            let th = top["h"].as_f64().unwrap();
+            assert!(tw > 0.0 && th > 0.0);
+
+            // cap = taille frame entière ≥ slice ; dims
+            // réelles rendues par out_w/out_h.
+            let mut spx = vec![0u8; cap];
+            let (mut sw, mut sh) = (0u32, 0u32);
+            let n = explorer_frame_top(
+                h,
+                tab,
+                epoch,
+                spx.as_mut_ptr(),
+                spx.len(),
+                std::ptr::addr_of_mut!(sw),
+                std::ptr::addr_of_mut!(sh),
+            );
+            assert!(n > 0, "slice servi à l'epoch courante");
+            assert!(sw > 0 && sh > 0);
+            assert_eq!(
+                usize::try_from(n).unwrap_or(0),
+                sw as usize * sh as usize * 4
+            );
+
+            // Sans dims de sortie — la variante la plus
+            // appelée (probe + comparaison de code retour).
+            let top_at = |tab: u64, epoch: u64, px: &mut Vec<u8>| -> isize {
+                explorer_frame_top(
+                    h,
+                    tab,
+                    epoch,
+                    px.as_mut_ptr(),
+                    px.len(),
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                )
+            };
+
+            // Epoch périmée → -2 (appairage refusé) ;
+            // u64::MAX → génération courante servie.
+            assert_eq!(top_at(tab, epoch + 1, &mut spx), -2);
+            assert!(top_at(tab, u64::MAX, &mut spx) > 0);
+            // Onglet inconnu → 0 (None), handle nul → -1.
+            assert_eq!(top_at(999, epoch, &mut spx), 0);
+            assert_eq!(
+                explorer_frame_top(
+                    std::ptr::null_mut(),
+                    tab,
+                    epoch,
+                    spx.as_mut_ptr(),
+                    spx.len(),
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                ),
+                -1
             );
 
             explorer_close_tab(h, tab);

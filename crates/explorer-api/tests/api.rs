@@ -237,6 +237,76 @@ async fn frame_serves_atomic_scroll_and_media_headers() {
     assert_eq!(arr[1]["r"]["w"], 0.0);
 }
 
+/// Étape 188 (M2 composition deux plans) — `GET …/frame`
+/// porte `x-explorer-frame-epoch` + `x-explorer-top` ;
+/// `?slice=top&epoch=N` sert le PNG RGBA+α du plan
+/// supérieur, une epoch périmée → `409` (appairage
+/// base↔slice garanti), `?slice=top` sans epoch →
+/// génération courante.
+#[tokio::test]
+async fn frame_top_slice_epoch_pairing() {
+    let (app, id) = media_tab().await;
+    let frame = app
+        .clone()
+        .oneshot(
+            HttpRequest::builder()
+                .uri(format!("/api/tabs/{id}/frame"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(frame.status(), StatusCode::OK);
+    let epoch: u64 = frame
+        .headers()
+        .get("x-explorer-frame-epoch")
+        .expect("header epoch")
+        .to_str()
+        .unwrap()
+        .parse()
+        .unwrap();
+    assert!(epoch > 0);
+    // `/media` a une vidéo composite → rect `top` servi.
+    let top = frame
+        .headers()
+        .get("x-explorer-top")
+        .expect("header top")
+        .to_str()
+        .unwrap();
+    let r: serde_json::Value = serde_json::from_str(top).unwrap();
+    assert!(r["w"].as_f64().unwrap() > 0.0 && r["h"].as_f64().unwrap() > 0.0);
+
+    let get = |uri: String| {
+        let app = app.clone();
+        async move {
+            app.oneshot(HttpRequest::builder().uri(uri).body(Body::empty()).unwrap())
+                .await
+                .unwrap()
+        }
+    };
+    // Epoch exacte → slice PNG servi.
+    let slice = get(format!("/api/tabs/{id}/frame?slice=top&epoch={epoch}")).await;
+    assert_eq!(slice.status(), StatusCode::OK);
+    assert_eq!(
+        slice.headers().get(header::CONTENT_TYPE).unwrap(),
+        "image/png"
+    );
+    let png = axum::body::to_bytes(slice.into_body(), 8 * 1024 * 1024)
+        .await
+        .unwrap();
+    assert_eq!(&png[..8], b"\x89PNG\r\n\x1a\n");
+    // Epoch périmée → 409 — jamais d'appairage croisé.
+    let stale = get(format!(
+        "/api/tabs/{id}/frame?slice=top&epoch={}",
+        epoch + 1
+    ))
+    .await;
+    assert_eq!(stale.status(), StatusCode::CONFLICT);
+    // Sans epoch → génération courante (rafraîchissement).
+    let wild = get(format!("/api/tabs/{id}/frame?slice=top")).await;
+    assert_eq!(wild.status(), StatusCode::OK);
+}
+
 /// Étape 120 — `GET …/dom` et `GET …/layout` : dumps
 /// diagnostiques du document vivant (triage « clic ignoré »
 /// — consent google : hit-test `form` vs `<input>` peint).

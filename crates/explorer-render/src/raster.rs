@@ -489,7 +489,7 @@ pub fn rasterize_cached(
     let dpi = Transform::from_scale(scale, scale);
 
     gc.sync(fonts);
-    replay_items(&mut pixmap, &list.items, dpi, fonts, gc, None);
+    replay_items(&mut pixmap, &list.items, dpi, fonts, gc, 0, None);
     Some(Frame {
         width: w,
         height: h,
@@ -574,6 +574,98 @@ pub fn rasterize_window_cached(
         base,
         fonts,
         gc,
+        0,
+        Some((&bounds, win_css)),
+    );
+    Some(Frame {
+        width: w,
+        height: h,
+        pixels: pixmap.data().to_vec(),
+        scale,
+    })
+}
+
+/// Rasterise la tranche `win_css` (px CSS, même repère
+/// framebuffer que [`rasterize_window`]) en un pixmap
+/// **transparent** ne dessinant que les items d'index
+/// ≥ `draw_from` — le « top slice » (étape 188,
+/// `interface-equipes.md`, demande M2 UX-vidéo) : les items
+/// émis après la coupe re-peignent au-dessus des surfaces
+/// média natives que l'hôte interpose entre les deux plans.
+/// La base servie restant la frame complète, le pixmap
+/// borné à `win_css` (session : ∪ des `v∩c` des surfaces)
+/// ne perd rien — ce qui tombe hors de la tranche est déjà
+/// sous la surface dans la base.
+///
+/// Les items d'état (`PushClip`/`PushTransform`/`Pop*`) du
+/// préfixe `[0..draw_from)` sont rejoués sans dessiner :
+/// la pile clip/transform au point de coupe est restituée
+/// à l'identique, puis chaque dessin est filtré à `win_css`
+/// (même mécanique `resolved_bounds` que la fenêtre).
+/// `draw_from == 0` = tranche alpha complète.
+/// `None` = borne dépassée (16 384 px par axe) ou pixmap
+/// non allouable — comme [`rasterize_window`].
+#[must_use]
+pub fn rasterize_slice(
+    list: &DisplayList,
+    fonts: &dyn FontSource,
+    scale: f32,
+    win_css: explorer_layout::Rect,
+    draw_from: usize,
+) -> Option<Frame> {
+    rasterize_slice_cached(
+        list,
+        fonts,
+        scale,
+        win_css,
+        draw_from,
+        &mut GlyphCache::new(),
+    )
+}
+
+/// [`rasterize_slice`] avec un [`GlyphCache`] persistant
+/// (R-36) — même sync `FontSource::revision` que
+/// [`rasterize_cached`].
+#[must_use]
+pub fn rasterize_slice_cached(
+    list: &DisplayList,
+    fonts: &dyn FontSource,
+    scale: f32,
+    win_css: explorer_layout::Rect,
+    draw_from: usize,
+    gc: &mut GlyphCache,
+) -> Option<Frame> {
+    let w_px = (win_css.width * scale).round().max(1.0);
+    let h_px = (win_css.height * scale).round().max(1.0);
+    if !(w_px.is_finite() && h_px.is_finite() && win_css.x.is_finite() && win_css.y.is_finite())
+        || w_px > 16384.0
+        || h_px > 16384.0
+    {
+        return None; // borne hostile — fenêtre géante.
+    }
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    let (w, h) = (w_px as u32, h_px as u32);
+    let mut pixmap = Pixmap::new(w, h)?;
+    // Pas de fond blanc : le slice se compose en sur-couche
+    // alpha au-dessus de base+surfaces — un fond opaque
+    // écrirait du blanc par-dessus le média natif.
+    let base = Transform::from_row(
+        scale,
+        0.0,
+        0.0,
+        scale,
+        -(win_css.x * scale),
+        -(win_css.y * scale),
+    );
+    let bounds = crate::display::resolved_bounds(&list.items);
+    gc.sync(fonts);
+    replay_items(
+        &mut pixmap,
+        &list.items,
+        base,
+        fonts,
+        gc,
+        draw_from,
         Some((&bounds, win_css)),
     );
     Some(Frame {
@@ -712,6 +804,7 @@ pub fn rasterize_dirty_cached(
             base,
             fonts,
             gc,
+            0,
             Some((&bounds, win_css)),
         );
         // Blit de la fenêtre dans la frame.
@@ -740,6 +833,7 @@ fn replay_items(
     dpi: Transform,
     fonts: &dyn FontSource,
     gc: &mut GlyphCache,
+    draw_from: usize,
     filter: Option<(&[Option<explorer_layout::Rect>], explorer_layout::Rect)>,
 ) {
     let mut clips: Vec<Mask> = Vec::new();
@@ -799,13 +893,17 @@ fn replay_items(
                 // Fenêtre sale : item dont la bounds résolue
                 // est hors fenêtre → sauté (son encre ne peut
                 // pas y toucher). `None` bounds = conservateur.
-                let draw = filter.is_none_or(|(bounds, win)| {
-                    bounds
-                        .get(idx)
-                        .copied()
-                        .flatten()
-                        .is_none_or(|b| rects_overlap(b, win))
-                });
+                // `idx < draw_from` : sous la coupe top-slice
+                // (étape 188) — les Push*/Pop* ci-dessus ont
+                // déjà restitué l'état, le dessin est sauté.
+                let draw = idx >= draw_from
+                    && filter.is_none_or(|(bounds, win)| {
+                        bounds
+                            .get(idx)
+                            .copied()
+                            .flatten()
+                            .is_none_or(|b| rects_overlap(b, win))
+                    });
                 if draw {
                     paint_item(pixmap, item, cur, fonts, gc, clips.last());
                 }

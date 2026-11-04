@@ -77,6 +77,11 @@ class MediaPaintMeta {
     return Rect.fromLTWH(d('x'), d('y'), d('w'), d('h'));
   }
 
+  /// `_rectOf` exposé aux autres rect filaires hors liste
+  /// `media` (`top` de l'étape 188 — même forme `MediaRect`
+  /// côté moteur).
+  static Rect? rectFromWire(Object? j) => _rectOf(j);
+
   /// Une entrée `x-explorer-media` — champs tolérés
   /// absents (un serveur antérieur n'émet pas le header ;
   /// ici on ne parse que des entrées présentes).

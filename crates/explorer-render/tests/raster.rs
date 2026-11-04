@@ -872,3 +872,50 @@ fn image_redimensionnee_echantillonne_en_bilineaire() {
         assert_eq!(p[3], 255);
     }
 }
+
+// ── Étape 188 : rasterize_slice — top-slice alpha ────────
+
+/// Le slice ne peint que les items ≥ `draw_from`, sur fond
+/// **transparent** (sur-couche de composition au-dessus de
+/// base+surfaces natives) ; l'état `PushClip` ouvert avant
+/// la coupe est restitué — un dessin clippé reste rogné.
+#[test]
+fn slice_peint_seul_au_dessus_de_la_coupe() {
+    // Enfants EN FLUX : un positionné est différé au drain
+    // du contexte d'empilement et sort de la portée du clip
+    // `overflow` ancêtre (approximation nommée du peintre) —
+    // en flux, le contenu reste entre PushClip et PopClip.
+    let html = "<div id=c><div id=a></div><div id=b></div></div>";
+    let css = "#c{width:60px;height:60px;overflow:hidden}\
+               #a{width:100px;height:40px;background:#ff0000}\
+               #b{width:100px;height:80px;background:#00ff00}";
+    let list = list_of(html, css, 200.0);
+    // Coupe = premier item de dessin de #b (FillRect vert) —
+    // les items d'état (PushClip de #c) restent dans le
+    // préfixe, rejoués sans dessiner.
+    let cut = list
+        .items
+        .iter()
+        .position(|it| {
+            matches!(it, explorer_render::DisplayItem::FillRect { color, .. }
+                if color.g == 255 && color.r == 0)
+        })
+        .expect("FillRect de #b");
+    let win = explorer_layout::Rect {
+        x: 0.0,
+        y: 0.0,
+        width: 100.0,
+        height: 100.0,
+    };
+    let sl =
+        explorer_render::rasterize_slice(&list, font_src(), 1.0, win, cut).expect("slice alloué");
+    // Clip (#c : 0..60) ∩ #b (y 40..120) → vert opaque.
+    assert_eq!(px(&sl, 30, 50), [0, 255, 0, 255], "vert de #b");
+    // Zone #a (sous la coupe) → alpha 0 : la base garde
+    // l'encre, le slice n'y re-peint rien.
+    assert_eq!(px(&sl, 30, 10), [0, 0, 0, 0], "sous coupe → vide");
+    // Hors clip (#c ferme à 60, #b déborde à 120) → alpha 0 :
+    // le PushClip du préfixe a bien été rejoué — sans lui
+    // #b déborderait son conteneur.
+    assert_eq!(px(&sl, 30, 70), [0, 0, 0, 0], "clip rejoué");
+}

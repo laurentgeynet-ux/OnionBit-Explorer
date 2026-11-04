@@ -684,6 +684,20 @@ class BrowserController extends Notifier<BrowserState> {
   /// converge à la frame livrée.
   final Map<String, double> _paintedScrollY = {};
 
+  /// Plans « top » par onglet (étape 188 — M2 composition
+  /// deux plans) : RGBA+α des items peints après la plus
+  /// haute surface composite (contrôles DOM du site au-
+  /// dessus du plan natif), tiré à l'`epoch` de la base.
+  /// `rect` en px CSS **viewport** de la frame peinte.
+  /// Hors `BrowserState` comme `_frameImages` (rétention).
+  final Map<String, ({ui.Image image, ui.Rect rect, int epoch})> _topSlices =
+      {};
+
+  /// Plan supérieur de l'onglet — `null` = composition
+  /// simple plan (pas de surface composite à recouvrir).
+  ({ui.Image image, ui.Rect rect, int epoch})? topSlice(String tabId) =>
+      _topSlices[tabId];
+
   /// Plan de pull par onglet (étape 109) : `rects` dirty
   /// accumulées (px physiques) → pull partiel + composite ;
   /// `full` → pull plein (scroll, `rects` vides/absentes,
@@ -1103,6 +1117,7 @@ class BrowserController extends Notifier<BrowserState> {
         // frame en cours finit de peindre.
         _frameImages.remove(tabId)?.dispose();
         _paintedScrollY.remove(tabId);
+        _topSlices.remove(tabId)?.image.dispose();
         _pendingRects.remove(tabId);
         _pendingFull.remove(tabId);
     }
@@ -1752,6 +1767,8 @@ class BrowserController extends Notifier<BrowserState> {
       final ui.Image img;
       double? paintedScrollY;
       List<MediaPaintMeta>? mediaMeta;
+      int? epoch;
+      ui.Rect? top;
       final engine = _repo;
       if (engine is FfiEngine) {
         final pull = await engine.fetchFramePull(tabId);
@@ -1759,17 +1776,25 @@ class BrowserController extends Notifier<BrowserState> {
         img = pull.image;
         paintedScrollY = pull.paintedScrollY;
         mediaMeta = pull.media;
+        epoch = pull.epoch;
+        top = pull.top;
       } else {
         final pull = await _repo.fetchFrame(tabId);
         if (pull == null || pull.bytes.isEmpty) return;
         img = await _decodePng(pull.bytes);
         paintedScrollY = pull.paintedScrollY;
         mediaMeta = pull.media;
+        epoch = pull.epoch;
+        top = pull.top;
       }
       if (!ref.mounted) {
         img.dispose();
         return;
       }
+      // Slice synchronisé AVANT l'install — le `frameTick`
+      // qui réveille l'affichage trouve déjà la paire
+      // base↔top cohérente (étape 188).
+      await _syncTopSlice(tabId, epoch, top);
       _installFrame(
         tabId,
         img,
@@ -1796,6 +1821,8 @@ class BrowserController extends Notifier<BrowserState> {
     final patches = <(ui.Rect, ui.Image)>[];
     double? paintedScrollY;
     List<MediaPaintMeta>? mediaMeta;
+    int? epoch;
+    ui.Rect? top;
     try {
       for (final r in rects) {
         final x = r.left.round();
@@ -1813,6 +1840,13 @@ class BrowserController extends Notifier<BrowserState> {
           // (même frame stockée) — la dernière vue gagne.
           paintedScrollY = pull.paintedScrollY ?? paintedScrollY;
           mediaMeta = pull.media ?? mediaMeta;
+          // `epoch` présent = démon 188 : la paire
+          // `e`/`top` est **autoritaire** — `top` `null`
+          // signifie « pas de slice », pas « inconnu ».
+          if (pull.epoch != null) {
+            epoch = pull.epoch;
+            top = pull.top;
+          }
           patch = await _decodePng(pull.bytes);
         }
         if (patch == null) return false;
@@ -1840,6 +1874,15 @@ class BrowserController extends Notifier<BrowserState> {
         img.dispose();
         return false;
       }
+      // Étape 188 — le pull partiel repeint des pixels du
+      // slice : REST le synchronise par les headers (paire
+      // `e`/`top` autoritaire) ; FFI, sans méta par région,
+      // ne re-tire que si la zone touchée chevauche le slice.
+      if (engine is FfiEngine) {
+        await _refreshTopSliceFfi(tabId, rects);
+      } else {
+        await _syncTopSlice(tabId, epoch, top);
+      }
       _installFrame(
         tabId,
         img,
@@ -1854,6 +1897,112 @@ class BrowserController extends Notifier<BrowserState> {
         img.dispose();
       }
     }
+  }
+
+  /// Synchronise le plan supérieur avec la méta d'un pull
+  /// (étape 188 — M2 composition deux plans). `epoch` `null`
+  /// = transport pré-188 → no-op ; `top` `null` sous contrat
+  /// = aucune surface composite → le slice retenu est effacé.
+  /// Sinon re-tiré quand l'epoch ou le rect diffèrent du
+  /// retenu ; `stale` = une peinture s'est interposée entre
+  /// base et slice → effacé, le pull suivant re-paire
+  /// (jamais d'appairage de deux générations).
+  Future<void> _syncTopSlice(String tabId, int? epoch, ui.Rect? top) async {
+    if (epoch == null) return;
+    final cur = _topSlices[tabId];
+    if (top == null) {
+      cur?.image.dispose();
+      _topSlices.remove(tabId);
+      return;
+    }
+    if (cur != null && cur.epoch == epoch && cur.rect == top) return;
+    final engine = _repo;
+    ui.Image? img;
+    var stale = false;
+    if (engine is FfiEngine) {
+      final r = await engine.fetchFrameTop(
+        tabId,
+        epoch: epoch,
+        w: top.width,
+        h: top.height,
+      );
+      img = r.image;
+      stale = r.stale;
+    } else {
+      final r = await _repo.fetchFrameTopSlice(tabId, epoch);
+      stale = r.stale;
+      final bytes = r.bytes;
+      if (bytes != null) {
+        try {
+          img = await _decodePng(bytes);
+        } on Object {
+          img = null;
+        }
+      }
+    }
+    if (!ref.mounted) {
+      img?.dispose();
+      return;
+    }
+    if (stale || img == null) {
+      cur?.image.dispose();
+      _topSlices.remove(tabId);
+      return;
+    }
+    cur?.image.dispose();
+    _topSlices[tabId] = (image: img, rect: top, epoch: epoch);
+  }
+
+  /// Chemin régions FFI (étape 188) : les pulls partiels
+  /// FFI ne portent pas de méta — quand un rect tiré
+  /// chevauche la zone du slice retenu, ses pixels sont
+  /// potentiellement périmés → re-tiré à la **génération
+  /// courante** (epoch wildcard — appairage plus lâche
+  /// qu'un pull plein : un interposé sert un slice plus
+  /// récent que la base, auto-correctif au pull suivant).
+  /// Le slice est borné à son rect — en dehors, ses pixels
+  /// ne changent pas → aucun re-tir. Dims rendues ≠ dims
+  /// retenues = la géométrie a bougé (position inconnue
+  /// sans méta) → effacé, réappris au prochain pull plein.
+  /// Limite nommée : un slice apparu sans pull méta
+  /// (vidéo JS mid-session, jamais de plein) reste
+  /// invisible jusqu'au prochain pull plein — repli M1.
+  Future<void> _refreshTopSliceFfi(String tabId, List<ui.Rect> rects) async {
+    final cur = _topSlices[tabId];
+    final engine = _repo;
+    if (cur == null || engine is! FfiEngine) return;
+    final sc = cur.rect.width > 0 ? cur.image.width / cur.rect.width : 0.0;
+    final phys = ui.Rect.fromLTWH(
+      cur.rect.left * sc,
+      cur.rect.top * sc,
+      cur.rect.width * sc,
+      cur.rect.height * sc,
+    );
+    if (!rects.any(phys.overlaps)) return;
+    final r = await engine.fetchFrameTop(tabId);
+    if (!ref.mounted) {
+      r.image?.dispose();
+      return;
+    }
+    if (r.stale) return;
+    final img = r.image;
+    if (img == null) {
+      // Plus de surface composite côté moteur (média
+      // retiré/sorti du viewport) → le plan retenu n'a
+      // plus lieu : effacé, sinon ses pixels couvriraient
+      // une base désormais sans média.
+      cur.image.dispose();
+      _topSlices.remove(tabId);
+      return;
+    }
+    if (img.width != cur.image.width || img.height != cur.image.height) {
+      img.dispose();
+      cur.image.dispose();
+      _topSlices.remove(tabId);
+      return;
+    }
+    cur.image.dispose();
+    _topSlices[tabId] = (image: img, rect: cur.rect, epoch: cur.epoch);
   }
 
   /// PNG → `ui.Image` décodée (codec disposé au retour).

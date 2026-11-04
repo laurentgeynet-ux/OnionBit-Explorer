@@ -6,6 +6,7 @@ import 'dart:async';
 import 'dart:ffi' as ffi;
 import 'dart:io';
 import 'dart:isolate';
+import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import '../../features/browser/data/browser_repository.dart';
@@ -61,6 +62,8 @@ class FfiFramePull {
     required this.image,
     this.paintedScrollY,
     this.media,
+    this.epoch,
+    this.top,
   });
 
   /// Frame RGBA décodée.
@@ -73,6 +76,15 @@ class FfiFramePull {
   /// `null` hors contrat 185 (même sémantique que
   /// `FramePull.media` : ensemble autoritaire quand présent).
   final List<MediaPaintMeta>? media;
+
+  /// Génération de la frame tirée (`e`, étape 188) — à
+  /// renvoyer à [fetchFrameTop] pour appairer le slice.
+  /// `null` hors contrat 188.
+  final int? epoch;
+
+  /// Rect **viewport** px CSS du top-slice (`top`, étape
+  /// 188) — `null` = aucun plan supérieur pour cette frame.
+  final ui.Rect? top;
 }
 
 /// Backend moteur **in-process** : charge `explorer_ffi.dll`
@@ -324,6 +336,8 @@ class FfiEngine implements BrowserRepository {
         bytes: bytes,
         paintedScrollY: pull.paintedScrollY,
         media: pull.media,
+        epoch: pull.epoch,
+        top: pull.top,
       );
     } finally {
       pull.image.dispose();
@@ -391,7 +405,70 @@ class FfiEngine implements BrowserRepository {
                 if (e is Map)
                   MediaPaintMeta.fromJson(Map<String, Object?>.from(e)),
             ],
+      epoch: (r['epoch'] as num?)?.toInt(),
+      top: MediaPaintMeta.rectFromWire(r['top']),
     );
+  }
+
+  /// Pull du top-slice de la frame courante (étape 188 —
+  /// M2 composition deux plans) : `explorer_frame_top`,
+  /// RGBA+α borné au rect `top` servi par [fetchFramePull].
+  /// `epoch` appaire à la base (`null` = génération
+  /// courante — rafraîchissement du chemin régions, qui ne
+  /// transporte pas de méta) ; `w`/`h` = dims CSS du rect
+  /// (dimensionnent le buffer natif — `0` = borne frame
+  /// entière, repli wildcard). `stale` = la génération
+  /// demandée n'est plus courante → l'appelant efface le
+  /// slice retenu. `image` `null` + `stale` `false` = pas
+  /// de slice ou export absent (repli plan unique).
+  Future<({ui.Image? image, bool stale})> fetchFrameTop(
+    String tabId, {
+    int? epoch,
+    double w = 0,
+    double h = 0,
+  }) async {
+    final r = await _worker.call(opFrameTop, {
+      'tab': _idOf(tabId),
+      'epoch': epoch ?? -1,
+      'w': w,
+      'h': h,
+    });
+    if (r == null || r['none'] == true) {
+      return (image: null, stale: false);
+    }
+    if (r['stale'] == true) return (image: null, stale: true);
+    final tw = (r['w'] as num?)?.toInt() ?? 0;
+    final th = (r['h'] as num?)?.toInt() ?? 0;
+    final px = (r['px']! as TransferableTypedData).materialize().asUint8List();
+    final done = Completer<ui.Image>();
+    ui.decodeImageFromPixels(
+      px,
+      tw,
+      th,
+      ui.PixelFormat.rgba8888,
+      done.complete,
+    );
+    return (image: await done.future, stale: false);
+  }
+
+  /// Forme PNG du pull top-slice (compat interface REST) —
+  /// ré-encode l'`ui.Image` de [fetchFrameTop] ; `stale`
+  /// remonte tel quel. Le chemin UI réel reste
+  /// [fetchFrameTop] (aucun codec).
+  @override
+  Future<({Uint8List? bytes, bool stale})> fetchFrameTopSlice(
+    String tabId,
+    int epoch,
+  ) async {
+    final r = await fetchFrameTop(tabId, epoch: epoch, w: 0, h: 0);
+    final img = r.image;
+    if (img == null) return (bytes: null, stale: r.stale);
+    try {
+      final data = await img.toByteData(format: ui.ImageByteFormat.png);
+      return (bytes: data?.buffer.asUint8List(), stale: false);
+    } finally {
+      img.dispose();
+    }
   }
 
   /// Région de frame `(x,y,w,h)` en px physiques → `ui.Image`

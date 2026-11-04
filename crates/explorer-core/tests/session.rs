@@ -12,8 +12,8 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use explorer_core::{
-    Bookmark, CoreError, CoreEvent, InputEvent, InputOutcome, KeyMods, MediaKind, Session,
-    SessionConfig, TabId,
+    Bookmark, CoreError, CoreEvent, FrameTop, InputEvent, InputOutcome, KeyMods, MediaKind,
+    Session, SessionConfig, TabId,
 };
 use explorer_layout::font::{FontRequest, FontSource};
 use explorer_net::error::NetResult;
@@ -1067,6 +1067,65 @@ async fn hit_targets_media_covered_by_dom() {
         .hit_targets_at(id, v.rect.x + v.rect.w / 2.0, v.rect.y + v.rect.h / 2.0)
         .unwrap();
     assert!(hit.media.is_none(), "DOM au-dessus → None : {hit:?}");
+}
+
+// --- Étape 188 : top-slice (`FrameMeta.e/top`, `frame_top`) ---
+
+/// `<video>` composite : la méta porte `e` + `top` (rect
+/// viewport ∪(v∩c)), `frame_top` sert le slice de la
+/// génération courante, une epoch périmée → `Stale`, le
+/// wildcard `None` sert la courante.
+#[tokio::test]
+async fn frame_top_slice_and_stale_epoch() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/m",
+        200,
+        "<!doctype html><html><body>\
+         <video src=\"v.mp4\" controls></video>\
+         <div style=\"position:absolute;left:0;top:0;width:200px;height:60px\">\
+         hud</div></body></html>",
+    );
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/m").await.unwrap();
+
+    let meta = s.frame_meta(id).expect("méta de la frame peinte");
+    assert!(meta.epoch > 0, "epoch bumpée à la peinture");
+    let top = meta.top.expect("top-slice attendu : vidéo composite");
+    assert!(top.w > 0.0 && top.h > 0.0);
+
+    // Génération exacte → slice RGBA aux dims du rect ×scale.
+    let FrameTop::Slice(rect, frame) = s.frame_top(id, Some(meta.epoch)) else {
+        panic!("slice attendu pour la génération courante");
+    };
+    assert_eq!(rect, top);
+    assert!(frame.width > 0 && frame.height > 0);
+    assert_eq!(
+        frame.pixels.len(),
+        frame.width as usize * frame.height as usize * 4
+    );
+
+    // Epoch périmée → `Stale` — jamais d'appairage croisé.
+    assert!(matches!(
+        s.frame_top(id, Some(meta.epoch + 1)),
+        FrameTop::Stale
+    ));
+    // Wildcard `None` → génération courante servie (chemin
+    // de rafraîchissement des pulls régions).
+    assert!(matches!(s.frame_top(id, None), FrameTop::Slice(..)));
+}
+
+/// Page sans média composite : `top` absent de la méta et
+/// `frame_top` rend `None` — l'hôte compose un plan unique.
+#[tokio::test]
+async fn frame_top_none_without_media() {
+    let (mut s, t) = test_session();
+    t.route("/", 200, "<html><body><p>plain</p></body></html>");
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    let meta = s.frame_meta(id).expect("méta de la frame peinte");
+    assert!(meta.top.is_none());
+    assert!(matches!(s.frame_top(id, None), FrameTop::None));
 }
 
 /// `download_event_json` — les 5 variantes portent leur nom

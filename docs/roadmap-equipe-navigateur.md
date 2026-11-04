@@ -6691,6 +6691,50 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   (ffi) ; déploiement réel +
   audit exécutés.
 
+- [x] **Étape 188. Composition
+  deux plans — top-slice (M2
+  UX-vidéo)** (`explorer-render`
+  + `explorer-core` +
+  `explorer-api` + `explorer-ffi`
+  + `app/` — réponse PIPE
+  journalisée `interface-equipes.md`) :
+  le plan natif occultait le DOM
+  peint par-dessus (contrôles du
+  site, z supérieurs, sticky).
+  L'app compose désormais
+  `base → surface(s) → slice` :
+  base = frame complète inchangée,
+  slice = re-raster RGBA+α des
+  items `[cut..)` borné à
+  `∪(v∩c)`. `rasterize_slice` :
+  `Push*/Pop*` du préfixe rejoués
+  sans dessin, items post-coupe
+  filtrés à la fenêtre.
+  `MediaSurface.box_path` (chemin
+  d'index → `spans`) ; coupe au
+  `max(span.end)` des surfaces
+  éligibles. `frame_epoch` par
+  onglet (bump `put_paint` +
+  bfcache) → `e`/`top` dans la
+  méta ; REST `x-explorer-frame-epoch`
+  + `x-explorer-top`,
+  `?slice=top&epoch=N` (`409`
+  stale) ; FFI `explorer_frame_top`
+  (`u64::MAX` courant, `-2` stale)
+  lookup optionnel (vieille dll →
+  repli M1). App : `_topSlices`
+  sync avant install, couche
+  `IgnorePointer` entre overlays
+  et scrollbar (hits → sonde 186).
+  Correctif connexe :
+  `painted_scroll_y` — la méta
+  frame/top décrit l'ancrage de
+  *sa* passe, plus le scroll
+  demandé qui avance pendant une
+  peinture détachée. Verrous :
+  render + core + api + ffi +
+  contrôleur — 67/67 app verts.
+
 - [ ] **Écarts terrain — vol humain
   22/10 (release `39ab821`, FFI)** :
   second run humain — trois constats

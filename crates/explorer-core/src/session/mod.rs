@@ -103,6 +103,7 @@ pub(crate) use downloads::*;
 pub(crate) use find::*;
 #[allow(clippy::wildcard_imports)]
 pub(crate) use forms::*;
+pub use frame::{FrameMeta, FrameTop};
 #[allow(clippy::wildcard_imports)]
 pub(crate) use media::*;
 pub use media::{
@@ -610,6 +611,20 @@ pub(crate) struct Tab {
     /// mort de la page (`close_media`) et jamais gelées :
     /// une restauration bfcache ré-offre avec des ids neufs.
     media: Vec<MediaSurface>,
+    /// Génération de la frame stockée (étape 188 —
+    /// atomicité top-slice M2) : bumpée à chaque
+    /// `put_paint` — un pull `frame_top`/`?slice=top`
+    /// exige la même génération que le pull de base,
+    /// deux frames ne s'appairent jamais.
+    frame_epoch: u64,
+    /// Scroll **peint** de la frame stockée (étape 188 —
+    /// même invariant que `frame_epoch`) : `p.scroll_y` au
+    /// `put_paint`, `snap.scroll_y` au restore bfcache.
+    /// `scroll_y` peut avancer pendant une peinture
+    /// détachée (position acceptée immédiatement, commit
+    /// plus tard) — la méta d'une frame décrit *son*
+    /// ancrage, jamais la position demandée.
+    painted_scroll_y: f32,
 }
 
 /// Push d'attribut session→miroir tamponné pendant le
@@ -1457,6 +1472,7 @@ impl Session {
                 pending_push: Vec::new(),
                 pending_replace: None,
                 scroll_y: 0.0,
+                painted_scroll_y: 0.0,
                 doc_h: 0.0,
                 geom: explorer_js::GeometrySlot::default(),
                 dom: None,
@@ -1494,6 +1510,7 @@ impl Session {
                 transitions: Vec::new(),
                 animations: Vec::new(),
                 nav_epoch: 0,
+                frame_epoch: 0,
                 pending_nav: std::collections::VecDeque::new(),
                 pending_nav_reqs: std::collections::VecDeque::new(),
                 dirty: Vec::new(),

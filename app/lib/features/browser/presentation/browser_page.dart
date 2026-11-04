@@ -1419,6 +1419,13 @@ class _FrameViewState extends ConsumerState<_FrameView> {
                             // px logiques (étape 82) — `fZoom`
                             // pendant le transit fit:width.
                             ..._mediaOverlays(st, active!.id, fZoom),
+                            // Plan supérieur (étape 188 —
+                            // composition deux plans) : DOM
+                            // peint après la plus haute
+                            // surface, re-rasterisé α par le
+                            // moteur — par-dessus les plans
+                            // natifs, transparent aux hits.
+                            ..._topSliceLayer(st, active.id, fZoom, fitW, dpr),
                             // Barre de scroll verticale
                             // (diagnostic terrain 23/10 : rend
                             // visible la scrollabilité détectée —
@@ -1525,6 +1532,47 @@ class _FrameViewState extends ConsumerState<_FrameView> {
               height: view.height * zoom,
               child: surface,
             ),
+          ),
+        ),
+      ),
+    ];
+  }
+
+  /// Top-slice de la composition deux plans (étape 188) —
+  /// dessiné **après** les surfaces natives, dans l'espace
+  /// de la frame peinte : translation `-shift` et échelle
+  /// `fitW`/`dpr` identiques à la base (le raster du slice
+  /// est sorti à `zoom·dpr` px physiques/px CSS, comme la
+  /// frame). `IgnorePointer` : les contrôles du site qu'il
+  /// montre sont cliqués **au travers** — le hit tombe sur
+  /// le plan natif, la sonde `/hit` (étape 186) voit alors
+  /// `media:null` → forward seul, pas de double détente.
+  /// Masqué sans slice retenu ou sans surface déclarée
+  /// (cache FFI-régions après retrait de la vidéo).
+  List<Widget> _topSliceLayer(
+    BrowserState st,
+    String tabId,
+    double fZoom,
+    double fitW,
+    double dpr,
+  ) {
+    final slice = widget.ctrl.topSlice(tabId);
+    if (slice == null) return const [];
+    final offers = st.media[tabId]?.values;
+    if (offers == null || !offers.any((o) => o.hasOverlay || o.hasAudioBar)) {
+      return const [];
+    }
+    final shift = widget.ctrl.frameShiftCss(tabId);
+    final r = slice.rect;
+    return [
+      Positioned(
+        left: r.left * fZoom,
+        top: (r.top - shift) * fZoom,
+        child: IgnorePointer(
+          child: Transform.scale(
+            scale: fitW,
+            alignment: Alignment.topLeft,
+            child: RawImage(image: slice.image, fit: BoxFit.none, scale: dpr),
           ),
         ),
       ),

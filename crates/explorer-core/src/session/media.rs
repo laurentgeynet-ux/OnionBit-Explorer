@@ -95,6 +95,12 @@ pub(crate) struct MediaSurface {
     /// media` — les drapeaux décrivent ce que le raster a
     /// réellement fait de la boîte, rien de plus).
     pub(crate) meta: MediaMeta,
+    /// Chemin d'index de la boîte dans l'arbre posé (étape
+    /// 188 — clé de `DisplayList::spans` pour la coupe
+    /// top-slice ; `None` = élément sans boîte ou `audio`
+    /// sans UI — jamais composite natif, aucun slice à
+    /// couper pour lui).
+    pub(crate) box_path: Option<Box<[u16]>>,
 }
 
 /// Contexte de peinture d'une boîte média (étape 185) —
@@ -201,6 +207,11 @@ struct ScannedMedia {
     looping: bool,
     /// Chemin `(tag, index)` de l'élément (71c — miroir JS).
     path: Vec<(String, u32)>,
+    /// Chemin d'index de la boîte dans l'arbre posé (étape
+    /// 188 — clé de `DisplayList::spans` pour la coupe
+    /// top-slice ; `None` = élément sans boîte ou `audio`
+    /// sans UI, jamais composite natif).
+    box_path: Option<Box<[u16]>>,
     /// Contexte peint de la boîte (étape 185) — voir
     /// [`MediaMeta`]. Défaut pour un élément sans boîte.
     meta: MediaMeta,
@@ -536,9 +547,10 @@ fn scan_media(
     // chaque boîte applique SES contributions (position,
     // transform, opacity, clips) avant d'être enregistrée —
     // mêmes règles que `paint_box`, même ordre de lecture.
-    let mut rects: HashMap<NodeId, (MediaRect, MediaMeta)> = HashMap::new();
-    let mut stack = vec![(tree, MediaCtx::default())];
-    while let Some((bx, mut ctx)) = stack.pop() {
+    let mut rects: HashMap<NodeId, (MediaRect, MediaMeta, Box<[u16]>)> = HashMap::new();
+    let mut stack: Vec<(&LayoutBox, MediaCtx, Vec<u16>)> =
+        vec![(tree, MediaCtx::default(), Vec::new())];
+    while let Some((bx, mut ctx, path)) = stack.pop() {
         ctx.accumulate(bx);
         if let Some(n) = bx.node {
             let meta = MediaMeta {
@@ -558,9 +570,19 @@ fn scan_media(
                     h: bx.rect.height,
                 },
                 meta,
+                // Chemin d'index de la boîte dans l'arbre
+                // posé (étape 188 — clé `DisplayList::spans`
+                // pour la coupe top-slice : la même passe qui
+                // pose le contexte peint porte l'adresse de
+                // la plage d'items émise).
+                path.clone().into_boxed_slice(),
             ));
         }
-        stack.extend(bx.children.iter().rev().map(|c| (c, ctx)));
+        stack.extend(bx.children.iter().enumerate().rev().map(|(i, c)| {
+            let mut p = path.clone();
+            p.push(u16::try_from(i).unwrap_or(u16::MAX));
+            (c, ctx, p)
+        }));
     }
     let zero = MediaRect {
         x: 0.0,
@@ -590,13 +612,13 @@ fn scan_media(
                     let controls = has_bool_attr(dom, n, "controls");
                     // `audio` sans UI : offre 0×0 quelle que
                     // soit la boîte — rien à positionner.
-                    let (rect, meta) = if kind == MediaKind::Audio && !controls {
-                        (zero, MediaMeta::default())
+                    let (rect, meta, box_path) = if kind == MediaKind::Audio && !controls {
+                        (zero, MediaMeta::default(), None)
                     } else {
                         rects
                             .get(&n)
-                            .copied()
-                            .unwrap_or((zero, MediaMeta::default()))
+                            .map(|(r, m, p)| (*r, *m, Some(p.clone())))
+                            .unwrap_or((zero, MediaMeta::default(), None))
                     };
                     out.push(ScannedMedia {
                         kind,
@@ -608,6 +630,7 @@ fn scan_media(
                         autoplay: has_bool_attr(dom, n, "autoplay"),
                         looping: has_bool_attr(dom, n, "loop"),
                         path: element_path(dom, n).unwrap_or_default(),
+                        box_path,
                         mse: false,
                         mse_buffers: Vec::new(),
                         mse_offsets: Vec::new(),
@@ -784,6 +807,7 @@ impl Session {
                     o.autoplay = s.autoplay;
                     o.looping = s.looping;
                     o.path.clone_from(&s.path);
+                    o.box_path.clone_from(&s.box_path);
                     // Moteur absent → drapeau/buffers retenus
                     // (scan à l'aveugle : ne rien dégrader) ;
                     // moteur présent → rafraîchir, y compris
@@ -826,6 +850,7 @@ impl Session {
                         report: None,
                         report_pending: false,
                         path: s.path,
+                        box_path: s.box_path,
                         mse: s.mse,
                         mse_buffers: s.mse_buffers,
                         mse_offsets: s.mse_offsets,
@@ -846,6 +871,7 @@ impl Session {
                         report: None,
                         report_pending: false,
                         path: surf.path.clone(),
+                        box_path: surf.box_path.clone(),
                         mse: surf.mse,
                         mse_offsets: surf.mse_offsets.clone(),
                         meta: surf.meta,

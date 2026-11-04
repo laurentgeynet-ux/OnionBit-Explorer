@@ -524,6 +524,14 @@ impl Tab {
         self.tree_epoch = p.tree_epoch;
         self.list = p.list;
         self.frame = p.frame;
+        // Génération frame (étape 188 — atomicité du pull
+        // top-slice : `e` dans `FrameMeta`/`?slice=top`).
+        self.frame_epoch = self.frame_epoch.wrapping_add(1);
+        // Scroll **peint** de cette passe (même étape) :
+        // `scroll_y` a pu avancer pendant la fenêtre
+        // détachée — la méta frame/top décale de l'ancrage
+        // réel de la frame, pas de la position demandée.
+        self.painted_scroll_y = p.scroll_y;
         self.font_cache = p.font_cache;
         self.layout_font_cache = p.layout_font_cache;
         self.png = p.png;

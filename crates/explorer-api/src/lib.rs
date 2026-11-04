@@ -439,6 +439,14 @@ struct FrameRegionQuery {
     w: Option<u32>,
     h: Option<u32>,
     full: Option<u8>,
+    /// `slice=top` (étape 188 — M2 UX-vidéo) : top-slice
+    /// RGBA+α des items peints après la plus haute surface
+    /// composite, borné au `x-explorer-top` servi avec la
+    /// base. `epoch` = génération attendue — `409` si une
+    /// autre peinture s'est interposée (jamais d'appairage
+    /// base↔slice de deux frames).
+    slice: Option<String>,
+    epoch: Option<u64>,
 }
 
 /// `GET /api/tabs/{id}/frame` → `image/png` (pull ADR-0004).
@@ -457,6 +465,25 @@ async fn frame(
     Query(q): Query<FrameRegionQuery>,
 ) -> Response {
     let mut session = st.session.lock().await;
+    // `?slice=top` — pull du plan supérieur de la MÊME
+    // frame (étape 188) : servi AVANT `tick_animations` —
+    // un tick ici repeindrait et bumplerait l'epoch, le
+    // slice serait `Stale` face à la base juste livrée.
+    // `epoch` absent = génération courante servie.
+    if q.slice.as_deref() == Some("top") {
+        return match session.frame_top(id, q.epoch) {
+            explorer_core::FrameTop::Slice(_, fr) => match fr.encode_png() {
+                Some(bytes) if !bytes.is_empty() => (
+                    [(header::CONTENT_TYPE, HeaderValue::from_static("image/png"))],
+                    bytes,
+                )
+                    .into_response(),
+                _ => StatusCode::NO_CONTENT.into_response(),
+            },
+            explorer_core::FrameTop::Stale => StatusCode::CONFLICT.into_response(),
+            explorer_core::FrameTop::None => StatusCode::NO_CONTENT.into_response(),
+        };
+    }
     let _ = session.tick_animations(id);
     let png = match (q.x, q.y, q.w, q.h, q.full) {
         (Some(rx), Some(ry), Some(rw), Some(rh), _) => session.frame_png_region(id, rx, ry, rw, rh),
@@ -503,6 +530,20 @@ async fn frame(
                 if let Ok(json) = serde_json::to_string(&meta.media) {
                     if let Ok(v) = HeaderValue::from_str(&json) {
                         headers.insert(HeaderName::from_static("x-explorer-media"), v);
+                    }
+                }
+                // Étape 188 — appairage top-slice : `e` =
+                // génération de CE PNG (renvoyée à
+                // `?slice=top&epoch=`), `top` = rect viewport
+                // du slice (absent = rien à tirer).
+                if let Ok(v) = HeaderValue::from_str(&meta.epoch.to_string()) {
+                    headers.insert(HeaderName::from_static("x-explorer-frame-epoch"), v);
+                }
+                if let Some(top) = meta.top {
+                    if let Ok(json) = serde_json::to_string(&top) {
+                        if let Ok(v) = HeaderValue::from_str(&json) {
+                            headers.insert(HeaderName::from_static("x-explorer-top"), v);
+                        }
                     }
                 }
             }
