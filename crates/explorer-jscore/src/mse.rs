@@ -29,10 +29,12 @@
 //! - `SourceBuffer.buffered` reste vide : les octets sont
 //!   comptabilisés, pas stockés — « rien de lisible bufferisé »
 //!   est vrai tant que l'hôte ne peut pas les consommer.
-//! - Les événements `updatestart`/`update`/`updateend` sont tirés
-//!   **en séquence synchrone** dans `appendBuffer` (approximation
-//!   documentée du « queue a task » spec — même économie que les
-//!   livraisons `FileReader` au checkpoint).
+//! - `updatestart`/`update` sont tirés **en séquence synchrone**
+//!   dans `appendBuffer`/`remove`/`abort` (fenêtre `updating`
+//!   spec — l'`InvalidStateError` re-entrant l'exige) ;
+//!   `updateend` est filé en **tâche** (JS-C349 — « queue a
+//!   task » spec : la boucle d'append d'un player se déroule
+//!   à la frontière de job, à plat — mur §B-100 vols 651/652).
 //!
 //! Budgets (§8 AGENTS — `appendBuffer` est un vecteur OOM
 //! canonique) : cap d'octets par `SourceBuffer`, cap de buffers
@@ -865,6 +867,29 @@ fn track_push(e: &mut Engine, lid: ObjId, ty: &'static str, track: Value) {
     match owner.and_then(|o| mse_state_at(e, o)) {
         Some(st) => st.pending_track_events.push_back((lid, ty, track)),
         None => e.mse.pending_track_events.push_back((lid, ty, track)),
+    }
+}
+
+/// Push d'un event **`SourceBuffer`** routé §B-89 — même file
+/// que `mse_push` mais cible = le wrapper buffer ; le realm
+/// propriétaire est celui du `MediaSource` parent (`sd.ms`).
+/// JS-C349 : `updateend` est filé en **tâche** (spec « queue
+/// a task ») — un listener `updateend` qui re-append reboucle
+/// à la frontière de job au lieu de récursionner (signature
+/// §B-100 vols 651/652 : ~600 frames JS, cycle ~9 ×65 — la
+/// boucle d'append `YouTube` était enfermée dans un `updateend`
+/// tiré synchrone → `RangeError` → SABR jamais armé).
+fn sb_push(e: &mut Engine, sid: ObjId, ty: &'static str) {
+    let owner = sb_data(e, Value::Obj(sid)).and_then(|sd| {
+        if let Value::Obj(mid) = sd.borrow().ms {
+            ms_ctx(e, mid)
+        } else {
+            None
+        }
+    });
+    match owner.and_then(|o| mse_state_at(e, o)) {
+        Some(st) => st.pending_events.push_back((sid, ty)),
+        None => e.mse.pending_events.push_back((sid, ty)),
     }
 }
 
@@ -2152,9 +2177,9 @@ fn est_append_range(sd: &mut SbData) -> Option<(f64, f64)> {
 }
 
 /// `sb.appendBuffer(buf)` — octets acceptés-**comptabilisés**
-/// (jamais stockés : pas de transport en C173). Séquence
-/// synchrone `updatestart` → `update` → `updateend` ; le cap
-/// d'octets jette `QuotaExceededError` (budget hostile).
+/// (jamais stockés : pas de transport en C173). `updatestart`/
+/// `update` synchrones, `updateend` **filé en tâche** (JS-C349) ;
+/// le cap d'octets jette `QuotaExceededError` (budget hostile).
 fn sb_append_buffer(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let Some(d) = sb_data(e, this) else {
         return Err(e.type_error("SourceBuffer.appendBuffer: Illegal invocation"));
@@ -2296,12 +2321,18 @@ fn sb_append_buffer(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Val
     let Value::Obj(sid) = this else {
         return Ok(Value::Undefined);
     };
-    // Approximation documentée : les trois événements partent en
-    // séquence synchrone (spec : « queue a task ») — l'ordre vu
-    // par les listeners est correct. JS-C283 : un listener qui
-    // jette n'interrompt plus la séquence — `updating` retombe
-    // et `updateend` part quand même, sinon `blockBuffers` d'un
-    // player réel gèle (hls.js → `endOfStream` jamais appelé).
+    // JS-C349 — `updatestart`/`update` restent synchrones
+    // (la garde `updating` spec exige leur fenêtre pour
+    // l'`InvalidStateError` re-entrant) mais `updateend` est
+    // filé en **tâche** (spec « queue a task ») : la boucle
+    // d'append d'un player se déroule alors à la frontière de
+    // job, à plat — avant, chaque `appendBuffer` dans le
+    // listener `updateend` ré-entrait en entier (~9 frames/
+    // cycle ×65 → `RangeError`, mur §B-100 des vols 651/652).
+    // JS-C283 : un listener qui jette n'interrompt pas la
+    // séquence — `updating` retombe et `updateend` est poussé
+    // quand même, sinon `blockBuffers` d'un player réel gèle
+    // (hls.js → `endOfStream` jamais appelé).
     let mut first_err = None;
     fire_mse_guarded(e, sid, "updatestart", &mut first_err);
     fire_mse_guarded(e, sid, "update", &mut first_err);
@@ -2387,7 +2418,9 @@ fn sb_append_buffer(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Val
         // `buffered_ms` du rapport hôte.
         mse_push(e, mid, "progress");
     }
-    fire_mse_guarded(e, sid, "updateend", &mut first_err);
+    // JS-C349 — `updateend` filé en tâche (après `progress`,
+    // même ordre observé qu'avant — la file est FIFO).
+    sb_push(e, sid, "updateend");
     match first_err {
         Some(err) => Err(err),
         None => Ok(Value::Undefined),
@@ -2427,7 +2460,9 @@ fn sb_abort(e: &mut Engine, this: Value, _args: &[Value]) -> JsResult<Value> {
     };
     let mut first_err = None;
     fire_mse_guarded(e, sid, "abort", &mut first_err);
-    fire_mse_guarded(e, sid, "updateend", &mut first_err);
+    // JS-C349 — `updateend` filé en tâche (après `abort`) —
+    // un listener qui re-append reboucle à la frontière de job.
+    sb_push(e, sid, "updateend");
     match first_err {
         Some(err) => Err(err),
         None => Ok(Value::Undefined),
@@ -2513,7 +2548,9 @@ fn sb_remove(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     fire_mse_guarded(e, sid, "updatestart", &mut first_err);
     fire_mse_guarded(e, sid, "update", &mut first_err);
     d.borrow_mut().updating = false;
-    fire_mse_guarded(e, sid, "updateend", &mut first_err);
+    // JS-C349 — `updateend` filé en tâche : boucle d'éviction
+    // (`remove` depuis `updateend`) déroulée à plat.
+    sb_push(e, sid, "updateend");
     match first_err {
         Some(err) => Err(err),
         None => Ok(Value::Undefined),

@@ -108,8 +108,10 @@ fn c193_source_buffers_list_and_events() {
 #[test]
 fn c193_append_buffer_events_and_props() {
     let mut e = engine();
-    // `appendBuffer` accepté-borné : séquence updatestart →
-    // update → updateend synchrone, `updating` bascule.
+    // `appendBuffer` accepté-borné : `updatestart`/`update`
+    // synchrones (fenêtre `updating`), `updateend` filé en
+    // tâche (JS-C349 — la boucle d'append des players se
+    // déroule à la frontière de job, à plat).
     assert_eq!(
         ev(
             &mut e,
@@ -124,8 +126,11 @@ fn c193_append_buffer_events_and_props() {
              log.join('>')+'|'+inU+'|'+sb.updating+'|'+sb.buffered.length"
         ),
         // JS-C278 — `buffered` estimé : 1 plage après append.
-        "s>u>e|true|false|1"
+        "s>u|true|false|1"
     );
+    // La tâche `updateend` a été servie à la frontière de job
+    // (l'eval précédent a vidangé) — l'ordre observé tient.
+    assert_eq!(ev(&mut e, "log.join('>')"), "s>u>e");
     // Props IDL : mode / timestampOffset / appendWindow /
     // pistes vides.
     assert_eq!(
@@ -399,6 +404,9 @@ fn c193_append_listener_throw_keeps_machine() {
              catch (err) { seq+='|threw:'+err.message; }\
              seq",
         ),
-        "|end;u=false|threw:boom"
+        "|threw:boom"
     );
+    // `updateend` (tâche JS-C349) servi à la frontière : la
+    // machine reste saine malgré le listener jeté en `update`.
+    assert_eq!(ev(&mut e, "seq"), "|threw:boom|end;u=false");
 }

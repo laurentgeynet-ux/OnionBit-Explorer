@@ -10061,6 +10061,20 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   (checkpoint spec, itératif).
   Verrous `c348_microtask_
   checkpoint` 2/2.
+- [x] **JS-C349. `updateend` filé
+  en tâche** (§B-100, signature
+  vols 651/652 — `updatestart`/
+  `update`/`updateend` tirés
+  synchrone dans `appendBuffer`/
+  `remove`/`abort` : boucle
+  d'append `updateend`→append
+  récursive ~9 frames ×65 →
+  `RangeError`) — `updateend`
+  poussé dans `pending_events`
+  (queue a task spec, couture
+  JS-C324), realm routé `sd.ms`.
+  Verrous `c349_updateend_tasked`
+  3/3.
 
 ## Tâches continues
 
