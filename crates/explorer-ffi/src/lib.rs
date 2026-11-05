@@ -1475,7 +1475,7 @@ pub unsafe extern "C" fn explorer_media_audio(
     let chunk = unsafe { std::slice::from_raw_parts(pcm, len) };
     let spec = explorer_core::MediaAudioSpec {
         sample_rate: rate,
-        channels: channels.min(u16::MAX as u32) as u16,
+        channels: u16::try_from(channels.min(u32::from(u16::MAX))).unwrap_or(u16::MAX),
         format,
     };
     match sess(h).media_audio(tab, media, spec, chunk) {
@@ -2365,7 +2365,7 @@ mod tests {
                 explorer_media_audio(h, tab, mid, 48000, 2, 4, pcm.as_ptr(), 0),
                 -1
             );
-            let big = [0u8; 17 * 1024];
+            let big = vec![0u8; 17 * 1024].into_boxed_slice();
             assert_eq!(
                 explorer_media_audio(h, tab, mid, 48000, 2, 4, big.as_ptr(), big.len()),
                 -1
