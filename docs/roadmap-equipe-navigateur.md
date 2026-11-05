@@ -6927,12 +6927,12 @@ incrément.
   `sync`/`drop`/`bandwidth_max`
   (sans consommateur). 75/75.
 
-- [ ] **Étape 200. `audio_pull` PCM
-  → WebAudio (design seul)** :
-  `audio_spec`/`audio_mode`/pull —
-  seam isolate→ring buffer→audio
-  plateforme ; ADR requis, pas
-  d'implémentation dans l'incrément.
+- [x] **Étape 200. `audio_pull` PCM — ADR-0032** (design) :
+  constat filaire `set_audio_mode(1)` = sink remplacé →
+  silence sans sink PCM app ; décision = tap dépôt
+  `AUDIO_MODE_TAP=2` (perf worktree) → canal REST
+  `…/media/{id}/audio` → jscore `AnalyserNode` (destination
+  muet documenté). Phases 1-3 spécifiées, non implémentées.
 
 ### Risques nommés
 
