@@ -20,7 +20,7 @@
 //! - un worker ne peut pas spawner de worker (pas de constructeur
 //!   `Worker` dans son scope).
 
-use crate::heap::{JsResult, ObjKind, Thrown};
+use crate::heap::{JsResult, ObjKind, TaKind, Thrown};
 use crate::value::{ObjId, Value};
 use crate::xhr::{XhrRequest, XhrResponse, XhrTransport};
 use crate::Engine;
@@ -256,9 +256,34 @@ pub(crate) enum WireValue {
     Arr(Vec<WireValue>),
     /// Objet ordinaire — props data propres, ordre d'insertion.
     Obj(Vec<(String, WireValue)>),
-    /// `ArrayBuffer` (un `TypedArray`/`DataView` posté arrive
-    /// comme son buffer — approximation documentée).
+    /// `ArrayBuffer`.
     Buf(Vec<u8>),
+    /// `%TypedArray%` — `(kind, buffer cloné entier, offset
+    /// octets, len éléments)` : la vue est reconstruite telle
+    /// quelle (spec `StructuredSerialize` sérialise le buffer
+    /// vu + les paramètres de fenêtre). Un `Uint8Array` posté
+    /// resortait avant en objet ordinaire `{}` (JS-C91 : les
+    /// segments mux.js `segment.data`/`.initSegment` perdaient
+    /// leur type → `data.buffer` `undefined` en aval).
+    Tarr {
+        /// Élément (largeur + conversion).
+        ta: TaKind,
+        /// Contenu du `ByteBuf` vu (entier, pas la fenêtre).
+        buf: Vec<u8>,
+        /// `byteOffset` de la vue dans `buf`.
+        offset: usize,
+        /// `length` de la vue (éléments).
+        len: usize,
+    },
+    /// `DataView` — `(buffer cloné entier, offset, len octets)`.
+    Dview {
+        /// Contenu du `ByteBuf` vu (entier).
+        buf: Vec<u8>,
+        /// `byteOffset` de la vue.
+        offset: usize,
+        /// `byteLength` de la vue.
+        len: usize,
+    },
     /// `RegExp` `(source, flags)`.
     Re(String, String),
     /// `Map` — paires `(clé, valeur)` ordonnées.
@@ -717,6 +742,8 @@ impl Engine {
                     Arr(Vec<Value>),
                     Obj(Vec<(String, Value)>),
                     Buf(Vec<u8>),
+                    Tarr(TaKind, Vec<u8>, usize, usize),
+                    Dview(Vec<u8>, usize, usize),
                     Re(String, String),
                     Map(Vec<(Value, Value)>),
                     Set(Vec<Value>),
@@ -734,6 +761,17 @@ impl Engine {
                 let shape = match self.heap.obj(id).map(|o| &o.kind) {
                     Some(ObjKind::Array(elems)) => Shape::Arr(elems.clone()),
                     Some(ObjKind::ByteBuf(b)) => Shape::Buf(b.clone()),
+                    Some(ObjKind::TypedArray {
+                        ta,
+                        buffer,
+                        offset,
+                        len,
+                    }) => Shape::Tarr(*ta, buffer_bytes(&self.heap, *buffer), *offset, *len),
+                    Some(ObjKind::DataView {
+                        buffer,
+                        offset,
+                        len,
+                    }) => Shape::Dview(buffer_bytes(&self.heap, *buffer), *offset, *len),
                     Some(ObjKind::RegExp(re)) => Shape::Re(re.source.clone(), re.flag_string()),
                     Some(ObjKind::Fun(_)) => Shape::Bad("function"),
                     Some(ObjKind::Promise(_)) => Shape::Bad("Promise"),
@@ -797,6 +835,13 @@ impl Engine {
                         Ok(WireValue::Blob(data.as_ref().clone(), ty, wprops))
                     }
                     Shape::Buf(b) => Ok(WireValue::Buf(b)),
+                    Shape::Tarr(ta, buf, offset, len) => Ok(WireValue::Tarr {
+                        ta,
+                        buf,
+                        offset,
+                        len,
+                    }),
+                    Shape::Dview(buf, offset, len) => Ok(WireValue::Dview { buf, offset, len }),
                     Shape::Re(s, f) => Ok(WireValue::Re(s, f)),
                     Shape::Arr(elems) => {
                         seen.push(id);
@@ -856,6 +901,34 @@ impl Engine {
                     props: Vec::new(),
                     idx: std::cell::OnceCell::new(),
                     kind: ObjKind::ByteBuf(b.clone()),
+                    extensible: true,
+                    elem_integrity: 0,
+                    args_map: None,
+                }))
+            }
+            WireValue::Tarr {
+                ta,
+                buf,
+                offset,
+                len,
+            } => {
+                let ab = crate::typed_array::new_array_buffer(self, buf.clone());
+                let Value::Obj(bid) = ab else {
+                    return Value::Null;
+                };
+                crate::typed_array::new_ta(self, *ta, bid, *offset, *len)
+            }
+            WireValue::Dview { buf, offset, len } => {
+                let ab = crate::typed_array::new_array_buffer(self, buf.clone());
+                Value::Obj(self.heap.alloc_obj(crate::heap::Object {
+                    proto: Value::Obj(self.protos.data_view),
+                    props: Vec::new(),
+                    idx: std::cell::OnceCell::new(),
+                    kind: ObjKind::DataView {
+                        buffer: ab,
+                        offset: *offset,
+                        len: *len,
+                    },
                     extensible: true,
                     elem_integrity: 0,
                     args_map: None,
@@ -953,6 +1026,20 @@ impl Engine {
                 o
             }
         }
+    }
+}
+
+/// Octets du `ByteBuf` derrière une valeur de vue (`buffer`
+/// d'un `TypedArray`/`DataView`) — `Vec` vide si le handle ne
+/// pointe plus un buffer (détaché/absent : dégradé, jamais
+/// de panic — un buffer mort encode une vue vide).
+fn buffer_bytes(heap: &crate::heap::Heap, buffer: Value) -> Vec<u8> {
+    let Value::Obj(bid) = buffer else {
+        return Vec::new();
+    };
+    match heap.obj(bid).map(|o| &o.kind) {
+        Some(ObjKind::ByteBuf(b)) => b.clone(),
+        _ => Vec::new(),
     }
 }
 

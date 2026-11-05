@@ -73,7 +73,7 @@ fn b64(data: &[u8]) -> String {
     for c in data.chunks(3) {
         let n = (u32::from(c[0]) << 16)
             | (u32::from(c.get(1).copied().unwrap_or(0)) << 8)
-            | (u32::from(c.get(2).copied().unwrap_or(0)) << 16);
+            | u32::from(c.get(2).copied().unwrap_or(0));
         s.push(A[(n >> 18) as usize & 63] as char);
         s.push(A[(n >> 12) as usize & 63] as char);
         s.push(if c.len() > 1 {
@@ -138,6 +138,12 @@ fn transmuxer_bundle_emits_on_real_segment() {
          w.onmessage = function(ev) {{\
              var d = ev.data;\
              msgs.push((d && d.action) || typeof d);\
+             if (d && d.action === 'data' && d.segment && d.segment.data) {{\
+                 globalThis.__db = d.segment.data.byteLength;\
+                 globalThis.__shape = (d.segment.data instanceof ArrayBuffer)\
+                     + '/' + (d.segment.initSegment instanceof Uint8Array)\
+                     + '/' + (d.segment.initSegment && d.segment.initSegment.buffer instanceof ArrayBuffer);\
+             }}\
              globalThis.__n = msgs.length;\
          }};\
          w.onerror = function(ev) {{\
@@ -150,15 +156,79 @@ fn transmuxer_bundle_emits_on_real_segment() {
          globalThis.__msgs = msgs;",
     );
     e.eval(&script).unwrap();
-    // §B-91 : le worker RÉPOND (avant : silence total —
-    // `onmessage` jamais câblé). Le message `data` du segment
-    // muxé porte des vues typées : sa livraison complète est
-    // verrouillée par JS-C337 (`post_message_preserves_typed_views`).
-    let r = pump_until(&mut e, "globalThis.__n >= 1", 15);
+    let r = pump_until(&mut e, "globalThis.__n >= 2", 15);
     let got = e
         .eval("globalThis.__msgs.join('|')")
         .map(|v| e.describe(v))
         .unwrap();
     assert_eq!(r, "true", "reçu seulement: {got}");
+    assert!(got.contains("data"), "attendu data: {got}");
     assert!(got.contains("done"), "attendu done: {got}");
+    // La charge utile doit survivre au `wire_decode` : le
+    // segment muxé porte `data` (init+media) non vide.
+    let db = e
+        .eval("globalThis.__db || 0")
+        .map(|v| e.describe(v))
+        .unwrap();
+    let db: i64 = db.parse().unwrap_or(0);
+    assert!(db > 0, "segment data vide");
+    // §B-92 — la forme fil doit garder le type de vue : le
+    // player lit `initSegment` comme `Uint8Array` et `data`
+    // comme `ArrayBuffer` (re-wrappé `new Uint8Array(data)`
+    // côté main) — `initSegment` décodé en objet ordinaire
+    // donnait `undefined` en aval et tuait la chaîne d'append
+    // en silence.
+    let shape = e
+        .eval("globalThis.__shape || 'unset'")
+        .map(|v| e.describe(v))
+        .unwrap();
+    assert_eq!(
+        shape, "true/true/true",
+        "data/initSegment n'ont pas survécu au wire_decode"
+    );
+}
+
+/// §B-92 — aller-retour des vues : `postMessage` worker→main
+/// d'un `Uint8Array`/`DataView` reconstruit le même type de vue
+/// (buffer cloné, `byteOffset`/`length` préservés) — avant, la
+/// vue tombait dans le bras `Obj` du fil et resortait en `{}`.
+#[test]
+fn post_message_preserves_typed_views() {
+    let mut e = engine_with_workers(&[(
+        "v.js",
+        "onmessage = function(ev) {\
+             var u = ev.data;\
+             postMessage({got: (u instanceof Uint8Array), n: u.length, v0: u[0], v3: u[3],\
+                          b: (u.buffer instanceof ArrayBuffer)});\
+         };\
+         var dv = new DataView(new Uint8Array([9,8,7,6]).buffer, 1, 2);\
+         postMessage({d: dv, i: new Int16Array([300, -2]), f: new Float64Array([1.5])});"
+            .to_string(),
+    )]);
+    e.eval(
+        "var w = new Worker('v.js'); var out = [];\
+         w.onmessage = function(ev){ out.push(ev.data); globalThis.__n = out.length; };\
+         var u = new Uint8Array([5,6,7,8]);\
+         w.postMessage(u, [u.buffer]);\
+         globalThis.__out = out;",
+    )
+    .unwrap();
+    assert_eq!(pump_until(&mut e, "globalThis.__n >= 2", 5), "true");
+    // Le worker poste `{d,i,f}` dès son eval — il peut arriver
+    // avant l'écho de `u` : repérer les deux messages par leur
+    // contenu plutôt que par leur indice.
+    let r = e
+        .eval(
+            "var m = globalThis.__out;\
+             var views = m[0].d ? m[0] : m[1];\
+             var echo = m[0].d ? m[1] : m[0];\
+             (echo.got + '|' + echo.n + '|' + echo.v0 + '|' + echo.v3 + '|' + echo.b)\
+             + '#' + (views.d instanceof DataView) + '|' + views.d.byteOffset + '|'\
+             + views.d.byteLength + '|' + views.d.getUint8(0)\
+             + '#' + (views.i instanceof Int16Array) + '|' + views.i[0] + '|' + views.i[1]\
+             + '#' + (views.f instanceof Float64Array) + '|' + views.f[0]",
+        )
+        .map(|v| e.describe(v))
+        .unwrap();
+    assert_eq!(r, "true|4|5|8|true#true|1|2|8#true|300|-2#true|1.5");
 }
