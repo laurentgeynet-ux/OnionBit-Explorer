@@ -2219,16 +2219,23 @@ impl JscoreEngine {
         // traités — probablement légitime chez les vrais moteurs
         // ~5-10k frames, fatale sous ce plafond). `EXPLORER_JS_
         // CALL_DEPTH`/`EXPLORER_JS_NEST` relèvent sans rebuild ;
-        // fenêtre clampée, défaut 1024 inchangé — la garde
-        // physique reste `stacker::maybe_grow` + budget ops.
+        // fenêtre clampée — la garde physique reste
+        // `stacker::maybe_grow` + budget ops.
+        // JS-C351 — **défauts calibrés vol 654** : sous 10240
+        // la récursion YouTube passait entière (`expr_bisect=0`,
+        // `/watch` 63,9 s record) — 1024 = mort certaine sur le
+        // web réel. `nest` en unités `expr_depth` (~1,75× les
+        // frames JS) → 16384 ≈ ~9 300 frames, échelle
+        // Chrome/Firefox ; `call` 8192 au-dessus des chaînes
+        // d'appel légitimes mesurées. Les env gardent la main.
         let env_depth = |key: &str| {
             std::env::var(key)
                 .ok()
                 .and_then(|v| v.parse::<u32>().ok())
                 .filter(|&n| (256..=131_072).contains(&n))
         };
-        eng.set_call_depth_limit(env_depth("EXPLORER_JS_CALL_DEPTH").unwrap_or(1024));
-        eng.set_nest_limit(env_depth("EXPLORER_JS_NEST").unwrap_or(1024));
+        eng.set_call_depth_limit(env_depth("EXPLORER_JS_CALL_DEPTH").unwrap_or(8192));
+        eng.set_nest_limit(env_depth("EXPLORER_JS_NEST").unwrap_or(16384));
         // Miroir DOM installé par `install_dom` (`Rc` — vit et
         // meurt sur ce thread). Le `Dom` y reste mutable par les
         // bindings ; `DomSync` lit le dirty bit et sérialise.

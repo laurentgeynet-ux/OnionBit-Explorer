@@ -10085,6 +10085,16 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   récursion bornée ~582 frames
   constante → mesure
   discriminante ×N sans rebuild.
+- [x] **JS-C351. Bornes pile
+  calibrées** (défauts `call`
+  8192 / `nest` 16384 ≈ ~9 300
+  frames effectives — vol 654 :
+  récursion `base.js` bornée
+  légitime confirmée sous 10240,
+  `expr_bisect=0`, `/watch`
+  63,9 s ; 1024 = mort certaine
+  web réel). Env JS-C350 gardent
+  la main — §B-100 résolu pile.
 
 ## Tâches continues
 
