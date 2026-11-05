@@ -691,6 +691,7 @@ impl Host for XhrHost {
             "open" => {
                 let method = e.to_js_string(arg(args, 0))?;
                 let url = e.to_js_string(arg(args, 1))?;
+                probe_url_bisect(e, "xhr.bisect", &method, &url);
                 // Sonde §B-102 — même collecte `media_probe`.
                 tracing::info!(
                     target: "media_probe",
@@ -2136,6 +2137,29 @@ fn url_path_seg(url: &str) -> &str {
     }
 }
 
+/// Sonde §B-97 — `fetch`/`XHR`/`sendBeacon` vers un token
+/// dégénéré (`"undefined"`, `"null"`, `"NaN"`, `""` ou préfixe
+/// `undefined…`/`null…`) : la concat d'une valeur absente
+/// produit l'URL — la pile JS nomme le site qui lit le getter
+/// fautif (`ytcfg`/`ytInitialData`/`yt.*`). Dédup `ub:{url}`
+/// via `probe_seen` quand un DOM est présent.
+pub(crate) fn probe_url_bisect(e: &Engine, site: &str, method: &str, url: &str) {
+    let bad = matches!(url, "" | "undefined" | "null" | "NaN")
+        || url.starts_with("undefined")
+        || url.starts_with("null");
+    if !bad {
+        return;
+    }
+    if let Some((dom, _)) = &e.dom_ctx {
+        if !dom.borrow_mut().ce.probe_seen.insert(format!("ub:{url}")) {
+            return;
+        }
+    }
+    let stack = e.stack_text(site, "");
+    let stack: String = stack.chars().take(1200).collect();
+    tracing::info!(target: "media_probe", site, method = %method, url = %url, stack = %stack);
+}
+
 /// `fetch(url | Request, opts?)` — `input` `Request` fournit
 /// url/method/headers/body par défaut, `opts` surcharge (spec
 /// `fetch` = `new Request(input, init)` puis transport).
@@ -2342,6 +2366,7 @@ pub(crate) fn fetch_fn(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Va
         return Ok(Value::Obj(pid));
     }
     if let Some(t) = &e.xhr.transport {
+        probe_url_bisect(e, "fetch.bisect", &req.method, &req.url);
         // Sonde §B-102 — `host` seul (les URLs `videoplayback`
         // sont signées : query = secret de session, jamais logué).
         tracing::info!(

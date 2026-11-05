@@ -10180,6 +10180,16 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   lisible). Vol 660 : rejet tardif
   non causal, fenêtre = fetch relatif
   + `error` → silence.
+- [x] **JS-C359. Bissect URLs
+  dégénérées** (`fetch.bisect`/
+  `xhr.bisect`/`beacon.bisect` :
+  URL `undefined`/`null`/`NaN`/vide
+  → `stack_text` pile JS ×16 dans
+  `media_probe` — le site `base.js`
+  qui produit la concat `undefined`
+  est nommé). Vol 661 : fetch vers
+  token nu confirmé, `path` prouvé
+  (`/videoplayback` ×6 lisibles).
 
 ## Tâches continues
 

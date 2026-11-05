@@ -13425,6 +13425,7 @@ fn nav_send_beacon(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value>
     let Some(t) = &e.xhr.transport else {
         return Ok(Value::Bool(false));
     };
+    crate::xhr::probe_url_bisect(e, "beacon.bisect", "POST", &url);
     let headers = ct
         .map(|c| vec![("Content-Type".into(), c)])
         .unwrap_or_default();
