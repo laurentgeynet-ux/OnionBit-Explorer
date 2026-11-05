@@ -26,6 +26,47 @@ class MediaFrameStats {
   final double totalDelaySecs;
 }
 
+/// Piste média du conteneur (Étape 196) — `kind` = famille
+/// filaire dépôt : `0` audio, `1` vidéo, `2` sous-titre,
+/// `3` autre ; `disposition` = masque `StreamDisposition`
+/// amont (1=DEFAULT, 2=FORCED, 4=attaché, 8=malentendant,
+/// 16=malvoyant, 32=commentaire). `index` = stream_index
+/// conteneur (sert `set_*_stream`). UI-side : les pistes ne
+/// partent **pas** dans `toJson`/`MediaReport`.
+class MediaTrack {
+  const MediaTrack({
+    required this.index,
+    required this.kind,
+    this.codec = '',
+    this.language = '',
+    this.title = '',
+    this.disposition = 0,
+  });
+
+  static const int kindAudio = 0;
+  static const int kindVideo = 1;
+  static const int kindSubtitle = 2;
+
+  final int index;
+  final int kind;
+  final String codec;
+  final String language;
+  final String title;
+  final int disposition;
+
+  bool get isDefault => disposition & 1 != 0;
+  bool get isForced => disposition & 2 != 0;
+
+  /// Étiquette de menu : titre > langue > codec > index.
+  String get label => title.isNotEmpty
+      ? title
+      : language.isNotEmpty
+          ? language
+          : codec.isNotEmpty
+              ? codec
+              : '#$index';
+}
+
 /// Instantané de lecture rapporté au moteur — contrat
 /// `MediaReport` (étape 71, `docs/interface-equipes.md`) :
 /// `position_ms`/`buffered_ms`/`duration_ms` entiers,
@@ -41,6 +82,10 @@ class MediaSnapshot {
     this.error,
     this.bufferedRanges = const [],
     this.frameStats,
+    this.tracks = const [],
+    this.audioTrack = -1,
+    this.subtitleTrack = -1,
+    this.subtitle = '',
   });
 
   final int positionMs;
@@ -57,6 +102,24 @@ class MediaSnapshot {
   /// Télémétrie `getVideoPlaybackQuality` — `null` quand
   /// l'hôte n'expose pas `frame_stats` (DLL pré-ABI 5).
   final MediaFrameStats? frameStats;
+
+  /// Pistes du conteneur (lue à l'open, statiques) — vide
+  /// si l'hôte n'expose pas `stream_*` (menu pistes masqué).
+  final List<MediaTrack> tracks;
+
+  /// Piste audio **résolue** courante — `-1` désactivée /
+  /// inconnue / hôte sans getter.
+  final int audioTrack;
+
+  /// Piste sous-titre courante — `-1` désactivée (ou hôte
+  /// sans getter). Séparée de [subtitle] : une piste peut
+  /// être sélectionnée sans cue à l'écran.
+  final int subtitleTrack;
+
+  /// Texte sous-titre à la position courante (pull
+  /// `subtitle_text` — fichier externe activé ou voie
+  /// embarquée) ; `''` = rien à afficher.
+  final String subtitle;
 
   /// Fin du segment de cache contenant la tête de lecture
   /// (barre « buffered » — l'extent *contigu en avance*,
@@ -145,6 +208,20 @@ abstract class MediaPlayer {
   /// `offer.loops` ne couvre que la création) :
   /// `onionmedia_set_loop(-1|0)`, repli no-op DLL < ABI 5.
   Future<void> setLoop(bool on);
+
+  /// Sélection de la piste audio par stream_index
+  /// (`≥ 0`), `-1` = désactivée, `-2` = auto — contrat
+  /// dépôt : **effet au prochain play** (pas de commutation
+  /// à chaud sur la famille). No-op hôte sans l'export.
+  Future<void> selectAudioStream(int index);
+
+  /// Sélection de la piste sous-titre embarquée — `-1`
+  /// désactivée, `-2` = auto (première FORCED, sinon DEFAULT,
+  /// sinon aucune — sémantique `sid` mpv). **Effet
+  /// immédiat** sur le pipeline. Bitmaps listées mais
+  /// sélection = no-op d'affichage (doc dépôt). No-op sans
+  /// l'export.
+  Future<void> selectSubtitleStream(int index);
   Future<void> dispose();
 }
 

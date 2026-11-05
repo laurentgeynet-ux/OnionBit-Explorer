@@ -210,6 +210,27 @@ class OnionMediaPlayer implements MediaPlayer {
   int Function(ffi.Pointer)? _frameSeq;
   int Function(ffi.Pointer)? _droppedFrames;
 
+  /// Famille `stream_*` / `subtitle_*` (Étape 196 — exports
+  /// pré-ABI 5, lookups gardés hors la porte).
+  int Function(ffi.Pointer)? _streamCount;
+  int Function(ffi.Pointer, int)? _streamKind;
+  int Function(ffi.Pointer, int)? _streamDispos;
+  int Function(ffi.Pointer, int, ffi.Pointer<ffi.Char>, int)?
+      _streamCodec;
+  int Function(ffi.Pointer, int, ffi.Pointer<ffi.Char>, int)?
+      _streamLang;
+  int Function(ffi.Pointer, int, ffi.Pointer<ffi.Char>, int)?
+      _streamTitle;
+  int Function(ffi.Pointer)? _audioStreamCur;
+  int Function(ffi.Pointer)? _subStreamCur;
+  int Function(ffi.Pointer, int)? _setAudioStream;
+  int Function(ffi.Pointer, int)? _setSubStream;
+  int Function(ffi.Pointer, ffi.Pointer<ffi.Char>, int)? _subText;
+
+  /// Pistes lues à l'open (statiques pour un conteneur) —
+  /// `stream_*` absents → vide (menu masqué).
+  List<MediaTrack> _tracks = const [];
+
   /// `onionmedia_abi_version` — la DLL s'auto-identifie
   /// (5 = surface P-63→P-71). Absente = socle ≤ ABI 4 :
   /// le bloc ABI 5 entier est sauté d'un coup. Doctrine
@@ -333,6 +354,60 @@ class OnionMediaPlayer implements MediaPlayer {
           int Function(ffi.Pointer)>('onionmedia_dropped_frames');
     } on Object {
       _droppedFrames = null;
+    }
+    // Famille pistes/sous-titres — pré-ABI 5, hors la porte.
+    try {
+      _streamCount = _lib.lookupFunction<
+          ffi.Int32 Function(ffi.Pointer), int Function(ffi.Pointer)>(
+          'onionmedia_stream_count');
+      _streamKind = _lib.lookupFunction<
+          ffi.Int32 Function(ffi.Pointer, ffi.Int32),
+          int Function(ffi.Pointer, int)>('onionmedia_stream_kind');
+      _streamDispos = _lib.lookupFunction<
+          ffi.Int32 Function(ffi.Pointer, ffi.Int32),
+          int Function(ffi.Pointer, int)>(
+          'onionmedia_stream_disposition');
+      _streamCodec = _lib.lookupFunction<
+          ffi.Int32 Function(ffi.Pointer, ffi.Int32,
+              ffi.Pointer<ffi.Char>, ffi.IntPtr),
+          int Function(ffi.Pointer, int, ffi.Pointer<ffi.Char>,
+              int)>('onionmedia_stream_codec');
+      _streamLang = _lib.lookupFunction<
+          ffi.Int32 Function(ffi.Pointer, ffi.Int32,
+              ffi.Pointer<ffi.Char>, ffi.IntPtr),
+          int Function(ffi.Pointer, int, ffi.Pointer<ffi.Char>,
+              int)>('onionmedia_stream_language');
+      _streamTitle = _lib.lookupFunction<
+          ffi.Int32 Function(ffi.Pointer, ffi.Int32,
+              ffi.Pointer<ffi.Char>, ffi.IntPtr),
+          int Function(ffi.Pointer, int, ffi.Pointer<ffi.Char>,
+              int)>('onionmedia_stream_title');
+      _audioStreamCur = _lib.lookupFunction<
+          ffi.Int32 Function(ffi.Pointer), int Function(ffi.Pointer)>(
+          'onionmedia_audio_stream');
+      _subStreamCur = _lib.lookupFunction<
+          ffi.Int32 Function(ffi.Pointer), int Function(ffi.Pointer)>(
+          'onionmedia_subtitle_stream');
+      _setAudioStream = _lib.lookupFunction<
+          ffi.Int32 Function(ffi.Pointer, ffi.Int32),
+          int Function(ffi.Pointer, int)>(
+          'onionmedia_set_audio_stream');
+      _setSubStream = _lib.lookupFunction<
+          ffi.Int32 Function(ffi.Pointer, ffi.Int32),
+          int Function(ffi.Pointer, int)>(
+          'onionmedia_set_subtitle_stream');
+      _subText = _lib.lookupFunction<
+          ffi.Int32 Function(
+              ffi.Pointer, ffi.Pointer<ffi.Char>, ffi.IntPtr),
+          int Function(ffi.Pointer, ffi.Pointer<ffi.Char>, int)>(
+          'onionmedia_subtitle_text');
+    } on Object {
+      // Lookup en paquet : un symbole manquant de la
+      // famille laisse le reste null (menu masqué).
+      _streamCount = _streamKind = _streamDispos =
+          _streamCodec = _streamLang = _streamTitle =
+              _audioStreamCur = _subStreamCur =
+                  _setAudioStream = _setSubStream = _subText = null;
     }
     // Porte ABI : `abi_version` elle-même se découvre —
     // absente = socle ≤ 4, le bloc 5 est sauté entier.
@@ -496,6 +571,90 @@ class OnionMediaPlayer implements MediaPlayer {
               corrupted: 0,
               totalDelaySecs: 0,
             );
+
+  /// `copy_out_str` avec paramètre index (`stream_codec`/
+  /// `language`/`title`) — `fn` null ou `need ≤ 0` → `''`.
+  String _pullIdxStr(
+    int Function(ffi.Pointer, int, ffi.Pointer<ffi.Char>, int)? fn,
+    int i,
+  ) {
+    if (fn == null) return '';
+    final need = fn(_h, i, ffi.nullptr, 0);
+    if (need <= 0) return '';
+    final buf = calloc<ffi.Char>(need + 1);
+    try {
+      final n = fn(_h, i, buf, need + 1);
+      return n > 0
+          ? String.fromCharCodes(buf.cast<ffi.Uint8>().asTypedList(n))
+          : '';
+    } finally {
+      calloc.free(buf);
+    }
+  }
+
+  /// `subtitle_text` — cue à la position courante (`''` =
+  /// rien à afficher ; `-1` handle → `''` aussi).
+  String _readSubtitleText() {
+    final fn = _subText;
+    if (fn == null) return '';
+    final need = fn(_h, ffi.nullptr, 0);
+    if (need <= 0) return '';
+    final buf = calloc<ffi.Char>(need + 1);
+    try {
+      final n = fn(_h, buf, need + 1);
+      return n > 0
+          ? String.fromCharCodes(buf.cast<ffi.Uint8>().asTypedList(n))
+          : '';
+    } finally {
+      calloc.free(buf);
+    }
+  }
+
+  /// Pistes courantes — relecture tant que la table est
+  /// vide (MSE/HLS la peuplent **après** `open_*`, dès le
+  /// premier segment démuxé ; `stream_count` reste un i32
+  /// bon marché par snapshot).
+  List<MediaTrack> get _tracksLive {
+    if (_tracks.isEmpty) _refreshTracks();
+    return _tracks;
+  }
+
+  /// Table des pistes du conteneur (`stream_*`) — lue une
+  /// fois à l'open (statique pour un progressif ; une variante
+  /// HLS qui changerait de pistes reste figée — limite connue).
+  void _refreshTracks() {
+    final countFn = _streamCount;
+    if (countFn == null) {
+      _tracks = const [];
+      return;
+    }
+    final n = countFn(_h);
+    if (n <= 0) {
+      _tracks = const [];
+      return;
+    }
+    _tracks = [
+      for (var i = 0; i < n; i++)
+        MediaTrack(
+          index: i,
+          kind: _streamKind?.call(_h, i) ?? -1,
+          codec: _pullIdxStr(_streamCodec, i),
+          language: _pullIdxStr(_streamLang, i),
+          title: _pullIdxStr(_streamTitle, i),
+          disposition: _streamDispos?.call(_h, i) ?? 0,
+        ),
+    ];
+  }
+
+  @override
+  Future<void> selectAudioStream(int index) async {
+    _setAudioStream?.call(_h, index);
+  }
+
+  @override
+  Future<void> selectSubtitleStream(int index) async {
+    _setSubStream?.call(_h, index);
+  }
 
   /// mesurable (doc dépôt) → ignoré du max. 0 = inconnu →
   /// pas de cap (`set_max_pixels` laissé désarmé).
@@ -707,6 +866,7 @@ class OnionMediaPlayer implements MediaPlayer {
       final rc = isHttp
           ? p._qtavOpenUrl(h, c, bytes.length)
           : p._qtavOpenPath(h, c, bytes.length);
+      p._refreshTracks();
       calloc.free(c);
       if (rc != 0) {
         throw StateError('onionmedia_open: ${p._playerError() ?? p._lastError()}');
@@ -1144,6 +1304,10 @@ class OnionMediaPlayer implements MediaPlayer {
       error: _playerError(),
       bufferedRanges: _readBufferedRanges(),
       frameStats: _readFrameStats(),
+      tracks: _tracksLive,
+      audioTrack: _audioStreamCur?.call(_h) ?? -1,
+      subtitleTrack: _subStreamCur?.call(_h) ?? -1,
+      subtitle: _readSubtitleText(),
     );
   }
 

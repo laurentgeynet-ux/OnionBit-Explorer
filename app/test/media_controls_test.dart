@@ -12,6 +12,7 @@ import 'package:explorer_app/core/api/events_client.dart';
 import 'package:explorer_app/core/config/app_config.dart';
 import 'package:explorer_app/core/design/design_tokens.dart';
 import 'package:explorer_app/core/l10n/app_localizations.dart';
+import 'package:explorer_app/features/browser/data/media_player.dart';
 import 'package:explorer_app/features/browser/domain/media_offer.dart';
 import 'package:explorer_app/features/browser/presentation/browser_controller.dart';
 import 'package:explorer_app/features/browser/presentation/media_controls.dart';
@@ -309,5 +310,45 @@ void main() {
     await tester.pump();
     expect(p.plays, 2);
     expect(actions, contains('input:click'));
+  });
+
+  testWidgets('196 — cue sous-titre affichée + menu pistes', (
+    tester,
+  ) async {
+    final (:c, :p) = await pumpSurface(tester);
+    p
+      ..tracks = const [
+        MediaTrack(
+          index: 0,
+          kind: MediaTrack.kindAudio,
+          title: 'Voix FR',
+        ),
+        MediaTrack(index: 1, kind: MediaTrack.kindAudio, language: 'eng'),
+        MediaTrack(
+          index: 2,
+          kind: MediaTrack.kindSubtitle,
+          language: 'fre',
+        ),
+      ]
+      ..subtitle = 'Bonjour le monde'
+      ..audioTrack = 0
+      ..notify();
+    await tester.pump();
+    // Cue posée sur la surface, indépendante de la barre.
+    expect(find.text('Bonjour le monde'), findsOneWidget);
+    await tester.tap(find.byIcon(Icons.subtitles));
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(find.text('Voix FR'), findsWidgets);
+    expect(find.text('Off'), findsOneWidget);
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.tap(
+      find.ancestor(
+        of: find.text('eng'),
+        matching: find.byType(InkWell),
+      ),
+    );
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(p.selectedAudio, 1);
+    expect(p.audioTrack, 1);
   });
 }

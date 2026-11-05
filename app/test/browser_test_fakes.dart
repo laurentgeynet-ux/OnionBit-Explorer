@@ -363,6 +363,14 @@ class FakePlayer implements MediaPlayer {
   bool _muted = false;
   final List<void Function()> _listeners = [];
 
+  /// Étape 196 — table pistes/captions injectables.
+  List<MediaTrack> tracks = const [];
+  int audioTrack = -1;
+  int subTrack = -1;
+  String subtitle = '';
+  int selectedAudio = -2;
+  int selectedSub = -2;
+
   void notify() {
     for (final l in List.of(_listeners)) {
       l();
@@ -379,6 +387,10 @@ class FakePlayer implements MediaPlayer {
     bufferedMs: bufferedMs,
     durationMs: durationMs,
     state: state,
+    tracks: tracks,
+    audioTrack: audioTrack,
+    subtitleTrack: subTrack,
+    subtitle: subtitle,
   );
 
   @override
@@ -426,6 +438,20 @@ class FakePlayer implements MediaPlayer {
   int loopSets = 0;
   @override
   Future<void> setLoop(bool on) async => loopSets += on ? 1 : 0;
+  @override
+  Future<void> selectAudioStream(int index) async {
+    selectedAudio = index;
+    audioTrack = index >= 0 ? index : -1;
+    notify();
+  }
+
+  @override
+  Future<void> selectSubtitleStream(int index) async {
+    selectedSub = index;
+    subTrack = index >= 0 ? index : -1;
+    notify();
+  }
+
   @override
   Future<void> dispose() async => disposes++;
 }

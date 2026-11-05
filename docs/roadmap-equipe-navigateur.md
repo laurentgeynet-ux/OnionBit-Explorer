@@ -6858,19 +6858,27 @@ incrément.
   préservé). Verrou : synthèse.
   71/71.
 
-- [ ] **Étape 196. Pistes +
+- [x] **Étape 196. Pistes +
   sous-titres, phase lecture**
   (`app/` + `media_controls`) :
-  `stream_count`/`stream_info`
-  (kind/lang/title/disposition) →
-  `snapshot.tracks` additif →
-  menu pistes (audio lang — IPTV
-  multi-audio) ; `set_audio_stream`/
-  `set_sub_stream`/`subtitle_enabled` ;
-  cues `subtitle_text` @ cadence
-  rapport → captions Flutter
-  overlay (thémables > burn-in).
-  À re-vérifier avant : layout
+  `stream_count`+getters
+  (`kind`/`codec`/`language`/`title`/
+  `disposition` — exports unitaires,
+  pas de `repr(C)` `stream_info` sur
+  ce dépôt) → `snapshot.tracks` additif
+  (UI-side, hors `MediaReport`) →
+  `_TracksMenuButton` coches
+  audio+sub (`selectAudioStream`
+  *prochain play*, `selectSubtitleStream`
+  `-1`off/`-2`auto `sid`-mpv **immédiat**,
+  bitmaps no-op d'affichage) ; cues
+  `subtitle_text` pull → overlay caption
+  indépendant de la barre. Table relue
+  tant que vide (MSE/HLS peuplent au
+  1er segment). Verrou widget cue+menu.
+  72/72. Reliquat : `set_subtitle_delay`,
+  `subtitle_load` externe, clés l10n,
+  `subtitle_enabled` (toggle sans perte).
   `repr(C)` `stream_info`,
   sémantique `subtitle_text`
   (`lib.rs` dépôt).

@@ -283,6 +283,40 @@ class _MediaSurfaceViewState extends State<MediaSurfaceView> {
                 },
               ),
             ),
+          // Sous-titres (Étape 196) — cue courante du pull
+          // `subtitle_text`, posée au-dessus de la barre et
+          // indépendante de `barShown` (les captions ne
+          // disparaissent pas avec l'UI). IgnorePointer :
+          // jamais un geste page/moteur mangé.
+          if (snap != null && snap.subtitle.isNotEmpty)
+            Positioned(
+              left: 8,
+              right: 8,
+              bottom: 48,
+              child: IgnorePointer(
+                child: Center(
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 4,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.black54,
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: Text(
+                      snap.subtitle,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 14,
+                        height: 1.25,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
           // Barre de contrôles — `controls` vidéo (bas,
           // auto-masquée) ou `controls` audio (remplit le rect,
           // fixe). `IgnorePointer` quand fondue : une barre
@@ -350,6 +384,88 @@ class _MediaSurfaceViewState extends State<MediaSurfaceView> {
             ),
         ],
       ),
+    );
+  }
+}
+
+/// Menu pistes audio/sous-titres (Étape 196) — valeur =
+/// `(kind, index)` : audio → `selectAudioStream`, sous-titre
+/// → `selectSubtitleStream` (`-1` off, `-2` auto — sémantique
+/// `sid` mpv du dépôt). Libellés = `MediaTrack.label` (donnée
+/// conteneur, pas de clé l10n) ; entrée off = « Off » neutre.
+class _TracksMenuButton extends StatelessWidget {
+  const _TracksMenuButton({
+    required this.snap,
+    required this.player,
+    required this.onSurface,
+  });
+
+  final MediaSnapshot snap;
+  final MediaPlayer player;
+  final Color onSurface;
+
+  @override
+  Widget build(BuildContext context) {
+    final audio =
+        snap.tracks.where((t) => t.kind == MediaTrack.kindAudio);
+    final subs =
+        snap.tracks.where((t) => t.kind == MediaTrack.kindSubtitle);
+    Widget item(IconData icon, String label, bool sel) => Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 16),
+            const SizedBox(width: 8),
+            Flexible(child: Text(label)),
+            if (sel) ...[
+              const SizedBox(width: 8),
+              const Icon(Icons.check, size: 16),
+            ],
+          ],
+        );
+    return PopupMenuButton<(int, int)>(
+      tooltip: 'Pistes',
+      icon: Icon(Icons.subtitles, color: onSurface, size: 20),
+      iconSize: 20,
+      onSelected: (sel) {
+        final (kind, index) = sel;
+        if (kind == MediaTrack.kindAudio) {
+          player.selectAudioStream(index);
+        } else if (kind == MediaTrack.kindSubtitle) {
+          player.selectSubtitleStream(index);
+        }
+      },
+      itemBuilder: (context) => [
+        for (final t in audio)
+          PopupMenuItem(
+            value: (MediaTrack.kindAudio, t.index),
+            child: item(
+              Icons.audiotrack,
+              t.label + (t.isDefault ? ' ·def' : ''),
+              t.index == snap.audioTrack,
+            ),
+          ),
+        if (audio.isNotEmpty && subs.isNotEmpty)
+          const PopupMenuDivider(),
+        if (subs.isNotEmpty) ...[
+          PopupMenuItem(
+            value: (MediaTrack.kindSubtitle, -1),
+            child: item(
+              Icons.subtitles_off,
+              'Off',
+              snap.subtitleTrack < 0,
+            ),
+          ),
+          for (final t in subs)
+            PopupMenuItem(
+              value: (MediaTrack.kindSubtitle, t.index),
+              child: item(
+                Icons.subtitles,
+                t.label + (t.isForced ? ' ·forcé' : ''),
+                t.index == snap.subtitleTrack,
+              ),
+            ),
+        ],
+      ],
     );
   }
 }
@@ -503,6 +619,15 @@ class MediaControlsBar extends StatelessWidget {
           Text(
             fmtTime(durMs),
             style: TextStyle(color: onSurface, fontSize: 12),
+          ),
+        // Menu pistes (Étape 196) — audio + sous-titres du
+        // conteneur, coche sur l'entrée active ; absent quand
+        // `tracks` est vide (hôte sans `stream_*`).
+        if (s != null && s.tracks.isNotEmpty && player != null)
+          _TracksMenuButton(
+            snap: s,
+            player: player!,
+            onSurface: onSurface,
           ),
         IconButton(
           visualDensity: compact,
