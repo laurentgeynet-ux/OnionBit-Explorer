@@ -949,6 +949,64 @@ fn anim_births_drain_bounded_by_event_budget() {
     }
 }
 
+/// Étape 206 / §B-54 (`YouTube`) — `drain_anim_births` ré-entrait
+/// `poll_net` à chaque naissance : un `NetDone` lourd arrivé
+/// pendant la peinture (`desktop_polymer.js`, 12,6 Mo) était
+/// livré **sous le verrou session** au milieu du drain →
+/// routes REST gelées. Désormais l'entrant attend le tick de
+/// la pompe ; le sortant est couvert par `after_script`.
+#[test]
+fn etape206_drain_anim_births_does_not_reenter_poll_net() {
+    let mut s = Session::new(Arc::new(FailTransport), Arc::new(TestFont));
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let tab = s.open_tab();
+    let html = "<!doctype html><html><body><div id=\"x\"></div></body></html>";
+    let eng = s.spawn_engine(tab, html, true, "");
+    {
+        let e = s.tabs.get_mut(&tab).unwrap();
+        let mut tb = TreeBuilder::new();
+        tb.push(html);
+        tb.finish();
+        e.dom = Some(tb.into_dom());
+        e.url = Some(Url::parse("http://h.test/as").unwrap());
+        e.js = eng;
+        e.pending_anim_births
+            .push_back((explorer_dom::NodeId::from_parts(1, 0), "k".into()));
+    }
+    // Un `NetDone` déjà arrivé dans le canal — s'il est livré
+    // pendant le drain, `poll_net` aura été ré-entré.
+    s.net_tx
+        .send(NetDone {
+            tab,
+            handle: 77,
+            cross: false,
+            mode: explorer_net::http::FetchMode::Cors,
+            credentials: explorer_net::http::FetchCredentials::Omit,
+            page_origin: "http://h.test".to_string(),
+            req_url: Url::parse("http://h.test/late.js").expect("url"),
+            partition: None,
+            out: Err(explorer_net::error::NetError::InvalidResponse(
+                "t".to_string(),
+            )),
+            script: None,
+            frame: None,
+            img: None,
+            link: None,
+            dyn_module: None,
+            import: None,
+        })
+        .expect("send");
+    s.drain_anim_births(tab);
+    // Naissance dispatchée — deque vidée.
+    assert!(s
+        .tabs
+        .get(&tab)
+        .is_some_and(|e| e.pending_anim_births.is_empty()));
+    // Le `NetDone` n'a pas été touché : le `poll_net` du tick
+    // pompe le livre normalement.
+    assert_eq!(s.poll_net(), 1, "entrant différé au tick pompe");
+}
+
 /// Étape 143 — pont lazy-CE : feuille **construite**
 /// (`new CSSStyleSheet` + `insertRule` + `adoptedStyleSheets`)
 /// cascadée réellement, et `:defined` lu sur le registre

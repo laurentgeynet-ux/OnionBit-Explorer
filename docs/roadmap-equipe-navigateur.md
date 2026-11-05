@@ -7075,6 +7075,24 @@ incrément.
   `set_sync_threshold`,
   `set_drop_threshold`,
   `set_bandwidth_max`.
+- [x] **Étape 206. `drain_anim_births`
+  sans ré-entrée `poll_net`** (§B-54,
+  roadmap YouTube P3.A — le dispatch
+  `animationstart` ré-entrait `poll_net`
+  à chaque naissance : le chunk
+  `desktop_polymer.js` 12,6 Mo arrivé
+  pendant la peinture exécutait
+  `deliver_dyn_script` **sous le verrou
+  session** → routes REST gelées
+  128,7 s) — `dispatch_path_event_props`
+  extrait en `_inner(..., run_poll_net)` ;
+  la voie naissances l'appelle avec
+  `false` (sortant déjà couvert par
+  `after_script`/`drain_script_net`,
+  entrant au tick pompe). Verrou
+  `etape206_drain_anim_births_does_not_
+  reenter_poll_net` ; canaris
+  `anim_births`/`poll_net` verts.
 
 - [ ] **Écarts terrain — vol humain
   22/10 (release `39ab821`, FFI)** :

@@ -731,7 +731,15 @@ impl Session {
                     explorer_js::EventProp::Str(String::new()),
                 ),
             ];
-            self.dispatch_path_event_props(tab, "animationstart", &path, &props);
+            // Étape 206 (§B-54) : pas de `poll_net` ré-entrant
+            // au milieu des naissances — un chunk lourd arrivé
+            // pendant la peinture (`desktop_polymer.js`, 12,6 Mo)
+            // exécuterait `deliver_dyn_script` **sous le verrou
+            // session** → routes REST gelées (128,7 s mesurés
+            // au vol YouTube). Le sortant est déjà couvert par
+            // `after_script`/`drain_script_net` dans le dispatch ;
+            // l'entrant attend le tick de la pompe.
+            self.dispatch_path_event_props_inner(tab, "animationstart", &path, &props, false);
         }
     }
 
@@ -1481,6 +1489,22 @@ impl Session {
         path: &[(String, u32)],
         props: &[(String, EventProp)],
     ) -> bool {
+        self.dispatch_path_event_props_inner(tab, ty, path, props, true)
+    }
+
+    /// Corps du dispatch — `run_poll_net=false` pour les chemins
+    /// en vrac (`drain_anim_births`, Étape 206) : le `poll_net`
+    /// entrant peut livrer un `deliver_dyn_script` de plusieurs
+    /// mégaoctets **sous le verrou session** ; la pompe le fait
+    /// à son tick propre (§B-54).
+    fn dispatch_path_event_props_inner(
+        &mut self,
+        tab: TabId,
+        ty: &str,
+        path: &[(String, u32)],
+        props: &[(String, EventProp)],
+        run_poll_net: bool,
+    ) -> bool {
         let t0 = Instant::now();
         let cooldown = self.js_stall_cooldown;
         let mut emit_err = None;
@@ -1563,8 +1587,10 @@ impl Session {
         // arrivé, sans yield (point de synchro interne).
         self.after_script(tab);
         let t = sync_phase(tab, "event.after_script", t);
-        self.poll_net();
-        sync_phase(tab, "event.poll_net", t);
+        if run_poll_net {
+            self.poll_net();
+            sync_phase(tab, "event.poll_net", t);
+        }
         prevented
     }
 
