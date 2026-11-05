@@ -238,6 +238,10 @@ class OnionMediaPlayer implements MediaPlayer {
   /// de saut de trames (`window_ms == 0` désarme).
   int Function(ffi.Pointer, int, int, int, int, int)? _framedropAuto;
 
+  /// `onionmedia_set_preload` (P-71) — politique 0/1/2
+  /// (`auto`/`metadata`/`none`) aux `open_*` suivants.
+  int Function(ffi.Pointer, int)? _setPreload;
+
   void _optionalBindings() {
     try {
       _acquire = _lib.lookupFunction<
@@ -366,6 +370,13 @@ class OnionMediaPlayer implements MediaPlayer {
             'onionmedia_set_framedrop_auto');
       } on Object {
         _framedropAuto = null;
+      }
+      try {
+        _setPreload = _lib.lookupFunction<
+            ffi.Int32 Function(ffi.Pointer, ffi.Int32),
+            int Function(ffi.Pointer, int)>('onionmedia_set_preload');
+      } on Object {
+        _setPreload = null;
       }
     }
   }
@@ -556,6 +567,7 @@ class OnionMediaPlayer implements MediaPlayer {
     bool loop = false,
     String referer = '',
     String userAgent = '',
+    String preload = 'auto',
     MediaFramedropConfig? framedrop,
   }) async {
     final lib = _load();
@@ -588,6 +600,15 @@ class OnionMediaPlayer implements MediaPlayer {
       p._setMaxPixels?.call(h, geo);
     }
     p._applyFramedrop(framedrop);
+    // `set_preload` (P-71) — attribut énuméré `auto`|
+    // `metadata`|`none` → 0/1/2, consommé aux `open_*`
+    // suivants. Progressif seulement : hors `open_mse*`
+    // (la page pilote les appends, la politique est moot).
+    p._setPreload?.call(h, switch (preload) {
+      'metadata' => 1,
+      'none' => 2,
+      _ => 0,
+    });
     try {
       final isHttp = url.startsWith('http');
       if (isHttp) {

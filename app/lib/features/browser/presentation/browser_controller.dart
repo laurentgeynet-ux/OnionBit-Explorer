@@ -185,6 +185,7 @@ final mediaPlayerFactoryProvider = Provider<MediaPlayerFactory>(
                 loop: offer.loops,
                 referer: referer,
                 userAgent: cfg.mediaUserAgent,
+                preload: offer.preload,
                 framedrop: cfg.mediaFramedrop);
   },
 );

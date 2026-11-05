@@ -114,6 +114,7 @@ class MediaOffer {
     this.mseBuffers = const [],
     this.mseOffsets = const [],
     this.loops = false,
+    this.preload = 'auto',
     this.paint,
   });
 
@@ -161,6 +162,12 @@ class MediaOffer {
   /// — `onionmedia_set_loop(-1)` quand posé ; hors MSE
   /// (source live non seekable, réarmement ignoré).
   final bool loops;
+
+  /// Attribut `preload` **énuméré** (`auto`|`metadata`|
+  /// `none` — champ `preload` du moteur, P-71) traduit en
+  /// `set_preload` 0/1/2 avant l'open ; absent/invalide
+  /// → `auto`.
+  final String preload;
 
   /// Géométrie peinte de la **dernière frame installée**
   /// (étape 185) — `null` tant qu'aucun pull méta n'a
@@ -224,6 +231,10 @@ class MediaOffer {
               .toList(growable: false) ??
           const [],
       loops: j['loop'] == true,
+      preload: switch (j['preload']) {
+        'metadata' || 'none' => j['preload'] as String,
+        _ => 'auto',
+      },
     );
   }
 }

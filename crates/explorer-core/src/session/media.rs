@@ -55,6 +55,9 @@ pub(crate) struct MediaSurface {
     pub(crate) autoplay: bool,
     /// Attribut `loop` présent (`<video loop>` — 139k).
     pub(crate) looping: bool,
+    /// Attribut `preload` énuméré (P-71 — `auto` absent ou
+    /// invalide).
+    pub(crate) preload: MediaPreload,
     /// Codecs déclarés par l'hôte claimé (`None` = stub).
     pub(crate) claim: Option<Vec<String>>,
     /// Claim enregistré mais pas encore livré au moteur —
@@ -205,6 +208,9 @@ struct ScannedMedia {
     autoplay: bool,
     /// Attribut `loop` présent.
     looping: bool,
+    /// Attribut `preload` énuméré (`auto`|`metadata`|`none`,
+    /// invalide → `auto`).
+    preload: MediaPreload,
     /// Chemin `(tag, index)` de l'élément (71c — miroir JS).
     path: Vec<(String, u32)>,
     /// Chemin d'index de la boîte dans l'arbre posé (étape
@@ -629,6 +635,9 @@ fn scan_media(
                         controls,
                         autoplay: has_bool_attr(dom, n, "autoplay"),
                         looping: has_bool_attr(dom, n, "loop"),
+                        preload: MediaPreload::parse(
+                            dom.attribute(n, "preload").ok().flatten().as_deref(),
+                        ),
                         path: element_path(dom, n).unwrap_or_default(),
                         box_path,
                         mse: false,
@@ -814,6 +823,7 @@ impl Session {
                     o.controls = s.controls;
                     o.autoplay = s.autoplay;
                     o.looping = s.looping;
+                    o.preload = s.preload;
                     o.path.clone_from(&s.path);
                     o.box_path.clone_from(&s.box_path);
                     // Moteur absent → drapeau/buffers retenus
@@ -853,6 +863,7 @@ impl Session {
                         controls: s.controls,
                         autoplay: s.autoplay,
                         looping: s.looping,
+                        preload: s.preload,
                         claim: None,
                         claim_pending: false,
                         report: None,
@@ -874,6 +885,7 @@ impl Session {
                         controls: surf.controls,
                         autoplay: surf.autoplay,
                         looping: surf.looping,
+                        preload: surf.preload,
                         claim: None,
                         claim_pending: false,
                         report: None,
@@ -941,6 +953,7 @@ impl Session {
                 autoplay: s.autoplay,
                 mse: s.mse,
                 looping: s.looping,
+                preload: s.preload,
                 mse_buffers: s.mse_buffers.clone(),
                 mse_offsets: s.mse_offsets.clone(),
             });
@@ -992,6 +1005,7 @@ impl Session {
                         controls: m.controls,
                         autoplay: m.autoplay,
                         looping: m.looping,
+                        preload: m.preload,
                         claim: m.claim.clone(),
                         state: m.report.clone(),
                         mse: m.mse,
@@ -1264,6 +1278,7 @@ pub fn media_offer_json(m: &MediaOfferInfo) -> serde_json::Value {
         "mse": m.mse, "mseBuffers": m.mse_buffers,
         "mseOffsets": m.mse_offsets,
         "controls": m.controls, "autoplay": m.autoplay, "loop": m.looping,
+        "preload": m.preload.as_str(),
         "claimed": m.claim.is_some(),
         "codecs": m.claim,
         "state": m.state.as_ref().map(|r| serde_json::json!({
@@ -1293,6 +1308,7 @@ pub fn media_event_json(ev: &CoreEvent) -> Option<(&'static str, String)> {
             autoplay,
             mse,
             looping,
+            preload,
             mse_buffers,
             mse_offsets,
         } => (
@@ -1306,7 +1322,8 @@ pub fn media_event_json(ev: &CoreEvent) -> Option<(&'static str, String)> {
                 "rect": { "x": rect.x, "y": rect.y, "w": rect.w, "h": rect.h },
                 "url": url, "mime": mime, "mse": mse,
                 "controls": controls, "autoplay": autoplay,
-                "loop": looping, "mseBuffers": mse_buffers,
+                "loop": looping, "preload": preload.as_str(),
+                "mseBuffers": mse_buffers,
                 "mseOffsets": mse_offsets,
             })
             .to_string(),

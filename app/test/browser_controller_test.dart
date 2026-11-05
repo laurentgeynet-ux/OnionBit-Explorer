@@ -313,6 +313,7 @@ void main() {
         'mime': 'video/mp4',
         'controls': true,
         'autoplay': false,
+        'preload': 'metadata',
       }),
     );
     // claim REST → fabrique async → listener : quelques ticks.
@@ -327,6 +328,8 @@ void main() {
     expect(FakePlayer.instances, hasLength(1));
     expect(FakePlayer.instances.single.url, 'http://h/v.mp4');
     expect(FakePlayer.instances.single.referer, pageUrl);
+    // `preload` énuméré de l'offre propagé au lecteur (P-71).
+    expect(FakePlayer.instances.single.preload, 'metadata');
     // Premier rapport d'état forcé (paused initial).
     expect(repo.mediaCalls, contains('state:1:42:paused'));
   });

@@ -6791,6 +6791,21 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   §13, progressif + MSE. Verrou :
   `hwGeoFromWire`. 42/42 + 68/68.
 
+- [x] **Étape 192. `preload`
+  énuméré, chaîne NAV-interne
+  (P-71)** (`core` + `app/`) :
+  `MediaPreload{Auto,Metadata,
+  None}` (invalide→`auto` spec)
+  — `ScannedMedia`→`MediaSurface`
+  →`MediaOffered`/`MediaOfferInfo`
+  (`"preload"` JSON+SSE)→
+  `MediaOffer.preload`→
+  `set_preload(h,0|1|2)` avant
+  `open_url` (progressif seul ;
+  MSE moot par design). Verrous :
+  offre `metadata` JSON + claim
+  → lecteur. 92/92 + 68/68.
+
 - [ ] **Écarts terrain — vol humain
   22/10 (release `39ab821`, FFI)** :
   second run humain — trois constats

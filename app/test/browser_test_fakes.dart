@@ -353,6 +353,7 @@ class FakePlayer implements MediaPlayer {
   Duration? seeked;
   int fastSeeks = 0;
   String referer = '';
+  String preload = 'auto';
   double? rate;
   String state = 'paused';
   int positionMs = 0;
@@ -434,7 +435,9 @@ Future<MediaPlayer> fakeMediaPlayerFactory(
   String apiBase = '',
   String referer = '',
 }) async {
-  final p = FakePlayer(offer.url)..referer = referer;
+  final p = FakePlayer(offer.url)
+    ..referer = referer
+    ..preload = offer.preload;
   FakePlayer.instances.add(p);
   return p;
 }

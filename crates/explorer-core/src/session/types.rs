@@ -198,6 +198,10 @@ pub enum CoreEvent {
         /// Attribut `loop` présent (139k — `<video loop>`,
         /// parité avec `media_offer_json`).
         looping: bool,
+        /// Attribut `preload` énuméré (`auto`|`metadata`|
+        /// `none` — P-71 : l'hôte le traduit en
+        /// `set_preload` avant l'open).
+        preload: MediaPreload,
         /// MIME des `SourceBuffer` (139k — parité
         /// `media_offer_json` ; un rail `open_mse_multi`
         /// par entrée, index `?buffer=N`). Vide hors MSE.
@@ -248,6 +252,42 @@ pub enum MediaKind {
     Video,
     /// `<audio>`.
     Audio,
+}
+
+/// Valeur de l'attribut `preload` (spec HTML — attribut
+/// **énuméré**, pas booléen : `auto`|`metadata`|`none`,
+/// invalide/absent → `auto` ; `onionmedia_set_preload`
+/// côté dépôt codec, P-71).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum MediaPreload {
+    /// `auto` — défaut spec, missing/invalid-value compris.
+    #[default]
+    Auto,
+    /// `metadata` — métadonnées seules avant `play()`.
+    Metadata,
+    /// `none` — aucun prefetch.
+    None,
+}
+
+impl MediaPreload {
+    /// Parse la valeur d'attribut — inconnu/absent → `Auto`
+    /// (missing-value default de la spec).
+    pub fn parse(v: Option<&str>) -> Self {
+        match v {
+            Some("metadata") => Self::Metadata,
+            Some("none") => Self::None,
+            _ => Self::Auto,
+        }
+    }
+
+    /// Forme filaire (offre JSON + SSE).
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Auto => "auto",
+            Self::Metadata => "metadata",
+            Self::None => "none",
+        }
+    }
 }
 
 /// Rectangle d'une offre média — **px CSS de document**
@@ -395,6 +435,8 @@ pub struct MediaOfferInfo {
     pub autoplay: bool,
     /// Attribut `loop` présent (139k — `<video loop>`).
     pub looping: bool,
+    /// Attribut `preload` énuméré (`auto`|`metadata`|`none`).
+    pub preload: MediaPreload,
     /// Codecs déclarés par l'hôte claimé, `None` = non
     /// claimée (la surface reste un stub ADR-0023).
     pub claim: Option<Vec<String>>,

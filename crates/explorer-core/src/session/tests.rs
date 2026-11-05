@@ -3782,6 +3782,7 @@ fn media_offer_json_carries_loop_and_mse_buffers() {
         controls: true,
         autoplay: false,
         looping: true,
+        preload: MediaPreload::Metadata,
         claim: None,
         state: None,
         mse: true,
@@ -3790,6 +3791,10 @@ fn media_offer_json_carries_loop_and_mse_buffers() {
     };
     let j = media_offer_json(&offer);
     assert_eq!(j["loop"], true, "attribut loop propagé");
+    assert_eq!(
+        j["preload"], "metadata",
+        "attribut preload énuméré propagé (P-71)"
+    );
     assert_eq!(
         j["mseBuffers"],
         serde_json::json!(["video/mp4", "audio/mp4"]),
