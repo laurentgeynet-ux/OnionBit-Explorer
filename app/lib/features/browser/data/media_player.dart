@@ -25,6 +25,20 @@ class MediaFrameStats {
   final int dropped;
   final int corrupted;
   final double totalDelaySecs;
+
+  /// Égalité par valeur (Étape 201) — requise pour le diff
+  /// structurel `MediaSnapshot`.
+  @override
+  bool operator ==(Object other) =>
+      other is MediaFrameStats &&
+      other.presented == presented &&
+      other.dropped == dropped &&
+      other.corrupted == corrupted &&
+      other.totalDelaySecs == totalDelaySecs;
+
+  @override
+  int get hashCode =>
+      Object.hash(presented, dropped, corrupted, totalDelaySecs);
 }
 
 /// Piste média du conteneur (Étape 196) — `kind` = famille
@@ -66,6 +80,23 @@ class MediaTrack {
           : codec.isNotEmpty
               ? codec
               : '#$index';
+
+  /// Égalité par valeur (Étape 201) — requise pour le diff
+  /// structurel `MediaSnapshot` (contenu de liste, pas juste
+  /// la longueur).
+  @override
+  bool operator ==(Object other) =>
+      other is MediaTrack &&
+      other.index == index &&
+      other.kind == kind &&
+      other.codec == codec &&
+      other.language == language &&
+      other.title == title &&
+      other.disposition == disposition;
+
+  @override
+  int get hashCode =>
+      Object.hash(index, kind, codec, language, title, disposition);
 }
 
 /// Chapitre du conteneur (Étape 197) — `startMs`/`endMs` en
@@ -86,6 +117,31 @@ class MediaChapter {
 
   /// Étiquette de menu : titre > rang humain (`#1`-base).
   String get label => title.isNotEmpty ? title : '#${index + 1}';
+
+  /// Égalité par valeur (Étape 201) — requise pour le diff
+  /// structurel `MediaSnapshot`.
+  @override
+  bool operator ==(Object other) =>
+      other is MediaChapter &&
+      other.index == index &&
+      other.startMs == startMs &&
+      other.endMs == endMs &&
+      other.title == title;
+
+  @override
+  int get hashCode => Object.hash(index, startMs, endMs, title);
+}
+
+/// Égalité de liste par valeur (Étape 201) — les records
+/// `(int,int)` comparent structurellement, `MediaTrack`/
+/// `MediaChapter` via leur `==`.
+bool _listEq<T>(List<T> a, List<T> b) {
+  if (identical(a, b)) return true;
+  if (a.length != b.length) return false;
+  for (var i = 0; i < a.length; i++) {
+    if (a[i] != b[i]) return false;
+  }
+  return true;
 }
 
 /// Instantané de lecture rapporté au moteur — contrat
@@ -94,6 +150,13 @@ class MediaChapter {
 /// `state` ∈ playing|paused|ended|error. Extensions ABI 5 :
 /// `buffered_ranges` = intervalles réels `[[s,e],…]` ms,
 /// `frame_stats` = télémétrie frames.
+///
+/// **Obligation (Étape 201)** : tout champ ajouté ici doit
+/// figurer dans `==`, `hashCode` et `volatilesFrom`. Sinon
+/// le diff structurel de `_onNotify` le perd — ou le voit
+/// diverger en permanence (repaint en trop, fort et
+/// visible), jamais l'invisibilité en pause de la whitelist
+/// manuelle corrigée en 199.
 class MediaSnapshot {
   const MediaSnapshot({
     required this.positionMs,
@@ -168,6 +231,70 @@ class MediaSnapshot {
     }
     return bufferedRanges.isEmpty ? bufferedMs : bufferedRanges.last.$2;
   }
+
+  /// Vue « volatils alignés » (Étape 201) — copie de [s]
+  /// dont les champs **volatils** (`positionMs`, `bufferedMs`,
+  /// `bufferedRanges`, `frameStats` — cadence pull/quantifiés
+  /// dans `_onNotify`) prennent les valeurs de [a] :
+  /// `a == volatilesFrom(s, a)` compare alors **tous** les
+  /// champs stables en une seule égalité. Un champ futur non
+  /// repris dans cette copie diverge en permanence → repaint
+  /// en trop (fort, détectable) — pas d'invisibilité muette.
+  factory MediaSnapshot.volatilesFrom(MediaSnapshot s, MediaSnapshot a) =>
+      MediaSnapshot(
+        positionMs: a.positionMs,
+        bufferedMs: a.bufferedMs,
+        bufferedRanges: a.bufferedRanges,
+        frameStats: a.frameStats,
+        state: s.state,
+        durationMs: s.durationMs,
+        error: s.error,
+        tracks: s.tracks,
+        audioTrack: s.audioTrack,
+        subtitleTrack: s.subtitleTrack,
+        subtitle: s.subtitle,
+        chapters: s.chapters,
+        chapter: s.chapter,
+        loopState: s.loopState,
+      );
+
+  /// Égalité complète par valeur — la source unique du diff
+  /// structurel `_onNotify` (Étape 201).
+  @override
+  bool operator ==(Object other) =>
+      other is MediaSnapshot &&
+      other.positionMs == positionMs &&
+      other.bufferedMs == bufferedMs &&
+      other.state == state &&
+      other.durationMs == durationMs &&
+      other.error == error &&
+      other.audioTrack == audioTrack &&
+      other.subtitleTrack == subtitleTrack &&
+      other.subtitle == subtitle &&
+      other.chapter == chapter &&
+      other.loopState == loopState &&
+      other.frameStats == frameStats &&
+      _listEq(other.bufferedRanges, bufferedRanges) &&
+      _listEq(other.tracks, tracks) &&
+      _listEq(other.chapters, chapters);
+
+  @override
+  int get hashCode => Object.hash(
+        positionMs,
+        bufferedMs,
+        state,
+        durationMs,
+        error,
+        audioTrack,
+        subtitleTrack,
+        subtitle,
+        chapter,
+        loopState,
+        frameStats,
+        Object.hashAll(bufferedRanges),
+        Object.hashAll(tracks),
+        Object.hashAll(chapters),
+      );
 
   Map<String, dynamic> toJson() => {
     'position_ms': positionMs,

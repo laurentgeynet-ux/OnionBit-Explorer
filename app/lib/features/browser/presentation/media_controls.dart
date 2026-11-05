@@ -75,7 +75,6 @@ class _MediaSurfaceViewState extends State<MediaSurfaceView> {
   /// que si l'un change (position quantifiée à ~100 ms, le
   /// lecteur notifie à chaque frame décodée).
   int _qPos = -1, _qBuf = -1;
-  int? _lastDur;
   bool _lastReady = false, _lastMuted = false;
   double _lastVol = -1;
 
@@ -90,28 +89,27 @@ class _MediaSurfaceViewState extends State<MediaSurfaceView> {
     final p = _listened;
     if (p == null || !mounted) return;
     final s = p.snapshot;
-    final qp = s.positionMs ~/ 100, qb = s.bufferedMs ~/ 250;
-    // Nouveaux champs UI (étapes 196-199) : cue sous-titre,
-    // pistes/chapitre/loop courants — leur changement doit
-    // aussi repeindre, sinon une sélection en pause reste
-    // invisible jusqu'au prochain tick de position.
-    final changed = _snap?.state != s.state ||
-        _lastDur != s.durationMs ||
+    final qp = s.positionMs ~/ 100;
+    // La barre peint `bufferedAheadEnd` (extent du segment
+    // actif) — c'est l'extent qui est quantifié : après un
+    // seek disjoint le scalaire peut rester constant pendant
+    // que l'extent bouge.
+    final qb = s.bufferedAheadEnd(s.positionMs) ~/ 250;
+    // Diff structurel (Étape 201) : `==` couvre **tous** les
+    // champs du snapshot ; `volatilesFrom` y gèle position/
+    // tampon/télémétrie (quantifiés ci-dessus). Un nouveau
+    // champ UI ne peut plus rester invisible en pause — la
+    // whitelist manuelle l'avait laissé passer (cue, pistes,
+    // chapitre, loop jusqu'au fix 199).
+    final changed = _snap == null ||
+        _snap != MediaSnapshot.volatilesFrom(s, _snap!) ||
         _lastReady != p.ready ||
         _lastMuted != p.muted ||
         _lastVol != p.volume ||
-        _snap?.subtitle != s.subtitle ||
-        _snap?.subtitleTrack != s.subtitleTrack ||
-        _snap?.audioTrack != s.audioTrack ||
-        _snap?.chapter != s.chapter ||
-        _snap?.loopState != s.loopState ||
-        _snap?.tracks.length != s.tracks.length ||
-        _snap?.chapters.length != s.chapters.length ||
         qp != _qPos ||
         qb != _qBuf;
     _qPos = qp;
     _qBuf = qb;
-    _lastDur = s.durationMs;
     _lastReady = p.ready;
     _lastMuted = p.muted;
     _lastVol = p.volume;

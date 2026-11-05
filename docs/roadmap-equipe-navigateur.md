@@ -6946,16 +6946,19 @@ incrément.
 
 #### File — suites des découvertes (201-204)
 
-- [ ] **Étape 201. `_onNotify` : diff
-  structurel** (`app/`) — la whitelist
-  manuelle corrigée en 199 est un
-  *pattern* : tout champ snapshot
-  additif doit être pensé pour le diff.
-  `uiEquals`/`==` complet sur les champs
-  UI → `_onNotify` compare par valeur ;
-  le quantizeur pos/buf 4 Hz reste.
-  Verrou : un champ UI oublié devient
-  impossible par construction.
+- [x] **Étape 201. `_onNotify` : diff
+  structurel** (`app/`) — `==`/`hashCode`
+  complets sur `MediaSnapshot` + les
+  types-valeurs ; `_onNotify` compare à
+  `volatilesFrom` (volatils gelés :
+  pos ~/100, extent
+  `bufferedAheadEnd` ~/250, télémétrie)
+  → champ futur intégré automatiquement,
+  oubli de copie = repaint en trop
+  (fort) jamais invisible. `qb` peint
+  l'extent (fix stale-fill seeks
+  disjoints). Verrous : 3 cas
+  `media_snapshot_test`. 79/79.
 - [~] **Étape 202. Mesure
   `mediaCodecProbes` corpus** — [x]
   instrumentation `tracing::info!`
