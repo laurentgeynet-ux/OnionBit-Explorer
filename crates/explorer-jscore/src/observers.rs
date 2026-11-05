@@ -79,6 +79,15 @@ struct ObsReg {
     /// changement (scroll/relayout) ; les cibles encore en
     /// `pending` n'ont pas d'état rapporté.
     last: HashMap<NodeId, bool>,
+    /// Dernière taille **rapportée** par cible
+    /// (`ResizeObserver`, JS-C343) — même discipline que
+    /// `last` : ré-évaluation à chaque checkpoint, un
+    /// changement `(w, h)` (premier layout publiant la
+    /// `GeometryMap` : `(0,0)` → taille réelle) rejoint
+    /// `pending`. Sans elle l'observer se taisait après la
+    /// notification initiale `0×0` — `containerWidth` figé
+    /// à 0, `shownItems` vide (§B-97 #5, `<ytd-rich-grid-renderer>`).
+    last_size: HashMap<NodeId, (f64, f64)>,
 }
 
 /// Famille d'observer — sélectionne le format d'entry.
@@ -240,6 +249,32 @@ impl Engine {
                     }
                 }
             }
+            // Ré-évaluation (Resize, JS-C343) : la `GeometryMap`
+            // arrive par `set_geometry` **après** l'`observe`
+            // initial (`0×0` hors layout) — chaque checkpoint
+            // compare la taille courante à la dernière rapportée ;
+            // un changement (layout, rotation, reflow) rejoint
+            // `pending` (spec : « queue a ResizeObserverEntry »).
+            if kind == ObsKind::Resize {
+                for &n in &targets {
+                    if pending.contains(&n) {
+                        continue;
+                    }
+                    let cur = self.target_box_size(&dom, n);
+                    let last = self
+                        .obs
+                        .regs
+                        .get(&id)
+                        .and_then(|r| r.last_size.get(&n))
+                        .copied();
+                    if last != Some(cur) {
+                        if let Some(reg) = self.obs.regs.get_mut(&id) {
+                            reg.last_size.insert(n, cur);
+                        }
+                        pending.push(n);
+                    }
+                }
+            }
             if pending.is_empty() {
                 continue;
             }
@@ -250,6 +285,15 @@ impl Engine {
                         let cur = self.is_intersecting(&dom, root, thresholds.first(), n);
                         if let Some(reg) = self.obs.regs.get_mut(&id) {
                             reg.last.insert(n, cur);
+                        }
+                    }
+                    if kind == ObsKind::Resize {
+                        // La taille *livrée* devient la référence —
+                        // sans ça un `set_geometry` entre `observe`
+                        // et livraison re-tirait sur le même état.
+                        let cur = self.target_box_size(&dom, n);
+                        if let Some(reg) = self.obs.regs.get_mut(&id) {
+                            reg.last_size.insert(n, cur);
                         }
                     }
                     self.observer_entry(kind, &dom, &cache, root, n)
@@ -373,20 +417,15 @@ impl Engine {
                 self.set_own(o, "rootBounds", rbounds, true);
             }
             ObsKind::Resize => {
-                let rect = self.rect_value(dom, node);
-                self.set_own(o, "contentRect", rect, true);
-                let (w, h) = {
-                    let d = dom.borrow();
-                    let is_root = node == d.body() || Some(node) == d.document_element();
-                    if is_root {
-                        (
-                            f64::from(self.hooks.viewport.0),
-                            f64::from(self.hooks.viewport.1),
-                        )
-                    } else {
-                        (0.0, 0.0)
-                    }
+                // `contentRect` = boîte publiée quand la
+                // `GeometryMap` existe (JS-C343) — sinon repli
+                // `rect_value` (viewport racine, 0 sinon).
+                let rect = match element_geom_rect(dom, node) {
+                    Some((x, y, w, h)) => self.rect_of(x, y, w, h),
+                    None => self.rect_value(dom, node),
                 };
+                self.set_own(o, "contentRect", rect, true);
+                let (w, h) = self.target_box_size(dom, node);
                 let box_size = {
                     let b = self.new_object();
                     self.set_own(b, "inlineSize", Value::Num(w), true);
@@ -404,6 +443,26 @@ impl Engine {
             }
         }
         Value::Obj(o)
+    }
+
+    /// Taille `(w, h)` de la boîte observée (JS-C343) — géométrie
+    /// publiée si la table existe, sinon règle `clientWidth` :
+    /// racines ≙ viewport, `0×0` ailleurs. C'est la valeur de
+    /// référence diffée au checkpoint (`last_size`).
+    fn target_box_size(&mut self, dom: &DomRef, node: NodeId) -> (f64, f64) {
+        if let Some((_, _, w, h)) = element_geom_rect(dom, node) {
+            return (w, h);
+        }
+        let is_root = {
+            let d = dom.borrow();
+            node == d.body() || Some(node) == d.document_element()
+        };
+        if is_root {
+            let (vw, vh) = self.hooks.viewport;
+            (f64::from(vw), f64::from(vh))
+        } else {
+            (0.0, 0.0)
+        }
     }
 
     /// Rect `{x,y,top,left,bottom,right,width,height}` du nœud
@@ -622,6 +681,7 @@ fn new_obs(
             pending: Vec::new(),
             thresholds: thresholds.to_vec(),
             last: HashMap::new(),
+            last_size: HashMap::new(),
         },
     );
     // Méthodes sur le prototype du ctor (spec WebIDL) — pas
@@ -702,6 +762,10 @@ impl Host for ObsHost {
                 let Some(node) = node_for_in(e, target, &self.dom) else {
                     return Err(e.type_error("observe: Element requis"));
                 };
+                // Taille initiale rapportée (Resize) — référence
+                // du diff checkpoint ; calculée avant l'emprunt
+                // mutable de `regs`.
+                let init_size = e.target_box_size(&self.dom, node);
                 let Some(reg) = e.obs.regs.get_mut(&self.id) else {
                     return Ok(Some(Value::Undefined));
                 };
@@ -709,6 +773,7 @@ impl Host for ObsHost {
                 if !reg.targets.contains(&node) {
                     reg.targets.push(node);
                     reg.pending.push(node);
+                    reg.last_size.insert(node, init_size);
                 }
                 Ok(Some(Value::Undefined))
             }
@@ -725,6 +790,7 @@ impl Host for ObsHost {
                     // notification initiale (spec), pas d'un
                     // diff contre l'ancien `last`.
                     reg.last.remove(&node);
+                    reg.last_size.remove(&node);
                 }
                 Ok(Some(Value::Undefined))
             }
@@ -734,6 +800,7 @@ impl Host for ObsHost {
                     reg.targets.clear();
                     reg.pending.clear();
                     reg.last.clear();
+                    reg.last_size.clear();
                 }
                 Ok(Some(Value::Undefined))
             }
@@ -755,6 +822,12 @@ impl Host for ObsHost {
                             let cur = e.is_intersecting(&self.dom, root, None, n);
                             if let Some(reg) = e.obs.regs.get_mut(&self.id) {
                                 reg.last.insert(n, cur);
+                            }
+                        }
+                        if kind == ObsKind::Resize {
+                            let cur = e.target_box_size(&self.dom, n);
+                            if let Some(reg) = e.obs.regs.get_mut(&self.id) {
+                                reg.last_size.insert(n, cur);
                             }
                         }
                         e.observer_entry(kind, &self.dom, &self.cache, root, n)

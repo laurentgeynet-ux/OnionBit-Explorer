@@ -9872,6 +9872,21 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   survit — mur `<yt-formatted-string>`).
   Verrous `c342_node_proto_accessors` 4/4 ;
   canaris `dom` 245/245, `c341` 6/6.
+- [x] **JS-C343. `ResizeObserver` ré-évalué
+  sur publication `GeometryMap`** (§B-97 #5,
+  roadmap YouTube P2.D — `containerWidth`
+  figé 0 tuait `shownItems` de
+  `<ytd-rich-grid-renderer>`) —
+  `last_size` par cible + diff à chaque
+  checkpoint `deliver_observers` (même
+  discipline que `last` Intersection :
+  init à l'`observe`, refresh à la
+  livraison, purge `unobserve`/`disconnect`).
+  Entries géométrie réelle :
+  `contentRect`/`boxSize` depuis
+  `element_geom_rect`. Verrous
+  `c343_resize_observer_geometry` 2/2 ;
+  canaris `dom` 245/245.
 
 ## Tâches continues
 
