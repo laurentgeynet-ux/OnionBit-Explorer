@@ -755,6 +755,323 @@ fn dom_acc_set(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     Ok(Value::Undefined)
 }
 
+/// Valeur **brute** d'une prop de navigation `Node`/`Element`
+/// (JS-C340) — source unique partagée entre `NodeHost::get` et
+/// les accesseurs de prototype (`dom_nav_get` : `desc.get.call(
+/// el)` ne repasse pas par `Host::get`, même discipline JS-C82
+/// que `dom_acc_get` — un accesseur propre `defineProperty` ne
+/// reboucle pas). `None` = prop hors table.
+fn dom_nav_value(
+    e: &mut Engine,
+    dom: &DomRef,
+    cache: &NodeCache,
+    node: NodeId,
+    key: &str,
+) -> JsResult<Option<Value>> {
+    let node_or_null = |e: &mut Engine, n: Option<NodeId>| match n {
+        Some(n) => node_value(e, dom, cache, n),
+        None => Value::Null,
+    };
+    Ok(Some(match key {
+        "parentNode" => {
+            let p = dom.borrow().nodes[node as usize].parent;
+            node_or_null(e, p)
+        }
+        "isConnected" => Value::Bool(dom.borrow().is_attached(node)),
+        // `parentElement` : spec — `null` quand le parent n'est
+        // pas un élément (la racine `#document` n'est pas un
+        // Element DOM : `html.parentElement` = null).
+        "parentElement" => {
+            let p = {
+                let d = dom.borrow();
+                d.nodes[node as usize]
+                    .parent
+                    .filter(|&p| p != d.root && d.nodes[p as usize].kind == NodeKind::Element)
+            };
+            node_or_null(e, p)
+        }
+        "children" => {
+            let kids = dom.borrow().element_children(node);
+            return Ok(Some(dom_collection(
+                e,
+                dom,
+                cache,
+                &kids,
+                false,
+                "HTMLCollection",
+            )));
+        }
+        "childNodes" => {
+            let kids = dom.borrow().child_nodes(node);
+            return Ok(Some(dom_collection(
+                e, dom, cache, &kids, false, "NodeList",
+            )));
+        }
+        "childElementCount" => {
+            let n = dom.borrow().element_children(node).len();
+            Value::Num(n as f64)
+        }
+        "firstChild" | "lastChild" | "firstElementChild" | "lastElementChild" => {
+            let c = {
+                let d = dom.borrow();
+                if matches!(key, "firstChild" | "lastChild") {
+                    let kids = &d.nodes[node as usize].children;
+                    if key == "firstChild" {
+                        kids.first().copied()
+                    } else {
+                        kids.last().copied()
+                    }
+                } else {
+                    let kids = d.element_children(node);
+                    if key == "firstElementChild" {
+                        kids.first().copied()
+                    } else {
+                        kids.last().copied()
+                    }
+                }
+            };
+            node_or_null(e, c)
+        }
+        "previousSibling" | "previousElementSibling" | "nextSibling" | "nextElementSibling" => {
+            let forward = matches!(key, "nextSibling" | "nextElementSibling");
+            let c = {
+                let d = dom.borrow();
+                let mut sib = d.sibling(node, forward);
+                while let Some(s) = sib {
+                    if !key.ends_with("ElementSibling")
+                        || d.nodes[s as usize].kind == NodeKind::Element
+                    {
+                        break;
+                    }
+                    sib = d.sibling(s, forward);
+                }
+                sib
+            };
+            node_or_null(e, c)
+        }
+        "nodeValue" | "data" => {
+            let n = &dom.borrow().nodes[node as usize];
+            let v = if matches!(n.kind, NodeKind::Text | NodeKind::Comment) {
+                n.text.clone()
+            } else {
+                String::new()
+            };
+            if v.is_empty() && n.kind == NodeKind::Element {
+                Value::Null
+            } else {
+                e.str_val(v)
+            }
+        }
+        "ownerDocument" => e.get_prop(e.global, "document").unwrap_or(Value::Null),
+        "tagName" | "nodeName" => {
+            let (k, t) = {
+                let n = &dom.borrow().nodes[node as usize];
+                (n.kind, n.tag.clone())
+            };
+            // Majuscule = éléments HTML (spec) ; SVG garde le nom
+            // qualifié ; sentinels non-élément gardent leur forme.
+            e.str_val(if k == NodeKind::Element {
+                if tag_interface(&t).is_some_and(|n| n.starts_with("SVG")) {
+                    t
+                } else {
+                    t.to_uppercase()
+                }
+            } else {
+                t
+            })
+        }
+        "localName" => {
+            let n = &dom.borrow().nodes[node as usize];
+            if n.kind == NodeKind::Element {
+                e.str_val(n.tag.clone())
+            } else {
+                Value::Null
+            }
+        }
+        "namespaceURI" => {
+            let n = &dom.borrow().nodes[node as usize];
+            if n.kind == NodeKind::Element {
+                e.str_val(
+                    if tag_interface(&n.tag).is_some_and(|i| i.starts_with("SVG")) {
+                        "http://www.w3.org/2000/svg"
+                    } else {
+                        "http://www.w3.org/1999/xhtml"
+                    },
+                )
+            } else {
+                Value::Null
+            }
+        }
+        "innerHTML" => {
+            let s = dom.borrow().inner_html(node);
+            e.str_val(s)
+        }
+        "outerHTML" => {
+            let s = dom.borrow().outer_html(node);
+            e.str_val(s)
+        }
+        "textContent" | "innerText" => {
+            let s = dom.borrow().text_content(node);
+            e.str_val(s)
+        }
+        "nodeType" => {
+            let k = dom.borrow().nodes[node as usize].kind;
+            Value::Num(match k {
+                NodeKind::Element => 1.0,
+                NodeKind::Text => 3.0,
+                NodeKind::Comment => 8.0,
+                NodeKind::Fragment => 11.0,
+            })
+        }
+        _ => return Ok(None),
+    }))
+}
+
+/// Props de navigation exposées en accesseurs `get` sur
+/// `Node.prototype` (JS-C340 — `Object.getOwnPropertyDescriptor(
+/// Node.prototype, 'firstChild').get` doit être appelable : les
+/// polyfills `ShadyDOM` capturent les getters natifs au chargement
+/// pour wrapper leurs propres implémentations). Toutes spec
+/// lecture seule — la pose tombe dans la voie host ordinaire.
+const NODE_NAV_GETTERS: &[&str] = &[
+    "nodeType",
+    "nodeName",
+    "nodeValue",
+    "textContent",
+    "ownerDocument",
+    "parentNode",
+    "parentElement",
+    "childNodes",
+    "firstChild",
+    "lastChild",
+    "previousSibling",
+    "nextSibling",
+    "isConnected",
+];
+
+/// Props de navigation exposées en accesseurs `get`/`set` sur
+/// `Node.prototype` — spec `textContent`/`nodeValue` sont
+/// inscriptibles : un accesseur `get`-seul rendrait l'assignation
+/// `el.textContent = x` en no-op silencieux (la prop propre
+/// n'est pas créée). Le setter délègue à `dom_nav_set`.
+const NODE_NAV_SETTERS: &[&str] = &["nodeValue", "textContent"];
+
+/// Props de navigation exposées en accesseurs `get` sur
+/// `Element.prototype` (même discipline — `ShadyDOM` capture
+/// `firstElementChild`/`children`/siblings élément).
+const ELEMENT_NAV_GETTERS: &[&str] = &[
+    "tagName",
+    "localName",
+    "namespaceURI",
+    "children",
+    "childElementCount",
+    "firstElementChild",
+    "lastElementChild",
+    "previousElementSibling",
+    "nextElementSibling",
+    "innerHTML",
+    "outerHTML",
+];
+
+/// Setter des accesseurs de navigation inscriptibles
+/// (`textContent`/`innerText`/`nodeValue`/`innerHTML`) — `bound[0]`
+/// = nom de prop, `args[1]` = valeur. Écriture **brute** (pas de
+/// retour par `Host::set` — même raison que `dom_nav_get`).
+fn dom_nav_set(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let Some(Value::Str(m)) = args.first() else {
+        return Ok(Value::Undefined);
+    };
+    let Some(prop) = e.heap.string(*m) else {
+        return Ok(Value::Undefined);
+    };
+    let v = arg(args, 1);
+    let Value::Obj(id) = this else {
+        return Ok(Value::Undefined);
+    };
+    let Some((dom, cache, node)) = e.host_of(id).and_then(|h| {
+        h.as_any()
+            .downcast_ref::<NodeHost>()
+            .map(|n| (n.dom.clone(), n.cache.clone(), n.node))
+    }) else {
+        return Ok(Value::Undefined);
+    };
+    if !dom.borrow().node_valid(node) {
+        return Ok(Value::Undefined);
+    }
+    match prop.as_str() {
+        "textContent" | "innerText" => {
+            let s = e.to_js_string(v)?;
+            let mut d = dom.borrow_mut();
+            let t = d.create_text(&s);
+            d.replace_children(node, &[t]);
+        }
+        "nodeValue" | "data" => {
+            let is_text = matches!(
+                dom.borrow().nodes[node as usize].kind,
+                NodeKind::Text | NodeKind::Comment
+            );
+            if is_text {
+                let s = e.to_js_string(v)?;
+                dom.borrow_mut().set_text(node, &s);
+            }
+        }
+        "innerHTML" => {
+            let s = e.to_js_string(v)?;
+            let host = NodeHost { dom, cache, node };
+            host.set_inner_html(node, &s);
+        }
+        _ => {}
+    }
+    Ok(Value::Undefined)
+}
+
+/// Getter d'accesseur de navigation prototype — `bound[0]` = nom
+/// de prop, `this` = le nœud (`desc.get.call(el)`, `ShadyDOM`).
+/// Lecture **brute** via `dom_nav_value`, receveurs `NodeHost`.
+fn dom_nav_get(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let Some(Value::Str(m)) = args.first() else {
+        return Ok(Value::Undefined);
+    };
+    let Some(prop) = e.heap.string(*m) else {
+        return Ok(Value::Undefined);
+    };
+    let Value::Obj(id) = this else {
+        return Ok(Value::Undefined);
+    };
+    let Some((dom, node, cache)) = e.host_of(id).and_then(|h| {
+        h.as_any()
+            .downcast_ref::<NodeHost>()
+            .map(|n| (n.dom.clone(), n.node, n.cache.clone()))
+    }) else {
+        return Ok(Value::Undefined);
+    };
+    if !dom.borrow().node_valid(node) {
+        return Ok(Value::Undefined);
+    }
+    match dom_nav_value(e, &dom, &cache, node, &prop) {
+        Ok(Some(v)) => Ok(v),
+        _ => Ok(Value::Undefined),
+    }
+}
+
+/// Pose un accesseur de navigation `get` (+ `set` si
+/// inscriptible) sur un prototype — partagé `Node.prototype`/
+/// `Element.prototype` (JS-C340).
+fn install_dom_nav_accessors(e: &mut Engine, pid: ObjId, props: &[&'static str]) {
+    for &prop in props {
+        let nm = e.str_val(prop);
+        let g = e.bound_native("dom.navget", dom_nav_get, vec![nm]);
+        let s = if NODE_NAV_SETTERS.contains(&prop) || prop == "innerHTML" {
+            e.bound_native("dom.navset", dom_nav_set, vec![nm])
+        } else {
+            Value::Undefined
+        };
+        if let Some(o) = e.heap.obj_mut(pid) {
+            o.set_accessor(prop, g, s, false);
+        }
+    }
+}
+
 impl Engine {
     /// `el.constructor` typé (JS-C82) : objet fonction non
     /// constructible nommé `class` + `prototype` porteur des
@@ -810,6 +1127,12 @@ impl Engine {
     /// (JS-C192 — sinon `inputValueTracking` React perçoit un
     /// proto nu).
     fn install_dom_idl_accessors(&mut self, pid: ObjId, class: &str) {
+        // Navigation `Element.prototype` (JS-C340) — accesseurs
+        // natifs `firstElementChild`/`children`/`innerHTML`…
+        // capturés par les polyfills `ShadyDOM`.
+        if class == "Element" {
+            install_dom_nav_accessors(self, pid, ELEMENT_NAV_GETTERS);
+        }
         for &prop in dom_acc_props(class) {
             let nm = self.str_val(prop);
             let g = self.bound_native("dom.get", dom_acc_get, vec![nm]);
@@ -2171,6 +2494,13 @@ impl Engine {
                 let f = self.bound_native("node.method", node_proto_method_trampoline, vec![nv]);
                 self.set_own(p, m, f, false);
             }
+            // JS-C340 — accesseurs natifs de navigation sur
+            // `Node.prototype` (`getOwnPropertyDescriptor(…,
+            // 'firstChild').get` appelable : ShadyDOM capture
+            // les getters natifs au chargement — absents → la
+            // capture rend `undefined` → `.call` jette et le
+            // polyfill meurt à l'init).
+            install_dom_nav_accessors(self, p, NODE_NAV_GETTERS);
             self.set_own(nid, "prototype", Value::Obj(p), false);
             for (k, v) in [
                 ("ELEMENT_NODE", 1),
@@ -6780,49 +7110,37 @@ impl Host for NodeHost {
                     _ => Value::Undefined,
                 }));
             }
-            "parentNode" => {
-                let p = self.dom.borrow().nodes[node as usize].parent;
-                return Ok(Some(match p {
-                    Some(p) => node_value(e, &self.dom, &self.cache, p),
-                    None => Value::Null,
-                }));
-            }
-            // `isConnected` (CAP-164) — le nœud remonte à
-            // `#document` ; les libs réelles le lisent avant
-            // mesure/délégation (React, selector-observer).
-            "isConnected" => {
-                return Ok(Some(Value::Bool(self.dom.borrow().is_attached(node))));
-            }
-            // `parentElement` : spec — `null` quand le parent n'est
-            // pas un élément (ex. `html.parentElement`, dont le
-            // parentNode est `#document`). Le confondre avec
-            // `parentNode` casse les remontées d'arbre qui
-            // terminent sur `null` (mesuré sur google.com).
-            "parentElement" => {
-                let p = {
-                    let d = self.dom.borrow();
-                    d.nodes[node as usize].parent.filter(|&p| {
-                        // La racine `#document` est stockée `Element`
-                        // dans le miroir mais n'est PAS un Element
-                        // DOM : `html.parentElement` doit être null.
-                        p != d.root && d.nodes[p as usize].kind == NodeKind::Element
-                    })
-                };
-                return Ok(Some(match p {
-                    Some(p) => node_value(e, &self.dom, &self.cache, p),
-                    None => Value::Null,
-                }));
-            }
-            "children" => {
-                let kids = self.dom.borrow().element_children(node);
-                return Ok(Some(dom_collection(
-                    e,
-                    &self.dom,
-                    &self.cache,
-                    &kids,
-                    false,
-                    "HTMLCollection",
-                )));
+            // Navigation/traversal brute (JS-C340) — déléguée à
+            // `dom_nav_value`, source unique partagée avec les
+            // accesseurs de prototype `dom_nav_get` : même valeur
+            // servie sur `el.x` et `desc.get.call(el)`.
+            "parentNode"
+            | "isConnected"
+            | "parentElement"
+            | "children"
+            | "childNodes"
+            | "firstChild"
+            | "lastChild"
+            | "childElementCount"
+            | "firstElementChild"
+            | "lastElementChild"
+            | "previousSibling"
+            | "previousElementSibling"
+            | "nextSibling"
+            | "nextElementSibling"
+            | "outerHTML"
+            | "nodeValue"
+            | "data"
+            | "ownerDocument"
+            | "tagName"
+            | "nodeName"
+            | "localName"
+            | "namespaceURI"
+            | "innerHTML"
+            | "textContent"
+            | "innerText"
+            | "nodeType" => {
+                return dom_nav_value(e, &self.dom, &self.cache, node, key);
             }
             // `el.attributes` — `NamedNodeMap` vivante (JS-C76) :
             // itérable + `length` + indexés — les helpers
@@ -6912,77 +7230,6 @@ impl Host for NodeHost {
                     Value::Null
                 }));
             }
-            "firstChild" => {
-                let c = self.dom.borrow().nodes[node as usize]
-                    .children
-                    .first()
-                    .copied();
-                return Ok(Some(match c {
-                    Some(c) => node_value(e, &self.dom, &self.cache, c),
-                    None => Value::Null,
-                }));
-            }
-            "lastChild" => {
-                let c = self.dom.borrow().nodes[node as usize]
-                    .children
-                    .last()
-                    .copied();
-                return Ok(Some(match c {
-                    Some(c) => node_value(e, &self.dom, &self.cache, c),
-                    None => Value::Null,
-                }));
-            }
-            // `childNodes` — all kinds incl. text (`children` is
-            // elements-only above).
-            "childNodes" => {
-                let kids = self.dom.borrow().child_nodes(node);
-                return Ok(Some(dom_collection(
-                    e,
-                    &self.dom,
-                    &self.cache,
-                    &kids,
-                    false,
-                    "NodeList",
-                )));
-            }
-            "childElementCount" => {
-                let n = self.dom.borrow().element_children(node).len();
-                return Ok(Some(Value::Num(n as f64)));
-            }
-            "firstElementChild" | "lastElementChild" => {
-                let kids = self.dom.borrow().element_children(node);
-                let c = if key == "firstElementChild" {
-                    kids.first()
-                } else {
-                    kids.last()
-                };
-                return Ok(Some(match c {
-                    Some(&c) => node_value(e, &self.dom, &self.cache, c),
-                    None => Value::Null,
-                }));
-            }
-            "previousSibling" | "previousElementSibling" => {
-                let c = {
-                    let d = self.dom.borrow();
-                    let mut sib = d.sibling(node, false);
-                    while let Some(s) = sib {
-                        if key == "previousSibling" || d.nodes[s as usize].kind == NodeKind::Element
-                        {
-                            break;
-                        }
-                        sib = d.sibling(s, false);
-                    }
-                    sib
-                };
-                return Ok(Some(match c {
-                    Some(c) => node_value(e, &self.dom, &self.cache, c),
-                    None => Value::Null,
-                }));
-            }
-            "outerHTML" => {
-                let s = self.dom.borrow().outer_html(node);
-                return Ok(Some(e.str_val(s)));
-            }
             // `dataset` — live host view over `data-*` attrs
             // (`el.dataset.fooBar` ≙ `data-foo-bar`).
             "dataset" => {
@@ -6990,25 +7237,6 @@ impl Host for NodeHost {
                     dom: self.dom.clone(),
                     node,
                 }))));
-            }
-            "nodeValue" | "data" => {
-                let n = &self.dom.borrow().nodes[node as usize];
-                let v = if matches!(n.kind, NodeKind::Text | NodeKind::Comment) {
-                    n.text.clone()
-                } else {
-                    String::new()
-                };
-                let v = if v.is_empty() && n.kind == NodeKind::Element {
-                    Value::Null
-                } else {
-                    e.str_val(v)
-                };
-                return Ok(Some(v));
-            }
-            "ownerDocument" => {
-                return Ok(Some(
-                    e.get_prop(e.global, "document").unwrap_or(Value::Null),
-                ));
             }
             // `shadowRoot.host` (CAP-191 tranche 1) — l'hôte
             // de la racine ; absent (`undefined` fallthrough)
@@ -7050,81 +7278,6 @@ impl Host for NodeHost {
                 let n = self.dom.borrow().nodes[node as usize].text.len();
                 return Ok(Some(Value::Num(n as f64)));
             }
-            "nextSibling" | "nextElementSibling" => {
-                let c = {
-                    let d = self.dom.borrow();
-                    d.nodes[node as usize].parent.and_then(|p| {
-                        let kids = &d.nodes[p as usize].children;
-                        let pos = kids.iter().position(|&k| k == node)?;
-                        kids[pos + 1..].iter().copied().find(|&k| {
-                            key == "nextSibling" || d.nodes[k as usize].kind == NodeKind::Element
-                        })
-                    })
-                };
-                return Ok(Some(match c {
-                    Some(c) => node_value(e, &self.dom, &self.cache, c),
-                    None => Value::Null,
-                }));
-            }
-            "tagName" | "nodeName" => {
-                let (k, t) = {
-                    let n = &self.dom.borrow().nodes[node as usize];
-                    (n.kind, n.tag.clone())
-                };
-                // Majuscule = éléments HTML (spec) ; les éléments
-                // SVG gardent le nom qualifié stocké (spec foreign
-                // elements — vivus/pathformer comparent en
-                // minuscule, JS-C233). Les sentinels non-élément
-                // gardent leur forme (`#text`, `#comment`,
-                // `#document-fragment`, `#document`).
-                return Ok(Some(e.str_val(if k == NodeKind::Element {
-                    if tag_interface(&t).is_some_and(|n| n.starts_with("SVG")) {
-                        t
-                    } else {
-                        t.to_uppercase()
-                    }
-                } else {
-                    t
-                })));
-            }
-            // `localName` — nom qualifié minuscule (spec DOM :
-            // n'existe que sur les éléments, `null` ailleurs).
-            // Son absence cassait les marcheurs d'ancêtres qui se
-            // gardent sur `"body"===r.localName` : le check ratait,
-            // la remontée débordait jusqu'au `document` puis
-            // `document.hasAttribute` tuait le script (SG vol 128,
-            // `localName`/`textContent` nicematin vol 124).
-            "localName" => {
-                let n = &self.dom.borrow().nodes[node as usize];
-                let v = if n.kind == NodeKind::Element {
-                    e.str_val(n.tag.clone())
-                } else {
-                    Value::Null
-                };
-                return Ok(Some(v));
-            }
-            // `namespaceURI` — l'arène ne trace pas les
-            // namespaces : dérivé du tag (JS-C233 — d3/vivas
-            // comparent l'URI SVG). Non-élément → `null` spec.
-            "namespaceURI" => {
-                let n = &self.dom.borrow().nodes[node as usize];
-                let v = if n.kind == NodeKind::Element {
-                    e.str_val(
-                        if tag_interface(&n.tag).is_some_and(|i| i.starts_with("SVG")) {
-                            "http://www.w3.org/2000/svg"
-                        } else {
-                            "http://www.w3.org/1999/xhtml"
-                        },
-                    )
-                } else {
-                    Value::Null
-                };
-                return Ok(Some(v));
-            }
-            "innerHTML" => {
-                let s = self.dom.borrow().inner_html(node);
-                return Ok(Some(e.str_val(s)));
-            }
             // `<template>.content` — `DocumentFragment` de
             // contenu (spec : ses enfants ne sont pas des
             // enfants de l'élément). `undefined` ailleurs —
@@ -7136,19 +7289,6 @@ impl Host for NodeHost {
                 if let Some(f) = frag {
                     return Ok(Some(node_value(e, &self.dom, &self.cache, f)));
                 }
-            }
-            "textContent" | "innerText" => {
-                let s = self.dom.borrow().text_content(node);
-                return Ok(Some(e.str_val(s)));
-            }
-            "nodeType" => {
-                let k = self.dom.borrow().nodes[node as usize].kind;
-                return Ok(Some(Value::Num(match k {
-                    NodeKind::Element => 1.0,
-                    NodeKind::Text => 3.0,
-                    NodeKind::Comment => 8.0,
-                    NodeKind::Fragment => 11.0,
-                })));
             }
             // `textarea.value` ≙ le contenu texte, `select.value`
             // ≙ la valeur de l'option `selected` (pas d'attribut

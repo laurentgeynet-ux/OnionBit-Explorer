@@ -9823,6 +9823,22 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   Verrou `media_events` ×1 ; suite
   15/15.
 
+- [x] **JS-C340. `TreeWalker` relatif à
+  `currentNode` + accesseurs natifs
+  `Node.prototype`/`Element.prototype`**
+  (§B-97, mur montage `ShadyDOM`/Polymer —
+  roadmap YouTube P2.A) — traversées spec
+  complètes (`firstChild`/`lastChild`
+  bornés à `cur`, siblings bornés à
+  `root`, `parentNode` root incluse,
+  `previousNode` ordre inverse + rejet) ;
+  accesseurs `get`/`get`+`set` natifs sur
+  les prototypes via `dom_nav_value`
+  (source unique `NodeHost::get`,
+  discipline JS-C82). Verrous
+  `c340_treewalker_shadydom` 9/9 ; canaris
+  `dom` 245/245.
+
 ## Tâches continues
 
 - **Spécialiste JS** : divergence miroir ↔ `explorer-dom` quand

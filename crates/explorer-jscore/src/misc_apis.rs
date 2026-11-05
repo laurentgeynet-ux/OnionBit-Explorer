@@ -1507,6 +1507,154 @@ fn tw_next(
     }
 }
 
+/// Frère de `n` du côté `forward` (`false` = précédent).
+fn tw_sib(dom: &crate::dom_host::DomRef, n: NodeId, forward: bool) -> Option<NodeId> {
+    dom.borrow().sibling(n, forward)
+}
+
+/// Enfant extrême de `n` du côté `forward` (first / last).
+fn tw_child_at(dom: &crate::dom_host::DomRef, n: NodeId, forward: bool) -> Option<NodeId> {
+    let d = dom.borrow();
+    let kids = d.child_nodes(n);
+    if forward { kids.first() } else { kids.last() }.copied()
+}
+
+/// Spec "traverse children" — `firstChild()`/`lastChild()` :
+/// descend depuis `cur`, `skip` → descente du même côté,
+/// `reject` → frère/remontée bornée à `cur` (le receveur) ou
+/// `root` — jamais au-dessus (JS-C340 : la borne était `root`,
+/// un `firstChild()` receveur vide sautait hors du sous-arbre).
+#[allow(clippy::too_many_arguments)]
+fn tw_children(
+    e: &mut Engine,
+    dom: &crate::dom_host::DomRef,
+    cache: &crate::dom_host::NodeCache,
+    what: u32,
+    filter: Value,
+    root: NodeId,
+    cur: NodeId,
+    forward: bool,
+) -> Option<NodeId> {
+    let mut node = tw_child_at(dom, cur, forward)?;
+    loop {
+        match tw_accept(e, dom, cache, node, what, filter) {
+            0 => return Some(node),
+            1 => {
+                if let Some(c) = tw_child_at(dom, node, forward) {
+                    node = c;
+                    continue;
+                }
+            }
+            _ => {}
+        }
+        // reject, ou skip sans enfant : frère du même côté,
+        // sinon remontée bornée à `cur`/`root` (exclus).
+        loop {
+            match tw_sib(dom, node, forward) {
+                Some(s) => {
+                    node = s;
+                    break;
+                }
+                None => match dom.borrow().parent(node) {
+                    Some(p) if p != cur && p != root => node = p,
+                    _ => return None,
+                },
+            }
+        }
+    }
+}
+
+/// Spec "traverse siblings" — `nextSibling()`/`previousSibling()` :
+/// né de `cur`, jamais au-dessus de `root` ; un frère non
+/// accepté (skip **ou** reject — la spec ne distingue pas ici)
+/// descend son enfant du même côté avant de tenter le frère
+/// suivant (JS-C340).
+#[allow(clippy::too_many_arguments)]
+fn tw_siblings(
+    e: &mut Engine,
+    dom: &crate::dom_host::DomRef,
+    cache: &crate::dom_host::NodeCache,
+    what: u32,
+    filter: Value,
+    root: NodeId,
+    cur: NodeId,
+    forward: bool,
+) -> Option<NodeId> {
+    if cur == root {
+        return None;
+    }
+    let mut node = cur;
+    loop {
+        let mut sib = tw_sib(dom, node, forward);
+        while let Some(s) = sib {
+            node = s;
+            if tw_accept(e, dom, cache, node, what, filter) == 0 {
+                return Some(node);
+            }
+            sib = tw_child_at(dom, node, forward).or_else(|| tw_sib(dom, node, forward));
+        }
+        match dom.borrow().parent(node) {
+            Some(p) if p != root => node = p,
+            _ => return None,
+        }
+    }
+}
+
+/// Spec `parentNode()` — premier ancêtre accepté, `root`
+/// incluse (elle peut être retournée si le filtre l'accepte).
+fn tw_parent(
+    e: &mut Engine,
+    dom: &crate::dom_host::DomRef,
+    cache: &crate::dom_host::NodeCache,
+    what: u32,
+    filter: Value,
+    root: NodeId,
+    cur: NodeId,
+) -> Option<NodeId> {
+    let mut node = cur;
+    while node != root {
+        node = dom.borrow().parent(node)?;
+        if tw_accept(e, dom, cache, node, what, filter) == 0 {
+            return Some(node);
+        }
+    }
+    None
+}
+
+/// Spec `previousNode()` — reverse ordre document : depuis
+/// `cur`, frère précédent → descente dernier enfant (skip),
+/// `reject` élague le sous-arbre, parent filtré à la remontée
+/// (`root` retournable si acceptée), borné à `root` (JS-C340).
+fn tw_prev_node(
+    e: &mut Engine,
+    dom: &crate::dom_host::DomRef,
+    cache: &crate::dom_host::NodeCache,
+    what: u32,
+    filter: Value,
+    root: NodeId,
+    cur: NodeId,
+) -> Option<NodeId> {
+    let mut node = cur;
+    while node != root {
+        let mut sib = tw_sib(dom, node, false);
+        while let Some(s) = sib {
+            node = s;
+            match tw_accept(e, dom, cache, node, what, filter) {
+                0 => return Some(node),
+                1 => {
+                    sib = tw_child_at(dom, node, false).or_else(|| tw_sib(dom, node, false));
+                }
+                _ => sib = tw_sib(dom, node, false),
+            }
+        }
+        node = dom.borrow().parent(node)?;
+        if tw_accept(e, dom, cache, node, what, filter) == 0 {
+            return Some(node);
+        }
+    }
+    None
+}
+
 /// `TreeWalker.prototype` paresseux.
 fn tw_proto(e: &mut Engine) -> ObjId {
     if let Some(p) = e.misc.tw_proto {
@@ -1603,23 +1751,24 @@ impl Host for TreeWalkerHost {
         args: &[Value],
     ) -> JsResult<Option<Value>> {
         let _ = args;
+        let (root, what, filter, cur) = {
+            let d = self.data.borrow();
+            (d.root, d.what, d.filter, d.cur)
+        };
+        // Toutes les traversées sont relatives à `currentNode`
+        // (JS-C340 — §B-97 : ShadyDOM repositionne `currentNode`
+        // puis appelle `firstChild`/`nextSibling` ; partir de
+        // `root` ou rendre `null` cassait le montage Polymer).
         let found = match name {
-            "nextNode" => {
-                let (root, what, filter, cur) = {
-                    let d = self.data.borrow();
-                    (d.root, d.what, d.filter, d.cur)
-                };
-                tw_next(e, &self.dom, &self.cache, what, filter, root, cur)
+            "nextNode" => tw_next(e, &self.dom, &self.cache, what, filter, root, cur),
+            "previousNode" => tw_prev_node(e, &self.dom, &self.cache, what, filter, root, cur),
+            "firstChild" => tw_children(e, &self.dom, &self.cache, what, filter, root, cur, true),
+            "lastChild" => tw_children(e, &self.dom, &self.cache, what, filter, root, cur, false),
+            "nextSibling" => tw_siblings(e, &self.dom, &self.cache, what, filter, root, cur, true),
+            "previousSibling" => {
+                tw_siblings(e, &self.dom, &self.cache, what, filter, root, cur, false)
             }
-            "firstChild" => {
-                let (root, what, filter) = {
-                    let d = self.data.borrow();
-                    (d.root, d.what, d.filter)
-                };
-                tw_next(e, &self.dom, &self.cache, what, filter, root, root)
-            }
-            // Borné CAP-182 : navigation inverse/fratrie non
-            // portée — `null` honnête plutôt que parcours faux.
+            "parentNode" => tw_parent(e, &self.dom, &self.cache, what, filter, root, cur),
             _ => return Ok(Some(Value::Null)),
         };
         match found {
