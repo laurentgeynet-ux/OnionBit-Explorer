@@ -4352,6 +4352,17 @@ impl Engine {
         if !dom.borrow().node_valid(target) {
             return Ok(());
         }
+        // Sonde §B-97 — recensement des types d'events, premier-
+        // par-type partagé avec `el.birth`/`ce.*` (volume borné
+        // aux types distincts ; le spam `mousemove` n'apparaît
+        // qu'une fois). L'hydratation `YouTube` s'orchestre par
+        // customs `yt-*` : leur absence nomme le gate amont.
+        {
+            let ty = ev.ty.borrow();
+            if dom.borrow_mut().ce.probe_seen.insert(format!("ev:{ty}")) {
+                tracing::info!(target: "dom_probe", site = "ev.dispatch", ty = %ty);
+            }
+        }
         let path = {
             let d = dom.borrow();
             let mut p = d.ancestors(target); // parent … root
@@ -10792,6 +10803,19 @@ impl Host for CustomElementsHost {
                     return Ok(Some(Value::Obj(p)));
                 }
                 if !self.dom.borrow().ce.defs.contains_key(&n) {
+                    // Sonde §B-97 — une attente restée pendante
+                    // nomme un gate d'hydratation (le bootstrap
+                    // `YouTube` attend-il un `define` jamais
+                    // venu ?), premier-par-tag.
+                    if self
+                        .dom
+                        .borrow_mut()
+                        .ce
+                        .probe_seen
+                        .insert(format!("wd:{n}"))
+                    {
+                        tracing::info!(target: "dom_probe", site = "ce.whenDefined", tag = %n);
+                    }
                     self.dom
                         .borrow_mut()
                         .ce

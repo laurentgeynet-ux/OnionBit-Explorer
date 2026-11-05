@@ -10120,6 +10120,15 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   de l'accueil ; `url_host` C352
   corrigé (`//h/…` et relatifs ne
   loguent plus la query signée).
+- [x] **JS-C354. Extension §B-97**
+  (`ev.dispatch` recensement
+  premier-par-type de tous les
+  events via `propagate_event` +
+  `ce.whenDefined` attente
+  pendante) — vol 656 : grille
+  « définie, jamais née » ; les
+  customs `yt-*` absents du
+  recensement nommeront le gate.
 
 ## Tâches continues
 
