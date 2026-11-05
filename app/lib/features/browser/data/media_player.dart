@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 import 'dart:async';
+import 'dart:ui' as ui;
 
 import 'package:flutter/widgets.dart';
 
@@ -108,6 +109,7 @@ class MediaSnapshot {
     this.subtitle = '',
     this.chapters = const [],
     this.chapter = -1,
+    this.loopState,
   });
 
   final int positionMs;
@@ -150,6 +152,11 @@ class MediaSnapshot {
   /// Index du chapitre à la position courante — `-1` hors
   /// lecture, sans chapitres ou hôte sans getter.
   final int chapter;
+
+  /// Réglage `loop-file` courant (Étape 199) — `-1` infini,
+  /// `0` off, `N ≥ 1` lectures. `null` = hôte sans `loop`
+  /// (à distinguer de `0` : absent ≠ off).
+  final int? loopState;
 
   /// Fin du segment de cache contenant la tête de lecture
   /// (barre « buffered » — l'extent *contigu en avance*,
@@ -203,6 +210,13 @@ abstract class MediaPlayer {
   /// `true` quand la vidéo est initialisée (premier frame
   /// disponible) — l'overlay affiche un fond noir en attendant.
   bool get ready;
+
+  /// Pochette jointe du conteneur (`cover_art_*`, Étape 199)
+  /// — image décodée à l'open, `null` quand le média n'en a
+  /// pas ou que l'hôte n'expose pas les exports. Sert de
+  /// poster avant la première frame (sur MSE, le moteur ne
+  /// peint rien sous la surface).
+  ui.Image? get coverArt;
 
   /// Instantané courant pour `POST …/state`.
   MediaSnapshot get snapshot;

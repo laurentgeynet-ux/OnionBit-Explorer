@@ -179,6 +179,7 @@ final mediaPlayerFactoryProvider = Provider<MediaPlayerFactory>(
                 apiBase: apiBase,
                 hwAccel: hw,
                 framedrop: cfg.mediaFramedrop,
+                pauseAtEof: cfg.mediaPauseAtEof,
               )
             : OnionMediaPlayer.create(offer.url,
                 hwAccel: hw,
@@ -188,7 +189,8 @@ final mediaPlayerFactoryProvider = Provider<MediaPlayerFactory>(
                 preload: offer.preload,
                 displayPixels:
                     OnionMediaPlayer.displayPixelsFor(offer.rect),
-                framedrop: cfg.mediaFramedrop);
+                framedrop: cfg.mediaFramedrop,
+                pauseAtEof: cfg.mediaPauseAtEof);
   },
 );
 

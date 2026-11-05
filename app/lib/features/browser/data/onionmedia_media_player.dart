@@ -236,6 +236,17 @@ class OnionMediaPlayer implements MediaPlayer {
   int Function(ffi.Pointer)? _currentChapter;
   int Function(ffi.Pointer, int)? _seekChapter;
 
+  /// Étape 199 — pochette + `loop` getter + `pause_at_eof`.
+  int Function(ffi.Pointer)? _coverArtLen;
+  int Function(ffi.Pointer, ffi.Pointer<ffi.Char>, int)?
+      _coverArtData;
+  int Function(ffi.Pointer)? _loopGet;
+  int Function(ffi.Pointer, int)? _setPauseEof;
+
+  /// Pochette décodée à l'open (`cover_art_*`) — poster
+  /// avant la première frame, MSE compris.
+  ui.Image? _coverArt;
+
   /// Pistes lues à l'open (statiques pour un conteneur) —
   /// `stream_*` absents → vide (menu masqué).
   List<MediaTrack> _tracks = const [];
@@ -436,6 +447,21 @@ class OnionMediaPlayer implements MediaPlayer {
           ffi.Int32 Function(ffi.Pointer, ffi.Int32),
           int Function(ffi.Pointer, int)>(
           'onionmedia_seek_chapter');
+      _coverArtLen = _lib.lookupFunction<
+          ffi.Int64 Function(ffi.Pointer), int Function(ffi.Pointer)>(
+          'onionmedia_cover_art_len');
+      _coverArtData = _lib.lookupFunction<
+          ffi.Int64 Function(ffi.Pointer, ffi.Pointer<ffi.Char>,
+              ffi.IntPtr),
+          int Function(ffi.Pointer, ffi.Pointer<ffi.Char>, int)>(
+          'onionmedia_cover_art_data');
+      _loopGet = _lib.lookupFunction<
+          ffi.Int64 Function(ffi.Pointer), int Function(ffi.Pointer)>(
+          'onionmedia_loop');
+      _setPauseEof = _lib.lookupFunction<
+          ffi.Int32 Function(ffi.Pointer, ffi.Int32),
+          int Function(ffi.Pointer, int)>(
+          'onionmedia_set_pause_at_eof');
     } on Object {
       // Lookup en paquet : un symbole manquant de la
       // famille laisse le reste null (menu masqué).
@@ -445,7 +471,9 @@ class OnionMediaPlayer implements MediaPlayer {
                   _setAudioStream = _setSubStream = _subText =
                       _chapterCount = _chapterStartMs =
                           _chapterEndMs = _chapterTitle =
-                              _currentChapter = _seekChapter = null;
+                              _currentChapter = _seekChapter =
+                                  _coverArtLen = _coverArtData =
+                                      _loopGet = _setPauseEof = null;
     }
     // Porte ABI : `abi_version` elle-même se découvre —
     // absente = socle ≤ 4, le bloc 5 est sauté entier.
@@ -715,6 +743,35 @@ class OnionMediaPlayer implements MediaPlayer {
     ];
   }
 
+  /// `cover_art_len`/`data` → `ui.Image` — octets **encodés**
+  /// (JPEG/PNG), le décodage est côté appelant (doc dépôt).
+  /// Lu une fois à l'open : `0`/absent → `null` (pas de
+  /// pochette — pas de poster fabriqué).
+  Future<void> _loadCoverArt() async {
+    final lenFn = _coverArtLen;
+    final dataFn = _coverArtData;
+    if (lenFn == null || dataFn == null) return;
+    final len = lenFn(_h);
+    if (len <= 0) return;
+    final buf = calloc<ffi.Char>(len);
+    try {
+      final n = dataFn(_h, buf, len);
+      if (n <= 0) return;
+      final bytes =
+          Uint8List.fromList(buf.cast<ffi.Uint8>().asTypedList(n));
+      final codec = await ui.instantiateImageCodec(bytes);
+      final frame = await codec.getNextFrame();
+      _coverArt = frame.image;
+    } on Object {
+      _coverArt = null;
+    } finally {
+      calloc.free(buf);
+    }
+  }
+
+  @override
+  ui.Image? get coverArt => _coverArt;
+
   @override
   Future<void> seekChapter(int index) async {
     _seekChapter?.call(_h, index);
@@ -948,6 +1005,7 @@ class OnionMediaPlayer implements MediaPlayer {
     String preload = 'auto',
     int displayPixels = 0,
     MediaFramedropConfig? framedrop,
+    bool pauseAtEof = false,
   }) async {
     final lib = _load();
     /// `file:///D:/x.mkv` -> `D:/x.mkv` ; chemin nu inchangé.
@@ -1011,6 +1069,10 @@ class OnionMediaPlayer implements MediaPlayer {
       p._refreshTracks();
       p._refreshChapters();
       calloc.free(c);
+      if (pauseAtEof) {
+        p._setPauseEof?.call(h, 1);
+      }
+      await p._loadCoverArt();
       if (rc != 0) {
         throw StateError('onionmedia_open: ${p._playerError() ?? p._lastError()}');
       }
@@ -1045,6 +1107,7 @@ class OnionMediaPlayer implements MediaPlayer {
     String apiBase = '',
     bool hwAccel = false,
     MediaFramedropConfig? framedrop,
+    bool pauseAtEof = false,
   }) async {
     final lib = _load();
     // Le symbole peut ne pas exister encore — erreur propre.
@@ -1093,6 +1156,10 @@ class OnionMediaPlayer implements MediaPlayer {
       rethrow;
     }
     p._applyLoop(offer.loops);
+    if (pauseAtEof) {
+      p._setPauseEof?.call(h, 1);
+    }
+    await p._loadCoverArt();
     p._startPump();
     return p;
   }
@@ -1453,6 +1520,7 @@ class OnionMediaPlayer implements MediaPlayer {
       subtitle: _readSubtitleText(),
       chapters: _chaptersLive,
       chapter: _currentChapter?.call(_h) ?? -1,
+      loopState: _loopGet == null ? null : _loopGet!(_h),
     );
   }
 

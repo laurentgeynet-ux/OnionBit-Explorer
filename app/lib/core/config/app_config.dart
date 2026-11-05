@@ -112,6 +112,7 @@ class AppConfig {
       'ipcm',
     ],
     this.mediaCodecOracle = true,
+    this.mediaPauseAtEof = false,
     this.mediaCodecProbes = const {
       'avc1': 'video/mp4; codecs="avc1.42E01E"',
       'hvc1': 'video/mp4; codecs="hvc1.1.6.L120.90"',
@@ -298,6 +299,11 @@ class AppConfig {
   /// volontairement alignée sur les préfixes de
   /// [mediaCodecs].
   final Map<String, String> mediaCodecProbes;
+
+  /// `set_pause_at_eof` (Étape 199, opt-in) — pause en fin
+  /// de flux au lieu du `ended` franc ; `false` par défaut =
+  /// comportement historique préservé.
+  final bool mediaPauseAtEof;
 
   /// `User-Agent` du lecteur média natif sur les ouvertures
   /// progressives (`onionmedia_set_http_headers`, P-66) —

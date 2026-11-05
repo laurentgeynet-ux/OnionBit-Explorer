@@ -91,11 +91,22 @@ class _MediaSurfaceViewState extends State<MediaSurfaceView> {
     if (p == null || !mounted) return;
     final s = p.snapshot;
     final qp = s.positionMs ~/ 100, qb = s.bufferedMs ~/ 250;
+    // Nouveaux champs UI (étapes 196-199) : cue sous-titre,
+    // pistes/chapitre/loop courants — leur changement doit
+    // aussi repeindre, sinon une sélection en pause reste
+    // invisible jusqu'au prochain tick de position.
     final changed = _snap?.state != s.state ||
         _lastDur != s.durationMs ||
         _lastReady != p.ready ||
         _lastMuted != p.muted ||
         _lastVol != p.volume ||
+        _snap?.subtitle != s.subtitle ||
+        _snap?.subtitleTrack != s.subtitleTrack ||
+        _snap?.audioTrack != s.audioTrack ||
+        _snap?.chapter != s.chapter ||
+        _snap?.loopState != s.loopState ||
+        _snap?.tracks.length != s.tracks.length ||
+        _snap?.chapters.length != s.chapters.length ||
         qp != _qPos ||
         qb != _qBuf;
     _qPos = qp;
@@ -193,6 +204,13 @@ class _MediaSurfaceViewState extends State<MediaSurfaceView> {
       child: Stack(
         fit: StackFit.expand,
         children: [
+          // Pochette du conteneur (Étape 199) — poster avant
+          // la première frame ; sur MSE le moteur ne peint
+          // rien sous la surface, c'est le seul visuel.
+          if (o.isVideo && !ready && p?.coverArt != null)
+            Positioned.fill(
+              child: RawImage(image: p!.coverArt, fit: BoxFit.cover),
+            ),
           // Couche vidéo — transparente avant la première
           // frame : le poster peint par le moteur reste
           // visible (pas de trou noir).
@@ -663,6 +681,14 @@ class MediaControlsBar extends StatelessWidget {
           Text(
             fmtTime(durMs),
             style: TextStyle(color: onSurface, fontSize: 12),
+          ),
+        // Boucle active (Étape 199) — `loop` getter : != 0 =
+        // infini (-1) ou N lectures ; `null` export absent =
+        // icône masquée (absent ≠ off).
+        if (s != null && (s.loopState ?? 0) != 0)
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 2),
+            child: Icon(Icons.repeat, size: 16, color: onSurface),
           ),
         // Chapitres (Étape 197) — prev/next bornés + liste
         // titrée ; le trio n'apparaît qu'avec `chapters`

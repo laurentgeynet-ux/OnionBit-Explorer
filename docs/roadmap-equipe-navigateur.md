@@ -6913,12 +6913,19 @@ incrément.
   retire un codec réel → clés à
   revoir après premier vol).
 
-- [ ] **Étape 199. Petits bindings
-  groupés** (`app/`) : `frame_step`/
-  `back_step`, `pause_at_eof`,
-  `bandwidth_max`, `sync_threshold`,
-  `cover_art` (poster MSE), `loop`
-  getter parité.
+- [x] **Étape 199. Petits bindings
+  groupés** (`app/`) : `cover_art`
+  → poster `!ready` (MSE) ;
+  `pause_at_eof` config opt-in ;
+  `loop` getter → `loopState` +
+  icône repeat. **Fix** `_onNotify` :
+  cue/pistes/chapitre/loop repeignent
+  désormais (avant : invisibles en
+  pause). Non câblé : `frame_step`/
+  `back_step` absents du filaire
+  (plan les supposait), `ab_loop`,
+  `sync`/`drop`/`bandwidth_max`
+  (sans consommateur). 75/75.
 
 - [ ] **Étape 200. `audio_pull` PCM
   → WebAudio (design seul)** :

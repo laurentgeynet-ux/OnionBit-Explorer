@@ -376,6 +376,9 @@ class FakePlayer implements MediaPlayer {
   int chapterIdx = -1;
   int seekedChapter = -1;
 
+  /// Étape 199 — `loop` getter (`null` = export absent).
+  int? loopState;
+
   void notify() {
     for (final l in List.of(_listeners)) {
       l();
@@ -386,6 +389,8 @@ class FakePlayer implements MediaPlayer {
   Widget get view => const SizedBox();
   @override
   bool get ready => true;
+  @override
+  ui.Image? get coverArt => null;
   @override
   MediaSnapshot get snapshot => MediaSnapshot(
     positionMs: positionMs,
@@ -398,6 +403,7 @@ class FakePlayer implements MediaPlayer {
     subtitle: subtitle,
     chapters: chapters,
     chapter: chapterIdx,
+    loopState: loopState,
   );
 
   @override

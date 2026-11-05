@@ -378,4 +378,23 @@ void main() {
     expect(find.text('0:00 — Intro'), findsOneWidget);
     expect(find.text('1:00 — Combat'), findsOneWidget);
   });
+
+  testWidgets('199 — loop actif → icône repeat ; absent → masquée', (
+    tester,
+  ) async {
+    final (:c, :p) = await pumpSurface(tester);
+    // loopState null (export absent) → pas d'icône.
+    expect(find.byIcon(Icons.repeat), findsNothing);
+    p
+      ..loopState = -1
+      ..notify();
+    await tester.pump();
+    expect(find.byIcon(Icons.repeat), findsOneWidget);
+    p
+      ..loopState = 0
+      ..notify();
+    await tester.pump();
+    await tester.pump();
+    expect(find.byIcon(Icons.repeat), findsNothing);
+  });
 }
