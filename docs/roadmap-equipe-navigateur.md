@@ -10129,6 +10129,20 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   « définie, jamais née » ; les
   customs `yt-*` absents du
   recensement nommeront le gate.
+- [x] **JS-C355. Rail `EventTarget`
+  → DOM** (`et_add`/`et_remove`/
+  `et_dispatch_event` résolvent
+  `this` via `node_for_in` +
+  `e.global` : cible DOM →
+  `node.listeners`/`propagate_event`
+  au lieu de `__et` — conformité
+  spec `…prototype.addEventListener.
+  call(el)` ≡ `el.addEventListener`,
+  hypothèse §B-97 : `ShadyDOM`
+  forwarde ses patches par la native
+  sauvegardée → listeners kevlar
+  morts-nés) + sondes `el.listen`/
+  `ev.threw`. Verrou `c355` 5/5.
 
 ## Tâches continues
 

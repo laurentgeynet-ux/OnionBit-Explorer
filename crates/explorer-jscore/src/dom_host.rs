@@ -4507,7 +4507,14 @@ impl Engine {
                 break;
             }
             if self.is_callable(f) {
-                self.call_value(f, this, &[*ev_val])?;
+                if let Err(th) = self.call_value(f, this, &[*ev_val]) {
+                    // Sonde §B-97 — un listener qui jette nomme
+                    // l'event dont le handler meurt (1×/type).
+                    if dom.borrow_mut().ce.probe_seen.insert(format!("th:{ty}")) {
+                        tracing::info!(target: "dom_probe", site = "ev.threw", ty = %ty);
+                    }
+                    return Err(th);
+                }
             }
         }
         if !capture && !ev.immediate.get() {
@@ -4528,8 +4535,20 @@ impl Engine {
                 // Spec : un handler `on*` qui retourne `false`
                 // annule l'événement (≙ `preventDefault` — pattern
                 // `onsubmit="return check()"`).
-                if matches!(self.call_value(f, this, &[*ev_val])?, Value::Bool(false)) {
-                    ev.prevented.set(true);
+                match self.call_value(f, this, &[*ev_val]) {
+                    Ok(v) => {
+                        if matches!(v, Value::Bool(false)) {
+                            ev.prevented.set(true);
+                        }
+                    }
+                    Err(th) => {
+                        // Sonde §B-97 — handler `on*` fautif,
+                        // même dédup `th:` que les listeners.
+                        if dom.borrow_mut().ce.probe_seen.insert(format!("th:{ty}")) {
+                            tracing::info!(target: "dom_probe", site = "ev.threw", ty = %ty);
+                        }
+                        return Err(th);
+                    }
                 }
             }
         }
@@ -5124,6 +5143,16 @@ impl Host for DocumentHost {
                 let f = arg(args, 1);
                 let capture = e.to_boolean(arg(args, 2));
                 if e.is_callable(f) {
+                    // Sonde §B-97 — recensement premier-par-type.
+                    if self
+                        .dom
+                        .borrow_mut()
+                        .ce
+                        .probe_seen
+                        .insert(format!("ls:{ty}"))
+                    {
+                        tracing::info!(target: "dom_probe", site = "el.listen", ty = %ty);
+                    }
                     let root = self.dom.borrow().root;
                     self.dom.borrow_mut().nodes[root as usize]
                         .listeners
@@ -8298,6 +8327,16 @@ impl Host for NodeHost {
                 let f = arg(args, 1);
                 let capture = e.to_boolean(arg(args, 2));
                 if e.is_callable(f) {
+                    // Sonde §B-97 — recensement premier-par-type.
+                    if self
+                        .dom
+                        .borrow_mut()
+                        .ce
+                        .probe_seen
+                        .insert(format!("ls:{ty}"))
+                    {
+                        tracing::info!(target: "dom_probe", site = "el.listen", ty = %ty);
+                    }
                     self.dom.borrow_mut().nodes[node as usize]
                         .listeners
                         .push((ty, f, capture));
@@ -11990,6 +12029,10 @@ fn win_add_event_listener(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult
     let capture = e.to_boolean(arg(args, 2));
     if e.is_callable(f) {
         if let Some((dom, _)) = &e.dom_ctx {
+            // Sonde §B-97 — recensement premier-par-type.
+            if dom.borrow_mut().ce.probe_seen.insert(format!("ls:{ty}")) {
+                tracing::info!(target: "dom_probe", site = "el.listen", ty = %ty);
+            }
             let root = dom.borrow().root;
             dom.borrow_mut().nodes[root as usize]
                 .listeners
@@ -12919,20 +12962,51 @@ pub(crate) fn dom_node_of(e: &Engine, v: Value) -> Option<(DomRef, NodeId)> {
     })
 }
 
+/// `this` du rail `EventTarget` résolu en cible DOM : nœud ou
+/// `document` via `node_for_in`, `window` ≙ racine — `None`
+/// pour les objets non-DOM qui gardent la map `__et`.
+fn et_dom_target(e: &mut Engine, this: Value, dom: &DomRef) -> Option<NodeId> {
+    if this == Value::Obj(e.global) {
+        return Some(dom.borrow().root);
+    }
+    node_for_in(e, this, dom)
+}
+
 /// `et.addEventListener(type, cb)` — pousse sur `__et[type]`.
 /// La map `__et` est créée paresseusement : les wrappers non-
 /// `EventTarget` qui exposent la méthode (`IDBRequest` — JS-C187)
 /// et les greffes `EventTarget.prototype.addEventListener.call(o)`
 /// des polyfills fonctionnent sans ctor préalable.
+///
+/// Un `this` DOM (élément, `document`, `window`) atteint par la
+/// greffe `EventTarget.prototype.addEventListener.call(nœud)`
+/// — le forward des patches `addEventListener` de `ShadyDOM` —
+/// atterrit dans `node.listeners`, seule file servie par
+/// `propagate_event` : la map `__et` le rendrait mort-né
+/// (mur §B-97 — listeners d'orchestration `yt-*` jamais vus).
 pub(crate) fn et_add_listener(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
-    let Value::Obj(sid) = this else {
-        return Ok(Value::Undefined);
-    };
     let ty = e.to_js_string(arg(args, 0))?;
     let cb = arg(args, 1);
     if !e.is_callable(cb) {
         return Ok(Value::Undefined); // spec : non-appelable ignoré
     }
+    if let Some((dom, _)) = e.dom_ctx.clone() {
+        if let Some(node) = et_dom_target(e, this, &dom) {
+            let capture = e.to_boolean(arg(args, 2));
+            // Sonde §B-97 — même dédup `ls:` que les autres
+            // sites : la greffe compte dans le recensement.
+            if dom.borrow_mut().ce.probe_seen.insert(format!("ls:{ty}")) {
+                tracing::info!(target: "dom_probe", site = "el.listen", ty = %ty);
+            }
+            dom.borrow_mut().nodes[node as usize]
+                .listeners
+                .push((ty, cb, capture));
+            return Ok(Value::Undefined);
+        }
+    }
+    let Value::Obj(sid) = this else {
+        return Ok(Value::Undefined);
+    };
     if e.get_prop(sid, "__et").is_none() {
         let mid = e.new_object();
         e.set_own(sid, "__et", Value::Obj(mid), true);
@@ -12955,11 +13029,23 @@ pub(crate) fn et_add_listener(e: &mut Engine, this: Value, args: &[Value]) -> Js
 }
 
 /// `et.removeEventListener(type, cb)` — retire de `__et[type]`.
+/// Même reroutage DOM que [`et_add_listener`] : un `this`
+/// nœud/document/window retire dans `node.listeners`.
 pub(crate) fn et_remove_listener(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    let ty = e.to_js_string(arg(args, 0))?;
+    if let Some((dom, _)) = e.dom_ctx.clone() {
+        if let Some(node) = et_dom_target(e, this, &dom) {
+            let cb = arg(args, 1);
+            let capture = e.to_boolean(arg(args, 2));
+            dom.borrow_mut().nodes[node as usize]
+                .listeners
+                .retain(|(t, lf, c)| !(t == &ty && *c == capture && e.strict_eq(*lf, cb)));
+            return Ok(Value::Undefined);
+        }
+    }
     let Value::Obj(sid) = this else {
         return Ok(Value::Undefined);
     };
-    let ty = e.to_js_string(arg(args, 0))?;
     let cb = arg(args, 1);
     if let Some(Value::Obj(map)) = e.get_prop(sid, "__et") {
         if let Some(Value::Obj(l)) = e.get_prop(map, &ty) {
@@ -12989,6 +13075,19 @@ pub(crate) fn et_remove_listener(e: &mut Engine, this: Value, args: &[Value]) ->
 /// (`target`/`currentTarget` = l'objet), `false` si
 /// `preventDefault` fut tiré.
 pub(crate) fn et_dispatch_event(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    // Un `this` DOM (greffe `EventTarget.prototype.dispatchEvent
+    // .call(nœud)`) reprend le chemin canonique :
+    // `event_state_of` + `propagate_event` — capture/bubble,
+    // `preventDefault` retourné à l'envers (spec).
+    if let Some((dom, cache)) = e.dom_ctx.clone() {
+        if let Some(node) = et_dom_target(e, this, &dom) {
+            let Some(state) = event_state_of(e, node, &dom, &cache, arg(args, 0))? else {
+                return Ok(Value::Bool(false));
+            };
+            e.propagate_event(&dom, &cache, &state)?;
+            return Ok(Value::Bool(!state.prevented.get()));
+        }
+    }
     let Value::Obj(sid) = this else {
         return Err(e.type_error("dispatchEvent: cible invalide"));
     };
