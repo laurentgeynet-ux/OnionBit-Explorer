@@ -6760,6 +6760,22 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   contrôleur fast → `fastSeeks`.
   Suites 13/13 + 15/15 + 67/67.
 
+- [x] **Étape 190. Headers HTTP
+  progressifs (P-66)** (`app/`) :
+  `set_http_headers` avant
+  `open_url` — `Referer` = URL de
+  l'onglet porteur (param
+  `referer` sur la factory,
+  `_tabById` côté claim) +
+  `User-Agent` = miroir
+  `explorer-net` en
+  `AppConfig.mediaUserAgent`
+  (§13, CDN UA-sniffers).
+  Lookup gardé ; MSE hors scope
+  (pull REST local). Verrou :
+  claim → `referer == active.url`.
+  41/41 + 67/67.
+
 - [ ] **Écarts terrain — vol humain
   22/10 (release `39ab821`, FFI)** :
   second run humain — trois constats

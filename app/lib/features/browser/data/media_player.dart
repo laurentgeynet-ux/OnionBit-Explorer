@@ -139,6 +139,7 @@ typedef MediaPlayerFactory = Future<MediaPlayer> Function(
   MediaOffer offer, {
   required String tabId,
   String apiBase,
+  String referer,
 });
 
 /// `OnionMediaPlayer` (FFI `onionmedia_ffi`) en prod,

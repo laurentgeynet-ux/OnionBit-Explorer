@@ -297,6 +297,10 @@ void main() {
     final c = makeContainer(repo, events);
     addTearDown(c.dispose);
     await settle(c);
+    // L'onglet porte une URL de page — elle doit devenir le
+    // `Referer` du lecteur natif (set_http_headers, P-66).
+    await c.read(browserProvider.notifier).navigate('page.test/article');
+    final pageUrl = c.read(browserProvider).active?.url;
 
     events.ctrl.add(
       ServerEvent('media_offered', {
@@ -321,6 +325,7 @@ void main() {
     expect(repo.mediaCalls, contains('claim:1:42'));
     expect(FakePlayer.instances, hasLength(1));
     expect(FakePlayer.instances.single.url, 'http://h/v.mp4');
+    expect(FakePlayer.instances.single.referer, pageUrl);
     // Premier rapport d'état forcé (paused initial).
     expect(repo.mediaCalls, contains('state:1:42:paused'));
   });

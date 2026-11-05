@@ -440,13 +440,44 @@ class OnionMediaPlayer implements MediaPlayer {
     }
   }
 
+  /// `onionmedia_set_http_headers` (P-66, ABI 5) — en-têtes
+  /// appliqués aux `open_*` suivants (manifeste + segments
+  /// HLS/DASH + Range ; **pas** `open_mse*` qui pull via le
+  /// REST local). Format filaire : `Nom: valeur\n`. Lookup
+  /// gardé — DLL < 5 = sans effet, jamais de crash.
+  static void _setHttpHeaders(
+    ffi.DynamicLibrary lib,
+    ffi.Pointer h,
+    String text,
+  ) {
+    if (text.isEmpty) return;
+    try {
+      final fn = lib.lookupFunction<
+          ffi.Int32 Function(ffi.Pointer, ffi.Pointer<ffi.Char>, ffi.IntPtr),
+          int Function(ffi.Pointer, ffi.Pointer<ffi.Char>, int)>(
+          'onionmedia_set_http_headers');
+      final s = text.toNativeUtf8();
+      try {
+        fn(h, s.cast<ffi.Char>(), s.length);
+      } finally {
+        calloc.free(s);
+      }
+    } on Object {
+      // export absent — en-têtes non pilotés.
+    }
+  }
+
   /// Ouvre `url` (http(s) proxyfiée ou chemin `file`/brut).
+  /// `referer`/`userAgent` partent via `set_http_headers`
+  /// **avant** l'open — googlevideo et consorts les exigent.
   /// `StateError` si la DLL ou l'ouverture échoue — la factory
   /// échoue, l'erreur remonte au claim.
   static Future<MediaPlayer> create(
     String url, {
     bool hwAccel = false,
     bool loop = false,
+    String referer = '',
+    String userAgent = '',
   }) async {
     final lib = _load();
     /// `file:///D:/x.mkv` -> `D:/x.mkv` ; chemin nu inchangé.
@@ -470,6 +501,12 @@ class OnionMediaPlayer implements MediaPlayer {
     _setHwAccel(lib, h, hwAccel);
     try {
       final isHttp = url.startsWith('http');
+      if (isHttp) {
+        _setHttpHeaders(lib, h, [
+          if (referer.isNotEmpty) 'Referer: $referer',
+          if (userAgent.isNotEmpty) 'User-Agent: $userAgent',
+        ].join('\n'));
+      }
       // `file:///D:/x.mkv` -> chemin filesystem pour
       // `open_path` (le moteur attend un path, pas une URL).
       final target = isHttp ? url : localPath(url);

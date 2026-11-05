@@ -79,6 +79,12 @@ class AppConfig {
       'ac-3',
       'ipcm',
     ],
+    // Miroir du défaut `explorer-net` (`h1.rs`) — même UA sur
+    // le HTML et le flux média pour les CDN qui sniffent.
+    this.mediaUserAgent =
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
+        'AppleWebKit/537.36 (KHTML, like Gecko) '
+        'Explorer/0.2 Safari/537.36',
     this.drmDelegateHosts = const [
       // Chaque entrée = un arbitrage (ADR-0027 §2 : périmètre
       // de confiance + exception d'égress ADR-0022 — le trafic
@@ -225,6 +231,14 @@ class AppConfig {
   /// containers/codecs que le backend OnionMedia sait jouer ;
   /// `canPlayType` côté JS se reflète dessus.
   final List<String> mediaCodecs;
+
+  /// `User-Agent` du lecteur média natif sur les ouvertures
+  /// progressives (`onionmedia_set_http_headers`, P-66) —
+  /// **miroir du défaut `explorer-net`** (`h1.rs` : les
+  /// anti-bot/CDN qui UA-sniffent doivent voir le même UA
+  /// sur le HTML et sur le flux). À resynchroniser si le
+  /// moteur change le sien.
+  final String mediaUserAgent;
 
   /// Domaines délégués à la WebView2 (étape 136b, ADR-0027) —
   /// allowlist explicite et minimale ; matching host exact +
