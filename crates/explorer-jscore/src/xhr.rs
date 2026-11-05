@@ -691,6 +691,13 @@ impl Host for XhrHost {
             "open" => {
                 let method = e.to_js_string(arg(args, 0))?;
                 let url = e.to_js_string(arg(args, 1))?;
+                // Sonde §B-102 — même collecte `media_probe`.
+                tracing::info!(
+                    target: "media_probe",
+                    site = "xhr.open",
+                    method = %method,
+                    host = url_host(&url)
+                );
                 let mut d = self.data.borrow_mut();
                 // `open` resets the request per spec — `withCredentials`
                 // et les listeners survivent (props de l'objet).
@@ -2092,6 +2099,16 @@ fn reject_fetch(e: &mut Engine, pid: crate::value::ObjId, msg: &str) -> JsResult
     Ok(Value::Obj(pid))
 }
 
+/// Hôte d'une URL pour la sonde §B-102 — `scheme://host[:port]`
+/// tronqué à l'autorité : les URLs média (`videoplayback`…) sont
+/// signées, query/cookies = secret de session, jamais logués.
+fn url_host(url: &str) -> &str {
+    url.split("://")
+        .nth(1)
+        .and_then(|r| r.split(['/', '?', '#']).next())
+        .unwrap_or(url)
+}
+
 /// `fetch(url | Request, opts?)` — `input` `Request` fournit
 /// url/method/headers/body par défaut, `opts` surcharge (spec
 /// `fetch` = `new Request(input, init)` puis transport).
@@ -2298,6 +2315,14 @@ pub(crate) fn fetch_fn(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Va
         return Ok(Value::Obj(pid));
     }
     if let Some(t) = &e.xhr.transport {
+        // Sonde §B-102 — `host` seul (les URLs `videoplayback`
+        // sont signées : query = secret de session, jamais logué).
+        tracing::info!(
+            target: "media_probe",
+            site = "fetch.send",
+            method = %req.method,
+            host = url_host(&req.url)
+        );
         let h = t.send(&req);
         // `Response.url` = URL absolue résolue contre le document
         // émetteur (JS-C282) — les players s'en servent comme base

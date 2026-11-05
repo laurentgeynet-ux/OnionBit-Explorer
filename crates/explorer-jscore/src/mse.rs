@@ -1578,6 +1578,15 @@ fn ms_add_source_buffer(e: &mut Engine, this: Value, args: &[Value]) -> JsResult
         return Err(e.type_error("MediaSource.addSourceBuffer: 1 argument required"));
     };
     let mime = e.to_js_string(v)?;
+    // Sonde §B-102 — création de buffer : mime + n° d'index
+    // (la chaîne SABR narrée en vol — deux buffers attendus
+    // av+opus sur `YouTube`).
+    tracing::info!(
+        target: "media_probe",
+        site = "mse.addSourceBuffer",
+        %mime,
+        n = d.borrow().buffers.len()
+    );
     // Spec (JS-C325) : chaîne vide → `TypeError`. La
     // validation du type reste tolérante (déviation
     // documentée — la table `declared_codecs` peut être
@@ -1680,6 +1689,8 @@ fn ms_end_of_stream(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Val
     let Some(d) = ms_data(e, this) else {
         return Err(e.type_error("MediaSource.endOfStream: Illegal invocation"));
     };
+    // Sonde §B-102 — fin de flux demandée par le player.
+    tracing::info!(target: "media_probe", site = "mse.endOfStream");
     // Spec : un `SourceBuffer` `updating` → InvalidStateError.
     for sbv in &d.borrow().buffers {
         let Some(sd) = sb_data(e, *sbv) else {
@@ -2190,6 +2201,13 @@ fn sb_append_buffer(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Val
             e.type_error("SourceBuffer.appendBuffer: argument is not an ArrayBuffer or view")
         );
     };
+    // Sonde §B-102 — chaque append narré (octets + total cumulé).
+    tracing::info!(
+        target: "media_probe",
+        site = "mse.appendBuffer",
+        bytes = bytes.len(),
+        total = d.borrow().bytes.saturating_add(bytes.len())
+    );
     let mut track_ops: Vec<(SbTrack, &'static str, Option<usize>)> = Vec::new();
     let mut saw_moov = false;
     {
@@ -2660,6 +2678,9 @@ pub(crate) fn maybe_attach(e: &mut Engine, url: &str, node: NodeId) {
     let Some(mid) = object_url_media(e, url) else {
         return;
     };
+    // Sonde §B-102 — la chaîne SABR narrée en vol (attache
+    // `src=blob:` = point de départ du cycle de vie MSE).
+    tracing::info!(target: "media_probe", site = "mse.attach");
     // Dernier posé gagne : rebinding `src=` ou deux éléments
     // sur le même `blob:` — `progress` va à l'attaché effectif.
     e.mse.attached_to.insert(mid, node);
@@ -2698,6 +2719,9 @@ pub(crate) fn deliver_mse_events(e: &mut Engine) -> JsResult<bool> {
     let mut first: Option<Thrown> = None;
     while let Some((target, ty)) = e.mse.pending_events.pop_front() {
         fired = true;
+        // Sonde §B-102 — chaque event MSE livré (la chaîne
+        // SABR se lit : sourceopen → updateend* → progress…).
+        tracing::info!(target: "media_probe", site = "mse.deliver", ty);
         // Les events de cycle de vie ciblent **l'élément**
         // attaché (`progress` étape 182, `loadstart`/
         // `durationchange`/échelle `loadedmetadata`… §B-88) —

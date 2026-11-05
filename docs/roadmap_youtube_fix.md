@@ -299,6 +299,7 @@ flowchart TD
   - ✅ **JS-C350 livré — bornes pile pilotables** — `EXPLORER_JS_CALL_DEPTH`/`EXPLORER_JS_NEST` (clamp `256..=131_072`, défaut 1024) côté worker `explorer-js` → sonde ×N sans rebuild.
   - ✅ **Vol 654 — §B-100 RÉSOLU (côté pile)** — sous `JS_NEST/CALL_DEPTH=10240` : `expr_bisect=0`, zéro `RangeError`, récursion bornée légitime confirmée ; `/watch` 63,9 s (record campagne). **JS-C351** cale les défauts en dur (`call` 8192 / `nest` 16384 ≈ ~9 300 frames).
   - ⚠️ **§B-102 nommé — post-bootstrap silencieux** — bootstrap complet (formats sondés, `av01` choisi, MSE + 2 buffers, `src=blob:`, `readyState=4`) mais **zéro fetch `videoplayback`/`googlevideo`** : le SABR attend un signal non livré (suspects : `sourceopen` page, `Response.body.getReader()` streaming, promesse `play()` pendante hors claim, gate machine d'état). Console vide, zéro rejection.
+  - ✅ **JS-C352 livré — instrumentation chaîne SABR** — neuf sondes `media_probe` (champs lazy, coût nul désarmé) : `media.claim`, `mse.attach`, `mse.deliver` (par event), `mse.addSourceBuffer`, `mse.appendBuffer` (octets+cumul), `mse.endOfStream`, `media.play` (pending/resolved), `fetch.send`, `xhr.open` (**host seul** via `url_host` — paramètres signés jamais logués). Lecture : la première sonde absente de la séquence nomme le maillon bloquant.
 
 ---
 

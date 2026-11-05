@@ -3988,6 +3988,16 @@ impl Engine {
     /// (ré-offre = id neuf, promesses conservées : l'élément
     /// persiste).
     pub fn set_media_claim(&mut self, node: NodeId, media: u64, codecs: Option<Vec<String>>) {
+        // Sonde §B-102 — claim/release hôte narré (surface id,
+        // codecs déclarés — distingue claim jamais posé vs
+        // claim sans effet aval).
+        tracing::info!(
+            target: "media_probe",
+            site = "media.claim",
+            media,
+            claimed = codecs.is_some(),
+            codecs_n = codecs.as_ref().map_or(0, Vec::len)
+        );
         let Some((dom, cache)) = self.dom_ctx.clone() else {
             return;
         };
@@ -6740,6 +6750,10 @@ fn media_call_claimed(
                     None => None,
                 }
             };
+            // Sonde §B-102 — `play()` narré : promesse pendante
+            // (claimé, attend `playing` hôte) ou résolution
+            // immédiate (hors claim/déjà playing).
+            tracing::info!(target: "media_probe", site = "media.play", pending = playing.is_some());
             Ok(Some(if let Some(pid) = playing {
                 Value::Obj(pid)
             } else {

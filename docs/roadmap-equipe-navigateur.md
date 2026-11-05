@@ -10095,6 +10095,19 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   63,9 s ; 1024 = mort certaine
   web réel). Env JS-C350 gardent
   la main — §B-100 résolu pile.
+- [x] **JS-C352. Sondes chaîne
+  SABR §B-102** (`media_probe` :
+  `media.claim`, `mse.attach`,
+  `mse.deliver`, `mse.addSource
+  Buffer`, `mse.appendBuffer`,
+  `mse.endOfStream`, `media.play`,
+  `fetch.send`, `xhr.open` — host
+  seul côté URLs signées, champs
+  lazy = coût nul désarmé) —
+  bissection du silence post-
+  bootstrap : la première sonde
+  absente nomme le maillon bloquant
+  le premier append/fetch média.
 
 ## Tâches continues
 
