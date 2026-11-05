@@ -8454,6 +8454,42 @@ async fn etape207bis_iframe_failed_external_releases_queue() {
     assert!(dump.contains("after"), "file relâchée après 404 : {dump}");
 }
 
+/// Étape 207-ter (mur II.4-ter du vol 648 — embed `YouTube`)
+/// : la déclaration codecs hôte (`EXPLORER_MEDIA_CODECS`,
+/// voie `declare_media_codecs` au boot) doit être visible
+/// dans les ctx de sous-cadre — sinon `isTypeSupported` y
+/// rend `""` sur tous les formats (`declared_n=0`) → embed
+/// « aucun format jouable ». Le realm enfant hérite la table
+/// `declared_codecs` du parent au spawn.
+#[tokio::test]
+async fn etape207ter_iframe_sees_host_declared_codecs() {
+    let (mut s, t) = test_session();
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    s.declare_media_codecs(&["avc1.4D400B".to_string(), "opus".to_string()]);
+    t.route(
+        "/",
+        200,
+        "<!doctype html><html><body><iframe src=\"/f\"></iframe></body></html>",
+    );
+    t.route(
+        "/f",
+        200,
+        "<!doctype html><html><body><p id=\"v\">?</p>\
+         <script>document.getElementById('v').textContent=\
+         MediaSource.isTypeSupported('video/mp4;codecs=\"avc1.4D400B\"')+'|'+\
+         MediaSource.isTypeSupported('audio/webm;codecs=\"opus\"');</script>\
+         </body></html>",
+    );
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    s.pump_net().await;
+    let dump = s.frame_dom_dump(id, 0).unwrap();
+    assert!(
+        dump.contains("maybe|maybe"),
+        "codecs hôte visibles dans le ctx enfant : {dump}"
+    );
+}
+
 /// Les sous-contextes voyagent dans le snapshot bfcache :
 /// back/forward restaure les DOM enfants sans re-fetch.
 #[tokio::test]

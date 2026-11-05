@@ -7148,6 +7148,36 @@ incrément.
   404) ; canaris iframe (37), dyn_*
   (24), module (14), lib (96) verts.
 
+- [x] **Étape 207-ter. Capacité codecs
+  héritée par les realms enfants**
+  (mur II.4-ter du vol 648 — embed
+  `YouTube` : `MseState` est garé par
+  contexte et chaque `Context` naît
+  `default` → `declared_n=0` dans les
+  iframes ; `isTypeSupported`/
+  `canPlayType` rendaient `""` sur
+  **tous** les formats dans le
+  sous-cadre → player embed « aucun
+  format jouable », écran d'erreur) —
+  `context_new` fait hériter le realm
+  naissant de la table
+  `declared_codecs` du parent au spawn
+  (`MseState::inherit_declared_codecs`
+  — snapshot : la capacité hôte
+  `EXPLORER_MEDIA_CODECS`/claims
+  antérieurs est plateforme-globale,
+  les claims ultérieurs du document
+  restent document-locaux). Verrous :
+  jscore `etape207ter_child_ctx_
+  inherits_declared_codecs`
+  (isTypeSupported+canPlayType dans
+  l'enfant, snapshot non-fuyard) +
+  session `etape207ter_iframe_sees_
+  host_declared_codecs` (`maybe|maybe`
+  dans le dump du cadre). Canaris :
+  iframe (40), suites mse/ctx (~110)
+  verts.
+
 - [ ] **Écarts terrain — vol humain
   22/10 (release `39ab821`, FFI)** :
   second run humain — trois constats

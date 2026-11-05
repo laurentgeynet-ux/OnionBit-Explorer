@@ -400,6 +400,16 @@ impl MseState {
             ids.extend(pids.iter().copied());
         }
     }
+
+    /// Hérite la table `declared_codecs` du contexte parent à
+    /// la naissance du realm (II.4-ter, vol 648) — la capacité
+    /// codec déclarée par l'hôte est plateforme-globale ;
+    /// snapshot à la naissance : les claims ultérieurs du
+    /// document restent document-locaux.
+    pub(crate) fn inherit_declared_codecs(&mut self, parent: &Self) {
+        self.declared_codecs
+            .extend(parent.declared_codecs.iter().cloned());
+    }
 }
 
 // ------------------------------------------------------------------

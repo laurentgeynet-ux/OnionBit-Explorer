@@ -1331,6 +1331,12 @@ impl Engine {
         // prototypes — `frame.Array !== parent.Array`).
         let mut fresh = crate::context::BrowsingContext::blank(&mut self.heap);
         self.swap_ctx_fields(&mut fresh);
+        // II.4-ter (vol 648) — capacité média plateforme-globale :
+        // le realm enfant hérite la table `declared_codecs` du
+        // parent au spawn — sinon `isTypeSupported`/`canPlayType`
+        // rendent `""` partout dans les iframes (`declared_n=0`
+        // → embed « aucun format jouable »).
+        self.mse.inherit_declared_codecs(&fresh.mse);
         // `self` porte désormais des champs neufs — installe les
         // builtins dans le nouveau global (même séquence que
         // `Engine::new`).

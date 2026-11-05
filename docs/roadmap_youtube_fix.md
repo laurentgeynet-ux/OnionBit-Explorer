@@ -281,8 +281,11 @@ flowchart TD
 - **Statut** :
   - ✅ **Étape 207 livrée** (`938e42e2`) — `Dom::mark_external_scripts_pending` + `install_dom_ctx` (borne `MAX_CTX_PARSE_SCRIPTS=64`) enfilent les `<script src>` du sous-document dans `pending_dyn` ; le rail dyn-script fetch/évalue tagué **ctx enfant** sous l'identité du cadre (`ctx_net_origin` — referer = URL de l'iframe). Verrous `frame_ext_scripts` + `etape207_iframe_external_scripts_execute_in_frame_ctx` verts.
   - ⚠️ **Vol 647 (`642d9b30`) — mur déplacé : II.4-bis** — les `src=` externes étaient bien fetchés/évalués (`ytembeds.base`, `base.js`), mais les `<script>` **inline** de l'iframe évaluaient au câblage du contexte **avant** leur livraison → `ReferenceError: writeEmbed is not defined`, lecteur noir.
-  - ✅ **Étape 207-bis livrée** — tout le flux parse (`src` + inline) enfilé dans la file ordonnée du rail dyn (`defer_order`) ; `Session.ordered_dyn` sérialise par ctx (`in_flight`/`pump_ordered_dyn`), cycle `readyState`/DCL/`load` du cadre différé à la vidange de la file (spec : DCL après les scripts parseur). Verrous `frame_ext_scripts` (6) + `etape207bis_*` ; 37 canaris iframe verts.
-  - ⏳ **À revalider en vol** — la résolution d'II.4-bis/§B-99 n'est acquise qu'au prochain vol live sur binaire frais (Étape 10).
+  - ✅ **Étape 207-bis livrée** (`2fad5311`) — tout le flux parse (`src` + inline) enfilé dans la file ordonnée du rail dyn (`defer_order`) ; `Session.ordered_dyn` sérialise par ctx (`in_flight`/`pump_ordered_dyn`), cycle `readyState`/DCL/`load` du cadre différé à la vidange de la file (spec : DCL après les scripts parseur). Verrous `frame_ext_scripts` (6) + `etape207bis_*` ; 37 canaris iframe verts.
+  - ✅ **Vol 648 — II.4-bis RÉSOLU** — externes évalués avant les inline différés (`ytembeds.base` 558 Ko + `base.js` 1,9 Mo + `r78Drb` 1 Mo dans le ctx enfant), **zéro `ReferenceError`**, `raster items 5→19`, bootstrap complet → écran d'erreur player peint.
+  - ⚠️ **Vol 648 — mur déplacé : II.4-ter** — `MediaSource.isTypeSupported`/`canPlayType` rendaient `""` sur tous les formats dans le ctx iframe (`declared_n=0` vs 13 au parent) : la table `declared_codecs` est garée par contexte et chaque `Context` naît vide → embed « aucun format jouable ».
+  - ✅ **Étape 207-ter livrée** — `context_new` fait hériter le realm naissant de `declared_codecs` du parent au spawn (snapshot : capacité hôte plateforme-globale ; claims ultérieurs document-locaux). Verrous `etape207ter_child_ctx_inherits_declared_codecs` + `etape207ter_iframe_sees_host_declared_codecs` ; canaris iframe (40) + suites mse/ctx verts.
+  - ⏳ **À revalider en vol** — la résolution d'II.4-ter n'est acquise qu'au prochain vol live sur binaire frais (Étape 10).
 
 ---
 

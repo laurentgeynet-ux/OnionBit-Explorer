@@ -542,3 +542,54 @@ fn c78_child_posts_to_parent_during_own_eval() {
     e.run_microtasks().expect("microtasks");
     assert_eq!(ev(&mut e, "got"), "pong|https://top.example");
 }
+
+// ----------------------------------------------------------------
+// II.4-ter — codecs déclarés hérités au spawn du realm (vol 648)
+// ----------------------------------------------------------------
+
+/// `EXPLORER_MEDIA_CODECS` est poussé dans le ctx top-level au
+/// boot ; un sous-cadre qui interroge `isTypeSupported` avant
+/// le fix trouvait `declared_n=0` → `""` partout → embed
+/// « aucun format jouable ». Le realm hérite la table au spawn
+/// (snapshot — les claims ultérieurs restent document-locaux).
+#[test]
+fn etape207ter_child_ctx_inherits_declared_codecs() {
+    let (mut e, d) = top_engine();
+    let codecs = vec![
+        "avc1.4D400B".to_string(),
+        "vp09.02.51.10".to_string(),
+        "opus".to_string(),
+    ];
+    e.note_media_codecs(&codecs);
+    let child = add_child(&mut e, &d, CHILD_URL);
+    // Chaîne complète déclarée → "maybe" (plafond §B-95) dans
+    // l'enfant comme au parent ; avant le fix : "".
+    assert_eq!(
+        ev_ctx(
+            &mut e,
+            child,
+            "MediaSource.isTypeSupported('video/mp4;codecs=\"avc1.4D400B\"')",
+        ),
+        "maybe"
+    );
+    // `canPlayType` même source honnête → "probably".
+    assert_eq!(
+        ev_ctx(
+            &mut e,
+            child,
+            "document.createElement('video').canPlayType('video/webm;codecs=\"vp09\"')",
+        ),
+        "probably"
+    );
+    // Snapshot à la naissance : un claim post-spawn dans le
+    // parent ne fuit pas vers l'enfant (document-local).
+    e.note_media_codecs(&["mp4a.40.2".to_string()]);
+    assert_eq!(
+        ev_ctx(
+            &mut e,
+            child,
+            "document.createElement('video').canPlayType('audio/mp4;codecs=\"mp4a.40.2\"')",
+        ),
+        ""
+    );
+}
