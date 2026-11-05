@@ -4104,6 +4104,12 @@ fn install_dom(
     d
 }
 
+/// Borne de `<script src>` parse-time enfilés par sous-document
+/// (Étape 207) — un cadre hostile ne gonfle pas la file dyn :
+/// ~10 scripts suffisent aux embeds réels (`www-embed-player.js`,
+/// `base.js`…) ; au-delà les balises restent inertes, bornées.
+const MAX_CTX_PARSE_SCRIPTS: usize = 64;
+
 /// `Cmd::InstallDomCtx` côté worker (étape 134) — même
 /// séquence que [`install_dom`] mais pour le contexte d'un
 /// `<iframe>` : miroir propre, `document`/`location`/timers/
@@ -4134,6 +4140,19 @@ fn install_dom_ctx(
     // est vidé avec le flag — un chemin sale résiduel
     // empoisonnerait la première vraie mutation de l'enfant.
     d.borrow().take_dirty_path();
+    // Étape 207 (mur §B-99 embed `YouTube`) : les `<script src>`
+    // du sous-document étaient inertes — `frame_context_plan`
+    // ne collectait que l'inline (`max_src = 0`) → lecteur
+    // embarqué figé. Le rail dyn-script existant couvre tout :
+    // `drain_dyn_scripts` émet les `DynScriptReq` tagués
+    // **ctx enfant**, `spawn_dyn_script` résout contre
+    // `ctx_net_origin` (Referer/origine **du cadre**, pas du
+    // parent — l'`embed` envoie le bon referer) et
+    // `deliver_dyn_script` évalue dans le realm + `load`/`error`
+    // sur l'élément. Les inline ne sont pas marqués — déjà
+    // évalués au câblage (double exécution sinon).
+    d.borrow_mut()
+        .mark_external_scripts_pending(MAX_CTX_PARSE_SCRIPTS);
     eng.install_dom(&d);
     eng.install_timers();
     eng.set_page_url(page_url);

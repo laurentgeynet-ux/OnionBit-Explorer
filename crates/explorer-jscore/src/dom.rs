@@ -1878,6 +1878,48 @@ impl Dom {
         }
     }
 
+    /// CAP-169 / Étape 207 (mur §B-99 embed) : les `<script
+    /// src>` **du parse d'un sous-document** (realm
+    /// `install_dom_ctx` — `<iframe>` `src`/`srcdoc`) sont
+    /// enfilés `pending_dyn` pour fetch/éval par la session,
+    /// comme les scripts insérés dynamiquement. Les balises
+    /// **inline** ne sont pas marquées : elles sont évaluées
+    /// au câblage du contexte (`FramePlan.scripts`) — les
+    /// marquer relancerait une double exécution. `max` borne
+    /// le lot par document ; la voie insertion
+    /// (`note_attached_scripts`) reste dédupée par
+    /// `dyn_started` — un nœud déplacé ne re-fetche pas.
+    /// Le document **top-level** n'appelle pas cette méthode :
+    /// ses `src=` restent sous la vague `SubJob` session.
+    pub fn mark_external_scripts_pending(&mut self, max: usize) {
+        let mut stack = vec![self.root];
+        let mut marked = 0usize;
+        while let Some(n) = stack.pop() {
+            if marked >= max {
+                break;
+            }
+            if self.nodes[n as usize].kind != NodeKind::Element {
+                stack.extend(self.nodes[n as usize].children.iter().rev().copied());
+                continue;
+            }
+            // Pas de garde `dyn_started` : `from_html` a déjà
+            // marqué **tous** les scripts du parse « already
+            // started » (sinon la file dyn les re-évaluerait).
+            // C'est précisément ce marquage qu'on contourne
+            // ici pour la voie `src` — l'insertion
+            // (`note_attached_scripts`) reste dédupée par le
+            // même `dyn_started` : un nœud déplacé ne re-fetche
+            // pas.
+            if self.nodes[n as usize].tag == "script"
+                && self.attr(n, "src").is_some_and(|s| !s.trim().is_empty())
+            {
+                self.pending_dyn.push(n);
+                marked += 1;
+            }
+            stack.extend(self.nodes[n as usize].children.iter().rev().copied());
+        }
+    }
+
     /// CAP-169/171 : les `<script>`/`<iframe>` attachés par
     /// `node` (sous-arbre compris, ordre document) et pas
     /// encore « started »/« seen » sont enfilés pour

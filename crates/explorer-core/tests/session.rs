@@ -8339,6 +8339,49 @@ async fn iframe_bounded_by_max_frames() {
     assert_eq!(s.tab_frames(id).len(), 1);
 }
 
+/// Étape 207 (mur §B-99 embed du vol 644) : un `<script src>`
+/// du parse d'un **sous-document** est fetché sous l'identité
+/// du cadre (referer = URL de l'iframe — `ctx_net_origin`),
+/// évalué dans son realm, et sa mutation synchronise dans
+/// `frames[i].dom`. Avant : `frame_context_plan` collectait
+/// `max_src = 0` → `www-embed-player.js`/`base.js` de
+/// `YouTube` jamais téléchargés, lecteur embarqué figé.
+#[tokio::test]
+async fn etape207_iframe_external_scripts_execute_in_frame_ctx() {
+    let (mut s, t) = test_session();
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    t.route(
+        "/",
+        200,
+        "<!doctype html><html><body><iframe src=\"/f\"></iframe></body></html>",
+    );
+    t.route(
+        "/f",
+        200,
+        "<!doctype html><html><body><p id=\"c\">enfant</p>\
+         <script src=\"/app.js\"></script></body></html>",
+    );
+    t.route(
+        "/app.js",
+        200,
+        "document.getElementById('c').textContent='booted';",
+    );
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    s.pump_net().await;
+    assert!(
+        t.paths().contains(&"/app.js".to_string()),
+        "le <script src> du cadre doit être fetché"
+    );
+    assert_eq!(
+        t.req_header("/app.js", "referer").as_deref(),
+        Some("http://h.test/f"),
+        "initiateur = document du cadre, pas la page parente"
+    );
+    let dump = s.frame_dom_dump(id, 0).unwrap();
+    assert!(dump.contains("booted"), "{dump}");
+}
+
 /// Les sous-contextes voyagent dans le snapshot bfcache :
 /// back/forward restaure les DOM enfants sans re-fetch.
 #[tokio::test]

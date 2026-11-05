@@ -7094,6 +7094,33 @@ incrément.
   reenter_poll_net` ; canaris
   `anim_births`/`poll_net` verts.
 
+- [x] **Étape 207. `<script src>`
+  externes des sous-documents** (§B-99
+  embed, roadmap YouTube P3.B — le plan
+  iframe collectait `max_src = 0` :
+  `www-embed-player.js`/`base.js` de
+  `YouTube` jamais fetchés → lecteur
+  embarqué figé) — `Dom::mark_external_
+  scripts_pending(max)` (jscore) enfile
+  les `src` du parse en `pending_dyn` ;
+  `install_dom_ctx` (adaptateur) l'arme
+  sous borne `MAX_CTX_PARSE_SCRIPTS=64`.
+  Le rail dyn-script existant fait le
+  reste : `drain_dyn_scripts` émet les
+  `DynScriptReq` tagués **ctx enfant**,
+  `spawn_dyn_script` résout contre
+  `ctx_net_origin` (referer/origine du
+  **cadre** — §B-54 fixé par rebond) et
+  `deliver_dyn_script` évalue dans son
+  realm + `load`/`error` élément. Les
+  inline ne sont pas re-émis (déjà
+  évalués au câblage — `FramePlan.
+  scripts`). Verrous `frame_ext_scripts`
+  (4) + `etape207_iframe_external_
+  scripts_execute_in_frame_ctx`
+  (session : fetch + referer + DOM
+  cadre) ; canaris iframe (35) verts.
+
 - [ ] **Écarts terrain — vol humain
   22/10 (release `39ab821`, FFI)** :
   second run humain — trois constats
