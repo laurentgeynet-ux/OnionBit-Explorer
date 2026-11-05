@@ -7047,6 +7047,27 @@ incrément.
     `webaudio.rs` 2/2 (sine→bin,
     zéros honnêtes), 271 tests
     jscore média/dom verts.
+- [x] **Étape 205. Durcissements
+  post-204** (`app/` + jscore) —
+  relecture 204 : (1) POST audio
+  non borné (futures empilées sous
+  stall) → `AudioChunkSink` → `bool`
+  + garde `inFlight` contrôleur ;
+  `audioTapDrops` diagnostic sur
+  `OnionMediaPlayer` (miroir app de
+  `tap_dropped`). (2) `pcm_rings`
+  jamais purgé (~192 Ko/surface +
+  PCM résiduel au re-claim) →
+  `remove` au bras release.
+  (3) `suspend()`/`close()` sans
+  flip de `state` → `"suspended"`/
+  `"closed"` terminal (`resume`
+  post-close reste `"closed"`).
+  Verrous : garde en-vol (rejet
+  pendant, acceptation après),
+  `release_purges_pcm_ring`,
+  `ctx_state_transitions_suspend_close`.
+  82/82 app, webaudio 4/4.
 - Inventaire à activation différée
   (existants, pas de consommateur) :
   `set_ab_loop`, `set_subtitle_delay`,

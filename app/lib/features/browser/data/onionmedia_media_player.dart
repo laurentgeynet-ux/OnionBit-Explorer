@@ -291,6 +291,11 @@ class OnionMediaPlayer implements MediaPlayer {
   int Function(ffi.Pointer, ffi.Pointer<ffi.Uint8>, int)? _audioPull;
   Timer? _audioDrain;
   AudioChunkSink? _audioSink;
+
+  /// Chunks droppés par le sink saturé (Étape 205 — miroir
+  /// du `tap_dropped` dépôt : flux, pas de file).
+  int _audioTapDrops = 0;
+  int get audioTapDrops => _audioTapDrops;
   MediaAudioSpec? _tapSpec;
 
   /// Famille `stream_*` / `subtitle_*` (Étape 196 — exports
@@ -1882,7 +1887,9 @@ class OnionMediaPlayer implements MediaPlayer {
       try {
         final got = pull(_h, ptr, n);
         if (got <= 0) return;
-        sink(spec, Uint8List.fromList(ptr.asTypedList(got)));
+        if (!sink(spec, Uint8List.fromList(ptr.asTypedList(got)))) {
+          _audioTapDrops++;
+        }
         avail -= got;
       } finally {
         calloc.free(ptr);

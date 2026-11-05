@@ -1414,14 +1414,23 @@ class BrowserController extends Notifier<BrowserState> {
       // (`_repo.mediaAudio` tranche). Fire-and-forget :
       // l'échec (413/409) n'est pas rejoué — flux borné.
       if (_cfg.mediaAudioTap) {
+        // Garde en-vol (Étape 205) : un push par surface à la
+        // fois — sous stall du transport les futures ne
+        // s'empilent pas, les chunks en trop retournent
+        // `false` (le lecteur les compte, `audioTapDrops`).
+        var audioInFlight = false;
         unawaited(
-          player.enableAudioTap(
-            (spec, chunk) => unawaited(
+          player.enableAudioTap((spec, chunk) {
+            if (audioInFlight) return false;
+            audioInFlight = true;
+            unawaited(
               _repo
                   .mediaAudio(tabId, offer.id, spec, chunk)
+                  .whenComplete(() => audioInFlight = false)
                   .catchError((Object _) {}),
-            ),
-          ),
+            );
+            return true;
+          }),
         );
       }
       // Premier rapport forcé : le moteur attend un état

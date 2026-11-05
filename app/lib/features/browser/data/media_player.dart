@@ -424,8 +424,11 @@ abstract class MediaPlayer {
 typedef MediaAudioSpec = ({int sampleRate, int channels, int format});
 
 /// Rappel de chunk PCM tap (Étape 204b) — `chunk` ≤ 16 Ko,
-/// interleaved à la spec annoncée.
-typedef AudioChunkSink = void Function(MediaAudioSpec spec, Uint8List chunk);
+/// interleaved à la spec annoncée. `false` = chunk droppé
+/// (transport saturé — flux, pas de file ; Étape 205) : le
+/// lecteur le compte dans `audioTapDrops`, miroir du
+/// `tap_dropped` dépôt.
+typedef AudioChunkSink = bool Function(MediaAudioSpec spec, Uint8List chunk);
 
 /// Fabrique de lecteurs — injectable (fake en test). L'offre
 /// complète passe (branche `mse` : le lecteur a besoin du

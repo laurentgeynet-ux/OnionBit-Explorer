@@ -2502,10 +2502,10 @@ impl Engine {
             self.set_own(p, crate::interp::SYM_TO_STRING_TAG, tag, false);
             self.set_own(p, "constructor", ac_f, false);
             for name in ["resume", "close", "suspend"] {
-                let f = if name == "resume" {
-                    audio_ctx_resume
-                } else {
-                    audio_ctx_promise
+                let f = match name {
+                    "resume" => audio_ctx_resume,
+                    "close" => audio_ctx_close,
+                    _ => audio_ctx_suspend,
                 };
                 let m = self.native_fn(name, f);
                 self.set_own(p, name, m, true);
@@ -3614,41 +3614,49 @@ impl Engine {
         };
         let (pending, first_claim) = {
             let mut d = dom.borrow_mut();
-            match codecs {
-                Some(c) => {
-                    // MSE-4 : les codecs que l'hôte déclare
-                    // au claim alimentent la table consultée
-                    // par `MediaSource.isTypeSupported`.
-                    crate::mse::note_declared_codecs(self, &c);
-                    if let Some(st) = d.media.get_mut(&node) {
-                        st.media = media;
-                        st.codecs = c;
-                        (None, false)
-                    } else {
-                        let mut st = MediaElState::new(media, c);
-                        // §B-88 handoff : l'échelle montée
-                        // pré-claim par les appends MSE passe
-                        // au bras claimé — `deliver_media_state`
-                        // continue sans re-tirer les events déjà
-                        // servis ; les promesses `play()`
-                        // pendantes migrent (résolues au premier
-                        // `playing` hôte) ; la durée `MediaSource`
-                        // déjà reflétée n'est pas re-annoncée.
-                        let (rs, pids) = self.mse_el_handoff(node);
-                        st.ready_state = rs;
-                        st.pending_play = pids;
-                        if let Some(sec) = d
-                            .attr(node, "src")
-                            .map(String::from)
-                            .and_then(|u| self.mse_source_duration(&u))
-                        {
-                            st.last_duration = Some((sec * 1000.0).max(0.0) as u64);
-                        }
-                        d.media.insert(node, st);
-                        (None, true)
+            if let Some(c) = codecs {
+                // MSE-4 : les codecs que l'hôte déclare
+                // au claim alimentent la table consultée
+                // par `MediaSource.isTypeSupported`.
+                crate::mse::note_declared_codecs(self, &c);
+                if let Some(st) = d.media.get_mut(&node) {
+                    st.media = media;
+                    st.codecs = c;
+                    (None, false)
+                } else {
+                    let mut st = MediaElState::new(media, c);
+                    // §B-88 handoff : l'échelle montée
+                    // pré-claim par les appends MSE passe
+                    // au bras claimé — `deliver_media_state`
+                    // continue sans re-tirer les events déjà
+                    // servis ; les promesses `play()`
+                    // pendantes migrent (résolues au premier
+                    // `playing` hôte) ; la durée `MediaSource`
+                    // déjà reflétée n'est pas re-annoncée.
+                    let (rs, pids) = self.mse_el_handoff(node);
+                    st.ready_state = rs;
+                    st.pending_play = pids;
+                    if let Some(sec) = d
+                        .attr(node, "src")
+                        .map(String::from)
+                        .and_then(|u| self.mse_source_duration(&u))
+                    {
+                        st.last_duration = Some((sec * 1000.0).max(0.0) as u64);
                     }
+                    d.media.insert(node, st);
+                    (None, true)
                 }
-                None => (d.media.remove(&node).map(|st| st.pending_play), false),
+            } else {
+                let st = d.media.remove(&node);
+                // Étape 205 : le ring PCM de la surface est
+                // purgé à la release — sinon ~192 Ko
+                // retenus par surface libérée jusqu'au
+                // swap de document (`MseState` vit avec
+                // le document).
+                if let Some(ref s) = st {
+                    self.mse.pcm_rings.remove(&s.media);
+                }
+                (st.map(|st| st.pending_play), false)
             }
         };
         // `loadstart` (étape 182) : le claim = l'hôte commence
@@ -12509,12 +12517,42 @@ fn audio_ctx_promise(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value>
 /// `ctx.resume()` (Étape 204c) — `state` → `"running"` puis
 /// promesse résolue : le graphe d'analyse tourne tant que le
 /// tap hôte alimente le ring (la destination reste muette).
-fn audio_ctx_resume(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
+/// Étape 205 : un contexte `"closed"` est terminal — resume
+/// n'y touche plus (le state le dit honnêtement).
+fn audio_ctx_resume(e: &mut Engine, this: Value, a: &[Value]) -> JsResult<Value> {
     if let Value::Obj(id) = this {
-        let st = e.str_val("running");
+        let st_v = e
+            .heap
+            .obj(id)
+            .and_then(|o| o.get_own("state"))
+            .unwrap_or(Value::Undefined);
+        let closed = matches!(e.to_js_string(st_v).as_deref(), Ok("closed"));
+        if !closed {
+            let st = e.str_val("running");
+            e.set_own(id, "state", st, true);
+        }
+    }
+    audio_ctx_promise(e, this, a)
+}
+
+/// `ctx.suspend()` (Étape 205) — `state` → `"suspended"` :
+/// la promesse résout, l'état reflète la pause demandée.
+fn audio_ctx_suspend(e: &mut Engine, this: Value, a: &[Value]) -> JsResult<Value> {
+    if let Value::Obj(id) = this {
+        let st = e.str_val("suspended");
         e.set_own(id, "state", st, true);
     }
-    audio_ctx_promise(e, this, _a)
+    audio_ctx_promise(e, this, a)
+}
+
+/// `ctx.close()` (Étape 205) — `state` → `"closed"` terminal
+/// : `resume` ultérieur ne ressuscite pas (garde ci-dessus).
+fn audio_ctx_close(e: &mut Engine, this: Value, a: &[Value]) -> JsResult<Value> {
+    if let Value::Obj(id) = this {
+        let st = e.str_val("closed");
+        e.set_own(id, "state", st, true);
+    }
+    audio_ctx_promise(e, this, a)
 }
 
 /// `ctx.createXxx()` — nœud audio générique : `connect` rend sa

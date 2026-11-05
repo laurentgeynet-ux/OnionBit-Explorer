@@ -165,7 +165,7 @@ fn analyser_byte_td(e: &mut Engine, this: Value, a: &[Value]) -> JsResult<Value>
 
 /// `analyser.getByteFrequencyData(u8)` — magnitudes dB
 /// recalées dans [`minDecibels`,`maxDecibels`] → `[0,255]`
-/// (spec AnalyserNode).
+/// (spec `AnalyserNode`).
 fn analyser_byte_freq(e: &mut Engine, this: Value, a: &[Value]) -> JsResult<Value> {
     let (mags, lo, hi) = analyser_db_row(e, this);
     crate::typed_array::ta_write_region(e, arg(a, 0), move |region| {
@@ -212,7 +212,7 @@ fn analyser_db_row(e: &mut Engine, this: Value) -> (Vec<f64>, f64, f64) {
 }
 
 /// Magnitudes dB des `n/2` bins — fenêtre Blackman (spec
-/// AnalyserNode) + FFT radix-2 ; référence `max(1e-20)` pour
+/// `AnalyserNode`) + FFT radix-2 ; référence `max(1e-20)` pour
 /// éviter `log(0)`.
 fn analyser_mags(mono: &[f32]) -> Vec<f64> {
     let n = mono.len();

@@ -377,6 +377,47 @@ void main() {
     expect(repo.audioCalls, contains('audio:1:42:9600'));
   });
 
+  test('205 — mediaAudio : une requête en vol, drop borné', () async {
+    final repo = FakeRepo();
+    final events = FakeEvents();
+    FakePlayer.instances.clear();
+    final c = makeContainer(
+      repo,
+      events,
+      config: const AppConfig(mediaAudioTap: true),
+    );
+    addTearDown(c.dispose);
+    await settle(c);
+    events.ctrl.add(
+      ServerEvent('media_offered', {
+        'tab': 1,
+        'media': 42,
+        'kind': 'video',
+        'rect': {'x': 0.0, 'y': 0.0, 'w': 320.0, 'h': 180.0},
+        'url': 'http://h/v.mp4',
+      }),
+    );
+    for (var i = 0; i < 5; i++) {
+      await Future<void>.delayed(Duration.zero);
+    }
+    final player = FakePlayer.instances.single;
+    const spec = (sampleRate: 48000, channels: 2, format: 4);
+    // Post gelé en vol → le chunk suivant retourne `false`
+    // (le lecteur comptera `audioTapDrops`), jamais de file.
+    repo.audioGate = Completer<void>();
+    expect(player.audioSink!(spec, Uint8List(64)), isTrue);
+    expect(player.audioSink!(spec, Uint8List(64)), isFalse);
+    expect(repo.audioCalls, hasLength(1));
+    // Complétion → la garde se libère, le flux reprend.
+    repo.audioGate!.complete();
+    repo.audioGate = null;
+    for (var i = 0; i < 5; i++) {
+      await Future<void>.delayed(Duration.zero);
+    }
+    expect(player.audioSink!(spec, Uint8List(64)), isTrue);
+    expect(repo.audioCalls, hasLength(2));
+  });
+
   test('204b — mediaAudioTap off : aucun tap demandé', () async {
     final repo = FakeRepo();
     final events = FakeEvents();

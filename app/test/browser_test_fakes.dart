@@ -341,6 +341,11 @@ class FakeRepo implements BrowserRepository {
 
   /// Chunks PCM tap reçus (Étape 204b) — `audio:n` par appel.
   final List<String> audioCalls = [];
+
+  /// Gel des posts en vol (Étape 205) — un `Completer` posé
+  /// suspend chaque `mediaAudio` jusqu'à complétion, pour
+  /// verrouiller la garde « une requête en vol ».
+  Completer<void>? audioGate;
   @override
   Future<void> mediaAudio(
     String tabId,
@@ -349,6 +354,7 @@ class FakeRepo implements BrowserRepository {
     Uint8List pcm,
   ) async {
     audioCalls.add('audio:$tabId:$mediaId:${pcm.length}');
+    await audioGate?.future;
   }
 }
 

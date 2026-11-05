@@ -50,7 +50,7 @@ fn ta_view(e: &mut Engine, this: Value) -> JsResult<(TaKind, ObjId, usize, usize
 /// Écrit dans la région brute d'une view typée passée par
 /// `this` JS (`AnalyserNode.getXxxData`, Étape 204c) :
 /// `write` reçoit `bytes[offset..offset+len*size]` borné —
-/// TypeError `not a typed array` sinon.
+/// `TypeError` `not a typed array` sinon.
 pub(crate) fn ta_write_region(
     e: &mut Engine,
     this: Value,

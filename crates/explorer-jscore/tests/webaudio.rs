@@ -27,16 +27,22 @@ fn ev(e: &mut Engine, src: &str) -> String {
     }
 }
 
-/// NodeId du `<video>` de la fixture.
+/// `NodeId` du `<video>` de la fixture.
 fn video_node(dom: &Rc<RefCell<Dom>>) -> u32 {
     let d = dom.borrow();
-    (0..d.nodes.len() as u32)
-        .find(|&n| d.nodes[n as usize].tag == "video")
-        .expect("video présent")
+    let idx = d
+        .nodes
+        .iter()
+        .position(|n| n.tag == "video")
+        .expect("video présent");
+    u32::try_from(idx).expect("la fixture tient en u32")
 }
 
 /// `fftSize` échantillons f32 stéréo d'une sinusoïde à
 /// `bin` périodes → pic garanti dans le bin `bin`.
+// Indices `usize` → f32 : la perte de précision est sans
+// enjeu pour une sinusoïde de fixture (bins < 2^23).
+#[allow(clippy::cast_precision_loss)]
 fn sine_pcm(fft: usize, bin: usize) -> Vec<u8> {
     let mut pcm = Vec::with_capacity(fft * 2 * 4);
     for i in 0..fft {
@@ -129,4 +135,48 @@ fn analyser_zeros_on_unclaimed() {
         ),
         "true"
     );
+}
+
+/// Étape 205 — la release purge le ring PCM de la surface :
+/// sans elle ~192 Ko restaient retenus par surface libérée
+/// jusqu'au swap de document, et un re-claim de la même
+/// surface voyait l'ancien PCM (données fausses).
+#[test]
+fn release_purges_pcm_ring() {
+    let (mut e, dom) = engine();
+    e.set_media_claim(video_node(&dom), 42, Some(vec!["avc1".into()]));
+    e.deliver_media_audio(42, 48_000, 2, 4, &sine_pcm(2048, 16));
+    e.set_media_claim(video_node(&dom), 42, None);
+    // Re-claim même surface : le ring repart vide — l'ancien
+    // PCM ne refait pas surface.
+    e.set_media_claim(video_node(&dom), 42, Some(vec!["avc1".into()]));
+    assert_eq!(
+        ev(
+            &mut e,
+            "var ctx=new AudioContext();\
+             var an=ctx.createAnalyser();\
+             var src=ctx.createMediaElementSource(document.getElementById('v'));\
+             src.connect(an);\
+             var u=new Uint8Array(an.frequencyBinCount);\
+             an.getByteFrequencyData(u);\
+             var mx=0;for(var i=0;i<u.length;i++)if(u[i]>mx)mx=u[i];mx"
+        ),
+        "0"
+    );
+}
+
+/// Étape 205 — `suspend()`/`close()` replacent `state` ;
+/// `"closed"` est terminal (`resume` n'y touche plus).
+#[test]
+fn ctx_state_transitions_suspend_close() {
+    let (mut e, _dom) = engine();
+    assert_eq!(
+        ev(&mut e, "var ctx=new AudioContext();ctx.state"),
+        "suspended"
+    );
+    assert_eq!(ev(&mut e, "ctx.resume();ctx.state"), "running");
+    assert_eq!(ev(&mut e, "ctx.suspend();ctx.state"), "suspended");
+    assert_eq!(ev(&mut e, "ctx.resume();ctx.state"), "running");
+    assert_eq!(ev(&mut e, "ctx.close();ctx.state"), "closed");
+    assert_eq!(ev(&mut e, "ctx.resume();ctx.state"), "closed");
 }
