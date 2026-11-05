@@ -10155,6 +10155,18 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   `el.listen`, cascade attachée),
   attachés jamais émis : l'émetteur
   ne tourne pas.
+- [x] **JS-C357. `unhandledrejection`
+  → `propagate_event`** (trou post-
+  C355 : l'event ne servait que
+  `__et`/`on*`, les listeners DOM de
+  la page le rataient — rejets de
+  boot-chain invisibles) + sonde
+  `promise.reject` nommant la
+  raison. Vol 659 : cascade `yt-*`
+  jamais construite → émetteur mort
+  en amont, rejet silencieux =
+  suspect résiduel. Verrou `c357`
+  3/3.
 
 ## Tâches continues
 

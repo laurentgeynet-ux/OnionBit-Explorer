@@ -824,6 +824,15 @@ impl Engine {
             reported += 1;
             self.unhandled_reports
                 .push(format!("unhandledrejection: {desc}"));
+            // Sonde §B-97 — nomme la raison d'un rejet
+            // silencieux de la boot-chain : un `.then`
+            // applicatif fautif tue l'émetteur `yt-*` sans
+            // laisser de trace dans le recensement events.
+            if let Some((dom, _)) = &self.dom_ctx {
+                if dom.borrow_mut().ce.probe_seen.insert(format!("pr:{desc}")) {
+                    tracing::info!(target: "dom_probe", site = "promise.reject", reason = %desc);
+                }
+            }
             // Event minimal spec (PromiseRejectionEvent).
             let ev = self.new_object();
             let ty = self.str_val("unhandledrejection");
@@ -857,6 +866,30 @@ impl Engine {
                         }
                     }
                 }
+            }
+            // JS-C357 — depuis JS-C355, `window.addEventListener`
+            // range dans `node.listeners` (racine DOM), plus dans
+            // `__et` : l'event doit traverser `propagate_event`
+            // sur la racine sinon les handlers de la page ne le
+            // voient jamais (trou de conformité — les rejets de
+            // la boot-chain restaient invisibles des deux côtés).
+            if let Some((dom, cache)) = self.dom_ctx.clone() {
+                let root = dom.borrow().root;
+                let state = crate::dom_host::make_event_state(
+                    "unhandledrejection",
+                    root,
+                    crate::dom_host::EventFlags {
+                        bubbles: true,
+                        cancelable: true,
+                        composed: false,
+                        trusted: true,
+                    },
+                    vec![("promise".to_string(), pv), ("reason".to_string(), reason)],
+                );
+                // Handlers qui jettent : avalés, jamais de
+                // casse du drain (même contrat que le rail
+                // `__et` ci-dessus).
+                let _ = self.propagate_event(&dom, &cache, &state);
             }
         }
         if same_desc > 0 {
