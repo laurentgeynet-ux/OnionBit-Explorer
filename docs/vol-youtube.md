@@ -57,13 +57,20 @@ usuel : `YOUTUBE`, `YTHOME`, `YTWATCH`, `YTEMBED`, `YTREVALID`.
 ```powershell
 # 1.1 worktree YouTube dédié — PERMANENT, jamais détruit
 #     entre les vols (créé une fois, réutilisé à chaque vol).
-#     Il vit détaché sur le HEAD mesuré de la campagne ; le
-#     worktree de dev principal et son WIP ne sont jamais
+#     Le worktree de dev principal et son WIP ne sont jamais
 #     touchés.
+#
+#     ⚠ VÉRIFICATION HEAD UNIQUEMENT AU DÉPART : relever les
+#     commits landés et choisir le sha à mesurer ne se font
+#     qu'au feu vert de l'opérateur — la campagne bouge entre
+#     deux vols (des JS-Cnnn peuvent lander à tout moment), un
+#     checkout anticipé fige un binaire déjà périmé. Entre deux
+#     vols, le worktree peut rester sur un vieux sha : normal.
 cd C:\OnionBit-Explorer-youtube-wt
 git status --short        # doit être propre — sinon, reset
 git fetch                 # si besoin
-git checkout <sha_campagne>   # HEAD à mesurer, détaché
+git log --oneline main..nav/youtube-fix   # commits landés — relevé AU DÉPART
+git checkout <sha_campagne>   # HEAD à mesurer, détaché — choisi au départ
 
 # 1.2 binaire frais — target-dir local au worktree dédié
 $env:CARGO_TARGET_DIR = "C:/OnionBit-Explorer-youtube-wt/target"
