@@ -1331,10 +1331,8 @@ pub(crate) fn note_declared_codecs(e: &mut Engine, codecs: &[String]) {
         // prise pour un codec nu (vol 177 : le claim en MIME
         // complet n'alimentait jamais la table →
         // `isTypeSupported(mime;codecs)` restait `""`).
-        let raw = match c.find("codecs=") {
-            Some(pos) => &c[pos + 7..],
-            None => c,
-        };
+        let owned = codecs_param(c);
+        let raw = owned.as_deref().unwrap_or(c);
         for part in raw.trim_matches(|ch| ch == '"' || ch == '\'').split(',') {
             let part = part.trim().trim_matches(|ch| ch == '"' || ch == '\'');
             // `video/mp4` nu (sans `codecs=`) = conteneur, pas un
@@ -1465,9 +1463,8 @@ fn media_can_play_type_verdict(e: &Engine, arg: &str) -> &'static str {
     if !known {
         return "";
     }
-    match mime.split("codecs=").nth(1) {
+    match codecs_param(&mime) {
         Some(cstr) => {
-            let cstr = cstr.trim_matches(|c| c == '"' || c == '\'');
             let all = cstr
                 .split(',')
                 .filter_map(codec_prefix)
@@ -1486,6 +1483,58 @@ fn media_can_play_type_verdict(e: &Engine, arg: &str) -> &'static str {
             }
         }
     }
+}
+
+/// Paramètre `codecs` d'un MIME RFC 6381 (§B-101, mur nommé au
+/// vol : les players sondent `…;codecs="vp9";height=360;
+/// framerate=…;eotf=…` — `split("codecs=")` avalait tout le
+/// reste de la chaîne dans la valeur → pseudo-codec
+/// `vp9";height=360` jamais déclaré → `""` sur les 242 sondes
+/// paramétrées). Scanne les `;name=value` avec valeurs
+/// quotées (`;` interne quoté ignoré), nom insensible à la
+/// casse, frontière stricte (`xcodecs=` ne matche pas). Les
+/// paramètres média hors `codecs` (height/framerate/bitrate/
+/// eotf/dvh/quality…) sont **ignorés** — ils n'invalident pas
+/// la capacité codec déclarée.
+fn codecs_param(mime: &str) -> Option<String> {
+    let b = mime.as_bytes();
+    let mut i = mime.find(';')? + 1;
+    while i < b.len() {
+        let ns = i;
+        while i < b.len() && b[i] != b'=' && b[i] != b';' {
+            i += 1;
+        }
+        let name = mime[ns..i].trim();
+        if i >= b.len() || b[i] == b';' {
+            i += 1;
+            continue;
+        }
+        i += 1;
+        let v = if i < b.len() && b[i] == b'"' {
+            i += 1;
+            let vs = i;
+            while i < b.len() && b[i] != b'"' {
+                i += 1;
+            }
+            let v = &mime[vs..i.min(b.len())];
+            i = (i + 1).min(b.len());
+            v
+        } else {
+            let vs = i;
+            while i < b.len() && b[i] != b';' {
+                i += 1;
+            }
+            mime[vs..i].trim()
+        };
+        if name.eq_ignore_ascii_case("codecs") {
+            return Some(v.to_string());
+        }
+        while i < b.len() && b[i] != b';' {
+            i += 1;
+        }
+        i += 1;
+    }
+    None
 }
 
 // ------------------------------------------------------------------

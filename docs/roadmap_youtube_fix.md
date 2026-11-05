@@ -287,8 +287,10 @@ flowchart TD
   - ✅ **Étape 207-ter livrée** (`d9654d83`) — `context_new` fait hériter le realm naissant de `declared_codecs` du parent au spawn (snapshot : capacité hôte plateforme-globale ; claims ultérieurs document-locaux). Verrous `etape207ter_child_ctx_inherits_declared_codecs` + `etape207ter_iframe_sees_host_declared_codecs` ; canaris iframe (40) + suites mse/ctx verts.
   - ✅ **Vol 649 — II.4-ter RÉSOLU** — `declared_n=13` dans le ctx iframe, verdicts honnêts (`maybe` chaînes complètes, `""` non-déclaré), plus d'écran « aucun format jouable » ; bootstrap embed vivant (`player_ias` 3 Mo évalué). `media_n=0` résiduel = stall aval §B-100-famille.
   - ⚠️ **Reste §B-100 (accueil + lecture)** — cascade `unhandledrejection` + `RangeError` `base.js:10855`, `mseOffsets=[0,0]` : suspect n°1 du stall SABR et de l'hydratation inachevée.
-  - ✅ **§B-95 fixé — JS-C345** (`20d041a0`) — `isTypeSupported` rend `"probably"` sur liste `codecs=` entièrement déclarée (verdict trois niveaux partagé avec `canPlayType`).
-  - ✅ **§B-94 fixé — JS-C346** — alias `vp9`/`h264`/`av1`/`hevc`/`aac`/`ac-3` → famille canonique (`codec_family`, deux bords) ; `eac3`/`ec-3`/`hvc1` négatifs honnêts. **À revalider en vol** (prochaine mesure `media_probe`).
+  - ✅ **§B-95 RÉSOLU EN VOL 650 — JS-C345** (`20d041a0`) — `isTypeSupported` rend `"probably"` sur liste `codecs=` entièrement déclarée (`vp09`/`avc1`/`opus`/`aac` → `probably` vs `maybe` avant).
+  - ✅ **§B-94 RÉSOLU EN VOL 650 — JS-C346** — alias `vp9`/`h264`/`av1`/`hevc`/`aac`/`ac-3` → `probably` (vs `""`), négatifs honnêts (`xyz9`/`av99` → `""`) ; idem dans le ctx iframe (`declared_n=13`, II.4-ter hold).
+  - ⚠️ **§B-101 nommé au vol 650 — paramètres MIME hors `codecs=`** : ~242 sondes paramétrées (`;height=360`/`framerate`/`bitrate`/`eotf`/`channels`) → `""` alors que la famille nue rend `probably` → table de formats inexploitable → `media_n=0`, rect noir embed. **Fix JS-C347 livré** (`codecs_param` RFC 6381 frontière stricte, deux bords) — à revalider en vol.
+  - ⚠️ **§B-100 stable au vol 650** — `mseOffsets=[0,0]` persiste : le stall vit dans la cascade JS (RangeError `base.js:10855`/rejections), pas dans la capacité codecs. Instrument de bissection embarqué (dump pile JS au dépassement `expr_depth`).
 
 ---
 

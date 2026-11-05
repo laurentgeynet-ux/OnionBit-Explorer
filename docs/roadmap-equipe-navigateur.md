@@ -10032,6 +10032,19 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   honnêts). Verrous
   `c346_codec_aliases` 3/3.
 
+- [x] **JS-C347. Tolérance paramètres
+  MIME hors `codecs=`** (§B-101, mur
+  nommé au vol 650 — `codecs="vp9";
+  height=360` → `""` sur les ~242
+  sondes paramétrées du player embed,
+  table de formats inexploitable) —
+  `codecs_param` parse les `;name=
+  value` RFC 6381 à frontière stricte
+  (quoted-string, casse, `xcodecs`
+  rejeté) aux deux bords ; params
+  média ignorés. Verrous
+  `c347_mime_params` 3/3.
+
 ## Tâches continues
 
 - **Spécialiste JS** : divergence miroir ↔ `explorer-dom` quand
