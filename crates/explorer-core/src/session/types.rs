@@ -330,12 +330,15 @@ pub enum MediaHostState {
 /// moteur. `None` = hôte sans télémétrie.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct MediaFrameStats {
-    /// Frames effectivement présentées → `totalVideoFrames`.
+    /// Frames effectivement présentées.
     pub presented: u64,
     /// Frames sautées → `droppedVideoFrames`.
     pub dropped: u64,
     /// Frames décodées (diagnostic — non exposé au JS).
     pub decoded: u64,
+    /// Fautes de conversion/présentation →
+    /// `corruptedVideoFrames`.
+    pub corrupted: u64,
     /// Retard cumulé de présentation (ms) → `totalFrameDelay`
     /// (secondes côté JS).
     pub total_delay_ms: f64,

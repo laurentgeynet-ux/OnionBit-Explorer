@@ -6735,6 +6735,31 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   render + core + api + ffi +
   contrôleur — 67/67 app verts.
 
+- [x] **Étape 189. Câblage hôte
+  du contrat dépôt codec (suite
+  JS-C334)** (`app/` +
+  `explorer-core`/`js`/`jscore`) :
+  `onionmedia_ffi` ABI 5 déployée
+  (`a89512e`, manifests partout) —
+  bindings gardés derrière porte
+  `abi_version()>=5` (lookups
+  conservés, doctrine dépôt) :
+  `fast_seek_ms`→`fastSeek`
+  (dispatch `seek`+`fast:true`),
+  `buffered_ranges` (CSV `s-e,s-e`
+  ms → `[[s,e],…]`), `frame_stats`
+  → `decoded` émis
+  `presented+dropped+corrupted`.
+  Contrat étendu additif :
+  `corrupted` tous étages →
+  `corruptedVideoFrames` réel ;
+  `totalVideoFrames` =
+  `presented+dropped` (convention
+  navigateur, doc dépôt). Verrous
+  : jscore `123|3|2|0.85`,
+  contrôleur fast → `fastSeeks`.
+  Suites 13/13 + 15/15 + 67/67.
+
 - [ ] **Écarts terrain — vol humain
   22/10 (release `39ab821`, FFI)** :
   second run humain — trois constats

@@ -546,12 +546,16 @@ pub enum JsMediaHostState {
 /// `frame_stats`) — sert `getVideoPlaybackQuality()`.
 #[derive(Debug, Clone, Copy)]
 pub struct JsMediaFrameStats {
-    /// Frames présentées → `totalVideoFrames`.
+    /// Frames présentées (`totalVideoFrames` =
+    /// `presented + dropped` — convention navigateur).
     pub presented: u64,
     /// Frames sautées → `droppedVideoFrames`.
     pub dropped: u64,
     /// Frames décodées (diagnostic, non exposé au JS).
     pub decoded: u64,
+    /// Fautes de conversion/présentation →
+    /// `corruptedVideoFrames`.
+    pub corrupted: u64,
     /// Retard cumulé de présentation (ms) → `totalFrameDelay`
     /// (secondes côté JS).
     pub total_delay_ms: f64,
@@ -4121,6 +4125,7 @@ fn media_report_of(r: JsMediaReport) -> explorer_jscore::MediaReport {
             presented: f.presented,
             dropped: f.dropped,
             decoded: f.decoded,
+            corrupted: f.corrupted,
             total_delay_ms: f.total_delay_ms,
         }),
     }

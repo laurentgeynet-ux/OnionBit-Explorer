@@ -351,6 +351,7 @@ class FakePlayer implements MediaPlayer {
 
   int plays = 0, pauses = 0, disposes = 0;
   Duration? seeked;
+  int fastSeeks = 0;
   double? rate;
   String state = 'paused';
   int positionMs = 0;
@@ -402,6 +403,11 @@ class FakePlayer implements MediaPlayer {
 
   @override
   Future<void> seekTo(Duration pos) async => seeked = pos;
+  @override
+  Future<void> fastSeek(Duration pos) async {
+    fastSeeks++;
+    seeked = pos;
+  }
   @override
   Future<void> setVolume(double v) async {
     _volume = v.clamp(0.0, 1.0);

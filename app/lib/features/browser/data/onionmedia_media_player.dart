@@ -56,6 +56,22 @@ final class _MseDesc extends ffi.Struct {
   external double ptsOffsetSecs;
 }
 
+/// Sortie `repr(C)` `OnionFrameStats` (onionmedia-ffi P-67,
+/// ABI 5) — `presented`/`dropped`/`corrupted` comptés depuis
+/// l'ouverture, `totalFrameDelaySecs` = retard cumulé vs
+/// l'horloge. `presented + dropped` = `totalVideoFrames`
+/// (convention navigateur, notée dans la doc DLL).
+final class _OnionFrameStats extends ffi.Struct {
+  @ffi.Uint64()
+  external int presented;
+  @ffi.Uint64()
+  external int dropped;
+  @ffi.Uint64()
+  external int corrupted;
+  @ffi.Double()
+  external double totalFrameDelaySecs;
+}
+
 /// Lecteur `onionmedia_ffi` (OnionMedia/OnionCodec — pur Rust, MIT/Apache)
 /// derrière la seam `MediaPlayer` (ADR-0024) — backend
 /// via FFI (`onionmedia_ffi.dll`). Les frames RGBA sont
@@ -186,6 +202,26 @@ class OnionMediaPlayer implements MediaPlayer {
   /// `-1` = infini (`<video loop>`).
   int Function(ffi.Pointer, int)? _setLoop;
 
+  /// `onionmedia_abi_version` — la DLL s'auto-identifie
+  /// (5 = surface P-63→P-71). Absente = socle ≤ ABI 4 :
+  /// le bloc ABI 5 entier est sauté d'un coup. Doctrine
+  /// dépôt : les symboles restent découverts par lookup —
+  /// la version borne, elle ne prouve pas.
+  int Function()? _abiVersion;
+
+  /// `onionmedia_fast_seek_ms` (P-68) — accoste à la
+  /// keyframe ≤ cible (approximation DOM `fastSeek`).
+  int Function(ffi.Pointer, int)? _fastSeek;
+
+  /// `onionmedia_buffered_ranges` (P-70) — filaire CSV
+  /// `s-e,s-e` en **ms**, contrat `copy_out_str`
+  /// (`buf NULL`/`0` → taille requise).
+  int Function(ffi.Pointer, ffi.Pointer<ffi.Char>, int)? _bufferedRanges;
+
+  /// `onionmedia_frame_stats` (P-67) — compteurs
+  /// `getVideoPlaybackQuality` dans un `OnionFrameStats`.
+  int Function(ffi.Pointer, ffi.Pointer<_OnionFrameStats>)? _frameStats;
+
   void _optionalBindings() {
     try {
       _acquire = _lib.lookupFunction<
@@ -257,6 +293,41 @@ class OnionMediaPlayer implements MediaPlayer {
     } on Object {
       _setLoop = null;
     }
+    // Porte ABI : `abi_version` elle-même se découvre —
+    // absente = socle ≤ 4, le bloc 5 est sauté entier.
+    try {
+      _abiVersion = _lib.lookupFunction<ffi.Uint32 Function(),
+          int Function()>('onionmedia_abi_version');
+    } on Object {
+      _abiVersion = null;
+    }
+    if ((_abiVersion?.call() ?? 0) >= 5) {
+      try {
+        _fastSeek = _lib.lookupFunction<
+            ffi.Int32 Function(ffi.Pointer, ffi.Int64),
+            int Function(ffi.Pointer, int)>('onionmedia_fast_seek_ms');
+      } on Object {
+        _fastSeek = null;
+      }
+      try {
+        _bufferedRanges = _lib.lookupFunction<
+            ffi.Int32 Function(
+                ffi.Pointer, ffi.Pointer<ffi.Char>, ffi.IntPtr),
+            int Function(ffi.Pointer, ffi.Pointer<ffi.Char>, int)>(
+            'onionmedia_buffered_ranges');
+      } on Object {
+        _bufferedRanges = null;
+      }
+      try {
+        _frameStats = _lib.lookupFunction<
+            ffi.Int32 Function(
+                ffi.Pointer, ffi.Pointer<_OnionFrameStats>),
+            int Function(ffi.Pointer, ffi.Pointer<_OnionFrameStats>)>(
+            'onionmedia_frame_stats');
+      } on Object {
+        _frameStats = null;
+      }
+    }
   }
 
   String _lastError() {
@@ -266,6 +337,63 @@ class OnionMediaPlayer implements MediaPlayer {
       return n > 0 ? String.fromCharCodes(buf.asTypedList(n)) : '';
     } finally {
       calloc.free(buf);
+    }
+  }
+
+  /// Contrat `copy_out_str` du dépôt (`buffered_ranges`,
+  /// `hw_codecs`…) : `buf NULL`/`0` → taille requise hors
+  /// NUL, sinon octets écrits hors NUL.
+  static String _copyOutStr(
+    int Function(ffi.Pointer<ffi.Char>, int) fn,
+  ) {
+    final need = fn(ffi.nullptr, 0);
+    if (need <= 0) return '';
+    final buf = calloc<ffi.Char>(need + 1);
+    try {
+      final n = fn(buf, need + 1);
+      return n > 0
+          ? String.fromCharCodes(buf.cast<ffi.Uint8>().asTypedList(n))
+          : '';
+    } finally {
+      calloc.free(buf);
+    }
+  }
+
+  /// `buffered_ranges` (P-70) — CSV `s-e,s-e` ms → paires.
+  /// Chaîne vide/export absent = `[]` (repli moteur
+  /// `[(0, buffered_ms)]`).
+  List<(int, int)> _readBufferedRanges() {
+    final fn = _bufferedRanges;
+    if (fn == null) return const [];
+    final wire = _copyOutStr((b, c) => fn(_h, b, c));
+    if (wire.isEmpty) return const [];
+    final out = <(int, int)>[];
+    for (final seg in wire.split(',')) {
+      final dash = seg.indexOf('-');
+      if (dash <= 0) continue;
+      final s = int.tryParse(seg.substring(0, dash));
+      final e = int.tryParse(seg.substring(dash + 1));
+      if (s != null && e != null && e > s) out.add((s, e));
+    }
+    return out;
+  }
+
+  /// `frame_stats` (P-67) — `null` sans l'export ou hors
+  /// lecture (le contrat distingue « absent » de « zéros »).
+  MediaFrameStats? _readFrameStats() {
+    final fn = _frameStats;
+    if (fn == null) return null;
+    final fs = calloc<_OnionFrameStats>(1);
+    try {
+      if (fn(_h, fs) != 0) return null;
+      return MediaFrameStats(
+        presented: fs.ref.presented,
+        dropped: fs.ref.dropped,
+        corrupted: fs.ref.corrupted,
+        totalDelaySecs: fs.ref.totalFrameDelaySecs,
+      );
+    } finally {
+      calloc.free(fs);
     }
   }
 
@@ -783,6 +911,8 @@ class OnionMediaPlayer implements MediaPlayer {
       durationMs: dur > 0 ? dur : null,
       state: state,
       error: _playerError(),
+      bufferedRanges: _readBufferedRanges(),
+      frameStats: _readFrameStats(),
     );
   }
 
@@ -797,6 +927,18 @@ class OnionMediaPlayer implements MediaPlayer {
   Future<void> pause() async => _qtavPause(_h);
   @override
   Future<void> seekTo(Duration pos) async => _qtavSeek(_h, pos.inMilliseconds);
+
+  /// `fastSeek` → `onionmedia_fast_seek_ms` (keyframe ≤
+  /// cible, P-68) ; repli seek précis sur DLL < ABI 5.
+  @override
+  Future<void> fastSeek(Duration pos) async {
+    final fn = _fastSeek;
+    if (fn != null) {
+      fn(_h, pos.inMilliseconds);
+    } else {
+      _qtavSeek(_h, pos.inMilliseconds);
+    }
+  }
   @override
   double get volume => _volume;
   @override

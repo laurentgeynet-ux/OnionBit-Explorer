@@ -708,6 +708,7 @@ fn js_report_of(report: &MediaReport) -> explorer_js::JsMediaReport {
             presented: f.presented,
             dropped: f.dropped,
             decoded: f.decoded,
+            corrupted: f.corrupted,
             total_delay_ms: f.total_delay_ms,
         }),
     }
@@ -1403,6 +1404,7 @@ pub fn media_report_from_json(v: &serde_json::Value) -> Option<MediaReport> {
             presented: fs.get("presented")?.as_u64().unwrap_or(0),
             dropped: fs.get("dropped")?.as_u64().unwrap_or(0),
             decoded: fs.get("decoded")?.as_u64().unwrap_or(0),
+            corrupted: fs.get("corrupted")?.as_u64().unwrap_or(0),
             total_delay_ms: fs.get("total_delay_ms")?.as_f64().unwrap_or(0.0),
         })
     });

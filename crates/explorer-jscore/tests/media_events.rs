@@ -340,25 +340,28 @@ fn media_frame_stats_feeds_video_playback_quality() {
         ev(
             &mut e,
             "var q=v.getVideoPlaybackQuality();\
-             q.totalVideoFrames+'|'+q.droppedVideoFrames+'|'+q.totalFrameDelay"
+             q.totalVideoFrames+'|'+q.droppedVideoFrames+'|'+q.corruptedVideoFrames+'|'+q.totalFrameDelay"
         ),
-        "0|0|0"
+        "0|0|0|0"
     );
     let mut r = rep(0, 60_000, 1_000, MediaState::Playing);
     r.frame_stats = Some(explorer_jscore::MediaFrameStats {
         presented: 120,
         dropped: 3,
         decoded: 123,
+        corrupted: 2,
         total_delay_ms: 850.0,
     });
     e.deliver_media_state(node, &r).expect("report");
+    // `totalVideoFrames` = presented+dropped (convention
+    // navigateur — la doc FFI dépôt le note explicitement).
     assert_eq!(
         ev(
             &mut e,
             "var q=v.getVideoPlaybackQuality();\
-             q.totalVideoFrames+'|'+q.droppedVideoFrames+'|'+q.totalFrameDelay"
+             q.totalVideoFrames+'|'+q.droppedVideoFrames+'|'+q.corruptedVideoFrames+'|'+q.totalFrameDelay"
         ),
-        "120|3|0.85"
+        "123|3|2|0.85"
     );
 }
 

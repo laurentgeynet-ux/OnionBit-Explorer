@@ -352,6 +352,9 @@ void main() {
       {'type': 'play'},
       {'type': 'pause'},
       {'type': 'seek', 'ms': 1500},
+      // `fast:true` = `v.fastSeek()` (JS-C334) → `fastSeek`,
+      // jamais le seek précis.
+      {'type': 'seek', 'ms': 2500, 'fast': true},
       {'type': 'volume', 'v': 0.4},
       {'type': 'muted', 'on': true},
       {'type': 'rate', 'r': 1.5},
@@ -364,7 +367,8 @@ void main() {
     await Future<void>.delayed(Duration.zero);
     expect(p.plays, 1);
     expect(p.pauses, 1);
-    expect(p.seeked, const Duration(milliseconds: 1500));
+    expect(p.seeked, const Duration(milliseconds: 2500));
+    expect(p.fastSeeks, 1);
     expect(p.volume, 0.4);
     expect(p.muted, isTrue);
     expect(p.rate, 1.5);

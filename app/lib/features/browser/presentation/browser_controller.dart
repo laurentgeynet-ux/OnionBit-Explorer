@@ -1428,8 +1428,13 @@ class BrowserController extends Notifier<BrowserState> {
       case 'pause':
         unawaited(p.pause());
       case 'seek':
+        final ms = (cmd['ms'] as num?)?.toInt() ?? 0;
+        // `fast:true` = `v.fastSeek()` JS (JS-C334) → seek
+        // approximatif keyframe ≤ cible ; précis sinon.
         unawaited(
-          p.seekTo(Duration(milliseconds: (cmd['ms'] as num?)?.toInt() ?? 0)),
+          cmd['fast'] == true
+              ? p.fastSeek(Duration(milliseconds: ms))
+              : p.seekTo(Duration(milliseconds: ms)),
         );
       case 'volume':
         unawaited(p.setVolume((cmd['v'] as num?)?.toDouble() ?? 1.0));
