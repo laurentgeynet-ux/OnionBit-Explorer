@@ -10019,6 +10019,19 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   `probably`) ; verrous
   `c345_its_probably` 2/2.
 
+- [x] **JS-C346. Alias de codecs
+  (`vp9`/`h264`/`av1`/`aac`…)** (§B-94,
+  vols YouTube — `codecs="vp9"` → `""`
+  table `vp09` déclarée, mesuré au
+  `media_probe` du vol 649) —
+  `codec_family` mappe les noms courts
+  vers le préfixe canonique, appliquée
+  **aux deux bords** (déclaration et
+  requête) ; `eac3`/`ec-3` ≠ `ac3`,
+  `hvc1` distinct d'`hev1` (négatifs
+  honnêts). Verrous
+  `c346_codec_aliases` 3/3.
+
 ## Tâches continues
 
 - **Spécialiste JS** : divergence miroir ↔ `explorer-dom` quand

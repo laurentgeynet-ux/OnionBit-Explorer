@@ -286,7 +286,9 @@ flowchart TD
   - ⚠️ **Vol 648 — mur déplacé : II.4-ter** — `MediaSource.isTypeSupported`/`canPlayType` rendaient `""` sur tous les formats dans le ctx iframe (`declared_n=0` vs 13 au parent) : la table `declared_codecs` est garée par contexte et chaque `Context` naît vide → embed « aucun format jouable ».
   - ✅ **Étape 207-ter livrée** (`d9654d83`) — `context_new` fait hériter le realm naissant de `declared_codecs` du parent au spawn (snapshot : capacité hôte plateforme-globale ; claims ultérieurs document-locaux). Verrous `etape207ter_child_ctx_inherits_declared_codecs` + `etape207ter_iframe_sees_host_declared_codecs` ; canaris iframe (40) + suites mse/ctx verts.
   - ✅ **Vol 649 — II.4-ter RÉSOLU** — `declared_n=13` dans le ctx iframe, verdicts honnêts (`maybe` chaînes complètes, `""` non-déclaré), plus d'écran « aucun format jouable » ; bootstrap embed vivant (`player_ias` 3 Mo évalué). `media_n=0` résiduel = stall aval §B-100-famille.
-  - ⚠️ **Reste §B-100 (accueil + lecture)** — cascade `unhandledrejection` + `RangeError` `base.js:10855`, `mseOffsets=[0,0]` : suspect n°1 du stall SABR et de l'hydratation inachevée. Et §B-94 (alias `vp9`→`""` table pleine) + §B-95 (`probably` jamais rendu par `isTypeSupported`).
+  - ⚠️ **Reste §B-100 (accueil + lecture)** — cascade `unhandledrejection` + `RangeError` `base.js:10855`, `mseOffsets=[0,0]` : suspect n°1 du stall SABR et de l'hydratation inachevée.
+  - ✅ **§B-95 fixé — JS-C345** (`20d041a0`) — `isTypeSupported` rend `"probably"` sur liste `codecs=` entièrement déclarée (verdict trois niveaux partagé avec `canPlayType`).
+  - ✅ **§B-94 fixé — JS-C346** — alias `vp9`/`h264`/`av1`/`hevc`/`aac`/`ac-3` → famille canonique (`codec_family`, deux bords) ; `eac3`/`ec-3`/`hvc1` négatifs honnêts. **À revalider en vol** (prochaine mesure `media_probe`).
 
 ---
 

@@ -1352,13 +1352,34 @@ pub(crate) fn note_declared_codecs(e: &mut Engine, codecs: &[String]) {
 /// Préfixe codec normalisé : `avc1.42E01E`→`avc1`,
 /// `vp09.00.10.08`→`vp09`, `mp4a.40.2`→`mp4a` — la famille
 /// suffit au matching déclaré (profil/niveau = affinement).
+/// Les noms courts passent par [`codec_family`] (§B-94).
 fn codec_prefix(s: &str) -> Option<String> {
     let base = s.trim();
     let p = base.split('.').next()?.trim();
     if p.is_empty() {
         return None;
     }
-    Some(p.to_ascii_lowercase())
+    Some(codec_family(&p.to_ascii_lowercase()).to_string())
+}
+
+/// Famille courte → préfixe canonique (§B-94, JS-C346) : les
+/// players sondent `vp9`/`h264`/`av1`/`aac`/`ac-3` pour les
+/// familles déclarées `vp09`/`avc1`/`av01`/`mp4a`/`ac3` — la
+/// résolution s'applique aux deux bords (déclaration **et**
+/// requête) pour rester symétrique. `eac3`/`ec-3` n'est PAS
+/// `ac3` (codec différent — négatif honnête) ; `hvc1` garde
+/// son identité (param-carriage distinct d'`hev1`).
+fn codec_family(fam: &str) -> &str {
+    match fam {
+        "vp9" => "vp09",
+        "vp8" => "vp08",
+        "av1" => "av01",
+        "h264" | "avc" | "avc3" => "avc1",
+        "h265" | "hevc" => "hev1",
+        "aac" => "mp4a",
+        "ac-3" => "ac3",
+        _ => fam,
+    }
 }
 
 /// `MediaSource.isTypeSupported(mime)` — MSE-4 : pilote par
