@@ -371,6 +371,11 @@ class FakePlayer implements MediaPlayer {
   int selectedAudio = -2;
   int selectedSub = -2;
 
+  /// Étape 197 — chapitres injectables.
+  List<MediaChapter> chapters = const [];
+  int chapterIdx = -1;
+  int seekedChapter = -1;
+
   void notify() {
     for (final l in List.of(_listeners)) {
       l();
@@ -391,6 +396,8 @@ class FakePlayer implements MediaPlayer {
     audioTrack: audioTrack,
     subtitleTrack: subTrack,
     subtitle: subtitle,
+    chapters: chapters,
+    chapter: chapterIdx,
   );
 
   @override
@@ -449,6 +456,13 @@ class FakePlayer implements MediaPlayer {
   Future<void> selectSubtitleStream(int index) async {
     selectedSub = index;
     subTrack = index >= 0 ? index : -1;
+    notify();
+  }
+
+  @override
+  Future<void> seekChapter(int index) async {
+    seekedChapter = index;
+    chapterIdx = index;
     notify();
   }
 

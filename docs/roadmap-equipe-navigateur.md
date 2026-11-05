@@ -6883,10 +6883,14 @@ incrément.
   sémantique `subtitle_text`
   (`lib.rs` dépôt).
 
-- [ ] **Étape 197. Chapitres**
+- [x] **Étape 197. Chapitres**
   (`app/` + `media_controls`) :
-  `chapter_count`/`seek_chapter` →
-  prev/next + liste. Effort faible.
+  `chapter_count`/`start_ms`/`end_ms`/
+  `title`/`current_chapter`/`seek_chapter`
+  (paquet gardé pré-5) → `snapshot.
+  {chapters,chapter}` UI-side →
+  prev/next bornés + menu `hh:mm —
+  titre` coché. Verrou widget. 73/73.
 
 - [ ] **Étape 198. `can_play_type`
   oracle → `mediaCodecs` dynamique**

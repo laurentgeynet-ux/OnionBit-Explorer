@@ -470,6 +470,50 @@ class _TracksMenuButton extends StatelessWidget {
   }
 }
 
+/// Menu chapitres (Étape 197) — liste `hh:mm — titre`,
+/// coche sur le chapitre courant (`current_chapter`).
+class _ChaptersMenuButton extends StatelessWidget {
+  const _ChaptersMenuButton({
+    required this.snap,
+    required this.player,
+    required this.onSurface,
+  });
+
+  final MediaSnapshot snap;
+  final MediaPlayer player;
+  final Color onSurface;
+
+  @override
+  Widget build(BuildContext context) => PopupMenuButton<int>(
+        tooltip: 'Chapitres',
+        icon: Icon(Icons.bookmark_border, color: onSurface, size: 20),
+        iconSize: 20,
+        onSelected: (i) => player.seekChapter(i),
+        itemBuilder: (context) => [
+          for (final c in snap.chapters)
+            PopupMenuItem(
+              value: c.index,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.bookmark, size: 16),
+                  const SizedBox(width: 8),
+                  Flexible(
+                    child: Text(
+                      '${MediaControlsBar.fmtTime(c.startMs)} — ${c.label}',
+                    ),
+                  ),
+                  if (c.index == snap.chapter) ...[
+                    const SizedBox(width: 8),
+                    const Icon(Icons.check, size: 16),
+                  ],
+                ],
+              ),
+            ),
+        ],
+      );
+}
+
 /// Barre de contrôles native — play/pause, position,
 /// progression (piste secondaire = bufferisé), durée ou
 /// badge DIRECT, volume + mute. `player == null` (claim en
@@ -620,6 +664,38 @@ class MediaControlsBar extends StatelessWidget {
             fmtTime(durMs),
             style: TextStyle(color: onSurface, fontSize: 12),
           ),
+        // Chapitres (Étape 197) — prev/next bornés + liste
+        // titrée ; le trio n'apparaît qu'avec `chapters`
+        // non vide (hôte sans `chapter_*` → barre inchangée).
+        if (s != null && s.chapters.isNotEmpty && player != null) ...[
+          IconButton(
+            visualDensity: compact,
+            iconSize: 20,
+            style: IconButton.styleFrom(foregroundColor: onSurface),
+            icon: const Icon(Icons.skip_previous),
+            tooltip: 'Chapitre précédent',
+            onPressed: () => player!.seekChapter(
+              s.chapter > 0 ? s.chapter - 1 : 0,
+            ),
+          ),
+          IconButton(
+            visualDensity: compact,
+            iconSize: 20,
+            style: IconButton.styleFrom(foregroundColor: onSurface),
+            icon: const Icon(Icons.skip_next),
+            tooltip: 'Chapitre suivant',
+            onPressed: () => player!.seekChapter(
+              s.chapter + 1 < s.chapters.length
+                  ? s.chapter + 1
+                  : s.chapters.length - 1,
+            ),
+          ),
+          _ChaptersMenuButton(
+            snap: s,
+            player: player!,
+            onSurface: onSurface,
+          ),
+        ],
         // Menu pistes (Étape 196) — audio + sous-titres du
         // conteneur, coche sur l'entrée active ; absent quand
         // `tracks` est vide (hôte sans `stream_*`).

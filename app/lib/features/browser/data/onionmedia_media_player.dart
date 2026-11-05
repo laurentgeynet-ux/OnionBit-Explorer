@@ -227,9 +227,21 @@ class OnionMediaPlayer implements MediaPlayer {
   int Function(ffi.Pointer, int)? _setSubStream;
   int Function(ffi.Pointer, ffi.Pointer<ffi.Char>, int)? _subText;
 
+  /// Famille `chapter_*` (Étape 197 — même vintage pré-5).
+  int Function(ffi.Pointer)? _chapterCount;
+  int Function(ffi.Pointer, int)? _chapterStartMs;
+  int Function(ffi.Pointer, int)? _chapterEndMs;
+  int Function(ffi.Pointer, int, ffi.Pointer<ffi.Char>, int)?
+      _chapterTitle;
+  int Function(ffi.Pointer)? _currentChapter;
+  int Function(ffi.Pointer, int)? _seekChapter;
+
   /// Pistes lues à l'open (statiques pour un conteneur) —
   /// `stream_*` absents → vide (menu masqué).
   List<MediaTrack> _tracks = const [];
+
+  /// Chapitres — même régime de lecture que [_tracks].
+  List<MediaChapter> _chapters = const [];
 
   /// `onionmedia_abi_version` — la DLL s'auto-identifie
   /// (5 = surface P-63→P-71). Absente = socle ≤ ABI 4 :
@@ -401,13 +413,39 @@ class OnionMediaPlayer implements MediaPlayer {
               ffi.Pointer, ffi.Pointer<ffi.Char>, ffi.IntPtr),
           int Function(ffi.Pointer, ffi.Pointer<ffi.Char>, int)>(
           'onionmedia_subtitle_text');
+      _chapterCount = _lib.lookupFunction<
+          ffi.Int32 Function(ffi.Pointer), int Function(ffi.Pointer)>(
+          'onionmedia_chapter_count');
+      _chapterStartMs = _lib.lookupFunction<
+          ffi.Int64 Function(ffi.Pointer, ffi.Int32),
+          int Function(ffi.Pointer, int)>(
+          'onionmedia_chapter_start_ms');
+      _chapterEndMs = _lib.lookupFunction<
+          ffi.Int64 Function(ffi.Pointer, ffi.Int32),
+          int Function(ffi.Pointer, int)>(
+          'onionmedia_chapter_end_ms');
+      _chapterTitle = _lib.lookupFunction<
+          ffi.Int32 Function(ffi.Pointer, ffi.Int32,
+              ffi.Pointer<ffi.Char>, ffi.IntPtr),
+          int Function(ffi.Pointer, int, ffi.Pointer<ffi.Char>,
+              int)>('onionmedia_chapter_title');
+      _currentChapter = _lib.lookupFunction<
+          ffi.Int32 Function(ffi.Pointer), int Function(ffi.Pointer)>(
+          'onionmedia_current_chapter');
+      _seekChapter = _lib.lookupFunction<
+          ffi.Int32 Function(ffi.Pointer, ffi.Int32),
+          int Function(ffi.Pointer, int)>(
+          'onionmedia_seek_chapter');
     } on Object {
       // Lookup en paquet : un symbole manquant de la
       // famille laisse le reste null (menu masqué).
       _streamCount = _streamKind = _streamDispos =
           _streamCodec = _streamLang = _streamTitle =
               _audioStreamCur = _subStreamCur =
-                  _setAudioStream = _setSubStream = _subText = null;
+                  _setAudioStream = _setSubStream = _subText =
+                      _chapterCount = _chapterStartMs =
+                          _chapterEndMs = _chapterTitle =
+                              _currentChapter = _seekChapter = null;
     }
     // Porte ABI : `abi_version` elle-même se découvre —
     // absente = socle ≤ 4, le bloc 5 est sauté entier.
@@ -646,6 +684,42 @@ class OnionMediaPlayer implements MediaPlayer {
     ];
   }
 
+  /// Chapitres courants — même relecture paresseuse que
+  /// [_tracksLive] (table peuplée après `open_*` sur MSE).
+  List<MediaChapter> get _chaptersLive {
+    if (_chapters.isEmpty) _refreshChapters();
+    return _chapters;
+  }
+
+  /// Table des chapitres (`chapter_*`) — `end_ms` `-1` =
+  /// non déclarée par le conteneur, titre `''` = anonyme.
+  void _refreshChapters() {
+    final fn = _chapterCount;
+    if (fn == null) {
+      _chapters = const [];
+      return;
+    }
+    final n = fn(_h);
+    if (n <= 0) {
+      _chapters = const [];
+      return;
+    }
+    _chapters = [
+      for (var i = 0; i < n; i++)
+        MediaChapter(
+          index: i,
+          startMs: _chapterStartMs?.call(_h, i) ?? -1,
+          endMs: _chapterEndMs?.call(_h, i) ?? -1,
+          title: _pullIdxStr(_chapterTitle, i),
+        ),
+    ];
+  }
+
+  @override
+  Future<void> seekChapter(int index) async {
+    _seekChapter?.call(_h, index);
+  }
+
   @override
   Future<void> selectAudioStream(int index) async {
     _setAudioStream?.call(_h, index);
@@ -867,6 +941,7 @@ class OnionMediaPlayer implements MediaPlayer {
           ? p._qtavOpenUrl(h, c, bytes.length)
           : p._qtavOpenPath(h, c, bytes.length);
       p._refreshTracks();
+      p._refreshChapters();
       calloc.free(c);
       if (rc != 0) {
         throw StateError('onionmedia_open: ${p._playerError() ?? p._lastError()}');
@@ -1308,6 +1383,8 @@ class OnionMediaPlayer implements MediaPlayer {
       audioTrack: _audioStreamCur?.call(_h) ?? -1,
       subtitleTrack: _subStreamCur?.call(_h) ?? -1,
       subtitle: _readSubtitleText(),
+      chapters: _chaptersLive,
+      chapter: _currentChapter?.call(_h) ?? -1,
     );
   }
 

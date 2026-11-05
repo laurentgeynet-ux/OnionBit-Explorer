@@ -67,6 +67,26 @@ class MediaTrack {
               : '#$index';
 }
 
+/// Chapitre du conteneur (Étape 197) — `startMs`/`endMs` en
+/// ms (`endMs < 0` = fin non déclarée par le conteneur),
+/// `title` `''` si anonyme. UI-side : hors `MediaReport`.
+class MediaChapter {
+  const MediaChapter({
+    required this.index,
+    required this.startMs,
+    this.endMs = -1,
+    this.title = '',
+  });
+
+  final int index;
+  final int startMs;
+  final int endMs;
+  final String title;
+
+  /// Étiquette de menu : titre > rang humain (`#1`-base).
+  String get label => title.isNotEmpty ? title : '#${index + 1}';
+}
+
 /// Instantané de lecture rapporté au moteur — contrat
 /// `MediaReport` (étape 71, `docs/interface-equipes.md`) :
 /// `position_ms`/`buffered_ms`/`duration_ms` entiers,
@@ -86,6 +106,8 @@ class MediaSnapshot {
     this.audioTrack = -1,
     this.subtitleTrack = -1,
     this.subtitle = '',
+    this.chapters = const [],
+    this.chapter = -1,
   });
 
   final int positionMs;
@@ -120,6 +142,14 @@ class MediaSnapshot {
   /// `subtitle_text` — fichier externe activé ou voie
   /// embarquée) ; `''` = rien à afficher.
   final String subtitle;
+
+  /// Chapitres du conteneur (lus à l'open comme [tracks]) —
+  /// vide si l'hôte n'expose pas `chapter_*`.
+  final List<MediaChapter> chapters;
+
+  /// Index du chapitre à la position courante — `-1` hors
+  /// lecture, sans chapitres ou hôte sans getter.
+  final int chapter;
 
   /// Fin du segment de cache contenant la tête de lecture
   /// (barre « buffered » — l'extent *contigu en avance*,
@@ -222,6 +252,10 @@ abstract class MediaPlayer {
   /// sélection = no-op d'affichage (doc dépôt). No-op sans
   /// l'export.
   Future<void> selectSubtitleStream(int index);
+
+  /// Saut au chapitre `index` (`onionmedia_seek_chapter` —
+  /// seek au `start_ms` du chapitre). No-op sans l'export.
+  Future<void> seekChapter(int index);
   Future<void> dispose();
 }
 

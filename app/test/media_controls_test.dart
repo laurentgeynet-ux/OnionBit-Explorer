@@ -351,4 +351,31 @@ void main() {
     expect(p.selectedAudio, 1);
     expect(p.audioTrack, 1);
   });
+
+  testWidgets('197 — menu chapitres + prev/next bornés', (
+    tester,
+  ) async {
+    final (:c, :p) = await pumpSurface(tester);
+    p
+      ..chapters = const [
+        MediaChapter(index: 0, startMs: 0, endMs: 60000, title: 'Intro'),
+        MediaChapter(index: 1, startMs: 60000, title: 'Combat'),
+      ]
+      ..chapterIdx = 0
+      ..notify();
+    await tester.pump();
+    // Prev borné à 0, next avance.
+    await tester.tap(find.byIcon(Icons.skip_previous));
+    await tester.pump();
+    expect(p.seekedChapter, 0);
+    await tester.tap(find.byIcon(Icons.skip_next));
+    await tester.pump();
+    expect(p.seekedChapter, 1);
+    // Liste titrée + coche courante.
+    await tester.tap(find.byIcon(Icons.bookmark_border));
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(find.text('0:00 — Intro'), findsOneWidget);
+    expect(find.text('1:00 — Combat'), findsOneWidget);
+  });
 }
