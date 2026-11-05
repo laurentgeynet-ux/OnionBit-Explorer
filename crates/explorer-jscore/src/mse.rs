@@ -1325,13 +1325,30 @@ fn mse_type_supported(e: &Engine, mime: &str) -> bool {
         }
 }
 
+/// Trace de mesure (Étape 202) — chaque interrogation MIME
+/// `isTypeSupported`/`canPlayType` est journalisée avec son
+/// verdict pour le vol corpus : `RUST_LOG=media_probe=info`
+/// collecte la couverture réelle vs `mediaCodecProbes` de
+/// l'app. `declared_n` = taille de la table d'hôte au moment
+/// de la requête (course claim/feature-detect visible).
+fn media_probe_log(site: &str, mime: &str, verdict: &str, declared_n: usize) {
+    tracing::info!(target: "media_probe", site, %mime, verdict, declared_n);
+}
+
 fn ms_is_type_supported(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     let mime = e.to_js_string(args.first().copied().unwrap_or(Value::Undefined))?;
-    Ok(e.str_val(if mse_type_supported(e, &mime) {
+    let verdict = if mse_type_supported(e, &mime) {
         "maybe"
     } else {
         ""
-    }))
+    };
+    media_probe_log(
+        "mse.isTypeSupported",
+        &mime,
+        verdict,
+        e.mse.declared_codecs.len(),
+    );
+    Ok(e.str_val(verdict))
 }
 
 /// `HTMLMediaElement.canPlayType(mime)` (§B-82) — même table
@@ -1348,6 +1365,17 @@ fn ms_is_type_supported(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<V
 /// d'attach des players — dash.js/shaka — interroge
 /// l'élément *avant* tout claim).
 pub(crate) fn media_can_play_type(e: &Engine, arg: &str) -> &'static str {
+    let verdict = media_can_play_type_verdict(e, arg);
+    media_probe_log(
+        "media.canPlayType",
+        arg,
+        verdict,
+        e.mse.declared_codecs.len(),
+    );
+    verdict
+}
+
+fn media_can_play_type_verdict(e: &Engine, arg: &str) -> &'static str {
     let mime = arg.trim().to_ascii_lowercase();
     let container = mime.split(';').next().unwrap_or("").trim();
     let known = matches!(

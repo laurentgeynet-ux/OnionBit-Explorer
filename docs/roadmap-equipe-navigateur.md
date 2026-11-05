@@ -6944,6 +6944,55 @@ incrément.
   derrière gate + vol mesuré.
 - 200 : architecture, pas binding.
 
+#### File — suites des découvertes (201-204)
+
+- [ ] **Étape 201. `_onNotify` : diff
+  structurel** (`app/`) — la whitelist
+  manuelle corrigée en 199 est un
+  *pattern* : tout champ snapshot
+  additif doit être pensé pour le diff.
+  `uiEquals`/`==` complet sur les champs
+  UI → `_onNotify` compare par valeur ;
+  le quantizeur pos/buf 4 Hz reste.
+  Verrou : un champ UI oublié devient
+  impossible par construction.
+- [~] **Étape 202. Mesure
+  `mediaCodecProbes` corpus** — [x]
+  instrumentation `tracing::info!`
+  cible `media_probe` aux deux
+  verdicts jscore (mime + verdict +
+  `declared_n`) ; [ ] vol corpus
+  (YouTube/Twitch/Dailymotion/IPTV,
+  `RUST_LOG=media_probe=info`) →
+  ajustement `AppConfig.mediaCodecProbes`
+  (config seule).
+- [ ] **Étape 203. `frame_step`/
+  `frame_back_step`** — filaire
+  **déjà livré** (cmd! macro,
+  exports + DLLs déployées — la note
+  199 « absents » était un faux
+  négatif de grep, symbole généré
+  par macro). Travail = NAV :
+  `stepFrame(dir)` + `,`/`.` +
+  `Isolate.run` + `_stepQueue` +
+  dispose-tracked ; durcissement
+  dépôt perf : test filaire +
+  `--step` probe + doc ABI.
+  **Implémenté par l'utilisateur.**
+- [ ] **Étape 204. `AUDIO_MODE_TAP=2`**
+  (dépôt perf → NAV) — ADR-0032
+  phases 1-3 : tee cpal+pull file,
+  canal REST PCM, jscore
+  `AnalyserNode`. Gros incrément
+  multi-couches, à re-planifier.
+- Inventaire à activation différée
+  (existants, pas de consommateur) :
+  `set_ab_loop`, `set_subtitle_delay`,
+  `subtitle_load`, `subtitle_enabled`,
+  `set_sync_threshold`,
+  `set_drop_threshold`,
+  `set_bandwidth_max`.
+
 - [ ] **Écarts terrain — vol humain
   22/10 (release `39ab821`, FFI)** :
   second run humain — trois constats
