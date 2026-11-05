@@ -6367,9 +6367,7 @@ fn media_call_claimed(
             e.set_own(
                 o,
                 "totalVideoFrames",
-                Value::Num(fs.map_or(0.0, |f| {
-                    (f.presented + f.dropped) as f64
-                })),
+                Value::Num(fs.map_or(0.0, |f| (f.presented + f.dropped) as f64)),
                 true,
             );
             e.set_own(

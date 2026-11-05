@@ -272,6 +272,7 @@ pub enum MediaPreload {
 impl MediaPreload {
     /// Parse la valeur d'attribut — inconnu/absent → `Auto`
     /// (missing-value default de la spec).
+    #[must_use]
     pub fn parse(v: Option<&str>) -> Self {
         match v {
             Some("metadata") => Self::Metadata,
@@ -281,6 +282,7 @@ impl MediaPreload {
     }
 
     /// Forme filaire (offre JSON + SSE).
+    #[must_use]
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Auto => "auto",
