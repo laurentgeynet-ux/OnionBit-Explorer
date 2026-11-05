@@ -5143,16 +5143,7 @@ impl Host for DocumentHost {
                 let f = arg(args, 1);
                 let capture = e.to_boolean(arg(args, 2));
                 if e.is_callable(f) {
-                    // Sonde §B-97 — recensement premier-par-type.
-                    if self
-                        .dom
-                        .borrow_mut()
-                        .ce
-                        .probe_seen
-                        .insert(format!("ls:{ty}"))
-                    {
-                        tracing::info!(target: "dom_probe", site = "el.listen", ty = %ty);
-                    }
+                    probe_el_listen(&self.dom, &ty);
                     let root = self.dom.borrow().root;
                     self.dom.borrow_mut().nodes[root as usize]
                         .listeners
@@ -5171,6 +5162,7 @@ impl Host for DocumentHost {
                 Ok(Some(Value::Undefined))
             }
             "dispatchEvent" => {
+                probe_ev_try(e, &self.dom, arg(args, 0));
                 let root = self.dom.borrow().root;
                 let Some(state) = event_state_of(e, root, &self.dom, &self.cache, arg(args, 0))?
                 else {
@@ -8327,16 +8319,7 @@ impl Host for NodeHost {
                 let f = arg(args, 1);
                 let capture = e.to_boolean(arg(args, 2));
                 if e.is_callable(f) {
-                    // Sonde §B-97 — recensement premier-par-type.
-                    if self
-                        .dom
-                        .borrow_mut()
-                        .ce
-                        .probe_seen
-                        .insert(format!("ls:{ty}"))
-                    {
-                        tracing::info!(target: "dom_probe", site = "el.listen", ty = %ty);
-                    }
+                    probe_el_listen(&self.dom, &ty);
                     self.dom.borrow_mut().nodes[node as usize]
                         .listeners
                         .push((ty, f, capture));
@@ -8354,6 +8337,7 @@ impl Host for NodeHost {
             }
             // `el.dispatchEvent(ev)` — EventHost or plain {type:…}.
             "dispatchEvent" => {
+                probe_ev_try(e, &self.dom, arg(args, 0));
                 let Some(state) = event_state_of(e, node, &self.dom, &self.cache, arg(args, 0))?
                 else {
                     return Err(e.type_error("dispatchEvent: not an event"));
@@ -12029,10 +12013,7 @@ fn win_add_event_listener(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult
     let capture = e.to_boolean(arg(args, 2));
     if e.is_callable(f) {
         if let Some((dom, _)) = &e.dom_ctx {
-            // Sonde §B-97 — recensement premier-par-type.
-            if dom.borrow_mut().ce.probe_seen.insert(format!("ls:{ty}")) {
-                tracing::info!(target: "dom_probe", site = "el.listen", ty = %ty);
-            }
+            probe_el_listen(dom, &ty);
             let root = dom.borrow().root;
             dom.borrow_mut().nodes[root as usize]
                 .listeners
@@ -12063,6 +12044,7 @@ fn win_dispatch_event(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Val
     let Some((dom, cache)) = e.dom_ctx.clone() else {
         return Ok(Value::Bool(false));
     };
+    probe_ev_try(e, &dom, arg(args, 0));
     let root = dom.borrow().root;
     let Some(state) = event_state_of(e, root, &dom, &cache, arg(args, 0))? else {
         return Ok(Value::Bool(false));
@@ -12301,6 +12283,15 @@ fn media_el_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
 /// le chemin `[[Construct]]` générique (JS-C56).
 fn event_ctor(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let ty = e.to_js_string(arg(args, 0))?;
+    // Sonde §B-97 — `ev.new` : events créés (tous ctors — les
+    // sous-classes délèguent ici). `ev.new` présent + `ev.try`
+    // absent = event construit mais `dispatchEvent` jamais
+    // appelé → l'émetteur meurt entre les deux.
+    if let Some((dom, _)) = &e.dom_ctx {
+        if !ty.is_empty() && dom.borrow_mut().ce.probe_seen.insert(format!("new:{ty}")) {
+            tracing::info!(target: "dom_probe", site = "ev.new", ty = %ty);
+        }
+    }
     let init = arg(args, 1);
     // `init` est un dictionnaire IDL : `undefined`/`null` → vide,
     // objet → lu, autre primitif → TypeError (spec WebIDL).
@@ -12972,6 +12963,58 @@ fn et_dom_target(e: &mut Engine, this: Value, dom: &DomRef) -> Option<NodeId> {
     node_for_in(e, this, dom)
 }
 
+/// `type` d'un event pour la sonde `ev.try` — `EventHost`
+/// (`state.ty`) ou objet literal (`type` lu sans invoquer de
+/// code utilisateur : `Value::Str` direct seulement).
+fn probe_event_ty(e: &mut Engine, v: Value) -> Option<String> {
+    let Value::Obj(id) = v else {
+        return None;
+    };
+    if let Some(ObjKind::Host(h)) = e.heap.obj(id).map(|o| &o.kind) {
+        if let Some(ev) = h.as_any().downcast_ref::<EventHost>() {
+            let ty = ev.state.ty.borrow().clone();
+            return (!ty.is_empty()).then_some(ty);
+        }
+    }
+    if let Some(Value::Str(sid)) = e.get_prop(id, "type") {
+        if let Some(ty) = e.heap.string(sid) {
+            return (!ty.is_empty()).then_some(ty);
+        }
+    }
+    None
+}
+
+/// Sonde §B-97 — `ev.try` : recensement des dispatchs
+/// **demandés**, à l'entrée des sites `dispatchEvent` (avant
+/// conversion `event_state_of`, cibles DOM **et** `__et`).
+/// `ev.try` présent + `ev.dispatch` absent = drop silencieux
+/// à la conversion ; les deux absents = l'émetteur ne tourne
+/// jamais (étage 3 du vol 658 : listeners `yt-*` attachés,
+/// cascade jamais émise).
+fn probe_ev_try(e: &mut Engine, dom: &DomRef, v: Value) {
+    let Some(ty) = probe_event_ty(e, v) else {
+        return;
+    };
+    if dom.borrow_mut().ce.probe_seen.insert(format!("try:{ty}")) {
+        tracing::info!(target: "dom_probe", site = "ev.try", ty = %ty);
+    }
+}
+
+/// Sonde §B-97 — `el.listen` : recensement premier-par-type
+/// des enregistrements + `ls.late` quand le type a **déjà**
+/// été dispatché (`ev:{ty}` présent) — les signaux une-fois
+/// (`spfready`, `yt-action`, `load`) ratés par un attach
+/// tardif nomment un émetteur jamais lancé.
+fn probe_el_listen(dom: &DomRef, ty: &str) {
+    let mut d = dom.borrow_mut();
+    if d.ce.probe_seen.insert(format!("ls:{ty}")) {
+        tracing::info!(target: "dom_probe", site = "el.listen", ty = %ty);
+    }
+    if d.ce.probe_seen.contains(&format!("ev:{ty}")) && d.ce.probe_seen.insert(format!("lt:{ty}")) {
+        tracing::info!(target: "dom_probe", site = "ls.late", ty = %ty);
+    }
+}
+
 /// `et.addEventListener(type, cb)` — pousse sur `__et[type]`.
 /// La map `__et` est créée paresseusement : les wrappers non-
 /// `EventTarget` qui exposent la méthode (`IDBRequest` — JS-C187)
@@ -12993,11 +13036,8 @@ pub(crate) fn et_add_listener(e: &mut Engine, this: Value, args: &[Value]) -> Js
     if let Some((dom, _)) = e.dom_ctx.clone() {
         if let Some(node) = et_dom_target(e, this, &dom) {
             let capture = e.to_boolean(arg(args, 2));
-            // Sonde §B-97 — même dédup `ls:` que les autres
-            // sites : la greffe compte dans le recensement.
-            if dom.borrow_mut().ce.probe_seen.insert(format!("ls:{ty}")) {
-                tracing::info!(target: "dom_probe", site = "el.listen", ty = %ty);
-            }
+            // Sonde §B-97 — la greffe compte dans le recensement.
+            probe_el_listen(&dom, &ty);
             dom.borrow_mut().nodes[node as usize]
                 .listeners
                 .push((ty, cb, capture));
@@ -13075,6 +13115,11 @@ pub(crate) fn et_remove_listener(e: &mut Engine, this: Value, args: &[Value]) ->
 /// (`target`/`currentTarget` = l'objet), `false` si
 /// `preventDefault` fut tiré.
 pub(crate) fn et_dispatch_event(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    // Sonde §B-97 — recense le dispatch demandé (cibles DOM
+    // **et** `__et`) avant toute conversion.
+    if let Some((dom, _)) = e.dom_ctx.clone() {
+        probe_ev_try(e, &dom, arg(args, 0));
+    }
     // Un `this` DOM (greffe `EventTarget.prototype.dispatchEvent
     // .call(nœud)`) reprend le chemin canonique :
     // `event_state_of` + `propagate_event` — capture/bubble,

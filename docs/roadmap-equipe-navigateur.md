@@ -10143,6 +10143,18 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   sauvegardée → listeners kevlar
   morts-nés) + sondes `el.listen`/
   `ev.threw`. Verrou `c355` 5/5.
+- [x] **JS-C356. Sondes §B-97
+  étage 3** (`ev.try` recensement
+  des dispatchs demandés à l'entrée
+  des 4 sites — drop silencieux vs
+  émetteur jamais lancé ; `ls.late`
+  attach sur type déjà dispatché =
+  signal une-fois manqué ; `ev.new`
+  au ctor — créé-jamais-dispatché)
+  — vol 658 : C355 validé (72
+  `el.listen`, cascade attachée),
+  attachés jamais émis : l'émetteur
+  ne tourne pas.
 
 ## Tâches continues
 
