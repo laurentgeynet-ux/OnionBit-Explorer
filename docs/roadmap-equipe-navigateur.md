@@ -6776,6 +6776,21 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   claim → `referer == active.url`.
   41/41 + 67/67.
 
+- [x] **Étape 191. Budget hw :
+  `hw_codecs`→`set_max_pixels`,
+  `framedrop_auto` (P-63/64)**
+  (`app/`) : cap géométrie =
+  max `w*h` des tags `@WxH`
+  (nus = non mesurables) avant
+  `open_url` — sélecteur de rep
+  HLS/DASH direct, no-op
+  progressif et hors `open_mse*`
+  (documenté). `framedrop_auto`
+  5-param (2s/1s/10s/4/3=NonKey)
+  via `AppConfig.mediaFramedrop`
+  §13, progressif + MSE. Verrou :
+  `hwGeoFromWire`. 42/42 + 68/68.
+
 - [ ] **Écarts terrain — vol humain
   22/10 (release `39ab821`, FFI)** :
   second run humain — trois constats

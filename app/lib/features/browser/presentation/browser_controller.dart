@@ -170,7 +170,7 @@ class BrowserState {
 final mediaPlayerFactoryProvider = Provider<MediaPlayerFactory>(
   (ref) {
     final hw = ref.watch(settingsProvider).hwAccel;
-    final ua = ref.watch(configProvider).mediaUserAgent;
+    final cfg = ref.watch(configProvider);
     return (offer, {tabId = '', apiBase = '', referer = ''}) =>
         offer.mse
             ? OnionMediaPlayer.createMse(
@@ -178,12 +178,14 @@ final mediaPlayerFactoryProvider = Provider<MediaPlayerFactory>(
                 tabId: tabId,
                 apiBase: apiBase,
                 hwAccel: hw,
+                framedrop: cfg.mediaFramedrop,
               )
             : OnionMediaPlayer.create(offer.url,
                 hwAccel: hw,
                 loop: offer.loops,
                 referer: referer,
-                userAgent: ua);
+                userAgent: cfg.mediaUserAgent,
+                framedrop: cfg.mediaFramedrop);
   },
 );
 

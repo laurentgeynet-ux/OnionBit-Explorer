@@ -14,6 +14,7 @@ import 'package:ffi/ffi.dart';
 import 'package:flutter/widgets.dart';
 
 import 'media_player.dart';
+import '../../../core/config/app_config.dart';
 
 /// Vue `repr(C)` d'`OnionMediaFrame` (onionmedia-ffi P-59,
 /// ABI ≥ 3) : `data`/`len` empruntent le snapshot interne et
@@ -222,6 +223,21 @@ class OnionMediaPlayer implements MediaPlayer {
   /// `getVideoPlaybackQuality` dans un `OnionFrameStats`.
   int Function(ffi.Pointer, ffi.Pointer<_OnionFrameStats>)? _frameStats;
 
+  /// `onionmedia_hw_codecs` — `tag[@WxH];…` issu de
+  /// l'interrogation D3D11 réelle ; global (sans handle),
+  /// convention `copy_out_str`.
+  int Function(ffi.Pointer<ffi.Char>, int)? _hwCodecs;
+
+  /// `onionmedia_set_max_pixels` (P-64) — cap de géométrie
+  /// consommé à `open_*` : sélecteur de représentation
+  /// HLS/DASH direct (no-op progressif sans manifeste et
+  /// `open_mse*` hors `IoConfig`).
+  int Function(ffi.Pointer, int)? _setMaxPixels;
+
+  /// `onionmedia_set_framedrop_auto` (P-63) — échelle auto
+  /// de saut de trames (`window_ms == 0` désarme).
+  int Function(ffi.Pointer, int, int, int, int, int)? _framedropAuto;
+
   void _optionalBindings() {
     try {
       _acquire = _lib.lookupFunction<
@@ -327,6 +343,30 @@ class OnionMediaPlayer implements MediaPlayer {
       } on Object {
         _frameStats = null;
       }
+      try {
+        _hwCodecs = _lib.lookupFunction<
+            ffi.Int32 Function(ffi.Pointer<ffi.Char>, ffi.IntPtr),
+            int Function(ffi.Pointer<ffi.Char>, int)>(
+            'onionmedia_hw_codecs');
+      } on Object {
+        _hwCodecs = null;
+      }
+      try {
+        _setMaxPixels = _lib.lookupFunction<
+            ffi.Int32 Function(ffi.Pointer, ffi.Uint64),
+            int Function(ffi.Pointer, int)>('onionmedia_set_max_pixels');
+      } on Object {
+        _setMaxPixels = null;
+      }
+      try {
+        _framedropAuto = _lib.lookupFunction<
+            ffi.Int32 Function(ffi.Pointer, ffi.Uint32, ffi.Uint32,
+                ffi.Uint32, ffi.Uint32, ffi.Uint32),
+            int Function(ffi.Pointer, int, int, int, int, int)>(
+            'onionmedia_set_framedrop_auto');
+      } on Object {
+        _framedropAuto = null;
+      }
     }
   }
 
@@ -395,6 +435,44 @@ class OnionMediaPlayer implements MediaPlayer {
     } finally {
       calloc.free(fs);
     }
+  }
+
+  /// `hw_codecs` — `avc1@4096x2304;…` issu de l'interrogation
+  /// D3D11 réelle. Tag nu sans `@WxH` = géométrie non
+  /// mesurable (doc dépôt) → ignoré du max. 0 = inconnu →
+  /// pas de cap (`set_max_pixels` laissé désarmé).
+  int _hwGeoMax() {
+    final fn = _hwCodecs;
+    return fn == null ? 0 : hwGeoFromWire(_copyOutStr(fn));
+  }
+
+  /// Parse filaire `tag[@WxH];…` → max `w*h` (0 = rien de
+  /// mesurable). `@visibleForTesting` : la tranche géométrie
+  /// du binding, sans la DLL.
+  @visibleForTesting
+  static int hwGeoFromWire(String wire) {
+    var best = 0;
+    for (final tag in wire.split(';')) {
+      final at = tag.indexOf('@');
+      if (at <= 0) continue;
+      final dims = tag.substring(at + 1).split('x');
+      if (dims.length != 2) continue;
+      final w = int.tryParse(dims[0]);
+      final h = int.tryParse(dims[1]);
+      if (w != null && h != null && w * h > best) best = w * h;
+    }
+    return best;
+  }
+
+  /// `set_framedrop_auto` (P-63) — escalade auto de saut de
+  /// trames quand le décodage < temps réel (« mur 4K » ;
+  /// `set_max_pixels` borne la géométrie, lui le débit).
+  /// `null` = pas de politique (comportement antérieur).
+  void _applyFramedrop(MediaFramedropConfig? cfg) {
+    final fn = _framedropAuto;
+    if (fn == null || cfg == null) return;
+    fn(_h, cfg.window.inMilliseconds, cfg.dwell.inMilliseconds,
+        cfg.pin.inMilliseconds, cfg.dropsPerWindow, cfg.maxLevel);
   }
 
   /// Dernière erreur du handle (`player_error` par handle si
@@ -478,6 +556,7 @@ class OnionMediaPlayer implements MediaPlayer {
     bool loop = false,
     String referer = '',
     String userAgent = '',
+    MediaFramedropConfig? framedrop,
   }) async {
     final lib = _load();
     /// `file:///D:/x.mkv` -> `D:/x.mkv` ; chemin nu inchangé.
@@ -499,6 +578,16 @@ class OnionMediaPlayer implements MediaPlayer {
     }
     final p = OnionMediaPlayer._(lib, h);
     _setHwAccel(lib, h, hwAccel);
+    // `set_max_pixels` : cap consommé à `open_*` (sélecteur
+    // de rep HLS/DASH direct — no-op MP4/WebM simple et hors
+    // `open_mse*`). Max géométrie hw = budget honnête ; le
+    // raffinement `min(geo, besoin affichage×dpr)` attend
+    // `MediaPaintMeta` (taille device, couche présentation).
+    final geo = p._hwGeoMax();
+    if (geo > 0) {
+      p._setMaxPixels?.call(h, geo);
+    }
+    p._applyFramedrop(framedrop);
     try {
       final isHttp = url.startsWith('http');
       if (isHttp) {
@@ -552,6 +641,7 @@ class OnionMediaPlayer implements MediaPlayer {
     String tabId = '',
     String apiBase = '',
     bool hwAccel = false,
+    MediaFramedropConfig? framedrop,
   }) async {
     final lib = _load();
     // Le symbole peut ne pas exister encore — erreur propre.
@@ -583,6 +673,10 @@ class OnionMediaPlayer implements MediaPlayer {
     final p = OnionMediaPlayer._(lib, h);
     try {
       _setHwAccel(lib, h, hwAccel);
+      // `set_max_pixels` volontairement absent ici :
+      // `open_mse*` ne prend pas d'`IoConfig` — le pull passe
+      // par le REST local, le cap n'atteint aucune rep.
+      p._applyFramedrop(framedrop);
       final tab = int.tryParse(tabId) ?? 0;
       if (offer.mseBuffers.length > 1 && openMulti != null) {
         _openMseMulti(

@@ -11,6 +11,7 @@ import 'package:explorer_app/core/settings/app_settings.dart';
 import 'package:explorer_app/features/browser/domain/bookmark.dart';
 import 'package:explorer_app/features/browser/domain/browser_tab.dart';
 import 'package:explorer_app/features/browser/domain/media_offer.dart';
+import 'package:explorer_app/features/browser/data/onionmedia_media_player.dart';
 import 'package:explorer_app/features/browser/domain/reload_result.dart';
 import 'package:explorer_app/features/browser/presentation/browser_controller.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -1299,6 +1300,24 @@ void main() {
       expect(ctrl.topSlice('1'), isNull);
     },
   );
+
+  test('191 — hwGeoFromWire : géométrie max, tags nus tolérés',
+      () {
+    // Forme filaire dépôt : `avc1@4096x2304;hev1@8192x8192;
+    // vp09;av01` — les tags sans `@WxH` sont non mesurables
+    // (doc dépôt) et ignorés du max.
+    expect(
+      OnionMediaPlayer.hwGeoFromWire(
+          'avc1@4096x2304;hev1@8192x8192;vp09;av01'),
+      8192 * 8192,
+    );
+    expect(OnionMediaPlayer.hwGeoFromWire('vp09;av01'), 0);
+    expect(OnionMediaPlayer.hwGeoFromWire(''), 0);
+    expect(
+      OnionMediaPlayer.hwGeoFromWire('avc1@1920x1080;junk@x;avc1@bad'),
+      1920 * 1080,
+    );
+  });
 }
 
 /// Contrôleur minimal sans onglet — `activeId` reste null.

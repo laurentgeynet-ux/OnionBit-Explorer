@@ -4,6 +4,38 @@
 
 /// Configuration de l'app — toutes les valeurs « en dur » vivent ici
 /// (AGENTS.md §4.13 : aucune valeur en dur ailleurs).
+/// Réglages `onionmedia_set_framedrop_auto` (P-63) — escalade
+/// automatique de saut de trames quand le décodage est moins
+/// rapide que le temps réel (le vrai levier « mur 4K » —
+/// `set_max_pixels` ne borne que la géométrie des
+/// représentations, pas le débit décodé).
+class MediaFramedropConfig {
+  const MediaFramedropConfig({
+    this.window = const Duration(seconds: 2),
+    this.dwell = const Duration(seconds: 1),
+    this.pin = const Duration(seconds: 10),
+    this.dropsPerWindow = 4,
+    this.maxLevel = 3,
+  });
+
+  /// Fenêtre glissante de comptage des drops (`window_ms`).
+  final Duration window;
+
+  /// Délai entre deux montées de palier (`dwell_ms`).
+  final Duration dwell;
+
+  /// Pin après un `set_framedrop` explicite (`pin_ms`).
+  final Duration pin;
+
+  /// Drops dans `window` déclenchant un palier
+  /// (`drops_per_window`).
+  final int dropsPerWindow;
+
+  /// Palier max auto — 3 = `NonKey` (jamais d'écran noir
+  /// auto ; la doc dépôt ramène 4/`All` à `NonKey`).
+  final int maxLevel;
+}
+
 class AppConfig {
   const AppConfig({
     this.daemonBaseUrl = 'http://127.0.0.1:9377',
@@ -85,6 +117,7 @@ class AppConfig {
         'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
         'AppleWebKit/537.36 (KHTML, like Gecko) '
         'Explorer/0.2 Safari/537.36',
+    this.mediaFramedrop = const MediaFramedropConfig(),
     this.drmDelegateHosts = const [
       // Chaque entrée = un arbitrage (ADR-0027 §2 : périmètre
       // de confiance + exception d'égress ADR-0022 — le trafic
@@ -239,6 +272,10 @@ class AppConfig {
   /// sur le HTML et sur le flux). À resynchroniser si le
   /// moteur change le sien.
   final String mediaUserAgent;
+
+  /// Politique `set_framedrop_auto` appliquée à chaque
+  /// lecteur natif — `null` = pas d'escalade auto.
+  final MediaFramedropConfig mediaFramedrop;
 
   /// Domaines délégués à la WebView2 (étape 136b, ADR-0027) —
   /// allowlist explicite et minimale ; matching host exact +
