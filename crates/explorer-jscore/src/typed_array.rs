@@ -47,6 +47,26 @@ fn ta_view(e: &mut Engine, this: Value) -> JsResult<(TaKind, ObjId, usize, usize
     }
 }
 
+/// Écrit dans la région brute d'une view typée passée par
+/// `this` JS (`AnalyserNode.getXxxData`, Étape 204c) :
+/// `write` reçoit `bytes[offset..offset+len*size]` borné —
+/// TypeError `not a typed array` sinon.
+pub(crate) fn ta_write_region(
+    e: &mut Engine,
+    this: Value,
+    write: impl FnOnce(&mut [u8]),
+) -> JsResult<Value> {
+    let (ta, bid, off, len) = ta_view(e, this)?;
+    let n = len * ta.size();
+    if let Some(o) = e.heap.obj_mut(bid) {
+        if let ObjKind::ByteBuf(bytes) = &mut o.kind {
+            let end = (off + n).min(bytes.len());
+            write(&mut bytes[off..end]);
+        }
+    }
+    Ok(Value::Undefined)
+}
+
 /// `this` doit être un `DataView` → `(buffer_id, offset, len)`.
 fn dv_view(e: &mut Engine, this: Value) -> JsResult<(ObjId, usize, usize)> {
     let Value::Obj(id) = this else {

@@ -267,7 +267,6 @@ impl PcmRing {
 
     /// Copie les `n` derniers octets du ring (fenêtre la plus
     /// récente pour `AnalyserNode`, 204c) — vide si insuffisant.
-    #[allow(dead_code)] // consommé par `MediaElementAudioSourceNode` (204c).
     pub fn read_latest(&self, n: usize) -> Vec<u8> {
         let take = n.min(self.buf.len());
         let start = self.buf.len() - take;

@@ -1680,7 +1680,7 @@ fn dom_parent(dom: &DomRef, n: NodeId) -> Option<NodeId> {
     dom.borrow().parent(n)
 }
 
-fn arg(args: &[Value], i: usize) -> Value {
+pub(crate) fn arg(args: &[Value], i: usize) -> Value {
     args.get(i).copied().unwrap_or(Value::Undefined)
 }
 
@@ -2502,14 +2502,28 @@ impl Engine {
             self.set_own(p, crate::interp::SYM_TO_STRING_TAG, tag, false);
             self.set_own(p, "constructor", ac_f, false);
             for name in ["resume", "close", "suspend"] {
-                let m = self.native_fn(name, audio_ctx_promise);
+                let f = if name == "resume" {
+                    audio_ctx_resume
+                } else {
+                    audio_ctx_promise
+                };
+                let m = self.native_fn(name, f);
                 self.set_own(p, name, m, true);
             }
+            // Étape 204c — l'AnalyserNode réel lit le ring PCM
+            // hôte (`AUDIO_MODE_TAP`) ; `createMediaElementSource`
+            // lie l'élément à sa surface claimée.
+            let m = self.native_fn("createAnalyser", crate::webaudio::create_analyser);
+            self.set_own(p, "createAnalyser", m, true);
+            let m = self.native_fn(
+                "createMediaElementSource",
+                crate::webaudio::create_media_element_source,
+            );
+            self.set_own(p, "createMediaElementSource", m, true);
             for name in [
                 "createOscillator",
                 "createGain",
                 "createDynamicsCompressor",
-                "createAnalyser",
                 "createBiquadFilter",
                 "createBufferSource",
                 "createDelay",
@@ -12492,6 +12506,17 @@ fn audio_ctx_promise(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value>
     Ok(Value::Obj(pid))
 }
 
+/// `ctx.resume()` (Étape 204c) — `state` → `"running"` puis
+/// promesse résolue : le graphe d'analyse tourne tant que le
+/// tap hôte alimente le ring (la destination reste muette).
+fn audio_ctx_resume(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
+    if let Value::Obj(id) = this {
+        let st = e.str_val("running");
+        e.set_own(id, "state", st, true);
+    }
+    audio_ctx_promise(e, this, _a)
+}
+
 /// `ctx.createXxx()` — nœud audio générique : `connect` rend sa
 /// cible (chaînage `a.connect(b).connect(dst)`), `start`/`stop`/
 /// `disconnect` no-op, `frequency`/`gain`/`Q`/`detune` posés en
@@ -12519,8 +12544,22 @@ fn audio_node_connect(_e: &mut Engine, _t: Value, a: &[Value]) -> JsResult<Value
 }
 
 /// no-op `undefined` pour les méthodes de nœud sans effet.
-fn audio_noop(_e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
+pub(crate) fn audio_noop(_e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
     Ok(Value::Undefined)
+}
+
+/// `(dom, node)` du wrapper DOM `v` — `None` pour les
+/// non-nœuds (Étape 204c : `createMediaElementSource`
+/// résout l'élément vers sa surface claimée).
+pub(crate) fn dom_node_of(e: &Engine, v: Value) -> Option<(DomRef, NodeId)> {
+    let Value::Obj(id) = v else {
+        return None;
+    };
+    e.host_of(id).and_then(|h| {
+        h.as_any()
+            .downcast_ref::<NodeHost>()
+            .map(NodeHost::dom_node)
+    })
 }
 
 /// `et.addEventListener(type, cb)` — pousse sur `__et[type]`.

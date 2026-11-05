@@ -7026,15 +7026,27 @@ incrément.
     `409` non claimé. Verrous :
     route REST + FFI + contrôleur
     tap on/off — 81/81 app.
-  - [ ] **204c** (jscore) :
-    `AnalyserNode`/`AudioContext` +
-    `createMediaElementSource` lisant
-    `PcmRing` (destination muet
-    documenté — le son audible reste
-    le device DLL ; `rustfft` à
-    justifier). API partielle visible
-    (`createGain` absent = `undefined`
-    honnête, pas de stub).
+  - [x] **204c** (jscore) :
+    `AnalyserNode` réel lisant
+    `PcmRing` — `getByteFrequencyData`/
+    `getFloatFrequencyData`/
+    `getByteTimeDomainData` (FFT
+    radix-2 + fenêtre Blackman spec,
+    échelle min/maxDecibels) ;
+    `createMediaElementSource(el)`
+    lie la surface claimée
+    (`__media` → `__src_media` au
+    `connect`) ; `resume()` →
+    `state` `"running"` ; destination
+    muette documentée. Zéros honnêtes
+    non claimé. FFT maison (radix-2
+    suffit — `fftSize` est toujours
+    pow2 spec), `rustfft` non requis.
+    `createGain`/worklets absents =
+    `undefined` honnête. Verrous :
+    `webaudio.rs` 2/2 (sine→bin,
+    zéros honnêtes), 271 tests
+    jscore média/dom verts.
 - Inventaire à activation différée
   (existants, pas de consommateur) :
   `set_ab_loop`, `set_subtitle_delay`,
