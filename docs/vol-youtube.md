@@ -9,6 +9,13 @@ YouTube (`docs/roadmap_youtube_fix.md`, worktree
 le protocole général** : séquence canonique §0, règles de vol §5,
 garde vignette `_view_*`, verdicts `consent_wall:*`.
 
+**Frontière de rôles** : la séquence de vol (§1→§5 — relevé
+HEAD, checkout, **build si changement dans HEAD**, claim,
+navigation, rapport) est exécutée par **l'équipe de vol**, au
+départ. Les sessions de maintenance (docs, règles, structure
+du corpus) n'exécutent pas ces étapes — pas de build, pas de
+claim, pas de sync du worktree en dehors d'un départ.
+
 Trois différences fondamentales :
 
 1. **Dossier dédié avec synthèse propre** — tous les artefacts
