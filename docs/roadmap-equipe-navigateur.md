@@ -6822,6 +6822,97 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   cmd+miroir, `loopSets`, ×3
   ranges. 14/14 + 69/69.
 
+### File features média — plan ouvert
+
+Reliquats des étapes 189-193 +
+surface `onionmedia_ffi` dormante
+(~90 exports, ~20 liés — journal
+§189). Ordre : reliquats → UX
+visible → capabilité → horizon.
+Règles : gate `abi_version` +
+lookups gardés ; verrous parse
+`@visibleForTesting` + contrat ;
+zéro écriture dépôt média hors
+worktree `perf` ; gouvernance par
+incrément.
+
+- [ ] **Étape 194. `set_max_pixels`
+  raffiné `min(hw_geo, besoin×dpr)`**
+  (`app/`) : `displayPixels` via
+  factory/provider =
+  `rect.w×h×dpr²` (`PlatformDispatcher
+  .implicitView`, pas de ctx) ;
+  `besoin==0` → repli hw_geo.
+  Cap figé à l'open (documenté) ;
+  MSE hors scope. Verrou : fake
+  reçoit displayPixels = rect×dpr².
+
+- [ ] **Étape 195. `dropped_frames`
+  repli scalaire** (`app/` +
+  `core`/`js`/`jscore`) : lookup
+  gardé, symbole plus ancien que
+  `frame_stats` — clé additive
+  `dropped_frames` → `droppedVideoFrames`
+  servi seul, jamais fabriqué.
+
+- [ ] **Étape 196. Pistes +
+  sous-titres, phase lecture**
+  (`app/` + `media_controls`) :
+  `stream_count`/`stream_info`
+  (kind/lang/title/disposition) →
+  `snapshot.tracks` additif →
+  menu pistes (audio lang — IPTV
+  multi-audio) ; `set_audio_stream`/
+  `set_sub_stream`/`subtitle_enabled` ;
+  cues `subtitle_text` @ cadence
+  rapport → captions Flutter
+  overlay (thémables > burn-in).
+  À re-vérifier avant : layout
+  `repr(C)` `stream_info`,
+  sémantique `subtitle_text`
+  (`lib.rs` dépôt).
+
+- [ ] **Étape 197. Chapitres**
+  (`app/` + `media_controls`) :
+  `chapter_count`/`seek_chapter` →
+  prev/next + liste. Effort faible.
+
+- [ ] **Étape 198. `can_play_type`
+  oracle → `mediaCodecs` dynamique**
+  (`app/` + config) : claim/
+  `isTypeSupported` consulte
+  l'oracle RFC 6381 dépôt au lieu
+  de la liste en dur — le vrai cap
+  géométrique MSE (refuser
+  `avc1.640033` = cap 4K). Gate
+  config + mesure vol avant
+  activation (risque de réduire
+  les types déclarés). Cacheable.
+
+- [ ] **Étape 199. Petits bindings
+  groupés** (`app/`) : `frame_step`/
+  `back_step`, `pause_at_eof`,
+  `bandwidth_max`, `sync_threshold`,
+  `cover_art` (poster MSE), `loop`
+  getter parité.
+
+- [ ] **Étape 200. `audio_pull` PCM
+  → WebAudio (design seul)** :
+  `audio_spec`/`audio_mode`/pull —
+  seam isolate→ring buffer→audio
+  plateforme ; ADR requis, pas
+  d'implémentation dans l'incrément.
+
+### Risques nommés
+
+- 196 : deux sémantiques filaires
+  à revérifier (`stream_info`,
+  `subtitle_text`) avant code.
+- 198 : peut réduire `canPlayType`
+  vs liste statique → activation
+  derrière gate + vol mesuré.
+- 200 : architecture, pas binding.
+
 - [ ] **Écarts terrain — vol humain
   22/10 (release `39ab821`, FFI)** :
   second run humain — trois constats
