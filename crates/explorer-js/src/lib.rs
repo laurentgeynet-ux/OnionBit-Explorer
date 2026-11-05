@@ -2214,8 +2214,21 @@ impl JscoreEngine {
         // thread moteur (JS-C41) : la pile est aussi protégée par
         // `maybe_grow`, ces bornes ne fixent que le `RangeError`
         // — ~1024 appels/parse niveaux, proche des usages réels.
-        eng.set_call_depth_limit(1024);
-        eng.set_nest_limit(1024);
+        // JS-C350 — **pilotables par env** (sonde §B-100, vol 653 :
+        // récursion bornée ~582 frames constante sur 3 mécanismes
+        // traités — probablement légitime chez les vrais moteurs
+        // ~5-10k frames, fatale sous ce plafond). `EXPLORER_JS_
+        // CALL_DEPTH`/`EXPLORER_JS_NEST` relèvent sans rebuild ;
+        // fenêtre clampée, défaut 1024 inchangé — la garde
+        // physique reste `stacker::maybe_grow` + budget ops.
+        let env_depth = |key: &str| {
+            std::env::var(key)
+                .ok()
+                .and_then(|v| v.parse::<u32>().ok())
+                .filter(|&n| (256..=131_072).contains(&n))
+        };
+        eng.set_call_depth_limit(env_depth("EXPLORER_JS_CALL_DEPTH").unwrap_or(1024));
+        eng.set_nest_limit(env_depth("EXPLORER_JS_NEST").unwrap_or(1024));
         // Miroir DOM installé par `install_dom` (`Rc` — vit et
         // meurt sur ce thread). Le `Dom` y reste mutable par les
         // bindings ; `DomSync` lit le dirty bit et sérialise.

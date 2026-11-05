@@ -10075,6 +10075,16 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   JS-C324), realm routé `sd.ms`.
   Verrous `c349_updateend_tasked`
   3/3.
+- [x] **JS-C350. Bornes pile
+  pilotables** (`EXPLORER_JS_
+  CALL_DEPTH`/`EXPLORER_JS_NEST`
+  → `set_call_depth_limit`/
+  `set_nest_limit`, clamp
+  `256..=131_072`, défaut 1024)
+  — sonde §B-100 vol 653 :
+  récursion bornée ~582 frames
+  constante → mesure
+  discriminante ×N sans rebuild.
 
 ## Tâches continues
 
