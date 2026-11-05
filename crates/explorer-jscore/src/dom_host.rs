@@ -10690,7 +10690,10 @@ impl Host for CustomElementsHost {
             "define" => {
                 let n = e.to_js_string(arg(args, 0))?;
                 let ctor = arg(args, 1);
-                tracing::debug!(name = %n, "customElements.define");
+                // Sonde §B-97 — chaque `define` narré : le trio
+                // né/défini/upgradé tranche où s'arrête
+                // l'hydratation `ytd-*` (accueil `YouTube`).
+                tracing::info!(target: "dom_probe", site = "ce.define", tag = %n);
                 // Spec `define` : DOMException typés — les
                 // frameworks (catalyst github) tolèrent
                 // `NotSupportedError` par `e.name` et rejettent
@@ -10858,7 +10861,7 @@ fn ce_upgrade_node(e: &mut Engine, dom: &DomRef, cache: &NodeCache, node: NodeId
     let Some((name, ctor, observed)) = ce_def_of(dom, node) else {
         return Ok(());
     };
-    dom.borrow_mut().ce.upgraded.insert(node, name);
+    dom.borrow_mut().ce.upgraded.insert(node, name.clone());
     let el = node_value(e, dom, cache, node);
     // `el.__proto__ = Ctor.prototype` (validé objet à define).
     if let Value::Obj(eid) = el {
@@ -10902,8 +10905,19 @@ fn ce_upgrade_node(e: &mut Engine, dom: &DomRef, cache: &NodeCache, node: NodeId
     if !ok {
         // Ctor throw, chaîne non-HTMLElement, ou retour étranger
         // → état « failed » honnête (proto conservée, spec).
+        // Sonde §B-97 — un ctor fautif désarme tous ses
+        // callbacks (mur `ytd-*` historique) : narré 1×/tag.
+        if dom.borrow_mut().ce.probe_seen.insert(format!("!{name}")) {
+            tracing::info!(target: "dom_probe", site = "ce.failed", tag = %name);
+        }
         dom.borrow_mut().ce.failed.insert(node);
         return Ok(());
+    }
+    // Sonde §B-97 — ctor exécuté avec succès, 1×/tag (dédup
+    // partagé `probe_seen` — borne le volume aux tags
+    // distincts effectivement customisés).
+    if dom.borrow_mut().ce.probe_seen.insert(format!("+{name}")) {
+        tracing::info!(target: "dom_probe", site = "ce.upgrade", tag = %name);
     }
     // `attributeChangedCallback` initial : attributs observés
     // présents, dans l'ordre de l'attribut list (spec).

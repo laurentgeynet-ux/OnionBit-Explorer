@@ -2102,11 +2102,16 @@ fn reject_fetch(e: &mut Engine, pid: crate::value::ObjId, msg: &str) -> JsResult
 /// Hôte d'une URL pour la sonde §B-102 — `scheme://host[:port]`
 /// tronqué à l'autorité : les URLs média (`videoplayback`…) sont
 /// signées, query/cookies = secret de session, jamais logués.
+/// URLs protocol-relative (`//host/…`) reconnues ; URL relative,
+/// `data:`/`blob:`/opaque → `""` honnête (jamais le contenu).
 fn url_host(url: &str) -> &str {
+    if let Some(rest) = url.strip_prefix("//") {
+        return rest.split(['/', '?', '#']).next().unwrap_or(rest);
+    }
     url.split("://")
         .nth(1)
         .and_then(|r| r.split(['/', '?', '#']).next())
-        .unwrap_or(url)
+        .unwrap_or("")
 }
 
 /// `fetch(url | Request, opts?)` — `input` `Request` fournit

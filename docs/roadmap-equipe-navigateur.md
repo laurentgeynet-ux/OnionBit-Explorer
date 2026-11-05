@@ -10108,6 +10108,18 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   bootstrap : la première sonde
   absente nomme le maillon bloquant
   le premier append/fetch média.
+- [x] **JS-C353. Sondes
+  hydratation §B-97** (cible
+  `dom_probe` : `el.birth` tags à
+  `-` premier-par-tag à l'`alloc`,
+  `ce.define`, `ce.upgrade`/
+  `ce.failed` via `CeRegistry.
+  probe_seen`) — discrimine
+  né/défini/upgradé pour le
+  `ytd-rich-grid-renderer` absent
+  de l'accueil ; `url_host` C352
+  corrigé (`//h/…` et relatifs ne
+  loguent plus la query signée).
 
 ## Tâches continues
 

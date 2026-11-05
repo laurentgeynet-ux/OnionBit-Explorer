@@ -152,6 +152,10 @@ pub struct CeRegistry {
     /// `customElements.whenDefined` pendantes : nom → ids de
     /// promesses résolues au `define` correspondant.
     pub pending: HashMap<String, Vec<ObjId>>,
+    /// Tags déjà narrés par les sondes `dom_probe` (§B-97) —
+    /// dédup premier-par-tag : borne le volume de log au
+    /// nombre de tags distincts (~une centaine en terrain).
+    pub probe_seen: HashSet<String>,
 }
 
 /// Réaction custom element produite par une mutation `Dom`
@@ -2003,6 +2007,17 @@ impl Dom {
     }
 
     fn alloc(&mut self, kind: NodeKind, tag: &str) -> NodeId {
+        // Sonde §B-97 — naissance de chaque tag à `-`
+        // (candidat custom element : parse, `createElement`,
+        // miroir… tout passe par `alloc`), premier-par-tag —
+        // discrimine « jamais né » vs « né mais jamais
+        // upgradé » pour les `ytd-*` de l'accueil `YouTube`.
+        if kind == NodeKind::Element && tag.contains('-') {
+            let t = tag.to_lowercase();
+            if self.ce.probe_seen.insert(t.clone()) {
+                tracing::info!(target: "dom_probe", site = "el.birth", tag = %t);
+            }
+        }
         // §B-59 — réutilise un slot libéré (payloads déjà
         // vidés, `parent` nul) : le churn `innerHTML` borne
         // l'arène au lieu de croître sans fin.
