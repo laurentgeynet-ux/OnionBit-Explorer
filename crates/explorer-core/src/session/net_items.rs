@@ -2588,8 +2588,8 @@ pub(crate) struct HeldFetch {
     pub(crate) url: String,
     /// En-têtes de la requête.
     pub(crate) headers: Vec<(String, String)>,
-    /// Corps `send/fetch`, si présent.
-    pub(crate) body: Option<String>,
+    /// Corps `send/fetch`, si présent — octets bruts (JS-C338).
+    pub(crate) body: Option<Vec<u8>>,
     /// `Request.mode` (JS-C77).
     pub(crate) mode: explorer_js::FetchMode,
     /// `Request.credentials` (JS-C77).

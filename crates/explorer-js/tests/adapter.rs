@@ -260,7 +260,7 @@ fn xhr_roundtrips_through_net_drain() {
     assert_eq!(method, "POST");
     assert_eq!(url, "/api");
     assert_eq!(headers, &[("X-A".to_string(), "1".to_string())]);
-    assert_eq!(body.as_deref(), Some("corps"));
+    assert_eq!(body.as_deref(), Some("corps".as_bytes()));
 
     eng.deliver_net_response(explorer_js::NetResponse {
         handle: *handle,
@@ -275,6 +275,27 @@ fn xhr_roundtrips_through_net_drain() {
     // `onload` a tourné pendant la livraison → miroir muté.
     let html = eng.sync_dom().expect("onload a muté le miroir");
     assert!(html.contains("REPONSE"), "sérialisation = {html}");
+}
+
+/// JS-C338 — corps `BodyInit` binaires à travers la couture
+/// `NetRequest::Fetch` : un `Uint8Array` sort en octets bruts
+/// (mur §B-98 : le POST SABR protobuf de `YouTube` `/watch`
+/// mourait en UTF-8 lossy → `sabr.malformed_config`).
+#[test]
+fn xhr_binary_body_crosses_net_drain_raw() {
+    let mut eng = JscoreEngine::new();
+    eng.install_dom("<html><body></body></html>", "http://h.test/p", 1);
+    eng.eval(
+        "var x = new XMLHttpRequest();\
+         x.open('POST', '/ump');\
+         x.send(new Uint8Array([0x00, 0xFF, 0x80, 0x7F]));",
+    )
+    .unwrap();
+    let reqs = eng.drain_net_requests();
+    let explorer_js::NetRequest::Fetch { body, .. } = &reqs[0] else {
+        panic!("attendu Fetch, obtenu {reqs:?}");
+    };
+    assert_eq!(body.as_deref(), Some(&[0x00, 0xFF, 0x80, 0x7F][..]));
 }
 
 /// `fetch(url)` rend une promesse : le handle sort par drain,

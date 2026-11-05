@@ -9788,6 +9788,28 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   c193 12/12, mse2 8/8, media_events
   10/10.
 
+- [x] **JS-C338. Corps `BodyInit` binaires
+  de bout en bout** (§B-98, mur `sabr.
+  malformed_config` `/watch` — roadmap
+  YouTube P1.A) — `body_init_text` →
+  `body_init_bytes` `(Vec<u8>,
+  Option<String>)` : buffers/vues bruts
+  (`byteOffset`/`byteLength` honorés)
+  → `Blob`/`File` octets partagés + CT
+  → `FormData`/`URLSearchParams`
+  urlencodé (JS-C67 reconduit) →
+  `ToString` UTF-8. `XhrRequest.body`,
+  `WorkerNetRequest.body`,
+  `NetRequest::Fetch.body`,
+  `HeldFetch.body` → `Option<Vec<u8>>` ;
+  `script_request`/`spawn_script_fetch`
+  → `Option<&[u8]>` ; `sendBeacon`
+  binaire + CT. Verrous
+  `c338_binary_bodyinit` 9/9 + adaptateur
+  `xhr_binary_body_crosses_net_drain_raw` ;
+  canaris xhr 80/80, adapter 32/32,
+  worker 16/16.
+
 ## Tâches continues
 
 - **Spécialiste JS** : divergence miroir ↔ `explorer-dom` quand

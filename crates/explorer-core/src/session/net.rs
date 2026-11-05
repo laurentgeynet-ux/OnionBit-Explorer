@@ -2414,7 +2414,7 @@ impl Session {
         method: &str,
         url: &str,
         headers: &[(String, String)],
-        body: Option<&str>,
+        body: Option<&[u8]>,
         mode: explorer_js::FetchMode,
         credentials: explorer_js::FetchCredentials,
         ctx: explorer_js::JsCtxId,

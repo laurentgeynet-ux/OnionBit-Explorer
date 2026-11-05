@@ -68,8 +68,10 @@ pub struct XhrRequest {
     pub url: String,
     /// `setRequestHeader` calls, in order.
     pub headers: Vec<(String, String)>,
-    /// `send(body)` payload, if any.
-    pub body: Option<String>,
+    /// `send(body)` payload, if any — octets bruts (JS-C338 :
+    /// un `Uint8Array`/`ArrayBuffer` protobuf ne survit pas à
+    /// `ToString` ni à l'UTF-8 lossy).
+    pub body: Option<Vec<u8>>,
     /// `Request.mode` de l'appel (JS-C77) — `Cors` pour `XHR`,
     /// `NoCors` pour `sendBeacon`, `init.mode` pour `fetch`.
     pub mode: FetchMode,
@@ -719,10 +721,11 @@ impl Host for XhrHost {
                     Value::Undefined | Value::Null => None,
                     v => {
                         // `FormData`/`URLSearchParams` → urlencoded +
-                        // CT (même déviation que `fetch`, JS-C67).
-                        let (text, c) = body_init_text(e, v)?;
+                        // CT (même déviation que `fetch`, JS-C67) ;
+                        // buffers/vues → octets bruts (JS-C338).
+                        let (bytes, c) = body_init_bytes(e, v)?;
                         ct = c;
-                        Some(text)
+                        Some(bytes)
                     }
                 };
                 if let Some(ct) = ct {
@@ -1760,8 +1763,8 @@ fn request_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
         }
         if let Some(b) = e.get_prop(oid, "body") {
             if !matches!(b, Value::Undefined | Value::Null) {
-                let (text, ct) = body_init_text(e, b)?;
-                body = text.into_bytes();
+                let (bytes, ct) = body_init_bytes(e, b)?;
+                body = bytes;
                 if let Some(ct) = ct {
                     if !headers
                         .iter()
@@ -1886,8 +1889,8 @@ fn response_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     let (body, body_ct) = match arg(args, 0) {
         Value::Undefined | Value::Null => (Vec::new(), None),
         v => {
-            let (t, ct) = body_init_text(e, v)?;
-            (t.into_bytes(), ct)
+            let (bytes, ct) = body_init_bytes(e, v)?;
+            (bytes, ct)
         }
     };
     let init = arg(args, 1);
@@ -2029,12 +2032,16 @@ fn blob_value(e: &mut Engine, body: Vec<u8>, this: Value) -> Value {
     crate::files::blob_value(e, body, ty)
 }
 
-/// `BodyInit` → `(texte, Content-Type suggéré)` — `FormData` et
-/// `URLSearchParams` sérialisent en urlencodé (déviation
-/// documentée JS-C67 : la spec exige `multipart/form-data` pour
-/// `FormData`, hors scope du transport `String`) ; toute autre
-/// valeur passe par `ToString` sans type suggéré.
-fn body_init_text(e: &mut Engine, v: Value) -> JsResult<(String, Option<String>)> {
+/// `BodyInit` → `(octets, Content-Type suggéré)` — JS-C338 : le
+/// corps est **binaire** de bout en bout, un `Uint8Array`/
+/// `ArrayBuffer`/`DataView` protobuf (SABR/UMP §B-98) part sans
+/// `ToString` ni UTF-8 lossy. Ordre : buffers/vues bruts →
+/// `Blob`/`File` (octets partagés, `Content-Type` = `blob.type`
+/// si renseigné) → `FormData`/`URLSearchParams` sérialisés
+/// urlencodé (déviation documentée JS-C67 : la spec exige
+/// `multipart/form-data` pour `FormData`, hors scope à cette
+/// tranche) → tout autre `ToString` encodé UTF-8.
+pub(crate) fn body_init_bytes(e: &mut Engine, v: Value) -> JsResult<(Vec<u8>, Option<String>)> {
     let encode = |pairs: &[(String, String)]| {
         pairs
             .iter()
@@ -2047,13 +2054,18 @@ fn body_init_text(e: &mut Engine, v: Value) -> JsResult<(String, Option<String>)
             })
             .collect::<Vec<_>>()
             .join("&")
+            .into_bytes()
     };
-    // `Blob`/`File` (JS-C70) — corps = octets décodés UTF-8
-    // lossy (transport `String` documenté) ; `Content-Type` =
-    // `blob.type` si renseigné (spec).
+    // `ArrayBuffer`/vues `TypedArray`/`DataView` — octets bruts
+    // de la région vue (buffer détaché → 0 octet, jamais panic).
+    if let Some(bytes) = crate::typed_array::bytes_of_value(e, v) {
+        return Ok((bytes, None));
+    }
+    // `Blob`/`File` (JS-C70) — octets partagés ; `Content-Type`
+    // = `blob.type` si renseigné (spec).
     if let Some((data, ty)) = crate::files::blob_parts(e, v) {
         let ct = if ty.is_empty() { None } else { Some(ty) };
-        return Ok((String::from_utf8_lossy(&data).into_owned(), ct));
+        return Ok(((*data).clone(), ct));
     }
     if let Some(pairs) = crate::dom_host::formdata_pairs_of(e, v) {
         return Ok((
@@ -2067,7 +2079,7 @@ fn body_init_text(e: &mut Engine, v: Value) -> JsResult<(String, Option<String>)
             Some("application/x-www-form-urlencoded;charset=UTF-8".into()),
         ));
     }
-    Ok((e.to_js_string(v)?, None))
+    Ok((e.to_js_string(v)?.into_bytes(), None))
 }
 
 // ---- fetch --------------------------------------------------------
@@ -2128,10 +2140,9 @@ pub(crate) fn fetch_fn(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Va
         }
         if let Some((_, b)) = fetch_body_of(e, input) {
             if !b.is_empty() {
-                // Corps `Request` → fil transport `String`
-                // (déviation documentée : seuls les corps
-                // réponse sont garantis octet-fidèles).
-                req.body = Some(String::from_utf8_lossy(&b).into_owned());
+                // Corps `Request` → octets bruts (JS-C338 : le
+                // fil transport est binaire de bout en bout).
+                req.body = Some(b);
             }
         }
         signal = e.get_prop(rid, "signal").unwrap_or(Value::Undefined);
@@ -2184,8 +2195,8 @@ pub(crate) fn fetch_fn(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Va
         }
         if let Some(b) = e.get_prop(oid, "body") {
             if !matches!(b, Value::Undefined | Value::Null) {
-                let (text, ct) = body_init_text(e, b)?;
-                req.body = Some(text);
+                let (bytes, ct) = body_init_bytes(e, b)?;
+                req.body = Some(bytes);
                 if let Some(ct) = ct {
                     if !req
                         .headers

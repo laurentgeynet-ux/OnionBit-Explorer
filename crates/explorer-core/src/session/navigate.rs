@@ -1743,7 +1743,7 @@ impl Session {
         method: &str,
         raw_url: &str,
         headers: &[(String, String)],
-        body: Option<&str>,
+        body: Option<&[u8]>,
         policy: Option<ReferrerPolicy>,
         csp: &[explorer_net::csp::CspPolicy],
         opaque: bool,
@@ -1817,7 +1817,7 @@ impl Session {
             method: m,
             url: url.clone(),
             headers: initiator_headers_policy(page, &url, m, policy.unwrap_or_default()),
-            body: body.map(|b| b.as_bytes().to_vec()),
+            body: body.map(<[u8]>::to_vec),
             // `fetch`/`XHR` = sous-ressource de la page —
             // `SameSite=Strict`/`Lax` exigent same-site (66) ;
             // origine opaque → `Opaque` : jamais same-site

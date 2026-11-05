@@ -157,8 +157,10 @@ pub enum NetRequest {
         url: String,
         /// En-têtes `setRequestHeader`/opts, dans l'ordre.
         headers: Vec<(String, String)>,
-        /// Corps `send(body)`/`fetch({body})`, si présent.
-        body: Option<String>,
+        /// Corps `send(body)`/`fetch({body})`, si présent —
+        /// octets bruts (JS-C338 : `Uint8Array`/`ArrayBuffer`
+        /// transportés sans stringify ni UTF-8 lossy).
+        body: Option<Vec<u8>>,
         /// `Request.mode` de l'appel (JS-C77) — `fetch({mode})`,
         /// `Cors` pour XHR, `NoCors` pour `sendBeacon`.
         mode: explorer_jscore::FetchMode,

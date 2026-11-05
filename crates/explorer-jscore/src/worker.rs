@@ -96,8 +96,9 @@ pub struct WorkerNetRequest {
     pub url: String,
     /// En-têtes d'auteur, dans l'ordre.
     pub headers: Vec<(String, String)>,
-    /// Corps `send`/`fetch({body})`, si présent.
-    pub body: Option<String>,
+    /// Corps `send`/`fetch({body})`, si présent — octets bruts
+    /// (JS-C338, même discipline que [`crate::xhr::XhrRequest`]).
+    pub body: Option<Vec<u8>>,
     /// URL du script worker — référent et base de résolution.
     pub referrer: String,
     /// `Request.mode` de l'émission (miroir JS-C77).

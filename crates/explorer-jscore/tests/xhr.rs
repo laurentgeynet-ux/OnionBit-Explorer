@@ -103,7 +103,7 @@ fn post_body_passes_through() {
     );
     let reqs = t.requests.borrow();
     assert_eq!(reqs[0].1.method, "POST");
-    assert_eq!(reqs[0].1.body.as_deref(), Some("a=1&b=2"));
+    assert_eq!(reqs[0].1.body.as_deref(), Some("a=1&b=2".as_bytes()));
 }
 
 #[test]
@@ -395,7 +395,7 @@ fn fetch_resolves_response() {
     assert_eq!(r.method, "POST");
     assert_eq!(r.url, "/api");
     assert_eq!(r.headers, vec![("X-A".to_string(), "1".to_string())]);
-    assert_eq!(r.body.as_deref(), Some("b=2"));
+    assert_eq!(r.body.as_deref(), Some("b=2".as_bytes()));
     let h = *h;
     drop(reqs);
     respond(&mut e, h, 201, "made");
@@ -691,7 +691,7 @@ fn c66_fetch_request_input() {
         assert_eq!(r.method, "PUT");
         assert_eq!(r.url, "/rq");
         assert_eq!(r.headers, vec![("x-r".to_string(), "7".to_string())]);
-        assert_eq!(r.body.as_deref(), Some("q=8"));
+        assert_eq!(r.body.as_deref(), Some("q=8".as_bytes()));
         let h = *h;
         drop(reqs);
         respond(&mut e, h, 200, "ok");
@@ -704,7 +704,7 @@ fn c66_fetch_request_input() {
     );
     let reqs = t.requests.borrow();
     assert_eq!(reqs[1].1.method, "POST");
-    assert_eq!(reqs[1].1.body.as_deref(), Some("z"));
+    assert_eq!(reqs[1].1.body.as_deref(), Some("z".as_bytes()));
     // `{headers: new Headers(...)}` accepté en opts.
     drop(reqs);
     describe(
@@ -735,7 +735,7 @@ fn c67_fetch_body_formdata_urlencoded() {
     );
     let reqs = t.requests.borrow();
     let r = &reqs[0].1;
-    assert_eq!(r.body.as_deref(), Some("u=lou+x&n=1"));
+    assert_eq!(r.body.as_deref(), Some("u=lou+x&n=1".as_bytes()));
     assert!(
         r.headers
             .iter()
@@ -773,7 +773,7 @@ fn c67_xhr_send_formdata_urlencoded() {
     );
     let reqs = t.requests.borrow();
     let r = &reqs[0].1;
-    assert_eq!(r.body.as_deref(), Some("k=v+v"));
+    assert_eq!(r.body.as_deref(), Some("k=v+v".as_bytes()));
     assert!(
         r.headers
             .iter()
@@ -859,7 +859,7 @@ fn c67_fetch_xhr_body_usp() {
     );
     let reqs = t.requests.borrow();
     let (r0, r1) = (&reqs[0].1, &reqs[1].1);
-    assert_eq!(r0.body.as_deref(), Some("a=1&b=x+y"));
+    assert_eq!(r0.body.as_deref(), Some("a=1&b=x+y".as_bytes()));
     assert!(
         r0.headers
             .iter()
@@ -868,7 +868,7 @@ fn c67_fetch_xhr_body_usp() {
         "headers: {:?}",
         r0.headers
     );
-    assert_eq!(r1.body.as_deref(), Some("q=test+me"));
+    assert_eq!(r1.body.as_deref(), Some("q=test+me".as_bytes()));
     assert!(
         r1.headers
             .iter()
@@ -1064,12 +1064,12 @@ fn c70_body_blob_and_res_blob() {
     {
         let reqs = t.requests.borrow();
         let (r0, r1) = (&reqs[0].1, &reqs[1].1);
-        assert_eq!(r0.body.as_deref(), Some("contenu"));
+        assert_eq!(r0.body.as_deref(), Some("contenu".as_bytes()));
         assert!(r0
             .headers
             .iter()
             .any(|(k, v)| k == "Content-Type" && v == "text/plain"));
-        assert_eq!(r1.body.as_deref(), Some("fdata"));
+        assert_eq!(r1.body.as_deref(), Some("fdata".as_bytes()));
         assert!(r1
             .headers
             .iter()
@@ -1118,7 +1118,7 @@ fn c70_formdata_file_filename() {
         let body = reqs[0].1.body.clone().unwrap_or_default();
         assert_eq!(
             body,
-            "plain=v&file=doc.txt&raw=blob&named=renamed.bin&s=set.bin"
+            b"plain=v&file=doc.txt&raw=blob&named=renamed.bin&s=set.bin".to_vec()
         );
     }
     // `fd.get` garde la valeur File (proto conservé).

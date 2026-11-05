@@ -12921,17 +12921,27 @@ fn nav_send_beacon(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value>
     if url.is_empty() {
         return Ok(Value::Bool(false));
     }
-    let body = match arg(args, 1) {
-        Value::Undefined => None,
-        v => Some(e.to_js_string(v)?),
+    // Corps binaire (JS-C338 : `ArrayBuffer`/vues/`Blob` partent
+    // sans stringify) — le `Content-Type` suggéré est propagé
+    // (spec `sendBeacon` : `text/plain` pour les chaînes est
+    // laissé au transport, conforme à l'existant).
+    let (body, ct) = match arg(args, 1) {
+        Value::Undefined => (None, None),
+        v => {
+            let (b, c) = crate::xhr::body_init_bytes(e, v)?;
+            (Some(b), c)
+        }
     };
     let Some(t) = &e.xhr.transport else {
         return Ok(Value::Bool(false));
     };
+    let headers = ct
+        .map(|c| vec![("Content-Type".into(), c)])
+        .unwrap_or_default();
     t.send(&XhrRequest {
         method: "POST".into(),
         url,
-        headers: Vec::new(),
+        headers,
         body,
         // Spec `sendBeacon` : `mode: no-cors` + `credentials:
         // include` (JS-C77 — le beacon part avec les cookies,
