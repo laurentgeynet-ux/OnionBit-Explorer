@@ -10956,66 +10956,92 @@ impl Engine {
     /// appelé après chaque `Host::invoke`/`Host::set` traité :
     /// les callbacks courent *dans* l'opération (spec) et leurs
     /// propres mutations ré-alimentent la file (boucle).
+    /// JS-C344 : la première erreur est **retenue** puis propagée
+    /// après vidange du lot — un `connectedCallback` fautif sur
+    /// un CE ne doit pas perdre les réactions sœurs déjà
+    /// extraites par `mem::take` (§B-97 #6 : sur `YouTube`, un
+    /// seul des ~80 `ytd-*` en échec gelait tout le lot suivant).
     ///
     /// # Errors
-    /// Propage l'exception d'un callback (même modèle que les
-    /// listeners d'événements du moteur).
+    /// Propage la **première** exception d'un callback (même
+    /// modèle que les listeners d'événements du moteur) après
+    /// traitement complet des réactions en file.
     pub(crate) fn drain_ce_reactions(&mut self) -> JsResult<()> {
         let Some((dom, cache)) = self.dom_ctx.clone() else {
             return Ok(());
         };
+        let mut first_err: Option<Thrown> = None;
         loop {
             let recs = std::mem::take(&mut dom.borrow_mut().ce_reactions);
             if recs.is_empty() {
-                return Ok(());
+                return match first_err {
+                    Some(err) => Err(err),
+                    None => Ok(()),
+                };
             }
             for rec in recs {
-                match rec {
-                    crate::dom::CeReaction::Connected(n) => {
-                        let (upgraded, failed) = {
-                            let d = dom.borrow();
-                            (d.ce.upgraded.contains_key(&n), d.ce.failed.contains(&n))
-                        };
-                        if failed {
-                            continue;
-                        }
-                        if upgraded {
-                            let el = node_value(self, &dom, &cache, n);
-                            ce_fire0(self, el, "connectedCallback")?;
-                        } else {
-                            // Upgrade à l'insertion — `ce_upgrade_node`
-                            // tire ctor + attrChanged + connected.
-                            ce_upgrade_node(self, &dom, &cache, n)?;
-                        }
-                    }
-                    crate::dom::CeReaction::Disconnected(n) => {
-                        let live = {
-                            let d = dom.borrow();
-                            d.ce.upgraded.contains_key(&n) && !d.ce.failed.contains(&n)
-                        };
-                        if !live {
-                            continue;
-                        }
-                        let el = node_value(self, &dom, &cache, n);
-                        ce_fire0(self, el, "disconnectedCallback")?;
-                    }
-                    crate::dom::CeReaction::AttrChanged {
-                        node,
-                        name,
-                        old,
-                        new,
-                    } => {
-                        let live = {
-                            let d = dom.borrow();
-                            d.ce.upgraded.contains_key(&node) && !d.ce.failed.contains(&node)
-                        };
-                        if !live {
-                            continue;
-                        }
-                        let el = node_value(self, &dom, &cache, node);
-                        ce_fire(self, el, "attributeChangedCallback", name, old, new)?;
+                if let Err(err) = self.ce_reaction(rec, &dom, &cache) {
+                    if first_err.is_none() {
+                        first_err = Some(err);
                     }
                 }
+            }
+        }
+    }
+
+    /// Une réaction custom element — extraction pour que
+    /// `drain_ce_reactions` isole son `Err` sans perdre le
+    /// reste du lot (JS-C344).
+    fn ce_reaction(
+        &mut self,
+        rec: crate::dom::CeReaction,
+        dom: &DomRef,
+        cache: &NodeCache,
+    ) -> JsResult<()> {
+        match rec {
+            crate::dom::CeReaction::Connected(n) => {
+                let (upgraded, failed) = {
+                    let d = dom.borrow();
+                    (d.ce.upgraded.contains_key(&n), d.ce.failed.contains(&n))
+                };
+                if failed {
+                    return Ok(());
+                }
+                if upgraded {
+                    let el = node_value(self, dom, cache, n);
+                    ce_fire0(self, el, "connectedCallback")
+                } else {
+                    // Upgrade à l'insertion — `ce_upgrade_node`
+                    // tire ctor + attrChanged + connected.
+                    ce_upgrade_node(self, dom, cache, n)
+                }
+            }
+            crate::dom::CeReaction::Disconnected(n) => {
+                let live = {
+                    let d = dom.borrow();
+                    d.ce.upgraded.contains_key(&n) && !d.ce.failed.contains(&n)
+                };
+                if !live {
+                    return Ok(());
+                }
+                let el = node_value(self, dom, cache, n);
+                ce_fire0(self, el, "disconnectedCallback")
+            }
+            crate::dom::CeReaction::AttrChanged {
+                node,
+                name,
+                old,
+                new,
+            } => {
+                let live = {
+                    let d = dom.borrow();
+                    d.ce.upgraded.contains_key(&node) && !d.ce.failed.contains(&node)
+                };
+                if !live {
+                    return Ok(());
+                }
+                let el = node_value(self, dom, cache, node);
+                ce_fire(self, el, "attributeChangedCallback", name, old, new)
             }
         }
     }

@@ -9887,6 +9887,18 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   `element_geom_rect`. Verrous
   `c343_resize_observer_geometry` 2/2 ;
   canaris `dom` 245/245.
+- [x] **JS-C344. `drain_ce_reactions`
+  résilient aux erreurs individuelles**
+  (§B-97 #6, roadmap YouTube P2.E — le
+  `mem::take` + `?` perdait les réactions
+  sœurs d'un CE fautif : ~80 `ytd-*`, un
+  seul throw gelait le montage) — corps
+  extrait en `ce_reaction`, première
+  `Thrown` retenue puis propagée après
+  vidange complète de la file (callback
+  ré-alimenté inclus). Verrous
+  `c344_ce_reactions_resilience` 2/2 ;
+  canaris `c322` 4/4, `dom` 245/245.
 
 ## Tâches continues
 
