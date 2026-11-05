@@ -1048,6 +1048,15 @@ fn worker_main(
         let _ = out.send(WorkerEvent::Fail(s));
     };
     let mut e = Engine::new();
+    // §B-91 — un `WorkerGlobalScope` n'a PAS de `window`
+    // (spec) : `"undefined"==typeof window` est le test
+    // d'environnement canonique des bundles worker (bitmovin
+    // `webworkify`, hls.js, dash.js — `a=p()` câble `onmessage`
+    // seulement si `window` est absent). `builtins::install`
+    // le pose pour le scope page : retiré ici, sinon tout le
+    // dispatch `onmessage` du worker saute en silence.
+    let g0 = e.global;
+    e.delete_prop(g0, "window");
     e.set_op_limit(op_limit);
     e.install_timers();
     e.hooks.page_url = spec.to_string();
