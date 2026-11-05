@@ -6806,6 +6806,22 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   offre `metadata` JSON + claim
   → lecteur. 92/92 + 68/68.
 
+- [x] **Étape 193. `loop` runtime
+  + buffered contigu** (`jscore`
+  +`js`+`core`+`app/`) :
+  `MediaCmd::Loop{on}` tous
+  étages (setter claimé → ordre
+  +miroir interne, non claimé →
+  miroir seul conservé) → SSE
+  `{"type":"loop","on"}` →
+  `setLoop` → `set_loop(-1|0)`.
+  `bufferedAheadEnd(tête)` =
+  fin du segment contenant la
+  tête → barre buffered en
+  extent contigu. Verrous :
+  cmd+miroir, `loopSets`, ×3
+  ranges. 14/14 + 69/69.
+
 - [ ] **Écarts terrain — vol humain
   22/10 (release `39ab821`, FFI)** :
   second run humain — trois constats

@@ -1236,6 +1236,7 @@ impl Session {
                     explorer_js::JsMediaCmd::FastSeek { ms } => MediaCmd::FastSeek { ms },
                     explorer_js::JsMediaCmd::Volume { v } => MediaCmd::Volume { v },
                     explorer_js::JsMediaCmd::Muted { on } => MediaCmd::Muted { on },
+                    explorer_js::JsMediaCmd::Loop { on } => MediaCmd::Loop { on },
                     explorer_js::JsMediaCmd::Rate { r } => MediaCmd::Rate { r },
                 };
                 let _ = self.events.send(CoreEvent::MediaCommand {
@@ -1358,6 +1359,9 @@ pub fn media_event_json(ev: &CoreEvent) -> Option<(&'static str, String)> {
                     }
                     MediaCmd::Muted { on } => {
                         serde_json::json!({ "type": "muted", "on": on })
+                    }
+                    MediaCmd::Loop { on } => {
+                        serde_json::json!({ "type": "loop", "on": on })
                     }
                     MediaCmd::Rate { r } => {
                         serde_json::json!({ "type": "rate", "r": r })

@@ -6233,6 +6233,9 @@ fn media_set_claimed(
         "muted" => MediaCmd::Muted {
             on: e.to_boolean(v),
         },
+        "loop" => MediaCmd::Loop {
+            on: e.to_boolean(v),
+        },
         _ => return Ok(false),
     };
     let ty = match cmd {
@@ -6242,7 +6245,7 @@ fn media_set_claimed(
     };
     {
         let mut d = dom.borrow_mut();
-        let mut muted = None;
+        let mut bool_attr = None;
         if let Some(st) = d.media.get_mut(&node) {
             match cmd {
                 MediaCmd::Volume { v } => st.volume = v,
@@ -6253,17 +6256,18 @@ fn media_set_claimed(
                         return Ok(true);
                     }
                 }
-                MediaCmd::Muted { on } => muted = Some(on),
+                MediaCmd::Muted { on } => bool_attr = Some(("muted", on)),
+                MediaCmd::Loop { on } => bool_attr = Some(("loop", on)),
                 _ => {}
             }
             let m = st.media;
             d.media_cmds.push((m, cmd));
         }
-        if let Some(on) = muted {
+        if let Some((name, on)) = bool_attr {
             if on {
-                d.set_attr(node, "muted", "");
+                d.set_attr(node, name, "");
             } else {
-                d.remove_attr(node, "muted");
+                d.remove_attr(node, name);
             }
         }
     }
@@ -7562,6 +7566,25 @@ impl Host for NodeHost {
                 if self.dom.borrow().media.contains_key(&node) {
                     media_set_claimed(e, &self.dom, &self.cache, node, key, v)
                 } else {
+                    Ok(true)
+                }
+            }
+            // `loop` (étape 193) — claimé : ordre hôte +
+            // miroir interne à `media_set_claimed` ; non
+            // claimé : miroir d'attribut seul (le getter lit
+            // l'attribut — comportement antérieur conservé),
+            // pas d'ordre sans lecteur.
+            "loop" if is_media(&self.dom, node) => {
+                if self.dom.borrow().media.contains_key(&node) {
+                    media_set_claimed(e, &self.dom, &self.cache, node, key, v)
+                } else {
+                    let on = e.to_boolean(v);
+                    let mut d = self.dom.borrow_mut();
+                    if on {
+                        d.set_attr(node, "loop", "");
+                    } else {
+                        d.remove_attr(node, "loop");
+                    }
                     Ok(true)
                 }
             }

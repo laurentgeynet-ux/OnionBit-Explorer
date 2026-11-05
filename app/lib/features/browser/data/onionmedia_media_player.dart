@@ -1114,6 +1114,9 @@ class OnionMediaPlayer implements MediaPlayer {
       _qtavSetSpeed(_h, r.clamp(0.25, 4.0));
 
   @override
+  Future<void> setLoop(bool on) async => _setLoop?.call(_h, on ? -1 : 0);
+
+  @override
   Future<void> dispose() async {
     if (_disposed) return;
     _disposed = true;

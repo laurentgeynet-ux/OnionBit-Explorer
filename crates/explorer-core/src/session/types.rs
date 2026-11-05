@@ -340,6 +340,12 @@ pub enum MediaCmd {
         /// Muet demandé.
         on: bool,
     },
+    /// `loop = …` runtime (étape 193 — l'attribut scanné
+    /// `offer.loops` ne couvre que la création du lecteur).
+    Loop {
+        /// Boucle demandée.
+        on: bool,
+    },
     /// `playbackRate = …`.
     Rate {
         /// Débit demandé.

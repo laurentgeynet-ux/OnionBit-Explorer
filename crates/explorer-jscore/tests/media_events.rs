@@ -410,3 +410,27 @@ fn media_fastseek_emits_fastseek_cmd() {
     );
     assert_eq!(ev(&mut e, "L.indexOf('seeking')>=0"), "true");
 }
+
+#[test]
+fn media_loop_setter_emits_loop_cmd_and_mirrors_attr() {
+    let (mut e, dom) = engine();
+    let node = claim_and_arm(&mut e, &dom);
+    e.deliver_media_state(node, &rep(0, 60_000, 8_000, MediaState::Playing))
+        .expect("report");
+    ev(&mut e, "v.loop=true;'armed'");
+    let cmds = dom.borrow().media_cmds.clone();
+    assert!(
+        cmds.iter()
+            .any(|&(_, c)| matches!(c, explorer_jscore::MediaCmd::Loop { on } if on)),
+        "media_cmds = {cmds:?}"
+    );
+    assert_eq!(ev(&mut e, "v.loop"), "true", "attribut mirroré");
+    ev(&mut e, "v.loop=false;'disarmed'");
+    let cmds = dom.borrow().media_cmds.clone();
+    assert!(
+        cmds.iter()
+            .any(|&(_, c)| matches!(c, explorer_jscore::MediaCmd::Loop { on } if !on)),
+        "media_cmds = {cmds:?}"
+    );
+    assert_eq!(ev(&mut e, "v.loop"), "false", "attribut retiré");
+}

@@ -614,6 +614,11 @@ pub enum JsMediaCmd {
         /// Muet demandé.
         on: bool,
     },
+    /// `loop = …` — réarmement runtime.
+    Loop {
+        /// Boucle demandée.
+        on: bool,
+    },
     /// `playbackRate`/`defaultPlaybackRate = …`.
     Rate {
         /// Débit demandé.
@@ -4140,6 +4145,7 @@ fn js_media_cmd(c: explorer_jscore::MediaCmd) -> JsMediaCmd {
         explorer_jscore::MediaCmd::FastSeek { ms } => JsMediaCmd::FastSeek { ms },
         explorer_jscore::MediaCmd::Volume { v } => JsMediaCmd::Volume { v },
         explorer_jscore::MediaCmd::Muted { on } => JsMediaCmd::Muted { on },
+        explorer_jscore::MediaCmd::Loop { on } => JsMediaCmd::Loop { on },
         explorer_jscore::MediaCmd::Rate { r } => JsMediaCmd::Rate { r },
     }
 }

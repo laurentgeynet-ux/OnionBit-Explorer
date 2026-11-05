@@ -11,6 +11,7 @@ import 'package:explorer_app/core/settings/app_settings.dart';
 import 'package:explorer_app/features/browser/domain/bookmark.dart';
 import 'package:explorer_app/features/browser/domain/browser_tab.dart';
 import 'package:explorer_app/features/browser/domain/media_offer.dart';
+import 'package:explorer_app/features/browser/data/media_player.dart';
 import 'package:explorer_app/features/browser/data/onionmedia_media_player.dart';
 import 'package:explorer_app/features/browser/domain/reload_result.dart';
 import 'package:explorer_app/features/browser/presentation/browser_controller.dart';
@@ -366,6 +367,7 @@ void main() {
       {'type': 'seek', 'ms': 2500, 'fast': true},
       {'type': 'volume', 'v': 0.4},
       {'type': 'muted', 'on': true},
+      {'type': 'loop', 'on': true},
       {'type': 'rate', 'r': 1.5},
     ]) {
       events.ctrl.add(
@@ -380,6 +382,7 @@ void main() {
     expect(p.fastSeeks, 1);
     expect(p.volume, 0.4);
     expect(p.muted, isTrue);
+    expect(p.loopSets, 1);
     expect(p.rate, 1.5);
 
     // media_moved met à jour le rect document.
@@ -1303,6 +1306,20 @@ void main() {
       expect(ctrl.topSlice('1'), isNull);
     },
   );
+
+  test('193 — bufferedAheadEnd : extent contigu en avance', () {
+    const snap = MediaSnapshot(
+      positionMs: 40000,
+      bufferedMs: 50000,
+      state: 'paused',
+      bufferedRanges: [(0, 10000), (40000, 50000)],
+    );
+    expect(snap.bufferedAheadEnd(40000), 50000); // tête dans le 2ᵉ segment
+    expect(snap.bufferedAheadEnd(20000), 50000); // hors segment → max connu
+    const scalar =
+        MediaSnapshot(positionMs: 0, bufferedMs: 9000, state: 'paused');
+    expect(scalar.bufferedAheadEnd(0), 9000); // hôte sans ranges → repli
+  });
 
   test('191 — hwGeoFromWire : géométrie max, tags nus tolérés',
       () {

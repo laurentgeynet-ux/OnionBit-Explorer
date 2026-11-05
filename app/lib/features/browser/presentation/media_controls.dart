@@ -475,7 +475,8 @@ class MediaControlsBar extends StatelessWidget {
                         : ((dragFrac ?? posMs / durMs).clamp(0.0, 1.0)),
                     secondaryTrackValue: durMs <= 0
                         ? 0
-                        : ((s?.bufferedMs ?? 0) / durMs).clamp(0.0, 1.0),
+                        : ((s?.bufferedAheadEnd(posMs) ?? 0) / durMs)
+                            .clamp(0.0, 1.0),
                     onChanged: player == null ? null : onSeekFrac,
                     onChangeEnd: player == null ? null : onSeekEnd,
                   ),

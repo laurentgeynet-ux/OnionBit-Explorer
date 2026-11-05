@@ -532,6 +532,12 @@ pub enum MediaCmd {
         /// Muet demandé.
         on: bool,
     },
+    /// `loop = …` — réarmement runtime (l'attribut scanné
+    /// `offer.loops` ne couvrait que la création).
+    Loop {
+        /// Boucle demandée.
+        on: bool,
+    },
     /// `playbackRate`/`defaultPlaybackRate = …`.
     Rate {
         /// Débit demandé.

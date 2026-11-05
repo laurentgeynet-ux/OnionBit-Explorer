@@ -58,6 +58,17 @@ class MediaSnapshot {
   /// l'hôte n'expose pas `frame_stats` (DLL pré-ABI 5).
   final MediaFrameStats? frameStats;
 
+  /// Fin du segment de cache contenant la tête de lecture
+  /// (barre « buffered » — l'extent *contigu en avance*,
+  /// honnête après seeks disjoints). Tête hors segment → fin
+  /// du dernier intervalle (= le scalaire). Vide → `bufferedMs`.
+  int bufferedAheadEnd(int positionMs) {
+    for (final (s, e) in bufferedRanges) {
+      if (s <= positionMs && e > positionMs) return e;
+    }
+    return bufferedRanges.isEmpty ? bufferedMs : bufferedRanges.last.$2;
+  }
+
   Map<String, dynamic> toJson() => {
     'position_ms': positionMs,
     'buffered_ms': bufferedMs,
@@ -129,6 +140,11 @@ abstract class MediaPlayer {
   Future<void> setVolume(double v);
   Future<void> setMuted(bool on);
   Future<void> setRate(double r);
+
+  /// `video.loop = …` runtime (étape 193 — l'attribut
+  /// `offer.loops` ne couvre que la création) :
+  /// `onionmedia_set_loop(-1|0)`, repli no-op DLL < ABI 5.
+  Future<void> setLoop(bool on);
   Future<void> dispose();
 }
 

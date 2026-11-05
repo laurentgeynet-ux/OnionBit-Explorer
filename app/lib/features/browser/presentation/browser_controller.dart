@@ -1451,6 +1451,8 @@ class BrowserController extends Notifier<BrowserState> {
         unawaited(p.setVolume((cmd['v'] as num?)?.toDouble() ?? 1.0));
       case 'muted':
         unawaited(p.setMuted(cmd['on'] == true));
+      case 'loop':
+        unawaited(p.setLoop(cmd['on'] == true));
       case 'rate':
         unawaited(p.setRate((cmd['r'] as num?)?.toDouble() ?? 1.0));
     }

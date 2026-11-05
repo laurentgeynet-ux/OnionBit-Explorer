@@ -423,6 +423,9 @@ class FakePlayer implements MediaPlayer {
   }
   @override
   Future<void> setRate(double r) async => rate = r;
+  int loopSets = 0;
+  @override
+  Future<void> setLoop(bool on) async => loopSets += on ? 1 : 0;
   @override
   Future<void> dispose() async => disposes++;
 }
