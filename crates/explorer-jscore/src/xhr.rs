@@ -696,7 +696,8 @@ impl Host for XhrHost {
                     target: "media_probe",
                     site = "xhr.open",
                     method = %method,
-                    host = url_host(&url)
+                    host = url_host(&url),
+                    path = url_path_seg(&url)
                 );
                 let mut d = self.data.borrow_mut();
                 // `open` resets the request per spec — `withCredentials`
@@ -2114,6 +2115,27 @@ fn url_host(url: &str) -> &str {
         .unwrap_or("")
 }
 
+/// Premier segment de chemin pour la sonde §B-97 —
+/// `/youtubei`, `/api`, `/undefined` : les URLs **relatives**
+/// (`host = ""`) deviennent lisibles sans exposer la query
+/// (signée sur les URLs média). Borné au segment de routage —
+/// jamais les paramètres ni les segments profonds.
+fn url_path_seg(url: &str) -> &str {
+    let rest = url
+        .split("://")
+        .nth(1)
+        .or_else(|| url.strip_prefix("//"))
+        .unwrap_or(url);
+    let Some(slash) = rest.find('/') else {
+        return "";
+    };
+    let p = rest[slash..].split(['?', '#']).next().unwrap_or("");
+    match p[1..].find('/') {
+        Some(i) => &p[..=i],
+        None => p,
+    }
+}
+
 /// `fetch(url | Request, opts?)` — `input` `Request` fournit
 /// url/method/headers/body par défaut, `opts` surcharge (spec
 /// `fetch` = `new Request(input, init)` puis transport).
@@ -2326,7 +2348,8 @@ pub(crate) fn fetch_fn(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Va
             target: "media_probe",
             site = "fetch.send",
             method = %req.method,
-            host = url_host(&req.url)
+            host = url_host(&req.url),
+            path = url_path_seg(&req.url)
         );
         let h = t.send(&req);
         // `Response.url` = URL absolue résolue contre le document

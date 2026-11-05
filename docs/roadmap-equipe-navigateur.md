@@ -10167,6 +10167,19 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   en amont, rejet silencieux =
   suspect résiduel. Verrou `c357`
   3/3.
+- [x] **JS-C358. Sondes étage 5**
+  (`console.call` première-par-
+  préfixe — la page logue son
+  gate ; `ev.error` — `message`/
+  `filename`/`lineno` d'un
+  ErrorEvent dispatché vs resource
+  error ; `path` premier segment
+  sur `fetch.send`/`xhr.open` —
+  le `host=""` relatif devient
+  `/undefined`/`/youtubei`
+  lisible). Vol 660 : rejet tardif
+  non causal, fenêtre = fetch relatif
+  + `error` → silence.
 
 ## Tâches continues
 

@@ -4362,6 +4362,33 @@ impl Engine {
             if dom.borrow_mut().ce.probe_seen.insert(format!("ev:{ty}")) {
                 tracing::info!(target: "dom_probe", site = "ev.dispatch", ty = %ty);
             }
+            // Sonde §B-97 — un `error` dispatché nomme sa raison
+            // quand c'est un ErrorEvent (`message`/`filename`/
+            // `lineno` dans `props`) : une exception synchrone
+            // non rattrapée tue la boot-chain silencieusement ;
+            // `message` vide = resource error (img/script).
+            if *ty == "error" {
+                let mut message = String::new();
+                let mut at = String::new();
+                for (k, v) in ev.props.borrow().iter() {
+                    match k.as_str() {
+                        "message" => message = self.describe(*v),
+                        "filename" => at = self.describe(*v),
+                        "lineno" => at = format!("{at}:{}", self.describe(*v)),
+                        _ => {}
+                    }
+                }
+                let message: String = message.chars().take(160).collect();
+                let at: String = at.chars().take(120).collect();
+                if dom
+                    .borrow_mut()
+                    .ce
+                    .probe_seen
+                    .insert(format!("er:{message}@{at}"))
+                {
+                    tracing::info!(target: "dom_probe", site = "ev.error", message = %message, at = %at);
+                }
+            }
         }
         let path = {
             let d = dom.borrow();
@@ -13668,6 +13695,18 @@ fn fmt_args(e: &mut Engine, args: &[Value]) -> JsResult<String> {
 
 pub(crate) fn console_line(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     let line = fmt_args(e, args)?;
+    // Sonde §B-97 — la page logue ses propres erreurs de boot
+    // (`yt.www.logError`, `console.warn/error` applicatifs) :
+    // première occurrence par préfixe, bornée à 160 chars —
+    // nomme le gate qui tue l'émetteur `yt-*` sans deviner
+    // l'interne kevlar.
+    if let Some((dom, _)) = &e.dom_ctx {
+        let key: String = line.chars().take(120).collect();
+        if dom.borrow_mut().ce.probe_seen.insert(format!("cl:{key}")) {
+            let line: String = line.chars().take(160).collect();
+            tracing::info!(target: "dom_probe", site = "console.call", line = %line);
+        }
+    }
     if let Some(f) = e.hooks.console.clone() {
         f(line);
     }
