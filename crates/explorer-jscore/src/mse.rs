@@ -1363,46 +1363,16 @@ fn codec_prefix(s: &str) -> Option<String> {
 
 /// `MediaSource.isTypeSupported(mime)` — MSE-4 : pilote par
 /// la table de codecs **déclarés par l'hôte** (`set_media_claim`
-/// — `OnionCodec` dit ce qu'il joue). Conteneur connu + tous les
-/// codecs du param `codecs` déclarés → `"maybe"` ; conteneur
+/// — `OnionCodec` dit ce qu'il joue). Verdict partagé avec
+/// `canPlayType` (§B-95, JS-C345) : conteneur connu + tous les
+/// codecs du param `codecs` déclarés → `"probably"` ; conteneur
 /// connu sans `codecs` → `"maybe"` ; sinon `""`. Table vide →
 /// `""` partout (état C173 préservé — jamais de promesse sans
 /// transport déclaré, ADR-0023).
 /// Support type MSE partagé (JS-C325 — extrait pour
-/// `changeType`) : conteneur connu, et tous les codecs du
-/// param `codecs=` déclarés quand la liste est présente
-/// (le conteneur seul suffit sinon, table non vide requise).
-/// Table vide → `false` partout (état C173 — jamais de
-/// promesse sans transport déclaré, ADR-0023).
+/// `changeType`) : `verdict != ""`.
 fn mse_type_supported(e: &Engine, mime: &str) -> bool {
-    let mime = mime.to_lowercase();
-    // Conteneur `type/subtype` — la borne `;` isole `codecs`.
-    let container = mime.split(';').next().unwrap_or("").trim();
-    let known = matches!(
-        container,
-        "video/mp4"
-            | "audio/mp4"
-            | "video/webm"
-            | "audio/webm"
-            | "video/x-matroska"
-            | "audio/mpeg"
-            | "video/mp2t"
-            | "audio/ogg"
-            | "audio/wav"
-            | "audio/x-wav"
-    );
-    known
-        && match mime.split("codecs=").nth(1) {
-            Some(cstr) => {
-                let cstr = cstr.trim_matches(|c| c == '"' || c == '\'');
-                cstr.split(',')
-                    .filter_map(codec_prefix)
-                    .all(|p| e.mse.declared_codecs.contains(&p))
-            }
-            // Pas de liste : le conteneur connu suffit —
-            // honnête (le codec réel peut manquer).
-            None => !e.mse.declared_codecs.is_empty(),
-        }
+    !media_can_play_type_verdict(e, mime).is_empty()
 }
 
 /// Trace de mesure (Étape 202) — chaque interrogation MIME
@@ -1417,11 +1387,11 @@ fn media_probe_log(site: &str, mime: &str, verdict: &str, declared_n: usize) {
 
 fn ms_is_type_supported(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     let mime = e.to_js_string(args.first().copied().unwrap_or(Value::Undefined))?;
-    let verdict = if mse_type_supported(e, &mime) {
-        "maybe"
-    } else {
-        ""
-    };
+    // §B-95 (JS-C345) — verdict trois niveaux partagé avec
+    // `canPlayType` : liste `codecs=` entièrement déclarée →
+    // `"probably"` (les players qui l'exigent n'étaient jamais
+    // servis — plafond `maybe` levé).
+    let verdict = media_can_play_type_verdict(e, &mime);
     media_probe_log(
         "mse.isTypeSupported",
         &mime,

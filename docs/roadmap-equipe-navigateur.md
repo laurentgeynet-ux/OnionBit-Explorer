@@ -10002,6 +10002,23 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   `c344_ce_reactions_resilience` 2/2 ;
   canaris `c322` 4/4, `dom` 245/245.
 
+- [x] **JS-C345. `isTypeSupported` rend
+  `probably` sur liste `codecs=`
+  entièrement déclarée** (§B-95, vols
+  YouTube 644→649 — le verdict plafonnait
+  à `maybe` alors que `canPlayType`
+  rendait `probably` sur la même table
+  honnête : players exigeant `probably`
+  jamais servis) — `ms_is_type_supported`
+  et le booléen `mse_type_supported`
+  délèguent désormais au verdict trois
+  niveaux partagé `media_can_play_type_
+  verdict` (`probably`/`maybe`/`""`).
+  Assertions recalées (`mse3_transport`,
+  `c78`, session `etape207ter` →
+  `probably`) ; verrous
+  `c345_its_probably` 2/2.
+
 ## Tâches continues
 
 - **Spécialiste JS** : divergence miroir ↔ `explorer-dom` quand

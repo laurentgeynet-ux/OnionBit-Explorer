@@ -562,15 +562,15 @@ fn etape207ter_child_ctx_inherits_declared_codecs() {
     ];
     e.note_media_codecs(&codecs);
     let child = add_child(&mut e, &d, CHILD_URL);
-    // Chaîne complète déclarée → "maybe" (plafond §B-95) dans
-    // l'enfant comme au parent ; avant le fix : "".
+    // Chaîne complète déclarée → "probably" dans l'enfant
+    // comme au parent ; avant le fix : "".
     assert_eq!(
         ev_ctx(
             &mut e,
             child,
             "MediaSource.isTypeSupported('video/mp4;codecs=\"avc1.4D400B\"')",
         ),
-        "maybe"
+        "probably"
     );
     // `canPlayType` même source honnête → "probably".
     assert_eq!(

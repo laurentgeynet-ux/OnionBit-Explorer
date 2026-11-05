@@ -467,12 +467,14 @@ fn mse4_is_type_supported_reflects_declared_codecs() {
         1,
         Some(vec!["avc1.42E01E".to_string(), "mp4a.40.2".to_string()]),
     );
+    // §B-95 (JS-C345) — liste `codecs=` entièrement déclarée
+    // → `"probably"` (le plafond `maybe` est levé).
     assert_eq!(
         ev(
             &mut e,
             "MediaSource.isTypeSupported('video/mp4; codecs=\"avc1.42E01E, mp4a.40.2\"')"
         ),
-        "maybe"
+        "probably"
     );
     assert_eq!(
         ev(
@@ -507,14 +509,14 @@ fn mse4_is_type_supported_reflects_declared_codecs() {
             &mut e2,
             "MediaSource.isTypeSupported('video/mp4; codecs=\"avc1.42E01E\"')"
         ),
-        "maybe"
+        "probably"
     );
     assert_eq!(
         ev(
             &mut e2,
             "MediaSource.isTypeSupported('video/mp4; codecs=\"avc1.42E01E,mp4a.40.2\"')"
         ),
-        "maybe"
+        "probably"
     );
     // Conteneur nu dans le claim → rien de déclaré en plus.
     let mut e3 = engine();

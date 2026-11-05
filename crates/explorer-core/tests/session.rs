@@ -8485,7 +8485,7 @@ async fn etape207ter_iframe_sees_host_declared_codecs() {
     s.pump_net().await;
     let dump = s.frame_dom_dump(id, 0).unwrap();
     assert!(
-        dump.contains("maybe|maybe"),
+        dump.contains("probably|probably"),
         "codecs hôte visibles dans le ctx enfant : {dump}"
     );
 }
