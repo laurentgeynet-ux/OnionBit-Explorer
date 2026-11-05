@@ -8764,6 +8764,15 @@ impl Host for NodeHost {
                         };
                         Ok(Some(e.str_val(crate::mse::media_can_play_type(e, &t))))
                     }
+                    // §B-99 — la méthode existe aussi pré-claim
+                    // (compteurs à zéro via le bras claimé, qui
+                    // tolère l'absence d'entrée `media`) :
+                    // `YouTube` lit `q.droppedVideoFrames` avant
+                    // tout offer/claim — `undefined` tuait le
+                    // bootstrap player en `TypeError`.
+                    "getVideoPlaybackQuality" => {
+                        media_call_claimed(e, &self.dom, &self.cache, node, name, args)
+                    }
                     "addTextTrack" | "captureStream" => Ok(Some(Value::Null)),
                     _ => Ok(Some(Value::Undefined)),
                 }

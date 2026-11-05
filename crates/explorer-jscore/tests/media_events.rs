@@ -365,6 +365,27 @@ fn media_frame_stats_feeds_video_playback_quality() {
     );
 }
 
+/// JS-C339 / mur §B-99 (vol 644) — `getVideoPlaybackQuality()`
+/// répond un objet **avant** tout claim hôte : `YouTube` lit
+/// `q.droppedVideoFrames` pendant le bootstrap player — la
+/// méthode rendait `undefined` pré-claim → `TypeError` fatal.
+#[test]
+fn video_playback_quality_before_claim() {
+    let (mut e, _dom) = engine();
+    // Aucun `set_media_claim` : feature-detect + lecture de
+    // champs — les deux doivent survivre hors-claim.
+    ev(
+        &mut e,
+        "var v=document.getElementById('v');\
+         var t=typeof v.getVideoPlaybackQuality;\
+         var q=(t==='function')?v.getVideoPlaybackQuality():null;\
+         var s=t+'|'+(q&&q.totalVideoFrames)+'|'+(q&&q.droppedVideoFrames)+'|'\
+             +(q&&q.corruptedVideoFrames)+'|'+(q&&q.totalFrameDelay)+'|'\
+             +(q&&q.creationTime);'done'",
+    );
+    assert_eq!(ev(&mut e, "s"), "function|0|0|0|0|0");
+}
+
 #[test]
 fn media_buffered_ranges_from_report_not_scalar() {
     let (mut e, dom) = engine();

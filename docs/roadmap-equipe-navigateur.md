@@ -9810,6 +9810,19 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   canaris xhr 80/80, adapter 32/32,
   worker 16/16.
 
+- [x] **JS-C339. `getVideoPlaybackQuality()`
+  hors-claim** (§B-99, mur `TypeError`
+  `droppedVideoFrames` `/watch` —
+  roadmap YouTube P1.B) — le bras média
+  non-claimé délègue à
+  `media_call_claimed` : objet
+  `VideoPlaybackQuality` complet à
+  compteurs zéro, même forme que le
+  chemin claimé (le claim reprend les
+  compteurs réels via `frame_stats`).
+  Verrou `media_events` ×1 ; suite
+  15/15.
+
 ## Tâches continues
 
 - **Spécialiste JS** : divergence miroir ↔ `explorer-dom` quand
