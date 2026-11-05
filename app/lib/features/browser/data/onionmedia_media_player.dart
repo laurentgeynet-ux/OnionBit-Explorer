@@ -457,6 +457,36 @@ class OnionMediaPlayer implements MediaPlayer {
     return fn == null ? 0 : hwGeoFromWire(_copyOutStr(fn));
   }
 
+  /// dpr de la vue principale — `PlatformDispatcher`
+  /// `implicitView` (aucune dépendance `BuildContext`, la
+  /// seam vit en couche data). 1.0 headless/test.
+  static double get _dpr =>
+      ui.PlatformDispatcher.instance.implicitView?.devicePixelRatio ??
+      1.0;
+
+  /// Besoin d'affichage en **px device** : rect px CSS × dpr².
+  /// 0 = rect vide (`audio` sans controls, 0×0) → pas de
+  /// borne d'affichage utile. Publique : la factory l'appelle
+  /// en prod ; testée unitairement.
+  static int displayPixelsFor(Rect r) {
+    if (r.isEmpty) return 0;
+    final d = _dpr;
+    return (r.width * r.height * d * d).round();
+  }
+
+  /// `min(hw_geo, besoin)` — politique du cap
+  /// `set_max_pixels` : `besoin == 0` → géométrie hw seule
+  /// (rien à affiner) ; `hwGeo == 0` (device absent/muet)
+  /// → besoin seul (borne même le décodage sw — pourquoi
+  /// décoder du 4K pour un overlay 480p) ; les deux nuls →
+  /// pas de cap.
+  @visibleForTesting
+  static int maxPixelsFor(int hwGeo, int besoin) {
+    if (hwGeo <= 0) return besoin;
+    if (besoin <= 0) return hwGeo;
+    return hwGeo < besoin ? hwGeo : besoin;
+  }
+
   /// Parse filaire `tag[@WxH];…` → max `w*h` (0 = rien de
   /// mesurable). `@visibleForTesting` : la tranche géométrie
   /// du binding, sans la DLL.
@@ -568,6 +598,7 @@ class OnionMediaPlayer implements MediaPlayer {
     String referer = '',
     String userAgent = '',
     String preload = 'auto',
+    int displayPixels = 0,
     MediaFramedropConfig? framedrop,
   }) async {
     final lib = _load();
@@ -592,10 +623,11 @@ class OnionMediaPlayer implements MediaPlayer {
     _setHwAccel(lib, h, hwAccel);
     // `set_max_pixels` : cap consommé à `open_*` (sélecteur
     // de rep HLS/DASH direct — no-op MP4/WebM simple et hors
-    // `open_mse*`). Max géométrie hw = budget honnête ; le
-    // raffinement `min(geo, besoin affichage×dpr)` attend
-    // `MediaPaintMeta` (taille device, couche présentation).
-    final geo = p._hwGeoMax();
+    // `open_mse*`). `min(geo_hw, besoin×dpr)` : pourquoi
+    // choisir une rep 8K pour un overlay 480p. Figé à
+    // l'open — un `media_moved` ultérieur reste cappé
+    // (accepté, documenté étape 194).
+    final geo = maxPixelsFor(p._hwGeoMax(), displayPixels);
     if (geo > 0) {
       p._setMaxPixels?.call(h, geo);
     }

@@ -186,6 +186,8 @@ final mediaPlayerFactoryProvider = Provider<MediaPlayerFactory>(
                 referer: referer,
                 userAgent: cfg.mediaUserAgent,
                 preload: offer.preload,
+                displayPixels:
+                    OnionMediaPlayer.displayPixelsFor(offer.rect),
                 framedrop: cfg.mediaFramedrop);
   },
 );

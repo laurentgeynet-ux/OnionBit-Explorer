@@ -6836,16 +6836,16 @@ zéro écriture dépôt média hors
 worktree `perf` ; gouvernance par
 incrément.
 
-- [ ] **Étape 194. `set_max_pixels`
+- [x] **Étape 194. `set_max_pixels`
   raffiné `min(hw_geo, besoin×dpr)`**
-  (`app/`) : `displayPixels` via
-  factory/provider =
-  `rect.w×h×dpr²` (`PlatformDispatcher
+  (`app/`) : `displayPixelsFor(rect)`
+  = CSS×dpr² (`PlatformDispatcher
   .implicitView`, pas de ctx) ;
-  `besoin==0` → repli hw_geo.
-  Cap figé à l'open (documenté) ;
-  MSE hors scope. Verrou : fake
-  reçoit displayPixels = rect×dpr².
+  `maxPixelsFor` = min avec replis
+  (0→autre seule). Cap figé à
+  l'open (documenté) ; MSE hors
+  scope. Verrous : maxPixelsFor ×5
+  + displayPixelsFor. 70/70.
 
 - [ ] **Étape 195. `dropped_frames`
   repli scalaire** (`app/` +

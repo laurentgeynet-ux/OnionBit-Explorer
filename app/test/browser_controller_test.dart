@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 import 'dart:async';
-import 'dart:ui' show Rect;
+import 'dart:ui' show PlatformDispatcher;
 
 import 'package:explorer_app/core/api/events_client.dart';
 import 'package:explorer_app/core/config/app_config.dart';
@@ -15,6 +15,7 @@ import 'package:explorer_app/features/browser/data/media_player.dart';
 import 'package:explorer_app/features/browser/data/onionmedia_media_player.dart';
 import 'package:explorer_app/features/browser/domain/reload_result.dart';
 import 'package:explorer_app/features/browser/presentation/browser_controller.dart';
+import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -1319,6 +1320,30 @@ void main() {
     const scalar =
         MediaSnapshot(positionMs: 0, bufferedMs: 9000, state: 'paused');
     expect(scalar.bufferedAheadEnd(0), 9000); // hôte sans ranges → repli
+  });
+
+  test('194 — maxPixelsFor/displayPixelsFor : min(hw,besoin)',
+      () {
+    expect(OnionMediaPlayer.maxPixelsFor(8192 * 8192, 480 * 270),
+        480 * 270); // besoin < geo → overlay borne la rep
+    expect(OnionMediaPlayer.maxPixelsFor(1024, 8192 * 8192), 1024);
+    expect(OnionMediaPlayer.maxPixelsFor(8192 * 8192, 0),
+        8192 * 8192); // pas de besoin → geo hw seule
+    expect(OnionMediaPlayer.maxPixelsFor(0, 5000), 5000); // sw → besoin
+    expect(OnionMediaPlayer.maxPixelsFor(0, 0), 0); // rien → pas de cap
+    // displayPixelsFor : rect vide → 0 (audio 0×0), plein →
+    // css×dpr² (dpr lu de la vue courante).
+    expect(
+      OnionMediaPlayer.displayPixelsFor(const Rect.fromLTWH(0, 0, 0, 0)),
+      0,
+    );
+    final dpr =
+        PlatformDispatcher.instance.implicitView?.devicePixelRatio ?? 1.0;
+    expect(
+      OnionMediaPlayer.displayPixelsFor(
+          const Rect.fromLTWH(0, 0, 100, 50)),
+      (5000 * dpr * dpr).round(),
+    );
   });
 
   test('191 — hwGeoFromWire : géométrie max, tags nus tolérés',
