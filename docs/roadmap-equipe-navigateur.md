@@ -9838,6 +9838,23 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   discipline JS-C82). Verrous
   `c340_treewalker_shadydom` 9/9 ; canaris
   `dom` 245/245.
+- [x] **JS-C341. `host_method_shadowed`
+  honoré dans `NodeHost::get` /
+  `DocumentHost::get`** (§B-97, mur montage
+  `ShadyDOM` #2 — roadmap YouTube P2.B) —
+  `Host::get` court-circuite `read_prop` :
+  le trampoline natif `appendChild` primait
+  le patch `ShadowRoot.prototype.appendChild`
+  auteur → `P.appendChild(P)` levait
+  `HierarchyRequestError`, composition
+  `<slot>` morte. Garde `host_method_shadowed`
+  sur les bras `NODE_METHODS`, `DOC_METHODS`
+  et `MEDIA_METHODS` : prop scriptée
+  own/chaîne prime, props natives des
+  prototypes moteur ignorées (BoundNative).
+  Verrous `c341_shadow_proto_methods` 6/6 ;
+  canaris `dom` 245/245, `media_events`
+  15/15, `c340` 9/9.
 
 ## Tâches continues
 

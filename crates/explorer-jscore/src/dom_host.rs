@@ -4937,7 +4937,14 @@ impl Host for DocumentHost {
             // & co. rendent une fonction bornée → `invoke` : le
             // sniff `typeof d.createElement` (React `canUseDOM`)
             // l'exige — invoke-only le rendait `undefined`.
-            k if DOC_METHODS.contains(&k) => {
+            // JS-C341 : le trampoline hôte cède le pas à une prop
+            // scriptée sur l'objet ou sa chaîne de prototypes —
+            // `Host::get` court-circuitant `read_prop`, un patch
+            // `Document.prototype`/`Node.prototype` auteur était
+            // masqué par le natif.
+            k if DOC_METHODS.contains(&k)
+                && !matches!(this, Value::Obj(id) if e.host_method_shadowed(id, k)) =>
+            {
                 let nv = e.str_val(k);
                 Ok(Some(e.bound_native(
                     "document.method",
@@ -7576,8 +7583,13 @@ impl Host for NodeHost {
         // Méthodes lisibles (JS-C80) — mêmes raisons que
         // `document` : `el.appendChild` & co. étaient
         // invoke-only ; les frameworks sniffent
-        // `typeof el.m`/`"m" in el`.
-        if NODE_METHODS.contains(&key) {
+        // `typeof el.m`/`"m" in el`. JS-C341 : cède le pas à
+        // une prop scriptée own/chaîne (ShadyDOM pose
+        // `ShadowRoot.prototype.appendChild` — sans le garde,
+        // le trampoline natif primait le patch auteur).
+        if NODE_METHODS.contains(&key)
+            && !matches!(this, Value::Obj(id) if e.host_method_shadowed(id, key))
+        {
             let nv = e.str_val(key);
             return Ok(Some(e.bound_native(
                 "node.method",
@@ -7588,8 +7600,12 @@ impl Host for NodeHost {
         // Méthodes `HTMLMediaElement` lisibles (§B-82) —
         // même voie que `NODE_METHODS` ; le dispatch invoke
         // garde la sémantique (claimé → `media_call_claimed`,
-        // non claimé → stubs honnêtes ADR-0023).
-        if is_media(&self.dom, node) && MEDIA_METHODS.contains(&key) {
+        // non claimé → stubs honnêtes ADR-0023). Même garde
+        // JS-C341 : un `el.play = f` auteur prime le natif.
+        if is_media(&self.dom, node)
+            && MEDIA_METHODS.contains(&key)
+            && !matches!(this, Value::Obj(id) if e.host_method_shadowed(id, key))
+        {
             let nv = e.str_val(key);
             return Ok(Some(e.bound_native(
                 "node.method",
