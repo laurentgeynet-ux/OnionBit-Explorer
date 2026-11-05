@@ -8382,6 +8382,78 @@ async fn etape207_iframe_external_scripts_execute_in_frame_ctx() {
     assert!(dump.contains("booted"), "{dump}");
 }
 
+/// Étape 207-bis (mur II.4-bis du vol 647 — embed `YouTube`)
+/// : l'ordre **document** du flux parse d'un cadre prime le
+/// force-async dyn — un inline appelant une fonction définie
+/// par le `<script src>` qui le précède n'évalue qu'après sa
+/// livraison. Avant : les inline évaluaient au câblage du
+/// contexte → `ReferenceError: writeEmbed is not defined`,
+/// lecteur noir.
+#[tokio::test]
+async fn etape207bis_iframe_inline_waits_for_external_script() {
+    let (mut s, t) = test_session();
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    t.route(
+        "/",
+        200,
+        "<!doctype html><html><body><iframe src=\"/f\"></iframe></body></html>",
+    );
+    t.route(
+        "/f",
+        200,
+        "<!doctype html><html><body><p id=\"o\">?</p>\
+         <script src=\"/base.js\"></script>\
+         <script>writeEmbed();</script></body></html>",
+    );
+    t.route(
+        "/base.js",
+        200,
+        "function writeEmbed(){\
+         document.getElementById('o').textContent='written';}",
+    );
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    s.pump_net().await;
+    assert!(
+        t.paths().contains(&"/base.js".to_string()),
+        "le <script src> du cadre doit être fetché"
+    );
+    let dump = s.frame_dom_dump(id, 0).unwrap();
+    assert!(
+        dump.contains("written"),
+        "inline après src exécuté — writeEmbed défini : {dump}"
+    );
+}
+
+/// II.4-bis — déblocage : un `<script src>` ordonné refusé
+/// (404) livre `error` puis **relâche** la file — l'inline
+/// suivant s'exécute quand même (spec : un script en échec
+/// ne bloque pas le reste du parse).
+#[tokio::test]
+async fn etape207bis_iframe_failed_external_releases_queue() {
+    let (mut s, t) = test_session();
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    t.route(
+        "/",
+        200,
+        "<!doctype html><html><body><iframe src=\"/f\"></iframe></body></html>",
+    );
+    t.route(
+        "/f",
+        200,
+        "<!doctype html><html><body><p id=\"o\">?</p>\
+         <script src=\"/dead.js\"></script>\
+         <script>document.getElementById('o').textContent='after';</script>\
+         </body></html>",
+    );
+    // `/dead.js` non routé → 404 → `error` honnête, file libérée.
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    s.pump_net().await;
+    let dump = s.frame_dom_dump(id, 0).unwrap();
+    assert!(dump.contains("after"), "file relâchée après 404 : {dump}");
+}
+
 /// Les sous-contextes voyagent dans le snapshot bfcache :
 /// back/forward restaure les DOM enfants sans re-fetch.
 #[tokio::test]

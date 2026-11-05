@@ -278,6 +278,12 @@ flowchart TD
   ```
 - **Commit dédié** : `feat(core): Étape 207 — exécution des <script src> externes dans les iframes (mur embed YouTube)`
 
+- **Statut** :
+  - ✅ **Étape 207 livrée** (`938e42e2`) — `Dom::mark_external_scripts_pending` + `install_dom_ctx` (borne `MAX_CTX_PARSE_SCRIPTS=64`) enfilent les `<script src>` du sous-document dans `pending_dyn` ; le rail dyn-script fetch/évalue tagué **ctx enfant** sous l'identité du cadre (`ctx_net_origin` — referer = URL de l'iframe). Verrous `frame_ext_scripts` + `etape207_iframe_external_scripts_execute_in_frame_ctx` verts.
+  - ⚠️ **Vol 647 (`642d9b30`) — mur déplacé : II.4-bis** — les `src=` externes étaient bien fetchés/évalués (`ytembeds.base`, `base.js`), mais les `<script>` **inline** de l'iframe évaluaient au câblage du contexte **avant** leur livraison → `ReferenceError: writeEmbed is not defined`, lecteur noir.
+  - ✅ **Étape 207-bis livrée** — tout le flux parse (`src` + inline) enfilé dans la file ordonnée du rail dyn (`defer_order`) ; `Session.ordered_dyn` sérialise par ctx (`in_flight`/`pump_ordered_dyn`), cycle `readyState`/DCL/`load` du cadre différé à la vidange de la file (spec : DCL après les scripts parseur). Verrous `frame_ext_scripts` (6) + `etape207bis_*` ; 37 canaris iframe verts.
+  - ⏳ **À revalider en vol** — la résolution d'II.4-bis/§B-99 n'est acquise qu'au prochain vol live sur binaire frais (Étape 10).
+
 ---
 
 ### PALIER 4 — Validation Terrain Live & Gate d'Intégration

@@ -1057,8 +1057,29 @@ impl Session {
         dyn_imgs: Vec<explorer_js::DynImgReq>,
         dyn_links: Vec<explorer_js::DynLinkReq>,
     ) {
+        let mut ordered_ctxs = Vec::new();
         for d in dyns {
-            self.spawn_dyn_script(tab, page, base, &d);
+            // Étape 207-bis (mur II.4-bis vol 647) : une balise
+            // **parse-marquée** (`defer_order`) attend son tour
+            // en file par ctx — l'ordre document du sous-
+            // document prime `force-async` : l'inline `writeEmbed()`
+            // de l'embed `YouTube` ne tire qu'après la livraison
+            // de `ytembeds.base`. Les insertions dynamiques
+            // (`defer_order = false`) gardent le tir immédiat.
+            if d.defer_order {
+                ordered_ctxs.push(d.ctx);
+                self.ordered_dyn
+                    .entry((tab, d.ctx))
+                    .or_default()
+                    .queue
+                    .push_back(d);
+            } else {
+                self.spawn_dyn_script(tab, page, base, &d);
+            }
+        }
+        ordered_ctxs.dedup();
+        for ctx in ordered_ctxs {
+            self.pump_ordered_dyn(tab, ctx, page, base);
         }
         // `<iframe>` : fetch puis realm enfant —
         // `commit_dyn_frame` à la réponse.
@@ -1079,6 +1100,11 @@ impl Session {
         for d in dyn_links {
             self.spawn_dyn_link(tab, page, base, &d);
         }
+        // Étape 207-bis — settle : les contextes de cadre
+        // dont la file ordonnée a vidé (ou jamais existé)
+        // tirent leur cycle `readyState`/`load` ici — DCL
+        // n'avance qu'après les scripts parseur (spec).
+        self.frame_ctx_load_events(tab);
     }
 
     /// `import()` dynamique (JS-C100) — l'URL est déjà résolue
@@ -1270,6 +1296,25 @@ impl Session {
         base: &Url,
         d: &explorer_js::DynScriptReq,
     ) {
+        // Sandbox `!allow-scripts` (CAP-149, Étape 207-bis) :
+        // le miroir enfile tout le flux parse du cadre — les
+        // balises d'un cadre à scripting désactivé ne doivent
+        // ni fetch ni évaluer (`error` honnête, comme un refus
+        // CSP — insertion dynamique couverte au passage).
+        let scripts_ok = self
+            .tabs
+            .get(&tab)
+            .and_then(|e| {
+                e.frame_ctxs
+                    .iter()
+                    .find(|f| f.ctx == d.ctx)
+                    .and_then(|f| e.frames.get(f.sub))
+            })
+            .is_none_or(|sf| sf.sandbox.is_none_or(|s| s.scripts));
+        if !scripts_ok {
+            self.deliver_dyn_script(tab, d.ctx, d.seq, None);
+            return;
+        }
         let Some((req_page, req_base, doc_policy, csp, _opaque)) =
             self.ctx_net_origin(tab, d.ctx, page, base)
         else {
@@ -1320,6 +1365,71 @@ impl Session {
             }
             // Ni `src` ni texte — balise inerte, rien à livrer.
             (None, None) => {}
+        }
+    }
+
+    /// Relais de livraison vers [`Self::pump_ordered_dyn`] —
+    /// le `src` en vol **vient d'être livré** : `in_flight`
+    /// retombe avant la pompe, sinon la file gelerait à
+    /// jamais (un seul item en vol par ctx — le flag tombé
+    /// est celui de la séquence livrée). `page`/`base`
+    /// dérivés de l'onglet (les balises ordonnées vivent dans
+    /// un ctx enfant : `ctx_net_origin` résout l'origine **du
+    /// cadre** et n'atteint jamais le repli top-level que
+    /// `page`/`base` n'alimentent que pour `JS_CTX_TOP`).
+    fn pump_ordered_dyn_tail(&mut self, tab: TabId, ctx: explorer_js::JsCtxId) {
+        if let Some(q) = self.ordered_dyn.get_mut(&(tab, ctx)) {
+            q.in_flight = false;
+        }
+        let Some((page, base)) = self.tabs.get(&tab).and_then(|e| {
+            e.url
+                .clone()
+                .zip(e.nav_base().cloned().or_else(|| e.url.clone()))
+        }) else {
+            return;
+        };
+        self.pump_ordered_dyn(tab, ctx, &page, &base);
+    }
+
+    /// Relâche la file ordonnée d'un contexte (Étape 207-bis,
+    /// mur II.4-bis) : tant qu'aucun `src` n'est en vol, la
+    /// tête part — texte livré en ligne, `src` fetché puis
+    /// `in_flight` armé jusqu'à `deliver_dyn_done`. Un `src`
+    /// **refusé en ligne** (résolution/mixed-content/CSP ou
+    /// ctx mort — `deliver_dyn_script(None)` synchrone, pas
+    /// de `dyn_tasks`) ne doit pas bloquer la file : son
+    /// `error` a déjà couru, on enchaîne. Appelée après
+    /// l'enfile ([`Self::spawn_dyn_subresources`]) et après
+    /// chaque livraison ordonnée.
+    fn pump_ordered_dyn(&mut self, tab: TabId, ctx: explorer_js::JsCtxId, page: &Url, base: &Url) {
+        loop {
+            let next = {
+                let Some(q) = self.ordered_dyn.get_mut(&(tab, ctx)) else {
+                    return;
+                };
+                if q.in_flight {
+                    return;
+                }
+                let Some(d) = q.queue.pop_front() else {
+                    self.ordered_dyn.remove(&(tab, ctx));
+                    // File vidée : le cycle `readyState`/`load`
+                    // du cadre part (différé depuis le câblage
+                    // — spec : DCL après les scripts parseur).
+                    self.frame_ctx_load_events(tab);
+                    return;
+                };
+                q.in_flight = d.src.is_some();
+                d
+            };
+            let seq = next.seq;
+            self.spawn_dyn_script(tab, page, base, &next);
+            if next.src.is_some() && !self.dyn_tasks.contains_key(&(tab, seq)) {
+                // Refus synchrone — `error` déjà livré :
+                // l'in-flight tombe, la balise suivante part.
+                if let Some(q) = self.ordered_dyn.get_mut(&(tab, ctx)) {
+                    q.in_flight = false;
+                }
+            }
         }
     }
 
@@ -1538,6 +1648,9 @@ impl Session {
             self.queue_apply_sync(tab, s);
         }
         self.after_script(tab);
+        // Étape 207-bis : un module `src` ordonné vient d'être
+        // évalué — la balise parse suivante du ctx part.
+        self.pump_ordered_dyn_tail(tab, ctx);
     }
 
     /// Livraison d'un `<script>` dynamique (CAP-169) — même
@@ -2171,11 +2284,9 @@ impl Session {
         let url = sf.url.clone();
         let html = sf.html.clone();
         let opaque = sf.sandbox.is_some_and(|s| !s.same_origin);
-        // Phase 1 : `SubFrame` rangé, scripts inline collectés
-        // (mêmes contrôles CSP/sandbox que le câblage
-        // statique), realm créé — `frame_ord` relie l'élément
-        // pour `contentWindow`.
-        let Some((sub, scripts, ctx)) = self.prepare_dyn_frame(tab, meta, sf, &url) else {
+        // Phase 1 : `SubFrame` rangé, realm créé —
+        // `frame_ord` relie l'élément pour `contentWindow`.
+        let Some((sub, ctx)) = self.prepare_dyn_frame(tab, meta, sf, &url) else {
             // Realm indisponible → `error` sur l'élément (le
             // `SubFrame` reste rendu, comme un cadre statique
             // sans JS).
@@ -2196,9 +2307,14 @@ impl Session {
         } else {
             self.origin_state(&url)
         };
-        // Phase 3 : miroir installé, scripts évalués, cycle
-        // `readyState` complet puis `load` sur l'élément.
-        let mut errs = Vec::new();
+        // Phase 3 : miroir installé, « loading » posé — le
+        // cycle `readyState` complet (interactive → DCL →
+        // complete → `load`) puis le `load` de l'élément sont
+        // **différés** au settle : `after_script` →
+        // `drain_script_net` enfile/pompe le flux parse
+        // ordonné, `frame_ctx_load_events` tire le cycle à
+        // vidange et livre `el_dyn` (spec : DCL/`load` après
+        // les scripts parseur — Étape 207-bis).
         let Some(entry) = self.tabs.get_mut(&tab) else {
             return;
         };
@@ -2206,119 +2322,57 @@ impl Session {
             return;
         };
         eng.install_dom_ctx(ctx, &html, &url.to_string(), local, &cookie);
-        // « loading » jusqu'au cycle interactive/complete —
-        // retient les `postMessage` entrants pendant les
-        // scripts du cadre dynamique (étape 130).
+        // « loading » retient les `postMessage` entrants
+        // pendant les scripts du cadre dynamique (étape 130).
         eng.set_ready_state(ctx, "loading");
-        for src in scripts {
-            // §B-1 : même disjoncteur que `eval_ctx_or_report`
-            // — accès direct aux champs, `eng` tient déjà
-            // l'emprunt mutable sur l'entrée.
-            if entry.slow_eval_streak >= js_glue::SLOW_EVAL_CAP {
-                errs.push("rafale d'évals lentes — disjoncteur §B-1".to_string());
-                break;
-            }
-            let t = std::time::Instant::now();
-            let res = eng.eval_ctx(ctx, &src, None);
-            if t.elapsed().as_millis() >= u128::from(self.slow_eval_ms) {
-                entry.slow_eval_streak = entry.slow_eval_streak.saturating_add(1);
-            } else {
-                entry.slow_eval_streak = 0;
-            }
-            if let Err(e) = res {
-                // §B-12 vol 100 : collecte puis passage par la
-                // porte — l'envoi direct contournait le cap
-                // « tas mort » (klaviyo/beacon tournent en
-                // cadres dynamiques).
-                errs.push(format!("{e} — iframe dynamique"));
-            }
-        }
-        eng.set_ready_state(ctx, "interactive");
-        let _ = eng.dispatch_event_ctx(ctx, "readystatechange", &[]);
-        let _ = eng.dispatch_event_ctx(ctx, "DOMContentLoaded", &[]);
-        eng.set_ready_state(ctx, "complete");
-        let _ = eng.dispatch_event_ctx(ctx, "readystatechange", &[]);
-        let _ = eng.dispatch_event_ctx(ctx, "load", &[]);
         entry.frame_ctxs.push(FrameCtx {
             ctx,
             sub,
             url,
             node: explorer_dom::NodeId::from_parts(u32::MAX, u32::MAX),
             opaque,
-            load_fired: true,
+            load_fired: false,
+            el_dyn: Some((meta.ctx, meta.seq)),
         });
-        // `load` sur l'élément — il vit dans le miroir du
-        // ctx **émetteur** (`meta.ctx`), pas de l'enfant.
-        eng.deliver_dyn_frame(meta.ctx, meta.seq, true);
-        let n = eng.run_pending();
-        tracing::trace!(tab, jobs = n, "jobs js après iframe dynamique");
         self.after_script(tab);
-        for m in errs {
-            self.emit_pipeline_error(tab, m);
-        }
     }
 
     /// Phase 1 de [`Self::install_dyn_frame_ctx`] (CAP-171) :
-    /// pousse le `SubFrame`, collecte ses scripts inline
-    /// (mêmes contrôles CSP/`sandbox` que le câblage
-    /// statique — `srcdoc` hérite la CSP de l'émetteur,
-    /// `<script>` externes non fetchés à cette tranche) et
-    /// crée le realm **sous le ctx émetteur**
-    /// (`context_new_in` — `frame_ord` résolu dans son
-    /// miroir). `(index frames, scripts, ctx)` — `None` =
-    /// realm indisponible (le `SubFrame` reste rendu).
+    /// pousse le `SubFrame` et crée le realm **sous le ctx
+    /// émetteur** (`context_new_in` — `frame_ord` résolu dans
+    /// son miroir). `(index frames, ctx)` — `None` = realm
+    /// indisponible (le `SubFrame` reste rendu). Les scripts
+    /// du sous-document ne sont plus collectés ici : depuis
+    /// l'Étape 207-bis `install_dom_ctx` enfile tout le flux
+    /// parse dans la file ordonnée dyn-script (II.4-bis) ;
+    /// sandbox/CSP restent filtrés à `spawn_dyn_script`.
     fn prepare_dyn_frame(
         &mut self,
         tab: TabId,
         meta: &DynFrameMeta,
         sf: SubFrame,
         url: &Url,
-    ) -> Option<(usize, Vec<String>, explorer_js::JsCtxId)> {
-        // Réarmement CMP (étape CMP-4) — lu avant le
-        // `get_mut` qui suit (emprunt disjoint).
-        let rearm = cmp_rearm(self.consent_policy);
+    ) -> Option<(usize, explorer_js::JsCtxId)> {
         let entry = self.tabs.get_mut(&tab)?;
         entry.frames.push(sf);
         let sub = entry.frames.len() - 1;
-        let f = &entry.frames[sub];
-        let (f_base, f_csp) = if f.srcdoc.is_some() {
-            (
-                entry
-                    .nav_base()
-                    .cloned()
-                    .unwrap_or_else(|| entry.url.clone().unwrap_or_else(|| url.clone())),
-                entry.csp.clone(),
-            )
-        } else {
-            (
-                document_base(&f.dom, &f.url)
-                    .0
-                    .unwrap_or_else(|| url.clone()),
-                collect_meta_csp(&f.dom)
-                    .iter()
-                    .map(|v| explorer_net::csp::CspPolicy::parse(v, true))
-                    .collect(),
-            )
-        };
-        let scripts = if f.sandbox.is_some_and(|s| !s.scripts) {
-            Vec::new()
-        } else {
-            collect_scripts(&f.dom, &f.url, &f_base, true, 0, &f_csp, rearm)
-                .into_iter()
-                .filter_map(|i| (!i.module).then_some(i.inline).flatten())
-                .collect()
-        };
         let ctx = entry
             .js
             .as_mut()
             .and_then(|eng| eng.context_new_in(meta.ctx, &url.to_string(), Some(meta.ord)))?;
-        Some((sub, scripts, ctx))
+        Some((sub, ctx))
     }
 
     /// `load`/`error` sur l'élément `<iframe>` miroir
     /// (CAP-171) — relais mince de `deliver_dyn_frame` avec
     /// resynchro (la livraison peut muter le DOM du ctx).
-    fn deliver_dyn_frame_el(&mut self, tab: TabId, ctx: explorer_js::JsCtxId, seq: u64, ok: bool) {
+    pub(crate) fn deliver_dyn_frame_el(
+        &mut self,
+        tab: TabId,
+        ctx: explorer_js::JsCtxId,
+        seq: u64,
+        ok: bool,
+    ) {
         let mutated = {
             let Some(entry) = self.tabs.get_mut(&tab) else {
                 return;
@@ -3173,6 +3227,9 @@ impl Session {
                     let Some((req_page, _rb, doc_policy, csp, _o)) =
                         self.ctx_net_origin(d.tab, meta.ctx, &meta.page, &meta.page)
                     else {
+                        // Origine morte : le graphe ne part pas —
+                        // relâche la file ordonnée (refus).
+                        self.pump_ordered_dyn_tail(d.tab, meta.ctx);
                         return;
                     };
                     self.spawn_dyn_module_graph(
@@ -3199,6 +3256,9 @@ impl Session {
             }
         } else {
             self.deliver_dyn_script(d.tab, meta.ctx, meta.seq, body);
+            // Étape 207-bis : le `src` ordonné est livré —
+            // la balise parse suivante du ctx part.
+            self.pump_ordered_dyn_tail(d.tab, meta.ctx);
         }
     }
 

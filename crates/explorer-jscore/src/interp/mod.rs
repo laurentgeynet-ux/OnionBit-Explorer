@@ -1746,6 +1746,7 @@ impl Engine {
                     charset: attr("charset"),
                     nonce: attr("nonce"),
                     module,
+                    defer_order: d.parse_dyn.contains(&n),
                     ctx,
                 });
             }

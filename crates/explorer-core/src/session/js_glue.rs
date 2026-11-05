@@ -32,7 +32,7 @@ impl Session {
     /// d'évals lentes a atteint `SLOW_EVAL_CAP` (variante
     /// vimeo : rafale `ok=true` hors portée de la deadline
     /// par-script). Partagé par `eval_or_report`,
-    /// `eval_ctx_or_report`, `eval_module_graph` et les
+    /// `eval_module_graph` et les
     /// livraisons dyn (vol 221 : les rafales passaient par
     /// `deliver_dyn_script`, hors des deux seuls sites
     /// couverts — 0 disjoncteur tiré).
@@ -1046,15 +1046,10 @@ impl Session {
     /// [`Self::frame_ctx_load_events`]. Remplit
     /// `entry.frame_ctxs`.
     pub(crate) fn wire_frame_contexts(&mut self, tab: TabId, eng: &mut dyn JsEngine) {
-        // Réarmement CMP (étape CMP-4) — même politique que
-        // le document parent : un `<script type=text/plain>`
-        // marqué dans un cadre réarme pareil (consentement
-        // de session, pas par frame).
-        let rearm = cmp_rearm(self.consent_policy);
         let Some(entry) = self.tabs.get(&tab) else {
             return;
         };
-        let plan = frame_context_plan(entry, rearm);
+        let plan = frame_context_plan(entry);
         if plan.is_empty() {
             return;
         }
@@ -1101,20 +1096,14 @@ impl Session {
                     eng.install_idb_ctx(ctx, &s.load_idb(&eff_url.origin().to_string()));
                 }
             }
-            // « loading » jusqu'au cycle interactive/complete
-            // ci-dessous — retient les `postMessage` entrants
-            // pendant les scripts du cadre (étape 130).
+            // « loading » jusqu'au cycle complet — tiré par
+            // `frame_ctx_load_events` quand la file ordonnée
+            // du ctx a vidé (Étape 207-bis : les scripts
+            // parse du sous-document coulent dans le rail
+            // dyn-script depuis `install_dom_ctx` ; DCL les
+            // attend, spec — et les `postMessage` retenus en
+            // « loading » ne partent qu'après, étape 130).
             eng.set_ready_state(ctx, "loading");
-            for src in &fp.scripts {
-                self.eval_ctx_or_report(tab, eng, ctx, src);
-            }
-            // Cycle de vie du sous-document : `readyState`
-            // « interactive » + `readystatechange` puis DCL
-            // après ses scripts (CAP-170 ; le `load` enfant
-            // est tiré au tail).
-            eng.set_ready_state(ctx, "interactive");
-            let _ = eng.dispatch_event_ctx(ctx, "readystatechange", &[]);
-            let _ = eng.dispatch_event_ctx(ctx, "DOMContentLoaded", &[]);
             fcs.push(FrameCtx {
                 ctx,
                 sub: fp.sub,
@@ -1122,6 +1111,7 @@ impl Session {
                 node: fp.node,
                 opaque: fp.opaque,
                 load_fired: false,
+                el_dyn: None,
             });
         }
         if let Some(entry) = self.tabs.get_mut(&tab) {
@@ -1146,35 +1136,6 @@ impl Session {
             .or_else(|| self.store.as_ref().map(|s| s.load_storage(&key)))
             .unwrap_or_default();
         (local, self.cookies.header_for(url, false))
-    }
-
-    /// `eval_ctx` avec rapport — même discipline que
-    /// [`Self::eval_or_report`] (`PipelineError`, jamais de
-    /// page cassée), adapté au realm `ctx`.
-    fn eval_ctx_or_report(&mut self, tab: TabId, eng: &mut dyn JsEngine, ctx: u32, src: &str) {
-        // Disjoncteur (vol 29 doctolib) : une éval déjà
-        // tombée en timeout fige le worker 30 s — relancer
-        // les scripts suivants dans le même commit = N×30 s
-        // de verrou → daemon entier mort. On saute l'appel.
-        if self.js_stalled(tab) || self.slow_eval_open(tab) {
-            tracing::debug!(
-                tab,
-                ctx,
-                bytes = src.len(),
-                "script iframe sauté — disjoncteur moteur ouvert"
-            );
-            return;
-        }
-        let t = std::time::Instant::now();
-        let res = eng.eval_ctx(ctx, src, None);
-        self.note_eval_ms(tab, t.elapsed().as_millis());
-        if let Err(e) = res {
-            tracing::debug!(tab, ctx, error = %e, "script iframe en échec");
-            if Self::is_engine_stall(&e) {
-                self.mark_js_stall(tab, &e);
-            }
-            self.emit_pipeline_error(tab, format!("{e} — iframe — src «{}»", src_head(src)));
-        }
     }
 
     /// Rejet de promesse non rattrapé → `PipelineError`
@@ -1243,49 +1204,90 @@ impl Session {
     /// `load` sur l'élément `<iframe>` côté parent
     /// (`onload=` — étape 134). Appelé au `sub_commit_tail`
     /// **avant** le `load` du document top-level (spec : le
-    /// `load` de la page attend ses sous-contextes).
+    /// `load` de la page attend ses sous-contextes) **et**
+    /// comme settle à chaque vidange de rail ordonné
+    /// (Étape 207-bis).
     pub(crate) fn frame_ctx_load_events(&mut self, tab: TabId) {
-        // CAP-171 : un `<iframe>` dynamique installé pendant
-        // les scripts du commit a déjà tiré son cycle —
-        // `load_fired` le saute ici (jamais de double
-        // `readystatechange`/`load`).
-        let fcs: Vec<(u32, NodeId)> = self.tabs.get_mut(&tab).map_or_else(Vec::new, |e| {
+        // CAP-171 + Étape 207-bis : le cycle de vie du sous-
+        // document (`interactive` → DCL → `complete` → `load`)
+        // n'est plus tiré au câblage — il attend la vidange
+        // de la file ordonnée `ordered_dyn` du ctx (spec :
+        // les scripts parseur précèdent `DOMContentLoaded` ;
+        // les `postMessage` retenus en « loading » partent
+        // alors **après** l'enregistrement des listeners —
+        // mur `iframe_postmessage_parent_to_child`). Un
+        // `<iframe>` dynamique à file déjà vide tire son
+        // cycle ici-même — `load_fired` verrouille tout
+        // double tir.
+        let fcs: Vec<(u32, NodeId)> = self.tabs.get(&tab).map_or_else(Vec::new, |e| {
             e.frame_ctxs
-                .iter_mut()
-                .filter_map(|f| {
-                    (!f.load_fired).then(|| {
-                        f.load_fired = true;
-                        (f.ctx, f.node)
-                    })
-                })
+                .iter()
+                .filter(|f| !f.load_fired)
+                .filter(|f| self.ordered_dyn_idle(tab, f.ctx))
+                .map(|f| (f.ctx, f.node))
                 .collect()
         });
         for (ctx, node) in fcs {
-            // L'événement vit dans le realm enfant (chemin
-            // vide = document de l'enfant) ; sa mutation
-            // éventuelle est synchronisée par le prochain
-            // `sync_frame_mirrors` (appelé via after_script).
-            {
-                let Some(entry) = self.tabs.get_mut(&tab) else {
-                    return;
-                };
-                let Some(eng) = entry.js.as_mut() else {
-                    return;
-                };
-                // `complete` + `readystatechange` dans le realm
-                // enfant **avant** son `load` (CAP-170, spec —
-                // `readyState === "complete"` dans les
-                // listeners `load`).
-                eng.set_ready_state(ctx, "complete");
-                let _ = eng.dispatch_event_ctx(ctx, "readystatechange", &[]);
-                let _ = eng.dispatch_event_ctx(ctx, "load", &[]);
-            }
-            // `onload` sur l'élément <iframe> — le chemin est
-            // re-résolu sur le DOM courant (le `NodeId` peut
-            // être mort après un re-parse de synchro : le
-            // dispatch dégrade en `Ok(false)`, jamais de
-            // livraison au mauvais nœud).
-            self.dispatch_dom_event(tab, "load", node);
+            let el_dyn = self.tabs.get_mut(&tab).and_then(|e| {
+                e.frame_ctxs.iter_mut().find(|f| f.ctx == ctx).map(|f| {
+                    f.load_fired = true;
+                    f.el_dyn
+                })
+            });
+            let el_dyn = el_dyn.unwrap_or_default();
+            self.fire_frame_ctx_cycle(tab, ctx, node, el_dyn);
+        }
+    }
+
+    /// File ordonnée du ctx vide ou inexistante (Étape
+    /// 207-bis) — condition du cycle de vie : aucun `src`
+    /// parse en vol, aucune balise en attente.
+    fn ordered_dyn_idle(&self, tab: TabId, ctx: u32) -> bool {
+        self.ordered_dyn
+            .get(&(tab, ctx))
+            .is_none_or(|q| !q.in_flight && q.queue.is_empty())
+    }
+
+    /// Cycle de vie complet d'un sous-document (CAP-170/171,
+    /// Étape 207-bis) — `interactive`, `readystatechange`,
+    /// `DOMContentLoaded` puis `complete`, `readystatechange`,
+    /// `load` (spec — `readyState === "complete"` dans les
+    /// listeners `load`). Le `load` de l'élément `<iframe>`
+    /// suit : `onload` DOM pour les cadres du parse,
+    /// livraison dyn-frame pour un cadre inséré par script.
+    fn fire_frame_ctx_cycle(
+        &mut self,
+        tab: TabId,
+        ctx: u32,
+        node: NodeId,
+        el_dyn: Option<(u32, u64)>,
+    ) {
+        // L'événement vit dans le realm enfant (chemin vide =
+        // document de l'enfant) ; sa mutation éventuelle est
+        // synchronisée par le prochain `sync_frame_mirrors`
+        // (appelé via after_script).
+        {
+            let Some(entry) = self.tabs.get_mut(&tab) else {
+                return;
+            };
+            let Some(eng) = entry.js.as_mut() else {
+                return;
+            };
+            eng.set_ready_state(ctx, "interactive");
+            let _ = eng.dispatch_event_ctx(ctx, "readystatechange", &[]);
+            let _ = eng.dispatch_event_ctx(ctx, "DOMContentLoaded", &[]);
+            eng.set_ready_state(ctx, "complete");
+            let _ = eng.dispatch_event_ctx(ctx, "readystatechange", &[]);
+            let _ = eng.dispatch_event_ctx(ctx, "load", &[]);
+        }
+        // `onload` sur l'élément <iframe> — le chemin est
+        // re-résolu sur le DOM courant (le `NodeId` peut
+        // être mort après un re-parse de synchro : le
+        // dispatch dégrade en `Ok(false)`, jamais de
+        // livraison au mauvais nœud).
+        self.dispatch_dom_event(tab, "load", node);
+        if let Some((pctx, seq)) = el_dyn {
+            self.deliver_dyn_frame_el(tab, pctx, seq, true);
         }
     }
 
@@ -1710,7 +1712,6 @@ struct FramePlan {
     sub: usize,
     url: Url,
     html: String,
-    scripts: Vec<String>,
     /// Origine opaque (`sandbox` sans
     /// `allow-same-origin`, CAP-149).
     opaque: bool,
@@ -1722,7 +1723,7 @@ struct FramePlan {
 /// 129) : deux cadres homonymes partagent le `SubFrame`
 /// mais reçoivent chacun un realm propre (spec : realms
 /// distincts).
-fn frame_context_plan(entry: &Tab, rearm: bool) -> Vec<FramePlan> {
+fn frame_context_plan(entry: &Tab) -> Vec<FramePlan> {
     let mut plan = Vec::new();
     let (Some(dom), Some(base)) = (entry.dom.as_ref(), entry.url.as_ref()) else {
         return plan;
@@ -1770,49 +1771,21 @@ fn frame_context_plan(entry: &Tab, rearm: bool) -> Vec<FramePlan> {
             }
         };
         let f = &entry.frames[sub];
-        // Politiques du document enfant (132/CAP-145) —
-        // `srcdoc` hérite base + CSP du parent ; un cadre
-        // fetché suit sa `<base href>` propre et ses
-        // `<meta>` CSP.
-        let (f_base, f_csp) = if f.srcdoc.is_some() {
-            (
-                entry.nav_base().cloned().unwrap_or_else(|| base.clone()),
-                entry.csp.clone(),
-            )
-        } else {
-            (
-                document_base(&f.dom, &f.url)
-                    .0
-                    .unwrap_or_else(|| f.url.clone()),
-                collect_meta_csp(&f.dom)
-                    .iter()
-                    .map(|v| explorer_net::csp::CspPolicy::parse(v, true))
-                    .collect::<Vec<_>>(),
-            )
-        };
-        // Scripts **inline** de l'enfant, ordre document —
-        // `max_src = 0` écarte les `src=` externes (sous-
-        // ressources des cadres non fetchées à cette
-        // tranche — journal) ; les modules n'ont pas de
-        // chargeur en contexte. `sandbox` sans
-        // `allow-scripts` (CAP-149) : le realm existe mais
-        // aucun script ne s'exécute — collecte sautée.
+        // Scripts de l'enfant : **aucune collecte ici** —
+        // depuis l'Étape 207-bis tout le flux parse du sous-
+        // document (src + inline) part dans la file ordonnée
+        // `pending_dyn`/`ordered_dyn` du rail dyn-script
+        // (ordre document honoré — vol 647 : l'inline au
+        // câblage tirait avant les `src=` livrés → mur
+        // II.4-bis). CSP/sandbox restent appliqués au spawn
+        // (`spawn_dyn_script` + `ctx_net_origin`).
         let sb = f.sandbox;
-        let scripts = if sb.is_some_and(|s| !s.scripts) {
-            Vec::new()
-        } else {
-            collect_scripts(&f.dom, &f.url, &f_base, true, 0, &f_csp, rearm)
-                .into_iter()
-                .filter_map(|i| (!i.module).then_some(i.inline).flatten())
-                .collect()
-        };
         plan.push(FramePlan {
             ord: u32::try_from(ord).unwrap_or(u32::MAX),
             node,
             sub,
             url: f.url.clone(),
             html: f.html.clone(),
-            scripts,
             opaque: sb.is_some_and(|s| !s.same_origin),
         });
     }
@@ -1839,7 +1812,6 @@ fn blank_frame_plan(dom: &Dom, node: NodeId, ord: usize, base: &Url) -> FramePla
         sub: usize::MAX,
         url: Url::resolve(base, "about:blank").unwrap_or_else(|_| base.clone()),
         html: "<!doctype html><html><head></head><body></body></html>".to_string(),
-        scripts: Vec::new(),
         opaque: sb.is_some_and(|s| !s.same_origin),
     }
 }

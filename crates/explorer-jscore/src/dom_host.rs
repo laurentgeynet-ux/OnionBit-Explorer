@@ -111,6 +111,13 @@ pub struct DynScriptReq {
     /// l'éval classique (un `import`/`export` top-level y
     /// serait un `SyntaxError` avalé — mur réel x-web).
     pub module: bool,
+    /// Script **du parse** d'un sous-document (Étape 207-bis,
+    /// mur II.4-bis vol 647) — `true` = la session le
+    /// sérialise en ordre document derrière les `src` en vol
+    /// du même ctx (un inline ne tire jamais avant l'externe
+    /// qui le précède). `false` = insertion dynamique
+    /// (`force-async` — à réception).
+    pub defer_order: bool,
     /// Contexte émetteur (`JsCtxId`) — la livraison et
     /// `currentScript` visent son miroir, jamais le parent.
     pub ctx: crate::context::CtxId,

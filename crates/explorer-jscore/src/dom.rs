@@ -706,6 +706,15 @@ pub struct Dom {
     /// en attente de fetch/éval par la session
     /// (`Engine::drain_dyn_scripts`). Ordre document.
     pub(crate) pending_dyn: Vec<NodeId>,
+    /// Sous-ensemble de `pending_dyn` marqué **parser** par
+    /// [`Self::mark_parse_scripts_pending`] (Étape 207-bis,
+    /// mur II.4-bis vol 647) : les scripts du parse d'un
+    /// sous-document s'exécutent en **ordre document** — la
+    /// session retient chaque balise derrière un `src` en
+    /// vol. Les scripts insérés dynamiquement restent hors
+    /// du set (`force-async` spec — à réception, jamais
+    /// sérialisés).
+    pub(crate) parse_dyn: HashSet<NodeId>,
     /// `<script>` du parse initial : ordinal document →
     /// nœud (CAP-184). La session numérote les scripts du
     /// **vrai** DOM et `eval_script_el` doit retrouver le
@@ -905,6 +914,7 @@ impl Dom {
             doc_open: true,
             dyn_started: HashSet::new(),
             pending_dyn: Vec::new(),
+            parse_dyn: HashSet::new(),
             script_seqs: HashMap::new(),
             link_seqs: HashMap::new(),
             dyn_img_seen: HashMap::new(),
@@ -1878,20 +1888,23 @@ impl Dom {
         }
     }
 
-    /// CAP-169 / Étape 207 (mur §B-99 embed) : les `<script
-    /// src>` **du parse d'un sous-document** (realm
-    /// `install_dom_ctx` — `<iframe>` `src`/`srcdoc`) sont
-    /// enfilés `pending_dyn` pour fetch/éval par la session,
-    /// comme les scripts insérés dynamiquement. Les balises
-    /// **inline** ne sont pas marquées : elles sont évaluées
-    /// au câblage du contexte (`FramePlan.scripts`) — les
-    /// marquer relancerait une double exécution. `max` borne
-    /// le lot par document ; la voie insertion
-    /// (`note_attached_scripts`) reste dédupée par
-    /// `dyn_started` — un nœud déplacé ne re-fetche pas.
+    /// CAP-169 / Étape 207-bis (murs §B-99 + II.4-bis, vols
+    /// 644/647) : les `<script>` **du parse d'un
+    /// sous-document** (realm `install_dom_ctx` — `<iframe>`
+    /// `src`/`srcdoc`) sont enfilés `pending_dyn` pour
+    /// fetch/éval par la session. `pending_dyn` garde l'ordre
+    /// document ; chaque nœud est aussi versé `parse_dyn`
+    /// (sauf `async` — `force-async` spec, à réception) pour
+    /// que `drain_dyn_scripts` le marque `defer_order` : la
+    /// session sérialise alors le flux derrière les `src` en
+    /// vol — sans quoi l'inline `writeEmbed()` de l'embed
+    /// `YouTube` tirait avant `ytembeds.base`/`base.js`
+    /// (`ReferenceError`, player mort). Les types inertes
+    /// (`text/plain`, `importmap`, …) et `nomodule`-classiques
+    /// restent inertes ; `max` borne le lot par document.
     /// Le document **top-level** n'appelle pas cette méthode :
     /// ses `src=` restent sous la vague `SubJob` session.
-    pub fn mark_external_scripts_pending(&mut self, max: usize) {
+    pub fn mark_parse_scripts_pending(&mut self, max: usize) {
         let mut stack = vec![self.root];
         let mut marked = 0usize;
         while let Some(n) = stack.pop() {
@@ -1904,20 +1917,46 @@ impl Dom {
             }
             // Pas de garde `dyn_started` : `from_html` a déjà
             // marqué **tous** les scripts du parse « already
-            // started » (sinon la file dyn les re-évaluerait).
-            // C'est précisément ce marquage qu'on contourne
-            // ici pour la voie `src` — l'insertion
-            // (`note_attached_scripts`) reste dédupée par le
-            // même `dyn_started` : un nœud déplacé ne re-fetche
-            // pas.
-            if self.nodes[n as usize].tag == "script"
-                && self.attr(n, "src").is_some_and(|s| !s.trim().is_empty())
-            {
+            // started » — c'est précisément ce marquage qu'on
+            // contourne ici. L'insertion (`note_attached_scripts`)
+            // reste dédupée par le même set : un nœud déplacé ne
+            // re-fetche pas.
+            if self.nodes[n as usize].tag == "script" && self.script_parse_exec(n) {
+                let src = self.attr(n, "src").is_some_and(|s| !s.trim().is_empty());
                 self.pending_dyn.push(n);
+                if !(src && self.attr(n, "async").is_some()) {
+                    self.parse_dyn.insert(n);
+                }
                 marked += 1;
             }
             stack.extend(self.nodes[n as usize].children.iter().rev().copied());
         }
+    }
+
+    /// `<script>` du parse à exécuter ? (Étape 207-bis) —
+    /// `type` absent/classique/`module` = exécutable (sous-
+    /// ensemble des « JavaScript MIME types », même table que
+    /// `CLASSIC_SCRIPT_TYPES` côté session) ; tout autre
+    /// `type` est un bloc de données inerte (spec), de même
+    /// qu'un classique `nomodule`. Les marqueurs CMP
+    /// (`type=text/plain` + `optanon-*`) restent inertes ici :
+    /// le réarmement vit dans `collect_scripts` côté session,
+    /// qui ne couvre que le document top-level.
+    fn script_parse_exec(&self, n: NodeId) -> bool {
+        let ty = self
+            .attr(n, "type")
+            .map_or_else(String::new, |t| t.trim().to_ascii_lowercase());
+        let module = ty == "module";
+        let exec = module
+            || matches!(
+                ty.as_str(),
+                "" | "text/javascript"
+                    | "application/javascript"
+                    | "text/ecmascript"
+                    | "application/ecmascript"
+                    | "text/jscript"
+            );
+        exec && (module || self.attr(n, "nomodule").is_none())
     }
 
     /// CAP-169/171 : les `<script>`/`<iframe>` attachés par

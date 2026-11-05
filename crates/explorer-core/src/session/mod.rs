@@ -890,6 +890,16 @@ pub struct Session {
     /// `(tab, seq)` → tâche tokio, livrés sur `net_rx` avec
     /// `NetDone.script` posé (pump [`Session::poll_net`]).
     dyn_tasks: HashMap<(TabId, u64), JoinHandle<()>>,
+    /// Files d'ordonnancement des scripts **parse-marqués**
+    /// par `(tab, ctx)` (Étape 207-bis, mur II.4-bis vol
+    /// 647) — les `<script defer_order>` d'un sous-document
+    /// s'exécutent en ordre document : chaque balise attend
+    /// la livraison du `src` qui la précède (sans quoi
+    /// l'inline `writeEmbed()` de l'embed `YouTube` tirait
+    /// avant `ytembeds.base` → `ReferenceError`). Les
+    /// insertions dynamiques (`defer_order = false`) restent
+    /// `force-async` — jamais enfilées.
+    ordered_dyn: HashMap<(TabId, explorer_js::JsCtxId), OrderedDyn>,
     /// Échecs réseau consécutifs par `(tab, url)` de `fetch`/
     /// XHR script-initiés (§B-60) — alimenté à la livraison
     /// `status: 0`, remis à zéro au premier succès ; au-delà
@@ -1157,6 +1167,7 @@ impl Session {
             ws_sends: HashMap::new(),
             net_tasks: HashMap::new(),
             dyn_tasks: HashMap::new(),
+            ordered_dyn: HashMap::new(),
             fetch_fail_streak: HashMap::new(),
             fetch_held: std::collections::VecDeque::new(),
             max_script_net: cfg.max_script_net,

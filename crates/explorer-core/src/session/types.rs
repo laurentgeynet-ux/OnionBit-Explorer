@@ -858,12 +858,36 @@ pub(crate) struct FrameCtx {
     /// `NetRequest`.
     pub(crate) opaque: bool,
     /// `readystatechange`/`load` déjà tirés dans le realm
-    /// (CAP-171 : un `<iframe>` dynamique installe son
-    /// contexte et tire son cycle complet à la réponse — un
-    /// script parseur peut le faire **avant**
-    /// `frame_ctx_load_events` du même commit, qui ne doit
-    /// pas rejouer le cycle).
+    /// (CAP-171 + Étape 207-bis : le cycle n'est plus tiré
+    /// au câblage — il attend la vidange de la file ordonnée
+    /// `ordered_dyn` du ctx, comme DCL attend les scripts
+    /// parseur ; `load_fired` verrouille tout double tir).
     pub(crate) load_fired: bool,
+    /// `load` à livrer sur l'élément `<iframe>` **dynamique**
+    /// (CAP-171 + Étape 207-bis) — retenu jusqu'au `load` du
+    /// document enfant (spec : `onload` suit le chargement
+    /// du sous-document). `(ctx émetteur, seq dyn-frame)`.
+    /// `None` pour les cadres du parse (leur `load` élément
+    /// passe par `dispatch_dom_event` sur `node`).
+    pub(crate) el_dyn: Option<(u32, u64)>,
+}
+
+/// File ordonnée des scripts **parse-marqués** d'un contexte
+/// (Étape 207-bis, mur II.4-bis vol 647 — embed `YouTube` :
+/// l'inline `writeEmbed()` tirait avant `ytembeds.base`) —
+/// `in_flight` = un `src` de la file est en vol réseau ; les
+/// balises suivantes (inline comprises) attendent dans
+/// `queue`, relâchées dans l'ordre par
+/// [`crate::session::Session::pump_ordered_dyn`] à chaque
+/// livraison.
+#[derive(Default)]
+pub(crate) struct OrderedDyn {
+    /// Un `src` ordonné est en vol réseau — tout le reste de
+    /// la file attend sa livraison.
+    pub(crate) in_flight: bool,
+    /// Balises en attente, ordre document (`DynScriptReq` du
+    /// miroir — `src`/`text` + métadonnées déjà extraites).
+    pub(crate) queue: std::collections::VecDeque<explorer_js::DynScriptReq>,
 }
 
 /// Étape du cycle de vie document tamponnée pendant le

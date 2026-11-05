@@ -7121,6 +7121,33 @@ incrément.
   (session : fetch + referer + DOM
   cadre) ; canaris iframe (35) verts.
 
+- [x] **Étape 207-bis. Ordre document
+  du flux parse des sous-documents**
+  (mur II.4-bis du vol 647 — embed
+  `YouTube` : l'inline `writeEmbed()`
+  évaluait au câblage avant les `src=`
+  du rail → `ReferenceError`, lecteur
+  noir) — tout le flux parse (`src` +
+  inline) enfilé `pending_dyn` ordre
+  document par `mark_parse_scripts_
+  pending` ; `DynScriptReq.defer_order`
+  (async/dynamiques hors-ordre),
+  `Session.ordered_dyn` sérialise par
+  ctx (`in_flight` sur `src` en vol,
+  `pump_ordered_dyn` relâche aux
+  livraisons). Cycle `readyState`/DCL/
+  `load` du cadre **différé** à la
+  vidange de la file (spec : DCL après
+  les scripts parseur — postMessages
+  retenus en `loading` partis après
+  les listeners ; `load` élément dyn
+  via `FrameCtx.el_dyn`). Gate sandbox
+  `!allow-scripts` au spawn. Verrous
+  `frame_ext_scripts` (6) + session
+  `etape207bis_*` (ordre + relâche
+  404) ; canaris iframe (37), dyn_*
+  (24), module (14), lib (96) verts.
+
 - [ ] **Écarts terrain — vol humain
   22/10 (release `39ab821`, FFI)** :
   second run humain — trois constats
