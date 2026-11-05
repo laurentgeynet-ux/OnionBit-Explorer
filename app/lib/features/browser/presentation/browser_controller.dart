@@ -208,7 +208,19 @@ final browserRepositoryProvider = Provider<BrowserRepository>((ref) {
   // de thème ne doit pas rebâtir le dépôt.
   final profile = ref.watch(settingsProvider.select((s) => s.profileDir));
   if (profile.isNotEmpty) setProcessEnv('EXPLORER_PROFILE', profile);
-  final ffi = mode == 'rest' ? null : FfiEngine.tryLoad(cfg);
+  // Oracle `can_play_type` (étape 198) : les préfixes codec
+  // déclarés au spawn sont ceux que la DLL certifie — la
+  // même liste résolue sert le claim (`_claimMedia`).
+  final ffi = mode == 'rest'
+      ? null
+      : FfiEngine.tryLoad(
+          cfg,
+          mediaCodecs: OnionMediaPlayer.resolveMediaCodecs(
+            cfg.mediaCodecs,
+            cfg.mediaCodecProbes,
+            oracle: cfg.mediaCodecOracle,
+          ),
+        );
   ref.onDispose(() => ffi?.dispose());
   return ffi ?? BrowserRepository(ref.watch(apiClientProvider));
 });
@@ -1387,7 +1399,15 @@ class BrowserController extends Notifier<BrowserState> {
   /// continuent côté JS — comportement honnête du contrat).
   Future<void> _claimMedia(String tabId, MediaOffer offer) async {
     try {
-      final ok = await _repo.claimMedia(tabId, offer.id, _cfg.mediaCodecs);
+      final ok = await _repo.claimMedia(
+        tabId,
+        offer.id,
+        OnionMediaPlayer.resolveMediaCodecs(
+          _cfg.mediaCodecs,
+          _cfg.mediaCodecProbes,
+          oracle: _cfg.mediaCodecOracle,
+        ),
+      );
       if (!ok || !ref.mounted) return;
       _patchMedia(tabId, offer.id, (m) => m.copyWith(claimed: true));
       final player =

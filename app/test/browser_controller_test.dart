@@ -1322,6 +1322,52 @@ void main() {
     expect(scalar.bufferedAheadEnd(0), 9000); // hôte sans ranges → repli
   });
 
+  test('198 — resolveMediaCodecs : oracle → préfixes certifiés', () {
+    const declared = ['video/mp4', 'audio/mpeg', 'avc1', 'hev1', 'dts'];
+    const probes = {'avc1': 'm1', 'hev1': 'm2', 'dts': 'm3'};
+    String? verdict(String m) => m == 'm1' ? 'probable' : '';
+    // Seul `avc1` certifié → conteneurs gardés, codecs
+    // filtrés à la mesure (pas de capacité fabriquée).
+    expect(
+      OnionMediaPlayer.resolveMediaCodecs(
+        declared,
+        probes,
+        probe: verdict,
+      ),
+      ['video/mp4', 'audio/mpeg', 'avc1'],
+    );
+    // Sonde indisponible (null partout = DLL absente) →
+    // repli statique complet, jamais de capacité retirée
+    // sans mesure.
+    expect(
+      OnionMediaPlayer.resolveMediaCodecs(
+        declared,
+        probes,
+        probe: (_) => null,
+      ),
+      declared,
+    );
+    // Oracle désactivé → statique tel quel.
+    expect(
+      OnionMediaPlayer.resolveMediaCodecs(
+        declared,
+        probes,
+        oracle: false,
+        probe: verdict,
+      ),
+      declared,
+    );
+    // `maybe` (conteneur seul sans codecs=) ne certifie pas.
+    expect(
+      OnionMediaPlayer.resolveMediaCodecs(
+        declared,
+        probes,
+        probe: (_) => 'maybe',
+      ),
+      declared,
+    );
+  });
+
   test('195 — frameStatsFromScalars : repli pré-ABI5', () {
     // Les deux compteurs absents → null (« absent » du
     // contrat, jamais de zéros fabriqués).

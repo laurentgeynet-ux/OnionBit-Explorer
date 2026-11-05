@@ -748,6 +748,74 @@ class OnionMediaPlayer implements MediaPlayer {
   /// 0 = rect vide (`audio` sans controls, 0×0) → pas de
   /// borne d'affichage utile. Publique : la factory l'appelle
   /// en prod ; testée unitairement.
+  /// Sonde `onionmedia_can_play_type` (Étape 198) — export
+  /// **global** (pas de handle, interrogeable avant
+  /// `onionmedia_new`) : `mime` RFC 6381 → verdict
+  /// `""`/`maybe`/`probable` du registry décodeurs réel.
+  /// `null` = sonde indisponible (DLL ou export absent,
+  /// mime refusé) — le résolveur replie alors sur le
+  /// statique, jamais de capacité retirée sans mesure.
+  static String? probeMimeVerdict(String mime) {
+    try {
+      final lib = _load();
+      final fn = lib.lookupFunction<
+          ffi.Int32 Function(ffi.Pointer<ffi.Char>, ffi.IntPtr,
+              ffi.Pointer<ffi.Char>, ffi.IntPtr),
+          int Function(
+              ffi.Pointer<ffi.Char>, int, ffi.Pointer<ffi.Char>, int)>(
+          'onionmedia_can_play_type');
+      final bytes = mime.codeUnits;
+      final mp = calloc<ffi.Char>(bytes.length);
+      try {
+        for (var i = 0; i < bytes.length; i++) {
+          mp[i] = bytes[i];
+        }
+        final need = fn(mp, bytes.length, ffi.nullptr, 0);
+        if (need < 0) return null;
+        final buf = calloc<ffi.Char>(need + 1);
+        try {
+          final n = fn(mp, bytes.length, buf, need + 1);
+          return n >= 0
+              ? String.fromCharCodes(
+                  buf.cast<ffi.Uint8>().asTypedList(n))
+              : null;
+        } finally {
+          calloc.free(buf);
+        }
+      } finally {
+        calloc.free(mp);
+      }
+    } on Object {
+      return null;
+    }
+  }
+
+  /// Oracle `can_play_type` (Étape 198) — la liste déclarée
+  /// au moteur = entrées conteneur inchangées + préfixes
+  /// codec que `probe` certifie `probable`. Repli
+  /// [declared] intact quand `oracle` est off, la table de
+  /// sondes est vide, ou **aucun** préfixe n'est certifié
+  /// (sonde indisponible — le repli garde le comportement
+  /// historique). `probe` injectable pour les tests.
+  static List<String> resolveMediaCodecs(
+    List<String> declared,
+    Map<String, String> probes, {
+    bool oracle = true,
+    String? Function(String mime)? probe,
+  }) {
+    if (!oracle || probes.isEmpty) return declared;
+    final pfn = probe ?? probeMimeVerdict;
+    final certified = <String>[
+      for (final e in probes.entries)
+        if (pfn(e.value) == 'probable') e.key,
+    ];
+    if (certified.isEmpty) return declared;
+    return [
+      ...declared.where((c) => c.contains('/')),
+      ...certified,
+    ];
+  }
+
   static int displayPixelsFor(Rect r) {
     if (r.isEmpty) return 0;
     final d = _dpr;

@@ -6892,17 +6892,26 @@ incrément.
   prev/next bornés + menu `hh:mm —
   titre` coché. Verrou widget. 73/73.
 
-- [ ] **Étape 198. `can_play_type`
+- [x] **Étape 198. `can_play_type`
   oracle → `mediaCodecs` dynamique**
-  (`app/` + config) : claim/
-  `isTypeSupported` consulte
-  l'oracle RFC 6381 dépôt au lieu
-  de la liste en dur — le vrai cap
-  géométrique MSE (refuser
-  `avc1.640033` = cap 4K). Gate
-  config + mesure vol avant
-  activation (risque de réduire
-  les types déclarés). Cacheable.
+  (`app/` + config) :
+  `OnionMediaPlayer.probeMimeVerdict`
+  (export global, registry réel) +
+  `resolveMediaCodecs` — préfixes
+  `probable` seuls, conteneurs
+  conservés, repli statique si sonde
+  absente (jamais de capacité retirée
+  sans mesure). `mediaCodecOracle`/
+  `mediaCodecProbes` config = décision
+  d'activation. Spawn FFI + claim
+  REST servis. Verrous : 4 cas
+  résolveur. 74/74. Reste la mesure
+  vol corpus pour confirmer la
+  couverture des sondes par site
+  (risque mesuré : un MIME mal
+  orthographié dans `mediaCodecProbes`
+  retire un codec réel → clés à
+  revoir après premier vol).
 
 - [ ] **Étape 199. Petits bindings
   groupés** (`app/`) : `frame_step`/

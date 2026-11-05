@@ -111,6 +111,23 @@ class AppConfig {
       'ac-3',
       'ipcm',
     ],
+    this.mediaCodecOracle = true,
+    this.mediaCodecProbes = const {
+      'avc1': 'video/mp4; codecs="avc1.42E01E"',
+      'hvc1': 'video/mp4; codecs="hvc1.1.6.L120.90"',
+      'hev1': 'video/mp4; codecs="hev1.1.6.L120.90"',
+      'vp09': 'video/webm; codecs="vp09.00.40.08"',
+      'av01': 'video/mp4; codecs="av01.0.08M.08"',
+      'vp08': 'video/webm; codecs="vp08"',
+      'vp8': 'video/webm; codecs="vp8"',
+      'mp4a': 'audio/mp4; codecs="mp4a.40.2"',
+      'mp3': 'audio/mpeg; codecs="mp3"',
+      'opus': 'audio/ogg; codecs="opus"',
+      'vorbis': 'audio/ogg; codecs="vorbis"',
+      'flac': 'audio/ogg; codecs="flac"',
+      'ac-3': 'audio/mp4; codecs="ac-3"',
+      'ipcm': 'audio/wav; codecs="ipcm"',
+    },
     // Miroir du défaut `explorer-net` (`h1.rs`) — même UA sur
     // le HTML et le flux média pour les CDN qui sniffent.
     this.mediaUserAgent =
@@ -264,6 +281,23 @@ class AppConfig {
   /// containers/codecs que le backend OnionMedia sait jouer ;
   /// `canPlayType` côté JS se reflète dessus.
   final List<String> mediaCodecs;
+
+  /// Oracle `onionmedia_can_play_type` (Étape 198) — quand
+  /// actif, les **préfixes codec** déclarés au moteur sont
+  /// ceux que la DLL certifie `probable` (registry réel de
+  /// décodeurs) au lieu de la liste statique ; les entrées
+  /// conteneur sont conservées telles quelles, et le
+  /// statique sert de repli quand la sonde est indisponible
+  /// (DLL absente, export manquant — jamais de capacité
+  /// retirée sans mesure).
+  final bool mediaCodecOracle;
+
+  /// Sondes de l'oracle : préfixe codec déclaré → MIME de
+  /// test (`video/mp4; codecs="…"` RFC 6381). Un préfixe
+  /// sans entrée n'est jamais certifié — la table est
+  /// volontairement alignée sur les préfixes de
+  /// [mediaCodecs].
+  final Map<String, String> mediaCodecProbes;
 
   /// `User-Agent` du lecteur média natif sur les ouvertures
   /// progressives (`onionmedia_set_http_headers`, P-66) —

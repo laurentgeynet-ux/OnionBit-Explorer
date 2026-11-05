@@ -179,7 +179,8 @@ class FfiEngine implements BrowserRepository {
   /// légère : un `dlopen`+symbole tient en millisecondes et
   /// garde la signature sans `await` ; le worker reprend le
   /// chemin gagnant et crée la session hors de l'UI.
-  static FfiEngine? tryLoad(AppConfig config) {
+  static FfiEngine? tryLoad(AppConfig config,
+      {List<String>? mediaCodecs}) {
     if (config.engineMode == 'rest') return null;
     for (final candidate in _candidates(config)) {
       try {
@@ -190,7 +191,7 @@ class FfiEngine implements BrowserRepository {
         return FfiEngine._(
           _FfiWorker.start(candidate),
           candidate,
-          config.mediaCodecs,
+          mediaCodecs ?? config.mediaCodecs,
           _probeAbi(lib),
         );
       } on Object {
