@@ -44,9 +44,13 @@ Trois différences fondamentales :
   YouTube et la chronologie. La `SYNTHESE.md` racine n'est pas
   mise à jour pour un vol YouTube (les entrées §B-97/98/99 qui
   s'y trouvent portent un pointeur vers `youtube/SYNTHESE.md`).
-- `CLAIMS.md` **reste à la racine** : c'est le mécanisme de
-  coordination inter-agents (ports, numéros de vol) — il doit
-  rester unique et central, pas une synthèse.
+- `youtube\CLAIMS.md` : claims **locaux à la campagne** —
+  la campagne YouTube est l'unique activité de vol, le
+  `CLAIMS.md` racine n'est pas touché. Les numéros de vol
+  poursuivent la séquence corpus (dernier vol lu dans
+  `youtube/SYNTHESE_JOURNAL.md`). Si des vols non-YouTube
+  reprennent en parallèle un jour, la coordination centrale
+  redeviendra nécessaire — point à réviser alors.
 
 Nommage : le préfixe `RAPPORT_VOL_` est conservé (grep corpus
 uniforme) — c'est le dossier qui cloisonne, pas le nom. TAG
@@ -69,7 +73,11 @@ usuel : `YOUTUBE`, `YTHOME`, `YTWATCH`, `YTEMBED`, `YTREVALID`.
 cd C:\OnionBit-Explorer-youtube-wt
 git status --short        # doit être propre — sinon, reset
 git fetch                 # si besoin
-git log --oneline main..nav/youtube-fix   # commits landés — relevé AU DÉPART
+# relevé AU DÉPART — base = binaire du DERNIER VOL (lu dans le
+# rapport précédent / youtube/SYNTHESE.md), PAS l'ancienne
+# position du worktree : tout commit jamais volé fait partie
+# du delta à valider, même s'il a landé il y a plusieurs vols.
+git log --oneline --reverse <sha_dernier_vol>..HEAD
 git checkout <sha_campagne>   # HEAD à mesurer, détaché — choisi au départ
 
 # 1.2 binaire frais — target-dir local au worktree dédié
@@ -96,6 +104,10 @@ pwsh -File scripts/spawn_daemon.ps1 -Port 946<N> `
 pwsh -File scripts/vol_joblimit.ps1 -TargetPid <pid> -LimitMB 5120
 pwsh -File scripts/vol_memwatch.ps1 -DaemonPid <pid> -MaxMB 5120 `
   -Log "C:\OnionBit-vol\youtube\logs\_vol<N>_watch.log" &
+
+# 1.6 claim AVANT le premier navigate — ligne dans
+#     youtube\CLAIMS.md (PAS la racine) : vol N, agent N,
+#     tag, cibles, sha mesuré
 ```
 
 Pourquoi chaque variable est exigée :
@@ -223,7 +235,7 @@ synthèse racine n'est pas touchée ; trou nouveau → proposition
    `youtube\SYNTHESE.md`.
 3. `git add youtube/ && git commit` dans `C:\OnionBit-vol`
    (staging ciblé — jamais `-A`, le corpus a d'autres agents
-   en vol) ; ligne `CLAIMS.md` racine libérée.
+   en vol) ; ligne `youtube\CLAIMS.md` libérée.
 4. **STOP — feu vert explicite exigé** : l'équipe de vol kill
    son daemon, publie, puis s'arrête. Aucun vol suivant sans
    accord de l'opérateur (choix du HEAD, du tag, des cibles).
