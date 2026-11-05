@@ -10,7 +10,7 @@
 //! crate — lookahead/backrefs surface as `SyntaxError` (regexp.rs).
 //! Everything installed non-enumerable so `for-in` stays clean.
 
-use crate::heap::{JsResult, NativeFn, ObjKind, Object, Thrown};
+use crate::heap::{JsResult, NativeFn, ObjKind, Object, Prop, Thrown};
 use crate::value::{num_to_js_string, to_int32, to_uint32, ObjId, Value};
 use crate::Engine;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -1144,6 +1144,81 @@ pub(crate) fn with_elems<R>(
     let r = f(e, &mut elems);
     put_elems(e, id, elems)?;
     r
+}
+
+/// Préambule partagé des méthodes `Array` à callback :
+/// `this` → `ObjId`, cb vérifiée callable, `thisArg`. `None`
+/// retourné via `Err` quand la cb n'est pas une fonction.
+fn iter_cb(
+    e: &mut Engine,
+    this: Value,
+    args: &[Value],
+    name: &str,
+) -> JsResult<(ObjId, Value, Value)> {
+    let id = this_array(e, this)?;
+    let cb = arg(args, 0);
+    if !e.is_callable(cb) {
+        return Err(e.type_error(format!("{name} needs a function")));
+    }
+    Ok((id, cb, arg(args, 1)))
+}
+
+/// `length` capturé **une fois** avant itération (spec
+/// `LengthOfArrayLike` — les méthodes à callback figent la borne
+/// avant les appels, les ajouts au-delà sont ignorés). Accesseur
+/// invoqué comme tout `Get` (`read_prop`) ; borne hostile cappée
+/// comme `take_elems`.
+fn iter_len(e: &mut Engine, id: ObjId) -> JsResult<usize> {
+    let v = e.read_prop(Value::Obj(id), Value::Obj(id), "length")?;
+    Ok((e.to_number(v)?.max(0.0) as usize).min(4_000_000))
+}
+
+/// Lecture **vivante** de `this[k]` pendant une itération à
+/// callback — `HasProperty` puis `Get` sur le tableau intact :
+/// la cb reçoit `arr` réellement peuplé (`arr.length`,
+/// `arr.indexOf`, `arr[j]` répondent normalement) et observe les
+/// mutations des indices non encore visités, comme l'exige la
+/// spec (`forEach`/`map`/`filter`/`find`/`reduce`/`flatMap`/
+/// `join`/`sort`).
+///
+/// `take_elems`/`with_elems` `mem::take`nt le backing pour toute
+/// la boucle : `this` lu depuis la cb voyait `length 0` /
+/// `indexOf −1` — la dedup `filter((e,t,i)=>i.indexOf(e)===t)`
+/// du `M3u8Translator` Bitmovin (`hbb`) rejetait toutes les
+/// variantes → aucun adaptation set vidéo → `load()` rejeté
+/// (§B-90, JS-C335).
+///
+/// `None` = `HasProperty` faux (trou dense sans source dans la
+/// chaîne proto) — la sémantique trou s'applique chez l'appelant
+/// (skip pour `forEach`/`filter`/`find`, trou préservé pour
+/// `map`).
+fn iter_get(e: &mut Engine, id: ObjId, k: usize) -> JsResult<Option<Value>> {
+    // Hit dense : zéro alloc, zéro lookup — la voie chaude. Un
+    // objet `arguments` mappé passe par `find_prop` (l'indice
+    // renvoie au slot env, spec `MappedArgumentsObject`).
+    if let Some(o) = e.heap.obj(id) {
+        if o.args_map.is_none() {
+            if let ObjKind::Array(v) = &o.kind {
+                if let Some(v) = v.get(k) {
+                    if !v.is_hole() {
+                        return Ok(Some(*v));
+                    }
+                }
+            }
+        }
+    }
+    // Trou / hors-dense / array-like : `HasProperty` (chaîne
+    // proto comprise) puis `Get` — un accesseur s'exécute avec
+    // `this` = l'objet itéré.
+    match e.find_prop(id, &k.to_string()) {
+        Some(Prop::Data { value, .. }) => Ok(Some(value)),
+        Some(Prop::Acc { get, .. }) => Ok(Some(if e.is_callable(get) {
+            e.call_value(get, Value::Obj(id), &[])?
+        } else {
+            Value::Undefined
+        })),
+        None => Ok(None),
+    }
 }
 
 /// Variante de [`put_elems`] pour les *mutators* (`pop`, `sort`,

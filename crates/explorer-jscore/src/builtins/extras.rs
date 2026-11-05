@@ -183,46 +183,52 @@ pub(crate) fn array_flat(e: &mut Engine, this: Value, args: &[Value]) -> JsResul
         Value::Undefined => 1,
         v => e.to_number(v)? as u32,
     };
-    let out = with_elems(e, id, |e, elems| {
-        let mut out = Vec::new();
-        for v in elems.iter().copied() {
+    // Lecture vivante (`iter_get`, JS-C335) : `IsConcatSpreadable`
+    // et les `Get` descendants observent `this` peuplé (§B-90).
+    let len = iter_len(e, id)?;
+    let mut out = Vec::new();
+    for i in 0..len {
+        if let Some(v) = iter_get(e, id, i)? {
             flat_into(e, v, depth, &mut out)?;
         }
-        Ok(out)
-    })?;
+        if i % 8192 == 0 {
+            e.tick()?;
+        }
+    }
     Ok(e.new_array(out))
 }
 
 pub(crate) fn array_flat_map(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
-    let id = this_array(e, this)?;
-    let cb = arg(args, 0);
-    if !e.is_callable(cb) {
-        return Err(e.type_error("flatMap needs a function"));
-    }
-    let out = with_elems(e, id, |e, elems| {
-        let mut out = Vec::new();
-        for (i, &v) in elems.iter().enumerate() {
-            if v.is_hole() {
-                continue;
-            }
-            let r = e.call_value(cb, arg(args, 1), &[v, Value::Num(i as f64), this])?;
+    let (id, cb, this_arg) = iter_cb(e, this, args, "flatMap")?;
+    let len = iter_len(e, id)?;
+    let mut out = Vec::new();
+    for i in 0..len {
+        if let Some(v) = iter_get(e, id, i)? {
+            let r = e.call_value(cb, this_arg, &[v, Value::Num(i as f64), this])?;
             flat_into(e, r, 1, &mut out)?;
         }
-        Ok(out)
-    })?;
+        if i % 8192 == 0 {
+            e.tick()?;
+        }
+    }
     Ok(e.new_array(out))
 }
 
 pub(crate) fn array_find_last(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
-    let (elems, hits, id) = array_iter_find(e, this, args)?;
-    let out = elems
-        .iter()
-        .zip(&hits)
-        .rev()
-        .find_map(|(&v, &h)| (h == Some(true)).then_some(v))
-        .unwrap_or(Value::Undefined);
-    put_elems(e, id, elems)?;
-    Ok(out)
+    let (id, cb, this_arg) = iter_cb(e, this, args, "findLast")?;
+    let len = iter_len(e, id)?;
+    for i in (0..len).rev() {
+        if let Some(v) = iter_get(e, id, i)? {
+            let r = e.call_value(cb, this_arg, &[v, Value::Num(i as f64), this])?;
+            if e.to_boolean(r) {
+                return Ok(v);
+            }
+        }
+        if i % 8192 == 0 {
+            e.tick()?;
+        }
+    }
+    Ok(Value::Undefined)
 }
 
 pub(crate) fn array_find_last_index(
@@ -230,13 +236,20 @@ pub(crate) fn array_find_last_index(
     this: Value,
     args: &[Value],
 ) -> JsResult<Value> {
-    let (elems, hits, id) = array_iter_find(e, this, args)?;
-    let out = hits
-        .iter()
-        .rposition(|&h| h == Some(true))
-        .map_or(-1.0, |i| i as f64);
-    put_elems(e, id, elems)?;
-    Ok(Value::Num(out))
+    let (id, cb, this_arg) = iter_cb(e, this, args, "findLastIndex")?;
+    let len = iter_len(e, id)?;
+    for i in (0..len).rev() {
+        if let Some(v) = iter_get(e, id, i)? {
+            let r = e.call_value(cb, this_arg, &[v, Value::Num(i as f64), this])?;
+            if e.to_boolean(r) {
+                return Ok(Value::Num(i as f64));
+            }
+        }
+        if i % 8192 == 0 {
+            e.tick()?;
+        }
+    }
+    Ok(Value::Num(-1.0))
 }
 
 // Array iterators — snapshot `Iter` objects (same family as

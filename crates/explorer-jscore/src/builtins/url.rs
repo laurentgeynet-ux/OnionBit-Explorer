@@ -13,32 +13,37 @@ use super::*;
 // ------------------------------------------------------------------
 
 pub(crate) fn array_reduce_right(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
-    let id = this_array(e, this)?;
-    let cb = arg(args, 0);
-    if !e.is_callable(cb) {
-        return Err(e.type_error("reduceRight needs a function"));
-    }
-    let elems = take_elems(e, id)?;
-    let (mut acc, start) = match args.get(1) {
-        Some(v) => (*v, elems.len() as i64 - 1),
+    let (id, cb, _this_arg) = iter_cb(e, this, args, "reduceRight")?;
+    // Itération vivante inversée (`iter_get`, JS-C335) : la cb
+    // voit le tableau peuplé — le `take_elems` d'avant le vidait
+    // pendant la boucle *et* le laissait vide si la cb jetait
+    // (le `put_elems` suivait le `?`, §B-90).
+    let len = iter_len(e, id)? as i64;
+    let (mut acc, start) = if let Some(v) = args.get(1) {
+        (*v, len - 1)
+    } else {
         // Sans init, acc = dernier élément *présent* (spec).
-        None => {
-            if let Some(i) = elems.iter().rposition(|v| !v.is_hole()) {
-                (elems[i], i as i64 - 1)
-            } else {
-                put_elems(e, id, elems)?;
-                return Err(e.type_error("reduceRight of empty array"));
+        let mut i = len - 1;
+        let mut found = None;
+        while i >= 0 {
+            if let Some(v) = iter_get(e, id, i as usize)? {
+                found = Some(v);
+                break;
             }
+            i -= 1;
         }
+        let Some(v) = found else {
+            return Err(e.type_error("reduceRight of empty array"));
+        };
+        (v, i - 1)
     };
-    for i in (0..=start).rev() {
-        let v = elems[i as usize];
-        if v.is_hole() {
-            continue;
+    let mut i = start;
+    while i >= 0 {
+        if let Some(v) = iter_get(e, id, i as usize)? {
+            acc = e.call_value(cb, Value::Undefined, &[acc, v, Value::Num(i as f64), this])?;
         }
-        acc = e.call_value(cb, Value::Undefined, &[acc, v, Value::Num(i as f64), this])?;
+        i -= 1;
     }
-    put_elems(e, id, elems)?;
     Ok(acc)
 }
 

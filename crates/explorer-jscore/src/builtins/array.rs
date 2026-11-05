@@ -147,29 +147,29 @@ pub(crate) fn array_join(e: &mut Engine, this: Value, args: &[Value]) -> JsResul
         Value::Undefined => ",".to_string(),
         v => e.to_js_string(v)?,
     };
-    // `with_elems` repose le backing même si un `toString`
-    // d'élément jette (take/put à l'épreuve des `?`, JS-C319).
-    let joined = with_elems(e, id, |e, elems| {
-        let mut parts = Vec::with_capacity(elems.len());
-        // `parts` et la sortie `join` sont des String natifs hors
-        // compteur du heap — la taille cumulée est gardée en cours
-        // de route (JS-C55 : `Array(1e6).fill('x'.repeat(100)).join()`
-        // materialiserait ~200 Mio d'un coup).
-        let mut total = sep.len().saturating_mul(elems.len().saturating_sub(1));
-        for (i, v) in elems.iter().enumerate() {
-            parts.push(match v {
-                Value::Undefined | Value::Null | Value::Hole => String::new(),
-                _ => e.to_js_string(*v)?,
-            });
-            total = total.saturating_add(parts.last().map_or(0, String::len));
-            if i % 4096 == 0 {
-                e.alloc_guard(total)?;
-            }
+    // Lecture vivante par indice (`iter_get`, JS-C335) : le
+    // `toString` d'un élément observe `this` peuplé — le backing
+    // détaché de `with_elems` le lui masquait (§B-90).
+    let len = iter_len(e, id)?;
+    let mut parts = Vec::with_capacity(len.min(65_536));
+    // `parts` et la sortie `join` sont des String natifs hors
+    // compteur du heap — la taille cumulée est gardée en cours
+    // de route (JS-C55 : `Array(1e6).fill('x'.repeat(100)).join()`
+    // materialiserait ~200 Mio d'un coup).
+    let mut total = sep.len().saturating_mul(len.saturating_sub(1));
+    for i in 0..len {
+        parts.push(match iter_get(e, id, i)? {
+            None | Some(Value::Undefined | Value::Null) => String::new(),
+            Some(v) => e.to_js_string(v)?,
+        });
+        total = total.saturating_add(parts.last().map_or(0, String::len));
+        if i % 4096 == 0 {
+            e.alloc_guard(total)?;
+            e.tick()?;
         }
-        e.alloc_guard(total)?;
-        Ok(parts.join(&sep))
-    })?;
-    Ok(e.str_val(joined))
+    }
+    e.alloc_guard(total)?;
+    Ok(e.str_val(parts.join(&sep)))
 }
 
 pub(crate) fn array_index_of(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
@@ -341,10 +341,22 @@ pub(crate) fn array_sort(e: &mut Engine, this: Value, args: &[Value]) -> JsResul
     }) {
         return Err(e.type_error("cannot sort a frozen array"));
     }
-    // `with_elems` repose le backing quand le comparateur (ou le
-    // `toString` du tri lexicographique) jette — sans elle le
-    // tableau restait vidé (JS-C319).
-    with_elems(e, id, |e, elems| {
+    // Copie matérialisée par `Get` vivant (JS-C335) : le
+    // comparateur lit `this` intact — la spec écrit les
+    // éléments triés seulement après la phase de comparaison,
+    // et le `take` de `with_elems` masquait le tableau au cmp
+    // (§B-90). Les trous restent des trous dans la copie.
+    let len = iter_len(e, id)?;
+    e.alloc_guard(len.saturating_mul(std::mem::size_of::<Value>()))?;
+    let mut elems = Vec::with_capacity(len.min(1 << 20));
+    for i in 0..len {
+        elems.push(iter_get(e, id, i)?.unwrap_or(Value::Hole));
+        if i % 8192 == 0 {
+            e.tick()?;
+        }
+    }
+    {
+        let elems = &mut elems;
         if use_cmp {
             // Merge sort itératif, stable — comparateur script
             // faillible. L'insertion sort O(n²) gelait le moteur
@@ -397,57 +409,43 @@ pub(crate) fn array_sort(e: &mut Engine, this: Value, args: &[Value]) -> JsResul
             keyed.sort_by(|a, b| a.0.cmp(&b.0));
             *elems = keyed.into_iter().map(|(_, v)| v).collect();
         }
-        Ok(())
-    })?;
+    }
+    put_elems(e, id, elems)?;
     Ok(this)
 }
 
 pub(crate) fn array_for_each(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
-    let id = this_array(e, this)?;
-    let cb = arg(args, 0);
-    if !e.is_callable(cb) {
-        return Err(e.type_error("forEach needs a function"));
-    }
-    let this_arg = arg(args, 1);
-    // `with_elems` : une cb qui jette ne doit pas vider `this`
-    // (JS-C319 — erreur souvent avalée par un try/catch du site).
-    with_elems(e, id, |e, elems| {
-        for (i, v) in elems.iter().enumerate() {
-            if v.is_hole() {
-                continue; // `forEach` saute les trous (spec).
-            }
-            e.call_value(cb, this_arg, &[*v, Value::Num(i as f64), this])?;
-            if i % 8192 == 0 {
-                e.tick()?; // cb native : ops-limit relu ici (JS-C55)
-            }
+    let (id, cb, this_arg) = iter_cb(e, this, args, "forEach")?;
+    // Itération vivante (`iter_get`, JS-C335) : `cb` reçoit le
+    // tableau peuplé et observe les mutations des indices non
+    // encore visités — `with_elems` le lui masquait (§B-90).
+    let len = iter_len(e, id)?;
+    for i in 0..len {
+        if let Some(v) = iter_get(e, id, i)? {
+            e.call_value(cb, this_arg, &[v, Value::Num(i as f64), this])?;
         }
-        Ok(Value::Undefined)
-    })
+        if i % 8192 == 0 {
+            e.tick()?; // cb native : ops-limit relu ici (JS-C55)
+        }
+    }
+    Ok(Value::Undefined)
 }
 
 pub(crate) fn array_map(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
-    let id = this_array(e, this)?;
-    let cb = arg(args, 0);
-    if !e.is_callable(cb) {
-        return Err(e.type_error("map needs a function"));
-    }
-    let this_arg = arg(args, 1);
-    let out = with_elems(e, id, |e, elems| {
-        let mut out = Vec::with_capacity(elems.len());
-        for (i, v) in elems.iter().enumerate() {
-            // `map` préserve les trous (spec — `Array(3).map(f)`
-            // reste épars, la cb n'est pas appelée).
-            out.push(if v.is_hole() {
-                Value::Hole
-            } else {
-                e.call_value(cb, this_arg, &[*v, Value::Num(i as f64), this])?
-            });
-            if i % 8192 == 0 {
-                e.tick()?;
-            }
+    let (id, cb, this_arg) = iter_cb(e, this, args, "map")?;
+    let len = iter_len(e, id)?;
+    let mut out = Vec::with_capacity(len.min(1 << 20));
+    for i in 0..len {
+        // `map` préserve les trous (spec — `Array(3).map(f)`
+        // reste épars, la cb n'est pas appelée).
+        out.push(match iter_get(e, id, i)? {
+            Some(v) => e.call_value(cb, this_arg, &[v, Value::Num(i as f64), this])?,
+            None => Value::Hole,
+        });
+        if i % 8192 == 0 {
+            e.tick()?;
         }
-        Ok(out)
-    })?;
+    }
     let a_v = species_array(e, this, out.len())?;
     for (i, v) in out.iter().enumerate() {
         e.set_prop_value(a_v, &i.to_string(), *v)?;
@@ -456,28 +454,20 @@ pub(crate) fn array_map(e: &mut Engine, this: Value, args: &[Value]) -> JsResult
 }
 
 pub(crate) fn array_filter(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
-    let id = this_array(e, this)?;
-    let cb = arg(args, 0);
-    if !e.is_callable(cb) {
-        return Err(e.type_error("filter needs a function"));
-    }
-    let this_arg = arg(args, 1);
-    let out = with_elems(e, id, |e, elems| {
-        let mut out = Vec::new();
-        for (i, v) in elems.iter().enumerate() {
-            if v.is_hole() {
-                continue;
-            }
-            let keep = e.call_value(cb, this_arg, &[*v, Value::Num(i as f64), this])?;
+    let (id, cb, this_arg) = iter_cb(e, this, args, "filter")?;
+    let len = iter_len(e, id)?;
+    let mut out = Vec::new();
+    for i in 0..len {
+        if let Some(v) = iter_get(e, id, i)? {
+            let keep = e.call_value(cb, this_arg, &[v, Value::Num(i as f64), this])?;
             if e.to_boolean(keep) {
-                out.push(*v);
-            }
-            if i % 8192 == 0 {
-                e.tick()?;
+                out.push(v);
             }
         }
-        Ok(out)
-    })?;
+        if i % 8192 == 0 {
+            e.tick()?;
+        }
+    }
     let a_v = species_array(e, this, out.len())?;
     for (i, v) in out.iter().enumerate() {
         e.set_prop_value(a_v, &i.to_string(), *v)?;
@@ -486,35 +476,37 @@ pub(crate) fn array_filter(e: &mut Engine, this: Value, args: &[Value]) -> JsRes
 }
 
 pub(crate) fn array_reduce(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
-    let id = this_array(e, this)?;
-    let cb = arg(args, 0);
-    if !e.is_callable(cb) {
-        return Err(e.type_error("reduce needs a function"));
-    }
-    // Tout dans `with_elems` : l'erreur « reduce of empty array »
-    // comme une cb qui jette reposent le backing (JS-C319).
-    with_elems(e, id, |e, elems| {
-        let (mut acc, start) = match args.get(1) {
-            Some(v) => (*v, 0),
-            // Sans init, l'acc est le premier élément *présent* —
-            // tout-trous ou vide → TypeError (spec).
-            None => {
-                if let Some(i) = elems.iter().position(|v| !v.is_hole()) {
-                    (elems[i], i + 1)
-                } else {
-                    return Err(e.type_error("reduce of empty array"));
-                }
+    let (id, cb, _this_arg) = iter_cb(e, this, args, "reduce")?;
+    let len = iter_len(e, id)?;
+    let (mut acc, start) = if let Some(v) = args.get(1) {
+        (*v, 0)
+    } else {
+        // Sans init, l'acc est le premier élément *présent* —
+        // tout-trous ou vide → TypeError (spec).
+        let mut i = 0;
+        let mut found = None;
+        while i < len {
+            if let Some(v) = iter_get(e, id, i)? {
+                found = Some(v);
+                break;
             }
-        };
-        for (i, v) in elems.iter().enumerate().skip(start) {
-            if v.is_hole() {
-                continue;
-            }
-            acc = e.call_value(cb, Value::Undefined, &[acc, *v, Value::Num(i as f64), this])?;
             if i % 8192 == 0 {
                 e.tick()?;
             }
+            i += 1;
         }
-        Ok(acc)
-    })
+        let Some(v) = found else {
+            return Err(e.type_error("reduce of empty array"));
+        };
+        (v, i + 1)
+    };
+    for i in start..len {
+        if let Some(v) = iter_get(e, id, i)? {
+            acc = e.call_value(cb, Value::Undefined, &[acc, v, Value::Num(i as f64), this])?;
+        }
+        if i % 8192 == 0 {
+            e.tick()?;
+        }
+    }
+    Ok(acc)
 }

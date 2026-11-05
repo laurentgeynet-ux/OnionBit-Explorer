@@ -970,77 +970,79 @@ pub(crate) fn array_includes(e: &mut Engine, this: Value, args: &[Value]) -> JsR
     Ok(Value::Bool(found))
 }
 
-/// Shared `find`/`findIndex`/`some`/`every` loop — `cb(v, i, arr)`.
-pub(crate) fn array_iter_find(
-    e: &mut Engine,
-    this: Value,
-    args: &[Value],
-) -> JsResult<(Vec<Value>, Vec<Option<bool>>, ObjId)> {
-    let id = this_array(e, this)?;
-    let cb = arg(args, 0);
-    if !e.is_callable(cb) {
-        return Err(e.type_error("callback is not a function"));
-    }
-    let elems = take_elems(e, id)?;
-    // Boucle collectée en sous-résultat : une cb qui jette repose
-    // `elems` avant de propager — sinon `this` restait vidé
-    // (JS-C319, même classe que `flat`/`sort`/`join`).
-    let r = (|e: &mut Engine| -> JsResult<Vec<Option<bool>>> {
-        let mut hits = Vec::with_capacity(elems.len());
-        for (i, &v) in elems.iter().enumerate() {
-            if v.is_hole() {
-                hits.push(None); // trou → cb non appelée (spec `HasProperty`).
-                continue;
-            }
-            let r = e.call_value(cb, arg(args, 1), &[v, Value::Num(i as f64), this])?;
-            hits.push(Some(e.to_boolean(r)));
-        }
-        Ok(hits)
-    })(e);
-    match r {
-        Ok(hits) => Ok((elems, hits, id)),
-        Err(er) => {
-            put_elems(e, id, elems)?;
-            Err(er)
-        }
-    }
-}
-
+/// Boucle vivante partagée `find`/`findIndex`/`some`/`every`
+/// (`iter_get`, JS-C335) : `cb` voit le tableau peuplé, court-
+/// circuit spec au premier verdict — l'ancien `array_iter_find`
+/// collectait tous les hits sur un backing détaché (§B-90) et
+/// ne court-circuitait jamais.
 pub(crate) fn array_find(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
-    let (elems, hits, id) = array_iter_find(e, this, args)?;
-    let out = elems
-        .iter()
-        .zip(&hits)
-        .find_map(|(&v, &h)| (h == Some(true)).then_some(v))
-        .unwrap_or(Value::Undefined);
-    put_elems(e, id, elems)?;
-    Ok(out)
+    let (id, cb, this_arg) = iter_cb(e, this, args, "find")?;
+    let len = iter_len(e, id)?;
+    for i in 0..len {
+        if let Some(v) = iter_get(e, id, i)? {
+            let r = e.call_value(cb, this_arg, &[v, Value::Num(i as f64), this])?;
+            if e.to_boolean(r) {
+                return Ok(v);
+            }
+        }
+        if i % 8192 == 0 {
+            e.tick()?;
+        }
+    }
+    Ok(Value::Undefined)
 }
 
 pub(crate) fn array_find_index(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
-    let (elems, hits, id) = array_iter_find(e, this, args)?;
-    let out = hits
-        .iter()
-        .position(|&h| h == Some(true))
-        .map_or(-1.0, |i| i as f64);
-    put_elems(e, id, elems)?;
-    Ok(Value::Num(out))
+    let (id, cb, this_arg) = iter_cb(e, this, args, "findIndex")?;
+    let len = iter_len(e, id)?;
+    for i in 0..len {
+        if let Some(v) = iter_get(e, id, i)? {
+            let r = e.call_value(cb, this_arg, &[v, Value::Num(i as f64), this])?;
+            if e.to_boolean(r) {
+                return Ok(Value::Num(i as f64));
+            }
+        }
+        if i % 8192 == 0 {
+            e.tick()?;
+        }
+    }
+    Ok(Value::Num(-1.0))
 }
 
 pub(crate) fn array_some(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
-    let (elems, hits, id) = array_iter_find(e, this, args)?;
-    let out = hits.contains(&Some(true));
-    put_elems(e, id, elems)?;
-    Ok(Value::Bool(out))
+    let (id, cb, this_arg) = iter_cb(e, this, args, "some")?;
+    let len = iter_len(e, id)?;
+    for i in 0..len {
+        if let Some(v) = iter_get(e, id, i)? {
+            let r = e.call_value(cb, this_arg, &[v, Value::Num(i as f64), this])?;
+            if e.to_boolean(r) {
+                return Ok(Value::Bool(true));
+            }
+        }
+        if i % 8192 == 0 {
+            e.tick()?;
+        }
+    }
+    Ok(Value::Bool(false))
 }
 
 pub(crate) fn array_every(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
-    let (elems, hits, id) = array_iter_find(e, this, args)?;
-    // `every` : les trous sont ignorés — `all` porte sur les
-    // éléments présents seulement (spec).
-    let out = hits.iter().flatten().all(|&h| h);
-    put_elems(e, id, elems)?;
-    Ok(Value::Bool(out))
+    let (id, cb, this_arg) = iter_cb(e, this, args, "every")?;
+    let len = iter_len(e, id)?;
+    for i in 0..len {
+        if let Some(v) = iter_get(e, id, i)? {
+            let r = e.call_value(cb, this_arg, &[v, Value::Num(i as f64), this])?;
+            // Les trous sont ignorés — le verdict porte sur les
+            // éléments présents seulement (spec).
+            if !e.to_boolean(r) {
+                return Ok(Value::Bool(false));
+            }
+        }
+        if i % 8192 == 0 {
+            e.tick()?;
+        }
+    }
+    Ok(Value::Bool(true))
 }
 
 // -- String extras -----------------------------------------------------
