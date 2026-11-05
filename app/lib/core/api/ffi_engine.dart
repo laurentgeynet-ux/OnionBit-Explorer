@@ -10,6 +10,7 @@ import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import '../../features/browser/data/browser_repository.dart';
+import '../../features/browser/data/media_player.dart' show MediaAudioSpec;
 import '../../features/browser/domain/bookmark.dart';
 import '../../features/browser/domain/browser_tab.dart';
 import '../../features/browser/domain/find_result.dart';
@@ -179,8 +180,7 @@ class FfiEngine implements BrowserRepository {
   /// légère : un `dlopen`+symbole tient en millisecondes et
   /// garde la signature sans `await` ; le worker reprend le
   /// chemin gagnant et crée la session hors de l'UI.
-  static FfiEngine? tryLoad(AppConfig config,
-      {List<String>? mediaCodecs}) {
+  static FfiEngine? tryLoad(AppConfig config, {List<String>? mediaCodecs}) {
     if (config.engineMode == 'rest') return null;
     for (final candidate in _candidates(config)) {
       try {
@@ -496,7 +496,13 @@ class FfiEngine implements BrowserRepository {
     final rh = (r['h'] as num).toInt();
     final px = (r['px']! as TransferableTypedData).materialize().asUint8List();
     final done = Completer<ui.Image>();
-    ui.decodeImageFromPixels(px, rw, rh, ui.PixelFormat.rgba8888, done.complete);
+    ui.decodeImageFromPixels(
+      px,
+      rw,
+      rh,
+      ui.PixelFormat.rgba8888,
+      done.complete,
+    );
     return done.future;
   }
 
@@ -554,8 +560,7 @@ class FfiEngine implements BrowserRepository {
 
   @override
   Future<bool> addBookmark(String url, {String title = ''}) async {
-    final r =
-        await _worker.call(opBookmarkAdd, {'url': url, 'title': title});
+    final r = await _worker.call(opBookmarkAdd, {'url': url, 'title': title});
     return (r?['code'] as num?)?.toInt() == 1;
   }
 
@@ -616,8 +621,11 @@ class FfiEngine implements BrowserRepository {
   /// antérieure → `code -1` → `id` `0` (la surface affiche
   /// une erreur douce, jamais de throw).
   @override
-  Future<int> downloadStart(String tabId, String url,
-      {String? filename}) async {
+  Future<int> downloadStart(
+    String tabId,
+    String url, {
+    String? filename,
+  }) async {
     final r = await _worker.call(opDownloadStart, {
       'tab': _idOf(tabId),
       'url': url,
@@ -631,8 +639,7 @@ class FfiEngine implements BrowserRepository {
   /// Voir [downloadStart] — `explorer_download_cancel`.
   @override
   Future<void> cancelDownload(String tabId, int dlId) async {
-    await _worker
-        .call(opDownloadCancel, {'tab': _idOf(tabId), 'dl': dlId});
+    await _worker.call(opDownloadCancel, {'tab': _idOf(tabId), 'dl': dlId});
   }
 
   /// Sonde hit-test (étape 186 — `explorer_hit_targets`,
@@ -642,9 +649,12 @@ class FfiEngine implements BrowserRepository {
   /// sur la double détente M0.
   @override
   Future<({String? link, String? image, int? media, bool mediaKnown})>
-      hitTarget(String tabId, double x, double y) async {
-    final res = await _worker
-        .call(opHit, {'tab': _idOf(tabId), 'x': x, 'y': y});
+  hitTarget(String tabId, double x, double y) async {
+    final res = await _worker.call(opHit, {
+      'tab': _idOf(tabId),
+      'x': x,
+      'y': y,
+    });
     final m = res ?? const <String, Object?>{};
     return (
       link: m['link'] as String?,
@@ -656,14 +666,12 @@ class FfiEngine implements BrowserRepository {
 
   /// Pas d'ABI de lecture du journal profil — `[]`.
   @override
-  Future<List<Map<String, dynamic>>> listDownloads() async =>
-      const [];
+  Future<List<Map<String, dynamic>>> listDownloads() async => const [];
 
   /// Voir [acceptDownload].
   @override
   Future<void> declineDownload(String tabId, int dlId) async {
-    await _worker
-        .call(opDownloadDecline, {'tab': _idOf(tabId), 'dl': dlId});
+    await _worker.call(opDownloadDecline, {'tab': _idOf(tabId), 'dl': dlId});
   }
 
   /// Seam MediaSurface (étape 71e) : l'ABI `explorer_media_*`
@@ -701,10 +709,7 @@ class FfiEngine implements BrowserRepository {
 
   @override
   Future<void> releaseMedia(String tabId, int mediaId) async {
-    await _worker.call(opMediaRelease, {
-      'tab': _idOf(tabId),
-      'media': mediaId,
-    });
+    await _worker.call(opMediaRelease, {'tab': _idOf(tabId), 'media': mediaId});
   }
 
   @override
@@ -717,6 +722,23 @@ class FfiEngine implements BrowserRepository {
       'tab': _idOf(tabId),
       'media': mediaId,
       'report': report,
+    });
+  }
+
+  @override
+  Future<void> mediaAudio(
+    String tabId,
+    int mediaId,
+    MediaAudioSpec spec,
+    Uint8List pcm,
+  ) async {
+    await _worker.call(opMediaAudio, {
+      'tab': _idOf(tabId),
+      'media': mediaId,
+      'rate': spec.sampleRate,
+      'channels': spec.channels,
+      'format': spec.format,
+      'pcm': pcm,
     });
   }
 

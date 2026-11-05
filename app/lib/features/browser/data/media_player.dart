@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 import 'dart:async';
+import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flutter/widgets.dart';
@@ -76,10 +77,10 @@ class MediaTrack {
   String get label => title.isNotEmpty
       ? title
       : language.isNotEmpty
-          ? language
-          : codec.isNotEmpty
-              ? codec
-              : '#$index';
+      ? language
+      : codec.isNotEmpty
+      ? codec
+      : '#$index';
 
   /// Égalité par valeur (Étape 201) — requise pour le diff
   /// structurel `MediaSnapshot` (contenu de liste, pas juste
@@ -280,21 +281,21 @@ class MediaSnapshot {
 
   @override
   int get hashCode => Object.hash(
-        positionMs,
-        bufferedMs,
-        state,
-        durationMs,
-        error,
-        audioTrack,
-        subtitleTrack,
-        subtitle,
-        chapter,
-        loopState,
-        frameStats,
-        Object.hashAll(bufferedRanges),
-        Object.hashAll(tracks),
-        Object.hashAll(chapters),
-      );
+    positionMs,
+    bufferedMs,
+    state,
+    durationMs,
+    error,
+    audioTrack,
+    subtitleTrack,
+    subtitle,
+    chapter,
+    loopState,
+    frameStats,
+    Object.hashAll(bufferedRanges),
+    Object.hashAll(tracks),
+    Object.hashAll(chapters),
+  );
 
   Map<String, dynamic> toJson() => {
     'position_ms': positionMs,
@@ -315,9 +316,7 @@ class MediaSnapshot {
         // perdue en présentation (approximation honnête,
         // le dépôt ne compte pas le décodé pur).
         'decoded':
-            frameStats!.presented +
-            frameStats!.dropped +
-            frameStats!.corrupted,
+            frameStats!.presented + frameStats!.dropped + frameStats!.corrupted,
         'corrupted': frameStats!.corrupted,
         'total_delay_ms': frameStats!.totalDelaySecs * 1000,
       },
@@ -394,6 +393,14 @@ abstract class MediaPlayer {
   /// à chaud sur la famille). No-op hôte sans l'export.
   Future<void> selectAudioStream(int index);
 
+  /// Tap PCM (`AUDIO_MODE_TAP=2` dépôt, Étape 204b —
+  /// ADR-0032) : `onChunk` reçoit les trames interleaved
+  /// (~25 ms) à pousser vers `…/audio` (REST ou op miroir
+  /// FFI) — fire-and-forget borné. `false` = tap
+  /// indisponible (symboles absents, mode refusé) — la
+  /// lecture device reste inchangée, jamais de silence.
+  Future<bool> enableAudioTap(AudioChunkSink onChunk);
+
   /// Sélection de la piste sous-titre embarquée — `-1`
   /// désactivée, `-2` = auto (première FORCED, sinon DEFAULT,
   /// sinon aucune — sémantique `sid` mpv). **Effet
@@ -407,6 +414,18 @@ abstract class MediaPlayer {
   Future<void> seekChapter(int index);
   Future<void> dispose();
 }
+
+/// Fabrique de lecteurs — injectable (fake en test). L'offre
+/// complète passe (branche `mse` : le lecteur a besoin du
+/// flag MSE + de l'identité de surface, pas juste l'URL).
+/// Format PCM d'un flux `audio` tap (Étape 204b —
+/// vocabulaire dépôt : `format` `4` = f32 LE, la
+/// `AUDIO_SPEC` fixe actuelle).
+typedef MediaAudioSpec = ({int sampleRate, int channels, int format});
+
+/// Rappel de chunk PCM tap (Étape 204b) — `chunk` ≤ 16 Ko,
+/// interleaved à la spec annoncée.
+typedef AudioChunkSink = void Function(MediaAudioSpec spec, Uint8List chunk);
 
 /// Fabrique de lecteurs — injectable (fake en test). L'offre
 /// complète passe (branche `mse` : le lecteur a besoin du

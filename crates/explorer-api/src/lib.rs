@@ -188,6 +188,7 @@ fn media_routes() -> Router<ApiState> {
     Router::new()
         .route("/api/tabs/{id}/media", get(list_media))
         .route("/api/tabs/{id}/media/{mid}", get(get_media))
+        .route("/api/tabs/{id}/media/{mid}/audio", post(media_audio))
         .route("/api/tabs/{id}/media/{mid}/claim", post(media_claim))
         .route("/api/tabs/{id}/media/{mid}/segments", get(media_segments))
         .route("/api/tabs/{id}/media/{mid}/release", post(media_release))
@@ -1124,6 +1125,39 @@ fn media_err(e: explorer_core::MediaError) -> Response {
         }
     };
     err(code, &e)
+}
+
+/// Cap d'un chunk `POST …/audio` (Étape 204b) — ~40 ms à la
+/// spec fixe dépôt (384 Ko/s) : un drain 25 ms tient ~9,6 Ko.
+const MEDIA_AUDIO_CHUNK_MAX: usize = 16 * 1024;
+
+/// `POST /api/tabs/{id}/media/{mid}/audio` — push PCM de
+/// l'hôte claimé (Étape 204b, ADR-0032 — tee
+/// `AUDIO_MODE_TAP` dépôt) : corps `application/octet-stream`
+/// interleaved non coupé trame, spec en query
+/// (`?rate=48000&ch=2&fmt=4` — défauts = `AUDIO_SPEC` fixe
+/// dépôt) → ring `pcm` de la surface, lu par le graphe Web
+/// Audio (204c). `413` au-delà de [`MEDIA_AUDIO_CHUNK_MAX`] ;
+/// `410` média mort ; `409` non claimé.
+async fn media_audio(
+    State(st): State<ApiState>,
+    Path((id, mid)): Path<(TabId, u64)>,
+    axum::extract::Query(q): axum::extract::Query<std::collections::HashMap<String, String>>,
+    body: axum::body::Bytes,
+) -> Response {
+    if body.len() > MEDIA_AUDIO_CHUNK_MAX {
+        return err(StatusCode::PAYLOAD_TOO_LARGE, &"audio chunk over 16KiB cap");
+    }
+    let spec = explorer_core::MediaAudioSpec {
+        sample_rate: q.get("rate").and_then(|s| s.parse().ok()).unwrap_or(48_000),
+        channels: q.get("ch").and_then(|s| s.parse().ok()).unwrap_or(2),
+        format: q.get("fmt").and_then(|s| s.parse().ok()).unwrap_or(4),
+    };
+    let mut session = st.session.lock().await;
+    match session.media_audio(id, mid, spec, &body) {
+        Ok(()) => Json(serde_json::json!({ "ok": true })).into_response(),
+        Err(e) => media_err(e),
+    }
 }
 
 /// `GET /api/tabs/{id}/media` → surfaces média vivantes de

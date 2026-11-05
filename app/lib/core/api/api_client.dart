@@ -32,10 +32,7 @@ class ApiClient {
 
   Uri _uri(String path, [Map<String, String>? query]) {
     final base = Uri.parse(config.daemonBaseUrl);
-    return base.replace(
-      path: '${base.path}$path',
-      queryParameters: query,
-    );
+    return base.replace(path: '${base.path}$path', queryParameters: query);
   }
 
   void _sign(HttpClientRequest req) {
@@ -53,8 +50,38 @@ class ApiClient {
     String path, {
     Map<String, dynamic>? body,
     Map<String, String>? query,
-  }) =>
-      _send('POST', path, body: body, query: query);
+  }) => _send('POST', path, body: body, query: query);
+
+  /// `POST` binaire (`application/octet-stream`) → JSON
+  /// décodé — chunk PCM `…/media/{mid}/audio` (Étape 204b).
+  Future<dynamic> postBytes(
+    String path,
+    Uint8List bytes, {
+    Map<String, String>? query,
+  }) async {
+    try {
+      final req = await _http
+          .openUrl('POST', _uri(path, query))
+          .timeout(config.requestTimeout);
+      _sign(req);
+      req.headers.contentType = ContentType.binary;
+      req.add(bytes);
+      final res = await req.close().timeout(config.requestTimeout);
+      final raw = await res.transform(utf8.decoder).join();
+      if (res.statusCode >= 400) {
+        throw ApiException(
+          _extractError(utf8.encode(raw)),
+          statusCode: res.statusCode,
+        );
+      }
+      if (raw.isEmpty) return null;
+      return jsonDecode(raw);
+    } on ApiException {
+      rethrow;
+    } on Object catch (e) {
+      throw ApiException('daemon injoignable : $e');
+    }
+  }
 
   /// `DELETE` → JSON décodé (corps optionnel — `?url=` pour
   /// les signets).
@@ -68,10 +95,8 @@ class ApiClient {
   /// growable facture ~8 octets par élément — une frame de 25 Mo
   /// devenait ~250 Mo de heap (terrain 22/10). Ici : les chunks
   /// ne sont pas recopiés, un seul `Uint8List` sort.
-  Future<Uint8List> getBytes(
-    String path, {
-    Map<String, String>? query,
-  }) async => (await getBytesMeta(path, query: query)).bytes;
+  Future<Uint8List> getBytes(String path, {Map<String, String>? query}) async =>
+      (await getBytesMeta(path, query: query)).bytes;
 
   /// `GET` → octets bruts **+ headers de réponse** (étape
   /// 185 : `/frame` porte `x-explorer-scroll-y` +

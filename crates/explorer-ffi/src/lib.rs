@@ -1440,6 +1440,50 @@ pub unsafe extern "C" fn explorer_media_state(
     }
 }
 
+/// Cap d'un appel [`explorer_media_audio`] — même borne que
+/// la route REST (`16 Ko` ≈ 40 ms de flux à 384 Ko/s).
+const MAX_MEDIA_AUDIO: usize = 16 * 1024;
+
+/// Chunk PCM de la surface claimée (Étape 204b — tee
+/// `AUDIO_MODE_TAP` dépôt, ADR-0032) : `pcm..pcm+len`
+/// interleaved non coupé trame ; `rate`/`channels`/`format`
+/// = spec du chunk (dépôt : 48000/2/`4`=f32 LE) → ring
+/// `pcm` moteur, lu par le graphe Web Audio (204c).
+/// Retour : `0`, `-1` argument (null/vide/>16 Ko),
+/// `-409` non claimée, `-410` morte.
+///
+/// # Safety
+///
+/// `h` issu de [`explorer_create`] ; `pcm..pcm+len` lisible.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn explorer_media_audio(
+    h: *mut ExplorerHandle,
+    tab: u64,
+    media: u64,
+    rate: u32,
+    channels: u32,
+    format: i32,
+    pcm: *const u8,
+    len: usize,
+) -> i32 {
+    let Some(h) = (unsafe { handle(h) }) else {
+        return -1;
+    };
+    if pcm.is_null() || len == 0 || len > MAX_MEDIA_AUDIO {
+        return -1;
+    }
+    let chunk = unsafe { std::slice::from_raw_parts(pcm, len) };
+    let spec = explorer_core::MediaAudioSpec {
+        sample_rate: rate,
+        channels: channels.min(u16::MAX as u32) as u16,
+        format,
+    };
+    match sess(h).media_audio(tab, media, spec, chunk) {
+        Ok(()) => 0,
+        Err(e) => media_err_code(e),
+    }
+}
+
 /// Télécharge `url` directement sous `state/downloads/`
 /// (« enregistrer la source » média / « enregistrer sous » —
 /// pile transport complète : cookies, cache, HSTS). `0`
@@ -2286,6 +2330,66 @@ mod tests {
         // SAFETY : le buffer est lisible ; rejet attendu.
         assert!(unsafe { explorer_create_with_profile(bad.as_ptr(), 2) }.is_null());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Étape 204b — `explorer_media_audio` : chunk PCM de la
+    /// surface claimée → ring moteur. `-1` argument (null /
+    /// vide / > 16 Ko), `-409` non claimée, `-410` morte.
+    #[test]
+    fn media_audio_ffi_contract() {
+        let h = test_handle();
+        // SAFETY : handle frais, appels sérialisés.
+        unsafe {
+            let tab = explorer_open_tab(h);
+            let url = b"http://test/v";
+            assert_eq!(explorer_navigate(h, tab, url.as_ptr(), url.len()), 0);
+            let mut evbuf = vec![0u8; 8192];
+            let n = explorer_media_events(h, evbuf.as_mut_ptr(), evbuf.len());
+            assert!(n > 0);
+            let nd = String::from_utf8_lossy(&evbuf[..usize::try_from(n).unwrap_or(0)]);
+            let offered: serde_json::Value = serde_json::from_str(
+                nd.lines()
+                    .find(|l| l.contains("media_offered"))
+                    .expect("media_offered drainé"),
+            )
+            .unwrap();
+            let mid = offered["data"]["media"].as_u64().unwrap();
+
+            // Arguments invalides → -1 (null, vide, oversize).
+            let pcm = [0x5Au8; 9600];
+            assert_eq!(
+                explorer_media_audio(h, tab, mid, 48000, 2, 4, std::ptr::null(), 9),
+                -1
+            );
+            assert_eq!(
+                explorer_media_audio(h, tab, mid, 48000, 2, 4, pcm.as_ptr(), 0),
+                -1
+            );
+            let big = [0u8; 17 * 1024];
+            assert_eq!(
+                explorer_media_audio(h, tab, mid, 48000, 2, 4, big.as_ptr(), big.len()),
+                -1
+            );
+            // Non claimée → -409 ; morte → -410.
+            assert_eq!(
+                explorer_media_audio(h, tab, mid, 48000, 2, 4, pcm.as_ptr(), pcm.len()),
+                -409
+            );
+            assert_eq!(
+                explorer_media_audio(h, tab, 999, 48000, 2, 4, pcm.as_ptr(), pcm.len()),
+                -410
+            );
+            // Claimée → 0.
+            let claim = br#"{"codecs":["video/mp4"]}"#;
+            assert_eq!(
+                explorer_media_claim(h, tab, mid, claim.as_ptr(), claim.len()),
+                0
+            );
+            assert_eq!(
+                explorer_media_audio(h, tab, mid, 48000, 2, 4, pcm.as_ptr(), pcm.len()),
+                0
+            );
+        }
     }
 
     /// Étape 71e — variante FFI `MediaSurface` : drain

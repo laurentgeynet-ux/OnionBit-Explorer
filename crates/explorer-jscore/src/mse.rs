@@ -210,6 +210,71 @@ fn peek_window(sd: &SbData, f: u64, max: usize) -> Result<(Vec<u8>, u64, Vec<u64
     Ok((out, pos, sections))
 }
 
+/// Capacité d'un ring PCM (Étape 204b) — ~500 ms à la spec
+/// fixe dépôt (48 kHz stéréo f32 = 384 Ko/s).
+const PCM_RING_CAP: usize = 192 * 1024;
+
+/// Ring PCM borné par surface média (Étape 204b — tee
+/// `AUDIO_MODE_TAP`, ADR-0032) : octets interleaved, **drop-
+/// oldest** quand plein (l'analyse voit toujours la fenêtre
+/// la plus récente — jamais de file infinie), compteur
+/// `dropped` pour diagnostic. Spec portée par le dernier
+/// chunk reçu — un changement de spec **purge** le ring
+/// (octets d'ancien format = données fausses).
+#[derive(Debug)]
+pub(crate) struct PcmRing {
+    buf: std::collections::VecDeque<u8>,
+    /// Octets écartés faute de place (diagnostic §B).
+    pub dropped: u64,
+    /// Spec du dernier chunk (Hz / canaux / format dépôt).
+    pub spec: (u32, u16, i32),
+}
+
+impl Default for PcmRing {
+    fn default() -> Self {
+        Self {
+            buf: std::collections::VecDeque::with_capacity(PCM_RING_CAP),
+            dropped: 0,
+            spec: (0, 0, -1),
+        }
+    }
+}
+
+impl PcmRing {
+    /// Pousse un chunk (drop-oldest borné à `PCM_RING_CAP`) ;
+    /// spec différente du dernier chunk = resync → purge.
+    pub fn push(&mut self, rate: u32, channels: u16, format: i32, chunk: &[u8]) {
+        if self.spec != (rate, channels, format) {
+            self.dropped += self.buf.len() as u64;
+            self.buf.clear();
+            self.spec = (rate, channels, format);
+        }
+        if chunk.len() >= PCM_RING_CAP {
+            self.dropped += (chunk.len() - PCM_RING_CAP) as u64;
+            self.buf.clear();
+            self.buf
+                .extend(chunk[chunk.len() - PCM_RING_CAP..].iter().copied());
+            return;
+        }
+        let over = (self.buf.len() + chunk.len()).saturating_sub(PCM_RING_CAP);
+        if over > 0 {
+            let over = over.min(self.buf.len());
+            self.buf.drain(..over);
+            self.dropped += over as u64;
+        }
+        self.buf.extend(chunk.iter().copied());
+    }
+
+    /// Copie les `n` derniers octets du ring (fenêtre la plus
+    /// récente pour `AnalyserNode`, 204c) — vide si insuffisant.
+    #[allow(dead_code)] // consommé par `MediaElementAudioSourceNode` (204c).
+    pub fn read_latest(&self, n: usize) -> Vec<u8> {
+        let take = n.min(self.buf.len());
+        let start = self.buf.len() - take;
+        self.buf.iter().skip(start).copied().collect()
+    }
+}
+
 /// État moteur MSE — protos paresseux + registre des URL objets
 /// pointant un `MediaSource`. Document-local : swappé avec le
 /// `BrowsingContext` comme `files`/`idb`.
@@ -242,6 +307,12 @@ pub(crate) struct MseState {
     /// ciblant l'élément attaché (`progress`, étape 182) y
     /// transitent aussi — cible résolue via `attached_to`.
     pending_events: std::collections::VecDeque<(ObjId, &'static str)>,
+    /// Rings PCM par surface claimée (Étape 204b — tee
+    /// `AUDIO_MODE_TAP`, ADR-0032) : alimentés par
+    /// `Engine::deliver_media_audio`, lus par le graphe Web
+    /// Audio (`MediaElementAudioSourceNode`, 204c). Clé = id
+    /// de surface média session.
+    pub(crate) pcm_rings: HashMap<u64, PcmRing>,
     /// Élément `<video>`/`<audio>` attaché à chaque
     /// `MediaSource` (étape 182) — posé au `src = blob:`/
     /// `setAttribute("src", …)`, dernier posé gagne (une

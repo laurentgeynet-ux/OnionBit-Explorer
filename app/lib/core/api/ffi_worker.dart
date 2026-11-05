@@ -269,51 +269,114 @@ typedef _MediaClaimD = int Function(
   int,
 );
 
+// Chunk PCM hôte → ring moteur (Étape 204b — `explorer_media_audio`
+// = export additif : corps binaire, pas de JSON).
+typedef _MediaAudioN = ffi.Int32 Function(
+  _NativeHandle,
+  ffi.Uint64,
+  ffi.Uint64,
+  ffi.Uint32,
+  ffi.Uint32,
+  ffi.Int32,
+  ffi.Pointer<ffi.Uint8>,
+  ffi.UintPtr,
+);
+typedef _MediaAudioD = int Function(
+  _NativeHandle,
+  int,
+  int,
+  int,
+  int,
+  int,
+  ffi.Pointer<ffi.Uint8>,
+  int,
+);
+
 // Pont favoris (PR-10 suite) — exports additifs : dll
 // antérieure → stubs côté engine, listes vides.
 typedef _BmListN = ffi.IntPtr Function(
-    _NativeHandle, ffi.Pointer<ffi.Uint8>, ffi.UintPtr);
-typedef _BmListD = int Function(
-    _NativeHandle, ffi.Pointer<ffi.Uint8>, int);
+  _NativeHandle,
+  ffi.Pointer<ffi.Uint8>,
+  ffi.UintPtr,
+);
+typedef _BmListD = int Function(_NativeHandle, ffi.Pointer<ffi.Uint8>, int);
 typedef _BmAddN = ffi.Int32 Function(
-    _NativeHandle, ffi.Pointer<ffi.Uint8>, ffi.UintPtr,
-    ffi.Pointer<ffi.Uint8>, ffi.UintPtr);
+  _NativeHandle,
+  ffi.Pointer<ffi.Uint8>,
+  ffi.UintPtr,
+  ffi.Pointer<ffi.Uint8>,
+  ffi.UintPtr,
+);
 typedef _BmAddD = int Function(
-    _NativeHandle, ffi.Pointer<ffi.Uint8>, int,
-    ffi.Pointer<ffi.Uint8>, int);
+  _NativeHandle,
+  ffi.Pointer<ffi.Uint8>,
+  int,
+  ffi.Pointer<ffi.Uint8>,
+  int,
+);
 // Offres de download — exports additifs.
 typedef _DlAcceptN = ffi.IntPtr Function(
-    _NativeHandle, ffi.Uint64, ffi.Uint64,
-    ffi.Pointer<ffi.Uint8>, ffi.UintPtr,
-    ffi.Pointer<ffi.Uint8>, ffi.UintPtr);
+  _NativeHandle,
+  ffi.Uint64,
+  ffi.Uint64,
+  ffi.Pointer<ffi.Uint8>,
+  ffi.UintPtr,
+  ffi.Pointer<ffi.Uint8>,
+  ffi.UintPtr,
+);
 typedef _DlAcceptD = int Function(
-    _NativeHandle, int, int,
-    ffi.Pointer<ffi.Uint8>, int,
-    ffi.Pointer<ffi.Uint8>, int);
+  _NativeHandle,
+  int,
+  int,
+  ffi.Pointer<ffi.Uint8>,
+  int,
+  ffi.Pointer<ffi.Uint8>,
+  int,
+);
 typedef _DlDeclN = ffi.Int32 Function(_NativeHandle, ffi.Uint64, ffi.Uint64);
 typedef _DlDeclD = int Function(_NativeHandle, int, int);
 // Démarrage non bloquant (`i64` = id, `<0` erreur) —
 // export additif étape 176. `_DlDeclN/D` sert aussi à
 // `explorer_download_cancel` (même signature).
 typedef _DlStartN = ffi.Int64 Function(
-    _NativeHandle, ffi.Uint64,
-    ffi.Pointer<ffi.Uint8>, ffi.UintPtr,
-    ffi.Pointer<ffi.Uint8>, ffi.UintPtr,
-    ffi.Pointer<ffi.Uint8>, ffi.UintPtr);
+  _NativeHandle,
+  ffi.Uint64,
+  ffi.Pointer<ffi.Uint8>,
+  ffi.UintPtr,
+  ffi.Pointer<ffi.Uint8>,
+  ffi.UintPtr,
+  ffi.Pointer<ffi.Uint8>,
+  ffi.UintPtr,
+);
 typedef _DlStartD = int Function(
-    _NativeHandle, int,
-    ffi.Pointer<ffi.Uint8>, int,
-    ffi.Pointer<ffi.Uint8>, int,
-    ffi.Pointer<ffi.Uint8>, int);
+  _NativeHandle,
+  int,
+  ffi.Pointer<ffi.Uint8>,
+  int,
+  ffi.Pointer<ffi.Uint8>,
+  int,
+  ffi.Pointer<ffi.Uint8>,
+  int,
+);
 // Find-in-page — export additif.
 typedef _FindN = ffi.IntPtr Function(
-    _NativeHandle, ffi.Uint64,
-    ffi.Pointer<ffi.Uint8>, ffi.UintPtr, ffi.Int64,
-    ffi.Pointer<ffi.Uint8>, ffi.UintPtr);
+  _NativeHandle,
+  ffi.Uint64,
+  ffi.Pointer<ffi.Uint8>,
+  ffi.UintPtr,
+  ffi.Int64,
+  ffi.Pointer<ffi.Uint8>,
+  ffi.UintPtr,
+);
 typedef _FindD = int Function(
-    _NativeHandle, int,
-    ffi.Pointer<ffi.Uint8>, int, int,
-    ffi.Pointer<ffi.Uint8>, int);
+  _NativeHandle,
+  int,
+  ffi.Pointer<ffi.Uint8>,
+  int,
+  int,
+  ffi.Pointer<ffi.Uint8>,
+  int,
+);
 
 // ---------------------------------------------------------------------------
 // Ops RPC — les entiers sont le contrat wire, ne pas réordonner.
@@ -352,6 +415,7 @@ const opApiPort = 29;
 const opMediaCodecs = 30;
 const opHit = 31;
 const opFrameTop = 32;
+const opMediaAudio = 33;
 
 /// Point d'entrée de l'isolate — `args` = `{'reply': SendPort,
 /// 'path': String}`. Envoie `{'port': SendPort}` puis
@@ -461,6 +525,7 @@ class _WorkerImpl {
   static _FindD? _find;
   static _ApiPortD? _apiPort;
   static _MediaCodecsD? _mediaCodecs;
+  static _MediaAudioD? _mediaAudio;
   final _MediaEventsD? _mediaEvents;
   final _TabUrlD? _mediaList;
   final _MediaClaimD? _mediaClaim;
@@ -516,8 +581,10 @@ class _WorkerImpl {
       // absents d'une dll antérieure → pull plein en repli.
       _FrameCopyRegionD? frameCopyRegion;
       try {
-        frameCopyRegion = lib.lookupFunction<_FrameCopyRegionN,
-            _FrameCopyRegionD>('explorer_frame_copy_region');
+        frameCopyRegion = lib
+            .lookupFunction<_FrameCopyRegionN, _FrameCopyRegionD>(
+              'explorer_frame_copy_region',
+            );
       } on Object {
         /* export absent */
       }
@@ -616,9 +683,7 @@ class _WorkerImpl {
         /* export absent */
       }
       try {
-        _history = lib.lookupFunction<_BmListN, _BmListD>(
-          'explorer_history',
-        );
+        _history = lib.lookupFunction<_BmListN, _BmListD>('explorer_history');
       } on Object {
         /* export absent */
       }
@@ -680,6 +745,16 @@ class _WorkerImpl {
       try {
         _mediaCodecs = lib.lookupFunction<_MediaCodecsN, _MediaCodecsD>(
           'explorer_media_codecs',
+        );
+      } on Object {
+        /* export absent */
+      }
+      // Push PCM tap (étape 204b — `AUDIO_MODE_TAP`) : export
+      // additif ; dll antérieure → `null` → op rend `-1` et
+      // le drainer app reste muet (pas de ring moteur).
+      try {
+        _mediaAudio = lib.lookupFunction<_MediaAudioN, _MediaAudioD>(
+          'explorer_media_audio',
         );
       } on Object {
         /* export absent */
@@ -813,6 +888,32 @@ class _WorkerImpl {
         };
       case opMediaState:
         return {'code': _mediaCall(m, _mediaState)};
+      case opMediaAudio:
+        // Corps binaire (`pcm` Uint8List) + spec scalaire —
+        // flux fire-and-forget borné (≤ 16 Ko/appel côté FFI).
+        final f = _mediaAudio;
+        final pcm = m['pcm'];
+        if (f == null || pcm is! Uint8List || pcm.isEmpty) {
+          return const {'code': -1};
+        }
+        final ptr = calloc<ffi.Uint8>(pcm.length);
+        try {
+          ptr.asTypedList(pcm.length).setAll(0, pcm);
+          return {
+            'code': f(
+              _handle,
+              _tab(m),
+              (m['media'] as num?)?.toInt() ?? 0,
+              (m['rate'] as num?)?.toInt() ?? 48000,
+              (m['channels'] as num?)?.toInt() ?? 2,
+              (m['format'] as num?)?.toInt() ?? 4,
+              ptr,
+              pcm.length,
+            ),
+          };
+        } finally {
+          calloc.free(ptr);
+        }
       case opApiPort:
         // Loopback média embarqué (étape 177/b2) — `0` sur
         // dll antérieure ou bind échoué → `apiBase` `''`.
@@ -842,8 +943,10 @@ class _WorkerImpl {
           return {
             'code': f(
               _handle,
-              u.cast<ffi.Uint8>(), u.length,
-              t.cast<ffi.Uint8>(), t.length,
+              u.cast<ffi.Uint8>(),
+              u.length,
+              t.cast<ffi.Uint8>(),
+              t.length,
             ),
           };
         } finally {
@@ -896,9 +999,7 @@ class _WorkerImpl {
       case opDownloadDecline:
         final f = _downloadDecline;
         if (f == null) return const {'code': -1};
-        return {
-          'code': f(_handle, _tab(m), (m['dl'] as num?)?.toInt() ?? 0),
-        };
+        return {'code': f(_handle, _tab(m), (m['dl'] as num?)?.toInt() ?? 0)};
       case opDownloadStart:
         // Non bloquant : rend `{'id'}` — le cycle de vie
         // arrive par les events NDJSON (`download_started`,
@@ -929,9 +1030,7 @@ class _WorkerImpl {
       case opDownloadCancel:
         final f = _downloadCancel;
         if (f == null) return const {'code': -1};
-        return {
-          'code': f(_handle, _tab(m), (m['dl'] as num?)?.toInt() ?? 0),
-        };
+        return {'code': f(_handle, _tab(m), (m['dl'] as num?)?.toInt() ?? 0)};
       case opFind:
         final f = _find;
         if (f == null) return const {'count': 0, 'index': 0};
@@ -1276,14 +1375,7 @@ class _WorkerImpl {
     const cap = 8192;
     final buf = calloc<ffi.Uint8>(cap);
     try {
-      final n = f(
-        _handle,
-        _tab(m),
-        _num(m, 'x'),
-        _num(m, 'y'),
-        buf,
-        cap,
-      );
+      final n = f(_handle, _tab(m), _num(m, 'x'), _num(m, 'y'), buf, cap);
       if (n <= 0) return const {'none': true};
       final v = jsonDecode(utf8.decode(buf.asTypedList(n)));
       return v is Map ? Map<String, Object?>.from(v) : const {'none': true};
@@ -1310,12 +1402,8 @@ class _WorkerImpl {
       }
       final x = ((m['x'] as num?)?.toInt() ?? 0).clamp(0, w.value).toInt();
       final y = ((m['y'] as num?)?.toInt() ?? 0).clamp(0, h.value).toInt();
-      final rw = ((m['w'] as num?)?.toInt() ?? 0)
-          .clamp(0, w.value - x)
-          .toInt();
-      final rh = ((m['h'] as num?)?.toInt() ?? 0)
-          .clamp(0, h.value - y)
-          .toInt();
+      final rw = ((m['w'] as num?)?.toInt() ?? 0).clamp(0, w.value - x).toInt();
+      final rh = ((m['h'] as num?)?.toInt() ?? 0).clamp(0, h.value - y).toInt();
       final len = rw * rh * 4;
       if (len <= 0) return const {'none': true};
       final px = calloc<ffi.Uint8>(len);
@@ -1397,9 +1485,7 @@ class _WorkerImpl {
       final n = f(_handle, buf, cap);
       if (n <= 0) return const [];
       final v = jsonDecode(utf8.decode(buf.asTypedList(n)));
-      return v is Map && v['history'] is List
-          ? v['history'] as List
-          : const [];
+      return v is Map && v['history'] is List ? v['history'] as List : const [];
     } on Object {
       return const [];
     } finally {
@@ -1442,8 +1528,7 @@ class _WorkerImpl {
       if (n <= 0) return const [];
       return [
         for (final line in utf8.decode(buf.asTypedList(n)).split('\n'))
-          if (line.isNotEmpty)
-            jsonDecode(line) as Object?,
+          if (line.isNotEmpty) jsonDecode(line) as Object?,
       ];
     } on Object {
       // Une ligne invalide ne doit pas perdre le lot —

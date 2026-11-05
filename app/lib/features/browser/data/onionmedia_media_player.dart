@@ -5,7 +5,9 @@
 import 'dart:async';
 import 'dart:ffi' as ffi;
 import 'dart:isolate';
+
 import '../domain/media_offer.dart';
+
 import 'dart:io';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
@@ -119,53 +121,104 @@ class OnionMediaPlayer implements MediaPlayer {
 
   // -- liaisons natives -------------------------------------------------------
 
-  late final _qtavFree =
-      _lib.lookupFunction<ffi.Void Function(ffi.Pointer), void Function(ffi.Pointer)>(
-          'onionmedia_free');
-  late final _qtavOpenUrl = _lib.lookupFunction<
-      ffi.Int32 Function(ffi.Pointer, ffi.Pointer<ffi.Char>, ffi.IntPtr),
-      int Function(ffi.Pointer, ffi.Pointer<ffi.Char>, int)>('onionmedia_open_url');
-  late final _qtavOpenPath = _lib.lookupFunction<
-      ffi.Int32 Function(ffi.Pointer, ffi.Pointer<ffi.Char>, ffi.IntPtr),
-      int Function(ffi.Pointer, ffi.Pointer<ffi.Char>, int)>('onionmedia_open_path');
-  late final _qtavPlay =
-      _lib.lookupFunction<ffi.Int32 Function(ffi.Pointer), int Function(ffi.Pointer)>(
-          'onionmedia_play');
-  late final _qtavPause =
-      _lib.lookupFunction<ffi.Int32 Function(ffi.Pointer), int Function(ffi.Pointer)>(
-          'onionmedia_pause');
-  late final _qtavStop =
-      _lib.lookupFunction<ffi.Int32 Function(ffi.Pointer), int Function(ffi.Pointer)>(
-          'onionmedia_stop');
-  late final _qtavSeek = _lib.lookupFunction<ffi.Int32 Function(ffi.Pointer, ffi.Int64),
-      int Function(ffi.Pointer, int)>('onionmedia_seek_ms');
-  late final _qtavSetVol = _lib.lookupFunction<ffi.Int32 Function(ffi.Pointer, ffi.Double),
-      int Function(ffi.Pointer, double)>('onionmedia_set_volume');
-  late final _qtavSetMute = _lib.lookupFunction<ffi.Int32 Function(ffi.Pointer, ffi.Int32),
-      int Function(ffi.Pointer, int)>('onionmedia_set_mute');
-  late final _qtavSetSpeed = _lib.lookupFunction<ffi.Int32 Function(ffi.Pointer, ffi.Double),
-      int Function(ffi.Pointer, double)>('onionmedia_set_speed');
-  late final _qtavState =
-      _lib.lookupFunction<ffi.Int32 Function(ffi.Pointer), int Function(ffi.Pointer)>(
-          'onionmedia_state');
-  late final _qtavPos = _lib.lookupFunction<ffi.Int64 Function(ffi.Pointer),
-      int Function(ffi.Pointer)>('onionmedia_position_ms');
-  late final _qtavDur = _lib.lookupFunction<ffi.Int64 Function(ffi.Pointer),
-      int Function(ffi.Pointer)>('onionmedia_duration_ms');
-  late final _qtavEof = _lib.lookupFunction<ffi.Int32 Function(ffi.Pointer),
-      int Function(ffi.Pointer)>('onionmedia_is_eof');
-  late final _qtavSeq = _lib.lookupFunction<ffi.Uint64 Function(ffi.Pointer),
-      int Function(ffi.Pointer)>('onionmedia_frame_seq');
-  late final _qtavFSize = _lib.lookupFunction<
-      ffi.Int32 Function(ffi.Pointer, ffi.Pointer<ffi.Uint32>, ffi.Pointer<ffi.Uint32>),
-      int Function(ffi.Pointer, ffi.Pointer<ffi.Uint32>, ffi.Pointer<ffi.Uint32>)>(
-      'onionmedia_frame_size');
-  late final _qtavFPull = _lib.lookupFunction<
-      ffi.Int64 Function(ffi.Pointer, ffi.Pointer<ffi.Uint8>, ffi.IntPtr),
-      int Function(ffi.Pointer, ffi.Pointer<ffi.Uint8>, int)>('onionmedia_frame_pull');
-  late final _qtavErr = _lib.lookupFunction<
-      ffi.Int32 Function(ffi.Pointer<ffi.Uint8>, ffi.IntPtr),
-      int Function(ffi.Pointer<ffi.Uint8>, int)>('onionmedia_last_error');
+  late final _qtavFree = _lib
+      .lookupFunction<
+        ffi.Void Function(ffi.Pointer),
+        void Function(ffi.Pointer)
+      >('onionmedia_free');
+  late final _qtavOpenUrl = _lib
+      .lookupFunction<
+        ffi.Int32 Function(ffi.Pointer, ffi.Pointer<ffi.Char>, ffi.IntPtr),
+        int Function(ffi.Pointer, ffi.Pointer<ffi.Char>, int)
+      >('onionmedia_open_url');
+  late final _qtavOpenPath = _lib
+      .lookupFunction<
+        ffi.Int32 Function(ffi.Pointer, ffi.Pointer<ffi.Char>, ffi.IntPtr),
+        int Function(ffi.Pointer, ffi.Pointer<ffi.Char>, int)
+      >('onionmedia_open_path');
+  late final _qtavPlay = _lib
+      .lookupFunction<
+        ffi.Int32 Function(ffi.Pointer),
+        int Function(ffi.Pointer)
+      >('onionmedia_play');
+  late final _qtavPause = _lib
+      .lookupFunction<
+        ffi.Int32 Function(ffi.Pointer),
+        int Function(ffi.Pointer)
+      >('onionmedia_pause');
+  late final _qtavStop = _lib
+      .lookupFunction<
+        ffi.Int32 Function(ffi.Pointer),
+        int Function(ffi.Pointer)
+      >('onionmedia_stop');
+  late final _qtavSeek = _lib
+      .lookupFunction<
+        ffi.Int32 Function(ffi.Pointer, ffi.Int64),
+        int Function(ffi.Pointer, int)
+      >('onionmedia_seek_ms');
+  late final _qtavSetVol = _lib
+      .lookupFunction<
+        ffi.Int32 Function(ffi.Pointer, ffi.Double),
+        int Function(ffi.Pointer, double)
+      >('onionmedia_set_volume');
+  late final _qtavSetMute = _lib
+      .lookupFunction<
+        ffi.Int32 Function(ffi.Pointer, ffi.Int32),
+        int Function(ffi.Pointer, int)
+      >('onionmedia_set_mute');
+  late final _qtavSetSpeed = _lib
+      .lookupFunction<
+        ffi.Int32 Function(ffi.Pointer, ffi.Double),
+        int Function(ffi.Pointer, double)
+      >('onionmedia_set_speed');
+  late final _qtavState = _lib
+      .lookupFunction<
+        ffi.Int32 Function(ffi.Pointer),
+        int Function(ffi.Pointer)
+      >('onionmedia_state');
+  late final _qtavPos = _lib
+      .lookupFunction<
+        ffi.Int64 Function(ffi.Pointer),
+        int Function(ffi.Pointer)
+      >('onionmedia_position_ms');
+  late final _qtavDur = _lib
+      .lookupFunction<
+        ffi.Int64 Function(ffi.Pointer),
+        int Function(ffi.Pointer)
+      >('onionmedia_duration_ms');
+  late final _qtavEof = _lib
+      .lookupFunction<
+        ffi.Int32 Function(ffi.Pointer),
+        int Function(ffi.Pointer)
+      >('onionmedia_is_eof');
+  late final _qtavSeq = _lib
+      .lookupFunction<
+        ffi.Uint64 Function(ffi.Pointer),
+        int Function(ffi.Pointer)
+      >('onionmedia_frame_seq');
+  late final _qtavFSize = _lib
+      .lookupFunction<
+        ffi.Int32 Function(
+          ffi.Pointer,
+          ffi.Pointer<ffi.Uint32>,
+          ffi.Pointer<ffi.Uint32>,
+        ),
+        int Function(
+          ffi.Pointer,
+          ffi.Pointer<ffi.Uint32>,
+          ffi.Pointer<ffi.Uint32>,
+        )
+      >('onionmedia_frame_size');
+  late final _qtavFPull = _lib
+      .lookupFunction<
+        ffi.Int64 Function(ffi.Pointer, ffi.Pointer<ffi.Uint8>, ffi.IntPtr),
+        int Function(ffi.Pointer, ffi.Pointer<ffi.Uint8>, int)
+      >('onionmedia_frame_pull');
+  late final _qtavErr = _lib
+      .lookupFunction<
+        ffi.Int32 Function(ffi.Pointer<ffi.Uint8>, ffi.IntPtr),
+        int Function(ffi.Pointer<ffi.Uint8>, int)
+      >('onionmedia_last_error');
 
   // -- liaisons optionnelles (ABI ≥ 2/3 — lookup gardé : la
   //    DLL circule copiée à la main, les exports récents
@@ -183,12 +236,14 @@ class OnionMediaPlayer implements MediaPlayer {
   /// `onionmedia_frame_pull_ex` (P-57) — pull atomique :
   /// `buf NULL` = sonde → `-2` + dims/seq de la trame.
   int Function(
-      ffi.Pointer,
-      ffi.Pointer<ffi.Uint8>,
-      int,
-      ffi.Pointer<ffi.Uint32>,
-      ffi.Pointer<ffi.Uint32>,
-      ffi.Pointer<ffi.Uint64>)? _framePullEx;
+    ffi.Pointer,
+    ffi.Pointer<ffi.Uint8>,
+    int,
+    ffi.Pointer<ffi.Uint32>,
+    ffi.Pointer<ffi.Uint32>,
+    ffi.Pointer<ffi.Uint64>,
+  )?
+  _framePullEx;
 
   /// `onionmedia_player_error` (P-57) — dernière erreur par
   /// handle, insensible aux migrations d'isolate entre
@@ -224,18 +279,28 @@ class OnionMediaPlayer implements MediaPlayer {
   /// gardés → `null` = pas sauté, jamais de repli approximatif.
   int Function(ffi.Pointer)? _frameStep;
   int Function(ffi.Pointer)? _frameBackStep;
+  // Tap PCM (Étape 204b) — `null` sur dll antérieure.
+  int Function(ffi.Pointer, int)? _setAudioMode;
+  int Function(
+    ffi.Pointer,
+    ffi.Pointer<ffi.Uint32>,
+    ffi.Pointer<ffi.Uint32>,
+    ffi.Pointer<ffi.Int32>,
+  )?
+  _audioSpec;
+  int Function(ffi.Pointer, ffi.Pointer<ffi.Uint8>, int)? _audioPull;
+  Timer? _audioDrain;
+  AudioChunkSink? _audioSink;
+  MediaAudioSpec? _tapSpec;
 
   /// Famille `stream_*` / `subtitle_*` (Étape 196 — exports
   /// pré-ABI 5, lookups gardés hors la porte).
   int Function(ffi.Pointer)? _streamCount;
   int Function(ffi.Pointer, int)? _streamKind;
   int Function(ffi.Pointer, int)? _streamDispos;
-  int Function(ffi.Pointer, int, ffi.Pointer<ffi.Char>, int)?
-      _streamCodec;
-  int Function(ffi.Pointer, int, ffi.Pointer<ffi.Char>, int)?
-      _streamLang;
-  int Function(ffi.Pointer, int, ffi.Pointer<ffi.Char>, int)?
-      _streamTitle;
+  int Function(ffi.Pointer, int, ffi.Pointer<ffi.Char>, int)? _streamCodec;
+  int Function(ffi.Pointer, int, ffi.Pointer<ffi.Char>, int)? _streamLang;
+  int Function(ffi.Pointer, int, ffi.Pointer<ffi.Char>, int)? _streamTitle;
   int Function(ffi.Pointer)? _audioStreamCur;
   int Function(ffi.Pointer)? _subStreamCur;
   int Function(ffi.Pointer, int)? _setAudioStream;
@@ -246,15 +311,13 @@ class OnionMediaPlayer implements MediaPlayer {
   int Function(ffi.Pointer)? _chapterCount;
   int Function(ffi.Pointer, int)? _chapterStartMs;
   int Function(ffi.Pointer, int)? _chapterEndMs;
-  int Function(ffi.Pointer, int, ffi.Pointer<ffi.Char>, int)?
-      _chapterTitle;
+  int Function(ffi.Pointer, int, ffi.Pointer<ffi.Char>, int)? _chapterTitle;
   int Function(ffi.Pointer)? _currentChapter;
   int Function(ffi.Pointer, int)? _seekChapter;
 
   /// Étape 199 — pochette + `loop` getter + `pause_at_eof`.
   int Function(ffi.Pointer)? _coverArtLen;
-  int Function(ffi.Pointer, ffi.Pointer<ffi.Char>, int)?
-      _coverArtData;
+  int Function(ffi.Pointer, ffi.Pointer<ffi.Char>, int)? _coverArtData;
   int Function(ffi.Pointer)? _loopGet;
   int Function(ffi.Pointer, int)? _setPauseEof;
 
@@ -310,262 +373,391 @@ class OnionMediaPlayer implements MediaPlayer {
 
   void _optionalBindings() {
     try {
-      _acquire = _lib.lookupFunction<
-          ffi.Int32 Function(ffi.Pointer, ffi.Pointer<_OnionMediaFrame>),
-          int Function(ffi.Pointer, ffi.Pointer<_OnionMediaFrame>)>(
-          'onionmedia_frame_acquire');
-      _frameRelease = _lib.lookupFunction<ffi.Void Function(ffi.Size),
-          void Function(int)>('onionmedia_frame_release');
+      _acquire = _lib
+          .lookupFunction<
+            ffi.Int32 Function(ffi.Pointer, ffi.Pointer<_OnionMediaFrame>),
+            int Function(ffi.Pointer, ffi.Pointer<_OnionMediaFrame>)
+          >('onionmedia_frame_acquire');
+      _frameRelease = _lib
+          .lookupFunction<ffi.Void Function(ffi.Size), void Function(int)>(
+            'onionmedia_frame_release',
+          );
     } on Object {
       _acquire = null;
       _frameRelease = null;
     }
     try {
-      _frameWait = _lib.lookupFunction<
-          ffi.Int64 Function(ffi.Pointer, ffi.Uint64, ffi.Uint32),
-          int Function(ffi.Pointer, int, int)>('onionmedia_frame_wait');
+      _frameWait = _lib
+          .lookupFunction<
+            ffi.Int64 Function(ffi.Pointer, ffi.Uint64, ffi.Uint32),
+            int Function(ffi.Pointer, int, int)
+          >('onionmedia_frame_wait');
     } on Object {
       _frameWait = null;
     }
     try {
-      _framePullEx = _lib.lookupFunction<
-          ffi.Int64 Function(
+      _framePullEx = _lib
+          .lookupFunction<
+            ffi.Int64 Function(
               ffi.Pointer,
               ffi.Pointer<ffi.Uint8>,
               ffi.IntPtr,
               ffi.Pointer<ffi.Uint32>,
               ffi.Pointer<ffi.Uint32>,
-              ffi.Pointer<ffi.Uint64>),
-          int Function(
+              ffi.Pointer<ffi.Uint64>,
+            ),
+            int Function(
               ffi.Pointer,
               ffi.Pointer<ffi.Uint8>,
               int,
               ffi.Pointer<ffi.Uint32>,
               ffi.Pointer<ffi.Uint32>,
-              ffi.Pointer<ffi.Uint64>)>('onionmedia_frame_pull_ex');
+              ffi.Pointer<ffi.Uint64>,
+            )
+          >('onionmedia_frame_pull_ex');
     } on Object {
       _framePullEx = null;
     }
     try {
-      _playerErr = _lib.lookupFunction<
-          ffi.Int32 Function(ffi.Pointer, ffi.Pointer<ffi.Uint8>, ffi.IntPtr),
-          int Function(ffi.Pointer, ffi.Pointer<ffi.Uint8>, int)>(
-          'onionmedia_player_error');
+      _playerErr = _lib
+          .lookupFunction<
+            ffi.Int32 Function(ffi.Pointer, ffi.Pointer<ffi.Uint8>, ffi.IntPtr),
+            int Function(ffi.Pointer, ffi.Pointer<ffi.Uint8>, int)
+          >('onionmedia_player_error');
     } on Object {
       _playerErr = null;
     }
     try {
-      _videoRotation = _lib.lookupFunction<ffi.Int32 Function(ffi.Pointer),
-          int Function(ffi.Pointer)>('onionmedia_video_rotation');
+      _videoRotation = _lib
+          .lookupFunction<
+            ffi.Int32 Function(ffi.Pointer),
+            int Function(ffi.Pointer)
+          >('onionmedia_video_rotation');
     } on Object {
       _videoRotation = null;
     }
     try {
-      _bufferedMs = _lib.lookupFunction<ffi.Int64 Function(ffi.Pointer),
-          int Function(ffi.Pointer)>('onionmedia_buffered_ms');
+      _bufferedMs = _lib
+          .lookupFunction<
+            ffi.Int64 Function(ffi.Pointer),
+            int Function(ffi.Pointer)
+          >('onionmedia_buffered_ms');
     } on Object {
       _bufferedMs = null;
     }
     try {
-      _bufferUnderrun = _lib.lookupFunction<ffi.Int32 Function(ffi.Pointer),
-          int Function(ffi.Pointer)>('onionmedia_buffer_underrun');
+      _bufferUnderrun = _lib
+          .lookupFunction<
+            ffi.Int32 Function(ffi.Pointer),
+            int Function(ffi.Pointer)
+          >('onionmedia_buffer_underrun');
     } on Object {
       _bufferUnderrun = null;
     }
     try {
-      _setLoop = _lib.lookupFunction<
-          ffi.Int32 Function(ffi.Pointer, ffi.Int64),
-          int Function(ffi.Pointer, int)>('onionmedia_set_loop');
+      _setLoop = _lib
+          .lookupFunction<
+            ffi.Int32 Function(ffi.Pointer, ffi.Int64),
+            int Function(ffi.Pointer, int)
+          >('onionmedia_set_loop');
     } on Object {
       _setLoop = null;
     }
     // Scalaires pré-ABI 5 — lookups gardés HORS la porte :
     // ils servent précisément quand le bloc 5 est sauté.
     try {
-      _frameSeq = _lib.lookupFunction<ffi.Uint64 Function(ffi.Pointer),
-          int Function(ffi.Pointer)>('onionmedia_frame_seq');
+      _frameSeq = _lib
+          .lookupFunction<
+            ffi.Uint64 Function(ffi.Pointer),
+            int Function(ffi.Pointer)
+          >('onionmedia_frame_seq');
     } on Object {
       _frameSeq = null;
     }
     try {
-      _droppedFrames = _lib.lookupFunction<ffi.Uint64 Function(ffi.Pointer),
-          int Function(ffi.Pointer)>('onionmedia_dropped_frames');
+      _droppedFrames = _lib
+          .lookupFunction<
+            ffi.Uint64 Function(ffi.Pointer),
+            int Function(ffi.Pointer)
+          >('onionmedia_dropped_frames');
     } on Object {
       _droppedFrames = null;
     }
     // Pas-à-pas (P-32) — lookups indépendants : un seul des
     // deux peut manquer sur une DLL exotique.
     try {
-      _frameStep = _lib.lookupFunction<ffi.Int32 Function(ffi.Pointer),
-          int Function(ffi.Pointer)>('onionmedia_frame_step');
+      _frameStep = _lib
+          .lookupFunction<
+            ffi.Int32 Function(ffi.Pointer),
+            int Function(ffi.Pointer)
+          >('onionmedia_frame_step');
     } on Object {
       _frameStep = null;
     }
     try {
-      _frameBackStep = _lib.lookupFunction<ffi.Int32 Function(ffi.Pointer),
-          int Function(ffi.Pointer)>('onionmedia_frame_back_step');
+      _frameBackStep = _lib
+          .lookupFunction<
+            ffi.Int32 Function(ffi.Pointer),
+            int Function(ffi.Pointer)
+          >('onionmedia_frame_back_step');
     } on Object {
       _frameBackStep = null;
     }
+    // Tap PCM (Étape 204b — `AUDIO_MODE_TAP` dépôt, P-33) —
+    // lookups gardés : dll antérieure → tap refusé honnête.
+    try {
+      _setAudioMode = _lib
+          .lookupFunction<
+            ffi.Int32 Function(ffi.Pointer, ffi.Uint32),
+            int Function(ffi.Pointer, int)
+          >('onionmedia_set_audio_mode');
+    } on Object {
+      _setAudioMode = null;
+    }
+    try {
+      _audioSpec = _lib
+          .lookupFunction<
+            ffi.Int32 Function(
+              ffi.Pointer,
+              ffi.Pointer<ffi.Uint32>,
+              ffi.Pointer<ffi.Uint32>,
+              ffi.Pointer<ffi.Int32>,
+            ),
+            int Function(
+              ffi.Pointer,
+              ffi.Pointer<ffi.Uint32>,
+              ffi.Pointer<ffi.Uint32>,
+              ffi.Pointer<ffi.Int32>,
+            )
+          >('onionmedia_audio_spec');
+    } on Object {
+      _audioSpec = null;
+    }
+    try {
+      _audioPull = _lib
+          .lookupFunction<
+            ffi.Int64 Function(ffi.Pointer, ffi.Pointer<ffi.Uint8>, ffi.IntPtr),
+            int Function(ffi.Pointer, ffi.Pointer<ffi.Uint8>, int)
+          >('onionmedia_audio_pull');
+    } on Object {
+      _audioPull = null;
+    }
     // Famille pistes/sous-titres — pré-ABI 5, hors la porte.
     try {
-      _streamCount = _lib.lookupFunction<
-          ffi.Int32 Function(ffi.Pointer), int Function(ffi.Pointer)>(
-          'onionmedia_stream_count');
-      _streamKind = _lib.lookupFunction<
-          ffi.Int32 Function(ffi.Pointer, ffi.Int32),
-          int Function(ffi.Pointer, int)>('onionmedia_stream_kind');
-      _streamDispos = _lib.lookupFunction<
-          ffi.Int32 Function(ffi.Pointer, ffi.Int32),
-          int Function(ffi.Pointer, int)>(
-          'onionmedia_stream_disposition');
-      _streamCodec = _lib.lookupFunction<
-          ffi.Int32 Function(ffi.Pointer, ffi.Int32,
-              ffi.Pointer<ffi.Char>, ffi.IntPtr),
-          int Function(ffi.Pointer, int, ffi.Pointer<ffi.Char>,
-              int)>('onionmedia_stream_codec');
-      _streamLang = _lib.lookupFunction<
-          ffi.Int32 Function(ffi.Pointer, ffi.Int32,
-              ffi.Pointer<ffi.Char>, ffi.IntPtr),
-          int Function(ffi.Pointer, int, ffi.Pointer<ffi.Char>,
-              int)>('onionmedia_stream_language');
-      _streamTitle = _lib.lookupFunction<
-          ffi.Int32 Function(ffi.Pointer, ffi.Int32,
-              ffi.Pointer<ffi.Char>, ffi.IntPtr),
-          int Function(ffi.Pointer, int, ffi.Pointer<ffi.Char>,
-              int)>('onionmedia_stream_title');
-      _audioStreamCur = _lib.lookupFunction<
-          ffi.Int32 Function(ffi.Pointer), int Function(ffi.Pointer)>(
-          'onionmedia_audio_stream');
-      _subStreamCur = _lib.lookupFunction<
-          ffi.Int32 Function(ffi.Pointer), int Function(ffi.Pointer)>(
-          'onionmedia_subtitle_stream');
-      _setAudioStream = _lib.lookupFunction<
-          ffi.Int32 Function(ffi.Pointer, ffi.Int32),
-          int Function(ffi.Pointer, int)>(
-          'onionmedia_set_audio_stream');
-      _setSubStream = _lib.lookupFunction<
-          ffi.Int32 Function(ffi.Pointer, ffi.Int32),
-          int Function(ffi.Pointer, int)>(
-          'onionmedia_set_subtitle_stream');
-      _subText = _lib.lookupFunction<
-          ffi.Int32 Function(
-              ffi.Pointer, ffi.Pointer<ffi.Char>, ffi.IntPtr),
-          int Function(ffi.Pointer, ffi.Pointer<ffi.Char>, int)>(
-          'onionmedia_subtitle_text');
-      _chapterCount = _lib.lookupFunction<
-          ffi.Int32 Function(ffi.Pointer), int Function(ffi.Pointer)>(
-          'onionmedia_chapter_count');
-      _chapterStartMs = _lib.lookupFunction<
-          ffi.Int64 Function(ffi.Pointer, ffi.Int32),
-          int Function(ffi.Pointer, int)>(
-          'onionmedia_chapter_start_ms');
-      _chapterEndMs = _lib.lookupFunction<
-          ffi.Int64 Function(ffi.Pointer, ffi.Int32),
-          int Function(ffi.Pointer, int)>(
-          'onionmedia_chapter_end_ms');
-      _chapterTitle = _lib.lookupFunction<
-          ffi.Int32 Function(ffi.Pointer, ffi.Int32,
-              ffi.Pointer<ffi.Char>, ffi.IntPtr),
-          int Function(ffi.Pointer, int, ffi.Pointer<ffi.Char>,
-              int)>('onionmedia_chapter_title');
-      _currentChapter = _lib.lookupFunction<
-          ffi.Int32 Function(ffi.Pointer), int Function(ffi.Pointer)>(
-          'onionmedia_current_chapter');
-      _seekChapter = _lib.lookupFunction<
-          ffi.Int32 Function(ffi.Pointer, ffi.Int32),
-          int Function(ffi.Pointer, int)>(
-          'onionmedia_seek_chapter');
-      _coverArtLen = _lib.lookupFunction<
-          ffi.Int64 Function(ffi.Pointer), int Function(ffi.Pointer)>(
-          'onionmedia_cover_art_len');
-      _coverArtData = _lib.lookupFunction<
-          ffi.Int64 Function(ffi.Pointer, ffi.Pointer<ffi.Char>,
-              ffi.IntPtr),
-          int Function(ffi.Pointer, ffi.Pointer<ffi.Char>, int)>(
-          'onionmedia_cover_art_data');
-      _loopGet = _lib.lookupFunction<
-          ffi.Int64 Function(ffi.Pointer), int Function(ffi.Pointer)>(
-          'onionmedia_loop');
-      _setPauseEof = _lib.lookupFunction<
-          ffi.Int32 Function(ffi.Pointer, ffi.Int32),
-          int Function(ffi.Pointer, int)>(
-          'onionmedia_set_pause_at_eof');
+      _streamCount = _lib
+          .lookupFunction<
+            ffi.Int32 Function(ffi.Pointer),
+            int Function(ffi.Pointer)
+          >('onionmedia_stream_count');
+      _streamKind = _lib
+          .lookupFunction<
+            ffi.Int32 Function(ffi.Pointer, ffi.Int32),
+            int Function(ffi.Pointer, int)
+          >('onionmedia_stream_kind');
+      _streamDispos = _lib
+          .lookupFunction<
+            ffi.Int32 Function(ffi.Pointer, ffi.Int32),
+            int Function(ffi.Pointer, int)
+          >('onionmedia_stream_disposition');
+      _streamCodec = _lib
+          .lookupFunction<
+            ffi.Int32 Function(
+              ffi.Pointer,
+              ffi.Int32,
+              ffi.Pointer<ffi.Char>,
+              ffi.IntPtr,
+            ),
+            int Function(ffi.Pointer, int, ffi.Pointer<ffi.Char>, int)
+          >('onionmedia_stream_codec');
+      _streamLang = _lib
+          .lookupFunction<
+            ffi.Int32 Function(
+              ffi.Pointer,
+              ffi.Int32,
+              ffi.Pointer<ffi.Char>,
+              ffi.IntPtr,
+            ),
+            int Function(ffi.Pointer, int, ffi.Pointer<ffi.Char>, int)
+          >('onionmedia_stream_language');
+      _streamTitle = _lib
+          .lookupFunction<
+            ffi.Int32 Function(
+              ffi.Pointer,
+              ffi.Int32,
+              ffi.Pointer<ffi.Char>,
+              ffi.IntPtr,
+            ),
+            int Function(ffi.Pointer, int, ffi.Pointer<ffi.Char>, int)
+          >('onionmedia_stream_title');
+      _audioStreamCur = _lib
+          .lookupFunction<
+            ffi.Int32 Function(ffi.Pointer),
+            int Function(ffi.Pointer)
+          >('onionmedia_audio_stream');
+      _subStreamCur = _lib
+          .lookupFunction<
+            ffi.Int32 Function(ffi.Pointer),
+            int Function(ffi.Pointer)
+          >('onionmedia_subtitle_stream');
+      _setAudioStream = _lib
+          .lookupFunction<
+            ffi.Int32 Function(ffi.Pointer, ffi.Int32),
+            int Function(ffi.Pointer, int)
+          >('onionmedia_set_audio_stream');
+      _setSubStream = _lib
+          .lookupFunction<
+            ffi.Int32 Function(ffi.Pointer, ffi.Int32),
+            int Function(ffi.Pointer, int)
+          >('onionmedia_set_subtitle_stream');
+      _subText = _lib
+          .lookupFunction<
+            ffi.Int32 Function(ffi.Pointer, ffi.Pointer<ffi.Char>, ffi.IntPtr),
+            int Function(ffi.Pointer, ffi.Pointer<ffi.Char>, int)
+          >('onionmedia_subtitle_text');
+      _chapterCount = _lib
+          .lookupFunction<
+            ffi.Int32 Function(ffi.Pointer),
+            int Function(ffi.Pointer)
+          >('onionmedia_chapter_count');
+      _chapterStartMs = _lib
+          .lookupFunction<
+            ffi.Int64 Function(ffi.Pointer, ffi.Int32),
+            int Function(ffi.Pointer, int)
+          >('onionmedia_chapter_start_ms');
+      _chapterEndMs = _lib
+          .lookupFunction<
+            ffi.Int64 Function(ffi.Pointer, ffi.Int32),
+            int Function(ffi.Pointer, int)
+          >('onionmedia_chapter_end_ms');
+      _chapterTitle = _lib
+          .lookupFunction<
+            ffi.Int32 Function(
+              ffi.Pointer,
+              ffi.Int32,
+              ffi.Pointer<ffi.Char>,
+              ffi.IntPtr,
+            ),
+            int Function(ffi.Pointer, int, ffi.Pointer<ffi.Char>, int)
+          >('onionmedia_chapter_title');
+      _currentChapter = _lib
+          .lookupFunction<
+            ffi.Int32 Function(ffi.Pointer),
+            int Function(ffi.Pointer)
+          >('onionmedia_current_chapter');
+      _seekChapter = _lib
+          .lookupFunction<
+            ffi.Int32 Function(ffi.Pointer, ffi.Int32),
+            int Function(ffi.Pointer, int)
+          >('onionmedia_seek_chapter');
+      _coverArtLen = _lib
+          .lookupFunction<
+            ffi.Int64 Function(ffi.Pointer),
+            int Function(ffi.Pointer)
+          >('onionmedia_cover_art_len');
+      _coverArtData = _lib
+          .lookupFunction<
+            ffi.Int64 Function(ffi.Pointer, ffi.Pointer<ffi.Char>, ffi.IntPtr),
+            int Function(ffi.Pointer, ffi.Pointer<ffi.Char>, int)
+          >('onionmedia_cover_art_data');
+      _loopGet = _lib
+          .lookupFunction<
+            ffi.Int64 Function(ffi.Pointer),
+            int Function(ffi.Pointer)
+          >('onionmedia_loop');
+      _setPauseEof = _lib
+          .lookupFunction<
+            ffi.Int32 Function(ffi.Pointer, ffi.Int32),
+            int Function(ffi.Pointer, int)
+          >('onionmedia_set_pause_at_eof');
     } on Object {
       // Lookup en paquet : un symbole manquant de la
       // famille laisse le reste null (menu masqué).
-      _streamCount = _streamKind = _streamDispos =
-          _streamCodec = _streamLang = _streamTitle =
-              _audioStreamCur = _subStreamCur =
-                  _setAudioStream = _setSubStream = _subText =
-                      _chapterCount = _chapterStartMs =
-                          _chapterEndMs = _chapterTitle =
-                              _currentChapter = _seekChapter =
-                                  _coverArtLen = _coverArtData =
-                                      _loopGet = _setPauseEof = null;
+      _streamCount = _streamKind = _streamDispos = _streamCodec = _streamLang = _streamTitle = _audioStreamCur =
+          _subStreamCur = _setAudioStream = _setSubStream = _subText = _chapterCount =
+              _chapterStartMs = _chapterEndMs = _chapterTitle = _currentChapter = _seekChapter =
+                  _coverArtLen = _coverArtData = _loopGet = _setPauseEof = null;
     }
     // Porte ABI : `abi_version` elle-même se découvre —
     // absente = socle ≤ 4, le bloc 5 est sauté entier.
     try {
-      _abiVersion = _lib.lookupFunction<ffi.Uint32 Function(),
-          int Function()>('onionmedia_abi_version');
+      _abiVersion = _lib.lookupFunction<ffi.Uint32 Function(), int Function()>(
+        'onionmedia_abi_version',
+      );
     } on Object {
       _abiVersion = null;
     }
     if ((_abiVersion?.call() ?? 0) >= 5) {
       try {
-        _fastSeek = _lib.lookupFunction<
-            ffi.Int32 Function(ffi.Pointer, ffi.Int64),
-            int Function(ffi.Pointer, int)>('onionmedia_fast_seek_ms');
+        _fastSeek = _lib
+            .lookupFunction<
+              ffi.Int32 Function(ffi.Pointer, ffi.Int64),
+              int Function(ffi.Pointer, int)
+            >('onionmedia_fast_seek_ms');
       } on Object {
         _fastSeek = null;
       }
       try {
-        _bufferedRanges = _lib.lookupFunction<
-            ffi.Int32 Function(
-                ffi.Pointer, ffi.Pointer<ffi.Char>, ffi.IntPtr),
-            int Function(ffi.Pointer, ffi.Pointer<ffi.Char>, int)>(
-            'onionmedia_buffered_ranges');
+        _bufferedRanges = _lib
+            .lookupFunction<
+              ffi.Int32 Function(
+                ffi.Pointer,
+                ffi.Pointer<ffi.Char>,
+                ffi.IntPtr,
+              ),
+              int Function(ffi.Pointer, ffi.Pointer<ffi.Char>, int)
+            >('onionmedia_buffered_ranges');
       } on Object {
         _bufferedRanges = null;
       }
       try {
-        _frameStats = _lib.lookupFunction<
-            ffi.Int32 Function(
-                ffi.Pointer, ffi.Pointer<_OnionFrameStats>),
-            int Function(ffi.Pointer, ffi.Pointer<_OnionFrameStats>)>(
-            'onionmedia_frame_stats');
+        _frameStats = _lib
+            .lookupFunction<
+              ffi.Int32 Function(ffi.Pointer, ffi.Pointer<_OnionFrameStats>),
+              int Function(ffi.Pointer, ffi.Pointer<_OnionFrameStats>)
+            >('onionmedia_frame_stats');
       } on Object {
         _frameStats = null;
       }
       try {
-        _hwCodecs = _lib.lookupFunction<
-            ffi.Int32 Function(ffi.Pointer<ffi.Char>, ffi.IntPtr),
-            int Function(ffi.Pointer<ffi.Char>, int)>(
-            'onionmedia_hw_codecs');
+        _hwCodecs = _lib
+            .lookupFunction<
+              ffi.Int32 Function(ffi.Pointer<ffi.Char>, ffi.IntPtr),
+              int Function(ffi.Pointer<ffi.Char>, int)
+            >('onionmedia_hw_codecs');
       } on Object {
         _hwCodecs = null;
       }
       try {
-        _setMaxPixels = _lib.lookupFunction<
-            ffi.Int32 Function(ffi.Pointer, ffi.Uint64),
-            int Function(ffi.Pointer, int)>('onionmedia_set_max_pixels');
+        _setMaxPixels = _lib
+            .lookupFunction<
+              ffi.Int32 Function(ffi.Pointer, ffi.Uint64),
+              int Function(ffi.Pointer, int)
+            >('onionmedia_set_max_pixels');
       } on Object {
         _setMaxPixels = null;
       }
       try {
-        _framedropAuto = _lib.lookupFunction<
-            ffi.Int32 Function(ffi.Pointer, ffi.Uint32, ffi.Uint32,
-                ffi.Uint32, ffi.Uint32, ffi.Uint32),
-            int Function(ffi.Pointer, int, int, int, int, int)>(
-            'onionmedia_set_framedrop_auto');
+        _framedropAuto = _lib
+            .lookupFunction<
+              ffi.Int32 Function(
+                ffi.Pointer,
+                ffi.Uint32,
+                ffi.Uint32,
+                ffi.Uint32,
+                ffi.Uint32,
+                ffi.Uint32,
+              ),
+              int Function(ffi.Pointer, int, int, int, int, int)
+            >('onionmedia_set_framedrop_auto');
       } on Object {
         _framedropAuto = null;
       }
       try {
-        _setPreload = _lib.lookupFunction<
-            ffi.Int32 Function(ffi.Pointer, ffi.Int32),
-            int Function(ffi.Pointer, int)>('onionmedia_set_preload');
+        _setPreload = _lib
+            .lookupFunction<
+              ffi.Int32 Function(ffi.Pointer, ffi.Int32),
+              int Function(ffi.Pointer, int)
+            >('onionmedia_set_preload');
       } on Object {
         _setPreload = null;
       }
@@ -585,9 +777,7 @@ class OnionMediaPlayer implements MediaPlayer {
   /// Contrat `copy_out_str` du dépôt (`buffered_ranges`,
   /// `hw_codecs`…) : `buf NULL`/`0` → taille requise hors
   /// NUL, sinon octets écrits hors NUL.
-  static String _copyOutStr(
-    int Function(ffi.Pointer<ffi.Char>, int) fn,
-  ) {
+  static String _copyOutStr(int Function(ffi.Pointer<ffi.Char>, int) fn) {
     final need = fn(ffi.nullptr, 0);
     if (need <= 0) return '';
     final buf = calloc<ffi.Char>(need + 1);
@@ -654,18 +844,15 @@ class OnionMediaPlayer implements MediaPlayer {
   /// compteurs absents → `null` (« absent » du contrat,
   /// repli `frame_stats` à zéros implicites interdit).
   @visibleForTesting
-  static MediaFrameStats? frameStatsFromScalars(
-    int? presented,
-    int? dropped,
-  ) =>
+  static MediaFrameStats? frameStatsFromScalars(int? presented, int? dropped) =>
       presented == null && dropped == null
-          ? null
-          : MediaFrameStats(
-              presented: presented ?? 0,
-              dropped: dropped ?? 0,
-              corrupted: 0,
-              totalDelaySecs: 0,
-            );
+      ? null
+      : MediaFrameStats(
+          presented: presented ?? 0,
+          dropped: dropped ?? 0,
+          corrupted: 0,
+          totalDelaySecs: 0,
+        );
 
   /// `copy_out_str` avec paramètre index (`stream_codec`/
   /// `language`/`title`) — `fn` null ou `need ≤ 0` → `''`.
@@ -786,8 +973,7 @@ class OnionMediaPlayer implements MediaPlayer {
     try {
       final n = dataFn(_h, buf, len);
       if (n <= 0) return;
-      final bytes =
-          Uint8List.fromList(buf.cast<ffi.Uint8>().asTypedList(n));
+      final bytes = Uint8List.fromList(buf.cast<ffi.Uint8>().asTypedList(n));
       final codec = await ui.instantiateImageCodec(bytes);
       final frame = await codec.getNextFrame();
       _coverArt = frame.image;
@@ -827,8 +1013,7 @@ class OnionMediaPlayer implements MediaPlayer {
   /// `implicitView` (aucune dépendance `BuildContext`, la
   /// seam vit en couche data). 1.0 headless/test.
   static double get _dpr =>
-      ui.PlatformDispatcher.instance.implicitView?.devicePixelRatio ??
-      1.0;
+      ui.PlatformDispatcher.instance.implicitView?.devicePixelRatio ?? 1.0;
 
   /// Besoin d'affichage en **px device** : rect px CSS × dpr².
   /// 0 = rect vide (`audio` sans controls, 0×0) → pas de
@@ -844,12 +1029,16 @@ class OnionMediaPlayer implements MediaPlayer {
   static String? probeMimeVerdict(String mime) {
     try {
       final lib = _load();
-      final fn = lib.lookupFunction<
-          ffi.Int32 Function(ffi.Pointer<ffi.Char>, ffi.IntPtr,
-              ffi.Pointer<ffi.Char>, ffi.IntPtr),
-          int Function(
-              ffi.Pointer<ffi.Char>, int, ffi.Pointer<ffi.Char>, int)>(
-          'onionmedia_can_play_type');
+      final fn = lib
+          .lookupFunction<
+            ffi.Int32 Function(
+              ffi.Pointer<ffi.Char>,
+              ffi.IntPtr,
+              ffi.Pointer<ffi.Char>,
+              ffi.IntPtr,
+            ),
+            int Function(ffi.Pointer<ffi.Char>, int, ffi.Pointer<ffi.Char>, int)
+          >('onionmedia_can_play_type');
       final bytes = mime.codeUnits;
       final mp = calloc<ffi.Char>(bytes.length);
       try {
@@ -862,8 +1051,7 @@ class OnionMediaPlayer implements MediaPlayer {
         try {
           final n = fn(mp, bytes.length, buf, need + 1);
           return n >= 0
-              ? String.fromCharCodes(
-                  buf.cast<ffi.Uint8>().asTypedList(n))
+              ? String.fromCharCodes(buf.cast<ffi.Uint8>().asTypedList(n))
               : null;
         } finally {
           calloc.free(buf);
@@ -896,10 +1084,7 @@ class OnionMediaPlayer implements MediaPlayer {
         if (pfn(e.value) == 'probable') e.key,
     ];
     if (certified.isEmpty) return declared;
-    return [
-      ...declared.where((c) => c.contains('/')),
-      ...certified,
-    ];
+    return [...declared.where((c) => c.contains('/')), ...certified];
   }
 
   static int displayPixelsFor(Rect r) {
@@ -946,8 +1131,14 @@ class OnionMediaPlayer implements MediaPlayer {
   void _applyFramedrop(MediaFramedropConfig? cfg) {
     final fn = _framedropAuto;
     if (fn == null || cfg == null) return;
-    fn(_h, cfg.window.inMilliseconds, cfg.dwell.inMilliseconds,
-        cfg.pin.inMilliseconds, cfg.dropsPerWindow, cfg.maxLevel);
+    fn(
+      _h,
+      cfg.window.inMilliseconds,
+      cfg.dwell.inMilliseconds,
+      cfg.pin.inMilliseconds,
+      cfg.dropsPerWindow,
+      cfg.maxLevel,
+    );
   }
 
   /// Dernière erreur du handle (`player_error` par handle si
@@ -982,9 +1173,11 @@ class OnionMediaPlayer implements MediaPlayer {
     // lookup gardé, ignoré silencieusement si absent.
     for (final sym in ['onionmedia_set_hw_accel', 'onionmedia_set_hwaccel']) {
       try {
-        final setHw = lib.lookupFunction<
-            ffi.Int32 Function(ffi.Pointer, ffi.Int32),
-            int Function(ffi.Pointer, int)>(sym);
+        final setHw = lib
+            .lookupFunction<
+              ffi.Int32 Function(ffi.Pointer, ffi.Int32),
+              int Function(ffi.Pointer, int)
+            >(sym);
         setHw(h, on ? 1 : 0);
         break;
       } on Object {
@@ -1005,10 +1198,11 @@ class OnionMediaPlayer implements MediaPlayer {
   ) {
     if (text.isEmpty) return;
     try {
-      final fn = lib.lookupFunction<
-          ffi.Int32 Function(ffi.Pointer, ffi.Pointer<ffi.Char>, ffi.IntPtr),
-          int Function(ffi.Pointer, ffi.Pointer<ffi.Char>, int)>(
-          'onionmedia_set_http_headers');
+      final fn = lib
+          .lookupFunction<
+            ffi.Int32 Function(ffi.Pointer, ffi.Pointer<ffi.Char>, ffi.IntPtr),
+            int Function(ffi.Pointer, ffi.Pointer<ffi.Char>, int)
+          >('onionmedia_set_http_headers');
       final s = text.toNativeUtf8();
       try {
         fn(h, s.cast<ffi.Char>(), s.length);
@@ -1037,6 +1231,7 @@ class OnionMediaPlayer implements MediaPlayer {
     bool pauseAtEof = false,
   }) async {
     final lib = _load();
+
     /// `file:///D:/x.mkv` -> `D:/x.mkv` ; chemin nu inchangé.
     String localPath(String url) {
       if (!url.startsWith('file')) {
@@ -1049,8 +1244,10 @@ class OnionMediaPlayer implements MediaPlayer {
       }
     }
 
-    final h = lib.lookupFunction<ffi.Pointer Function(), ffi.Pointer Function()>(
-        'onionmedia_new')();
+    final h = lib
+        .lookupFunction<ffi.Pointer Function(), ffi.Pointer Function()>(
+          'onionmedia_new',
+        )();
     if (h == ffi.nullptr) {
       throw StateError('onionmedia_new a échoué');
     }
@@ -1079,10 +1276,14 @@ class OnionMediaPlayer implements MediaPlayer {
     try {
       final isHttp = url.startsWith('http');
       if (isHttp) {
-        _setHttpHeaders(lib, h, [
-          if (referer.isNotEmpty) 'Referer: $referer',
-          if (userAgent.isNotEmpty) 'User-Agent: $userAgent',
-        ].join('\n'));
+        _setHttpHeaders(
+          lib,
+          h,
+          [
+            if (referer.isNotEmpty) 'Referer: $referer',
+            if (userAgent.isNotEmpty) 'User-Agent: $userAgent',
+          ].join('\n'),
+        );
       }
       // `file:///D:/x.mkv` -> chemin filesystem pour
       // `open_path` (le moteur attend un path, pas une URL).
@@ -1103,7 +1304,9 @@ class OnionMediaPlayer implements MediaPlayer {
       }
       await p._loadCoverArt();
       if (rc != 0) {
-        throw StateError('onionmedia_open: ${p._playerError() ?? p._lastError()}');
+        throw StateError(
+          'onionmedia_open: ${p._playerError() ?? p._lastError()}',
+        );
       }
     } catch (_) {
       p._qtavFree(h);
@@ -1142,26 +1345,27 @@ class OnionMediaPlayer implements MediaPlayer {
     // Le symbole peut ne pas exister encore — erreur propre.
     try {
       lib.lookup<ffi.NativeFunction<ffi.Void Function()>>(
-          'onionmedia_open_mse');
-    } on Object {
-      throw StateError(
-        'onionmedia_open_mse absent — DLL sans le chemin MSE',
+        'onionmedia_open_mse',
       );
+    } on Object {
+      throw StateError('onionmedia_open_mse absent — DLL sans le chemin MSE');
     }
     // `open_mse_multi` est additif (ABI 2→3) : absent →
     // mono-rail dégradé, jamais de claim cassant.
     final openMulti = () {
       try {
         return lib.lookupFunction<
-            ffi.Int32 Function(ffi.Pointer, ffi.Pointer<_MseDesc>, ffi.IntPtr),
-            int Function(ffi.Pointer, ffi.Pointer<_MseDesc>, int)>(
-            'onionmedia_open_mse_multi');
+          ffi.Int32 Function(ffi.Pointer, ffi.Pointer<_MseDesc>, ffi.IntPtr),
+          int Function(ffi.Pointer, ffi.Pointer<_MseDesc>, int)
+        >('onionmedia_open_mse_multi');
       } on Object {
         return null;
       }
     }();
-    final h = lib.lookupFunction<ffi.Pointer Function(), ffi.Pointer Function()>(
-        'onionmedia_new')();
+    final h = lib
+        .lookupFunction<ffi.Pointer Function(), ffi.Pointer Function()>(
+          'onionmedia_new',
+        )();
     if (h == ffi.nullptr) {
       throw StateError('onionmedia_new a échoué');
     }
@@ -1175,8 +1379,15 @@ class OnionMediaPlayer implements MediaPlayer {
       final tab = int.tryParse(tabId) ?? 0;
       if (offer.mseBuffers.length > 1 && openMulti != null) {
         _openMseMulti(
-            openMulti, p, h, apiBase, tab, offer.id, offer.mseBuffers,
-            offer.mseOffsets);
+          openMulti,
+          p,
+          h,
+          apiBase,
+          tab,
+          offer.id,
+          offer.mseBuffers,
+          offer.mseOffsets,
+        );
       } else {
         _openMseSingle(lib, p, h, apiBase, tab, offer);
       }
@@ -1202,10 +1413,17 @@ class OnionMediaPlayer implements MediaPlayer {
   /// registre poubelle → « extension mse invalide (utf-8) »).
   /// `ext` = MIME du rail (`video/mp4`, `;codecs=` toléré —
   /// normalisé `container_hint` côté DLL depuis P-59).
-  static void _openMseSingle(ffi.DynamicLibrary lib, OnionMediaPlayer p,
-      ffi.Pointer h, String apiBase, int tab, MediaOffer offer) {
-    final openMse = lib.lookupFunction<
-        ffi.Int32 Function(
+  static void _openMseSingle(
+    ffi.DynamicLibrary lib,
+    OnionMediaPlayer p,
+    ffi.Pointer h,
+    String apiBase,
+    int tab,
+    MediaOffer offer,
+  ) {
+    final openMse = lib
+        .lookupFunction<
+          ffi.Int32 Function(
             ffi.Pointer,
             ffi.Pointer<ffi.Char>,
             ffi.IntPtr,
@@ -1213,8 +1431,9 @@ class OnionMediaPlayer implements MediaPlayer {
             ffi.Uint64,
             ffi.Uint32,
             ffi.Pointer<ffi.Char>,
-            ffi.IntPtr),
-        int Function(
+            ffi.IntPtr,
+          ),
+          int Function(
             ffi.Pointer,
             ffi.Pointer<ffi.Char>,
             int,
@@ -1222,12 +1441,15 @@ class OnionMediaPlayer implements MediaPlayer {
             int,
             int,
             ffi.Pointer<ffi.Char>,
-            int)>('onionmedia_open_mse');
+            int,
+          )
+        >('onionmedia_open_mse');
     final ab = apiBase.codeUnits;
-    final ext = (offer.mseBuffers.isNotEmpty
-            ? offer.mseBuffers.first
-            : offer.mime ?? 'mp4')
-        .codeUnits;
+    final ext =
+        (offer.mseBuffers.isNotEmpty
+                ? offer.mseBuffers.first
+                : offer.mime ?? 'mp4')
+            .codeUnits;
     final cAb = calloc<ffi.Char>(ab.length);
     final cExt = calloc<ffi.Char>(ext.length);
     for (var i = 0; i < ab.length; i++) {
@@ -1241,7 +1463,8 @@ class OnionMediaPlayer implements MediaPlayer {
     calloc.free(cExt);
     if (rc != 0) {
       throw StateError(
-          'onionmedia_open_mse: ${p._playerError() ?? p._lastError()}');
+        'onionmedia_open_mse: ${p._playerError() ?? p._lastError()}',
+      );
     }
   }
 
@@ -1287,7 +1510,8 @@ class OnionMediaPlayer implements MediaPlayer {
       final rc = openMulti(h, descs, rails.length);
       if (rc != 0) {
         throw StateError(
-            'onionmedia_open_mse_multi: ${p._playerError() ?? 'rc=$rc'}');
+          'onionmedia_open_mse_multi: ${p._playerError() ?? 'rc=$rc'}',
+        );
       }
     } finally {
       for (final c in exts) {
@@ -1305,8 +1529,7 @@ class OnionMediaPlayer implements MediaPlayer {
       _startWaiter();
       return;
     }
-    _pump =
-        Timer.periodic(const Duration(milliseconds: 33), (_) => _pull());
+    _pump = Timer.periodic(const Duration(milliseconds: 33), (_) => _pull());
   }
 
   /// Isolate dédié `frame_wait` (P-59) : bloque côté natif
@@ -1321,21 +1544,24 @@ class OnionMediaPlayer implements MediaPlayer {
     final exit = ReceivePort();
     _waiterExit = exit;
     _waiterSub = port.listen((_) => _pull());
-    Isolate.spawn(
-      _waiterMain,
-      (port: port.sendPort, h: _h.address),
-      onExit: exit.sendPort,
-    ).then((iso) {
-      if (_disposed) {
-        iso.kill();
-      } else {
-        _waiter = iso;
-      }
-    }).catchError((Object e) {
-      // spawn impossible → repli polling périodique.
-      _pump ??= Timer.periodic(
-          const Duration(milliseconds: 33), (_) => _pull());
-    });
+    Isolate.spawn(_waiterMain, (
+          port: port.sendPort,
+          h: _h.address,
+        ), onExit: exit.sendPort)
+        .then((iso) {
+          if (_disposed) {
+            iso.kill();
+          } else {
+            _waiter = iso;
+          }
+        })
+        .catchError((Object e) {
+          // spawn impossible → repli polling périodique.
+          _pump ??= Timer.periodic(
+            const Duration(milliseconds: 33),
+            (_) => _pull(),
+          );
+        });
   }
 
   /// Corps de l'isolate waiter — `frame_wait` bloquant dans
@@ -1345,9 +1571,11 @@ class OnionMediaPlayer implements MediaPlayer {
   /// retour `-1` (handle libéré).
   static void _waiterMain(({SendPort port, int h}) msg) {
     final lib = _load();
-    final wait = lib.lookupFunction<
-        ffi.Int64 Function(ffi.Pointer, ffi.Uint64, ffi.Uint32),
-        int Function(ffi.Pointer, int, int)>('onionmedia_frame_wait');
+    final wait = lib
+        .lookupFunction<
+          ffi.Int64 Function(ffi.Pointer, ffi.Uint64, ffi.Uint32),
+          int Function(ffi.Pointer, int, int)
+        >('onionmedia_frame_wait');
     final h = ffi.Pointer<ffi.Void>.fromAddress(msg.h);
     var last = 0;
     while (true) {
@@ -1435,8 +1663,7 @@ class OnionMediaPlayer implements MediaPlayer {
             final n = pullEx(_h, buf, w.value * ht.value * 4, w, ht, sq);
             if (n <= 0) return;
             _lastSeq = sq.value;
-            final img = await _decode(
-                buf.asTypedList(n), w.value, ht.value);
+            final img = await _decode(buf.asTypedList(n), w.value, ht.value);
             if (img != null) {
               _frame?.dispose();
               _frame = img;
@@ -1499,8 +1726,7 @@ class OnionMediaPlayer implements MediaPlayer {
   Widget get view {
     final img = _frame;
     if (img == null) {
-      return const SizedBox.expand(
-          child: ColoredBox(color: Color(0xFF000000)));
+      return const SizedBox.expand(child: ColoredBox(color: Color(0xFF000000)));
     }
     // Rotation conteneur (`tkhd`) lue à la demande — le
     // pivotement physique des pixels reste côté rendu, les
@@ -1512,7 +1738,8 @@ class OnionMediaPlayer implements MediaPlayer {
           ? RawImage(image: img, fit: BoxFit.contain)
           : RotatedBox(
               quarterTurns: quarter,
-              child: RawImage(image: img, fit: BoxFit.contain)),
+              child: RawImage(image: img, fit: BoxFit.contain),
+            ),
     );
   }
 
@@ -1536,8 +1763,9 @@ class OnionMediaPlayer implements MediaPlayer {
     final buffered = _bufferedMs?.call(_h) ?? -1;
     return MediaSnapshot(
       positionMs: pos,
-      bufferedMs:
-          buffered >= 0 ? buffered : pos, // P-60, sinon approximation v1
+      bufferedMs: buffered >= 0
+          ? buffered
+          : pos, // P-60, sinon approximation v1
       durationMs: dur > 0 ? dur : null,
       state: state,
       error: _playerError(),
@@ -1593,20 +1821,92 @@ class OnionMediaPlayer implements MediaPlayer {
     if (fwd ? _frameStep == null : _frameBackStep == null) return;
     final addr = _h.address;
     final run = _stepQueue.then(
-      (_) => Isolate.run(() {
-        final lib = _load();
-        final fn = lib.lookupFunction<ffi.Int32 Function(ffi.Pointer),
-            int Function(ffi.Pointer)>(
-            fwd ? 'onionmedia_frame_step' : 'onionmedia_frame_back_step');
-        fn(ffi.Pointer<ffi.Void>.fromAddress(addr));
-      }).catchError((Object _) {
-        // Isolate impossible — le pas est sauté, la file survit.
-      }),
+      (_) =>
+          Isolate.run(() {
+            final lib = _load();
+            final fn = lib
+                .lookupFunction<
+                  ffi.Int32 Function(ffi.Pointer),
+                  int Function(ffi.Pointer)
+                >(fwd ? 'onionmedia_frame_step' : 'onionmedia_frame_back_step');
+            fn(ffi.Pointer<ffi.Void>.fromAddress(addr));
+          }).catchError((Object _) {
+            // Isolate impossible — le pas est sauté, la file survit.
+          }),
     );
     _stepQueue = run;
     await run;
     _notify();
   }
+
+  /// `enableAudioTap` (Étape 204b — `AUDIO_MODE_TAP=2`,
+  /// ADR-0032) : `set_audio_mode(2)` pose le tee — device
+  /// **et** ring pull (le son n'est jamais coupé). `-1` sur
+  /// dll antérieure → `false` honnête, la lecture reste
+  /// device-only. Le drain 25 ms sonde `audio_pull(NULL,0)`
+  /// puis pousse les chunks ≤ 16 Ko (cap route) au sink —
+  /// lecture non bloquante ring → timer UI sûr. La spec est
+  /// lue paresseusement au premier octet : le reader n'existe
+  /// qu'après l'installation du tee (au `play`).
+  @override
+  Future<bool> enableAudioTap(AudioChunkSink onChunk) async {
+    if (_disposed) return false;
+    if (_audioDrain != null) return true;
+    final setMode = _setAudioMode;
+    if (setMode == null || _audioSpec == null || _audioPull == null) {
+      return false;
+    }
+    if (setMode(_h, 2) != 0) return false; // AUDIO_MODE_TAP
+    _audioSink = onChunk;
+    _audioDrain = Timer.periodic(
+      const Duration(milliseconds: 25),
+      (_) => _drainAudio(),
+    );
+    return true;
+  }
+
+  /// Cap d'un chunk poussé — borne de la route `…/audio`.
+  static const _tapChunkMax = 16 * 1024;
+
+  void _drainAudio() {
+    final pull = _audioPull;
+    final sink = _audioSink;
+    if (pull == null || sink == null || _disposed) return;
+    // Sonde : octets disponibles sans copie.
+    var avail = pull(_h, ffi.Pointer<ffi.Uint8>.fromAddress(0), 0);
+    while (avail > 0) {
+      final spec = _tapSpec ??= _readAudioSpec();
+      if (spec == null) return; // reader pas encore installé
+      final n = avail > _tapChunkMax ? _tapChunkMax : avail;
+      final ptr = calloc<ffi.Uint8>(n);
+      try {
+        final got = pull(_h, ptr, n);
+        if (got <= 0) return;
+        sink(spec, Uint8List.fromList(ptr.asTypedList(got)));
+        avail -= got;
+      } finally {
+        calloc.free(ptr);
+      }
+    }
+  }
+
+  MediaAudioSpec? _readAudioSpec() {
+    final specFn = _audioSpec;
+    if (specFn == null) return null;
+    final rate = calloc<ffi.Uint32>();
+    final ch = calloc<ffi.Uint32>();
+    final fmt = calloc<ffi.Int32>();
+    try {
+      if (specFn(_h, rate, ch, fmt) != 0) return null;
+      return (sampleRate: rate.value, channels: ch.value, format: fmt.value);
+    } finally {
+      calloc
+        ..free(rate)
+        ..free(ch)
+        ..free(fmt);
+    }
+  }
+
   @override
   double get volume => _volume;
   @override
@@ -1625,9 +1925,9 @@ class OnionMediaPlayer implements MediaPlayer {
     _qtavSetMute(_h, on ? 1 : 0);
     _notify();
   }
+
   @override
-  Future<void> setRate(double r) async =>
-      _qtavSetSpeed(_h, r.clamp(0.25, 4.0));
+  Future<void> setRate(double r) async => _qtavSetSpeed(_h, r.clamp(0.25, 4.0));
 
   @override
   Future<void> setLoop(bool on) async => _setLoop?.call(_h, on ? -1 : 0);
@@ -1636,6 +1936,9 @@ class OnionMediaPlayer implements MediaPlayer {
   Future<void> dispose() async {
     if (_disposed) return;
     _disposed = true;
+    _audioDrain?.cancel();
+    _audioDrain = null;
+    _audioSink = null;
     _pump?.cancel();
     await _waiterSub?.cancel();
     final iso = _waiter;
@@ -1646,18 +1949,17 @@ class OnionMediaPlayer implements MediaPlayer {
       // bloqué dans `frame_wait` sur le handle (borne 5 s
       // + marge — `wait` rend au timeout si rien n'arrive).
       if (exit != null) {
-        await exit.first
-            .timeout(const Duration(seconds: 10), onTimeout: () => null);
+        await exit.first.timeout(
+          const Duration(seconds: 10),
+          onTimeout: () => null,
+        );
       }
       exit?.close();
     }
     // Pas-à-pas en file/vol (Étape 203) : attendre la fin du
     // FFI actif avant `stop`/`free` — même invariant que
     // `_waiter`, borné (un pas est lui-même borné côté dépôt).
-    await _stepQueue.timeout(
-      const Duration(seconds: 10),
-      onTimeout: () {},
-    );
+    await _stepQueue.timeout(const Duration(seconds: 10), onTimeout: () {});
     _qtavStop(_h);
     _qtavFree(_h);
     _frame?.dispose();

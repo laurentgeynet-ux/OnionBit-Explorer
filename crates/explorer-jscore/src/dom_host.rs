@@ -3681,6 +3681,23 @@ impl Engine {
     /// ne peut pas contredire `buffered` (étape 182).
     /// Rapport sur élément non claimé → ignoré.
     ///
+    /// Pousse un chunk PCM hôte dans le ring de la surface
+    /// `media` (Étape 204b — tee `AUDIO_MODE_TAP`, ADR-0032) :
+    /// stockage muet (flux — pas de rejeu), lu par le graphe
+    /// Web Audio (`MediaElementAudioSourceNode`, 204c).
+    /// Surface inconnue = ring créé à la réception.
+    pub fn deliver_media_audio(
+        &mut self,
+        media: u64,
+        rate: u32,
+        channels: u16,
+        format: i32,
+        chunk: &[u8],
+    ) {
+        let ring = self.mse.pcm_rings.entry(media).or_default();
+        ring.push(rate, channels, format, chunk);
+    }
+
     /// # Errors
     /// Propage la première exception de listener DOM.
     pub fn deliver_media_state(&mut self, node: NodeId, rep: &MediaReport) -> JsResult<()> {

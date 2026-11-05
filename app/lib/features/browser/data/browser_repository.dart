@@ -14,6 +14,7 @@ import '../domain/find_result.dart';
 import '../domain/history_entry.dart';
 import '../domain/media_offer.dart';
 import '../domain/reload_result.dart';
+import 'media_player.dart' show MediaAudioSpec;
 
 /// Pull de frame **atomique** (étape 185, M1) — le PNG et
 /// sa métadonnée proviennent de la même réponse :
@@ -281,10 +282,7 @@ class BrowserRepository {
   /// (`prefers-color-scheme` + défauts UA). Réglage
   /// session-level : le serveur repeint l'onglet nommé.
   Future<void> setColorScheme(String tabId, String scheme) =>
-      _api.postJson(
-        '/api/tabs/$tabId/color-scheme',
-        body: {'scheme': scheme},
-      );
+      _api.postJson('/api/tabs/$tabId/color-scheme', body: {'scheme': scheme});
 
   /// `Accept-Language` session (`POST /api/accept-language`,
   /// étape 118) — valeur annoncée sur toutes les requêtes
@@ -384,8 +382,11 @@ class BrowserRepository {
   /// `progress`/`done`/`failed` SSE). `filename` =
   /// suggestion de nom (avant `Content-Disposition`).
   /// Retourne l'identifiant.
-  Future<int> downloadStart(String tabId, String url,
-      {String? filename}) async {
+  Future<int> downloadStart(
+    String tabId,
+    String url, {
+    String? filename,
+  }) async {
     final res = await _api.postJson(
       '/api/tabs/$tabId/downloads',
       body: {'url': url, 'filename': ?filename},
@@ -411,9 +412,8 @@ class BrowserRepository {
   /// `mediaKnown` distingue « la clé existe » d'un daemon
   /// antérieur qui ne l'émet pas (`false` → repli M0).
   Future<({String? link, String? image, int? media, bool mediaKnown})>
-      hitTarget(String tabId, double x, double y) async {
-    final res =
-        await _api.getJson('/api/tabs/$tabId/hit?x=$x&y=$y');
+  hitTarget(String tabId, double x, double y) async {
+    final res = await _api.getJson('/api/tabs/$tabId/hit?x=$x&y=$y');
     if (res is Map<String, dynamic>) {
       return (
         link: res['link'] as String?,
@@ -494,4 +494,24 @@ class BrowserRepository {
     int mediaId,
     Map<String, dynamic> report,
   ) => _api.postJson('/api/tabs/$tabId/media/$mediaId/state', body: report);
+
+  /// Pousse un chunk PCM de la surface claimée (`POST
+  /// …/audio`, Étape 204b — tee `AUDIO_MODE_TAP` dépôt,
+  /// ADR-0032) : octets interleaved + spec en query → ring
+  /// `pcm` moteur lu par le graphe Web Audio (204c).
+  /// `FfiEngine` le surcharge en op miroir `opMediaAudio`.
+  Future<void> mediaAudio(
+    String tabId,
+    int mediaId,
+    MediaAudioSpec spec,
+    Uint8List pcm,
+  ) => _api.postBytes(
+    '/api/tabs/$tabId/media/$mediaId/audio',
+    pcm,
+    query: {
+      'rate': '${spec.sampleRate}',
+      'ch': '${spec.channels}',
+      'fmt': '${spec.format}',
+    },
+  );
 }

@@ -6994,12 +6994,47 @@ incrément.
   filaire `frame_step_wire_contract`
   + `--step`/`--back-step` vol
   probe + doc ABI. 76/76 app.
-- [ ] **Étape 204. `AUDIO_MODE_TAP=2`**
-  (dépôt perf → NAV) — ADR-0032
-  phases 1-3 : tee cpal+pull file,
-  canal REST PCM, jscore
-  `AnalyserNode`. Gros incrément
-  multi-couches, à re-planifier.
+- [~] **Étape 204. `AUDIO_MODE_TAP=2`**
+  (dépôt → NAV → jscore) — ADR-0032
+  en trois sous-étapes :
+  - [x] **204a** (dépôt, `master
+    806f22b`) : `TeeAudioSink` —
+    `write` device maître puis
+    `push_slice` non bloquant vers le
+    ring pull (`tap_dropped`), spec
+    fixe 48 kHz/stéréo/f32, jambe
+    pull seule si device absent ;
+    `set_audio_mode` accepte `2`,
+    `3` → `-1`. Verrou
+    `audio_tap_wire_contract`
+    (`probe_ffi` 9/9).
+  - [x] **204b** (NAV) : bindings
+    gardés `set_audio_mode`/
+    `audio_spec`/`audio_pull` +
+    `AppConfig.mediaAudioTap` (opt-in,
+    défaut off — `-1` vieille DLL →
+    device-only honnête) ; drainer
+    25 ms chunks ≤ 16 Ko ; transport
+    double = `POST …/media/{mid}/
+    audio` (REST daemon) **et**
+    `explorer_media_audio` (`op
+    MediaAudio`, loopback FFI —
+    même ring moteur `PcmRing`
+    192 Ko drop-oldest par surface,
+    changement de spec = resync
+    purge) ; `413` cap, `410` mort,
+    `409` non claimé. Verrous :
+    route REST + FFI + contrôleur
+    tap on/off — 81/81 app.
+  - [ ] **204c** (jscore) :
+    `AnalyserNode`/`AudioContext` +
+    `createMediaElementSource` lisant
+    `PcmRing` (destination muet
+    documenté — le son audible reste
+    le device DLL ; `rustfft` à
+    justifier). API partielle visible
+    (`createGain` absent = `undefined`
+    honnête, pas de stub).
 - Inventaire à activation différée
   (existants, pas de consommateur) :
   `set_ab_loop`, `set_subtitle_delay`,

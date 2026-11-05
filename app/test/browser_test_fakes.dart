@@ -201,8 +201,7 @@ class FakeRepo implements BrowserRepository {
     double w,
     double h,
     double scale,
-  ) async =>
-      actions.add('viewport:${w.toInt()}x${h.toInt()}');
+  ) async => actions.add('viewport:${w.toInt()}x${h.toInt()}');
 
   @override
   Future<void> setColorScheme(String tabId, String scheme) async =>
@@ -267,9 +266,11 @@ class FakeRepo implements BrowserRepository {
   final List<String> declinedDownloads = [];
 
   @override
-  Future<int> downloadStart(String tabId, String url,
-      {String? filename}) async =>
-      throw UnimplementedError('FakeRepo.downloadStart');
+  Future<int> downloadStart(
+    String tabId,
+    String url, {
+    String? filename,
+  }) async => throw UnimplementedError('FakeRepo.downloadStart');
 
   @override
   Future<void> cancelDownload(String tabId, int dlId) async =>
@@ -286,7 +287,7 @@ class FakeRepo implements BrowserRepository {
 
   @override
   Future<({String? link, String? image, int? media, bool mediaKnown})>
-      hitTarget(String tabId, double x, double y) async {
+  hitTarget(String tabId, double x, double y) async {
     final h = nextHit;
     if (h == null) throw StateError('sonde indisponible');
     return h;
@@ -336,6 +337,18 @@ class FakeRepo implements BrowserRepository {
     Map<String, dynamic> report,
   ) async {
     mediaCalls.add('state:$tabId:$mediaId:${report['state']}');
+  }
+
+  /// Chunks PCM tap reçus (Étape 204b) — `audio:n` par appel.
+  final List<String> audioCalls = [];
+  @override
+  Future<void> mediaAudio(
+    String tabId,
+    int mediaId,
+    MediaAudioSpec spec,
+    Uint8List pcm,
+  ) async {
+    audioCalls.add('audio:$tabId:$mediaId:${pcm.length}');
   }
 }
 
@@ -449,6 +462,7 @@ class FakePlayer implements MediaPlayer {
     );
     notify();
   }
+
   @override
   Future<void> setVolume(double v) async {
     _volume = v.clamp(0.0, 1.0);
@@ -460,6 +474,7 @@ class FakePlayer implements MediaPlayer {
     _muted = on;
     notify();
   }
+
   @override
   Future<void> setRate(double r) async => rate = r;
   int loopSets = 0;
@@ -488,6 +503,18 @@ class FakePlayer implements MediaPlayer {
 
   @override
   Future<void> dispose() async => disposes++;
+
+  /// Tap PCM (Étape 204b) — `audioTapResult` pilote le
+  /// retour (`false` = symbole/mode refusé, repli silencieux).
+  bool audioTapResult = true;
+  int audioTaps = 0;
+  AudioChunkSink? audioSink;
+  @override
+  Future<bool> enableAudioTap(AudioChunkSink onChunk) async {
+    audioTaps++;
+    if (audioTapResult) audioSink = onChunk;
+    return audioTapResult;
+  }
 }
 
 /// Fabrique enregistrant ses instances — les tests lisent le

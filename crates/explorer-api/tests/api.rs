@@ -1525,6 +1525,71 @@ async fn media_claim_state_release() {
     assert_eq!(v["claimed"], false);
 }
 
+/// Étape 204b — `POST …/media/{mid}/audio` : push PCM de
+/// l'hôte claimé → ring `pcm` moteur. `409` non claimée,
+/// `410` id mort, `413` au-delà du cap 16 Ko — fire-and-
+/// forget borné, l'erreur n'est jamais rejouée.
+#[tokio::test]
+async fn media_audio_route_contract() {
+    fn audio_post(uri: &str, n: usize) -> HttpRequest<Body> {
+        HttpRequest::builder()
+            .method("POST")
+            .uri(uri)
+            .header(header::CONTENT_TYPE, "application/octet-stream")
+            .body(Body::from(vec![0x5Au8; n]))
+            .unwrap()
+    }
+    let (app, id) = media_tab().await;
+    let v = media_get(&app, id, "").await;
+    let mid = v["media"][0]["id"].as_u64().unwrap();
+    let uri = format!("/api/tabs/{id}/media/{mid}/audio");
+
+    // Sans claim → 409 ; chunk mort → 410 ; > 16 Ko → 413.
+    let st = app.clone().oneshot(audio_post(&uri, 9600)).await.unwrap();
+    assert_eq!(st.status(), StatusCode::CONFLICT);
+    let dead = app
+        .clone()
+        .oneshot(audio_post(&format!("/api/tabs/{id}/media/999/audio"), 9600))
+        .await
+        .unwrap();
+    assert_eq!(dead.status(), StatusCode::GONE);
+    let big = app
+        .clone()
+        .oneshot(audio_post(&uri, 17 * 1024))
+        .await
+        .unwrap();
+    assert_eq!(big.status(), StatusCode::PAYLOAD_TOO_LARGE);
+
+    // Claim → chunk + spec en query → 200.
+    let cl = app
+        .clone()
+        .oneshot(json_post(
+            &format!("/api/tabs/{id}/media/{mid}/claim"),
+            r#"{"codecs":["h264","aac"]}"#,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(cl.status(), StatusCode::OK);
+    let ok = app
+        .clone()
+        .oneshot(audio_post(&format!("{uri}?rate=48000&ch=2&fmt=4"), 9600))
+        .await
+        .unwrap();
+    assert_eq!(ok.status(), StatusCode::OK);
+    // Release → plus de push (409).
+    let rel = app
+        .clone()
+        .oneshot(json_post(
+            &format!("/api/tabs/{id}/media/{mid}/release"),
+            "{}",
+        ))
+        .await
+        .unwrap();
+    assert_eq!(rel.status(), StatusCode::OK);
+    let gone = app.oneshot(audio_post(&uri, 9600)).await.unwrap();
+    assert_eq!(gone.status(), StatusCode::CONFLICT);
+}
+
 /// Issue #23 — mort permanente des sondes : un futur de
 /// navigation droppé pendant le rendu détaché (client HTTP
 /// tombé en timeout) laissait la payload perdue et

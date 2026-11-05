@@ -723,6 +723,29 @@ fn js_report_of(report: &MediaReport) -> explorer_js::JsMediaReport {
     }
 }
 
+/// Format PCM d'un flux `audio` hôte (Étape 204b —
+/// `AUDIO_MODE_TAP` dépôt) : échantillons interleaved non
+/// coupés trame ; `format` = vocabulaire dépôt (`4` f32 LE,
+/// la `AUDIO_SPEC` fixe actuelle).
+#[derive(Debug, Clone, Copy)]
+pub struct MediaAudioSpec {
+    /// Cadence (Hz).
+    pub sample_rate: u32,
+    /// Canaux.
+    pub channels: u16,
+    /// Format d'échantillon dépôt (`0` u8 … `5` f64).
+    pub format: i32,
+}
+
+/// Traduction spec session → payload moteur (Étape 204b).
+fn js_audio_spec_of(spec: MediaAudioSpec) -> explorer_js::JsAudioSpec {
+    explorer_js::JsAudioSpec {
+        sample_rate: spec.sample_rate,
+        channels: spec.channels,
+        format: spec.format,
+    }
+}
+
 /// Livre au moteur le claim en attente (claim/release posé
 /// pendant une fenêtre moteur-absent) — idempotent : le
 /// drapeau tombe à la première livraison réussie.
@@ -1194,6 +1217,39 @@ impl Session {
             m.report_pending = true;
         }
         m.report = Some(report);
+        Ok(())
+    }
+
+    /// Chunk PCM de la surface claimée (Étape 204b — tee
+    /// `AUDIO_MODE_TAP` dépôt, ADR-0032) → ring `pcm`
+    /// moteur par surface, lu par le graphe Web Audio
+    /// (204c). Flux : un chunk pendant la fenêtre
+    /// moteur-absent est perdu (pas de rejeu), le ring
+    /// reprend au chunk suivant. Exige un claim actif.
+    ///
+    /// # Errors
+    /// [`MediaError::Dead`] id inconnu ou mort ;
+    /// [`MediaError::NotClaimed`] surface non claimée.
+    pub fn media_audio(
+        &mut self,
+        tab: TabId,
+        media: u64,
+        spec: MediaAudioSpec,
+        chunk: &[u8],
+    ) -> Result<(), MediaError> {
+        let Some(entry) = self.tabs.get_mut(&tab) else {
+            return Err(MediaError::Dead);
+        };
+        let Some(m) = entry.media.iter_mut().find(|m| m.id == media) else {
+            return Err(MediaError::Dead);
+        };
+        if m.claim.is_none() {
+            return Err(MediaError::NotClaimed);
+        }
+        sync_claim_to_engine(m, &mut entry.js);
+        if let Some(eng) = entry.js.as_mut() {
+            eng.deliver_media_audio(&m.path, m.id, js_audio_spec_of(spec), chunk);
+        }
         Ok(())
     }
 

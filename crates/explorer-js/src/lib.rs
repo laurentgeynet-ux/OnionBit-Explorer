@@ -585,6 +585,21 @@ pub struct JsMediaReport {
     pub frame_stats: Option<JsMediaFrameStats>,
 }
 
+/// Format PCM d'un flux `audio` hôte (Étape 204b — tee
+/// `AUDIO_MODE_TAP` dépôt, ADR-0032) : échantillons
+/// **interleaved** non coupés trame ; `format` suit le
+/// vocabulaire dépôt (`4` = f32 LE, la spec fixe
+/// `AUDIO_SPEC` actuelle).
+#[derive(Debug, Clone, Copy)]
+pub struct JsAudioSpec {
+    /// Cadence (Hz) — 48 000 en pratique.
+    pub sample_rate: u32,
+    /// Canaux — 2 en pratique.
+    pub channels: u16,
+    /// Format d'échantillon (dépôt : `0` u8 … `5` f64).
+    pub format: i32,
+}
+
 /// Ordre média page → hôte (étape 71c) — drainé par la
 /// session qui émet `CoreEvent::MediaCommand`.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -1498,6 +1513,21 @@ pub trait JsEngine: Send {
     ) {
     }
 
+    /// Relaie un chunk PCM de la surface claimée vers le
+    /// moteur (Étape 204b — le tap dépôt, ADR-0032) :
+    /// alimente le ring `pcm` par surface, lu par le graphe
+    /// Web Audio (`MediaElementAudioSourceNode`, 204c).
+    /// Chunks hors fenêtre moteur = perdus (flux — pas de
+    /// rejeu). Défaut : rien.
+    fn deliver_media_audio(
+        &mut self,
+        _path: &[(String, u32)],
+        _media: u64,
+        _spec: JsAudioSpec,
+        _chunk: &[u8],
+    ) {
+    }
+
     /// Draine les ordres média émis par la page depuis le
     /// dernier appel (`play()`/`pause()`/seek/volume/rate
     /// sur élément claimé — étape 71c). La session les émet
@@ -1878,6 +1908,11 @@ enum Cmd {
         path: Vec<(String, u32)>,
         media: u64,
         report: JsMediaReport,
+    },
+    DeliverMediaAudio {
+        media: u64,
+        spec: JsAudioSpec,
+        chunk: Vec<u8>,
     },
     NoteMediaCodecs {
         codecs: Vec<String>,
@@ -3607,6 +3642,23 @@ impl JsEngine for JscoreEngine {
         });
     }
 
+    fn deliver_media_audio(
+        &mut self,
+        _path: &[(String, u32)],
+        media: u64,
+        spec: JsAudioSpec,
+        chunk: &[u8],
+    ) {
+        // Pas de `path` dans le Cmd : le ring est clé par id
+        // de surface — le lien nœud↔media se résout à la
+        // lecture (204c) via la table du claim.
+        let _ = self.tx.send(Cmd::DeliverMediaAudio {
+            media,
+            spec,
+            chunk: chunk.to_vec(),
+        });
+    }
+
     fn note_media_codecs(&mut self, codecs: &[String]) {
         let _ = self.tx.send(Cmd::NoteMediaCodecs {
             codecs: codecs.to_vec(),
@@ -3830,6 +3882,15 @@ fn serve_side(
             report,
         } => {
             deliver_media_state(eng, jsd, media_nodes, &path, media, report);
+            true
+        }
+        Cmd::DeliverMediaAudio {
+            media, spec, chunk, ..
+        } => {
+            // Ring par id de surface — le lien nœud↔media est
+            // résolu à la lecture (`createMediaElementSource`,
+            // 204c) via la table du claim, pas besoin du path.
+            eng.deliver_media_audio(media, spec.sample_rate, spec.channels, spec.format, &chunk);
             true
         }
         Cmd::NoteMediaCodecs { codecs } => {

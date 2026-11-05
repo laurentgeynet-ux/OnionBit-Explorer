@@ -167,32 +167,30 @@ class BrowserState {
 
 /// Fabrique de lecteurs natifs pour la seam `MediaSurface` —
 /// `OnionMediaPlayer` (FFI `onionmedia_ffi`) en prod, fake en test.
-final mediaPlayerFactoryProvider = Provider<MediaPlayerFactory>(
-  (ref) {
-    final hw = ref.watch(settingsProvider).hwAccel;
-    final cfg = ref.watch(configProvider);
-    return (offer, {tabId = '', apiBase = '', referer = ''}) =>
-        offer.mse
-            ? OnionMediaPlayer.createMse(
-                offer,
-                tabId: tabId,
-                apiBase: apiBase,
-                hwAccel: hw,
-                framedrop: cfg.mediaFramedrop,
-                pauseAtEof: cfg.mediaPauseAtEof,
-              )
-            : OnionMediaPlayer.create(offer.url,
-                hwAccel: hw,
-                loop: offer.loops,
-                referer: referer,
-                userAgent: cfg.mediaUserAgent,
-                preload: offer.preload,
-                displayPixels:
-                    OnionMediaPlayer.displayPixelsFor(offer.rect),
-                framedrop: cfg.mediaFramedrop,
-                pauseAtEof: cfg.mediaPauseAtEof);
-  },
-);
+final mediaPlayerFactoryProvider = Provider<MediaPlayerFactory>((ref) {
+  final hw = ref.watch(settingsProvider).hwAccel;
+  final cfg = ref.watch(configProvider);
+  return (offer, {tabId = '', apiBase = '', referer = ''}) => offer.mse
+      ? OnionMediaPlayer.createMse(
+          offer,
+          tabId: tabId,
+          apiBase: apiBase,
+          hwAccel: hw,
+          framedrop: cfg.mediaFramedrop,
+          pauseAtEof: cfg.mediaPauseAtEof,
+        )
+      : OnionMediaPlayer.create(
+          offer.url,
+          hwAccel: hw,
+          loop: offer.loops,
+          referer: referer,
+          userAgent: cfg.mediaUserAgent,
+          preload: offer.preload,
+          displayPixels: OnionMediaPlayer.displayPixelsFor(offer.rect),
+          framedrop: cfg.mediaFramedrop,
+          pauseAtEof: cfg.mediaPauseAtEof,
+        );
+});
 
 /// Dépôt injectable (tests : `Provider.overrideWith`).
 /// `auto` : `FfiEngine` (moteur in-process, ADR-0018) si la
@@ -391,11 +389,7 @@ class SessionStore {
         jsonEncode({
           'tabs': [
             for (final t in tabs)
-              {
-                'url': t.url,
-                'title': t.title,
-                'scroll': scrollY[t.id] ?? 0.0,
-              },
+              {'url': t.url, 'title': t.title, 'scroll': scrollY[t.id] ?? 0.0},
           ],
           'active': active < 0 ? 0 : active,
         }),
@@ -675,10 +669,7 @@ class BrowserController extends Notifier<BrowserState> {
     try {
       final back = await wv.canGoBack();
       final fwd = await wv.canGoForward();
-      _patch(
-        tabId,
-        (t) => t.copyWith(canBack: back, canForward: fwd),
-      );
+      _patch(tabId, (t) => t.copyWith(canBack: back, canForward: fwd));
     } on Object {
       // Canal mort (webview détruite) — rien à resynchroniser.
     }
@@ -878,8 +869,7 @@ class BrowserController extends Notifier<BrowserState> {
             if (y != 0.0) _pendingScroll[tab.id] = y;
           }
           tabs = restored;
-          _restoredActiveId =
-              tabs[saved.active.clamp(0, tabs.length - 1)].id;
+          _restoredActiveId = tabs[saved.active.clamp(0, tabs.length - 1)].id;
         } else {
           tabs = [await _repo.createTab()];
         }
@@ -960,8 +950,7 @@ class BrowserController extends Notifier<BrowserState> {
     // Mutations de session persistées — debouncées : les
     // tempêtes navigated/title n'écrivent `session.json`
     // qu'une fois (PR-4).
-    if (const {'navigated', 'title_changed', 'tab_closed'}
-        .contains(ev.name)) {
+    if (const {'navigated', 'title_changed', 'tab_closed'}.contains(ev.name)) {
       _sessionDebounce?.cancel();
       _sessionDebounce = Timer(
         const Duration(milliseconds: 500),
@@ -1003,9 +992,7 @@ class BrowserController extends Notifier<BrowserState> {
         // un `scroll(dy)` la ramène à la position persistée.
         final restoreY = _pendingScroll.remove(tabId);
         if (restoreY != null) {
-          unawaited(
-            _repo.sendInput(tabId, {'type': 'scroll', 'dy': restoreY}),
-          );
+          unawaited(_repo.sendInput(tabId, {'type': 'scroll', 'dy': restoreY}));
         }
       case 'title_changed':
         _patch(
@@ -1023,11 +1010,7 @@ class BrowserController extends Notifier<BrowserState> {
         // Ét.109 — `rects` dirty (px physiques) consommées :
         // plan partiel quand la frame retenue reste à la même
         // position, plein sinon, skip si tout dégât hors-frame.
-        if (_planInvalidation(
-          tabId,
-          _parseRects(ev.data['rects']),
-          y,
-        )) {
+        if (_planInvalidation(tabId, _parseRects(ev.data['rects']), y)) {
           unawaited(_pullFrame(tabId));
         }
         if (tabId == state.activeId) {
@@ -1082,9 +1065,7 @@ class BrowserController extends Notifier<BrowserState> {
         // de suivi, **pas** de dialogue (l'offre utilisateur
         // reste le seul rôle de `download_offered`).
         final d = ActiveDownload.fromJson(ev.data);
-        state = state.copyWith(
-          downloads: {...state.downloads, d.id: d},
-        );
+        state = state.copyWith(downloads: {...state.downloads, d.id: d});
       case 'download_progress':
         final id = (ev.data['id'] as num?)?.toInt() ?? 0;
         final cur = state.downloads[id];
@@ -1106,10 +1087,7 @@ class BrowserController extends Notifier<BrowserState> {
           lastError: () => _l10n.downloadSaved('${ev.data['path']}'),
           downloads: cur == null
               ? null
-              : {
-                  ...state.downloads,
-                  id: cur.copyWith(finished: true),
-                },
+              : {...state.downloads, id: cur.copyWith(finished: true)},
         );
       case 'download_failed':
         final id = (ev.data['id'] as num?)?.toInt() ?? 0;
@@ -1256,9 +1234,7 @@ class BrowserController extends Notifier<BrowserState> {
     final p = _players[tabId]?[mediaId];
     if (p == null) return;
     unawaited(
-      ref
-          .read(settingsProvider.notifier)
-          .setMediaAudio(p.volume, p.muted),
+      ref.read(settingsProvider.notifier).setMediaAudio(p.volume, p.muted),
     );
   }
 
@@ -1268,9 +1244,7 @@ class BrowserController extends Notifier<BrowserState> {
     final p = _players[tabId]?[mediaId];
     if (p == null) return;
     unawaited(
-      p.setMuted(!p.muted).then(
-            (_) => mediaPersistAudio(tabId, mediaId),
-          ),
+      p.setMuted(!p.muted).then((_) => mediaPersistAudio(tabId, mediaId)),
     );
   }
 
@@ -1334,11 +1308,7 @@ class BrowserController extends Notifier<BrowserState> {
     String? filename,
   }) async {
     try {
-      final id = await _repo.downloadStart(
-        tabId,
-        url,
-        filename: filename,
-      );
+      final id = await _repo.downloadStart(tabId, url, filename: filename);
       return id > 0 ? id : null;
     } on Object {
       return null;
@@ -1363,11 +1333,7 @@ class BrowserController extends Notifier<BrowserState> {
   /// faux = transport sans la clé (daemon/dll antérieurs —
   /// l'appelant retombe sur la double détente M0).
   Future<({String? link, String? image, int? media, bool mediaKnown})?>
-      hitTarget(
-    String tabId,
-    double x,
-    double y,
-  ) async {
+  hitTarget(String tabId, double x, double y) async {
     try {
       return await _repo.hitTarget(tabId, x, y);
     } on Object {
@@ -1423,11 +1389,12 @@ class BrowserController extends Notifier<BrowserState> {
       );
       if (!ok || !ref.mounted) return;
       _patchMedia(tabId, offer.id, (m) => m.copyWith(claimed: true));
-      final player =
-          await _playerFactory(offer,
-              tabId: tabId,
-              apiBase: _repo.apiBase,
-              referer: _tabById(tabId)?.url ?? '');
+      final player = await _playerFactory(
+        offer,
+        tabId: tabId,
+        apiBase: _repo.apiBase,
+        referer: _tabById(tabId)?.url ?? '',
+      );
       if (!ref.mounted || state.media[tabId]?[offer.id] == null) {
         unawaited(player.dispose());
         return;
@@ -1441,6 +1408,22 @@ class BrowserController extends Notifier<BrowserState> {
       _playerListeners[key] = listener;
       player.addListener(listener);
       (_players[tabId] ??= {})[offer.id] = player;
+      // Tap PCM (Étape 204b, opt-in `mediaAudioTap`) : le
+      // drain 25 ms du lecteur pousse chaque chunk vers
+      // `…/audio` — REST ou op miroir selon le transport
+      // (`_repo.mediaAudio` tranche). Fire-and-forget :
+      // l'échec (413/409) n'est pas rejoué — flux borné.
+      if (_cfg.mediaAudioTap) {
+        unawaited(
+          player.enableAudioTap(
+            (spec, chunk) => unawaited(
+              _repo
+                  .mediaAudio(tabId, offer.id, spec, chunk)
+                  .catchError((Object _) {}),
+            ),
+          ),
+        );
+      }
       // Premier rapport forcé : le moteur attend un état
       // initial pour refléter `paused`/`readyState`.
       unawaited(_reportMedia(tabId, offer.id, force: true));
@@ -1622,10 +1605,7 @@ class BrowserController extends Notifier<BrowserState> {
         scrollY != null &&
         painted != null &&
         (scrollY - painted).abs() > _cfg.scrollSyncEpsilon;
-    if (painted == null ||
-        scrolled ||
-        rects == null ||
-        rects.isEmpty) {
+    if (painted == null || scrolled || rects == null || rects.isEmpty) {
       _pendingFull.add(tabId);
       _pendingRects.remove(tabId);
       return true;
@@ -1799,8 +1779,7 @@ class BrowserController extends Notifier<BrowserState> {
   /// l'itération s'accumulent pour le tour suivant.
   Future<void> _pullFrameOnce(String tabId) async {
     final rects = _pendingRects.remove(tabId);
-    final full =
-        _pendingFull.remove(tabId) || rects == null || rects.isEmpty;
+    final full = _pendingFull.remove(tabId) || rects == null || rects.isEmpty;
     if (!full && _frameImages[tabId] != null) {
       if (await _pullRegions(tabId, rects)) return;
       // Région indisponible/décodage → plein honnête.
@@ -2090,8 +2069,7 @@ class BrowserController extends Notifier<BrowserState> {
   }) {
     _frameImages[tabId]?.dispose();
     _frameImages[tabId] = img;
-    _paintedScrollY[tabId] =
-        paintedScrollY ?? state.scrollY[tabId] ?? 0.0;
+    _paintedScrollY[tabId] = paintedScrollY ?? state.scrollY[tabId] ?? 0.0;
     if (mediaMeta != null) {
       final byId = {for (final m in mediaMeta) m.id: m};
       final perTab = state.media[tabId];
@@ -2255,7 +2233,9 @@ class BrowserController extends Notifier<BrowserState> {
   /// (`fr_FR` → `fr-FR,fr;q=0.9,en;q=0.8`).
   String _effectiveLanguage() {
     final cfg = ref.read(settingsProvider).language.trim();
-    final raw = cfg.isNotEmpty ? cfg : ui.PlatformDispatcher.instance.locale.toLanguageTag();
+    final raw = cfg.isNotEmpty
+        ? cfg
+        : ui.PlatformDispatcher.instance.locale.toLanguageTag();
     // Déjà une liste qualifiée → telle quelle.
     if (raw.contains(',') || raw.contains(';')) return raw;
     final base = raw.split('-').first;
@@ -2295,8 +2275,7 @@ class BrowserController extends Notifier<BrowserState> {
     if (_delegationSupported && _allow.delegatesUrl(url)) {
       _patch(
         id,
-        (t) =>
-            t.copyWith(kind: TabKind.delegated, url: url, loading: false),
+        (t) => t.copyWith(kind: TabKind.delegated, url: url, loading: false),
       );
       // La WebView de l'onglet charge l'URL ; si le widget
       // n'est pas encore monté, sa construction part de

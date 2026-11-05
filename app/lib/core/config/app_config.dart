@@ -113,6 +113,7 @@ class AppConfig {
     ],
     this.mediaCodecOracle = true,
     this.mediaPauseAtEof = false,
+    this.mediaAudioTap = false,
     this.mediaCodecProbes = const {
       'avc1': 'video/mp4; codecs="avc1.42E01E"',
       'hvc1': 'video/mp4; codecs="hvc1.1.6.L120.90"',
@@ -304,6 +305,14 @@ class AppConfig {
   /// de flux au lieu du `ended` franc ; `false` par défaut =
   /// comportement historique préservé.
   final bool mediaPauseAtEof;
+
+  /// Tap PCM (`AUDIO_MODE_TAP=2` dépôt, Étape 204b — opt-
+  /// in) : tee device+pull — le PCM drainé ~25 ms est poussé
+  /// vers `…/audio` (REST/FFI selon le transport) pour le
+  /// graphe Web Audio (204c). `false` par défaut = zéro
+  /// coût latent ; dll antérieure → refus honnête, lecture
+  /// device inchangée.
+  final bool mediaAudioTap;
 
   /// `User-Agent` du lecteur média natif sur les ouvertures
   /// progressives (`onionmedia_set_http_headers`, P-66) —

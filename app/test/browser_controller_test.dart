@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 import 'dart:async';
+import 'dart:typed_data';
 import 'dart:ui' show PlatformDispatcher;
 
 import 'package:explorer_app/core/api/events_client.dart';
@@ -20,7 +21,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'browser_test_fakes.dart';
-
 
 void main() {
   test('bootstrap crée un onglet et le rend actif', () async {
@@ -334,6 +334,74 @@ void main() {
     expect(FakePlayer.instances.single.preload, 'metadata');
     // Premier rapport d'état forcé (paused initial).
     expect(repo.mediaCalls, contains('state:1:42:paused'));
+  });
+
+  test('204b — mediaAudioTap pousse les chunks PCM au repo', () async {
+    final repo = FakeRepo();
+    final events = FakeEvents();
+    FakePlayer.instances.clear();
+    final c = makeContainer(
+      repo,
+      events,
+      config: const AppConfig(mediaAudioTap: true),
+    );
+    addTearDown(c.dispose);
+    await settle(c);
+    events.ctrl.add(
+      ServerEvent('media_offered', {
+        'tab': 1,
+        'media': 42,
+        'kind': 'video',
+        'rect': {'x': 10.0, 'y': 500.0, 'w': 320.0, 'h': 180.0},
+        'url': 'http://h/v.mp4',
+        'mime': 'video/mp4',
+        'controls': true,
+        'autoplay': false,
+        'preload': 'auto',
+      }),
+    );
+    for (var i = 0; i < 5; i++) {
+      await Future<void>.delayed(Duration.zero);
+    }
+    final player = FakePlayer.instances.single;
+    expect(player.audioTaps, 1, reason: 'tap activé au claim');
+    // Le drainer pousse un chunk → repo (fire-and-forget).
+    player.audioSink!((
+      sampleRate: 48000,
+      channels: 2,
+      format: 4,
+    ), Uint8List(9600));
+    for (var i = 0; i < 5; i++) {
+      await Future<void>.delayed(Duration.zero);
+    }
+    expect(repo.audioCalls, contains('audio:1:42:9600'));
+  });
+
+  test('204b — mediaAudioTap off : aucun tap demandé', () async {
+    final repo = FakeRepo();
+    final events = FakeEvents();
+    FakePlayer.instances.clear();
+    final c = makeContainer(repo, events);
+    addTearDown(c.dispose);
+    await settle(c);
+    events.ctrl.add(
+      ServerEvent('media_offered', {
+        'tab': 1,
+        'media': 42,
+        'kind': 'video',
+        'rect': {'x': 0.0, 'y': 0.0, 'w': 320.0, 'h': 180.0},
+        'url': 'http://h/v.mp4',
+        'mime': 'video/mp4',
+        'controls': true,
+        'autoplay': false,
+        'preload': 'auto',
+      }),
+    );
+    for (var i = 0; i < 5; i++) {
+      await Future<void>.delayed(Duration.zero);
+    }
+    expect(FakePlayer.instances.single.audioTaps, 0);
+    expect(repo.audioCalls, isEmpty);
   });
 
   test('media_command route vers le lecteur, media_gone dispose', () async {
@@ -782,7 +850,12 @@ void main() {
     // pull livré remet l'écart à zéro.
     final before = repo.frameFetches;
     events.ctrl.add(
-      invalidation(100, rects: [{'x': 0, 'y': 0, 'w': 8, 'h': 8}]),
+      invalidation(
+        100,
+        rects: [
+          {'x': 0, 'y': 0, 'w': 8, 'h': 8},
+        ],
+      ),
     );
     await waitFor(() => repo.frameFetches > before);
     expect(repo.regionFetches, isEmpty);
@@ -803,9 +876,7 @@ void main() {
     // `_pushColorScheme` livrent chacun un pull plein —
     // `frameImage` posé ne suffit pas, le 2ᵉ pullOnce peut
     // encore voler quand le 1ᵉr installe.
-    await waitFor(
-      () => ctrl.frameImage('1') != null && repo.frameFetches >= 2,
-    );
+    await waitFor(() => ctrl.frameImage('1') != null && repo.frameFetches >= 2);
     final before = repo.frameFetches;
 
     // Petite région à même position → pull région + composite
@@ -814,53 +885,66 @@ void main() {
     // gonflerait `frameFetches` avant qu'on ne le mesure.
     final prev = ctrl.frameImage('1');
     events.ctrl.add(
-      invalidation(0, rects: [{'x': 1, 'y': 1, 'w': 2, 'h': 2}]),
+      invalidation(
+        0,
+        rects: [
+          {'x': 1, 'y': 1, 'w': 2, 'h': 2},
+        ],
+      ),
     );
     await waitFor(() => ctrl.frameImage('1') != prev);
     expect(repo.regionFetches, ['1,1,2x2']);
     expect(repo.frameFetches, before);
   });
 
-  test('frame_invalidated rects hors-frame → clippées/skippées (étape 109)',
-      () async {
-    final repo = FakeRepo()..realPng = true;
-    final events = FakeEvents();
-    final c = makeContainer(repo, events);
-    addTearDown(c.dispose);
-    await settle(c);
-    final ctrl = c.read(browserProvider.notifier);
+  test(
+    'frame_invalidated rects hors-frame → clippées/skippées (étape 109)',
+    () async {
+      final repo = FakeRepo()..realPng = true;
+      final events = FakeEvents();
+      final c = makeContainer(repo, events);
+      addTearDown(c.dispose);
+      await settle(c);
+      final ctrl = c.read(browserProvider.notifier);
 
-    await waitFor(
-      () => ctrl.frameImage('1') != null && repo.frameFetches >= 2,
-    );
-    final before = repo.frameFetches;
+      await waitFor(
+        () => ctrl.frameImage('1') != null && repo.frameFetches >= 2,
+      );
+      final before = repo.frameFetches;
 
-    // Terrain : le moteur rapporte les dégâts ancienne+
-    // nouvelle position — un scroll sort du texte par le
-    // haut → rect à `y` négatif (lobste.rs : `y:-375`).
-    // Sans clip : 400 REST → tout le partiel en plein.
-    final prev = ctrl.frameImage('1');
-    events.ctrl.add(
-      invalidation(0, rects: [
-        {'x': 4, 'y': -3, 'w': 2, 'h': 5}, // partielle → 4,0,2x2
-        {'x': 20, 'y': 20, 'w': 4, 'h': 4}, // dehors → sautée
-      ]),
-    );
-    await waitFor(() => ctrl.frameImage('1') != prev);
-    expect(repo.regionFetches, ['4,0,2x2']);
-    expect(repo.frameFetches, before);
+      // Terrain : le moteur rapporte les dégâts ancienne+
+      // nouvelle position — un scroll sort du texte par le
+      // haut → rect à `y` négatif (lobste.rs : `y:-375`).
+      // Sans clip : 400 REST → tout le partiel en plein.
+      final prev = ctrl.frameImage('1');
+      events.ctrl.add(
+        invalidation(
+          0,
+          rects: [
+            {'x': 4, 'y': -3, 'w': 2, 'h': 5}, // partielle → 4,0,2x2
+            {'x': 20, 'y': 20, 'w': 4, 'h': 4}, // dehors → sautée
+          ],
+        ),
+      );
+      await waitFor(() => ctrl.frameImage('1') != prev);
+      expect(repo.regionFetches, ['4,0,2x2']);
+      expect(repo.frameFetches, before);
 
-    // Toutes les rects hors-frame → rien de visible à
-    // repeindre : l'invalidation se saute, aucun pull.
-    events.ctrl.add(
-      invalidation(0, rects: [
-        {'x': 0, 'y': -50, 'w': 8, 'h': 20},
-      ]),
-    );
-    await Future<void>.delayed(const Duration(milliseconds: 60));
-    expect(repo.regionFetches, ['4,0,2x2']);
-    expect(repo.frameFetches, before);
-  });
+      // Toutes les rects hors-frame → rien de visible à
+      // repeindre : l'invalidation se saute, aucun pull.
+      events.ctrl.add(
+        invalidation(
+          0,
+          rects: [
+            {'x': 0, 'y': -50, 'w': 8, 'h': 20},
+          ],
+        ),
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 60));
+      expect(repo.regionFetches, ['4,0,2x2']);
+      expect(repo.frameFetches, before);
+    },
+  );
 
   test('frame_invalidated rects vides → pull plein (contrat 55)', () async {
     final repo = FakeRepo()..realPng = true;
@@ -870,9 +954,7 @@ void main() {
     await settle(c);
     final ctrl = c.read(browserProvider.notifier);
 
-    await waitFor(
-      () => ctrl.frameImage('1') != null && repo.frameFetches >= 2,
-    );
+    await waitFor(() => ctrl.frameImage('1') != null && repo.frameFetches >= 2);
     var before = repo.frameFetches;
 
     // `rects: []` = repeindre entièrement — le plein reste le
@@ -887,8 +969,7 @@ void main() {
     expect(repo.regionFetches, isEmpty);
   });
 
-  test('136c — URL DRM : onglet délégué, moteur jamais contacté',
-      () async {
+  test('136c — URL DRM : onglet délégué, moteur jamais contacté', () async {
     final repo = FakeRepo();
     final c = makeContainer(repo, FakeEvents());
     addTearDown(c.dispose);
@@ -902,8 +983,7 @@ void main() {
     expect(tab.url, 'http://netflix.com');
   });
 
-  test('136c — delegated → engine : re-bascule sur URL normale',
-      () async {
+  test('136c — delegated → engine : re-bascule sur URL normale', () async {
     final repo = FakeRepo();
     final c = makeContainer(repo, FakeEvents());
     addTearDown(c.dispose);
@@ -918,8 +998,7 @@ void main() {
     expect(c.read(browserProvider).active!.kind, TabKind.engine);
   });
 
-  test('136c — back/reload délégués ne touchent pas le daemon',
-      () async {
+  test('136c — back/reload délégués ne touchent pas le daemon', () async {
     final repo = FakeRepo();
     final c = makeContainer(repo, FakeEvents());
     addTearDown(c.dispose);
@@ -959,8 +1038,7 @@ void main() {
     expect(tab.title, 'Netflix');
   });
 
-  test('136g — sans WebView2 : repli honnête, chemin moteur',
-      () async {
+  test('136g — sans WebView2 : repli honnête, chemin moteur', () async {
     BrowserController.debugDelegationSupported = false;
     addTearDown(() => BrowserController.debugDelegationSupported = null);
     final repo = FakeRepo();
@@ -1179,84 +1257,85 @@ void main() {
   /// l'offre. Une liste `media` livrée est l'ensemble
   /// complet : l'offre absente perd sa méta ; un transport
   /// sans contrat (`media == null`) la préserve.
-  test('185 — pull méta : scroll peint servi, paint joint et autoritaire',
-      () async {
-    final repo = FakeRepo()
-      ..realPng = true
-      ..nextFrameScrollY = 42;
-    final events = FakeEvents();
-    FakePlayer.instances.clear();
-    final c = makeContainer(repo, events);
-    addTearDown(c.dispose);
-    await settle(c);
-    final ctrl = c.read(browserProvider.notifier);
+  test(
+    '185 — pull méta : scroll peint servi, paint joint et autoritaire',
+    () async {
+      final repo = FakeRepo()
+        ..realPng = true
+        ..nextFrameScrollY = 42;
+      final events = FakeEvents();
+      FakePlayer.instances.clear();
+      final c = makeContainer(repo, events);
+      addTearDown(c.dispose);
+      await settle(c);
+      final ctrl = c.read(browserProvider.notifier);
 
-    // Le pull bootstrap sert déjà 42 — posé sans supposition.
-    await waitFor(() => ctrl.frameImage('1') != null);
-    expect(ctrl.paintedScrollY('1'), 42);
+      // Le pull bootstrap sert déjà 42 — posé sans supposition.
+      await waitFor(() => ctrl.frameImage('1') != null);
+      expect(ctrl.paintedScrollY('1'), 42);
 
-    // Offre vidéo présente ; la méta jointe au prochain pull
-    // donne sa géométrie peinte (vue à 58 = doc 100 − scroll 42).
-    events.ctrl.add(
-      ServerEvent('media_offered', {
-        'tab': 1,
-        'media': 5,
-        'kind': 'video',
-        'rect': {'x': 0, 'y': 100, 'w': 320, 'h': 180},
-        'url': 'http://h/v.mp4',
-        'controls': true,
-      }),
-    );
-    for (var i = 0; i < 8; i++) {
-      await Future<void>.delayed(Duration.zero);
-    }
-    expect(c.read(browserProvider).media['1']![5]!.paint, isNull);
+      // Offre vidéo présente ; la méta jointe au prochain pull
+      // donne sa géométrie peinte (vue à 58 = doc 100 − scroll 42).
+      events.ctrl.add(
+        ServerEvent('media_offered', {
+          'tab': 1,
+          'media': 5,
+          'kind': 'video',
+          'rect': {'x': 0, 'y': 100, 'w': 320, 'h': 180},
+          'url': 'http://h/v.mp4',
+          'controls': true,
+        }),
+      );
+      for (var i = 0; i < 8; i++) {
+        await Future<void>.delayed(Duration.zero);
+      }
+      expect(c.read(browserProvider).media['1']![5]!.paint, isNull);
 
-    const meta = MediaPaintMeta(
-      id: 5,
-      doc: Rect.fromLTWH(0, 100, 320, 180),
-      view: Rect.fromLTWH(0, 58, 320, 180),
-      fixed: false,
-      transformed: false,
-      visible: true,
-      order: 3,
-    );
-    repo.nextFrameMedia = [meta];
-    final tick = c.read(browserProvider).frameTick;
-    events.ctrl.add(ServerEvent('frame_invalidated', {'tab': 1}));
-    await waitFor(() => c.read(browserProvider).frameTick > tick);
+      const meta = MediaPaintMeta(
+        id: 5,
+        doc: Rect.fromLTWH(0, 100, 320, 180),
+        view: Rect.fromLTWH(0, 58, 320, 180),
+        fixed: false,
+        transformed: false,
+        visible: true,
+        order: 3,
+      );
+      repo.nextFrameMedia = [meta];
+      final tick = c.read(browserProvider).frameTick;
+      events.ctrl.add(ServerEvent('frame_invalidated', {'tab': 1}));
+      await waitFor(() => c.read(browserProvider).frameTick > tick);
 
-    var paint = c.read(browserProvider).media['1']![5]!.paint;
-    expect(paint, isNotNull);
-    expect(paint!.view.top, 58);
-    expect(paint.order, 3);
+      var paint = c.read(browserProvider).media['1']![5]!.paint;
+      expect(paint, isNotNull);
+      expect(paint!.view.top, 58);
+      expect(paint.order, 3);
 
-    // Liste livrée = ensemble autoritaire : la surface absente
-    // du payload perd sa méta (repli rect − scrollY).
-    repo.nextFrameMedia = [];
-    final tick2 = c.read(browserProvider).frameTick;
-    events.ctrl.add(ServerEvent('frame_invalidated', {'tab': 1}));
-    await waitFor(() => c.read(browserProvider).frameTick > tick2);
-    expect(c.read(browserProvider).media['1']![5]!.paint, isNull);
+      // Liste livrée = ensemble autoritaire : la surface absente
+      // du payload perd sa méta (repli rect − scrollY).
+      repo.nextFrameMedia = [];
+      final tick2 = c.read(browserProvider).frameTick;
+      events.ctrl.add(ServerEvent('frame_invalidated', {'tab': 1}));
+      await waitFor(() => c.read(browserProvider).frameTick > tick2);
+      expect(c.read(browserProvider).media['1']![5]!.paint, isNull);
 
-    // Transport sans contrat (`media` absent) → méta préservée.
-    repo.nextFrameMedia = [meta];
-    final tick3 = c.read(browserProvider).frameTick;
-    events.ctrl.add(ServerEvent('frame_invalidated', {'tab': 1}));
-    await waitFor(() => c.read(browserProvider).frameTick > tick3);
-    repo.nextFrameMedia = null;
-    final tick4 = c.read(browserProvider).frameTick;
-    events.ctrl.add(ServerEvent('frame_invalidated', {'tab': 1}));
-    await waitFor(() => c.read(browserProvider).frameTick > tick4);
-    paint = c.read(browserProvider).media['1']![5]!.paint;
-    expect(paint, isNotNull);
-    expect(paint!.view.top, 58);
-  });
+      // Transport sans contrat (`media` absent) → méta préservée.
+      repo.nextFrameMedia = [meta];
+      final tick3 = c.read(browserProvider).frameTick;
+      events.ctrl.add(ServerEvent('frame_invalidated', {'tab': 1}));
+      await waitFor(() => c.read(browserProvider).frameTick > tick3);
+      repo.nextFrameMedia = null;
+      final tick4 = c.read(browserProvider).frameTick;
+      events.ctrl.add(ServerEvent('frame_invalidated', {'tab': 1}));
+      await waitFor(() => c.read(browserProvider).frameTick > tick4);
+      paint = c.read(browserProvider).media['1']![5]!.paint;
+      expect(paint, isNotNull);
+      expect(paint!.view.top, 58);
+    },
+  );
 
   /// `MediaPaintMeta.fromJson` tolère l'absence de champs
   /// (transport minimal) et lit le jeu complet étape 185.
-  test('185 — MediaPaintMeta.fromJson : champs optionnels et complets',
-      () {
+  test('185 — MediaPaintMeta.fromJson : champs optionnels et complets', () {
     final bare = MediaPaintMeta.fromJson({'i': 2});
     expect(bare.id, 2);
     expect(bare.doc, Rect.zero);
@@ -1359,8 +1438,11 @@ void main() {
     );
     expect(snap.bufferedAheadEnd(40000), 50000); // tête dans le 2ᵉ segment
     expect(snap.bufferedAheadEnd(20000), 50000); // hors segment → max connu
-    const scalar =
-        MediaSnapshot(positionMs: 0, bufferedMs: 9000, state: 'paused');
+    const scalar = MediaSnapshot(
+      positionMs: 0,
+      bufferedMs: 9000,
+      state: 'paused',
+    );
     expect(scalar.bufferedAheadEnd(0), 9000); // hôte sans ranges → repli
   });
 
@@ -1371,22 +1453,14 @@ void main() {
     // Seul `avc1` certifié → conteneurs gardés, codecs
     // filtrés à la mesure (pas de capacité fabriquée).
     expect(
-      OnionMediaPlayer.resolveMediaCodecs(
-        declared,
-        probes,
-        probe: verdict,
-      ),
+      OnionMediaPlayer.resolveMediaCodecs(declared, probes, probe: verdict),
       ['video/mp4', 'audio/mpeg', 'avc1'],
     );
     // Sonde indisponible (null partout = DLL absente) →
     // repli statique complet, jamais de capacité retirée
     // sans mesure.
     expect(
-      OnionMediaPlayer.resolveMediaCodecs(
-        declared,
-        probes,
-        probe: (_) => null,
-      ),
+      OnionMediaPlayer.resolveMediaCodecs(declared, probes, probe: (_) => null),
       declared,
     );
     // Oracle désactivé → statique tel quel.
@@ -1422,13 +1496,16 @@ void main() {
     expect(s.totalDelaySecs, 0);
   });
 
-  test('194 — maxPixelsFor/displayPixelsFor : min(hw,besoin)',
-      () {
-    expect(OnionMediaPlayer.maxPixelsFor(8192 * 8192, 480 * 270),
-        480 * 270); // besoin < geo → overlay borne la rep
+  test('194 — maxPixelsFor/displayPixelsFor : min(hw,besoin)', () {
+    expect(
+      OnionMediaPlayer.maxPixelsFor(8192 * 8192, 480 * 270),
+      480 * 270,
+    ); // besoin < geo → overlay borne la rep
     expect(OnionMediaPlayer.maxPixelsFor(1024, 8192 * 8192), 1024);
-    expect(OnionMediaPlayer.maxPixelsFor(8192 * 8192, 0),
-        8192 * 8192); // pas de besoin → geo hw seule
+    expect(
+      OnionMediaPlayer.maxPixelsFor(8192 * 8192, 0),
+      8192 * 8192,
+    ); // pas de besoin → geo hw seule
     expect(OnionMediaPlayer.maxPixelsFor(0, 5000), 5000); // sw → besoin
     expect(OnionMediaPlayer.maxPixelsFor(0, 0), 0); // rien → pas de cap
     // displayPixelsFor : rect vide → 0 (audio 0×0), plein →
@@ -1440,20 +1517,17 @@ void main() {
     final dpr =
         PlatformDispatcher.instance.implicitView?.devicePixelRatio ?? 1.0;
     expect(
-      OnionMediaPlayer.displayPixelsFor(
-          const Rect.fromLTWH(0, 0, 100, 50)),
+      OnionMediaPlayer.displayPixelsFor(const Rect.fromLTWH(0, 0, 100, 50)),
       (5000 * dpr * dpr).round(),
     );
   });
 
-  test('191 — hwGeoFromWire : géométrie max, tags nus tolérés',
-      () {
+  test('191 — hwGeoFromWire : géométrie max, tags nus tolérés', () {
     // Forme filaire dépôt : `avc1@4096x2304;hev1@8192x8192;
     // vp09;av01` — les tags sans `@WxH` sont non mesurables
     // (doc dépôt) et ignorés du max.
     expect(
-      OnionMediaPlayer.hwGeoFromWire(
-          'avc1@4096x2304;hev1@8192x8192;vp09;av01'),
+      OnionMediaPlayer.hwGeoFromWire('avc1@4096x2304;hev1@8192x8192;vp09;av01'),
       8192 * 8192,
     );
     expect(OnionMediaPlayer.hwGeoFromWire('vp09;av01'), 0);

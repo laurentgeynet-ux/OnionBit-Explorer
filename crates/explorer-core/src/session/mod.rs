@@ -108,7 +108,7 @@ pub use frame::{FrameMeta, FrameTop};
 pub(crate) use media::*;
 pub use media::{
     media_codecs_from_json, media_event_json, media_host_state_str, media_offer_json,
-    media_report_from_json, MsePull,
+    media_report_from_json, MediaAudioSpec, MsePull,
 };
 pub use mem::MemReport;
 #[allow(clippy::wildcard_imports)]
