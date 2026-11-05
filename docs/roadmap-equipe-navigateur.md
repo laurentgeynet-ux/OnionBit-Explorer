@@ -10190,6 +10190,18 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   est nommé). Vol 661 : fetch vers
   token nu confirmé, `path` prouvé
   (`/videoplayback` ×6 lisibles).
+- [x] **JS-C360. Sondes globals
+  `yt*` + conteneurs tagués**
+  (`g.read`/`g.write` sur `window`
+  watchlist `yt*` ; `ytcfg`/
+  `ytInitialData`/`ytInitial
+  PlayerResponse` tagués → `g.cfg`/
+  `g.data`/`g.player` reads+writes
+  de clés — `ytcfg.get(k)` ≙
+  `data_[k]` nomme la clé absente
+  qui tue le boot). Vol 662 : fetch
+  JS réfuté (pile vide = natif),
+  return-early pur confirmé.
 
 ## Tâches continues
 

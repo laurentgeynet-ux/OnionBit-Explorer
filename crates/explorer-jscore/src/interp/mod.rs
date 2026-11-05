@@ -302,6 +302,14 @@ pub struct Engine {
     /// — alimentés sous `EXPLORER_JS_PROFILE` par [`Self::profile_tick`].
     prof_counts: std::collections::HashMap<String, u64>,
     prof_total: u64,
+    /// Sonde §B-97 — conteneurs bootstrap tagués (`ytcfg`,
+    /// `data_`, `ytInitialData`, `ytInitialPlayerResponse` et
+    /// sous-objets lus dessus, cap 32) dont les reads (`g.cfg`/
+    /// `g.data`/`g.player`) et writes (`g.cfgw`…) de membres
+    /// sont recensés — le return-early de la boot-chain nomme
+    /// la clé absente (vols 659-662 : cascade `yt-*` jamais
+    /// construite, toutes mécaniques exonérées).
+    pub(crate) probe_tagged: Vec<(ObjId, &'static str)>,
     /// Borne d'emboîtement du parseur et de l'évaluateur
     /// d'expressions (JS-C41) — relevable par l'embeddeur sur un
     /// thread moteur à pile large.
@@ -951,6 +959,7 @@ impl Engine {
             missing_api_total: 0,
             prof_counts: std::collections::HashMap::new(),
             prof_total: 0,
+            probe_tagged: Vec::new(),
             nat_trace_total: 0,
             nest_limit: crate::parser::DEFAULT_NEST_LIMIT,
             heap_dead: None,
@@ -5726,7 +5735,108 @@ impl Engine {
     /// run script code, needing `&mut self`); internal callers get
     /// `None` for accessor props.
     pub(crate) fn get_prop(&mut self, id: ObjId, key: &str) -> Option<Value> {
-        self.find_prop(id, key).and_then(|p| p.data_value())
+        let v = self.find_prop(id, key).and_then(|p| p.data_value());
+        self.probe_lookup(id, key, v);
+        v
+    }
+
+    /// Watchlist §B-97 — globals consultés par le bootstrap
+    /// kevlar (read `g.read` / write `g.write` recensés).
+    const YT_WATCH_GLOBALS: &[&str] = &[
+        "ytcfg",
+        "ytcfgdata",
+        "ytInitialData",
+        "ytInitialPlayerResponse",
+        "yt",
+        "ytcsi",
+        "spf",
+        "ytd",
+        "_yt_player",
+        "ytplayer",
+        "ytPageType",
+    ];
+
+    /// Sonde §B-97 — read `o[k]` : `o` = global + clé `yt*` →
+    /// `g.read {k}` ; `o` tagué (conteneur bootstrap) →
+    /// `{label} {k}` (`g.cfg`/`g.data`/`g.player`). La valeur
+    /// retournée est taguée à son tour quand c'est un objet —
+    /// `ytcfg`/`data_` → `g.cfg`, `ytInitialData` → `g.data`,
+    /// `ytInitialPlayerResponse` → `g.player`, sous-objets lus
+    /// sur conteneur tagué → même label (cap 32 entrées : le
+    /// scan reste négligeable sur le hot path) — les reads
+    /// profonds nomment chaque clé consultée (`ytcfg.get(k)`
+    /// ≙ `data_[k]`, `ytInitialData.response.contents…`) ou
+    /// jamais lue = boot mort avant lecture.
+    fn probe_lookup(&mut self, id: ObjId, key: &str, v: Option<Value>) {
+        let label = if id == self.global {
+            if !Self::YT_WATCH_GLOBALS.contains(&key) {
+                return;
+            }
+            "g.read"
+        } else {
+            let Some((_, l)) = self.probe_tagged.iter().find(|(o, _)| *o == id) else {
+                return;
+            };
+            *l
+        };
+        if let Some((dom, _)) = &self.dom_ctx {
+            if dom
+                .borrow_mut()
+                .ce
+                .probe_seen
+                .insert(format!("{label}:{key}"))
+            {
+                tracing::info!(target: "dom_probe", site = label, key = %key);
+            }
+        }
+        if let Some(Value::Obj(oid)) = v {
+            let tag = if id == self.global {
+                match key {
+                    "ytcfg" => Some("g.cfg"),
+                    "ytInitialData" => Some("g.data"),
+                    "ytInitialPlayerResponse" => Some("g.player"),
+                    _ => None,
+                }
+            } else {
+                // Sous-objet lu sur un conteneur tagué → hérite
+                // le label (reads profonds recensés, cap 32).
+                Some(label)
+            };
+            if let Some(t) = tag {
+                if !self.probe_tagged.iter().any(|(o, _)| *o == oid) && self.probe_tagged.len() < 32
+                {
+                    self.probe_tagged.push((oid, t));
+                }
+            }
+        }
+    }
+
+    /// Sonde §B-97 — write `o[k] = v` : `o` = global + clé
+    /// `yt*` → `g.write {k}` (la donnée bootstrap est-elle
+    /// peuplée ?) ; `o` tagué → `{label}w {k}` (`g.cfgw` =
+    /// `ytcfg.set(k,v)`/`data_.k=v` — clés de config posées).
+    fn probe_store(&mut self, id: ObjId, key: &str) {
+        let site = if id == self.global {
+            if !Self::YT_WATCH_GLOBALS.contains(&key) {
+                return;
+            }
+            "g.write".to_string()
+        } else {
+            let Some((_, l)) = self.probe_tagged.iter().find(|(o, _)| *o == id) else {
+                return;
+            };
+            format!("{l}w")
+        };
+        if let Some((dom, _)) = &self.dom_ctx {
+            if dom
+                .borrow_mut()
+                .ce
+                .probe_seen
+                .insert(format!("{site}:{key}"))
+            {
+                tracing::info!(target: "dom_probe", site = %site, key = %key);
+            }
+        }
     }
 
     /// Property read with accessor invocation — `o.x` where `x` has a
@@ -5773,7 +5883,10 @@ impl Engine {
             self.deleg_hop(&mut depth)?;
         }
         match self.find_prop(id, key) {
-            Some(Prop::Data { value, .. }) => Ok(value),
+            Some(Prop::Data { value, .. }) => {
+                self.probe_lookup(id, key, Some(value));
+                Ok(value)
+            }
             Some(Prop::Acc { get, .. }) => {
                 if self.is_callable(get) {
                     self.call_value(get, recv, &[])
@@ -6237,6 +6350,7 @@ impl Engine {
     /// (non-writable, non-extensible, frozen). Le caller décide
     /// silence sloppy vs `TypeError` strict.
     pub(crate) fn set_prop(&mut self, id: ObjId, key: &str, v: Value) -> JsResult<bool> {
+        self.probe_store(id, key);
         // Élément indexé d'une vue typée : la cible est le *buffer*
         // partagé, pas la vue ; hors-bornes canonique → ignoré
         // (spec `IntegerIndexedElementSet` retourne `true`).
