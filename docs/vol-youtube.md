@@ -9,12 +9,18 @@ YouTube (`docs/roadmap_youtube_fix.md`, worktree
 le protocole général** : séquence canonique §0, règles de vol §5,
 garde vignette `_view_*`, verdicts `consent_wall:*`.
 
-Deux différences fondamentales :
+Trois différences fondamentales :
 
-1. **Dossier dédié** — tous les artefacts YouTube atterrissent
-   dans `C:\OnionBit-vol\youtube\`, jamais à la racine du corpus
-   (ni dans le repo).
-2. **Batterie d'env `EXPLORER_*` obligatoire** — YouTube est la
+1. **Dossier dédié avec synthèse propre** — tous les artefacts
+   YouTube, **y compris la synthèse et le journal de campagne**,
+   atterrissent dans `C:\OnionBit-vol\youtube\`, jamais à la
+   racine du corpus (ni dans le repo). La synthèse racine n'est
+   pas polluée par la campagne YouTube ; la synthèse YouTube
+   n'est pas polluée par les autres vols.
+2. **Worktree de vol dédié et permanent** —
+   `C:\OnionBit-Explorer-youtube-wt`, détaché, jamais détruit
+   entre les vols ; il absorbe seul les HEAD de la campagne.
+3. **Batterie d'env `EXPLORER_*` obligatoire** — YouTube est la
    cible la plus lourde du corpus ; un vol sans la batterie
    complète produit des constats faux (murs artificiels §B-80/81).
 
@@ -22,17 +28,25 @@ Deux différences fondamentales :
 
 | Artefact | Chemin canonique |
 |---|---|
+| **Synthèse campagne** | `youtube\SYNTHESE.md` — statuts §B YouTube + historique des vols |
+| **Journal campagne** | `youtube\SYNTHESE_JOURNAL.md` — chronologie des vols YouTube |
 | Rapports | `youtube\rapports\RAPPORT_VOL_<date>_AGENT<n>_<TAG>.md` |
 | Captures | `youtube\captures\vol<n>_youtube_<cible>.png` (+ `_view_`) |
 | Logs & sondes | `youtube\logs\_vol<n>_*.log`, `daemon-*.log`, dumps `eval`/JSON |
 | Profils froids | `youtube\prof-vol<n>\` (`cache/`/`session-store/` exclus du git) |
 | Binaires de sonde | `youtube\logs\seg_*.bin`, fixtures arrachées au vol |
 
-**Le canon reste à la racine** : `SYNTHESE.md` (§A/§B/§E-bis),
-`SYNTHESE_JOURNAL.md`, `CLAIMS.md` ne bougent pas — `youtube/`
-cloisonne les artefacts, il ne crée pas un second corpus. Les
-lignes §B (73, 94, 95, 97, 98, 99, 41-porteurs…) se mettent à
-jour dans `SYNTHESE.md` comme pour tout vol.
+**Frontière corpus** :
+
+- `youtube\SYNTHESE.md` / `youtube\SYNTHESE_JOURNAL.md` sont le
+  **canon de la campagne YouTube** — c'est là que vivent les
+  statuts §B-97/98/99, les occurrences §B-73/94/95 mesurées sur
+  YouTube et la chronologie. La `SYNTHESE.md` racine n'est pas
+  mise à jour pour un vol YouTube (les entrées §B-97/98/99 qui
+  s'y trouvent portent un pointeur vers `youtube/SYNTHESE.md`).
+- `CLAIMS.md` **reste à la racine** : c'est le mécanisme de
+  coordination inter-agents (ports, numéros de vol) — il doit
+  rester unique et central, pas une synthèse.
 
 Nommage : le préfixe `RAPPORT_VOL_` est conservé (grep corpus
 uniforme) — c'est le dossier qui cloisonne, pas le nom. TAG
@@ -41,11 +55,18 @@ usuel : `YOUTUBE`, `YTHOME`, `YTWATCH`, `YTEMBED`, `YTREVALID`.
 ## 1. Lancement — batterie YouTube obligatoire
 
 ```powershell
-# 1.1 arbre propre + HEAD connu (§0 vol-agent)
-git rev-parse HEAD; git status --short
+# 1.1 worktree YouTube dédié — PERMANENT, jamais détruit
+#     entre les vols (créé une fois, réutilisé à chaque vol).
+#     Il vit détaché sur le HEAD mesuré de la campagne ; le
+#     worktree de dev principal et son WIP ne sont jamais
+#     touchés.
+cd C:\OnionBit-Explorer-youtube-wt
+git status --short        # doit être propre — sinon, reset
+git fetch                 # si besoin
+git checkout <sha_campagne>   # HEAD à mesurer, détaché
 
-# 1.2 binaire frais — worktree dédié, target-dir dédié
-$env:CARGO_TARGET_DIR = "D:/cargo-target/OninionBit-Explorer-YoutubeFix"
+# 1.2 binaire frais — target-dir local au worktree dédié
+$env:CARGO_TARGET_DIR = "C:/OnionBit-Explorer-youtube-wt/target"
 cargo build --release -p explorer-daemon   # attendre « Finished »
 
 # 1.3 env du vol — TOUTES obligatoires sauf mention contraire
@@ -180,17 +201,25 @@ En-tête minimal (en plus du corps libre) :
 ```
 
 Chaque constat porte son **ID §B** (occurrence → incrémenter la
-ligne `vol N : site ×N` dans `SYNTHESE.md` ; trou nouveau →
-proposition §B au numéro suivant). Verdicts consentement sous
+ligne `vol N : site ×N` dans `youtube\SYNTHESE.md` — la
+synthèse racine n'est pas touchée ; trou nouveau → proposition
+§B au numéro suivant). Verdicts consentement sous
 `consent_wall:soft|hard` avec la politique du vol.
 
-## 5. Clôture
+## 5. Clôture — kill, publier, attendre
 
-1. `DELETE /api/tabs/{id}` puis kill daemon **par PID**.
-2. `git add -A && git commit` dans `C:\OnionBit-vol` — couvre
-   `youtube/` comme le reste du canon.
-3. Entrée `SYNTHESE_JOURNAL.md` + statuts §B synchronisés à la
-   racine ; ligne `CLAIMS.md` libérée.
+1. `DELETE /api/tabs/{id}` puis kill daemon **par PID**
+   (le worktree dédié, lui, reste en place — il sert au
+   prochain vol).
+2. Rapport dans `youtube\rapports\` + entrée
+   `youtube\SYNTHESE_JOURNAL.md` + statuts §B synchronisés dans
+   `youtube\SYNTHESE.md`.
+3. `git add youtube/ && git commit` dans `C:\OnionBit-vol`
+   (staging ciblé — jamais `-A`, le corpus a d'autres agents
+   en vol) ; ligne `CLAIMS.md` racine libérée.
+4. **STOP — feu vert explicite exigé** : l'équipe de vol kill
+   son daemon, publie, puis s'arrête. Aucun vol suivant sans
+   accord de l'opérateur (choix du HEAD, du tag, des cibles).
 
 ## 6. Ce qui change, ce qui reste — vol vs tests
 
