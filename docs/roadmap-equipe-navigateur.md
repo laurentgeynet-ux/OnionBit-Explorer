@@ -9855,6 +9855,23 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   Verrous `c341_shadow_proto_methods` 6/6 ;
   canaris `dom` 245/245, `media_events`
   15/15, `c340` 9/9.
+- [x] **JS-C342. Accesseurs `Prop::Acc`
+  auteur sur la chaîne de prototypes +
+  `el.data` restreint à `Text|Comment`**
+  (§B-97 #3/#4, roadmap YouTube P2.C) —
+  `proto_accessor_shadows` détecte les
+  descripteurs scriptés sur tout proto
+  dérivé (`ShadowRoot.prototype`, protos CE
+  `Polymer`, `Node.prototype` patché par
+  `insideDescriptors`) — natifs moteur
+  exclus par nature (BoundNative), pas par
+  identité de proto. `get`/`set` cèdent à
+  `read_prop`/`write_prop`. `data` :
+  `CharacterData` seulement, `Element` →
+  voie JS normale (own prop `trackingParams`
+  survit — mur `<yt-formatted-string>`).
+  Verrous `c342_node_proto_accessors` 4/4 ;
+  canaris `dom` 245/245, `c341` 6/6.
 
 ## Tâches continues
 

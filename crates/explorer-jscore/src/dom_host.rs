@@ -1025,6 +1025,48 @@ fn dom_nav_set(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     Ok(Value::Undefined)
 }
 
+/// `Prop::Acc` posé par l'auteur sur la chaîne de prototypes de
+/// `id` (JS-C342, §B-97 #3) — `ShadyDOM`/`Polymer` définissent
+/// leurs descripteurs sur `ShadowRoot.prototype`, les prototypes
+/// de Custom Elements **et** `Node.prototype`/`Element.prototype`
+/// eux-mêmes (`insideDescriptors` patche la base) : l'exclusion
+/// porte donc sur la *nature* de l'accesseur, pas l'identité du
+/// proto. Les accesseurs natifs du moteur (`BoundNative` — nav
+/// JS-C340, IDL `install_dom_idl_accessors`) ne shadowent pas :
+/// la voie hôte sert la même valeur sans appel rebouclant.
+/// `true` → `NodeHost::get`/`set` cèdent à `read_prop`/`write_prop`
+/// qui invoquent le getter/setter scripté.
+fn proto_accessor_shadows(e: &mut Engine, id: ObjId, key: &str) -> bool {
+    let mut cur = match e.heap.obj(id) {
+        Some(o) => o.proto,
+        None => return false,
+    };
+    // Borne 32 — la chaîne DOM est courte ; un cycle proto
+    // hostile ne doit pas boucler (conforme `find_prop`).
+    for _ in 0..32 {
+        let Value::Obj(cid) = cur else { break };
+        if let Some(crate::heap::Prop::Acc { get, set, .. }) = e.find_own(cid, key) {
+            let authored = |v: Value| match v {
+                Value::Obj(fid) => matches!(
+                    e.heap.obj(fid).map(|o| &o.kind),
+                    Some(ObjKind::Fun(
+                        crate::heap::Fun::Script { .. } | crate::heap::Fun::Bound { .. }
+                    ))
+                ),
+                _ => false,
+            };
+            if authored(get) || authored(set) {
+                return true;
+            }
+        }
+        cur = match e.heap.obj(cid) {
+            Some(o) => o.proto,
+            None => break,
+        };
+    }
+    false
+}
+
 /// Getter d'accesseur de navigation prototype — `bound[0]` = nom
 /// de prop, `this` = le nœud (`desc.get.call(el)`, `ShadyDOM`).
 /// Lecture **brute** via `dom_nav_value`, receveurs `NodeHost`.
@@ -6872,9 +6914,15 @@ impl Host for NodeHost {
         // Accesseur propre `defineProperty` (JS-C82) : il shadowe
         // la voie host — `read_prop` l'invoquera (spec : own
         // prop > IDL). Sans ça le tracker React posé par
-        // `inputValueTracking` n'intercepterait rien.
+        // `inputValueTracking` n'intercepterait rien. JS-C342 :
+        // même discipline pour l'accesseur *de prototype* auteur
+        // (`ShadowRoot.prototype`/`Node.prototype` patchés par
+        // `ShadyDOM`, prototypes de Custom Elements `Polymer`) —
+        // les descripteurs natifs du moteur ne shadowent pas.
         if let Value::Obj(id) = this {
-            if matches!(e.find_own(id, key), Some(crate::heap::Prop::Acc { .. })) {
+            if matches!(e.find_own(id, key), Some(crate::heap::Prop::Acc { .. }))
+                || proto_accessor_shadows(e, id, key)
+            {
                 return Ok(None);
             }
         }
@@ -7137,7 +7185,6 @@ impl Host for NodeHost {
             | "nextElementSibling"
             | "outerHTML"
             | "nodeValue"
-            | "data"
             | "ownerDocument"
             | "tagName"
             | "nodeName"
@@ -7148,6 +7195,23 @@ impl Host for NodeHost {
             | "innerText"
             | "nodeType" => {
                 return dom_nav_value(e, &self.dom, &self.cache, node, key);
+            }
+            // `data` = `CharacterData` seulement (JS-C342, §B-97
+            // #4) — `Element`/`Document`/`Fragment` n'ont pas la
+            // prop : `None` laisse la lecture suivre la voie
+            // normale (own prop `el.data = {trackingParams:…}`,
+            // accesseur de proto Custom Element) au lieu du
+            // `null` qui tuait `this.data.trackingParams` sur
+            // `<yt-formatted-string>`.
+            "data" => {
+                let is_text = matches!(
+                    self.dom.borrow().nodes[node as usize].kind,
+                    NodeKind::Text | NodeKind::Comment
+                );
+                if is_text {
+                    return dom_nav_value(e, &self.dom, &self.cache, node, key);
+                }
+                return Ok(None);
             }
             // `el.attributes` — `NamedNodeMap` vivante (JS-C76) :
             // itérable + `length` + indexés — les helpers
@@ -7680,9 +7744,14 @@ impl Host for NodeHost {
             return Ok(false);
         }
         // Accesseur propre `defineProperty` (JS-C82) : refuser
-        // la voie host → `write_prop` invoque le setter.
+        // la voie host → `write_prop` invoque le setter. JS-C342 :
+        // setter *de prototype* auteur honoré de même (`el.title =
+        // x` sur un Custom Element Polymer doit déclencher le
+        // descripteur du proto, pas un expando fantôme).
         if let Value::Obj(id) = this {
-            if matches!(e.find_own(id, key), Some(crate::heap::Prop::Acc { .. })) {
+            if matches!(e.find_own(id, key), Some(crate::heap::Prop::Acc { .. }))
+                || proto_accessor_shadows(e, id, key)
+            {
                 return Ok(false);
             }
         }
