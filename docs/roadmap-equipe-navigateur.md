@@ -6966,19 +6966,31 @@ incrément.
   `RUST_LOG=media_probe=info`) →
   ajustement `AppConfig.mediaCodecProbes`
   (config seule).
-- [ ] **Étape 203. `frame_step`/
-  `frame_back_step`** — filaire
-  **déjà livré** (cmd! macro,
-  exports + DLLs déployées — la note
-  199 « absents » était un faux
-  négatif de grep, symbole généré
-  par macro). Travail = NAV :
-  `stepFrame(dir)` + `,`/`.` +
-  `Isolate.run` + `_stepQueue` +
-  dispose-tracked ; durcissement
-  dépôt perf : test filaire +
-  `--step` probe + doc ABI.
-  **Implémenté par l'utilisateur.**
+- [x] **Étape 203. `frame_step`/
+  `frame_back_step` câblés**
+  (`app/` + dépôt perf) : le
+  filaire existait depuis l'import
+  (`cmd!`, symboles additifs —
+  la note 199 « absents » était un
+  faux négatif de grep, symbole
+  généré par macro, DLLs déployées
+  vérifiées). `MediaPlayer.stepFrame
+  (dir)` (seam ADR-0024) →
+  `OnionMediaPlayer` : lookups
+  gardés hors porte ABI 5 +
+  **`Isolate.run`** (le call DLL
+  est bloquant, borne 2 s) +
+  **`_stepQueue`** (un pas à la
+  fois, ordre des frappes) +
+  attente au `dispose` avant
+  `free` ; `_mediaKey` : `,`/`.`
+  → `mediaStepFrame(∓1)` (mapping
+  mpv, un pas/frappe — repeat
+  filtré). Fake + test contrôleur.
+  Dépôt perf (`883e3db`) : test
+  filaire `frame_step_wire_contract`
+  + `--step`/`--back-step` vol
+  probe + doc ABI. 76/76 app.
 - [ ] **Étape 204. `AUDIO_MODE_TAP=2`**
   (dépôt perf → NAV) — ADR-0032
   phases 1-3 : tee cpal+pull file,

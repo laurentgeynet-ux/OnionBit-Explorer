@@ -1074,6 +1074,48 @@ void main() {
     expect(p.plays, greaterThan(0));
   });
 
+  /// Étape 203 — pas-à-pas : `mediaStepFrame` route le `dir`
+  /// signé vers `MediaPlayer.stepFrame` (fake : compteur +
+  /// position simulée ~40 ms) ; `0` et surface inconnue → no-op.
+  test('203 — mediaStepFrame route le pas signé au lecteur', () async {
+    final repo = FakeRepo();
+    final events = FakeEvents();
+    FakePlayer.instances.clear();
+    final c = makeContainer(repo, events);
+    addTearDown(c.dispose);
+    await settle(c);
+
+    events.ctrl.add(
+      ServerEvent('media_offered', {
+        'tab': 1,
+        'media': 7,
+        'kind': 'video',
+        'rect': {'x': 0, 'y': 0, 'w': 100, 'h': 50},
+        'url': 'http://h/v.mp4',
+      }),
+    );
+    for (var i = 0; i < 6; i++) {
+      await Future<void>.delayed(Duration.zero);
+    }
+    final p = FakePlayer.instances.single;
+    final ctrl = c.read(browserProvider.notifier);
+    p.durationMs = 60000;
+    p.positionMs = 2000;
+
+    // Avant : un pas = une trame simulée (~40 ms).
+    ctrl.mediaStepFrame('1', 7, 1);
+    expect(p.steps, 1);
+    expect(p.positionMs, 2040);
+    // Arrière : position −40.
+    ctrl.mediaStepFrame('1', 7, -1);
+    expect(p.steps, 2);
+    expect(p.positionMs, 2000);
+    // `0` et surface inconnue : no-op, jamais de pas perdu.
+    ctrl.mediaStepFrame('1', 7, 0);
+    ctrl.mediaStepFrame('1', 99, 1);
+    expect(p.steps, 2);
+  });
+
   /// Étape 184 — indicateur 🔊/🔇 d'onglet : recalculé à
   /// chaque notification lecteur (y compris surfaces 0×0
   /// `display:none` autoplay) ; le clic bascule le mute

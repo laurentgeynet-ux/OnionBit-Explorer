@@ -102,6 +102,15 @@ class OnionMediaPlayer implements MediaPlayer {
   bool _disposed = false;
   bool _pulling = false;
 
+  /// File des pas-à-pas (Étape 203) — `frame_step` est
+  /// **bloquant** côté DLL (poll jusqu'à trame présentée,
+  /// borne 2 s) : chaque pas tourne dans un `Isolate.run`, un
+  /// à la fois **dans l'ordre des frappes** — deux frappes
+  /// rapides ne se réordonnent pas sous le mutex interne du
+  /// `Player`. `dispose` attend la queue avant `free` : jamais
+  /// d'appel natif sur un handle libéré.
+  Future<void> _stepQueue = Future.value();
+
   /// État audio tracé localement (étape 183) — la DLL n'a pas
   /// de getter volume/mute : les setters mémorisent et notifient
   /// pour que la barre de contrôles se redessine.
@@ -209,6 +218,12 @@ class OnionMediaPlayer implements MediaPlayer {
   /// compteurs — `corrupted`/delay non mesurables → 0).
   int Function(ffi.Pointer)? _frameSeq;
   int Function(ffi.Pointer)? _droppedFrames;
+
+  /// `frame_step`/`frame_back_step` (P-32, Étape 203) —
+  /// pas-à-pas mpv ; symboles additifs pré-ABI 5, lookups
+  /// gardés → `null` = pas sauté, jamais de repli approximatif.
+  int Function(ffi.Pointer)? _frameStep;
+  int Function(ffi.Pointer)? _frameBackStep;
 
   /// Famille `stream_*` / `subtitle_*` (Étape 196 — exports
   /// pré-ABI 5, lookups gardés hors la porte).
@@ -377,6 +392,20 @@ class OnionMediaPlayer implements MediaPlayer {
           int Function(ffi.Pointer)>('onionmedia_dropped_frames');
     } on Object {
       _droppedFrames = null;
+    }
+    // Pas-à-pas (P-32) — lookups indépendants : un seul des
+    // deux peut manquer sur une DLL exotique.
+    try {
+      _frameStep = _lib.lookupFunction<ffi.Int32 Function(ffi.Pointer),
+          int Function(ffi.Pointer)>('onionmedia_frame_step');
+    } on Object {
+      _frameStep = null;
+    }
+    try {
+      _frameBackStep = _lib.lookupFunction<ffi.Int32 Function(ffi.Pointer),
+          int Function(ffi.Pointer)>('onionmedia_frame_back_step');
+    } on Object {
+      _frameBackStep = null;
     }
     // Famille pistes/sous-titres — pré-ABI 5, hors la porte.
     try {
@@ -1547,6 +1576,37 @@ class OnionMediaPlayer implements MediaPlayer {
       _qtavSeek(_h, pos.inMilliseconds);
     }
   }
+
+  /// `stepFrame` → `onionmedia_frame_step` / `…_back_step`
+  /// (P-32, Étape 203). Le call DLL est **bloquant** (attente
+  /// de la trame présentée, borne `frame_step_timeout` = 2 s
+  /// côté dépôt ; back-step = seek borné + même attente) —
+  /// jamais sur l'isolate UI : le pas s'exécute dans un
+  /// `Isolate.run` qui charge sa propre copie de la DLL et
+  /// rappelle le handle par adresse (patron `_waiterMain`).
+  /// Symbole absent, isolate impossible → pas sauté, no-op
+  /// honnête ; rc non nul ignoré comme les autres commandes.
+  @override
+  Future<void> stepFrame(int dir) async {
+    if (dir == 0 || _disposed) return;
+    final fwd = dir > 0;
+    if (fwd ? _frameStep == null : _frameBackStep == null) return;
+    final addr = _h.address;
+    final run = _stepQueue.then(
+      (_) => Isolate.run(() {
+        final lib = _load();
+        final fn = lib.lookupFunction<ffi.Int32 Function(ffi.Pointer),
+            int Function(ffi.Pointer)>(
+            fwd ? 'onionmedia_frame_step' : 'onionmedia_frame_back_step');
+        fn(ffi.Pointer<ffi.Void>.fromAddress(addr));
+      }).catchError((Object _) {
+        // Isolate impossible — le pas est sauté, la file survit.
+      }),
+    );
+    _stepQueue = run;
+    await run;
+    _notify();
+  }
   @override
   double get volume => _volume;
   @override
@@ -1591,6 +1651,13 @@ class OnionMediaPlayer implements MediaPlayer {
       }
       exit?.close();
     }
+    // Pas-à-pas en file/vol (Étape 203) : attendre la fin du
+    // FFI actif avant `stop`/`free` — même invariant que
+    // `_waiter`, borné (un pas est lui-même borné côté dépôt).
+    await _stepQueue.timeout(
+      const Duration(seconds: 10),
+      onTimeout: () {},
+    );
     _qtavStop(_h);
     _qtavFree(_h);
     _frame?.dispose();

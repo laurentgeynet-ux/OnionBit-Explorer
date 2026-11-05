@@ -435,6 +435,20 @@ class FakePlayer implements MediaPlayer {
     fastSeeks++;
     seeked = pos;
   }
+
+  /// Étape 203 — pas-à-pas : compteur + déplacement simulé
+  /// d'une trame (~40 ms à 25 i/s, borné à la durée connue).
+  int steps = 0;
+  @override
+  Future<void> stepFrame(int dir) async {
+    if (dir == 0) return;
+    steps++;
+    positionMs = (positionMs + dir.sign * 40).clamp(
+      0,
+      durationMs ?? positionMs,
+    );
+    notify();
+  }
   @override
   Future<void> setVolume(double v) async {
     _volume = v.clamp(0.0, 1.0);

@@ -1187,7 +1187,9 @@ class _FrameViewState extends ConsumerState<_FrameView> {
   /// `fieldFocused`) : la cible est la dernière surface
   /// interagie de l'onglet actif. espace/K = play/pause,
   /// ←/→ = ±`mediaSeekStep`, ↑/↓ = ±`mediaVolumeStep`,
-  /// M = mute.
+  /// M = mute, `,`/`.` = pas-à-pas −/+1 trame (Étape 203,
+  /// mapping `frame-back-step`/`frame-step` mpv — un pas par
+  /// frappe, `KeyRepeatEvent` filtré en amont).
   void _mediaKey(LogicalKeyboardKey k) {
     final target = _keyMedia;
     final activeId = widget.state.activeId;
@@ -1208,6 +1210,10 @@ class _FrameViewState extends ConsumerState<_FrameView> {
       c.mediaAdjustVolume(activeId, mid, -c.cfg.mediaVolumeStep);
     } else if (k == LogicalKeyboardKey.keyM) {
       c.mediaToggleMute(activeId, mid);
+    } else if (k == LogicalKeyboardKey.comma) {
+      c.mediaStepFrame(activeId, mid, -1);
+    } else if (k == LogicalKeyboardKey.period) {
+      c.mediaStepFrame(activeId, mid, 1);
     }
   }
 

@@ -1217,6 +1217,17 @@ class BrowserController extends Notifier<BrowserState> {
     unawaited(p.seekTo(pos));
   }
 
+  /// Pas-à-pas mpv (Étape 203) — `dir` ±1 : `,` recule d'une
+  /// trame, `.` avance ; la cible est la dernière surface
+  /// interagie (`_keyMedia` du `_FrameView`). La position
+  /// atteinte remonte au moteur via le rapport `snapshot`
+  /// (chrome, jamais de `media_command`).
+  void mediaStepFrame(String tabId, int mediaId, int dir) {
+    final p = _players[tabId]?[mediaId];
+    if (p == null) return;
+    unawaited(p.stepFrame(dir));
+  }
+
   /// Volume absolu `[0..1]` — dé-mute : monter le volume
   /// d'une surface mutée réactive le son (convention des
   /// barres natives).

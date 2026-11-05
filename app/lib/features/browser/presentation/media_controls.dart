@@ -48,7 +48,7 @@ class MediaSurfaceView extends StatefulWidget {
   final double scrollY;
 
   /// Dernier média interagi — cible des raccourcis clavier
-  /// (espace, ←/→, ↑/↓, M) définis dans `_FrameView`.
+  /// (espace, ←/→, ↑/↓, M, `,`/`.`) définis dans `_FrameView`.
   final ValueChanged<int> onActive;
 
   @override

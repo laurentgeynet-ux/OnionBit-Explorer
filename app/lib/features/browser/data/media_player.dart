@@ -244,6 +244,14 @@ abstract class MediaPlayer {
   /// la keyframe ≤ cible ; repli `seekTo` précis quand le
   /// backend n'expose pas `onionmedia_fast_seek_ms`.
   Future<void> fastSeek(Duration pos);
+
+  /// Pas-à-pas mpv (`frame-step`/`frame-back-step`, dépôt
+  /// P-32, Étape 203) : `dir > 0` = trame suivante, `dir < 0`
+  /// = trame précédente, `0` = no-op — un pas par appel. En
+  /// lecture, le backend pause d'abord (le pas repause
+  /// toujours). No-op sur hôte sans les exports — jamais de
+  /// seek approximatif fabriqué à la place.
+  Future<void> stepFrame(int dir);
   Future<void> setVolume(double v);
   Future<void> setMuted(bool on);
   Future<void> setRate(double r);
