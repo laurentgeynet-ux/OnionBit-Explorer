@@ -471,7 +471,16 @@ impl Engine {
     }
 
     fn run_microtasks_impl(&mut self, boot_boundary: bool) -> JsResult<usize> {
-        // DIAG temporaire J2 — réentrance native de la pompe.
+        // JS-C348 — garde de réentrance de la pompe. Un drain
+        // actif plus haut dans la pile rend l'appel no-op : les
+        // jobs enfilés sont dépoppés par **sa** boucle au même
+        // niveau de pile (« microtask checkpoint » spec — un
+        // seul drain, itératif). Sans la garde, une native qui
+        // draine depuis un callback de job (`dispatch_media`,
+        // livraison XHR, `fire_dom_event`, timers…) empilait un
+        // drain par cycle — vol 651 : ~600 frames JS / cycle ~9
+        // (dumps `[expr_bisect]`) → `RangeError` expr_depth →
+        // bootstrap YouTube mort en plein chaînage `.then`.
         thread_local! {
             static MT_DEPTH: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
         }
@@ -497,10 +506,10 @@ impl Engine {
             c.set(d);
             d
         });
-        if mt_d > 1 {
-            eprintln!("[mt-depth {mt_d}] rem={:?}", stacker::remaining_stack());
-        }
         let _g = MtGuard;
+        if mt_d > 1 {
+            return Ok(0);
+        }
         let mut ran = 0usize;
         let mut rounds = 0usize;
         let home = self.cur_ctx;

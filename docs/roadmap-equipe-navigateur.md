@@ -10044,6 +10044,23 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   rejeté) aux deux bords ; params
   média ignorés. Verrous
   `c347_mime_params` 3/3.
+- [x] **JS-C348. Pompe microtâches
+  non ré-entrante** (§B-100, mur
+  caractérisé au vol 651 — dumps
+  `[expr_bisect]` : `call_depth`
+  651-780, ~600 frames, cycle ~9
+  ×65 ; une native drainant depuis
+  un callback de job — `dispatch_
+  media`, XHR, `fire_dom_event`,
+  timers, crypto — empilait un
+  drain par cycle → `RangeError`
+  → bootstrap `.then` mort) —
+  drain actif ⇒ appel imbriqué
+  no-op, la boucle externe dépoppe
+  au même niveau de pile
+  (checkpoint spec, itératif).
+  Verrous `c348_microtask_
+  checkpoint` 2/2.
 
 ## Tâches continues
 
