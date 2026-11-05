@@ -201,10 +201,13 @@ Trois faits d'abord — ils orientent tout le vol :
   conteneur seul → `"maybe"`, sinon `""`.
 - **Bornes JS au lancement** (contournement §B-81,
   validé en routine vols 625/626 — premier vol long
-  sans mort daemon) : `EXPLORER_JS_OPS=20M` +
+  sans mort daemon) : `EXPLORER_JS_OPS=20000000` +
   `EXPLORER_JS_MEM_MIB=384` — l'explosion non bornée
   devient dégradation propre (moteur meurt sous
-  bornes **sans** tuer le daemon).
+  bornes **sans** tuer le daemon). ⚠ `js_ops` se
+  parse en `u64` brut : la forme suffixée `20M`
+  échoue en silence → `None` → défaut 20 M (les
+  vols « 20M » tombaient juste par coïncidence).
 - **Le vol vole en REST pur — jamais l'app.** Le
   décodage réel passe par `rest_host_probe` (hôte
   média headless, pont REST↔DLL — b) ci-dessous), qui

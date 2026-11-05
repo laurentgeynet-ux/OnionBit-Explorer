@@ -51,12 +51,14 @@ cargo build --release -p explorer-daemon   # attendre « Finished »
 # 1.3 env du vol — TOUTES obligatoires sauf mention contraire
 $env:EXPLORER_VIEWPORT='1366x900'
 $env:EXPLORER_MEDIA_CODECS='avc1;hev1;hvc1;vp09;av01;vp08;mp4a;mp3;opus;vorbis;flac;ac3;ipcm'
-$env:EXPLORER_JS_OPS='20M'            # §B-81 : bundle polymer 12,6 Mo
+$env:EXPLORER_JS_OPS='20000000'       # §B-81 : bundle polymer 12,6 Mo
 $env:EXPLORER_JS_MEM_MIB='384'        # §B-81 : heap borné, dégradation propre
 $env:EXPLORER_MEM_DIAG='1'            # muts/heap/dom_nodes par onglet
 $env:EXPLORER_PROFILE='C:\OnionBit-vol\youtube\prof-vol<N>'   # froid = défaut
 # optionnel — sonde §B-59 (traçage des retraits/remplacements DOM) :
 # $env:EXPLORER_DOM_KILL='1'
+#   ⚠ testée par PRÉSENCE : EXPLORER_DOM_KILL=0 l'arme quand même —
+#   pour un vol propre, la désactiver (Remove-Item Env:EXPLORER_DOM_KILL)
 
 # 1.4 daemon dédié — plage 9460+ réservée aux vols YouTube
 pwsh -File scripts/spawn_daemon.ps1 -Port 946<N> `
@@ -79,10 +81,16 @@ Pourquoi chaque variable est exigée :
 - **`EXPLORER_JS_OPS`/`EXPLORER_JS_MEM_MIB`** — contournement
   §B-81 validé en routine : l'explosion non bornée devient
   dégradation propre (le moteur meurt sous bornes **sans** tuer
-  le daemon).
+  le daemon). **Piège de format** : `js_ops` se parse en
+  `u64` **brut** — `20M` n'est PAS accepté (`parse` échoue →
+  `None` → défaut `20_000_000`). Les vols documentés « 20M »
+  ont donc tourné au bon budget **par coïncidence** ; écrire
+  `20000000` (toute autre valeur suffixée serait perdue en
+  silence).
 - **`EXPLORER_MEM_DIAG=1`** — la télémétrie `muts`/`js_heap`/
   `media_n`/`pending_events` est la signature §B-73/§B-97 : sans
   elle, un squelette figé et un feed hydraté se ressemblent.
+  Exige la valeur `1` exacte (autre valeur = off).
 - **`EXPLORER_CONSENT_POLICY`** — à déclarer dans le rapport ;
   défaut `reject`. YouTube sert un consent-wall dur côté EU :
   distinguer `consent_wall:soft` (régression) de `hard` (modèle
@@ -139,7 +147,8 @@ la signature §B-97/98 vit dans la télémétrie, pas dans le PNG.
   de redirection** `…&pbj=1` (le fallback JSON-brut = preuve
   que le POST protobuf est mort — §B-98).
 - `MediaSource` : attache `src="blob:…"` (`media_n=1` au
-  mem_diag), `sourceBuffers.length >= 1`.
+  mem_diag), `mseBuffers.length >= 1` au `GET …/media`
+  (`ms.sourceBuffers.length >= 1` en page).
 - `video.getVideoPlaybackQuality()` → objet non-`undefined`
   (`droppedVideoFrames` lisible — §B-99).
 - `GET …/media` : offre(s) MSE vivante(s) ; cycle claim →
@@ -182,3 +191,15 @@ proposition §B au numéro suivant). Verdicts consentement sous
    `youtube/` comme le reste du canon.
 3. Entrée `SYNTHESE_JOURNAL.md` + statuts §B synchronisés à la
    racine ; ligne `CLAIMS.md` libérée.
+
+## 6. Ce qui change, ce qui reste — vol vs tests
+
+- **Protocole de vol** : différencié (ce document) — dossier
+  dédié `youtube/`, batterie `EXPLORER_*` obligatoire, mesures
+  par cible calées sur les 10 bloqueurs de la roadmap.
+- **Protocole de test** : **inchangé** — les verrous par étape
+  (`cargo test` rouge-avant/vert-après + clippy, commandes dans
+  chaque étape de `roadmap_youtube_fix.md`) et le gate de
+  fusion `verify_all.ps1` de l'Étape 10 suivent le protocole
+  standard (`AGENTS.md` §3). Le vol terrain est le jalon de
+  validation final ; il ne remplace pas les verrous.
