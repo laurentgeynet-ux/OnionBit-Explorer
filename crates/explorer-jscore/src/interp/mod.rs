@@ -282,6 +282,11 @@ pub struct Engine {
     /// hook les voit avant parse (diagnostic, jamais modifié).
     pub(crate) eval_hook: Option<EvalHook>,
     expr_depth: u32,
+    /// Dumps restants de la pile JS au dépassement `expr_depth`
+    /// (§B-100) — la première rafale nomme le motif de récursion
+    /// réel, le compteur borne le spam si l'erreur est attrapée
+    /// et retentée.
+    expr_dump_n: u8,
     /// Comptage par nom de native (diagnostic wedge) — incrémenté
     /// au dispatch `Fun::Native` quand `EXPLORER_NAT_TRACE` est armé ;
     /// périodiquement dumpé pour nommer un natif en boucle.
@@ -940,6 +945,7 @@ impl Engine {
             call_stack: Vec::new(),
             eval_hook: None,
             expr_depth: 0,
+            expr_dump_n: 4,
             nat_trace_counts: std::collections::HashMap::new(),
             missing_api_counts: std::collections::HashMap::new(),
             missing_api_total: 0,

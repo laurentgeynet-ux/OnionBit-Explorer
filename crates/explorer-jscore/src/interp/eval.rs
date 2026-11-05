@@ -20,6 +20,39 @@ impl Engine {
         self.expr_depth += 1;
         if self.expr_depth > self.nest_limit {
             self.expr_depth -= 1;
+            // §B-100 : la borne *expression* a sauté avant celle
+            // des appels (`call_depth` < limite ici) — les frames
+            // JS nomment le motif de récursion réel (ré-entrée
+            // qui cumule la profondeur locale à chaque frame).
+            if self.expr_dump_n > 0 {
+                self.expr_dump_n -= 1;
+                let frames: Vec<String> = self
+                    .call_stack
+                    .iter()
+                    .rev()
+                    .take(24)
+                    .map(|l| {
+                        let n = l.name.as_deref().unwrap_or("<anon>");
+                        match &l.src {
+                            Some(s) => format!("{n}({s}:{}:{})", l.pos.0, l.pos.1),
+                            None => format!("{n}(:{}:{})", l.pos.0, l.pos.1),
+                        }
+                    })
+                    .collect();
+                // `eprintln!` (pas tracing) : la batterie vol
+                // épingle `RUST_LOG=media_probe=info` — un warn!
+                // de cible tierce serait filtré ; stderr est
+                // capturé quoiqu'il arrive. ×4 max par moteur.
+                eprintln!(
+                    "[expr_bisect] expr_depth>{} call_depth={} frames={} kind={} \
+                     top→bottom: {}",
+                    self.nest_limit,
+                    self.call_depth,
+                    self.call_stack.len(),
+                    expr_tag(e),
+                    frames.join(" | ")
+                );
+            }
             return Err(self.range_error("expression too deeply nested"));
         }
         // JS-C41 : la descente d'expressions imbriquées croît sur
