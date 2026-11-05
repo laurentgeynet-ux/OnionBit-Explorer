@@ -203,6 +203,13 @@ class OnionMediaPlayer implements MediaPlayer {
   /// `-1` = infini (`<video loop>`).
   int Function(ffi.Pointer, int)? _setLoop;
 
+  /// `frame_seq`/`dropped_frames` — scalaires **pré-ABI 5** :
+  /// trames présentées / sautées par la synchro. Repli quand
+  /// `frame_stats` est absent (DLL < 5 qui a quand même les
+  /// compteurs — `corrupted`/delay non mesurables → 0).
+  int Function(ffi.Pointer)? _frameSeq;
+  int Function(ffi.Pointer)? _droppedFrames;
+
   /// `onionmedia_abi_version` — la DLL s'auto-identifie
   /// (5 = surface P-63→P-71). Absente = socle ≤ ABI 4 :
   /// le bloc ABI 5 entier est sauté d'un coup. Doctrine
@@ -312,6 +319,20 @@ class OnionMediaPlayer implements MediaPlayer {
           int Function(ffi.Pointer, int)>('onionmedia_set_loop');
     } on Object {
       _setLoop = null;
+    }
+    // Scalaires pré-ABI 5 — lookups gardés HORS la porte :
+    // ils servent précisément quand le bloc 5 est sauté.
+    try {
+      _frameSeq = _lib.lookupFunction<ffi.Uint64 Function(ffi.Pointer),
+          int Function(ffi.Pointer)>('onionmedia_frame_seq');
+    } on Object {
+      _frameSeq = null;
+    }
+    try {
+      _droppedFrames = _lib.lookupFunction<ffi.Uint64 Function(ffi.Pointer),
+          int Function(ffi.Pointer)>('onionmedia_dropped_frames');
+    } on Object {
+      _droppedFrames = null;
     }
     // Porte ABI : `abi_version` elle-même se découvre —
     // absente = socle ≤ 4, le bloc 5 est sauté entier.
@@ -431,9 +452,18 @@ class OnionMediaPlayer implements MediaPlayer {
 
   /// `frame_stats` (P-67) — `null` sans l'export ou hors
   /// lecture (le contrat distingue « absent » de « zéros »).
+  /// Repli pré-ABI 5 : `frame_seq` + `dropped_frames`
+  /// synthétisent présentées/droppées mesurées — `corrupted`
+  /// et delay non mesurables → 0 (plancher honnête, jamais
+  /// fabriqué).
   MediaFrameStats? _readFrameStats() {
     final fn = _frameStats;
-    if (fn == null) return null;
+    if (fn == null) {
+      return frameStatsFromScalars(
+        _frameSeq?.call(_h),
+        _droppedFrames?.call(_h),
+      );
+    }
     final fs = calloc<_OnionFrameStats>(1);
     try {
       if (fn(_h, fs) != 0) return null;
@@ -450,6 +480,23 @@ class OnionMediaPlayer implements MediaPlayer {
 
   /// `hw_codecs` — `avc1@4096x2304;…` issu de l'interrogation
   /// D3D11 réelle. Tag nu sans `@WxH` = géométrie non
+  /// Synthèse scalaire → `MediaFrameStats` : les deux
+  /// compteurs absents → `null` (« absent » du contrat,
+  /// repli `frame_stats` à zéros implicites interdit).
+  @visibleForTesting
+  static MediaFrameStats? frameStatsFromScalars(
+    int? presented,
+    int? dropped,
+  ) =>
+      presented == null && dropped == null
+          ? null
+          : MediaFrameStats(
+              presented: presented ?? 0,
+              dropped: dropped ?? 0,
+              corrupted: 0,
+              totalDelaySecs: 0,
+            );
+
   /// mesurable (doc dépôt) → ignoré du max. 0 = inconnu →
   /// pas de cap (`set_max_pixels` laissé désarmé).
   int _hwGeoMax() {

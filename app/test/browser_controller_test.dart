@@ -1322,6 +1322,18 @@ void main() {
     expect(scalar.bufferedAheadEnd(0), 9000); // hôte sans ranges → repli
   });
 
+  test('195 — frameStatsFromScalars : repli pré-ABI5', () {
+    // Les deux compteurs absents → null (« absent » du
+    // contrat, jamais de zéros fabriqués).
+    expect(OnionMediaPlayer.frameStatsFromScalars(null, null), isNull);
+    final s = OnionMediaPlayer.frameStatsFromScalars(120, 3);
+    expect(s!.presented, 120);
+    expect(s.dropped, 3);
+    // corrupted/delay non mesurables pré-ABI5 → plancher 0.
+    expect(s.corrupted, 0);
+    expect(s.totalDelaySecs, 0);
+  });
+
   test('194 — maxPixelsFor/displayPixelsFor : min(hw,besoin)',
       () {
     expect(OnionMediaPlayer.maxPixelsFor(8192 * 8192, 480 * 270),

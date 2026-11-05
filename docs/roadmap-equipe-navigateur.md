@@ -6847,13 +6847,16 @@ incrément.
   scope. Verrous : maxPixelsFor ×5
   + displayPixelsFor. 70/70.
 
-- [ ] **Étape 195. `dropped_frames`
-  repli scalaire** (`app/` +
-  `core`/`js`/`jscore`) : lookup
-  gardé, symbole plus ancien que
-  `frame_stats` — clé additive
-  `dropped_frames` → `droppedVideoFrames`
-  servi seul, jamais fabriqué.
+- [x] **Étape 195. `frame_stats`
+  repli pré-ABI 5** (`app/`) :
+  `frame_seq`+`dropped_frames`
+  (scalaires pré-5) liés hors la
+  porte → `frameStatsFromScalars`
+  synthétise p/d mesurés —
+  `corrupted`/delay→0 plancher ;
+  2×null→null (contrat « absent »
+  préservé). Verrou : synthèse.
+  71/71.
 
 - [ ] **Étape 196. Pistes +
   sous-titres, phase lecture**
