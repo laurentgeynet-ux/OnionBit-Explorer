@@ -379,7 +379,7 @@ fn match_sur_handles_obsoletes_ne_panique_pas() {
     // Détache puis collecte le sous-arbre de p2 : les handles
     // deviennent obsolètes — matching doit renvoyer false.
     f.dom.remove(f.p2).unwrap();
-    let _ = f.dom.collect();
+    let _ = f.dom.collect(&[]);
     assert!(!matches(&f.dom, f.p2, &sel("p.c")));
     assert!(!matches(&f.dom, f.em, &sel("em")));
 }

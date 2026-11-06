@@ -66,7 +66,7 @@ fn rooted_node_survives_collect() {
 
     // Sans root, `collect` réclame le sous-arbre détaché ; avec
     // root, le nœud est protégé.
-    assert_eq!(dom.collect(), 0);
+    assert_eq!(dom.collect(&[]), 0);
     assert_eq!(heap.get(&dom, h).unwrap(), "div");
 }
 
@@ -82,7 +82,7 @@ fn unrooted_subtree_is_reclaimed() {
     // Détache `parent` du document → ni lui ni `child` ne sont
     // rootés : `collect` les réclame tous les deux.
     dom.remove(parent).unwrap();
-    let reclaimed = dom.collect();
+    let reclaimed = dom.collect(&[]);
     assert!(reclaimed >= 2, "{reclaimed} réclamés");
     assert!(!dom.is_alive(parent));
     assert!(!dom.is_alive(child));
@@ -98,7 +98,7 @@ fn stale_handle_after_collect_and_reuse() {
     // Détache puis réclame le slot, puis crée un nouveau nœud qui
     // réalloue le slot avec une génération incrémentée.
     dom.remove(el).unwrap();
-    dom.collect();
+    dom.collect(&[]);
     let fresh = dom.create_element("span").unwrap();
     dom.append_child(doc, fresh).unwrap();
 
@@ -130,7 +130,7 @@ fn detach_then_collect_invalidates_handle() {
 
     // Une fois dé-rooté + collecté, le handle devient périmé.
     heap.release(&mut dom, hb);
-    dom.collect();
+    dom.collect(&[]);
     let err = dom.tag_name(b).unwrap_err();
     assert!(matches!(err, DomError::StaleHandle { .. }));
 }

@@ -77,12 +77,12 @@ arbres vivants (AR-1 sans seeds) ou des nœuds encore référencés
   survivent à `collect` ; sous-arbre détaché non seedé
   réclamé ; entrées shadow d'un hôte balayé purgées ; handle
   de nœud balayé → `StaleHandle` typé.
-- [ ] **AR-2. `Dom::collect(&seeds)`** — PIPE (signature).
-  `collect` gagne un paramètre seeds semé avec document+roots —
-  la shape est prouvée en interne :
+- [x] **AR-2. `Dom::collect(&seeds)`** — PIPE (signature).
+  **Livré R-142** : `collect` gagne le paramètre seeds semé
+  avec document+roots — la shape est prouvée en interne :
   `jscore::Dom::collect_garbage(&HashSet<NodeId>)`
   (`jscore/dom.rs:1055`). `roots` inchangé (contrat JS futur).
-  Journal : signature publique PIPE → `interface-equipes`.
+  Journal : annoncé R-140, livré R-142.
 - [ ] **AR-3. Inventaire `NodeId` + déclencheur** — NAV.
   `dom_live_seeds()` centralisé : `keymap.values()` + tables
   persistantes (`PaintPayload.images.*`, transitions `elem`,

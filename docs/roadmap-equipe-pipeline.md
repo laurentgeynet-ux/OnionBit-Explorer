@@ -2748,6 +2748,21 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   Aucun producteur prod à ce jour — la borne arme avant
   que le contrat handle-JS ne soit câblé. Verrou :
   `budget_racines` (refus typé, place libérée réutilisable).
+- [x] **R-142. `Dom::collect(&seeds)`** (AR-2, chantier
+  ARÈNE — signature annoncée au journal en R-140) : casse
+  `collect(&mut self)` → `collect(&mut self, seeds:
+  &[NodeId])` — les seeds (vérité de vivacité recalculée
+  par l'appelant à chaque passe : tables session, AR-3)
+  sont semés avec document+racines au marquage ; seeds
+  obsolètes/hors arène ignorés comme les racines mortes ;
+  seeds non persistants — une passe sans seed réclame.
+  Un seed manqué échoue typé (`StaleHandle`) là où un
+  `remove_root` oublié retiendrait muet à vie ; `roots`
+  inchangé pour le contrat handle-JS ADR-0008. Callers
+  migrés : tests `dom`/`css` → `collect(&[])`. Verrou :
+  `collect_seeds_retient_arbre_detache` (rétention,
+  non-persistance, seed profond = descendance sans
+  ancêtres, hors-arène ignoré).
 
 ## Palier R-B — Contenu étranger, animation, canvas
 

@@ -133,7 +133,7 @@ fn detache_reste_valide_puis_collecte_reclame() {
     assert_eq!(dom.tag_name(div), Ok("div"));
 
     // La collecte réclame le sous-arbre entier (div + t).
-    let freed = dom.collect();
+    let freed = dom.collect(&[]);
     assert_eq!(freed, 2);
     assert_eq!(dom.live_count(), 1); // le Document seul
     assert!(matches!(dom.data(div), Err(DomError::StaleHandle { .. })));
@@ -153,7 +153,7 @@ fn rooting_survit_a_la_collecte() {
     dom.remove(div).expect("remove");
 
     // Rooté : le sous-arbre survit, enfants compris.
-    assert_eq!(dom.collect(), 0);
+    assert_eq!(dom.collect(&[]), 0);
     assert_eq!(dom.tag_name(div), Ok("div"));
     assert_eq!(dom.text(t), Ok("vivant"));
     assert_eq!(dom.root_target(root), Ok(div));
@@ -161,7 +161,7 @@ fn rooting_survit_a_la_collecte() {
 
     // La racine levée, la collecte réclame tout.
     dom.remove_root(root).expect("unroot");
-    assert_eq!(dom.collect(), 2);
+    assert_eq!(dom.collect(&[]), 2);
     assert!(matches!(dom.data(div), Err(DomError::StaleHandle { .. })));
     assert!(matches!(
         dom.remove_root(root),
@@ -176,7 +176,7 @@ fn case_reutilisee_generation_bump() {
     let a = el(&mut dom, "a");
     dom.append_child(doc, a).expect("a");
     dom.remove(a).expect("remove");
-    dom.collect();
+    dom.collect(&[]);
     assert!(matches!(dom.data(a), Err(DomError::StaleHandle { .. })));
 
     // La prochaine allocation réutilise la case avec génération +1.
@@ -203,7 +203,7 @@ fn faux_handles_echouent_types() {
     // Case libre : un nœud collecté devient Vacant, son handle
     // reste StaleHandle même avec la génération qui suivait.
     let tmp = el(&mut dom, "tmp"); // orphelin : déjà détaché
-    dom.collect();
+    dom.collect(&[]);
     assert!(matches!(dom.data(tmp), Err(DomError::StaleHandle { .. })));
 }
 
@@ -464,14 +464,14 @@ fn collect_preserve_arbres_lateraux() {
 
     // Rien n'est réclamé : les deux arbres latéraux sont
     // atteints via les arêtes de leurs hôtes vivants.
-    assert_eq!(dom.collect(), 0);
+    assert_eq!(dom.collect(&[]), 0);
     for id in [tpl, frag, t, root, inner] {
         assert!(dom.is_alive(id), "vivant {id:?}");
     }
 
     // Hôte retiré → racine shadow balayée avec lui, table purgée.
     dom.remove(host).expect("remove host");
-    assert_eq!(dom.collect(), 3); // host + racine shadow + span
+    assert_eq!(dom.collect(&[]), 3); // host + racine shadow + span
     for id in [host, root, inner] {
         assert!(!dom.is_alive(id), "balayé {id:?}");
         assert!(matches!(dom.data(id), Err(DomError::StaleHandle { .. })));
@@ -496,7 +496,7 @@ fn collect_reclame_fragment_template_detache() {
     dom.append_child(frag, t).expect("t");
 
     dom.remove(tpl).expect("remove tpl");
-    assert_eq!(dom.collect(), 3); // tpl + fragment + texte
+    assert_eq!(dom.collect(&[]), 3); // tpl + fragment + texte
     assert!(matches!(dom.data(frag), Err(DomError::StaleHandle { .. })));
 }
 
@@ -516,9 +516,46 @@ fn racine_shadow_survit_si_hote_roote() {
 
     let keep = dom.add_root(host).expect("root host");
     dom.remove(host).expect("remove host");
-    assert_eq!(dom.collect(), 0); // hôte rooté → ombre vivante
+    assert_eq!(dom.collect(&[]), 0); // hôte rooté → ombre vivante
     assert!(dom.is_alive(inner));
     dom.remove_root(keep).expect("unroot");
-    assert_eq!(dom.collect(), 3); // host + racine + inner
+    assert_eq!(dom.collect(&[]), 3); // host + racine + inner
     assert!(!dom.is_shadow_root(root));
+}
+
+/// R-142 — `seeds` : vérité de vivacité recalculée à chaque
+/// passe — un sous-arbre détaché survit tant qu'un seed le
+/// désigne ; les seeds ne persistent pas et un seed obsolète
+/// est ignoré comme une racine morte.
+#[test]
+fn collect_seeds_retient_arbre_detache() {
+    let mut dom = Dom::new();
+    let doc = dom.document();
+    let div = el(&mut dom, "div");
+    dom.append_child(doc, div).expect("div");
+    let t = txt(&mut dom, "vivant");
+    dom.append_child(div, t).expect("t");
+    dom.remove(div).expect("detach");
+
+    // Seed vivant → le sous-arbre détaché survit à la passe.
+    assert_eq!(dom.collect(&[div]), 0);
+    assert!(dom.is_alive(div) && dom.is_alive(t));
+
+    // Seed hors arène : ignoré — et les seeds ne persistent
+    // pas : la passe sans seed sur `div` réclame l'arbre.
+    let ghost = NodeId::from_parts(9_999, 1);
+    assert_eq!(dom.collect(&[ghost]), 2); // div + t
+    assert!(matches!(dom.data(div), Err(DomError::StaleHandle { .. })));
+
+    // Seed profond : retient sa descendance, pas ses ancêtres.
+    let host = el(&mut dom, "span");
+    dom.append_child(doc, host).expect("host");
+    let inner = el(&mut dom, "b");
+    dom.append_child(host, inner).expect("inner");
+    let leaf = txt(&mut dom, "feuille");
+    dom.append_child(inner, leaf).expect("leaf");
+    dom.remove(host).expect("detach host");
+    assert_eq!(dom.collect(&[inner]), 1); // host seul balayé
+    assert!(!dom.is_alive(host));
+    assert!(dom.is_alive(inner) && dom.is_alive(leaf));
 }

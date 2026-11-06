@@ -903,10 +903,17 @@ impl Dom {
         self.roots.len()
     }
 
-    /// Réclame tout nœud inaccessible depuis le `Document` et les
-    /// racines vivantes. Les cases libérées voient leur génération
-    /// incrémentée : les `NodeId` qui les désignaient deviennent
-    /// `StaleHandle`.
+    /// Réclame tout nœud inaccessible depuis le `Document`, les
+    /// racines vivantes et les `seeds`. Les cases libérées voient
+    /// leur génération incrémentée : les `NodeId` qui les
+    /// désignaient deviennent `StaleHandle`.
+    ///
+    /// `seeds` = vérité de vivacité recalculée par l'appelant à
+    /// chaque passe (ex. tables session retenant des `NodeId`) —
+    /// un seed obsolète ou hors arène est ignoré, comme une
+    /// racine morte. La passe échoue **typé** (`StaleHandle` au
+    /// prochain accès), jamais muet : un seed manqué se détecte
+    /// là où un `remove_root` oublié retiendrait à vie.
     ///
     /// Arêtes de marquage (R-139) : la chaîne enfants/siblings
     /// **plus** les arbres latéraux — fragment
@@ -919,11 +926,13 @@ impl Dom {
     /// désigner des cases réattribuables.
     ///
     /// Retourne le nombre de nœuds réclamés.
-    pub fn collect(&mut self) -> usize {
-        // Marquage : BFS depuis le document + cibles de racines.
+    pub fn collect(&mut self, seeds: &[NodeId]) -> usize {
+        // Marquage : BFS depuis le document + racines + seeds.
         let mut marked = vec![false; self.slots.len()];
-        let mut stack = vec![self.document()];
+        let mut stack = Vec::with_capacity(1 + self.roots.len() + seeds.len());
+        stack.push(self.document());
         stack.extend(self.roots.values().copied());
+        stack.extend_from_slice(seeds);
         while let Some(id) = stack.pop() {
             let idx = slot_idx(id.index());
             if idx >= self.slots.len() || !self.is_alive(id) || marked[idx] {

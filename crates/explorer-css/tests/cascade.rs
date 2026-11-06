@@ -759,7 +759,7 @@ fn compute_tree_propague_l_heritage() {
 fn compute_sur_handle_obsolete_ne_panique_pas() {
     let mut f = fixture();
     f.dom.remove(f.div).unwrap();
-    let _ = f.dom.collect();
+    let _ = f.dom.collect(&[]);
     let e = StyleEngine::new();
     let s: ComputedStyle = e.compute(&f.dom, f.div, &env());
     assert_eq!(s.get("display"), None); // vide, pas de panic
