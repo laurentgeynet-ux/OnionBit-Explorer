@@ -368,7 +368,14 @@ impl Lexer<'_> {
     }
 
     fn run(&mut self) -> Result<Vec<Token>> {
-        let mut out: Vec<Token> = Vec::new();
+        // Préallocation (V-6c) : ~0.3-0.4 token/octet en code
+        // dense — `len/4` borne la quasi-totalité des réallocs
+        // d'un `Vec` qui atteindrait cette taille de toute façon
+        // (~19 doublures × memcpy sinon). Cap 2M tokens (~160 Mo
+        // à ~80 o) : un source hostile creux (espaces/commentaires)
+        // ne sur-alloue pas au-delà.
+        let est = (self.src.len() / 4).min(2_000_000);
+        let mut out: Vec<Token> = Vec::with_capacity(est);
         // `/` is division after an operand, a regex literal start
         // otherwise — the classic heuristic (no parser feedback).
         let mut expect_operand = true;

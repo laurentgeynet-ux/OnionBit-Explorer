@@ -284,6 +284,10 @@ arbitré ici :
   complétée** : `par_next=553 429` = 1.004× `lex_tok` →
   streamer une-passe propre, backtracking inexistant (les
   gardes `close_of` O(1) filtrent déjà la speculation).
+  **V-6c livré (JS-C379)** : `out` préalloué
+  `with_capacity(min(len/4, 2M))` — ~19 doublures × memcpy
+  éliminées ; **mesuré `lex_ns` 76.0 → 64.8 ms (−15 %
+  de la phase lex)**.
   Verdict : `stmt` = dispatch récursif (~5M calls) + alloc
   AST — **territoire structurel** (arène AST/bytecode =
   V-5), plus de micro-fix à ce niveau.
