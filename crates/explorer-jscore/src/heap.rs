@@ -1502,7 +1502,9 @@ impl Object {
         if self.props.len() < PROPS_IDX_MIN || self.props.len() >= u32::MAX as usize {
             return self.props.iter().position(|(k, _)| {
                 crate::j17_tick(&crate::J17_PROP_SCAN);
-                &**k == key
+                // V-3a : clés internées → même alloc ⇒ même ptr ;
+                // clés dynamiques (non internées) → miss → memcmp.
+                std::ptr::eq(&raw const **k, key) || &**k == key
             });
         }
         let m = self.idx.get_or_init(|| {
@@ -2009,7 +2011,12 @@ impl BindingMap {
     /// Lookup partagé — le `Vec` est scanné sur `str`.
     pub fn get(&self, name: &str) -> Option<&EnvCell> {
         match self {
-            BindingMap::Small(v) => v.iter().find(|(k, _)| &**k == name).map(|(_, c)| c),
+            // V-3a : `ptr_eq` sur `&str` (clés internées) puis
+            // `memcmp` — voir `prop_pos`.
+            BindingMap::Small(v) => v
+                .iter()
+                .find(|(k, _)| std::ptr::eq(&raw const **k, name) || &**k == name)
+                .map(|(_, c)| c),
             BindingMap::Map(m) => m.get(name),
         }
     }
@@ -2017,7 +2024,10 @@ impl BindingMap {
     /// Variante mutable de [`Self::get`].
     pub fn get_mut(&mut self, name: &str) -> Option<&mut EnvCell> {
         match self {
-            BindingMap::Small(v) => v.iter_mut().find(|(k, _)| &**k == name).map(|(_, c)| c),
+            BindingMap::Small(v) => v
+                .iter_mut()
+                .find(|(k, _)| std::ptr::eq(&raw const **k, name) || &**k == name)
+                .map(|(_, c)| c),
             BindingMap::Map(m) => m.get_mut(name),
         }
     }
