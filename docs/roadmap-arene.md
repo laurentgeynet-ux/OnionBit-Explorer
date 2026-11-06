@@ -101,10 +101,11 @@ arbres vivants (AR-1 sans seeds) ou des nœuds encore référencés
   `Text` de la série absorbe, saut `is_root_target`,
   `unlink`+`free` (bump de génération). Mort en prod — à
   livrer avant que la piste n'acquière des appelants.
-- [ ] **AR-5. Borne `roots`** — PIPE, trivial, intercalable.
-  `DEFAULT_MAX_ROOTS` configurable (`with_*`, §4.13) +
-  `DomError::RootBudgetExceeded` — implémente la promesse
-  ADR-0008 avant qu'un producteur n'arme le contrat.
+- [x] **AR-5. Borne `roots`** — PIPE, trivial, intercalable.
+  **Livré R-141** : `DEFAULT_MAX_ROOTS` = 65 536 configurable
+  via `Dom::with_limits` + `DomError::RootBudgetExceeded`
+  — implémente la promesse ADR-0008 avant qu'un producteur
+  n'arme le contrat.
 
 ## Palier AR-P1 — Mesure (préalable à tout item perf)
 

@@ -2738,6 +2738,16 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   inchangée : premier `Text` de série absorbe, saut
   `is_root_target`, `unlink`+`free` générationnels.
   Verrou : chaîne de 10 000 `<div>` normalisée.
+- [x] **R-141. Borne `max_roots` sur la table `roots`** (AR-5,
+  chantier ARÈNE) : implémente la promesse ADR-0008 « le
+  nombre de roots est borné » — `add_root` refusait aucune
+  accumulation hostile. `DEFAULT_MAX_ROOTS` = 65 536,
+  configurable via le nouveau constructeur `with_limits`
+  (additif ; `new`/`with_max_nodes` délèguent), getter
+  `max_roots`, erreur typée `DomError::RootBudgetExceeded`.
+  Aucun producteur prod à ce jour — la borne arme avant
+  que le contrat handle-JS ne soit câblé. Verrou :
+  `budget_racines` (refus typé, place libérée réutilisable).
 
 ## Palier R-B — Contenu étranger, animation, canvas
 

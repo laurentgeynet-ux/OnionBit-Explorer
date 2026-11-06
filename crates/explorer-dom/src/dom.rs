@@ -17,6 +17,12 @@ const NIL: u32 = u32::MAX;
 /// (ADR-0011). Configurable via [`Dom::with_max_nodes`].
 pub const DEFAULT_MAX_NODES: usize = 1_000_000;
 
+/// Budget de racines explicites par défaut — la table `roots`
+/// est bornée comme le reste de l'arène (ADR-0008 : « le nombre
+/// de roots est borné »). Configurable via [`Dom::with_limits`] ;
+/// valeur à réviser quand le contrat handle-JS sera câblé.
+pub const DEFAULT_MAX_ROOTS: usize = 65_536;
+
 /// Case de l'arène : occupée par un nœud ou libre (free-list
 /// chaînée). La `generation` survit à la réallocation — c'est elle
 /// qui invalide les `NodeId` obsolètes.
@@ -60,6 +66,7 @@ pub struct Dom {
     free_head: u32,
     live: usize,
     max_nodes: usize,
+    max_roots: usize,
     roots: HashMap<RootId, NodeId>,
     next_root: u64,
     document_mode: DocumentMode,
@@ -85,17 +92,25 @@ impl Dom {
     /// `Document` à l'index 0.
     #[must_use]
     pub fn new() -> Self {
-        Self::with_max_nodes(DEFAULT_MAX_NODES)
+        Self::with_limits(DEFAULT_MAX_NODES, DEFAULT_MAX_ROOTS)
     }
 
-    /// Arène neuve avec budget de nœuds explicite.
+    /// Arène neuve avec budget de nœuds explicite (racines à
+    /// [`DEFAULT_MAX_ROOTS`]).
     #[must_use]
     pub fn with_max_nodes(max_nodes: usize) -> Self {
+        Self::with_limits(max_nodes, DEFAULT_MAX_ROOTS)
+    }
+
+    /// Arène neuve avec budgets de nœuds et de racines explicites.
+    #[must_use]
+    pub fn with_limits(max_nodes: usize, max_roots: usize) -> Self {
         let mut dom = Self {
             slots: Vec::new(),
             free_head: NIL,
             live: 0,
             max_nodes,
+            max_roots,
             roots: HashMap::new(),
             next_root: 0,
             document_mode: DocumentMode::NoQuirks,
@@ -136,6 +151,12 @@ impl Dom {
     #[must_use]
     pub fn max_nodes(&self) -> usize {
         self.max_nodes
+    }
+
+    /// Budget de racines configuré (borne de la table `roots`).
+    #[must_use]
+    pub fn max_roots(&self) -> usize {
+        self.max_roots
     }
 
     // -----------------------------------------------------------------
@@ -773,7 +794,7 @@ impl Dom {
     /// tête de la série fusionnable suivante.
     ///
     /// Itératif — borne de pile constante (la forme récursive
-    /// n'avait pas la garde `deep` de [`Dom::collect_text`] : un
+    /// n'avait pas la garde `deep` de `collect_text` : un
     /// DOM hostile profond débordait de pile).
     ///
     /// # Errors
@@ -831,9 +852,16 @@ impl Dom {
     /// [`Dom::collect`] même détaché. Retourne la clé de la table.
     ///
     /// # Errors
-    /// Erreurs de handle comme [`Dom::data`].
+    /// Erreurs de handle comme [`Dom::data`] ;
+    /// [`DomError::RootBudgetExceeded`] si le budget de racines
+    /// (borne ADR-0008, [`Dom::with_limits`]) est atteint.
     pub fn add_root(&mut self, id: NodeId) -> Result<RootId> {
         self.node(id)?;
+        if self.roots.len() >= self.max_roots {
+            return Err(DomError::RootBudgetExceeded {
+                limit: self.max_roots,
+            });
+        }
         let root = RootId(self.next_root);
         self.next_root += 1;
         self.roots.insert(root, id);

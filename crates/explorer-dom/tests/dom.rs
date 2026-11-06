@@ -336,6 +336,31 @@ fn budget_noeuds() {
 }
 
 #[test]
+fn budget_racines() {
+    // R-141 : la table `roots` est bornée (promesse ADR-0008)
+    // — un contenu hostile ne peut pas la grossir sans fin.
+    let mut dom = Dom::with_limits(16, 2);
+    let a = el(&mut dom, "a");
+    let b = el(&mut dom, "b");
+    let c = el(&mut dom, "c");
+    let r1 = dom.add_root(a).expect("root a");
+    dom.add_root(b).expect("root b");
+    assert_eq!(
+        dom.add_root(c),
+        Err(DomError::RootBudgetExceeded { limit: 2 })
+    );
+    // La borne protège la table — un handle fautif reste une
+    // erreur de handle, pas de budget.
+    assert!(matches!(
+        dom.add_root(NodeId::from_parts(42, 7)),
+        Err(DomError::OutOfBounds(_) | DomError::StaleHandle { .. })
+    ));
+    // Une place libérée redevient utilisable.
+    dom.remove_root(r1).expect("unroot");
+    assert!(dom.add_root(c).is_ok());
+}
+
+#[test]
 fn text_content_propage_erreur_handle() {
     let dom = Dom::new();
     let fake = NodeId::from_parts(42, 7);

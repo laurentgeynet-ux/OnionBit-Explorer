@@ -51,6 +51,14 @@ pub enum DomError {
         /// Budget configuré.
         limit: usize,
     },
+
+    /// Budget de racines explicites atteint (ADR-0008 — la table
+    /// `roots` est bornée comme le reste de l'arène).
+    #[error("budget de racines atteint ({limit})")]
+    RootBudgetExceeded {
+        /// Budget configuré.
+        limit: usize,
+    },
 }
 
 /// Alias de résultat du crate.
