@@ -2692,6 +2692,15 @@ impl Engine {
         if !self.sched_tally.is_empty() {
             self.sched_tally
                 .insert("left_now", self.microtasks.len() as u64);
+            // JS-C365 — settle global : `prom.created −
+            // prom.settled` = promesses pendantes vivantes ;
+            // à rapprocher de `then − post.reaction` (le gap
+            // doit matcher si les pendantes portent des
+            // réactions).
+            self.sched_tally
+                .insert("prom.created", self.promises_created);
+            self.sched_tally
+                .insert("prom.settled", self.promises_settled);
             tracing::info!(target: "dom_probe", site = "sched.tally", tally = ?self.sched_tally);
         }
         n

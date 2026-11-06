@@ -298,6 +298,10 @@ impl Engine {
                 .map(|(k, _)| *k)
         };
         let Some(owner) = owner else {
+            // JS-C365 : réponse sans émetteur vivant (ctx mort,
+            // handle inconnu) — la promesse `fetch` reste
+            // pendante à jamais ; nommée `net.orphan`.
+            self.sched_tick("net.orphan");
             return Ok(());
         };
         let home = self.cur_ctx;
@@ -312,6 +316,11 @@ impl Engine {
     /// Livraison dans le contexte **courant** — corps de
     /// [`Self::deliver_xhr_response`] après switch (JS-C78).
     fn deliver_xhr_response_ctx(&mut self, resp: XhrResponse) -> JsResult<()> {
+        // JS-C365 — chaque réponse remise au moteur (rail qui
+        // settle les promesses `fetch` : `fetch.send` vs
+        // `dlv.net` vs `fetch.res`/`fetch.rej` nomme l'étage
+        // où les livrées se perdent).
+        self.sched_tick("dlv.net");
         // `fetch` handles resolve a promise instead of filling an XHR.
         if let Some(pos) = self
             .xhr
@@ -321,6 +330,7 @@ impl Engine {
         {
             let (_, pid, url, ty) = self.xhr.fetches.remove(pos);
             if resp.status == 0 {
+                self.sched_tick("fetch.rej");
                 let msg = self.str_val("fetch: network error");
                 self.reject_promise(pid, msg);
             } else if ty == "opaque" {
@@ -337,14 +347,17 @@ impl Engine {
                     redirected: false,
                 });
                 self.resolve_promise(pid, r);
+                self.sched_tick("fetch.res");
             } else {
                 let r = self.make_fetch_response(resp, url, ty);
                 self.resolve_promise(pid, r);
+                self.sched_tick("fetch.res");
             }
             self.run_microtasks()?;
             return Ok(());
         }
         let Some(pos) = self.xhr.live.iter().position(|(h, _, _)| *h == resp.handle) else {
+            self.sched_tick("net.orphan");
             return Ok(());
         };
         let (_, wrapper, data) = self.xhr.live.remove(pos);
@@ -357,6 +370,7 @@ impl Engine {
             d.ready_state = 4;
             d.handle = None;
         }
+        self.sched_tick("xhr.dlv");
         self.fire_xhr_event(wrapper, &data, "readystatechange")?;
         self.fire_xhr_event(
             wrapper,
