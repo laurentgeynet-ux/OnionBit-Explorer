@@ -4357,10 +4357,12 @@ impl Engine {
         // aux types distincts ; le spam `mousemove` n'apparaît
         // qu'une fois). L'hydratation `YouTube` s'orchestre par
         // customs `yt-*` : leur absence nomme le gate amont.
-        {
+        if tracing::enabled!(target: "dom_probe", tracing::Level::INFO) {
             let ty = ev.ty.borrow();
-            if dom.borrow_mut().ce.probe_seen.insert(format!("ev:{ty}")) {
-                tracing::info!(target: "dom_probe", site = "ev.dispatch", ty = %ty);
+            if let Ok(mut d) = dom.try_borrow_mut() {
+                if d.ce.probe_seen.insert(format!("ev:{ty}")) {
+                    tracing::info!(target: "dom_probe", site = "ev.dispatch", ty = %ty);
+                }
             }
             // Sonde §B-97 — un `error` dispatché nomme sa raison
             // quand c'est un ErrorEvent (`message`/`filename`/
@@ -4380,13 +4382,10 @@ impl Engine {
                 }
                 let message: String = message.chars().take(160).collect();
                 let at: String = at.chars().take(120).collect();
-                if dom
-                    .borrow_mut()
-                    .ce
-                    .probe_seen
-                    .insert(format!("er:{message}@{at}"))
-                {
-                    tracing::info!(target: "dom_probe", site = "ev.error", message = %message, at = %at);
+                if let Ok(mut d) = dom.try_borrow_mut() {
+                    if d.ce.probe_seen.insert(format!("er:{message}@{at}")) {
+                        tracing::info!(target: "dom_probe", site = "ev.error", message = %message, at = %at);
+                    }
                 }
             }
         }
@@ -4537,8 +4536,12 @@ impl Engine {
                 if let Err(th) = self.call_value(f, this, &[*ev_val]) {
                     // Sonde §B-97 — un listener qui jette nomme
                     // l'event dont le handler meurt (1×/type).
-                    if dom.borrow_mut().ce.probe_seen.insert(format!("th:{ty}")) {
-                        tracing::info!(target: "dom_probe", site = "ev.threw", ty = %ty);
+                    if tracing::enabled!(target: "dom_probe", tracing::Level::INFO) {
+                        if let Ok(mut d) = dom.try_borrow_mut() {
+                            if d.ce.probe_seen.insert(format!("th:{ty}")) {
+                                tracing::info!(target: "dom_probe", site = "ev.threw", ty = %ty);
+                            }
+                        }
                     }
                     return Err(th);
                 }
@@ -4571,8 +4574,12 @@ impl Engine {
                     Err(th) => {
                         // Sonde §B-97 — handler `on*` fautif,
                         // même dédup `th:` que les listeners.
-                        if dom.borrow_mut().ce.probe_seen.insert(format!("th:{ty}")) {
-                            tracing::info!(target: "dom_probe", site = "ev.threw", ty = %ty);
+                        if tracing::enabled!(target: "dom_probe", tracing::Level::INFO) {
+                            if let Ok(mut d) = dom.try_borrow_mut() {
+                                if d.ce.probe_seen.insert(format!("th:{ty}")) {
+                                    tracing::info!(target: "dom_probe", site = "ev.threw", ty = %ty);
+                                }
+                            }
                         }
                         return Err(th);
                     }
@@ -10857,14 +10864,12 @@ impl Host for CustomElementsHost {
                     // nomme un gate d'hydratation (le bootstrap
                     // `YouTube` attend-il un `define` jamais
                     // venu ?), premier-par-tag.
-                    if self
-                        .dom
-                        .borrow_mut()
-                        .ce
-                        .probe_seen
-                        .insert(format!("wd:{n}"))
-                    {
-                        tracing::info!(target: "dom_probe", site = "ce.whenDefined", tag = %n);
+                    if tracing::enabled!(target: "dom_probe", tracing::Level::INFO) {
+                        if let Ok(mut d) = self.dom.try_borrow_mut() {
+                            if d.ce.probe_seen.insert(format!("wd:{n}")) {
+                                tracing::info!(target: "dom_probe", site = "ce.whenDefined", tag = %n);
+                            }
+                        }
                     }
                     self.dom
                         .borrow_mut()
@@ -10981,8 +10986,12 @@ fn ce_upgrade_node(e: &mut Engine, dom: &DomRef, cache: &NodeCache, node: NodeId
         // → état « failed » honnête (proto conservée, spec).
         // Sonde §B-97 — un ctor fautif désarme tous ses
         // callbacks (mur `ytd-*` historique) : narré 1×/tag.
-        if dom.borrow_mut().ce.probe_seen.insert(format!("!{name}")) {
-            tracing::info!(target: "dom_probe", site = "ce.failed", tag = %name);
+        if tracing::enabled!(target: "dom_probe", tracing::Level::INFO) {
+            if let Ok(mut d) = dom.try_borrow_mut() {
+                if d.ce.probe_seen.insert(format!("!{name}")) {
+                    tracing::info!(target: "dom_probe", site = "ce.failed", tag = %name);
+                }
+            }
         }
         dom.borrow_mut().ce.failed.insert(node);
         return Ok(());
@@ -10990,8 +10999,12 @@ fn ce_upgrade_node(e: &mut Engine, dom: &DomRef, cache: &NodeCache, node: NodeId
     // Sonde §B-97 — ctor exécuté avec succès, 1×/tag (dédup
     // partagé `probe_seen` — borne le volume aux tags
     // distincts effectivement customisés).
-    if dom.borrow_mut().ce.probe_seen.insert(format!("+{name}")) {
-        tracing::info!(target: "dom_probe", site = "ce.upgrade", tag = %name);
+    if tracing::enabled!(target: "dom_probe", tracing::Level::INFO) {
+        if let Ok(mut d) = dom.try_borrow_mut() {
+            if d.ce.probe_seen.insert(format!("+{name}")) {
+                tracing::info!(target: "dom_probe", site = "ce.upgrade", tag = %name);
+            }
+        }
     }
     // `attributeChangedCallback` initial : attributs observés
     // présents, dans l'ordre de l'attribut list (spec).
@@ -12315,8 +12328,12 @@ fn event_ctor(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     // absent = event construit mais `dispatchEvent` jamais
     // appelé → l'émetteur meurt entre les deux.
     if let Some((dom, _)) = &e.dom_ctx {
-        if !ty.is_empty() && dom.borrow_mut().ce.probe_seen.insert(format!("new:{ty}")) {
-            tracing::info!(target: "dom_probe", site = "ev.new", ty = %ty);
+        if !ty.is_empty() && tracing::enabled!(target: "dom_probe", tracing::Level::INFO) {
+            if let Ok(mut d) = dom.try_borrow_mut() {
+                if d.ce.probe_seen.insert(format!("new:{ty}")) {
+                    tracing::info!(target: "dom_probe", site = "ev.new", ty = %ty);
+                }
+            }
         }
     }
     let init = arg(args, 1);
@@ -13019,11 +13036,16 @@ fn probe_event_ty(e: &mut Engine, v: Value) -> Option<String> {
 /// jamais (étage 3 du vol 658 : listeners `yt-*` attachés,
 /// cascade jamais émise).
 fn probe_ev_try(e: &mut Engine, dom: &DomRef, v: Value) {
+    if !tracing::enabled!(target: "dom_probe", tracing::Level::INFO) {
+        return;
+    }
     let Some(ty) = probe_event_ty(e, v) else {
         return;
     };
-    if dom.borrow_mut().ce.probe_seen.insert(format!("try:{ty}")) {
-        tracing::info!(target: "dom_probe", site = "ev.try", ty = %ty);
+    if let Ok(mut d) = dom.try_borrow_mut() {
+        if d.ce.probe_seen.insert(format!("try:{ty}")) {
+            tracing::info!(target: "dom_probe", site = "ev.try", ty = %ty);
+        }
     }
 }
 
@@ -13033,7 +13055,12 @@ fn probe_ev_try(e: &mut Engine, dom: &DomRef, v: Value) {
 /// (`spfready`, `yt-action`, `load`) ratés par un attach
 /// tardif nomment un émetteur jamais lancé.
 fn probe_el_listen(dom: &DomRef, ty: &str) {
-    let mut d = dom.borrow_mut();
+    if !tracing::enabled!(target: "dom_probe", tracing::Level::INFO) {
+        return;
+    }
+    let Ok(mut d) = dom.try_borrow_mut() else {
+        return;
+    };
     if d.ce.probe_seen.insert(format!("ls:{ty}")) {
         tracing::info!(target: "dom_probe", site = "el.listen", ty = %ty);
     }
@@ -13703,10 +13730,14 @@ pub(crate) fn console_line(e: &mut Engine, _t: Value, args: &[Value]) -> JsResul
     // nomme le gate qui tue l'émetteur `yt-*` sans deviner
     // l'interne kevlar.
     if let Some((dom, _)) = &e.dom_ctx {
-        let key: String = line.chars().take(120).collect();
-        if dom.borrow_mut().ce.probe_seen.insert(format!("cl:{key}")) {
-            let line: String = line.chars().take(160).collect();
-            tracing::info!(target: "dom_probe", site = "console.call", line = %line);
+        if tracing::enabled!(target: "dom_probe", tracing::Level::INFO) {
+            let key: String = line.chars().take(120).collect();
+            if let Ok(mut d) = dom.try_borrow_mut() {
+                if d.ce.probe_seen.insert(format!("cl:{key}")) {
+                    let line: String = line.chars().take(160).collect();
+                    tracing::info!(target: "dom_probe", site = "console.call", line = %line);
+                }
+            }
         }
     }
     if let Some(f) = e.hooks.console.clone() {

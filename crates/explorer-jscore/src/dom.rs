@@ -2072,7 +2072,10 @@ impl Dom {
         // miroir… tout passe par `alloc`), premier-par-tag —
         // discrimine « jamais né » vs « né mais jamais
         // upgradé » pour les `ytd-*` de l'accueil `YouTube`.
-        if kind == NodeKind::Element && tag.contains('-') {
+        if kind == NodeKind::Element
+            && tag.contains('-')
+            && tracing::enabled!(target: "dom_probe", tracing::Level::INFO)
+        {
             let t = tag.to_lowercase();
             if self.ce.probe_seen.insert(t.clone()) {
                 tracing::info!(target: "dom_probe", site = "el.birth", tag = %t);

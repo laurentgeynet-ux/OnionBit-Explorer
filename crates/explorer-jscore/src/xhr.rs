@@ -2161,12 +2161,17 @@ pub(crate) fn probe_url_bisect(e: &Engine, site: &str, method: &str, url: &str) 
     let bad = matches!(url, "" | "undefined" | "null" | "NaN")
         || url.starts_with("undefined")
         || url.starts_with("null");
-    if !bad {
+    if !bad || !tracing::enabled!(target: "media_probe", tracing::Level::INFO) {
         return;
     }
     if let Some((dom, _)) = &e.dom_ctx {
-        if !dom.borrow_mut().ce.probe_seen.insert(format!("ub:{url}")) {
-            return;
+        // `try_borrow_mut` : dédup best-effort — un échec de
+        // borrow logue quand même (l'événement vaut plus que
+        // la dédup), jamais de panic réentrant.
+        if let Ok(mut d) = dom.try_borrow_mut() {
+            if !d.ce.probe_seen.insert(format!("ub:{url}")) {
+                return;
+            }
         }
     }
     let stack = e.stack_text(site, "");

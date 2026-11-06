@@ -875,8 +875,12 @@ impl Engine {
             // applicatif fautif tue l'émetteur `yt-*` sans
             // laisser de trace dans le recensement events.
             if let Some((dom, _)) = &self.dom_ctx {
-                if dom.borrow_mut().ce.probe_seen.insert(format!("pr:{desc}")) {
-                    tracing::info!(target: "dom_probe", site = "promise.reject", reason = %desc);
+                if tracing::enabled!(target: "dom_probe", tracing::Level::INFO) {
+                    if let Ok(mut d) = dom.try_borrow_mut() {
+                        if d.ce.probe_seen.insert(format!("pr:{desc}")) {
+                            tracing::info!(target: "dom_probe", site = "promise.reject", reason = %desc);
+                        }
+                    }
                 }
             }
             // Event minimal spec (PromiseRejectionEvent).
