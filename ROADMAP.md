@@ -15,6 +15,9 @@ est dans les roadmaps dédiées :
 - **`docs/roadmap-arene.md`** — santé des arènes : réclamation,
   marquage, empreinte, accès `explorer-dom` + heaps adjacents
   (piste `AR-N`, transverse PIPE/NAV/JS).
+- **`docs/roadmap-vitesse-js.md`** — vitesse de l'interpréteur
+  `explorer-jscore` : résolution props/liaisons, shapes + cache
+  (piste `V-N`, périmètre spécialiste JS).
 
 Ce fichier-ci est tenu par le lead : cases cochées historiques,
 état des phases, jalons. Une étape est cochée quand :
