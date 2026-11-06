@@ -9,8 +9,8 @@
 
 use explorer_jscore::{
     j17_enable, j17_snapshot, Engine, J17_ARRIDX_TRY, J17_CALL, J17_CALL_NAT, J17_ENV_LVL,
-    J17_PROP_IDX_BUILD, J17_PROP_IDX_HIT, J17_PROP_LOOKUP, J17_PROP_SCAN, J17_PROTO_LVL,
-    J17_STR_READ,
+    J17_PARSE_CALL, J17_PARSE_DUP, J17_PROP_IDX_BUILD, J17_PROP_IDX_HIT, J17_PROP_LOOKUP,
+    J17_PROP_SCAN, J17_PROTO_LVL, J17_STR_READ,
 };
 use std::sync::atomic::Ordering::Relaxed;
 
@@ -120,6 +120,29 @@ fn attribution_call_rate_domine() {
     assert!(
         calls > nats * 10,
         "les appels script doivent dominer ({calls} calls / {nats} nats)"
+    );
+}
+
+#[test]
+fn parse_probe_nomme_les_reparses() {
+    j17_enable();
+    let mut e = Engine::new();
+    // Verrou V-3c : même source re-parsée → `parse_dup`
+    // tick ; source distincte → `parse_call` seul. Le mode
+    // entre dans le hash (script ≠ module).
+    let (c0, d0) = (tick(&J17_PARSE_CALL), tick(&J17_PARSE_DUP));
+    e.eval("var j17x=1").expect("eval 1");
+    e.eval("var j17x=1").expect("eval 2 — même source");
+    e.eval("var j17y=2").expect("eval 3 — source distincte");
+    assert!(
+        tick(&J17_PARSE_CALL) > c0 + 2,
+        "3 parses attendus, vu {}",
+        tick(&J17_PARSE_CALL) - c0
+    );
+    assert!(
+        tick(&J17_PARSE_DUP) > d0,
+        "la source répétée doit compter un dup, vu {}",
+        tick(&J17_PARSE_DUP) - d0
     );
 }
 

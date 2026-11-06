@@ -285,6 +285,19 @@ pub static J17_STR_READ: std::sync::atomic::AtomicU64 = std::sync::atomic::Atomi
 /// ~coût format+insert = le biais des métriques de vol elles-
 /// mêmes (dispatch, phases §B-97).
 pub static J17_PROBE_HIT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// `parse_in`/`parse_module_in` entré — dénominateur du ratio
+/// de re-parse. Décision V-3c : un cache `Program` ne se
+/// justifie que si `parse_dup/parse_call` est significatif
+/// sur les vols réels (chaque `<script>` ne parse qu'une fois ;
+/// le cache ne rapporterait que sur `eval()`/`Function()` de
+/// source répétée).
+pub static J17_PARSE_CALL: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// Parse d'une source déjà vue (hash identique — mode
+/// script/module inclus dans le hash, précondition V-3c
+/// respectée). Le hash + le set TLS ne tournent que sous
+/// `j17_on()` : coût nul désarmé. Collision hash = faux
+/// positif toléré (diagnostic borné, pas décision d'exécution).
+pub static J17_PARSE_DUP: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 /// Gate J17 : les compteurs ci-dessus ne s'incrémentent que si
 /// `EXPLORER_J17_PROF` est posé (non vide/non "0") au premier
@@ -315,7 +328,7 @@ pub fn j17_enable() {
 #[must_use]
 pub fn j17_snapshot() -> String {
     let r = std::sync::atomic::Ordering::Relaxed;
-    let pairs: [(&str, &std::sync::atomic::AtomicU64); 12] = [
+    let pairs: [(&str, &std::sync::atomic::AtomicU64); 14] = [
         ("prop_lookup", &J17_PROP_LOOKUP),
         ("proto_lvl", &J17_PROTO_LVL),
         ("prop_scan", &J17_PROP_SCAN),
@@ -328,6 +341,8 @@ pub fn j17_snapshot() -> String {
         ("call_nat", &J17_CALL_NAT),
         ("str_read", &J17_STR_READ),
         ("probe_hit", &J17_PROBE_HIT),
+        ("parse_call", &J17_PARSE_CALL),
+        ("parse_dup", &J17_PARSE_DUP),
     ];
     let mut out = String::new();
     for (k, c) in pairs {
@@ -347,6 +362,35 @@ pub fn j17_snapshot() -> String {
 pub(crate) fn j17_tick(c: &'static std::sync::atomic::AtomicU64) {
     if j17_on() {
         c.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
+thread_local! {
+    /// Hashes des sources déjà parsées — rempli uniquement sous
+    /// `j17_on()` (sonde V-3c), jamais lu hors de la sonde.
+    static J17_PARSE_SEEN: std::cell::RefCell<std::collections::HashSet<u64>> =
+        std::cell::RefCell::new(std::collections::HashSet::new());
+}
+
+/// Sonde V-3c à l'entrée de `parse_in`/`parse_module_in` :
+/// `parse_call` à chaque appel, `parse_dup` si le hash
+/// (source + mode) est déjà connu. Le hash FNV-1a n'est
+/// calculé qu'armé — désarmé, un `load`+branche ~1 ns.
+pub(crate) fn j17_parse_probe(src: &str, module: bool) {
+    if !j17_on() {
+        return;
+    }
+    J17_PARSE_CALL.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    // FNV-1a 64 — zéro dépendance ; le mode entre dans la
+    // racine du hash (précondition V-3c : script ≠ module).
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325 ^ u64::from(module);
+    for b in src.as_bytes() {
+        h ^= u64::from(*b);
+        h = h.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    let dup = J17_PARSE_SEEN.with(|s| !s.borrow_mut().insert(h));
+    if dup {
+        J17_PARSE_DUP.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     }
 }
 

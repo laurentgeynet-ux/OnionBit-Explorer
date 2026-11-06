@@ -50,6 +50,7 @@ pub(crate) fn parse_in(
     nest_max: u32,
     src_name: Option<Rc<str>>,
 ) -> Result<Program> {
+    crate::j17_parse_probe(src, false);
     let toks = lex(src)?;
     let close_of = close_table(&toks);
     let mut p = Parser {
@@ -93,6 +94,7 @@ pub(crate) fn parse_module_in(
     nest_max: u32,
     src_name: Option<Rc<str>>,
 ) -> Result<Program> {
+    crate::j17_parse_probe(src, true);
     let toks = lex(src)?;
     let close_of = close_table(&toks);
     let mut p = Parser {

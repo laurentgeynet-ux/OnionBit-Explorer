@@ -161,16 +161,21 @@ avant/après dans le message. Ordre = risque croissant.
   `host_method_shadowed`). `read_prop` épargné
   volontairement — sa boucle proxy ne tourne pas dans le
   cas commun, hoister y taxerait chaque read.
-- [ ] **V-3c. Cache `Program` parse** — *seulement si V-1f
-  le justifie* : table TLS `hash(src) → Rc<Program>`
-  (gabarit `intern()`/`Atom`), cap borné + eviction.
-  **Revue — deux conditions** : (1) le mode
-  script/module (`parse_in(src, false, …)`) entre dans la
-  **clé**, pas juste `hash(src)` ; (2) audit
-  **immutabilité AST au run** — `lazy.rs` existe : si
-  `FnLit` porte un `OnceCell` de compilation paresseuse,
-  le partage cross-eval doit être idempotent (cache OK,
-  état run-spécifique NON).
+- [x] **V-3c. Cache `Program` parse — DÉCISION : non
+  retenu** à cette date (JS-C374). V-1f mesure le *coût*
+  du parse (~1.08 µs/stmt), pas la *répétition* — or
+  chaque `<script>` ne parse qu'une fois par page : un
+  cache `hash→Program` ne rapporterait que sur
+  `eval()`/`Function()` de source identique (rare hors
+  code hostile/bancs). **Sondes posées** pour une
+  décision réouvrable sur preuve : `parse_call`/
+  `parse_dup` (hash FNV-1a source **+ mode**, TLS borné
+  par `j17_on()`, ~1 ns désarmé) aux entonnoirs
+  `parse_in`/`parse_module_in` — le ratio mesuré sur
+  vols réels tranchera. Si réouvert : clé = (hash, mode)
+  + cap borné + eviction ; préconditions inchangées —
+  audit `lazy.rs`/`OnceCell` avant partage cross-eval
+  (cache idempotent OK, état run-spécifique NON).
 
 ## V-4 — Shapes + cache global `(shape, clé) → slot`
 
