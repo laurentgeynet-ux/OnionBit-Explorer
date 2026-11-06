@@ -43,25 +43,32 @@ version publiée >7 jours). Chaque scénario mesure ns/op ;
 les baselines sont enregistrées en commentaire dans le
 banc — c'est le juge de V-3/V-4.
 
-- [ ] **V-1a. Boucle lecture de prop monomorphe** — `o.k`
+- [x] **V-1a. Boucle lecture de prop monomorphe** — `o.k`
   même shape ×N : coût de la marche proto + `prop_pos` par
-  accès (la cible V-4).
-- [ ] **V-1b. Polymorphe** — 2-3 shapes alternées sur le même
+  accès (la cible V-4). → **~1.10 µs/lookup**
+- [x] **V-1b. Polymorphe** — 2-3 shapes alternées sur le même
   site : dégradation méga-morphique (borne de V-4).
-- [ ] **V-1c. Profondeur proto** — `o.k` résolu à 4-6
+  → **~1.74 µs/lookup (+58 %)**
+- [x] **V-1c. Profondeur proto** — `o.k` résolu à 4-6
   niveaux de chaîne (`Array.prototype` → `Object.prototype`) :
-  coût par niveau.
-- [ ] **V-1d. Accès variable closure** — `Ident` à 3+
+  coût par niveau. → **~1.23 µs/lookup (+12 % / +3 niveaux)**
+- [x] **V-1d. Accès variable closure** — `Ident` à 3+
   profondeurs de scope : `env_get_seen` marché.
-- [ ] **V-1e. Taux d'appel** — `f()` petit corps ×N : coût
+  → **~1.00 µs/iter (2 reads, prof. 2+1)**
+- [x] **V-1e. Taux d'appel** — `f()` petit corps ×N : coût
   frame/env par `call_value` (alloc scope incluse).
-- [ ] **V-1f. Parse seul** — `parse_in` sur source
-  synthétique représentatif (~100 Ko-1 Mo de code objet
-  dense) : mesure si V-3c est justifié (seuil de décision :
-  parse > ~5 % d'un eval réaliste).
-- [ ] **V-1g. Mix composite** — mini-workload « page »
-  (objets littéraux + map + accès + appels) : le nombre
-  d'ordre global, point de comparaison final.
+  → **~4.93 µs/appel — 4.5× un lookup, dominant**
+- [x] **V-1f. Parse seul** — `parse_in` `pub(crate)` → proxy
+  eval parse-dominé (`0;` ×50k, exécution ~nulle) :
+  **~1.08 µs/stmt**, tare `eval("0")` = 1.8 µs.
+- [x] **V-1g. Mix composite** — mini-workload « page »
+  (objets littéraux + map + accès + appels) : **28.6 µs/iter**
+  (~5 calls/iter → call-dominé, cohérent avec V-1e).
+  + **bonus `array_read`** (`a[i]`/`length`) : ~1.17 µs/iter.
+- **Signal V-1** : `call_rate` ≈ 4.9 µs domine les lookups
+  (~1.1 µs) — V-2 doit attribuer frame/env vs résolution
+  avant tout fix structurel (la porte peut nommer les
+  appels, pas les props).
 
 ## V-2 — Compteurs de résolution J17
 
