@@ -1128,6 +1128,11 @@ pub struct SessionConfig {
     pub max_fonts: usize,
     /// Nombre max de `<script src>` fetchés par document
     /// (étape 50 — une page peut en déclarer des centaines).
+    /// Défaut 256 : twitch en déclare ~108 dont l'entrée
+    /// webpack `core-*.js` ~#119 (§B-106, vol 677 — la borne
+    /// 32 collectait 32 src, l'entrée n'était jamais fetchée
+    /// → `e.O` muet à jamais) ; `max_inflight` et les
+    /// timeouts bornent encore la rafale hostile.
     pub max_scripts: usize,
     /// Nombre max de `<iframe src>` fetchés par document
     /// (étape 128 — un sous-contexte = un document complet ;
@@ -1277,7 +1282,7 @@ impl Default for SessionConfig {
             max_sheets: 32,
             max_imports: 16,
             max_fonts: 16,
-            max_scripts: 32,
+            max_scripts: 256,
             max_frames: 8,
             // Graphe statique réel : mastodon `application-*.js`
             // en compte >64 (axios = n°65+ → « module non chargé »,

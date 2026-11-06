@@ -4436,6 +4436,46 @@ async fn external_script_404_is_skipped() {
     assert!(s.frame_png(a).is_some());
 }
 
+/// §B-106 (vol 677) — `max_scripts` ≥ le nombre déclaré :
+/// les SPA réels déclarent >100 `<script src>` dont l'entrée
+/// webpack loin dans l'ordre document (twitch `core-*.js`
+/// ~#119). Borne 32 → entrée jamais fetchée → silence total.
+/// Verrou : 40 scripts, l'entrée en position #40.
+#[tokio::test]
+async fn many_scripts_entry_beyond_old_bound_runs() {
+    let (mut s, t) = test_session_with(SessionConfig {
+        max_scripts: 256,
+        js_stall_cooldown: std::time::Duration::ZERO,
+        ..SessionConfig::default()
+    });
+    let mut page = String::from("<!doctype html><html><body><div id=\"x\">avant</div>");
+    for i in 0..39 {
+        let _ = std::fmt::Write::write_fmt(
+            &mut page,
+            format_args!("<script src=\"/s{i}.js\"></script>"),
+        );
+    }
+    // L'entrée applicative, dernière — à 32 elle n'existait pas.
+    page.push_str("<script src=\"/entry.js\"></script></body></html>");
+    t.route_bin("/p", 200, page.into_bytes());
+    for i in 0..39 {
+        t.route(&format!("/s{i}.js"), 200, "void 0");
+    }
+    t.route(
+        "/entry.js",
+        200,
+        "document.getElementById('x').textContent='BOOT'",
+    );
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let a = s.open_tab();
+    s.navigate(a, "http://h.test/p").await.unwrap();
+    // Page + 40 scripts.
+    assert_eq!(t.calls(), 41);
+    // L'entrée #40 a évalué — l'ancienne borne 32 la sautait.
+    let dump = s.dom_dump(a).unwrap_or_default();
+    assert!(dump.contains("BOOT"), "entrée en #40 non évaluée : {dump}");
+}
+
 /// Sans fabrique JS, aucun `<script src>` n'est fetché
 /// (scripting désactivé — spec HTML).
 #[tokio::test]
