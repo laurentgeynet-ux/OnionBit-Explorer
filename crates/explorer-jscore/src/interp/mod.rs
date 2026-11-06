@@ -2804,6 +2804,14 @@ impl Engine {
             for list in dom.borrow().ce.pending.values() {
                 ids.extend(list.iter().copied());
             }
+            // `adoptedStyleSheets` (CAP-195, ADR-0033) —
+            // `ObjId` des feuilles adoptées : racines tant que
+            // le document vit — sinon un GC réaffectait le
+            // slot et `adopted_sheets_css` lisait `cssRules`
+            // sur le mauvais objet.
+            for sid in dom.borrow().adopted_sheets.iter().copied() {
+                ids.push(sid);
+            }
         }
         // Élément sous upgrade CE traversant `construct` — il
         // n'est encore rattaché à rien de traçable côté JS.

@@ -1015,6 +1015,13 @@ impl Dom {
         keep.extend(self.pending_dyn_imgs.iter().copied());
         keep.extend(self.dyn_link_seen.keys().copied());
         keep.extend(self.pending_dyn_links.iter().copied());
+        // ADR-0033 — tampons ordinaux **figés au parse** : le
+        // design veut « un script/link retiré reste
+        // identifiable » → les nœuds cités sont retenus,
+        // bornés par le compte parse-time (sinon le slot
+        // réutilisé aliasserait `currentScript`/`load`).
+        keep.extend(self.script_seqs.values().copied());
+        keep.extend(self.link_seqs.values().copied());
         keep
     }
 
@@ -1045,11 +1052,15 @@ impl Dom {
 
     /// Libère les payloads des nœuds **morts** : non attachés
     /// et non retenus par `seeds` (wrappers JS encore vivants,
-    /// cibles IO/RO, records — §B-59). Le slot reste valide —
-    /// `NodeId` indexe l'arène et n'est jamais réutilisé (le
-    /// journal `DomSync` et les records y font foi) ; seules les
-    /// allocations lourdes sont rendues (attrs, texte,
-    /// enfants, listeners). Les `seeds` sont closes sur les
+    /// cibles IO/RO, records — §B-59) ; les slots vont en
+    /// `free_nodes` (réutilisés par [`Self::alloc`]) ou en
+    /// `dead_blocked` (journal en attente → recyclables au
+    /// drain). `NodeId` **est donc réutilisé** : l'invariant
+    /// « un slot recyclé n'aliase jamais une référence encore
+    /// stockée » est maintenu par `extra_kept_nodes` (toutes
+    /// les side-tables citant des ids), `journal_kept_nodes`
+    /// et la passe de délink/purge ci-dessous (ADR-0033 —
+    /// audit AR-16). Les `seeds` sont closes sur les
     /// descendants : un wrapper vivant sur un nœud détaché
     /// retient tout son sous-arbre.
     pub(crate) fn collect_garbage(&mut self, seeds: &std::collections::HashSet<NodeId>) -> usize {
@@ -1111,6 +1122,34 @@ impl Dom {
                 self.dead_blocked.push(id);
             } else {
                 self.free_nodes.push(id);
+            }
+        }
+        // ADR-0033 — complétion de l'invariant : un slot
+        // réutilisé ne doit jamais aliasser une référence
+        // encore stockée. La fermeture `keep` est
+        // descendante : un nœud retenu peut avoir un
+        // `parent` mort — il devient racine de forêt
+        // (parentNode → `None` honnête, jamais le nœud
+        // réaffecté). Même cure pour les flags
+        // transitoires : purge des entrées pointant un slot
+        // libéré *avant* que `alloc` ne le réattribue.
+        for &id in &keep {
+            if let Some(p) = self.nodes[id as usize].parent {
+                if self.nodes[p as usize].free {
+                    self.nodes[id as usize].parent = None;
+                }
+            }
+        }
+        self.parse_dyn
+            .retain(|&n| self.nodes.get(n as usize).is_some_and(|x| !x.free));
+        if let Some(f) = self.focused.get() {
+            if self.nodes[f as usize].free {
+                self.focused.set(None);
+            }
+        }
+        if let Some(dn) = self.dirty_node.get() {
+            if self.nodes[dn as usize].free {
+                self.dirty_node.set(None);
             }
         }
         freed
@@ -5619,4 +5658,87 @@ fn named_entity(name: &str) -> Option<&'static str> {
         "diams" => "♦",
         _ => return None,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    //! Verrous ADR-0033 (AR-16) : un slot réutilisé ne doit
+    //! jamais aliasser une référence encore stockée.
+    use super::*;
+    use std::collections::HashSet;
+
+    /// Un nœud retenu dont le parent détaché meurt devient
+    /// racine de forêt — `parent` est délié, jamais résolu
+    /// vers le nœud réaffecté au slot.
+    #[test]
+    fn collect_delink_parent_mort() {
+        let mut d = Dom::new();
+        let p = d.create_element("div");
+        let c = d.create_element("span");
+        d.append(p, c);
+        // `c` retenu par son wrapper JS (seed), `p` meurt.
+        let mut seeds = HashSet::new();
+        seeds.insert(c);
+        d.collect_garbage(&seeds);
+        assert!(d.nodes[p as usize].free, "le parent doit être libéré");
+        assert_eq!(d.parent(c), None, "parent délié — racine de forêt");
+        // La réutilisation du slot ne doit rien changer.
+        let x = d.create_element("a");
+        assert_eq!(d.parent(c), None, "parent jamais réaffecté ({x:?})");
+    }
+
+    /// `script_seqs`/`link_seqs` sont figés au parse : leurs
+    /// nœuds restent identifiables même détachés — le slot ne
+    /// part pas en `free_nodes`.
+    #[test]
+    fn collect_retient_seqs_figees() {
+        let mut d = Dom::new();
+        let s = d.create_element("script");
+        let l = d.create_element("link");
+        d.script_seqs.insert(0, s);
+        d.link_seqs.insert(0, l);
+        d.collect_garbage(&HashSet::new());
+        assert!(
+            !d.nodes[s as usize].free && !d.nodes[l as usize].free,
+            "les tampons figés retiennent leurs nœuds"
+        );
+        assert_eq!(d.script_seqs.get(&0), Some(&s));
+        assert_eq!(d.link_seqs.get(&0), Some(&l));
+        assert_eq!(d.nodes[s as usize].tag, "script");
+    }
+
+    /// Flags transitoires purgés : `parse_dyn`, `focused`,
+    /// `dirty_node` pointant un slot libéré sont retirés —
+    /// dégradation honnête, jamais fausse association sur le
+    /// nœud réaffecté.
+    #[test]
+    fn collect_purge_flags_transitoires() {
+        let mut d = Dom::new();
+        let n = d.create_element("script");
+        let f = d.create_element("div");
+        let dn = d.create_element("main");
+        d.parse_dyn.insert(n);
+        d.focused.set(Some(f));
+        d.dirty_node.set(Some(dn));
+        d.collect_garbage(&HashSet::new());
+        assert!(d.nodes[n as usize].free);
+        assert!(!d.parse_dyn.contains(&n), "parse_dyn purgé");
+        assert_eq!(d.focused.get(), None, "focused purgé");
+        assert_eq!(d.dirty_node.get(), None, "dirty_node purgé");
+    }
+
+    /// Un nœud **attaché** reste vivant et son `parent`
+    /// (attaché aussi) n'est jamais délié — le fix ne casse
+    /// pas la hiérarchie normale.
+    #[test]
+    fn collect_preserve_parent_vivant() {
+        let mut d = Dom::new();
+        let p = d.create_element("div");
+        let c = d.create_element("span");
+        d.append(p, c);
+        d.append(d.root, p); // attaché → vivant
+        d.collect_garbage(&HashSet::new());
+        assert_eq!(d.parent(c), Some(p));
+        assert!(!d.nodes[p as usize].free);
+    }
 }

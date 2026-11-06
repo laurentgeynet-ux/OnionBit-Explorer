@@ -241,13 +241,17 @@ arbres vivants (AR-1 sans seeds) ou des nœuds encore référencés
 
 ## Piste parallèle JS (spécialiste JS — hors `explorer-dom`)
 
-- [ ] **AR-16. Audit ids sans génération** — JS. `ObjId` =
+- [x] **AR-16. Audit ids sans génération** — JS. `ObjId` =
   `u32` nu réutilisé (`heap.rs` alloc via `free.pop()`) et
   `NodeId` miroir idem (`free_nodes`) : un id obsolète peut
   résoudre un objet **réaffecté** en silence — `dead_blocked`
   ne couvre que le rejeu journal. Audit + ADR avant impl ;
   la mitigation « handle persistant = rooté » borne mais
-  n'élimine pas la classe.
+  n'élimine pas la classe. **Livré (ADR-0033, JS-C362)** :
+  complétion conservatrice — `extra_kept_nodes` += seqs
+  figées, post-sweep délink parent + purge flags
+  transitoires, `gc_seed_ids` += `adopted_sheets` ;
+  génération refusée (rayon d'explosion démesuré — harnais).
 - [ ] **AR-17. Index `id` miroir** — JS. `by_id` = scan O(n)
   (`jscore/dom.rs:3636`) ; `getElementById` est chaud sur
   pages réelles — `HashMap<String, NodeId>` maintenu à
