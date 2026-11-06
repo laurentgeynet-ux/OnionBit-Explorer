@@ -2744,6 +2744,9 @@ impl Engine {
                 std::collections::BTreeMap::new();
             let mut thens: std::collections::BTreeMap<String, u64> =
                 std::collections::BTreeMap::new();
+            let mut settled = 0u64;
+            let mut settle_pairs: std::collections::BTreeMap<String, u64> =
+                std::collections::BTreeMap::new();
             for (id, pr) in &self.prom_sites {
                 let Some(o) = self.heap.obj(*id) else {
                     continue;
@@ -2751,13 +2754,31 @@ impl Engine {
                 let crate::heap::ObjKind::Promise(p) = &o.kind else {
                     continue;
                 };
-                if p.state != crate::promise::PromiseState::Pending || p.reactions.is_empty() {
-                    continue;
-                }
-                pend += 1;
-                *created.entry(pr.created.to_string()).or_default() += 1;
-                for t in &pr.thens {
-                    *thens.entry(t.to_string()).or_default() += 1;
+                match p.state {
+                    crate::promise::PromiseState::Pending if !p.reactions.is_empty() => {
+                        pend += 1;
+                        *created.entry(pr.created.to_string()).or_default() += 1;
+                        for t in &pr.thens {
+                            *thens.entry(t.to_string()).or_default() += 1;
+                        }
+                    }
+                    crate::promise::PromiseState::Pending => {}
+                    crate::promise::PromiseState::Fulfilled
+                    | crate::promise::PromiseState::Rejected => {
+                        // JS-C386 — face miroir `prom.settle` :
+                        // paire `created → [F|R]site_du_settle`.
+                        if let Some((sb, st)) = &pr.settled {
+                            settled += 1;
+                            let tag = match st {
+                                crate::promise::PromiseState::Fulfilled => "F",
+                                crate::promise::PromiseState::Rejected => "R",
+                                crate::promise::PromiseState::Pending => "?",
+                            };
+                            *settle_pairs
+                                .entry(format!("{} -> [{}]{}", pr.created, tag, sb))
+                                .or_default() += 1;
+                        }
+                    }
                 }
             }
             tracing::info!(
@@ -2766,6 +2787,16 @@ impl Engine {
                 n = pend,
                 created = ?top(created),
                 thens = ?top(thens)
+            );
+            // JS-C386 — `prom.settle` : qui règle les promesses
+            // (paires `created → [F|R]site`) — l'absence d'un
+            // `created` dominant ici alors qu'il domine
+            // `prom.pending` = resolve jamais invoqué.
+            tracing::info!(
+                target: "dom_probe",
+                site = "prom.settle",
+                n = settled,
+                pairs = ?top(settle_pairs)
             );
         }
         n

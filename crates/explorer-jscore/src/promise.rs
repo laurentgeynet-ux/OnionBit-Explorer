@@ -78,6 +78,12 @@ pub(crate) struct PromProbe {
     /// Sites `.then`/adoption souscrits tant qu'elle pendait —
     /// dédup + borne [`PROM_THEN_SITES_PER`].
     pub thens: Vec<Rc<str>>,
+    /// JS-C386 — site du settle (`fn(l:c)` à l'appel de
+    /// `resolve`/`reject` ou à la résolution chaînée) + état —
+    /// la face miroir : `prom.pending` nomme les pendantes,
+    /// `prom.settle` nomme *qui règle* (`1484` créée ici mais
+    /// jamais réglée → son `resolve` n'est jamais invoqué).
+    pub settled: Option<(Rc<str>, PromiseState)>,
 }
 
 /// JS-C383 — borne globale de la table `prom_sites` (sonde
@@ -180,6 +186,7 @@ impl Engine {
             PromProbe {
                 created: site,
                 thens: Vec::new(),
+                settled: None,
             },
         );
     }
@@ -202,6 +209,7 @@ impl Engine {
                 PromProbe {
                     created: "<?>".into(),
                     thens: Vec::new(),
+                    settled: None,
                 },
             );
         }
@@ -209,6 +217,35 @@ impl Engine {
             if pr.thens.len() < PROM_THEN_SITES_PER && !pr.thens.contains(&site) {
                 pr.thens.push(site);
             }
+        }
+    }
+
+    /// JS-C386 — sonde settle-site : note `fn(l:c)` à l'appel
+    /// effectif du settle (`resolve`/`reject` natif, réaction
+    /// chaînée ou adoption — `cur_fn_label` nomme la fonction
+    /// JS au sommet). Appelée depuis [`Self::settle_promise`]
+    /// après la transition d'état — l'early-return « déjà
+    /// settlée » garantit l'unicité.
+    fn probe_prom_settled(&mut self, id: ObjId, state: PromiseState) {
+        if !tracing::enabled!(target: "dom_probe", tracing::Level::INFO) {
+            return;
+        }
+        let site: Rc<str> = self.cur_fn_label().into();
+        if !self.prom_sites.contains_key(&id) {
+            if self.prom_sites.len() >= PROM_SITES_MAX {
+                return;
+            }
+            self.prom_sites.insert(
+                id,
+                PromProbe {
+                    created: "<?>".into(),
+                    thens: Vec::new(),
+                    settled: None,
+                },
+            );
+        }
+        if let Some(pr) = self.prom_sites.get_mut(&id) {
+            pr.settled = Some((site, state));
         }
     }
 
@@ -270,6 +307,7 @@ impl Engine {
             let u = state == PromiseState::Rejected && !p.handled;
             (std::mem::take(&mut p.reactions), u)
         };
+        self.probe_prom_settled(id, state);
         // `unhandledrejection` (JS-C154) — promesse rejetée sans
         // aucun `then` : gardée pour le tir en fin de checkpoint
         // (un `.then` tardif la revoit — `rejectionhandled`
@@ -1692,8 +1730,10 @@ mod tests {
         // le subscriber est posé au boot avant tout callsite).
         tracing::callsite::rebuild_interest_cache();
         let mut e = Engine::new();
-        let v =
-            e.eval("let p = new Promise(function(){}); function f(){ p.then(function(){}); } f();");
+        let v = e.eval(
+            "let p = new Promise(function(){}); function f(){ p.then(function(){}); } f();\
+             var q; new Promise(function(res){ q = res; }); function g(){ q(1); } g();",
+        );
         assert!(v.is_ok(), "eval: {v:?}");
         e.collect();
         let named_then = e
@@ -1717,5 +1757,21 @@ mod tests {
             e.prom_sites.values().all(|pr| !pr.created.is_empty()),
             "created doit etre non vide"
         );
+        // JS-C386 — `prom.settle` : la promesse résolue depuis
+        // `g` porte le site du settle nommé.
+        let settle_named = e.prom_sites.values().any(|pr| {
+            matches!(
+                &pr.settled,
+                Some((site, PromiseState::Fulfilled)) if site.starts_with("g(")
+            )
+        });
+        assert!(settle_named, "settle doit nommer g: {:?}", {
+            let v: Vec<_> = e
+                .prom_sites
+                .values()
+                .map(|pr| pr.settled.as_ref().map(|(s, _)| s.to_string()))
+                .collect();
+            v
+        });
     }
 }
