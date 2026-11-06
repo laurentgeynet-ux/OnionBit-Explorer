@@ -274,7 +274,7 @@ fn media_mime_from_url(url: &Url) -> Option<String> {
 /// Attribut booléen présent (`controls`, `autoplay`) —
 /// présence compte, valeur ignorée (HTML).
 fn has_bool_attr(dom: &Dom, n: NodeId, name: &str) -> bool {
-    dom.attribute(n, name).ok().flatten().is_some()
+    dom.attribute_str(n, name).ok().flatten().is_some()
 }
 
 /// Préfixe de codec RFC 6381 (`avc1.42E01E` → `avc1`) —
@@ -398,28 +398,25 @@ fn media_source(
     n: NodeId,
     declared: &std::collections::HashSet<String>,
 ) -> Option<(String, Option<String>)> {
-    let attr = |name: &str| dom.attribute(n, name).ok().flatten();
+    let attr = |name: &str| dom.attribute_str(n, name).ok().flatten();
     if let Some(src) = attr("src").filter(|s| !s.is_empty()) {
-        return Some((src, attr("type")));
+        return Some((src.to_owned(), attr("type").map(str::to_owned)));
     }
     for c in dom.children(n).unwrap_or_default() {
         if !dom.tag_name(c).is_ok_and(|t| t == "source") {
             continue;
         }
-        let Ok(Some(src)) = dom.attribute(c, "src") else {
+        let Ok(Some(src)) = dom.attribute_str(c, "src") else {
             continue;
         };
         if src.is_empty() {
             continue;
         }
-        let ty = dom.attribute(c, "type").ok().flatten();
-        if ty
-            .as_deref()
-            .is_some_and(|t| !source_type_playable(t, declared))
-        {
+        let ty = dom.attribute_str(c, "type").ok().flatten();
+        if ty.is_some_and(|t| !source_type_playable(t, declared)) {
             continue;
         }
-        return Some((src, ty));
+        return Some((src.to_owned(), ty.map(str::to_owned)));
     }
     None
 }
@@ -636,7 +633,7 @@ fn scan_media(
                         autoplay: has_bool_attr(dom, n, "autoplay"),
                         looping: has_bool_attr(dom, n, "loop"),
                         preload: MediaPreload::parse(
-                            dom.attribute(n, "preload").ok().flatten().as_deref(),
+                            dom.attribute_str(n, "preload").ok().flatten(),
                         ),
                         path: element_path(dom, n).unwrap_or_default(),
                         box_path,

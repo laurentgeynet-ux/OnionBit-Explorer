@@ -1865,7 +1865,7 @@ impl Session {
             .srcset
             .as_deref()
             .and_then(|ss| {
-                let eff_w = resolve_sizes(d.sizes.clone(), self.viewport.0);
+                let eff_w = resolve_sizes(d.sizes.as_deref(), self.viewport.0);
                 pick_srcset(ss, eff_w, self.scale)
             })
             .or_else(|| {

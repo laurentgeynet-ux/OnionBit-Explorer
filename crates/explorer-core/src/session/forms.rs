@@ -18,21 +18,21 @@ pub(crate) fn submit_control(dom: &Dom, mut node: NodeId) -> Option<NodeId> {
         match dom.tag_name(node) {
             Ok("button") => {
                 let ty = dom
-                    .attribute(node, "type")
+                    .attribute_str(node, "type")
                     .ok()
                     .flatten()
                     .unwrap_or_default();
-                if !matches!(ty.as_str(), "button" | "reset") {
+                if !matches!(ty, "button" | "reset") {
                     return Some(node);
                 }
             }
             Ok("input") => {
                 let ty = dom
-                    .attribute(node, "type")
+                    .attribute_str(node, "type")
                     .ok()
                     .flatten()
                     .unwrap_or_default();
-                if matches!(ty.as_str(), "submit" | "image") {
+                if matches!(ty, "submit" | "image") {
                     return Some(node);
                 }
             }
@@ -50,17 +50,17 @@ pub(crate) fn toggle_control(dom: &Dom, mut node: NodeId) -> Option<NodeId> {
         match dom.tag_name(node) {
             Ok("input") => {
                 let ty = dom
-                    .attribute(node, "type")
+                    .attribute_str(node, "type")
                     .ok()
                     .flatten()
                     .unwrap_or_default();
-                if matches!(ty.as_str(), "checkbox" | "radio") {
+                if matches!(ty, "checkbox" | "radio") {
                     return Some(node);
                 }
             }
             Ok("label") => {
-                if let Ok(Some(f)) = dom.attribute(node, "for") {
-                    if let Some(target) = find_by_id(dom, &f) {
+                if let Ok(Some(f)) = dom.attribute_str(node, "for") {
+                    if let Some(target) = find_by_id(dom, f) {
                         if dom.tag_name(target).is_ok_and(|t| t == "input") {
                             return Some(target);
                         }
@@ -80,8 +80,8 @@ pub(crate) fn select_control(dom: &Dom, mut node: NodeId) -> Option<NodeId> {
         match dom.tag_name(node) {
             Ok("select") => return Some(node),
             Ok("label") => {
-                if let Ok(Some(f)) = dom.attribute(node, "for") {
-                    if let Some(target) = find_by_id(dom, &f) {
+                if let Ok(Some(f)) = dom.attribute_str(node, "for") {
+                    if let Some(target) = find_by_id(dom, f) {
                         if dom.tag_name(target).is_ok_and(|t| t == "select") {
                             return Some(target);
                         }
@@ -99,20 +99,23 @@ pub(crate) fn select_control(dom: &Dom, mut node: NodeId) -> Option<NodeId> {
 /// (`name` identique) du même formulaire (ou du document
 /// hors formulaire).
 pub(crate) fn toggle_checked(dom: &mut Dom, ctrl: NodeId) -> Result<(), DomError> {
-    let ty = dom.attribute(ctrl, "type")?.unwrap_or_default();
+    let ty = dom.attribute_str(ctrl, "type")?.unwrap_or_default();
     if ty == "radio" {
-        if dom.attribute(ctrl, "checked")?.is_some() {
+        if dom.attribute_str(ctrl, "checked")?.is_some() {
             return Ok(()); // un radio coché ne se décoche pas au clic
         }
         dom.set_attribute(ctrl, "checked", "")?;
-        let name = dom.attribute(ctrl, "name")?.unwrap_or_default();
+        let name = dom
+            .attribute_str(ctrl, "name")?
+            .unwrap_or_default()
+            .to_owned();
         if !name.is_empty() {
             let scope = enclosing_form(dom, ctrl).unwrap_or_else(|| dom.document());
             let mut queue = vec![scope];
             while let Some(n) = queue.pop() {
                 if n != ctrl && dom.tag_name(n).is_ok_and(|t| t == "input") {
-                    let same = dom.attribute(n, "type")?.unwrap_or_default() == "radio"
-                        && dom.attribute(n, "name")?.unwrap_or_default() == name;
+                    let same = dom.attribute_str(n, "type")?.unwrap_or_default() == "radio"
+                        && dom.attribute_str(n, "name")?.unwrap_or_default() == name;
                     if same {
                         dom.remove_attribute(n, "checked")?;
                     }
@@ -124,7 +127,7 @@ pub(crate) fn toggle_checked(dom: &mut Dom, ctrl: NodeId) -> Result<(), DomError
         }
         return Ok(());
     }
-    if dom.attribute(ctrl, "checked")?.is_some() {
+    if dom.attribute_str(ctrl, "checked")?.is_some() {
         dom.remove_attribute(ctrl, "checked")?;
     } else {
         dom.set_attribute(ctrl, "checked", "")?;
@@ -186,7 +189,7 @@ pub(crate) fn invalid_controls(dom: &Dom, form: NodeId) -> Vec<NodeId> {
 /// `type=hidden`/`submit`-like exclus (HTML §4.10.21.2 —
 /// `barred from constraint validation`).
 pub(crate) fn is_control_candidate(dom: &Dom, n: NodeId, tag: &str) -> bool {
-    if dom.attribute(n, "disabled").ok().flatten().is_some() {
+    if dom.attribute_str(n, "disabled").ok().flatten().is_some() {
         return false;
     }
     match tag {
@@ -207,7 +210,7 @@ pub(crate) fn is_control_candidate(dom: &Dom, n: NodeId, tag: &str) -> bool {
 /// pattern, bornes numériques, pas (`step`).
 pub(crate) fn control_invalid_reason(dom: &Dom, n: NodeId, tag: &str) -> Option<&'static str> {
     if dom
-        .attribute(n, CUSTOM_VALIDITY_ATTR)
+        .attribute_str(n, CUSTOM_VALIDITY_ATTR)
         .ok()
         .flatten()
         .is_some_and(|m| !m.is_empty())
@@ -220,7 +223,7 @@ pub(crate) fn control_invalid_reason(dom: &Dom, n: NodeId, tag: &str) -> Option<
             match ty.as_str() {
                 "checkbox" => (
                     String::new(),
-                    dom.attribute(n, "checked").ok().flatten().is_none(),
+                    dom.attribute_str(n, "checked").ok().flatten().is_none(),
                 ),
                 "radio" => (String::new(), !radio_group_checked(dom, n)),
                 _ => (
@@ -244,7 +247,7 @@ pub(crate) fn control_invalid_reason(dom: &Dom, n: NodeId, tag: &str) -> Option<
         }
         _ => (String::new(), false),
     };
-    if dom.attribute(n, "required").ok().flatten().is_some() && empty_required {
+    if dom.attribute_str(n, "required").ok().flatten().is_some() && empty_required {
         return Some("valueMissing");
     }
     // Longueurs + pattern : champs textuels seulement —
@@ -266,8 +269,8 @@ pub(crate) fn control_invalid_reason(dom: &Dom, n: NodeId, tag: &str) -> Option<
                 return Some("tooLong");
             }
         }
-        if let Some(pat) = dom.attribute(n, "pattern").ok().flatten() {
-            if !value.is_empty() && !pattern_full_match(&pat, &value) {
+        if let Some(pat) = dom.attribute_str(n, "pattern").ok().flatten() {
+            if !value.is_empty() && !pattern_full_match(pat, &value) {
                 return Some("patternMismatch");
             }
         }
@@ -308,7 +311,7 @@ pub(crate) fn control_invalid_reason(dom: &Dom, n: NodeId, tag: &str) -> Option<
 /// au niveau du groupe (HTML).
 pub(crate) fn radio_group_checked(dom: &Dom, n: NodeId) -> bool {
     let Some(name) = attr_opt(dom, n, "name") else {
-        return dom.attribute(n, "checked").ok().flatten().is_some();
+        return dom.attribute_str(n, "checked").ok().flatten().is_some();
     };
     // Ancêtre `<form>` le plus proche, sinon la racine du
     // document (un groupe hors formulaire reste groupé).
@@ -322,8 +325,8 @@ pub(crate) fn radio_group_checked(dom: &Dom, n: NodeId) -> bool {
     }
     descendant_elements(dom, scope, "input").iter().any(|&r| {
         attr_lower(dom, r, "type") == "radio"
-            && attr_opt(dom, r, "name").as_deref() == Some(name.as_str())
-            && dom.attribute(r, "checked").ok().flatten().is_some()
+            && attr_opt(dom, r, "name") == Some(name)
+            && dom.attribute_str(r, "checked").ok().flatten().is_some()
     })
 }
 
@@ -364,14 +367,14 @@ pub(crate) fn collect_form_data(
         let tag = dom.tag_name(n).unwrap_or("");
         if n != form
             && dom.element(n).is_ok()
-            && dom.attribute(n, "disabled").ok().flatten().is_none()
+            && dom.attribute_str(n, "disabled").ok().flatten().is_none()
         {
             match tag {
                 "input" => {
                     let ty = attr_lower(dom, n, "type");
                     match ty.as_str() {
                         "checkbox" | "radio" => {
-                            if dom.attribute(n, "checked").ok().flatten().is_some() {
+                            if dom.attribute_str(n, "checked").ok().flatten().is_some() {
                                 push_named(dom, n, input_value(dom, n, &ty), &mut out);
                             }
                         }
@@ -383,7 +386,11 @@ pub(crate) fn collect_form_data(
                         "file" => {
                             if let Some(name) = attr_opt(dom, n, "name").filter(|s| !s.is_empty()) {
                                 let filename = attr_opt(dom, n, "value").unwrap_or_default();
-                                out.push(FormEntry::File(name, filename, Vec::new()));
+                                out.push(FormEntry::File(
+                                    name.to_owned(),
+                                    filename.to_owned(),
+                                    Vec::new(),
+                                ));
                             }
                         }
                         _ => push_named(dom, n, input_value(dom, n, &ty), &mut out),
@@ -396,12 +403,20 @@ pub(crate) fn collect_form_data(
                     push_named(dom, n, select_value(dom, n), &mut out);
                 }
                 "button" => {
-                    let ty = dom.attribute(n, "type").ok().flatten().unwrap_or_default();
-                    if Some(n) == submitter && !matches!(ty.as_str(), "button" | "reset") {
+                    let ty = dom
+                        .attribute_str(n, "type")
+                        .ok()
+                        .flatten()
+                        .unwrap_or_default();
+                    if Some(n) == submitter && !matches!(ty, "button" | "reset") {
                         push_named(
                             dom,
                             n,
-                            dom.attribute(n, "value").ok().flatten().unwrap_or_default(),
+                            dom.attribute_str(n, "value")
+                                .ok()
+                                .flatten()
+                                .unwrap_or_default()
+                                .to_owned(),
                             &mut out,
                         );
                     }
@@ -423,20 +438,24 @@ pub(crate) fn collect_form_data(
 /// Pousse `Text(name, value)` si le contrôle est nommé.
 pub(crate) fn push_named(dom: &Dom, n: NodeId, value: String, out: &mut Vec<FormEntry>) {
     if let Some(name) = attr_opt(dom, n, "name").filter(|s| !s.is_empty()) {
-        out.push(FormEntry::Text(name, value));
+        out.push(FormEntry::Text(name.to_owned(), value));
     }
 }
 
 /// Valeur courante d'un `<input>` : `value` ou `"on"` pour
 /// checkbox/radio sans `value`, vide sinon.
 pub(crate) fn input_value(dom: &Dom, n: NodeId, ty: &str) -> String {
-    dom.attribute(n, "value").ok().flatten().unwrap_or_else(|| {
-        if matches!(ty, "checkbox" | "radio") {
-            "on".to_string()
-        } else {
-            String::new()
-        }
-    })
+    dom.attribute_str(n, "value")
+        .ok()
+        .flatten()
+        .unwrap_or({
+            if matches!(ty, "checkbox" | "radio") {
+                "on"
+            } else {
+                ""
+            }
+        })
+        .to_owned()
 }
 
 /// Valeur courante d'un `<select>` : `value` (ou texte) de
@@ -445,13 +464,13 @@ pub(crate) fn select_value(dom: &Dom, sel: NodeId) -> String {
     let opts = descendant_elements(dom, sel, "option");
     let sel_opt = opts
         .iter()
-        .find(|&&o| dom.attribute(o, "selected").ok().flatten().is_some())
+        .find(|&&o| dom.attribute_str(o, "selected").ok().flatten().is_some())
         .or_else(|| opts.first());
     sel_opt.map_or_else(String::new, |&o| {
-        dom.attribute(o, "value")
-            .ok()
-            .flatten()
-            .unwrap_or_else(|| dom.text_content(o).unwrap_or_default().trim().to_string())
+        dom.attribute_str(o, "value").ok().flatten().map_or_else(
+            || dom.text_content(o).unwrap_or_default().trim().to_string(),
+            str::to_owned,
+        )
     })
 }
 
@@ -470,7 +489,7 @@ pub(crate) fn collect_autofill_data(dom: &Dom, form: NodeId) -> Vec<(String, Str
         let tag = dom.tag_name(n).unwrap_or("");
         if n != form
             && dom.element(n).is_ok()
-            && dom.attribute(n, "disabled").ok().flatten().is_none()
+            && dom.attribute_str(n, "disabled").ok().flatten().is_none()
         {
             match tag {
                 "input" => {
@@ -482,7 +501,7 @@ pub(crate) fn collect_autofill_data(dom: &Dom, form: NodeId) -> Vec<(String, Str
                             if let Some(name) = attr_opt(dom, n, "name").filter(|s| !s.is_empty()) {
                                 let v = input_value(dom, n, &ty);
                                 if !v.trim().is_empty() {
-                                    out.push((name, v));
+                                    out.push((name.to_owned(), v));
                                 }
                             }
                         }
@@ -492,7 +511,7 @@ pub(crate) fn collect_autofill_data(dom: &Dom, form: NodeId) -> Vec<(String, Str
                     if let Some(name) = attr_opt(dom, n, "name").filter(|s| !s.is_empty()) {
                         let v = dom.text_content(n).unwrap_or_default();
                         if !v.trim().is_empty() {
-                            out.push((name, v));
+                            out.push((name.to_owned(), v));
                         }
                     }
                 }
@@ -500,7 +519,7 @@ pub(crate) fn collect_autofill_data(dom: &Dom, form: NodeId) -> Vec<(String, Str
                     if let Some(name) = attr_opt(dom, n, "name").filter(|s| !s.is_empty()) {
                         let v = select_value(dom, n);
                         if !v.is_empty() {
-                            out.push((name, v));
+                            out.push((name.to_owned(), v));
                         }
                     }
                 }

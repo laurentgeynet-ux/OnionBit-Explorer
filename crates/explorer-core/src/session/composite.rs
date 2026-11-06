@@ -68,7 +68,7 @@ pub(crate) type SubFrameBitmaps = HashMap<(String, u32, u32), Arc<DecodedImage>>
 /// `canvas_intrinsic` côté PIPE).
 pub(crate) fn iframe_intrinsic(dom: &Dom, node: NodeId) -> (f32, f32) {
     let attr_px = |name: &str, def: f32| {
-        dom.attribute(node, name)
+        dom.attribute_str(node, name)
             .ok()
             .flatten()
             .and_then(|v| v.trim().parse::<f32>().ok())
@@ -193,20 +193,17 @@ pub(crate) fn composite_frames(p: &mut PaintPayload, ctx: &ApplyCtx, dom: &Dom) 
         // recherche par **contenu** (tous les `about:srcdoc`
         // partagent leur URL — la clé de cache est le hash du
         // HTML, pas l'adresse).
-        let (f, cache_id) = if let Some(html) = dom.attribute(node, "srcdoc").ok().flatten() {
-            let Some(f) = p
-                .frames
-                .iter()
-                .find(|f| f.srcdoc.as_deref() == Some(html.as_str()))
+        let (f, cache_id) = if let Some(html) = dom.attribute_str(node, "srcdoc").ok().flatten() {
+            let Some(f) = p.frames.iter().find(|f| f.srcdoc.as_deref() == Some(html)) else {
+                continue;
+            };
+            (f, srcdoc_key(html))
+        } else {
+            let (Some(base), Ok(Some(src))) = (base.as_ref(), dom.attribute_str(node, "src"))
             else {
                 continue;
             };
-            (f, srcdoc_key(&html))
-        } else {
-            let (Some(base), Ok(Some(src))) = (base.as_ref(), dom.attribute(node, "src")) else {
-                continue;
-            };
-            let Ok(url) = Url::resolve(base, &src) else {
+            let Ok(url) = Url::resolve(base, src) else {
                 continue;
             };
             let Some(f) = p.frames.iter().find(|f| f.url == url) else {

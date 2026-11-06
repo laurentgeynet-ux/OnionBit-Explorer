@@ -1295,7 +1295,7 @@ fn relocate_obreloc(dom: &mut Dom) {
                 "data-obreloc-html",
                 "data-obreloc-x",
             ] {
-                if let Ok(Some(v)) = dom.attribute(n, a) {
+                if let Ok(Some(v)) = dom.attribute_str(n, a) {
                     found = Some((n, a, v));
                     break;
                 }

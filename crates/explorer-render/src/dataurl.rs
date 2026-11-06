@@ -75,7 +75,7 @@ pub fn collect_data_images(dom: &Dom, styles: &StyleMap, max_px: u32) -> PaintIm
             _ => "",
         };
         if !attr.is_empty() {
-            if let Ok(Some(src)) = dom.attribute(node, attr) {
+            if let Ok(Some(src)) = dom.attribute_str(node, attr) {
                 if let Some(img) = decode_data_url(src.trim(), max_px) {
                     out.replaced.insert(node, Arc::new(img));
                 }

@@ -176,7 +176,7 @@ fn cmp_rearm_module(dom: &Dom, n: explorer_dom::NodeId, rearm_cmp: bool) -> Opti
     }
     tracing::info!("script marqué CMP réarmé — consentement résolu");
     Some(
-        dom.attribute(n, "data-type")
+        dom.attribute_str(n, "data-type")
             .ok()
             .flatten()
             .is_some_and(|t| t.trim().eq_ignore_ascii_case("module")),
@@ -200,7 +200,7 @@ fn collect_script_el(
     rearm_cmp: bool,
 ) {
     let ty = dom
-        .attribute(n, "type")
+        .attribute_str(n, "type")
         .ok()
         .flatten()
         .map_or_else(String::new, |t| t.trim().to_ascii_lowercase());
@@ -220,78 +220,35 @@ fn collect_script_el(
         }
     };
     // `nomodule` n'a d'effet que sur les classiques.
-    let nomodule = dom.attribute(n, "nomodule").ok().flatten().is_some();
+    let nomodule = dom.attribute_str(n, "nomodule").ok().flatten().is_some();
     if !module && nomodule {
         return;
     }
     let src_attr = dom
-        .attribute(n, "src")
+        .attribute_str(n, "src")
         .ok()
         .flatten()
         .or_else(|| {
             // CMP : la vraie URL est souvent déplacée vers
             // `data-src` (évite le fetch pré-consentement).
             rearmed
-                .then(|| dom.attribute(n, "data-src").ok().flatten())
+                .then(|| dom.attribute_str(n, "data-src").ok().flatten())
                 .flatten()
         })
         .filter(|s| !s.trim().is_empty());
     if let Some(raw) = src_attr {
-        // Externe : `async` l'emporte sur `defer`
-        // (spec — les deux présents = async).
-        let async_ = dom.attribute(n, "async").ok().flatten().is_some();
-        let defer = !async_ && dom.attribute(n, "defer").ok().flatten().is_some();
-        let resolved = Url::resolve(base, raw.trim())
-            .ok()
-            .filter(|u| !is_mixed_content(page, u))
-            .filter(|u| {
-                explorer_net::csp::csp_allows(csp, page, explorer_net::http::FetchDest::Script, u)
-            });
-        if resolved.is_none() {
-            // Plan-time — vol 33 radiogarden : un
-            // script refusé ici (URL irrésoluble,
-            // mixed-content, `script-src`) mourait
-            // sans trace, console vide.
-            tracing::warn!(src = %raw.trim(),
-                "script refusé en plan — résolution/mixed-content/CSP");
-        }
-        if let (Some(u), true) = (resolved, *slots < max_src) {
-            out.push(ScriptItem {
-                src: Some(u),
-                inline: None,
-                charset: if module {
-                    None
-                } else {
-                    dom.attribute(n, "charset").ok().flatten()
-                },
-                integrity: dom.attribute(n, "integrity").ok().flatten(),
-                crossorigin: super::dom_helpers::crossorigin_attr(dom, n),
-                module,
-                exec: if async_ {
-                    ScriptExec::Arrival
-                } else if module || defer {
-                    ScriptExec::Post
-                } else {
-                    ScriptExec::Parse
-                },
-                slot: {
-                    let s = *slots;
-                    *slots += 1;
-                    Some(s)
-                },
-                el_ord,
-                rearmed,
-            });
-        }
+        push_external_script(
+            dom, n, page, base, csp, el_ord, slots, max_src, out, rearmed, module, raw,
+        );
         // Hors borne / irrésoluble / bloqué :
         // balise inerte, non collectée.
     } else {
         let text = dom.text_content(n).unwrap_or_default();
-        let nonce = dom.attribute(n, "nonce").ok().flatten();
+        let nonce = dom.attribute_str(n, "nonce").ok().flatten();
         let inline_ok = explorer_net::csp::csp_inline_allowed(
             csp,
             explorer_net::csp::InlineKind::Script,
-            nonce.as_deref(),
+            nonce,
         );
         if !text.trim().is_empty() && inline_ok {
             // Inline : `async`/`defer` sans effet —
@@ -316,6 +273,82 @@ fn collect_script_el(
     }
 }
 
+/// Bras `src=` de [`collect_script_el`] : résolution
+/// URL (base + mixed-content + `script-src`) puis push
+/// dans la borne `max_src` — `async` l'emporte sur
+/// `defer` (spec — les deux présents = async).
+#[allow(clippy::too_many_arguments)]
+fn push_external_script(
+    dom: &Dom,
+    n: explorer_dom::NodeId,
+    page: &Url,
+    base: &Url,
+    csp: &[explorer_net::csp::CspPolicy],
+    el_ord: usize,
+    slots: &mut usize,
+    max_src: usize,
+    out: &mut Vec<ScriptItem>,
+    rearmed: bool,
+    module: bool,
+    raw: &str,
+) {
+    let async_ = dom.attribute_str(n, "async").ok().flatten().is_some();
+    let defer = !async_ && dom.attribute_str(n, "defer").ok().flatten().is_some();
+    let resolved = Url::resolve(base, raw.trim())
+        .ok()
+        .filter(|u| !is_mixed_content(page, u))
+        .filter(|u| {
+            explorer_net::csp::csp_allows(csp, page, explorer_net::http::FetchDest::Script, u)
+        });
+    if resolved.is_none() {
+        // Plan-time — vol 33 radiogarden : un
+        // script refusé ici (URL irrésoluble,
+        // mixed-content, `script-src`) mourait
+        // sans trace, console vide.
+        tracing::warn!(src = %raw.trim(),
+            "script refusé en plan — résolution/mixed-content/CSP");
+    }
+    if let (Some(u), true) = (resolved, *slots < max_src) {
+        // `charset` est sans objet sur un module
+        // (toujours UTF-8 par spec).
+        let charset = if module {
+            None
+        } else {
+            dom.attribute_str(n, "charset")
+                .ok()
+                .flatten()
+                .map(str::to_owned)
+        };
+        let integrity = dom
+            .attribute_str(n, "integrity")
+            .ok()
+            .flatten()
+            .map(str::to_owned);
+        out.push(ScriptItem {
+            src: Some(u),
+            inline: None,
+            charset,
+            integrity,
+            crossorigin: super::dom_helpers::crossorigin_attr(dom, n),
+            module,
+            exec: if async_ {
+                ScriptExec::Arrival
+            } else if module || defer {
+                ScriptExec::Post
+            } else {
+                ScriptExec::Parse
+            },
+            slot: {
+                let s = *slots;
+                *slots += 1;
+                Some(s)
+            },
+            el_ord,
+            rearmed,
+        });
+    }
+}
+
 /// Corps des `<script type="importmap">` du document, ordre
 /// document (issue #6) : JSON bruts poussés au moteur via
 /// `set_import_map` **avant** le premier `eval_module`, et
@@ -333,7 +366,7 @@ pub(crate) fn collect_import_maps(dom: &Dom) -> Vec<String> {
     while let Some(n) = queue.pop() {
         if dom.tag_name(n).is_ok_and(|t| t == "script") {
             let ty = dom
-                .attribute(n, "type")
+                .attribute_str(n, "type")
                 .ok()
                 .flatten()
                 .map_or_else(String::new, |t| t.trim().to_ascii_lowercase());

@@ -397,6 +397,8 @@ ni l'un ni l'autre. Variante arrêtée (pull, cohérente avec
 
 | 2026-11-06 | `explorer-dom`/`explorer-core` — **`Dom::heap_bytes()` + `MemReport.dom_bytes`** (R-143, AR-7 chantier ARÈNE) | **Additif PIPE** : `heap_bytes()` mesure la capacité `slots` (cases libres incluses), les tables `roots`/`shadow_*`/`defined_names` et les allocs internes aux nœuds (textes, `tag_name`, attributs) — approximation `capacity()` documentée, jamais de faux total exact. **Consommation NAV** : `MemReport.dom_bytes`/`bfcache_dom_bytes` alimentés à côté de `dom_nodes` (compte) — la lecture `/mem` distingue désormais vivacité et empreinte réelle de l'arène (le surbooking post-`collect` reste visible, conforme au RSS). Verrou `heap_bytes_mesure_capacite_et_contenu`. | PIPE/NAV | livré |
 
+| 2026-11-06 | `explorer-dom` + tous consommateurs — **`Dom::attribute_str` + migration 124 sites** (R-145, AR-9 chantier ARÈNE) | **Additif PIPE** : `attribute_str(id, name) -> Result<Option<&str>>` — zéro allocation, emprunté à l'arène (expire à la prochaine mutation). `attribute` (clonant) délègue désormais — **conservé pour les cas exigeant `String`**. Migration complète en une passe : css/html/layout/render + core (~91 sites — `attr_opt`, `find_by_attr`, `resolve_sizes`, formulaires, srcset, scripts, téléchargements). `to_owned` ciblé aux sorties qui exigent `String` ; un `to_owned` pour conflit d'emprunt (`remove_attribute` sous lecture). Règle pour les nouveaux sites : **`attribute_str` par défaut, `attribute` seulement si possession requise**. | PIPE + NAV | livré |
+
 ## Phase terrain humain 2026-10-23 — anomalies dispatchées
 
 Bilan de la session de test réel (daemon REST + app, binaires

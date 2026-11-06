@@ -410,7 +410,7 @@ pub fn build_box_tree_sized<S: ::std::hash::BuildHasher>(
         .is_ok_and(|t| t == "input" || t == "select")
     {
         let ty = dom
-            .attribute(root, "type")
+            .attribute_str(root, "type")
             .ok()
             .flatten()
             .unwrap_or_default()
@@ -606,9 +606,14 @@ fn assign_marker_ordinals(dom: &Dom, parent: NodeId, out: &mut [LayoutBox]) {
         return;
     }
     let is_ol = dom.tag_name(parent).is_ok_and(|t| t == "ol");
-    let reversed = is_ol && dom.attribute(parent, "reversed").ok().flatten().is_some();
+    let reversed = is_ol
+        && dom
+            .attribute_str(parent, "reversed")
+            .ok()
+            .flatten()
+            .is_some();
     let mut cur: i32 = dom
-        .attribute(parent, "start")
+        .attribute_str(parent, "start")
         .ok()
         .flatten()
         .and_then(|s| s.trim().parse::<i32>().ok())
@@ -625,7 +630,7 @@ fn assign_marker_ordinals(dom: &Dom, parent: NodeId, out: &mut [LayoutBox]) {
         // `li[value]` fixe l'ordinal et déplace le compteur.
         let v = b
             .node
-            .and_then(|n| dom.attribute(n, "value").ok().flatten())
+            .and_then(|n| dom.attribute_str(n, "value").ok().flatten())
             .and_then(|s| s.trim().parse::<i32>().ok());
         cur = v.unwrap_or(cur);
         b.marker_ordinal = cur;
@@ -986,7 +991,7 @@ fn flush_run(out: &mut Vec<LayoutBox>, run: &mut Vec<LayoutBox>, style: &Compute
 ///   (hit-test mort : `searchInput` Wikipedia à
 ///   `height:100%` non résolvable, R-101).
 fn control_paint(dom: &Dom, node: NodeId, ty: &str) -> (Option<String>, bool) {
-    let attr = |n: NodeId, name: &str| dom.attribute(n, name).ok().flatten();
+    let attr = |n: NodeId, name: &str| dom.attribute_str(n, name).ok().flatten();
     let tag = dom.tag_name(node).unwrap_or("");
     if tag == "select" {
         // Options en ordre document ; `selected` gagne, sinon
@@ -1007,6 +1012,7 @@ fn control_paint(dom: &Dom, node: NodeId, ty: &str) -> (Option<String>, bool) {
             .or_else(|| opts.first());
         let text = sel.and_then(|&o| {
             attr(o, "value")
+                .map(str::to_owned)
                 .or_else(|| dom.text_content(o).ok().map(|t| t.trim().to_string()))
                 .filter(|t| !t.is_empty())
         });
@@ -1015,7 +1021,9 @@ fn control_paint(dom: &Dom, node: NodeId, ty: &str) -> (Option<String>, bool) {
     match ty {
         "checkbox" | "radio" => (None, attr(node, "checked").is_some()),
         "submit" | "button" | "reset" => (
-            attr(node, "value").or_else(|| Some("\u{A0}".to_owned())),
+            attr(node, "value")
+                .map(str::to_owned)
+                .or_else(|| Some("\u{A0}".to_owned())),
             false,
         ),
         "hidden" | "file" | "image" => (None, false),
@@ -1024,6 +1032,7 @@ fn control_paint(dom: &Dom, node: NodeId, ty: &str) -> (Option<String>, bool) {
             let v = attr(node, "value").filter(|s| !s.is_empty());
             (
                 v.or_else(|| attr(node, "placeholder"))
+                    .map(str::to_owned)
                     .or_else(|| Some("\u{A0}".to_owned())),
                 false,
             )
@@ -1080,7 +1089,7 @@ fn object_box(
 
 fn svg_intrinsic(dom: &Dom, node: NodeId) -> (f32, f32) {
     let attr_px = |name: &str| {
-        dom.attribute(node, name).ok().flatten().and_then(|v| {
+        dom.attribute_str(node, name).ok().flatten().and_then(|v| {
             let t = v.trim();
             if t.ends_with('%') {
                 return None;
@@ -1091,14 +1100,18 @@ fn svg_intrinsic(dom: &Dom, node: NodeId) -> (f32, f32) {
                 .filter(|f| f.is_finite() && *f > 0.0)
         })
     };
-    let vb = dom.attribute(node, "viewBox").ok().flatten().and_then(|v| {
-        let nums: Vec<f32> = v
-            .split([',', ' ', '\t'])
-            .filter(|s| !s.is_empty())
-            .filter_map(|s| s.parse().ok())
-            .collect();
-        (nums.len() == 4).then(|| (nums[2], nums[3]))
-    });
+    let vb = dom
+        .attribute_str(node, "viewBox")
+        .ok()
+        .flatten()
+        .and_then(|v| {
+            let nums: Vec<f32> = v
+                .split([',', ' ', '\t'])
+                .filter(|s| !s.is_empty())
+                .filter_map(|s| s.parse().ok())
+                .collect();
+            (nums.len() == 4).then(|| (nums[2], nums[3]))
+        });
     let (w, h) = (attr_px("width"), attr_px("height"));
     match (w, h, vb) {
         (Some(w), Some(h), _) => (w, h),
@@ -1120,14 +1133,13 @@ fn img_box<S: ::std::hash::BuildHasher>(
     sizes: &std::collections::HashMap<NodeId, (f32, f32), S>,
 ) -> LayoutBox {
     let alt = dom
-        .attribute(node, "alt")
+        .attribute_str(node, "alt")
         .ok()
         .flatten()
-        .unwrap_or_default()
-        .clone();
+        .unwrap_or_default();
     let (kind, text) = match sizes.get(&node) {
         Some(_) => (box_kind_of(&style), None),
-        None => (BoxKind::Text, (!alt.is_empty()).then_some(alt)),
+        None => (BoxKind::Text, (!alt.is_empty()).then(|| alt.to_owned())),
     };
     let mut bx = leaf_box(kind, node, style, sizes.get(&node).copied());
     bx.text = text;
@@ -1170,7 +1182,7 @@ fn leaf_box(
 /// non numérique → repli), défaut spec 300×150.
 fn canvas_intrinsic(dom: &Dom, node: NodeId) -> (f32, f32) {
     let attr_px = |name: &str, def: f32| {
-        dom.attribute(node, name)
+        dom.attribute_str(node, name)
             .ok()
             .flatten()
             .and_then(|v| v.trim().parse::<f32>().ok())

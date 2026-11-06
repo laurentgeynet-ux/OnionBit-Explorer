@@ -1383,20 +1383,24 @@ fn match_part_chain(
     for pname in names.iter().rev() {
         let root = dom.containing_shadow_root(el)?;
         let host = dom.shadow_host(root)?;
-        let exported = dom.attribute(host, "exportparts").ok().flatten();
-        let part_ok = dom.attribute(el, "part").ok().flatten().is_some_and(|v| {
-            v.split_ascii_whitespace().any(|t| {
-                if t == *pname {
-                    return true;
-                }
-                exported.as_deref().is_some_and(|e| {
-                    e.split_ascii_whitespace().any(|e| match e.split_once(':') {
-                        Some((i, o)) => i == t && o == *pname,
-                        None => e == t && e == *pname,
+        let exported = dom.attribute_str(host, "exportparts").ok().flatten();
+        let part_ok = dom
+            .attribute_str(el, "part")
+            .ok()
+            .flatten()
+            .is_some_and(|v| {
+                v.split_ascii_whitespace().any(|t| {
+                    if t == *pname {
+                        return true;
+                    }
+                    exported.is_some_and(|e| {
+                        e.split_ascii_whitespace().any(|e| match e.split_once(':') {
+                            Some((i, o)) => i == t && o == *pname,
+                            None => e == t && e == *pname,
+                        })
                     })
                 })
-            })
-        });
+            });
         if !part_ok {
             return None;
         }

@@ -42,8 +42,8 @@ fn tag(dom: &Dom, node: NodeId) -> &str {
 }
 
 /// Valeur d'attribut (`None` hors élément/absent).
-fn attr(dom: &Dom, node: NodeId, name: &str) -> Option<String> {
-    dom.attribute(node, name).ok().flatten()
+fn attr<'a>(dom: &'a Dom, node: NodeId, name: &str) -> Option<&'a str> {
+    dom.attribute_str(node, name).ok().flatten()
 }
 
 fn has_attr(dom: &Dom, node: NodeId, name: &str) -> bool {
@@ -205,7 +205,7 @@ pub(crate) fn is_read_write(dom: &Dom, node: NodeId) -> bool {
 pub(crate) fn placeholder_shown(dom: &Dom, node: NodeId) -> bool {
     tag(dom, node) == "input"
         && attr(dom, node, "placeholder").is_some_and(|p| !p.is_empty())
-        && attr(dom, node, "value").is_none_or(|v| v.is_empty())
+        && attr(dom, node, "value").is_none_or(str::is_empty)
 }
 
 /// Candidat à la validation de contrainte (§4.10.19.2) :
@@ -246,9 +246,10 @@ fn is_validation_candidate(dom: &Dom, node: NodeId) -> bool {
 fn control_value(dom: &Dom, node: NodeId) -> String {
     match tag(dom, node) {
         "option" => attr(dom, node, "value")
+            .map(str::to_owned)
             .or_else(|| dom.text_content(node).ok())
             .unwrap_or_default(),
-        _ => attr(dom, node, "value").unwrap_or_default(),
+        _ => attr(dom, node, "value").unwrap_or_default().to_owned(),
     }
 }
 

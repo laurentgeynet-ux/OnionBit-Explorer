@@ -124,11 +124,11 @@ pub(crate) fn editable_field(dom: &Dom, mut node: NodeId) -> Option<NodeId> {
         match dom.tag_name(node) {
             Ok("input") => {
                 let ty = dom
-                    .attribute(node, "type")
+                    .attribute_str(node, "type")
                     .ok()
                     .flatten()
                     .unwrap_or_default();
-                return TEXT_TYPES.contains(&ty.as_str()).then_some(node);
+                return TEXT_TYPES.contains(&ty).then_some(node);
             }
             Ok("textarea") => return Some(node),
             _ => {}
@@ -146,10 +146,11 @@ pub(crate) fn field_value(dom: &Dom, field: NodeId) -> String {
     if dom.tag_name(field).is_ok_and(|t| t == "textarea") {
         dom.text_content(field).unwrap_or_default()
     } else {
-        dom.attribute(field, "value")
+        dom.attribute_str(field, "value")
             .ok()
             .flatten()
             .unwrap_or_default()
+            .to_owned()
     }
 }
 
@@ -207,7 +208,7 @@ pub(crate) fn edit_field(dom: &mut Dom, field: NodeId, key: &str) -> Result<(), 
 pub(crate) fn ancestor_link(dom: &Dom, mut node: NodeId) -> Option<NodeId> {
     loop {
         if dom.tag_name(node).is_ok_and(|t| t == "a")
-            && matches!(dom.attribute(node, "href"), Ok(Some(_)))
+            && matches!(dom.attribute_str(node, "href"), Ok(Some(_)))
         {
             return Some(node);
         }
@@ -224,7 +225,7 @@ pub(crate) fn ancestor_link(dom: &Dom, mut node: NodeId) -> Option<NodeId> {
 pub(crate) fn ancestor_img(dom: &Dom, mut node: NodeId) -> Option<NodeId> {
     loop {
         if dom.tag_name(node).is_ok_and(|t| t == "img")
-            && matches!(dom.attribute(node, "src"), Ok(Some(_)))
+            && matches!(dom.attribute_str(node, "src"), Ok(Some(_)))
         {
             return Some(node);
         }
@@ -274,8 +275,8 @@ pub(crate) fn target_name_new_context(name: &str) -> bool {
 /// réutilisation des contextes nommés — le booléen
 /// `target_new_context` seul perd l'information).
 pub(crate) fn resolved_target_name(dom: &Dom, el: NodeId, base_target: Option<&str>) -> String {
-    match dom.attribute(el, "target") {
-        Ok(Some(t)) => t,
+    match dom.attribute_str(el, "target") {
+        Ok(Some(t)) => t.to_owned(),
         _ => base_target.map_or_else(String::new, str::to_string),
     }
 }
@@ -301,15 +302,15 @@ pub(crate) fn document_base(dom: &Dom, doc_url: &Url) -> (Option<Url>, Option<St
                 // Premier `<base href>` en ordre document —
                 // irrésolvable = repli sur l'URL du document,
                 // les `<base>` suivants sont sans effet (spec).
-                if let Some(href) = dom.attribute(n, "href").ok().flatten() {
+                if let Some(href) = dom.attribute_str(n, "href").ok().flatten() {
                     seen_href = true;
                     base_url = Url::resolve(doc_url, href.trim()).ok();
                 }
             }
             if !seen_target {
-                if let Some(t) = dom.attribute(n, "target").ok().flatten() {
+                if let Some(t) = dom.attribute_str(n, "target").ok().flatten() {
                     seen_target = true;
-                    base_target = Some(t);
+                    base_target = Some(t.to_owned());
                 }
             }
             if seen_href && seen_target {
@@ -328,10 +329,13 @@ pub(crate) fn document_base(dom: &Dom, doc_url: &Url) -> (Option<Url>, Option<St
 /// implicite, sans objet tant que `window.opener` n'a
 /// pas de pont JS — étape 130).
 pub(crate) fn rel_no_referrer(dom: &Dom, el: NodeId) -> bool {
-    dom.attribute(el, "rel").ok().flatten().is_some_and(|r| {
-        r.split_whitespace()
-            .any(|t| t.eq_ignore_ascii_case("noreferrer"))
-    })
+    dom.attribute_str(el, "rel")
+        .ok()
+        .flatten()
+        .is_some_and(|r| {
+            r.split_whitespace()
+                .any(|t| t.eq_ignore_ascii_case("noreferrer"))
+        })
 }
 
 /// `referrerpolicy=` d'un élément liant (`<a>`, `<form>`,
@@ -344,10 +348,10 @@ pub(crate) fn element_referrer_policy(
     dom: &Dom,
     el: NodeId,
 ) -> Option<explorer_net::http::ReferrerPolicy> {
-    dom.attribute(el, "referrerpolicy")
+    dom.attribute_str(el, "referrerpolicy")
         .ok()
         .flatten()
-        .and_then(|v| explorer_net::http::ReferrerPolicy::parse(&v))
+        .and_then(explorer_net::http::ReferrerPolicy::parse)
 }
 
 /// Politique `Referer` du document via `<meta
@@ -360,16 +364,16 @@ pub(crate) fn meta_referrer_policy(dom: &Dom) -> Option<explorer_net::http::Refe
     while let Some(n) = queue.pop() {
         if dom.tag_name(n).is_ok_and(|t| t == "meta")
             && dom
-                .attribute(n, "name")
+                .attribute_str(n, "name")
                 .ok()
                 .flatten()
                 .is_some_and(|v| v.trim().eq_ignore_ascii_case("referrer"))
         {
             if let Some(p) = dom
-                .attribute(n, "content")
+                .attribute_str(n, "content")
                 .ok()
                 .flatten()
-                .and_then(|v| explorer_net::http::ReferrerPolicy::parse(&v))
+                .and_then(explorer_net::http::ReferrerPolicy::parse)
             {
                 out = Some(p);
             }
@@ -392,16 +396,16 @@ pub(crate) fn meta_refresh(dom: &Dom) -> Option<(f64, Option<String>)> {
     while let Some(n) = queue.pop() {
         if dom.tag_name(n).is_ok_and(|t| t == "meta")
             && dom
-                .attribute(n, "http-equiv")
+                .attribute_str(n, "http-equiv")
                 .ok()
                 .flatten()
                 .is_some_and(|v| v.trim().eq_ignore_ascii_case("refresh"))
         {
             if let Some(r) = dom
-                .attribute(n, "content")
+                .attribute_str(n, "content")
                 .ok()
                 .flatten()
-                .and_then(|v| parse_refresh_content(&v))
+                .and_then(parse_refresh_content)
             {
                 return Some(r);
             }
@@ -601,13 +605,13 @@ pub(crate) fn collect_meta_csp(dom: &Dom) -> Vec<String> {
     while let Some(n) = queue.pop() {
         if dom.tag_name(n).is_ok_and(|t| t == "meta")
             && dom
-                .attribute(n, "http-equiv")
+                .attribute_str(n, "http-equiv")
                 .ok()
                 .flatten()
                 .is_some_and(|v| v.trim().eq_ignore_ascii_case("content-security-policy"))
         {
-            if let Some(c) = dom.attribute(n, "content").ok().flatten() {
-                out.push(c);
+            if let Some(c) = dom.attribute_str(n, "content").ok().flatten() {
+                out.push(c.to_owned());
             }
         }
         if let Ok(ch) = dom.children(n) {
@@ -637,11 +641,11 @@ pub(crate) fn collect_style_sheets(
     let mut queue = vec![dom.document()];
     while let Some(n) = queue.pop() {
         if dom.tag_name(n).is_ok_and(|t| t == "style") {
-            let nonce = dom.attribute(n, "nonce").ok().flatten();
+            let nonce = dom.attribute_str(n, "nonce").ok().flatten();
             if explorer_net::csp::csp_inline_allowed(
                 csp,
                 explorer_net::csp::InlineKind::Style,
-                nonce.as_deref(),
+                nonce,
             ) {
                 if let Ok(t) = dom.text_content(n) {
                     sheets.push((dom.containing_shadow_root(n), t));
@@ -667,7 +671,7 @@ pub(crate) fn collect_style_sheets(
 /// same-origin seulement, spec) ; `use-credentials` →
 /// `Include`. La valeur est ASCII case-insensitive.
 pub(crate) fn crossorigin_attr(dom: &Dom, n: NodeId) -> Option<FetchCredentials> {
-    dom.attribute(n, "crossorigin").ok().flatten().map(|v| {
+    dom.attribute_str(n, "crossorigin").ok().flatten().map(|v| {
         match v.trim().to_ascii_lowercase().as_str() {
             "use-credentials" => FetchCredentials::Include,
             _ => FetchCredentials::SameOrigin,
@@ -712,7 +716,7 @@ pub(crate) fn collect_stylesheet_links(dom: &Dom) -> Vec<SheetLink> {
             let el_ord = els;
             els += 1;
             let rel = dom
-                .attribute(n, "rel")
+                .attribute_str(n, "rel")
                 .ok()
                 .flatten()
                 .unwrap_or_default()
@@ -727,16 +731,22 @@ pub(crate) fn collect_stylesheet_links(dom: &Dom) -> Vec<SheetLink> {
             let is_sheet = rel.split_whitespace().any(|w| w == "stylesheet")
                 || (rel.split_whitespace().any(|w| w == "preload")
                     && dom
-                        .attribute(n, "as")
+                        .attribute_str(n, "as")
                         .ok()
                         .flatten()
                         .is_some_and(|a| a.trim().eq_ignore_ascii_case("style")));
             if is_sheet {
-                if let Ok(Some(href)) = dom.attribute(n, "href") {
+                if let Ok(Some(href)) = dom.attribute_str(n, "href") {
                     if !href.is_empty() {
-                        let media = dom.attribute(n, "media").ok().flatten();
-                        let integrity = dom.attribute(n, "integrity").ok().flatten();
-                        out.push((href, media, integrity, crossorigin_attr(dom, n), el_ord));
+                        let media = dom.attribute_str(n, "media").ok().flatten();
+                        let integrity = dom.attribute_str(n, "integrity").ok().flatten();
+                        out.push((
+                            href.to_owned(),
+                            media.map(str::to_owned),
+                            integrity.map(str::to_owned),
+                            crossorigin_attr(dom, n),
+                            el_ord,
+                        ));
                     }
                 }
             }
@@ -762,21 +772,21 @@ pub(crate) fn collect_module_preloads(dom: &Dom) -> Vec<String> {
     while let Some(n) = queue.pop() {
         if dom.tag_name(n).is_ok_and(|t| t == "link") {
             let rel = dom
-                .attribute(n, "rel")
+                .attribute_str(n, "rel")
                 .ok()
                 .flatten()
                 .unwrap_or_default()
                 .to_ascii_lowercase();
             let is_mod_preload = rel.split_whitespace().any(|w| w == "modulepreload")
                 || (rel.split_whitespace().any(|w| w == "preload")
-                    && dom.attribute(n, "as").ok().flatten().is_some_and(|a| {
+                    && dom.attribute_str(n, "as").ok().flatten().is_some_and(|a| {
                         let a = a.trim();
                         a.eq_ignore_ascii_case("script") || a.eq_ignore_ascii_case("module")
                     }));
             if is_mod_preload {
-                if let Ok(Some(href)) = dom.attribute(n, "href") {
+                if let Ok(Some(href)) = dom.attribute_str(n, "href") {
                     if !href.is_empty() {
-                        out.push(href);
+                        out.push(href.to_owned());
                     }
                 }
             }
@@ -902,7 +912,7 @@ pub(crate) fn pick_srcset(srcset: &str, eff_w: f32, dpr: f32) -> Option<String> 
 /// termes conditionnels `(...) Npx` sont sautés (éval
 /// média hors portée — le terme final non conditionnel de
 /// la spec est ainsi trouvé). Défaut : `viewport` (100vw).
-pub(crate) fn resolve_sizes(sizes: Option<String>, vp_w: f32) -> f32 {
+pub(crate) fn resolve_sizes(sizes: Option<&str>, vp_w: f32) -> f32 {
     let Some(sizes) = sizes else {
         return vp_w;
     };
@@ -955,22 +965,23 @@ pub(crate) fn collect_images(dom: &Dom, img_w: f32, dpr: f32) -> Vec<(NodeId, St
                 // passe par `pick_srcset` comme `srcset`, et
                 // prime `src`/`data-src` de même préséance).
                 let srcset_of = |attr: &str| {
-                    dom.attribute(n, attr)
+                    dom.attribute_str(n, attr)
                         .ok()
                         .flatten()
                         .filter(|s| !s.is_empty())
                         .and_then(|ss| {
                             let eff_w =
-                                resolve_sizes(dom.attribute(n, "sizes").ok().flatten(), img_w);
-                            pick_srcset(&ss, eff_w, dpr)
+                                resolve_sizes(dom.attribute_str(n, "sizes").ok().flatten(), img_w);
+                            pick_srcset(ss, eff_w, dpr)
                         })
                 };
                 let src = srcset_of("srcset")
                     .or_else(|| {
-                        dom.attribute(n, "src")
+                        dom.attribute_str(n, "src")
                             .ok()
                             .flatten()
                             .filter(|s| !s.is_empty())
+                            .map(str::to_owned)
                     })
                     // Lazy-load (vol 13 lemonde/bbc : ~200
                     // `<img>` à `data-src`, ~0 % peints) : le
@@ -986,17 +997,21 @@ pub(crate) fn collect_images(dom: &Dom, img_w: f32, dpr: f32) -> Vec<(NodeId, St
                         const LAZY_SRCS: &[&str] =
                             &["data-src", "data-lazy-src", "data-original", "data-url"];
                         LAZY_SRCS.iter().find_map(|a| {
-                            dom.attribute(n, a).ok().flatten().filter(|s| !s.is_empty())
+                            dom.attribute_str(n, a)
+                                .ok()
+                                .flatten()
+                                .filter(|s| !s.is_empty())
+                                .map(str::to_owned)
                         })
                     });
                 if let Some(src) = src {
-                    out.push((n, src));
+                    out.push((n, src.clone()));
                 }
             }
             Ok("video") => {
-                if let Ok(Some(src)) = dom.attribute(n, "poster") {
+                if let Ok(Some(src)) = dom.attribute_str(n, "poster") {
                     if !src.is_empty() {
-                        out.push((n, src));
+                        out.push((n, src.to_owned()));
                     }
                 }
             }
@@ -1062,22 +1077,22 @@ pub(crate) fn collect_iframes(
     let mut queue = vec![dom.document()];
     while let Some(n) = queue.pop() {
         if dom.tag_name(n).is_ok_and(|t| t == "iframe") {
-            let srcdoc = dom.attribute(n, "srcdoc").ok().flatten();
+            let srcdoc = dom.attribute_str(n, "srcdoc").ok().flatten();
             let src = dom
-                .attribute(n, "src")
+                .attribute_str(n, "src")
                 .ok()
                 .flatten()
                 .filter(|s| !s.is_empty());
             let kind = match (srcdoc, src) {
-                (Some(h), _) => Some(IframeKind::Srcdoc(h)),
-                (None, Some(s)) => Some(IframeKind::Src(s)),
+                (Some(h), _) => Some(IframeKind::Srcdoc(h.to_owned())),
+                (None, Some(s)) => Some(IframeKind::Src(s.to_owned())),
                 (None, None) => None,
             };
             if let Some(k) = kind {
                 out.push((
                     k,
                     element_referrer_policy(dom, n),
-                    parse_sandbox(dom.attribute(n, "sandbox").ok().flatten().as_deref()),
+                    parse_sandbox(dom.attribute_str(n, "sandbox").ok().flatten()),
                 ));
             }
         }
@@ -1170,7 +1185,7 @@ fn css_unescape(s: &str) -> String {
 #[allow(clippy::cast_precision_loss)] // pixels u32 → f32 : < 2^24.
 pub(crate) fn image_sizes(dom: &Dom, images: &ImageTable) -> HashMap<NodeId, (f32, f32)> {
     let px_attr = |n: NodeId, name: &str| {
-        dom.attribute(n, name)
+        dom.attribute_str(n, name)
             .ok()
             .flatten()
             .and_then(|v| v.trim().trim_end_matches("px").parse::<f32>().ok())
@@ -1208,7 +1223,7 @@ pub(crate) fn default_button(dom: &Dom, form: NodeId) -> Option<NodeId> {
         let tag = dom.tag_name(n).unwrap_or("");
         if n != form
             && dom.element(n).is_ok()
-            && dom.attribute(n, "disabled").ok().flatten().is_none()
+            && dom.attribute_str(n, "disabled").ok().flatten().is_none()
         {
             let is_submit = match tag {
                 "input" => matches!(attr_lower(dom, n, "type").as_str(), "submit" | "image"),
@@ -1291,8 +1306,7 @@ pub(crate) fn find_by_id(dom: &Dom, id: &str) -> Option<NodeId> {
 pub(crate) fn find_by_attr(dom: &Dom, attr: &str, value: &str) -> Option<NodeId> {
     let mut queue = vec![dom.document()];
     while let Some(n) = queue.pop() {
-        if dom.element(n).is_ok() && dom.attribute(n, attr).ok().flatten().as_deref() == Some(value)
-        {
+        if dom.element(n).is_ok() && dom.attribute_str(n, attr).ok().flatten() == Some(value) {
             return Some(n);
         }
         if let Ok(ch) = dom.children(n) {
@@ -1309,7 +1323,7 @@ pub(crate) fn find_named_anchor(dom: &Dom, name: &str) -> Option<NodeId> {
     let mut queue = vec![dom.document()];
     while let Some(n) = queue.pop() {
         if dom.tag_name(n).is_ok_and(|t| t == "a")
-            && dom.attribute(n, "name").ok().flatten().as_deref() == Some(name)
+            && dom.attribute_str(n, "name").ok().flatten() == Some(name)
         {
             return Some(n);
         }
@@ -1349,9 +1363,10 @@ pub(crate) fn attr_lower(dom: &Dom, n: NodeId, attr: &str) -> String {
     attr_opt(dom, n, attr).unwrap_or_default().to_lowercase()
 }
 
-/// Attribut ou `None`.
-pub(crate) fn attr_opt(dom: &Dom, n: NodeId, attr: &str) -> Option<String> {
-    dom.attribute(n, attr).ok().flatten()
+/// Attribut ou `None` (emprunté à l'arène — `to_owned`
+/// où une `String` est réellement requise).
+pub(crate) fn attr_opt<'a>(dom: &'a Dom, n: NodeId, attr: &str) -> Option<&'a str> {
+    dom.attribute_str(n, attr).ok().flatten()
 }
 
 /// Éléments descendants portant `tag`, ordre document.

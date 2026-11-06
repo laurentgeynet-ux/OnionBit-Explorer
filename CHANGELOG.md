@@ -7,6 +7,8 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **R-145 — `Dom::attribute_str` non-clonant + migration des 124 sites** (`explorer-dom` + css/html/layout/render/core, AR-9 chantier ARÈNE) : le getter `attribute()` allouait une `String` par lookup — ≈ 27× le coût d'une lecture slice (banc AR-6). Nouvel additif `attribute_str(id, name) -> Result<Option<&str>>` emprunté à l'arène ; `attribute()` délègue désormais dessus. **124 sites `src` migrés** : `find_by_attr` n'alloue plus par nœud visité, `attr_opt`/`hint_attr`/`resolve_sizes` passés en `&str`, `to_owned` ciblé aux seules sorties exigeant `String` (FormEntry, IframeKind, URLs collectées, conflit d'emprunt `remove_attribute`). Extraction `push_external_script` (borne 100 lignes). 454/454 tests session + suites PIPE vertes.
+
 - **R-144 — banc `explorer-dom` (AR-6 chantier ARÈNE)** : `benches/arena.rs` sous criterion 0.5 (même harness que `relayout`) — `build` 1 k/10 k, `children` (Vec alloué/appel), `attribute` vs `attributes` (slice), `set_attribute`, `collect` sur arène fragmentée 10 k + chaîne profonde 10 k. Baselines quick-run : `attribute` ≈ **27×** `attributes` (68 ns vs 2,5 ns/lookup — cible AR-10 chiffrée), `children` 4,2 µs/appel (cible AR-9), `collect` 3,4 ms/10 k balayés, marquage profond linéaire. Commande : `cargo bench -p explorer-dom`.
 
 - **AR-8 — estimateur mémoire du test `tab_mem_inventory` corrigé** (`explorer-core`) : l'estimation « `live_count` × ~120 o » + marche manuelle `dom_deep_bytes` est remplacée par `Dom::heap_bytes()` (R-143 — `Slot` mesuré à 144 o, textes/attributs inclus) ; le helper récursif est supprimé.

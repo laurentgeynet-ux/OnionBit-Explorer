@@ -2043,7 +2043,7 @@ fn focus_reattaches_by_identity() {
     let e = s.tabs.get(&tab).unwrap();
     let dom = e.dom.as_ref().unwrap();
     assert_eq!(
-        dom.attribute(n, "name").unwrap().as_deref(),
+        dom.attribute_str(n, "name").unwrap(),
         Some("q"),
         "le chemin ne doit pas résoudre sur le voisin"
     );
@@ -2057,7 +2057,7 @@ fn focus_reattaches_by_identity() {
     let n = s.focused_node(tab).expect("focus ré-ancré sur chemin mort");
     let e = s.tabs.get(&tab).unwrap();
     let dom = e.dom.as_ref().unwrap();
-    assert_eq!(dom.attribute(n, "name").unwrap().as_deref(), Some("q"));
+    assert_eq!(dom.attribute_str(n, "name").unwrap(), Some("q"));
     assert_eq!(dom_path_node(dom, e.focused.as_ref().unwrap()), Some(n));
 
     // (c) Élément réellement supprimé → `None` honnête,
@@ -2141,8 +2141,13 @@ fn deferred_inputs_fifo_and_coalesce() {
     s.drain_deferred_inputs(tab);
     let e = s.tabs.get(&tab).unwrap();
     assert!(e.deferred_inputs.is_empty());
-    let v = e.dom.as_ref().unwrap().attribute(input, "value").unwrap();
-    assert_eq!(v.as_deref(), Some("abc"));
+    let v = e
+        .dom
+        .as_ref()
+        .unwrap()
+        .attribute_str(input, "value")
+        .unwrap();
+    assert_eq!(v, Some("abc"));
 }
 
 /// Issue #23 — mort permanente des sondes : un futur de

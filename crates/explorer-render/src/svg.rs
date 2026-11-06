@@ -134,17 +134,17 @@ pub fn svg_sizes(dom: &Dom, root: NodeId) -> std::collections::HashMap<NodeId, (
 /// Taille intrinsèque d'un `<svg>` : attrs > viewBox > 300×150.
 fn svg_intrinsic(dom: &Dom, n: NodeId) -> (f32, f32) {
     let attr_px = |name: &str| {
-        dom.attribute(n, name)
+        dom.attribute_str(n, name)
             .ok()
             .flatten()
-            .and_then(|v| parse_svg_length(&v))
+            .and_then(parse_svg_length)
     };
     let (w, h) = (attr_px("width"), attr_px("height"));
     let vb = dom
-        .attribute(n, "viewBox")
+        .attribute_str(n, "viewBox")
         .ok()
         .flatten()
-        .and_then(|v| parse_viewbox(&v));
+        .and_then(parse_viewbox);
     match (w, h, vb) {
         (Some(w), Some(h), _) => (w, h),
         (Some(w), None, Some((_, _, vw, vh))) if vw > 0.0 => (w, w * vh / vw),

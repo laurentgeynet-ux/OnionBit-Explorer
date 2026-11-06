@@ -569,12 +569,25 @@ impl Dom {
     /// # Errors
     /// Comme [`Dom::element`].
     pub fn attribute(&self, id: NodeId, name: &str) -> Result<Option<String>> {
+        Ok(self.attribute_str(id, name)?.map(str::to_owned))
+    }
+
+    /// Valeur d'attribut par nom exact, **sans allocation** —
+    /// préférer à [`Dom::attribute`] dans les chemins chauds :
+    /// le banc `arena` (AR-6) mesure le getter clonant ≈ 27×
+    /// plus cher (String allouée par lookup, ×124 sites en
+    /// `src`). La référence emprunte l'arène — elle expire à
+    /// la prochaine mutation du `Dom`, comme [`Dom::attributes`].
+    ///
+    /// # Errors
+    /// Comme [`Dom::element`].
+    pub fn attribute_str(&self, id: NodeId, name: &str) -> Result<Option<&str>> {
         Ok(self
             .element(id)?
             .attributes
             .iter()
             .find(|a| a.name == name)
-            .map(|a| a.value.clone()))
+            .map(|a| a.value.as_str()))
     }
 
     /// Attributs ordonnés d'un élément.
@@ -764,7 +777,7 @@ impl Dom {
             return Vec::new();
         };
         let name = self
-            .attribute(slot, "name")
+            .attribute_str(slot, "name")
             .ok()
             .flatten()
             .unwrap_or_default();
@@ -786,7 +799,11 @@ impl Dom {
                     if consumed {
                         continue;
                     }
-                    let want = self.attribute(c, "slot").ok().flatten().unwrap_or_default();
+                    let want = self
+                        .attribute_str(c, "slot")
+                        .ok()
+                        .flatten()
+                        .unwrap_or_default();
                     if want == name {
                         out.push(c);
                     }
@@ -823,12 +840,12 @@ impl Dom {
         let host = self.parent(el).ok().flatten()?;
         let root = self.shadow_root(host, true)?;
         let want = self
-            .attribute(el, "slot")
+            .attribute_str(el, "slot")
             .ok()
             .flatten()
             .unwrap_or_default();
         self.slots_in(root).into_iter().find(|s| {
-            self.attribute(*s, "name")
+            self.attribute_str(*s, "name")
                 .ok()
                 .flatten()
                 .unwrap_or_default()

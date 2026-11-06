@@ -1185,7 +1185,13 @@ impl TreeBuilder {
             let selected = options
                 .iter()
                 .rev()
-                .find(|&&id| self.dom.attribute(id, "selected").ok().flatten().is_some())
+                .find(|&&id| {
+                    self.dom
+                        .attribute_str(id, "selected")
+                        .ok()
+                        .flatten()
+                        .is_some()
+                })
                 .copied()
                 .or_else(|| options.first().copied());
             let Some(selected) = selected else {
@@ -1843,7 +1849,13 @@ impl TreeBuilder {
                 if self.recent_template().is_none() {
                     if let Some(&html) = self.stack.first() {
                         for a in attributes {
-                            if self.dom.attribute(html, &a.name).ok().flatten().is_none() {
+                            if self
+                                .dom
+                                .attribute_str(html, &a.name)
+                                .ok()
+                                .flatten()
+                                .is_none()
+                            {
                                 let _ = self.dom.set_attribute(html, &a.name, &a.value);
                             }
                         }
@@ -1855,7 +1867,13 @@ impl TreeBuilder {
                     if let Some(&body) = self.stack.get(1) {
                         if self.dom.tag_name(body).ok() == Some("body") {
                             for a in attributes {
-                                if self.dom.attribute(body, &a.name).ok().flatten().is_none() {
+                                if self
+                                    .dom
+                                    .attribute_str(body, &a.name)
+                                    .ok()
+                                    .flatten()
+                                    .is_none()
+                                {
                                     let _ = self.dom.set_attribute(body, &a.name, &a.value);
                                 }
                             }
@@ -2479,7 +2497,7 @@ impl TreeBuilder {
     fn attach_dsd_shadow(&mut self, template: NodeId) {
         let Some(mode) = self
             .dom
-            .attribute(template, "shadowrootmode")
+            .attribute_str(template, "shadowrootmode")
             .ok()
             .flatten()
         else {

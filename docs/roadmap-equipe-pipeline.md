@@ -2788,6 +2788,22 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   AR-9), `collect` fragmenté 3,4 ms/10 k balayés,
   marquage profond linéaire 0,5 ms/10 k. Commande :
   `cargo bench -p explorer-dom`.
+- [x] **R-145. `Dom::attribute_str` + migration des
+  124 sites** (AR-9, chantier ARÈNE) : getter additif
+  `Result<Option<&str>>` sans allocation — le banc
+  AR-6 mesurait `attribute` ≈ 27× le coût slice
+  (String clonée par lookup). `attribute` délègue
+  désormais (`to_owned` au seul site qui en a
+  besoin). Migration complète des 124 sites `src` :
+  css 17, html 4, layout 9, render 3, core ~91 —
+  `attr_opt`/`hint_attr`/`resolve_sizes` basculés en
+  `&str` ; `to_owned` ciblé là où une `String` est
+  réellement requise (sorties `FormEntry`,
+  `IframeKind`, bitmaps URL, `Vec<String>` — et un
+  cas E0502 : `name` possédé pour `remove_attribute`
+  sous emprunt). Extraction `push_external_script`
+  (borne 100 lignes clippy). 454/454 tests session
+  + suites PIPE vertes.
 
 ## Palier R-B — Contenu étranger, animation, canvas
 

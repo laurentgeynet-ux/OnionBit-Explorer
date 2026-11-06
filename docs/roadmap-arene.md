@@ -130,11 +130,11 @@ arbres vivants (AR-1 sans seeds) ou des nœuds encore référencés
 
 ## Palier AR-P2 — Perf / mémoire (sur baseline AR-6)
 
-- [ ] **AR-9. `attribute_str` non-clonant** — PIPE additif +
-  migration. Getter `Option<&str>` à côté de l'existant ;
-  migration prioritaire `find_by_attr` (`dom_helpers.rs:1291` —
-  aujourd'hui O(arbre) **avec une alloc par nœud**), puis les
-  ~124 sites `.attribute(` en `src` (poids : core 108).
+- [x] **AR-9. `attribute_str` non-clonant** — PIPE additif +
+  migration. **Livré R-145** : les 124 sites `src` migrés ;
+  `find_by_attr` ne fait plus d'alloc par nœud ; `to_owned`
+  uniquement aux sorties qui exigent `String` (FormEntry,
+  IframeKind, URLs collectées).
 - [ ] **AR-10. Itérateurs de traversée** — PIPE additif.
   `children_iter` (curseur prévalidé — une validation, plus un
   bound+gen-check par sibling), `descendants` préordre,

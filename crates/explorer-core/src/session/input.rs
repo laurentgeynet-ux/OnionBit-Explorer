@@ -355,13 +355,13 @@ impl Session {
                         // cross-origin = attribut ignoré
                         // (navigation normale, spec HTML
                         // « downloading resources »).
-                        match dom.and_then(|d| d.attribute(anchor, "download").ok().flatten()) {
+                        match dom.and_then(|d| d.attribute_str(anchor, "download").ok().flatten()) {
                             Some(v)
                                 if entry
                                     .and_then(|e| e.url.as_ref())
                                     .is_some_and(|p| p.origin() == u.origin()) =>
                             {
-                                Some(v)
+                                Some(v.to_owned())
                             }
                             _ => None,
                         },
@@ -476,11 +476,14 @@ impl Session {
         let options = descendant_elements(dom, sel, "option")
             .into_iter()
             .map(|o| {
-                let label =
-                    dom.attribute(o, "label").ok().flatten().unwrap_or_else(|| {
-                        dom.text_content(o).unwrap_or_default().trim().to_string()
-                    });
-                (label, dom.attribute(o, "selected").ok().flatten().is_some())
+                let label = dom.attribute_str(o, "label").ok().flatten().map_or_else(
+                    || dom.text_content(o).unwrap_or_default().trim().to_string(),
+                    str::to_owned,
+                );
+                (
+                    label,
+                    dom.attribute_str(o, "selected").ok().flatten().is_some(),
+                )
             })
             .collect();
         let entry = self.tabs.get_mut(&tab).ok_or(CoreError::UnknownTab(tab))?;
@@ -641,9 +644,13 @@ impl Session {
         let (form_path, sub_path, novalidate) = {
             let dom = self.tabs.get(&tab).and_then(|e| e.dom.as_ref());
             let nv = dom.is_some_and(|d| {
-                d.attribute(form, "novalidate").ok().flatten().is_some()
-                    || submitter
-                        .is_some_and(|s| d.attribute(s, "formnovalidate").ok().flatten().is_some())
+                d.attribute_str(form, "novalidate").ok().flatten().is_some()
+                    || submitter.is_some_and(|s| {
+                        d.attribute_str(s, "formnovalidate")
+                            .ok()
+                            .flatten()
+                            .is_some()
+                    })
             });
             (
                 dom.and_then(|d| element_path(d, form)),
@@ -719,12 +726,12 @@ impl Session {
                 }
             }
             let mut action = dom
-                .attribute(form, "action")
+                .attribute_str(form, "action")
                 .ok()
                 .flatten()
                 .unwrap_or_default();
             let mut method = dom
-                .attribute(form, "method")
+                .attribute_str(form, "method")
                 .ok()
                 .flatten()
                 .unwrap_or_default();
@@ -735,16 +742,16 @@ impl Session {
             // multi-actions, CAP-150).
             let mut target_override = None;
             if let Some(s) = submitter {
-                if let Ok(Some(v)) = dom.attribute(s, "formaction") {
+                if let Ok(Some(v)) = dom.attribute_str(s, "formaction") {
                     action = v;
                 }
-                if let Ok(Some(v)) = dom.attribute(s, "formmethod") {
+                if let Ok(Some(v)) = dom.attribute_str(s, "formmethod") {
                     method = v;
                 }
-                if let Ok(Some(v)) = dom.attribute(s, "formenctype") {
+                if let Ok(Some(v)) = dom.attribute_str(s, "formenctype") {
                     enctype = v.to_ascii_lowercase();
                 }
-                target_override = dom.attribute(s, "formtarget").ok().flatten();
+                target_override = dom.attribute_str(s, "formtarget").ok().flatten();
             }
             // `formmethod="dialog"` : le bouton ferme un
             // `<dialog>` sans soumettre — hors périmètre (pas
@@ -752,7 +759,7 @@ impl Session {
             if method.eq_ignore_ascii_case("dialog") {
                 return Ok(());
             }
-            let req = form_request(page, base, &action, &method, &enctype, &pairs)
+            let req = form_request(page, base, action, method, &enctype, &pairs)
                 .ok_or_else(|| CoreError::Url("action de formulaire irrésolvable".to_string()))?;
             // `form-action` (CAP-145) : la cible résolue est
             // refusée par une politique → soumission morte
@@ -766,9 +773,10 @@ impl Session {
                 // `formtarget` du submitter > `target` du
                 // `<form>` > `<base target>` (HTML §4.10.21,
                 // CAP-159 : le nom voyage jusqu'au drain).
-                target_override.unwrap_or_else(|| {
-                    resolved_target_name(dom, form, entry.base_target.as_deref())
-                }),
+                target_override.map_or_else(
+                    || resolved_target_name(dom, form, entry.base_target.as_deref()),
+                    str::to_owned,
+                ),
                 rel_no_referrer(dom, form),
                 element_referrer_policy(dom, form),
             )
@@ -846,7 +854,7 @@ impl Session {
         if let Some(n) = dom_path_node(dom, &path) {
             let ok = key
                 .as_ref()
-                .is_none_or(|(a, v)| dom.attribute(n, a).ok().flatten().as_deref() == Some(v));
+                .is_none_or(|(a, v)| dom.attribute_str(n, a).ok().flatten() == Some(v));
             if ok {
                 return Some(n);
             }
@@ -951,15 +959,15 @@ impl Session {
         });
         let new_key = field.and_then(|f| {
             entry.and_then(|e| e.dom.as_ref()).and_then(|d| {
-                d.attribute(f, "id")
+                d.attribute_str(f, "id")
                     .ok()
                     .flatten()
-                    .map(|v| ("id".to_string(), v))
+                    .map(|v| ("id".to_string(), v.to_owned()))
                     .or_else(|| {
-                        d.attribute(f, "name")
+                        d.attribute_str(f, "name")
                             .ok()
                             .flatten()
-                            .map(|v| ("name".to_string(), v))
+                            .map(|v| ("name".to_string(), v.to_owned()))
                     })
             })
         });
@@ -987,7 +995,7 @@ impl Session {
             let entry = self.tabs.get_mut(&tab).ok_or(CoreError::UnknownTab(tab))?;
             let dom = entry.dom.as_mut().ok_or(CoreError::EmptyDocument)?;
             toggle_checked(dom, ctrl)?;
-            dom.attribute(ctrl, "checked").ok().flatten().is_some()
+            dom.attribute_str(ctrl, "checked").ok().flatten().is_some()
         };
         self.sync_mirror_attr(tab, ctrl, "checked", checked.then_some(""));
         Ok(())
@@ -1047,13 +1055,13 @@ impl Session {
             if let Some(node) = hit_test(tree, x, y, entry.scroll_y, self.viewport) {
                 if let Some(base) = entry.nav_base() {
                     if let Some(a) = ancestor_link(dom, node) {
-                        if let Ok(Some(href)) = dom.attribute(a, "href") {
-                            out.link = Url::resolve(base, &href).ok().map(|u| u.to_string());
+                        if let Ok(Some(href)) = dom.attribute_str(a, "href") {
+                            out.link = Url::resolve(base, href).ok().map(|u| u.to_string());
                         }
                     }
                     if let Some(img) = ancestor_img(dom, node) {
-                        if let Ok(Some(src)) = dom.attribute(img, "src") {
-                            out.image = Url::resolve(base, &src).ok().map(|u| u.to_string());
+                        if let Ok(Some(src)) = dom.attribute_str(img, "src") {
+                            out.image = Url::resolve(base, src).ok().map(|u| u.to_string());
                         }
                     }
                 }
@@ -1082,11 +1090,11 @@ impl Session {
         let dom = entry.dom.as_ref()?;
         let node = hit_test(tree, x, y, entry.scroll_y, self.viewport)?;
         let a = ancestor_link(dom, node)?;
-        let href = dom.attribute(a, "href").ok().flatten()?;
+        let href = dom.attribute_str(a, "href").ok().flatten()?;
         // `href` résout contre la base document (`<base
         // href>` ou l'URL de la page, étape 135).
         let base = entry.nav_base()?;
-        Some((a, Url::resolve(base, &href).ok()?.to_string()))
+        Some((a, Url::resolve(base, href).ok()?.to_string()))
     }
 
     /// Scroll borné `[0, doc_h - viewport_h]` puis repaint +

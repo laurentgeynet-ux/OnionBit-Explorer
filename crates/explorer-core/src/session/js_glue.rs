@@ -1733,8 +1733,8 @@ fn frame_context_plan(entry: &Tab) -> Vec<FramePlan> {
         // association par **contenu** comme le composite
         // (tous les `about:srcdoc` partagent leur URL) ;
         // `src` = par URL.
-        let srcdoc = dom.attribute(node, "srcdoc").ok().flatten();
-        let sub = if let Some(sd) = srcdoc.as_deref() {
+        let srcdoc = dom.attribute_str(node, "srcdoc").ok().flatten();
+        let sub = if let Some(sd) = srcdoc {
             if let Some(sub) = entry
                 .frames
                 .iter()
@@ -1749,8 +1749,8 @@ fn frame_context_plan(entry: &Tab) -> Vec<FramePlan> {
                 continue;
             }
         } else {
-            let src = dom.attribute(node, "src").ok().flatten();
-            let url = src.and_then(|s| Url::resolve(base, &s).ok());
+            let src = dom.attribute_str(node, "src").ok().flatten();
+            let url = src.and_then(|s| Url::resolve(base, s).ok());
             if let Some(sub) = url.and_then(|u| {
                 entry
                     .frames
@@ -1805,7 +1805,7 @@ fn frame_context_plan(entry: &Tab) -> Vec<FramePlan> {
 /// l'élément est respecté pour `opaque` (scripts déjà vides
 /// — un cadre blanc n'a pas de source à évaluer).
 fn blank_frame_plan(dom: &Dom, node: NodeId, ord: usize, base: &Url) -> FramePlan {
-    let sb = parse_sandbox(dom.attribute(node, "sandbox").ok().flatten().as_deref());
+    let sb = parse_sandbox(dom.attribute_str(node, "sandbox").ok().flatten());
     FramePlan {
         ord: u32::try_from(ord).unwrap_or(u32::MAX),
         node,

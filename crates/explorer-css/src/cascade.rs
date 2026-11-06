@@ -1343,10 +1343,10 @@ impl StyleEngine {
         // `style=` parsé avant `cand` : ses déclarations y
         // sont empruntées — il doit survivre à la boucle.
         let inline_decls = if pseudo.is_none() {
-            dom.attribute(node, "style")
+            dom.attribute_str(node, "style")
                 .ok()
                 .flatten()
-                .map(|s| crate::parser::parse_declarations(&s))
+                .map(crate::parser::parse_declarations)
                 .unwrap_or_default()
         } else {
             Vec::new()
@@ -2069,12 +2069,12 @@ fn hint(props: &mut HashMap<String, String>, prop: &str, val: Option<String>) {
 }
 
 /// Valeur d'attribut HTML sur le nœud.
-fn hint_attr(dom: &Dom, node: NodeId, name: &str) -> Option<String> {
-    dom.attribute(node, name).ok().flatten()
+fn hint_attr<'a>(dom: &'a Dom, node: NodeId, name: &str) -> Option<&'a str> {
+    dom.attribute_str(node, name).ok().flatten()
 }
 
 /// `N` → "Npx", `N%` → "N%" ; autres syntaxes → None.
-fn dim(a: Option<String>) -> Option<String> {
+fn dim(a: Option<&str>) -> Option<String> {
     let v = a?;
     let v = v.trim();
     if v.is_empty() {
@@ -2098,7 +2098,7 @@ fn dim(a: Option<String>) -> Option<String> {
 /// `N` → "Nch" — attributs `cols`/`size` des champs de
 /// saisie : largeur en caractères (HTML Rendering). Entier
 /// ≥ 1 requis ; borne 1000 défensive comme `span`.
-fn chars(a: Option<String>) -> Option<String> {
+fn chars(a: Option<&str>) -> Option<String> {
     a?.trim()
         .parse::<u32>()
         .ok()
@@ -2109,7 +2109,7 @@ fn chars(a: Option<String>) -> Option<String> {
 /// `N` lignes → "N×1.2em" — `rows` de `textarea` : hauteur
 /// = N × hauteur de ligne normale (approx 1.2em — le hint
 /// reste rang UA, la CSS auteur prime).
-fn lines(a: Option<String>) -> Option<String> {
+fn lines(a: Option<&str>) -> Option<String> {
     a?.trim()
         .parse::<u32>()
         .ok()
@@ -2121,7 +2121,7 @@ fn lines(a: Option<String>) -> Option<String> {
 /// valeurs invalides → None (= 1 par défaut). Le plafond
 /// 1000 (borne HTML table model) reste défensif — le vrai
 /// clamp visuel s'applique dans `explorer-layout`.
-fn span(a: Option<String>) -> Option<String> {
+fn span(a: Option<&str>) -> Option<String> {
     a?.trim()
         .parse::<u32>()
         .ok()
@@ -2131,7 +2131,7 @@ fn span(a: Option<String>) -> Option<String> {
 
 /// `align` → text-align (spec : presentational hint) ;
 /// `middle` sur `div` vaut `center` (HTML Rendering).
-fn hint_align(a: Option<String>) -> Option<String> {
+fn hint_align(a: Option<&str>) -> Option<String> {
     match a?.trim().to_ascii_lowercase().as_str() {
         v @ ("left" | "right" | "center" | "justify") => Some(v.to_string()),
         "middle" => Some("center".to_string()),
@@ -2145,11 +2145,11 @@ fn hint_align(a: Option<String>) -> Option<String> {
 /// La **première** table ancêtre est la bonne (`<table>`
 /// imbriquée : une cellule relève de SA table, trouvée en
 /// remontant — `tr`/`tbody` intermédiaires ne comptent pas).
-fn ancestor_table_attr(dom: &Dom, node: NodeId, name: &str) -> Option<String> {
+fn ancestor_table_attr<'a>(dom: &'a Dom, node: NodeId, name: &str) -> Option<&'a str> {
     let mut n = dom.parent(node).ok()?;
     while let Some(id) = n {
         if dom.tag_name(id).is_ok_and(|t| t == "table") {
-            return dom.attribute(id, name).ok().flatten();
+            return dom.attribute_str(id, name).ok().flatten();
         }
         n = dom.parent(id).ok()?;
     }
