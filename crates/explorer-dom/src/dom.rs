@@ -4,6 +4,7 @@
 
 //! Arène DOM — allocation générationnelle, arbre, rooting ADR-0008.
 
+use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 
 use crate::error::{DomError, Result};
@@ -30,6 +31,67 @@ pub const DEFAULT_MAX_ROOTS: usize = 65_536;
 enum Slot {
     Vacant { generation: u32, next_free: u32 },
     Occupied { generation: u32, node: Node },
+}
+
+/// Candidats `by_id` d'une même valeur d'attribut `id` (AR-11).
+/// `One` inline couvre le cas dominant du web (identifiants
+/// uniques — pas d'allocation par entrée, purge `collect`
+/// séquentielle, AR-12) ; `Many` déborde sur les doublons.
+/// Invariant : jamais vide — l'entrée est supprimée dès que
+/// son dernier candidat part.
+#[derive(Debug)]
+enum IdSet {
+    One(NodeId),
+    Many(Vec<NodeId>),
+}
+
+impl IdSet {
+    fn push(&mut self, id: NodeId) {
+        match self {
+            IdSet::One(existing) => {
+                if *existing != id {
+                    *self = IdSet::Many(vec![*existing, id]);
+                }
+            }
+            IdSet::Many(ids) => {
+                if !ids.contains(&id) {
+                    ids.push(id);
+                }
+            }
+        }
+    }
+
+    /// Retire `id` ; retourne `true` si l'ensemble est vidé
+    /// (l'entrée doit être supprimée de la table).
+    fn remove(&mut self, id: NodeId) -> bool {
+        match self {
+            IdSet::One(existing) => *existing == id,
+            IdSet::Many(ids) => {
+                ids.retain(|&n| n != id);
+                ids.is_empty()
+            }
+        }
+    }
+
+    /// Ne garde que les handles vivants ; retourne `true` si
+    /// l'ensemble est vidé.
+    fn retain_dead(&mut self, alive: impl Fn(NodeId) -> bool) -> bool {
+        match self {
+            IdSet::One(existing) => !alive(*existing),
+            IdSet::Many(ids) => {
+                ids.retain(|&n| alive(n));
+                ids.is_empty()
+            }
+        }
+    }
+
+    /// Vue tranche — `One` se prête `from_ref`, zéro copie.
+    fn as_slice(&self) -> &[NodeId] {
+        match self {
+            IdSet::One(id) => std::slice::from_ref(id),
+            IdSet::Many(ids) => ids,
+        }
+    }
 }
 
 /// Mode de compatibilité du document, tranché par le DOCTYPE
@@ -92,7 +154,26 @@ pub struct Dom {
     /// deux passes, [`Dom::by_id`] filtre lui-même les handles
     /// obsolètes et les nœuds hors de l'arbre document
     /// (détachés, shadow, `<template>`).
-    id_index: HashMap<String, Vec<NodeId>>,
+    id_index: HashMap<String, IdSet>,
+    /// Scratch `collect` conservé entre passes (AR-12) :
+    /// bitmap de marquage 1 bit/case (vs `vec![bool]` =
+    /// 1 o/case) et pile DFS — ~1,3 Kio pour 10 k nœuds,
+    /// alloué à la première passe puis réutilisé. `take`n
+    /// pendant le marquage pour contourner l'emprunt de `self`.
+    mark_bits: Vec<u64>,
+    mark_stack: Vec<NodeId>,
+    /// Plancher de génération des cases tronquées (AR-12) :
+    /// `collect` rend la queue de `slots` au système — les
+    /// générations abandonnées sont conservées ici pour que
+    /// toute case repoussée reparte strictement au-dessus
+    /// (ADR-0008 : un handle émis avant la truncation ne doit
+    /// jamais résoudre un nœud neuf).
+    tail_generation: u32,
+    /// High-water de `slots.len()` (AR-12) : distingue un
+    /// handle vers un indice **tronqué** (`< peak_len` →
+    /// `StaleHandle`, il a existé) d'un indice forgé
+    /// (`≥ peak_len` → `OutOfBounds`, jamais alloué).
+    peak_len: usize,
 }
 
 impl Dom {
@@ -126,6 +207,10 @@ impl Dom {
             shadow_hosts: HashMap::new(),
             defined_names: std::collections::HashSet::new(),
             id_index: HashMap::new(),
+            mark_bits: Vec::new(),
+            mark_stack: Vec::new(),
+            tail_generation: 0,
+            peak_len: 0,
         };
         // Index 0 sur arène vide : ne peut pas échouer.
         let _ = dom.alloc(NodeData::Document);
@@ -189,12 +274,20 @@ impl Dom {
             .iter()
             .map(String::capacity)
             .sum::<usize>();
-        bytes += self.id_index.capacity() * size_of::<(String, Vec<NodeId>)>()
+        bytes += self.id_index.capacity() * size_of::<(String, IdSet)>()
             + self
                 .id_index
                 .iter()
-                .map(|(k, v)| k.capacity() + v.capacity() * size_of::<NodeId>())
-                .sum::<usize>();
+                .map(|(k, v)| {
+                    k.capacity()
+                        + match v {
+                            IdSet::Many(ids) => ids.capacity() * size_of::<NodeId>(),
+                            IdSet::One(_) => 0,
+                        }
+                })
+                .sum::<usize>()
+            + self.mark_bits.capacity() * size_of::<u64>()
+            + self.mark_stack.capacity() * size_of::<NodeId>();
         for slot in &self.slots {
             let Slot::Occupied { node, .. } = slot else {
                 continue;
@@ -553,7 +646,7 @@ impl Dom {
     /// shadow trees ni dans `<template>`).
     #[must_use]
     pub fn by_id(&self, id: &str) -> Option<NodeId> {
-        let candidates = self.id_index.get(id)?;
+        let candidates = self.id_index.get(id)?.as_slice();
         let doc = self.document();
         let mut best: Option<NodeId> = None;
         for &n in candidates {
@@ -1162,18 +1255,31 @@ impl Dom {
     ///
     /// Retourne le nombre de nœuds réclamés.
     pub fn collect(&mut self, seeds: &[NodeId]) -> usize {
-        // Marquage : BFS depuis le document + racines + seeds.
-        let mut marked = vec![false; self.slots.len()];
-        let mut stack = Vec::with_capacity(1 + self.roots.len() + seeds.len());
+        // Marquage : DFS depuis le document + racines + seeds —
+        // bitmap 1 bit/case (AR-12 ; `vec![bool]` coûtait
+        // 1 o/case) sur scratch conservé entre passes.
+        // `is_alive` AVANT le bit : un seed obsolète ne doit pas
+        // marquer une case réattribuée à un autre nœud.
+        let words = self.slots.len().div_ceil(64);
+        let mut bits = std::mem::take(&mut self.mark_bits);
+        bits.clear();
+        bits.resize(words, 0u64);
+        let mut stack = std::mem::take(&mut self.mark_stack);
+        stack.clear();
+        stack.reserve(1 + self.roots.len() + seeds.len());
         stack.push(self.document());
         stack.extend(self.roots.values().copied());
         stack.extend_from_slice(seeds);
         while let Some(id) = stack.pop() {
             let idx = slot_idx(id.index());
-            if idx >= self.slots.len() || !self.is_alive(id) || marked[idx] {
+            if idx >= self.slots.len() || !self.is_alive(id) {
                 continue;
             }
-            marked[idx] = true;
+            let bit = 1u64 << (idx & 63);
+            if bits[idx >> 6] & bit != 0 {
+                continue;
+            }
+            bits[idx >> 6] |= bit;
             if let Ok(node) = self.node(id) {
                 let mut cursor = node.first_child;
                 while let Some(child) = cursor {
@@ -1194,22 +1300,108 @@ impl Dom {
                 stack.push(root);
             }
         }
-        // Balayage : tout l'occupé non marqué est réclamé.
+        let freed = self.sweep_dead(&bits);
+        // Scratch conservé pour la passe suivante.
+        self.mark_bits = bits;
+        self.mark_stack = stack;
+        freed
+    }
+
+    /// Balayage `collect` : réclame tout occupé non marqué dans
+    /// `bits`, re-chaîne la free-list au passage, tronque la
+    /// queue de cases mortes puis purge les tables latérales
+    /// et l'index `id`. Retourne le nombre de nœuds réclamés.
+    fn sweep_dead(&mut self, bits: &[u64]) -> usize {
+        // `new_len` = dernière case marquée + 1 — au-delà, tout
+        // est mort et part au truncate : le balayage s'y borne
+        // (le document, index 0, est toujours marqué → ≥ 1).
+        let new_len = bits.iter().rposition(|&w| w != 0).map_or(1, |w| {
+            w * 64 + usize::try_from(64 - bits[w].leading_zeros()).unwrap_or(64)
+        });
+        // Balayage : tout l'occupé non marqué sous `new_len` est
+        // réclamé — les mots pleins sautent d'un coup (arbre
+        // vivant = majorité marquée). La free-list est re-chaînée
+        // **dans le même passage** : `next_free` émis à mesure en
+        // ordre croissant → les allocs futures se tassent en tête
+        // du Vec et la queue reste tronçable. Aucun second
+        // parcours des cases n'est nécessaire (AR-12).
         let mut freed = 0;
-        for (index, is_marked) in marked.iter().enumerate() {
-            if *is_marked {
+        let mut new_free_head = NIL;
+        let mut prev_vacant: Option<usize> = None;
+        for (w, &word) in bits.iter().enumerate().take(new_len.div_ceil(64)) {
+            if word == u64::MAX {
                 continue;
             }
-            if let Slot::Occupied { generation, .. } = self.slots[index] {
-                let id = NodeId::new(index_as_u32(index), generation);
-                if self.free(id).is_ok() {
-                    freed += 1;
+            let base = w * 64;
+            for lane in 0..64 {
+                if word >> lane & 1 != 0 {
+                    continue;
                 }
+                let index = base + lane;
+                if index >= new_len {
+                    break;
+                }
+                let generation = match &self.slots[index] {
+                    Slot::Occupied { generation, .. } => {
+                        self.live -= 1;
+                        freed += 1;
+                        *generation + 1
+                    }
+                    Slot::Vacant { generation, .. } => *generation,
+                };
+                self.slots[index] = Slot::Vacant {
+                    generation,
+                    next_free: NIL,
+                };
+                if new_free_head == NIL {
+                    new_free_head = index_as_u32(index);
+                }
+                if let Some(p) = prev_vacant {
+                    if let Slot::Vacant { next_free, .. } = &mut self.slots[p] {
+                        *next_free = index_as_u32(index);
+                    }
+                }
+                prev_vacant = Some(index);
+            }
+        }
+        self.free_head = new_free_head;
+        // Queue tronçable (AR-12 — le vrai gain RAM : `slots` ne
+        // rétrécissait jamais, watermark permanent post-churn ;
+        // `heap_bytes` le mesure). Cases ≥ `new_len` : plancher
+        // de génération conservé (toute case repoussée à ces
+        // indices repart au-dessus — sinon un handle émis avant
+        // la truncation résoudrait un nœud neuf, ADR-0008) ;
+        // `live`/`freed` soldés pour les occupés qui meurent
+        // sans passer par le chaînage.
+        if new_len < self.slots.len() {
+            let mut floor = self.tail_generation;
+            for slot in &self.slots[new_len..] {
+                match slot {
+                    Slot::Occupied { generation, .. } => {
+                        floor = floor.max(*generation);
+                        self.live -= 1;
+                        freed += 1;
+                    }
+                    Slot::Vacant { generation, .. } => {
+                        floor = floor.max(*generation);
+                    }
+                }
+            }
+            self.tail_generation = floor;
+            self.slots.truncate(new_len);
+            // Rendre la RAM : `truncate` ne touche pas la
+            // capacité — `shrink` amorti (seuil 2×, plancher
+            // pour les petites arènes) contre le thrash ré-alloc.
+            if self.slots.capacity() > 2 * new_len.max(256) {
+                self.slots.shrink_to_fit();
             }
         }
         // Purge des tables latérales : une entrée dont l'hôte ou
         // la racine vient d'être balayée désignerait une case
         // réattribuable — génération vérifiée, pas la présence.
+        // (Après le truncate : les cases parties rendent
+        // `alive → false` par absence, pas seulement par
+        // génération.)
         let slots = &self.slots;
         self.shadow_roots
             .retain(|&host, &mut (root, _)| alive(slots, host) && alive(slots, root));
@@ -1219,10 +1411,8 @@ impl Dom {
         // ne doit plus être candidat `by_id` (entre deux passes,
         // `by_id` filtre déjà par `is_alive`, la purge borne la
         // mémoire et le coût du filtre).
-        self.id_index.values_mut().for_each(|v| {
-            v.retain(|&n| alive(slots, n));
-        });
-        self.id_index.retain(|_, v| !v.is_empty());
+        self.id_index
+            .retain(|_, set| !set.retain_dead(|n| alive(slots, n)));
         freed
     }
 
@@ -1234,24 +1424,41 @@ impl Dom {
     /// (index multivalué — les doublons sont arbitrés à la
     /// requête par [`Dom::doc_order_lt`]).
     fn index_id(&mut self, id: NodeId, value: &str) {
-        self.id_index.entry(value.to_owned()).or_default().push(id);
+        match self.id_index.entry(value.to_owned()) {
+            Entry::Occupied(mut e) => e.get_mut().push(id),
+            Entry::Vacant(e) => {
+                e.insert(IdSet::One(id));
+            }
+        }
     }
 
     /// Retire `id` de la liste de la valeur donnée ; l'entrée
     /// disparaît quand sa liste se vide.
     fn unindex_id(&mut self, id: NodeId, value: &str) {
-        if let Some(v) = self.id_index.get_mut(value) {
-            v.retain(|&n| n != id);
-            if v.is_empty() {
+        if let Some(set) = self.id_index.get_mut(value) {
+            if set.remove(id) {
                 self.id_index.remove(value);
             }
         }
     }
 
     /// Accès validé : index borné + génération concordante.
+    /// Un indice sous `peak_len` mais hors `slots` (tronqué par
+    /// `collect`, AR-12) rend `StaleHandle` — il a existé ;
+    /// au-delà, `OutOfBounds` — forgé.
     fn node(&self, id: NodeId) -> Result<&Node> {
         match self.slots.get(slot_idx(id.index())) {
-            None => Err(DomError::OutOfBounds(id)),
+            None => {
+                if slot_idx(id.index()) < self.peak_len {
+                    Err(DomError::StaleHandle {
+                        id,
+                        expected: id.generation(),
+                        found: self.tail_generation,
+                    })
+                } else {
+                    Err(DomError::OutOfBounds(id))
+                }
+            }
             Some(Slot::Vacant { generation, .. }) => Err(DomError::StaleHandle {
                 id,
                 expected: id.generation(),
@@ -1273,7 +1480,17 @@ impl Dom {
 
     fn node_mut(&mut self, id: NodeId) -> Result<&mut Node> {
         match self.slots.get_mut(slot_idx(id.index())) {
-            None => Err(DomError::OutOfBounds(id)),
+            None => {
+                if slot_idx(id.index()) < self.peak_len {
+                    Err(DomError::StaleHandle {
+                        id,
+                        expected: id.generation(),
+                        found: self.tail_generation,
+                    })
+                } else {
+                    Err(DomError::OutOfBounds(id))
+                }
+            }
             Some(Slot::Vacant { generation, .. }) => Err(DomError::StaleHandle {
                 id,
                 expected: id.generation(),
@@ -1325,12 +1542,18 @@ impl Dom {
             }
         }
         let index = index_as_u32(self.slots.len());
-        self.slots.push(Slot::Occupied {
-            generation: 1,
-            node,
-        });
+        // `tail_generation + 1` : une case repoussée après
+        // truncation repart au-dessus de toute génération
+        // abandonnée (AR-12) ; `tail_generation` vaut 0 tant
+        // que rien n'a été tronqué → génération initiale 1.
+        let generation = self.tail_generation + 1;
+        self.slots.push(Slot::Occupied { generation, node });
+        // `max` : `peak_len` ne doit jamais décroître — c'est lui
+        // qui distingue « indice tronqué » (StaleHandle) d'
+        // « indice jamais alloué » (OutOfBounds).
+        self.peak_len = self.peak_len.max(self.slots.len());
         self.live += 1;
-        Ok(NodeId::new(index, 1))
+        Ok(NodeId::new(index, generation))
     }
 
     /// Réclame une case : génération incrémentée (invalidation des

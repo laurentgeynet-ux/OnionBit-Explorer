@@ -158,10 +158,22 @@ arbres vivants (AR-1 sans seeds) ou des nœuds encore référencés
   tué (6 sites), `svg::find_by_id` tué, `find_by_attr`
   conservé pour les attributs génériques. `element_mut`
   documenté comme contournement de l'index.
-- [ ] **AR-12. Sweep `collect` optimisé** — PIPE. Bitmap
-  `Vec<u64>` (vs `vec![false]` = 1 o/case), scratch conservé
-  entre passes, `truncate` des `Vacant` traînants (le `Vec`
-  ne rétrécit jamais → watermark permanent post-churn).
+- [x] **AR-12. Sweep `collect` optimisé** — **Livré R-148** :
+  bitmap `Vec<u64>` sur scratch `mark_bits`/`mark_stack`
+  conservé entre passes (zéro alloc/passe) ; balayage borné
+  à `new_len` avec free-list **re-chaînée dans le même
+  passage** en ordre croissant (allocs tassées en tête,
+  queue tronçable) — aucun second parcours des cases ;
+  `truncate` + `shrink` amorti (seuil 2×) → la RAM post-churn
+  est rendue, `heap_bytes` la mesure. Sécurité générationnelle
+  : plancher `tail_generation` sur les cases tronquées
+  (repousse au-dessus de toute génération abandonnée) +
+  `peak_len` monotonique distinguant indice tronqué
+  (`StaleHandle`) d'indice forgé (`OutOfBounds`). Valeur
+  d'index `id` singleton inline `IdSet` (purge sans saut de
+  cache sur ids uniques). Banc : `collect` fragmenté 10 k
+  **3,8 ms vs 4,5 ms baseline** (−15 %) en faisant plus de
+  travail (reclaim + purges) ; profond 0,42 ms.
 - [ ] **AR-13. Interning atomes** — PIPE, **casse de champs
   pub** → journal + arbitrage. `tag_name: String` +
   `Attribute.name` → atome `u32` sur table internée au `Dom`

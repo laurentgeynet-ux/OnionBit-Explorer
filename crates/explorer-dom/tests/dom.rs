@@ -179,10 +179,13 @@ fn case_reutilisee_generation_bump() {
     dom.collect(&[]);
     assert!(matches!(dom.data(a), Err(DomError::StaleHandle { .. })));
 
-    // La prochaine allocation réutilise la case avec génération +1.
+    // La prochaine allocation réutilise la case avec une
+    // génération strictement supérieure — AR-12 : la case
+    // tronquée repart au plancher `tail_generation + 1`, pas
+    // forcément à +1 exact.
     let b = el(&mut dom, "b");
     assert_eq!(b.index(), a.index());
-    assert_eq!(b.generation(), a.generation() + 1);
+    assert!(b.generation() > a.generation());
     // L'ancien handle reste périmé malgré la case occupée.
     assert!(matches!(dom.data(a), Err(DomError::StaleHandle { .. })));
 }
@@ -658,6 +661,83 @@ fn by_id_premier_en_ordre_document() {
     dom.remove(doublon).expect("detach2");
     dom.collect(&[]);
     assert_eq!(dom.by_id("cible"), None);
+}
+
+#[test]
+fn collect_tronque_rend_la_ram() {
+    let mut dom = Dom::new();
+    let doc = dom.document();
+    // Gardien en tête (bas indice), churn en queue : la haute
+    // eau de l'arène meurt entièrement → truncate + shrink.
+    let keep = el(&mut dom, "div");
+    dom.append_child(doc, keep).expect("keep");
+    let mut handles = Vec::new();
+    for _ in 0..600 {
+        let n = el(&mut dom, "div");
+        dom.append_child(doc, n).expect("a");
+        handles.push(n);
+    }
+    for &n in &handles {
+        dom.remove(n).expect("rm");
+    }
+    let avant = dom.heap_bytes();
+    let freed = dom.collect(&[]);
+    assert_eq!(freed, 600);
+    assert!(
+        dom.heap_bytes() < avant / 4,
+        "la capacité slots doit être rendue (truncate + shrink)"
+    );
+    // Free-list re-chaînée : les allocations restent saines.
+    let n2 = el(&mut dom, "span");
+    dom.append_child(doc, n2).expect("post");
+    assert!(dom.is_alive(n2));
+    // Le survivant garde un handle valide.
+    assert_eq!(dom.tag_name(keep), Ok("div"));
+    // Les handles réclamés échouent typés (StaleHandle —
+    // indices sous peak_len, jamais OutOfBounds).
+    assert!(matches!(
+        dom.data(handles[0]),
+        Err(DomError::StaleHandle { .. })
+    ));
+}
+
+#[test]
+fn collect_tronque_puis_realloc_garde_stale() {
+    let mut dom = Dom::new();
+    let doc = dom.document();
+    // Même topologie : gardien bas, churn haut → truncate dur.
+    let keep = el(&mut dom, "div");
+    dom.append_child(doc, keep).expect("keep");
+    let mut churn = Vec::new();
+    for _ in 0..300 {
+        let n = el(&mut dom, "div");
+        dom.append_child(doc, n).expect("c");
+        churn.push(n);
+    }
+    for &n in &churn {
+        dom.remove(n).expect("rm");
+    }
+    dom.collect(&[]);
+    // Réallocations au-delà de l'eau tronquée : les cases
+    // repoussées partent au plancher de génération — un vieux
+    // handle ne ressuscite jamais (ADR-0008), y compris sur un
+    // indice réutilisé.
+    for _ in 0..50 {
+        let n = el(&mut dom, "span");
+        dom.append_child(doc, n).expect("post");
+    }
+    // Indice 2 (churn[0]) a été réattribué, indice ~152 est
+    // hors Vec mais sous peak_len : les deux rendent
+    // StaleHandle, jamais OutOfBounds ni nœud vivant.
+    assert!(matches!(
+        dom.data(churn[0]),
+        Err(DomError::StaleHandle { .. })
+    ));
+    assert!(matches!(
+        dom.data(churn[150]),
+        Err(DomError::StaleHandle { .. })
+    ));
+    assert!(dom.is_alive(keep));
 }
 
 #[test]

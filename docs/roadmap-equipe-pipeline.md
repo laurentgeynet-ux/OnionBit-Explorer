@@ -2856,6 +2856,37 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   l'index. Verrous : premier-en-ordre sous doublons,
   rename, retrait, détaché, purge `collect`, ordre après
   déplacement. 96/97 tests session verts, clippy propre.
+- [x] **R-148. Sweep `collect` optimisé + retour RAM
+  post-churn** (AR-12, chantier ARÈNE) : marquage sur bitmap
+  `Vec<u64>` (1 bit/case vs `vec![bool]` = 1 o/case) posé sur
+  scratch `mark_bits`/`mark_stack` conservé entre passes —
+  zéro allocation par `collect`. Balayage **borné à
+  `new_len`** (dernière case marquée + 1) : la free-list est
+  re-chaînée *dans le même passage* par liens `next_free`
+  ascendants — les allocs futures se tassent en tête du Vec
+  et la queue reste tronçable ; aucun second parcours des
+  cases (la première mouture re-chaînait `slots` en entier :
+  +1,5 ms/20 k, le coût dominant débusqué par le banc).
+  `truncate` des cases mortes de queue + `shrink_to_fit`
+  amorti (capacité > 2×len, plancher 256) — la RAM
+  post-churn est **rendue**, `heap_bytes` la mesure.
+  Sécurité générationnelle : `tail_generation` plancher des
+  générations abandonnées (une case repoussée à ces indices
+  repart au-dessus — ADR-0008) ; `peak_len` monotonique
+  (`max` — il décroissait au push post-truncate) distingue
+  indice tronqué (`StaleHandle`) d'indice forgé
+  (`OutOfBounds`). `live`/`freed` soldés aussi pour les
+  occupés tronqués (la première mouture les comptait
+  doublement vivants). Valeur d'index `id` `IdSet` —
+  singleton inline (ids uniques = cas dominant), `Vec` sur
+  doublons seulement : purge `collect` sans saut de cache,
+  −1 alloc/entrée. Banc `arena` : fragmenté 10 k **3,8 ms
+  vs 4,5 ms baseline** (−15 % en faisant plus de travail —
+  reclaim + purges), profond 0,42 ms. Verrous :
+  `collect_tronque_rend_la_ram` (capacité ÷4),
+  `collect_tronque_puis_realloc_garde_stale` (réutilisation
+  d'indice tronqué + `peak_len`), toute la batterie
+  stale-handle existante — 27/27 verts, clippy `-D warnings`.
 
 ## Palier R-B — Contenu étranger, animation, canvas
 
