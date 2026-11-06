@@ -80,8 +80,12 @@ ou en fin d'eval.
   paresseux (≥24 props).
 - [ ] **V-2e.** `J17_ENV_LVL` — niveaux de scope marchés par
   `env_get_seen`. *Env churn annexe (revue)* : `Env` frais +
-  `BindingMap::Small(Vec)` par appel — même `Small` alloue ;
-  candidat sérieux au top-3, `stats_alloc` le nommera.
+  `BindingMap::Small(Vec)` par appel — la création est
+  gratuite (`Vec::new()` n'alloue pas), le coût est à la
+  **première liaison** (push → alloc + croissance amortie) ;
+  scope sans liaison = gratuit, scope avec liaisons = 1
+  alloc. Candidat sérieux au top-3, `stats_alloc` le
+  nommera.
 - [ ] **V-2f.** `J17_ARRIDX` — `array_index(key)` tentés
   (**multiplicité** par `find_own` × niveau, ×2 par niveau
   Array — cible V-3b : hoister, pas garder).
@@ -165,16 +169,25 @@ arbitré ici :
   l'index `Vec` stable par shape ; `push_prop` est seul
   append-only (J15 `heap.rs:1527`) mais **les autres
   chemins mutent longueur/ordre/kind** — surface vérifiée :
-  `remove_own` `props.remove(i)` (`heap.rs:1761`, décale
-  toutes positions > i → transition shape obligatoire),
-  **5 sites `get_mut`** retournant le kind in-place
-  (`heap.rs:1549/1595/1658/1714/1732` — conversion
-  data→accessor **post-cache** : soit flip = transition,
-  soit le read caché re-vérifie `props[slot].1` kind —
-  « accesseurs jamais cachés » ne couvre pas une prop
-  *devenue* accesseur). Aucun `swap_remove`/`props.insert`
-  trouvé (grep vérifié) — un seul site oublié = slot
-  fantôme.
+  `remove_own` `props.remove(i)` (`heap.rs:1761`, shift —
+  l'ordre relatif survit → layout post-delete
+  déterministe pour `S'`, cohérent avec « delete =
+  transition ») ; **5 sites `get_mut`** (`define_data`
+  1549, `define_accessor` 1595, `define_accessor_strict`
+  1658, `set_own` 1714, `set_accessor` 1732).
+  **La direction du flip compte** : dangereux = 3
+  (`define_accessor`/`define_accessor_strict`/`set_accessor`
+  — Data→Acc sur prop *cachée comme data*) ; bénin = 2
+  (`define_data` Data→Data : slot juste, valeur fraîche ;
+  `set_own` Acc→Data : jamais cachée, miss → slow path).
+  **Arbitrage retenu (revue)** : **garde au read** —
+  le hit caché re-vérifie `props[slot].1` kind et bail
+  vers le slow path si `Acc` — plutôt que flip=transition
+  aux 5 sites : une seule garde au point de lecture vs 5
+  bumps répartis, et tout site futur oublié **dégrade**
+  vers le slow path au lieu d'un slot fantôme (même
+  philosophie que NIL/AR-15 : échec typé, jamais muet).
+  Aucun `swap_remove`/`props.insert` trouvé (grep vérifié).
 - [ ] **V-4a.** ADR-0034 : design + mesures V-1/V-2 citées.
 - [ ] **V-4b.** `ShapeId` sur `JsObj` + table de transitions
   dans `push_prop` (J15 : le seul writer — point d'injection
