@@ -5313,13 +5313,13 @@ impl Engine {
                             pat: Pat::Ident(REST.into()),
                             rest: true,
                         }],
-                        body: if parent.is_some() {
+                        body: crate::ast::FnBody::Parsed(Rc::new(if parent.is_some() {
                             vec![Stmt::Expr(Expr::SuperCall(vec![Expr::Spread(Box::new(
                                 Expr::Ident(REST.into()),
                             ))]))]
                         } else {
                             Vec::new()
-                        },
+                        })),
                         is_arrow: false,
                         is_async: false,
                         is_gen: false,
@@ -7759,6 +7759,22 @@ impl Engine {
         r
     }
 
+    /// Corps de `lit` matérialisé pour exécution (V-5a) — un
+    /// corps différé est sous-parsé ici, au premier appel
+    /// (ensuite `OnceCell`). Erreur de syntaxe tardive → throw
+    /// `SyntaxError` — tolérant, jamais de panic.
+    fn resolve_lit_body(
+        &mut self,
+        lit: &std::rc::Rc<crate::ast::FnLit>,
+    ) -> JsResult<std::rc::Rc<Vec<Stmt>>> {
+        match &lit.body {
+            crate::ast::FnBody::Parsed(b) => Ok(b.clone()),
+            crate::ast::FnBody::Deferred(d) => d
+                .get_or_parse(lit.is_gen)
+                .map_err(|e| self.syntax_error(e.to_string())),
+        }
+    }
+
     /// Corps d'un appel `Fun::Script` — extrait de
     /// [`Self::call_value_impl`] pour permettre le switch de
     /// contexte transactionnel (JS-C78) autour de l'exécution.
@@ -7809,13 +7825,26 @@ impl Engine {
         let outer_strict = self.strict;
         self.strict = lit.strict;
         let local = Env::local(env);
+        // V-5a : un corps différé se sous-parse ici, au premier
+        // appel — erreur de syntaxe tardive → throw (jamais de
+        // panic). `FnLit.strict` a déjà été fixé au parse par le
+        // scan anticipé des directives.
+        let body_rc = match self.resolve_lit_body(lit) {
+            Ok(b) => b,
+            Err(t) => {
+                self.call_depth -= 1;
+                self.call_stack.pop();
+                self.strict = outer_strict;
+                return Err(t);
+            }
+        };
         // JS-C96 : générateur/async — les `= défaut` de
         // paramètres contenant un suspend sont déplacés dans
         // le corps (la liaison s'exécute hors `GExec`, un
         // `await` pendante y jetterait). `lit` reste la
         // référence (`fn.length`, `args_map`).
-        let lowered_fn =
-            (lit.is_gen || lit.is_async).then(|| crate::interp::lazy::lower_suspend_fn(lit));
+        let lowered_fn = (lit.is_gen || lit.is_async)
+            .then(|| crate::interp::lazy::lower_suspend_fn(lit, &body_rc));
         // §B-59 : sous-phase « bind » — `last_phase` figé à
         // « bind » = mort dans le liage de paramètres
         // (`bind_pat` × N params, `...rest`, défauts).
@@ -7881,7 +7910,7 @@ impl Engine {
         }
         let lowered_body = lowered_fn.as_ref().map(|(_, b)| b.clone());
         self.hoist(
-            lowered_body.as_deref().map_or(&lit.body[..], |b| &b[..]),
+            lowered_body.as_deref().map_or(&body_rc[..], |b| &b[..]),
             &local,
         );
         // Générateur lazy (JS-C34) : le corps ne tourne
@@ -7890,7 +7919,7 @@ impl Engine {
         if lit.is_gen {
             let body = lowered_body
                 .clone()
-                .unwrap_or_else(|| crate::interp::lazy::lower_suspend_body(&lit.body));
+                .unwrap_or_else(|| crate::interp::lazy::lower_suspend_body(&body_rc));
             let it = crate::interp::lazy::gen_lazy_obj(self, local.clone(), this, body);
             if let (Value::Obj(iid), Value::Obj(fid)) = (it, f) {
                 if let Some(proto) = self.get_prop(fid, "prototype") {
@@ -7910,7 +7939,7 @@ impl Engine {
         // `then` ; `return`/`throw` settle la promesse rendue.
         if lit.is_async {
             let body =
-                lowered_body.unwrap_or_else(|| crate::interp::lazy::lower_suspend_body(&lit.body));
+                lowered_body.unwrap_or_else(|| crate::interp::lazy::lower_suspend_body(&body_rc));
             let prom = self.new_promise();
             let gen = crate::interp::lazy::gen_lazy_obj(self, local.clone(), this, body);
             if let Value::Obj(gid) = gen {
@@ -7937,7 +7966,7 @@ impl Engine {
         let r = stacker::maybe_grow(
             crate::parser::STACK_RED_ZONE,
             crate::parser::STACK_GROW,
-            || self.exec_body(&local, this, &lit.body),
+            || self.exec_body(&local, this, &body_rc),
         );
         self.call_depth -= 1;
         self.call_stack.pop();

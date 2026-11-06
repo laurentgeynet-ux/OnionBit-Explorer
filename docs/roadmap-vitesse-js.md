@@ -291,7 +291,23 @@ arbitré ici :
   Verdict : `stmt` = dispatch récursif (~5M calls) + alloc
   AST — **territoire structurel** (arène AST/bytecode =
   V-5), plus de micro-fix à ce niveau.
-- **V-5. Bytecode/VM** — l'horizon : stack machine, IC par
+- **V-5. Structural** — **V-5a livré (JS-C380)** : corps de
+  fonction différés — `FnLit.body: FnBody`, les corps ≥ 24
+  tokens retiennent leur slice `Rc<[Token]>` et sautent au
+  `}` via `close_of` O(1) ; sous-parse au premier appel
+  (`OnceCell`, même `fn_body` — directives, `priv_scopes`,
+  `nest` snapshotés). Strict du prologue fixé au parse par
+  scan ASI-safe (coercition `this` exacte). **Mesuré BBC :
+  eval 255→102 ms (−60 %), `stmt_ns` 168→23 ms (−86 %)** —
+  `fn_defer`=405 corps couvrant `fn_def_tok`=546 218
+  (99 % du stream), `fn_mat`=0 : le bundle n'appelle rien
+  de ses corps. `tok_clone` 390k→3.4k, `par_next`
+  553k→5.6k. Déviation documentée : early errors du corps
+  strict rapportées à l'appel (throw, pas panic). Reste :
+  `lex` = nouveau mur (64 ms / 63 %) — `chars().collect()`
+  ~5.8 Mo est le suspect n°1. V-5b (arène AST / émission
+  bytecode) sous porte d'attribution.
+- **V-5c. Bytecode/VM** — l'horizon : stack machine, IC par
   site persistants, registre allocation. Marathon, hors de
   ce chantier.
 - **IC par site (V-4 bis)** — si un jour le cache `Program`

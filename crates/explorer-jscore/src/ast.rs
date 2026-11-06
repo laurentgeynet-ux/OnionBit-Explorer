@@ -10,7 +10,11 @@
 //! `with`, labels/labelled break-continue, regex literals, classes,
 //! generators, modules, destructuring, `for-of`.
 
+use std::cell::OnceCell;
+use std::collections::HashSet;
 use std::rc::Rc;
+
+use crate::lexer::Token;
 
 /// A whole script.
 #[derive(Debug, Clone)]
@@ -304,8 +308,8 @@ pub struct FnLit {
     pub name: Option<Rc<str>>,
     /// Parameters (patterns + defaults + rest).
     pub params: Vec<Param>,
-    /// Body statements.
-    pub body: Vec<Stmt>,
+    /// Body statements — éager ou différé (V-5a).
+    pub body: FnBody,
     /// Arrow function — `this` is captured lexically, and a single
     /// expression body `x => e` is desugared to `{ return e }`.
     pub is_arrow: bool,
@@ -351,6 +355,58 @@ pub struct FnLit {
     /// — mot-clé `function`/`async`/`class`… inclus, `}` final
     /// inclus. `(0, 0)` sans `src_text`.
     pub span: (usize, usize),
+}
+
+/// Corps de fonction (V-5a) : éager ou différé.
+#[derive(Debug, Clone)]
+pub enum FnBody {
+    /// Corps parsé à la construction — partsagé `Rc` pour que le
+    /// chemin d'appel récupère une référence sans copie.
+    Parsed(Rc<Vec<Stmt>>),
+    /// Corps différé : la plage de tokens `{…}` est conservée et
+    /// sous-parsée au **premier appel** (`close_table` a rendu le
+    /// saut O(1) au parse — les bundles webpack/enregistreurs ne
+    /// paient plus la descente récursive des corps jamais
+    /// appelés). Les fonctions imbriquées sont différées
+    /// récursivement par le sous-parse.
+    Deferred(Rc<DeferredBody>),
+}
+
+/// État d'un corps différé — la matérialisation est unique
+/// (`OnceCell`) et découverte par le même `fn_body` que le chemin
+/// éager (prologue de directives inclus).
+#[derive(Debug, Clone)]
+pub struct DeferredBody {
+    /// Tokens `{…}` du corps (accolades incluses) — payloads `Rc`,
+    /// la copie de slice au defer est un passage de refcounts.
+    pub toks: Rc<[Token]>,
+    /// Mode strict **hérité** au point du defer — le sous-parse
+    /// repart de là puis `scan_directives` tranche le strict
+    /// effectif (qui a déjà été fixé sur `FnLit.strict` par le
+    /// scan anticipé du parseur — coercage `this` au premier
+    /// appel).
+    pub strict: bool,
+    /// Contexte module du parse d'origine.
+    pub module: bool,
+    /// Profondeur de nesting accumulée au defer — le sous-parse
+    /// l'emboîte sur la même borne (pattern `template_parts`).
+    pub nest: u32,
+    /// Borne de nesting héritée.
+    pub nest_max: u32,
+    /// Compteur d'identités de noms privés au defer — la
+    /// résolution `#x` du corps voit les portées de classes
+    /// englobantes (clonées, identité préservée).
+    pub priv_seq: u32,
+    /// Portées de noms privés `(identité, déclarations)` au defer.
+    pub priv_scopes: Vec<(u32, HashSet<String>)>,
+    /// Nom de source pour les erreurs du sous-parse.
+    pub src_name: Option<Rc<str>>,
+    /// Texte source verbatim — les `FnLit` produits par le
+    /// sous-parse tranchent leurs spans dedans (offsets relatifs
+    /// à la source complète : les tokens gardent leurs `off`).
+    pub src_text: Option<Rc<str>>,
+    /// `(stmts, strict effectif)` matérialisés au premier appel.
+    pub parsed: OnceCell<(Rc<Vec<Stmt>>, bool)>,
 }
 
 /// One formal parameter.
@@ -816,8 +872,26 @@ impl Drop for FnLit {
     /// récursion (JS-C121).
     fn drop(&mut self) {
         let mut queue = Vec::new();
-        for s in self.body.drain(..) {
-            queue.push(s);
+        match &mut self.body {
+            FnBody::Parsed(b) => {
+                if let Some(b) = Rc::get_mut(b) {
+                    queue.append(b);
+                }
+            }
+            FnBody::Deferred(d) => {
+                // Corps matérialisé dont le `DeferredBody` et le
+                // `Rc<Vec<Stmt>>` sont les derniers détenteurs —
+                // même drop itératif (un dernier référent qui
+                // vit ailleurs droppe récursivement, borne par
+                // `STACK` — rare, accepté).
+                if let Some(d) = Rc::get_mut(d) {
+                    if let Some((b, _)) = d.parsed.take() {
+                        if let Ok(mut v) = Rc::try_unwrap(b) {
+                            queue.append(&mut v);
+                        }
+                    }
+                }
+            }
         }
         while let Some(mut s) = queue.pop() {
             s.take_children(&mut queue);

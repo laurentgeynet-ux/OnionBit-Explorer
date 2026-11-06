@@ -11,12 +11,13 @@
 //! init clauses (the `no_in` flag), like the spec's `NoIn` grammar.
 
 use crate::ast::{
-    AssignOp, BinOp, ChainStep, ClassLit, ClassMember, ClassMemberKind, ExportDecl, Expr, FnLit,
-    ForInit, ForTarget, ImportBind, ObjProp, Param, Pat, Program, PropKey, Stmt, SwitchCase, UnOp,
-    VarDecl,
+    AssignOp, BinOp, ChainStep, ClassLit, ClassMember, ClassMemberKind, DeferredBody, ExportDecl,
+    Expr, FnBody, FnLit, ForInit, ForTarget, ImportBind, ObjProp, Param, Pat, Program, PropKey,
+    Stmt, SwitchCase, UnOp, VarDecl,
 };
 use crate::error::{Error, Result};
 use crate::lexer::{lex, Kw, Tok, Token, TplPart, P};
+use std::cell::OnceCell;
 use std::collections::HashSet;
 use std::rc::Rc;
 
@@ -42,6 +43,91 @@ fn close_table(toks: &[Token]) -> Vec<usize> {
         }
     }
     close
+}
+
+/// Taille minimale (en tokens) d'un corps de fonction différé
+/// (V-5a) — en deçà, le surcoût `DeferredBody` (slice + cellule +
+/// scan) ne se justifie pas (`{ return x }` ≈ 5 tokens reste
+/// éager). Au-delà, le saut `close_of` O(1) évite la descente
+/// récursive — les corps jamais appelés ne sont jamais parsés.
+const DEFER_MIN_TOKS: usize = 24;
+
+/// Scan lecture seule du prologue de directives d'un corps
+/// différé — `true` si `"use strict"` en tête. Même règle de
+/// terminaison que [`Parser::scan_directives`] (directive =
+/// `Tok::Str` terminée par `;`, `}`, EOF ou ASI via
+/// `newline_before`) : `FnLit.strict` doit être fixe dès le
+/// parse — il pilote la coercition `this` au premier appel,
+/// avant toute matérialisation.
+fn deferred_use_strict(toks: &[Token]) -> bool {
+    let mut i = 0;
+    let mut strict = false;
+    while let Some(t) = toks.get(i) {
+        let Tok::Str(s) = &t.tok else { break };
+        let ends = match toks.get(i + 1) {
+            None => true,
+            Some(n) => n.newline_before || matches!(n.tok, Tok::Eof | Tok::P(P::Semi | P::RBrace)),
+        };
+        if !ends {
+            break;
+        }
+        if &**s == "use strict" {
+            strict = true;
+        }
+        i += 1;
+        if matches!(toks.get(i).map(|t| &t.tok), Some(Tok::P(P::Semi))) {
+            i += 1;
+        }
+    }
+    strict
+}
+
+/// Sous-parse d'un corps différé au premier appel (V-5a) — même
+/// `fn_body` que le chemin éager (prologue de directives,
+/// save/restore des flags). Les tokens `{…}` sont repris tels
+/// quels du `Rc<[Token]>` ; `close_table` est reconstruite sur
+/// le slice — O(slice) payé **une fois par corps réellement
+/// appelé**. `pos = 1` : le `{` à l'indice 0 est pré-consommé.
+/// Déviation documentée : les early errors que la stricte du
+/// corps impose aux paramètres (doublons…) sont rapportées à
+/// l'appel plutôt qu'au parse — tolérant, jamais de panic.
+pub(crate) fn materialize_body(d: &DeferredBody, is_gen: bool) -> Result<(Vec<Stmt>, bool)> {
+    let toks: Vec<Token> = d.toks.to_vec();
+    let close_of = close_table(&toks);
+    let mut sub = Parser {
+        toks,
+        pos: 1,
+        nest: d.nest,
+        nest_max: d.nest_max,
+        strict: d.strict,
+        module: d.module,
+        in_gen: is_gen,
+        labels: Vec::new(),
+        priv_seq: d.priv_seq,
+        priv_scopes: d.priv_scopes.clone(),
+        src_name: d.src_name.clone(),
+        src_text: d.src_text.clone(),
+        close_of,
+    };
+    sub.fn_body()
+}
+
+impl DeferredBody {
+    /// Corps matérialisé — le parse ne court qu'une fois
+    /// (`OnceCell`) ; `is_gen` vient du `FnLit` porteur (le flag
+    /// vit sur le littéral, pas dans le corps). Une erreur de
+    /// syntaxe tardive n'est pas cachée — elle re-jette à
+    /// chaque appel (le throw est construit par l'appelant).
+    pub(crate) fn get_or_parse(&self, is_gen: bool) -> Result<Rc<Vec<Stmt>>> {
+        if let Some((b, _)) = self.parsed.get() {
+            return Ok(b.clone());
+        }
+        crate::j17_tick(&crate::J17_FN_MAT);
+        let (stmts, strict) = materialize_body(self, is_gen)?;
+        let rc = Rc::new(stmts);
+        let _ = self.parsed.set((rc.clone(), strict));
+        Ok(rc)
+    }
 }
 
 pub(crate) fn parse_in(
@@ -1690,8 +1776,13 @@ impl Parser {
     /// `return expr`).
     /// Corps de flèche — retourne aussi le strict effectif du corps
     /// (hérité ou prologue `"use strict"`).
-    fn arrow_body(&mut self, no_in: bool) -> Result<(Vec<Stmt>, bool)> {
+    fn arrow_body(&mut self, no_in: bool) -> Result<(FnBody, bool)> {
         if self.eat_p(P::LBrace) {
+            // Même deferral que `fn_body` (V-5a) — une flèche
+            // bloc jamais appelée ne paie pas sa descente.
+            if let Some(x) = self.try_defer_body(self.pos - 1) {
+                return Ok(x);
+            }
             let outer_strict = self.strict;
             let outer_gen = self.in_gen;
             self.in_gen = false; // les flèches ne sont jamais génératrices
@@ -1700,11 +1791,11 @@ impl Parser {
             let strict = self.strict;
             self.strict = outer_strict;
             self.in_gen = outer_gen;
-            return body.map(|b| (b, strict));
+            return body.map(|b| (FnBody::Parsed(Rc::new(b)), strict));
         }
         let e = self.assign(no_in)?;
         let strict = self.strict;
-        Ok((vec![Stmt::Return(Some(e))], strict))
+        Ok((FnBody::Parsed(Rc::new(vec![Stmt::Return(Some(e))])), strict))
     }
 
     fn cond(&mut self, no_in: bool) -> Result<Expr> {
@@ -2251,16 +2342,16 @@ impl Parser {
                         self.expect_p(P::LBrace, "`{`")?;
                         let outer_gen = self.in_gen;
                         self.in_gen = false; // get/set : jamais générateurs
-                        let body = self.fn_body()?;
+                        let (body, strict) = self.fn_body_or_deferred()?;
                         self.in_gen = outer_gen;
                         let fun = Rc::new(FnLit {
                             name: None,
                             params,
-                            body: body.0,
+                            body,
                             is_arrow: false,
                             is_async: false,
                             is_gen: false,
-                            strict: body.1,
+                            strict,
                             pos: kpos,
                             src: self.src_name.clone(),
                             src_text: self.src_text.clone(),
@@ -2279,18 +2370,18 @@ impl Parser {
                         self.expect_p(P::LBrace, "`{`")?;
                         let outer_gen = self.in_gen;
                         self.in_gen = gen;
-                        let body = self.fn_body()?;
+                        let (body, strict) = self.fn_body_or_deferred()?;
                         self.in_gen = outer_gen;
                         props.push(ObjProp::Prop(
                             key,
                             Expr::Function(Rc::new(FnLit {
                                 name: None,
                                 params,
-                                body: body.0,
+                                body,
                                 is_arrow: false,
                                 is_async: async_,
                                 is_gen: gen,
-                                strict: body.1,
+                                strict,
                                 pos: kpos,
                                 src: self.src_name.clone(),
                                 src_text: self.src_text.clone(),
@@ -2447,7 +2538,7 @@ impl Parser {
         // tolérance : on n'a pas de paramètres non-simples).
         let outer_gen = self.in_gen;
         self.in_gen = gen;
-        let (body, strict) = self.fn_body()?;
+        let (body, strict) = self.fn_body_or_deferred()?;
         // `fn_body` restaure la valeur **posée juste avant** —
         // sans ce second restore, un `function(){}` non-générateur
         // imbriqué dans un `function*(){}` masque les `yield`
@@ -2468,6 +2559,49 @@ impl Parser {
             src_text: self.src_text.clone(),
             span: (soff, eoff),
         }))
+    }
+
+    /// Corps `{` ouvert à l'index `lbrace` (déjà consommé) —
+    /// tentative de deferral V-5a : retient la plage de tokens
+    /// et saute au `}` en O(1) via `close_of`. `None` → le
+    /// caller retombe sur le parse éager (`fn_body`/`stmt_list`)
+    /// qui produit les erreurs normales (délimiteur désapparié,
+    /// corps trop court…).
+    fn try_defer_body(&mut self, lbrace: usize) -> Option<(FnBody, bool)> {
+        let close = *self.close_of.get(lbrace)?;
+        if close == usize::MAX || close.saturating_sub(lbrace) < DEFER_MIN_TOKS {
+            return None;
+        }
+        // Strict effectif fixé dès le parse — le prologue de
+        // directives est scanné en lecture seule pour que
+        // `FnLit.strict` soit exact au premier appel.
+        let strict = self.strict || deferred_use_strict(&self.toks[lbrace + 1..close]);
+        let d = DeferredBody {
+            toks: Rc::from(&self.toks[lbrace..=close]),
+            strict: self.strict,
+            module: self.module,
+            nest: self.nest,
+            nest_max: self.nest_max,
+            priv_seq: self.priv_seq,
+            priv_scopes: self.priv_scopes.clone(),
+            src_name: self.src_name.clone(),
+            src_text: self.src_text.clone(),
+            parsed: OnceCell::new(),
+        };
+        crate::j17_tick(&crate::J17_FN_DEFER);
+        crate::j17_add(&crate::J17_FN_DEF_TOK, (close - lbrace + 1) as u64);
+        self.pos = close + 1;
+        Some((FnBody::Deferred(Rc::new(d)), strict))
+    }
+
+    /// `fn_body` avec deferral : `{` consommé à `pos-1` — corps
+    /// différé si la plage le justifie, sinon parse éager
+    /// enrobé. Retourne `(corps, strict effectif)`.
+    fn fn_body_or_deferred(&mut self) -> Result<(FnBody, bool)> {
+        if let Some(x) = self.try_defer_body(self.pos - 1) {
+            return Ok(x);
+        }
+        self.fn_body().map(|(b, s)| (FnBody::Parsed(Rc::new(b)), s))
     }
 
     /// Corps de fonction déjà ouvert (`{` consommé) — prologue de
@@ -2579,7 +2713,10 @@ impl Parser {
                 self.next();
                 let outer_strict = self.strict;
                 self.strict = true;
-                let body = self.stmt_list()?;
+                let body = match self.try_defer_body(self.pos - 1) {
+                    Some((b, _)) => b,
+                    None => FnBody::Parsed(Rc::new(self.stmt_list()?)),
+                };
                 self.strict = outer_strict;
                 members.push(ClassMember {
                     key: PropKey::Name(Rc::from("")),
@@ -2656,9 +2793,10 @@ impl Parser {
                     None
                 };
                 self.eat_p(P::Semi);
-                let body = init
-                    .map(|e| vec![Stmt::Return(Some(e))])
-                    .unwrap_or_default();
+                let body = FnBody::Parsed(Rc::new(
+                    init.map(|e| vec![Stmt::Return(Some(e))])
+                        .unwrap_or_default(),
+                ));
                 members.push(ClassMember {
                     key,
                     kind: ClassMemberKind::Field,
@@ -2689,8 +2827,11 @@ impl Parser {
             let outer_gen = self.in_gen;
             // get/set ne sont jamais générateurs ; `*m` oui.
             self.in_gen = gen && kind == ClassMemberKind::Method;
-            let body = self.stmt_list();
             let is_gen = self.in_gen;
+            let body = match self.try_defer_body(self.pos - 1) {
+                Some((b, _)) => b,
+                None => FnBody::Parsed(Rc::new(self.stmt_list()?)),
+            };
             self.strict = outer_strict;
             self.in_gen = outer_gen;
             members.push(ClassMember {
@@ -2700,7 +2841,7 @@ impl Parser {
                 fun: Rc::new(FnLit {
                     name: None,
                     params,
-                    body: body?,
+                    body,
                     is_arrow: false,
                     is_async: async_,
                     is_gen,

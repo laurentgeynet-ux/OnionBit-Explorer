@@ -259,3 +259,58 @@ fn snapshot_liste_les_compteurs_armes() {
     // le compteur ne doit pas être incohérent.
     assert!(tick(&J17_STR_READ) >= s0);
 }
+
+/// Verrou V-5a : les corps différés se matérialisent au premier
+/// appel **avec la sémantique exacte** — retour correct, strict
+/// du prologue respecté, closures, et une erreur de syntaxe
+/// tardive jette au call (pas au parse, jamais panic).
+#[test]
+fn corps_differes_materialisation_fidele() {
+    let _g = TEST_LOCK.lock().expect("lock");
+    j17_enable();
+    use explorer_jscore::{J17_FN_DEFER, J17_FN_MAT};
+    let d0 = tick(&J17_FN_DEFER);
+    let m0 = tick(&J17_FN_MAT);
+    let mut e = Engine::new();
+
+    // Corps ≥ 24 tokens → différé ; appelé → matérialisé une
+    // fois (le 2e appel réutilise le OnceCell), retour exact.
+    // big(3)=265, big(4)=363 → 628.
+    let r = e
+        .eval(
+            "function big(a){var x=a+1;var y=x*2;var z=y-3;             var w=z+a;var q=w*10;var t=q/2;var u=t+x;             var v=u+y;var s=v+z;var r=s+w;var j=r+q;             return j+q+t}             big(3)+big(4)",
+        )
+        .expect("eval corps différé appelé");
+    assert_eq!(e.describe(r), "628");
+    assert!(tick(&J17_FN_DEFER) > d0, "le corps doit être différé");
+    assert!(tick(&J17_FN_MAT) > m0, "l'appel doit matérialiser");
+    assert!(
+        tick(&J17_FN_MAT) - m0 <= 1,
+        "la matérialisation est unique (OnceCell), vu {}",
+        tick(&J17_FN_MAT) - m0
+    );
+
+    // Corps jamais appelé : différé, jamais matérialisé.
+    e.eval("function dead(){var a=1;var b=2;var c=3;var d=4;            var e=5;var f=6;var g=7;var h=8;return a+b+c+d+e+f+g+h}var ok=1")
+        .expect("eval corps mort");
+
+    // Erreur de syntaxe dans un corps différé : pas de rejet
+    // au parse (tolérance) mais throw à l'appel — jamais panic.
+    let r2 = e.eval(
+        "var bad=function(){var a=1;var b=2;var c=3;var d=4;         var e=5;var f=6;var g=7;return a+};'parsed'",
+    );
+    assert_eq!(e.describe(r2.expect("parse tolère")), "parsed");
+    let called = e
+        .eval("try{bad()}catch(ex){'thrown'}")
+        .expect("appel erroné");
+    assert_eq!(e.describe(called), "thrown");
+
+    // Strict du prologue lu dès le parse : corps différé
+    // `"use strict"` → `this` non coercé (undefined, pas global).
+    let strict = e
+        .eval(
+            "var s=function(){'use strict';var a=1;var b=2;var c=3;             var d=4;var e=5;var f=6;var g=7;var h=8;             return this===undefined};s()",
+        )
+        .expect("eval strict différé");
+    assert_eq!(e.describe(strict), "true");
+}

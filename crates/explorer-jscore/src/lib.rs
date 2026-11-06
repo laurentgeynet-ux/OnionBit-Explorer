@@ -321,6 +321,16 @@ pub static J17_TOK_CLONE: std::sync::atomic::AtomicU64 = std::sync::atomic::Atom
 /// confirmé ; >> `lex_tok` = re-consommation cachée
 /// (backtracking non couvert par les gardes `close_of`).
 pub static J17_PAR_NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// V-5a — corps de fonction différés au parse (slice retenue,
+/// saut `close_of` O(1)).
+pub static J17_FN_DEFER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// V-5a — tokens couverts par les corps différés (part du
+/// stream soustraite à la descente éager).
+pub static J17_FN_DEF_TOK: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// V-5a — corps différés matérialisés au premier appel.
+/// `fn_defer`/`fn_mat` ≫ 1 = la majorité des corps retenus ne
+/// sont jamais appelés → le deferral a évité leur parse.
+pub static J17_FN_MAT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 /// Gate J17 : les compteurs ci-dessus ne s'incrémentent que si
 /// `EXPLORER_J17_PROF` est posé (non vide/non "0") au premier
@@ -351,7 +361,7 @@ pub fn j17_enable() {
 #[must_use]
 pub fn j17_snapshot() -> String {
     let r = std::sync::atomic::Ordering::Relaxed;
-    let pairs: [(&str, &std::sync::atomic::AtomicU64); 21] = [
+    let pairs: [(&str, &std::sync::atomic::AtomicU64); 24] = [
         ("prop_lookup", &J17_PROP_LOOKUP),
         ("proto_lvl", &J17_PROTO_LVL),
         ("prop_scan", &J17_PROP_SCAN),
@@ -373,6 +383,9 @@ pub fn j17_snapshot() -> String {
         ("ast_stmt", &J17_AST_STMT),
         ("tok_clone", &J17_TOK_CLONE),
         ("par_next", &J17_PAR_NEXT),
+        ("fn_defer", &J17_FN_DEFER),
+        ("fn_def_tok", &J17_FN_DEF_TOK),
+        ("fn_mat", &J17_FN_MAT),
     ];
     let mut out = String::new();
     for (k, c) in pairs {

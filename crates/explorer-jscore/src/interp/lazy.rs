@@ -692,7 +692,10 @@ fn lower_list(list: &[Stmt], cx: &mut LowerCx) -> Vec<Stmt> {
 /// - `p = e` non-ident → `__paramI` + `if` + `let p = …`.
 ///
 /// `lit` inchangé (`fn.length`, `args_map` lisent l'original).
-pub(crate) fn lower_suspend_fn(lit: &FnLit) -> (Vec<Param>, Rc<Vec<Stmt>>) {
+/// `src_body` = corps matérialisé (V-5a) — passé à part car un
+/// corps différé n'est pas forcément un `&[Stmt]` derrière
+/// `lit.body`.
+pub(crate) fn lower_suspend_fn(lit: &FnLit, src_body: &[Stmt]) -> (Vec<Param>, Rc<Vec<Stmt>>) {
     let mut prelude: Vec<Stmt> = Vec::new();
     let mut params = lit.params.clone();
     for (i, p) in params.iter_mut().enumerate() {
@@ -736,7 +739,7 @@ pub(crate) fn lower_suspend_fn(lit: &FnLit) -> (Vec<Param>, Rc<Vec<Stmt>>) {
         }
     }
     let mut body = prelude;
-    body.extend(lit.body.iter().cloned());
+    body.extend(src_body.iter().cloned());
     (params, lower_suspend_body(&body))
 }
 
