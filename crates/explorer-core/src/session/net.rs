@@ -78,6 +78,34 @@ fn net_err_kind(e: &explorer_net::error::NetError) -> &'static str {
     }
 }
 
+/// Sonde §B-108 — nomme le refus d'une livraison dyn-img
+/// (contexte mort / pas de source résoluble / mixed-content
+/// ou CSP `img-src`). `enabled!` = coût nul désarmé.
+fn img_dskip(reason: &'static str) {
+    if tracing::enabled!(target: "media_probe", tracing::Level::INFO) {
+        tracing::info!(target: "media_probe", site = "img.dskip", reason);
+    }
+}
+
+/// Source retenue d'un `DynImgReq` — `srcset` résolu par
+/// `sizes`/dpr prime sur `src` (spec), même pile que
+/// `collect_images`.
+fn dyn_img_src_key(d: &explorer_js::DynImgReq, img_w: f32, dpr: f32) -> Option<String> {
+    d.srcset
+        .as_deref()
+        .and_then(|ss| {
+            let eff_w = resolve_sizes(d.sizes.as_deref(), img_w);
+            pick_srcset(ss, eff_w, dpr)
+        })
+        .or_else(|| {
+            d.src
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_string)
+        })
+}
+
 /// Délai de retenue §B-60 pour un streak donné —
 /// `250 ms → 10 s` en doublement plafonné.
 pub(crate) fn fetch_backoff_delay(streak: u32) -> std::time::Duration {
@@ -1901,27 +1929,15 @@ impl Session {
         let Some((req_page, req_base, doc_policy, csp, _opaque)) =
             self.ctx_net_origin(tab, d.ctx, page, base)
         else {
+            img_dskip("ctx");
             self.deliver_dyn_img_el(tab, d.ctx, d.seq, false);
             return;
         };
         // Choix de la source — `srcset` prime sur `src`
         // (spec) ; la clé est la chaîne telle que
         // `collect_images` la relira au prochain apply.
-        let src_key = d
-            .srcset
-            .as_deref()
-            .and_then(|ss| {
-                let eff_w = resolve_sizes(d.sizes.as_deref(), self.viewport.0);
-                pick_srcset(ss, eff_w, self.scale)
-            })
-            .or_else(|| {
-                d.src
-                    .as_deref()
-                    .map(str::trim)
-                    .filter(|s| !s.is_empty())
-                    .map(str::to_string)
-            });
-        let Some(src_key) = src_key else {
+        let Some(src_key) = dyn_img_src_key(d, self.viewport.0, self.scale) else {
+            img_dskip("nosrc");
             self.deliver_dyn_img_el(tab, d.ctx, d.seq, false);
             return;
         };
@@ -1944,6 +1960,7 @@ impl Session {
                 )
             })
         else {
+            img_dskip("blocked");
             self.deliver_dyn_img_el(tab, d.ctx, d.seq, false);
             return;
         };
@@ -3597,6 +3614,77 @@ impl Session {
             + self.pending_script_net.len()
     }
 
+    /// Pipeline `<img>` de [`Self::plan_subresources`] —
+    /// résolution base, upgrade CSP, mixed-content +
+    /// `img-src`, dédup URL, borne `max_images`. Sonde
+    /// §B-108 `img.skip` : attribution des drops entre
+    /// collecte et fetch (la raison qui tue le candidat).
+    fn plan_img_urls(
+        &self,
+        dom: &Dom,
+        page: &Url,
+        base: &Url,
+        upg: &dyn Fn(Url) -> Url,
+        allow: &dyn Fn(explorer_net::http::FetchDest, &Url) -> bool,
+    ) -> Vec<Url> {
+        let mut seen_img = std::collections::HashSet::new();
+        let img_probe = tracing::enabled!(target: "media_probe", tracing::Level::INFO);
+        let mut noresolve = 0u64;
+        let mut nonhttp = 0u64;
+        let mut blocked = 0u64;
+        let mut dup = 0u64;
+        let img_cands = collect_images(dom, self.viewport.0, self.scale);
+        let img_cand_n = img_cands.len();
+        let imgs: Vec<Url> = img_cands
+            .into_iter()
+            .filter_map(|(_, src)| {
+                Url::resolve(base, &src).ok().or_else(|| {
+                    if img_probe {
+                        noresolve += 1;
+                    }
+                    None
+                })
+            })
+            .map(upg)
+            // `data:` (et autres non-http) ne se fetch pas —
+            // peints inline par `collect_data_images` (56f).
+            .filter(|u| {
+                let ok = matches!(u.scheme(), "http" | "https");
+                if !ok && img_probe {
+                    nonhttp += 1;
+                }
+                ok
+            })
+            .filter(|u| {
+                if is_mixed_content(page, u) || !allow(explorer_net::http::FetchDest::Image, u) {
+                    if img_probe {
+                        blocked += 1;
+                    }
+                    return false;
+                }
+                let fresh = seen_img.insert(u.as_str());
+                if !fresh && img_probe {
+                    dup += 1;
+                }
+                fresh
+            })
+            .take(self.max_images)
+            .collect();
+        if img_probe {
+            tracing::info!(
+                target: "media_probe",
+                site = "img.skip",
+                cand = img_cand_n,
+                noresolve,
+                nonhttp,
+                blocked,
+                dup,
+                fetch = imgs.len()
+            );
+        }
+        imgs
+    }
+
     /// Collecte des sous-ressources du document (étape 50) :
     /// URLs résolues ici (émission propre), mixed-content
     /// filtré, images dédupliquées — plan borné par la
@@ -3682,21 +3770,7 @@ impl Session {
         } else {
             Vec::new()
         };
-        let mut seen_img = std::collections::HashSet::new();
-        let imgs: Vec<Url> = collect_images(dom, self.viewport.0, self.scale)
-            .into_iter()
-            .filter_map(|(_, src)| Url::resolve(base, &src).ok())
-            .map(&upg)
-            // `data:` (et autres non-http) ne se fetch pas —
-            // peints inline par `collect_data_images` (56f).
-            .filter(|u| matches!(u.scheme(), "http" | "https"))
-            .filter(|u| {
-                !is_mixed_content(page, u)
-                    && allow(explorer_net::http::FetchDest::Image, u)
-                    && seen_img.insert(u.as_str())
-            })
-            .take(self.max_images)
-            .collect();
+        let imgs = self.plan_img_urls(dom, page, base, &upg, &allow);
         // `<iframe>` (étape 128 + CAP-142) — un sous-contexte
         // est un document complet : `src` = fetch http(s),
         // mixed-content filtré, dédup par URL résolue ;

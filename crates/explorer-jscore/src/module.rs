@@ -387,6 +387,7 @@ impl Engine {
             ctx: self.cur_ctx,
             import_specs: self.import_map.clone(),
         });
+        self.sched_tick("req.import");
         Ok(Value::Obj(pid))
     }
 
@@ -404,6 +405,11 @@ impl Engine {
         let Some(p) = self.pending_imports.remove(&seq) else {
             return;
         };
+        self.sched_tick(if src.is_ok() {
+            "dlv.import"
+        } else {
+            "err.import"
+        });
         match src {
             Ok(s) => {
                 match self

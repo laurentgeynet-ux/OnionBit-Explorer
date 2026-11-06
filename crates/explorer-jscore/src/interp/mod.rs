@@ -1794,6 +1794,11 @@ impl Engine {
                 });
             }
         }
+        // Sonde §B-108 — rail lazy-chunk : `req.dynscript`
+        // vs `dlv./err.` côté livraison (un chunk jamais
+        // demandé = runtime ne l'émet pas ; émis sans
+        // livraison = rail mort côté session).
+        self.sched_add("req.dynscript", out.len() as u64);
         out
     }
 
@@ -1813,27 +1818,28 @@ impl Engine {
         let Some((dom, cache)) = self.dom_ctx.clone() else {
             return;
         };
-        let ty = match body {
-            Some(text) => {
-                let prev = self.hooks.current_script;
-                self.hooks.current_script = Some(node);
-                // Un script qui jette n'empêche pas `load`
-                // (spec : `error` n'est que transport/CSP).
-                // `eval_named` (JS-C87) : la pile d'erreur
-                // attribue le chunk (`at fn (url:l:c)`) —
-                // src sinon étiquette seq. `currentScript`
-                // reste posé pendant le drain des microtasks
-                // (parité Chrome — cf. `eval_script_el`).
-                let label = {
-                    let d = dom.borrow();
-                    d.attr(node, "src")
-                        .map_or_else(|| format!("dyn:{seq}"), str::to_string)
-                };
-                let _ = self.eval_named(text, &label);
-                self.hooks.current_script = prev;
-                "load"
-            }
-            None => "error",
+        let ty = if let Some(text) = body {
+            let prev = self.hooks.current_script;
+            self.hooks.current_script = Some(node);
+            // Un script qui jette n'empêche pas `load`
+            // (spec : `error` n'est que transport/CSP).
+            // `eval_named` (JS-C87) : la pile d'erreur
+            // attribue le chunk (`at fn (url:l:c)`) —
+            // src sinon étiquette seq. `currentScript`
+            // reste posé pendant le drain des microtasks
+            // (parité Chrome — cf. `eval_script_el`).
+            let label = {
+                let d = dom.borrow();
+                d.attr(node, "src")
+                    .map_or_else(|| format!("dyn:{seq}"), str::to_string)
+            };
+            let _ = self.eval_named(text, &label);
+            self.hooks.current_script = prev;
+            self.sched_tick("dlv.dynscript");
+            "load"
+        } else {
+            self.sched_tick("err.dynscript");
+            "error"
         };
         let (bubbles, cancelable, composed) = crate::dom_host::platform_event_flags(ty);
         let ev = crate::dom_host::make_event_state(
@@ -2038,6 +2044,7 @@ impl Engine {
                 });
             }
         }
+        self.sched_add("req.img", out.len() as u64);
         out
     }
 
@@ -2050,6 +2057,7 @@ impl Engine {
         let Some(node) = self.hooks.dyn_img_nodes.remove(&seq) else {
             return;
         };
+        self.sched_tick(if ok { "dlv.img" } else { "err.img" });
         self.fire_el_load_error(node, ok);
     }
 
