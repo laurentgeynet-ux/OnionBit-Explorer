@@ -12,6 +12,9 @@ est dans les roadmaps dédiées :
   (piste produit étapes 50+, piste JS JS-C26+).
 - **`docs/roadmap-profil.md`** — contenu du profil `state/`
   (piste `PR-N`, équipe NAVIGATEUR).
+- **`docs/roadmap-arene.md`** — santé des arènes : réclamation,
+  marquage, empreinte, accès `explorer-dom` + heaps adjacents
+  (piste `AR-N`, transverse PIPE/NAV/JS).
 
 Ce fichier-ci est tenu par le lead : cases cochées historiques,
 état des phases, jalons. Une étape est cochée quand :
