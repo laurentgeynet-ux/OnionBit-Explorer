@@ -24,11 +24,13 @@
 
 #![forbid(unsafe_code)]
 
+mod atom;
 mod dom;
 mod error;
 mod id;
 mod node;
 
+pub use atom::Atom;
 pub use dom::{ChildrenIter, Descendants, DocumentMode, Dom, DEFAULT_MAX_NODES, DEFAULT_MAX_ROOTS};
 pub use error::{DomError, Result};
 pub use id::{NodeId, RootId};

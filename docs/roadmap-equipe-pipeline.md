@@ -2887,6 +2887,35 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   `collect_tronque_puis_realloc_garde_stale` (réutilisation
   d'indice tronqué + `peak_len`), toute la batterie
   stale-handle existante — 27/27 verts, clippy `-D warnings`.
+- [x] **R-149. Interning `tag_name`/`Attribute.name` →
+  `Atom`** (AR-13, chantier ARÈNE — **casse de champs pub,
+  journalée avant code**) : `ElementData.tag_name` et
+  `Attribute.name` passent de `String` à `Atom` — nom
+  interné **process-wide** (`&'static str` dédupliquée par
+  `thread_local`, zéro verrou ni indirection à la lecture —
+  style `AtomicString` Blink/V8 : chaque nom unique alloué
+  une fois, vie du processus ; ~290 noms seedés → fast-path
+  pointeur cross-thread). *Écart assumé au brief « atome
+  u32 sur table au `Dom` »* : une table par-`Dom` cassait
+  `PartialEq` entre arènes (`attrs_eq` compare deux `Dom`)
+  et imposait `&Dom` à chaque lecture ; l'atome global
+  garde `Eq`/`Hash`/`Ord` **textuels** → corrects même sans
+  dédup. Shims `PartialEq<str>`/`PartialEq<&str>`/
+  `Deref<Target=str>`/`Display`/`as_str()`/`Borrow<str>` →
+  les 137 sites `dom.tag_name()` et la quasi-totalité des
+  lectures (`el.tag_name == "x"`, `.len()`, `format!`)
+  compilent **inchangés** — 2 corrections mesurées sur tout
+  le workspace (un `clone()` → `to_string()`, un test).
+  Bonus : `NodeData::Doctype` → `Box<DoctypeData>` (un
+  doctype par document ne doit pas plafonner `NodeData` à
+  72 o) → `Element` devient le variant maximal. Mesuré :
+  `Attribute` 48→40 o, `ElementData` 64→56 o, `NodeData`
+  72→56 o, `Slot` 144→128 o, −1 alloc/élément, −1 alloc/nom
+  d'attribut, noms dedup'd. Banc : `collect` fragmenté
+  **3,2 ms vs 4,5 baseline** (−29 % cumulé AR-12+13),
+  profond **0,19 ms** (−55 %). Verrou de tailles
+  `sizes_probe`, suites vertes, clippy `-D warnings`.
+  `heap_bytes` hors table d'atomes (process-globale).
 
 ## Palier R-B — Contenu étranger, animation, canvas
 

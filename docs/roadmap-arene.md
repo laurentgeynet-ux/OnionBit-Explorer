@@ -174,13 +174,22 @@ arbres vivants (AR-1 sans seeds) ou des nœuds encore référencés
   cache sur ids uniques). Banc : `collect` fragmenté 10 k
   **3,8 ms vs 4,5 ms baseline** (−15 %) en faisant plus de
   travail (reclaim + purges) ; profond 0,42 ms.
-- [ ] **AR-13. Interning atomes** — PIPE, **casse de champs
-  pub** → journal + arbitrage. `tag_name: String` +
-  `Attribute.name` → atome `u32` sur table internée au `Dom`
-  (« div »/« class » dupliqués ×milliers ; comparaisons
-  entières à la cascade). `ElementData` est `pub` à champs
-  `pub` → casse de signature. À trancher **après** baseline
-  AR-6 (coût allocs parse + matching).
+- [x] **AR-13. Interning atomes** — **Livré R-149** :
+  `tag_name`/`Attribute.name` : `String` → `Atom` — nom
+  interné **process-wide** (`&'static str` dédupliquée
+  `thread_local`, zéro verrou — style `AtomicString`).
+  *Écart au brief « u32 sur table au `Dom` »* : une table
+  par-`Dom` cassait `PartialEq` cross-`Dom` (`attrs_eq`
+  compare deux arènes) et imposait `&Dom` à chaque lecture —
+  l'atome global garde l'égalité saine partout (fast-path
+  pointeur + égalité textuelle). Shims `PartialEq<str>` /
+  `Deref` / `Display` / `as_str()` → lectures quasi
+  inchangées (2 corrections mesurées workspace). Bonus :
+  `NodeData::Doctype` boxé (unique → ne plafonne plus
+  `NodeData` à 72 o). `Slot` 144→128 o, −1 alloc/élément,
+  −1 alloc/nom d'attribut, noms dedup'd ; `collect` 3,2 ms
+  (baseline 4,5), profond 0,19 ms. Casse loguée au journal
+  **avant** code (§10.2).
 - [ ] **AR-14. Texte mutualisé** — PIPE, **casse de variante
   pub** → journal + arbitrage. `NodeData::Text(String)` /
   `Comment(String)` → ranges `(off, len)` dans un buffer

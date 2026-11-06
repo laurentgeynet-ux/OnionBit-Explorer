@@ -1348,7 +1348,7 @@ impl TreeBuilder {
                 .map(|a| {
                     a.iter()
                         .map(|at| TokenAttribute {
-                            name: at.name.clone(),
+                            name: at.name.to_string(),
                             value: at.value.clone(),
                         })
                         .collect::<Vec<_>>()
@@ -2309,7 +2309,7 @@ impl TreeBuilder {
         let Ok(e) = self.dom.element(src) else {
             return None;
         };
-        let (tag, ns, attrs) = (e.tag_name.clone(), e.namespace, e.attributes.clone());
+        let (tag, ns, attrs) = (e.tag_name, e.namespace, e.attributes.clone());
         let node = self.dom.create_element_ns(&tag, ns).ok()?;
         for a in attrs {
             let _ = self.dom.set_attribute(node, &a.name, &a.value);

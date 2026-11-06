@@ -14,7 +14,7 @@ use explorer_js::{JsEngine, JscoreEngine};
 /// comparaison structurelle miroir ↔ `explorer-dom`.
 fn collect(dom: &explorer_dom::Dom, id: NodeId, out: &mut Vec<(String, String)>) {
     if let Ok(el) = dom.element(id) {
-        out.push((el.tag_name.clone(), String::new()));
+        out.push((el.tag_name.to_string(), String::new()));
     }
     if let Ok(t) = dom.text(id) {
         out.push(("#text".to_string(), t.to_string()));

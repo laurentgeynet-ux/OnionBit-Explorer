@@ -7,6 +7,7 @@
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 
+use crate::atom::Atom;
 use crate::error::{DomError, Result};
 use crate::id::{NodeId, RootId};
 use crate::node::{Attribute, DoctypeData, ElementData, Namespace, Node, NodeData};
@@ -295,14 +296,20 @@ impl Dom {
             bytes += match &node.data {
                 NodeData::Document => 0,
                 NodeData::Doctype(d) => {
-                    d.name.capacity() + d.public_id.capacity() + d.system_id.capacity()
+                    size_of::<DoctypeData>()
+                        + d.name.capacity()
+                        + d.public_id.capacity()
+                        + d.system_id.capacity()
                 }
                 NodeData::Element(el) => {
-                    el.tag_name.capacity()
-                        + el.attributes.capacity() * size_of::<Attribute>()
+                    // `tag_name`/`attr.name` sont des `Atom`
+                    // internés process-wide (AR-13) — hors
+                    // empreinte propre au `Dom` (la table
+                    // d'atomes est globale, cf. `atom.rs`).
+                    el.attributes.capacity() * size_of::<Attribute>()
                         + el.attributes
                             .iter()
-                            .map(|a| a.name.capacity() + a.value.capacity())
+                            .map(|a| a.value.capacity())
                             .sum::<usize>()
                 }
                 NodeData::Text(t) | NodeData::Comment(t) => t.capacity(),
@@ -382,11 +389,11 @@ impl Dom {
         public_id: &str,
         system_id: &str,
     ) -> Result<NodeId> {
-        self.alloc(NodeData::Doctype(DoctypeData {
+        self.alloc(NodeData::Doctype(Box::new(DoctypeData {
             name: name.to_owned(),
             public_id: public_id.to_owned(),
             system_id: system_id.to_owned(),
-        }))
+        })))
     }
 
     // -----------------------------------------------------------------
@@ -849,7 +856,7 @@ impl Dom {
         match el.attributes.iter_mut().find(|a| a.name == name) {
             Some(attr) => value.clone_into(&mut attr.value),
             None => el.attributes.push(Attribute {
-                name: name.to_owned(),
+                name: Atom::from(name),
                 value: value.to_owned(),
             }),
         }
@@ -892,7 +899,7 @@ impl Dom {
     /// # Errors
     /// Comme [`Dom::element`].
     pub fn tag_name(&self, id: NodeId) -> Result<&str> {
-        Ok(&self.element(id)?.tag_name)
+        Ok(self.element(id)?.tag_name.as_str())
     }
 
     /// Namespace d'un élément (`Html` par défaut — R-15).

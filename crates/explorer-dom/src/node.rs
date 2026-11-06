@@ -4,6 +4,7 @@
 
 //! Contenu des nœuds — données par type + chaînage d'arbre.
 
+use crate::atom::Atom;
 use crate::id::NodeId;
 
 /// Contenu typé d'un nœud de l'arène.
@@ -11,8 +12,11 @@ use crate::id::NodeId;
 pub enum NodeData {
     /// Racine unique — index 0 de l'arène, toujours vivante.
     Document,
-    /// `<!DOCTYPE>` : nom, identifiants public/système.
-    Doctype(DoctypeData),
+    /// `<!DOCTYPE>` : nom, identifiants public/système. Boxé —
+    /// un seul par document, il ne doit pas plafonner
+    /// `NodeData` à 72 o (AR-13 : `Element` devient le variant
+    /// maximal → `Node`/`Slot` rétrécissent).
+    Doctype(Box<DoctypeData>),
     /// Élément : nom de balise + attributs ordonnés.
     Element(ElementData),
     /// Texte (newlines normalisés `\r\n`/`\r` → `\n` à l'insertion).
@@ -36,8 +40,11 @@ pub struct DoctypeData {
 /// sérialisation DOM l'exige).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Attribute {
-    /// Nom (casse préservée — la normalisation HTML est au tree-builder).
-    pub name: String,
+    /// Nom interné — casse préservée (la normalisation HTML est
+    /// au tree-builder). `Atom` : dédupliqué process-wide,
+    /// `== "x"`/`as_str()`/`Deref<str>` préservent l'usage
+    /// `String` (AR-13).
+    pub name: Atom,
     /// Valeur brute.
     pub value: String,
 }
@@ -59,9 +66,10 @@ pub enum Namespace {
 /// Données d'un élément.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ElementData {
-    /// Nom de balise — ajusté en casse pour les balises étrangères
-    /// (`foreignObject`, `feGaussianBlur`…, R-15).
-    pub tag_name: String,
+    /// Nom de balise interné — ajusté en casse pour les balises
+    /// étrangères (`foreignObject`, `feGaussianBlur`…, R-15).
+    /// `Atom` : dédupliqué process-wide (AR-13).
+    pub tag_name: Atom,
     /// Namespace — `Html` sauf contenu étranger.
     pub namespace: Namespace,
     /// Attributs dans l'ordre d'insertion.
@@ -72,8 +80,9 @@ pub struct ElementData {
 }
 
 impl ElementData {
-    /// Crée un élément sans attribut.
-    pub fn new(tag_name: impl Into<String>) -> Self {
+    /// Crée un élément sans attribut — `tag_name` interné à la
+    /// volée (`&str`, `String`, `Atom` acceptés).
+    pub fn new(tag_name: impl Into<Atom>) -> Self {
         Self {
             tag_name: tag_name.into(),
             namespace: Namespace::Html,
@@ -83,7 +92,7 @@ impl ElementData {
     }
 
     /// Crée un élément dans un namespace donné.
-    pub fn with_namespace(tag_name: impl Into<String>, namespace: Namespace) -> Self {
+    pub fn with_namespace(tag_name: impl Into<Atom>, namespace: Namespace) -> Self {
         Self {
             namespace,
             ..Self::new(tag_name)
