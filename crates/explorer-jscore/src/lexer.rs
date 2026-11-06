@@ -293,7 +293,6 @@ pub fn lex(src: &str) -> Result<Vec<Token>> {
 fn lex_in(src: &str, tpl_nest: u32) -> Result<Vec<Token>> {
     Lexer {
         src,
-        chars: src.chars().collect(),
         pos: 0,
         byte_pos: 0,
         line: 1,
@@ -311,11 +310,15 @@ fn lex_in(src: &str, tpl_nest: u32) -> Result<Vec<Token>> {
 const MAX_TPL_NEST: u32 = 512;
 
 struct Lexer<'a> {
-    /// Source — sert aux tranches identifiant du fast-path C311
-    /// (slice `&str` internée sans `String` transitoire).
+    /// Source — itérée directement en `&str` (V-6d) : `peek` se
+    /// décode à la volée sur `src[byte_pos..]`, les tranches de
+    /// littéraux sont des slices `&str` zéro-alloc (fast-path
+    /// C311 généralisé). Le `Vec<char>` de ~4 o/char a quitté
+    /// le chemin — 5.8 Mo évités sur un bundle d'1.4 Mo.
     src: &'a str,
-    chars: Vec<char>,
-    /// Position en *chars* (`chars[pos]` = `peek()`).
+    /// Position en *chars* (compte pour `Token::off`/`end` —
+    /// les spans de `FnLit::toString` restent indexés en
+    /// caractères).
     pos: usize,
     /// Position en *octets* dans `src` — avancée avec `bump()`
     /// (`c.len_utf8()` ; CRLF = 2).
@@ -330,11 +333,37 @@ struct Lexer<'a> {
 
 impl Lexer<'_> {
     fn peek(&self) -> Option<char> {
-        self.chars.get(self.pos).copied()
+        // Fast-path ASCII : le JS réel est ASCII-dominant —
+        // 1 octet lu vs 4 dans l'ancien `Vec<char>` (cache
+        // plus dense) ; le décodage UTF-8 complet n'est payé
+        // que sur le non-ASCII.
+        let b = *self.src.as_bytes().get(self.byte_pos)?;
+        if b < 0x80 {
+            Some(b as char)
+        } else {
+            self.src[self.byte_pos..].chars().next()
+        }
     }
 
+    /// Lookahead `ahead` chars — itère sur `src[byte_pos..]` ;
+    /// les appels réels bornent à 3 (`punct` quatuor).
     fn peek_at(&self, ahead: usize) -> Option<char> {
-        self.chars.get(self.pos + ahead).copied()
+        let bs = self.src.as_bytes();
+        let mut i = self.byte_pos;
+        for _ in 0..ahead {
+            let b = *bs.get(i)?;
+            i += if b < 0x80 {
+                1
+            } else {
+                self.src[i..].chars().next()?.len_utf8()
+            };
+        }
+        let b = *bs.get(i)?;
+        if b < 0x80 {
+            Some(b as char)
+        } else {
+            self.src[i..].chars().next()
+        }
     }
 
     fn bump(&mut self) -> Option<char> {
@@ -745,7 +774,7 @@ impl Lexer<'_> {
     }
 
     fn number(&mut self) -> Result<Tok> {
-        let start = self.pos;
+        let start_b = self.byte_pos;
         // `0x`/`0b`/`0o` prefixed literals.
         if self.peek() == Some('0') {
             if let Some(k) = self.peek_at(1) {
@@ -758,7 +787,7 @@ impl Lexer<'_> {
                 if radix > 0 {
                     self.bump();
                     self.bump();
-                    let ds = self.pos;
+                    let ds_b = self.byte_pos;
                     let dig = |c: char| match radix {
                         16 => c.is_ascii_hexdigit(),
                         8 => matches!(c, '0'..='7'),
@@ -767,11 +796,11 @@ impl Lexer<'_> {
                     while self.peek().is_some_and(|c| dig(c) || c == '_') {
                         self.bump();
                     }
-                    let raw: String = self.chars[ds..self.pos].iter().collect();
+                    let raw = &self.src[ds_b..self.byte_pos];
                     if raw.is_empty() {
                         return Err(self.err("malformed numeric literal"));
                     }
-                    let s = self.clean_num(&raw, dig)?;
+                    let s = self.clean_num(raw, dig)?;
                     // Suffixe `n` → BigInt (`0xFn`, `0o17n`, `0b101n`).
                     if self.peek() == Some('n') {
                         self.bump();
@@ -850,8 +879,8 @@ impl Lexer<'_> {
                     if self.peek().is_some_and(is_ident_start) {
                         return Err(self.err("identifier directly after number"));
                     }
-                    let s: String = self.chars[start..self.pos].iter().collect();
-                    return match u64::from_str_radix(&s, 8) {
+                    let s = &self.src[start_b..self.byte_pos];
+                    return match u64::from_str_radix(s, 8) {
                         Ok(v) => Ok(Tok::Num(v as f64)),
                         Err(_) => Err(self.err("malformed octal literal")),
                     };
@@ -864,11 +893,11 @@ impl Lexer<'_> {
         // Suffixe `n` → BigInt décimal — pas de point ni exposant,
         // et `08n`/`010n` (NonOctalDecimal/octale legacy) rejetés.
         if self.peek() == Some('n') {
-            let raw: String = self.chars[start..self.pos].iter().collect();
+            let raw = &self.src[start_b..self.byte_pos];
             if raw.len() > 1 && raw.starts_with('0') {
                 return Err(self.err("legacy octal bigint literal"));
             }
-            let lit = self.clean_num(&raw, |c| c.is_ascii_digit())?;
+            let lit = self.clean_num(raw, |c| c.is_ascii_digit())?;
             self.bump();
             if self
                 .peek()
@@ -908,8 +937,8 @@ impl Lexer<'_> {
         if self.peek().is_some_and(is_ident_start) {
             return Err(self.err("identifier directly after number"));
         }
-        let raw: String = self.chars[start..self.pos].iter().collect();
-        let s = self.clean_num(&raw, |c| c.is_ascii_digit())?;
+        let raw = &self.src[start_b..self.byte_pos];
+        let s = self.clean_num(raw, |c| c.is_ascii_digit())?;
         s.parse::<f64>()
             .map(Tok::Num)
             .map_err(|_| self.err(format!("malformed number literal `{s}`")))
@@ -985,20 +1014,21 @@ impl Lexer<'_> {
         self.bump(); // opening backquote
         let mut parts = Vec::new();
         let mut cur = String::new();
-        let mut seg_start = self.pos;
+        let mut seg_start_b = self.byte_pos;
         loop {
             match self.bump() {
                 None => return Err(self.err("unterminated template literal")),
                 Some('`') => {
-                    let raw: String = self.chars[seg_start..self.pos - 1].iter().collect();
+                    // Backtick ASCII — `byte_pos - 1` = borne exacte.
+                    let raw = self.src[seg_start_b..self.byte_pos - 1].to_string();
                     parts.push(TplPart::Str(cur, raw));
                     return Ok(Tok::Tpl(parts.into()));
                 }
                 Some('$') if self.peek() == Some('{') => {
                     self.bump();
-                    // `$` et `{` consommés — le chunk brut s'arrête
-                    // avant le `$`.
-                    let raw: String = self.chars[seg_start..self.pos - 2].iter().collect();
+                    // `$` et `{` consommés (2 octets ASCII) — le
+                    // chunk brut s'arrête avant le `$`.
+                    let raw = self.src[seg_start_b..self.byte_pos - 2].to_string();
                     parts.push(TplPart::Str(std::mem::take(&mut cur), raw));
                     let src = self.template_expr_src()?;
                     // Ré-entrée du lexer pour le contenu — profon-
@@ -1010,7 +1040,7 @@ impl Lexer<'_> {
                         || lex_in(&src, nest),
                     )?;
                     parts.push(TplPart::Expr(toks));
-                    seg_start = self.pos;
+                    seg_start_b = self.byte_pos;
                 }
                 Some('\\') => match self.bump() {
                     None => return Err(self.err("unterminated template escape")),
@@ -1051,7 +1081,7 @@ impl Lexer<'_> {
     }
 
     fn template_expr_src_inner(&mut self) -> Result<String> {
-        let start = self.pos;
+        let start_b = self.byte_pos;
         let mut depth = 1usize;
         loop {
             match self.peek() {
@@ -1064,7 +1094,8 @@ impl Lexer<'_> {
                     self.bump();
                     depth -= 1;
                     if depth == 0 {
-                        return Ok(self.chars[start..self.pos - 1].iter().collect());
+                        // `}` ASCII consommé — borne exacte.
+                        return Ok(self.src[start_b..self.byte_pos - 1].to_string());
                     }
                 }
                 Some('\'' | '"') => self.skip_quoted()?,
@@ -1112,11 +1143,11 @@ impl Lexer<'_> {
     /// précédent ferme un opérande (`)`, `]`, `}`, quote,
     /// identifiant/chiffre) → division ; sinon regex.
     fn prev_is_operand_end(&self) -> bool {
-        for c in self.chars[..self.pos].iter().rev() {
+        for c in self.src[..self.byte_pos].chars().rev() {
             match c {
                 ' ' | '\t' | '\n' | '\r' => {}
                 ')' | ']' | '}' | '\'' | '"' | '`' => return true,
-                _ => return c.is_alphanumeric() || *c == '_' || *c == '$',
+                _ => return c.is_alphanumeric() || c == '_' || c == '$',
             }
         }
         false

@@ -307,6 +307,12 @@ arbitré ici :
   `lex` = nouveau mur (64 ms / 63 %) — `chars().collect()`
   ~5.8 Mo est le suspect n°1. V-5b (arène AST / émission
   bytecode) sous porte d'attribution.
+  **V-6d livré (JS-C381)** : `Vec<char>` supprimé — lexer
+  100 % `&str` byte-wise (peek/peek_at fast-path ASCII,
+  littéraux en slices zéro-alloc) : **−5.8 Mo de pic
+  mémoire**, fin de l'amplification ×4 sur source hostile ;
+  `lex_ns` 64→~68 ms (+~5 ms ≈ 1.7 ns/peek — trade
+  mémoire accepté, documenté).
 - **V-5c. Bytecode/VM** — l'horizon : stack machine, IC par
   site persistants, registre allocation. Marathon, hors de
   ce chantier.

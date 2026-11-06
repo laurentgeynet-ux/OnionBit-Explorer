@@ -266,9 +266,9 @@ fn snapshot_liste_les_compteurs_armes() {
 /// tardive jette au call (pas au parse, jamais panic).
 #[test]
 fn corps_differes_materialisation_fidele() {
+    use explorer_jscore::{J17_FN_DEFER, J17_FN_MAT};
     let _g = TEST_LOCK.lock().expect("lock");
     j17_enable();
-    use explorer_jscore::{J17_FN_DEFER, J17_FN_MAT};
     let d0 = tick(&J17_FN_DEFER);
     let m0 = tick(&J17_FN_MAT);
     let mut e = Engine::new();
