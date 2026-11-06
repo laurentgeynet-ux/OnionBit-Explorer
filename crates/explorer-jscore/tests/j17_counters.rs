@@ -9,8 +9,8 @@
 
 use explorer_jscore::{
     j17_enable, j17_snapshot, Engine, J17_ARRIDX_TRY, J17_CALL, J17_CALL_NAT, J17_ENV_LVL,
-    J17_PARSE_CALL, J17_PARSE_DUP, J17_PROP_IDX_BUILD, J17_PROP_IDX_HIT, J17_PROP_LOOKUP,
-    J17_PROP_SCAN, J17_PROTO_LVL, J17_STR_READ,
+    J17_FN_DEFER, J17_FN_DEF_TOK, J17_FN_MAT, J17_PARSE_CALL, J17_PARSE_DUP, J17_PROP_IDX_BUILD,
+    J17_PROP_IDX_HIT, J17_PROP_LOOKUP, J17_PROP_SCAN, J17_PROTO_LVL, J17_STR_READ,
 };
 use std::sync::atomic::Ordering::Relaxed;
 
@@ -266,7 +266,6 @@ fn snapshot_liste_les_compteurs_armes() {
 /// tardive jette au call (pas au parse, jamais panic).
 #[test]
 fn corps_differes_materialisation_fidele() {
-    use explorer_jscore::{J17_FN_DEFER, J17_FN_MAT};
     let _g = TEST_LOCK.lock().expect("lock");
     j17_enable();
     let d0 = tick(&J17_FN_DEFER);
@@ -313,4 +312,56 @@ fn corps_differes_materialisation_fidele() {
         )
         .expect("eval strict différé");
     assert_eq!(e.describe(strict), "true");
+}
+
+/// Harnais d'attribution partagé (V-5a validation
+/// multi-fixtures) : eval verbatim + pompe, delta
+/// `fn_defer`/`fn_mat` imprimés — la part de corps réellement
+/// matérialisés est la mesure, pas un invariant.
+/// NB : `fn_def_tok` = volume cumulé des décisions de defer
+/// (les fonctions imbriquées re-diffèrent à chaque
+/// matérialisation → dépasse `lex_tok` sur bundles exécutés) ;
+/// `fn_mat`/`fn_defer` restent les signaux de taux réel.
+fn attribution_fixture(label: &str, file: &str) {
+    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/");
+    let src = std::fs::read_to_string(format!("{path}{file}"))
+        .unwrap_or_else(|e| panic!("fixture {file}: {e}"));
+    let (d0, dt0, m0) = (
+        tick(&J17_FN_DEFER),
+        tick(&J17_FN_DEF_TOK),
+        tick(&J17_FN_MAT),
+    );
+    let mut e = Engine::new();
+    e.install_timers();
+    let t = std::time::Instant::now();
+    let r = e.eval(&src);
+    let eval_wall = t.elapsed();
+    for _ in 0..8 {
+        let _ = e.run_microtasks();
+        let _ = e.run_due_timers_bounded(200);
+        let _ = e.drain_unhandled_rejections();
+    }
+    let wall = t.elapsed();
+    eprintln!(
+        "attribution {label}: eval={eval_wall:?} total={wall:?} \
+         r={:?} | defer=+{} defer_tok=+{} mat=+{} | {}",
+        r.as_ref().map(|_| "ok").map_err(|_| "err"),
+        tick(&J17_FN_DEFER) - d0,
+        tick(&J17_FN_DEF_TOK) - dt0,
+        tick(&J17_FN_MAT) - m0,
+        j17_snapshot()
+    );
+}
+
+#[test]
+fn attribution_bundles_reels_dsfr_bitmovin() {
+    let _g = TEST_LOCK.lock().expect("lock");
+    j17_enable();
+    // Profils non-webpack-BBC : dsfr (composants état) et
+    // transmuxer bitmovin (pipeline media) — les corps y sont
+    // pour partie appelés au startup → `fn_mat` exercera la
+    // matérialisation en conditions réelles.
+    attribution_fixture("dsfr_core", "vol16_dsfr_core.js");
+    attribution_fixture("bitmovin", "bitmovin_transmuxer.js");
+    attribution_fixture("spotify_slice", "vol12_spotify_gen_slice.js");
 }
