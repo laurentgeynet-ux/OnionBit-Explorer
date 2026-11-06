@@ -396,6 +396,15 @@ pub struct Engine {
     /// Vie du moteur, pas document-local.
     pub(crate) promises_created: u64,
     pub(crate) promises_settled: u64,
+    /// Compteurs d'ordonnancement (sonde §B-97 `sched.*`) —
+    /// cumulés depuis le boot, émis `sched.tally` à chaque
+    /// [`Engine::collect`]. `posts ≠ fires` nomme le rail qui
+    /// enfile sans drainer ; `then` élevé sans `post.reaction`
+    /// = promesses jamais résolues (le `.then` n'enfile rien
+    /// tant que la promesse ne settle pas) ; `left_now` =
+    /// résidu de file à la passe (JS-C103) ; `ctx_drop` =
+    /// jobs lâchés sur realm mort (§B-97 candidat H-A).
+    pub(crate) sched_tally: std::collections::BTreeMap<&'static str, u64>,
     /// `MutationObserver` bookkeeping (JS-C26) — callbacks par
     /// id d'observer ; les records vivent dans la file du `Dom`.
     pub(crate) mutobs: crate::mutation::MutObsState,
@@ -992,6 +1001,7 @@ impl Engine {
             microtasks: std::collections::VecDeque::new(),
             promises_created: 0,
             promises_settled: 0,
+            sched_tally: std::collections::BTreeMap::new(),
             mutobs: crate::mutation::MutObsState::default(),
             obs: crate::observers::ObsState::default(),
             files: crate::files::FilesState::default(),
@@ -2429,6 +2439,7 @@ impl Engine {
         // pour le check `"/"` (native_caller = vrai appelant
         // sous switch natif).
         let origin = self.ctx_origin(src);
+        self.sched_tick("post.msg");
         self.pending_msgs.push_back(crate::context::PendingMsg {
             target,
             data: wire,
@@ -2569,6 +2580,25 @@ impl Engine {
     /// [`Engine::add_root`]. Retourne le nombre de cellules
     /// réclamées ; les host objects balayés reçoivent leur
     /// hook `Host::finalize` avant libération.
+    /// Sonde §B-97 — incrémente un compteur `sched.*` (garde
+    /// `enabled!` : coût nul quand la batterie n'est pas armée,
+    /// convention `dom_probe`/`media_probe`).
+    #[inline]
+    pub(crate) fn sched_tick(&mut self, key: &'static str) {
+        if tracing::enabled!(target: "dom_probe", tracing::Level::INFO) {
+            *self.sched_tally.entry(key).or_default() += 1;
+        }
+    }
+
+    /// Même sonde en addition `n` (livraisons groupées par
+    /// round — observer/stream/idb/etc.).
+    #[inline]
+    pub(crate) fn sched_add(&mut self, key: &'static str, n: u64) {
+        if n > 0 && tracing::enabled!(target: "dom_probe", tracing::Level::INFO) {
+            *self.sched_tally.entry(key).or_default() += n;
+        }
+    }
+
     pub fn collect(&mut self) -> usize {
         // 1. Rassemble les `ObjId` tenus par les structures
         //    annexes (RefCell/NodeCache — leurs borrows doivent
@@ -2601,9 +2631,9 @@ impl Engine {
         // wrapper est mort partent (un nœud détaché et
         // déréférencé ne garde plus de wrapper) ; puis les
         // nœuds non attachés non retenus perdent leurs
-        // payloads lourds — l'arène reste append-only (les
-        // `NodeId` indexent `nodes` et ne se réutilisent pas,
-        // journal DomSync intact) mais le churn `innerHTML`
+        // payloads lourds et leur slot — réutilisés par
+        // `alloc` (§B-59) sauf `dead_blocked` (rejeu journal
+        // en attente — ADR-0033) ; le churn `innerHTML`
         // n'accumule plus attrs/texte/enfants.
         if let Some((dom, cache)) = &self.dom_ctx {
             let mut c = cache.borrow_mut();
@@ -2651,6 +2681,18 @@ impl Engine {
             );
             self.microtasks
                 .push_back((self.cur_ctx, crate::promise::Job::Plain(f)));
+            self.sched_tick("post.plain");
+        }
+        // §B-97 — tally ordonnancement : posts vs fires par
+        // rail (promesses/timers/livraisons). `then` élevé
+        // sans `post.reaction` = promesses jamais résolues —
+        // la tâche consommatrice n'est jamais *postée* (H-A) ;
+        // `post.* > fire.*` = rail enfilé jamais drainé ;
+        // `ctx_drop` = jobs lâchés sur realm mort.
+        if !self.sched_tally.is_empty() {
+            self.sched_tally
+                .insert("left_now", self.microtasks.len() as u64);
+            tracing::info!(target: "dom_probe", site = "sched.tally", tally = ?self.sched_tally);
         }
         n
     }

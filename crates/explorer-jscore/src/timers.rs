@@ -239,6 +239,7 @@ impl Engine {
             }
             // Each callback gets a fresh op budget — et sa
             // propre deadline (J11 : tâche par tâche).
+            self.sched_tick("fire.timer");
             self.ops_left = self.op_limit;
             self.arm_eval_deadline();
             // Sonde boucle §B-59/J11 : sous `EXPLORER_JOB_TRACE`,
@@ -350,6 +351,7 @@ fn timer_set_timeout(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Valu
     let cb = arg(args, 0);
     let ms = delay_ms(e, args.get(1).copied())?;
     let cb_args = args.get(2..).unwrap_or(&[]).to_vec();
+    e.sched_tick("post.timer");
     let id = e.timers.schedule(cb, ms, false, cb_args);
     Ok(Value::Num(id as f64))
 }
@@ -359,6 +361,7 @@ fn timer_set_interval(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Val
     let cb = arg(args, 0);
     let ms = delay_ms(e, args.get(1).copied())?;
     let cb_args = args.get(2..).unwrap_or(&[]).to_vec();
+    e.sched_tick("post.timer");
     let id = e.timers.schedule(cb, ms, true, cb_args);
     Ok(Value::Num(id as f64))
 }
@@ -369,6 +372,7 @@ fn timer_set_interval(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Val
 fn timer_raf(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     let cb = arg(args, 0);
     let ts = Value::Num(e.t0.elapsed().as_secs_f64() * 1000.0);
+    e.sched_tick("post.raf");
     let id = e.timers.schedule(cb, 16, false, vec![ts]);
     Ok(Value::Num(id as f64))
 }
@@ -417,6 +421,7 @@ fn timer_ric(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     let sched = Value::Num(e.t0.elapsed().as_secs_f64() * 1000.0);
     let tr = e.bound_native("timeRemaining", idle_time_remaining, vec![sched]);
     e.set_own(deadline, "timeRemaining", tr, true);
+    e.sched_tick("post.ric");
     let id = e
         .timers
         .schedule(cb, delay, false, vec![Value::Obj(deadline)]);

@@ -161,6 +161,7 @@ impl Host for PortHost {
                 if self.closed.get() {
                     return Ok(Some(Value::Undefined));
                 }
+                e.sched_tick("post.port");
                 e.port_msgs.push_back(PortMsg {
                     dest: self.peer.get(),
                     data,

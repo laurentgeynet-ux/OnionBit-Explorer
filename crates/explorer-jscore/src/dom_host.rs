@@ -13330,6 +13330,7 @@ fn signal_static_timeout(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<
         _ => 0,
     };
     let cb = e.bound_native("abort", signal_timeout_fire, vec![sig]);
+    e.sched_tick("post.timer");
     e.timers.schedule(cb, ms, false, Vec::new());
     Ok(sig)
 }
@@ -15606,6 +15607,7 @@ fn scheduler_post_task(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Va
             return Ok(Value::Obj(pid));
         }
     }
+    e.sched_tick("post.posttask");
     let fire = e.bound_native(
         "postTask",
         post_task_fire,

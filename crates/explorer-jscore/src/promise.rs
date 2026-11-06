@@ -207,6 +207,7 @@ impl Engine {
         }
         for r in reactions {
             let rejected = state == PromiseState::Rejected;
+            self.sched_tick("post.reaction");
             self.microtasks.push_back((
                 self.cur_ctx,
                 Job::Reaction {
@@ -341,6 +342,7 @@ impl Engine {
                         let ObjKind::Promise(p) = &o.kind else { return };
                         (p.resolve_fn, p.reject_fn)
                     };
+                    self.sched_tick("then");
                     if let Some(o) = self.heap.obj_mut(vid) {
                         if let ObjKind::Promise(p) = &mut o.kind {
                             // Adoption = souscription — `vid` est
@@ -408,6 +410,7 @@ impl Engine {
             };
             (p.resolve_fn, p.reject_fn)
         };
+        self.sched_tick("post.thenable");
         self.microtasks.push_back((
             self.cur_ctx,
             Job::Thenable {
@@ -427,6 +430,7 @@ impl Engine {
 
     /// `queueMicrotask(f)` — also used internally for deferred work.
     pub(crate) fn enqueue_microtask(&mut self, f: Value) {
+        self.sched_tick("post.plain");
         self.microtasks.push_back((self.cur_ctx, Job::Plain(f)));
     }
 
@@ -574,6 +578,7 @@ impl Engine {
                     // est sauté — nomme la famine (github lazy-CE :
                     // réactions `.then` post-`import()` taguées
                     // d'un ctx module disparu).
+                    self.sched_tick("ctx_drop");
                     if std::env::var("EXPLORER_PROM_TRACE").is_ok() {
                         eprintln!("[prom-job-drop] ctx={ctx} cur={}", self.cur_ctx);
                     }
@@ -618,6 +623,11 @@ impl Engine {
                     eprintln!("[mt-run] {kind} ctx={ctx}");
                 }
                 ran += 1;
+                self.sched_tick(match &job {
+                    Job::Reaction { .. } => "fire.reaction",
+                    Job::Thenable { .. } => "fire.thenable",
+                    Job::Plain(_) => "fire.plain",
+                });
                 match job {
                     Job::Reaction {
                         cb,
@@ -672,6 +682,9 @@ impl Engine {
             // J11 — sortie gracieuse sur yield : jobs restants
             // en file, mêmes sorties qu'un drain apaisé.
             if yielded {
+                if !self.microtasks.is_empty() {
+                    self.sched_tick("left_drains");
+                }
                 self.fire_unhandled_rejections();
                 self.switch_to(home);
                 self.maybe_collect();
@@ -716,15 +729,39 @@ impl Engine {
                 if self.cur_ctx != id {
                     continue;
                 }
-                if self.deliver_mutations()?
-                    || self.deliver_observers()? > 0
-                    || self.deliver_file_reads()? > 0
-                    || self.pump_stream_reads()? > 0
-                    || crate::idb::deliver_idb_requests(self)? > 0
-                    || self.deliver_ws()? > 0
-                    || self.drain_es()? > 0
-                    || self.deliver_bc()? > 0
-                    || crate::mse::deliver_mse_events(self)?
+                // §B-97 — comptage par rail (`sched.*`) : le
+                // `||` séquentiel court-circuitait les pompes
+                // aval dès qu'une pompe amont livrait — chaque
+                // pompe tourne désormais à chaque round (plus
+                // fidèle à « deliver all ready work ») et sa
+                // production est nommée dans le tally.
+                let dm = self.deliver_mutations()?;
+                let dob = self.deliver_observers()?;
+                let dfr = self.deliver_file_reads()?;
+                let dsr = self.pump_stream_reads()?;
+                let didb = crate::idb::deliver_idb_requests(self)?;
+                let dws = self.deliver_ws()?;
+                let des = self.drain_es()?;
+                let dbc = self.deliver_bc()?;
+                let dmse = crate::mse::deliver_mse_events(self)?;
+                self.sched_add("dlv.mutations", u64::from(dm));
+                self.sched_add("dlv.observers", dob as u64);
+                self.sched_add("dlv.file_reads", dfr as u64);
+                self.sched_add("dlv.stream_reads", dsr as u64);
+                self.sched_add("dlv.idb", didb as u64);
+                self.sched_add("dlv.ws", dws as u64);
+                self.sched_add("dlv.es", des as u64);
+                self.sched_add("dlv.bc", dbc as u64);
+                self.sched_add("dlv.mse", u64::from(dmse));
+                if dm
+                    || dob > 0
+                    || dfr > 0
+                    || dsr > 0
+                    || didb > 0
+                    || dws > 0
+                    || des > 0
+                    || dbc > 0
+                    || dmse
                 {
                     delivered = true;
                 }
@@ -734,6 +771,9 @@ impl Engine {
             // JS-C81 : messages `MessageChannel` — même
             // frontière de job que `postMessage`/workers.
             let ports = self.drain_port_msgs()?;
+            self.sched_add("dlv.msgs", msgs as u64);
+            self.sched_add("dlv.workers", workers as u64);
+            self.sched_add("dlv.ports", ports as u64);
             rounds += 1;
             // JS-C103 — sortie bornée : plafond de jobs atteint,
             // rounds de livraison épuisés, ou file réellement
@@ -741,6 +781,12 @@ impl Engine {
             let settled =
                 !delivered && msgs == 0 && workers == 0 && ports == 0 && self.microtasks.is_empty();
             if settled || ran >= MICROTASK_DRAIN_CAP || rounds >= DELIVERY_ROUNDS_CAP {
+                // §B-97 — résidu : sortie avec file non vide
+                // (borne JS-C103/rounds) — des jobs postés
+                // attendent la pompe suivante.
+                if !self.microtasks.is_empty() {
+                    self.sched_tick("left_drains");
+                }
                 // JS-C154 — `unhandledrejection` en fin de
                 // checkpoint : les rejets non gérés du tour sont
                 // revus (un `.then` tardif les a retirés).
@@ -1017,6 +1063,7 @@ fn promise_then(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> 
     };
     match state {
         PromiseState::Pending => {
+            e.sched_tick("then");
             if let Some(o) = e.heap.obj_mut(id) {
                 if let ObjKind::Promise(p) = &mut o.kind {
                     p.reactions.push(Reaction {
@@ -1029,6 +1076,7 @@ fn promise_then(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> 
         }
         PromiseState::Fulfilled | PromiseState::Rejected => {
             let rejected = state == PromiseState::Rejected;
+            e.sched_tick("post.reaction");
             e.microtasks.push_back((
                 e.cur_ctx,
                 Job::Reaction {
