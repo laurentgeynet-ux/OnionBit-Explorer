@@ -157,6 +157,41 @@ fn bench_composite(c: &mut Criterion) {
     });
 }
 
+/// V-2 attribution — profil « kevlar-like » : config profonde
+/// (`ytcfg.data_.a.b.c`), classes ES5 (`function`+`prototype`),
+/// dispatch de méthodes, callbacks `map`/`filter`, closures,
+/// churn objets et concat — le mix réel que la porte V-4 doit
+/// chiffrer (part des lookups dans le temps total).
+fn bench_kevlar_like(c: &mut Criterion) {
+    let mut e = Engine::new();
+    c.bench_function("kevlar_like_200", |b| {
+        b.iter(|| {
+            e.eval(black_box(
+                "(function(){\
+                 var cfg={data_:{a:{b:{c:7}}},env:{prod:1,flags:{x:1}}};\
+                 function W(id){this.id=id;this.state=0;this.items=[]}\
+                 W.prototype.tick=function(k){this.state+=k;return this.state};\
+                 W.prototype.collect=function(cb){var s=0;\
+                   for(var i=0;i<this.items.length;i++){s+=cb(this.items[i])}return s};\
+                 var ws=[];\
+                 for(var i=0;i<50;i++){var w=new W(i);\
+                   for(var j=0;j<4;j++){w.items.push({v:j,w:i})}ws.push(w)}\
+                 var s=0;\
+                 for(var t=0;t<200;t++){\
+                   var w=ws[t%50];\
+                   s+=w.tick(1)+cfg.data_.a.b.c;\
+                   s+=w.collect(function(it){return it.v+it.w});\
+                   var m=w.items.map(function(it){return it.v*2})\
+                                .filter(function(v){return v>2});\
+                   s+=m.length;\
+                   var st='w'+w.id+':'+w.state;s+=st.length}\
+                 return s})()",
+            ))
+            .expect("kevlar_like")
+        });
+    });
+}
+
 criterion_group!(
     benches,
     bench_prop_mono,
@@ -167,5 +202,6 @@ criterion_group!(
     bench_array_read,
     bench_parse,
     bench_composite,
+    bench_kevlar_like,
 );
 criterion_main!(benches);

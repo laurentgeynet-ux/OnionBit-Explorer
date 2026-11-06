@@ -179,6 +179,26 @@ avant/après dans le message. Ordre = risque croissant.
 
 ## V-4 — Shapes + cache global `(shape, clé) → slot`
 
+> **Verdict de la porte V-2 (mesuré, 2026-11-06 —
+> JS-C375) : DIFFÉRÉ.** Le bundle réel `vol34_bbc_app.js`
+> (1 445 423 o, capturé vol 34) évalué verbatim sous J17
+> armé : `eval=258 ms`, `prop_lookup=12`, `call=1`,
+> `parse_call=1`, `parse_dup=0` — **~180 ns/octet de
+> parse (~5.6 Mo/s), quasi 100 % du temps d'eval**, la
+> résolution de props ≈ 0 %. Sur le synthétique
+> prop-dense `kevlar_like` (8.8 ms) : 10 607 lookups ×
+> ~1.1 µs ≈ 11.7 ms projetés vs 1 901 calls × ~4.9 µs ≈
+> 9.3 ms — lookups et frames se partagent le temps, aucun
+> n'atteint le seuil ~30-40 % seul sur workload réel.
+> **Le mur mesuré suivant = le parse** (YouTube livre
+> des Mo → secondes de parse au boot), puis frame/env au
+> steady-state. V-4 reste le bon fix *structurel* des
+> props mais sa part mesurée ne le justifie pas avant
+> d'autres chantiers — le design ci-dessous est prêt et
+> arbitré, rouvrir si les vols armés (`EXPLORER_J17_PROF`)
+> montrent `parse_call×temps` effacé par du churn
+> lookup-dominé en steady-state.
+
 Le fix structurel. **ADR-0034 avant code** — le design est
 arbitré ici :
 
@@ -240,6 +260,15 @@ arbitré ici :
 
 ## Ouvertures (hors file)
 
+- **V-6. Vitesse de parse** — le mur mesuré par la porte
+  V-4 : ~180 ns/octet (~5.6 Mo/s) sur `vol34_bbc_app.js`
+  (258 ms pour 1.44 Mo, exécution quasi nulle). Le lexer
+  (`Tok` par char), `close_table` (O(n²) sur accolades ?),
+  les `Vec` d'AST par statement sont les suspects — à
+  instrumenter avant de toucher (même discipline V-2 :
+  compteurs par phase `lex`/`parse`/`bind`, `note_parse`
+  chronomètre déjà). Candidat sérieux au prochain levier
+  marathon : YouTube livre des Mo.
 - **V-5. Bytecode/VM** — l'horizon : stack machine, IC par
   site persistants, registre allocation. Marathon, hors de
   ce chantier.

@@ -14,12 +14,21 @@ use explorer_jscore::{
 };
 use std::sync::atomic::Ordering::Relaxed;
 
+/// Les compteurs J17 sont des atomiques **process-global** :
+/// les tests du harnais tournent en parallèle et se
+/// contaminent mutuellement leurs fenêtres delta (flake
+/// observé : `call_nat` de `kevlar_like` compté dans
+/// `attribution_call_rate_domine`). Chaque test prend le
+/// verrou — coût nul (suites ~ms), mesures propres.
+static TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 fn tick(c: &'static std::sync::atomic::AtomicU64) -> u64 {
     c.load(Relaxed)
 }
 
 #[test]
 fn counters_nomment_les_chemins_payes() {
+    let _g = TEST_LOCK.lock().expect("lock");
     j17_enable();
     let mut e = Engine::new();
 
@@ -58,6 +67,7 @@ fn counters_nomment_les_chemins_payes() {
 
 #[test]
 fn counters_index_paresseux() {
+    let _g = TEST_LOCK.lock().expect("lock");
     j17_enable();
     let mut e = Engine::new();
     // ≥24 props → `prop_pos` construit l'index au premier
@@ -83,6 +93,7 @@ fn counters_index_paresseux() {
 
 #[test]
 fn attribution_call_rate_domine() {
+    let _g = TEST_LOCK.lock().expect("lock");
     j17_enable();
     let mut e = Engine::new();
     // Le scénario `call_rate` du banc V-1 (~4.9 µs/appel) :
@@ -124,7 +135,92 @@ fn attribution_call_rate_domine() {
 }
 
 #[test]
+fn attribution_kevlar_like() {
+    let _g = TEST_LOCK.lock().expect("lock");
+    j17_enable();
+    let mut e = Engine::new();
+    // Porte V-4 : la part des lookups dans le temps total
+    // d'un workload kevlar-like (config profonde, classes
+    // ES5+proto, callbacks, churn). Snapshot + wall time —
+    // la projection se fait dans le test, hors assert :
+    // les parts sont des mesures, pas des invariants.
+    let (c0, l0, e0) = (tick(&J17_CALL), tick(&J17_PROP_LOOKUP), tick(&J17_ENV_LVL));
+    let t = std::time::Instant::now();
+    e.eval(
+        "(function(){\
+         var cfg={data_:{a:{b:{c:7}}},env:{prod:1,flags:{x:1}}};\
+         function W(id){this.id=id;this.state=0;this.items=[]}\
+         W.prototype.tick=function(k){this.state+=k;return this.state};\
+         W.prototype.collect=function(cb){var s=0;\
+           for(var i=0;i<this.items.length;i++){s+=cb(this.items[i])}return s};\
+         var ws=[];\
+         for(var i=0;i<50;i++){var w=new W(i);\
+           for(var j=0;j<4;j++){w.items.push({v:j,w:i})}ws.push(w)}\
+         var s=0;\
+         for(var t=0;t<100;t++){\
+           var w=ws[t%50];\
+           s+=w.tick(1)+cfg.data_.a.b.c;\
+           s+=w.collect(function(it){return it.v+it.w});\
+           var m=w.items.map(function(it){return it.v*2})\
+                        .filter(function(v){return v>2});\
+           s+=m.length;\
+           var st='w'+w.id+':'+w.state;s+=st.length}\
+         return s})()",
+    )
+    .expect("eval kevlar_like");
+    let wall = t.elapsed();
+    let calls = tick(&J17_CALL) - c0;
+    let lookups = tick(&J17_PROP_LOOKUP) - l0;
+    let env_lvls = tick(&J17_ENV_LVL) - e0;
+    eprintln!(
+        "attribution kevlar_like: wall={wall:?} calls={calls} \
+         lookups={lookups} env_lvls={env_lvls} | {}",
+        j17_snapshot()
+    );
+    // Verrous lâches : le workload doit exercer les trois
+    // chemins (un profil à zéro = mesure morte).
+    assert!(calls > 500, "calls attendus, vu {calls}");
+    assert!(lookups > 500, "lookups attendus, vu {lookups}");
+    assert!(env_lvls > 500, "env_lvls attendus, vu {env_lvls}");
+}
+
+#[test]
+fn attribution_bundle_reel_bbc() {
+    let _g = TEST_LOCK.lock().expect("lock");
+    j17_enable();
+    // Vol armé local : le chunk `_app` BBC Good Food
+    // (1 445 423 o, capturé vol 34) évalué verbatim —
+    // même harnais que `j6_probe` (timers + pompe).
+    // Le wall armé inclut le coût des ticks (~15 ns/
+    // événement) → la part props projetée est une borne
+    // haute, conservatrice pour la porte V-4.
+    let src = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/data/vol34_bbc_app.js"
+    ))
+    .unwrap_or_else(|e| panic!("fixture: {e}"));
+    let mut e = Engine::new();
+    e.install_timers();
+    let t = std::time::Instant::now();
+    let r = e.eval(&src);
+    let eval_wall = t.elapsed();
+    for _ in 0..8 {
+        let _ = e.run_microtasks();
+        let _ = e.run_due_timers_bounded(200);
+        let _ = e.drain_unhandled_rejections();
+    }
+    let wall = t.elapsed();
+    eprintln!(
+        "attribution bbc_app: eval={eval_wall:?} total={wall:?} \
+         r={:?} | {}",
+        r.as_ref().map(|_| "ok").map_err(|_| "err"),
+        j17_snapshot()
+    );
+}
+
+#[test]
 fn parse_probe_nomme_les_reparses() {
+    let _g = TEST_LOCK.lock().expect("lock");
     j17_enable();
     let mut e = Engine::new();
     // Verrou V-3c : même source re-parsée → `parse_dup`
@@ -148,6 +244,7 @@ fn parse_probe_nomme_les_reparses() {
 
 #[test]
 fn snapshot_liste_les_compteurs_armes() {
+    let _g = TEST_LOCK.lock().expect("lock");
     j17_enable();
     let mut e = Engine::new();
     e.eval("var o={a:1};o.a").expect("eval");
