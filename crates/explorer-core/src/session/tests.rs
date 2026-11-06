@@ -2455,22 +2455,6 @@ fn attr_diff_restyle_subtree_hors_dirty() {
 //   cargo test -p explorer-core --lib tab_mem_inventory -- --ignored --nocapture
 // ------------------------------------------------------------------
 
-fn dom_deep_bytes(dom: &Dom, n: explorer_dom::NodeId) -> usize {
-    let mut b = dom.text(n).map_or(0, str::len);
-    if let Ok(attrs) = dom.attributes(n) {
-        b += attrs
-            .iter()
-            .map(|a| a.name.len() + a.value.len())
-            .sum::<usize>();
-    }
-    b + dom
-        .children(n)
-        .unwrap_or_default()
-        .iter()
-        .map(|&c| dom_deep_bytes(dom, c))
-        .sum::<usize>()
-}
-
 fn box_deep_bytes(bx: &explorer_layout::LayoutBox) -> usize {
     let mut b = std::mem::size_of::<explorer_layout::LayoutBox>()
         + bx.text.as_deref().map_or(0, str::len)
@@ -2553,11 +2537,14 @@ async fn tab_mem_inventory() {
 
     let e = s.tabs.get_mut(&tab).unwrap();
     let mib = |n: usize| n / 1_048_576;
-    // DOM — arène opaque : live_count × Slot estimé (~120 o) + textes.
-    let (nodes, dom_text) = e.dom.as_ref().map_or((0, 0), |d| {
-        (d.live_count(), dom_deep_bytes(d, d.document()))
-    });
-    eprintln!("dom: {nodes} nœuds, texte+attrs {} Mio", mib(dom_text));
+    // DOM — arène mesurée : heap_bytes (capacité slots +
+    // tables + textes/attributs internes, R-143) — remplace
+    // l'estimateur « ~120 o/case » (Slot = 144 o mesuré).
+    let (nodes, dom_b) = e
+        .dom
+        .as_ref()
+        .map_or((0, 0), |d| (d.live_count(), d.heap_bytes()));
+    eprintln!("dom: {nodes} nœuds, arène {} Mio", mib(dom_b));
     let tree_b = e.tree.as_ref().map_or(0, box_deep_bytes);
     eprintln!(
         "boxtree: {} Mio (size_of LayoutBox={})",

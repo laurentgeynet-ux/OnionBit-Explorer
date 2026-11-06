@@ -123,8 +123,10 @@ arbres vivants (AR-1 sans seeds) ou des nœuds encore référencés
   **Livré R-143** : capacité `slots` (cases libres
   incluses) + tables + allocs internes aux nœuds →
   `MemReport.dom_bytes`/`bfcache_dom_bytes`.
-- [ ] **AR-8. Estimateur corrigé** — NAV, trivial.
-  `session/tests.rs:2556` « ~120 o » → **144 o** (mesuré).
+- [x] **AR-8. Estimateur corrigé** — NAV, trivial.
+  `tab_mem_inventory` : `live_count × ~120 o` + marche
+  manuelle remplacés par `Dom::heap_bytes()` (R-143) ;
+  `dom_deep_bytes` supprimé.
 
 ## Palier AR-P2 — Perf / mémoire (sur baseline AR-6)
 
