@@ -919,6 +919,16 @@ pub struct Session {
     /// 209) — émis à leur échéance `at` par `poll_net`,
     /// annulés par `Abort`/fermeture d'onglet.
     fetch_held: std::collections::VecDeque<net_items::HeldFetch>,
+    /// `fetch`/XHR validés en attente d'un slot
+    /// `max_script_net` (JS-C367, vol 668 §B-97) — le quota
+    /// borne les tâches **vivantes**, l'excédent attend ici
+    /// (FIFO par onglet) au lieu d'être rejeté `status: 0`
+    /// sec : la rafale `FontFace.load()` de kevlar (~200
+    /// fetch sur 16 slots) tuait le `Promise.all` de
+    /// font-gating → `ytInitialData` jamais consommé.
+    /// Drainée par `pump_pending_script_net` à chaque
+    /// `poll_net` ; purgée `close_tab`/`Abort`.
+    pending_script_net: std::collections::VecDeque<net_items::PendingFetch>,
     /// Dedup des sondes `net.drop`/`net.fail` (JS-C366,
     /// `media_probe`) — couples `(kind, host)` déjà logués :
     /// le motif d'échec est nommé une fois par sorte, le
@@ -1185,6 +1195,7 @@ impl Session {
             ordered_dyn: HashMap::new(),
             fetch_fail_streak: HashMap::new(),
             fetch_held: std::collections::VecDeque::new(),
+            pending_script_net: std::collections::VecDeque::new(),
             net_probe_seen: std::collections::HashSet::new(),
             max_script_net: cfg.max_script_net,
             max_timer_jobs: cfg.max_timer_jobs,
@@ -1604,6 +1615,9 @@ impl Session {
         // sans purge, une promesse retenue pendrait à jamais.
         self.fetch_held.retain(|h| h.tab != tab);
         self.fetch_fail_streak.retain(|(t, _), _| *t != tab);
+        // Garés quota JS-C367 — une promesse garée sur un
+        // onglet mort pendrait à jamais.
+        self.pending_script_net.retain(|p| p.tab != tab);
         // Même purge pour les imports/scripts dynamiques :
         // jusqu'ici `dyn_tasks` survivait au DELETE — une
         // rafale `import()`/`<script>` dynamique continuait

@@ -4675,19 +4675,22 @@ async fn xhr_cross_origin_custom_header_blocked() {
     );
 }
 
-/// Deux XHR, quota 1 : la seconde échoue d'office (`error`),
-/// la première complète.
+/// Deux XHR, quota 1 : la seconde **attend un slot** puis
+/// complète (`load` — JS-C367 : file bornée au lieu du
+/// rejet `status: 0` sec qui tuait le font-gating kevlar,
+/// vol 668 §B-97).
 const PAGE_XHR_QUOTA: &str = "<!doctype html><html><body>\
     <div id=\"a\">?</div><div id=\"b\">?</div>\
     <script>\
     var q=new XMLHttpRequest();q.open('GET','/api');\
     q.onload=function(){document.getElementById('a').textContent='OK'};\
     var r=new XMLHttpRequest();r.open('GET','/api');\
+    r.onload=function(){document.getElementById('b').textContent='OK2'};\
     r.onerror=function(){document.getElementById('b').textContent='KO'};\
     q.send();r.send()</script></body></html>";
 
 #[tokio::test]
-async fn xhr_quota_exceeded_fails_fast() {
+async fn xhr_quota_exceeded_queues_and_completes() {
     let t = Arc::new(FakeTransport::new());
     t.route("/", 200, PAGE_XHR_QUOTA);
     t.route("/api", 200, "DATA");
@@ -4695,7 +4698,7 @@ async fn xhr_quota_exceeded_fails_fast() {
         "/stat",
         200,
         "<!doctype html><html><body><div id=\"a\">OK</div>\
-         <div id=\"b\">KO</div></body></html>",
+         <div id=\"b\">OK2</div></body></html>",
     );
     let mut s = Session::with_config(
         t.clone(),
@@ -4713,7 +4716,7 @@ async fn xhr_quota_exceeded_fails_fast() {
     assert_eq!(
         s.frame_png(a),
         s.frame_png(b),
-        "quota atteint → 2e requête en erreur immédiate"
+        "quota atteint → 2e requête garée puis complétée au slot libéré"
     );
 }
 

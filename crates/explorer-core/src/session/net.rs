@@ -35,6 +35,15 @@ pub(crate) const FETCH_BACKOFF_CAP: std::time::Duration = std::time::Duration::f
 /// quota atteint), la tempête reste bornée par le quota
 /// `max_script_net` des tâches vivantes.
 const MAX_HELD_FETCHES: usize = 512;
+/// Borne de la file `pending_script_net` (JS-C367) — un
+/// fetch/XHR validé qui dépasse `max_script_net` **attend
+/// un slot** (comportement navigateur) au lieu d'être
+/// rejeté `status: 0` sec : la rafale `FontFace.load()`
+/// de kevlar (~200 fetch/16 slots — vol 668 §B-97) tuait
+/// le font-gating et l'hydratation entière. Au-delà de la
+/// borne (file saturée — exhaustion réelle), rejet sec
+/// `pend_full`, livré `status: 0` comme avant.
+pub(crate) const MAX_PENDING_FETCHES: usize = 1_024;
 /// URLs suivies par le streak §B-60 : borne mémoire — une
 /// page balayant des milliers d'URL distinctes ne fait pas
 /// gonfler la map (les nouvelles URLs passent sans streak).
@@ -548,8 +557,11 @@ impl Session {
     ) {
         let mut failed = Vec::new();
         self.dispatch_net_reqs_inner(tab, page, base, reqs, &mut failed);
-        // Échecs immédiats (bloquée/quota) : livrés comme un
-        // échec réseau — déclenche `error`, jamais de panic.
+        // Échecs immédiats (ctx mort/bloquée/file quota
+        // saturée) : livrés comme un échec réseau —
+        // déclenche `error`, jamais de panic. Le dépassement
+        // de quota simple n'en fait plus partie (JS-C367 :
+        // le fetch attend un slot dans `pending_script_net`).
         for handle in failed {
             self.deliver_net_response(
                 tab,
@@ -644,6 +656,11 @@ impl Session {
                     // trouver hors de `net_tasks`.
                     self.fetch_held
                         .retain(|h| !(h.tab == tab && h.handle == handle));
+                    // Même purge pour un fetch garé au quota
+                    // (JS-C367) — annulé avant d'avoir pu
+                    // partir, jamais émis.
+                    self.pending_script_net
+                        .retain(|p| !(p.tab == tab && p.handle == handle));
                 }
                 // Opération `crypto.subtle` (JS-C79) — pas une
                 // requête réseau : le calcul tourne en
@@ -2519,12 +2536,6 @@ impl Session {
             self.note_net_drop("ctx_dead", url);
             return Err(());
         };
-        let inflight = self.net_tasks.keys().filter(|(t, _)| *t == tab).count();
-        if inflight >= self.max_script_net {
-            tracing::trace!(tab, handle, "quota requêtes script atteint");
-            self.note_net_drop("quota", url);
-            return Err(());
-        }
         let Some((req, cross)) = self.script_request(
             &req_page,
             &req_base,
@@ -2541,8 +2552,6 @@ impl Session {
             self.note_net_drop("blocked", url);
             return Err(());
         };
-        let tr = self.transport.clone();
-        let tx = self.net_tx.clone();
         // Origine opaque : `null` (sérialisation spec) — ACAO
         // `*` reste admis, un `ACAO: <origine>` ne l'est pas.
         let page_origin = if opaque {
@@ -2550,7 +2559,6 @@ impl Session {
         } else {
             origin_header_value(&req_page)
         };
-        let req_url = req.url.clone();
         // `credentials` du script (JS-C77) — porté hors
         // `req.cors` : `no-cors`/`include` (`sendBeacon`
         // cross) capture aussi `Set-Cookie`.
@@ -2561,19 +2569,58 @@ impl Session {
             }
             explorer_js::FetchCredentials::Include => explorer_net::http::FetchCredentials::Include,
         };
-        let partition = explorer_net::cookies::request_partition(&req);
-        let fetch_mode = req.fetch_mode;
+        let p = net_items::PendingFetch {
+            tab,
+            handle,
+            partition: explorer_net::cookies::request_partition(&req),
+            mode: req.fetch_mode,
+            req,
+            cross,
+            page_origin,
+            credentials,
+        };
+        // JS-C367 — le quota borne les tâches **vivantes** :
+        // l'excédent attend un slot dans la file (FIFO par
+        // onglet) plutôt qu'un `status: 0` sec — la rafale
+        // `FontFace.load()` de kevlar (~200 fetch/16 slots)
+        // tuait le `Promise.all` de font-gating (vol 668,
+        // §B-97). `pending.any(tab)` = un fetch frais ne
+        // double jamais un garé de son onglet (FIFO strict).
+        let inflight = self.net_tasks.keys().filter(|(t, _)| *t == tab).count();
+        if inflight >= self.max_script_net || self.pending_script_net.iter().any(|q| q.tab == tab) {
+            if self.pending_script_net.len() >= MAX_PENDING_FETCHES {
+                tracing::trace!(tab, handle, "file requêtes script saturée");
+                self.note_net_drop("pend_full", url);
+                return Err(());
+            }
+            self.pending_script_net.push_back(p);
+            return Ok(());
+        }
+        self.launch_pending(p);
+        Ok(())
+    }
+
+    /// Émission effective d'un [`net_items::PendingFetch`]
+    /// (JS-C367) — la tâche tokio est créée et rangée dans
+    /// `net_tasks`. Partagée par `spawn_script_fetch` (slot
+    /// libre à l'émission) et `pump_pending_script_net`
+    /// (slot libéré par un `NetDone`).
+    fn launch_pending(&mut self, p: net_items::PendingFetch) {
+        let tr = self.transport.clone();
+        let tx = self.net_tx.clone();
+        let req_url = p.req.url.clone();
+        let (tab, handle) = (p.tab, p.handle);
         let j = tokio::spawn(async move {
-            let out = fetch_maybe_data(&tr, &req).await;
+            let out = fetch_maybe_data(&tr, &p.req).await;
             let _ = tx.send(NetDone {
                 tab,
                 handle,
-                cross,
-                mode: fetch_mode,
-                credentials,
-                page_origin,
+                cross: p.cross,
+                mode: p.mode,
+                credentials: p.credentials,
+                page_origin: p.page_origin,
                 req_url,
-                partition,
+                partition: p.partition,
                 out,
                 script: None,
                 frame: None,
@@ -2584,7 +2631,32 @@ impl Session {
             });
         });
         self.net_tasks.insert((tab, handle), j);
-        Ok(())
+    }
+
+    /// Pompe la file `pending_script_net` (JS-C367) — chaque
+    /// `NetDone`/`Abort`/fin de flux a pu libérer un slot :
+    /// les requêtes garées partent en FIFO par onglet (une
+    /// entrée d'un onglet saturé ne bloque pas les autres).
+    fn pump_pending_script_net(&mut self) {
+        if self.pending_script_net.is_empty() {
+            return;
+        }
+        let mut inflight: HashMap<TabId, usize> = HashMap::new();
+        for (t, _) in self.net_tasks.keys() {
+            *inflight.entry(*t).or_default() += 1;
+        }
+        let max = self.max_script_net;
+        let mut still = std::collections::VecDeque::new();
+        for p in std::mem::take(&mut self.pending_script_net) {
+            let n = inflight.get(&p.tab).copied().unwrap_or(0);
+            if n < max {
+                inflight.insert(p.tab, n + 1);
+                self.launch_pending(p);
+            } else {
+                still.push_back(p);
+            }
+        }
+        self.pending_script_net = still;
     }
 
     /// Ouverture d'un flux SSE `EventSource` (JS-C92) —
@@ -3278,6 +3350,10 @@ impl Session {
         self.drain_ws_events();
         let n = done.len();
         self.drain_net_done(done, start);
+        // JS-C367 — les livrées/aborts/fins de flux ont pu
+        // libérer des slots : les fetch/XHR garés au quota
+        // partent (FIFO par onglet).
+        self.pump_pending_script_net();
         // Des `Set-Cookie` XHR ont pu enrichir le jar —
         // persistance au même point de synchro.
         if n > 0 {
@@ -3515,7 +3591,10 @@ impl Session {
     /// (CLI, tests).
     #[must_use]
     pub fn net_pending(&self) -> usize {
-        self.net_tasks.len() + self.dyn_tasks.len() + self.fetch_held.len()
+        self.net_tasks.len()
+            + self.dyn_tasks.len()
+            + self.fetch_held.len()
+            + self.pending_script_net.len()
     }
 
     /// Collecte des sous-ressources du document (étape 50) :

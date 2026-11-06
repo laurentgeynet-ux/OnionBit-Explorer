@@ -2597,3 +2597,38 @@ pub(crate) struct HeldFetch {
     /// Contexte de navigation émetteur (étape 134).
     pub(crate) ctx: explorer_js::JsCtxId,
 }
+
+/// `fetch`/XHR validé mais garé faute de slot
+/// `max_script_net` (JS-C367, vol 668 §B-97) — la rafale
+/// `FontFace.load()` de kevlar (~200 fetch) dépassait le
+/// quota de 16 tâches vivantes et l'excédent était rejeté
+/// `status: 0` sec → `Promise.all`/font-gating mort →
+/// `ytInitialData` jamais consommé. Comportement
+/// navigateur : le quota borne les tâches **vivantes**,
+/// l'excédent attend un slot dans
+/// `Session::pending_script_net` (drainé FIFO par onglet à
+/// chaque `poll_net` — pas de blocage inter-onglets). La
+/// requête est déjà validée (`ctx_net_origin` +
+/// `script_request` — CSP/mixed/méthode) au parcage ;
+/// l'entrée est rejouée telle quelle par
+/// `Session::launch_pending`.
+pub(crate) struct PendingFetch {
+    /// Onglet émetteur (quota compté par onglet ; purge
+    /// `close_tab`, `Abort`).
+    pub(crate) tab: TabId,
+    /// Corrélation moteur (`NetRequest::Fetch.handle`).
+    pub(crate) handle: u64,
+    /// Requête validée prête à émettre.
+    pub(crate) req: Request,
+    /// Cible cross-origin — lisibilité `ACAO` à la livraison.
+    pub(crate) cross: bool,
+    /// Origine canonique de la page émettrice (`"null"` si
+    /// opaque — check `cors_readable`).
+    pub(crate) page_origin: String,
+    /// `credentials` traduit — capture `Set-Cookie`.
+    pub(crate) credentials: FetchCredentials,
+    /// Seau CHIPS (`request_partition` à l'émission).
+    pub(crate) partition: Option<String>,
+    /// `mode` traduit (`NoCors` cross → livré opaque).
+    pub(crate) mode: FetchMode,
+}

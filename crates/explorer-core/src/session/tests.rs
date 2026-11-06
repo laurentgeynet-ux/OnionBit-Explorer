@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 //! Tests internes de la session — helpers et régressions.
+use super::net::MAX_PENDING_FETCHES;
 use super::*;
 
 use explorer_css::value::Color;
@@ -3713,6 +3714,164 @@ async fn fetch_backoff_retient_les_retries_dune_url_en_echec() {
         s.fetch_fail_streak.is_empty(),
         "close_tab purge les streaks"
     );
+}
+
+/// Fabrique un `NetRequest::Fetch` de test — même gabarit
+/// que le harnais backoff (`JS_CTX_TOP`, cors/same-origin).
+fn test_fetch(tab_url: &Url, handle: u64) -> explorer_js::NetRequest {
+    explorer_js::NetRequest::Fetch {
+        handle,
+        method: "GET".to_string(),
+        url: format!("{tab_url}r{handle}"),
+        headers: Vec::new(),
+        body: None,
+        mode: explorer_js::FetchMode::Cors,
+        credentials: explorer_js::FetchCredentials::SameOrigin,
+        ctx: explorer_js::JS_CTX_TOP,
+    }
+}
+
+/// JS-C367 (vol 668 §B-97) — le dépassement de
+/// `max_script_net` **file** le fetch validé au lieu de le
+/// rejeter `status: 0` sec : la promesse reste pendante et
+/// part au prochain slot libéré.
+#[tokio::test(flavor = "current_thread")]
+async fn fetch_quota_file_au_lieu_de_rejeter() {
+    let cfg = SessionConfig {
+        max_script_net: 1,
+        ..Default::default()
+    };
+    let mut s = Session::with_config(Arc::new(FailTransport), Arc::new(TestFont), cfg);
+    let tab = s.open_tab();
+    let page = Url::parse("https://x.test/").expect("page");
+    s.dispatch_net_requests(tab, &page, &page, vec![test_fetch(&page, 1)]);
+    s.dispatch_net_requests(tab, &page, &page, vec![test_fetch(&page, 2)]);
+    assert_eq!(s.net_tasks.len(), 1, "un seul slot vivant");
+    assert_eq!(
+        s.pending_script_net.len(),
+        1,
+        "l'excédent est garé, pas rejeté"
+    );
+    assert!(
+        s.tabs.get(&tab).expect("tab").js_pending_net.is_empty(),
+        "aucun status: 0 synthétique livré"
+    );
+}
+
+/// JS-C367 — un `NetDone` livré libère son slot : la pompe
+/// `poll_net` émet le fetch garé (FIFO par onglet).
+#[tokio::test(flavor = "current_thread")]
+async fn fetch_quota_pompe_au_slot_libere() {
+    use std::time::Instant;
+    let cfg = SessionConfig {
+        max_script_net: 1,
+        ..Default::default()
+    };
+    let mut s = Session::with_config(Arc::new(FailTransport), Arc::new(TestFont), cfg);
+    let tab = s.open_tab();
+    let page = Url::parse("https://x.test/").expect("page");
+    s.dispatch_net_requests(tab, &page, &page, vec![test_fetch(&page, 1)]);
+    s.dispatch_net_requests(tab, &page, &page, vec![test_fetch(&page, 2)]);
+    assert_eq!(s.pending_script_net.len(), 1);
+    // Le slot se libère → la pompe émet le garé au tour
+    // suivant (le `NetDone` 1 libère, `pending` part).
+    s.drain_net_done(
+        vec![NetDone {
+            tab,
+            handle: 1,
+            cross: false,
+            mode: explorer_net::http::FetchMode::Cors,
+            credentials: explorer_net::http::FetchCredentials::Omit,
+            page_origin: "https://x.test".to_string(),
+            req_url: page.clone(),
+            partition: None,
+            out: Err(explorer_net::error::NetError::InvalidResponse("t".into())),
+            script: None,
+            frame: None,
+            img: None,
+            link: None,
+            dyn_module: None,
+            import: None,
+        }],
+        Instant::now(),
+    );
+    s.poll_net();
+    assert!(s.pending_script_net.is_empty(), "garé pompé");
+    assert!(
+        s.net_tasks.contains_key(&(tab, 2)),
+        "le fetch garé a pris le slot libéré"
+    );
+}
+
+/// JS-C367 — FIFO strict par onglet : un fetch frais ne
+/// double jamais un garé, même si un slot vient de se
+/// libérer (Abort) avant la pompe.
+#[tokio::test(flavor = "current_thread")]
+async fn fetch_quota_fifo_pas_de_doublage() {
+    let cfg = SessionConfig {
+        max_script_net: 1,
+        ..Default::default()
+    };
+    let mut s = Session::with_config(Arc::new(FailTransport), Arc::new(TestFont), cfg);
+    let tab = s.open_tab();
+    let page = Url::parse("https://x.test/").expect("page");
+    s.dispatch_net_requests(tab, &page, &page, vec![test_fetch(&page, 1)]);
+    s.dispatch_net_requests(tab, &page, &page, vec![test_fetch(&page, 2)]);
+    // Abort du vivant : slot libre mais le garé 2 a
+    // priorité — le frais 3 se range derrière.
+    s.dispatch_net_requests(
+        tab,
+        &page,
+        &page,
+        vec![explorer_js::NetRequest::Abort { handle: 1 }],
+    );
+    s.dispatch_net_requests(tab, &page, &page, vec![test_fetch(&page, 3)]);
+    assert_eq!(
+        s.pending_script_net.len(),
+        2,
+        "le frais attend derrière le garé (FIFO)"
+    );
+    assert!(s.net_tasks.is_empty(), "aucun spawn direct devant la file");
+    // `Abort` purge le garé comme la retenue §B-60.
+    s.dispatch_net_requests(
+        tab,
+        &page,
+        &page,
+        vec![explorer_js::NetRequest::Abort { handle: 2 }],
+    );
+    assert_eq!(s.pending_script_net.len(), 1, "Abort purge le garé");
+    assert_eq!(
+        s.pending_script_net.front().expect("reste").handle,
+        3,
+        "le survivant est bien le dernier"
+    );
+}
+
+/// JS-C367 — la file est bornée (`MAX_PENDING_FETCHES`) :
+/// au-delà, le rejet sec `status: 0` est conservé
+/// (exhaustion réelle), livré comme un échec réseau.
+#[test]
+fn fetch_quota_file_saturee_rejette() {
+    let cfg = SessionConfig {
+        max_script_net: 0,
+        ..Default::default()
+    };
+    let mut s = Session::with_config(Arc::new(FailTransport), Arc::new(TestFont), cfg);
+    let tab = s.open_tab();
+    let page = Url::parse("https://x.test/").expect("page");
+    for h in 0..MAX_PENDING_FETCHES as u64 {
+        s.dispatch_net_requests(tab, &page, &page, vec![test_fetch(&page, h)]);
+    }
+    assert_eq!(s.pending_script_net.len(), MAX_PENDING_FETCHES);
+    s.dispatch_net_requests(tab, &page, &page, vec![test_fetch(&page, 9999)]);
+    assert_eq!(
+        s.pending_script_net.len(),
+        MAX_PENDING_FETCHES,
+        "file pleine : la 1025e est rejetée sec, pas garée"
+    );
+    // Fermeture : file purgée avec l'onglet.
+    s.close_tab(tab).expect("close");
+    assert!(s.pending_script_net.is_empty(), "close_tab purge la file");
 }
 
 /// §B-60 — un succès referme le streak : le retry suivant
