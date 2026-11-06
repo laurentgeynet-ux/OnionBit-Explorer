@@ -358,3 +358,53 @@ fn fontface_status_transitions_and_set_events_fire() {
     );
     assert_eq!(ev(&mut e, "late.join(',')"), "seen");
 }
+
+/// §B-106 — repro synthétique du bootstrap **webpack JSONP**
+/// (twitch : 1019 modules enregistrés, `prom.created=1`,
+/// entrée jamais invoquée) : chunk données posé avant le
+/// runtime, hook `push` + replay buffer, `checkDeferredModules`
+/// qui n'invoque l'entrée que quand tous les chunks requis
+/// sont installés. Verrou de la sémantique moteur : si ce
+/// pattern tourne, le gate twitch est timing/données, pas
+/// interpréteur.
+#[test]
+fn webpack_jsonp_bootstrap_entry_invokes() {
+    let mut e = engine();
+    assert_eq!(
+        ev(
+            &mut e,
+            r#"
+            var g = typeof self !== 'undefined' ? self : this;
+            g.wpC = g.wpC || [];
+            var cg = g.wpC;
+            // Chunk données posé AVANT le runtime (ordre libre).
+            cg.push([["data1"], {"m_d": function() { return 7; }}]);
+            // --- runtime : hook push + deferred check ---
+            var entryRan = [];
+            var installed = {}, mods = {};
+            var deferred = [["entry", ["data1", "rt", "entryC"]]];
+            var require = function(id) { mods[id](); };
+            cg.push = function(res) {
+                res[0].forEach(function(id) { installed[id] = true; });
+                for (var k in res[1]) mods[k] = res[1][k];
+                // checkDeferredModules : déps posées → module
+                // invoqué UNE fois, deferred consommé (splice).
+                for (var i = deferred.length - 1; i >= 0; i--) {
+                    var dm = deferred[i], ok = true;
+                    for (var j = 0; j < dm[1].length; j++) {
+                        if (!installed[dm[1][j]]) ok = false;
+                    }
+                    if (ok) { deferred.splice(i, 1); require(dm[0]); }
+                }
+            };
+            installed["rt"] = true;
+            // Replay des pushes bufferisés (vrai webpack le fait).
+            for (var i = 0; i < cg.length; i++) cg.push.call(cg, cg[i]);
+            // Chunk d'entrée posé après le runtime.
+            cg.push([["entryC"], {"entry": function() { entryRan.push("entry-exec"); }}]);
+            entryRan.join(',')
+            "#
+        ),
+        "entry-exec"
+    );
+}
