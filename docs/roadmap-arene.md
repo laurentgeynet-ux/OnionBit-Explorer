@@ -273,6 +273,11 @@ arbres vivants (AR-1 sans seeds) ou des nœuds encore référencés
   count` ; pertinent seulement quand `roots` aura un
   producteur (AR-2 l'offre en alternative — alors cet index
   devient load-bearing).
+- **`Dom::normalize` sans appelant prod** — itératif et
+  testé mais dormant ; un appelant réel serait une op
+  journal `Node.normalize()` propagée du miroir. Si ce
+  jour vient, l'index `is_root_target` ci-dessus devient
+  utile dans le même mouvement (audit post-implantation).
 
 ## Traçabilité constat → étape
 
