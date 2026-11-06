@@ -535,7 +535,7 @@ fn broken_sheet_does_not_swallow_next() {
          <style>#victim{position:fixed}</style>\
          <div id=victim></div>",
     );
-    let victim = find_by_id(&dom, "victim").unwrap();
+    let victim = dom.by_id("victim").unwrap();
     {
         let e = s.tabs.get_mut(&tab).unwrap();
         e.url = Some(Url::parse("http://h.test/x").unwrap());
@@ -715,7 +715,7 @@ fn pump_resync_coalesced_under_floor() {
         s.tabs
             .get(&tab)
             .and_then(|e| e.dom.as_ref())
-            .and_then(|d| find_by_id(d, "x"))
+            .and_then(|d| d.by_id("x"))
             .and_then(|n| {
                 s.tabs
                     .get(&tab)
@@ -2079,7 +2079,7 @@ fn deferred_inputs_fifo_and_coalesce() {
     }
     let input = {
         let e = s.tabs.get(&tab).unwrap();
-        find_by_id(e.dom.as_ref().unwrap(), "q").unwrap()
+        e.dom.as_ref().unwrap().by_id("q").unwrap()
     };
     s.set_focus(tab, Some(input));
 

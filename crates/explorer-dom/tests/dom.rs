@@ -620,3 +620,60 @@ fn iterateurs_children_descendants() {
     assert!(dom.descendants(ghost).is_err());
     assert!(dom.children_iter(ghost).is_err());
 }
+
+#[test]
+fn by_id_premier_en_ordre_document() {
+    let mut dom = Dom::new();
+    let doc = dom.document();
+    let premier = el(&mut dom, "div");
+    let milieu = el(&mut dom, "span");
+    let doublon = el(&mut dom, "p");
+    dom.append_child(doc, premier).expect("premier");
+    dom.append_child(premier, milieu).expect("milieu");
+    dom.append_child(doc, doublon).expect("doublon");
+    dom.set_attribute(premier, "id", "cible").expect("id");
+    dom.set_attribute(doublon, "id", "cible").expect("id2");
+    dom.set_attribute(milieu, "id", "autre").expect("id3");
+
+    // Doublons : le premier en ordre document gagne.
+    assert_eq!(dom.by_id("cible"), Some(premier));
+    assert_eq!(dom.by_id("autre"), Some(milieu));
+    assert_eq!(dom.by_id("absent"), None);
+
+    // Renommage : l'ancienne valeur ne pointe plus le nœud.
+    dom.set_attribute(milieu, "id", "cible").expect("rename");
+    assert_eq!(dom.by_id("autre"), None);
+    assert_eq!(dom.by_id("cible"), Some(premier));
+
+    // Retrait d'attribut.
+    dom.remove_attribute(premier, "id").expect("remove");
+    assert_eq!(dom.by_id("cible"), Some(milieu));
+
+    // Détaché (unlink seul) : plus dans l'arbre document.
+    dom.remove(milieu).expect("detach");
+    assert_eq!(dom.by_id("cible"), Some(doublon));
+
+    // collect purge les handles morts — le détaché non seedé
+    // est réclamé ; `doublon` reste.
+    dom.remove(doublon).expect("detach2");
+    dom.collect(&[]);
+    assert_eq!(dom.by_id("cible"), None);
+}
+
+#[test]
+fn by_id_ordre_apres_deplacement() {
+    let mut dom = Dom::new();
+    let doc = dom.document();
+    let avant = el(&mut dom, "div");
+    let apres = el(&mut dom, "div");
+    dom.append_child(doc, avant).expect("avant");
+    dom.append_child(doc, apres).expect("apres");
+    dom.set_attribute(avant, "id", "dup").expect("id");
+    dom.set_attribute(apres, "id", "dup").expect("id2");
+    assert_eq!(dom.by_id("dup"), Some(avant));
+
+    // Déplacer `apres` avant `avant` inverse l'ordre document
+    // — l'index (insertion) ne l'ordonne pas, la requête si.
+    dom.insert_before(doc, apres, Some(avant)).expect("move");
+    assert_eq!(dom.by_id("dup"), Some(apres));
+}

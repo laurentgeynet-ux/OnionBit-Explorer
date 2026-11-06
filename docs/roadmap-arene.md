@@ -147,13 +147,17 @@ arbres vivants (AR-1 sans seeds) ou des nœuds encore référencés
   tranches/réassignations du `Vec`, boucles mutantes.
   `compare_document_position` reste ouvert (hors livraison —
   `is_ancestor` couvre `contains` modulo `|| a == b`).
-- [ ] **AR-11. Index `id → NodeId`** — PIPE (champ + accesseur)
-  puis adoption NAV. Maintenu à `set_attribute("id")` /
-  `remove_attribute` / collect ; `by_id` O(1) — attention
-  sémantique : spec = **premier match en ordre document**,
-  l'index rend le premier, pas un quelconque. Tue
-  `find_by_id`/`find_by_attr("id")` et prépare `getElementById`
-  réel.
+- [x] **AR-11. Index `id → NodeId`** — **Livré R-147** :
+  `id_index` multivalué maintenu à `set_attribute`
+  (rename = retire ancien + ajoute) / `remove_attribute` /
+  purge `collect` ; `by_id` O(1) filtre vivant +
+  atteignable-depuis-document (détaché/shadow/template
+  exclus — spec `getElementById`) et arbitre les doublons
+  par `doc_order_lt` **à la requête** (les `insert_before`
+  ne réordonnent pas l'index). Adoption NAV : `find_by_id`
+  tué (6 sites), `svg::find_by_id` tué, `find_by_attr`
+  conservé pour les attributs génériques. `element_mut`
+  documenté comme contournement de l'index.
 - [ ] **AR-12. Sweep `collect` optimisé** — PIPE. Bitmap
   `Vec<u64>` (vs `vec![false]` = 1 o/case), scratch conservé
   entre passes, `truncate` des `Vacant` traînants (le `Vec`

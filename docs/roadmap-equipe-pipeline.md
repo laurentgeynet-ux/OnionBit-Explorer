@@ -2829,6 +2829,33 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   mutantes (`tree` remove/clone sous itération).
   96/97 tests session verts (échec codecs préexistant
   inchangé), suites PIPE vertes, clippy `-D warnings`.
+- [x] **R-147. Index `id → NodeId` + `Dom::by_id`** (AR-11,
+  chantier ARÈNE) : `find_by_attr(dom, "id", …)` scannait
+  l'arbre à chaque lookup (focus re-ancrage, labels de
+  formulaires, ancres `#frag`, refs SVG). `id_index` —
+  `HashMap<String, Vec<NodeId>>` **multivalué** (doublons
+  `id` = web hostile réel) — maintenu aux seuls points
+  d'écriture d'attributs : `set_attribute` capture
+  l'ancienne valeur (rename = retire + ajoute),
+  `remove_attribute` déréférence ; `collect` purge les
+  handles balayés. `by_id(id) -> Option<NodeId>` filtre
+  `is_alive` + atteignable-depuis-`document()` (détachés,
+  shadow, `<template>` exclus — sémantique
+  `getElementById` spec) puis arbitre les doublons par
+  `doc_order_lt` — comparaison préordre O(profondeur) par
+  chaînes d'ancêtres, **résolue à la requête** car les
+  `insert_before` ne réordonnent pas l'index (test :
+  renversement d'ordre par déplacement suivi). Chemins
+  couverts : journal `Attr` JS (`el.id=`, `setAttribute`)
+  → `set_attribute` ; `clone_subtree_into`/graft idem —
+  `element_mut` documenté comme contournement. Adoption
+  NAV : `find_by_id` supprimé (6 sites → `by_id`),
+  `svg::find_by_id` local supprimé (résolution `#id`
+  document-globale), `find_by_attr` conservé pour les
+  attributs génériques (`name`). `heap_bytes` compte
+  l'index. Verrous : premier-en-ordre sous doublons,
+  rename, retrait, détaché, purge `collect`, ordre après
+  déplacement. 96/97 tests session verts, clippy propre.
 
 ## Palier R-B — Contenu étranger, animation, canvas
 

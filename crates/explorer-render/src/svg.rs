@@ -70,7 +70,7 @@ pub fn collect_svg_with_sources(
                 // (`<symbol>` en début de document) — sans elle
                 // usvg rend l'usage vide. On l'injecte dans
                 // `<defs>` avant `</svg>` pour la résolution.
-                inject_external_refs(dom, root, n, &mut src);
+                inject_external_refs(dom, n, &mut src);
                 // P3 — `xlink:href` survivant sans déclaration :
                 // HTML range `xlink:href` dans les attrs mais ne
                 // porte pas l'`xmlns` — le XML sérialisé est
@@ -235,7 +235,7 @@ fn escape_xml(s: &str, out: &mut String, attr: bool) {
 /// cible trouvée hors de l'îlot est sérialisée dans un
 /// `<defs>` injecté avant `</svg>` ; les refs introuvables
 /// ou auto-référencées sont ignorées (rendu dégradé usvg).
-fn inject_external_refs(dom: &Dom, doc_root: NodeId, svg: NodeId, src: &mut String) {
+fn inject_external_refs(dom: &Dom, svg: NodeId, src: &mut String) {
     let mut needed = Vec::<String>::new();
     let mut defined = Vec::<String>::new();
     let mut stack = vec![svg];
@@ -282,7 +282,7 @@ fn inject_external_refs(dom: &Dom, doc_root: NodeId, svg: NodeId, src: &mut Stri
             if defined.contains(id) {
                 continue;
             }
-            if let Some(target) = find_by_id(dom, doc_root, id) {
+            if let Some(target) = dom.by_id(id) {
                 serialize_into(dom, target, &mut defs);
                 defined.push(id.clone());
                 injected.push(target);
@@ -318,16 +318,4 @@ fn inject_external_refs(dom: &Dom, doc_root: NodeId, svg: NodeId, src: &mut Stri
             src.insert_str(i, &defs_tag);
         }
     }
-}
-
-/// Premier élément portant `id` sous `root` (BFS).
-fn find_by_id(dom: &Dom, root: NodeId, id: &str) -> Option<NodeId> {
-    for n in std::iter::once(root).chain(dom.descendants(root).into_iter().flatten()) {
-        if let Ok(e) = dom.element(n) {
-            if e.attributes.iter().any(|a| a.name == "id" && a.value == id) {
-                return Some(n);
-            }
-        }
-    }
-    None
 }

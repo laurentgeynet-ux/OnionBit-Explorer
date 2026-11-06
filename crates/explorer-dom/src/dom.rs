@@ -85,6 +85,14 @@ pub struct Dom {
     /// miroir JS ; lu par `:defined` (selectors-4 §13) à la
     /// cascade. Document-local, comme le registre spec.
     defined_names: std::collections::HashSet<String>,
+    /// Index `id → NodeId` (AR-11) : tous les éléments portant
+    /// un `id`, doublons compris (document hostile). Maintenu
+    /// par [`Dom::set_attribute`]/[`Dom::remove_attribute`],
+    /// purgé des handles morts par [`Dom::collect`] — entre
+    /// deux passes, [`Dom::by_id`] filtre lui-même les handles
+    /// obsolètes et les nœuds hors de l'arbre document
+    /// (détachés, shadow, `<template>`).
+    id_index: HashMap<String, Vec<NodeId>>,
 }
 
 impl Dom {
@@ -117,6 +125,7 @@ impl Dom {
             shadow_roots: HashMap::new(),
             shadow_hosts: HashMap::new(),
             defined_names: std::collections::HashSet::new(),
+            id_index: HashMap::new(),
         };
         // Index 0 sur arène vide : ne peut pas échouer.
         let _ = dom.alloc(NodeData::Document);
@@ -180,6 +189,12 @@ impl Dom {
             .iter()
             .map(String::capacity)
             .sum::<usize>();
+        bytes += self.id_index.capacity() * size_of::<(String, Vec<NodeId>)>()
+            + self
+                .id_index
+                .iter()
+                .map(|(k, v)| k.capacity() + v.capacity() * size_of::<NodeId>())
+                .sum::<usize>();
         for slot in &self.slots {
             let Slot::Occupied { node, .. } = slot else {
                 continue;
@@ -317,6 +332,10 @@ impl Dom {
     }
 
     /// Accès mutable aux données d'élément.
+    ///
+    /// **Contourne les index** : muter `attributes` directement
+    /// ne met pas à jour `id_index` (AR-11) — préférer
+    /// [`Dom::set_attribute`]/[`Dom::remove_attribute`].
     ///
     /// # Errors
     /// Comme [`Dom::element`].
@@ -519,6 +538,92 @@ impl Dom {
         Ok(false)
     }
 
+    /// Premier élément portant `id` **en ordre document** —
+    /// sémantique `getElementById` (premier match préordre dans
+    /// l'arbre du document). L'index `id_index` est rempli par
+    /// [`Dom::set_attribute`]/[`Dom::remove_attribute`] ; les
+    /// doublons d'`id` (web hostile) sont arbitrés ici par
+    /// [`Dom::doc_order_lt`], pas à l'insertion — les déplacements
+    /// (`insert_before`) ne réordonnent pas l'index.
+    ///
+    /// Ne retourne jamais un nœud hors de l'arbre document :
+    /// détaché ([`Dom::remove`] = unlink, le sous-arbre reste
+    /// vivant), racine/contenu shadow, fragment `<template>` —
+    /// conforme à la spec (`getElementById` n'entre ni dans les
+    /// shadow trees ni dans `<template>`).
+    #[must_use]
+    pub fn by_id(&self, id: &str) -> Option<NodeId> {
+        let candidates = self.id_index.get(id)?;
+        let doc = self.document();
+        let mut best: Option<NodeId> = None;
+        for &n in candidates {
+            if !self.is_alive(n) {
+                continue; // balayé — purge différée à `collect`
+            }
+            if n != doc && !self.is_ancestor(doc, n).unwrap_or(false) {
+                continue; // détaché, shadow ou <template>
+            }
+            if best.is_none_or(|b| self.doc_order_lt(n, b)) {
+                best = Some(n);
+            }
+        }
+        best
+    }
+
+    /// `a` précède-t-il `b` en **préordre document** ? Chaînes
+    /// d'ancêtres comparées jusqu'à l'ancêtre commun le plus bas,
+    /// puis ordre des deux branches par parcours sibling —
+    /// O(profondeur + fratrie). Arbres disjoints : ordre stable
+    /// arbitraire (cas filtré en amont par `by_id`).
+    fn doc_order_lt(&self, a: NodeId, b: NodeId) -> bool {
+        if a == b {
+            return false;
+        }
+        if self.is_ancestor(a, b).unwrap_or(false) {
+            return true; // l'ancêtre précède en préordre
+        }
+        if self.is_ancestor(b, a).unwrap_or(false) {
+            return false;
+        }
+        let chain_a = self.ancestor_chain(a);
+        let chain_b = self.ancestor_chain(b);
+        // Les chaînes finissent à leur racine respective ; la
+        // queue commune fait remonter l'ancêtre commun le plus bas.
+        let mut i = chain_a.len();
+        let mut j = chain_b.len();
+        while i > 0 && j > 0 && chain_a[i - 1] == chain_b[j - 1] {
+            i -= 1;
+            j -= 1;
+        }
+        if i == chain_a.len() || j == chain_b.len() {
+            // Racines différentes : arbres disjoints — ordre
+            // stable arbitraire (filtré en amont par `by_id`).
+            return a.index() < b.index();
+        }
+        // chain_a[i - 1] / chain_b[j - 1] : branches distinctes
+        // sous l'ancêtre commun — la première par ordre sibling
+        // gagne.
+        let mut cursor = Some(chain_a[i - 1]);
+        while let Some(n) = cursor {
+            if n == chain_b[j - 1] {
+                return true;
+            }
+            cursor = self.next_sibling(n).ok().flatten();
+        }
+        false
+    }
+
+    /// Chaîne `id → racine` (id inclus, racine en queue).
+    fn ancestor_chain(&self, id: NodeId) -> Vec<NodeId> {
+        let mut out = vec![id];
+        let mut cursor = id;
+        while let Ok(Some(p)) = self.parent(cursor) {
+            out.push(p);
+            cursor = p;
+        }
+        out
+    }
+
     // -----------------------------------------------------------------
     // Mutations d'arbre
     // -----------------------------------------------------------------
@@ -630,10 +735,23 @@ impl Dom {
     }
 
     /// Pose ou remplace un attribut (ordre d'insertion préservé).
+    /// `id` alimente `id_index` (AR-11) : l'ancienne valeur
+    /// est retirée de l'index, la nouvelle ajoutée.
     ///
     /// # Errors
     /// `WrongKind` si le nœud n'est pas un élément.
     pub fn set_attribute(&mut self, id: NodeId, name: &str, value: &str) -> Result<()> {
+        let is_id = name == "id";
+        let old_id = is_id
+            .then(|| {
+                self.element(id).ok().and_then(|el| {
+                    el.attributes
+                        .iter()
+                        .find(|a| a.name == "id")
+                        .map(|a| a.value.clone())
+                })
+            })
+            .flatten();
         let el = self.element_mut(id)?;
         match el.attributes.iter_mut().find(|a| a.name == name) {
             Some(attr) => value.clone_into(&mut attr.value),
@@ -642,18 +760,38 @@ impl Dom {
                 value: value.to_owned(),
             }),
         }
+        if is_id {
+            if let Some(old) = old_id {
+                self.unindex_id(id, &old);
+            }
+            self.index_id(id, value);
+        }
         Ok(())
     }
 
     /// Retire un attribut ; `true` s'il existait.
+    /// `id` déréférence le nœud d'`id_index` (AR-11).
     ///
     /// # Errors
     /// `WrongKind` si le nœud n'est pas un élément.
     pub fn remove_attribute(&mut self, id: NodeId, name: &str) -> Result<bool> {
         let el = self.element_mut(id)?;
+        let old_id = (name == "id").then(|| {
+            el.attributes
+                .iter()
+                .find(|a| a.name == "id")
+                .map(|a| a.value.clone())
+        });
+        let old_id = old_id.flatten();
         let before = el.attributes.len();
         el.attributes.retain(|a| a.name != name);
-        Ok(el.attributes.len() != before)
+        let removed = el.attributes.len() != before;
+        if removed {
+            if let Some(old) = old_id {
+                self.unindex_id(id, &old);
+            }
+        }
+        Ok(removed)
     }
 
     /// Nom de balise d'un élément.
@@ -1077,12 +1215,38 @@ impl Dom {
             .retain(|&host, &mut (root, _)| alive(slots, host) && alive(slots, root));
         self.shadow_hosts
             .retain(|&root, &mut host| alive(slots, root) && alive(slots, host));
+        // Index id : purge des handles balayés — un nœud réclamé
+        // ne doit plus être candidat `by_id` (entre deux passes,
+        // `by_id` filtre déjà par `is_alive`, la purge borne la
+        // mémoire et le coût du filtre).
+        self.id_index.values_mut().for_each(|v| {
+            v.retain(|&n| alive(slots, n));
+        });
+        self.id_index.retain(|_, v| !v.is_empty());
         freed
     }
 
     // -----------------------------------------------------------------
     // Interne — accès validés et chaînage
     // -----------------------------------------------------------------
+
+    /// Enregistre `id` sous la valeur d'attribut `id` donnée
+    /// (index multivalué — les doublons sont arbitrés à la
+    /// requête par [`Dom::doc_order_lt`]).
+    fn index_id(&mut self, id: NodeId, value: &str) {
+        self.id_index.entry(value.to_owned()).or_default().push(id);
+    }
+
+    /// Retire `id` de la liste de la valeur donnée ; l'entrée
+    /// disparaît quand sa liste se vide.
+    fn unindex_id(&mut self, id: NodeId, value: &str) {
+        if let Some(v) = self.id_index.get_mut(value) {
+            v.retain(|&n| n != id);
+            if v.is_empty() {
+                self.id_index.remove(value);
+            }
+        }
+    }
 
     /// Accès validé : index borné + génération concordante.
     fn node(&self, id: NodeId) -> Result<&Node> {

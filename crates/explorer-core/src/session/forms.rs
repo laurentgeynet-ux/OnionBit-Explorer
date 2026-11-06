@@ -60,7 +60,7 @@ pub(crate) fn toggle_control(dom: &Dom, mut node: NodeId) -> Option<NodeId> {
             }
             Ok("label") => {
                 if let Ok(Some(f)) = dom.attribute_str(node, "for") {
-                    if let Some(target) = find_by_id(dom, f) {
+                    if let Some(target) = dom.by_id(f) {
                         if dom.tag_name(target).is_ok_and(|t| t == "input") {
                             return Some(target);
                         }
@@ -81,7 +81,7 @@ pub(crate) fn select_control(dom: &Dom, mut node: NodeId) -> Option<NodeId> {
             Ok("select") => return Some(node),
             Ok("label") => {
                 if let Ok(Some(f)) = dom.attribute_str(node, "for") {
-                    if let Some(target) = find_by_id(dom, f) {
+                    if let Some(target) = dom.by_id(f) {
                         if dom.tag_name(target).is_ok_and(|t| t == "select") {
                             return Some(target);
                         }

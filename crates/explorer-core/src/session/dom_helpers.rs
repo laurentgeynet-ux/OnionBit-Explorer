@@ -1252,15 +1252,12 @@ pub(crate) fn dom_path_dead_end(dom: &Dom, path: &[(String, u32)]) -> Option<(us
     None
 }
 
-pub(crate) fn find_by_id(dom: &Dom, id: &str) -> Option<NodeId> {
-    find_by_attr(dom, "id", id)
-}
-
 /// Premier élément dont l'attribut `attr` vaut `value`,
-/// parcours préfixe — même itératif que `find_by_id`
-/// historique. Sert au re-ancrage du focus par identité
-/// (`id`/`name`) quand le chemin `(tag, index)` a été
-/// déplacé par une mutation (étape 92).
+/// parcours préfixe — itératif. Pour `attr == "id"`,
+/// préférer [`Dom::by_id`] (O(1) via `id_index`, AR-11).
+/// Sert au re-ancrage du focus par identité (`name`)
+/// quand le chemin `(tag, index)` a été déplacé par
+/// une mutation (étape 92).
 pub(crate) fn find_by_attr(dom: &Dom, attr: &str, value: &str) -> Option<NodeId> {
     dom.descendants(dom.document())
         .into_iter()

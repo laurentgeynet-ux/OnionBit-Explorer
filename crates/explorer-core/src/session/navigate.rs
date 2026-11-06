@@ -459,7 +459,7 @@ impl Session {
         let (Some(dom), Some(tree)) = (entry.dom.as_ref(), entry.tree.as_ref()) else {
             return;
         };
-        let target = find_by_id(dom, frag).or_else(|| find_named_anchor(dom, frag));
+        let target = dom.by_id(frag).or_else(|| find_named_anchor(dom, frag));
         let Some(y) = target.and_then(|n| box_y_of_node(tree, n)) else {
             return;
         };
