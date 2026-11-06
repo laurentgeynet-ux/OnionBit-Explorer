@@ -92,9 +92,11 @@ fn deferred_use_strict(toks: &[Token]) -> bool {
 /// corps impose aux paramètres (doublons…) sont rapportées à
 /// l'appel plutôt qu'au parse — tolérant, jamais de panic.
 pub(crate) fn materialize_body(d: &DeferredBody, is_gen: bool) -> Result<(Vec<Stmt>, bool)> {
-    let toks: Vec<Token> = d.toks.to_vec();
+    // V-8a : `Rc<[Token]>` partagé — le parseur n'en a besoin
+    // qu'en lecture ; le clone `to_vec` du corps entier meurt.
+    let toks: Rc<[Token]> = d.toks.clone();
     // V-7 : `close_ns`/`stmt_ns` cumulent ici aussi — la part
-    // `mat_ns` − (close+stmt) isole le clone `to_vec` + setup.
+    // `mat_ns` − (close+stmt) isole le setup résiduel.
     let close_of = crate::j17_time(&crate::J17_CLOSE_NS, || close_table(&toks));
     let mut sub = Parser {
         toks,
@@ -146,7 +148,7 @@ pub(crate) fn parse_in(
     );
     let close_of = crate::j17_time(&crate::J17_CLOSE_NS, || close_table(&toks));
     let mut p = Parser {
-        toks,
+        toks: Rc::from(toks),
         pos: 0,
         nest: 0,
         nest_max,
@@ -201,7 +203,7 @@ pub(crate) fn parse_module_in(
     );
     let close_of = crate::j17_time(&crate::J17_CLOSE_NS, || close_table(&toks));
     let mut p = Parser {
-        toks,
+        toks: Rc::from(toks),
         pos: 0,
         nest: 0,
         nest_max,
@@ -252,7 +254,10 @@ pub(crate) const STACK_RED_ZONE: usize = 256 * 1024;
 pub(crate) const STACK_GROW: usize = 2 * 1024 * 1024;
 
 struct Parser {
-    toks: Vec<Token>,
+    // V-8a : tranche partagée — le parseur ne mute jamais
+    // `toks` ; `materialize_body` y passe son `Rc<[Token]>`
+    // directement (plus de clone `to_vec` ~165 µs/corps).
+    toks: Rc<[Token]>,
     pos: usize,
     /// Expression nesting guard — `((((…` input must not blow the
     /// native stack through recursive descent.
@@ -2467,7 +2472,7 @@ impl Parser {
                 TplPart::Expr(toks) => {
                     let close_of = close_table(toks);
                     let mut sub = Parser {
-                        toks: toks.clone(),
+                        toks: Rc::from(toks.as_slice()),
                         pos: 0,
                         // Accumule l'emboîtement : `${`x${`…`}`}`
                         // récursive via des sous-parseurs (JS-C41).
