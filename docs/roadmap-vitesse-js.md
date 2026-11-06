@@ -151,11 +151,16 @@ avant/après dans le message. Ordre = risque croissant.
   **Mesuré** : `env_depth` **−8.6 %** (30.1 → 27.5 ms —
   liaisons internées hit `ptr_eq` systématiquement), props
   ~±1 % (objets <5 props, scans déjà courts).
-- [ ] **V-3b. Hoister `array_index`** — le bail existe
-  déjà (`ops.rs:148`) ; le coût = appel par niveau proto
-  + ×2 par niveau Array dans `find_own`. Calculer **une
-  fois** par `find_own` (ou le passer en paramètre) —
-  micro-fix réel, plus petit que prévu.
+- [x] **V-3b. Hoister `array_index`** — le bail existe
+  déjà (`ops.rs:148`) ; le coût était pire que la revue :
+  appel par niveau proto + **×3** par `find_own`
+  (`args_map`, éléments Array, BigInt `TypedArray`).
+  `find_own` → wrapper déléguant à `find_own_ai(id, key,
+  ai)` ; hoists aux 4 marches proto (read `find_prop`,
+  writes `write_prop` + `prim_set_intercept`,
+  `host_method_shadowed`). `read_prop` épargné
+  volontairement — sa boucle proxy ne tourne pas dans le
+  cas commun, hoister y taxerait chaque read.
 - [ ] **V-3c. Cache `Program` parse** — *seulement si V-1f
   le justifie* : table TLS `hash(src) → Rc<Program>`
   (gabarit `intern()`/`Atom`), cap borné + eviction.

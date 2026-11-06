@@ -3368,11 +3368,12 @@ impl Engine {
     /// hostMethod`, données non-fonction) ne masquent pas :
     /// `location.toString` garde le rail host.
     pub(crate) fn host_method_shadowed(&mut self, bid: ObjId, name: &str) -> bool {
+        let ai = array_index(name); // V-3b — hoisted hors de la marche
         let mut cur = Some(bid);
         let mut depth = 0;
         let mut own = true;
         while let Some(cid) = cur {
-            if let Some(p) = self.find_own(cid, name) {
+            if let Some(p) = self.find_own_ai(cid, name, ai) {
                 if own {
                     // Own-prop quelconque — comportement
                     // historique (patch direct ou méthode own).
@@ -5489,10 +5490,19 @@ impl Engine {
     /// Own-property lookup with array/`length` semantics — returns
     /// the raw `Prop` so accessor pairs are visible to the caller.
     pub(crate) fn find_own(&mut self, id: ObjId, key: &str) -> Option<Prop> {
+        self.find_own_ai(id, key, array_index(key))
+    }
+
+    /// `find_own` à indice pré-calculé (V-3b) : `find_prop` et
+    /// les marches proto d'écriture hoistent `array_index(key)`
+    /// — la clé ne change pas d'un niveau à l'autre (avant :
+    /// 1 parse par `find_own` × niveau + ×2-3 par niveau
+    /// Array/`args_map`/`TypedArray`).
+    fn find_own_ai(&mut self, id: ObjId, key: &str, ai: Option<usize>) -> Option<Prop> {
         crate::j17_tick(&crate::J17_PROP_LOOKUP);
         // `arguments` mappé : l'indice renvoie au slot env du
         // paramètre formel (spec `MappedArgumentsObject` [[Get]]).
-        if let Some(i) = array_index(key) {
+        if let Some(i) = ai {
             let mapped = self.heap.obj(id).and_then(|o| {
                 o.args_map.as_ref().and_then(|(env, map)| {
                     map.get(i).and_then(|n| n.clone().map(|n| (env.clone(), n)))
@@ -5522,7 +5532,7 @@ impl Engine {
                     },
                 });
             }
-            if let Some(i) = array_index(key) {
+            if let Some(i) = ai {
                 return elems
                     .get(i)
                     .copied()
@@ -5602,7 +5612,7 @@ impl Engine {
             } if ta.is_big() => Some((*ta, *buffer, *offset, *len)),
             _ => None,
         };
-        if let (Some((ta, buffer, offset, len)), Some(i)) = (big, array_index(key)) {
+        if let (Some((ta, buffer, offset, len)), Some(i)) = (big, ai) {
             // Cle non-numerique (`name`, `@@toStringTag`...) → tomber
             // sur la synthese ci-dessous ; cle numerique hors-bornes
             // → `None` (proto chain).
@@ -5773,11 +5783,12 @@ impl Engine {
 
     /// First `Prop` found on `id`'s prototype chain.
     pub(crate) fn find_prop(&mut self, id: ObjId, key: &str) -> Option<Prop> {
+        let ai = array_index(key); // V-3b — hoisted hors de la marche
         let mut cur = Some(id);
         let mut depth = 0;
         while let Some(cid) = cur {
             crate::j17_tick(&crate::J17_PROTO_LVL);
-            if let Some(p) = self.find_own(cid, key) {
+            if let Some(p) = self.find_own_ai(cid, key, ai) {
                 return Some(p);
             }
             cur = match self.heap.obj(cid).map(|o| o.proto) {
@@ -6020,6 +6031,7 @@ impl Engine {
         // bornée — `own` suit le dernier non-proxy (cible réelle
         // du `set_prop` final : écrire sur le wrapper proxy serait
         // une fuite, J2 : délégation `Proxy(proxy)×N` sans borne).
+        let ai = array_index(key); // V-3b — hoisted hors de la marche
         let mut own = id;
         let mut cur = Some(id);
         let mut depth = 0;
@@ -6049,7 +6061,7 @@ impl Engine {
                 }
                 continue;
             }
-            match self.find_own(cid, key) {
+            match self.find_own_ai(cid, key, ai) {
                 Some(Prop::Acc { set, .. }) => {
                     if self.is_callable(set) {
                         self.call_value(set, recv, &[v])?;
@@ -6415,6 +6427,7 @@ impl Engine {
         key: &str,
         v: Value,
     ) -> JsResult<bool> {
+        let ai = array_index(key); // V-3b — hoisted hors de la marche
         let mut depth = 0;
         loop {
             if let Some((tid, target, handler)) = self.proxy_th(cur)? {
@@ -6428,7 +6441,7 @@ impl Engine {
                 // (ses props propres puis sa chaîne).
                 cur = tid;
             } else {
-                match self.find_own(cur, key) {
+                match self.find_own_ai(cur, key, ai) {
                     Some(Prop::Acc { set, .. }) => {
                         if self.is_callable(set) {
                             self.call_value(set, recv, &[v])?;
