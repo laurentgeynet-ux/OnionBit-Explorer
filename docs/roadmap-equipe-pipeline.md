@@ -2727,6 +2727,17 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   des entrées à génération morte. 3 verrous : survie
   template+shadow à `collect`, réclamation à la mort de
   l'hôte, survie si hôte rooté.
+- [x] **R-140. `Dom::normalize` itératif** (AR-4, chantier
+  ARÈNE) : la récursion post-order n'avait pas la garde
+  `deep` de `collect_text` — aucune borne de pile sur un
+  DOM hostile profond. Forme work-stack du miroir portée
+  (`jscore/dom.rs:3299`) sans son clone de `children` —
+  les liens sibling suffisent ; seuls les `Element` sont
+  poussés (`Text`/`Comment`/`Doctype` ne peuvent pas avoir
+  d'enfants, `insert_before` borne les parents). Sémantique
+  inchangée : premier `Text` de série absorbe, saut
+  `is_root_target`, `unlink`+`free` générationnels.
+  Verrou : chaîne de 10 000 `<div>` normalisée.
 
 ## Palier R-B — Contenu étranger, animation, canvas
 

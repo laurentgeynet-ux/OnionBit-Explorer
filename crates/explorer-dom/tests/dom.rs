@@ -300,6 +300,30 @@ fn normalize_preserve_texte_roote() {
 }
 
 #[test]
+fn normalize_profond_iteratif() {
+    // R-140 : la forme récursive descendait une frame par niveau
+    // sans garde `deep` — un DOM hostile profond débordait de pile.
+    // La forme itérative tient la profondeur à pile constante.
+    let mut dom = Dom::new();
+    let doc = dom.document();
+    let depth = 10_000;
+    let mut parent = doc;
+    for _ in 0..depth {
+        let d = el(&mut dom, "div");
+        dom.append_child(parent, d).expect("chaine");
+        parent = d;
+    }
+    let a = txt(&mut dom, "x");
+    let b = txt(&mut dom, "y");
+    dom.append_child(parent, a).expect("a");
+    dom.append_child(parent, b).expect("b");
+
+    dom.normalize(doc).expect("normalize profond");
+    assert_eq!(dom.text(a), Ok("xy"));
+    assert!(matches!(dom.data(b), Err(DomError::StaleHandle { .. })));
+}
+
+#[test]
 fn budget_noeuds() {
     let mut dom = Dom::with_max_nodes(3);
     let _doc = dom.document(); // index 0 déjà consommé

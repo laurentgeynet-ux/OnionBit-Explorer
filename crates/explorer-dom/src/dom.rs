@@ -772,41 +772,53 @@ impl Dom {
     /// conservé pour ne pas casser un handle JS vivant ; il devient
     /// tête de la série fusionnable suivante.
     ///
+    /// Itératif — borne de pile constante (la forme récursive
+    /// n'avait pas la garde `deep` de [`Dom::collect_text`] : un
+    /// DOM hostile profond débordait de pile).
+    ///
     /// # Errors
     /// Erreurs de handle comme [`Dom::data`].
     pub fn normalize(&mut self, id: NodeId) -> Result<()> {
-        // Post-order : les descendants d'abord.
-        let mut cursor = self.first_child(id)?;
-        while let Some(child) = cursor {
-            self.normalize(child)?;
-            cursor = self.next_sibling(child)?;
-        }
-        let mut prev_text: Option<NodeId> = None;
-        let mut cursor = self.first_child(id)?;
-        while let Some(child) = cursor {
-            let next = self.next_sibling(child)?;
-            if let NodeData::Text(t) = self.data(child)? {
-                if self.is_root_target(child) {
-                    // Vivant via un handle JS : jamais fusionné
-                    // ni supprimé — il peut devenir tête de série.
-                    prev_text = Some(child);
-                } else if t.is_empty() {
-                    self.unlink(child)?;
-                    self.free(child)?;
-                } else if let Some(prev) = prev_text {
-                    let merged = t.clone();
-                    if let NodeData::Text(pt) = &mut self.node_mut(prev)?.data {
-                        pt.push_str(&merged);
+        // Pile de travail explicite (forme du miroir jscore) :
+        // descendants poussés au fil de la fusion — l'ordre est
+        // équivalent au post-order, la fusion ne touchant que
+        // les enfants `Text` directs. Seuls les `Element` sont
+        // poussés : `Text`/`Comment`/`Doctype` ne peuvent pas
+        // avoir d'enfants (`insert_before` borne les parents).
+        let mut work = vec![id];
+        while let Some(n) = work.pop() {
+            let mut prev_text: Option<NodeId> = None;
+            let mut cursor = self.first_child(n)?;
+            while let Some(child) = cursor {
+                let next = self.next_sibling(child)?;
+                match self.data(child)? {
+                    NodeData::Text(t) => {
+                        if self.is_root_target(child) {
+                            // Vivant via un handle JS : jamais fusionné
+                            // ni supprimé — il peut devenir tête de série.
+                            prev_text = Some(child);
+                        } else if t.is_empty() {
+                            self.unlink(child)?;
+                            self.free(child)?;
+                        } else if let Some(prev) = prev_text {
+                            let merged = t.clone();
+                            if let NodeData::Text(pt) = &mut self.node_mut(prev)?.data {
+                                pt.push_str(&merged);
+                            }
+                            self.unlink(child)?;
+                            self.free(child)?;
+                        } else {
+                            prev_text = Some(child);
+                        }
                     }
-                    self.unlink(child)?;
-                    self.free(child)?;
-                } else {
-                    prev_text = Some(child);
+                    NodeData::Element(_) => {
+                        prev_text = None;
+                        work.push(child);
+                    }
+                    _ => prev_text = None,
                 }
-            } else {
-                prev_text = None;
+                cursor = next;
             }
-            cursor = next;
         }
         Ok(())
     }

@@ -94,8 +94,8 @@ arbres vivants (AR-1 sans seeds) ou des nœuds encore référencés
   transporte des `NodeId` — ou boxtree inclus dans les seeds.
   Vérif terrain : `GET /mem` → `dom_nodes` redescend après
   churn ; verrou : session youtube longue sans croissance.
-- [ ] **AR-4. `normalize` itératif** — PIPE, trivial,
-  intercalable. Porter la forme work-stack du miroir
+- [x] **AR-4. `normalize` itératif** — PIPE, trivial,
+  intercalable. **Livré R-140.** Porter la forme work-stack du miroir
   (`jscore/dom.rs:3299-3332`) — sans son clone de `children`
   (liens sibling suffisent). Sémantique inchangée : premier
   `Text` de la série absorbe, saut `is_root_target`,
