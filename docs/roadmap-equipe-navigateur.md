@@ -7177,6 +7177,36 @@ incrément.
   dans le dump du cadre). Canaris :
   iframe (40), suites mse/ctx (~110)
   verts.
+- [x] **Étape 208. `Dom::collect`
+  câblé sur la voie journal**
+  (AR-3, chantier ARÈNE —
+  `docs/roadmap-arene.md`) : la
+  voie journal détachait sans
+  libérer — `live`/`slots`
+  monotone-croissants jusqu'à
+  `BudgetExceeded` sur pages à
+  churn (constat 1 de l'audit).
+  `apply_journal` réclame quand
+  `live >= dom_gc_mark` (marque
+  ×2 amortie, raz à la
+  navigation) ; seeds recalculés
+  à chaque passe = `keymap`
+  (pont miroir→réel) + `touched`
+  + `frame_nodes` + `anim_births`
+  — un oubli échoue typé
+  (`StaleHandle`), jamais muet.
+  `images.*`/`canvases` purgés
+  de leurs clés mortes via le
+  nouvel additif PIPE
+  `PaintImages::retain_alive`
+  (les semer aurait retenu les
+  nœuds retirés à vie).
+  Boxtree/display list exclus :
+  lecteurs déjà tolérants aux
+  ids morts (re-parse). Verrou :
+  `etape208_journal_remove_
+  reclame_l_arene` (live −2,
+  bitmap purgée, marque ×2).
 
 - [ ] **Écarts terrain — vol humain
   22/10 (release `39ab821`, FFI)** :

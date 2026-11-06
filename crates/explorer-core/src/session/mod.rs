@@ -421,6 +421,14 @@ pub(crate) struct Tab {
     /// voyage avec la payload (`take_paint`/`put_paint`).
     /// Vide = journal non rejouable → repli re-parse.
     dom_keymap: HashMap<u64, explorer_dom::NodeId>,
+    /// Watermark du prochain `Dom::collect` sur la voie
+    /// journal (Étape 208, chantier ARÈNE AR-3) — les
+    /// `Remove` détachent sans libérer (`live`
+    /// monotone-croissant) ; quand `live` atteint la
+    /// marque, `apply_journal` réclame puis double la
+    /// marque (amorti ×2, modèle `maybe_collect` du heap).
+    /// Voyage avec la payload, raz à la navigation.
+    dom_gc_mark: usize,
     /// Chemins de cycle de report §B-26 déjà journalisés
     /// (`WARN` une fois par chemin, `debug` ensuite — la
     /// borne absorbe à chaque apply ; vol 67 : 994 WARN
@@ -1515,6 +1523,7 @@ impl Session {
                 bg_decoded: HashMap::new(),
                 img_bodies: HashMap::new(),
                 dom_keymap: HashMap::new(),
+                dom_gc_mark: 0,
                 cycle_warned: std::collections::HashSet::new(),
                 style_dirty: Vec::new(),
                 prev_styles: HashMap::new(),

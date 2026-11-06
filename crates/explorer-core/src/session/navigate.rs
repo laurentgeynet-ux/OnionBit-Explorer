@@ -1209,6 +1209,10 @@ impl Session {
             entry.prev_styles = HashMap::new();
             entry.transitions.clear();
             entry.sync_floor = None;
+            // Nouveau document = nouvelle arène : la marque
+            // GC repart à zéro (la première passe journal
+            // réclame puis cale `live` ×2).
+            entry.dom_gc_mark = 0;
             entry.dom = Some(dom);
         }
         // Le moteur sortant (non gelé bfcache) meurt ici —

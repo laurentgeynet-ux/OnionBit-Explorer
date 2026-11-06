@@ -97,6 +97,23 @@ impl PaintImages {
     pub fn register_mask(&mut self, url: &str, img: Arc<DecodedImage>) {
         self.masks_url.insert(url.to_string(), img);
     }
+
+    /// Purge les entrées clées `NodeId` dont le nœud a été
+    /// collecté — à appeler après `Dom::collect` (AR-3). Les
+    /// tables `NodeId → bitmap` persistent sur la voie journal
+    /// (les ids stables conservent les entrées des nœuds
+    /// inchangés) : un `Remove` y laissait une entrée morte —
+    /// bitmap + op-list retenus sans que personne ne les
+    /// relise jamais. Les tables clées url (`masks_url`)
+    /// n'ont pas de `NodeId` : inchangées.
+    pub fn retain_alive(&mut self, dom: &explorer_dom::Dom) {
+        self.replaced.retain(|k, _| dom.is_alive(*k));
+        self.backgrounds.retain(|k, _| dom.is_alive(*k));
+        self.svgs.retain(|k, _| dom.is_alive(*k));
+        self.svg_sources.retain(|k, _| dom.is_alive(*k));
+        self.masks.retain(|k, _| dom.is_alive(*k));
+        self.canvases.retain(|k, _| dom.is_alive(*k));
+    }
 }
 
 /// Décode `bytes` en RGBA — `None` si le format n'est pas

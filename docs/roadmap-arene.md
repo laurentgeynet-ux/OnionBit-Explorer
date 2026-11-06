@@ -83,7 +83,11 @@ arbres vivants (AR-1 sans seeds) ou des nœuds encore référencés
   `jscore::Dom::collect_garbage(&HashSet<NodeId>)`
   (`jscore/dom.rs:1055`). `roots` inchangé (contrat JS futur).
   Journal : annoncé R-140, livré R-142.
-- [ ] **AR-3. Inventaire `NodeId` + déclencheur** — NAV.
+- [x] **AR-3. Inventaire `NodeId` + déclencheur** — NAV.
+  **Livré Étape 208** : `dom_live_seeds` (`keymap` +
+  `touched` + `frame_nodes` + `anim_births`), déclencheur
+  watermark ×2 dans `apply_journal`, `retain_alive` sur
+  `images.*`/`canvases`.
   `dom_live_seeds()` centralisé : `keymap.values()` + tables
   persistantes (`PaintPayload.images.*`, transitions `elem`,
   focus, caret, hit-test, rects médias) — **exhaustivité

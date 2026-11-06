@@ -357,6 +357,10 @@ pub(crate) struct PaintPayload {
     /// tout journal tombe en `NoBaseline` → re-parse. Vit et
     /// meurt avec `dom` (même granule de remplacement).
     pub keymap: HashMap<u64, explorer_dom::NodeId>,
+    /// Watermark du prochain `Dom::collect` (Étape 208,
+    /// AR-3) — voyage avec la payload comme `keymap` ;
+    /// `Tab::dom_gc_mark` fait foi hors de la passe.
+    pub dom_gc_mark: usize,
     /// Chemins de cycle §B-26 déjà journalisés pour cet
     /// onglet — la borne saute des sur-émissions à *chaque*
     /// apply (vol 67 : 994 WARN identiques `[0,0,0,0]` sur
@@ -502,6 +506,7 @@ impl Tab {
             bg_decoded: std::mem::take(&mut self.bg_decoded),
             img_bodies: std::mem::take(&mut self.img_bodies),
             keymap: std::mem::take(&mut self.dom_keymap),
+            dom_gc_mark: self.dom_gc_mark,
             cycle_warned: std::mem::take(&mut self.cycle_warned),
             style_dirty: std::mem::take(&mut self.style_dirty),
         }
@@ -566,6 +571,7 @@ impl Tab {
         self.bg_decoded = p.bg_decoded;
         self.img_bodies = p.img_bodies;
         self.dom_keymap = p.keymap;
+        self.dom_gc_mark = p.dom_gc_mark;
         self.cycle_warned = p.cycle_warned;
         self.style_dirty = p.style_dirty;
         // Issue #19 — la table de géométrie publiée au JS se
@@ -1366,6 +1372,37 @@ fn relocate_obreloc(dom: &mut Dom) {
     }
 }
 
+/// Seeds de vivacité pour `Dom::collect` (Étape 208, AR-3)
+/// — recalculés à chaque passe : la `keymap` (pont
+/// miroir → réel : tout nœud que le journal peut encore
+/// adresser), les cibles du relayout à venir (`touched`),
+/// les nœuds `<iframe>` peints (`frame_nodes`), les
+/// naissances d'animation de la passe.
+/// Absents **par design** : boxtree/display list/`images.*`
+/// (leurs `NodeId` meurent déjà au re-parse — les lecteurs
+/// tolèrent `StaleHandle`, cf. `input.rs`, et `images.*`
+/// est purgée par [`PaintImages::retain_alive`]) ;
+/// `focused`/`popup`/`find` (chemins `(tag, index)`, pas
+/// des `NodeId`) ; `prev_styles`/`transitions`/`animations`
+/// (ordinaux `usize`) ; `pending_anim_births` côté `Tab`
+/// (le drain saute déjà les ids morts via `element_path`) ;
+/// `frame_ctxs[].node` (tolère la mort — « nettoyé,
+/// jamais déréférencé aveuglément », `types.rs`).
+/// **Exhaustivité requise** : tout nouveau champ
+/// `PaintPayload` porteur de `NodeId` persistants doit
+/// entrer ici — un oubli = `StaleHandle` latent, visible
+/// seulement à l'usage post-balayage.
+fn dom_live_seeds(p: &PaintPayload, touched: &[explorer_dom::NodeId]) -> Vec<explorer_dom::NodeId> {
+    let mut seeds = Vec::with_capacity(
+        p.keymap.len() + touched.len() + p.frame_nodes.len() + p.anim_births.len(),
+    );
+    seeds.extend(p.keymap.values().copied());
+    seeds.extend(touched.iter().copied());
+    seeds.extend(p.frame_nodes.iter().copied());
+    seeds.extend(p.anim_births.iter().map(|&(n, _)| n));
+    seeds
+}
+
 /// `NodeId` moteur d'une clé miroir — `Err` = non mappée.
 fn key_node(p: &PaintPayload, key: u64) -> Result<explorer_dom::NodeId, JournalReject> {
     if p.keymap.is_empty() {
@@ -1656,6 +1693,38 @@ fn apply_journal(
     let new_title = extract_title(dom);
     if old_title != new_title.as_deref() {
         out.title = Some(new_title);
+    }
+    // Étape 208 (AR-3, chantier ARÈNE) — la voie journal
+    // détache sans libérer : `live`/`slots` étaient
+    // monotone-croissants jusqu'à `BudgetExceeded` (audit
+    // arène, constat 1). Passe amortie par watermark ×2 :
+    // `seeds` = vérité de vivacité recalculée (keymap =
+    // pont miroir→réel, cibles du relayout, nœuds iframe) —
+    // un seed oublié échoue typé (`StaleHandle`), jamais
+    // muet. Boxtree/display list exclus par design : leurs
+    // lecteurs tolèrent déjà les ids morts (re-parse les
+    // tue de même, `input.rs`). Les bitmaps `images.*`
+    // clés `NodeId` persistent sur la voie journal — leurs
+    // entrées mortes sont **purgées** (`retain_alive`) :
+    // les semer retiendrait les nœuds retirés à vie.
+    if p.dom
+        .as_ref()
+        .is_some_and(|d| d.live_count() >= p.dom_gc_mark)
+    {
+        let seeds = dom_live_seeds(p, &touched);
+        if let Some(dom) = p.dom.as_mut() {
+            let freed = dom.collect(&seeds);
+            p.images.retain_alive(dom);
+            p.dom_gc_mark = dom.live_count().saturating_mul(2).max(1);
+            if freed > 0 {
+                tracing::debug!(
+                    freed,
+                    live = dom.live_count(),
+                    mark = p.dom_gc_mark,
+                    "apply: dom collect"
+                );
+            }
+        }
     }
     // JS-C293 — journal vide (drain propre) : l'empreinte
     // ci-dessus reste l'arbitre, mais rien n'a bougé → pas de
@@ -3544,5 +3613,76 @@ mod reloc_tests {
             super::apply_journal(&mut p, &ctx, &job, &j, None, 100),
             Err(super::JournalReject::Fingerprint)
         ));
+    }
+
+    /// Étape 208 (AR-3) — la voie journal réclame l'arène :
+    /// un `Remove` détachait sans libérer (`live`
+    /// monotone-croissant avant R-142). Marque `0` au départ
+    /// → première passe `collect` balaie le sous-arbre ;
+    /// `images.*` perd ses clés mortes (`retain_alive`) et
+    /// la marque double (amorti des passes suivantes).
+    #[test]
+    fn etape208_journal_remove_reclame_l_arene() {
+        use crate::session::apply::PaintPayload;
+        use std::sync::Arc;
+        let dom = TreeBuilder::parse_scripting("<html><body><p>x</p></body></html>", false);
+        let mut p = PaintPayload {
+            dom: Some(dom),
+            ..PaintPayload::default()
+        };
+        let e = super::engine_preorder(p.dom.as_ref().unwrap());
+        for (i, id) in e.iter().enumerate() {
+            p.keymap.insert(i as u64 + 1, *id);
+        }
+        // Le `<p>` et sa clé miroir — sous-arbre retiré.
+        let p_id = e
+            .iter()
+            .copied()
+            .find(|&id| p.dom.as_ref().unwrap().tag_name(id).is_ok_and(|t| t == "p"))
+            .expect("un <p>");
+        let p_key = p
+            .keymap
+            .iter()
+            .find(|(_, v)| **v == p_id)
+            .map(|(k, _)| *k)
+            .expect("clé du <p>");
+        let live_before = p.dom.as_ref().unwrap().live_count();
+        // Empreinte post-Remove : somme des tags mappés —
+        // `<p>` sort de la keymap (son texte n'y compte pas).
+        let fp_before = super::engine_fingerprint(p.dom.as_ref().unwrap(), &p.keymap);
+        let fp = fp_before.wrapping_sub(super::fp_tag("p"));
+        // Bitmap accrochée au nœud mourant — la purge
+        // post-collect la retire (entrée jamais relue).
+        p.images.replaced.insert(
+            p_id,
+            Arc::new(explorer_render::DecodedImage {
+                width: 1,
+                height: 1,
+                rgba: vec![0, 0, 0, 255],
+            }),
+        );
+        let ctx = c293_ctx();
+        let job = super::PendingApply {
+            tab: 0,
+            epoch: 0,
+            html: String::new(),
+            dirty: None,
+            canvas_ops: super::CanvasOpsTable::new(),
+            relayout: false,
+            journal: None,
+            ids: Vec::new(),
+            tags: Vec::new(),
+        };
+        let j = explorer_js::DomJournal {
+            ops: vec![explorer_js::DomMutation::Remove { key: p_key }],
+            fingerprint: fp,
+        };
+        assert!(super::apply_journal(&mut p, &ctx, &job, &j, None, 100).is_ok());
+        let dom = p.dom.as_ref().unwrap();
+        assert_eq!(dom.live_count(), live_before - 2); // <p> + son texte
+        assert!(!dom.is_alive(p_id));
+        assert!(p.images.replaced.is_empty());
+        // Marque doublée — les passes suivantes sont amorties.
+        assert_eq!(p.dom_gc_mark, dom.live_count() * 2);
     }
 }
