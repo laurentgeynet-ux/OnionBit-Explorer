@@ -308,3 +308,53 @@ fn tagged_methods_are_readable_on_tag_only() {
         "42"
     );
 }
+
+/// JS-C387 / rail `fonts.load` §B-97 — transitions spec de
+/// `FontFace`/`FontFaceSet` : `status` bascule
+/// `'unloaded'→'loaded'` (un gate `f.status === 'loaded'`
+/// post-await lisait `unloaded` à jamais) et le set tire
+/// `loading`/`loadingdone` en **microtask** — le listener posé
+/// avant OU après `load()` dans le même tour voit l'événement
+/// (dispatch synchrone manquerait le second motif).
+#[test]
+fn fontface_status_transitions_and_set_events_fire() {
+    let mut e = engine();
+    assert_eq!(
+        ev(&mut e, "var f = new FontFace('K', 'url(x)'); f.status"),
+        "unloaded"
+    );
+    assert_eq!(ev(&mut e, "f.load(); f.status"), "loaded");
+    // `add()` charge la face posée (`status` → 'loaded') et
+    // tire `loading`+`loadingdone` avec `fontfaces: [face]`.
+    assert_eq!(
+        ev(
+            &mut e,
+            "var hits = []; document.fonts.addEventListener('loadingdone', (e2) => hits.push(e2.type + ':' + e2.fontfaces.length));
+             var g = new FontFace('G', 'url(y)');
+             document.fonts.add(g); g.status"
+        ),
+        "loaded"
+    );
+    assert_eq!(ev(&mut e, "hits.join(',')"), "loadingdone:1");
+    // `fonts.load()` : `loading` puis `loadingdone` en file —
+    // une lecture synchrone verrait `seq` vide (les events sont
+    // des tâches, spec) ; la suite relit dans l'eval suivant,
+    // après le drain de fin d'eval.
+    ev(
+        &mut e,
+        "var seq = []; document.fonts.addEventListener('loading', (e3) => seq.push(e3.type));
+         document.fonts.addEventListener('loadingdone', (e4) => seq.push(e4.type));
+         document.fonts.load('12px K'); 'queued'",
+    );
+    assert_eq!(ev(&mut e, "seq.join(',')"), "loading,loadingdone");
+    // Listener posé APRÈS `load()` dans le même tour — la
+    // microtask le voit quand même ; un dispatch synchrone
+    // l'aurait manqué à jamais (le discriminant du fix).
+    ev(
+        &mut e,
+        "var late = []; document.fonts.load('9px L');
+         document.fonts.addEventListener('loadingdone', () => late.push('seen'));
+         'armed'",
+    );
+    assert_eq!(ev(&mut e, "late.join(',')"), "seen");
+}

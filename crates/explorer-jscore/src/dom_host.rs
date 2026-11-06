@@ -12159,10 +12159,16 @@ impl Host for FontFaceSetHost {
         match name {
             // `load(font, text?)` → Promise<FontFace[]> — résolu
             // avec un tableau vide : aucune fonte web déclarée.
+            // JS-C387 : `loading`/`loadingdone` sont tirés en
+            // microtask (spec : événement en tâche) — un gate
+            // `fonts.addEventListener('loadingdone', res)` voit
+            // la transition même si la charge est instantanée.
             "load" => {
                 let arr = e.new_array(Vec::new());
                 let pid = e.new_promise();
                 e.resolve_promise(pid, arr);
+                ff_queue_event(e, t, "loading", arr)?;
+                ff_queue_event(e, t, "loadingdone", arr)?;
                 Ok(Some(Value::Obj(pid)))
             }
             // `add(face)` — spec : retourne le set (chaînage),
@@ -12180,6 +12186,16 @@ impl Host for FontFaceSetHost {
                     if let Value::Obj(id) = t {
                         e.set_own(id, "__faces", arr, false);
                     }
+                    // JS-C387 — spec : `add()` charge la face
+                    // (statut → 'loaded') et tire `loading` +
+                    // `loadingdone` avec `fontfaces: [face]`.
+                    if let Value::Obj(fid) = face {
+                        let st = e.str_val("loaded");
+                        e.set_own(fid, "status", st, true);
+                    }
+                    let one = e.new_array(vec![face]);
+                    ff_queue_event(e, t, "loading", one)?;
+                    ff_queue_event(e, t, "loadingdone", one)?;
                 }
                 Ok(Some(t))
             }
@@ -13312,12 +13328,25 @@ pub(crate) fn et_add_listener(e: &mut Engine, this: Value, args: &[Value]) -> Js
     if let Some(Value::Obj(map)) = e.get_prop(sid, "__et") {
         let list = e.get_prop(map, &ty).unwrap_or(Value::Undefined);
         if let Value::Obj(l) = list {
+            // JS-C387 : la liste est reconstruite — l'ancienne
+            // écrivait `l[i]`+`l.length` en props propres mais
+            // `length`/`get_prop` des arrays dérivent de
+            // `ObjKind::Array` → tout 2ᵉ listener `__et` était
+            // silencieusement perdu (FontFaceSet, IDBRequest,
+            // greffes EventTarget de polyfills).
             let len = match e.get_prop(l, "length") {
                 Some(Value::Num(n)) => n as usize,
                 _ => 0,
             };
-            e.set_own(l, &len.to_string(), cb, true);
-            e.set_own(l, "length", Value::Num((len + 1) as f64), true);
+            let mut keep = Vec::with_capacity(len + 1);
+            for i in 0..len {
+                if let Some(v) = e.get_prop(l, &i.to_string()) {
+                    keep.push(v);
+                }
+            }
+            keep.push(cb);
+            let arr = e.new_array(keep);
+            e.set_own(map, &ty, arr, true);
         } else {
             let l = e.new_array(vec![cb]);
             e.set_own(map, &ty, l, true);
@@ -15718,11 +15747,85 @@ fn fontface_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
 
 /// `fontface.load()` — promesse résolue `this` (aucune fonte
 /// distante n'est chargée — la promesse existe pour les
-/// loaders qui enchaînent `document.fonts.add(f)`).
+/// loaders qui enchaînent `document.fonts.add(f)`). JS-C387 :
+/// `status` bascule à `'loaded'` — la transition observable
+/// de la spec doit être lisible (`f.status` figé `unloaded`
+/// tuait tout gate applicatif qui attend `'loaded'`).
 fn fontface_load(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
+    if let Value::Obj(fid) = this {
+        let st = e.str_val("loaded");
+        e.set_own(fid, "status", st, true);
+    }
     let id = e.new_promise();
     e.resolve_promise(id, this);
     Ok(Value::Obj(id))
+}
+
+/// JS-C387 — enfile un `FontFaceSetLoadEvent` synthétique
+/// `{type, fontfaces}` dans `__ff_ev` et arme le drain en
+/// microtask (spec : événement en tâche — un listener posé
+/// après `load()` dans le même tour le reçoit aussi). Repli :
+/// dispatch synchrone immédiat si `bind` est indisponible —
+/// l'événement part toujours.
+fn ff_queue_event(e: &mut Engine, set: Value, ty: &str, faces: Value) -> JsResult<()> {
+    let Value::Obj(sid) = set else {
+        return Ok(());
+    };
+    let ev = e.new_object();
+    let t2 = e.str_val(ty);
+    e.set_own(ev, "type", t2, true);
+    e.set_own(ev, "fontfaces", faces, true);
+    let mut evs = match e.get_prop(sid, "__ff_ev") {
+        Some(Value::Obj(a)) => match e.heap.obj(a).map(|o| &o.kind) {
+            Some(ObjKind::Array(v)) => v.clone(),
+            _ => Vec::new(),
+        },
+        _ => Vec::new(),
+    };
+    evs.push(Value::Obj(ev));
+    let arr = e.new_array(evs);
+    e.set_own(sid, "__ff_ev", arr, false);
+    if matches!(e.get_prop(sid, "__ff_q"), Some(Value::Bool(true))) {
+        return Ok(()); // drain déjà armé — ordre FIFO préservé
+    }
+    e.set_own(sid, "__ff_q", Value::Bool(true), false);
+    let flush = e.native_fn("ff_flush", ff_events_flush);
+    let bound = e
+        .get_prop_value(flush, "bind")
+        .ok()
+        .and_then(|b| e.call_value(b, flush, &[set]).ok());
+    match bound {
+        Some(b) => e.enqueue_microtask(b),
+        None => {
+            let _ = ff_events_flush(e, set, &[])?;
+        }
+    }
+    Ok(())
+}
+
+/// JS-C387 — drain des événements `FontFaceSet` en file
+/// (`loading`/`loadingdone`/`loadingerror`), armé une fois par
+/// tour. Un listener qui jette n'interrompt pas les événements
+/// restants ni la file (tolérant — spec : chaque listener est
+/// rapporté indépendamment).
+fn ff_events_flush(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
+    let Value::Obj(sid) = this else {
+        return Ok(Value::Undefined);
+    };
+    e.set_own(sid, "__ff_q", Value::Bool(false), false);
+    let evs = match e.get_prop(sid, "__ff_ev") {
+        Some(Value::Obj(a)) => match e.heap.obj(a).map(|o| &o.kind) {
+            Some(ObjKind::Array(v)) => v.clone(),
+            _ => Vec::new(),
+        },
+        _ => Vec::new(),
+    };
+    let empty = e.new_array(Vec::new());
+    e.set_own(sid, "__ff_ev", empty, false);
+    for ev in evs {
+        let _ = et_dispatch_event(e, this, &[ev]);
+    }
+    Ok(Value::Undefined)
 }
 
 /// `createImageBitmap(image, sx?, sy?, sw?, sh?)` — promesse
