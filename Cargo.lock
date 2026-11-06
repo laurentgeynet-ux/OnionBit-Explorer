@@ -899,6 +899,7 @@ dependencies = [
 name = "explorer-dom"
 version = "0.2.0"
 dependencies = [
+ "criterion",
  "explorer-common",
  "thiserror",
 ]
