@@ -77,15 +77,15 @@ désarmé) — le partage *réel* avant d'optimiser quoi que ce
 soit. Dump périodique (à la collect, gabarit `sched.tally`)
 ou en fin d'eval.
 
-- [ ] **V-2a.** `J17_PROP_LOOKUP` — appels `find_own` totaux.
-- [ ] **V-2b.** `J17_PROTO_LVL` — somme des niveaux proto
+- [x] **V-2a.** `J17_PROP_LOOKUP` — appels `find_own` totaux.
+- [x] **V-2b.** `J17_PROTO_LVL` — somme des niveaux proto
   parcourus (ratio = profondeur moyenne par lookup).
-- [ ] **V-2c.** `J17_PROP_SCAN` — comparaisons de clés en
+- [x] **V-2c.** `J17_PROP_SCAN` — comparaisons de clés en
   branche linéaire (<24, sans index) — le coût exact de la
   branche V-3a.
-- [ ] **V-2d.** `J17_PROP_IDX` — hits/miss de l'index
+- [x] **V-2d.** `J17_PROP_IDX_HIT/MISS/BUILD` — index
   paresseux (≥24 props).
-- [ ] **V-2e.** `J17_ENV_LVL` — niveaux de scope marchés par
+- [x] **V-2e.** `J17_ENV_LVL` — niveaux de scope marchés par
   `env_get_seen`. *Env churn annexe (revue)* : `Env` frais +
   `BindingMap::Small(Vec)` par appel — la création est
   gratuite (`Vec::new()` n'alloue pas), le coût est à la
@@ -93,24 +93,37 @@ ou en fin d'eval.
   scope sans liaison = gratuit, scope avec liaisons = 1
   alloc. Candidat sérieux au top-3, `stats_alloc` le
   nommera.
-- [ ] **V-2f.** `J17_ARRIDX` — `array_index(key)` tentés
+- [x] **V-2f.** `J17_ARRIDX_TRY` — `array_index(key)` tentés
   (**multiplicité** par `find_own` × niveau, ×2 par niveau
   Array — cible V-3b : hoister, pas garder).
-- [ ] **V-2g.** `J17_CALL` — `call_value` par classe
-  (script/natif) — pèse V-4 vs frame-alloc.
-- [ ] **V-2h.** **Classe ALLOC/clone (revue)** — `stats_alloc`
+- [x] **V-2g.** `J17_CALL` / `J17_CALL_NAT` — `call_value`
+  par classe (script = call − nat) — pèse V-4 vs frame-alloc.
+- [x] **V-2h.** **Classe ALLOC/clone (revue)** — `stats_alloc`
   existe déjà (`explorer-common`) : l'attribuer aux phases
   eval. Suspects nommés : `heap.string()` clone chaque
-  chaîne lue (`heap.rs:275`), `find_own` retourne `Prop`
-  **par valeur** à chaque niveau proto.
-- [ ] **V-2i.** **Coût `probe_lookup` sur le hot path** —
-  l'instrumentation §B-97 s'exécute à chaque `get_prop`
-  (`interp/mod.rs:5798`) : mesurer son coût désarmé
-  (compare `id == self.global` + `probe_tagged.iter().find`)
-  — si non négligeable, la garder derrière le flag J17.
-- [ ] **V-2j.** Verrou : `EXPLORER_J17_PROF=1` sur micro-script
-  → compteurs non nuls ; suite `cargo test` verte (désarmé =
-  comportement identique).
+  chaîne lue (`heap.rs:275` → `J17_STR_READ` ajouté),
+  `find_own` retourne `Prop` **par valeur** à chaque niveau
+  proto.
+- [x] **V-2i.** **Coût `probe_lookup` sur le hot path** —
+  désarmé ≈ ~2 ns (u32 compare + `Vec` vide → `find` = check
+  len, ~0.2 % d'un lookup). **Amendement revue NAV** : les
+  vols tournent `dom_probe=info` → chemin **armé** =
+  `format!("{label}:{key}:{ty}")` + `HashSet::insert` par
+  read de clé surveillée (globales `yt*` + ≤32 conteneurs
+  tagués) — `J17_PROBE_HIT` compte ces événements pour que
+  le prochain vol mesure le **biais des métriques elles-
+  mêmes** (dispatch, phases §B-97).
+- [x] **V-2j.** Verrou : `tests/j17_counters.rs` ×4 —
+  chemins nommés, index paresseux, snapshot, attribution
+  `call_rate` (env_lvl=10.2k / 1.1k calls ≈ 10 niveaux/appel,
+  prop_scan=21.7k ≈ 15 cmp/lookup).
+
+**Lien marathon noté (revue NAV)** : le rejet récurrent
+`Error: Wa` à `kevlar_base:6892:177` (~65 s, vol 669)
+ressemble à un watchdog applicatif — si l'eval est assez
+lent pour expirer les timeouts de la page, la vitesse n'est
+pas orthogonale à §B-97. L'attribution V-2 **sur page
+réelle** (snapshot lu en vol) tranche.
 
 **Porte de décision** (formulation de la revue) : si
 `PROP_*` + `ENV_*` + parse dépassent **~30-40 %** de l'eval

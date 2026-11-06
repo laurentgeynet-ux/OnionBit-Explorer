@@ -4372,6 +4372,7 @@ impl Engine {
                 /// matérialisation se fait hors emprunt.
                 Lazy(std::rc::Rc<crate::heap::LazyArgs>),
             }
+            crate::j17_tick(&crate::J17_ENV_LVL);
             // `with (o)` — la résolution passe par les props de
             // l'objet (hors `@@unscopables`) puis remonte.
             let with_oid = {
@@ -5488,6 +5489,7 @@ impl Engine {
     /// Own-property lookup with array/`length` semantics — returns
     /// the raw `Prop` so accessor pairs are visible to the caller.
     pub(crate) fn find_own(&mut self, id: ObjId, key: &str) -> Option<Prop> {
+        crate::j17_tick(&crate::J17_PROP_LOOKUP);
         // `arguments` mappé : l'indice renvoie au slot env du
         // paramètre formel (spec `MappedArgumentsObject` [[Get]]).
         if let Some(i) = array_index(key) {
@@ -5774,6 +5776,7 @@ impl Engine {
         let mut cur = Some(id);
         let mut depth = 0;
         while let Some(cid) = cur {
+            crate::j17_tick(&crate::J17_PROTO_LVL);
             if let Some(p) = self.find_own(cid, key) {
                 return Some(p);
             }
@@ -5839,6 +5842,7 @@ impl Engine {
             *l
         };
         if let Some((dom, _)) = &self.dom_ctx {
+            crate::j17_tick(&crate::J17_PROBE_HIT);
             // `ty` dans la clé de dédup : un read qui rend
             // `undefined` puis `obj` logue les deux — la transition
             // « donnée absente → peuplée » reste visible ; pour les
@@ -7571,6 +7575,7 @@ impl Engine {
             *g = "call";
         }
         crate::CALL_N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        crate::j17_tick(&crate::J17_CALL);
         let mut cur = f;
         let mut args_owned: Option<Vec<Value>> = None;
         let mut this = this;
@@ -7626,10 +7631,12 @@ impl Engine {
         };
         match fun {
             Fun::Native { name, f } => {
+                crate::j17_tick(&crate::J17_CALL_NAT);
                 self.nat_trace_tick(name);
                 self.call_native_ctx(name, f, this, args_ref)
             }
             Fun::BoundNative { name, f, bound } => {
+                crate::j17_tick(&crate::J17_CALL_NAT);
                 self.nat_trace_tick(name);
                 let mut a = Vec::with_capacity(bound.len() + args_ref.len());
                 a.extend_from_slice(&bound);

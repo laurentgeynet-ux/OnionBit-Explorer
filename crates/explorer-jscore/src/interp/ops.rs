@@ -146,6 +146,7 @@ pub(crate) fn parse_js_number(s: &str) -> f64 {
 
 /// Is `key` a canonical array index (`"0"`, `"1"`, … no leading zeros)?
 pub(crate) fn array_index(key: &str) -> Option<usize> {
+    crate::j17_tick(&crate::J17_ARRIDX_TRY);
     if key.is_empty() || !key.bytes().all(|b| b.is_ascii_digit()) {
         return None;
     }

@@ -246,6 +246,45 @@ pub static J17_PROP_KEY: std::sync::atomic::AtomicU64 = std::sync::atomic::Atomi
 /// J17 — lectures `arr[i]` servies par le fast-path éléments
 /// sans `String` de clé (`arr_index_get`).
 pub static J17_ARR_IDX: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+// -- V-2 (chantier VITESSE-JS) : attribution des chemins de --
+// -- résolution — événements, pas octets. Monotones, deltas --
+// -- lus par banc/test/sonde. --------------------------------
+/// `find_own` entré — un appel par niveau proto parcouru
+/// (`J17_PROTO_LVL` = cumul des niveaux).
+pub static J17_PROP_LOOKUP: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// Niveaux de chaîne prototype parcourus (`find_prop` loop).
+pub static J17_PROTO_LVL: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// Comparaisons de clés payées en scan linéaire `prop_pos`
+/// (< `PROPS_IDX_MIN`) — le coût exact de la branche V-3a.
+pub static J17_PROP_SCAN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// Hit de l'index paresseux `props` (≥ `PROPS_IDX_MIN`).
+pub static J17_PROP_IDX_HIT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// Miss de l'index paresseux `props`.
+pub static J17_PROP_IDX_MISS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// Constructions de l'index paresseux `props` (`get_or_init`).
+pub static J17_PROP_IDX_BUILD: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// Niveaux de scope parcourus par `env_get_seen` — profondeur
+/// de fermeture moyenne × `env_get` = coût résolution variable.
+pub static J17_ENV_LVL: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// `array_index(key)` tenté — multiplicité par `find_own`
+/// (× niveau, ×2 par niveau Array) — cible V-3b (hoist).
+pub static J17_ARRIDX_TRY: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// `call_value_impl` entré — version gatée de `CALL_N`
+/// (celui-ci, non gaté, sert les sondes de vol §B-59).
+pub static J17_CALL: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// Dispatch native (`Fun::Native`/`BoundNative`) —
+/// `J17_CALL` − `J17_CALL_NAT` ≈ appels script (frame/env).
+pub static J17_CALL_NAT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// `Heap::string` clone-read servi — chaque lecture de chaîne
+/// clone (`s.clone()`) — suspect V-2h (`stats_alloc` donne
+/// les octets, ce compteur les événements).
+pub static J17_STR_READ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// `probe_lookup` chemin **armé** atteint (`dom_ctx` présent +
+/// clé surveillée/taguée → `format!` + dedup `HashSet`) —
+/// V-2i : les vols tournent `dom_probe=info`, ce compteur ×
+/// ~coût format+insert = le biais des métriques de vol elles-
+/// mêmes (dispatch, phases §B-97).
+pub static J17_PROBE_HIT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 /// Gate J17 : les compteurs ci-dessus ne s'incrémentent que si
 /// `EXPLORER_J17_PROF` est posé (non vide/non "0") au premier
@@ -268,6 +307,39 @@ pub(crate) fn j17_on() -> bool {
 /// (bancs de test J17 — sinon les relevés restent à zéro).
 pub fn j17_enable() {
     J17_ENABLED.store(true, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Snapshot borné des compteurs V-2 (chantier VITESSE-JS) —
+/// une ligne `k=v` pour la piste vol/banc, vide si tout est
+/// à zéro. Lecture `Relaxed`, coût nul hors appel.
+#[must_use]
+pub fn j17_snapshot() -> String {
+    let r = std::sync::atomic::Ordering::Relaxed;
+    let pairs: [(&str, &std::sync::atomic::AtomicU64); 12] = [
+        ("prop_lookup", &J17_PROP_LOOKUP),
+        ("proto_lvl", &J17_PROTO_LVL),
+        ("prop_scan", &J17_PROP_SCAN),
+        ("prop_idx_hit", &J17_PROP_IDX_HIT),
+        ("prop_idx_miss", &J17_PROP_IDX_MISS),
+        ("prop_idx_build", &J17_PROP_IDX_BUILD),
+        ("env_lvl", &J17_ENV_LVL),
+        ("arridx_try", &J17_ARRIDX_TRY),
+        ("call", &J17_CALL),
+        ("call_nat", &J17_CALL_NAT),
+        ("str_read", &J17_STR_READ),
+        ("probe_hit", &J17_PROBE_HIT),
+    ];
+    let mut out = String::new();
+    for (k, c) in pairs {
+        let v = c.load(r);
+        if v > 0 {
+            if !out.is_empty() {
+                out.push(' ');
+            }
+            out.push_str(&format!("{k}={v}"));
+        }
+    }
+    out
 }
 
 /// Incrément borné d'un compteur J17 — no-op hors mode profil.

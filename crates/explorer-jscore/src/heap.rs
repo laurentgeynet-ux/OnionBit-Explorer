@@ -276,7 +276,10 @@ impl Heap {
         match self.cells.get(id as usize) {
             Some(Some(Cell {
                 data: CellData::Str(s),
-            })) => Some(s.clone()),
+            })) => {
+                crate::j17_tick(&crate::J17_STR_READ);
+                Some(s.clone())
+            }
             _ => None,
         }
     }
@@ -1497,9 +1500,13 @@ impl Object {
     /// de panic).
     pub(crate) fn prop_pos(&self, key: &str) -> Option<usize> {
         if self.props.len() < PROPS_IDX_MIN || self.props.len() >= u32::MAX as usize {
-            return self.props.iter().position(|(k, _)| &**k == key);
+            return self.props.iter().position(|(k, _)| {
+                crate::j17_tick(&crate::J17_PROP_SCAN);
+                &**k == key
+            });
         }
         let m = self.idx.get_or_init(|| {
+            crate::j17_tick(&crate::J17_PROP_IDX_BUILD);
             let mut m = std::collections::HashMap::with_capacity(self.props.len());
             for (i, (k, _)) in self.props.iter().enumerate() {
                 if let Ok(pos) = u32::try_from(i) {
@@ -1508,8 +1515,13 @@ impl Object {
             }
             Box::new(m)
         });
-        m.get(key)
-            .map(|i| usize::try_from(*i).unwrap_or(usize::MAX))
+        let pos = m.get(key);
+        crate::j17_tick(if pos.is_some() {
+            &crate::J17_PROP_IDX_HIT
+        } else {
+            &crate::J17_PROP_IDX_MISS
+        });
+        pos.map(|i| usize::try_from(*i).unwrap_or(usize::MAX))
     }
 
     /// Insertion en fin d'ordre — met l'index à jour s'il existe.
