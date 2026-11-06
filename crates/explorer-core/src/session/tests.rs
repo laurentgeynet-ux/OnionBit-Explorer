@@ -1373,11 +1373,14 @@ fn declared_media_codecs_reach_scan_and_engine() {
     let tab2 = s2.open_tab();
     let eng = s2.spawn_engine(tab2, "<!doctype html><html><body></body></html>", true, "");
     let mut eng = eng.expect("moteur spawné");
+    // JS-C345 : liste `codecs=` entièrement déclarée →
+    // `"probably"` (plafond `maybe` levé) ; codec hors table
+    // (`vp8`) → `""`.
     let yes = eng
-        .eval("MediaSource.isTypeSupported('video/mp4;codecs=\"avc1.42E01E,mp4a.40.2\"')==='maybe'?'yes':'no'")
+        .eval("MediaSource.isTypeSupported('video/mp4;codecs=\"avc1.42E01E,mp4a.40.2\"')==='probably'?'yes':'no'")
         .unwrap();
     let no = eng
-        .eval("MediaSource.isTypeSupported('video/mp4;codecs=\"avc1.42E01E,vp8\"')==='maybe'?'yes':'no'")
+        .eval("MediaSource.isTypeSupported('video/mp4;codecs=\"avc1.42E01E,vp8\"')!==''?'yes':'no'")
         .unwrap();
     assert_eq!((yes.as_str(), no.as_str()), ("yes", "no"));
 }
