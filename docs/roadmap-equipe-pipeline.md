@@ -2942,6 +2942,29 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   (heap ÷4, survie du texte post-réécriture, plage forgée),
   `TextRange` 8 o dans `sizes_probe`, 28/28 dom + 454/454
   session verts, clippy `-D warnings`.
+- [x] **R-151. Liens intrusifs `Option<NodeId>` → `NodeId`
+  à sentinelle NIL** (AR-15, chantier ARÈNE — interne pur,
+  zéro casse API) : `Option<NodeId>` = 12 o (4 o de
+  discriminant — pas de niche sur `NodeId{u32,u32}`) → les
+  5 liens `Node` (`parent`/`first_child`/`last_child`/
+  `prev`/`next_sibling`, `pub(crate)`) passent en `NodeId`
+  nu à sentinelle `NodeId::NIL` (`index = u32::MAX`,
+  `generation = 0` — un lien NIL suivi par erreur échoue
+  typé `OutOfBounds`, jamais de mauvais nœud) : **60 →
+  40 o/nœud**, `Node` 120 → **96 o**, `Slot` 128 →
+  **104 o** (−19 %). **La génération reste vérifiée à la
+  résolution — ADR-0008 inchangé**, aucun fixup requis
+  (contrairement au `u32` nu, refusé sur analyse : liens
+  `parent`/siblings-frontière vers cases réattribuées =
+  mauvais nœud résolu en silence → classe de bug
+  correction sur navigateur, gain ~19 % slot jugé
+  insuffisant vs le risque + une passe O(vivants) de délink
+  au `collect`). Accesseurs publics inchangés
+  (`as_option()` aux frontières ; itérateurs gardent
+  `Option` en état interne). Banc : `collect` fragmenté
+  **2,3 ms** (baseline 4,5 → −48 % cumulé AR-12→15),
+  profond 0,18 ms. Verrou interne `Node` = 96 o, 28/28 +
+  454/454 verts, clippy `-D warnings`.
 
 ## Palier R-B — Contenu étranger, animation, canvas
 

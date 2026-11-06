@@ -213,16 +213,31 @@ arbres vivants (AR-1 sans seeds) ou des nœuds encore référencés
 
 ## Palier AR-P3 — Redesign sémantique (dernier, sur preuve)
 
-- [ ] **AR-15. Liens internes `u32`** — PIPE, redesign.
-  60 o → 20 o de liens par nœud (`Slot` 144 → ~104 o).
-  **Prérequis bloquant** : `free()` ne délinke pas —
-  des survivants (roots, tables latérales) gardent des liens
-  vers des cases libérées et c'est la **génération** qui rend
-  leur suivi un échec typé aujourd'hui. En `u32` nu, une case
-  réallouée résout silencieusement le mauvais nœud → exige un
-  fixup de délink à la libération dans `collect` **avant**
-  tout gain. Ne livrer que si AR-6/AR-12 mesurent le coût
-  réel des `Option<NodeId>`.
+- [x] **AR-15. Liens internes — mesuré, livré la moitié
+  sûre, `u32` nu refusé sur preuve** — PIPE. Mesure
+  `Option<NodeId>` = **12 o** (4 o de discriminant —
+  `NodeId{u32,u32}` sans niche) → 5 liens intrusifs =
+  **60 o/nœud** (roadmap cohérente). **Livré** : sentinelle
+  `NodeId::NIL` (`index = u32::MAX`, `generation = 0`) —
+  liens stockés en `NodeId` nu → **60 → 40 o/nœud**,
+  `Node` 120 → **96 o**, `Slot` 128 → **104 o** (−19 %) ;
+  **génération toujours vérifiée à la résolution** —
+  invariant ADR-0008 strictement inchangé, champs
+  `pub(crate)`, zéro casse API, zéro fixup. Banc :
+  `collect` fragmenté **2,3 ms** (baseline 4,5 → −48 %
+  cumulé AR-12→15), profond 0,18 ms. **`u32` intégral
+  refusé sur analyse** : le marquage couvre les liens
+  descendants, mais `parent` et les siblings frontière
+  (sous-arbre vivant par root/seed dont le parent meurt)
+  pointeraient vers des cases réattribuées → **mauvais nœud
+  résolu en silence** dans `is_ancestor`/`children_iter` —
+  classe de bug correction, pas crash. Le fixup de délink
+  exigerait une passe O(vivants) au `collect` + régime
+  hybride `u32`/`NodeId` pour ~20 o/nœud de plus : gain
+  réel (~19 % slot) jugé insuffisant au regard de la classe
+  de risque sur un navigateur. `NonZeroU32` sur
+  `generation` refusé aussi : `from_parts(idx, 0)` forgé
+  clamé pourrait résoudre une vraie case gen-1.
 
 ## Piste parallèle JS (spécialiste JS — hors `explorer-dom`)
 

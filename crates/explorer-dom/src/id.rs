@@ -46,6 +46,37 @@ impl NodeId {
     pub fn generation(self) -> u32 {
         self.generation
     }
+
+    /// Sentinelle « pas de lien » pour le chaînage intrusif
+    /// interne (AR-15) : `index = u32::MAX` ne peut pas être
+    /// une case réelle (l'arène est bornée par `max_nodes`,
+    /// très loin de `u32::MAX`), et `generation = 0` ne
+    /// correspond à aucune case (les générations démarrent à
+    /// 1). Un lien NIL suivi par erreur échoue donc **typé**
+    /// (`OutOfBounds` à la résolution) — jamais de mauvais
+    /// nœud résolu en silence. Permet de stocker les liens en
+    /// `NodeId` nu (8 o) plutôt qu'`Option<NodeId>` (12 o).
+    pub(crate) const NIL: Self = Self {
+        index: u32::MAX,
+        generation: 0,
+    };
+
+    /// `true` si ce lien est la sentinelle NIL.
+    #[must_use]
+    pub(crate) fn is_nil(self) -> bool {
+        self.index == u32::MAX
+    }
+
+    /// Convertit le lien interne en `Option` pour les
+    /// accesseurs publics.
+    #[must_use]
+    pub(crate) fn as_option(self) -> Option<Self> {
+        if self.is_nil() {
+            None
+        } else {
+            Some(self)
+        }
+    }
 }
 
 impl fmt::Debug for NodeId {

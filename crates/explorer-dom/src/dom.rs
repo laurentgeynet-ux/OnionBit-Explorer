@@ -551,7 +551,7 @@ impl Dom {
     /// # Errors
     /// Erreurs de handle comme [`Dom::data`].
     pub fn parent(&self, id: NodeId) -> Result<Option<NodeId>> {
-        Ok(self.node(id)?.parent)
+        Ok(self.node(id)?.parent.as_option())
     }
 
     /// Premier enfant.
@@ -559,7 +559,7 @@ impl Dom {
     /// # Errors
     /// Erreurs de handle comme [`Dom::data`].
     pub fn first_child(&self, id: NodeId) -> Result<Option<NodeId>> {
-        Ok(self.node(id)?.first_child)
+        Ok(self.node(id)?.first_child.as_option())
     }
 
     /// Dernier enfant.
@@ -567,7 +567,7 @@ impl Dom {
     /// # Errors
     /// Erreurs de handle comme [`Dom::data`].
     pub fn last_child(&self, id: NodeId) -> Result<Option<NodeId>> {
-        Ok(self.node(id)?.last_child)
+        Ok(self.node(id)?.last_child.as_option())
     }
 
     /// Sibling précédent.
@@ -575,7 +575,7 @@ impl Dom {
     /// # Errors
     /// Erreurs de handle comme [`Dom::data`].
     pub fn prev_sibling(&self, id: NodeId) -> Result<Option<NodeId>> {
-        Ok(self.node(id)?.prev_sibling)
+        Ok(self.node(id)?.prev_sibling.as_option())
     }
 
     /// Sibling suivant.
@@ -583,7 +583,7 @@ impl Dom {
     /// # Errors
     /// Erreurs de handle comme [`Dom::data`].
     pub fn next_sibling(&self, id: NodeId) -> Result<Option<NodeId>> {
-        Ok(self.node(id)?.next_sibling)
+        Ok(self.node(id)?.next_sibling.as_option())
     }
 
     /// Enfants dans l'ordre du document.
@@ -610,7 +610,7 @@ impl Dom {
     pub fn children_iter(&self, id: NodeId) -> Result<ChildrenIter<'_>> {
         Ok(ChildrenIter {
             dom: self,
-            next: self.node(id)?.first_child,
+            next: self.node(id)?.first_child.as_option(),
         })
     }
 
@@ -627,7 +627,7 @@ impl Dom {
         Ok(Descendants {
             dom: self,
             root: id,
-            pending: first,
+            pending: first.as_option(),
         })
     }
 
@@ -1320,9 +1320,12 @@ impl Dom {
             bits[idx >> 6] |= bit;
             if let Ok(node) = self.node(id) {
                 let mut cursor = node.first_child;
-                while let Some(child) = cursor {
-                    stack.push(child);
-                    cursor = self.node(child).ok().and_then(|n| n.next_sibling);
+                while !cursor.is_nil() {
+                    stack.push(cursor);
+                    cursor = self
+                        .node(cursor)
+                        .ok()
+                        .map_or(NodeId::NIL, |n| n.next_sibling);
                 }
                 // Arbre latéral : fragment `content` d'un
                 // `<template>` — détaché de la chaîne enfants.
@@ -1671,25 +1674,25 @@ impl Dom {
             let node = self.node(id)?;
             (node.parent, node.prev_sibling, node.next_sibling)
         };
-        if let Some(prev) = prev {
+        if !prev.is_nil() {
             self.node_mut(prev)?.next_sibling = next;
         }
-        if let Some(next) = next {
+        if !next.is_nil() {
             self.node_mut(next)?.prev_sibling = prev;
         }
-        if let Some(parent) = parent {
+        if !parent.is_nil() {
             let p = self.node_mut(parent)?;
-            if p.first_child == Some(id) {
+            if p.first_child == id {
                 p.first_child = next;
             }
-            if p.last_child == Some(id) {
+            if p.last_child == id {
                 p.last_child = prev;
             }
         }
         let node = self.node_mut(id)?;
-        node.parent = None;
-        node.prev_sibling = None;
-        node.next_sibling = None;
+        node.parent = NodeId::NIL;
+        node.prev_sibling = NodeId::NIL;
+        node.next_sibling = NodeId::NIL;
         Ok(())
     }
 
@@ -1701,30 +1704,30 @@ impl Dom {
         reference: Option<NodeId>,
     ) -> Result<()> {
         let (prev, next) = match reference {
-            Some(reference) => (self.node(reference)?.prev_sibling, Some(reference)),
-            None => (self.node(parent)?.last_child, None),
+            Some(reference) => (self.node(reference)?.prev_sibling, reference),
+            None => (self.node(parent)?.last_child, NodeId::NIL),
         };
-        if let Some(prev) = prev {
-            self.node_mut(prev)?.next_sibling = Some(child);
+        if !prev.is_nil() {
+            self.node_mut(prev)?.next_sibling = child;
         }
-        if let Some(next) = next {
-            self.node_mut(next)?.prev_sibling = Some(child);
+        if !next.is_nil() {
+            self.node_mut(next)?.prev_sibling = child;
         }
         {
             let p = self.node_mut(parent)?;
             if let Some(reference) = reference {
-                if p.first_child == Some(reference) {
-                    p.first_child = Some(child);
+                if p.first_child == reference {
+                    p.first_child = child;
                 }
             } else {
-                p.last_child = Some(child);
+                p.last_child = child;
             }
-            if p.first_child.is_none() {
-                p.first_child = Some(child);
+            if p.first_child.is_nil() {
+                p.first_child = child;
             }
         }
         let c = self.node_mut(child)?;
-        c.parent = Some(parent);
+        c.parent = parent;
         c.prev_sibling = prev;
         c.next_sibling = next;
         Ok(())
@@ -1779,7 +1782,11 @@ impl Iterator for ChildrenIter<'_> {
         // ne l'interdit pas si le `Dom` est recréé entre
         // appels) termine l'itération plutôt que suivre un
         // handle obsolète.
-        self.next = self.dom.node(cur).ok().and_then(|n| n.next_sibling);
+        self.next = self
+            .dom
+            .node(cur)
+            .ok()
+            .and_then(|n| n.next_sibling.as_option());
         Some(cur)
     }
 }
@@ -1801,10 +1808,10 @@ impl Descendants<'_> {
     fn next_unvisited(&self, mut n: NodeId) -> Option<NodeId> {
         while n != self.root {
             let node = self.dom.node(n).ok()?;
-            if let Some(s) = node.next_sibling {
-                return Some(s);
+            if !node.next_sibling.is_nil() {
+                return Some(node.next_sibling);
             }
-            n = node.parent?;
+            n = node.parent.as_option()?;
         }
         None
     }
@@ -1821,8 +1828,27 @@ impl Iterator for Descendants<'_> {
             .dom
             .node(cur)
             .ok()
-            .and_then(|n| n.first_child)
+            .and_then(|n| n.first_child.as_option())
             .or_else(|| self.next_unvisited(cur));
         Some(cur)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    //! Verrous de représentation interne (types `pub(crate)`
+    //! — invisibles aux tests d'intégration).
+    use std::mem::size_of;
+
+    #[test]
+    fn liens_nil_sentinel_taille() {
+        // AR-15 : les 5 liens intrusifs sont des `NodeId` nus
+        // (8 o) à sentinelle `index == u32::MAX`, pas des
+        // `Option<NodeId>` (12 o) — la génération reste
+        // vérifiée à la résolution (ADR-0008 inchangé).
+        // `Node` = 5×8 liens + `NodeData` (56) = 96 o ;
+        // `Slot` = tag + max(Occupied{u32+96}, Vacant{8}) ≈ 104.
+        assert_eq!(size_of::<super::Node>(), 96);
+        assert!(size_of::<super::Slot>() <= 112, "Slot a regrossi");
     }
 }

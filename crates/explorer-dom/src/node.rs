@@ -117,13 +117,17 @@ impl ElementData {
 /// Nœud d'arène : chaînage intrusif parent/enfants/siblings +
 /// contenu typé. Tous les liens sont des `NodeId` — validité
 /// garantie par la génération à chaque accès via `Dom`.
+/// Liens stockés en `NodeId` nu avec sentinelle
+/// [`NodeId::NIL`] (8 o vs 12 o pour `Option` — AR-15) :
+/// `generation` reste vérifiée à la résolution, l'invariant
+/// ADR-0008 est inchangé.
 #[derive(Debug)]
 pub(crate) struct Node {
-    pub(crate) parent: Option<NodeId>,
-    pub(crate) first_child: Option<NodeId>,
-    pub(crate) last_child: Option<NodeId>,
-    pub(crate) prev_sibling: Option<NodeId>,
-    pub(crate) next_sibling: Option<NodeId>,
+    pub(crate) parent: NodeId,
+    pub(crate) first_child: NodeId,
+    pub(crate) last_child: NodeId,
+    pub(crate) prev_sibling: NodeId,
+    pub(crate) next_sibling: NodeId,
     pub(crate) data: NodeData,
 }
 
@@ -131,11 +135,11 @@ impl Node {
     /// Crée un nœud orphelin (aucun lien).
     pub(crate) fn new(data: NodeData) -> Self {
         Self {
-            parent: None,
-            first_child: None,
-            last_child: None,
-            prev_sibling: None,
-            next_sibling: None,
+            parent: NodeId::NIL,
+            first_child: NodeId::NIL,
+            last_child: NodeId::NIL,
+            prev_sibling: NodeId::NIL,
+            next_sibling: NodeId::NIL,
             data,
         }
     }
