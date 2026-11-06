@@ -919,6 +919,13 @@ pub struct Session {
     /// 209) — émis à leur échéance `at` par `poll_net`,
     /// annulés par `Abort`/fermeture d'onglet.
     fetch_held: std::collections::VecDeque<net_items::HeldFetch>,
+    /// Dedup des sondes `net.drop`/`net.fail` (JS-C366,
+    /// `media_probe`) — couples `(kind, host)` déjà logués :
+    /// le motif d'échec est nommé une fois par sorte, le
+    /// décompte reste dans `fetch.rej` côté moteur. Borné —
+    /// au-delà de [`MAX_NET_PROBE_SEEN`] on logue tout (les
+    /// signatures nouvelles passent encore).
+    net_probe_seen: std::collections::HashSet<(&'static str, String)>,
     /// Téléchargements bufferisés en attente de décision
     /// (étape 70), `id → corps + méta`.
     downloads: HashMap<u64, PendingDownload>,
@@ -1178,6 +1185,7 @@ impl Session {
             ordered_dyn: HashMap::new(),
             fetch_fail_streak: HashMap::new(),
             fetch_held: std::collections::VecDeque::new(),
+            net_probe_seen: std::collections::HashSet::new(),
             max_script_net: cfg.max_script_net,
             max_timer_jobs: cfg.max_timer_jobs,
             max_auto_navs: cfg.max_auto_navs,

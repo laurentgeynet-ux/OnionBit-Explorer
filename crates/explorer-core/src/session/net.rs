@@ -39,6 +39,35 @@ const MAX_HELD_FETCHES: usize = 512;
 /// page balayant des milliers d'URL distinctes ne fait pas
 /// gonfler la map (les nouvelles URLs passent sans streak).
 const MAX_STREAK_URLS: usize = 1_024;
+/// Borne dedup des sondes `net.drop`/`net.fail` (JS-C366) —
+/// couples `(kind, host)` retenus ; au-delà, log direct.
+const MAX_NET_PROBE_SEEN: usize = 512;
+
+/// Variante d'un `NetError` en nom de sonde — la cause
+/// transport est nommée sans fuiter les détails (cible,
+/// source io) dans le journal.
+fn net_err_kind(e: &explorer_net::error::NetError) -> &'static str {
+    use explorer_net::error::NetError as E;
+    match e {
+        E::Dns { .. } => "dns",
+        E::Connect { .. } => "connect",
+        E::Tls { .. } => "tls",
+        E::Timeout { .. } => "timeout",
+        E::UnsupportedScheme(_) => "scheme",
+        E::InvalidResponse(_) => "bad_response",
+        E::HeadTooLarge(_) => "head_large",
+        E::BodyTooLarge(_) => "body_large",
+        E::TruncatedBody { .. } => "truncated",
+        E::InvalidChunked(_) => "chunked",
+        E::TooManyRedirects(_) => "redirects",
+        E::BlockedMixedContent(_) => "mixed",
+        E::CorsBlocked(_) => "cors_preflight",
+        E::DecodedTooLarge(_) => "decoded_large",
+        E::ContentDecode(_) => "decode",
+        E::Http2(_) => "h2",
+        E::Io(_) => "io",
+    }
+}
 
 /// Délai de retenue §B-60 pour un streak donné —
 /// `250 ms → 10 s` en doublement plafonné.
@@ -2487,11 +2516,13 @@ impl Session {
             self.ctx_net_origin(tab, ctx, page, base)
         else {
             tracing::trace!(tab, handle, ctx, "fetch d'un contexte mort");
+            self.note_net_drop("ctx_dead", url);
             return Err(());
         };
         let inflight = self.net_tasks.keys().filter(|(t, _)| *t == tab).count();
         if inflight >= self.max_script_net {
             tracing::trace!(tab, handle, "quota requêtes script atteint");
+            self.note_net_drop("quota", url);
             return Err(());
         }
         let Some((req, cross)) = self.script_request(
@@ -2507,6 +2538,7 @@ impl Session {
             mode,
             credentials,
         ) else {
+            self.note_net_drop("blocked", url);
             return Err(());
         };
         let tr = self.transport.clone();
@@ -2827,6 +2859,63 @@ impl Session {
         });
         self.net_tasks.insert((tab, handle), j);
         Ok(())
+    }
+
+    /// Sonde `net.drop` (`media_probe`, JS-C366) — requête
+    /// script refusée **avant émission** : nomme la cause
+    /// (`ctx_dead`/`quota`/`blocked`) + l'hôte ; dedup
+    /// `(kind, host)` — le décompte reste côté `fetch.rej`
+    /// moteur, un motif est logué une fois par sorte.
+    fn note_net_drop(&mut self, kind: &'static str, url: &str) {
+        if !tracing::enabled!(target: "media_probe", tracing::Level::INFO) {
+            return;
+        }
+        let host = Url::parse(url)
+            .ok()
+            .map(|u| u.host().clone())
+            .unwrap_or_default();
+        if self.note_net_probe(kind, &host) {
+            tracing::info!(target: "media_probe", site = "net.drop", kind, host);
+        }
+    }
+
+    /// Sonde `net.fail` (`media_probe`, JS-C366) — réponse
+    /// arrivée mais livrée `status: 0` : nomme la cause
+    /// transport (`NetError` → kind) ou `cors_resp` (corps
+    /// reçu mais `ACAO` absent/mismatch). Dedup `(kind, host)`.
+    fn note_net_fail(&mut self, done: &net_items::NetDone) {
+        if !tracing::enabled!(target: "media_probe", tracing::Level::INFO) {
+            return;
+        }
+        let host = done.req_url.host().clone();
+        match &done.out {
+            Err(e) => {
+                let kind = net_err_kind(e);
+                if self.note_net_probe(kind, &host) {
+                    tracing::info!(target: "media_probe", site = "net.fail", kind, host);
+                }
+            }
+            Ok(r) => {
+                let acao = r
+                    .headers_all("access-control-allow-origin")
+                    .next()
+                    .is_some();
+                if self.note_net_probe("cors_resp", &host) {
+                    tracing::info!(target: "media_probe", site = "net.fail", kind = "cors_resp", host, status = r.status, acao);
+                }
+            }
+        }
+    }
+
+    /// Dedup `(kind, host)` des sondes `net.*` — `true` = le
+    /// couple n'a jamais été logué (inséré sous la borne ;
+    /// au-delà, non inséré mais signalé comme nouveau).
+    fn note_net_probe(&mut self, kind: &'static str, host: &str) -> bool {
+        if self.net_probe_seen.len() < MAX_NET_PROBE_SEEN {
+            self.net_probe_seen.insert((kind, host.to_string()))
+        } else {
+            !self.net_probe_seen.contains(&(kind, host.to_string()))
+        }
     }
 
     /// Livre une `NetResponse` au moteur puis applique le
@@ -3369,13 +3458,18 @@ impl Session {
                         body: resp.body.clone(),
                     }
                 }
-                _ => NetResponse {
-                    handle: d.handle,
-                    status: 0,
-                    status_text: String::new(),
-                    headers: Vec::new(),
-                    body: Vec::new(),
-                },
+                _ => {
+                    // JS-C366 — nomme la cause transport/CORS
+                    // du `status: 0` (dedup `(kind, host)`).
+                    self.note_net_fail(&d);
+                    NetResponse {
+                        handle: d.handle,
+                        status: 0,
+                        status_text: String::new(),
+                        headers: Vec::new(),
+                        body: Vec::new(),
+                    }
+                }
             };
             // Streak §B-60 : `status: 0` (échec transport ou
             // réponse cross non-lisible livrée opaque) allonge
