@@ -33,10 +33,10 @@ fn ev(e: &mut Engine, src: &str) -> String {
 }
 
 /// Les reflets hors-tag rendent `false` au `in` (le poison
-/// §B-103) et `undefined` en lecture — les reflets en-tag
-/// restent vrais ; les globaux restent globaux.
+/// §B-103) — les reflets en-tag restent vrais ; les globaux
+/// restent globaux.
 #[test]
-fn reflected_attrs_are_tag_scoped() {
+fn reflected_attrs_false_off_tag() {
     let mut e = engine();
     // Poison §B-103 — faux sur mauvais tag.
     for key in [
@@ -75,6 +75,13 @@ fn reflected_attrs_are_tag_scoped() {
             "'{key}' in div"
         );
     }
+}
+
+/// Les reflets en-tag restent vrais ; les globaux restent
+/// globaux sur n'importe quel élément.
+#[test]
+fn reflected_attrs_true_on_tag_and_globals() {
+    let mut e = engine();
     // En-tag : vrais.
     for (tag, key) in [
         ("link", "media"),
@@ -206,5 +213,98 @@ fn tagged_reflect_read_write_semantics() {
             "var v = document.createElement('video'); v.controls = true; v.controls"
         ),
         "true"
+    );
+}
+
+/// §B-107/JS-C385 — les méthodes tag-scopées sont **lisibles**
+/// (`typeof`/`in`) comme un navigateur : `canvas.getContext`,
+/// `form.submit`, `dialog.showModal`, `img.decode`… étaient
+/// invoke-only → `undefined` → chart.js ratant son
+/// feature-detect. Hors-tag elles restent `undefined`.
+#[test]
+fn tagged_methods_are_readable_on_tag_only() {
+    let mut e = engine();
+    // En-tag : `'function'` + `in` vrai.
+    for (tag, m) in [
+        ("canvas", "getContext"),
+        ("canvas", "toDataURL"),
+        ("canvas", "toBlob"),
+        ("form", "submit"),
+        ("form", "requestSubmit"),
+        ("form", "reset"),
+        ("form", "checkValidity"),
+        ("form", "reportValidity"),
+        ("form", "setCustomValidity"),
+        ("input", "checkValidity"),
+        ("input", "select"),
+        ("input", "setSelectionRange"),
+        ("textarea", "setRangeText"),
+        ("dialog", "showModal"),
+        ("dialog", "show"),
+        ("dialog", "close"),
+        ("img", "decode"),
+        ("slot", "assignedElements"),
+        ("slot", "assignedNodes"),
+        ("button", "checkValidity"),
+        ("fieldset", "checkValidity"),
+        ("select", "checkValidity"),
+    ] {
+        assert_eq!(
+            ev(
+                &mut e,
+                &format!("typeof document.createElement('{tag}').{m}")
+            ),
+            "function",
+            "typeof {tag}.{m}"
+        );
+        assert_eq!(
+            ev(&mut e, &format!("'{m}' in document.createElement('{tag}')")),
+            "true",
+            "'{m}' in {tag}"
+        );
+    }
+    // Hors-tag : `undefined` + `in` faux (le poison §B-107).
+    for m in [
+        "getContext",
+        "toDataURL",
+        "toBlob",
+        "submit",
+        "requestSubmit",
+        "checkValidity",
+        "showModal",
+        "decode",
+        "assignedElements",
+    ] {
+        assert_eq!(
+            ev(&mut e, &format!("typeof document.createElement('div').{m}")),
+            "undefined",
+            "typeof div.{m}"
+        );
+        assert_eq!(
+            ev(&mut e, &format!("'{m}' in document.createElement('div')")),
+            "false",
+            "'{m}' in div"
+        );
+    }
+    // L'appel reste sain : `getContext('2d')` rend un objet
+    // contexte, `checkValidity` un booléen.
+    assert_eq!(
+        ev(
+            &mut e,
+            "typeof document.createElement('canvas').getContext('2d')"
+        ),
+        "object"
+    );
+    assert_eq!(
+        ev(&mut e, "document.createElement('form').checkValidity()"),
+        "true"
+    );
+    // Garde JS-C341 : une prop auteur shadowe le trampoline.
+    assert_eq!(
+        ev(
+            &mut e,
+            "var c = document.createElement('canvas'); c.getContext = 42; c.getContext"
+        ),
+        "42"
     );
 }

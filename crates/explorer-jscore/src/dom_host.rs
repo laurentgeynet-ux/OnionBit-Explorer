@@ -6239,6 +6239,69 @@ const MEDIA_METHODS: &[&str] = &[
     "setMediaKeys",
 ];
 
+/// Méthodes **tag-scopées** lisibles (§B-107, JS-C385) —
+/// `(nom, tags)` : la méthode n'existe que sur les tags où la
+/// spec IDL la déclare. Historiquement invoke-only :
+/// `typeof`/`in`/`GET` rendaient `undefined` → chart.js
+/// ratant son feature-detect `canvas.getContext` et jetait
+/// dans l'emit (boot démo hls.js mort à `loadSource`,
+/// vol 673). Même discipline que `MAPPED→TAGGED_ATTRS`
+/// (JS-C384) : nommé par tag, jamais en table plate.
+const TAGGED_METHODS: &[(&str, &[&str])] = &[
+    // `HTMLCanvasElement`.
+    ("getContext", &["canvas"]),
+    ("toDataURL", &["canvas"]),
+    ("toBlob", &["canvas"]),
+    ("captureStream", &["canvas"]),
+    // `HTMLFormElement`.
+    ("submit", &["form"]),
+    ("requestSubmit", &["form"]),
+    ("reset", &["form"]),
+    // Validation de contraintes — éléments form +
+    // `<form>` lui-même (la validité de form agrège ses
+    // contrôles, spec).
+    (
+        "checkValidity",
+        &[
+            "button", "fieldset", "form", "input", "output", "select", "textarea",
+        ],
+    ),
+    (
+        "reportValidity",
+        &[
+            "button", "fieldset", "form", "input", "output", "select", "textarea",
+        ],
+    ),
+    (
+        "setCustomValidity",
+        &[
+            "button", "fieldset", "form", "input", "output", "select", "textarea",
+        ],
+    ),
+    // `HTMLInputElement`/`HTMLTextAreaElement` (`is_field`).
+    ("select", &["input", "textarea"]),
+    ("setSelectionRange", &["input", "textarea"]),
+    ("setRangeText", &["input", "textarea"]),
+    // `HTMLDialogElement`.
+    ("showModal", &["dialog"]),
+    ("show", &["dialog"]),
+    ("close", &["dialog"]),
+    // `HTMLImageElement`.
+    ("decode", &["img"]),
+    // `HTMLSlotElement`.
+    ("assignedElements", &["slot"]),
+    ("assignedNodes", &["slot"]),
+];
+
+/// Méthode tag-scopée reconnue sur ce tag — voir
+/// [`TAGGED_METHODS`] (§B-107).
+fn tagged_method_for(tag: &str, name: &str) -> Option<&'static str> {
+    TAGGED_METHODS
+        .iter()
+        .find(|(m, tags)| *m == name && tags.contains(&tag))
+        .map(|(m, _)| *m)
+}
+
 /// Trampoline des méthodes lisibles : `bound ++ args` =
 /// `(nom, receveur, args…)` → [`Host::invoke`]. Le receveur est
 /// lié à la création — `f.call(autreEl)` ne redispatche pas
@@ -7041,13 +7104,14 @@ impl Host for NodeHost {
             return NODE_METHODS.contains(&name);
         }
         NODE_METHODS.contains(&name)
-            || (is_dialog(&self.dom, self.node) && matches!(name, "showModal" | "show" | "close"))
-            || (is_field(&self.dom, self.node)
-                && matches!(name, "select" | "setSelectionRange" | "setRangeText"))
-            || (self.dom.borrow().nodes[self.node as usize].tag.as_str() == "form"
-                && name == "reset")
-            || (self.dom.borrow().nodes[self.node as usize].tag.as_str() == "img"
-                && name == "decode")
+            // §B-107 — table tag-scopée (canvas/form/dialog/
+            // img/slot/contrôles) : englobe les anciennes
+            // gardes nom-à-nom ci-dessous.
+            || tagged_method_for(
+                self.dom.borrow().nodes[self.node as usize].tag.as_str(),
+                name,
+            )
+            .is_some()
             // JS-C223/233 — `typeof path.getTotalLength` =
             // 'function' (proto `SVGGeometryElement`), pas
             // seulement appelable via `x.m()`.
@@ -7849,6 +7913,25 @@ impl Host for NodeHost {
             && MEDIA_METHODS.contains(&key)
             && !matches!(this, Value::Obj(id) if e.host_method_shadowed(id, key))
         {
+            let nv = e.str_val(key);
+            return Ok(Some(e.bound_native(
+                "node.method",
+                host_method_trampoline,
+                vec![nv, this],
+            )));
+        }
+        // Méthodes tag-scopées lisibles (§B-107, JS-C385) —
+        // `canvas.getContext`, `form.submit`, `checkValidity`,
+        // `dialog.showModal`, `img.decode`, `slot.assigned*` :
+        // invoke-only → `typeof`/`in` `undefined` → chart.js
+        // ratant son feature-detect et jetant dans l'emit
+        // (boot démo hls.js mort à `loadSource`, vol 673).
+        // Même voie trampoline + garde JS-C341.
+        let tagged = {
+            let d = self.dom.borrow();
+            tagged_method_for(d.nodes[node as usize].tag.as_str(), key)
+        };
+        if tagged.is_some() && !matches!(this, Value::Obj(id) if e.host_method_shadowed(id, key)) {
             let nv = e.str_val(key);
             return Ok(Some(e.bound_native(
                 "node.method",
