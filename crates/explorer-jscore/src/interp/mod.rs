@@ -5780,13 +5780,19 @@ impl Engine {
             *l
         };
         if let Some((dom, _)) = &self.dom_ctx {
+            // `ty` dans la clé de dédup : un read qui rend
+            // `undefined` puis `obj` logue les deux — la transition
+            // « donnée absente → peuplée » reste visible ; pour les
+            // conteneurs tagués, `g.data response ty=undef` nomme
+            // une clé lue mais vide (signature du return-early).
+            let ty = v.map_or("miss", Self::probe_ty);
             if dom
                 .borrow_mut()
                 .ce
                 .probe_seen
-                .insert(format!("{label}:{key}"))
+                .insert(format!("{label}:{key}:{ty}"))
             {
-                tracing::info!(target: "dom_probe", site = label, key = %key);
+                tracing::info!(target: "dom_probe", site = label, key = %key, ty = %ty);
             }
         }
         if let Some(Value::Obj(oid)) = v {
@@ -5811,11 +5817,27 @@ impl Engine {
         }
     }
 
+    /// Type court pour le `ty=` des sondes `g.*` — jamais de
+    /// déréférencement : `undef`/`null` nomment la donnée absente
+    /// (signature du return-early applicatif).
+    fn probe_ty(v: Value) -> &'static str {
+        match v {
+            Value::Undefined | Value::Hole => "undef",
+            Value::Null => "null",
+            Value::Bool(_) => "bool",
+            Value::Num(_) => "num",
+            Value::Str(_) => "str",
+            Value::Big(_) => "bigint",
+            Value::Obj(_) => "obj",
+        }
+    }
+
     /// Sonde §B-97 — write `o[k] = v` : `o` = global + clé
-    /// `yt*` → `g.write {k}` (la donnée bootstrap est-elle
-    /// peuplée ?) ; `o` tagué → `{label}w {k}` (`g.cfgw` =
+    /// `yt*` → `g.write {k} ty={type}` (la donnée bootstrap
+    /// est-elle peuplée — `obj`, ou assignée à `undef` ?) ;
+    /// `o` tagué → `{label}w {k} ty={type}` (`g.cfgw` =
     /// `ytcfg.set(k,v)`/`data_.k=v` — clés de config posées).
-    fn probe_store(&mut self, id: ObjId, key: &str) {
+    fn probe_store(&mut self, id: ObjId, key: &str, v: Value) {
         let site = if id == self.global {
             if !Self::YT_WATCH_GLOBALS.contains(&key) {
                 return;
@@ -5827,14 +5849,15 @@ impl Engine {
             };
             format!("{l}w")
         };
+        let ty = Self::probe_ty(v);
         if let Some((dom, _)) = &self.dom_ctx {
             if dom
                 .borrow_mut()
                 .ce
                 .probe_seen
-                .insert(format!("{site}:{key}"))
+                .insert(format!("{site}:{key}:{ty}"))
             {
-                tracing::info!(target: "dom_probe", site = %site, key = %key);
+                tracing::info!(target: "dom_probe", site = %site, key = %key, ty = %ty);
             }
         }
     }
@@ -6350,7 +6373,7 @@ impl Engine {
     /// (non-writable, non-extensible, frozen). Le caller décide
     /// silence sloppy vs `TypeError` strict.
     pub(crate) fn set_prop(&mut self, id: ObjId, key: &str, v: Value) -> JsResult<bool> {
-        self.probe_store(id, key);
+        self.probe_store(id, key, v);
         // Élément indexé d'une vue typée : la cible est le *buffer*
         // partagé, pas la vue ; hors-bornes canonique → ignoré
         // (spec `IntegerIndexedElementSet` retourne `true`).
