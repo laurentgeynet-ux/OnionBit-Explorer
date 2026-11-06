@@ -4908,10 +4908,16 @@ fn enum_attr_form_media_misc() {
     );
 }
 
-/// Les éléments hors table gardent le reflet brut (`""`).
+/// Les éléments hors table énumérée n'ont pas de reflet IDL —
+/// §B-103/JS-C384 : `type` n'est pas IDL sur `HTMLDivElement`,
+/// spec → `undefined` (l'ancien reflet plat `""` empoisonnait
+/// le `in` de la détection feature).
 #[test]
 fn enum_attr_unlisted_tags_stay_raw() {
-    assert_eq!(ev_in(ENUM_PAGE, "document.createElement('div').type"), "");
+    assert_eq!(
+        ev_in(ENUM_PAGE, "document.createElement('div').type"),
+        "undefined"
+    );
     // `track.kind` : absent → `subtitles`, invalide → `metadata`.
     assert_eq!(
         ev_in(ENUM_PAGE, "document.createElement('track').kind"),

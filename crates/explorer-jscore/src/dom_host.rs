@@ -5806,71 +5806,154 @@ impl Host for DocumentHost {
 // Element / text node
 // ------------------------------------------------------------------
 
-/// Attributes mirrored as properties (get + set).
-const MAPPED_ATTRS: &[&str] = &[
-    "id",
-    "class",
-    "name",
-    "value",
-    "href",
-    "src",
-    "type",
-    "title",
-    "alt",
-    "placeholder",
-    "action",
-    "method",
-    "target",
-    "rel",
-    // `HTMLElement` globaux (JS-C201) — `documentElement.lang`
-    // lu par les pluralizers des bundles i18n (orpi vol 136 :
-    // `.lang.replace` tuait le chunk → `Translator` jamais défini
-    // → traductions mortes en cascade). Attr absent → `""` (spec).
-    "lang",
-    "dir",
-    // `HTMLMediaElement` (étape 58) — attributs réfléchis
-    // de même nom sur `<video>`/`<audio>`.
-    "poster",
-    "preload",
-    // `HTMLIFrameElement` (CAP-171) — `f.srcdoc=`/`sandbox=`
-    // écrivent l'attribut (la mutation déclenche la
-    // navigation du sous-contexte).
-    "srcdoc",
-    "sandbox",
-    // `HTMLImageElement` (CAP-172) — `m.srcset=`/`sizes=`
-    // écrivent l'attribut (le choix de source `srcset`
-    // relit `sizes`, spec).
-    "srcset",
-    "sizes",
+/// Attributs réfléchis comme props sur TOUT élément — spec
+/// globale (`HTMLElement` : `id`/`class`/`title`/`lang`/`dir` ;
+/// `slot` est global par le mixin `Slottable`).
+const GLOBAL_ATTRS: &[&str] = &["id", "class", "title", "lang", "dir", "slot"];
+
+/// Attributs réfléchis **scopés par tag** — spec IDL
+/// `reflect` par classe (§B-103, JS-C384). La table plate
+/// historique rendait `'media' in div`/`'srcset' in el` vrais
+/// sur tout élément : la détection feature de kevlar prend la
+/// mauvaise branche → return silencieux → `.then` jamais
+/// enfilé — la signature §B-97 exacte. La présence du reflet
+/// se décide par le tag, jamais en table plate.
+const TAGGED_ATTRS: &[(&str, &[&str])] = &[
+    // `name` — IDL sur de nombreux éléments (a/map/meta/
+    // form/contrôles/iframe/slot…) mais PAS sur div/span.
+    (
+        "name",
+        &[
+            "a", "applet", "button", "embed", "fieldset", "form", "frame", "frameset", "iframe",
+            "img", "input", "map", "meta", "object", "output", "param", "select", "slot",
+            "textarea",
+        ],
+    ),
+    (
+        "value",
+        &[
+            "button", "data", "input", "li", "meter", "option", "output", "param", "progress",
+            "select", "textarea",
+        ],
+    ),
+    ("href", &["a", "area", "base", "link"]),
+    (
+        "src",
+        &[
+            "audio", "embed", "frame", "iframe", "img", "input", "script", "source", "track",
+            "video",
+        ],
+    ),
+    (
+        "type",
+        &[
+            "a", "button", "embed", "input", "li", "link", "menu", "object", "ol", "param",
+            "script", "source", "style", "ul",
+        ],
+    ),
+    ("alt", &["area", "img", "input"]),
+    ("placeholder", &["input", "textarea"]),
+    ("action", &["form"]),
+    ("method", &["form"]),
+    ("enctype", &["form"]),
+    ("target", &["a", "area", "base", "form"]),
+    ("rel", &["a", "area", "form", "link"]),
+    // `HTMLMediaElement` (étape 58) — `<video>`/`<audio>`.
+    ("poster", &["video"]),
+    ("preload", &["audio", "video"]),
+    // `HTMLIFrameElement` (CAP-171).
+    ("srcdoc", &["iframe"]),
+    ("sandbox", &["iframe"]),
+    // `HTMLImageElement`/`HTMLSourceElement` (CAP-172).
+    ("srcset", &["img", "source"]),
+    ("sizes", &["img", "source"]),
     // `HTMLLinkElement`/`HTMLStyleElement`/`HTMLSourceElement`
-    // (CAP-173) — `l.media=` écrit l'attribut (gate
-    // d'application de la feuille, spec IDL `media`).
-    "media",
-    // `slot` (T3) — `el.slot=` écrit l'attribut
-    // (re-distribution flat recalculée à la prochaine
-    // lecture `assigned*`).
-    "slot",
+    // + `HTMLMetaElement` (CAP-173).
+    ("media", &["link", "meta", "source", "style"]),
+    // `htmlFor`/`encoding`/`crossOrigin`/`playsInline`/
+    // `referrerPolicy` — noms d'attributs après traduction.
+    ("for", &["label", "output"]),
+    ("crossorigin", &["audio", "img", "link", "script", "video"]),
+    ("playsinline", &["video"]),
+    (
+        "referrerpolicy",
+        &["a", "area", "iframe", "img", "link", "script"],
+    ),
 ];
 
-/// Boolean attributes mirrored as `bool` props (`checked`…).
-const BOOL_ATTRS: &[&str] = &[
-    "checked", "disabled", "selected", "readonly", "multiple",
+/// Attributs booléens réfléchis — même discipline de scoping
+/// (§B-103) : `'controls' in div`/`'checked' in div` → `false`.
+const TAGGED_BOOL_ATTRS: &[(&str, &[&str])] = &[
+    ("checked", &["input"]),
+    (
+        "disabled",
+        &[
+            "button", "fieldset", "input", "optgroup", "option", "select", "textarea",
+        ],
+    ),
+    ("selected", &["option"]),
+    ("readonly", &["input", "textarea"]),
+    ("multiple", &["input", "select"]),
     // `HTMLMediaElement` (étape 58).
-    "controls", "muted", "loop", "autoplay",
+    ("controls", &["audio", "video"]),
+    ("muted", &["audio", "video"]),
+    ("loop", &["audio", "video"]),
+    ("autoplay", &["audio", "video"]),
 ];
 
-/// `className` ↔ `class`, `htmlFor` ↔ `for`, `tagName` (ro)…
-fn prop_to_attr(key: &str) -> Option<&'static str> {
-    Some(match key {
+/// Prop IDL → nom d'attribut — traduction camelCase.
+fn prop_attr_name(key: &str) -> &str {
+    match key {
         "className" => "class",
         "htmlFor" => "for",
-        "value" => "value",
         "encoding" => "enctype",
         "crossOrigin" => "crossorigin",
         "playsInline" => "playsinline",
         "referrerPolicy" => "referrerpolicy",
-        k => return MAPPED_ATTRS.iter().copied().find(|&a| a == k),
-    })
+        k => k,
+    }
+}
+
+/// `className` ↔ `class`, `htmlFor` ↔ `for`, `tagName` (ro)…
+/// Union `GLOBAL`+`TAGGED` **sans** scoping — pour les chemins
+/// d'accesseurs de prototype (installés par classe via
+/// [`dom_acc_props`], la restriction est déjà faite).
+fn prop_to_attr(key: &str) -> Option<&'static str> {
+    let attr = prop_attr_name(key);
+    GLOBAL_ATTRS
+        .iter()
+        .copied()
+        .find(|&a| a == attr)
+        .or_else(|| {
+            TAGGED_ATTRS
+                .iter()
+                .find(|(a, _)| *a == attr)
+                .map(|(a, _)| *a)
+        })
+}
+
+/// Variante **tag-restreinte** — le reflet n'existe que sur
+/// les tags où la spec IDL le déclare (§B-103 : `'media' in
+/// div` retournait `""`/`true` et empoisonnait la détection
+/// feature des bundles — suspect mécanisme §B-97).
+fn prop_to_attr_for(tag: &str, key: &str) -> Option<&'static str> {
+    let attr = prop_attr_name(key);
+    if let Some(a) = GLOBAL_ATTRS.iter().copied().find(|&a| a == attr) {
+        return Some(a);
+    }
+    TAGGED_ATTRS
+        .iter()
+        .find(|(a, tags)| *a == attr && tags.contains(&tag))
+        .map(|(a, _)| *a)
+}
+
+/// Attribut booléen reflété **tag-restreint** — voir
+/// [`prop_to_attr_for`] (même racine §B-103).
+fn bool_attr_for(tag: &str, key: &str) -> Option<&'static str> {
+    TAGGED_BOOL_ATTRS
+        .iter()
+        .find(|(a, tags)| *a == key && tags.contains(&tag))
+        .map(|(a, _)| *a)
 }
 
 /// Noms `on*` reconnus comme handlers IDL (`GlobalEventHandlers`,
@@ -7373,7 +7456,8 @@ impl Host for NodeHost {
             }
             // `input.files` — `FileList` honnête vide (`type=file`)
             // ou `null` (autres types) — l'upload réel est JS-C70.
-            "files" => {
+            // Garde `input` (§B-103) : `'files' in div` → `false`.
+            "files" if self.dom.borrow().nodes[node as usize].tag == "input" => {
                 let is_file = {
                     let d = self.dom.borrow();
                     d.nodes[node as usize].tag == "input" && d.attr(node, "type") == Some("file")
@@ -7451,7 +7535,15 @@ impl Host for NodeHost {
             // `textarea.value` ≙ le contenu texte, `select.value`
             // ≙ la valeur de l'option `selected` (pas d'attribut
             // `value` dans le markup pour ces deux tags).
-            "value" => {
+            // Garde tag (§B-103) : `value` n'est IDL que sur les
+            // contrôles — `'value' in div` → `false`.
+            "value"
+                if prop_to_attr_for(
+                    self.dom.borrow().nodes[node as usize].tag.as_str(),
+                    "value",
+                )
+                .is_some() =>
+            {
                 let d = self.dom.borrow();
                 let tag = d.nodes[node as usize].tag.as_str();
                 let v = d.attr(node, "value").map(str::to_string).or_else(|| {
@@ -7777,8 +7869,15 @@ impl Host for NodeHost {
         if let Some(v) = enum_attr_default(&self.dom.borrow(), node, key) {
             return Ok(Some(e.str_val(v)));
         }
-        // Attribute-mapped props.
-        if let Some(attr) = prop_to_attr(key) {
+        // Attribute-mapped props — **tag-restreint** (§B-103,
+        // JS-C384) : `get` sur un tag sans reflet IDL tombe
+        // aux sources suivantes au lieu de rendre `""` (le
+        // `in` descend alors honnêtement à `false`).
+        let mapped = {
+            let d = self.dom.borrow();
+            prop_to_attr_for(d.nodes[node as usize].tag.as_str(), key)
+        };
+        if let Some(attr) = mapped {
             // IDL URL-typé : `src`/`href` se résolvent contre
             // `document.baseURI` à la lecture (spec) —
             // `getAttribute` reste brut. `new URL(el.src)`
@@ -7794,8 +7893,12 @@ impl Host for NodeHost {
             };
             return Ok(Some(e.str_val(v)));
         }
-        if BOOL_ATTRS.contains(&key) {
-            let has = self.dom.borrow().has_attr(node, key);
+        let scoped_bool = {
+            let d = self.dom.borrow();
+            bool_attr_for(d.nodes[node as usize].tag.as_str(), key)
+        };
+        if let Some(attr) = scoped_bool {
+            let has = self.dom.borrow().has_attr(node, attr);
             return Ok(Some(Value::Bool(has)));
         }
         // Named getter du `<form>` (HTML §4.10.3) : `form.username`
@@ -7939,7 +8042,13 @@ impl Host for NodeHost {
                     Ok(true)
                 }
             }
-            "value" => {
+            "value"
+                if prop_to_attr_for(
+                    self.dom.borrow().nodes[node as usize].tag.as_str(),
+                    "value",
+                )
+                .is_some() =>
+            {
                 let s = e.to_js_string(v)?;
                 let mut d = self.dom.borrow_mut();
                 if d.nodes[node as usize].tag.eq_ignore_ascii_case("textarea") {
@@ -7998,13 +8107,17 @@ impl Host for NodeHost {
                 Ok(true)
             }
             _ => {
-                if BOOL_ATTRS.contains(&key) {
+                let scoped_bool = {
+                    let d = self.dom.borrow();
+                    bool_attr_for(d.nodes[node as usize].tag.as_str(), key)
+                };
+                if let Some(attr) = scoped_bool {
                     let on = e.to_boolean(v);
                     let mut d = self.dom.borrow_mut();
                     if on {
-                        d.set_attr(node, key, "");
+                        d.set_attr(node, attr, "");
                     } else {
-                        d.remove_attr(node, key);
+                        d.remove_attr(node, attr);
                     }
                     return Ok(true);
                 }
@@ -8019,7 +8132,15 @@ impl Host for NodeHost {
                         return Ok(true);
                     }
                 }
-                if let Some(attr) = prop_to_attr(key) {
+                // Reflets non-booléens — même discipline §B-103 :
+                // `el.poster = "x"` sur un `<div>` devient une
+                // prop propre (`Ok(false)`), pas un attribut
+                // fantôme visible via `getAttribute`.
+                let mapped = {
+                    let d = self.dom.borrow();
+                    prop_to_attr_for(d.nodes[node as usize].tag.as_str(), key)
+                };
+                if let Some(attr) = mapped {
                     let s = e.to_js_string(v)?;
                     self.dom.borrow_mut().set_attr(node, attr, &s);
                     return Ok(true);
