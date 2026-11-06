@@ -98,10 +98,7 @@ fn inside_disabled_fieldset(dom: &Dom, node: NodeId) -> bool {
 
 /// Premier enfant élément de `node` portant `name`.
 fn first_child_tag(dom: &Dom, node: NodeId, name: &str) -> Option<NodeId> {
-    dom.children(node)
-        .ok()?
-        .into_iter()
-        .find(|c| tag(dom, *c) == name)
+    dom.children_iter(node).ok()?.find(|c| tag(dom, *c) == name)
 }
 
 /// Élément réellement désactivé (`:disabled`) : contrôle
@@ -283,11 +280,11 @@ fn fails_required(dom: &Dom, node: NodeId) -> bool {
 /// `option[selected]` en ordre d'arbre, sinon la première
 /// `option` — sélection par défaut spec).
 fn selected_option_value(dom: &Dom, node: NodeId) -> Option<String> {
-    let kids = dom.children(node).ok()?;
+    let kids = dom.children_iter(node).ok()?;
     let mut first: Option<NodeId> = None;
     for k in kids {
         if tag(dom, k) == "optgroup" {
-            if let Ok(grand) = dom.children(k) {
+            if let Ok(grand) = dom.children_iter(k) {
                 for g in grand {
                     if tag(dom, g) == "option" {
                         first.get_or_insert(g);
@@ -502,12 +499,12 @@ pub(crate) fn is_invalid(dom: &Dom, node: NodeId) -> bool {
 
 /// Un descendant candidat de `node` échoue-t-il une contrainte.
 fn any_descendant_invalid(dom: &Dom, node: NodeId) -> bool {
-    let Ok(kids) = dom.children(node) else {
+    let Ok(mut kids) = dom.children_iter(node) else {
         return false;
     };
-    kids.iter().any(|k| {
-        (is_validation_candidate(dom, *k) && !satisfies_constraints(dom, *k))
-            || explorer_common::deep(|| any_descendant_invalid(dom, *k))
+    kids.any(|k| {
+        (is_validation_candidate(dom, k) && !satisfies_constraints(dom, k))
+            || explorer_common::deep(|| any_descendant_invalid(dom, k))
     })
 }
 

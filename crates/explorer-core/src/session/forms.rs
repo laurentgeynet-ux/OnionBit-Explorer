@@ -120,7 +120,7 @@ pub(crate) fn toggle_checked(dom: &mut Dom, ctrl: NodeId) -> Result<(), DomError
                         dom.remove_attribute(n, "checked")?;
                     }
                 }
-                if let Ok(ch) = dom.children(n) {
+                if let Ok(ch) = dom.children_iter(n) {
                     queue.extend(ch);
                 }
             }

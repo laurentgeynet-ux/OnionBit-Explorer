@@ -657,7 +657,7 @@ async fn layout(src: &str, size: Option<&str>) -> ExitCode {
             };
             let styles = eng.compute_tree(&dom, dom.document(), &env);
             let Some(root_el) = dom
-                .children(dom.document())
+                .children_iter(dom.document())
                 .into_iter()
                 .flatten()
                 .find(|&c| dom.element(c).is_ok())
@@ -685,16 +685,12 @@ async fn layout(src: &str, size: Option<&str>) -> ExitCode {
 /// liées : hors périmètre de l'étape 17).
 fn collect_style_css(dom: &explorer_dom::Dom) -> String {
     let mut css = String::new();
-    let mut queue = vec![dom.document()];
-    while let Some(n) = queue.pop() {
+    for n in dom.descendants(dom.document()).into_iter().flatten() {
         if dom.tag_name(n).is_ok_and(|t| t == "style") {
             if let Ok(t) = dom.text_content(n) {
                 css.push_str(&t);
                 css.push('\n');
             }
-        }
-        if let Ok(ch) = dom.children(n) {
-            queue.extend(ch.iter().rev());
         }
     }
     css

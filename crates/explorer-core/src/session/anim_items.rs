@@ -121,13 +121,9 @@ pub(crate) const MAX_TRANSITIONS: usize = 256;
 /// transitions repartent alors — déviation MVP).
 pub(crate) fn element_ordinals(dom: &Dom) -> HashMap<NodeId, usize> {
     let mut out = HashMap::new();
-    let mut queue = vec![dom.document()];
-    while let Some(n) = queue.pop() {
+    for n in dom.descendants(dom.document()).into_iter().flatten() {
         if dom.element(n).is_ok() {
             out.insert(n, out.len());
-        }
-        if let Ok(ch) = dom.children(n) {
-            queue.extend(ch.iter().rev());
         }
     }
     out

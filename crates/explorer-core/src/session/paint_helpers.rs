@@ -297,9 +297,8 @@ pub(crate) fn remap_node_uncached(
     } else {
         new.document()
     };
-    let sibs = old.children(parent).ok()?;
-    let idx = sibs.iter().position(|&c| c == id)?;
-    let cand = new.children(new_parent).ok()?.get(idx).copied()?;
+    let idx = old.children_iter(parent).ok()?.position(|c| c == id)?;
+    let cand = new.children_iter(new_parent).ok()?.nth(idx)?;
     // Garde structurelle : élément ↔ élément (même tag),
     // texte/commentaire ↔ non-élément.
     let ok = match (old.element(id).is_ok(), new.element(cand).is_ok()) {

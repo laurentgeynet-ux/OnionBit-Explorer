@@ -1745,7 +1745,7 @@ fn type_index(dom: &Dom, node: NodeId, from_end: bool) -> usize {
 
 /// `:empty` — pas d'enfant élément ni de texte non-blanc.
 fn empty_element(dom: &Dom, node: NodeId) -> bool {
-    let Ok(children) = dom.children(node) else {
+    let Ok(children) = dom.children_iter(node) else {
         return false;
     };
     for c in children {

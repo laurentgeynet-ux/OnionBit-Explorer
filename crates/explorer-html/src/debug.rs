@@ -20,7 +20,7 @@ pub fn dump(dom: &Dom) -> String {
 }
 
 fn dump_children(dom: &Dom, parent: NodeId, depth: usize, out: &mut String) {
-    for child in dom.children(parent).unwrap_or_default() {
+    for child in dom.children_iter(parent).into_iter().flatten() {
         out.push_str("| ");
         for _ in 1..depth {
             out.push_str("  ");

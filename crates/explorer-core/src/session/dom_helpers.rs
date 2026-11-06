@@ -49,11 +49,10 @@ pub(crate) fn element_path(dom: &Dom, node: NodeId) -> Option<Vec<(String, u32)>
     while let Some(p) = dom.parent(cur).ok().flatten() {
         let tag = dom.tag_name(cur).ok()?.to_string();
         let k = dom
-            .children(p)
+            .children_iter(p)
             .ok()?
-            .iter()
-            .take_while(|&&c| c != cur)
-            .filter(|&&c| dom.tag_name(c).is_ok_and(|t| t == tag))
+            .take_while(|&c| c != cur)
+            .filter(|&c| dom.tag_name(c).is_ok_and(|t| t == tag))
             .count();
         path.push((tag, u32::try_from(k).ok()?));
         cur = p;
@@ -182,8 +181,7 @@ pub(crate) fn edit_field(dom: &mut Dom, field: NodeId, key: &str) -> Result<(), 
     let next = apply_key(&field_value(dom, field), key);
     if dom.tag_name(field).is_ok_and(|t| t == "textarea") {
         let texts: Vec<NodeId> = dom
-            .children(field)?
-            .into_iter()
+            .children_iter(field)?
             .filter(|&c| dom.text(c).is_ok())
             .collect();
         if let Some((&first, rest)) = texts.split_first() {
@@ -295,8 +293,7 @@ pub(crate) fn document_base(dom: &Dom, doc_url: &Url) -> (Option<Url>, Option<St
     let mut seen_target = false;
     let mut base_url = None;
     let mut base_target = None;
-    let mut queue = vec![dom.document()];
-    while let Some(n) = queue.pop() {
+    for n in dom.descendants(dom.document()).into_iter().flatten() {
         if dom.tag_name(n).is_ok_and(|t| t == "base") {
             if !seen_href {
                 // Premier `<base href>` en ordre document —
@@ -316,9 +313,6 @@ pub(crate) fn document_base(dom: &Dom, doc_url: &Url) -> (Option<Url>, Option<St
             if seen_href && seen_target {
                 break;
             }
-        }
-        if let Ok(ch) = dom.children(n) {
-            queue.extend(ch.iter().rev());
         }
     }
     (base_url, base_target)
@@ -360,8 +354,7 @@ pub(crate) fn element_referrer_policy(
 /// traitées à leur rencontre ; aucune reconnue → `None`).
 pub(crate) fn meta_referrer_policy(dom: &Dom) -> Option<explorer_net::http::ReferrerPolicy> {
     let mut out = None;
-    let mut queue = vec![dom.document()];
-    while let Some(n) = queue.pop() {
+    for n in dom.descendants(dom.document()).into_iter().flatten() {
         if dom.tag_name(n).is_ok_and(|t| t == "meta")
             && dom
                 .attribute_str(n, "name")
@@ -378,9 +371,6 @@ pub(crate) fn meta_referrer_policy(dom: &Dom) -> Option<explorer_net::http::Refe
                 out = Some(p);
             }
         }
-        if let Ok(ch) = dom.children(n) {
-            queue.extend(ch.iter().rev());
-        }
     }
     out
 }
@@ -392,8 +382,7 @@ pub(crate) fn meta_referrer_policy(dom: &Dom) -> Option<explorer_net::http::Refe
 /// Retourne `(délai secondes, URL brute)` ; `None` dans
 /// l'URL = rechargement du document courant.
 pub(crate) fn meta_refresh(dom: &Dom) -> Option<(f64, Option<String>)> {
-    let mut queue = vec![dom.document()];
-    while let Some(n) = queue.pop() {
+    for n in dom.descendants(dom.document()).into_iter().flatten() {
         if dom.tag_name(n).is_ok_and(|t| t == "meta")
             && dom
                 .attribute_str(n, "http-equiv")
@@ -409,9 +398,6 @@ pub(crate) fn meta_refresh(dom: &Dom) -> Option<(f64, Option<String>)> {
             {
                 return Some(r);
             }
-        }
-        if let Ok(ch) = dom.children(n) {
-            queue.extend(ch.iter().rev());
         }
     }
     None
@@ -462,8 +448,7 @@ pub(crate) fn noscript_meta_refresh(dom: &Dom) -> Option<(f64, Option<String>)> 
     // `head` et `body` en un seul balayage.
     let mut head = None;
     let mut body = None;
-    let mut queue = vec![dom.document()];
-    while let Some(n) = queue.pop() {
+    for n in dom.descendants(dom.document()).into_iter().flatten() {
         match dom.tag_name(n) {
             Ok("head") => head = Some(n),
             Ok("body") => body = Some(n),
@@ -472,21 +457,14 @@ pub(crate) fn noscript_meta_refresh(dom: &Dom) -> Option<(f64, Option<String>)> 
         if head.is_some() && body.is_some() {
             break;
         }
-        if let Ok(ch) = dom.children(n) {
-            queue.extend(ch.iter().rev());
-        }
     }
     // Cas 1 — `noscript` descendant de `head`, toujours
     // éligible (pattern no-JS de DDG, indépendant du body).
     let mut noscripts = Vec::new();
     if let Some(h) = head {
-        let mut q = vec![h];
-        while let Some(n) = q.pop() {
+        for n in dom.descendants(h).into_iter().flatten() {
             if dom.tag_name(n).is_ok_and(|t| t == "noscript") {
                 noscripts.push(n);
-            }
-            if let Ok(ch) = dom.children(n) {
-                q.extend(ch.iter().rev());
             }
         }
     }
@@ -497,7 +475,7 @@ pub(crate) fn noscript_meta_refresh(dom: &Dom) -> Option<(f64, Option<String>)> 
     }
     // Cas 2 — fallback pur dans le `body`.
     let body = body?;
-    let children = dom.children(body).ok()?;
+    let children = dom.children_iter(body).ok()?;
     let mut body_noscripts = Vec::new();
     for c in children {
         match dom.data(c).ok()? {
@@ -574,8 +552,7 @@ pub(crate) fn parse_refresh_content(content: &str) -> Option<(f64, Option<String
 /// Extrait le texte du premier `<title>` du document —
 /// `None` si absent ou vide.
 pub(crate) fn extract_title(dom: &Dom) -> Option<String> {
-    let mut queue = vec![dom.document()];
-    while let Some(n) = queue.pop() {
+    for n in dom.descendants(dom.document()).into_iter().flatten() {
         if dom.tag_name(n).is_ok_and(|t| t == "title") {
             if let Ok(t) = dom.text_content(n) {
                 let t = t.trim().to_string();
@@ -583,9 +560,6 @@ pub(crate) fn extract_title(dom: &Dom) -> Option<String> {
                     return Some(t);
                 }
             }
-        }
-        if let Ok(ch) = dom.children(n) {
-            queue.extend(ch.iter().rev());
         }
     }
     None
@@ -601,8 +575,7 @@ pub(crate) fn extract_title(dom: &Dom) -> Option<String> {
 /// (chacune doit autoriser — la plus restrictive réduit).
 pub(crate) fn collect_meta_csp(dom: &Dom) -> Vec<String> {
     let mut out = Vec::new();
-    let mut queue = vec![dom.document()];
-    while let Some(n) = queue.pop() {
+    for n in dom.descendants(dom.document()).into_iter().flatten() {
         if dom.tag_name(n).is_ok_and(|t| t == "meta")
             && dom
                 .attribute_str(n, "http-equiv")
@@ -613,9 +586,6 @@ pub(crate) fn collect_meta_csp(dom: &Dom) -> Vec<String> {
             if let Some(c) = dom.attribute_str(n, "content").ok().flatten() {
                 out.push(c.to_owned());
             }
-        }
-        if let Ok(ch) = dom.children(n) {
-            queue.extend(ch.iter().rev());
         }
     }
     out
@@ -656,7 +626,8 @@ pub(crate) fn collect_style_sheets(
             queue.extend(ch.iter().rev());
         }
         // Flat tree : la racine shadow se visite à la
-        // position de son hôte — avant les enfants light.
+        // position de son hôte — avant les enfants light
+        // (poussée après eux, donc dépilée avant).
         if let Some(root) = dom.shadow_root(n, true) {
             queue.push(root);
         }
@@ -710,8 +681,7 @@ pub(crate) type SheetFetch = (Url, Option<String>, Option<FetchCredentials>, u32
 pub(crate) fn collect_stylesheet_links(dom: &Dom) -> Vec<SheetLink> {
     let mut out = Vec::new();
     let mut els = 0u32;
-    let mut queue = vec![dom.document()];
-    while let Some(n) = queue.pop() {
+    for n in dom.descendants(dom.document()).into_iter().flatten() {
         if dom.tag_name(n).is_ok_and(|t| t == "link") {
             let el_ord = els;
             els += 1;
@@ -751,9 +721,6 @@ pub(crate) fn collect_stylesheet_links(dom: &Dom) -> Vec<SheetLink> {
                 }
             }
         }
-        if let Ok(ch) = dom.children(n) {
-            queue.extend(ch.iter().rev());
-        }
     }
     out
 }
@@ -768,8 +735,7 @@ pub(crate) fn collect_stylesheet_links(dom: &Dom) -> Vec<SheetLink> {
 /// **pas** un module — jamais préfetché ici.
 pub(crate) fn collect_module_preloads(dom: &Dom) -> Vec<String> {
     let mut out = Vec::new();
-    let mut queue = vec![dom.document()];
-    while let Some(n) = queue.pop() {
+    for n in dom.descendants(dom.document()).into_iter().flatten() {
         if dom.tag_name(n).is_ok_and(|t| t == "link") {
             let rel = dom
                 .attribute_str(n, "rel")
@@ -790,9 +756,6 @@ pub(crate) fn collect_module_preloads(dom: &Dom) -> Vec<String> {
                     }
                 }
             }
-        }
-        if let Ok(ch) = dom.children(n) {
-            queue.extend(ch.iter().rev());
         }
     }
     out
@@ -955,8 +918,7 @@ pub(crate) fn resolve_sizes(sizes: Option<&str>, vp_w: f32) -> f32 {
 /// `sizes` résolu par `resolve_sizes`).
 pub(crate) fn collect_images(dom: &Dom, img_w: f32, dpr: f32) -> Vec<(NodeId, String)> {
     let mut out = Vec::new();
-    let mut queue = vec![dom.document()];
-    while let Some(n) = queue.pop() {
+    for n in dom.descendants(dom.document()).into_iter().flatten() {
         match dom.tag_name(n) {
             Ok("img") => {
                 // `srcset` ET sa variante lazy `data-srcset`
@@ -1017,9 +979,6 @@ pub(crate) fn collect_images(dom: &Dom, img_w: f32, dpr: f32) -> Vec<(NodeId, St
             }
             _ => {}
         }
-        if let Ok(ch) = dom.children(n) {
-            queue.extend(ch.iter().rev());
-        }
     }
     out
 }
@@ -1074,8 +1033,7 @@ pub(crate) fn collect_iframes(
     Option<SandboxFlags>,
 )> {
     let mut out = Vec::new();
-    let mut queue = vec![dom.document()];
-    while let Some(n) = queue.pop() {
+    for n in dom.descendants(dom.document()).into_iter().flatten() {
         if dom.tag_name(n).is_ok_and(|t| t == "iframe") {
             let srcdoc = dom.attribute_str(n, "srcdoc").ok().flatten();
             let src = dom
@@ -1095,9 +1053,6 @@ pub(crate) fn collect_iframes(
                     parse_sandbox(dom.attribute_str(n, "sandbox").ok().flatten()),
                 ));
             }
-        }
-        if let Ok(ch) = dom.children(n) {
-            queue.extend(ch.iter().rev());
         }
     }
     out
@@ -1235,6 +1190,9 @@ pub(crate) fn default_button(dom: &Dom, form: NodeId) -> Option<NodeId> {
             }
         }
         if n == form || tag != "form" {
+            // `<form>` imbriqué non descendu (défensif —
+            // le tree-builder ne le produit pas, mais le
+            // garde-fou reste moins cher que le parcours).
             if let Ok(ch) = dom.children(n) {
                 queue.extend(ch.iter().rev());
             }
@@ -1248,7 +1206,7 @@ pub(crate) fn dom_path_node(dom: &Dom, path: &[(String, u32)]) -> Option<NodeId>
     for (tag, k) in path {
         let mut seen = 0u32;
         let mut next = None;
-        for c in dom.children(cur).ok()? {
+        for c in dom.children_iter(cur).ok()? {
             if dom.tag_name(c).is_ok_and(|t| t == *tag) {
                 if seen == *k {
                     next = Some(c);
@@ -1304,34 +1262,25 @@ pub(crate) fn find_by_id(dom: &Dom, id: &str) -> Option<NodeId> {
 /// (`id`/`name`) quand le chemin `(tag, index)` a été
 /// déplacé par une mutation (étape 92).
 pub(crate) fn find_by_attr(dom: &Dom, attr: &str, value: &str) -> Option<NodeId> {
-    let mut queue = vec![dom.document()];
-    while let Some(n) = queue.pop() {
-        if dom.element(n).is_ok() && dom.attribute_str(n, attr).ok().flatten() == Some(value) {
-            return Some(n);
-        }
-        if let Ok(ch) = dom.children(n) {
-            queue.extend(ch.iter().rev());
-        }
-    }
-    None
+    dom.descendants(dom.document())
+        .into_iter()
+        .flatten()
+        .find(|&n| {
+            dom.element(n).is_ok() && dom.attribute_str(n, attr).ok().flatten() == Some(value)
+        })
 }
 
 /// Repli navigateur pour les fragments (étape 56d) :
 /// `<a name="x">` quand aucun `id="x"` n'existe —
 /// itératif, même parcours que `find_by_id`.
 pub(crate) fn find_named_anchor(dom: &Dom, name: &str) -> Option<NodeId> {
-    let mut queue = vec![dom.document()];
-    while let Some(n) = queue.pop() {
-        if dom.tag_name(n).is_ok_and(|t| t == "a")
-            && dom.attribute_str(n, "name").ok().flatten() == Some(name)
-        {
-            return Some(n);
-        }
-        if let Ok(ch) = dom.children(n) {
-            queue.extend(ch.iter().rev());
-        }
-    }
-    None
+    dom.descendants(dom.document())
+        .into_iter()
+        .flatten()
+        .find(|&n| {
+            dom.tag_name(n).is_ok_and(|t| t == "a")
+                && dom.attribute_str(n, "name").ok().flatten() == Some(name)
+        })
 }
 
 /// Hauteur `y` (haut) de la première boîte posée portant
@@ -1372,13 +1321,9 @@ pub(crate) fn attr_opt<'a>(dom: &'a Dom, n: NodeId, attr: &str) -> Option<&'a st
 /// Éléments descendants portant `tag`, ordre document.
 pub(crate) fn descendant_elements(dom: &Dom, root: NodeId, tag: &str) -> Vec<NodeId> {
     let mut out = Vec::new();
-    let mut queue = vec![root];
-    while let Some(n) = queue.pop() {
-        if n != root && dom.tag_name(n).is_ok_and(|t| t == tag) {
+    for n in dom.descendants(root).into_iter().flatten() {
+        if dom.tag_name(n).is_ok_and(|t| t == tag) {
             out.push(n);
-        }
-        if let Ok(ch) = dom.children(n) {
-            queue.extend(ch.iter().rev());
         }
     }
     out

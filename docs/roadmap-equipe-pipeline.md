@@ -2804,6 +2804,31 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   sous emprunt). Extraction `push_external_script`
   (borne 100 lignes clippy). 454/454 tests session
   + suites PIPE vertes.
+- [x] **R-146. `children_iter` + `descendants` + migration
+  des traversées** (AR-10, chantier ARÈNE) : `children()`
+  allouait un `Vec<NodeId>` par appel (banc AR-6 :
+  4,2 µs / 1 000 frères) et ~45 sites `src` reconstruisaient
+  le préordre à la main (pile + `extend(rev)`). Additifs :
+  `children_iter(id) -> Result<ChildrenIter>` — curseur sur
+  les liens intrusifs, une validation racine + un check
+  générationnel par sibling, zéro allocation ;
+  `descendants(root) -> Result<Descendants>` — préordre
+  itératif borné à la racine (remontée plafonnée : jamais
+  les ancêtres/siblings de `root`). Migration sélective :
+  ~15 scans document `queue` → `descendants` (dom_helpers,
+  scripts, anim_items, composite, media, cli, svg
+  `find_by_id`), boucles directes → `children_iter`
+  (state, selector `:empty`, cascade, paint_helpers
+  `position`/`nth`, apply, forms). **Non migrés par
+  conception** : scans qui poussent des arêtes latérales
+  (`collect_style_sheets` → shadow roots, `engine_preorder`
+  → `<template>` + shadow), gardes de frontière
+  (`default_button`/forms — `<form>` imbriqué non descendu ;
+  svg — sous-arbre `<svg>` atomique), sites qui tranchent
+  ou réassignent le `Vec` (`apply` insert/reloc), boucles
+  mutantes (`tree` remove/clone sous itération).
+  96/97 tests session verts (échec codecs préexistant
+  inchangé), suites PIPE vertes, clippy `-D warnings`.
 
 ## Palier R-B — Contenu étranger, animation, canvas
 

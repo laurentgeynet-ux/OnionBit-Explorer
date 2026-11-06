@@ -1072,14 +1072,10 @@ async fn adopted_sheet_defined_selector_drives_lazy_discovery() {
         let dom = entry.dom.as_ref().unwrap();
         // BFS — `x-lazy` est le seul élément à tiret.
         let mut found = None;
-        let mut queue = vec![dom.document()];
-        while let Some(n) = queue.pop() {
+        for n in dom.descendants(dom.document()).into_iter().flatten() {
             if dom.tag_name(n).is_ok_and(|t| t == "x-lazy") {
                 found = Some(n);
                 break;
-            }
-            if let Ok(ch) = dom.children(n) {
-                queue.extend(ch.iter().rev());
             }
         }
         let node = found.expect("x-lazy dans le DOM");

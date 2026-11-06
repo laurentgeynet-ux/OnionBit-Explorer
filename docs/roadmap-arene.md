@@ -135,12 +135,18 @@ arbres vivants (AR-1 sans seeds) ou des nœuds encore référencés
   `find_by_attr` ne fait plus d'alloc par nœud ; `to_owned`
   uniquement aux sorties qui exigent `String` (FormEntry,
   IframeKind, URLs collectées).
-- [ ] **AR-10. Itérateurs de traversée** — PIPE additif.
-  `children_iter` (curseur prévalidé — une validation, plus un
-  bound+gen-check par sibling), `descendants` préordre,
-  `compare_document_position` (API spec manquante ;
-  `is_ancestor` couvre déjà `contains` modulo `|| a == b`).
-  Consommateurs : ~68 sites `.children(` — poids en core (56).
+- [x] **AR-10. Itérateurs de traversée** — PIPE additif.
+  **Livré R-146** : `children_iter` (curseur sur liens
+  intrusifs — une validation racine, un check par sibling,
+  zéro `Vec`) + `descendants` (préordre itératif borné à la
+  racine — pas de fuite par parent/sibling). Migration
+  sélective : scans document `queue` → `descendants`,
+  boucles directes → `children_iter` ; **conservés** :
+  scans à arêtes latérales (shadow/`<template>`), gardes de
+  frontière (`<form>` imbriqué, sous-arbre `<svg>`),
+  tranches/réassignations du `Vec`, boucles mutantes.
+  `compare_document_position` reste ouvert (hors livraison —
+  `is_ancestor` couvre `contains` modulo `|| a == b`).
 - [ ] **AR-11. Index `id → NodeId`** — PIPE (champ + accesseur)
   puis adoption NAV. Maintenu à `set_attribute("id")` /
   `remove_attribute` / collect ; `by_id` O(1) — attention

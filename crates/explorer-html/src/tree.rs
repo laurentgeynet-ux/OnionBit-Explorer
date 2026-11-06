@@ -1209,7 +1209,7 @@ impl TreeBuilder {
 
     /// DFS des descendants d'un nœud (ordre du document).
     fn collect_descendants(&self, root: NodeId, out: &mut Vec<NodeId>) {
-        for child in self.dom.children(root).unwrap_or_default() {
+        for child in self.dom.descendants(root).into_iter().flatten() {
             out.push(child);
             self.collect_descendants(child, out);
         }

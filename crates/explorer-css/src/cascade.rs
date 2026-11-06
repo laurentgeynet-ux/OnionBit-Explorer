@@ -1225,7 +1225,7 @@ impl StyleEngine {
                 pseudos.insert(node, ps);
             }
         }
-        let Ok(children) = dom.children(node) else {
+        let Ok(children) = dom.children_iter(node) else {
             map.insert(node, style);
             return;
         };
@@ -1249,7 +1249,7 @@ impl StyleEngine {
         // filtre de `collect_candidates` tient la porte).
         let host_root = dom.shadow_root(node, true);
         if let Some(root) = host_root {
-            if let Ok(schildren) = dom.children(root) {
+            if let Ok(schildren) = dom.children_iter(root) {
                 for child in schildren {
                     if dom.element(child).is_ok() {
                         explorer_common::deep(|| {

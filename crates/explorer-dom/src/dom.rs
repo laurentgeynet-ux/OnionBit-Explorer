@@ -444,13 +444,44 @@ impl Dom {
     /// # Errors
     /// Erreurs de handle comme [`Dom::data`].
     pub fn children(&self, id: NodeId) -> Result<Vec<NodeId>> {
-        let mut out = Vec::new();
-        let mut cursor = self.first_child(id)?;
-        while let Some(child) = cursor {
-            out.push(child);
-            cursor = self.next_sibling(child)?;
-        }
-        Ok(out)
+        Ok(self.children_iter(id)?.collect())
+    }
+
+    /// Itérateur paresseux sur les enfants dans l'ordre du
+    /// document — **sans `Vec` alloué** : une validation de
+    /// `id` à la création, puis un check borne+génération par
+    /// sibling à l'avance (le banc `arena` mesurait
+    /// [`Dom::children`] à 4,2 µs/appel sur 1 000 frères —
+    /// cible AR-10). L'itérateur emprunte le `Dom` :
+    /// l'arène ne peut pas muter pendant la traversée ; un
+    /// lien sibling mort termine l'itération (même
+    /// robustesse que [`Dom::children`], sans propager
+    /// d'erreur par item).
+    ///
+    /// # Errors
+    /// Erreurs de handle comme [`Dom::data`].
+    pub fn children_iter(&self, id: NodeId) -> Result<ChildrenIter<'_>> {
+        Ok(ChildrenIter {
+            dom: self,
+            next: self.node(id)?.first_child,
+        })
+    }
+
+    /// Descendants en **préordre document** (`id` exclu) —
+    /// remplace l'idiome `queue`+`children().rev()` des scans
+    /// d'arbre : O(1) mémoire, une validation par nœud
+    /// visité (AR-10). Un lien mort termine la remontée du
+    /// sous-arbre fautif sans fausser le reste du parcours.
+    ///
+    /// # Errors
+    /// Erreurs de handle comme [`Dom::data`].
+    pub fn descendants(&self, id: NodeId) -> Result<Descendants<'_>> {
+        let first = self.node(id)?.first_child;
+        Ok(Descendants {
+            dom: self,
+            root: id,
+            pending: first,
+        })
     }
 
     /// Premier enfant **élément** du `Document` — l'« élément
@@ -742,19 +773,12 @@ impl Dom {
     #[must_use]
     pub fn slots_in(&self, root: NodeId) -> Vec<NodeId> {
         let mut out = Vec::new();
-        let mut stack: Vec<NodeId> = self.children(root).unwrap_or_default();
-        stack.reverse();
-        while let Some(n) = stack.pop() {
+        for n in self.descendants(root).into_iter().flatten() {
             if self
                 .tag_name(n)
                 .is_ok_and(|t| t.eq_ignore_ascii_case("slot"))
             {
                 out.push(n);
-            }
-            if let Ok(cs) = self.children(n) {
-                for &c in cs.iter().rev() {
-                    stack.push(c);
-                }
             }
         }
         out
@@ -782,7 +806,7 @@ impl Dom {
             .flatten()
             .unwrap_or_default();
         let mut out = Vec::new();
-        if let Ok(children) = self.children(host) {
+        if let Ok(children) = self.children_iter(host) {
             for c in children {
                 if self.element(c).is_ok() {
                     // `<template shadowrootmode>` consommé : la
@@ -1257,4 +1281,69 @@ fn slot_idx(index: u32) -> usize {
 /// mais reste non-fatale.
 fn index_as_u32(index: usize) -> u32 {
     u32::try_from(index).unwrap_or(u32::MAX)
+}
+
+/// Voir [`Dom::children_iter`] — curseur sibling emprunté,
+/// sans `Vec` alloué.
+pub struct ChildrenIter<'a> {
+    dom: &'a Dom,
+    next: Option<NodeId>,
+}
+
+impl Iterator for ChildrenIter<'_> {
+    type Item = NodeId;
+
+    fn next(&mut self) -> Option<NodeId> {
+        let cur = self.next?;
+        // Un sibling mort (case réaffectée entre deux appels
+        // — impossible tant que l'emprunt vit, mais le type
+        // ne l'interdit pas si le `Dom` est recréé entre
+        // appels) termine l'itération plutôt que suivre un
+        // handle obsolète.
+        self.next = self.dom.node(cur).ok().and_then(|n| n.next_sibling);
+        Some(cur)
+    }
+}
+
+/// Voir [`Dom::descendants`] — marche préordre O(1) mémoire.
+/// `root` borne la remontée : sans elle, le dernier
+/// descendant ferait fuir le parcours vers les siblings
+/// de la racine.
+pub struct Descendants<'a> {
+    dom: &'a Dom,
+    root: NodeId,
+    pending: Option<NodeId>,
+}
+
+impl Descendants<'_> {
+    /// Premier nœud pas encore visité en remontant : premier
+    /// `next_sibling` rencontré, borné à `root` (ses siblings
+    /// restent hors du sous-arbre).
+    fn next_unvisited(&self, mut n: NodeId) -> Option<NodeId> {
+        while n != self.root {
+            let node = self.dom.node(n).ok()?;
+            if let Some(s) = node.next_sibling {
+                return Some(s);
+            }
+            n = node.parent?;
+        }
+        None
+    }
+}
+
+impl Iterator for Descendants<'_> {
+    type Item = NodeId;
+
+    fn next(&mut self) -> Option<NodeId> {
+        let cur = self.pending?;
+        // Préordre : descendre si enfant, sinon premier
+        // sibling d'un ancêtre borné par la racine.
+        self.pending = self
+            .dom
+            .node(cur)
+            .ok()
+            .and_then(|n| n.first_child)
+            .or_else(|| self.next_unvisited(cur));
+        Some(cur)
+    }
 }

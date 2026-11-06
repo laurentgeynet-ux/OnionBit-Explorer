@@ -1243,10 +1243,9 @@ fn graft_subtree(
     // pas : indexer dessus décalerait l'insertion devant un
     // `<!-- -->` → empreinte divergente). Les ops antérieures
     // ont déjà rejoué — invariant séquentiel.
-    let kids = dom.children(dst_parent).map_err(|_| JournalReject::Dom)?;
-    let refn = kids
-        .iter()
-        .copied()
+    let refn = dom
+        .children_iter(dst_parent)
+        .map_err(|_| JournalReject::Dom)?
         .filter(|&n| serializable_kind(dom, n))
         .nth(index);
     dom.insert_before(dst_parent, new, refn)
@@ -1256,11 +1255,11 @@ fn graft_subtree(
         let tnew = dom.create_fragment().map_err(|_| JournalReject::Dom)?;
         dom.set_template_contents(new, tnew)
             .map_err(|_| JournalReject::Dom)?;
-        for (i, &c) in src.children(tfrag).unwrap_or_default().iter().enumerate() {
+        for (i, c) in src.children_iter(tfrag).into_iter().flatten().enumerate() {
             graft_subtree(dom, src, c, tnew, i)?;
         }
     }
-    for (i, &c) in src.children(src_id).unwrap_or_default().iter().enumerate() {
+    for (i, c) in src.children_iter(src_id).into_iter().flatten().enumerate() {
         graft_subtree(dom, src, c, new, i)?;
     }
     Ok(new)
@@ -1332,8 +1331,8 @@ fn relocate_obreloc(dom: &mut Dom) {
                 let de = dom.document_element();
                 let i = val.parse::<usize>().unwrap_or(usize::MAX);
                 let refr = de
-                    .and_then(|d| dom.children(d).ok())
-                    .and_then(|ks| ks.get(i).copied());
+                    .and_then(|d| dom.children_iter(d).ok())
+                    .and_then(|mut ks| ks.nth(i));
                 (de, refr)
             }
             _ => {
@@ -1487,12 +1486,18 @@ fn apply_journal_op(
             let dom = p.dom.as_mut().ok_or(JournalReject::NoDom)?;
             while let Some(n) = stack.pop() {
                 gone.insert(n);
-                stack.extend(dom.children(n).unwrap_or_default());
+                if let Ok(ch) = dom.children_iter(n) {
+                    stack.extend(ch);
+                }
                 if let Ok(Some(f)) = dom.template_contents(n) {
-                    stack.extend(dom.children(f).unwrap_or_default());
+                    if let Ok(ch) = dom.children_iter(f) {
+                        stack.extend(ch);
+                    }
                 }
                 if let Some(r) = dom.shadow_root(n, true) {
-                    stack.extend(dom.children(r).unwrap_or_default());
+                    if let Ok(ch) = dom.children_iter(r) {
+                        stack.extend(ch);
+                    }
                     gone.insert(r);
                 }
             }
@@ -3391,10 +3396,9 @@ mod reloc_tests {
     use explorer_html::TreeBuilder;
 
     fn kids_tags(dom: &explorer_dom::Dom, id: explorer_dom::NodeId) -> Vec<String> {
-        dom.children(id)
+        dom.children_iter(id)
             .unwrap()
-            .iter()
-            .map(|&n| dom.tag_name(n).unwrap_or("?").to_string())
+            .map(|n| dom.tag_name(n).unwrap_or("?").to_string())
             .collect()
     }
 
@@ -3403,11 +3407,9 @@ mod reloc_tests {
         id: explorer_dom::NodeId,
         tag: &str,
     ) -> explorer_dom::NodeId {
-        dom.children(id)
+        dom.children_iter(id)
             .unwrap()
-            .iter()
-            .find(|&&n| dom.tag_name(n).is_ok_and(|t| t == tag))
-            .copied()
+            .find(|&n| dom.tag_name(n).is_ok_and(|t| t == tag))
             .unwrap()
     }
 

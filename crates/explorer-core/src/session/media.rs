@@ -402,7 +402,7 @@ fn media_source(
     if let Some(src) = attr("src").filter(|s| !s.is_empty()) {
         return Some((src.to_owned(), attr("type").map(str::to_owned)));
     }
-    for c in dom.children(n).unwrap_or_default() {
+    for c in dom.children_iter(n).into_iter().flatten() {
         if !dom.tag_name(c).is_ok_and(|t| t == "source") {
             continue;
         }
@@ -594,8 +594,7 @@ fn scan_media(
         h: 0.0,
     };
     let mut out = Vec::new();
-    let mut queue = vec![dom.document()];
-    while let Some(n) = queue.pop() {
+    for n in dom.descendants(dom.document()).into_iter().flatten() {
         let kind = match dom.tag_name(n) {
             Ok("video") => Some(MediaKind::Video),
             Ok("audio") => Some(MediaKind::Audio),
@@ -643,9 +642,6 @@ fn scan_media(
                     });
                 }
             }
-        }
-        if let Ok(ch) = dom.children(n) {
-            queue.extend(ch.iter().rev());
         }
     }
     out

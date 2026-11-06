@@ -81,7 +81,7 @@ pub fn collect_data_images(dom: &Dom, styles: &StyleMap, max_px: u32) -> PaintIm
                 }
             }
         }
-        if let Ok(children) = dom.children(node) {
+        if let Ok(children) = dom.children_iter(node) {
             stack.extend(children);
         }
     }

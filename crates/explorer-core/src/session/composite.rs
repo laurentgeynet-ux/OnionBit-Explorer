@@ -85,13 +85,9 @@ pub(crate) fn iframe_intrinsic(dom: &Dom, node: NodeId) -> (f32, f32) {
 /// ordre document).
 pub(crate) fn iframe_nodes(dom: &Dom) -> Vec<NodeId> {
     let mut out = Vec::new();
-    let mut queue = vec![dom.document()];
-    while let Some(n) = queue.pop() {
+    for n in dom.descendants(dom.document()).into_iter().flatten() {
         if dom.tag_name(n).is_ok_and(|t| t == "iframe") {
             out.push(n);
-        }
-        if let Ok(ch) = dom.children(n) {
-            queue.extend(ch.iter().rev());
         }
     }
     out

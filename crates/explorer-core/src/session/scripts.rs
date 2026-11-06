@@ -150,17 +150,13 @@ pub(crate) fn collect_scripts(
     // Tous les `<script>` — y compris les non-collectés —
     // numérotés pour `document.currentScript` (CAP-168).
     let mut els = 0usize;
-    let mut queue = vec![dom.document()];
-    while let Some(n) = queue.pop() {
+    for n in dom.descendants(dom.document()).into_iter().flatten() {
         if dom.tag_name(n).is_ok_and(|t| t == "script") {
             let el_ord = els;
             els += 1;
             collect_script_el(
                 dom, n, page, base, csp, el_ord, &mut slots, max_src, &mut out, rearm_cmp,
             );
-        }
-        if let Ok(ch) = dom.children(n) {
-            queue.extend(ch.iter().rev());
         }
     }
     out
@@ -362,8 +358,7 @@ fn push_external_script(
 /// l'ordre exact n'importe pas aux sites observés).
 pub(crate) fn collect_import_maps(dom: &Dom) -> Vec<String> {
     let mut out = Vec::new();
-    let mut queue = vec![dom.document()];
-    while let Some(n) = queue.pop() {
+    for n in dom.descendants(dom.document()).into_iter().flatten() {
         if dom.tag_name(n).is_ok_and(|t| t == "script") {
             let ty = dom
                 .attribute_str(n, "type")
@@ -376,9 +371,6 @@ pub(crate) fn collect_import_maps(dom: &Dom) -> Vec<String> {
                     out.push(text);
                 }
             }
-        }
-        if let Ok(ch) = dom.children(n) {
-            queue.extend(ch.iter().rev());
         }
     }
     out
@@ -421,8 +413,7 @@ pub(crate) fn merge_import_maps(maps: &[String]) -> Vec<(String, String)> {
 /// tokenizer ; `len > 2` écarte l'attribut `on` nu. Un faux
 /// positif (`once`, `only`…) ne coûte qu'un moteur inutilisé.
 pub(crate) fn has_inline_handlers(dom: &Dom) -> bool {
-    let mut queue = vec![dom.document()];
-    while let Some(n) = queue.pop() {
+    for n in dom.descendants(dom.document()).into_iter().flatten() {
         if let Ok(attrs) = dom.attributes(n) {
             if attrs
                 .iter()
@@ -430,9 +421,6 @@ pub(crate) fn has_inline_handlers(dom: &Dom) -> bool {
             {
                 return true;
             }
-        }
-        if let Ok(ch) = dom.children(n) {
-            queue.extend(ch.iter().rev());
         }
     }
     false
@@ -447,8 +435,7 @@ pub(crate) fn has_inline_handlers(dom: &Dom) -> bool {
 /// schéma est insensible à la casse, espaces trimés comme
 /// le fait `Url::resolve`).
 pub(crate) fn has_javascript_urls(dom: &Dom) -> bool {
-    let mut queue = vec![dom.document()];
-    while let Some(n) = queue.pop() {
+    for n in dom.descendants(dom.document()).into_iter().flatten() {
         if let Ok(attrs) = dom.attributes(n) {
             if attrs.iter().any(|a| {
                 (a.name == "href" || a.name == "action" || a.name == "formaction")
@@ -459,9 +446,6 @@ pub(crate) fn has_javascript_urls(dom: &Dom) -> bool {
             }) {
                 return true;
             }
-        }
-        if let Ok(ch) = dom.children(n) {
-            queue.extend(ch.iter().rev());
         }
     }
     false

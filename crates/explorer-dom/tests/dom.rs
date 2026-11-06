@@ -585,3 +585,38 @@ fn heap_bytes_mesure_capacite_et_contenu() {
     assert!(after < grown, "after={after} grown={grown}");
     assert!(after > 0);
 }
+
+#[test]
+fn iterateurs_children_descendants() {
+    let mut dom = Dom::new();
+    let doc = dom.document();
+    // doc >< premier >< milieu, fin >< texte ; autre
+    let premier = el(&mut dom, "a");
+    let autre = el(&mut dom, "e");
+    dom.append_child(doc, premier).expect("premier");
+    dom.append_child(doc, autre).expect("autre");
+    let milieu = el(&mut dom, "b");
+    let fin = el(&mut dom, "c");
+    dom.append_child(premier, milieu).expect("milieu");
+    dom.append_child(premier, fin).expect("fin");
+    let texte = txt(&mut dom, "d");
+    dom.append_child(fin, texte).expect("texte");
+
+    // children_iter : ordre document, zéro Vec intermédiaire.
+    let kids: Vec<_> = dom.children_iter(doc).expect("kids").collect();
+    assert_eq!(kids, vec![premier, autre]);
+
+    // descendants : préordre document.
+    let order: Vec<_> = dom.descendants(doc).expect("desc").collect();
+    assert_eq!(order, vec![premier, milieu, fin, texte, autre]);
+
+    // Borné à la racine passée : pas de fuite vers `autre`.
+    let sub: Vec<_> = dom.descendants(premier).expect("sub").collect();
+    assert_eq!(sub, vec![milieu, fin, texte]);
+
+    // Racine feuille / hors arène.
+    assert_eq!(dom.descendants(autre).expect("autre").count(), 0);
+    let ghost = NodeId::from_parts(9_999, 1);
+    assert!(dom.descendants(ghost).is_err());
+    assert!(dom.children_iter(ghost).is_err());
+}

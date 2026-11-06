@@ -198,8 +198,8 @@ fn serialize_into(dom: &Dom, node: NodeId, out: &mut String) {
             if !has_xmlns && e.namespace == Namespace::Svg && e.tag_name == "svg" {
                 out.push_str(" xmlns=\"http://www.w3.org/2000/svg\"");
             }
-            let children = dom.children(node).unwrap_or_default();
-            if children.is_empty() {
+            let mut children = dom.children_iter(node).into_iter().flatten().peekable();
+            if children.peek().is_none() {
                 out.push_str("/>");
             } else {
                 out.push('>');
@@ -322,14 +322,10 @@ fn inject_external_refs(dom: &Dom, doc_root: NodeId, svg: NodeId, src: &mut Stri
 
 /// Premier élément portant `id` sous `root` (BFS).
 fn find_by_id(dom: &Dom, root: NodeId, id: &str) -> Option<NodeId> {
-    let mut queue = vec![root];
-    while let Some(n) = queue.pop() {
+    for n in std::iter::once(root).chain(dom.descendants(root).into_iter().flatten()) {
         if let Ok(e) = dom.element(n) {
             if e.attributes.iter().any(|a| a.name == "id" && a.value == id) {
                 return Some(n);
-            }
-            if let Ok(ch) = dom.children(n) {
-                queue.extend(ch.iter().rev());
             }
         }
     }
