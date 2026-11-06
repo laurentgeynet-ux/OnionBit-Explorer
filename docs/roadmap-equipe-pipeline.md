@@ -2763,6 +2763,18 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   `collect_seeds_retient_arbre_detache` (rétention,
   non-persistance, seed profond = descendance sans
   ancêtres, hors-arène ignoré).
+- [x] **R-143. `Dom::heap_bytes()`** (AR-7, chantier ARÈNE) :
+  octets heap **mesurés** de l'arène — capacité `slots`
+  (cases libres incluses : l'arène ne rend pas la mémoire
+  avant rétrécissement, comme le RSS réel), capacités des
+  tables `roots`/`shadow_*`/`defined_names`, et allocations
+  internes aux nœuds vivants (textes, commentaires,
+  `tag_name`, `attributes` + leurs `String`). Consommé par
+  `MemReport.dom_bytes`/`bfcache_dom_bytes` (étape NAV à
+  suivre) — `live_count` (compte) et `heap_bytes` (octets)
+  distingués, jamais de faux total octet inventé. Verrou :
+  `heap_bytes_mesure_capacite_et_contenu` (croissance ≥
+  allocs posées, redescente après `collect`, > 0).
 
 ## Palier R-B — Contenu étranger, animation, canvas
 

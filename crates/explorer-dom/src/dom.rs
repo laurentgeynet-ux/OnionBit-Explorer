@@ -147,6 +147,62 @@ impl Dom {
         self.live
     }
 
+    /// Octets heap **mesurés** de l'arène — le chiffre que
+    /// `mem_report` publie en `dom_bytes` (AR-7). Couvre :
+    /// - la capacité du vecteur `slots` — **y compris les
+    ///   cases libres** : l'arène ne rend pas la mémoire tant
+    ///   que le vecteur n'est pas rétréci (le surbooking d'un
+    ///   document passé persiste donc dans ce chiffre, comme
+    ///   en RSS réel) ;
+    /// - la capacité des tables `roots`, `shadow_roots`,
+    ///   `shadow_hosts` et `defined_names` ;
+    /// - les allocations internes aux nœuds vivants : textes
+    ///   et commentaires (`String`), `tag_name`, vecteurs
+    ///   `attributes` et les `String` de chaque attribut.
+    ///
+    /// La capacité d'un `HashMap`/`HashSet` est prise à sa
+    /// valeur `capacity()` (case + octet de contrôle élidés
+    /// — approximation de l'ordre du pour-cent, documentée,
+    /// jamais un faux total exact).
+    #[must_use]
+    pub fn heap_bytes(&self) -> usize {
+        use std::mem::size_of;
+        let mut bytes = self.slots.capacity() * size_of::<Slot>()
+            + self.roots.capacity() * size_of::<(RootId, NodeId)>()
+            + self
+                .shadow_roots
+                .capacity()
+                .saturating_mul(size_of::<(NodeId, (NodeId, bool))>())
+            + self.shadow_hosts.capacity() * size_of::<(NodeId, NodeId)>()
+            + self.defined_names.capacity() * size_of::<String>();
+        bytes += self
+            .defined_names
+            .iter()
+            .map(String::capacity)
+            .sum::<usize>();
+        for slot in &self.slots {
+            let Slot::Occupied { node, .. } = slot else {
+                continue;
+            };
+            bytes += match &node.data {
+                NodeData::Document => 0,
+                NodeData::Doctype(d) => {
+                    d.name.capacity() + d.public_id.capacity() + d.system_id.capacity()
+                }
+                NodeData::Element(el) => {
+                    el.tag_name.capacity()
+                        + el.attributes.capacity() * size_of::<Attribute>()
+                        + el.attributes
+                            .iter()
+                            .map(|a| a.name.capacity() + a.value.capacity())
+                            .sum::<usize>()
+                }
+                NodeData::Text(t) | NodeData::Comment(t) => t.capacity(),
+            };
+        }
+        bytes
+    }
+
     /// Budget de nœuds configuré.
     #[must_use]
     pub fn max_nodes(&self) -> usize {

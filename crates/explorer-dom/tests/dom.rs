@@ -559,3 +559,29 @@ fn collect_seeds_retient_arbre_detache() {
     assert!(!dom.is_alive(host));
     assert!(dom.is_alive(inner) && dom.is_alive(leaf));
 }
+
+#[test]
+fn heap_bytes_mesure_capacite_et_contenu() {
+    let mut dom = Dom::new();
+    let base = dom.heap_bytes();
+    assert!(base > 0); // document + capacité minimale des tables
+
+    // Allocs internes : tag_name + attributs + texte long.
+    let doc = dom.document();
+    let div = el(&mut dom, "div");
+    dom.append_child(doc, div).expect("div");
+    dom.set_attribute(div, "data-blob", &"x".repeat(4_096))
+        .expect("attr");
+    let big = txt(&mut dom, &"y".repeat(8_192));
+    dom.append_child(div, big).expect("big");
+    let grown = dom.heap_bytes();
+    assert!(grown >= base + 12_288, "grown={grown} base={base}");
+
+    // Réclamation : les String des nœuds balayés sont rendues —
+    // le chiffre redescend (la capacité `slots`, elle, reste).
+    dom.remove(div).expect("detach");
+    assert_eq!(dom.collect(&[]), 2);
+    let after = dom.heap_bytes();
+    assert!(after < grown, "after={after} grown={grown}");
+    assert!(after > 0);
+}

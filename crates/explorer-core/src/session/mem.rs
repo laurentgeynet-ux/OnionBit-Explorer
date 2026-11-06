@@ -58,6 +58,10 @@ use super::*;
 pub struct MemReport {
     /// Nœuds vivants du DOM courant (`Dom::live_count`).
     pub dom_nodes: usize,
+    /// Octets heap mesurés de l'arène DOM courante
+    /// (`Dom::heap_bytes` — capacité `slots` + tables +
+    /// allocations internes aux nœuds, R-143/AR-7).
+    pub dom_bytes: usize,
     /// Boîtes de l'arbre de layout courant (descente récursive).
     pub layout_boxes: usize,
     /// Items de la display list courante.
@@ -120,6 +124,9 @@ pub struct MemReport {
     pub bfcache_pages: usize,
     /// Nœuds DOM des pages gelées (somme des `live_count`).
     pub bfcache_dom_nodes: usize,
+    /// Octets heap mesurés des arènes gelées (somme des
+    /// `Dom::heap_bytes`).
+    pub bfcache_dom_bytes: usize,
     /// Boîtes de layout des pages gelées.
     pub bfcache_layout_boxes: usize,
     /// Items de display list des pages gelées.
@@ -215,6 +222,7 @@ impl Session {
         // Page vivante.
         if let Some(d) = &entry.dom {
             r.dom_nodes = d.live_count();
+            r.dom_bytes = d.heap_bytes();
         }
         if let Some(t) = &entry.tree {
             r.layout_boxes = count_boxes(t);
@@ -324,6 +332,7 @@ impl Session {
         for snap in &mut entry.bfcache {
             if let Some(d) = &snap.dom {
                 r.bfcache_dom_nodes += d.live_count();
+                r.bfcache_dom_bytes += d.heap_bytes();
             }
             if let Some(t) = &snap.tree {
                 r.bfcache_layout_boxes += count_boxes(t);

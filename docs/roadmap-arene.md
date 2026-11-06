@@ -119,10 +119,10 @@ arbres vivants (AR-1 sans seeds) ou des nœuds encore référencés
   traversée (`children`/siblings/`attribute`), `collect` sur
   arène fragmentée, `set_attribute`/lookup. Produit les
   baselines de AR-9 → AR-15.
-- [ ] **AR-7. `Dom::heap_bytes()`** — PIPE, additif.
-  `slots.capacity() × size_of::<Slot>()` + tas réel (textes,
-  `attributes`, `roots`) — alimente `mem_report` (étape 130 :
-  capacité « non inventée » à ce jour).
+- [x] **AR-7. `Dom::heap_bytes()`** — PIPE, additif.
+  **Livré R-143** : capacité `slots` (cases libres
+  incluses) + tables + allocs internes aux nœuds →
+  `MemReport.dom_bytes`/`bfcache_dom_bytes`.
 - [ ] **AR-8. Estimateur corrigé** — NAV, trivial.
   `session/tests.rs:2556` « ~120 o » → **144 o** (mesuré).
 
