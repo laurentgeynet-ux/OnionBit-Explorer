@@ -649,6 +649,15 @@ pub struct Dom {
     /// `(media, cmd)`, drainés par l'adaptateur
     /// (`drain_media_commands`) qui les relaie vers l'hôte.
     pub media_cmds: Vec<(u64, MediaCmd)>,
+    /// Index `id → candidats` (AR-17) : `by_id` était un
+    /// scan `O(n)` — `getElementById` est chaud sur pages
+    /// réelles. `Vec` multivalué (ids dupliqués = web
+    /// hostile) ; les entrées sont des **candidats**
+    /// re-validés à la requête (vivant, attr `id` courant,
+    /// attaché) — une entrée obsolète n'y survit pas.
+    /// Politique ADR-0033 : purge au sweep, jamais de
+    /// rétention — un index ne maintient rien en vie.
+    id_index: HashMap<String, Vec<NodeId>>,
     /// Registre custom elements (JS-C68) — les définitions
     /// pilotent l'émission des `CeReaction` par les
     /// mutateurs ; les `Value`/`ObjId` qu'il porte sont
@@ -912,6 +921,7 @@ impl Dom {
             shadow_roots: HashMap::new(),
             shadow_hosts: HashMap::new(),
             media_cmds: Vec::new(),
+            id_index: HashMap::new(),
             ce: CeRegistry::default(),
             ce_reactions: Vec::new(),
             canvas_op_limit: DEFAULT_CANVAS_OP_LIMIT,
@@ -1142,6 +1152,17 @@ impl Dom {
         }
         self.parse_dyn
             .retain(|&n| self.nodes.get(n as usize).is_some_and(|x| !x.free));
+        // AR-17 — `id_index` : les candidats pointant des
+        // slots libérés sont retirés (la requête les aurait
+        // re-validés de toute façon — la purge borne la
+        // mémoire, politique ADR-0033 : purge, pas rétention).
+        {
+            let nodes = &self.nodes;
+            self.id_index.retain(|_, v| {
+                v.retain(|&n| nodes.get(n as usize).is_some_and(|x| !x.free));
+                !v.is_empty()
+            });
+        }
         if let Some(f) = self.focused.get() {
             if self.nodes[f as usize].free {
                 self.focused.set(None);
@@ -3073,6 +3094,7 @@ impl Dom {
         };
         let id = self.alloc(kind, &tag);
         self.nodes[id as usize].attrs = attrs;
+        self.index_id(id, None);
         self.nodes[id as usize].text = text;
         // Graines `(src, dst_parent, descendre)` — itératif : la
         // profondeur DOM est contrôlée par le script, une descente
@@ -3105,6 +3127,7 @@ impl Dom {
             };
             let cid = self.alloc(k2, &t2);
             self.nodes[cid as usize].attrs = a2;
+            self.index_id(cid, None);
             self.nodes[cid as usize].text = x2;
             self.append(dst_parent, cid);
             if t2 == "template" {
@@ -3138,6 +3161,7 @@ impl Dom {
         };
         let id = self.alloc(kind, &tag);
         self.nodes[id as usize].attrs = attrs;
+        self.index_id(id, None);
         self.nodes[id as usize].text = text;
         if tag == "template" {
             if let Some(&frag) = src_dom.template_contents.get(&src) {
@@ -3178,6 +3202,7 @@ impl Dom {
         };
         let id = self.alloc(kind, &tag);
         self.nodes[id as usize].attrs = attrs;
+        self.index_id(id, None);
         self.nodes[id as usize].text = text;
         let mut work: Vec<(NodeId, NodeId)> = Vec::new();
         if tag == "template" {
@@ -3206,6 +3231,7 @@ impl Dom {
             };
             let cid = self.alloc(k2, &t2);
             self.nodes[cid as usize].attrs = a2;
+            self.index_id(cid, None);
             self.nodes[cid as usize].text = x2;
             self.append(dst_parent, cid);
             if t2 == "template" {
@@ -3495,6 +3521,9 @@ impl Dom {
         } else {
             attrs.push((name.to_lowercase(), value.to_string()));
         }
+        if name.eq_ignore_ascii_case("id") {
+            self.index_id(node, old.clone());
+        }
         self.mark_dirty_at(node);
         self.queue_mutation(&MutationRecord {
             ty: "attributes",
@@ -3555,6 +3584,9 @@ impl Dom {
         attrs.retain(|(k, _)| !k.eq_ignore_ascii_case(name));
         let removed = attrs.len() != before;
         if removed {
+            if name.eq_ignore_ascii_case("id") {
+                self.index_id(node, old.clone());
+            }
             self.mark_dirty_at(node);
             self.queue_mutation(&MutationRecord {
                 ty: "attributes",
@@ -3666,22 +3698,55 @@ impl Dom {
             .unwrap_or_default()
     }
 
+    /// Maintient `id_index` quand l'attribut `id` de `node`
+    /// change (AR-17) : retire `old` (bucket vidé → supprimé),
+    /// ajoute la valeur courante lue dans `attrs`. `old=None`
+    /// = simple ajout (parse/clone — l'index lit `attrs`).
+    /// Les entrées sont des *candidats* : la validation
+    /// définitive se fait dans [`Self::by_id`].
+    fn index_id(&mut self, node: NodeId, old: Option<String>) {
+        if let Some(o) = old {
+            if let Some(v) = self.id_index.get_mut(&o) {
+                v.retain(|&n| n != node);
+                if v.is_empty() {
+                    self.id_index.remove(&o);
+                }
+            }
+        }
+        if let Some(cur) = Self::attr_val(&self.nodes[node as usize], "id") {
+            let cur = cur.to_string();
+            let e = self.id_index.entry(cur).or_default();
+            if !e.contains(&node) {
+                e.push(node);
+            }
+        }
+    }
+
     /// `getElementById` — first match, document order. Seuls les
     /// nœuds **rattachés** au document comptent (JS-C35) : un
     /// élément `remove()`d ou effacé par `document.open()` n'est
     /// plus trouvable (spec — la recherche couvre l'arbre du
-    /// document, pas l'arène).
+    /// document, pas l'arène). Index `id → candidats` (AR-17) :
+    /// chaque slot est re-validé (élément vivant, attr `id`
+    /// courant égal, attaché) — une entrée obsolète (attr
+    /// changé, slot réaffecté) n'y survit pas ; le `min` par
+    /// `NodeId` préserve l'ordre du scan historique (slots
+    /// croissants ≈ préordre de parse).
     #[must_use]
     pub fn by_id(&self, id: &str) -> Option<NodeId> {
-        self.nodes
-            .iter()
-            .enumerate()
-            .find(|(i, n)| {
-                n.kind == NodeKind::Element
-                    && Self::attr_val(n, "id") == Some(id)
-                    && self.is_attached(*i as NodeId)
-            })
-            .map(|(i, _)| i as NodeId)
+        self.id_index.get(id).and_then(|cands| {
+            cands
+                .iter()
+                .filter(|&&n| {
+                    self.nodes.get(n as usize).is_some_and(|x| {
+                        x.kind == NodeKind::Element
+                            && !x.free
+                            && Self::attr_val(x, "id") == Some(id)
+                    }) && self.is_attached(n)
+                })
+                .min()
+                .copied()
+        })
     }
 
     /// Le nœud remonte à `root` — les nœuds détachés
@@ -4534,6 +4599,7 @@ impl Dom {
             }
             let id = self.alloc(NodeKind::Element, &tag);
             self.nodes[id as usize].attrs = attrs;
+            self.index_id(id, None);
             let top = *stack.last().unwrap_or(&parent);
             self.append(top, id);
             if !self_close && !VOID_TAGS.contains(&tag.as_str()) {
@@ -5740,5 +5806,74 @@ mod tests {
         d.collect_garbage(&HashSet::new());
         assert_eq!(d.parent(c), Some(p));
         assert!(!d.nodes[p as usize].free);
+    }
+
+    // -- AR-17 — index `id → candidats` -------------------------------
+
+    /// `by_id` via l'index : pose, rename, suppression
+    /// d'attribut — chaque transition est répercutée.
+    #[test]
+    fn by_id_indexe_set_rename_remove() {
+        let mut d = Dom::new();
+        let a = d.create_element("div");
+        d.append(d.root, a);
+        d.set_attr(a, "id", "hero");
+        assert_eq!(d.by_id("hero"), Some(a));
+        d.set_attr(a, "id", "main");
+        assert_eq!(d.by_id("hero"), None, "ancienne clé retirée");
+        assert_eq!(d.by_id("main"), Some(a));
+        d.remove_attr(a, "id");
+        assert_eq!(d.by_id("main"), None);
+    }
+
+    /// Le parseur alimente l'index (assignation `.attrs` en
+    /// direct) ; détacher rend le nœud invisible (JS-C35).
+    #[test]
+    fn by_id_parse_et_detachement() {
+        let mut d = Dom::new();
+        d.parse_fragment_into(d.root, "<div id=parsed>x</div>");
+        let n = d.by_id("parsed").expect("le parse indexe");
+        d.detach(n);
+        assert_eq!(d.by_id("parsed"), None, "détaché = invisible");
+    }
+
+    /// Doublons `id` : le slot le plus bas gagne (ordre du
+    /// scan historique) ; un slot libéré puis réaffecté sans
+    /// cet `id` n'aliase jamais l'ancienne clé.
+    #[test]
+    fn by_id_doublons_et_slot_reaffecte() {
+        let mut d = Dom::new();
+        let a = d.create_element("div");
+        let b = d.create_element("div");
+        d.append(d.root, a);
+        d.append(d.root, b);
+        d.set_attr(a, "id", "dup");
+        d.set_attr(b, "id", "dup");
+        assert_eq!(d.by_id("dup"), Some(a.min(b)));
+
+        // `a` détaché → le doublon `b` prend le relais.
+        d.detach(a);
+        assert_eq!(d.by_id("dup"), Some(b));
+
+        // `b` meurt au GC, son slot est réaffecté à un nœud
+        // **sans** `id` → l'entrée obsolète n'aliase pas.
+        d.detach(b);
+        d.collect_garbage(&HashSet::new());
+        let r = d.create_element("span");
+        d.append(d.root, r);
+        assert_eq!(d.by_id("dup"), None);
+    }
+
+    /// `clone_node` indexe les attrs clonés ; un nœud détaché
+    /// cloné puis attaché redevient trouvable.
+    #[test]
+    fn by_id_clone_indexe() {
+        let mut d = Dom::new();
+        let a = d.create_element("div");
+        d.set_attr(a, "id", "tpl");
+        let c = d.clone_node(a, false);
+        d.append(d.root, c);
+        // `a` détaché reste invisible ; le clone attaché sert.
+        assert_eq!(d.by_id("tpl"), Some(c));
     }
 }

@@ -252,10 +252,13 @@ arbres vivants (AR-1 sans seeds) ou des nœuds encore référencés
   figées, post-sweep délink parent + purge flags
   transitoires, `gc_seed_ids` += `adopted_sheets` ;
   génération refusée (rayon d'explosion démesuré — harnais).
-- [ ] **AR-17. Index `id` miroir** — JS. `by_id` = scan O(n)
+- [x] **AR-17. Index `id` miroir** — JS. `by_id` = scan O(n)
   (`jscore/dom.rs:3636`) ; `getElementById` est chaud sur
   pages réelles — `HashMap<String, NodeId>` maintenu à
-  attr/attach/detach.
+  attr/attach/detach. **Livré (JS-C363)** : `id_index`
+  multivalué alimenté aux 6 chemins d'écriture `attrs` ;
+  candidats re-validés à la requête (vivant, attr courant,
+  attaché) ; purgé au sweep — jamais de rétention (ADR-0033).
 
 ## Ouvertures stratégiques (hors file — à promouvoir au besoin)
 
