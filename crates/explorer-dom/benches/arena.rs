@@ -112,24 +112,22 @@ fn bench_set_attribute(c: &mut Criterion) {
 
 fn bench_collect(c: &mut Criterion) {
     let mut g = c.benchmark_group("collect");
-    for n in [10_000usize] {
-        g.bench_with_input(BenchmarkId::from_parameter(n), &n, |b, &n| {
-            b.iter_batched(
-                || {
-                    let mut dom = Dom::new();
-                    let els = build_flat(&mut dom, n);
-                    // Fragmente l'arène : un sous-arbre sur
-                    // deux détaché → sweep ~n nœuds balayés.
-                    for el in els.iter().step_by(2) {
-                        dom.remove(*el).expect("detach");
-                    }
-                    dom
-                },
-                |mut dom| black_box(dom.collect(&[])),
-                criterion::BatchSize::LargeInput,
-            );
-        });
-    }
+    g.bench_function("flat_10000", |b| {
+        b.iter_batched(
+            || {
+                let mut dom = Dom::new();
+                let els = build_flat(&mut dom, 10_000);
+                // Fragmente l'arène : un sous-arbre sur
+                // deux détaché → sweep ~10 k nœuds balayés.
+                for el in els.iter().step_by(2) {
+                    dom.remove(*el).expect("detach");
+                }
+                dom
+            },
+            |mut dom| black_box(dom.collect(&[])),
+            criterion::BatchSize::LargeInput,
+        );
+    });
 
     // Chaîne profonde : le marquage itératif ne doit pas
     // dériver de la linéarité.
