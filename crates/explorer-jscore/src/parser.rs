@@ -247,6 +247,7 @@ impl Parser {
     }
 
     fn next(&mut self) -> &Token {
+        crate::j17_tick(&crate::J17_PAR_NEXT);
         let t = &self.toks[self.pos];
         if self.pos + 1 < self.toks.len() {
             self.pos += 1;
@@ -397,7 +398,7 @@ impl Parser {
                     }
                 }
                 Tok::Private(n) if depth == 1 => {
-                    out.insert(n.clone());
+                    out.insert(n.to_string());
                 }
                 _ => {}
             }
@@ -712,7 +713,7 @@ impl Parser {
             self.expect_semi()?;
             return Ok(Stmt::Import {
                 binds: Vec::new(),
-                source: src,
+                source: src.to_string(),
             });
         }
         let mut binds = Vec::new();
@@ -920,7 +921,7 @@ impl Parser {
         match self.peek_clone() {
             Tok::Str(s) => {
                 self.next();
-                Ok(s)
+                Ok(s.to_string())
             }
             _ => Err(self.err("expected module specifier string")),
         }
@@ -970,7 +971,7 @@ impl Parser {
             if !ends {
                 break;
             }
-            if s == "use strict" {
+            if &**s == "use strict" {
                 self.strict = true;
             }
             i += 1;
@@ -1957,7 +1958,7 @@ impl Parser {
                 let Tok::Tpl(parts) = self.next_clone() else {
                     return Err(self.err("malformed template literal"));
                 };
-                let (parts, raws, exprs) = self.template_parts(parts, no_in)?;
+                let (parts, raws, exprs) = self.template_parts(&parts, no_in)?;
                 e = Expr::TaggedTemplate {
                     tag: Box::new(e),
                     parts,
@@ -2048,14 +2049,14 @@ impl Parser {
             }
             Tok::Big(s) => {
                 self.next();
-                Ok(Expr::BigInt(s))
+                Ok(Expr::BigInt(s.to_string()))
             }
             Tok::Str(s) => {
                 if self.strict && self.cur().legacy_octal {
                     return Err(self.err("legacy octal escape in strict mode"));
                 }
                 self.next();
-                Ok(Expr::Str(s))
+                Ok(Expr::Str(s.to_string()))
             }
             Tok::Ident(s) => {
                 // `async function [f](){}` — expression form.
@@ -2120,7 +2121,7 @@ impl Parser {
             }
             Tok::Tpl(parts) => {
                 self.next();
-                self.template(parts, no_in)
+                self.template(&parts, no_in)
             }
             Tok::Regex { body, flags } => {
                 self.next();
@@ -2131,8 +2132,8 @@ impl Parser {
                     return Err(self.err(msg));
                 }
                 Ok(Expr::Regex {
-                    pattern: body,
-                    flags,
+                    pattern: body.to_string(),
+                    flags: flags.to_string(),
                 })
             }
             // `import(spec)` / `import.meta` — legal in modules and
@@ -2345,7 +2346,7 @@ impl Parser {
     }
 
     /// `` `t${e}t` `` — `parts.len() == exprs.len() + 1` enforced.
-    fn template(&mut self, parts: Vec<TplPart>, no_in: bool) -> Result<Expr> {
+    fn template(&mut self, parts: &[TplPart], no_in: bool) -> Result<Expr> {
         let (lit_parts, _raws, exprs) = self.template_parts(parts, no_in)?;
         Ok(Expr::Template {
             parts: lit_parts,
@@ -2358,7 +2359,7 @@ impl Parser {
     /// (`Expr::TaggedTemplate`, qui consomme aussi les raws).
     fn template_parts(
         &mut self,
-        parts: Vec<TplPart>,
+        parts: &[TplPart],
         no_in: bool,
     ) -> Result<(Vec<String>, Vec<String>, Vec<Expr>)> {
         let mut lit_parts = Vec::new();
@@ -2367,13 +2368,13 @@ impl Parser {
         for part in parts {
             match part {
                 TplPart::Str(s, raw) => {
-                    lit_parts.push(s);
-                    raws.push(raw);
+                    lit_parts.push(s.clone());
+                    raws.push(raw.clone());
                 }
                 TplPart::Expr(toks) => {
-                    let close_of = close_table(&toks);
+                    let close_of = close_table(toks);
                     let mut sub = Parser {
-                        toks,
+                        toks: toks.clone(),
                         pos: 0,
                         // Accumule l'emboîtement : `${`x${`…`}`}`
                         // récursive via des sous-parseurs (JS-C41).

@@ -223,24 +223,28 @@ pub enum Tok {
     Num(f64),
     /// `BigInt` literal `123n` / `0xFn` / `0o17n` / `0b101n` —
     /// digits normalisés en décimal (le lexer connaît la base).
-    Big(String),
-    /// String literal (escapes already decoded).
-    Str(String),
+    /// `Rc` (V-6b) : clone = refcount++, pas memcpy.
+    Big(std::rc::Rc<str>),
+    /// String literal (escapes already decoded). `Rc` (V-6b) —
+    /// le parseur clone `Tok` ~0.7× par token dans sa cascade.
+    Str(std::rc::Rc<str>),
     /// Private name `#name` (ES2022 class-private member).
-    Private(String),
+    /// `Rc` (V-6b).
+    Private(std::rc::Rc<str>),
     /// Punctuation / operator.
     P(P),
     /// Template literal: literal chunks interleaved with `${…}`
     /// substitutions (each stored as its own token slice, parsed
-    /// lazily by the parser).
-    Tpl(Vec<TplPart>),
+    /// lazily by the parser). `Rc<[TplPart]>` (V-6b).
+    Tpl(std::rc::Rc<[TplPart]>),
     /// `/pat/flags` regex literal — only lexed where an operand is
     /// expected (the lexer tracks operand/operator context).
+    /// `Rc` (V-6b).
     Regex {
         /// Pattern source (unescaped form, between the slashes).
-        body: String,
+        body: std::rc::Rc<str>,
         /// Flag letters after the closing slash.
-        flags: String,
+        flags: std::rc::Rc<str>,
     },
 }
 
@@ -400,7 +404,7 @@ impl Lexer<'_> {
                     self.number()?
                 }
                 Some('#') => self.private_name()?,
-                Some('"' | '\'') => Tok::Str(self.string()?),
+                Some('"' | '\'') => Tok::Str(self.string()?.into()),
                 Some('`') => self.template()?,
                 Some('/') if expect_operand => self.regex_lit()?,
                 Some(_) => Tok::P(self.punct()?),
@@ -490,7 +494,10 @@ impl Lexer<'_> {
         while self.peek().is_some_and(is_ident_part) {
             flags.push(self.bump().unwrap_or_default());
         }
-        Ok(Tok::Regex { body, flags })
+        Ok(Tok::Regex {
+            body: body.into(),
+            flags: flags.into(),
+        })
     }
 
     /// Skip whitespace and comments. Returns whether a newline was crossed.
@@ -702,7 +709,7 @@ impl Lexer<'_> {
         if s.is_empty() {
             return Err(self.err("`#` must be followed by a private name"));
         }
-        Ok(Tok::Private(s))
+        Ok(Tok::Private(s.into()))
     }
 
     /// `true` si `c` est un chiffre décimal ou le séparateur `_`.
@@ -768,7 +775,7 @@ impl Lexer<'_> {
                             return Err(self.err("identifier directly after number"));
                         }
                         return match num_bigint::BigInt::parse_bytes(s.as_bytes(), radix) {
-                            Some(b) => Ok(Tok::Big(b.to_string())),
+                            Some(b) => Ok(Tok::Big(b.to_string().into())),
                             None => Err(self.err("malformed bigint literal")),
                         };
                     }
@@ -863,7 +870,7 @@ impl Lexer<'_> {
                 return Err(self.err("identifier directly after number"));
             }
             return match num_bigint::BigInt::parse_bytes(lit.as_bytes(), 10) {
-                Some(b) => Ok(Tok::Big(b.to_string())),
+                Some(b) => Ok(Tok::Big(b.to_string().into())),
                 None => Err(self.err("malformed bigint literal")),
             };
         }
@@ -978,7 +985,7 @@ impl Lexer<'_> {
                 Some('`') => {
                     let raw: String = self.chars[seg_start..self.pos - 1].iter().collect();
                     parts.push(TplPart::Str(cur, raw));
-                    return Ok(Tok::Tpl(parts));
+                    return Ok(Tok::Tpl(parts.into()));
                 }
                 Some('$') if self.peek() == Some('{') => {
                     self.bump();

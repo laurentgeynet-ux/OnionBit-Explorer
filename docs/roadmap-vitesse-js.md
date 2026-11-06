@@ -274,6 +274,19 @@ arbitré ici :
   `Private`/`Big`/`Regex` paient malloc+memcpy) via
   `peek_clone`/`next_clone` dans la cascade de précédence
   → fix candidat payloads `Rc` (clone = refcount++).
+  **V-6b livré (JS-C378)** : `Tok` payloads → `Rc` partout
+  (`Str`/`Private`/`Big`/`Regex`/`Tpl`→`Rc<[TplPart]>`),
+  consommateurs AST paient 1 copie. **Mesure honnête :
+  plat** — `stmt_ns` 166→167 ms, eval ~257 ms : la majorité
+  des 390k clones tombaient sur `Tok::Ident` (déjà `Rc`,
+  C311). Correct per se (les ~50-80k deep clones restants
+  → refcount), sans gain sur ce profil. **Décomposition
+  complétée** : `par_next=553 429` = 1.004× `lex_tok` →
+  streamer une-passe propre, backtracking inexistant (les
+  gardes `close_of` O(1) filtrent déjà la speculation).
+  Verdict : `stmt` = dispatch récursif (~5M calls) + alloc
+  AST — **territoire structurel** (arène AST/bytecode =
+  V-5), plus de micro-fix à ce niveau.
 - **V-5. Bytecode/VM** — l'horizon : stack machine, IC par
   site persistants, registre allocation. Marathon, hors de
   ce chantier.

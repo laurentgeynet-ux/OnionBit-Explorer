@@ -317,6 +317,10 @@ pub static J17_AST_STMT: std::sync::atomic::AtomicU64 = std::sync::atomic::Atomi
 /// variants `String`/`Vec` paient malloc+memcpy par clone —
 /// la cascade de précédence clone ~N× par token littéral.
 pub static J17_TOK_CLONE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// V-6 — `next()` appelé : ~`lex_tok` = streaming une-passe
+/// confirmé ; >> `lex_tok` = re-consommation cachée
+/// (backtracking non couvert par les gardes `close_of`).
+pub static J17_PAR_NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 /// Gate J17 : les compteurs ci-dessus ne s'incrémentent que si
 /// `EXPLORER_J17_PROF` est posé (non vide/non "0") au premier
@@ -347,7 +351,7 @@ pub fn j17_enable() {
 #[must_use]
 pub fn j17_snapshot() -> String {
     let r = std::sync::atomic::Ordering::Relaxed;
-    let pairs: [(&str, &std::sync::atomic::AtomicU64); 20] = [
+    let pairs: [(&str, &std::sync::atomic::AtomicU64); 21] = [
         ("prop_lookup", &J17_PROP_LOOKUP),
         ("proto_lvl", &J17_PROTO_LVL),
         ("prop_scan", &J17_PROP_SCAN),
@@ -368,6 +372,7 @@ pub fn j17_snapshot() -> String {
         ("lex_tok", &J17_LEX_TOK),
         ("ast_stmt", &J17_AST_STMT),
         ("tok_clone", &J17_TOK_CLONE),
+        ("par_next", &J17_PAR_NEXT),
     ];
     let mut out = String::new();
     for (k, c) in pairs {
