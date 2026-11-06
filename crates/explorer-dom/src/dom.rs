@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use crate::atom::Atom;
 use crate::error::{DomError, Result};
 use crate::id::{NodeId, RootId};
-use crate::node::{Attribute, DoctypeData, ElementData, Namespace, Node, NodeData};
+use crate::node::{Attribute, DoctypeData, ElementData, Namespace, Node, NodeData, TextRange};
 
 /// Sentinelle de free-list (« pas de case libre »).
 const NIL: u32 = u32::MAX;
@@ -175,6 +175,14 @@ pub struct Dom {
     /// `StaleHandle`, il a existé) d'un indice forgé
     /// (`≥ peak_len` → `OutOfBounds`, jamais alloué).
     peak_len: usize,
+    /// Buffer texte mutualisé (AR-14) : tout le texte du
+    /// document (nœuds `Text` **et** `Comment`) vit ici — une
+    /// seule allocation au lieu d'une `String` par nœud.
+    /// Append-only entre passes : `set_text`/fusion `normalize`
+    /// ajoutent une plage, l'ancienne reste morte — [`Dom::collect`]
+    /// **compacte** (réécrit les plages vivantes contiguës, rend
+    /// les octets morts). Résolution via [`Dom::text_at`].
+    text_buffer: String,
 }
 
 impl Dom {
@@ -212,6 +220,7 @@ impl Dom {
             mark_stack: Vec::new(),
             tail_generation: 0,
             peak_len: 0,
+            text_buffer: String::new(),
         };
         // Index 0 sur arène vide : ne peut pas échouer.
         let _ = dom.alloc(NodeData::Document);
@@ -288,13 +297,13 @@ impl Dom {
                 })
                 .sum::<usize>()
             + self.mark_bits.capacity() * size_of::<u64>()
-            + self.mark_stack.capacity() * size_of::<NodeId>();
+            + self.mark_stack.capacity() * size_of::<NodeId>()
+            + self.text_buffer.capacity();
         for slot in &self.slots {
             let Slot::Occupied { node, .. } = slot else {
                 continue;
             };
             bytes += match &node.data {
-                NodeData::Document => 0,
                 NodeData::Doctype(d) => {
                     size_of::<DoctypeData>()
                         + d.name.capacity()
@@ -312,7 +321,9 @@ impl Dom {
                             .map(|a| a.value.capacity())
                             .sum::<usize>()
                 }
-                NodeData::Text(t) | NodeData::Comment(t) => t.capacity(),
+                // Plages dans le buffer partagé — compté une
+                // fois via `text_buffer` (AR-14).
+                NodeData::Document | NodeData::Text(_) | NodeData::Comment(_) => 0,
             };
         }
         bytes
@@ -368,7 +379,8 @@ impl Dom {
     /// # Errors
     /// [`DomError::BudgetExceeded`] si le budget de nœuds est atteint.
     pub fn create_text(&mut self, data: &str) -> Result<NodeId> {
-        self.alloc(NodeData::Text(data.to_owned()))
+        let range = self.push_text(data)?;
+        self.alloc(NodeData::Text(range))
     }
 
     /// Crée un commentaire détaché.
@@ -376,7 +388,8 @@ impl Dom {
     /// # Errors
     /// [`DomError::BudgetExceeded`] si le budget de nœuds est atteint.
     pub fn create_comment(&mut self, data: &str) -> Result<NodeId> {
-        self.alloc(NodeData::Comment(data.to_owned()))
+        let range = self.push_text(data)?;
+        self.alloc(NodeData::Comment(range))
     }
 
     /// Crée un `<!DOCTYPE>` détaché.
@@ -456,12 +469,24 @@ impl Dom {
     /// comme [`Dom::data`].
     pub fn text(&self, id: NodeId) -> Result<&str> {
         match self.data(id)? {
-            NodeData::Text(t) | NodeData::Comment(t) => Ok(t),
+            NodeData::Text(t) | NodeData::Comment(t) => Ok(self.text_at(*t)),
             _ => Err(DomError::WrongKind {
                 id,
                 expected: "Text | Comment",
             }),
         }
+    }
+
+    /// Résout une [`TextRange`] en `&str` depuis le buffer
+    /// texte mutualisé (AR-14). Plage forgée hors bornes → `""`
+    /// (dégradation gracieuse — le buffer ne peut pas être
+    /// corrompu, seule une plage issue d'un `element_mut` ou
+    /// d'une recopie manuelle peut être invalide).
+    #[must_use]
+    pub fn text_at(&self, range: TextRange) -> &str {
+        self.text_buffer
+            .get(range.start as usize..range.start as usize + range.len as usize)
+            .unwrap_or("")
     }
 
     /// Remplace le texte d'un nœud `Text`/`Comment` (contenu tel
@@ -470,15 +495,18 @@ impl Dom {
     /// # Errors
     /// Comme [`Dom::text`].
     pub fn set_text(&mut self, id: NodeId, data: &str) -> Result<()> {
-        let node = self.node_mut(id)?;
-        match &mut node.data {
-            NodeData::Text(t) | NodeData::Comment(t) => data.clone_into(t),
-            _ => {
-                return Err(DomError::WrongKind {
-                    id,
-                    expected: "Text | Comment",
-                });
-            }
+        if !matches!(self.data(id)?, NodeData::Text(_) | NodeData::Comment(_)) {
+            return Err(DomError::WrongKind {
+                id,
+                expected: "Text | Comment",
+            });
+        }
+        // Append-only : la nouvelle plage est poussée au buffer,
+        // l'ancienne reste morte jusqu'à la compaction `collect`.
+        let range = self.push_text(data)?;
+        match &mut self.node_mut(id)?.data {
+            NodeData::Text(t) | NodeData::Comment(t) => *t = range,
+            _ => {}
         }
         Ok(())
     }
@@ -491,7 +519,7 @@ impl Dom {
     pub fn text_content(&self, id: NodeId) -> Result<String> {
         let mut out = String::new();
         match self.data(id)? {
-            NodeData::Text(t) | NodeData::Comment(t) => out.push_str(t),
+            NodeData::Text(t) | NodeData::Comment(t) => out.push_str(self.text_at(*t)),
             NodeData::Document | NodeData::Element(_) | NodeData::Doctype(_) => {
                 self.collect_text(id, &mut out)?;
             }
@@ -503,7 +531,7 @@ impl Dom {
         let mut cursor = self.first_child(id)?;
         while let Some(child) = cursor {
             match self.data(child)? {
-                NodeData::Text(t) => out.push_str(t),
+                NodeData::Text(t) => out.push_str(self.text_at(*t)),
                 // Descente bornée-pile : un DOM hostile peut
                 // nicher des milliers d'éléments (R-24).
                 NodeData::Element(_) => explorer_common::deep(|| self.collect_text(child, out))?,
@@ -1153,14 +1181,17 @@ impl Dom {
                             // Vivant via un handle JS : jamais fusionné
                             // ni supprimé — il peut devenir tête de série.
                             prev_text = Some(child);
-                        } else if t.is_empty() {
+                        } else if t.len == 0 {
                             self.unlink(child)?;
                             self.free(child)?;
                         } else if let Some(prev) = prev_text {
-                            let merged = t.clone();
-                            if let NodeData::Text(pt) = &mut self.node_mut(prev)?.data {
-                                pt.push_str(&merged);
-                            }
+                            // Plage append-only : la fusion
+                            // produit une nouvelle plage chez
+                            // `prev` ; les deux anciennes restent
+                            // mortes jusqu'à `collect`.
+                            let mut merged = self.text(prev)?.to_owned();
+                            merged.push_str(self.text_at(*t));
+                            self.set_text(prev, &merged)?;
                             self.unlink(child)?;
                             self.free(child)?;
                         } else {
@@ -1420,6 +1451,36 @@ impl Dom {
         // mémoire et le coût du filtre).
         self.id_index
             .retain(|_, set| !set.retain_dead(|n| alive(slots, n)));
+        // Compaction du buffer texte (AR-14) : les plages
+        // vivantes sont réécrites contiguës — les octets morts
+        // (nœuds balayés, plages remplacées par `set_text` ou
+        // fusions `normalize`) sont rendus. Après le truncate :
+        // seuls les marqués restent `Occupied` sous `new_len`.
+        // `String::new()` (pas `with_capacity`) : la croissance
+        // amortie tasse la capacité au volume vivant — la RAM
+        // morte est réellement rendue (`heap_bytes` la mesure).
+        let mut compacted = String::new();
+        for slot in self.slots.iter_mut().take(new_len) {
+            let range = match slot {
+                Slot::Occupied { node, .. } => match &mut node.data {
+                    NodeData::Text(r) | NodeData::Comment(r) => r,
+                    _ => continue,
+                },
+                Slot::Vacant { .. } => continue,
+            };
+            let start = compacted.len();
+            let end = range.start as usize + range.len as usize;
+            if let Some(s) = self.text_buffer.get(range.start as usize..end) {
+                compacted.push_str(s);
+                *range = TextRange {
+                    start: u32::try_from(start).unwrap_or(u32::MAX),
+                    len: range.len,
+                };
+            } else {
+                *range = TextRange::default();
+            }
+        }
+        self.text_buffer = compacted;
         freed
     }
 
@@ -1450,6 +1511,30 @@ impl Dom {
     }
 
     /// Accès validé : index borné + génération concordante.
+    /// Ajoute `s` au buffer texte mutualisé (AR-14) et renvoie
+    /// sa plage. Append-only : les plages remplacées restent
+    /// mortes jusqu'à la compaction [`Dom::collect`].
+    ///
+    /// # Errors
+    /// [`DomError::BudgetExceeded`] si le buffer dépasserait
+    /// `u32::MAX` octets (borne de la plage — document hostile).
+    fn push_text(&mut self, s: &str) -> Result<TextRange> {
+        let start = self.text_buffer.len();
+        if start
+            .checked_add(s.len())
+            .is_none_or(|end| end > u32::MAX as usize)
+        {
+            return Err(DomError::BudgetExceeded {
+                limit: u32::MAX as usize,
+            });
+        }
+        self.text_buffer.push_str(s);
+        Ok(TextRange {
+            start: u32::try_from(start).unwrap_or(0),
+            len: u32::try_from(s.len()).unwrap_or(u32::MAX),
+        })
+    }
+
     /// Un indice sous `peak_len` mais hors `slots` (tronqué par
     /// `collect`, AR-12) rend `StaleHandle` — il a existé ;
     /// au-delà, `OutOfBounds` — forgé.

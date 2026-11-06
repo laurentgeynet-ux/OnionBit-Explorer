@@ -702,6 +702,49 @@ fn collect_tronque_rend_la_ram() {
 }
 
 #[test]
+fn collect_compacte_le_buffer_texte() {
+    let mut dom = Dom::new();
+    let doc = dom.document();
+    // Plages mortes par `set_text` (append-only) sur le gardien.
+    let keep = dom.create_text("v0").expect("t");
+    dom.append_child(doc, keep).expect("a");
+    for i in 1..50 {
+        dom.set_text(keep, &format!("valeur-de-remplacement-{i}"))
+            .expect("s");
+    }
+    // Plages mortes par balayage (churn en fin de buffer) —
+    // textes longs pour que le buffer domine le signal
+    // `heap_bytes` (les petites arènes sont sous le plancher
+    // de shrink des slots).
+    let corps = "x".repeat(64);
+    let mut churn = Vec::new();
+    for i in 0..600 {
+        let t = dom.create_text(&format!("churn-{i}-{corps}")).expect("c");
+        dom.append_child(doc, t).expect("a");
+        churn.push(t);
+    }
+    for &t in &churn {
+        dom.remove(t).expect("rm");
+    }
+    let avant = dom.heap_bytes();
+    dom.collect(&[]);
+    assert!(
+        dom.heap_bytes() < avant / 4,
+        "la compaction doit rendre les octets morts du buffer"
+    );
+    // Le texte survivant reste correct après réécriture de plage.
+    assert_eq!(dom.text(keep), Ok("valeur-de-remplacement-49"));
+    // Plage forgée hors bornes → "" (dégradation, jamais panic).
+    assert_eq!(
+        dom.text_at(explorer_dom::TextRange {
+            start: u32::MAX - 3,
+            len: 8,
+        }),
+        ""
+    );
+}
+
+#[test]
 fn collect_tronque_puis_realloc_garde_stale() {
     let mut dom = Dom::new();
     let doc = dom.document();

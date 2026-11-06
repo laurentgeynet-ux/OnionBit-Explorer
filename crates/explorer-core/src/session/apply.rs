@@ -1133,7 +1133,7 @@ fn align_keyed(
                 break;
             };
             if let Ok(explorer_dom::NodeData::Text(t)) = dom.data(*e) {
-                if fnv64(t.as_str()) == h {
+                if fnv64(dom.text_at(*t)) == h {
                     keymap.insert(m, *e);
                     j += 1;
                 }
@@ -1225,10 +1225,10 @@ fn graft_subtree(
             .create_element(src.tag_name(src_id).map_err(|_| JournalReject::Dom)?)
             .map_err(|_| JournalReject::Dom)?,
         NodeData::Text(t) => dom
-            .create_text(t.as_str())
+            .create_text(src.text_at(*t))
             .map_err(|_| JournalReject::Dom)?,
         NodeData::Comment(c) => dom
-            .create_comment(c.as_str())
+            .create_comment(src.text_at(*c))
             .map_err(|_| JournalReject::Dom)?,
         _ => return Err(JournalReject::Dom),
     };

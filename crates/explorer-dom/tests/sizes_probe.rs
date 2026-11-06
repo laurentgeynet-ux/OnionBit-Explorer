@@ -18,4 +18,7 @@ fn tailles_apres_interning() {
     // `NodeData` : `Element` est désormais le variant maximal —
     // `DoctypeData` (72 o) est boxé, un seul par document.
     assert_eq!(size_of::<explorer_dom::NodeData>(), 56);
+    // `TextRange` (AR-14) : plage (u32, u32) — 24 → 8 o par
+    // nœud texte, contenu dans le buffer partagé.
+    assert_eq!(size_of::<explorer_dom::TextRange>(), 8);
 }

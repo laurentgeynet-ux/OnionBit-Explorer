@@ -210,7 +210,7 @@ fn serialize_into(dom: &Dom, node: NodeId, out: &mut String) {
                 let _ = write!(out, "</{}>", e.tag_name);
             }
         }
-        Ok(NodeData::Text(t)) => escape_xml(t, out, false),
+        Ok(NodeData::Text(t)) => escape_xml(dom.text_at(*t), out, false),
         _ => {}
     }
 }

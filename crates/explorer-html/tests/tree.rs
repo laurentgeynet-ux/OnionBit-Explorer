@@ -42,10 +42,10 @@ fn dump_children(dom: &Dom, parent: NodeId, depth: usize, out: &mut String) {
                 }
             }
             NodeData::Text(t) => {
-                let _ = write!(out, "\"{t}\"");
+                let _ = write!(out, "\"{}\"", dom.text_at(*t));
             }
             NodeData::Comment(c) => {
-                let _ = write!(out, "<!-- {c} -->");
+                let _ = write!(out, "<!-- {} -->", dom.text_at(*c));
             }
         }
         out.push('\n');

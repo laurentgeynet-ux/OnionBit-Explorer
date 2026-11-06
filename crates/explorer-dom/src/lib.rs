@@ -34,4 +34,4 @@ pub use atom::Atom;
 pub use dom::{ChildrenIter, Descendants, DocumentMode, Dom, DEFAULT_MAX_NODES, DEFAULT_MAX_ROOTS};
 pub use error::{DomError, Result};
 pub use id::{NodeId, RootId};
-pub use node::{Attribute, DoctypeData, ElementData, Namespace, NodeData};
+pub use node::{Attribute, DoctypeData, ElementData, Namespace, NodeData, TextRange};

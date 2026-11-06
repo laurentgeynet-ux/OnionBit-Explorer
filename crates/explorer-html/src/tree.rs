@@ -1229,13 +1229,15 @@ impl TreeBuilder {
                 el
             }
             Ok(explorer_dom::NodeData::Text(t)) => {
-                let Ok(t) = self.dom.create_text(&t) else {
+                let s = self.dom.text_at(t).to_owned();
+                let Ok(t) = self.dom.create_text(&s) else {
                     return;
                 };
                 t
             }
             Ok(explorer_dom::NodeData::Comment(c)) => {
-                let Ok(c) = self.dom.create_comment(&c) else {
+                let s = self.dom.text_at(c).to_owned();
+                let Ok(c) = self.dom.create_comment(&s) else {
                     return;
                 };
                 c

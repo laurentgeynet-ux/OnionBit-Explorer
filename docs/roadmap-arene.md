@@ -190,11 +190,26 @@ arbres vivants (AR-1 sans seeds) ou des nœuds encore référencés
   −1 alloc/nom d'attribut, noms dedup'd ; `collect` 3,2 ms
   (baseline 4,5), profond 0,19 ms. Casse loguée au journal
   **avant** code (§10.2).
-- [ ] **AR-14. Texte mutualisé** — PIPE, **casse de variante
-  pub** → journal + arbitrage. `NodeData::Text(String)` /
-  `Comment(String)` → ranges `(off, len)` dans un buffer
-  document unique — des milliers de petites allocs → une.
-  Même procédure qu'AR-13.
+- [x] **AR-14. Texte mutualisé** — PIPE, **casse de variante
+  pub** journalée avant code (même procédure qu'AR-13).
+  `NodeData::Text`/`Comment` : `String` (24 o + alloc) →
+  `TextRange{start:u32,len:u32}` (8 o) dans `Dom::text_buffer`
+  — **une seule allocation pour tout le texte du document**.
+  Sémantique : buffer append-only entre passes (`set_text`/
+  fusion `normalize` poussent une plage, l'ancienne meurt)
+  puis **compacté par `collect`** — plages vivantes réécrites
+  contiguës, octets morts rendus (`heap_bytes` le mesure ;
+  `String::new()` pour que la capacité se tasse au vivant).
+  `dom.text`/`set_text`/`create_text`/`text_content` inchangés
+  en signature (`&str`) ; nouveau `dom.text_at(TextRange)`
+  pour les payloads destructurés (~10 sites migrés :
+  apply, tree, dom_helpers, debug, svg, tests). `PartialEq`
+  `NodeData` compare désormais les plages. Cap buffer
+  `u32::MAX` → `BudgetExceeded` typé. Mesuré : −1 alloc/nœud
+  texte, ~40 o/nœud net, `collect` fragmenté **2,7 ms**
+  (vs 4,5 baseline), profond 0,20 ms ; verrou
+  `collect_compacte_le_buffer_texte` (heap ÷4 + survie du
+  texte + plage forgée → `""`).
 
 ## Palier AR-P3 — Redesign sémantique (dernier, sur preuve)
 

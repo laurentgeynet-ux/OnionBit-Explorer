@@ -485,7 +485,9 @@ pub(crate) fn noscript_meta_refresh(dom: &Dom) -> Option<(f64, Option<String>)> 
                 _ => return None, // contenu réel — spec.
             },
             // Texte non blanc hors repli → contenu réel.
-            explorer_dom::NodeData::Text(t) if !t.trim().is_empty() => return None,
+            explorer_dom::NodeData::Text(t) if !dom.text_at(*t).trim().is_empty() => {
+                return None;
+            }
             _ => {}
         }
     }

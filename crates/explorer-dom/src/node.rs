@@ -20,9 +20,23 @@ pub enum NodeData {
     /// Élément : nom de balise + attributs ordonnés.
     Element(ElementData),
     /// Texte (newlines normalisés `\r\n`/`\r` → `\n` à l'insertion).
-    Text(String),
-    /// Commentaire `<!-- … -->`.
-    Comment(String),
+    /// Plage dans le buffer partagé `Dom::text_buffer` (AR-14).
+    Text(TextRange),
+    /// Commentaire `<!-- … -->` — même buffer que `Text`.
+    Comment(TextRange),
+}
+
+/// Plage `(début, longueur)` en octets dans
+/// [`crate::Dom::text_buffer`] — le buffer texte mutualisé de
+/// l'arène (AR-14 : des milliers de petites `String` → une
+/// allocation, compactée par `collect`). `Copy` — résolution
+/// via [`crate::Dom::text_at`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct TextRange {
+    /// Premier octet dans le buffer.
+    pub start: u32,
+    /// Longueur en octets.
+    pub len: u32,
 }
 
 /// Données d'un `<!DOCTYPE html …>`.

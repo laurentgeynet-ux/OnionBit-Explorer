@@ -2916,6 +2916,32 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   profond **0,19 ms** (−55 %). Verrou de tailles
   `sizes_probe`, suites vertes, clippy `-D warnings`.
   `heap_bytes` hors table d'atomes (process-globale).
+- [x] **R-150. Texte mutualisé `NodeData::Text`/`Comment` →
+  `TextRange`** (AR-14, chantier ARÈNE — **casse de variante
+  pub, journalée avant code**) : `String` (24 o + alloc par
+  nœud) → `TextRange{start:u32,len:u32}` (8 o, `Copy`)
+  pointant dans `Dom::text_buffer` — **une seule allocation
+  pour tout le texte du document** (~40 o/nœud texte net,
+  −1 alloc/nœud). Le buffer est append-only entre passes —
+  `set_text`/fusion `normalize` poussent une plage et
+  l'ancienne meurt — puis **compacté par `collect`** : les
+  plages vivantes sont réécrites contiguës dans un buffer
+  neuf (`String::new()` pour que la capacité se tasse au
+  vivant — les octets morts sont réellement rendus,
+  `heap_bytes` le mesure). `dom.text`/`set_text`/
+  `create_text`/`create_comment`/`text_content` inchangés en
+  signature (`&str`) ; nouveau `dom.text_at(TextRange) ->
+  &str` pour les payloads destructurés — ~10 sites migrés
+  (apply, tree, dom_helpers, debug, svg, tests).
+  `PartialEq` sur `NodeData` compare désormais les plages
+  (deux textes égaux à plages différentes ≠). Cap
+  `u32::MAX` → `BudgetExceeded` typé ; plage forgée → `""`
+  (jamais panic). Banc : `collect` fragmenté **2,7 ms**
+  (baseline 4,5 → −40 % cumulé AR-12+13+14), profond
+  0,20 ms. Verrous : `collect_compacte_le_buffer_texte`
+  (heap ÷4, survie du texte post-réécriture, plage forgée),
+  `TextRange` 8 o dans `sizes_probe`, 28/28 dom + 454/454
+  session verts, clippy `-D warnings`.
 
 ## Palier R-B — Contenu étranger, animation, canvas
 
