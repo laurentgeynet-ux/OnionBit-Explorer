@@ -298,6 +298,25 @@ pub static J17_PARSE_CALL: std::sync::atomic::AtomicU64 = std::sync::atomic::Ato
 /// `j17_on()` : coût nul désarmé. Collision hash = faux
 /// positif toléré (diagnostic borné, pas décision d'exécution).
 pub static J17_PARSE_DUP: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// V-6 — temps `lex()` cumulé en ns (inclut la matérialisation
+/// `chars().collect()` — suspect n°1 : 4 o/char × source).
+/// Désarmé : un `load`+branche par parse, ~1 ns.
+pub static J17_LEX_NS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// V-6 — temps `close_table` cumulé en ns (O(n) pile — vérifié
+/// par inspection, mesuré pour conclure).
+pub static J17_CLOSE_NS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// V-6 — temps de la boucle `stmt` (descente récursive +
+/// `scan_directives`) cumulé en ns — le cœur du parse.
+pub static J17_STMT_NS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// V-6 — tokens produits par `lex` (cumul `toks.len()`) —
+/// calibre le volume vs octets source.
+pub static J17_LEX_TOK: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// V-6 — statements top-level parsés (cumul `body.len()`).
+pub static J17_AST_STMT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// V-6 — `Tok` deep-clonés (`peek_clone`/`next_clone`) : les
+/// variants `String`/`Vec` paient malloc+memcpy par clone —
+/// la cascade de précédence clone ~N× par token littéral.
+pub static J17_TOK_CLONE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 /// Gate J17 : les compteurs ci-dessus ne s'incrémentent que si
 /// `EXPLORER_J17_PROF` est posé (non vide/non "0") au premier
@@ -328,7 +347,7 @@ pub fn j17_enable() {
 #[must_use]
 pub fn j17_snapshot() -> String {
     let r = std::sync::atomic::Ordering::Relaxed;
-    let pairs: [(&str, &std::sync::atomic::AtomicU64); 14] = [
+    let pairs: [(&str, &std::sync::atomic::AtomicU64); 20] = [
         ("prop_lookup", &J17_PROP_LOOKUP),
         ("proto_lvl", &J17_PROTO_LVL),
         ("prop_scan", &J17_PROP_SCAN),
@@ -343,6 +362,12 @@ pub fn j17_snapshot() -> String {
         ("probe_hit", &J17_PROBE_HIT),
         ("parse_call", &J17_PARSE_CALL),
         ("parse_dup", &J17_PARSE_DUP),
+        ("lex_ns", &J17_LEX_NS),
+        ("close_ns", &J17_CLOSE_NS),
+        ("stmt_ns", &J17_STMT_NS),
+        ("lex_tok", &J17_LEX_TOK),
+        ("ast_stmt", &J17_AST_STMT),
+        ("tok_clone", &J17_TOK_CLONE),
     ];
     let mut out = String::new();
     for (k, c) in pairs {
@@ -391,6 +416,32 @@ pub(crate) fn j17_parse_probe(src: &str, module: bool) {
     let dup = J17_PARSE_SEEN.with(|s| !s.borrow_mut().insert(h));
     if dup {
         J17_PARSE_DUP.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
+/// Addition bornée sur un compteur J17 — no-op hors mode profil.
+#[inline]
+pub(crate) fn j17_add(c: &'static std::sync::atomic::AtomicU64, n: u64) {
+    if j17_on() {
+        c.fetch_add(n, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
+/// V-6 — exécute `f` en cumulant son temps (ns) dans `c`,
+/// armé seulement ; désarmé = `load`+branche puis appel direct
+/// (~1-2 ns, aucun `Instant` pris). Les phases du parse
+/// appellent ceci au lieu de chronométrer à la main.
+pub(crate) fn j17_time<T>(c: &'static std::sync::atomic::AtomicU64, f: impl FnOnce() -> T) -> T {
+    if j17_on() {
+        let t = std::time::Instant::now();
+        let r = f();
+        c.fetch_add(
+            u64::try_from(t.elapsed().as_nanos()).unwrap_or(u64::MAX),
+            std::sync::atomic::Ordering::Relaxed,
+        );
+        r
+    } else {
+        f()
     }
 }
 

@@ -51,8 +51,12 @@ pub(crate) fn parse_in(
     src_name: Option<Rc<str>>,
 ) -> Result<Program> {
     crate::j17_parse_probe(src, false);
-    let toks = lex(src)?;
-    let close_of = close_table(&toks);
+    let toks = crate::j17_time(&crate::J17_LEX_NS, || lex(src))?;
+    crate::j17_add(
+        &crate::J17_LEX_TOK,
+        u64::try_from(toks.len()).unwrap_or(u64::MAX),
+    );
+    let close_of = crate::j17_time(&crate::J17_CLOSE_NS, || close_table(&toks));
     let mut p = Parser {
         toks,
         pos: 0,
@@ -62,17 +66,24 @@ pub(crate) fn parse_in(
         module: false,
         in_gen: false,
         labels: Vec::new(),
-        priv_seq: 0,
         priv_scopes: Vec::new(),
+        priv_seq: 0,
         src_name,
         src_text: Some(Rc::from(src)),
         close_of,
     };
-    p.scan_directives();
-    let mut body = Vec::new();
-    while !p.at_eof() {
-        body.push(p.stmt()?);
-    }
+    let body = crate::j17_time(&crate::J17_STMT_NS, || -> Result<Vec<Stmt>> {
+        p.scan_directives();
+        let mut body = Vec::new();
+        while !p.at_eof() {
+            body.push(p.stmt()?);
+        }
+        Ok(body)
+    })?;
+    crate::j17_add(
+        &crate::J17_AST_STMT,
+        u64::try_from(body.len()).unwrap_or(u64::MAX),
+    );
     Ok(Program {
         body,
         strict: p.strict,
@@ -95,8 +106,12 @@ pub(crate) fn parse_module_in(
     src_name: Option<Rc<str>>,
 ) -> Result<Program> {
     crate::j17_parse_probe(src, true);
-    let toks = lex(src)?;
-    let close_of = close_table(&toks);
+    let toks = crate::j17_time(&crate::J17_LEX_NS, || lex(src))?;
+    crate::j17_add(
+        &crate::J17_LEX_TOK,
+        u64::try_from(toks.len()).unwrap_or(u64::MAX),
+    );
+    let close_of = crate::j17_time(&crate::J17_CLOSE_NS, || close_table(&toks));
     let mut p = Parser {
         toks,
         pos: 0,
@@ -112,11 +127,18 @@ pub(crate) fn parse_module_in(
         src_text: Some(Rc::from(src)),
         close_of,
     };
-    p.scan_directives();
-    let mut body = Vec::new();
-    while !p.at_eof() {
-        body.push(p.stmt()?);
-    }
+    let body = crate::j17_time(&crate::J17_STMT_NS, || -> Result<Vec<Stmt>> {
+        p.scan_directives();
+        let mut body = Vec::new();
+        while !p.at_eof() {
+            body.push(p.stmt()?);
+        }
+        Ok(body)
+    })?;
+    crate::j17_add(
+        &crate::J17_AST_STMT,
+        u64::try_from(body.len()).unwrap_or(u64::MAX),
+    );
     Ok(Program {
         body,
         strict: p.strict,
@@ -232,6 +254,20 @@ impl Parser {
         t
     }
 
+    /// `peek().clone()` compté (V-6) — les variants `String`/
+    /// `Vec` de `Tok` paient malloc+memcpy par clone ; la
+    /// cascade de précédence multiplie ce coût par token.
+    fn peek_clone(&self) -> Tok {
+        crate::j17_tick(&crate::J17_TOK_CLONE);
+        self.peek().clone()
+    }
+
+    /// `next().tok.clone()` compté (V-6) — même classe.
+    fn next_clone(&mut self) -> Tok {
+        crate::j17_tick(&crate::J17_TOK_CLONE);
+        self.next().tok.clone()
+    }
+
     fn at_eof(&self) -> bool {
         matches!(self.peek(), Tok::Eof)
     }
@@ -304,7 +340,7 @@ impl Parser {
     /// Property name after `.` — keywords are legal member names in
     /// real engines (`el.class`, `o.function`, `a.return`…).
     fn expect_prop_name(&mut self) -> Result<Rc<str>> {
-        match self.peek().clone() {
+        match self.peek_clone() {
             Tok::Ident(s) => {
                 self.next();
                 Ok(s)
@@ -393,7 +429,7 @@ impl Parser {
         if self.cur().newline_before {
             return Ok(None);
         }
-        match self.peek().clone() {
+        match self.peek_clone() {
             Tok::Ident(n) => {
                 self.next();
                 Ok(Some(n))
@@ -406,7 +442,7 @@ impl Parser {
     /// détermine en regardant au-delà des labels chaînés
     /// (`a: b: for` — `continue a` vise bien la boucle, spec).
     fn labeled_stmt(&mut self) -> Result<Stmt> {
-        let Tok::Ident(name) = self.peek().clone() else {
+        let Tok::Ident(name) = self.peek_clone() else {
             return Err(self.err("expected label name"));
         };
         let mut i = self.pos + 2;
@@ -443,7 +479,7 @@ impl Parser {
     }
 
     fn stmt_inner(&mut self) -> Result<Stmt> {
-        match self.peek().clone() {
+        match self.peek_clone() {
             Tok::P(P::Semi) => {
                 self.next();
                 Ok(Stmt::Empty)
@@ -671,7 +707,7 @@ impl Parser {
     fn import_stmt(&mut self) -> Result<Stmt> {
         self.next(); // `import`
                      // `import 'mod';` — side-effect only, no bindings.
-        if let Tok::Str(src) = self.peek().clone() {
+        if let Tok::Str(src) = self.peek_clone() {
             self.next();
             self.expect_semi()?;
             return Ok(Stmt::Import {
@@ -680,7 +716,7 @@ impl Parser {
             });
         }
         let mut binds = Vec::new();
-        match self.peek().clone() {
+        match self.peek_clone() {
             Tok::P(P::Star) => {
                 self.next();
                 self.expect_ident("as")?;
@@ -692,7 +728,7 @@ impl Parser {
             Tok::Ident(_) | Tok::Kw(_) => {
                 binds.push(ImportBind::Default(self.module_export_name()?));
                 if self.eat_p(P::Comma) {
-                    match self.peek().clone() {
+                    match self.peek_clone() {
                         Tok::P(P::Star) => {
                             self.next();
                             self.expect_ident("as")?;
@@ -736,7 +772,7 @@ impl Parser {
     /// `export …` — cursor on `export`, module goal.
     fn export_stmt(&mut self) -> Result<Stmt> {
         self.next(); // `export`
-        match self.peek().clone() {
+        match self.peek_clone() {
             // `export * [as ns] from 'm'`
             Tok::P(P::Star) => {
                 self.next();
@@ -764,7 +800,7 @@ impl Parser {
             // `export default <expr|function|class>`
             Tok::Kw(Kw::Default) => {
                 self.next();
-                let e = match self.peek().clone() {
+                let e = match self.peek_clone() {
                     Tok::Kw(Kw::Function) => Expr::Function(self.function(false, false)?),
                     // `export default async function`
                     Tok::Ident(s)
@@ -862,7 +898,7 @@ impl Parser {
     /// each side of `as` (`import {a}`, `export {a as b}`, string
     /// export names ES2022).
     fn module_export_name(&mut self) -> Result<Rc<str>> {
-        match self.peek().clone() {
+        match self.peek_clone() {
             Tok::Ident(s) => {
                 self.next();
                 Ok(s)
@@ -881,7 +917,7 @@ impl Parser {
 
     /// Literal string argument (`'mod'` specifier).
     fn expect_str_tok(&mut self) -> Result<String> {
-        match self.peek().clone() {
+        match self.peek_clone() {
             Tok::Str(s) => {
                 self.next();
                 Ok(s)
@@ -1021,7 +1057,7 @@ impl Parser {
     }
 
     fn pattern_nested(&mut self, allow_default: bool) -> Result<Pat> {
-        let mut pat = match self.peek().clone() {
+        let mut pat = match self.peek_clone() {
             Tok::P(P::Ellipsis) => {
                 self.next();
                 Pat::Rest(Box::new(self.pattern()?))
@@ -1116,7 +1152,7 @@ impl Parser {
             self.expect_p(P::RBracket, "`]`")?;
             return Ok(PropKey::Computed(e));
         }
-        let name = match self.peek().clone() {
+        let name = match self.peek_clone() {
             Tok::Ident(s) => {
                 self.next();
                 s
@@ -1493,7 +1529,7 @@ impl Parser {
             }
         }
         // `ident => body`
-        if let Tok::Ident(name) = self.peek().clone() {
+        if let Tok::Ident(name) = self.peek_clone() {
             if self
                 .toks
                 .get(self.pos + 1)
@@ -1571,7 +1607,7 @@ impl Parser {
         let soff = self.off_here();
         self.next(); // `async`
                      // `async x => e`
-        if let Tok::Ident(name) = self.peek().clone() {
+        if let Tok::Ident(name) = self.peek_clone() {
             if self
                 .toks
                 .get(self.pos + 1)
@@ -1918,7 +1954,7 @@ impl Parser {
                 if steps.is_some() {
                     return Err(self.err("template literal in an optional chain"));
                 }
-                let Tok::Tpl(parts) = self.next().tok.clone() else {
+                let Tok::Tpl(parts) = self.next_clone() else {
                     return Err(self.err("malformed template literal"));
                 };
                 let (parts, raws, exprs) = self.template_parts(parts, no_in)?;
@@ -2002,7 +2038,7 @@ impl Parser {
     }
 
     fn primary(&mut self, no_in: bool) -> Result<Expr> {
-        match self.peek().clone() {
+        match self.peek_clone() {
             Tok::Num(n) => {
                 if self.strict && self.cur().legacy_octal {
                     return Err(self.err("legacy octal literal in strict mode"));
@@ -2390,7 +2426,7 @@ impl Parser {
         self.expect_kw(Kw::Function, "`function`")?;
         // `function*` / `async function*`.
         let gen = self.eat_p(P::Star);
-        let name = match self.peek().clone() {
+        let name = match self.peek_clone() {
             Tok::Ident(s) => {
                 self.next();
                 Some(s)
@@ -2491,7 +2527,7 @@ impl Parser {
         // (V8 : `C.toString()` = le texte `class` complet).
         let class_off = self.off_here();
         self.expect_kw(Kw::Class, "`class`")?;
-        let name = match self.peek().clone() {
+        let name = match self.peek_clone() {
             Tok::Ident(s) => {
                 self.next();
                 Some(s)

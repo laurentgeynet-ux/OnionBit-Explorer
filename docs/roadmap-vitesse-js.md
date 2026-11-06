@@ -262,13 +262,18 @@ arbitré ici :
 
 - **V-6. Vitesse de parse** — le mur mesuré par la porte
   V-4 : ~180 ns/octet (~5.6 Mo/s) sur `vol34_bbc_app.js`
-  (258 ms pour 1.44 Mo, exécution quasi nulle). Le lexer
-  (`Tok` par char), `close_table` (O(n²) sur accolades ?),
-  les `Vec` d'AST par statement sont les suspects — à
-  instrumenter avant de toucher (même discipline V-2 :
-  compteurs par phase `lex`/`parse`/`bind`, `note_parse`
-  chronomètre déjà). Candidat sérieux au prochain levier
-  marathon : YouTube livre des Mo.
+  (258 ms pour 1.44 Mo, exécution quasi nulle).
+  **Décomposition instrumentée (JS-C377, J17 armé)** :
+  `stmt` (descente récursive) = **166 ms / 68 %**,
+  `lex` = 75 ms / 29 % (inclut `chars().collect()` ~5.8 Mo
+  — suspect interne), `close_table` = 4.3 ms / 2 % (O(n)
+  confirmé, hors course). Volumes : 551 390 tokens,
+  `ast_stmt=1` (IIFE webpack). **Sous-suspect `stmt`
+  nommé** : `tok_clone=390 477` — ~71 % des tokens
+  deep-clonés (variants `Tok::Str(String)`/`Tpl(Vec)`/
+  `Private`/`Big`/`Regex` paient malloc+memcpy) via
+  `peek_clone`/`next_clone` dans la cascade de précédence
+  → fix candidat payloads `Rc` (clone = refcount++).
 - **V-5. Bytecode/VM** — l'horizon : stack machine, IC par
   site persistants, registre allocation. Marathon, hors de
   ce chantier.
