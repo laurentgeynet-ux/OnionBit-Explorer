@@ -172,6 +172,9 @@ impl Engine {
     }
 
     pub(crate) fn exec_body(&mut self, env: &EnvRef, this: Value, body: &[Stmt]) -> JsResult<Flow> {
+        // V-7 : temps cumulé de dispatch de corps (inclusif —
+        // les appels imbriqués cumulent dedans).
+        let _t = crate::j17_scope(&crate::J17_BODY_NS);
         if std::env::var("DBG_DRIVE").is_ok() {
             eprintln!(
                 "[exec_body] call body={} stmts depth={} cur_mod={}",

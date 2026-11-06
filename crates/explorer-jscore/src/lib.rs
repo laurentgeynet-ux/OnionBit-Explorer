@@ -332,6 +332,31 @@ pub static J17_FN_DEF_TOK: std::sync::atomic::AtomicU64 = std::sync::atomic::Ato
 /// sont jamais appelés → le deferral a évité leur parse.
 pub static J17_FN_MAT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
+/// V-7 — ns cumulés dans le prologue+épilogue de
+/// `call_script_body` (coercition `this`, `Env::local`, liaison
+/// des paramètres, `arguments` paresseux, `hoist`, pops) —
+/// **hors** `exec_body`. Overhead frame pur par appel JS.
+pub static J17_FRAME_NS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// V-7 — ns cumulés dans `env_get_seen` (marche de chaîne de
+/// portées, inclusif : les sous-appels éventuels comptent dedans).
+pub static J17_ENV_NS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// V-7 — ns cumulés dans `get_prop_value` (résolution de
+/// propriété, inclusif — un getter JS re-entrant cumule son
+/// propre temps dans le span englobant).
+pub static J17_PROP_NS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// V-7 — ns cumulés dans `resolve_lit_body` — matérialisation
+/// des corps différés V-5a (sous-parse + construction AST) au
+/// premier appel.
+pub static J17_MAT_NS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// V-7 — ns cumulés dans `collect` (marquage+balayage).
+pub static J17_GC_NS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// V-7 — frames `Env::local` créées (une par appel JS
+/// ordinaire — le volume d'allocation de scope).
+pub static J17_ENV_NEW: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// V-7 — ns cumulés dans `exec_body` (dispatch du corps —
+/// inclusif : les appels imbriqués comptent dedans).
+pub static J17_BODY_NS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
 /// Gate J17 : les compteurs ci-dessus ne s'incrémentent que si
 /// `EXPLORER_J17_PROF` est posé (non vide/non "0") au premier
 /// appel, ou si [`j17_enable`] a été appelé (tests/benchs). Un
@@ -361,7 +386,7 @@ pub fn j17_enable() {
 #[must_use]
 pub fn j17_snapshot() -> String {
     let r = std::sync::atomic::Ordering::Relaxed;
-    let pairs: [(&str, &std::sync::atomic::AtomicU64); 24] = [
+    let pairs: [(&str, &std::sync::atomic::AtomicU64); 31] = [
         ("prop_lookup", &J17_PROP_LOOKUP),
         ("proto_lvl", &J17_PROTO_LVL),
         ("prop_scan", &J17_PROP_SCAN),
@@ -386,6 +411,13 @@ pub fn j17_snapshot() -> String {
         ("fn_defer", &J17_FN_DEFER),
         ("fn_def_tok", &J17_FN_DEF_TOK),
         ("fn_mat", &J17_FN_MAT),
+        ("frame_ns", &J17_FRAME_NS),
+        ("env_ns", &J17_ENV_NS),
+        ("prop_ns", &J17_PROP_NS),
+        ("mat_ns", &J17_MAT_NS),
+        ("gc_ns", &J17_GC_NS),
+        ("env_new", &J17_ENV_NEW),
+        ("body_ns", &J17_BODY_NS),
     ];
     let mut out = String::new();
     for (k, c) in pairs {
@@ -460,6 +492,36 @@ pub(crate) fn j17_time<T>(c: &'static std::sync::atomic::AtomicU64, f: impl FnOn
         r
     } else {
         f()
+    }
+}
+
+/// V-7 — garde RAII chronométrant un span jusqu'à son `Drop` :
+/// permet de mesurer des zones **non contiguës** (prologue +
+/// épilogue de `call_script_body` hors `exec_body`) et des
+/// fonctions à sorties multiples. Désarmé = `Option<Instant>`
+/// `None`, un `load`+branche à la création, rien au drop.
+pub(crate) struct J17Scope {
+    c: &'static std::sync::atomic::AtomicU64,
+    t: Option<std::time::Instant>,
+}
+
+/// Arme un [`J17Scope`] sur `c` — à poser en `let _g = …` en
+/// tête de zone, ou `drop(g)` explicite pour fermer un span.
+pub(crate) fn j17_scope(c: &'static std::sync::atomic::AtomicU64) -> J17Scope {
+    J17Scope {
+        c,
+        t: j17_on().then(std::time::Instant::now),
+    }
+}
+
+impl Drop for J17Scope {
+    fn drop(&mut self) {
+        if let Some(t) = self.t {
+            self.c.fetch_add(
+                u64::try_from(t.elapsed().as_nanos()).unwrap_or(u64::MAX),
+                std::sync::atomic::Ordering::Relaxed,
+            );
+        }
     }
 }
 

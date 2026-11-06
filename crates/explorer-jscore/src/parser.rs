@@ -93,7 +93,9 @@ fn deferred_use_strict(toks: &[Token]) -> bool {
 /// l'appel plutôt qu'au parse — tolérant, jamais de panic.
 pub(crate) fn materialize_body(d: &DeferredBody, is_gen: bool) -> Result<(Vec<Stmt>, bool)> {
     let toks: Vec<Token> = d.toks.to_vec();
-    let close_of = close_table(&toks);
+    // V-7 : `close_ns`/`stmt_ns` cumulent ici aussi — la part
+    // `mat_ns` − (close+stmt) isole le clone `to_vec` + setup.
+    let close_of = crate::j17_time(&crate::J17_CLOSE_NS, || close_table(&toks));
     let mut sub = Parser {
         toks,
         pos: 1,
@@ -109,7 +111,7 @@ pub(crate) fn materialize_body(d: &DeferredBody, is_gen: bool) -> Result<(Vec<St
         src_text: d.src_text.clone(),
         close_of,
     };
-    sub.fn_body()
+    crate::j17_time(&crate::J17_STMT_NS, || sub.fn_body())
 }
 
 impl DeferredBody {

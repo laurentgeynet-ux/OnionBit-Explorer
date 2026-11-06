@@ -2612,6 +2612,8 @@ impl Engine {
     }
 
     pub fn collect(&mut self) -> usize {
+        // V-7 : temps cumulé marquage+balayage.
+        let _t = crate::j17_scope(&crate::J17_GC_NS);
         // 1. Rassemble les `ObjId` tenus par les structures
         //    annexes (RefCell/NodeCache — leurs borrows doivent
         //    être relâchés avant la passe).
@@ -4460,6 +4462,8 @@ impl Engine {
         name: &str,
         visited: &mut HashSet<(usize, String)>,
     ) -> Option<Value> {
+        // V-7 : temps cumulé de la marche de chaîne de portées.
+        let _t = crate::j17_scope(&crate::J17_ENV_NS);
         let mut cur = Some(env.clone());
         while let Some(e) = cur {
             enum Next {
@@ -6370,6 +6374,9 @@ impl Engine {
 
     /// `base[key]` on any value — wraps primitives via their prototype.
     pub(crate) fn get_prop_value(&mut self, base: Value, key: &str) -> JsResult<Value> {
+        // V-7 : temps cumulé de résolution (inclusif — un getter
+        // JS re-entrant cumule dans le span englobant).
+        let _t = crate::j17_scope(&crate::J17_PROP_NS);
         match base {
             Value::Undefined | Value::Null | Value::Hole => {
                 // Sonde JS-C313 — journalise la lecture nulle avec
@@ -7863,6 +7870,9 @@ impl Engine {
         &mut self,
         lit: &std::rc::Rc<crate::ast::FnLit>,
     ) -> JsResult<std::rc::Rc<Vec<Stmt>>> {
+        // V-7 : matérialisation des corps différés (sous-parse
+        // au premier appel — `OnceCell` ensuite → ~0).
+        let _t = crate::j17_scope(&crate::J17_MAT_NS);
         match &lit.body {
             crate::ast::FnBody::Parsed(b) => Ok(b.clone()),
             crate::ast::FnBody::Deferred(d) => d
@@ -7886,6 +7896,11 @@ impl Engine {
         args: &[Value],
         nt: Value,
     ) -> JsResult<Value> {
+        // V-7 : span prologue (frame setup : coercition `this`,
+        // `Env::local`, liaison params, `arguments`, `hoist`) —
+        // refermé explicitement avant `exec_body`, réarmé après
+        // pour l'épilogue. `body_ns` reste ainsi hors `frame_ns`.
+        let frame = crate::j17_scope(&crate::J17_FRAME_NS);
         self.call_depth += 1;
         // JS-C41 : borne logique d'appels — la pile elle-
         // même est protégée par `maybe_grow` au corps.
@@ -7921,6 +7936,7 @@ impl Engine {
         let outer_strict = self.strict;
         self.strict = lit.strict;
         let local = Env::local(env);
+        crate::j17_tick(&crate::J17_ENV_NEW);
         // V-5a : un corps différé se sous-parse ici, au premier
         // appel — erreur de syntaxe tardive → throw (jamais de
         // panic). `FnLit.strict` a déjà été fixé au parse par le
@@ -8059,11 +8075,13 @@ impl Engine {
         // native (mesuré) — la récursion bascule sur un
         // segment tas avant tout débordement ; la borne
         // `call_depth_limit` garde le plafond logique.
+        drop(frame);
         let r = stacker::maybe_grow(
             crate::parser::STACK_RED_ZONE,
             crate::parser::STACK_GROW,
             || self.exec_body(&local, this, &body_rc),
         );
+        let _frame = crate::j17_scope(&crate::J17_FRAME_NS);
         self.call_depth -= 1;
         self.call_stack.pop();
         self.strict = outer_strict;
