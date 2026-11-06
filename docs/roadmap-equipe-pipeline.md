@@ -2715,6 +2715,18 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   (css-scoping §6 — dernière borne) : `scope_rank` entre
   origine et layer — inner > outer normal, outer > inner
   `!important` ; `style=` au contexte du nœud. 3 sens testés.
+- [x] **R-139. `Dom::collect` suit les arbres latéraux**
+  (AR-1, chantier ARÈNE — `docs/roadmap-arene.md`) : le
+  marquage ne marchait que `first_child`/`next_sibling` —
+  un futur déclencheur câblé (AR-3) aurait balayé les
+  arbres shadow et les fragments `<template>` vivants.
+  Arêtes ajoutées : `template_contents` + `shadow_root`
+  (l'edge-set du `Remove` de journal, `apply.rs:1451`) —
+  hôte marqué ⇒ arbre latéral marqué ; hôte balayé ⇒
+  arbre balayé. Sweep : purge `shadow_roots`/`shadow_hosts`
+  des entrées à génération morte. 3 verrous : survie
+  template+shadow à `collect`, réclamation à la mort de
+  l'hôte, survie si hôte rooté.
 
 ## Palier R-B — Contenu étranger, animation, canvas
 

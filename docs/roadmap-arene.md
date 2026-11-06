@@ -66,7 +66,8 @@ Ordre imposé : **AR-1 → AR-2 → AR-3**. Inverser tuerait des
 arbres vivants (AR-1 sans seeds) ou des nœuds encore référencés
 (AR-3 sans inventaire).
 
-- [ ] **AR-1. Marquage complet de `Dom::collect`** — PIPE.
+- [x] **AR-1. Marquage complet de `Dom::collect`** — PIPE.
+  **Livré R-139.**
   Edge-set = celui que `apply_journal_op`/`Remove` marche déjà
   (`apply.rs:1451-1460`) : `first_child`/`next_sibling` **+
   `template_contents` + `shadow_root`** ; seeds ajoutées : les

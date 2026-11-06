@@ -391,3 +391,85 @@ fn slot_distribution() {
     assert_eq!(dom.assigned_slot(orphan), None);
     assert_eq!(dom.slots_in(host), Vec::<explorer_dom::NodeId>::new());
 }
+
+/// R-139 — `collect` suit les arêtes latérales : le fragment
+/// `template_contents` et la racine shadow attachée survivent
+/// tant que leur hôte survit ; hôte balayé, arbre balayé et
+/// tables purgées.
+#[test]
+fn collect_preserve_arbres_lateraux() {
+    let mut dom = Dom::new();
+    let doc = dom.document();
+    let host = el(&mut dom, "div");
+    dom.append_child(doc, host).expect("host");
+    let tpl = el(&mut dom, "template");
+    dom.append_child(doc, tpl).expect("tpl");
+    let frag = dom.create_fragment().expect("frag");
+    dom.set_template_contents(tpl, frag).expect("tpl frag");
+    let t = txt(&mut dom, "contenu");
+    dom.append_child(frag, t).expect("t sous frag");
+    let root = dom.create_fragment().expect("root");
+    dom.attach_shadow_root(host, root, true);
+    let inner = el(&mut dom, "span");
+    dom.append_child(root, inner).expect("inner sous root");
+
+    // Rien n'est réclamé : les deux arbres latéraux sont
+    // atteints via les arêtes de leurs hôtes vivants.
+    assert_eq!(dom.collect(), 0);
+    for id in [tpl, frag, t, root, inner] {
+        assert!(dom.is_alive(id), "vivant {id:?}");
+    }
+
+    // Hôte retiré → racine shadow balayée avec lui, table purgée.
+    dom.remove(host).expect("remove host");
+    assert_eq!(dom.collect(), 3); // host + racine shadow + span
+    for id in [host, root, inner] {
+        assert!(!dom.is_alive(id), "balayé {id:?}");
+        assert!(matches!(dom.data(id), Err(DomError::StaleHandle { .. })));
+    }
+    assert_eq!(dom.shadow_root(host, true), None);
+    assert!(!dom.is_shadow_root(root));
+    // Le fragment du template survit : son élément reste rattaché.
+    assert!(dom.is_alive(frag) && dom.is_alive(t));
+}
+
+/// R-139 — le fragment `content` d'un `<template>` détaché est
+/// réclamé avec son élément (l'arête part d'un hôte marqué).
+#[test]
+fn collect_reclame_fragment_template_detache() {
+    let mut dom = Dom::new();
+    let doc = dom.document();
+    let tpl = el(&mut dom, "template");
+    dom.append_child(doc, tpl).expect("tpl");
+    let frag = dom.create_fragment().expect("frag");
+    dom.set_template_contents(tpl, frag).expect("tpl frag");
+    let t = txt(&mut dom, "x");
+    dom.append_child(frag, t).expect("t");
+
+    dom.remove(tpl).expect("remove tpl");
+    assert_eq!(dom.collect(), 3); // tpl + fragment + texte
+    assert!(matches!(dom.data(frag), Err(DomError::StaleHandle { .. })));
+}
+
+/// R-139 — une racine shadow survit au détachement tant que
+/// son hôte est rooté : l'arête part du nœud marqué, pas de la
+/// liste des tables (sinon l'arbre fuirait après purge).
+#[test]
+fn racine_shadow_survit_si_hote_roote() {
+    let mut dom = Dom::new();
+    let doc = dom.document();
+    let host = el(&mut dom, "div");
+    dom.append_child(doc, host).expect("host");
+    let root = dom.create_fragment().expect("root");
+    dom.attach_shadow_root(host, root, true);
+    let inner = el(&mut dom, "b");
+    dom.append_child(root, inner).expect("inner");
+
+    let keep = dom.add_root(host).expect("root host");
+    dom.remove(host).expect("remove host");
+    assert_eq!(dom.collect(), 0); // hôte rooté → ombre vivante
+    assert!(dom.is_alive(inner));
+    dom.remove_root(keep).expect("unroot");
+    assert_eq!(dom.collect(), 3); // host + racine + inner
+    assert!(!dom.is_shadow_root(root));
+}

@@ -221,10 +221,7 @@ impl Dom {
     /// `true` si le handle désigne un nœud encore vivant.
     #[must_use]
     pub fn is_alive(&self, id: NodeId) -> bool {
-        matches!(
-            self.slots.get(slot_idx(id.index())),
-            Some(Slot::Occupied { generation, .. }) if *generation == id.generation()
-        )
+        alive(&self.slots, id)
     }
 
     /// Données d'élément.
@@ -871,6 +868,16 @@ impl Dom {
     /// incrémentée : les `NodeId` qui les désignaient deviennent
     /// `StaleHandle`.
     ///
+    /// Arêtes de marquage (R-139) : la chaîne enfants/siblings
+    /// **plus** les arbres latéraux — fragment
+    /// [`Dom::template_contents`] et racine shadow attachée (le
+    /// même edge-set que le `Remove` du journal session,
+    /// `apply.rs`) : une racine shadow ne survit que si son hôte
+    /// survit, un fragment que si son `<template>` survit. Au
+    /// balayage, `shadow_roots`/`shadow_hosts` sont purgées des
+    /// entrées à génération morte — une table ne doit pas
+    /// désigner des cases réattribuables.
+    ///
     /// Retourne le nombre de nœuds réclamés.
     pub fn collect(&mut self) -> usize {
         // Marquage : BFS depuis le document + cibles de racines.
@@ -889,6 +896,18 @@ impl Dom {
                     stack.push(child);
                     cursor = self.node(child).ok().and_then(|n| n.next_sibling);
                 }
+                // Arbre latéral : fragment `content` d'un
+                // `<template>` — détaché de la chaîne enfants.
+                if let NodeData::Element(el) = &node.data {
+                    if let Some(frag) = el.template_contents {
+                        stack.push(frag);
+                    }
+                }
+            }
+            // Arbre latéral : racine shadow attachée — vit dans
+            // `shadow_roots`, hors `children`.
+            if let Some(&(root, _)) = self.shadow_roots.get(&id) {
+                stack.push(root);
             }
         }
         // Balayage : tout l'occupé non marqué est réclamé.
@@ -904,6 +923,14 @@ impl Dom {
                 }
             }
         }
+        // Purge des tables latérales : une entrée dont l'hôte ou
+        // la racine vient d'être balayée désignerait une case
+        // réattribuable — génération vérifiée, pas la présence.
+        let slots = &self.slots;
+        self.shadow_roots
+            .retain(|&host, &mut (root, _)| alive(slots, host) && alive(slots, root));
+        self.shadow_hosts
+            .retain(|&root, &mut host| alive(slots, root) && alive(slots, host));
         freed
     }
 
@@ -1083,6 +1110,17 @@ impl Default for Dom {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// `true` si la case est occupée à la génération du handle —
+/// cœur de [`Dom::is_alive`], isolé pour les fermetures qui
+/// empruntent déjà un autre champ de `self` (purge des tables
+/// latérales au balayage).
+fn alive(slots: &[Slot], id: NodeId) -> bool {
+    matches!(
+        slots.get(slot_idx(id.index())),
+        Some(Slot::Occupied { generation, .. }) if *generation == id.generation()
+    )
 }
 
 /// `u32` → `usize` : lossless sur nos cibles (≥ 32 bits) ; saturé en
