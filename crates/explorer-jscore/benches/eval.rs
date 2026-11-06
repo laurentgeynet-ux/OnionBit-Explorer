@@ -26,6 +26,11 @@
 //!   `composite_1k`    28.6 ms  (28.6 µs/iter, ~5 calls/iter → call-dominé)
 //! Premier signal : `call_rate` domine — V-2 devra attribuer
 //! frame/env vs résolution avant tout fix structurel.
+//!
+//! Post V-3a+V-3b (2026-11-06) :
+//!   `composite_1k`    25.4 ms  (−11 % cumulé micro-wins)
+//!   `kevlar_like_200` 15.45 ms (~77 µs/iter — mix proto/
+//!                     callbacks/churn, workload attribution V-2)
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use explorer_jscore::Engine;
