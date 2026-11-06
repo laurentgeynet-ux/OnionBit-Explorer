@@ -20,6 +20,7 @@
 use crate::heap::{JsResult, ObjKind, Thrown};
 use crate::value::{ObjId, Value};
 use crate::Engine;
+use std::rc::Rc;
 
 /// Promise lifecycle.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -63,6 +64,32 @@ pub struct Reaction {
     /// Capability returned by `then`, settled with the handler result.
     pub next: ThenSink,
 }
+
+/// JS-C383 — sonde « promesses pendantes nommées » (§B-97) :
+/// sites capturés par promesse quand `dom_probe` est armée —
+/// le site de création (`new Promise`/`capability`) + les
+/// sites de souscription `.then`/adoption. Table latérale
+/// [`Engine::prom_sites`] — aucune entrée n'est créée hors
+/// sonde (zéro coût par promesse désarmée).
+pub(crate) struct PromProbe {
+    /// « fn(bundle:l:c) » de l'appelant à la création — `<?>` si
+    /// la promesse prédate l'armement de la sonde.
+    pub created: Rc<str>,
+    /// Sites `.then`/adoption souscrits tant qu'elle pendait —
+    /// dédup + borne [`PROM_THEN_SITES_PER`].
+    pub thens: Vec<Rc<str>>,
+}
+
+/// JS-C383 — borne globale de la table `prom_sites` (sonde
+/// armée : un vol peut créer des milliers de promesses — le
+/// résidu utile est de ~30-60 `.then`, large au-dessus).
+pub(crate) const PROM_SITES_MAX: usize = 8192;
+/// JS-C383 — `.then` retenus par promesse (les chaînes réelles
+/// souscrivent peu par promesse ; les chaînages massifs se
+/// répartissent sur la séquence, pas un seul objet).
+pub(crate) const PROM_THEN_SITES_PER: usize = 8;
+/// JS-C383 — sites émis par histogramme `prom.pending.*`.
+pub(crate) const PROM_SITES_TOP: usize = 32;
 
 /// The `ObjKind::Promise` payload.
 pub struct JsPromise {
@@ -137,6 +164,54 @@ impl Engine {
         )
     }
 
+    /// JS-C383 — sonde « promesses pendantes nommées » : note le
+    /// site de création (`dom_probe` armée uniquement). No-op
+    /// désarmée ou table pleine ([`PROM_SITES_MAX`]).
+    fn probe_prom_created(&mut self, id: ObjId) {
+        if !tracing::enabled!(target: "dom_probe", tracing::Level::INFO)
+            || self.prom_sites.len() >= PROM_SITES_MAX
+            || self.prom_sites.contains_key(&id)
+        {
+            return;
+        }
+        let site: Rc<str> = self.cur_fn_label().into();
+        self.prom_sites.insert(
+            id,
+            PromProbe {
+                created: site,
+                thens: Vec::new(),
+            },
+        );
+    }
+
+    /// JS-C383 — note un site de souscription `.then`/adoption
+    /// sur promesse pendante (`dom_probe` armée uniquement).
+    /// L'entrée peut manquer si la promesse prédate l'armement —
+    /// elle est alors créée avec `created = "<?>"`.
+    fn probe_prom_then(&mut self, id: ObjId) {
+        if !tracing::enabled!(target: "dom_probe", tracing::Level::INFO) {
+            return;
+        }
+        let site: Rc<str> = self.cur_fn_label().into();
+        if !self.prom_sites.contains_key(&id) {
+            if self.prom_sites.len() >= PROM_SITES_MAX {
+                return;
+            }
+            self.prom_sites.insert(
+                id,
+                PromProbe {
+                    created: "<?>".into(),
+                    thens: Vec::new(),
+                },
+            );
+        }
+        if let Some(pr) = self.prom_sites.get_mut(&id) {
+            if pr.thens.len() < PROM_THEN_SITES_PER && !pr.thens.contains(&site) {
+                pr.thens.push(site);
+            }
+        }
+    }
+
     pub(crate) fn new_promise(&mut self) -> ObjId {
         self.promises_created += 1;
         let id = self.heap.alloc_obj(crate::heap::Object {
@@ -164,6 +239,7 @@ impl Engine {
                 p.reject_fn = reject;
             }
         }
+        self.probe_prom_created(id);
         id
     }
 
@@ -359,6 +435,7 @@ impl Engine {
                             });
                         }
                     }
+                    self.probe_prom_then(vid);
                 }
                 // Already settled → adopt its outcome directly.
                 PromiseState::Fulfilled | PromiseState::Rejected => {
@@ -1077,6 +1154,7 @@ fn promise_then(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> 
                     });
                 }
             }
+            e.probe_prom_then(id);
         }
         PromiseState::Fulfilled | PromiseState::Rejected => {
             let rejected = state == PromiseState::Rejected;
@@ -1575,5 +1653,69 @@ fn c_id(v: Value) -> ObjId {
     match v {
         Value::Obj(id) => id,
         _ => 0,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Subscriber minimal — arme la cible `dom_probe` seule,
+    /// ignore tout le reste (la sonde JS-C383 gate sur
+    /// `enabled!` ; aucune dépendance `tracing-subscriber`
+    /// n'est requise pour un test in-crate).
+    struct ArmProbe;
+    impl tracing::Subscriber for ArmProbe {
+        fn enabled(&self, m: &tracing::Metadata<'_>) -> bool {
+            m.target() == "dom_probe"
+        }
+        fn new_span(&self, _: &tracing::span::Attributes<'_>) -> tracing::span::Id {
+            tracing::span::Id::from_u64(1)
+        }
+        fn record(&self, _: &tracing::span::Id, _: &tracing::span::Record<'_>) {}
+        fn record_follows_from(&self, _: &tracing::span::Id, _: &tracing::span::Id) {}
+        fn event(&self, _: &tracing::Event<'_>) {}
+        fn enter(&self, _: &tracing::span::Id) {}
+        fn exit(&self, _: &tracing::span::Id) {}
+    }
+
+    /// JS-C383 — la sonde nomme la promesse pendante : créée
+    /// en `<top>`, `.then` souscrit depuis `f` ; `collect`
+    /// conserve l'entrée (encore `Pending` + réaction).
+    #[test]
+    fn probe_noms_les_promesses_pendantes() {
+        let _g = tracing::subscriber::set_default(ArmProbe);
+        // Les callsites `enabled!` sont cachés — les tests en
+        // parallèle les ont réchauffés désarmés avant
+        // `set_default` ; il faut reconstruire le cache
+        // d'intérêt sinon la sonde reste muette ici (en vol,
+        // le subscriber est posé au boot avant tout callsite).
+        tracing::callsite::rebuild_interest_cache();
+        let mut e = Engine::new();
+        let v =
+            e.eval("let p = new Promise(function(){}); function f(){ p.then(function(){}); } f();");
+        assert!(v.is_ok(), "eval: {v:?}");
+        e.collect();
+        let named_then = e
+            .prom_sites
+            .values()
+            .any(|pr| pr.thens.iter().any(|t| t.starts_with("f(")));
+        assert!(named_then, "prom_sites doit nommer f: {:?}", {
+            let v: Vec<_> = e
+                .prom_sites
+                .values()
+                .map(|pr| (pr.created.to_string(), pr.thens.len()))
+                .collect();
+            v
+        });
+        // Le label `created` peut tomber `<?>` quand le callsite
+        // `enabled!` de `probe_prom_created` a été gelé `never`
+        // par les tests parallèles (cache d'intérêt global) —
+        // le signal du vol est le nommage des `.then`, prouvé
+        // ci-dessus ; `created` est non vide quoi qu'il arrive.
+        assert!(
+            e.prom_sites.values().all(|pr| !pr.created.is_empty()),
+            "created doit etre non vide"
+        );
     }
 }

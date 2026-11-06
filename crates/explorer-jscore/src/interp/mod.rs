@@ -405,6 +405,17 @@ pub struct Engine {
     /// résidu de file à la passe (JS-C103) ; `ctx_drop` =
     /// jobs lâchés sur realm mort (§B-97 candidat H-A).
     pub(crate) sched_tally: std::collections::BTreeMap<&'static str, u64>,
+    /// JS-C383 — sonde « promesses pendantes nommées » : par
+    /// `ObjId`, site de création + sites de souscription `.then`,
+    /// peuplés uniquement sous `dom_probe` armée (table latérale
+    /// — zéro coût mémoire par promesse désarmée). Au [`Engine::
+    /// collect`], les promesses encore `Pending` avec réactions
+    /// sont émises en histogrammes `prom.pending.*` : le résidu
+    /// `then − post.reaction` devient des noms de fonctions.
+    /// Entrées élaguées à chaque passe (les mortes/swept ne
+    /// s'accumulent pas) + borne globale [`crate::promise::
+    /// PROM_SITES_MAX`].
+    pub(crate) prom_sites: std::collections::HashMap<ObjId, crate::promise::PromProbe>,
     /// `MutationObserver` bookkeeping (JS-C26) — callbacks par
     /// id d'observer ; les records vivent dans la file du `Dom`.
     pub(crate) mutobs: crate::mutation::MutObsState,
@@ -1002,6 +1013,7 @@ impl Engine {
             promises_created: 0,
             promises_settled: 0,
             sched_tally: std::collections::BTreeMap::new(),
+            prom_sites: std::collections::HashMap::new(),
             mutobs: crate::mutation::MutObsState::default(),
             obs: crate::observers::ObsState::default(),
             files: crate::files::FilesState::default(),
@@ -2703,6 +2715,59 @@ impl Engine {
                 .insert("prom.settled", self.promises_settled);
             tracing::info!(target: "dom_probe", site = "sched.tally", tally = ?self.sched_tally);
         }
+        // JS-C383 — « promesses pendantes nommées » : les
+        // promesses encore `Pending` portant des réactions (le
+        // résidu `then − post.reaction` de §B-97) sortent
+        // *nommées* — site de création + sites `.then` — en
+        // histogrammes bornés. La table est élaguée des id
+        // balayées/non-promesse à chaque passe (évite la
+        // dérive + les faux positifs d'ObjId réutilisées).
+        if tracing::enabled!(target: "dom_probe", tracing::Level::INFO)
+            && !self.prom_sites.is_empty()
+        {
+            // Top-N par fréquence — le résidu (~30-60 `.then`)
+            // se condense en une poignée de sites nommés.
+            let top = |h: std::collections::BTreeMap<String, u64>| -> Vec<(String, u64)> {
+                let mut v: Vec<_> = h.into_iter().collect();
+                v.sort_by_key(|a| std::cmp::Reverse(a.1));
+                v.truncate(crate::promise::PROM_SITES_TOP);
+                v
+            };
+            self.prom_sites.retain(|id, _| {
+                matches!(
+                    self.heap.obj(*id).map(|o| &o.kind),
+                    Some(crate::heap::ObjKind::Promise(_))
+                )
+            });
+            let mut pend = 0u64;
+            let mut created: std::collections::BTreeMap<String, u64> =
+                std::collections::BTreeMap::new();
+            let mut thens: std::collections::BTreeMap<String, u64> =
+                std::collections::BTreeMap::new();
+            for (id, pr) in &self.prom_sites {
+                let Some(o) = self.heap.obj(*id) else {
+                    continue;
+                };
+                let crate::heap::ObjKind::Promise(p) = &o.kind else {
+                    continue;
+                };
+                if p.state != crate::promise::PromiseState::Pending || p.reactions.is_empty() {
+                    continue;
+                }
+                pend += 1;
+                *created.entry(pr.created.to_string()).or_default() += 1;
+                for t in &pr.thens {
+                    *thens.entry(t.to_string()).or_default() += 1;
+                }
+            }
+            tracing::info!(
+                target: "dom_probe",
+                site = "prom.pending",
+                n = pend,
+                created = ?top(created),
+                thens = ?top(thens)
+            );
+        }
         n
     }
 
@@ -3639,7 +3704,7 @@ impl Engine {
     /// `EXPLORER_JS_PROFILE`, chaque dispatch natif échantillonne
     /// Label court « fn(bundle:l:c) » du sommet `call_stack` —
     /// la fonction JS appelante (sondes §B-4(c)/JS-C313 + profil).
-    fn cur_fn_label(&self) -> String {
+    pub(crate) fn cur_fn_label(&self) -> String {
         self.call_stack
             .last()
             .map_or_else(|| "<top>".to_string(), Self::fn_label_of)
