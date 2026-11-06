@@ -5843,38 +5843,53 @@ impl Engine {
         };
         if let Some((dom, _)) = &self.dom_ctx {
             crate::j17_tick(&crate::J17_PROBE_HIT);
-            // `ty` dans la clé de dédup : un read qui rend
-            // `undefined` puis `obj` logue les deux — la transition
-            // « donnée absente → peuplée » reste visible ; pour les
-            // conteneurs tagués, `g.data response ty=undef` nomme
-            // une clé lue mais vide (signature du return-early).
-            let ty = v.map_or("miss", Self::probe_ty);
-            if dom
-                .borrow_mut()
-                .ce
-                .probe_seen
-                .insert(format!("{label}:{key}:{ty}"))
-            {
-                tracing::info!(target: "dom_probe", site = label, key = %key, ty = %ty);
+            // V-2i : le chemin « armé » est structurel — `dom_ctx`
+            // est présent sur toute page réelle, pas seulement
+            // sous `dom_probe=info`. Sans ce gate, `format!` +
+            // `HashSet::insert` + `borrow_mut` étaient payés par
+            // read surveillé sur **chaque** navigation (et l'alloc
+            // `format!` précédait la dédup — payée même pour les
+            // clés déjà vues). Le travail est donc gaté par le
+            // niveau du target : désarmé = filtres seuls (~2 ns).
+            // `try_borrow_mut` : read sous mutation DOM empruntée
+            // → sonde ratée, jamais panic réentrant.
+            if tracing::enabled!(target: "dom_probe", tracing::Level::INFO) {
+                // `ty` dans la clé de dédup : un read qui rend
+                // `undefined` puis `obj` logue les deux — la
+                // transition « donnée absente → peuplée » reste
+                // visible ; pour les conteneurs tagués,
+                // `g.data response ty=undef` nomme une clé lue
+                // mais vide (signature du return-early).
+                let ty = v.map_or("miss", Self::probe_ty);
+                if let Ok(mut d) = dom.try_borrow_mut() {
+                    if d.ce.probe_seen.insert(format!("{label}:{key}:{ty}")) {
+                        tracing::info!(target: "dom_probe", site = label, key = %key, ty = %ty);
+                    }
+                }
             }
         }
         if let Some(Value::Obj(oid)) = v {
-            let tag = if id == self.global {
-                match key {
-                    "ytcfg" => Some("g.cfg"),
-                    "ytInitialData" => Some("g.data"),
-                    "ytInitialPlayerResponse" => Some("g.player"),
-                    _ => None,
-                }
-            } else {
-                // Sous-objet lu sur un conteneur tagué → hérite
-                // le label (reads profonds recensés, cap 32).
-                Some(label)
-            };
-            if let Some(t) = tag {
-                if !self.probe_tagged.iter().any(|(o, _)| *o == oid) && self.probe_tagged.len() < 32
-                {
-                    self.probe_tagged.push((oid, t));
+            // `probe_tagged` est état de sonde : la population ne
+            // sert que sous `dom_probe=info` — même gate.
+            if tracing::enabled!(target: "dom_probe", tracing::Level::INFO) {
+                let tag = if id == self.global {
+                    match key {
+                        "ytcfg" => Some("g.cfg"),
+                        "ytInitialData" => Some("g.data"),
+                        "ytInitialPlayerResponse" => Some("g.player"),
+                        _ => None,
+                    }
+                } else {
+                    // Sous-objet lu sur un conteneur tagué → hérite
+                    // le label (reads profonds recensés, cap 32).
+                    Some(label)
+                };
+                if let Some(t) = tag {
+                    if !self.probe_tagged.iter().any(|(o, _)| *o == oid)
+                        && self.probe_tagged.len() < 32
+                    {
+                        self.probe_tagged.push((oid, t));
+                    }
                 }
             }
         }
@@ -5901,26 +5916,32 @@ impl Engine {
     /// `o` tagué → `{label}w {k} ty={type}` (`g.cfgw` =
     /// `ytcfg.set(k,v)`/`data_.k=v` — clés de config posées).
     fn probe_store(&mut self, id: ObjId, key: &str, v: Value) {
-        let site = if id == self.global {
+        // Filtres cheap d'abord (global + clé surveillée, ou
+        // conteneur tagué) — puis tout le travail armé est gaté
+        // par le niveau du target (même fix V-2i que
+        // `probe_lookup` : l'alloc `site`/`format!` n'existe
+        // plus que si le log partira).
+        let base = if id == self.global {
             if !Self::YT_WATCH_GLOBALS.contains(&key) {
                 return;
             }
-            "g.write".to_string()
+            None
         } else {
             let Some((_, l)) = self.probe_tagged.iter().find(|(o, _)| *o == id) else {
                 return;
             };
-            format!("{l}w")
+            Some(*l)
         };
-        let ty = Self::probe_ty(v);
         if let Some((dom, _)) = &self.dom_ctx {
-            if dom
-                .borrow_mut()
-                .ce
-                .probe_seen
-                .insert(format!("{site}:{key}:{ty}"))
-            {
-                tracing::info!(target: "dom_probe", site = %site, key = %key, ty = %ty);
+            crate::j17_tick(&crate::J17_PROBE_HIT);
+            if tracing::enabled!(target: "dom_probe", tracing::Level::INFO) {
+                let site = base.map_or_else(|| "g.write".to_string(), |l| format!("{l}w"));
+                let ty = Self::probe_ty(v);
+                if let Ok(mut d) = dom.try_borrow_mut() {
+                    if d.ce.probe_seen.insert(format!("{site}:{key}:{ty}")) {
+                        tracing::info!(target: "dom_probe", site = %site, key = %key, ty = %ty);
+                    }
+                }
             }
         }
     }

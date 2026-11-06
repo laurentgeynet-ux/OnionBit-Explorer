@@ -104,15 +104,21 @@ ou en fin d'eval.
   chaîne lue (`heap.rs:275` → `J17_STR_READ` ajouté),
   `find_own` retourne `Prop` **par valeur** à chaque niveau
   proto.
-- [x] **V-2i.** **Coût `probe_lookup` sur le hot path** —
-  désarmé ≈ ~2 ns (u32 compare + `Vec` vide → `find` = check
-  len, ~0.2 % d'un lookup). **Amendement revue NAV** : les
-  vols tournent `dom_probe=info` → chemin **armé** =
-  `format!("{label}:{key}:{ty}")` + `HashSet::insert` par
-  read de clé surveillée (globales `yt*` + ≤32 conteneurs
-  tagués) — `J17_PROBE_HIT` compte ces événements pour que
-  le prochain vol mesure le **biais des métriques elles-
-  mêmes** (dispatch, phases §B-97).
+- [x] **V-2i.** **Coût `probe_lookup` sur le hot path —
+  corrigé (revue NAV #2)** : le chemin « armé » était
+  **structurel** — `dom_ctx.is_some()` sur toute page
+  réelle, `format!` + `HashSet::insert` + `borrow_mut`
+  payés par read surveillé *hors* vols (et `format!`
+  précédait la dédup → alloc même sur clés vues).
+  **Fix livré** : travail gaté par
+  `tracing::enabled!(dom_probe, INFO)` sur les deux sites
+  (`probe_lookup` + `probe_store` — son `site: String`
+  était aussi alloué avant le gate) + `try_borrow_mut`
+  (panic réentrant impossible → sonde ratée, jamais de
+  crash) + `probe_tagged` ne se peuple que sous sonde
+  (état de sonde, pas de moteur). Désarmé = filtres seuls
+  (~2 ns, ~0.2 % d'un lookup). `J17_PROBE_HIT` mesure les
+  hits structurels en vol → biais des métriques chiffrable.
 - [x] **V-2j.** Verrou : `tests/j17_counters.rs` ×4 —
   chemins nommés, index paresseux, snapshot, attribution
   `call_rate` (env_lvl=10.2k / 1.1k calls ≈ 10 niveaux/appel,
@@ -138,12 +144,13 @@ V-2h existe pour ça) — coût du cas défavorable : deux
 Chaque sous-étape = un commit indépendant avec banc
 avant/après dans le message. Ordre = risque croissant.
 
-- [ ] **V-3a. `ptr_eq` fast-path** — `prop_pos` et
-  `BindingMap::Small` : `std::ptr::eq(&**k, key) ||
-  &**k == key`. **Zéro précondition** (revue) : clés de
-  requête statiques déjà internées via lexer → `Member` ;
-  clés dynamiques → miss → `memcmp` fallback. Signature
-  inchangée (`&str` des deux côtés).
+- [x] **V-3a. `ptr_eq` fast-path** — `prop_pos` et
+  `BindingMap::Small` get/get_mut : `std::ptr::eq` sur
+  `&str` (`&raw const`, clippy) puis `memcmp` — clés
+  statiques internées via lexer, dynamiques → fallback.
+  **Mesuré** : `env_depth` **−8.6 %** (30.1 → 27.5 ms —
+  liaisons internées hit `ptr_eq` systématiquement), props
+  ~±1 % (objets <5 props, scans déjà courts).
 - [ ] **V-3b. Hoister `array_index`** — le bail existe
   déjà (`ops.rs:148`) ; le coût = appel par niveau proto
   + ×2 par niveau Array dans `find_own`. Calculer **une
