@@ -7,6 +7,8 @@ et le projet adhère au [Semantic Versioning](https://semver.org/lang/fr/).
 
 ## [Unreleased]
 
+- **R-144 — banc `explorer-dom` (AR-6 chantier ARÈNE)** : `benches/arena.rs` sous criterion 0.5 (même harness que `relayout`) — `build` 1 k/10 k, `children` (Vec alloué/appel), `attribute` vs `attributes` (slice), `set_attribute`, `collect` sur arène fragmentée 10 k + chaîne profonde 10 k. Baselines quick-run : `attribute` ≈ **27×** `attributes` (68 ns vs 2,5 ns/lookup — cible AR-10 chiffrée), `children` 4,2 µs/appel (cible AR-9), `collect` 3,4 ms/10 k balayés, marquage profond linéaire. Commande : `cargo bench -p explorer-dom`.
+
 - **AR-8 — estimateur mémoire du test `tab_mem_inventory` corrigé** (`explorer-core`) : l'estimation « `live_count` × ~120 o » + marche manuelle `dom_deep_bytes` est remplacée par `Dom::heap_bytes()` (R-143 — `Slot` mesuré à 144 o, textes/attributs inclus) ; le helper récursif est supprimé.
 
 - **R-143 — `Dom::heap_bytes()` + `MemReport.dom_bytes`** (`explorer-dom`, AR-7 chantier ARÈNE) : l'arène n'exposait que `live_count` — aucune mesure d'octets. `heap_bytes()` mesure la capacité du vecteur `slots` (cases libres incluses — l'arène ne rend pas la mémoire avant rétrécissement, comme le RSS), les tables `roots`/`shadow_*`/`defined_names` et les allocations internes aux nœuds vivants (textes, commentaires, `tag_name`, `attributes` + leurs `String`). `MemReport` publie `dom_bytes`/`bfcache_dom_bytes` à côté de `dom_nodes` — `/mem` distingue désormais vivacité et empreinte réelle ; le surbooking post-`collect` reste visible. Verrou `heap_bytes_mesure_capacite_et_contenu`.

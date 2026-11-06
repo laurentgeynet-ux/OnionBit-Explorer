@@ -113,12 +113,12 @@ arbres vivants (AR-1 sans seeds) ou des nœuds encore référencés
 
 ## Palier AR-P1 — Mesure (préalable à tout item perf)
 
-- [ ] **AR-6. Bench `explorer-dom`** — PIPE. `criterion 0.5`
-  déjà en workspace + `[[bench]]` livré dans `explorer-layout`
-  (même harness). Scénarios : build d'arbre N nœuds,
-  traversée (`children`/siblings/`attribute`), `collect` sur
-  arène fragmentée, `set_attribute`/lookup. Produit les
-  baselines de AR-9 → AR-15.
+- [x] **AR-6. Bench `explorer-dom`** — PIPE.
+  **Livré R-144** : `benches/arena.rs` (criterion 0.5,
+  harness `relayout`) — baselines quick-run :
+  `attribute` ≈ 27× `attributes` (68 vs 2,5 ns/lookup),
+  `children` 4,2 µs/appel, `collect` 3,4 ms/10 k
+  fragmentés, marquage profond linéaire 0,5 ms/10 k.
 - [x] **AR-7. `Dom::heap_bytes()`** — PIPE, additif.
   **Livré R-143** : capacité `slots` (cases libres
   incluses) + tables + allocs internes aux nœuds →

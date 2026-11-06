@@ -2775,6 +2775,19 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   distingués, jamais de faux total octet inventé. Verrou :
   `heap_bytes_mesure_capacite_et_contenu` (croissance ≥
   allocs posées, redescente après `collect`, > 0).
+- [x] **R-144. Bench `explorer-dom`** (AR-6, chantier
+  ARÈNE) : `benches/arena.rs` (criterion 0.5, même
+  harness que `relayout`) — scénarios `build` plat
+  1 k/10 k, `children` (Vec alloué/appel), `attribute`
+  vs `attributes` (slice), `set_attribute` réécriture,
+  `collect` arène fragmentée 10 k + chaîne 10 k.
+  Premières baselines (quick-run, machine dev) :
+  `attribute` ≈ **27×** `attributes` (68 ns vs
+  2,5 ns/lookup — chiffre la cible AR-10),
+  `children` 4,2 µs/appel (1 000 frères — cible
+  AR-9), `collect` fragmenté 3,4 ms/10 k balayés,
+  marquage profond linéaire 0,5 ms/10 k. Commande :
+  `cargo bench -p explorer-dom`.
 
 ## Palier R-B — Contenu étranger, animation, canvas
 
