@@ -92,15 +92,17 @@ fn deferred_use_strict(toks: &[Token]) -> bool {
 /// corps impose aux paramètres (doublons…) sont rapportées à
 /// l'appel plutôt qu'au parse — tolérant, jamais de panic.
 pub(crate) fn materialize_body(d: &DeferredBody, is_gen: bool) -> Result<(Vec<Stmt>, bool)> {
-    // V-8a : `Rc<[Token]>` partagé — le parseur n'en a besoin
-    // qu'en lecture ; le clone `to_vec` du corps entier meurt.
-    let toks: Rc<[Token]> = d.toks.clone();
-    // V-7 : `close_ns`/`stmt_ns` cumulent ici aussi — la part
-    // `mat_ns` − (close+stmt) isole le setup résiduel.
-    let close_of = crate::j17_time(&crate::J17_CLOSE_NS, || close_table(&toks));
+    // V-8a+V-5b : flux `Rc<[Token]>` et `close_of` **partagés**
+    // — ni clone de slice ni reconstruction de table ; `pos`
+    // global pointe juste après le `{` (`d.start`), la borne
+    // structurale `}` (`d.end`) arrête `fn_body` naturellement.
+    debug_assert!(
+        matches!(d.toks.get(d.start).map(|t| &t.tok), Some(Tok::P(P::LBrace)))
+            && matches!(d.toks.get(d.end).map(|t| &t.tok), Some(Tok::P(P::RBrace)))
+    );
     let mut sub = Parser {
-        toks,
-        pos: 1,
+        toks: d.toks.clone(),
+        pos: d.start + 1,
         nest: d.nest,
         nest_max: d.nest_max,
         strict: d.strict,
@@ -111,7 +113,7 @@ pub(crate) fn materialize_body(d: &DeferredBody, is_gen: bool) -> Result<(Vec<St
         priv_scopes: d.priv_scopes.clone(),
         src_name: d.src_name.clone(),
         src_text: d.src_text.clone(),
-        close_of,
+        close_of: d.close.clone(),
     };
     crate::j17_time(&crate::J17_STMT_NS, || sub.fn_body())
 }
@@ -146,7 +148,7 @@ pub(crate) fn parse_in(
         &crate::J17_LEX_TOK,
         u64::try_from(toks.len()).unwrap_or(u64::MAX),
     );
-    let close_of = crate::j17_time(&crate::J17_CLOSE_NS, || close_table(&toks));
+    let close_of = crate::j17_time(&crate::J17_CLOSE_NS, || Rc::new(close_table(&toks)));
     let mut p = Parser {
         toks: Rc::from(toks),
         pos: 0,
@@ -201,7 +203,7 @@ pub(crate) fn parse_module_in(
         &crate::J17_LEX_TOK,
         u64::try_from(toks.len()).unwrap_or(u64::MAX),
     );
-    let close_of = crate::j17_time(&crate::J17_CLOSE_NS, || close_table(&toks));
+    let close_of = crate::j17_time(&crate::J17_CLOSE_NS, || Rc::new(close_table(&toks)));
     let mut p = Parser {
         toks: Rc::from(toks),
         pos: 0,
@@ -305,8 +307,10 @@ struct Parser {
     /// vérifie `=>` après le `)` en O(1) au lieu de re-parser le
     /// sous-arbre — les chaînes `n=(n=(n=…` (strftime réel,
     /// base.js de dev.to) faisaient exploser le temps de parse
-    /// exponentiellement, un niveau par parenthèse.
-    close_of: Vec<usize>,
+    /// exponentiellement, un niveau par parenthèse. `Rc` (V-5b) :
+    /// les sous-parses de corps différés la partagent — repère
+    /// `pos` global, aucune reconstruction ni rebase.
+    close_of: Rc<Vec<usize>>,
 }
 
 impl Parser {
@@ -2470,7 +2474,7 @@ impl Parser {
                     raws.push(raw.clone());
                 }
                 TplPart::Expr(toks) => {
-                    let close_of = close_table(toks);
+                    let close_of = Rc::new(close_table(toks));
                     let mut sub = Parser {
                         toks: Rc::from(toks.as_slice()),
                         pos: 0,
@@ -2584,7 +2588,15 @@ impl Parser {
         // `FnLit.strict` soit exact au premier appel.
         let strict = self.strict || deferred_use_strict(&self.toks[lbrace + 1..close]);
         let d = DeferredBody {
-            toks: Rc::from(&self.toks[lbrace..=close]),
+            // V-5b : flux parent + table `close_of` partagés —
+            // ni copie de slice ni reconstruction : un bump de
+            // refcount par corps différé (au lieu d'un clone de
+            // `Token` par jeton du corps + O(slice) au premier
+            // appel).
+            toks: self.toks.clone(),
+            start: lbrace,
+            end: close,
+            close: self.close_of.clone(),
             strict: self.strict,
             module: self.module,
             nest: self.nest,
