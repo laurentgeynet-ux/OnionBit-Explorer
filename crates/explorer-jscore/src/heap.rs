@@ -2161,8 +2161,72 @@ pub fn envs_live() -> usize {
 }
 
 impl Drop for Env {
+    /// §B-111 — descente itérative de la chaîne de portées.
+    /// La libération d'une closure au sweep GC chaînait
+    /// `parent`→`parent`→… en récursion native ∝ profondeur
+    /// des scopes — `maybe_grow` ne couvre pas `Drop` →
+    /// overflow de pile **à charge égale** quelle que soit
+    /// `RUST_MIN_STACK` (vols 689/690 : `job: gc` dernier
+    /// breadcrumb avant `0xC00000FD`, 452 130 breadcrumbs —
+    /// ni callback ni rail : le sweep lui-même). Patron
+    /// R-24/JS-C41 : on ne poursuit que les maillons dont on
+    /// est le dernier détenteur — un env partagé brise la
+    /// descente ici. Seconde arête env→env : `EnvCell::Alias`
+    /// (live bindings d'import, chaînes de ré-exports) —
+    /// extraite avant la libération des liaisons, sinon le
+    /// drop de la `BindingMap` renichait la récursion à +1
+    /// par maillon.
     fn drop(&mut self) {
         ENVS_LIVE.with(|c| c.set(c.get().saturating_sub(1)));
+        let mut worklist: Vec<EnvRef> = Vec::new();
+        worklist.extend(self.parent.take());
+        take_env_edges(&mut self.kind, &mut worklist);
+        while let Some(rc) = worklist.pop() {
+            // Env partagé (autre closure, pile d'appel) : la
+            // décrémente de `rc` en sortie de boucle suffit,
+            // la chaîne amont appartient à d'autres vies.
+            if Rc::strong_count(&rc) != 1 {
+                continue;
+            }
+            // Emprunt en vol (pathologique à la frontière de
+            // job) : `rc` drop → `Env::drop` reprend la
+            // descente itérative un niveau plus bas — la
+            // profondeur ajoutée borne les emprunts réels.
+            let Ok(mut b) = rc.try_borrow_mut() else {
+                continue;
+            };
+            worklist.extend(b.parent.take());
+            take_env_edges(&mut b.kind, &mut worklist);
+            drop(b);
+            drop(rc);
+        }
+    }
+}
+
+/// Extrait les `EnvRef` référencés par les liaisons d'`env`
+/// (arête `EnvCell::Alias` — le parent est détaché par
+/// l'appelant) : la table vidée se libère ensuite sans
+/// décrémenter de portée — la récursion reste plate.
+fn take_env_edges(kind: &mut EnvKind, worklist: &mut Vec<EnvRef>) {
+    let map = match kind {
+        EnvKind::Global(m) | EnvKind::Local(m) | EnvKind::Block(m) => m,
+        EnvKind::With(_) => return,
+    };
+    match map {
+        BindingMap::Small(v) => {
+            for (_, c) in v.drain(..) {
+                if let EnvCell::Alias(target, _) = c {
+                    worklist.push(target);
+                }
+            }
+        }
+        BindingMap::Map(m) => {
+            for (_, c) in m.drain() {
+                if let EnvCell::Alias(target, _) = c {
+                    worklist.push(target);
+                }
+            }
+        }
     }
 }
 
@@ -2252,5 +2316,57 @@ mod tests {
         assert_eq!(h.mem_limit(), 0);
         h.set_mem_limit(64);
         assert_eq!(h.mem_limit(), 64);
+    }
+
+    /// §B-111 — le drop d'une chaîne d'envs ne récurse jamais
+    /// en natif (vols 689/690 : `job: gc` dernier breadcrumb
+    /// avant `0xC00000FD` — le sweep libérait une closure au
+    /// sommet d'une chaîne de portées et `Drop` descendait
+    /// `parent`→`parent`→… hors de toute garde `maybe_grow`).
+    /// 50 000 maillons sur pile 2 Mio : sans la descente
+    /// itérative le test meurt en `0xC00000FD` — la signature
+    /// WER exacte du terrain.
+    #[test]
+    fn env_drop_deep_chain_iterative() {
+        std::thread::Builder::new()
+            .stack_size(2 * 1024 * 1024)
+            .spawn(|| {
+                let mut env = Env::global();
+                for _ in 0..50_000 {
+                    env = Env::local(env);
+                }
+                assert_eq!(envs_live(), 50_001);
+                drop(env);
+                assert_eq!(envs_live(), 0);
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
+    /// §B-111 — même classe par la seconde arête env→env :
+    /// `EnvCell::Alias` (live bindings d'import, chaînes de
+    /// ré-exports). La libération de la `BindingMap` devait
+    /// décrémenter chaque cible en nichant son drop — la
+    /// worklist extrait les arêtes avant libération.
+    #[test]
+    fn env_drop_alias_chain_iterative() {
+        std::thread::Builder::new()
+            .stack_size(2 * 1024 * 1024)
+            .spawn(|| {
+                let mut tail = Env::global();
+                for _ in 0..20_000 {
+                    let e = Env::local(Env::global());
+                    if let EnvKind::Local(m) = &mut e.borrow_mut().kind {
+                        m.insert("x", EnvCell::Alias(tail, "x".to_string()));
+                    }
+                    tail = e;
+                }
+                drop(tail);
+                assert_eq!(envs_live(), 0);
+            })
+            .unwrap()
+            .join()
+            .unwrap();
     }
 }
