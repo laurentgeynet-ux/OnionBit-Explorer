@@ -6681,7 +6681,7 @@ sortie : R-12 (layout incrémental) ou cadencement temporel.
   (sha256+abi+commit+utc) → audit
   re-hashé (divergence = échec) ;
   `$auditOnly` signale les
-  reliques `D:\cargo-target` sans
+  reliques `C:\cargo-target` sans
   les écrire. `build_terrain`/
   `build_dist` routés — plus de
   `Copy-Item` ad-hoc ; `target/
@@ -10456,6 +10456,21 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   556 Mio / 236 511 cellules — graphes JSON éclatés +
   sources co-retenues ; clés de prop déjà internées
   JS-C310). Verrou `str_census_ranks_and_sanitizes`.
+- [x] **JS-C418. Dette `gc_debt` — `gc_due` s'arme **sous**
+  la borne, la poubelle ne monte plus à `dead_hard`** (§B-114
+  tranché par vol 705 : 99,6 % du tas = déchets au kill,
+  vivant ~2 Mio — churn non balayable, pas rétention. Racine :
+  `gc_due` n'armé qu'à `bytes > lim` → le churn sous-limite
+  traversait les checkpoints sans sweep jusqu'au cap dur.
+  `gc_debt(lim) = min(lim/4, GC_DEAD_FLOOR)` arme au tick ;
+  `maybe_collect` balaye à la frontière de job — poubelle
+  bornée par la cadence des checkpoints. `gc_cap` jamais
+  hissé sans mesure `mark_live` réelle ; `dead_hard` reste
+  la borne de kill absolue ; sweep mid-eval toujours
+  interdit — pile Rust non racine). Verrou
+  `gc_debt_arms_sweep_below_soft_limit` (8 rounds × ~450 Kio
+  morts sous `lim` 1 Mio : survie + `bytes` retenu sous
+  `base + dette`).
 
 ## Tâches continues
 

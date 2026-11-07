@@ -4317,6 +4317,22 @@ impl Engine {
                 self.gc_due = true;
                 self.gc_cap = self.heap.bytes().saturating_mul(4).min(hard);
             }
+        } else {
+            // §B-114 (JS-C417) — dette de déchets **sous** la
+            // borne : le churn transitoire resté sous `lim`
+            // n'armait jamais `gc_due` — les checkpoints le
+            // traversaient sans balayer (vol 705 : 553 Mio de
+            // `Str` mortes = 99,6 % du tas au kill, vivant ~2
+            // Mio). Armer dès `gc_debt` fait balayer chaque
+            // frontière de job : la poubelle ne monte plus
+            // jusqu'au cap dur. `gc_cap` est **laissé** : le
+            // hissage ×4 n'est légitime qu'après une mesure
+            // `mark_live` réelle (la voie `over_limit`) — le
+            // poser ici éteindrait les kills suivants.
+            let lim = self.heap.mem_limit();
+            if lim > 0 && !self.gc_due && self.heap.bytes() > Self::gc_debt(lim) {
+                self.gc_due = true;
+            }
         }
         Ok(())
     }
@@ -4369,6 +4385,20 @@ impl Engine {
         } else {
             lim.saturating_add(Self::GC_DEAD_FLOOR)
         }
+    }
+
+    /// Dette de déchets armant `gc_due` **sous** la borne —
+    /// §B-114 (vol 705 : 553 Mio de `Str` mortes = 99,6 % du
+    /// tas au kill, vivant réel ~2 Mio — « deferred GC
+    /// unreachable » au sens littéral). `over_limit` n'arme le
+    /// sweep différé qu'à `bytes > lim` : un churn transitoire
+    /// resté sous `lim` traversait les checkpoints sans jamais
+    /// être balayé et montait jusqu'au cap dur. Armer dès
+    /// `min(lim/4, GC_DEAD_FLOOR)` fait réclamer chaque
+    /// frontière de job — la poubelle reste bornée par la
+    /// cadence des checkpoints, pas par le cap de kill.
+    pub(crate) fn gc_debt(lim: usize) -> usize {
+        (lim / 4).min(Self::GC_DEAD_FLOOR)
     }
 
     /// Recensement §B-59 des réservoirs natifs non comptés par
@@ -8631,5 +8661,43 @@ mod tests {
         assert_eq!(Engine::dead_hard(100 << 20), 356 << 20);
         // §B-114 : 384 Mio → 640 Mio (était 1,5 Gio).
         assert_eq!(Engine::dead_hard(384 << 20), 640 << 20);
+    }
+
+    /// JS-C417 — la dette `gc_due` s'arme **sous** `lim` (vol
+    /// 705 : 553 Mio de `Str` mortes sous-limite jamais
+    /// balayées aux checkpoints → kill `dead_hard`, vivant
+    /// réel ~2 Mio). Verrou : un churn sous-limite répété
+    /// survit — sans l'arme dette, l'estimé cumulait ~450 Kio
+    /// de morts par eval et le cap dur tuait en ~3 rounds ;
+    /// avec elle, chaque frontière de job réclame et `bytes`
+    /// retombe. `gc_cap` n'est pas hissé sans mesure — les
+    /// kills `over_limit` restent entiers.
+    #[test]
+    fn gc_debt_arms_sweep_below_soft_limit() {
+        let mut e = Engine::new();
+        // lim 1 Mio → dette 256 Kio, cap dur 1,25 Mio : chaque
+        // eval jette ~450 Kio de Str mortes — sous `lim`, la
+        // voie `over_limit` ne s'arme pas, seule la dette peut
+        // faire balayer.
+        e.heap.set_mem_limit(1024 * 1024);
+        e.collect();
+        let base = e.heap.bytes();
+        for _ in 0..8 {
+            let r = e.eval(
+                "(function(){var a=[];for(var i=0;i<4000;i++)a.push('s'+i+'-'+i);return a.length})()",
+            );
+            assert!(r.is_ok(), "churn sous-limite ne doit pas tuer : {r:?}");
+            // Frontière de job — la dette armée au tick fait
+            // balayer ici (no-op si le drain l'a déjà fait) :
+            // l'estimé n'a pas cumulé les ~450 Kio de morts du
+            // tour — sans l'arme, le 3ᵉ round croisait le cap.
+            e.maybe_collect();
+            assert!(
+                e.heap.bytes() < base + Engine::gc_debt(1024 * 1024),
+                "churn non balayé sous-limite : bytes={} B (base={})",
+                e.heap.bytes(),
+                base
+            );
+        }
     }
 }
