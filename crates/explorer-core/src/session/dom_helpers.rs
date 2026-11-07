@@ -1345,13 +1345,18 @@ pub(crate) fn box_y_of_node(root: &LayoutBox, target: NodeId) -> Option<f32> {
     best
 }
 
-/// Boîte posée de `node` — descente récursive de l'arbre de
-/// layout (chaque `LayoutBox` garde son `NodeId` source).
+/// Boîte posée de `node` — descente itérative de l'arbre de
+/// layout (chaque `LayoutBox` garde son `NodeId` source ;
+/// profondeur hostile = coût tas, R-24/JS-C400).
 pub(crate) fn box_rect(bx: &LayoutBox, node: NodeId) -> Option<Rect> {
-    if bx.node == Some(node) {
-        return Some(bx.rect);
+    let mut stack = vec![bx];
+    while let Some(b) = stack.pop() {
+        if b.node == Some(node) {
+            return Some(b.rect);
+        }
+        stack.extend(b.children.iter().rev());
     }
-    bx.children.iter().find_map(|c| box_rect(c, node))
+    None
 }
 
 /// Attribut en minuscules, `""` si absent.

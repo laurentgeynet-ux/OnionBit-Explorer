@@ -2591,6 +2591,12 @@ table {
 /// virgule de tête sépare les deux branches ; un argument
 /// manquant conserve le texte source (dégradation).
 fn resolve_light_dark(v: &str, dark: bool) -> String {
+    // JS-C400 — arête ∝ imbrication `light-dark(` dans la
+    // valeur (contrôlée par la feuille — §B-111) : segment tas.
+    explorer_common::deep(|| resolve_light_dark_inner(v, dark))
+}
+
+fn resolve_light_dark_inner(v: &str, dark: bool) -> String {
     let mut out = String::with_capacity(v.len());
     let mut rest = v;
     while let Some(i) = rest.to_ascii_lowercase().find("light-dark(") {
@@ -2658,6 +2664,12 @@ mod color_mix {
     /// polaires : lch, oklch, hsl (hue par le plus court chemin).
     /// Somme < 100 → alpha × somme (§3.3). Inconnu → brut.
     pub(crate) fn resolve_color_mix(v: &str) -> String {
+        // JS-C400 — arête ∝ imbrication `color-mix(` (réaction
+        // mutuelle via `mix_eval` — §B-111) : segment tas.
+        explorer_common::deep(|| resolve_color_mix_inner(v))
+    }
+
+    fn resolve_color_mix_inner(v: &str) -> String {
         let mut out = String::with_capacity(v.len());
         let mut rest = v;
         while let Some(i) = rest.to_ascii_lowercase().find("color-mix(") {

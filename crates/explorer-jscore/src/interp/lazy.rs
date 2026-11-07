@@ -60,6 +60,18 @@ use std::rc::Rc;
 /// `true` si `e` contient un `yield`/`await` (recursion sur
 /// les enfants — mêmes positions que `take_children`).
 fn has_suspend(e: &Expr) -> bool {
+    // JS-C400 — arête ∝ profondeur AST : le lowering tourne
+    // **avant** le `maybe_grow` d'`exec_body`, sur le segment
+    // courant — un corps profond débordait indifféremment de
+    // la pile native (§B-111, vol 687). Chaque arête re-bascule.
+    stacker::maybe_grow(
+        crate::parser::STACK_RED_ZONE,
+        crate::parser::STACK_GROW,
+        || has_suspend_inner(e),
+    )
+}
+
+fn has_suspend_inner(e: &Expr) -> bool {
     match e {
         Expr::Yield { .. } | Expr::Await(_) => true,
         Expr::Unary(_, a)
@@ -128,6 +140,15 @@ fn is_suspend(e: &Expr) -> bool {
 /// gauche-à-droite d'évaluation). Les enfants du suspend
 /// sont eux-mêmes liftés avant (suspend imbriqué).
 fn lift(e: &mut Expr, pre: &mut Vec<Stmt>, cx: &mut LowerCx) {
+    // JS-C400 — arête ∝ profondeur AST (voir `has_suspend`).
+    stacker::maybe_grow(
+        crate::parser::STACK_RED_ZONE,
+        crate::parser::STACK_GROW,
+        || lift_inner(e, pre, cx),
+    );
+}
+
+fn lift_inner(e: &mut Expr, pre: &mut Vec<Stmt>, cx: &mut LowerCx) {
     if is_suspend(e) {
         // Lift l'argument d'abord (`yield (await x)`…).
         match e {
@@ -340,6 +361,15 @@ fn lift_classlit(cl: &mut ClassLit, pre: &mut Vec<Stmt>, cx: &mut LowerCx) {
 /// `catch`, cible `for-*`) contient un suspend : `= défaut`,
 /// clé calculée `[e]` ou lvalue.
 fn has_suspend_pat(p: &Pat) -> bool {
+    // JS-C400 — arête ∝ profondeur du motif (voir `has_suspend`).
+    stacker::maybe_grow(
+        crate::parser::STACK_RED_ZONE,
+        crate::parser::STACK_GROW,
+        || has_suspend_pat_inner(p),
+    )
+}
+
+fn has_suspend_pat_inner(p: &Pat) -> bool {
     match p {
         Pat::Ident(_) => false,
         Pat::Lvalue(e) => has_suspend(e),
@@ -359,6 +389,15 @@ fn has_suspend_pat(p: &Pat) -> bool {
 /// où la spec ne les évalue que si le défaut tire (même
 /// déviation que `?:`/`&&`, documentée en en-tête).
 fn lift_pat(p: &mut Pat, pre: &mut Vec<Stmt>, cx: &mut LowerCx) {
+    // JS-C400 — arête ∝ profondeur du motif (voir `has_suspend`).
+    stacker::maybe_grow(
+        crate::parser::STACK_RED_ZONE,
+        crate::parser::STACK_GROW,
+        || lift_pat_inner(p, pre, cx),
+    );
+}
+
+fn lift_pat_inner(p: &mut Pat, pre: &mut Vec<Stmt>, cx: &mut LowerCx) {
     match p {
         Pat::Ident(_) => {}
         Pat::Lvalue(e) => lift(e, pre, cx),
@@ -629,6 +668,15 @@ fn lower_stmt(s: &Stmt, cx: &mut LowerCx) -> Vec<Stmt> {
 /// `true` si le statement contient un suspend en position
 /// non liftée (corps de if/while/for/try…).
 pub(crate) fn stmt_has_suspend(s: &Stmt) -> bool {
+    // JS-C400 — arête ∝ profondeur du corps (voir `has_suspend`).
+    stacker::maybe_grow(
+        crate::parser::STACK_RED_ZONE,
+        crate::parser::STACK_GROW,
+        || stmt_has_suspend_inner(s),
+    )
+}
+
+fn stmt_has_suspend_inner(s: &Stmt) -> bool {
     match s {
         Stmt::Expr(e) | Stmt::Throw(e) | Stmt::Return(Some(e)) => has_suspend(e),
         Stmt::Var(ds) | Stmt::Lexical { decls: ds, .. } | Stmt::Using { decls: ds, .. } => ds
@@ -714,6 +762,15 @@ pub(crate) fn stmt_has_suspend(s: &Stmt) -> bool {
 /// Descente récursive : chaque sous-statement composé est
 /// loweré à son tour (les corps de if/while/try…).
 fn lower_list(list: &[Stmt], cx: &mut LowerCx) -> Vec<Stmt> {
+    // JS-C400 — arête ∝ imbrication des corps (voir `has_suspend`).
+    stacker::maybe_grow(
+        crate::parser::STACK_RED_ZONE,
+        crate::parser::STACK_GROW,
+        || lower_list_inner(list, cx),
+    )
+}
+
+fn lower_list_inner(list: &[Stmt], cx: &mut LowerCx) -> Vec<Stmt> {
     let mut out = Vec::new();
     for s in list {
         let mut s2 = s.clone();

@@ -2643,6 +2643,17 @@ impl Dom {
     /// `<html>` plié peut porter `<head>`/`<body>`), comme le
     /// fait le mode « in body » du parseur.
     fn fold_structure_kids(&mut self, parent: NodeId, kids: Vec<NodeId>) -> Vec<NodeId> {
+        // JS-C400 — arête ∝ imbrication des tags de structure
+        // illégaux (le script contrôle le miroir sans borne de
+        // parseur — §B-111) : segment tas par niveau.
+        stacker::maybe_grow(
+            crate::parser::STACK_RED_ZONE,
+            crate::parser::STACK_GROW,
+            || self.fold_structure_kids_inner(parent, kids),
+        )
+    }
+
+    fn fold_structure_kids_inner(&mut self, parent: NodeId, kids: Vec<NodeId>) -> Vec<NodeId> {
         let mut out = Vec::with_capacity(kids.len());
         for k in kids {
             if self.structure_illegal(parent, k) {
@@ -3158,6 +3169,16 @@ impl Dom {
     /// `clone a node`, ses enfants de `content` sont copiés
     /// (chacun au niveau superficiel) même pour un clone shallow.
     pub fn clone_shallow_from(&mut self, src_dom: &Dom, src: NodeId) -> NodeId {
+        // JS-C400 — arête ∝ imbrication des `<template>` (voir
+        // `fold_structure_kids`).
+        stacker::maybe_grow(
+            crate::parser::STACK_RED_ZONE,
+            crate::parser::STACK_GROW,
+            || self.clone_shallow_from_inner(src_dom, src),
+        )
+    }
+
+    fn clone_shallow_from_inner(&mut self, src_dom: &Dom, src: NodeId) -> NodeId {
         let (kind, tag, attrs, text) = {
             let n = &src_dom.nodes[src as usize];
             (n.kind, n.tag.clone(), n.attrs.clone(), n.text.clone())

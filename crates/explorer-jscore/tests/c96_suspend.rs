@@ -229,3 +229,70 @@ fn c394_lazy_positions_guard_suspend() {
     );
     assert_eq!(seq(&s, &c), "r:0:1");
 }
+
+/// JS-C400 / §B-111 — le lowering d'un corps suspendable
+/// (`has_suspend`/`lift`/`lower_list`/`stmt_has_suspend`)
+/// tournait **avant** le `maybe_grow` d'`exec_body`, sur le
+/// segment courant : une fonction profonde débordait
+/// indifféremment de `RUST_MIN_STACK` (vol 687 — `0xC00000FD`
+/// à charge égale sous 2/32 Mio). Chaque arête récursive
+/// re-bascule désormais — la profondeur devient un coût tas.
+#[test]
+fn c400_suspend_lowering_deep_expr() {
+    std::thread::Builder::new()
+        .stack_size(2 * 1024 * 1024)
+        .spawn(|| {
+            let mut e = Engine::new();
+            // `!` × 20 000 sur `await p` — chaîne `Expr::Unary`
+            // profonde : `has_suspend`/`lift` descendaient
+            // autant de frames natives → débordement avant le
+            // fix sur cette pile de 2 Mio. La borne logique de
+            // nichement est relevée pour passer le parseur.
+            e.set_nest_limit(200_000);
+            let src = format!(
+                "{P} async function f(){{ return {}await p; }} f().then(function(v){{out='r:'+v;}},function(x){{out='E:'+x;}});",
+                "!".repeat(20_000)
+            );
+            e.eval(&src)
+                .unwrap_or_else(|err| panic!("eval -> {err}"));
+            assert_eq!(
+                e.eval("out").map(|v| e.describe(v)).unwrap_or_default(),
+                "r:true"
+            );
+        })
+        .unwrap_or_else(|_| panic!("spawn"))
+        .join()
+        .unwrap_or_else(|_| panic!("thread panicked"));
+}
+
+/// Même classe côté motif : `expr_to_pat` / `has_suspend_pat` /
+/// `lift_pat` recouraient nus depuis `eval_expr_inner`/
+/// `exec_stmt_inner`, déjà dans un segment — `[[[[…]]]]`
+/// hostile débordait le reste de segment sans pouvoir
+/// re-basculer.
+#[test]
+fn c400_suspend_lowering_deep_pat() {
+    std::thread::Builder::new()
+        .stack_size(2 * 1024 * 1024)
+        .spawn(|| {
+            let mut e = Engine::new();
+            // Affectation destructurante `([[[[…]]]] = v)` ×
+            // 20 000 → `expr_to_pat` descend toute la grammaire
+            // Array avant `bind_pat` (borne relevée pour le
+            // parseur ; l'éval échoue ensuite en destructuration
+            // — ce qui compte : plus de débordement).
+            e.set_nest_limit(200_000);
+            let n = 20_000;
+            let src = format!(
+                "{P} async function f(){{ var x; ({}x{} = await p); return 'ok'; }} f().then(function(v){{out='r:'+v;}},function(e2){{out='E:'+e2;}});",
+                "[".repeat(n),
+                "]".repeat(n)
+            );
+            e.eval(&src)
+                .unwrap_or_else(|err| panic!("eval -> {err}"));
+            let _ = e.eval("out");
+        })
+        .unwrap_or_else(|_| panic!("spawn"))
+        .join()
+        .unwrap_or_else(|_| panic!("thread panicked"));
+}

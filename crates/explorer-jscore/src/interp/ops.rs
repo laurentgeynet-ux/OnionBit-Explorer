@@ -161,6 +161,18 @@ pub(crate) fn array_index(key: &str) -> Option<usize> {
 /// expression isn't a valid pattern — the caller falls back to a
 /// plain-lvalue error.
 pub(crate) fn expr_to_pat(e: &Expr) -> Option<Pat> {
+    // JS-C400 — arête ∝ imbrication destructurante : l'appel
+    // arrive depuis `eval_expr_inner`/`exec_stmt_inner`, déjà
+    // dans un segment — `[[[[…]]]]` hostile débordait le reste
+    // de segment sans jamais pouvoir re-basculer (§B-111).
+    stacker::maybe_grow(
+        crate::parser::STACK_RED_ZONE,
+        crate::parser::STACK_GROW,
+        || expr_to_pat_inner(e),
+    )
+}
+
+fn expr_to_pat_inner(e: &Expr) -> Option<Pat> {
     match e {
         Expr::Ident(name) => Some(Pat::Ident(name.clone())),
         // `o.p`/`a[i]` destructuring targets assign through the

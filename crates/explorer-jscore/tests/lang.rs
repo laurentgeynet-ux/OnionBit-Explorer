@@ -2585,6 +2585,16 @@ fn string_escapes() {
     assert_eq!(ev_str(r"'\ud83c'"), "\u{fffd}");
     // Continuation de ligne sur tout terminateur.
     assert_eq!(ev_str("'a\\\u{2028}b'"), "ab");
+    // `\` + `<CR><LF>` = UNE LineTerminatorSequence — le LF pair
+    // ne retombe pas sur « newline in string literal » (JS-C400).
+    assert_eq!(ev_str("'a\\\r\nb'"), "ab");
+    assert_eq!(ev_str("'a\\\nb'"), "ab");
+    assert_eq!(ev_str("'a\\\rb'"), "ab");
+    assert_eq!(ev_str("'a\\\u{2029}b'"), "ab");
+    // Templates : continuation cuite vide pour tout terminateur.
+    assert_eq!(ev_str("`a\\\r\nb`"), "ab");
+    assert_eq!(ev_str("`a\\\u{2028}b`"), "ab");
+    assert_eq!(ev_str("`a\\\u{2029}b`"), "ab");
     // CR/LF bruts restent interdits ; LS/PS bruts permis (ES2019).
     assert!(Engine::new().eval("'a\nb'").is_err());
     assert!(Engine::new().eval("'a\rb'").is_err());
