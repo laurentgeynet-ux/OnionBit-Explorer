@@ -202,6 +202,47 @@ fn data_url_module_resolves_inline() {
     assert!(e.drain_dyn_imports().is_empty());
 }
 
+/// JS-C414 — `import()` depuis un module **inline** : le
+/// referrer `inline:N` (`import.meta.url` d'un module
+/// inline) est absolu mais opaque — `url_parse` y
+/// produisait `inline:/x.js`, refusé au transport
+/// (« schéma non supporté : inline », vimeo). Repli sur
+/// `hooks.page_url` : `./chunk.js` part résolu en
+/// `https://…` absolu dans `DynImportReq`.
+#[test]
+fn c414_dyn_import_inline_referrer_falls_back_to_page() {
+    let mut e = Engine::new();
+    e.sync_ctx_url(0, "https://site.example/app/page", 1);
+    e.set_import_drain();
+    e.eval_module("import('./chunk.js');", "inline:1")
+        .expect("module eval");
+    let reqs = e.drain_dyn_imports();
+    assert_eq!(reqs.len(), 1);
+    assert_eq!(reqs[0].url, "https://site.example/app/chunk.js");
+}
+
+/// Même repli côté `load_source` : l'import **statique**
+/// `./dep.js` d'un module inline retrouve la source seedée
+/// sous son URL page-résolue (avant : la probe cherchait
+/// `inline:/dep.js` — jamais seedée — puis le miss partait
+/// en defer/rejet).
+#[test]
+fn c414_static_dep_from_inline_module_uses_page_base() {
+    let mut e = Engine::new();
+    e.sync_ctx_url(0, "https://site.example/app/page", 1);
+    e.seed_module_source(
+        "https://site.example/app/dep.js".to_string(),
+        "export const v = 7;".to_string(),
+    );
+    e.eval_module(
+        "import {v} from './dep.js'; globalThis.__r = 'ok:' + v;",
+        "inline:1",
+    )
+    .expect("module eval");
+    let r = e.eval("globalThis.__r").expect("__r");
+    assert_eq!(e.describe(r), "ok:7");
+}
+
 /// JS-C245 — chaîne de modules profonde : `instantiate`/
 /// `evaluate_module` récursaient sans garde `maybe_grow` là
 /// où parser et éval classiques en ont une (vols 380/381 —

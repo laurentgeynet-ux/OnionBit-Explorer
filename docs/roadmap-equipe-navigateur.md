@@ -10256,6 +10256,14 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   <l:c>`). Verrous `fnat_finds_enclosing_function`,
   `fnat_top_level_is_empty`,
   `fnat_materializes_deferred_bodies`.
+- [x] **JS-C414. `import()` inline : repli de résolution
+  sur la page** (`effective_referrer` — referrer opaque
+  `inline:N`/`blob:`/`about:` → `hooks.page_url`
+  hiérarchique ; couvre probe `module_sources`, loader
+  `resolve`/`load`, résolution finale. Mur « schéma non
+  supporté : inline » vimeo). Verrous
+  `c414_dyn_import_inline_referrer_falls_back_to_page`,
+  `c414_static_dep_from_inline_module_uses_page_base`.
 
 ## Tâches continues
 
