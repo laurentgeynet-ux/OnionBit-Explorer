@@ -587,6 +587,20 @@ journal « livré ».
   casse mixte (`--Brand-*`, `--Font-*`, `--Spacer-*`…)
   récupère ses valeurs — github, mais aussi tout site à
   noms `--*` non-minuscules.
+- [ ] **`grid-area` : formes raccourcies 1/2/3 valeurs**
+  (diagnostic Google G-5, vols 681-684 — google.com pose
+  `grid-area: <l> / <c>` à 2 valeurs dans sa grille
+  d'accueil). `crates/explorer-layout/src/grid.rs` ne
+  résout `grid-area` numérique que sur `parts.len() == 4`
+  (`r / c / r2 / c2`) — toute forme courte retombe en
+  auto-placement. CSS grid-placement §5.1 : valeurs
+  omises = `auto` côté end quand le start est un entier
+  (span 1), sinon propagation du start ; la forme 1
+  valeur `<int>` vaut `<int> / auto`. Attendu : parser
+  1..=4 parts avec les défauts spec, pas `None` dès que
+  `!= 4`. Impact terrain mesuré : la grille Google
+  auto-place ses tuiles au lieu de les poser — rendu
+  dégradé non bloquant.
 
 ### Piste NAVIGATEUR
 
