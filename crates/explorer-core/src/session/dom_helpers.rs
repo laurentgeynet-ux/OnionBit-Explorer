@@ -107,7 +107,7 @@ pub(crate) fn collect_geometry(
         }
     }
     for c in &bx.children {
-        collect_geometry(dom, c, fixed, out);
+        explorer_common::deep(|| collect_geometry(dom, c, fixed, out));
     }
 }
 

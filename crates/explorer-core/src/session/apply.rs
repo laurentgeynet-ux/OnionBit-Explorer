@@ -1256,11 +1256,11 @@ fn graft_subtree(
         dom.set_template_contents(new, tnew)
             .map_err(|_| JournalReject::Dom)?;
         for (i, c) in src.children_iter(tfrag).into_iter().flatten().enumerate() {
-            graft_subtree(dom, src, c, tnew, i)?;
+            explorer_common::deep(|| graft_subtree(dom, src, c, tnew, i))?;
         }
     }
     for (i, c) in src.children_iter(src_id).into_iter().flatten().enumerate() {
-        graft_subtree(dom, src, c, new, i)?;
+        explorer_common::deep(|| graft_subtree(dom, src, c, new, i))?;
     }
     Ok(new)
 }
@@ -3286,6 +3286,44 @@ mod tests {
         let b = map[&13];
         assert_eq!(dom.tag_name(b).unwrap(), "b");
         assert_eq!(map.len(), 5, "5 clés miroir attendues : {map:?}");
+    }
+
+    /// §B-111 — soundcloud : un `Insert` hydraté très profond
+    /// débordait la pile worker (`tokio-rt-worker` mort,
+    /// `0xC00000FD`) — `graft_subtree` récursait natif par
+    /// niveau de sous-arbre. La greffe tourne désormais sous
+    /// `deep` : la profondeur devient un coût tas. Verrou :
+    /// ~10 000 niveaux sur une pile de 2 Mio — sans la garde,
+    /// l'overflow tue le thread (en réel : le process).
+    #[test]
+    fn graft_subtree_deep_survives() {
+        const DEPTH: usize = 10_000;
+        let graft = std::thread::Builder::new()
+            .stack_size(2 * 1024 * 1024)
+            .spawn(|| {
+                let mut src = Dom::with_max_nodes(DEPTH + 16);
+                let root = src.create_element("div").unwrap();
+                let mut cur = root;
+                for _ in 0..DEPTH {
+                    let n = src.create_element("div").unwrap();
+                    src.append_child(cur, n).unwrap();
+                    cur = n;
+                }
+                let mut dst = Dom::with_max_nodes(DEPTH + 16);
+                let par = dst.create_element("div").unwrap();
+                let new = graft_subtree(&mut dst, &src, root, par, 0).expect("greffe profonde");
+                // La chaîne complète est greffée : on redescend
+                // itératif jusqu'au 10 000ᵉ descendant.
+                let mut depth = 0usize;
+                let mut cur = new;
+                while let Some(c) = dst.children_iter(cur).unwrap().next() {
+                    depth += 1;
+                    cur = c;
+                }
+                assert_eq!(depth, DEPTH);
+            })
+            .expect("spawn");
+        graft.join().expect("thread greffe survécu");
     }
 
     /// Le texte miroir sans concordant de contenu à la

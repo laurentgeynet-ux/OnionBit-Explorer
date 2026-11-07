@@ -89,7 +89,9 @@ fn box_of(bx: &LayoutBox, node: explorer_dom::NodeId) -> Option<&LayoutBox> {
     if bx.node == Some(node) {
         return Some(bx);
     }
-    bx.children.iter().find_map(|c| box_of(c, node))
+    bx.children
+        .iter()
+        .find_map(|c| explorer_common::deep(|| box_of(c, node)))
 }
 
 /// Dernier fragment de texte posé dans le sous-arbre, avec
@@ -101,7 +103,7 @@ fn box_of(bx: &LayoutBox, node: explorer_dom::NodeId) -> Option<&LayoutBox> {
 /// anonyme enfant).
 fn last_text_frag(bx: &LayoutBox) -> Option<(&Fragment, &LineBox)> {
     for c in bx.children.iter().rev() {
-        if let Some(t) = last_text_frag(c) {
+        if let Some(t) = explorer_common::deep(|| last_text_frag(c)) {
             return Some(t);
         }
     }

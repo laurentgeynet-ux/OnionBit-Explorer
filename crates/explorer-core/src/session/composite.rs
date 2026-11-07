@@ -147,7 +147,7 @@ fn iframe_boxes(bx: &LayoutBox, dom: &Dom, out: &mut Vec<(NodeId, Rect)>) {
         }
     }
     for c in &bx.children {
-        iframe_boxes(c, dom, out);
+        explorer_common::deep(|| iframe_boxes(c, dom, out));
     }
 }
 

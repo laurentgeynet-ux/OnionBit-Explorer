@@ -293,7 +293,7 @@ pub(crate) fn remap_node_uncached(
     }
     let parent = old.parent(id).ok()??;
     let new_parent = if old.element(parent).is_ok() {
-        remap_node(old, new, parent, memo)?
+        explorer_common::deep(|| remap_node(old, new, parent, memo))?
     } else {
         new.document()
     };
