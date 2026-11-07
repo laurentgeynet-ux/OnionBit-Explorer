@@ -47,6 +47,10 @@ param(
 # Résolution du binaire : -Exe explicite, sinon la canonique
 # cargo (CARGO_TARGET_DIR > .cargo/config.toml > .\target —
 # même règle que deploy_engine.ps1). release préféré à debug.
+# Sous un `cargo build --target <triple>` (worktrees à
+# CARGO_TARGET_DIR isolé), le binaire vit dans
+# `<target>\<triple>\<prof>\` — la racine `<target>\<prof>\`
+# est alors vide et l'ancien script échouait « introuvable ».
 if ($Exe -eq '') {
   $repo = Split-Path -Parent $PSScriptRoot
   $target = if ($env:CARGO_TARGET_DIR) {
@@ -61,9 +65,33 @@ if ($Exe -eq '') {
   if (-not [System.IO.Path]::IsPathRooted($target)) {
     $target = Join-Path $repo $target
   }
-  foreach ($prof in 'release', 'debug') {
-    $cand = Join-Path $target "$prof\explorer-daemon.exe"
+  # Triple hôte (`x86_64-pc-windows-msvc`…) — rustc absent =
+  # chaîne vide, le repli glob plus bas couvre alors.
+  $triple = ''
+  try {
+    $v = & rustc -vV 2>$null | Select-String -Pattern '^host: (\S+)'
+    if ($v) { $triple = $v.Matches[0].Groups[1].Value }
+  } catch { }
+  $cands = @(
+    (Join-Path $target 'release\explorer-daemon.exe')
+    $(if ($triple) { Join-Path $target "$triple\release\explorer-daemon.exe" })
+    (Join-Path $target 'debug\explorer-daemon.exe')
+    $(if ($triple) { Join-Path $target "$triple\debug\explorer-daemon.exe" })
+  ) | Where-Object { $_ }
+  foreach ($cand in $cands) {
     if (Test-Path $cand) { $Exe = $cand; break }
+  }
+  # Repli borné : tout `<target>\<triple>\<prof>\explorer-
+  # daemon.exe` — couvre un triple différent de `rustc -vV`
+  # (cross-build) ou un rustc absent du PATH.
+  if ($Exe -eq '') {
+    $hit = Get-ChildItem -Path $target -Recurse -Depth 2 `
+      -Filter 'explorer-daemon.exe' -ErrorAction SilentlyContinue |
+      Sort-Object `
+        { if ($_.FullName -match '\\release\\') { 0 } else { 1 } }, `
+        { -$_.LastWriteTime.Ticks } |
+      Select-Object -First 1
+    if ($hit) { $Exe = $hit.FullName }
   }
 }
 if (-not (Test-Path $Exe)) {
@@ -148,7 +176,16 @@ $dpid = (Get-CimInstance Win32_Process `
   -Filter "ParentProcessId = $($proc.ProcessId)" `
   | Where-Object { $_.Name -eq 'explorer-daemon.exe' } `
   | Select-Object -First 1 -ExpandProperty ProcessId)
-if ($dpid) { Write-Output "daemon PID $dpid" }
+if ($dpid) {
+  # Pidfile `daemon-<port>.pid` : les vols visent le PID écrit
+  # ici (Get-Content), jamais un `taskkill` sur un PID lu
+  # ailleurs — le kill collatéral du vol 698 (PID 7392 = un
+  # AUTRE daemon de la machine) vient d'un taskkill à main
+  # levée. Le fichier est réécrit à chaque spawn du port.
+  $pidfile = Join-Path $LogDir "daemon-$Port.pid"
+  Set-Content -Path $pidfile -Value "$dpid" -NoNewline -Encoding ascii
+  Write-Output "daemon PID $dpid (pidfile $pidfile)"
+}
 
 if ($ok) {
   Write-Output "daemon $Port en ligne"
