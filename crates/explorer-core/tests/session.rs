@@ -12180,6 +12180,49 @@ async fn noscript_fallback_visible_without_js() {
     );
 }
 
+/// JS-C392 — §B-109 (vol 681, google.com) : le miroir jscore
+/// parsait `<noscript>` en éléments ; la sérialisation les
+/// transportait en `data-obreloc-prev` et `relocate_obreloc`
+/// les **resplicait dans le DOM session** → le
+/// `<style>table,div,span,p{display:none}</style>` de Google
+/// entrait en cascade → effondrement du rendu (13 boîtes,
+/// page blanche). Après synchro miroir→apply, le contenu
+/// noscript doit rester du **texte**, sans élément resplicé
+/// ni style collecté.
+#[tokio::test]
+async fn noscript_mirror_sync_no_style_leak() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/",
+        200,
+        "<!doctype html><html><body>\
+         <noscript><style>table,div,span,p{display:none}</style>\
+         <b>FB</b></noscript>\
+         <div id=\"x\">stay</div>\
+         <script>setTimeout(function(){\
+         document.getElementById('x').setAttribute('data-ok','1')},40)</script>\
+         </body></html>",
+    );
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/").await.unwrap();
+    // Forcer une synchro miroir → apply (mutation scriptée).
+    std::thread::sleep(std::time::Duration::from_millis(90));
+    s.pump_timers(id);
+    let dump = s.dom_dump(id).unwrap();
+    assert!(
+        !dump
+            .lines()
+            .any(|l| l.trim() == "<style>" || l.trim() == "<b>"),
+        "aucun enfant élément resplicé sous noscript : {dump}"
+    );
+    let lay = s.layout_dump(id).unwrap();
+    assert!(
+        lay.contains("stay"),
+        "le style noscript fuité ne doit pas masquer la page : {lay}"
+    );
+}
+
 // ---------- Vol 2026-10-26 — console : échecs de
 // sous-ressources ----------
 

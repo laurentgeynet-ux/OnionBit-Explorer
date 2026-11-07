@@ -4670,7 +4670,15 @@ const VOID_TAGS: &[&str] = &[
 ];
 
 /// Raw-text elements (content is text until matching close tag).
-const RAW_TEXT: &[&str] = &["script", "style", "textarea", "title"];
+/// `noscript` est rawtext **quand le scripting est actif**
+/// (spec « in body ») — or ce miroir n'existe que derrière un
+/// moteur JS : le scripting y est toujours on. Sans lui, les
+/// enfants éléments de `<noscript>` (ex. le
+/// `<style>table,div,span,p{display:none}` de Google)
+/// voyageaient en `data-obreloc-prev` et finissaient resplicés
+/// dans le DOM session → style/meta actifs en cascade = page
+/// blanche (§B-109, vol 681).
+const RAW_TEXT: &[&str] = &["script", "style", "textarea", "title", "noscript"];
 
 /// Éléments rawtext émis **verbatim** à la sérialisation
 /// (étape 55c) — le re-parseur ne décode pas d'entités en
@@ -4679,7 +4687,7 @@ const RAW_TEXT: &[&str] = &["script", "style", "textarea", "title"];
 /// sont RCDATA (décodés) et restent échappés normalement ;
 /// le set doit rester **en correspondance** avec les
 /// entrées non-RCDATA de `RAW_TEXT`.
-const RAW_VERBATIM: &[&str] = &["script", "style"];
+const RAW_VERBATIM: &[&str] = &["script", "style", "noscript"];
 
 // ------------------------------------------------------------------
 // JS-C291 — marqueurs de relocalisation `data-obreloc*`
@@ -5878,5 +5886,59 @@ mod tests {
         d.append(d.root, c);
         // `a` détaché reste invisible ; le clone attaché sert.
         assert_eq!(d.by_id("tpl"), Some(c));
+    }
+
+    // -- JS-C392 — §B-109 : `<noscript>` rawtext sous scripting -------
+
+    /// Le miroir n'existe que derrière un moteur JS → scripting
+    /// toujours on → `<noscript>` est du rawtext : ses enfants
+    /// balisés ne deviennent jamais des éléments. Sans cela ils
+    /// voyageaient en `data-obreloc-prev` puis étaient resplicés
+    /// dans le DOM session → le `<style>table,div,span,p{…}` de
+    /// Google fuyait dans la cascade (page blanche, vol 681).
+    #[test]
+    fn noscript_parse_comme_rawtext() {
+        let d = Dom::from_html(
+            "<html><body><noscript><style>div{display:none}</style><div>FB</div></noscript><p>stay</p></body></html>",
+        );
+        let ns = d.by_tag(d.root, "noscript");
+        assert_eq!(ns.len(), 1, "un <noscript>");
+        let kids = d.child_nodes(ns[0]);
+        assert_eq!(kids.len(), 1, "un seul enfant texte : {kids:?}");
+        assert_eq!(d.nodes[kids[0] as usize].kind, NodeKind::Text);
+        assert!(
+            d.nodes[kids[0] as usize]
+                .text
+                .contains("<style>div{display:none}</style><div>FB</div>"),
+            "le balisage survit verbatim en texte : {:?}",
+            d.nodes[kids[0] as usize].text
+        );
+        // Aucun élément ne doit exister sous noscript.
+        assert_eq!(d.by_tag(ns[0], "style"), []);
+        assert_eq!(d.by_tag(ns[0], "div"), []);
+    }
+
+    /// Round-trip : la sérialisation émet le contenu noscript
+    /// verbatim en ligne (pas de marqueur `data-obreloc`, pas
+    /// d'échappement qui corromprait la source au re-parse).
+    #[test]
+    fn noscript_serialize_verbatim_sans_reloc() {
+        let src = "<html><body><noscript><style>a{b:c}</style><i>x</i></noscript></body></html>";
+        let d = Dom::from_html(src);
+        let ser = d.serialize_document();
+        assert!(
+            ser.contains("<noscript><style>a{b:c}</style><i>x</i></noscript>"),
+            "contenu verbatim inline : {ser}"
+        );
+        assert!(
+            !ser.contains("data-obreloc"),
+            "aucun marqueur de relocalisation : {ser}"
+        );
+        // Re-parse : le texte reste du texte (stable).
+        let d2 = Dom::from_html(&ser);
+        let ns2 = d2.by_tag(d2.root, "noscript");
+        let kids2 = d2.child_nodes(ns2[0]);
+        assert_eq!(kids2.len(), 1);
+        assert_eq!(d2.by_tag(ns2[0], "style"), []);
     }
 }
