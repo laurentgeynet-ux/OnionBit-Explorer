@@ -3149,6 +3149,10 @@ impl Session {
     /// les nouvelles requêtes réseau vers le scheduler.
     #[allow(clippy::too_many_lines)] // drains séquentiels, chaque bras documenté
     pub(crate) fn after_script(&mut self, tab: TabId) {
+        // §B-111 — `net:`/`fmir` (morgue C407) : le drain a
+        // retourné (`net: frame ret`), la mort vit dans cette
+        // queue post-script — chaque étape nommée.
+        tracing::info!("net: afs tab={tab}");
         if self.js_stalled(tab) {
             return;
         }
@@ -3212,6 +3216,7 @@ impl Session {
         // l'identité du parent. **Avant** `drain_script_net` :
         // un `document.cookie` suivi d'un `fetch` dans le même
         // script doit émettre le cookie — comme le top-level.
+        tracing::info!("net: sinks");
         let sinks: Vec<FrameSink> = self
             .tabs
             .get_mut(&tab)
@@ -3280,12 +3285,16 @@ impl Session {
                 }
             }
         }
+        tracing::info!("net: dsn");
         self.drain_script_net(tab);
+        tracing::info!("net: dsn done");
         // Étape 134 : les miroirs des contextes `<iframe>`
         // mutés par leurs scripts reviennent en
         // `SubFrame.dom` (le composite re-rend au relayout).
         self.sync_frame_mirrors(tab);
+        tracing::info!("net: media");
         self.drain_media_commands(tab);
+        tracing::info!("net: afs done");
     }
 
     /// Livre les réponses arrivées — synchrone, sans yield :

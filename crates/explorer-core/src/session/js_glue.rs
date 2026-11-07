@@ -1350,6 +1350,7 @@ impl Session {
             let Some(eng) = entry.js.as_mut() else {
                 return;
             };
+            tracing::info!("net: fmir pull ctxs={}", entry.frame_ctxs.len());
             for fc in &entry.frame_ctxs {
                 if let Some(html) = eng.sync_dom_ctx(fc.ctx) {
                     touched.push((fc.sub, html));
@@ -1366,6 +1367,7 @@ impl Session {
                     // reprend son scripting (un cadre sans
                     // `allow-scripts` affiche `<noscript>`).
                     let scripting = f.sandbox.is_none_or(|s| s.scripts);
+                    tracing::info!("net: fmir parse sub={sub} html={}", html.len());
                     f.dom = explorer_html::TreeBuilder::parse_scripting(html, scripting);
                 }
             }
@@ -1374,6 +1376,7 @@ impl Session {
             // Un relayout rejoue la passe composite sur les
             // DOM frais — `relayout` est tolérant à l'absence
             // d'arbre posé (commit encore en vol).
+            tracing::info!("net: fmir relayout n={}", touched.len());
             let _ = self.relayout(tab);
         }
     }
