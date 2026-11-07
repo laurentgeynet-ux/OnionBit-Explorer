@@ -1739,12 +1739,15 @@ impl Session {
         seq: u64,
         body: Option<String>,
     ) {
-        if self.slow_eval_open(tab) {
-            // §B-1 (vol 221 : la rafale d'évals lentes
-            // passait ici — livraisons dyn, hors des deux
-            // sites couverts par Étape 161). Livrer
-            // `error` plutôt qu'évaluer : le script
-            // saute, le tour moteur continue.
+        // §B-1 (vol 221 : la rafale d'évals lentes passait
+        // ici — livraisons dyn, hors des deux sites couverts
+        // par Étape 161). Livrer `error` plutôt qu'évaluer :
+        // le script saute, le tour moteur continue. Un corps
+        // ≤ `SLOW_EVAL_PROBE_BYTES` peut sonder une fois par
+        // fenêtre (demi-ouvert, C397) ; `None` (fetch
+        // échoué — pas une éval) reste une erreur livrée.
+        let bytes = body.as_ref().map_or(usize::MAX, String::len);
+        if self.slow_eval_skip(tab, bytes) {
             let entry = self.tabs.get_mut(&tab);
             if let Some(eng) = entry.and_then(|e| e.js.as_mut()) {
                 eng.deliver_dyn_script(ctx, seq, None);

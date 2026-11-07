@@ -3953,9 +3953,13 @@ fn slow_eval_streak_saute_la_rafale_lente() {
         "éval rapide referme la série"
     );
     // Au cap : l'éval est sautée, erreur pipeline émise,
-    // moteur jamais appelé (streak figé au cap).
+    // moteur jamais appelé (streak figé au cap). Le script
+    // est > `SLOW_EVAL_PROBE_BYTES` : les petits peuvent
+    // sonder en demi-ouvert depuis C397 — un sauté franc
+    // doit être gros.
     s.tabs.get_mut(&tab).unwrap().slow_eval_streak = crate::session::js_glue::SLOW_EVAL_CAP;
-    s.eval_or_report(tab, e, "4", None, None);
+    let big = "0;".repeat(crate::session::js_glue::SLOW_EVAL_PROBE_BYTES / 2 + 1);
+    s.eval_or_report(tab, e, &big, None, None);
     let mut seen = false;
     while let Ok(ev) = rx.try_recv() {
         if let CoreEvent::PipelineError { message, .. } = ev {
@@ -3968,6 +3972,45 @@ fn slow_eval_streak_saute_la_rafale_lente() {
         crate::session::js_glue::SLOW_EVAL_CAP,
         "sautée : streak inchangé (moteur non appelé)"
     );
+}
+
+/// §B-1 acte II (vol 683 vimeo — ~19 victimes `bytes≈883`
+/// parmi 63 sauts) : le circuit ouvert n'est plus une mort
+/// permanente. Demi-ouvert : les scripts ≤
+/// `SLOW_EVAL_PROBE_BYTES` sondent une fois par fenêtre
+/// `SLOW_EVAL_PROBE_MS` ; une éval rapide referme le streak.
+#[test]
+fn slow_eval_sonde_demi_ouverte_referme_le_circuit() {
+    use crate::session::js_glue::{SLOW_EVAL_CAP, SLOW_EVAL_PROBE_BYTES};
+    let mut s = Session::new(Arc::new(FailTransport), Arc::new(TestFont));
+    let tab = s.open_tab();
+    s.tabs.get_mut(&tab).unwrap().slow_eval_streak = SLOW_EVAL_CAP;
+    // Gros script : sauté même en demi-ouvert.
+    assert!(
+        s.slow_eval_skip(tab, SLOW_EVAL_PROBE_BYTES + 1),
+        "gros script sauté sous circuit ouvert"
+    );
+    // Petit script : admis en sonde — cadence fraîche.
+    assert!(
+        !s.slow_eval_skip(tab, 883),
+        "petit script admis en sonde (victime vimeo 883 o)"
+    );
+    // Cadence épuisée dans la fenêtre : second petit sauté.
+    assert!(
+        s.slow_eval_skip(tab, 883),
+        "sonde épuisée — cadence hostile bornée"
+    );
+    // Fenêtre écoulée : une nouvelle sonde est admise.
+    s.tabs.get_mut(&tab).unwrap().slow_probe_at =
+        std::time::Instant::now().checked_sub(std::time::Duration::from_secs(20));
+    assert!(
+        !s.slow_eval_skip(tab, 883),
+        "sonde ré-admise après la fenêtre"
+    );
+    // Sonde rapide : `note_eval_ms` referme le streak —
+    // tout repasse, gros compris (page saine sortie de rafale).
+    s.note_eval_ms(tab, 0);
+    assert!(!s.slow_eval_skip(tab, usize::MAX), "circuit refermé");
 }
 
 /// Contrat 139k : `loop`/`mseBuffers` de l'offre JSON (SSE +

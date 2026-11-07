@@ -26,20 +26,51 @@ pub(crate) const SLOW_EVAL_MS: u64 = 2_000;
 /// Une éval rapide referme la série : la page qui alterne
 /// scripts lourds et légers n'est jamais pénalisée.
 pub(crate) const SLOW_EVAL_CAP: u32 = 8;
+/// Taille sous laquelle un script peut **sonder** un
+/// disjoncteur §B-1 ouvert (demi-ouvert) : les petits
+/// scripts (pushes de données, amorces ~1 Kio) coûtent ~ms
+/// à évaluer — leur passage `note_eval_ms` referme le
+/// streak et rend la page. Sans sonde, le circuit ouvert
+/// tuait **tout** ce qui arrivait pendant la fenêtre et ne
+/// se refermait jamais (seule une éval rapide reset, or
+/// rien ne tournait — vol 683 vimeo : ~19 victimes
+/// `bytes≈883` parmi 63 sauts, pushes `__next_f` sacrifiés).
+pub(crate) const SLOW_EVAL_PROBE_BYTES: usize = 8 * 1024;
+/// Cadence minimale entre deux sondes admises — borne le
+/// service hostile : un script minuscule mais lent
+/// (`while(1)` tient en 100 o) reste mesuré par
+/// `note_eval_ms`, garde le circuit ouvert et n'enchaîne un
+/// second probe qu'après la fenêtre.
+pub(crate) const SLOW_EVAL_PROBE_MS: u64 = 10_000;
 
 impl Session {
-    /// Disjoncteur §B-1 ouvert sur l'onglet ? — la série
-    /// d'évals lentes a atteint `SLOW_EVAL_CAP` (variante
-    /// vimeo : rafale `ok=true` hors portée de la deadline
-    /// par-script). Partagé par `eval_or_report`,
-    /// `eval_module_graph` et les
-    /// livraisons dyn (vol 221 : les rafales passaient par
-    /// `deliver_dyn_script`, hors des deux seuls sites
-    /// couverts — 0 disjoncteur tiré).
-    pub(crate) fn slow_eval_open(&self, tab: TabId) -> bool {
-        self.tabs
-            .get(&tab)
-            .is_some_and(|e| e.slow_eval_streak >= SLOW_EVAL_CAP)
+    /// Circuit §B-1 : faut-il sauter cette éval de `bytes`
+    /// octets ? Ouvert (`streak ≥ CAP`) : les gros scripts
+    /// sautent toujours ; un script ≤ `SLOW_EVAL_PROBE_BYTES`
+    /// peut **sonder** une fois par fenêtre
+    /// `SLOW_EVAL_PROBE_MS` — sonde rapide → `note_eval_ms`
+    /// reset le streak et le circuit se referme (page saine
+    /// sortie de la rafale), sonde lente → le streak tient,
+    /// la cadence s'épuise jusqu'à la prochaine fenêtre.
+    pub(crate) fn slow_eval_skip(&mut self, tab: TabId, bytes: usize) -> bool {
+        let Some(e) = self.tabs.get_mut(&tab) else {
+            return false;
+        };
+        if e.slow_eval_streak < SLOW_EVAL_CAP {
+            return false;
+        }
+        if bytes > SLOW_EVAL_PROBE_BYTES {
+            return true;
+        }
+        let now = Instant::now();
+        if e.slow_probe_at.is_some_and(|t| {
+            now.saturating_duration_since(t) < Duration::from_millis(SLOW_EVAL_PROBE_MS)
+        }) {
+            return true;
+        }
+        e.slow_probe_at = Some(now);
+        tracing::warn!(tab, bytes, "sonde §B-1 admise — demi-ouvert");
+        false
     }
 
     /// Comptabilise la durée d'une éval bloquante §B-1 :
@@ -816,7 +847,10 @@ impl Session {
     pub(crate) fn eval_module_graph(&mut self, tab: TabId, eng: &mut dyn JsEngine, me: &ModEval) {
         // Même disjoncteur §B-1 que `eval_or_report` : une
         // rafale `type=module` lente produit le même wedge.
-        if self.slow_eval_open(tab) {
+        // Octets = somme des sources du graphe — un graphe
+        // minuscule peut sonder (demi-ouvert, C397).
+        let bytes: usize = me.graph.sources.values().map(String::len).sum();
+        if self.slow_eval_skip(tab, bytes) {
             tracing::warn!(
                 tab,
                 name = %me.name,
@@ -1378,8 +1412,10 @@ impl Session {
         // lentes `ok=true` — 47 × 5,5 s tiennent le verrou
         // >260 s, navigate jamais retourné, API morte. Au
         // cap, les suivantes sont sautées comme un stall —
-        // page dégradée, API vivante.
-        if self.slow_eval_open(tab) {
+        // page dégradée, API vivante. Les scripts ≤
+        // `SLOW_EVAL_PROBE_BYTES` peuvent sonder une fois par
+        // fenêtre (demi-ouvert, C397 — victimes vimeo 883 o).
+        if self.slow_eval_skip(tab, src.len()) {
             tracing::warn!(
                 tab,
                 bytes = src.len(),

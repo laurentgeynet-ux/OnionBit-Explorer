@@ -528,6 +528,11 @@ pub(crate) struct Tab {
     /// saute les suivantes (erreur pipeline, page dégradée
     /// mais API vivante) ; une éval rapide referme la série.
     slow_eval_streak: u32,
+    /// Dernière sonde admise sous circuit ouvert (demi-ouvert
+    /// §B-1 — vol 683 : victimes `bytes≈883` pendant la
+    /// fenêtre). Cadencée `SLOW_EVAL_PROBE_MS` ; une éval
+    /// rapide referme le streak via `note_eval_ms`.
+    slow_probe_at: Option<std::time::Instant>,
     /// §B-4(c) T2-bis — le WARN `evals_sans_mutation` a tiré
     /// pendant le commit : `sub_commit_tail` ré-échantillonne
     /// `boot_diag` post-`load` (le premier tir voit
@@ -1560,6 +1565,7 @@ impl Session {
                 js_detached: None,
                 js_stall_until: None,
                 slow_eval_streak: 0,
+                slow_probe_at: None,
                 boot_mute_warned: false,
                 cmp_rearmed: 0,
                 paint_detached: false,
