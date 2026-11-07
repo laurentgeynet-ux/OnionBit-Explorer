@@ -509,6 +509,12 @@ impl Heap {
         F: FnMut(&mut dyn FnMut(ObjId)),
     {
         // -- Mark --
+        // Invariant explicite : la passe repart de marques
+        // nettoyées (JS-C417 — `mark_live` laisse désormais ses
+        // marques chaudes au census `Str` des kills ; chaque
+        // phase mark se ré-initialise elle-même au lieu de
+        // présupposer la nettoyage du passant précédent).
+        self.marks.fill(false);
         let mut worklist: Vec<ObjId> = Vec::new();
         let mut envs: HashSet<usize> = HashSet::new();
         let mut discovered: Vec<ObjId> = Vec::new();
@@ -658,7 +664,13 @@ impl Heap {
                 }
             }
         }
-        self.marks.fill(false);
+        // Marques laissées **chaudes** (JS-C417 / §B-114) : le
+        // census `Str` émis juste après au kill `over_limit`
+        // discrimine vivant retenu / déchets non balayables —
+        // le cas « rétention structurelle » vs « churn `s += c` »
+        // se lit alors au lieu d'être conjecturé. La passe
+        // suivante (`collect`/`mark_live`) se ré-initialise en
+        // tête — invariant explicite, pas d'état partagé.
         (live, bytes)
     }
 
@@ -695,24 +707,32 @@ impl Heap {
     }
 
     /// Census `Str` au kill — sonde §B-114 : la rétention
-    /// structurelle non bornée (186 987 cellules / 872 Mio au
-    /// kill `dead_hard`, vol 703 ; `Str` croît jusqu'à tout
-    /// cap — pas un working-set) se nomme par **contenu**, pas
-    /// par kind. Retourne `(octets total `Str`, compte
-    /// ≥64 Kio, compte ≥1 Mio, top-N (len, préfixe))` — les
+    /// structurelle non bornée (236 511 cellules / 556 Mio de
+    /// contenu au kill `dead_hard`, vol 704) se nomme par
+    /// **contenu** et par **statut** (vivant retenu vs déchets
+    /// de concat non balayables mid-eval — `live_b`/`dead_b`
+    /// exigent les marques chaudes de [`Heap::mark_live`]). Les
     /// préfixes sont tronqués à ~48 chars et sanitisés ASCII
-    /// (le contenu peut être binaire/hostile — jamais de dump
-    /// brut dans les journaux). O(cellules) — l'appelant le
-    /// réserve aux sites de kill, pas au tick.
-    pub(crate) fn str_census(&self, top_n: usize) -> (usize, usize, usize, Vec<(usize, String)>) {
-        let (mut total, mut big, mut huge, mut top) = (0usize, 0usize, 0usize, Vec::new());
-        for c in self.cells.iter().flatten() {
-            if let CellData::Str(s) = &c.data {
-                let n = s.len();
-                total += n;
-                big += usize::from(n >= 65_536);
-                huge += usize::from(n >= 1_048_576);
-                top.push((n, s.as_str()));
+    /// (contenu potentiellement binaire/hostile — jamais de
+    /// dump brut dans les journaux). O(cellules) — l'appelant
+    /// le réserve aux sites de kill, pas au tick.
+    pub(crate) fn str_census(&self, top_n: usize) -> StrCensus {
+        let (mut total, mut live, mut dead, mut big, mut huge, mut top) =
+            (0usize, 0usize, 0usize, 0usize, 0usize, Vec::new());
+        for (i, slot) in self.cells.iter().enumerate() {
+            if let Some(c) = slot {
+                if let CellData::Str(s) = &c.data {
+                    let n = s.len();
+                    total += n;
+                    if self.marks.get(i).copied().unwrap_or(false) {
+                        live += n;
+                    } else {
+                        dead += n;
+                    }
+                    big += usize::from(n >= 65_536);
+                    huge += usize::from(n >= 1_048_576);
+                    top.push((n, s.as_str()));
+                }
             }
         }
         top.sort_by_key(|e| std::cmp::Reverse(e.0));
@@ -734,7 +754,14 @@ impl Heap {
                 (n, p)
             })
             .collect();
-        (total, big, huge, top)
+        StrCensus {
+            total_b: total,
+            live_b: live,
+            dead_b: dead,
+            ge64k: big,
+            ge1m: huge,
+            top,
+        }
     }
 
     /// Recalcule `bytes` sur l'état courant des cellules —
@@ -790,6 +817,27 @@ impl Heap {
             gc_runs: self.gc_runs,
         }
     }
+}
+
+/// Census `Str` au kill — sonde §B-114 (JS-C417).
+pub(crate) struct StrCensus {
+    /// Octets de contenu (`len`) toutes cellules `Str`.
+    pub total_b: usize,
+    /// Octets sur cellules marquées vivantes — n'a de sens
+    /// que juste après [`Heap::mark_live`] (marques chaudes
+    /// laissées par JS-C417) ; froid sinon.
+    pub live_b: usize,
+    /// Octets sur cellules non marquées — déchets non
+    /// balayés mid-eval (churn concat) vs vivant retenu :
+    /// le discriminant « rétention structurelle » §B-114.
+    pub dead_b: usize,
+    /// Cellules ≥ 64 Kio de contenu.
+    pub ge64k: usize,
+    /// Cellules ≥ 1 Mio de contenu.
+    pub ge1m: usize,
+    /// Top-N `(len, préfixe ≤48 chars ASCII-sanitisé)`
+    /// trié par taille descendante.
+    pub top: Vec<(usize, String)>,
 }
 
 /// Instantané des compteurs du heap (JS-C37).
@@ -2551,28 +2599,35 @@ mod tests {
 
     /// JS-C417 — `str_census` : tri par taille, seaux
     /// ≥64 Kio/≥1 Mio, préfixe borné 48 chars ASCII-sanitisé
-    /// (non-ASCII → `.`). §B-114 : la rétention `Str` se nomme
-    /// par contenu au kill.
+    /// (non-ASCII → `.`), split vivant/déchet sur les marques
+    /// chaudes laissées par `mark_live`. §B-114 : la rétention
+    /// `Str` se nomme par contenu **et statut** au kill.
     #[test]
     fn str_census_ranks_and_sanitizes() {
         let mut h = Heap::new();
-        h.alloc_str("x".repeat(10));
+        let keep = h.alloc_str("x".repeat(10));
         h.alloc_str("big".repeat(30_000)); // 90 000 B → ≥64 Kio
         h.alloc_str("H".repeat(1_200_000)); // → ≥1 Mio
         h.alloc_str("préfixe-é-non-ascii\tavec\ttabs");
-        let (total, big, huge, top) = h.str_census(3);
+        // Marques chaudes : `keep` vivante, le reste déchet.
+        let (live_n, live_b) = h.mark_live(|mark| mark(keep));
+        assert_eq!(live_n, 1);
+        assert!(live_b >= 10, "la Str gardée compte : {live_b}");
+        let c = h.str_census(3);
         // `len()` = octets UTF-8 : les deux `é` comptent 2 B.
-        assert_eq!(total, 10 + 90_000 + 1_200_000 + 31);
-        assert_eq!(big, 2);
-        assert_eq!(huge, 1);
-        assert_eq!(top.len(), 3);
-        assert_eq!(top[0].0, 1_200_000);
-        assert_eq!(top[1].0, 90_000);
+        assert_eq!(c.total_b, 10 + 90_000 + 1_200_000 + 31);
+        assert_eq!(c.live_b, 10, "seule `keep` est marquée");
+        assert_eq!(c.dead_b, 90_000 + 1_200_000 + 31);
+        assert_eq!(c.ge64k, 2);
+        assert_eq!(c.ge1m, 1);
+        assert_eq!(c.top.len(), 3);
+        assert_eq!(c.top[0].0, 1_200_000);
+        assert_eq!(c.top[1].0, 90_000);
         // Préfixe du 3ᵉ : 31 B, non-ASCII/tab → '.'.
-        assert_eq!(top[2].0, 31);
-        assert!(top[2].1.is_ascii());
-        assert!(top[2].1.contains('.'));
+        assert_eq!(c.top[2].0, 31);
+        assert!(c.top[2].1.is_ascii());
+        assert!(c.top[2].1.contains('.'));
         // Borne de troncature : 48 chars max.
-        assert!(top[0].1.len() <= 48);
+        assert!(c.top[0].1.len() <= 48);
     }
 }

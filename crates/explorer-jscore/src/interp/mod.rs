@@ -3177,25 +3177,36 @@ impl Engine {
         self.heap.slab_overhead_bytes()
     }
 
-    /// Census `Str` aux deux kills heap (§B-114 — vol 703 :
-    /// 872 Mio de `Str` au kill `dead_hard`, rétention qui
-    /// croît jusqu'à tout cap → pas un working-set) — top-8
-    /// par taille + seaux ≥64 Kio/≥1 Mio, préfixes sanitisés.
-    /// Ligne `warn!` dédiée : elle survit à une troncature du
-    /// `RangeError` et nomme le contenu retenu (segment SABR ?
-    /// `ytInitialData` ? concat base64 ?).
+    /// Census `Str` aux deux kills heap (§B-114 — vol 704 :
+    /// 556 Mio de contenu `Str` au kill `dead_hard`) — top-8
+    /// par taille + seaux + **split vivant/déchet** (marques
+    /// chaudes du `mark_live` exécuté juste avant : le cas
+    /// « rétention structurelle » vs « churn concat non
+    /// balayable mid-eval » se lit directement). Ligne `warn!`
+    /// dédiée : elle survit à une troncature du `RangeError`.
+    /// `EXPLORER_J17_PROF=1` : le snapshot compteurs suit sur
+    /// la même émission (vol 704 : `j17_snapshot()` n'avait
+    /// aucun appelant en chemin daemon — tests uniquement).
     fn log_str_census(&self) {
-        let (stot, sbig, shuge, scens) = self.heap.str_census(8);
+        let c = self.heap.str_census(8);
         let mut top_s = String::new();
-        for (n, p) in &scens {
+        for (n, p) in &c.top {
             top_s.push_str(&format!(" {n}B:\"{p}\""));
         }
+        let j17 = if crate::j17_on() {
+            crate::j17_snapshot()
+        } else {
+            String::new()
+        };
         tracing::warn!(
             target: "js_alloc",
-            str_total_b = stot,
-            str_ge64k = sbig,
-            str_ge1m = shuge,
+            str_total_b = c.total_b,
+            str_live_b = c.live_b,
+            str_dead_b = c.dead_b,
+            str_ge64k = c.ge64k,
+            str_ge1m = c.ge1m,
             top = %top_s,
+            j17 = %j17,
             "str_census_kill"
         );
     }
