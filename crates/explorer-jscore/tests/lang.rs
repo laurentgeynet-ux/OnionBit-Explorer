@@ -5936,6 +5936,129 @@ fn c16_url_search_params() {
 }
 
 // ------------------------------------------------------------------
+// JS-V1/V-2 — URL mutable (accesseurs proto) + searchParams lié
+// vivant : setters de composants, write-back des mutations USP,
+// `size`, `has(name, value)`, paires malformées → TypeError.
+// ------------------------------------------------------------------
+
+#[test]
+fn v1_url_mut() {
+    for (src, want) in [
+        // Setters de composants — la spec mut les normalise.
+        (
+            "var u=new URL('https://ex.com/a'); u.pathname='/b/c'; u.href",
+            "https://ex.com/b/c",
+        ),
+        (
+            "var u=new URL('https://ex.com/a'); u.search='?x=1'; u.href",
+            "https://ex.com/a?x=1",
+        ),
+        (
+            "var u=new URL('https://ex.com/a?x=1'); u.search=''; u.href",
+            "https://ex.com/a",
+        ),
+        (
+            "var u=new URL('https://ex.com/a'); u.hash='sec'; u.href",
+            "https://ex.com/a#sec",
+        ),
+        (
+            "var u=new URL('https://ex.com/a'); u.hostname='sub.ex.com'; u.href",
+            "https://sub.ex.com/a",
+        ),
+        (
+            "var u=new URL('https://ex.com/a'); u.host='o:8443'; u.port+'|'+u.host",
+            "8443|o:8443",
+        ),
+        // Port par défaut → effacé de la sérialisation (spec).
+        (
+            "var u=new URL('https://ex.com/a'); u.port='443'; u.host",
+            "ex.com",
+        ),
+        (
+            "var u=new URL('https://ex.com:9000/a'); u.port=''; u.href",
+            "https://ex.com/a",
+        ),
+        (
+            "var u=new URL('https://ex.com/a'); u.username='u'; u.password='p'; u.href",
+            "https://u:p@ex.com/a",
+        ),
+        (
+            "var u=new URL('https://ex.com/a'); u.protocol='http'; u.href",
+            "http://ex.com/a",
+        ),
+        (
+            "var u=new URL('https://ex.com/a'); u.href='http://n.com/z?q=9'; u.href",
+            "http://n.com/z?q=9",
+        ),
+    ] {
+        assert_eq!(ev_str(src), want, "{src}");
+    }
+    // href invalide → TypeError (spec : le parse échoué jette —
+    // comportement Chrome, vérifié console).
+    assert!(Engine::new()
+        .eval("var u=new URL('https://ex.com/a'); u.href='::bad'")
+        .is_err());
+}
+
+#[test]
+fn v1_url_search_params_live() {
+    for (src, want) in [
+        // Le lien vivant : mutations USP → URL (spec `URL`).
+        (
+            "var u=new URL('https://ex.com/a?x=1'); u.searchParams.set('x','2'); u.search",
+            "?x=2",
+        ),
+        (
+            "var u=new URL('https://ex.com/a?x=1'); u.searchParams.append('y','3'); u.href",
+            "https://ex.com/a?x=1&y=3",
+        ),
+        (
+            "var u=new URL('https://ex.com/a?x=1&y=2'); u.searchParams.delete('x'); u.search",
+            "?y=2",
+        ),
+        (
+            "var u=new URL('https://ex.com/a?b=1&a=2'); u.searchParams.sort(); u.search",
+            "?a=2&b=1",
+        ),
+        // … et URL → USP : `search=` resynchronise la paire liée.
+        (
+            "var u=new URL('https://ex.com/a?x=1'); u.search='?z=9'; u.searchParams.get('z')",
+            "9",
+        ),
+        // Une seule instance `searchParams` par URL (spec).
+        (
+            "var u=new URL('https://ex.com/a'); u.searchParams===u.searchParams",
+            "true",
+        ),
+        // V-2 — `size` (spec 2023) + `has(name, value)` 2-arg.
+        ("new URLSearchParams('a=1&b=2&a=3').size", "3"),
+        ("new URLSearchParams('').size", "0"),
+        ("new URLSearchParams('a=1&a=2').has('a','2')", "true"),
+        ("new URLSearchParams('a=1&a=2').has('a','3')", "false"),
+        ("new URLSearchParams('a=1').has('a')", "true"),
+        (
+            "var s=new URLSearchParams('a=1&b=2'); s.delete('a','2'); s.toString()",
+            "a=1&b=2",
+        ),
+        (
+            "var s=new URLSearchParams('a=1&a=2'); s.delete('a','2'); s.toString()",
+            "a=1",
+        ),
+    ] {
+        assert_eq!(ev_str(src), want, "{src}");
+    }
+    // Paires itérables malformées → TypeError (spec : chaque
+    // item doit avoir exactement 2 éléments).
+    assert!(Engine::new().eval("new URLSearchParams([['a']])").is_err());
+    assert!(Engine::new()
+        .eval("new URLSearchParams([['a','1','x']])")
+        .is_err());
+    assert!(Engine::new().eval("new URLSearchParams([5])").is_err());
+    // Forme record inchangée.
+    assert_eq!(ev_str("new URLSearchParams({k:'v'}).get('k')"), "v");
+}
+
+// ------------------------------------------------------------------
 // JS-C17 — ES2024-2026 : Float16Array/f16round, Uint8Array b64/hex,
 // copyWithin, Annex B (`__proto__`…), Iterator global, crypto,
 // DisposableStack/SuppressedError

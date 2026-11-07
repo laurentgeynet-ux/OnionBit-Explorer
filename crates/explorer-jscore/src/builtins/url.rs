@@ -348,6 +348,82 @@ pub(crate) fn url_parse_static(e: &mut Engine, _t: Value, args: &[Value]) -> JsR
     }
 }
 
+/// Props cachées (PUA — jamais nommables depuis JS) :
+/// `\u{f131}urlh` = href canonique, **source de vérité
+/// unique** de l'instance (JS-V1/V-2 — les props `URL` sont
+/// des accesseurs proto : getters re-parsent, setters
+/// réécrivent). `\u{f131}urls` = l'objet `searchParams`
+/// caché (spec : une instance par URL, liée vivante).
+/// `\u{f131}urlpar` = lien retour `URLSearchParams → URL`
+/// posé par `url_ctor` — `usp_write` réécrit la query du
+/// parent à chaque mutation.
+const URL_HREF: &str = "\u{f131}urlh";
+const URL_SP: &str = "\u{f131}urls";
+const USP_PARENT: &str = "\u{f131}urlpar";
+
+/// `origin` sérialisé — `scheme://host[:port]` ou `"null"`
+/// (origine opaque : `file:`/pas d'hôte/schèmes non hiérar.).
+fn url_origin_str(p: &UrlParts) -> String {
+    if url_has_origin(&p.scheme) && p.scheme != "file" && !p.host.is_empty() {
+        let mut o = format!("{}://{}", p.scheme, p.host);
+        if !p.port.is_empty() {
+            o.push(':');
+            o.push_str(&p.port);
+        }
+        o
+    } else {
+        "null".to_string()
+    }
+}
+
+/// `this` → parts re-parsées depuis le href caché (les
+/// accesseurs vivent sur `URL.prototype` — `this` sans
+/// `\u{f131}urlh` = receveur incompatible, spec `TypeError`).
+fn url_this(e: &mut Engine, this: Value) -> JsResult<(crate::value::ObjId, UrlParts)> {
+    let Value::Obj(id) = this else {
+        return Err(e.type_error("URL accessor on non-object"));
+    };
+    let h = e
+        .get_prop(id, URL_HREF)
+        .and_then(|v| e.to_js_string(v).ok())
+        .unwrap_or_default();
+    let Some(p) = url_parse_absolute(&h) else {
+        return Err(e.type_error("URL accessor on incompatible receiver"));
+    };
+    Ok((id, p))
+}
+
+/// Écrit le href canonique + resynchronise `searchParams`
+/// (lien vivant — V-1). `usp_write` → sync parent
+/// re-sérialise la query encodée : le href du setter (query
+/// brute conservée, spec `u.search = '?a=%20'`) est rétabli.
+fn url_store(e: &mut Engine, id: crate::value::ObjId, p: &UrlParts) {
+    let h = e.str_val(url_href(p));
+    e.set_own(id, URL_HREF, h, false);
+    if let Some(Value::Obj(sp)) = e.get_prop(id, URL_SP) {
+        usp_write(e, sp, url_decode_pairs(&p.query));
+        let h = e.str_val(url_href(p));
+        e.set_own(id, URL_HREF, h, false);
+    }
+}
+
+/// Setter générique : lit `this`, applique `f` aux parts,
+/// réécrit. `f` rend `Err(msg)` → `TypeError` nommant l'input.
+fn url_set(
+    e: &mut Engine,
+    this: Value,
+    args: &[Value],
+    f: impl Fn(&mut UrlParts, &str) -> Result<(), String>,
+) -> JsResult<Value> {
+    let (id, mut p) = url_this(e, this)?;
+    let raw = e.to_js_string(arg(args, 0))?;
+    if let Err(m) = f(&mut p, &raw) {
+        return Err(e.type_error(m));
+    }
+    url_store(e, id, &p);
+    Ok(Value::Undefined)
+}
+
 pub(crate) fn url_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     let href = e.to_js_string(arg(args, 0))?;
     // `base` peut être une `URL` (lit son `href`) ou une string.
@@ -371,71 +447,193 @@ pub(crate) fn url_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Va
     };
     let proto = Value::Obj(e.protos.url);
     let id = e.heap.alloc_obj(crate::heap::Object::ordinary(proto));
-    let host = if p.port.is_empty() {
-        p.host.clone()
-    } else {
-        format!("{}:{}", p.host, p.port)
-    };
-    let origin = if url_has_origin(&p.scheme) && p.scheme != "file" {
-        let mut o = format!("{}://{}", p.scheme, p.host);
-        if !p.port.is_empty() {
-            o.push(':');
-            o.push_str(&p.port);
-        }
-        o
-    } else {
-        "null".to_string()
-    };
-    let fields = [
-        ("href", url_href(&p)),
-        ("protocol", format!("{}:", p.scheme)),
-        ("origin", origin),
-        ("username", p.user.clone()),
-        ("password", p.pass.clone()),
-        ("host", host),
-        ("hostname", p.host.clone()),
-        ("port", p.port.clone()),
-        (
-            "pathname",
-            if p.path.is_empty() && url_has_origin(&p.scheme) {
-                "/".to_string()
-            } else {
-                p.path.clone()
-            },
-        ),
-        (
-            "search",
-            if p.query.is_empty() {
-                String::new()
-            } else {
-                format!("?{}", p.query)
-            },
-        ),
-        (
-            "hash",
-            if p.frag.is_empty() {
-                String::new()
-            } else {
-                format!("#{}", p.frag)
-            },
-        ),
-    ];
-    for (k, v) in fields {
-        let sv = e.str_val(v);
-        e.set_own(id, k, sv, true);
+    // JS-V1/V-2 — props = accesseurs proto : le href
+    // canonique est la vérité unique, `searchParams` lié.
+    let h = e.str_val(url_href(&p));
+    e.set_own(id, URL_HREF, h, false);
+    let sp = usp_new(e, url_decode_pairs(&p.query));
+    if let Value::Obj(spid) = sp {
+        e.set_own(spid, USP_PARENT, Value::Obj(id), false);
     }
-    // `searchParams` lié à la query.
-    let pairs = url_decode_pairs(&p.query);
-    let sp = usp_new(e, pairs);
-    e.set_own(id, "searchParams", sp, true);
+    e.set_own(id, URL_SP, sp, false);
     Ok(Value::Obj(id))
 }
 
-pub(crate) fn url_href_get(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
-    let Value::Obj(id) = this else {
-        return Err(e.type_error("URL method on non-URL"));
-    };
-    Ok(e.get_prop(id, "href").unwrap_or(Value::Undefined))
+/// `toString`/`toJSON` — sérialisation courante (accesseur
+/// `href` : la vérité cachée, jamais un snapshot).
+pub(crate) fn url_href_get(e: &mut Engine, this: Value, a: &[Value]) -> JsResult<Value> {
+    url_acc_href(e, this, a)
+}
+
+// -- Accesseurs `URL.prototype` (JS-V1/V-2) ----------------------------
+// Spec WHATWG : toutes les props sont des getter/setter sur le
+// proto (énumérables — `for in`/descriptors de feature-detect
+// les voient). Chaque accès re-parse le href caché — source de
+// vérité unique, jamais de divergence part/prop.
+
+/// Getter générique : `this` → parts → champ sérialisé.
+fn url_get(e: &mut Engine, this: Value, f: impl Fn(&UrlParts) -> String) -> JsResult<Value> {
+    let (_id, p) = url_this(e, this)?;
+    Ok(e.str_val(f(&p)))
+}
+
+pub(crate) fn url_acc_href(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
+    url_get(e, this, url_href)
+}
+pub(crate) fn url_acc_protocol(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
+    url_get(e, this, |p| format!("{}:", p.scheme))
+}
+pub(crate) fn url_acc_origin(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
+    url_get(e, this, url_origin_str)
+}
+pub(crate) fn url_acc_username(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
+    url_get(e, this, |p| p.user.clone())
+}
+pub(crate) fn url_acc_password(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
+    url_get(e, this, |p| p.pass.clone())
+}
+pub(crate) fn url_acc_host(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
+    url_get(e, this, |p| {
+        if p.port.is_empty() {
+            p.host.clone()
+        } else {
+            format!("{}:{}", p.host, p.port)
+        }
+    })
+}
+pub(crate) fn url_acc_hostname(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
+    url_get(e, this, |p| p.host.clone())
+}
+pub(crate) fn url_acc_port(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
+    url_get(e, this, |p| p.port.clone())
+}
+pub(crate) fn url_acc_pathname(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
+    url_get(e, this, |p| {
+        if p.path.is_empty() && url_has_origin(&p.scheme) {
+            "/".to_string()
+        } else {
+            p.path.clone()
+        }
+    })
+}
+pub(crate) fn url_acc_search(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
+    url_get(e, this, |p| {
+        if p.query.is_empty() {
+            String::new()
+        } else {
+            format!("?{}", p.query)
+        }
+    })
+}
+pub(crate) fn url_acc_hash(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
+    url_get(e, this, |p| {
+        if p.frag.is_empty() {
+            String::new()
+        } else {
+            format!("#{}", p.frag)
+        }
+    })
+}
+/// `searchParams` — instance cachée liée vivante (V-1).
+pub(crate) fn url_acc_search_params(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
+    let (id, _p) = url_this(e, this)?;
+    Ok(e.get_prop(id, URL_SP).unwrap_or(Value::Undefined))
+}
+
+pub(crate) fn url_set_href(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    url_set(e, this, args, |p, raw| match url_parse_absolute(raw) {
+        Some(np) => {
+            *p = np;
+            Ok(())
+        }
+        None => Err(format!(
+            "Invalid URL: {}",
+            raw.chars().take(80).collect::<String>()
+        )),
+    })
+}
+pub(crate) fn url_set_protocol(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    url_set(e, this, args, |p, raw| {
+        // Spec : ignorer silencieusement un schéma invalide.
+        let s = raw.strip_suffix(':').unwrap_or(raw);
+        if !s.is_empty()
+            && s.chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.'))
+            && s.chars().next().is_some_and(|c| c.is_ascii_alphabetic())
+        {
+            p.scheme = s.to_ascii_lowercase();
+        }
+        Ok(())
+    })
+}
+pub(crate) fn url_set_username(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    url_set(e, this, args, |p, raw| {
+        p.user = raw.to_string();
+        Ok(())
+    })
+}
+pub(crate) fn url_set_password(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    url_set(e, this, args, |p, raw| {
+        p.pass = raw.to_string();
+        Ok(())
+    })
+}
+pub(crate) fn url_set_host(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    url_set(e, this, args, |p, raw| {
+        url_split_authority(raw, p);
+        Ok(())
+    })
+}
+pub(crate) fn url_set_hostname(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    url_set(e, this, args, |p, raw| {
+        url_split_authority(raw, p);
+        Ok(())
+    })
+}
+pub(crate) fn url_set_port(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    url_set(e, this, args, |p, raw| {
+        if raw.is_empty() {
+            p.port.clear();
+        } else if raw.chars().all(|c| c.is_ascii_digit()) {
+            let default = URL_DEFAULT_PORTS
+                .iter()
+                .find(|(s, _)| s == &p.scheme.as_str())
+                .map_or("", |(_, d)| *d);
+            p.port = if raw == default {
+                String::new()
+            } else {
+                raw.to_string()
+            };
+        }
+        Ok(())
+    })
+}
+pub(crate) fn url_set_pathname(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    url_set(e, this, args, |p, raw| {
+        // Spec : chemin opaque (`data:`/`mailto:`…) non
+        // assignable — ignoré, pas de jeté.
+        if url_has_origin(&p.scheme) || p.path.starts_with('/') {
+            let np = if raw.starts_with('/') {
+                raw.to_string()
+            } else {
+                format!("/{raw}")
+            };
+            p.path = url_norm_path(&np);
+        }
+        Ok(())
+    })
+}
+pub(crate) fn url_set_search(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    url_set(e, this, args, |p, raw| {
+        p.query = raw.strip_prefix('?').unwrap_or(raw).to_string();
+        Ok(())
+    })
+}
+pub(crate) fn url_set_hash(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
+    url_set(e, this, args, |p, raw| {
+        p.frag = raw.strip_prefix('#').unwrap_or(raw).to_string();
+        Ok(())
+    })
 }
 
 // -- URLSearchParams (x-www-form-urlencoded) --------------------------
@@ -542,6 +740,24 @@ pub(crate) fn usp_write(e: &mut Engine, id: crate::value::ObjId, pairs: Vec<(Str
         .collect();
     let arr = e.new_array(vals);
     e.set_own(id, USP_PAIRS, arr, false);
+    // JS-V1 — `u.searchParams` lié vivant : chaque mutation
+    // réécrit la query du parent (spec : même liste — les
+    // paires sont sérialisées encodées formulaire).
+    if let Some(Value::Obj(pid)) = e.get_prop(id, USP_PARENT) {
+        let pairs = usp_pairs(e, id);
+        if let Some(hv) = e.get_prop(pid, URL_HREF) {
+            let h = e.to_js_string(hv).unwrap_or_default();
+            if let Some(mut p) = url_parse_absolute(&h) {
+                p.query = pairs
+                    .iter()
+                    .map(|(k, v)| format!("{}={}", form_encode(k), form_encode(v)))
+                    .collect::<Vec<_>>()
+                    .join("&");
+                let hv = e.str_val(url_href(&p));
+                e.set_own(pid, URL_HREF, hv, false);
+            }
+        }
+    }
 }
 
 /// Nouvel objet `URLSearchParams` (proto `protos.url_params`).
@@ -576,8 +792,26 @@ pub(crate) fn usp_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Va
             match e.iter_values(v) {
                 Ok(items) => {
                     for it in items {
-                        let k = e.get_prop_value(it, "0")?;
-                        let val = e.get_prop_value(it, "1")?;
+                        // Spec `sequence<sequence>` : chaque item
+                        // doit être une paire exacte — scalaire ou
+                        // tuple ≠ 2 → TypeError (feature-detects).
+                        if !matches!(it, Value::Obj(_)) {
+                            return Err(
+                                e.type_error("URLSearchParams: sequence item is not a pair")
+                            );
+                        }
+                        let (k, val) = match e.iter_values(it) {
+                            Ok(ivs) if ivs.len() == 2 => (ivs[0], ivs[1]),
+                            Ok(_) => {
+                                return Err(e.type_error(
+                                    "URLSearchParams: pair must have exactly 2 elements",
+                                ));
+                            }
+                            // Non-itérable : l'objet indexé 0/1
+                            // reste accepté (permissif — la spec
+                            // jetterait aussi ici).
+                            Err(_) => (e.get_prop_value(it, "0")?, e.get_prop_value(it, "1")?),
+                        };
                         pairs.push((e.to_js_string(k)?, e.to_js_string(val)?));
                     }
                 }
@@ -623,10 +857,23 @@ pub(crate) fn usp_get_all(e: &mut Engine, this: Value, args: &[Value]) -> JsResu
     Ok(e.new_array(vals))
 }
 
+/// `.size` (spec 2023) — nombre de paires, accesseur proto.
+pub(crate) fn usp_size(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
+    let (_id, pairs) = usp_this(e, this)?;
+    Ok(Value::Num(pairs.len() as f64))
+}
+
 pub(crate) fn usp_has(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let (_id, pairs) = usp_this(e, this)?;
     let name = e.to_js_string(arg(args, 0))?;
-    Ok(Value::Bool(pairs.iter().any(|(k, _)| *k == name)))
+    // Spec 2023 : `has(name, value)` filtre aussi la valeur.
+    let val_filter = match arg(args, 1) {
+        Value::Undefined => None,
+        v => Some(e.to_js_string(v)?),
+    };
+    Ok(Value::Bool(pairs.iter().any(|(k, v)| {
+        *k == name && val_filter.as_ref().is_none_or(|f| f == v)
+    })))
 }
 
 pub(crate) fn usp_set(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {

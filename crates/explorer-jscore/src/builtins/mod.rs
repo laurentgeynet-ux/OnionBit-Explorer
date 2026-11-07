@@ -257,9 +257,96 @@ pub(crate) fn install(e: &mut Engine) {
     }
 
     {
+        // JS-V1/V-2 — props `URL` = accesseurs proto
+        // énumérables (spec WHATWG) : le href canonique vit en
+        // prop cachée `\u{f131}urlh` (source de vérité
+        // unique) ; `searchParams` lié vivant — mutations
+        // propagées dans les deux sens.
+        type UrlAcc = (
+            &'static str,
+            &'static str,
+            crate::heap::NativeFn,
+            Option<(&'static str, crate::heap::NativeFn)>,
+        );
         let up = e.protos.url;
         e.add_method(up, "toString", url_href_get);
         e.add_method(up, "toJSON", url_href_get);
+        let accs: [UrlAcc; 12] = [
+            (
+                "href",
+                "get href",
+                url_acc_href,
+                Some(("set href", url_set_href)),
+            ),
+            (
+                "protocol",
+                "get protocol",
+                url_acc_protocol,
+                Some(("set protocol", url_set_protocol)),
+            ),
+            (
+                "username",
+                "get username",
+                url_acc_username,
+                Some(("set username", url_set_username)),
+            ),
+            (
+                "password",
+                "get password",
+                url_acc_password,
+                Some(("set password", url_set_password)),
+            ),
+            (
+                "host",
+                "get host",
+                url_acc_host,
+                Some(("set host", url_set_host)),
+            ),
+            (
+                "hostname",
+                "get hostname",
+                url_acc_hostname,
+                Some(("set hostname", url_set_hostname)),
+            ),
+            (
+                "port",
+                "get port",
+                url_acc_port,
+                Some(("set port", url_set_port)),
+            ),
+            (
+                "pathname",
+                "get pathname",
+                url_acc_pathname,
+                Some(("set pathname", url_set_pathname)),
+            ),
+            (
+                "search",
+                "get search",
+                url_acc_search,
+                Some(("set search", url_set_search)),
+            ),
+            (
+                "hash",
+                "get hash",
+                url_acc_hash,
+                Some(("set hash", url_set_hash)),
+            ),
+            ("origin", "get origin", url_acc_origin, None),
+            (
+                "searchParams",
+                "get searchParams",
+                url_acc_search_params,
+                None,
+            ),
+        ];
+        for (key, gname, gf, sf) in accs {
+            let g = e.native_fn(gname, gf);
+            let s = sf.map_or(Value::Undefined, |(name, f)| e.native_fn(name, f));
+            if let Some(o) = e.heap.obj_mut(up) {
+                o.set_accessor(key, g, s, true);
+            }
+        }
         let pp = e.protos.url_params;
         e.add_method(pp, "get", usp_get);
         e.add_method(pp, "getAll", usp_get_all);
@@ -275,6 +362,11 @@ pub(crate) fn install(e: &mut Engine) {
         e.add_method(pp, "entries", usp_entries);
         let it = e.native_fn("entries", usp_entries);
         e.set_own(pp, crate::interp::SYM_ITERATOR, it, false);
+        // `.size` — spec 2023 (feature-detects core-js).
+        let sz = e.native_fn("get size", usp_size);
+        if let Some(o) = e.heap.obj_mut(pp) {
+            o.set_accessor("size", sz, Value::Undefined, true);
+        }
         let tag = e.str_val("URLSearchParams");
         e.set_own(pp, crate::interp::SYM_TO_STRING_TAG, tag, false);
         let tag = e.str_val("URL");
