@@ -10249,6 +10249,13 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   émis top-`created` au checkpoint, §B-97/§B-113
   forensique). Verrous `c412_prom_src_dumps_executor_
   excerpt` + `c412_prom_src_disarmed_is_silent`.
+- [x] **JS-C413. `fnat` — « fonction à `l:c` »**
+  (`fn_chain_at` : chaîne `FnLit` englobants, corps
+  différés matérialisés à la demande — lire le code au
+  site nommé par les sondes ; binaire `fnat <fichier>
+  <l:c>`). Verrous `fnat_finds_enclosing_function`,
+  `fnat_top_level_is_empty`,
+  `fnat_materializes_deferred_bodies`.
 
 ## Tâches continues
 

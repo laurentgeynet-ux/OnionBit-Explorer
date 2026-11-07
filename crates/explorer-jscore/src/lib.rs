@@ -53,6 +53,7 @@ mod dom_host;
 mod error;
 mod eventsource;
 mod files;
+mod fnat;
 mod geom;
 mod heap;
 mod idb;
@@ -97,6 +98,8 @@ pub use dom_host::{
 };
 pub use error::{Error, Result};
 pub use eventsource::{EsEvent, EsRequest, EsTransport};
+#[doc(hidden)]
+pub use fnat::{fn_chain_at, FnHit};
 pub use geom::{ElementGeom, GeoRect, GeomPosition, GeometryMap, GeometrySlot};
 pub use heap::{HeapStats, Host};
 pub use idb::{CacheEntry, CacheRegistry, IdbDb, IdbIndexDef, IdbRegistry, IdbStore};
