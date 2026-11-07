@@ -549,12 +549,12 @@ pub async fn pump_timers_shared(sess: &tokio::sync::Mutex<Session>, tab: TabId) 
     // ligne vivante brackete le site fautif.
     let tb = Instant::now();
     let out = tokio::task::spawn_blocking(move || {
-        tracing::info!("pump: run");
+        dlv_info!("pump: run");
         let jobs = eng.run_pending_bounded(max).unwrap_or(0);
-        tracing::info!("pump: js jobs={jobs}");
+        dlv_info!("pump: js jobs={jobs}");
         let mutated = if sync_ok {
             let m = Session::sync_for_apply(&mut *eng);
-            tracing::info!("pump: sync mutated={}", m.is_some());
+            dlv_info!("pump: sync mutated={}", m.is_some());
             m
         } else {
             None
@@ -565,17 +565,17 @@ pub async fn pump_timers_shared(sess: &tokio::sync::Mutex<Session>, tab: TabId) 
     sync_phase(tab, "pump.offlock", tb);
     let mut s = sess.lock().await;
     let tc = Instant::now();
-    tracing::info!("pump: commit");
+    dlv_info!("pump: commit");
     let jobs = s.commit_js_pump(tab, epoch, out.ok(), sync_ok);
     // 55e : les animations cadencées par ce battement.
-    tracing::info!("pump: anim");
+    dlv_info!("pump: anim");
     let _ = s.advance_animations(tab);
     sync_phase(tab, "pump.commit_lock", tc);
     drop(s);
     // 55h : la mutation rapportée par le miroir a été
     // enfilée — l'apply (re-parse → cascade → relayout →
     // repaint) tourne en `spawn_blocking` hors verrou.
-    tracing::info!("pump: dapply");
+    dlv_info!("pump: dapply");
     drain_applies_shared(sess, tab).await;
     jobs
 }
@@ -627,9 +627,9 @@ pub async fn eval_shared(sess: &tokio::sync::Mutex<Session>, tab: TabId, src: St
         // L'éval a pu armer timers/microtasks (attribution
         // d'hydratation, setTimeout(0)…) — on les draine pour
         // que la valeur rendue reflète l'état stabilisé.
-        tracing::info!("pump: evalrun");
+        dlv_info!("pump: evalrun");
         let jobs = eng.run_pending_bounded(max).unwrap_or(0);
-        tracing::info!("pump: evalret jobs={jobs}");
+        dlv_info!("pump: evalret jobs={jobs}");
         let mutated = if sync_ok {
             Session::sync_for_apply(&mut *eng)
         } else {
@@ -690,12 +690,12 @@ pub async fn drain_applies_shared(sess: &tokio::sync::Mutex<Session>, _tab: TabI
             // §B-111 — brackette le segment worker avant
             // `journal: apply` (morgue C405 : la mort
             // post-collect vit sur `tokio-rt-worker`).
-            tracing::info!("pump: applyjob tab={tab}");
+            dlv_info!("pump: applyjob tab={tab}");
             // ADR-0025 : voie journal (rejeu en place) ou
             // re-parse ; le rejet est remonté, la session
             // re-enfile en mode baseline.
             let r = apply::run_apply_job(g.payload_mut(), &ctx, &job, old_title.as_deref());
-            tracing::info!("pump: applyjob_done tab={tab}");
+            dlv_info!("pump: applyjob_done tab={tab}");
             (g, r, job)
         })
         .await;

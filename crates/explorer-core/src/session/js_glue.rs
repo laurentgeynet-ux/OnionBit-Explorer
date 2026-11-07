@@ -156,7 +156,7 @@ impl Session {
             // §B-111 — `pump:` (morgue C405) : la mort
             // post-collect vit sur le worker — chaque étape
             // du retour est nommée.
-            tracing::info!("pump: run");
+            dlv_info!("pump: run");
             let jobs = match eng.run_pending_bounded(max) {
                 Ok(n) => n,
                 Err(explorer_js::JsError::Timeout) => {
@@ -165,10 +165,10 @@ impl Session {
                 }
                 Err(_) => 0,
             };
-            tracing::info!("pump: js jobs={jobs}");
+            dlv_info!("pump: js jobs={jobs}");
             let m = if sync_ok {
                 let m = Self::sync_for_apply(eng.as_mut());
-                tracing::info!("pump: sync mutated={}", m.is_some());
+                dlv_info!("pump: sync mutated={}", m.is_some());
                 m
             } else {
                 None
@@ -183,7 +183,7 @@ impl Session {
         }
         if jobs > 0 {
             // Les callbacks ont pu émettre XHR/cookies/storage.
-            tracing::info!("pump: drains");
+            dlv_info!("pump: drains");
             self.after_script(tab);
             self.poll_net();
             sync_phase(tab, "pump.drains", t);
@@ -206,9 +206,9 @@ impl Session {
         self.drain_media_commands(tab);
         // Les applies enfilés par cette pompe sont exécutés
         // ici (hôte `&mut` synchrone — étape 55h).
-        tracing::info!("pump: dapply");
+        dlv_info!("pump: dapply");
         self.drain_applies();
-        tracing::info!("pump: done");
+        dlv_info!("pump: done");
         jobs
     }
 
@@ -1350,7 +1350,7 @@ impl Session {
             let Some(eng) = entry.js.as_mut() else {
                 return;
             };
-            tracing::info!("net: fmir pull ctxs={}", entry.frame_ctxs.len());
+            dlv_info!("net: fmir pull ctxs={}", entry.frame_ctxs.len());
             for fc in &entry.frame_ctxs {
                 if let Some(html) = eng.sync_dom_ctx(fc.ctx) {
                     touched.push((fc.sub, html));
@@ -1367,7 +1367,7 @@ impl Session {
                     // reprend son scripting (un cadre sans
                     // `allow-scripts` affiche `<noscript>`).
                     let scripting = f.sandbox.is_none_or(|s| s.scripts);
-                    tracing::info!("net: fmir parse sub={sub} html={}", html.len());
+                    dlv_info!("net: fmir parse sub={sub} html={}", html.len());
                     f.dom = explorer_html::TreeBuilder::parse_scripting(html, scripting);
                 }
             }
@@ -1376,7 +1376,7 @@ impl Session {
             // Un relayout rejoue la passe composite sur les
             // DOM frais — `relayout` est tolérant à l'absence
             // d'arbre posé (commit encore en vol).
-            tracing::info!("net: fmir relayout n={}", touched.len());
+            dlv_info!("net: fmir relayout n={}", touched.len());
             let _ = self.relayout(tab);
         }
     }
@@ -1602,9 +1602,9 @@ impl Session {
                 }
             };
             let t1 = sync_phase(tab, "event.dispatch", t0);
-            tracing::info!("net: event");
+            dlv_info!("net: event");
             let n = eng.run_pending();
-            tracing::info!("net: event ret n={n}");
+            dlv_info!("net: event ret n={n}");
             let m = Self::sync_for_apply(eng.as_mut());
             (p, sync_phase(tab, "event.mirror_sync", t1), m)
         };

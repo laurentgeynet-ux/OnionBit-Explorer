@@ -126,6 +126,30 @@ pub use shared::*;
 #[allow(clippy::wildcard_imports)]
 pub use types::*;
 
+/// Sondes §B-111 — `EXPLORER_DLV_TRACE=1` arme les marqueurs
+/// de morgue (`journal:`/`pump:`/`net:`/`fmir:`/`afs`) qui ont
+/// mené au fix C408 : la dernière ligne avant un overflow de
+/// pile nomme la phase fautive (le `.dmp` WER n'existe pas —
+/// abort Rust hors capture ; la trace tient lieu de morgue).
+/// Désarmées : un booléen lu une fois, zéro coût — les vols
+/// sains ne paient plus ~600 k lignes de stderr (JS-C409).
+pub(crate) fn dlv_trace() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("EXPLORER_DLV_TRACE").is_some())
+}
+
+/// Marqueur de morgue : `info!` émis seulement sous
+/// `EXPLORER_DLV_TRACE=1` — l'armement reste posé, le coût
+/// disparaît hors diagnostic.
+macro_rules! dlv_info {
+    ($($t:tt)*) => {
+        if crate::session::dlv_trace() {
+            tracing::info!($($t)*)
+        }
+    };
+}
+pub(crate) use dlv_info;
+
 /// Entrée d'historique d'onglet (étape 76) : la requête
 /// d'origine (rejouée à la traversée hors bfcache) + le
 /// marqueur « échec » — une navigation en échec pousse son

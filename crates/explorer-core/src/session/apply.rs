@@ -1416,16 +1416,9 @@ fn key_node(p: &PaintPayload, key: u64) -> Result<explorer_dom::NodeId, JournalR
 /// Résumé borné d'une op de journal — le `html` d'un
 /// `Insert` peut peser des Ko : on logue nature + clés +
 /// tailles, jamais le contenu (diagnostic JS-C289).
-/// Sonde §B-111 — `EXPLORER_DLV_TRACE=1` logue chaque op de
-/// journal **avant** exécution : la dernière ligne de log
-/// avant un overflow de pile nomme l'op fautive (le `.dmp`
-/// WER n'existe pas — abort Rust hors capture ; la trace
-/// tient lieu de morgue). Désarmée : un booléen lu une fois.
-fn dlv_trace() -> bool {
-    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *ON.get_or_init(|| std::env::var_os("EXPLORER_DLV_TRACE").is_some())
-}
-
+/// Le breadcrumb §B-111 `journal: op` vit sous `dlv_trace`
+/// (partagé `session::` — JS-C409) : la dernière ligne avant
+/// un overflow nomme l'op fautive.
 fn journal_op_desc(op: &explorer_js::DomMutation) -> String {
     use explorer_js::DomMutation::{AttachShadow, Insert, Remove, SetAttr, SetText};
     match op {
@@ -1666,7 +1659,7 @@ fn apply_journal(
     }
     // Étape 137a — cibles réelles des ops pour le relayout
     // incrémental ciblé (le journal remplace `job.dirty`).
-    tracing::info!(
+    dlv_info!(
         ops = journal.ops.len(),
         fp = journal.fingerprint,
         "journal: apply"
@@ -1674,10 +1667,8 @@ fn apply_journal(
     let mut touched = Vec::new();
     for (op_i, op) in journal.ops.iter().enumerate() {
         // §B-111 — breadcrumb opt-in : la dernière ligne avant
-        // la mort nomme l'op fautive (voir `dlv_trace`).
-        if dlv_trace() {
-            tracing::info!(op_i, "journal: op {}", journal_op_desc(op));
-        }
+        // la mort nomme l'op fautive (gate `dlv_trace` interne).
+        dlv_info!(op_i, "journal: op {}", journal_op_desc(op));
         if let Err(e) = apply_journal_op(p, ctx, op, &mut touched) {
             // Diagnostic JS-C289 — nomme l'op et la clé
             // fautive (le `html` d'un Insert peut peser des
@@ -1706,7 +1697,7 @@ fn apply_journal(
     // prématurément puis re-parserait à chaque pompe
     // (la garde a été perdue dans la réécriture C315 —
     // restaurée).
-    tracing::info!("journal: ops done");
+    dlv_info!("journal: ops done");
     let dom = p.dom.as_ref().ok_or(JournalReject::NoDom)?;
     if !journal.ops.is_empty() && engine_fingerprint(dom, &p.keymap) != journal.fingerprint {
         return Err(JournalReject::Fingerprint);
@@ -1820,7 +1811,7 @@ fn journal_relayout(
         }
         &touched_all
     };
-    tracing::info!(touched = touched.len(), "journal: relayout");
+    dlv_info!(touched = touched.len(), "journal: relayout");
     let incremental = journal_cover(&dom, touched)
         .is_some_and(|t| try_incr_payload(p, ctx, Some(&dom), &dom, t, t, &job.canvas_ops));
     if !incremental && relayout_dom_payload(p, ctx, &dom, &job.canvas_ops).is_err() {
@@ -1828,7 +1819,7 @@ fn journal_relayout(
         p.style_dirty = debt;
         return Err(JournalReject::Dom);
     }
-    tracing::info!(incremental, "journal: relayout done");
+    dlv_info!(incremental, "journal: relayout done");
     out.incremental = incremental;
     p.dom = Some(dom);
     out.repainted = true;
@@ -1895,7 +1886,7 @@ fn try_incr_payload(
     let Some(root_el) = new_dom.document_element() else {
         return false;
     };
-    tracing::info!(target = ?target_new, "journal: incr");
+    dlv_info!(target = ?target_new, "journal: incr");
     // Tables `images.*` indexées par `NodeId` de l'ANCIEN DOM —
     // re-key par `src`/styles AVANT la mesure intrinsèque
     // (étape 108) : `<img>` fetchés, `data:` et fonds
@@ -2095,7 +2086,7 @@ pub(crate) fn relayout_dom_payload(
     // cases, retirer plus tard pourrait emporter un
     // bitmap frais (étape 129).
     composite::purge_frame_bitmaps(p);
-    tracing::info!("apply: relayout");
+    dlv_info!("apply: relayout");
     let styles = styles_payload(p, dom, ctx.viewport, ctx.color_scheme, ctx.scripting);
     tracing::info!(
         ms = u64::try_from(t0.elapsed().as_millis()).unwrap_or(u64::MAX),
@@ -2649,9 +2640,9 @@ impl Session {
             // §B-111 — `pump:` pré-apply (morgue C406) — même
             // fenêtre silencieuse que `run_apply` côté voie
             // détachée : reclaim → ctx → freshen → take_paint.
-            tracing::info!("pump: take tab={}", job.tab);
+            dlv_info!("pump: take tab={}", job.tab);
             self.reclaim_orphaned_paint(job.tab);
-            tracing::info!("pump: reclaim tab={}", job.tab);
+            dlv_info!("pump: reclaim tab={}", job.tab);
             let ctx = self.apply_ctx();
             {
                 let Some(entry) = self.tabs.get_mut(&job.tab) else {
@@ -2665,7 +2656,7 @@ impl Session {
                     continue; // navigation supplantée → caduque
                 }
             }
-            tracing::info!("pump: freshen tab={}", job.tab);
+            dlv_info!("pump: freshen tab={}", job.tab);
             self.freshen_apply(job.tab, &mut job);
             // B-25 (caf) : un job baseline sans `html` —
             // rejet de journal re-enfilé dont la resync n'a
@@ -2682,7 +2673,7 @@ impl Session {
             }
             let entry = self.tabs.get_mut(&job.tab)?;
             entry.paint_detached = true;
-            tracing::info!("pump: paint tab={}", job.tab);
+            dlv_info!("pump: paint tab={}", job.tab);
             let p = entry.take_paint();
             let g = DetachedPaint::new(
                 std::sync::Arc::clone(&self.orphaned_paints),
@@ -2949,9 +2940,9 @@ impl Session {
         // la fenêtre silencieuse = reclaim (drop d'une
         // PaintPayload orpheline) + apply_ctx ; `apply: début`
         // n'émettant jamais, la mort vit ici.
-        tracing::info!("pump: rapply tab={tab}");
+        dlv_info!("pump: rapply tab={tab}");
         self.reclaim_orphaned_paint(tab);
-        tracing::info!("pump: reclaim tab={tab}");
+        dlv_info!("pump: reclaim tab={tab}");
         let ctx = self.apply_ctx();
         {
             let Some(entry) = self.tabs.get_mut(&tab) else {
@@ -2966,14 +2957,14 @@ impl Session {
         }
         let t_apply = Instant::now();
         tracing::info!(tab, journal = job.journal.is_some(), "apply: début");
-        tracing::info!("pump: freshen tab={tab}");
+        dlv_info!("pump: freshen tab={tab}");
         self.freshen_apply(tab, job);
         let Some(entry) = self.tabs.get_mut(&tab) else {
             return;
         };
         let old_title = entry.title.clone();
         let epoch = job.epoch;
-        tracing::info!("pump: paint tab={tab}");
+        dlv_info!("pump: paint tab={tab}");
         let mut p = entry.take_paint();
         // ADR-0025 : rejeu du journal en place — `NodeId`
         // stables, zéro re-parse. Tout rejet bascule sur la
