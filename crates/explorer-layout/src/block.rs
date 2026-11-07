@@ -621,7 +621,7 @@ fn eval_calc(expr: &str, pct_basis: f32, em_basis: f32, ctx: &BlockCtx) -> Optio
         }
         if b[*i] == b'(' {
             *i += 1;
-            let t = expr_in(s, i, pct, em, ctx)?;
+            let t = explorer_common::deep(|| expr_in(s, i, pct, em, ctx))?;
             while *i < b.len() && b[*i].is_ascii_whitespace() {
                 *i += 1;
             }
@@ -841,9 +841,11 @@ fn escaped_bottom_run(bx: &LayoutBox, cb_w: f32, parent_fs: f32, ctx: &BlockCtx)
                 && c.float == Float::None
         }) {
             if margin_transparent(c, cb_w, fs, ctx) {
-                run.fold(margin_chain(c, cb_w, fs, ctx));
+                run.fold(explorer_common::deep(|| margin_chain(c, cb_w, fs, ctx)));
             } else {
-                run.fold(escaped_bottom_run(c, cb_w, fs, ctx));
+                run.fold(explorer_common::deep(|| {
+                    escaped_bottom_run(c, cb_w, fs, ctx)
+                }));
             }
         }
     }
@@ -908,10 +910,14 @@ fn collapsed_top_margin(
             break;
         }
         if chain_transparent(c, cb_w, cb_h, fs, ctx) {
-            run.fold(candidate_chain(c, cb_w, cb_h, fs, ctx));
+            run.fold(explorer_common::deep(|| {
+                candidate_chain(c, cb_w, cb_h, fs, ctx)
+            }));
             continue;
         }
-        run.fold(collapsed_top_margin(c, cb_w, cb_h, fs, ctx));
+        run.fold(explorer_common::deep(|| {
+            collapsed_top_margin(c, cb_w, cb_h, fs, ctx)
+        }));
         break;
     }
     run
@@ -957,7 +963,7 @@ fn chain_transparent(
                 return true;
             }
             let cfs = font_size_px(&c.style, fs, ctx);
-            chain_transparent(c, cb_w, cb_h, cfs, ctx)
+            explorer_common::deep(|| chain_transparent(c, cb_w, cb_h, cfs, ctx))
         })
 }
 
@@ -986,7 +992,9 @@ fn candidate_chain(
         }
         let cfs = font_size_px(&c.style, fs, ctx);
         if chain_transparent(c, cb_w, cb_h, cfs, ctx) {
-            run.fold(candidate_chain(c, cb_w, cb_h, cfs, ctx));
+            run.fold(explorer_common::deep(|| {
+                candidate_chain(c, cb_w, cb_h, cfs, ctx)
+            }));
         } else {
             let cm = margins(&c.style, cb_w, cfs, ctx);
             run.add(cm.top);
@@ -1016,7 +1024,7 @@ fn margin_chain(bx: &LayoutBox, cb_w: f32, parent_fs: f32, ctx: &BlockCtx) -> Ma
             continue;
         }
         if margin_transparent(c, cb_w, fs, ctx) {
-            run.fold(margin_chain(c, cb_w, fs, ctx));
+            run.fold(explorer_common::deep(|| margin_chain(c, cb_w, fs, ctx)));
         } else {
             let cm = margins(&c.style, cb_w, font_size_px(&c.style, fs, ctx), ctx);
             run.add(cm.top);

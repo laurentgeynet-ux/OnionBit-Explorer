@@ -1211,7 +1211,7 @@ impl TreeBuilder {
     fn collect_descendants(&self, root: NodeId, out: &mut Vec<NodeId>) {
         for child in self.dom.descendants(root).into_iter().flatten() {
             out.push(child);
-            self.collect_descendants(child, out);
+            explorer_common::deep(|| self.collect_descendants(child, out));
         }
     }
 
@@ -1248,7 +1248,7 @@ impl TreeBuilder {
             return;
         }
         for child in self.dom.children(src).unwrap_or_default() {
-            self.clone_subtree_into(child, clone);
+            explorer_common::deep(|| self.clone_subtree_into(child, clone));
         }
     }
 

@@ -2334,7 +2334,9 @@ fn parent_computed(
     if let Some(s) = memo.get(&parent) {
         return Some(s.clone());
     }
-    let grand = parent_computed(engine, dom, parent, env, state, memo, mcache, root_fs);
+    let grand = explorer_common::deep(|| {
+        parent_computed(engine, dom, parent, env, state, memo, mcache, root_fs)
+    });
     let s = engine.compute_with_parent(
         dom,
         parent,

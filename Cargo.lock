@@ -929,6 +929,7 @@ dependencies = [
 name = "explorer-html"
 version = "0.2.0"
 dependencies = [
+ "explorer-common",
  "explorer-dom",
 ]
 

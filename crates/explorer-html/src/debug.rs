@@ -55,6 +55,6 @@ fn dump_children(dom: &Dom, parent: NodeId, depth: usize, out: &mut String) {
             }
         }
         out.push('\n');
-        dump_children(dom, child, depth + 1, out);
+        explorer_common::deep(|| dump_children(dom, child, depth + 1, out));
     }
 }

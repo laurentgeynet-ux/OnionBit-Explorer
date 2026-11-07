@@ -111,7 +111,9 @@ pub(crate) fn ignorable_in_table(b: &LayoutBox) -> bool {
         b.kind,
         crate::BoxKind::Text | crate::BoxKind::AnonymousBlock
     ) && b.text.as_deref().is_none_or(|t| t.trim().is_empty())
-        && b.children.iter().all(ignorable_in_table)
+        && b.children
+            .iter()
+            .all(|c| explorer_common::deep(|| ignorable_in_table(c)))
 }
 
 /// Styles des `col` explicites en ordre document — sources de
@@ -131,7 +133,7 @@ fn collect_col_styles<'a>(bx: &'a LayoutBox, out: &mut Vec<&'a ComputedStyle>) {
             }
             _ => {
                 if c.kind == crate::BoxKind::AnonymousBlock {
-                    collect_col_styles(c, out);
+                    explorer_common::deep(|| collect_col_styles(c, out));
                 }
             }
         }
