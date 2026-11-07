@@ -4087,3 +4087,24 @@ fn after_script_reentry_defers_without_nesting() {
     assert!(s.after_script_again.is_empty());
     assert!(!s.in_after_script);
 }
+
+/// JS-C415 — le kind `net.drop` discrimine `badr` (résolution
+/// impossible — base opaque : le mur « host='' » réel) de
+/// `blocked` (résolue puis refusée mixed/CSP/méthode/mode).
+#[test]
+fn c415_net_drop_kind_discriminates_badr() {
+    use super::net::net_drop_kind;
+    let page = Url::parse("https://x.example/p").expect("url");
+    // Relative ou absolue sur base hiérarchique → résout,
+    // le refus est ailleurs → `blocked`.
+    assert_eq!(net_drop_kind(&page, "/data"), "blocked");
+    assert_eq!(net_drop_kind(&page, "https://y.example/a"), "blocked");
+    // Base opaque : relative n'a nulle part où aller → `badr`.
+    let blank = Url::parse("about:blank").expect("blank");
+    assert_eq!(net_drop_kind(&blank, "/data"), "badr");
+    assert_eq!(net_drop_kind(&blank, "rel/x.js"), "badr");
+    // Fragment seul résout même sur base opaque → pas badr.
+    assert_eq!(net_drop_kind(&blank, "#top"), "blocked");
+    // Absolu résout sans tenir compte de la base → pas badr.
+    assert_eq!(net_drop_kind(&blank, "https://a.example/"), "blocked");
+}

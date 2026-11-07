@@ -10264,6 +10264,13 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   supporté : inline » vimeo). Verrous
   `c414_dyn_import_inline_referrer_falls_back_to_page`,
   `c414_static_dep_from_inline_module_uses_page_base`.
+- [x] **JS-C415. Sondes `net.host`/`net.badr` — l'hôte
+  résolu derrière « `host=""` »** (l'artefact « host=''
+  = relative brute » séparé du mur réel : `badr` =
+  `Url::resolve` échoue sur base de ctx opaque/vide ;
+  `net.host` = hôte résolu dedup — audit des `host=""`
+  dash.js/rumble/vimeo). Verrou
+  `c415_net_drop_kind_discriminates_badr`.
 
 ## Tâches continues
 

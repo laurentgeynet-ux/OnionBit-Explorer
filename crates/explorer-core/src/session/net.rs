@@ -51,6 +51,19 @@ const MAX_STREAK_URLS: usize = 1_024;
 /// Borne dedup des sondes `net.drop`/`net.fail` (JS-C366) —
 /// couples `(kind, host)` retenus ; au-delà, log direct.
 const MAX_NET_PROBE_SEEN: usize = 512;
+
+/// JS-C415 — kind `net.drop` : `badr` si `url` ne résout pas
+/// contre `base` (base opaque/vide — le mur « host='' » réel :
+/// ctx né sous `about:`/`data:` — la relative n'a nulle part
+/// où aller), `blocked` si elle résout puis est refusée
+/// (mixed/CSP/méthode/mode same-origin).
+pub(crate) fn net_drop_kind(base: &Url, url: &str) -> &'static str {
+    if Url::resolve(base, url.trim()).is_err() {
+        "badr"
+    } else {
+        "blocked"
+    }
+}
 /// Borne de passes `after_script` déroulées par entrée
 /// (§B-111 — vol 695) : une tempête de livraisons qui
 /// re-marque à chaque passe cède la main sous verrou ; les
@@ -2583,9 +2596,30 @@ impl Session {
             mode,
             credentials,
         ) else {
-            self.note_net_drop("blocked", url);
+            // JS-C415 — discrimine le motif : `badr` = l'URL
+            // brute n'a pas résolu contre `req_base` (le mur
+            // réel « host='' » — base de ctx opaque/vide :
+            // une relative n'a nulle part où aller) ;
+            // `blocked` = résolue puis refusée (mixed/CSP/
+            // méthode/mode same-origin).
+            let kind = net_drop_kind(&req_base, url);
+            if kind == "badr" {
+                self.note_net_badr(&req_base, url, ctx);
+            }
+            self.note_net_drop(kind, url);
             return Err(());
         };
+        // JS-C415 — `net.host` : l'hôte **résolu** (dedup par
+        // host) — discrimine l'artefact `fetch.send host=""`
+        // (sonde moteur sur l'URL **brute** pré-résolution :
+        // toute relative logue "") d'une vraie résolution
+        // manquée — celle-ci apparaît en `net.badr`, jamais ici.
+        if tracing::enabled!(target: "media_probe", tracing::Level::INFO) {
+            let rhost = req.url.host();
+            if self.note_net_probe("host.res", &rhost) {
+                tracing::info!(target: "media_probe", site = "net.host", host = %rhost, cross, ctx);
+            }
+        }
         // Origine opaque : `null` (sérialisation spec) — ACAO
         // `*` reste admis, un `ACAO: <origine>` ne l'est pas.
         let page_origin = if opaque {
@@ -2973,6 +3007,23 @@ impl Session {
     /// (`ctx_dead`/`quota`/`blocked`) + l'hôte ; dedup
     /// `(kind, host)` — le décompte reste côté `fetch.rej`
     /// moteur, un motif est logué une fois par sorte.
+    /// Sonde `net.badr` (JS-C415) — la résolution
+    /// `Url::resolve` elle-même a échoué : logue la **base**
+    /// du ctx (suspect n°1 du mur « host='' » — ctx né sous
+    /// `about:`/`data:`/base vide : une relative n'a nulle
+    /// part où aller) + extrait brut + `ctx`. Dedup par
+    /// (`badr`, base) — une ligne par population fautive.
+    fn note_net_badr(&mut self, base: &Url, url: &str, ctx: explorer_js::JsCtxId) {
+        if !tracing::enabled!(target: "media_probe", tracing::Level::INFO) {
+            return;
+        }
+        let b = base.as_str();
+        if self.note_net_probe("badr", &b) {
+            let raw = &url[..url.len().min(64)];
+            tracing::info!(target: "media_probe", site = "net.badr", base = %b, raw, ctx);
+        }
+    }
+
     fn note_net_drop(&mut self, kind: &'static str, url: &str) {
         if !tracing::enabled!(target: "media_probe", tracing::Level::INFO) {
             return;
