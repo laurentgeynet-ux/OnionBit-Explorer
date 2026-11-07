@@ -11760,6 +11760,47 @@ async fn location_replace_rewrites_entry() {
     assert_eq!(s.tab_url(id).as_deref(), Some("http://h.test/a"));
 }
 
+/// G-4 (diag648, vol 681/682) : un `document.cookie` posé
+/// **dans le même tour de script** que `location.replace`
+/// doit figurer dans le `Cookie:` de la requête remplacée —
+/// la forme exacte du challenge `SG_SS` de Google Search
+/// Guard. L'écriture atterrit au jar partagé **synchronement**
+/// au setter (jar injecté dans le contexte JS) ; le
+/// `NavRequest` n'est drainé qu'au point de synchro suivant —
+/// l'ordre est garanti par construction. Session câblée
+/// « production » (`CookieTransport` + jar partagé) :
+/// l'assertion porte sur l'en-tête filaire, pas seulement
+/// sur le jar. Sans `CookieTransport` l'allégation « drain
+/// avant commit » serait indistinguable d'un jar vide.
+#[tokio::test]
+async fn cookie_set_before_location_replace_sent_on_target() {
+    let (mut s, t) = cookie_session_with(SessionConfig {
+        consent_policy: explorer_net::consent::ConsentPolicy::Honest,
+        ..SessionConfig::default()
+    });
+    t.route(
+        "/sg",
+        200,
+        "<!doctype html><html><body><script>\
+         document.cookie='SG_SS=tok;path=/';location.replace('/serp')\
+         </script></body></html>",
+    );
+    t.route("/serp", 200, "<html><body>serp</body></html>");
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+    let id = s.open_tab();
+    s.navigate(id, "http://h.test/sg").await.unwrap();
+    s.drain_script_nav(id).await;
+    assert_eq!(s.tab_url(id).as_deref(), Some("http://h.test/serp"));
+    // Le `Cookie:` de la requête remplacée porte le cookie
+    // posé par le script de la page précédente — le jar
+    // était déjà à jour quand le drain a émis le fetch.
+    assert_eq!(
+        t.req_header("/serp", "cookie").as_deref(),
+        Some("SG_SS=tok"),
+        "cookie script→jar→filaire sur la nav remplacée"
+    );
+}
+
 /// `location.reload` (CAP-152) : la requête de l'entrée
 /// est rejouée (`last_req`), aucune entrée nouvelle —
 /// `back` reste `EmptyDocument`.
