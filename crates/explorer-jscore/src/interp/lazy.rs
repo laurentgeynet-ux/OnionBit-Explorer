@@ -13,8 +13,12 @@
 //!    expression (`let __gN = yield e ; S[__gN]`) : suspendre
 //!    n'arrive plus qu'à des positions de statement, jamais
 //!    au milieu d'une expression. Les positions paresseuses
-//!    (`?:`/`&&`/`||`/`??`/`?.`) portant un suspend sont
-//!    hissées éagerment — déviation documentée (rare).
+//!    `&&`/`||`/`??`/`?:` hissent leur suspend **sous garde**
+//!    (`if` dans les pré-statements — paresse réelle, le
+//!    suspend ne se lève que si la branche tire) ; `?.` et les
+//!    positions hors-expression (cases `switch`, défauts de
+//!    motifs, `catch`) restent hissées éagerment — déviation
+//!    documentée (rare).
 //!    JS-C96 : couverture étendue aux têtes de statements
 //!    (`for` init, `switch` case, `with`, `using`, `for-in`
 //!    init), aux motifs (`{a = …}`, `[… = …]`, clés
@@ -146,14 +150,93 @@ fn lift(e: &mut Expr, pre: &mut Vec<Stmt>, cx: &mut LowerCx) {
         | Expr::Spread(a)
         | Expr::ImportCall(a)
         | Expr::SuperIndex(a) => lift(a, pre, cx),
+        // Positions paresseuses `&&`/`||`/`??` portant un
+        // suspend : hissage **sous garde** — `var __gN = l ;
+        // if (<garde>) { <pre_r> ; __gN = r' }`, le suspend
+        // ne se lève que si la branche tire (vol 682, bundle
+        // xjs Google : l'évaluation éagère de
+        // `a.TRa && b(await c(a.TRa(…)))` appelait `a.TRa(…)`
+        // = undefined → `is not a function`).
+        Expr::Binary(op @ (BinOp::And | BinOp::Or | BinOp::Nullish), l, r) => {
+            lift(l, pre, cx);
+            if has_suspend(r) {
+                let n = cx.fresh();
+                let mut pre_r = Vec::new();
+                lift(r, &mut pre_r, cx);
+                pre_r.push(Stmt::Expr(Expr::Assign(
+                    Box::new(Expr::Ident(n.clone())),
+                    AssignOp::Set,
+                    Box::new(std::mem::replace(r.as_mut(), Expr::Null)),
+                )));
+                let cond = match op {
+                    // `l && r` : la branche tire quand `l` est truthy.
+                    BinOp::And => Expr::Ident(n.clone()),
+                    // `l || r` : quand `l` est falsy.
+                    BinOp::Or => {
+                        Expr::Unary(crate::ast::UnOp::Not, Box::new(Expr::Ident(n.clone())))
+                    }
+                    // `l ?? r` : `l == null` (loose — null ET undefined).
+                    _ => Expr::Binary(
+                        BinOp::Eq,
+                        Box::new(Expr::Ident(n.clone())),
+                        Box::new(Expr::Null),
+                    ),
+                };
+                pre.push(Stmt::Var(vec![VarDecl {
+                    pat: Pat::Ident(n.clone()),
+                    init: Some(std::mem::replace(l.as_mut(), Expr::Null)),
+                }]));
+                pre.push(Stmt::If {
+                    cond,
+                    then: Box::new(Stmt::Block(pre_r)),
+                    else_: None,
+                });
+                *e = Expr::Ident(n);
+            } else {
+                lift(r, pre, cx);
+            }
+        }
         Expr::Binary(_, l, r) | Expr::Assign(l, _, r) | Expr::Index(l, r) => {
             lift(l, pre, cx);
             lift(r, pre, cx);
         }
         Expr::Cond(c, t, e2) => {
             lift(c, pre, cx);
-            lift(t, pre, cx);
-            lift(e2, pre, cx);
+            if has_suspend(t) || has_suspend(e2) {
+                // `c ? t : f` avec suspend → `var __gN = c ;
+                // if (__gN) { <pre_t> ; __gN = t' } else
+                // { <pre_f> ; __gN = f' }` — `__gN` porte la
+                // valeur du test tant que la branche choisie
+                // l'écrase.
+                let n = cx.fresh();
+                let mut pre_t = Vec::new();
+                lift(t, &mut pre_t, cx);
+                pre_t.push(Stmt::Expr(Expr::Assign(
+                    Box::new(Expr::Ident(n.clone())),
+                    AssignOp::Set,
+                    Box::new(std::mem::replace(t.as_mut(), Expr::Null)),
+                )));
+                let mut pre_f = Vec::new();
+                lift(e2, &mut pre_f, cx);
+                pre_f.push(Stmt::Expr(Expr::Assign(
+                    Box::new(Expr::Ident(n.clone())),
+                    AssignOp::Set,
+                    Box::new(std::mem::replace(e2.as_mut(), Expr::Null)),
+                )));
+                pre.push(Stmt::Var(vec![VarDecl {
+                    pat: Pat::Ident(n.clone()),
+                    init: Some(std::mem::replace(c.as_mut(), Expr::Null)),
+                }]));
+                pre.push(Stmt::If {
+                    cond: Expr::Ident(n.clone()),
+                    then: Box::new(Stmt::Block(pre_t)),
+                    else_: Some(Box::new(Stmt::Block(pre_f))),
+                });
+                *e = Expr::Ident(n);
+            } else {
+                lift(t, pre, cx);
+                lift(e2, pre, cx);
+            }
         }
         Expr::Call(f, args) | Expr::New(f, args) => {
             lift(f, pre, cx);

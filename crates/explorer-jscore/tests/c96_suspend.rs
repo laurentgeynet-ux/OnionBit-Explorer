@@ -153,3 +153,79 @@ fn c96_for_await() {
     ));
     assert_eq!(seq(&s, &c), "r:1");
 }
+
+/// JS-C394 — positions paresseuses `&&`/`||`/`??`/`?:` portant
+/// un suspend : hissage **sous garde** (vol 682, bundle xjs
+/// Google : `a.TRa && b(await c(a.TRa(a.Xg)))` appelait
+/// `a.TRa(…)` hors garde → `is not a function` — le suspend
+/// était évalué éagerment, déviation documentée devenue bug
+/// terrain). Chaque cas mesure aussi l'effet de bord `n` :
+/// la branche non tirée ne produit rien.
+#[test]
+fn c394_lazy_positions_guard_suspend() {
+    // `&&` falsy — forme exacte du site Google `Edc` : garde
+    // `a.TRa` undefined → le membre droit ne s'évalue pas.
+    let (s, c) = await_case(
+        "var a={Xg:1,TRa:undefined,target:{},Aa:0,Qna:0,ka:0}; return a.TRa&&a.TRa(a.Xg);",
+    );
+    assert_eq!(seq(&s, &c), "r:undefined");
+    // `&&` falsy : zéro effet de bord du membre droit.
+    let (s, c) = await_case(
+        "var n=0; function g(){n++;return Promise.resolve(9);} var r=false&&await g(); return n;",
+    );
+    assert_eq!(seq(&s, &c), "r:0");
+    // `&&` truthy : le membre droit (await inclus) évalué.
+    let (s, c) =
+        await_case("var n=0; function g(){n++;return Promise.resolve(9);} return 1&&await g()+n;");
+    assert_eq!(seq(&s, &c), "r:10");
+    // `||` : le membre droit ne tire que si falsy.
+    let (s, c) = await_case(
+        "var n=0; function g(){n++;return Promise.resolve(9);} var r='L'||await g(); return r+':'+n;",
+    );
+    assert_eq!(seq(&s, &c), "r:L:0");
+    let (s, c) = await_case(
+        "var n=0; function g(){n++;return Promise.resolve(9);} var r=0||await g(); return r+':'+n;",
+    );
+    assert_eq!(seq(&s, &c), "r:9:1");
+    // `??` : `null`/`undefined` seulement (loose `== null`).
+    let (s, c) = await_case(
+        "var n=0; function g(){n++;return Promise.resolve(9);} var r=5??await g(); return r+':'+n;",
+    );
+    assert_eq!(seq(&s, &c), "r:5:0");
+    let (s, c) = await_case(
+        "var n=0; function g(){n++;return Promise.resolve(9);} var r=null??await g(); return r+':'+n;",
+    );
+    assert_eq!(seq(&s, &c), "r:9:1");
+    let (s, c) = await_case(
+        "var n=0; function g(){n++;return Promise.resolve(9);} var r=undefined??await g(); return r+':'+n;",
+    );
+    assert_eq!(seq(&s, &c), "r:9:1");
+    // `?:` : seule la branche choisie suspend.
+    let (s, c) = await_case(
+        "var n=0; function t(){n+=10;return Promise.resolve(1);} function f(){n+=100;return Promise.resolve(2);} var r=1?await t():await f(); return r+':'+n;",
+    );
+    assert_eq!(seq(&s, &c), "r:1:10");
+    let (s, c) = await_case(
+        "var n=0; function t(){n+=10;return Promise.resolve(1);} function f(){n+=100;return Promise.resolve(2);} var r=0?await t():await f(); return r+':'+n;",
+    );
+    assert_eq!(seq(&s, &c), "r:2:100");
+    // Suspend paresseux imbriqué : `a && (b || await g())`.
+    let (s, c) = await_case(
+        "var n=0; function g(){n++;return Promise.resolve(9);} var r=1&&(0||await g()); return r+':'+n;",
+    );
+    assert_eq!(seq(&s, &c), "r:9:1");
+    let (s, c) = await_case(
+        "var n=0; function g(){n++;return Promise.resolve(9);} var r=0&&(0||await g()); return r+':'+n;",
+    );
+    assert_eq!(seq(&s, &c), "r:0:0");
+    // La valeur awaitée circule dans l'expression englobante.
+    let (s, c) = await_case(
+        "var n=0; function g(){n++;return Promise.resolve(7);} var r=(1&&await g())*2; return r;",
+    );
+    assert_eq!(seq(&s, &c), "r:14");
+    // Suspend en LHS : toujours évalué (garde comprise).
+    let (s, c) = await_case(
+        "var n=0; function g(){n++;return Promise.resolve(0);} var r=await g()&&9; return r+':'+n;",
+    );
+    assert_eq!(seq(&s, &c), "r:0:1");
+}
