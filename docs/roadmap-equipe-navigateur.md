@@ -10243,6 +10243,12 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   Mio` au-delà de 64 Mio — mur §B-114, overshoot rumble).
   Verrous `c411_dead_hard_bounded_slack` +
   `c411_cell_bytes_counts_capacity_and_payloads`.
+- [x] **JS-C412. `prom.src` — le code des fabriques
+  pendantes dans la sonde** (extrait ~200c **copié** de
+  l'executor à la création — jamais le `Rc` du bundle ;
+  émis top-`created` au checkpoint, §B-97/§B-113
+  forensique). Verrous `c412_prom_src_dumps_executor_
+  excerpt` + `c412_prom_src_disarmed_is_silent`.
 
 ## Tâches continues
 

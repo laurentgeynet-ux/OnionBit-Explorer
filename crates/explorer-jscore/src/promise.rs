@@ -84,6 +84,15 @@ pub(crate) struct PromProbe {
     /// `prom.settle` nomme *qui règle* (`1484` créée ici mais
     /// jamais réglée → son `resolve` n'est jamais invoqué).
     pub settled: Option<(Rc<str>, PromiseState)>,
+    /// JS-C412 — extrait source **copié** de l'executor
+    /// (`new Promise(fn)`) — [`PROM_SRC_CHARS`] premiers
+    /// caractères de la fonction. `prom.src` imprime le code
+    /// de la fabrique pendante au lieu de son seul site : la
+    /// condition que `resolve` attend est *lue*, pas devinée.
+    /// Copié — jamais le `Rc<str>` de `lit.src_text` : retenir
+    /// le handle épinglerait le bundle entier par promesse,
+    /// ironique pour une sonde mémoire.
+    pub src: Option<Rc<str>>,
 }
 
 /// JS-C383 — borne globale de la table `prom_sites` (sonde
@@ -96,6 +105,13 @@ pub(crate) const PROM_SITES_MAX: usize = 8192;
 pub(crate) const PROM_THEN_SITES_PER: usize = 8;
 /// JS-C383 — sites émis par histogramme `prom.pending.*`.
 pub(crate) const PROM_SITES_TOP: usize = 32;
+/// JS-C412 — caractères retenus de l'executor par promesse
+/// (`prom.src`) — assez pour nommer la condition du gate
+/// (signature + ouverture de la fabrique) ; l'extrait complet
+/// sort par `fnat` (JS-C413) sur le bundle archivé.
+pub(crate) const PROM_SRC_CHARS: usize = 200;
+/// JS-C412 — sites `prom.src` émis par passe (top créés).
+pub(crate) const PROM_SRC_SITES: usize = 8;
 
 /// The `ObjKind::Promise` payload.
 pub struct JsPromise {
@@ -187,6 +203,7 @@ impl Engine {
                 created: site,
                 thens: Vec::new(),
                 settled: None,
+                src: None,
             },
         );
     }
@@ -210,6 +227,7 @@ impl Engine {
                     created: "<?>".into(),
                     thens: Vec::new(),
                     settled: None,
+                    src: None,
                 },
             );
         }
@@ -241,11 +259,56 @@ impl Engine {
                     created: "<?>".into(),
                     thens: Vec::new(),
                     settled: None,
+                    src: None,
                 },
             );
         }
         if let Some(pr) = self.prom_sites.get_mut(&id) {
             pr.settled = Some((site, state));
+        }
+    }
+
+    /// JS-C412 — extrait source borné d'une valeur fonction
+    /// ([`PROM_SRC_CHARS`] premiers caractères) : lit
+    /// `ObjKind::Fun::Script` → `lit.src_text` + `lit.span`
+    /// (offsets en **caractères**). `None` pour natives,
+    /// synthétisées et fonctions sans verbatim.
+    fn fn_source_excerpt(&self, v: Value) -> Option<Rc<str>> {
+        let Value::Obj(id) = v else {
+            return None;
+        };
+        let o = self.heap.obj(id)?;
+        let ObjKind::Fun(crate::heap::Fun::Script { lit, .. }) = &o.kind else {
+            return None;
+        };
+        let src = lit.src_text.as_ref()?;
+        let (lo, hi) = lit.span;
+        if hi <= lo {
+            return None;
+        }
+        let excerpt: String = src
+            .chars()
+            .skip(lo)
+            .take((hi - lo).min(PROM_SRC_CHARS))
+            .collect();
+        Some(excerpt.into())
+    }
+
+    /// JS-C412 — « lire la fabrique pendante » (§B-97) : à la
+    /// création `new Promise(executor)`, retient l'extrait
+    /// copié de la source de l'executor — le `prom.src` du
+    /// checkpoint imprime le CODE à côté du site : la condition
+    /// que `resolve` attend est lue dans le log, pas devinée.
+    /// No-op désarmée (un `enabled!`, zéro coût par promesse).
+    fn probe_prom_src(&mut self, id: ObjId, executor: Value) {
+        if !tracing::enabled!(target: "dom_probe", tracing::Level::INFO) {
+            return;
+        }
+        let Some(excerpt) = self.fn_source_excerpt(executor) else {
+            return;
+        };
+        if let Some(pr) = self.prom_sites.get_mut(&id) {
+            pr.src = Some(excerpt);
         }
     }
 
@@ -1185,6 +1248,7 @@ fn promise_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
         return Err(e.type_error("Promise resolver is not a function"));
     }
     let id = e.new_promise();
+    e.probe_prom_src(id, executor);
     let (resolve, reject) = {
         let Some(o) = e.heap.obj(id) else {
             return Err(e.type_error("internal promise error"));
@@ -1851,5 +1915,51 @@ mod tests {
                 .collect();
             v
         });
+    }
+
+    /// JS-C412 — `prom.src` : l'extrait source de l'executor
+    /// est retenu **copié et borné** (`PROM_SRC_CHARS`) — le
+    /// code de la fabrique pendante devient lisible dans le
+    /// log, sans retenir le `Rc` du bundle.
+    #[test]
+    fn c412_prom_src_dumps_executor_excerpt() {
+        let _g = tracing::subscriber::set_default(ArmProbe);
+        tracing::callsite::rebuild_interest_cache();
+        let mut e = Engine::new();
+        let v = e.eval(
+            "new Promise(function gatekeeper(){\
+                 if (window.__ready) { resolve(); } poll(); });",
+        );
+        assert!(v.is_ok(), "eval: {v:?}");
+        let found = e.prom_sites.values().any(|pr| {
+            pr.src
+                .as_deref()
+                .is_some_and(|s| s.contains("gatekeeper") && s.contains("__ready"))
+        });
+        assert!(found, "extrait de la fabrique attendu: {:?}", {
+            let v: Vec<_> = e.prom_sites.values().map(|pr| pr.src.clone()).collect();
+            v
+        });
+        // Borné : jamais plus de PROM_SRC_CHARS caractères.
+        assert!(e.prom_sites.values().all(|pr| {
+            pr.src
+                .as_deref()
+                .is_none_or(|s| s.chars().count() <= PROM_SRC_CHARS)
+        }));
+    }
+
+    /// JS-C412 — désarmée, la sonde est muette : aucune entrée
+    /// `prom_sites`, aucun extrait retenu.
+    #[test]
+    fn c412_prom_src_disarmed_is_silent() {
+        // Pas de subscriber → `enabled!` faux → zéro coût.
+        let mut e = Engine::new();
+        e.eval("new Promise(function(){ poll(); });").ok();
+        e.eval("var p = new Promise(function(){}); p.then(function(){});")
+            .ok();
+        assert!(
+            e.prom_sites.is_empty(),
+            "désarmée, prom_sites doit rester vide"
+        );
     }
 }

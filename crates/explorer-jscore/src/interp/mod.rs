@@ -2773,6 +2773,8 @@ impl Engine {
                 std::collections::BTreeMap::new();
             let mut thens: std::collections::BTreeMap<String, u64> =
                 std::collections::BTreeMap::new();
+            let mut srcs: std::collections::HashMap<String, Rc<str>> =
+                std::collections::HashMap::new();
             let mut settled = 0u64;
             let mut settle_pairs: std::collections::BTreeMap<String, u64> =
                 std::collections::BTreeMap::new();
@@ -2789,6 +2791,13 @@ impl Engine {
                         *created.entry(pr.created.to_string()).or_default() += 1;
                         for t in &pr.thens {
                             *thens.entry(t.to_string()).or_default() += 1;
+                        }
+                        // JS-C412 — premier extrait vu par site
+                        // `created` (les executors répétés d'un
+                        // même site partagent leur source).
+                        if let Some(s) = &pr.src {
+                            srcs.entry(pr.created.to_string())
+                                .or_insert_with(|| s.clone());
                         }
                     }
                     crate::promise::PromiseState::Pending => {}
@@ -2810,12 +2819,29 @@ impl Engine {
                     }
                 }
             }
+            let created_top = top(created);
             tracing::info!(
                 target: "dom_probe",
                 site = "prom.pending",
                 n = pend,
-                created = ?top(created),
+                created = ?created_top,
                 thens = ?top(thens)
+            );
+            // JS-C412 — `prom.src` : le code des fabriques
+            // pendantes, ordonné par le top `created` — la
+            // condition que `resolve` attend est lue dans le
+            // log (extrait borné [`PROM_SRC_CHARS`] copié à la
+            // création, jamais le `Rc` du bundle).
+            let excerpts: Vec<String> = created_top
+                .iter()
+                .filter_map(|(c, _)| srcs.get(c).map(|s| format!("{c} => {s}")))
+                .take(crate::promise::PROM_SRC_SITES)
+                .collect();
+            tracing::info!(
+                target: "dom_probe",
+                site = "prom.src",
+                n = excerpts.len(),
+                excerpts = ?excerpts
             );
             // JS-C386 — `prom.settle` : qui règle les promesses
             // (paires `created → [F|R]site`) — l'absence d'un
