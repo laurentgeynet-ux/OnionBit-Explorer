@@ -1073,6 +1073,36 @@ impl Engine {
                 let lp = self.to_primitive(l, PrimHint::Default)?;
                 let rp = self.to_primitive(r, PrimHint::Default)?;
                 if matches!(lp, Value::Str(_)) || matches!(rp, Value::Str(_)) {
+                    // §B-110 : `x + ""`/`"" + x` en boucle
+                    // churnait une cellule Str par op — une concat
+                    // avec "" est l'identité : la cellule `Str`
+                    // existante ou le cache petits-entiers
+                    // suffisent (et `to_js_string` clone la chaîne
+                    // — l'éviter épargne aussi le churn natif).
+                    if let Value::Str(rid) = rp {
+                        if self.heap.str_len(rid).unwrap_or(0) == 0 {
+                            return Ok(match lp {
+                                v @ Value::Str(_) => v,
+                                Value::Num(n) => self.num_str_val(n),
+                                v => {
+                                    let s = self.to_js_string(v)?;
+                                    self.str_val(s)
+                                }
+                            });
+                        }
+                    }
+                    if let Value::Str(lid) = lp {
+                        if self.heap.str_len(lid).unwrap_or(0) == 0 {
+                            return Ok(match rp {
+                                v @ Value::Str(_) => v,
+                                Value::Num(n) => self.num_str_val(n),
+                                v => {
+                                    let s = self.to_js_string(v)?;
+                                    self.str_val(s)
+                                }
+                            });
+                        }
+                    }
                     let ls = self.to_js_string(lp)?;
                     let rs = self.to_js_string(rp)?;
                     // §B-59 : `s = s + s` en boucle double la

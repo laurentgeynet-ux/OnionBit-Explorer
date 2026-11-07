@@ -50,6 +50,42 @@ fn string_concat_and_coercion() {
 }
 
 #[test]
+fn b110_str_churn_stays_flat() {
+    // §B-110 : les coercitions `String(i)` / `i+""` / `[i].join()`
+    // en boucle produisaient une cellule Str morte par op
+    // (mesuré SG : ~1,3 Gio) — le cache petits-entiers et les
+    // identités `+""`/`join` len≤1 les rendent sans alloc.
+    let mut e = Engine::new();
+    e.eval("var x='x', em=''; String(7); [9].join();").unwrap();
+    let strs = |e: &Engine| -> usize {
+        e.heap_kind_histogram()
+            .iter()
+            .filter(|(k, _, _)| *k == "Str")
+            .map(|(_, n, _)| *n)
+            .sum()
+    };
+    let before = strs(&e);
+    e.eval(
+        "for (var i = 0; i < 3000; i++) { String(7); String(i % 500); [9].join(); [i % 500].toString(); x+em; em+x; }",
+    )
+    .unwrap();
+    let after = strs(&e);
+    // ≤ ~500 nouvelles cellules (les i%500 canoniques) — sans le
+    // cache ce serait ~18 000.
+    assert!(
+        after - before <= 510,
+        "le churn Str doit rester borné par le cache : {before} -> {after}"
+    );
+    assert_eq!(ev_str("[5].toString()"), "5");
+    assert_eq!(ev_str("['a'].join('-')"), "a");
+    assert_eq!(ev_str("[].join(',')"), "");
+    assert_eq!(ev_str("['a','b'].join('-')"), "a-b");
+    assert_eq!(ev_str("[null].join()"), "");
+    assert_eq!(ev_str("'' + 'z'"), "z");
+    assert_eq!(ev_str("'z' + ''"), "z");
+}
+
+#[test]
 fn equality_loose_and_strict() {
     assert_eq!(ev_str("1 == '1'"), "true");
     assert_eq!(ev_str("1 === '1'"), "false");

@@ -107,16 +107,15 @@ pub(crate) fn string_ctor(e: &mut Engine, t: Value, args: &[Value]) -> JsResult<
             Ok(wrap_or_prim(e, t, e.protos.string, prim))
         }
         v => {
-            let s = if let Some(d) = sym_desc(e, v) {
-                if d.is_empty() {
+            let prim = if let Some(d) = sym_desc(e, v) {
+                e.str_val(if d.is_empty() {
                     "Symbol()".to_string()
                 } else {
                     format!("Symbol({d})")
-                }
+                })
             } else {
-                e.to_js_string(v)?
+                e.to_str_val(v)?
             };
-            let prim = e.str_val(s);
             Ok(wrap_or_prim(e, t, e.protos.string, prim))
         }
     }

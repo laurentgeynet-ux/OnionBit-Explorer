@@ -151,6 +151,22 @@ pub(crate) fn array_join(e: &mut Engine, this: Value, args: &[Value]) -> JsResul
     // `toString` d'un élément observe `this` peuplé — le backing
     // détaché de `with_elems` le lui masquait (§B-90).
     let len = iter_len(e, id)?;
+    // §B-110 : `join`/`toString` sur len ≤ 1 — spec `ToString`
+    // retourne l'élément lui-même ; pour une `Str` c'est la
+    // cellule existante (zéro alloc), pour `Num` le cache
+    // petits-entiers. Les prédicats obfusqués `[x]+""`/`[""]==0`
+    // churnent une Str par op sinon (mesuré SG : 1,3 Gio).
+    if len <= 1 {
+        return Ok(match iter_get(e, id, 0)? {
+            None | Some(Value::Undefined | Value::Null) => e.str_val(""),
+            Some(v @ Value::Str(_)) => v,
+            Some(Value::Num(n)) => e.num_str_val(n),
+            Some(v) => {
+                let s = e.to_js_string(v)?;
+                e.str_val(s)
+            }
+        });
+    }
     let mut parts = Vec::with_capacity(len.min(65_536));
     // `parts` et la sortie `join` sont des String natifs hors
     // compteur du heap — la taille cumulée est gardée en cours

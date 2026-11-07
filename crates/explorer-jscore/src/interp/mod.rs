@@ -269,6 +269,13 @@ pub struct Engine {
     /// Voir `gen_proto` — variante `async function*`.
     pub(crate) async_gen_proto: Value,
     pub(crate) symbol_reg: std::collections::BTreeMap<String, Value>,
+    /// Cache `Num → Str` des petits entiers (§B-110, idiom V8) —
+    /// `num_strs[i]` = la cellule `"i"` ; rempli paresseusement,
+    /// raciné au GC (les Strs sont immuables, le partage est
+    /// transparent). Sans lui les coercitions `String(i)`/
+    /// `i+""`/`[i].join()` en boucle produisaient une cellule
+    /// par itération (mesuré SG : ~1,3 Gio de Strs mortes).
+    pub(crate) num_strs: Vec<Value>,
     call_depth: u32,
     call_depth_limit: u32,
     /// Pile d'appels des fonctions **script** en cours (JS-C47) —
@@ -957,6 +964,7 @@ impl Engine {
             rng: seed | 1,
             t0: Instant::now(),
             symbol_reg: std::collections::BTreeMap::new(),
+            num_strs: Vec::new(),
             sym_seq: 0,
             sym_index: std::collections::BTreeMap::new(),
             finregs: Vec::new(),
@@ -2983,6 +2991,9 @@ impl Engine {
         for v in self.symbol_reg.values() {
             crate::heap::push_value(&mut ids, *v);
         }
+        for v in &self.num_strs {
+            crate::heap::push_value(&mut ids, *v);
+        }
         for id in self.sym_index.values() {
             ids.push(*id);
         }
@@ -3344,6 +3355,45 @@ impl Engine {
     /// Allocate a JS string value.
     pub(crate) fn str_val(&mut self, s: impl Into<String>) -> Value {
         Value::Str(self.heap.alloc_str(s))
+    }
+
+    /// Borne du cache `num_strs` (§B-110) — les entiers
+    /// `0..NUM_STR_CACHE` partagent leur cellule `"i"`.
+    pub(crate) const NUM_STR_CACHE: usize = 1024;
+
+    /// `Num` → `Str` avec cache borné des petits entiers
+    /// (§B-110) : `n` entier < [`Self::NUM_STR_CACHE`] retourne
+    /// la cellule partagée (immuabilité → partage transparent),
+    /// sinon allocation normale.
+    pub(crate) fn num_str_val(&mut self, n: f64) -> Value {
+        if n >= 0.0 && n.fract() == 0.0 && n < Self::NUM_STR_CACHE as f64 {
+            let i = n as usize;
+            while self.num_strs.len() <= i {
+                self.num_strs.push(Value::Undefined);
+            }
+            if matches!(self.num_strs[i], Value::Undefined) {
+                let s = num_to_js_string(n);
+                self.num_strs[i] = self.str_val(s);
+            }
+            self.num_strs[i]
+        } else {
+            self.str_val(num_to_js_string(n))
+        }
+    }
+
+    /// `ToString` renvoyant une `Value` — fast-paths zéro-alloc
+    /// (§B-110) : `Str` → même cellule, `Num` → cache
+    /// petits-entiers. Le chemin général délègue à
+    /// [`Self::to_js_string`] puis alloue.
+    pub(crate) fn to_str_val(&mut self, v: Value) -> JsResult<Value> {
+        Ok(match v {
+            s @ Value::Str(_) => s,
+            Value::Num(n) => self.num_str_val(n),
+            _ => {
+                let s = self.to_js_string(v)?;
+                self.str_val(s)
+            }
+        })
     }
 
     /// Allocate a `bigint` primitive (`ObjKind::BigInt` cell,
