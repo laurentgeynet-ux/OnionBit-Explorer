@@ -1102,6 +1102,23 @@ pub struct Session {
     /// verrou figeait l'API). Témoigne du déroutage pour
     /// les tests ; chaque incrément = un fil `js-engine-drop`.
     pub(crate) engines_dropped_offlock: usize,
+    /// §B-111 (vol 695) : garde de classe contre la
+    /// ré-entrance d'orchestration — `after_script` →
+    /// `drain_script_net` → livraisons `deliver_*` →
+    /// `after_script` empilait une passe imbriquée par
+    /// livraison (pile ∝ file, `0xC00000FD` à charge égale
+    /// sous pile ×16). Un appel imbriqué se re-file dans
+    /// `after_script_again` ; la passe la plus externe
+    /// déroule les redemandes en boucle, à plat — même
+    /// leçon que `Drop for Env` : on garde la classe de
+    /// récursion, pas le site.
+    pub(crate) in_after_script: bool,
+    /// Onglets dont une passe post-script a été redemandée
+    /// pendant une passe en cours — dépilés par la boucle
+    /// externe. `HashSet` : un onglet marqué n fois ne
+    /// produit qu'une passe supplémentaire ; l'ordre entre
+    /// onglets est sans importance (drains indépendants).
+    pub(crate) after_script_again: std::collections::HashSet<TabId>,
 }
 
 impl Session {
@@ -1239,6 +1256,8 @@ impl Session {
             max_download_bytes: cfg.max_download_bytes,
             color_scheme: cfg.color_scheme,
             consent_policy: cfg.consent_policy,
+            in_after_script: false,
+            after_script_again: std::collections::HashSet::new(),
         }
     }
 

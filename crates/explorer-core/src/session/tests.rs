@@ -4063,3 +4063,27 @@ fn media_offer_json_carries_loop_and_mse_buffers() {
     assert_eq!(report.state, MediaHostState::Buffering);
     assert_eq!(media_host_state_str(report.state), "buffering");
 }
+
+#[test]
+fn after_script_reentry_defers_without_nesting() {
+    // §B-111 (vol 695) : la morgue C407 comptait 1 768
+    // `net: dsn` non fermés — `after_script` →
+    // `drain_script_net` → `deliver_*` → `after_script`
+    // empilait une passe par livraison. La garde re-file
+    // tout appel imbriqué : il entre dans `after_script_
+    // again`, jamais dans la pile.
+    let mut s = Session::new(Arc::new(FailTransport), Arc::new(TestFont));
+    s.in_after_script = true;
+    s.after_script(7);
+    assert!(s.after_script_again.contains(&7));
+    // Double marquage = une seule passe supplémentaire.
+    s.after_script(7);
+    assert_eq!(s.after_script_again.len(), 1);
+    // Flag relâché (fin de la passe externe) : l'entrée
+    // suivante dépile la file entière en boucle — les
+    // onglets inconnus dégradent en passes vides.
+    s.in_after_script = false;
+    s.after_script(9);
+    assert!(s.after_script_again.is_empty());
+    assert!(!s.in_after_script);
+}

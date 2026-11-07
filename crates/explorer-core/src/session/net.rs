@@ -51,6 +51,12 @@ const MAX_STREAK_URLS: usize = 1_024;
 /// Borne dedup des sondes `net.drop`/`net.fail` (JS-C366) —
 /// couples `(kind, host)` retenus ; au-delà, log direct.
 const MAX_NET_PROBE_SEEN: usize = 512;
+/// Borne de passes `after_script` déroulées par entrée
+/// (§B-111 — vol 695) : une tempête de livraisons qui
+/// re-marque à chaque passe cède la main sous verrou ; les
+/// onglets restants dans `after_script_again` sont repris à
+/// la prochaine entrée (la file persiste, rien n'est perdu).
+const AFTER_SCRIPT_MAX_PASSES: usize = 64;
 
 /// Variante d'un `NetError` en nom de sonde — la cause
 /// transport est nommée sans fuiter les détails (cible,
@@ -3147,8 +3153,51 @@ impl Session {
     /// (`HttpOnly` filtré — non posable par un script), le
     /// `localStorage` vers la map d'origine + le profil, et
     /// les nouvelles requêtes réseau vers le scheduler.
-    #[allow(clippy::too_many_lines)] // drains séquentiels, chaque bras documenté
+    ///
+    /// §B-111 (vol 695) — **garde de classe, pas de site** :
+    /// la morgue C407 a compté 1 768 `net: dsn` non fermés —
+    /// `after_script` → `drain_script_net` → livraisons
+    /// `deliver_*` → `after_script` imbriquait une passe par
+    /// livraison (pile native ∝ file, `0xC00000FD` à charge
+    /// égale). Tout appel reçu pendant une passe se re-file
+    /// dans `after_script_again` et retourne immédiatement ;
+    /// la boucle externe déroule les redemandes à plat, quelle
+    /// que soit l'arête de ré-entrance (les voies silencieuses
+    /// — `element_path`, `el_dyn`, `frame_ctx_load_events` —
+    /// n'ont pas à être nommées : la classe est couverte par
+    /// construction).
     pub(crate) fn after_script(&mut self, tab: TabId) {
+        if self.in_after_script {
+            if self.after_script_again.insert(tab) {
+                tracing::info!("net: afs defer tab={tab}");
+            }
+            return;
+        }
+        self.in_after_script = true;
+        self.after_script_again.insert(tab);
+        let mut passes = 0_usize;
+        while let Some(t) = self.after_script_again.iter().next().copied() {
+            self.after_script_again.remove(&t);
+            passes += 1;
+            if passes > AFTER_SCRIPT_MAX_PASSES {
+                // Une tempête qui re-marque à chaque passe
+                // cède la main — le reste de la file persiste
+                // pour la prochaine entrée (`HashSet` non
+                // vidé), jamais perdu.
+                tracing::warn!("net: afs passes>{AFTER_SCRIPT_MAX_PASSES} tab={t}");
+                break;
+            }
+            self.after_script_pass(t);
+        }
+        self.in_after_script = false;
+    }
+
+    /// Corps d'une passe post-script — jamais appelé
+    /// directement hors [`Self::after_script`] (la garde
+    /// `in_after_script` doit être posée : un appel nu
+    /// réintroduirait la ré-entrance §B-111).
+    #[allow(clippy::too_many_lines)] // drains séquentiels, chaque bras documenté
+    fn after_script_pass(&mut self, tab: TabId) {
         // §B-111 — `net:`/`fmir` (morgue C407) : le drain a
         // retourné (`net: frame ret`), la mort vit dans cette
         // queue post-script — chaque étape nommée.
