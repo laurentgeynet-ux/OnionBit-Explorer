@@ -2828,6 +2828,11 @@ impl Engine {
                 pairs = ?top(settle_pairs)
             );
         }
+        // §B-111 — la dernière ligne vivante de la passe : si
+        // `gc done` apparaît, `collect` est revenu sain et la
+        // mort post-collect vit dans le retour (drop de locals,
+        // `maybe_collect`, drain, glue session).
+        crate::promise::job_rail(self.cur_ctx, "gc done");
         n
     }
 

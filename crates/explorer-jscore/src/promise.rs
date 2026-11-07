@@ -824,6 +824,8 @@ impl Engine {
                 self.switch_to(home);
                 job_rail(self.cur_ctx, "gc");
                 self.maybe_collect();
+                job_rail(self.cur_ctx, "gc done");
+                job_rail(self.cur_ctx, "drain done");
                 return Ok(ran);
             }
             // JS-C26 : livraison MutationObserver en fin de
@@ -943,10 +945,13 @@ impl Engine {
                 self.switch_to(home);
                 job_rail(self.cur_ctx, "gc");
                 self.maybe_collect();
+                job_rail(self.cur_ctx, "gc done");
+                job_rail(self.cur_ctx, "drain done");
                 return Ok(ran);
             }
             job_rail(self.cur_ctx, "gc");
             self.maybe_collect();
+            job_rail(self.cur_ctx, "gc done");
         }
     }
 

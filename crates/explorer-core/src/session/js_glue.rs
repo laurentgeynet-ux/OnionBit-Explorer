@@ -153,6 +153,10 @@ impl Session {
             // Deadline interne (J1) : une rafale saturante
             // remonte `Timeout` → disjoncteur, même règle
             // qu'une éval figée (allrecipes).
+            // §B-111 — `pump:` (morgue C405) : la mort
+            // post-collect vit sur le worker — chaque étape
+            // du retour est nommée.
+            tracing::info!("pump: run");
             let jobs = match eng.run_pending_bounded(max) {
                 Ok(n) => n,
                 Err(explorer_js::JsError::Timeout) => {
@@ -161,8 +165,11 @@ impl Session {
                 }
                 Err(_) => 0,
             };
+            tracing::info!("pump: js jobs={jobs}");
             let m = if sync_ok {
-                Self::sync_for_apply(eng.as_mut())
+                let m = Self::sync_for_apply(eng.as_mut());
+                tracing::info!("pump: sync mutated={}", m.is_some());
+                m
             } else {
                 None
             };
@@ -176,6 +183,7 @@ impl Session {
         }
         if jobs > 0 {
             // Les callbacks ont pu émettre XHR/cookies/storage.
+            tracing::info!("pump: drains");
             self.after_script(tab);
             self.poll_net();
             sync_phase(tab, "pump.drains", t);
@@ -198,7 +206,9 @@ impl Session {
         self.drain_media_commands(tab);
         // Les applies enfilés par cette pompe sont exécutés
         // ici (hôte `&mut` synchrone — étape 55h).
+        tracing::info!("pump: dapply");
         self.drain_applies();
+        tracing::info!("pump: done");
         jobs
     }
 
