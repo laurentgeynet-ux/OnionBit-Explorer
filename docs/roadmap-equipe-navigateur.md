@@ -10233,8 +10233,111 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   JS réfuté (pile vide = natif),
   return-early pur confirmé.
 
-<!-- JS-C361 → JS-C410 : livrés hors feuille (vols §B-97 →
-     §B-111 + piste V) — rattrapage documentaire en cours. -->
+<!-- Rattrapage JS-C361→C410 : livrés avant tenue de la
+     feuille (vols §B-97 → §B-111 + piste V) — entrées
+     reconstituées depuis le git log ; 362-364 et 407-408
+     sont des sauts de numérotation, pas des pertes. -->
+
+- [x] **JS-C361. Typage `ty=` des sondes `g.*`** (vol 663 —
+  la valeur lue/écrite sur les globals tagués devient
+  typée, pas seulement nommée).
+- [x] **JS-C365. Sondes disposition des livrées réseau**
+  (vol 666 — chaque `NetResponse` livrée est comptée par
+  bras : consommée/doublon/tardive/ctx mort).
+- [x] **JS-C366. Sondes de cause des `status:0` réseau
+  script** (`net.fail` transport/`cors_resp` + `net.drop`
+  — le `status:0` sec cesse d'être anonyme).
+- [x] **JS-C367. File d'attente du quota réseau script**
+  (l'excédent attend un slot FIFO par onglet plutôt qu'un
+  `status:0` — rafale `FontFace.load` kevlar ~200/16).
+- [x] **JS-C368. Banc de vérité eval V-1** — baselines de
+  résolution mesurées avant toute opt.
+- [x] **JS-C369. Compteurs de résolution J17** —
+  attribution V-2 par site (props/protos/scopes).
+- [x] **JS-C370. Gate `enabled!` sur le chemin armé des
+  sondes `g.*`** (fix V-2i — la sonde désarmée ne paye
+  plus son propre coût).
+- [x] **JS-C371. `ptr_eq` fast-path sur scans linéaires
+  de clés** (V-3a — même objet, zéro comparaison de
+  chaîne).
+- [x] **JS-C372. Gate `enabled!` généralisé à toutes les
+  sondes `probe_seen`**.
+- [x] **JS-C373. Hoist `array_index` hors des marches
+  proto** (V-3b — le coût de conversion n'est plus payé
+  par niveau de chaîne).
+- [x] **JS-C374. Décision V-3c non retenue** + sondes
+  `parse_call`/`parse_dup` (mesure avant geste).
+- [x] **JS-C375. Attribution V-2 finale** — porte V-4
+  différée, mur = parse (le goulot déplacé nommé).
+- [x] **JS-C376. Résidus soldés** — baseline
+  `kevlar_like`, `prop_scan` expliqué.
+- [x] **JS-C377. Instrumentation V-6** — mur = stmt
+  (68%) + clones Tok (le parse est le coût, pas
+  l'exécution).
+- [x] **JS-C378. Payloads `Tok` en `Rc` + décomposition
+  V-6 complète** — les gros variants ne copient plus.
+- [x] **JS-C379. Préallocation du `Vec` de tokens du
+  lexer**.
+- [x] **JS-C380. Corps de fonction différés
+  (`FnBody::Deferred`)** — eval BBC −60% : le parse est
+  paresseux, matérialisé à l'appel.
+- [x] **JS-C381. Lexer 100% `&str` byte-wise** —
+  `Vec<char>` supprimé (double matérialisation du
+  source éliminée).
+- [x] **JS-C382. Validation multi-fixtures du deferral
+  V-5a**.
+- [x] **JS-C383. Sonde `prom.pending`** — promesses
+  pendantes nommées par site de création (§B-97).
+- [x] **JS-C384. Reflets d'attributs tag-scopés** —
+  poison §B-103 éliminé.
+- [x] **JS-C385. Méthodes tag-scopées lisibles** —
+  poison §B-107 éliminé.
+- [x] **JS-C386. Sonde `prom.settle`** — qui règle les
+  promesses (§B-97 — le pendant de `prom.pending`).
+- [x] **JS-C387. Transitions fonts spec-fidèles** +
+  2ᵉ listener `__et` perdu (§B-97).
+- [x] **JS-C388. Verrou sémantique webpack JSONP** —
+  audit bootstrap §B-106 conclu sain.
+- [x] **JS-C389. `max_scripts` 32→256** — racine §B-106
+  éliminée (la file bootstrap s'écoule).
+- [x] **JS-C390. Sondes d'attribution §B-108** — rails
+  lazy nommés (quelle chaîne différée coûte).
+- [x] **JS-C391. Traversées session sous `deep`** —
+  fatalité §B-111 armée (récursions arbre bornées).
+- [x] **JS-C392. `noscript` rawtext au miroir** — fuite
+  style/meta DOM session §B-109.
+- [x] **JS-C393. Verrou G-4** — cookie script→jar→
+  filaire sur `location.replace`.
+- [x] **JS-C394. Suspend paresseux hissé sous garde** —
+  `&&`/`||`/`??`/`?:` retrouvent leur paresse.
+- [x] **JS-C395. Jumeaux PIPELINE sous `deep`** —
+  §B-111 acte II.
+- [x] **JS-C396. Sondes `el.listen on=`/`ev.cb`** —
+  cible des listeners nommée.
+- [x] **JS-C397. Disjoncteur §B-1 demi-ouvert** — petits
+  scripts sondent, la page récupère.
+- [x] **JS-C398. §B-110 nomme ses kinds** — top-kinds
+  dans le kill GC + sonde `b110`.
+- [x] **JS-C399. Mitigations churn §B-110** — `join`
+  len≤1, cache `num→str`, `+""` identité.
+- [x] **JS-C400. §B-111 acte III** — `derive(Clone)` sur
+  l'AST nu était le vrai site de l'overflow.
+- [x] **JS-C401. Sonde §B-111** — dernier nœud vu par
+  vague de mutations.
+- [x] **JS-C402. Sonde §B-111** — breadcrumb par job
+  dans le drain.
+- [x] **JS-C403. §B-111 résolu** — drop itératif des
+  chaînes d'envs au sweep GC (la récursion de drop est
+  morte).
+- [x] **JS-C404. Morgue `gc.*` subdivisée** +
+  histogramme des morts.
+- [x] **JS-C405. Morgue post-collect, rail `pump:`**.
+- [x] **JS-C406. Morgue `via=`** — paires `net:`/`pump:`
+  + pré-`apply:` début.
+- [x] **JS-C409. Morgue §B-111 sous `EXPLORER_DLV_
+  TRACE`** + audit de classe.
+- [x] **JS-C410 (V-1/V-2). URL mutable + `searchParams`
+  lié vivant**.
 
 - [x] **JS-C411. Comptage heap honnête + slack garbage borné
   absolument** (`cell_bytes` : capacité `Str`, réservoirs
