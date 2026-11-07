@@ -4170,8 +4170,18 @@ impl Engine {
                     .max(Self::GC_DEAD_FLOOR);
                 if lim > 0 && self.heap.bytes() > hard {
                     let b = self.heap.bytes();
+                    // Top kinds à l'instant du kill — les déchets
+                    // non balayés dominent numériquement, le mix
+                    // nomme la source (§B-110 : PoW = garbage
+                    // d'un kind unique mitraillé en boucle).
+                    let mut hist = self.heap.kind_histogram();
+                    hist.truncate(4);
+                    let mut top = String::new();
+                    for (k, n, kb) in &hist {
+                        top.push_str(&format!(" {k}:{n}/{}MiB", kb / 1_048_576));
+                    }
                     let msg = format!(
-                        "heap memory limit exceeded ({live} cells, {b} B allocated > {hard} B hard cap — deferred GC unreachable)"
+                        "heap memory limit exceeded ({live} cells, {b} B allocated > {hard} B hard cap — deferred GC unreachable) |{top} |"
                     );
                     self.heap_dead = Some(msg.clone());
                     return Err(self.range_error(msg));
