@@ -32,6 +32,9 @@ serde_json.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
+# RSS processus du shed-load (Étape 209 / §B-114-b) — même
+# source `memory_stats()` que le watchdog daemon.
+memory-stats.workspace = true
 
 [dev-dependencies]
 image.workspace = true

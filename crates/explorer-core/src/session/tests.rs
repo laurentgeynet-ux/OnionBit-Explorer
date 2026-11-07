@@ -4108,3 +4108,99 @@ fn c415_net_drop_kind_discriminates_badr() {
     // Absolu résout sans tenir compte de la base → pas badr.
     assert_eq!(net_drop_kind(&blank, "https://a.example/"), "blocked");
 }
+
+/// Étape 209 / §B-114-b — le shed RSS dégrade **sans tuer** :
+/// files `fetch_held`/`pending_script_net` → `status:0`
+/// livrés (promesses rejetées, jamais pendantes), GC demandé
+/// par onglet, bitmaps décodés évincés, `shed_active` posé ;
+/// hysteresis au réarmement ; navigation refusée
+/// `CoreError::Overloaded` pendant l'épisode.
+#[tokio::test]
+async fn etape209_rss_shed_degrades_without_death() {
+    let cfg = SessionConfig {
+        rss_shed_mb: 4_096,
+        ..SessionConfig::default()
+    };
+    let mut s = Session::with_config(Arc::new(FailTransport), Arc::new(TestFont), cfg);
+    let tab = s.open_tab();
+    // Files basse priorité remplies — handles fictifs : la
+    // livraison `status:0` est tolérée aux ctx inconnus, elle
+    // ne doit simplement pas paniquer ni pendre.
+    let page = Url::parse("https://x.example/p").expect("page");
+    s.fetch_held.push_back(net_items::HeldFetch {
+        at: std::time::Instant::now(),
+        tab,
+        page: page.clone(),
+        base: page.clone(),
+        handle: 77,
+        method: "GET".to_string(),
+        url: "https://x.example/data".to_string(),
+        headers: Vec::new(),
+        body: None,
+        mode: explorer_js::FetchMode::Cors,
+        credentials: explorer_js::FetchCredentials::Omit,
+        ctx: explorer_js::JS_CTX_TOP,
+    });
+    s.pending_script_net.push_back(net_items::PendingFetch {
+        tab,
+        handle: 78,
+        req: explorer_net::http::Request::get(Url::parse("https://x.example/more").expect("u")),
+        cross: false,
+        page_origin: "https://x.example".to_string(),
+        credentials: explorer_net::http::FetchCredentials::Omit,
+        partition: None,
+        mode: explorer_net::http::FetchMode::Cors,
+    });
+    // Bitmap décodé retenu — le gradin 3 doit l'évincer.
+    let img = Arc::new(explorer_render::DecodedImage {
+        width: 2,
+        height: 2,
+        rgba: vec![0u8; 16],
+    });
+    s.tabs
+        .get_mut(&tab)
+        .expect("tab")
+        .img_decoded
+        .insert("k".to_string(), img);
+    // Passage au-dessus du seuil → épisode armé, gradins appliqués.
+    s.shed_evaluate(4_200);
+    assert!(s.shed_active());
+    assert!(s.fetch_held.is_empty(), "fetch_held droppée");
+    assert!(s.pending_script_net.is_empty(), "pending droppée");
+    assert!(
+        s.tabs
+            .get(&tab)
+            .is_some_and(|e| e.img_decoded.is_empty() && e.bg_decoded.is_empty()),
+        "bitmaps décodés évincés"
+    );
+    // Hysteresis : marge = max(4096/8, 64) = 512 — sous le
+    // seuil mais dans la marge (3 900 + 512 > 4 096) → actif.
+    s.shed_evaluate(3_900);
+    assert!(s.shed_active(), "sous seuil mais dans la marge");
+    // Sous la marge (3 500 + 512 ≤ 4 096) → levé.
+    s.shed_evaluate(3_500);
+    assert!(!s.shed_active());
+    // Ré-armement immédiat possible (pas de cooldown).
+    s.shed_evaluate(5_000);
+    assert!(s.shed_active());
+    // Navigation refusée pendant l'épisode.
+    let r = s.navigate(tab, "https://x.example/").await;
+    assert!(
+        matches!(r, Err(CoreError::Overloaded(_))),
+        "nav pendant shed doit être Overloaded : {r:?}"
+    );
+    // Levée → la navigation n'est plus refusée par le shed
+    // (le stub réseau échouera plus loin, jamais Overloaded).
+    s.shed_evaluate(1_000);
+    let r = s.navigate(tab, "https://x.example/").await;
+    assert!(!matches!(r, Err(CoreError::Overloaded(_))), "{r:?}");
+    // Désarmé (`rss_shed_mb = 0`) : shed_evaluate n'arme rien
+    // — le mécanisme est inerte hors config.
+    let cfg_off = SessionConfig {
+        rss_shed_mb: 0,
+        ..SessionConfig::default()
+    };
+    let mut s2 = Session::with_config(Arc::new(FailTransport), Arc::new(TestFont), cfg_off);
+    s2.shed_evaluate(99_999);
+    assert!(!s2.shed_active());
+}

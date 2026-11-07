@@ -35,6 +35,13 @@ impl Session {
         if !self.tabs.contains_key(&tab) {
             return Err(CoreError::UnknownTab(tab));
         }
+        // Étape 209 — navigation neuve refusée pendant un
+        // épisode shed : la session souffle plutôt que
+        // d'empiler un document de plus (REST → 503).
+        self.maybe_rss_shed();
+        if let Some(retry) = self.shed_refusal() {
+            return Err(CoreError::Overloaded(retry));
+        }
         let url = Url::parse(url).map_err(|e| CoreError::Url(e.to_string()))?;
         // `push` = l'entrée rejoint l'historique ; `Navigated`
         // est émis par `navigate_request` si le document final

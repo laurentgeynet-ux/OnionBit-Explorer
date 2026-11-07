@@ -299,13 +299,14 @@ impl Session {
         stall: Option<explorer_js::JsError>,
         jobs: usize,
         cooldown: Duration,
+        shed: bool,
     ) {
         if let Some(e) = stall {
             tracing::warn!(tab, error = %e,
                 "livrée moteur en timeout — disjoncteur armé");
             entry.js_stall_until = Some(Instant::now() + cooldown);
         }
-        Self::log_mem_diag(tab, jobs, entry, eng.as_mut());
+        Self::log_mem_diag(tab, jobs, entry, eng.as_mut(), shed);
         entry.js = Some(eng);
     }
 
@@ -315,7 +316,7 @@ impl Session {
     /// display list, files `js_pending_*`) + compteurs internes
     /// du moteur via `diag_line` (§B-59 : le compteur qui suit
     /// la RSS nomme le fuyard).
-    fn log_mem_diag(tab: TabId, jobs: usize, entry: &mut Tab, eng: &mut dyn JsEngine) {
+    fn log_mem_diag(tab: TabId, jobs: usize, entry: &mut Tab, eng: &mut dyn JsEngine, shed: bool) {
         if !Self::mem_diag_enabled() {
             return;
         }
@@ -406,6 +407,9 @@ impl Session {
             media_n = entry.media.len(),
             hist = entry.hist.len(),
             styles = entry.prev_styles.len(),
+            // Étape 209 — signature de l'épisode shed dans le
+            // diag : observable en vol, corrélable aux drops.
+            shed,
             js = %eng.diag_line().unwrap_or_default(),
             "mem_diag"
         );
@@ -613,7 +617,7 @@ impl Session {
                 mutated
             };
             let cooldown = self.js_stall_cooldown;
-            Self::reinsert_engine(tab, entry, eng, stall, jobs, cooldown);
+            Self::reinsert_engine(tab, entry, eng, stall, jobs, cooldown, self.shed_active);
             (jobs, mutated)
         };
         let (jobs, mutated) = phase;

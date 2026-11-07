@@ -7208,6 +7208,62 @@ incrément.
   reclame_l_arene` (live −2,
   bitmap purgée, marque ×2).
 
+- [x] **Étape 209. Shed-load RSS
+  session — dégrader plutôt que
+  mourir** (`explorer-core`
+  session net/mod/navigate/
+  shared/types/js_glue +
+  `explorer-api`, vol 697 rumble
+  — RSS 4,4 Go → `0xC0000409`
+  sans aucune couche dégradante
+  armée : les kills
+  `EXPLORER_*_KILL/LIMIT_MB`
+  existants sont opt-in « vols
+  §B-59 » et tous *tuent*,
+  aucun ne *shed*). Garde-fou
+  `SessionConfig.rss_shed_mb`
+  (défaut 4 096 — sous les
+  seuils de kill, `0` désarme
+  l'évaluation entière, pas
+  juste l'échantillonneur) +
+  `shed_retry_after_s` (défaut
+  5). `memory-stats` lit le
+  RSS process en tête de
+  `poll_net` ; au-delà du
+  seuil+hystérésis
+  (`max(seuil/8, 64 Mio)`) la
+  session arme `shed_active` :
+  les rails droppables sont
+  vidés **proprement** —
+  `fetch_held`/`pending_script_
+  net` livrés `status:0` (les
+  promesses rejettent, la page
+  voit un échec réseau, pas un
+  crash), `drain_dyn_imgs`
+  suspendu, `eng.gc()` (Cmd
+  asynchrone) demandé sur tous
+  les ctx. Cooldown avant
+  réévaluation ; le désarmement
+  exige le retour sous
+  `seuil − hystérésis`.
+  Pendant l'épisode :
+  `navigate`/`navigate_shared`/
+  `open_tab` →
+  `CoreError::Overloaded(retry)`
+  → REST **503 + `Retry-After`**
+  (`core_err`, `err_status`
+  étendu). `mem_diag` enrichi :
+  tailles des réservoirs
+  session + diag JS. Verrou
+  `etape209_rss_shed_degrades_
+  without_death` (synthétique
+  `HeldFetch`+pending : armé →
+  vidé sans mort, 503 honnête,
+  `rss_shed_mb=0` jamais armé —
+  invariant dans `shed_evaluate`
+  lui-même). Suites : core lib
+  106/106, api 33/33.
+
 - [ ] **Écarts terrain — vol humain
   22/10 (release `39ab821`, FFI)** :
   second run humain — trois constats

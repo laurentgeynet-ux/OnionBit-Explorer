@@ -1004,6 +1004,22 @@ pub struct Session {
     /// Quota de requêtes script-initiées simultanées par
     /// onglet (`max_script_net` de config, ADR-0019).
     max_script_net: usize,
+    /// Seuil RSS processus du shed-load (Étape 209 /
+    /// §B-114-b — `SessionConfig::rss_shed_mb`, `0` =
+    /// désarmé). Sous les seuils de kill opt-in : la session
+    /// dégrade avant la mort, jamais à leur place.
+    rss_shed_mb: u32,
+    /// Épisode shed en cours — posé/levé par
+    /// `shed_evaluate` (hysteresis `shed_margin`) : les
+    /// navigations/onglets neufs sont refusés (`Overloaded`
+    /// → REST 503) tant qu'il dure.
+    shed_active: bool,
+    /// Dernier échantillon RSS (`maybe_rss_shed` borne la
+    /// cadence — `memory_stats()` est un appel système).
+    rss_shed_at: std::time::Instant,
+    /// `Retry-After` (s) porté par `CoreError::Overloaded`
+    /// pendant l'épisode (`SessionConfig::shed_retry_after_s`).
+    shed_retry_after_s: u32,
     /// Quota de callbacks de timers déclenchés par tick
     /// (`max_timer_jobs` de config, étape 52 — borne
     /// ADR-0019).
@@ -1242,6 +1258,10 @@ impl Session {
             fetch_fail_streak: HashMap::new(),
             fetch_held: std::collections::VecDeque::new(),
             pending_script_net: std::collections::VecDeque::new(),
+            rss_shed_mb: cfg.rss_shed_mb,
+            shed_active: false,
+            rss_shed_at: std::time::Instant::now(),
+            shed_retry_after_s: cfg.shed_retry_after_s,
             net_probe_seen: std::collections::HashSet::new(),
             max_script_net: cfg.max_script_net,
             max_timer_jobs: cfg.max_timer_jobs,

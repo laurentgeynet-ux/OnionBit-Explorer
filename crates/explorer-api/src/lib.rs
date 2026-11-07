@@ -333,11 +333,26 @@ fn err(status: StatusCode, e: &impl std::fmt::Display) -> Response {
         .into_response()
 }
 
-/// Erreur métier → HTTP : `UnknownTab` → 404, erreurs de
-/// pipeline (fetch, HTTP amont, parse) → 502.
+/// Réponse d'erreur [`CoreError`] : statut via [`err_status`]
+/// et en-tête `Retry-After` honnête sur `Overloaded` — le
+/// refus shed (Étape 209) est temporaire par construction.
+fn core_err(e: &CoreError) -> Response {
+    let mut r = err(err_status(e), e);
+    if let CoreError::Overloaded(retry) = e {
+        if let Ok(v) = HeaderValue::from_str(&retry.to_string()) {
+            r.headers_mut().insert(header::RETRY_AFTER, v);
+        }
+    }
+    r
+}
+
+/// Erreur métier → HTTP : `UnknownTab` → 404, `Overloaded`
+/// (shed Étape 209) → 503, erreurs de pipeline (fetch, HTTP
+/// amont, parse) → 502.
 fn err_status(e: &CoreError) -> StatusCode {
     match e {
         CoreError::UnknownTab(_) => StatusCode::NOT_FOUND,
+        CoreError::Overloaded(_) => StatusCode::SERVICE_UNAVAILABLE,
         _ => StatusCode::BAD_GATEWAY,
     }
 }
@@ -412,9 +427,15 @@ async fn list_tabs(State(st): State<ApiState>) -> impl IntoResponse {
     Json(serde_json::json!({ "tabs": tabs }))
 }
 
-/// `POST /api/tabs` → `{ "id": n }`.
+/// `POST /api/tabs` → `{ "id": n }` ; `503 + Retry-After`
+/// pendant un épisode shed (Étape 209 — un onglet neuf coûte
+/// un contexte moteur entier).
 async fn open_tab(State(st): State<ApiState>) -> impl IntoResponse {
-    let id = st.session.lock().await.open_tab();
+    let mut s = st.session.lock().await;
+    if let Some(retry) = s.shed_refusal() {
+        return core_err(&CoreError::Overloaded(retry));
+    }
+    let id = s.open_tab();
     (StatusCode::CREATED, Json(serde_json::json!({ "id": id }))).into_response()
 }
 
@@ -596,7 +617,7 @@ async fn navigate(
             let session = st.session.lock().await;
             tab_json(&session, id)
         }
-        Err(e) => err(err_status(&e), &e),
+        Err(e) => core_err(&e),
     }
 }
 

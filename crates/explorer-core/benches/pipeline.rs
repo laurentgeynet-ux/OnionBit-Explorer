@@ -128,6 +128,8 @@ fn bench_session() -> (Session, Arc<FakeTransport>) {
             js_stall_cooldown: std::time::Duration::ZERO,
             poll_net_budget: std::time::Duration::from_secs(2),
             event_tail_budget: std::time::Duration::from_secs(15),
+            rss_shed_mb: 0,
+            shed_retry_after_s: 5,
         },
     );
     (s, t)

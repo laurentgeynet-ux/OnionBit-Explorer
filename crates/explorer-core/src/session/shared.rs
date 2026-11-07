@@ -83,6 +83,14 @@ pub async fn navigate_shared(
         if s.try_fragment_nav(tab, &req) {
             return Ok(());
         }
+        // Étape 209 — refus pendant épisode shed **après** les
+        // chemins gratuits (restauration bfcache/fragment ne
+        // fetch pas — les autoriser ne coûte rien et garde
+        // l'historique fluide).
+        s.maybe_rss_shed();
+        if let Some(retry) = s.shed_refusal() {
+            return Err(CoreError::Overloaded(retry));
+        }
         s.nav_begin(tab, req, push)?
     };
     let epoch = job.epoch;

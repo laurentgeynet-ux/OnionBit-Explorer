@@ -311,6 +311,8 @@ fn test_session_policy(
         js_stall_cooldown: std::time::Duration::ZERO,
         poll_net_budget: std::time::Duration::from_secs(2),
         event_tail_budget: std::time::Duration::from_secs(15),
+        rss_shed_mb: 0,
+        shed_retry_after_s: 5,
     })
 }
 
@@ -797,6 +799,8 @@ async fn download_url_bound_fails_mid_stream() {
         js_stall_cooldown: std::time::Duration::ZERO,
         poll_net_budget: std::time::Duration::from_secs(2),
         event_tail_budget: std::time::Duration::from_secs(15),
+        rss_shed_mb: 0,
+        shed_retry_after_s: 5,
     });
     let dir = std::env::temp_dir().join("explorer-dl-174-bound");
     let _ = std::fs::remove_dir_all(&dir);
@@ -7633,6 +7637,8 @@ async fn redirect_commits_final_url_and_fragment() {
             js_stall_cooldown: std::time::Duration::ZERO,
             poll_net_budget: std::time::Duration::from_secs(2),
             event_tail_budget: std::time::Duration::from_secs(15),
+            rss_shed_mb: 0,
+            shed_retry_after_s: 5,
         },
     );
 

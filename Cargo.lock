@@ -858,6 +858,7 @@ dependencies = [
  "fslock",
  "futures-util",
  "image",
+ "memory-stats",
  "regex",
  "serde",
  "serde_json",

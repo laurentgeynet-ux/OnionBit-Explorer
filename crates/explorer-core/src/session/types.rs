@@ -1067,6 +1067,13 @@ pub enum CoreError {
     /// attente d'un détenteur mort en vol).
     #[error("attente expirée : {0}")]
     Timeout(String),
+    /// Session saturée (Étape 209 — épisode `rss_shed` actif :
+    /// la dégradation a déjà abandonné les fetchs basse
+    /// priorité ; la requête attend un souffle plutôt qu'une
+    /// place de plus dans la file). Porte le `Retry-After`
+    /// conseillé en secondes — REST → 503 + en-tête.
+    #[error("session saturée (rss_shed) — réessayer dans {0} s")]
+    Overloaded(u32),
 }
 
 /// Configuration de session — seuils et viewport initiaux
@@ -1262,6 +1269,23 @@ pub struct SessionConfig {
     /// conservé). `Duration::ZERO` = borne désactivée.
     /// Défaut 15 s.
     pub event_tail_budget: std::time::Duration,
+    /// Seuil RSS **processus** du shed-load (Étape 209 /
+    /// §B-114-b, env `EXPLORER_RSS_SHED_MB`), en Mio — mesuré
+    /// sur `physical_mem` comme le watchdog daemon. Placé
+    /// **sous** les seuils de kill (`EXPLORER_RSS_LIMIT_MB` /
+    /// `COMMIT_LIMIT_MB`, opt-in « vols §B-59 seulement ») :
+    /// la session dégrade en gradins (files fetch basse
+    /// priorité → `status:0`, GC moteur demandé, bitmaps
+    /// décodés évincés, navigations/onglets refusés 503)
+    /// plutôt que d'attendre la mort — c'est la première
+    /// couche **dégradante et permanente**, les kills restent
+    /// le dernier recours. `0` = shed désarmé. Défaut 4 096.
+    pub rss_shed_mb: u32,
+    /// `Retry-After` conseillé (secondes) porté par
+    /// [`CoreError::Overloaded`] pendant un épisode shed —
+    /// indice client : le shed se lève sur la marge RSS
+    /// réelle, pas sur cette durée.
+    pub shed_retry_after_s: u32,
 }
 
 impl Default for SessionConfig {
@@ -1305,6 +1329,12 @@ impl Default for SessionConfig {
             js_stall_cooldown: std::time::Duration::from_secs(10),
             poll_net_budget: std::time::Duration::from_secs(2),
             event_tail_budget: std::time::Duration::from_secs(15),
+            // Sous le watchdog job (~5 Gio mesuré vol 697) et
+            // les kills opt-in : le shed dégrade avant toute
+            // mort — seuil par défaut armé (le trou du vol 697
+            // était précisément « rien d'armé »).
+            rss_shed_mb: 4_096,
+            shed_retry_after_s: 5,
         }
     }
 }
