@@ -148,7 +148,12 @@ mod tests {
     #[test]
     fn b59_string_doubling_is_range_error() {
         let mut e = Engine::new();
-        e.set_mem_limit(1 << 20); // 1 Mio pour la démo
+        // Borne relative au heap d'amorçage — JS-C411 compte la
+        // capacité des `Str`, l'estimé d'init a grandi : un
+        // plafond absolu 1 Mio armerait `over_mem` d'emblée.
+        e.collect();
+        let base = e.heap_stats().estimated_bytes;
+        e.set_mem_limit(base + (1 << 20)); // +1 Mio pour la démo
         let r = e.eval("var s='x'.repeat(65536); for (var i=0;i<8;i++){ s=s+s; } s");
         assert!(r.is_err(), "concat géante doit lever RangeError");
     }
@@ -159,7 +164,9 @@ mod tests {
     #[test]
     fn b59_replace_all_output_bounded() {
         let mut e = Engine::new();
-        e.set_mem_limit(1 << 20);
+        e.collect();
+        let base = e.heap_stats().estimated_bytes;
+        e.set_mem_limit(base + (1 << 20));
         let r = e.eval(
             "var s='a'.repeat(200000); var rep='z'.repeat(64);\
              s.replaceAll('a', rep)",
@@ -171,7 +178,9 @@ mod tests {
     #[test]
     fn b59_template_literal_bounded() {
         let mut e = Engine::new();
-        e.set_mem_limit(1 << 20);
+        e.collect();
+        let base = e.heap_stats().estimated_bytes;
+        e.set_mem_limit(base + (1 << 20));
         let r = e.eval("var a='x'.repeat(700000); var b='y'.repeat(700000); `${a}${b}`");
         assert!(r.is_err(), "template géant doit lever RangeError");
     }

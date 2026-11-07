@@ -10233,6 +10233,17 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   JS réfuté (pile vide = natif),
   return-early pur confirmé.
 
+<!-- JS-C361 → JS-C410 : livrés hors feuille (vols §B-97 →
+     §B-111 + piste V) — rattrapage documentaire en cours. -->
+
+- [x] **JS-C411. Comptage heap honnête + slack garbage borné
+  absolument** (`cell_bytes` : capacité `Str`, réservoirs
+  `FetchBody`/`Promise`/`FinReg`/`DispStack`/`Symbol`/
+  `BigInt`/`Bound`/`GenLive` ; `dead_hard(lim)` = `lim + 256
+  Mio` au-delà de 64 Mio — mur §B-114, overshoot rumble).
+  Verrous `c411_dead_hard_bounded_slack` +
+  `c411_cell_bytes_counts_capacity_and_payloads`.
+
 ## Tâches continues
 
 - **Spécialiste JS** : divergence miroir ↔ `explorer-dom` quand

@@ -682,7 +682,7 @@ impl Heap {
             std::collections::HashMap::new();
         for c in self.cells.iter().flatten() {
             let bytes = match &c.data {
-                CellData::Str(s) => std::mem::size_of::<Cell>() + s.len(),
+                CellData::Str(s) => std::mem::size_of::<Cell>() + s.capacity(),
                 CellData::Obj(_) => cell_bytes(&c.data),
             };
             let e = h.entry(cell_kind_name(&c.data)).or_default();
@@ -765,14 +765,17 @@ pub struct HeapStats {
 }
 
 /// Coût estimé d'une cellule — approximation documentée : le
-/// `String` compte sa longueur, l'`Object` son empreinte fixe plus
-/// la capacité de sa table de props (les clés `Rc<str>` sont
-/// mutualisées par l'interneur — le texte n'est compté nulle
-/// part ailleurs : borne grossière, pas mesure exacte).
+/// `String` compte sa **capacité** (§B-114 : `s += …` réserve
+/// amorti ×2 — compter `len` sous-estimait le RSS réel de
+/// moitié, 547 Mio vivants mesurés pour un cap de 402), et
+/// l'`Object` son empreinte fixe plus la capacité de sa table
+/// de props (les clés `Rc<str>` sont mutualisées par
+/// l'interneur — le texte n'est compté nulle part ailleurs :
+/// borne grossière, pas mesure exacte).
 fn cell_bytes(data: &CellData) -> usize {
     let base = std::mem::size_of::<Cell>();
     match data {
-        CellData::Str(s) => base + s.len(),
+        CellData::Str(s) => base + s.capacity(),
         CellData::Obj(o) => {
             base + std::mem::size_of::<Object>()
                 + o.props.capacity() * std::mem::size_of::<(Rc<str>, Prop)>()
@@ -790,6 +793,11 @@ fn cell_bytes(data: &CellData) -> usize {
                 // actugaming : `arr.push` en boucle — croissance
                 // post-alloc invisible au compteur) : compter
                 // la capacité, relue à chaque mesure.
+                // JS-C411 : les kinds tombés dans `_ => 0`
+                // rendaient leurs réservoirs invisibles —
+                // `FetchBody` verbatim (segment MSE de dizaines
+                // de Mo non compté, §B-114 rumble), réactions de
+                // promesses, piles de générateurs suspendus.
                 + match &o.kind {
                     ObjKind::ByteBuf(b) => b.len(),
                     ObjKind::Blob { data, .. } => data.len(),
@@ -802,6 +810,36 @@ fn cell_bytes(data: &CellData) -> usize {
                     ObjKind::Iter { items, .. } => {
                         items.capacity() * std::mem::size_of::<Value>()
                     }
+                    ObjKind::FetchBody { body } => body.capacity(),
+                    ObjKind::Promise(p) => {
+                        p.reactions.capacity()
+                            * std::mem::size_of::<crate::promise::Reaction>()
+                    }
+                    ObjKind::FinReg { entries, .. } => {
+                        entries.capacity() * std::mem::size_of::<FinRegEntry>()
+                    }
+                    ObjKind::DispStack { stack, .. } => {
+                        stack.capacity()
+                            * std::mem::size_of::<(Value, Value, Value)>()
+                    }
+                    ObjKind::Symbol { desc, key } => {
+                        desc.as_ref().map_or(0, String::capacity)
+                            + key.capacity()
+                    }
+                    ObjKind::BigInt(b) => {
+                        usize::try_from(b.bits() / 8).unwrap_or(usize::MAX)
+                    }
+                    ObjKind::Fun(
+                        Fun::Bound { bound, .. } | Fun::BoundNative { bound, .. },
+                    ) => bound.capacity() * std::mem::size_of::<Value>(),
+                    ObjKind::GenLive { exec } => {
+                        exec.try_borrow().map_or(0, |g| g.mem_estimate())
+                    }
+                    // Partagés/opaques : `Fun::Script` (`Rc<FnLit>`
+                    // mutualisé — compter le corps par instance
+                    // doublerait), `Host`, `RegExp`, `Temp`,
+                    // `WeakRef`, `Proxy`, vues (`DataView`/
+                    // `TypedArray` — le `ByteBuf` porte le coût).
                     _ => 0,
                 }
         }
@@ -974,9 +1012,10 @@ pub struct Object {
     /// comptée dans `cell_bytes`. `OnceCell<Box>` : **8 o par
     /// objet** (niche du pointeur) — l'index est rare (≥24 props),
     /// les petits objets ne doivent pas payer sa place inline :
-    /// le heap de démarrage est à ~1 047 941 o, 635 o sous la
-    /// borne 1 Mio des tests mémoire — un champ inline plus large
-    /// armerait `over_mem` dès la première alloc post-init
+    /// le heap de démarrage est à ~540 551 o post-sweep (JS-C411,
+    /// comptage capacité) — un champ inline plus large armerait
+    /// `over_mem` dès la première alloc post-init sur les
+    /// contextes à borne serrée
     /// (`js_heap_limit_reaches_context`). `pub(crate)` : les
     /// littéraux `Object { … }` hors module le posent
     /// `OnceCell::new()` — jamais autre chose (invariant
@@ -2413,5 +2452,57 @@ mod tests {
             .unwrap()
             .join()
             .unwrap();
+    }
+
+    /// JS-C411 — l'estimé compte la **capacité** `Str` et les
+    /// réservoirs autrefois invisibles (`_ => 0`) : `FetchBody`
+    /// verbatim, réactions de promesse, disposeurs, symboles,
+    /// args liés, bigint. §B-114 : un segment MSE de 30 Mo
+    /// dans un `FetchBody` passait sous le compteur.
+    #[test]
+    fn c411_cell_bytes_counts_capacity_and_payloads() {
+        // Capacité Str > len (croissance amortie comptée).
+        let mut s = String::with_capacity(1024);
+        s.push_str("ab");
+        let cell = std::mem::size_of::<Cell>();
+        assert!(cell_bytes(&CellData::Str(s)) >= cell + 1024);
+
+        let mk = |kind| Object::blank(Value::Null, kind);
+        let fb = cell_bytes(&CellData::Obj(mk(ObjKind::FetchBody {
+            body: vec![0u8; 512],
+        })));
+        assert!(fb >= 512, "FetchBody body compté : {fb}");
+
+        let mut p = crate::promise::JsPromise {
+            state: crate::promise::PromiseState::Pending,
+            result: Value::Undefined,
+            reactions: Vec::new(),
+            resolve_fn: Value::Undefined,
+            reject_fn: Value::Undefined,
+            handled: false,
+        };
+        p.reactions.reserve(64);
+        let pr = cell_bytes(&CellData::Obj(mk(ObjKind::Promise(p))));
+        assert!(
+            pr >= 64 * std::mem::size_of::<crate::promise::Reaction>(),
+            "reactions comptées : {pr}"
+        );
+
+        let ds = cell_bytes(&CellData::Obj(mk(ObjKind::DispStack {
+            disposed: false,
+            stack: Vec::with_capacity(32),
+        })));
+        assert!(ds >= 32 * 24, "DispStack compté : {ds}");
+
+        let sym = cell_bytes(&CellData::Obj(mk(ObjKind::Symbol {
+            desc: Some(String::with_capacity(64)),
+            key: String::with_capacity(16),
+        })));
+        assert!(sym >= 80, "Symbol compté : {sym}");
+
+        let bi = cell_bytes(&CellData::Obj(mk(ObjKind::BigInt(
+            num_bigint::BigInt::from(u128::MAX),
+        ))));
+        assert!(bi >= 16, "BigInt digits comptés : {bi}");
     }
 }

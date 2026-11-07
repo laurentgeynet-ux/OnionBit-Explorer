@@ -1011,6 +1011,14 @@ fn iter_result(e: &mut Engine, value: Value, done: bool) -> Value {
 }
 
 impl GExec {
+    /// Estimation pour `cell_bytes` (JS-C411) — la pile de
+    /// contrôle suspendue d'un générateur/`async` gelé retient
+    /// frames + envs vivants : hors compteur, elle était
+    /// invisible aux bornes (réservoir §B-114).
+    pub(crate) fn mem_estimate(&self) -> usize {
+        self.stack.capacity() * std::mem::size_of::<GFrame>()
+    }
+
     pub(crate) fn new(env: EnvRef, this: Value, body: Rc<Vec<Stmt>>) -> Self {
         Self {
             stack: vec![GFrame {

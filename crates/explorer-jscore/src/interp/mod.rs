@@ -4226,14 +4226,14 @@ impl Engine {
                 // §B-59 — cap dur sur l'**estimé** (déchets
                 // retenus inclus) : le sweep est impossible
                 // mid-eval, un eval dont les cellules mortes
-                // dépassent `lim × GC_DEAD_MULT` est une bombe
+                // dépassent le cap dur est une bombe
                 // même à vivant petit — rien ne libèrera avant
                 // la fin de job. Sudouest : `s += c` en boucle
                 // retient O(n²) d'intermédiaires → 8-12 Go RSS
                 // → abort allocateur ; ici → RangeError borné.
-                let hard = lim
-                    .saturating_mul(Self::GC_DEAD_MULT)
-                    .max(Self::GC_DEAD_FLOOR);
+                // JS-C411 : slack garbage **absolu** au-delà
+                // des petites bornes (`dead_hard`).
+                let hard = Self::dead_hard(lim);
                 if lim > 0 && self.heap.bytes() > hard {
                     let b = self.heap.bytes();
                     // Top kinds à l'instant du kill — les déchets
@@ -4277,15 +4277,37 @@ impl Engine {
     pub(crate) const GC_DEAD_MULT: usize = 4;
     /// Plancher absolu du cap dur — le kill sur estimé pur a
     /// tué des pages réelles (JS-C113, hubspot : déchet
-    /// transitoire à vivant petit). Le cap ne tire donc qu'au-
-    /// delà du **plus grand** de `lim × GC_DEAD_MULT` et ce
+    /// transitoire à vivant petit). Sous `lim ≤ 64 Mio` le cap
+    /// reste le **plus grand** de `lim × GC_DEAD_MULT` et ce
     /// plancher : des contextes à borne serrée (tests, iframes
-    /// confinées) conservent leur droit au churn transitoire,
-    /// et au-delà de 256 Mio de cellules mortes retenues dans
-    /// un seul eval l'RSS du processus est menacé quoi qu'il
-    /// arrive — le sweep mid-eval étant impossible, tuer est
-    /// la seule récupération sûre.
+    /// confinées) conservent leur droit au churn transitoire.
+    /// Au-delà, JS-C411 le convertit en **slack absolu**
+    /// (`lim + GC_DEAD_FLOOR`, voir [`Engine::dead_hard`]) :
+    /// 256 Mio de cellules mortes retenues dans un seul eval
+    /// menacent déjà le RSS du processus — au-delà, le sweep
+    /// mid-eval étant impossible, tuer est la seule
+    /// récupération sûre.
     pub(crate) const GC_DEAD_FLOOR: usize = 256 * 1024 * 1024;
+
+    /// Cap dur sur l'estimé pour une borne `lim` donnée —
+    /// extrait pour verrou (JS-C411). §B-114 : `lim × 4` sans
+    /// plafond tolérait 1,5 Gio de déchets estimés sous cap
+    /// 384 Mio — l'estimé sous-comptant déjà, le RSS réel
+    /// filait à 4,4 Go avant le kill. Le slack garbage est
+    /// désormais borné **absolument** au-delà des petites
+    /// limites : `lim + 256 Mio`. Sous `lim ≤ 64 Mio`, la
+    /// formule historique (`lim × 4`, plancher 256 Mio) est
+    /// inchangée — les tests et iframes confinés gardent leur
+    /// droit au churn mesuré JS-C113. `lim = 0` n'est jamais
+    /// passé (les appels sont gatés `lim > 0`).
+    pub(crate) fn dead_hard(lim: usize) -> usize {
+        if lim <= Self::GC_DEAD_FLOOR / Self::GC_DEAD_MULT {
+            lim.saturating_mul(Self::GC_DEAD_MULT)
+                .max(Self::GC_DEAD_FLOOR)
+        } else {
+            lim.saturating_add(Self::GC_DEAD_FLOOR)
+        }
+    }
 
     /// Recensement §B-59 des réservoirs natifs non comptés par
     /// `heap.bytes` : files, maps, Vecs et contextes garés —
@@ -8525,3 +8547,27 @@ pub(crate) mod lazy;
 mod ops;
 
 pub(crate) use ops::*;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// JS-C411 — le slack garbage du cap dur est borné
+    /// **absolument** au-delà des petites limites : `lim + 256
+    /// Mio`. §B-114 : `lim × 4` tolérait 1,5 Gio de déchets
+    /// estimés sous cap 384 Mio ; le RSS réel (estimé sous-
+    /// compté) filait à 4,4 Go avant le kill. Sous 64 Mio, la
+    /// formule historique (`×4`, plancher 256 Mio — droit au
+    /// churn JS-C113 des contextes confinés) est inchangée.
+    #[test]
+    fn c411_dead_hard_bounded_slack() {
+        // Petites bornes : formule et plancher historiques.
+        assert_eq!(Engine::dead_hard(8 << 20), 256 << 20);
+        assert_eq!(Engine::dead_hard(64 << 20), 256 << 20);
+        // Au-delà : slack absolu +256 Mio.
+        assert_eq!(Engine::dead_hard(65 << 20), 321 << 20);
+        assert_eq!(Engine::dead_hard(100 << 20), 356 << 20);
+        // §B-114 : 384 Mio → 640 Mio (était 1,5 Gio).
+        assert_eq!(Engine::dead_hard(384 << 20), 640 << 20);
+    }
+}
