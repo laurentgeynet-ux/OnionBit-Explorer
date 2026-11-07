@@ -694,6 +694,49 @@ impl Heap {
         v
     }
 
+    /// Census `Str` au kill — sonde §B-114 : la rétention
+    /// structurelle non bornée (186 987 cellules / 872 Mio au
+    /// kill `dead_hard`, vol 703 ; `Str` croît jusqu'à tout
+    /// cap — pas un working-set) se nomme par **contenu**, pas
+    /// par kind. Retourne `(octets total `Str`, compte
+    /// ≥64 Kio, compte ≥1 Mio, top-N (len, préfixe))` — les
+    /// préfixes sont tronqués à ~48 chars et sanitisés ASCII
+    /// (le contenu peut être binaire/hostile — jamais de dump
+    /// brut dans les journaux). O(cellules) — l'appelant le
+    /// réserve aux sites de kill, pas au tick.
+    pub(crate) fn str_census(&self, top_n: usize) -> (usize, usize, usize, Vec<(usize, String)>) {
+        let (mut total, mut big, mut huge, mut top) = (0usize, 0usize, 0usize, Vec::new());
+        for c in self.cells.iter().flatten() {
+            if let CellData::Str(s) = &c.data {
+                let n = s.len();
+                total += n;
+                big += usize::from(n >= 65_536);
+                huge += usize::from(n >= 1_048_576);
+                top.push((n, s.as_str()));
+            }
+        }
+        top.sort_by_key(|e| std::cmp::Reverse(e.0));
+        top.truncate(top_n);
+        let top = top
+            .into_iter()
+            .map(|(n, s)| {
+                let p: String = s
+                    .chars()
+                    .take(48)
+                    .map(|c| {
+                        if c.is_ascii_graphic() || c == ' ' {
+                            c
+                        } else {
+                            '.'
+                        }
+                    })
+                    .collect();
+                (n, p)
+            })
+            .collect();
+        (total, big, huge, top)
+    }
+
     /// Recalcule `bytes` sur l'état courant des cellules —
     /// §B-59 bras actugaming : les mutations post-alloc
     /// (`arr.push`, `obj[k]=`, `Map.set`…) grossissent sans
@@ -2504,5 +2547,32 @@ mod tests {
             num_bigint::BigInt::from(u128::MAX),
         ))));
         assert!(bi >= 16, "BigInt digits comptés : {bi}");
+    }
+
+    /// JS-C417 — `str_census` : tri par taille, seaux
+    /// ≥64 Kio/≥1 Mio, préfixe borné 48 chars ASCII-sanitisé
+    /// (non-ASCII → `.`). §B-114 : la rétention `Str` se nomme
+    /// par contenu au kill.
+    #[test]
+    fn str_census_ranks_and_sanitizes() {
+        let mut h = Heap::new();
+        h.alloc_str("x".repeat(10));
+        h.alloc_str("big".repeat(30_000)); // 90 000 B → ≥64 Kio
+        h.alloc_str("H".repeat(1_200_000)); // → ≥1 Mio
+        h.alloc_str("préfixe-é-non-ascii\tavec\ttabs");
+        let (total, big, huge, top) = h.str_census(3);
+        // `len()` = octets UTF-8 : les deux `é` comptent 2 B.
+        assert_eq!(total, 10 + 90_000 + 1_200_000 + 31);
+        assert_eq!(big, 2);
+        assert_eq!(huge, 1);
+        assert_eq!(top.len(), 3);
+        assert_eq!(top[0].0, 1_200_000);
+        assert_eq!(top[1].0, 90_000);
+        // Préfixe du 3ᵉ : 31 B, non-ASCII/tab → '.'.
+        assert_eq!(top[2].0, 31);
+        assert!(top[2].1.is_ascii());
+        assert!(top[2].1.contains('.'));
+        // Borne de troncature : 48 chars max.
+        assert!(top[0].1.len() <= 48);
     }
 }

@@ -3177,6 +3177,29 @@ impl Engine {
         self.heap.slab_overhead_bytes()
     }
 
+    /// Census `Str` aux deux kills heap (§B-114 — vol 703 :
+    /// 872 Mio de `Str` au kill `dead_hard`, rétention qui
+    /// croît jusqu'à tout cap → pas un working-set) — top-8
+    /// par taille + seaux ≥64 Kio/≥1 Mio, préfixes sanitisés.
+    /// Ligne `warn!` dédiée : elle survit à une troncature du
+    /// `RangeError` et nomme le contenu retenu (segment SABR ?
+    /// `ytInitialData` ? concat base64 ?).
+    fn log_str_census(&self) {
+        let (stot, sbig, shuge, scens) = self.heap.str_census(8);
+        let mut top_s = String::new();
+        for (n, p) in &scens {
+            top_s.push_str(&format!(" {n}B:\"{p}\""));
+        }
+        tracing::warn!(
+            target: "js_alloc",
+            str_total_b = stot,
+            str_ge64k = sbig,
+            str_ge1m = shuge,
+            top = %top_s,
+            "str_census_kill"
+        );
+    }
+
     /// Split **alloc natif** de la dernière éval (§B-59, J17) :
     /// `(parse, exec)` chacun `(octets demandés, nb allocs)` —
     /// la phase exec couvre `exec_program` seul (le drain
@@ -4243,6 +4266,7 @@ impl Engine {
                     // si live croît, borne trop serrée si live
                     // < limite — mesuré marmiton/bookshop en
                     // rafale ×3/×14).
+                    self.log_str_census();
                     let msg = format!(
                         "heap memory limit exceeded ({live} cells, {live_bytes} B live > {lim} B)"
                     );
@@ -4272,6 +4296,7 @@ impl Engine {
                     for (k, n, kb) in &hist {
                         top.push_str(&format!(" {k}:{n}/{}MiB", kb / 1_048_576));
                     }
+                    self.log_str_census();
                     let msg = format!(
                         "heap memory limit exceeded ({live} cells, {b} B allocated > {hard} B hard cap — deferred GC unreachable) |{top} |"
                     );

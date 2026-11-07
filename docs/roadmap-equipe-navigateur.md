@@ -10444,6 +10444,14 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   `prom.pending` `_.C4` dominant étant l'état normal
   Chrome). Verrou `c416_proto_harvest` (7 tests, `.call`
   dispatch réel inclus).
+- [x] **JS-C417. Sonde `str_census_kill` — la rétention
+  `Str` nommée par contenu au kill** (§B-114, vol 703 :
+  `Str` croît jusqu'à tout cap → rétention structurelle,
+  pas working-set. `Heap::str_census` : total, seaux
+  ≥64 Kio/≥1 Mio, top-8 `(len, préfixe ASCII borné)` émis
+  aux deux kills heap — nomme segment SABR/ytInitialData/
+  concat `s += c`/base64 au prochain vol `/watch`).
+  Verrou `str_census_ranks_and_sanitizes`.
 
 ## Tâches continues
 
