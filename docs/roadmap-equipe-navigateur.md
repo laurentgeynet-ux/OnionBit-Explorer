@@ -10472,6 +10472,21 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   morts sous `lim` 1 Mio : survie + `bytes` retenu sous
   `base + dette`).
 
+- [x] **JS-C419. Attribution site→volume des `Str` morts —
+  le producteur des déchets se nomme au kill** (§B-114 vols
+  706/707 : dead au kill **scale avec le cap** — 243 Mio
+  sous 640 → 555 sous 1 280 → span monolithique à déchets
+  non bornés entre checkpoints ; la coupe dépend du
+  producteur : `Rc<str>` ne libère qu'à la chute du dernier
+  ref, or « dead » inclut les stack-détenus mid-eval).
+  `#[track_caller]` sur `alloc_str` + `str_val` → site
+  producteur réel (701 appelants) enregistré par cellule
+  sous `j17_on()` ; `str_census` joint `dead_b` par site →
+  `top_sites` dans `str_census_kill`. Prochain kill `/watch`
+  tranche la matrice : temporaires droppés → `Rc<str>` ;
+  stack-détenus → fix structurel ; site chaud unique → fix
+  chirurgical. Verrou `str_census_names_dead_sites`.
+
 ## Tâches continues
 
 - **Spécialiste JS** : divergence miroir ↔ `explorer-dom` quand

@@ -3193,6 +3193,10 @@ impl Engine {
         for (n, p) in &c.top {
             top_s.push_str(&format!(" {n}B:\"{p}\""));
         }
+        let mut sites_s = String::new();
+        for (l, n, b) in &c.top_sites {
+            sites_s.push_str(&format!(" {l}×{n}={b}B"));
+        }
         let j17 = if crate::j17_on() {
             crate::j17_snapshot()
         } else {
@@ -3206,6 +3210,7 @@ impl Engine {
             str_ge64k = c.ge64k,
             str_ge1m = c.ge1m,
             top = %top_s,
+            top_sites = %sites_s,
             j17 = %j17,
             "str_census_kill"
         );
@@ -3428,7 +3433,10 @@ impl Engine {
 
     // -- allocation helpers -------------------------------------------
 
-    /// Allocate a JS string value.
+    /// Allocate a JS string value. `#[track_caller]` (JS-C419) —
+    /// le site d'alloc `Str` remonte au producteur réel à
+    /// travers cet entonnoir, pas à cette ligne.
+    #[track_caller]
     pub(crate) fn str_val(&mut self, s: impl Into<String>) -> Value {
         Value::Str(self.heap.alloc_str(s))
     }

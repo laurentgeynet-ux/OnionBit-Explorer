@@ -101,6 +101,16 @@ pub struct Heap {
     peak_live: usize,
     /// Pic d'octets estimés.
     peak_bytes: usize,
+    /// Sites d'alloc `Str` par cellule — sonde §B-114
+    /// (JS-C419) : `#[track_caller]` remonte le `Location`
+    /// du producteur réel à travers l'entonnoir `str_val`,
+    /// et le census joint `dead_b` par site → nomme le
+    /// producteur des déchets (temporaire droppé vs
+    /// intermédiaire stack-détenu). Remplie sous `j17_on()`
+    /// seulement ; les entrées des cellules balayées restent
+    /// jusqu'à réutilisation de l'id (bornée par le pic de
+    /// cellules `Str` depuis l'armement).
+    str_sites: HashMap<ObjId, &'static std::panic::Location<'static>>,
 }
 
 impl Heap {
@@ -118,6 +128,7 @@ impl Heap {
             gc_runs: 0,
             peak_live: 0,
             peak_bytes: 0,
+            str_sites: HashMap::new(),
         }
     }
 
@@ -142,10 +153,17 @@ impl Heap {
         (self.cells.len() - 1) as ObjId
     }
 
-    /// Allocate a string, returning its id.
+    /// Allocate a string, returning its id. `#[track_caller]`
+    /// propage le site du producteur réel (JS-C419) — sous
+    /// `j17_on()` il est enregistré par cellule pour le census.
+    #[track_caller]
     pub fn alloc_str(&mut self, s: impl Into<String>) -> ObjId {
         crate::j17_tick(&crate::J17_STR_CELL);
-        self.alloc(CellData::Str(s.into()))
+        let id = self.alloc(CellData::Str(s.into()));
+        if crate::j17_on() {
+            self.str_sites.insert(id, std::panic::Location::caller());
+        }
+        id
     }
 
     /// Allocate an object.
@@ -719,6 +737,7 @@ impl Heap {
     pub(crate) fn str_census(&self, top_n: usize) -> StrCensus {
         let (mut total, mut live, mut dead, mut big, mut huge, mut top) =
             (0usize, 0usize, 0usize, 0usize, 0usize, Vec::new());
+        let mut sites: HashMap<&std::panic::Location, (u32, usize)> = HashMap::new();
         for (i, slot) in self.cells.iter().enumerate() {
             if let Some(c) = slot {
                 if let CellData::Str(s) = &c.data {
@@ -728,6 +747,11 @@ impl Heap {
                         live += n;
                     } else {
                         dead += n;
+                        if let Some(loc) = self.str_sites.get(&(i as ObjId)) {
+                            let e = sites.entry(loc).or_default();
+                            e.0 += 1;
+                            e.1 += n;
+                        }
                     }
                     big += usize::from(n >= 65_536);
                     huge += usize::from(n >= 1_048_576);
@@ -754,6 +778,12 @@ impl Heap {
                 (n, p)
             })
             .collect();
+        let mut sites: Vec<_> = sites
+            .into_iter()
+            .map(|(l, (n, b))| (site_label(l), n, b))
+            .collect();
+        sites.sort_by_key(|e| std::cmp::Reverse(e.2));
+        sites.truncate(top_n);
         StrCensus {
             total_b: total,
             live_b: live,
@@ -761,6 +791,7 @@ impl Heap {
             ge64k: big,
             ge1m: huge,
             top,
+            top_sites: sites,
         }
     }
 
@@ -838,6 +869,24 @@ pub(crate) struct StrCensus {
     /// Top-N `(len, préfixe ≤48 chars ASCII-sanitisé)`
     /// trié par taille descendante.
     pub top: Vec<(usize, String)>,
+    /// Top-N sites d'alloc `(label file:line, cellules,
+    /// octets morts)` — JS-C419 : nomme le producteur des
+    /// déchets pour trancher « `Rc<str>` (temporaires
+    /// droppés) vs fix structurel (stack-détenu) ». Vide
+    /// hors `j17_on()` ; cellules allouées désarmées non
+    /// attribuées.
+    pub top_sites: Vec<(String, u32, usize)>,
+}
+
+/// Label compact d'un site d'alloc — les deux derniers
+/// segments de chemin suffisent (`mod.rs` seul est ambigu).
+fn site_label(l: &std::panic::Location) -> String {
+    let segs: Vec<&str> = l.file().rsplit(['/', '\\']).take(2).collect();
+    let base = segs.first().copied().unwrap_or("?");
+    match segs.get(1) {
+        Some(dir) => format!("{dir}/{base}:{}", l.line()),
+        None => format!("{base}:{}", l.line()),
+    }
 }
 
 /// Instantané des compteurs du heap (JS-C37).
@@ -2629,5 +2678,26 @@ mod tests {
         assert!(c.top[2].1.contains('.'));
         // Borne de troncature : 48 chars max.
         assert!(c.top[0].1.len() <= 48);
+    }
+
+    /// JS-C419 — attribution site→volume : sous `j17_on()`,
+    /// `alloc_str` (`#[track_caller]`) enregistre le
+    /// `Location` du producteur par cellule et le census
+    /// joint `dead_b` par site — nomme le producteur des
+    /// déchets pour trancher « `Rc<str>` vs fix structurel ».
+    #[test]
+    fn str_census_names_dead_sites() {
+        crate::j17_enable();
+        let mut h = Heap::new();
+        h.alloc_str("dead-payload".repeat(1_000)); // 12 000 B, non seedée
+        let keep = h.alloc_str("live".to_string());
+        let (_n, _b) = h.mark_live(|mark| mark(keep));
+        let c = h.str_census(4);
+        // Un seul site mort : la ligne d'alloc ci-dessus.
+        assert_eq!(c.top_sites.len(), 1, "{:?}", c.top_sites);
+        let (label, n, b) = &c.top_sites[0];
+        assert!(label.contains("heap.rs:"), "site = ce fichier : {label}");
+        assert_eq!(*n, 1);
+        assert_eq!(*b, 12_000);
     }
 }
