@@ -301,7 +301,7 @@ Règles de la coexistence :
    partagées, worktrees) — les règles ne gouvernent que ce
    qui atterrit sur `main`.
    - **Worktrees parallèles — `target-dir` distinct** :
-     `.cargo/config.toml` épingle `D:/cargo-target/
+     `.cargo/config.toml` épingle `C:/cargo-target/
      OnionBit-Explorer` pour tous les worktrees — les
      binaires de test d'un autre worktree (autre
      `CARGO_MANIFEST_DIR`, fixtures absentes) peuvent
