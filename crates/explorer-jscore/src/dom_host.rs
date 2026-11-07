@@ -4512,19 +4512,23 @@ impl Engine {
         ev.adjusted.set(adjusted);
         ev.adjusted_related.set(related);
         let ty = ev.ty.borrow().clone();
-        let fns: Vec<Value> = {
+        let (fns, node_desc): (Vec<Value>, String) = {
             let d = dom.borrow();
-            d.nodes
-                .get(node as usize)
-                .map(|n| {
-                    n.listeners
-                        .iter()
-                        .filter(|(t, _, c)| t == &ty && *c == capture)
-                        .map(|(_, f, _)| *f)
-                        .collect()
-                })
-                .unwrap_or_default()
+            (
+                d.nodes
+                    .get(node as usize)
+                    .map(|n| {
+                        n.listeners
+                            .iter()
+                            .filter(|(t, _, c)| t == &ty && *c == capture)
+                            .map(|(_, f, _)| *f)
+                            .collect()
+                    })
+                    .unwrap_or_default(),
+                probe_node_desc(&d, node),
+            )
         };
+        let n_fns = fns.len();
         let this = node_value(self, dom, cache, node);
         for f in fns {
             // Spec : `stopPropagation` laisse finir les listeners
@@ -4544,6 +4548,16 @@ impl Engine {
                         }
                     }
                     return Err(th);
+                }
+            }
+        }
+        // Sonde G-6 — premier nœud par type avec des listeners
+        // réellement invoqués : nomme la cible du callback (≠
+        // `el.listen` qui nomme l'enregistrement).
+        if n_fns > 0 && tracing::enabled!(target: "dom_probe", tracing::Level::INFO) {
+            if let Ok(mut d) = dom.try_borrow_mut() {
+                if d.ce.probe_seen.insert(format!("cb:{ty}")) {
+                    tracing::info!(target: "dom_probe", site = "ev.cb", ty = %ty, on = %node_desc, n = n_fns);
                 }
             }
         }
@@ -5177,7 +5191,7 @@ impl Host for DocumentHost {
                 let f = arg(args, 1);
                 let capture = e.to_boolean(arg(args, 2));
                 if e.is_callable(f) {
-                    probe_el_listen(&self.dom, &ty);
+                    probe_el_listen(&self.dom, &ty, "document");
                     let root = self.dom.borrow().root;
                     self.dom.borrow_mut().nodes[root as usize]
                         .listeners
@@ -8557,7 +8571,11 @@ impl Host for NodeHost {
                 let f = arg(args, 1);
                 let capture = e.to_boolean(arg(args, 2));
                 if e.is_callable(f) {
-                    probe_el_listen(&self.dom, &ty);
+                    let on = {
+                        let d = self.dom.borrow();
+                        probe_node_desc(&d, node)
+                    };
+                    probe_el_listen(&self.dom, &ty, &on);
                     self.dom.borrow_mut().nodes[node as usize]
                         .listeners
                         .push((ty, f, capture));
@@ -12273,7 +12291,7 @@ fn win_add_event_listener(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult
     let capture = e.to_boolean(arg(args, 2));
     if e.is_callable(f) {
         if let Some((dom, _)) = &e.dom_ctx {
-            probe_el_listen(dom, &ty);
+            probe_el_listen(dom, &ty, "window");
             let root = dom.borrow().root;
             dom.borrow_mut().nodes[root as usize]
                 .listeners
@@ -13274,7 +13292,7 @@ fn probe_ev_try(e: &mut Engine, dom: &DomRef, v: Value) {
 /// été dispatché (`ev:{ty}` présent) — les signaux une-fois
 /// (`spfready`, `yt-action`, `load`) ratés par un attach
 /// tardif nomment un émetteur jamais lancé.
-fn probe_el_listen(dom: &DomRef, ty: &str) {
+fn probe_el_listen(dom: &DomRef, ty: &str, on: &str) {
     if !tracing::enabled!(target: "dom_probe", tracing::Level::INFO) {
         return;
     }
@@ -13282,10 +13300,22 @@ fn probe_el_listen(dom: &DomRef, ty: &str) {
         return;
     };
     if d.ce.probe_seen.insert(format!("ls:{ty}")) {
-        tracing::info!(target: "dom_probe", site = "el.listen", ty = %ty);
+        tracing::info!(target: "dom_probe", site = "el.listen", ty = %ty, on = %on);
     }
     if d.ce.probe_seen.contains(&format!("ev:{ty}")) && d.ce.probe_seen.insert(format!("lt:{ty}")) {
         tracing::info!(target: "dom_probe", site = "ls.late", ty = %ty);
+    }
+}
+
+/// Descripteur court d'un nœud pour les sondes — `tag#id` quand
+/// l'élément porte un id, `tag` sinon.
+fn probe_node_desc(d: &Dom, node: NodeId) -> String {
+    let Some(n) = d.nodes.get(node as usize) else {
+        return "<?>".to_string();
+    };
+    match d.attr(node, "id") {
+        Some(id) if !id.is_empty() => format!("{}#{}", n.tag, id),
+        _ => n.tag.clone(),
     }
 }
 
@@ -13311,7 +13341,11 @@ pub(crate) fn et_add_listener(e: &mut Engine, this: Value, args: &[Value]) -> Js
         if let Some(node) = et_dom_target(e, this, &dom) {
             let capture = e.to_boolean(arg(args, 2));
             // Sonde §B-97 — la greffe compte dans le recensement.
-            probe_el_listen(&dom, &ty);
+            let on = {
+                let d = dom.borrow();
+                probe_node_desc(&d, node)
+            };
+            probe_el_listen(&dom, &ty, &on);
             dom.borrow_mut().nodes[node as usize]
                 .listeners
                 .push((ty, cb, capture));
