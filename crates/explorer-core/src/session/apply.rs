@@ -1416,6 +1416,16 @@ fn key_node(p: &PaintPayload, key: u64) -> Result<explorer_dom::NodeId, JournalR
 /// Résumé borné d'une op de journal — le `html` d'un
 /// `Insert` peut peser des Ko : on logue nature + clés +
 /// tailles, jamais le contenu (diagnostic JS-C289).
+/// Sonde §B-111 — `EXPLORER_DLV_TRACE=1` logue chaque op de
+/// journal **avant** exécution : la dernière ligne de log
+/// avant un overflow de pile nomme l'op fautive (le `.dmp`
+/// WER n'existe pas — abort Rust hors capture ; la trace
+/// tient lieu de morgue). Désarmée : un booléen lu une fois.
+fn dlv_trace() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("EXPLORER_DLV_TRACE").is_some())
+}
+
 fn journal_op_desc(op: &explorer_js::DomMutation) -> String {
     use explorer_js::DomMutation::{AttachShadow, Insert, Remove, SetAttr, SetText};
     match op {
@@ -1656,8 +1666,18 @@ fn apply_journal(
     }
     // Étape 137a — cibles réelles des ops pour le relayout
     // incrémental ciblé (le journal remplace `job.dirty`).
+    tracing::info!(
+        ops = journal.ops.len(),
+        fp = journal.fingerprint,
+        "journal: apply"
+    );
     let mut touched = Vec::new();
     for (op_i, op) in journal.ops.iter().enumerate() {
+        // §B-111 — breadcrumb opt-in : la dernière ligne avant
+        // la mort nomme l'op fautive (voir `dlv_trace`).
+        if dlv_trace() {
+            tracing::info!(op_i, "journal: op {}", journal_op_desc(op));
+        }
         if let Err(e) = apply_journal_op(p, ctx, op, &mut touched) {
             // Diagnostic JS-C289 — nomme l'op et la clé
             // fautive (le `html` d'un Insert peut peser des
@@ -1686,6 +1706,7 @@ fn apply_journal(
     // prématurément puis re-parserait à chaque pompe
     // (la garde a été perdue dans la réécriture C315 —
     // restaurée).
+    tracing::info!("journal: ops done");
     let dom = p.dom.as_ref().ok_or(JournalReject::NoDom)?;
     if !journal.ops.is_empty() && engine_fingerprint(dom, &p.keymap) != journal.fingerprint {
         return Err(JournalReject::Fingerprint);
@@ -1799,6 +1820,7 @@ fn journal_relayout(
         }
         &touched_all
     };
+    tracing::info!(touched = touched.len(), "journal: relayout");
     let incremental = journal_cover(&dom, touched)
         .is_some_and(|t| try_incr_payload(p, ctx, Some(&dom), &dom, t, t, &job.canvas_ops));
     if !incremental && relayout_dom_payload(p, ctx, &dom, &job.canvas_ops).is_err() {
@@ -1806,6 +1828,7 @@ fn journal_relayout(
         p.style_dirty = debt;
         return Err(JournalReject::Dom);
     }
+    tracing::info!(incremental, "journal: relayout done");
     out.incremental = incremental;
     p.dom = Some(dom);
     out.repainted = true;
@@ -1872,6 +1895,7 @@ fn try_incr_payload(
     let Some(root_el) = new_dom.document_element() else {
         return false;
     };
+    tracing::info!(target = ?target_new, "journal: incr");
     // Tables `images.*` indexées par `NodeId` de l'ANCIEN DOM —
     // re-key par `src`/styles AVANT la mesure intrinsèque
     // (étape 108) : `<img>` fetchés, `data:` et fonds
@@ -2071,6 +2095,7 @@ pub(crate) fn relayout_dom_payload(
     // cases, retirer plus tard pourrait emporter un
     // bitmap frais (étape 129).
     composite::purge_frame_bitmaps(p);
+    tracing::info!("apply: relayout");
     let styles = styles_payload(p, dom, ctx.viewport, ctx.color_scheme, ctx.scripting);
     tracing::info!(
         ms = u64::try_from(t0.elapsed().as_millis()).unwrap_or(u64::MAX),
