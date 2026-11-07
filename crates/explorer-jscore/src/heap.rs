@@ -529,6 +529,13 @@ impl Heap {
         });
         // Drain itératif — `trace_cell` pousse les référencements
         // dans `discovered`, on les marque en remettant.
+        if crate::dlv_trace() {
+            tracing::info!(
+                "job: gc.mark cells={} roots={}",
+                self.cells.len(),
+                worklist.len()
+            );
+        }
         while let Some(id) = worklist.pop() {
             self.trace_cell(id, &mut discovered, &mut envs);
             for d in discovered.drain(..) {
@@ -537,6 +544,32 @@ impl Heap {
                     worklist.push(d);
                 }
             }
+        }
+        // §B-111 — morgue de la vague : une mort en cascade
+        // dans le sweep laisse le top-kinds des cellules mortes
+        // en dernière ligne (`GenLive` ? `Host` ? `Promise` ?) —
+        // le suspect de drop récursif est nommé sans per-cell log.
+        if crate::dlv_trace() {
+            let mut h: std::collections::HashMap<&'static str, usize> =
+                std::collections::HashMap::new();
+            let mut dead = 0usize;
+            for (i, slot) in self.cells.iter().enumerate() {
+                if !self.marks[i] {
+                    if let Some(c) = slot.as_ref() {
+                        *h.entry(cell_kind_name(&c.data)).or_default() += 1;
+                        dead += 1;
+                    }
+                }
+            }
+            let mut v: Vec<_> = h.into_iter().collect();
+            v.sort_by_key(|e| std::cmp::Reverse(e.1));
+            let kinds = v
+                .iter()
+                .take(6)
+                .map(|(k, n)| format!("{k}:{n}"))
+                .collect::<Vec<_>>()
+                .join(" ");
+            tracing::info!("job: gc.sweep dead={dead} {kinds}");
         }
         // -- Sweep --
         let mut swept = 0usize;
@@ -648,32 +681,11 @@ impl Heap {
         let mut h: std::collections::HashMap<&'static str, (usize, usize)> =
             std::collections::HashMap::new();
         for c in self.cells.iter().flatten() {
-            let (name, bytes) = match &c.data {
-                CellData::Str(s) => ("Str", std::mem::size_of::<Cell>() + s.len()),
-                CellData::Obj(o) => {
-                    let kind = match &o.kind {
-                        ObjKind::Ordinary => "Ordinary",
-                        ObjKind::Array(_) => "Array",
-                        ObjKind::Fun(_) => "Fun",
-                        ObjKind::Host(_) => "Host",
-                        ObjKind::RegExp(_) => "RegExp",
-                        ObjKind::Promise(_) => "Promise",
-                        ObjKind::Map(_) => "Map",
-                        ObjKind::Set(_) => "Set",
-                        ObjKind::Iter { .. } => "Iter",
-                        ObjKind::GenLive { .. } => "GenLive",
-                        ObjKind::Temp(_) => "Temp",
-                        ObjKind::WeakRef(_) => "WeakRef",
-                        ObjKind::Symbol { .. } => "Symbol",
-                        ObjKind::BigInt(_) => "BigInt",
-                        ObjKind::ByteBuf(_) => "ByteBuf",
-                        ObjKind::Blob { .. } => "Blob",
-                        _ => "other",
-                    };
-                    (kind, cell_bytes(&c.data))
-                }
+            let bytes = match &c.data {
+                CellData::Str(s) => std::mem::size_of::<Cell>() + s.len(),
+                CellData::Obj(_) => cell_bytes(&c.data),
             };
-            let e = h.entry(name).or_default();
+            let e = h.entry(cell_kind_name(&c.data)).or_default();
             e.0 += 1;
             e.1 += bytes;
         }
@@ -1949,6 +1961,39 @@ pub enum Fun {
         /// Args prepended to every call.
         bound: Vec<Value>,
     },
+}
+
+/// Nom de kind d'une cellule — partagé par [`Heap::kind_histogram`]
+/// (§B-59 vivant) et la morgue `gc.sweep` (§B-111 morts) : même
+/// vocabulaire des deux côtés de la frontière vie/mort.
+fn cell_kind_name(d: &CellData) -> &'static str {
+    match d {
+        CellData::Str(_) => "Str",
+        CellData::Obj(o) => match &o.kind {
+            ObjKind::Ordinary => "Ordinary",
+            ObjKind::Array(_) => "Array",
+            ObjKind::Fun(_) => "Fun",
+            ObjKind::Host(_) => "Host",
+            ObjKind::RegExp(_) => "RegExp",
+            ObjKind::Promise(_) => "Promise",
+            ObjKind::Map(_) => "Map",
+            ObjKind::Set(_) => "Set",
+            ObjKind::Iter { .. } => "Iter",
+            ObjKind::GenLive { .. } => "GenLive",
+            ObjKind::Temp(_) => "Temp",
+            ObjKind::WeakRef(_) => "WeakRef",
+            ObjKind::Symbol { .. } => "Symbol",
+            ObjKind::BigInt(_) => "BigInt",
+            ObjKind::ByteBuf(_) => "ByteBuf",
+            ObjKind::Blob { .. } => "Blob",
+            ObjKind::Proxy { .. } => "Proxy",
+            ObjKind::FinReg { .. } => "FinReg",
+            ObjKind::DispStack { .. } => "DispStack",
+            ObjKind::DataView { .. } => "DataView",
+            ObjKind::TypedArray { .. } => "TypedArray",
+            ObjKind::FetchBody { .. } => "FetchBody",
+        },
+    }
 }
 
 /// Lexical environment. The global environment delegates its bindings

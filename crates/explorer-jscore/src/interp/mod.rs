@@ -2639,10 +2639,12 @@ impl Engine {
         // 1. Rassemble les `ObjId` tenus par les structures
         //    annexes (RefCell/NodeCache — leurs borrows doivent
         //    être relâchés avant la passe).
+        crate::promise::job_rail(self.cur_ctx, "gc.seed");
         let ids = self.gc_seed_ids();
         self.gc_due = false;
         self.gc_cap = 0;
         // 3. Mark-sweep.
+        crate::promise::job_rail(self.cur_ctx, "gc.marksweep");
         let n = self.heap.collect(|mark| {
             for &id in &ids {
                 mark(id);
@@ -2653,6 +2655,7 @@ impl Engine {
         //    seules (`disconnect` JS n'est pas garanti) et
         //    continueraient à produire des records pour un
         //    objet mort. Purge + retrait des registrations Dom.
+        crate::promise::job_rail(self.cur_ctx, "gc.obspurge");
         let dead_mutobs = self.mutobs.purge_dead(&self.heap);
         if !dead_mutobs.is_empty() {
             if let Some((dom, _)) = &self.dom_ctx {
@@ -2671,6 +2674,7 @@ impl Engine {
         // `alloc` (§B-59) sauf `dead_blocked` (rejeu journal
         // en attente — ADR-0033) ; le churn `innerHTML`
         // n'accumule plus attrs/texte/enfants.
+        crate::promise::job_rail(self.cur_ctx, "gc.domgc");
         if let Some((dom, cache)) = &self.dom_ctx {
             let mut c = cache.borrow_mut();
             c.retain(|_, &mut oid| self.heap.obj(oid).is_some());
@@ -2684,6 +2688,7 @@ impl Engine {
         //    puis cleanup en microtask pour les cibles balayées
         //    (spec `HostEnqueueFinalizationRegistryCleanupJob` :
         //    jamais synchrone).
+        crate::promise::job_rail(self.cur_ctx, "gc.finreg");
         let heap = &self.heap;
         self.finregs
             .retain(|&rid| matches!(heap.obj(rid).map(|o| &o.kind), Some(ObjKind::FinReg { .. })));
