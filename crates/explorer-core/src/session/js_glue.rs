@@ -1599,8 +1599,9 @@ impl Session {
                 }
             };
             let t1 = sync_phase(tab, "event.dispatch", t0);
+            tracing::info!("net: event");
             let n = eng.run_pending();
-            tracing::trace!(tab, jobs = n, "jobs js après événement");
+            tracing::info!("net: event ret n={n}");
             let m = Self::sync_for_apply(eng.as_mut());
             (p, sync_phase(tab, "event.mirror_sync", t1), m)
         };

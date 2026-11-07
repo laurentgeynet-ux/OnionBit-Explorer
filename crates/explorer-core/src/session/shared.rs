@@ -627,7 +627,9 @@ pub async fn eval_shared(sess: &tokio::sync::Mutex<Session>, tab: TabId, src: St
         // L'éval a pu armer timers/microtasks (attribution
         // d'hydratation, setTimeout(0)…) — on les draine pour
         // que la valeur rendue reflète l'état stabilisé.
+        tracing::info!("pump: evalrun");
         let jobs = eng.run_pending_bounded(max).unwrap_or(0);
+        tracing::info!("pump: evalret jobs={jobs}");
         let mutated = if sync_ok {
             Session::sync_for_apply(&mut *eng)
         } else {

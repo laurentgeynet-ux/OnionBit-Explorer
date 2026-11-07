@@ -2646,7 +2646,12 @@ impl Session {
     ) -> Option<(PendingApply, DetachedPaint, ApplyCtx, Option<String>)> {
         loop {
             let mut job = self.pending_applies.pop_front()?;
+            // §B-111 — `pump:` pré-apply (morgue C406) — même
+            // fenêtre silencieuse que `run_apply` côté voie
+            // détachée : reclaim → ctx → freshen → take_paint.
+            tracing::info!("pump: take tab={}", job.tab);
             self.reclaim_orphaned_paint(job.tab);
+            tracing::info!("pump: reclaim tab={}", job.tab);
             let ctx = self.apply_ctx();
             {
                 let Some(entry) = self.tabs.get_mut(&job.tab) else {
@@ -2660,6 +2665,7 @@ impl Session {
                     continue; // navigation supplantée → caduque
                 }
             }
+            tracing::info!("pump: freshen tab={}", job.tab);
             self.freshen_apply(job.tab, &mut job);
             // B-25 (caf) : un job baseline sans `html` —
             // rejet de journal re-enfilé dont la resync n'a
@@ -2676,6 +2682,7 @@ impl Session {
             }
             let entry = self.tabs.get_mut(&job.tab)?;
             entry.paint_detached = true;
+            tracing::info!("pump: paint tab={}", job.tab);
             let p = entry.take_paint();
             let g = DetachedPaint::new(
                 std::sync::Arc::clone(&self.orphaned_paints),
@@ -2938,7 +2945,13 @@ impl Session {
     /// pompe synchrone, FFI/CLI/tests).
     fn run_apply(&mut self, job: &mut PendingApply) {
         let tab = job.tab;
+        // §B-111 — `pump:` pré-`apply: début` (morgue C406) :
+        // la fenêtre silencieuse = reclaim (drop d'une
+        // PaintPayload orpheline) + apply_ctx ; `apply: début`
+        // n'émettant jamais, la mort vit ici.
+        tracing::info!("pump: rapply tab={tab}");
         self.reclaim_orphaned_paint(tab);
+        tracing::info!("pump: reclaim tab={tab}");
         let ctx = self.apply_ctx();
         {
             let Some(entry) = self.tabs.get_mut(&tab) else {
@@ -2953,12 +2966,14 @@ impl Session {
         }
         let t_apply = Instant::now();
         tracing::info!(tab, journal = job.journal.is_some(), "apply: début");
+        tracing::info!("pump: freshen tab={tab}");
         self.freshen_apply(tab, job);
         let Some(entry) = self.tabs.get_mut(&tab) else {
             return;
         };
         let old_title = entry.title.clone();
         let epoch = job.epoch;
+        tracing::info!("pump: paint tab={tab}");
         let mut p = entry.take_paint();
         // ADR-0025 : rejeu du journal en place — `NodeId`
         // stables, zéro re-parse. Tout rejet bascule sur la

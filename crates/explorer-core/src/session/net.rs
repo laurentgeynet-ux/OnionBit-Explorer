@@ -331,8 +331,11 @@ impl Session {
                 evals += 1;
             }
         }
+        // §B-111 — paire `net:` (morgue C406) : la ligne
+        // d'entrée sans son `ret` nomme le drain fautif.
+        tracing::info!("net: scripts");
         let n = eng.run_pending();
-        tracing::trace!(tab, jobs = n, "jobs js exécutés");
+        tracing::info!("net: scripts ret n={n}");
         // Miroir muté ? → re-parse : le relayout qui suit
         // rend les modifications (dirty bit consommé côté
         // moteur).
@@ -1705,8 +1708,9 @@ impl Session {
             self.eval_module_graph(tab, eng.as_mut(), &ModEval { name, graph });
         }
         eng.deliver_dyn_module(ctx, seq, ok);
+        tracing::info!("net: module");
         let n = eng.run_pending();
-        tracing::trace!(tab, jobs = n, "jobs js après module dynamique");
+        tracing::info!("net: module ret n={n}");
         let mutated = Self::sync_for_apply(eng.as_mut());
         let mut eng = Some(eng);
         if let Some(entry) = self.tabs.get_mut(&tab) {
@@ -1768,8 +1772,9 @@ impl Session {
             let t = std::time::Instant::now();
             eng.deliver_dyn_script(ctx, seq, body);
             let eval_ms = t.elapsed().as_millis();
+            tracing::info!("net: script");
             let n = eng.run_pending();
-            tracing::trace!(tab, jobs = n, "jobs js après script dynamique");
+            tracing::info!("net: script ret n={n}");
             (Self::sync_for_apply(eng.as_mut()), eval_ms)
         };
         self.note_eval_ms(tab, eval_ms);
@@ -2247,8 +2252,9 @@ impl Session {
                 return;
             };
             eng.deliver_dyn_link(ctx, seq, ok);
+            tracing::info!("net: link");
             let n = eng.run_pending();
-            tracing::trace!(tab, jobs = n, "jobs js après livraison link dyn");
+            tracing::info!("net: link ret n={n}");
             Self::sync_for_apply(eng.as_mut())
         };
         if let Some(s) = mutated {
@@ -2269,8 +2275,9 @@ impl Session {
                 return;
             };
             eng.deliver_dyn_img(ctx, seq, ok);
+            tracing::info!("net: img");
             let n = eng.run_pending();
-            tracing::trace!(tab, jobs = n, "jobs js après livraison img dyn");
+            tracing::info!("net: img ret n={n}");
             Self::sync_for_apply(eng.as_mut())
         };
         if let Some(s) = mutated {
@@ -2447,8 +2454,9 @@ impl Session {
                 return;
             };
             eng.deliver_dyn_frame(ctx, seq, ok);
+            tracing::info!("net: frame");
             let n = eng.run_pending();
-            tracing::trace!(tab, jobs = n, "jobs js après livraison iframe dyn");
+            tracing::info!("net: frame ret n={n}");
             Self::sync_for_apply(eng.as_mut())
         };
         if let Some(s) = mutated {
@@ -2845,8 +2853,9 @@ impl Session {
                     errs.push(e.to_string());
                 }
             }
+            tracing::info!("net: ws");
             let n = eng.run_pending();
-            tracing::trace!(tab, jobs = n, "jobs js après événement ws");
+            tracing::info!("net: ws ret n={n}");
             (Self::sync_for_apply(eng.as_mut()), errs)
         };
         let (mutated, errs) = mutated;
@@ -3034,8 +3043,9 @@ impl Session {
                 tracing::debug!(tab, error = %e, "livraison réseau js");
                 emit_err = Some(e.to_string());
             }
+            tracing::info!("net: resp");
             let n = eng.run_pending();
-            tracing::trace!(tab, jobs = n, "jobs js après réponse réseau");
+            tracing::info!("net: resp ret n={n}");
             (Self::sync_for_apply(eng.as_mut()), emit_err)
         };
         let (mutated, emit_err) = mutated;
@@ -3073,8 +3083,9 @@ impl Session {
                 tracing::debug!(tab, error = %e, "livraison crypto js");
                 emit_err = Some(e.to_string());
             }
+            tracing::info!("net: crypto");
             let n = eng.run_pending();
-            tracing::trace!(tab, jobs = n, "jobs js après réponse crypto");
+            tracing::info!("net: crypto ret n={n}");
             (Self::sync_for_apply(eng.as_mut()), emit_err)
         };
         let (mutated, emit_err) = mutated;
@@ -3116,8 +3127,9 @@ impl Session {
                 tracing::debug!(tab, error = %e, "livraison eventsource js");
                 emit_err = Some(e.to_string());
             }
+            tracing::info!("net: es");
             let n = eng.run_pending();
-            tracing::trace!(tab, jobs = n, "jobs js après événement sse");
+            tracing::info!("net: es ret n={n}");
             (Self::sync_for_apply(eng.as_mut()), emit_err)
         };
         let (mutated, emit_err) = mutated;
