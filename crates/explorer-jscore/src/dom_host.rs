@@ -980,6 +980,133 @@ const ELEMENT_NAV_GETTERS: &[&str] = &[
     "outerHTML",
 ];
 
+/// Méthodes spec `Element` posées **propres** sur
+/// `Element.prototype` (JS-C416, mur §B-97) — la récolte
+/// `ShadyDOM` `E(Element.prototype, "setAttribute getAttribute
+/// …".split(" "))` lit `Object.getOwnPropertyDescriptor` :
+/// propre **seulement**, les méthodes héritées de
+/// `Node.prototype` restent invisibles à la récolte →
+/// `nativeMethods.setAttribute` jamais peuplé → `TypeError`
+/// à l'init du polyfill → CE upgrades bloqués → squelettes
+/// `ytd-*` sans contenu (mesuré webcomponents-sd.js:152:259,
+/// vol 700). Sous-ensemble `NODE_METHODS` hors méthodes
+/// `Node`/`EventTarget` pures et hors impls dédiées déjà
+/// posées sur le proto (`matches`/`querySelector`/`attachShadow`…).
+const ELEMENT_PROTO_METHODS: &[&str] = &[
+    "append",
+    "prepend",
+    "before",
+    "after",
+    "remove",
+    "replaceWith",
+    "replaceChildren",
+    "setAttribute",
+    "getAttribute",
+    "hasAttribute",
+    "hasAttributes",
+    "getAttributeNames",
+    "removeAttribute",
+    "setAttributeNS",
+    "getAttributeNS",
+    "hasAttributeNS",
+    "removeAttributeNS",
+    "getAttributeNode",
+    "getAttributeNodeNS",
+    "setAttributeNode",
+    "setAttributeNodeNS",
+    "removeAttributeNode",
+    "toggleAttribute",
+    "insertAdjacentElement",
+    "insertAdjacentHTML",
+    "insertAdjacentText",
+    "getHTML",
+    "setHTMLUnsafe",
+    "parseHTMLUnsafe",
+    "checkVisibility",
+    "getClientRects",
+    "animate",
+    "getAnimations",
+    "attachInternals",
+    "focus",
+    "blur",
+    "click",
+];
+
+/// Méthodes spec `Document` posées **propres** sur
+/// `Document.prototype` (JS-C416) — même mécanisme de
+/// récolte `E(Document.prototype, […])` (mesuré
+/// `importNode`/`getElementById`/`elementFromPoint` +
+/// `ParentNode` `ab`). `DOC_METHODS` moins le trio
+/// `EventTarget` (propre sur `EventTarget.prototype`,
+/// hérité — fidèle `WebIDL`).
+const DOC_PROTO_METHODS: &[&str] = &[
+    "adoptNode",
+    "importNode",
+    "exitFullscreen",
+    "createRange",
+    "createTreeWalker",
+    "createNodeIterator",
+    "execCommand",
+    "getAnimations",
+    "startViewTransition",
+    "evaluate",
+    "createExpression",
+    "createNSResolver",
+    "hasStorageAccess",
+    "requestStorageAccess",
+    "elementFromPoint",
+    "elementsFromPoint",
+    "caretPositionFromPoint",
+    "getSelection",
+    "hasFocus",
+    "contains",
+    "getElementById",
+    "getElementsByTagName",
+    "getElementsByClassName",
+    "getElementsByName",
+    "querySelector",
+    "querySelectorAll",
+    "createElement",
+    "createElementNS",
+    "createAttribute",
+    "createAttributeNS",
+    "createTextNode",
+    "createComment",
+    "createDocumentFragment",
+    "createEvent",
+    "open",
+    "close",
+    "write",
+    "writeln",
+    "appendChild",
+    "append",
+    "prepend",
+    "insertBefore",
+    "removeChild",
+    "replaceChild",
+    "replaceChildren",
+    "hasChildNodes",
+];
+
+/// Surface spec `DocumentFragment` (JS-C416) — `ParentNode`
+/// et `NonElementParentNode.getElementById` : les accesseurs
+/// `Node` nav viennent de `Node.prototype` (chaîne déjà posée),
+/// les méthodes ci-dessous sont propres au fragment.
+const DOCFRAG_NAV_GETTERS: &[&str] = &[
+    "children",
+    "firstElementChild",
+    "lastElementChild",
+    "childElementCount",
+];
+const DOCFRAG_PROTO_METHODS: &[&str] = &[
+    "getElementById",
+    "querySelector",
+    "querySelectorAll",
+    "append",
+    "prepend",
+    "replaceChildren",
+];
+
 /// Setter des accesseurs de navigation inscriptibles
 /// (`textContent`/`innerText`/`nodeValue`/`innerHTML`) — `bound[0]`
 /// = nom de prop, `args[1]` = valeur. Écriture **brute** (pas de
@@ -1118,6 +1245,26 @@ fn install_dom_nav_accessors(e: &mut Engine, pid: ObjId, props: &[&'static str])
         if let Some(o) = e.heap.obj_mut(pid) {
             o.set_accessor(prop, g, s, false);
         }
+    }
+}
+
+/// Méthodes **propres** de prototype DOM — `bound[0]` = nom,
+/// receveur = le `this` de l'appel (`node_proto_method_trampoline`
+/// redispatche `Host::invoke` sur le receveur). JS-C416 / §B-97 :
+/// la récolte `ShadyDOM` `E(X.prototype, […])` lit
+/// `Object.getOwnPropertyDescriptor` — propre **seulement**, les
+/// méthodes héritées de `Node.prototype` restaient invisibles →
+/// table `nativeMethods` vide → `TypeError` à l'init du polyfill.
+/// Un nom déjà posé (impl dédiée — `attachShadow`, `querySelector`…)
+/// est conservé tel quel.
+fn install_dom_proto_methods(e: &mut Engine, pid: ObjId, names: &[&'static str]) {
+    for &name in names {
+        if e.heap.obj(pid).is_some_and(|o| o.find(name).is_some()) {
+            continue;
+        }
+        let nv = e.str_val(name);
+        let f = e.bound_native("node.method", node_proto_method_trampoline, vec![nv]);
+        e.set_own(pid, name, f, false);
     }
 }
 
@@ -2602,6 +2749,12 @@ impl Engine {
                 let m = self.native_fn(k, f2);
                 self.set_own(p, k, m, true);
             }
+            // JS-C416 / §B-97 — récolte ShadyDOM
+            // `E(HTMLElement.prototype, ["children","innerHTML",
+            // "className"])` : propres exigées (descripteurs
+            // accesseurs `dom.nav`/`dom.acc`).
+            install_dom_nav_accessors(self, p, &["children", "innerHTML"]);
+            self.install_dom_idl_accessors(p, "HTMLElement");
             self.set_own(fid, "prototype", Value::Obj(p), false);
             // Chaînage WebIDL `HTMLElement.prototype →
             // Element.prototype` différé juste après la boucle
@@ -2849,6 +3002,24 @@ impl Engine {
                 // `dom_ctor` (React `inputValueTracking`,
                 // JS-C192).
                 self.install_dom_idl_accessors(p, name);
+                // JS-C416 / §B-97 — méthodes/accesseurs propres
+                // des protos non-élément récoltés par ShadyDOM
+                // (`E(Document.prototype, […])`, `E(DocumentFragment.
+                // prototype, …)`, `E(HTMLTemplateElement.prototype,
+                // ["innerHTML"])`) — `getOwnPropertyDescriptor`
+                // est propre-seulement, l'héritage `Node.prototype`
+                // ne suffit pas.
+                match name {
+                    "Document" => install_dom_proto_methods(self, p, DOC_PROTO_METHODS),
+                    "DocumentFragment" => {
+                        install_dom_nav_accessors(self, p, DOCFRAG_NAV_GETTERS);
+                        install_dom_proto_methods(self, p, DOCFRAG_PROTO_METHODS);
+                    }
+                    "HTMLTemplateElement" => {
+                        install_dom_nav_accessors(self, p, &["innerHTML"]);
+                    }
+                    _ => {}
+                }
                 // Spec WebIDL : `X.prototype.constructor === X`
                 // (`el.constructor`, `document.constructor`).
                 self.set_own(p, "constructor", f, false);
@@ -3159,6 +3330,15 @@ impl Engine {
                     let m = self.native_fn(k, f2);
                     self.set_own(pid, k, m, true);
                 }
+                // JS-C416 / §B-97 — méthodes spec `Element`
+                // propres restantes (attributs, insertion,
+                // focus…) : la récolte ShadyDOM exige des
+                // descripteurs PROPRES — `Node.prototype`
+                // hérité est invisible à
+                // `getOwnPropertyDescriptor(Element.prototype,
+                // "setAttribute")` → `nativeMethods.setAttribute`
+                // vide → `TypeError` init CE → squelettes.
+                install_dom_proto_methods(self, pid, ELEMENT_PROTO_METHODS);
             }
         }
         // `document` hérite de `HTMLDocument.prototype` (spec —

@@ -10430,6 +10430,20 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   `net.host` = hôte résolu dedup — audit des `host=""`
   dash.js/rumble/vimeo). Verrou
   `c415_net_drop_kind_discriminates_badr`.
+- [x] **JS-C416. Récolte ShadyDOM : les protos DOM possèdent
+  leurs méthodes spec en propre** (mur §B-97 prouvé par
+  `fnat` — `Kd webcomponents-sd.js:152:259` :
+  `nativeMethods.setAttribute` vide parce que
+  `getOwnPropertyDescriptor` est propre-seul et que
+  `setAttribute` & co. vivaient hérités de `Node.prototype`
+  ; `TypeError` à l'init → CE upgrades bloqués → squelettes
+  `ytd-*`. `install_dom_proto_methods` + listes
+  `ELEMENT`/`DOC`/`DOCFRAG_PROTO_METHODS` + accesseurs
+  `children`/`innerHTML`/`className` sur `HTMLElement`,
+  `innerHTML` sur `HTMLTemplateElement` — vol 700, le
+  `prom.pending` `_.C4` dominant étant l'état normal
+  Chrome). Verrou `c416_proto_harvest` (7 tests, `.call`
+  dispatch réel inclus).
 
 ## Tâches continues
 
