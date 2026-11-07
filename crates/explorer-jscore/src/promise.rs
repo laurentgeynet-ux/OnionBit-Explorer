@@ -17,7 +17,7 @@
 //! jQuery Deferred, `IDBRequest`…) are adopted on `await` the
 //! same way `resolve` adopts them (JS-C278).
 
-use crate::heap::{JsResult, ObjKind, Thrown};
+use crate::heap::{Fun, JsResult, ObjKind, Thrown};
 use crate::value::{ObjId, Value};
 use crate::Engine;
 use std::rc::Rc;
@@ -743,6 +743,25 @@ impl Engine {
                     Job::Thenable { .. } => "fire.thenable",
                     Job::Plain(_) => "fire.plain",
                 });
+                // §B-111 — breadcrumb par job : la dernière
+                // ligne avant un overflow nomme la callback
+                // fautive (vol 689 : la mort vit dans le drain,
+                // ni apply ni eval top-level — la trace tient
+                // lieu de morgue, le `.dmp` WER n'existe pas).
+                if crate::dlv_trace() {
+                    let desc = match &job {
+                        Job::Reaction { cb, rejected, .. } => format!(
+                            "reaction{} {}",
+                            if *rejected { "-rej" } else { "-ok" },
+                            self.job_cb_desc(*cb)
+                        ),
+                        Job::Thenable { then_fn, .. } => {
+                            format!("thenable {}", self.job_cb_desc(*then_fn))
+                        }
+                        Job::Plain(f) => format!("plain {}", self.job_cb_desc(*f)),
+                    };
+                    tracing::info!("job: mt ctx={ctx} {desc}");
+                }
                 match job {
                     Job::Reaction {
                         cb,
@@ -800,8 +819,10 @@ impl Engine {
                 if !self.microtasks.is_empty() {
                     self.sched_tick("left_drains");
                 }
+                job_rail(self.cur_ctx, "unhandled");
                 self.fire_unhandled_rejections();
                 self.switch_to(home);
+                job_rail(self.cur_ctx, "gc");
                 self.maybe_collect();
                 return Ok(ran);
             }
@@ -850,14 +871,23 @@ impl Engine {
                 // pompe tourne désormais à chaque round (plus
                 // fidèle à « deliver all ready work ») et sa
                 // production est nommée dans le tally.
+                job_rail(id, "dlv.mutations");
                 let dm = self.deliver_mutations()?;
+                job_rail(id, "dlv.observers");
                 let dob = self.deliver_observers()?;
+                job_rail(id, "dlv.file_reads");
                 let dfr = self.deliver_file_reads()?;
+                job_rail(id, "dlv.stream_reads");
                 let dsr = self.pump_stream_reads()?;
+                job_rail(id, "dlv.idb");
                 let didb = crate::idb::deliver_idb_requests(self)?;
+                job_rail(id, "dlv.ws");
                 let dws = self.deliver_ws()?;
+                job_rail(id, "dlv.es");
                 let des = self.drain_es()?;
+                job_rail(id, "dlv.bc");
                 let dbc = self.deliver_bc()?;
+                job_rail(id, "dlv.mse");
                 let dmse = crate::mse::deliver_mse_events(self)?;
                 self.sched_add("dlv.mutations", u64::from(dm));
                 self.sched_add("dlv.observers", dob as u64);
@@ -881,10 +911,13 @@ impl Engine {
                     delivered = true;
                 }
             }
+            job_rail(self.cur_ctx, "msgs");
             let msgs = self.drain_pending_msgs()?;
+            job_rail(self.cur_ctx, "workers");
             let workers = self.pump_workers()?;
             // JS-C81 : messages `MessageChannel` — même
             // frontière de job que `postMessage`/workers.
+            job_rail(self.cur_ctx, "ports");
             let ports = self.drain_port_msgs()?;
             self.sched_add("dlv.msgs", msgs as u64);
             self.sched_add("dlv.workers", workers as u64);
@@ -905,13 +938,53 @@ impl Engine {
                 // JS-C154 — `unhandledrejection` en fin de
                 // checkpoint : les rejets non gérés du tour sont
                 // revus (un `.then` tardif les a retirés).
+                job_rail(self.cur_ctx, "unhandled");
                 self.fire_unhandled_rejections();
                 self.switch_to(home);
+                job_rail(self.cur_ctx, "gc");
                 self.maybe_collect();
                 return Ok(ran);
             }
+            job_rail(self.cur_ctx, "gc");
             self.maybe_collect();
         }
+    }
+
+    /// Nommage de la callback d'un job pour le breadcrumb
+    /// §B-111 — **sans effet de bord** : lecture directe du
+    /// heap uniquement (`describe`/`describe_diag` passent par
+    /// `get_prop`/`to_js_string`, qui peuvent invoquer des
+    /// getters ou `toPrimitive` utilisateur — inacceptables
+    /// dans un chemin exécuté avant chaque job). Une fonction
+    /// script nomme `nom @ligne:col`, une native son symbole.
+    pub(crate) fn job_cb_desc(&self, v: Value) -> String {
+        let Value::Obj(id) = v else {
+            return format!("{v:?}");
+        };
+        let Some(o) = self.heap.obj(id) else {
+            return format!("dead#{id}");
+        };
+        match &o.kind {
+            ObjKind::Fun(Fun::Script { lit, .. }) => {
+                let n = lit.name.as_deref().unwrap_or("<anon>");
+                format!("fn {n} @{}:{}", lit.pos.0, lit.pos.1)
+            }
+            ObjKind::Fun(Fun::Native { name, .. } | Fun::BoundNative { name, .. }) => {
+                format!("native {name}")
+            }
+            ObjKind::Fun(Fun::Bound { .. }) => "bound".to_string(),
+            _ => format!("obj#{id}"),
+        }
+    }
+}
+
+/// Breadcrumb de rail §B-111 : nomme la file de livraison
+/// ou l'étape en cours — si le drain meurt, la dernière
+/// ligne identifie le rail fautif (mutations, observers,
+/// streams, idb… ou le sweep GC de checkpoint).
+pub(crate) fn job_rail(ctx: u32, rail: &'static str) {
+    if crate::dlv_trace() {
+        tracing::info!("job: {rail} ctx={ctx}");
     }
 }
 

@@ -545,6 +545,18 @@ pub fn host_mark(class: &str, name: &str) {
 /// `EXPLORER_JS_RSS_WATCH` uniquement — `format!` par tick est
 /// trop cher hors diagnostic).
 pub static LAST_FRAME: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
+
+/// Sonde §B-111 — `EXPLORER_DLV_TRACE=1` logue chaque job
+/// **avant** invocation dans les drains (microtasks, timers,
+/// livraisons, GC de checkpoint) : la dernière ligne avant
+/// un overflow de pile nomme la callback fautive — le
+/// `.dmp` WER n'existe pas, la trace tient lieu de morgue
+/// (pendant moteur de la sonde par-op session, JS-C401).
+/// Désarmée : un booléen lu une fois.
+pub(crate) fn dlv_trace() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("EXPLORER_DLV_TRACE").is_some())
+}
 /// Phase de l'appelant JS — **inconditionnelle** (`&'static
 /// str`, ~20 ns) : écrite à l'entrée de `call_value_impl` et
 /// `exec_body`, là où aucun tick n'a encore couru. Vide à

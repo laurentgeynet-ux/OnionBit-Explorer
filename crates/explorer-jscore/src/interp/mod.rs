@@ -2552,6 +2552,9 @@ impl Engine {
         let g = self.global;
         if let Some(cb) = self.get_prop(g, &on) {
             if self.is_callable(cb) {
+                if crate::dlv_trace() {
+                    tracing::info!("job: ev {ty} cb={}", self.job_cb_desc(cb));
+                }
                 let _ = self.call_value(cb, Value::Obj(g), &[ev])?;
             }
         }
@@ -2569,6 +2572,9 @@ impl Engine {
             .collect();
 
         for cb in cbs {
+            if crate::dlv_trace() {
+                tracing::info!("job: ev {ty} cb={}", self.job_cb_desc(cb));
+            }
             let _ = self.call_value(cb, Value::Obj(g), &[ev])?;
         }
         Ok(())

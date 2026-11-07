@@ -252,6 +252,16 @@ impl Engine {
                     t.id, t.interval_ms, desc
                 );
             }
+            // §B-111 — breadcrumb par callback : la dernière
+            // ligne avant un overflow nomme le timer fautif.
+            if crate::dlv_trace() {
+                tracing::info!(
+                    "job: timer id={} interval={:?} cb={}",
+                    t.id,
+                    t.interval_ms,
+                    self.job_cb_desc(t.cb)
+                );
+            }
             // Isolation par callback (J8) : un timer qui jette est
             // rapporté (`uncaught`) et les autres timers gardent
             // leur tour — spec : l'exception ne bloque pas la file.
