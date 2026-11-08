@@ -3865,6 +3865,13 @@ fn note_eval(
     let (alloc_b, alloc_n) = explorer_common::alloc_delta().unwrap_or((0, 0));
     let ((alloc_parse_b, alloc_parse_n), (alloc_exec_b, alloc_exec_n)) =
         eng.last_eval_alloc_split();
+    // JS-C425 — attribution J17 par éval : le snapshot est
+    // cumulatif process-wide ; les lignes `eval split` sont
+    // séquentielles (worker mono-thread) → la différence de
+    // deux lignes consécutives attribue les compteurs à
+    // l'éval qui les sépare. Vide quand PROF désarmé — 31
+    // loads Relaxed par split, coût nul.
+    let j17 = explorer_jscore::j17_snapshot();
     tracing::info!(
         target: "js_alloc",
         kind,
@@ -3881,6 +3888,7 @@ fn note_eval(
         alloc_parse_n,
         alloc_exec_b,
         alloc_exec_n,
+        j17 = %j17,
         ok,
         "eval split"
     );

@@ -10585,4 +10585,12 @@ un crate PIPELINE.- [x] **JS-C422. Deadline honnête — canal session ↔ budge
   Reste : (a) table de racines d'expressions (correction de
   fond), (c) passe safepoint allégée (purges DOM/logs hors du
   chemin chaud).
+- [x] **JS-C425. Attribution J17 par éval — `j17` dans `eval
+  split`** (vol 714 : `kevlar_base` complète en 5,8 s —
+  `alloc_exec 1,05 Gio/12,4 M` = mur mesurable suivant, il
+  faut nommer où vont les 5 s). `note_eval` émet
+  `j17_snapshot()` — cumulatif process-wide diffable entre
+  splits séquentiels ; vide hors `EXPLORER_J17_PROF`, 31
+  loads Relaxed par split = coût nul. Distorsion connue sous
+  PROF : `Instant` des `j17_scope` sur chemins chauds.
 
