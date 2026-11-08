@@ -3860,6 +3860,8 @@ fn note_eval(
     ok: bool,
 ) {
     let (parse_us, exec_us) = eng.last_eval_split();
+    let gc_us = eng.last_eval_gc_us();
+    let sp_us = eng.last_eval_sp_us();
     let (alloc_b, alloc_n) = explorer_common::alloc_delta().unwrap_or((0, 0));
     let ((alloc_parse_b, alloc_parse_n), (alloc_exec_b, alloc_exec_n)) =
         eng.last_eval_alloc_split();
@@ -3871,6 +3873,8 @@ fn note_eval(
         us = u64::try_from(t0.elapsed().as_micros()).unwrap_or(u64::MAX),
         parse_us,
         exec_us,
+        gc_us,
+        sp_us,
         alloc_b,
         alloc_n,
         alloc_parse_b,

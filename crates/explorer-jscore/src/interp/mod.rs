@@ -369,6 +369,21 @@ pub struct Engine {
     last_parse_alloc: (u64, u64),
     last_exec_alloc: (u64, u64),
     eval_alloc_mark: (u64, u64),
+    /// JS-C423 — temps GC cumulé du moteur, en nanosecondes
+    /// (`collect_extra` est le funnel unique : checkpoints
+    /// job + safepoints JS-C421 inclus). Toujours armé — deux
+    /// `Instant` par collecte, événement ~ms : coût nul.
+    /// `eval_gc_mark` = snapshot à `reset_eval_split` →
+    /// `last_eval_gc_us` attribue la part GC d'une éval (le
+    /// span kevlar 303 s du vol 711 : exec ou mark/sweep ?).
+    gc_ns: std::cell::Cell<u64>,
+    eval_gc_mark: u64,
+    /// Part safepoint (sous-ensemble de `gc_ns`) — isole le
+    /// coût du mécanisme JS-C421 des collectes de frontière.
+    sp_ns: std::cell::Cell<u64>,
+    /// Snapshot `sp_ns` à `reset_eval_split` (même frontière
+    /// que `eval_gc_mark`).
+    eval_sp_mark: std::cell::Cell<u64>,
     /// Deadline wall-clock du batch courant (éval / drain timers
     /// / microtasks) — armée par `arm_eval_deadline` aux bornes
     /// publiques, vérifiée dans `tick` (J1 : une rafale post-apply
@@ -1057,6 +1072,10 @@ impl Engine {
             last_parse_alloc: (0, 0),
             last_exec_alloc: (0, 0),
             eval_alloc_mark: (0, 0),
+            gc_ns: std::cell::Cell::new(0),
+            eval_gc_mark: 0,
+            sp_ns: std::cell::Cell::new(0),
+            eval_sp_mark: std::cell::Cell::new(0),
             timers: crate::timers::TimerQueue::default(),
             xhr: crate::xhr::XhrEngineState::default(),
             dom_ctx: None,
@@ -1249,12 +1268,14 @@ impl Engine {
         };
         let hs = self.heap.stats();
         format!(
-            "cells={} heap_b={} gc={} | cbs={} regs={} timers={} \
+            "cells={} heap_b={} gc={} gc_us={} sp_us={} | cbs={} regs={} timers={} \
              | nodes={} muts={} oregs={} journal={} pend={} \
              | cache={} parked={} unhand={} micro={}",
             hs.live_cells,
             hs.estimated_bytes,
             hs.gc_runs,
+            self.gc_ns.get() / 1_000,
+            self.sp_ns.get() / 1_000,
             self.mutobs.b59_len(),
             self.obs.b59_len(),
             self.pending_timers(),
@@ -2702,6 +2723,7 @@ impl Engine {
     pub(crate) fn collect_extra(&mut self, extra: Vec<ObjId>, young: u64) -> usize {
         // V-7 : temps cumulé marquage+balayage.
         let _t = crate::j17_scope(&crate::J17_GC_NS);
+        let gc_t0 = Instant::now();
         // 1. Rassemble les `ObjId` tenus par les structures
         //    annexes (RefCell/NodeCache — leurs borrows doivent
         //    être relâchés avant la passe).
@@ -2939,6 +2961,13 @@ impl Engine {
         // mort post-collect vit dans le retour (drop de locals,
         // `maybe_collect`, drain, glue session).
         crate::promise::job_rail(self.cur_ctx, "gc done");
+        // JS-C423 — temps GC cumulé moteur (attribution par
+        // éval via `eval_gc_mark`).
+        self.gc_ns.set(
+            self.gc_ns
+                .get()
+                .saturating_add(u64::try_from(gc_t0.elapsed().as_nanos()).unwrap_or(u64::MAX)),
+        );
         n
     }
 
@@ -3334,6 +3363,24 @@ impl Engine {
         self.last_parse_alloc = (0, 0);
         self.last_exec_alloc = (0, 0);
         self.eval_alloc_mark = alloc_snap();
+        self.eval_gc_mark = self.gc_ns.get();
+        self.eval_sp_mark.set(self.sp_ns.get());
+    }
+
+    /// Temps GC passé **dans la dernière entrée publique** (µs)
+    /// — safepoints + collectes de frontière confondues
+    /// (JS-C423 : décomposition du span kevlar 303 s du vol
+    /// 711 — exec pure vs mark/sweep sous pression).
+    #[must_use]
+    pub fn last_eval_gc_us(&self) -> u64 {
+        self.gc_ns.get().saturating_sub(self.eval_gc_mark) / 1_000
+    }
+
+    /// Part safepoint (`sp_ns`) de la même fenêtre (µs) —
+    /// isole le coût du mécanisme JS-C421.
+    #[must_use]
+    pub fn last_eval_sp_us(&self) -> u64 {
+        self.sp_ns.get().saturating_sub(self.eval_sp_mark.get()) / 1_000
     }
 
     pub(crate) fn note_parse(&mut self, start: Instant) {
@@ -4818,7 +4865,14 @@ impl Engine {
         // JS-C421 : épargne les cellules allouées depuis le plus
         // ancien statement actif — temporaires d'expression des
         // locaux Rust, invisibles aux racines.
+        // JS-C423 — part safepoint du temps GC.
+        let t = Instant::now();
         self.collect_extra(ids, self.young_floor);
+        self.sp_ns.set(
+            self.sp_ns
+                .get()
+                .saturating_add(u64::try_from(t.elapsed().as_nanos()).unwrap_or(u64::MAX)),
+        );
     }
 
     // -- environments --------------------------------------------------
@@ -9004,5 +9058,44 @@ mod tests {
             Ok(Value::Num(n)) => assert_eq!(n, 42.0),
             other => panic!("éval post-abandon empoisonnée : {other:?}"),
         }
+    }
+
+    /// JS-C423 — la décomposition GC du span est attribuée par
+    /// éval et **survit à la mort deadline/interruption** : le
+    /// mark est posé à `reset_eval_split`, `note_exec` court
+    /// même sur `Err`, la ligne `eval split` sort complète
+    /// (`us`/`parse_us`/`exec_us`/`gc_us`/`sp_us`) — une éval
+    /// tuée n'efface pas la mesure du temps qu'elle a brûlé.
+    #[test]
+    fn c423_gc_time_attributed_and_survives_kill() {
+        let mut e = Engine::new();
+        // Nominal : compteurs posés et cohérents (sp ⊆ gc).
+        e.eval("40+2").unwrap();
+        let gc0 = e.last_eval_gc_us();
+        let sp0 = e.last_eval_sp_us();
+        assert!(sp0 <= gc0, "sp ⊆ gc : sp={sp0} gc={gc0}");
+
+        // Churn sous borne serrée → safepoints réels (C421) ;
+        // gc_us doit refléter les collectes mid-span.
+        e.heap.set_mem_limit(1024 * 1024);
+        e.collect();
+        let r = e.eval(
+            "(function(){var a=[];for(var i=0;i<4000;i++)a.push('s'+i+'-'+i);return a.length})()",
+        );
+        assert!(r.is_ok(), "churn sous-limite : {r:?}");
+        let gc1 = e.last_eval_gc_us();
+        let sp1 = e.last_eval_sp_us();
+        assert!(gc1 > 0, "des safepoints ont tourné : gc_us={gc1}");
+        assert!(sp1 <= gc1, "sp ⊆ gc : sp={sp1} gc={gc1}");
+
+        // Mort par interruption : le profil survit — exec_us
+        // rempli (note_exec inconditionnel), gc/sp relisibles.
+        let flag = e.interrupt_handle();
+        flag.store(true, std::sync::atomic::Ordering::Relaxed);
+        let r = e.eval("var s=0; while(true){ s++; } s");
+        assert!(r.is_err(), "abandon : {r:?}");
+        let (_p, x) = e.last_eval_split();
+        assert!(x > 0, "exec_us renseigné même sur éval tuée");
+        let _ = (e.last_eval_gc_us(), e.last_eval_sp_us());
     }
 }

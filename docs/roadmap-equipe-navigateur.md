@@ -10553,4 +10553,19 @@ un crate PIPELINE.- [x] **JS-C422. Deadline honnête — canal session ↔ budge
   abandon tue au tick suivant). Effet vol attendu : le figé
   devient honnêtement attribué (vraie deadline moteur) et le
   thread ne brûle plus en orphelin.
+- [x] **JS-C423. Décomposition GC du span d'éval — `gc_us`/`sp_us`
+  attribués par entrée** (vol 711 : `kevlar_base` brûle ~303 s
+  d'exec sans mesure de la part mark/sweep — exec pure,
+  safepoints JS-C421, ou frontières ?). Compteurs toujours
+  armés (deux `Instant` par collecte — événement ~ms, coût
+  nul) : `Engine::gc_ns` accumulé dans `collect_extra` (funnel
+  unique : checkpoints + safepoints), `Engine::sp_ns` dans
+  `safepoint_gc` (part JS-C421), marks posés à
+  `reset_eval_split` → `last_eval_gc_us`/`last_eval_sp_us`.
+  La ligne `eval split` (`js_alloc`) gagne `gc_us`/`sp_us` —
+  émise aussi sur `ok:false` (deadline/interruption : le
+  profil de l'éval tuée survit, `note_exec` est
+  inconditionnel). `b59_diag` porte `gc_us`/`sp_us` cumulés.
+  Verrou : `c423_gc_time_attributed_and_survives_kill` (sp ⊆
+  gc, churn sous borne → gc_us > 0, abandon → profil lisible).
 
