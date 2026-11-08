@@ -10502,7 +10502,7 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   réécrit : J4 tient tant que le vivant JsStr dépasse la
   borne, `set_mem_limit(0)` ressuscite. Suites : lib 39/39,
   lang 313/313, b59/b59b, clippy `-D warnings` propre.)
-- [ ] **JS-C421. Safepoint GC intra-span — le mur §B-114 a
+- [x] **JS-C421. Safepoint GC intra-span — le mur §B-114 a
   migré des `Str` aux cellules** (vol 709 : JsStr validé —
   `str_dead_b` 555 Mio→0, live borné 3,02 Mio — MAIS le span
   d'hydratation `/watch` produit ~1,21 M de cellules /

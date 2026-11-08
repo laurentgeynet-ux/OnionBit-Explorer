@@ -153,6 +153,9 @@ impl Engine {
         }
         let mut r = Ok(Flow::Normal);
         for s in &prog.body {
+            // JS-C421 : frontière de statements — balayage GC
+            // licite sous pression (env/this/racines semés).
+            self.safepoint_gc(env, &this);
             match self.exec_stmt(env, this.clone(), s) {
                 Ok(Flow::Normal | Flow::Break(_) | Flow::Continue(_)) => {}
                 other => {
@@ -198,6 +201,9 @@ impl Engine {
         }
         let mut r = Ok(Flow::Normal);
         for s in body {
+            // JS-C421 : frontière de statements — balayage GC
+            // licite sous pression (env/this/racines semés).
+            self.safepoint_gc(env, &this);
             if std::env::var("DBG_DRIVE").is_ok() {
                 eprintln!("[exec_body] stmt={:?}", std::mem::discriminant(s));
             }
@@ -307,13 +313,26 @@ impl Engine {
             }
         }
         self.tick()?;
+        // JS-C421 : `this` + `env` restent vivants tant que cette
+        // frame court — racines safepoint pour les corps en
+        // dessous (la chaîne parente de la callee ne remonte pas
+        // à l'env appelant) ; `young_floor` borne l'âge balayable
+        // au plus ancien statement actif.
+        self.safepoint_roots.push(this.clone());
+        self.safepoint_envs.push(env.clone());
+        let saved_floor = self.young_floor;
+        self.young_floor = saved_floor.min(self.heap.alloc_seq());
         // JS-C41 : `if`/`try`/`for` s'exécutent en récursion
         // native — segment tas de secours avant débordement.
-        stacker::maybe_grow(
+        let r = stacker::maybe_grow(
             crate::parser::STACK_RED_ZONE,
             crate::parser::STACK_GROW,
             || self.exec_stmt_inner(env, this, s),
-        )
+        );
+        self.safepoint_roots.pop();
+        self.safepoint_envs.pop();
+        self.young_floor = saved_floor;
+        r
     }
 
     pub(crate) fn exec_stmt_inner(
@@ -613,20 +632,36 @@ impl Engine {
                 // (bindings block-scope + capture de closure).
                 let per_iter =
                     matches!(target, ForTarget::Lexical { .. } | ForTarget::Using { .. });
-                for key in self.enum_keys(id)? {
+                let keys = self.enum_keys(id)?;
+                // JS-C421 : l'objet énuméré vit à travers tous
+                // les corps d'itération — racine pour la boucle.
+                self.safepoint_roots.push(Value::Obj(id));
+                let mut out = Ok(Flow::Normal);
+                for key in keys {
                     let kv = self.str_val(key);
                     let ienv = if per_iter {
                         Env::block(env.clone())
                     } else {
                         env.clone()
                     };
-                    self.assign_target(&ienv, this.clone(), target, kv)?;
-                    let f = self.exec_stmt(&ienv, this.clone(), body)?;
-                    if let Some(f) = Self::loop_flow(f, &labels) {
-                        return Ok(f);
+                    let st = self
+                        .assign_target(&ienv, this.clone(), target, kv)
+                        .and_then(|()| self.exec_stmt(&ienv, this.clone(), body));
+                    match st {
+                        Err(e) => {
+                            out = Err(e);
+                            break;
+                        }
+                        Ok(f) => {
+                            if let Some(f) = Self::loop_flow(f, &labels) {
+                                out = Ok(f);
+                                break;
+                            }
+                        }
                     }
                 }
-                Ok(Flow::Normal)
+                self.safepoint_roots.pop();
+                out
             }
             Stmt::ForOf {
                 target,
@@ -648,6 +683,11 @@ impl Engine {
                 // chaque closure capture sa cellule.
                 let using = matches!(target, ForTarget::Using { .. });
                 let lex = matches!(target, ForTarget::Lexical { .. } | ForTarget::Using { .. });
+                // JS-C421 : les items non encore itérés vivent à
+                // travers les corps — racines pour toute la boucle.
+                let sr_mark = self.safepoint_roots.len();
+                self.safepoint_roots.extend(items.iter().cloned());
+                let mut out = Ok(Flow::Normal);
                 for item in items {
                     if using {
                         self.using_stack.push(Vec::new());
@@ -663,11 +703,21 @@ impl Engine {
                     if using {
                         r = self.drain_using(r);
                     }
-                    if let Some(f) = Self::loop_flow(r?, &labels) {
-                        return Ok(f);
+                    match r {
+                        Err(e) => {
+                            out = Err(e);
+                            break;
+                        }
+                        Ok(f) => {
+                            if let Some(f) = Self::loop_flow(f, &labels) {
+                                out = Ok(f);
+                                break;
+                            }
+                        }
                     }
                 }
-                Ok(Flow::Normal)
+                self.safepoint_roots.truncate(sr_mark);
+                out
             }
             // `lbl : stmt` — les labels de boucle sont consommés par
             // la boucle enfant via `pending_labels` ; `break lbl`
@@ -730,13 +780,29 @@ impl Engine {
                         ) {
                             r = Err(e);
                         } else {
+                            // JS-C421 : le jeton vit dans `r`
+                            // pendant le corps catch — racine.
+                            self.safepoint_roots.push(v.clone());
                             r = self.exec_body(&cenv, this.clone(), cbody);
+                            self.safepoint_roots.pop();
                         }
                     }
                 }
                 if let Some(fbody) = finally {
+                    // JS-C421 : `r` porte encore son jeton éventuel
+                    // pendant le corps finally — racine temporaire.
+                    let held = if let Err(Thrown(v)) = &r {
+                        self.safepoint_roots.push(v.clone());
+                        true
+                    } else {
+                        false
+                    };
                     let fenv = Env::block(env.clone());
-                    let fr = self.exec_body(&fenv, this, fbody)?;
+                    let fr = self.exec_body(&fenv, this, fbody);
+                    if held {
+                        self.safepoint_roots.pop();
+                    }
+                    let fr = fr?;
                     if !matches!(fr, Flow::Normal) {
                         return Ok(fr);
                     }
@@ -766,16 +832,30 @@ impl Engine {
                 // bloc déclaratif (spec — `let` dans un case est
                 // visible des suivants, jamais du scope englobant).
                 let senv = Env::block(env.clone());
+                // JS-C421 : `dv` vit à travers les corps de cases.
+                self.safepoint_roots.push(dv);
+                let mut out = Ok(Flow::Normal);
                 for c in &cases[start..] {
-                    match self.exec_body(&senv, this.clone(), &c.body)? {
-                        Flow::Normal => {}
+                    match self.exec_body(&senv, this.clone(), &c.body) {
+                        Err(e) => {
+                            out = Err(e);
+                            break;
+                        }
+                        Ok(Flow::Normal) => {}
                         // `break` seul sort du switch ; `break lbl`
                         // remonte jusqu'au statement étiqueté.
-                        Flow::Break(None) => return Ok(Flow::Normal),
-                        f => return Ok(f),
+                        Ok(Flow::Break(None)) => {
+                            out = Ok(Flow::Normal);
+                            break;
+                        }
+                        Ok(f) => {
+                            out = Ok(f);
+                            break;
+                        }
                     }
                 }
-                Ok(Flow::Normal)
+                self.safepoint_roots.pop();
+                out
             }
         }
     }

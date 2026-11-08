@@ -589,6 +589,28 @@ pub struct Engine {
     /// `using` disposal frames — une par corps contenant
     /// une décl `using` (ES2026) : `(dispose_fn, resource, is_async)`.
     pub(crate) using_stack: Vec<Vec<(Value, Value, bool)>>,
+    /// Racines de safepoint (JS-C421) — `Value`s tenues par des
+    /// frames Rust au-dessus d'un corps de statements en cours :
+    /// `safepoint_gc` peut balayer entre deux statements d'un
+    /// `exec_body`/`exec_program_in` sous pression (`gc_due`) ;
+    /// les sites qui portent un temporaire à travers l'appel
+    /// (callee/this/args d'un `call_value_impl`, `this` d'un
+    /// `exec_stmt`, jeton d'un `try`/`switch`, iterable d'un
+    /// `for`-in/of) le poussent ici pour la durée de l'appel.
+    pub(crate) safepoint_roots: Vec<Value>,
+    /// Pile d'envs safepoint (JS-C421) — chaque `exec_stmt` y
+    /// pousse son `env` : la chaîne parente du corps courant ne
+    /// couvre PAS les envs appelants (l'env d'une callee chaîne
+    /// sur son env de *définition*, pas celui de l'appelant) —
+    /// sans elle, un safepoint dans un corps appelé balayerait
+    /// les bindings vivants des frames au-dessus.
+    pub(crate) safepoint_envs: Vec<EnvRef>,
+    /// Borne d'âge safepoint (JS-C421) — min des `alloc_seq` des
+    /// statements actifs : les cellules allouées depuis sont des
+    /// temporaires potentiels de locaux Rust (`x + f()` — `x`
+    /// vit dans la frame de `BinOp` pendant que `f` safepointe).
+    /// `u64::MAX` hors éval — une passe de frontière balaie tout.
+    pub(crate) young_floor: u64,
     /// Le builtin `eval` — identité pour distinguer l'appel direct
     /// `eval(…)` (env appelant) de l'indirect (`(0,eval)`, `e=eval`
     /// → global), spec `PerformEval`.
@@ -1077,6 +1099,9 @@ impl Engine {
             gen_collect: Vec::new(),
             pending_labels: Vec::new(),
             using_stack: Vec::new(),
+            safepoint_roots: Vec::new(),
+            safepoint_envs: Vec::new(),
+            young_floor: u64::MAX,
             eval_fn: Value::Undefined,
             re_ctor: Value::Undefined,
             re_static: None,
@@ -2656,22 +2681,35 @@ impl Engine {
     }
 
     pub fn collect(&mut self) -> usize {
+        self.collect_extra(Vec::new(), u64::MAX)
+    }
+
+    /// [`collect`] + racines supplémentaires — le safepoint
+    /// intra-éval (JS-C421) y ajoute l'env courant tracé, `this`
+    /// et ce que `safepoint_roots` couvre déjà via `gc_seed_ids`.
+    /// `young` = borne d'âge passée à `collect_bounded` : cellules
+    /// allouées depuis conservées (temporaires de locaux Rust).
+    pub(crate) fn collect_extra(&mut self, extra: Vec<ObjId>, young: u64) -> usize {
         // V-7 : temps cumulé marquage+balayage.
         let _t = crate::j17_scope(&crate::J17_GC_NS);
         // 1. Rassemble les `ObjId` tenus par les structures
         //    annexes (RefCell/NodeCache — leurs borrows doivent
         //    être relâchés avant la passe).
         crate::promise::job_rail(self.cur_ctx, "gc.seed");
-        let ids = self.gc_seed_ids();
+        let mut ids = self.gc_seed_ids();
+        ids.extend(extra);
         self.gc_due = false;
         self.gc_cap = 0;
         // 3. Mark-sweep.
         crate::promise::job_rail(self.cur_ctx, "gc.marksweep");
-        let n = self.heap.collect(|mark| {
-            for &id in &ids {
-                mark(id);
-            }
-        });
+        let n = self.heap.collect_bounded(
+            |mark| {
+                for &id in &ids {
+                    mark(id);
+                }
+            },
+            young,
+        );
         // 4. §B-59 — entrées d'observers dont le wrapper vient
         //    d'être balayé : elles ne se vident pas toutes
         //    seules (`disconnect` JS n'est pas garanti) et
@@ -2681,9 +2719,13 @@ impl Engine {
         let dead_mutobs = self.mutobs.purge_dead(&self.heap);
         if !dead_mutobs.is_empty() {
             if let Some((dom, _)) = &self.dom_ctx {
-                let mut d = dom.borrow_mut();
-                for id in dead_mutobs {
-                    d.disconnect_observer(id);
+                // `try_borrow` (JS-C421) — un safepoint mid-eval
+                // peut coexister avec un borrow natif en cours ;
+                // sauter plutôt que paniquer.
+                if let Ok(mut d) = dom.try_borrow_mut() {
+                    for id in dead_mutobs {
+                        d.disconnect_observer(id);
+                    }
                 }
             }
         }
@@ -2698,13 +2740,19 @@ impl Engine {
         // n'accumule plus attrs/texte/enfants.
         crate::promise::job_rail(self.cur_ctx, "gc.domgc");
         if let Some((dom, cache)) = &self.dom_ctx {
-            let mut c = cache.borrow_mut();
-            c.retain(|_, &mut oid| self.heap.obj(oid).is_some());
-            let mut seeds: std::collections::HashSet<crate::dom::NodeId> =
-                c.keys().copied().collect();
-            drop(c);
-            seeds.extend(self.obs.live_target_ids());
-            dom.borrow_mut().collect_garbage(&seeds);
+            // `try_borrow` — même motif safepoint (JS-C421) :
+            // un borrow traversant l'éval rend domgc non licite,
+            // on le saute pour cette passe.
+            if let Ok(mut c) = cache.try_borrow_mut() {
+                c.retain(|_, &mut oid| self.heap.obj(oid).is_some());
+                let mut seeds: std::collections::HashSet<crate::dom::NodeId> =
+                    c.keys().copied().collect();
+                drop(c);
+                seeds.extend(self.obs.live_target_ids());
+                if let Ok(mut d) = dom.try_borrow_mut() {
+                    d.collect_garbage(&seeds);
+                }
+            }
         }
         // 4. `FinalizationRegistry` — purge des registres morts,
         //    puis cleanup en microtask pour les cibles balayées
@@ -3002,44 +3050,51 @@ impl Engine {
         self.mse.root_ids(&mut ids);
         self.misc.root_ids(&mut ids);
         if let Some((dom, cache)) = &self.dom_ctx {
-            let d = dom.borrow();
-            // §B-59 — le cache n'est plus raciné en bloc : un
-            // wrapper de nœud **détaché et non retenu** meurt
-            // avec ses expandos (déviation documentée vs
-            // Chrome qui le garde par weak-map — ici la borne
-            // mémoire prime). Les nœuds attachés, observés ou
-            // cités par des records en attente restent racinés.
-            let extra = d.extra_kept_nodes();
-            for (nid, &id) in cache.borrow().iter() {
-                if d.is_attached(*nid) || extra.contains(nid) {
-                    ids.push(id);
+            // `try_borrow` (JS-C421) — un safepoint mid-eval peut
+            // trouver le miroir emprunté par un natif : sauter le
+            // bloc DOM plutôt que paniquer (les racines DOM sont
+            // alors couvertes par les safepoint_roots/envs).
+            if let Ok(d) = dom.try_borrow() {
+                // §B-59 — le cache n'est plus raciné en bloc : un
+                // wrapper de nœud **détaché et non retenu** meurt
+                // avec ses expandos (déviation documentée vs
+                // Chrome qui le garde par weak-map — ici la borne
+                // mémoire prime). Les nœuds attachés, observés ou
+                // cités par des records en attente restent racinés.
+                let extra = d.extra_kept_nodes();
+                if let Ok(c) = cache.try_borrow() {
+                    for (nid, &id) in c.iter() {
+                        if d.is_attached(*nid) || extra.contains(nid) {
+                            ids.push(id);
+                        }
+                    }
                 }
-            }
-            for node in &d.nodes {
-                for (_, cb, _) in &node.listeners {
-                    crate::heap::push_value(&mut ids, cb);
+                for node in &d.nodes {
+                    for (_, cb, _) in &node.listeners {
+                        crate::heap::push_value(&mut ids, cb);
+                    }
                 }
-            }
-            // Contextes 2D `<canvas>` (JS-C28) — détenus par la
-            // side-table du miroir, racines tant qu'il vit.
-            for v in dom.borrow().canvas_ctx_values() {
-                crate::heap::push_value(&mut ids, &v);
-            }
-            // `customElements` (JS-C68) — ctors des définitions,
-            // promesses `whenDefined` pendantes.
-            for def in dom.borrow().ce.defs.values() {
-                crate::heap::push_value(&mut ids, &def.ctor);
-            }
-            for list in dom.borrow().ce.pending.values() {
-                ids.extend(list.iter().copied());
-            }
-            // `adoptedStyleSheets` (CAP-195, ADR-0033) —
-            // `ObjId` des feuilles adoptées : racines tant que
-            // le document vit — sinon un GC réaffectait le
-            // slot et `adopted_sheets_css` lisait `cssRules`
-            // sur le mauvais objet.
-            for sid in dom.borrow().adopted_sheets.iter().copied() {
-                ids.push(sid);
+                // Contextes 2D `<canvas>` (JS-C28) — détenus par la
+                // side-table du miroir, racines tant qu'il vit.
+                for v in dom.borrow().canvas_ctx_values() {
+                    crate::heap::push_value(&mut ids, &v);
+                }
+                // `customElements` (JS-C68) — ctors des définitions,
+                // promesses `whenDefined` pendantes.
+                for def in dom.borrow().ce.defs.values() {
+                    crate::heap::push_value(&mut ids, &def.ctor);
+                }
+                for list in dom.borrow().ce.pending.values() {
+                    ids.extend(list.iter().copied());
+                }
+                // `adoptedStyleSheets` (CAP-195, ADR-0033) —
+                // `ObjId` des feuilles adoptées : racines tant que
+                // le document vit — sinon un GC réaffectait le
+                // slot et `adopted_sheets_css` lisait `cssRules`
+                // sur le mauvais objet.
+                for sid in d.adopted_sheets.iter().copied() {
+                    ids.push(sid);
+                }
             }
         }
         // Élément sous upgrade CE traversant `construct` — il
@@ -3070,11 +3125,36 @@ impl Engine {
         crate::heap::push_value(&mut ids, &self.async_gen_fn_proto);
         crate::heap::push_value(&mut ids, &self.async_gen_proto);
         crate::heap::push_value(&mut ids, &self.completion);
+        // `using` en cours (ES2026) — disposeur + ressource
+        // vivants tant que leur corps tourne ; mesure mid-eval
+        // et safepoint (JS-C421) passent par ici.
+        for frame in &self.using_stack {
+            for (d, r, _) in frame {
+                crate::heap::push_value(&mut ids, d);
+                crate::heap::push_value(&mut ids, r);
+            }
+        }
+        // Générateurs/async suspendus — valeurs des frames gelés.
+        for frame in &self.gen_collect {
+            for v in frame {
+                crate::heap::push_value(&mut ids, v);
+            }
+        }
+        // Racines de safepoint — `Value`s des frames Rust au-dessus
+        // du safepoint courant (JS-C421) ; vide hors éval.
+        for v in &self.safepoint_roots {
+            crate::heap::push_value(&mut ids, v);
+        }
         // 2. Env global — les bindings `let`/`const` ne vivent pas
         //    sur l'objet global — + envs de modules (leurs exports
         //    restent vivants tant que le graphe tient).
         let mut visited = HashSet::new();
         crate::heap::trace_env(&self.global_env, &mut ids, &mut visited);
+        // Envs safepoint — chaînes de portée des frames Rust
+        // en cours, appelants compris (JS-C421).
+        for e in &self.safepoint_envs {
+            crate::heap::trace_env(e, &mut ids, &mut visited);
+        }
         for m in &self.modules {
             crate::heap::trace_env(&m.env, &mut ids, &mut visited);
         }
@@ -4659,6 +4739,40 @@ impl Engine {
         } else {
             0
         }
+    }
+
+    /// Safepoint GC intra-éval (JS-C421) — appelé **entre deux
+    /// statements** d'un corps (`exec_body`/`exec_program_in`) :
+    /// là, les seuls `Value` vivants hors `gc_seed_ids` sont la
+    /// chaîne d'env courante, `this` et ce que les frames Rust
+    /// englobantes ont poussé en `safepoint_roots` (callee/args
+    /// d'un appel, jeton `try`, discriminant `switch`, iterable
+    /// `for`-in/of…). Ne tourne QUE sous pression (`gc_due` armé
+    /// par `tick`/`gc_debt`, ou `mem_over`) — coût nominal : un
+    /// test booléen par statement, zéro hors pression.
+    ///
+    /// Sûreté : un safepoint n'est licite qu'à une frontière de
+    /// statements où aucun temporaire d'expression n'existe —
+    /// jamais dans `eval_expr` ni au sein d'une arm `exec_stmt`
+    /// entre deux `eval_*` (leurs locaux seraient invisibles).
+    pub(crate) fn safepoint_gc(&mut self, env: &EnvRef, this: &Value) {
+        if !self.gc_due && !self.mem_over() {
+            return;
+        }
+        let mut ids = Vec::new();
+        let mut visited = HashSet::new();
+        crate::heap::trace_env(env, &mut ids, &mut visited);
+        crate::heap::push_value(&mut ids, this);
+        for v in &self.safepoint_roots {
+            crate::heap::push_value(&mut ids, v);
+        }
+        for e in &self.safepoint_envs {
+            crate::heap::trace_env(e, &mut ids, &mut visited);
+        }
+        // JS-C421 : épargne les cellules allouées depuis le plus
+        // ancien statement actif — temporaires d'expression des
+        // locaux Rust, invisibles aux racines.
+        self.collect_extra(ids, self.young_floor);
     }
 
     // -- environments --------------------------------------------------
@@ -7958,6 +8072,28 @@ impl Engine {
         if let Ok(mut g) = crate::LAST_PHASE.lock() {
             *g = "call";
         }
+        // JS-C421 : `f`/`this`/`args`/`nt` tenus par les frames
+        // Rust appelantes pendant tout le corps — les pousser
+        // racines pour les safepoints des corps en dessous.
+        let sr_mark = self.safepoint_roots.len();
+        self.safepoint_roots.push(f.clone());
+        self.safepoint_roots.push(this.clone());
+        self.safepoint_roots.push(nt.clone());
+        self.safepoint_roots.extend_from_slice(args);
+        let out = self.call_value_inner(f, this, args, nt);
+        self.safepoint_roots.truncate(sr_mark);
+        out
+    }
+
+    /// Corps de [`call_value_impl`] — séparé pour que le funnel
+    /// de racines safepoint (JS-C421) entoure tout le dispatch.
+    fn call_value_inner(
+        &mut self,
+        f: Value,
+        this: Value,
+        args: &[Value],
+        nt: Value,
+    ) -> JsResult<Value> {
         crate::CALL_N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         crate::j17_tick(&crate::J17_CALL);
         let mut cur = f;
@@ -8751,5 +8887,47 @@ mod tests {
                 base
             );
         }
+    }
+
+    /// JS-C421 — le safepoint intra-éval : sous pression, un
+    /// programme plat peut balayer les déchets de ses statements
+    /// **entre** statements (jamais avant : la frontière de job
+    /// était la seule occasion). Programme : K itérations qui
+    /// chacune jettent un objet + un tableau volumineux — sans
+    /// safepoint le cap dur tue mid-span ; avec, le tas stagne.
+    /// Les temporaires en vol (`acc`, `big`) survivent — la
+    /// borne d'âge `young_floor` les épargne.
+    #[test]
+    fn safepoint_sweeps_dead_cells_mid_span() {
+        let mut e = Engine::new();
+        // Borne serrée : la somme des déchets du span dépasse le
+        // cap dur — sans safepoint, kill `dead_hard` garanti.
+        e.heap.set_mem_limit(16 * 1024 * 1024);
+        e.collect();
+        let gc0 = e.heap.stats().gc_runs;
+        // ~8 000 objets complexes morts par bloc — cumul ≫ la
+        // dette qui arme `gc_due` (4 Mio à cette borne) : sans
+        // safepoint, `dead_hard` tue mid-span.
+        let r = e.eval(
+            "var acc=0;\
+             for(var i=0;i<8000;i++){\
+               { let big={x:i,y:[i,i+1,i+2],z:{a:i,b:i}}; acc+=big.x; }\
+             }\
+             acc",
+        );
+        match &r {
+            Ok(Value::Num(n)) => assert_eq!(*n, 8000.0 * 7999.0 / 2.0),
+            other => panic!("le span doit survivre sous safepoint : {other:?}"),
+        }
+        let gc1 = e.heap.stats().gc_runs;
+        assert!(
+            gc1 > gc0,
+            "le safepoint n'a balayé aucune fois dans le span (gc_runs {gc0}→{gc1})"
+        );
+        assert!(
+            e.heap.bytes() < 16 * 1024 * 1024,
+            "déchets cumulés au-delà de la borne : {}",
+            e.heap.bytes()
+        );
     }
 }

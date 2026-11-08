@@ -1096,6 +1096,23 @@ impl GExec {
     }
 
     fn drive(&mut self, e: &mut Engine) -> JsResult<Value> {
+        // JS-C421 : tant que ce `GExec` tourne, son
+        // `RefCell` est emprunté — `trace_cell` le saute
+        // (`try_borrow` échoue) et un safepoint GC balayerait
+        // ses envs/items vivants. On publie les racines dans
+        // `safepoint_roots` le temps du drive (id → `Value::Obj`).
+        let sr_mark = e.safepoint_roots.len();
+        let mut ids: Vec<crate::value::ObjId> = Vec::new();
+        self.trace(&mut ids, &mut std::collections::HashSet::new());
+        e.safepoint_roots.extend(ids.into_iter().map(Value::Obj));
+        let out = self.drive_inner(e);
+        e.safepoint_roots.truncate(sr_mark);
+        out
+    }
+
+    /// Corps de [`GExec::drive`] — isolé pour que le publish
+    /// de racines safepoint (JS-C421) entoure tout le cycle.
+    fn drive_inner(&mut self, e: &mut Engine) -> JsResult<Value> {
         if let Some(r) = self.resume.take() {
             match r {
                 Ok(v) => self.liver(e, v)?,

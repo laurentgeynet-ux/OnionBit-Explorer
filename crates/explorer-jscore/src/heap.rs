@@ -66,6 +66,11 @@ pub enum CellData {
 pub struct Cell {
     /// Payload.
     pub data: CellData,
+    /// Numéro d'alloc monotone (JS-C421) — le safepoint GC
+    /// intra-éval épargne les cellules `seq >= young_floor`
+    /// (possibles temporaires d'expression tenus par des
+    /// locaux Rust, invisibles aux racines).
+    pub seq: u64,
 }
 
 /// One arena slot — `None` = tombstone réutilisable.
@@ -103,6 +108,9 @@ pub struct Heap {
     peak_live: usize,
     /// Pic d'octets estimés.
     peak_bytes: usize,
+    /// Compteur monotone d'allocs — source des `Cell::seq`
+    /// (JS-C421).
+    alloc_seq: u64,
 }
 
 impl Heap {
@@ -119,6 +127,7 @@ impl Heap {
             gc_runs: 0,
             peak_live: 0,
             peak_bytes: 0,
+            alloc_seq: 0,
         }
     }
 
@@ -131,11 +140,13 @@ impl Heap {
         if self.bytes > self.peak_bytes {
             self.peak_bytes = self.bytes;
         }
+        let seq = self.alloc_seq;
+        self.alloc_seq += 1;
         if let Some(idx) = self.free.pop() {
-            self.cells[idx as usize] = Some(Cell { data });
+            self.cells[idx as usize] = Some(Cell { data, seq });
             return idx;
         }
-        self.cells.push(Some(Cell { data }));
+        self.cells.push(Some(Cell { data, seq }));
         self.marks.push(false);
         (self.cells.len() - 1) as ObjId
     }
@@ -152,6 +163,7 @@ impl Heap {
         match self.cells.get(id as usize) {
             Some(Some(Cell {
                 data: CellData::Obj(o),
+                ..
             })) => Some(o),
             _ => None,
         }
@@ -162,6 +174,7 @@ impl Heap {
         match self.cells.get_mut(id as usize) {
             Some(Some(Cell {
                 data: CellData::Obj(o),
+                ..
             })) => Some(o),
             _ => None,
         }
@@ -193,6 +206,13 @@ impl Heap {
 
     /// Nombre de cellules vivantes — objets seuls depuis
     /// JS-C420 (les chaînes `JsStr` vivent hors arène).
+    /// Compteur d'allocs monotone — source des `Cell::seq`, lu
+    /// par `Engine` pour borner le safepoint GC (`young_floor`,
+    /// JS-C421).
+    pub(crate) fn alloc_seq(&self) -> u64 {
+        self.alloc_seq
+    }
+
     pub fn live_count(&self) -> usize {
         self.cells.len() - self.free.len()
     }
@@ -238,6 +258,7 @@ impl Heap {
     pub(crate) fn trace_cell(&self, id: ObjId, out: &mut Vec<ObjId>, envs: &mut HashSet<usize>) {
         let Some(Some(Cell {
             data: CellData::Obj(o),
+            ..
         })) = self.cells.get(id as usize)
         else {
             return;
@@ -364,11 +385,16 @@ impl Heap {
         }
     }
 
-    /// Passe mark-sweep. `seed` sème les racines de l'Engine (la
-    /// table `roots` explicite est toujours incluse). Retourne le
-    /// nombre de cellules réclamées ; les host objects balayés
-    /// reçoivent [`Host::finalize`] avant libération.
-    pub fn collect<F>(&mut self, mut seed: F) -> usize
+    /// Passe mark-sweep à frontière d'âge (JS-C421). `seed` sème
+    /// les racines de l'Engine (la table `roots` explicite est
+    /// toujours incluse) ; les cellules non marquées avec
+    /// `seq >= young_seq` sont conservées — ce sont les
+    /// temporaires potentiels des locaux Rust d'éval (invisibles
+    /// aux racines). `u64::MAX` = passe pleine (frontière de job :
+    /// aucune cellule n'est « jeune »). Retourne le nombre de
+    /// cellules réclamées ; les host objects balayés reçoivent
+    /// [`Host::finalize`] avant libération.
+    pub(crate) fn collect_bounded<F>(&mut self, mut seed: F, young_seq: u64) -> usize
     where
         F: FnMut(&mut dyn FnMut(ObjId)),
     {
@@ -445,9 +471,20 @@ impl Heap {
         let mut swept = 0usize;
         let mut live_bytes = 0usize;
         for (i, slot) in self.cells.iter_mut().enumerate() {
+            // JS-C421 : cellule jeune (allouée depuis la borne
+            // d'âge) non marquée — temporaire potentiel d'un
+            // local Rust : conservée, comptée vivante.
+            if slot.as_ref().is_some_and(|c| c.seq >= young_seq) {
+                if let Some(c) = slot.as_ref() {
+                    live_bytes += cell_bytes(&c.data);
+                }
+                self.marks[i] = false;
+                continue;
+            }
             if slot.is_some() && !self.marks[i] {
                 if let Some(Cell {
                     data: CellData::Obj(o),
+                    ..
                 }) = slot.as_ref()
                 {
                     if let ObjKind::Host(h) = &o.kind {
