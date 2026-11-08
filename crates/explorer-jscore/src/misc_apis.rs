@@ -115,12 +115,12 @@ impl MiscState {
             }
         }
         for (_, d) in &self.bc_pending {
-            crate::heap::push_value(ids, *d);
+            crate::heap::push_value(ids, d);
         }
         if let Some(w) = self.sel_wrapper {
             ids.push(w);
         }
-        if let Some(v) = self.cmp_optanon {
+        if let Some(ref v) = self.cmp_optanon {
             crate::heap::push_value(ids, v);
         }
     }
@@ -206,7 +206,7 @@ fn fire_bc_message(e: &mut Engine, data: &Rc<RefCell<BcData>>, payload: Value) -
         crate::dom_host::event_proto(e, o, "MessageEvent");
         let t = e.str_val("message");
         e.set_own(o, "type", t, true);
-        e.set_own(o, "target", this, true);
+        e.set_own(o, "target", this.clone(), true);
         e.set_own(o, "data", payload, true);
         let org = e.str_val("");
         e.set_own(o, "origin", org, true);
@@ -218,8 +218,8 @@ fn fire_bc_message(e: &mut Engine, data: &Rc<RefCell<BcData>>, payload: Value) -
         Value::Obj(o)
     };
     if let Some(f) = e.get_prop(wid, "onmessage") {
-        if e.is_callable(f) {
-            e.call_value(f, this, &[ev])?;
+        if e.is_callable(f.clone()) {
+            e.call_value(f, this.clone(), std::slice::from_ref(&ev))?;
         }
     }
     let fns: Vec<Value> = data
@@ -227,11 +227,11 @@ fn fire_bc_message(e: &mut Engine, data: &Rc<RefCell<BcData>>, payload: Value) -
         .listeners
         .iter()
         .filter(|(t, _, _)| t == "message")
-        .map(|(_, f, _)| *f)
+        .map(|(_, f, _)| f.clone())
         .collect();
     for f in fns {
-        if e.is_callable(f) {
-            e.call_value(f, this, &[ev])?;
+        if e.is_callable(f.clone()) {
+            e.call_value(f, this.clone(), std::slice::from_ref(&ev))?;
         }
     }
     Ok(())
@@ -336,7 +336,7 @@ impl Host for BcHost {
                 let ty = e.to_js_string(arg(args, 0))?;
                 let f = arg(args, 1);
                 let capture = e.to_boolean(arg(args, 2));
-                if e.is_callable(f) {
+                if e.is_callable(f.clone()) {
                     self.data.borrow_mut().listeners.push((ty, f, capture));
                 }
                 Ok(Some(Value::Undefined))
@@ -347,14 +347,15 @@ impl Host for BcHost {
                 self.data
                     .borrow_mut()
                     .listeners
-                    .retain(|(t, g, _)| !(*t == ty && e.strict_eq(*g, f)));
+                    .retain(|(t, g, _)| !(*t == ty && e.strict_eq(g, &f)));
                 Ok(Some(Value::Undefined))
             }
             "dispatchEvent" => {
                 let ev = arg(args, 0);
                 let ty = if let Value::Obj(id) = ev {
                     e.get_prop(id, "type")
-                        .and_then(|v| e.heap_string_of(v))
+                        .as_ref()
+                        .and_then(Engine::heap_string_of)
                         .unwrap_or_default()
                 } else {
                     String::new()
@@ -479,8 +480,8 @@ fn notif_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
 fn notif_request_permission(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     let denied = e.str_val("denied");
     if let Some(cb) = args.first() {
-        if e.is_callable(*cb) {
-            e.call_value(*cb, Value::Undefined, &[denied])?;
+        if e.is_callable(cb.clone()) {
+            e.call_value(cb.clone(), Value::Undefined, std::slice::from_ref(&denied))?;
         }
     }
     let p = e.new_promise();
@@ -869,18 +870,18 @@ impl Host for SelectionHost {
 /// `Uncaught: <v>` (sortie réelle d'un uncaught).
 fn report_error(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     let v = arg(args, 0);
-    let message = e.to_js_string(v).unwrap_or_default();
+    let message = e.to_js_string(v.clone()).unwrap_or_default();
     // 1. `window.onerror` legacy — 5 arguments (spec HTML) ;
     //    retour truthy = erreur « gérée », pas de rapport.
     let g = e.global;
     if let Some(f) = e.get_prop(g, "onerror") {
-        if e.is_callable(f) {
+        if e.is_callable(f.clone()) {
             let m = e.str_val(message.clone());
             let src = e.str_val(e.hooks.page_url.clone());
             let ret = e.call_value(
                 f,
                 Value::Obj(g),
-                &[m, src, Value::Num(0.0), Value::Num(0.0), v],
+                &[m, src, Value::Num(0.0), Value::Num(0.0), v.clone()],
             )?;
             if e.to_boolean(ret) {
                 return Ok(Value::Undefined);
@@ -936,7 +937,7 @@ pub(crate) fn install_misc(e: &mut Engine) {
     if let Value::Obj(cid) = bc {
         let p = bc_proto(e);
         e.set_own(cid, "prototype", Value::Obj(p), false);
-        e.set_own(p, "constructor", bc, false);
+        e.set_own(p, "constructor", bc.clone(), false);
     }
     e.set_own(g, "BroadcastChannel", bc, false);
     // `Notification` — stub honnête (`permission` 'default',
@@ -945,7 +946,7 @@ pub(crate) fn install_misc(e: &mut Engine) {
     if let Value::Obj(cid) = nf {
         let p = notif_proto(e);
         e.set_own(cid, "prototype", Value::Obj(p), false);
-        e.set_own(p, "constructor", nf, false);
+        e.set_own(p, "constructor", nf.clone(), false);
         // Statiques : `permission` own-prop figée `'default'`
         // (honnête — le grant n'est pas atteignable sans UI,
         // jamais `'granted'` mensonger), `requestPermission`,
@@ -974,7 +975,7 @@ pub(crate) fn install_misc(e: &mut Engine) {
 
 /// `args[i]` ou `Undefined` (même convention que `xhr::arg`).
 fn arg(args: &[Value], i: usize) -> Value {
-    args.get(i).copied().unwrap_or(Value::Undefined)
+    args.get(i).cloned().unwrap_or(Value::Undefined)
 }
 
 // ===== CAP-182 — Range / TreeWalker / execCommand (édition) —
@@ -1490,7 +1491,7 @@ fn tw_next(
         .next()
         .or_else(|| tw_step_out(dom, from, root))?;
     loop {
-        match tw_accept(e, dom, cache, n, what, filter) {
+        match tw_accept(e, dom, cache, n, what, filter.clone()) {
             0 => return Some(n),
             1 => {
                 n = dom
@@ -1537,7 +1538,7 @@ fn tw_children(
 ) -> Option<NodeId> {
     let mut node = tw_child_at(dom, cur, forward)?;
     loop {
-        match tw_accept(e, dom, cache, node, what, filter) {
+        match tw_accept(e, dom, cache, node, what, filter.clone()) {
             0 => return Some(node),
             1 => {
                 if let Some(c) = tw_child_at(dom, node, forward) {
@@ -1588,7 +1589,7 @@ fn tw_siblings(
         let mut sib = tw_sib(dom, node, forward);
         while let Some(s) = sib {
             node = s;
-            if tw_accept(e, dom, cache, node, what, filter) == 0 {
+            if tw_accept(e, dom, cache, node, what, filter.clone()) == 0 {
                 return Some(node);
             }
             sib = tw_child_at(dom, node, forward).or_else(|| tw_sib(dom, node, forward));
@@ -1614,7 +1615,7 @@ fn tw_parent(
     let mut node = cur;
     while node != root {
         node = dom.borrow().parent(node)?;
-        if tw_accept(e, dom, cache, node, what, filter) == 0 {
+        if tw_accept(e, dom, cache, node, what, filter.clone()) == 0 {
             return Some(node);
         }
     }
@@ -1639,7 +1640,7 @@ fn tw_prev_node(
         let mut sib = tw_sib(dom, node, false);
         while let Some(s) = sib {
             node = s;
-            match tw_accept(e, dom, cache, node, what, filter) {
+            match tw_accept(e, dom, cache, node, what, filter.clone()) {
                 0 => return Some(node),
                 1 => {
                     sib = tw_child_at(dom, node, false).or_else(|| tw_sib(dom, node, false));
@@ -1648,7 +1649,7 @@ fn tw_prev_node(
             }
         }
         node = dom.borrow().parent(node)?;
-        if tw_accept(e, dom, cache, node, what, filter) == 0 {
+        if tw_accept(e, dom, cache, node, what, filter.clone()) == 0 {
             return Some(node);
         }
     }
@@ -1706,7 +1707,7 @@ impl Host for TreeWalkerHost {
 
     fn trace(&self, out: &mut Vec<ObjId>) {
         crate::dom_host::trace_node_cache(&self.cache, out);
-        crate::heap::push_value(out, self.data.borrow().filter);
+        crate::heap::push_value(out, &self.data.borrow().filter);
     }
 
     fn has_method(&self, name: &str) -> bool {
@@ -1727,7 +1728,7 @@ impl Host for TreeWalkerHost {
         Ok(Some(match key {
             "root" => node_value(e, &self.dom, &self.cache, d.root),
             "whatToShow" => Value::Num(f64::from(d.what)),
-            "filter" => d.filter,
+            "filter" => d.filter.clone(),
             "currentNode" => node_value(e, &self.dom, &self.cache, d.cur),
             _ => return Ok(None),
         }))
@@ -1753,7 +1754,7 @@ impl Host for TreeWalkerHost {
         let _ = args;
         let (root, what, filter, cur) = {
             let d = self.data.borrow();
-            (d.root, d.what, d.filter, d.cur)
+            (d.root, d.what, d.filter.clone(), d.cur)
         };
         // Toutes les traversées sont relatives à `currentNode`
         // (JS-C340 — §B-97 : ShadyDOM repositionne `currentNode`
@@ -1928,7 +1929,7 @@ impl Host for NiHost {
 
     fn trace(&self, out: &mut Vec<ObjId>) {
         crate::dom_host::trace_node_cache(&self.cache, out);
-        crate::heap::push_value(out, self.data.borrow().filter);
+        crate::heap::push_value(out, &self.data.borrow().filter);
     }
 
     fn has_method(&self, name: &str) -> bool {
@@ -1943,7 +1944,7 @@ impl Host for NiHost {
         Ok(Some(match key {
             "root" => node_value(e, &self.dom, &self.cache, d.root),
             "whatToShow" => Value::Num(f64::from(d.what)),
-            "filter" => d.filter,
+            "filter" => d.filter.clone(),
             "referenceNode" => node_value(e, &self.dom, &self.cache, d.cur),
             "pointerBeforeReferenceNode" => Value::Bool(false),
             _ => return Ok(None),
@@ -1962,13 +1963,13 @@ impl Host for NiHost {
             "nextNode" => {
                 let (root, what, filter, cur, started) = {
                     let d = self.data.borrow();
-                    (d.root, d.what, d.filter, d.cur, d.started)
+                    (d.root, d.what, d.filter.clone(), d.cur, d.started)
                 };
                 let found = if started {
                     tw_next(e, &self.dom, &self.cache, what, filter, root, cur)
                 } else {
                     self.data.borrow_mut().started = true;
-                    if tw_accept(e, &self.dom, &self.cache, root, what, filter) == 0 {
+                    if tw_accept(e, &self.dom, &self.cache, root, what, filter.clone()) == 0 {
                         Some(root)
                     } else {
                         tw_next(e, &self.dom, &self.cache, what, filter, root, root)
@@ -1985,14 +1986,14 @@ impl Host for NiHost {
             "previousNode" => {
                 let (root, what, filter, mut n) = {
                     let d = self.data.borrow();
-                    (d.root, d.what, d.filter, d.cur)
+                    (d.root, d.what, d.filter.clone(), d.cur)
                 };
                 loop {
                     let Some(p) = tw_prev(&self.dom, n, root) else {
                         return Ok(Some(Value::Null));
                     };
                     n = p;
-                    if tw_accept(e, &self.dom, &self.cache, n, what, filter) == 0 {
+                    if tw_accept(e, &self.dom, &self.cache, n, what, filter.clone()) == 0 {
                         self.data.borrow_mut().cur = n;
                         return Ok(Some(node_value(e, &self.dom, &self.cache, n)));
                     }
@@ -2127,7 +2128,7 @@ pub(crate) fn sheet_delete_rule(e: &mut Engine, this: Value, args: &[Value]) -> 
 /// vidées ; pas de parse).
 pub(crate) fn sheet_replace(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let text = e.to_js_string(arg(args, 0))?;
-    sheet_set_text(e, this, &text)?;
+    sheet_set_text(e, this.clone(), &text)?;
     let pid = e.new_promise();
     e.resolve_promise(pid, this);
     Ok(Value::Obj(pid))
@@ -2327,8 +2328,8 @@ impl Host for AnimHost {
             "currentTime" | "effect" | "timeline" => Value::Null,
             "finished" => Value::Obj(d.finished),
             "ready" => Value::Obj(d.ready),
-            "onfinish" => d.onfinish,
-            "oncancel" => d.oncancel,
+            "onfinish" => d.onfinish.clone(),
+            "oncancel" => d.oncancel.clone(),
             _ => return Ok(None),
         }))
     }
@@ -2371,13 +2372,13 @@ impl Host for AnimHost {
                 let (pid, onf, w) = {
                     let mut d = self.data.borrow_mut();
                     d.state = "finished";
-                    (d.finished, d.onfinish, d.wrapper)
+                    (d.finished, d.onfinish.clone(), d.wrapper)
                 };
                 // `finished` résout avec l'objet `Animation`
                 // (spec) — pas la promesse (auto-résolution
                 // → rejet TypeError).
                 e.resolve_promise(pid, w.map_or(Value::Undefined, Value::Obj));
-                if e.is_callable(onf) {
+                if e.is_callable(onf.clone()) {
                     let ev = e.new_object();
                     e.call_value(onf, t, &[Value::Obj(ev)])?;
                 }
@@ -2387,11 +2388,11 @@ impl Host for AnimHost {
                 let (pid, onc) = {
                     let mut d = self.data.borrow_mut();
                     d.state = "idle";
-                    (d.finished, d.oncancel)
+                    (d.finished, d.oncancel.clone())
                 };
                 let m = e.str_val("AbortError: animation canceled");
                 e.reject_promise(pid, m);
-                if e.is_callable(onc) {
+                if e.is_callable(onc.clone()) {
                     let ev = e.new_object();
                     e.call_value(onc, t, &[Value::Obj(ev)])?;
                 }
@@ -2434,7 +2435,7 @@ pub(crate) fn start_view_transition(e: &mut Engine, _t: Value, args: &[Value]) -
     if let Some(obj) = e.heap.obj_mut(o) {
         obj.proto = Value::Obj(p);
     }
-    if e.is_callable(cb) {
+    if e.is_callable(cb.clone()) {
         e.call_value(cb, Value::Obj(o), &[])?;
     }
     e.resolve_promise(ucd, Value::Undefined);

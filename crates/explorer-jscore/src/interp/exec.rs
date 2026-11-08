@@ -153,7 +153,7 @@ impl Engine {
         }
         let mut r = Ok(Flow::Normal);
         for s in &prog.body {
-            match self.exec_stmt(env, this, s) {
+            match self.exec_stmt(env, this.clone(), s) {
                 Ok(Flow::Normal | Flow::Break(_) | Flow::Continue(_)) => {}
                 other => {
                     r = other;
@@ -166,7 +166,7 @@ impl Engine {
         }
         match r {
             Ok(Flow::Return(v)) => Ok(v),
-            Ok(_) => Ok(self.completion),
+            Ok(_) => Ok(self.completion.clone()),
             Err(e) => Err(e),
         }
     }
@@ -224,7 +224,7 @@ impl Engine {
                     self.call_depth
                 );
             }
-            match self.exec_stmt(env, this, s) {
+            match self.exec_stmt(env, this.clone(), s) {
                 Ok(Flow::Normal) => {}
                 other => {
                     r = other;
@@ -283,7 +283,7 @@ impl Engine {
                     self.get_prop(id, crate::interp::SYM_DISPOSE)
                 };
                 match m {
-                    Some(f) if self.is_callable(f) => {
+                    Some(f) if self.is_callable(f.clone()) => {
                         if let Some(frame) = self.using_stack.last_mut() {
                             frame.push((f, v, is_await));
                         }
@@ -335,7 +335,7 @@ impl Engine {
                 // fonction/classe nommée lie aussi son propre nom.
                 ExportDecl::Default(e) => {
                     let v = self.eval_expr(env, this, e)?;
-                    self.env_set(env, "default", v)?;
+                    self.env_set(env, "default", v.clone())?;
                     let own = match &**e {
                         Expr::Function(lit) => lit.name.clone(),
                         Expr::Class(lit) => lit.name.clone(),
@@ -359,9 +359,9 @@ impl Engine {
                 for d in decls {
                     match &d.init {
                         Some(init) => {
-                            let v = self.eval_expr(env, this, init)?;
-                            self.infer_name(&d.pat, v);
-                            self.bind_pat(env, this, &d.pat, v, BindMode::Var)?;
+                            let v = self.eval_expr(env, this.clone(), init)?;
+                            self.infer_name(&d.pat, v.clone());
+                            self.bind_pat(env, this.clone(), &d.pat, v, BindMode::Var)?;
                         }
                         // `var a;` — declare without clobbering.
                         None => self.declare_pat_names(env, &d.pat),
@@ -373,9 +373,15 @@ impl Engine {
                 for d in decls {
                     Self::declare_pat_lex(env, &d.pat, !constant);
                     if let Some(init) = &d.init {
-                        let v = self.eval_expr(env, this, init)?;
-                        self.infer_name(&d.pat, v);
-                        self.bind_pat(env, this, &d.pat, v, BindMode::Lex { mutable: !constant })?;
+                        let v = self.eval_expr(env, this.clone(), init)?;
+                        self.infer_name(&d.pat, v.clone());
+                        self.bind_pat(
+                            env,
+                            this.clone(),
+                            &d.pat,
+                            v,
+                            BindMode::Lex { mutable: !constant },
+                        )?;
                     }
                 }
                 Ok(Flow::Normal)
@@ -433,16 +439,22 @@ impl Engine {
             Stmt::Using { decls, is_await } => {
                 for d in decls {
                     let v = match &d.init {
-                        Some(i) => self.eval_expr(env, this, i)?,
+                        Some(i) => self.eval_expr(env, this.clone(), i)?,
                         None => Value::Undefined,
                     };
-                    self.bind_pat(env, this, &d.pat, v, BindMode::Lex { mutable: false })?;
+                    self.bind_pat(
+                        env,
+                        this.clone(),
+                        &d.pat,
+                        v.clone(),
+                        BindMode::Lex { mutable: false },
+                    )?;
                     self.register_using(v, *is_await)?;
                 }
                 Ok(Flow::Normal)
             }
             Stmt::If { cond, then, else_ } => {
-                let c = self.eval_expr(env, this, cond)?;
+                let c = self.eval_expr(env, this.clone(), cond)?;
                 if self.to_boolean(c) {
                     self.exec_stmt(env, this, then)
                 } else if let Some(e) = else_ {
@@ -455,7 +467,7 @@ impl Engine {
             // props de `o` (sauf `@@unscopables`), puis le scope
             // englobant. Sloppy uniquement (early-error du parseur).
             Stmt::With { obj, body } => {
-                let v = self.eval_expr(env, this, obj)?;
+                let v = self.eval_expr(env, this.clone(), obj)?;
                 let Some(oid) = self.with_object_of(v)? else {
                     return Err(self.type_error("cannot use `with` on `null` or `undefined`"));
                 };
@@ -466,11 +478,11 @@ impl Engine {
                 let labels = std::mem::take(&mut self.pending_labels);
                 loop {
                     self.tick()?;
-                    let c = self.eval_expr(env, this, cond)?;
+                    let c = self.eval_expr(env, this.clone(), cond)?;
                     if !self.to_boolean(c) {
                         return Ok(Flow::Normal);
                     }
-                    let f = self.exec_stmt(env, this, body)?;
+                    let f = self.exec_stmt(env, this.clone(), body)?;
                     if let Some(f) = Self::loop_flow(f, &labels) {
                         return Ok(f);
                     }
@@ -480,11 +492,11 @@ impl Engine {
                 let labels = std::mem::take(&mut self.pending_labels);
                 loop {
                     self.tick()?;
-                    let f = self.exec_stmt(env, this, body)?;
+                    let f = self.exec_stmt(env, this.clone(), body)?;
                     if let Some(f) = Self::loop_flow(f, &labels) {
                         return Ok(f);
                     }
-                    let c = self.eval_expr(env, this, cond)?;
+                    let c = self.eval_expr(env, this.clone(), cond)?;
                     if !self.to_boolean(c) {
                         return Ok(Flow::Normal);
                     }
@@ -512,8 +524,8 @@ impl Engine {
                         ForInit::Var(decls) => {
                             for d in decls {
                                 if let Some(i) = &d.init {
-                                    let v = self.eval_expr(env, this, i)?;
-                                    self.bind_pat(env, this, &d.pat, v, BindMode::Var)?;
+                                    let v = self.eval_expr(env, this.clone(), i)?;
+                                    self.bind_pat(env, this.clone(), &d.pat, v, BindMode::Var)?;
                                 }
                             }
                         }
@@ -523,10 +535,10 @@ impl Engine {
                                 Self::lex_pat_names(&d.pat, !constant, &mut names);
                                 Self::declare_pat_lex(&head, &d.pat, !constant);
                                 if let Some(i) = &d.init {
-                                    let v = self.eval_expr(&head, this, i)?;
+                                    let v = self.eval_expr(&head, this.clone(), i)?;
                                     self.bind_pat(
                                         &head,
-                                        this,
+                                        this.clone(),
                                         &d.pat,
                                         v,
                                         BindMode::Lex { mutable: !constant },
@@ -536,25 +548,25 @@ impl Engine {
                             ienv = head;
                         }
                         ForInit::Expr(e) => {
-                            self.eval_expr(env, this, e)?;
+                            self.eval_expr(env, this.clone(), e)?;
                         }
                     }
                 }
                 loop {
                     self.tick()?;
                     if let Some(t) = test {
-                        let c = self.eval_expr(&ienv, this, t)?;
+                        let c = self.eval_expr(&ienv, this.clone(), t)?;
                         if !self.to_boolean(c) {
                             return Ok(Flow::Normal);
                         }
                     }
-                    let f = self.exec_stmt(&ienv, this, body)?;
+                    let f = self.exec_stmt(&ienv, this.clone(), body)?;
                     if let Some(f) = Self::loop_flow(f, &labels) {
                         return Ok(f);
                     }
                     if let Some(u) = update {
                         if names.is_empty() {
-                            self.eval_expr(&ienv, this, u)?;
+                            self.eval_expr(&ienv, this.clone(), u)?;
                         } else {
                             // Copie post-corps : le tour suivant
                             // reçoit des cellules fraîches portant
@@ -566,7 +578,7 @@ impl Engine {
                                 Self::env_declare_lex(&next, n, *m);
                                 Self::env_init_lex(&next, n, v);
                             }
-                            self.eval_expr(&next, this, u)?;
+                            self.eval_expr(&next, this.clone(), u)?;
                             ienv = next;
                         }
                     } else if !names.is_empty() {
@@ -589,10 +601,10 @@ impl Engine {
                 body,
             } => {
                 let labels = std::mem::take(&mut self.pending_labels);
-                let ov = self.eval_expr(env, this, obj)?;
+                let ov = self.eval_expr(env, this.clone(), obj)?;
                 if let Some(init) = var_init {
-                    let v = self.eval_expr(env, this, init)?;
-                    self.assign_target(env, this, target, v)?;
+                    let v = self.eval_expr(env, this.clone(), init)?;
+                    self.assign_target(env, this.clone(), target, v)?;
                 }
                 let Value::Obj(id) = ov else {
                     return Ok(Flow::Normal); // for-in over primitives: skip
@@ -608,8 +620,8 @@ impl Engine {
                     } else {
                         env.clone()
                     };
-                    self.assign_target(&ienv, this, target, kv)?;
-                    let f = self.exec_stmt(&ienv, this, body)?;
+                    self.assign_target(&ienv, this.clone(), target, kv)?;
+                    let f = self.exec_stmt(&ienv, this.clone(), body)?;
                     if let Some(f) = Self::loop_flow(f, &labels) {
                         return Ok(f);
                     }
@@ -623,7 +635,7 @@ impl Engine {
                 is_await,
             } => {
                 let labels = std::mem::take(&mut self.pending_labels);
-                let v = self.eval_expr(env, this, iter)?;
+                let v = self.eval_expr(env, this.clone(), iter)?;
                 let items = if *is_await {
                     self.iter_values_await(v)?
                 } else {
@@ -646,8 +658,8 @@ impl Engine {
                         env.clone()
                     };
                     let mut r = self
-                        .assign_target(&ienv, this, target, item)
-                        .and_then(|()| self.exec_stmt(&ienv, this, body));
+                        .assign_target(&ienv, this.clone(), target, item)
+                        .and_then(|()| self.exec_stmt(&ienv, this.clone(), body));
                     if using {
                         r = self.drain_using(r);
                     }
@@ -703,18 +715,22 @@ impl Engine {
                 // `try {}`/`finally {}` sont des blocs — env enfant
                 // pour leurs `let`/`const` (même règle que Block).
                 let benv = Env::block(env.clone());
-                let mut r = self.exec_body(&benv, this, block);
-                if let Err(Thrown(v)) = r {
+                let mut r = self.exec_body(&benv, this.clone(), block);
+                if let Err(Thrown(ref v)) = r {
                     if let Some((pat, cbody)) = catch {
                         let cenv = Env::block(env.clone());
                         // Param en liaison lexicale : `bind_pat Var`
                         // traverserait le bloc vers le scope fonction.
-                        if let Err(e) =
-                            self.bind_pat(&cenv, this, pat, v, BindMode::Lex { mutable: true })
-                        {
+                        if let Err(e) = self.bind_pat(
+                            &cenv,
+                            this.clone(),
+                            pat,
+                            v.clone(),
+                            BindMode::Lex { mutable: true },
+                        ) {
                             r = Err(e);
                         } else {
-                            r = self.exec_body(&cenv, this, cbody);
+                            r = self.exec_body(&cenv, this.clone(), cbody);
                         }
                     }
                 }
@@ -728,14 +744,14 @@ impl Engine {
                 r
             }
             Stmt::Switch { disc, cases } => {
-                let dv = self.eval_expr(env, this, disc)?;
+                let dv = self.eval_expr(env, this.clone(), disc)?;
                 let mut matched = None;
                 let mut default = None;
                 for (i, c) in cases.iter().enumerate() {
                     match &c.test {
                         Some(t) => {
-                            let tv = self.eval_expr(env, this, t)?;
-                            if strict_eq(dv, tv, &self.heap) {
+                            let tv = self.eval_expr(env, this.clone(), t)?;
+                            if strict_eq(&dv, &tv, &self.heap) {
                                 matched = Some(i);
                                 break;
                             }
@@ -751,7 +767,7 @@ impl Engine {
                 // visible des suivants, jamais du scope englobant).
                 let senv = Env::block(env.clone());
                 for c in &cases[start..] {
-                    match self.exec_body(&senv, this, &c.body)? {
+                    match self.exec_body(&senv, this.clone(), &c.body)? {
                         Flow::Normal => {}
                         // `break` seul sort du switch ; `break lbl`
                         // remonte jusqu'au statement étiqueté.
@@ -808,7 +824,7 @@ impl Engine {
             }
             // `for (using x of y)` — binding const + disposeur.
             ForTarget::Using { pat, is_await } => {
-                self.bind_pat(env, this, pat, v, BindMode::Lex { mutable: false })?;
+                self.bind_pat(env, this, pat, v.clone(), BindMode::Lex { mutable: false })?;
                 self.register_using(v, *is_await)?;
             }
         }
@@ -835,7 +851,8 @@ impl Engine {
         // écraser ; l'inférence ne vaut que pour `""`/absent.
         let cur = self
             .get_prop(id, "name")
-            .and_then(|n| self.heap_string_of(n))
+            .as_ref()
+            .and_then(Self::heap_string_of)
             .unwrap_or_default();
         if cur.is_empty() && !name.is_empty() {
             let n = self.str_val(&**name);

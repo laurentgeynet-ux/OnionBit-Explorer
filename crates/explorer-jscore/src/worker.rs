@@ -414,7 +414,7 @@ impl crate::heap::Host for WorkerHost {
                     let ty = e.to_js_string(arg(args, 0))?;
                     let f = arg(args, 1);
                     if name == "addEventListener" {
-                        if e.is_callable(f) {
+                        if e.is_callable(f.clone()) {
                             listener_push(e, oid, &ty, f);
                         }
                     } else {
@@ -450,7 +450,7 @@ impl crate::heap::Host for WorkerHost {
 }
 
 fn arg(args: &[Value], i: usize) -> Value {
-    args.get(i).copied().unwrap_or(Value::Undefined)
+    args.get(i).cloned().unwrap_or(Value::Undefined)
 }
 
 // -- listeners `addEventListener` (wrapper + scope worker) -------------
@@ -488,7 +488,7 @@ fn listener_remove(e: &mut Engine, id: crate::value::ObjId, ty: &str, f: Value) 
             .get_prop(ent, "t")
             .and_then(|v| e.to_js_string(v).ok())
             .is_some_and(|t| t == ty);
-        let same_f = e.get_prop(ent, "f").is_some_and(|ef| e.strict_eq(ef, f));
+        let same_f = e.get_prop(ent, "f").is_some_and(|ef| e.strict_eq(&ef, &f));
         if same_ty && same_f {
             e.set_own(ent, "f", Value::Undefined, false);
         }
@@ -512,7 +512,7 @@ fn listeners_of(e: &mut Engine, id: crate::value::ObjId, ty: &str) -> Vec<Value>
             .is_some_and(|t| t == ty);
         if same_ty {
             if let Some(f) = e.get_prop(ent, "f") {
-                if e.is_callable(f) {
+                if e.is_callable(f.clone()) {
                     out.push(f);
                 }
             }
@@ -563,7 +563,7 @@ impl Engine {
         }
         if let Value::Obj(cid) = v {
             self.set_own(cid, "prototype", Value::Obj(p), false);
-            self.set_own(p, "constructor", v, false);
+            self.set_own(p, "constructor", v.clone(), false);
         }
         self.set_own(g, "Worker", v, false);
     }
@@ -618,13 +618,13 @@ impl Engine {
                         }
                         Some(Err(m)) => {
                             self.workers[i].terminated = true;
-                            let obj = self.workers[i].obj;
+                            let obj = self.workers[i].obj.clone();
                             if let Value::Obj(oid) = obj {
                                 let onerr =
                                     self.get_prop(oid, "onerror").unwrap_or(Value::Undefined);
-                                if self.is_callable(onerr) {
+                                if self.is_callable(onerr.clone()) {
                                     let s = self.str_val(m);
-                                    let ev = self.message_event(obj, "error", s);
+                                    let ev = self.message_event(obj.clone(), "error", s);
                                     self.call_value(onerr, obj, &[ev])?;
                                     delivered += 1;
                                 }
@@ -647,38 +647,38 @@ impl Engine {
                         break;
                     }
                 };
-                let obj = self.workers[i].obj;
+                let obj = self.workers[i].obj.clone();
                 match ev {
                     WorkerEvent::Msg(wv) => {
                         let data = self.wire_decode(&wv)?;
                         let Value::Obj(oid) = obj else { continue };
                         let onmsg = self.get_prop(oid, "onmessage").unwrap_or(Value::Undefined);
-                        if self.is_callable(onmsg) {
-                            let ev = self.message_event(obj, "message", data);
-                            self.call_value(onmsg, obj, &[ev])?;
+                        if self.is_callable(onmsg.clone()) {
+                            let ev = self.message_event(obj.clone(), "message", data.clone());
+                            self.call_value(onmsg, obj.clone(), &[ev])?;
                             delivered += 1;
                         }
                         // `addEventListener('message', f)` du
                         // wrapper — spéc EventTarget.
                         for f in listeners_of(self, oid, "message") {
-                            let ev = self.message_event(obj, "message", data);
-                            self.call_value(f, obj, &[ev])?;
+                            let ev = self.message_event(obj.clone(), "message", data.clone());
+                            self.call_value(f, obj.clone(), &[ev])?;
                             delivered += 1;
                         }
                     }
                     WorkerEvent::Fail(msg) => {
                         let Value::Obj(oid) = obj else { continue };
                         let onerr = self.get_prop(oid, "onerror").unwrap_or(Value::Undefined);
-                        if self.is_callable(onerr) {
+                        if self.is_callable(onerr.clone()) {
                             let m = self.str_val(msg.clone());
-                            let ev = self.message_event(obj, "error", m);
-                            self.call_value(onerr, obj, &[ev])?;
+                            let ev = self.message_event(obj.clone(), "error", m);
+                            self.call_value(onerr, obj.clone(), &[ev])?;
                             delivered += 1;
                         }
                         for f in listeners_of(self, oid, "error") {
                             let m = self.str_val(msg.clone());
-                            let ev = self.message_event(obj, "error", m);
-                            self.call_value(f, obj, &[ev])?;
+                            let ev = self.message_event(obj.clone(), "error", m);
+                            self.call_value(f, obj.clone(), &[ev])?;
                             delivered += 1;
                         }
                     }
@@ -697,7 +697,7 @@ impl Engine {
         let id = self.new_object();
         let t = self.str_val(ty);
         self.set_own(id, "type", t, true);
-        self.set_own(id, "data", data, true);
+        self.set_own(id, "data", data.clone(), true);
         self.set_own(id, "target", target, true);
         // `ErrorEvent` spec (§B-84) : `onerror` sur un fetch de
         // source tombé doit porter `message`/`filename`/`lineno`/
@@ -705,7 +705,7 @@ impl Engine {
         // (hls.js logue `ev.message` sur worker mort) lisent
         // `undefined` et diagnostiquent à l'aveugle.
         if ty == "error" {
-            self.set_own(id, "message", data, true);
+            self.set_own(id, "message", data.clone(), true);
             self.set_own(id, "error", data, true);
             let empty = self.str_val("");
             self.set_own(id, "filename", empty, true);
@@ -733,7 +733,7 @@ impl Engine {
             Value::Null => Ok(WireValue::Null),
             Value::Bool(b) => Ok(WireValue::Bool(b)),
             Value::Num(n) => Ok(WireValue::Num(n)),
-            Value::Str(id) => Ok(WireValue::Str(self.heap.string(id).unwrap_or_default())),
+            Value::Str(id) => Ok(WireValue::Str(id.to_string())),
             Value::Big(id) => match self.heap.obj(id).map(|o| &o.kind) {
                 Some(ObjKind::BigInt(b)) => Ok(WireValue::Big(b.clone())),
                 _ => Err(self.type_error("postMessage: cannot clone bigint")),
@@ -767,12 +767,12 @@ impl Engine {
                         buffer,
                         offset,
                         len,
-                    }) => Shape::Tarr(*ta, buffer_bytes(&self.heap, *buffer), *offset, *len),
+                    }) => Shape::Tarr(*ta, buffer_bytes(&self.heap, buffer.clone()), *offset, *len),
                     Some(ObjKind::DataView {
                         buffer,
                         offset,
                         len,
-                    }) => Shape::Dview(buffer_bytes(&self.heap, *buffer), *offset, *len),
+                    }) => Shape::Dview(buffer_bytes(&self.heap, buffer.clone()), *offset, *len),
                     Some(ObjKind::RegExp(re)) => Shape::Re(re.source.clone(), re.flag_string()),
                     Some(ObjKind::Fun(_)) => Shape::Bad("function"),
                     Some(ObjKind::Promise(_)) => Shape::Bad("Promise"),
@@ -940,7 +940,7 @@ impl Engine {
                 let flags = flags.clone();
                 self.make_regexp(&src, &flags).unwrap_or(Value::Null)
             }
-            WireValue::Ref(i) => memo.get(*i as usize).copied().unwrap_or(Value::Null),
+            WireValue::Ref(i) => memo.get(*i as usize).cloned().unwrap_or(Value::Null),
             WireValue::Big(b) => self.big_val(b.clone()),
             WireValue::Map(entries) => {
                 let proto = Value::Obj(self.protos.map);
@@ -953,7 +953,7 @@ impl Engine {
                     elem_integrity: 0,
                     args_map: None,
                 }));
-                memo.push(m);
+                memo.push(m.clone());
                 let Value::Obj(id) = m else { return m };
                 for (k, v) in entries {
                     let dk = self.wire_dec(k, memo);
@@ -977,7 +977,7 @@ impl Engine {
                     elem_integrity: 0,
                     args_map: None,
                 }));
-                memo.push(s);
+                memo.push(s.clone());
                 let Value::Obj(id) = s else { return s };
                 for it in items {
                     let v = self.wire_dec(it, memo);
@@ -999,12 +999,12 @@ impl Engine {
                         self.set_own(id, k, v, true);
                     }
                 }
-                memo.push(b);
+                memo.push(b.clone());
                 b
             }
             WireValue::Arr(items) => {
                 let arr = self.new_array(Vec::new());
-                memo.push(arr);
+                memo.push(arr.clone());
                 let Value::Obj(id) = arr else { return arr };
                 for it in items {
                     let v = self.wire_dec(it, memo);
@@ -1019,7 +1019,7 @@ impl Engine {
             WireValue::Obj(props) => {
                 let id = self.new_object();
                 let o = Value::Obj(id);
-                memo.push(o);
+                memo.push(o.clone());
                 for (k, v) in props {
                     let dv = self.wire_dec(v, memo);
                     self.set_own(id, k, dv, true);
@@ -1092,7 +1092,7 @@ pub(crate) fn worker_ctor_pub(e: &mut Engine, _this: Value, args: &[Value]) -> J
     // `Worker.prototype` (spec ; `new_host_object` pose
     // `Object.prototype` par défaut).
     let g = e.global;
-    if let (Some(Value::Obj(wc)), Value::Obj(hid)) = (e.get_prop(g, "Worker"), host) {
+    if let (Some(Value::Obj(wc)), Value::Obj(hid)) = (e.get_prop(g, "Worker"), host.clone()) {
         if let Some(pp @ Value::Obj(_)) = e.get_prop(wc, "prototype") {
             if let Some(o) = e.heap.obj_mut(hid) {
                 o.proto = pp;
@@ -1111,7 +1111,7 @@ pub(crate) fn worker_ctor_pub(e: &mut Engine, _this: Value, args: &[Value]) -> J
         }),
         alive,
         join: None,
-        obj: host,
+        obj: host.clone(),
         terminated: false,
     });
     Ok(host)
@@ -1183,8 +1183,8 @@ fn worker_main(
     // Scope WorkerGlobalScope minimal.
     let g = e.global;
     let gv = Value::Obj(g);
-    e.set_own(g, "self", gv, false);
-    e.set_own(g, "globalThis", gv, false);
+    e.set_own(g, "self", gv.clone(), false);
+    e.set_own(g, "globalThis", gv.clone(), false);
     let post = e.native_fn("postMessage", wscope_post);
     e.set_own(g, "postMessage", post, false);
     let imp = e.native_fn("importScripts", wscope_import_scripts);
@@ -1247,15 +1247,15 @@ fn worker_main(
             match e.wire_decode(&w) {
                 Ok(data) => {
                     let onmsg = e.get_prop(g, "onmessage").unwrap_or(Value::Undefined);
-                    if e.is_callable(onmsg) {
-                        let ev = e.message_event(gv, "message", data);
-                        if let Err(t) = e.call_value(onmsg, gv, &[ev]) {
+                    if e.is_callable(onmsg.clone()) {
+                        let ev = e.message_event(gv.clone(), "message", data.clone());
+                        if let Err(t) = e.call_value(onmsg, gv.clone(), &[ev]) {
                             fail(&mut e, t);
                         }
                     }
                     for f in listeners_of(&mut e, g, "message") {
-                        let ev = e.message_event(gv, "message", data);
-                        if let Err(t) = e.call_value(f, gv, &[ev]) {
+                        let ev = e.message_event(gv.clone(), "message", data.clone());
+                        if let Err(t) = e.call_value(f, gv.clone(), &[ev]) {
                             fail(&mut e, t);
                         }
                     }
@@ -1285,7 +1285,7 @@ fn worker_main(
 fn wscope_add_listener(e: &mut Engine, _this: Value, args: &[Value]) -> JsResult<Value> {
     let ty = e.to_js_string(arg(args, 0))?;
     let f = arg(args, 1);
-    if e.is_callable(f) {
+    if e.is_callable(f.clone()) {
         listener_push(e, e.global, &ty, f);
     }
     Ok(Value::Undefined)
@@ -1319,7 +1319,7 @@ fn wscope_import_scripts(e: &mut Engine, _this: Value, args: &[Value]) -> JsResu
     };
     let mut srcs = Vec::new();
     for a in args {
-        let spec = e.to_js_string(*a)?;
+        let spec = e.to_js_string(a.clone())?;
         // §B-84 — `blob:` se résout dans l'engine (registre
         // seedé du parent au spawn) avant tout aller réseau —
         // le loader n'a pas le registre d'URL objets.

@@ -96,7 +96,7 @@ pub(crate) fn create_analyser(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResu
 /// rend `dst` (chaînage spec).
 fn audio_graph_connect(e: &mut Engine, this: Value, a: &[Value]) -> JsResult<Value> {
     let dst = arg(a, 0);
-    if let (Value::Obj(sid), Value::Obj(did)) = (this, dst) {
+    if let (Value::Obj(sid), Value::Obj(did)) = (this, dst.clone()) {
         let mid = e.get_prop(sid, "__media").unwrap_or(Value::Num(-1.0));
         e.set_own(did, "__src_media", mid, true);
     }
@@ -153,7 +153,7 @@ fn analyser_samples(e: &mut Engine, this: Value, n: usize) -> Vec<f32> {
 /// **non fenêtrée** des `fftSize` derniers échantillons
 /// (spec : `128 + 128·x` borné).
 fn analyser_byte_td(e: &mut Engine, this: Value, a: &[Value]) -> JsResult<Value> {
-    let fft = analyser_fft_size(e, this);
+    let fft = analyser_fft_size(e, this.clone());
     let samples = analyser_samples(e, this, fft);
     crate::typed_array::ta_write_region(e, arg(a, 0), move |region| {
         for (i, b) in region.iter_mut().enumerate() {
@@ -196,8 +196,8 @@ fn analyser_float_freq(e: &mut Engine, this: Value, a: &[Value]) -> JsResult<Val
 /// Magnitudes dB `fftSize/2` du signal courant + bornes
 /// `minDecibels`/`maxDecibels` lues sur le nœud.
 fn analyser_db_row(e: &mut Engine, this: Value) -> (Vec<f64>, f64, f64) {
-    let fft = analyser_fft_size(e, this);
-    let samples = analyser_samples(e, this, fft);
+    let fft = analyser_fft_size(e, this.clone());
+    let samples = analyser_samples(e, this.clone(), fft);
     let mags = analyser_mags(&samples);
     let (mut lo, mut hi) = (-100.0, -30.0);
     if let Value::Obj(id) = this {

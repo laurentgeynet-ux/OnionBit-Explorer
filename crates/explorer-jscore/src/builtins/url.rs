@@ -13,14 +13,14 @@ use super::*;
 // ------------------------------------------------------------------
 
 pub(crate) fn array_reduce_right(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
-    let (id, cb, _this_arg) = iter_cb(e, this, args, "reduceRight")?;
+    let (id, cb, _this_arg) = iter_cb(e, this.clone(), args, "reduceRight")?;
     // Itération vivante inversée (`iter_get`, JS-C335) : la cb
     // voit le tableau peuplé — le `take_elems` d'avant le vidait
     // pendant la boucle *et* le laissait vide si la cb jetait
     // (le `put_elems` suivait le `?`, §B-90).
     let len = iter_len(e, id)? as i64;
     let (mut acc, start) = if let Some(v) = args.get(1) {
-        (*v, len - 1)
+        (v.clone(), len - 1)
     } else {
         // Sans init, acc = dernier élément *présent* (spec).
         let mut i = len - 1;
@@ -40,7 +40,11 @@ pub(crate) fn array_reduce_right(e: &mut Engine, this: Value, args: &[Value]) ->
     let mut i = start;
     while i >= 0 {
         if let Some(v) = iter_get(e, id, i as usize)? {
-            acc = e.call_value(cb, Value::Undefined, &[acc, v, Value::Num(i as f64), this])?;
+            acc = e.call_value(
+                cb.clone(),
+                Value::Undefined,
+                &[acc, v, Value::Num(i as f64), this.clone()],
+            )?;
         }
         i -= 1;
     }
@@ -789,7 +793,7 @@ pub(crate) fn usp_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Va
             // Iterable (`[[k,v],…]`, autre URLSearchParams via son
             // `[Symbol.iterator]`) → paires ; non-itérable → record
             // `{k: v}` dans l'ordre des props énumérables.
-            match e.iter_values(v) {
+            match e.iter_values(v.clone()) {
                 Ok(items) => {
                     for it in items {
                         // Spec `sequence<sequence>` : chaque item
@@ -800,8 +804,8 @@ pub(crate) fn usp_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Va
                                 e.type_error("URLSearchParams: sequence item is not a pair")
                             );
                         }
-                        let (k, val) = match e.iter_values(it) {
-                            Ok(ivs) if ivs.len() == 2 => (ivs[0], ivs[1]),
+                        let (k, val) = match e.iter_values(it.clone()) {
+                            Ok(ivs) if ivs.len() == 2 => (ivs[0].clone(), ivs[1].clone()),
                             Ok(_) => {
                                 return Err(e.type_error(
                                     "URLSearchParams: pair must have exactly 2 elements",
@@ -810,7 +814,10 @@ pub(crate) fn usp_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Va
                             // Non-itérable : l'objet indexé 0/1
                             // reste accepté (permissif — la spec
                             // jetterait aussi ici).
-                            Err(_) => (e.get_prop_value(it, "0")?, e.get_prop_value(it, "1")?),
+                            Err(_) => (
+                                e.get_prop_value(it.clone(), "0")?,
+                                e.get_prop_value(it, "1")?,
+                            ),
                         };
                         pairs.push((e.to_js_string(k)?, e.to_js_string(val)?));
                     }
@@ -821,7 +828,7 @@ pub(crate) fn usp_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Va
                         pairs = usp_pairs(e, oid);
                     } else {
                         for k in e.own_enum_keys(oid) {
-                            let val = e.get_prop_value(v, &k)?;
+                            let val = e.get_prop_value(v.clone(), &k)?;
                             pairs.push((k, e.to_js_string(val)?));
                         }
                     }
@@ -932,16 +939,16 @@ pub(crate) fn usp_sort(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Va
 }
 
 pub(crate) fn usp_for_each(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
-    let (_id, pairs) = usp_this(e, this)?;
+    let (_id, pairs) = usp_this(e, this.clone())?;
     let cb = arg(args, 0);
-    if !e.is_callable(cb) {
+    if !e.is_callable(cb.clone()) {
         return Err(e.type_error("forEach needs a function"));
     }
     let this_arg = arg(args, 1);
     for (k, v) in pairs {
         let kv = e.str_val(k);
         let vv = e.str_val(v);
-        e.call_value(cb, this_arg, &[vv, kv, this])?;
+        e.call_value(cb.clone(), this_arg.clone(), &[vv, kv, this.clone()])?;
     }
     Ok(Value::Undefined)
 }

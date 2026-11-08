@@ -16,11 +16,11 @@ use crate::value::{ObjId, Value};
 use crate::Engine;
 
 fn arg(args: &[Value], i: usize) -> Value {
-    args.get(i).copied().unwrap_or(Value::Undefined)
+    args.get(i).cloned().unwrap_or(Value::Undefined)
 }
 
 /// `SameValueZero` — `===` plus `NaN` equals `NaN`.
-fn svz(h: &crate::heap::Heap, a: Value, b: Value) -> bool {
+fn svz(h: &crate::heap::Heap, a: &Value, b: &Value) -> bool {
     crate::interp::strict_eq(a, b, h)
         || matches!((a, b), (Value::Num(x), Value::Num(y)) if x.is_nan() && y.is_nan())
 }
@@ -122,7 +122,7 @@ fn map_new(e: &mut Engine, args: &[Value], proto_id: crate::value::ObjId) -> JsR
             if i % 4096 == 0 {
                 e.tick()?;
             }
-            let k = e.get_prop_value(pair, "0")?;
+            let k = e.get_prop_value(pair.clone(), "0")?;
             let v = e.get_prop_value(pair, "1")?;
             map_set_entry(e, id, k, v)?;
         }
@@ -166,7 +166,7 @@ pub(crate) fn map_set_entry(e: &mut Engine, id: ObjId, k: Value, v: Value) -> Js
     // Two-phase: find the slot immutably, then mutate — `svz` needs
     // the heap for string comparison.
     let (pos, len) = e.heap.obj(id).map_or((None, 0), |o| match &o.kind {
-        ObjKind::Map(m) => (m.iter().position(|(ek, _)| svz(&e.heap, *ek, k)), m.len()),
+        ObjKind::Map(m) => (m.iter().position(|(ek, _)| svz(&e.heap, ek, &k)), m.len()),
         _ => (None, 0),
     });
     if pos.is_none() {
@@ -191,7 +191,7 @@ pub(crate) fn map_set_entry(e: &mut Engine, id: ObjId, k: Value, v: Value) -> Js
 
 pub(crate) fn set_add(e: &mut Engine, id: ObjId, v: Value) -> JsResult<()> {
     let (has, len) = e.heap.obj(id).map_or((true, 0), |o| match &o.kind {
-        ObjKind::Set(s) => (s.iter().any(|&ev| svz(&e.heap, ev, v)), s.len()),
+        ObjKind::Set(s) => (s.iter().any(|ev| svz(&e.heap, ev, &v)), s.len()),
         _ => (true, 0),
     });
     if has {
@@ -230,8 +230,8 @@ fn map_get(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
         .and_then(|o| match &o.kind {
             ObjKind::Map(m) => m
                 .iter()
-                .find(|(ek, _)| svz(&e.heap, *ek, k))
-                .map(|(_, v)| *v),
+                .find(|(ek, _)| svz(&e.heap, ek, &k))
+                .map(|(_, v)| v.clone()),
             _ => None,
         })
         .unwrap_or(Value::Undefined);
@@ -242,7 +242,7 @@ fn map_has(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let k = arg(args, 0);
     Ok(Value::Bool(e.heap.obj(c_id(this)).is_some_and(
         |o| match &o.kind {
-            ObjKind::Map(m) => m.iter().any(|(ek, _)| svz(&e.heap, *ek, k)),
+            ObjKind::Map(m) => m.iter().any(|(ek, _)| svz(&e.heap, ek, &k)),
             _ => false,
         },
     )))
@@ -254,7 +254,7 @@ fn map_delete(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     };
     let k = arg(args, 0);
     let pos = e.heap.obj(id).and_then(|o| match &o.kind {
-        ObjKind::Map(m) => m.iter().position(|(ek, _)| svz(&e.heap, *ek, k)),
+        ObjKind::Map(m) => m.iter().position(|(ek, _)| svz(&e.heap, ek, &k)),
         _ => None,
     });
     let Some(i) = pos else {
@@ -278,13 +278,13 @@ fn map_get_or_insert(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Va
     if let Some(ev) = e.heap.obj(id).and_then(|o| match &o.kind {
         ObjKind::Map(m) => m
             .iter()
-            .find(|(ek, _)| svz(&e.heap, *ek, k))
-            .map(|(_, ev)| *ev),
+            .find(|(ek, _)| svz(&e.heap, ek, &k))
+            .map(|(_, ev)| ev.clone()),
         _ => None,
     }) {
         return Ok(ev);
     }
-    map_set_entry(e, id, k, v)?;
+    map_set_entry(e, id, k, v.clone())?;
     Ok(v)
 }
 
@@ -295,20 +295,20 @@ fn map_get_or_insert_computed(e: &mut Engine, this: Value, args: &[Value]) -> Js
         return Err(e.type_error("Map.getOrInsertComputed on non-Map"));
     };
     let (k, cb) = (arg(args, 0), arg(args, 1));
-    if !e.is_callable(cb) {
+    if !e.is_callable(cb.clone()) {
         return Err(e.type_error("Map.getOrInsertComputed: callback is not callable"));
     }
     if let Some(ev) = e.heap.obj(id).and_then(|o| match &o.kind {
         ObjKind::Map(m) => m
             .iter()
-            .find(|(ek, _)| svz(&e.heap, *ek, k))
-            .map(|(_, ev)| *ev),
+            .find(|(ek, _)| svz(&e.heap, ek, &k))
+            .map(|(_, ev)| ev.clone()),
         _ => None,
     }) {
         return Ok(ev);
     }
-    let v = e.call_value(cb, Value::Undefined, &[k])?;
-    map_set_entry(e, id, k, v)?;
+    let v = e.call_value(cb, Value::Undefined, std::slice::from_ref(&k))?;
+    map_set_entry(e, id, k, v.clone())?;
     Ok(v)
 }
 
@@ -337,7 +337,7 @@ fn map_size(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
 fn coll_for_each(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let f = arg(args, 0);
     let this_arg = arg(args, 1);
-    if !e.is_callable(f) {
+    if !e.is_callable(f.clone()) {
         return Err(e.type_error("forEach: callback is not a function"));
     }
     let Value::Obj(id) = this else {
@@ -354,11 +354,11 @@ fn coll_for_each(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value>
     e.alloc_guard(n.saturating_mul(std::mem::size_of::<(Value, Value)>()))?;
     let pairs: Vec<(Value, Value)> = match e.heap.obj(id).map(|o| &o.kind) {
         Some(ObjKind::Map(m)) => m.clone(),
-        Some(ObjKind::Set(s)) => s.iter().map(|&v| (v, v)).collect(),
+        Some(ObjKind::Set(s)) => s.iter().map(|v| (v.clone(), v.clone())).collect(),
         _ => return Err(e.type_error("forEach on non-collection")),
     };
     for (k, v) in pairs {
-        e.call_value(f, this_arg, &[v, k, this])?;
+        e.call_value(f.clone(), this_arg.clone(), &[v, k, this.clone()])?;
     }
     Ok(Value::Undefined)
 }
@@ -405,7 +405,7 @@ fn set_has(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let v = arg(args, 0);
     Ok(Value::Bool(e.heap.obj(c_id(this)).is_some_and(
         |o| match &o.kind {
-            ObjKind::Set(s) => s.iter().any(|&ev| svz(&e.heap, ev, v)),
+            ObjKind::Set(s) => s.iter().any(|ev| svz(&e.heap, ev, &v)),
             _ => false,
         },
     )))
@@ -417,7 +417,7 @@ fn set_delete(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     };
     let v = arg(args, 0);
     let pos = e.heap.obj(id).and_then(|o| match &o.kind {
-        ObjKind::Set(s) => s.iter().position(|&ev| svz(&e.heap, ev, v)),
+        ObjKind::Set(s) => s.iter().position(|ev| svz(&e.heap, ev, &v)),
         _ => None,
     });
     let Some(i) = pos else {
@@ -460,7 +460,7 @@ fn set_entries_iter(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value
     let items = set_items(e, c_id(this))?;
     let mut out = Vec::with_capacity(items.len());
     for v in items {
-        out.push(e.new_array(vec![v, v]));
+        out.push(e.new_array(vec![v.clone(), v]));
     }
     Ok(iter_obj(e, out, e.protos.set_iter))
 }
@@ -499,8 +499,8 @@ fn two_sets(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<(Vec<Value>
     Ok((mine, other))
 }
 
-fn contains(e: &Engine, hay: &[Value], v: Value) -> bool {
-    hay.iter().any(|&x| svz(&e.heap, x, v))
+fn contains(e: &Engine, hay: &[Value], v: &Value) -> bool {
+    hay.iter().any(|x| svz(&e.heap, x, v))
 }
 
 fn set_union(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
@@ -511,36 +511,36 @@ fn set_union(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
 
 fn set_intersection(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let (a, b) = two_sets(e, this, args)?;
-    let keep: Vec<Value> = a.iter().copied().filter(|&v| contains(e, &b, v)).collect();
+    let keep: Vec<Value> = a.iter().filter(|v| contains(e, &b, v)).cloned().collect();
     new_set_from(e, keep)
 }
 
 fn set_difference(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let (a, b) = two_sets(e, this, args)?;
-    let keep: Vec<Value> = a.iter().copied().filter(|&v| !contains(e, &b, v)).collect();
+    let keep: Vec<Value> = a.iter().filter(|v| !contains(e, &b, v)).cloned().collect();
     new_set_from(e, keep)
 }
 
 fn set_sym_diff(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let (a, b) = two_sets(e, this, args)?;
-    let mut out: Vec<Value> = a.iter().copied().filter(|&v| !contains(e, &b, v)).collect();
-    out.extend(b.iter().copied().filter(|&v| !contains(e, &a, v)));
+    let mut out: Vec<Value> = a.iter().filter(|v| !contains(e, &b, v)).cloned().collect();
+    out.extend(b.iter().filter(|v| !contains(e, &a, v)).cloned());
     new_set_from(e, out)
 }
 
 fn set_is_subset(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let (a, b) = two_sets(e, this, args)?;
-    Ok(Value::Bool(a.iter().all(|&v| contains(e, &b, v))))
+    Ok(Value::Bool(a.iter().all(|v| contains(e, &b, v))))
 }
 
 fn set_is_superset(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let (a, b) = two_sets(e, this, args)?;
-    Ok(Value::Bool(b.iter().all(|&v| contains(e, &a, v))))
+    Ok(Value::Bool(b.iter().all(|v| contains(e, &a, v))))
 }
 
 fn set_is_disjoint(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let (a, b) = two_sets(e, this, args)?;
-    Ok(Value::Bool(!a.iter().any(|&v| contains(e, &b, v))))
+    Ok(Value::Bool(!a.iter().any(|v| contains(e, &b, v))))
 }
 
 // ------------------------------------------------------------------
@@ -568,17 +568,18 @@ fn iter_next(e: &mut Engine, this: Value, a: &[Value]) -> JsResult<Value> {
         match &mut o.kind {
             ObjKind::Iter { items, idx, ret } => {
                 if *idx < items.len() {
-                    let v = items[*idx];
+                    let v = items[*idx].clone();
                     *idx += 1;
                     (Some(v), Value::Undefined)
                 } else {
-                    (None, *ret)
+                    (None, ret.clone())
                 }
             }
             _ => return Err(e.type_error("next on non-iterator")),
         }
     };
-    Ok(iter_result(e, item.unwrap_or(ret), item.is_none()))
+    let done = item.is_none();
+    Ok(iter_result(e, item.unwrap_or(ret), done))
 }
 
 /// Iterator proto's `[Symbol.iterator]` returns `this`.
@@ -679,8 +680,13 @@ pub(crate) fn install(e: &mut Engine) {
         }
     }
     let map_ctor_v = e.native_fn("Map", map_ctor);
-    e.set_own(c_id(map_ctor_v), "prototype", Value::Obj(map_proto), false);
-    e.add_method(c_id(map_ctor_v), "groupBy", map_group_by);
+    e.set_own(
+        c_id(map_ctor_v.clone()),
+        "prototype",
+        Value::Obj(map_proto),
+        false,
+    );
+    e.add_method(c_id(map_ctor_v.clone()), "groupBy", map_group_by);
     let g = e.global;
     e.set_own(g, "Map", map_ctor_v, false);
 
@@ -710,7 +716,12 @@ pub(crate) fn install(e: &mut Engine) {
         }
     }
     let set_ctor_v = e.native_fn("Set", set_ctor);
-    e.set_own(c_id(set_ctor_v), "prototype", Value::Obj(set_proto), false);
+    e.set_own(
+        c_id(set_ctor_v.clone()),
+        "prototype",
+        Value::Obj(set_proto),
+        false,
+    );
     let g = e.global;
     e.set_own(g, "Set", set_ctor_v, false);
 
@@ -733,8 +744,8 @@ pub(crate) fn install(e: &mut Engine) {
         e.add_method(wmp, "getOrInsert", map_get_or_insert);
         e.add_method(wmp, "getOrInsertComputed", map_get_or_insert_computed);
         let wm = e.native_fn("WeakMap", weak_map_ctor);
-        e.set_own(c_id(wm), "prototype", Value::Obj(wmp), false);
-        e.set_own(wmp, "constructor", wm, false);
+        e.set_own(c_id(wm.clone()), "prototype", Value::Obj(wmp), false);
+        e.set_own(wmp, "constructor", wm.clone(), false);
         e.set_own(g, "WeakMap", wm, false);
     }
     {
@@ -745,8 +756,8 @@ pub(crate) fn install(e: &mut Engine) {
         e.add_method(wsp, "has", set_has);
         e.add_method(wsp, "delete", set_delete);
         let ws = e.native_fn("WeakSet", weak_set_ctor);
-        e.set_own(c_id(ws), "prototype", Value::Obj(wsp), false);
-        e.set_own(wsp, "constructor", ws, false);
+        e.set_own(c_id(ws.clone()), "prototype", Value::Obj(wsp), false);
+        e.set_own(wsp, "constructor", ws.clone(), false);
         e.set_own(g, "WeakSet", ws, false);
     }
 }
@@ -760,7 +771,7 @@ pub(crate) fn install(e: &mut Engine) {
 fn map_group_by(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     let items = e.iter_values(arg(args, 0))?;
     let f = arg(args, 1);
-    if !e.is_callable(f) {
+    if !e.is_callable(f.clone()) {
         return Err(e.type_error("groupBy callback is not callable"));
     }
     let out = e.heap.alloc_obj(Object {
@@ -773,11 +784,15 @@ fn map_group_by(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
         args_map: None,
     });
     for (i, v) in items.into_iter().enumerate() {
-        let k = e.call_value(f, Value::Undefined, &[v, Value::Num(i as f64)])?;
+        let k = e.call_value(
+            f.clone(),
+            Value::Undefined,
+            &[v.clone(), Value::Num(i as f64)],
+        )?;
         let existing = e.heap.obj(out).and_then(|o| match &o.kind {
             ObjKind::Map(m) => m
                 .iter()
-                .find(|(ek, _)| svz(&e.heap, *ek, k))
+                .find(|(ek, _)| svz(&e.heap, ek, &k))
                 .and_then(|(_, ev)| {
                     if let Value::Obj(id) = ev {
                         Some(*id)
@@ -830,10 +845,10 @@ fn it_pull_all(e: &mut Engine, this: Value) -> JsResult<Vec<Value>> {
             let Some(nf) = e.get_prop(id, "next") else {
                 break;
             };
-            if !e.is_callable(nf) {
+            if !e.is_callable(nf.clone()) {
                 break;
             }
-            let r = e.call_value(nf, this, &[])?;
+            let r = e.call_value(nf, this.clone(), &[])?;
             let Value::Obj(rid) = r else { break };
             if e.get_prop(rid, "done").is_some_and(|d| e.to_boolean(d)) {
                 break;
@@ -846,7 +861,7 @@ fn it_pull_all(e: &mut Engine, this: Value) -> JsResult<Vec<Value>> {
 }
 
 fn it_callback(e: &mut Engine, f: Value, v: Value, i: usize) -> JsResult<Value> {
-    if !e.is_callable(f) {
+    if !e.is_callable(f.clone()) {
         return Err(e.type_error("iterator callback is not callable"));
     }
     e.call_value(f, Value::Undefined, &[v, Value::Num(i as f64)])
@@ -857,7 +872,7 @@ fn it_map(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let vals = it_pull_all(e, this)?;
     let mut out = Vec::with_capacity(vals.len());
     for (i, v) in vals.into_iter().enumerate() {
-        out.push(it_callback(e, f, v, i)?);
+        out.push(it_callback(e, f.clone(), v, i)?);
     }
     Ok(iter_obj(e, out, e.protos.iter_helper))
 }
@@ -867,7 +882,7 @@ fn it_filter(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let vals = it_pull_all(e, this)?;
     let mut out = Vec::new();
     for (i, v) in vals.into_iter().enumerate() {
-        let k = it_callback(e, f, v, i)?;
+        let k = it_callback(e, f.clone(), v.clone(), i)?;
         if e.to_boolean(k) {
             out.push(v);
         }
@@ -900,7 +915,7 @@ fn it_flat_map(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let vals = it_pull_all(e, this)?;
     let mut out = Vec::new();
     for (i, v) in vals.into_iter().enumerate() {
-        let m = it_callback(e, f, v, i)?;
+        let m = it_callback(e, f.clone(), v, i)?;
         out.extend(e.iter_values(m)?);
     }
     Ok(iter_obj(e, out, e.protos.iter_helper))
@@ -915,7 +930,7 @@ fn it_for_each(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let f = arg(args, 0);
     let vals = it_pull_all(e, this)?;
     for (i, v) in vals.into_iter().enumerate() {
-        it_callback(e, f, v, i)?;
+        it_callback(e, f.clone(), v, i)?;
     }
     Ok(Value::Undefined)
 }
@@ -932,7 +947,7 @@ fn it_reduce(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
         v => v,
     };
     for (i, v) in it {
-        acc = e.call_value(f, Value::Undefined, &[acc, v, Value::Num(i as f64)])?;
+        acc = e.call_value(f.clone(), Value::Undefined, &[acc, v, Value::Num(i as f64)])?;
     }
     Ok(acc)
 }
@@ -940,7 +955,7 @@ fn it_reduce(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
 fn it_some(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let f = arg(args, 0);
     for (i, v) in it_pull_all(e, this)?.into_iter().enumerate() {
-        let k = it_callback(e, f, v, i)?;
+        let k = it_callback(e, f.clone(), v, i)?;
         if e.to_boolean(k) {
             return Ok(Value::Bool(true));
         }
@@ -951,7 +966,7 @@ fn it_some(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
 fn it_every(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let f = arg(args, 0);
     for (i, v) in it_pull_all(e, this)?.into_iter().enumerate() {
-        let k = it_callback(e, f, v, i)?;
+        let k = it_callback(e, f.clone(), v, i)?;
         if !e.to_boolean(k) {
             return Ok(Value::Bool(false));
         }
@@ -962,7 +977,7 @@ fn it_every(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
 fn it_find(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let f = arg(args, 0);
     for (i, v) in it_pull_all(e, this)?.into_iter().enumerate() {
-        let k = it_callback(e, f, v, i)?;
+        let k = it_callback(e, f.clone(), v.clone(), i)?;
         if e.to_boolean(k) {
             return Ok(v);
         }

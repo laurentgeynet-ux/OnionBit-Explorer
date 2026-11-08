@@ -999,7 +999,7 @@ pub(crate) struct GExec {
 
 /// `args[i]` ou `Undefined` — convention natives.
 fn arg(args: &[Value], i: usize) -> Value {
-    args.get(i).copied().unwrap_or(Value::Undefined)
+    args.get(i).cloned().unwrap_or(Value::Undefined)
 }
 
 /// `{value, done}` résultat d'itération.
@@ -1073,7 +1073,7 @@ impl GExec {
     /// forcée, `finally` simplifiée).
     pub(crate) fn ret_at(&mut self, e: &mut Engine, v: Value) -> JsResult<Value> {
         self.done = true;
-        self.ret = v;
+        self.ret = v.clone();
         Ok(iter_result(e, v, true))
     }
 
@@ -1114,12 +1114,12 @@ impl GExec {
             // suivant (`Expr(__gN)` lifté) tournerait pendant
             // que `into` n'est pas encore livré.
             if self.pending.is_some() && self.drain_step(e)? {
-                return Ok(iter_result(e, self.emit, false));
+                return Ok(iter_result(e, self.emit.clone(), false));
             }
             let Some(f) = self.stack.last() else {
                 self.done = true;
-                self.settle_outer(e, Ok(self.ret));
-                return Ok(iter_result(e, self.ret, true));
+                self.settle_outer(e, Ok(self.ret.clone()));
+                return Ok(iter_result(e, self.ret.clone(), true));
             };
             if f.pc >= f.list.len() {
                 self.leave_frame(e)?;
@@ -1150,18 +1150,18 @@ impl GExec {
                 }
                 Ok(GFlow::Susp) => {}
                 Ok(GFlow::Ret(v)) => {
-                    self.ret = v;
+                    self.ret = v.clone();
                     self.stack.clear();
                     self.done = true;
                     self.settle_outer(e, Ok(v));
-                    return Ok(iter_result(e, self.ret, true));
+                    return Ok(iter_result(e, self.ret.clone(), true));
                 }
                 Ok(GFlow::Brk(l)) => self.do_break(e, l.as_ref())?,
                 Ok(GFlow::Cont(l)) => self.do_cont(e, l.as_ref())?,
                 Err(Thrown(v)) => self.throw_into(e, v)?,
             }
             if self.pending.is_some() && self.drain_step(e)? {
-                return Ok(iter_result(e, self.emit, false));
+                return Ok(iter_result(e, self.emit.clone(), false));
             }
         }
     }
@@ -1184,7 +1184,7 @@ impl GExec {
                     }
                     return Ok(false);
                 }
-                self.emit = items[idx];
+                self.emit = items[idx].clone();
                 self.pending = Some(Pending::Drain {
                     items,
                     idx: idx + 1,
@@ -1319,9 +1319,9 @@ impl GExec {
             let Some(f) = self.stack.pop() else {
                 self.done = true;
                 if std::env::var("DBG_DRIVE").is_ok() {
-                    eprintln!("[uncaught] v={:?}", e.describe(v));
+                    eprintln!("[uncaught] v={:?}", e.describe(v.clone()));
                 }
-                self.settle_outer(e, Err(v));
+                self.settle_outer(e, Err(v.clone()));
                 return Err(Thrown(v));
             };
             match f.kind {
@@ -1330,7 +1330,13 @@ impl GExec {
                     finally,
                 } => {
                     let cenv = Env::local(f.env.clone());
-                    e.bind_pat(&cenv, self.this, &pat, v, BindMode::Lex { mutable: true })?;
+                    e.bind_pat(
+                        &cenv,
+                        self.this.clone(),
+                        &pat,
+                        v,
+                        BindMode::Lex { mutable: true },
+                    )?;
                     if let Some(fin) = finally {
                         self.stack.push(GFrame {
                             list: Rc::new(fin),
@@ -1406,7 +1412,7 @@ impl GExec {
             }
             FKind::While { cond } => {
                 let (env, cond) = (f.env.clone(), cond.clone());
-                let c = e.eval_expr(&env, self.this, &cond)?;
+                let c = e.eval_expr(&env, self.this.clone(), &cond)?;
                 if e.to_boolean(c) {
                     self.stack.last_mut().unwrap().pc = 0;
                 } else {
@@ -1416,11 +1422,11 @@ impl GExec {
             FKind::For { test, update } => {
                 let (env, test, update) = (f.env.clone(), test.clone(), update.clone());
                 if let Some(u) = &update {
-                    e.eval_expr(&env, self.this, u)?;
+                    e.eval_expr(&env, self.this.clone(), u)?;
                 }
                 let cont = match &test {
                     Some(t) => {
-                        let c = e.eval_expr(&env, self.this, t)?;
+                        let c = e.eval_expr(&env, self.this.clone(), t)?;
                         e.to_boolean(c)
                     }
                     None => true,
@@ -1438,7 +1444,7 @@ impl GExec {
                     self.stack.pop();
                     return Ok(());
                 }
-                let v = items[idx];
+                let v = items[idx].clone();
                 if let Err(Thrown(v)) = self.bind_for_target(e, &env, &target, v) {
                     return self.throw_into(e, v);
                 }
@@ -1459,8 +1465,13 @@ impl GExec {
                 target,
                 issued,
             } => {
-                let (env, it, next, target, issued) =
-                    (f.env.clone(), *iter, *next, target.clone(), *issued);
+                let (env, it, next, target, issued) = (
+                    f.env.clone(),
+                    iter.clone(),
+                    next.clone(),
+                    target.clone(),
+                    *issued,
+                );
                 if !issued {
                     let r = match e.call_value(next, it, &[]) {
                         Ok(v) => v,
@@ -1532,8 +1543,8 @@ impl GExec {
         env: &EnvRef,
         into: Option<Rc<str>>,
     ) -> JsResult<GFlow> {
-        let mut awaited = v;
-        if matches!(v, Value::Obj(_)) && !e.is_promise(v) {
+        let mut awaited = v.clone();
+        if matches!(v, Value::Obj(_)) && !e.is_promise(v.clone()) {
             // Thenable étranger (polyfill `Promise` des bundles,
             // jQuery Deferred, `IDBRequest` pont-thenable —
             // JS-C278, mur §B-14) : spec `await v` =
@@ -1543,14 +1554,14 @@ impl GExec {
             // (getter `then` abrupt → jeté au site ci-dessous) ;
             // non-thenable → fulfill direct avec `v`.
             let wrapper = e.new_promise();
-            if !e.adopt_thenable(wrapper, v) {
-                e.settle_promise(wrapper, crate::promise::PromiseState::Fulfilled, v);
+            if !e.adopt_thenable(wrapper, v.clone()) {
+                e.settle_promise(wrapper, crate::promise::PromiseState::Fulfilled, v.clone());
             }
             awaited = Value::Obj(wrapper);
         }
         if let Value::Obj(pid) = awaited {
             let st = e.heap.obj(pid).and_then(|o| match &o.kind {
-                ObjKind::Promise(p) => Some((p.state, p.result)),
+                ObjKind::Promise(p) => Some((p.state, p.result.clone())),
                 _ => None,
             });
             if let Some((state, result)) = st {
@@ -1559,9 +1570,9 @@ impl GExec {
                         // Réactions boundées `[gen_obj, outer]`
                         // — `BoundNative` prépose bound aux args
                         // → `async_resume_ok(gen, outer, v)`.
-                        let gen = self.gen_obj;
+                        let gen = self.gen_obj.clone();
                         let next = e.new_promise();
-                        let ok_f = bound_resume(e, gen, self.outer, true);
+                        let ok_f = bound_resume(e, gen.clone(), self.outer, true);
                         let err_f = bound_resume(e, gen, self.outer, false);
                         if let Some(o) = e.heap.obj_mut(pid) {
                             if let ObjKind::Promise(p) = &mut o.kind {
@@ -1605,7 +1616,7 @@ impl GExec {
         env: &EnvRef,
         into: Option<Rc<str>>,
     ) -> JsResult<GFlow> {
-        let v = e.eval_expr(env, self.this, a)?;
+        let v = e.eval_expr(env, self.this.clone(), a)?;
         self.arm_await(e, v, env, into)
     }
 
@@ -1619,10 +1630,10 @@ impl GExec {
     ) -> JsResult<()> {
         match t {
             ForTarget::Var(p) | ForTarget::Lexical { pat: p, .. } => {
-                e.bind_pat(env, self.this, p, v, BindMode::Var)
+                e.bind_pat(env, self.this.clone(), p, v, BindMode::Var)
             }
             ForTarget::Expr(x) => {
-                if let Some(lv) = e.resolve_lvalue(env, self.this, x)? {
+                if let Some(lv) = e.resolve_lvalue(env, self.this.clone(), x)? {
                     e.store_lvalue(env, lv, v)?;
                 }
                 Ok(())
@@ -1649,7 +1660,7 @@ impl GExec {
         // `exec_stmt` direct (le chemin amont, testé) ; la
         // pile de frames ne sert qu'à porter les suspensions.
         if !stmt_has_suspend(s) && !matches!(s, Stmt::Expr(Expr::Yield { .. })) {
-            return match e.exec_stmt(env, self.this, s)? {
+            return match e.exec_stmt(env, self.this.clone(), s)? {
                 Flow::Normal => Ok(GFlow::Adv),
                 Flow::Return(v) => Ok(GFlow::Ret(v)),
                 Flow::Break(l) => Ok(GFlow::Brk(l)),
@@ -1662,7 +1673,7 @@ impl GExec {
             // `yield e;` (statement nu — binding ignoré).
             Stmt::Expr(Expr::Yield { arg, delegate }) => {
                 let v = match arg {
-                    Some(a) => e.eval_expr(env, self.this, a)?,
+                    Some(a) => e.eval_expr(env, self.this.clone(), a)?,
                     None => Value::Undefined,
                 };
                 if *delegate {
@@ -1692,7 +1703,7 @@ impl GExec {
                         }
                         Some(Expr::Yield { arg, delegate }) => {
                             let v = match arg {
-                                Some(a) => e.eval_expr(env, self.this, a)?,
+                                Some(a) => e.eval_expr(env, self.this.clone(), a)?,
                                 None => Value::Undefined,
                             };
                             let name = match &d.pat {
@@ -1715,7 +1726,7 @@ impl GExec {
                         _ => {
                             // init plain (déjà lifté) —
                             // binding par exec_stmt habituel.
-                            e.exec_stmt(env, self.this, &Stmt::Var(vec![d.clone()]))?;
+                            e.exec_stmt(env, self.this.clone(), &Stmt::Var(vec![d.clone()]))?;
                         }
                     }
                 }
@@ -1724,14 +1735,14 @@ impl GExec {
             // `return e` — fin du corps.
             Stmt::Return(x) => {
                 let v = match x {
-                    Some(e2) => e.eval_expr(env, self.this, e2)?,
+                    Some(e2) => e.eval_expr(env, self.this.clone(), e2)?,
                     None => Value::Undefined,
                 };
                 Ok(GFlow::Ret(v))
             }
             // Composés porteurs de suspensions → frames.
             Stmt::If { cond, then, else_ } => {
-                let c = e.eval_expr(env, self.this, cond)?;
+                let c = e.eval_expr(env, self.this.clone(), cond)?;
                 let branch = if e.to_boolean(c) {
                     Some(&**then)
                 } else {
@@ -1759,7 +1770,7 @@ impl GExec {
                 Ok(GFlow::Adv)
             }
             Stmt::While { cond, body } => {
-                let c = e.eval_expr(env, self.this, cond)?;
+                let c = e.eval_expr(env, self.this.clone(), cond)?;
                 if e.to_boolean(c) {
                     self.stack.push(GFrame {
                         list: Rc::new(Self::body_list(body)),
@@ -1796,11 +1807,11 @@ impl GExec {
                             constant: *constant,
                         },
                     };
-                    e.exec_stmt(env, self.this, &st)?;
+                    e.exec_stmt(env, self.this.clone(), &st)?;
                 }
                 let cont = match test {
                     Some(t) => {
-                        let c = e.eval_expr(env, self.this, t)?;
+                        let c = e.eval_expr(env, self.this.clone(), t)?;
                         e.to_boolean(c)
                     }
                     None => true,
@@ -1825,7 +1836,7 @@ impl GExec {
                 body,
                 is_await,
             } => {
-                let v = e.eval_expr(env, self.this, iter)?;
+                let v = e.eval_expr(env, self.this.clone(), iter)?;
                 // `for await` — itérateur async, suspension par
                 // pas : le frame part « consommé » (`pc` en fin
                 // de liste), `leave_frame` émet le premier
@@ -1851,7 +1862,7 @@ impl GExec {
                 if items.is_empty() {
                     return Ok(GFlow::Adv);
                 }
-                self.bind_for_target(e, env, target, items[0])?;
+                self.bind_for_target(e, env, target, items[0].clone())?;
                 let benv = Env::local(env.clone());
                 self.stack.push(GFrame {
                     list: Rc::new(Self::body_list(body)),
@@ -1872,7 +1883,7 @@ impl GExec {
                 body,
                 ..
             } => {
-                let v = e.eval_expr(env, self.this, iter)?;
+                let v = e.eval_expr(env, self.this.clone(), iter)?;
                 let items = match v {
                     Value::Obj(id) => e.enum_keys(id)?.into_iter().map(|k| e.str_val(k)).collect(),
                     _ => Vec::new(),
@@ -1880,7 +1891,7 @@ impl GExec {
                 if items.is_empty() {
                     return Ok(GFlow::Adv);
                 }
-                self.bind_for_target(e, env, target, items[0])?;
+                self.bind_for_target(e, env, target, items[0].clone())?;
                 let benv = Env::local(env.clone());
                 self.stack.push(GFrame {
                     list: Rc::new(Self::body_list(body)),
@@ -1929,14 +1940,14 @@ impl GExec {
             // fallthrough = liste plate, `break` s'arrête au
             // frame `Switch` (`do_break`).
             Stmt::Switch { disc, cases } => {
-                let dv = e.eval_expr(env, self.this, disc)?;
+                let dv = e.eval_expr(env, self.this.clone(), disc)?;
                 let mut start = None;
                 let mut default = None;
                 for (i, c) in cases.iter().enumerate() {
                     match &c.test {
                         Some(t) => {
-                            let tv = e.eval_expr(env, self.this, t)?;
-                            if start.is_none() && e.strict_eq(dv, tv) {
+                            let tv = e.eval_expr(env, self.this.clone(), t)?;
+                            if start.is_none() && e.strict_eq(&dv, &tv) {
                                 start = Some(i);
                             }
                         }
@@ -1969,7 +1980,7 @@ impl GExec {
             Stmt::Break(l) => Ok(GFlow::Brk(l.clone())),
             Stmt::Continue(l) => Ok(GFlow::Cont(l.clone())),
             // Le reste : non-suspendu post-lowering — `exec_stmt`.
-            other => match e.exec_stmt(env, self.this, other)? {
+            other => match e.exec_stmt(env, self.this.clone(), other)? {
                 Flow::Normal => Ok(GFlow::Adv),
                 Flow::Return(v) => Ok(GFlow::Ret(v)),
                 Flow::Break(l) => Ok(GFlow::Brk(l)),
@@ -2045,11 +2056,11 @@ fn async_iterator(e: &mut Engine, v: Value) -> JsResult<(Value, Value)> {
             crate::interp::SYM_ITERATOR,
         ] {
             if let Some(m) = e.get_prop(id, sym) {
-                if e.is_callable(m) {
+                if e.is_callable(m.clone()) {
                     let it = e.call_value(m, v, &[])?;
                     if let Value::Obj(iid) = it {
                         if let Some(next) = e.get_prop(iid, "next") {
-                            if e.is_callable(next) {
+                            if e.is_callable(next.clone()) {
                                 return Ok((it, next));
                             }
                         }
@@ -2079,7 +2090,7 @@ pub(crate) fn gen_lazy_obj(e: &mut Engine, env: EnvRef, this: Value, body: Rc<Ve
     let v = Value::Obj(id);
     if let Some(o) = e.heap.obj(id) {
         if let ObjKind::GenLive { exec } = &o.kind {
-            exec.borrow_mut().gen_obj = v;
+            exec.borrow_mut().gen_obj = v.clone();
         }
     }
     v

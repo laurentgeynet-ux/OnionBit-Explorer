@@ -176,9 +176,7 @@ impl Engine {
             .unwrap_or_default();
         for (key, val) in pairs {
             let Value::Str(id) = val else { continue };
-            let Some(target) = self.heap.string(id) else {
-                continue;
-            };
+            let target = id.to_string();
             if self.import_map.iter().all(|(k, _)| *k != key) {
                 self.import_map.push((key, target));
             }
@@ -1015,7 +1013,7 @@ fn ns_get(e: &mut Engine, _this: Value, args: &[Value]) -> JsResult<Value> {
         return Ok(Value::Undefined);
     };
     let Some(name) = args.get(1).and_then(|v| match v {
-        Value::Str(id) => e.heap.string(*id),
+        Value::Str(id) => Some(id.to_string()),
         _ => None,
     }) else {
         return Ok(Value::Undefined);

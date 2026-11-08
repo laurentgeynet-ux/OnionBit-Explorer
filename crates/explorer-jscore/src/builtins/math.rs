@@ -40,7 +40,7 @@ pub(crate) fn math_round(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<
 pub(crate) fn math_max(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     let mut m = f64::NEG_INFINITY;
     for a in args {
-        let n = e.to_number(*a)?;
+        let n = e.to_number(a.clone())?;
         if n.is_nan() {
             return Ok(Value::Num(f64::NAN));
         }
@@ -56,7 +56,7 @@ pub(crate) fn math_max(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Va
 pub(crate) fn math_min(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     let mut m = f64::INFINITY;
     for a in args {
-        let n = e.to_number(*a)?;
+        let n = e.to_number(a.clone())?;
         if n.is_nan() {
             return Ok(Value::Num(f64::NAN));
         }

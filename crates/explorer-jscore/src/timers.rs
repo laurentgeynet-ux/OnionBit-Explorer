@@ -84,8 +84,8 @@ impl TimerQueue {
     /// racines GC (un callback planifié garde ses captures vivantes).
     pub(crate) fn roots(&self, out: &mut Vec<Value>) {
         for t in &self.timers {
-            out.push(t.cb);
-            out.extend(t.cb_args.iter().copied());
+            out.push(t.cb.clone());
+            out.extend(t.cb_args.iter().cloned());
         }
     }
 
@@ -246,7 +246,7 @@ impl Engine {
             // chaque timer tiré s'identifie — un callback en
             // boucle infinie se dénonce en spammant le log.
             if std::env::var_os("EXPLORER_JOB_TRACE").is_some() {
-                let desc = self.describe(t.cb);
+                let desc = self.describe(t.cb.clone());
                 eprintln!(
                     "[job-trace] timer id={} interval={:?} cb={}",
                     t.id, t.interval_ms, desc
@@ -259,7 +259,7 @@ impl Engine {
                     "job: timer id={} interval={:?} cb={}",
                     t.id,
                     t.interval_ms,
-                    self.job_cb_desc(t.cb)
+                    self.job_cb_desc(t.cb.clone())
                 );
             }
             // Isolation par callback (J8) : un timer qui jette est
@@ -267,13 +267,13 @@ impl Engine {
             // leur tour — spec : l'exception ne bloque pas la file.
             // Les morts de budget (deadline, ops) restent fatales
             // au batch, pas isolables.
-            let fire = if self.is_callable(t.cb) {
+            let fire = if self.is_callable(t.cb.clone()) {
                 let args = t.cb_args.clone();
-                self.call_value(t.cb, Value::Obj(self.global), &args)
-            } else if let Value::Str(sid) = t.cb {
+                self.call_value(t.cb.clone(), Value::Obj(self.global), &args)
+            } else if let Value::Str(sid) = &t.cb {
                 // Legacy string form — parsed & run in global scope
                 // at fire time, not at schedule time.
-                let src = self.heap.string(sid).unwrap_or_default();
+                let src = sid.to_string();
                 self.eval_source(&src).map(|_| Value::Undefined)
             } else {
                 Ok(Value::Undefined)
@@ -359,7 +359,7 @@ impl Engine {
 /// `setTimeout(fn, ms)` → timer id.
 fn timer_set_timeout(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     let cb = arg(args, 0);
-    let ms = delay_ms(e, args.get(1).copied())?;
+    let ms = delay_ms(e, args.get(1).cloned())?;
     let cb_args = args.get(2..).unwrap_or(&[]).to_vec();
     e.sched_tick("post.timer");
     let id = e.timers.schedule(cb, ms, false, cb_args);
@@ -369,7 +369,7 @@ fn timer_set_timeout(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Valu
 /// `setInterval(fn, ms, ...args)` → timer id.
 fn timer_set_interval(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     let cb = arg(args, 0);
-    let ms = delay_ms(e, args.get(1).copied())?;
+    let ms = delay_ms(e, args.get(1).cloned())?;
     let cb_args = args.get(2..).unwrap_or(&[]).to_vec();
     e.sched_tick("post.timer");
     let id = e.timers.schedule(cb, ms, true, cb_args);
@@ -404,7 +404,7 @@ fn timer_raf_cancel(e: &mut Engine, t: Value, args: &[Value]) -> JsResult<Value>
 /// l'échéance). `cancelIdleCallback(id)` ≙ `clearTimeout`.
 fn timer_ric(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     let cb = arg(args, 0);
-    if !e.is_callable(cb) {
+    if !e.is_callable(cb.clone()) {
         return Err(e.type_error("requestIdleCallback: callback is not a function"));
     }
     let opts = arg(args, 1);
@@ -459,7 +459,7 @@ fn timer_clear(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
 }
 
 fn arg(args: &[Value], i: usize) -> Value {
-    args.get(i).copied().unwrap_or(Value::Undefined)
+    args.get(i).cloned().unwrap_or(Value::Undefined)
 }
 
 /// Delay arg → ms (default 0, negative clamps — browsers clamp at

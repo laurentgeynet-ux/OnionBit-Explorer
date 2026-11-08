@@ -373,9 +373,9 @@ fn key_algo(e: &mut Engine, v: Value) -> JsResult<Option<(KeyAlgo, &'static str)
     let name = match v {
         Value::Obj(id) => match e.get_prop(id, "name") {
             Some(n) => e.to_js_string(n)?,
-            None => e.to_js_string(v)?,
+            None => e.to_js_string(v.clone())?,
         },
-        _ => e.to_js_string(v)?,
+        _ => e.to_js_string(v.clone())?,
     };
     // `-` et `_` ignorés (`RSASSA-PKCS1-v1_5` → `RSASSAPKCS1V15`).
     Ok(
@@ -392,7 +392,8 @@ fn key_algo(e: &mut Engine, v: Value) -> JsResult<Option<(KeyAlgo, &'static str)
             "ECDSA" => {
                 let curve_ok = if let Value::Obj(id) = v {
                     e.get_prop(id, "namedCurve")
-                        .and_then(|c| e.heap_string_of(c))
+                        .as_ref()
+                        .and_then(Engine::heap_string_of)
                         .is_some_and(|c| c.eq_ignore_ascii_case("P-256"))
                 } else {
                     false
@@ -579,7 +580,8 @@ fn crypto_arg_desc(e: &mut Engine, v: Value) -> String {
             let desc = e
                 .get_prop(id, "constructor")
                 .and_then(|c| e.get_prop_value(c, "name").ok())
-                .and_then(|n| e.heap_string_of(n))
+                .as_ref()
+                .and_then(Engine::heap_string_of)
                 .filter(|n| !n.is_empty())
                 .unwrap_or_else(|| "Object".to_string());
             if desc != "Object" {
@@ -587,7 +589,8 @@ fn crypto_arg_desc(e: &mut Engine, v: Value) -> String {
             }
             if let Some(t) = e
                 .get_prop(id, crate::interp::SYM_TO_STRING_TAG)
-                .and_then(|t| e.heap_string_of(t))
+                .as_ref()
+                .and_then(Engine::heap_string_of)
                 .filter(|t| !t.is_empty())
             {
                 return format!("Object@@{t}");
@@ -666,7 +669,7 @@ fn subtle_import_key(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Valu
     let extractable = e.to_boolean(arg(args, 3));
     let usages = key_usages(e, arg(args, 4))?;
     let pid = e.new_promise();
-    match key_algo(e, algo_v)? {
+    match key_algo(e, algo_v.clone())? {
         None => {
             // Nom reçu dans le message (même rail que JS-C228)
             // — un `unknown algorithm` sans le nom demandé ne
@@ -756,7 +759,8 @@ fn subtle_sign(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
         return Err(e.type_error("subtle.sign: data must be a BufferSource"));
     };
     let pid = e.new_promise();
-    let Some((key_bytes, key_type, algo_name, key_algo, usages, _)) = crypto_key_of(e, key_v)
+    let Some((key_bytes, key_type, algo_name, key_algo, usages, _)) =
+        crypto_key_of(e, key_v.clone())
     else {
         let desc = crypto_arg_desc(e, key_v);
         let err = dom_exc(
@@ -816,7 +820,8 @@ fn subtle_verify(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
         return Err(e.type_error("subtle.verify: data must be a BufferSource"));
     };
     let pid = e.new_promise();
-    let Some((key_bytes, key_type, algo_name, key_algo, usages, _)) = crypto_key_of(e, key_v)
+    let Some((key_bytes, key_type, algo_name, key_algo, usages, _)) =
+        crypto_key_of(e, key_v.clone())
     else {
         let desc = crypto_arg_desc(e, key_v);
         let err = dom_exc(
@@ -941,7 +946,7 @@ impl Engine {
                         usages,
                         extractable,
                     }));
-                    if let (Some(p), Value::Obj(id)) = (self.crypto.ck_proto, ck) {
+                    if let (Some(p), Value::Obj(id)) = (self.crypto.ck_proto, ck.clone()) {
                         if let Some(o) = self.heap.obj_mut(id) {
                             o.proto = Value::Obj(p);
                         }
@@ -1008,9 +1013,10 @@ fn subtle_aead(
     let pid = e.new_promise();
     // `algorithm` doit être un objet `AES-GCM` — la clé
     // confirme `name` et porte l'usage.
-    let name_ok = algo_name_of(e, algo_v)?
+    let name_ok = algo_name_of(e, algo_v.clone())?
         .is_some_and(|n| n.to_ascii_uppercase().replace('-', "") == "AESGCM");
-    let Some((key_bytes, key_type, _an, key_algo, usages, _)) = crypto_key_of(e, key_v) else {
+    let Some((key_bytes, key_type, _an, key_algo, usages, _)) = crypto_key_of(e, key_v.clone())
+    else {
         let desc = crypto_arg_desc(e, key_v);
         let err = dom_exc(
             e,
@@ -1076,7 +1082,8 @@ fn subtle_rsa_oaep(
         return Err(e.type_error("subtle: data must be a BufferSource"));
     };
     let pid = e.new_promise();
-    let Some((key_bytes, key_type, _an, key_algo, usages, _)) = crypto_key_of(e, key_v) else {
+    let Some((key_bytes, key_type, _an, key_algo, usages, _)) = crypto_key_of(e, key_v.clone())
+    else {
         let desc = crypto_arg_desc(e, key_v);
         let err = dom_exc(
             e,

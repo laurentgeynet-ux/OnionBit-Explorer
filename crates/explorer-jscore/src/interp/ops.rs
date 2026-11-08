@@ -6,7 +6,7 @@
 use super::*;
 use crate::ast::{AssignOp, Expr, ObjProp, Pat};
 use crate::heap::{Heap, ObjKind};
-use crate::value::Value;
+use crate::value::{JsStr, Value};
 
 /// `bigint == number` — égalité mathématique (spec `IsLooselyEqual`
 /// étape : le `number` doit être fini et entier).
@@ -48,23 +48,21 @@ pub(crate) fn big_cmp_num(b: &num_bigint::BigInt, n: f64) -> Option<std::cmp::Or
 }
 
 /// `===` (no user code runs).
-pub(crate) fn strict_eq(l: Value, r: Value, heap: &Heap) -> bool {
+pub(crate) fn strict_eq(l: &Value, r: &Value, heap: &Heap) -> bool {
     let (l, r) = (l.unhole(), r.unhole());
-    match (l, r) {
+    match (&l, &r) {
         (Value::Num(a), Value::Num(b)) => a == b, // NaN != NaN via f64 ==
         (Value::Str(a), Value::Str(b)) => {
-            if a == b {
-                true
-            } else {
-                heap.str_eq(a, b)
-            }
+            // `JsStr` : égalité de contenu — fast-path même
+            // boîte `Rc` d'abord (cache `num_strs`, aliasing).
+            JsStr::ptr_eq(a, b) || a == b
         }
         (Value::Big(a), Value::Big(b)) => {
             if a == b {
                 true
             } else {
                 matches!(
-                    (heap.obj(a).map(|o| &o.kind), heap.obj(b).map(|o| &o.kind)),
+                    (heap.obj(*a).map(|o| &o.kind), heap.obj(*b).map(|o| &o.kind)),
                     (Some(ObjKind::BigInt(x)), Some(ObjKind::BigInt(y))) if x == y
                 )
             }

@@ -13,6 +13,10 @@
 //! (pile d'appel non racine — JS-C206), le cap tue l'eval
 //! avant la fin du challenge → SERP bloquée.
 //!
+//! JS-C420 : la moitié `Str` du churn meurt désormais au
+//! refcount (hors arène) — le census dur ne nomme plus que
+//! les kinds encore cellulaires, `Array` en tête.
+//!
 //! Ici : la même signature en 20 lignes — `for` qui alloue
 //! `[i]` + `String(i)` par tour, `mem_limit` réduit pour un
 //! verdict rapide. `cargo test --test b110_probe`.
@@ -33,9 +37,10 @@ fn array_str_churn_hits_deferred_gc_cap() {
         "le churn doit tomber sous le cap dur GC différée : {msg}"
     );
     // La forme morte nomme ses kinds (top-kinds §B-110) —
-    // Array puis Str doivent dominer le message.
+    // `Array` domine ; `Str` n'est plus un kind de cellule
+    // depuis JS-C420 (les temporaries meurent au refcount).
     assert!(
-        msg.contains("Array:") && msg.contains("Str:"),
+        msg.contains("Array:") && !msg.contains("Str:"),
         "le message doit nommer les kinds dominants : {msg}"
     );
 }

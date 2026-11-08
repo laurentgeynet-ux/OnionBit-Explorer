@@ -84,12 +84,13 @@ pub(crate) fn is_blob(e: &Engine, v: Value) -> bool {
 /// `name`), `None` pour un `Blob` nu (spec : `append(fd)`
 /// nomme `File`, `Blob` → `"blob"` par défaut).
 pub(crate) fn file_name_of(e: &mut Engine, v: Value) -> Option<String> {
-    if !is_blob(e, v) {
+    if !is_blob(e, v.clone()) {
         return None;
     }
     let Value::Obj(id) = v else { return None };
     e.get_prop(id, "name")
-        .and_then(|n| e.heap_string_of(n))
+        .as_ref()
+        .and_then(Engine::heap_string_of)
         .filter(|n| !n.is_empty())
 }
 
@@ -163,9 +164,9 @@ fn blob_parts_bytes(e: &mut Engine, parts: Value) -> JsResult<Vec<u8>> {
         return Ok(out);
     }
     for v in e.iter_values(parts)? {
-        if let Some((data, _)) = blob_parts(e, v) {
+        if let Some((data, _)) = blob_parts(e, v.clone()) {
             out.extend_from_slice(&data);
-        } else if let Some(bytes) = crate::typed_array::bytes_of_value(e, v) {
+        } else if let Some(bytes) = crate::typed_array::bytes_of_value(e, v.clone()) {
             out.extend_from_slice(&bytes);
         } else {
             let s = e.to_js_string(v)?;
@@ -219,7 +220,7 @@ fn file_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
         return Err(e.type_error("File: 2 arguments required"));
     }
     let opts = arg(args, 2);
-    let ty = blob_norm_type(e, opts)?;
+    let ty = blob_norm_type(e, opts.clone())?;
     let name = e.to_js_string(arg(args, 1))?;
     let lm = match opts {
         Value::Obj(o) => match e.get_prop(o, "lastModified") {
@@ -496,7 +497,7 @@ impl Engine {
             crate::dom_host::event_proto(self, o, "ProgressEvent");
             let t = self.str_val(ty);
             self.set_own(o, "type", t, true);
-            self.set_own(o, "target", this, true);
+            self.set_own(o, "target", this.clone(), true);
             self.set_own(o, "lengthComputable", Value::Bool(true), true);
             self.set_own(o, "loaded", Value::Num(loaded), true);
             self.set_own(o, "total", Value::Num(total), true);
@@ -504,8 +505,8 @@ impl Engine {
         };
         let key = format!("on{ty}");
         if let Some(f) = self.get_prop(wrapper, &key) {
-            if self.is_callable(f) {
-                self.call_value(f, this, &[ev])?;
+            if self.is_callable(f.clone()) {
+                self.call_value(f, this.clone(), std::slice::from_ref(&ev))?;
             }
         }
         let fns: Vec<Value> = data
@@ -513,11 +514,11 @@ impl Engine {
             .listeners
             .iter()
             .filter(|(t, _, _)| t == ty)
-            .map(|(_, f, _)| *f)
+            .map(|(_, f, _)| f.clone())
             .collect();
         for f in fns {
-            if self.is_callable(f) {
-                self.call_value(f, this, &[ev])?;
+            if self.is_callable(f.clone()) {
+                self.call_value(f, this.clone(), std::slice::from_ref(&ev))?;
             }
         }
         Ok(())
@@ -537,8 +538,8 @@ impl Host for FileReaderHost {
         let d = self.data.borrow();
         Ok(Some(match key {
             "readyState" => Value::Num(f64::from(d.ready)),
-            "result" => d.result,
-            "error" => d.error,
+            "result" => d.result.clone(),
+            "error" => d.error.clone(),
             "EMPTY" => Value::Num(0.0),
             "LOADING" => Value::Num(1.0),
             "DONE" => Value::Num(2.0),
@@ -603,7 +604,7 @@ impl Host for FileReaderHost {
                 let ty = e.to_js_string(arg(args, 0))?;
                 let f = arg(args, 1);
                 let capture = e.to_boolean(arg(args, 2));
-                if e.is_callable(f) {
+                if e.is_callable(f.clone()) {
                     self.data.borrow_mut().listeners.push((ty, f, capture));
                 }
                 Ok(Some(Value::Undefined))
@@ -614,7 +615,7 @@ impl Host for FileReaderHost {
                 self.data
                     .borrow_mut()
                     .listeners
-                    .retain(|(t, g, _)| !(*t == ty && e.strict_eq(*g, f)));
+                    .retain(|(t, g, _)| !(*t == ty && e.strict_eq(g, &f)));
                 Ok(Some(Value::Undefined))
             }
             _ => Ok(None),
@@ -628,8 +629,8 @@ impl Host for FileReaderHost {
                 out.push(*id);
             }
         }
-        crate::heap::push_value(out, d.result);
-        crate::heap::push_value(out, d.error);
+        crate::heap::push_value(out, &d.result);
+        crate::heap::push_value(out, &d.error);
     }
 }
 
@@ -661,7 +662,7 @@ pub(crate) fn alloc_object_url(e: &mut Engine) -> String {
 /// (JS-C193 — octets à venir via la couture d'offre).
 pub(crate) fn url_create_object_url(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     let v = arg(args, 0);
-    if let Some(url) = crate::mse::object_url_for(e, v) {
+    if let Some(url) = crate::mse::object_url_for(e, v.clone()) {
         return Ok(e.str_val(url));
     }
     let Some((data, ty)) = blob_parts(e, v) else {
@@ -774,5 +775,5 @@ pub(crate) fn install_files(e: &mut Engine) {
 /// Argument `args[i]` — `Undefined` hors rang (helper local,
 /// même convention que `xhr::arg`).
 fn arg(args: &[Value], i: usize) -> Value {
-    args.get(i).copied().unwrap_or(Value::Undefined)
+    args.get(i).cloned().unwrap_or(Value::Undefined)
 }

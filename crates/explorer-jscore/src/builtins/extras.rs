@@ -67,8 +67,8 @@ pub(crate) fn object_from_entries(e: &mut Engine, _t: Value, args: &[Value]) -> 
             _ => Vec::new(),
         };
         if pair.len() >= 2 {
-            let k = e.prop_key(pair[0])?;
-            e.set_prop_value(Value::Obj(obj), &k, pair[1])?;
+            let k = e.prop_key(pair[0].clone())?;
+            e.set_prop_value(Value::Obj(obj), &k, pair[1].clone())?;
         }
     }
     Ok(Value::Obj(obj))
@@ -103,12 +103,12 @@ pub(crate) fn array_at(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<
     // ne laisse pas le backing vidé (JS-C319).
     with_elems(e, id, |e, elems| {
         let i = rel_index(e, arg(args, 0), elems.len())?;
-        Ok(i.map_or(Value::Undefined, |i| elems[i]).unhole())
+        Ok(i.map_or(Value::Undefined, |i| elems[i].clone()).unhole())
     })
 }
 
 pub(crate) fn array_fill(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
-    let id = this_array(e, this)?;
+    let id = this_array(e, this.clone())?;
     // `with_elems` — `rel_index` faillible + refus `frozen` :
     // le tableau reste intact quoi qu'il arrive (JS-C319).
     with_elems(e, id, |e, elems| {
@@ -125,7 +125,7 @@ pub(crate) fn array_fill(e: &mut Engine, this: Value, args: &[Value]) -> JsResul
             return Err(e.type_error("cannot fill a frozen array"));
         }
         for slot in &mut elems[start..end.min(len)] {
-            *slot = v;
+            *slot = v.clone();
         }
         Ok(this)
     })
@@ -199,12 +199,16 @@ pub(crate) fn array_flat(e: &mut Engine, this: Value, args: &[Value]) -> JsResul
 }
 
 pub(crate) fn array_flat_map(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
-    let (id, cb, this_arg) = iter_cb(e, this, args, "flatMap")?;
+    let (id, cb, this_arg) = iter_cb(e, this.clone(), args, "flatMap")?;
     let len = iter_len(e, id)?;
     let mut out = Vec::new();
     for i in 0..len {
         if let Some(v) = iter_get(e, id, i)? {
-            let r = e.call_value(cb, this_arg, &[v, Value::Num(i as f64), this])?;
+            let r = e.call_value(
+                cb.clone(),
+                this_arg.clone(),
+                &[v, Value::Num(i as f64), this.clone()],
+            )?;
             flat_into(e, r, 1, &mut out)?;
         }
         if i % 8192 == 0 {
@@ -215,11 +219,15 @@ pub(crate) fn array_flat_map(e: &mut Engine, this: Value, args: &[Value]) -> JsR
 }
 
 pub(crate) fn array_find_last(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
-    let (id, cb, this_arg) = iter_cb(e, this, args, "findLast")?;
+    let (id, cb, this_arg) = iter_cb(e, this.clone(), args, "findLast")?;
     let len = iter_len(e, id)?;
     for i in (0..len).rev() {
         if let Some(v) = iter_get(e, id, i)? {
-            let r = e.call_value(cb, this_arg, &[v, Value::Num(i as f64), this])?;
+            let r = e.call_value(
+                cb.clone(),
+                this_arg.clone(),
+                &[v.clone(), Value::Num(i as f64), this.clone()],
+            )?;
             if e.to_boolean(r) {
                 return Ok(v);
             }
@@ -236,11 +244,15 @@ pub(crate) fn array_find_last_index(
     this: Value,
     args: &[Value],
 ) -> JsResult<Value> {
-    let (id, cb, this_arg) = iter_cb(e, this, args, "findLastIndex")?;
+    let (id, cb, this_arg) = iter_cb(e, this.clone(), args, "findLastIndex")?;
     let len = iter_len(e, id)?;
     for i in (0..len).rev() {
         if let Some(v) = iter_get(e, id, i)? {
-            let r = e.call_value(cb, this_arg, &[v, Value::Num(i as f64), this])?;
+            let r = e.call_value(
+                cb.clone(),
+                this_arg.clone(),
+                &[v, Value::Num(i as f64), this.clone()],
+            )?;
             if e.to_boolean(r) {
                 return Ok(Value::Num(i as f64));
             }
@@ -259,7 +271,10 @@ pub(crate) fn array_values(e: &mut Engine, this: Value, _a: &[Value]) -> JsResul
     let elems = take_elems(e, id)?;
     put_elems(e, id, elems.clone())?;
     // L'itérateur produit `undefined` pour les trous (spec `Get`).
-    let vals: Vec<Value> = elems.iter().map(|v| v.unhole()).collect();
+    let vals: Vec<Value> = elems
+        .iter()
+        .map(super::super::value::Value::unhole)
+        .collect();
     Ok(crate::collections::iter_obj(e, vals, e.protos.array_iter))
 }
 
@@ -287,7 +302,7 @@ pub(crate) fn array_entries(e: &mut Engine, this: Value, _a: &[Value]) -> JsResu
     let id = this_array(e, this)?;
     let elems = take_elems(e, id)?;
     let mut items = Vec::with_capacity(elems.len());
-    for (i, &v) in elems.iter().enumerate() {
+    for (i, v) in elems.iter().enumerate() {
         items.push(e.new_array(vec![Value::Num(i as f64), v.unhole()]));
     }
     put_elems(e, id, elems)?;
@@ -305,7 +320,10 @@ pub(crate) fn array_with(e: &mut Engine, this: Value, args: &[Value]) -> JsResul
             Some(i) => {
                 // `with` produit un résultat dense (spec `Get` →
                 // trou relu `undefined`).
-                let mut out_v: Vec<Value> = elems.iter().map(|v| v.unhole()).collect();
+                let mut out_v: Vec<Value> = elems
+                    .iter()
+                    .map(super::super::value::Value::unhole)
+                    .collect();
                 out_v[i] = arg(args, 1);
                 Ok(Some(e.new_array(out_v)))
             }
@@ -321,7 +339,10 @@ pub(crate) fn array_with(e: &mut Engine, this: Value, args: &[Value]) -> JsResul
 pub(crate) fn array_to_reversed(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let id = this_array(e, this)?;
     let elems = take_elems(e, id)?;
-    let mut out_v: Vec<Value> = elems.iter().map(|v| v.unhole()).collect();
+    let mut out_v: Vec<Value> = elems
+        .iter()
+        .map(super::super::value::Value::unhole)
+        .collect();
     out_v.reverse();
     let out = e.new_array(out_v);
     put_elems(e, id, elems)?;
@@ -398,9 +419,17 @@ pub(crate) fn array_to_spliced(e: &mut Engine, this: Value, args: &[Value]) -> J
         let ins: &[Value] = args.get(2..).unwrap_or(&[]);
         let mut out_v = Vec::with_capacity(len - del + ins.len());
         // Résultat dense — `toSpliced` fait `Get` par slot (spec).
-        out_v.extend(elems[..start].iter().map(|v| v.unhole()));
+        out_v.extend(
+            elems[..start]
+                .iter()
+                .map(super::super::value::Value::unhole),
+        );
         out_v.extend_from_slice(ins);
-        out_v.extend(elems[start + del..].iter().map(|v| v.unhole()));
+        out_v.extend(
+            elems[start + del..]
+                .iter()
+                .map(super::super::value::Value::unhole),
+        );
         Ok(e.new_array(out_v))
     })?;
     Ok(out)
@@ -412,9 +441,14 @@ pub(crate) fn array_to_sorted(e: &mut Engine, this: Value, args: &[Value]) -> Js
     let id = this_array(e, this)?;
     let elems = take_elems(e, id)?;
     // Dense — `toSorted` relit les slots par `Get` (spec).
-    let copy = e.new_array(elems.iter().map(|v| v.unhole()).collect());
+    let copy = e.new_array(
+        elems
+            .iter()
+            .map(super::super::value::Value::unhole)
+            .collect(),
+    );
     put_elems(e, id, elems)?;
-    array_sort(e, copy, args)?;
+    array_sort(e, copy.clone(), args)?;
     Ok(copy)
 }
 
@@ -424,9 +458,9 @@ pub(crate) fn string_at(e: &mut Engine, this: Value, args: &[Value]) -> JsResult
     // §B-59 : lecture en place — `this_str` clonait la chaîne
     // entière par appel (`at`/`charAt` en boucle de décodeur).
     if let Value::Str(id) = this {
-        let len = e.heap.str_u16_len(id).unwrap_or(0);
+        let len = id.u16_len();
         return Ok(match rel_index(e, arg(args, 0), len)? {
-            Some(i) => match e.heap.str_u16_at(id, i) {
+            Some(i) => match id.u16_at(i) {
                 Some(w) => e.str_val(u16_to_string(&[w])),
                 None => Value::Undefined,
             },
@@ -487,7 +521,7 @@ pub(crate) fn string_iterator(e: &mut Engine, this: Value, _a: &[Value]) -> JsRe
 /// `matchAll(re)` — requires the `g` flag (spec `TypeError`); yields
 /// an iterator of match arrays.
 pub(crate) fn string_match_all(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
-    let s = this_str(e, this)?;
+    let s = this_str(e, this.clone())?;
     // `rx[Symbol.matchAll](this)` (spec `GetMethod`).
     if let Some(v) = sym_method(e, arg(args, 0), crate::interp::SYM_MATCH_ALL, &[this])? {
         return Ok(v);
@@ -503,8 +537,8 @@ pub(crate) fn string_from_code_point(e: &mut Engine, _t: Value, args: &[Value]) 
     // UTF-8 — refuse avant la boucle (§B-59, apply géant).
     e.alloc_guard(args.len().saturating_mul(4))?;
     let mut s = String::new();
-    for &a in args {
-        let n = e.to_number(a)?;
+    for a in args {
+        let n = e.to_number(a.clone())?;
         if !(0.0..=1_114_111.0).contains(&n) || n.fract() != 0.0 {
             return Err(e.range_error("fromCodePoint: invalid code point"));
         }
@@ -521,16 +555,16 @@ pub(crate) fn string_from_code_point(e: &mut Engine, _t: Value, args: &[Value]) 
 /// and `.length`, so array-likes work too).
 pub(crate) fn string_raw(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     let raw = e.get_prop_value(arg(args, 0), "raw")?;
-    let n = match e.get_prop_value(raw, "length")? {
+    let n = match e.get_prop_value(raw.clone(), "length")? {
         Value::Num(n) => n.max(0.0) as usize,
         _ => 0,
     };
     let mut out = String::new();
     for i in 0..n {
-        let seg = e.get_prop_value(raw, &i.to_string())?;
+        let seg = e.get_prop_value(raw.clone(), &i.to_string())?;
         out.push_str(&e.to_js_string(seg)?);
         if let Some(v) = args.get(i + 1) {
-            out.push_str(&e.to_js_string(*v)?);
+            out.push_str(&e.to_js_string(v.clone())?);
         }
     }
     Ok(e.str_val(out))
@@ -619,8 +653,8 @@ math1!(math_tanh, f64::tanh);
 
 pub(crate) fn math_hypot(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     let mut acc = 0.0_f64;
-    for &a in args {
-        let x = e.to_number(a)?;
+    for a in args {
+        let x = e.to_number(a.clone())?;
         acc = acc.hypot(x);
     }
     Ok(Value::Num(acc))

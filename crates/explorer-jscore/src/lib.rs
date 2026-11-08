@@ -40,6 +40,12 @@
 // `to_*` methods deliberately take `&mut self`: coercion can run user
 // code (valueOf/toString). The names mirror the JS spec operations.
 #![allow(clippy::wrong_self_convention)]
+// `Value` is the engine's 16-octet tagged handle (JsStr = `Rc` bump,
+// JS-C420) : `NativeFn`'s fn-pointer signature `fn(&mut Engine, Value,
+// &[Value])` mandates `this: Value` in ~150 handlers, and reader
+// helpers keep the uniform by-value idiom — an `Rc` bump is cheaper
+// than the churn of a dual `&Value`/`Value` convention.
+#![allow(clippy::needless_pass_by_value)]
 
 mod ast;
 mod builtins;
@@ -215,7 +221,7 @@ pub static CALL_N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::
 // (octets ≈ événement × taille type du site). Monotones — le banc
 // lit le delta avant/après. `Relaxed`, ~1-2 ns par bump.
 // ----------------------------------------------------------------
-/// Cellules `Str` créées (`Heap::alloc_str`) — 1 alloc buffer.
+/// Boîtes `JsStr` créées (`JsStr::new`, JS-C420) — 1 alloc `Rc`.
 pub static J17_STR_CELL: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 /// Cellules objet créées (`Heap::alloc_obj`) — +1 alloc `props`
 /// Vec par objet non vide, +1 `String` par clé (`J17_PROP_NEW`).

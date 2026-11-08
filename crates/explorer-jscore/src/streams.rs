@@ -85,7 +85,7 @@ impl StreamState {
 
 /// Argument `args[i]` — `Undefined` hors rang (helper local).
 fn arg(args: &[Value], i: usize) -> Value {
-    args.get(i).copied().unwrap_or(Value::Undefined)
+    args.get(i).cloned().unwrap_or(Value::Undefined)
 }
 
 // ------------------------------------------------------------------
@@ -212,15 +212,15 @@ fn readable_stream_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<V
         queue: VecDeque::new(),
         closed: false,
         errored: None,
-        pull: pull.filter(|&f| e.is_callable(f)),
-        cancel: cancel.filter(|&f| e.is_callable(f)),
-        source,
+        pull: pull.filter(|f| e.is_callable(f.clone())),
+        cancel: cancel.filter(|f| e.is_callable(f.clone())),
+        source: source.clone(),
         locked: false,
         pending_reads: Vec::new(),
     }));
     let rp = rs_proto(e);
     let v = rs_obj(e, &d, rp);
-    if let Some(s) = start.filter(|&f| e.is_callable(f)) {
+    if let Some(s) = start.filter(|f| e.is_callable(f.clone())) {
         let cp = rs_ctrl_proto(e);
         let ctrl = rs_obj(e, &d, cp);
         // `start` peut throw → le stream part en échec (spec :
@@ -261,7 +261,7 @@ fn drain_pending(e: &mut Engine, d: &Rc<RefCell<RsData>>) -> bool {
             if dd.pending_reads.is_empty() {
                 return false;
             }
-            if let Some(err) = dd.errored {
+            if let Some(err) = dd.errored.clone() {
                 let pid = dd.pending_reads.remove(0);
                 Some((pid, Err(err)))
             } else if let Some(v) = dd.queue.pop_front() {
@@ -283,7 +283,7 @@ fn drain_pending(e: &mut Engine, d: &Rc<RefCell<RsData>>) -> bool {
                 let r = iter_result(e, Value::Undefined, true);
                 e.resolve_promise(pid, r);
             }
-            Some((pid, Err(err))) => e.reject_promise(pid, err),
+            Some((pid, Err(err))) => e.reject_promise(pid, err.clone()),
             None => return false,
         }
     }
@@ -368,7 +368,7 @@ fn cancel_stream(e: &mut Engine, d: &Rc<RefCell<RsData>>, reason: Value) -> JsRe
         let mut dd = d.borrow_mut();
         dd.queue.clear();
         dd.closed = true;
-        (dd.cancel, dd.source)
+        (dd.cancel.clone(), dd.source.clone())
     };
     if let Some(f) = cancel {
         e.call_value(f, source, &[reason])?;
@@ -405,15 +405,15 @@ fn reader_cancel(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value>
 /// → `pull()` puis re-check ; toujours vide → promesse pendante
 /// (résolue par `enqueue`/`close`/`error` ou au checkpoint).
 fn reader_read(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
-    let Some(d) = rs_data(e, this) else {
+    let Some(d) = rs_data(e, this.clone()) else {
         return Err(e.type_error("read on incompatible receiver"));
     };
     let pid = e.new_promise();
     // État immédiat — erreur / chunk / fin.
     {
         let mut dd = d.borrow_mut();
-        if let Some(err) = dd.errored {
-            e.reject_promise(pid, err);
+        if let Some(ref err) = dd.errored {
+            e.reject_promise(pid, err.clone());
             return Ok(Value::Obj(pid));
         }
         if let Some(v) = dd.queue.pop_front() {
@@ -434,7 +434,7 @@ fn reader_read(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
     // re-tente tant que la lecture reste pendante).
     let (pull, source) = {
         let dd = d.borrow();
-        (dd.pull, dd.source)
+        (dd.pull.clone(), dd.source.clone())
     };
     if let Some(f) = pull {
         let cp = rs_ctrl_proto(e);
@@ -492,7 +492,7 @@ fn pump_pending_reads(e: &mut Engine) -> JsResult<usize> {
         }
         let (pull, source) = {
             let dd = d.borrow();
-            (dd.pull, dd.source)
+            (dd.pull.clone(), dd.source.clone())
         };
         if let Some(f) = pull {
             let cp = rs_ctrl_proto(e);
@@ -533,13 +533,13 @@ fn pipe_drain(e: &mut Engine, d: &Rc<RefCell<RsData>>, dest: Value) -> JsResult<
         return Err(e.type_error("pipeTo: destination is not a WritableStream"));
     };
     let writer = match e.get_prop(did, "getWriter") {
-        Some(g) if e.is_callable(g) => e.call_value(g, dest, &[])?,
+        Some(g) if e.is_callable(g.clone()) => e.call_value(g, dest.clone(), &[])?,
         _ => dest, // sink nu (TransformStream.writable interne)
     };
     loop {
         let next = {
             let mut dd = d.borrow_mut();
-            if let Some(err) = dd.errored {
+            if let Some(err) = dd.errored.clone() {
                 Some(Err(err))
             } else if let Some(v) = dd.queue.pop_front() {
                 Some(Ok(Some(v)))
@@ -551,26 +551,26 @@ fn pipe_drain(e: &mut Engine, d: &Rc<RefCell<RsData>>, dest: Value) -> JsResult<
         };
         match next {
             Some(Ok(Some(v))) => {
-                if let Ok(w) = e.get_prop_value(writer, "write") {
-                    if e.is_callable(w) {
-                        let r = e.call_value(w, writer, &[v])?;
+                if let Ok(w) = e.get_prop_value(writer.clone(), "write") {
+                    if e.is_callable(w.clone()) {
+                        let r = e.call_value(w, writer.clone(), &[v])?;
                         let _ = e.await_value(r)?; // promesse sink
                     }
                 }
             }
             Some(Ok(None)) => {
-                if let Ok(c) = e.get_prop_value(writer, "close") {
-                    if e.is_callable(c) {
-                        let r = e.call_value(c, writer, &[])?;
+                if let Ok(c) = e.get_prop_value(writer.clone(), "close") {
+                    if e.is_callable(c.clone()) {
+                        let r = e.call_value(c, writer.clone(), &[])?;
                         let _ = e.await_value(r)?;
                     }
                 }
                 return Ok(());
             }
             Some(Err(err)) => {
-                if let Ok(a) = e.get_prop_value(writer, "abort") {
-                    if e.is_callable(a) {
-                        let r = e.call_value(a, writer, &[err])?;
+                if let Ok(a) = e.get_prop_value(writer.clone(), "abort") {
+                    if e.is_callable(a.clone()) {
+                        let r = e.call_value(a, writer.clone(), std::slice::from_ref(&err))?;
                         let _ = e.await_value(r)?;
                     }
                 }
@@ -582,7 +582,7 @@ fn pipe_drain(e: &mut Engine, d: &Rc<RefCell<RsData>>, dest: Value) -> JsResult<
                 let cp = rs_ctrl_proto(e);
                 let (pull, source, ctrl) = {
                     let dd = d.borrow();
-                    (dd.pull, dd.source, rs_obj(e, d, cp))
+                    (dd.pull.clone(), dd.source.clone(), rs_obj(e, d, cp))
                 };
                 match pull {
                     Some(f) => {
@@ -632,7 +632,7 @@ fn rs_tee(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
     let make = |e: &mut Engine| {
         let (queue, closed, errored) = {
             let dd = d.borrow();
-            (dd.queue.clone(), dd.closed, dd.errored)
+            (dd.queue.clone(), dd.closed, dd.errored.clone())
         };
         let nd = Rc::new(RefCell::new(RsData {
             queue,
@@ -690,12 +690,15 @@ impl Host for RsHost {
     fn trace(&self, out: &mut Vec<ObjId>) {
         let d = self.d.borrow();
         for v in &d.queue {
-            crate::heap::push_value(out, *v);
-        }
-        for v in [d.pull, d.cancel, d.errored].into_iter().flatten() {
             crate::heap::push_value(out, v);
         }
-        crate::heap::push_value(out, d.source);
+        for v in [d.pull.clone(), d.cancel.clone(), d.errored.clone()]
+            .into_iter()
+            .flatten()
+        {
+            crate::heap::push_value(out, &v);
+        }
+        crate::heap::push_value(out, &d.source);
         out.extend(d.pending_reads.iter().copied());
     }
 }
@@ -802,10 +805,10 @@ fn writable_stream_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<V
         start = e.get_prop(sid, "start");
     }
     let d = Rc::new(RefCell::new(WsData {
-        write: write.filter(|&f| e.is_callable(f)),
-        close: close.filter(|&f| e.is_callable(f)),
-        abort: abort.filter(|&f| e.is_callable(f)),
-        sink,
+        write: write.filter(|f| e.is_callable(f.clone())),
+        close: close.filter(|f| e.is_callable(f.clone())),
+        abort: abort.filter(|f| e.is_callable(f.clone())),
+        sink: sink.clone(),
         locked: false,
         done: false,
         errored: None,
@@ -813,7 +816,7 @@ fn writable_stream_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<V
     }));
     let wp = ws_proto(e);
     let v = ws_obj(e, &d, wp);
-    if let Some(s) = start.filter(|&f| e.is_callable(f)) {
+    if let Some(s) = start.filter(|f| e.is_callable(f.clone())) {
         let cp = ws_ctrl_proto(e);
         let ctrl = ws_obj(e, &d, cp);
         if let Err(err) = e.call_value(s, sink, &[ctrl]) {
@@ -853,11 +856,11 @@ fn ws_get_writer(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
 /// `await_value`).
 fn settle_from(e: &mut Engine, pid: ObjId, r: &JsResult<Value>) {
     match r {
-        Ok(v) => match e.await_value(*v) {
+        Ok(v) => match e.await_value(v.clone()) {
             Ok(_) => e.resolve_promise(pid, Value::Undefined),
             Err(crate::heap::Thrown(err)) => e.reject_promise(pid, err),
         },
-        Err(crate::heap::Thrown(err)) => e.reject_promise(pid, *err),
+        Err(crate::heap::Thrown(err)) => e.reject_promise(pid, err.clone()),
     }
 }
 
@@ -869,7 +872,12 @@ fn writer_write(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> 
     let pid = e.new_promise();
     let (write, sink, err, done) = {
         let dd = d.borrow();
-        (dd.write, dd.sink, dd.errored, dd.done)
+        (
+            dd.write.clone(),
+            dd.sink.clone(),
+            dd.errored.clone(),
+            dd.done,
+        )
     };
     if let Some(err) = err {
         e.reject_promise(pid, err);
@@ -901,7 +909,7 @@ fn writer_close(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
     let (close, sink) = {
         let mut dd = d.borrow_mut();
         dd.done = true;
-        (dd.close, dd.sink)
+        (dd.close.clone(), dd.sink.clone())
     };
     let r = match close {
         Some(f) => e.call_value(f, sink, &[]),
@@ -926,8 +934,8 @@ fn writer_abort(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> 
     let (abort, sink) = {
         let mut dd = d.borrow_mut();
         dd.done = true;
-        dd.errored = Some(reason);
-        (dd.abort, dd.sink)
+        dd.errored = Some(reason.clone());
+        (dd.abort.clone(), dd.sink.clone())
     };
     let r = match abort {
         Some(f) => e.call_value(f, sink, &[reason]),
@@ -965,7 +973,7 @@ fn ws_ctrl_error(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value>
     };
     let reason = arg(args, 0);
     let mut dd = d.borrow_mut();
-    dd.errored = Some(reason);
+    dd.errored = Some(reason.clone());
     dd.done = true;
     if let Some(cp) = dd.closed_promise {
         drop(dd);
@@ -994,10 +1002,18 @@ impl Host for WsHost {
 
     fn trace(&self, out: &mut Vec<ObjId>) {
         let d = self.d.borrow();
-        for v in [d.write, d.close, d.abort, d.errored].into_iter().flatten() {
-            crate::heap::push_value(out, v);
+        for v in [
+            d.write.clone(),
+            d.close.clone(),
+            d.abort.clone(),
+            d.errored.clone(),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            crate::heap::push_value(out, &v);
         }
-        crate::heap::push_value(out, d.sink);
+        crate::heap::push_value(out, &d.sink);
         if let Some(cp) = d.closed_promise {
             out.push(cp);
         }
@@ -1089,9 +1105,9 @@ fn transform_stream_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<
         start = e.get_prop(tid, "start");
     }
     let d = Rc::new(RefCell::new(TsData {
-        transform: transform.filter(|&f| e.is_callable(f)),
-        flush: flush.filter(|&f| e.is_callable(f)),
-        transformer,
+        transform: transform.filter(|f| e.is_callable(f.clone())),
+        flush: flush.filter(|f| e.is_callable(f.clone())),
+        transformer: transformer.clone(),
         rs: Rc::new(RefCell::new(RsData {
             queue: VecDeque::new(),
             closed: false,
@@ -1118,7 +1134,7 @@ fn transform_stream_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<
         e.set_own(id, "readable", readable, true);
         e.set_own(id, "writable", writable, true);
     }
-    if let Some(s) = start.filter(|&f| e.is_callable(f)) {
+    if let Some(s) = start.filter(|f| e.is_callable(f.clone())) {
         let ctrl = ts_ctrl(e, &d);
         if let Err(err) = e.call_value(s, transformer, &[ctrl]) {
             let crate::heap::Thrown(v) = err;
@@ -1166,9 +1182,9 @@ fn ts_writable(e: &mut Engine, d: &Rc<RefCell<TsData>>) -> Value {
         e.add_method(sid, "close", ts_sink_close);
         e.add_method(sid, "abort", ts_sink_abort);
     }
-    wd.borrow_mut().write = e.get_prop_value(sink, "write").ok();
-    wd.borrow_mut().close = e.get_prop_value(sink, "close").ok();
-    wd.borrow_mut().abort = e.get_prop_value(sink, "abort").ok();
+    wd.borrow_mut().write = e.get_prop_value(sink.clone(), "write").ok();
+    wd.borrow_mut().close = e.get_prop_value(sink.clone(), "close").ok();
+    wd.borrow_mut().abort = e.get_prop_value(sink.clone(), "abort").ok();
     wd.borrow_mut().sink = sink;
     let wp = ws_proto(e);
     ws_obj(e, &wd, wp)
@@ -1182,7 +1198,7 @@ fn ts_sink_write(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value>
     };
     let (transform, transformer) = {
         let dd = d.borrow();
-        (dd.transform, dd.transformer)
+        (dd.transform.clone(), dd.transformer.clone())
     };
     let chunk = arg(args, 0);
     if let Some(f) = transform {
@@ -1205,7 +1221,7 @@ fn ts_sink_close(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
     };
     let (flush, transformer) = {
         let dd = d.borrow();
-        (dd.flush, dd.transformer)
+        (dd.flush.clone(), dd.transformer.clone())
     };
     if let Some(f) = flush {
         let ctrl = ts_ctrl(e, &d);
@@ -1284,10 +1300,10 @@ impl Host for TsHost {
     }
     fn trace(&self, out: &mut Vec<ObjId>) {
         let d = self.d.borrow();
-        for v in [d.transform, d.flush].into_iter().flatten() {
-            crate::heap::push_value(out, v);
+        for v in [d.transform.clone(), d.flush.clone()].into_iter().flatten() {
+            crate::heap::push_value(out, &v);
         }
-        crate::heap::push_value(out, d.transformer);
+        crate::heap::push_value(out, &d.transformer);
         // `d.rs` est couvert par le host du readable exposé.
     }
 }
@@ -1308,12 +1324,12 @@ impl Host for TsCtrlHost {
     }
     fn trace(&self, out: &mut Vec<ObjId>) {
         let d = self.d.borrow();
-        for v in [d.transform, d.flush].into_iter().flatten() {
-            crate::heap::push_value(out, v);
+        for v in [d.transform.clone(), d.flush.clone()].into_iter().flatten() {
+            crate::heap::push_value(out, &v);
         }
-        crate::heap::push_value(out, d.transformer);
+        crate::heap::push_value(out, &d.transformer);
         for v in &d.rs.borrow().queue {
-            crate::heap::push_value(out, *v);
+            crate::heap::push_value(out, v);
         }
     }
 }
@@ -1327,10 +1343,10 @@ impl Host for TsSinkHost {
     }
     fn trace(&self, out: &mut Vec<ObjId>) {
         let d = self.d.borrow();
-        for v in [d.transform, d.flush].into_iter().flatten() {
-            crate::heap::push_value(out, v);
+        for v in [d.transform.clone(), d.flush.clone()].into_iter().flatten() {
+            crate::heap::push_value(out, &v);
         }
-        crate::heap::push_value(out, d.transformer);
+        crate::heap::push_value(out, &d.transformer);
     }
 }
 
@@ -1396,7 +1412,7 @@ fn tes_decode_transform(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<V
 fn stream_enqueue(e: &mut Engine, ctrl: Value, v: Value) -> JsResult<Value> {
     if let Value::Obj(cid) = ctrl {
         if let Some(enq) = e.get_prop(cid, "enqueue") {
-            if e.is_callable(enq) {
+            if e.is_callable(enq.clone()) {
                 e.call_value(enq, ctrl, &[v])?;
             }
         }
@@ -1435,7 +1451,7 @@ pub(crate) fn install_streams(e: &mut Engine) {
         let fv = e.native_fn(name, f);
         if let Value::Obj(fid) = fv {
             e.set_own(fid, "prototype", Value::Obj(proto), false);
-            e.set_own(proto, "constructor", fv, false);
+            e.set_own(proto, "constructor", fv.clone(), false);
         }
         e.set_own(g, name, fv, false);
     }

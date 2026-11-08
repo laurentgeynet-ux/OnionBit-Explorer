@@ -229,14 +229,14 @@ impl BrowsingContext {
         let mut vs = Vec::new();
         self.timers.roots(&mut vs);
         for v in vs {
-            crate::heap::push_value(ids, v);
+            crate::heap::push_value(ids, &v);
         }
         for (_, wrapper, data) in &self.xhr.live {
             ids.push(*wrapper);
             let mut cbs = Vec::new();
             data.borrow().listener_values(&mut cbs);
             for cb in cbs {
-                crate::heap::push_value(ids, cb);
+                crate::heap::push_value(ids, &cb);
             }
         }
         for (_, promise, _, _) in &self.xhr.fetches {
@@ -286,20 +286,20 @@ impl BrowsingContext {
             }
             for node in &d.nodes {
                 for (_, cb, _) in &node.listeners {
-                    crate::heap::push_value(ids, *cb);
+                    crate::heap::push_value(ids, cb);
                 }
             }
             for v in dom.borrow().canvas_ctx_values() {
-                crate::heap::push_value(ids, v);
+                crate::heap::push_value(ids, &v);
             }
             for def in dom.borrow().ce.defs.values() {
-                crate::heap::push_value(ids, def.ctor);
+                crate::heap::push_value(ids, &def.ctor);
             }
             for list in dom.borrow().ce.pending.values() {
                 ids.extend(list.iter().copied());
             }
         }
-        if let Some(v) = self.ce_upgrade_slot {
+        if let Some(ref v) = self.ce_upgrade_slot {
             crate::heap::push_value(ids, v);
         }
         if let Some(s) = self.screen_obj {
@@ -307,17 +307,17 @@ impl BrowsingContext {
         }
         ids.push(self.global);
         ids.extend(self.protos.all());
-        crate::heap::push_value(ids, self.gen_ctor);
-        crate::heap::push_value(ids, self.async_gen_ctor);
-        crate::heap::push_value(ids, self.async_ctor);
-        crate::heap::push_value(ids, self.async_fn_proto);
-        crate::heap::push_value(ids, self.gen_fn_proto);
-        crate::heap::push_value(ids, self.gen_proto);
-        crate::heap::push_value(ids, self.async_gen_fn_proto);
-        crate::heap::push_value(ids, self.async_gen_proto);
-        crate::heap::push_value(ids, self.eval_fn);
-        crate::heap::push_value(ids, self.re_ctor);
-        crate::heap::push_value(ids, self.completion);
+        crate::heap::push_value(ids, &self.gen_ctor);
+        crate::heap::push_value(ids, &self.async_gen_ctor);
+        crate::heap::push_value(ids, &self.async_ctor);
+        crate::heap::push_value(ids, &self.async_fn_proto);
+        crate::heap::push_value(ids, &self.gen_fn_proto);
+        crate::heap::push_value(ids, &self.gen_proto);
+        crate::heap::push_value(ids, &self.async_gen_fn_proto);
+        crate::heap::push_value(ids, &self.async_gen_proto);
+        crate::heap::push_value(ids, &self.eval_fn);
+        crate::heap::push_value(ids, &self.re_ctor);
+        crate::heap::push_value(ids, &self.completion);
         crate::heap::trace_env(&self.global_env, ids, visited);
         for m in &self.modules {
             crate::heap::trace_env(&m.env, ids, visited);

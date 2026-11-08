@@ -2478,7 +2478,7 @@ impl Dom {
     /// Objet contexte JS déjà créé pour `node` — `getContext`
     /// est idempotent par mode.
     pub fn canvas_ctx(&self, node: NodeId) -> Option<Value> {
-        self.canvases.get(&node).and_then(|s| s.ctx_value)
+        self.canvases.get(&node).and_then(|s| s.ctx_value.clone())
     }
 
     /// Enregistre l'objet contexte de `node` — semé comme
@@ -2492,7 +2492,10 @@ impl Dom {
     /// tant que le miroir vit, même si le script a lâché sa
     /// référence (le canvas reste ré-utilisable).
     pub fn canvas_ctx_values(&self) -> Vec<Value> {
-        self.canvases.values().filter_map(|s| s.ctx_value).collect()
+        self.canvases
+            .values()
+            .filter_map(|s| s.ctx_value.clone())
+            .collect()
     }
 
     /// `canvas.width=`/`height=` efface le bitmap et remet

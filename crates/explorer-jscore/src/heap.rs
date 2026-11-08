@@ -51,10 +51,13 @@ pub(crate) const DEFAULT_MEM_LIMIT: usize = 512 * 1024 * 1024;
 /// args are the call arguments.
 pub type NativeFn = fn(&mut crate::Engine, Value, &[Value]) -> JsResult<Value>;
 
-/// A heap cell: either an immutable string or an object.
+/// A heap cell's payload. JS-C420 : les chaînes JS sont sorties
+/// de l'arène — `Value::Str` porte un `JsStr` (`Rc` + compteur
+/// d'octets `Engine::str_acct`) : leurs temporaries meurent au
+/// refcount mid-eval, jamais en cellules mortes non balayables.
+/// L'enum survit à une variante : la forme `CellData::Obj`
+/// est partout dans le code de trace/sweep.
 pub enum CellData {
-    /// String data (JS strings are immutable).
-    Str(String),
     /// Object data.
     Obj(Object),
 }
@@ -90,27 +93,16 @@ pub struct Heap {
     /// un script hosti ne doit jamais pouvoir vider la machine —
     /// jusqu'ici la borne existait mais n'était armée nulle part,
     /// mesuré : challenge google + budget relevé = OOM station).
-    /// Le dépassement lève `over_mem` ; le kill doux est émis au
-    /// `tick` suivant (l'alloc elle-même ne peut pas échouer).
+    /// Le dépassement est lu au `tick` suivant par
+    /// `Engine::mem_over` (arène **+** `str_acct`, JS-C420) —
+    /// l'alloc elle-même ne peut pas échouer.
     mem_limit: usize,
-    /// `true` tant que `bytes > mem_limit` (borne non nulle).
-    over_mem: bool,
     /// Passes GC effectuées — métrique `heap_stats`.
     gc_runs: u64,
     /// Pic de cellules vivantes observé (post-sweep/alloc).
     peak_live: usize,
     /// Pic d'octets estimés.
     peak_bytes: usize,
-    /// Sites d'alloc `Str` par cellule — sonde §B-114
-    /// (JS-C419) : `#[track_caller]` remonte le `Location`
-    /// du producteur réel à travers l'entonnoir `str_val`,
-    /// et le census joint `dead_b` par site → nomme le
-    /// producteur des déchets (temporaire droppé vs
-    /// intermédiaire stack-détenu). Remplie sous `j17_on()`
-    /// seulement ; les entrées des cellules balayées restent
-    /// jusqu'à réutilisation de l'id (bornée par le pic de
-    /// cellules `Str` depuis l'armement).
-    str_sites: HashMap<ObjId, &'static std::panic::Location<'static>>,
 }
 
 impl Heap {
@@ -124,11 +116,9 @@ impl Heap {
             allocated: 0,
             bytes: 0,
             mem_limit: DEFAULT_MEM_LIMIT,
-            over_mem: false,
             gc_runs: 0,
             peak_live: 0,
             peak_bytes: 0,
-            str_sites: HashMap::new(),
         }
     }
 
@@ -141,9 +131,6 @@ impl Heap {
         if self.bytes > self.peak_bytes {
             self.peak_bytes = self.bytes;
         }
-        if self.mem_limit > 0 && self.bytes > self.mem_limit {
-            self.over_mem = true;
-        }
         if let Some(idx) = self.free.pop() {
             self.cells[idx as usize] = Some(Cell { data });
             return idx;
@@ -153,153 +140,11 @@ impl Heap {
         (self.cells.len() - 1) as ObjId
     }
 
-    /// Allocate a string, returning its id. `#[track_caller]`
-    /// propage le site du producteur réel (JS-C419) — sous
-    /// `j17_on()` il est enregistré par cellule pour le census.
-    #[track_caller]
-    pub fn alloc_str(&mut self, s: impl Into<String>) -> ObjId {
-        crate::j17_tick(&crate::J17_STR_CELL);
-        let id = self.alloc(CellData::Str(s.into()));
-        if crate::j17_on() {
-            self.str_sites.insert(id, std::panic::Location::caller());
-        }
-        id
-    }
-
     /// Allocate an object.
     pub fn alloc_obj(&mut self, o: Object) -> ObjId {
         crate::j17_tick(&crate::J17_OBJ_CELL);
         self.allocated += 1;
         self.alloc(CellData::Obj(o))
-    }
-
-    /// Longueur en octets sans cloner — la garde d'alloc en a
-    /// besoin avant toute matérialisation (§B-59 : `s += …`
-    /// clone l'opérande géante avant `alloc_guard` sinon).
-    pub fn str_len(&self, id: ObjId) -> Option<usize> {
-        match self.cells.get(id as usize) {
-            Some(Some(Cell {
-                data: CellData::Str(s),
-            })) => Some(s.len()),
-            _ => None,
-        }
-    }
-
-    /// Longueur en **code units UTF-16** sans cloner — le
-    /// `length` spec d'une Str (astral = 2) sans la copie que
-    /// `string()` imposerait (§B-59).
-    pub fn str_u16_len(&self, id: ObjId) -> Option<usize> {
-        match self.cells.get(id as usize) {
-            Some(Some(Cell {
-                data: CellData::Str(s),
-            })) => Some(s.encode_utf16().count()),
-            _ => None,
-        }
-    }
-
-    /// Égalité de contenu Str **sans clone** — `===`/`==` sur
-    /// chaînes clonait les deux opérandes entiers (`giant ===
-    /// giant` = 2 clones commit sans comptage, §B-59) ; la
-    /// comparaison en place est gratuite.
-    pub fn str_eq(&self, a: ObjId, b: ObjId) -> bool {
-        match (self.cells.get(a as usize), self.cells.get(b as usize)) {
-            (
-                Some(Some(Cell {
-                    data: CellData::Str(x),
-                })),
-                Some(Some(Cell {
-                    data: CellData::Str(y),
-                })),
-            ) => x == y,
-            _ => false,
-        }
-    }
-
-    /// Code unit UTF-16 à l'indice `i`, lu **en place** — les
-    /// `charCodeAt`/`at` en boucle clonaient la chaîne entière
-    /// par appel (churn commit sans comptage, §B-59 décodeur
-    /// Confiant `charAt` × N sur géante chaîne).
-    pub fn str_u16_at(&self, id: ObjId, i: usize) -> Option<u16> {
-        match self.cells.get(id as usize) {
-            Some(Some(Cell {
-                data: CellData::Str(s),
-            })) => s.encode_utf16().nth(i),
-            _ => None,
-        }
-    }
-
-    /// Offset octet du `u16_i`-ème code unit UTF-16 (frontière
-    /// de char, ou `s.len()` au-delà) — conversion units→bytes
-    /// sans matérialiser la vue (§B-59).
-    pub(crate) fn u16_pos_to_byte(s: &str, u16_i: usize) -> usize {
-        let mut u = 0usize;
-        for (b, c) in s.char_indices() {
-            if u >= u16_i {
-                return b;
-            }
-            u += c.len_utf16();
-        }
-        s.len()
-    }
-
-    /// `indexOf`/`lastIndexOf` en place — offset octet du
-    /// `from_u16`-ième unit, recherche `find`/`match_indices`
-    /// sur la tranche interne, reconversion units (§B-59).
-    pub fn str_index_of(&self, id: ObjId, needle: &str, from_u16: usize, last: bool) -> i64 {
-        let Some(Some(Cell {
-            data: CellData::Str(s),
-        })) = self.cells.get(id as usize)
-        else {
-            return -1;
-        };
-        let byte_from = Self::u16_pos_to_byte(s, from_u16);
-        let pos = if needle.len() > s.len() {
-            None
-        } else if last {
-            let limit = byte_from.min(s.len() - needle.len());
-            s.match_indices(needle)
-                .take_while(|(p, _)| *p <= limit)
-                .last()
-                .map(|(p, _)| p)
-        } else if byte_from > s.len() - needle.len() {
-            None
-        } else {
-            s[byte_from..].find(needle).map(|p| p + byte_from)
-        };
-        pos.map_or(-1, |b| s[..b].encode_utf16().count() as i64)
-    }
-
-    /// Tranche `[a, b)` en units → `String`, lue en place (§B-59
-    /// — `slice`/`substring`/`substr` en boucle sans clone plein).
-    pub fn str_slice_u16(&self, id: ObjId, a: usize, b: usize) -> Option<String> {
-        let Some(Some(Cell {
-            data: CellData::Str(s),
-        })) = self.cells.get(id as usize)
-        else {
-            return None;
-        };
-        // Tranche en code units (spec) — pas en octets :
-        // `u16_pos_to_byte` snappait à la frontière de char et
-        // avalait l'astral entier quand la coupe tombait dans
-        // une paire surrogate. On décode les units `[a,b)` à la
-        // volée ; surrogate isolé → U+FFFD (déviation documentée,
-        // `split('')`/`u16_to_string` idem) — régression JS-C263,
-        // verrou `c23_utf16_positions_and_slices`.
-        let units: Vec<u16> = s.encode_utf16().skip(a).take(b.saturating_sub(a)).collect();
-        Some(String::from_utf16_lossy(&units))
-    }
-
-    /// Borrow a string's contents (cloned — strings are short here).
-    pub fn string(&self, id: ObjId) -> Option<String> {
-        match self.cells.get(id as usize) {
-            Some(Some(Cell {
-                data: CellData::Str(s),
-            })) => {
-                crate::j17_tick(&crate::J17_STR_READ);
-                Some(s.clone())
-            }
-            _ => None,
-        }
     }
 
     /// Borrow an object.
@@ -346,7 +191,8 @@ impl Heap {
         self.cells.swap(a as usize, b as usize);
     }
 
-    /// Nombre de cellules vivantes (objets + chaînes).
+    /// Nombre de cellules vivantes — objets seuls depuis
+    /// JS-C420 (les chaînes `JsStr` vivent hors arène).
     pub fn live_count(&self) -> usize {
         self.cells.len() - self.free.len()
     }
@@ -396,13 +242,13 @@ impl Heap {
         else {
             return;
         };
-        push_value(out, o.proto);
+        push_value(out, &o.proto);
         for (_, p) in &o.props {
             match p {
-                Prop::Data { value, .. } => push_value(out, *value),
+                Prop::Data { value, .. } => push_value(out, value),
                 Prop::Acc { get, set, .. } => {
-                    push_value(out, *get);
-                    push_value(out, *set);
+                    push_value(out, get);
+                    push_value(out, set);
                 }
             }
         }
@@ -413,19 +259,19 @@ impl Heap {
         }
         match &o.kind {
             ObjKind::Array(elems) => {
-                for &v in elems {
+                for v in elems {
                     push_value(out, v);
                 }
             }
             ObjKind::Fun(fun) => match fun {
                 Fun::Script { env, lex_this, .. } => {
                     if let Some(t) = lex_this {
-                        push_value(out, *t);
+                        push_value(out, t);
                     }
                     trace_env(env, out, envs);
                 }
                 Fun::BoundNative { bound, .. } => {
-                    for &v in bound {
+                    for v in bound {
                         push_value(out, v);
                     }
                 }
@@ -434,9 +280,9 @@ impl Heap {
                     this,
                     bound,
                 } => {
-                    push_value(out, *target);
-                    push_value(out, *this);
-                    for &v in bound {
+                    push_value(out, target);
+                    push_value(out, this);
+                    for v in bound {
                         push_value(out, v);
                     }
                 }
@@ -444,14 +290,14 @@ impl Heap {
             },
             ObjKind::Host(h) => h.trace(out),
             ObjKind::Promise(p) => {
-                push_value(out, p.result);
-                push_value(out, p.resolve_fn);
-                push_value(out, p.reject_fn);
+                push_value(out, &p.result);
+                push_value(out, &p.resolve_fn);
+                push_value(out, &p.reject_fn);
                 for r in &p.reactions {
-                    push_value(out, r.on_fulfilled);
-                    push_value(out, r.on_rejected);
-                    match r.next {
-                        crate::promise::ThenSink::Native(id) => out.push(id),
+                    push_value(out, &r.on_fulfilled);
+                    push_value(out, &r.on_rejected);
+                    match &r.next {
+                        crate::promise::ThenSink::Native(id) => out.push(*id),
                         crate::promise::ThenSink::Foreign { resolve, reject } => {
                             push_value(out, resolve);
                             push_value(out, reject);
@@ -461,20 +307,20 @@ impl Heap {
             }
             ObjKind::Map(entries) => {
                 for (k, v) in entries {
-                    push_value(out, *k);
-                    push_value(out, *v);
+                    push_value(out, k);
+                    push_value(out, v);
                 }
             }
             ObjKind::Set(items) => {
-                for &v in items {
+                for v in items {
                     push_value(out, v);
                 }
             }
             ObjKind::Iter { items, ret, .. } => {
-                for &v in items {
+                for v in items {
                     push_value(out, v);
                 }
-                push_value(out, *ret);
+                push_value(out, ret);
             }
             ObjKind::GenLive { exec } => {
                 if let Ok(g) = exec.try_borrow() {
@@ -482,26 +328,26 @@ impl Heap {
                 }
             }
             ObjKind::Proxy { target, handler } => {
-                push_value(out, *target);
+                push_value(out, target);
                 if let Some(h) = handler {
-                    push_value(out, *h);
+                    push_value(out, h);
                 }
             }
             ObjKind::DataView { buffer, .. } | ObjKind::TypedArray { buffer, .. } => {
-                push_value(out, *buffer);
+                push_value(out, buffer);
             }
             ObjKind::FinReg { cb, entries } => {
-                push_value(out, *cb);
+                push_value(out, cb);
                 for en in entries {
-                    push_value(out, en.held);
-                    push_value(out, en.token);
+                    push_value(out, &en.held);
+                    push_value(out, &en.token);
                 }
             }
             ObjKind::DispStack { stack, .. } => {
                 for (f, t, v) in stack {
-                    push_value(out, *f);
-                    push_value(out, *t);
-                    push_value(out, *v);
+                    push_value(out, f);
+                    push_value(out, t);
+                    push_value(out, v);
                 }
             }
             // `WeakRef` : la cible n'est PAS tracée (c'est le
@@ -627,7 +473,6 @@ impl Heap {
         if self.bytes > self.peak_bytes {
             self.peak_bytes = self.bytes;
         }
-        self.over_mem = self.mem_limit > 0 && self.bytes > self.mem_limit;
         swept
     }
 
@@ -636,7 +481,7 @@ impl Heap {
     /// [`Heap::collect`]. Contrairement à `collect`, elle est
     /// sûre **pendant une évaluation** : rien n'est balayé, les
     /// temporaires de la pile d'appel (non racines) survivent —
-    /// c'est le garde-fou qui permet au `tick` `over_limit` de
+    /// c'est le garde-fou qui permet au `tick` `mem_over` de
     /// distinguer fuite réelle et simple déchets sans corrompre
     /// les `ObjId` des receveurs en vol (« `push` is not a
     /// function (on ?) », incapsula vol 161/162 — JS-C206).
@@ -683,10 +528,12 @@ impl Heap {
             }
         }
         // Marques laissées **chaudes** (JS-C417 / §B-114) : le
-        // census `Str` émis juste après au kill `over_limit`
-        // discrimine vivant retenu / déchets non balayables —
-        // le cas « rétention structurelle » vs « churn `s += c` »
-        // se lit alors au lieu d'être conjecturé. La passe
+        // kill `mem_over` émis juste après discrimine vivant
+        // retenu / déchets non balayables — le cas « rétention
+        // structurelle » vs « churn `s += c` » se lit alors au
+        // lieu d'être conjecturé. (Avant JS-C420 le census `Str`
+        // relisait ces marques ; les chaînes vivent désormais
+        // hors arène, leur vivant exact est `str_acct`.) La passe
         // suivante (`collect`/`mark_live`) se ré-initialise en
         // tête — invariant explicite, pas d'état partagé.
         (live, bytes)
@@ -711,10 +558,7 @@ impl Heap {
         let mut h: std::collections::HashMap<&'static str, (usize, usize)> =
             std::collections::HashMap::new();
         for c in self.cells.iter().flatten() {
-            let bytes = match &c.data {
-                CellData::Str(s) => std::mem::size_of::<Cell>() + s.capacity(),
-                CellData::Obj(_) => cell_bytes(&c.data),
-            };
+            let bytes = cell_bytes(&c.data);
             let e = h.entry(cell_kind_name(&c.data)).or_default();
             e.0 += 1;
             e.1 += bytes;
@@ -724,84 +568,13 @@ impl Heap {
         v
     }
 
-    /// Census `Str` au kill — sonde §B-114 : la rétention
-    /// structurelle non bornée (236 511 cellules / 556 Mio de
-    /// contenu au kill `dead_hard`, vol 704) se nomme par
-    /// **contenu** et par **statut** (vivant retenu vs déchets
-    /// de concat non balayables mid-eval — `live_b`/`dead_b`
-    /// exigent les marques chaudes de [`Heap::mark_live`]). Les
-    /// préfixes sont tronqués à ~48 chars et sanitisés ASCII
-    /// (contenu potentiellement binaire/hostile — jamais de
-    /// dump brut dans les journaux). O(cellules) — l'appelant
-    /// le réserve aux sites de kill, pas au tick.
-    pub(crate) fn str_census(&self, top_n: usize) -> StrCensus {
-        let (mut total, mut live, mut dead, mut big, mut huge, mut top) =
-            (0usize, 0usize, 0usize, 0usize, 0usize, Vec::new());
-        let mut sites: HashMap<&std::panic::Location, (u32, usize)> = HashMap::new();
-        for (i, slot) in self.cells.iter().enumerate() {
-            if let Some(c) = slot {
-                if let CellData::Str(s) = &c.data {
-                    let n = s.len();
-                    total += n;
-                    if self.marks.get(i).copied().unwrap_or(false) {
-                        live += n;
-                    } else {
-                        dead += n;
-                        if let Some(loc) = self.str_sites.get(&(i as ObjId)) {
-                            let e = sites.entry(loc).or_default();
-                            e.0 += 1;
-                            e.1 += n;
-                        }
-                    }
-                    big += usize::from(n >= 65_536);
-                    huge += usize::from(n >= 1_048_576);
-                    top.push((n, s.as_str()));
-                }
-            }
-        }
-        top.sort_by_key(|e| std::cmp::Reverse(e.0));
-        top.truncate(top_n);
-        let top = top
-            .into_iter()
-            .map(|(n, s)| {
-                let p: String = s
-                    .chars()
-                    .take(48)
-                    .map(|c| {
-                        if c.is_ascii_graphic() || c == ' ' {
-                            c
-                        } else {
-                            '.'
-                        }
-                    })
-                    .collect();
-                (n, p)
-            })
-            .collect();
-        let mut sites: Vec<_> = sites
-            .into_iter()
-            .map(|(l, (n, b))| (site_label(l), n, b))
-            .collect();
-        sites.sort_by_key(|e| std::cmp::Reverse(e.2));
-        sites.truncate(top_n);
-        StrCensus {
-            total_b: total,
-            live_b: live,
-            dead_b: dead,
-            ge64k: big,
-            ge1m: huge,
-            top,
-            top_sites: sites,
-        }
-    }
-
     /// Recalcule `bytes` sur l'état courant des cellules —
     /// §B-59 bras actugaming : les mutations post-alloc
     /// (`arr.push`, `obj[k]=`, `Map.set`…) grossissent sans
     /// repasser par `alloc` → l'estimé restait plat pendant
     /// que le RSS explosait (45 Mo comptés / 2,6 Go réels).
     /// Le `tick` l'appelle périodiquement : les bornes
-    /// (`over_limit`, cap dur) voient alors la vraie
+    /// (`mem_over`, cap dur) voient alors la vraie
     /// empreinte. O(cellules + props) — le rythme est borné
     /// côté appelant.
     pub fn refresh_estimate(&mut self) {
@@ -814,21 +587,14 @@ impl Heap {
         if self.bytes > self.peak_bytes {
             self.peak_bytes = self.bytes;
         }
-        self.over_mem = self.mem_limit > 0 && self.bytes > self.mem_limit;
     }
 
     /// Borne mémoire par contexte (ADR-0019) — `0` = illimité.
     /// Le dépassement n'empêche pas l'alloc (signature non
-    /// faillible) : il lève le drapeau `over_limit`, lu au `tick`
-    /// par l'interp pour un kill doux borné.
+    /// faillible) : il est lu au `tick` par `Engine::mem_over`
+    /// pour un kill doux borné.
     pub fn set_mem_limit(&mut self, bytes: usize) {
         self.mem_limit = bytes;
-        self.over_mem = bytes > 0 && self.bytes > bytes;
-    }
-
-    /// `true` tant que l'estimation dépasse la borne configurée.
-    pub fn over_limit(&self) -> bool {
-        self.over_mem
     }
 
     /// Borne mémoire configurée (`0` = illimité) — relue par la
@@ -850,45 +616,6 @@ impl Heap {
     }
 }
 
-/// Census `Str` au kill — sonde §B-114 (JS-C417).
-pub(crate) struct StrCensus {
-    /// Octets de contenu (`len`) toutes cellules `Str`.
-    pub total_b: usize,
-    /// Octets sur cellules marquées vivantes — n'a de sens
-    /// que juste après [`Heap::mark_live`] (marques chaudes
-    /// laissées par JS-C417) ; froid sinon.
-    pub live_b: usize,
-    /// Octets sur cellules non marquées — déchets non
-    /// balayés mid-eval (churn concat) vs vivant retenu :
-    /// le discriminant « rétention structurelle » §B-114.
-    pub dead_b: usize,
-    /// Cellules ≥ 64 Kio de contenu.
-    pub ge64k: usize,
-    /// Cellules ≥ 1 Mio de contenu.
-    pub ge1m: usize,
-    /// Top-N `(len, préfixe ≤48 chars ASCII-sanitisé)`
-    /// trié par taille descendante.
-    pub top: Vec<(usize, String)>,
-    /// Top-N sites d'alloc `(label file:line, cellules,
-    /// octets morts)` — JS-C419 : nomme le producteur des
-    /// déchets pour trancher « `Rc<str>` (temporaires
-    /// droppés) vs fix structurel (stack-détenu) ». Vide
-    /// hors `j17_on()` ; cellules allouées désarmées non
-    /// attribuées.
-    pub top_sites: Vec<(String, u32, usize)>,
-}
-
-/// Label compact d'un site d'alloc — les deux derniers
-/// segments de chemin suffisent (`mod.rs` seul est ambigu).
-fn site_label(l: &std::panic::Location) -> String {
-    let segs: Vec<&str> = l.file().rsplit(['/', '\\']).take(2).collect();
-    let base = segs.first().copied().unwrap_or("?");
-    match segs.get(1) {
-        Some(dir) => format!("{dir}/{base}:{}", l.line()),
-        None => format!("{base}:{}", l.line()),
-    }
-}
-
 /// Instantané des compteurs du heap (JS-C37).
 #[derive(Debug, Clone, Copy)]
 pub struct HeapStats {
@@ -904,18 +631,17 @@ pub struct HeapStats {
     pub gc_runs: u64,
 }
 
-/// Coût estimé d'une cellule — approximation documentée : le
-/// `String` compte sa **capacité** (§B-114 : `s += …` réserve
-/// amorti ×2 — compter `len` sous-estimait le RSS réel de
-/// moitié, 547 Mio vivants mesurés pour un cap de 402), et
-/// l'`Object` son empreinte fixe plus la capacité de sa table
+/// Coût estimé d'une cellule — approximation documentée : les
+/// chaînes ont quitté l'arène (JS-C420 — leur capacité est
+/// désormais comptée dans `Engine::str_acct` au fil du
+/// refcount, plus fine qu'un sweep), et l'`Object` compte
+/// son empreinte fixe plus la capacité de sa table
 /// de props (les clés `Rc<str>` sont mutualisées par
 /// l'interneur — le texte n'est compté nulle part ailleurs :
 /// borne grossière, pas mesure exacte).
 fn cell_bytes(data: &CellData) -> usize {
     let base = std::mem::size_of::<Cell>();
     match data {
-        CellData::Str(s) => base + s.capacity(),
         CellData::Obj(o) => {
             base + std::mem::size_of::<Object>()
                 + o.props.capacity() * std::mem::size_of::<(Rc<str>, Prop)>()
@@ -986,10 +712,11 @@ fn cell_bytes(data: &CellData) -> usize {
     }
 }
 
-/// Pousse l'`ObjId` d'un `Value` (no-op pour les scalaires).
-pub(crate) fn push_value(out: &mut Vec<ObjId>, v: Value) {
+/// Pousse l'`ObjId` d'un `Value` (no-op pour les scalaires —
+/// `Str` n'est plus une cellule, JS-C420).
+pub(crate) fn push_value(out: &mut Vec<ObjId>, v: &Value) {
     match v {
-        Value::Obj(i) | Value::Str(i) | Value::Big(i) => out.push(i),
+        Value::Obj(i) | Value::Big(i) => out.push(*i),
         _ => {}
     }
 }
@@ -1011,15 +738,15 @@ pub(crate) fn trace_env(env: &EnvRef, out: &mut Vec<ObjId>, visited: &mut HashSe
                 EnvKind::Global(m) | EnvKind::Local(m) | EnvKind::Block(m) => {
                     for c in m.values() {
                         match c {
-                            EnvCell::Bind(b) => push_value(out, b.value),
+                            EnvCell::Bind(b) => push_value(out, &b.value),
                             // `arguments` paresseux : les valeurs
                             // captées à l'appel restent racines tant
                             // que la cellule n'est pas matérialisée.
                             EnvCell::LazyArgs(la) => {
                                 for v in la.args.borrow().iter() {
-                                    push_value(out, *v);
+                                    push_value(out, v);
                                 }
-                                push_value(out, la.f);
+                                push_value(out, &la.f);
                             }
                             // Alias d'import : l'env du module exporteur est
                             // aussi une racine — ses liaisons restent
@@ -1029,7 +756,7 @@ pub(crate) fn trace_env(env: &EnvRef, out: &mut Vec<ObjId>, visited: &mut HashSe
                     }
                 }
                 // `with (o)` — l'objet-scope vit tant que le bloc.
-                EnvKind::With(oid) => push_value(out, Value::Obj(*oid)),
+                EnvKind::With(oid) => push_value(out, &Value::Obj(*oid)),
             }
             cur.clone_from(&borrowed.parent);
         }
@@ -1072,7 +799,7 @@ impl PropAttrs {
 
 /// A property entry. `enumerable` gates `for-in` enumeration
 /// (builtins install themselves as non-enumerable).
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub enum Prop {
     /// Plain data property.
     Data {
@@ -1120,7 +847,7 @@ impl Prop {
     /// those through the getter-invoking path).
     pub fn data_value(&self) -> Option<Value> {
         match self {
-            Prop::Data { value, .. } => Some(*value),
+            Prop::Data { value, .. } => Some(value.clone()),
             Prop::Acc { .. } => None,
         }
     }
@@ -1153,9 +880,9 @@ pub struct Object {
     /// objet** (niche du pointeur) — l'index est rare (≥24 props),
     /// les petits objets ne doivent pas payer sa place inline :
     /// le heap de démarrage est à ~540 551 o post-sweep (JS-C411,
-    /// comptage capacité) — un champ inline plus large armerait
-    /// `over_mem` dès la première alloc post-init sur les
-    /// contextes à borne serrée
+    /// comptage capacité) — un champ inline plus large
+    /// approcherait la borne `mem_over` dès la première alloc
+    /// post-init sur les contextes à borne serrée
     /// (`js_heap_limit_reaches_context`). `pub(crate)` : les
     /// littéraux `Object { … }` hors module le posent
     /// `OnceCell::new()` — jamais autre chose (invariant
@@ -1736,7 +1463,7 @@ impl Object {
     /// magic) — accessors come back as `Prop::Acc`.
     pub fn find(&self, key: &str) -> Option<Prop> {
         self.prop_pos(key)
-            .and_then(|i| self.props.get(i).map(|(_, p)| *p))
+            .and_then(|i| self.props.get(i).map(|(_, p)| p.clone()))
     }
 
     /// Own property lookup — data value only (`None` for accessors).
@@ -2147,7 +1874,6 @@ pub enum Fun {
 /// vocabulaire des deux côtés de la frontière vie/mort.
 fn cell_kind_name(d: &CellData) -> &'static str {
     match d {
-        CellData::Str(_) => "Str",
         CellData::Obj(o) => match &o.kind {
             ObjKind::Ordinary => "Ordinary",
             ObjKind::Array(_) => "Array",
@@ -2358,7 +2084,7 @@ pub struct LazyArgs {
 /// sloppy) — sauf `sloppy_silent` (nom de `FunctionExpression`,
 /// `ReadOnly` ES3 §13 : échec silencieux en sloppy, `TypeError` en
 /// strict).
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct Binding {
     /// Stored value.
     pub value: Value,
@@ -2503,14 +2229,14 @@ impl Env {
 /// getters proto sont perdus (spec — mur terrain `TanStack`
 /// `e.id` → `undefined`).
 pub(crate) fn proto_has_accessor(heap: &Heap, sid: ObjId) -> bool {
-    let mut cur = heap.obj(sid).map_or(Value::Null, |o| o.proto);
+    let mut cur = heap.obj(sid).map_or(Value::Null, |o| o.proto.clone());
     for _ in 0..32 {
         let Value::Obj(id) = cur else { return false };
         let Some(o) = heap.obj(id) else { return false };
         if o.props.iter().any(|(_, p)| matches!(p, Prop::Acc { .. })) {
             return true;
         }
-        cur = o.proto;
+        cur = o.proto.clone();
     }
     false
 }
@@ -2528,7 +2254,7 @@ mod tests {
     fn mem_limit_armed_by_default() {
         let h = Heap::new();
         assert_eq!(h.mem_limit(), DEFAULT_MEM_LIMIT);
-        assert!(!h.over_limit());
+        assert!(h.bytes <= h.mem_limit());
     }
 
     /// `set_mem_limit(0)` reste le désarmement explicite — les
@@ -2594,19 +2320,15 @@ mod tests {
             .unwrap();
     }
 
-    /// JS-C411 — l'estimé compte la **capacité** `Str` et les
-    /// réservoirs autrefois invisibles (`_ => 0`) : `FetchBody`
-    /// verbatim, réactions de promesse, disposeurs, symboles,
-    /// args liés, bigint. §B-114 : un segment MSE de 30 Mo
-    /// dans un `FetchBody` passait sous le compteur.
+    /// JS-C411 — l'estimé compte les réservoirs autrefois
+    /// invisibles (`_ => 0`) : `FetchBody` verbatim, réactions
+    /// de promesse, disposeurs, symboles, args liés, bigint.
+    /// §B-114 : un segment MSE de 30 Mo dans un `FetchBody`
+    /// passait sous le compteur. JS-C420 : les chaînes ne sont
+    /// plus des cellules — leur capacité est comptée côté
+    /// `Engine::str_acct`, pas ici.
     #[test]
     fn c411_cell_bytes_counts_capacity_and_payloads() {
-        // Capacité Str > len (croissance amortie comptée).
-        let mut s = String::with_capacity(1024);
-        s.push_str("ab");
-        let cell = std::mem::size_of::<Cell>();
-        assert!(cell_bytes(&CellData::Str(s)) >= cell + 1024);
-
         let mk = |kind| Object::blank(Value::Null, kind);
         let fb = cell_bytes(&CellData::Obj(mk(ObjKind::FetchBody {
             body: vec![0u8; 512],
@@ -2644,60 +2366,5 @@ mod tests {
             num_bigint::BigInt::from(u128::MAX),
         ))));
         assert!(bi >= 16, "BigInt digits comptés : {bi}");
-    }
-
-    /// JS-C417 — `str_census` : tri par taille, seaux
-    /// ≥64 Kio/≥1 Mio, préfixe borné 48 chars ASCII-sanitisé
-    /// (non-ASCII → `.`), split vivant/déchet sur les marques
-    /// chaudes laissées par `mark_live`. §B-114 : la rétention
-    /// `Str` se nomme par contenu **et statut** au kill.
-    #[test]
-    fn str_census_ranks_and_sanitizes() {
-        let mut h = Heap::new();
-        let keep = h.alloc_str("x".repeat(10));
-        h.alloc_str("big".repeat(30_000)); // 90 000 B → ≥64 Kio
-        h.alloc_str("H".repeat(1_200_000)); // → ≥1 Mio
-        h.alloc_str("préfixe-é-non-ascii\tavec\ttabs");
-        // Marques chaudes : `keep` vivante, le reste déchet.
-        let (live_n, live_b) = h.mark_live(|mark| mark(keep));
-        assert_eq!(live_n, 1);
-        assert!(live_b >= 10, "la Str gardée compte : {live_b}");
-        let c = h.str_census(3);
-        // `len()` = octets UTF-8 : les deux `é` comptent 2 B.
-        assert_eq!(c.total_b, 10 + 90_000 + 1_200_000 + 31);
-        assert_eq!(c.live_b, 10, "seule `keep` est marquée");
-        assert_eq!(c.dead_b, 90_000 + 1_200_000 + 31);
-        assert_eq!(c.ge64k, 2);
-        assert_eq!(c.ge1m, 1);
-        assert_eq!(c.top.len(), 3);
-        assert_eq!(c.top[0].0, 1_200_000);
-        assert_eq!(c.top[1].0, 90_000);
-        // Préfixe du 3ᵉ : 31 B, non-ASCII/tab → '.'.
-        assert_eq!(c.top[2].0, 31);
-        assert!(c.top[2].1.is_ascii());
-        assert!(c.top[2].1.contains('.'));
-        // Borne de troncature : 48 chars max.
-        assert!(c.top[0].1.len() <= 48);
-    }
-
-    /// JS-C419 — attribution site→volume : sous `j17_on()`,
-    /// `alloc_str` (`#[track_caller]`) enregistre le
-    /// `Location` du producteur par cellule et le census
-    /// joint `dead_b` par site — nomme le producteur des
-    /// déchets pour trancher « `Rc<str>` vs fix structurel ».
-    #[test]
-    fn str_census_names_dead_sites() {
-        crate::j17_enable();
-        let mut h = Heap::new();
-        h.alloc_str("dead-payload".repeat(1_000)); // 12 000 B, non seedée
-        let keep = h.alloc_str("live".to_string());
-        let (_n, _b) = h.mark_live(|mark| mark(keep));
-        let c = h.str_census(4);
-        // Un seul site mort : la ligne d'alloc ci-dessus.
-        assert_eq!(c.top_sites.len(), 1, "{:?}", c.top_sites);
-        let (label, n, b) = &c.top_sites[0];
-        assert!(label.contains("heap.rs:"), "site = ce fichier : {label}");
-        assert_eq!(*n, 1);
-        assert_eq!(*b, 12_000);
     }
 }

@@ -62,7 +62,7 @@ use crate::Engine;
 
 /// Argument `args[i]` — `Undefined` hors rang.
 fn arg(args: &[Value], i: usize) -> Value {
-    args.get(i).copied().unwrap_or(Value::Undefined)
+    args.get(i).cloned().unwrap_or(Value::Undefined)
 }
 
 // ------------------------------------------------------------------
@@ -91,7 +91,7 @@ fn trace_registry(reg: &IdbRegistry, out: &mut Vec<ObjId>) {
     for db in reg.borrow().values() {
         for st in db.stores.values() {
             for v in st.records.values() {
-                crate::heap::push_value(out, *v);
+                crate::heap::push_value(out, v);
             }
         }
     }
@@ -231,7 +231,7 @@ impl IdbKey {
 fn idb_key_of(e: &mut Engine, v: Value, depth: u32) -> Option<IdbKey> {
     match v {
         Value::Num(n) if !n.is_nan() => Some(IdbKey::Num(n)),
-        Value::Str(_) => e.heap_string_of(v).map(IdbKey::Str),
+        Value::Str(_) => Engine::heap_string_of(&v).map(IdbKey::Str),
         Value::Obj(id) if depth < 8 => {
             // `Date` → timestamp (own-prop `__time`) ; array → Arr.
             if let Some(n) = date_time_of(e, id) {
@@ -338,7 +338,7 @@ impl IdbState {
             for db in reg.borrow().values() {
                 for s in db.stores.values() {
                     for v in s.records.values() {
-                        crate::heap::push_value(ids, *v);
+                        crate::heap::push_value(ids, v);
                     }
                 }
             }
@@ -617,7 +617,7 @@ fn idb_event(e: &mut Engine, ty: &str, target: Value, vers: Option<(u64, u64)>) 
     crate::dom_host::event_proto(e, o, "Event");
     let t = e.str_val(ty);
     e.set_own(o, "type", t, true);
-    e.set_own(o, "target", target, true);
+    e.set_own(o, "target", target.clone(), true);
     e.set_own(o, "currentTarget", target, true);
     if let Some((old, new)) = vers {
         e.set_own(o, "oldVersion", Value::Num(old as f64), true);
@@ -634,8 +634,8 @@ fn fire_idb(e: &mut Engine, wrapper: ObjId, ty: &str, vers: Option<(u64, u64)>) 
     let ev = idb_event(e, ty, Value::Obj(wrapper), vers);
     let key = format!("on{ty}");
     if let Some(f) = e.get_prop(wrapper, &key) {
-        if e.is_callable(f) {
-            e.call_value(f, Value::Obj(wrapper), &[ev])?;
+        if e.is_callable(f.clone()) {
+            e.call_value(f, Value::Obj(wrapper), std::slice::from_ref(&ev))?;
         }
     }
     if let Some(Value::Obj(map)) = e.get_prop(wrapper, "__et") {
@@ -646,8 +646,8 @@ fn fire_idb(e: &mut Engine, wrapper: ObjId, ty: &str, vers: Option<(u64, u64)>) 
             };
             for i in 0..len {
                 if let Some(cb) = e.get_prop(l, &i.to_string()) {
-                    if e.is_callable(cb) {
-                        e.call_value(cb, Value::Obj(wrapper), &[ev])?;
+                    if e.is_callable(cb.clone()) {
+                        e.call_value(cb, Value::Obj(wrapper), std::slice::from_ref(&ev))?;
                     }
                 }
             }
@@ -715,7 +715,7 @@ fn req_then(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
 /// `success` → résout la promesse thenable avec `result`.
 fn idb_then_ok(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     if let Some(Value::Obj(pid)) = args.first() {
-        let res = req_data(e, this).map_or(Value::Undefined, |d| d.borrow().result);
+        let res = req_data(e, this).map_or(Value::Undefined, |d| d.borrow().result.clone());
         e.resolve_promise(*pid, res);
     }
     Ok(Value::Undefined)
@@ -724,7 +724,7 @@ fn idb_then_ok(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
 /// `error` → rejette la promesse thenable avec `error`.
 fn idb_then_ko(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     if let Some(Value::Obj(pid)) = args.first() {
-        let err = req_data(e, this).map_or(Value::Undefined, |d| d.borrow().error);
+        let err = req_data(e, this).map_or(Value::Undefined, |d| d.borrow().error.clone());
         e.reject_promise(*pid, err);
     }
     Ok(Value::Undefined)
@@ -1359,7 +1359,8 @@ fn db_create_store(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Valu
     if let Value::Obj(oid) = opts {
         kp = e
             .get_prop(oid, "keyPath")
-            .and_then(|v| e.heap_string_of(v))
+            .as_ref()
+            .and_then(Engine::heap_string_of)
             .filter(|s| !s.is_empty());
         ai = e
             .get_prop(oid, "autoIncrement")
@@ -1437,7 +1438,7 @@ fn db_delete_store(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Valu
 
 /// `db.transaction(stores, mode?)` → `IDBTransaction`.
 fn db_transaction(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
-    let Some((reg, name, _)) = db_host(e, this) else {
+    let Some((reg, name, _)) = db_host(e, this.clone()) else {
         return Err(e.type_error("transaction on incompatible receiver"));
     };
     let mut names = Vec::new();
@@ -1479,11 +1480,13 @@ fn db_close(_e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
 fn db_host(e: &Engine, v: Value) -> Option<(IdbRegistry, String, Value)> {
     let Value::Obj(id) = v else { return None };
     match e.heap.obj(id).map(|o| &o.kind) {
-        Some(ObjKind::Host(h)) => h
-            .clone()
-            .as_any()
-            .downcast_ref::<IdbDbHost>()
-            .map(|d| (d.reg.clone(), d.name.clone(), *d.upgrade_txn.borrow())),
+        Some(ObjKind::Host(h)) => h.clone().as_any().downcast_ref::<IdbDbHost>().map(|d| {
+            (
+                d.reg.clone(),
+                d.name.clone(),
+                d.upgrade_txn.borrow().clone(),
+            )
+        }),
         _ => None,
     }
 }
@@ -1535,7 +1538,7 @@ fn txn_value(
         pending: 0,
         aborted: false,
         wrapper: None,
-        db_wrapper,
+        db_wrapper: db_wrapper.clone(),
         error: Value::Null,
     }));
     let v = e.new_host_object(Rc::new(IdbTxnHost {
@@ -1721,7 +1724,7 @@ fn store_count(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
 
 /// Corps commun des requêtes de lecture.
 fn query_native(e: &mut Engine, this: Value, args: &[Value], what: QueryKind) -> JsResult<Value> {
-    let Some((ctx, idx)) = store_ctx(e, this) else {
+    let Some((ctx, idx)) = store_ctx(e, this.clone()) else {
         return Err(bad_store(e));
     };
     let range = range_of(e, arg(args, 0))?;
@@ -1746,7 +1749,7 @@ fn query_native(e: &mut Engine, this: Value, args: &[Value], what: QueryKind) ->
 /// valeur), clé résolue ici pour `keyPath`/explicite ;
 /// `autoIncrement` allouée à la livraison.
 fn put_or_add(e: &mut Engine, this: Value, args: &[Value], add_only: bool) -> JsResult<Value> {
-    let Some((ctx, idx)) = store_ctx(e, this) else {
+    let Some((ctx, idx)) = store_ctx(e, this.clone()) else {
         return Err(bad_store(e));
     };
     if idx.is_some() {
@@ -1772,7 +1775,7 @@ fn put_or_add(e: &mut Engine, this: Value, args: &[Value], add_only: bool) -> Js
                 .map_or((None, false), |s| (s.key_path.clone(), s.auto_inc))
         };
         if let Some(path) = kp {
-            let kv = key_path_value(e, cloned, &path)
+            let kv = key_path_value(e, cloned.clone(), &path)
                 .ok_or_else(|| e.type_error("put/add: keyPath yields no key"))?;
             let k =
                 idb_key_of(e, kv, 0).ok_or_else(|| e.type_error("put/add: keyPath key invalid"))?;
@@ -1807,7 +1810,7 @@ fn store_add(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
 
 /// `store.delete(key|range)` — spec accepte un range.
 fn store_delete(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
-    let Some((ctx, idx)) = store_ctx(e, this) else {
+    let Some((ctx, idx)) = store_ctx(e, this.clone()) else {
         return Err(bad_store(e));
     };
     if idx.is_some() {
@@ -1824,7 +1827,7 @@ fn store_delete(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> 
 
 /// `store.clear()`.
 fn store_clear(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
-    let Some((ctx, idx)) = store_ctx(e, this) else {
+    let Some((ctx, idx)) = store_ctx(e, this.clone()) else {
         return Err(bad_store(e));
     };
     if idx.is_some() {
@@ -1849,7 +1852,7 @@ fn dir_of(s: &str) -> Dir {
 
 /// `store.openCursor(range?, direction?)`.
 fn store_open_cursor(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
-    let Some((ctx, idx)) = store_ctx(e, this) else {
+    let Some((ctx, idx)) = store_ctx(e, this.clone()) else {
         return Err(bad_store(e));
     };
     if idx.is_some() {
@@ -1877,7 +1880,7 @@ fn index_open_key_cursor(e: &mut Engine, this: Value, args: &[Value]) -> JsResul
 
 /// Corps `openCursor`/`openKeyCursor` d'index.
 fn index_cursor(e: &mut Engine, this: Value, args: &[Value], key_only: bool) -> JsResult<Value> {
-    let Some((ctx, idx)) = store_ctx(e, this) else {
+    let Some((ctx, idx)) = store_ctx(e, this.clone()) else {
         return Err(bad_store(e));
     };
     let Some(iname) = idx else {
@@ -1897,7 +1900,7 @@ fn index_cursor(e: &mut Engine, this: Value, args: &[Value], key_only: bool) -> 
 /// légal en upgrade txn (et versionchange ; le miroir ne
 /// distingue pas — approximation documentée).
 fn store_create_index(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
-    let Some((ctx, idx)) = store_ctx(e, this) else {
+    let Some((ctx, idx)) = store_ctx(e, this.clone()) else {
         return Err(bad_store(e));
     };
     if idx.is_some() {
@@ -1951,7 +1954,7 @@ fn store_create_index(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<V
 
 /// `store.deleteIndex(name)`.
 fn store_delete_index(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
-    let Some((ctx, idx)) = store_ctx(e, this) else {
+    let Some((ctx, idx)) = store_ctx(e, this.clone()) else {
         return Err(bad_store(e));
     };
     if idx.is_some() {
@@ -1981,7 +1984,7 @@ fn store_delete_index(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<V
 
 /// `store.index(name)` → wrapper `IDBIndex`.
 fn store_index(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
-    let Some((ctx, idx)) = store_ctx(e, this) else {
+    let Some((ctx, idx)) = store_ctx(e, this.clone()) else {
         return Err(bad_store(e));
     };
     if idx.is_some() {
@@ -2020,7 +2023,7 @@ fn cursor_continue(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Valu
         v => Some(idb_key_of(e, v, 0).ok_or_else(|| e.type_error("continue: invalid key"))?),
     };
     let _ = id;
-    let ctx = cursor_ctx(e, this)?;
+    let ctx = cursor_ctx(e, this.clone())?;
     Ok(store_request(
         e,
         &ctx,
@@ -2038,7 +2041,7 @@ fn cursor_advance(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value
         return Err(e.type_error("advance on incompatible receiver"));
     };
     let n = e.to_number(arg(args, 0))?.max(1.0) as u32;
-    let ctx = cursor_ctx(e, this)?;
+    let ctx = cursor_ctx(e, this.clone())?;
     Ok(store_request(
         e,
         &ctx,
@@ -2056,7 +2059,7 @@ fn cursor_update(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value>
         return Err(e.type_error("update on incompatible receiver"));
     };
     let cloned = crate::builtins::clone::clone_deep(e, arg(args, 0), &mut Vec::new(), 0)?;
-    let ctx = cursor_ctx(e, this)?;
+    let ctx = cursor_ctx(e, this.clone())?;
     Ok(store_request(
         e,
         &ctx,
@@ -2074,7 +2077,7 @@ fn cursor_delete(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value>
         return Err(e.type_error("delete on incompatible receiver"));
     };
     let _ = args;
-    let ctx = cursor_ctx(e, this)?;
+    let ctx = cursor_ctx(e, this.clone())?;
     Ok(store_request(
         e,
         &ctx,
@@ -2125,7 +2128,7 @@ fn index_entries(
 ) -> Vec<(IdbKey, IdbKey, Value)> {
     let mut out = Vec::new();
     for (pk, v) in &st.records {
-        if let Some(iv) = key_path_value(e, *v, &idef.key_path) {
+        if let Some(iv) = key_path_value(e, v.clone(), &idef.key_path) {
             if idef.multi {
                 // `multiEntry` : un élément-array par entrée.
                 if let Value::Obj(oid) = iv {
@@ -2133,7 +2136,7 @@ fn index_entries(
                         for i in 0..len as u32 {
                             if let Some(el) = e.get_prop(oid, &i.to_string()) {
                                 if let Some(k) = idb_key_of(e, el, 0) {
-                                    out.push((k, pk.clone(), *v));
+                                    out.push((k, pk.clone(), v.clone()));
                                 }
                             }
                         }
@@ -2142,7 +2145,7 @@ fn index_entries(
                 }
             }
             if let Some(k) = idb_key_of(e, iv, 0) {
-                out.push((k, pk.clone(), *v));
+                out.push((k, pk.clone(), v.clone()));
             }
         }
     }
@@ -2166,7 +2169,7 @@ fn run_idb_op(e: &mut Engine, req: ObjId, op: &IdbOp) -> Result<Value, Value> {
             key,
             add_only,
             check_unique,
-        } => put_op(e, ctx, *value, key.clone(), *add_only, *check_unique),
+        } => put_op(e, ctx, value.clone(), key.clone(), *add_only, *check_unique),
         IdbOp::Query { ctx, range, what } => query_op(e, ctx, None, range.as_ref(), what),
         IdbOp::QueryIdx {
             ctx,
@@ -2222,20 +2225,20 @@ fn open_op(e: &mut Engine, req: ObjId, name: &str, version: Option<u64>) -> Resu
             name.to_string(),
             Vec::new(),
             "versionchange".to_string(),
-            dbv,
+            dbv.clone(),
         );
         if let Value::Obj(did) = dbv {
             if let Some(ObjKind::Host(h)) = e.heap.obj(did).map(|o| &o.kind) {
                 if let Some(d) = h.as_any().downcast_ref::<IdbDbHost>() {
-                    *d.upgrade_txn.borrow_mut() = txv;
+                    *d.upgrade_txn.borrow_mut() = txv.clone();
                 }
             }
         }
         // `req.transaction` = la txn d'upgrade pendant
         // l'event ; `result` déjà dispo (spec).
         if let Some(d) = req_data(e, Value::Obj(req)) {
-            d.borrow_mut().result = dbv;
-            d.borrow_mut().txn = txv;
+            d.borrow_mut().result = dbv.clone();
+            d.borrow_mut().txn = txv.clone();
         }
         // `Thrown(v)` → erreur de request (handler throw =
         // abort txn spec — approx : error sur la request).
@@ -2291,13 +2294,13 @@ fn put_op(
     // Unicité des index `unique` (recalcul depuis les records).
     if check_unique {
         for idef in st.indexes.values().filter(|i| i.unique) {
-            if let Some(iv) = key_path_value(e, value, &idef.key_path) {
+            if let Some(iv) = key_path_value(e, value.clone(), &idef.key_path) {
                 if let Some(nk) = idb_key_of(e, iv, 0) {
                     for (pk, rec) in &st.records {
                         if *pk == k {
                             continue;
                         }
-                        if let Some(ev2) = key_path_value(e, *rec, &idef.key_path) {
+                        if let Some(ev2) = key_path_value(e, rec.clone(), &idef.key_path) {
                             if idb_key_of(e, ev2, 0) == Some(nk.clone()) {
                                 return Err(idb_err(e, "ConstraintError", "unique index violated"));
                             }
@@ -2335,7 +2338,7 @@ fn query_op(
             None => st
                 .records
                 .iter()
-                .map(|(k, v)| (k.clone(), k.clone(), *v))
+                .map(|(k, v)| (k.clone(), k.clone(), v.clone()))
                 .collect(),
         }
     };
@@ -2353,9 +2356,9 @@ fn query_op(
     match what {
         QueryKind::One => Ok(filtered
             .first()
-            .map_or(Value::Undefined, |(_, _, v)| cl(e, *v))),
+            .map_or(Value::Undefined, |(_, _, v)| cl(e, v.clone()))),
         QueryKind::All => {
-            let vals: Vec<Value> = filtered.iter().map(|(_, _, v)| cl(e, *v)).collect();
+            let vals: Vec<Value> = filtered.iter().map(|(_, _, v)| cl(e, v.clone())).collect();
             Ok(e.new_array(vals))
         }
         QueryKind::Key => Ok(filtered.first().map_or(Value::Undefined, |(ik, pk, _)| {
@@ -2426,7 +2429,7 @@ fn cursor_open_op(
             None => st
                 .records
                 .iter()
-                .map(|(k, v)| (k.clone(), k.clone(), *v))
+                .map(|(k, v)| (k.clone(), k.clone(), v.clone()))
                 .collect(),
         }
     };
@@ -2535,7 +2538,7 @@ fn cursor_step_op(e: &mut Engine, cursor: ObjId, act: &CursorAct) -> Result<Valu
             else {
                 return Err(idb_err(e, "InvalidStateError", "store gone"));
             };
-            st.records.insert(pk.clone(), *v);
+            st.records.insert(pk.clone(), v.clone());
             Ok(pk.to_value(e))
         }
         CursorAct::Delete => {
@@ -2582,12 +2585,12 @@ pub(crate) fn deliver_idb_requests(e: &mut Engine) -> JsResult<usize> {
                 continue;
             }
             db.done = true;
-            (db.op.take(), db.txn)
+            (db.op.take(), db.txn.clone())
         };
         delivered += 1;
         let Some(op) = op else { continue };
         // Txn abortée → op sautée.
-        if let Some(td) = txn_data(e, txn_v) {
+        if let Some(td) = txn_data(e, txn_v.clone()) {
             if td.borrow().aborted {
                 continue;
             }
@@ -2612,15 +2615,15 @@ pub(crate) fn deliver_idb_requests(e: &mut Engine) -> JsResult<usize> {
                 fire_idb(e, fire_req, "success", None)?;
             }
             Err(err) => {
-                d.borrow_mut().error = err;
-                if let Some(td) = txn_data(e, txn_v) {
+                d.borrow_mut().error = err.clone();
+                if let Some(td) = txn_data(e, txn_v.clone()) {
                     td.borrow_mut().error = err;
                 }
                 fire_idb(e, req, "error", None)?;
             }
         }
         // `pending--` + `complete` quand la txn se vide.
-        if let Some(td) = txn_data(e, txn_v) {
+        if let Some(td) = txn_data(e, txn_v.clone()) {
             let mut tb = td.borrow_mut();
             if tb.pending != usize::MAX && tb.pending > 0 {
                 tb.pending -= 1;
@@ -2645,31 +2648,31 @@ impl Host for IdbReqHost {
     fn get(&self, e: &mut Engine, _t: Value, k: &str) -> JsResult<Option<Value>> {
         let d = self.d.borrow();
         Ok(match k {
-            "result" => Some(d.result),
-            "error" => Some(d.error),
+            "result" => Some(d.result.clone()),
+            "error" => Some(d.error.clone()),
             "readyState" => Some(e.str_val(if d.done { "done" } else { "pending" })),
-            "source" => Some(d.source),
-            "transaction" => Some(d.txn),
+            "source" => Some(d.source.clone()),
+            "transaction" => Some(d.txn.clone()),
             _ => None,
         })
     }
 
     fn trace(&self, out: &mut Vec<ObjId>) {
         let d = self.d.borrow();
-        crate::heap::push_value(out, d.result);
-        crate::heap::push_value(out, d.error);
-        crate::heap::push_value(out, d.source);
-        crate::heap::push_value(out, d.txn);
+        crate::heap::push_value(out, &d.result);
+        crate::heap::push_value(out, &d.error);
+        crate::heap::push_value(out, &d.source);
+        crate::heap::push_value(out, &d.txn);
         if let Some(op) = &d.op {
             match op {
                 IdbOp::Put { value, ctx, .. } => {
-                    crate::heap::push_value(out, *value);
+                    crate::heap::push_value(out, value);
                     if let Some(t) = &ctx.txn {
                         let tb = t.borrow();
                         if let Some(w) = tb.wrapper {
                             out.push(w);
                         }
-                        crate::heap::push_value(out, tb.db_wrapper);
+                        crate::heap::push_value(out, &tb.db_wrapper);
                     }
                 }
                 IdbOp::Query { ctx, .. }
@@ -2680,7 +2683,7 @@ impl Host for IdbReqHost {
                         if let Some(w) = tb.wrapper {
                             out.push(w);
                         }
-                        crate::heap::push_value(out, tb.db_wrapper);
+                        crate::heap::push_value(out, &tb.db_wrapper);
                     }
                 }
                 IdbOp::Cursor { ctx: cc, .. } => {
@@ -2692,13 +2695,13 @@ impl Host for IdbReqHost {
                         if let Some(w) = tb.wrapper {
                             out.push(w);
                         }
-                        crate::heap::push_value(out, tb.db_wrapper);
+                        crate::heap::push_value(out, &tb.db_wrapper);
                     }
                 }
                 IdbOp::CursorStep { cursor, act } => {
                     out.push(*cursor);
                     if let CursorAct::Update(v) = act {
-                        crate::heap::push_value(out, *v);
+                        crate::heap::push_value(out, v);
                     }
                 }
                 IdbOp::Open { .. } | IdbOp::DeleteDb { .. } => {}
@@ -2740,7 +2743,7 @@ impl Host for IdbDbHost {
     }
 
     fn trace(&self, out: &mut Vec<ObjId>) {
-        crate::heap::push_value(out, *self.upgrade_txn.borrow());
+        crate::heap::push_value(out, &self.upgrade_txn.borrow());
         trace_registry(&self.reg, out);
     }
 
@@ -2757,7 +2760,7 @@ impl Host for IdbTxnHost {
     fn get(&self, _e: &mut Engine, _t: Value, k: &str) -> JsResult<Option<Value>> {
         let d = self.d.borrow();
         Ok(match k {
-            "error" => Some(d.error),
+            "error" => Some(d.error.clone()),
             _ => None,
         })
     }
@@ -2767,8 +2770,8 @@ impl Host for IdbTxnHost {
         if let Some(w) = d.wrapper {
             out.push(w);
         }
-        crate::heap::push_value(out, d.db_wrapper);
-        crate::heap::push_value(out, d.error);
+        crate::heap::push_value(out, &d.db_wrapper);
+        crate::heap::push_value(out, &d.error);
     }
 
     fn class_name(&self) -> &'static str {
@@ -2787,8 +2790,8 @@ impl Host for IdbStoreHost {
             if let Some(w) = tb.wrapper {
                 out.push(w);
             }
-            crate::heap::push_value(out, tb.db_wrapper);
-            crate::heap::push_value(out, tb.error);
+            crate::heap::push_value(out, &tb.db_wrapper);
+            crate::heap::push_value(out, &tb.error);
         }
         trace_registry(&self.ctx.reg, out);
     }
@@ -2816,7 +2819,7 @@ impl Host for IdbCursorHost {
                 if d.key_only {
                     Some(Value::Undefined)
                 } else {
-                    d.current.as_ref().map(|(_, _, v)| *v)
+                    d.current.as_ref().map(|(_, _, v)| v.clone())
                 }
             }
             "direction" => Some(e.str_val(match d.dir {
@@ -2825,7 +2828,7 @@ impl Host for IdbCursorHost {
                 Dir::NextUnique => "nextunique",
                 Dir::PrevUnique => "prevunique",
             })),
-            "source" => Some(d.source),
+            "source" => Some(d.source.clone()),
             _ => None,
         })
     }
@@ -2833,19 +2836,19 @@ impl Host for IdbCursorHost {
     fn trace(&self, out: &mut Vec<ObjId>) {
         let d = self.d.borrow();
         for (_, _, v) in &d.items {
-            crate::heap::push_value(out, *v);
+            crate::heap::push_value(out, v);
         }
         if let Some((_, _, v)) = &d.current {
-            crate::heap::push_value(out, *v);
+            crate::heap::push_value(out, v);
         }
-        crate::heap::push_value(out, d.source);
+        crate::heap::push_value(out, &d.source);
         out.push(d.req);
         if let Some(t) = &d.ctx.txn {
             let tb = t.borrow();
             if let Some(w) = tb.wrapper {
                 out.push(w);
             }
-            crate::heap::push_value(out, tb.db_wrapper);
+            crate::heap::push_value(out, &tb.db_wrapper);
         }
     }
 
@@ -2916,7 +2919,11 @@ fn cache_data(e: &Engine, v: Value) -> Option<(CacheRegistry, String)> {
 fn cache_key(e: &mut Engine, req: Value) -> JsResult<String> {
     match req {
         Value::Obj(id) => {
-            if let Some(u) = e.get_prop(id, "url").and_then(|v| e.heap_string_of(v)) {
+            if let Some(u) = e
+                .get_prop(id, "url")
+                .as_ref()
+                .and_then(Engine::heap_string_of)
+            {
                 Ok(u)
             } else {
                 e.to_js_string(req)
@@ -3153,7 +3160,7 @@ fn cache_keys(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
         .map(|u| {
             let uv = e.str_val(u);
             // `new Request(url)` via le ctor partagé.
-            crate::xhr::request_of(e, uv).unwrap_or(uv)
+            crate::xhr::request_of(e, uv.clone()).unwrap_or(uv)
         })
         .collect();
     let arr = e.new_array(vals);
@@ -3206,7 +3213,7 @@ fn cache_add_all(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value>
     };
     let mut parts = Vec::with_capacity(list.len());
     for u in list {
-        parts.push(cache_add(e, this, &[u])?);
+        parts.push(cache_add(e, this.clone(), &[u])?);
     }
     let arr = e.new_array(parts);
     // `Promise.all(parts)` via le global.
@@ -3220,7 +3227,7 @@ fn cache_add_all(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value>
             }
         })
         .unwrap_or(Value::Undefined);
-    if e.is_callable(pall) {
+    if e.is_callable(pall.clone()) {
         return e.call_value(pall, Value::Undefined, &[arr]);
     }
     Ok(arr)
@@ -3269,7 +3276,7 @@ pub(crate) fn install_idb(e: &mut Engine, inject: Option<IdbRegistry>) {
         let fp = new_tagged_proto(e, "IDBFactory");
         if let Value::Obj(cid) = c {
             e.set_own(cid, "prototype", Value::Obj(fp), false);
-            e.set_own(fp, "constructor", c, false);
+            e.set_own(fp, "constructor", c.clone(), false);
         }
         e.set_own(g, "IDBFactory", c, false);
         if let Some(o) = e.heap.obj_mut(f) {
@@ -3286,7 +3293,7 @@ pub(crate) fn install_idb(e: &mut Engine, inject: Option<IdbRegistry>) {
         e.add_method(kid, "bound", kr_bound);
     }
     let kp = keyrange_proto(e);
-    e.link_ctor(kc, Some(kp));
+    e.link_ctor(kc.clone(), Some(kp));
     e.set_own(g, "IDBKeyRange", kc, false);
 
     install_idb_interfaces(e);
@@ -3339,7 +3346,7 @@ pub(crate) fn install_idb_interfaces(e: &mut Engine) {
         let c = e.native_fn(name, idb_illegal_ctor);
         if let Value::Obj(cid) = c {
             e.set_own(cid, "prototype", Value::Obj(proto), false);
-            e.set_own(proto, "constructor", c, false);
+            e.set_own(proto, "constructor", c.clone(), false);
         }
         e.set_own(e.global, name, c, false);
     }
@@ -3433,7 +3440,7 @@ impl Engine {
                         let mut recs = Vec::with_capacity(store.records.len());
                         for (k, v) in &store.records {
                             let kv = k.to_value(self);
-                            let ev = idb_val_encode(self, *v, 0);
+                            let ev = idb_val_encode(self, v.clone(), 0);
                             recs.push(self.new_array(vec![kv, ev]));
                         }
                         let ra = self.new_array(recs);
@@ -3632,14 +3639,14 @@ fn dom_string_list(e: &mut Engine, vals: Vec<Value>) -> Value {
 /// `list.contains(s)` — `true` si un élément est `SameValue`.
 fn dsl_contains(e: &mut Engine, this: Value, a: &[Value]) -> JsResult<Value> {
     let want = match a.first() {
-        Some(v) => *v,
+        Some(v) => v.clone(),
         None => return Ok(Value::Bool(false)),
     };
     if let Value::Obj(id) = this {
         if let Some(Value::Num(n)) = e.get_prop(id, "length") {
             for i in 0..n as u64 {
                 let el = e.get_prop(id, &i.to_string()).unwrap_or(Value::Undefined);
-                if e.strict_eq(el, want) {
+                if e.strict_eq(&el, &want) {
                     return Ok(Value::Bool(true));
                 }
             }

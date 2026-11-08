@@ -37,7 +37,7 @@ fn concat_churn_rss_vs_heap() {
             st.estimated_bytes,
             st.live_cells,
             st.gc_runs,
-            r.as_ref().map(|v| e.describe(*v))
+            r.as_ref().map(|v| e.describe(v.clone()))
         );
         if r.is_err() {
             break;
@@ -83,7 +83,7 @@ function dec(idx){ if(CACHE[idx]!==undefined) return CACHE[idx];
             e.slab_overhead_bytes(),
             st.live_cells,
             st.gc_runs,
-            r.as_ref().map(|v| e.describe(*v))
+            r.as_ref().map(|v| e.describe(v.clone()))
         );
         if r.is_err() {
             break;
@@ -117,7 +117,7 @@ fn eval_ast_retention_rss_vs_heap() {
             st.estimated_bytes,
             e.slab_overhead_bytes(),
             st.live_cells,
-            r.as_ref().map(|v| e.describe(*v))
+            r.as_ref().map(|v| e.describe(v.clone()))
         );
         if r.is_err() {
             break;

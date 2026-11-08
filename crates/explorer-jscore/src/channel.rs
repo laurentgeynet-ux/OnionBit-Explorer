@@ -31,10 +31,13 @@ use crate::heap::{Host, JsResult};
 use crate::value::Value;
 use crate::Engine;
 use std::cell::{Cell, RefCell};
+// `peer` est une `Value` (Rc) — pas `Cell` : `Cell::get`
+// exige `Copy` ; `RefCell` garde la même sémantique
+// single-threaded (JS-C420).
 use std::rc::Rc;
 
 fn arg(args: &[Value], i: usize) -> Value {
-    args.get(i).copied().unwrap_or(Value::Undefined)
+    args.get(i).cloned().unwrap_or(Value::Undefined)
 }
 
 /// Message en file pour un port — le `WireValue` est décodé à
@@ -55,10 +58,8 @@ fn port_method_trampoline(e: &mut Engine, _this: Value, args: &[Value]) -> JsRes
     let Some((Value::Str(m), rest)) = args.split_first() else {
         return Ok(Value::Undefined);
     };
-    let Some(name) = e.heap.string(*m) else {
-        return Ok(Value::Undefined);
-    };
-    let Some(Value::Obj(id)) = rest.first().copied() else {
+    let name = m.to_string();
+    let Some(Value::Obj(id)) = rest.first().cloned() else {
         return Ok(Value::Undefined);
     };
     let Some(h) = e.host_of(id) else {
@@ -73,7 +74,7 @@ fn port_method_trampoline(e: &mut Engine, _this: Value, args: &[Value]) -> JsRes
 /// `postMessage` clone-route vers le pair, `close` fige.
 struct PortHost {
     /// L'autre port du canal (`Value` traquée pour le GC).
-    peer: Cell<Value>,
+    peer: RefCell<Value>,
     /// `close()` appelé — poste et réception deviennent no-op
     /// (spec : `postMessage` sur port désentrelacé est
     /// silencieux ; les messages en file vers un port fermé
@@ -96,7 +97,7 @@ impl PortHost {
                 .borrow()
                 .iter()
                 .filter(|(t, _)| t == "message")
-                .map(|(_, f)| *f)
+                .map(|(_, f)| f.clone())
                 .collect(),
         )
     }
@@ -112,7 +113,7 @@ impl Host for PortHost {
     }
 
     fn trace(&self, out: &mut Vec<crate::value::ObjId>) {
-        if let Value::Obj(id) = self.peer.get() {
+        if let Value::Obj(id) = *self.peer.borrow() {
             out.push(id);
         }
         for (_, f) in self.listeners.borrow().iter() {
@@ -163,7 +164,7 @@ impl Host for PortHost {
                 }
                 e.sched_tick("post.port");
                 e.port_msgs.push_back(PortMsg {
-                    dest: self.peer.get(),
+                    dest: self.peer.borrow().clone(),
                     data,
                     ctx: e.current_context(),
                 });
@@ -178,7 +179,7 @@ impl Host for PortHost {
             "addEventListener" => {
                 let ty = e.to_js_string(arg(args, 0))?;
                 let f = arg(args, 1);
-                if e.is_callable(f) {
+                if e.is_callable(f.clone()) {
                     self.listeners.borrow_mut().push((ty, f));
                     // Un listener posé démarre le port (spec) —
                     // déjà vrai (démarrés à la création).
@@ -230,12 +231,12 @@ impl Engine {
     /// `pending_msgs`.
     fn new_port_pair(&mut self) -> (Value, Value) {
         let h1 = Rc::new(PortHost {
-            peer: Cell::new(Value::Undefined),
+            peer: RefCell::new(Value::Undefined),
             closed: Cell::new(false),
             listeners: RefCell::new(Vec::new()),
         });
         let h2 = Rc::new(PortHost {
-            peer: Cell::new(Value::Undefined),
+            peer: RefCell::new(Value::Undefined),
             closed: Cell::new(false),
             listeners: RefCell::new(Vec::new()),
         });
@@ -244,13 +245,13 @@ impl Engine {
         // `port instanceof MessagePort` — les instances
         // chaînent `MessagePort.prototype` (spec ;
         // `new_host_object` pose `Object.prototype`).
-        for pv in [p1, p2] {
+        for pv in [p1.clone(), p2.clone()] {
             if let Value::Obj(pid) = pv {
                 self.chain_port_proto(pid);
             }
         }
-        h1.peer.set(p2);
-        h2.peer.set(p1);
+        *h1.peer.borrow_mut() = p2.clone();
+        *h2.peer.borrow_mut() = p1.clone();
         (p1, p2)
     }
 
@@ -291,7 +292,7 @@ impl Engine {
             // EventTarget).
             let p = self.new_object();
             self.set_own(cid, "prototype", Value::Obj(p), false);
-            self.set_own(p, "constructor", v, false);
+            self.set_own(p, "constructor", v.clone(), false);
         }
         let g = self.global;
         self.set_own(g, "MessageChannel", v, false);
@@ -317,7 +318,7 @@ impl Engine {
         }
         if let Value::Obj(cid) = mp {
             self.set_own(cid, "prototype", Value::Obj(mp_proto), false);
-            self.set_own(mp_proto, "constructor", mp, false);
+            self.set_own(mp_proto, "constructor", mp.clone(), false);
         }
         self.set_own(g, "MessagePort", mp, false);
     }
@@ -363,8 +364,8 @@ impl Engine {
             let ty = self.str_val("message");
             self.set_own(ev, "type", ty, true);
             self.set_own(ev, "data", data, true);
-            self.set_own(ev, "target", m.dest, true);
-            self.set_own(ev, "currentTarget", m.dest, true);
+            self.set_own(ev, "target", m.dest.clone(), true);
+            self.set_own(ev, "currentTarget", m.dest.clone(), true);
             self.set_own(ev, "bubbles", Value::Bool(false), true);
             self.set_own(ev, "cancelable", Value::Bool(false), true);
             let ports = self.new_array(Vec::new());
@@ -374,13 +375,13 @@ impl Engine {
             // listeners du même type forment une file unique —
             // ici l'IDL précède, déviation mineure).
             if let Some(cb) = self.get_prop(id, "onmessage") {
-                if self.is_callable(cb) {
-                    self.call_value(cb, m.dest, &[evv])?;
+                if self.is_callable(cb.clone()) {
+                    self.call_value(cb, m.dest.clone(), std::slice::from_ref(&evv))?;
                 }
             }
             for f in listeners {
-                if self.is_callable(f) {
-                    self.call_value(f, m.dest, &[evv])?;
+                if self.is_callable(f.clone()) {
+                    self.call_value(f, m.dest.clone(), std::slice::from_ref(&evv))?;
                 }
             }
             n += 1;

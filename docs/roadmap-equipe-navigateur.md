@@ -10486,6 +10486,22 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
   tranche la matrice : temporaires droppés → `Rc<str>` ;
   stack-détenus → fix structurel ; site chaud unique → fix
   chirurgical. Verrou `str_census_names_dead_sites`.
+- [x] **JS-C420. Chaînes JS hors arène : `Value::Str(JsStr)`
+  refcount — les temporaries meurent mid-eval** (§B-114 —
+  tranché par JS-C419 : la concat `format!("{ls}{rs}")`
+  produisait ~99,99 % des octets morts, 555+ Mio entre
+  checkpoints, sweep impossible mid-eval). `JsStr` =
+  `Rc<StrBox>` + `Engine::str_acct` comptant la capacité
+  vivante, rendue exactement au `Drop` ; concat en place
+  `try_append` si la boîte est détenue seule. `Value`
+  non-`Copy` (16 o) → migration ~1 300 sites
+  `.clone()`/`&Value` ; `CellData::Str`/`alloc_str`/
+  `str_sites`/`str_census`/`over_limit` retirés ;
+  `mem_over`/`dead_hard`/`gc_debt` lisent `total_bytes()`
+  (heap + `str_acct`). Verrou `dead_cell_hard_cap_kills_eval`
+  réécrit : J4 tient tant que le vivant JsStr dépasse la
+  borne, `set_mem_limit(0)` ressuscite. Suites : lib 39/39,
+  lang 313/313, b59/b59b, clippy `-D warnings` propre.)
 
 ## Tâches continues
 

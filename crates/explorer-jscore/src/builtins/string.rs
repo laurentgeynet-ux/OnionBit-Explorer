@@ -25,7 +25,7 @@ pub(crate) fn string_char_at(e: &mut Engine, this: Value, args: &[Value]) -> JsR
     // chaîne entière par appel via `this_str` (churn commit).
     if let Value::Str(id) = this {
         let w = if i >= 0.0 {
-            e.heap.str_u16_at(id, i as usize)
+            id.u16_at(i as usize)
         } else {
             None
         };
@@ -56,7 +56,7 @@ pub(crate) fn string_char_code_at(e: &mut Engine, this: Value, args: &[Value]) -
     if let Value::Str(id) = this {
         return Ok(Value::Num(
             if i >= 0.0 {
-                e.heap.str_u16_at(id, i as usize).map(u32::from)
+                id.u16_at(i as usize).map(u32::from)
             } else {
                 None
             }
@@ -95,12 +95,10 @@ pub(crate) fn str_index_of(
     // `this_str` clonait toute la chaîne par appel (décodeur
     // Confiant `indexOf` × N = ratchet de commit géant).
     if let Value::Str(id) = this {
-        return Ok(Value::Num(
-            e.heap.str_index_of(id, &needle, from, last) as f64
-        ));
+        return Ok(Value::Num(id.index_of(&needle, from, last) as f64));
     }
     let s = this_str(e, this)?;
-    let byte_from = Heap::u16_pos_to_byte(&s, from);
+    let byte_from = JsStr::u16_pos_to_byte(&s, from);
     let pos = if needle.len() > s.len() {
         None
     } else if last {
@@ -137,7 +135,7 @@ pub(crate) fn str_slice(e: &mut Engine, s: &str, start: i64, end: Option<i64>) -
     if a >= b {
         return e.str_val("");
     }
-    let (ba, bb) = (Heap::u16_pos_to_byte(s, a), Heap::u16_pos_to_byte(s, b));
+    let (ba, bb) = (JsStr::u16_pos_to_byte(s, a), JsStr::u16_pos_to_byte(s, b));
     e.str_val(s[ba..bb].to_string())
 }
 
@@ -153,13 +151,13 @@ pub(crate) fn string_slice(e: &mut Engine, this: Value, args: &[Value]) -> JsRes
     // §B-59 : tranche lue en place — `this_str` clonait la
     // chaîne entière avant de n'en garder qu'un segment.
     if let Value::Str(id) = this {
-        let len = e.heap.str_u16_len(id).unwrap_or(0) as i64;
+        let len = id.u16_len() as i64;
         let a = norm_idx(start, len);
         let b = end.map_or(len as usize, |e2| norm_idx(e2, len));
         if a >= b {
             return Ok(e.str_val(""));
         }
-        return Ok(e.str_val(e.heap.str_slice_u16(id, a, b).unwrap_or_default()));
+        return Ok(e.str_val(id.slice_u16(a, b)));
     }
     let s = this_str(e, this)?;
     Ok(str_slice(e, &s, start, end))
@@ -168,7 +166,7 @@ pub(crate) fn string_slice(e: &mut Engine, this: Value, args: &[Value]) -> JsRes
 pub(crate) fn string_substring(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     // §B-59 : tranche lue en place (voir `string_slice`).
     if let Value::Str(id) = this {
-        let len = e.heap.str_u16_len(id).unwrap_or(0) as i64;
+        let len = id.u16_len() as i64;
         let a = match arg(args, 0) {
             Value::Undefined => 0,
             v => (e.to_number(v)? as i64).clamp(0, len),
@@ -178,11 +176,7 @@ pub(crate) fn string_substring(e: &mut Engine, this: Value, args: &[Value]) -> J
             v => (e.to_number(v)? as i64).clamp(0, len),
         };
         let (lo, hi) = if a <= b { (a, b) } else { (b, a) };
-        return Ok(e.str_val(
-            e.heap
-                .str_slice_u16(id, lo as usize, hi as usize)
-                .unwrap_or_default(),
-        ));
+        return Ok(e.str_val(id.slice_u16(lo as usize, hi as usize)));
     }
     let s = this_str(e, this)?;
     let len = u16_len(&s) as i64;
@@ -196,8 +190,8 @@ pub(crate) fn string_substring(e: &mut Engine, this: Value, args: &[Value]) -> J
     };
     let (lo, hi) = if a <= b { (a, b) } else { (b, a) };
     let (ba, bb) = (
-        Heap::u16_pos_to_byte(&s, lo as usize),
-        Heap::u16_pos_to_byte(&s, hi as usize),
+        JsStr::u16_pos_to_byte(&s, lo as usize),
+        JsStr::u16_pos_to_byte(&s, hi as usize),
     );
     Ok(e.str_val(s[ba..bb].to_string()))
 }
@@ -205,7 +199,7 @@ pub(crate) fn string_substring(e: &mut Engine, this: Value, args: &[Value]) -> J
 pub(crate) fn string_substr(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     // §B-59 : tranche lue en place (voir `string_slice`).
     if let Value::Str(id) = this {
-        let len = e.heap.str_u16_len(id).unwrap_or(0) as i64;
+        let len = id.u16_len() as i64;
         let mut start = match arg(args, 0) {
             Value::Undefined => 0,
             v => e.to_number(v)? as i64,
@@ -221,11 +215,7 @@ pub(crate) fn string_substr(e: &mut Engine, this: Value, args: &[Value]) -> JsRe
         if start >= end {
             return Ok(e.str_val(""));
         }
-        return Ok(e.str_val(
-            e.heap
-                .str_slice_u16(id, start as usize, end as usize)
-                .unwrap_or_default(),
-        ));
+        return Ok(e.str_val(id.slice_u16(start as usize, end as usize)));
     }
     let s = this_str(e, this)?;
     let len = u16_len(&s) as i64;
@@ -245,8 +235,8 @@ pub(crate) fn string_substr(e: &mut Engine, this: Value, args: &[Value]) -> JsRe
         return Ok(e.str_val(""));
     }
     let (ba, bb) = (
-        Heap::u16_pos_to_byte(&s, start as usize),
-        Heap::u16_pos_to_byte(&s, end as usize),
+        JsStr::u16_pos_to_byte(&s, start as usize),
+        JsStr::u16_pos_to_byte(&s, end as usize),
     );
     Ok(e.str_val(s[ba..bb].to_string()))
 }
@@ -267,7 +257,7 @@ pub(crate) fn string_trim(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult
 }
 
 pub(crate) fn string_split(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
-    let s = this_str(e, this)?;
+    let s = this_str(e, this.clone())?;
     // `sep[Symbol.split](this, limit)` (spec `GetMethod`).
     if let Some(v) = sym_method(
         e,
@@ -284,7 +274,7 @@ pub(crate) fn string_split(e: &mut Engine, this: Value, args: &[Value]) -> JsRes
     let mut parts: Vec<String> = match arg(args, 0) {
         Value::Undefined => vec![s],
         v => {
-            if let Some(re) = re_of(e, v) {
+            if let Some(re) = re_of(e, v.clone()) {
                 // Regex split inserts capture groups between pieces.
                 if limit == 0 {
                     return Ok(arr_of(e, Vec::new()));
@@ -335,23 +325,28 @@ pub(crate) fn replace_impl(
     args: &[Value],
     all: bool,
 ) -> JsResult<Value> {
-    let s = this_str(e, this)?;
+    let s = this_str(e, this.clone())?;
     let pat = arg(args, 0);
     let rep = arg(args, 1);
     // Spec `replaceAll` : un pattern RegExp sans `g` est rejeté
     // AVANT le dispatch `@@replace` (`IsRegExp` + flags).
     if all {
-        if let Some(re) = re_of(e, pat) {
+        if let Some(re) = re_of(e, pat.clone()) {
             if !re.global {
                 return Err(e.type_error("replaceAll requires a global regex"));
             }
         }
     }
     // `pat[Symbol.replace](this, rep)` (spec `GetMethod`).
-    if let Some(v) = sym_method(e, pat, crate::interp::SYM_REPLACE, &[this, rep])? {
+    if let Some(v) = sym_method(
+        e,
+        pat.clone(),
+        crate::interp::SYM_REPLACE,
+        &[this, rep.clone()],
+    )? {
         return Ok(v);
     }
-    if let Some(re) = re_of(e, pat) {
+    if let Some(re) = re_of(e, pat.clone()) {
         return re_replace_impl(e, &re, &s, rep);
     }
     // String pattern — first occurrence (or all for replaceAll).
@@ -379,7 +374,7 @@ pub(crate) fn replace_impl(
         out.push_str(&s[cur..pos]);
         out.push_str(&expand_rep(
             e,
-            rep,
+            rep.clone(),
             &[],
             &[],
             &s[..pos],
@@ -408,7 +403,7 @@ pub(crate) fn as_regexp(
     e: &mut Engine,
     v: Value,
 ) -> JsResult<(std::rc::Rc<crate::regexp::JsRegExp>, ObjId)> {
-    if let Some(r) = re_of(e, v) {
+    if let Some(r) = re_of(e, v.clone()) {
         let Value::Obj(id) = v else {
             return Err(e.type_error("not a RegExp"));
         };
@@ -522,7 +517,7 @@ pub(crate) fn splice_matches(
     matches: &[crate::regexp::ExecMatch],
     rep: Value,
 ) -> JsResult<Value> {
-    let use_fn = e.is_callable(rep);
+    let use_fn = e.is_callable(rep.clone());
     if std::env::var("DBG_DRIVE").is_ok() {
         eprintln!(
             "[splice] matches={} use_fn={} s.len={}",
@@ -570,12 +565,12 @@ pub(crate) fn splice_matches(
                 }
                 call_args.push(Value::Obj(gobj));
             }
-            let r = e.call_value(rep, Value::Undefined, &call_args)?;
+            let r = e.call_value(rep.clone(), Value::Undefined, &call_args)?;
             out.push_str(&e.to_js_string(r)?);
         } else {
             out.push_str(&expand_rep(
                 e,
-                rep,
+                rep.clone(),
                 &m.groups,
                 &m.named,
                 &s[..m.start_b],
@@ -658,7 +653,7 @@ pub(crate) fn regexp_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult
     // `new RegExp(re)` clones the pattern; `RegExp(str, flags)`.
     let (pat, flags) = match arg(args, 0) {
         v @ Value::Obj(_) => {
-            if let Some(r) = re_of(e, v) {
+            if let Some(r) = re_of(e, v.clone()) {
                 let flags = match arg(args, 1) {
                     Value::Undefined => r.flag_string(),
                     f => e.to_js_string(f)?,
@@ -763,7 +758,7 @@ pub(crate) fn regexp_to_string(e: &mut Engine, this: Value, _a: &[Value]) -> JsR
 }
 
 pub(crate) fn string_match(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
-    let s = this_str(e, this)?;
+    let s = this_str(e, this.clone())?;
     // `rx[Symbol.match](this)` (spec `GetMethod`).
     if let Some(v) = sym_method(e, arg(args, 0), crate::interp::SYM_MATCH, &[this])? {
         return Ok(v);
@@ -773,7 +768,7 @@ pub(crate) fn string_match(e: &mut Engine, this: Value, args: &[Value]) -> JsRes
 }
 
 pub(crate) fn string_search(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
-    let s = this_str(e, this)?;
+    let s = this_str(e, this.clone())?;
     // `rx[Symbol.search](this)` (spec `GetMethod`).
     if let Some(v) = sym_method(e, arg(args, 0), crate::interp::SYM_SEARCH, &[this])? {
         return Ok(v);
@@ -788,7 +783,7 @@ pub(crate) fn string_search(e: &mut Engine, this: Value, args: &[Value]) -> JsRe
 pub(crate) fn string_concat(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let mut s = this_str(e, this)?;
     for a in args {
-        s.push_str(&e.to_js_string(*a)?);
+        s.push_str(&e.to_js_string(a.clone())?);
     }
     Ok(e.str_val(s))
 }
@@ -803,7 +798,7 @@ pub(crate) fn string_from_char_code(e: &mut Engine, _t: Value, args: &[Value]) -
     e.alloc_guard(args.len().saturating_mul(4))?;
     let mut units = Vec::with_capacity(args.len());
     for a in args {
-        units.push(e.to_number(*a)? as u16);
+        units.push(e.to_number(a.clone())? as u16);
     }
     Ok(e.str_val(u16_to_string(&units)))
 }

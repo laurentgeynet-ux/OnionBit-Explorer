@@ -393,7 +393,7 @@ impl MseState {
         }
         for (t, _, tr) in &self.pending_track_events {
             ids.push(*t);
-            crate::heap::push_value(ids, *tr);
+            crate::heap::push_value(ids, tr);
         }
         // Promesses `play()` pendantes pré-claim (§B-88) —
         // le tir différé ne doit pas trouver un wrapper
@@ -609,7 +609,7 @@ struct TrackListHost {
 fn track_obj(e: &mut Engine, d: &Rc<RefCell<SbData>>, idx: usize, sb: Value) -> Option<Value> {
     {
         let sd = d.borrow();
-        if let Some(o) = sd.tracks.get(idx).and_then(|t| t.obj) {
+        if let Some(o) = sd.tracks.get(idx).and_then(|t| t.obj.clone()) {
             return Some(o);
         }
     }
@@ -628,7 +628,7 @@ fn track_obj(e: &mut Engine, d: &Rc<RefCell<SbData>>, idx: usize, sb: Value) -> 
         if let Some(o) = e.heap.obj_mut(id) {
             o.proto = Value::Obj(proto);
         }
-        d.borrow_mut().tracks[idx].obj = Some(v);
+        d.borrow_mut().tracks[idx].obj = Some(v.clone());
     }
     Some(v)
 }
@@ -657,8 +657,8 @@ fn detached_track_obj(e: &mut Engine, d: &Rc<RefCell<SbData>>, sb: Value, snap: 
 /// `addsourcebuffer` sur `sourceBuffers`).
 fn track_list(e: &mut Engine, d: &Rc<RefCell<SbData>>, list: &'static str) -> Value {
     let i = list_idx(list);
-    if let Some(l) = d.borrow().track_lists[i] {
-        return l;
+    if let Some(ref l) = d.borrow().track_lists[i] {
+        return l.clone();
     }
     let lp = track_list_proto(e, list);
     let v = e.new_host_object(Rc::new(TrackListHost { d: d.clone(), list }));
@@ -666,7 +666,7 @@ fn track_list(e: &mut Engine, d: &Rc<RefCell<SbData>>, list: &'static str) -> Va
         if let Some(o) = e.heap.obj_mut(id) {
             o.proto = Value::Obj(lp);
         }
-        d.borrow_mut().track_lists[i] = Some(v);
+        d.borrow_mut().track_lists[i] = Some(v.clone());
     }
     v
 }
@@ -860,7 +860,7 @@ fn mse_push(e: &mut Engine, mid: ObjId, ty: &'static str) {
 /// dans le realm du `MediaSource` parent de la liste.
 fn track_push(e: &mut Engine, lid: ObjId, ty: &'static str, track: Value) {
     let owner = track_list_data(e, lid).and_then(|d| {
-        let ms = d.borrow().ms;
+        let ms = d.borrow().ms.clone();
         let Value::Obj(mid) = ms else { return None };
         ms_ctx(e, mid)
     });
@@ -926,7 +926,7 @@ pub(crate) fn is_media_source(e: &Engine, v: Value) -> bool {
 /// `readyState` du `MediaSource` parent (`sd.ms` = wrapper) —
 /// `None` = parent mort (orphelin, traité comme `closed`).
 fn parent_state(e: &Engine, sd: &SbData) -> Option<&'static str> {
-    ms_data(e, sd.ms).map(|ms| ms.borrow().ready_state)
+    ms_data(e, sd.ms.clone()).map(|ms| ms.borrow().ready_state)
 }
 
 /// Garde `updating` spec (JS-C325) : un appel re-entrant
@@ -957,7 +957,7 @@ fn reopen_if_ended(e: &mut Engine, sd: &SbData) {
     if parent_state(e, sd) != Some("ended") {
         return;
     }
-    let Some(ms) = ms_data(e, sd.ms) else {
+    let Some(ms) = ms_data(e, sd.ms.clone()) else {
         return;
     };
     ms.borrow_mut().ready_state = "open";
@@ -982,7 +982,7 @@ fn mse_event(e: &mut Engine, ty: &str, target: Value) -> Value {
     let o = e.new_object();
     let t = e.str_val(ty);
     e.set_own(o, "type", t, true);
-    e.set_own(o, "target", target, true);
+    e.set_own(o, "target", target.clone(), true);
     e.set_own(o, "currentTarget", target, true);
     Value::Obj(o)
 }
@@ -1009,8 +1009,8 @@ fn fire_track_event(e: &mut Engine, list: ObjId, ty: &'static str, track: Value)
 fn dispatch_mse_event(e: &mut Engine, target: ObjId, ty: &str, ev: Value) -> JsResult<()> {
     let key = format!("on{ty}");
     if let Some(f) = e.get_prop(target, &key) {
-        if e.is_callable(f) {
-            e.call_value(f, Value::Obj(target), &[ev])?;
+        if e.is_callable(f.clone()) {
+            e.call_value(f, Value::Obj(target), std::slice::from_ref(&ev))?;
         }
     }
     if let Some(Value::Obj(map)) = e.get_prop(target, "__et") {
@@ -1021,8 +1021,8 @@ fn dispatch_mse_event(e: &mut Engine, target: ObjId, ty: &str, ev: Value) -> JsR
             };
             for i in 0..len {
                 if let Some(cb) = e.get_prop(l, &i.to_string()) {
-                    if e.is_callable(cb) {
-                        e.call_value(cb, Value::Obj(target), &[ev])?;
+                    if e.is_callable(cb.clone()) {
+                        e.call_value(cb, Value::Obj(target), std::slice::from_ref(&ev))?;
                     }
                 }
             }
@@ -1233,8 +1233,8 @@ fn time_ranges(e: &mut Engine, ranges: Vec<(f64, f64)>) -> Value {
 
 /// Wrapper `SourceBufferList` caché sur le `MediaSource`.
 fn buffer_list(e: &mut Engine, d: &Rc<RefCell<MsData>>) -> Value {
-    if let Some(l) = d.borrow().list {
-        return l;
+    if let Some(ref l) = d.borrow().list {
+        return l.clone();
     }
     let lp = sbl_proto(e);
     let v = e.new_host_object(Rc::new(SbListHost { d: d.clone() }));
@@ -1242,7 +1242,7 @@ fn buffer_list(e: &mut Engine, d: &Rc<RefCell<MsData>>) -> Value {
         if let Some(o) = e.heap.obj_mut(id) {
             o.proto = Value::Obj(lp);
         }
-        d.borrow_mut().list = Some(v);
+        d.borrow_mut().list = Some(v.clone());
     }
     v
 }
@@ -1430,7 +1430,7 @@ fn media_probe_log(site: &str, mime: &str, verdict: &str, declared_n: usize) {
 }
 
 fn ms_is_type_supported(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
-    let mime = e.to_js_string(args.first().copied().unwrap_or(Value::Undefined))?;
+    let mime = e.to_js_string(args.first().cloned().unwrap_or(Value::Undefined))?;
     // §B-95 (JS-C345) — verdict trois niveaux partagé avec
     // `canPlayType` : liste `codecs=` entièrement déclarée →
     // `"probably"` (les players qui l'exigent n'étaient jamais
@@ -1571,13 +1571,13 @@ fn codecs_param(mime: &str) -> Option<String> {
 /// la liste. Permis quel que soit `readyState` (déviation
 /// documentée — voir en-tête de module).
 fn ms_add_source_buffer(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
-    let Some(d) = ms_data(e, this) else {
+    let Some(d) = ms_data(e, this.clone()) else {
         return Err(e.type_error("MediaSource.addSourceBuffer: Illegal invocation"));
     };
-    let Some(&v) = args.first() else {
+    let Some(v) = args.first() else {
         return Err(e.type_error("MediaSource.addSourceBuffer: 1 argument required"));
     };
-    let mime = e.to_js_string(v)?;
+    let mime = e.to_js_string(v.clone())?;
     // Sonde §B-102 — création de buffer : mime + n° d'index
     // (la chaîne SABR narrée en vol — deux buffers attendus
     // av+opus sur `YouTube`).
@@ -1632,7 +1632,7 @@ fn ms_add_source_buffer(e: &mut Engine, this: Value, args: &[Value]) -> JsResult
         if let Some(o) = e.heap.obj_mut(id) {
             o.proto = Value::Obj(sp);
         }
-        d.borrow_mut().buffers.push(v);
+        d.borrow_mut().buffers.push(v.clone());
     }
     // `addsourcebuffer` sur la liste (spec) — la liste est
     // matérialisée pour porter l'événement même si le site ne
@@ -1648,8 +1648,8 @@ fn ms_remove_source_buffer(e: &mut Engine, this: Value, args: &[Value]) -> JsRes
     let Some(d) = ms_data(e, this) else {
         return Err(e.type_error("MediaSource.removeSourceBuffer: Illegal invocation"));
     };
-    let v = args.first().copied().unwrap_or(Value::Undefined);
-    if sb_data(e, v).is_none() {
+    let v = args.first().cloned().unwrap_or(Value::Undefined);
+    if sb_data(e, v.clone()).is_none() {
         return Err(e.type_error("MediaSource.removeSourceBuffer: not a SourceBuffer"));
     }
     let pos = {
@@ -1686,14 +1686,14 @@ fn ms_remove_source_buffer(e: &mut Engine, this: Value, args: &[Value]) -> JsRes
 /// double appel est un no-op propre (`sourceended` non
 /// re-filé).
 fn ms_end_of_stream(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
-    let Some(d) = ms_data(e, this) else {
+    let Some(d) = ms_data(e, this.clone()) else {
         return Err(e.type_error("MediaSource.endOfStream: Illegal invocation"));
     };
     // Sonde §B-102 — fin de flux demandée par le player.
     tracing::info!(target: "media_probe", site = "mse.endOfStream");
     // Spec : un `SourceBuffer` `updating` → InvalidStateError.
     for sbv in &d.borrow().buffers {
-        let Some(sd) = sb_data(e, *sbv) else {
+        let Some(sd) = sb_data(e, sbv.clone()) else {
             continue;
         };
         if sd.borrow().updating {
@@ -1707,7 +1707,7 @@ fn ms_end_of_stream(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Val
     let kind = match args.first() {
         None | Some(Value::Undefined) => None,
         Some(v) => {
-            let s = e.to_js_string(*v)?;
+            let s = e.to_js_string(v.clone())?;
             match s.as_str() {
                 "network" | "decode" => Some(s),
                 _ => return Err(e.type_error("MediaSource.endOfStream: bad error name")),
@@ -1779,7 +1779,7 @@ fn deliver_eos_error(e: &mut Engine, mid: ObjId, kind: &str) -> JsResult<()> {
     };
     let mv = e.str_val(&msg);
     for p in pids {
-        e.reject_promise(p, mv);
+        e.reject_promise(p, mv.clone());
     }
     e.dispatch_media(&dom, &cache, node, "error")
 }
@@ -1790,8 +1790,8 @@ fn ms_set_live_range(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Va
     let Some(d) = ms_data(e, this) else {
         return Err(e.type_error("MediaSource.setLiveSeekableRange: Illegal invocation"));
     };
-    let s = e.to_number(args.first().copied().unwrap_or(Value::Undefined))?;
-    let t = e.to_number(args.get(1).copied().unwrap_or(Value::Undefined))?;
+    let s = e.to_number(args.first().cloned().unwrap_or(Value::Undefined))?;
+    let t = e.to_number(args.get(1).cloned().unwrap_or(Value::Undefined))?;
     if !(0.0..=t).contains(&s) {
         return Err(e.type_error("MediaSource.setLiveSeekableRange: bad range"));
     }
@@ -2192,10 +2192,10 @@ fn est_append_range(sd: &mut SbData) -> Option<(f64, f64)> {
 /// `update` synchrones, `updateend` **filé en tâche** (JS-C349) ;
 /// le cap d'octets jette `QuotaExceededError` (budget hostile).
 fn sb_append_buffer(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
-    let Some(d) = sb_data(e, this) else {
+    let Some(d) = sb_data(e, this.clone()) else {
         return Err(e.type_error("SourceBuffer.appendBuffer: Illegal invocation"));
     };
-    let v = args.first().copied().unwrap_or(Value::Undefined);
+    let v = args.first().cloned().unwrap_or(Value::Undefined);
     let Some(bytes) = crate::typed_array::bytes_of_value(e, v) else {
         return Err(
             e.type_error("SourceBuffer.appendBuffer: argument is not an ArrayBuffer or view")
@@ -2329,8 +2329,8 @@ fn sb_append_buffer(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Val
     // l'`appendBuffer` d'init doit voir `addtrack`).
     for (snap, ty, idx) in track_ops {
         let track_v = match idx {
-            Some(i) => track_obj(e, &d, i, this).unwrap_or(Value::Null),
-            None => detached_track_obj(e, &d, this, snap.clone()),
+            Some(i) => track_obj(e, &d, i, this.clone()).unwrap_or(Value::Null),
+            None => detached_track_obj(e, &d, this.clone(), snap.clone()),
         };
         if let Value::Obj(lid) = track_list(e, &d, snap.list) {
             track_push(e, lid, ty, track_v);
@@ -2386,7 +2386,7 @@ fn sb_append_buffer(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Val
                         }
                         let (init, dur) = (m.init_seen, m.duration);
                         for sbv in &m.buffers {
-                            if let Some(sd2) = sb_data(e, *sbv) {
+                            if let Some(sd2) = sb_data(e, sbv.clone()) {
                                 for &(a, b) in &sd2.borrow().est_ranges {
                                     end = end.max(b);
                                     if a <= 0.0 && b > 0.0 {
@@ -2464,7 +2464,7 @@ fn sb_append_buffer(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Val
 /// modèle est atomique, les players bouclent sur
 /// `updateend` pour armer la suite).
 fn sb_abort(e: &mut Engine, this: Value, _args: &[Value]) -> JsResult<Value> {
-    let Some(d) = sb_data(e, this) else {
+    let Some(d) = sb_data(e, this.clone()) else {
         return Err(e.type_error("SourceBuffer.abort: Illegal invocation"));
     };
     {
@@ -2490,11 +2490,11 @@ fn sb_abort(e: &mut Engine, this: Value, _args: &[Value]) -> JsResult<Value> {
 /// `sb.remove(start, end)` — accepté : `buffered` est vide, il
 /// n'y a rien à évincer ; la séquence d'événements est tirée.
 fn sb_remove(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
-    let Some(d) = sb_data(e, this) else {
+    let Some(d) = sb_data(e, this.clone()) else {
         return Err(e.type_error("SourceBuffer.remove: Illegal invocation"));
     };
-    let s = e.to_number(args.first().copied().unwrap_or(Value::Undefined))?;
-    let t = e.to_number(args.get(1).copied().unwrap_or(Value::Undefined))?;
+    let s = e.to_number(args.first().cloned().unwrap_or(Value::Undefined))?;
+    let t = e.to_number(args.get(1).cloned().unwrap_or(Value::Undefined))?;
     if !(s.is_finite() && s >= 0.0) || t <= s {
         return Err(e.type_error("SourceBuffer.remove: bad range"));
     }
@@ -2587,7 +2587,7 @@ fn sb_change_type(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value
     let Some(d) = sb_data(e, this) else {
         return Err(e.type_error("SourceBuffer.changeType: Illegal invocation"));
     };
-    let mime = e.to_js_string(args.first().copied().unwrap_or(Value::Undefined))?;
+    let mime = e.to_js_string(args.first().cloned().unwrap_or(Value::Undefined))?;
     let mut sd = d.borrow_mut();
     sb_updating_guard(e, &sd, "changeType")?;
     if !e.mse.declared_codecs.is_empty() && !mse_type_supported(e, &mime) {
@@ -2612,7 +2612,7 @@ fn tr_bound(e: &mut Engine, this: Value, args: &[Value], start: bool) -> JsResul
     let Some(ranges) = tr_ranges(e, this) else {
         return Err(e.type_error("TimeRanges: Illegal invocation"));
     };
-    let i = e.to_number(args.first().copied().unwrap_or(Value::Undefined))?;
+    let i = e.to_number(args.first().cloned().unwrap_or(Value::Undefined))?;
     if !(i >= 0.0 && i.fract() == 0.0) {
         return Err(e.type_error("TimeRanges: index out of range"));
     }
@@ -2899,7 +2899,7 @@ impl Engine {
     ) -> Option<MsePullOut> {
         let mid = self.mse.object_urls.get(url).copied()?;
         let ms = ms_data(self, Value::Obj(mid))?;
-        let sbv = ms.borrow().buffers.get(buffer).copied()?;
+        let sbv = ms.borrow().buffers.get(buffer).cloned()?;
         let sd = sb_data(self, sbv)?;
         let mut sd = sd.borrow_mut();
         if let Some(f) = from {
@@ -3101,7 +3101,7 @@ impl Host for MsHost {
                 (md.buffers.clone(), md.duration)
             };
             for sbv in &buffers {
-                let Some(sd) = sb_data(e, *sbv) else {
+                let Some(sd) = sb_data(e, sbv.clone()) else {
                     continue;
                 };
                 if sd.borrow().updating {
@@ -3114,7 +3114,7 @@ impl Host for MsHost {
             }
             if old.is_finite() && n < old {
                 for sbv in &buffers {
-                    let Some(sd) = sb_data(e, *sbv) else {
+                    let Some(sd) = sb_data(e, sbv.clone()) else {
                         continue;
                     };
                     let mut s = sd.borrow_mut();
@@ -3157,9 +3157,9 @@ impl Host for MsHost {
     fn trace(&self, out: &mut Vec<ObjId>) {
         let d = self.d.borrow();
         for b in &d.buffers {
-            crate::heap::push_value(out, *b);
+            crate::heap::push_value(out, b);
         }
-        if let Some(l) = d.list {
+        if let Some(ref l) = d.list {
             crate::heap::push_value(out, l);
         }
     }
@@ -3261,16 +3261,16 @@ impl Host for SbHost {
 
     fn trace(&self, out: &mut Vec<ObjId>) {
         let d = self.d.borrow();
-        crate::heap::push_value(out, d.ms);
+        crate::heap::push_value(out, &d.ms);
         // JS-C327 — wrappers piste/liste cachés : racinés
         // tant que le buffer vit (identité stable garantie).
         for t in &d.tracks {
-            if let Some(o) = t.obj {
+            if let Some(ref o) = t.obj {
                 crate::heap::push_value(out, o);
             }
         }
         for l in d.track_lists.iter().flatten() {
-            crate::heap::push_value(out, *l);
+            crate::heap::push_value(out, l);
         }
     }
 
@@ -3290,7 +3290,7 @@ impl Host for SbListHost {
             return Ok(Some(Value::Num(d.buffers.len() as f64)));
         }
         if let Ok(i) = k.parse::<usize>() {
-            return Ok(d.buffers.get(i).copied());
+            return Ok(d.buffers.get(i).cloned());
         }
         Ok(None)
     }
@@ -3298,7 +3298,7 @@ impl Host for SbListHost {
     fn trace(&self, out: &mut Vec<ObjId>) {
         let d = self.d.borrow();
         for b in &d.buffers {
-            crate::heap::push_value(out, *b);
+            crate::heap::push_value(out, b);
         }
     }
 
@@ -3381,7 +3381,7 @@ impl Host for TrackHost {
             "inBandMetadataTrackDispatchType" if snap.list == "text" => Some(e.str_val("")),
             // MSE spec — `track.sourceBuffer` = le buffer
             // d'origine (`null` hors MSE ; ici toujours posé).
-            "sourceBuffer" => Some(self.sb),
+            "sourceBuffer" => Some(self.sb.clone()),
             _ => None,
         })
     }
@@ -3436,8 +3436,8 @@ impl Host for TrackHost {
     }
 
     fn trace(&self, out: &mut Vec<ObjId>) {
-        crate::heap::push_value(out, self.sb);
-        if let Some(o) = self.snap.obj {
+        crate::heap::push_value(out, &self.sb);
+        if let Some(ref o) = self.snap.obj {
             crate::heap::push_value(out, o);
         }
     }
@@ -3496,9 +3496,9 @@ impl Host for TrackListHost {
 
     fn trace(&self, out: &mut Vec<ObjId>) {
         let d = self.d.borrow();
-        crate::heap::push_value(out, d.ms);
+        crate::heap::push_value(out, &d.ms);
         for t in &d.tracks {
-            if let Some(o) = t.obj {
+            if let Some(ref o) = t.obj {
                 crate::heap::push_value(out, o);
             }
         }
@@ -3522,13 +3522,13 @@ impl Host for TrackListHost {
 /// stocke pas (le wrapper se trouve dans `MsData.buffers`) :
 /// on la résout via le parent.
 fn sb_value(e: &Engine, d: &Rc<RefCell<SbData>>) -> Value {
-    let ms = d.borrow().ms;
+    let ms = d.borrow().ms.clone();
     ms_data(e, ms).map_or(Value::Undefined, |m| {
         m.borrow()
             .buffers
             .iter()
-            .copied()
-            .find(|&b| sb_data(e, b).is_some_and(|s| std::rc::Rc::ptr_eq(&s, d)))
+            .find(|&b| sb_data(e, b.clone()).is_some_and(|s| std::rc::Rc::ptr_eq(&s, d)))
+            .cloned()
             .unwrap_or(Value::Undefined)
     })
 }
@@ -3550,7 +3550,7 @@ fn tl_get_track_by_id(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<V
         return Err(e.type_error("TrackList.getTrackById: Illegal invocation"));
     };
     let want = match args.first() {
-        Some(v) => e.to_js_string(*v)?,
+        Some(v) => e.to_js_string(v.clone())?,
         None => return Ok(Value::Null),
     };
     let idx = {
@@ -3585,7 +3585,7 @@ pub(crate) fn install_mse(e: &mut Engine) {
     if let Value::Obj(fid) = fv {
         e.set_own(fid, "prototype", Value::Obj(mp), false);
         if let Some(o) = e.heap.obj_mut(mp) {
-            o.set_own("constructor", fv, false);
+            o.set_own("constructor", fv.clone(), false);
         }
         e.add_method(fid, "isTypeSupported", ms_is_type_supported);
     }
@@ -3753,7 +3753,9 @@ mod tests {
         // pas de ctx sur un `this` non-global → tourne sous
         // `cur_ctx` : le parasite. L'init `moov` (payload non
         // vide pour `walk_boxes`) monte `loadedmetadata`.
-        let append = e.get_prop_value(sbv, "appendBuffer").expect("method");
+        let append = e
+            .get_prop_value(sbv.clone(), "appendBuffer")
+            .expect("method");
         let bytes = b"\x00\x00\x00\x10moov\x00\x00\x00\x08free";
         let arr = format!("new Uint8Array({bytes:?}).buffer");
         let ab = e.eval(&arr).expect("buffer");

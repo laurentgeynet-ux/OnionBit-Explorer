@@ -15,7 +15,7 @@ use crate::value::Value;
 use crate::Engine;
 
 fn arg(args: &[Value], i: usize) -> Value {
-    args.get(i).copied().unwrap_or(Value::Undefined)
+    args.get(i).cloned().unwrap_or(Value::Undefined)
 }
 
 // ------------------------------------------------------------------
@@ -281,7 +281,7 @@ pub(crate) fn stringify(e: &mut Engine, v: Value) -> JsResult<Value> {
 pub(crate) fn json_parse(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     let v = parse(e, arg(args, 0))?;
     let reviver = arg(args, 1);
-    if !e.is_callable(reviver) {
+    if !e.is_callable(reviver.clone()) {
         return Ok(v);
     }
     // Reviver (spec `InternalizeJSONProperty`) : parcours
@@ -316,9 +316,9 @@ fn internalize_inner(
     name: Value,
     reviver: Value,
 ) -> JsResult<Value> {
-    let key = match name {
-        Value::Str(sid) => e.heap.string(sid).unwrap_or_default(),
-        Value::Num(n) => crate::value::num_to_js_string(n),
+    let key = match &name {
+        Value::Str(sid) => sid.to_string(),
+        Value::Num(n) => crate::value::num_to_js_string(*n),
         _ => String::new(),
     };
     let val = e
@@ -334,7 +334,7 @@ fn internalize_inner(
         };
         for k in keys {
             let kval = e.str_val(k.clone());
-            let sub = internalize(e, oid, kval, reviver)?;
+            let sub = internalize(e, oid, kval, reviver.clone())?;
             if matches!(sub, Value::Undefined) {
                 e.delete_result(oid, &k)?;
             } else {
@@ -407,8 +407,7 @@ fn json_write(
             }
         }
         Value::Str(id) => {
-            let s = e.heap.string(id).unwrap_or_default();
-            esc_str(out, &s);
+            esc_str(out, &id);
         }
         // Spec `SerializeJSONProperty` : BigInt → TypeError.
         Value::Big(_) => return Err(e.type_error("do not know how to serialize a BigInt")),
@@ -426,7 +425,7 @@ fn json_write(
                 }
             });
             if let Some(Value::Str(rid)) = raw {
-                let s = e.heap.string(rid).unwrap_or_default();
+                let s = rid.to_string();
                 out.push_str(&s);
                 return Ok(true);
             }
@@ -440,8 +439,8 @@ fn json_write(
             }
             // `toJSON` hook.
             if let Some(f) = e.get_prop(id, "toJSON") {
-                if e.is_callable(f) {
-                    let v2 = e.call_value(f, v, &[])?;
+                if e.is_callable(f.clone()) {
+                    let v2 = e.call_value(f, v.clone(), &[])?;
                     return json_write(e, out, v2, space, indent, depth + 1, cx);
                 }
             }
@@ -465,9 +464,9 @@ fn json_write(
                         .find_own(id, &i.to_string())
                         .and_then(|p| p.data_value())
                         .unwrap_or(Value::Undefined);
-                    if let Some(rp) = cx.replacer {
+                    if let Some(rp) = cx.replacer.clone() {
                         let kv = e.str_val(i.to_string());
-                        el = e.call_value(rp, v, &[kv, el])?;
+                        el = e.call_value(rp, v.clone(), &[kv, el])?;
                     }
                     if !json_write(e, out, el, space, indent + 1, depth + 1, cx)? {
                         out.push_str("null"); // undefined → null in arrays
@@ -493,9 +492,9 @@ fn json_write(
                     let Some(mut val) = e.find_own(id, &k).and_then(|p| p.data_value()) else {
                         continue;
                     };
-                    if let Some(rp) = cx.replacer {
+                    if let Some(rp) = cx.replacer.clone() {
                         let kv = e.str_val(k.clone());
-                        val = e.call_value(rp, v, &[kv, val])?;
+                        val = e.call_value(rp, v.clone(), &[kv, val])?;
                     }
                     // Skip undefined/functions/symbols in values.
                     if matches!(val, Value::Undefined) {
@@ -540,7 +539,7 @@ fn json_write(
 /// objet/tableau → `SyntaxError`.
 fn json_raw_json(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     let text = match arg(args, 0) {
-        Value::Str(id) => e.heap.string(id).unwrap_or_default(),
+        Value::Str(id) => id.to_string(),
         _ => {
             return Err(e.type_error("JSON.rawJSON expects a string"));
         }
@@ -588,13 +587,13 @@ fn json_stringify(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> 
     // clés (`PropertyList` : strings/numbers → ToString, dédup).
     let rep = arg(args, 1);
     let mut plist: Option<Vec<String>> = None;
-    let replacer = if e.is_callable(rep) {
+    let replacer = if e.is_callable(rep.clone()) {
         Some(rep)
     } else {
-        if let Value::Obj(pid) = rep {
+        if let Value::Obj(pid) = rep.clone() {
             if matches!(e.heap.obj(pid).map(|o| &o.kind), Some(ObjKind::Array(_))) {
                 let n = e
-                    .get_prop_value(rep, "length")
+                    .get_prop_value(rep.clone(), "length")
                     .ok()
                     .and_then(|v| match v {
                         Value::Num(n) => Some(n as usize),
@@ -603,9 +602,9 @@ fn json_stringify(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> 
                     .unwrap_or(0);
                 let mut list: Vec<String> = Vec::new();
                 for i in 0..n {
-                    let ev = e.get_prop_value(rep, &i.to_string())?;
+                    let ev = e.get_prop_value(rep.clone(), &i.to_string())?;
                     let k = match ev {
-                        Value::Str(sid) => e.heap.string(sid).unwrap_or_default(),
+                        Value::Str(sid) => sid.to_string(),
                         Value::Num(nv) => crate::value::num_to_js_string(nv),
                         // Wrapper String/Number → ToString.
                         Value::Obj(_) => match e.to_js_string(ev) {
@@ -628,16 +627,10 @@ fn json_stringify(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> 
     // ToString (spec).
     let space = match arg(args, 2) {
         Value::Num(n) => " ".repeat((n as usize).min(10)),
-        Value::Str(id) => e
-            .heap
-            .string(id)
-            .unwrap_or_default()
-            .chars()
-            .take(10)
-            .collect(),
+        Value::Str(id) => id.chars().take(10).collect(),
         Value::Obj(_) => {
             let v = arg(args, 2);
-            if let Ok(n) = e.to_number(v) {
+            if let Ok(n) = e.to_number(v.clone()) {
                 " ".repeat((n as usize).min(10))
             } else {
                 e.to_js_string(v)
@@ -652,10 +645,10 @@ fn json_stringify(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> 
     let cx = Ctx { replacer, plist };
     // Racine : holder `{"": v}` — le replacer y est appelé avec
     // la clé `""` (spec `SerializeJSONProperty` sur la racine).
-    let mut root = v;
-    if let Some(rp) = cx.replacer {
+    let mut root = v.clone();
+    if let Some(rp) = cx.replacer.clone() {
         let holder = e.new_object();
-        e.set_own(holder, "", v, true);
+        e.set_own(holder, "", v.clone(), true);
         let kv = e.str_val("");
         root = e.call_value(rp, Value::Obj(holder), &[kv, v])?;
     }

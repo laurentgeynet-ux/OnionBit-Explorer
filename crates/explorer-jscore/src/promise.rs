@@ -42,7 +42,7 @@ pub enum PromiseState {
 /// polyfills, le `FakePromise` de la détection core-js) →
 /// `resolve`/`reject` callables capturés par l'exécuteur
 /// capability, appelés au settle.
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub enum ThenSink {
     /// Capacité `%Promise%` — `resolve_promise`/`settle_promise`.
     Native(ObjId),
@@ -366,7 +366,7 @@ impl Engine {
             }
             p.state = state;
             self.promises_settled += 1;
-            p.result = result;
+            p.result = result.clone();
             let u = state == PromiseState::Rejected && !p.handled;
             (std::mem::take(&mut p.reactions), u)
         };
@@ -377,7 +377,8 @@ impl Engine {
         // silencieux). Le host session draine
         // `unhandled_reports` pour le ring console.
         if unhandled {
-            self.pending_unhandled.push((Value::Obj(id), result));
+            self.pending_unhandled
+                .push((Value::Obj(id), result.clone()));
         }
         if std::env::var("EXPLORER_PROM_TRACE").is_ok() && !reactions.is_empty() {
             eprintln!("[settle] reactions={}", reactions.len());
@@ -393,7 +394,7 @@ impl Engine {
                     } else {
                         r.on_fulfilled
                     },
-                    arg: result,
+                    arg: result.clone(),
                     rejected,
                     next: r.next,
                 },
@@ -420,7 +421,7 @@ impl Engine {
         };
         match s {
             Value::Undefined | Value::Null => Ok(Value::Obj(self.protos.promise_ctor)),
-            s if self.is_callable(s) => Ok(s),
+            s if self.is_callable(s.clone()) => Ok(s),
             _ => Err(self.type_error("SpeciesConstructor: @@species is not a constructor")),
         }
     }
@@ -446,7 +447,7 @@ impl Engine {
         let exec = self.bound_native(
             "promise capability executor",
             promise_cap_executor,
-            vec![slot],
+            vec![slot.clone()],
         );
         let promise = self.construct(c, &[exec])?;
         let (resolve, reject) = match slot {
@@ -456,7 +457,7 @@ impl Engine {
             ),
             _ => (Value::Undefined, Value::Undefined),
         };
-        if !self.is_callable(resolve) || !self.is_callable(reject) {
+        if !self.is_callable(resolve.clone()) || !self.is_callable(reject.clone()) {
             return Err(
                 self.type_error("promise capability: executor did not capture resolve/reject")
             );
@@ -498,14 +499,14 @@ impl Engine {
             self.settle_promise(id, PromiseState::Rejected, e);
             return;
         }
-        if self.is_promise(v) {
+        if self.is_promise(v.clone()) {
             // Adopt `v`: subscribe our own resolve/reject — re-entering
             // resolve_promise handles thenable chains naturally.
             let Value::Obj(vid) = v else { return };
             let (state, result) = {
                 let Some(o) = self.heap.obj(vid) else { return };
                 let ObjKind::Promise(p) = &o.kind else { return };
-                (p.state, p.result)
+                (p.state, p.result.clone())
             };
             match state {
                 PromiseState::Pending => {
@@ -517,7 +518,7 @@ impl Engine {
                     let (my_resolve, my_reject) = {
                         let Some(o) = self.heap.obj(id) else { return };
                         let ObjKind::Promise(p) = &o.kind else { return };
-                        (p.resolve_fn, p.reject_fn)
+                        (p.resolve_fn.clone(), p.reject_fn.clone())
                     };
                     self.sched_tick("then");
                     if let Some(o) = self.heap.obj_mut(vid) {
@@ -546,7 +547,7 @@ impl Engine {
             return;
         }
         // Thenable adoption: `obj.then` callable → deferred call.
-        if self.adopt_thenable(id, v) {
+        if self.adopt_thenable(id, v.clone()) {
             return;
         }
         self.settle_promise(id, PromiseState::Fulfilled, v);
@@ -566,7 +567,7 @@ impl Engine {
         if !matches!(v, Value::Obj(_)) {
             return false;
         }
-        let then_fn = match self.get_prop_value(v, "then") {
+        let then_fn = match self.get_prop_value(v.clone(), "then") {
             Ok(f) => f,
             Err(Thrown(t)) => {
                 self.reject_promise(id, t);
@@ -574,9 +575,12 @@ impl Engine {
             }
         };
         if std::env::var("EXPLORER_PROM_TRACE").is_ok() {
-            eprintln!("[res-thenable] callable={}", self.is_callable(then_fn));
+            eprintln!(
+                "[res-thenable] callable={}",
+                self.is_callable(then_fn.clone())
+            );
         }
-        if !self.is_callable(then_fn) {
+        if !self.is_callable(then_fn.clone()) {
             return false;
         }
         let (resolve, reject) = {
@@ -586,7 +590,7 @@ impl Engine {
             let ObjKind::Promise(p) = &o.kind else {
                 return true;
             };
-            (p.resolve_fn, p.reject_fn)
+            (p.resolve_fn.clone(), p.reject_fn.clone())
         };
         self.sched_tick("post.thenable");
         self.microtasks.push_back((
@@ -816,12 +820,12 @@ impl Engine {
                         Job::Reaction { cb, rejected, .. } => format!(
                             "reaction{} {}",
                             if *rejected { "-rej" } else { "-ok" },
-                            self.job_cb_desc(*cb)
+                            self.job_cb_desc(cb.clone())
                         ),
                         Job::Thenable { then_fn, .. } => {
-                            format!("thenable {}", self.job_cb_desc(*then_fn))
+                            format!("thenable {}", self.job_cb_desc(then_fn.clone()))
                         }
-                        Job::Plain(f) => format!("plain {}", self.job_cb_desc(*f)),
+                        Job::Plain(f) => format!("plain {}", self.job_cb_desc(f.clone())),
                     };
                     tracing::info!("job: mt ctx={ctx} {desc}");
                 }
@@ -832,7 +836,7 @@ impl Engine {
                         rejected,
                         next,
                     } => {
-                        if self.is_callable(cb) {
+                        if self.is_callable(cb.clone()) {
                             match self.call_value(cb, Value::Undefined, &[arg]) {
                                 Ok(v) => self.sink_resolve(next, v)?,
                                 Err(Thrown(t)) => {
@@ -843,7 +847,7 @@ impl Engine {
                                     // le `.then` webpack post-import
                                     // raté, `define` jamais atteint).
                                     if std::env::var("EXPLORER_PROM_TRACE").is_ok() {
-                                        eprintln!("[prom-cb-throw] {}", self.describe(t));
+                                        eprintln!("[prom-cb-throw] {}", self.describe(t.clone()));
                                     }
                                     self.sink_reject(next, t)?;
                                 }
@@ -852,7 +856,7 @@ impl Engine {
                             // Pass-through: `then()` without a handler for
                             // this outcome forwards state/result as-is.
                             if rejected && std::env::var("EXPLORER_PROM_TRACE").is_ok() {
-                                eprintln!("[prom-unhandled] {}", self.describe(arg));
+                                eprintln!("[prom-unhandled] {}", self.describe(arg.clone()));
                             }
                             if rejected {
                                 self.sink_reject(next, arg)?;
@@ -867,7 +871,9 @@ impl Engine {
                         resolve,
                         reject,
                     } => {
-                        if let Err(Thrown(t)) = self.call_value(then_fn, this, &[resolve, reject]) {
+                        if let Err(Thrown(t)) =
+                            self.call_value(then_fn, this, &[resolve.clone(), reject.clone()])
+                        {
                             let _ = self.call_value(reject, Value::Undefined, &[t]);
                         }
                     }
@@ -1106,7 +1112,7 @@ impl Engine {
             // JS-C272 — `[object Object]` remplacé par le
             // descripteur `Object@@tag`/`Object{clés}` (§B-14
             // vol 529 hltb — payload opaque ×4).
-            let desc = self.describe_rejection(reason);
+            let desc = self.describe_rejection(reason.clone());
             if desc == last_desc {
                 same_desc += 1;
                 continue;
@@ -1143,8 +1149,8 @@ impl Engine {
             let ev = self.new_object();
             let ty = self.str_val("unhandledrejection");
             self.set_own(ev, "type", ty, true);
-            self.set_own(ev, "promise", pv, true);
-            self.set_own(ev, "reason", reason, true);
+            self.set_own(ev, "promise", pv.clone(), true);
+            self.set_own(ev, "reason", reason.clone(), true);
             self.set_own(ev, "defaultPrevented", Value::Bool(false), true);
             let pd = self.native_fn("preventDefault", rejection_prevent_default);
             self.set_own(ev, "preventDefault", pd, true);
@@ -1154,8 +1160,8 @@ impl Engine {
             // `addEventListener('unhandledrejection', …)` (`__et`).
             let onh = self.get_prop(self.global, "onunhandledrejection");
             if let Some(f) = onh {
-                if self.is_callable(f) {
-                    let _ = self.call_value(f, g, &[ev]);
+                if self.is_callable(f.clone()) {
+                    let _ = self.call_value(f, g.clone(), std::slice::from_ref(&ev));
                 }
             }
             if let Some(Value::Obj(map)) = self.get_prop(self.global, "__et") {
@@ -1166,8 +1172,8 @@ impl Engine {
                     };
                     for i in 0..len {
                         if let Some(cb) = self.get_prop(l, &i.to_string()) {
-                            if self.is_callable(cb) {
-                                let _ = self.call_value(cb, g, &[ev]);
+                            if self.is_callable(cb.clone()) {
+                                let _ = self.call_value(cb, g.clone(), std::slice::from_ref(&ev));
                             }
                         }
                     }
@@ -1221,20 +1227,20 @@ fn rejection_prevent_default(e: &mut Engine, this: Value, _a: &[Value]) -> JsRes
 
 /// `resolve` bound native: `bound = [promise_id]`.
 fn promise_resolve(e: &mut Engine, _this: Value, args: &[Value]) -> JsResult<Value> {
-    let Some(Value::Obj(id)) = args.first().copied() else {
+    let Some(Value::Obj(id)) = args.first().cloned() else {
         return Err(e.type_error("resolve: missing promise"));
     };
-    let v = args.get(1).copied().unwrap_or(Value::Undefined);
+    let v = args.get(1).cloned().unwrap_or(Value::Undefined);
     e.resolve_promise(id, v);
     Ok(Value::Undefined)
 }
 
 /// `reject` bound native: `bound = [promise_id]`.
 fn promise_reject(e: &mut Engine, _this: Value, args: &[Value]) -> JsResult<Value> {
-    let Some(Value::Obj(id)) = args.first().copied() else {
+    let Some(Value::Obj(id)) = args.first().cloned() else {
         return Err(e.type_error("reject: missing promise"));
     };
-    let v = args.get(1).copied().unwrap_or(Value::Undefined);
+    let v = args.get(1).cloned().unwrap_or(Value::Undefined);
     e.reject_promise(id, v);
     Ok(Value::Undefined)
 }
@@ -1243,12 +1249,12 @@ fn promise_reject(e: &mut Engine, _this: Value, args: &[Value]) -> JsResult<Valu
 
 /// `new Promise(executor)`.
 fn promise_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
-    let executor = args.first().copied().unwrap_or(Value::Undefined);
-    if !e.is_callable(executor) {
+    let executor = args.first().cloned().unwrap_or(Value::Undefined);
+    if !e.is_callable(executor.clone()) {
         return Err(e.type_error("Promise resolver is not a function"));
     }
     let id = e.new_promise();
-    e.probe_prom_src(id, executor);
+    e.probe_prom_src(id, executor.clone());
     let (resolve, reject) = {
         let Some(o) = e.heap.obj(id) else {
             return Err(e.type_error("internal promise error"));
@@ -1256,7 +1262,7 @@ fn promise_ctor(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
         let ObjKind::Promise(p) = &o.kind else {
             return Err(e.type_error("internal promise error"));
         };
-        (p.resolve_fn, p.reject_fn)
+        (p.resolve_fn.clone(), p.reject_fn.clone())
     };
     if let Err(Thrown(t)) = e.call_value(executor, Value::Undefined, &[resolve, reject]) {
         e.reject_promise(id, t);
@@ -1297,8 +1303,8 @@ fn promise_then(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> 
     let Value::Obj(id) = this else {
         return Err(e.type_error("then called on non-promise"));
     };
-    let on_f = args.first().copied().unwrap_or(Value::Undefined);
-    let on_r = args.get(1).copied().unwrap_or(Value::Undefined);
+    let on_f = args.first().cloned().unwrap_or(Value::Undefined);
+    let on_r = args.get(1).cloned().unwrap_or(Value::Undefined);
     // Spec `PerformPromiseThen` : `C = SpeciesConstructor(this,
     // %Promise%)`, `next = NewPromiseCapability(C)` — le ctor de
     // résultat se lit via `constructor`/`@@species` (JS-C280 —
@@ -1320,7 +1326,7 @@ fn promise_then(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> 
         // promesse (même sans handler — le rejet propage à la
         // chaîne) ; coupe `unhandledrejection` sur `.then` tardif.
         p.handled = true;
-        (p.state, p.result)
+        (p.state, p.result.clone())
     };
     match state {
         PromiseState::Pending => {
@@ -1361,9 +1367,9 @@ fn promise_catch(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value>
 /// Bound `finally` handler — `bound = [cb]`; fulfill path returns the
 /// original value after running `cb`.
 fn promise_finally_ok(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
-    let cb = args.first().copied().unwrap_or(Value::Undefined);
-    let v = args.get(1).copied().unwrap_or(Value::Undefined);
-    if e.is_callable(cb) {
+    let cb = args.first().cloned().unwrap_or(Value::Undefined);
+    let v = args.get(1).cloned().unwrap_or(Value::Undefined);
+    if e.is_callable(cb.clone()) {
         e.call_value(cb, this, &[])?;
     }
     Ok(v)
@@ -1371,9 +1377,9 @@ fn promise_finally_ok(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<V
 
 /// Bound `finally` handler — reject path rethrows the reason.
 fn promise_finally_err(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
-    let cb = args.first().copied().unwrap_or(Value::Undefined);
-    let v = args.get(1).copied().unwrap_or(Value::Undefined);
-    if e.is_callable(cb) {
+    let cb = args.first().cloned().unwrap_or(Value::Undefined);
+    let v = args.get(1).cloned().unwrap_or(Value::Undefined);
+    if e.is_callable(cb.clone()) {
         e.call_value(cb, this, &[])?;
     }
     Err(Thrown(v))
@@ -1382,7 +1388,7 @@ fn promise_finally_err(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<
 /// `p.finally(cb)`.
 fn promise_finally(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let cb = arg(args, 0);
-    let ok = e.bound_native("finally", promise_finally_ok, vec![cb]);
+    let ok = e.bound_native("finally", promise_finally_ok, vec![cb.clone()]);
     let err = e.bound_native("finally", promise_finally_err, vec![cb]);
     promise_then(e, this, &[ok, err])
 }
@@ -1393,11 +1399,11 @@ fn promise_finally(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Valu
 /// classe rend une instance de Q (JS-C280).
 fn promise_static_resolve(e: &mut Engine, this: Value, args: &[Value]) -> JsResult<Value> {
     let v = arg(args, 0);
-    if e.is_promise(v) {
+    if e.is_promise(v.clone()) {
         // `v.constructor === C` → `v` renvoyée (spec) — le `Get`
         // peut jeter (accesseur hostile) : propagé.
-        if let Ok(c) = e.get_prop_value(v, "constructor") {
-            if matches!((c, this), (Value::Obj(a), Value::Obj(b)) if a == b) {
+        if let Ok(c) = e.get_prop_value(v.clone(), "constructor") {
+            if matches!((c, this.clone()), (Value::Obj(a), Value::Obj(b)) if a == b) {
                 return Ok(v);
             }
         }
@@ -1465,7 +1471,7 @@ fn promise_all(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     e.set_own(state, "results", Value::Obj(results), false);
     e.set_own(state, "target", Value::Obj(id), false);
     for (i, v) in vals.into_iter().enumerate() {
-        let pv = if e.is_promise(v) {
+        let pv = if e.is_promise(v.clone()) {
             v
         } else {
             let pid = e.new_promise();
@@ -1482,7 +1488,7 @@ fn promise_all(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
             let ObjKind::Promise(p) = &o.kind else {
                 continue;
             };
-            p.reject_fn
+            p.reject_fn.clone()
         };
         promise_then(e, pv, &[on_f, on_r])?;
     }
@@ -1491,18 +1497,18 @@ fn promise_all(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
 
 /// `all` per-element fulfill — `bound = [state, index]`.
 fn promise_all_fulfill(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
-    let Some(Value::Obj(state)) = args.first().copied() else {
+    let Some(Value::Obj(state)) = args.first().cloned() else {
         return Err(e.type_error("all: missing state"));
     };
-    let i = e.to_number(args.get(1).copied().unwrap_or(Value::Num(0.0)))? as usize;
-    let v = args.get(2).copied().unwrap_or(Value::Undefined);
+    let i = e.to_number(args.get(1).cloned().unwrap_or(Value::Num(0.0)))? as usize;
+    let v = args.get(2).cloned().unwrap_or(Value::Undefined);
     let (results, target) = {
         let r = e.get_prop(state, "results").unwrap_or(Value::Undefined);
         let t = e.get_prop(state, "target").unwrap_or(Value::Undefined);
         (r, t)
     };
-    if let (Value::Obj(rid), Value::Obj(tid)) = (results, target) {
-        if let Some(o) = e.heap.obj_mut(rid) {
+    if let (Value::Obj(rid), Value::Obj(tid)) = (&results, &target) {
+        if let Some(o) = e.heap.obj_mut(*rid) {
             if let ObjKind::Array(elems) = &mut o.kind {
                 if let Some(slot) = elems.get_mut(i) {
                     *slot = v;
@@ -1515,7 +1521,7 @@ fn promise_all_fulfill(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Va
             - 1.0;
         e.set_own(state, "remaining", Value::Num(rem), false);
         if rem <= 0.0 {
-            e.resolve_promise(tid, results);
+            e.resolve_promise(*tid, results);
         }
     }
     Ok(Value::Undefined)
@@ -1532,11 +1538,11 @@ fn promise_race(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
         let ObjKind::Promise(p) = &o.kind else {
             return Err(e.type_error("internal promise error"));
         };
-        (p.resolve_fn, p.reject_fn)
+        (p.resolve_fn.clone(), p.reject_fn.clone())
     };
     for v in vals {
-        if e.is_promise(v) {
-            promise_then(e, v, &[resolve, reject])?;
+        if e.is_promise(v.clone()) {
+            promise_then(e, v, &[resolve.clone(), reject.clone()])?;
         } else {
             e.resolve_promise(id, v);
         }
@@ -1563,7 +1569,7 @@ fn promise_all_settled(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Va
     e.set_own(state, "results", Value::Obj(results), false);
     e.set_own(state, "target", Value::Obj(id), false);
     for (i, v) in vals.into_iter().enumerate() {
-        let pv = if e.is_promise(v) {
+        let pv = if e.is_promise(v.clone()) {
             v
         } else {
             let pid = e.new_promise();
@@ -1588,11 +1594,11 @@ fn promise_all_settled(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Va
 /// `allSettled` slot writer — `bound = [state, index]`, the slot
 /// value comes as arg, `ok` picks `value` vs `reason` key.
 fn all_settled_slot(e: &mut Engine, args: &[Value], key: &'static str) -> JsResult<()> {
-    let Some(Value::Obj(state)) = args.first().copied() else {
+    let Some(Value::Obj(state)) = args.first().cloned() else {
         return Err(e.type_error("allSettled: missing state"));
     };
-    let i = e.to_number(args.get(1).copied().unwrap_or(Value::Num(0.0)))? as usize;
-    let v = args.get(2).copied().unwrap_or(Value::Undefined);
+    let i = e.to_number(args.get(1).cloned().unwrap_or(Value::Num(0.0)))? as usize;
+    let v = args.get(2).cloned().unwrap_or(Value::Undefined);
     let slot = e.new_object();
     let status = e.str_val(if key == "value" {
         "fulfilled"
@@ -1607,8 +1613,8 @@ fn all_settled_slot(e: &mut Engine, args: &[Value], key: &'static str) -> JsResu
             e.get_prop(state, "target").unwrap_or(Value::Undefined),
         )
     };
-    if let (Value::Obj(rid), Value::Obj(tid)) = (results, target) {
-        if let Some(o) = e.heap.obj_mut(rid) {
+    if let (Value::Obj(rid), Value::Obj(tid)) = (&results, &target) {
+        if let Some(o) = e.heap.obj_mut(*rid) {
             if let ObjKind::Array(elems) = &mut o.kind {
                 if let Some(s) = elems.get_mut(i) {
                     *s = Value::Obj(slot);
@@ -1621,7 +1627,7 @@ fn all_settled_slot(e: &mut Engine, args: &[Value], key: &'static str) -> JsResu
             - 1.0;
         e.set_own(state, "remaining", Value::Num(rem), false);
         if rem <= 0.0 {
-            e.resolve_promise(tid, results);
+            e.resolve_promise(*tid, results);
         }
     }
     Ok(())
@@ -1652,7 +1658,7 @@ fn promise_any(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     e.set_own(state, "target", Value::Obj(id), false);
     e.set_own(state, "errors", arr, false);
     for (i, v) in vals.into_iter().enumerate() {
-        let pv = if e.is_promise(v) {
+        let pv = if e.is_promise(v.clone()) {
             v
         } else {
             let pid = e.new_promise();
@@ -1664,7 +1670,7 @@ fn promise_any(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
             let ObjKind::Promise(p) = &o.kind else {
                 continue;
             };
-            p.resolve_fn
+            p.resolve_fn.clone()
         };
         let on_r = e.bound_native(
             "any",
@@ -1694,11 +1700,11 @@ fn aggregate(e: &mut Engine, errors: Vec<Value>) -> Value {
 /// `any` reject bookkeeping — raisons collectées en `errors[i]` ;
 /// la dernière produit l'`AggregateError`.
 fn promise_any_reject(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
-    let Some(Value::Obj(state)) = args.first().copied() else {
+    let Some(Value::Obj(state)) = args.first().cloned() else {
         return Err(e.type_error("any: missing state"));
     };
-    let i = e.to_number(args.get(1).copied().unwrap_or(Value::Num(0.0)))? as usize;
-    let reason = args.get(2).copied().unwrap_or(Value::Undefined);
+    let i = e.to_number(args.get(1).cloned().unwrap_or(Value::Num(0.0)))? as usize;
+    let reason = args.get(2).cloned().unwrap_or(Value::Undefined);
     let (target, errors) = {
         let t = e.get_prop(state, "target").unwrap_or(Value::Undefined);
         let r = e.get_prop(state, "errors").unwrap_or(Value::Undefined);
@@ -1741,7 +1747,7 @@ fn promise_with_resolvers(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<V
         let ObjKind::Promise(p) = &o.kind else {
             return Err(e.type_error("internal promise error"));
         };
-        (p.resolve_fn, p.reject_fn)
+        (p.resolve_fn.clone(), p.reject_fn.clone())
     };
     let out = e.new_object();
     e.set_own(out, "promise", Value::Obj(id), true);
@@ -1769,7 +1775,7 @@ fn promise_try(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
 /// Callback `then` de `Promise.try` — bound `[f, ...extras]`,
 /// appelle `f(...extras)` et laisse `then` adopter le retour.
 fn promise_try_call(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
-    let f = args.first().copied().unwrap_or(Value::Undefined);
+    let f = args.first().cloned().unwrap_or(Value::Undefined);
     let end = args.len().saturating_sub(1).max(1);
     let extras: Vec<Value> = args.get(1..end).unwrap_or(&[]).to_vec();
     e.call_value(f, Value::Undefined, &extras)
@@ -1778,7 +1784,7 @@ fn promise_try_call(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value
 /// `queueMicrotask(f)`.
 fn queue_microtask(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value> {
     let f = arg(args, 0);
-    if !e.is_callable(f) {
+    if !e.is_callable(f.clone()) {
         return Err(e.type_error("queueMicrotask: not a function"));
     }
     e.enqueue_microtask(f);
@@ -1786,7 +1792,7 @@ fn queue_microtask(e: &mut Engine, _t: Value, args: &[Value]) -> JsResult<Value>
 }
 
 fn arg(args: &[Value], i: usize) -> Value {
-    args.get(i).copied().unwrap_or(Value::Undefined)
+    args.get(i).cloned().unwrap_or(Value::Undefined)
 }
 
 /// Install `Promise`/`queueMicrotask` on the global object.
@@ -1798,12 +1804,12 @@ pub(crate) fn install(e: &mut Engine) {
     e.add_method(rp, "finally", promise_finally);
     let ctor = e.native_fn("Promise", promise_ctor);
     e.set_own(
-        crate::promise::c_id(ctor),
+        crate::promise::c_id(ctor.clone()),
         "prototype",
         Value::Obj(rp),
         false,
     );
-    e.set_own(rp, "constructor", ctor, false);
+    e.set_own(rp, "constructor", ctor.clone(), false);
     if let Value::Obj(cid) = ctor {
         // `%Promise%` intrinsèque du realm — défaut de
         // `SpeciesConstructor`, résistant à la réécriture de
