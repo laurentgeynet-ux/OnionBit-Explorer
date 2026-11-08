@@ -726,6 +726,25 @@ pub struct Engine {
     /// Seuil `bytes` du prochain re-marquage sous `gc_due`
     /// (voir ci-dessus). `0` = inactif.
     pub(crate) gc_cap: usize,
+    /// JS-C424 — ligne de basse du backoff safepoint :
+    /// `total_bytes()` mesuré à la fin de la dernière passe
+    /// safepoint (`usize::MAX` = jamais passé). Une nouvelle
+    /// passe n'est servie qu'après `gc_debt << gc_sp_shift`
+    /// octets de croissance **au-dessus de cette basse** — le
+    /// seuil absolu `total > gc_debt` réarmait `gc_due` en
+    /// permanence dès que le vivant + churn épinglé par
+    /// `young_floor` restaient au-dessus (vol 713 : 2 550
+    /// passes à ~45 Hz sur `kevlar_base`, 95,4 % du span en
+    /// mark/sweep sans rien récupérer). Glisse vers le bas si
+    /// `total` retombe sous la basse (collecte de frontière).
+    pub(crate) gc_sp_floor: usize,
+    /// Exposant du backoff safepoint — `0..=4` (×1 → ×16 la
+    /// dette). Incrémenté quand une passe libère moins que
+    /// `gc_debt/4` (futile : le churn est épinglé par
+    /// `young_floor` sous un appel monolithique) ; remis à 0
+    /// quand une passe libère vraiment (pression réelle — la
+    /// cadence normale se reprend).
+    pub(crate) gc_sp_shift: u8,
     /// Octets de source cumulés passés par `eval`/`Function`
     /// (§B-59 bras 3 : chaque éval dynamique retient son AST
     /// `Rc<FnLit>` via les cellules `Fun` — masse native hors
@@ -1161,6 +1180,8 @@ impl Engine {
             rss_watch_last: 0,
             nat_stack: Vec::new(),
             gc_cap: 0,
+            gc_sp_floor: usize::MAX,
+            gc_sp_shift: 0,
             eval_src_bytes: 0,
             eval_src_cap: std::env::var("EXPLORER_JS_EVAL_SRC_CAP")
                 .ok()
@@ -4590,6 +4611,11 @@ impl Engine {
     /// récupération sûre.
     pub(crate) const GC_DEAD_FLOOR: usize = 256 * 1024 * 1024;
 
+    /// Borne du backoff safepoint (JS-C424) : `gc_sp_shift`
+    /// plafonné ici → dette de réarmement ×16 max au-dessus de
+    /// la basse post-passe.
+    pub(crate) const GC_SP_SHIFT_MAX: u8 = 4;
+
     /// Cap dur sur l'estimé pour une borne `lim` donnée —
     /// extrait pour verrou (JS-C411). §B-114 : `lim × 4` sans
     /// plafond tolérait 1,5 Gio de déchets estimés sous cap
@@ -4852,6 +4878,28 @@ impl Engine {
         if !self.gc_due && !self.mem_over() {
             return;
         }
+        let lim = self.heap.mem_limit();
+        if lim > 0 && self.gc_sp_floor != usize::MAX {
+            // JS-C424 — backoff de croissance : une passe n'est
+            // servie qu'après `gc_debt << shift` octets au-
+            // dessus de la basse post-passe. Le seuil absolu
+            // réarmait une passe vide à ~45 Hz quand
+            // `young_floor` épinglait le churn de l'appel
+            // monolithique (vol 713 : 95,4 % du span en
+            // mark/sweep). Couvre `gc_due` ET `mem_over` — les
+            // deux arment ce gate par statement.
+            if self.total_bytes() < self.gc_sp_floor {
+                // Libéré ailleurs (frontière de job / morts
+                // refcount) : la basse glisse, backoff levé.
+                self.gc_sp_floor = self.total_bytes();
+                self.gc_sp_shift = 0;
+            }
+            let debt = Self::gc_debt(lim).saturating_mul(1usize << self.gc_sp_shift);
+            if self.total_bytes().saturating_sub(self.gc_sp_floor) < debt {
+                return;
+            }
+        }
+        let before = self.total_bytes();
         let mut ids = Vec::new();
         let mut visited = HashSet::new();
         crate::heap::trace_env(env, &mut ids, &mut visited);
@@ -4873,6 +4921,17 @@ impl Engine {
                 .get()
                 .saturating_add(u64::try_from(t.elapsed().as_nanos()).unwrap_or(u64::MAX)),
         );
+        // JS-C424 — basse + backoff selon le rendement : une
+        // passe qui libère moins de `gc_debt/4` était futile
+        // (churn épinglé) → prochaine dette ×2 (borné ×16) ;
+        // une passe productive reprend la cadence normale.
+        let freed = before.saturating_sub(self.total_bytes());
+        self.gc_sp_floor = self.total_bytes();
+        if lim > 0 && freed < Self::gc_debt(lim) / 4 {
+            self.gc_sp_shift = (self.gc_sp_shift + 1).min(Self::GC_SP_SHIFT_MAX);
+        } else {
+            self.gc_sp_shift = 0;
+        }
     }
 
     // -- environments --------------------------------------------------
@@ -9097,5 +9156,53 @@ mod tests {
         let (_p, x) = e.last_eval_split();
         assert!(x > 0, "exec_us renseigné même sur éval tuée");
         let _ = (e.last_eval_gc_us(), e.last_eval_sp_us());
+    }
+
+    /// JS-C424 — backoff de croissance : après une passe
+    /// safepoint, aucune nouvelle passe n'est servie avant
+    /// `gc_debt << shift` octets de croissance au-dessus de la
+    /// basse — le seuil absolu transformait un churn épinglé
+    /// par `young_floor` en spin à ~45 Hz (vol 713 : 95,4 %
+    /// du span `kevlar_base` en sweeps vides). Le backoff
+    /// couvre `gc_due` ET `mem_over` ; une croissance réelle ≥
+    /// dette re-sert une passe.
+    #[test]
+    fn c424_safepoint_backoff_supprime_le_spin() {
+        let mut e = Engine::new();
+        e.heap.set_mem_limit(64 << 20); // dette = 16 Mio
+        let env = e.global_env.clone();
+        let v = Value::Num(1.0);
+
+        // Première passe : basse jamais posée → servie, pose
+        // la ligne de basse au total post-sweep.
+        e.gc_due = true;
+        e.safepoint_gc(&env, &v);
+        let runs0 = e.heap.stats().gc_runs;
+        assert!(runs0 > 0, "première passe inconditionnelle");
+
+        // Réarmements immédiats, 0 octet de croissance →
+        // supprimés (le spin qui brûlait la deadline).
+        e.gc_due = true;
+        e.safepoint_gc(&env, &v);
+        e.safepoint_gc(&env, &v);
+        e.safepoint_gc(&env, &v);
+        assert_eq!(
+            e.heap.stats().gc_runs,
+            runs0,
+            "sans croissance au-dessus de la basse, les réarmements sont supprimés"
+        );
+
+        // Croissance réelle > dette × backoff (la première
+        // passe, futile, a hissé `shift` → seuil 32 Mio) →
+        // la passe est servie. ~40 Mio de vivant ajouté
+        // (≈610 B/objet mesuré), sous le cap 64 Mio.
+        e.eval("var __k=[]; for(var i=0;i<65000;i++) __k.push({x:i,y:i,z:i,w:i}); __k.length")
+            .unwrap();
+        e.gc_due = true;
+        e.safepoint_gc(&env, &v);
+        assert!(
+            e.heap.stats().gc_runs > runs0,
+            "croissance ≥ dette au-dessus de la basse → passe servie"
+        );
     }
 }

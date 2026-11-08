@@ -10568,4 +10568,21 @@ un crate PIPELINE.- [x] **JS-C422. Deadline honnête — canal session ↔ budge
   inconditionnel). `b59_diag` porte `gc_us`/`sp_us` cumulés.
   Verrou : `c423_gc_time_attributed_and_survives_kill` (sp ⊆
   gc, churn sous borne → gc_us > 0, abandon → profil lisible).
+- [x] **JS-C424. Backoff de croissance des safepoints — fin du
+  spin GC à 45 Hz** (vol 713 : `kevlar_base` `gc_us=60,04 s` =
+  95,4 % du span — `young_floor` épinglant le churn de l'appel
+  monolithique, `gc_due` réarmait sur le seuil absolu `total >
+  gc_debt` : 2 550 passes à ~45 Hz ne récupérant rien).
+  `safepoint_gc` gagne `gc_sp_floor` (basse `total_bytes`
+  post-passe, glisse vers le bas si libéré ailleurs) +
+  `gc_sp_shift` (backoff ×2 borné ×16 : passe libérant <
+  `gc_debt/4` = futile → shift++, productive → 0). Une passe
+  n'est re-servie qu'après `gc_debt << shift` de croissance
+  réelle — couvre `gc_due` et `mem_over`. Le churn épinglé
+  accumule jusqu'à la dette élargie / `dead_hard` honnête au
+  lieu de brûler le thread ; les passes productives gardent la
+  cadence. Verrou : `c424_safepoint_backoff_supprime_le_spin`.
+  Reste : (a) table de racines d'expressions (correction de
+  fond), (c) passe safepoint allégée (purges DOM/logs hors du
+  chemin chaud).
 
