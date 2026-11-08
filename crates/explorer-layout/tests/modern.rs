@@ -1267,3 +1267,26 @@ fn table_cell_vertical_align_decale_le_contenu() {
     // t (pas de valign) : contenu reste en haut.
     let _ = t;
 }
+
+#[test]
+fn caption_side_left_right_posee_en_vis_a_vis() {
+    // R-164 — `caption-side:left|right` : la légende se pose
+    // en vis-à-vis du bord latéral de la table, alignée haut
+    // (ne décale pas la hauteur de la table).
+    let (dom, bx) = laid(
+        "<!doctype html><table><caption id=cap>titre</caption>\
+         <tr><td>x</td></tr></table>",
+        "body { margin: 0 } table { width: 200px; margin-left: 100px } \
+         caption { caption-side: left }",
+    );
+    let cap = find(&bx, by_id(&dom, "cap"));
+    let tbl = find(&bx, by_tag(&dom, "table"));
+    // La légende est à GAUCHE de la boîte table (x négatif
+    // ou < tbl.x) — pas au-dessus comme le défaut `top`.
+    assert!(
+        cap.rect.x + cap.rect.width <= tbl.rect.x + 1.0,
+        "caption pas à gauche : cap={:?} tbl={:?}",
+        cap.rect,
+        tbl.rect
+    );
+}

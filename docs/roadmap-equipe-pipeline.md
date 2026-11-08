@@ -3062,9 +3062,11 @@ scroll interne `overflow:auto`) est loguée au journal.
   `control_paint` ; `img_box` réutilisé (repli `alt` tant
   que `src` absent de `sizes` — fetch = journal NAV).
   Verrou puces + repli alt.
-- [ ] **R-164. Détails tables** : `empty-cells`,
-  `caption-side:left/right` ; collapse vertical/`hidden`/
-  couleurs si le corpus l'exige.
+- [x] **R-164. Détails tables** : `empty-cells:hide`
+  (cellule vide = ni fond ni bordure, `separate` seul) ;
+  `caption-side:left|right` en vis-à-vis. Collapse
+  vertical/hidden/couleurs : corpus ne l'exige pas.
+  Verrous ×2.
 - [ ] **R-165. `<wbr>`** : opportunité de coupure à
   l'itemisation (miroir `br`→U+2028, pas une règle UA).
 - [ ] **R-166. Bordures 3D réelles** : `inset`/`outset`/

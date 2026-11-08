@@ -2185,3 +2185,35 @@ fn text_decoration_enjambe_depuis_le_conteneur_bloc() {
     assert_eq!(t.len(), 1, "un run attendu : {t:?}");
     assert_eq!(underlines(&items, t[0].1).len(), 1, "un souligné");
 }
+
+#[test]
+fn empty_cells_hide_ne_peint_ni_fond_ni_bordure() {
+    // R-164 — `empty-cells:hide` : sous le modèle `separate`,
+    // une cellule vide ne peint ni fond ni bordure (§17.6.1.1)
+    // ; `&nbsp;` compte comme contenu. `collapse` → inerte.
+    let (dom, _bx, items) = dl(
+        "<table><tr><td id=pleine>x</td><td id=vide></td>\
+         <td id=nbsp>&nbsp;</td></tr></table>",
+        "table { empty-cells: hide; border-spacing: 4px } \
+         td { border: 2px solid black; background: red; width: 40px }",
+    );
+    // 2 cellules peinent (pleine + nbsp) ; la vide saute.
+    let borders = items
+        .iter()
+        .filter(|i| matches!(i, DisplayItem::Border { .. }))
+        .count();
+    assert_eq!(borders, 2, "cellules bordées peintes : {borders}");
+    // Contrôle `collapse` : la cellule vide re-peint (modèle
+    // hors périmètre de empty-cells).
+    let (_d2, _b2, items2) = dl(
+        "<table><tr><td id=pleine>x</td><td id=vide></td></tr></table>",
+        "table { empty-cells: hide; border-collapse: collapse } \
+         td { border: 2px solid black }",
+    );
+    let borders2 = items2
+        .iter()
+        .filter(|i| matches!(i, DisplayItem::Border { .. }))
+        .count();
+    assert_eq!(borders2, 2, "collapse : empty-cells inerte : {borders2}");
+    let _ = dom;
+}

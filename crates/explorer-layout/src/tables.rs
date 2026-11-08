@@ -75,15 +75,20 @@ enum RowClass {
 }
 
 /// Légendes `table-caption` repérées dans l'arbre (§17.4 :
-/// posées au-dessus ou au-dessous de la grille selon
-/// `caption-side`, pleine largeur de table). Hors périmètre
-/// documenté : `caption-side: left|right`.
+/// `top`/`bottom` posées au-dessus/dessous de la grille,
+/// pleine largeur ; `left`/`right` posées en vis-à-vis —
+/// au bord latéral de la boîte table, alignées en haut
+/// (R-164, ancien align HTML).
 #[derive(Default)]
 struct Captions {
     /// `caption-side: top` (défaut).
     top: Vec<Vec<usize>>,
     /// `caption-side: bottom`.
     bottom: Vec<Vec<usize>>,
+    /// `caption-side: left` (vis-à-vis gauche, R-164).
+    left: Vec<Vec<usize>>,
+    /// `caption-side: right` (vis-à-vis droit, R-164).
+    right: Vec<Vec<usize>>,
 }
 
 /// Un rang `table-row` repéré : chemin d'indices depuis la
@@ -206,10 +211,11 @@ fn collect_grid(bx: &LayoutBox) -> (Vec<Row>, Captions) {
                 "table-caption" => {
                     let mut p = prefix.clone();
                     p.push(i);
-                    if c.style.get("caption-side") == Some("bottom") {
-                        caps.bottom.push(p);
-                    } else {
-                        caps.top.push(p);
+                    match c.style.get("caption-side") {
+                        Some("bottom") => caps.bottom.push(p),
+                        Some("left") => caps.left.push(p),
+                        Some("right") => caps.right.push(p),
+                        _ => caps.top.push(p),
                     }
                 }
                 "table-row" => {
@@ -887,6 +893,37 @@ pub(crate) fn layout_table(
             cap_cb,
             &mut FloatCtx::default(),
         );
+    }
+    // R-164 — `caption-side: left|right` : la légende se
+    // pose en vis-à-vis du bord externe de la table, alignée
+    // haut (largeur = sa préférée, bornée à 40% de la
+    // table). Elle n'entre pas dans `h` (spec : posée à
+    // côté de la boîte bordure — ici bord interne).
+    for (side, caps_side) in [(-1.0_f32, &caps.left), (1.0_f32, &caps.right)] {
+        for p in caps_side {
+            let Some(cap) = at_path(bx, p) else {
+                continue;
+            };
+            let cap_w = (table_w * 0.4).min(grid_w);
+            let cap_x = if side < 0.0 { x - cap_w } else { x + table_w };
+            let cap_cb = Rect {
+                x: cap_x,
+                y: y + it,
+                width: cap_w,
+                height: 0.0,
+            };
+            layout_block(
+                cap,
+                cap_x,
+                y + it,
+                cap_w,
+                None,
+                ctx,
+                fs,
+                cap_cb,
+                &mut FloatCtx::default(),
+            );
+        }
     }
     let h = cursor_y - y + ib;
     bx.rect = Rect {

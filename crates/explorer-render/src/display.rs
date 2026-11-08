@@ -1995,7 +1995,25 @@ fn paint_self(
     // source propagée — `None != None` sautait le fond de
     // tout pseudo (`:after{…gradient}` text.npr.org, R-74).
     let bg_propagated = bx.node.is_some_and(|n| canvas_bg_src == Some(n));
-    if !anonymous && !inline_flow && !bg_propagated {
+    // R-164 — `empty-cells:hide` (§17.6.1.1) : sous le
+    // modèle `separate`, une cellule sans contenu (ni
+    // enfants ni lignes — `&nbsp;` compte comme contenu)
+    // ne peint ni fond ni bordure.
+    let empty_hidden = bx
+        .style
+        .get("display")
+        .is_some_and(|v| v.trim() == "table-cell")
+        && bx
+            .style
+            .get("empty-cells")
+            .is_some_and(|v| v.trim() == "hide")
+        && bx
+            .style
+            .get("border-collapse")
+            .is_none_or(|v| v.trim() != "collapse")
+        && bx.children.is_empty()
+        && bx.lines.is_empty();
+    if !anonymous && !inline_flow && !bg_propagated && !empty_hidden {
         if let Some(c) = bx.style.get("background-color").and_then(parse_color) {
             if c.a > 0 {
                 // R-52 — `mask-image` présent : la couleur ne
@@ -2076,7 +2094,7 @@ fn paint_self(
     // si le style du côté est déclaré non-`none` — l'initiale
     // `medium` vaut alors 3 px (`border: solid` sans épaisseur
     // peint 3 px).
-    let widths = if anonymous || inline_flow {
+    let widths = if anonymous || inline_flow || empty_hidden {
         [0.0; 4]
     } else {
         [
