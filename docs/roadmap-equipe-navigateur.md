@@ -10541,4 +10541,16 @@ github.com — bundle > plafonds (JS-C41 livré le cadre).
 
 Règle : les demandes d'API au domaine pur transitent par
 `docs/interface-equipes.md` — jamais de commit direct dans
-un crate PIPELINE.
+un crate PIPELINE.- [x] **JS-C422. Deadline honnête — canal session ↔ budget
+  moteur + abandon interruptible** (vols 710c/711 : figé
+  `kevlar_base` à 65 011 ms reproduit à l'identique — pas la
+  deadline moteur, le **canal** : `EVAL_CMD_TIMEOUT_EVAL=65 s`
+  dur calé sur l'ancien défaut 60 s, ignorant les env
+  `EXPLORER_JS_EVAL_*` et l'éval orpheline brûlait le thread
+  jusqu'à sa deadline interne, `exec_us`=303 s). `budget_tx`
+  par cmd éval (worker rapporte le budget armé, session attend
+  budget+marge) + flag `interrupt` relu au gate 256-ops (un
+  abandon tue au tick suivant). Effet vol attendu : le figé
+  devient honnêtement attribué (vraie deadline moteur) et le
+  thread ne brûle plus en orphelin.
+

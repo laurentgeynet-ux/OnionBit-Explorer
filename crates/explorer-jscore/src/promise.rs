@@ -1930,28 +1930,40 @@ mod tests {
     #[test]
     fn c412_prom_src_dumps_executor_excerpt() {
         let _g = tracing::subscriber::set_default(ArmProbe);
-        tracing::callsite::rebuild_interest_cache();
-        let mut e = Engine::new();
-        let v = e.eval(
-            "new Promise(function gatekeeper(){\
-                 if (window.__ready) { resolve(); } poll(); });",
-        );
-        assert!(v.is_ok(), "eval: {v:?}");
-        let found = e.prom_sites.values().any(|pr| {
-            pr.src
-                .as_deref()
-                .is_some_and(|s| s.contains("gatekeeper") && s.contains("__ready"))
-        });
-        assert!(found, "extrait de la fabrique attendu: {:?}", {
-            let v: Vec<_> = e.prom_sites.values().map(|pr| pr.src.clone()).collect();
-            v
-        });
-        // Borné : jamais plus de PROM_SRC_CHARS caractères.
-        assert!(e.prom_sites.values().all(|pr| {
-            pr.src
-                .as_deref()
-                .is_none_or(|s| s.chars().count() <= PROM_SRC_CHARS)
-        }));
+        // Course de scheduling : le cache d'intérêt **global**
+        // peut être re-gelé `never` par un test parallèle entre
+        // le `rebuild_interest_cache` et l'éval → la sonde reste
+        // muette (`src=[]` observé en suite complète). On
+        // retente le couple rebuild+éval tant que l'extrait
+        // n'a pas atterri — le verrou porte sur le mécanisme
+        // (extrait copié+borné), pas sur la course.
+        let mut found = false;
+        let mut last = Vec::new();
+        for _ in 0..8 {
+            if found {
+                break;
+            }
+            tracing::callsite::rebuild_interest_cache();
+            let mut e = Engine::new();
+            let v = e.eval(
+                "new Promise(function gatekeeper(){\
+                     if (window.__ready) { resolve(); } poll(); });",
+            );
+            assert!(v.is_ok(), "eval: {v:?}");
+            found = e.prom_sites.values().any(|pr| {
+                pr.src
+                    .as_deref()
+                    .is_some_and(|s| s.contains("gatekeeper") && s.contains("__ready"))
+            });
+            last = e.prom_sites.values().map(|pr| pr.src.clone()).collect();
+            // Borné : jamais plus de PROM_SRC_CHARS caractères.
+            assert!(e.prom_sites.values().all(|pr| {
+                pr.src
+                    .as_deref()
+                    .is_none_or(|s| s.chars().count() <= PROM_SRC_CHARS)
+            }));
+        }
+        assert!(found, "extrait de la fabrique attendu: {last:?}");
     }
 
     /// JS-C412 — désarmée, la sonde est muette : aucune entrée

@@ -577,6 +577,15 @@ pub struct Engine {
     /// Côté WORKER : flag partagé vivant (le `WorkerHost` du
     /// parent le coupe à `terminate()`/GC).
     pub(crate) worker_alive: Arc<AtomicBool>,
+    /// JS-C422 — abandon d'une commande côté session : quand la
+    /// patience du canal (`recv_eval*`/`recv_eval_long`) expire,
+    /// l'adaptateur lève ce flag ; l'éval en vol meurt au tick
+    /// suivant (gate 256 ops) au lieu de brûler le thread moteur
+    /// jusqu'à sa deadline interne (vol 711 : 239 s de CPU
+    /// orphelines mesurées sur `kevlar_base`). Réarmé à chaque
+    /// commande par le worker — un flag posé entre deux jobs est
+    /// un no-op, il ne peut pas empoisonner la commande suivante.
+    pub(crate) interrupt: Arc<AtomicBool>,
     /// Pile de collecteurs `yield` des générateurs en cours
     /// (générateur eager : le corps tourne à l'appel et chaque
     /// `yield` pousse sur le collecteur du sommet — déviation
@@ -1096,6 +1105,7 @@ impl Engine {
             worker_loader: None,
             worker_close: false,
             worker_alive: Arc::new(AtomicBool::new(true)),
+            interrupt: Arc::new(AtomicBool::new(false)),
             gen_collect: Vec::new(),
             pending_labels: Vec::new(),
             using_stack: Vec::new(),
@@ -4163,6 +4173,31 @@ impl Engine {
         self.eval_timeout_boot_ms = ms;
     }
 
+    /// Budget boot actuellement configuré (ms) — lu par
+    /// l'adaptateur `explorer-js` pour dimensionner la patience
+    /// du canal d'éval (JS-C422 : la session attend le budget
+    /// réellement armé + marge au lieu d'une constante 65 s
+    /// calée sur l'ancien défaut 60 s — vol 711).
+    #[must_use]
+    pub fn eval_timeout_boot_ms(&self) -> u64 {
+        self.eval_timeout_boot_ms
+    }
+
+    /// Poignée du flag d'abandon de commande (JS-C422) —
+    /// l'adaptateur la lève quand la session dépasse sa
+    /// patience ; le moteur la consomme au `tick` suivant.
+    #[must_use]
+    pub fn interrupt_handle(&self) -> Arc<AtomicBool> {
+        self.interrupt.clone()
+    }
+
+    /// Installe un flag d'abandon externe (l'adaptateur crée
+    /// l'`Arc` côté session et l'injecte au spawn worker) —
+    /// `Engine::new` en crée un par défaut sinon.
+    pub fn set_interrupt(&mut self, flag: Arc<AtomicBool>) {
+        self.interrupt = flag;
+    }
+
     pub fn set_eval_timeout_ms(&mut self, ms: u64) {
         self.eval_timeout_ms = ms;
         self.eval_timeout_boot_ms = ms;
@@ -4198,6 +4233,17 @@ impl Engine {
                     self.deadline_hit = true;
                     return Err(self.range_error("eval deadline exceeded"));
                 }
+            }
+            // JS-C422 — abandon session : l'éval en vol meurt au
+            // tick suivant au lieu de courir jusqu'à sa deadline
+            // interne en orphelin (`swap` consomme : un flag posé
+            // hors job est effacé par le worker à la prise de
+            // commande — il ne peut tomber que sur le job en cours).
+            if self
+                .interrupt
+                .swap(false, std::sync::atomic::Ordering::Relaxed)
+            {
+                return Err(self.range_error("eval interrupted (session abandoned)"));
             }
             // Breadcrumb + sondes RSS — échantillonnés 1/256 ops
             // dans ce gate : `format!` du breadcrumb et
@@ -8929,5 +8975,34 @@ mod tests {
             "déchets cumulés au-delà de la borne : {}",
             e.heap.bytes()
         );
+    }
+
+    /// JS-C422 — abandon session : `interrupt` est relu au gate
+    /// 256-ops de `tick`. Un flag posé tue l'éval en vol au
+    /// prochain gate (la session abandonnée ne laisse pas le
+    /// thread brûler jusqu'à la deadline interne — vol 711 :
+    /// 239 s de CPU orphelines mesurées sur `kevlar_base` après
+    /// le timeout canal 65 s), et `swap(false)` le consomme :
+    /// l'éval suivante repart propre.
+    #[test]
+    fn interrupt_flag_kills_eval_at_tick_gate() {
+        let mut e = Engine::new();
+        let flag = e.interrupt_handle();
+        flag.store(true, std::sync::atomic::Ordering::Relaxed);
+        // Boucle sans borne — sans flag elle coure au budget ops
+        // entier ; le flag la tue au premier gate (256 ops).
+        let t0 = std::time::Instant::now();
+        let r = e.eval("var s=0; while(true){ s++; } s");
+        assert!(r.is_err(), "flag posé → l'éval doit mourir : {r:?}");
+        assert!(
+            t0.elapsed() < std::time::Duration::from_secs(5),
+            "l'éval doit mourir au gate, pas au budget : {:?}",
+            t0.elapsed()
+        );
+        // Consommé par `swap` — l'éval suivante n'est pas empoisonnée :
+        match e.eval("40+2") {
+            Ok(Value::Num(n)) => assert_eq!(n, 42.0),
+            other => panic!("éval post-abandon empoisonnée : {other:?}"),
+        }
     }
 }
