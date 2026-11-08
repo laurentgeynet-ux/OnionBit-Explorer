@@ -2252,9 +2252,17 @@ fn hint_align(a: Option<&str>) -> Option<String> {
 /// imbriquée : une cellule relève de SA table, trouvée en
 /// remontant — `tr`/`tbody` intermédiaires ne comptent pas).
 fn ancestor_table_attr<'a>(dom: &'a Dom, node: NodeId, name: &str) -> Option<&'a str> {
+    ancestor_elem_attr(dom, node, "table", name)
+}
+
+/// Attribut `name` de l'ancêtre `<tag>` le plus proche
+/// (`cellpadding` sur `table`, `link` sur `body` —
+/// R-157). La **première** occurrence en remontant fait
+/// foi.
+fn ancestor_elem_attr<'a>(dom: &'a Dom, node: NodeId, tag: &str, name: &str) -> Option<&'a str> {
     let mut n = dom.parent(node).ok()?;
     while let Some(id) = n {
-        if dom.tag_name(id).is_ok_and(|t| t == "table") {
+        if dom.tag_name(id).is_ok_and(|t| t == tag) {
             return dom.attribute_str(id, name).ok().flatten();
         }
         n = dom.parent(id).ok()?;
@@ -2370,18 +2378,63 @@ fn legacy_presentational_hints(
                 hint(props, "white-space", Some("nowrap".to_string()));
             }
         }
-        "body" => {
-            hint(
-                props,
-                "color",
-                hint_attr(dom, node, "text").and_then(legacy_color),
-            );
-        }
+        "body" => hint_body(dom, node, props),
+        "a" | "area" => hint_link(dom, node, props),
         "img" => hint_img(dom, node, props),
         "hr" => hint_hr(dom, node, props),
         "br" => hint_br(dom, node, props),
         "font" => hint_font(dom, node, parent, env, props),
         _ => {}
+    }
+}
+
+/// `<body>` présentationnel : `text` → `color` ;
+/// marges historiques (R-157, HTML Rendering) :
+/// `topmargin`/`leftmargin`/`rightmargin`/`bottommargin` →
+/// côté homonyme ; `marginwidth`/`marginheight` → paires.
+/// Le défaut UA `8px` est émis ici en hint : une vraie
+/// règle `body{margin:8px}` primerait les attributs
+/// (rang 0 < règle) — l'auteur reste prioritaire.
+fn hint_body(dom: &Dom, node: NodeId, props: &mut HashMap<String, String>) {
+    hint(
+        props,
+        "color",
+        hint_attr(dom, node, "text").and_then(legacy_color),
+    );
+    let mw = dim(hint_attr(dom, node, "marginwidth"));
+    let mh = dim(hint_attr(dom, node, "marginheight"));
+    for (attr, prop, pair) in [
+        ("topmargin", "margin-top", &mh),
+        ("leftmargin", "margin-left", &mw),
+        ("rightmargin", "margin-right", &mw),
+        ("bottommargin", "margin-bottom", &mh),
+    ] {
+        hint(
+            props,
+            prop,
+            dim(hint_attr(dom, node, attr))
+                .or_else(|| pair.clone())
+                .or_else(|| Some("8px".to_string())),
+        );
+    }
+}
+
+/// `a[href]`/`area[href]` (R-157) : `body[link]` → couleur
+/// des liens, lue sur le body ancêtre (`:link` structurel).
+/// Le défaut `#00e` est émis ici en hint — une vraie règle
+/// UA primerait `body[link]` sinon ; l'auteur prime toujours
+/// via `props` rempli. `vlink` documenté non-fait
+/// (`:visited` toujours faux, vie privée — R-19) ; `alink`
+/// exige le filage `:active` (NAV, journal).
+fn hint_link(dom: &Dom, node: NodeId, props: &mut HashMap<String, String>) {
+    if hint_attr(dom, node, "href").is_some() {
+        hint(
+            props,
+            "color",
+            ancestor_elem_attr(dom, node, "body", "link")
+                .and_then(legacy_color)
+                .or_else(|| Some("#00e".to_string())),
+        );
     }
 }
 
@@ -2436,11 +2489,7 @@ fn hint_img(dom: &Dom, node: NodeId, props: &mut HashMap<String, String>) {
     hint(props, "margin-left", dim(hint_attr(dom, node, "hspace")));
     hint(props, "margin-right", dim(hint_attr(dom, node, "hspace")));
     hint(props, "margin-top", dim(hint_attr(dom, node, "vspace")));
-    hint(
-        props,
-        "margin-bottom",
-        dim(hint_attr(dom, node, "vspace")),
-    );
+    hint(props, "margin-bottom", dim(hint_attr(dom, node, "vspace")));
     if let Some(bw) = dim(hint_attr(dom, node, "border")) {
         hint(props, "border-width", Some(bw));
         hint(props, "border-style", Some("solid".to_string()));
@@ -2781,13 +2830,12 @@ h4 { font-size: 1em; font-weight: bold; margin-top: 1.33em; margin-bottom: 1.33e
 h5 { font-size: 0.83em; font-weight: bold; margin-top: 1.67em; margin-bottom: 1.67em }
 h6 { font-size: 0.67em; font-weight: bold; margin-top: 2.33em; margin-bottom: 2.33em }
 p { margin-top: 1em; margin-bottom: 1em }
-body { margin: 8px }
 ul, ol, menu, dir, dl, dd { margin-top: 1em; margin-bottom: 1em }
 ul, ol, menu, dir { padding-left: 40px }
 dd { margin-left: 40px }
 blockquote { margin: 1em 40px }
 hr { border-top-width: 1px; border-style: inset }
-a[href] { color: #00e; text-decoration: underline }
+a[href] { text-decoration: underline }
 table { border-collapse: separate }
 th { font-weight: bold; text-align: center }
 input, textarea, select, button, img, svg, canvas { display: inline-block }

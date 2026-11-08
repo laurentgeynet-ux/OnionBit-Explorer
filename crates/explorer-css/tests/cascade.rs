@@ -2818,3 +2818,34 @@ fn hint_table_td_hr_br_legacy() {
         Some("url(\"bg.png\")")
     );
 }
+
+#[test]
+fn hint_body_link_marges_et_ancetre() {
+    // R-157 : `body[link]` → couleur des `<a href>`/`area`
+    // (lue sur le body ancêtre — `:link` structurel) ;
+    // `topmargin`/`marginwidth`/`marginheight` → marges.
+    // `vlink` documenté non-fait (vie privée), `alink` NAV.
+    let f = fixture();
+    let e = StyleEngine::new();
+    let mut dom = f.dom;
+    dom.set_attribute(f.body, "link", "ff0000").unwrap();
+    dom.set_attribute(f.body, "topmargin", "20").unwrap();
+    dom.set_attribute(f.body, "marginwidth", "40").unwrap();
+    let a = el(&mut dom, f.body, "a", &[("href", "#")]);
+    assert_eq!(
+        e.compute(&dom, a, &env()).get("color"),
+        Some("#ff0000"),
+        "body[link] → couleur du lien (hex nu normalisé)"
+    );
+    // Sans href : pas de lien → pas de hint.
+    let a2 = el(&mut dom, f.body, "a", &[]);
+    assert_ne!(
+        e.compute(&dom, a2, &env()).get("color"),
+        Some("#ff0000"),
+        "<a> sans href non affecté"
+    );
+    let bs = e.compute(&dom, f.body, &env());
+    assert_eq!(bs.get("margin-top"), Some("20px"), "topmargin");
+    assert_eq!(bs.get("margin-left"), Some("40px"), "marginwidth→left");
+    assert_eq!(bs.get("margin-right"), Some("40px"), "marginwidth→right");
+}

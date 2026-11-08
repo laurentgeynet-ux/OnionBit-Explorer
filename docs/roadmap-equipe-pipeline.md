@@ -3020,11 +3020,14 @@ scroll interne `overflow:auto`) est loguée au journal.
   `hr[align|noshade|color]`, `br[clear]`→clear. Fusionné
   dans les bras `table`/`td|th` existants (cellspacing/
   cellpadding intacts). Verrous ×2.
-- [ ] **R-157. Attributs `<body>`** : `link`→clé interne
-  lue sur `a[href]`/`area[href]` (`:link` structurel) ;
-  `marginwidth`/`topmargin`…→marges ; `vlink` documenté
-  non-fait (`:visited` volontairement faux — vie privée) ;
-  `alink` reporté (exige `:active`, couture NAV).
+- [x] **R-157. Attributs `<body>`** : `link` → couleur
+  des liens lue sur le body ancêtre (`a[href]`/`area[href]`,
+  `:link` structurel) ; `marginwidth`/`marginheight`/
+  `topmargin`… → marges. Les défauts UA `color:#00e` et
+  `margin:8px` passent en hint (les règles UA primer les
+  attributs sinon — pattern `-webkit-link`). `vlink`
+  documenté non-fait (`:visited` vie privée) ; `alink`
+  reporté (`:active`, couture NAV — journal). Verrou.
 - [ ] **R-158. Trous UA sans dépendance** : `big`/`small`,
   `nobr`, `mark`, `figure`, `fieldset`+chrome groove.
 - [ ] **R-159. `border-spacing` consommé en `separate`** :
