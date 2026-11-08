@@ -321,6 +321,7 @@ fn fragment_sub_rect_glyph_metrics() {
         marg_t: 0.0,
         marg_b: 0.0,
         style: explorer_css::ComputedStyle::default(),
+        deco: Vec::new(),
     };
 
     // Tranche "bc" (octets 1..3) : x = 10 + 5 = 15, w = 10.

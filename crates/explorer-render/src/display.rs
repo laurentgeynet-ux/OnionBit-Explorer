@@ -2219,13 +2219,51 @@ fn paint_lines(bx: &LayoutBox, items: &mut Vec<DisplayItem>, off: (f32, f32)) {
                     .get("color")
                     .and_then(parse_color)
                     .unwrap_or(Color::BLACK);
+                let fs = prop_px(&frag.style, "font-size", 16.0);
+                // §16.3.1 / R-153 : `text-decoration` résolue
+                // à l'itemisation (`frag.deco`, couleur du
+                // déclarant). `under`/`over` sous l'encre,
+                // `through` après le Text — elle barre les
+                // glyphes. Épaisseur ≈ 1/16 d'em, positions
+                // usuelles (approx. métriques fonte absente).
+                let th = (fs * 0.0625).max(1.0);
+                let base_y = frag.rect.y + frag.baseline + off.1;
+                let deco_rect = |dy: f32| Rect {
+                    x: frag.rect.x + off.0,
+                    y: dy,
+                    width: frag.rect.width,
+                    height: th,
+                };
+                for d in &frag.deco {
+                    let color = d.color.unwrap_or(ink);
+                    if d.lines & explorer_layout::inline::DECO_UNDERLINE != 0 {
+                        items.push(DisplayItem::FillRect {
+                            rect: deco_rect(base_y + (fs * 0.1).max(1.0)),
+                            color,
+                        });
+                    }
+                    if d.lines & explorer_layout::inline::DECO_OVERLINE != 0 {
+                        items.push(DisplayItem::FillRect {
+                            rect: deco_rect(base_y - fs * 0.85),
+                            color,
+                        });
+                    }
+                }
                 items.push(DisplayItem::Text {
-                    origin: (frag.rect.x + off.0, frag.rect.y + frag.baseline + off.1),
+                    origin: (frag.rect.x + off.0, base_y),
                     run: run.clone(),
                     font: font_request(&frag.style),
                     color: ink,
-                    size_px: prop_px(&frag.style, "font-size", 16.0),
+                    size_px: fs,
                 });
+                for d in &frag.deco {
+                    if d.lines & explorer_layout::inline::DECO_LINE_THROUGH != 0 {
+                        items.push(DisplayItem::FillRect {
+                            rect: deco_rect(base_y - fs * 0.3 - th / 2.0),
+                            color: d.color.unwrap_or(ink),
+                        });
+                    }
+                }
             }
         }
     }

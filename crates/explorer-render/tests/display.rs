@@ -2070,3 +2070,118 @@ fn svg_use_cross_ilot_transitif() {
     assert!(src.contains("id=\"inner\""), "ref transitive : {src}");
     assert!(src.contains("id=\"p1\""), "contenu symbol : {src}");
 }
+
+// ── R-153 : `text-decoration` peint ─────────────────────────
+
+/// Runs texte `(origine_x, baseline_y, encre)` de la liste.
+fn texts(items: &[DisplayItem]) -> Vec<(f32, f32, explorer_css::value::Color)> {
+    items
+        .iter()
+        .filter_map(|i| match i {
+            DisplayItem::Text { origin, color, .. } => Some((origin.0, origin.1, *color)),
+            _ => None,
+        })
+        .collect()
+}
+
+/// `FillRect` de soulignement : rect plein dont le haut tombe
+/// entre la baseline `b` et `b + 8` px (sous l'encre).
+fn underlines(items: &[DisplayItem], baseline: f32) -> Vec<(f32, explorer_css::value::Color)> {
+    items
+        .iter()
+        .filter_map(|i| match i {
+            DisplayItem::FillRect { rect, color }
+                if rect.y >= baseline - 0.5 && rect.y <= baseline + 8.0 =>
+            {
+                Some((rect.x, *color))
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn text_decoration_u_souligne_sous_la_baseline() {
+    // R-153 : `u` (UA underline) produit un FillRect fin sous
+    // la baseline de son run — avant : rien n'était peint.
+    let (_dom, _bx, items) = dl("<p><u>hello</u></p>", "p{margin:0}");
+    let t = texts(&items);
+    assert_eq!(t.len(), 1, "un run attendu : {t:?}");
+    let u = underlines(&items, t[0].1);
+    assert_eq!(u.len(), 1, "un souligné attendu : {u:?}");
+}
+
+#[test]
+fn text_decoration_couleur_du_declarant_pas_du_fragment() {
+    // §16.3.1 (piège du lead) : la déco enjambe les inlines
+    // descendants avec la couleur de l'élément DÉCLARANT —
+    // `<a>` rouge souligne le `<b>` bleu EN ROUGE. Un « le
+    // fragment peint sa propre déco » naïf donnerait bleu.
+    let (_dom, _bx, items) = dl(
+        "<p><a href=\"#\"><b>x</b></a></p>",
+        "p{margin:0} a{color:#ff0000} b{color:#0000ff}",
+    );
+    let t = texts(&items);
+    assert_eq!(t.len(), 1, "un run attendu : {t:?}");
+    assert_eq!((t[0].2.r, t[0].2.b), (0, 255), "encre = bleu b");
+    let u = underlines(&items, t[0].1);
+    assert_eq!(u.len(), 1, "un souligné attendu : {u:?}");
+    assert_eq!(
+        (u[0].1.r, u[0].1.g, u[0].1.b),
+        (255, 0, 0),
+        "souligné = rouge de `a` (déclarant), pas bleu de `b`"
+    );
+}
+
+#[test]
+fn text_decoration_saute_les_remplaces() {
+    // §16.3.1 : la propagation saute les atomiques —
+    // l'inline-block descendant d'un `<a>` n'est pas souligné
+    // par la déco du lien (un seul FillRect : celui de « a »).
+    let (_dom, _bx, items) = dl(
+        "<p><a href=\"#\">a<span class=\"i\">b</span></a></p>",
+        "p{margin:0} .i{display:inline-block}",
+    );
+    let t = texts(&items);
+    let rects: Vec<_> = items
+        .iter()
+        .filter(|i| matches!(i, DisplayItem::FillRect { .. }))
+        .collect();
+    assert_eq!(t.len(), 2, "runs « a » + « b » : {t:?}");
+    assert_eq!(rects.len(), 1, "un seul souligné : {rects:?}");
+}
+
+#[test]
+fn text_decoration_del_barre_apres_l_encre() {
+    // `del` → line-through : le FillRect est AU-DESSUS de la
+    // baseline et émis APRÈS le Text (il barre les glyphes).
+    let (_dom, _bx, items) = dl("<p><del>x</del></p>", "p{margin:0}");
+    let t = texts(&items);
+    assert_eq!(t.len(), 1, "un run attendu : {t:?}");
+    let pos_text = items
+        .iter()
+        .position(|i| matches!(i, DisplayItem::Text { .. }))
+        .expect("texte");
+    let pos_strike = items
+        .iter()
+        .position(|i| match i {
+            DisplayItem::FillRect { rect, .. } => rect.y < t[0].1,
+            _ => false,
+        })
+        .expect("barré au-dessus de la baseline");
+    assert!(pos_strike > pos_text, "le barré peint après l'encre");
+}
+
+#[test]
+fn text_decoration_enjambe_depuis_le_conteneur_bloc() {
+    // §16.3.1 : `text-decoration` posée sur le bloc conteneur
+    // enjambe son propre contenu en-ligne (seed de la pile
+    // à `collect_items`) — `<div style=…>x</div>` souligné.
+    let (_dom, _bx, items) = dl(
+        "<div style=\"text-decoration:underline\">x</div>",
+        "div{margin:0}",
+    );
+    let t = texts(&items);
+    assert_eq!(t.len(), 1, "un run attendu : {t:?}");
+    assert_eq!(underlines(&items, t[0].1).len(), 1, "un souligné");
+}

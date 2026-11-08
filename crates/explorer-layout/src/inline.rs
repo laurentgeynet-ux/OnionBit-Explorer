@@ -24,12 +24,59 @@
 
 use std::collections::HashMap;
 
-use explorer_css::ComputedStyle;
+use explorer_css::{value::Color, ComputedStyle};
 
 use crate::block::{css_px, font_size_px, layout_block, measure_fn, side_px, BlockCtx, FloatCtx};
 use crate::boxtree::{BoxKind, LayoutBox, Rect};
 use crate::font::{self, ShapedRun};
 use crate::text::{self, Direction};
+
+/// Ligne `text-decoration` sous le texte (R-153).
+pub const DECO_UNDERLINE: u8 = 0b001;
+/// Ligne `text-decoration` au-dessus du texte (R-153).
+pub const DECO_OVERLINE: u8 = 0b010;
+/// Ligne `text-decoration` barrant le texte (R-153).
+pub const DECO_LINE_THROUGH: u8 = 0b100;
+
+/// `text-decoration` **résolue** portée par un [`Fragment`]
+/// (R-153) : l'entrée appartient à l'élément **déclarant** —
+/// sa couleur vient de son style à lui, pas de celui du
+/// fragment traversé (§16.3.1 : la déco enjambe les inlines
+/// descendants, en couleur de déclarant même si les
+/// descendants ont un `color` différent).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TextDeco {
+    /// Lignes actives — masque [`DECO_UNDERLINE`] /
+    /// [`DECO_OVERLINE`] / [`DECO_LINE_THROUGH`].
+    pub lines: u8,
+    /// `color` de l'élément déclarant ; `None` → l'encre
+    /// du fragment au paint (repli currentcolor).
+    pub color: Option<Color>,
+}
+
+/// `text-decoration` de `st` → entrée résolue, `None` si
+/// absente/`none`. Mots inconnus tolérés (`blink`, styles et
+/// couleurs du shorthand Level 4 — ignorés, jamais d'échec).
+fn text_deco(st: &ComputedStyle) -> Option<TextDeco> {
+    let v = st.get("text-decoration")?;
+    let mut lines = 0u8;
+    for t in v.split_ascii_whitespace() {
+        if t.eq_ignore_ascii_case("underline") {
+            lines |= DECO_UNDERLINE;
+        } else if t.eq_ignore_ascii_case("overline") {
+            lines |= DECO_OVERLINE;
+        } else if t.eq_ignore_ascii_case("line-through") {
+            lines |= DECO_LINE_THROUGH;
+        }
+    }
+    if lines == 0 {
+        return None;
+    }
+    Some(TextDeco {
+        lines,
+        color: st.color("color"),
+    })
+}
 
 /// Fragment posé dans une ligne : tranche de texte shapé, ou
 /// boîte atomique `inline-block` (`atomic`, `text` vide).
@@ -79,6 +126,11 @@ pub struct Fragment {
     /// `color`/`font-*` ICI, pas sur la boîte des lignes :
     /// `a{color}`/`span{color}` doit colorer ses runs (R-18).
     pub style: ComputedStyle,
+    /// `text-decoration` résolues des ancêtres déclarants
+    /// (R-153, ordre ancêtre → descendant) — vide sans déco,
+    /// vide aussi sur les atomes : la propagation saute les
+    /// remplacés (§16.3.1).
+    pub deco: Vec<TextDeco>,
 }
 
 /// Une ligne de contenu en-ligne posée.
@@ -111,6 +163,10 @@ struct Item {
     /// (ouverture ou fermeture) — porte les marges
     /// horizontales de l'élément (§8.3/§9.4.2).
     marker: Option<Marker>,
+    /// Décos résolues au moment de l'itemisation (R-153) —
+    /// snapshot de la pile des ancêtres déclarants ; vide
+    /// pour atomes et marqueurs.
+    deco: Vec<TextDeco>,
 }
 
 /// Borne d'élément en-ligne : `Open` applique `margin-left`,
@@ -226,12 +282,12 @@ fn apply_text_overflow(
         }
         // L'ellipsis prend la fonte du dernier fragment texte
         // (spec : mise en forme de l'élément qui déborde).
-        let Some((est, enode, eowner, ebase)) = line
+        let Some((est, enode, eowner, ebase, edeco)) = line
             .fragments
             .iter()
             .rev()
             .find(|f| !f.atomic)
-            .map(|f| (f.style.clone(), f.node, f.owner, f.baseline))
+            .map(|f| (f.style.clone(), f.node, f.owner, f.baseline, f.deco.clone()))
         else {
             continue;
         };
@@ -278,6 +334,7 @@ fn apply_text_overflow(
             marg_t: 0.0,
             marg_b: 0.0,
             style: est,
+            deco: edeco,
         });
         line.rect.width = (cut + ell_w - line.rect.x).max(0.0);
     }
@@ -464,13 +521,25 @@ fn size_atomics_walk(
 fn collect_items(bx: &LayoutBox) -> Vec<Item> {
     let mut items = Vec::new();
     let mut aid = 0usize;
+    // §16.3.1 / R-153 : une déco posée sur le CONTENEUR
+    // enjambe son propre contenu en-ligne — la pile des
+    // déclarants démarre avec la sienne (`<div style=
+    // "text-decoration:underline">`). Les descendants la
+    // complètent à l'entrée de chaque élément inline.
+    let mut decos: Vec<TextDeco> = text_deco(&bx.style).into_iter().collect();
     for (owner, child) in bx.children.iter().enumerate() {
-        collect_child(child, owner, &mut items, &mut aid);
+        collect_child(child, owner, &mut items, &mut aid, &mut decos);
     }
     items
 }
 
-fn collect_child(b: &LayoutBox, owner: usize, items: &mut Vec<Item>, aid: &mut usize) {
+fn collect_child(
+    b: &LayoutBox,
+    owner: usize,
+    items: &mut Vec<Item>,
+    aid: &mut usize,
+    decos: &mut Vec<TextDeco>,
+) {
     // Hors-flux : `absolute`/`fixed` est posé par
     // `resolve_absolutes` — son contenu n'entre jamais dans
     // les items de la ligne, sinon son texte serait posé une
@@ -486,7 +555,7 @@ fn collect_child(b: &LayoutBox, owner: usize, items: &mut Vec<Item>, aid: &mut u
     // `display: inline-block` — l'atomicité ne vaut que pour
     // les conteneurs.
     if let Some(t) = &b.text {
-        items.push(text_item(b, owner, t));
+        items.push(text_item(b, owner, t, decos));
         return;
     }
     if is_atomic(b) {
@@ -499,6 +568,10 @@ fn collect_child(b: &LayoutBox, owner: usize, items: &mut Vec<Item>, aid: &mut u
             pieces: Vec::new(),
             aid: Some(id),
             marker: None,
+            // §16.3.1 : la déco ne propage pas dans un
+            // remplacé/atomique — `deco` reste vide même si
+            // des ancêtres déclarent (`<a><img></a>`).
+            deco: Vec::new(),
         });
         return;
     }
@@ -511,6 +584,18 @@ fn collect_child(b: &LayoutBox, owner: usize, items: &mut Vec<Item>, aid: &mut u
     // « marge » copiée n'est pas la leur : transparentes.
     let margins = b.kind == BoxKind::Inline
         && (b.style.get("margin-left").is_some() || b.style.get("margin-right").is_some());
+    // Élément en-ligne déclarant (§16.3.1 / R-153) : sa déco
+    // enjambe le contenu descendant — empilée pour les items
+    // produits par la descente, dépilée à la fermeture.
+    // `AnonymousBlock` n'est pas un déclarant : son style
+    // cloné porte la déco du conteneur, déjà seedée par
+    // `collect_items` — la repousser la doublerait.
+    let pushed = (b.kind == BoxKind::Inline)
+        .then(|| text_deco(&b.style))
+        .flatten();
+    if let Some(d) = pushed {
+        decos.push(d);
+    }
     if margins {
         items.push(Item {
             owner,
@@ -519,10 +604,14 @@ fn collect_child(b: &LayoutBox, owner: usize, items: &mut Vec<Item>, aid: &mut u
             pieces: Vec::new(),
             aid: None,
             marker: Some(Marker::Open),
+            deco: Vec::new(),
         });
     }
     for c in &b.children {
-        explorer_common::deep(|| collect_child(c, owner, items, aid));
+        explorer_common::deep(|| collect_child(c, owner, items, aid, decos));
+    }
+    if pushed.is_some() {
+        decos.pop();
     }
     if margins {
         items.push(Item {
@@ -532,12 +621,15 @@ fn collect_child(b: &LayoutBox, owner: usize, items: &mut Vec<Item>, aid: &mut u
             pieces: Vec::new(),
             aid: None,
             marker: Some(Marker::Close),
+            deco: Vec::new(),
         });
     }
 }
 
 /// Item texte : runs itemisés → pièces entre opportunités.
-fn text_item(b: &LayoutBox, owner: usize, t: &str) -> Item {
+/// `decos` = pile des décos déclarées par les ancêtres
+/// en-ligne (R-153) — copiée en snapshot sur l'item.
+fn text_item(b: &LayoutBox, owner: usize, t: &str, decos: &[TextDeco]) -> Item {
     // §16.6.1 white-space processing : `normal`/`nowrap` effondrent
     // toute suite de blancs en une espace ; `pre-line` effondre les
     // espaces/tabs mais garde `\n` (saut forcé) ; `pre`/`pre-wrap`
@@ -592,6 +684,7 @@ fn text_item(b: &LayoutBox, owner: usize, t: &str) -> Item {
         pieces,
         aid: None,
         marker: None,
+        deco: decos.to_vec(),
     }
 }
 
@@ -910,6 +1003,7 @@ fn break_into_lines(
                 marg_r: mr,
                 marg_t: mt,
                 marg_b: mb,
+                deco: Vec::new(),
             });
             // (`rect.y = y + base - h`), `mb` allonge la ligne.
             acc.max_lh = acc.max_lh.max(mt + r.height + mb);
@@ -956,6 +1050,7 @@ fn break_into_lines(
                     marg_r,
                     marg_t: 0.0,
                     marg_b: 0.0,
+                    deco: Vec::new(),
                 });
                 cursor_x += m;
             }
@@ -1008,6 +1103,7 @@ fn break_into_lines(
                         marg_r: 0.0,
                         marg_t: 0.0,
                         marg_b: 0.0,
+                        deco: Vec::new(),
                     });
                     acc.max_lh = acc.max_lh.max(lh);
                     acc.max_base = acc.max_base.max(fs * 0.8);
@@ -1094,6 +1190,7 @@ fn break_into_lines(
                     marg_r: 0.0,
                     marg_t: 0.0,
                     marg_b: 0.0,
+                    deco: item.deco.clone(),
                 });
                 acc.max_lh = acc.max_lh.max(lh);
                 acc.max_base = acc.max_base.max(baseline);

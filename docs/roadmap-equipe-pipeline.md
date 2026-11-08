@@ -2987,12 +2987,18 @@ scroll interne `overflow:auto`) est loguée au journal.
   couche `url()`, les suivantes sautées (fix complet =
   fetch multi-url côté NAV, journalisé). Verrou +
   vérification terrain.
-- [ ] **R-153. `text-decoration` peint** : cascadé + UA
+- [x] **R-153. `text-decoration` peint** : cascadé + UA
   (`a[href]`/`u`/`del`) mais aucun `DisplayItem` ne le
-  consomme — aucun lien souligné sur ~25 sites du corpus.
-  Déco **résolue au fragment** (couleur/nœud déclarant,
-  propagation inlines, saut des remplacés) ; repro
-  `<a><b>` dès l'étape.
+  consommait — aucun lien souligné sur ~25 sites du corpus.
+  Livré : déco **résolue au fragment** à l'itemisation —
+  pile des ancêtres inline déclarants dans `collect_child`,
+  snapshot `TextDeco{lignes, couleur du déclarant}` sur les
+  fragments (§16.3.1 : `<a>` rouge souligne `<b>` bleu en
+  rouge, saut des remplacés, seed conteneur bloc). Paint =
+  `FillRect` (under/over sous l'encre, through après).
+  Approximations : métriques en fractions d'em, `solid`
+  seul, `blink` ignoré, `-color`/`-style`/`-thickness`
+  hors scope. Verrous ×5 + terrain (Drudge, REC-html32).
 - [ ] **R-154. `<font>` présentationnel** : `face`/`color`/
   `size` 1-7 + `±N` relatif (`apply_presentational_hints`
   a le parent `ComputedStyle` en scope) ; `basefont` si le
