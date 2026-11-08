@@ -1411,7 +1411,7 @@ fn deco_inline_peinte_par_fragment_pas_par_union() {
     let fills: Vec<(f32, f32)> = items
         .iter()
         .filter_map(|i| match i {
-            DisplayItem::FillRect { rect, color } if color.g > 200 => {
+            DisplayItem::FillRect { rect, color, .. } if color.g > 200 => {
                 Some((rect.width, rect.height))
             }
             _ => None,
@@ -2090,7 +2090,7 @@ fn underlines(items: &[DisplayItem], baseline: f32) -> Vec<(f32, explorer_css::v
     items
         .iter()
         .filter_map(|i| match i {
-            DisplayItem::FillRect { rect, color }
+            DisplayItem::FillRect { rect, color, .. }
                 if rect.y >= baseline - 0.5 && rect.y <= baseline + 8.0 =>
             {
                 Some((rect.x, *color))
@@ -2242,4 +2242,45 @@ fn styles_3d_mappees_aux_variantes_reelles() {
         });
         assert_eq!(got, Some(want), "{kw}");
     }
+}
+
+#[test]
+fn border_radius_shorthand_et_radii_sur_items() {
+    // R-167 — `border-radius` éclate en 4 coins, arrive en
+    // `radii` sur `Border` ET `FillRect` (fond arrondi) ;
+    // `%` du plus petit côté, borné à la moitié.
+    let (_d, _b, items) = dl(
+        "<div>x</div>",
+        "div { border: 4px solid black; background: #ccc; \
+         border-radius: 10px 20px; width: 80px; height: 60px }",
+    );
+    let border = items.iter().find_map(|i| match i {
+        DisplayItem::Border { radii, .. } => Some(*radii),
+        _ => None,
+    });
+    assert_eq!(
+        border,
+        Some([10.0, 20.0, 10.0, 20.0]),
+        "radii border : {border:?}"
+    );
+    let fill = items.iter().find_map(|i| match i {
+        DisplayItem::FillRect { radii, .. } => Some(*radii),
+        _ => None,
+    });
+    assert_eq!(
+        fill,
+        Some([10.0, 20.0, 10.0, 20.0]),
+        "radii fond : {fill:?}"
+    );
+    // `50%` → moitié du plus petit côté (60→30px).
+    let (_d2, _b2, items2) = dl(
+        "<div>x</div>",
+        "div { border: 2px solid black; border-radius: 50%; \
+         width: 80px; height: 60px }",
+    );
+    let r2 = items2.iter().find_map(|i| match i {
+        DisplayItem::Border { radii, .. } => Some(*radii),
+        _ => None,
+    });
+    assert_eq!(r2, Some([32.0; 4]), "50% : {r2:?}");
 }

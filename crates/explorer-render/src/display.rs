@@ -38,6 +38,9 @@ pub enum DisplayItem {
         rect: Rect,
         /// Couleur RGBA.
         color: Color,
+        /// Rayons des 4 coins [tl,tr,br,bl] px (R-167) —
+        /// 0 = rectangle franc.
+        radii: [f32; 4],
     },
     /// Bordure d'une boîte — 4 côtés uniformisés en un item.
     Border {
@@ -49,6 +52,8 @@ pub enum DisplayItem {
         colors: [Color; 4],
         /// Style (`solid`/`dashed`/`dotted`/…) par côté.
         styles: [BorderStyle; 4],
+        /// Rayons des 4 coins [tl,tr,br,bl] px (R-167).
+        radii: [f32; 4],
     },
     /// Run de glyphes shapés, posé depuis l'origine
     /// baseline (`x`, `y` = ligne de base).
@@ -302,7 +307,7 @@ impl DisplayList {
         for item in &self.items {
             use std::fmt::Write as _;
             match item {
-                DisplayItem::FillRect { rect, color } => {
+                DisplayItem::FillRect { rect, color, .. } => {
                     let _ = writeln!(out, "fill {rect:?} #{color:?}");
                 }
                 DisplayItem::Border { rect, .. } => {
@@ -517,26 +522,30 @@ fn item_eq(a: &DisplayItem, b: &DisplayItem) -> bool {
             D::FillRect {
                 rect: r1,
                 color: c1,
+                radii: ra1,
             },
             D::FillRect {
                 rect: r2,
                 color: c2,
+                radii: ra2,
             },
-        ) => r1 == r2 && c1 == c2,
+        ) => r1 == r2 && c1 == c2 && ra1 == ra2,
         (
             D::Border {
                 rect: r1,
                 widths: w1,
                 colors: c1,
                 styles: s1,
+                radii: ra1,
             },
             D::Border {
                 rect: r2,
                 widths: w2,
                 colors: c2,
                 styles: s2,
+                radii: ra2,
             },
-        ) => r1 == r2 && w1 == w2 && c1 == c2 && s1 == s2,
+        ) => r1 == r2 && w1 == w2 && c1 == c2 && s1 == s2 && ra1 == ra2,
         (
             D::Text {
                 origin: o1,
@@ -876,6 +885,7 @@ fn emit_canvas_bg(
             items.push(DisplayItem::FillRect {
                 rect: canvas,
                 color: c,
+                radii: [0.0; 4],
             });
         }
     }
@@ -1227,6 +1237,38 @@ fn border_style(v: Option<&str>) -> BorderStyle {
 /// (`thin`/`medium`/`thick`) valent 1/3/5 px ; `em`/`rem` et
 /// pourcents sont hors portée ici (pas de contexte de fonte)
 /// → repli `fallback`.
+/// `border-<coin>-radius` → px (R-167) : `%` du plus petit
+/// côté de la boîte (approximation — la spec résout x% sur
+/// la largeur, y% sur la hauteur pour les rayons elliptiques ;
+/// ici rayon circulaire par coin), unité absolue sinon, 0 si
+/// absent/invalide.
+#[allow(clippy::cast_possible_truncation)]
+fn radius_px(raw: Option<&str>, basis: f32) -> f32 {
+    let Some(v) = raw.map(str::trim) else {
+        return 0.0;
+    };
+    if let Some(p) = v.strip_suffix('%') {
+        return p.trim().parse::<f32>().unwrap_or(0.0) / 100.0 * basis;
+    }
+    parse_length(v)
+        .and_then(|l| l.unit.px_factor().map(|f| l.value * f))
+        .unwrap_or(0.0) as f32
+}
+
+/// Rayons des 4 coins `[tl, tr, br, bl]` en px, bornés à la
+/// moitié du plus petit côté (§ couvercle — deux rayons
+/// adjacents ne se chevauchent pas, approximation).
+fn corner_radii(st: &explorer_css::ComputedStyle, rect: &Rect) -> [f32; 4] {
+    let basis = rect.width.min(rect.height).max(0.0);
+    let cap = basis / 2.0;
+    [
+        radius_px(st.get("border-top-left-radius"), basis).min(cap),
+        radius_px(st.get("border-top-right-radius"), basis).min(cap),
+        radius_px(st.get("border-bottom-right-radius"), basis).min(cap),
+        radius_px(st.get("border-bottom-left-radius"), basis).min(cap),
+    ]
+}
+
 #[allow(clippy::cast_possible_truncation)]
 fn prop_px(st: &explorer_css::ComputedStyle, prop: &str, fallback: f32) -> f32 {
     let raw = st.get_or(prop, "");
@@ -2071,7 +2113,11 @@ fn paint_self(
                         repeat: mask_repeat(&bx.style),
                     });
                 } else {
-                    items.push(DisplayItem::FillRect { rect, color: c });
+                    items.push(DisplayItem::FillRect {
+                        rect,
+                        color: c,
+                        radii: corner_radii(&bx.style, &rect),
+                    });
                 }
             }
         }
@@ -2133,6 +2179,7 @@ fn paint_self(
                 border_style(bx.style.get("border-bottom-style")),
                 border_style(bx.style.get("border-left-style")),
             ],
+            radii: corner_radii(&bx.style, &rect),
         });
     }
     // (Les fragments `bx.lines` sont émis par `paint_lines`,
@@ -2156,6 +2203,7 @@ fn paint_self(
                     height: side,
                 },
                 color: ink,
+                radii: [0.0; 4],
             });
         }
     }
@@ -2270,12 +2318,14 @@ fn paint_lines(bx: &LayoutBox, items: &mut Vec<DisplayItem>, off: (f32, f32)) {
                         items.push(DisplayItem::FillRect {
                             rect: deco_rect(base_y + (fs * 0.1).max(1.0)),
                             color,
+                            radii: [0.0; 4],
                         });
                     }
                     if d.lines & explorer_layout::inline::DECO_OVERLINE != 0 {
                         items.push(DisplayItem::FillRect {
                             rect: deco_rect(base_y - fs * 0.85),
                             color,
+                            radii: [0.0; 4],
                         });
                     }
                 }
@@ -2291,6 +2341,7 @@ fn paint_lines(bx: &LayoutBox, items: &mut Vec<DisplayItem>, off: (f32, f32)) {
                         items.push(DisplayItem::FillRect {
                             rect: deco_rect(base_y - fs * 0.3 - th / 2.0),
                             color: d.color.unwrap_or(ink),
+                            radii: [0.0; 4],
                         });
                     }
                 }
@@ -2343,6 +2394,7 @@ fn paint_inline_deco(
             items.push(DisplayItem::FillRect {
                 rect: outer,
                 color: c,
+                radii: [0.0; 4],
             });
         }
     }
@@ -2370,6 +2422,7 @@ fn paint_inline_deco(
                 border_style(st.get("border-bottom-style")),
                 border_style(st.get("border-left-style")),
             ],
+            radii: corner_radii(st, &outer),
         });
     }
 }
@@ -2985,20 +3038,23 @@ fn translate_item(it: &DisplayItem, d: (f32, f32)) -> DisplayItem {
         return it.clone();
     }
     match it {
-        D::FillRect { rect, color } => D::FillRect {
+        D::FillRect { rect, color, radii } => D::FillRect {
             rect: shifted(*rect, d),
             color: *color,
+            radii: *radii,
         },
         D::Border {
             rect,
             widths,
             colors,
             styles,
+            radii,
         } => D::Border {
             rect: shifted(*rect, d),
             widths: *widths,
             colors: *colors,
             styles: *styles,
+            radii: *radii,
         },
         D::Text {
             origin,

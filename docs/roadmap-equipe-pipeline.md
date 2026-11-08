@@ -3076,9 +3076,12 @@ scroll interne `overflow:auto`) est loguée au journal.
   noir / clair mix blanc), `groove`/`ridge` en moitiés,
   `double` = 2 liserés + tiers vide — bandes fractionnées
   `side_bands`/`paint_border_band`. Verrou 6 styles.
-- [ ] **R-167. `border-radius`** : shorthand + 4 longhands
-  (aujourd'hui absents d'`expand_shorthand`) + path arrondi
-  + clip `overflow` au raster.
+- [x] **R-167. `border-radius`** : shorthand → 4 coins
+  (elliptique `h/v` → rayon horizontal seul) ; `radii`
+  sur `Border`/`FillRect` (% du petit côté, borné moitié) ;
+  chemin arrondi κ≈0.5523 — fond arrondi + anneau EvenOdd
+  bordure `solid` uniforme ; clip `overflow` reste rect
+  (reporté). Verrou valeurs + `50%`.
 - [ ] **R-168+** : `counter-*`/`counter()` + `attr()` dans
   `content`, `list-style-image`, `word-spacing`, `noframes`
   conditionnel — selon corpus. Tranche NAV-dominante

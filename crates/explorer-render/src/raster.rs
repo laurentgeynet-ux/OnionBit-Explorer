@@ -920,6 +920,36 @@ fn rects_overlap(a: explorer_layout::Rect, b: explorer_layout::Rect) -> bool {
 
 /// Peint un item de dessin (les clips sont gérés par
 /// `rasterize` directement).
+/// R-167 — un `FillRect` : rayon > 0 → fill du chemin
+/// arrondi ; sinon rect pixel-snappé (`fill_guarded`).
+fn fill_rect_item(
+    pixmap: &mut Pixmap,
+    rect: &explorer_layout::Rect,
+    color: Color,
+    radii: &[f32; 4],
+    dpi: Transform,
+    clip: Option<&Mask>,
+) {
+    let mut paint = Paint {
+        anti_alias: true,
+        ..Paint::default()
+    };
+    paint.set_color(skia_color(color));
+    if radii.iter().any(|r| *r > 0.0) {
+        if let Some(path) = rounded_rect_path(
+            rect.x,
+            rect.y,
+            rect.x + rect.width,
+            rect.y + rect.height,
+            radii,
+        ) {
+            pixmap.fill_path(&path, &paint, FillRule::Winding, dpi, clip);
+        }
+    } else if let Some(r) = Rect::from_xywh(rect.x, rect.y, rect.width, rect.height) {
+        fill_guarded(pixmap, &r, &paint, dpi, clip);
+    }
+}
+
 fn paint_item(
     pixmap: &mut Pixmap,
     item: &DisplayItem,
@@ -929,23 +959,17 @@ fn paint_item(
     clip: Option<&Mask>,
 ) {
     match item {
-        DisplayItem::FillRect { rect, color } => {
-            let mut paint = Paint {
-                anti_alias: true,
-                ..Paint::default()
-            };
-            paint.set_color(skia_color(*color));
-            if let Some(r) = Rect::from_xywh(rect.x, rect.y, rect.width, rect.height) {
-                fill_guarded(pixmap, &r, &paint, dpi, clip);
-            }
+        DisplayItem::FillRect { rect, color, radii } => {
+            fill_rect_item(pixmap, rect, *color, radii, dpi, clip);
         }
         DisplayItem::Border {
             rect,
             widths,
             colors,
             styles,
+            radii,
         } => {
-            paint_border(pixmap, rect, widths, colors, *styles, dpi, clip);
+            paint_border(pixmap, rect, widths, colors, *styles, radii, dpi, clip);
         }
         DisplayItem::Text {
             origin,
@@ -1502,6 +1526,41 @@ fn paint_tiled(
     }
 }
 
+/// R-167 — chemin d'un rectangle aux 4 coins arrondis
+/// (cubiques Bézier κ≈0.5523 par coin, rayons 0 = coin
+/// droit ; approximation circulaire — l'elliptique `h/v`
+/// n'est pas encore supporté).
+fn rounded_rect_path(
+    x0: f32,
+    y0: f32,
+    x1: f32,
+    y1: f32,
+    radii: &[f32; 4],
+) -> Option<tiny_skia::Path> {
+    const K: f32 = 0.552_284_8;
+    let [rtl, rtr, rbr, rbl] = *radii;
+    let mut pb = PathBuilder::new();
+    pb.move_to(x0 + rtl, y0);
+    pb.line_to(x1 - rtr, y0);
+    if rtr > 0.0 {
+        pb.cubic_to(x1 - rtr + K * rtr, y0, x1, y0 + rtr - K * rtr, x1, y0 + rtr);
+    }
+    pb.line_to(x1, y1 - rbr);
+    if rbr > 0.0 {
+        pb.cubic_to(x1, y1 - rbr + K * rbr, x1 - rbr + K * rbr, y1, x1 - rbr, y1);
+    }
+    pb.line_to(x0 + rbl, y1);
+    if rbl > 0.0 {
+        pb.cubic_to(x0 + rbl - K * rbl, y1, x0, y1 - rbl + K * rbl, x0, y1 - rbl);
+    }
+    pb.line_to(x0, y0 + rtl);
+    if rtl > 0.0 {
+        pb.cubic_to(x0, y0 + rtl - K * rtl, x0 + rtl - K * rtl, y0, x0 + rtl, y0);
+    }
+    pb.close();
+    pb.finish()
+}
+
 /// R-166 — demi-teinte sombre d'une couleur de bordure
 /// (moitié vers le noir) pour les styles 3D.
 fn shade_dark(c: Color) -> Color {
@@ -1570,15 +1629,57 @@ fn side_bands(side: usize, c: Color, s: BorderStyle) -> Vec<(f32, f32, Color)> {
 /// R-166 : styles 3D et `double` → bandes `side_bands` —
 /// demi-teintes par côté (`inset`/`outset`) ou en moitiés
 /// (`groove`/`ridge`) / liserés en tiers (`double`).
+#[allow(clippy::too_many_arguments)]
 fn paint_border(
     pixmap: &mut Pixmap,
     rect: &explorer_layout::Rect,
     widths: &[f32; 4],
     colors: &[Color; 4],
     styles: [BorderStyle; 4],
+    radii: &[f32; 4],
     dpi: Transform,
     clip: Option<&Mask>,
 ) {
+    // R-167 — coins arrondis : anneau unique externe−interne
+    // (EvenOdd) pour une bordure uniforme pleine — le cas
+    // commun `border-radius + solid` (boutons, navs). Les
+    // variantes de style ou de couleur retombent sur la
+    // peinture plate par bandes (approximation documentée).
+    if radii.iter().any(|r| *r > 0.0)
+        && styles
+            .iter()
+            .all(|s| *s == BorderStyle::Solid || *s == BorderStyle::None)
+        && colors.iter().all(|c| *c == colors[0])
+    {
+        let (ox0, oy0) = (rect.x, rect.y);
+        let (ox1, oy1) = (rect.x + rect.width, rect.y + rect.height);
+        let ix0 = ox0 + widths[3];
+        let iy0 = oy0 + widths[0];
+        let ix1 = ox1 - widths[1];
+        let iy1 = oy1 - widths[2];
+        let inner_r: [f32; 4] = [
+            (radii[0] - widths[0].max(widths[3])).max(0.0),
+            (radii[1] - widths[0].max(widths[1])).max(0.0),
+            (radii[2] - widths[2].max(widths[1])).max(0.0),
+            (radii[3] - widths[2].max(widths[3])).max(0.0),
+        ];
+        let mut pb = PathBuilder::new();
+        if let Some(outer) = rounded_rect_path(ox0, oy0, ox1, oy1, radii) {
+            pb.push_path(&outer);
+        }
+        if let Some(inner) = rounded_rect_path(ix0, iy0, ix1, iy1, &inner_r) {
+            pb.push_path(&inner);
+        }
+        if let Some(ring) = pb.finish() {
+            let mut paint = Paint {
+                anti_alias: true,
+                ..Paint::default()
+            };
+            paint.set_color(skia_color(colors[0]));
+            pixmap.fill_path(&ring, &paint, FillRule::EvenOdd, dpi, clip);
+        }
+        return;
+    }
     let painted = |i: usize| styles[i] != BorderStyle::None && widths[i] > 0.0;
     // R-166 — styles 3D / multi-bandes : la couleur réelle
     // d'une bande est dérivée (demi-teintes) — le chemin

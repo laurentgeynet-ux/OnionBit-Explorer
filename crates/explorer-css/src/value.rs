@@ -639,6 +639,21 @@ pub fn expand_shorthand(name: &str, value: &str) -> Option<Vec<(String, String)>
             (b.to_string(), v2.to_string()),
         ]);
     }
+    // `border-radius` (R-167) : 1..4 rayons → coins tl/tr/
+    // br/bl ; la forme elliptique `h/v` n'est pas encore
+    // supportée — seul le rayon horizontal avant `/` est
+    // pris (dégradation documentée).
+    if name == "border-radius" {
+        let hpart = value.split('/').next().unwrap_or_default();
+        let parts: Vec<&str> = hpart.split_whitespace().collect();
+        let [tl, tr, br, bl] = four_sides(&parts)?;
+        return Some(vec![
+            ("border-top-left-radius".to_string(), tl),
+            ("border-top-right-radius".to_string(), tr),
+            ("border-bottom-right-radius".to_string(), br),
+            ("border-bottom-left-radius".to_string(), bl),
+        ]);
+    }
     match name {
         "margin" | "padding" => expand_box(name, value),
         "inset" => {
