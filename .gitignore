@@ -1,4 +1,7 @@
 /target
+# Surcharges cargo locales de worktree (target-dir, env) —
+# jamais commitées : chaque worktree y pose les siennes.
+/.cargo/config
 **/*.rs.bk
 Cargo.lock.bak
 

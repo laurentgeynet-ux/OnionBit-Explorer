@@ -21,8 +21,24 @@ cargo build --release -p explorer-daemon -p explorer-cli -p explorer-ffi
 if ($LASTEXITCODE -ne 0) { throw "ECHEC : build release" }
 
 New-Item -ItemType Directory -Force -Path "$Dist/bin" | Out-Null
-Copy-Item "target/release/explorer-daemon.exe" "$Dist/bin/"
-Copy-Item "target/release/explorer-cli.exe"    "$Dist/bin/"
+# `target_directory` reel via `cargo metadata` (CARGO_TARGET_DIR /
+# configs le deportent — jamais `target/release` en dur) + repli
+# <target>/<triple>/release quand `build.target` est explicite
+# (config globale) — meme regle que spawn_daemon.ps1.
+$meta = cargo metadata --no-deps --format-version 1 | ConvertFrom-Json
+$triple = ''
+$v = & rustc -vV 2>$null | Select-String -Pattern '^host: (\S+)'
+if ($v) { $triple = $v.Matches[0].Groups[1].Value }
+$relTarget = @(
+    $(if ($triple) { Join-Path $meta.target_directory "$triple\release" }),
+    (Join-Path $meta.target_directory 'release')
+) | Where-Object { $_ -and (Test-Path (Join-Path $_ 'explorer-daemon.exe')) } |
+    Select-Object -First 1
+if (-not $relTarget) {
+    throw "explorer-daemon.exe introuvable sous $($meta.target_directory)"
+}
+Copy-Item (Join-Path $relTarget 'explorer-daemon.exe') "$Dist/bin/"
+Copy-Item (Join-Path $relTarget 'explorer-cli.exe')    "$Dist/bin/"
 
 if (-not $SkipApp -and (Test-Path 'app/pubspec.yaml')) {
     $flutter = Get-Command flutter -ErrorAction SilentlyContinue
@@ -41,7 +57,7 @@ if (-not $SkipApp -and (Test-Path 'app/pubspec.yaml')) {
             # gagnait silencieusement la sonde `tryLoad`
             # (terrain : latence 20 s + gel). Le binaire
             # compilé ici est déposé dans le bundle.
-            $ffiDll = 'target/release/explorer_ffi.dll'
+            $ffiDll = Join-Path $relTarget 'explorer_ffi.dll'
             if (Test-Path $ffiDll) {
                 Copy-Item $ffiDll "$Dist/app/"
             }

@@ -300,16 +300,35 @@ Règles de la coexistence :
    au vert. En interne d'équipe, liberté totale (branches
    partagées, worktrees) — les règles ne gouvernent que ce
    qui atterrit sur `main`.
-   - **Worktrees parallèles — `target-dir` distinct** :
-     `.cargo/config.toml` épingle `D:/cargo-target/
-     OnionBit-Explorer` pour tous les worktrees — les
-     binaires de test d'un autre worktree (autre
-     `CARGO_MANIFEST_DIR`, fixtures absentes) peuvent
-     s'exécuter à la place des vôtres (ex. réel :
-     `tree_construction` « corpus dir NotFound » — race
-     environnementale, pas un flake). Deux sessions
-     simultanées → `CARGO_TARGET_DIR=<worktree>/target`
-     par worktree, ou gate sur `main` uniquement.
+   - **Sortie de build — aucun chemin commité** :
+     `.cargo/config.toml` n'épingle **aucun**
+     `target-dir` (l'ancien épinglage d'un dossier
+     partagé entre worktrees exécutait les
+     binaires/tests d'un autre worktree à la place
+     des vôtres — race réelle `tree_construction`
+     « corpus dir NotFound » : autre
+     `CARGO_MANIFEST_DIR`, fixtures absentes). La
+     centralisation relève du poste : la config cargo
+     de la **machine** (niveau utilisateur, hors
+     dépôt) pose `build-dir` avec le templating
+     `{workspace-path-hash}` (cargo ≥ 1.91) → chaque
+     projet/worktree obtient un sous-dossier unique
+     sous la racine centrale du poste, rien à
+     déclarer dans le dépôt (`cargo metadata`
+     expose `build_directory`/`target_directory`).
+     Les binaires finaux restent dans le `target/`
+     local du worktree — défaut cargo, isolation
+     automatique ; pour les déporter aussi :
+     `CARGO_TARGET_DIR` par session (cf. docs de
+     vol) ou `.cargo/config` non commité
+     (prioritaire sur `config.toml`, gitignoré).
+     **Scripts** : l'exe d'un binaire se résout via
+     `cargo metadata` + repli
+     `<target>/<triple>/<profil>` — un
+     `build.target` explicite (config machine)
+     range les artefacts finaux sous le
+     sous-dossier triple ; jamais de chemin
+     `target/<profil>` en dur.
    - **Gate entier avant push** : `verify_all` complet, pas
      seulement son crate — le couplage est asymétrique :
      PIPELINE (amont) peut casser des tests `explorer-core`
@@ -334,10 +353,10 @@ Règles de la coexistence :
    - **Pas de CI distante** (dépôt mono-machine) : « main
      vert » est garanti par le gate `verify_all` manuel.
      `scripts/verify_all.ps1` est conçu CI-ready — le jour
-     où un remote existe, il devient le job CI tel quel, à
-     ceci près : `.cargo/config.toml` (commité — postes
-     partagés) pointe `target-dir` sur `D:` ; la CI devra
-     poser `CARGO_TARGET_DIR` (prioritaire sur la config).
+     où un remote existe, il devient le job CI tel quel ;
+     la CI posera `CARGO_TARGET_DIR` et/ou
+     `CARGO_BUILD_BUILD_DIR` selon sa machine (l'env
+     prime sur toute config).
 4. **Fichiers partagés** : `CHANGELOG.md` est union-mergé ;
    `Cargo.lock` se régénère (règle §10.3) ;
    `[workspace.dependencies]` et `AGENTS.md`/ADR relèvent du

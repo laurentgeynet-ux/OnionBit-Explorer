@@ -29,8 +29,8 @@
 # Usage :
 #   pwsh -File scripts/spawn_daemon.ps1 [-Port 9377]
 #     [-Profile <dir>] [-Exe <chemin>] [-LogDir <dossier>]
-#   -Exe défaut : <target-dir>\release\explorer-daemon.exe
-#   (résolution cargo — repli debug) ; -Profile omis =
+#   -Exe défaut : <target-dir>[/<triple>]\release\explorer-daemon.exe
+#   (résolution cargo via `cargo metadata` — repli debug) ; -Profile omis =
 #   EXPLORER_PROFILE de l'appelant (hérité via WMI).
 
 param(
@@ -45,25 +45,47 @@ param(
 )
 
 # Résolution du binaire : -Exe explicite, sinon la canonique
-# cargo (CARGO_TARGET_DIR > .cargo/config.toml > .\target —
-# même règle que deploy_engine.ps1). release préféré à debug.
+# cargo via `cargo metadata` (CARGO_TARGET_DIR > configs projet
+# et globale > .\target — la chaîne entière, y compris la
+# config utilisateur hors dépôt). release préféré à debug.
+# Sous un `cargo build --target <triple>` ou un `build.target`
+# explicite (config globale), le binaire vit dans
+# `<target>\<triple>\<prof>\` — la racine `<target>\<prof>\`
+# est alors vide et l'ancien script échouait « introuvable ».
 if ($Exe -eq '') {
   $repo = Split-Path -Parent $PSScriptRoot
-  $target = if ($env:CARGO_TARGET_DIR) {
-    $env:CARGO_TARGET_DIR
-  } else {
-    $cfg = Join-Path $repo '.cargo\config.toml'
-    if (Test-Path $cfg) {
-      $m = Select-String -Path $cfg -Pattern 'target-dir\s*=\s*"([^"]+)"'
-      if ($m) { $m.Matches[0].Groups[1].Value } else { 'target' }
-    } else { 'target' }
-  }
-  if (-not [System.IO.Path]::IsPathRooted($target)) {
-    $target = Join-Path $repo $target
-  }
-  foreach ($prof in 'release', 'debug') {
-    $cand = Join-Path $target "$prof\explorer-daemon.exe"
+  Push-Location $repo
+  try {
+    $target = (cargo metadata --no-deps --format-version 1 |
+      ConvertFrom-Json).target_directory
+  } finally { Pop-Location }
+  # Triple hôte (`x86_64-pc-windows-msvc`…) — rustc absent =
+  # chaîne vide, le repli glob plus bas couvre alors.
+  $triple = ''
+  try {
+    $v = & rustc -vV 2>$null | Select-String -Pattern '^host: (\S+)'
+    if ($v) { $triple = $v.Matches[0].Groups[1].Value }
+  } catch { }
+  $cands = @(
+    (Join-Path $target 'release\explorer-daemon.exe')
+    $(if ($triple) { Join-Path $target "$triple\release\explorer-daemon.exe" })
+    (Join-Path $target 'debug\explorer-daemon.exe')
+    $(if ($triple) { Join-Path $target "$triple\debug\explorer-daemon.exe" })
+  ) | Where-Object { $_ }
+  foreach ($cand in $cands) {
     if (Test-Path $cand) { $Exe = $cand; break }
+  }
+  # Repli borné : tout `<target>\<triple>\<prof>\explorer-
+  # daemon.exe` — couvre un triple différent de `rustc -vV`
+  # (cross-build) ou un rustc absent du PATH.
+  if ($Exe -eq '') {
+    $hit = Get-ChildItem -Path $target -Recurse -Depth 2 `
+      -Filter 'explorer-daemon.exe' -ErrorAction SilentlyContinue |
+      Sort-Object `
+        { if ($_.FullName -match '\\release\\') { 0 } else { 1 } }, `
+        { -$_.LastWriteTime.Ticks } |
+      Select-Object -First 1
+    if ($hit) { $Exe = $hit.FullName }
   }
 }
 if (-not (Test-Path $Exe)) {
