@@ -2821,8 +2821,11 @@ i, em, cite, dfn, var, address { font-style: italic }
 u, ins { text-decoration: underline }
 s, del, strike { text-decoration: line-through }
 big { font-size: larger }
-small { font-size: smaller }
+small, sub, sup { font-size: smaller }
 nobr { white-space: nowrap }
+sub { vertical-align: sub }
+sup { vertical-align: super }
+abbr[title], acronym[title] { text-decoration: underline }
 mark { background-color: yellow; color: black }
 figure { margin-top: 1em; margin-bottom: 1em; margin-left: 40px; margin-right: 40px }
 fieldset { border-width: 2px; border-style: groove; margin-left: 2px; margin-right: 2px; padding: 0.35em 0.75em 0.625em }

@@ -3046,9 +3046,12 @@ scroll interne `overflow:auto`) est loguée au journal.
   cellule garde sa géométrie peinte) ; `tr[valign]` relayé
   aux cellules. `baseline`/`top` = en haut (vraie baseline
   = R-161). Verrou middle/bottom sur rangée.
-- [ ] **R-161. `vertical-align` inline** : `sub`/`super`/px/
-  `%` — débloque `sub`/`sup`/`abbr[title]`/`acronym` UA
-  (dépend de R-153 pour `abbr`).
+- [x] **R-161. `vertical-align` inline** : lu sur tous les
+  fragments — `sub`/`super` (fractions de font-size), px,
+  `%` (strut ≈ line-height). Règles UA livrées : `sub`/
+  `sup`→smaller+décalage, `abbr[title]`/`acronym[title]`
+  →souligné. `text-top`/`text-bottom`/`middle` ≈ ligne.
+  Verrou baseline décalée.
 - [ ] **R-162. `text-transform`** : appliqué à la chaîne
   avant itemisation/segmentation UAX #14.
 - [ ] **R-163. `input[type=password]`→bullets +

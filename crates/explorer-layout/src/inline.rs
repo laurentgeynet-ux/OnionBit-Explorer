@@ -26,7 +26,9 @@ use std::collections::HashMap;
 
 use explorer_css::{value::Color, ComputedStyle};
 
-use crate::block::{css_px, font_size_px, layout_block, measure_fn, side_px, BlockCtx, FloatCtx};
+use crate::block::{
+    css_px, font_size_px, layout_block, measure_fn, raw_length_px, side_px, BlockCtx, FloatCtx,
+};
 use crate::boxtree::{BoxKind, LayoutBox, Rect};
 use crate::font::{self, ShapedRun};
 use crate::text::{self, Direction};
@@ -782,7 +784,7 @@ impl LineAcc {
 
     /// Ferme la ligne à `y` : aligne les fragments sur la
     /// baseline commune, calcule le rect.
-    fn close(&mut self, y: &mut f32, lines: &mut Vec<LineBox>) {
+    fn close(&mut self, y: &mut f32, lines: &mut Vec<LineBox>, ctx: &BlockCtx) {
         // §16.6.1 : les espaces en FIN de ligne sont retirées
         // (elles ne rendent rien et ne comptent pas dans la
         // largeur — `text-align` mesure sans elles).
@@ -825,16 +827,28 @@ impl LineAcc {
             // (approximation — la spec centre sur x-height/2
             // au-dessus de la baseline). Texte et autres clés
             // : baseline.
-            let va = if f.atomic {
-                f.style.get("vertical-align").unwrap_or("baseline")
-            } else {
-                "baseline"
+            let va = f.style.get("vertical-align").unwrap_or("baseline");
+            // R-161 — décalages de baseline sur tout fragment
+            // : / en fractions de font-size
+            // (métriques fonte hors périmètre), longueur en
+            // px négative = monte,  de la hauteur de strut
+            // (approxime la line-height, §10.8).
+            let fs_px = f
+                .style
+                .get("font-size")
+                .and_then(|v| v.strip_suffix("px"))
+                .and_then(|t| t.trim().parse::<f32>().ok())
+                .unwrap_or(self.strut_lh);
+            let dy = match va {
+                "sub" => fs_px * 0.2,
+                "super" => -(fs_px * 0.33),
+                _ => raw_length_px(va, self.strut_lh, fs_px, ctx).map_or(0.0, |l| -l),
             };
             f.rect.y = match va {
                 "top" | "text-top" => *y + f.marg_t,
                 "bottom" | "text-bottom" => *y + h - (f.rect.height + f.marg_b),
                 "middle" => *y + (h - f.rect.height - f.marg_t - f.marg_b) / 2.0 + f.marg_t,
-                _ => *y + (base - f.baseline),
+                _ => *y + (base - f.baseline) + dy,
             };
         }
         lines.push(LineBox {
@@ -919,7 +933,7 @@ fn break_into_lines(
     // suivant (les flottants peuvent avoir commencé/fini).
     macro_rules! new_line {
         () => {{
-            acc.close(&mut cursor_y, &mut lines);
+            acc.close(&mut cursor_y, &mut lines, ctx);
             (line_x, line_w) = fl.band(cursor_y, x, w);
             cursor_x = line_x;
         }};
@@ -1201,7 +1215,7 @@ fn break_into_lines(
             }
         }
     }
-    acc.close(&mut cursor_y, &mut lines);
+    acc.close(&mut cursor_y, &mut lines, ctx);
     lines
 }
 

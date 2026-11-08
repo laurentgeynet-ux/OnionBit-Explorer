@@ -586,3 +586,46 @@ fn text_overflow_ellipsis_sans_clip_inerte() {
     let last = p.children[0].lines[0].fragments.last().expect("frag");
     assert_ne!(last.text, "…", "visible : pas de suspension");
 }
+
+/// R-161 — `sup`/`sub`/`vertical-align:px`/`%` : la
+/// baseline des runs concernés se décale (les autres
+/// restent sur la baseline commune).
+#[test]
+fn vertical_align_sub_super_px_pct_decale_la_baseline() {
+    let (dom, bx) = laid_w(
+        "<!doctype html><p>x<sup>2</sup>y<sub>i</sub>\
+         <span style=\"vertical-align:4px\">z</span>\
+         <span style=\"vertical-align:-20%\">w</span></p>",
+        "body { margin: 0 } p { font-size: 20px; margin: 0 }",
+        800.0,
+    );
+    let p = find(&bx, by_tag(&dom, "p"));
+    let frags = &p.children[0].lines[0].fragments;
+    let fy = |needle: &str| -> f32 {
+        frags
+            .iter()
+            .find(|f| f.text.trim() == needle)
+            .map_or(f32::NAN, |f| f.rect.y)
+    };
+    let base_y = fy("x");
+    // Le texte courant peut fusionner « x » au voisin — la
+    // baseline de référence = un fragment sans décalage.
+    let ref_y = frags
+        .iter()
+        .filter(|f| f.text.contains('y') || f.text.contains('x'))
+        .map(|f| f.rect.y)
+        .fold(f32::INFINITY, f32::min);
+    assert!(ref_y.is_finite(), "ligne sans texte courant ?");
+    let up = fy("2");
+    let lo = fy("i");
+    let px = fy("z");
+    let pct = fy("w");
+    assert!(up < ref_y - 2.0, "sup doit monter : up={up} ref={ref_y}");
+    assert!(lo > ref_y + 2.0, "sub doit descendre : lo={lo} ref={ref_y}");
+    assert!(px < ref_y - 3.0, "4px doit monter : px={px} ref={ref_y}");
+    assert!(
+        pct > ref_y + 2.0,
+        "-20% doit descendre : pct={pct} ref={ref_y}"
+    );
+    let _ = base_y;
+}
