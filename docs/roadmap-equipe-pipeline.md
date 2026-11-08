@@ -3028,8 +3028,12 @@ scroll interne `overflow:auto`) est loguée au journal.
   attributs sinon — pattern `-webkit-link`). `vlink`
   documenté non-fait (`:visited` vie privée) ; `alink`
   reporté (`:active`, couture NAV — journal). Verrou.
-- [ ] **R-158. Trous UA sans dépendance** : `big`/`small`,
-  `nobr`, `mark`, `figure`, `fieldset`+chrome groove.
+- [x] **R-158. Trous UA sans dépendance** : `big`→larger,
+  `small`→smaller, `nobr`→nowrap, `mark`→fond jaune,
+  `figure`→`1em 40px`, `fieldset`→`2px groove`+padding
+  (groove rendu solide — vraies 3D = R-166), `legend`→
+  padding latéral. `sub`/`sup`/`abbr` liés à R-161.
+  Verrou `ua_big_small_nobr_mark_figure_fieldset`.
 - [ ] **R-159. `border-spacing` consommé en `separate`** :
   propriété zombie — `gap[]` ne se remplit que sous
   `collapse`, le défaut 2px et `cellspacing` sont morts ;

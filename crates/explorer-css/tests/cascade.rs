@@ -2849,3 +2849,36 @@ fn hint_body_link_marges_et_ancetre() {
     assert_eq!(bs.get("margin-left"), Some("40px"), "marginwidth→left");
     assert_eq!(bs.get("margin-right"), Some("40px"), "marginwidth→right");
 }
+
+#[test]
+fn ua_big_small_nobr_mark_figure_fieldset() {
+    // R-158 : trous UA sans dépendance — `big`/`small`
+    // (larger/smaller, résolus par R-17), `nobr` nowrap,
+    // `mark` surligné, `figure` marges 1em/40px,
+    // `fieldset` chrome 2px groove + padding (groove rendu
+    // solide aujourd'hui — vraies 3D = R-166),
+    // `legend` padding latéral.
+    let f = fixture();
+    let eng = StyleEngine::new();
+    let mut dom = f.dom;
+    let big = el(&mut dom, f.body, "big", &[]);
+    assert!((fs_px(&eng.compute(&dom, big, &env())) - 19.2).abs() < 0.05);
+    let small = el(&mut dom, f.body, "small", &[]);
+    assert!((fs_px(&eng.compute(&dom, small, &env())) - 16.0 / 1.2).abs() < 0.05);
+    let nobr = el(&mut dom, f.body, "nobr", &[]);
+    assert_eq!(
+        eng.compute(&dom, nobr, &env()).get("white-space"),
+        Some("nowrap")
+    );
+    let mk = el(&mut dom, f.body, "mark", &[]);
+    let mst = eng.compute(&dom, mk, &env());
+    assert_eq!(mst.get("background-color"), Some("yellow"));
+    let fig = el(&mut dom, f.body, "figure", &[]);
+    let fst = eng.compute(&dom, fig, &env());
+    assert_eq!(fst.get("margin-left"), Some("40px"));
+    let fs = el(&mut dom, f.body, "fieldset", &[]);
+    let fss = eng.compute(&dom, fs, &env());
+    // `border-style`/`border-width` éclatent en longhands.
+    assert_eq!(fss.get("border-top-style"), Some("groove"));
+    assert_eq!(fss.get("border-top-width"), Some("2px"));
+}
