@@ -1499,9 +1499,54 @@ fn emit_bg_layers(
 /// §marker). Émise après le fond de la boîte et avant ses
 /// lignes → sous le texte. `inside` dessine au début du
 /// contenu (le texte n'est pas décalé — résidu).
-fn emit_list_marker(bx: &LayoutBox, items: &mut Vec<DisplayItem>, off: (f32, f32)) {
+fn emit_list_marker(
+    bx: &LayoutBox,
+    items: &mut Vec<DisplayItem>,
+    off: (f32, f32),
+    images: &crate::PaintImages,
+) {
     if bx.kind != BoxKind::ListItem {
         return;
+    }
+    // R-168 — `list-style-image` : la bitmap est fetchée
+    // comme les `url()` CSS (clé `NodeId` → `backgrounds`)
+    // et peinte dans la gouttière à la place du marqueur —
+    // absent/`none` → repli `list-style-type` (spec).
+    if bx
+        .style
+        .get("list-style-image")
+        .is_some_and(|v| v.contains("url("))
+    {
+        if let Some(img) = bx.node.and_then(|n| images.backgrounds.get(&n)) {
+            let fs = font_size_of(&bx.style) as f32;
+            let iw = img.width as f32;
+            let ih = img.height as f32;
+            let baseline_y = bx
+                .lines
+                .first()
+                .map_or_else(|| bx.rect.y + fs, |l| l.rect.y + l.baseline);
+            let cy = baseline_y - fs * 0.3;
+            let content_x = content_rect(bx).x;
+            let inside = bx
+                .style
+                .get("list-style-position")
+                .is_some_and(|p| p.trim() == "inside");
+            let cx = if inside {
+                content_x + iw / 2.0
+            } else {
+                content_x - fs * 0.34 - iw / 2.0
+            };
+            items.push(DisplayItem::Image {
+                rect: Rect {
+                    x: cx - iw / 2.0 + off.0,
+                    y: cy - ih / 2.0 + off.1,
+                    width: iw,
+                    height: ih,
+                },
+                img: std::sync::Arc::clone(img),
+            });
+            return;
+        }
     }
     let kind = match bx.style.get("list-style-type").map(str::trim) {
         // Initiale spec = `disc` (absence ou `initial`).
@@ -3588,7 +3633,7 @@ fn paint_box<'a>(
         // contenu → DANS le clip, pas avec les décorations de
         // `paint_self` émises avant (R-55).
         if !hidden {
-            emit_list_marker(bx, items, off);
+            emit_list_marker(bx, items, off, cx.images);
             paint_lines(bx, items, off);
         }
         // Ordre App. E au sein des non positionnés : (a)

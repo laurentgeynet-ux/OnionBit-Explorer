@@ -3082,12 +3082,19 @@ scroll interne `overflow:auto`) est loguée au journal.
   chemin arrondi κ≈0.5523 — fond arrondi + anneau EvenOdd
   bordure `solid` uniforme ; clip `overflow` reste rect
   (reporté). Verrou valeurs + `50%`.
-- [ ] **R-168+** : `counter-*`/`counter()` + `attr()` dans
-  `content`, `list-style-image`, `word-spacing`, `noframes`
-  conditionnel — selon corpus. Tranche NAV-dominante
-  (journal) : `frameset`→grille d'iframes, image maps,
-  `:hover`/`:focus` session, `overflow:auto` scroll +
+- [x] **R-168. `word-spacing` + `attr()` + `list-style-image`
+  + `noframes`** : `+ws` par espace à l'itemisation ;
+  `attr(name)` résolu dans `content` (ordre du flux) ;
+  bitmap de marqueur depuis `backgrounds` (repli type si
+  absente) ; `noframes` rend naturellement. Tranche NAV
+  journalée : `frameset`→grille d'iframes, image maps
+  `usemap`, `:hover`/`:focus` session, `overflow:auto`
   scrollbars, `a[name]` ancres.
+- [ ] **R-169. `counter-*`/`counter()` dans `content`** :
+  `counter-reset`/`counter-increment`/`counter(name)` —
+  sous-système dédié (portée par élément, incrément
+  implicite des `list-item` déjà porté par
+  `marker_ordinal`).
 
 ## Palier R-B — Contenu étranger, animation, canvas
 

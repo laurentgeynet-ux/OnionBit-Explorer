@@ -739,3 +739,52 @@ fn wbr_opportunite_de_coupure_souple() {
         }
     }
 }
+
+/// R-168 — `word-spacing` : chaque espace U+0020 gagne
+/// le supplément — le fragment texte « a b c » (2 espaces)
+/// s'élargit de 2×ws vs `normal`.
+#[test]
+fn word_spacing_ajoute_par_espace() {
+    let w = |css: &str| -> f32 {
+        let (dom, bx) = laid_w(
+            "<!doctype html><p>a b c</p>",
+            &format!("body {{ margin: 0 }} p {{ margin: 0; font-size: 20px; {css} }}"),
+            800.0,
+        );
+        let p = find(&bx, by_tag(&dom, "p"));
+        p.children[0].lines[0].rect.width
+    };
+    let base = w("word-spacing: normal");
+    let plus = w("word-spacing: 10px");
+    assert!(
+        plus - base > 19.0 && plus - base < 21.0,
+        "2 espaces ×10px attendus : base={base} plus={plus}"
+    );
+}
+
+/// R-168 — `content: attr(name)` : la valeur de
+/// l'attribut de l'élément entre dans le texte généré
+/// du pseudo-élément (concaténée entre les chaînes).
+#[test]
+fn attr_dans_content_pseudo() {
+    let (dom, bx) = laid_w(
+        "<!doctype html><a href=https://ex.fr>lien</a>",
+        "a::after { content: \" [\" attr(href) \"]\" }",
+        800.0,
+    );
+    let a = find(&bx, by_tag(&dom, "a"));
+    // Le pseudo `::after` est le dernier enfant ; son
+    // enfant Text porte la chaîne générée.
+    let mut found = String::new();
+    let mut stack = vec![a];
+    while let Some(b) = stack.pop() {
+        if let Some(t) = &b.text {
+            found.push_str(t);
+        }
+        stack.extend(b.children.iter());
+    }
+    assert!(
+        found.contains("https://ex.fr"),
+        "attr(href) absent du texte généré : {found:?}"
+    );
+}

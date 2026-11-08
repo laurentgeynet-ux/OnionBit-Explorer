@@ -964,6 +964,23 @@ fn break_into_lines(
         let lh = line_height_of(&item.style, fs, ctx);
         let font_req = font::request_of(&item.style, ctx);
         let measure = measure_fn(&item.style, fs, ctx);
+        // R-168 — `word-spacing` : supplément par caractère
+        // espace (% de l'avance de l'espace, §16.4.7 —
+        // `normal` → 0, donc inerte).
+        let ws = item
+            .style
+            .get("word-spacing")
+            .and_then(|v| raw_length_px(v, measure(" "), fs, ctx))
+            .unwrap_or(0.0);
+        let measure = move |s: &str| -> f32 {
+            let w = measure(s);
+            if ws.abs() < f32::EPSILON {
+                w
+            } else {
+                let spaces: u16 = s.matches(' ').count().try_into().unwrap_or(u16::MAX);
+                w + ws * f32::from(spaces)
+            }
+        };
 
         // Boîte atomique : coule comme une pièce incassable.
         // Ses marges horizontales font partie de sa boîte

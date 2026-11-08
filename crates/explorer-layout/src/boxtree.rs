@@ -516,7 +516,7 @@ fn child_boxes<S: ::std::hash::BuildHasher>(
     };
     let mut out = Vec::new();
     // `::before` généré en tête du contenu (R-13).
-    if let Some(b) = pseudo_box(styles, parent, PseudoElement::Before) {
+    if let Some(b) = pseudo_box(dom, styles, parent, PseudoElement::Before) {
         out.push(b);
     }
     for child in children {
@@ -603,7 +603,7 @@ fn child_boxes<S: ::std::hash::BuildHasher>(
         }
     }
     // `::after` en fin de contenu.
-    if let Some(b) = pseudo_box(styles, parent, PseudoElement::After) {
+    if let Some(b) = pseudo_box(dom, styles, parent, PseudoElement::After) {
         out.push(b);
     }
     // R-108 — ordinals de marqueurs : position des `list-item`
@@ -661,12 +661,13 @@ fn assign_marker_ordinals(dom: &Dom, parent: NodeId, out: &mut [LayoutBox]) {
 /// `None` (pas de nœud DOM — hit-test et relayout remontent
 /// à l'élément origine).
 fn pseudo_box(
+    dom: &Dom,
     styles: &StyleMap,
     node: NodeId,
     which: explorer_css::PseudoElement,
 ) -> Option<LayoutBox> {
     let st = styles.pseudo(node, which)?;
-    let text = pseudo_content(st.get("content")?)?;
+    let text = pseudo_content(st.get("content")?, dom, node)?;
     let kind = box_kind_of(st);
     let mut bx = leaf_box_anon(kind, st.clone());
     if !text.is_empty() {
@@ -688,7 +689,7 @@ fn pseudo_box(
 /// `'…'`/`"…"` ; `none`/`normal` ou valeurs non couvertes
 /// → `None` (pas de boîte). `""` → boîte vide (ses
 /// bordures/dimensions peignent quand même — Acid2 nose).
-fn pseudo_content(raw: &str) -> Option<String> {
+fn pseudo_content(raw: &str, dom: &Dom, node: NodeId) -> Option<String> {
     let t = raw.trim();
     if t.eq_ignore_ascii_case("none") || t.eq_ignore_ascii_case("normal") {
         return None;
@@ -723,7 +724,37 @@ fn pseudo_content(raw: &str) -> Option<String> {
     };
     let mut out = String::new();
     let mut rest = t;
-    while let Some(qpos) = rest.find(['\'', '"']) {
+    // `attr(name)` (R-168) : token de `content` résolu à la
+    // valeur de l'attribut de l'élément — l'ordre respecte
+    // le flux (attr entre deux chaînes concatène entre
+    // elles). `attr(name type, fallback)` : le premier
+    // token seul est lu (type/fallback non supportés).
+    loop {
+        let qpos = rest.find(['\'', '"']);
+        let apos = rest.find("attr(");
+        if let Some(a) = apos {
+            if qpos.is_none_or(|q| a < q) {
+                let after = &rest[a + 5..];
+                let end = after.find(')')?;
+                let name = after[..end]
+                    .split_whitespace()
+                    .next()
+                    .unwrap_or_default()
+                    .trim_matches('"')
+                    .trim_matches('\'');
+                let v = dom
+                    .attribute_str(node, name)
+                    .ok()
+                    .flatten()
+                    .unwrap_or_default();
+                out.push_str(v);
+                rest = &after[end + 1..];
+                continue;
+            }
+        }
+        let Some(qpos) = qpos else {
+            break;
+        };
         let q = rest.as_bytes()[qpos];
         let after = &rest[qpos + 1..];
         let end = after.find(q as char)?;
