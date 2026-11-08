@@ -2217,3 +2217,29 @@ fn empty_cells_hide_ne_peint_ni_fond_ni_bordure() {
     assert_eq!(borders2, 2, "collapse : empty-cells inerte : {borders2}");
     let _ = dom;
 }
+
+#[test]
+fn styles_3d_mappees_aux_variantes_reelles() {
+    // R-166 — `inset`/`outset`/`groove`/`ridge`/`double`
+    // ne sont plus rabattus sur `Double` : la display list
+    // porte la variante réelle pour le bevel par côté.
+    let cases = [
+        ("outset", BorderStyle::Outset),
+        ("inset", BorderStyle::Inset),
+        ("groove", BorderStyle::Groove),
+        ("ridge", BorderStyle::Ridge),
+        ("double", BorderStyle::Double),
+        ("solid", BorderStyle::Solid),
+    ];
+    for (kw, want) in cases {
+        let (_d, _b, items) = dl(
+            "<div>x</div>",
+            &format!("div {{ border: 6px {kw} #888; width: 40px }}"),
+        );
+        let got = items.iter().find_map(|i| match i {
+            DisplayItem::Border { styles, .. } => Some(styles[0]),
+            _ => None,
+        });
+        assert_eq!(got, Some(want), "{kw}");
+    }
+}

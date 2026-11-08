@@ -1502,7 +1502,63 @@ fn paint_tiled(
     }
 }
 
-/// Bordure : 4 côtés pleins (pattern dashed/dotted reporté —
+/// R-166 — demi-teinte sombre d'une couleur de bordure
+/// (moitié vers le noir) pour les styles 3D.
+fn shade_dark(c: Color) -> Color {
+    Color {
+        r: c.r / 2,
+        g: c.g / 2,
+        b: c.b / 2,
+        a: c.a,
+    }
+}
+
+/// R-166 — demi-teinte claire (moitié vers le blanc) —
+/// le mix blanc donne le relief aussi sur teinte foncée.
+fn shade_light(c: Color) -> Color {
+    Color {
+        r: u8::midpoint(c.r, 255),
+        g: u8::midpoint(c.g, 255),
+        b: u8::midpoint(c.b, 255),
+        a: c.a,
+    }
+}
+
+/// Bandes d'un côté : fractions [f0,f1) le long de
+/// l'épaisseur vers l'intérieur + couleur de la bande.
+/// `inset` = haut/gauche foncés ; `outset` l'inverse ;
+/// `groove`/`ridge` = bande externe/interne échangées ;
+/// `double` = deux liserés pleins séparés d'un tiers vide
+/// (approximation du bevel Win95, R-166).
+fn side_bands(side: usize, c: Color, s: BorderStyle) -> Vec<(f32, f32, Color)> {
+    let tl = matches!(side, 0 | 3);
+    match s {
+        BorderStyle::Inset => {
+            vec![(0.0, 1.0, if tl { shade_dark(c) } else { shade_light(c) })]
+        }
+        BorderStyle::Outset => {
+            vec![(0.0, 1.0, if tl { shade_light(c) } else { shade_dark(c) })]
+        }
+        BorderStyle::Groove => {
+            if tl {
+                vec![(0.0, 0.5, shade_dark(c)), (0.5, 1.0, shade_light(c))]
+            } else {
+                vec![(0.0, 0.5, shade_light(c)), (0.5, 1.0, shade_dark(c))]
+            }
+        }
+        BorderStyle::Ridge => {
+            if tl {
+                vec![(0.0, 0.5, shade_light(c)), (0.5, 1.0, shade_dark(c))]
+            } else {
+                vec![(0.0, 0.5, shade_dark(c)), (0.5, 1.0, shade_light(c))]
+            }
+        }
+        BorderStyle::Double => vec![(0.0, 1.0 / 3.0, c), (2.0 / 3.0, 1.0, c)],
+        _ => vec![(0.0, 1.0, c)],
+    }
+}
+
+/// Bordure : 4 côtés (pattern dashed/dotted reporté —
 /// documenté en `DisplayItem`). Quand les côtés peints ont
 /// des couleurs différentes, chaque côté est le **trapèze**
 /// entre l'arête externe et l'arête de la padding box — le
@@ -1511,6 +1567,9 @@ fn paint_tiled(
 /// les vrais triangles `border-*` à `height:0` (Acid2 nose).
 /// Couleur uniforme → anneau par rectangles pixel-snapés
 /// (arêtes dures, pas de couture AA sur la diagonale).
+/// R-166 : styles 3D et `double` → bandes `side_bands` —
+/// demi-teintes par côté (`inset`/`outset`) ou en moitiés
+/// (`groove`/`ridge`) / liserés en tiers (`double`).
 fn paint_border(
     pixmap: &mut Pixmap,
     rect: &explorer_layout::Rect,
@@ -1521,19 +1580,26 @@ fn paint_border(
     clip: Option<&Mask>,
 ) {
     let painted = |i: usize| styles[i] != BorderStyle::None && widths[i] > 0.0;
-    let uniform = (0..4)
-        .filter(|&i| painted(i))
-        .map(|i| colors[i])
-        .collect::<Vec<_>>()
-        .windows(2)
-        .all(|w| w[0] == w[1]);
-    let (x0, y0) = (rect.x, rect.y);
-    let (x1, y1) = (rect.x + rect.width, rect.y + rect.height);
-    // Coins internes (padding box). `widths` = [t, r, b, l].
-    let itl = (x0 + widths[3], y0 + widths[0]);
-    let itr = (x1 - widths[1], y0 + widths[0]);
-    let ibr = (x1 - widths[1], y1 - widths[2]);
-    let ibl = (x0 + widths[3], y1 - widths[2]);
+    // R-166 — styles 3D / multi-bandes : la couleur réelle
+    // d'une bande est dérivée (demi-teintes) — le chemin
+    // « rect uniforme » ne s'applique qu'aux styles plats.
+    let has_bands = styles.iter().any(|s| {
+        matches!(
+            s,
+            BorderStyle::Double
+                | BorderStyle::Inset
+                | BorderStyle::Outset
+                | BorderStyle::Groove
+                | BorderStyle::Ridge
+        )
+    });
+    let uniform = !has_bands
+        && (0..4)
+            .filter(|&i| painted(i))
+            .map(|i| colors[i])
+            .collect::<Vec<_>>()
+            .windows(2)
+            .all(|w| w[0] == w[1]);
     for (side, (bw, (c, s))) in widths
         .iter()
         .zip(colors.iter().zip(styles.iter()))
@@ -1542,50 +1608,121 @@ fn paint_border(
         if *s == BorderStyle::None || *bw <= 0.0 {
             continue;
         }
-        let mut paint = Paint::default();
-        paint.set_color(skia_color(*c));
-        // Un côté sans voisin peint n'a pas de coin mitré : sa
-        // bande est un rectangle — passer par `fill_guarded`
-        // (pixel-snap des fonds, comme un background ; sinon un
-        // reftest à `border-top/bottom` non uniformes gardait
-        // des arêtes AA d'un pixel face aux fills snappés —
-        // margin-collapse-003).
-        let neighbors_painted = painted((side + 3) % 4) || painted((side + 1) % 4);
-        if uniform || !neighbors_painted {
-            let r = match side {
-                0 => Rect::from_xywh(rect.x, rect.y, rect.width, *bw),
-                1 => Rect::from_xywh(rect.x + rect.width - *bw, rect.y, *bw, rect.height),
-                2 => Rect::from_xywh(rect.x, rect.y + rect.height - *bw, rect.width, *bw),
-                _ => Rect::from_xywh(rect.x, rect.y, *bw, rect.height),
-            };
-            if let Some(r) = r {
-                fill_guarded(pixmap, &r, &paint, dpi, clip);
-            }
-            continue;
+        // Un côté sans voisin peint n'a pas de coin mitré :
+        // bande rectangulaire (shortcut `fill_guarded`).
+        let rect_shortcut = uniform || !(painted((side + 3) % 4) || painted((side + 1) % 4));
+        for (f0, f1, band_color) in side_bands(side, *c, *s) {
+            paint_border_band(
+                pixmap,
+                rect,
+                widths,
+                side,
+                *bw,
+                f0,
+                f1,
+                band_color,
+                rect_shortcut,
+                dpi,
+                clip,
+            );
         }
-        // Trapèze du côté : arête externe + arête interne de
-        // la padding box. Ordre des sommets = sens horaire.
-        let quad: [(f32, f32); 4] = match side {
-            0 => [(x0, y0), (x1, y0), itr, itl],
-            1 => [(x1, y0), (x1, y1), ibr, itr],
-            2 => [(x1, y1), (x0, y1), ibl, ibr],
-            _ => [(x0, y1), (x0, y0), itl, ibl],
+    }
+}
+
+/// R-166 — une bande d'un côté de bordure : rect
+/// pixel-snappé (`fill_guarded`, margin-collapse-003)
+/// quand le côté n'a pas de voisin peint ou que la
+/// bordure est uniforme ; sinon trapèze entre les coins
+/// externes (fraction f0) et internes (fraction f1) de la
+/// padding box — les sommets tournent dans le sens horaire.
+#[allow(clippy::too_many_arguments)]
+fn paint_border_band(
+    pixmap: &mut Pixmap,
+    rect: &explorer_layout::Rect,
+    widths: &[f32; 4],
+    side: usize,
+    bw: f32,
+    f0: f32,
+    f1: f32,
+    band_color: Color,
+    rect_shortcut: bool,
+    dpi: Transform,
+    clip: Option<&Mask>,
+) {
+    let mut paint = Paint::default();
+    paint.set_color(skia_color(band_color));
+    if rect_shortcut {
+        let r = match side {
+            0 => Rect::from_xywh(rect.x, rect.y + f0 * bw, rect.width, (f1 - f0) * bw),
+            1 => Rect::from_xywh(
+                rect.x + rect.width - f1 * bw,
+                rect.y,
+                (f1 - f0) * bw,
+                rect.height,
+            ),
+            2 => Rect::from_xywh(
+                rect.x,
+                rect.y + rect.height - f1 * bw,
+                rect.width,
+                (f1 - f0) * bw,
+            ),
+            _ => Rect::from_xywh(rect.x + f0 * bw, rect.y, (f1 - f0) * bw, rect.height),
         };
-        let mut pb = PathBuilder::new();
-        pb.move_to(quad[0].0, quad[0].1);
-        for p in &quad[1..] {
-            pb.line_to(p.0, p.1);
+        if let Some(r) = r {
+            fill_guarded(pixmap, &r, &paint, dpi, clip);
         }
-        pb.close();
-        if let Some(path) = pb.finish() {
-            // La boîte englobante du quad ⊆ `rect` → le garde
-            // de domaine device s'y applique tel quel.
-            let domain = Rect::from_ltrb(-SAFE_COORD, -SAFE_COORD, SAFE_COORD, SAFE_COORD);
-            let outer = Rect::from_xywh(rect.x, rect.y, rect.width, rect.height);
-            if let (Some(d), Some(o)) = (domain, outer) {
-                if device_bbox(&o, dpi).is_some_and(|b| d.intersect(&b).is_some()) {
-                    pixmap.fill_path(&path, &paint, FillRule::Winding, dpi, clip);
-                }
+        return;
+    }
+    let (x0, y0) = (rect.x, rect.y);
+    let (x1, y1) = (rect.x + rect.width, rect.y + rect.height);
+    // Coins internes (padding box). `widths` = [t, r, b, l].
+    let itl = (x0 + widths[3], y0 + widths[0]);
+    let itr = (x1 - widths[1], y0 + widths[0]);
+    let ibr = (x1 - widths[1], y1 - widths[2]);
+    let ibl = (x0 + widths[3], y1 - widths[2]);
+    let lerp_pt = |o: (f32, f32), i: (f32, f32), f: f32| -> (f32, f32) {
+        (o.0 + (i.0 - o.0) * f, o.1 + (i.1 - o.1) * f)
+    };
+    let quad: [(f32, f32); 4] = match side {
+        0 => [
+            lerp_pt((x0, y0), itl, f0),
+            lerp_pt((x1, y0), itr, f0),
+            lerp_pt((x1, y0), itr, f1),
+            lerp_pt((x0, y0), itl, f1),
+        ],
+        1 => [
+            lerp_pt((x1, y0), itr, f0),
+            lerp_pt((x1, y1), ibr, f0),
+            lerp_pt((x1, y1), ibr, f1),
+            lerp_pt((x1, y0), itr, f1),
+        ],
+        2 => [
+            lerp_pt((x1, y1), ibr, f0),
+            lerp_pt((x0, y1), ibl, f0),
+            lerp_pt((x0, y1), ibl, f1),
+            lerp_pt((x1, y1), ibr, f1),
+        ],
+        _ => [
+            lerp_pt((x0, y1), ibl, f0),
+            lerp_pt((x0, y0), itl, f0),
+            lerp_pt((x0, y0), itl, f1),
+            lerp_pt((x0, y1), ibl, f1),
+        ],
+    };
+    let mut pb = PathBuilder::new();
+    pb.move_to(quad[0].0, quad[0].1);
+    for p in &quad[1..] {
+        pb.line_to(p.0, p.1);
+    }
+    pb.close();
+    if let Some(path) = pb.finish() {
+        // La boîte englobante du quad ⊆ `rect` → le garde
+        // de domaine device s'y applique tel quel.
+        let domain = Rect::from_ltrb(-SAFE_COORD, -SAFE_COORD, SAFE_COORD, SAFE_COORD);
+        let outer = Rect::from_xywh(rect.x, rect.y, rect.width, rect.height);
+        if let (Some(d), Some(o)) = (domain, outer) {
+            if device_bbox(&o, dpi).is_some_and(|b| d.intersect(&b).is_some()) {
+                pixmap.fill_path(&path, &paint, FillRule::Winding, dpi, clip);
             }
         }
     }

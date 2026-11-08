@@ -3071,9 +3071,11 @@ scroll interne `overflow:auto`) est loguée au journal.
   UAX #14 → coupure souple permise) ; strippée avant
   shaping — pas de glyphe. Miroir `br`→U+2028, sans saut
   dur. Verrou coupure + ZWSP non peinte.
-- [ ] **R-166. Bordures 3D réelles** : `inset`/`outset`/
-  `groove`/`ridge` en demi-teintes par côté, `double` vrai
-  liseré (aujourd'hui tout → solide au raster).
+- [x] **R-166. Bordures 3D réelles** : `Inset`/`Outset`/
+  `Groove`/`Ridge` = demi-teintes par côté (sombre ×½ vers
+  noir / clair mix blanc), `groove`/`ridge` en moitiés,
+  `double` = 2 liserés + tiers vide — bandes fractionnées
+  `side_bands`/`paint_border_band`. Verrou 6 styles.
 - [ ] **R-167. `border-radius`** : shorthand + 4 longhands
   (aujourd'hui absents d'`expand_shorthand`) + path arrondi
   + clip `overflow` au raster.

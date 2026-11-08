@@ -191,6 +191,14 @@ pub enum BorderStyle {
     Dotted,
     /// Double liseré.
     Double,
+    /// Effet 3D enfoncé (R-166 : demi-teintes par côté).
+    Inset,
+    /// Effet 3D en relief (R-166 : demi-teintes par côté).
+    Outset,
+    /// Rainure 3D — moitié externe `inset`, interne `outset`.
+    Groove,
+    /// Crête 3D — moitié externe `outset`, interne `inset`.
+    Ridge,
 }
 
 /// La frame prête à rasteriser : items + taille du viewport.
@@ -1205,7 +1213,11 @@ fn border_style(v: Option<&str>) -> BorderStyle {
     match v {
         Some("solid") => BorderStyle::Solid,
         Some("dotted" | "dashed") => BorderStyle::Dotted,
-        Some("double" | "groove" | "ridge" | "inset" | "outset") => BorderStyle::Double,
+        Some("double") => BorderStyle::Double,
+        Some("groove") => BorderStyle::Groove,
+        Some("ridge") => BorderStyle::Ridge,
+        Some("inset") => BorderStyle::Inset,
+        Some("outset") => BorderStyle::Outset,
         _ => BorderStyle::None,
     }
 }
