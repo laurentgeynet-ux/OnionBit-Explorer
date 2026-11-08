@@ -4850,14 +4850,42 @@ impl Engine {
         let due = self.gc_due;
         self.gc_due = false;
         self.gc_cap = 0;
-        if due
-            || self.mem_over()
-            || (self.gc_threshold > 0 && self.heap.live_count() > self.gc_threshold)
-        {
-            self.collect()
-        } else {
-            0
+        if self.mem_over() {
+            return self.collect();
         }
+        if !(due || (self.gc_threshold > 0 && self.heap.live_count() > self.gc_threshold)) {
+            return 0;
+        }
+        // JS-C426 — backoff de croissance aux frontières de job :
+        // `live_count > gc_threshold` reste vrai en permanence
+        // sur une page hydratée (le VIVANT ne descend pas en
+        // collectant — vol 717 §B-115 : ~30 passes/s, ~100 %
+        // du fil en mark-sweep, API affamée). Une passe
+        // opportuniste n'est re-servie qu'après `gc_debt<<shift`
+        // de croissance réelle au-dessus de sa basse post-passe
+        // — même mécanique que safepoint_gc (JS-C424) ; la
+        // basse et le shift sont partagés avec elle.
+        let lim = self.heap.mem_limit();
+        if lim > 0 && self.gc_sp_floor != usize::MAX {
+            if self.total_bytes() < self.gc_sp_floor {
+                self.gc_sp_floor = self.total_bytes();
+                self.gc_sp_shift = 0;
+            }
+            let debt = Self::gc_debt(lim).saturating_mul(1usize << self.gc_sp_shift);
+            if self.total_bytes().saturating_sub(self.gc_sp_floor) < debt {
+                return 0;
+            }
+        }
+        let before = self.total_bytes();
+        let n = self.collect();
+        let freed = before.saturating_sub(self.total_bytes());
+        self.gc_sp_floor = self.total_bytes();
+        if lim > 0 && freed < Self::gc_debt(lim) / 4 {
+            self.gc_sp_shift = (self.gc_sp_shift + 1).min(Self::GC_SP_SHIFT_MAX);
+        } else {
+            self.gc_sp_shift = 0;
+        }
+        n
     }
 
     /// Safepoint GC intra-éval (JS-C421) — appelé **entre deux
@@ -4913,13 +4941,15 @@ impl Engine {
         // JS-C421 : épargne les cellules allouées depuis le plus
         // ancien statement actif — temporaires d'expression des
         // locaux Rust, invisibles aux racines.
-        // JS-C423 — part safepoint du temps GC.
-        let t = Instant::now();
+        // JS-C423 — part safepoint du temps GC : le delta de
+        // `gc_ns` autour de la passe (mesure partagée —
+        // `sp_us` ne peut pas dépasser `gc_us` sur l'éval).
+        let g0 = self.gc_ns.get();
         self.collect_extra(ids, self.young_floor);
         self.sp_ns.set(
             self.sp_ns
                 .get()
-                .saturating_add(u64::try_from(t.elapsed().as_nanos()).unwrap_or(u64::MAX)),
+                .saturating_add(self.gc_ns.get().saturating_sub(g0)),
         );
         // JS-C424 — basse + backoff selon le rendement : une
         // passe qui libère moins de `gc_debt/4` était futile
@@ -9144,7 +9174,16 @@ mod tests {
         assert!(r.is_ok(), "churn sous-limite : {r:?}");
         let gc1 = e.last_eval_gc_us();
         let sp1 = e.last_eval_sp_us();
-        assert!(gc1 > 0, "des safepoints ont tourné : gc_us={gc1}");
+        assert!(
+            gc1 > 0,
+            "des safepoints ont tourné : gc_us={gc1} runs={} total={} floor={} due={} over={} live={}",
+            e.heap.stats().gc_runs,
+            e.total_bytes(),
+            e.gc_sp_floor,
+            e.gc_due,
+            e.mem_over(),
+            e.heap.live_count()
+        );
         assert!(sp1 <= gc1, "sp ⊆ gc : sp={sp1} gc={gc1}");
 
         // Mort par interruption : le profil survit — exec_us
@@ -9192,17 +9231,92 @@ mod tests {
             "sans croissance au-dessus de la basse, les réarmements sont supprimés"
         );
 
-        // Croissance réelle > dette × backoff (la première
-        // passe, futile, a hissé `shift` → seuil 32 Mio) →
-        // la passe est servie. ~40 Mio de vivant ajouté
-        // (≈610 B/objet mesuré), sous le cap 64 Mio.
+        // Croissance réelle au-dessus de la basse → passe
+        // servie. ~40 Mio de vivant (≈610 B/objet, cap 64 Mio),
+        // puis basse à 0 : l'éval traverse sa propre frontière
+        // de job (JS-C426 partage la basse) — le gate vérifie
+        // l'arithmétique croissance ≥ dette×shift.
         e.eval("var __k=[]; for(var i=0;i<65000;i++) __k.push({x:i,y:i,z:i,w:i}); __k.length")
             .unwrap();
+        let r_eval = e.heap.stats().gc_runs;
+        e.gc_sp_floor = 0;
+        e.gc_sp_shift = 0;
         e.gc_due = true;
         e.safepoint_gc(&env, &v);
         assert!(
-            e.heap.stats().gc_runs > runs0,
+            e.heap.stats().gc_runs > r_eval,
             "croissance ≥ dette au-dessus de la basse → passe servie"
+        );
+    }
+
+    /// JS-C426 — la frontière de job applique le même backoff
+    /// de croissance : `live_count > gc_threshold` est vrai en
+    /// permanence sur une page hydratée (le vivant ne descend
+    /// pas en collectant), et `gc_due` réarmé à chaque tick
+    /// sous pression — sans borne, chaque `maybe_collect`
+    /// collectait (~30 passes/s, §B-115). `mem_over` reste
+    /// inconditionnel.
+    #[test]
+    fn c426_boundary_backoff_supprime_le_spin_frontiere() {
+        let mut e = Engine::new();
+        e.heap.set_mem_limit(64 << 20); // dette = 16 Mio
+                                        // `live_count > gc_threshold` permanent — le déclencheur
+                                        // opportuniste du wedge.
+        e.set_gc_threshold(64);
+        // L'éval traverse sa propre frontière de job : la basse
+        // est déjà posée quand on reprend la main.
+        e.eval("var __keep=[]; for(var i=0;i<200;i++) __keep.push({a:i}); __keep.length")
+            .unwrap();
+        let runs1 = e.heap.stats().gc_runs;
+
+        // Réarmements sans croissance réelle → supprimés.
+        e.gc_due = true;
+        e.maybe_collect();
+        e.maybe_collect();
+        e.gc_due = true;
+        e.maybe_collect();
+        assert_eq!(
+            e.heap.stats().gc_runs,
+            runs1,
+            "frontière : les réarmements sans croissance sont supprimés"
+        );
+
+        // Petites croissances répétées (~3 Mio/eval) : sans
+        // borne chaque frontière collecterait (+5 passes — le
+        // wedge §B-115) ; le cumul < dette×shift laisse ≤2.
+        let r2 = e.heap.stats().gc_runs;
+        for _ in 0..5 {
+            e.eval("for(var i=0;i<5000;i++) __keep.push({x:i,y:i,z:i,w:i}); __keep.length")
+                .unwrap();
+            e.gc_due = true;
+            e.maybe_collect();
+        }
+        let gained = e.heap.stats().gc_runs - r2;
+        assert!(
+            gained <= 2,
+            "5 frontières sous pression → {gained} passes (≤2 attendu, wedge sinon)"
+        );
+
+        // Croissance franche au-dessus de la basse → la passe
+        // est servie (basse abaissée manuellement pour simuler
+        // le delta — l'éval collecte elle-même à ses frontières
+        // internes, un seuil de basse est la seule variable).
+        e.eval("for(var i=0;i<60000;i++) __keep.push({x:i,y:i,z:i,w:i}); __keep.length")
+            .unwrap();
+        e.gc_sp_floor = 0; // total (>dette) ≫ basse → passe due
+        e.gc_sp_shift = 0;
+        let r3 = e.heap.stats().gc_runs;
+        e.gc_due = true;
+        e.maybe_collect();
+        assert!(
+            e.heap.stats().gc_runs > r3,
+            "croissance ≥ dette au-dessus de la basse → passe servie \
+             (runs {} vs {r3}, total {}, floor {}, live {}, thresh {})",
+            e.heap.stats().gc_runs,
+            e.total_bytes(),
+            e.gc_sp_floor,
+            e.heap.live_count(),
+            e.gc_threshold
         );
     }
 }

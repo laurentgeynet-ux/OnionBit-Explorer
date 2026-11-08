@@ -10594,3 +10594,15 @@ un crate PIPELINE.- [x] **JS-C422. Deadline honnête — canal session ↔ budge
   loads Relaxed par split = coût nul. Distorsion connue sous
   PROF : `Instant` des `j17_scope` sur chemins chauds.
 
+- [x] **JS-C426. Backoff de croissance aux frontières de job —
+  fin du wedge §B-115** (vol 717 vimeo : ~9 200 collectes en
+  ~5 min, ~30/s — API affamée, nav pendante ; mécanisme :
+  `live_count > gc_threshold` permanent sur page hydratée →
+  chaque `maybe_collect` collectait). La frontière partage
+  la basse `gc_sp_floor`/`gc_sp_shift` du safepoint :
+  passe opportuniste re-servie seulement après
+  `gc_debt<<shift` de croissance réelle ; `heap_dead` /
+  `mem_over` inconditionnels. `sp_us` = delta de `gc_ns`
+  (invariant `sp ⊆ gc` structurel). Verrou c426 + c423/c424
+  durcis ; lib 44/44, clippy propre.
+
