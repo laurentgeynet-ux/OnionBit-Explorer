@@ -2285,6 +2285,18 @@ fn legacy_presentational_hints(
         _ => {}
     }
     match tag {
+        "body" | "table" | "thead" | "tbody" | "tfoot" | "tr" | "td" | "th" => {
+            // Attribut `background` (R-156, HTML Rendering) :
+            // url d'arrière-plan → `background-image`.
+            hint(
+                props,
+                "background-image",
+                hint_attr(dom, node, "background").map(|v| format!("url(\"{}\")", v.trim())),
+            );
+        }
+        _ => {}
+    }
+    match tag {
         "caption" | "col" | "colgroup" | "div" | "h1" | "h2" | "h3" | "h4" | "h5" | "h6"
         | "legend" | "p" | "td" | "th" | "tr" => {
             hint(
@@ -2323,6 +2335,16 @@ fn legacy_presentational_hints(
                 hint(props, "border-width", Some(bw));
                 hint(props, "border-style", Some("outset".to_string()));
             }
+            // `align` (R-156) : left/right → `float` ;
+            // `center` → marges auto (HTML Rendering).
+            match hint_attr(dom, node, "align").map(|v| v.trim().to_ascii_lowercase()) {
+                Some(v) if v == "left" || v == "right" => hint(props, "float", Some(v)),
+                Some(v) if v == "center" => {
+                    hint(props, "margin-left", Some("auto".to_string()));
+                    hint(props, "margin-right", Some("auto".to_string()));
+                }
+                _ => {}
+            }
         }
         "td" | "th" => {
             // `cellpadding` de la table ancêtre → padding des
@@ -2343,6 +2365,10 @@ fn legacy_presentational_hints(
             // au layout table via des clés internes.
             hint(props, "-x-colspan", span(hint_attr(dom, node, "colspan")));
             hint(props, "-x-rowspan", span(hint_attr(dom, node, "rowspan")));
+            // `nowrap` (R-156) → white-space (HTML Rendering).
+            if hint_attr(dom, node, "nowrap").is_some() {
+                hint(props, "white-space", Some("nowrap".to_string()));
+            }
         }
         "body" => {
             hint(
@@ -2351,30 +2377,113 @@ fn legacy_presentational_hints(
                 hint_attr(dom, node, "text").and_then(legacy_color),
             );
         }
-        "font" => {
-            // `<font>` (R-154 — signature du vieux web) :
-            // `face`/`color`/`size` 1-7 + `±N` relatif à
-            // l'index table du parent (§ font element,
-            // HTML Rendering). `basefont` documenté
-            // non-fait (rare, mécanisme distinct).
-            hint(
-                props,
-                "font-family",
-                hint_attr(dom, node, "face").map(|v| v.trim().to_string()),
-            );
-            hint(
-                props,
-                "color",
-                hint_attr(dom, node, "color").and_then(legacy_color),
-            );
-            hint(
-                props,
-                "font-size",
-                font_size_hint(hint_attr(dom, node, "size"), parent, env),
-            );
+        "img" => hint_img(dom, node, props),
+        "hr" => hint_hr(dom, node, props),
+        "br" => hint_br(dom, node, props),
+        "font" => hint_font(dom, node, parent, env, props),
+        _ => {}
+    }
+}
+
+/// `<font>` (R-154 — signature du vieux web) : `face`/
+/// `color`/`size` 1-7 + `±N` relatif à l'index table du
+/// parent (§ font element, HTML Rendering). `basefont`
+/// documenté non-fait (rare, mécanisme distinct).
+fn hint_font(
+    dom: &Dom,
+    node: NodeId,
+    parent: Option<&ComputedStyle>,
+    env: &StyleEnv,
+    props: &mut HashMap<String, String>,
+) {
+    hint(
+        props,
+        "font-family",
+        hint_attr(dom, node, "face").map(|v| v.trim().to_string()),
+    );
+    hint(
+        props,
+        "color",
+        hint_attr(dom, node, "color").and_then(legacy_color),
+    );
+    hint(
+        props,
+        "font-size",
+        font_size_hint(hint_attr(dom, node, "size"), parent, env),
+    );
+}
+
+/// `<img>` présentationnel (R-156) : `align` left/right →
+/// `float`, autres valeurs → `vertical-align` (HTML
+/// Rendering) ; `hspace`/`vspace` → marges ; `border` →
+/// filet solide (le bleu des images-liées vient de `color`
+/// héritée de `<a>` — `border-color` currentcolor).
+fn hint_img(dom: &Dom, node: NodeId, props: &mut HashMap<String, String>) {
+    match hint_attr(dom, node, "align").map(|v| v.trim().to_ascii_lowercase()) {
+        Some(v) if v == "left" || v == "right" => hint(props, "float", Some(v)),
+        Some(v) => {
+            let va = match v.as_str() {
+                "top" => "top",
+                "middle" | "absmiddle" => "middle",
+                "baseline" => "baseline",
+                "texttop" => "text-top",
+                _ => "bottom",
+            };
+            hint(props, "vertical-align", Some(va.to_string()));
+        }
+        None => {}
+    }
+    hint(props, "margin-left", dim(hint_attr(dom, node, "hspace")));
+    hint(props, "margin-right", dim(hint_attr(dom, node, "hspace")));
+    hint(props, "margin-top", dim(hint_attr(dom, node, "vspace")));
+    hint(
+        props,
+        "margin-bottom",
+        dim(hint_attr(dom, node, "vspace")),
+    );
+    if let Some(bw) = dim(hint_attr(dom, node, "border")) {
+        hint(props, "border-width", Some(bw));
+        hint(props, "border-style", Some("solid".to_string()));
+    }
+}
+
+/// `<hr>` présentationnel (R-156) : `align` → marges auto
+/// par côté ; `noshade` → filet plein (vs `inset` UA) ;
+/// `color` → `color` (la bordure UA est currentcolor).
+fn hint_hr(dom: &Dom, node: NodeId, props: &mut HashMap<String, String>) {
+    match hint_attr(dom, node, "align").map(|v| v.trim().to_ascii_lowercase()) {
+        Some(v) if v == "left" => {
+            hint(props, "margin-right", Some("auto".to_string()));
+        }
+        Some(v) if v == "right" => {
+            hint(props, "margin-left", Some("auto".to_string()));
+        }
+        Some(v) if v == "center" => {
+            hint(props, "margin-left", Some("auto".to_string()));
+            hint(props, "margin-right", Some("auto".to_string()));
         }
         _ => {}
     }
+    if hint_attr(dom, node, "noshade").is_some() {
+        hint(props, "border-style", Some("solid".to_string()));
+    }
+    hint(
+        props,
+        "color",
+        hint_attr(dom, node, "color").and_then(legacy_color),
+    );
+}
+
+/// `br[clear]` (R-156, HTML Rendering) : `all` → `both`,
+/// `left`/`right`/`none` → homonyme.
+fn hint_br(dom: &Dom, node: NodeId, props: &mut HashMap<String, String>) {
+    let lowered = hint_attr(dom, node, "clear").map(|v| v.trim().to_ascii_lowercase());
+    let c = match lowered.as_deref() {
+        Some("all") => Some("both"),
+        Some(v @ ("left" | "right" | "none")) => Some(v),
+        _ => None,
+    };
+    hint(props, "clear", c.map(str::to_string));
 }
 
 /// Substitue les `var(--name[, fallback])` de `text` depuis

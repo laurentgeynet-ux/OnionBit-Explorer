@@ -2752,3 +2752,69 @@ fn hint_couleurs_legacy_bgcolor_et_text() {
         Some("blue")
     );
 }
+
+#[test]
+fn hint_img_align_hspace_border() {
+    // R-156 : `align` left/right → float, top/middle →
+    // vertical-align ; `hspace`/`vspace` → marges ;
+    // `border` → filet solide (le bleu image-liée vient de
+    // `color` héritée via currentcolor).
+    let f = fixture();
+    let eng = StyleEngine::new();
+    let mut dom = f.dom;
+    let img_l = el(&mut dom, f.body, "img", &[("align", "left")]);
+    assert_eq!(eng.compute(&dom, img_l, &env()).get("float"), Some("left"));
+    let img_m = el(&mut dom, f.body, "img", &[("align", "middle")]);
+    assert_eq!(
+        eng.compute(&dom, img_m, &env()).get("vertical-align"),
+        Some("middle")
+    );
+    let img_s = el(
+        &mut dom,
+        f.body,
+        "img",
+        &[("hspace", "10"), ("vspace", "4"), ("border", "2")],
+    );
+    let st = eng.compute(&dom, img_s, &env());
+    assert_eq!(st.get("margin-left"), Some("10px"), "hspace → margin-l/r");
+    assert_eq!(st.get("margin-bottom"), Some("4px"), "vspace → margin-t/b");
+    assert_eq!(st.get("border-width"), Some("2px"));
+    assert_eq!(st.get("border-style"), Some("solid"));
+}
+
+#[test]
+fn hint_table_td_hr_br_legacy() {
+    let f = fixture();
+    let e = StyleEngine::new();
+    let mut dom = f.dom;
+    // table[align=center] → marges auto ; [right] → float.
+    let c = el(&mut dom, f.body, "table", &[("align", "center")]);
+    assert_eq!(e.compute(&dom, c, &env()).get("margin-left"), Some("auto"));
+    let r = el(&mut dom, f.body, "table", &[("align", "right")]);
+    assert_eq!(e.compute(&dom, r, &env()).get("float"), Some("right"));
+    // td[nowrap] → white-space: nowrap.
+    let td = el(&mut dom, f.body, "td", &[("nowrap", "")]);
+    assert_eq!(
+        e.compute(&dom, td, &env()).get("white-space"),
+        Some("nowrap")
+    );
+    // hr : noshade → solid (vs inset UA), color nu → color.
+    let hr = el(
+        &mut dom,
+        f.body,
+        "hr",
+        &[("noshade", ""), ("color", "ff0000")],
+    );
+    let hcs = e.compute(&dom, hr, &env());
+    assert_eq!(hcs.get("border-style"), Some("solid"));
+    assert_eq!(hcs.get("color"), Some("#ff0000"));
+    // br[clear=all] → both ; [left] → left.
+    let br = el(&mut dom, f.body, "br", &[("clear", "all")]);
+    assert_eq!(e.compute(&dom, br, &env()).get("clear"), Some("both"));
+    // Attribut background → url(...) sur body/td.
+    let td2 = el(&mut dom, f.body, "td", &[("background", "bg.png")]);
+    assert_eq!(
+        e.compute(&dom, td2, &env()).get("background-image"),
+        Some("url(\"bg.png\")")
+    );
+}

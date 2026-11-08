@@ -3013,10 +3013,13 @@ scroll interne `overflow:auto`) est loguée au journal.
   étendue aux hints `bgcolor` et `body[text]` — hex nu
   3/6 digits normalisé, nommées/modernes inchangées.
   Verrou `hint_couleurs_legacy_bgcolor_et_text`.
-- [ ] **R-156. Hints image/table** : `img[align]`→float/
-  valign, `hspace`/`vspace`, `img[border]`, `table[align]`
-  →float/`margin:auto`, `td/th[nowrap]`, `background` attr
-  →`background-image`, `hr[align|noshade|color]`, `br[clear]`.
+- [x] **R-156. Hints image/table** : `img[align]`→float/
+  valign, `hspace`/`vspace`→marges, `img[border]`→filet
+  solid, `table[align]`→float/`margin:auto`, `td/th[nowrap]`
+  →white-space, `background` attr→`background-image`,
+  `hr[align|noshade|color]`, `br[clear]`→clear. Fusionné
+  dans les bras `table`/`td|th` existants (cellspacing/
+  cellpadding intacts). Verrous ×2.
 - [ ] **R-157. Attributs `<body>`** : `link`→clé interne
   lue sur `a[href]`/`area[href]` (`:link` structurel) ;
   `marginwidth`/`topmargin`…→marges ; `vlink` documenté
