@@ -952,6 +952,7 @@ version = "0.2.0"
 dependencies = [
  "criterion",
  "fancy-regex",
+ "idna",
  "memory-stats",
  "num-bigint",
  "num-traits",

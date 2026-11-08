@@ -10618,3 +10618,15 @@ un crate PIPELINE.- [x] **JS-C422. Deadline honnête — canal session ↔ budge
   → `instanceof` tient. Verrous `domrect_ctor.rs` ×5 ;
   lib 44/44, clippy propre. **Re-flight MSE requis.**
 
+- [x] **JS-C428. §B-116 — conformité `URL`/`URLSearchParams`
+  contre la détection core-js** (`Invalid scheme` interne au
+  polyfill : f24, castlabs, explore.org). Gate empirique
+  `b116_url_gate.rs` (24 checks) → 6 divergences mesurées et
+  corrigées : `forEach`/itérateurs USP vivants (re-lecture
+  par pas, mutations visibles), `has`/`delete` arg `optional`
+  (absent ≠ `undefined`), encode-sets WHATWG par composant,
+  IDNA/UTS-46 au parse (`idna` workspace), strip `\t\n\r`
+  intégral. Sonde `url.ctor.fail` (arm+input+base). Verrou
+  gate 24/24 permanent ; lib 44/44, clippy propre.
+  **Re-flight 3 sites requis.**
+
