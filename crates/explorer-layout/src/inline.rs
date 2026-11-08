@@ -649,6 +649,26 @@ fn text_item(b: &LayoutBox, owner: usize, t: &str, decos: &[TextDeco]) -> Item {
             &collapsed
         }
     };
+    // R-162 — text-transform : applique a la chaine avant
+    // itemisation/segmentation UAX #14 (§16.5) — les
+    // lettres changent, la ponctuation et les espaces non ;
+    // herite via le style calcule.
+    let transformed;
+    let src = match b.style.get("text-transform").map(str::trim) {
+        Some("uppercase") => {
+            transformed = src.to_uppercase();
+            &transformed
+        }
+        Some("lowercase") => {
+            transformed = src.to_lowercase();
+            &transformed
+        }
+        Some("capitalize") => {
+            transformed = capitalize_words(src);
+            &transformed
+        }
+        _ => src,
+    };
     let mut pieces = Vec::new();
     for run in text::itemize(src) {
         let mut prev = 0usize;
@@ -1549,4 +1569,25 @@ fn split_to_fit<'a>(
         segs.push(rest);
     }
     segs
+}
+
+/// capitalize (R-162) : premiere lettre de chaque mot en
+/// capitale, le reste inchange (approximation UAX #29 —
+/// un mot = suite alphanumerique ; un chiffre en tete
+/// garde le mot ouvert : «2abc» → «2Abc»).
+fn capitalize_words(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut boundary = true;
+    for c in s.chars() {
+        if boundary && c.is_alphabetic() {
+            out.extend(c.to_uppercase());
+            boundary = false;
+        } else {
+            out.push(c);
+            if !c.is_alphanumeric() {
+                boundary = true;
+            }
+        }
+    }
+    out
 }

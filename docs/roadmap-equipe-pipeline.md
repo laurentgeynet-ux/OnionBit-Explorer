@@ -3052,8 +3052,11 @@ scroll interne `overflow:auto`) est loguée au journal.
   `sup`→smaller+décalage, `abbr[title]`/`acronym[title]`
   →souligné. `text-top`/`text-bottom`/`middle` ≈ ligne.
   Verrou baseline décalée.
-- [ ] **R-162. `text-transform`** : appliqué à la chaîne
-  avant itemisation/segmentation UAX #14.
+- [x] **R-162. `text-transform`** : appliqué à la chaîne
+  dans `text_item` entre white-space et UAX #14 —
+  uppercase/lowercase Unicode, `capitalize` = 1re lettre
+  par mot (le reste inchangé). Hérité via la cascade.
+  Verrou 3 valeurs + héritage inline.
 - [ ] **R-163. `input[type=password]`→bullets +
   `type=image`→remplacé** (mixte NAV+PIPE : `collect_images`
   + tailles intrinsèques — journal d'abord).

@@ -71,6 +71,19 @@ fn by_tag(dom: &Dom, tag: &str) -> NodeId {
     panic!("<{tag}> absent")
 }
 
+fn by_id(dom: &Dom, id: &str) -> NodeId {
+    let mut queue = vec![dom.document()];
+    while let Some(n) = queue.pop() {
+        if dom.attribute_str(n, "id").is_ok_and(|v| v == Some(id)) {
+            return n;
+        }
+        if let Ok(ch) = dom.children(n) {
+            queue.extend(ch.iter().rev());
+        }
+    }
+    panic!("#{id} absent")
+}
+
 fn find(b: &LayoutBox, id: NodeId) -> &LayoutBox {
     if b.node == Some(id) {
         return b;
@@ -628,4 +641,35 @@ fn vertical_align_sub_super_px_pct_decale_la_baseline() {
         "-20% doit descendre : pct={pct} ref={ref_y}"
     );
     let _ = base_y;
+}
+
+/// R-162 — `text-transform` appliqué avant itemisation :
+/// `uppercase`/`lowercase` sur tout le texte, `capitalize`
+/// par mot, hérité aux éléments descendants.
+#[test]
+fn text_transform_applique_avant_itemisation() {
+    let (dom, bx) = laid_w(
+        "<!doctype html><p id=u>hello WORLD</p><p id=l>HELLO World</p>\
+         <p id=c>bonjour le monde</p><div id=d><span id=s>abc def</span></div>",
+        "body { margin: 0 } #u { text-transform: uppercase; margin: 0 } \
+         #l { text-transform: lowercase; margin: 0 } \
+         #c { text-transform: capitalize; margin: 0 } \
+         #d { text-transform: uppercase } span { margin: 0 }",
+        800.0,
+    );
+    let text = |id: &str| -> String {
+        let b = find(&bx, by_id(&dom, id));
+        b.children[0]
+            .lines
+            .iter()
+            .flat_map(|l| l.fragments.iter())
+            .map(|f| f.text.as_str())
+            .collect()
+    };
+    assert!(text("u").contains("HELLO WORLD"), "u={}", text("u"));
+    assert!(text("l").contains("hello world"), "l={}", text("l"));
+    assert!(text("c").contains("Bonjour Le Monde"), "c={}", text("c"));
+    // Hérité au descendant `span` (§16.5 — la propriété
+    // descend l'arbre comme `color`).
+    assert!(text("d").contains("ABC DEF"), "d={}", text("d"));
 }
