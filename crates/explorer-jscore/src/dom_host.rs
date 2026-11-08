@@ -2891,8 +2891,8 @@ impl Engine {
             "NodeList",
             "HTMLCollection",
             "NamedNodeMap",
-            "DOMRect",
-            "DOMRectReadOnly",
+            // `DOMRect`/`DOMRectReadOnly` — constructibles spec
+            // WebIDL, installés plus bas (JS-C427).
             "CSSStyleDeclaration",
             "CSSRule",
             "StyleSheet",
@@ -3016,6 +3016,51 @@ impl Engine {
                 // Spec WebIDL : `X.prototype.constructor === X`
                 // (`el.constructor`, `document.constructor`).
                 self.set_own(p, "constructor", f.clone(), false);
+            }
+            self.set_own(g, name, f, false);
+        }
+        // JS-C427 — `DOMRectReadOnly`/`DOMRect` constructibles
+        // (WebIDL `[Constructor]` — ima3/shaka `new DOMRect`,
+        // §B-112). `DOMRect.prototype` hérite `DOMRectReadOnly.
+        // prototype` ; `top/right/bottom/left` = getters dérivés
+        // (bords min/max pour w/h négatifs, spec) ; `toJSON` +
+        // `fromRect` complets ; les instances `x/y/width/height`
+        // sont readonly en RO, mutables en RW.
+        let ro_proto = self.new_object();
+        let ro_pv = Value::Obj(ro_proto);
+        for edge in ["top", "right", "bottom", "left"] {
+            let nm = self.str_val(edge);
+            let gg = self.bound_native("domrect.get", domrect_get, vec![nm]);
+            if let Some(o) = self.heap.obj_mut(ro_proto) {
+                o.set_accessor(edge, gg, Value::Undefined, false);
+            }
+        }
+        let tj = self.native_fn("toJSON", domrect_to_json);
+        self.set_own(ro_proto, "toJSON", tj.clone(), false);
+        let rw_proto = self.new_object();
+        if let Some(o) = self.heap.obj_mut(rw_proto) {
+            o.proto = ro_pv.clone();
+        }
+        self.set_own(rw_proto, "toJSON", tj, false);
+        for (name, proto, ro) in [
+            ("DOMRectReadOnly", ro_pv, true),
+            ("DOMRect", Value::Obj(rw_proto), false),
+        ] {
+            let flag = self.str_val(if ro { "ro" } else { "rw" });
+            let f = self.bound_native(name, domrect_ctor, vec![flag]);
+            if let Value::Obj(fid) = f {
+                self.set_own(fid, "length", Value::Num(0.0), false);
+                self.set_own(fid, "prototype", proto.clone(), false);
+                if let Value::Obj(pid) = proto.clone() {
+                    self.set_own(pid, "constructor", f.clone(), false);
+                }
+                let flag2 = self.str_val(if ro { "ro" } else { "rw" });
+                let from = self.bound_native("fromRect", domrect_from, vec![flag2, proto.clone()]);
+                self.set_own(fid, "fromRect", from, false);
+                self.add_root(fid);
+                if let Value::Obj(pid) = proto {
+                    self.add_root(pid);
+                }
             }
             self.set_own(g, name, f, false);
         }
@@ -10057,7 +10102,14 @@ fn point_candidate_paths(dom: &DomRef, x: f64, y: f64) -> Vec<Vec<(String, u32)>
 /// divergence miroir/session dégrade, ne plante pas).
 pub(crate) fn gbrect_shared(e: &mut Engine, dom: &DomRef, node: NodeId) -> Value {
     let (x, y, w, h) = element_geom_rect(dom, node).unwrap_or_default();
+    // JS-C427 — proto `DOMRect.prototype` : `r instanceof
+    // DOMRect` doit tenir (feature-detects de players).
     let r = e.new_object();
+    if let Some(p) = domrect_proto(e, "DOMRect") {
+        if let Some(o) = e.heap.obj_mut(r) {
+            o.proto = p;
+        }
+    }
     for (k, v) in [
         ("x", x),
         ("y", y),
@@ -10071,6 +10123,141 @@ pub(crate) fn gbrect_shared(e: &mut Engine, dom: &DomRef, node: NodeId) -> Value
         e.set_own(r, k, Value::Num(v), true);
     }
     Value::Obj(r)
+}
+
+/// `Ctor.prototype` résolu depuis le global (`DOMRect` /
+/// `DOMRectReadOnly`) — `None` si l'interface n'est pas
+/// installée (contexte sans DOM complet — graceful).
+pub(crate) fn domrect_proto(e: &mut Engine, name: &str) -> Option<Value> {
+    let g = e.global;
+    let ctor = e.get_prop(g, name)?;
+    let Value::Obj(cid) = ctor else { return None };
+    e.get_prop(cid, "prototype")
+}
+
+/// Remplit les 4 props de base d'un rect (`x`/`y`/`width`/
+/// `height`) — `writable` distingue `DOMRect` de sa version
+/// readonly (attributs `WebIDL` : enumerable + configurable).
+pub(crate) fn domrect_fill(e: &mut Engine, id: ObjId, x: f64, y: f64, w: f64, h: f64, rw: bool) {
+    let attrs = crate::heap::PropAttrs {
+        writable: rw,
+        enumerable: true,
+        configurable: true,
+    };
+    for (k, v) in [("x", x), ("y", y), ("width", w), ("height", h)] {
+        e.set_own_attrs(id, k, Value::Num(v), attrs);
+    }
+}
+
+/// JS-C427 — `new DOMRect(ReadOnly)(x, y, w, h)` — `bound[0]` =
+/// `"ro"`/`"rw"` ; appel fonctionnel = `TypeError` spec (les
+/// interfaces `WebIDL` sont ctor-only). `unrestricted double` :
+/// NaN/±Infinity passent sans `TypeError`.
+fn domrect_ctor(e: &mut Engine, this: Value, a: &[Value]) -> JsResult<Value> {
+    let rw = a
+        .first()
+        .and_then(|v| e.to_js_string(v.clone()).ok())
+        .is_some_and(|s| s == "rw");
+    let Value::Obj(id) = this.clone() else {
+        return Err(e.type_error("illegal constructor"));
+    };
+    if e.ctor_fresh != Some(id) {
+        return Err(e.type_error("illegal constructor"));
+    }
+    let num = |e: &mut Engine, i: usize| -> JsResult<f64> {
+        match a.get(i) {
+            Some(v) => e.to_number(v.clone()),
+            None => Ok(0.0),
+        }
+    };
+    let (x, y, w, h) = (num(e, 1)?, num(e, 2)?, num(e, 3)?, num(e, 4)?);
+    domrect_fill(e, id, x, y, w, h, rw);
+    Ok(this)
+}
+
+/// `DOMRect(ReadOnly).fromRect(init)` — bound[0] = `"ro"`/
+/// `"rw"`, bound[1] = proto : lit `x`/`y`/`width`/`height` du
+/// dict (repli `left`/`top`/`right`/`bottom`, `DOMRectInit`
+/// legacy) et produit l'instance du bon proto.
+fn domrect_from(e: &mut Engine, _this: Value, a: &[Value]) -> JsResult<Value> {
+    let rw = a
+        .first()
+        .and_then(|v| e.to_js_string(v.clone()).ok())
+        .is_some_and(|s| s == "rw");
+    let proto = a.get(1).cloned().unwrap_or(Value::Undefined);
+    let src = a.get(2).cloned().unwrap_or(Value::Undefined);
+    let rd = |e: &mut Engine, k: &str| -> Option<f64> {
+        match e.get_prop_value(src.clone(), k) {
+            Ok(Value::Num(n)) => Some(n),
+            _ => None,
+        }
+    };
+    let x = rd(e, "x").or_else(|| rd(e, "left")).unwrap_or(0.0);
+    let y = rd(e, "y").or_else(|| rd(e, "top")).unwrap_or(0.0);
+    let w = rd(e, "width")
+        .or_else(|| rd(e, "right").map(|r| r - x))
+        .unwrap_or(0.0);
+    let h = rd(e, "height")
+        .or_else(|| rd(e, "bottom").map(|b| b - y))
+        .unwrap_or(0.0);
+    let id = e.new_object();
+    if let Value::Obj(p) = proto {
+        if let Some(o) = e.heap.obj_mut(id) {
+            o.proto = Value::Obj(p);
+        }
+    }
+    domrect_fill(e, id, x, y, w, h, rw);
+    Ok(Value::Obj(id))
+}
+
+/// Getter de bord dérivé (`top`/`right`/`bottom`/`left`) —
+/// bound[0] = nom ; bords min/max pour `width`/`height`
+/// négatifs (spec `DOMRectReadOnly`).
+fn domrect_get(e: &mut Engine, this: Value, a: &[Value]) -> JsResult<Value> {
+    let edge = a
+        .first()
+        .and_then(|v| e.to_js_string(v.clone()).ok())
+        .unwrap_or_default();
+    let rd = |e: &mut Engine, k: &str| -> f64 {
+        e.get_prop_value(this.clone(), k)
+            .ok()
+            .and_then(|v| e.to_number(v).ok())
+            .unwrap_or(0.0)
+    };
+    let (x, y, w, h) = (rd(e, "x"), rd(e, "y"), rd(e, "width"), rd(e, "height"));
+    Ok(Value::Num(match edge.as_str() {
+        "top" => y.min(y + h),
+        "bottom" => y.max(y + h),
+        "left" => x.min(x + w),
+        "right" => x.max(x + w),
+        _ => 0.0,
+    }))
+}
+
+/// `toJSON` — `{x,y,width,height,top,right,bottom,left}`
+/// complet (spec `DOMRectReadOnly`).
+fn domrect_to_json(e: &mut Engine, this: Value, _a: &[Value]) -> JsResult<Value> {
+    let rd = |e: &mut Engine, k: &str| -> f64 {
+        e.get_prop_value(this.clone(), k)
+            .ok()
+            .and_then(|v| e.to_number(v).ok())
+            .unwrap_or(0.0)
+    };
+    let (x, y, w, h) = (rd(e, "x"), rd(e, "y"), rd(e, "width"), rd(e, "height"));
+    let o = e.new_object();
+    for (k, v) in [
+        ("x", x),
+        ("y", y),
+        ("width", w),
+        ("height", h),
+        ("top", y.min(y + h)),
+        ("bottom", y.max(y + h)),
+        ("left", x.min(x + w)),
+        ("right", x.max(x + w)),
+    ] {
+        e.set_own(o, k, Value::Num(v), true);
+    }
+    Ok(Value::Obj(o))
 }
 
 /// Resolve a `dispatchEvent` argument to event state: an `Event`

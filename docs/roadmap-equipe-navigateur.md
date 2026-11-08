@@ -10606,3 +10606,15 @@ un crate PIPELINE.- [x] **JS-C422. Deadline honnête — canal session ↔ budge
   (invariant `sp ⊆ gc` structurel). Verrou c426 + c423/c424
   durcis ; lib 44/44, clippy propre.
 
+- [x] **JS-C427. `DOMRect`/`DOMRectReadOnly` constructibles —
+  porte §B-112/§B-104** (`DOMRect illegal constructor` tuait
+  `ima3` chez castlabs/shaka (§B-112) ; `google.ima` absent
+  avalait `read 'settings' of Undefined` chez bitmovin
+  (§B-104)). WebIDL `[Constructor]` : `x`/`y`/`w`/`h` own
+  props (RO figées, RW mutables), `top/right/bottom/left`
+  getters min/max, `DOMRect → DOMRectReadOnly` en proto,
+  `toJSON`/`fromRect` (props `Num` seulement), `length=0`,
+  ctor-only `TypeError`. gbrect/observers posent le proto
+  → `instanceof` tient. Verrous `domrect_ctor.rs` ×5 ;
+  lib 44/44, clippy propre. **Re-flight MSE requis.**
+

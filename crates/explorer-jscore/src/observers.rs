@@ -488,8 +488,15 @@ impl Engine {
     /// Rect arbitraire `(x, y, w, h)` au format
     /// `DOMRectReadOnly` minimal — `x`/`left`/`top` etc.
     /// tous dérivés (spec : `bottom`/`right` = bords).
+    /// JS-C427 : proto `DOMRectReadOnly.prototype` posé quand
+    /// l'interface est installée — `instanceof` tient.
     fn rect_of(&mut self, x: f64, y: f64, w: f64, h: f64) -> Value {
         let r = self.new_object();
+        if let Some(p) = crate::dom_host::domrect_proto(self, "DOMRectReadOnly") {
+            if let Some(o) = self.heap.obj_mut(r) {
+                o.proto = p;
+            }
+        }
         for (k, v) in [
             ("x", x),
             ("y", y),
@@ -513,6 +520,11 @@ impl Engine {
     /// Rect du viewport `(0,0,vw,vh)` — `hooks.viewport`.
     fn viewport_rect(&mut self) -> Value {
         let r = self.new_object();
+        if let Some(p) = crate::dom_host::domrect_proto(self, "DOMRectReadOnly") {
+            if let Some(o) = self.heap.obj_mut(r) {
+                o.proto = p;
+            }
+        }
         let (w, h) = self.hooks.viewport;
         for (k, v) in [
             ("x", 0.0),
