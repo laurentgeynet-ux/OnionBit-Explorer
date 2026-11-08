@@ -2279,7 +2279,7 @@ fn legacy_presentational_hints(
             hint(
                 props,
                 "background-color",
-                hint_attr(dom, node, "bgcolor").map(|v| v.trim().to_string()),
+                hint_attr(dom, node, "bgcolor").and_then(legacy_color),
             );
         }
         _ => {}
@@ -2348,7 +2348,7 @@ fn legacy_presentational_hints(
             hint(
                 props,
                 "color",
-                hint_attr(dom, node, "text").map(|v| v.trim().to_string()),
+                hint_attr(dom, node, "text").and_then(legacy_color),
             );
         }
         "font" => {

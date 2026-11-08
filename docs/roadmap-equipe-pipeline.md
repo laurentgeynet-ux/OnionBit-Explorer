@@ -3008,9 +3008,11 @@ scroll interne `overflow:auto`) est loguée au journal.
   base`) ; px réels produits par `normalize_font_size`
   (R-17), aucun changement layout. `basefont` non-fait.
   Verrous ×3 + terrain (heavensgate, toastytech).
-- [ ] **R-155. Couleurs legacy sans `#`** : hex nu 3/6
-  digits + padding (`bgcolor="ffcc00"` meurt dans
-  `parse_color`) — normalisation à l'émission des hints.
+- [x] **R-155. Couleurs legacy sans `#`** : `legacy_color()`
+  (règles HTML Standard, livrée en R-154 pour `font[color]`)
+  étendue aux hints `bgcolor` et `body[text]` — hex nu
+  3/6 digits normalisé, nommées/modernes inchangées.
+  Verrou `hint_couleurs_legacy_bgcolor_et_text`.
 - [ ] **R-156. Hints image/table** : `img[align]`→float/
   valign, `hspace`/`vspace`, `img[border]`, `table[align]`
   →float/`margin:auto`, `td/th[nowrap]`, `background` attr

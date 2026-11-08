@@ -2721,3 +2721,34 @@ fn hint_font_color_couleur_legacy_sans_diese() {
         "auteur > hint color"
     );
 }
+
+#[test]
+fn hint_couleurs_legacy_bgcolor_et_text() {
+    // R-155 : `legacy_color()` appliquée aux hints couleur
+    // existants — `bgcolor="ffcc00"`/`text="00ff00"` du web
+    // 90s mouraient dans `parse_color` (sans `#`).
+    let f = fixture();
+    let e = StyleEngine::new();
+    let mut dom = f.dom;
+    let td = el(&mut dom, f.body, "td", &[("bgcolor", "ffcc00")]);
+    assert_eq!(
+        e.compute(&dom, td, &env()).get("background-color"),
+        Some("#ffcc00"),
+        "bgcolor nu → #rrggbb"
+    );
+    // Hex 3 digits nu : padding legacy → #f0f000… —
+    // la forme exacte importe moins que « couleur valide ».
+    let td3 = el(&mut dom, f.body, "td", &[("bgcolor", "f0f")]);
+    let binding = e.compute(&dom, td3, &env());
+    let v = binding.get("background-color");
+    assert!(
+        v.is_some_and(|v| v.starts_with('#')),
+        "bgcolor 3 digits → #…, eu {v:?}"
+    );
+    // Nommées et syntaxes modernes inchangées.
+    let td2 = el(&mut dom, f.body, "td", &[("bgcolor", "blue")]);
+    assert_eq!(
+        e.compute(&dom, td2, &env()).get("background-color"),
+        Some("blue")
+    );
+}
