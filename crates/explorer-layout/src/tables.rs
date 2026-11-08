@@ -40,7 +40,9 @@
 //! `col`, `border-spacing`, `display: table-column`,
 //! `caption`.
 
-use crate::block::{border_px, css_px, font_size_px, layout_block, side_px, BlockCtx, FloatCtx};
+use crate::block::{
+    border_px, css_px, font_size_px, layout_block, raw_length_px, side_px, BlockCtx, FloatCtx,
+};
 use crate::boxtree::{LayoutBox, Rect};
 use explorer_css::ComputedStyle;
 
@@ -490,7 +492,20 @@ pub(crate) fn layout_table(
     // cadre rognerait les colonnes.
     let total_pref: f32 = pref_w.iter().sum();
     let total_min: f32 = min_w.iter().sum();
-    let frame = il + ir;
+    // §17.6.1 `border-spacing` (R-159) — consommé seulement
+    // en `separate` : `sh` entre colonnes + bords externes,
+    // `sv` entre rangs + bords externes. Le `collapse`
+    // §17.6.2 ignore la propriété (ses arêtes fusionnent).
+    let (sh, sv) = if st
+        .get("border-collapse")
+        .is_some_and(|v| v.trim() == "collapse")
+    {
+        (0.0_f32, 0.0_f32)
+    } else {
+        border_spacing(&st, cb_w, fs, ctx)
+    };
+    let spacing_x = sh * u16::try_from(ncols + 1).map_or(0.0, f32::from);
+    let frame = il + ir + spacing_x;
     // En `table-layout:fixed`, une largeur `auto` s'évalue
     // sur les colonnes spécifiées (`col` + premier rang),
     // jamais sur le contenu (§17.5.2.1) — les colonnes
@@ -505,6 +520,11 @@ pub(crate) fn layout_table(
         .min(cb_w);
     let table_w = table_w.max((total_min + frame).min(cb_w));
     let grid_w = (table_w - il - ir).max(0.0);
+    // Budget des colonnes = grid moins les espacements
+    // `border-spacing` (`sh` inter-colonnes + bords
+    // externes, R-159) — `cols_budget` alimente la distribution,
+    // `grid_w` garde la pleine largeur pour les captions.
+    let cols_budget = (grid_w - spacing_x).max(0.0);
 
     // Distribution (§17.5.2.2) : une `width` de cellule cloue
     // sa colonne ; le reste va aux colonnes auto au prorata
@@ -513,18 +533,18 @@ pub(crate) fn layout_table(
     // réduction proportionnelle).
     let fixed_sum: f32 = spec_w.iter().sum();
     let mut col_w = vec![0.0_f32; ncols];
-    if fixed_sum >= grid_w && fixed_sum > 0.0 {
+    if fixed_sum >= cols_budget && fixed_sum > 0.0 {
         for (i, w) in col_w.iter_mut().enumerate() {
             *w = if spec_w[i] > 0.0 {
-                spec_w[i] * grid_w / fixed_sum
+                spec_w[i] * cols_budget / fixed_sum
             } else {
-                min_w[i].min(grid_w)
+                min_w[i].min(cols_budget)
             };
         }
     } else {
-        let mut left = grid_w;
+        let mut left = cols_budget;
         for (i, w) in col_w.iter_mut().enumerate() {
-            *w = spec_w[i].min(grid_w);
+            *w = spec_w[i].min(cols_budget);
             left -= *w;
         }
         let auto_pref: f32 = (0..ncols)
@@ -624,6 +644,11 @@ pub(crate) fn layout_table(
             gap[k] = bot_w[k - 1].max(top_w[k]);
         }
         gap[nrows] = (bot_w[nrows - 1] - bb).max(0.0);
+    } else {
+        // `separate` (§17.6.1 / R-159) : `sv` entre chaque
+        // rang ET aux bords externes — `gap[0]`/`gap[nrows]`
+        // couvrent les extrémités comme sous `collapse`.
+        gap.fill(sv);
     }
 
     // Pose : chaque cellule est un bloc dans sa colonne ;
@@ -660,10 +685,13 @@ pub(crate) fn layout_table(
     for (k, row) in rows.iter().enumerate() {
         let mut row_h = 0.0_f32;
         for cell in &row.cells {
-            let col_x: f32 = x + il + col_w[..cell.col].iter().sum::<f32>();
+            let col_x: f32 =
+                x + il + sh * u16::try_from(cell.col + 1).map_or(0.0, f32::from)
+                    + col_w[..cell.col].iter().sum::<f32>();
             // `colspan` : la cellule occupe la somme des
             // colonnes couvertes (R-47).
-            let cw: f32 = col_w[cell.col..cell.col + cell.cols].iter().sum();
+            let cw: f32 = col_w[cell.col..cell.col + cell.cols].iter().sum::<f32>()
+                + sh * u16::try_from(cell.cols - 1).map_or(0.0, f32::from);
             // Cellule positionnée → conteneur pour ses absolus.
             let cell_cb = Rect {
                 x: col_x,
@@ -864,4 +892,22 @@ fn cell_widths(bx: &LayoutBox, cell_path: &[usize], ctx: &BlockCtx, fs: f32) -> 
         + border_px(st, "border-left-width", 0.0, fs, ctx)
         + border_px(st, "border-right-width", 0.0, fs, ctx);
     (longest + extras, pref + extras, 0.0)
+}
+
+/// `border-spacing` → `(horizontal, vertical)` — deux
+/// longueurs ou une (la seconde = la première, §17.6.1).
+/// `0`/invalide → `0` — consommé seulement en `separate`
+/// (R-159 ; `collapse` fusionne via `gap[]` §17.6.2).
+fn border_spacing(st: &ComputedStyle, cb_w: f32, fs: f32, ctx: &BlockCtx) -> (f32, f32) {
+    let mut it = st
+        .get("border-spacing")
+        .into_iter()
+        .flat_map(|v| v.split_whitespace());
+    let h = it.next().and_then(|t| raw_length_px(t, cb_w, fs, ctx));
+    let v = it.next().and_then(|t| raw_length_px(t, cb_w, fs, ctx));
+    match (h, v) {
+        (Some(h), Some(v)) => (h, v),
+        (Some(h), None) => (h, h),
+        _ => (0.0, 0.0),
+    }
 }

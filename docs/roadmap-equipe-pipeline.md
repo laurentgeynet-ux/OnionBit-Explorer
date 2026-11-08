@@ -3034,10 +3034,13 @@ scroll interne `overflow:auto`) est loguée au journal.
   (groove rendu solide — vraies 3D = R-166), `legend`→
   padding latéral. `sub`/`sup`/`abbr` liés à R-161.
   Verrou `ua_big_small_nobr_mark_figure_fieldset`.
-- [ ] **R-159. `border-spacing` consommé en `separate`** :
-  propriété zombie — `gap[]` ne se remplit que sous
-  `collapse`, le défaut 2px et `cellspacing` sont morts ;
-  gaps inter-colonnes/rangs + bords externes.
+- [x] **R-159. `border-spacing` consommé en `separate`** :
+  `sh`/`sv` dans la largeur intrinsèque (`frame`), le
+  budget colonnes (`cols_budget`), `col_x`/`cw` (cellules
+  enjambées = colonnes + spacing traversé §17.6.1),
+  `gap.fill(sv)` vertical + bords externes. Ignorée sous
+  `collapse`. Verrous ×2 + 5 attentes pré-spacing mises
+  aux valeurs spec.
 - [ ] **R-160. `vertical-align` cellules** : top/middle/
   bottom via translation du sous-arbre posé (`valign` est
   émis en hint mais jamais lu) ; baseline = lot 2.
