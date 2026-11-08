@@ -415,6 +415,13 @@ pub fn build_box_tree_sized<S: ::std::hash::BuildHasher>(
             .flatten()
             .unwrap_or_default()
             .to_lowercase();
+        // R-163 — `input[type=image]` : même boîte qu'un
+        // `<img>` (remplacé si `src` est résolu dans `sizes`,
+        // repli `alt` sinon) — le fetch `src` reste la
+        // couture NAV (journal interface-equipes).
+        if ty == "image" {
+            return Some(img_box(dom, root, style.clone(), sizes));
+        }
         return Some(control_box(
             root,
             style.clone(),
@@ -1031,6 +1038,16 @@ fn control_paint(dom: &Dom, node: NodeId, ty: &str) -> (Option<String>, bool) {
             false,
         ),
         "hidden" | "file" | "image" => (None, false),
+        // `password` (R-163) : la valeur rend une puce par
+        // caractère — jamais le texte en clair ; jambe
+        // `\u{A0}` si vide.
+        "password" => (
+            attr(node, "value")
+                .filter(|s| !s.is_empty())
+                .map(|v| "•".repeat(v.chars().count()))
+                .or_else(|| Some("\u{A0}".to_owned())),
+            false,
+        ),
         // Texte libre : `value`, `placeholder`, jambe en repli.
         _ => {
             let v = attr(node, "value").filter(|s| !s.is_empty());

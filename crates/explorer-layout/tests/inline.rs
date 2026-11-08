@@ -673,3 +673,42 @@ fn text_transform_applique_avant_itemisation() {
     // descend l'arbre comme `color`).
     assert!(text("d").contains("ABC DEF"), "d={}", text("d"));
 }
+
+/// R-163 — `input[type=password]` : la valeur rend une
+/// puce par caractère, jamais le texte clair ;
+/// `input[type=image]` : même boîte qu'un `img` — repli
+/// `alt` tant que `src` n'est pas dans `sizes` (le fetch
+/// reste la couture NAV).
+#[test]
+fn input_password_puces_et_type_image_replie_alt() {
+    let (dom, bx) = laid_w(
+        "<!doctype html><input id=pw type=password value=secret>\
+         <input id=im type=image src=btn.png alt=Envoyer>",
+        "body { margin: 0 } input { margin: 0 }",
+        800.0,
+    );
+    // La boîte contrôle enveloppe l'enfant Text dans un
+    // bloc anonyme — collecte récursive du texte.
+    let all_text = |b: &LayoutBox| -> String {
+        let mut out = String::new();
+        let mut stack = vec![b];
+        while let Some(x) = stack.pop() {
+            if let Some(t) = &x.text {
+                out.push_str(t);
+            }
+            stack.extend(x.children.iter());
+        }
+        out
+    };
+    let pw = find(&bx, by_id(&dom, "pw"));
+    let t = all_text(pw);
+    // 6 caractères → 6 puces, jamais le texte clair.
+    assert_eq!(
+        t, "\u{2022}\u{2022}\u{2022}\u{2022}\u{2022}\u{2022}",
+        "pw={t}"
+    );
+    assert!(!t.contains('s'), "le texte clair fuit : {t}");
+    // `type=image` sans `sizes` → repli `alt` (chemin img_box).
+    let im = find(&bx, by_id(&dom, "im"));
+    assert_eq!(all_text(im), "Envoyer");
+}

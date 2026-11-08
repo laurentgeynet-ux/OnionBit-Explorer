@@ -3057,9 +3057,11 @@ scroll interne `overflow:auto`) est loguée au journal.
   uppercase/lowercase Unicode, `capitalize` = 1re lettre
   par mot (le reste inchangé). Hérité via la cascade.
   Verrou 3 valeurs + héritage inline.
-- [ ] **R-163. `input[type=password]`→bullets +
-  `type=image`→remplacé** (mixte NAV+PIPE : `collect_images`
-  + tailles intrinsèques — journal d'abord).
+- [x] **R-163. `input[type=password]`→puces +
+  `type=image`→remplacé** : `•`×len(value) via
+  `control_paint` ; `img_box` réutilisé (repli `alt` tant
+  que `src` absent de `sizes` — fetch = journal NAV).
+  Verrou puces + repli alt.
 - [ ] **R-164. Détails tables** : `empty-cells`,
   `caption-side:left/right` ; collapse vertical/`hidden`/
   couleurs si le corpus l'exige.
