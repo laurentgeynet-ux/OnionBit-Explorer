@@ -84,7 +84,13 @@ l'interpréteur non optimisé (~10-20× plus lent — la suite
 `hostile` jscore passe de ~10 min à ~30 s en `--release`).
 Pour le diagnostic itératif : `cargo test -p explorer-jscore
 --test <suite> --release` (le gate verify_all garde le profil
-debug — il vérifie les tests, pas la perf). Per-test timings :
+debug — il vérifie les tests, pas la perf). **Piège asymétrique
+(mesuré 2026-11-08)** : `--release` n'accélère que
+l'*exécution* — la *compilation* des ~50 binaires de test
+jscore en mode optimisé dépasse l'heure (jamais menée à terme :
+tuée à 18 min puis à ~1 h). **Ne jamais lancer `cargo test
+--release` sans filtre `--test <suite>`** ; le gate correct reste
+debug `--lib` + smokes ciblés en release. Per-test timings :
 `cargo nextest run`. **Instrumentation** : les compteurs J17_*
 (allocs par site, JS-C306+) sont **désarmés par défaut** —
 les armer coûte un `fetch_add` atomique par événement chaud ;
