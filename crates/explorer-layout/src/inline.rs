@@ -754,7 +754,7 @@ fn strip_break_chars(p: &str) -> &str {
     p.trim_end_matches(|c| {
         matches!(
             c,
-            '\n' | '\r' | '\u{85}' | '\u{B}' | '\u{C}' | '\u{2028}' | '\u{2029}'
+            '\n' | '\r' | '\u{85}' | '\u{B}' | '\u{C}' | '\u{2028}' | '\u{2029}' | '\u{200B}'
         )
     })
 }

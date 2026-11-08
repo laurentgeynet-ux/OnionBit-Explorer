@@ -712,3 +712,30 @@ fn input_password_puces_et_type_image_replie_alt() {
     let im = find(&bx, by_id(&dom, "im"));
     assert_eq!(all_text(im), "Envoyer");
 }
+
+/// R-165 — `<wbr>` : opportunité de coupure souple à
+/// l'itemisation — un mot insecable se coupe au point
+/// `<wbr>` quand la bande est étroite, sans rien peindre
+/// (la sentinelle ZWSP est strippée avant le shaping).
+#[test]
+fn wbr_opportunite_de_coupure_souple() {
+    let (dom, bx) = laid_w(
+        "<!doctype html><p>mot_insecable<wbr>suite_du_mot</p>",
+        "body { margin: 0 } p { font-size: 20px; margin: 0; width: 110px }",
+        400.0,
+    );
+    let p = find(&bx, by_tag(&dom, "p"));
+    let lines = &p.children[0].lines;
+    assert!(
+        lines.len() >= 2,
+        "le mot devrait couper au wbr : {} lignes",
+        lines.len()
+    );
+    // La sentinelle ne peint rien : aucun fragment ne
+    // porte U+200B.
+    for l in lines {
+        for f in &l.fragments {
+            assert!(!f.text.contains('\u{200B}'), "zwsp peinte : {:?}", f.text);
+        }
+    }
+}

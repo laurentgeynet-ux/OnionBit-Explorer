@@ -558,6 +558,15 @@ fn child_boxes<S: ::std::hash::BuildHasher>(
                 if dom.tag_name(child).is_ok_and(|t| t == "br") && b.text.is_none() {
                     b.text = Some("\u{2028}".to_string());
                 }
+                // `<wbr>` (R-165) : opportunité de coupure
+                // souple — sentinelle U+200B ZERO WIDTH
+                // SPACE, que l'itemisation UAX #14 marque
+                // comme point de coupure permis (ZW).
+                // `strip_break_chars` la retire avant le
+                // shaping → jamais de glyphe `.notdef`.
+                if dom.tag_name(child).is_ok_and(|t| t == "wbr") && b.text.is_none() {
+                    b.text = Some("\u{200B}".to_string());
+                }
                 out.push(b);
             }
             // `display: none` ou absent de la map → sauté.

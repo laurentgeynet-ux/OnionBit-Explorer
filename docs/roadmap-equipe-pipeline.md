@@ -3067,8 +3067,10 @@ scroll interne `overflow:auto`) est loguée au journal.
   `caption-side:left|right` en vis-à-vis. Collapse
   vertical/hidden/couleurs : corpus ne l'exige pas.
   Verrous ×2.
-- [ ] **R-165. `<wbr>`** : opportunité de coupure à
-  l'itemisation (miroir `br`→U+2028, pas une règle UA).
+- [x] **R-165. `<wbr>`** : sentinelle U+200B (classe ZW
+  UAX #14 → coupure souple permise) ; strippée avant
+  shaping — pas de glyphe. Miroir `br`→U+2028, sans saut
+  dur. Verrou coupure + ZWSP non peinte.
 - [ ] **R-166. Bordures 3D réelles** : `inset`/`outset`/
   `groove`/`ridge` en demi-teintes par côté, `double` vrai
   liseré (aujourd'hui tout → solide au raster).
