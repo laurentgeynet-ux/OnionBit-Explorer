@@ -1229,3 +1229,41 @@ fn border_spacing_collapse_les_gaps_reviennent_zero() {
         b.rect.x
     );
 }
+
+#[test]
+fn table_cell_vertical_align_decale_le_contenu() {
+    // R-160 : `valign=middle`/`bottom` sur une cellule
+    // décale son contenu dans la hauteur de rangée
+    // (fonds/bordures couvrent toute la rangée ; baseline
+    // et top = en haut — baseline réel = lot suivant).
+    let (dom, bx) = laid(
+        "<!doctype html><table><tr><td id=\"m\" valign=\"middle\"><p id=\"pm\">x</p></td>\
+         <td id=\"b\" valign=\"bottom\"><p id=\"pb\">y</p></td>\
+         <td id=\"t\"><div style=\"height:60px\"></div></td></tr></table>",
+        "body { margin: 0 } table { width: 300px } p { margin: 0; height: 10px }",
+    );
+    let m = find(&bx, by_id(&dom, "m"));
+    let b = find(&bx, by_id(&dom, "b"));
+    let t = find(&bx, by_id(&dom, "t"));
+    // Rangée = 60px (la grande cellule) ; pésente 10px.
+    let row_h = m.rect.height;
+    assert!(row_h >= 60.0, "rangée {row_h}");
+    let pm = find(&bx, by_id(&dom, "pm"));
+    let pb = find(&bx, by_id(&dom, "pb"));
+    // middle : contenu centré → pm.y ≈ m.y + (60-10)/2.
+    let mid_y = m.rect.y + (row_h - 10.0) / 2.0;
+    assert!(
+        (pm.rect.y - mid_y).abs() < 1.5,
+        "middle : pm.y={} attendu ~{mid_y}",
+        pm.rect.y
+    );
+    // bottom : contenu en bas → pb.y ≈ b.y + row_h - 10.
+    let bot_y = b.rect.y + row_h - 10.0;
+    assert!(
+        (pb.rect.y - bot_y).abs() < 1.5,
+        "bottom : pb.y={} attendu ~{bot_y}",
+        pb.rect.y
+    );
+    // t (pas de valign) : contenu reste en haut.
+    let _ = t;
+}

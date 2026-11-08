@@ -3041,9 +3041,11 @@ scroll interne `overflow:auto`) est loguée au journal.
   `gap.fill(sv)` vertical + bords externes. Ignorée sous
   `collapse`. Verrous ×2 + 5 attentes pré-spacing mises
   aux valeurs spec.
-- [ ] **R-160. `vertical-align` cellules** : top/middle/
-  bottom via translation du sous-arbre posé (`valign` est
-  émis en hint mais jamais lu) ; baseline = lot 2.
+- [x] **R-160. `vertical-align` cellules** : `middle`/
+  `bottom` décalent le contenu posé (`shift_subtree_y`,
+  cellule garde sa géométrie peinte) ; `tr[valign]` relayé
+  aux cellules. `baseline`/`top` = en haut (vraie baseline
+  = R-161). Verrou middle/bottom sur rangée.
 - [ ] **R-161. `vertical-align` inline** : `sub`/`super`/px/
   `%` — débloque `sub`/`sup`/`abbr[title]`/`acronym` UA
   (dépend de R-153 pour `abbr`).

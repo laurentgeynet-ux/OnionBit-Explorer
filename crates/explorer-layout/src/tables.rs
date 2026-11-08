@@ -682,12 +682,17 @@ pub(crate) fn layout_table(
     }
     let mut row_tops = Vec::new();
     let mut row_fixed = vec![false; nrows];
+    // Hauteurs posées par cellule — consommées par le
+    // `vertical-align` de la passe 2 (R-160).
+    let mut cell_used: Vec<Vec<f32>> = Vec::with_capacity(nrows);
     for (k, row) in rows.iter().enumerate() {
         let mut row_h = 0.0_f32;
+        let mut used_list = Vec::with_capacity(row.cells.len());
         for cell in &row.cells {
-            let col_x: f32 =
-                x + il + sh * u16::try_from(cell.col + 1).map_or(0.0, f32::from)
-                    + col_w[..cell.col].iter().sum::<f32>();
+            let col_x: f32 = x
+                + il
+                + sh * u16::try_from(cell.col + 1).map_or(0.0, f32::from)
+                + col_w[..cell.col].iter().sum::<f32>();
             // `colspan` : la cellule occupe la somme des
             // colonnes couvertes (R-47).
             let cw: f32 = col_w[cell.col..cell.col + cell.cols].iter().sum::<f32>()
@@ -700,6 +705,7 @@ pub(crate) fn layout_table(
                 height: 0.0,
             };
             let Some(cell_box) = at_path(bx, &cell.path) else {
+                used_list.push(0.0);
                 continue;
             };
             if cell_box
@@ -724,7 +730,9 @@ pub(crate) fn layout_table(
                 &mut FloatCtx::default(),
             );
             row_h = row_h.max(used);
+            used_list.push(used);
         }
+        cell_used.push(used_list);
         row_tops.push((cursor_y, row_h));
         cursor_y += row_h + gap[k + 1];
     }
@@ -762,7 +770,16 @@ pub(crate) fn layout_table(
     // `border-top|bottom` peignent les lignes fusionnées).
     for (k, row) in rows.iter().enumerate() {
         let (ry, rh) = row_tops[k];
-        for cell in &row.cells {
+        // `tr[valign]` (R-160) : lu sur la rangée — la
+        // cellule spécifiée prime (vertical-align n'est pas
+        // hérité ; le hint tr existe mais n'atteint pas les
+        // cellules sinon).
+        let tr_va: Option<String> = row
+            .path
+            .as_ref()
+            .and_then(|p| at_path(bx, p))
+            .and_then(|t| t.style.get("vertical-align").map(str::to_string));
+        for (ci, cell) in row.cells.iter().enumerate() {
             let Some(cell_box) = at_path(bx, &cell.path) else {
                 continue;
             };
@@ -775,6 +792,30 @@ pub(crate) fn layout_table(
                 + gap[k + 1..last].iter().sum::<f32>();
             cell_box.rect.height = cell_box.rect.height.max(span_h.max(rh));
             cell_box.rect.y = ry;
+            // `vertical-align` cellule (R-160, §17.5.3.1) :
+            // `middle`/`bottom` décalent le contenu posé dans
+            // la hauteur finale (fonds/bordures couvrent
+            // toute la rangée). `baseline`/`top` = pas de
+            // décalage (baseline réel = lot suivant).
+            let cell_h = cell_box.rect.height;
+            let used = cell_used
+                .get(k)
+                .and_then(|r| r.get(ci))
+                .copied()
+                .unwrap_or(0.0);
+            let va = cell_box
+                .style
+                .get("vertical-align")
+                .or(tr_va.as_deref())
+                .unwrap_or("baseline");
+            let dy = match va {
+                "middle" => (cell_h - used) / 2.0,
+                "bottom" => cell_h - used,
+                _ => 0.0,
+            };
+            if dy > 0.01 {
+                shift_subtree_y(cell_box, dy);
+            }
         }
         let mut cur = &mut *bx;
         let Some(rpath) = &row.path else {
@@ -909,5 +950,23 @@ fn border_spacing(st: &ComputedStyle, cb_w: f32, fs: f32, ctx: &BlockCtx) -> (f3
         (Some(h), Some(v)) => (h, v),
         (Some(h), None) => (h, h),
         _ => (0.0, 0.0),
+    }
+}
+
+/// Décale `dy` tout le contenu posé d'une boîte — lignes
+/// inline (fragments) et sous-arbres enfants, récursif.
+/// La boîte elle-même garde sa géométrie : fonds et
+/// bordures couvrent la rangée entière — utilisé par
+/// `vertical-align` de cellule (R-160, §17.5.3.1).
+fn shift_subtree_y(bx: &mut LayoutBox, dy: f32) {
+    for line in &mut bx.lines {
+        line.rect.y += dy;
+        for frag in &mut line.fragments {
+            frag.rect.y += dy;
+        }
+    }
+    for child in &mut bx.children {
+        child.rect.y += dy;
+        shift_subtree_y(child, dy);
     }
 }
