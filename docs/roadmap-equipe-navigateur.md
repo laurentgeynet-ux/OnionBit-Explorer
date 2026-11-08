@@ -10650,3 +10650,21 @@ un crate PIPELINE.- [x] **JS-C422. Deadline honnête — canal session ↔ budge
   gate 24/24 permanent ; lib 44/44, clippy propre.
   **Re-flight 3 sites requis.**
 
+- [x] **JS-C429. §B-105 — `{__proto__:…}` littéral règle
+  [[Prototype]], jamais prop own énumérable** (`chart.umd`
+  `isForType` → `cannot read 'prototype' of Null` chez dash.js
+  + bitmovin — repro isolée stack-identique ; instrumentation
+  du bundle : `coll=0 key=__proto__`, le `registerables`
+  `{__proto__:null,…}` livrait un membre `null` à `register`
+  via `each`/`for..in`). Cause moteur : `Expr::Object`
+  appliquait `set_own` à `__proto__` au lieu de régler le
+  proto — divergence spec `PropertyDefinition` (clé littérale
+  seulement ; `['__proto__']` calculé = prop own normale).
+  Bras `ObjProp::Prop` : `PropKey::Name("__proto__")` →
+  `o.proto = v` si obj/`null`, ignoré sinon. Verrous :
+  `b105_proto_literal_n_est_pas_prop_own` + `b105_bundle_eval`
+  (chart.umd 205 Kio s'évalue, `Chart` posé). `lang`/`dom`/
+  `c313` 313+313+245, `hostile` 12/12, jscore release bout
+  en bout vert, clippy propre. **Re-flight dash.js + bitmovin
+  requis.**
+

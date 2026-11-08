@@ -4,7 +4,7 @@
 
 #[allow(clippy::wildcard_imports)]
 use super::*;
-use crate::ast::{AssignOp, BinOp, ChainStep, Expr, ObjProp, UnOp};
+use crate::ast::{AssignOp, BinOp, ChainStep, Expr, ObjProp, PropKey, UnOp};
 use crate::heap::{Binding, Env, EnvCell, EnvKind, EnvRef, Fun, JsResult, ObjKind, Thrown};
 use crate::value::{to_int32, to_uint32, Value};
 
@@ -196,9 +196,23 @@ impl Engine {
                 for p in props {
                     match p {
                         ObjProp::Prop(k, ve) => {
-                            let ks = self.eval_prop_key(env, this.clone(), k)?;
                             let v = self.eval_expr(env, this.clone(), ve)?;
-                            self.set_own(id, &ks, v, true);
+                            // Spec `PropertyDefinition` : `__proto__:`
+                            // littéral (jamais `["__proto__"]` calculé)
+                            // règle [[Prototype]] au lieu de créer une
+                            // prop own — `{__proto__:null}` énumérable
+                            // nourrissait `for..in`/`each` d'un item
+                            // null (§B-105, crash `isForType` chart.umd).
+                            if matches!(k, PropKey::Name(n) if n.as_ref() == "__proto__") {
+                                if matches!(v, Value::Obj(_) | Value::Null) {
+                                    if let Some(o) = self.heap.obj_mut(id) {
+                                        o.proto = v;
+                                    }
+                                }
+                            } else {
+                                let ks = self.eval_prop_key(env, this.clone(), k)?;
+                                self.set_own(id, &ks, v, true);
+                            }
                         }
                         ObjProp::Spread(e) => {
                             // `{...o}` — enumerable own props only.
