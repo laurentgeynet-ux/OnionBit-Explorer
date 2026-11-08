@@ -1,6 +1,14 @@
-# Répertoire de build Cargo local au worktree (C:) — chaque
-# worktree parallèle a ainsi son propre target/, ce qui évite
-# les races de binaires de test entre sessions (cf. AGENTS.md
-# §10). CARGO_TARGET_DIR a priorité sur ce réglage.
-[build]
-target-dir = "target"
+# Sortie de build : aucun chemin n'est épinglé dans le dépôt.
+#
+# - Artefacts intermédiaires (deps, incremental, fingerprints) :
+#   la config cargo de la MACHINE (niveau utilisateur, hors
+#   dépôt) pose `build-dir` avec le templating
+#   `{workspace-path-hash}` (cargo ≥ 1.91) → chaque projet et
+#   chaque worktree obtient son propre sous-dossier sous la
+#   racine centrale du poste. `cargo metadata` rapporte le
+#   chemin réel (champ `build_directory`).
+# - Artefacts finaux (binaires, doc, package) : `target/` local
+#   au worktree — le défaut cargo, isolation par construction.
+#   Pour les déporter par worktree : `CARGO_TARGET_DIR` en
+#   session (cf. docs de vol) ou `.cargo/config` local non
+#   commité (prioritaire sur ce fichier, gitignoré).

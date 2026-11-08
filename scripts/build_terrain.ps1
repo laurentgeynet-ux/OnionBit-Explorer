@@ -38,17 +38,27 @@ Step 'cargo build --release (daemon + cli + ffi)' {
     cargo build --release -p explorer-daemon -p explorer-cli -p explorer-ffi
 }
 
-# target dir effectif : parametre, sinon config cargo du workspace.
+# target dir effectif : parametre, sinon resolution canonique
+# cargo via `cargo metadata` (CARGO_TARGET_DIR > configs projet
+# et globale > <workspace>/target).
 $target = if ($CargoTargetDir) {
     $CargoTargetDir
 } else {
-    $cfg = Join-Path (Get-Location) '.cargo\config.toml'
-    if (Test-Path $cfg) {
-        $m = Select-String -Path $cfg -Pattern 'target-dir\s*=\s*"([^"]+)"'
-        if ($m) { $m.Matches[0].Groups[1].Value } else { 'target' }
-    } else { 'target' }
+    (cargo metadata --no-deps --format-version 1 |
+        ConvertFrom-Json).target_directory
 }
-$release = Join-Path $target 'release'
+# <target>/<triple>/release sous un `build.target` explicite
+# (config globale) — repli <target>/release, meme regle que
+# spawn_daemon.ps1.
+$triple = ''
+$v = & rustc -vV 2>$null | Select-String -Pattern '^host: (\S+)'
+if ($v) { $triple = $v.Matches[0].Groups[1].Value }
+$release = @(
+    $(if ($triple) { Join-Path $target "$triple\release" }),
+    (Join-Path $target 'release')
+) | Where-Object { $_ -and (Test-Path (Join-Path $_ 'explorer-daemon.exe')) } |
+    Select-Object -First 1
+if (-not $release) { $release = Join-Path $target 'release' }
 
 $artifacts = @('explorer-daemon.exe', 'explorer-cli.exe', 'explorer_ffi.dll')
 foreach ($a in $artifacts) {

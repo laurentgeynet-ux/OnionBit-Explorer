@@ -79,11 +79,19 @@ if ($LASTEXITCODE -ne 0) {
 # `CARGO_TARGET_DIR` prime encore : `cargo metadata` résout le
 # chemin réel — un chemin en dur rendait des faux OK sur des
 # PNG périmés).
+# Un `build.target` explicite (config globale) range l'exe sous
+# <target>/<triple>/<prof> — les deux emplacements sont sondes.
 $meta = cargo metadata --no-deps --format-version 1 |
     ConvertFrom-Json
-$cli = Join-Path $meta.target_directory 'debug\explorer-cli.exe'
-if (-not (Test-Path $cli)) {
-    Write-Error "explorer-cli introuvable : $cli"
+$triple = ''
+$v = & rustc -vV 2>$null | Select-String -Pattern '^host: (\S+)'
+if ($v) { $triple = $v.Matches[0].Groups[1].Value }
+$cli = @(
+    $(if ($triple) { Join-Path $meta.target_directory "$triple\debug\explorer-cli.exe" }),
+    (Join-Path $meta.target_directory 'debug\explorer-cli.exe')
+) | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
+if (-not $cli) {
+    Write-Error "explorer-cli introuvable sous $($meta.target_directory)"
     exit 1
 }
 # Purge des PNG précédents : une frame produite dans un run

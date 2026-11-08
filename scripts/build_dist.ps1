@@ -43,12 +43,12 @@ $app        = Join-Path $root "app"
 $dist       = Join-Path $root "dist"
 $bundleRoot = Join-Path $dist "Explorer"
 $osDir      = Join-Path $bundleRoot "windows"
-# CARGO_TARGET_DIR (worktrees paralleles) a priorite sur le
-# target/ epingle par .cargo\config.toml.
-$cargoTarget = if ($env:CARGO_TARGET_DIR) { $env:CARGO_TARGET_DIR } else { Join-Path $root "target" }
-
 Push-Location $root
 try {
+    # Resolution canonique cargo via `cargo metadata`
+    # (CARGO_TARGET_DIR > configs projet et globale > defaut).
+    $cargoTarget = (cargo metadata --no-deps --format-version 1 |
+        ConvertFrom-Json).target_directory
     # -- 1) Moteur FFI + lanceur ---------------------------------------
     if (-not $SkipCheck) {
         Write-Host "== cargo check pre-build ==" -ForegroundColor Cyan
@@ -74,7 +74,18 @@ try {
     }
 
     # -- 3) Assemblage `dist\Explorer\` ---------------------------------
-    $cargoOut   = Join-Path $cargoTarget $Profile
+    # <target>/<triple>/<profil> sous un `build.target` explicite
+    # (config globale) — repli <target>/<profil> (meme regle que
+    # spawn_daemon.ps1).
+    $triple = ''
+    $v = & rustc -vV 2>$null | Select-String -Pattern '^host: (\S+)'
+    if ($v) { $triple = $v.Matches[0].Groups[1].Value }
+    $cargoOut = @(
+        $(if ($triple) { Join-Path $cargoTarget "$triple\$Profile" }),
+        (Join-Path $cargoTarget $Profile)
+    ) | Where-Object { $_ -and (Test-Path (Join-Path $_ 'explorer-launcher.exe')) } |
+        Select-Object -First 1
+    if (-not $cargoOut) { $cargoOut = Join-Path $cargoTarget $Profile }
     $flutterOut = Join-Path $app "build\windows\x64\runner\$(@{$true='Release';$false='Debug'}[$Profile -eq 'release'])"
     if (-not (Test-Path "$cargoOut\explorer-launcher.exe")) {
         throw "explorer-launcher.exe introuvable dans $cargoOut"

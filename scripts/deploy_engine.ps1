@@ -4,10 +4,12 @@
 
 # deploy_engine.ps1 — source de verite du runtime moteur.
 #
-# Canonique : <target-dir>\<Profile>\explorer_ffi.dll (cdylib
-# du crate explorer-ffi — `cargo build --release -p explorer-ffi`
-# SEUL la produit). Le target-dir se resout comme cargo :
-# -TargetDir > CARGO_TARGET_DIR > .cargo/config.toml > .\target.
+# Canonique : <target-dir>[/<triple>]\<Profile>\explorer_ffi.dll
+# (cdylib du crate explorer-ffi — `cargo build --release -p
+# explorer-ffi` SEUL la produit). Le target-dir se resout comme
+# cargo : -TargetDir > `cargo metadata` (CARGO_TARGET_DIR >
+# configs projet et globale > .\target) ; le sous-dossier
+# <triple> couvre un `build.target` explicite (config globale).
 #
 # Les copies sont INEVITABLES : LoadLibrary resout la DLL
 # adjacente a l'exe consommateur (explorer_app, daemon,
@@ -37,23 +39,41 @@ param(
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path -Parent $PSScriptRoot
 
-# target dir effectif : parametre, env cargo, config du
-# workspace, defaut — meme regle que build_terrain.ps1.
+# target dir effectif : parametre, sinon resolution canonique
+# cargo via `cargo metadata` (CARGO_TARGET_DIR > configs projet
+# et globale > <workspace>/target — la chaine entiere, y compris
+# la config utilisateur hors depot, qu'une regex de config.toml
+# ne voit pas).
 $target = if ($TargetDir) {
     $TargetDir
-} elseif ($env:CARGO_TARGET_DIR) {
-    $env:CARGO_TARGET_DIR
 } else {
-    $cfg = Join-Path $repo '.cargo\config.toml'
-    if (Test-Path $cfg) {
-        $m = Select-String -Path $cfg -Pattern 'target-dir\s*=\s*"([^"]+)"'
-        if ($m) { $m.Matches[0].Groups[1].Value } else { 'target' }
-    } else { 'target' }
+    Push-Location $repo
+    try {
+        (cargo metadata --no-deps --format-version 1 |
+            ConvertFrom-Json).target_directory
+    } finally { Pop-Location }
 }
 if (-not [System.IO.Path]::IsPathRooted($target)) {
     $target = Join-Path $repo $target
 }
-$dll = Join-Path $target "$Profile\explorer_ffi.dll"
+# Un `build.target` explicite (config globale) range les
+# artefacts finaux sous <target>/<triple>/<profil> — repli
+# <target>/<profil> (meme regle que spawn_daemon.ps1).
+# Resolu par Get-CanonDll : le binaire peut n'apparaitre
+# qu'APRES le `cargo build` ci-dessous.
+$triple = ''
+$v = & rustc -vV 2>$null | Select-String -Pattern '^host: (\S+)'
+if ($v) { $triple = $v.Matches[0].Groups[1].Value }
+$script:dllCands = @(
+    $(if ($triple) { Join-Path $target "$triple\$Profile\explorer_ffi.dll" }),
+    (Join-Path $target "$Profile\explorer_ffi.dll")
+) | Where-Object { $_ }
+function Get-CanonDll {
+    $hit = $script:dllCands | Where-Object { Test-Path $_ } |
+        Select-Object -First 1
+    if ($hit) { $hit } else { $script:dllCands[0] }
+}
+$dll = Get-CanonDll
 
 # Registre des consommateurs — chaque entree = un dossier qui
 # doit contenir explorer_ffi.dll ADJACENTE a l'exe qu'il
@@ -106,6 +126,7 @@ if (-not $VerifyOnly) {
         cargo build --$Profile -p explorer-ffi
         if ($LASTEXITCODE -ne 0) { throw "cargo build : $LASTEXITCODE" }
     }
+    $dll = Get-CanonDll
     if (-not (Test-Path $dll)) { throw "DLL canonique absente : $dll" }
 
     $canon = (Get-FileHash $dll -Algorithm SHA256).Hash.ToLower()
@@ -136,6 +157,7 @@ if (-not $VerifyOnly) {
 # -- audit : chaque copie doit egaler la canonique, et son
 # sidecar declarer le meme hash ---------------------------------
 
+$dll = Get-CanonDll
 if (-not (Test-Path $dll)) { throw "DLL canonique absente : $dll" }
 $canon = (Get-FileHash $dll -Algorithm SHA256).Hash.ToLower()
 $bad = 0

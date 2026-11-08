@@ -87,8 +87,9 @@ git fetch                 # si besoin
 git log --oneline --reverse <sha_dernier_vol>..HEAD
 git checkout <sha_campagne>   # HEAD à mesurer, détaché — choisi au départ
 
-# 1.2 binaire frais — target-dir local au worktree dédié
-$env:CARGO_TARGET_DIR = "C:/OnionBit-Explorer-youtube-wt/target"
+# 1.2 binaire frais — target-dir dédié au worktree, sous la
+#     racine centrale de build du poste (AGENTS.md §10)
+$env:CARGO_TARGET_DIR = "C:/cargo-target/OnionBit-Explorer-youtube-wt"
 cargo build --release -p explorer-daemon   # attendre « Finished »
 
 # 1.3 env du vol — TOUTES obligatoires sauf mention contraire

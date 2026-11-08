@@ -95,16 +95,27 @@ foreach ($i in 1..50) {
 
 # --- 2. daemon -------------------------------------------------------------
 # `target_directory` reel via `cargo metadata` : `.cargo/
-# config.toml` (et `CARGO_TARGET_DIR`) deportent `target/` —
-# un chemin en dur `target/release` raterait le binaire.
+# config.toml` (et `CARGO_TARGET_DIR`) deportent `target/` — et
+# un `build.target` explicite (config globale) range l'exe sous
+# <target>/<triple>/<prof> — jamais de chemin en dur.
 $meta = cargo metadata --no-deps --format-version 1 | ConvertFrom-Json
-$daemon = Join-Path $meta.target_directory 'release\explorer-daemon.exe'
-if (-not (Test-Path $daemon)) {
+$triple = ''
+$v = & rustc -vV 2>$null | Select-String -Pattern '^host: (\S+)'
+if ($v) { $triple = $v.Matches[0].Groups[1].Value }
+$daemonDirs = @(
+    $(if ($triple) { Join-Path $meta.target_directory $triple }),
+    $meta.target_directory
+) | Where-Object { $_ }
+$daemon = $daemonDirs | ForEach-Object { Join-Path $_ 'release\explorer-daemon.exe' } |
+    Where-Object { Test-Path $_ } | Select-Object -First 1
+if (-not $daemon) {
     Write-Host "==> cargo build -p explorer-daemon (release absent)" -ForegroundColor Cyan
     cargo build -p explorer-daemon
     if ($LASTEXITCODE -ne 0) { throw "ECHEC : build daemon" }
-    $daemon = Join-Path $meta.target_directory 'debug\explorer-daemon.exe'
+    $daemon = $daemonDirs | ForEach-Object { Join-Path $_ 'debug\explorer-daemon.exe' } |
+        Where-Object { Test-Path $_ } | Select-Object -First 1
 }
+if (-not $daemon) { throw "explorer-daemon.exe introuvable apres build" }
 
 $env:EXPLORER_PORT = "$ApiPort"
 $proc = Start-Process -FilePath (Resolve-Path $daemon) -PassThru `
