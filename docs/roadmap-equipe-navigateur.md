@@ -7264,6 +7264,26 @@ incrément.
   lui-même). Suites : core lib
   106/106, api 33/33.
 
+- [x] **Étape 210. Picture-in-Picture (PiP) interactif & navigation frame-par-frame à la molette**
+  (`app/` presentation browser_controller/media_controls/pip_overlay/browser_page) —
+  innovation UX vidéo native :
+  - **Détachement PiP** : overlay 16:9 flottant draggable avec clamp aux bords
+    d'écran (`PipOverlay`), affichage direct de la texture native du player (`p.view`),
+    incrustation temps réel des sous-titres (`snap.subtitle`), placeholder élégant
+    sur la surface page avec bouton de rapatriement immédiat.
+  - **Navigation image par image à la molette** : interception de `PointerScrollEvent`
+    sur la vidéo en pause (haut = +1 frame via `stepFrame(1)`, bas = -1 frame via `stepFrame(-1)`),
+    boutons `[-1f]` et `[+1f]` ajoutés sur la barre de contrôle et sur l'overlay PiP,
+    s'appuyant sur le filaire `onionmedia_frame_step` / `onionmedia_frame_back_step`.
+  - **Contrôles PiP overlay** : header avec poignée de déplacement, bouton retour page
+    (`open_in_new`), bouton fermeture (`close`), footer avec lecture/pause, pas-à-pas,
+    scrubber de position et toggle muet.
+  - **Cycle de vie propre** : `BrowserController` gère `pipMedia: ({String tabId, int mediaId})?`,
+    fermeture explicite (`mediaClosePip`), bascule (`mediaTogglePip`), et purge automatique
+    sur `_dropMedia` / `_dropAllMedia`.
+  - Verrou : test contrôleur `210 — mediaTogglePip active, bascule et désactive le Picture-in-Picture`,
+    `flutter analyze` 0 issue, `flutter test` 83/83 pass.
+
 - [ ] **Écarts terrain — vol humain
   22/10 (release `39ab821`, FFI)** :
   second run humain — trois constats

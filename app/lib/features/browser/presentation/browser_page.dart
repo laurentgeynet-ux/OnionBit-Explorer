@@ -21,6 +21,7 @@ import 'browser_controller.dart';
 import 'delegated_webview.dart';
 import 'library_panels.dart';
 import 'media_controls.dart';
+import 'pip_overlay.dart';
 
 /// Coquille navigateur — étape 29 : barre d'onglets, boutons
 /// back/forward/reload, omnibox, états de chargement poussés
@@ -312,6 +313,8 @@ class _BrowserPageState extends ConsumerState<BrowserPage> {
                                   ),
                                 ),
                               ),
+                          if (st.pipMedia != null)
+                            PipOverlay(ctrl: ctrl, tokens: t),
                         ],
                       ),
               ),

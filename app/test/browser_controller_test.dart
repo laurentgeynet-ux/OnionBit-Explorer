@@ -1235,6 +1235,60 @@ void main() {
     expect(p.steps, 2);
   });
 
+  /// Étape 210 — Picture-in-Picture : `mediaTogglePip` active
+  /// le PiP sur `(tabId, mediaId)`, un second appel le désactive,
+  /// et `mediaClosePip` le referme ; `_dropMedia` purge le PiP.
+  test('210 — mediaTogglePip active, bascule et désactive le Picture-in-Picture', () async {
+    final repo = FakeRepo();
+    final events = FakeEvents();
+    FakePlayer.instances.clear();
+    final c = makeContainer(repo, events);
+    addTearDown(c.dispose);
+    await settle(c);
+
+    events.ctrl.add(
+      ServerEvent('media_offered', {
+        'tab': 1,
+        'media': 7,
+        'kind': 'video',
+        'rect': {'x': 0, 'y': 0, 'w': 100, 'h': 50},
+        'url': 'http://h/v.mp4',
+      }),
+    );
+    for (var i = 0; i < 6; i++) {
+      await Future<void>.delayed(Duration.zero);
+    }
+    final ctrl = c.read(browserProvider.notifier);
+
+    expect(ctrl.state.pipMedia, isNull);
+    expect(ctrl.isPipActive('1', 7), isFalse);
+
+    // Activer PiP
+    ctrl.mediaTogglePip('1', 7);
+    expect(ctrl.state.pipMedia, (tabId: '1', mediaId: 7));
+    expect(ctrl.isPipActive('1', 7), isTrue);
+
+    // Re-toggle sur la même surface → désactive
+    ctrl.mediaTogglePip('1', 7);
+    expect(ctrl.state.pipMedia, isNull);
+    expect(ctrl.isPipActive('1', 7), isFalse);
+
+    // Activer puis fermer via mediaClosePip
+    ctrl.mediaTogglePip('1', 7);
+    expect(ctrl.isPipActive('1', 7), isTrue);
+    ctrl.mediaClosePip();
+    expect(ctrl.isPipActive('1', 7), isFalse);
+
+    // Disparition de la surface (media_gone) → purge automatique du PiP
+    ctrl.mediaTogglePip('1', 7);
+    expect(ctrl.isPipActive('1', 7), isTrue);
+    events.ctrl.add(ServerEvent('media_gone', {'tab': 1, 'media': 7}));
+    for (var i = 0; i < 4; i++) {
+      await Future<void>.delayed(Duration.zero);
+    }
+    expect(ctrl.isPipActive('1', 7), isFalse);
+  });
+
   /// Étape 184 — indicateur 🔊/🔇 d'onglet : recalculé à
   /// chaque notification lecteur (y compris surfaces 0×0
   /// `display:none` autoplay) ; le clic bascule le mute
