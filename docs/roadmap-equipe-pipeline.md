@@ -2999,10 +2999,15 @@ scroll interne `overflow:auto`) est loguée au journal.
   Approximations : métriques en fractions d'em, `solid`
   seul, `blink` ignoré, `-color`/`-style`/`-thickness`
   hors scope. Verrous ×5 + terrain (Drudge, REC-html32).
-- [ ] **R-154. `<font>` présentationnel** : `face`/`color`/
-  `size` 1-7 + `±N` relatif (`apply_presentational_hints`
-  a le parent `ComputedStyle` en scope) ; `basefont` si le
-  corpus le justifie.
+- [x] **R-154. `<font>` présentationnel** : `face` →
+  `font-family`, `color` → `color` via `legacy_color()`
+  (hex nu `ffcc00` → `#ffcc00`, règles HTML Standard) —
+  le normalizer sera étendu à `bgcolor`/`text` en R-155.
+  `size` `1..7` → mots-clés absolus, `±N` → index table du
+  parent (px calculée → index proche sur `env.font_size_
+  base`) ; px réels produits par `normalize_font_size`
+  (R-17), aucun changement layout. `basefont` non-fait.
+  Verrous ×3 + terrain (heavensgate, toastytech).
 - [ ] **R-155. Couleurs legacy sans `#`** : hex nu 3/6
   digits + padding (`bgcolor="ffcc00"` meurt dans
   `parse_color`) — normalisation à l'émission des hints.

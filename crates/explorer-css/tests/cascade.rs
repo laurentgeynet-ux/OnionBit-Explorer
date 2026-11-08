@@ -2629,3 +2629,95 @@ fn b75_multi_feuilles_atomiques_s_appliquent() {
         "display:flex attendu : {dbg}"
     );
 }
+
+// ── `<font>` présentationnel (R-154) ────────────────────────
+
+/// `font-size` calculée → px (la valeur calculée est une
+/// longueur absolue — R-17 normalise à la cascade).
+fn fs_px(s: &ComputedStyle) -> f32 {
+    s.get("font-size")
+        .and_then(|v| v.trim().trim_end_matches("px").parse::<f32>().ok())
+        .expect("font-size calculée en px")
+}
+
+#[test]
+fn hint_font_face_color_size() {
+    let f = fixture();
+    let e = StyleEngine::new();
+    let mut dom = f.dom;
+    let n = el(
+        &mut dom,
+        f.body,
+        "font",
+        &[("face", "Verdana"), ("color", "#ff6600"), ("size", "4")],
+    );
+    let s = e.compute(&dom, n, &env());
+    assert_eq!(s.get("font-family"), Some("Verdana"), "face → font-family");
+    assert_eq!(s.get("color"), Some("#ff6600"), "color → color");
+    assert!((fs_px(&s) - 16.0).abs() < 0.05, "size=4 → medium 16px");
+}
+
+#[test]
+fn hint_font_size_absolu_et_relatif() {
+    let f = fixture();
+    let e = StyleEngine::new();
+    let mut dom = f.dom;
+    // Table absolue (échelle ×1.2, base 16) : 1→9.26, 2→11.1,
+    // 3→13.3, 5→19.2, 7→27.6 — résolue en px à la cascade.
+    for (attr, px) in [
+        ("1", 16.0 / 1.728),
+        ("2", 16.0 / 1.44),
+        ("3", 16.0 / 1.2),
+        ("5", 19.2),
+        ("7", 27.648),
+    ] {
+        let n = el(&mut dom, f.body, "font", &[("size", attr)]);
+        let got = fs_px(&e.compute(&dom, n, &env()));
+        assert!((got - px).abs() < 0.05, "size={attr} → {px}px, eu {got}");
+    }
+    // Invalide → pas de hint.
+    let bad = el(&mut dom, f.body, "font", &[("size", "9")]);
+    assert_eq!(e.compute(&dom, bad, &env()).get("font-size"), None);
+    // `±N` relatif à l'index du parent — body sans taille
+    // déclarée → base 3 (medium) : +1 → large 19.2, -2 →
+    // x-small 11.1.
+    let up = el(&mut dom, f.body, "font", &[("size", "+1")]);
+    assert!((fs_px(&e.compute(&dom, up, &env())) - 19.2).abs() < 0.05);
+    let down = el(&mut dom, f.body, "font", &[("size", "-2")]);
+    assert!((fs_px(&e.compute(&dom, down, &env())) - 16.0 / 1.44).abs() < 0.05);
+    // Imbriqué : `<font size=7>` (27.648px calculée → index
+    // 6) dont le fils déclare -1 → index 5 = x-large 23.04.
+    let outer = el(&mut dom, f.body, "font", &[("size", "7")]);
+    let inner = el(&mut dom, outer, "font", &[("size", "-1")]);
+    let got = fs_px(&e.compute(&dom, inner, &env()));
+    assert!((got - 23.04).abs() < 0.05, "relatif parent font : {got}");
+}
+
+#[test]
+fn hint_font_color_couleur_legacy_sans_diese() {
+    // Règles « legacy color » (HTML Standard) : `color` nu
+    // sans `#` devient un hex — `ffcc00` → #ffcc00, nommées
+    // et syntaxes modernes inchangées.
+    let f = fixture();
+    let e = StyleEngine::new();
+    let mut dom = f.dom;
+    let hex = el(&mut dom, f.body, "font", &[("color", "ffcc00")]);
+    assert_eq!(
+        e.compute(&dom, hex, &env()).get("color"),
+        Some("#ffcc00"),
+        "hex nu → #rrggbb"
+    );
+    let named = el(&mut dom, f.body, "font", &[("color", "red")]);
+    assert_eq!(e.compute(&dom, named, &env()).get("color"), Some("red"));
+    // Hint de rang zéro : la règle auteur prime l'attribut.
+    let e2 = {
+        let mut eng = StyleEngine::new();
+        eng.add_css("font{color:#0000ff}", Origin::Author);
+        eng
+    };
+    assert_eq!(
+        e2.compute(&dom, named, &env()).get("color"),
+        Some("#0000ff"),
+        "auteur > hint color"
+    );
+}

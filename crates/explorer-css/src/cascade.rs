@@ -1415,7 +1415,7 @@ impl StyleEngine {
         // appliqués seulement si la propriété n'est pas déjà
         // fixée par une vraie règle ou l'attribut `style`).
         if pseudo.is_none() {
-            apply_presentational_hints(dom, node, &mut props);
+            apply_presentational_hints(dom, node, parent, env, &mut props);
         }
         // 3. Héritage : propriétés héritées non déclarées.
         if let Some(p) = parent {
@@ -1980,7 +1980,13 @@ fn resolve_font_size(raw: &str, parent_fs: f32, env: &StyleEnv, rem_base: f32) -
 /// non analysable → ignorée (contenu hostile → dégradation).
 /// Jamais au-dessus d'une vraie déclaration : `insert` si
 /// la propriété est absente uniquement.
-fn apply_presentational_hints(dom: &Dom, node: NodeId, props: &mut HashMap<String, String>) {
+fn apply_presentational_hints(
+    dom: &Dom,
+    node: NodeId,
+    parent: Option<&ComputedStyle>,
+    env: &StyleEnv,
+    props: &mut HashMap<String, String>,
+) {
     let Ok(tag) = dom.tag_name(node) else {
         return;
     };
@@ -2056,7 +2062,107 @@ fn apply_presentational_hints(dom: &Dom, node: NodeId, props: &mut HashMap<Strin
         }
         _ => {}
     }
-    legacy_presentational_hints(dom, node, tag, props);
+    legacy_presentational_hints(dom, node, tag, parent, env, props);
+}
+
+/// `<font>` (HTML 3.2/4.01 — la moitié du corpus legacy)
+/// — mots-clés `font-size` en index de table absolue.
+const FONT_SIZE_KW: [&str; 7] = [
+    "xx-small", "x-small", "small", "medium", "large", "x-large", "xx-large",
+];
+
+/// Facteur de chaque mot-clé sur la base utilisateur —
+/// même ordre que [`FONT_SIZE_KW`], même échelle ×1.2 que
+/// [`resolve_font_size`] (sert au mapping px→index du
+/// parent pour `size=±N`).
+const FONT_SIZE_FACTOR: [f32; 7] = [1.0 / 1.728, 1.0 / 1.44, 1.0 / 1.2, 1.0, 1.2, 1.44, 1.728];
+
+/// `size` de `<font>` → mot-clé `font-size` : absolu `1..7`
+/// → `xx-small`…`xx-large` ; `+N`/`-N` relatif à l'index du
+/// parent (HTML — `3` = medium si le parent n'est pas un
+/// mot-clé, sa taille px est arrondie à l'index le plus
+/// proche). Invalide → `None`.
+fn font_size_hint(
+    a: Option<&str>,
+    parent: Option<&ComputedStyle>,
+    env: &StyleEnv,
+) -> Option<String> {
+    let t = a?.trim();
+    if let Some(rest) = t.strip_prefix(['+', '-']) {
+        let n = rest.trim().parse::<i32>().ok()?;
+        let n = if t.starts_with('-') { -n } else { n };
+        // Index du parent : mot-clé direct, ou font-size
+        // **calculée** (px absolu — `normalize_font_size`
+        // l'a déjà résolue) ramenée à l'index le plus proche
+        // sur la base utilisateur ; relatif/inconnu → 3
+        // (medium — base HTML des tailles `<font>`).
+        let pidx = i32::try_from(
+            parent
+                .and_then(|p| p.get("font-size"))
+                .and_then(|v| {
+                    let v = v.trim();
+                    FONT_SIZE_KW
+                        .iter()
+                        .position(|kw| v.eq_ignore_ascii_case(kw))
+                        .or_else(|| {
+                            let len = parse_length(v)?;
+                            let fs =
+                                (len.value * len.unit.px_factor()?) / f64::from(env.font_size_base);
+                            FONT_SIZE_FACTOR
+                                .iter()
+                                .enumerate()
+                                .min_by(|(_, a), (_, b)| {
+                                    (fs - f64::from(**a))
+                                        .abs()
+                                        .partial_cmp(&(fs - f64::from(**b)).abs())
+                                        .unwrap_or(std::cmp::Ordering::Equal)
+                                })
+                                .map(|(i, _)| i)
+                        })
+                })
+                .unwrap_or(3),
+        )
+        .unwrap_or(3);
+        let idx = usize::try_from((pidx + n).clamp(0, 6)).unwrap_or(3);
+        return Some(FONT_SIZE_KW[idx].to_string());
+    }
+    let n: usize = t.parse().ok()?;
+    (1..=7)
+        .contains(&n)
+        .then(|| FONT_SIZE_KW[n - 1].to_string())
+}
+
+/// Couleur d'attribut HTML → valeur CSS (`#rrggbb` ou
+/// syntaxe moderne). Règles « legacy color » du HTML
+/// Standard : si la valeur n'est pas déjà une couleur CSS,
+/// les caractères non-hex deviennent `0`, la chaîne est
+/// complétée à un multiple de 3 puis chaque tiers tronqué
+/// à 2 digits — `bgcolor="ffcc00"` / `color="f0f"` vivent
+/// ainsi (R-154/155). `None` = vide/`transparent`.
+fn legacy_color(v: &str) -> Option<String> {
+    let t = v.trim();
+    if t.is_empty() || t.eq_ignore_ascii_case("transparent") {
+        return None;
+    }
+    if parse_color(t).is_some() {
+        return Some(t.to_string());
+    }
+    let mut s: String = t
+        .chars()
+        .map(|c| if c.is_ascii_hexdigit() { c } else { '0' })
+        .collect();
+    while s.len() < 3 || s.len() % 3 != 0 {
+        s.push('0');
+    }
+    let third = s.len() / 3;
+    let mut out = String::from("#");
+    for i in 0..3 {
+        let part = &s[i * third..(i + 1) * third];
+        let mut it = part.chars();
+        out.push(it.next().unwrap_or('0'));
+        out.push(it.next().unwrap_or('0'));
+    }
+    Some(out)
 }
 
 /// Dépose `prop = val` dans `props` si la propriété n'est
@@ -2163,6 +2269,8 @@ fn legacy_presentational_hints(
     dom: &Dom,
     node: NodeId,
     tag: &str,
+    parent: Option<&ComputedStyle>,
+    env: &StyleEnv,
     props: &mut HashMap<String, String>,
 ) {
     match tag {
@@ -2241,6 +2349,28 @@ fn legacy_presentational_hints(
                 props,
                 "color",
                 hint_attr(dom, node, "text").map(|v| v.trim().to_string()),
+            );
+        }
+        "font" => {
+            // `<font>` (R-154 — signature du vieux web) :
+            // `face`/`color`/`size` 1-7 + `±N` relatif à
+            // l'index table du parent (§ font element,
+            // HTML Rendering). `basefont` documenté
+            // non-fait (rare, mécanisme distinct).
+            hint(
+                props,
+                "font-family",
+                hint_attr(dom, node, "face").map(|v| v.trim().to_string()),
+            );
+            hint(
+                props,
+                "color",
+                hint_attr(dom, node, "color").and_then(legacy_color),
+            );
+            hint(
+                props,
+                "font-size",
+                font_size_hint(hint_attr(dom, node, "size"), parent, env),
             );
         }
         _ => {}
