@@ -2966,6 +2966,84 @@ Sortie de palier : **WPT reftests ≥ 35/40**.
   profond 0,18 ms. Verrou interne `Node` = 96 o, 28/28 +
   454/454 verts, clippy `-D warnings`.
 
+## Palier R-L — Compat web patrimonial (corpus legacy)
+
+Piste ouverte 2026-11-08 sur la demande « les sites vieux/
+standard ne s'affichent pas correctement ». Corpus de mesure :
+`sites-legacy.txt` (30 sites — pré-doctype/quirks, tables +
+`<font>`, neocities/frames, forums 2000s, wayback) ;
+premier triage `site_smoke` : 28 OK / 2 FAIL (réseau, hors
+moteur). Ordre = ratio impact/effort mesuré ; la tranche
+NAV-dominante (framesets, image maps, `:hover`/`:focus`,
+scroll interne `overflow:auto`) est loguée au journal.
+
+- [x] **R-152. `background-image` multi-`url()` : image par
+  couche** : la collecte ne fetch que le premier `url()`
+  (`backgrounds` clé `NodeId → image`) mais `emit_bg_layers`
+  repeignait cette bitmap sur **chaque** couche `url()` —
+  mesuré `w3.org/TR/REC-html32` : le filigrane `no-repeat`
+  retilé par la couche texture `repeat` → page illisible.
+  Livré : l'image stockée n'est affectée qu'à la première
+  couche `url()`, les suivantes sautées (fix complet =
+  fetch multi-url côté NAV, journalisé). Verrou +
+  vérification terrain.
+- [ ] **R-153. `text-decoration` peint** : cascadé + UA
+  (`a[href]`/`u`/`del`) mais aucun `DisplayItem` ne le
+  consomme — aucun lien souligné sur ~25 sites du corpus.
+  Déco **résolue au fragment** (couleur/nœud déclarant,
+  propagation inlines, saut des remplacés) ; repro
+  `<a><b>` dès l'étape.
+- [ ] **R-154. `<font>` présentationnel** : `face`/`color`/
+  `size` 1-7 + `±N` relatif (`apply_presentational_hints`
+  a le parent `ComputedStyle` en scope) ; `basefont` si le
+  corpus le justifie.
+- [ ] **R-155. Couleurs legacy sans `#`** : hex nu 3/6
+  digits + padding (`bgcolor="ffcc00"` meurt dans
+  `parse_color`) — normalisation à l'émission des hints.
+- [ ] **R-156. Hints image/table** : `img[align]`→float/
+  valign, `hspace`/`vspace`, `img[border]`, `table[align]`
+  →float/`margin:auto`, `td/th[nowrap]`, `background` attr
+  →`background-image`, `hr[align|noshade|color]`, `br[clear]`.
+- [ ] **R-157. Attributs `<body>`** : `link`→clé interne
+  lue sur `a[href]`/`area[href]` (`:link` structurel) ;
+  `marginwidth`/`topmargin`…→marges ; `vlink` documenté
+  non-fait (`:visited` volontairement faux — vie privée) ;
+  `alink` reporté (exige `:active`, couture NAV).
+- [ ] **R-158. Trous UA sans dépendance** : `big`/`small`,
+  `nobr`, `mark`, `figure`, `fieldset`+chrome groove.
+- [ ] **R-159. `border-spacing` consommé en `separate`** :
+  propriété zombie — `gap[]` ne se remplit que sous
+  `collapse`, le défaut 2px et `cellspacing` sont morts ;
+  gaps inter-colonnes/rangs + bords externes.
+- [ ] **R-160. `vertical-align` cellules** : top/middle/
+  bottom via translation du sous-arbre posé (`valign` est
+  émis en hint mais jamais lu) ; baseline = lot 2.
+- [ ] **R-161. `vertical-align` inline** : `sub`/`super`/px/
+  `%` — débloque `sub`/`sup`/`abbr[title]`/`acronym` UA
+  (dépend de R-153 pour `abbr`).
+- [ ] **R-162. `text-transform`** : appliqué à la chaîne
+  avant itemisation/segmentation UAX #14.
+- [ ] **R-163. `input[type=password]`→bullets +
+  `type=image`→remplacé** (mixte NAV+PIPE : `collect_images`
+  + tailles intrinsèques — journal d'abord).
+- [ ] **R-164. Détails tables** : `empty-cells`,
+  `caption-side:left/right` ; collapse vertical/`hidden`/
+  couleurs si le corpus l'exige.
+- [ ] **R-165. `<wbr>`** : opportunité de coupure à
+  l'itemisation (miroir `br`→U+2028, pas une règle UA).
+- [ ] **R-166. Bordures 3D réelles** : `inset`/`outset`/
+  `groove`/`ridge` en demi-teintes par côté, `double` vrai
+  liseré (aujourd'hui tout → solide au raster).
+- [ ] **R-167. `border-radius`** : shorthand + 4 longhands
+  (aujourd'hui absents d'`expand_shorthand`) + path arrondi
+  + clip `overflow` au raster.
+- [ ] **R-168+** : `counter-*`/`counter()` + `attr()` dans
+  `content`, `list-style-image`, `word-spacing`, `noframes`
+  conditionnel — selon corpus. Tranche NAV-dominante
+  (journal) : `frameset`→grille d'iframes, image maps,
+  `:hover`/`:focus` session, `overflow:auto` scroll +
+  scrollbars, `a[name]` ancres.
+
 ## Palier R-B — Contenu étranger, animation, canvas
 
 - [x] **R-8. Foreign-content dans `explorer-html`** (ex-60a) :
@@ -3157,10 +3235,12 @@ trigger site réel) :**
 - `display:contents` — repli `Block` ; flatten des enfants
   comme items flex/grid et UA sur `<slot>` non portés.
 - `radial-`/`conic-gradient` — parsés, non peints.
-- `background` shorthand multi-couches : première couche
-  seulement (borne R-94) ; `background-origin`/`-clip` émis
-  au parse, non consommés au paint. (Le multi-couches de
-  `background-image` longhand est, lui, peint — R-73.)
+- `background-image` multi-`url()` : la collecte ne fetch
+  que le premier `url()` (`backgrounds` clé `NodeId →
+  image`) — les couches `url()` suivantes sont sautées au
+  paint depuis R-152 ; le fix complet (fetch par couche)
+  est logué au journal pour NAV. (La couche dégradé et la
+  première couche url peignent — R-73/R-152.)
 - `light-dark()` — non implémenté (R-59 hors scope v1).
 - Marqueurs textuels (`decimal`, alpha, roman) — non peints,
   la display list ne shape pas ; `list-style-position:

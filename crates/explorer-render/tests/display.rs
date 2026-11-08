@@ -1264,6 +1264,39 @@ fn background_image_multicouche_peint_la_couche_url() {
 }
 
 #[test]
+fn multicouche_url_seule_la_premiere_peint_limage_stockee() {
+    // Mesuré : w3.org/TR/REC-html32 — `background:` à deux
+    // couches `url()` (filigrane `no-repeat` + texture
+    // `repeat`). La table `backgrounds` est clé `NodeId →
+    // image` et la collecte ne fetch que le premier url :
+    // la couche texture repeignait le filigrane en tuilage,
+    // recouvrant tout le viewport. Seule la **première**
+    // couche `url()` peut légitimement peindre l'image
+    // stockée ; les suivantes sont sautées (dégradation
+    // gracieuse — leurs urls seront fetchées par la session,
+    // étape multi-couches complète).
+    let list = bg_div("background:url(strip) no-repeat,url(tex)");
+    let n = list
+        .items
+        .iter()
+        .filter(|i| matches!(i, DisplayItem::BackgroundImage { .. }))
+        .count();
+    assert_eq!(
+        n, 1,
+        "seule la 1re couche url peint l'image stockée — la couche repeat doit être sautée"
+    );
+    let repeat = list
+        .items
+        .iter()
+        .find_map(|i| match i {
+            DisplayItem::BackgroundImage { repeat, .. } => Some(*repeat),
+            _ => None,
+        })
+        .expect("item fond");
+    assert_eq!(repeat, (false, false), "couche no-repeat conservée");
+}
+
+#[test]
 fn linear_gradient_peint_un_degrade_reel() {
     // Issue #10 : la couche `linear-gradient` est rasterisée
     // à la taille de la zone de positionnement puis peinte —

@@ -1346,7 +1346,18 @@ fn emit_bg_layers(
             .filter(|s| !s.is_empty())
     };
     let fs = font_size_of(style);
-    for (i, layer) in bg_layers(v).iter().enumerate().rev() {
+    let layers = bg_layers(v);
+    // La table `backgrounds` est clé `NodeId → image` et la
+    // collecte ne fetch que le **premier** `url()` du style
+    // calculé : l'image stockée appartient à la première
+    // couche url — la donner aux couches suivantes
+    // repeindrait cette même bitmap avec leurs paramètres
+    // (mesuré : w3.org/TR/REC-html32 — le filigrane
+    // `no-repeat` était retilé sur tout le viewport par la
+    // couche texture `repeat`). Les autres couches url sont
+    // sautées tant que la session ne fetch pas leurs urls.
+    let first_url = layers.iter().position(|l| bg_has_url(l));
+    for (i, layer) in layers.iter().enumerate().rev() {
         let clip = match layer_value("background-clip", i).as_deref() {
             Some("content-box") => content,
             Some("padding-box") => padding,
@@ -1367,7 +1378,11 @@ fn emit_bg_layers(
             _ => (true, true), // `repeat` = défaut.
         };
         let img = if bg_has_url(layer) {
-            node.and_then(|n| images.backgrounds.get(&n)).cloned()
+            if Some(i) == first_url {
+                node.and_then(|n| images.backgrounds.get(&n)).cloned()
+            } else {
+                None // url non fetchée — couche sautée.
+            }
         } else if bg_has_gradient(layer) {
             crate::gradient::decode_gradient(layer, l_area.0, l_area.1, fs).map(std::sync::Arc::new)
         } else {
