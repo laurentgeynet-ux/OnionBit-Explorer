@@ -11290,7 +11290,19 @@ un crate PIPELINE.- [x] **JS-C422. Deadline honnête — canal session ↔ budge
   routé ctx enfant, `GET
   /segments` rend un vrai init
   DASH (`ftyp`/`moov`/`soun`).
-  Reliquat à mesurer : cadence
+  **Verdict dll (vol 778 suite,
+  `rest_host_probe --reclaim`
+  90 s)** : claim `→200`,
+  `ABI 5`, `frames=55 dropped=17
+  vq[total=72 corrupt=0
+  delay=8,60s] 256×144 pcm=
+  1 917 032o pos=46 794 795ms
+  underrun=1 streams Aac+H264`
+  — le flux Tembe live décodé
+  bout-en-bout (classe du
+  verdict vol 763, reproduit
+  post-§B-54 ph4). Reliquat
+  à mesurer : cadence
   drain `rest` = 8/passe sous
   pression — si le backlog
   `rest` reste >500 en vol long,
