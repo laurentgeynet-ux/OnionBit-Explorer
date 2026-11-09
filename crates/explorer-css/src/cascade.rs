@@ -313,6 +313,12 @@ const SUPPORTED_PROPS: &[&str] = &[
     "left",
     "letter-spacing",
     "line-clamp",
+    "-webkit-box-orient",
+    "-webkit-box-direction",
+    "-webkit-box-pack",
+    "-webkit-box-align",
+    "-webkit-box-flex",
+    "-webkit-box-ordinal-group",
     "-webkit-line-clamp",
     "line-height",
     "list-style",
@@ -2100,6 +2106,11 @@ impl StyleEngine {
                 }
             }
         }
+        // 10. Flexbox 2009 (R-192) : `display:-webkit-box` et
+        //    la famille `-webkit-box-*` aliasée vers le modèle
+        //    flex moderne — la prop moderne déclarée prime
+        //    (injection seulement si absente).
+        legacy_flex_aliases(&mut props);
         ComputedStyle { props, vars }
     }
 
@@ -2871,6 +2882,83 @@ fn ancestor_elem_attr<'a>(dom: &'a Dom, node: NodeId, tag: &str, name: &str) -> 
 /// Hints « legacy » HTML Rendering : `bgcolor`, `align`,
 /// `valign`, `cellspacing`/`cellpadding`/`border` des tables
 /// (R-16 — les pages tabulaires type HN en dépendent).
+/// R-192 — flexbox 2009 (`display:-webkit-box` + famille
+/// `-webkit-box-*`) aliasée vers le modèle flex moderne.
+/// La prop **moderne** déclarée prime : chaque alias n'est
+/// injecté que si son équivalent est absent. Approximation
+/// documentée : `-webkit-box-ordinal-group` est 1-based
+/// (copié tel quel dans `order` — le décalage de 1 n'a
+/// d'effet que sur l'ordre relatif entre groupes > 1, cas
+/// rare en terrain).
+fn legacy_flex_aliases(props: &mut HashMap<String, String>) {
+    match props.get("display").map(String::as_str) {
+        Some("-webkit-box") => {
+            props.insert("display".into(), "flex".into());
+        }
+        Some("-webkit-inline-box") => {
+            props.insert("display".into(), "inline-flex".into());
+        }
+        _ => {}
+    }
+    let get = |p: &str| {
+        props
+            .get(p)
+            .map(|v| v.trim().to_string())
+            .unwrap_or_default()
+    };
+    let orient = get("-webkit-box-orient");
+    let wdir = get("-webkit-box-direction");
+    let pack = get("-webkit-box-pack");
+    let align = get("-webkit-box-align");
+    let grow = get("-webkit-box-flex");
+    let ordinal = get("-webkit-box-ordinal-group");
+    if !props.contains_key("flex-direction") {
+        let mut dir = match orient.as_str() {
+            "vertical" | "block-axis" => "column",
+            _ => "row",
+        };
+        if wdir == "reverse" {
+            dir = if dir == "column" {
+                "column-reverse"
+            } else {
+                "row-reverse"
+            };
+        }
+        if orient == "vertical" || wdir == "reverse" {
+            props.insert("flex-direction".into(), dir.into());
+        }
+    }
+    if !props.contains_key("justify-content") {
+        if let Some(v) = match pack.as_str() {
+            "start" => Some("flex-start"),
+            "center" => Some("center"),
+            "end" => Some("flex-end"),
+            "justify" => Some("space-between"),
+            _ => None,
+        } {
+            props.insert("justify-content".into(), v.into());
+        }
+    }
+    if !props.contains_key("align-items") {
+        if let Some(v) = match align.as_str() {
+            "start" => Some("flex-start"),
+            "center" => Some("center"),
+            "end" => Some("flex-end"),
+            "baseline" => Some("baseline"),
+            "stretch" => Some("stretch"),
+            _ => None,
+        } {
+            props.insert("align-items".into(), v.into());
+        }
+    }
+    if !props.contains_key("flex-grow") && grow.parse::<f32>().is_ok() {
+        props.insert("flex-grow".into(), grow);
+    }
+    if !props.contains_key("order") && ordinal.parse::<i32>().is_ok() {
+        props.insert("order".into(), ordinal);
+    }
+}
+
 fn legacy_presentational_hints(
     dom: &Dom,
     node: NodeId,

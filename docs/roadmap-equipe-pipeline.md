@@ -3459,10 +3459,18 @@ déblocage/coût décroissant.
   `nest_depth` partagée. `&` top-level hors scope (spec
   `:scope` — non substitué, documenté). 9 verrous
   `nesting_*` (`tests/parser.rs`).
-- [ ] **R-192. `display:-webkit-box` + `-webkit-line-clamp`
-  contexte** : vieux flexbox → bloc ; `line-clamp` est livré
-  MVP sans exiger la famille `-webkit-box`. Pattern legacy
-  très répandu (vieux Bootstrap, clamps historiques).
+- [x] **R-192. `display:-webkit-box` + `-webkit-line-clamp`
+  contexte** : la famille 2009 est **aliasée** vers le modèle
+  flex moderne dans la passe calculée (`legacy_flex_aliases`,
+  `explorer-css` `cascade.rs`) : `display:-webkit-box` →
+  `flex`, `-webkit-box-orient` → `flex-direction`,
+  `-webkit-box-direction:reverse` → `*-reverse`,
+  `-webkit-box-pack` → `justify-content`, `-webkit-box-align`
+  → `align-items`, `-webkit-box-flex` → `flex-grow`,
+  `-webkit-box-ordinal-group` → `order` (1-based,
+  approximation documentée) — la prop moderne déclarée prime.
+  Props ajoutées à `SUPPORTED_PROPS`. `line-clamp` livré MVP
+  (R-M10). Verrou `webkit_box_alias_flex_moderne`.
 - [ ] **R-193. `<basefont>`** : taille/couleur face de base —
   hint documenté non implémenté ; rare mais trivial à cadrer.
 - [ ] **R-191. `display:contents` — résidus** : le cœur est

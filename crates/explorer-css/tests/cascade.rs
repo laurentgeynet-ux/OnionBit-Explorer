@@ -3136,3 +3136,56 @@ fn writing_mode_resout_les_props_logiques() {
         "rtl : is → margin-right"
     );
 }
+
+/// R-192 — flexbox 2009 : `display:-webkit-box` et la
+/// famille `-webkit-box-*` aliasée vers le modèle moderne,
+/// la prop moderne déclarée primant sur l'alias.
+#[test]
+fn webkit_box_alias_flex_moderne() {
+    let dom = TreeBuilder::parse("<div id=c><span id=k>x</span></div>");
+    let find = |dom: &Dom, id: &str| {
+        let mut stack: Vec<explorer_dom::NodeId> =
+            dom.children(dom.document()).into_iter().flatten().collect();
+        while let Some(n) = stack.pop() {
+            if dom.element(n).is_ok() {
+                if dom.attribute_str(n, "id").ok().flatten() == Some(id) {
+                    return Some(n);
+                }
+                stack.extend(dom.children(n).into_iter().flatten());
+            }
+        }
+        None
+    };
+    let (c_node, k_node) = (
+        find(&dom, "c").expect("div"),
+        find(&dom, "k").expect("span"),
+    );
+    let mut eng = StyleEngine::new();
+    eng.add_css(
+        "#c{display:-webkit-box;-webkit-box-orient:vertical;\
+         -webkit-box-pack:center;-webkit-box-align:end}\
+         #k{-webkit-box-flex:2;-webkit-box-ordinal-group:3}",
+        Origin::Author,
+    );
+    let map = eng.compute_tree(&dom, c_node, &env());
+    let c = map.get(c_node).expect("computed c");
+    assert_eq!(c.get("display"), Some("flex"));
+    assert_eq!(c.get("flex-direction"), Some("column"));
+    assert_eq!(c.get("justify-content"), Some("center"));
+    assert_eq!(c.get("align-items"), Some("flex-end"));
+    let k = map.get(k_node).expect("computed k");
+    assert_eq!(k.get("flex-grow"), Some("2"));
+    assert_eq!(k.get("order"), Some("3"));
+    // La prop moderne déclarée prime sur l'alias.
+    let mut eng2 = StyleEngine::new();
+    eng2.add_css(
+        "#c{display:-webkit-box;flex-direction:row-reverse;\
+         -webkit-box-orient:vertical}",
+        Origin::Author,
+    );
+    let map2 = eng2.compute_tree(&dom, c_node, &env());
+    assert_eq!(
+        map2.get(c_node).expect("c2").get("flex-direction"),
+        Some("row-reverse")
+    );
+}
