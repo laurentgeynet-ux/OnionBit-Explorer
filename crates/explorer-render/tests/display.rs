@@ -2708,3 +2708,36 @@ fn background_blend_et_clip_text() {
         .count();
     assert!(clips >= 1, "PushClip de clip:text attendu");
 }
+
+/// R-185 — `mix-blend-mode`/`isolation`/`will-change`/
+/// `contain` : `PushBlend`/`PopBlend` encadrent le
+/// sous-arbre fondu ; `contain:paint` ajoute un clip.
+#[test]
+fn mix_blend_isolation_contain() {
+    use explorer_render::DisplayItem;
+    let (_, _, items) = dl(
+        "<div style=\"mix-blend-mode:multiply\">\
+         <div style=\"isolation:isolate;contain:paint\">\
+         <span>A</span></div></div>",
+        "",
+    );
+    let pushes = items
+        .iter()
+        .filter(|it| matches!(it, DisplayItem::PushBlend(_)))
+        .count();
+    let pops = items
+        .iter()
+        .filter(|it| matches!(it, DisplayItem::PopBlend))
+        .count();
+    assert_eq!(pushes, pops, "brackets PushBlend/PopBlend appairés");
+    assert!(
+        pushes >= 2,
+        "mix-blend + isolation : 2 groupes attendus, {pushes}"
+    );
+    assert!(
+        items
+            .iter()
+            .any(|it| matches!(it, DisplayItem::PushClip(_))),
+        "contain:paint → PushClip attendu"
+    );
+}

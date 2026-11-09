@@ -845,7 +845,7 @@ fn replay_items(
     // R-M5 — `filter` : les items d'un groupe
     // `PushFilter`…`PopFilter` se peignent dans un tampon
     // offscreen puis reçoivent les ops et se compositent.
-    let mut filtered: Vec<(Pixmap, Vec<FilterOp>)> = Vec::new();
+    let mut filtered: Vec<(Pixmap, Vec<FilterOp>, u8)> = Vec::new();
     // Pile des `transform` CSS : `cur` = dpi · produit des
     // matrices actives — recomposé à chaque push/pop (peu de
     // niveaux en pratique).
@@ -929,13 +929,21 @@ fn replay_items(
             }
             DisplayItem::PushFilter(ops) => {
                 if let Some(buf) = Pixmap::new(pixmap.width(), pixmap.height()) {
-                    filtered.push((buf, ops.clone()));
+                    filtered.push((buf, ops.clone(), 0));
+                }
+            }
+            // R-185 — `mix-blend-mode`/`isolation` : groupe
+            // hors-écran fondu au pop (tag `BLEND_MODES`,
+            // 0 = `isolation` isolant).
+            DisplayItem::PushBlend(tag) => {
+                if let Some(buf) = Pixmap::new(pixmap.width(), pixmap.height()) {
+                    filtered.push((buf, Vec::new(), *tag));
                 }
             }
             DisplayItem::PopFilter => {
-                if let Some((mut buf, ops)) = filtered.pop() {
+                if let Some((mut buf, ops, _)) = filtered.pop() {
                     apply_filter_ops(&mut buf, &ops);
-                    let dst = filtered.last_mut().map_or(&mut *pixmap, |(b, _)| b);
+                    let dst = filtered.last_mut().map_or(&mut *pixmap, |(b, _, _)| b);
                     dst.draw_pixmap(
                         0,
                         0,
@@ -946,6 +954,16 @@ fn replay_items(
                     );
                 }
             }
+            // R-185 — `PopBlend` : le tampon du groupe se
+            // composite sur le fond accumulé — `blend_channel`
+            // par canal quand le tag > 0, source-over sinon
+            // (isolation = buffer opaque, même coût de copie).
+            DisplayItem::PopBlend => {
+                if let Some((buf, _, tag)) = filtered.pop() {
+                    let dst = filtered.last_mut().map_or(&mut *pixmap, |(b, _, _)| b);
+                    composite_blend(dst, &buf, tag);
+                }
+            }
             // R-M9b — `backdrop-filter` : la région déjà
             // peinte sous `rect` reçoit les ops, le contenu
             // se peint ensuite par-dessus.
@@ -954,7 +972,9 @@ fn replay_items(
                 let (bw, bh) = (r.width.ceil() as u32, r.height.ceil() as u32);
                 if bw > 0 && bh > 0 {
                     if let Some(mut buf) = Pixmap::new(bw, bh) {
-                        let src = filtered.last().map_or(pixmap.as_ref(), |(b, _)| b.as_ref());
+                        let src = filtered
+                            .last()
+                            .map_or(pixmap.as_ref(), |(b, _, _)| b.as_ref());
                         buf.draw_pixmap(
                             0,
                             0,
@@ -964,7 +984,7 @@ fn replay_items(
                             None,
                         );
                         apply_filter_ops(&mut buf, ops);
-                        let dst = filtered.last_mut().map_or(&mut *pixmap, |(b, _)| b);
+                        let dst = filtered.last_mut().map_or(&mut *pixmap, |(b, _, _)| b);
                         dst.draw_pixmap(
                             r.x.round() as i32,
                             r.y.round() as i32,
@@ -992,7 +1012,7 @@ fn replay_items(
                             .is_none_or(|b| rects_overlap(b, win))
                     });
                 if draw {
-                    let dst = filtered.last_mut().map_or(&mut *pixmap, |(b, _)| b);
+                    let dst = filtered.last_mut().map_or(&mut *pixmap, |(b, _, _)| b);
                     paint_item(dst, item, cur, fonts, gc, clips.last());
                 }
             }
@@ -1467,6 +1487,8 @@ fn paint_item(
         | DisplayItem::PushTransform(_)
         | DisplayItem::PushFilter(_)
         | DisplayItem::PopFilter
+        | DisplayItem::PushBlend(_)
+        | DisplayItem::PopBlend
         | DisplayItem::BackdropFilter { .. }
         | DisplayItem::PopTransform => {}
     }
@@ -1870,6 +1892,59 @@ fn paint_image_axis(
 /// compris **avant** l'origine (repeat ±∞). Axis-aligned →
 /// boucle directe ; le cas général tombe sur la boucle avec
 /// `cur` appliqué par point — approximation bornée documentée.
+/// R-185 — composite un tampon de groupe (`mix-blend-mode`
+/// / `isolation`) sur la destination : `blend_channel` par
+/// canal pour tag > 0, copie source-over sinon — pixels
+/// prémultipliés démultipliés au passage.
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    clippy::cast_precision_loss
+)]
+fn composite_blend(dst: &mut Pixmap, src: &Pixmap, tag: u8) {
+    let (w, h) = (src.width().min(dst.width()), src.height().min(dst.height()));
+    for y in 0..h as usize {
+        for x in 0..w as usize {
+            let i = y * dst.width() as usize + x;
+            let Some(sp) = src.pixel(x as u32, y as u32) else {
+                continue;
+            };
+            let su = sp.demultiply();
+            let (sa, sr, sg, sb) = (
+                f32::from(su.alpha()) / 255.0,
+                f32::from(su.red()) / 255.0,
+                f32::from(su.green()) / 255.0,
+                f32::from(su.blue()) / 255.0,
+            );
+            if sa <= 0.0 {
+                continue;
+            }
+            let d = dst.pixels()[i].demultiply();
+            let (dr, dg, db) = (
+                f32::from(d.red()) / 255.0,
+                f32::from(d.green()) / 255.0,
+                f32::from(d.blue()) / 255.0,
+            );
+            let chan = |sv: f32, dv: f32| -> f32 {
+                let cb = if tag == 0 {
+                    sv
+                } else {
+                    blend_channel(tag, sv, dv)
+                };
+                (dv * (1.0 - sa) + cb * sa) * 255.0
+            };
+            if let Some(c) = tiny_skia::PremultipliedColorU8::from_rgba(
+                (chan(sr, dr) * sa).min(255.0) as u8,
+                (chan(sg, dg) * sa).min(255.0) as u8,
+                (chan(sb, db) * sa).min(255.0) as u8,
+                ((sa + f32::from(d.alpha()) / 255.0 * (1.0 - sa)) * 255.0).min(255.0) as u8,
+            ) {
+                dst.pixels_mut()[i] = c;
+            }
+        }
+    }
+}
+
 /// R-184 — un canal de `background-blend-mode` (formules
 /// css-compositing-1 § blending). `s`/`d` ∈ [0,1]. Modes
 /// séparables portés ; `hue`/`saturation`/`color`/

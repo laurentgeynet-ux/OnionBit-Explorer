@@ -1030,3 +1030,4 @@ journal « livré ».
   dans `dom_helpers` — cf. R-195 roadmap PIPE), appearance/
   startup-JS menus (surface JS-Cxx). | PIPE→NAV **demande
   déclarée** |
+- **R-185** — `DisplayItem::PushBlend(u8)`/`PopBlend` (mix-blend-mode/isolation) : bras `→ None` ajoutés dans `explorer-core::display_item_bounds` (même classe que `PushFilter`). Additif, tag u8 = `BLEND_MODES` (0 = normal/isolation).

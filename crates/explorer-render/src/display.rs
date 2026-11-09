@@ -231,6 +231,15 @@ pub enum DisplayItem {
     /// Fin du groupe filtré — composite du tampon avec
     /// les ops appliquées.
     PopFilter,
+    /// `mix-blend-mode`/`isolation` (R-185) : les items
+    /// jusqu'à `PopBlend` se peignent hors-écran puis se
+    /// composite sur le fond accumulé avec le mode de fondu
+    /// taggé (mêmes tags que `BLEND_MODES` ; `isolation`
+    /// → tag 0, buffer isolant — les fondus des enfants ne
+    /// traversent pas la borne).
+    PushBlend(u8),
+    /// Fin du groupe fondu.
+    PopBlend,
     /// `backdrop-filter` (R-M9b) : les pixels DÉJÀ peints
     /// sous `rect` reçoivent les ops, le contenu de la
     /// boîte se peint ensuite par-dessus.
@@ -458,6 +467,10 @@ impl DisplayList {
                 DisplayItem::PopTransform => out.push_str("pop-transform\n"),
                 DisplayItem::PushFilter(_) => out.push_str("push-filter\n"),
                 DisplayItem::PopFilter => out.push_str("pop-filter\n"),
+                DisplayItem::PushBlend(b) => {
+                    let _ = writeln!(out, "push-blend {b}");
+                }
+                DisplayItem::PopBlend => out.push_str("pop-blend\n"),
                 DisplayItem::BackdropFilter { rect, .. } => {
                     let _ = writeln!(out, "backdrop-filter {rect:?}");
                 }
@@ -614,7 +627,9 @@ fn item_bounds(item: &DisplayItem) -> Option<Rect> {
         | DisplayItem::PushTransform(_)
         | DisplayItem::PopTransform
         | DisplayItem::PushFilter(_)
-        | DisplayItem::PopFilter => None,
+        | DisplayItem::PopFilter
+        | DisplayItem::PushBlend(_)
+        | DisplayItem::PopBlend => None,
     }
 }
 
@@ -806,6 +821,8 @@ fn item_eq(a: &DisplayItem, b: &DisplayItem) -> bool {
             },
         ) => r1 == r2 && a1 == a2,
         (D::PushFilter(o1), D::PushFilter(o2)) => o1 == o2,
+        (D::PushBlend(b1), D::PushBlend(b2)) => b1 == b2,
+        (D::PopBlend, D::PopBlend) => true,
         (D::BackdropFilter { rect: r1, ops: o1 }, D::BackdropFilter { rect: r2, ops: o2 }) => {
             r1 == r2 && o1 == o2
         }
@@ -3843,7 +3860,12 @@ fn translate_item(it: &DisplayItem, d: (f32, f32)) -> DisplayItem {
             m.ty += d.1;
             D::PushTransform(m)
         }
-        D::PopClip | D::PopTransform | D::PushFilter(_) | D::PopFilter => it.clone(),
+        D::PopClip
+        | D::PopTransform
+        | D::PushFilter(_)
+        | D::PopFilter
+        | D::PushBlend(_)
+        | D::PopBlend => it.clone(),
         D::BackdropFilter { rect, ops } => D::BackdropFilter {
             rect: shifted(*rect, d),
             ops: ops.clone(),
@@ -4042,6 +4064,23 @@ fn stacking_ctx(bx: &LayoutBox) -> bool {
             .style
             .get("transform")
             .is_some_and(|v| v.trim() != "none")
+        // R-185 — inducteurs de contexte d'empilement (spec
+        // css-compositing + will-change + contain) :
+        // `mix-blend-mode`/`isolation` actifs, `will-change`
+        // à valeur transformée, `contain:paint|strict|content`.
+        || bx
+            .style
+            .get("mix-blend-mode")
+            .is_some_and(|v| v.trim() != "normal")
+        || bx.style.get("isolation").is_some_and(|v| v.trim() == "isolate")
+        || bx
+            .style
+            .get("will-change")
+            .is_some_and(|v| v.split(',').any(|t| matches!(t.trim(), "transform" | "opacity" | "filter")))
+        || bx
+            .style
+            .get("contain")
+            .is_some_and(|v| v.split(' ').any(|t| matches!(t, "paint" | "strict" | "content")))
 }
 
 /// Enfile un enfant positionné dans la file de son contexte
@@ -4234,7 +4273,33 @@ fn paint_box<'a>(
     if filtered {
         items.push(DisplayItem::PushFilter(fops));
     }
+    // R-185 — `mix-blend-mode` : le sous-arbre entier se
+    // fond avec le fond accumulé ; `isolation:isolate` →
+    // buffer isolant (tag 0) qui borne les fondus internes.
+    let blend = blend_tag(bx.style.get("mix-blend-mode"));
+    let isolated = bx
+        .style
+        .get("isolation")
+        .is_some_and(|v| v.trim() == "isolate");
+    if blend > 0 || isolated {
+        items.push(DisplayItem::PushBlend(blend));
+    }
+    // R-185 — `contain:paint|strict|content` : le contenu
+    // de la boîte ne peint pas hors de sa border box.
+    let paint_contained = bx.style.get("contain").is_some_and(|v| {
+        v.split(' ')
+            .any(|t| matches!(t, "paint" | "strict" | "content"))
+    });
+    if paint_contained {
+        items.push(DisplayItem::PushClip(bx.rect));
+    }
     paint_box_impl(bx, items, off, cx, defer, pos_defer, fixed_defer);
+    if paint_contained {
+        items.push(DisplayItem::PopClip);
+    }
+    if blend > 0 || isolated {
+        items.push(DisplayItem::PopBlend);
+    }
     if filtered {
         items.push(DisplayItem::PopFilter);
     }

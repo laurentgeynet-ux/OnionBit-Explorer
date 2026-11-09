@@ -3400,7 +3400,7 @@ déblocage/coût décroissant.
 - [x] **R-184. `background-clip:text` + `background-blend-mode`**
   : texte rempli de dégradé (motif de héro fréquent) et
   fusion des couches de fond — `display.rs`/`raster.rs`.
-- [ ] **R-185. `mix-blend-mode`/`isolation` + `will-change`/
+- [x] **R-185. `mix-blend-mode`/`isolation` + `will-change`/
   `contain`** : fusion du groupe filtré avec le fond accumulé ;
   les contextes de pilement induits manquants.
 - [ ] **R-186. Typo longue traîne** : `font-stretch`,
