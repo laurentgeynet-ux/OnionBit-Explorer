@@ -4352,6 +4352,45 @@ async fn async_script_runs_before_defer() {
     assert_eq!(s.frame_png(a), s.frame_png(b));
 }
 
+/// §B-119 — un `async` arrivé tôt n'évalue **pas** avant les
+/// scripts parser-inserted : ordre Chrome = inlines à leur
+/// position de parse, asyncs ensuite. Explore.org/arte/
+/// france.tv : le runtime turbopack (async) s'évaluait avant
+/// le pusher inline → son handler tournait sous
+/// `currentScript` inline → `new URL("")` → `Invalid URL:`.
+#[tokio::test]
+async fn async_script_yields_to_parser_inserted_inline() {
+    let (mut s, t) = test_session();
+    t.route(
+        "/p",
+        200,
+        "<!doctype html><html><body><div id=\"x\">?</div>\
+         <script async src=\"/x.js\"></script>\
+         <script>var o='I'</script>\
+         </body></html>",
+    );
+    t.route(
+        "/x.js",
+        200,
+        "document.getElementById('x').textContent=\
+         (typeof o==='undefined'?'avant':o)",
+    );
+    t.route(
+        "/stat",
+        200,
+        "<!doctype html><html><body><div id=\"x\">I</div></body></html>",
+    );
+    s.set_js_factory(explorer_js::JscoreEngine::factory());
+
+    let a = s.open_tab();
+    s.navigate(a, "http://h.test/p").await.unwrap();
+    let b = s.open_tab();
+    s.navigate(b, "http://h.test/stat").await.unwrap();
+
+    // Inline d'abord : `o` vaut « I » quand l'async s'évalue.
+    assert_eq!(s.frame_png(a), s.frame_png(b));
+}
+
 /// `<script type="module">` externe avec import statique :
 /// le graphe est prefetché via le transport puis instancié
 /// par le `ModuleLoader` (JS-C5) — la dépendance s'exécute.

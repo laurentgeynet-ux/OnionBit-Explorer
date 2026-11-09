@@ -812,15 +812,6 @@ pub(crate) struct SubJob {
     /// Bus d'événements — `PipelineError` des évaluations
     /// « arrival » pendant la vague.
     pub(crate) events: broadcast::Sender<CoreEvent>,
-    /// Verrou « tas mort rapporté » **partagé** avec la
-    /// session (§B-12 vol 100 — bookshop ×5) : les scripts
-    /// `async` sont évalués ici, hors verrou, sur le moteur
-    /// embarqué — chaque éval post-mortem échouait avec la
-    /// signature heap et partait en `PipelineError` direct,
-    /// contournant la porte `heap_dead_reported`. Le même
-    /// `Arc` borne à une occurrence par document, des deux
-    /// côtés du verrou.
-    pub(crate) heap_dead_flag: std::sync::Arc<std::sync::atomic::AtomicBool>,
     /// URL de la page — politique mixed-content/`Referer`
     /// du prefetch modules.
     pub(crate) page: Url,
@@ -924,6 +915,18 @@ pub(crate) struct SubJob {
     pub(crate) mask_aliases: HashMap<String, String>,
     /// Corps des modules `async` arrivés (ordre d'arrivée).
     pub(crate) async_mods: Vec<(Url, String)>,
+    /// §B-119 — corps des scripts **classiques** `async`
+    /// arrivés (ordre d'arrivée, `(el_ord, src, corps)`),
+    /// évalués au commit **après** les scripts parser-inserted
+    /// (`ScriptExec::Parse`) : un `<script async>` ne doit
+    /// jamais devancer un inline qui le suit dans le document
+    /// — sinon `document.currentScript` vise l'inline sous le
+    ///quel le push-handler tourne (`Invalid URL:` sur
+    /// `new URL(currentScript.src)`, vols 721/733/734 —
+    /// explore.org, arte, france.tv, zdf). Ordre Chrome :
+    /// le parse évalue les inlines à leur position, les
+    /// asyncs arrivent ensuite.
+    pub(crate) arrival_classic: Vec<(usize, Option<Url>, String)>,
     /// Faces `@font-face` téléchargées et décodées —
     /// `family`, `weight`, `italic`, données brutes.
     pub(crate) fonts: Vec<(String, u16, bool, Vec<u8>)>,
@@ -999,10 +1002,6 @@ impl SubJob {
 
         let tab = self.tab;
         let events = self.events.clone();
-        let heap_flag = std::sync::Arc::clone(&self.heap_dead_flag);
-        let eval_arrival = |eng: &mut Option<Box<dyn JsEngine>>, src: &str, ord: usize| {
-            eval_async_arrival(eng, src, ord, tab, &events, &heap_flag);
-        };
         // Émission par priorité : CSS → scripts → images.
         let jobs = sub_jobs(
             &self.url,
@@ -1014,7 +1013,7 @@ impl SubJob {
         );
         let jobs_n = jobs.len();
         let t_wave = Instant::now();
-        let mut eng = self.eng.take();
+        let eng = self.eng.take();
         // Scripting du parent (CAP-155) — hissé hors de la
         // closure `!Sync`-sûre (le moteur n'est pas Sync,
         // le booléen l'est).
@@ -1165,7 +1164,19 @@ impl SubJob {
                                     async_mods.push((u.clone(), text));
                                 }
                             } else {
-                                eval_arrival(&mut eng, &text, item.el_ord);
+                                // §B-119 — pas d'éval à
+                                // l'arrivée : la file est
+                                // drainée au commit **après**
+                                // les scripts parser-inserted
+                                // (ordre Chrome — sinon le
+                                // push-handler d'un async
+                                // tourne sous `currentScript`
+                                // d'un inline).
+                                self.arrival_classic.push((
+                                    item.el_ord,
+                                    item.src.clone(),
+                                    text,
+                                ));
                             }
                         } else {
                             self.script_srcs[*slot] = Some(text);
@@ -2169,9 +2180,14 @@ pub(crate) fn frame_request(base: &Url, url: &Url, policy: Option<ReferrerPolicy
 /// nav) et parsé en `Dom` propre : aucune mutation croisée
 /// avec le parent n'existe.
 ///
-/// `async`/arrivée désordonnée (étape 51) : le corps reçu
-/// est évalué immédiatement sur le moteur embarqué — un
-/// échec est rapporté en `PipelineError`, jamais fatal.
+/// `async`/arrivée désordonnée (étape 51) — historique :
+/// le corps reçu était évalué immédiatement sur le moteur
+/// embarqué. §B-119 : les classiques `async` sont désormais
+/// **différés au commit** (`SubJob::arrival_classic`, ordre
+/// Chrome — les scripts parser-inserted tournent avant) ;
+/// cette entrée ne sert plus qu'aux tests qui rejouent
+/// l'évaluation hors verrou.
+#[cfg(test)]
 pub(crate) fn eval_async_arrival(
     eng: &mut Option<Box<dyn JsEngine>>,
     src: &str,

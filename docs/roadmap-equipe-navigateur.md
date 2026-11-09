@@ -10801,3 +10801,19 @@ un crate PIPELINE.- [x] **JS-C422. Deadline honnête — canal session ↔ budge
   appelle `new URL("")` (suspects : `currentScript.src`
   inline turbopack, resource-timing vide…). Gate b116
   24/24 vert.
+- [x] **JS-C434. §B-119 — ordre d'éval : les `async`
+  classiques n'enjambent plus les parser-inserted** (cause
+  racine nommée par la sonde JS-C433-bis : `cur=script:<inline>`
+  + stack `a←i←I` turbopack — `getAssetPrefix` de Next.js
+  lisait `currentScript.src=""` car le runtime externe async
+  s'évaluait **avant** le pusher inline qui le suit dans le
+  document ; Chrome évalue les inlines à leur position de
+  parse puis les asyncs à l'arrivée). `SubJob::arrival_classic`
+  : file ordre d'arrivée drainée au commit **après** la vague
+  `Parse`, avant `arrival_evals` (modules) et `Post` (defer) —
+  `eval_or_report` garde disjoncteur/heap-dead/rapports
+  identiques, `heap_dead_flag` du chemin direct retiré (la
+  porte `heap_dead_reported` couvre désormais les asyncs).
+  Verrou `async_script_yields_to_parser_inserted_inline` +
+  `async_script_runs_before_defer` inchangé. Vol de verdict
+  sur explore.org/arte à suivre.

@@ -1254,11 +1254,6 @@ impl Session {
             title,
             transport: Arc::clone(&self.transport),
             events: self.events.clone(),
-            // §B-12 vol 100 : le verrou « tas mort rapporté »
-            // est partagé — les évals `async` de la vague
-            // détachée passent par le même flag (une
-            // occurrence par document, hors verrou inclus).
-            heap_dead_flag: self.heap_dead_reported.entry(tab).or_default().clone(),
             cookies: Arc::clone(&self.cookies),
             page: url,
             page_policy: referrer_policy,
@@ -1284,6 +1279,7 @@ impl Session {
             bg_bodies: HashMap::new(),
             mask_aliases: HashMap::new(),
             async_mods: Vec::new(),
+            arrival_classic: Vec::new(),
             fonts: Vec::new(),
             arrival_evals: Vec::new(),
             post_evals: Vec::new(),

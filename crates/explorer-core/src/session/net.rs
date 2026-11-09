@@ -223,6 +223,7 @@ impl Session {
             mask_aliases,
             mut eng,
             fonts,
+            arrival_classic,
             arrival_evals,
             post_evals,
             import_maps,
@@ -257,6 +258,7 @@ impl Session {
                 eng.as_mut(),
                 &scripts,
                 &script_srcs,
+                arrival_classic,
                 arrival_evals,
                 post_evals,
                 &import_maps,
@@ -308,6 +310,7 @@ impl Session {
         eng: &mut dyn JsEngine,
         scripts: &[ScriptItem],
         script_srcs: &[Option<String>],
+        arrival_classic: Vec<(usize, Option<Url>, String)>,
         arrival_evals: Vec<ModEval>,
         post_evals: Vec<ModEval>,
         import_maps: &[String],
@@ -344,6 +347,19 @@ impl Session {
             };
             let url = item.src.as_ref().map(Url::as_str);
             self.eval_or_report(tab, eng, src, url.as_deref(), Some(item.el_ord));
+            evals += 1;
+        }
+        // §B-119 — scripts classiques `async` : évalués en
+        // ordre d'arrivée **après** les scripts parser-inserted
+        // (`Parse` — ordre Chrome : les inlines tournent à leur
+        // position de parse, les asyncs ensuite). Un `async`
+        // évalué avant un inline qui le suit faisait voir à
+        // `document.currentScript` l'inline sous le push-handler
+        // → `new URL(currentScript.src)` → `Invalid URL:`
+        // (Next.js `getAssetPrefix`, vols 721/733/734).
+        for (ord, url, src) in arrival_classic {
+            let url = url.as_ref().map(Url::as_str);
+            self.eval_or_report(tab, eng, &src, url.as_deref(), Some(ord));
             evals += 1;
         }
         for me in arrival_evals {
