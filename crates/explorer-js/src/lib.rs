@@ -1952,9 +1952,6 @@ enum Cmd {
     SetMemLimit {
         bytes: usize,
     },
-    DrainNet {
-        tx: Sender<Vec<NetRequest>>,
-    },
     DeliverNet {
         resp: NetResponse,
         tx: Sender<Result<(), JsError>>,
@@ -2146,6 +2143,14 @@ pub struct JscoreEngine {
     /// `drain_net_requests` sans transiter par `Cmd` —
     /// le thread moteur peut y être bloqué en `load()`.
     worker_rx: std::sync::mpsc::Receiver<NetRequest>,
+    /// File `Send` des `NetRequest` script (fetch/XHR/ES/WS/
+    /// crypto, §B-54) — alimentée par les transports `Chan*`
+    /// du thread moteur, drainée par `drain_net_requests`
+    /// en `try_iter` **sans `Cmd`** : un thread moteur saturé
+    /// (tempête timers/hydratation) retardait `DrainNet` de
+    /// ~10-18 s sous verrou session — le `fetch.send` →
+    /// `net.go` d'explore.org vol 772 ratait le timeout SPA.
+    net_rx: std::sync::mpsc::Receiver<NetRequest>,
 }
 
 impl JscoreEngine {
@@ -2154,6 +2159,7 @@ impl JscoreEngine {
     pub fn new() -> Self {
         let (tx, rx) = channel::<Cmd>();
         let (wtx, wrx) = std::sync::mpsc::channel::<NetRequest>();
+        let (ntx, nrx) = std::sync::mpsc::channel::<NetRequest>();
         let interrupt = Arc::new(AtomicBool::new(false));
         let interrupt_w = interrupt.clone();
         let join = std::thread::Builder::new()
@@ -2164,13 +2170,14 @@ impl JscoreEngine {
             // recourir aux segments tas de `maybe_grow` ; les
             // plafonds logiques sont relevés dans `worker`.
             .stack_size(32 * 1024 * 1024)
-            .spawn(move || Self::worker(&rx, &wtx, &interrupt_w));
+            .spawn(move || Self::worker(&rx, &wtx, &ntx, &interrupt_w));
         match join {
             Ok(j) => Self {
                 tx,
                 join: Some(j),
                 interrupt,
                 worker_rx: wrx,
+                net_rx: nrx,
             },
             // Thread impossible (OS saturé) : moteur inerte —
             // `eval` répondra `Dead`, jamais de panic.
@@ -2179,6 +2186,7 @@ impl JscoreEngine {
                 join: None,
                 interrupt,
                 worker_rx: wrx,
+                net_rx: nrx,
             },
         }
     }
@@ -2278,6 +2286,7 @@ impl JscoreEngine {
     fn worker(
         rx: &Receiver<Cmd>,
         wtx: &std::sync::mpsc::Sender<NetRequest>,
+        ntx: &std::sync::mpsc::Sender<NetRequest>,
         interrupt: &Arc<AtomicBool>,
     ) {
         let mut eng = explorer_jscore::Engine::new();
@@ -2335,10 +2344,13 @@ impl JscoreEngine {
         // par `DrainNav` (jamais de navigation re-entrante).
         let nav_q: std::rc::Rc<std::cell::RefCell<Vec<NavRequest>>> =
             std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
-        // Requêtes XHR/fetch émises par les scripts — `ChanXhr`
-        // (`Rc` thread-local) alimente, `DrainNet` vide.
-        let net_q: std::rc::Rc<std::cell::RefCell<Vec<NetRequest>>> =
-            std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        // Requêtes XHR/fetch émises par les scripts — `Chan*`
+        // postent sur le canal `Send` `net_tx` (§B-54 :
+        // `Rc<RefCell>` + `DrainNet` Cmd faisait attendre le
+        // thread saturé ~10-18 s par requête — les fetches à
+        // timeout SPA mouraient avant `net.go`). Le drain est
+        // `try_iter` côté adaptateur, instantané.
+        let net_tx = ntx.clone();
         // Jar `document.cookie` : snapshot session + miroir des
         // écritures — drainé pour le vrai jar (politiques dans
         // `explorer-net`, jamais ici).
@@ -2391,7 +2403,7 @@ impl JscoreEngine {
                 let ctx_stores = &mut ctx_stores;
                 let local_store = &mut local_store;
                 let media_nodes = &mut media_nodes;
-                let net_q = &net_q;
+                let net_tx = &net_tx;
                 let nav_q = &nav_q;
                 let jar = &jar;
                 let xhr_next = &xhr_next;
@@ -2486,7 +2498,7 @@ impl JscoreEngine {
                         *jsd = Some(install_dom(
                             eng,
                             nav_q,
-                            net_q,
+                            net_tx,
                             jar,
                             &html,
                             &page_url,
@@ -2778,7 +2790,7 @@ impl JscoreEngine {
                                 std::rc::Rc::new(std::cell::RefCell::new(local));
                             let d = install_dom_ctx(
                                 eng,
-                                net_q,
+                                net_tx,
                                 &cjar,
                                 &storage,
                                 &html,
@@ -2987,7 +2999,6 @@ impl JscoreEngine {
                             eng,
                             jsd.as_ref(),
                             ctx_doms,
-                            net_q,
                             jar,
                             local_store,
                             media_nodes,
@@ -3623,11 +3634,12 @@ impl JsEngine for JscoreEngine {
     }
 
     fn drain_net_requests(&mut self) -> Vec<NetRequest> {
-        let (tx, rx) = channel();
-        if self.tx.send(Cmd::DrainNet { tx }).is_err() {
-            return Vec::new();
-        }
-        rx.recv_timeout(Self::EVAL_CMD_TIMEOUT).unwrap_or_default()
+        // §B-54 — canal `Send` : instantané, jamais de `Cmd`.
+        // Avant : `Cmd::DrainNet` attendait le thread moteur
+        // (~10-18 s saturé) sous verrou session ; les fetches
+        // à timeout SPA (explore.org `api/initial`, vol 772)
+        // mouraient avant `net.go`.
+        self.net_rx.try_iter().collect()
     }
 
     fn drain_worker_requests(&mut self) -> Vec<NetRequest> {
@@ -4012,7 +4024,6 @@ fn serve_side(
     eng: &mut explorer_jscore::Engine,
     jsd: Option<&explorer_jscore::DomRef>,
     ctx_doms: &HashMap<JsCtxId, explorer_jscore::DomRef>,
-    net_q: &std::rc::Rc<std::cell::RefCell<Vec<NetRequest>>>,
     jar: &std::rc::Rc<SnapshotJar>,
     local_store: &mut Option<explorer_jscore::Storage>,
     media_nodes: &mut HashMap<u64, explorer_jscore::NodeId>,
@@ -4020,10 +4031,6 @@ fn serve_side(
 ) -> bool {
     match cmd {
         Cmd::CanvasOps { tx } => tx.send(canvas_ops_of(jsd)).is_ok(),
-        Cmd::DrainNet { tx } => {
-            let out = std::mem::take(&mut *net_q.borrow_mut());
-            tx.send(out).is_ok()
-        }
         // Seam média (étape 71c) — `path` résolu en nœud
         // miroir une fois ; les commandes drainées rappellent
         // l'id de surface session.
@@ -4203,7 +4210,7 @@ fn serve_side(
 fn install_dom(
     eng: &mut explorer_jscore::Engine,
     nav_q: &std::rc::Rc<std::cell::RefCell<Vec<NavRequest>>>,
-    net_q: &std::rc::Rc<std::cell::RefCell<Vec<NetRequest>>>,
+    net_tx: &std::sync::mpsc::Sender<NetRequest>,
     jar: &std::rc::Rc<SnapshotJar>,
     html: &str,
     page_url: &str,
@@ -4287,24 +4294,24 @@ fn install_dom(
         }));
     }
     eng.install_xhr(std::rc::Rc::new(ChanXhr {
-        q: std::rc::Rc::clone(net_q),
+        q: net_tx.clone(),
         next: std::rc::Rc::clone(xhr_next),
     }));
     eng.install_crypto(std::rc::Rc::new(ChanCrypto {
-        q: std::rc::Rc::clone(net_q),
+        q: net_tx.clone(),
         next: std::rc::Rc::clone(crypto_next),
     }));
     // `EventSource` (JS-C92) — ouvertures en `NetRequest::
     // EventSource`, `close()` en `Abort` ; les handles
     // partagent le compteur `xhr_next` (Abort univoque).
     eng.install_es_transport(std::rc::Rc::new(ChanEs {
-        q: std::rc::Rc::clone(net_q),
+        q: net_tx.clone(),
         next: std::rc::Rc::clone(xhr_next),
     }));
     // `WebSocket` (JS-C94) — ouvertures `NetRequest::WsOpen`,
     // `send`/`close` `WsSend`/`WsClose` ; handles `xhr_next`.
     eng.install_ws_transport(std::rc::Rc::new(ChanWs {
-        q: std::rc::Rc::clone(net_q),
+        q: net_tx.clone(),
         next: std::rc::Rc::clone(xhr_next),
     }));
     eng.set_cookie_jar(jar.clone());
@@ -4332,7 +4339,7 @@ const MAX_CTX_PARSE_SCRIPTS: usize = 64;
 #[allow(clippy::too_many_arguments)]
 fn install_dom_ctx(
     eng: &mut explorer_jscore::Engine,
-    net_q: &std::rc::Rc<std::cell::RefCell<Vec<NetRequest>>>,
+    net_tx: &std::sync::mpsc::Sender<NetRequest>,
     jar: &std::rc::Rc<SnapshotJar>,
     storage: &explorer_jscore::Storage,
     html: &str,
@@ -4364,21 +4371,21 @@ fn install_dom_ctx(
     eng.install_timers();
     eng.set_page_url(page_url);
     eng.install_xhr(std::rc::Rc::new(ChanXhr {
-        q: std::rc::Rc::clone(net_q),
+        q: net_tx.clone(),
         next: std::rc::Rc::clone(xhr_next),
     }));
     eng.install_crypto(std::rc::Rc::new(ChanCrypto {
-        q: std::rc::Rc::clone(net_q),
+        q: net_tx.clone(),
         next: std::rc::Rc::clone(crypto_next),
     }));
     eng.install_es_transport(std::rc::Rc::new(ChanEs {
-        q: std::rc::Rc::clone(net_q),
+        q: net_tx.clone(),
         next: std::rc::Rc::clone(xhr_next),
     }));
     // `WebSocket` (JS-C94) — même dial que le contexte
     // parent (engine-global) ; les livraisons visent ce ctx.
     eng.install_ws_transport(std::rc::Rc::new(ChanWs {
-        q: std::rc::Rc::clone(net_q),
+        q: net_tx.clone(),
         next: std::rc::Rc::clone(xhr_next),
     }));
     eng.set_cookie_jar(jar.clone());
@@ -4604,8 +4611,9 @@ impl explorer_jscore::ModuleLoader for MapLoader {
 /// par la session, qui possède `HttpTransport` (modèle
 /// drain-nav généralisé : jamais d'I/O depuis le moteur).
 struct ChanXhr {
-    /// File partagée avec `DrainNet`.
-    q: std::rc::Rc<std::cell::RefCell<Vec<NetRequest>>>,
+    /// Canal `Send` vers la session — `try_iter` côté
+    /// adaptateur, jamais de `Cmd` (§B-54).
+    q: std::sync::mpsc::Sender<NetRequest>,
     /// Prochain handle libre — `Rc` **partagé entre tous les
     /// contextes** du moteur (étape 134 : chaque `<iframe>`
     /// a son transport ; un compteur global garantit des
@@ -4618,7 +4626,7 @@ impl explorer_jscore::XhrTransport for ChanXhr {
     fn send(&self, req: &explorer_jscore::XhrRequest) -> u64 {
         let handle = self.next.get();
         self.next.set(handle + 1);
-        self.q.borrow_mut().push(NetRequest::Fetch {
+        let _ = self.q.send(NetRequest::Fetch {
             handle,
             method: req.method.clone(),
             url: req.url.clone(),
@@ -4632,7 +4640,7 @@ impl explorer_jscore::XhrTransport for ChanXhr {
     }
 
     fn abort(&self, handle: u64) {
-        self.q.borrow_mut().push(NetRequest::Abort { handle });
+        let _ = self.q.send(NetRequest::Abort { handle });
     }
 }
 
@@ -4718,8 +4726,9 @@ impl explorer_jscore::WorkerLoader for ChanWorker {
 /// `Cmd::DeliverCrypto`. Le calcul vit côté plateforme
 /// (`explorer-net`), jamais dans le moteur.
 struct ChanCrypto {
-    /// File partagée avec `DrainNet`.
-    q: std::rc::Rc<std::cell::RefCell<Vec<NetRequest>>>,
+    /// Canal `Send` vers la session — `try_iter` côté
+    /// adaptateur, jamais de `Cmd` (§B-54).
+    q: std::sync::mpsc::Sender<NetRequest>,
     /// Prochain handle libre — `Rc` partagé entre contextes
     /// (même raison que [`ChanXhr::next`] : handles uniques
     /// dans tout le moteur).
@@ -4730,7 +4739,7 @@ impl explorer_jscore::CryptoTransport for ChanCrypto {
     fn submit(&self, req: explorer_jscore::CryptoRequest) -> u64 {
         let handle = self.next.get();
         self.next.set(handle + 1);
-        self.q.borrow_mut().push(NetRequest::Crypto {
+        let _ = self.q.send(NetRequest::Crypto {
             handle,
             op: req.op,
             data: req.data,
@@ -4746,8 +4755,9 @@ impl explorer_jscore::CryptoTransport for ChanCrypto {
 /// `NetRequest::Abort` — le handle vit dans l'espace `xhr`
 /// pour que l'abort tue la tâche streamée comme un fetch.
 struct ChanEs {
-    /// File partagée avec `DrainNet`.
-    q: std::rc::Rc<std::cell::RefCell<Vec<NetRequest>>>,
+    /// Canal `Send` vers la session — `try_iter` côté
+    /// adaptateur, jamais de `Cmd` (§B-54).
+    q: std::sync::mpsc::Sender<NetRequest>,
     /// Prochain handle libre — partagé avec `ChanXhr` (les
     /// `Abort { handle }` doivent rester non ambigus).
     next: std::rc::Rc<std::cell::Cell<u64>>,
@@ -4757,7 +4767,7 @@ impl explorer_jscore::EsTransport for ChanEs {
     fn open(&self, req: explorer_jscore::EsRequest) -> u64 {
         let handle = self.next.get();
         self.next.set(handle + 1);
-        self.q.borrow_mut().push(NetRequest::EventSource {
+        let _ = self.q.send(NetRequest::EventSource {
             handle,
             url: req.url,
             with_credentials: req.with_credentials,
@@ -4767,7 +4777,7 @@ impl explorer_jscore::EsTransport for ChanEs {
     }
 
     fn abort(&self, handle: u64) {
-        self.q.borrow_mut().push(NetRequest::Abort { handle });
+        let _ = self.q.send(NetRequest::Abort { handle });
     }
 }
 
@@ -4777,8 +4787,9 @@ impl explorer_jscore::EsTransport for ChanEs {
 /// pool), `send`/`close` = `WsSend`/`WsClose`. Les événements
 /// reviennent par `Cmd::DeliverWs` — multi-coups comme SSE.
 struct ChanWs {
-    /// File partagée avec `DrainNet`.
-    q: std::rc::Rc<std::cell::RefCell<Vec<NetRequest>>>,
+    /// Canal `Send` vers la session — `try_iter` côté
+    /// adaptateur, jamais de `Cmd` (§B-54).
+    q: std::sync::mpsc::Sender<NetRequest>,
     /// Prochain handle libre — partagé avec `ChanXhr`/`ChanEs`.
     next: std::rc::Rc<std::cell::Cell<u64>>,
 }
@@ -4787,7 +4798,7 @@ impl explorer_jscore::WsTransport for ChanWs {
     fn open(&self, req: &explorer_jscore::WsRequest) -> u64 {
         let handle = self.next.get();
         self.next.set(handle + 1);
-        self.q.borrow_mut().push(NetRequest::WsOpen {
+        let _ = self.q.send(NetRequest::WsOpen {
             handle,
             url: req.url.clone(),
             protocols: req.protocols.clone(),
@@ -4797,11 +4808,11 @@ impl explorer_jscore::WsTransport for ChanWs {
     }
 
     fn send(&self, handle: u64, out: explorer_jscore::WsOut) {
-        self.q.borrow_mut().push(NetRequest::WsSend { handle, out });
+        let _ = self.q.send(NetRequest::WsSend { handle, out });
     }
 
     fn close(&self, handle: u64, code: u16, reason: &str) {
-        self.q.borrow_mut().push(NetRequest::WsClose {
+        let _ = self.q.send(NetRequest::WsClose {
             handle,
             code,
             reason: reason.to_string(),
