@@ -29,63 +29,66 @@ terrain ; « mesuré » = compteur/sonde, pas intuition.
 
 Légende : `[ ]` à faire · `[~]` en cours · `[x]` terminée.
 
-Ordre de prise suggéré : les quick wins d'abord
-(JT-13 fix prêt, JT-3 recette JS-C427, JT-12 décision
-tranchée) — le palier JT-A (GC incrémental) est le chantier
-long, à faire vivre en fond ou en branche courte.
+**Ordre de la file — coût croissant, groupé par zone de
+code** : (1) quick wins — fix prêt, recettes éprouvées,
+décision tranchée ; (2) gaps `dom_host.rs` en batch
+(sonde → fix) ; (3) surfaces builtins auto-contenues ;
+(4) divergences langue (`interp`, risque moyen) ;
+(5) rappel piste V ; (6) GC structural en dernier —
+chantier long sur le hot path, à faire vivre en fond ou
+en branche courte sans invalider les étapes courtes.
 
 ---
 
-## JT-A — GC/heap : résidus §B-114 + §B-110 (`interp`, `heap`, marquage)
+## JT-A — Quick wins : fix prêt, recettes éprouvées, décision tranchée
 
-État : le gros a landé — chaînes hors arène `JsStr`
-(JS-C420), safepoint intra-span (JS-C421), backoff de
-croissance aux safepoints et frontières de job
-(JS-C424/JS-C426). Reste deux résidus **du même chantier**
-— le mécanisme JS-C398 (top-kinds) les a nommés ; le fix
-est un seul design : **marquage incrémental** ou
-**safepoint plus fin**.
-
-- [ ] **JT-1. Churn `a.ads.rmbl.ws` (rumble) — +1 %
-  overshoot résiduel** : post-backoff, la croissance heap
-  dépasse encore le seuil sur ce script. Attribuer le site
-  d'alloc avant tout fix (attribution J17 par éval JS-C425
-  disponible, `EXPLORER_J17_PROF=1`) — l'overshoot est
-  un symptôme, pas un diagnostic.
-- [ ] **JT-2. Sweep sous éval — PoW `SG_SS` (~500 B/op de
-  churn)** : le collecteur se déclenche en plein span
-  d'éval sur un script qui ne rend jamais la main. Le
-  safepoint JS-C421 borne la pause mais ne change pas la
-  cadence : à ce taux de churn le sweep repart sitôt
-  terminé. Options (tranchées à la prise, mesures J17 à
-  l'appui) : (a) **marquage incrémental** — tranches de
-  mark bornées entrelacées aux safepoints, write-barrier
-  ou re-scan borné à documenter ; (b) **safepoint plus
-  fin** — granularité sous le span (tick de boucle déjà
-  instrumenté). Verrous : pas de régression sur la suite
-  `hostile` release, overshoot rumble mesuré ≤ seuil,
-  `SG_SS` atteint son espace d'exception sans mourir au
-  budget (réglages diagnostic Étape 123/124).
-
-## JT-B — Gaps API miroir DOM (`dom_host.rs`, `builtins/`)
-
-Chaque gap = une erreur nommée en vol — `TypeError` /
-`ReferenceError` qui abort un bootstrap réel. Surface
-minimale par item : l'entrée manquante, jamais un stub
-qui ment. Recette éprouvée : JS-C427 (`DOMRect`
-constructible — même classe « illegal constructor »).
-
-- [ ] **JT-3. `DocumentFragment` constructible** —
+- [ ] **JT-1. `drain_pending_msgs`/`drain_port_msgs` sous
+  le realm routé** (`channel.rs`) — même classe que
+  §B-104 (JS-C430 a corrigé la livraison worker sous
+  dernier ctx) : postMessage/MessageChannel livrent sous
+  le dernier ctx actif au lieu du ctx destinataire. **Fix
+  déjà prêt** — le premier cas réel était attendu ; vol
+  732 a nommé le latent. Si aucun site ne l'exerce au
+  prochain vol, livrer sur verrou synthétique (deux ctx,
+  message posté depuis ctx0 vers port ctx1) plutôt que
+  laisser pourrir le fix.
+- [ ] **JT-2. `DocumentFragment` constructible** —
   `illegal constructor DocumentFragment` (gitlab) :
   `[Constructor]` WebIDL absent alors que le nœud existe
   (`createDocumentFragment` fonctionne). Ctor sans args,
-  `instanceof` honnête.
+  `instanceof` honnête — recette éprouvée JS-C427
+  (`DOMRect`/`DOMRectReadOnly`, même classe « illegal
+  constructor »). Fichier : `dom_host.rs` /
+  `misc_apis.rs`.
+- [ ] **JT-3. Globals CommonJS honnêtes en sandbox**
+  (résidu §B-105 — `builtins`, scope exec) —
+  `module`/`exports`/`require` : les wrappers UMD
+  survivent déjà (debounce/chart.umd) mais `module is
+  not defined` persiste sur leurs chemins CJS. Décision
+  tranchée : **globals CommonJS en sandbox** —
+  `module = {exports:{}}`, `exports = module.exports`,
+  `require` minimal borné (retourne `module.exports`
+  des deps connues, `Error` honnête sinon — **jamais**
+  de fetch/éval réseau). Scope : sandbox d'exécution,
+  pas le global de la page (le site ne doit pas voir
+  `module` comme feature-detect). Verrous : bundle UMD
+  prend la branche CJS sans throw, `require` inconnu
+  → erreur typée.
+
+## JT-B — Gaps API miroir DOM (`dom_host.rs`) — batch sonde → fix
+
+Chaque gap = une erreur nommée en vol qui abort un
+bootstrap réel. Même recette pour tous : sonder l'objet
+porteur d'abord (une erreur `X of Undefined` se fixe sur
+l'objet qui aurait dû porter `X`, pas en avalant), puis
+surface minimale — jamais un stub qui ment.
+
 - [ ] **JT-4. `toUpperCase of Undefined` (mw wikimedia)** —
   lecture de prop sur `Undefined` : nommer le site
   d'accès par sonde avant fix — la prop attendue est
   probablement une chaîne non installée sur le miroir
-  (médiawiki). Ne pas fixer à l'aveugle : un getter qui
-  rend `""` sur le mauvais objet déplace l'erreur.
+  (médiawiki). Un getter qui rend `""` sur le mauvais
+  objet déplace l'erreur.
 - [ ] **JT-5. `querySelectorAll` / `categories of Null`
   (jwplayer archive.org)** — deux symptômes : qsa absent
   ou non routé sur la cible visée ; `categories` lu sur
@@ -111,109 +114,27 @@ constructible — même classe « illegal constructor »).
   site attend une fonction (getter installé en valeur
   au lieu d'une natfn, ou méthode absente).
 
-## JT-C — Divergences langue (`interp`, `parser`, `module.rs`)
+## JT-C — Surfaces builtins auto-contenues
 
-- [ ] **JT-9. `for..of` eager (vol 722)** — divergence
-  nommée : reprendre le cas minimal du rapport de vol.
-  Suspect de classe connue : l'héritage eager documenté
-  (générateurs, JS-C34 a livré `GExec`/suspension
-  réelle — `for..of` sur corps suspendable est le
-  voisin logique). Verrou : fixture spec du cas + pas
-  de régression `c34_*`.
-- [ ] **JT-10. `import()` `inline:` non routé** ×2
-  (vimeo 697) — JS-C414 a livré le repli du **referrer**
-  `inline:N` → page ; le résidu est le specifier
-  `import("inline:…")` **lui-même** non routé vers le
-  registre des modules inline (`module.rs` — le
-  parse/routage est jscore, pas NAV). Verrous :
-  `c414_*` existants conservés + cas specifier inline
-  résolu vers la source garée.
-- [ ] **JT-11. Throws avalés dans les promesses** (vol
-  629, ouvert) — une exception dans un executor ou un
-  handler disparaît au lieu de rejeter : tracer
-  `promise.rs` chemin job→reject ; le symptôme site
-  est un `.catch` jamais appelé + état `pending` éternel.
-  Verrou : throw synchrone executor → rejet, throw dans
-  `then` → propagation au rejet suivant.
-
-## JT-D — UMD sandbox, résidu §B-105 (`builtins`, scope exec)
-
-- [ ] **JT-12. Globals CommonJS honnêtes en sandbox** —
-  `module`/`exports`/`require` : les wrappers UMD
-  survivent déjà (debounce/chart.umd) mais `module is
-  not defined` persiste sur leurs chemins CJS. Décision
-  tranchée : **globals CommonJS en sandbox** —
-  `module = {exports:{}}`, `exports = module.exports`,
-  `require` minimal borné (retourne `module.exports`
-  des deps connues, `Error` honnête sinon — **jamais**
-  de fetch/éval réseau). Scope : sandbox d'exécution,
-  pas le global de la page (le site ne doit pas voir
-  `module` comme feature-detect). Verrous : bundle UMD
-  prend la branche CJS sans throw, `require` inconnu
-  → erreur typée.
-
-## JT-E — Delivery cross-realm (`channel.rs`, ports)
-
-- [ ] **JT-13. `drain_pending_msgs`/`drain_port_msgs`
-  sous le realm routé** — même classe que §B-104
-  (JS-C430 a corrigé la livraison worker sous dernier
-  ctx) : postMessage/MessageChannel livrent sous le
-  dernier ctx actif au lieu du ctx destinataire. **Fix
-  déjà prêt** — le premier cas réel était attendu ;
-  vol 732 a nommé le latent. Si aucun site ne l'exerce
-  au prochain vol, livrer sur verrou synthétique (deux
-  ctx, message posté depuis ctx0 vers port ctx1) plutôt
-  que laisser pourrir le fix.
-
-## JT-F — i18n bindings YouTube (miroir bindings)
-
-- [ ] **JT-14. `[[getSimpleString]]`/`[[countryCode]]`** —
-  résidu nommé vol 701, post-§B-97 : slots internes du
-  binding i18n du player YT (syntaxe `[[…]]` = accès
-  aux internes Polymer/ytcfg). Surface minimale :
-  chaînes simples servies depuis `ytcfg`/la table de
-  strings du miroir, `countryCode` depuis la config de
-  session (jamais de géoloc inventée — valeur honnête
-  ou absente documentée). Fichier : `dom_host.rs` /
-  miroir bindings.
-
-## JT-G — WebCrypto `crypto.subtle` (§B-117 corpus-root)
-
-- [ ] **JT-15. `crypto.subtle` disponible sans backend
-  installé** — odysee : bootstrap tardif abort sur
-  `SubtleCrypto not available` (= le chemin `no crypto
-  backend installed` de `crypto.rs`). État : JS-C79 a
-  tranché « couture embedder » (jscore zéro-dep) et
-  JS-C93 a livré clés/sign via `ring` **côté
-  embedder** — mais un contexte câblé sans backend
-  aborte au lieu de dégrader. Minimal requis par le
-  site : `digest` (SHA-256) + `getRandomValues`. Deux
-  voies à trancher à la prise : (a) **fallback natif
-  dans jscore** — SHA-256 pur Rust ~150 lignes std-only
-  dans `crypto.rs`, la promesse « autonome zéro-dep »
+- [ ] **JT-9. `crypto.subtle` disponible sans backend
+  installé** (§B-117 corpus-root — `crypto.rs`) —
+  odysee : bootstrap tardif abort sur `SubtleCrypto not
+  available` (= le chemin `no crypto backend installed`
+  de `crypto.rs`). État : JS-C79 a tranché « couture
+  embedder » (jscore zéro-dep) et JS-C93 a livré
+  clés/sign via `ring` **côté embedder** — mais un
+  contexte câblé sans backend aborte au lieu de
+  dégrader. Minimal requis par le site : `digest`
+  (SHA-256) + `getRandomValues`. Deux voies à trancher
+  à la prise : (a) **fallback natif dans jscore** —
+  SHA-256 pur Rust ~150 lignes std-only dans
+  `crypto.rs`, la promesse « autonome zéro-dep »
   survit ; (b) **dep pur Rust** (`sha2`, ≥7 jours,
   workspace-deps) — justifiée par §B-117 dans le
   commit, mais casse la promesse historique du crate.
   Préférence : (a) sauf si la table d'algos demandée
   grossit.
-
-## JT-H — Perf interprète (`roadmap-vitesse-js.md`)
-
-- [ ] **JT-16. Résidus vitesse nommés — `fn_body`
-  sous-parse ~7 ms, `close_table` partagée ~1,7 ms** —
-  ferme les derniers sauts §B-1. **La file se tient
-  dans `docs/roadmap-vitesse-js.md`** (ouvrir l'étape
-  V-x correspondante) — JT-16 est le rappel ici que la
-  piste V a du résidu terrain, pas une duplication de
-  file. `close_table` partagée : la table `Rc<Vec>` est
-  reconstruite par sub-parse alors que le stream
-  `Rc<[Token]>` est déjà partagé — candidat : la porter
-  sur le `Program`/sub-parser au lieu de la rebâtir
-  (`parser.rs:31`, `:2477`).
-
-## JT-I — Surface API média (`builtins`)
-
-- [ ] **JT-17. `VTTCue`** — « chaîne suivante » nommée
+- [ ] **JT-10. `VTTCue`** — « chaîne suivante » nommée
   vol 722 : la classe est absente → `ReferenceError`
   sur les players qui pistonnent les sous-titres
   (videojs/jwplayer). Surface : `TextTrackCue` base +
@@ -223,6 +144,86 @@ constructible — même classe « illegal constructor »).
   minimal honnête, `onenter`/`onexit` stockés. Pas de
   moteur de rendu cue — présence API + état, la
   rasterisation n'est pas de ce périmètre.
+- [ ] **JT-11. i18n bindings YouTube
+  `[[getSimpleString]]`/`[[countryCode]]`** — résidu
+  nommé vol 701, post-§B-97 : slots internes du binding
+  i18n du player YT (syntaxe `[[…]]` = accès aux
+  internes Polymer/ytcfg). Surface minimale : chaînes
+  simples servies depuis `ytcfg`/la table de strings du
+  miroir, `countryCode` depuis la config de session
+  (jamais de géoloc inventée — valeur honnête ou
+  absente documentée). Fichier : `dom_host.rs` /
+  miroir bindings.
+
+## JT-D — Divergences langue (`interp`, `parser`, `module.rs`)
+
+- [ ] **JT-12. Throws avalés dans les promesses** (vol
+  629, ouvert) — une exception dans un executor ou un
+  handler disparaît au lieu de rejeter : tracer
+  `promise.rs` chemin job→reject ; le symptôme site
+  est un `.catch` jamais appelé + état `pending`
+  éternel. Verrou : throw synchrone executor → rejet,
+  throw dans `then` → propagation au rejet suivant.
+- [ ] **JT-13. `import()` `inline:` non routé** ×2
+  (vimeo 697) — JS-C414 a livré le repli du **referrer**
+  `inline:N` → page ; le résidu est le specifier
+  `import("inline:…")` **lui-même** non routé vers le
+  registre des modules inline (`module.rs` — le
+  parse/routage est jscore, pas NAV). Verrous :
+  `c414_*` existants conservés + cas specifier inline
+  résolu vers la source garée.
+- [ ] **JT-14. `for..of` eager (vol 722)** — divergence
+  nommée : reprendre le cas minimal du rapport de vol.
+  Suspect de classe connue : l'héritage eager documenté
+  (générateurs, JS-C34 a livré `GExec`/suspension
+  réelle — `for..of` sur corps suspendable est le
+  voisin logique). Verrou : fixture spec du cas + pas
+  de régression `c34_*`.
+
+## JT-E — Perf interprète (rappel — file tenue dans `roadmap-vitesse-js.md`)
+
+- [ ] **JT-15. Résidus vitesse nommés — `fn_body`
+  sous-parse ~7 ms, `close_table` partagée ~1,7 ms** —
+  ferme les derniers sauts §B-1. **La file se tient
+  dans `docs/roadmap-vitesse-js.md`** (ouvrir l'étape
+  V-x correspondante) — JT-15 est le rappel ici que la
+  piste V a du résidu terrain, pas une duplication de
+  file. `close_table` partagée : la table `Rc<Vec>` est
+  reconstruite par sub-parse alors que le stream
+  `Rc<[Token]>` est déjà partagé — candidat : la porter
+  sur le `Program`/sub-parser au lieu de la rebâtir
+  (`parser.rs:31`, `:2477`).
+
+## JT-F — GC/heap : résidus §B-114 + §B-110 (chantier long, `interp`/`heap`/marquage)
+
+État : le gros a landé — chaînes hors arène `JsStr`
+(JS-C420), safepoint intra-span (JS-C421), backoff de
+croissance aux safepoints et frontières de job
+(JS-C424/JS-C426). Reste deux résidus **du même chantier**
+— le mécanisme JS-C398 (top-kinds) les a nommés ; le fix
+est un seul design : **marquage incrémental** ou
+**safepoint plus fin**.
+
+- [ ] **JT-16. Churn `a.ads.rmbl.ws` (rumble) — +1 %
+  overshoot résiduel** : post-backoff, la croissance heap
+  dépasse encore le seuil sur ce script. Attribuer le site
+  d'alloc avant tout fix (attribution J17 par éval JS-C425
+  disponible, `EXPLORER_J17_PROF=1`) — l'overshoot est
+  un symptôme, pas un diagnostic.
+- [ ] **JT-17. Sweep sous éval — PoW `SG_SS` (~500 B/op de
+  churn)** : le collecteur se déclenche en plein span
+  d'éval sur un script qui ne rend jamais la main. Le
+  safepoint JS-C421 borne la pause mais ne change pas la
+  cadence : à ce taux de churn le sweep repart sitôt
+  terminé. Options (tranchées à la prise, mesures J17 à
+  l'appui) : (a) **marquage incrémental** — tranches de
+  mark bornées entrelacées aux safepoints, write-barrier
+  ou re-scan borné à documenter ; (b) **safepoint plus
+  fin** — granularité sous le span (tick de boucle déjà
+  instrumenté). Verrous : pas de régression sur la suite
+  `hostile` release, overshoot rumble mesuré ≤ seuil,
+  `SG_SS` atteint son espace d'exception sans mourir au
+  budget (réglages diagnostic Étape 123/124).
 
 ## JT-J — Dormants langue (file prête, règle J-B)
 
@@ -245,20 +246,20 @@ réel, échec `site_smoke`, besoin produit) :
 
 | Constat terrain | Étape |
 |---|---|
-| Overshoot rumble `a.ads.rmbl.ws` +1 % post-backoff | JT-1 |
-| Sweep en span d'éval, PoW `SG_SS` ~500 B/op churn | JT-2 |
-| `illegal constructor DocumentFragment` (gitlab) | JT-3 |
+| `drain_*_msgs` sous dernier ctx (vol 732) | JT-1 |
+| `illegal constructor DocumentFragment` (gitlab) | JT-2 |
+| `module is not defined` UMD (§B-105) | JT-3 |
 | `toUpperCase of Undefined` (mw wikimedia) | JT-4 |
 | `querySelectorAll`/`categories of Null` (jwplayer, archive.org) | JT-5 |
 | `FinalizationRegistry unregisterToken` (odysee) | JT-6 |
 | `call of Undefined` core-js (framatube) | JT-7 |
 | `value is not a function` adapter Vercel (videojs) | JT-8 |
-| `for..of` eager (vol 722) | JT-9 |
-| `import()` `inline:` non routé ×2 (vimeo 697) | JT-10 |
-| Throws avalés promesses (vol 629) | JT-11 |
-| `module is not defined` UMD (§B-105) | JT-12 |
-| `drain_*_msgs` sous dernier ctx (vol 732) | JT-13 |
-| `[[getSimpleString]]`/`[[countryCode]]` (vol 701) | JT-14 |
-| `SubtleCrypto not available` (odysee, §B-117) | JT-15 |
-| `fn_body` ~7 ms / `close_table` ~1,7 ms (§B-1) | JT-16 → piste V |
-| `VTTCue` absent (vol 722) | JT-17 |
+| `SubtleCrypto not available` (odysee, §B-117) | JT-9 |
+| `VTTCue` absent (vol 722) | JT-10 |
+| `[[getSimpleString]]`/`[[countryCode]]` (vol 701) | JT-11 |
+| Throws avalés promesses (vol 629) | JT-12 |
+| `import()` `inline:` non routé ×2 (vimeo 697) | JT-13 |
+| `for..of` eager (vol 722) | JT-14 |
+| `fn_body` ~7 ms / `close_table` ~1,7 ms (§B-1) | JT-15 → piste V |
+| Overshoot rumble `a.ads.rmbl.ws` +1 % post-backoff | JT-16 |
+| Sweep en span d'éval, PoW `SG_SS` ~500 B/op churn | JT-17 |
