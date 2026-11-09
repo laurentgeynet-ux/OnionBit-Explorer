@@ -71,7 +71,10 @@ fn c461_animation_ctor_machine_etat() {
     );
     // `finish()`/`cancel()` hérités de la machine CAP-187.
     assert_eq!(
-        ev(&mut e, "a.finish();a.playState+'|'+(a instanceof Animation)"),
+        ev(
+            &mut e,
+            "a.finish();a.playState+'|'+(a instanceof Animation)"
+        ),
         "finished|true"
     );
 }

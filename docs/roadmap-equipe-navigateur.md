@@ -11515,3 +11515,20 @@ un crate PIPELINE.- [x] **JS-C422. Deadline honnête — canal session ↔ budge
   dash.js requis** — si le manifest se parse, le mur
   suivant sera nommé par la même méthode (bus
   d'événements `dashjs.MediaPlayer.events`).
+- [x] **JS-C463. §B-125 — `caller`/`arguments` `null`
+  sur fonctions sloppy (comportement observable
+  V8)** (vol 734, accueil YouTube post-JS-C461 —
+  `uncaught TypeError: caller/arguments are
+  restricted function properties` ×8+ croissant,
+  gate de la cascade WAAPI levée) : les accesseurs
+  `caller`/`arguments` vivent désormais sur
+  `Function.prototype` → `null` (les fonctions
+  sloppy n'héritent plus d'un trou — avant : aucun
+  accesseur, lecture `undefined` ; après : `null`
+  comme V8). Les fonctions strictes/génératrices/
+  async conservent leur propre poison
+  `restricted_prop` (propre prop masque le proto —
+  `AddRestrictedFunctionProperties` spec intacte,
+  `TypeError` toujours servi). Verrou
+  `c463_fn_caller_arguments` ×3 (sloppy/arrow→null,
+  strict→TypeError, boucle d'accès) ; dom 246/246.

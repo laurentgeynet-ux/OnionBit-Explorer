@@ -764,6 +764,23 @@ pub(crate) fn install(e: &mut Engine) {
     e.add_method(fp, "apply", function_apply);
     e.add_method(fp, "bind", function_bind);
     e.add_method(fp, "toString", function_to_string);
+    // JS-C463 (§B-125, vol 734) — `caller`/`arguments` sur
+    // `Function.prototype` : V8 rend `null` pour les
+    // fonctions **sloppy** (l'accès remonte la chaîne des
+    // protos jusqu'ici) ; les fonctions strictes/génératrices/
+    // async portent leur propre accesseur poison
+    // (`AddRestrictedFunctionProperties`, interp `fn_obj`) qui
+    // masque celui-ci — le `TypeError` spec est préservé.
+    {
+        let na = e.native_fn(
+            "restricted_null",
+            crate::builtins::restricted_null_prop,
+        );
+        if let Some(o) = e.heap.obj_mut(fp) {
+            o.set_accessor("caller", na.clone(), na.clone(), false);
+            o.set_accessor("arguments", na.clone(), na, false);
+        }
+    }
     // `Function.prototype.name === ""` (spec — le proto est
     // ordinaire, le bras synthétique `Fun` ne le couvre pas).
     let empty_name = e.str_val("");

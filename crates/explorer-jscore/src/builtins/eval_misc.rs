@@ -176,6 +176,14 @@ pub(crate) fn restricted_prop(e: &mut Engine, _t: Value, _a: &[Value]) -> JsResu
     Err(e.type_error("caller/arguments are restricted function properties"))
 }
 
+/// Accesseur `caller`/`arguments` de `Function.prototype`
+/// (JS-C463, §B-125) — V8 rend `null` sur les fonctions
+/// sloppy ; les strictes portent leur poison propre
+/// (`restricted_prop`) qui masque celui-ci.
+pub(crate) fn restricted_null_prop(_e: &mut Engine, _t: Value, _a: &[Value]) -> JsResult<Value> {
+    Ok(Value::Null)
+}
+
 // -- Symbol ---------------------------------------------------------
 
 /// `Symbol(desc?)` — unique `ObjKind::Symbol` per call (identity by
