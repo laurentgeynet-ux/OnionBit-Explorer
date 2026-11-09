@@ -3444,12 +3444,21 @@ déblocage/coût décroissant.
   `font_face` porte l'index de face). Décompression woff
   (zlib déjà lié) + `format()`. *Priorité 1 : meilleur
   ratio valeur/effort de la file.*
-- [ ] **R-189. CSS nesting** : `&`, règles de style imbriquées,
-  `@media`/`@supports` imbriqués dans un bloc de déclarations —
-  tout est avalé par `recover_decl` → règles modernes perdues
-  en silence (CSS 2023+, composants, thèmes). `parser.rs` doit
-  émettre des règles imbriquées + résolution `&`/ordre dans
-  `cascade.rs`. Livre la machinerie de scope utile à R-194.
+- [x] **R-189. CSS nesting** : désucrage **au parse** —
+  zéro touche cascade/sélecteur (`explorer-css` `parser.rs`).
+  `style_block` dispatche les items de bloc : lookahead
+  `looks_like_rule` (`{` à profondeur-0 avant `;`/`}` →
+  règle) ; `&` → `:is(<parent>)` (`substitute_ampersand`
+  pur — `div&`, `:not(&)`, `&&`, produit cartésien des
+  listes borné à 64 branches) ; nu → `& ` implicite
+  (descendant, combinateur initial `>`/`+`/`~` préservé) ;
+  decls post-règle soulevées en règle plate ordonnée (ordre
+  source) ; `@media`/`@supports`/`@container`/`@layer`
+  imbriqués portent leurs items (`at_rule_in_block`) ;
+  `&` profond résout vs sélecteur substitué ; borne
+  `nest_depth` partagée. `&` top-level hors scope (spec
+  `:scope` — non substitué, documenté). 9 verrous
+  `nesting_*` (`tests/parser.rs`).
 - [ ] **R-192. `display:-webkit-box` + `-webkit-line-clamp`
   contexte** : vieux flexbox → bloc ; `line-clamp` est livré
   MVP sans exiger la famille `-webkit-box`. Pattern legacy

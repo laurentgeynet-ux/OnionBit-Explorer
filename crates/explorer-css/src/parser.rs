@@ -370,9 +370,8 @@ impl<'t> Parser<'t> {
                 }
                 Some(_) => {
                     let before = self.pos;
-                    if let Some(rule) = self.qualified_rule() {
-                        sheet.rules.push(rule);
-                    } else if self.pos == before {
+                    sheet.rules.extend(self.qualified_rule());
+                    if self.pos == before {
                         // Aucune progression (token isolé
                         // invalide) : on l'avale pour garantir
                         // la terminaison (contenu hostile).
@@ -632,9 +631,8 @@ impl<'t> Parser<'t> {
                 }
                 Some(_) => {
                     let before = self.pos;
-                    if let Some(rule) = self.qualified_rule() {
-                        rules.push(rule);
-                    } else if self.pos == before {
+                    rules.extend(self.qualified_rule());
+                    if self.pos == before {
                         // Anti-boucle : token isolé non traité.
                         self.pos += 1;
                     }
@@ -738,6 +736,176 @@ impl<'t> Parser<'t> {
         })
     }
 
+    /// R-189 — l'item courant est-il une **règle** plutôt
+    /// qu'une déclaration ? Lookahead non consommant : un
+    /// `{` à profondeur-0 atteint avant `;`/`}` signale un
+    /// bloc imbriqué (css-nesting-1 — `a:hover {}` n'est pas
+    /// une déclaration, `x: y` n'atteint jamais `{`).
+    fn looks_like_rule(&self) -> bool {
+        let mut depth = 0i32;
+        let mut i = self.pos;
+        loop {
+            match self.tokens.get(i) {
+                None | Some(Token::Eof) => return false,
+                Some(Token::OpenBrace) if depth == 0 => return true,
+                Some(Token::Semicolon | Token::CloseBrace) if depth == 0 => return false,
+                Some(
+                    Token::OpenBrace | Token::OpenParen | Token::OpenBracket | Token::Function(_),
+                ) => {
+                    depth += 1;
+                }
+                Some(Token::CloseBrace | Token::CloseParen | Token::CloseBracket) if depth > 0 => {
+                    depth -= 1;
+                }
+                _ => {}
+            }
+            i += 1;
+        }
+    }
+
+    /// Bloc d'une règle **de style** (`{` déjà consommé) :
+    /// dispatch déclaration / règle imbriquée / at-rule
+    /// imbriquée (css-nesting-1, R-189). Chaque run de
+    /// déclarations devient une [`QualifiedRule`] plate pour
+    /// `sel` émise à sa position source — une déclaration
+    /// après une règle imbriquée est ainsi soulevée en règle
+    /// `&` implicite (spec : l'ordre source est conservé).
+    /// Règles **désucrées** : l'aval ne voit que des règles
+    /// plates.
+    fn style_block(&mut self, sel: &str) -> Vec<Rule> {
+        let mut out: Vec<Rule> = Vec::new();
+        let mut decls: Vec<Declaration> = Vec::new();
+        // Run de déclarations → règle plate ordonnée.
+        macro_rules! flush {
+            () => {
+                if !decls.is_empty() {
+                    out.push(Rule::Qualified(QualifiedRule {
+                        prelude: sel.to_string(),
+                        declarations: std::mem::take(&mut decls),
+                    }));
+                }
+            };
+        }
+        loop {
+            self.skip_ws();
+            match self.peek() {
+                None | Some(Token::CloseBrace) => {
+                    if self.peek().is_some() {
+                        self.pos += 1;
+                    }
+                    break;
+                }
+                Some(Token::Semicolon) => {
+                    self.pos += 1;
+                }
+                Some(Token::AtKeyword(name)) => {
+                    let name = name.clone();
+                    self.pos += 1;
+                    flush!();
+                    out.push(self.at_rule_in_block(&name, sel));
+                }
+                Some(_) => {
+                    if self.looks_like_rule() {
+                        flush!();
+                        out.extend(self.nested_qualified(sel));
+                    } else if let Some(d) = self.declaration() {
+                        decls.push(d);
+                    }
+                }
+            }
+        }
+        flush!();
+        out
+    }
+
+    /// R-189 — règle qualifiée imbriquée : prélude jusqu'à
+    /// `{`, `&` substitué par `:is(<parent>)` (ou `&` implicite
+    /// préfixé — descendant — pour les sélecteurs nus), puis
+    /// bloc récursé avec le sélecteur **substitué** comme
+    /// nouveau parent. Déjà `nest_depth`-borné à l'appel.
+    fn nested_qualified(&mut self, parent_sel: &str) -> Vec<Rule> {
+        let prelude = self.consume_prelude(false);
+        if !matches!(self.peek(), Some(Token::OpenBrace)) {
+            return Vec::new();
+        }
+        self.pos += 1;
+        let eff = substitute_ampersand(&prelude, parent_sel);
+        if self.nest_depth >= MAX_NESTING {
+            self.skip_block();
+            return Vec::new();
+        }
+        self.nest_depth += 1;
+        let rules = self.style_block(&eff);
+        self.nest_depth -= 1;
+        rules
+    }
+
+    /// R-189 — at-rule **dans un bloc de style** : son corps
+    /// contient des block-items (déclarations + règles
+    /// imbriquées liées au `parent_sel`), pas des règles
+    /// top-level — variante de [`Parser::at_rule`] pour ce
+    /// contexte (`@media`/`@supports`/`@container`/`@layer` ;
+    /// les autres corps sont avalés comme inconnus).
+    fn at_rule_in_block(&mut self, name: &str, parent_sel: &str) -> Rule {
+        let prelude = self.consume_prelude(true);
+        let lname = name.to_ascii_lowercase();
+        if !matches!(self.peek(), Some(Token::OpenBrace)) {
+            self.consume_semicolon();
+            return Rule::At(AtRule {
+                name: lname,
+                kind: AtKind::Statement { prelude },
+            });
+        }
+        self.pos += 1;
+        // Corps → règles plates liées au parent, borné.
+        let rules = if self.nest_depth >= MAX_NESTING {
+            self.skip_block();
+            Vec::new()
+        } else {
+            self.nest_depth += 1;
+            let r = self.style_block(parent_sel);
+            self.nest_depth -= 1;
+            r
+        };
+        let kind = match lname.as_str() {
+            "media" | "supports" => AtKind::Media {
+                queries: if lname == "media" {
+                    parse_media_queries(&prelude)
+                } else {
+                    Self::parse_supports_queries(&prelude)
+                },
+                rules,
+            },
+            "container" => {
+                let prelude_t = prelude.trim();
+                let (cname, query) = match prelude_t.find('(') {
+                    Some(i) => {
+                        let n = prelude_t[..i].trim().to_string();
+                        (
+                            (!n.is_empty()).then_some(n),
+                            prelude_t[i..].trim().to_string(),
+                        )
+                    }
+                    None => (None, prelude_t.to_string()),
+                };
+                AtKind::Container {
+                    name: cname,
+                    query,
+                    rules,
+                }
+            }
+            "layer" => {
+                let n = prelude.trim();
+                AtKind::Layer {
+                    name: (!n.is_empty()).then(|| n.to_string()),
+                    rules,
+                }
+            }
+            _ => AtKind::UnknownBlock { prelude },
+        };
+        Rule::At(AtRule { name: lname, kind })
+    }
+
     /// Saute jusqu'à `;` ou `}` (sans consommer le `}`).
     fn recover_decl(&mut self) {
         let mut depth = 0i32;
@@ -758,24 +926,31 @@ impl<'t> Parser<'t> {
         }
     }
 
-    /// Règle qualifiée : prélude jusqu'à `{` puis déclarations.
-    /// Invalide → `None` (le prélude a déjà été sauté).
-    fn qualified_rule(&mut self) -> Option<Rule> {
+    /// Règle qualifiée : prélude jusqu'à `{` puis bloc —
+    /// R-189 : le corps peut contenir des **règles imbriquées**
+    /// (css-nesting-1) désucrées en règles plates ordonnées ;
+    /// retourne la liste complète (la règle propre + ses
+    /// expansions). Invalide → liste vide.
+    fn qualified_rule(&mut self) -> Vec<Rule> {
         let prelude = self.consume_prelude(false);
         if let Some(Token::OpenBrace) = self.peek() {
             self.pos += 1;
-            let declarations = self.declaration_block();
             if prelude.is_empty() {
-                return None;
+                self.skip_block();
+                return Vec::new();
             }
-            Some(Rule::Qualified(QualifiedRule {
-                prelude,
-                declarations,
-            }))
+            if self.nest_depth >= MAX_NESTING {
+                self.skip_block();
+                return Vec::new();
+            }
+            self.nest_depth += 1;
+            let rules = self.style_block(&prelude);
+            self.nest_depth -= 1;
+            rules
         } else {
             // Pas de bloc → règle abandonnée (le prélude court
             // jusqu'à `{` ou EOF — `;` ne le borne plus).
-            None
+            Vec::new()
         }
     }
 
@@ -879,6 +1054,105 @@ fn strip_important(raw: &str) -> (String, bool) {
 }
 
 /// `@import "u" screen and (x)` → url + media brut.
+/// R-189 — coupe un prélude sélecteur sur les virgules de
+/// profondeur-0 : `(`/`)`, `[`/`]`, chaînes quotées et
+/// échappements `\` sont ignorés (`:not(.a, .b)` reste un
+/// seul segment).
+fn split_top_commas(s: &str) -> Vec<&str> {
+    let mut out = Vec::new();
+    let (mut depth, mut quote, mut esc, mut start) = (0i32, '\0', false, 0usize);
+    for (i, c) in s.char_indices() {
+        if esc {
+            esc = false;
+            continue;
+        }
+        match c {
+            '\\' => esc = true,
+            '"' | '\'' if quote == '\0' => quote = c,
+            c if c == quote => quote = '\0',
+            '(' | '[' if quote == '\0' => depth += 1,
+            ')' | ']' if quote == '\0' && depth > 0 => depth -= 1,
+            ',' if quote == '\0' && depth == 0 => {
+                out.push(&s[start..i]);
+                start = i + 1;
+            }
+            _ => {}
+        }
+    }
+    out.push(&s[start..]);
+    out
+}
+
+/// R-189 — substitution `&` d'un prélude imbriqué dans son
+/// parent (css-nesting-1) : chaque `&` (hors chaînes et
+/// échappements) devient `:is(<partie parent>)` — wrap
+/// `:is` = sémantique exacte de spécificité/matching, et
+/// couvre `div&`, `:not(&)`, `&&`. Une partie sans `&`
+/// reçoit le parent en descendant (`& ` implicite — le
+/// combinateur initial `>`/`+`/`~` est préservé). Listes
+/// parent × imbriqué → produit cartésien, borné pour les
+/// préludes hostiles.
+const MAX_NEST_PARTS: usize = 64;
+
+fn substitute_ampersand(nested: &str, parent: &str) -> String {
+    /// Remplace les `&` hors chaînes/échappements par `rep`.
+    fn replace_amp(s: &str, rep: &str) -> String {
+        let mut out = String::with_capacity(s.len() + rep.len());
+        let (mut quote, mut esc) = ('\0', false);
+        for c in s.chars() {
+            if esc {
+                out.push(c);
+                esc = false;
+                continue;
+            }
+            match c {
+                '\\' => {
+                    out.push(c);
+                    esc = true;
+                }
+                '"' | '\'' if quote == '\0' => {
+                    quote = c;
+                    out.push(c);
+                }
+                c if c == quote => {
+                    quote = '\0';
+                    out.push(c);
+                }
+                '&' if quote == '\0' => out.push_str(rep),
+                _ => out.push(c),
+            }
+        }
+        out
+    }
+    let parents = split_top_commas(parent);
+    let mut out: Vec<String> = Vec::new();
+    'outer: for n in split_top_commas(nested) {
+        let n = n.trim();
+        if n.is_empty() {
+            continue;
+        }
+        for p in &parents {
+            let p = p.trim();
+            if p.is_empty() {
+                continue;
+            }
+            let part = if n.contains('&') {
+                replace_amp(n, &format!(":is({p})"))
+            } else {
+                // Nu → `& ` implicite (descendant — un
+                // combinateur initial `>`/`+`/`~` suit le
+                // parent tel quel).
+                format!("{p} {n}")
+            };
+            out.push(part);
+            if out.len() >= MAX_NEST_PARTS {
+                break 'outer;
+            }
+        }
+    }
+    out.join(", ")
+}
+
 fn parse_import(prelude: &str) -> ImportRule {
     let p = prelude.trim();
     let (url, rest) = if let Some(q) = p.strip_prefix("url(") {

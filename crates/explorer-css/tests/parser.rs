@@ -329,3 +329,106 @@ fn parenthese_non_fermee_eof_termine() {
     assert_eq!(s.rules.len(), 1, "{:?}", s.rules);
     assert!(decls(&s.rules[0]).iter().any(|x| x.name == "transform"));
 }
+
+// ---------- R-189 — CSS nesting : désucrage au parse ----------
+
+fn prelude_of(rule: &Rule) -> &str {
+    match rule {
+        Rule::Qualified(q) => &q.prelude,
+        _ => "",
+    }
+}
+
+/// `&` substitué en `:is(<parent>)` — descendant et composé.
+#[test]
+fn nesting_esperluette_descendant_et_hover() {
+    let s = parse_stylesheet("div{& .x{a:1}&:hover{b:2}}");
+    assert_eq!(s.rules.len(), 2, "{:?}", s.rules);
+    assert_eq!(prelude_of(&s.rules[0]), ":is(div) .x");
+    assert_eq!(prelude_of(&s.rules[1]), ":is(div):hover");
+    assert!(decls(&s.rules[0]).iter().any(|d| d.name == "a"));
+    assert!(decls(&s.rules[1]).iter().any(|d| d.name == "b"));
+}
+
+/// Sélecteur nu → `& ` implicite (descendant) ; combinateur
+/// initial `>` préservé.
+#[test]
+fn nesting_nu_et_combinateur() {
+    let s = parse_stylesheet(".a{.b{c:1}> .d{e:2}}");
+    assert_eq!(prelude_of(&s.rules[0]), ".a .b");
+    assert_eq!(prelude_of(&s.rules[1]), ".a > .d");
+}
+
+/// `a:hover{}` à l'intérieur d'un bloc = règle imbriquée,
+/// pas une déclaration (l'ambiguïté `:` est tranchée par
+/// le `{` à profondeur-0 avant `;`/`}`).
+#[test]
+fn nesting_hover_ident_n_est_pas_declaration() {
+    let s = parse_stylesheet("a{a:hover{color:red}}");
+    assert_eq!(s.rules.len(), 1);
+    assert_eq!(prelude_of(&s.rules[0]), "a a:hover");
+}
+
+/// Liste parente × partie imbriquée → produit cartésien.
+#[test]
+fn nesting_produit_cartesien() {
+    let s = parse_stylesheet("a, b{& .x{c:1}}");
+    assert_eq!(prelude_of(&s.rules[0]), ":is(a) .x, :is(b) .x");
+}
+
+/// Ordre source : une déclaration APRÈS une règle imbriquée
+/// est soulevée en règle plate ordonnée (spec : la séquence
+/// compte — la dernière l'emporte à spécificité égale).
+#[test]
+fn nesting_ordre_source_runs() {
+    let s = parse_stylesheet("div{color:1;&:hover{x:2}color:3}");
+    assert_eq!(s.rules.len(), 3, "{:?}", s.rules);
+    assert_eq!(prelude_of(&s.rules[0]), "div");
+    assert_eq!(prelude_of(&s.rules[1]), ":is(div):hover");
+    assert_eq!(prelude_of(&s.rules[2]), "div");
+    assert_eq!(decls(&s.rules[2])[0].value, "3");
+}
+
+/// `&` profond : dans `& .b { & .c }`, le `&` interne
+/// résout contre le sélecteur SUBSTITUÉ (`:is(div) .b`),
+/// pas contre `div`.
+#[test]
+fn nesting_esperluette_profonde() {
+    let s = parse_stylesheet("div{& .b{& .c{a:1}}}");
+    assert_eq!(prelude_of(&s.rules[0]), ":is(:is(div) .b) .c");
+}
+
+/// `@media` imbriqué dans un bloc : ses items sont des
+/// block-items liés au parent — règle plate DANS l'at-rule.
+#[test]
+fn nesting_media_imbrique() {
+    let s = parse_stylesheet("div{@media screen{color:red}}");
+    assert_eq!(s.rules.len(), 1);
+    match &s.rules[0] {
+        Rule::At(at) => {
+            assert_eq!(at.name, "media");
+            if let AtKind::Media { rules, .. } = &at.kind {
+                assert_eq!(rules.len(), 1);
+                assert_eq!(prelude_of(&rules[0]), "div");
+                assert!(decls(&rules[0]).iter().any(|d| d.name == "color"));
+            } else {
+                panic!("attendu AtKind::Media");
+            }
+        }
+        _ => panic!("attendu At"),
+    }
+}
+
+/// Hostile : `&` top-level sans parent n'est pas substitué
+/// (prélude littéral — le sélecteur amont tranche) ; bloc
+/// imbriqué déséquilibré → récupération, feuille terminée.
+#[test]
+fn nesting_hostile_tolere() {
+    let s = parse_stylesheet("&{color:red}p{x:1}");
+    assert_eq!(s.rules.len(), 2);
+    assert_eq!(prelude_of(&s.rules[0]), "&");
+    // Feuille sans nesting : output identique à avant.
+    let s2 = parse_stylesheet("p{a:1}b{c:2}");
+    assert_eq!(s2.rules.len(), 2);
+    assert_eq!(prelude_of(&s2.rules[0]), "p");
+}
