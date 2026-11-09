@@ -3126,16 +3126,27 @@ la dette, pas le layout.
   9 ops couleurs par pixel + `blur` en box blur
   séparable, `drop-shadow()`/`url()` hors scope ;
   `backdrop-filter` à part. Verrou ops + `none`.
-- [ ] **R-M6. `position:sticky`** : bloc conteneur relatif
-  clampé au scroll — PIPE pose + session offset (journal).
-- [ ] **R-M7. `transform` complet + `transition`/
-  `animation`** : matrix 2D réel sur les boîtes +
-  interpolation CSS — couture session (journal NAV).
-- [ ] **R-M8. `clip-path` + clip `overflow` arrondi**
-  (reliquat R-167) + `aspect-ratio` + `line-clamp`.
-- [ ] **R-M9. Font fallback par glyphe** : `.ttc` +
-  fallback CJK (tofu du journal) ; `scroll-snap` ;
-  `has()`/`is()`/`where()` sélecteurs modernes.
+- [x] **R-M6. `position:sticky`** — **déjà livré** à
+  R-6/R-134 : `Position::Sticky`, `sticky_offset`
+  (`layout::hit`), `sticky_deltas` + `PushTransform` au
+  display, seuils `left`/`right`. Aucune action.
+- [x] **R-M7. `transform` complet + `transition`/
+  `animation`** — **déjà livré** : `PushTransform`
+  (matrice affine empilée), `explorer_css::transition`
+  (interpolate + `Timing` cubic-bezier), `animation.rs`
+  (`@keyframes`), moteur `session/anim.rs` (étape 45).
+  Aucune action.
+- [x] **R-M8. `clip-path` + `aspect-ratio`** —
+  **déjà livré** à R-58 (`inset`/`circle`/`ellipse`/
+  `polygon` v1) et R-123 (`aspect-ratio` sizing).
+  **Reste** : clip `overflow` arrondi (reliquat R-167)
+  et `line-clamp`.
+- [ ] **R-M9. Résidus** : clip `overflow` arrondi
+  (reliquat R-167) ; `backdrop-filter` ;
+  `scroll-snap`/`scroll-behavior` (session) ;
+  font fallback par glyphe (`.ttc`, tofu CJK) ;
+  `line-clamp` ; `inert`/`dialog`/`popover`/
+  `:focus-visible` (session).
 
 ## Palier R-B — Contenu étranger, animation, canvas
 
