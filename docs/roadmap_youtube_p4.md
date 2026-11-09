@@ -70,6 +70,17 @@ de s'exécuter, aucun stamp/binding/card ne peut s'allumer.
 > (`caller`/`arguments` = `null` sur fonctions non-strict,
 > spec) ; span ~8 min post-`/youtubei` reconduit
 > (instrumentation du consumer à prévoir).
+>
+> **Verdict vol 735** — §B-125 **levé** par JS-C463
+> (+ sonde `fn.restricted` 0 tir — les fns touchées
+> étaient sloppy ; kevlar est `"use strict"`). **§B-126
+> nommé : stamping template Polymer** —
+> `ready()`→`_stampTemplate`→`_addEventListenerToNode(F)`
+> reçoit `F=undefined` (kevlar `:8866`, pile complète) :
+> le fragment stampé ne fournit pas les nœuds annotés
+> aux indices `nodeInfos` → bindings `on-*`/`[[…]]` morts
+> = le cœur de P4.B. Repro : `<template>`+`on-*`+CE →
+> indices du walk vs nodeInfos.
 
 ```mermaid
 flowchart TD
