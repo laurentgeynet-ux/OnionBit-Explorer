@@ -188,7 +188,7 @@ Trois faits d'abord — ils orientent tout le vol :
   MIME `codecs="a,b"` — le `;` interne est toléré) :
 
   ```powershell
-  $env:EXPLORER_MEDIA_CODECS='avc1;hev1;hvc1;vp09;av01;vp08;mp4a;mp3;opus;vorbis;flac;ac3;ipcm'
+  $env:EXPLORER_MEDIA_CODECS='avc1;hev1;hvc1;vp09;av01;mp4a;mp3;opus;vorbis;flac;ac-3;ipcm'
   ```
 
   Avec elle : conteneur connu sans `codecs=` → `"maybe"`,

@@ -94,7 +94,7 @@ cargo build --release -p explorer-daemon   # attendre « Finished »
 
 # 1.3 env du vol — TOUTES obligatoires sauf mention contraire
 $env:EXPLORER_VIEWPORT='1366x900'
-$env:EXPLORER_MEDIA_CODECS='avc1;hev1;hvc1;vp09;av01;vp08;mp4a;mp3;opus;vorbis;flac;ac3;ipcm'
+$env:EXPLORER_MEDIA_CODECS='avc1;hev1;hvc1;vp09;av01;mp4a;mp3;opus;vorbis;flac;ac-3;ipcm'
 $env:EXPLORER_JS_OPS='20000000'       # §B-81 : bundle polymer 12,6 Mo
 $env:EXPLORER_JS_MEM_MIB='384'        # §B-81 : heap borné, dégradation propre
 $env:EXPLORER_MEM_DIAG='1'            # muts/heap/dom_nodes par onglet

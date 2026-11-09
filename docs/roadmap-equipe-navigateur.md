@@ -7284,6 +7284,36 @@ incrément.
   - Verrou : test contrôleur `210 — mediaTogglePip active, bascule et désactive le Picture-in-Picture`,
     `flutter analyze` 0 issue, `flutter test` 83/83 pass.
 
+- [x] **Étape 211. `mediaCodecs` aligné
+  sur le registry décodeur réel —
+  VP8 retiré de la déclaration**
+  (`app/` `AppConfig.mediaCodecs` +
+  `mediaCodecProbes`) : la table
+  déclarait `vp08`/`vp8` alors que
+  le dépôt n'a **aucun crate
+  `onioncodec-video-vp8`** —
+  `CodecId::Vp8` n'existe que pour
+  l'identification demux (ivf/mkv/
+  mp4) et le décodeur est resté en
+  `archive/vp8-wip`. ADR-0029 : la
+  table déclare ce que la stack
+  joue **réellement** — déclarer
+  VP8 renvoyait un verdict
+  `isTypeSupported` que
+  `onionmedia_ffi` ne peut pas
+  honorer (fausse promesse, le
+  player choisirait une piste
+  indécodable). Retiré des deux
+  listes → `declared_n` passe 13→
+  **12** (avc1, hvc1, hev1, vp09,
+  av01, mp4a, mp3, opus, vorbis,
+  flac, ac-3→ac3, ipcm). Docs de
+  vol corrigées (`vol-agent.md`,
+  `vol-youtube.md` — `EXPLORER_
+  MEDIA_CODECS` sans vp08, `ac3`→
+  `ac-3` miroir app). `flutter
+  analyze` 0 issue.
+
 - [ ] **Écarts terrain — vol humain
   22/10 (release `39ab821`, FFI)** :
   second run humain — trois constats
