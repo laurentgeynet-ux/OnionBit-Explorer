@@ -50,6 +50,19 @@ de s'exécuter, aucun stamp/binding/card ne peut s'allumer.
 
 ## 1. Graphe d'exécution
 
+> **Verdict vol 733 (P4.A livré)** — l'hydratation **dépasse
+> le squelette** : `dom.kill`×5 retire `home-page-skeleton`,
+> `g.data`×6, `ce.define` 1045, **`/youtubei` POST→200**
+> (browse émis, 1ʳᵉ fois accueil), `dlv.observers` livrés
+> en session → **P4.E pré-validé**, **P4.G fermé** (401
+> attendu). L'abandon est **post-mount**, nommé **§B-124** :
+> `uncaught TypeError: illegal constructor (KeyframeEffect)`
+> `late,app:5743:23` (stub `illegal_ctor_bound` — surface
+> WAAPI absente) → **P4.B pivote : première étape =
+> `KeyframeEffect` constructible** (JS-C46x), puis sonder
+> le span ~8 min du consommateur `/youtubei` sans mutation
+> aval.
+
 ```mermaid
 flowchart TD
     subgraph P4A["P4.A — Diagnostic : nommer l'abandon (bouchon maître)"]
