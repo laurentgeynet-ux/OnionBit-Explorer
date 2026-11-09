@@ -148,13 +148,7 @@ surface minimale — jamais un stub qui ment.
   Arrays/TA/strings gardent `iter_values`. Verrous
   `c456_forof_lazy` ×4.
 - [x] **JT-13. `import()` `inline:` (vimeo 697)** — **livré (JS-C457)** : hit `module_urls`/`module_specs` avant `load_source` — réimport par URL opaque sans fetch. Verrou `c457_import_inline_url`.
-- [ ] **JT-14. `for..of` eager (vol 722)** — divergence
-  nommée : reprendre le cas minimal du rapport de vol.
-  Suspect de classe connue : l'héritage eager documenté
-  (générateurs, JS-C34 a livré `GExec`/suspension
-  réelle — `for..of` sur corps suspendable est le
-  voisin logique). Verrou : fixture spec du cas + pas
-  de régression `c34_*`.
+- [x] **JT-14. throws avalés dans les promesses (vol 629)** — **livré (JS-C458)** : frontière par job — un throw en microtask part en `uncaught:` rapporté, le drain continue (le `?` global sautait les réactions + `fire_unhandled_rejections`). Verrous `c458_microtask_throw` ×2.
 
 ## JT-E — Perf interprète (rappel — file tenue dans `roadmap-vitesse-js.md`)
 

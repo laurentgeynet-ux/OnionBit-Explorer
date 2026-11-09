@@ -656,6 +656,66 @@ impl Engine {
         self.run_microtasks_impl(false)
     }
 
+    /// Un job de microtask (JS-C458 — frontière « report the
+    /// exception ») : le `throw` est propagé à l'appelant qui
+    /// décide — deadline → abort, throw site → rapport + la
+    /// file continue.
+    fn run_one_job(&mut self, job: Job) -> JsResult<()> {
+        match job {
+            Job::Reaction {
+                cb,
+                arg,
+                rejected,
+                next,
+            } => {
+                if self.is_callable(cb.clone()) {
+                    match self.call_value(cb, Value::Undefined, &[arg]) {
+                        Ok(v) => self.sink_resolve(next, v)?,
+                        Err(Thrown(t)) => {
+                            // `EXPLORER_PROM_TRACE` : un cb
+                            // qui jette atterrit en rejet
+                            // silencieux — la raison nomme
+                            // l'API manquante (github lazy-CE :
+                            // le `.then` webpack post-import
+                            // raté, `define` jamais atteint).
+                            if std::env::var("EXPLORER_PROM_TRACE").is_ok() {
+                                eprintln!("[prom-cb-throw] {}", self.describe(t.clone()));
+                            }
+                            self.sink_reject(next, t)?;
+                        }
+                    }
+                } else {
+                    // Pass-through: `then()` without a handler for
+                    // this outcome forwards state/result as-is.
+                    if rejected && std::env::var("EXPLORER_PROM_TRACE").is_ok() {
+                        eprintln!("[prom-unhandled] {}", self.describe(arg.clone()));
+                    }
+                    if rejected {
+                        self.sink_reject(next, arg)?;
+                    } else {
+                        self.sink_resolve(next, arg)?;
+                    }
+                }
+            }
+            Job::Thenable {
+                then_fn,
+                this,
+                resolve,
+                reject,
+            } => {
+                if let Err(Thrown(t)) =
+                    self.call_value(then_fn, this, &[resolve.clone(), reject.clone()])
+                {
+                    let _ = self.call_value(reject, Value::Undefined, &[t]);
+                }
+            }
+            Job::Plain(f) => {
+                self.call_value(f, Value::Undefined, &[])?;
+            }
+        }
+        Ok(())
+    }
+
     fn run_microtasks_impl(&mut self, boot_boundary: bool) -> JsResult<usize> {
         // JS-C348 — garde de réentrance de la pompe. Un drain
         // actif plus haut dans la pile rend l'appel no-op : les
@@ -829,57 +889,22 @@ impl Engine {
                     };
                     tracing::info!("job: mt ctx={ctx} {desc}");
                 }
-                match job {
-                    Job::Reaction {
-                        cb,
-                        arg,
-                        rejected,
-                        next,
-                    } => {
-                        if self.is_callable(cb.clone()) {
-                            match self.call_value(cb, Value::Undefined, &[arg]) {
-                                Ok(v) => self.sink_resolve(next, v)?,
-                                Err(Thrown(t)) => {
-                                    // `EXPLORER_PROM_TRACE` : un cb
-                                    // qui jette atterrit en rejet
-                                    // silencieux — la raison nomme
-                                    // l'API manquante (github lazy-CE :
-                                    // le `.then` webpack post-import
-                                    // raté, `define` jamais atteint).
-                                    if std::env::var("EXPLORER_PROM_TRACE").is_ok() {
-                                        eprintln!("[prom-cb-throw] {}", self.describe(t.clone()));
-                                    }
-                                    self.sink_reject(next, t)?;
-                                }
-                            }
-                        } else {
-                            // Pass-through: `then()` without a handler for
-                            // this outcome forwards state/result as-is.
-                            if rejected && std::env::var("EXPLORER_PROM_TRACE").is_ok() {
-                                eprintln!("[prom-unhandled] {}", self.describe(arg.clone()));
-                            }
-                            if rejected {
-                                self.sink_reject(next, arg)?;
-                            } else {
-                                self.sink_resolve(next, arg)?;
-                            }
-                        }
+                // JS-C458 — frontière par job (spec « report the
+                // exception ») : un `throw` dans une microtask —
+                // `queueMicrotask`, callback `then`, sink hostile —
+                // n'avorte PAS le drain : les réactions promesse
+                // derrière n'étaient jamais exécutées (vol 629 —
+                // « throws avalés ») et `fire_unhandled_rejections`
+                // était sauté. Le throw est rapporté `uncaught:`
+                // sur le rail `unhandled_reports` et la file
+                // continue ; seul l'abort interne (`deadline_hit`)
+                // propage toujours.
+                if let Err(Thrown(t)) = self.run_one_job(job) {
+                    if self.deadline_hit {
+                        return Err(Thrown(t));
                     }
-                    Job::Thenable {
-                        then_fn,
-                        this,
-                        resolve,
-                        reject,
-                    } => {
-                        if let Err(Thrown(t)) =
-                            self.call_value(then_fn, this, &[resolve.clone(), reject.clone()])
-                        {
-                            let _ = self.call_value(reject, Value::Undefined, &[t]);
-                        }
-                    }
-                    Job::Plain(f) => {
-                        self.call_value(f, Value::Undefined, &[])?;
-                    }
+                    let desc = self.describe_rejection(t);
+                    self.unhandled_reports.push(format!("uncaught: {desc}"));
                 }
             }
             // J11 — sortie gracieuse sur yield : jobs restants

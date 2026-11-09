@@ -11385,3 +11385,9 @@ un crate PIPELINE.- [x] **JS-C422. Deadline honnête — canal session ↔ budge
   opaque → `DynImportReq` « schéma non supporté ».
   `module_urls`/`module_specs` consultés d'abord
   (identité JS-C95). Verrou `c457_import_inline_url`.
+- [x] **JS-C458 (JT-14). throw en microtask n'avorte
+  plus le drain** — vol 629 « throws avalés » : le `?`
+  global sautait les réactions promesse restantes +
+  `fire_unhandled_rejections`. Frontière spec « report
+  the exception » → `uncaught:` rapporté, file continue
+  ; `deadline_hit` propage. `c458_microtask_throw` ×2.
