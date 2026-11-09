@@ -1604,6 +1604,79 @@ fn emit_bg_layers(
     }
 }
 
+/// R-M4 — émission des fantômes `text-shadow` pour un
+/// fragment : une run par couche sous le texte ; `blur`
+/// ≈ 4 fantômes croisés ±blur/2 à alpha/3 (documenté,
+/// pas de gaussien).
+#[allow(clippy::too_many_arguments)]
+fn emit_text_shadows(
+    st: &explorer_css::ComputedStyle,
+    x: f32,
+    base_y: f32,
+    run: &std::sync::Arc<ShapedRun>,
+    fs: f32,
+    ink: Color,
+    items: &mut Vec<DisplayItem>,
+) {
+    for (soff, sblur, scolor) in text_shadows(st, ink) {
+        let mut ghost = |dx: f32, dy: f32, a: u8| {
+            let mut c = scolor;
+            c.a = a;
+            items.push(DisplayItem::Text {
+                origin: (x + soff.0 + dx, base_y + soff.1 + dy),
+                run: run.clone(),
+                font: font_request(st),
+                color: c,
+                size_px: fs,
+            });
+        };
+        if sblur > 0.0 {
+            ghost(sblur / 2.0, 0.0, scolor.a / 3);
+            ghost(-sblur / 2.0, 0.0, scolor.a / 3);
+            ghost(0.0, sblur / 2.0, scolor.a / 3);
+            ghost(0.0, -sblur / 2.0, scolor.a / 3);
+        } else {
+            ghost(0.0, 0.0, scolor.a);
+        }
+    }
+}
+
+/// `text-shadow` → couches `(offset, blur, color)`
+/// (R-M4) : `x y [blur] [color]` par virgule de niveau
+/// 0 ; `none` → vide. Le flou est rendu en fantômes
+/// croisés à l'émission (approx. documentée).
+#[allow(clippy::cast_possible_truncation)]
+fn text_shadows(st: &explorer_css::ComputedStyle, default: Color) -> Vec<((f32, f32), f32, Color)> {
+    let Some(v) = st.get("text-shadow") else {
+        return Vec::new();
+    };
+    if v.trim().eq_ignore_ascii_case("none") {
+        return Vec::new();
+    }
+    bg_layers(v)
+        .iter()
+        .filter_map(|layer| {
+            let mut lens = Vec::with_capacity(3);
+            let mut color = None;
+            for tok in layer.split_whitespace() {
+                if let Some(l) = parse_length(tok) {
+                    lens.push(l.unit.px_factor().map_or(0.0, |f| l.value * f) as f32);
+                } else if let Some(c) = parse_color(tok) {
+                    color = Some(c);
+                }
+            }
+            if lens.len() < 2 {
+                return None;
+            }
+            Some((
+                (lens[0], lens[1]),
+                lens.get(2).copied().unwrap_or(0.0).max(0.0),
+                color.unwrap_or(default),
+            ))
+        })
+        .collect()
+}
+
 /// Marqueur de `display: list-item` (issue #9) : la puce se
 /// peint dans la gouttière avant la content box
 /// (`list-style-position: outside` — l'espace est laissé par
@@ -2509,6 +2582,15 @@ fn paint_lines(bx: &LayoutBox, items: &mut Vec<DisplayItem>, off: (f32, f32)) {
                         });
                     }
                 }
+                emit_text_shadows(
+                    &frag.style,
+                    frag.rect.x + off.0,
+                    base_y,
+                    run,
+                    fs,
+                    ink,
+                    items,
+                );
                 items.push(DisplayItem::Text {
                     origin: (frag.rect.x + off.0, base_y),
                     run: run.clone(),

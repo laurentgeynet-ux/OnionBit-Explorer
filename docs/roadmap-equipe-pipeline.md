@@ -3113,12 +3113,14 @@ la dette, pas le layout.
   approx.) ; rayons `border-radius` suivis ; flou
   approximé en 8 bandes alpha concentriques (documenté,
   pas de gaussien). Verrou valeurs + `none`.
-- [ ] **R-M3. `object-fit`** : `cover`/`contain`/`fill`/
-  `none`/`scale-down` dans `paint_replaced` (crop/fit du
-  bitmap au rect — responsive media).
-- [ ] **R-M4. `text-shadow`** : réutilise le fill/shadow
-  de R-M2 sur les runs texte (`text-shadow: x y blur
-  color`).
+- [x] **R-M3. `object-fit`** — **déjà livré** :
+  `object_fit_dst` couvre `cover`/`contain`/`fill`/
+  `none`/`scale-down` + `object-position` + clip.
+- [x] **R-M4. `text-shadow`** : fantômes `Text` par
+  couche (`x y [blur] [color]`, `none` géré) sous le
+  texte réel — blur ≈ 4 fantômes croisés ±blur/2 à
+  alpha/3 (documenté, pas de gaussien). Verrou offset+
+  couleur+`none`.
 - [ ] **R-M5. `filter`** : `blur`/`brightness`/`contrast`
   à minima (post-traitement raster) ; `backdrop-filter`
   à part.

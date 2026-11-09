@@ -2319,3 +2319,38 @@ fn box_shadow_parsed_sur_item() {
         "none → aucun item"
     );
 }
+
+#[test]
+fn text_shadow_fantomes_sous_texte() {
+    // R-M4 — `text-shadow: 3px 2px red` : une run fantôme
+    // décalée (origin+offset, couleur de l'ombre) émise
+    // AVANT le texte réel ; `none` → aucun fantôme.
+    let (_d, _b, items) = dl(
+        "<div>ombre</div>",
+        "div { font-size: 20px; text-shadow: 3px 2px red }",
+    );
+    let texts: Vec<_> = items
+        .iter()
+        .filter_map(|i| match i {
+            DisplayItem::Text { origin, color, .. } => Some((*origin, *color)),
+            _ => None,
+        })
+        .collect();
+    assert!(texts.len() >= 2, "fantôme + texte attendus : {texts:?}");
+    let ghost = &texts[0];
+    let real = &texts[1];
+    assert_eq!(ghost.1.r, 255);
+    assert!(
+        (ghost.0 .0 - real.0 .0 - 3.0).abs() < 0.5 && (ghost.0 .1 - real.0 .1 - 2.0).abs() < 0.5,
+        "offset fantôme : {ghost:?} vs {real:?}"
+    );
+    let (_d2, _b2, items2) = dl("<div>x</div>", "div { text-shadow: none }");
+    assert_eq!(
+        items2
+            .iter()
+            .filter(|i| matches!(i, DisplayItem::Text { .. }))
+            .count(),
+        1,
+        "none → texte seul"
+    );
+}
