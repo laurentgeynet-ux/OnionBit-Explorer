@@ -20,7 +20,13 @@
 
 use crate::token::Token;
 use crate::tokenizer::tokenize;
-use explorer_dom::{Dom, NodeId};
+use explorer_dom::{DocumentMode, Dom, NodeId};
+
+/// Document en mode **quirks** (R-182) — sélecteurs
+/// classe/id ASCII-insensibles, couleurs/longueurs laxistes.
+fn quirks_mode(dom: &Dom) -> bool {
+    matches!(dom.document_mode(), DocumentMode::Quirks)
+}
 use std::collections::HashMap;
 
 /// Spécificité `(ids, classes+attributs+pseudo-classes, types+ps-élts)`.
@@ -1448,13 +1454,22 @@ fn simple_matches(
         // clonerait la valeur String à chaque test — chaud
         // dans la boucle candidats × nœuds (R-83).
         SimpleSelector::Class(cls) => match dom.attributes(node) {
+            // R-182 — quirks : classe/id ASCII-insensibles
+            // (HTML Standard §quirks — « in quirks mode »).
             Ok(attrs) => attrs.iter().any(|a| {
-                a.name == "class" && a.value.split_ascii_whitespace().any(|c| c == cls.as_str())
+                a.name == "class"
+                    && a.value.split_ascii_whitespace().any(|c| {
+                        c == cls.as_str()
+                            || (quirks_mode(dom) && c.eq_ignore_ascii_case(cls.as_str()))
+                    })
             }),
             Err(_) => false,
         },
         SimpleSelector::Id(id) => match dom.attributes(node) {
-            Ok(attrs) => attrs.iter().any(|a| a.name == "id" && a.value == *id),
+            Ok(attrs) => attrs.iter().any(|a| {
+                a.name == "id"
+                    && (a.value == *id || (quirks_mode(dom) && a.value.eq_ignore_ascii_case(id)))
+            }),
             Err(_) => false,
         },
         SimpleSelector::Attribute {

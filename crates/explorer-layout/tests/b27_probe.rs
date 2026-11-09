@@ -81,6 +81,7 @@ fn widest(b: &LayoutBox, acc: &mut Vec<LayoutBox>) {
         marker_style: None,
         first_line: None,
         first_letter: None,
+        quirks_mode: false,
     });
     for c in &b.children {
         widest(c, acc);

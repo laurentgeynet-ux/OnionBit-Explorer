@@ -692,6 +692,10 @@ impl SelectorIndex {
             }
         }
         if let Ok(attrs) = dom.attributes(node) {
+            // R-182 — quirks : l'index reste exact, le lookup
+            // gagne un balayage ASCII-insensible (HTML
+            // Standard §quirks — `.Foo` matche class="foo").
+            let quirks = matches!(dom.document_mode(), explorer_dom::DocumentMode::Quirks);
             for a in attrs {
                 if a.name == "class" {
                     for c in a.value.split_ascii_whitespace() {
@@ -700,11 +704,29 @@ impl SelectorIndex {
                                 out(e);
                             }
                         }
+                        if quirks {
+                            for (k, v) in &self.by_class {
+                                if k.as_str() != c && k.eq_ignore_ascii_case(c) {
+                                    for e in v {
+                                        out(e);
+                                    }
+                                }
+                            }
+                        }
                     }
                 } else if a.name == "id" {
                     if let Some(v) = self.by_id.get(a.value.as_str()) {
                         for e in v {
                             out(e);
+                        }
+                    }
+                    if quirks {
+                        for (k, v) in &self.by_id {
+                            if k.as_str() != a.value && k.eq_ignore_ascii_case(&a.value) {
+                                for e in v {
+                                    out(e);
+                                }
+                            }
                         }
                     }
                 }
@@ -1721,7 +1743,7 @@ impl StyleEngine {
         // un pseudo).
         // `style=` parsé avant `cand` : ses déclarations y
         // sont empruntées — il doit survivre à la boucle.
-        let inline_decls = if pseudo.is_none() {
+        let mut inline_decls = if pseudo.is_none() {
             dom.attribute_str(node, "style")
                 .ok()
                 .flatten()
@@ -1730,6 +1752,23 @@ impl StyleEngine {
         } else {
             Vec::new()
         };
+        // R-182 — quirks « hashless hex » (HTML Standard
+        // §quirks colors) : `color:abc` dans `style=` sans
+        // `#` — la valeur passe par `legacy_color`
+        // (non-hex → `0`, complétion à 3 digits). Seules les
+        // propriétés couleur, jamais en standards.
+        if matches!(dom.document_mode(), explorer_dom::DocumentMode::Quirks) {
+            for d in &mut inline_decls {
+                if (d.name == "color" || d.name.ends_with("-color"))
+                    && !d.value.trim_start().starts_with('#')
+                    && crate::value::parse_color(&d.value).is_none()
+                {
+                    if let Some(c) = legacy_color(&d.value) {
+                        d.value = c;
+                    }
+                }
+            }
+        }
         let mut cand = self.collect_candidates(dom, node, env, pseudo, state, mcache, anc);
         if pseudo.is_none() {
             // `style=` vit au contexte du nœud : interne si le
@@ -1784,6 +1823,14 @@ impl StyleEngine {
                     // raccourci invalide → déclaration ignorée).
                     if value_is_valid_for(&lname, &d.value) {
                         props.insert(lname, d.value.clone());
+                    } else if matches!(dom.document_mode(), explorer_dom::DocumentMode::Quirks)
+                        && d.value.trim().parse::<f32>().is_ok()
+                    {
+                        // R-182 — quirks « unitless length » :
+                        // `N` nu devient `Npx` (HTML Standard
+                        // §quirks — les props numériques déjà
+                        // valides ne passent jamais ici).
+                        props.insert(lname, format!("{}px", d.value.trim()));
                     }
                 }
             }

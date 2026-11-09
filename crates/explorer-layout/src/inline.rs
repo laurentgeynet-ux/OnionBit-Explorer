@@ -1105,6 +1105,14 @@ impl LineAcc {
             return;
         }
         self.reorder_bidi(base_rtl, band_right);
+        // R-182 — quirks « images en cellule » (HTML
+        // Standard §quirks) : une ligne sans aucun texte
+        // (tout en atomes) n'impose pas le strut — le
+        // remplacé descend au bas de sa cellule.
+        if ctx.quirks.get() && !self.frags.is_empty() && self.frags.iter().all(|f| f.atomic) {
+            self.strut_base = 0.0;
+            self.strut_lh = 0.0;
+        }
         // Le strut pose la baseline ET la hauteur plancher
         // de la ligne (§10.8.1) — un fragment bas s'y aligne
         // comme sur un caractère de la fonte du conteneur.

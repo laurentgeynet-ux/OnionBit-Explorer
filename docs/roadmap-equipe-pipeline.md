@@ -3387,7 +3387,7 @@ déblocage/coût décroissant.
   (décoratif), `column-span`, `column-fill`/`break-inside`/
   `break-before`/`break-after` ignorés (`columns.rs` range,
   `in-flow` absent du constructeur).
-- [ ] **R-182. Quirks profond** : unitless lengths (`td
+- [x] **R-182. Quirks profond** : unitless lengths (`td
   width=2`), hex sans `#` dans `style=` (le `legacy_color` ne
   couvre que les attributs), `%`-height traversant les ancêtres
   `auto`, sélecteurs classe/id ASCII-insensibles, baseline quirks

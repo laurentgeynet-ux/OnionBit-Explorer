@@ -114,6 +114,7 @@ impl BoxKind {
 
 /// Une boîte de l'arbre de mise en page.
 #[derive(Debug, Clone)]
+#[allow(clippy::struct_excessive_bools)]
 pub struct LayoutBox {
     /// Nature.
     pub kind: BoxKind,
@@ -192,6 +193,10 @@ pub struct LayoutBox {
     /// R-177 — style `::first-letter` de la cascade — overlay
     /// sur le premier fragment texte (drop caps).
     pub first_letter: Option<ComputedStyle>,
+    /// Document en mode **quirks** (R-182) — posé sur la
+    /// racine par `build_box_tree_sized`, lu par
+    /// `layout_tree` qui arme `BlockCtx::quirks`.
+    pub quirks_mode: bool,
 }
 
 /// Contexte de pose enregistré par `layout_block` (R-12) :
@@ -336,6 +341,9 @@ pub fn build_box_tree_sized<S: ::std::hash::BuildHasher>(
         b.marker_style = styles.pseudo(root, PseudoElement::Marker).cloned();
         b.first_line = styles.pseudo(root, PseudoElement::FirstLine).cloned();
         b.first_letter = styles.pseudo(root, PseudoElement::FirstLetter).cloned();
+        // R-182 — le document mode voyage jusqu'au layout
+        // (le DOM n'y est plus accessible).
+        b.quirks_mode = dom.document_mode() != explorer_dom::DocumentMode::NoQuirks;
         lend_first_pseudos(b);
         inject_inside_markers(b);
     }
@@ -393,6 +401,7 @@ fn inject_inside_markers(bx: &mut LayoutBox) {
                     marker_style: None,
                     first_line: None,
                     first_letter: None,
+                    quirks_mode: false,
                 },
             );
         }
@@ -585,6 +594,7 @@ fn build_box_tree_env<S: ::std::hash::BuildHasher>(
         marker_style: None,
         first_line: None,
         first_letter: None,
+        quirks_mode: false,
     };
     let children = child_boxes(dom, root, styles, &style, sizes, envs);
     b.children = wrap_children(children, &style, kind);
@@ -746,6 +756,7 @@ fn child_boxes<S: ::std::hash::BuildHasher>(
                     marker_style: None,
                     first_line: None,
                     first_letter: None,
+                    quirks_mode: false,
                 });
             }
         }
@@ -1062,6 +1073,7 @@ fn leaf_box_anon(kind: BoxKind, style: ComputedStyle) -> LayoutBox {
         marker_style: None,
         first_line: None,
         first_letter: None,
+        quirks_mode: false,
     }
 }
 
@@ -1293,6 +1305,7 @@ fn flush_run(out: &mut Vec<LayoutBox>, run: &mut Vec<LayoutBox>, style: &Compute
             marker_style: None,
             first_line: None,
             first_letter: None,
+            quirks_mode: false,
         });
     }
 }
@@ -1412,6 +1425,7 @@ fn object_box(
         marker_style: None,
         first_line: None,
         first_letter: None,
+        quirks_mode: false,
     };
     // Ressource résolue → feuille remplacée ; sinon les
     // enfants prennent la place de l'objet.
@@ -1512,6 +1526,7 @@ fn leaf_box(
         marker_style: None,
         first_line: None,
         first_letter: None,
+        quirks_mode: false,
     }
 }
 
@@ -1564,6 +1579,7 @@ fn control_box(
                     marker_style: None,
                     first_line: None,
                     first_letter: None,
+                    quirks_mode: false,
                 }],
                 &style,
             )

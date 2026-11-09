@@ -2969,3 +2969,64 @@ fn multicol_span_et_break() {
         b.rect.x
     );
 }
+
+/// R-182 — quirks profond : `N` nu = Npx dans les valeurs,
+/// `color:abc` sans `#`, `%`-height traversant les ancêtres
+/// `auto`, sélecteurs classe/id ASCII-insensibles.
+#[test]
+fn quirks_profond() {
+    let laid_q = |html: &str, css: &str| -> (Dom, explorer_layout::LayoutBox) {
+        let mut dom = TreeBuilder::parse(html);
+        dom.set_document_mode(explorer_dom::DocumentMode::Quirks);
+        let mut eng = StyleEngine::new();
+        eng.add_css("body { margin: 0 }", Origin::Author);
+        eng.add_css(css, Origin::Author);
+        let styles = eng.compute_tree(&dom, dom.document(), &StyleEnv::default());
+        let root_el = dom
+            .children(dom.document())
+            .into_iter()
+            .flatten()
+            .find(|&c| dom.element(c).is_ok())
+            .expect("racine");
+        let mut bx = build_box_tree(&dom, root_el, &styles).expect("arbre");
+        layout_tree(&mut bx, VIEW, &BlockCtx::default());
+        (dom, bx)
+    };
+    // unitless : `width:5` dans style= → 5px (quirks seul).
+    let (dom, bx) = laid_q("<div id=d style=\"width:5\">x</div>", "");
+    assert_eq!(find(&bx, by_id(&dom, "d")).rect.width, 5.0, "unitless px");
+    // hashless hex : `color:abc` → #a0b0c0.
+    let (dom, bx) = laid_q("<div id=c style=\"color:abc\">x</div>", "");
+    assert_eq!(
+        find(&bx, by_id(&dom, "c")).style.get("color"),
+        Some("#a0b0c0"),
+        "hashless hex"
+    );
+    // classe/id insensibles : `.Foo`/`#Bar` sur du minuscule.
+    let (dom, bx) = laid_q(
+        "<div id=Bar class=foo>x</div>",
+        ".Foo{width:9px} #bAR{color:red}",
+    );
+    let d = find(&bx, by_id(&dom, "Bar"));
+    assert_eq!(d.rect.width, 9.0, "classe insensible");
+    assert_eq!(d.style.get("color"), Some("red"), "id insensible");
+    // %-height : `i` 50% sous un ancêtre `auto` → dernier
+    // ancêtre défini (600px) → 300.
+    let (dom, bx) = laid_q(
+        "<div style=\"height:600px\"><div><div id=i style=\"height:50%\">x</div></div></div>",
+        "",
+    );
+    assert_eq!(
+        find(&bx, by_id(&dom, "i")).rect.height,
+        300.0,
+        "% traversant l'ancêtre auto"
+    );
+    // En standards, tout ça reste inerte.
+    // En standards (doctype explicite → NoQuirks), inerte.
+    let (dom, bx) = laid("<!doctype html><div id=d style=\"width:5\">x</div>", "");
+    assert_ne!(
+        find(&bx, by_id(&dom, "d")).rect.width,
+        5.0,
+        "standards : unitless ignoré"
+    );
+}

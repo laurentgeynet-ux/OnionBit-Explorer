@@ -64,6 +64,11 @@ pub fn relayout_subtree<S: BuildHasher>(
     target: NodeId,
     ctx: &BlockCtx,
 ) -> Relayout {
+    // R-182 — `quirks` est armé par `layout_tree` à la
+    // racine ; le relayout scopé n'y passe pas — le flag
+    // se repose ici depuis le DOM (cohérence géométrique).
+    ctx.quirks
+        .set(dom.document_mode() != explorer_dom::DocumentMode::NoQuirks);
     let Some(target) = nearest_element(dom, target) else {
         return Relayout::NotFound;
     };

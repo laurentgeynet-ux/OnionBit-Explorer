@@ -61,6 +61,11 @@ pub struct BlockCtx<'a> {
     /// chaque tick re-shape tout le document (mesuré ~5 ms/
     /// nœud texte en debug — le mur relayout journalisé 55g).
     pub font_cache: std::cell::RefCell<font::FontCache>,
+    /// Document en mode **quirks** (R-182) — armé par
+    /// [`layout_tree`] depuis `LayoutBox::quirks_mode` (le
+    /// DOM n'est plus accessible à ce niveau). `Cell` comme
+    /// `root_font_size` — même mécanisme de pose tardive.
+    pub quirks: std::cell::Cell<bool>,
 }
 
 impl Default for BlockCtx<'_> {
@@ -80,6 +85,7 @@ impl Default for BlockCtx<'_> {
             viewport_h: 600.0,
             viewport_w: 800.0,
             font_cache: std::cell::RefCell::new(font::FontCache::new()),
+            quirks: std::cell::Cell::new(false),
         }
     }
 }
@@ -326,6 +332,10 @@ pub fn layout_tree(root: &mut LayoutBox, viewport_w: f32, ctx: &BlockCtx) {
     // La racine établit le BFC initial : ses flottants sont
     // contenus dans sa hauteur (§9.4.1/§10.6.7).
     let mut floats = FloatCtx::default();
+    // R-182 — document mode posé sur la racine par
+    // `build_box_tree` : quirks/unitless/`%`-height/
+    // baseline-remplacés s'activent ici.
+    ctx.quirks.set(root.quirks_mode);
     // Les marges de la racine s'appliquent à sa border box
     // (§8.3.1 : jamais collapsées — le collapse-through est
     // bloqué par `is_root` plus bas). La marge haute décale
@@ -452,6 +462,14 @@ pub(crate) fn raw_length_px(
     // largeurs retombait à `auto` → items flex éclatés.
     if let Some(v) = eval_math_fn(raw, pct_basis, em_basis, ctx) {
         return Some(v);
+    }
+    // R-182 — quirks « unitless length » (HTML Standard
+    // §quirks) : `N` nu = `Npx`. Jamais en standards, et
+    // `line-height:N` n'arrive pas ici (ratio géré en amont).
+    if ctx.quirks.get() {
+        if let Ok(n) = raw.parse::<f32>() {
+            return Some(n);
+        }
     }
     let len = parse_length(raw)?;
     #[allow(clippy::cast_possible_truncation)]
@@ -1346,12 +1364,21 @@ fn layout_block_inner(
             // la racine : ses marges ne collapsent pas, la
             // chaîne du premier fils reste à l'intérieur.
             let adjoins = !is_root && pt + bt <= 0.0 && !is_fc_root(bx);
+            // R-182 — quirks « % traversant les ancêtres
+            // auto » : la base % des enfants remonte au
+            // dernier ancêtre à hauteur définie (`cb_h` reçu)
+            // au lieu de valoir `auto` (HTML Standard §quirks).
+            let kid_cb = if ctx.quirks.get() {
+                h_spec.or(cb_h)
+            } else {
+                h_spec
+            };
             flow_columns(
-                bx, content_x, cursor, content_w, adjoins, line_h, ctx, fs, pos_cb, h_spec,
+                bx, content_x, cursor, content_w, adjoins, line_h, ctx, fs, pos_cb, kid_cb,
             )
             .unwrap_or_else(|| {
                 flow_children(
-                    bx, content_x, cursor, content_w, adjoins, line_h, ctx, fs, pos_cb, fl, h_spec,
+                    bx, content_x, cursor, content_w, adjoins, line_h, ctx, fs, pos_cb, fl, kid_cb,
                 )
             })
         }
@@ -2260,6 +2287,7 @@ fn flow_children(
                 marker_style: None,
                 first_line: None,
                 first_letter: None,
+                quirks_mode: false,
             };
             let gap = if first && adjoining_top {
                 0.0
